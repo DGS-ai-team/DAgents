@@ -86,7 +86,6 @@ prod-app-01
 
 - `password`：密码；
 - `private_key`：私钥文件或密钥内容引用；
-- `ssh_agent`：使用 Node 进程可访问的 SSH Agent；
 - 后续 `certificate`：SSH certificate。
 
 用户要求的 IP、用户名、密码可以映射为 `host + username + credential(password)`，但设计上不把 password 直接放到 channel profile 或 Agent snapshot。
@@ -170,6 +169,8 @@ CREATE TABLE linux_channels (
 );
 ```
 
+`host_key_policy` 和 `host_key_ref` 是旧版本字段，当前实现保留数据库列以兼容已有数据，但不再由界面配置或连接运行时使用。
+
 不建议把 `password` 或私钥原文放在这张表中。
 
 ### 5.2 `linux_credentials`
@@ -191,10 +192,10 @@ CREATE TABLE linux_credentials (
 
 1. 操作系统 Secret Store/Keyring；
 2. Node 本地加密 secret store，密钥由安装实例保护；
-3. 环境变量引用或 SSH Agent；
+3. 环境变量引用；
 4. 仅在明确接受风险时才允许加密数据库中的密码。
 
-密码支持是产品需求，但不应成为默认推荐认证方式。生产环境默认推荐 SSH private key、SSH Agent 或证书。
+密码支持是产品需求，但不应成为默认推荐认证方式。生产环境默认推荐 SSH private key 或证书。
 
 ### 5.3 `agent_linux_channels`
 
@@ -227,7 +228,6 @@ Agent snapshot 中只保存 channel ID、绑定开关和非敏感执行选项；
 ```text
 password     → SSH password authentication
 private_key  → 本地 key path / OS secret ref
-ssh_agent    → SSH_AUTH_SOCK 或 Windows OpenSSH Agent
 certificate  → 后续扩展
 ```
 
@@ -243,18 +243,9 @@ SSH 连接建立时，只有 `LinuxChannelProvider` 能读取凭据。以下位�
 
 ### 6.2 Host key 验证
 
-禁止默认使用无条件的 `InsecureIgnoreHostKey`。
-
-建议策略：
-
-| 策略 | 说明 |
-|---|---|
-| `known_hosts` | 使用 Node 用户的 known_hosts 或 Node 管理的 known_hosts 文件 |
-| `pinned` | 配置明确的 host key fingerprint |
-| `accept_new` | 仅开发模式允许，第一次记录，后续必须校验 |
-| `insecure` | 默认禁止；仅测试构建可显式打开 |
-
-首次连接遇到未知 host key 时，不应让模型自行决定是否接受，而应返回 HITL，让用户确认 fingerprint。
+当前版本暂时不开放 host key 校验配置，以降低 Linux 通道的初始配置复杂度。Node 使用
+`ssh.InsecureIgnoreHostKey()` 建立连接；这会降低对中间人攻击的防护，后续重新引入
+`known_hosts` 或 `pinned` 时需要同步增加迁移和 HITL 确认流程。
 
 ## 7. 通道生命周期
 
@@ -671,7 +662,7 @@ linux_approval_required
 
 第一阶段推荐使用 Go SSH 客户端实现 Node 内部 Provider，而不是通过 shell 拼接调用系统 `ssh`：
 
-- 统一处理密码、私钥、SSH Agent、超时、取消、stdout/stderr 和退出码；
+- 统一处理密码、私钥、超时、取消、stdout/stderr 和退出码；
 - Linux 与 Windows Node 使用相同代码路径；
 - 避免远程命令经过本地 shell 的第二次转义；
 - 便于接入 DAgents policy、HITL、审计和指标。
@@ -710,8 +701,6 @@ tool call → binding/policy/HITL → SSH client → SSH session
   "port": 22,
   "username": "deploy",
   "credential_id": "cred_prod_deploy",
-  "host_key_policy": "pinned",
-  "host_key_fingerprint": "SHA256:...",
   "remote_shell": "bash",
   "default_cwd": "/srv/app",
   "command_timeout_ms": 120000,
@@ -788,8 +777,8 @@ exit_code, error_code, output_bytes, truncated
 ### 20.1 测试
 
 - schema migration、binding 校验、secret 泄漏回归；
-- password/private-key/SSH Agent 认证；
-- known_hosts 匹配、未知和 mismatch；
+- password/private-key 认证；
+- SSH 连接建立与登录凭据校验；
 - stdout/stderr/exit code、超时、取消、输出截断；
 - session 并发限制、transport EOF、重连和连接池淘汰；
 - Agent A 不能读取 Agent B 的 channel session；
@@ -800,7 +789,7 @@ exit_code, error_code, output_bytes, truncated
 ### 20.2 平台
 
 - Linux Node：优先 Go 原生 Provider，减少外部命令依赖；
-- Windows Node：使用相同 Go Provider，适配 private key、known_hosts 和 SSH Agent 路径；
+- Windows Node：使用相同 Go Provider，适配 private key；
 - 远程 Linux：只要求标准 sshd 和远程 shell，不要求安装 DAgents；
 - 远程用户权限由 Linux 本身决定，不把 Node 的 root 权限映射到远程主机。
 

@@ -162,6 +162,10 @@ export function getAgentToolJobs(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/tool-jobs`);
 }
 
+export function listAgentTerminals(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/terminals`);
+}
+
 export function clearContext(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/clear-context`, { method: "POST", body: {} });
 }
@@ -308,6 +312,53 @@ export function putAgentMcp(agentId, bindings) {
 
 export function getAgentMcpEffectiveTools(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/mcp/effective-tools`);
+}
+
+export function listLinuxChannels() {
+  return apiFetch("/v1/linux/channels");
+}
+
+export function createLinuxChannel(payload = {}) {
+  return apiFetch("/v1/linux/channels", { method: "POST", body: payload });
+}
+
+export function patchLinuxChannel(channelId, payload = {}) {
+  return apiFetch(`/v1/linux/channels/${encodeURIComponent(channelId)}`, { method: "PATCH", body: payload });
+}
+
+export function deleteLinuxChannel(channelId) {
+  return apiFetch(`/v1/linux/channels/${encodeURIComponent(channelId)}`, { method: "DELETE" });
+}
+
+export function testLinuxChannel(channelId) {
+  return apiFetch(`/v1/linux/channels/${encodeURIComponent(channelId)}/test`, { method: "POST", body: {} });
+}
+
+export function listLinuxCredentials() {
+  return apiFetch("/v1/linux/credentials");
+}
+
+export function createLinuxCredential(payload = {}) {
+  return apiFetch("/v1/linux/credentials", { method: "POST", body: payload });
+}
+
+export function patchLinuxCredential(credentialId, payload = {}) {
+  return apiFetch(`/v1/linux/credentials/${encodeURIComponent(credentialId)}`, { method: "PATCH", body: payload });
+}
+
+export function deleteLinuxCredential(credentialId) {
+  return apiFetch(`/v1/linux/credentials/${encodeURIComponent(credentialId)}`, { method: "DELETE" });
+}
+
+export function getAgentLinuxChannels(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/linux-channels`);
+}
+
+export function putAgentLinuxChannels(agentId, bindings) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/linux-channels`, {
+    method: "PUT",
+    body: { bindings: Array.isArray(bindings) ? bindings : [] },
+  });
 }
 
 export function listTriggers() {

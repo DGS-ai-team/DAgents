@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -127,75 +125,74 @@ func (r *Registry) hardLimitSec() int {
 	return maxBashTimeoutSec
 }
 
-func (r *Registry) startShellCommand(params shellRunParams) (*exec.Cmd, error) {
-	cmd, err := buildShellCommand(params.shellType, params.command)
-	if err != nil {
-		return nil, err
+func (r *Registry) startShellProcess(ctx context.Context, params shellRunParams) (Process, error) {
+	provider := r.shellProvider
+	if provider == nil {
+		provider = NewLocalShellProvider()
 	}
-	applyShellCmdDir(cmd, params.cwd)
-	return cmd, nil
+	return provider.Start(ctx, ExecRequest{
+		Target: ExecutionTarget{Kind: executionTargetLocal},
+		Context: ExecutionContext{
+			AgentID:    r.agentID,
+			SessionID:  sessionIDFromContext(ctx),
+			ToolCallID: toolCallIDFromContext(ctx),
+			Target:     ExecutionTarget{Kind: executionTargetLocal},
+		},
+		ShellType: string(params.shellType),
+		Command:   params.command,
+		CWD:       params.cwd,
+		Timeout:   time.Duration(params.timeoutSec) * time.Second,
+		EventSink: r.processEventSink,
+	})
 }
 
 // runShellUntilDoneWithRegistry 在 ctx 有效期内等待 shell 结束。
 func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
-	base, err := r.startShellCommand(params)
+	process, err := r.startShellProcess(ctx, params)
 	if err != nil {
 		return "", nil, err
 	}
-	cmd := exec.CommandContext(ctx, base.Args[0], base.Args[1:]...)
-	cmd.Dir = base.Dir
-	cmd.SysProcAttr = base.SysProcAttr
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
+	process.SetOutput(&stdout, &stderr)
+	if err := process.Start(); err != nil {
 		return "", nil, err
 	}
-	tree, treeErr := attachProcessTree(cmd)
-	if treeErr != nil {
-		tree = nil
-	}
 	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
+	go func() { waitErr <- process.Wait() }()
 	var runErr error
 	select {
 	case runErr = <-waitErr:
 	case <-ctx.Done():
-		terminateProcessTree(cmd, tree)
+		_ = process.Terminate(ctx)
 		runErr = <-waitErr
 	}
-	closeProcessTree(tree)
+	_ = process.Close()
 	outText := decodeShellOutput(stdout.Bytes(), params.outputEncoding)
 	errText := decodeShellOutput(stderr.Bytes(), params.outputEncoding)
 	if params.shellType == shellPowerShell {
 		errText = decodePowerShellCLIXML(errText)
 	}
-	out, stats := formatShellCompletedOutput(params, outText, errText, cmd.ProcessState, runErr)
+	out, stats := formatShellCompletedOutput(params, outText, errText, process.ExitStatus(), runErr)
 	return out, stats, nil
 }
 
 // runShellSyncWithAutoDegrade 同步等待；显式 timeout 到期可降后台，未传 timeout 则硬上限杀进程。
 // 等待期间可通过 syncShellGate 接受 UI 的终止 / 转后台请求。
 func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
-	cmd, err := r.startShellCommand(params)
+	process, err := r.startShellProcess(ctx, params)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil, nil
 	}
-	stdoutPipe, err := cmd.StdoutPipe()
+	stdoutPipe, err := process.StdoutPipe()
 	if err != nil {
 		return "", nil, fmt.Errorf("bash_run 失败: %w", err)
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	stderrPipe, err := process.StderrPipe()
 	if err != nil {
 		return "", nil, fmt.Errorf("bash_run 失败: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := process.Start(); err != nil {
 		return fmt.Sprintf("ERROR: bash_run 失败: %v", err), nil, nil
-	}
-
-	tree, treeErr := attachProcessTree(cmd)
-	if treeErr != nil {
-		tree = nil
 	}
 
 	sessionID := sessionIDFromContext(ctx)
@@ -208,8 +205,7 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		status:             "running",
 		startedAt:          nowMs(),
 		done:               make(chan struct{}),
-		bashCmd:            cmd,
-		processTree:        tree,
+		process:            process,
 		bashCwd:            params.cwd,
 		bashTimeout:        params.timeoutSec,
 		bashShellType:      string(params.shellType),
@@ -236,7 +232,7 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		job.mu.Lock()
 		status := job.status
 		preset := job.result
-		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, cmd.ProcessState, nil)
+		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, process.ExitStatus(), nil)
 		if status != jobStatusCancelled {
 			job.compressStats = stats
 		}
@@ -257,7 +253,7 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		job.mu.Lock()
 		job.transitionStatusLocked(jobStatusCancelled, "cancelled")
 		job.mu.Unlock()
-		terminateProcessTree(cmd, tree)
+		_ = process.Terminate(ctx)
 		<-collectDone
 		return formatShellCancelledResult(job, params), nil, nil
 	case <-timer.C:
@@ -269,14 +265,14 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		job.mu.Lock()
 		job.transitionStatusLocked(jobStatusCancelled, formatShellHardTimeoutResult(params.timeoutSec))
 		job.mu.Unlock()
-		terminateProcessTree(cmd, tree)
+		_ = process.Terminate(ctx)
 		<-collectDone
 		return formatShellHardTimeoutResult(params.timeoutSec), nil, nil
 	case <-ctx.Done():
 		job.mu.Lock()
 		job.transitionStatusLocked(jobStatusCancelled, ctx.Err().Error())
 		job.mu.Unlock()
-		terminateProcessTree(cmd, tree)
+		_ = process.Terminate(ctx)
 		<-collectDone
 		return "", nil, ctx.Err()
 	}
@@ -287,7 +283,7 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 	go func() {
 		defer close(done)
 		defer func() {
-			closeProcessTree(job.processTree)
+			_ = job.process.Close()
 			close(job.done)
 		}()
 		var wg sync.WaitGroup
@@ -303,7 +299,7 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 			wg.Done()
 		}()
 		wg.Wait()
-		waitErr := job.bashCmd.Wait()
+		waitErr := job.process.Wait()
 
 		job.mu.Lock()
 		job.bashStdout = decodeShellOutput(stdoutBuf.Bytes(), params.outputEncoding)
@@ -325,13 +321,13 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 			return
 		}
 		code := 0
-		if job.bashCmd.ProcessState != nil {
-			code = job.bashCmd.ProcessState.ExitCode()
+		if exit := job.process.ExitStatus(); exit != nil {
+			code = exit.Code
 		} else if waitErr != nil {
 			code = 1
 		}
 		job.bashExitCode = &code
-		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.bashCmd.ProcessState, waitErr)
+		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.process.ExitStatus(), waitErr)
 		if code == 0 {
 			job.transitionStatusLocked(jobStatusSucceeded, result)
 		} else {
@@ -365,13 +361,13 @@ func (r *Registry) markAutoDegradedAndMaybeNotify(job *backgroundJob) {
 	}
 }
 
-func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, state *os.ProcessState, runErr error) (string, *OutputCompressStats) {
+func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, exit *ExitStatus, runErr error) (string, *OutputCompressStats) {
 	exitCode := 0
 	if runErr != nil {
 		exitCode = 1
 	}
-	if state != nil {
-		exitCode = state.ExitCode()
+	if exit != nil {
+		exitCode = exit.Code
 	}
 
 	cfg := params.compress.normalized()

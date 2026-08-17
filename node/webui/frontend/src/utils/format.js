@@ -1,6 +1,7 @@
 import { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible, parseToolArguments } from "./toolCalls.js";
 import { truncateGraphemes } from "./textTruncate.js";
 import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
+import { isTerminalResultTool, normalizeTerminalResultContent } from "./terminalOutput.js";
 
 export { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible };
 
@@ -16,6 +17,8 @@ export function formatToolResultDisplay(entry, { verbose = false } = {}) {
   const data = entry?.data || entry || {};
   const name = String(data.tool_name || data.name || "tool").trim();
   const content = String(data.content || data.output || "").trim();
+  const terminalResult = isTerminalResultTool(name);
+  const displayContent = terminalResult ? normalizeTerminalResultContent(content) : content;
   const rejected = !!data.rejected;
   const elapsed = formatToolElapsed(data.duration_seconds);
   const args = parseToolArguments(data.arguments ?? data.raw_arguments);
@@ -34,8 +37,8 @@ export function formatToolResultDisplay(entry, { verbose = false } = {}) {
 
   const displayName = entry?.summary || data.summary || toolDisplayName(name, args);
   let headline = `${displayName}${rejected ? " · 已拒绝" : " · 已完成"}${elapsed}`;
-  const detail = !rejected && content ? content : "";
-  return { headline, detail, raw: verbose ? content : detail };
+  const detail = !rejected && displayContent ? displayContent : "";
+  return { headline, detail, raw: verbose ? displayContent : detail };
 }
 
 export function formatToolElapsed(seconds) {

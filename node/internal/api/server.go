@@ -53,6 +53,8 @@ type Server struct {
 	agents          *store.AgentStore
 	mcpServers      *store.MCPServerStore
 	mcpManager      *mcp.Manager
+	linuxChannels   *store.LinuxChannelStore
+	linuxProvider   *tools.LinuxShellProvider
 	llmConfigs      *store.LLMConfigStore
 	nodeSettings    *store.NodeSettingsStore
 	stream          *stream.Hub // 进程内 SSE 事件总线
@@ -70,6 +72,7 @@ type Server struct {
 	mediaRegister   tools.MediaRegisterFunc
 	workgroupWorker *workgroup.Worker
 	workgroupDialer *workgroup.Dialer
+	terminals       *terminalSessionRegistry
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex
@@ -264,6 +267,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 	}
+	var linuxChannelStore *store.LinuxChannelStore
+	var linuxProvider *tools.LinuxShellProvider
+	if !o.skipStore {
+		opened, err := store.OpenLinuxChannels(filepath.Join(cfg.RuntimeDir(), "linux_channels.db"))
+		if err != nil {
+			logger.Error("linux channel store init failed", "error", err)
+		} else {
+			linuxChannelStore = opened
+			linuxProvider = tools.NewLinuxShellProvider(opened, resolveLinuxSecret).
+				WithBindingResolver(opened)
+		}
+	}
 
 	hub := stream.NewHub(256, logger)
 	workgroupStream := stream.NewHub(1024, logger)
@@ -439,6 +454,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		agents:          agentsStore,
 		mcpServers:      mcpServerStore,
 		mcpManager:      mcpManager,
+		linuxChannels:   linuxChannelStore,
+		linuxProvider:   linuxProvider,
 		llmConfigs:      llmConfigStore,
 		nodeSettings:    o.nodeSettings,
 		sessions:        mgr,
@@ -454,7 +471,20 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mediaRegister:   mediaRegister,
 		workgroupWorker: wgWorker,
 		workgroupDialer: wgDialer,
+		terminals:       newTerminalSessionRegistry(),
 	}
+	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
+		registry, err := s.terminalToolsRegistry(agentID)
+		if err != nil {
+			return nil, err
+		}
+		return registry.OpenTerminal(ctx, req)
+	})
+	s.terminals.setChangePublisher(func(agentID, eventType string, data map[string]any) {
+		if s.stream != nil {
+			s.stream.Publish(agentID, eventType, data)
+		}
+	})
 	if wgWorker != nil {
 		wgWorker.OnTimelineEvent = func(env workgroup.WSEnvelope) {
 			wid := strings.TrimSpace(env.WorkgroupID)
@@ -497,6 +527,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
 	s.registerMCPRoutes()
+	s.registerLinuxChannelRoutes()
+	s.registerTerminalRoutes()
 	s.registerWorkgroupRoutes()
 	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
@@ -564,6 +596,15 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	if s == nil || reg == nil {
 		return
 	}
+	reg.SetAgentID(targetAgentID)
+	if s.linuxProvider != nil {
+		if err := reg.WithLinuxShellProvider(s.linuxProvider); err != nil && s.logger != nil {
+			s.logger.Warn("agent linux provider bind failed", "agent_id", targetAgentID, "error", err)
+		}
+	}
+	if s.linuxChannels != nil {
+		reg.SetTerminalConfigResolver(s.linuxChannels)
+	}
 	if s.backgroundJobs != nil {
 		bindErr := error(nil)
 		if reg == s.tools {
@@ -578,6 +619,8 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
 	attachBackgroundJobNotifier(reg, s.sessions, s.logger)
+	attachProcessEventSink(reg, s.stream, s.store, s.logger)
+	reg.SetTerminalSessionBroker(s.terminals)
 	if s.mediaRegister != nil {
 		reg.SetMediaRegister(s.mediaRegister)
 	}
@@ -633,6 +676,82 @@ func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logg
 			if logger != nil {
 				logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
 			}
+		}
+	})
+}
+
+// attachProcessEventSink exposes execution lifecycle events on the existing
+// Node stream. Lifecycle events are replayable; high-frequency stdout/stderr
+// chunks are ephemeral so a slow SSE client cannot block shell execution or
+// inflate the stream history.
+func attachProcessEventSink(reg *tools.Registry, hub *stream.Hub, auditStore *store.SQLiteStore, logger *slog.Logger) {
+	if reg == nil || hub == nil {
+		return
+	}
+	reg.SetProcessEventSink(func(ev tools.ProcessEvent) {
+		sessionID := strings.TrimSpace(ev.Context.SessionID)
+		if sessionID == "" {
+			return
+		}
+		payload := map[string]any{
+			"process_id": ev.ProcessID,
+			"event":      string(ev.Type),
+			"seq":        ev.Seq,
+			"stream":     ev.Stream,
+		}
+		if len(ev.Data) > 0 {
+			// []byte is encoded as base64 by encoding/json, preserving arbitrary
+			// command output without corrupting the SSE JSON payload.
+			payload["data"] = ev.Data
+		}
+		if ev.Exit != nil {
+			payload["exit_status"] = map[string]any{
+				"code":  ev.Exit.Code,
+				"error": ev.Exit.Error,
+			}
+		}
+		if ev.Type == tools.ProcessEventOutput {
+			hub.PublishEphemeral(sessionID, "execution", payload)
+			return
+		}
+		hub.Publish(sessionID, "execution", payload)
+		if auditStore == nil {
+			return
+		}
+		agentID := strings.TrimSpace(ev.Context.AgentID)
+		if agentID == "" {
+			agentID = sessionID
+		}
+		var exitCode *int
+		exitError := ""
+		if ev.Exit != nil {
+			code := ev.Exit.Code
+			exitCode = &code
+			exitError = ev.Exit.Error
+		}
+		if err := auditStore.AppendExecutionEvent(context.Background(), store.ExecutionEventRecord{
+			AgentID:        agentID,
+			SessionID:      sessionID,
+			ProcessID:      ev.ProcessID,
+			ProcessSeq:     ev.Seq,
+			EventType:      string(ev.Type),
+			Stream:         ev.Stream,
+			TurnID:         ev.Context.TurnID,
+			ToolCallID:     ev.Context.ToolCallID,
+			TargetKind:     ev.Context.Target.Kind,
+			TargetID:       ev.Context.Target.ID,
+			PolicyDecision: ev.Context.PolicyDecision,
+			ApprovalID:     ev.Context.ApprovalID,
+			RiskLevel:      ev.Context.RiskLevel,
+			ExitCode:       exitCode,
+			ExitError:      exitError,
+		}); err != nil && logger != nil {
+			logger.Warn("execution event audit persist failed",
+				"session_id", sessionID,
+				"process_id", ev.ProcessID,
+				"seq", ev.Seq,
+				"error", err,
+			)
 		}
 	})
 }
@@ -694,6 +813,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		// 与启动顺序相反：先停后台任务与会话，再关 HTTP 监听。
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
+		}
+		if s.terminals != nil {
+			s.terminals.closeAll()
 		}
 		s.sessions.Stop()
 		if s.tools != nil {
@@ -771,6 +893,9 @@ func (s *Server) Close() {
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
 	}
+	if s.terminals != nil {
+		s.terminals.closeAll()
+	}
 	if s.sessions != nil {
 		s.sessions.Stop()
 	}
@@ -797,6 +922,9 @@ func (s *Server) Close() {
 	}
 	if s.mcpServers != nil {
 		_ = s.mcpServers.Close()
+	}
+	if s.linuxChannels != nil {
+		_ = s.linuxChannels.Close()
 	}
 }
 

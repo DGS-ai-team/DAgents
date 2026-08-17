@@ -18,7 +18,11 @@ function onPick(cmd) {
 
 <template>
   <div class="settings-page settings-embedded">
-    <h1 class="settings-page__title">关于</h1>
+    <header class="settings-page__header">
+      <div class="settings-page__header-main">
+        <h1 class="settings-page__title">关于</h1>
+      </div>
+    </header>
     <UpdatePanel embedded @close="() => {}" />
 
     <section class="settings-section settings-section--standalone">
