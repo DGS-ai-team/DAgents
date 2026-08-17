@@ -51,7 +51,7 @@
 
 ## Web UI（浏览器 Client）
 
-适用于无法运行 Python Textual 或 Go full TUI 的老 Windows（Chrome/Edge）：Node 启动后在本机浏览器打开：
+Node 启动后可直接在本机浏览器（Chrome/Edge）打开：
 
 ```text
 http://127.0.0.1:<listen.port>/ui/

@@ -15,7 +15,7 @@ DAgents **发布包不内置**第三方 CLI。下列工具经社区验证，适�
 1. 从 [Releases](https://github.com/iOfficeAI/OfficeCLI/releases) 下载对应平台二进制（Windows：`officecli-win-x64.exe` → 重命名为 `officecli.exe`）。
 2. 放入 **`<运行根>/.runtime/externaltools/`** 或系统 `PATH` 目录。
 3. 将上游仓库 **`skills/`** 下 `officecli*` 目录复制到 **`<运行根>/.runtime/skills/`**。
-4. TUI 内执行 **`/skill load officecli`**（或 `officecli-docx` / `officecli-xlsx` / `officecli-pptx` 等子 skill），再让 Agent 处理 Office 文档。
+4. 在 Node Web UI 的 Skills 面板中加载 **`officecli`**（或 `officecli-docx` / `officecli-xlsx` / `officecli-pptx` 等子 skill），再让 Agent 处理 Office 文档。
 
 ```bash
 # 验证（示例）

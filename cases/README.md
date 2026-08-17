@@ -8,8 +8,8 @@
 
 1. **场景简介** — 一两段说明角色、容器/组件与要验证的能力  
 2. **快速开始** — `cp .env.example .env`、**.env 各字段含义**、**真实 LLM 时如何设 `LLM_MOCK=false`**、`docker compose up --build -d`；**修改 `.env` 后须 `docker compose up -d --force-recreate`**（**不**写「先跑 verify.sh」）  
-3. **启动 TUI** — 容器外命令、`--config` 与端口、连哪个 Node  
-4. **发什么消息、预期什么结果** — 用表格列用户输入与预期行为/输出（TUI 对话、自动侧车等）  
+3. **打开 Web UI** — 容器外访问地址、端口与连接的 Node
+4. **发什么消息、预期什么结果** — 用表格列 Web UI 操作与预期行为/输出
 5. **容器内目录与关键文件** — 各容器路径、`custom.md` / Agent Card / config 等源文件摘要  
 6. **延伸阅读** — 架构文档链接；`verify.sh` 可在附录一笔带过
 
@@ -17,7 +17,7 @@
 
 | 目录 | 场景摘要 |
 |------|----------|
-| [`centos7-feature-tour/`](centos7-feature-tour/) | **CentOS 7** 静态 Node；TUI 特性导览（Mock / 真实 LLM） |
+| [`centos7-feature-tour/`](centos7-feature-tour/) | **CentOS 7** 静态 Node；Web UI 特性导览（Mock / 真实 LLM） |
 
 ## 通用约定
 
