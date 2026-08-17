@@ -112,6 +112,12 @@ let workgroupEventSeq = 0;
 
 const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
 const hitlMode = computed(() => Boolean(activeHitl.value));
+// Assigned member content is already represented by the task card. Keep the
+// live bubble for Supervisor and direct @member turns, where it is the actual
+// conversational reply.
+const showLiveAssistant = computed(
+  () => Boolean(liveAssistant.value) && streamMode.value !== "member",
+);
 const debugLlmBadge = computed(() => {
   const mode = String(debugLlm.value?.mode || "").trim();
   if (mode === "mock") return "Mock · 回声/脚本";
@@ -1622,7 +1628,7 @@ const eventGroups = computed(() => {
     }
   }
 
-  if (liveAssistant.value) {
+  if (showLiveAssistant.value) {
     const actorId = streamActorId.value || (streamMode.value === "leader" ? "leader" : "member");
     flat.push({
       role: "assistant",
@@ -2269,7 +2275,7 @@ onUnmounted(() => {
               v-if="
                 (sending || remoteSending) &&
                 !activeHitl &&
-                !liveAssistant
+                !showLiveAssistant
               "
               class="msg msg--assistant msg--progress"
             >

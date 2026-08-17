@@ -1209,6 +1209,12 @@ class WorkGroupStore:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
             if workgroup_id and member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
+            # A provision result may arrive after the member was archived,
+            # especially when the Home Node replays an unacked provision
+            # frame during WS resume.  Archive is terminal; a late result
+            # must never resurrect the member.
+            if member.status == "archived" and status != "archived":
+                return member
             update: dict[str, Any] = {"status": status}
             if status == "error":
                 update["error_code"] = (error_code or "").strip() or None
