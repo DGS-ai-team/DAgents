@@ -28,3 +28,8 @@ Agent Node 对本地 Client 暴露的 HTTP/SSE 端点（composition root）。
 
 - Go Node 内部结构：[`docs/architecture/go-node-internals.md`](../../../docs/architecture/go-node-internals.md)
 - Session 队列：[`../session/README.md`](../session/README.md)
+## Terminal WebSocket
+
+`GET /v1/agents/{agent_id}/terminals/ws` opens one PTY per WebSocket connection. The first frame is `open`; later frames are `input`, `resize`, `terminate`, or `close`. JSON `data` fields use base64. `resize` is an internal UI/PTY operation, not an Agent tool. `terminate` sends Ctrl+C first, then closes the PTY if the process does not exit within the grace period.
+
+Interactive terminal sessions are reaped after 10 minutes without input or PTY output. Reading an unchanged snapshot does not refresh this idle timer; Node restart always starts with an empty in-memory session registry.

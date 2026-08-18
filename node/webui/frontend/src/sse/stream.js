@@ -80,6 +80,7 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, onRe
     const types = [
       "assistant",
       "reasoning",
+      "execution",
       "tool_call",
       "tool_result",
       "usage",
@@ -95,6 +96,9 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, onRe
       "side_effect_turn_start",
       "side_effect_applied",
       "side_effects_cleared",
+      "terminal.opened",
+      "terminal.updated",
+      "terminal.closed",
     ];
     types.forEach((type) => {
       es.addEventListener(type, (ev) => {

@@ -8,6 +8,7 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
+import TerminalDock from "../components/TerminalDock.vue";
 import {
   agentStore,
   persistAgentId,
@@ -57,6 +58,10 @@ import {
 } from "../stores/hitl.js";
 import { consumeStartupURL, hydrateAgent, invalidateHydration } from "../stores/hydrate.js";
 import {
+  recordSSEEvent,
+  startPerformanceSpan,
+} from "../stores/performanceDiagnostics.js";
+import {
   startDesktopFocusHeartbeat,
   stopDesktopFocusHeartbeat,
   pulseDesktopFocus,
@@ -105,6 +110,9 @@ const agentListCount = ref(null);
 const agentList = ref([]);
 const currentAgentDisplayName = ref("");
 const chatPanelRef = ref(null);
+const selectedTerminalId = ref("");
+const selectedTerminalMeta = ref(null);
+const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
 
@@ -190,6 +198,7 @@ function restartStream() {
     },
     onEvent: handleEvent,
     onReconnect: () => {
+      terminalRevision.value += 1;
       void resyncAfterSSEGap("reconnect");
     },
   });
@@ -231,6 +240,7 @@ async function activateAgentStream() {
     restartStream();
   }
   await syncChildAgentsFromApi();
+  terminalRevision.value += 1;
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
 }
@@ -300,11 +310,17 @@ function handleEvent(ev) {
   if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
 
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
-  turnWatchdog.noteActivity();
-  const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
+  recordSSEEvent(ev.type, ev.seq);
+  const eventSpan = startPerformanceSpan("sse.handle", { type: ev.type });
+  try {
+    turnWatchdog.noteActivity();
+    if (["terminal.opened", "terminal.updated", "terminal.closed"].includes(ev.type)) {
+      terminalRevision.value += 1;
+    }
+    const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
-  if (!skipRender) {
-    switch (ev.type) {
+    if (!skipRender) {
+      switch (ev.type) {
     case "assistant":
       markTurnContent();
       finishWaitingStatuses();
@@ -397,12 +413,15 @@ function handleEvent(ev) {
     case "side_effects_cleared":
       markSideEffectsStale(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
       break;
-    default:
-      break;
+        default:
+          break;
+      }
     }
-  }
 
-  markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+    markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+  } finally {
+    eventSpan.end();
+  }
 }
 
 function handleCompressionEvent(type, data) {
@@ -951,8 +970,25 @@ watch(
   () => agentStore.agentId,
   () => {
     void syncCurrentAgentDisplayName();
+    selectedTerminalId.value = "";
+    selectedTerminalMeta.value = null;
   },
 );
+
+const terminalOpen = computed(
+  () => Boolean(String(selectedTerminalId.value || "").trim() && selectedTerminalMeta.value),
+);
+
+function selectTerminal(item) {
+  const id = String(item?.terminal_id || "").trim();
+  selectedTerminalId.value = id;
+  selectedTerminalMeta.value = id ? item : null;
+}
+
+function closeTerminal() {
+  selectedTerminalId.value = "";
+  selectedTerminalMeta.value = null;
+}
 
 onActivated(() => {
   turnWatchdog.start();
@@ -1022,7 +1058,10 @@ onUnmounted(() => {
     <aside class="app__col app__col--agents">
       <NavRail
         ref="agentPanelRef"
+        :terminal-revision="terminalRevision"
+        :selected-terminal-id="selectedTerminalId"
         @switch="switchAgent"
+        @terminal-selected="selectTerminal"
         @create="openCreateWizard()"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
@@ -1056,35 +1095,44 @@ onUnmounted(() => {
         <p>选择左侧 Agent，或点击 + 从模板新建。</p>
       </div>
 
-      <MainChatPanel
-        v-else
-        ref="chatPanelRef"
-        :entries="entries"
-        :hitl-queue="hitlStore.queue"
-        :tool-verbose="transcriptStore.toolFoldVerbose"
-        :disabled="!canSend"
-        :sending="sending"
-        :cancelling="cancelling"
-        :hitl-busy="hitlStore.busy"
-        :hitl-busy-index="hitlStore.busyIndex"
-        :thinking-supported="thinkingSupported"
-        :llm-settings="chromeStore.llmSettings"
-        :agent-title="currentAgentTitle"
-        @send="onSendMessage"
-        @cancel="cancelTurn"
-        @toggle-thinking="toggleThinkingMode"
-        @cycle-effort="cycleThinkingEffort"
-        @switch-profile="switchLLMProfile"
-        @open-activity="openLeftActivity"
-        @approve-all="(idx) => submitHitlApproval(true, idx)"
-        @reject-all="(idx) => submitHitlApproval(false, idx)"
-        @approve-one="(payload) => submitHitlOne(payload, true)"
-        @reject-one="(payload) => submitHitlOne(payload, false)"
-        @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
-        @user-info-selected="onHitlUserInfoSelected"
-        @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
-        @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
-      />
+      <div v-else class="chat-workspace">
+        <MainChatPanel
+          v-show="!terminalOpen"
+          ref="chatPanelRef"
+          :entries="entries"
+          :hitl-queue="hitlStore.queue"
+          :tool-verbose="transcriptStore.toolFoldVerbose"
+          :disabled="!canSend"
+          :sending="sending"
+          :cancelling="cancelling"
+          :hitl-busy="hitlStore.busy"
+          :hitl-busy-index="hitlStore.busyIndex"
+          :thinking-supported="thinkingSupported"
+          :llm-settings="chromeStore.llmSettings"
+          :agent-title="currentAgentTitle"
+          @send="onSendMessage"
+          @cancel="cancelTurn"
+          @toggle-thinking="toggleThinkingMode"
+          @cycle-effort="cycleThinkingEffort"
+          @switch-profile="switchLLMProfile"
+          @open-activity="openLeftActivity"
+          @approve-all="(idx) => submitHitlApproval(true, idx)"
+          @reject-all="(idx) => submitHitlApproval(false, idx)"
+          @approve-one="(payload) => submitHitlOne(payload, true)"
+          @reject-one="(payload) => submitHitlOne(payload, false)"
+          @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
+          @user-info-selected="onHitlUserInfoSelected"
+          @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
+          @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
+        />
+        <TerminalDock
+          v-if="terminalOpen"
+          :agent-id="agentStore.agentId"
+          :selected-terminal-id="selectedTerminalId"
+          :terminal-meta="selectedTerminalMeta"
+          @close="closeTerminal"
+        />
+      </div>
 
       <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel @close="closePanel" />
@@ -1099,3 +1147,8 @@ onUnmounted(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
+</style>

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -25,8 +24,7 @@ type backgroundJob struct {
 	cancelFn   context.CancelFunc
 	// bash 超时自动降级：保留子进程由 collector 收割。
 	autoDegraded       bool
-	bashCmd            *exec.Cmd
-	processTree        processTreeHandle
+	process            Process
 	bashCwd            string
 	bashTimeout        int
 	bashStdout         string
@@ -471,13 +469,12 @@ func (j *backgroundJob) cancelJob() string {
 			j.mu.Unlock()
 			return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=%s", j.id, status)
 		}
-		cmd := j.bashCmd
-		tree := j.processTree
+		process := j.process
 		cancel := j.cancelFn
 		id := j.id
 		j.mu.Unlock()
-		if cmd != nil && cmd.Process != nil && cmd.ProcessState == nil {
-			terminateProcessTree(cmd, tree)
+		if process != nil {
+			_ = process.Terminate(context.Background())
 		} else if cancel != nil {
 			cancel()
 		}

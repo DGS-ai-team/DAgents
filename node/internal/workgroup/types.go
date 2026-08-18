@@ -7,20 +7,20 @@ const SchemaVersion = "0.5.0"
 
 // WorkerBinding 对应 D0.5 WorkerBinding.json；不进入本地 Agents API。
 type WorkerBinding struct {
-	MemberID                 string `json:"member_id"`
-	WorkgroupID              string `json:"workgroup_id"`
-	HomeNodeID               string `json:"home_node_id"`
-	ProvisionID              string `json:"provision_id"`
-	MemberSpecDigest         string `json:"member_spec_digest"`
-	LeaseEpoch               int64  `json:"lease_epoch"`
-	MemberGeneration         int64  `json:"member_generation"`
-	WorkspacePath            string `json:"workspace_path"`
-	Status                   string `json:"status"` // provisioning|ready|busy|archived|error
-	NotEnumerableAsLocalAgent bool  `json:"not_enumerable_as_local_agent"`
-	ToolAllowNames           []string `json:"tool_allow_names,omitempty"`
-	ToolCatalogRevision      string   `json:"tool_catalog_revision,omitempty"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	MemberID                  string    `json:"member_id"`
+	WorkgroupID               string    `json:"workgroup_id"`
+	HomeNodeID                string    `json:"home_node_id"`
+	ProvisionID               string    `json:"provision_id"`
+	MemberSpecDigest          string    `json:"member_spec_digest"`
+	LeaseEpoch                int64     `json:"lease_epoch"`
+	MemberGeneration          int64     `json:"member_generation"`
+	WorkspacePath             string    `json:"workspace_path"`
+	Status                    string    `json:"status"` // provisioning|ready|busy|archived|error
+	NotEnumerableAsLocalAgent bool      `json:"not_enumerable_as_local_agent"`
+	ToolAllowNames            []string  `json:"tool_allow_names,omitempty"`
+	ToolCatalogRevision       string    `json:"tool_catalog_revision,omitempty"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 // ProvisionRequest 为 member.provision 入参。
@@ -38,15 +38,15 @@ type ProvisionRequest struct {
 
 // ProvisionResult 为 provision 结果。
 type ProvisionResult struct {
-	Binding   WorkerBinding
-	Created   bool // 本次是否新建 workspace
-	Manifest  ToolManifest
+	Binding  WorkerBinding
+	Created  bool // 本次是否新建 workspace
+	Manifest ToolManifest
 }
 
 // ToolManifest 对齐契约 §7.1。
 type ToolManifest struct {
-	NodeID              string         `json:"node_id"`
-	ToolCatalogRevision string         `json:"tool_catalog_revision"`
+	NodeID              string             `json:"node_id"`
+	ToolCatalogRevision string             `json:"tool_catalog_revision"`
 	Tools               []ToolCatalogEntry `json:"tools"`
 }
 
@@ -60,23 +60,23 @@ type ToolCatalogEntry struct {
 
 // ToolCommand 对齐 ToolCommand.json（D2 用到的字段）。
 type ToolCommand struct {
-	CommandID            string `json:"command_id"`
-	WorkgroupID          string `json:"workgroup_id"`
-	MemberID             string `json:"member_id"`
-	AssignID             string `json:"assign_id"`
-	RunID                string `json:"run_id"`
-	TurnID               string `json:"turn_id"`
-	ToolCallID           string `json:"tool_call_id"`
-	ToolName             string `json:"tool_name"`
-	ArgumentsJSON        string `json:"arguments_json"`
-	PayloadHash          string `json:"payload_hash"`
-	LeaseID              string `json:"lease_id"`
-	LeaseEpoch           int64  `json:"lease_epoch"`
-	MemberGeneration     int64  `json:"member_generation"`
-	MemberSpecDigest     string `json:"member_spec_digest"`
-	ToolCatalogRevision  string `json:"tool_catalog_revision"`
-	Status               string `json:"status"`
-	SideEffectClass      string `json:"side_effect_class"`
+	CommandID           string `json:"command_id"`
+	WorkgroupID         string `json:"workgroup_id"`
+	MemberID            string `json:"member_id"`
+	AssignID            string `json:"assign_id"`
+	RunID               string `json:"run_id"`
+	TurnID              string `json:"turn_id"`
+	ToolCallID          string `json:"tool_call_id"`
+	ToolName            string `json:"tool_name"`
+	ArgumentsJSON       string `json:"arguments_json"`
+	PayloadHash         string `json:"payload_hash"`
+	LeaseID             string `json:"lease_id"`
+	LeaseEpoch          int64  `json:"lease_epoch"`
+	MemberGeneration    int64  `json:"member_generation"`
+	MemberSpecDigest    string `json:"member_spec_digest"`
+	ToolCatalogRevision string `json:"tool_catalog_revision"`
+	Status              string `json:"status"`
+	SideEffectClass     string `json:"side_effect_class"`
 }
 
 // CommandAck 对齐 CommandAck.json。
@@ -123,5 +123,10 @@ type ResumeCursor struct {
 // ArchiveTombstone 归档栅栏。
 type ArchiveTombstone struct {
 	WorkgroupID         string `json:"workgroup_id"`
+	MemberID            string `json:"member_id,omitempty"`
 	LeaseEpochAtArchive int64  `json:"lease_epoch_at_archive"`
+}
+
+func memberTombstoneKey(workgroupID, memberID string) string {
+	return workgroupID + "\x00" + memberID
 }

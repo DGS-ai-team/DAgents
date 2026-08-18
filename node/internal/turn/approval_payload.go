@@ -75,6 +75,17 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 			return "将执行 Shell 命令（参数未提供 command）", risk
 		}
 		return "将执行 Shell 命令: " + truncateRunes(cmd, 160), risk
+	case "linux_exec":
+		risk = "high"
+		channel := firstNonEmpty(args, "channel_id")
+		cmd := strings.TrimSpace(fmt.Sprint(args["command"]))
+		if channel == "" {
+			return "执行 Linux SSH 命令（channel_id 未提供）", risk
+		}
+		if cmd == "" {
+			return "在 Linux SSH channel " + channel + " 上执行命令（command 未提供）", risk
+		}
+		return "在 Linux SSH channel " + channel + " 上执行命令: " + truncateRunes(cmd, 160), risk
 	case "write_file", "search_replace":
 		risk = "medium"
 		path := firstNonEmpty(args, "path", "file_path")

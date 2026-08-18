@@ -2,11 +2,13 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import router from "./router/index.js";
 import { initTheme } from "./stores/theme.js";
+import { installPerformanceDiagnosticsGlobal } from "./stores/performanceDiagnostics.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import "./styles/workbench.css";
 import "./styles/overrides.css";
 
 initTheme();
+installPerformanceDiagnosticsGlobal();
 
 const favicon = document.querySelector('link[rel~="icon"]') || document.createElement("link");
 favicon.rel = "icon";

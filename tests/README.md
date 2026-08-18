@@ -2,7 +2,7 @@
 
 Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 各包内（`*_test.go`）。
 
-**当前规模**：Python **157** 例（`unittest discover`）；Go **~149** 个 `Test*`（`go test`，含 2 SKIP）。详细优先级与缺口见 **`UNIT_TEST_CHECKLIST.md`**。
+测试数量以当前代码和 CI 实际运行结果为准；详细优先级与缺口见 **`UNIT_TEST_CHECKLIST.md`**。
 
 ---
 
@@ -10,7 +10,7 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 
 | 路径 | 说明 |
 |------|------|
-| **`UNIT_TEST_CHECKLIST.md`** | 单元测试清单：Manage + CLI + Go 覆盖表、CI 与实施顺序 |
+| **`UNIT_TEST_CHECKLIST.md`** | 单元测试清单：Manage + Node/Client Go 覆盖表、CI 与实施顺序 |
 | **`test_support/`** | 单测替身（如 `stub_settings.py`） |
 | **`integration/`** | 可选联网集成测试（默认 skip）；见子目录 **`README.md`** |
 
@@ -31,26 +31,12 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 | `test_manage_admin.py`、`test_manage_storage_schema.py` | Admin 只读、DB schema |
 | `test_manage_text_sanitize.py` | 文本消毒 |
 
-### Textual CLI（`app/cli/` · `dagents chat`）
-
-| 文件 | 说明 |
-|------|------|
-| `test_cli_session_controller.py` | session 控制器渲染 |
-| `test_cli_child_agent.py` | 子 Agent scope / tracker / SSE 过滤 |
-| `test_cli_approval.py`、`test_cli_hitl_batch.py`、`test_cli_hitl_large_args.py` | HITL 审批、SSE 解析 |
-| `test_cli_tool_calls.py`、`test_cli_render_tokens.py` | tool call 规范化与渲染 |
-| `test_cli_user_information.py` | CLI 用户信息收集 |
-| `test_cli_a2a_relay.py` | A2A 中继展示 |
-| `test_cli_policy.py`、`test_cli_triggers.py` | policy / triggers |
-| `test_cli_last_session.py`、`test_cli_welcome_panel.py` | 会话恢复与欢迎面板 |
-| `test_tui_usage_layout.py`、`test_transcript_log.py` | TUI 布局与 transcript |
-
-### 横切 / 渲染
+### 横切 / Workgroup
 
 | 文件 | 说明 |
 |------|------|
 | `test_smoke.py` | 工作区可导入（CI 非空 discovery） |
-| `test_render_sanitize.py`、`test_tool_call_streaming.py` | 渲染与流式 tool call |
+| `test_manage_workgroup_*.py` | Workgroup API、投影、会话与成员协作 |
 
 ### 非 discover
 
@@ -71,10 +57,9 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 | 子 Agent | `node/internal/childagent`、`node/internal/api`（child API） | 创建/wait、**delivered 终态**、HTTP |
 | 工具 / 策略 | `node/internal/tools`、`policy`、`hitl`、`llm`、`skills` | 含 `bash_policy_test.go`、mock LLM |
 | Triggers | `node/internal/triggers`、`node/internal/session` | trigger 与调度 |
-| Client TUI | `client/internal/tui/full`、`repl`、`shared` | 全屏 TUI、**REPL 子 Agent SSE 过滤**、/children |
-| Client 其他 | `client/internal/api`、`hitl`、`probe` | HTTP 客户端、审批、健康探测 |
+| Client | `client/internal/api`、`desktop`、`probe`、`update` | Node API、桌面更新、健康探测与更新 |
 
-**尚无单测**：`node/internal/hostsnapshot`、`node/cmd/*`、`client/cmd/*`、`client/internal/tui` 顶层 dispatch。完整包级列表见 **`UNIT_TEST_CHECKLIST.md`** § Go 进度表。
+**尚无单测**：`node/internal/hostsnapshot`、`node/cmd/*`、`client/cmd/*`。完整包级列表见 **`UNIT_TEST_CHECKLIST.md`** § Go 进度表。
 
 ---
 

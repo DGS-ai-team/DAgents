@@ -11,6 +11,9 @@ import (
 type Provisioner struct {
 	NodeID   string
 	Bindings BindingStore
+	// MemberTombstones prevents a provision replay from recreating a member
+	// when the archive frame arrived before the binding existed locally.
+	MemberTombstones map[string]ArchiveTombstone
 	// NodeToolNames 为本机可提供的工具名（来自 tools.Registry）。
 	NodeToolNames []string
 	// WorkspaceCreated 测试钩子：统计新建 workspace 次数。
@@ -27,6 +30,13 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 	}
 	if req.HomeNodeID != "" && p.NodeID != "" && req.HomeNodeID != p.NodeID {
 		return nil, errf(CodeNotAuthorized, "home_node_id must be this node")
+	}
+	if tombstone, ok := p.MemberTombstones[memberTombstoneKey(req.WorkgroupID, req.MemberID)]; ok {
+		return nil, errf(
+			CodeWorkgroupArchived,
+			"member archived at lease epoch %d",
+			tombstone.LeaseEpochAtArchive,
+		)
 	}
 
 	existing, err := p.Bindings.GetByProvisionID(req.ProvisionID)

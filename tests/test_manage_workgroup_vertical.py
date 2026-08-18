@@ -15,10 +15,11 @@ if str(_ROOT) not in sys.path:
 
 from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.d3_models import (  # noqa: E402
-    HITLCreateRequest,
-    HITLResolveRequest,
-    HumanPostRequest,
-    MemberFinalRequest,
+	HITLCreateRequest,
+	HITLResolveRequest,
+	HumanPostRequest,
+	MemberFinalRequest,
+	ProvisionCompleteRequest,
 )
 from manage.workgroup.errors import WorkgroupError  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
@@ -258,6 +259,45 @@ class WorkgroupVerticalTests(unittest.TestCase):
             )
             self.assertEqual(recon["status"], "indeterminate")
             self.assertFalse(recon["auto_reexec"])
+
+    def test_archived_member_ignores_late_provision_result(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
+            loop = VerticalLoop(store)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Archive replay",
+                    created_by_node_id="node-a",
+                    llm_profile_id="default",
+                    llm_profile_revision="1",
+                )
+            )
+            first, _ = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(home_node_id="node-a", display_name="first"),
+            )
+            second, _ = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(home_node_id="node-a", display_name="second"),
+            )
+            provision = loop.enqueue_provision(group.workgroup_id, first.member_id)
+
+            archived = store.archive_member(group.workgroup_id, first.member_id)
+            tombstone = loop.enqueue_member_tombstone(group.workgroup_id, first.member_id)
+            self.assertEqual(archived.status, "archived")
+            self.assertEqual(tombstone.payload["member_id"], first.member_id)
+
+            late = loop.complete_provision(
+                group.workgroup_id,
+                ProvisionCompleteRequest(
+                    member_id=first.member_id,
+                    provision_id=provision.payload["provision_id"],
+                    status="ready",
+                ),
+            )
+            self.assertEqual(late["member"].status, "archived")
+            self.assertEqual(store.get_member(first.member_id).status, "archived")
+            self.assertEqual([m.member_id for m in store.list_members(group.workgroup_id)], [second.member_id])
 
 
 if __name__ == "__main__":

@@ -38,11 +38,11 @@ http://127.0.0.1:18765/ui/
 
 `dagents node` 就绪后会打印 `[dagents] Web UI: http://127.0.0.1:…/ui/`。
 
-关闭 UI：在 `config.yaml` 中设置 `ui.enabled: false`（仅隐藏 `/ui/`，不影响 TUI）。
+关闭 UI：在 `config.yaml` 中设置 `ui.enabled: false`（仅隐藏 `/ui/`，不影响 Node API）。
 
 ## 开发
 
-与 Textual / Go Client **共用** `packaging/agent-client/config.yaml`（从 `config.example.yaml` 复制后按需编辑）。
+与 Go 运维 Client **共用** `packaging/agent-client/config.yaml`（从 `config.example.yaml` 复制后按需编辑）。
 
 ### 方式 A：VS Code / Cursor 复合调试
 

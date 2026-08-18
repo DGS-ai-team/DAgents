@@ -43,6 +43,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 |------|----------|
 | `fs` | `read_file`、`write_file`、`glob_files`、`grep_file`、`grep_files`、`search_replace` |
 | `bash` | `bash_run`、`background_job_status`、`background_job_cancel` |
+| `terminal` | `terminal_config_list`、`terminal_open`、`terminal_input`、`terminal_read`、`terminal_terminate`、`terminal_list` |
 | `hitl` | `ask_user_information` |
 | `memory` | `remember` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |

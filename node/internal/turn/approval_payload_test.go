@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -38,5 +39,18 @@ func TestDescribeApprovalMetaBashRun(t *testing.T) {
 	}
 	if reason == "" {
 		t.Fatal("empty reason")
+	}
+}
+
+func TestDescribeApprovalMetaLinuxExec(t *testing.T) {
+	reason, risk := describeApprovalMeta("linux_exec", map[string]any{
+		"channel_id": "prod-app-01",
+		"command":    "systemctl restart api",
+	})
+	if risk != "high" {
+		t.Fatalf("risk = %q", risk)
+	}
+	if reason == "" || !strings.Contains(reason, "prod-app-01") {
+		t.Fatalf("reason = %q", reason)
 	}
 }

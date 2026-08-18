@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
@@ -15,21 +14,27 @@ import (
 
 // Registry 注册内置工具并在 FS_ROOT 内执行。
 type Registry struct {
-	fsRoot              string
-	bashTimeout         int
-	bashHardLimitSec    int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
-	shellOutputEncoding string
-	fileEncoding        string
-	bashCompress        BashCompressConfig
-	compressMu          sync.Mutex
-	bashCompressStats   map[string]*OutputCompressStats
-	visionMu            sync.Mutex
-	readImageVision     map[string]*ReadImageVisionPayload
-	bgJobs              *backgroundJobRegistry
-	syncShells          *syncShellTracker
-	triggerStore        *triggers.Store
-	triggerSched        *triggers.Scheduler
-	agentID             string
+	fsRoot                 string
+	bashTimeout            int
+	bashHardLimitSec       int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
+	shellOutputEncoding    string
+	fileEncoding           string
+	bashCompress           BashCompressConfig
+	compressMu             sync.Mutex
+	bashCompressStats      map[string]*OutputCompressStats
+	visionMu               sync.Mutex
+	readImageVision        map[string]*ReadImageVisionPayload
+	bgJobs                 *backgroundJobRegistry
+	syncShells             *syncShellTracker
+	shellProvider          ShellProvider
+	localTerminalProvider  TerminalProvider
+	linuxProvider          *LinuxShellProvider
+	terminalConfigResolver TerminalConfigResolver
+	processEventSink       ProcessEventSink
+	terminalBroker         TerminalSessionBroker
+	triggerStore           *triggers.Store
+	triggerSched           *triggers.Scheduler
+	agentID                string
 	skillsCatalogHolder
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
@@ -50,6 +55,107 @@ type Registry struct {
 // it to keep jobs in memory only.
 func (r *Registry) WithBackgroundJobStore(st *BackgroundJobStore) error {
 	return r.withBackgroundJobStore(st, "")
+}
+
+// WithShellProvider replaces the execution backend used by shell tools. It
+// is intentionally an internal seam for the current Local provider and
+// future SSH/container/exec-server providers; tool policy remains in the
+// Registry and is not bypassed by changing the provider.
+func (r *Registry) WithShellProvider(provider ShellProvider) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	if provider == nil {
+		return fmt.Errorf("shell provider is nil")
+	}
+	r.shellProvider = provider
+	if terminalProvider, ok := provider.(TerminalProvider); ok {
+		r.localTerminalProvider = terminalProvider
+	}
+	return nil
+}
+
+// WithLinuxShellProvider enables the separately named linux_exec tool. It is
+// kept separate from bash_run so a Linux channel can never be selected by
+// accidentally changing a local bash target.
+func (r *Registry) WithLinuxShellProvider(provider *LinuxShellProvider) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	if provider == nil {
+		return fmt.Errorf("linux shell provider is nil")
+	}
+	r.linuxProvider = provider
+	return nil
+}
+
+// SetTerminalConfigResolver binds the Agent-scoped terminal config view. The
+// resolver is consulted both when listing configs and when opening one, so a
+// model cannot bypass the Agent's binding by guessing a channel ID.
+func (r *Registry) SetTerminalConfigResolver(resolver TerminalConfigResolver) {
+	if r == nil {
+		return
+	}
+	r.terminalConfigResolver = resolver
+}
+
+// OpenTerminal routes local and Linux-channel terminals through the same
+// registry that owns model-facing tools. The registry fills in the owning
+// agent and runtime event sink so a terminal API cannot accidentally bypass
+// per-agent channel binding or execution observability.
+func (r *Registry) OpenTerminal(ctx context.Context, req TerminalRequest) (Terminal, error) {
+	if r == nil {
+		return nil, fmt.Errorf("terminal registry is unavailable")
+	}
+	if strings.TrimSpace(req.Context.AgentID) == "" {
+		req.Context.AgentID = r.agentID
+	}
+	if req.EventSink == nil {
+		req.EventSink = r.processEventSink
+	}
+	switch req.Target.Kind {
+	case "", executionTargetLocal:
+		if r.localTerminalProvider == nil {
+			return nil, fmt.Errorf("local terminal provider is unavailable")
+		}
+		return r.localTerminalProvider.OpenTerminal(ctx, req)
+	case executionTargetLinuxChannel:
+		if r.linuxProvider == nil {
+			return nil, fmt.Errorf("linux terminal provider is unavailable")
+		}
+		return r.linuxProvider.OpenTerminal(ctx, req)
+	default:
+		return nil, fmt.Errorf("unsupported terminal target %q", req.Target.Kind)
+	}
+}
+
+// SetProcessEventSink attaches the runtime execution-event bridge. The sink
+// must be non-blocking because stdout/stderr collection calls it on the
+// process IO path.
+func (r *Registry) SetProcessEventSink(sink ProcessEventSink) {
+	if r == nil {
+		return
+	}
+	r.processEventSink = sink
+}
+
+// SetTerminalSessionBroker binds the API-owned long-lived terminal registry.
+// Keeping the interface in tools avoids importing the HTTP layer into Agent
+// execution while allowing tools and WebSocket clients to share sessions.
+func (r *Registry) SetTerminalSessionBroker(broker TerminalSessionBroker) {
+	if r == nil {
+		return
+	}
+	r.terminalBroker = broker
+}
+
+// SetAgentID attaches the owning Agent identity to execution requests and
+// lifecycle events. It is also used by per-agent channel binding checks.
+func (r *Registry) SetAgentID(agentID string) {
+	if r == nil {
+		return
+	}
+	r.agentID = strings.TrimSpace(agentID)
 }
 
 // WithBackgroundJobStoreForSession restores only jobs belonging to one
@@ -112,17 +218,20 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 	if len(encodings) > 1 {
 		fileEnc = strings.TrimSpace(encodings[1])
 	}
+	localProvider := NewLocalShellProvider()
 	r := &Registry{
-		fsRoot:              root,
-		bashTimeout:         bashTimeoutSeconds,
-		bashHardLimitSec:    maxBashTimeoutSec,
-		shellOutputEncoding: shellEnc,
-		fileEncoding:        fileEnc,
-		bashCompress:        DefaultBashCompressConfig(),
-		bgJobs:              newBackgroundJobRegistry(),
-		syncShells:          newSyncShellTracker(),
-		handlers:            make(map[string]handler),
-		mcpTools:            make(map[string]MCPTool),
+		fsRoot:                root,
+		bashTimeout:           bashTimeoutSeconds,
+		bashHardLimitSec:      maxBashTimeoutSec,
+		shellOutputEncoding:   shellEnc,
+		fileEncoding:          fileEnc,
+		bashCompress:          DefaultBashCompressConfig(),
+		bgJobs:                newBackgroundJobRegistry(),
+		syncShells:            newSyncShellTracker(),
+		shellProvider:         localProvider,
+		localTerminalProvider: localProvider,
+		handlers:              make(map[string]handler),
+		mcpTools:              make(map[string]MCPTool),
 	}
 	r.registerBuiltins()
 	return r, nil
@@ -144,6 +253,12 @@ func (r *Registry) Definitions() []ToolDef {
 		grepFilesToolDef(),
 		searchReplaceToolDef(),
 		bashRunToolDef(),
+		terminalConfigListToolDef(),
+		terminalOpenToolDef(),
+		terminalInputToolDef(),
+		terminalReadToolDef(),
+		terminalTerminateToolDef(),
+		terminalListToolDef(),
 		backgroundJobStatusToolDef(),
 		backgroundJobCancelToolDef(),
 		askUserInformationToolDef(),
@@ -164,6 +279,9 @@ func (r *Registry) Definitions() []ToolDef {
 		base = append(base, defs...)
 	}
 	base = append(base, childAgentToolDefs()...)
+	if r.linuxProvider != nil {
+		base = append(base, linuxExecToolDef()...)
+	}
 	base = append(base, r.mcpToolDefs()...)
 	return r.enrichDefinitions(r.filterToolDefs(base))
 }
@@ -193,6 +311,13 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["search_file"] = r.execSearchFile
 	r.handlers["search_replace"] = r.execSearchReplace
 	r.handlers["bash_run"] = r.execBashRun
+	r.handlers["terminal_config_list"] = r.execTerminalConfigList
+	r.handlers["terminal_open"] = r.execTerminalOpen
+	r.handlers["terminal_input"] = r.execTerminalInput
+	r.handlers["terminal_read"] = r.execTerminalRead
+	r.handlers["terminal_terminate"] = r.execTerminalTerminate
+	r.handlers["terminal_list"] = r.execTerminalList
+	r.handlers["linux_exec"] = r.execLinuxExec
 	r.handlers["background_job_status"] = r.execBackgroundJobStatus
 	r.handlers["background_job_cancel"] = r.execBackgroundJobCancel
 	r.handlers["ask_user_information"] = func(context.Context, json.RawMessage) (string, error) {

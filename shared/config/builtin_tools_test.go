@@ -57,6 +57,19 @@ func TestExpandBuiltinToolGroups(t *testing.T) {
 	}
 }
 
+func TestExpandBuiltinToolGroupsTerminal(t *testing.T) {
+	got := ExpandBuiltinToolGroups([]string{"terminal"})
+	want := []string{"terminal_config_list", "terminal_input", "terminal_list", "terminal_open", "terminal_read", "terminal_terminate"}
+	if len(got) != len(want) {
+		t.Fatalf("got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestExpandBuiltinToolGroupsBrowser(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{"browser"})
 	want := []string{"browser_run_task", "browser_task_cancel", "browser_task_status"}
@@ -128,6 +141,12 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 	}
 	if _, ok := BuiltinToolGroupMembers("nope"); ok {
 		t.Fatal("expected false for unknown group")
+	}
+	if members, ok := BuiltinToolGroupMembers("bash"); !ok || len(members) != 3 {
+		t.Fatalf("bash members = %v ok=%v want bash_run + 2 background tools", members, ok)
+	}
+	if members, ok := BuiltinToolGroupMembers("terminal"); !ok || len(members) != 6 {
+		t.Fatalf("terminal members = %v ok=%v want 6 terminal tools", members, ok)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
-// CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 TUI 提示精简。
+// CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 UI 提示精简。
 const CatalogBloatTokenThreshold = 4000
 
 // LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 tools.loadSkillsMetadataPrefix 一致）。
@@ -198,7 +198,7 @@ func EstimateCatalogStats(defs []Definition) CatalogTokenStats {
 	return stats
 }
 
-// BloatDisplayTokens 返回用于 TUI 告警展示的 token 数（元数据与最大正文中的较大值）。
+// BloatDisplayTokens 返回用于 UI 告警展示的 token 数（元数据与最大正文中的较大值）。
 func (s CatalogTokenStats) BloatDisplayTokens() int {
 	if s.MaxBodyTokens > s.MetadataTokens {
 		return s.MaxBodyTokens

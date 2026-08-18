@@ -86,7 +86,7 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 - `tool_call`：转录工具行；**不**替代 HITL 块。  
 - 子 Agent 内部 `done`：**不**转发到父 SSE（`relay_hub.go`）。
 
-**Client 展开**：Go `client/internal/hitl/hitl_batch.go`；Python `app/cli/hitl_batch.py`；Web `node/webui/frontend/src/stores/hitl.js` → `expandHitlRequired`。
+**Web UI 展开**：`node/webui/frontend/src/stores/hitl.js` → `expandHitlRequired`。当前 Go Client 仅提供 probe/update/version 等运维命令，不负责对话展示。
 
 ---
 
@@ -117,5 +117,5 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 | `stream/hub.go` | 序号与订阅 |
 | `childagent/relay_hub.go` | 子 Agent 过滤 |
 
-Python Client：`app/cli/session_controller.py` — `wait_user_turn` 等。  
-Go Client：`client/internal/tui/full/stream_events.go`。
+Web UI：`node/webui/frontend/src/` — 负责 SSE 订阅、消息流与 HITL 展示。
+Go Client：`client/cmd/dagents-client` — 仅提供 probe/update/version 等运维命令。

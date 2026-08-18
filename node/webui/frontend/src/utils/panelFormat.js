@@ -46,7 +46,7 @@ function formatClock(hour, minute) {
   return `${pad(hour)}:${pad(minute)}`;
 }
 
-/** 对齐 TUI formatTriggerCondition（产品 UI 中文摘要）。 */
+/** 生成 Trigger 条件的产品 UI 中文摘要。 */
 export function formatTriggerCondition(condition) {
   if (!condition || typeof condition !== "object") return "手动";
   const interval = intFromAny(condition.interval_seconds);

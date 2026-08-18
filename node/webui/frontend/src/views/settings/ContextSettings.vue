@@ -5,8 +5,12 @@ import ContextPanel from "../../components/ContextPanel.vue";
 
 <template>
   <div class="settings-page settings-embedded">
-    <h1 class="settings-page__title">上下文</h1>
-    <p class="settings-page__hint">上方为进程级压缩与钩子；下方为当前智能体消息的只读视图。</p>
+    <header class="settings-page__header">
+      <div class="settings-page__header-main">
+        <h1 class="settings-page__title">上下文</h1>
+        <p class="settings-page__hint">上方为进程级压缩与钩子；下方为当前智能体消息的只读视图。</p>
+      </div>
+    </header>
     <ContextConfigPanel />
 
     <section class="settings-section settings-section--standalone settings-section--debug">

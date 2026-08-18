@@ -5,6 +5,7 @@ import * as api from "../../api/node.js";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
+import LinuxAgentPanel from "../../components/LinuxAgentPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -152,15 +153,19 @@ onUnmounted(() => stopConfigurationEvents());
 
 <template>
   <div class="settings-page settings-embedded">
-    <div class="agent-detail__head">
-      <button type="button" class="btn btn--ghost btn--sm" @click="backToList">← 返回列表</button>
-      <h1 class="settings-page__title">
-        {{ agentMeta?.display_name || "智能体配置" }}
-      </h1>
-      <p v-if="agentMeta" class="agent-detail__id" :title="agentMeta.agent_id">
-        {{ agentMeta.agent_id }}
-      </p>
-    </div>
+    <header class="settings-page__header">
+      <div class="settings-page__header-main">
+        <h1 class="settings-page__title">
+          {{ agentMeta?.display_name || "智能体配置" }}
+        </h1>
+        <p v-if="agentMeta" class="agent-detail__id" :title="agentMeta.agent_id">
+          {{ agentMeta.agent_id }}
+        </p>
+      </div>
+      <div class="settings-page__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" @click="backToList">← 返回列表</button>
+      </div>
+    </header>
 
     <p v-if="loading" class="agent-detail__status">加载中…</p>
     <template v-else>
@@ -186,6 +191,7 @@ onUnmounted(() => stopConfigurationEvents());
         </button>
       </div>
       <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
+      <LinuxAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
       <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
       <p v-if="error" class="agent-detail__error">{{ error }}</p>
       <p class="agent-detail__hint">保存后立即生效。工具审批可在下方单独调整。</p>
@@ -201,14 +207,6 @@ onUnmounted(() => stopConfigurationEvents());
 </template>
 
 <style scoped>
-.agent-detail__head {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-
 .agent-detail__id {
   margin: 0;
   font-size: 12px;

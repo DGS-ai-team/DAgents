@@ -116,7 +116,13 @@ def build_workgroup_ws_router(
                         if not wid:
                             raise WorkgroupError("schema_mismatch", "workgroup_id required")
                         hub.resume_offer(node_id, workgroup_id=wid, last_ack_delivery_seq=last_ack)
-                    elif mtype in {"tool.ack", "delivery.ack", "tool.result", "member.provision_result"}:
+                    elif mtype in {
+                        "tool.ack",
+                        "delivery.ack",
+                        "tool.result",
+                        "member.provision_result",
+                        "workgroup.tombstone_ack",
+                    }:
                         seq = int(
                             payload.get("delivery_seq")
                             or msg.get("delivery_seq")
