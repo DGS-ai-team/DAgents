@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { formatToolCallLine, formatToolResultDisplay, formatToolElapsed } from "../utils/format.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
@@ -22,6 +22,8 @@ const props = defineProps({
 });
 
 const outputExpanded = ref(false);
+const copyState = ref("");
+let copyTimer = null;
 
 const isCall = computed(() => props.entry.kind === "tool_call");
 const isResult = computed(() => props.entry.kind === "tool_result");
@@ -127,6 +129,56 @@ const statusText = computed(() => {
 function toggleOutput() {
   outputExpanded.value = !outputExpanded.value;
 }
+
+function clearCopyState() {
+  if (copyTimer) {
+    clearTimeout(copyTimer);
+    copyTimer = null;
+  }
+}
+
+async function copyOutput() {
+  const value = outputText.value;
+  if (!value) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    copyState.value = "已复制";
+  } catch {
+    copyState.value = "复制失败";
+  }
+  clearCopyState();
+  copyTimer = setTimeout(() => {
+    copyState.value = "";
+    copyTimer = null;
+  }, 1600);
+}
+
+function downloadOutput() {
+  const value = outputText.value;
+  if (!value) return;
+  const blob = new Blob([value], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${isShellOutput.value ? "terminal-output" : "tool-output"}-${Date.now()}.txt`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+onBeforeUnmount(clearCopyState);
 </script>
 
 <template>
@@ -172,6 +224,15 @@ function toggleOutput() {
         <ImageResultPreview v-else-if="showImagePreview" :entry="entry" />
 
         <div v-else-if="outputText && !verbose" class="tool-output">
+          <div class="tool-output__head">
+            <span class="tool-output__label">{{ isShellOutput ? "shell" : "输出" }}</span>
+            <div class="tool-output__actions">
+              <button type="button" class="tool-output__action" @click="copyOutput">
+                {{ copyState || "复制" }}
+              </button>
+              <button type="button" class="tool-output__action" @click="downloadOutput">下载</button>
+            </div>
+          </div>
           <pre
             class="tool-exec-bubble__code tool-exec-bubble__result-detail"
             :class="{ 'tool-output__pre--shell': isShellOutput }"
@@ -189,6 +250,15 @@ function toggleOutput() {
         <details v-if="verbose" class="tool-exec-bubble__details" open>
           <summary>原始输出</summary>
           <div class="tool-exec-bubble__details-body">
+            <div v-if="outputText" class="tool-output__head">
+              <span class="tool-output__label">原始输出</span>
+              <div class="tool-output__actions">
+                <button type="button" class="tool-output__action" @click="copyOutput">
+                  {{ copyState || "复制" }}
+                </button>
+                <button type="button" class="tool-output__action" @click="downloadOutput">下载</button>
+              </div>
+            </div>
             <pre class="tool-card__args tool-card__args--compact">{{
               entry.data?.content || entry.data?.raw_arguments || entry.data?.output || JSON.stringify(entry.data, null, 2)
             }}</pre>

@@ -73,7 +73,7 @@ const title = computed(() => {
         transform="rotate(-90 9 9)"
       />
     </svg>
-    <span class="context-meter__label">{{ usedPercent }}%</span>
+    <span class="context-meter__label">上下文 {{ usedPercent }}%</span>
   </div>
 </template>
 

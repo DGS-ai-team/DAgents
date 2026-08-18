@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { computed, ref, shallowRef, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
 import MessageBubble from "./MessageBubble.vue";
@@ -9,7 +9,9 @@ import UserInfoBubble from "./UserInfoBubble.vue";
 import MemoryConflictBubble from "./MemoryConflictBubble.vue";
 import ScrollToTailButton from "./ScrollToTailButton.vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
+import ToolGroupRow from "./ToolGroupRow.vue";
 import { buildStream } from "../composables/useStream.js";
+import { groupConsecutiveToolSteps } from "../utils/streamDisplay.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
@@ -43,6 +45,7 @@ const props = defineProps({
   thinkingSupported: { type: Boolean, default: false },
   llmSettings: { type: Object, default: null },
   agentTitle: { type: String, default: "" },
+  error: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -89,38 +92,81 @@ let streamResizeObserver = null;
 const MAX_RENDERED_STREAM_ITEMS = 180;
 const streamWindowStart = ref(0);
 let previousStreamItemCount = 0;
+let streamBuildHandle = null;
 
-const stream = computed(() => {
-  // 依赖 tool-jobs，以便排队/执行中相位随 /tool-jobs 刷新
-  void toolJobsStore.runningCallIds;
-  void toolJobsStore.backgroundCallIds;
+const stream = shallowRef([]);
+
+/**
+ * 流式 token、工具轮询和 SSE 状态可能在同一帧内连续变化。
+ * 将展示层重建合并到下一帧，避免每个 token 都重复构建消息列表和测量布局。
+ */
+const streamInputKey = computed(() => {
+  const parts = [props.entries.length, props.hitlQueue.length];
+  for (const entry of props.entries) {
+    parts.push(
+      entry.id,
+      entry.kind,
+      (entry.text || "").length,
+      entry.streaming ? 1 : 0,
+      entry.partial ? 1 : 0,
+      String(entry.summary || "").length,
+      String(entry.data?.content || "").length,
+      String(entry.data?.arguments || "").length,
+    );
+  }
+  for (const hitl of props.hitlQueue) {
+    parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
+  }
+  parts.push(
+    toolJobsStore.runningCallIds.join(","),
+    toolJobsStore.backgroundCallIds.join(","),
+  );
+  return parts.join("\0");
+});
+
+function rebuildStream() {
+  streamBuildHandle = null;
   const items = measureSync(
     "stream.build",
     () => buildStream(props.entries, props.hitlQueue, toolJobsStore),
     { entries: props.entries.length },
   );
   updateRuntimeMetrics({ entries: props.entries.length, streamItems: items.length });
-  return items;
-});
+  stream.value = items;
+}
+
+function scheduleStreamBuild() {
+  if (streamBuildHandle !== null) return;
+  const run = () => rebuildStream();
+  if (typeof requestAnimationFrame === "function") {
+    streamBuildHandle = requestAnimationFrame(run);
+  } else {
+    streamBuildHandle = setTimeout(run, 0);
+  }
+}
+
+const displayStream = computed(() => groupConsecutiveToolSteps(stream.value));
+
+watch(streamInputKey, scheduleStreamBuild, { immediate: true });
 
 const renderedStream = computed(() => {
-  let visible = stream.value;
-  if (stream.value.length > MAX_RENDERED_STREAM_ITEMS) {
+  let visible = displayStream.value;
+  if (displayStream.value.length > MAX_RENDERED_STREAM_ITEMS) {
     const start = Math.min(
       Math.max(0, streamWindowStart.value),
-      Math.max(0, stream.value.length - MAX_RENDERED_STREAM_ITEMS),
+      Math.max(0, displayStream.value.length - MAX_RENDERED_STREAM_ITEMS),
     );
-    visible = stream.value.slice(start, start + MAX_RENDERED_STREAM_ITEMS);
+    visible = displayStream.value.slice(start, start + MAX_RENDERED_STREAM_ITEMS);
   }
   updateRuntimeMetrics({
     entries: props.entries.length,
-    streamItems: stream.value.length,
+    streamItems: displayStream.value.length,
     visibleItems: visible.length,
   });
   return visible;
 });
 const hasEarlierStreamItems = computed(
-  () => stream.value.length > MAX_RENDERED_STREAM_ITEMS && streamWindowStart.value > 0,
+  () => displayStream.value.length > MAX_RENDERED_STREAM_ITEMS && streamWindowStart.value > 0,
 );
 const earlierStreamItemCount = computed(() => Math.max(0, streamWindowStart.value));
 
@@ -143,6 +189,14 @@ function streamItemMemo(item) {
     props.hitlBusy ? 1 : 0,
     props.hitlBusyIndex,
     JSON.stringify(userInfoSelected.value),
+  ].join("|");
+}
+
+function streamGroupMemo(item) {
+  return [
+    item?.key,
+    item?.steps?.length || 0,
+    ...(item?.steps || []).map((step) => streamItemMemo(step)),
   ].join("|");
 }
 
@@ -180,6 +234,7 @@ const backgroundJobCount = computed(() => toolJobsStore.background);
 
 const inputStripLeftText = computed(() => {
   if (props.cancelling) return "正在取消…";
+  if (props.sending) return "本轮执行中，可先编辑下一条消息";
   if (props.hitlQueue.length > 1 && pendingApprovals.value === 0) {
     return `HITL 队列 ${props.hitlQueue.length}`;
   }
@@ -187,6 +242,17 @@ const inputStripLeftText = computed(() => {
 });
 
 const inputStripRightText = computed(() => inputStripRight());
+const connectionState = computed(() => {
+  const state = String(chromeStore.sseStatus || "idle").toLowerCase();
+  if (state === "connected") return { tone: "connected", label: "已连接", title: "实时消息连接正常" };
+  if (state === "connecting") return { tone: "connecting", label: "连接中", title: "正在建立实时消息连接" };
+  if (state === "reconnecting") return { tone: "reconnecting", label: "重连中", title: "实时消息连接中断，正在重连" };
+  if (state === "disconnected") return { tone: "disconnected", label: "已断开", title: "实时消息连接已断开" };
+  return { tone: "idle", label: "未连接", title: "实时消息连接尚未建立" };
+});
+const composerPlaceholder = computed(() =>
+  props.sending ? "本轮执行中，可先编辑下一条消息…" : "输入消息，或向助手提问…",
+);
 
 const activitySnap = computed(() => deriveActivityFromTranscript(transcriptStore.entries));
 const activityFileCount = computed(() => activitySnap.value.file_count || 0);
@@ -275,7 +341,8 @@ async function onAttachmentSelected(event) {
   if (names.length) applyPathInsertion(names);
 }
 
-const attachDisabled = computed(() => props.disabled || props.sending || props.cancelling);
+// 生成中允许继续编辑草稿；只有真正不能输入（HITL、无 Agent、取消中）时才锁定。
+const attachDisabled = computed(() => props.disabled || props.cancelling);
 const imageAttachDisabled = computed(
   () => attachDisabled.value || pendingImages.value.length >= 8,
 );
@@ -336,7 +403,7 @@ function updateScrollToTailVisibility() {
 }
 
 function scrollToTail() {
-  streamWindowStart.value = Math.max(0, stream.value.length - MAX_RENDERED_STREAM_ITEMS);
+  streamWindowStart.value = Math.max(0, displayStream.value.length - MAX_RENDERED_STREAM_ITEMS);
   nextTick(() => {
     scrollTail.forcePin(streamRef.value);
     updateScrollToTailVisibility();
@@ -373,13 +440,18 @@ onMounted(() => {
 onBeforeUnmount(() => {
   streamResizeObserver?.disconnect();
   streamResizeObserver = null;
+  if (streamBuildHandle !== null) {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(streamBuildHandle);
+    else clearTimeout(streamBuildHandle);
+    streamBuildHandle = null;
+  }
 });
 
 watch(streamRef, (el) => {
   if (el) bindStreamResizeObserver();
 });
 
-watch(stream, (items) => {
+watch(displayStream, (items) => {
   if (scrollTail.follow && items.length > previousStreamItemCount) {
     streamWindowStart.value = Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS);
   } else {
@@ -390,18 +462,6 @@ watch(stream, (items) => {
   }
   previousStreamItemCount = items.length;
 }, { immediate: true });
-
-watch(stream, (items) => {
-  if (scrollTail.follow && items.length > previousStreamItemCount) {
-    streamWindowStart.value = Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS);
-  } else {
-    streamWindowStart.value = Math.min(
-      streamWindowStart.value,
-      Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS),
-    );
-  }
-  previousStreamItemCount = items.length;
-});
 
 async function submit() {
   const text = input.value.trim();
@@ -421,6 +481,9 @@ function onCancel() {
 
 function onKeydown(e) {
   if (e.key === "Enter" && !e.shiftKey) {
+    // 本轮执行中允许用户继续编辑下一条草稿，Enter 在此时插入换行，避免
+    // 看起来像发送成功但实际上被 turn gate 静默拦截。
+    if (props.sending) return;
     e.preventDefault();
     submit();
   }
@@ -518,12 +581,29 @@ defineExpose({
         <span class="chat__title-main">{{ agentTitle || "助手" }}</span>
       </div>
       <div class="chat__header-meta">
+        <span
+          class="chat__connection"
+          :class="`chat__connection--${connectionState.tone}`"
+          :title="connectionState.title"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="chat__connection-dot" aria-hidden="true" />
+          <span>{{ connectionState.label }}</span>
+        </span>
         <span v-if="pendingApprovals > 0" class="pill pill--warn">{{ pendingApprovals }} 待审批</span>
       </div>
     </header>
 
     <div class="chat__stream-wrap">
-      <div ref="streamRef" class="chat__stream" @scroll="onStreamScroll">
+      <div
+        ref="streamRef"
+        class="chat__stream"
+        role="log"
+        aria-label="消息记录"
+        :aria-busy="sending || cancelling"
+        @scroll="onStreamScroll"
+      >
       <div v-if="!stream.length" class="chat__empty">
         <div class="chat__empty-inner">
           <div class="chat__empty-title">开始对话</div>
@@ -550,6 +630,12 @@ defineExpose({
           :call-entry="item.callEntry"
           :result-entry="item.resultEntry"
           :execution-hint="item.executionHint"
+          :verbose="toolVerbose"
+        />
+        <ToolGroupRow
+          v-memo="[streamGroupMemo(item), toolVerbose]"
+          v-else-if="item.kind === 'tool_group'"
+          :steps="item.steps"
           :verbose="toolVerbose"
         />
         <ApprovalBubble
@@ -590,6 +676,10 @@ defineExpose({
     </div>
 
     <footer class="chat__composer">
+      <div v-if="error" class="chat__composer-alert" role="alert" aria-live="polite">
+        <span class="chat__composer-alert-icon" aria-hidden="true">!</span>
+        <span>{{ error }}</span>
+      </div>
       <div class="chat__composer-pill">
         <input
           v-if="multimodalEnabled"
@@ -650,8 +740,9 @@ defineExpose({
             v-model="input"
             class="chat__textarea"
             rows="1"
-            placeholder="输入消息，或向助手提问…"
-            :disabled="disabled || sending || cancelling"
+            :placeholder="composerPlaceholder"
+            aria-label="输入消息"
+            :disabled="disabled || cancelling"
             @keydown="onKeydown"
             @paste="onComposerPaste"
             @drop="onComposerDrop"
@@ -670,12 +761,15 @@ defineExpose({
             v-if="showCancel"
             type="button"
             class="chat__composer-send chat__composer-send--cancel"
-            title="取消"
-            aria-label="取消"
+            :class="{ 'chat__composer-send--cancelling': cancelling }"
+            :title="cancelling ? '正在停止本轮…' : '停止本轮'"
+            :aria-label="cancelling ? '正在停止本轮' : '停止本轮'"
+            :aria-busy="cancelling"
             :disabled="cancelling"
             @click="onCancel"
           >
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <span v-if="cancelling" class="chat__composer-stop-spinner" aria-hidden="true" />
+            <svg v-else viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
             </svg>
           </button>
@@ -695,7 +789,7 @@ defineExpose({
         </div>
       </div>
 
-      <div class="chat__composer-statusline">
+      <div class="chat__composer-statusline" aria-live="polite">
         <div class="chat__composer-statusline-left">
           <button
             v-if="showActivityPill"
