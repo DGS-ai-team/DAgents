@@ -245,10 +245,10 @@ describe("agentTemplateForm", () => {
 
   it("filters tool groups from setup available_tool_groups", () => {
     const groups = toolGroupsFromSetup({
-      available_tool_groups: ["fs", "bash", "browser"],
+      available_tool_groups: ["fs", "bash", "terminal", "browser"],
       features: { browser_enabled: false, wecom_enabled: true },
     });
-    expect(groups.map((g) => g.name)).toEqual(["bash", "browser", "fs"]);
+    expect(groups.map((g) => g.name)).toEqual(["bash", "browser", "fs", "terminal"]);
   });
 
   it("falls back to features when available_tool_groups missing", () => {

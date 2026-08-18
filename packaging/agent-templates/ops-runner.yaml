@@ -17,7 +17,7 @@ defaults:
         multimodal_enabled: false
     max_tool_loops: 24
   tools:
-    enabled_groups: [fs, bash]
+    enabled_groups: [fs, bash, terminal]
   skills:
     enabled: true
   child_agents:

@@ -21,6 +21,7 @@ export const TOOL_GROUPS = [
   { name: "hitl", label: "用户询问" },
   { name: "memory", label: "记忆" },
   { name: "skills", label: "技能" },
+  { name: "terminal", label: "终端" },
   { name: "triggers", label: "定时任务" },
   { name: "wecom", label: "企业微信" },
 ];

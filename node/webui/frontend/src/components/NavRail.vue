@@ -51,6 +51,10 @@ const agents = ref([]);
 const workgroups = ref([]);
 const loadingAgents = ref(false);
 const loadingWgs = ref(false);
+const agentsLoaded = ref(false);
+const workgroupsLoaded = ref(false);
+const agentsLoadError = ref("");
+const workgroupsLoadError = ref("");
 const terminals = ref([]);
 const loadingTerminals = ref(false);
 const terminalError = ref("");
@@ -208,6 +212,8 @@ async function refreshAgents({ force = false } = {}) {
     const now = Date.now();
     if (!force && railCache.agentsFetchedAt && now - railCache.agentsFetchedAt < RAIL_CACHE_TTL_MS) {
       agents.value = [...railCache.agents];
+      agentsLoaded.value = true;
+      agentsLoadError.value = "";
       return;
     }
     if (!railCache.agentsInFlight) {
@@ -223,8 +229,11 @@ async function refreshAgents({ force = false } = {}) {
     }
     await railCache.agentsInFlight;
     agents.value = [...railCache.agents];
+    agentsLoaded.value = true;
+    agentsLoadError.value = "";
   } catch {
     // Keep the last successful list during transient refresh failures.
+    if (!agentsLoaded.value) agentsLoadError.value = "智能体列表暂时不可用，正在重试…";
   } finally {
     loadingAgents.value = false;
     emit("agents-updated", agents.value.slice());
@@ -241,6 +250,8 @@ async function refreshWorkgroups({ force = false } = {}) {
       now - railCache.workgroupsFetchedAt < RAIL_CACHE_TTL_MS
     ) {
       workgroups.value = [...railCache.workgroups];
+      workgroupsLoaded.value = true;
+      workgroupsLoadError.value = "";
       return;
     }
     if (!railCache.workgroupsInFlight) {
@@ -256,8 +267,11 @@ async function refreshWorkgroups({ force = false } = {}) {
     }
     await railCache.workgroupsInFlight;
     workgroups.value = [...railCache.workgroups];
+    workgroupsLoaded.value = true;
+    workgroupsLoadError.value = "";
   } catch {
     // Keep the last successful list during transient refresh failures.
+    if (!workgroupsLoaded.value) workgroupsLoadError.value = "工作组列表暂时不可用，正在重试…";
   } finally {
     loadingWgs.value = false;
   }
@@ -667,7 +681,8 @@ defineExpose({
             </button>
           </div>
         </li>
-        <li v-if="!sortedAgents.length && loadingAgents" class="nav-rail__hint">加载中…</li>
+        <li v-if="!sortedAgents.length && !agentsLoaded && loadingAgents && !agentsLoadError" class="nav-rail__hint">加载中…</li>
+        <li v-else-if="!sortedAgents.length && agentsLoadError" class="nav-rail__hint">{{ agentsLoadError }}</li>
         <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
       </ul>
       </div>
@@ -976,7 +991,8 @@ defineExpose({
             </template>
           </ul>
         </li>
-        <li v-if="!workgroups.length && loadingWgs" class="nav-rail__hint">加载中…</li>
+        <li v-if="!workgroups.length && !workgroupsLoaded && loadingWgs && !workgroupsLoadError" class="nav-rail__hint">加载中…</li>
+        <li v-else-if="!workgroups.length && workgroupsLoadError" class="nav-rail__hint">{{ workgroupsLoadError }}</li>
         <li v-else-if="!workgroups.length" class="nav-rail__empty">暂无工作组</li>
       </ul>
       </div>

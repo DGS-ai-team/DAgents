@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,41 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	}
 	if terminatedPayload["output"] != "stopped\r\n" || terminatedPayload["graceful"] != true {
 		t.Fatalf("terminated=%s", terminated)
+	}
+}
+
+func TestTerminalReadWaitsBeforeSnapshot(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetAgentID("agent-terminal-wait-test")
+	reg.SetTerminalSessionBroker(&fakeTerminalBroker{read: TerminalOutput{
+		Chunks:  []TerminalOutputChunk{{Seq: 1, Data: []byte("done\r\n")}},
+		NextSeq: 1,
+	}})
+
+	started := time.Now()
+	if _, err := reg.Execute(context.Background(), "terminal_read", `{"terminal_id":"terminal-test-1","wait_seconds":1}`); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 900*time.Millisecond {
+		t.Fatalf("terminal_read returned before requested delay: %s", elapsed)
+	}
+}
+
+func TestTerminalReadWaitCanBeCancelled(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetAgentID("agent-terminal-cancel-test")
+	reg.SetTerminalSessionBroker(&fakeTerminalBroker{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(25*time.Millisecond, cancel)
+	_, err = reg.Execute(ctx, "terminal_read", `{"terminal_id":"terminal-test-1","wait_seconds":60}`)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("terminal_read error=%v, want context.Canceled", err)
 	}
 }

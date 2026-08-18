@@ -12,6 +12,11 @@ defineProps({
       <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
       <path d="M7 9.5 9.5 12 7 14.5M12 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
     </template>
+    <!-- 终端会话 -->
+    <template v-else-if="name === 'terminal'">
+      <rect x="4" y="5" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5" />
+      <path d="M8 19h8M12 17v2M8 9.5l2.5 2.5L8 14.5M13 14.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </template>
     <!-- 浏览器 -->
     <template v-else-if="name === 'browser'">
       <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
