@@ -58,6 +58,10 @@ import {
 } from "../stores/hitl.js";
 import { consumeStartupURL, hydrateAgent, invalidateHydration } from "../stores/hydrate.js";
 import {
+  recordSSEEvent,
+  startPerformanceSpan,
+} from "../stores/performanceDiagnostics.js";
+import {
   startDesktopFocusHeartbeat,
   stopDesktopFocusHeartbeat,
   pulseDesktopFocus,
@@ -306,14 +310,17 @@ function handleEvent(ev) {
   if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
 
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
-  turnWatchdog.noteActivity();
-  if (["terminal.opened", "terminal.updated", "terminal.closed"].includes(ev.type)) {
-    terminalRevision.value += 1;
-  }
-  const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
+  recordSSEEvent(ev.type, ev.seq);
+  const eventSpan = startPerformanceSpan("sse.handle", { type: ev.type });
+  try {
+    turnWatchdog.noteActivity();
+    if (["terminal.opened", "terminal.updated", "terminal.closed"].includes(ev.type)) {
+      terminalRevision.value += 1;
+    }
+    const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
-  if (!skipRender) {
-    switch (ev.type) {
+    if (!skipRender) {
+      switch (ev.type) {
     case "assistant":
       markTurnContent();
       finishWaitingStatuses();
@@ -406,12 +413,15 @@ function handleEvent(ev) {
     case "side_effects_cleared":
       markSideEffectsStale(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
       break;
-    default:
-      break;
+        default:
+          break;
+      }
     }
-  }
 
-  markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+    markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+  } finally {
+    eventSpan.end();
+  }
 }
 
 function handleCompressionEvent(type, data) {
