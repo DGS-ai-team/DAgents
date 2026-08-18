@@ -21,11 +21,14 @@ const FS_TOOLS = new Set([
 
 const SHELL_TOOLS = new Set(["bash_run", "bash", "background_job_status", "background_job_cancel"]);
 
+const LINUX_TOOLS = new Set(["linux_exec", "linux_file_upload", "linux_file_download"]);
+
 const SKILLS_TOOLS = new Set(["load_skills", "unload_skills", "clear_skills"]);
 
 const KIND_META = {
   mcp: { label: "mcp", short: "mcp", icon: "M" },
   terminal: { label: "terminal", short: "terminal", icon: ">_" },
+  linux: { label: "linux", short: "linux", icon: "L" },
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
   browser: { label: "browser", short: "browser", icon: "◉" },
@@ -48,6 +51,7 @@ export function inferToolKind(name, data = {}) {
   if (n.startsWith("trigger_")) return "triggers";
   if (n.startsWith("terminal_")) return "terminal";
   if (SKILLS_TOOLS.has(n)) return "skills";
+  if (LINUX_TOOLS.has(n) || n.startsWith("linux_")) return "linux";
   if (SHELL_TOOLS.has(n) || n.startsWith("background_job_")) return "shell";
   if (FS_TOOLS.has(n)) return "fs";
   if (n === USER_INFORMATION_TOOL) return "hitl";

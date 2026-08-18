@@ -58,6 +58,7 @@ type Server struct {
 	llmConfigs      *store.LLMConfigStore
 	nodeSettings    *store.NodeSettingsStore
 	stream          *stream.Hub // 进程内 SSE 事件总线
+	transferStream  *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）
 	workgroupStream *stream.Hub // Manage 工作组 Timeline + 实时协作事件
 	store           *store.SQLiteStore
 	triggerStore    *triggers.Store
@@ -67,6 +68,7 @@ type Server struct {
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
 	tools           *tools.Registry
+	transfers       *tools.LinuxTransferManager
 	backgroundJobs  *tools.BackgroundJobStore
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
@@ -281,6 +283,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 
 	hub := stream.NewHub(256, logger)
+	transferHub := stream.NewHub(256, logger)
+	var transferManager *tools.LinuxTransferManager
+	if linuxProvider != nil {
+		transferManager = tools.NewLinuxTransferManager(linuxProvider, cfg.FSRoot, tools.DefaultLinuxTransferConcurrency,
+			func(agentID, eventType string, data map[string]any, replayable bool) {
+				if replayable {
+					transferHub.Publish(agentID, eventType, data)
+				} else {
+					transferHub.PublishEphemeral(agentID, eventType, data)
+				}
+			})
+	}
 	workgroupStream := stream.NewHub(1024, logger)
 	hostsnapshot.CaptureAtStartup()
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
@@ -449,6 +463,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger:          logger,
 		mux:             http.NewServeMux(),
 		stream:          hub,
+		transferStream:  transferHub,
 		workgroupStream: workgroupStream,
 		store:           st,
 		agents:          agentsStore,
@@ -466,6 +481,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		packageUploader: packageUploader,
 		control:         control,
 		tools:           o.tools,
+		transfers:       transferManager,
 		backgroundJobs:  backgroundJobs,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
@@ -532,6 +548,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerWorkgroupRoutes()
 	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
+	s.registerLinuxTransferRoutes()
 	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
@@ -600,6 +617,11 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	if s.linuxProvider != nil {
 		if err := reg.WithLinuxShellProvider(s.linuxProvider); err != nil && s.logger != nil {
 			s.logger.Warn("agent linux provider bind failed", "agent_id", targetAgentID, "error", err)
+		}
+	}
+	if s.transfers != nil {
+		if err := reg.WithLinuxTransferManager(s.transfers); err != nil && s.logger != nil {
+			s.logger.Warn("agent linux transfer manager bind failed", "agent_id", targetAgentID, "error", err)
 		}
 	}
 	if s.linuxChannels != nil {

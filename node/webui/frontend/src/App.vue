@@ -4,6 +4,7 @@ import { RouterView } from "vue-router";
 import ImageLightbox from "./components/ImageLightbox.vue";
 import FirstRunNodeProfile from "./views/FirstRunNodeProfile.vue";
 import * as api from "./api/node.js";
+import TransferStatusBar from "./components/TransferStatusBar.vue";
 
 defineOptions({ name: "AppRoot" });
 
@@ -98,6 +99,7 @@ onUnmounted(() => {
           <component :is="Component" />
         </KeepAlive>
       </RouterView>
+      <TransferStatusBar />
       <ImageLightbox />
     </div>
   </Transition>
