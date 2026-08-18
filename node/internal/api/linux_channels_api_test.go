@@ -46,6 +46,29 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 		credentialBody = body
 	}
 	credentialID := credentialBody["credential_id"].(string)
+	directPassword := "p@ss word: 你好"
+	directStatus, directBody := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
+		"auth_type": "password", "secret_value": directPassword,
+	})
+	if directStatus != http.StatusCreated || directBody["secret_source"] != "direct" || directBody["secret_value"] != nil || directBody["secret_ref"] != nil {
+		t.Fatalf("direct password status=%d body=%v", directStatus, directBody)
+	}
+	directID := bodyCredentialID(directBody)
+	directCredential, err := linuxStore.GetCredential(t.Context(), directID)
+	if err != nil || directCredential == nil {
+		t.Fatalf("direct credential=%+v err=%v", directCredential, err)
+	}
+	if strings.Contains(directCredential.SecretRef, directPassword) {
+		t.Fatal("direct password should not be stored as plain text reference")
+	}
+	if got, err := resolveLinuxSecret(t.Context(), directCredential.SecretRef); err != nil || got != directPassword {
+		t.Fatalf("resolved direct password=%q err=%v", got, err)
+	}
+	if status, body := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
+		"auth_type": "private_key", "secret_value": "not-a-key",
+	}); status != http.StatusBadRequest || body["error"] == nil {
+		t.Fatalf("private key direct input status=%d body=%v", status, body)
+	}
 	channelBody := map[string]any{}
 	if status, body := postJSON(http.MethodPost, "/v1/linux/channels", map[string]any{
 		"channel_id": "client-supplied-channel", "host": "127.0.0.1", "username": "root", "credential_id": credentialID,
@@ -69,4 +92,9 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 	if err != nil || len(bindings) != 1 || bindings[0].ChannelID != channelID {
 		t.Fatalf("binding replacement was not atomic: %+v err=%v", bindings, err)
 	}
+}
+
+func bodyCredentialID(body map[string]any) string {
+	id, _ := body["credential_id"].(string)
+	return id
 }

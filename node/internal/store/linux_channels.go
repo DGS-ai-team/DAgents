@@ -38,8 +38,9 @@ type LinuxChannelRecord struct {
 	UpdatedAt        time.Time
 }
 
-// LinuxCredentialRecord stores an opaque secret reference, never a password
-// or private-key body. Secret resolution is intentionally outside this store.
+// LinuxCredentialRecord stores an opaque secret reference. Direct password
+// input is stored in an internal encoded literal form; secret resolution is
+// intentionally outside this store and secrets are never returned in views.
 type LinuxCredentialRecord struct {
 	CredentialID string
 	DisplayName  string
