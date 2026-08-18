@@ -12,18 +12,19 @@ const error = ref("");
 const status = ref("");
 const showCredentialForm = ref(false);
 const showChannelForm = ref(false);
+const editingChannelId = ref("");
 
 const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
 const channel = reactive({ display_name: "", host: "", port: 22, username: "", credential_id: "", remote_shell: "bash", default_cwd: "" });
 
 const credentialAuthMeta = {
-  private_key: { label: "SSH 私钥", description: "通过环境变量引用私钥内容，Node 不会把私钥放进工具参数。" },
+  private_key: { label: "SSH 私钥", description: "可直接输入私钥或引用环境变量，Node 不会把私钥放进工具参数。" },
   password: { label: "密码", description: "可直接输入密码，也可以通过环境变量引用。" },
 };
 
 const credentialAuthDescription = computed(() => credentialAuthMeta[credential.auth_type]?.description || "请选择认证方式。");
 const credentialReady = computed(() => {
-  if (credential.auth_type === "password" && credential.secret_mode === "direct") {
+  if (credential.secret_mode === "direct") {
     return credential.secret_value.trim().length > 0;
   }
   return Boolean(credential.secret_ref.trim());
@@ -74,15 +75,30 @@ function closeCredentialForm() {
   if (!saving.value) showCredentialForm.value = false;
 }
 
-function openChannelForm() {
+function openChannelForm(item = null) {
   resetChannelForm();
+  editingChannelId.value = item?.channel_id || "";
+  if (item) {
+    Object.assign(channel, {
+      display_name: item.display_name || "",
+      host: item.host || "",
+      port: item.port || 22,
+      username: item.username || "",
+      credential_id: item.credential_id || "",
+      remote_shell: item.remote_shell || "bash",
+      default_cwd: item.default_cwd || "",
+    });
+  }
   error.value = "";
   status.value = "";
   showChannelForm.value = true;
 }
 
 function closeChannelForm() {
-  if (!saving.value) showChannelForm.value = false;
+  if (!saving.value) {
+    showChannelForm.value = false;
+    editingChannelId.value = "";
+  }
 }
 
 async function load() {
@@ -110,7 +126,7 @@ async function saveCredential() {
       username_hint: credential.username_hint,
       enabled: true,
     };
-    if (credential.auth_type === "password" && credential.secret_mode === "direct") {
+    if (credential.secret_mode === "direct") {
       payload.secret_value = credential.secret_value;
     } else {
       payload.secret_ref = credential.secret_ref;
@@ -132,12 +148,18 @@ async function saveChannel() {
   error.value = "";
   status.value = "";
   try {
-    await api.createLinuxChannel({ ...channel, enabled: true });
+    if (editingChannelId.value) {
+      await api.patchLinuxChannel(editingChannelId.value, { ...channel, enabled: true });
+    } else {
+      await api.createLinuxChannel({ ...channel, enabled: true });
+    }
     resetChannelForm();
     showChannelForm.value = false;
+    const wasEditing = Boolean(editingChannelId.value);
+    editingChannelId.value = "";
     await load();
     notifyConfigurationChanged("linux-channels");
-    status.value = "Linux 通道已保存";
+    status.value = wasEditing ? "Linux 通道已更新" : "Linux 通道已保存";
   } catch (e) {
     error.value = e.message || "保存通道失败";
   } finally {
@@ -193,7 +215,7 @@ onMounted(() => void load());
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">凭据清单</h2>
-          <p class="settings-section__desc">ID由系统自动生成。密码可直接输入或使用 <code>env:变量名</code> 引用；SSH 私钥使用环境变量引用。</p>
+          <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；直接输入内容会加密存储。</p>
         </div>
         <div class="settings-section__actions">
           <button type="button" class="btn btn--primary btn--sm" @click="openCredentialForm">新增凭据</button>
@@ -222,7 +244,7 @@ onMounted(() => void load());
       <div v-else class="linux-settings__list">
         <div v-for="item in channels" :key="item.channel_id" class="linux-settings__row">
           <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }}</small></div>
-          <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
+          <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="openChannelForm(item)">编辑</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
         </div>
       </div>
     </section>
@@ -246,24 +268,25 @@ onMounted(() => void load());
             </select>
             <small>{{ credentialAuthDescription }}</small>
           </div>
-          <div v-if="credential.auth_type === 'password'" class="linux-settings__field">
-            <label>密码来源 <span>必选</span></label>
+          <div v-if="credential.auth_type === 'password' || credential.auth_type === 'private_key'" class="linux-settings__field">
+            <label>凭据来源 <span>必选</span></label>
             <select v-model="credential.secret_mode" class="settings-field__input" @change="onCredentialSecretModeChange">
-              <option value="environment">环境变量</option>
+              <option value="environment">环境变量引用</option>
               <option value="direct">直接输入</option>
             </select>
-            <small>直接输入的密码会保存到本机 Node 配置中，请确认本机运行环境可信。</small>
+            <small>直接输入的内容会加密保存到本机 Node 配置中，不需要重启 Node 或 shell。</small>
           </div>
           <div class="linux-settings__field linux-settings__field--wide">
-            <template v-if="credential.auth_type === 'password' && credential.secret_mode === 'direct'">
-              <label>登录密码 <span>必选</span></label>
-              <input v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" placeholder="输入 SSH 登录密码" />
-              <small>密码只会在建立 SSH 连接时使用，不会通过凭据列表接口返回。</small>
+            <template v-if="credential.secret_mode === 'direct'">
+              <label>{{ credential.auth_type === "private_key" ? "SSH 私钥" : "登录密码" }} <span>必选</span></label>
+              <textarea v-if="credential.auth_type === 'private_key'" v-model="credential.secret_value" rows="6" class="settings-field__input" placeholder="粘贴 SSH 私钥内容" />
+              <input v-else v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" placeholder="输入 SSH 登录密码" />
+              <small>只会在建立 SSH 连接时使用，不会通过凭据列表接口返回。</small>
             </template>
             <template v-else>
               <label>环境变量引用 <span>必选</span></label>
               <input v-model="credential.secret_ref" class="settings-field__input" :placeholder="credential.auth_type === 'private_key' ? '例如：env:SSH_KEY' : '例如：env:SSH_PASSWORD'" />
-              <small>这里只保存引用名称，Node 会在连接时从进程环境变量解析。</small>
+              <small>这里只保存引用名称，Node 会在连接时从进程环境变量解析；修改环境变量后仍需重启 Node 才能让进程看到新值。</small>
             </template>
           </div>
         </div>
@@ -277,7 +300,7 @@ onMounted(() => void load());
     <div v-if="showChannelForm" class="linux-settings__modal-backdrop" @click.self="closeChannelForm">
       <section class="linux-settings__modal linux-settings__modal--wide" role="dialog" aria-modal="true" aria-labelledby="channel-form-title">
         <div class="linux-settings__modal-head">
-          <div><h2 id="channel-form-title">新增 SSH 通道</h2><p>通道 ID由系统自动生成，一个通道代表一台远程主机。</p></div>
+          <div><h2 id="channel-form-title">{{ editingChannelId ? "编辑 SSH 通道" : "新增 SSH 通道" }}</h2><p>{{ editingChannelId ? `正在修改通道 ${editingChannelId}` : "通道 ID由系统自动生成，一个通道代表一台远程主机。" }}</p></div>
           <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeChannelForm">×</button>
         </div>
         <div class="linux-settings__channel-editor">
@@ -307,7 +330,7 @@ onMounted(() => void load());
         </div>
         <div class="linux-settings__modal-actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="closeChannelForm">取消</button>
-          <button type="button" class="btn btn--primary btn--sm" :disabled="saving || !channelReady" @click="saveChannel">保存 SSH 通道</button>
+          <button type="button" class="btn btn--primary btn--sm" :disabled="saving || !channelReady" @click="saveChannel">{{ editingChannelId ? "保存修改" : "保存 SSH 通道" }}</button>
         </div>
       </section>
     </div>

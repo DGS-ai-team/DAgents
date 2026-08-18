@@ -231,7 +231,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 					"agents", result.AgentsTouched, "tools_added", result.ToolsAdded)
 			}
 		}
-		openedMCP, err := store.OpenMCPServers(filepath.Join(cfg.RuntimeDir(), "mcp_servers.db"))
+		openedMCP, err := store.OpenMCPServers(filepath.Join(cfg.RuntimeDir(), "mcp_servers.db"), cfg.RuntimeDir())
 		if err != nil {
 			logger.Error("mcp server store init failed", "error", err)
 		} else {
@@ -270,12 +270,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var linuxChannelStore *store.LinuxChannelStore
 	var linuxProvider *tools.LinuxShellProvider
 	if !o.skipStore {
-		opened, err := store.OpenLinuxChannels(filepath.Join(cfg.RuntimeDir(), "linux_channels.db"))
+		opened, err := store.OpenLinuxChannels(filepath.Join(cfg.RuntimeDir(), "linux_channels.db"), cfg.RuntimeDir())
 		if err != nil {
 			logger.Error("linux channel store init failed", "error", err)
 		} else {
 			linuxChannelStore = opened
-			linuxProvider = tools.NewLinuxShellProvider(opened, resolveLinuxSecret).
+			linuxProvider = tools.NewLinuxShellProvider(opened, opened.ResolveSecret).
 				WithBindingResolver(opened)
 		}
 	}

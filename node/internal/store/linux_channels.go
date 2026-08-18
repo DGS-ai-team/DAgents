@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -39,8 +40,8 @@ type LinuxChannelRecord struct {
 }
 
 // LinuxCredentialRecord stores an opaque secret reference. Direct password
-// input is stored in an internal encoded literal form; secret resolution is
-// intentionally outside this store and secrets are never returned in views.
+// input is stored as an encrypted literal; secret resolution remains inside
+// the store so callers never need access to the encryption key.
 type LinuxCredentialRecord struct {
 	CredentialID string
 	DisplayName  string
@@ -67,9 +68,12 @@ type LinuxChannelBindingRecord struct {
 	UpdatedAt       time.Time
 }
 
-type LinuxChannelStore struct{ db *sql.DB }
+type LinuxChannelStore struct {
+	db  *sql.DB
+	box *SecretBox
+}
 
-func OpenLinuxChannels(dbPath string) (*LinuxChannelStore, error) {
+func OpenLinuxChannels(dbPath string, keyDirs ...string) (*LinuxChannelStore, error) {
 	path := strings.TrimSpace(dbPath)
 	if path == "" {
 		return nil, fmt.Errorf("linux channels db path is required")
@@ -82,7 +86,16 @@ func OpenLinuxChannels(dbPath string) (*LinuxChannelStore, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &LinuxChannelStore{db: db}
+	keyDir := filepath.Dir(path)
+	if len(keyDirs) > 0 && strings.TrimSpace(keyDirs[0]) != "" {
+		keyDir = strings.TrimSpace(keyDirs[0])
+	}
+	box, err := OpenSecretBox(keyDir)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open Linux channel secret box: %w", err)
+	}
+	s := &LinuxChannelStore{db: db, box: box}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -348,6 +361,65 @@ ON CONFLICT(credential_id) DO UPDATE SET
 		rec.CredentialID, rec.DisplayName, rec.AuthType, rec.SecretRef, rec.UsernameHint,
 		boolInt(rec.Enabled), created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
 	return err
+}
+
+// EncryptLiteralSecret stores a direct credential value without exposing it
+// to the database or to API response objects.
+func (s *LinuxChannelStore) EncryptLiteralSecret(value string) (string, error) {
+	if s == nil || s.box == nil {
+		return "", fmt.Errorf("linux channel secret box unavailable")
+	}
+	if value == "" {
+		return "", fmt.Errorf("linux literal secret is empty")
+	}
+	ciphertext, err := s.box.Encrypt(value)
+	if err != nil {
+		return "", fmt.Errorf("encrypt Linux literal secret: %w", err)
+	}
+	return "literal:" + ciphertext, nil
+}
+
+// ResolveSecret resolves both the current encrypted literal format and the
+// legacy base64 literal format written by older Node versions. Environment
+// references are intentionally resolved at connection time for compatibility.
+func (s *LinuxChannelStore) ResolveSecret(ctx context.Context, ref string) (string, error) {
+	_ = ctx
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "literal:") {
+		encoded := strings.TrimPrefix(ref, "literal:")
+		if encoded == "" {
+			return "", fmt.Errorf("linux literal secret is empty")
+		}
+		if s != nil && s.box != nil {
+			if value, err := s.box.Decrypt(encoded); err == nil {
+				if value == "" {
+					return "", fmt.Errorf("linux literal secret is empty")
+				}
+				return value, nil
+			}
+		}
+		// Backward compatibility for records created before encrypted storage.
+		value, err := base64.RawStdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("linux literal secret is invalid: %w", err)
+		}
+		if len(value) == 0 {
+			return "", fmt.Errorf("linux literal secret is empty")
+		}
+		return string(value), nil
+	}
+	if !strings.HasPrefix(ref, "env:") {
+		return "", fmt.Errorf("unsupported linux secret reference; use env:NAME or direct secret input")
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(ref, "env:"))
+	if name == "" {
+		return "", fmt.Errorf("linux secret environment name is empty")
+	}
+	value := os.Getenv(name)
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("linux secret environment %q is empty", name)
+	}
+	return value, nil
 }
 
 // GenerateCredentialID returns a server-generated ID that is unique in the

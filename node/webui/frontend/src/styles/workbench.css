@@ -4553,6 +4553,24 @@ select.settings-field__input {
   line-height: 1.5;
 }
 
+.policy-panel__bulk-head {
+  align-items: center;
+  gap: 12px;
+}
+
+.policy-panel__bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.policy-panel__bulk-hint {
+  margin-top: -4px;
+}
+
 .policy-panel__add-shell {
   display: flex;
   flex-wrap: wrap;

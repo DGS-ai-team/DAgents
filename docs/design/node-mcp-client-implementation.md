@@ -16,8 +16,8 @@ binding, while Manage never receives an MCP secret.
   exposed to an Agent until explicitly enabled.
 - Environment-variable references such as `${OPENAI_API_KEY}` and literal
   `env`/`headers` values are both supported in the local Node configuration.
-  Literal credentials are persisted in the local MCP database and should only
-  be used when that local storage boundary is acceptable.
+  Literal credentials are encrypted at rest in the local MCP database; the
+  editor accepts plaintext only while saving the local configuration.
 - Tool namespace `mcp__<server_id>__<tool_name>`.
 - Per-Agent binding in `config_snapshot.defaults.mcp.bindings`, including a
   server enable flag and a tool allowlist.
