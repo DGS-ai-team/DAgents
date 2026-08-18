@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +58,7 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/reload", s.handleAgentReload)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/execution-events", s.handleAgentExecutionEvents)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/context", s.handleAgentContext)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ack", s.handleAgentAck)
@@ -722,6 +724,78 @@ func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleAgentHydrate(w http.ResponseWriter, r *http.Request) {
 	s.withAgentRuntime(s.handleAgentHydrateImpl)(w, r)
+}
+
+func (s *Server) handleAgentExecutionEvents(w http.ResponseWriter, r *http.Request) {
+	s.withAgentRuntime(s.handleAgentExecutionEventsImpl)(w, r)
+}
+
+type executionEventResponse struct {
+	ID             int64  `json:"id"`
+	AgentID        string `json:"agent_id"`
+	SessionID      string `json:"session_id"`
+	ProcessID      string `json:"process_id"`
+	ProcessSeq     uint64 `json:"process_seq"`
+	EventType      string `json:"event_type"`
+	Stream         string `json:"stream,omitempty"`
+	TurnID         string `json:"turn_id,omitempty"`
+	ToolCallID     string `json:"tool_call_id,omitempty"`
+	TargetKind     string `json:"target_kind,omitempty"`
+	TargetID       string `json:"target_id,omitempty"`
+	PolicyDecision string `json:"policy_decision,omitempty"`
+	ApprovalID     string `json:"approval_id,omitempty"`
+	RiskLevel      string `json:"risk_level,omitempty"`
+	ExitCode       *int   `json:"exit_code,omitempty"`
+	ExitError      string `json:"exit_error,omitempty"`
+	CreatedAt      string `json:"created_at"`
+}
+
+func (s *Server) handleAgentExecutionEventsImpl(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "store_unavailable", "execution event audit is unavailable", nil)
+		return
+	}
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer", nil)
+			return
+		}
+		limit = parsed
+	}
+	agentID := strings.TrimSpace(r.PathValue("agent_id"))
+	events, err := s.store.ListExecutionEvents(r.Context(), agentID, limit)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "execution_event_list_failed", err.Error(), nil)
+		return
+	}
+	items := make([]executionEventResponse, 0, len(events))
+	for _, event := range events {
+		items = append(items, executionEventResponse{
+			ID:             event.ID,
+			AgentID:        event.AgentID,
+			SessionID:      event.SessionID,
+			ProcessID:      event.ProcessID,
+			ProcessSeq:     event.ProcessSeq,
+			EventType:      event.EventType,
+			Stream:         event.Stream,
+			TurnID:         event.TurnID,
+			ToolCallID:     event.ToolCallID,
+			TargetKind:     event.TargetKind,
+			TargetID:       event.TargetID,
+			PolicyDecision: event.PolicyDecision,
+			ApprovalID:     event.ApprovalID,
+			RiskLevel:      event.RiskLevel,
+			ExitCode:       event.ExitCode,
+			ExitError:      event.ExitError,
+			CreatedAt:      event.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"agent_id": agentID,
+		"events":   items,
+	})
 }
 
 func (s *Server) handleAgentCancel(w http.ResponseWriter, r *http.Request) {

@@ -4,22 +4,16 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
-	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -27,7 +21,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
-	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -35,8 +28,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
-	"github.com/DGS-ai-team/DAgents/node/internal/version"
-	"github.com/DGS-ai-team/DAgents/node/internal/webui"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -53,6 +44,8 @@ type Server struct {
 	agents          *store.AgentStore
 	mcpServers      *store.MCPServerStore
 	mcpManager      *mcp.Manager
+	linuxChannels   *store.LinuxChannelStore
+	linuxProvider   *tools.LinuxShellProvider
 	llmConfigs      *store.LLMConfigStore
 	nodeSettings    *store.NodeSettingsStore
 	stream          *stream.Hub // 进程内 SSE 事件总线
@@ -70,6 +63,7 @@ type Server struct {
 	mediaRegister   tools.MediaRegisterFunc
 	workgroupWorker *workgroup.Worker
 	workgroupDialer *workgroup.Dialer
+	terminals       *terminalSessionRegistry
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex
@@ -264,6 +258,19 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 	}
+	var linuxChannelStore *store.LinuxChannelStore
+	var linuxProvider *tools.LinuxShellProvider
+	if !o.skipStore {
+		opened, err := store.OpenLinuxChannels(filepath.Join(cfg.RuntimeDir(), "linux_channels.db"))
+		if err != nil {
+			logger.Error("linux channel store init failed", "error", err)
+		} else {
+			linuxChannelStore = opened
+			linuxProvider = tools.NewLinuxShellProvider(opened, resolveLinuxSecret).
+				WithBindingResolver(opened).
+				WithHostKeyResolver(tools.DefaultLinuxHostKeyResolver)
+		}
+	}
 
 	hub := stream.NewHub(256, logger)
 	workgroupStream := stream.NewHub(1024, logger)
@@ -439,6 +446,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		agents:          agentsStore,
 		mcpServers:      mcpServerStore,
 		mcpManager:      mcpManager,
+		linuxChannels:   linuxChannelStore,
+		linuxProvider:   linuxProvider,
 		llmConfigs:      llmConfigStore,
 		nodeSettings:    o.nodeSettings,
 		sessions:        mgr,
@@ -454,7 +463,20 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mediaRegister:   mediaRegister,
 		workgroupWorker: wgWorker,
 		workgroupDialer: wgDialer,
+		terminals:       newTerminalSessionRegistry(),
 	}
+	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
+		registry, err := s.terminalToolsRegistry(agentID)
+		if err != nil {
+			return nil, err
+		}
+		return registry.OpenTerminal(ctx, req)
+	})
+	s.terminals.setChangePublisher(func(agentID, eventType string, data map[string]any) {
+		if s.stream != nil {
+			s.stream.Publish(agentID, eventType, data)
+		}
+	})
 	if wgWorker != nil {
 		wgWorker.OnTimelineEvent = func(env workgroup.WSEnvelope) {
 			wid := strings.TrimSpace(env.WorkgroupID)
@@ -490,941 +512,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	hub.SetEventListener(func(ev stream.Event) {
 		mgr.OnStreamEvent(ev)
 	})
-	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.mux.HandleFunc("POST /v1/desktop/ui/focus", s.handleDesktopUIFocus)
-	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
-	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
-	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
-	s.registerAgentRoutes()
-	s.registerMCPRoutes()
-	s.registerWorkgroupRoutes()
-	s.registerScreenRoutes()
-	s.registerToolCallControlRoutes()
-	s.registerUIAggregateRoutes()
-	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
-	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
-	s.registerTriggerRoutes()
-	s.registerMediaRoutes()
-	s.registerLLMRoutes()
-	s.registerSetupRoutes()
-	s.registerManageUploadRoutes()
-	s.mux.HandleFunc("GET /v1/skills/catalog", s.handleNodeSkillsCatalog)
-	// Web UI 固定挂载（不再受 ui.enabled 开关控制）。
-	s.mux.Handle("GET /ui/", webui.Handler())
-	s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
+	s.registerRoutes()
 	return s
-}
-
-const desktopFocusRelayURL = "http://127.0.0.1:18767/v1/desktop/ui/focus"
-
-// handleDesktopUIFocus relays focus claims from a remote browser to the Shell
-// running beside this Node. The Web UI first tries the browser-local Shell API;
-// this same-origin fallback covers a browser connected to a remote Node host.
-func (s *Server) handleDesktopUIFocus(w http.ResponseWriter, r *http.Request) {
-	var body io.Reader = http.NoBody
-	if r.Body != nil {
-		body = io.LimitReader(r.Body, 16<<10)
-	}
-	payload, err := io.ReadAll(body)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_focus_request", err.Error(), nil)
-		return
-	}
-	request, err := http.NewRequestWithContext(
-		r.Context(),
-		http.MethodPost,
-		desktopFocusRelayURL,
-		bytes.NewReader(payload),
-	)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "desktop_relay_failed", err.Error(), nil)
-		return
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "desktop_unavailable", "Shell desktop API is unavailable", nil)
-		return
-	}
-	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 32<<10))
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "desktop_relay_failed", err.Error(), nil)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(response.StatusCode)
-	_, _ = w.Write(responseBody)
-}
-
-// attachNodeRuntimeDeps 将 Node 级运行时依赖挂到工具 Registry（默认表与 per-agent 共用）。
-func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string) {
-	if s == nil || reg == nil {
-		return
-	}
-	if s.backgroundJobs != nil {
-		bindErr := error(nil)
-		if reg == s.tools {
-			bindErr = reg.WithBackgroundJobStore(s.backgroundJobs)
-		} else {
-			bindErr = reg.WithBackgroundJobStoreForSession(s.backgroundJobs, targetAgentID)
-		}
-		if bindErr != nil && s.logger != nil {
-			s.logger.Warn("agent tools background job store bind failed", "error", bindErr)
-		}
-	}
-	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
-	attachWeComRuntime(reg, s.cfg)
-	attachBackgroundJobNotifier(reg, s.sessions, s.logger)
-	if s.mediaRegister != nil {
-		reg.SetMediaRegister(s.mediaRegister)
-	}
-	if s.browserMgr != nil {
-		reg.SetBrowserManager(s.browserMgr)
-	}
-	if s.agents != nil {
-		agents := s.agents
-		reg.SetBrowserCompanionExists(func(ctx context.Context, companionAgentID string) (bool, error) {
-			rec, err := agents.Get(ctx, companionAgentID)
-			if err != nil {
-				return false, err
-			}
-			return rec != nil && !rec.Archived, nil
-		})
-	}
-}
-
-// attachTriggerRuntime 为工具 Registry 注入触发器 store；targetAgentID 为空时用 node_id。
-func attachTriggerRuntime(reg *tools.Registry, store *triggers.Store, sched *triggers.Scheduler, targetAgentID string) {
-	if reg == nil || store == nil {
-		return
-	}
-	agentID := strings.TrimSpace(targetAgentID)
-	reg.SetTriggerRuntime(store, sched, agentID)
-}
-
-// attachWeComRuntime 按 Node 配置注入企业微信 webhook 客户端。
-func attachWeComRuntime(reg *tools.Registry, cfg *config.Config) {
-	if reg == nil {
-		return
-	}
-	reg.SetWeComClient(wecom.NewClientFromConfig(cfg))
-}
-
-// attachBackgroundJobNotifier 将后台 bash 完成回调挂到 Registry（默认工具表与 per-agent Registry 均需挂载）。
-func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logger *slog.Logger) {
-	if reg == nil || mgr == nil {
-		return
-	}
-	reg.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
-		if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-			JobID:                  done.JobID,
-			ToolName:               done.ToolName,
-			ToolCallID:             done.ToolCallID,
-			Status:                 done.Status,
-			ResultText:             done.ResultText,
-			ErrorText:              done.ErrorText,
-			OutputCompressSavedPct: done.OutputCompressSavedPct,
-			OutputCompressRawRunes: done.OutputCompressRawRunes,
-			OutputCompressOutRunes: done.OutputCompressOutRunes,
-		}); err != nil {
-			if logger != nil {
-				logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
-			}
-		}
-	})
-}
-
-// Handler 返回可用于 http.Server 的根 Handler（含 access log）。
-func (s *Server) Handler() http.Handler {
-	return accessLogMiddleware(s.logger, s.onboardingGateMiddleware(s.mux))
-}
-
-// ListenAndServe 在配置的 listen 地址启动 HTTP 服务；ctx 取消时触发优雅关闭。
-//
-// 逻辑：
-// 1. 后台 goroutine 调用 http.Server.ListenAndServe；
-// 2. ctx 取消时依次停止 trigger scheduler、session consumer、SQLite，再 Shutdown HTTP；
-// 3. 监听异常（非 ErrServerClosed）向上返回。
-//
-// 副作用：关闭 store、停止全部 session consumer。
-func (s *Server) ListenAndServe(ctx context.Context) error {
-	addr := s.cfg.ListenAddr()
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           s.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
-	errCh := make(chan error, 1)
-	regCtx, regCancel := context.WithCancel(ctx)
-	defer regCancel()
-	s.manageMu.Lock()
-	s.manageCtx = regCtx
-	s.manageCancel = regCancel
-	s.manageStarted = false
-	s.manageMu.Unlock()
-	s.maybeStartManageSidecars()
-	if s.updateChecker != nil {
-		s.updateChecker.Start(regCtx)
-	}
-	go func() {
-		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.NodeID)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		} else {
-			errCh <- nil
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		s.logger.Info("agent node shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		regCancel()
-		if s.workgroupDialer != nil {
-			s.workgroupDialer.Close()
-		}
-		if s.registrar != nil {
-			s.registrar.Stop(shutdownCtx)
-		}
-		// 与启动顺序相反：先停后台任务与会话，再关 HTTP 监听。
-		if s.triggerSched != nil {
-			s.triggerSched.Stop()
-		}
-		s.sessions.Stop()
-		if s.tools != nil {
-			_ = s.tools.CloseBrowser()
-		}
-		if s.backgroundJobs != nil {
-			_ = s.backgroundJobs.Close()
-		}
-		if s.store != nil {
-			_ = s.store.Close()
-		}
-		if s.agents != nil {
-			_ = s.agents.Close()
-		}
-		if s.llmConfigs != nil {
-			_ = s.llmConfigs.Close()
-		}
-		if s.nodeSettings != nil {
-			_ = s.nodeSettings.Close()
-		}
-		if s.mcpManager != nil {
-			s.mcpManager.Close()
-		}
-		if s.mcpServers != nil {
-			_ = s.mcpServers.Close()
-		}
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
-		}
-		return <-errCh
-	case err := <-errCh:
-		if err != nil {
-			return fmt.Errorf("listen %s: %w", addr, err)
-		}
-		return nil
-	}
-}
-
-// maybeStartManageSidecars 在首配完成且 Manage 已启用时启动 registrar / workgroup dialer（可热启动一次）。
-func (s *Server) maybeStartManageSidecars() {
-	if s == nil {
-		return
-	}
-	s.manageMu.Lock()
-	defer s.manageMu.Unlock()
-	if s.manageStarted || s.manageCtx == nil {
-		return
-	}
-	if s.cfg == nil || !s.cfg.NodeProfileCompleted() {
-		if s.cfg != nil && !s.cfg.NodeProfileCompleted() {
-			s.logger.Info("manage registrar/dialer deferred until node profile onboarding completes")
-		}
-		return
-	}
-	if s.registrar != nil {
-		s.registrar.Start(s.manageCtx)
-	}
-	if s.workgroupDialer != nil {
-		ctx := s.manageCtx
-		go func() {
-			_ = s.workgroupDialer.Run(ctx, func(err error, backoff time.Duration) {
-				s.logger.Warn("workgroup dialer disconnected; retrying",
-					"error", err, "backoff", backoff.String())
-			})
-		}()
-	}
-	s.manageStarted = true
-}
-
-// Close 释放 SQLite / 会话等资源。ListenAndServe 退出路径会调用；httptest 测试需显式 Cleanup。
-func (s *Server) Close() {
-	if s == nil {
-		return
-	}
-	if s.triggerSched != nil {
-		s.triggerSched.Stop()
-	}
-	if s.sessions != nil {
-		s.sessions.Stop()
-	}
-	if s.tools != nil {
-		_ = s.tools.CloseBrowser()
-	}
-	if s.backgroundJobs != nil {
-		_ = s.backgroundJobs.Close()
-	}
-	if s.store != nil {
-		_ = s.store.Close()
-	}
-	if s.agents != nil {
-		_ = s.agents.Close()
-	}
-	if s.llmConfigs != nil {
-		_ = s.llmConfigs.Close()
-	}
-	if s.nodeSettings != nil {
-		_ = s.nodeSettings.Close()
-	}
-	if s.mcpManager != nil {
-		s.mcpManager.Close()
-	}
-	if s.mcpServers != nil {
-		_ = s.mcpServers.Close()
-	}
-}
-
-type healthResponse struct {
-	Status  string `json:"status"`
-	NodeID  string `json:"node_id"`
-	Version string `json:"version"`
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	// 探活：Client 启动前与运维脚本使用；无鉴权。
-	writeJSON(w, http.StatusOK, healthResponse{
-		Status:  "ok",
-		NodeID:  s.cfg.NodeID,
-		Version: version.Version,
-	})
-}
-
-type agentInfoResponse struct {
-	NodeID            string              `json:"node_id"`
-	Name              string              `json:"name,omitempty"`
-	Capabilities      []string            `json:"capabilities"`
-	MultimodalEnabled bool                `json:"multimodal_enabled"`
-	ManageEnabled     bool                `json:"manage_enabled"`
-	ManageURL         string              `json:"manage_url,omitempty"`
-	ManageRegistered  bool                `json:"manage_registered"`
-	LLM               llm.LLMSettingsView `json:"llm"`
-	Compression       compressionInfo     `json:"compression"`
-}
-
-type compressionInfo struct {
-	SilentTriggerTokens   int `json:"silent_trigger_tokens"`
-	BlockingTriggerTokens int `json:"blocking_trigger_tokens"`
-}
-
-func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
-	registered := false
-	if s.registrar != nil {
-		registered = s.registrar.Registered()
-	}
-	llmView := llm.LLMSettingsView{}
-	if s.llmRuntime != nil {
-		llmView = s.llmRuntime.Snapshot()
-	}
-	comp := compressionInfo{}
-	if s.cfg != nil {
-		comp.SilentTriggerTokens = s.cfg.Compression.SilentTriggerTokens
-		comp.BlockingTriggerTokens = s.cfg.Compression.BlockingTriggerTokens
-	}
-	writeJSON(w, http.StatusOK, agentInfoResponse{
-		NodeID:            s.cfg.NodeID,
-		Name:              strings.TrimSpace(s.cfg.Agent.Name),
-		Capabilities:      s.cfg.Capabilities(),
-		MultimodalEnabled: s.cfg.MultimodalEnabled(),
-		ManageEnabled:     s.cfg != nil && s.cfg.Manage.Enabled,
-		ManageURL:         strings.TrimSpace(s.cfg.Manage.URL),
-		ManageRegistered:  registered,
-		LLM:               llmView,
-		Compression:       comp,
-	})
-}
-
-func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
-	if manage.UpdateDelegatedToShell() {
-		channel := "stable"
-		if s.cfg != nil {
-			channel = strings.TrimSpace(s.cfg.Manage.Update.Channel)
-		}
-		writeJSON(w, http.StatusOK, manage.ShellDelegateUpdateStatus(channel))
-		return
-	}
-	if s.updateChecker == nil {
-		writeJSON(w, http.StatusOK, manage.UpdateStatus{
-			CurrentVersion:  version.Version,
-			LatestVersion:   version.Version,
-			ManageReachable: false,
-			Platform:        manage.ReleasePlatform(),
-			Channel:         "stable",
-			ApplyCommand:    "dagents update",
-			Message:         "Manage 未启用，无法检查更新",
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, s.updateChecker.Snapshot())
-}
-
-func (s *Server) handleAgentUpgradeReadiness(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.sessions.UpgradeReadiness())
-}
-
-type clearContextResponse struct {
-	AgentID       string `json:"agent_id"`
-	Cleared       bool   `json:"cleared"`
-	CancelledTurn bool   `json:"cancelled_turn"`
-}
-
-func (s *Server) handleAgentClearContextImpl(w http.ResponseWriter, r *http.Request) {
-	// POST clear-context：清空 messages；在途 turn 会先 cancel。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
-		return
-	}
-	cancelled, err := s.sessions.ClearContext(sessionID)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, clearContextResponse{
-		AgentID:       sessionID,
-		Cleared:       true,
-		CancelledTurn: cancelled,
-	})
-}
-
-type contextMessagePreview struct {
-	Role                string `json:"role"`
-	Content             string `json:"content,omitempty"`
-	ToolCallID          string `json:"tool_call_id,omitempty"`
-	ToolCallsCount      int    `json:"tool_calls_count,omitempty"`
-	HasReasoningContent bool   `json:"has_reasoning_content,omitempty"`
-}
-
-type sessionContextResponse struct {
-	AgentID                             string                               `json:"agent_id"`
-	MessagesCount                       int                                  `json:"messages_count"`
-	PendingToolCallsCount               int                                  `json:"pending_tool_calls_count"`
-	MessagesTotalTokens                 int                                  `json:"messages_total_tokens"`
-	ToolLoopCount                       int                                  `json:"tool_loop_count"`
-	QueuePending                        int                                  `json:"queue_pending"`
-	HasActiveTurn                       bool                                 `json:"has_active_turn"`
-	TurnState                           string                               `json:"turn_state,omitempty"`
-	RunTurnPhase                        string                               `json:"run_turn_phase"`
-	SystemPrompt                        string                               `json:"system_prompt,omitempty"`
-	SystemPromptEstimatedTokens         int                                  `json:"system_prompt_estimated_tokens"`
-	SkillsCatalogEstimatedTokens        int                                  `json:"skills_catalog_estimated_tokens"`
-	SkillsCatalogMaxBodyEstimatedTokens int                                  `json:"skills_catalog_max_body_estimated_tokens"`
-	SkillsCatalogBloatThreshold         int                                  `json:"skills_catalog_bloat_threshold"`
-	LoadedSkills                        []skills.LoadedSkill                 `json:"loaded_skills"`
-	RecentMessages                      []contextMessagePreview              `json:"recent_messages"`
-	Messages                            *[]contextMessagePreview             `json:"messages,omitempty"`
-	LastCompression                     *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
-}
-
-func buildContextMessagePreviews(messages []llm.Message, maxRunes int) []contextMessagePreview {
-	out := make([]contextMessagePreview, 0, len(messages))
-	for _, m := range messages {
-		content := truncateContextPreview(llm.MessageTextSummary(m), maxRunes)
-		out = append(out, contextMessagePreview{
-			Role:                m.Role,
-			Content:             content,
-			ToolCallID:          m.ToolCallID,
-			ToolCallsCount:      len(m.ToolCalls),
-			HasReasoningContent: strings.TrimSpace(m.ReasoningContent) != "",
-		})
-	}
-	return out
-}
-
-func queryBoolParam(r *http.Request, key string) bool {
-	v := strings.TrimSpace(r.URL.Query().Get(key))
-	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
-}
-
-func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) {
-	// GET context：只读快照；默认 recent_messages 最多 10 条；full_messages=1 返回完整 messages 列表。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
-		return
-	}
-	view, err := s.sessions.GetContextView(sessionID)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	const previewLimit = 10
-	const contextMessagePreviewRunes = 8000
-	start := 0
-	if len(view.Messages) > previewLimit {
-		start = len(view.Messages) - previewLimit
-	}
-	recent := buildContextMessagePreviews(view.Messages[start:], contextMessagePreviewRunes)
-	resp := sessionContextResponse{
-		AgentID:                             view.SessionID,
-		MessagesCount:                       view.MessagesCount,
-		PendingToolCallsCount:               view.PendingToolCallsCount,
-		MessagesTotalTokens:                 view.MessagesTotalTokens,
-		ToolLoopCount:                       view.ToolLoopCount,
-		QueuePending:                        view.QueuePending,
-		HasActiveTurn:                       view.HasActiveTurn,
-		SystemPrompt:                        view.SystemPrompt,
-		SystemPromptEstimatedTokens:         view.SystemPromptEstimatedTokens,
-		SkillsCatalogEstimatedTokens:        view.SkillsCatalogEstimatedTokens,
-		SkillsCatalogMaxBodyEstimatedTokens: view.SkillsCatalogMaxBodyEstimatedTokens,
-		SkillsCatalogBloatThreshold:         view.SkillsCatalogBloatThreshold,
-		LoadedSkills:                        view.LoadedSkills,
-		RecentMessages:                      recent,
-		LastCompression:                     view.LastCompression,
-		RunTurnPhase:                        turn.RunTurnPhase(view.TurnState),
-	}
-	if queryBoolParam(r, "full_messages") {
-		msgs := buildContextMessagePreviews(view.Messages, contextMessagePreviewRunes)
-		resp.Messages = &msgs
-	}
-	if view.TurnState != "" {
-		resp.TurnState = string(view.TurnState)
-	}
-	if resp.LoadedSkills == nil {
-		resp.LoadedSkills = []skills.LoadedSkill{}
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-type sessionHydrateResponse struct {
-	AgentID       string                    `json:"agent_id"`
-	RunTurnPhase  string                    `json:"run_turn_phase"`
-	HasActiveTurn bool                      `json:"has_active_turn"`
-	QueuePending  int                       `json:"queue_pending"`
-	Transcript    []session.TranscriptEntry `json:"transcript"`
-	PendingHITL   map[string]any            `json:"pending_hitl"`
-	SSESeqHint    int                       `json:"sse_seq_hint"`
-	NotifySeq     int                       `json:"notify_seq"`
-	AckSeq        int                       `json:"ack_seq"`
-	HasUnread     bool                      `json:"has_unread"`
-	ToolJobs      map[string]int            `json:"tool_jobs,omitempty"`
-}
-
-func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
-		return
-	}
-	view, err := s.sessions.GetHydrateView(sessionID)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	transcript := view.Transcript
-	if transcript == nil {
-		transcript = []session.TranscriptEntry{}
-	}
-	runPhase := view.RunTurnPhase
-	toolJobs := map[string]int{"running": 0, "background": 0}
-	if reg := s.sessions.SessionTools(sessionID); reg != nil {
-		c := reg.SessionToolJobCounts(sessionID)
-		toolJobs["running"] = c.Running
-		toolJobs["background"] = c.Background
-	}
-	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		AgentID:       view.SessionID,
-		RunTurnPhase:  runPhase,
-		HasActiveTurn: view.HasActiveTurn,
-		QueuePending:  view.QueuePending,
-		Transcript:    transcript,
-		PendingHITL:   view.PendingHITL,
-		SSESeqHint:    s.stream.CurrentSeq(),
-		NotifySeq:     view.NotifySeq,
-		AckSeq:        view.AckSeq,
-		HasUnread:     view.HasUnread,
-		ToolJobs:      toolJobs,
-	})
-}
-
-type sessionAckRequest struct {
-	SSESeq int `json:"sse_seq"`
-}
-
-type sessionAckResponse struct {
-	AgentID   string `json:"agent_id"`
-	NotifySeq int    `json:"notify_seq"`
-	AckSeq    int    `json:"ack_seq"`
-	HasUnread bool   `json:"has_unread"`
-}
-
-func (s *Server) handleAgentAckImpl(w http.ResponseWriter, r *http.Request) {
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
-		return
-	}
-	var req sessionAckRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
-		return
-	}
-	if req.SSESeq <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sse_seq must be positive", nil)
-		return
-	}
-	state, err := s.sessions.AckSession(r.Context(), sessionID, req.SSESeq)
-	if err != nil {
-		switch err.Error() {
-		case "agent_not_found":
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		case "agent_id is required", "sse_seq must be positive":
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
-		default:
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, sessionAckResponse{
-		AgentID:   sessionID,
-		NotifySeq: state.NotifySeq,
-		AckSeq:    state.AckSeq,
-		HasUnread: state.HasUnread,
-	})
-}
-
-func (s *Server) handleAgentCompressImpl(w http.ResponseWriter, r *http.Request) {
-	// POST compress：手动触发一次阻塞压缩（忽略 token 阈值）。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
-		return
-	}
-	result, err := s.sessions.CompressContext(r.Context(), sessionID)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	if result.Status == "busy" {
-		writeAPIError(w, http.StatusConflict, "turn_busy", "当前 turn 进行中，请稍后再试", map[string]any{
-			"agent_id": sessionID,
-			"status":   result.Status,
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-type postMessageRequest struct {
-	AgentID         string            `json:"agent_id"`
-	RequestType     string            `json:"request_type"`
-	Content         string            `json:"content"`
-	ContentParts    []llm.ContentPart `json:"content_parts,omitempty"`
-	UserMessageName string            `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any    `json:"resume_value"`
-}
-
-type postMessageResponse struct {
-	Accepted bool   `json:"accepted"`
-	AgentID  string `json:"agent_id"`
-	Priority string `json:"priority"`
-}
-
-func resolveAgentID(agentID string) (string, error) {
-	aid := strings.TrimSpace(agentID)
-	if aid == "" {
-		return "", fmt.Errorf("agent_id is required")
-	}
-	return aid, nil
-}
-
-func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
-	// POST /v1/messages：message 入队 human 优先级；resume 用于 HITL 续跑。仅接受 agent_id。
-	var req postMessageRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
-		return
-	}
-	sessionID, err := resolveAgentID(req.AgentID)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", err.Error(), nil)
-		return
-	}
-	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
-	if s.agents != nil {
-		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
-			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
-				return
-			}
-			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
-				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})
-				return
-			}
-		}
-	}
-	requestType := strings.TrimSpace(req.RequestType)
-	if requestType == "" {
-		requestType = "message"
-	}
-
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
-	if err != nil {
-		switch err.Error() {
-		case "agent_not_found":
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		case "invalid_message":
-			writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
-		case "multimodal_disabled":
-			writeAPIError(w, http.StatusBadRequest, "multimodal_disabled", "多模态未启用（config multimodal.enabled）", nil)
-		case "invalid_request_type":
-			writeAPIError(w, http.StatusBadRequest, "invalid_request_type", "不支持的 request_type", nil)
-		case "no_pending_hitl":
-			writeAPIError(w, http.StatusConflict, "no_pending_hitl", "当前无等待中的 HITL", nil)
-		default:
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, postMessageResponse{
-		Accepted: true,
-		AgentID:  sessionID,
-		Priority: priority,
-	})
-}
-
-type cancelTurnResponse struct {
-	AgentID   string `json:"agent_id"`
-	Cancelled bool   `json:"cancelled"`
-}
-
-func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
-	// POST cancel：取消在途 turn；无在途任务时 cancelled=false。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
-		return
-	}
-	if s.sessions.Get(sessionID) == nil {
-		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		return
-	}
-	cancelled := s.sessions.CancelTurn(sessionID)
-	writeJSON(w, http.StatusOK, cancelTurnResponse{
-		AgentID:   sessionID,
-		Cancelled: cancelled,
-	})
-}
-
-func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
-	// GET /v1/streams：SSE 长连接；Client 用 agent_id 查询参数过滤事件。
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "streaming not supported", nil)
-		return
-	}
-
-	agentFilter := strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	// 远端引用若未走 Edge upgrade，禁止订阅本机 hub（否则永远无事件且误导）。
-	if agentFilter != "" && s.agents != nil {
-		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
-			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
-				return
-			}
-		}
-	}
-	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
-	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
-	// live=1：TUI/WebUI 首连只收增量，避免 replay 历史 done 干扰 wait_user_turn。
-	// after_seq：WebUI EventSource 重连无法带 Last-Event-ID header，用 query 续传 hub 历史。
-	if live {
-		lastSeq = s.stream.CurrentSeq()
-	} else if afterRaw := strings.TrimSpace(r.URL.Query().Get("after_seq")); afterRaw != "" {
-		lastSeq = parseLastEventID(afterRaw)
-	}
-	s.logger.Info("sse subscribe",
-		"agent_id", agentFilter,
-		"live", live,
-		"after_seq", lastSeq,
-		"remote", r.RemoteAddr,
-	)
-	defer s.logger.Debug("sse unsubscribe", "agent_id", agentFilter, "remote", r.RemoteAddr)
-
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	events := s.stream.SubscribeAgent(lastSeq, agentFilter)
-	defer s.stream.Unsubscribe(events)
-
-	// 首包注释行立即 flush，使 Client 立刻收到 HTTP 200；否则 idle 连接要等 15s heartbeat。
-	if _, err := fmt.Fprintf(w, ": connected\n\n"); err != nil {
-		return
-	}
-	flusher.Flush()
-
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	ctx := r.Context()
-	for {
-		select {
-		case <-ctx.Done():
-			// Client 断开连接；Unsubscribe 在 defer 中执行。
-			return
-		case <-ticker.C:
-			// SSE 注释行保活，避免代理/防火墙空闲断连。
-			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
-				return
-			}
-			flusher.Flush()
-		case ev, ok := <-events:
-			if !ok {
-				return
-			}
-			// Hub 已按 agentFilter 投递；此处不再二次过滤。
-			if _, err := w.Write([]byte(ev.FormatSSE())); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
-}
-
-func (s *Server) handleAgentListSkillsImpl(w http.ResponseWriter, r *http.Request) {
-	// GET skills：返回 session 已加载与磁盘可用 skill 元数据。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	loaded, available, err := s.sessions.ListSessionSkills(sessionID)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":         sessionID,
-		"loaded_skills":    loaded,
-		"available_skills": available,
-	})
-}
-
-// handleNodeSkillsCatalog 返回 Node 级 skills 目录（不受 Agent 可见性白名单过滤），供创建/编辑 Agent 勾选。
-func (s *Server) handleNodeSkillsCatalog(w http.ResponseWriter, r *http.Request) {
-	if s.cfg == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled":          true,
-			"available_skills": []skills.LoadedSkill{},
-		})
-		return
-	}
-	catalog := skills.NewCatalog(s.cfg.SkillsRoot(), true, s.cfg.Skills.MaxInPrompt)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":          true,
-		"skills_root":      catalog.Root(),
-		"available_skills": catalog.ListMetadata(),
-	})
-}
-
-type skillNameRequest struct {
-	SkillName string `json:"skill_name"`
-}
-
-func (s *Server) handleAgentLoadSkillImpl(w http.ResponseWriter, r *http.Request) {
-	// POST skills/load：与 load_skills 工具语义一致，供 Client 设置页调用。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	var req skillNameRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
-		return
-	}
-	loaded, err := s.sessions.LoadSessionSkill(sessionID, req.SkillName)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":      sessionID,
-		"loaded_skills": loaded,
-	})
-}
-
-func (s *Server) handleAgentUnloadSkillImpl(w http.ResponseWriter, r *http.Request) {
-	// POST skills/unload：从 session 移除指定 skill。
-	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
-	var req skillNameRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
-		return
-	}
-	loaded, err := s.sessions.UnloadSessionSkill(sessionID, req.SkillName)
-	if err != nil {
-		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":      sessionID,
-		"loaded_skills": loaded,
-	})
-}
-
-// writeJSON 写入 JSON 响应并设置 Content-Type；编码失败时静默（极少发生）。
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func toolsBashCompressFromConfig(toolsCfg config.ToolsConfig) tools.BashCompressConfig {
-	out := tools.DefaultBashCompressConfig()
-	if toolsCfg.BashCompress.Enabled != nil {
-		out.Enabled = *toolsCfg.BashCompress.Enabled
-	}
-	if toolsCfg.BashCompress.MaxOutputChars > 0 {
-		out.MaxOutputChars = toolsCfg.BashCompress.MaxOutputChars
-	}
-	if toolsCfg.BashCompress.MaxOutputCharsStderr > 0 {
-		out.MaxOutputCharsStderr = toolsCfg.BashCompress.MaxOutputCharsStderr
-	}
-	return out
 }

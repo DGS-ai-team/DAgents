@@ -11,6 +11,7 @@ import AboutSettings from "../views/settings/AboutSettings.vue";
 import ContextSettings from "../views/settings/ContextSettings.vue";
 import ConnectionSettings from "../views/settings/ConnectionSettings.vue";
 import McpSettings from "../views/settings/McpSettings.vue";
+import LinuxChannelsSettings from "../views/settings/LinuxChannelsSettings.vue";
 import CapabilitiesSettings from "../views/settings/CapabilitiesSettings.vue";
 import AgentsSettings from "../views/settings/AgentsSettings.vue";
 import AgentDetailSettings from "../views/settings/AgentDetailSettings.vue";
@@ -37,6 +38,7 @@ const router = createRouter({
         { path: "general", name: "settings-general", component: GeneralSettings },
         { path: "connection", name: "settings-connection", component: ConnectionSettings },
         { path: "mcp", name: "settings-mcp", component: McpSettings },
+        { path: "linux-channels", name: "settings-linux-channels", component: LinuxChannelsSettings },
         { path: "agents", name: "settings-agents", component: AgentsSettings },
         { path: "agents/:agentId", name: "settings-agent-detail", component: AgentDetailSettings },
         { path: "capabilities", name: "settings-capabilities", component: CapabilitiesSettings },

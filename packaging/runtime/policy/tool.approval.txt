@@ -20,6 +20,7 @@ trigger_delete=always
 
 # --- 上下文治理：只读 + status 轮询（WS3 spill + WS6 duplicate guard）---
 bash_run=rule
+linux_exec=always
 read_file=rule
 glob_files=rule
 grep_file=rule

@@ -29,6 +29,7 @@ export default defineConfig({
       "/v1": {
         target: nodeTarget,
         changeOrigin: true,
+        ws: true,
         configure(proxy) {
           proxy.on("proxyRes", (proxyRes, req) => {
             if (req.url?.includes("/streams")) {

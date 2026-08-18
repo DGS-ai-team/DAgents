@@ -41,3 +41,6 @@
 # Linux channel design
 
 See [linux-channel-plan.md](./linux-channel-plan.md) for the Node-side Linux SSH channel design.
+# Shell execution design
+
+See [shell-execution-plan.md](./shell-execution-plan.md) for the local/remote Bash, Process, PTY, Sandbox and Exec Server design.

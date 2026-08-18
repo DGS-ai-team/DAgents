@@ -5,6 +5,8 @@ import * as api from "../../api/node.js";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
+import LinuxAgentPanel from "../../components/LinuxAgentPanel.vue";
+import TerminalPanel from "../../components/TerminalPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -186,6 +188,8 @@ onUnmounted(() => stopConfigurationEvents());
         </button>
       </div>
       <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
+      <LinuxAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
+      <TerminalPanel :agent-id="agentId" />
       <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
       <p v-if="error" class="agent-detail__error">{{ error }}</p>
       <p class="agent-detail__hint">保存后立即生效。工具审批可在下方单独调整。</p>

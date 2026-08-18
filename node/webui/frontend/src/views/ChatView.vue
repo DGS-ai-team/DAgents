@@ -8,6 +8,7 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
+import TerminalDock from "../components/TerminalDock.vue";
 import {
   agentStore,
   persistAgentId,
@@ -105,6 +106,10 @@ const agentListCount = ref(null);
 const agentList = ref([]);
 const currentAgentDisplayName = ref("");
 const chatPanelRef = ref(null);
+const workspaceMode = ref("messages");
+const selectedTerminalId = ref("");
+const terminalRevision = ref(0);
+const terminalCount = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
 
@@ -190,6 +195,7 @@ function restartStream() {
     },
     onEvent: handleEvent,
     onReconnect: () => {
+      terminalRevision.value += 1;
       void resyncAfterSSEGap("reconnect");
     },
   });
@@ -231,6 +237,7 @@ async function activateAgentStream() {
     restartStream();
   }
   await syncChildAgentsFromApi();
+  terminalRevision.value += 1;
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
 }
@@ -301,6 +308,12 @@ function handleEvent(ev) {
 
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
   turnWatchdog.noteActivity();
+  if (["terminal.opened", "terminal.updated", "terminal.closed"].includes(ev.type)) {
+    terminalRevision.value += 1;
+    if (ev.type === "terminal.opened" && ev.data?.terminal_id && !selectedTerminalId.value) {
+      selectedTerminalId.value = String(ev.data.terminal_id);
+    }
+  }
   const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
   if (!skipRender) {
@@ -951,6 +964,9 @@ watch(
   () => agentStore.agentId,
   () => {
     void syncCurrentAgentDisplayName();
+    workspaceMode.value = "messages";
+    selectedTerminalId.value = "";
+    terminalCount.value = 0;
   },
 );
 
@@ -1056,35 +1072,69 @@ onUnmounted(() => {
         <p>选择左侧 Agent，或点击 + 从模板新建。</p>
       </div>
 
-      <MainChatPanel
-        v-else
-        ref="chatPanelRef"
-        :entries="entries"
-        :hitl-queue="hitlStore.queue"
-        :tool-verbose="transcriptStore.toolFoldVerbose"
-        :disabled="!canSend"
-        :sending="sending"
-        :cancelling="cancelling"
-        :hitl-busy="hitlStore.busy"
-        :hitl-busy-index="hitlStore.busyIndex"
-        :thinking-supported="thinkingSupported"
-        :llm-settings="chromeStore.llmSettings"
-        :agent-title="currentAgentTitle"
-        @send="onSendMessage"
-        @cancel="cancelTurn"
-        @toggle-thinking="toggleThinkingMode"
-        @cycle-effort="cycleThinkingEffort"
-        @switch-profile="switchLLMProfile"
-        @open-activity="openLeftActivity"
-        @approve-all="(idx) => submitHitlApproval(true, idx)"
-        @reject-all="(idx) => submitHitlApproval(false, idx)"
-        @approve-one="(payload) => submitHitlOne(payload, true)"
-        @reject-one="(payload) => submitHitlOne(payload, false)"
-        @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
-        @user-info-selected="onHitlUserInfoSelected"
-        @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
-        @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
-      />
+      <div v-else class="chat-workspace">
+        <div class="chat-workspace__switcher" role="tablist" aria-label="工作区视图">
+          <button
+            type="button"
+            class="chat-workspace__tab"
+            :class="{ 'chat-workspace__tab--active': workspaceMode === 'messages' }"
+            role="tab"
+            :aria-selected="workspaceMode === 'messages'"
+            @click="workspaceMode = 'messages'"
+          >
+            消息
+          </button>
+          <button
+            type="button"
+            class="chat-workspace__tab"
+            :class="{ 'chat-workspace__tab--active': workspaceMode === 'terminals' }"
+            role="tab"
+            :aria-selected="workspaceMode === 'terminals'"
+            @click="workspaceMode = 'terminals'"
+          >
+            终端
+            <span v-if="terminalCount" class="chat-workspace__count">{{ terminalCount }}</span>
+          </button>
+        </div>
+
+        <MainChatPanel
+          v-show="workspaceMode === 'messages'"
+          ref="chatPanelRef"
+          :entries="entries"
+          :hitl-queue="hitlStore.queue"
+          :tool-verbose="transcriptStore.toolFoldVerbose"
+          :disabled="!canSend"
+          :sending="sending"
+          :cancelling="cancelling"
+          :hitl-busy="hitlStore.busy"
+          :hitl-busy-index="hitlStore.busyIndex"
+          :thinking-supported="thinkingSupported"
+          :llm-settings="chromeStore.llmSettings"
+          :agent-title="currentAgentTitle"
+          @send="onSendMessage"
+          @cancel="cancelTurn"
+          @toggle-thinking="toggleThinkingMode"
+          @cycle-effort="cycleThinkingEffort"
+          @switch-profile="switchLLMProfile"
+          @open-activity="openLeftActivity"
+          @approve-all="(idx) => submitHitlApproval(true, idx)"
+          @reject-all="(idx) => submitHitlApproval(false, idx)"
+          @approve-one="(payload) => submitHitlOne(payload, true)"
+          @reject-one="(payload) => submitHitlOne(payload, false)"
+          @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
+          @user-info-selected="onHitlUserInfoSelected"
+          @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
+          @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
+        />
+        <TerminalDock
+          v-show="workspaceMode === 'terminals'"
+          :agent-id="agentStore.agentId"
+          :refresh-key="terminalRevision"
+          :selected-terminal-id="selectedTerminalId"
+          @update:selected-terminal-id="selectedTerminalId = $event"
+          @count-changed="terminalCount = $event"
+        />
+      </div>
 
       <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel @close="closePanel" />
@@ -1099,3 +1149,43 @@ onUnmounted(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.chat-workspace__switcher {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface, #fff);
+}
+.chat-workspace__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  font-size: 12px;
+}
+.chat-workspace__tab--active {
+  border-bottom-color: var(--color-primary, #3689d6);
+  color: var(--color-text);
+  font-weight: 600;
+}
+.chat-workspace__count {
+  min-width: 17px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: #e6f1ff;
+  color: #2875c7;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+.chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
+</style>
