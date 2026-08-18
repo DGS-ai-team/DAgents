@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"time"
 )
 
 const (
-	terminalDefaultReadBytes = 12000
-	terminalMaxReadBytes     = 65536
+	terminalDefaultReadBytes   = 12000
+	terminalMaxReadBytes       = 65536
+	terminalMaxReadWaitSeconds = 60
 )
 
 type terminalOpenArgs struct {
@@ -33,9 +35,10 @@ type terminalInputArgs struct {
 }
 
 type terminalReadArgs struct {
-	TerminalID string `json:"terminal_id"`
-	AfterSeq   uint64 `json:"after_seq"`
-	MaxBytes   int    `json:"max_bytes"`
+	TerminalID  string `json:"terminal_id"`
+	AfterSeq    uint64 `json:"after_seq"`
+	MaxBytes    int    `json:"max_bytes"`
+	WaitSeconds int    `json:"wait_seconds"`
 }
 
 func terminalOpenToolDef() ToolDef {
@@ -78,11 +81,12 @@ func terminalInputToolDef() ToolDef {
 func terminalReadToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_read",
-		Description: "读取交互终端从指定序号之后产生的输出。首次读取 after_seq 留空；后续使用返回的 next_seq，避免重复读取。",
+		Description: "等待指定秒数后，读取交互终端从指定序号之后产生的输出。wait_seconds 是严格的读取前延时，不会因为提前出现输出而提前返回；首次读取 after_seq 留空，后续使用返回的 next_seq，避免重复读取。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
-			"terminal_id": map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
-			"after_seq":   map[string]any{"type": "integer", "minimum": 0, "description": "上次读取返回的 next_seq，可选，默认 0"},
-			"max_bytes":   map[string]any{"type": "integer", "minimum": 1, "maximum": terminalMaxReadBytes, "description": "最多读取的字节数，可选，默认 12000"},
+			"terminal_id":  map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
+			"after_seq":    map[string]any{"type": "integer", "minimum": 0, "description": "上次读取返回的 next_seq，可选，默认 0"},
+			"max_bytes":    map[string]any{"type": "integer", "minimum": 1, "maximum": terminalMaxReadBytes, "description": "最多读取的字节数，可选，默认 12000"},
+			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": terminalMaxReadWaitSeconds, "description": "读取前严格等待的秒数，可选，默认 0，最大 60"},
 		}, "terminal_id")),
 	}}
 }
@@ -287,6 +291,24 @@ func (r *Registry) execTerminalRead(ctx context.Context, raw json.RawMessage) (s
 	if strings.TrimSpace(args.TerminalID) == "" {
 		return "", fmt.Errorf("terminal_id is required")
 	}
+	waitSeconds := args.WaitSeconds
+	if waitSeconds < 0 {
+		waitSeconds = 0
+	}
+	if waitSeconds > terminalMaxReadWaitSeconds {
+		waitSeconds = terminalMaxReadWaitSeconds
+	}
+	if waitSeconds > 0 {
+		timer := time.NewTimer(time.Duration(waitSeconds) * time.Second)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
 	maxBytes := args.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = terminalDefaultReadBytes
@@ -303,10 +325,11 @@ func (r *Registry) execTerminalRead(ctx context.Context, raw json.RawMessage) (s
 		b.Write(chunk.Data)
 	}
 	result := map[string]any{
-		"terminal_id": strings.TrimSpace(args.TerminalID),
-		"output":      b.String(),
-		"next_seq":    out.NextSeq,
-		"exited":      out.Exited,
+		"terminal_id":  strings.TrimSpace(args.TerminalID),
+		"output":       b.String(),
+		"next_seq":     out.NextSeq,
+		"exited":       out.Exited,
+		"wait_seconds": waitSeconds,
 	}
 	if out.ReplayGap {
 		result["replay_gap"] = true

@@ -12,6 +12,8 @@ N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步�
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
+**`terminal_read` 延时读取**：可传入 `wait_seconds`，工具会严格等待指定秒数后再读取终端输出；默认 0，最大 60 秒。等待期间如果 turn 被取消，会立即结束等待并返回取消错误。输出仍使用 `after_seq` / `next_seq` 游标读取。
+
 ---
 
 ## 目录布局（阶段 A，2026-06）
