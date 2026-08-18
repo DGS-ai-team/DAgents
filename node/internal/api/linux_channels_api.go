@@ -458,6 +458,7 @@ func linuxChannelView(rec store.LinuxChannelRecord) map[string]any {
 	return map[string]any{
 		"channel_id": rec.ChannelID, "display_name": rec.DisplayName, "host": rec.Host,
 		"port": rec.Port, "username": rec.Username, "credential_id": rec.CredentialID,
+		"host_key_policy": rec.HostKeyPolicy, "host_key_ref": rec.HostKeyRef,
 		"remote_shell": rec.RemoteShell, "default_cwd": rec.DefaultCWD,
 		"connect_timeout_ms": rec.ConnectTimeoutMS, "command_timeout_ms": rec.CommandTimeoutMS,
 		"keepalive_seconds": rec.KeepaliveSeconds, "max_sessions": rec.MaxSessions,

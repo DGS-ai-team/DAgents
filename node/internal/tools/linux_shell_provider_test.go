@@ -31,8 +31,8 @@ func (r testLinuxResolver) ResolveLinuxCredential(context.Context, string) (Linu
 func TestLinuxShellProviderValidatesStrictTargetAndConfiguration(t *testing.T) {
 	provider := NewLinuxShellProvider(testLinuxResolver{
 		channel: LinuxChannelConfig{
-			ID: "prod", Port: 22, Username: "deploy",
-			CredentialID: "cred", Enabled: true,
+			ID: "prod", Host: "127.0.0.1", Port: 22, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "known_hosts", Enabled: true,
 		},
 		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "env:SSH_PASSWORD", Enabled: true},
 	}, func(context.Context, string) (string, error) { return "secret", nil })
@@ -43,8 +43,8 @@ func TestLinuxShellProviderValidatesStrictTargetAndConfiguration(t *testing.T) {
 	}
 	if _, err := provider.Start(context.Background(), ExecRequest{
 		Target: ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "prod"}, Command: "id",
-	}); err == nil || !strings.Contains(err.Error(), "linux channel host is required") {
-		t.Fatalf("provider should validate the channel host: %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "known_hosts host key callback") {
+		t.Fatalf("provider should fail closed without host key callback: %v", err)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestLinuxExitStatus(t *testing.T) {
 }
 
 func TestLinuxShellProviderRunsAgainstTestSSHServer(t *testing.T) {
-	addr, _ := startTestSSHServer(t)
+	addr, fingerprint := startTestSSHServer(t)
 	host, portString, err := net.SplitHostPort(addr)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestLinuxShellProviderRunsAgainstTestSSHServer(t *testing.T) {
 	provider := NewLinuxShellProvider(testLinuxResolver{
 		channel: LinuxChannelConfig{
 			ID: "test", Host: host, Port: port, Username: "test-user",
-			CredentialID: "cred",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: fingerprint,
 			RemoteShell: "bash", Enabled: true,
 		},
 		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "test-secret", Enabled: true},
@@ -157,7 +157,7 @@ func TestLinuxShellProviderRunsAgainstTestSSHServer(t *testing.T) {
 }
 
 func TestLinuxShellProviderOpensPTY(t *testing.T) {
-	addr, _ := startTestSSHServer(t)
+	addr, fingerprint := startTestSSHServer(t)
 	host, portString, err := net.SplitHostPort(addr)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestLinuxShellProviderOpensPTY(t *testing.T) {
 	provider := NewLinuxShellProvider(testLinuxResolver{
 		channel: LinuxChannelConfig{
 			ID: "test", Host: host, Port: port, Username: "test-user",
-			CredentialID: "cred",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: fingerprint,
 			RemoteShell: "bash", Enabled: true,
 		},
 		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "test-secret", Enabled: true},
