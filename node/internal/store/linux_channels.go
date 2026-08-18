@@ -206,6 +206,12 @@ func (s *LinuxChannelStore) SaveChannel(ctx context.Context, rec LinuxChannelRec
 	if rec.Port < 1 || rec.Port > 65535 {
 		return fmt.Errorf("channel port must be between 1 and 65535")
 	}
+	if rec.HostKeyPolicy != "known_hosts" && rec.HostKeyPolicy != "pinned" {
+		return fmt.Errorf("host_key_policy must be known_hosts or pinned")
+	}
+	if rec.HostKeyPolicy == "pinned" && rec.HostKeyRef == "" {
+		return fmt.Errorf("host_key_ref is required for pinned host key policy")
+	}
 	now := time.Now().UTC()
 	created := rec.CreatedAt
 	if created.IsZero() {
@@ -316,16 +322,13 @@ func (s *LinuxChannelStore) SaveCredential(ctx context.Context, rec LinuxCredent
 	rec.CredentialID = strings.TrimSpace(rec.CredentialID)
 	rec.AuthType = strings.ToLower(strings.TrimSpace(rec.AuthType))
 	rec.SecretRef = strings.TrimSpace(rec.SecretRef)
-	if rec.CredentialID == "" || rec.AuthType == "" {
-		return fmt.Errorf("credential_id and auth_type are required")
+	if rec.CredentialID == "" || rec.AuthType == "" || rec.SecretRef == "" {
+		return fmt.Errorf("credential_id, auth_type and secret_ref are required")
 	}
 	switch rec.AuthType {
-	case "password", "private_key":
+	case "password", "private_key", "ssh_agent":
 	default:
 		return fmt.Errorf("unsupported credential auth_type %q", rec.AuthType)
-	}
-	if rec.SecretRef == "" {
-		return fmt.Errorf("secret_ref is required for %s credentials", rec.AuthType)
 	}
 	now := time.Now().UTC()
 	created := rec.CreatedAt
@@ -644,6 +647,7 @@ func (s *LinuxChannelStore) ResolveLinuxChannel(ctx context.Context, id string) 
 	return tools.LinuxChannelConfig{
 		ID: rec.ChannelID, DisplayName: rec.DisplayName, Host: rec.Host, Port: rec.Port,
 		Username: rec.Username, CredentialID: rec.CredentialID,
+		HostKeyPolicy: rec.HostKeyPolicy, HostKeyRef: rec.HostKeyRef,
 		RemoteShell: rec.RemoteShell, DefaultCWD: rec.DefaultCWD,
 		ConnectTimeout: time.Duration(rec.ConnectTimeoutMS) * time.Millisecond,
 		CommandTimeout: time.Duration(rec.CommandTimeoutMS) * time.Millisecond,
@@ -746,6 +750,11 @@ func normalizeLinuxChannel(rec *LinuxChannelRecord) {
 	rec.Host = strings.TrimSpace(rec.Host)
 	rec.Username = strings.TrimSpace(rec.Username)
 	rec.CredentialID = strings.TrimSpace(rec.CredentialID)
+	rec.HostKeyPolicy = strings.ToLower(strings.TrimSpace(rec.HostKeyPolicy))
+	if rec.HostKeyPolicy == "" {
+		rec.HostKeyPolicy = "known_hosts"
+	}
+	rec.HostKeyRef = strings.TrimSpace(rec.HostKeyRef)
 	rec.RemoteShell = strings.TrimSpace(rec.RemoteShell)
 	if rec.RemoteShell == "" {
 		rec.RemoteShell = "bash"

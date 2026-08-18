@@ -60,7 +60,7 @@ func TestLinuxChannelStoreRoundTripKeepsSecretsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.CredentialID != "cred-prod" {
+	if resolved.CredentialID != "cred-prod" || resolved.HostKeyRef != "SHA256:test-fingerprint" {
 		t.Fatalf("resolved=%+v", resolved)
 	}
 	if err := st.SaveBinding(ctx, LinuxChannelBindingRecord{
@@ -126,10 +126,10 @@ func TestLinuxChannelStoreRejectsUnsafeOrIncompleteConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.SaveChannel(ctx, LinuxChannelRecord{
-		ChannelID: "legacy-no-host-check", Host: "example", Username: "root", CredentialID: "cred",
+		ChannelID: "unsafe", Host: "example", Username: "root", CredentialID: "cred",
 		HostKeyPolicy: "insecure", Enabled: true,
-	}); err != nil {
-		t.Fatalf("legacy host key fields should not block channel storage: %v", err)
+	}); err == nil {
+		t.Fatal("insecure host key policy should be rejected")
 	}
 	if err := st.SaveCredential(ctx, LinuxCredentialRecord{
 		CredentialID: "bad", AuthType: "token", SecretRef: "env:TOKEN", Enabled: true,

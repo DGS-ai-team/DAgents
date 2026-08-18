@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/user"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +17,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 const executionTargetLinuxChannel = "linux_channel"
@@ -28,6 +33,8 @@ type LinuxChannelConfig struct {
 	Port           int
 	Username       string
 	CredentialID   string
+	HostKeyPolicy  string
+	HostKeyRef     string
 	RemoteShell    string
 	DefaultCWD     string
 	ConnectTimeout time.Duration
@@ -81,6 +88,11 @@ type LinuxChannelBindingResolver interface {
 // encrypted secret store. The returned value must never be logged or emitted.
 type LinuxSecretResolver func(ctx context.Context, secretRef string) (string, error)
 
+// LinuxHostKeyResolver creates a strict callback for a channel. Production
+// callers should use knownhosts.New or a pinned-key callback. Returning nil is
+// not allowed by the provider.
+type LinuxHostKeyResolver func(ctx context.Context, cfg LinuxChannelConfig) (ssh.HostKeyCallback, error)
+
 // LinuxShellProvider executes one non-PTY command in one SSH session. The SSH
 // client is intentionally not exposed as a persistent shell: cwd, env, and
 // process state do not leak between commands.
@@ -88,6 +100,8 @@ type LinuxShellProvider struct {
 	resolver        LinuxChannelResolver
 	bindingResolver LinuxChannelBindingResolver
 	secretResolver  LinuxSecretResolver
+	hostKey         LinuxHostKeyResolver
+	agentSocket     string
 }
 
 var linuxProcessSequence uint64
@@ -96,11 +110,47 @@ func NewLinuxShellProvider(resolver LinuxChannelResolver, secretResolver LinuxSe
 	return &LinuxShellProvider{resolver: resolver, secretResolver: secretResolver}
 }
 
+func (p *LinuxShellProvider) WithHostKeyResolver(resolver LinuxHostKeyResolver) *LinuxShellProvider {
+	if p != nil {
+		p.hostKey = resolver
+	}
+	return p
+}
+
+func (p *LinuxShellProvider) WithSSHAgentSocket(socket string) *LinuxShellProvider {
+	if p != nil {
+		p.agentSocket = strings.TrimSpace(socket)
+	}
+	return p
+}
+
 func (p *LinuxShellProvider) WithBindingResolver(resolver LinuxChannelBindingResolver) *LinuxShellProvider {
 	if p != nil {
 		p.bindingResolver = resolver
 	}
 	return p
+}
+
+// DefaultLinuxHostKeyResolver uses an explicit channel path when provided or
+// the current user's ~/.ssh/known_hosts. It deliberately has no insecure
+// fallback and is suitable as the Node default.
+func DefaultLinuxHostKeyResolver(_ context.Context, cfg LinuxChannelConfig) (ssh.HostKeyCallback, error) {
+	if strings.EqualFold(strings.TrimSpace(cfg.HostKeyPolicy), "pinned") {
+		return nil, nil
+	}
+	path := strings.TrimSpace(cfg.HostKeyRef)
+	if path == "" {
+		home, err := user.Current()
+		if err != nil {
+			return nil, fmt.Errorf("resolve current user for known_hosts: %w", err)
+		}
+		path = filepath.Join(home.HomeDir, ".ssh", "known_hosts")
+	}
+	callback, err := knownhosts.New(path)
+	if err != nil {
+		return nil, fmt.Errorf("load known_hosts %q: %w", path, err)
+	}
+	return callback, nil
 }
 
 func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Process, error) {
@@ -165,6 +215,14 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 	if err != nil {
 		return nil, err
 	}
+	hostKey, err := p.hostKeyCallback(ctx, cfg)
+	if err != nil {
+		if agentConn != nil {
+			_ = agentConn.Close()
+		}
+		return nil, err
+	}
+
 	connectTimeout := cfg.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -182,7 +240,7 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 	clientConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKey,
 		Timeout:         connectTimeout,
 	}
 	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), clientConfig)
@@ -257,6 +315,10 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 	if agentConn != nil {
 		defer agentConn.Close()
 	}
+	hostKey, err := p.hostKeyCallback(ctx, cfg)
+	if err != nil {
+		return TargetStatus{}, err
+	}
 	connectTimeout := cfg.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -270,7 +332,7 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKey,
 		Timeout:         connectTimeout,
 	})
 	if err != nil {
@@ -298,6 +360,14 @@ func validateLinuxChannelConfig(cfg LinuxChannelConfig) error {
 	if strings.TrimSpace(cfg.CredentialID) == "" {
 		return fmt.Errorf("linux channel credential id is required")
 	}
+	switch strings.ToLower(strings.TrimSpace(cfg.HostKeyPolicy)) {
+	case "known_hosts", "pinned":
+	default:
+		return fmt.Errorf("linux channel host key policy must be known_hosts or pinned")
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.HostKeyPolicy), "pinned") && strings.TrimSpace(cfg.HostKeyRef) == "" {
+		return fmt.Errorf("linux channel pinned host key reference is required")
+	}
 	return nil
 }
 
@@ -320,6 +390,19 @@ func (p *LinuxShellProvider) authMethod(ctx context.Context, cred LinuxCredentia
 			return nil, nil, fmt.Errorf("linux private key is invalid: %w", err)
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil, nil
+	case "ssh_agent":
+		socket := strings.TrimSpace(p.agentSocket)
+		if socket == "" {
+			socket = strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK"))
+		}
+		if socket == "" {
+			return nil, nil, fmt.Errorf("SSH_AUTH_SOCK is not configured")
+		}
+		conn, err := net.Dial("unix", socket)
+		if err != nil {
+			return nil, nil, fmt.Errorf("connect SSH agent: %w", err)
+		}
+		return []ssh.AuthMethod{ssh.PublicKeysCallback(agent.NewClient(conn).Signers)}, conn, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported linux credential auth type %q", cred.AuthType)
 	}
@@ -341,6 +424,36 @@ func (p *LinuxShellProvider) resolveSecret(ctx context.Context, cred LinuxCreden
 		return "", fmt.Errorf("linux credential %q secret is empty", cred.ID)
 	}
 	return secret, nil
+}
+
+func (p *LinuxShellProvider) hostKeyCallback(ctx context.Context, cfg LinuxChannelConfig) (ssh.HostKeyCallback, error) {
+	if p != nil && p.hostKey != nil {
+		callback, err := p.hostKey(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		if callback != nil {
+			return callback, nil
+		}
+		if !strings.EqualFold(strings.TrimSpace(cfg.HostKeyPolicy), "pinned") {
+			return nil, fmt.Errorf("linux host key resolver returned an empty callback")
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.HostKeyPolicy), "pinned") {
+		return pinnedHostKeyCallback(cfg.HostKeyRef), nil
+	}
+	return nil, errors.New("linux known_hosts host key callback is not configured")
+}
+
+func pinnedHostKeyCallback(reference string) ssh.HostKeyCallback {
+	want := strings.TrimSpace(reference)
+	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
+		got := ssh.FingerprintSHA256(key)
+		if want != got && strings.TrimPrefix(want, "SHA256:") != strings.TrimPrefix(got, "SHA256:") {
+			return fmt.Errorf("linux host key mismatch for %s", hostname)
+		}
+		return nil
+	}
 }
 
 func buildLinuxRemoteCommand(cfg LinuxChannelConfig, req ExecRequest) (string, error) {
