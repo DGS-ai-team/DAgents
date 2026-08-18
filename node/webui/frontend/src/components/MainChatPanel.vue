@@ -242,6 +242,11 @@ const inputStripLeftText = computed(() => {
 });
 
 const inputStripRightText = computed(() => inputStripRight());
+const hitlQueueKey = computed(() =>
+  props.hitlQueue
+    .map((item) => `${item?.kind || ""}:${item?.data?.request_id || item?.data?.approval_id || ""}`)
+    .join("\0"),
+);
 const connectionState = computed(() => {
   const state = String(chromeStore.sseStatus || "idle").toLowerCase();
   if (state === "connected") return { tone: "connected", label: "已连接", title: "实时消息连接正常" };
@@ -390,6 +395,17 @@ function maybeScrollToTail() {
 
 watch(tailContentKey, () => {
   maybeScrollToTail();
+});
+
+// HITL 卡片属于消息区末尾的新内容。沿用消息流当前的跟随状态：用户原本
+// 在底部时滚到新的底部，用户正在查看历史时不打断其阅读位置。
+watch(hitlQueueKey, (next, previous) => {
+  if (next === previous) return;
+  nextTick(() => {
+    const scroll = () => maybeScrollToTail();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(scroll);
+    else setTimeout(scroll, 0);
+  });
 });
 
 function onStreamScroll() {
