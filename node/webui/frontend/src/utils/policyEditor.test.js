@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PROTECTED_POLICY_TOOL,
+  buildBulkToolUpdates,
   canSetPolicyMode,
   decisionToMode,
   entryMode,
@@ -22,6 +23,22 @@ describe("policyEditor", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("read_file");
+  });
+
+  it("builds bulk updates only for the filtered tools and protects HITL", () => {
+    expect(buildBulkToolUpdates([
+      { name: "read_file" },
+      { name: PROTECTED_POLICY_TOOL },
+      { name: "bash" },
+    ], "always")).toEqual([
+      { name: "read_file", mode: "always" },
+      { name: PROTECTED_POLICY_TOOL, mode: "always" },
+      { name: "bash", mode: "always" },
+    ]);
+    expect(buildBulkToolUpdates([
+      { name: "read_file" },
+      { name: PROTECTED_POLICY_TOOL },
+    ], "deny")).toEqual([{ name: "read_file", mode: "deny" }]);
   });
 
   it("filters shell commands by name", () => {

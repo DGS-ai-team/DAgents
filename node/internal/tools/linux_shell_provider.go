@@ -426,6 +426,86 @@ func (p *LinuxShellProvider) resolveSecret(ctx context.Context, cred LinuxCreden
 	return secret, nil
 }
 
+// openClient creates an authenticated SSH client for one Linux channel. It is
+// shared by SFTP transfers and deliberately keeps the client private to the
+// provider so credentials never cross the tools boundary.
+func (p *LinuxShellProvider) openClient(ctx context.Context, channelID, agentID string) (LinuxChannelConfig, *ssh.Client, net.Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if p == nil || p.resolver == nil {
+		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel resolver is unavailable")
+	}
+	id := strings.TrimSpace(channelID)
+	if id == "" {
+		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel target id is required")
+	}
+	cfg, err := p.resolver.ResolveLinuxChannel(ctx, id)
+	if err != nil {
+		return LinuxChannelConfig{}, nil, nil, err
+	}
+	if err := validateLinuxChannelConfig(cfg); err != nil {
+		return LinuxChannelConfig{}, nil, nil, err
+	}
+	if !cfg.Enabled {
+		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel %q is disabled", cfg.ID)
+	}
+	if p.bindingResolver != nil {
+		binding, err := p.bindingResolver.ResolveLinuxBinding(ctx, strings.TrimSpace(agentID), cfg.ID)
+		if err != nil {
+			return LinuxChannelConfig{}, nil, nil, err
+		}
+		if !binding.Enabled {
+			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel %q is not enabled for agent %q", cfg.ID, agentID)
+		}
+	}
+	cred, err := p.resolver.ResolveLinuxCredential(ctx, cfg.CredentialID)
+	if err != nil {
+		return LinuxChannelConfig{}, nil, nil, err
+	}
+	if !cred.Enabled {
+		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux credential %q is disabled", cred.ID)
+	}
+	auth, agentConn, err := p.authMethod(ctx, cred)
+	if err != nil {
+		return LinuxChannelConfig{}, nil, agentConn, err
+	}
+	hostKey, err := p.hostKeyCallback(ctx, cfg)
+	if err != nil {
+		if agentConn != nil {
+			_ = agentConn.Close()
+		}
+		return LinuxChannelConfig{}, nil, nil, err
+	}
+	connectTimeout := cfg.ConnectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = 10 * time.Second
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
+	if err != nil {
+		if agentConn != nil {
+			_ = agentConn.Close()
+		}
+		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel connect failed: %w", err)
+	}
+	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
+		User:            cfg.Username,
+		Auth:            auth,
+		HostKeyCallback: hostKey,
+		Timeout:         connectTimeout,
+	})
+	if err != nil {
+		_ = conn.Close()
+		if agentConn != nil {
+			_ = agentConn.Close()
+		}
+		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel handshake failed: %w", err)
+	}
+	return cfg, ssh.NewClient(clientConn, chans, requests), agentConn, nil
+}
+
 func (p *LinuxShellProvider) hostKeyCallback(ctx context.Context, cfg LinuxChannelConfig) (ssh.HostKeyCallback, error) {
 	if p != nil && p.hostKey != nil {
 		callback, err := p.hostKey(ctx, cfg)

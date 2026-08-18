@@ -37,7 +37,19 @@ renderer.code = ({ text, lang }) => {
     content = hljs.highlight(text, { language }).value;
   }
 
-  return `<pre><code class="hljs${languageClass}">${content}</code></pre>`;
+  const label = language ? escapeHtml(language) : "文本";
+  return [
+    '<div class="markdown-code-block">',
+    '<div class="markdown-code-block__toolbar">',
+    `<span class="markdown-code-block__language">${label}</span>`,
+    '<span class="markdown-code-block__actions">',
+    '<button type="button" class="markdown-code-block__action" data-markdown-action="copy" aria-label="复制代码" title="复制代码">复制代码</button>',
+    '<button type="button" class="markdown-code-block__action" data-markdown-action="download" aria-label="下载代码" title="下载代码">下载</button>',
+    "</span>",
+    "</div>",
+    `<pre><code class="hljs${languageClass}">${content}</code></pre>`,
+    "</div>",
+  ].join("");
 };
 
 // Keep raw HTML inert even in non-browser test environments where DOMPurify

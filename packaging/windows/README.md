@@ -29,7 +29,7 @@
 
 静默：`/TASKS=shellmodern` 或 `/TASKS=shelllegacy`。zip 包默认 `dagents-shell.exe` 为 Tauri，并附带两套命名产物。
 
-**API Key** 仍通过系统环境变量提供（如 `OPENAI_API_KEY`），Web UI 只配置环境变量名（`api_key_env`）。
+**API Key** 可在 Web UI 中直接输入并由 Node 加密保存；`api_key_env` 仍作为兼容方式保留。使用环境变量时，修改变量后需要重启 Node 才能让进程读取新值。
 
 升级安装：若已存在 `config.yaml`，不会被覆盖；policy 覆盖仍可选询问。
 

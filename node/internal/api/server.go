@@ -49,6 +49,7 @@ type Server struct {
 	llmConfigs      *store.LLMConfigStore
 	nodeSettings    *store.NodeSettingsStore
 	stream          *stream.Hub // 进程内 SSE 事件总线
+	transferStream  *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）
 	workgroupStream *stream.Hub // Manage 工作组 Timeline + 实时协作事件
 	store           *store.SQLiteStore
 	triggerStore    *triggers.Store
@@ -58,6 +59,7 @@ type Server struct {
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
 	tools           *tools.Registry
+	transfers       *tools.LinuxTransferManager
 	backgroundJobs  *tools.BackgroundJobStore
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
@@ -222,7 +224,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 					"agents", result.AgentsTouched, "tools_added", result.ToolsAdded)
 			}
 		}
-		openedMCP, err := store.OpenMCPServers(filepath.Join(cfg.RuntimeDir(), "mcp_servers.db"))
+		openedMCP, err := store.OpenMCPServers(filepath.Join(cfg.RuntimeDir(), "mcp_servers.db"), cfg.RuntimeDir())
 		if err != nil {
 			logger.Error("mcp server store init failed", "error", err)
 		} else {
@@ -261,18 +263,30 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var linuxChannelStore *store.LinuxChannelStore
 	var linuxProvider *tools.LinuxShellProvider
 	if !o.skipStore {
-		opened, err := store.OpenLinuxChannels(filepath.Join(cfg.RuntimeDir(), "linux_channels.db"))
+		opened, err := store.OpenLinuxChannels(filepath.Join(cfg.RuntimeDir(), "linux_channels.db"), cfg.RuntimeDir())
 		if err != nil {
 			logger.Error("linux channel store init failed", "error", err)
 		} else {
 			linuxChannelStore = opened
-			linuxProvider = tools.NewLinuxShellProvider(opened, resolveLinuxSecret).
+			linuxProvider = tools.NewLinuxShellProvider(opened, opened.ResolveSecret).
 				WithBindingResolver(opened).
 				WithHostKeyResolver(tools.DefaultLinuxHostKeyResolver)
 		}
 	}
 
 	hub := stream.NewHub(256, logger)
+	transferHub := stream.NewHub(256, logger)
+	var transferManager *tools.LinuxTransferManager
+	if linuxProvider != nil {
+		transferManager = tools.NewLinuxTransferManager(linuxProvider, cfg.FSRoot, tools.DefaultLinuxTransferConcurrency,
+			func(agentID, eventType string, data map[string]any, replayable bool) {
+				if replayable {
+					transferHub.Publish(agentID, eventType, data)
+				} else {
+					transferHub.PublishEphemeral(agentID, eventType, data)
+				}
+			})
+	}
 	workgroupStream := stream.NewHub(1024, logger)
 	hostsnapshot.CaptureAtStartup()
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
@@ -441,6 +455,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger:          logger,
 		mux:             http.NewServeMux(),
 		stream:          hub,
+		transferStream:  transferHub,
 		workgroupStream: workgroupStream,
 		store:           st,
 		agents:          agentsStore,
@@ -458,6 +473,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		packageUploader: packageUploader,
 		control:         control,
 		tools:           o.tools,
+		transfers:       transferManager,
 		backgroundJobs:  backgroundJobs,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,

@@ -120,6 +120,8 @@ var knownBuiltinTools = map[string]struct{}{
 	"terminal_terminate":     {},
 	"terminal_list":          {},
 	"linux_exec":             {},
+	"linux_file_upload":      {},
+	"linux_file_download":    {},
 	"background_job_status":  {},
 	"background_job_cancel":  {},
 	"ask_user_information":   {},

@@ -67,6 +67,11 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 			s.logger.Warn("agent linux provider bind failed", "agent_id", targetAgentID, "error", err)
 		}
 	}
+	if s.transfers != nil {
+		if err := reg.WithLinuxTransferManager(s.transfers); err != nil && s.logger != nil {
+			s.logger.Warn("agent linux transfer manager bind failed", "agent_id", targetAgentID, "error", err)
+		}
+	}
 	if s.linuxChannels != nil {
 		reg.SetTerminalConfigResolver(s.linuxChannels)
 	}

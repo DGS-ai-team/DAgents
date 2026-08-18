@@ -106,4 +106,25 @@ describe("createFollowTailController — streaming smooth desync repro", () => {
     expect(el.scrollTop).toBe(1000);
     flushRaf();
   });
+
+  it("approval card arrival follows the current tail preference", () => {
+    const ctrl = createFollowTailController();
+    const el = fakeScroller({ scrollHeight: 600, clientHeight: 300, scrollTop: 300 });
+    ctrl.onScroll(el);
+
+    // The card is rendered below the existing content; a user at the tail
+    // should follow it to the new bottom.
+    el.scrollHeight = 900;
+    expect(ctrl.pinIfFollowing(el)).toBe(true);
+    expect(el.scrollTop).toBe(900);
+    flushRaf();
+
+    // A user reading history should keep their position when the card arrives.
+    const historyCtrl = createFollowTailController();
+    const historyEl = fakeScroller({ scrollHeight: 600, clientHeight: 300, scrollTop: 0 });
+    historyCtrl.onScroll(historyEl);
+    historyEl.scrollHeight = 900;
+    expect(historyCtrl.pinIfFollowing(historyEl)).toBe(false);
+    expect(historyEl.scrollTop).toBe(0);
+  });
 });

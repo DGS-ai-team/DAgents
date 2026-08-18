@@ -1085,7 +1085,7 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
-      <div v-if="agentStore.error" class="chat-error-banner">{{ agentStore.error }}</div>
+      <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
       <AgentEmptyState
         v-if="showNoAgentWelcome"
         @create="openCreateWizard()"
@@ -1102,9 +1102,10 @@ onUnmounted(() => {
           :entries="entries"
           :hitl-queue="hitlStore.queue"
           :tool-verbose="transcriptStore.toolFoldVerbose"
-          :disabled="!canSend"
+          :disabled="!canSend && !sending"
           :sending="sending"
           :cancelling="cancelling"
+          :error="agentStore.error"
           :hitl-busy="hitlStore.busy"
           :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"

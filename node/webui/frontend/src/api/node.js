@@ -162,6 +162,17 @@ export function getAgentToolJobs(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/tool-jobs`);
 }
 
+export function listTransfers(agentId = "") {
+  return apiFetch("/v1/transfers", { params: agentId ? { agent_id: agentId } : {} });
+}
+
+export function cancelTransfer(transferId) {
+  return apiFetch(`/v1/transfers/${encodeURIComponent(transferId)}/cancel`, {
+    method: "POST",
+    body: {},
+  });
+}
+
 export function listAgentTerminals(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/terminals`);
 }

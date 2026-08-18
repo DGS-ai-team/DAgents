@@ -1,11 +1,8 @@
 package api
 
 import (
-	"context"
-	"encoding/base64"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -200,7 +197,7 @@ func (s *Server) handleCreateLinuxCredential(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusInternalServerError, "linux_credential_id_failed", err.Error(), nil)
 		return
 	}
-	rec, err := linuxCredentialRecordFromRequest(req, id)
+	rec, err := linuxCredentialRecordFromRequest(req, id, s.linuxChannels.EncryptLiteralSecret)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "linux_credential_save_failed", err.Error(), nil)
 		return
@@ -236,7 +233,7 @@ func (s *Server) handlePatchLinuxCredential(w http.ResponseWriter, r *http.Reque
 	if req.AuthType == "" {
 		req.AuthType = existing.AuthType
 	}
-	rec, err := linuxCredentialRecordFromRequest(req, id)
+	rec, err := linuxCredentialRecordFromRequest(req, id, s.linuxChannels.EncryptLiteralSecret)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "linux_credential_save_failed", err.Error(), nil)
 		return
@@ -416,7 +413,7 @@ func mergeLinuxChannelRecord(dst *store.LinuxChannelRecord, old store.LinuxChann
 	}
 }
 
-func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID string) (store.LinuxCredentialRecord, error) {
+func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID string, encodeLiteral func(string) (string, error)) (store.LinuxCredentialRecord, error) {
 	id := strings.TrimSpace(fallbackID)
 	if id == "" {
 		id = strings.TrimSpace(req.CredentialID)
@@ -428,16 +425,23 @@ func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID str
 	authType := strings.ToLower(strings.TrimSpace(req.AuthType))
 	secretRef := strings.TrimSpace(req.SecretRef)
 	if req.SecretValue != nil {
-		if authType != "password" {
-			return store.LinuxCredentialRecord{}, fmt.Errorf("direct secret input is supported for password credentials only")
+		if authType != "password" && authType != "private_key" {
+			return store.LinuxCredentialRecord{}, fmt.Errorf("direct secret input is not supported for credential type %q", authType)
 		}
 		if secretRef != "" {
 			return store.LinuxCredentialRecord{}, fmt.Errorf("secret_ref and secret_value cannot both be provided")
 		}
 		if strings.TrimSpace(*req.SecretValue) == "" {
-			return store.LinuxCredentialRecord{}, fmt.Errorf("secret_value is required for direct password credentials")
+			return store.LinuxCredentialRecord{}, fmt.Errorf("secret_value is required for direct credentials")
 		}
-		secretRef = encodeLinuxLiteralSecret(*req.SecretValue)
+		if encodeLiteral == nil {
+			return store.LinuxCredentialRecord{}, fmt.Errorf("direct secret storage is unavailable")
+		}
+		var err error
+		secretRef, err = encodeLiteral(*req.SecretValue)
+		if err != nil {
+			return store.LinuxCredentialRecord{}, err
+		}
 	}
 	return store.LinuxCredentialRecord{CredentialID: id, DisplayName: strings.TrimSpace(req.DisplayName), AuthType: authType, SecretRef: secretRef, UsernameHint: strings.TrimSpace(req.UsernameHint), Enabled: enabled}, nil
 }
@@ -470,40 +474,6 @@ func linuxBindingView(rec store.LinuxChannelBindingRecord) map[string]any {
 		"allowed_commands": rec.AllowedCommands, "denied_commands": rec.DeniedCommands,
 		"created_at": rec.CreatedAt, "updated_at": rec.UpdatedAt,
 	}
-}
-
-func resolveLinuxSecret(_ context.Context, ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if strings.HasPrefix(ref, "literal:") {
-		encoded := strings.TrimPrefix(ref, "literal:")
-		if encoded == "" {
-			return "", fmt.Errorf("linux literal secret is empty")
-		}
-		value, err := base64.RawStdEncoding.DecodeString(encoded)
-		if err != nil {
-			return "", fmt.Errorf("linux literal secret is invalid: %w", err)
-		}
-		if len(value) == 0 {
-			return "", fmt.Errorf("linux literal secret is empty")
-		}
-		return string(value), nil
-	}
-	if !strings.HasPrefix(ref, "env:") {
-		return "", fmt.Errorf("unsupported linux secret reference; use env:NAME or direct password input")
-	}
-	name := strings.TrimSpace(strings.TrimPrefix(ref, "env:"))
-	if name == "" {
-		return "", fmt.Errorf("linux secret environment name is empty")
-	}
-	value := os.Getenv(name)
-	if strings.TrimSpace(value) == "" {
-		return "", fmt.Errorf("linux secret environment %q is empty", name)
-	}
-	return value, nil
-}
-
-func encodeLinuxLiteralSecret(value string) string {
-	return "literal:" + base64.RawStdEncoding.EncodeToString([]byte(value))
 }
 
 func linuxSecretSource(ref string) string {

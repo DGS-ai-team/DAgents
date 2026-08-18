@@ -6,6 +6,7 @@ import {
   PROTECTED_POLICY_TOOL,
   applyLocalShellUpdate,
   applyLocalToolUpdate,
+  buildBulkToolUpdates,
   canSetPolicyMode,
   entryMode,
   filterPolicyShellEntries,
@@ -35,6 +36,7 @@ const shellTab = ref("bash");
 const filterText = ref("");
 const newShellCommand = ref("");
 const newShellMode = ref("never");
+const bulkToolMode = ref("never");
 
 const resolvedAgentId = computed(() => String(props.agentId || "").trim());
 
@@ -46,6 +48,7 @@ const shellTypes = computed(() => {
 });
 
 const filteredTools = computed(() => filterPolicyTools(data.value?.tools, filterText.value));
+const bulkToolUpdates = computed(() => buildBulkToolUpdates(filteredTools.value, bulkToolMode.value));
 
 const shellEntries = computed(() => {
   const shell = data.value?.shell;
@@ -98,6 +101,26 @@ async function updateToolMode(name, mode) {
     await api.updateToolPolicy(resolvedAgentId.value, [{ name, mode }]);
     applyLocalToolUpdate(data.value, name, mode);
     statusMessage.value = `已更新 ${name} → ${formatPolicyMode(mode)}`;
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busyKey.value = "";
+  }
+}
+
+async function applyBulkToolMode() {
+  const updates = bulkToolUpdates.value;
+  if (!updates.length || busyKey.value) return;
+  busyKey.value = "tool-bulk";
+  error.value = "";
+  statusMessage.value = "";
+  try {
+    await api.updateToolPolicy(resolvedAgentId.value, updates);
+    for (const update of updates) applyLocalToolUpdate(data.value, update.name, update.mode);
+    const skipped = filteredTools.value.length - updates.length;
+    statusMessage.value = skipped
+      ? `已批量更新 ${updates.length} 个工具，跳过 ${skipped} 个受保护或无效项`
+      : `已批量更新当前过滤结果中的 ${updates.length} 个工具`;
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -224,7 +247,25 @@ onMounted(load);
         <p v-if="statusMessage" class="policy-panel__status">{{ statusMessage }}</p>
 
         <section v-if="tab === 'tools'" class="command-section">
-          <h3 class="command-section__title">工具策略 ({{ filteredTools.length }})</h3>
+          <div class="command-section__head policy-panel__bulk-head">
+            <h3 class="command-section__title">工具策略 ({{ filteredTools.length }})</h3>
+            <div class="policy-panel__bulk-actions">
+              <select v-model="bulkToolMode" class="policy-panel__decision-select" :disabled="!!busyKey">
+                <option v-for="opt in POLICY_MODES" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="btn btn--primary btn--sm"
+                :disabled="!bulkToolUpdates.length || !!busyKey"
+                @click="applyBulkToolMode"
+              >
+                {{ busyKey === "tool-bulk" ? "应用中…" : `应用到当前 ${bulkToolUpdates.length} 项` }}
+              </button>
+            </div>
+          </div>
+          <p class="policy-panel__hint policy-panel__bulk-hint">批量操作只作用于当前过滤结果；将“禁止”应用到过滤结果时会自动跳过受保护工具。</p>
           <div v-if="filteredTools.length" class="command-table-wrap">
             <table class="command-table">
               <thead>

@@ -17,6 +17,7 @@ func (s *Server) registerRoutes() {
 	s.registerWorkgroupRoutes()
 	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
+	s.registerLinuxTransferRoutes()
 	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)

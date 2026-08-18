@@ -19,6 +19,13 @@ describe("inferToolKind", () => {
     expect(inferToolKind("terminal_terminate")).toBe("terminal");
   });
 
+  it("maps Linux channel tools to the Linux source", () => {
+    expect(inferToolKind("linux_exec")).toBe("linux");
+    expect(inferToolKind("linux_file_upload")).toBe("linux");
+    expect(inferToolKind("linux_file_download")).toBe("linux");
+    expect(inferToolKind("linux_future_tool")).toBe("linux");
+  });
+
   it("maps triggers and browser by prefix", () => {
     expect(inferToolKind("trigger_list")).toBe("triggers");
     expect(inferToolKind("browser_navigate")).toBe("browser");
@@ -53,6 +60,10 @@ describe("resolveToolVisual", () => {
       kind: "terminal",
       label: "terminal",
     });
+    expect(resolveToolVisual({ data: { tool_name: "linux_file_upload" } })).toMatchObject({
+      kind: "linux",
+      label: "linux",
+    });
   });
 
   it("uses the MCP server name instead of the generic tool label", () => {
@@ -60,6 +71,7 @@ describe("resolveToolVisual", () => {
       kind: "mcp",
       label: "tencent-docs",
       short: "tencent-docs",
+      icon: "M",
     });
   });
 });

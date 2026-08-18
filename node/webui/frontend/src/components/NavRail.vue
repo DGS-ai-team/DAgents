@@ -17,7 +17,8 @@ import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import { activeChildCount, remoteWorkerStore } from "../stores/remoteWorkers.js";
 import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
 
-const RAIL_CACHE_TTL_MS = 5_000;
+const RAIL_CACHE_TTL_MS = 30_000;
+const UNREAD_REFRESH_INTERVAL_MS = 15_000;
 const railCache = {
   agents: [],
   workgroups: [],
@@ -26,7 +27,9 @@ const railCache = {
   agentsInFlight: null,
   workgroupsInFlight: null,
 };
+let refreshTimer = null;
 let unreadRefreshTimer = null;
+let railRefreshInFlight = null;
 let terminalLoadToken = 0;
 
 const props = defineProps({
@@ -55,6 +58,7 @@ const agentsLoaded = ref(false);
 const workgroupsLoaded = ref(false);
 const agentsLoadError = ref("");
 const workgroupsLoadError = ref("");
+const manualRefreshingAgents = ref(false);
 const terminals = ref([]);
 const loadingTerminals = ref(false);
 const manualRefreshingTerminals = ref(false);
@@ -68,14 +72,20 @@ const sectionOpen = ref({
   agents: true,
   terminals: true,
   workgroups: true,
-  activity: true,
+  activity: false,
 });
+const mobileActionOpen = ref("");
 
 function toggleSection(key) {
+  mobileActionOpen.value = "";
   sectionOpen.value = {
     ...sectionOpen.value,
     [key]: !sectionOpen.value[key],
   };
+}
+
+function toggleSectionActions(key) {
+  mobileActionOpen.value = mobileActionOpen.value === key ? "" : key;
 }
 
 /** 展开某一分区（供对话区 Changes 等入口调用） */
@@ -154,11 +164,23 @@ async function loadTerminals({ manual = false } = {}) {
 }
 
 function terminalLabel(item) {
+  const displayName = String(item?.display_name || item?.label || item?.name || "").trim();
+  if (displayName) return displayName;
   const shell = String(item?.shell || "终端").trim();
   const target = String(item?.target_kind || "local").trim() === "linux_channel"
-    ? String(item?.target_id || "Linux").trim()
+    ? `Linux · ${String(item?.target_id || "通道").trim()}`
     : "本机";
   return `${shell} · ${target}`;
+}
+
+function terminalMeta(item) {
+  const parts = [terminalStatusLabel(item?.status)];
+  const username = String(item?.username || item?.user || "").trim();
+  const host = String(item?.host || item?.hostname || "").trim();
+  if (username && host) parts.push(`${username}@${host}`);
+  else if (host) parts.push(host);
+  if (item?.config_id) parts.push(String(item.config_id));
+  return parts.join(" · ");
 }
 
 function terminalStatusLabel(status) {
@@ -203,7 +225,7 @@ function onToggleTheme() {
 }
 
 function agentSortTime(agent) {
-  const ts = Date.parse(agent?.updated_at || agent?.UpdatedAt || "");
+  const ts = Date.parse(agent?.last_active_at || agent?.LastActiveAt || agent?.updated_at || agent?.UpdatedAt || "");
   return Number.isFinite(ts) ? ts : 0;
 }
 
@@ -211,7 +233,8 @@ const sortedAgents = computed(() => {
   return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a));
 });
 
-async function refreshAgents({ force = false } = {}) {
+async function refreshAgents({ force = false, manual = false } = {}) {
+  if (manual) manualRefreshingAgents.value = true;
   loadingAgents.value = true;
   try {
     const now = Date.now();
@@ -237,10 +260,12 @@ async function refreshAgents({ force = false } = {}) {
     agentsLoaded.value = true;
     agentsLoadError.value = "";
   } catch {
-    // Keep the last successful list during transient refresh failures.
-    if (!agentsLoaded.value) agentsLoadError.value = "智能体列表暂时不可用，正在重试…";
+    // Keep the last successful list during transient refresh failures and
+    // expose the stale state in the section header instead of replacing rows.
+    agentsLoadError.value = "智能体列表暂时不可用，正在重试…";
   } finally {
     loadingAgents.value = false;
+    if (manual) manualRefreshingAgents.value = false;
     emit("agents-updated", agents.value.slice());
   }
 }
@@ -276,8 +301,9 @@ async function refreshWorkgroups({ force = false, manual = false } = {}) {
     workgroupsLoaded.value = true;
     workgroupsLoadError.value = "";
   } catch {
-    // Keep the last successful list during transient refresh failures.
-    if (!workgroupsLoaded.value) workgroupsLoadError.value = "工作组列表暂时不可用，正在重试…";
+    // Keep the last successful list during transient refresh failures and
+    // expose the stale state in the section header instead of replacing rows.
+    workgroupsLoadError.value = "工作组列表暂时不可用";
   } finally {
     loadingWgs.value = false;
     if (manual) manualRefreshingWgs.value = false;
@@ -304,14 +330,23 @@ async function refreshWorkgroupUnread(workgroupList) {
 }
 
 async function refresh({ force = true, manual = false } = {}) {
-  await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force, manual })]);
-  await refreshWorkgroupUnread(workgroups.value);
-  // 已展开的工作组刷新成员
-  await Promise.all(
-    workgroups.value
-      .filter((wg) => expanded.value.has(wg.workgroup_id))
-      .map((wg) => loadMembers(wg.workgroup_id, true)),
-  );
+  if (railRefreshInFlight) return railRefreshInFlight;
+  const task = (async () => {
+    await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force, manual })]);
+    await refreshWorkgroupUnread(workgroups.value);
+    // 已展开的工作组刷新成员
+    await Promise.all(
+      workgroups.value
+        .filter((wg) => expanded.value.has(wg.workgroup_id))
+        .map((wg) => loadMembers(wg.workgroup_id, true)),
+    );
+  })();
+  railRefreshInFlight = task;
+  try {
+    return await task;
+  } finally {
+    if (railRefreshInFlight === task) railRefreshInFlight = null;
+  }
 }
 
 function isExpanded(wgId) {
@@ -525,19 +560,33 @@ watch(
   { immediate: true },
 );
 
+function onVisibilityChange() {
+  if (document.visibilityState === "visible") {
+    void refresh({ force: true });
+  }
+}
+
 onMounted(() => {
   void refresh({ force: false });
-  unreadRefreshTimer = window.setInterval(() => {
-    void refreshAgents({ force: true });
-    void refreshWorkgroups({ force: true }).then(() => refreshWorkgroupUnread(workgroups.value));
+  refreshTimer = window.setInterval(() => {
+    void refresh({ force: true });
   }, RAIL_CACHE_TTL_MS);
+  unreadRefreshTimer = window.setInterval(() => {
+    void refreshWorkgroupUnread(workgroups.value);
+  }, UNREAD_REFRESH_INTERVAL_MS);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 });
 
 onUnmounted(() => {
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
   if (unreadRefreshTimer !== null) {
     window.clearInterval(unreadRefreshTimer);
     unreadRefreshTimer = null;
   }
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 });
 
 defineExpose({
@@ -558,7 +607,10 @@ defineExpose({
     <div class="nav-rail__scroll">
     <!-- Agents -->
     <section class="nav-rail__section">
-      <header class="nav-rail__section-head">
+      <header
+        class="nav-rail__section-head"
+        :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'agents' }"
+      >
         <button
           type="button"
           class="nav-rail__section-toggle"
@@ -573,13 +625,20 @@ defineExpose({
           </span>
           <span class="nav-rail__section-title">智能体</span>
           <span v-if="sortedAgents.length" class="nav-rail__section-count">{{ sortedAgents.length }}</span>
+          <span
+            v-if="agentsLoadError && agentsLoaded"
+            class="nav-rail__section-state nav-rail__section-state--error"
+            title="智能体列表刷新失败，当前显示上次成功结果"
+          >!</span>
+          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.agents ? "⌄" : "›" }}</span>
         </button>
+        <div class="nav-rail__section-actions">
         <button
           type="button"
-          class="nav-rail__icon-btn"
+          class="nav-rail__icon-btn nav-rail__section-action"
           title="新建智能体"
           aria-label="新建智能体"
-          @click.stop="openCreateAgent"
+          @click.stop="mobileActionOpen = ''; openCreateAgent()"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
             <path
@@ -591,6 +650,31 @@ defineExpose({
             />
           </svg>
         </button>
+        </div>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-collapse"
+          :title="sectionOpen.agents ? '收起智能体' : '展开智能体'"
+          :aria-label="sectionOpen.agents ? '收起智能体' : '展开智能体'"
+          :aria-expanded="sectionOpen.agents"
+          @click.stop="toggleSection('agents')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-more"
+          title="更多操作"
+          aria-label="更多操作"
+          :aria-expanded="mobileActionOpen === 'agents'"
+          @click.stop="toggleSectionActions('agents')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="4" cy="8" r="1" fill="currentColor" /><circle cx="8" cy="8" r="1" fill="currentColor" /><circle cx="12" cy="8" r="1" fill="currentColor" />
+          </svg>
+        </button>
       </header>
 
       <div v-if="sectionOpen.agents">
@@ -598,7 +682,7 @@ defineExpose({
         <li
           v-for="a in sortedAgents"
           :key="agentRecordId(a)"
-          class="nav-rail__item"
+          class="nav-rail__item nav-rail__agent-item"
           :class="{ 'nav-rail__item--active': agentRecordId(a) === activeAgentId }"
           @click="selectAgent(agentRecordId(a))"
         >
@@ -629,10 +713,10 @@ defineExpose({
           </div>
           <div class="nav-rail__item-trail">
             <span
-              v-if="a.updated_at"
+              v-if="a.last_active_at"
               class="nav-rail__time"
-              :title="a.updated_at"
-            >{{ formatCompactRelativeTime(a.updated_at) }}</span>
+              :title="a.last_active_at"
+            >{{ formatCompactRelativeTime(a.last_active_at) }}</span>
           </div>
           <div class="nav-rail__item-actions" @click.stop>
             <button
@@ -689,7 +773,16 @@ defineExpose({
           </div>
         </li>
         <li v-if="!sortedAgents.length && !agentsLoaded && loadingAgents && !agentsLoadError" class="nav-rail__hint">加载中…</li>
-        <li v-else-if="!sortedAgents.length && agentsLoadError" class="nav-rail__hint">{{ agentsLoadError }}</li>
+        <li v-else-if="!sortedAgents.length && agentsLoadError" class="nav-rail__hint nav-rail__hint--error">
+          <span>暂时无法加载智能体</span>
+          <button
+            type="button"
+            class="nav-rail__retry"
+            :class="{ 'nav-rail__icon-btn--spinning': manualRefreshingAgents }"
+            :disabled="manualRefreshingAgents"
+            @click="refreshAgents({ force: true, manual: true })"
+          >重试</button>
+        </li>
         <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
       </ul>
       </div>
@@ -697,7 +790,10 @@ defineExpose({
 
     <!-- Terminals -->
     <section v-if="activeAgentId" class="nav-rail__section">
-      <header class="nav-rail__section-head">
+      <header
+        class="nav-rail__section-head"
+        :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'terminals' }"
+      >
         <button
           type="button"
           class="nav-rail__section-toggle"
@@ -712,24 +808,48 @@ defineExpose({
           </span>
           <span class="nav-rail__section-title">终端</span>
           <span v-if="terminals.length" class="nav-rail__section-count">{{ terminals.length }}</span>
+          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.terminals ? "⌄" : "›" }}</span>
         </button>
+        <div class="nav-rail__section-actions">
         <button
           type="button"
-          class="nav-rail__icon-btn"
+          class="nav-rail__icon-btn nav-rail__section-action"
           :class="{ 'nav-rail__icon-btn--spinning': manualRefreshingTerminals }"
           title="刷新终端清单"
           aria-label="刷新终端清单"
           :disabled="manualRefreshingTerminals"
-          @click.stop="loadTerminals({ manual: true })"
+          @click.stop="mobileActionOpen = ''; loadTerminals({ manual: true })"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
+            <path
+              d="M17.65 6.35A7.98 7.98 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4l-2.35 2.35Z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+        </div>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-collapse"
+          :title="sectionOpen.terminals ? '收起终端' : '展开终端'"
+          :aria-label="sectionOpen.terminals ? '收起终端' : '展开终端'"
+          :aria-expanded="sectionOpen.terminals"
+          @click.stop="toggleSection('terminals')"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
-            <path
-              d="M13 5.6A5.5 5.5 0 104.1 12M13 5.6V2.4m0 3.2H9.8"
-              stroke="currentColor"
-              stroke-width="1.35"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-more"
+          title="更多操作"
+          aria-label="更多操作"
+          :aria-expanded="mobileActionOpen === 'terminals'"
+          @click.stop="toggleSectionActions('terminals')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="4" cy="8" r="1" fill="currentColor" /><circle cx="8" cy="8" r="1" fill="currentColor" /><circle cx="12" cy="8" r="1" fill="currentColor" />
           </svg>
         </button>
       </header>
@@ -754,8 +874,7 @@ defineExpose({
               <span class="nav-rail__terminal-title">{{ terminalLabel(item) }}</span>
               <span class="nav-rail__terminal-meta">
                 <span class="nav-rail__terminal-status-dot" :class="`nav-rail__terminal-status-dot--${item.status}`"></span>
-                {{ terminalStatusLabel(item.status) }}
-                <span v-if="item.config_id" class="nav-rail__terminal-config">{{ item.config_id }}</span>
+                <span class="nav-rail__terminal-meta-text">{{ terminalMeta(item) }}</span>
               </span>
             </span>
           </li>
@@ -766,7 +885,10 @@ defineExpose({
 
     <!-- Workgroups -->
     <section class="nav-rail__section">
-      <header class="nav-rail__section-head">
+      <header
+        class="nav-rail__section-head"
+        :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'workgroups' }"
+      >
         <button
           type="button"
           class="nav-rail__section-toggle"
@@ -782,13 +904,20 @@ defineExpose({
           </span>
           <span class="nav-rail__section-title">工作组</span>
           <span v-if="workgroups.length" class="nav-rail__section-count">{{ workgroups.length }}</span>
+          <span
+            v-if="workgroupsLoadError && workgroupsLoaded"
+            class="nav-rail__section-state nav-rail__section-state--error"
+            title="工作组列表刷新失败，当前显示上次成功结果"
+          >!</span>
+          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.workgroups ? "⌄" : "›" }}</span>
         </button>
+        <div class="nav-rail__section-actions">
         <button
           type="button"
-          class="nav-rail__icon-btn"
+          class="nav-rail__icon-btn nav-rail__section-action"
           title="新建工作组"
           aria-label="新建工作组"
-          @click.stop="openCreateWg"
+          @click.stop="mobileActionOpen = ''; openCreateWg()"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
             <path
@@ -802,21 +931,43 @@ defineExpose({
         </button>
         <button
           type="button"
-          class="nav-rail__icon-btn"
+          class="nav-rail__icon-btn nav-rail__section-action"
           :class="{ 'nav-rail__icon-btn--spinning': manualRefreshingWgs }"
           title="刷新工作组"
           aria-label="刷新工作组"
           :disabled="manualRefreshingWgs"
-          @click.stop="refresh({ force: true, manual: true })"
+          @click.stop="mobileActionOpen = ''; refresh({ force: true, manual: true })"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
+            <path
+              d="M17.65 6.35A7.98 7.98 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4l-2.35 2.35Z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+        </div>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-collapse"
+          :title="sectionOpen.workgroups ? '收起工作组' : '展开工作组'"
+          :aria-label="sectionOpen.workgroups ? '收起工作组' : '展开工作组'"
+          :aria-expanded="sectionOpen.workgroups"
+          @click.stop="toggleSection('workgroups')"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
-            <path
-              d="M13 5.6A5.5 5.5 0 104.1 12M13 5.6V2.4m0 3.2H9.8"
-              stroke="currentColor"
-              stroke-width="1.35"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-more"
+          title="更多操作"
+          aria-label="更多操作"
+          :aria-expanded="mobileActionOpen === 'workgroups'"
+          @click.stop="toggleSectionActions('workgroups')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="4" cy="8" r="1" fill="currentColor" /><circle cx="8" cy="8" r="1" fill="currentColor" /><circle cx="12" cy="8" r="1" fill="currentColor" />
           </svg>
         </button>
       </header>
@@ -999,7 +1150,9 @@ defineExpose({
           </ul>
         </li>
         <li v-if="!workgroups.length && !workgroupsLoaded && loadingWgs && !workgroupsLoadError" class="nav-rail__hint">加载中…</li>
-        <li v-else-if="!workgroups.length && workgroupsLoadError" class="nav-rail__hint">{{ workgroupsLoadError }}</li>
+        <li v-else-if="!workgroups.length && workgroupsLoadError" class="nav-rail__hint nav-rail__hint--error">
+          <span>暂时无法加载工作组</span>
+        </li>
         <li v-else-if="!workgroups.length" class="nav-rail__empty">暂无工作组</li>
       </ul>
       </div>
@@ -1026,6 +1179,19 @@ defineExpose({
           </span>
           <span class="nav-rail__section-title">活动</span>
           <span v-if="activityBadge" class="nav-rail__section-count">{{ activityBadge }}</span>
+          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.activity ? "⌄" : "›" }}</span>
+        </button>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-collapse"
+          :title="sectionOpen.activity ? '收起活动' : '展开活动'"
+          :aria-label="sectionOpen.activity ? '收起活动' : '展开活动'"
+          :aria-expanded="sectionOpen.activity"
+          @click.stop="toggleSection('activity')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
       </header>
       <ActivityPanel v-if="sectionOpen.activity" embedded />

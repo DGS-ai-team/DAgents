@@ -19,6 +19,7 @@ export const TOOL_GROUPS = [
   { name: "child_agents", label: "子智能体" },
   { name: "fs", label: "文件" },
   { name: "hitl", label: "用户询问" },
+  { name: "linux", label: "Linux 通道", hint: "SSH 命令与文件传输" },
   { name: "memory", label: "记忆" },
   { name: "skills", label: "技能" },
   { name: "terminal", label: "终端" },

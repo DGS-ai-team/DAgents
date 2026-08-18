@@ -174,7 +174,7 @@ onMounted(() => {
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">MCP 配置</h2>
-          <p class="settings-section__desc">兼容常见 MCP 客户端的 mcpServers 格式。凭据可以填写明文，也可以写成 ${ENV_NAME} 环境变量引用。</p>
+          <p class="settings-section__desc">兼容常见 MCP 客户端的 mcpServers 格式。凭据可以填写明文，也可以写成 ${ENV_NAME} 环境变量引用；明文内容会加密存储。</p>
         </div>
         <div class="settings-section__actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="formatDraft">格式化</button>
@@ -192,7 +192,7 @@ onMounted(() => {
   "mcpServers": {}
 }'
       ></textarea>
-      <p class="mcp-settings__hint">stdio 示例：command、args、env；远程服务示例：type、url、headers。明文凭据会保存在本机 Node 的 MCP 配置中，请谨慎使用。</p>
+      <p class="mcp-settings__hint">stdio 示例：command、args、env；远程服务示例：type、url、headers。明文凭据仅在编辑器中输入，保存后会在本机 Node 配置中加密存储。</p>
     </section>
 
     <p v-if="loading" class="mcp-settings__muted">加载中…</p>
