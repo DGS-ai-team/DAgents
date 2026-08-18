@@ -58,6 +58,10 @@ import {
 } from "../stores/hitl.js";
 import { consumeStartupURL, hydrateAgent, invalidateHydration } from "../stores/hydrate.js";
 import {
+  recordSSEEvent,
+  startPerformanceSpan,
+} from "../stores/performanceDiagnostics.js";
+import {
   startDesktopFocusHeartbeat,
   stopDesktopFocusHeartbeat,
   pulseDesktopFocus,
@@ -106,10 +110,9 @@ const agentListCount = ref(null);
 const agentList = ref([]);
 const currentAgentDisplayName = ref("");
 const chatPanelRef = ref(null);
-const workspaceMode = ref("messages");
 const selectedTerminalId = ref("");
+const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
-const terminalCount = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
 
@@ -307,17 +310,17 @@ function handleEvent(ev) {
   if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
 
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
-  turnWatchdog.noteActivity();
-  if (["terminal.opened", "terminal.updated", "terminal.closed"].includes(ev.type)) {
-    terminalRevision.value += 1;
-    if (ev.type === "terminal.opened" && ev.data?.terminal_id && !selectedTerminalId.value) {
-      selectedTerminalId.value = String(ev.data.terminal_id);
+  recordSSEEvent(ev.type, ev.seq);
+  const eventSpan = startPerformanceSpan("sse.handle", { type: ev.type });
+  try {
+    turnWatchdog.noteActivity();
+    if (["terminal.opened", "terminal.updated", "terminal.closed"].includes(ev.type)) {
+      terminalRevision.value += 1;
     }
-  }
-  const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
+    const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
-  if (!skipRender) {
-    switch (ev.type) {
+    if (!skipRender) {
+      switch (ev.type) {
     case "assistant":
       markTurnContent();
       finishWaitingStatuses();
@@ -410,12 +413,15 @@ function handleEvent(ev) {
     case "side_effects_cleared":
       markSideEffectsStale(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
       break;
-    default:
-      break;
+        default:
+          break;
+      }
     }
-  }
 
-  markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+    markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+  } finally {
+    eventSpan.end();
+  }
 }
 
 function handleCompressionEvent(type, data) {
@@ -964,11 +970,25 @@ watch(
   () => agentStore.agentId,
   () => {
     void syncCurrentAgentDisplayName();
-    workspaceMode.value = "messages";
     selectedTerminalId.value = "";
-    terminalCount.value = 0;
+    selectedTerminalMeta.value = null;
   },
 );
+
+const terminalOpen = computed(
+  () => Boolean(String(selectedTerminalId.value || "").trim() && selectedTerminalMeta.value),
+);
+
+function selectTerminal(item) {
+  const id = String(item?.terminal_id || "").trim();
+  selectedTerminalId.value = id;
+  selectedTerminalMeta.value = id ? item : null;
+}
+
+function closeTerminal() {
+  selectedTerminalId.value = "";
+  selectedTerminalMeta.value = null;
+}
 
 onActivated(() => {
   turnWatchdog.start();
@@ -1038,7 +1058,10 @@ onUnmounted(() => {
     <aside class="app__col app__col--agents">
       <NavRail
         ref="agentPanelRef"
+        :terminal-revision="terminalRevision"
+        :selected-terminal-id="selectedTerminalId"
         @switch="switchAgent"
+        @terminal-selected="selectTerminal"
         @create="openCreateWizard()"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
@@ -1073,32 +1096,8 @@ onUnmounted(() => {
       </div>
 
       <div v-else class="chat-workspace">
-        <div class="chat-workspace__switcher" role="tablist" aria-label="工作区视图">
-          <button
-            type="button"
-            class="chat-workspace__tab"
-            :class="{ 'chat-workspace__tab--active': workspaceMode === 'messages' }"
-            role="tab"
-            :aria-selected="workspaceMode === 'messages'"
-            @click="workspaceMode = 'messages'"
-          >
-            消息
-          </button>
-          <button
-            type="button"
-            class="chat-workspace__tab"
-            :class="{ 'chat-workspace__tab--active': workspaceMode === 'terminals' }"
-            role="tab"
-            :aria-selected="workspaceMode === 'terminals'"
-            @click="workspaceMode = 'terminals'"
-          >
-            终端
-            <span v-if="terminalCount" class="chat-workspace__count">{{ terminalCount }}</span>
-          </button>
-        </div>
-
         <MainChatPanel
-          v-show="workspaceMode === 'messages'"
+          v-show="!terminalOpen"
           ref="chatPanelRef"
           :entries="entries"
           :hitl-queue="hitlStore.queue"
@@ -1127,12 +1126,11 @@ onUnmounted(() => {
           @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
         />
         <TerminalDock
-          v-show="workspaceMode === 'terminals'"
+          v-if="terminalOpen"
           :agent-id="agentStore.agentId"
-          :refresh-key="terminalRevision"
           :selected-terminal-id="selectedTerminalId"
-          @update:selected-terminal-id="selectedTerminalId = $event"
-          @count-changed="terminalCount = $event"
+          :terminal-meta="selectedTerminalMeta"
+          @close="closeTerminal"
         />
       </div>
 
@@ -1152,40 +1150,5 @@ onUnmounted(() => {
 
 <style scoped>
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.chat-workspace__switcher {
-  display: flex;
-  flex: none;
-  gap: 4px;
-  padding: 8px 20px 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface, #fff);
-}
-.chat-workspace__tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px 9px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--color-text-subtle);
-  cursor: pointer;
-  font-size: 12px;
-}
-.chat-workspace__tab--active {
-  border-bottom-color: var(--color-primary, #3689d6);
-  color: var(--color-text);
-  font-weight: 600;
-}
-.chat-workspace__count {
-  min-width: 17px;
-  padding: 1px 5px;
-  border-radius: 10px;
-  background: #e6f1ff;
-  color: #2875c7;
-  font-size: 10px;
-  line-height: 15px;
-  text-align: center;
-}
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
 </style>

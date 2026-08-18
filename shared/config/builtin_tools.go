@@ -61,14 +61,16 @@ var builtinToolGroups = map[string][]string{
 	},
 	"bash": {
 		"bash_run",
+		"background_job_status",
+		"background_job_cancel",
+	},
+	"terminal": {
 		"terminal_config_list",
 		"terminal_open",
 		"terminal_input",
 		"terminal_read",
 		"terminal_terminate",
 		"terminal_list",
-		"background_job_status",
-		"background_job_cancel",
 	},
 	"linux": {
 		"linux_exec",

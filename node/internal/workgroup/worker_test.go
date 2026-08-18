@@ -319,6 +319,60 @@ func TestArchiveRejectsStaleEpoch(t *testing.T) {
 	}
 }
 
+func TestMemberArchiveTombstoneStopsProvisionReplay(t *testing.T) {
+	dir := t.TempDir()
+	req := ProvisionRequest{
+		ProvisionID:      "pv_01h00000000000000000000009",
+		WorkgroupID:      "wg_01h00000000000000000000001",
+		MemberID:         "mb_01h00000000000000000000002",
+		HomeNodeID:       "node_b",
+		MemberSpecDigest: "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+		LeaseEpoch:       1,
+		MemberGeneration: 1,
+		ToolAllowNames:   []string{"read_file"},
+		WorkspaceRoot:    filepath.Join(dir, "ws"),
+	}
+	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	provisioned, err := w.HandleProvision(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleArchive(ArchiveTombstone{
+		WorkgroupID:         req.WorkgroupID,
+		MemberID:            req.MemberID,
+		LeaseEpochAtArchive: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	binding, err := w.Bindings.Get(req.MemberID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding == nil || binding.Status != "archived" || binding.LeaseEpoch != 2 {
+		t.Fatalf("archived binding=%+v", binding)
+	}
+	if _, err := w.HandleProvision(req); err == nil || err.(*Error).Code != CodeWorkgroupArchived {
+		t.Fatalf("replayed provision error=%v", err)
+	}
+	if provisioned.Binding.Status != "ready" {
+		t.Fatalf("initial binding status=%s", provisioned.Binding.Status)
+	}
+
+	// The tombstone must also win when it arrives before the first provision
+	// frame (for example after a local binding was lost during restart).
+	w2 := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	if err := w2.HandleArchive(ArchiveTombstone{
+		WorkgroupID:         req.WorkgroupID,
+		MemberID:            req.MemberID,
+		LeaseEpochAtArchive: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w2.HandleProvision(req); err == nil || err.(*Error).Code != CodeWorkgroupArchived {
+		t.Fatalf("provision after pre-binding tombstone error=%v", err)
+	}
+}
+
 func TestEmptyAllowNamesMeansNoTools(t *testing.T) {
 	names := EffectiveToolNames([]string{}, []string{"read_file"}, []string{"read_file", "bash"})
 	if len(names) != 0 {

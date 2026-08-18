@@ -72,6 +72,7 @@ type TerminalConfigInfo struct {
 	Port        int    `json:"port,omitempty"`
 	Username    string `json:"username,omitempty"`
 	Remark      string `json:"remark,omitempty"`
+	Shell       string `json:"shell,omitempty"`
 	TargetKind  string `json:"-"`
 	TargetID    string `json:"-"`
 }

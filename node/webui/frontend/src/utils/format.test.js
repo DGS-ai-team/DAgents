@@ -52,4 +52,27 @@ describe("formatToolResultDisplay", () => {
     expect(display.headline).toContain("已完成");
     expect(display.detail).toBe("file body");
   });
+
+  it("removes WSL protocol and ANSI sequences from terminal results", () => {
+    const output =
+      "top -bn1 | head -20\r\n" +
+      "\u001b]3008;start=abc;type=shell\u001b\\" +
+      "\u001b[?2004h\u001b[?2004l" +
+      "\u001b]0;aphrodite@host\u0007" +
+      "\u001b[32m\u001b[1maphrodite\u001b[m$ \r\n" +
+      "Tasks: 76 total\r\n" +
+      "\u001b[11;1Hdone\u001b[?25h\n";
+    const display = formatToolResultDisplay({
+      data: {
+        name: "terminal_read",
+        content: JSON.stringify({ terminal_id: "term-1", output, next_seq: 15, exited: false }),
+      },
+    });
+
+    expect(display.detail).not.toContain("\u001b");
+    expect(display.detail).not.toContain("3008;");
+    expect(display.detail).not.toContain("[?2004");
+    expect(display.detail).not.toContain("\r");
+    expect(display.detail).toContain("Tasks: 76 total");
+  });
 });

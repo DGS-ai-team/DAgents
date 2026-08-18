@@ -205,6 +205,35 @@ class VerticalLoop:
             self.store.ack_outbox(workgroup_id, frame.delivery_seq)
         return frame
 
+    def enqueue_member_tombstone(self, workgroup_id: str, member_id: str) -> OutboxFrame:
+        """Tell the member Home Node to fence one archived member binding."""
+        member = self.store.get_member(member_id)
+        if member is None or member.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "member not found", http_status=404)
+        ctx = self.store.member_execution_context(member_id)
+        payload = {
+            "workgroup_id": workgroup_id,
+            "member_id": member_id,
+            "lease_epoch_at_archive": ctx["lease_epoch"],
+        }
+        frame = self.store.enqueue_outbox(
+            workgroup_id,
+            type="workgroup.tombstone",
+            payload=payload,
+        )
+        if self.hub is not None:
+            self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
+            self.hub.request_resume(ctx["home_node_id"], workgroup_id)
+        # The bridge is only a synchronous test/local integration.  Keep the
+        # older bridge contract compatible while allowing member-scoped
+        # fencing when it is implemented by the bridge.
+        if self.bridge is not None:
+            apply_member_tombstone = getattr(self.bridge, "apply_member_tombstone", None)
+            if callable(apply_member_tombstone):
+                apply_member_tombstone(payload)
+                self.store.ack_outbox(workgroup_id, frame.delivery_seq)
+        return frame
+
     def complete_provision(self, workgroup_id: str, req: ProvisionCompleteRequest) -> dict[str, Any]:
         member = self.store.mark_member_status(
             req.member_id,

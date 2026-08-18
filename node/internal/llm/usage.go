@@ -238,7 +238,7 @@ func (u Usage) sseFieldsWithPrefix(prefix string) map[string]any {
 	return out
 }
 
-// SSEPayload 转为 SSE usage 事件扁平字段（Client / Textual TUI 共用）。
+// SSEPayload 转为 SSE usage 事件扁平字段（Web UI / 运维 Client 共用）。
 func (u Usage) SSEPayload() map[string]any {
 	norm := u
 	norm.Normalize()

@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"strings"
+	"time"
 )
 
 const (
-	terminalDefaultReadBytes = 12000
-	terminalMaxReadBytes     = 65536
+	terminalDefaultReadBytes   = 12000
+	terminalMaxReadBytes       = 65536
+	terminalMaxReadWaitSeconds = 60
 )
 
 type terminalOpenArgs struct {
@@ -32,9 +35,10 @@ type terminalInputArgs struct {
 }
 
 type terminalReadArgs struct {
-	TerminalID string `json:"terminal_id"`
-	AfterSeq   uint64 `json:"after_seq"`
-	MaxBytes   int    `json:"max_bytes"`
+	TerminalID  string `json:"terminal_id"`
+	AfterSeq    uint64 `json:"after_seq"`
+	MaxBytes    int    `json:"max_bytes"`
+	WaitSeconds int    `json:"wait_seconds"`
 }
 
 func terminalOpenToolDef() ToolDef {
@@ -77,11 +81,12 @@ func terminalInputToolDef() ToolDef {
 func terminalReadToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_read",
-		Description: "读取交互终端从指定序号之后产生的输出。首次读取 after_seq 留空；后续使用返回的 next_seq，避免重复读取。",
+		Description: "等待指定秒数后，读取交互终端从指定序号之后产生的输出。wait_seconds 是严格的读取前延时，不会因为提前出现输出而提前返回；首次读取 after_seq 留空，后续使用返回的 next_seq，避免重复读取。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
-			"terminal_id": map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
-			"after_seq":   map[string]any{"type": "integer", "minimum": 0, "description": "上次读取返回的 next_seq，可选，默认 0"},
-			"max_bytes":   map[string]any{"type": "integer", "minimum": 1, "maximum": terminalMaxReadBytes, "description": "最多读取的字节数，可选，默认 12000"},
+			"terminal_id":  map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
+			"after_seq":    map[string]any{"type": "integer", "minimum": 0, "description": "上次读取返回的 next_seq，可选，默认 0"},
+			"max_bytes":    map[string]any{"type": "integer", "minimum": 1, "maximum": terminalMaxReadBytes, "description": "最多读取的字节数，可选，默认 12000"},
+			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": terminalMaxReadWaitSeconds, "description": "读取前严格等待的秒数，可选，默认 0，最大 60"},
 		}, "terminal_id")),
 	}}
 }
@@ -147,10 +152,28 @@ func localTerminalConfig() TerminalConfigInfo {
 	}
 }
 
+func localTerminalConfigs() []TerminalConfigInfo {
+	local := localTerminalConfig()
+	configs := []TerminalConfigInfo{local}
+	for _, candidate := range []string{"wsl.exe", "wsl"} {
+		if _, err := exec.LookPath(candidate); err != nil {
+			continue
+		}
+		wsl := local
+		wsl.ConfigID = "local-wsl"
+		wsl.DisplayName = "本机 WSL"
+		wsl.Shell = "wsl"
+		wsl.Remark = "Node 所在主机 · 默认 WSL 发行版"
+		configs = append(configs, wsl)
+		break
+	}
+	return configs
+}
+
 func (r *Registry) listTerminalConfigs(ctx context.Context) ([]TerminalConfigInfo, error) {
 	configs := make([]TerminalConfigInfo, 0, 1)
 	if r != nil && r.localTerminalProvider != nil {
-		configs = append(configs, localTerminalConfig())
+		configs = append(configs, localTerminalConfigs()...)
 	}
 	if r == nil || r.terminalConfigResolver == nil {
 		return configs, nil
@@ -168,12 +191,12 @@ func (r *Registry) resolveTerminalConfig(ctx context.Context, configID string) (
 	if id == "" {
 		return TerminalConfigInfo{}, fmt.Errorf("config_id is required; call terminal_config_list first")
 	}
-	local := localTerminalConfig()
-	if id == local.ConfigID {
-		if r == nil || r.localTerminalProvider == nil {
-			return TerminalConfigInfo{}, fmt.Errorf("local terminal config is unavailable")
+	if r != nil && r.localTerminalProvider != nil {
+		for _, local := range localTerminalConfigs() {
+			if id == local.ConfigID {
+				return local, nil
+			}
 		}
-		return local, nil
 	}
 	if r == nil || r.terminalConfigResolver == nil {
 		return TerminalConfigInfo{}, fmt.Errorf("terminal config %q is not bound to this agent", id)
@@ -211,12 +234,16 @@ func (r *Registry) execTerminalOpen(ctx context.Context, raw json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
+	shell := strings.TrimSpace(args.Shell)
+	if shell == "" {
+		shell = strings.TrimSpace(config.Shell)
+	}
 	info, err := broker.Open(ctx, r.agentID, TerminalRequest{
 		Target:   ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID},
 		ConfigID: config.ConfigID,
 		Context:  ExecutionContext{AgentID: r.agentID, SessionID: SessionIDFromContext(ctx), Target: ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID}},
 		CWD:      strings.TrimSpace(args.CWD),
-		Shell:    strings.TrimSpace(args.Shell),
+		Shell:    shell,
 		Rows:     args.Rows,
 		Cols:     args.Cols,
 	})
@@ -264,6 +291,24 @@ func (r *Registry) execTerminalRead(ctx context.Context, raw json.RawMessage) (s
 	if strings.TrimSpace(args.TerminalID) == "" {
 		return "", fmt.Errorf("terminal_id is required")
 	}
+	waitSeconds := args.WaitSeconds
+	if waitSeconds < 0 {
+		waitSeconds = 0
+	}
+	if waitSeconds > terminalMaxReadWaitSeconds {
+		waitSeconds = terminalMaxReadWaitSeconds
+	}
+	if waitSeconds > 0 {
+		timer := time.NewTimer(time.Duration(waitSeconds) * time.Second)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
 	maxBytes := args.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = terminalDefaultReadBytes
@@ -280,10 +325,11 @@ func (r *Registry) execTerminalRead(ctx context.Context, raw json.RawMessage) (s
 		b.Write(chunk.Data)
 	}
 	result := map[string]any{
-		"terminal_id": strings.TrimSpace(args.TerminalID),
-		"output":      b.String(),
-		"next_seq":    out.NextSeq,
-		"exited":      out.Exited,
+		"terminal_id":  strings.TrimSpace(args.TerminalID),
+		"output":       b.String(),
+		"next_seq":     out.NextSeq,
+		"exited":       out.Exited,
+		"wait_seconds": waitSeconds,
 	}
 	if out.ReplayGap {
 		result["replay_gap"] = true

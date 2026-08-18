@@ -42,6 +42,12 @@ func (h *ToolResultPackageHook) RunToolAfterEach(_ context.Context, in ToolAfter
 	if !h.cfg.Enabled {
 		return nil
 	}
+	if toolresult.IsTerminalOutputTool(in.ToolName) {
+		client, history, _ := toolresult.PackageTerminal(in.RawResult, toolresult.DefaultTerminalHistoryMaxBytes)
+		out.ForClient = client
+		out.ForHistory = history
+		return nil
+	}
 	res, err := toolresult.Package(h.cfg.toToolresultConfig(), in.SessionID, in.ToolCallID, in.ToolName, in.RawResult)
 	if err != nil {
 		return err

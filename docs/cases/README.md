@@ -11,6 +11,6 @@
 
 | 目录 | 场景摘要 |
 |------|----------|
-| [`cases/centos7-feature-tour/`](../../cases/centos7-feature-tour/) | **CentOS 7** 静态 Node；TUI 特性导览（Mock / 真实 LLM） |
+| [`cases/centos7-feature-tour/`](../../cases/centos7-feature-tour/) | **CentOS 7** 静态 Node；Web UI 特性导览（Mock / 真实 LLM） |
 
 新增案例时请更新 **[`cases/README.md`](../../cases/README.md)** 与本表。

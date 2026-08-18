@@ -4,9 +4,9 @@
 > **Go 约定**：`go test ./shared/config/... ./node/... ./client/...`（各包内 `*_test.go`）。  
 > **状态图例**：`✅` 已有对应用例且默认 discover / `go test` 会跑；`🟡` 已建文件但部分场景未覆盖或依赖完整 `requirements.txt` / 环境；`⬜` 尚未建建议文件；`—` Go 侧无对应 Python 模块或反之。
 
-**进度快照（2026-07）**：Python **157** 例 OK（Manage + CLI）；Go **~149** 个 `Test*`（2 SKIP），全绿。
+**进度快照**：测试数量以当前代码和 CI 实际运行结果为准。
 
-> **已移除**：原 Python Agent API（`app/harness/`、`app/core/` 等）及对应单测；见下方 **§0–12、15**。行为覆盖见 **Go Node** 各包 `*_test.go` 与 **§13、§16**。
+> **已移除**：原 Python Agent API（`app/harness/`、`app/core/` 等）及对应单测；见下方归档说明。行为覆盖见 **Go Node** 各包 `*_test.go` 与 **§13、§16**。
 
 ---
 
@@ -15,9 +15,8 @@
 | 文件 | 覆盖 | 备注 |
 |------|------|------|
 | `test_smoke.py` | 横切 | 工作区可导入 |
-| `test_manage_*.py`（11 个） | §13 Manage | Registry、A2A、Skills、LLM、Releases、Cases、Admin |
-| `test_cli_*.py`、`test_tui_*.py`、`test_transcript_log.py` 等 | §16 CLI | Textual TUI、HITL、子 Agent、A2A 展示 |
-| `test_render_sanitize.py`、`test_tool_call_streaming.py` | 渲染 | 流式 tool call |
+| `test_manage_*.py` | §13 Manage | Registry、A2A、Skills、LLM、Releases、Cases、Admin、Workgroup |
+| `test_workgroup_*.py` | Workgroup | D05 索引与 store golden 用例 |
 | `integration/live_llm_smoke.py` | §14 | 显式模块运行，非 discover |
 
 **下一批 Python 缺口**：Manage Workflow 落地后补 `test_manage_workflows.py`。
@@ -49,20 +48,17 @@
 | `node/internal/triggers` | `triggers_test.go`, `schedule_test.go` | trigger 与调度 | ✅ |
 | `node/internal/turn` | `orchestrator_test.go`, `tool_result_messages_test.go`, `prompt_test.go` | turn 编排、tool 消息、prompt | ✅ |
 | `client/internal/api` | `client_test.go` | Node HTTP 客户端 | ✅ |
-| `client/internal/hitl` | `approval_test.go`, `compression_test.go`, `scope_test.go`, `user_information_test.go` | 审批、压缩、scope、用户信息 | ✅ |
 | `client/internal/probe` | `probe_test.go` | 健康探测 | ✅ |
-| `client/internal/tui/full` | `stream_events_test.go`, `child_agent_test.go` | 全屏 TUI SSE、子 Agent | ✅ |
-| `client/internal/tui/repl` | `stream_test.go` | REPL **子 Agent SSE 过滤** | ✅ |
-| `client/internal/tui/shared` | `transcript_test.go`, `child_agents_format_test.go` |  transcript、/children 格式化 | ✅ |
+| `client/internal/desktop` | `update_test.go` | 桌面更新辅助 | ✅ |
+| `client/internal/update` | `update_test.go` | Release Hub 更新 | ✅ |
 | `node/internal/hostsnapshot` | — | 宿主机快照 | ⬜ |
 | `node/cmd/dagents-node` | — | main 入口 | ⬜ |
 | `client/cmd/dagents-client` | — | main 入口 | ⬜ |
-| `client/internal/tui`（顶层 dispatch） | — | full/repl 模式切换 | ⬜ |
 | `node/internal/version` | — | 版本常量（全项目唯一） | ⬜ |
 
 ---
 
-## 0–12、15. 已归档（Python Agent API）
+## 已归档（Python Agent API）
 
 原 `app/harness/`、`app/core/`、`app/context/`、`app/schemas/`、`app/observability/`、`app/harness/triggers/` 及对应 `test_*.py` 已随运行时移除。下列能力由 **Go Node** 覆盖：
 
@@ -98,22 +94,7 @@
 
 ---
 
-## 16. `app/cli/`（Textual TUI · `dagents chat`）
-
-| 优先级 | 主题 | 建议用例 | 断言方向 | 状态 |
-|--------|------|----------|----------|------|
-| P1 | session 控制器 | `test_cli_session_controller.py` | 渲染、非阻塞 HITL | ✅ |
-| P1 | 子 Agent | `test_cli_child_agent.py` | scope、tracker、SSE 过滤 | ✅ |
-| P1 | HITL 审批 | `test_cli_approval.py`、`test_cli_hitl_batch.py` | 审批 UI、SSE 解析 | ✅ |
-| P2 | tool call 规范化 | `test_cli_tool_calls.py`、`test_tool_call_streaming.py` | OpenAI tool_calls 结构 | ✅ |
-| P2 | 用户信息 / A2A 展示 | `test_cli_user_information.py`、`test_cli_a2a_relay.py` | ask user、中继 transcript | ✅ |
-| P2 | policy / triggers / 布局 | `test_cli_policy.py`、`test_cli_triggers.py`、`test_tui_usage_layout.py` | 配置与 UI | ✅ |
-
-> Go Client mirror：`client/internal/tui/full`、`repl`、`shared`（见 Go 进度表）。
-
----
-
-## 17. Go Node / Client（本地 Assistant 运行时）
+## 16. Go Node / Client（本地 Assistant 运行时）
 
 | 优先级 | 主题 | 包 / 测试 | 断言方向 | 状态 |
 |--------|------|-----------|----------|------|
@@ -121,8 +102,6 @@
 | P0 | 子 Agent | `node/internal/childagent` | async create/wait、**delivered 终态** | ✅ |
 | P1 | session + 子 Agent API | `node/internal/session`、`api` | 绑定、HTTP | ✅ |
 | P1 | bash 策略 | `node/internal/tools/bash_policy_test.go` | su/sudo 守卫 | ✅ |
-| P1 | REPL 子 Agent SSE | `client/internal/tui/repl/stream_test.go` | 父会话不泄漏子事件 | ✅ |
-| P1 | 全屏 TUI 子 Agent | `client/internal/tui/full/child_agent_test.go` | /children、事件 | ✅ |
 | P2 | LLM mock | `node/internal/llm/mock_test.go` | 测试替身行为 | ✅ |
 | P2 | skills | `node/internal/skills/skills_test.go` | 加载与列表 | ✅ |
 | P2 | hostsnapshot | `node/internal/hostsnapshot` | capture 缓存 | ⬜ |
@@ -130,7 +109,7 @@
 
 ---
 
-## 18. 手动脚本（可选，不纳入 discovery）
+## 17. 手动脚本（可选，不纳入 discovery）
 
 | 文件 | 用途 | 状态 |
 |------|------|------|
@@ -140,7 +119,7 @@
 
 ## 建议实施顺序（迭代）
 
-1. **已完成主干**：Manage Registry/A2A、Textual CLI、Go node/client 核心包与子 Agent / REPL 过滤。  
+1. **已完成主干**：Manage Registry/A2A、Go Node/Client 核心包与 Workgroup 协作。
 2. **Go 缺口**：`node/internal/hostsnapshot`、可选 cmd smoke。  
 3. **Python 下一批**：Manage Workflow 落地后补 `test_manage_workflows.py`；integration 慢测按需。  
 4. **P3**：manual 脚本归档、Node Prometheus 指标单测（落地后）。
@@ -158,7 +137,7 @@
 **新增约定**：
 
 - Python 文件：`test_<领域>.py`，类继承 `unittest.TestCase` 或 `IsolatedAsyncioTestCase`。
-- Go 文件：与同包源码并列的 `<name>_test.go`；子 Agent / REPL 等新行为优先补在对应 `internal/` 包内。
+- Go 文件：与同包源码并列的 `<name>_test.go`；新行为优先补在对应 `internal/` 包内。
 
 **本地一键**：
 

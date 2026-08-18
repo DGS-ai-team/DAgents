@@ -1,6 +1,6 @@
 # CentOS 7 特性导览（Docker）
 
-在 **CentOS 7（glibc 2.17）** 用户态容器中运行 **静态编译** 的 `dagents-node`，通过 **TUI** 体验 Mock 对话、Context、Skills、Session 持久化等本地助手能力；可选切换 **真实 LLM** 验证工具循环与 HITL 审批。
+在 **CentOS 7（glibc 2.17）** 用户态容器中运行 **静态编译** 的 `dagents-node`，通过 Node 内嵌的 **Web UI** 体验 Mock 对话、Context、Skills、Session 持久化等本地助手能力；可选切换 **真实 LLM** 验证工具循环与 HITL 审批。
 
 > Docker 提供老企业 Linux **用户态**；`uname -r` 仍为宿主机内核。Release 二进制为 **`CGO_ENABLED=0`**，适合 RHEL 7 量级环境。
 
@@ -58,32 +58,22 @@ docker compose up -d --force-recreate
 
 ---
 
-## 2. 启动 TUI
+## 2. 打开 Web UI
 
-在 **仓库根目录**、**容器外**执行：
+容器启动后，在宿主机浏览器打开：
 
-```bash
-go run ./client/cmd/dagents-client \
-  --config cases/centos7-feature-tour/local-run/client.yaml \
-  tui
+```text
+http://127.0.0.1:18765/ui/
 ```
 
-注意：`--config` 必须写在子命令 **`tui` 之前**。  
-启动后输入 **`/status`**，应看到 `agent_id=case-write-skill`，且无连接错误。
+进入页面后确认连接的 Agent ID 为 **`case-write-skill`**，即可在任务区发送消息并观察 Context、Skills、Session 与工具调用。
 
-### TUI 斜杠命令速查
+### 访问说明
 
-| 命令 | 用途 |
+| 项目 | 说明 |
 |------|------|
-| `/status` | agent_id、session_id、队列深度 |
-| `/context` | system_prompt、token、loaded_skills（Esc 返回） |
-| `/skill` | 列出 skills |
-| `/skill load NAME` / `/skill unload NAME` | 加载 / 卸载 skill 正文 |
-| `/sessions` / `/switch <id>` / `/new` | Session 列表、切换、新建 |
-| `/compress` | 手动触发上下文压缩 |
-| `/tools verbose\|brief` | 工具输出展开 / 折叠 |
-| `/reasoning on\|off` | 推理流显示（视模型而定） |
-| `/quit` | 退出 |
+| 地址 | `http://127.0.0.1:18765/ui/`；修改 `DAGENTS_PORT` 后替换端口 |
+| 连接检查 | 页面可加载，Agent ID 为 **`case-write-skill`** |
 
 ---
 
@@ -91,26 +81,23 @@ go run ./client/cmd/dagents-client \
 
 ### 3.1 Mock 模式（`LLM_MOCK=true`，默认）
 
-| 操作 | 你在 TUI 输入 | 预期结果 |
+| 操作 | Web UI 操作 | 预期结果 |
 |------|---------------|----------|
-| 连通性 | `/status` | `agent_id` 为 **`case-write-skill`**，已分配 `session_id` |
-| Mock 对话 | `feature tour ping` | Transcript 出现 user / assistant，内容均含该句；队列深度先升后降 |
-| Context | `/context` | 可见 **system_prompt**、token 粗算、`loaded_skills`；含 **`write-skill`** 元数据（无正文） |
-| Skills | `/skill` → `/skill load write-skill` → `/context` | `loaded_skills` 含 `write-skill`，system_prompt 出现 **`### write-skill`** 正文 |
-| Skills 卸载 | `/skill unload write-skill` → `/context` | 正文段消失，列表不再含该项 |
-| Session 持久化 | 发送 `feature tour session test` → `/sessions` 记下 id → 另终端 `docker compose restart dagents-node` → `/switch <id>` | 历史消息仍在 transcript 中 |
-| 工作区说明 | `/context` 查看 system_prompt | 可见 **FS_ROOT** / workspace 范围说明；`demo/hello.txt` 已在容器内就绪（Mock 不自动调工具） |
+| 连通性 | 打开 `http://127.0.0.1:18765/ui/` | 页面可加载，Agent ID 为 **`case-write-skill`** |
+| Mock 对话 | 发送 `feature tour ping` | 任务卡片中出现 user / assistant，内容均含该句 |
+| Context / Skills | 使用页面中的 Context、Skills 面板 | 可查看 system prompt 与已加载的 **`write-skill`** 元数据；按页面操作加载或卸载 skill |
+| Session 持久化 | 发送 `feature tour session test`，重启 `dagents-node` 后从 Session 列表重新打开 | 历史消息仍在任务卡片中 |
+| 工作区说明 | 在 Web UI 中询问工作区范围 | 可见 **FS_ROOT** / workspace 说明；`demo/hello.txt` 已在容器内就绪（Mock 不自动调工具） |
 
 ### 3.2 真实 LLM（`LLM_MOCK=false` + 有效 `OPENAI_API_KEY`）
 
 容器内默认 **`provider: deepseek`**、`base_url: https://api.deepseek.com`、`model: deepseek-chat`（见 `config.yaml`）。密钥通过 **`OPENAI_API_KEY`** 环境变量注入（历史命名，兼容 OpenAI 格式网关）。
 
-| 你在 TUI 输入 | 预期结果 |
+| Web UI 操作 | 预期结果 |
 |---------------|----------|
-| `请读取 demo/hello.txt，用一句话总结内容。` | 出现 **`read_file`** 工具调用与结果；assistant 给出摘要；`/context` 中 `tool_loop_count` 可能 > 0 |
-| `在 demo 目录下创建 notes.txt，内容为 ok。` | 首次 **`write_file`** 弹出 **HITL 审批**（默认 `write_file=rule`）；Approve 后文件落盘；同 session 内若 Agent 再次写入**同一新建文件**可能经信任链 **免审**（见 [内置工具参考 §write_file](../../docs/handbook/附录/内置工具参考.md)）；Reject 则不写入 |
-| 多轮对话后 `/compress` | 压缩完成提示；`/context` 中 `messages_count` 下降 |
-| `/reasoning on` 后发送较复杂问题 | 若模型支持，可见推理流；底栏或 transcript 有 usage 统计 |
+| 发送“请读取 `demo/hello.txt`，用一句话总结内容。” | 出现 **`read_file`** 工具调用与结果；assistant 给出摘要 |
+| 发送“在 demo 目录下创建 `notes.txt`，内容为 ok。” | 首次 **`write_file`** 弹出 **HITL 审批**（默认 `write_file=rule`）；Approve 后文件落盘，Reject 则不写入；详见[内置工具参考](../../docs/handbook/附录/内置工具参考.md) |
+| 在页面中查看 Context / usage | 可查看消息数量、token 或 usage 等运行信息（具体字段随 UI 版本变化） |
 
 若出现 **401 / Authentication Fails**，检查本目录 `.env` 的 `OPENAI_API_KEY`，并按 [§1.3](#13-修改-env-后必须重建容器) 重建容器。
 
@@ -118,7 +105,7 @@ go run ./client/cmd/dagents-client \
 
 | 项 | 说明 |
 |----|------|
-| **Triggers** | `config.yaml` 中 **`triggers.enabled: false`**，TUI 内无法演示定时触发 |
+| **Triggers** | `config.yaml` 中 **`triggers.enabled: false`**，本案例不演示定时触发 |
 | **Manage / A2A** | 未接入 Manage；单 Node 本地助手导览 |
 | **Agent Card** | 未启用 Manage 注册；无需 `agent-card.json` |
 
@@ -146,9 +133,8 @@ go run ./client/cmd/dagents-client \
 | 路径 | 内容摘要 |
 |------|----------|
 | `config.yaml` | `agent_id: case-write-skill`；`fs_root: /workspace/.runtime`；skills 开启；**`llm.mock: true`**（entrypoint 可覆盖）；DeepSeek 兼容端点 |
-| `local-run/client.yaml` | **宿主机 TUI** 连 `http://127.0.0.1:18765` |
+| `local-run/client.yaml` | 可选的宿主机 Client 运维命令配置，连接 `http://127.0.0.1:18765` |
 | `workspace/` | 挂载为容器 `.runtime`；本地可查看 demo、policy、session 数据 |
-| `client-config.snippet.yaml` | 已弃用，请用 **`local-run/client.yaml`** |
 
 ---
 
@@ -156,7 +142,7 @@ go run ./client/cmd/dagents-client \
 
 - [Cases 文档约定](../README.md#case-readme-写法)
 - [内置工具参考](../../docs/handbook/附录/内置工具参考.md)
-- [Client 斜杠命令](../../client/README.md)
+- [Client 运维命令](../../client/README.md)
 - [Agent Node API](../../docs/architecture/agent-node-api.md)
 - [本地助手架构](../../docs/architecture/local-assistant.md)
 - [Go Node 兼容矩阵](../../docs/architecture/go-node-compatibility.md)

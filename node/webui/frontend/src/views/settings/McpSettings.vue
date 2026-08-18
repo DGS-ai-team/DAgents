@@ -158,23 +158,25 @@ onMounted(() => {
 
 <template>
   <div class="settings-page settings-embedded mcp-settings">
-    <div class="mcp-settings__head">
-      <div>
+    <header class="settings-page__header">
+      <div class="settings-page__header-main">
         <h1 class="settings-page__title">MCP 外部服务</h1>
         <p class="settings-page__intro">
           使用标准 mcpServers JSON 配置多个 MCP 服务。保存后会加载服务目录，工具默认不暴露给智能体；点击服务条目后再启用需要的工具。
         </p>
       </div>
-      <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="reloadDraft">重新加载</button>
-    </div>
+      <div class="settings-page__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="reloadDraft">重新加载</button>
+      </div>
+    </header>
 
     <section class="mcp-settings__editor settings-section settings-section--standalone">
-      <div class="mcp-settings__section-head">
+      <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">MCP 配置</h2>
           <p class="settings-section__desc">兼容常见 MCP 客户端的 mcpServers 格式。凭据可以填写明文，也可以写成 ${ENV_NAME} 环境变量引用。</p>
         </div>
-        <div class="mcp-settings__actions">
+        <div class="settings-section__actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="formatDraft">格式化</button>
           <button type="button" class="btn btn--primary btn--sm" :disabled="saving" @click="save">
             {{ saving ? "保存中…" : "保存并刷新" }}
@@ -198,14 +200,14 @@ onMounted(() => {
     <p v-if="status" class="mcp-settings__ok">{{ status }}</p>
 
     <section class="mcp-settings__servers settings-section settings-section--standalone">
-      <div class="mcp-settings__section-head">
+      <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">已配置服务</h2>
           <p class="settings-section__desc">保存配置后，服务会以独立条目显示。点击条目进入工具目录。</p>
         </div>
         <span class="mcp-settings__count">{{ servers.length }} 个服务</span>
       </div>
-      <div v-if="!servers.length && !loading" class="mcp-settings__empty">还没有配置 MCP 服务。</div>
+      <div v-if="!servers.length && !loading" class="mcp-settings__empty settings-empty-state">还没有配置 MCP 服务。</div>
       <div v-else class="mcp-settings__server-list">
         <button
           v-for="server in servers"
@@ -230,13 +232,13 @@ onMounted(() => {
     </section>
 
     <section v-if="activeServer" class="mcp-settings__detail settings-section settings-section--standalone">
-      <div class="mcp-settings__section-head">
+      <div class="settings-section__head">
         <div>
           <button type="button" class="mcp-settings__back" @click="activeServerId = ''">‹ 返回服务列表</button>
           <h2 class="settings-section__title">{{ activeServer.display_name || activeServer.id }} 的工具</h2>
           <p class="settings-section__desc">只启用确实需要暴露给智能体的工具。</p>
         </div>
-        <div class="mcp-settings__actions">
+        <div class="settings-section__actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="refreshing === activeServer.id" @click="refreshServer(activeServer)">
             {{ refreshing === activeServer.id ? "刷新中…" : "刷新目录" }}
           </button>
@@ -248,8 +250,8 @@ onMounted(() => {
         <input v-model="toolQuery" class="settings-field__input" placeholder="搜索工具名称或说明" />
         <span>{{ activeServer.enabled_tool_count || 0 }} / {{ activeServer.tool_count || 0 }} 个已启用</span>
       </div>
-      <div v-if="!activeServer.tools?.length" class="mcp-settings__empty">还没有工具目录，请先刷新服务。</div>
-      <div v-else-if="!activeTools.length" class="mcp-settings__empty">没有匹配的工具。</div>
+      <div v-if="!activeServer.tools?.length" class="mcp-settings__empty settings-empty-state">还没有工具目录，请先刷新服务。</div>
+      <div v-else-if="!activeTools.length" class="mcp-settings__empty settings-empty-state">没有匹配的工具。</div>
       <div v-else class="mcp-settings__tool-list">
         <label v-for="tool in activeTools" :key="tool.name" class="mcp-settings__tool-row">
           <input type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
@@ -264,21 +266,15 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.mcp-settings__head,
-.mcp-settings__section-head,
-.mcp-settings__actions,
 .mcp-settings__tool-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.mcp-settings__head { align-items: flex-start; }
-.mcp-settings__section-head { align-items: flex-start; }
-.mcp-settings__actions { flex-wrap: wrap; justify-content: flex-end; }
 .mcp-settings__editor,
 .mcp-settings__servers,
-.mcp-settings__detail { margin-top: 18px; }
+.mcp-settings__detail { margin-top: 16px; }
 .mcp-settings__textarea {
   display: block;
   width: 100%;
@@ -296,11 +292,9 @@ onMounted(() => {
 .mcp-settings__hint,
 .mcp-settings__muted,
 .mcp-settings__error,
-.mcp-settings__ok,
-.mcp-settings__empty { margin: 10px 0 0; font-size: 12px; }
+.mcp-settings__ok { margin: 10px 0 0; font-size: 12px; }
 .mcp-settings__hint,
-.mcp-settings__muted,
-.mcp-settings__empty { color: var(--color-text-muted); }
+.mcp-settings__muted { color: var(--color-text-muted); }
 .mcp-settings__error { color: var(--color-danger); }
 .mcp-settings__ok { color: var(--color-success, #3d9a5f); }
 .mcp-settings__count { color: var(--color-text-muted); font-size: 12px; }
@@ -343,9 +337,6 @@ onMounted(() => {
 .mcp-settings__tool-row code { font-family: var(--font-mono, ui-monospace, monospace); }
 .mcp-settings__tool-row small { display: block; margin-top: 4px; color: var(--color-text-muted); line-height: 1.4; }
 @media (max-width: 760px) {
-  .mcp-settings__head,
-  .mcp-settings__section-head { flex-direction: column; }
-  .mcp-settings__actions { justify-content: flex-start; }
   .mcp-settings__server-card { grid-template-columns: auto 1fr auto; }
   .mcp-settings__server-meta { grid-column: 2 / -1; text-align: left; }
   .mcp-settings__server-arrow { grid-column: 3; grid-row: 1; }

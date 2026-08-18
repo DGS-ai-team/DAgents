@@ -876,6 +876,41 @@
   margin-bottom: 20px;
 }
 
+.settings-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.settings-page__header-main {
+  min-width: 0;
+}
+
+.settings-page__header .settings-page__title {
+  margin-bottom: 6px;
+}
+
+.settings-page__header .settings-page__intro,
+.settings-page__header .settings-page__desc,
+.settings-page__header .settings-page__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-page__header-actions,
+.settings-section__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .settings-section {
   margin-bottom: 0;
   padding-bottom: 20px;
@@ -892,14 +927,45 @@
 
 .settings-section__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 12px;
+}
+
+.settings-section__head > :first-child {
+  min-width: 0;
 }
 
 .settings-section__head .settings-section__title {
   margin: 0;
+}
+
+.settings-empty-state {
+  margin-top: 16px;
+  padding: 22px 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-muted, #fbfcfd);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .settings-page__header {
+    flex-direction: column;
+  }
+
+  .settings-section__head {
+    flex-direction: column;
+  }
+
+  .settings-page__header-actions,
+  .settings-section__actions {
+    justify-content: flex-start;
+  }
 }
 
 .child-agents-section__empty,
@@ -1294,6 +1360,11 @@ select.settings-field__input {
   background: var(--color-surface-muted);
 }
 
+.tool-exec-bubble--terminal {
+  border-left-color: #569cd6;
+  background: var(--color-surface-muted);
+}
+
 .tool-exec-bubble--fs {
   border-left-color: var(--color-success);
   background: var(--color-surface-muted);
@@ -1339,6 +1410,11 @@ select.settings-field__input {
 .tool-source-badge--shell {
   background: rgba(226, 160, 83, 0.14);
   color: #e2a053;
+}
+
+.tool-source-badge--terminal {
+  background: rgba(86, 156, 214, 0.14);
+  color: #569cd6;
 }
 
 .tool-source-badge--fs {
@@ -2640,6 +2716,95 @@ select.settings-field__input {
 
 .nav-rail__member-mark svg {
   display: block;
+}
+
+.nav-rail__terminal-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.nav-rail__terminal-item {
+  gap: 7px;
+  min-height: 34px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.nav-rail__terminal-mark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-subtle);
+}
+
+.nav-rail__terminal-mark svg {
+  display: block;
+}
+
+.nav-rail__terminal-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-rail__terminal-title,
+.nav-rail__terminal-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-rail__terminal-title {
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.nav-rail__terminal-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-subtle);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.nav-rail__terminal-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+}
+
+.nav-rail__terminal-status-dot--running {
+  background: var(--color-success, #3d9a5f);
+}
+
+.nav-rail__terminal-status-dot--exited {
+  background: var(--color-warning, #c28a24);
+}
+
+.nav-rail__terminal-status-dot--closed {
+  background: var(--color-danger, #c45757);
+}
+
+.nav-rail__terminal-config {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-rail__error {
+  margin: 0;
+  padding: 6px 14px 8px;
+  color: var(--color-danger);
+  font-size: 11px;
 }
 
 .nav-rail__item-trail {
