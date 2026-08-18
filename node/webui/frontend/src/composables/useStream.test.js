@@ -19,4 +19,15 @@ describe("buildStream", () => {
     expect(items.filter((item) => item.kind === "tool_step")).toHaveLength(2);
     expect(items.filter((item) => item.kind === "tool_step").every((item) => item.resultEntry)).toBe(true);
   });
+
+  it("keys replacement HITL entries by request id", () => {
+    const first = buildStream([
+      entry(1, "assistant", { text: "等待确认" }),
+    ], [{ kind: "approval", data: { request_id: "request-a" } }]);
+    const second = buildStream([
+      entry(1, "assistant", { text: "等待确认" }),
+    ], [{ kind: "approval", data: { request_id: "request-b" } }]);
+
+    expect(first.at(-1).key).not.toBe(second.at(-1).key);
+  });
 });

@@ -71,6 +71,7 @@ describe("resolveToolVisual", () => {
       kind: "mcp",
       label: "tencent-docs",
       short: "tencent-docs",
+      icon: "M",
     });
   });
 });

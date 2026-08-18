@@ -3,7 +3,8 @@ import { computed, ref } from "vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import { resolveToolVisual } from "../utils/toolSource.js";
-import { resolveToolStepPhase, toolStepUserSummary } from "../utils/toolUserLabel.js";
+import { resolveToolStepPhase, toolStepPurpose } from "../utils/toolUserLabel.js";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
   steps: { type: Array, default: () => [] },
@@ -25,7 +26,7 @@ const hasActive = computed(() => activeSteps.value.length > 0);
 const firstStep = computed(() => props.steps[0] || null);
 const summary = computed(() => {
   const step = activeSteps.value[0] || firstStep.value;
-  return step ? toolStepUserSummary(step) : "";
+  return step ? toolStepPurpose(step) : "";
 });
 const visual = computed(() => {
   const step = activeSteps.value[0] || firstStep.value;
@@ -48,16 +49,18 @@ function toggle() {
       type="button"
       class="tool-group-row__head"
       :aria-expanded="expanded"
-      aria-label="展开工具执行清单"
+      :aria-label="expanded ? '收起工具执行清单' : '展开工具执行清单'"
       @click="toggle"
     >
       <span class="tool-group-row__glyph" aria-hidden="true">
         <BrandActivityIndicator v-if="hasActive" mode="tool" :show-label="false" compact />
         <span v-else>✓</span>
       </span>
-      <span class="tool-group-row__kind">工具执行</span>
+      <span class="tool-group-row__visual" :title="visual.label">
+        <ToolGroupIcon :name="visual.kind" />
+      </span>
       <span class="tool-group-row__count">{{ steps.length }} 项</span>
-      <span class="tool-group-row__summary">{{ summary || visual.label }}</span>
+      <span v-if="summary" class="tool-group-row__summary">{{ summary }}</span>
       <span class="tool-group-row__status">{{ statusText }}</span>
       <span class="tool-group-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
     </button>
@@ -90,6 +93,7 @@ function toggle() {
 .tool-group-row {
   width: 100%;
   min-width: 0;
+  flex: 0 0 auto;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface);
@@ -129,7 +133,6 @@ function toggle() {
   font-size: 12px;
 }
 
-.tool-group-row__kind,
 .tool-group-row__count {
   flex: 0 0 auto;
   font-size: 10.5px;
@@ -137,11 +140,21 @@ function toggle() {
   color: var(--color-text-subtle);
 }
 
-.tool-group-row__kind {
-  padding: 1px 5px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-surface-elevated);
+.tool-group-row__visual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  color: var(--color-text-muted);
+}
+
+.tool-group-row--progress .tool-group-row__visual {
+  color: var(--color-primary);
+}
+
+.tool-group-row__visual :deep(.tool-group-icon) {
+  width: 18px;
+  height: 18px;
 }
 
 .tool-group-row__count {

@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { renderMarkdown } from "../utils/markdown.js";
+import { copyText } from "../utils/clipboard.js";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 import ThinkingIndicator from "./ThinkingIndicator.vue";
@@ -9,6 +10,51 @@ import BrowserCitationBlock from "./BrowserCitationBlock.vue";
 
 const props = defineProps({
   entry: { type: Object, required: true },
+});
+
+const markdownActionTimer = ref(null);
+
+function resetMarkdownAction(button) {
+  if (button) button.textContent = button.dataset.defaultLabel || "复制代码";
+  if (markdownActionTimer.value) {
+    clearTimeout(markdownActionTimer.value);
+    markdownActionTimer.value = null;
+  }
+}
+
+async function onMarkdownAction(event) {
+  const button = event.target?.closest?.("[data-markdown-action]");
+  if (!button) return;
+  const code =
+    button.dataset.code ||
+    button.closest(".markdown-code-block")?.querySelector("code")?.textContent ||
+    "";
+  if (!code) return;
+  button.dataset.defaultLabel = button.textContent || "复制代码";
+  try {
+    if (button.dataset.markdownAction === "download") {
+      const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "markdown-code.txt";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      button.textContent = "已下载";
+    } else {
+      button.textContent = (await copyText(code)) ? "已复制" : "复制失败";
+    }
+  } catch {
+    button.textContent = "操作失败";
+  }
+  if (markdownActionTimer.value) clearTimeout(markdownActionTimer.value);
+  markdownActionTimer.value = setTimeout(() => resetMarkdownAction(button), 1600);
+}
+
+onBeforeUnmount(() => {
+  if (markdownActionTimer.value) clearTimeout(markdownActionTimer.value);
 });
 
 const browserRefs = computed(() =>
@@ -52,6 +98,7 @@ function userImageThumb(src) {
               class="msg__image"
               :src="userImageThumb(src)"
               alt="用户上传图片"
+              :aria-label="`查看第 ${idx + 1} 张用户图片`"
               loading="lazy"
             />
           </button>
@@ -78,8 +125,12 @@ function userImageThumb(src) {
         <BrandActivityIndicator label="正在生成" mode="generating" :show-label="false" />
       </div>
       <div v-else class="msg__bubble msg__bubble--assistant-md">
-        <pre v-if="entry.streaming" class="assistant-msg__stream-plain">{{ entry.text }}</pre>
-        <div v-else class="tool-exec-bubble__markdown assistant-msg__md" v-html="renderMarkdown(entry.text)" />
+        <div
+          class="tool-exec-bubble__markdown assistant-msg__md"
+          :class="{ 'assistant-msg__md--streaming': entry.streaming }"
+          v-html="renderMarkdown(entry.text)"
+          @click="onMarkdownAction"
+        />
         <BrowserCitationBlock v-if="!entry.streaming && browserRefs.length" :refs="browserRefs" />
         <div v-if="entry.usage" class="msg__usage">{{ entry.usage }}</div>
       </div>

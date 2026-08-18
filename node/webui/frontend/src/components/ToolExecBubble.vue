@@ -9,6 +9,7 @@ import { resolveToolStepPhase, toolStepUserSummary } from "../utils/toolUserLabe
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 import ImageResultPreview from "./ImageResultPreview.vue";
 import { hasToolMedia, isShowImageTool } from "../utils/showImage.js";
+import { copyText } from "../utils/clipboard.js";
 
 const FOLD_LINE_THRESHOLD = 8;
 const FOLD_CHAR_THRESHOLD = 480;
@@ -141,19 +142,7 @@ async function copyOutput() {
   const value = outputText.value;
   if (!value) return;
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = value;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
-    }
-    copyState.value = "已复制";
+    copyState.value = (await copyText(value)) ? "已复制" : "复制失败";
   } catch {
     copyState.value = "复制失败";
   }
@@ -227,10 +216,22 @@ onBeforeUnmount(clearCopyState);
           <div class="tool-output__head">
             <span class="tool-output__label">{{ isShellOutput ? "shell" : "输出" }}</span>
             <div class="tool-output__actions">
-              <button type="button" class="tool-output__action" @click="copyOutput">
+              <button
+                type="button"
+                class="tool-output__action"
+                aria-label="复制工具输出"
+                title="复制工具输出"
+                @click="copyOutput"
+              >
                 {{ copyState || "复制" }}
               </button>
-              <button type="button" class="tool-output__action" @click="downloadOutput">下载</button>
+              <button
+                type="button"
+                class="tool-output__action"
+                aria-label="下载工具输出"
+                title="下载工具输出"
+                @click="downloadOutput"
+              >下载</button>
             </div>
           </div>
           <pre
@@ -253,10 +254,22 @@ onBeforeUnmount(clearCopyState);
             <div v-if="outputText" class="tool-output__head">
               <span class="tool-output__label">原始输出</span>
               <div class="tool-output__actions">
-                <button type="button" class="tool-output__action" @click="copyOutput">
-                  {{ copyState || "复制" }}
-                </button>
-                <button type="button" class="tool-output__action" @click="downloadOutput">下载</button>
+            <button
+              type="button"
+              class="tool-output__action"
+              aria-label="复制原始工具输出"
+              title="复制原始工具输出"
+              @click="copyOutput"
+            >
+              {{ copyState || "复制" }}
+            </button>
+            <button
+              type="button"
+              class="tool-output__action"
+              aria-label="下载原始工具输出"
+              title="下载原始工具输出"
+              @click="downloadOutput"
+            >下载</button>
               </div>
             </div>
             <pre class="tool-card__args tool-card__args--compact">{{

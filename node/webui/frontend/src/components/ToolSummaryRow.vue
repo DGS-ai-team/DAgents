@@ -3,10 +3,10 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { formatToolElapsed } from "../utils/format.js";
 import {
   resolveToolStepPhase,
+  toolStepPurpose,
   toolStepIsInProgress,
   toolStepIsPending,
   toolStepStatusText,
-  toolStepUserSummary,
 } from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
@@ -23,6 +23,7 @@ import {
 import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
   callEntry: { type: Object, default: null },
@@ -42,7 +43,7 @@ const stepArgs = computed(() => ({
   resultEntry: props.resultEntry,
   executionHint: props.executionHint,
 }));
-const summary = computed(() => toolStepUserSummary(stepArgs.value));
+const purpose = computed(() => toolStepPurpose(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
 const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
 const stepPending = computed(() => toolStepIsPending(stepArgs.value));
@@ -142,14 +143,22 @@ async function onBackground(ev) {
     }"
   >
     <div class="tool-summary-row__bar">
-      <button type="button" class="tool-summary-row__head" @click="toggle">
+      <button
+        type="button"
+        class="tool-summary-row__head"
+        :aria-expanded="expanded"
+        :aria-label="expanded ? '收起工具详情' : '展开工具详情'"
+        @click="toggle"
+      >
         <span class="tool-summary-row__glyph" aria-hidden="true">
           <span v-if="inProgress" class="tool-exec-spinner" />
           <span v-else-if="stepPending" class="tool-summary-row__pending">○</span>
           <span v-else class="tool-summary-row__check">✓</span>
         </span>
-        <span class="tool-summary-row__kind">{{ visual.label }}</span>
-        <span class="tool-summary-row__text">{{ summary }}</span>
+        <span class="tool-summary-row__visual" :title="visual.label">
+          <ToolGroupIcon :name="visual.kind" />
+        </span>
+        <span v-if="purpose" class="tool-summary-row__text">{{ purpose }}</span>
         <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
           <img
             class="tool-summary-row__thumb"
@@ -195,7 +204,7 @@ async function onBackground(ev) {
         type="button"
         class="tool-summary-row__chevron-btn"
         :aria-expanded="expanded"
-        aria-label="展开工具详情"
+        :aria-label="expanded ? '收起工具详情' : '展开工具详情'"
         @click="toggle"
       >
         <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
@@ -209,6 +218,7 @@ async function onBackground(ev) {
 
 <style scoped>
 .tool-summary-row {
+  flex: 0 0 auto;
   margin: 2px 0;
   border-radius: 6px;
   background: var(--color-surface);
@@ -272,29 +282,35 @@ async function onBackground(ev) {
   color: var(--color-text-subtle);
 }
 
-.tool-summary-row__kind {
-  flex: 0 0 auto;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--color-text-subtle);
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
+.tool-summary-row__visual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  color: var(--color-text-muted);
 }
 
-.tool-summary-row--shell .tool-summary-row__kind {
+.tool-summary-row--shell .tool-summary-row__visual {
   color: #e2a053;
-  border-color: rgba(226, 160, 83, 0.25);
-  background: rgba(226, 160, 83, 0.08);
 }
 
-.tool-summary-row--fs .tool-summary-row__kind {
+.tool-summary-row--terminal .tool-summary-row__visual,
+.tool-summary-row--browser .tool-summary-row__visual,
+.tool-summary-row--linux .tool-summary-row__visual {
+  color: #569cd6;
+}
+
+.tool-summary-row--fs .tool-summary-row__visual,
+.tool-summary-row--skills .tool-summary-row__visual {
   color: var(--color-success);
-  border-color: rgba(137, 209, 133, 0.25);
-  background: var(--color-success-soft);
+}
+
+.tool-summary-row--mcp .tool-summary-row__visual {
+  color: #9b8cff;
+}
+
+.tool-summary-row--child .tool-summary-row__visual {
+  color: #c586c0;
 }
 
 .tool-summary-row__text {
@@ -306,7 +322,6 @@ async function onBackground(ev) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono);
 }
 
 .tool-summary-row__thumb-wrap {

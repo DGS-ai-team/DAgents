@@ -20,6 +20,7 @@ import { toolJobsStore } from "../stores/toolJobs.js";
 import { statusStore, statusPhaseOrder, hasStatus, formatStatusText } from "../stores/statusLines.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
+import { countNewStreamItems } from "../utils/streamUnread.js";
 import {
   measureSync,
   updateRuntimeMetrics,
@@ -88,11 +89,14 @@ function onUserInfoSelected(next) {
 
 const scrollTail = createFollowTailController();
 const showScrollToTail = ref(false);
+const unreadMessageCount = ref(0);
 let streamResizeObserver = null;
 const MAX_RENDERED_STREAM_ITEMS = 180;
 const streamWindowStart = ref(0);
 let previousStreamItemCount = 0;
 let streamBuildHandle = null;
+let scrollUpdateHandle = null;
+let streamWatchInitialized = false;
 
 const stream = shallowRef([]);
 
@@ -385,12 +389,21 @@ const tailContentKey = computed(() => {
 });
 
 function maybeScrollToTail() {
-  nextTick(() => {
-    measureSync("scroll.update", () => {
-      scrollTail.pinIfFollowing(streamRef.value);
-      updateScrollToTailVisibility();
+  if (scrollUpdateHandle !== null) return;
+  const run = () => {
+    scrollUpdateHandle = null;
+    nextTick(() => {
+      measureSync("scroll.update", () => {
+        scrollTail.pinIfFollowing(streamRef.value);
+        updateScrollToTailVisibility();
+      });
     });
-  });
+  };
+  if (typeof requestAnimationFrame === "function") {
+    scrollUpdateHandle = requestAnimationFrame(run);
+  } else {
+    scrollUpdateHandle = setTimeout(run, 0);
+  }
 }
 
 watch(tailContentKey, () => {
@@ -415,11 +428,13 @@ function onStreamScroll() {
 
 function updateScrollToTailVisibility() {
   const el = streamRef.value;
+  if (scrollTail.follow) unreadMessageCount.value = 0;
   showScrollToTail.value = Boolean(el && !scrollTail.follow && distanceFromTail(el) > 48);
 }
 
 function scrollToTail() {
   streamWindowStart.value = Math.max(0, displayStream.value.length - MAX_RENDERED_STREAM_ITEMS);
+  unreadMessageCount.value = 0;
   nextTick(() => {
     scrollTail.forcePin(streamRef.value);
     updateScrollToTailVisibility();
@@ -461,13 +476,24 @@ onBeforeUnmount(() => {
     else clearTimeout(streamBuildHandle);
     streamBuildHandle = null;
   }
+  if (scrollUpdateHandle !== null) {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(scrollUpdateHandle);
+    else clearTimeout(scrollUpdateHandle);
+    scrollUpdateHandle = null;
+  }
 });
 
 watch(streamRef, (el) => {
   if (el) bindStreamResizeObserver();
 });
 
-watch(displayStream, (items) => {
+watch(displayStream, (items, previousItems) => {
+  if (!streamWatchInitialized) {
+    streamWatchInitialized = true;
+  } else if (!scrollTail.follow && Array.isArray(previousItems)) {
+    const addedCount = countNewStreamItems(items, previousItems);
+    if (addedCount > 0) unreadMessageCount.value += addedCount;
+  }
   if (scrollTail.follow && items.length > previousStreamItemCount) {
     streamWindowStart.value = Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS);
   } else {
@@ -630,6 +656,7 @@ defineExpose({
         v-if="hasEarlierStreamItems"
         type="button"
         class="chat__load-earlier"
+        :aria-label="`加载更早的 ${earlierStreamItemCount} 条消息`"
         @click="loadEarlierStreamItems"
       >
         加载更早的 {{ earlierStreamItemCount }} 条消息
@@ -688,7 +715,11 @@ defineExpose({
         :phase="phase"
       />
       </div>
-      <ScrollToTailButton :visible="showScrollToTail" @click="scrollToTail" />
+      <ScrollToTailButton
+        :visible="showScrollToTail"
+        :unread-count="unreadMessageCount"
+        @click="scrollToTail"
+      />
     </div>
 
     <footer class="chat__composer">
@@ -748,7 +779,13 @@ defineExpose({
           <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">
             <div v-for="(img, idx) in pendingImages" :key="`${img.name}-${idx}`" class="chat__pending-image">
               <img class="chat__pending-image-thumb" :src="img.url" :alt="img.name" />
-              <button type="button" class="chat__pending-image-remove" @click="removePendingImage(idx)">×</button>
+              <button
+                type="button"
+                class="chat__pending-image-remove"
+                aria-label="移除待发送图片"
+                title="移除图片"
+                @click="removePendingImage(idx)"
+              >×</button>
             </div>
           </div>
           <textarea

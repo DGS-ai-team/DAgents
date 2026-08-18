@@ -146,6 +146,7 @@ type agentView struct {
 	Host           json.RawMessage `json:"host,omitempty"`
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
+	LastActiveAt   string          `json:"last_active_at,omitempty"`
 	// 以下字段供托盘 / 通知同步（agent_id 与内部 session 1:1）。
 	Active           bool   `json:"active,omitempty"`
 	HasActiveTurn    bool   `json:"has_active_turn,omitempty"`
@@ -318,6 +319,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	views := make([]agentView, 0, len(list))
+	lastActiveAt := s.loadAgentLastActiveAt(r.Context())
 	for _, rec := range list {
 		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
 			// D5 Cut6：列表时归档遗留 remote stub（不依赖 Manage Control DELETE）。
@@ -341,7 +343,11 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		} else if updated, err := s.agents.Get(r.Context(), rec.AgentID); err == nil && updated != nil {
 			rec = *updated
 		}
-		views = append(views, s.enrichAgentNotify(agentViewFromRecord(rec)))
+		view := s.enrichAgentNotify(agentViewFromRecord(rec))
+		if activeAt, ok := lastActiveAt[view.AgentID]; ok && !activeAt.IsZero() {
+			view.LastActiveAt = activeAt.UTC().Format(time.RFC3339Nano)
+		}
+		views = append(views, view)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": views})
 }
@@ -364,7 +370,35 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.enrichAgentNotify(agentViewFromRecord(*rec)))
+	view := s.enrichAgentNotify(agentViewFromRecord(*rec))
+	if activeAt, ok := s.loadAgentLastActiveAt(r.Context())[view.AgentID]; ok && !activeAt.IsZero() {
+		view.LastActiveAt = activeAt.UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// loadAgentLastActiveAt reads the runtime snapshot timestamps separately from
+// the agent configuration timestamps. The latter changes when settings are
+// edited, while the former advances when the conversation is persisted.
+func (s *Server) loadAgentLastActiveAt(ctx context.Context) map[string]time.Time {
+	result := make(map[string]time.Time)
+	if s == nil || s.sessions == nil {
+		return result
+	}
+	summaries, err := s.sessions.ListPersisted(ctx)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("list persisted sessions for agent activity failed", "error", err)
+		}
+		return result
+	}
+	for _, summary := range summaries {
+		if strings.TrimSpace(summary.AgentID) == "" || summary.UpdatedAt.IsZero() {
+			continue
+		}
+		result[summary.AgentID] = summary.UpdatedAt
+	}
+	return result
 }
 
 // enrichAgentNotify 附加未读 / HITL 等通知字段（托盘待办同步用）。

@@ -225,7 +225,7 @@ function onToggleTheme() {
 }
 
 function agentSortTime(agent) {
-  const ts = Date.parse(agent?.updated_at || agent?.UpdatedAt || "");
+  const ts = Date.parse(agent?.last_active_at || agent?.LastActiveAt || agent?.updated_at || agent?.UpdatedAt || "");
   return Number.isFinite(ts) ? ts : 0;
 }
 
@@ -682,7 +682,7 @@ defineExpose({
         <li
           v-for="a in sortedAgents"
           :key="agentRecordId(a)"
-          class="nav-rail__item"
+          class="nav-rail__item nav-rail__agent-item"
           :class="{ 'nav-rail__item--active': agentRecordId(a) === activeAgentId }"
           @click="selectAgent(agentRecordId(a))"
         >
@@ -713,10 +713,10 @@ defineExpose({
           </div>
           <div class="nav-rail__item-trail">
             <span
-              v-if="a.updated_at"
+              v-if="a.last_active_at"
               class="nav-rail__time"
-              :title="a.updated_at"
-            >{{ formatCompactRelativeTime(a.updated_at) }}</span>
+              :title="a.last_active_at"
+            >{{ formatCompactRelativeTime(a.last_active_at) }}</span>
           </div>
           <div class="nav-rail__item-actions" @click.stop>
             <button
