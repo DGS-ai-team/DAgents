@@ -39,7 +39,7 @@
 /* ---------- v0.6.1 product layout ---------- */
 
 .app__body--chat-v61 {
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--chat-sidebar-width) minmax(0, 1fr);
   align-items: stretch;
   gap: 0;
   padding: 0;
@@ -63,6 +63,12 @@
 @media (prefers-reduced-motion: reduce) {
   .app__body--chat-v61 {
     animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --chat-sidebar-width: 220px;
   }
 }
 

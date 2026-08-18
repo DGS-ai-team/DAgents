@@ -2556,7 +2556,7 @@ select.settings-field__input {
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   padding-bottom: 8px;
 }
 
@@ -2636,11 +2636,61 @@ select.settings-field__input {
 }
 
 .nav-rail__section-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 28px;
   padding: 2px 8px 8px 8px;
+}
+
+.nav-rail__section-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 50px;
+  pointer-events: none;
+}
+
+.nav-rail__section-action {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0s linear 0.12s;
+}
+
+.nav-rail__section-head:hover .nav-rail__section-action,
+.nav-rail__section-head:focus-within .nav-rail__section-action,
+.nav-rail__section-head--actions-open .nav-rail__section-action {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition-delay: 0s;
+}
+
+.nav-rail__section-collapse {
+  flex: 0 0 24px;
+  margin-left: 0;
+}
+
+.nav-rail__section-chevron-path {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.15s ease;
+}
+
+.nav-rail__section-collapse[aria-expanded="false"] .nav-rail__section-chevron-path {
+  transform: rotate(-90deg);
+}
+
+.nav-rail__icon-btn.nav-rail__section-more {
+  display: none;
+  flex: 0 0 24px;
+  margin-left: 0;
 }
 
 .nav-rail__section-toggle {
@@ -2664,6 +2714,12 @@ select.settings-field__input {
   background: var(--color-sidebar-hover);
 }
 
+.nav-rail__section-toggle:focus-visible,
+.nav-rail__retry:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
 .nav-rail__section-icon {
   display: inline-flex;
   align-items: center;
@@ -2684,6 +2740,31 @@ select.settings-field__input {
   font-size: 11px;
   color: var(--color-text-subtle);
   font-variant-numeric: tabular-nums;
+}
+
+.nav-rail__section-chevron {
+  display: none;
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  font-size: 15px;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.nav-rail__section-state {
+  display: inline-grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nav-rail__section-state--error {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 .nav-rail__icon-btn {
@@ -2728,6 +2809,38 @@ select.settings-field__input {
   animation: nav-rail-refresh-spin 0.9s linear infinite;
 }
 
+@media (max-width: 760px) {
+  .nav-rail__section-actions {
+    position: absolute;
+    z-index: 5;
+    right: 32px;
+    top: 50%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    box-shadow: none;
+    transform: translateY(-50%);
+  }
+
+  .nav-rail__section-action {
+    transform: none;
+  }
+
+  .nav-rail__section-head--actions-open .nav-rail__section-actions {
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-md);
+    pointer-events: auto;
+  }
+
+  .nav-rail__icon-btn.nav-rail__section-more {
+    display: inline-flex;
+  }
+}
+
 @keyframes nav-rail-refresh-spin {
   to {
     transform: rotate(360deg);
@@ -2740,6 +2853,35 @@ select.settings-field__input {
   font-size: 12px;
   color: var(--color-text-subtle);
   list-style: none;
+}
+
+.nav-rail__hint--error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-warning);
+}
+
+.nav-rail__retry {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 42%, var(--color-border));
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nav-rail__retry:hover:not(:disabled) {
+  background: var(--color-warning-soft);
+}
+
+.nav-rail__retry:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .nav-rail__list {
@@ -2894,6 +3036,13 @@ select.settings-field__input {
   color: var(--color-text-subtle);
   font-size: 10px;
   line-height: 1.2;
+}
+
+.nav-rail__terminal-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-rail__terminal-status-dot {
