@@ -57,6 +57,7 @@ const agentsLoadError = ref("");
 const workgroupsLoadError = ref("");
 const terminals = ref([]);
 const loadingTerminals = ref(false);
+const manualRefreshingTerminals = ref(false);
 const terminalError = ref("");
 const deletingId = ref("");
 const renamingId = ref("");
@@ -95,6 +96,7 @@ const createWgOpen = ref(false);
 const createWgName = ref("");
 const createWgBusy = ref(false);
 const createWgError = ref("");
+const manualRefreshingWgs = ref(false);
 
 const activitySnap = computed(() => {
   if (route.name === "workgroups") {
@@ -117,12 +119,14 @@ const activeAgentId = computed(() => {
   return String(agentStore.agentId || "").trim();
 });
 
-async function loadTerminals() {
+async function loadTerminals({ manual = false } = {}) {
+  if (manual) manualRefreshingTerminals.value = true;
   const agentId = String(activeAgentId.value || "").trim();
   const token = ++terminalLoadToken;
   if (!agentId) {
     terminals.value = [];
     terminalError.value = "";
+    if (manual) manualRefreshingTerminals.value = false;
     return;
   }
   loadingTerminals.value = true;
@@ -145,6 +149,7 @@ async function loadTerminals() {
     terminalError.value = e.message || "加载终端列表失败";
   } finally {
     if (token === terminalLoadToken) loadingTerminals.value = false;
+    if (manual) manualRefreshingTerminals.value = false;
   }
 }
 
@@ -240,7 +245,8 @@ async function refreshAgents({ force = false } = {}) {
   }
 }
 
-async function refreshWorkgroups({ force = false } = {}) {
+async function refreshWorkgroups({ force = false, manual = false } = {}) {
+  if (manual) manualRefreshingWgs.value = true;
   loadingWgs.value = true;
   try {
     const now = Date.now();
@@ -274,6 +280,7 @@ async function refreshWorkgroups({ force = false } = {}) {
     if (!workgroupsLoaded.value) workgroupsLoadError.value = "工作组列表暂时不可用，正在重试…";
   } finally {
     loadingWgs.value = false;
+    if (manual) manualRefreshingWgs.value = false;
   }
 }
 
@@ -296,8 +303,8 @@ async function refreshWorkgroupUnread(workgroupList) {
   );
 }
 
-async function refresh({ force = true } = {}) {
-  await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force })]);
+async function refresh({ force = true, manual = false } = {}) {
+  await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force, manual })]);
   await refreshWorkgroupUnread(workgroups.value);
   // 已展开的工作组刷新成员
   await Promise.all(
@@ -709,11 +716,11 @@ defineExpose({
         <button
           type="button"
           class="nav-rail__icon-btn"
-          :class="{ 'nav-rail__icon-btn--spinning': loadingTerminals }"
+          :class="{ 'nav-rail__icon-btn--spinning': manualRefreshingTerminals }"
           title="刷新终端清单"
           aria-label="刷新终端清单"
-          :disabled="loadingTerminals"
-          @click.stop="loadTerminals"
+          :disabled="manualRefreshingTerminals"
+          @click.stop="loadTerminals({ manual: true })"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
             <path
@@ -796,11 +803,11 @@ defineExpose({
         <button
           type="button"
           class="nav-rail__icon-btn"
-          :class="{ 'nav-rail__icon-btn--spinning': loadingWgs }"
+          :class="{ 'nav-rail__icon-btn--spinning': manualRefreshingWgs }"
           title="刷新工作组"
           aria-label="刷新工作组"
-          :disabled="loadingWgs"
-          @click.stop="refresh({ force: true })"
+          :disabled="manualRefreshingWgs"
+          @click.stop="refresh({ force: true, manual: true })"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
             <path

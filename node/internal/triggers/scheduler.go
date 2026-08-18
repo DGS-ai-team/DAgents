@@ -78,10 +78,12 @@ func (s *Scheduler) Start() {
 	if s.stopCh != nil {
 		return
 	}
-	s.stopCh = make(chan struct{})
-	s.doneCh = make(chan struct{})
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	s.stopCh = stopCh
+	s.doneCh = doneCh
 	s.logger.Info("trigger scheduler started", "poll_seconds", int(s.pollInterval.Seconds()))
-	go s.runLoop()
+	go s.runLoop(stopCh, doneCh)
 }
 
 // Stop 停止轮询并等待 goroutine 退出。
@@ -91,12 +93,13 @@ func (s *Scheduler) Stop() {
 		s.mu.Unlock()
 		return
 	}
-	close(s.stopCh)
-	done := s.doneCh
+	stopCh := s.stopCh
+	doneCh := s.doneCh
+	close(stopCh)
 	s.stopCh = nil
 	s.doneCh = nil
 	s.mu.Unlock()
-	<-done
+	<-doneCh
 }
 
 // FireTrigger 手动或工具触发指定触发器。
@@ -110,14 +113,16 @@ func (s *Scheduler) FireTrigger(triggerID, reason string, payload map[string]any
 	return s.fire(context.Background(), *def, reason, payload, force, opts), nil
 }
 
-func (s *Scheduler) runLoop() {
-	defer close(s.doneCh)
+func (s *Scheduler) runLoop(stopCh, doneCh chan struct{}) {
+	// Stop clears the fields to allow a later restart. Keep these per-run channel
+	// references so clearing the fields cannot make the stop case nil.
+	defer close(doneCh)
 	s.tickDue(time.Now())
 	ticker := time.NewTicker(s.pollInterval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-s.stopCh:
+		case <-stopCh:
 			return
 		case now := <-ticker.C:
 			s.tickDue(now)
