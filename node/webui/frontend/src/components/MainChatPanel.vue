@@ -18,6 +18,10 @@ import { toolJobsStore } from "../stores/toolJobs.js";
 import { statusStore, statusPhaseOrder, hasStatus, formatStatusText } from "../stores/statusLines.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
+import {
+  measureSync,
+  updateRuntimeMetrics,
+} from "../stores/performanceDiagnostics.js";
 import { getDesktopClipboardFiles } from "../api/desktop.js";
 import {
   formatPathsForComposer,
@@ -90,16 +94,30 @@ const stream = computed(() => {
   // 依赖 tool-jobs，以便排队/执行中相位随 /tool-jobs 刷新
   void toolJobsStore.runningCallIds;
   void toolJobsStore.backgroundCallIds;
-  return buildStream(props.entries, props.hitlQueue, toolJobsStore);
+  const items = measureSync(
+    "stream.build",
+    () => buildStream(props.entries, props.hitlQueue, toolJobsStore),
+    { entries: props.entries.length },
+  );
+  updateRuntimeMetrics({ entries: props.entries.length, streamItems: items.length });
+  return items;
 });
 
 const renderedStream = computed(() => {
-  if (stream.value.length <= MAX_RENDERED_STREAM_ITEMS) return stream.value;
-  const start = Math.min(
-    Math.max(0, streamWindowStart.value),
-    Math.max(0, stream.value.length - MAX_RENDERED_STREAM_ITEMS),
-  );
-  return stream.value.slice(start, start + MAX_RENDERED_STREAM_ITEMS);
+  let visible = stream.value;
+  if (stream.value.length > MAX_RENDERED_STREAM_ITEMS) {
+    const start = Math.min(
+      Math.max(0, streamWindowStart.value),
+      Math.max(0, stream.value.length - MAX_RENDERED_STREAM_ITEMS),
+    );
+    visible = stream.value.slice(start, start + MAX_RENDERED_STREAM_ITEMS);
+  }
+  updateRuntimeMetrics({
+    entries: props.entries.length,
+    streamItems: stream.value.length,
+    visibleItems: visible.length,
+  });
+  return visible;
 });
 const hasEarlierStreamItems = computed(
   () => stream.value.length > MAX_RENDERED_STREAM_ITEMS && streamWindowStart.value > 0,
@@ -274,28 +292,32 @@ function buildContentParts(text, images) {
 
 /** 消息/HITL/状态条等内容变化指纹；流式 assistant 改 text 长度也会触发。 */
 const tailContentKey = computed(() => {
-  const parts = [stream.value.length, props.hitlQueue.length, activeStatusPhases.value.length];
-  for (const entry of props.entries) {
-    parts.push(entry.id, entry.kind, (entry.text || "").length, entry.streaming ? 1 : 0);
-    // 工具气泡内容在 data 上，text 常为空；纳入 summary / content 长度以免漏钉尾
-    if (entry.kind === "tool_call" || entry.kind === "tool_result") {
-      parts.push(
-        String(entry.summary || "").length,
-        String(entry.data?.content || "").length,
-        entry.partial ? 1 : 0,
-      );
+  return measureSync("tail.key", () => {
+    const parts = [stream.value.length, props.hitlQueue.length, activeStatusPhases.value.length];
+    for (const entry of props.entries) {
+      parts.push(entry.id, entry.kind, (entry.text || "").length, entry.streaming ? 1 : 0);
+      // 工具气泡内容在 data 上，text 常为空；纳入 summary / content 长度以免漏钉尾
+      if (entry.kind === "tool_call" || entry.kind === "tool_result") {
+        parts.push(
+          String(entry.summary || "").length,
+          String(entry.data?.content || "").length,
+          entry.partial ? 1 : 0,
+        );
+      }
     }
-  }
-  for (const hitl of props.hitlQueue) {
-    parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
-  }
-  return parts.join("\0");
+    for (const hitl of props.hitlQueue) {
+      parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
+    }
+    return parts.join("\0");
+  }, { entries: props.entries.length });
 });
 
 function maybeScrollToTail() {
   nextTick(() => {
-    scrollTail.pinIfFollowing(streamRef.value);
-    updateScrollToTailVisibility();
+    measureSync("scroll.update", () => {
+      scrollTail.pinIfFollowing(streamRef.value);
+      updateScrollToTailVisibility();
+    });
   });
 }
 

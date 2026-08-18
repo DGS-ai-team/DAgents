@@ -1,4 +1,6 @@
 /** 流式文本匀速揭示（chars/s）；SSE 突发写入 source，UI 按固定速率消费。 */
+import { updateRuntimeMetrics } from "./performanceDiagnostics.js";
+
 export const REVEAL_CHARS_PER_SECOND = 420;
 
 const revealState = {
@@ -76,6 +78,12 @@ function tickReveal(now) {
     }
     if (st.streaming || st.revealedLen < source.length) keepLoop = true;
   }
+
+  const assistantSource = readSource("assistant");
+  updateRuntimeMetrics({
+    assistantBufferLength: assistantSource.length,
+    unrevealedChars: Math.max(0, assistantSource.length - revealState.assistant.revealedLen),
+  });
 
   if (keepLoop) {
     rafHandle = requestAnimationFrame(tickReveal);
