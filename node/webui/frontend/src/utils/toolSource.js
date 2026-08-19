@@ -28,7 +28,6 @@ const SKILLS_TOOLS = new Set(["load_skills", "unload_skills", "clear_skills"]);
 const KIND_META = {
   mcp: { label: "mcp", short: "mcp", icon: "M" },
   terminal: { label: "terminal", short: "terminal", icon: ">_" },
-  linux: { label: "linux", short: "linux", icon: "L" },
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
   browser: { label: "browser", short: "browser", icon: "◉" },
@@ -51,7 +50,7 @@ export function inferToolKind(name, data = {}) {
   if (n.startsWith("trigger_")) return "triggers";
   if (n.startsWith("terminal_")) return "terminal";
   if (SKILLS_TOOLS.has(n)) return "skills";
-  if (LINUX_TOOLS.has(n) || n.startsWith("linux_")) return "linux";
+  if (LINUX_TOOLS.has(n) || n.startsWith("linux_")) return "terminal";
   if (SHELL_TOOLS.has(n) || n.startsWith("background_job_")) return "shell";
   if (FS_TOOLS.has(n)) return "fs";
   if (n === USER_INFORMATION_TOOL) return "hitl";
@@ -77,4 +76,21 @@ export function resolveToolVisual(entry) {
     return { kind, label: serverName, short: serverName, icon: KIND_META.mcp.icon };
   }
   return visualForKind(kind);
+}
+
+/**
+ * 合并工具气泡的总图标。
+ * 同一气泡里出现多个工具组时，不使用首个工具的图标，避免让用户误以为
+ * 所有步骤都属于同一类工具；展开后仍由每个 ToolSummaryRow 展示准确图标。
+ */
+export function resolveToolGroupVisual(steps = []) {
+  const visuals = (Array.isArray(steps) ? steps : [])
+    .map((step) => resolveToolVisual(step?.resultEntry || step?.callEntry || step || {}))
+    .filter(Boolean);
+  const first = visuals[0] || visualForKind("tool");
+  const kinds = new Set(visuals.map((item) => item.kind));
+  if (kinds.size > 1) {
+    return { kind: "wrench", label: "多种工具组", short: "多工具", icon: "⚒", mixed: true };
+  }
+  return first;
 }

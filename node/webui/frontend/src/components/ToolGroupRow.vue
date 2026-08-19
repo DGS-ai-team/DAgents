@@ -2,8 +2,8 @@
 import { computed, ref } from "vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
-import { resolveToolVisual } from "../utils/toolSource.js";
-import { resolveToolStepPhase, toolStepPurpose } from "../utils/toolUserLabel.js";
+import { resolveToolGroupVisual } from "../utils/toolSource.js";
+import { resolveToolStepPhase } from "../utils/toolUserLabel.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
@@ -23,14 +23,8 @@ const activeSteps = computed(() =>
 
 const completedCount = computed(() => props.steps.filter((step) => !!step?.resultEntry).length);
 const hasActive = computed(() => activeSteps.value.length > 0);
-const firstStep = computed(() => props.steps[0] || null);
-const summary = computed(() => {
-  const step = activeSteps.value[0] || firstStep.value;
-  return step ? toolStepPurpose(step) : "";
-});
 const visual = computed(() => {
-  const step = activeSteps.value[0] || firstStep.value;
-  return resolveToolVisual(step?.resultEntry || step?.callEntry || {});
+  return resolveToolGroupVisual(props.steps);
 });
 const statusText = computed(() => {
   if (hasActive.value) return `${activeSteps.value.length} 项执行中`;
@@ -44,7 +38,13 @@ function toggle() {
 </script>
 
 <template>
-  <div class="tool-group-row" :class="{ 'tool-group-row--expanded': expanded, 'tool-group-row--progress': hasActive }">
+  <div
+    class="tool-group-row"
+    :class="[
+      `tool-group-row--${visual.kind}`,
+      { 'tool-group-row--expanded': expanded, 'tool-group-row--progress': hasActive },
+    ]"
+  >
     <button
       type="button"
       class="tool-group-row__head"
@@ -59,8 +59,7 @@ function toggle() {
       <span class="tool-group-row__visual" :title="visual.label">
         <ToolGroupIcon :name="visual.kind" />
       </span>
-      <span class="tool-group-row__count">{{ steps.length }} 项</span>
-      <span v-if="summary" class="tool-group-row__summary">{{ summary }}</span>
+      <span class="tool-group-row__title">工具执行清单</span>
       <span class="tool-group-row__status">{{ statusText }}</span>
       <span class="tool-group-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
     </button>
@@ -133,13 +132,6 @@ function toggle() {
   font-size: 12px;
 }
 
-.tool-group-row__count {
-  flex: 0 0 auto;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--color-text-subtle);
-}
-
 .tool-group-row__visual {
   display: inline-flex;
   align-items: center;
@@ -148,29 +140,48 @@ function toggle() {
   color: var(--color-text-muted);
 }
 
-.tool-group-row--progress .tool-group-row__visual {
-  color: var(--color-primary);
-}
-
 .tool-group-row__visual :deep(.tool-group-icon) {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
-.tool-group-row__count {
-  color: var(--color-primary-strong);
-  font-variant-numeric: tabular-nums;
+/* 合并气泡沿用独立工具气泡的工具组色彩，避免同一命令行工具出现两种颜色。 */
+.tool-group-row--shell .tool-group-row__visual {
+  color: #e2a053;
 }
 
-.tool-group-row__summary {
+.tool-group-row--terminal .tool-group-row__visual,
+.tool-group-row--browser .tool-group-row__visual,
+.tool-group-row--linux .tool-group-row__visual {
+  color: #569cd6;
+}
+
+.tool-group-row--fs .tool-group-row__visual,
+.tool-group-row--skills .tool-group-row__visual {
+  color: var(--color-success);
+}
+
+.tool-group-row--mcp .tool-group-row__visual {
+  color: #9b8cff;
+}
+
+.tool-group-row--child .tool-group-row__visual {
+  color: #c586c0;
+}
+
+.tool-group-row--wrench .tool-group-row__visual,
+.tool-group-row--tool .tool-group-row__visual {
+  color: var(--color-text-muted);
+}
+
+.tool-group-row__title {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 400;
   line-height: 1.35;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

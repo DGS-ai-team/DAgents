@@ -22,7 +22,6 @@ import {
 } from "../stores/toolJobs.js";
 import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
-import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
@@ -190,14 +189,6 @@ async function onBackground(ev) {
         </button>
       </div>
       <span v-if="status" class="tool-summary-row__status">
-        <BrandActivityIndicator
-          v-if="inProgress"
-          class="tool-summary-row__dots"
-          label="工具执行中"
-          mode="tool"
-          :show-label="false"
-          compact
-        />
         {{ status }}
       </span>
       <button
@@ -381,11 +372,6 @@ async function onBackground(ev) {
   font-size: 11px;
   color: var(--color-text-subtle);
   white-space: nowrap;
-}
-
-.tool-summary-row__dots {
-  --stream-meta-dot-size: 4px;
-  --stream-meta-dot-gap: 2px;
 }
 
 .tool-summary-row__chevron-btn {
