@@ -95,22 +95,22 @@ defineProps({
   0%,
   100% {
     opacity: 0.82;
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.98);
+    transform: rotate(0deg);
     filter: drop-shadow(0 0 0 transparent);
   }
   22% {
     opacity: 0.96;
-    transform: translate3d(0, -0.5px, 0) rotate(0deg) scale(1);
+    transform: rotate(0deg);
     filter: drop-shadow(0 0 3px color-mix(in srgb, var(--primary, #4f8cff) 34%, transparent));
   }
   46% {
     opacity: 1;
-    transform: translate3d(0, -0.5px, 0) rotate(3deg) scale(1.04);
+    transform: rotate(3deg);
     filter: drop-shadow(0 0 5px color-mix(in srgb, var(--primary, #4f8cff) 40%, transparent));
   }
   68% {
     opacity: 0.94;
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(1.01);
+    transform: rotate(0deg);
     filter: drop-shadow(0 0 3px color-mix(in srgb, var(--primary, #4f8cff) 30%, transparent));
   }
 }
@@ -119,30 +119,30 @@ defineProps({
   0%,
   100% {
     opacity: 0.82;
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.98);
+    transform: rotate(0deg);
     filter: drop-shadow(0 0 0 transparent);
   }
   14% {
     opacity: 0.96;
-    transform: translate3d(0, -0.5px, 0) rotate(0deg) scale(1);
+    transform: rotate(0deg);
   }
   28% {
-    transform: translate3d(0, -0.5px, 0) rotate(8deg) scale(1.03);
+    transform: rotate(4deg);
     filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary, #4f8cff) 38%, transparent));
   }
   42% {
-    transform: translate3d(0, 0, 0) rotate(16deg) scale(0.99);
+    transform: rotate(0deg);
   }
   56% {
     opacity: 1;
-    transform: translate3d(0, -0.5px, 0) rotate(24deg) scale(1.04);
+    transform: rotate(6deg);
     filter: drop-shadow(0 0 5px color-mix(in srgb, var(--primary, #4f8cff) 42%, transparent));
   }
   70% {
-    transform: translate3d(0, 0, 0) rotate(32deg) scale(1.01);
+    transform: rotate(2deg);
   }
   84% {
-    transform: translate3d(0, -0.5px, 0) rotate(40deg) scale(1.03);
+    transform: rotate(5deg);
     filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary, #4f8cff) 34%, transparent));
   }
 }
@@ -151,22 +151,22 @@ defineProps({
   0%,
   100% {
     opacity: 0.82;
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.98);
+    transform: rotate(0deg);
   }
   18% {
     opacity: 0.96;
-    transform: translate3d(0, -0.5px, 0) rotate(-4deg) scale(1.01);
+    transform: rotate(-3deg);
   }
   36% {
-    transform: translate3d(0, 0.5px, 0) rotate(4deg) scale(0.99);
+    transform: rotate(3deg);
   }
   54% {
     opacity: 1;
-    transform: translate3d(0, -0.5px, 0) rotate(-4deg) scale(1.02);
+    transform: rotate(-3deg);
     filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary, #4f8cff) 36%, transparent));
   }
   72% {
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    transform: rotate(0deg);
   }
 }
 

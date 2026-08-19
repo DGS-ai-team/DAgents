@@ -111,6 +111,16 @@ defineProps({
         stroke-linejoin="round"
       />
     </template>
+    <!-- 多工具组 -->
+    <template v-else-if="name === 'wrench'">
+      <path
+        d="M15.4 5.1a4.4 4.4 0 0 0-5.2 5.2l-5.6 5.6a2.1 2.1 0 1 0 3 3l5.6-5.6a4.4 4.4 0 0 0 5.2-5.2l-2.5 2.5-2.3-.6-.6-2.3 2.4-2.6Z"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
     <!-- fallback -->
     <template v-else>
       <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.5" />

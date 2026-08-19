@@ -169,6 +169,13 @@ describe("agentTemplateForm", () => {
     expect(draft.llmProfileId).toBe("deepseek");
   });
 
+  it("migrates a saved Linux group when opening agent settings", () => {
+    const draft = draftFromAgentView({
+      config_snapshot: { defaults: { tools: { enabled_groups: ["linux", "terminal"] } } },
+    });
+    expect(draft.toolGroups).toEqual(["terminal"]);
+  });
+
   it("omits skills.visible when unrestricted", () => {
     const payload = buildCreateAgentPayload({
       displayName: "全技能",
@@ -249,6 +256,11 @@ describe("agentTemplateForm", () => {
       features: { browser_enabled: false, wecom_enabled: true },
     });
     expect(groups.map((g) => g.name)).toEqual(["bash", "browser", "fs", "terminal"]);
+  });
+
+  it("maps the legacy Linux group into terminal", () => {
+    const groups = toolGroupsFromSetup({ available_tool_groups: ["fs", "linux"] });
+    expect(groups.map((g) => g.name)).toEqual(["fs", "terminal"]);
   });
 
   it("falls back to features when available_tool_groups missing", () => {

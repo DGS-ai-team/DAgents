@@ -13,16 +13,34 @@ function promptFieldEnabled(text) {
 
 export const BLANK_TEMPLATE_ID = "__blank__";
 
+const LEGACY_TOOL_GROUP_ALIASES = Object.freeze({ linux: "terminal" });
+
+export function canonicalToolGroupName(value) {
+  const name = String(value || "").trim();
+  return LEGACY_TOOL_GROUP_ALIASES[name] || name;
+}
+
+export function normalizeToolGroupNames(groups) {
+  const seen = new Set();
+  const out = [];
+  for (const value of Array.isArray(groups) ? groups : []) {
+    const name = canonicalToolGroupName(value);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
 export const TOOL_GROUPS = [
   { name: "bash", label: "命令行" },
   { name: "browser", label: "浏览器", beta: true, hint: "任务级派发至伴生（需真实 LLM）" },
   { name: "child_agents", label: "子智能体" },
   { name: "fs", label: "文件" },
   { name: "hitl", label: "用户询问" },
-  { name: "linux", label: "Linux 通道", hint: "SSH 命令与文件传输" },
   { name: "memory", label: "记忆" },
   { name: "skills", label: "技能" },
-  { name: "terminal", label: "终端" },
+  { name: "terminal", label: "终端与 Linux 通道", hint: "本机终端、SSH 命令与文件传输" },
   { name: "triggers", label: "定时任务" },
   { name: "wecom", label: "企业微信" },
 ];
@@ -33,7 +51,7 @@ export const TOOL_GROUPS = [
  */
 export function toolGroupsFromSetup(setup, all = TOOL_GROUPS) {
   const names = Array.isArray(setup?.available_tool_groups)
-    ? setup.available_tool_groups.map((x) => String(x || "").trim()).filter(Boolean)
+    ? normalizeToolGroupNames(setup.available_tool_groups)
     : null;
   if (names && names.length) {
     const allow = new Set(names);
@@ -57,7 +75,7 @@ export function pruneDraftToolGroups(draft, availableGroups) {
       .filter(Boolean),
   );
   const cur = Array.isArray(draft.toolGroups) ? draft.toolGroups : [];
-  draft.toolGroups = cur.map((x) => String(x || "").trim()).filter((n) => n && allow.has(n));
+  draft.toolGroups = normalizeToolGroupNames(cur).filter((n) => allow.has(n));
 }
 
 export const LONG_TERM_SCOPES = [
@@ -181,9 +199,7 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.description = String(template?.description || agent.description || "").trim();
   draft.role = String(agent.role || "assistant").trim() || "assistant";
   draft.maxToolLoops = numberOr(llm.max_tool_loops, 32);
-  draft.toolGroups = Array.isArray(tools.enabled_groups)
-    ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
-    : [];
+  draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
@@ -218,9 +234,7 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.description = String(agentMeta.description || "").trim();
   draft.role = String(agentMeta.role || "assistant").trim() || "assistant";
   draft.maxToolLoops = numberOr(llm.max_tool_loops, 32);
-  draft.toolGroups = Array.isArray(tools.enabled_groups)
-    ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
-    : [];
+  draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
@@ -264,7 +278,7 @@ export function buildCreateAgentPayload(draft) {
         max_tool_loops: numberOr(draft.maxToolLoops, 32),
       },
       tools: {
-        enabled_groups: Array.isArray(draft.toolGroups) ? [...draft.toolGroups] : [],
+        enabled_groups: normalizeToolGroupNames(draft.toolGroups),
       },
       skills: skillsPayload(draft),
       prompt_context: {
@@ -316,7 +330,7 @@ export function buildCreateTemplatePayload(meta, draft) {
         max_tool_loops: numberOr(draft?.maxToolLoops, 32),
       },
       tools: {
-        enabled_groups: Array.isArray(draft?.toolGroups) ? [...draft.toolGroups] : [],
+        enabled_groups: normalizeToolGroupNames(draft?.toolGroups),
       },
       skills: skillsPayload(draft),
       prompt_context: {
