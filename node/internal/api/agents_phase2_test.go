@@ -205,6 +205,86 @@ defaults:
 	}
 }
 
+func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *testing.T) {
+	root, err := os.MkdirTemp("", "dagents-agent-llm-focus-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
+		"profile-a": {Provider: "mock", Model: "model-a", Mock: true},
+		"profile-b": {Provider: "mock", Model: "model-b", Mock: true},
+	}
+	cfg.LLM.ProfileOrder = []string{"profile-a", "profile-b"}
+	cfg.LLM.Active = "profile-a"
+	cfg.ApplyDefaults()
+	if err := cfg.SetActiveLLMProfile("profile-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+	t.Cleanup(func() {
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+		_ = agentsDB.Close()
+	})
+
+	create := func(name, profile string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"display_name": name,
+			"defaults": map[string]any{
+				"llm": map[string]any{"active": profile},
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("create %s status=%d body=%s", name, rr.Code, rr.Body.String())
+		}
+		var view agentView
+		if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {
+			t.Fatal(err)
+		}
+		return view.AgentID
+	}
+
+	agentA := create("Agent A", "profile-a")
+	agentB := create("Agent B", "profile-b")
+	if got := cfg.LLM.ActiveProfileID(); got != "profile-b" {
+		t.Fatalf("after creating B active profile=%q", got)
+	}
+
+	// Both runtimes are already loaded and their revisions are unchanged. This
+	// is the path that used to return early and leave profile-b active for A.
+	for _, tc := range []struct {
+		id   string
+		want string
+	}{
+		{agentA, "profile-a"},
+		{agentB, "profile-b"},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/agents/"+tc.id+"/ensure", nil)
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("ensure %s status=%d body=%s", tc.id, rr.Code, rr.Body.String())
+		}
+		if got := cfg.LLM.ActiveProfileID(); got != tc.want {
+			t.Fatalf("ensure %s active profile=%q want %q", tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestResolveAgentID(t *testing.T) {
 	id, err := resolveAgentID("agt-1")
 	if err != nil || id != "agt-1" {

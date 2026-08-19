@@ -30,4 +30,23 @@ describe("buildStream", () => {
 
     expect(first.at(-1).key).not.toBe(second.at(-1).key);
   });
+
+  it("keeps a content-less partial tool call visible as generating", () => {
+    const items = buildStream([
+      entry(1, "tool_call", {
+        blockId: "mimo-call",
+        partial: true,
+        data: {
+          tool_call_id: "mimo-call",
+          tool_name: "bash_run",
+          arguments: "",
+        },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe("tool_step");
+    expect(items[0].callEntry.partial).toBe(true);
+    expect(items[0].executionHint).toBeUndefined();
+  });
 });
