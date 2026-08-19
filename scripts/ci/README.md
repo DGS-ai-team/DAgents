@@ -9,6 +9,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`build_dagents_browser.sh`** | PyInstaller 单文件 **`dagents-browser`**（browser-use 薄服务） |
 | **`build_linux_rocky8_pyenv.sh`** | **Release CI 默认**：Rocky Linux 8 容器（glibc **2.28**）内 pyenv + PyInstaller（`BROWSER_PI_ARGS`）；`SKIP_DNF=1` 配合预装镜像 |
 | **`../packaging/ci/Dockerfile.rocky8-browser`** | Rocky8 + gcc-toolset-13 预装依赖（CI Buildx + GHA cache）；pyenv 目录另做 actions/cache |
+| **`../packaging/ci/Dockerfile.tauri-linux`** | Ubuntu 24.04 + Rust stable + Tauri Linux 系统依赖；发布到 GHCR 后供 `tauri-shell.yml` 直接复用 |
 | **`build_linux_focal_pyenv.sh`** | Ubuntu 20.04 focal 容器（glibc 2.31；i386 或需较新链时手动用） |
 | **`assemble_local_assistant_bundle.sh`** | 组装 `dagents-local-assistant-*` 目录并 tar.gz/zip |
 | **`build_windows_installer.sh`** | Windows：staging `bundle/` + Inno Setup 生成 `.exe` 安装包 |
@@ -19,6 +20,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 **Release 打包**：仓库根 `scripts/package_local_assistant.sh`；CI 见 `.github/workflows/build-and-release.yml`：
 
 - Linux 与 Windows（Go / Tauri Shell / browser）在单测后**并行**；
+- Tauri Linux 检查优先使用 GHCR 预构建镜像，不在正常 CI 中重复安装 apt 依赖；镜像由 `tauri-linux-image.yml` 在 `dev/main` 发布并通过 BuildKit GHA cache 加速构建。镜像首次发布前仅允许一次 bootstrap apt 兜底。
 - Windows 三路产物合流后再 assemble + Inno；
 - Manage 离线包**只依赖** `linux-amd64` 助手包（不再空等 Windows）。
 
