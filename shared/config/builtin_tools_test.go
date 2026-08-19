@@ -59,13 +59,34 @@ func TestExpandBuiltinToolGroups(t *testing.T) {
 
 func TestExpandBuiltinToolGroupsTerminal(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{"terminal"})
-	want := []string{"terminal_config_list", "terminal_input", "terminal_list", "terminal_open", "terminal_read", "terminal_terminate"}
+	want := []string{"linux_exec", "linux_file_download", "linux_file_upload", "terminal_config_list", "terminal_input", "terminal_list", "terminal_open", "terminal_read", "terminal_terminate"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("got=%v want=%v", got, want)
+		}
+	}
+}
+
+func TestLinuxToolGroupAliasUsesTerminal(t *testing.T) {
+	got := ExpandBuiltinToolGroups([]string{"linux"})
+	want := ExpandBuiltinToolGroups([]string{"terminal"})
+	if len(got) != len(want) {
+		t.Fatalf("linux alias expanded to %v, terminal expanded to %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("linux alias expanded to %v, terminal expanded to %v", got, want)
+		}
+	}
+	if _, ok := BuiltinToolGroupMembers("linux"); !ok {
+		t.Fatal("legacy linux group should remain readable")
+	}
+	for _, name := range AllBuiltinToolGroupNames() {
+		if name == "linux" {
+			t.Fatal("linux should not be exposed as an independent tool group")
 		}
 	}
 }
@@ -145,8 +166,8 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 	if members, ok := BuiltinToolGroupMembers("bash"); !ok || len(members) != 3 {
 		t.Fatalf("bash members = %v ok=%v want bash_run + 2 background tools", members, ok)
 	}
-	if members, ok := BuiltinToolGroupMembers("terminal"); !ok || len(members) != 6 {
-		t.Fatalf("terminal members = %v ok=%v want 6 terminal tools", members, ok)
+	if members, ok := BuiltinToolGroupMembers("terminal"); !ok || len(members) != 9 {
+		t.Fatalf("terminal members = %v ok=%v want 9 terminal/Linux tools", members, ok)
 	}
 }
 

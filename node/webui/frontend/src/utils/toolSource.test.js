@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferToolKind, resolveToolVisual } from "./toolSource.js";
+import { inferToolKind, resolveToolGroupVisual, resolveToolVisual } from "./toolSource.js";
 
 describe("inferToolKind", () => {
   it("maps fs tools", () => {
@@ -19,11 +19,11 @@ describe("inferToolKind", () => {
     expect(inferToolKind("terminal_terminate")).toBe("terminal");
   });
 
-  it("maps Linux channel tools to the Linux source", () => {
-    expect(inferToolKind("linux_exec")).toBe("linux");
-    expect(inferToolKind("linux_file_upload")).toBe("linux");
-    expect(inferToolKind("linux_file_download")).toBe("linux");
-    expect(inferToolKind("linux_future_tool")).toBe("linux");
+	  it("maps Linux channel tools into the terminal source", () => {
+		expect(inferToolKind("linux_exec")).toBe("terminal");
+		expect(inferToolKind("linux_file_upload")).toBe("terminal");
+		expect(inferToolKind("linux_file_download")).toBe("terminal");
+		expect(inferToolKind("linux_future_tool")).toBe("terminal");
   });
 
   it("maps triggers and browser by prefix", () => {
@@ -61,8 +61,8 @@ describe("resolveToolVisual", () => {
       label: "terminal",
     });
     expect(resolveToolVisual({ data: { tool_name: "linux_file_upload" } })).toMatchObject({
-      kind: "linux",
-      label: "linux",
+		kind: "terminal",
+		label: "terminal",
     });
   });
 
@@ -73,5 +73,32 @@ describe("resolveToolVisual", () => {
       short: "tencent-docs",
       icon: "M",
     });
+  });
+
+  it("uses a wrench for a merged group containing different tool kinds", () => {
+    expect(
+      resolveToolGroupVisual([
+        { callEntry: { data: { tool_name: "read_file" } } },
+        { callEntry: { data: { tool_name: "bash_run" } } },
+      ]),
+    ).toMatchObject({ kind: "wrench", label: "多种工具组", mixed: true });
+  });
+
+  it("keeps the specific visual for a merged group with one tool kind", () => {
+    expect(
+      resolveToolGroupVisual([
+        { callEntry: { data: { tool_name: "mcp__tencent-docs__doc_get" } } },
+        { callEntry: { data: { tool_name: "mcp__tencent-docs__doc_search" } } },
+      ]),
+    ).toMatchObject({ kind: "mcp", label: "tencent-docs" });
+  });
+
+  it("keeps terminal and Linux channel steps in one merged visual group", () => {
+    expect(
+      resolveToolGroupVisual([
+        { callEntry: { data: { tool_name: "terminal_read" } } },
+        { callEntry: { data: { tool_name: "linux_exec" } } },
+      ]),
+    ).toMatchObject({ kind: "terminal", label: "terminal" });
   });
 });

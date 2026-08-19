@@ -120,7 +120,7 @@ func (c *Config) FilterAgentToolGroups(groups []string) []string {
 	}
 	out := make([]string, 0, len(groups))
 	seen := make(map[string]struct{}, len(groups))
-	for _, raw := range groups {
+	for _, raw := range NormalizeBuiltinToolGroups(groups) {
 		name := strings.TrimSpace(raw)
 		if name == "" {
 			continue

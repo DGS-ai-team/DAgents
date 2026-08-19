@@ -64,9 +64,9 @@ func EnabledToolGroups(snap Snapshot) []string {
 				out = append(out, s)
 			}
 		}
-		return out
+		return config.NormalizeBuiltinToolGroups(out)
 	case []string:
-		return append([]string(nil), v...)
+		return config.NormalizeBuiltinToolGroups(v)
 	default:
 		return nil
 	}

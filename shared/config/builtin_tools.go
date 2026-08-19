@@ -73,8 +73,6 @@ var builtinToolGroups = map[string][]string{
 		"terminal_read",
 		"terminal_terminate",
 		"terminal_list",
-	},
-	"linux": {
 		"linux_exec",
 		"linux_file_upload",
 		"linux_file_download",
@@ -114,6 +112,12 @@ var builtinToolGroups = map[string][]string{
 		"wecom_send_markdown",
 		"wecom_send_file",
 	},
+}
+
+// builtinToolGroupAliases 保留旧配置中的 linux 组名，统一映射到 terminal。
+// 新配置只暴露 terminal，避免本机终端与 Linux 通道被误认为是两套能力。
+var builtinToolGroupAliases = map[string]string{
+	"linux": "terminal",
 }
 
 var builtinToolToGroup map[string]string
@@ -159,7 +163,7 @@ func PublicBuiltinToolGroupNames() []string {
 
 // BuiltinToolGroupMembers 返回组内工具名（副本）；未知组返回 false。
 func BuiltinToolGroupMembers(group string) ([]string, bool) {
-	members, ok := builtinToolGroups[group]
+	members, ok := builtinToolGroups[canonicalBuiltinToolGroup(group)]
 	if !ok {
 		return nil, false
 	}
@@ -176,7 +180,7 @@ func NormalizeBuiltinToolGroups(groups []string) []string {
 	seen := make(map[string]struct{}, len(groups))
 	out := make([]string, 0, len(groups))
 	for _, raw := range groups {
-		name := strings.TrimSpace(raw)
+		name := canonicalBuiltinToolGroup(raw)
 		if name == "" {
 			continue
 		}
@@ -190,6 +194,14 @@ func NormalizeBuiltinToolGroups(groups []string) []string {
 		return nil
 	}
 	return out
+}
+
+func canonicalBuiltinToolGroup(raw string) string {
+	name := strings.TrimSpace(raw)
+	if alias, ok := builtinToolGroupAliases[name]; ok {
+		return alias
+	}
+	return name
 }
 
 // ExpandBuiltinToolGroups 将工具组展开为工具名列表；空切片表示未选任何组。
