@@ -278,7 +278,8 @@ func (s *Server) handleProbeLLMModels(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := llm.ProviderName(providerName)
 	switch provider {
-	case llm.ProviderDeepSeek, llm.ProviderQwen, llm.ProviderOpenAI, llm.ProviderVLLM:
+	case llm.ProviderDeepSeek, llm.ProviderQwen, llm.ProviderOpenAI, llm.ProviderVLLM,
+		llm.ProviderGLM, llm.ProviderMiniMax, llm.ProviderMiMo:
 	default:
 		if sug := llm.SuggestProviderFromBaseURL(baseURL); sug != "" {
 			provider = llm.ProviderName(sug)

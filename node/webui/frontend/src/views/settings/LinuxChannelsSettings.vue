@@ -12,17 +12,23 @@ const error = ref("");
 const status = ref("");
 const showCredentialForm = ref(false);
 const showChannelForm = ref(false);
+const editingChannelId = ref("");
 
-const credential = reactive({ display_name: "", auth_type: "private_key", secret_ref: "", username_hint: "" });
+const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
 const channel = reactive({ display_name: "", host: "", port: 22, username: "", credential_id: "", remote_shell: "bash", default_cwd: "" });
 
 const credentialAuthMeta = {
-  private_key: { label: "SSH 私钥", description: "从 secret_ref 解析私钥内容，Node 不会把私钥放进工具参数。" },
-  password: { label: "密码", description: "从 secret_ref 解析密码，只在建立 SSH 连接时使用。" },
+  private_key: { label: "SSH 私钥", description: "可直接输入私钥或引用环境变量，Node 不会把私钥放进工具参数。" },
+  password: { label: "密码", description: "可直接输入密码，也可以通过环境变量引用。" },
 };
 
 const credentialAuthDescription = computed(() => credentialAuthMeta[credential.auth_type]?.description || "请选择认证方式。");
-const credentialReady = computed(() => Boolean(credential.secret_ref.trim()));
+const credentialReady = computed(() => {
+  if (credential.secret_mode === "direct") {
+    return credential.secret_value.trim().length > 0;
+  }
+  return Boolean(credential.secret_ref.trim());
+});
 const channelReady = computed(() => Boolean(
   channel.host.trim() &&
   channel.username.trim() &&
@@ -34,11 +40,24 @@ function authTypeLabel(type) {
 }
 
 function credentialStatusLabel(item) {
-  return item.has_secret ? "已配置引用" : "未配置引用";
+  if (item.secret_source === "direct") return "已配置直接密码";
+  if (item.secret_source === "environment") return "已配置环境变量";
+  return item.has_secret ? "已配置凭据" : "未配置凭据";
 }
 
 function resetCredentialForm() {
-  Object.assign(credential, { display_name: "", auth_type: "private_key", secret_ref: "", username_hint: "" });
+  Object.assign(credential, { display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
+}
+
+function onCredentialAuthTypeChange() {
+  credential.secret_mode = "environment";
+  credential.secret_ref = "";
+  credential.secret_value = "";
+}
+
+function onCredentialSecretModeChange() {
+  credential.secret_ref = "";
+  credential.secret_value = "";
 }
 
 function resetChannelForm() {
@@ -56,15 +75,30 @@ function closeCredentialForm() {
   if (!saving.value) showCredentialForm.value = false;
 }
 
-function openChannelForm() {
+function openChannelForm(item = null) {
   resetChannelForm();
+  editingChannelId.value = item?.channel_id || "";
+  if (item) {
+    Object.assign(channel, {
+      display_name: item.display_name || "",
+      host: item.host || "",
+      port: item.port || 22,
+      username: item.username || "",
+      credential_id: item.credential_id || "",
+      remote_shell: item.remote_shell || "bash",
+      default_cwd: item.default_cwd || "",
+    });
+  }
   error.value = "";
   status.value = "";
   showChannelForm.value = true;
 }
 
 function closeChannelForm() {
-  if (!saving.value) showChannelForm.value = false;
+  if (!saving.value) {
+    showChannelForm.value = false;
+    editingChannelId.value = "";
+  }
 }
 
 async function load() {
@@ -86,11 +120,22 @@ async function saveCredential() {
   error.value = "";
   status.value = "";
   try {
-    await api.createLinuxCredential({ ...credential, enabled: true });
+    const payload = {
+      display_name: credential.display_name,
+      auth_type: credential.auth_type,
+      username_hint: credential.username_hint,
+      enabled: true,
+    };
+    if (credential.secret_mode === "direct") {
+      payload.secret_value = credential.secret_value;
+    } else {
+      payload.secret_ref = credential.secret_ref;
+    }
+    await api.createLinuxCredential(payload);
     resetCredentialForm();
     showCredentialForm.value = false;
     await load();
-    status.value = "凭据引用已保存";
+    status.value = "凭据已保存";
   } catch (e) {
     error.value = e.message || "保存凭据失败";
   } finally {
@@ -103,12 +148,18 @@ async function saveChannel() {
   error.value = "";
   status.value = "";
   try {
-    await api.createLinuxChannel({ ...channel, enabled: true });
+    if (editingChannelId.value) {
+      await api.patchLinuxChannel(editingChannelId.value, { ...channel, enabled: true });
+    } else {
+      await api.createLinuxChannel({ ...channel, enabled: true });
+    }
     resetChannelForm();
     showChannelForm.value = false;
+    const wasEditing = Boolean(editingChannelId.value);
+    editingChannelId.value = "";
     await load();
     notifyConfigurationChanged("linux-channels");
-    status.value = "Linux 通道已保存";
+    status.value = wasEditing ? "Linux 通道已更新" : "Linux 通道已保存";
   } catch (e) {
     error.value = e.message || "保存通道失败";
   } finally {
@@ -149,7 +200,7 @@ onMounted(() => void load());
     <header class="settings-page__header">
       <div class="settings-page__header-main">
         <h1 class="settings-page__title">Linux 通道</h1>
-        <p class="settings-page__intro">先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。敏感信息只在建立连接时解析，不会进入工具参数或会话上下文。</p>
+        <p class="settings-page__intro">先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。密码可直接输入或引用环境变量，敏感信息不会进入工具参数或会话上下文。</p>
       </div>
       <div class="settings-page__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
@@ -164,7 +215,7 @@ onMounted(() => void load());
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">凭据清单</h2>
-          <p class="settings-section__desc">ID由系统自动生成。密码和私钥建议使用 <code>env:变量名</code> 作为引用。</p>
+          <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；直接输入内容会加密存储。</p>
         </div>
         <div class="settings-section__actions">
           <button type="button" class="btn btn--primary btn--sm" @click="openCredentialForm">新增凭据</button>
@@ -193,7 +244,7 @@ onMounted(() => void load());
       <div v-else class="linux-settings__list">
         <div v-for="item in channels" :key="item.channel_id" class="linux-settings__row">
           <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }}</small></div>
-          <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
+          <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="openChannelForm(item)">编辑</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
         </div>
       </div>
     </section>
@@ -211,16 +262,32 @@ onMounted(() => void load());
           </div>
           <div class="linux-settings__field">
             <label>认证方式 <span>必选</span></label>
-            <select v-model="credential.auth_type" class="settings-field__input">
+            <select v-model="credential.auth_type" class="settings-field__input" @change="onCredentialAuthTypeChange">
               <option value="private_key">SSH 私钥</option>
               <option value="password">密码</option>
             </select>
             <small>{{ credentialAuthDescription }}</small>
           </div>
+          <div v-if="credential.auth_type === 'password' || credential.auth_type === 'private_key'" class="linux-settings__field">
+            <label>凭据来源 <span>必选</span></label>
+            <select v-model="credential.secret_mode" class="settings-field__input" @change="onCredentialSecretModeChange">
+              <option value="environment">环境变量引用</option>
+              <option value="direct">直接输入</option>
+            </select>
+            <small>直接输入的内容会加密保存到本机 Node 配置中，不需要重启 Node 或 shell。</small>
+          </div>
           <div class="linux-settings__field linux-settings__field--wide">
-            <label>敏感信息引用 <span>必选</span></label>
-            <input v-model="credential.secret_ref" class="settings-field__input" placeholder="例如：env:SSH_KEY 或 env:SSH_PASSWORD" />
-            <small>这里只保存引用名称，不保存明文。Node 会在连接时解析该引用。</small>
+            <template v-if="credential.secret_mode === 'direct'">
+              <label>{{ credential.auth_type === "private_key" ? "SSH 私钥" : "登录密码" }} <span>必选</span></label>
+              <textarea v-if="credential.auth_type === 'private_key'" v-model="credential.secret_value" rows="6" class="settings-field__input" placeholder="粘贴 SSH 私钥内容" />
+              <input v-else v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" placeholder="输入 SSH 登录密码" />
+              <small>只会在建立 SSH 连接时使用，不会通过凭据列表接口返回。</small>
+            </template>
+            <template v-else>
+              <label>环境变量引用 <span>必选</span></label>
+              <input v-model="credential.secret_ref" class="settings-field__input" :placeholder="credential.auth_type === 'private_key' ? '例如：env:SSH_KEY' : '例如：env:SSH_PASSWORD'" />
+              <small>这里只保存引用名称，Node 会在连接时从进程环境变量解析；修改环境变量后仍需重启 Node 才能让进程看到新值。</small>
+            </template>
           </div>
         </div>
         <div class="linux-settings__modal-actions">
@@ -233,7 +300,7 @@ onMounted(() => void load());
     <div v-if="showChannelForm" class="linux-settings__modal-backdrop" @click.self="closeChannelForm">
       <section class="linux-settings__modal linux-settings__modal--wide" role="dialog" aria-modal="true" aria-labelledby="channel-form-title">
         <div class="linux-settings__modal-head">
-          <div><h2 id="channel-form-title">新增 SSH 通道</h2><p>通道 ID由系统自动生成，一个通道代表一台远程主机。</p></div>
+          <div><h2 id="channel-form-title">{{ editingChannelId ? "编辑 SSH 通道" : "新增 SSH 通道" }}</h2><p>{{ editingChannelId ? `正在修改通道 ${editingChannelId}` : "通道 ID由系统自动生成，一个通道代表一台远程主机。" }}</p></div>
           <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeChannelForm">×</button>
         </div>
         <div class="linux-settings__channel-editor">
@@ -263,7 +330,7 @@ onMounted(() => void load());
         </div>
         <div class="linux-settings__modal-actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="closeChannelForm">取消</button>
-          <button type="button" class="btn btn--primary btn--sm" :disabled="saving || !channelReady" @click="saveChannel">保存 SSH 通道</button>
+          <button type="button" class="btn btn--primary btn--sm" :disabled="saving || !channelReady" @click="saveChannel">{{ editingChannelId ? "保存修改" : "保存 SSH 通道" }}</button>
         </div>
       </section>
     </div>

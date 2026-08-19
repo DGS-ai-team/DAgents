@@ -39,6 +39,14 @@ type LongTermStore interface {
 	SaveLongTerm(ctx context.Context, entries []LongTermEntry, expectedVersion time.Time) error
 }
 
+// LongTermScopeSetter is an optional capability for stores whose scope can be
+// changed while the owning Agent runtime stays loaded. A Turn still freezes
+// the model-visible prompt; the new scope is used by the next Turn or by an
+// explicit memory reload boundary.
+type LongTermScopeSetter interface {
+	SetLongTermScope(scope string)
+}
+
 // FormatLongTermEntries 将条目格式化为注入 prompt 的文本。
 func FormatLongTermEntries(entries []LongTermEntry) string {
 	if len(entries) == 0 {

@@ -17,7 +17,6 @@ import (
 const (
 	terminalResumeGrace    = 30 * time.Second
 	terminalReplayBytes    = 1 << 20
-	terminalOutputFrameMax = 4 << 10
 	terminalInterruptGrace = 1500 * time.Millisecond
 	terminalForceTimeout   = 2 * time.Second
 	terminalForceWait      = 500 * time.Millisecond
@@ -119,33 +118,22 @@ func (s *terminalSession) appendOutput(data []byte) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	s.mu.Lock()
-	conn := s.conn
-	frames := make([]terminalOutputFrame, 0, (len(data)+terminalOutputFrameMax-1)/terminalOutputFrameMax)
-	for len(data) > 0 {
-		chunkSize := len(data)
-		if chunkSize > terminalOutputFrameMax {
-			chunkSize = terminalOutputFrameMax
-		}
-		s.nextSeq++
-		frame := terminalOutputFrame{seq: s.nextSeq, data: append([]byte(nil), data[:chunkSize]...)}
-		s.frames = append(s.frames, frame)
-		s.frameBytes += len(frame.data)
-		frames = append(frames, frame)
-		data = data[chunkSize:]
-		for s.frameBytes > terminalReplayBytes && len(s.frames) > 0 {
-			s.frameBytes -= len(s.frames[0].data)
-			s.frames = s.frames[1:]
-			s.dropped = true
-		}
+	s.nextSeq++
+	frame := terminalOutputFrame{seq: s.nextSeq, data: append([]byte(nil), data...)}
+	s.frames = append(s.frames, frame)
+	s.frameBytes += len(frame.data)
+	for s.frameBytes > terminalReplayBytes && len(s.frames) > 0 {
+		s.frameBytes -= len(s.frames[0].data)
+		s.frames = s.frames[1:]
+		s.dropped = true
 	}
+	conn := s.conn
 	s.mu.Unlock()
 	s.touchActivity()
 	if conn != nil {
-		for _, frame := range frames {
-			_ = writeTerminalWSEventWithTimeout(conn, terminalWSEvent{
-				Type: "output", SessionID: s.id, TerminalID: s.id, Seq: frame.seq, Data: frame.data,
-			})
-		}
+		_ = writeTerminalWSEventWithTimeout(conn, terminalWSEvent{
+			Type: "output", SessionID: s.id, TerminalID: s.id, Seq: frame.seq, Data: frame.data,
+		})
 	}
 }
 

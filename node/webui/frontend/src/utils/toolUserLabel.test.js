@@ -3,6 +3,7 @@ import {
   resolveToolStepPhase,
   toolStepIsInProgress,
   toolStepIsPending,
+  toolStepPurpose,
   toolStepStatusText,
   toolStepUserSummary,
 } from "./toolUserLabel.js";
@@ -76,6 +77,30 @@ describe("toolStepUserSummary", () => {
       },
     });
     expect(text).toBe("查询浏览器任务：标题是 Example Domain");
+  });
+});
+
+describe("toolStepPurpose", () => {
+  it("returns only call_purpose for the compact tool bubble", () => {
+    expect(
+      toolStepPurpose({
+        callEntry: {
+          kind: "tool_call",
+          data: { tool_name: "bash_run", arguments: { call_purpose: "查询东莞天气" } },
+        },
+      }),
+    ).toBe("查询东莞天气");
+  });
+
+  it("supports temporary agent purpose as a fallback", () => {
+    expect(
+      toolStepPurpose({
+        callEntry: {
+          kind: "tool_call",
+          data: { tool_name: "create_temporary_agent", arguments: { purpose: "整理接口文档" } },
+        },
+      }),
+    ).toBe("整理接口文档");
   });
 });
 

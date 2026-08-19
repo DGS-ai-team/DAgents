@@ -70,6 +70,11 @@ type Orchestrator struct {
 
 	ctxMetrics *contextMetricsStore
 
+	modelSnapshots  *modelContextSnapshotStore
+	runtimeRevision int64
+	runtimeDigest   string
+	executionGuard  ExecutionGuard
+
 	enqueueToolResult   func(ctx context.Context, sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
 
@@ -93,6 +98,34 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetRuntimeIdentity attaches diagnostics to each Turn snapshot. These values
+// are never inserted into the model-visible prompt.
+func (o *Orchestrator) SetRuntimeIdentity(revision int64, digest string) {
+	if o == nil {
+		return
+	}
+	o.runtimeRevision = revision
+	o.runtimeDigest = strings.TrimSpace(digest)
+}
+
+// SetExecutionGuard replaces the latest-state execution check. The default
+// guard delegates to the existing policy/hooks path; tool providers still do
+// their own channel and credential validation at the actual execution edge.
+func (o *Orchestrator) SetExecutionGuard(guard ExecutionGuard) {
+	if o == nil {
+		return
+	}
+	o.executionGuard = guard
+}
+
+// ModelContextSnapshot returns the active Turn snapshot, if any.
+func (o *Orchestrator) ModelContextSnapshot(sessionID string) *ModelContextSnapshot {
+	if o == nil || o.modelSnapshots == nil {
+		return nil
+	}
+	return o.modelSnapshots.get(sessionID)
 }
 
 // SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
@@ -151,6 +184,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	if userMsg.Role == "" {
 		userMsg.Role = "user"
 	}
+	o.clearModelContextSnapshot(sessionID)
 	o.appendHistory(sessionID, history, userMsg)
 	summary := llm.MessageTextSummary(userMsg)
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
@@ -279,7 +313,9 @@ func NewOrchestrator(
 		journal:        journal,
 		logger:         logx.OrDefault(logger),
 		ctxMetrics:     newContextMetricsStore(),
+		modelSnapshots: newModelContextSnapshotStore(),
 	}
+	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
 	return orch
 }
@@ -339,17 +375,37 @@ func (o *Orchestrator) runOneStep(
 	// 让模型给出结论并询问用户；下一条 user 消息会重置 toolLoopCount。
 	overToolBudget := toolLoopCount > o.maxToolLoops
 
-	toolDefs := o.ToolDefinitions()
-	if overToolBudget {
-		toolDefs = nil
-	}
-	systemPrompt := o.buildSystemPrompt(sessionID)
-	msgs, systemPrompt, hookErr := o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt)
-	if hookErr != nil {
-		o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
-		o.publishError(sessionID, hookErr.Error())
-		o.publishDone(sessionID, "error")
-		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+	var toolDefs []tools.ToolDef
+	var systemPrompt string
+	var msgs []llm.Message
+	var hookErr error
+	snapshot := o.ModelContextSnapshot(sessionID)
+	if snapshot != nil {
+		// A hard tool-loop budget is an execution safeguard, not a new runtime
+		// configuration. Keep the prompt snapshot but suppress tools for this
+		// final model request.
+		systemPrompt = snapshot.SystemPrompt
+		toolDefs = append([]tools.ToolDef(nil), snapshot.ToolDefinitions...)
+		if overToolBudget {
+			toolDefs = nil
+		}
+		msgs = append([]llm.Message(nil), (*history)...)
+	} else {
+		toolDefs = o.ToolDefinitions()
+		if overToolBudget {
+			toolDefs = nil
+		}
+		systemPrompt = o.buildSystemPrompt(sessionID)
+		msgs, systemPrompt, hookErr = o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt)
+		if hookErr != nil {
+			o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
+			o.publishError(sessionID, hookErr.Error())
+			o.publishDone(sessionID, "error")
+			o.clearModelContextSnapshot(sessionID)
+			return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+		}
+		snapshot = NewModelContextSnapshot(systemPrompt, toolDefs, o.runtimeRevision, o.runtimeDigest)
+		o.setModelContextSnapshot(sessionID, snapshot)
 	}
 	*history = msgs
 	setState(StateModelStreaming)
@@ -401,6 +457,7 @@ func (o *Orchestrator) runOneStep(
 			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
 		}
 		o.publishDone(sessionID, finishReason)
+		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
 
@@ -415,6 +472,7 @@ func (o *Orchestrator) runOneStep(
 		}
 		o.publishError(sessionID, msg)
 		o.publishDone(sessionID, "error")
+		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
 	}
 
@@ -424,6 +482,7 @@ func (o *Orchestrator) runOneStep(
 	if len(result.ToolCalls) == 0 {
 		o.publishDone(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "loop", toolLoopCount)
+		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{LoopCount: toolLoopCount}
 	}
 
@@ -445,10 +504,12 @@ func (o *Orchestrator) runOneStep(
 		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
 		if toolLoopCount > o.maxToolLoops+1 {
 			o.publishDone(sessionID, finishReason)
+			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{LoopCount: toolLoopCount}
 		}
 		if o.enqueueToolResult != nil {
 			if err := o.enqueueToolResult(ctx, sessionID); err != nil {
+				o.clearModelContextSnapshot(sessionID)
 				return StepOutcome{LoopCount: toolLoopCount, Err: err}
 			}
 			return StepOutcome{LoopCount: toolLoopCount}
@@ -470,6 +531,7 @@ func (o *Orchestrator) runOneStep(
 			o.publishError(sessionID, procErr.Error())
 		}
 		o.publishDone(sessionID, finishReason)
+		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{LoopCount: toolLoopCount, Err: procErr}
 	}
 	if pending != nil {
@@ -479,11 +541,29 @@ func (o *Orchestrator) runOneStep(
 	}
 	if o.enqueueToolResult != nil {
 		if err := o.enqueueToolResult(ctx, sessionID); err != nil {
+			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{LoopCount: toolLoopCount, Err: err}
 		}
 		return StepOutcome{LoopCount: toolLoopCount}
 	}
 	return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+}
+
+func (o *Orchestrator) setModelContextSnapshot(sessionID string, snapshot *ModelContextSnapshot) {
+	if o == nil {
+		return
+	}
+	if o.modelSnapshots == nil {
+		o.modelSnapshots = newModelContextSnapshotStore()
+	}
+	o.modelSnapshots.set(sessionID, snapshot)
+}
+
+func (o *Orchestrator) clearModelContextSnapshot(sessionID string) {
+	if o == nil || o.modelSnapshots == nil {
+		return
+	}
+	o.modelSnapshots.clear(sessionID)
 }
 
 // resetTurnUsage 新 user 消息 turn 开始时清零 token 累计，避免上轮用量带入 SSE usage。
@@ -498,6 +578,9 @@ func (o *Orchestrator) resetTurnUsage(sessionID string) {
 
 // SystemPromptForSession 返回当前 session 下一步 LLM 调用将使用的 system prompt。
 func (o *Orchestrator) SystemPromptForSession(sessionID string) string {
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		return snapshot.SystemPrompt
+	}
 	return o.buildSystemPrompt(sessionID)
 }
 
@@ -507,6 +590,17 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 		return nil
 	}
 	return o.tools.Definitions()
+}
+
+// ToolDefinitionsForSession returns the active Turn schema when a Turn
+// snapshot exists. Compression and diagnostics should use this form so a
+// skill/MCP change during a running Turn cannot make the sidecar diverge from
+// the main model request.
+func (o *Orchestrator) ToolDefinitionsForSession(sessionID string) []tools.ToolDef {
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		return cloneToolDefinitions(snapshot.ToolDefinitions)
+	}
+	return o.ToolDefinitions()
 }
 
 // ToolRegistry 在 Executor 为 *tools.Registry 时返回，供 UI 同步控制 bash。

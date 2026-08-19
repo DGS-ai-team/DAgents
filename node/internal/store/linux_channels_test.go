@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -60,7 +61,7 @@ func TestLinuxChannelStoreRoundTripKeepsSecretsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.CredentialID != "cred-prod" {
+	if resolved.CredentialID != "cred-prod" || resolved.HostKeyRef != "SHA256:test-fingerprint" {
 		t.Fatalf("resolved=%+v", resolved)
 	}
 	if err := st.SaveBinding(ctx, LinuxChannelBindingRecord{
@@ -126,10 +127,10 @@ func TestLinuxChannelStoreRejectsUnsafeOrIncompleteConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.SaveChannel(ctx, LinuxChannelRecord{
-		ChannelID: "legacy-no-host-check", Host: "example", Username: "root", CredentialID: "cred",
+		ChannelID: "unsafe", Host: "example", Username: "root", CredentialID: "cred",
 		HostKeyPolicy: "insecure", Enabled: true,
-	}); err != nil {
-		t.Fatalf("legacy host key fields should not block channel storage: %v", err)
+	}); err == nil {
+		t.Fatal("insecure host key policy should be rejected")
 	}
 	if err := st.SaveCredential(ctx, LinuxCredentialRecord{
 		CredentialID: "bad", AuthType: "token", SecretRef: "env:TOKEN", Enabled: true,
@@ -166,5 +167,35 @@ func TestLinuxChannelStoreGeneratesUniqueIDs(t *testing.T) {
 	}
 	if channelID1 == channelID2 || !strings.HasPrefix(channelID1, "channel_") || !strings.HasPrefix(channelID2, "channel_") {
 		t.Fatalf("channel ids=%q,%q", channelID1, channelID2)
+	}
+}
+
+func TestLinuxChannelStoreEncryptsLiteralSecretsAndReadsLegacyValues(t *testing.T) {
+	st, err := OpenLinuxChannels(t.TempDir() + "/linux.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	plain := "password with spaces / 中文"
+	ref, err := st.EncryptLiteralSecret(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ref, plain) || !strings.HasPrefix(ref, "literal:") {
+		t.Fatalf("literal reference leaks plaintext: %q", ref)
+	}
+	if err := st.SaveCredential(ctx, LinuxCredentialRecord{
+		CredentialID: "direct", AuthType: "password", SecretRef: ref, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ResolveSecret(ctx, ref)
+	if err != nil || got != plain {
+		t.Fatalf("encrypted secret=%q err=%v", got, err)
+	}
+	legacy := "literal:" + base64.RawStdEncoding.EncodeToString([]byte("legacy-value"))
+	if got, err := st.ResolveSecret(ctx, legacy); err != nil || got != "legacy-value" {
+		t.Fatalf("legacy secret=%q err=%v", got, err)
 	}
 }

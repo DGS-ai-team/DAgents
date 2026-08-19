@@ -8,7 +8,7 @@ defineProps({
 <template>
   <svg class="tool-group-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <!-- 命令行 -->
-    <template v-if="name === 'bash'">
+    <template v-if="name === 'bash' || name === 'shell'">
       <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
       <path d="M7 9.5 9.5 12 7 14.5M12 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
     </template>
@@ -26,11 +26,23 @@ defineProps({
       <circle cx="11.5" cy="6.5" r="0.75" fill="currentColor" />
     </template>
     <!-- 子智能体 -->
-    <template v-else-if="name === 'child_agents'">
+    <template v-else-if="name === 'child_agents' || name === 'child'">
       <circle cx="12" cy="6.5" r="2.25" stroke="currentColor" stroke-width="1.5" />
       <circle cx="6.5" cy="16.5" r="2.25" stroke="currentColor" stroke-width="1.5" />
       <circle cx="17.5" cy="16.5" r="2.25" stroke="currentColor" stroke-width="1.5" />
       <path d="M12 8.75v3.5M12 12.25 7.75 15M12 12.25l4.25 2.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </template>
+    <!-- MCP 服务 -->
+    <template v-else-if="name === 'mcp'">
+      <circle cx="6" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5" />
+      <circle cx="18" cy="7" r="2.5" stroke="currentColor" stroke-width="1.5" />
+      <circle cx="18" cy="17" r="2.5" stroke="currentColor" stroke-width="1.5" />
+      <path d="m8.3 11 7.4-3M8.3 13l7.4 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </template>
+    <!-- Linux 通道 -->
+    <template v-else-if="name === 'linux'">
+      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5" />
+      <path d="M7.5 9.5 10 12l-2.5 2.5M12.5 14.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
     </template>
     <!-- 文件 -->
     <template v-else-if="name === 'fs'">

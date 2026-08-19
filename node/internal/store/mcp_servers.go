@@ -14,47 +14,98 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type MCPServerStore struct{ db *sql.DB }
+type MCPServerStore struct {
+	db  *sql.DB
+	box *SecretBox
+}
 
 type storedMCPServerConfig struct {
-	ID           string            `json:"id"`
-	DisplayName  string            `json:"display_name"`
-	Transport    string            `json:"transport"`
-	Command      string            `json:"command"`
-	Args         []string          `json:"args,omitempty"`
-	CWD          string            `json:"cwd,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	EnvRefs      map[string]string `json:"env_refs,omitempty"`
-	HeaderRefs   map[string]string `json:"header_refs,omitempty"`
-	EnvValues    map[string]string `json:"env_values,omitempty"`
-	HeaderValues map[string]string `json:"header_values,omitempty"`
-	EnabledTools []string          `json:"enabled_tools,omitempty"`
-	Enabled      bool              `json:"enabled"`
+	ID          string            `json:"id"`
+	DisplayName string            `json:"display_name"`
+	Transport   string            `json:"transport"`
+	Command     string            `json:"command"`
+	Args        []string          `json:"args,omitempty"`
+	CWD         string            `json:"cwd,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	EnvRefs     map[string]string `json:"env_refs,omitempty"`
+	HeaderRefs  map[string]string `json:"header_refs,omitempty"`
+	// EnvValues/HeaderValues are legacy plaintext fields. They remain readable
+	// for migration, but new writes use the ciphertext maps below.
+	EnvValues              map[string]string `json:"env_values,omitempty"`
+	HeaderValues           map[string]string `json:"header_values,omitempty"`
+	EnvValueCiphertexts    map[string]string `json:"env_value_ciphertexts,omitempty"`
+	HeaderValueCiphertexts map[string]string `json:"header_value_ciphertexts,omitempty"`
+	EnabledTools           []string          `json:"enabled_tools,omitempty"`
+	Enabled                bool              `json:"enabled"`
 }
 
-func encodeMCPServerConfig(cfg mcp.ServerConfig) ([]byte, error) {
-	return json.Marshal(storedMCPServerConfig{
+func (s *MCPServerStore) encodeConfig(cfg mcp.ServerConfig) ([]byte, error) {
+	stored := storedMCPServerConfig{
 		ID: cfg.ID, DisplayName: cfg.DisplayName, Transport: cfg.Transport,
 		Command: cfg.Command, Args: cfg.Args, CWD: cfg.CWD, URL: cfg.URL,
-		EnvRefs: cfg.EnvRefs, HeaderRefs: cfg.HeaderRefs, EnvValues: cfg.EnvValues,
-		HeaderValues: cfg.HeaderValues, EnabledTools: cfg.EnabledTools, Enabled: cfg.Enabled,
-	})
+		EnvRefs: cfg.EnvRefs, HeaderRefs: cfg.HeaderRefs,
+		EnabledTools: cfg.EnabledTools, Enabled: cfg.Enabled,
+	}
+	if len(cfg.EnvValues) > 0 {
+		stored.EnvValueCiphertexts = make(map[string]string, len(cfg.EnvValues))
+		for key, value := range cfg.EnvValues {
+			ciphertext, err := s.box.Encrypt(value)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt MCP environment value %q: %w", key, err)
+			}
+			stored.EnvValueCiphertexts[key] = ciphertext
+		}
+	}
+	if len(cfg.HeaderValues) > 0 {
+		stored.HeaderValueCiphertexts = make(map[string]string, len(cfg.HeaderValues))
+		for key, value := range cfg.HeaderValues {
+			ciphertext, err := s.box.Encrypt(value)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt MCP header value %q: %w", key, err)
+			}
+			stored.HeaderValueCiphertexts[key] = ciphertext
+		}
+	}
+	return json.Marshal(stored)
 }
 
-func decodeMCPServerConfig(raw string) (mcp.ServerConfig, error) {
+func (s *MCPServerStore) decodeConfig(raw string) (mcp.ServerConfig, bool, error) {
 	var stored storedMCPServerConfig
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return mcp.ServerConfig{}, err
+		return mcp.ServerConfig{}, false, err
+	}
+	legacy := len(stored.EnvValues) > 0 || len(stored.HeaderValues) > 0
+	envValues := cloneStringMap(stored.EnvValues)
+	if len(stored.EnvValueCiphertexts) > 0 {
+		envValues = make(map[string]string, len(stored.EnvValueCiphertexts))
+		for key, ciphertext := range stored.EnvValueCiphertexts {
+			value, err := s.box.Decrypt(ciphertext)
+			if err != nil {
+				return mcp.ServerConfig{}, false, fmt.Errorf("decrypt MCP environment value %q: %w", key, err)
+			}
+			envValues[key] = value
+		}
+	}
+	headerValues := cloneStringMap(stored.HeaderValues)
+	if len(stored.HeaderValueCiphertexts) > 0 {
+		headerValues = make(map[string]string, len(stored.HeaderValueCiphertexts))
+		for key, ciphertext := range stored.HeaderValueCiphertexts {
+			value, err := s.box.Decrypt(ciphertext)
+			if err != nil {
+				return mcp.ServerConfig{}, false, fmt.Errorf("decrypt MCP header value %q: %w", key, err)
+			}
+			headerValues[key] = value
+		}
 	}
 	return mcp.ServerConfig{
 		ID: stored.ID, DisplayName: stored.DisplayName, Transport: stored.Transport,
 		Command: stored.Command, Args: stored.Args, CWD: stored.CWD, URL: stored.URL,
-		EnvRefs: stored.EnvRefs, HeaderRefs: stored.HeaderRefs, EnvValues: stored.EnvValues,
-		HeaderValues: stored.HeaderValues, EnabledTools: stored.EnabledTools, Enabled: stored.Enabled,
-	}, nil
+		EnvRefs: stored.EnvRefs, HeaderRefs: stored.HeaderRefs, EnvValues: envValues,
+		HeaderValues: headerValues, EnabledTools: stored.EnabledTools, Enabled: stored.Enabled,
+	}, legacy, nil
 }
 
-func OpenMCPServers(dbPath string) (*MCPServerStore, error) {
+func OpenMCPServers(dbPath string, keyDirs ...string) (*MCPServerStore, error) {
 	path := strings.TrimSpace(dbPath)
 	if path == "" {
 		return nil, fmt.Errorf("mcp servers db path is required")
@@ -67,7 +118,16 @@ func OpenMCPServers(dbPath string) (*MCPServerStore, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &MCPServerStore{db: db}
+	keyDir := filepath.Dir(path)
+	if len(keyDirs) > 0 && strings.TrimSpace(keyDirs[0]) != "" {
+		keyDir = strings.TrimSpace(keyDirs[0])
+	}
+	box, err := OpenSecretBox(keyDir)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open MCP secret box: %w", err)
+	}
+	s := &MCPServerStore{db: db, box: box}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -102,12 +162,13 @@ func (s *MCPServerStore) List(ctx context.Context) ([]mcp.ServerConfig, error) {
 	}
 	defer rows.Close()
 	var out []mcp.ServerConfig
+	var migrations []mcp.ServerConfig
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		cfg, err := decodeMCPServerConfig(raw)
+		cfg, legacy, err := s.decodeConfig(raw)
 		if err != nil {
 			return nil, fmt.Errorf("decode mcp server: %w", err)
 		}
@@ -115,9 +176,23 @@ func (s *MCPServerStore) List(ctx context.Context) ([]mcp.ServerConfig, error) {
 		if err != nil {
 			return nil, err
 		}
+		if legacy {
+			migrations = append(migrations, validated)
+		}
 		out = append(out, validated)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, cfg := range migrations {
+		if err := s.Save(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("migrate MCP server secrets: %w", err)
+		}
+	}
+	return out, nil
 }
 
 func (s *MCPServerStore) Get(ctx context.Context, id string) (*mcp.ServerConfig, error) {
@@ -132,13 +207,18 @@ func (s *MCPServerStore) Get(ctx context.Context, id string) (*mcp.ServerConfig,
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := decodeMCPServerConfig(raw)
+	cfg, legacy, err := s.decodeConfig(raw)
 	if err != nil {
 		return nil, err
 	}
 	validated, err := mcp.ValidateServerConfig(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if legacy {
+		if err := s.Save(ctx, validated); err != nil {
+			return nil, fmt.Errorf("migrate MCP server secrets: %w", err)
+		}
 	}
 	return &validated, nil
 }
@@ -151,7 +231,7 @@ func (s *MCPServerStore) Save(ctx context.Context, raw mcp.ServerConfig) error {
 	if err != nil {
 		return err
 	}
-	data, err := encodeMCPServerConfig(cfg)
+	data, err := s.encodeConfig(cfg)
 	if err != nil {
 		return err
 	}
@@ -181,7 +261,7 @@ func (s *MCPServerStore) Replace(ctx context.Context, configs []mcp.ServerConfig
 		if err != nil {
 			return err
 		}
-		data, err := encodeMCPServerConfig(cfg)
+		data, err := s.encodeConfig(cfg)
 		if err != nil {
 			return err
 		}
@@ -191,6 +271,17 @@ func (s *MCPServerStore) Replace(ctx context.Context, configs []mcp.ServerConfig
 		}
 	}
 	return tx.Commit()
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
 }
 
 func (s *MCPServerStore) Delete(ctx context.Context, id string) error {

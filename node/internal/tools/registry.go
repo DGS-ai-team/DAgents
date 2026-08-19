@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -29,6 +30,7 @@ type Registry struct {
 	shellProvider          ShellProvider
 	localTerminalProvider  TerminalProvider
 	linuxProvider          *LinuxShellProvider
+	linuxTransferManager   *LinuxTransferManager
 	terminalConfigResolver TerminalConfigResolver
 	processEventSink       ProcessEventSink
 	terminalBroker         TerminalSessionBroker
@@ -86,6 +88,20 @@ func (r *Registry) WithLinuxShellProvider(provider *LinuxShellProvider) error {
 		return fmt.Errorf("linux shell provider is nil")
 	}
 	r.linuxProvider = provider
+	return nil
+}
+
+// WithLinuxTransferManager binds the Node-level Linux file transfer queue.
+// The manager is shared by all Agent registries so one Agent cannot exhaust
+// the Node's SSH/SFTP transfer capacity.
+func (r *Registry) WithLinuxTransferManager(manager *LinuxTransferManager) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	if manager == nil {
+		return fmt.Errorf("linux transfer manager is nil")
+	}
+	r.linuxTransferManager = manager
 	return nil
 }
 
@@ -281,9 +297,22 @@ func (r *Registry) Definitions() []ToolDef {
 	base = append(base, childAgentToolDefs()...)
 	if r.linuxProvider != nil {
 		base = append(base, linuxExecToolDef()...)
+		base = append(base, linuxFileTransferToolDefs()...)
 	}
 	base = append(base, r.mcpToolDefs()...)
-	return r.enrichDefinitions(r.filterToolDefs(base))
+	defs := r.enrichDefinitions(r.filterToolDefs(base))
+	// Keep the serialized tools prefix stable even when optional providers
+	// contribute definitions in a different order. MCP itself is already
+	// sorted, but normalizing the complete list also covers future providers.
+	sort.SliceStable(defs, func(i, j int) bool {
+		left := defs[i].Function.Name
+		right := defs[j].Function.Name
+		if left == right {
+			return defs[i].Type < defs[j].Type
+		}
+		return left < right
+	})
+	return defs
 }
 
 // Execute 按名称 dispatch 工具；未知工具或未启用工具返回 error 文本。
@@ -318,6 +347,8 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["terminal_terminate"] = r.execTerminalTerminate
 	r.handlers["terminal_list"] = r.execTerminalList
 	r.handlers["linux_exec"] = r.execLinuxExec
+	r.handlers["linux_file_upload"] = r.execLinuxFileUpload
+	r.handlers["linux_file_download"] = r.execLinuxFileDownload
 	r.handlers["background_job_status"] = r.execBackgroundJobStatus
 	r.handlers["background_job_cancel"] = r.execBackgroundJobCancel
 	r.handlers["ask_user_information"] = func(context.Context, json.RawMessage) (string, error) {

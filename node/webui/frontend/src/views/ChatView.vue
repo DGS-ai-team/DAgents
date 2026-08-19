@@ -96,6 +96,7 @@ import {
 import { bumpActivityRefresh } from "../stores/activity.js";
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
+import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -793,7 +794,11 @@ async function deleteAgentById(payload) {
 
 async function toggleThinkingMode() {
   if (!chromeStore.llmSettings?.thinking_supported) {
-    agentStore.error = "当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）";
+    agentStore.error = "当前 provider 不支持 thinking 控制";
+    return;
+  }
+  if (!canToggleThinking(chromeStore.llmSettings)) {
+    agentStore.error = "当前模型固定开启思考，无法切换";
     return;
   }
   agentStore.error = "";
@@ -808,7 +813,10 @@ async function toggleThinkingMode() {
 }
 
 async function cycleThinkingEffort() {
-  if (!chromeStore.llmSettings?.thinking_supported) return;
+  if (
+    !chromeStore.llmSettings?.thinking_supported ||
+    !hasThinkingSecondaryControl(chromeStore.llmSettings)
+  ) return;
   agentStore.error = "";
   const current = String(chromeStore.llmSettings.reasoning_effort || "high").toLowerCase();
   const next = current === "max" ? "high" : "max";
@@ -1085,7 +1093,7 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
-      <div v-if="agentStore.error" class="chat-error-banner">{{ agentStore.error }}</div>
+      <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
       <AgentEmptyState
         v-if="showNoAgentWelcome"
         @create="openCreateWizard()"
@@ -1102,9 +1110,10 @@ onUnmounted(() => {
           :entries="entries"
           :hitl-queue="hitlStore.queue"
           :tool-verbose="transcriptStore.toolFoldVerbose"
-          :disabled="!canSend"
+          :disabled="!canSend && !sending"
           :sending="sending"
           :cancelling="cancelling"
+          :error="agentStore.error"
           :hitl-busy="hitlStore.busy"
           :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"

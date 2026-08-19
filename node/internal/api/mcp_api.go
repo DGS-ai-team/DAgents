@@ -340,11 +340,18 @@ func (s *Server) handlePutAgentMCP(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
 	}
-	if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
+	updated, err := s.agents.Get(r.Context(), id)
+	if err != nil || updated == nil {
+		writeAPIError(w, http.StatusInternalServerError, "agent_reload_record_failed", "agent record unavailable after save", nil)
+		return
+	}
+	applied, err := s.reloadAgentRuntimeIfIdle(r.Context(), *updated, "mcp_binding")
+	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "agent_mcp_reload_failed", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"agent_id": id, "bindings": mcp.BindingsFromDefaults(snap.Defaults)})
+	s.publishRuntimeConfigChanged(id, "mcp_binding", applied)
+	writeJSON(w, http.StatusOK, map[string]any{"agent_id": id, "bindings": mcp.BindingsFromDefaults(snap.Defaults), "runtime_applied": applied})
 }
 
 func (s *Server) handleGetAgentEffectiveMCPTools(w http.ResponseWriter, r *http.Request) {
@@ -405,8 +412,17 @@ func (s *Server) reloadMCPBoundAgents(ctx context.Context) {
 		if len(bindings) == 0 {
 			continue
 		}
-		if err := s.reloadAgentRuntime(ctx, rec); err != nil {
+		applied, err := s.reloadAgentRuntimeIfIdle(ctx, rec, "mcp_catalog")
+		if err != nil {
 			s.logger.Warn("reload agent after MCP catalog change failed", "agent_id", rec.AgentID, "error", err)
+			continue
+		}
+		s.publishRuntimeConfigChanged(rec.AgentID, "mcp_catalog", applied)
+		if s.stream != nil {
+			s.stream.Publish(rec.AgentID, "mcp/catalog-changed", map[string]any{
+				"agent_id": rec.AgentID,
+				"applied":  applied,
+			})
 		}
 	}
 }

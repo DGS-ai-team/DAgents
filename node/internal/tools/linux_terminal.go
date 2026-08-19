@@ -100,6 +100,14 @@ func (p *LinuxShellProvider) OpenTerminal(ctx context.Context, req TerminalReque
 	if err != nil {
 		return nil, err
 	}
+	hostKey, err := p.hostKeyCallback(ctx, cfg)
+	if err != nil {
+		if agentConn != nil {
+			_ = agentConn.Close()
+		}
+		return nil, err
+	}
+
 	connectTimeout := cfg.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -116,7 +124,7 @@ func (p *LinuxShellProvider) OpenTerminal(ctx context.Context, req TerminalReque
 	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKey,
 		Timeout:         connectTimeout,
 	})
 	if err != nil {

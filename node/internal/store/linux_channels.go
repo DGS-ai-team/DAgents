@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,8 +39,9 @@ type LinuxChannelRecord struct {
 	UpdatedAt        time.Time
 }
 
-// LinuxCredentialRecord stores an opaque secret reference, never a password
-// or private-key body. Secret resolution is intentionally outside this store.
+// LinuxCredentialRecord stores an opaque secret reference. Direct password
+// input is stored as an encrypted literal; secret resolution remains inside
+// the store so callers never need access to the encryption key.
 type LinuxCredentialRecord struct {
 	CredentialID string
 	DisplayName  string
@@ -66,9 +68,12 @@ type LinuxChannelBindingRecord struct {
 	UpdatedAt       time.Time
 }
 
-type LinuxChannelStore struct{ db *sql.DB }
+type LinuxChannelStore struct {
+	db  *sql.DB
+	box *SecretBox
+}
 
-func OpenLinuxChannels(dbPath string) (*LinuxChannelStore, error) {
+func OpenLinuxChannels(dbPath string, keyDirs ...string) (*LinuxChannelStore, error) {
 	path := strings.TrimSpace(dbPath)
 	if path == "" {
 		return nil, fmt.Errorf("linux channels db path is required")
@@ -81,7 +86,16 @@ func OpenLinuxChannels(dbPath string) (*LinuxChannelStore, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &LinuxChannelStore{db: db}
+	keyDir := filepath.Dir(path)
+	if len(keyDirs) > 0 && strings.TrimSpace(keyDirs[0]) != "" {
+		keyDir = strings.TrimSpace(keyDirs[0])
+	}
+	box, err := OpenSecretBox(keyDir)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open Linux channel secret box: %w", err)
+	}
+	s := &LinuxChannelStore{db: db, box: box}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -205,6 +219,12 @@ func (s *LinuxChannelStore) SaveChannel(ctx context.Context, rec LinuxChannelRec
 	if rec.Port < 1 || rec.Port > 65535 {
 		return fmt.Errorf("channel port must be between 1 and 65535")
 	}
+	if rec.HostKeyPolicy != "known_hosts" && rec.HostKeyPolicy != "pinned" {
+		return fmt.Errorf("host_key_policy must be known_hosts or pinned")
+	}
+	if rec.HostKeyPolicy == "pinned" && rec.HostKeyRef == "" {
+		return fmt.Errorf("host_key_ref is required for pinned host key policy")
+	}
 	now := time.Now().UTC()
 	created := rec.CreatedAt
 	if created.IsZero() {
@@ -315,16 +335,13 @@ func (s *LinuxChannelStore) SaveCredential(ctx context.Context, rec LinuxCredent
 	rec.CredentialID = strings.TrimSpace(rec.CredentialID)
 	rec.AuthType = strings.ToLower(strings.TrimSpace(rec.AuthType))
 	rec.SecretRef = strings.TrimSpace(rec.SecretRef)
-	if rec.CredentialID == "" || rec.AuthType == "" {
-		return fmt.Errorf("credential_id and auth_type are required")
+	if rec.CredentialID == "" || rec.AuthType == "" || rec.SecretRef == "" {
+		return fmt.Errorf("credential_id, auth_type and secret_ref are required")
 	}
 	switch rec.AuthType {
-	case "password", "private_key":
+	case "password", "private_key", "ssh_agent":
 	default:
 		return fmt.Errorf("unsupported credential auth_type %q", rec.AuthType)
-	}
-	if rec.SecretRef == "" {
-		return fmt.Errorf("secret_ref is required for %s credentials", rec.AuthType)
 	}
 	now := time.Now().UTC()
 	created := rec.CreatedAt
@@ -347,6 +364,65 @@ ON CONFLICT(credential_id) DO UPDATE SET
 		rec.CredentialID, rec.DisplayName, rec.AuthType, rec.SecretRef, rec.UsernameHint,
 		boolInt(rec.Enabled), created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
 	return err
+}
+
+// EncryptLiteralSecret stores a direct credential value without exposing it
+// to the database or to API response objects.
+func (s *LinuxChannelStore) EncryptLiteralSecret(value string) (string, error) {
+	if s == nil || s.box == nil {
+		return "", fmt.Errorf("linux channel secret box unavailable")
+	}
+	if value == "" {
+		return "", fmt.Errorf("linux literal secret is empty")
+	}
+	ciphertext, err := s.box.Encrypt(value)
+	if err != nil {
+		return "", fmt.Errorf("encrypt Linux literal secret: %w", err)
+	}
+	return "literal:" + ciphertext, nil
+}
+
+// ResolveSecret resolves both the current encrypted literal format and the
+// legacy base64 literal format written by older Node versions. Environment
+// references are intentionally resolved at connection time for compatibility.
+func (s *LinuxChannelStore) ResolveSecret(ctx context.Context, ref string) (string, error) {
+	_ = ctx
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "literal:") {
+		encoded := strings.TrimPrefix(ref, "literal:")
+		if encoded == "" {
+			return "", fmt.Errorf("linux literal secret is empty")
+		}
+		if s != nil && s.box != nil {
+			if value, err := s.box.Decrypt(encoded); err == nil {
+				if value == "" {
+					return "", fmt.Errorf("linux literal secret is empty")
+				}
+				return value, nil
+			}
+		}
+		// Backward compatibility for records created before encrypted storage.
+		value, err := base64.RawStdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("linux literal secret is invalid: %w", err)
+		}
+		if len(value) == 0 {
+			return "", fmt.Errorf("linux literal secret is empty")
+		}
+		return string(value), nil
+	}
+	if !strings.HasPrefix(ref, "env:") {
+		return "", fmt.Errorf("unsupported linux secret reference; use env:NAME or direct secret input")
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(ref, "env:"))
+	if name == "" {
+		return "", fmt.Errorf("linux secret environment name is empty")
+	}
+	value := os.Getenv(name)
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("linux secret environment %q is empty", name)
+	}
+	return value, nil
 }
 
 // GenerateCredentialID returns a server-generated ID that is unique in the
@@ -643,6 +719,7 @@ func (s *LinuxChannelStore) ResolveLinuxChannel(ctx context.Context, id string) 
 	return tools.LinuxChannelConfig{
 		ID: rec.ChannelID, DisplayName: rec.DisplayName, Host: rec.Host, Port: rec.Port,
 		Username: rec.Username, CredentialID: rec.CredentialID,
+		HostKeyPolicy: rec.HostKeyPolicy, HostKeyRef: rec.HostKeyRef,
 		RemoteShell: rec.RemoteShell, DefaultCWD: rec.DefaultCWD,
 		ConnectTimeout: time.Duration(rec.ConnectTimeoutMS) * time.Millisecond,
 		CommandTimeout: time.Duration(rec.CommandTimeoutMS) * time.Millisecond,
@@ -745,6 +822,11 @@ func normalizeLinuxChannel(rec *LinuxChannelRecord) {
 	rec.Host = strings.TrimSpace(rec.Host)
 	rec.Username = strings.TrimSpace(rec.Username)
 	rec.CredentialID = strings.TrimSpace(rec.CredentialID)
+	rec.HostKeyPolicy = strings.ToLower(strings.TrimSpace(rec.HostKeyPolicy))
+	if rec.HostKeyPolicy == "" {
+		rec.HostKeyPolicy = "known_hosts"
+	}
+	rec.HostKeyRef = strings.TrimSpace(rec.HostKeyRef)
 	rec.RemoteShell = strings.TrimSpace(rec.RemoteShell)
 	if rec.RemoteShell == "" {
 		rec.RemoteShell = "bash"

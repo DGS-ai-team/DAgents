@@ -54,8 +54,12 @@ type TurnOptions struct {
 	PluginHooks                 hooks.PluginsConfig
 	HookHost                    turn.HookHostConfig
 	MultimodalEnabled           bool
-	// ConfigRevision 为装入本 runtime 时 agents.updated_at 的 UnixNano；用于配置变更检测。
+	// ConfigRevision 保留兼容旧调用方；新代码使用 RuntimeRevision。
 	ConfigRevision int64
+	// RuntimeRevision 是独立于 agents.updated_at 的 Agent runtime 版本。
+	RuntimeRevision int64
+	// RuntimeDigest 标识该 runtime 的模型可见输入（prompt + tools）。
+	RuntimeDigest string
 	// PromptContext 控制 soul/custom/long_term 侧车是否注入（缺省全开）。
 	PromptContext PromptContextOptions
 	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
@@ -335,6 +339,47 @@ func (m *Manager) ConfigRevision(sessionID string) int64 {
 		return rt.configRevision
 	}
 	return 0
+}
+
+// RuntimeRevision 返回内存 runtime 装入时的独立配置版本。
+func (m *Manager) RuntimeRevision(sessionID string) int64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rt, ok := m.sessions[strings.TrimSpace(sessionID)]; ok {
+		return rt.runtimeRevision
+	}
+	return 0
+}
+
+// RuntimeDigest 返回内存 runtime 的模型上下文输入摘要。
+func (m *Manager) RuntimeDigest(sessionID string) string {
+	if m == nil {
+		return ""
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rt, ok := m.sessions[strings.TrimSpace(sessionID)]; ok {
+		return rt.runtimeDigest
+	}
+	return ""
+}
+
+// RefreshRuntimePromptContext synchronizes persisted prompt sidecar changes
+// into an already-loaded runtime. It intentionally does not rebuild the
+// runtime or mutate a running Turn's ModelContextSnapshot.
+func (m *Manager) RefreshRuntimePromptContext(sessionID string, content promptcontext.Content, scope string) bool {
+	if m == nil {
+		return false
+	}
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return false
+	}
+	rt.refreshPromptContext(content, scope)
+	return true
 }
 
 // ListActive 返回内存中活跃 session。

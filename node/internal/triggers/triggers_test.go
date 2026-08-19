@@ -163,6 +163,30 @@ func TestSchedulerSkipsWhenPendingDelivery(t *testing.T) {
 	}
 }
 
+func TestSchedulerStopAlwaysHonorsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "t.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched := NewScheduler(store, &fakeSubmitter{}, 5)
+
+	for i := 0; i < 100; i++ {
+		sched.Start()
+		stopped := make(chan struct{})
+		go func() {
+			sched.Stop()
+			close(stopped)
+		}()
+
+		select {
+		case <-stopped:
+		case <-time.After(time.Second):
+			t.Fatalf("scheduler stop timed out on iteration %d", i)
+		}
+	}
+}
+
 func TestEvaluateDueIntervalFiresEvenWhenOverdue(t *testing.T) {
 	nextAt := time.Now().Add(-2 * time.Minute)
 	def := Definition{

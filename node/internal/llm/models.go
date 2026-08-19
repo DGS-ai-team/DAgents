@@ -42,6 +42,12 @@ func SuggestProviderFromBaseURL(baseURL string) string {
 		return string(ProviderQwen)
 	case strings.Contains(lower, "api.openai.com"), strings.Contains(lower, "openai.com"):
 		return string(ProviderOpenAI)
+	case strings.Contains(lower, "bigmodel.cn"), strings.Contains(lower, "api.z.ai"):
+		return string(ProviderGLM)
+	case strings.Contains(lower, "minimaxi.com"), strings.Contains(lower, "minimax.io"):
+		return string(ProviderMiniMax)
+	case strings.Contains(lower, "xiaomimimo.com"), strings.Contains(lower, "mimo-v2.com"):
+		return string(ProviderMiMo)
 	case strings.Contains(lower, "127.0.0.1"), strings.Contains(lower, "localhost"):
 		return string(ProviderVLLM)
 	default:

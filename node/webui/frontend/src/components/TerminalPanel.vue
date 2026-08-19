@@ -13,12 +13,7 @@ const props = defineProps({
   autoConnect: { type: Boolean, default: false },
   preserveSession: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
-  showClose: { type: Boolean, default: false },
-  /** Sidebar terminal previews are intentionally read-only. */
-  readOnly: { type: Boolean, default: false },
 });
-
-const emit = defineEmits(["close"]);
 
 const outputRef = ref(null);
 const status = ref("idle");
@@ -63,8 +58,7 @@ function ensureTerminal() {
   if (terminal || !outputRef.value) return;
   terminal = new Terminal({
     convertEol: false,
-    disableStdin: props.readOnly,
-    cursorBlink: !props.readOnly,
+    cursorBlink: true,
     scrollback: 5000,
     fontSize: 12,
     lineHeight: 1.35,
@@ -78,11 +72,9 @@ function ensureTerminal() {
   fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(outputRef.value);
-  if (!props.readOnly) {
-    terminalDataDisposable = terminal.onData((data) => {
-      if (status.value === "connected") session?.sendInput(data);
-    });
-  }
+  terminalDataDisposable = terminal.onData((data) => {
+    if (status.value === "connected") session?.sendInput(data);
+  });
   terminalScrollDisposable = terminal.onScroll(() => {
     autoScroll.value = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
   });
@@ -230,10 +222,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section
-    class="terminal-panel"
-    :class="{ 'terminal-panel--embedded': embedded, 'terminal-panel--readonly': readOnly }"
-  >
+  <section class="terminal-panel">
     <div class="terminal-panel__head">
       <div>
         <div class="terminal-panel__title">终端</div>
@@ -243,36 +232,22 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="terminal-panel__actions">
-        <button
-          v-if="showClose"
-          type="button"
-          class="terminal-panel__close"
-          title="返回消息"
-          aria-label="返回消息"
-          @click="emit('close')"
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
-            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
-          </svg>
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="status === 'connecting'" @click="reconnectTerminal">
+          {{ status === "idle" || status === "closed" || status === "exited" ? "连接" : status === "reconnecting" ? "重连中…" : "重连" }}
         </button>
-        <template v-if="!readOnly">
-          <button type="button" class="btn btn--ghost btn--sm" :disabled="status === 'connecting'" @click="reconnectTerminal">
-            {{ status === "idle" || status === "closed" || status === "exited" ? "连接" : status === "reconnecting" ? "重连中…" : "重连" }}
-          </button>
-          <button
-            type="button"
-            class="btn btn--ghost btn--sm"
-            :disabled="status !== 'connected'"
-            @click="terminateTerminal"
-          >
-            终止
-          </button>
-          <button type="button" class="btn btn--ghost btn--sm" @click="clearOutput">清空</button>
-        </template>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm"
+          :disabled="status !== 'connected'"
+          @click="terminateTerminal"
+        >
+          终止
+        </button>
+        <button type="button" class="btn btn--ghost btn--sm" @click="clearOutput">清空</button>
       </div>
     </div>
 
-    <div v-if="!readOnly && !props.terminalId" class="terminal-panel__options">
+    <div v-if="!props.terminalId" class="terminal-panel__options">
       <label class="terminal-panel__field">
         <span>连接目标</span>
         <select v-model="selectedTarget" class="terminal-panel__select" :disabled="status === 'connected' || status === 'connecting' || targetLoading">
@@ -292,31 +267,18 @@ onBeforeUnmount(() => {
       重连期间的部分终端输出已超过服务端回放范围，当前内容可能不完整。
     </div>
     <div ref="outputRef" class="terminal-panel__output"></div>
-    <p v-if="!readOnly" class="terminal-panel__input-hint">连接后可直接在终端区域输入命令，支持方向键、Ctrl+C、粘贴和多行交互。</p>
+    <p class="terminal-panel__input-hint">连接后可直接在终端区域输入命令，支持方向键、Ctrl+C、粘贴和多行交互。</p>
     <p v-if="error" class="terminal-panel__error">{{ error }}</p>
   </section>
 </template>
 
 <style scoped>
 .terminal-panel {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-height: 0;
-  box-sizing: border-box;
   margin-top: v-bind('embedded ? "0" : "20px"');
   padding: 16px;
   border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
   border-radius: 12px;
   background: color-mix(in srgb, var(--color-surface, #fff) 96%, #eef5ff);
-}
-
-.terminal-panel--embedded {
-  height: 100%;
-  margin-top: 0;
-  border: 0;
-  border-radius: 0;
-  background: var(--color-editor, #fff);
 }
 
 .terminal-panel__head,
@@ -369,26 +331,6 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.terminal-panel__close {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text-subtle);
-  cursor: pointer;
-}
-
-.terminal-panel__close:hover {
-  border-color: var(--color-border);
-  background: var(--color-sidebar-hover);
-  color: var(--color-text);
-}
-
 .terminal-panel__options {
   display: flex;
   align-items: center;
@@ -431,18 +373,11 @@ onBeforeUnmount(() => {
 }
 
 .terminal-panel__output {
-  flex: 0 0 260px;
-  min-height: 0;
   height: 260px;
   margin: 14px 0 10px;
   overflow: hidden;
   border-radius: 8px;
   background: #17212b;
-}
-
-.terminal-panel--embedded .terminal-panel__output {
-  flex: 1 1 auto;
-  height: auto;
 }
 
 .terminal-panel__output :deep(.xterm) {

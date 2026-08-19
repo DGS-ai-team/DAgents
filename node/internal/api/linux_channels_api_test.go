@@ -46,6 +46,36 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 		credentialBody = body
 	}
 	credentialID := credentialBody["credential_id"].(string)
+	directPassword := "p@ss word: 你好"
+	directStatus, directBody := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
+		"auth_type": "password", "secret_value": directPassword,
+	})
+	if directStatus != http.StatusCreated || directBody["secret_source"] != "direct" || directBody["secret_value"] != nil || directBody["secret_ref"] != nil {
+		t.Fatalf("direct password status=%d body=%v", directStatus, directBody)
+	}
+	directID := bodyCredentialID(directBody)
+	directCredential, err := linuxStore.GetCredential(t.Context(), directID)
+	if err != nil || directCredential == nil {
+		t.Fatalf("direct credential=%+v err=%v", directCredential, err)
+	}
+	if strings.Contains(directCredential.SecretRef, directPassword) {
+		t.Fatal("direct password should not be stored as plain text reference")
+	}
+	if got, err := linuxStore.ResolveSecret(t.Context(), directCredential.SecretRef); err != nil || got != directPassword {
+		t.Fatalf("resolved direct password=%q err=%v", got, err)
+	}
+	privateKey := "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key\n-----END OPENSSH PRIVATE KEY-----"
+	if status, body := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
+		"auth_type": "private_key", "secret_value": privateKey,
+	}); status != http.StatusCreated || body["secret_source"] != "direct" {
+		t.Fatalf("private key direct input status=%d body=%v", status, body)
+	} else if id := bodyCredentialID(body); id == "" {
+		t.Fatalf("private key direct credential missing id: %v", body)
+	} else if stored, err := linuxStore.GetCredential(t.Context(), id); err != nil || stored == nil {
+		t.Fatalf("private key direct credential=%+v err=%v", stored, err)
+	} else if got, err := linuxStore.ResolveSecret(t.Context(), stored.SecretRef); err != nil || got != privateKey {
+		t.Fatalf("resolved private key=%q err=%v", got, err)
+	}
 	channelBody := map[string]any{}
 	if status, body := postJSON(http.MethodPost, "/v1/linux/channels", map[string]any{
 		"channel_id": "client-supplied-channel", "host": "127.0.0.1", "username": "root", "credential_id": credentialID,
@@ -55,6 +85,11 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 		channelBody = body
 	}
 	channelID := channelBody["channel_id"].(string)
+	if status, body := postJSON(http.MethodPatch, "/v1/linux/channels/"+channelID, map[string]any{
+		"display_name": "本地调试通道", "host": "127.0.0.2", "port": 2222,
+	}); status != http.StatusOK || body["channel_id"] != channelID || body["host"] != "127.0.0.2" || body["port"] != float64(2222) {
+		t.Fatalf("channel patch status=%d body=%v", status, body)
+	}
 	if status, body := postJSON(http.MethodPut, "/v1/agents/agent-a/linux-channels", map[string]any{
 		"bindings": []map[string]any{{"channel_id": channelID, "enabled": true}},
 	}); status != http.StatusOK || body["agent_id"] != "agent-a" {
@@ -69,4 +104,9 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 	if err != nil || len(bindings) != 1 || bindings[0].ChannelID != channelID {
 		t.Fatalf("binding replacement was not atomic: %+v err=%v", bindings, err)
 	}
+}
+
+func bodyCredentialID(body map[string]any) string {
+	id, _ := body["credential_id"].(string)
+	return id
 }

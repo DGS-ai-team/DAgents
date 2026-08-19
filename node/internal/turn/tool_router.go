@@ -130,6 +130,13 @@ func (o *Orchestrator) processToolCalls(
 }
 
 func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+	if o.executionGuard != nil {
+		return o.executionGuard.Check(ctx, sessionID, history, tc)
+	}
+	return o.evaluateToolBeforeEach(ctx, sessionID, history, tc)
+}
+
+func (o *Orchestrator) evaluateToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
 	if o.toolHooks == nil {
 		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
 		mode := policy.ModeRule

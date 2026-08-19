@@ -86,6 +86,19 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 			return "在 Linux SSH channel " + channel + " 上执行命令（command 未提供）", risk
 		}
 		return "在 Linux SSH channel " + channel + " 上执行命令: " + truncateRunes(cmd, 160), risk
+	case "linux_file_upload", "linux_file_download":
+		risk = "high"
+		channel := firstNonEmpty(args, "channel_id")
+		local := firstNonEmpty(args, "local_path")
+		remote := firstNonEmpty(args, "remote_path")
+		direction := "上传"
+		if name == "linux_file_download" {
+			direction = "下载"
+		}
+		if channel == "" {
+			return direction + " Linux 文件（channel_id 未提供）", risk
+		}
+		return direction + " Linux 文件: " + channel + " · " + truncateRunes(local+" → "+remote, 200), risk
 	case "write_file", "search_replace":
 		risk = "medium"
 		path := firstNonEmpty(args, "path", "file_path")

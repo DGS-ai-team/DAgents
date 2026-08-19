@@ -1,10 +1,8 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -30,12 +28,13 @@ type linuxChannelRequest struct {
 }
 
 type linuxCredentialRequest struct {
-	CredentialID string `json:"credential_id"`
-	DisplayName  string `json:"display_name"`
-	AuthType     string `json:"auth_type"`
-	SecretRef    string `json:"secret_ref"`
-	UsernameHint string `json:"username_hint"`
-	Enabled      *bool  `json:"enabled"`
+	CredentialID string  `json:"credential_id"`
+	DisplayName  string  `json:"display_name"`
+	AuthType     string  `json:"auth_type"`
+	SecretRef    string  `json:"secret_ref"`
+	SecretValue  *string `json:"secret_value"`
+	UsernameHint string  `json:"username_hint"`
+	Enabled      *bool   `json:"enabled"`
 }
 
 type linuxBindingRequest struct {
@@ -198,7 +197,11 @@ func (s *Server) handleCreateLinuxCredential(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusInternalServerError, "linux_credential_id_failed", err.Error(), nil)
 		return
 	}
-	rec := linuxCredentialRecordFromRequest(req, id)
+	rec, err := linuxCredentialRecordFromRequest(req, id, s.linuxChannels.EncryptLiteralSecret)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "linux_credential_save_failed", err.Error(), nil)
+		return
+	}
 	if err := s.linuxChannels.SaveCredential(r.Context(), rec); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "linux_credential_save_failed", err.Error(), nil)
 		return
@@ -227,7 +230,14 @@ func (s *Server) handlePatchLinuxCredential(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	rec := linuxCredentialRecordFromRequest(req, id)
+	if req.AuthType == "" {
+		req.AuthType = existing.AuthType
+	}
+	rec, err := linuxCredentialRecordFromRequest(req, id, s.linuxChannels.EncryptLiteralSecret)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "linux_credential_save_failed", err.Error(), nil)
+		return
+	}
 	if rec.DisplayName == "" {
 		rec.DisplayName = existing.DisplayName
 	}
@@ -328,7 +338,10 @@ func (s *Server) handlePutAgentLinuxChannels(w http.ResponseWriter, r *http.Requ
 	}
 	if s.agents != nil {
 		if rec, err := s.agents.Get(r.Context(), agentID); err == nil && rec != nil {
-			_ = s.ensureAgentRuntimeOpts(r.Context(), agentID, true)
+			// Linux bindings and credentials are resolved at tool execution time;
+			// rebuilding the Agent here would unnecessarily interrupt an active
+			// Turn and would invalidate its model snapshot.
+			s.publishRuntimeConfigChanged(agentID, "linux_channel", true)
 		}
 	}
 	items, _ := s.linuxChannels.ListBindings(r.Context(), agentID)
@@ -403,7 +416,7 @@ func mergeLinuxChannelRecord(dst *store.LinuxChannelRecord, old store.LinuxChann
 	}
 }
 
-func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID string) store.LinuxCredentialRecord {
+func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID string, encodeLiteral func(string) (string, error)) (store.LinuxCredentialRecord, error) {
 	id := strings.TrimSpace(fallbackID)
 	if id == "" {
 		id = strings.TrimSpace(req.CredentialID)
@@ -412,17 +425,43 @@ func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID str
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	return store.LinuxCredentialRecord{CredentialID: id, DisplayName: strings.TrimSpace(req.DisplayName), AuthType: strings.TrimSpace(req.AuthType), SecretRef: strings.TrimSpace(req.SecretRef), UsernameHint: strings.TrimSpace(req.UsernameHint), Enabled: enabled}
+	authType := strings.ToLower(strings.TrimSpace(req.AuthType))
+	secretRef := strings.TrimSpace(req.SecretRef)
+	if req.SecretValue != nil {
+		if authType != "password" && authType != "private_key" {
+			return store.LinuxCredentialRecord{}, fmt.Errorf("direct secret input is not supported for credential type %q", authType)
+		}
+		if secretRef != "" {
+			return store.LinuxCredentialRecord{}, fmt.Errorf("secret_ref and secret_value cannot both be provided")
+		}
+		if strings.TrimSpace(*req.SecretValue) == "" {
+			return store.LinuxCredentialRecord{}, fmt.Errorf("secret_value is required for direct credentials")
+		}
+		if encodeLiteral == nil {
+			return store.LinuxCredentialRecord{}, fmt.Errorf("direct secret storage is unavailable")
+		}
+		var err error
+		secretRef, err = encodeLiteral(*req.SecretValue)
+		if err != nil {
+			return store.LinuxCredentialRecord{}, err
+		}
+	}
+	return store.LinuxCredentialRecord{CredentialID: id, DisplayName: strings.TrimSpace(req.DisplayName), AuthType: authType, SecretRef: secretRef, UsernameHint: strings.TrimSpace(req.UsernameHint), Enabled: enabled}, nil
 }
 
 func linuxCredentialView(rec store.LinuxCredentialRecord) map[string]any {
-	return map[string]any{"credential_id": rec.CredentialID, "display_name": rec.DisplayName, "auth_type": rec.AuthType, "username_hint": rec.UsernameHint, "enabled": rec.Enabled, "has_secret": strings.TrimSpace(rec.SecretRef) != ""}
+	return map[string]any{
+		"credential_id": rec.CredentialID, "display_name": rec.DisplayName, "auth_type": rec.AuthType,
+		"username_hint": rec.UsernameHint, "enabled": rec.Enabled,
+		"has_secret": strings.TrimSpace(rec.SecretRef) != "", "secret_source": linuxSecretSource(rec.SecretRef),
+	}
 }
 
 func linuxChannelView(rec store.LinuxChannelRecord) map[string]any {
 	return map[string]any{
 		"channel_id": rec.ChannelID, "display_name": rec.DisplayName, "host": rec.Host,
 		"port": rec.Port, "username": rec.Username, "credential_id": rec.CredentialID,
+		"host_key_policy": rec.HostKeyPolicy, "host_key_ref": rec.HostKeyRef,
 		"remote_shell": rec.RemoteShell, "default_cwd": rec.DefaultCWD,
 		"connect_timeout_ms": rec.ConnectTimeoutMS, "command_timeout_ms": rec.CommandTimeoutMS,
 		"keepalive_seconds": rec.KeepaliveSeconds, "max_sessions": rec.MaxSessions,
@@ -440,18 +479,16 @@ func linuxBindingView(rec store.LinuxChannelBindingRecord) map[string]any {
 	}
 }
 
-func resolveLinuxSecret(_ context.Context, ref string) (string, error) {
+func linuxSecretSource(ref string) string {
 	ref = strings.TrimSpace(ref)
-	if !strings.HasPrefix(ref, "env:") {
-		return "", fmt.Errorf("unsupported linux secret reference; use env:NAME")
+	switch {
+	case strings.HasPrefix(ref, "env:"):
+		return "environment"
+	case strings.HasPrefix(ref, "literal:"):
+		return "direct"
+	case ref != "":
+		return "legacy"
+	default:
+		return "none"
 	}
-	name := strings.TrimSpace(strings.TrimPrefix(ref, "env:"))
-	if name == "" {
-		return "", fmt.Errorf("linux secret environment name is empty")
-	}
-	value := os.Getenv(name)
-	if strings.TrimSpace(value) == "" {
-		return "", fmt.Errorf("linux secret environment %q is empty", name)
-	}
-	return value, nil
 }

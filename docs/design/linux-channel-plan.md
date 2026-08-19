@@ -188,12 +188,17 @@ CREATE TABLE linux_credentials (
 );
 ```
 
-`secret_ref` 只保存引用，不保存明文。推荐优先级：
+`secret_ref` 保存引用或加密后的本地凭据。当前实现支持两种来源：
+
+- `env:NAME`：从 Node 进程环境变量解析；
+- `literal:<ciphertext>`：由直接输入接口生成，使用 Node runtime 的 SecretBox 加密，接口不接受调用方直接提交该内部格式。
+
+直接输入的密码或私钥会保存到 Node 本地配置数据库，密文只在建立 SSH 连接时解密。环境变量引用仍然兼容旧配置，但修改环境变量后需要重启 Node 才能让进程看到新值。推荐优先级：
 
 1. 操作系统 Secret Store/Keyring；
 2. Node 本地加密 secret store，密钥由安装实例保护；
 3. 环境变量引用；
-4. 仅在明确接受风险时才允许加密数据库中的密码。
+4. 直接输入并加密保存本地凭据。
 
 密码支持是产品需求，但不应成为默认推荐认证方式。生产环境默认推荐 SSH private key 或证书。
 
@@ -452,6 +457,20 @@ POST   /v1/linux/credentials/{credential_id}/test
 ```
 
 GET 只返回：`credential_id`、显示名、认证类型、更新时间和是否可用；禁止返回秘密。
+
+创建凭据时，密码认证可提交以下两种请求之一：
+
+```json
+{"auth_type":"password","secret_ref":"env:SSH_PASSWORD"}
+```
+
+```json
+{"auth_type":"password","secret_value":"本地 SSH 密码"}
+```
+
+私钥也可以使用同样的 `secret_value` 字段直接输入，服务端会加密保存。
+
+`secret_value` 支持 `password` 和 `private_key` 认证，响应只返回 `secret_source`（`environment` 或 `direct`），不返回密码、私钥或内部 `secret_ref`。
 
 ### 10.3 Agent 绑定
 

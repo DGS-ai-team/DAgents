@@ -263,6 +263,8 @@ func defaultEngine() *Engine {
 			"search_replace":        ModeRule,
 			"bash_run":              ModeRule,
 			"linux_exec":            ModeAlways,
+			"linux_file_upload":     ModeAlways,
+			"linux_file_download":   ModeAlways,
 			"background_job_status": ModeRule,
 			"background_job_cancel": ModeAlways,
 			"trigger_list":          ModeNever,

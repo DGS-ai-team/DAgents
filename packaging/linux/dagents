@@ -180,7 +180,7 @@ Options:
   --force                      Re-run even if onboarding already completed
   --preferred-name NAME        How the agent should address you
   --node-name NAME             This Node display name
-  --provider PROVIDER          mock|deepseek|openai|qwen|vllm
+  --provider PROVIDER          mock|deepseek|openai|qwen|vllm|glm|minimax|mimo
   --model MODEL                Model id (default mock for --provider mock)
   --base-url URL               Optional API base URL
   --api-key KEY                LLM API key (or env OPENAI_API_KEY / DAGENTS_API_KEY)
@@ -240,6 +240,9 @@ EOF
       echo "  3) openai"
       echo "  4) qwen"
       echo "  5) vllm"
+      echo "  6) glm"
+      echo "  7) minimax"
+      echo "  8) mimo"
       local choice
       choice="$(prompt_with_default "编号" "1")"
       case "${choice}" in
@@ -248,6 +251,9 @@ EOF
         3|openai) provider="openai" ;;
         4|qwen) provider="qwen" ;;
         5|vllm) provider="vllm" ;;
+        6|glm) provider="glm" ;;
+        7|minimax) provider="minimax" ;;
+        8|mimo) provider="mimo" ;;
         *) die "invalid provider choice: ${choice}" ;;
       esac
     fi

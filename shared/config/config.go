@@ -372,7 +372,7 @@ type LLMConfig struct {
 	Model           string                      `yaml:"model"`
 	APIKeyEnv       string                      `yaml:"api_key_env"`
 	Mock            bool                        `yaml:"mock"`
-	Thinking        string                      `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
+	Thinking        string                      `yaml:"thinking"`         // provider thinking：enabled | disabled
 	ReasoningEffort string                      `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
 	// max_tool_loops 已迁至 Agent config_snapshot（defaults.llm.max_tool_loops），勿再写入 Node YAML。
 }

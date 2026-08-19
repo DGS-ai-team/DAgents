@@ -166,7 +166,15 @@ export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
   }
 
   hitlQueue.forEach((hitl, idx) => {
-    items.push({ key: `hitl-${idx}-${hitl.kind}`, kind: hitl.kind, hitl, hitlIndex: idx });
+    const hitlId = String(
+      hitl?.data?.request_id || hitl?.data?.approval_id || hitl?.data?.id || "",
+    ).trim();
+    items.push({
+      key: `hitl-${idx}-${hitl.kind}-${hitlId}`,
+      kind: hitl.kind,
+      hitl,
+      hitlIndex: idx,
+    });
   });
 
   const annotated = annotateToolExecutionHints(items, jobs, hitlQueue);

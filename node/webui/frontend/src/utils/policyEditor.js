@@ -44,6 +44,15 @@ export function filterPolicyTools(tools, filterText) {
   });
 }
 
+/** Build one atomic update list for the tools currently visible in the UI. */
+export function buildBulkToolUpdates(tools, mode) {
+  const rows = Array.isArray(tools) ? tools : [];
+  return rows
+    .map((row) => String(row?.name || "").trim())
+    .filter((name) => name && canSetPolicyMode(name, mode))
+    .map((name) => ({ name, mode }));
+}
+
 export function filterPolicyShellEntries(entries, filterText) {
   const rows = Array.isArray(entries) ? entries : [];
   const filt = String(filterText || "").trim().toLowerCase();

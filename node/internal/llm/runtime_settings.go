@@ -28,15 +28,19 @@ type RuntimeSettings struct {
 
 // LLMSettingsView 为 GET /v1/llm/settings 与 agent/info 嵌套字段。
 type LLMSettingsView struct {
-	ActiveProfile     string   `json:"active_profile,omitempty"`
-	Profiles          []string `json:"profiles,omitempty"`
-	Provider          string   `json:"provider"`
-	Model             string   `json:"model"`
-	Mock              bool     `json:"mock"`
-	MultimodalEnabled bool     `json:"multimodal_enabled"`
-	ThinkingSupported bool     `json:"thinking_supported"`
-	Thinking          string   `json:"thinking,omitempty"`
-	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
+	ActiveProfile            string   `json:"active_profile,omitempty"`
+	Profiles                 []string `json:"profiles,omitempty"`
+	Provider                 string   `json:"provider"`
+	Model                    string   `json:"model"`
+	Mock                     bool     `json:"mock"`
+	MultimodalEnabled        bool     `json:"multimodal_enabled"`
+	ThinkingSupported        bool     `json:"thinking_supported"`
+	ReasoningEffortSupported bool     `json:"reasoning_effort_supported"`
+	ThinkingControl          string   `json:"thinking_control,omitempty"`
+	ThinkingLabel            string   `json:"thinking_label,omitempty"`
+	ThinkingSecondaryLabel   string   `json:"thinking_secondary_label,omitempty"`
+	Thinking                 string   `json:"thinking,omitempty"`
+	ReasoningEffort          string   `json:"reasoning_effort,omitempty"`
 }
 
 // LLMSettingsPatch 为 PATCH /v1/llm/settings 请求体（字段均可选）。
@@ -56,7 +60,7 @@ func NewRuntimeSettings(cfg *config.Config) *RuntimeSettings {
 			ReasoningEffort: "high",
 		}
 	}
-	thinking, effort := NormalizeThinkingSettings(cfg.LLM.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
+	thinking, effort := NormalizeThinkingSettingsForModel(cfg.LLM.Provider, cfg.LLM.Model, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	return &RuntimeSettings{
 		AgentID:           strings.TrimSpace(cfg.NodeID),
 		ActiveProfile:     cfg.LLM.ActiveProfileID(),
@@ -84,17 +88,23 @@ func (s *RuntimeSettings) Snapshot() LLMSettingsView {
 
 func (s *RuntimeSettings) snapshotLocked() LLMSettingsView {
 	view := LLMSettingsView{
-		ActiveProfile:     s.ActiveProfile,
-		Profiles:          append([]string(nil), s.profileIDs...),
-		Provider:          s.Provider,
-		Model:             s.Model,
-		Mock:              s.Mock,
-		MultimodalEnabled: s.MultimodalEnabled,
-		ThinkingSupported: ThinkingSupported(s.Provider),
+		ActiveProfile:            s.ActiveProfile,
+		Profiles:                 append([]string(nil), s.profileIDs...),
+		Provider:                 s.Provider,
+		Model:                    s.Model,
+		Mock:                     s.Mock,
+		MultimodalEnabled:        s.MultimodalEnabled,
+		ThinkingSupported:        ThinkingSupported(s.Provider),
+		ReasoningEffortSupported: ReasoningEffortSupported(s.Provider),
 	}
+	view.ThinkingControl, view.ThinkingLabel, view.ThinkingSecondaryLabel = ThinkingControlMetadata(s.Provider, s.Model)
 	if view.ThinkingSupported {
-		view.Thinking = s.Thinking
-		if s.Thinking == "enabled" {
+		if view.ThinkingControl == ThinkingControlFixed {
+			view.Thinking = "enabled"
+		} else {
+			view.Thinking = s.Thinking
+		}
+		if s.Thinking == "enabled" && view.ReasoningEffortSupported {
 			view.ReasoningEffort = s.ReasoningEffort
 		}
 	}
@@ -153,7 +163,7 @@ func (s *RuntimeSettings) RequestExtra() map[string]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var extra map[string]any
-	if built := BuildRequestExtra(s.Provider, s.Thinking, s.ReasoningEffort); len(built) > 0 {
+	if built := BuildRequestExtraForModel(s.Provider, s.Model, s.Thinking, s.ReasoningEffort); len(built) > 0 {
 		extra = built
 	}
 	if uid := strings.TrimSpace(s.AgentID); uid != "" {
@@ -183,9 +193,12 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 	}
 	if !ThinkingSupported(s.Provider) {
 		if patch.Thinking != nil || patch.ReasoningEffort != nil {
-			return s.snapshotLocked(), fmt.Errorf("thinking controls require llm.provider=deepseek, qwen, or openai")
+			return s.snapshotLocked(), fmt.Errorf("thinking controls are not supported by llm.provider=%s", s.Provider)
 		}
 		return s.snapshotLocked(), nil
+	}
+	if ThinkingControl(s.Provider, s.Model) == ThinkingControlFixed && patch.Thinking != nil {
+		return s.snapshotLocked(), fmt.Errorf("thinking cannot be changed for llm.model=%s", s.Model)
 	}
 	if patch.Thinking != nil {
 		normalized, err := normalizeThinking(*patch.Thinking)
@@ -195,6 +208,9 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 		s.Thinking = normalized
 	}
 	if patch.ReasoningEffort != nil {
+		if !ReasoningEffortSupported(s.Provider) {
+			return s.snapshotLocked(), fmt.Errorf("reasoning effort is not supported by llm.provider=%s", s.Provider)
+		}
 		normalized, err := normalizeReasoningEffort(*patch.ReasoningEffort)
 		if err != nil {
 			return s.snapshotLocked(), err
@@ -222,7 +238,7 @@ func (s *RuntimeSettings) SyncFromConfig(cfg *config.Config) {
 	s.Model = strings.TrimSpace(cfg.LLM.Model)
 	s.Mock = cfg.LLM.Mock
 	s.MultimodalEnabled = cfg.MultimodalEnabled()
-	thinking, effort := NormalizeThinkingSettings(s.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
+	thinking, effort := NormalizeThinkingSettingsForModel(s.Provider, cfg.LLM.Model, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	s.Thinking = thinking
 	s.ReasoningEffort = effort
 }
@@ -231,6 +247,18 @@ func (s *RuntimeSettings) SyncFromConfig(cfg *config.Config) {
 // openai 按 OpenAI 兼容网关常见约定注入 thinking / reasoning_effort（与 DeepSeek 同形）。
 func ThinkingSupported(provider string) bool {
 	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
+	case ProviderDeepSeek, ProviderQwen, ProviderOpenAI, ProviderGLM, ProviderMiniMax, ProviderMiMo:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReasoningEffortSupported 表示 provider 是否接受 high/max 这套强度参数。
+// GLM、MiniMax、MiMo 的 OpenAI-compatible 接口使用各自的 thinking 结构，
+// 不把 DeepSeek/Qwen 的 reasoning_effort 字段发给它们。
+func ReasoningEffortSupported(provider string) bool {
+	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
 	case ProviderDeepSeek, ProviderQwen, ProviderOpenAI:
 		return true
 	default:
@@ -238,12 +266,75 @@ func ThinkingSupported(provider string) bool {
 	}
 }
 
+// ThinkingControl describes the controls that are meaningful for a provider/model.
+// effort and budget both expose the thinking toggle plus a high/max secondary control;
+// toggle only exposes the on/off switch; fixed exposes a read-only status.
+const (
+	ThinkingControlEffort = "effort"
+	ThinkingControlBudget = "budget"
+	ThinkingControlToggle = "toggle"
+	ThinkingControlFixed  = "fixed"
+)
+
+// ThinkingControl returns the UI/request control shape for the current provider/model.
+// MiniMax M3 supports adaptive/disabled thinking; older MiniMax models keep thinking
+// enabled and must not present a fake off switch.
+func ThinkingControl(provider, model string) string {
+	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
+	case ProviderDeepSeek, ProviderOpenAI:
+		return ThinkingControlEffort
+	case ProviderQwen:
+		return ThinkingControlBudget
+	case ProviderGLM, ProviderMiMo:
+		return ThinkingControlToggle
+	case ProviderMiniMax:
+		if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "m3") || strings.TrimSpace(model) == "" {
+			return ThinkingControlToggle
+		}
+		return ThinkingControlFixed
+	default:
+		return ""
+	}
+}
+
+// ThinkingControlMetadata returns labels that keep provider-specific terminology out
+// of the web UI while preserving a small, stable API contract.
+func ThinkingControlMetadata(provider, model string) (control, label, secondaryLabel string) {
+	control = ThinkingControl(provider, model)
+	switch control {
+	case ThinkingControlEffort:
+		return control, "思考", "推理强度"
+	case ThinkingControlBudget:
+		return control, "思考", "思考预算"
+	case ThinkingControlToggle:
+		if ProviderName(strings.ToLower(strings.TrimSpace(provider))) == ProviderMiMo {
+			return control, "深度思考", ""
+		}
+		return control, "思考", ""
+	case ThinkingControlFixed:
+		return control, "思考", ""
+	default:
+		return "", "", ""
+	}
+}
+
 // NormalizeThinkingSettings 规范化配置中的 thinking 字段。
 func NormalizeThinkingSettings(provider, thinking, effort string) (string, string) {
+	return NormalizeThinkingSettingsForModel(provider, "", thinking, effort)
+}
+
+// NormalizeThinkingSettingsForModel additionally applies model-specific restrictions.
+func NormalizeThinkingSettingsForModel(provider, model, thinking, effort string) (string, string) {
 	if !ThinkingSupported(provider) {
 		return "", ""
 	}
+	if ThinkingControl(provider, model) == ThinkingControlFixed {
+		return "enabled", ""
+	}
 	t, _ := normalizeThinkingDefault(thinking)
+	if !ReasoningEffortSupported(provider) {
+		return t, ""
+	}
 	e, _ := normalizeReasoningEffortDefault(effort)
 	if t != "enabled" {
 		return t, "high"
@@ -253,18 +344,61 @@ func NormalizeThinkingSettings(provider, thinking, effort string) (string, strin
 
 // BuildRequestExtra 按 provider 与 thinking 参数构造出站 JSON 扩展字段。
 func BuildRequestExtra(provider, thinking, effort string) map[string]any {
+	return BuildRequestExtraForModel(provider, "", thinking, effort)
+}
+
+// BuildRequestExtraForModel builds provider-specific request fields with model-aware
+// restrictions. BuildRequestExtra remains as a compatibility wrapper for callers that
+// do not have a model name.
+func BuildRequestExtraForModel(provider, model, thinking, effort string) map[string]any {
 	if !ThinkingSupported(provider) {
 		return nil
 	}
-	t, e := NormalizeThinkingSettings(provider, thinking, effort)
+	t, e := NormalizeThinkingSettingsForModel(provider, model, thinking, effort)
 	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
 	case ProviderQwen:
 		return buildQwenRequestExtra(t, e)
 	case ProviderDeepSeek, ProviderOpenAI:
 		return buildDeepSeekRequestExtra(t, e)
+	case ProviderGLM:
+		return buildGLMRequestExtra(t)
+	case ProviderMiniMax:
+		return buildMiniMaxRequestExtra(t)
+	case ProviderMiMo:
+		return buildMiMoRequestExtra(t)
 	default:
 		return nil
 	}
+}
+
+func buildGLMRequestExtra(thinking string) map[string]any {
+	if thinking == "disabled" {
+		return map[string]any{"thinking": map[string]string{"type": "disabled"}}
+	}
+	// GLM's preserved-thinking mode is the safe mode for multi-turn tool use:
+	// the assistant reasoning_content is returned and must be sent back intact.
+	return map[string]any{
+		"thinking": map[string]any{"type": "enabled", "clear_thinking": false},
+	}
+}
+
+func buildMiniMaxRequestExtra(thinking string) map[string]any {
+	thinkingType := "adaptive"
+	if thinking == "disabled" {
+		thinkingType = "disabled"
+	}
+	return map[string]any{
+		"thinking":        map[string]string{"type": thinkingType},
+		"reasoning_split": true,
+	}
+}
+
+func buildMiMoRequestExtra(thinking string) map[string]any {
+	typ := "enabled"
+	if thinking == "disabled" {
+		typ = "disabled"
+	}
+	return map[string]any{"thinking": map[string]string{"type": typ}}
 }
 
 func buildDeepSeekRequestExtra(thinking, effort string) map[string]any {

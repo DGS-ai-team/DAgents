@@ -71,9 +71,12 @@ type streamToolCallDelta struct {
 type chatStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content          string                `json:"content"`
-			ReasoningContent string                `json:"reasoning_content"`
-			ToolCalls        []streamToolCallDelta `json:"tool_calls"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ReasoningDetails []struct {
+				Text string `json:"text"`
+			} `json:"reasoning_details"`
+			ToolCalls []streamToolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -178,6 +181,19 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 				if handler.OnReasoningDelta != nil {
 					handler.OnReasoningDelta(reasoning)
 				}
+			} else if len(chunk.Choices[0].Delta.ReasoningDetails) > 0 {
+				// MiniMax may expose reasoning through reasoning_details when
+				// reasoning_split is enabled. Some versions send cumulative text,
+				// so append only the suffix not already present.
+				for _, detail := range chunk.Choices[0].Delta.ReasoningDetails {
+					if detail.Text == "" {
+						continue
+					}
+					newReasoning := appendReasoningDetail(&fullReasoning, detail.Text)
+					if newReasoning != "" && handler.OnReasoningDelta != nil {
+						handler.OnReasoningDelta(newReasoning)
+					}
+				}
 			}
 			for _, tc := range chunk.Choices[0].Delta.ToolCalls {
 				toolAcc.add(tc)
@@ -213,6 +229,24 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		ToolCalls:        tcs,
 		FinishReason:     finishReason,
 	}, nil
+}
+
+func appendReasoningDetail(full *strings.Builder, detail string) string {
+	if full == nil || detail == "" {
+		return ""
+	}
+	current := full.String()
+	switch {
+	case strings.HasPrefix(detail, current):
+		suffix := detail[len(current):]
+		full.WriteString(suffix)
+		return suffix
+	case strings.HasPrefix(current, detail):
+		return ""
+	default:
+		full.WriteString(detail)
+		return detail
+	}
 }
 
 type completeRequestBody struct {

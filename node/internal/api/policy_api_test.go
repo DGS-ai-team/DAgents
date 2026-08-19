@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -188,9 +190,9 @@ func TestHandlePutAgentPolicyProtectAskUserInformation(t *testing.T) {
 }
 
 func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
-	_, ts, agentID := testAgentPolicyServer(t)
+	srv, ts, agentID := testAgentPolicyServer(t)
 
-	putBody := []byte(`{"soul_md":"我是助手","user_md":"用户偏好简洁","custom_md":"临时指令","long_term_md":"记得开会"}`)
+	putBody := []byte(`{"soul_md":"我是助手","user_md":"用户偏好简洁","custom_md":"临时指令","long_term_md":"记得开会","long_term_scope":"global"}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/prompt-context", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -222,5 +224,23 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	}
 	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].Content != "记得开会" {
 		t.Fatalf("long_term entries = %+v md=%q", view.LongTermEntries, view.LongTermMD)
+	}
+	contextView, err := srv.sessions.GetContextView(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(contextView.SystemPrompt, "我是助手") {
+		t.Fatalf("live runtime prompt was not refreshed: %q", contextView.SystemPrompt)
+	}
+	rec, err := srv.agents.Get(t.Context(), agentID)
+	if err != nil || rec == nil {
+		t.Fatalf("load agent after prompt update: rec=%v err=%v", rec, err)
+	}
+	snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := agentruntime.LongTermScopeFromDefaults(snap); got != "global" {
+		t.Fatalf("long_term_scope was not persisted to agent snapshot: %q", got)
 	}
 }

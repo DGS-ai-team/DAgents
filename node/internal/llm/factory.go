@@ -13,6 +13,9 @@ const (
 	defaultDeepSeekBaseURL = "https://api.deepseek.com"
 	defaultQwenBaseURL     = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 	defaultVLLMBaseURL     = "http://127.0.0.1:8000/v1"
+	defaultGLMBaseURL      = "https://open.bigmodel.cn/api/paas/v4"
+	defaultMiniMaxBaseURL  = "https://api.minimaxi.com/v1"
+	defaultMiMoBaseURL     = "https://api.xiaomimimo.com/v1"
 )
 
 // NewFromConfig 根据 Node 配置构造 LLM Client。
@@ -41,6 +44,12 @@ func defaultBaseURL(provider ProviderName) string {
 		return defaultQwenBaseURL
 	case ProviderVLLM:
 		return defaultVLLMBaseURL
+	case ProviderGLM:
+		return defaultGLMBaseURL
+	case ProviderMiniMax:
+		return defaultMiniMaxBaseURL
+	case ProviderMiMo:
+		return defaultMiMoBaseURL
 	default:
 		return ""
 	}

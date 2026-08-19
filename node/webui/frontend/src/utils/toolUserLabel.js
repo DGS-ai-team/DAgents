@@ -113,6 +113,17 @@ function toolNameFromStep(callEntry, resultEntry) {
   return "";
 }
 
+/** 工具气泡仅展示模型给出的用户目的，不重复展示工具名称或技术文案。 */
+export function toolStepPurpose({ callEntry, resultEntry } = {}) {
+  const args = argsFromStep(callEntry, resultEntry);
+  const purpose = toolCallPurpose(args);
+  if (purpose) return purpose;
+
+  // 临时 Agent 的 schema 使用 purpose，而普通工具统一使用 call_purpose。
+  const directPurpose = sanitizeInline(args.purpose);
+  return directPurpose ? truncateGraphemes(directPurpose, 48) : "";
+}
+
 /**
  * 用户向一行摘要（F-UI6）；禁止出现裸 tool()。
  */

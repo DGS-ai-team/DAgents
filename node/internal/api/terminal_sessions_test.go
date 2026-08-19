@@ -151,33 +151,6 @@ func TestTerminalSessionTerminateInterruptsAndReturnsUnreadOutput(t *testing.T) 
 	session.shutdown()
 }
 
-func TestTerminalSessionSplitsLargeOutputFramesForCursorReads(t *testing.T) {
-	terminal := newInterruptibleTestTerminal()
-	session, err := newTerminalSession("agent-frame", terminal, nil, tools.TerminalRequest{}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := bytes.Repeat([]byte("x"), terminalOutputFrameMax*2+100)
-	if err := terminal.write(payload); err != nil {
-		t.Fatal(err)
-	}
-	waitForTerminalFrames(t, session, 3)
-
-	first := session.snapshotOutput(0, terminalOutputFrameMax, true)
-	if len(first.Chunks) != 1 || len(first.Chunks[0].Data) != terminalOutputFrameMax || first.NextSeq != 1 {
-		t.Fatalf("first bounded read=%+v", first)
-	}
-	second := session.snapshotOutput(first.NextSeq, terminalOutputFrameMax, true)
-	if len(second.Chunks) != 1 || len(second.Chunks[0].Data) != terminalOutputFrameMax || second.NextSeq != 2 {
-		t.Fatalf("second bounded read=%+v", second)
-	}
-	third := session.snapshotOutput(second.NextSeq, terminalOutputFrameMax, true)
-	if len(third.Chunks) != 1 || len(third.Chunks[0].Data) != 100 || third.NextSeq != 3 {
-		t.Fatalf("third bounded read=%+v", third)
-	}
-	session.shutdown()
-}
-
 func TestTerminalSessionRegistryEnforcesAgentLimitAndIsNotPersistent(t *testing.T) {
 	registry := newTerminalSessionRegistry(1)
 	registry.setOpener(func(context.Context, string, tools.TerminalRequest) (tools.Terminal, error) {

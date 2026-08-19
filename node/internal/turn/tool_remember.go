@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
@@ -42,6 +43,26 @@ func (o *Orchestrator) SetLongTermStore(store LongTermStore) {
 		return
 	}
 	o.longTermStore = store
+}
+
+// SetLongTermScope updates the persistence scope for future memory reads and
+// writes without changing the active Turn snapshot.
+func (o *Orchestrator) SetLongTermScope(scope string) {
+	if o == nil || o.longTermStore == nil {
+		return
+	}
+	if setter, ok := o.longTermStore.(LongTermScopeSetter); ok {
+		setter.SetLongTermScope(scope)
+	}
+}
+
+// SetPromptContent updates the sidecar source used when the next model
+// context is built. An active Turn keeps its existing ModelContextSnapshot.
+func (o *Orchestrator) SetPromptContent(content promptcontext.Content) {
+	if o == nil || o.promptCtx == nil {
+		return
+	}
+	o.promptCtx.SetContent(content)
 }
 
 func (o *Orchestrator) executeRememberTool(
@@ -168,6 +189,13 @@ func (o *Orchestrator) analyzeRememberConflict(ctx context.Context, existing, in
 func (o *Orchestrator) persistLongTermCAS(ctx context.Context, entries []LongTermEntry, expectedVersion time.Time) error {
 	if err := o.longTermStore.SaveLongTerm(ctx, entries, expectedVersion); err != nil {
 		return err
+	}
+	if o.hub != nil {
+		o.hub.Publish(o.agentID, "memory/changed", map[string]any{
+			"agent_id":      o.agentID,
+			"entry_count":   countNonEmptyEntries(entries),
+			"turn_boundary": "next_turn",
+		})
 	}
 	return nil
 }
