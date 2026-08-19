@@ -7,30 +7,32 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
+  TAURI_LINUX_CI_IMAGE: ghcr.io/dgs-ai-team/dagents-tauri-linux-ci:ubuntu24.04-v1
 
 jobs:
   cargo-check-linux:
     name: cargo check (linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Linux Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Rust
+      # Keep a bootstrap path for the first run, before the GHCR image has
+      # been published by the main-branch image workflow.
+      - name: Setup Rust (bootstrap fallback)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
@@ -38,9 +40,34 @@ jobs:
         with:
           workspaces: desktop/tray-tauri/src-tauri -> target
 
-      - name: cargo test
-        working-directory: desktop/tray-tauri/src-tauri
-        run: cargo test --locked
+      - name: Run cargo test in prebuilt image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.cargo"
+          if docker pull "${TAURI_LINUX_CI_IMAGE}"; then
+            docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              --env CARGO_HOME=/cargo \
+              --env RUSTUP_HOME=/opt/rustup \
+              --env PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+              --env CARGO_TERM_COLOR=always \
+              --volume "${GITHUB_WORKSPACE}:/workspace" \
+              --volume "${HOME}/.cargo:/cargo" \
+              --workdir /workspace/desktop/tray-tauri/src-tauri \
+              "${TAURI_LINUX_CI_IMAGE}" \
+              cargo test --locked
+          else
+            echo "::warning::Tauri Linux CI image is unavailable; using the bootstrap apt path."
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              libwebkit2gtk-4.1-dev \
+              libayatana-appindicator3-dev \
+              librsvg2-dev \
+              patchelf \
+              libssl-dev
+            cargo test --locked --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
+          fi
 
   build-windows:
     name: Build dagents-shell (windows-amd64)
