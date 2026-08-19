@@ -10,9 +10,12 @@ const PROVIDER_PRESETS = {
     model: "qwen-plus",
   },
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
+  glm: { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2" },
+  minimax: { base_url: "https://api.minimaxi.com/v1", model: "MiniMax-M3" },
+  mimo: { base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-pro" },
 };
 
-const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm"]);
+const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm", "glm", "minimax", "mimo"]);
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -263,6 +266,9 @@ watch(
                 <option value="openai">OpenAI</option>
                 <option value="qwen">Qwen</option>
                 <option value="vllm">vLLM</option>
+                <option value="glm">GLM</option>
+                <option value="minimax">MiniMax</option>
+                <option value="mimo">MiMo</option>
               </select>
             </label>
             <label class="field">

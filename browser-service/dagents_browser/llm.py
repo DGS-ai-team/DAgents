@@ -33,7 +33,7 @@ def llm_settings_from_config(raw: dict[str, Any]) -> LLMSettings | None:
 def create_extraction_llm(settings: LLMSettings) -> BaseChatModel:
     api_key = os.environ.get(settings.api_key_env, "").strip() or None
     provider = settings.provider
-    if provider in ("openai", "deepseek", "qwen", "vllm"):
+    if provider in ("openai", "deepseek", "qwen", "vllm", "glm", "minimax", "mimo"):
         from browser_use.llm.openai.chat import ChatOpenAI
 
         kwargs: dict[str, Any] = {"model": settings.model, "api_key": api_key}

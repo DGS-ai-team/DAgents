@@ -96,6 +96,7 @@ import {
 import { bumpActivityRefresh } from "../stores/activity.js";
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
+import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -793,7 +794,11 @@ async function deleteAgentById(payload) {
 
 async function toggleThinkingMode() {
   if (!chromeStore.llmSettings?.thinking_supported) {
-    agentStore.error = "当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）";
+    agentStore.error = "当前 provider 不支持 thinking 控制";
+    return;
+  }
+  if (!canToggleThinking(chromeStore.llmSettings)) {
+    agentStore.error = "当前模型固定开启思考，无法切换";
     return;
   }
   agentStore.error = "";
@@ -808,7 +813,10 @@ async function toggleThinkingMode() {
 }
 
 async function cycleThinkingEffort() {
-  if (!chromeStore.llmSettings?.thinking_supported) return;
+  if (
+    !chromeStore.llmSettings?.thinking_supported ||
+    !hasThinkingSecondaryControl(chromeStore.llmSettings)
+  ) return;
   agentStore.error = "";
   const current = String(chromeStore.llmSettings.reasoning_effort || "high").toLowerCase();
   const next = current === "max" ? "high" : "max";

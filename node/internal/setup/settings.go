@@ -435,7 +435,7 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 			return fmt.Errorf("llm.model is required when mock is false")
 		}
 		switch provider {
-		case "openai", "deepseek", "qwen", "vllm", "mock":
+		case "openai", "deepseek", "qwen", "vllm", "glm", "minimax", "mimo", "mock":
 		default:
 			return fmt.Errorf("unsupported llm.provider %q", p.Provider)
 		}

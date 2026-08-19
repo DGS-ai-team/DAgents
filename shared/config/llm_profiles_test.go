@@ -17,6 +17,18 @@ func TestNormalizeLLMProfiles_fromFlat(t *testing.T) {
 	}
 }
 
+func TestLLMProfile_acceptsNewProviders(t *testing.T) {
+	for _, provider := range []string{"glm", "minimax", "mimo"} {
+		cfg := &Config{}
+		cfg.LLM.Provider = provider
+		cfg.LLM.Model = "model"
+		cfg.ApplyDefaults()
+		if got := cfg.LLM.Provider; got != provider {
+			t.Fatalf("provider=%q normalized to %q", provider, got)
+		}
+	}
+}
+
 func TestSetActiveLLMProfile(t *testing.T) {
 	cfg := &Config{}
 	cfg.ApplyDefaults()

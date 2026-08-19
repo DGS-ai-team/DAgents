@@ -10,11 +10,14 @@ import (
 
 func TestSuggestProviderFromBaseURL(t *testing.T) {
 	cases := map[string]string{
-		"https://api.deepseek.com":                                    "deepseek",
-		"https://dashscope.aliyuncs.com/compatible-mode/v1":           "qwen",
-		"https://api.openai.com/v1":                                   "openai",
-		"http://127.0.0.1:8000/v1":                                    "vllm",
-		"https://example.com/v1":                                      "",
+		"https://api.deepseek.com":                          "deepseek",
+		"https://dashscope.aliyuncs.com/compatible-mode/v1": "qwen",
+		"https://api.openai.com/v1":                         "openai",
+		"https://open.bigmodel.cn/api/paas/v4":              "glm",
+		"https://api.minimaxi.com/v1":                       "minimax",
+		"https://api.xiaomimimo.com/v1":                     "mimo",
+		"http://127.0.0.1:8000/v1":                          "vllm",
+		"https://example.com/v1":                            "",
 	}
 	for url, want := range cases {
 		if got := SuggestProviderFromBaseURL(url); got != want {

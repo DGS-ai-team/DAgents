@@ -9,6 +9,9 @@ const PROVIDER_PRESETS = {
   openai: { base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
   qwen: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
+  glm: { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2" },
+  minimax: { base_url: "https://api.minimaxi.com/v1", model: "MiniMax-M3" },
+  mimo: { base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-pro" },
 };
 
 const PROVIDER_OPTIONS = [
@@ -16,9 +19,12 @@ const PROVIDER_OPTIONS = [
   { value: "openai", label: "OpenAI" },
   { value: "qwen", label: "Qwen" },
   { value: "vllm", label: "vLLM" },
+  { value: "glm", label: "GLM" },
+  { value: "minimax", label: "MiniMax" },
+  { value: "mimo", label: "MiMo" },
 ];
 
-const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm"]);
+const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm", "glm", "minimax", "mimo"]);
 
 const THEME_OPTIONS = [
   { id: "light", title: "浅色" },

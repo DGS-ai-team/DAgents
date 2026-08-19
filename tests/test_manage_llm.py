@@ -23,6 +23,12 @@ class LLMStoreTest(unittest.TestCase):
         self.assertEqual(s.get(cfg.id).model, "claude-sonnet-4-6")
         self.assertEqual(len(s.list()), 1)
 
+    def test_create_supports_glm_minimax_mimo(self):
+        s = _store()
+        for provider in ("glm", "minimax", "mimo"):
+            cfg = s.create(self._mk(name=provider, provider=provider), now=100)
+            self.assertEqual(cfg.provider, provider)
+
     def test_default_is_unique(self):
         s = _store()
         a = s.create(self._mk(name="a"), now=1)
@@ -184,6 +190,12 @@ class LLMProbeHelpersTest(unittest.TestCase):
             suggest_provider_from_base_url("https://dashscope.aliyuncs.com/compatible-mode/v1"),
             "qwen",
         )
+        self.assertEqual(
+            suggest_provider_from_base_url("https://open.bigmodel.cn/api/paas/v4"),
+            "glm",
+        )
+        self.assertEqual(suggest_provider_from_base_url("https://api.minimaxi.com/v1"), "minimax")
+        self.assertEqual(suggest_provider_from_base_url("https://api.xiaomimimo.com/v1"), "mimo")
         self.assertEqual(suggest_provider_from_base_url("http://127.0.0.1:8000/v1"), "vllm")
 
     def test_probe_models_parses_list(self):

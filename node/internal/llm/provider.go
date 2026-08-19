@@ -15,6 +15,9 @@ const (
 	ProviderDeepSeek ProviderName = "deepseek"
 	ProviderQwen     ProviderName = "qwen"
 	ProviderVLLM     ProviderName = "vllm"
+	ProviderGLM      ProviderName = "glm"
+	ProviderMiniMax  ProviderName = "minimax"
+	ProviderMiMo     ProviderName = "mimo"
 )
 
 // MessageAdapter 按厂商处理会话消息的存储规范化与 API 出站形态。
@@ -32,13 +35,18 @@ type MessageAdapter interface {
 
 // NewMessageAdapter 根据 provider 字符串构造适配器；未知值回退 openai。
 func NewMessageAdapter(provider string) MessageAdapter {
-	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
+	providerName := ProviderName(strings.ToLower(strings.TrimSpace(provider)))
+	switch providerName {
 	case ProviderDeepSeek:
 		return deepSeekAdapter{}
 	case ProviderQwen:
 		return qwenAdapter{}
 	case ProviderVLLM:
 		return vllmAdapter{}
+	case ProviderGLM, ProviderMiniMax, ProviderMiMo:
+		// These services expose the OpenAI Chat Completions wire format, but
+		// keep their provider identity for endpoint defaults and request extras.
+		return openAIAdapter{provider: providerName}
 	default:
 		return openAIAdapter{}
 	}

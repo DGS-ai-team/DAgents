@@ -292,7 +292,7 @@ func validateLLMProfile(p LLMProfileConfig) error {
 		return fmt.Errorf("llm.provider is required")
 	}
 	switch provider {
-	case "openai", "deepseek", "qwen", "vllm", "mock":
+	case "openai", "deepseek", "qwen", "vllm", "glm", "minimax", "mimo", "mock":
 	default:
 		return fmt.Errorf("unsupported llm.provider %q", p.Provider)
 	}

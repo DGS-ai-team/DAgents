@@ -9,9 +9,16 @@ import (
 // 当 RuntimeSettings 注入 thinking 时，出站规则对齐 DeepSeek：
 // - 带 tool_calls 的 assistant 保留 reasoning_content（键须存在，值可为空）；
 // - 纯对话 assistant 出站剥离 reasoning_content。
-type openAIAdapter struct{}
+type openAIAdapter struct {
+	provider ProviderName
+}
 
-func (openAIAdapter) Name() ProviderName { return ProviderOpenAI }
+func (a openAIAdapter) Name() ProviderName {
+	if a.provider == "" {
+		return ProviderOpenAI
+	}
+	return a.provider
+}
 
 func (openAIAdapter) NormalizeAssistantForStorage(_ []Message, msg Message, logger *slog.Logger) Message {
 	normalized := cloneMessage(msg)
