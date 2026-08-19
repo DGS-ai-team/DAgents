@@ -45,7 +45,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/.cargo"
-          if docker pull "${TAURI_LINUX_CI_IMAGE}"; then
+          image_available=false
+          max_pull_attempts=6
+          pull_retry_delay_seconds=20
+
+          for ((attempt = 1; attempt <= max_pull_attempts; attempt++)); do
+            echo "Pulling ${TAURI_LINUX_CI_IMAGE} (attempt ${attempt}/${max_pull_attempts})"
+            if docker pull "${TAURI_LINUX_CI_IMAGE}"; then
+              image_available=true
+              break
+            fi
+
+            if (( attempt < max_pull_attempts )); then
+              echo "Tauri Linux CI image is not available yet; retrying in ${pull_retry_delay_seconds}s."
+              sleep "${pull_retry_delay_seconds}"
+            fi
+          done
+
+          if [[ "${image_available}" == true ]]; then
             docker run --rm \
               --user "$(id -u):$(id -g)" \
               --env CARGO_HOME=/cargo \
@@ -58,7 +75,7 @@ jobs:
               "${TAURI_LINUX_CI_IMAGE}" \
               cargo test --locked
           else
-            echo "::warning::Tauri Linux CI image is unavailable; using the bootstrap apt path."
+            echo "::warning::Tauri Linux CI image is unavailable after ${max_pull_attempts} attempts; using the bootstrap apt path."
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends \
               libwebkit2gtk-4.1-dev \
