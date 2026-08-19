@@ -21,14 +21,14 @@ import { statusStore, statusPhaseOrder, hasStatus, formatStatusText } from "../s
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import { countNewStreamItems } from "../utils/streamUnread.js";
+import { toolStepIsInProgress } from "../utils/toolUserLabel.js";
 import {
   measureSync,
   updateRuntimeMetrics,
 } from "../stores/performanceDiagnostics.js";
 import { getDesktopClipboardFiles } from "../api/desktop.js";
 import {
-  formatPathsForComposer,
-  mergePathInsertion,
+  buildMessageWithFileReferences,
   pathsFromFileList,
   pathsFromUriList,
   shouldResolvePathsViaShell,
@@ -93,6 +93,7 @@ const thinkingSecondarySupported = computed(
 
 const input = ref("");
 const pendingImages = ref([]);
+const pendingFiles = ref([]);
 const imageInputRef = ref(null);
 const attachInputRef = ref(null);
 const textareaRef = ref(null);
@@ -222,7 +223,7 @@ function streamGroupMemo(item) {
 }
 
 const hasActiveToolStep = computed(() =>
-  stream.value.some((item) => item?.kind === "tool_step" && item.executionHint === "active"),
+  stream.value.some((item) => item?.kind === "tool_step" && toolStepIsInProgress(item)),
 );
 
 const activeStatusPhases = computed(() => {
@@ -297,7 +298,10 @@ const multimodalEnabled = computed(() => {
   return Boolean(chromeStore.agentInfo?.multimodal_enabled);
 });
 const canSubmit = computed(
-  () => !props.disabled && !props.sending && (!!input.value.trim() || pendingImages.value.length > 0),
+  () =>
+    !props.disabled &&
+    !props.sending &&
+    (!!input.value.trim() || pendingImages.value.length > 0 || pendingFiles.value.length > 0),
 );
 
 function resizeTextarea() {
@@ -340,6 +344,26 @@ function removePendingImage(index) {
   pendingImages.value.splice(index, 1);
 }
 
+const MAX_PENDING_FILES = 8;
+
+function fileNameFromPath(path) {
+  const value = String(path || "").trim();
+  return value.split(/[\\/]/).filter(Boolean).pop() || value;
+}
+
+function addPendingFiles(paths) {
+  for (const rawPath of paths || []) {
+    const path = String(rawPath || "").trim();
+    if (!path || pendingFiles.value.length >= MAX_PENDING_FILES) break;
+    if (pendingFiles.value.some((file) => file.path === path)) continue;
+    pendingFiles.value.push({ path, name: fileNameFromPath(path) });
+  }
+}
+
+function removePendingFile(index) {
+  pendingFiles.value.splice(index, 1);
+}
+
 function openImagePicker() {
   imageInputRef.value?.click();
 }
@@ -360,11 +384,11 @@ async function onAttachmentSelected(event) {
 
   const paths = pathsFromFileList(files);
   if (paths.length) {
-    applyPathInsertion(paths);
+    addPendingFiles(paths);
     return;
   }
   const names = files.map((f) => f.name).filter(Boolean);
-  if (names.length) applyPathInsertion(names);
+  if (names.length) addPendingFiles(names);
 }
 
 // 生成中允许继续编辑草稿；只有真正不能输入（HITL、无 Agent、取消中）时才锁定。
@@ -525,12 +549,22 @@ watch(displayStream, (items, previousItems) => {
 async function submit() {
   const text = input.value.trim();
   const images = pendingImages.value.slice();
-  if ((!text && !images.length) || props.disabled || props.sending) return;
+  const files = pendingFiles.value.slice();
+  if ((!text && !images.length && !files.length) || props.disabled || props.sending) return;
   scrollToTail();
-  const contentParts = buildContentParts(text, images);
-  emit("send", { text, contentParts, images: images.map((img) => img.url) });
+  const messageText = buildMessageWithFileReferences(
+    text,
+    files.map((file) => file.path),
+  );
+  const contentParts = buildContentParts(messageText, images);
+  emit("send", {
+    text: messageText,
+    contentParts,
+    images: images.map((img) => img.url),
+  });
   input.value = "";
   pendingImages.value = [];
+  pendingFiles.value = [];
 }
 
 function onCancel() {
@@ -546,24 +580,6 @@ function onKeydown(e) {
     e.preventDefault();
     submit();
   }
-}
-
-function applyPathInsertion(paths) {
-  const formatted = formatPathsForComposer(paths);
-  if (!formatted) return false;
-  const el = textareaRef.value;
-  const start = el?.selectionStart ?? input.value.length;
-  const end = el?.selectionEnd ?? start;
-  const { value, cursor } = mergePathInsertion(input.value, formatted, { start, end });
-  input.value = value;
-  nextTick(() => {
-    if (el) {
-      el.selectionStart = cursor;
-      el.selectionEnd = cursor;
-      el.focus();
-    }
-  });
-  return true;
 }
 
 async function resolveFilePaths({ text, files, uriList }) {
@@ -602,7 +618,8 @@ async function onComposerPaste(e) {
     files,
     uriList: dt.getData("text/uri-list") || dt.getData("text/plain"),
   });
-  if (paths.length && applyPathInsertion(paths)) {
+  if (paths.length) {
+    addPendingFiles(paths);
     e.preventDefault();
   }
 }
@@ -617,7 +634,7 @@ async function onComposerDrop(e) {
     uriList: dt.getData("text/uri-list") || dt.getData("text/plain"),
   });
   if (paths.length) {
-    applyPathInsertion(paths);
+    addPendingFiles(paths);
     return;
   }
   if (multimodalEnabled.value && isImageOnlyFileList(dt.files)) {
@@ -744,6 +761,85 @@ defineExpose({
         <span class="chat__composer-alert-icon" aria-hidden="true">!</span>
         <span>{{ error }}</span>
       </div>
+      <div
+        v-if="pendingFiles.length || (multimodalEnabled && pendingImages.length)"
+        class="chat__pending-attachments"
+        aria-label="待发送附件"
+      >
+        <div
+          v-if="pendingFiles.length"
+          class="chat__pending-files"
+          aria-label="待引用文件"
+        >
+          <div class="chat__pending-files-list">
+          <div
+            v-for="(file, idx) in pendingFiles"
+            :key="`${file.path}-${idx}`"
+            class="chat__pending-file"
+            tabindex="0"
+            :aria-label="`第 ${idx + 1} 个待引用文件：${file.path}`"
+          >
+            <span class="chat__pending-file-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none">
+                <path d="M5.25 2.75h6.1L15.5 6.9v10.35H5.25z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
+                <path d="M11.25 2.75V7h4.25M7.75 10h5.5M7.75 13h5.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span class="chat__pending-file-index">{{ idx + 1 }}</span>
+            </span>
+            <span class="chat__pending-file-preview" aria-hidden="true">
+              <strong>{{ file.name }}</strong>
+              <small>{{ file.path }}</small>
+            </span>
+            <button
+              type="button"
+              class="chat__pending-file-remove"
+              aria-label="移除待引用文件"
+              title="移除文件"
+              @click="removePendingFile(idx)"
+            >
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+          </div>
+        </div>
+        <div
+          v-if="multimodalEnabled && pendingImages.length"
+          class="chat__pending-images"
+          aria-label="待发送图片"
+        >
+          <div class="chat__pending-images-list">
+            <div
+              v-for="(img, idx) in pendingImages"
+              :key="`${img.name}-${idx}`"
+              class="chat__pending-image"
+              tabindex="0"
+              :aria-label="`第 ${idx + 1} 张待发送图片：${img.name}`"
+            >
+              <span class="chat__pending-image-thumb-wrap">
+                <img class="chat__pending-image-thumb" :src="img.url" :alt="img.name" />
+                <span class="chat__pending-image-index">{{ idx + 1 }}</span>
+              </span>
+              <span class="chat__pending-image-preview" aria-hidden="true">
+                <img :src="img.url" :alt="img.name" />
+                <span>{{ img.name }}</span>
+              </span>
+              <button
+                type="button"
+                class="chat__pending-image-remove"
+                aria-label="移除待发送图片"
+                title="移除图片"
+                @click="removePendingImage(idx)"
+              >
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="chat__composer-pill">
         <input
           v-if="multimodalEnabled"
@@ -766,7 +862,7 @@ defineExpose({
           <button
             type="button"
             class="chat__composer-plus"
-            title="添加附件（插入文件路径）"
+            title="添加文件引用"
             aria-label="添加附件"
             :disabled="attachDisabled"
             @click="openAttachmentPicker"
@@ -793,18 +889,6 @@ defineExpose({
         </div>
 
         <div class="chat__composer-pill-center">
-          <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">
-            <div v-for="(img, idx) in pendingImages" :key="`${img.name}-${idx}`" class="chat__pending-image">
-              <img class="chat__pending-image-thumb" :src="img.url" :alt="img.name" />
-              <button
-                type="button"
-                class="chat__pending-image-remove"
-                aria-label="移除待发送图片"
-                title="移除图片"
-                @click="removePendingImage(idx)"
-              >×</button>
-            </div>
-          </div>
           <textarea
             ref="textareaRef"
             v-model="input"
