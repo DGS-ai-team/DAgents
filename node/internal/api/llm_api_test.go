@@ -36,6 +36,9 @@ func TestHandleLLMSettingsGetPatch(t *testing.T) {
 	if got.Model != "deepseek-chat" || !got.ThinkingSupported || got.Thinking != "enabled" {
 		t.Fatalf("unexpected settings: %+v", got)
 	}
+	if got.ThinkingControl != llm.ThinkingControlEffort || got.ThinkingSecondaryLabel != "推理强度" {
+		t.Fatalf("unexpected thinking controls: %+v", got)
+	}
 
 	patchBody := []byte(`{"thinking":"disabled"}`)
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/llm/settings", bytes.NewReader(patchBody))

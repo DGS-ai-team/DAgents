@@ -28,6 +28,12 @@ def suggest_provider_from_base_url(base_url: str) -> str:
         return "qwen"
     if "api.openai.com" in lower or "openai.com" in lower:
         return "openai"
+    if "bigmodel.cn" in lower or "api.z.ai" in lower:
+        return "glm"
+    if "minimaxi.com" in lower or "minimax.io" in lower:
+        return "minimax"
+    if "xiaomimimo.com" in lower or "mimo-v2.com" in lower:
+        return "mimo"
     if "127.0.0.1" in lower or "localhost" in lower:
         return "vllm"
     return ""

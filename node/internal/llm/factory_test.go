@@ -10,6 +10,9 @@ func TestDefaultBaseURL(t *testing.T) {
 		{ProviderDeepSeek, defaultDeepSeekBaseURL},
 		{ProviderQwen, defaultQwenBaseURL},
 		{ProviderVLLM, defaultVLLMBaseURL},
+		{ProviderGLM, defaultGLMBaseURL},
+		{ProviderMiniMax, defaultMiniMaxBaseURL},
+		{ProviderMiMo, defaultMiMoBaseURL},
 		{ProviderOpenAI, ""},
 	}
 	for _, tc := range cases {
@@ -24,6 +27,9 @@ func TestNewMessageAdapter_providers(t *testing.T) {
 		"deepseek": ProviderDeepSeek,
 		"qwen":     ProviderQwen,
 		"vllm":     ProviderVLLM,
+		"glm":      ProviderGLM,
+		"minimax":  ProviderMiniMax,
+		"mimo":     ProviderMiMo,
 		"openai":   ProviderOpenAI,
 		"unknown":  ProviderOpenAI,
 	} {

@@ -34,6 +34,7 @@ import {
   shouldResolvePathsViaShell,
 } from "../utils/filePathPaste.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
+import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
@@ -72,6 +73,22 @@ const thinkingEnabled = computed(() => {
 });
 const thinkingEffort = computed(() =>
   String(props.llmSettings?.reasoning_effort || "high").toLowerCase(),
+);
+const reasoningEffortSupported = computed(
+  () => props.llmSettings?.reasoning_effort_supported !== false,
+);
+const thinkingControl = computed(() => getThinkingControl(props.llmSettings));
+const thinkingFixed = computed(() => thinkingControl.value === "fixed");
+const thinkingLabel = computed(() => {
+  const label = String(props.llmSettings?.thinking_label || "").trim();
+  return label || "思考";
+});
+const thinkingSecondaryLabel = computed(() => {
+  const label = String(props.llmSettings?.thinking_secondary_label || "").trim();
+  return label || (thinkingControl.value === "budget" ? "思考预算" : "推理强度");
+});
+const thinkingSecondarySupported = computed(
+  () => hasThinkingSecondaryControl(props.llmSettings) && reasoningEffortSupported.value,
 );
 
 const input = ref("");
@@ -903,26 +920,34 @@ defineExpose({
             class="chat__input-strip-right"
             :title="inputStripRightText"
           >{{ inputStripRightText }}</span>
-          <div v-if="thinkingSupported" class="chat__statusline-thinking">
+          <div v-if="thinkingSupported && thinkingControl" class="chat__statusline-thinking">
+            <span
+              v-if="thinkingFixed"
+              class="composer-toolbar__btn composer-toolbar__btn--status"
+              title="当前模型固定开启思考"
+            >
+              <span class="composer-toolbar__label">{{ thinkingLabel }}（固定）</span>
+            </span>
             <button
+              v-else
               type="button"
               class="composer-toolbar__btn"
               :class="{ 'composer-toolbar__btn--active': thinkingEnabled }"
-              :title="thinkingEnabled ? '思考模式已开启，点击关闭' : '思考模式已关闭，点击开启'"
+              :title="thinkingEnabled ? `${thinkingLabel}已开启，点击关闭` : `${thinkingLabel}已关闭，点击开启`"
               :disabled="disabled || cancelling"
               @click="emit('toggle-thinking')"
             >
-              <span class="composer-toolbar__label">{{ thinkingEnabled ? "思考" : "思考关" }}</span>
+              <span class="composer-toolbar__label">{{ thinkingEnabled ? thinkingLabel : `${thinkingLabel}关` }}</span>
             </button>
             <button
-              v-if="thinkingEnabled"
+              v-if="thinkingEnabled && thinkingSecondarySupported"
               type="button"
               class="composer-toolbar__btn composer-toolbar__btn--secondary"
-              :title="`推理强度 ${thinkingEffort}，点击切换 high/max`"
+              :title="`${thinkingSecondaryLabel} ${thinkingEffort}，点击切换 high/max`"
               :disabled="disabled || cancelling"
               @click="emit('cycle-effort')"
             >
-              <span class="composer-toolbar__label">{{ thinkingEffort }}</span>
+              <span class="composer-toolbar__label">{{ thinkingSecondaryLabel }} {{ thinkingEffort }}</span>
             </button>
           </div>
           <ContextMeter />

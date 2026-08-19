@@ -4091,6 +4091,11 @@ select.settings-field__input {
   background: transparent;
 }
 
+.composer-toolbar__btn--status {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
 .composer-toolbar__btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
