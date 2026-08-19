@@ -85,25 +85,33 @@ function userImageThumb(src) {
 <template>
   <div v-if="entry.kind === 'user'" class="msg msg--user">
     <div class="msg__body">
-      <div class="msg__bubble msg__bubble--user">
-        <div v-if="userImageSrcs.length" class="msg__images">
-          <button
-            v-for="(src, idx) in userImageSrcs"
-            :key="idx"
-            type="button"
-            class="msg__image-btn"
-            @click="openUserImage(idx)"
-          >
-            <img
-              class="msg__image"
-              :src="userImageThumb(src)"
-              alt="用户上传图片"
-              :aria-label="`查看第 ${idx + 1} 张用户图片`"
-              loading="lazy"
-            />
-          </button>
-        </div>
-        <div v-if="entry.text">{{ entry.text }}</div>
+      <div v-if="entry.text" class="msg__bubble msg__bubble--user">
+        <div class="msg__text">{{ entry.text }}</div>
+      </div>
+      <div v-if="userImageSrcs.length" class="msg__images" aria-label="发送的图片">
+        <button
+          v-for="(src, idx) in userImageSrcs"
+          :key="idx"
+          type="button"
+          class="msg__image-btn"
+          @click="openUserImage(idx)"
+        >
+          <span class="msg__image-frame">
+            <span class="msg__image-thumb-wrap">
+              <img
+                class="msg__image"
+                :src="userImageThumb(src)"
+                :alt="`用户上传图片 ${idx + 1}`"
+                :aria-label="`查看第 ${idx + 1} 张用户图片`"
+                :loading="idx === 0 ? 'eager' : 'lazy'"
+              />
+              <span class="msg__image-index">{{ idx + 1 }}</span>
+            </span>
+            <span class="msg__image-preview" aria-hidden="true">
+              <img :src="mediaFullUrl(src)" :alt="`用户上传图片 ${idx + 1}`" />
+            </span>
+          </span>
+        </button>
       </div>
     </div>
   </div>
@@ -158,19 +166,100 @@ function userImageThumb(src) {
   background: transparent;
   cursor: zoom-in;
   line-height: 0;
+  min-width: 0;
+  text-align: left;
 }
 .msg__images {
   display: flex;
+  align-items: flex-end;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
+  width: min(420px, 100%);
+  gap: 6px;
+  margin-top: 6px;
+}
+.msg__image-frame {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 56px;
+  overflow: visible;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.msg__image-thumb-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-hover);
 }
 .msg__image {
-  max-width: min(240px, 100%);
-  max-height: 180px;
-  border-radius: 8px;
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  background: rgba(0, 0, 0, 0.15);
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+.msg__image-preview {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: min(240px, 64vw);
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  background: var(--color-editor);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px) scale(0.96);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.msg__image-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+.msg__image-btn:hover .msg__image-preview,
+.msg__image-btn:focus-visible .msg__image-preview {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.msg__image-btn:hover .msg__image-frame,
+.msg__image-btn:focus-visible .msg__image-frame {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
+  transform: translateY(-1px);
+}
+.msg__image-btn:focus-visible {
+  outline: none;
+}
+.msg__image-index {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 64%, transparent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.msg__text {
+  white-space: pre-wrap;
 }
 .msg__usage {
   margin-top: 8px;

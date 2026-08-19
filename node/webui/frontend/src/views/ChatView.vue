@@ -450,7 +450,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
     hitlStore.busyIndex = -1;
     beginSubmit();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -474,7 +474,7 @@ async function submitHitlOne(payload, approve) {
     hitlStore.busyIndex = -1;
     beginSubmit();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -495,7 +495,7 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
     hitlStore.busyIndex = -1;
     beginSubmit();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -531,7 +531,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
     hitlSelected.value = [];
     beginSubmit();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -572,9 +572,9 @@ async function onSendMessage(payload) {
   turnWatchdog.noteActivity();
   try {
     await api.submitMessage(agentStore.agentId, text, contentParts);
-    if (!agentStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
-    finishStatus("prefilling");
+    finishStatus("thinking");
     finishTurn();
     agentStore.error = e.message;
   }
