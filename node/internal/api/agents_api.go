@@ -516,14 +516,30 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
 	}
+	// Save assigns the next independent runtime_revision. Reload and response
+	// handling must use the persisted value rather than the pre-save record.
+	if updated, err := s.agents.Get(r.Context(), id); err == nil && updated != nil {
+		rec = updated
+	}
 	if runtimeDirty && s.sessions != nil {
+		runtimeApplied := true
 		newToolGroups := agentruntime.EnabledToolGroups(snap)
 		if agentruntime.ToolsetShrinks(oldToolGroups, newToolGroups) {
 			s.sessions.NotifyToolsetChanged(id)
 		}
-		if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
+		_, active, state, _ := s.sessions.RuntimeInfo(id)
+		if active {
+			runtimeApplied = false
+			s.logger.Info("agent runtime reload deferred after patch",
+				"agent_id", id,
+				"runtime_revision", rec.RuntimeRevision,
+				"turn_state", state,
+			)
+		} else if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
+			runtimeApplied = false
 			s.logger.Warn("agent runtime reload after patch failed", "agent_id", id, "error", err)
 		}
+		s.publishRuntimeConfigChanged(id, "agent_snapshot", runtimeApplied)
 	}
 	if runtimeDirty {
 		if err := s.syncBrowserCompanion(r.Context(), *rec); err != nil {
@@ -585,7 +601,7 @@ func generateAgentInstanceID() (string, error) {
 }
 
 // ensureAgentRuntime 按 agents.db 快照把 Agent 装入内存（CreateWithOptions）。
-// 若内存已有但配置版本落后（UpdatedAt 变更），会自动 Release 后重建。
+// 若内存已有但 runtime_revision 落后，会在新 runtime 构建成功后交换。
 func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
 	return s.ensureAgentRuntimeOpts(ctx, agentID, false)
 }
@@ -612,15 +628,37 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 		s.archiveRetiredRemoteStub(ctx, id)
 		return fmt.Errorf("agent_not_found")
 	}
-	rev := rec.UpdatedAt.UTC().UnixNano()
+	rev := rec.RuntimeRevision
+	if rev <= 0 {
+		// Old databases are migrated with a default revision. Keep this fallback
+		// for stores created by older test fixtures that do not expose it yet.
+		rev = 1
+	}
+	if !forceReload && s.hasRuntimeReloadPending(id) {
+		if s.sessions.Get(id) != nil {
+			if _, active, state, _ := s.sessions.RuntimeInfo(id); active {
+				s.logger.Info("pending runtime reload remains deferred", "agent_id", id, "turn_state", state)
+				return nil
+			}
+		}
+		if err := s.reloadAgentRuntime(ctx, *rec); err != nil {
+			return err
+		}
+		s.clearRuntimeReloadPending(id)
+		return nil
+	}
 	if !forceReload && s.sessions.Get(id) != nil {
-		if s.sessions.ConfigRevision(id) == rev {
+		if s.sessions.RuntimeRevision(id) == rev {
 			return nil
 		}
-		forceReload = true
-	}
-	if forceReload {
-		_, _ = s.sessions.Release(id)
+		if _, active, state, _ := s.sessions.RuntimeInfo(id); active {
+			s.logger.Info("agent runtime reload deferred until turn idle",
+				"agent_id", id,
+				"runtime_revision", rev,
+				"turn_state", state,
+			)
+			return nil
+		}
 	}
 	return s.reloadAgentRuntime(ctx, *rec)
 }
@@ -655,9 +693,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 			policyEngine = engine
 		}
 	}
-	if s.sessions.Get(id) != nil {
-		_, _ = s.sessions.Release(id)
-	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
 		NodeCFG:  s.cfg,
 		BaseTurn: s.sessions.DefaultTurnOptions(),
@@ -669,7 +704,12 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("build agent runtime: %w", err)
 	}
 	s.attachNodeRuntimeDeps(built.Registry, id)
-	built.TurnOptions.ConfigRevision = rec.UpdatedAt.UTC().UnixNano()
+	rev := rec.RuntimeRevision
+	if rev <= 0 {
+		rev = 1
+	}
+	built.TurnOptions.ConfigRevision = rev // compatibility for older observers
+	built.TurnOptions.RuntimeRevision = rev
 	if s.cfg != nil {
 		built.TurnOptions.PreferredName = s.cfg.PreferredName()
 	}
@@ -687,9 +727,29 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 			}
 		}
 	}
+	// Runtime digest is an identity of the built model-visible inputs. The
+	// per-Turn snapshot also records the exact prompt/tool digests, so a live
+	// memory refresh can be distinguished from a runtime rebuild.
+	var promptSeed string
+	if built.TurnOptions.PromptContent != nil {
+		if raw, err := json.Marshal(built.TurnOptions.PromptContent); err == nil {
+			promptSeed = string(raw)
+		}
+	}
+	built.TurnOptions.RuntimeDigest = turn.RuntimeDigestFromInputs(
+		snapParsed,
+		promptSeed,
+		built.Registry.Definitions(),
+	)
+	// Release only after every build input has been prepared. A failed build or
+	// prompt load therefore leaves the previous good runtime serving requests.
+	if s.sessions.Get(id) != nil {
+		_, _ = s.sessions.Release(id)
+	}
 	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
 		return err
 	}
+	s.clearRuntimeReloadPending(id)
 	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
 	if !agentruntime.IsBrowserCompanionRecord(rec.ConfigSnapshot) && !agentruntime.IsCompanionBrowserAgentID(id) {
 		if err := s.syncBrowserCompanion(ctx, rec); err != nil {

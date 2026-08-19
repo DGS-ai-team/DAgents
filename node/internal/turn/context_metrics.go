@@ -11,19 +11,19 @@ import (
 
 // TurnContextMetrics WS5：单次用户任务（human_message → turn_complete）内的工具链上下文指标。
 type TurnContextMetrics struct {
-	ToolLoops              int
-	ToolCalls              int
-	StatusPollCount        int
-	HistoryResultTokens    float64
-	HistoryResultChars     int
-	SpillCount             int
-	ReadFileCalls          int
-	ReadFilePathRepeats    int
-	EncodingSourceDetect   int
-	EncodingSourceCache    int
-	EncodingGarbledHints   int
-	ToolCallsByName        map[string]int
-	readPaths              map[string]int
+	ToolLoops            int
+	ToolCalls            int
+	StatusPollCount      int
+	HistoryResultTokens  float64
+	HistoryResultChars   int
+	SpillCount           int
+	ReadFileCalls        int
+	ReadFilePathRepeats  int
+	EncodingSourceDetect int
+	EncodingSourceCache  int
+	EncodingGarbledHints int
+	ToolCallsByName      map[string]int
+	readPaths            map[string]int
 }
 
 func newTurnContextMetrics() *TurnContextMetrics {
@@ -170,17 +170,17 @@ func (m *TurnContextMetrics) snapshot() map[string]any {
 		return nil
 	}
 	out := map[string]any{
-		"tool_loops":               m.ToolLoops,
-		"tool_calls":               m.ToolCalls,
-		"status_poll_count":        m.StatusPollCount,
-		"history_result_tokens":    int(m.HistoryResultTokens + 0.5),
-		"history_result_chars":     m.HistoryResultChars,
-		"spill_count":              m.SpillCount,
-		"read_file_calls":          m.ReadFileCalls,
-		"read_file_path_repeats":   m.ReadFilePathRepeats,
-		"encoding_source_detect":   m.EncodingSourceDetect,
-		"encoding_source_cache":    m.EncodingSourceCache,
-		"encoding_garbled_hints":   m.EncodingGarbledHints,
+		"tool_loops":             m.ToolLoops,
+		"tool_calls":             m.ToolCalls,
+		"status_poll_count":      m.StatusPollCount,
+		"history_result_tokens":  int(m.HistoryResultTokens + 0.5),
+		"history_result_chars":   m.HistoryResultChars,
+		"spill_count":            m.SpillCount,
+		"read_file_calls":        m.ReadFileCalls,
+		"read_file_path_repeats": m.ReadFilePathRepeats,
+		"encoding_source_detect": m.EncodingSourceDetect,
+		"encoding_source_cache":  m.EncodingSourceCache,
+		"encoding_garbled_hints": m.EncodingGarbledHints,
 	}
 	if len(m.ToolCallsByName) > 0 {
 		byName := make(map[string]any, len(m.ToolCallsByName))
@@ -197,22 +197,31 @@ func (o *Orchestrator) logTurnContextMetrics(sessionID, finishReason string) {
 	if m == nil || o.logger == nil {
 		return
 	}
-	o.logger.Info("turn context metrics",
-			"session_id", sessionID,
-			"finish_reason", finishReason,
-			"tool_loops", m.ToolLoops,
-			"tool_calls", m.ToolCalls,
-			"status_poll_count", m.StatusPollCount,
-			"history_result_tokens", int(m.HistoryResultTokens+0.5),
-			"history_result_chars", m.HistoryResultChars,
-			"spill_count", m.SpillCount,
-			"read_file_calls", m.ReadFileCalls,
-			"read_file_path_repeats", m.ReadFilePathRepeats,
-			"encoding_source_detect", m.EncodingSourceDetect,
-			"encoding_source_cache", m.EncodingSourceCache,
-			"encoding_garbled_hints", m.EncodingGarbledHints,
-			slog.Group("tool_calls_by_name", toolCallsByNameLogAttrs(m.ToolCallsByName)...),
-	)
+	attrs := []any{
+		"session_id", sessionID,
+		"finish_reason", finishReason,
+		"tool_loops", m.ToolLoops,
+		"tool_calls", m.ToolCalls,
+		"status_poll_count", m.StatusPollCount,
+		"history_result_tokens", int(m.HistoryResultTokens + 0.5),
+		"history_result_chars", m.HistoryResultChars,
+		"spill_count", m.SpillCount,
+		"read_file_calls", m.ReadFileCalls,
+		"read_file_path_repeats", m.ReadFilePathRepeats,
+		"encoding_source_detect", m.EncodingSourceDetect,
+		"encoding_source_cache", m.EncodingSourceCache,
+		"encoding_garbled_hints", m.EncodingGarbledHints,
+		slog.Group("tool_calls_by_name", toolCallsByNameLogAttrs(m.ToolCallsByName)...),
+	}
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		attrs = append(attrs,
+			"runtime_revision", snapshot.RuntimeRevision,
+			"runtime_digest", snapshot.RuntimeDigest,
+			"prompt_digest", snapshot.PromptDigest,
+			"tool_digest", snapshot.ToolDigest,
+		)
+	}
+	o.logger.Info("turn context metrics", attrs...)
 }
 
 func toolCallsByNameLogAttrs(m map[string]int) []any {

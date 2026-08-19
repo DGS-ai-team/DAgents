@@ -93,3 +93,36 @@ func TestAgentStore_PlacementAndHostJSON(t *testing.T) {
 		t.Fatalf("host = %s", got.HostJSON)
 	}
 }
+
+func TestAgentRuntimeRevisionIsIndependentAndMonotonic(t *testing.T) {
+	st, err := OpenAgents(filepath.Join(t.TempDir(), "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	rec := AgentRecord{AgentID: "agent-revision", DisplayName: "Revision"}
+	if err := st.Save(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.Get(ctx, rec.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RuntimeRevision != 1 {
+		t.Fatalf("first runtime revision = %d, want 1", first.RuntimeRevision)
+	}
+	// Keep UpdatedAt fixed to prove the runtime revision does not depend on
+	// timestamp precision or clock changes.
+	rec.UpdatedAt = first.UpdatedAt
+	if err := st.Save(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.Get(ctx, rec.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RuntimeRevision != 2 {
+		t.Fatalf("second runtime revision = %d, want 2", second.RuntimeRevision)
+	}
+}

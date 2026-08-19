@@ -1,0 +1,114 @@
+package turn
+
+import (
+	"context"
+	"sync"
+	"testing"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/stream"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+)
+
+func TestModelContextSnapshotCopiesDefinitionsAndDigestsStableMaps(t *testing.T) {
+	defs := []tools.ToolDef{{
+		Type: "function",
+		Function: tools.FunctionDef{
+			Name: "example",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"b": "two", "a": "one"},
+			},
+		},
+	}}
+	snapshot := NewModelContextSnapshot("system", defs, 7, "")
+	defs[0].Function.Parameters["changed"] = true
+	if _, ok := snapshot.ToolDefinitions[0].Function.Parameters["changed"]; ok {
+		t.Fatal("snapshot tool definitions must be immutable from caller mutations")
+	}
+	if snapshot.PromptDigest == "" || snapshot.ToolDigest == "" || snapshot.RuntimeDigest == "" {
+		t.Fatalf("snapshot digests should be populated: %+v", snapshot)
+	}
+	left := Digest(map[string]any{"a": 1, "b": 2})
+	right := Digest(map[string]any{"b": 2, "a": 1})
+	if left != right {
+		t.Fatalf("map key order changed digest: %q != %q", left, right)
+	}
+}
+
+func TestTurnKeepsModelContextSnapshotAcrossToolSteps(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	reg := testRegistry(t)
+	if _, err := reg.Execute(context.Background(), "write_file", `{"path":"snapshot.txt","content":"ok"}`); err != nil {
+		t.Fatal(err)
+	}
+	client := &snapshotLLM{}
+	pol, _ := policy.LoadFile("")
+	orch := NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	var promptCalls int
+	orch.SetSystemPromptBuilder(func(SystemPromptInput) string {
+		promptCalls++
+		return "prompt-version-" + string(rune('0'+promptCalls))
+	})
+
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-1", &history, "读取", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("expected two model steps, got %d", len(client.requests))
+	}
+	if client.requests[0].SystemPrompt != client.requests[1].SystemPrompt {
+		t.Fatalf("system prompt changed within Turn: %q != %q", client.requests[0].SystemPrompt, client.requests[1].SystemPrompt)
+	}
+	if len(client.requests[0].Tools) != len(client.requests[1].Tools) {
+		t.Fatalf("tool schema count changed within Turn: %d != %d", len(client.requests[0].Tools), len(client.requests[1].Tools))
+	}
+	if promptCalls == 0 {
+		t.Fatal("system prompt builder was not called")
+	}
+	if orch.ModelContextSnapshot("session-1") != nil {
+		t.Fatal("completed Turn must release its model context snapshot")
+	}
+}
+
+type snapshotLLM struct {
+	mu       sync.Mutex
+	requests []llm.ChatRequest
+	calls    int
+}
+
+func (m *snapshotLLM) StreamChat(_ context.Context, req llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	m.mu.Lock()
+	m.requests = append(m.requests, llm.ChatRequest{
+		SystemPrompt: req.SystemPrompt,
+		Messages:     append([]llm.Message(nil), req.Messages...),
+		Tools:        append([]tools.ToolDef(nil), req.Tools...),
+	})
+	m.calls++
+	call := m.calls
+	m.mu.Unlock()
+	if call == 1 {
+		return llm.ChatResult{ToolCalls: []llm.ToolCall{{
+			ID: "snapshot-call", Type: "function",
+			Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"snapshot.txt"}`},
+		}}, FinishReason: "tool_calls"}, nil
+	}
+	if handler.OnDelta != nil {
+		handler.OnDelta("完成")
+	}
+	return llm.ChatResult{Content: "完成", FinishReason: "stop"}, nil
+}
+
+func (m *snapshotLLM) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+
+func (m *snapshotLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}

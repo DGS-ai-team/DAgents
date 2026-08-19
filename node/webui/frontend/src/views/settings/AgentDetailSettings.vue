@@ -6,6 +6,7 @@ import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
 import LinuxAgentPanel from "../../components/LinuxAgentPanel.vue";
+import MemoryPanel from "../../components/MemoryPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -28,6 +29,7 @@ const policyRefreshKey = ref(0);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
 const agentMeta = ref(null);
+const savedLongTermScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
@@ -69,10 +71,11 @@ async function load() {
     if (promptCtx) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
       draft.promptCustomMd = String(promptCtx.custom_md || "");
-      draft.promptLongTermScope =
+      savedLongTermScope.value =
         String(promptCtx.long_term_scope || draft.promptLongTermScope || "agent").trim() === "global"
           ? "global"
           : "agent";
+      draft.promptLongTermScope = savedLongTermScope.value;
     }
   } catch (e) {
     error.value = e.message || "加载失败";
@@ -96,11 +99,13 @@ async function save() {
   try {
     const updated = await api.patchAgent(agentId.value, buildPatchAgentPayload(draft));
     agentMeta.value = updated;
+    const nextLongTermScope = draft.promptLongTermScope === "global" ? "global" : "agent";
     await api.putAgentPromptContext(agentId.value, {
       soul_md: draft.promptSoulMd || "",
       custom_md: draft.promptCustomMd || "",
-      long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
+      long_term_scope: nextLongTermScope,
     });
+    savedLongTermScope.value = nextLongTermScope;
     await api.reloadAgentRuntime(agentId.value);
     policyRefreshKey.value += 1;
     notifyConfigurationChanged("tools");
@@ -190,6 +195,7 @@ onUnmounted(() => stopConfigurationEvents());
           {{ reloading ? "加载中…" : "重新加载" }}
         </button>
       </div>
+      <MemoryPanel :agent-id="agentId" :scope="savedLongTermScope" />
       <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
       <LinuxAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
       <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>

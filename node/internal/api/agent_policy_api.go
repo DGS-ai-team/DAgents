@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"runtime"
 	"strings"
@@ -168,6 +169,7 @@ func (s *Server) handlePutAgentToolPolicy(w http.ResponseWriter, r *http.Request
 	if s.sessions != nil {
 		s.sessions.SetSessionPolicy(id, engine)
 	}
+	s.publishRuntimeConfigChanged(id, "execution_policy", true)
 	s.logger.Info("agent policy tools updated", "agent_id", id, "count", len(body.Updates))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
@@ -216,6 +218,7 @@ func (s *Server) handlePutAgentShellPolicy(w http.ResponseWriter, r *http.Reques
 	if s.sessions != nil {
 		s.sessions.SetSessionPolicy(id, engine)
 	}
+	s.publishRuntimeConfigChanged(id, "execution_policy", true)
 	s.logger.Info("agent policy shell updated", "agent_id", id, "shell", shellType, "updates", len(body.Updates), "deletes", len(body.Deletes))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
@@ -298,12 +301,46 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusInternalServerError, "prompt_context_save_failed", err.Error(), nil)
 		return
 	}
-	scope := agentruntime.LongTermScopeFromDefaults(mustParseAgentSnapshot(rec))
+	snap := mustParseAgentSnapshot(rec)
+	scope := agentruntime.LongTermScopeFromDefaults(snap)
+	scopeChanged := false
 	if body.LongTermScope != nil {
-		scope = normalizePromptLongTermScope(*body.LongTermScope)
+		nextScope := normalizePromptLongTermScope(*body.LongTermScope)
+		scopeChanged = nextScope != scope
+		scope = nextScope
 	}
+	if scopeChanged {
+		if parsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
+			return
+		} else {
+			promptDefaults, _ := parsed.Defaults["prompt_context"].(map[string]any)
+			if promptDefaults == nil {
+				promptDefaults = make(map[string]any)
+			}
+			promptDefaults["long_term_scope"] = scope
+			parsed.Defaults["prompt_context"] = promptDefaults
+			raw, err := json.Marshal(map[string]any{"template_id": parsed.TemplateID, "defaults": parsed.Defaults})
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
+				return
+			}
+			rec.ConfigSnapshot = raw
+			if err := s.agents.Save(r.Context(), *rec); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
+				return
+			}
+			if updated, err := s.agents.Get(r.Context(), id); err == nil && updated != nil {
+				rec = updated
+			}
+		}
+	}
+	memoryChanged := false
+	memoryCount := 0
 	if body.LongTermEntries != nil {
 		entries := longTermViewsToEntries(*body.LongTermEntries)
+		memoryChanged = true
+		memoryCount = len(entries)
 		ltRec := store.LongTermRecord{
 			Scope:     scope,
 			AgentID:   id,
@@ -316,6 +353,8 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		}
 	} else if body.LongTermMD != nil {
 		entries := store.EntriesFromLegacyMarkdown(*body.LongTermMD, time.Now().UTC())
+		memoryChanged = true
+		memoryCount = len(entries)
 		ltRec := store.LongTermRecord{
 			Scope:     scope,
 			AgentID:   id,
@@ -326,6 +365,18 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 			writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
 			return
 		}
+	}
+	if s.sessions != nil {
+		content := promptContentFromRecord(pc)
+		if content != nil {
+			s.sessions.RefreshRuntimePromptContext(id, *content, scope)
+		}
+	}
+	// The live sidecar reader is refreshed here; a scope change additionally
+	// bumps the Agent snapshot so the next Turn rebuilds the full runtime.
+	s.publishRuntimeConfigChanged(id, "prompt_context", true)
+	if memoryChanged {
+		s.publishMemoryChanged(id, "prompt_context", memoryCount, true)
 	}
 	view, err := s.buildAgentPromptContextView(r.Context(), id, rec, pc)
 	if err != nil {

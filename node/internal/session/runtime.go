@@ -66,6 +66,7 @@ type runtime struct {
 
 	// 技能目录
 	skillsCatalog *skills.Catalog
+	skillRevision string
 	// 上下文压缩逻辑
 	compression *compression.Coordinator
 
@@ -78,15 +79,16 @@ type runtime struct {
 	// sessionEpoch invalidates events queued before clear-context/rebuild.
 	sessionEpoch uint64
 	// turnID/generation identify internal continuations belonging to the active turn.
-	turnID              string
-	generation          uint64
-	continuationPending bool
-	messages            []llm.Message        // 交互消息列表
-	loadedSkills        []skills.LoadedSkill // 加载的技能列表
-	pending             *turn.PendingHITL    // 暂停
-	toolLoopCount       int                  // tool 循环计数
-	fsRoot              string               // 文件系统根路径
-	media               *media.Registry      // session 媒体索引（F-M1）
+	turnID               string
+	generation           uint64
+	continuationPending  bool
+	messages             []llm.Message        // 交互消息列表
+	loadedSkills         []skills.LoadedSkill // 加载的技能列表
+	pendingLongTermScope string               // scope changes wait for the next human Turn
+	pending              *turn.PendingHITL    // 暂停
+	toolLoopCount        int                  // tool 循环计数
+	fsRoot               string               // 文件系统根路径
+	media                *media.Registry      // session 媒体索引（F-M1）
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
@@ -99,7 +101,9 @@ type runtime struct {
 	notifySeq int // F-E13：最后需 Client 关注的 SSE seq
 	ackSeq    int // F-E13：Client 已确认看到的最大 SSE seq
 
-	configRevision int64 // Agent 配置版本（UpdatedAt UnixNano）
+	configRevision  int64 // 兼容旧观测字段；值与 runtimeRevision 一致
+	runtimeRevision int64
+	runtimeDigest   string
 }
 
 // newRuntime 创建新的 session runtime
@@ -170,6 +174,7 @@ func newRuntimeWithPublisher(
 		state:                   turn.StateIdle,
 		messages:                append([]llm.Message(nil), initial...),
 		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
+		skillRevision:           catalog.Revision(),
 		pending:                 initialPending,
 		toolLoopCount:           initialLoopCount,
 		fsRoot:                  turnOpts.FSRoot,
@@ -178,7 +183,9 @@ func newRuntimeWithPublisher(
 		idleAutoCompressApplied: idleAutoCompressApplied,
 		notifySeq:               initialNotifySeq,
 		ackSeq:                  initialAckSeq,
-		configRevision:          turnOpts.ConfigRevision,
+		configRevision:          firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
+		runtimeRevision:         firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
+		runtimeDigest:           strings.TrimSpace(turnOpts.RuntimeDigest),
 	}
 	if reg, err := media.NewRegistry(id, turnOpts.FSRoot); err == nil {
 		rt.media = reg
@@ -226,6 +233,7 @@ func newRuntimeWithPublisher(
 		logger,
 	)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
+	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
 	rt.orch.SetMultimodalEnabled(turnOpts.MultimodalEnabled)
 	rt.orch.SetMediaRegistry(rt.media)
 	if len(initialHookStore) > 0 {
@@ -241,9 +249,38 @@ func newRuntimeWithPublisher(
 	return rt
 }
 
+func firstNonZero(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 // setPolicy 热更新 orchestrator 策略。
 func (r *runtime) setPolicy(engine *policy.Engine) {
 	r.orch.SetPolicy(engine)
+}
+
+// refreshPromptContext updates sidecar content and memory scope for future
+// Turns. The orchestrator keeps the active Turn's model snapshot unchanged.
+func (r *runtime) refreshPromptContext(content promptcontext.Content, scope string) {
+	if r == nil || r.orch == nil {
+		return
+	}
+	r.orch.SetPromptContent(content)
+	// Do not switch the persistence target in the middle of a Turn: a memory
+	// tool call must continue against the same scope as the active snapshot.
+	// Agent snapshot revision will cause a rebuild at the next idle boundary.
+	if r.turnState() != turn.StateIdle {
+		r.mu.Lock()
+		r.pendingLongTermScope = scope
+		r.mu.Unlock()
+		return
+	}
+	r.orch.SetLongTermScope(scope)
+	r.orch.ReloadLongTermMemory(context.Background())
 }
 
 // getLoadedSkills 获取加载的技能列表
@@ -453,6 +490,8 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	r.toolLoopCount = 0
 	firstInteraction := len(r.messages) == 0
 	r.mu.Unlock()
+	r.applyPendingLongTermScope()
+	r.observeSkillCatalogChange()
 
 	if firstInteraction && r.orch != nil {
 		r.orch.ReloadLongTermMemory(parent)
@@ -484,6 +523,52 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 		r.finishTurnIdle(outcome)
 	}
 	r.persist(context.Background())
+}
+
+// applyPendingLongTermScope starts the next human Turn with a scope that was
+// changed while the preceding Turn was active (including an interrupted HITL
+// turn). It is deliberately not called from tool continuations.
+func (r *runtime) applyPendingLongTermScope() {
+	if r == nil || r.orch == nil {
+		return
+	}
+	r.mu.Lock()
+	scope := r.pendingLongTermScope
+	r.pendingLongTermScope = ""
+	r.mu.Unlock()
+	if scope == "" {
+		return
+	}
+	r.orch.SetLongTermScope(scope)
+	r.orch.ReloadLongTermMemory(context.Background())
+}
+
+// observeSkillCatalogChange applies external Skill edits only at a new human
+// Turn boundary. The active Turn snapshot remains untouched.
+func (r *runtime) observeSkillCatalogChange() {
+	if r == nil || r.skillsCatalog == nil {
+		return
+	}
+	current := r.skillsCatalog.Revision()
+	if current == "" {
+		return
+	}
+	r.mu.Lock()
+	previous := r.skillRevision
+	if previous == current {
+		r.mu.Unlock()
+		return
+	}
+	r.skillRevision = current
+	r.mu.Unlock()
+	if r.hub != nil {
+		r.hub.Publish(r.agentID, "skills/changed", map[string]any{
+			"agent_id":         r.agentID,
+			"previous":         previous,
+			"revision":         current,
+			"applied_boundary": "next_turn",
+		})
+	}
 }
 
 func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
@@ -661,7 +746,7 @@ func pendingHITLLogFields(pending *turn.PendingHITL) (summary string, toolCallID
 func (r *runtime) sidecarPrefix() compression.SidecarPrefix {
 	return compression.SidecarPrefix{
 		SystemPrompt: r.orch.SystemPromptForSession(r.session.ID),
-		Tools:        r.orch.ToolDefinitions(),
+		Tools:        r.orch.ToolDefinitionsForSession(r.session.ID),
 	}
 }
 

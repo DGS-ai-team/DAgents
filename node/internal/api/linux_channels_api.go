@@ -338,7 +338,10 @@ func (s *Server) handlePutAgentLinuxChannels(w http.ResponseWriter, r *http.Requ
 	}
 	if s.agents != nil {
 		if rec, err := s.agents.Get(r.Context(), agentID); err == nil && rec != nil {
-			_ = s.ensureAgentRuntimeOpts(r.Context(), agentID, true)
+			// Linux bindings and credentials are resolved at tool execution time;
+			// rebuilding the Agent here would unnecessarily interrupt an active
+			// Turn and would invalidate its model snapshot.
+			s.publishRuntimeConfigChanged(agentID, "linux_channel", true)
 		}
 	}
 	items, _ := s.linuxChannels.ListBindings(r.Context(), agentID)

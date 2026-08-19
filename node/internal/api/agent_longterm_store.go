@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -12,14 +13,37 @@ type agentLongTermStore struct {
 	agents     *store.AgentStore
 	agentID    string
 	runtimeDir string
+	mu         sync.RWMutex
 	scope      string
+}
+
+// SetLongTermScope changes only the persistence target. The prompt reader is
+// refreshed separately, and an active Turn continues using its frozen prompt
+// snapshot until the next Turn boundary.
+func (s *agentLongTermStore) SetLongTermScope(scope string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.scope = normalizeAPIScope(scope)
+	s.mu.Unlock()
+}
+
+func (s *agentLongTermStore) currentScope() string {
+	if s == nil {
+		return store.LongTermScopeAgent
+	}
+	s.mu.RLock()
+	scope := s.scope
+	s.mu.RUnlock()
+	return normalizeAPIScope(scope)
 }
 
 func (s *agentLongTermStore) ReadLongTerm(ctx context.Context) (turn.LongTermSnapshot, error) {
 	if s == nil || s.agents == nil {
 		return turn.LongTermSnapshot{}, nil
 	}
-	scope := normalizeAPIScope(s.scope)
+	scope := s.currentScope()
 	legacyMD := ""
 	if scope == store.LongTermScopeAgent {
 		if pc, err := s.agents.EnsureAgentPromptContext(ctx, s.agentID, s.runtimeDir); err == nil && pc != nil {
@@ -44,7 +68,7 @@ func (s *agentLongTermStore) SaveLongTerm(ctx context.Context, entries []turn.Lo
 	if s == nil || s.agents == nil {
 		return nil
 	}
-	scope := normalizeAPIScope(s.scope)
+	scope := s.currentScope()
 	rec := store.LongTermRecord{
 		Scope:   scope,
 		AgentID: s.agentID,

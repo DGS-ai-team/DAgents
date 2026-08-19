@@ -126,6 +126,7 @@ const statusText = computed(() => {
   if (bashStatus && bashStatus[1].toUpperCase() === "RUNNING") return "后台执行中";
   return "已完成";
 });
+const showStatusText = computed(() => statusText.value !== "已完成");
 
 function toggleOutput() {
   outputExpanded.value = !outputExpanded.value;
@@ -194,12 +195,12 @@ onBeforeUnmount(clearCopyState);
           </div>
           <div class="tool-exec-bubble__head">
             <span class="tool-exec-bubble__name">{{ toolTitle }}</span>
-            <span class="tool-exec-bubble__status">
+            <span class="tool-exec-bubble__status" role="status" :aria-label="statusText">
               <span v-if="isGenerating" class="tool-exec-spinner" aria-hidden="true" />
               <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{
                 rejected || isInterrupted ? "−" : "✓"
               }}</span>
-              <span>{{ statusText }}</span>
+              <span v-if="showStatusText">{{ statusText }}</span>
             </span>
           </div>
           <div v-if="isCall" class="tool-exec-bubble__summary">{{ formatToolCallLine(entry) }}</div>
