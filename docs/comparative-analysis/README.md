@@ -35,6 +35,7 @@
 
 - [2026-08-17：Bash 工具专项审查](./bash-tool-review-2026-08-17.md)
 - [2026-08 基线对比报告](./baseline-2026-08.md)
+- [2026-08-19：Runtime Snapshot 与上下文缓存分析](./runtime-snapshot-cache-analysis-2026-08-19.md)
 # 最新增量报告
 
 - [2026-08-17：2026-08-14 至 2026-08-17 项目变化](./delta-2026-08-17.md)

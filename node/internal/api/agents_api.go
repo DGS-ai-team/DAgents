@@ -649,6 +649,12 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 	}
 	if !forceReload && s.sessions.Get(id) != nil {
 		if s.sessions.RuntimeRevision(id) == rev {
+			// Runtime 已经加载并不代表进程级 LLM 仍然属于当前 Agent：
+			// 切换 Agent 后，另一个 Agent 的配置可能已经切换了全局 active
+			// profile。即使 runtime revision 没变，也必须重新应用当前绑定。
+			if err := s.applyAgentLLMProfile(*rec); err != nil {
+				return err
+			}
 			return nil
 		}
 		if _, active, state, _ := s.sessions.RuntimeInfo(id); active {
@@ -676,10 +682,8 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("parse agent snapshot: %w", err)
 	}
 	// 装入/聚焦 Agent 时应用其绑定的 LLM 档案（进程级共享 LLM 的过渡方案）。
-	if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
-		if err := s.switchActiveLLMProfile(active); err != nil {
-			s.logger.Warn("apply agent-bound llm failed", "agent_id", id, "llm_active", active, "error", err)
-		}
+	if err := s.applyAgentLLMProfile(rec); err != nil {
+		s.logger.Warn("apply agent-bound llm failed", "agent_id", id, "error", err)
 	}
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
@@ -757,6 +761,25 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		}
 	}
 	return nil
+}
+
+// applyAgentLLMProfile keeps the process-level LLM selection aligned with the
+// Agent being focused. Runtime loading can be skipped when the Agent revision
+// is unchanged, but the active profile is still shared by the process and may
+// have been changed while another Agent was selected.
+func (s *Server) applyAgentLLMProfile(rec store.AgentRecord) error {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	if err != nil {
+		return fmt.Errorf("parse agent snapshot: %w", err)
+	}
+	active := agentruntime.LLMActiveFromDefaults(snapParsed)
+	if active == "" || active == s.cfg.LLM.ActiveProfileID() {
+		return nil
+	}
+	return s.switchActiveLLMProfile(active)
 }
 
 func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {

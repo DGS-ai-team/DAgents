@@ -136,6 +136,17 @@ describe("toolStepStatusText", () => {
     expect(toolStepIsInProgress({ callEntry: call, resultEntry: null })).toBe(true);
   });
 
+  it("treats a content-less partial tool call as generating", () => {
+    const call = {
+      kind: "tool_call",
+      partial: true,
+      data: { tool_name: "bash_run", tool_call_id: "c-partial-empty" },
+    };
+    expect(resolveToolStepPhase({ callEntry: call, resultEntry: null })).toBe("generating");
+    expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("生成中");
+    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null })).toBe(true);
+  });
+
   it("shows pending only when executionHint marks HITL-gated call", () => {
     const call = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "c-hitl" } };
     expect(toolStepStatusText({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
