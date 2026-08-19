@@ -45,6 +45,23 @@ export function formatPathsForComposer(paths) {
 }
 
 /**
+ * 构建发送给 Agent 的文件引用前缀；路径不再直接写入输入框。
+ * @param {string[]} paths
+ */
+export function formatFileReferences(paths) {
+  return Array.from(new Set((paths || []).map((path) => String(path || "").trim()).filter(Boolean)))
+    .map((path) => `'''引用文件：<file>${path}</file>'''`)
+    .join("\n");
+}
+
+/** @param {string} text @param {string[]} paths */
+export function buildMessageWithFileReferences(text, paths) {
+  const message = String(text || "").trim();
+  const references = formatFileReferences(paths);
+  return [references, message].filter(Boolean).join("\n\n");
+}
+
+/**
  * @param {string} current
  * @param {string} insertion
  * @param {{ start: number, end: number }} selection

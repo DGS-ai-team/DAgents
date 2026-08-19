@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   formatPathsForComposer,
+  formatFileReferences,
+  buildMessageWithFileReferences,
   mergePathInsertion,
   pathsFromFileList,
   pathsFromUriList,
@@ -41,6 +43,20 @@ describe("pathsFromFileList", () => {
 describe("formatPathsForComposer", () => {
   it("joins multiple paths with newline", () => {
     expect(formatPathsForComposer(["D:\\a", "D:\\b"])).toBe("D:\\a\nD:\\b");
+  });
+});
+
+describe("file references", () => {
+  it("formats each path as a model-readable file reference", () => {
+    expect(formatFileReferences(["D:\\a.txt", "D:\\b.txt", "D:\\a.txt"])).toBe(
+      "'''引用文件：<file>D:\\a.txt</file>'''\n'''引用文件：<file>D:\\b.txt</file>'''",
+    );
+  });
+
+  it("prepends references without changing the user text", () => {
+    expect(buildMessageWithFileReferences("请读取", ["D:\\a.txt"])).toBe(
+      "'''引用文件：<file>D:\\a.txt</file>'''\n\n请读取",
+    );
   });
 });
 
