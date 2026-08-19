@@ -72,6 +72,12 @@ type Server struct {
 	manageCtx     context.Context
 	manageCancel  context.CancelFunc
 	manageStarted bool
+
+	// runtimeReloads records catalog-driven rebuilds that were deferred while
+	// an Agent was in a Turn. Agent snapshot revisions cover persisted config;
+	// this small queue covers external MCP/Skill catalog changes.
+	runtimeReloadMu      sync.Mutex
+	pendingRuntimeReload map[string]string
 }
 
 // Option 为 NewServer 可选配置。
@@ -449,37 +455,38 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger.Info("workgroup dialer enabled", "manage_url", cfg.Manage.URL)
 	}
 	s := &Server{
-		cfg:             cfg,
-		configPath:      o.configPath,
-		llmRuntime:      llmRuntime,
-		logger:          logger,
-		mux:             http.NewServeMux(),
-		stream:          hub,
-		transferStream:  transferHub,
-		workgroupStream: workgroupStream,
-		store:           st,
-		agents:          agentsStore,
-		mcpServers:      mcpServerStore,
-		mcpManager:      mcpManager,
-		linuxChannels:   linuxChannelStore,
-		linuxProvider:   linuxProvider,
-		llmConfigs:      llmConfigStore,
-		nodeSettings:    o.nodeSettings,
-		sessions:        mgr,
-		triggerStore:    triggerStore,
-		triggerSched:    triggerSched,
-		registrar:       registrar,
-		updateChecker:   updateChecker,
-		packageUploader: packageUploader,
-		control:         control,
-		tools:           o.tools,
-		transfers:       transferManager,
-		backgroundJobs:  backgroundJobs,
-		browserMgr:      browserMgr,
-		mediaRegister:   mediaRegister,
-		workgroupWorker: wgWorker,
-		workgroupDialer: wgDialer,
-		terminals:       newTerminalSessionRegistry(),
+		cfg:                  cfg,
+		configPath:           o.configPath,
+		llmRuntime:           llmRuntime,
+		logger:               logger,
+		mux:                  http.NewServeMux(),
+		stream:               hub,
+		transferStream:       transferHub,
+		workgroupStream:      workgroupStream,
+		store:                st,
+		agents:               agentsStore,
+		mcpServers:           mcpServerStore,
+		mcpManager:           mcpManager,
+		linuxChannels:        linuxChannelStore,
+		linuxProvider:        linuxProvider,
+		llmConfigs:           llmConfigStore,
+		nodeSettings:         o.nodeSettings,
+		sessions:             mgr,
+		triggerStore:         triggerStore,
+		triggerSched:         triggerSched,
+		registrar:            registrar,
+		updateChecker:        updateChecker,
+		packageUploader:      packageUploader,
+		control:              control,
+		tools:                o.tools,
+		transfers:            transferManager,
+		backgroundJobs:       backgroundJobs,
+		browserMgr:           browserMgr,
+		mediaRegister:        mediaRegister,
+		workgroupWorker:      wgWorker,
+		workgroupDialer:      wgDialer,
+		terminals:            newTerminalSessionRegistry(),
+		pendingRuntimeReload: make(map[string]string),
 	}
 	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
 		registry, err := s.terminalToolsRegistry(agentID)

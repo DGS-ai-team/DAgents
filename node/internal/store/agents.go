@@ -43,6 +43,10 @@ type AgentRecord struct {
 	Archived       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// RuntimeRevision is an independent, monotonic revision for runtime-affecting
+	// agent configuration. It must not be derived from UpdatedAt: metadata writes
+	// and clock precision are not a reliable runtime identity.
+	RuntimeRevision int64
 }
 
 // AgentStore 持久化 Agent 实例元数据（agents.db）。
@@ -94,7 +98,8 @@ CREATE TABLE IF NOT EXISTS agents (
   host_json TEXT NOT NULL DEFAULT '{}',
   archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  runtime_revision INTEGER NOT NULL DEFAULT 1
 );
 `)
 	if err != nil {
@@ -106,6 +111,9 @@ CREATE TABLE IF NOT EXISTS agents (
 	if err := s.ensurePlacementColumns(); err != nil {
 		return err
 	}
+	if err := s.ensureRuntimeRevisionColumn(); err != nil {
+		return err
+	}
 	if err := s.ensurePolicySchema(); err != nil {
 		return err
 	}
@@ -113,6 +121,32 @@ CREATE TABLE IF NOT EXISTS agents (
 		return err
 	}
 	return s.ensureLongTermStoreSchema()
+}
+
+// ensureRuntimeRevisionColumn 兼容旧库：补 runtime_revision 列。
+func (s *AgentStore) ensureRuntimeRevisionColumn() error {
+	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "runtime_revision" {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE agents ADD COLUMN runtime_revision INTEGER NOT NULL DEFAULT 1`)
+	return err
 }
 
 // ensureOriginColumn 兼容旧库：补 origin 列。
@@ -234,11 +268,27 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	if rec.Archived {
 		archived = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
+	// Save is the single write boundary for an Agent runtime definition. Bump
+	// the revision here, independently of UpdatedAt, so every successful
+	// configuration write causes a deterministic next-runtime decision.
+	runtimeRevision := int64(1)
+	var currentRevision int64
+	err := s.db.QueryRowContext(ctx, `SELECT runtime_revision FROM agents WHERE agent_id = ?`, id).Scan(&currentRevision)
+	switch err {
+	case nil:
+		if currentRevision > 0 {
+			runtimeRevision = currentRevision + 1
+		}
+	case sql.ErrNoRows:
+	default:
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO agents (
   agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-  config_snapshot_json, placement_json, host_json, archived, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  config_snapshot_json, placement_json, host_json, archived, created_at, updated_at,
+  runtime_revision
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(agent_id) DO UPDATE SET
   display_name=excluded.display_name,
   template_id=excluded.template_id,
@@ -249,9 +299,10 @@ ON CONFLICT(agent_id) DO UPDATE SET
   placement_json=excluded.placement_json,
   host_json=excluded.host_json,
   archived=excluded.archived,
-  updated_at=excluded.updated_at
+  updated_at=excluded.updated_at,
+  runtime_revision=excluded.runtime_revision
 `, id, name, tpl, origin, sandbox, backend, string(snap), string(placement), string(host), archived,
-		created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
+		created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano), runtimeRevision)
 	return err
 }
 
@@ -263,7 +314,8 @@ func (s *AgentStore) Get(ctx context.Context, agentID string) (*AgentRecord, err
 	agentID = strings.TrimSpace(agentID)
 	row := s.db.QueryRowContext(ctx, `
 SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at
+       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at,
+       runtime_revision
 FROM agents WHERE agent_id = ?`, agentID)
 	return scanAgent(row)
 }
@@ -275,7 +327,8 @@ func (s *AgentStore) List(ctx context.Context) ([]AgentRecord, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at
+       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at,
+       runtime_revision
 FROM agents WHERE archived = 0
 ORDER BY updated_at DESC`)
 	if err != nil {
@@ -333,9 +386,9 @@ type scannable interface {
 func scanAgent(row scannable) (*AgentRecord, error) {
 	var (
 		id, name, tpl, origin, backend, snap, placement, host, created, updated string
-		sandbox, archived                                                       int
+		sandbox, archived, runtimeRevision                                      int64
 	)
-	if err := row.Scan(&id, &name, &tpl, &origin, &sandbox, &backend, &snap, &placement, &host, &archived, &created, &updated); err != nil {
+	if err := row.Scan(&id, &name, &tpl, &origin, &sandbox, &backend, &snap, &placement, &host, &archived, &created, &updated, &runtimeRevision); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -350,17 +403,18 @@ func scanAgent(row scannable) (*AgentRecord, error) {
 		host = "{}"
 	}
 	return &AgentRecord{
-		AgentID:        id,
-		DisplayName:    name,
-		TemplateID:     tpl,
-		Origin:         NormalizeAgentOrigin(origin),
-		SandboxEnabled: sandbox != 0,
-		SandboxBackend: backend,
-		ConfigSnapshot: json.RawMessage(snap),
-		PlacementJSON:  json.RawMessage(placement),
-		HostJSON:       json.RawMessage(host),
-		Archived:       archived != 0,
-		CreatedAt:      ct,
-		UpdatedAt:      ut,
+		AgentID:         id,
+		DisplayName:     name,
+		TemplateID:      tpl,
+		Origin:          NormalizeAgentOrigin(origin),
+		SandboxEnabled:  sandbox != 0,
+		SandboxBackend:  backend,
+		ConfigSnapshot:  json.RawMessage(snap),
+		PlacementJSON:   json.RawMessage(placement),
+		HostJSON:        json.RawMessage(host),
+		Archived:        archived != 0,
+		CreatedAt:       ct,
+		UpdatedAt:       ut,
+		RuntimeRevision: runtimeRevision,
 	}, nil
 }

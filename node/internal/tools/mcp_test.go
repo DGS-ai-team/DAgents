@@ -48,3 +48,35 @@ func TestRegistryMCPToolsExposeCallPurposeAndStripIt(t *testing.T) {
 		t.Fatalf("unexpected args: %#v", received)
 	}
 }
+
+func TestDefinitionsStableAcrossMCPProviderOrder(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetBuiltinEnabledNone()
+	stubCall := func(_ context.Context, _ json.RawMessage) (mcp.CallResult, error) {
+		return mcp.CallResult{}, nil
+	}
+	if err := reg.SetMCPTools([]MCPTool{
+		{Name: "mcp__z__run", Description: "z", Call: stubCall},
+		{Name: "mcp__a__run", Description: "a", Call: stubCall},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := reg.Definitions()
+	if len(first) != 2 || first[0].Function.Name != "mcp__a__run" || first[1].Function.Name != "mcp__z__run" {
+		t.Fatalf("unexpected stable order: %#v", first)
+	}
+	firstJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := json.Marshal(reg.Definitions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatalf("definitions drifted between calls: %s != %s", firstJSON, secondJSON)
+	}
+}

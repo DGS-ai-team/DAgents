@@ -113,6 +113,9 @@ func (o *Orchestrator) publishDone(sessionID, finishReason string) {
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()
 	}
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		payload["model_context_snapshot"] = snapshot.observability()
+	}
 	o.logTurnContextMetrics(sessionID, finishReason)
 	o.hub.Publish(sessionID, "done", payload)
 }
@@ -130,6 +133,11 @@ func (o *Orchestrator) publishUsage(sessionID string, llmStep int, u llm.Usage) 
 	acc.AccumulateFrom(u)
 	o.turnUsage[sessionID] = acc
 	payload := llm.UsageSSEEvent(llmStep, u, acc)
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		for key, value := range snapshot.observability() {
+			payload[key] = value
+		}
+	}
 	o.turnUsageMu.Unlock()
 	o.hub.Publish(sessionID, "usage", payload)
 }
@@ -151,6 +159,11 @@ func (o *Orchestrator) publishUsageIfAccumulated(sessionID string, llmStep int) 
 		return
 	}
 	payload := llm.UsageSSEEvent(llmStep, llm.Usage{}, acc)
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		for key, value := range snapshot.observability() {
+			payload[key] = value
+		}
+	}
 	o.hub.Publish(sessionID, "usage", payload)
 }
 

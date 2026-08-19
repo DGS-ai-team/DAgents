@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -299,7 +300,19 @@ func (r *Registry) Definitions() []ToolDef {
 		base = append(base, linuxFileTransferToolDefs()...)
 	}
 	base = append(base, r.mcpToolDefs()...)
-	return r.enrichDefinitions(r.filterToolDefs(base))
+	defs := r.enrichDefinitions(r.filterToolDefs(base))
+	// Keep the serialized tools prefix stable even when optional providers
+	// contribute definitions in a different order. MCP itself is already
+	// sorted, but normalizing the complete list also covers future providers.
+	sort.SliceStable(defs, func(i, j int) bool {
+		left := defs[i].Function.Name
+		right := defs[j].Function.Name
+		if left == right {
+			return defs[i].Type < defs[j].Type
+		}
+		return left < right
+	})
+	return defs
 }
 
 // Execute 按名称 dispatch 工具；未知工具或未启用工具返回 error 文本。

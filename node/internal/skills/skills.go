@@ -111,6 +111,21 @@ func (c *Catalog) Root() string {
 	return strings.TrimSpace(c.root)
 }
 
+// Revision returns the stable on-disk catalog signature used by the catalog
+// cache. It changes when a skill file is added, removed, resized, or its
+// modification time changes, allowing callers to publish a next-Turn change
+// event without rebuilding the runtime mid-Turn.
+func (c *Catalog) Revision() string {
+	if c == nil || !c.enabled || strings.TrimSpace(c.root) == "" {
+		return ""
+	}
+	sig, err := c.listSignature()
+	if err != nil {
+		return ""
+	}
+	return sig
+}
+
 // List 扫描 `{root}/*/SKILL.md` 并返回全部 skill 元数据与正文。
 //
 // 结果按各 SKILL.md 的 name+mtime+size 签名缓存；磁盘未变时复用内存列表，避免每步 tool loop 重复读盘。
