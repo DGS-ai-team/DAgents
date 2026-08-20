@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"runtime"
 	"strings"
@@ -32,6 +33,8 @@ func (s *Server) registerAgentPolicyRoutes() {
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/policy/shell/{shell_type}", s.handlePutAgentShellPolicy)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/prompt-context", s.handleGetAgentPromptContext)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/prompt-context", s.handlePutAgentPromptContext)
+	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}/prompt-context/memory/{entry_id}", s.handlePatchAgentMemoryEntry)
+	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}/prompt-context/memory/{entry_id}", s.handleDeleteAgentMemoryEntry)
 }
 
 func (s *Server) requireAgentRecord(w http.ResponseWriter, r *http.Request) (string, *store.AgentRecord, bool) {
@@ -251,6 +254,11 @@ type agentPromptContextPutBody struct {
 	LongTermEntries *[]longTermEntryView `json:"long_term_entries"`
 }
 
+type agentMemoryEntryMutationBody struct {
+	Scope   string `json:"scope"`
+	Content string `json:"content"`
+}
+
 func (s *Server) handleGetAgentPromptContext(w http.ResponseWriter, r *http.Request) {
 	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
@@ -377,6 +385,133 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 	s.publishRuntimeConfigChanged(id, "prompt_context", true)
 	if memoryChanged {
 		s.publishMemoryChanged(id, "prompt_context", memoryCount, true)
+	}
+	view, err := s.buildAgentPromptContextView(r.Context(), id, rec, pc)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"agent_id":       id,
+		"prompt_context": view,
+	})
+}
+
+func (s *Server) handlePatchAgentMemoryEntry(w http.ResponseWriter, r *http.Request) {
+	id, rec, ok := s.requireAgentRecord(w, r)
+	if !ok {
+		return
+	}
+	entryID := strings.TrimSpace(r.PathValue("entry_id"))
+	if entryID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_entry", "entry_id is required", nil)
+		return
+	}
+	var body agentMemoryEntryMutationBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	scope, err := parseMemoryScope(body.Scope, r.URL.Query().Get("scope"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_scope", err.Error(), nil)
+		return
+	}
+	content := strings.TrimSpace(body.Content)
+	if content == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_content", "content is required", nil)
+		return
+	}
+	updated, err := s.agents.UpdateLongTermEntry(r.Context(), scope, id, entryID, content)
+	if err != nil {
+		writeMemoryMutationError(w, err)
+		return
+	}
+	if err := s.refreshMemoryRuntime(r, id, rec, len(updated.Entries)); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "memory_runtime_refresh_failed", err.Error(), nil)
+		return
+	}
+	s.writeMemoryMutationResponse(w, r, id, rec)
+}
+
+func (s *Server) handleDeleteAgentMemoryEntry(w http.ResponseWriter, r *http.Request) {
+	id, rec, ok := s.requireAgentRecord(w, r)
+	if !ok {
+		return
+	}
+	entryID := strings.TrimSpace(r.PathValue("entry_id"))
+	if entryID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_entry", "entry_id is required", nil)
+		return
+	}
+	scope, err := parseMemoryScope(r.URL.Query().Get("scope"), "")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_scope", err.Error(), nil)
+		return
+	}
+	updated, err := s.agents.DeleteLongTermEntry(r.Context(), scope, id, entryID)
+	if err != nil {
+		writeMemoryMutationError(w, err)
+		return
+	}
+	if err := s.refreshMemoryRuntime(r, id, rec, len(updated.Entries)); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "memory_runtime_refresh_failed", err.Error(), nil)
+		return
+	}
+	s.writeMemoryMutationResponse(w, r, id, rec)
+}
+
+func parseMemoryScope(bodyScope, queryScope string) (string, error) {
+	scope := strings.TrimSpace(bodyScope)
+	if scope == "" {
+		scope = strings.TrimSpace(queryScope)
+	}
+	if scope == "" {
+		return store.LongTermScopeAgent, nil
+	}
+	if scope != store.LongTermScopeAgent && scope != store.LongTermScopeGlobal {
+		return "", errors.New("scope must be agent or global")
+	}
+	return scope, nil
+}
+
+func writeMemoryMutationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrLongTermEntryNotFound) {
+		writeAPIError(w, http.StatusNotFound, "memory_entry_not_found", err.Error(), nil)
+		return
+	}
+	if strings.Contains(err.Error(), "content is required") {
+		writeAPIError(w, http.StatusBadRequest, "invalid_content", err.Error(), nil)
+		return
+	}
+	writeAPIError(w, http.StatusInternalServerError, "memory_update_failed", err.Error(), nil)
+}
+
+func (s *Server) refreshMemoryRuntime(r *http.Request, id string, rec *store.AgentRecord, count int) error {
+	pc, err := s.agents.EnsureAgentPromptContext(r.Context(), id, s.runtimeDir())
+	if err != nil {
+		return err
+	}
+	if s.sessions != nil {
+		content := promptContentFromRecord(pc)
+		if content != nil {
+			// Editing the non-active scope must not switch the agent's configured
+			// memory scope. The edited scope is only the persistence target.
+			runtimeScope := agentruntime.LongTermScopeFromDefaults(mustParseAgentSnapshot(rec))
+			s.sessions.RefreshRuntimePromptContext(id, *content, runtimeScope)
+		}
+	}
+	s.publishRuntimeConfigChanged(id, "prompt_context", true)
+	s.publishMemoryChanged(id, "prompt_context", count, true)
+	return nil
+}
+
+func (s *Server) writeMemoryMutationResponse(w http.ResponseWriter, r *http.Request, id string, rec *store.AgentRecord) {
+	pc, err := s.agents.EnsureAgentPromptContext(r.Context(), id, s.runtimeDir())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), nil)
+		return
 	}
 	view, err := s.buildAgentPromptContextView(r.Context(), id, rec, pc)
 	if err != nil {
