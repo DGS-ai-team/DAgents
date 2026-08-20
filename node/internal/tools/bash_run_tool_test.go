@@ -10,7 +10,7 @@ func TestBashRunToolDescription_windows(t *testing.T) {
 	cmdDesc := bashRunCommandParamDescription(true)
 	shellDesc := bashRunShellTypeParamDescription(true)
 
-	for _, sub := range []string{"PowerShell", "Windows", "powershell", "Get-ChildItem", "cmd.exe", "dir"} {
+	for _, sub := range []string{"PowerShell", "Windows", "powershell", "terminal_open"} {
 		if !strings.Contains(desc, sub) {
 			t.Fatalf("desc missing %q: %q", sub, desc)
 		}
@@ -31,7 +31,7 @@ func TestBashRunToolDescription_unix(t *testing.T) {
 	cmdDesc := bashRunCommandParamDescription(false)
 	shellDesc := bashRunShellTypeParamDescription(false)
 
-	for _, sub := range []string{"bash", "非 Windows", "ls", "grep"} {
+	for _, sub := range []string{"bash", "terminal_open"} {
 		if !strings.Contains(desc, sub) {
 			t.Fatalf("desc missing %q: %q", sub, desc)
 		}

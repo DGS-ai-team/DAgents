@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 优化
+
+- 精简高频工具描述，减少工具 schema 对模型上下文和注意力的占用。
+- 将启用 skills 后的可用目录放入 system prompt 尾部，并在 snapshot 的 human turn 边界按目录 revision 更新。
+- 将触发器 condition 改为结构化参数 schema，降低模型构造调度条件时的歧义。
+
 ## [0.9.15] - 2026-08-19
 
 **附件体验与流式工具状态优化**：改善图片/文件附件交互，并修复不同模型返回工具调用时的 Agent 状态展示。

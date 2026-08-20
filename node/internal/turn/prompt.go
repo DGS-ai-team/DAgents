@@ -73,7 +73,7 @@ func DefaultMaxToolLoops() int {
 
 // BuildSystemPrompt 构造单次 LLM 请求 system prompt。
 //
-// 拼接顺序：静态规则 → 运行环境 → 工作区子目录约定 → 侧车上下文 → 已加载 skills → custom。
+// 拼接顺序：静态规则 → 运行环境 → 工作区子目录约定 → 侧车上下文 → 已加载 skills → custom → 可用 skills 目录。
 func BuildSystemPrompt(in SystemPromptInput) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(staticSystemPrompt))
@@ -105,6 +105,17 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 
 	if in.PromptCtx != nil {
 		b.WriteString(in.PromptCtx.BuildCustomSection())
+	}
+
+	// 可用 skill 目录只在当前 Agent snapshot 启用了 skills 工具组时注入，
+	// 并固定放在 system prompt 尾部。目录变化由 Catalog.Revision 在下一个
+	// human turn 边界观察，避免活动 turn 中途改变模型上下文。
+	if in.Catalog != nil && in.Catalog.Enabled() {
+		if section := in.Catalog.RenderMetadataSection(); section != "" {
+			b.WriteString("\n\n## 可用 skills\n\n")
+			b.WriteString("当任务与下列 skill 描述匹配且尚未加载时，先调用 load_skills；skill_names 必须使用下列名称。\n\n")
+			b.WriteString(section)
+		}
 	}
 
 	return strings.TrimSpace(b.String())

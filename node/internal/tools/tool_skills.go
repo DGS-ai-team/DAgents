@@ -8,8 +8,7 @@ func loadSkillsToolDef() ToolDef {
 		Function: FunctionDef{
 			Name: "load_skills",
 			Description: "加载 skills 到当前会话，使后续回合 system prompt 注入已加载 skill 正文；并同步注册各 skill 的 hooks/ 目录下 Hook（unload/clear 时移除）。" +
-				"可用 skill 目录（name: description）见本工具 description 下方列表（若已配置 skills）。" +
-				"当用户任务与某 skill 的 description 匹配且尚未加载时，必须先调用本工具。" +
+				"当用户任务与 system prompt 尾部可用 skills 目录中的 description 匹配且尚未加载时，必须先调用本工具。" +
 				"整组替换当前已加载列表（非追加）；skill_names 传 [] 清空。" +
 				"一次可加载多个 name，数量受配置上限约束；不再需要时用 unload_skills 或 clear_skills。" +
 				"注意：已加载的skills中就是skill.md中的内容，如果需要修改文件不必重复读取skill.md文件",
@@ -19,7 +18,7 @@ func loadSkillsToolDef() ToolDef {
 					"skill_names": map[string]any{
 						"type":  "array",
 						"items": map[string]any{"type": "string"},
-						"description": "要加载的 skill 名称（必填）。须与本 description 下方 available skills 或 skills/<name> 目录一致；" +
+						"description": "要加载的 skill 名称（必填）。须与 system prompt 尾部可用 skills 目录或 skills/<name> 目录一致；" +
 							"通常等于 skills/<name> 目录名（skill_name）及 SKILL.md frontmatter 的 name 字段",
 					},
 				},
