@@ -275,6 +275,23 @@ export function putAgentPromptContext(agentId, body) {
   });
 }
 
+export function patchAgentMemoryEntry(agentId, scope, entryId, content) {
+  return apiFetch(
+    `/v1/agents/${encodeURIComponent(agentId)}/prompt-context/memory/${encodeURIComponent(entryId)}`,
+    {
+      method: "PATCH",
+      body: { scope, content },
+    },
+  );
+}
+
+export function deleteAgentMemoryEntry(agentId, scope, entryId) {
+  return apiFetch(
+    `/v1/agents/${encodeURIComponent(agentId)}/prompt-context/memory/${encodeURIComponent(entryId)}?scope=${encodeURIComponent(scope)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function listMcpServers() {
   return apiFetch("/v1/mcp/servers");
 }
