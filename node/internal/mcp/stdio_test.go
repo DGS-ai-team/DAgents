@@ -179,3 +179,61 @@ func TestQualifiedToolNameNormalizesDotsForLLMProviders(t *testing.T) {
 		t.Fatalf("qualified name = %q", got)
 	}
 }
+
+func TestResolveEnvironmentScrubsInheritedSecrets(t *testing.T) {
+	t.Setenv("MCP_TEST_SECRET", "must-not-inherit")
+	t.Setenv("MCP_TEST_PATH", "ordinary-value")
+	t.Setenv("MCP_TEST_REF", "explicit-ref-value")
+
+	env, err := resolveEnvironment(
+		map[string]string{"EXPLICIT_REF": "MCP_TEST_REF"},
+		map[string]string{"EXPLICIT_LITERAL": "literal-value"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := make(map[string]string, len(env))
+	for _, entry := range env {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid child environment entry %q", entry)
+		}
+		values[parts[0]] = parts[1]
+	}
+	if _, ok := values["MCP_TEST_SECRET"]; ok {
+		t.Fatalf("inherited secret was not scrubbed: %#v", values)
+	}
+	if values["MCP_TEST_PATH"] != "ordinary-value" {
+		t.Fatalf("ordinary inherited variable missing: %#v", values)
+	}
+	if values["EXPLICIT_REF"] != "explicit-ref-value" || values["EXPLICIT_LITERAL"] != "literal-value" {
+		t.Fatalf("explicit MCP environment values missing: %#v", values)
+	}
+
+	for i := 1; i < len(env); i++ {
+		if strings.SplitN(env[i-1], "=", 2)[0] > strings.SplitN(env[i], "=", 2)[0] {
+			t.Fatalf("child environment names are not deterministic: %#v", env)
+		}
+	}
+}
+
+func TestResolveEnvironmentRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name string
+		refs map[string]string
+		vals map[string]string
+	}{
+		{name: "empty literal name", vals: map[string]string{" ": "value"}},
+		{name: "equals in literal name", vals: map[string]string{"BAD=NAME": "value"}},
+		{name: "nul in literal value", vals: map[string]string{"BAD": "a\x00b"}},
+		{name: "empty reference name", refs: map[string]string{"CHILD": " "}},
+		{name: "nul in reference name", refs: map[string]string{"CHILD\x00": "SOURCE"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := resolveEnvironment(tt.refs, tt.vals); err == nil {
+				t.Fatal("expected invalid environment configuration error")
+			}
+		})
+	}
+}
