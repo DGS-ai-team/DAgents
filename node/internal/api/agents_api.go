@@ -745,12 +745,10 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		promptSeed,
 		built.Registry.Definitions(),
 	)
-	// Release only after every build input has been prepared. A failed build or
-	// prompt load therefore leaves the previous good runtime serving requests.
-	if s.sessions.Get(id) != nil {
-		_, _ = s.sessions.Release(id)
-	}
-	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
+	// Build and hydrate the replacement before swapping the manager entry. A
+	// failed load/start therefore leaves the previous good runtime serving
+	// requests instead of creating a release-then-create gap.
+	if _, _, err := s.sessions.ReplaceWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
 		return err
 	}
 	s.clearRuntimeReloadPending(id)

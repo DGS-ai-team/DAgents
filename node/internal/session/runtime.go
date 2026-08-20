@@ -671,6 +671,30 @@ func (r *runtime) persist(ctx context.Context) {
 	})
 }
 
+// replacementData returns the in-memory state needed when a manager without
+// a persistence store replaces a runtime. Production managers normally load
+// this state from SQLite after persist; keeping this fallback prevents tests
+// and embedded callers from losing history during a swap.
+func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int) {
+	if r == nil {
+		return nil, nil, nil, 0, nil, false, 0, 0
+	}
+	r.mu.Lock()
+	msgs := append([]llm.Message(nil), r.messages...)
+	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
+	pending := r.pending
+	loopCount := r.toolLoopCount
+	idleMarked := r.idleAutoCompressApplied
+	notifySeq := r.notifySeq
+	ackSeq := r.ackSeq
+	r.mu.Unlock()
+	var hookStore map[string]json.RawMessage
+	if r.orch != nil {
+		hookStore = r.orch.HookStoreSnapshot()
+	}
+	return msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq
+}
+
 func (r *runtime) clearMessages(ctx context.Context) {
 	if r.compression != nil {
 		r.compression.CancelSession(r.session.ID)
