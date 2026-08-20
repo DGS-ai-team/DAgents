@@ -13,6 +13,11 @@ const error = ref("");
 const viewScope = ref(normalizeScope(props.scope));
 const agentEntries = ref([]);
 const globalEntries = ref([]);
+const editingId = ref("");
+const editContent = ref("");
+const savingId = ref("");
+const deletingId = ref("");
+const mutationError = ref("");
 
 const currentScope = computed(() => normalizeScope(props.scope));
 const currentScopeLabel = computed(() => (currentScope.value === "global" ? "全局" : "本智能体"));
@@ -32,6 +37,11 @@ function normalizeEntries(entries) {
       updatedAt: String(entry?.updated_at || "").trim(),
     }))
     .filter((entry) => entry.content);
+}
+
+function applyContext(context) {
+  agentEntries.value = normalizeEntries(context?.long_term_entries);
+  globalEntries.value = normalizeEntries(context?.global_long_term_entries);
 }
 
 function formatDate(value) {
@@ -56,13 +66,62 @@ async function load({ silent = false } = {}) {
   error.value = "";
   try {
     const context = await api.getAgentPromptContext(props.agentId);
-    agentEntries.value = normalizeEntries(context?.long_term_entries);
-    globalEntries.value = normalizeEntries(context?.global_long_term_entries);
+    applyContext(context);
+    if (editingId.value && !visibleEntries.value.some((entry) => entry.id === editingId.value)) {
+      cancelEdit();
+    }
   } catch (e) {
     error.value = e?.message || "加载记忆清单失败";
   } finally {
     loading.value = false;
     refreshing.value = false;
+  }
+}
+
+function startEdit(entry) {
+  if (!entry?.id) return;
+  mutationError.value = "";
+  editingId.value = entry.id;
+  editContent.value = entry.content;
+}
+
+function cancelEdit() {
+  editingId.value = "";
+  editContent.value = "";
+}
+
+async function saveEdit(entry) {
+  const content = String(editContent.value || "").trim();
+  if (!content) {
+    mutationError.value = "记忆内容不能为空。";
+    return;
+  }
+  savingId.value = entry.id;
+  mutationError.value = "";
+  try {
+    const result = await api.patchAgentMemoryEntry(props.agentId, viewScope.value, entry.id, content);
+    applyContext(result?.prompt_context || result);
+    cancelEdit();
+  } catch (e) {
+    mutationError.value = e?.message || "保存记忆失败";
+  } finally {
+    savingId.value = "";
+  }
+}
+
+async function deleteEntry(entry) {
+  if (!entry?.id || deletingId.value) return;
+  if (typeof window !== "undefined" && !window.confirm("确定删除这条长期记忆吗？")) return;
+  deletingId.value = entry.id;
+  mutationError.value = "";
+  try {
+    const result = await api.deleteAgentMemoryEntry(props.agentId, viewScope.value, entry.id);
+    applyContext(result?.prompt_context || result);
+    if (editingId.value === entry.id) cancelEdit();
+  } catch (e) {
+    mutationError.value = e?.message || "删除记忆失败";
+  } finally {
+    deletingId.value = "";
   }
 }
 
@@ -73,6 +132,8 @@ async function refresh() {
 watch(
   () => props.agentId,
   () => {
+    cancelEdit();
+    mutationError.value = "";
     viewScope.value = currentScope.value;
     void load();
   },
@@ -81,6 +142,8 @@ watch(
 watch(
   () => props.scope,
   (value) => {
+    cancelEdit();
+    mutationError.value = "";
     viewScope.value = normalizeScope(value);
     void load({ silent: true });
   },
@@ -98,7 +161,7 @@ defineExpose({ refresh });
     <div class="memory-panel__header">
       <div>
         <h3 class="memory-panel__title">长期记忆</h3>
-        <p class="memory-panel__description">查看该智能体可使用的结构化记忆条目。</p>
+        <p class="memory-panel__description">查看并维护该智能体可使用的结构化记忆条目。</p>
       </div>
       <button
         type="button"
@@ -142,6 +205,8 @@ defineExpose({ refresh });
       当前配置使用的是{{ currentScopeLabel }}记忆；这里可以查看另一作用域的内容。
     </p>
 
+    <p v-if="mutationError" class="memory-panel__mutation-error">{{ mutationError }}</p>
+
     <p v-if="loading" class="memory-panel__state">加载中…</p>
     <div v-else-if="error" class="memory-panel__error">
       <span>{{ error }}</span>
@@ -150,10 +215,46 @@ defineExpose({ refresh });
     <p v-else-if="!visibleEntries.length" class="memory-panel__state">当前作用域暂无记忆条目。</p>
     <ul v-else class="memory-panel__list">
       <li v-for="entry in visibleEntries" :key="entry.id || entry.content" class="memory-panel__item">
-        <div class="memory-panel__content">{{ entry.content }}</div>
+        <textarea
+          v-if="editingId === entry.id"
+          v-model="editContent"
+          class="memory-panel__editor"
+          rows="3"
+          aria-label="编辑记忆内容"
+          :disabled="savingId === entry.id"
+        />
+        <div v-else class="memory-panel__content">{{ entry.content }}</div>
         <div class="memory-panel__item-meta">
-          <span>最后更新 {{ formatDate(entry.updatedAt || entry.createdAt) }}</span>
-          <span v-if="entry.id" class="memory-panel__id">{{ entry.id }}</span>
+          <div class="memory-panel__item-info">
+            <span>最后更新 {{ formatDate(entry.updatedAt || entry.createdAt) }}</span>
+            <span v-if="entry.id" class="memory-panel__id">{{ entry.id }}</span>
+          </div>
+          <div v-if="entry.id" class="memory-panel__item-actions">
+            <template v-if="editingId === entry.id">
+              <button
+                type="button"
+                class="btn btn--primary btn--xs"
+                :disabled="savingId === entry.id"
+                @click="saveEdit(entry)"
+              >
+                {{ savingId === entry.id ? "保存中…" : "保存" }}
+              </button>
+              <button type="button" class="btn btn--ghost btn--xs" :disabled="savingId === entry.id" @click="cancelEdit">
+                取消
+              </button>
+            </template>
+            <template v-else>
+              <button type="button" class="btn btn--ghost btn--xs" @click="startEdit(entry)">编辑</button>
+              <button
+                type="button"
+                class="btn btn--ghost btn--xs memory-panel__delete"
+                :disabled="deletingId === entry.id"
+                @click="deleteEntry(entry)"
+              >
+                {{ deletingId === entry.id ? "删除中…" : "删除" }}
+              </button>
+            </template>
+          </div>
         </div>
       </li>
     </ul>
@@ -175,6 +276,13 @@ defineExpose({ refresh });
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.memory-panel__mutation-error {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-danger);
 }
 
 .memory-panel__title {
@@ -274,11 +382,47 @@ defineExpose({ refresh });
   color: var(--color-text);
 }
 
+.memory-panel__editor {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  font: inherit;
+  line-height: 1.55;
+}
+
 .memory-panel__item-meta {
   justify-content: flex-start;
   margin-top: 8px;
   font-size: 11px;
   color: var(--color-text-subtle);
+}
+
+.memory-panel__item-info,
+.memory-panel__item-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.memory-panel__item-actions {
+  margin-left: auto;
+}
+
+.memory-panel__delete:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+.btn--xs {
+  padding: 3px 7px;
+  font-size: 11px;
 }
 
 .memory-panel__id {

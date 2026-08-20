@@ -244,3 +244,63 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 		t.Fatalf("long_term_scope was not persisted to agent snapshot: %q", got)
 	}
 }
+
+func TestHandleAgentMemoryEntryMutation(t *testing.T) {
+	_, ts, agentID := testAgentPolicyServer(t)
+	base := ts.URL + "/v1/agents/" + agentID + "/prompt-context"
+	putBody := []byte(`{"long_term_entries":[{"id":"lt-edit","content":"旧内容"},{"id":"lt-delete","content":"待删除"}]}`)
+	putReq, err := http.NewRequest(http.MethodPut, base, bytes.NewReader(putBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp, err := http.DefaultClient.Do(putReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("seed memory status = %d", putResp.StatusCode)
+	}
+
+	patchBody := []byte(`{"scope":"agent","content":"已编辑"}`)
+	patchReq, err := http.NewRequest(http.MethodPatch, base+"/memory/lt-edit", bytes.NewReader(patchBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchResp, err := http.DefaultClient.Do(patchReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchResp.Body.Close()
+	if patchResp.StatusCode != http.StatusOK {
+		t.Fatalf("patch memory status = %d", patchResp.StatusCode)
+	}
+
+	deleteReq, err := http.NewRequest(http.MethodDelete, base+"/memory/lt-delete?scope=agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteResp, err := http.DefaultClient.Do(deleteReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusOK {
+		t.Fatalf("delete memory status = %d", deleteResp.StatusCode)
+	}
+
+	getResp, err := http.Get(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer getResp.Body.Close()
+	var view agentPromptContextView
+	if err := json.NewDecoder(getResp.Body).Decode(&view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].ID != "lt-edit" || view.LongTermEntries[0].Content != "已编辑" {
+		t.Fatalf("mutated memory entries = %+v", view.LongTermEntries)
+	}
+}
