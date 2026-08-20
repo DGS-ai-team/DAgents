@@ -247,6 +247,77 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 	return &rt.session, created, nil
 }
 
+// ReplaceWithOptions atomically replaces an existing runtime after the new
+// runtime has been fully hydrated and started. If loading the replacement
+// fails, the old runtime remains registered and continues serving requests.
+// This is the reload counterpart to CreateWithOptions; callers must only use
+// it at an idle boundary so the old Turn snapshot is not interrupted.
+func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor, policyEngine *policy.Engine) (*Session, bool, error) {
+	id := strings.TrimSpace(requestedID)
+	if id == "" {
+		return nil, false, fmt.Errorf("session id is required for ReplaceWithOptions")
+	}
+	if toolExec == nil {
+		toolExec = m.tools
+	}
+	if policyEngine == nil {
+		policyEngine = m.policy
+	}
+
+	m.mu.Lock()
+	old := m.sessions[id]
+	if old != nil && old.isChildSession() {
+		m.mu.Unlock()
+		return nil, false, fmt.Errorf("cannot replace child session")
+	}
+	var msgs []llm.Message
+	var loaded []skills.LoadedSkill
+	var pending *turn.PendingHITL
+	var loopCount int
+	var hookStore map[string]json.RawMessage
+	var idleMarked bool
+	var notifySeq, ackSeq int
+	if old != nil {
+		// Persist for cold-start recovery, but hydrate from the old runtime's
+		// in-memory snapshot. This avoids losing a last-minute state change when
+		// the store write fails or when the manager is embedded without a store.
+		old.persist(context.Background())
+		if m.store != nil {
+			if _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+				m.mu.Unlock()
+				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
+				return nil, false, err
+			}
+		}
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq = old.replacementData()
+	} else {
+		var err error
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err = m.loadSessionData(id)
+		if err != nil {
+			m.mu.Unlock()
+			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
+			return nil, false, err
+		}
+	}
+	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	m.attachUserChildTools(rt)
+	rt.start(m.ctx)
+	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
+	m.sessions[id] = rt
+	m.mu.Unlock()
+
+	if old != nil {
+		old.stop()
+	}
+	if created {
+		rt.persist(context.Background())
+	}
+	m.logger.Info("session replaced", "session_id", id, "had_previous_runtime", old != nil)
+	return &rt.session, created, nil
+}
+
 // Create 创建或复用 session；若 DB 中已有则加载历史并启动 consumer。
 func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	id := strings.TrimSpace(requestedID)
