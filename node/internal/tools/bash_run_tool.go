@@ -61,28 +61,18 @@ func bashRunToolDef() ToolDef {
 }
 
 func bashRunToolDescription(isWindows bool) string {
-	tail := "外置 CLI、编译二进制与 shell 脚本见 `externaltools/` 与根目录 `externaltools_menu.md`（可通过命令名或 `externaltools/<tool>` 调用）。" +
-		" 除非明确需要，否则避免 su/sudo 等需交互密码的命令。" +
-		" 若传入 timeout_seconds，同步等待该秒数，超时自动降为后台 job（返回 job_id），完成后自动回灌；" +
-		" 省略 timeout_seconds 时最长等待硬上限（默认 600 秒），超时终止并返回错误（不转后台）。" +
-		" 用户可在 UI 对进行中的 bash 手动终止或转后台。" +
-		" 长输出会按 tools.bash_compress 清洗；超长结果落盘并在 history 中头尾摘要（hooks.tool_result）。"
+	common := "传入 timeout_seconds 时，超时自动转为后台 job 并返回 job_id；省略时超时终止。长输出会按配置清洗并截断。需要保持目录、环境或进程状态时，请使用 terminal_open。"
 	if isWindows {
-		return "执行 PowerShell 命令；cwd 省略时默认为工作区根。" +
-			" 当前环境为 Windows，省略 shell_type 时默认 powershell。" +
-			" command 须使用 PowerShell 语法（如 Get-ChildItem、Copy-Item），勿使用 cmd.exe 语法（如 dir、copy、type）。" +
-			" 除非确实需要启动嵌套 PowerShell 进程，否则不要生成 powershell -c 或 powershell -Command 包装；直接执行 PowerShell 语句，避免额外的 Windows 引号解析层。路径优先使用单引号和 -LiteralPath。" + tail
+		return "在 Node 所在 Windows 主机执行一次本地 PowerShell 命令并返回结果。cwd 省略时使用工作区根目录；省略 shell_type 时使用 powershell。" + common
 	}
-	return "执行 bash 命令；cwd 省略时默认为工作区根。" +
-		" 当前环境非 Windows，省略 shell_type 时默认 bash。" +
-		" command 须使用 bash 语法（如 ls、grep、cat），勿使用 PowerShell 或 cmd 语法。" + tail
+	return "在 Node 所在主机执行一次本地 bash 命令并返回结果。cwd 省略时使用工作区根目录；省略 shell_type 时使用 bash。" + common
 }
 
 func bashRunCommandParamDescription(isWindows bool) string {
 	if isWindows {
-		return "PowerShell 命令字符串（必填）；"
+		return "PowerShell 语句（必填）；直接填写命令，不要额外包装 powershell -Command"
 	}
-	return "bash 命令字符串（必填）；须为 bash 语法"
+	return "bash 命令字符串（必填）；须使用 bash 语法"
 }
 
 func bashRunShellTypeParamDescription(isWindows bool) string {

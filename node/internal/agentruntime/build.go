@@ -7,7 +7,6 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
-	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -110,14 +109,6 @@ func Build(p BuildParams) (Built, error) {
 		turnOpts.SkillsVisibleRestrict = true
 		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
 	}
-	if turnOpts.SkillsEnabled && strings.TrimSpace(turnOpts.SkillsRoot) != "" {
-		catalog := skills.NewCatalog(turnOpts.SkillsRoot, true, turnOpts.SkillsMaxInPrompt)
-		if turnOpts.SkillsVisibleRestrict {
-			catalog.RestrictVisible(turnOpts.SkillsVisible)
-		}
-		reg.SetSkillsCatalog(catalog)
-	}
-
 	return Built{
 		FSRoot:      fsRoot,
 		TurnOptions: turnOpts,

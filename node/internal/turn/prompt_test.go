@@ -54,6 +54,23 @@ func TestBuildSystemPrompt_omitsHistoryJournalWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_appendsSkillsCatalogOnlyWhenEnabled(t *testing.T) {
+	root := t.TempDir()
+	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
+
+	enabled := skills.NewCatalog(root, true, 2)
+	prompt := BuildSystemPrompt(SystemPromptInput{Catalog: enabled})
+	if !containsAll(prompt, "## 可用 skills", "writer: Write docs", "load_skills") {
+		t.Fatalf("enabled prompt = %q", prompt)
+	}
+
+	disabled := skills.NewCatalog(root, false, 2)
+	without := BuildSystemPrompt(SystemPromptInput{Catalog: disabled})
+	if contains(without, "## 可用 skills") || contains(without, "writer: Write docs") {
+		t.Fatalf("disabled prompt should omit skills catalog: %q", without)
+	}
+}
+
 func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".runtime")
 	cliDir := filepath.Join(root, "externaltools")

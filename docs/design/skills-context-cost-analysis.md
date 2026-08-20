@@ -4,6 +4,11 @@
 > 分支：`feat/tool-context-cost-optimization`  
 > 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md)
 
+> **现网注记（2026-08-20）**：本文保留历史分析口径；现网已将可用 skills 目录从
+> `load_skills` 工具描述移到启用 `skills` 工具组时的 system prompt 尾部，并按 Agent
+> snapshot / Catalog revision 在下一个 human turn 边界更新。下文关于“catalog 不写入 system”
+> 和 `registry_enrich.go` 的描述属于历史状态。
+
 ---
 
 ## 1. 背景：Skills 在账单里的位置

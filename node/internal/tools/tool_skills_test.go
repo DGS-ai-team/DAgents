@@ -24,4 +24,7 @@ func TestLoadSkillsToolDef_describesWhenToUse(t *testing.T) {
 	if !strings.Contains(paramDesc, "skill_name") {
 		t.Fatalf("skill_names param description = %q", paramDesc)
 	}
+	if strings.Contains(desc, "可用 skills（name: description）：") {
+		t.Fatalf("load_skills description should not embed the catalog: %s", desc)
+	}
 }
