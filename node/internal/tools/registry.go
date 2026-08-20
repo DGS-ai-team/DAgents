@@ -37,7 +37,6 @@ type Registry struct {
 	triggerStore           *triggers.Store
 	triggerSched           *triggers.Scheduler
 	agentID                string
-	skillsCatalogHolder
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
 	browser                *browser.Manager
@@ -300,7 +299,7 @@ func (r *Registry) Definitions() []ToolDef {
 		base = append(base, linuxFileTransferToolDefs()...)
 	}
 	base = append(base, r.mcpToolDefs()...)
-	defs := r.enrichDefinitions(r.filterToolDefs(base))
+	defs := r.filterToolDefs(base)
 	// Keep the serialized tools prefix stable even when optional providers
 	// contribute definitions in a different order. MCP itself is already
 	// sorted, but normalizing the complete list also covers future providers.

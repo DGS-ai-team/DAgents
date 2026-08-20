@@ -27,7 +27,6 @@ tools/
 │   registry.go               # Registry、NewRegistry、Definitions、Execute
 │   registry_path.go          # resolveFSRoot、resolvePath
 │   registry_enabled.go       # SetBuiltinEnabled、filterToolDefs
-│   registry_enrich.go        # SetSkillsCatalog、enrichDefinitions
 │   executor.go               # Executor 接口
 │   execution_mode.go         # call_purpose、StartBackground（内部）
 │   tools_test.go             # registry 集成 smoke

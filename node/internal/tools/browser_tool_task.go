@@ -75,9 +75,8 @@ func browserTaskStatusToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
-			Name: "browser_task_status",
-			Description: "查询浏览器伴生任务状态（wait=false 或等待超时时使用）。completed 时 detail 含：" +
-				"summary（同 extracted_content）、success、steps、urls、screenshot_paths、errors。",
+			Name:        "browser_task_status",
+			Description: "查询浏览器伴生任务状态，用于 browser_run_task(wait=false) 或等待超时的任务。完成时返回摘要、成功状态、步数、URL、截图路径和错误信息。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

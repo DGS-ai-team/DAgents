@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.9.16] - 2026-08-20
+
+**工具上下文与 schema 优化**：降低工具描述对模型上下文的占用，并改善 skills 与触发器参数的可发现性。
+
+### 优化
+
+- 精简 shell、terminal、Linux 执行/传输、浏览器状态、图片读取和人工询问等高频工具描述。
+- 将启用 skills 后的可用目录放入 system prompt 尾部，并在 Agent snapshot 的 human turn 边界按目录 revision 更新。
+- 移除旧的 registry 动态工具描述注入路径，保持工具定义稳定，减少消息级缓存失效。
+- 将 trigger condition 改为结构化参数 schema，保留运行时校验作为最终约束。
+
+### 测试
+
+- 增加 skills system prompt、trigger condition schema 和工具描述回归测试。
+
 ## [0.9.15] - 2026-08-19
 
 **附件体验与流式工具状态优化**：改善图片/文件附件交互，并修复不同模型返回工具调用时的 Agent 状态展示。
