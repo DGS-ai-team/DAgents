@@ -30,7 +30,7 @@ func linuxExecToolDef() []ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "linux_exec",
-			Description: "在指定的 Linux SSH channel 上执行一次非交互命令，返回 stdout、stderr 和退出码。每次调用使用独立 SSH session，不共享 cwd、环境变量或后台进程。执行可能涉及远程写入，必须遵循当前 Agent 的审批策略。",
+			Description: "在指定的 Linux SSH 配置上执行一次非交互命令并返回 stdout、stderr 和退出码。每次调用使用独立会话，不保留 cwd、环境或后台进程；需要交互或保持状态时请使用 terminal_open。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

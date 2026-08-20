@@ -22,7 +22,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
-	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -178,7 +177,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 		reg.SetMultimodalEnabled(cfg.MultimodalEnabled())
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
-		reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
 		o.tools = reg
 	}
 	var backgroundJobs *tools.BackgroundJobStore

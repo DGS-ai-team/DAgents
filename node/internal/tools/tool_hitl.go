@@ -6,7 +6,7 @@ func askUserInformationToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "ask_user_information",
-			Description: "向用户询问补充信息（选项或自由文本）",
+			Description: "向用户询问当前任务缺失的信息，并暂停当前回合等待回答；支持选项或自由文本，不用于工具审批。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -32,8 +32,8 @@ func readImageToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "read_image",
-			Description: "读取图片文件" +
-				" 支持.jpg/.jpeg/.png/.gif/.webp，单文件最大 10MB。",
+			Description: "读取图片并附加到下一次模型输入，供视觉模型分析。" +
+				" 支持 .jpg/.jpeg/.png/.gif/.webp，单文件最大 10MB；仅在启用多模态时可用。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

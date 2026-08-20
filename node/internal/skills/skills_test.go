@@ -21,7 +21,7 @@ func writeSkill(t *testing.T, root, name, body string) {
 	}
 }
 
-func TestEstimateCatalogStats_metadataOnlyForToolsSchema(t *testing.T) {
+func TestEstimateCatalogStats_metadataOnlyForPromptCatalog(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "alpha", "---\nname: alpha\ndescription: short desc\n---\n"+strings.Repeat("x", 16004))
 	c := NewCatalog(root, true, 3)

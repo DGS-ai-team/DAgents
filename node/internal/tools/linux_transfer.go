@@ -673,12 +673,12 @@ func linuxFileTransferToolDefs() []ToolDef {
 	return []ToolDef{
 		{Type: "function", Function: FunctionDef{
 			Name:        "linux_file_upload",
-			Description: "通过指定的 Linux SSH channel 将 Node 工作区中的单个文件上传到远程主机。任务可能进入全局传输队列，返回完成后才结束；不会把文件内容写入消息历史。",
+			Description: "通过指定的 Linux SSH 配置将 Node 工作区中的单个文件上传到远程主机。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
 			Parameters:  injectCallPurposeParam(objectParams(base, "channel_id", "local_path", "remote_path")),
 		}},
 		{Type: "function", Function: FunctionDef{
 			Name:        "linux_file_download",
-			Description: "通过指定的 Linux SSH channel 将远程主机中的单个文件下载到 Node 工作区。任务可能进入全局传输队列，返回完成后才结束；不会把文件内容写入消息历史。",
+			Description: "通过指定的 Linux SSH 配置将远程主机中的单个文件下载到 Node 工作区。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
 			Parameters:  injectCallPurposeParam(objectParams(base, "channel_id", "local_path", "remote_path")),
 		}},
 	}
