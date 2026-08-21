@@ -86,7 +86,7 @@ sequenceDiagram
 6. 已加载 skills 正文（动态会话状态，非工具 catalog）
 7. `custom.md`
 
-skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时注入 **`load_skills` 工具 description**（`Registry.SetSkillsCatalog`）。
+启用 skills 工具组时，skills **目录元数据**追加到 system prompt 尾部；已加载 skill 正文仍按会话状态注入。目录 revision 在下一个 human turn 边界观察，避免活动 turn 中途修改上下文。
 
 父与子 session **同一套** prompt 逻辑，暂无子专用分支。压缩摘要使用独立 system prompt，见 [`../compression/coordinator.go`](../compression/coordinator.go)。
 
