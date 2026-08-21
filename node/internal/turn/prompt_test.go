@@ -21,7 +21,7 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
@@ -126,6 +126,12 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
 		t.Fatalf("child prompt should not expose fs_root path, got %q", prompt)
+	}
+	if !containsAll(prompt, "任务执行契约", "工具调用成功不等于任务成功", "只有在缺少关键信息") {
+		t.Fatalf("child prompt missing execution contract: %q", prompt)
+	}
+	if contains(prompt, "多向用户确认") || contains(prompt, "积极向用户澄清") {
+		t.Fatalf("child prompt should not encourage over-confirmation: %q", prompt)
 	}
 	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "以下是用户信息") {
 		t.Fatalf("child prompt should omit parent sections, got %q", prompt)

@@ -144,7 +144,7 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	if err := json.Unmarshal([]byte(read), &readPayload); err != nil {
 		t.Fatal(err)
 	}
-	if readPayload["output"] != "hello\r\n" || readPayload["next_seq"] != float64(1) {
+	if readPayload["output"] != "hello\r\n" || readPayload["output_bytes"] != float64(len([]byte("hello\r\n"))) || readPayload["output_empty"] != false || readPayload["next_seq"] != float64(1) {
 		t.Fatalf("read=%s", read)
 	}
 	terminated, err := reg.Execute(context.Background(), "terminal_terminate", `{"terminal_id":"terminal-test-1"}`)
@@ -158,7 +158,7 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	if err := json.Unmarshal([]byte(terminated), &terminatedPayload); err != nil {
 		t.Fatal(err)
 	}
-	if terminatedPayload["output"] != "stopped\r\n" || terminatedPayload["graceful"] != true || terminatedPayload["termination_status"] != "confirmed" {
+	if terminatedPayload["output"] != "stopped\r\n" || terminatedPayload["output_bytes"] != float64(len([]byte("stopped\r\n"))) || terminatedPayload["output_empty"] != false || terminatedPayload["graceful"] != true || terminatedPayload["termination_status"] != "confirmed" {
 		t.Fatalf("terminated=%s", terminated)
 	}
 }

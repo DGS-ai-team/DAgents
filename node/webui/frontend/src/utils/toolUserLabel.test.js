@@ -120,6 +120,15 @@ describe("toolStepStatusText", () => {
     ).toBe("已终止");
   });
 
+  it("uses event status before inspecting legacy result text", () => {
+    const result = {
+      kind: "tool_result",
+      data: { tool_name: "linux_exec", status: "failed", content: "" },
+    };
+    expect(resolveToolStepPhase({ resultEntry: result })).toBe("failed");
+    expect(toolStepStatusText({ resultEntry: result })).toBe("执行失败");
+  });
+
   it("shows interrupted for a tool result created by stream cancellation", () => {
     const result = {
       kind: "tool_result",

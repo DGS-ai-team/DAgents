@@ -5,6 +5,39 @@ import { isTerminalResultTool, normalizeTerminalResultContent } from "./terminal
 
 export { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible };
 
+function normalizedResultStatus(data) {
+  const status = String(data?.status || "").trim().toLowerCase();
+  return status || "";
+}
+
+function resultStatusLabel(status, legacyRejected) {
+  switch (status) {
+    case "denied":
+    case "rejected":
+      return "已拒绝";
+    case "failed":
+    case "error":
+      return "执行失败";
+    case "cancelled":
+    case "canceled":
+      return "已终止";
+    case "timed_out":
+      return "已超时";
+    case "running":
+      return "执行中";
+    case "queued":
+      return "后台执行中";
+    case "awaiting_user":
+      return "等待输入";
+    case "unknown":
+      return "状态未知";
+    case "succeeded":
+      return "已完成";
+    default:
+      return legacyRejected ? "已拒绝" : "已完成";
+  }
+}
+
 export function formatToolCallLine(entry) {
   const data = entry?.data || entry || {};
   const name = entry?.summary || data.summary || toolDisplayName(data.tool_name || data.name, data.arguments || {});
@@ -19,14 +52,16 @@ export function formatToolResultDisplay(entry, { verbose = false } = {}) {
   const content = String(data.content || data.output || "").trim();
   const terminalResult = isTerminalResultTool(name);
   const displayContent = terminalResult ? normalizeTerminalResultContent(content) : content;
-  const rejected = !!data.rejected;
+  const status = normalizedResultStatus(data);
+  const rejected = status === "denied" || status === "rejected" || (!status && !!data.rejected);
   const elapsed = formatToolElapsed(data.duration_seconds);
   const args = parseToolArguments(data.arguments ?? data.raw_arguments);
 
   const parsed = parseTemporaryAgentToolResult(name, content);
   if (parsed) {
     let headline = parsed.summary;
-    if (rejected) headline = `[已拒绝] ${headline}`;
+    if (status && status !== "succeeded") headline = `${resultStatusLabel(status, rejected)} · ${headline}`;
+    else if (rejected) headline = `[已拒绝] ${headline}`;
     else if (elapsed) headline += elapsed;
     return {
       headline,
@@ -36,7 +71,10 @@ export function formatToolResultDisplay(entry, { verbose = false } = {}) {
   }
 
   const displayName = entry?.summary || data.summary || toolDisplayName(name, args);
-  let headline = `${displayName}${rejected ? " · 已拒绝" : " · 已完成"}${elapsed}`;
+  const resultLabel = resultStatusLabel(status, rejected);
+  let headline = `${displayName} · ${resultLabel}${elapsed}`;
+  // A failed/cancelled result is evidence the model may need to recover from;
+  // only policy-denied results hide the body for the compact UI.
   const detail = !rejected && displayContent ? displayContent : "";
   return { headline, detail, raw: verbose ? displayContent : detail };
 }
