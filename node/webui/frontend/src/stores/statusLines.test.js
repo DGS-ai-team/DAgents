@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { finishStatus, hasStatus, resetStatusLines, startStatus } from "./statusLines.js";
+import {
+  finishStatus,
+  hasStatus,
+  resetStatusLines,
+  startStatus,
+  statusStore,
+  syncTurnStatus,
+} from "./statusLines.js";
 
 describe("statusLines compression watchdog", () => {
   beforeEach(() => {
@@ -26,5 +33,24 @@ describe("statusLines compression watchdog", () => {
     finishStatus("compression");
     vi.advanceTimersByTime(130_000);
     expect(hasStatus("compression")).toBe(false);
+  });
+
+  it("keeps the same visible phase stable across streaming deltas", () => {
+    syncTurnStatus({ phase: "model_generating", outputChannel: "reasoning" });
+    const startedAt = statusStore.phases.thinking.startedAt;
+
+    vi.advanceTimersByTime(1_000);
+    syncTurnStatus({ phase: "model_generating", outputChannel: "reasoning" });
+
+    expect(statusStore.phases.thinking.startedAt).toBe(startedAt);
+    expect(Object.keys(statusStore.phases)).toEqual(["thinking"]);
+  });
+
+  it("replaces the status only when the authoritative output phase changes", () => {
+    syncTurnStatus({ phase: "model_generating", outputChannel: "reasoning" });
+    syncTurnStatus({ phase: "model_generating", outputChannel: "assistant" });
+
+    expect(hasStatus("thinking")).toBe(false);
+    expect(hasStatus("assistant_generating")).toBe(true);
   });
 });

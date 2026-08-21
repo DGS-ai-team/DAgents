@@ -551,7 +551,7 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	}
 	pending := rec.RuntimeState.Pending
 	stepCount := rec.RuntimeState.ToolLoopCount
-	lifecycle, hasLifecycleProjection, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
+	lifecycle, hasLifecycleProjection, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
 	} else if hasLifecycleProjection {

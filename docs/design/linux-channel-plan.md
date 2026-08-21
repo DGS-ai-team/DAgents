@@ -169,7 +169,7 @@ CREATE TABLE linux_channels (
 );
 ```
 
-`host_key_policy` 和 `host_key_ref` 是旧版本字段，当前实现保留数据库列以兼容已有数据，但不再由界面配置或连接运行时使用。
+`host_key_policy` 和 `host_key_ref` 是活动配置字段：`known_hosts` 使用 Node 本机 known_hosts（`host_key_ref` 可指定路径），`pinned` 使用 SHA256 主机指纹。敏感凭据仍不得放入通道记录。
 
 不建议把 `password` 或私钥原文放在这张表中。
 
@@ -248,9 +248,12 @@ SSH 连接建立时，只有 `LinuxChannelProvider` 能读取凭据。以下位�
 
 ### 6.2 Host key 验证
 
-当前版本暂时不开放 host key 校验配置，以降低 Linux 通道的初始配置复杂度。Node 使用
-`ssh.InsecureIgnoreHostKey()` 建立连接；这会降低对中间人攻击的防护，后续重新引入
-`known_hosts` 或 `pinned` 时需要同步增加迁移和 HITL 确认流程。
+Node 严格执行主机密钥校验，不提供 insecure fallback：
+
+- `known_hosts`：读取 Node 当前系统用户的 `~/.ssh/known_hosts`，或使用 `host_key_ref` 指定路径；
+- `pinned`：`host_key_ref` 保存 `SHA256:...` 主机指纹；
+- 首次测试遇到未知主机时，后端只返回观测到的公钥指纹，不自动信任；用户通过可信渠道核对后，才能在 Web UI 中保存为 `pinned`；
+- 未知密钥和已配置指纹不匹配分别返回 `host_key_unknown`、`host_key_mismatch`。
 
 ## 7. 通道生命周期
 
@@ -720,6 +723,8 @@ tool call → binding/policy/HITL → SSH client → SSH session
   "port": 22,
   "username": "deploy",
   "credential_id": "cred_prod_deploy",
+  "host_key_policy": "pinned",
+  "host_key_ref": "SHA256:...",
   "remote_shell": "bash",
   "default_cwd": "/srv/app",
   "command_timeout_ms": 120000,
@@ -797,6 +802,8 @@ exit_code, error_code, output_bytes, truncated
 
 - schema migration、binding 校验、secret 泄漏回归；
 - password/private-key 认证；
+- known_hosts 未知密钥返回指纹、用户确认后 pinned 复测；
+- pinned 指纹匹配和指纹不匹配；
 - SSH 连接建立与登录凭据校验；
 - stdout/stderr/exit code、超时、取消、输出截断；
 - session 并发限制、transport EOF、重连和连接池淘汰；

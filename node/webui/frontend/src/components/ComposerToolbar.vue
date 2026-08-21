@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { statusStore, hasStatus } from "../stores/statusLines.js";
-import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
+import { hasStreamingTextContent } from "../stores/transcript.js";
 
 const props = defineProps({
   llmSettings: { type: Object, default: null },
@@ -35,7 +35,7 @@ const prefillingActive = computed(() => {
 });
 const thinkingActive = computed(() => {
   void statusStore.tick;
-  return hasStatus("thinking") && !hasStreamingKind("reasoning");
+  return hasStatus("thinking");
 });
 const compressionActive = computed(() => {
   void statusStore.tick;

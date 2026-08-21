@@ -3,16 +3,15 @@ import { clearHitl, enqueueHitlRequired } from "./hitl.js";
 import { setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
   applyHydrateSeqHint,
-  applyHydrateTurnState,
+  applyAuthoritativeTurnState,
   ackAgentAfterHydrate,
-  agentStore,
   ensureAgent,
-  finishTurn,
   persistAgentId,
 } from "./agent.js";
 import { loadTranscriptFromHydrate } from "./transcript.js";
 import { applyToolJobsSnapshot } from "./toolJobs.js";
-import { resetStatusLines, startStatus } from "./statusLines.js";
+import { resetStatusLines, syncTurnStatus } from "./statusLines.js";
+import { turnStateStore } from "./turnState.js";
 
 // ChatView is KeepAlive-ed. A hydrate request can outlive the view that
 // started it (for example while navigating to Agent settings). Do not let a
@@ -25,14 +24,19 @@ export function invalidateHydration() {
 
 /**
  * hydrate 后复位 UI 状态相位。
- * model_streaming 时给 thinking 指示；工具执行中只锁 composer，不挂三点跳动。
+ * 模型生成时按已知输出通道展示模型生成中；思考内容到达后由 reasoning
+ * 事件把展示细分切换为思考中。工具执行中只锁 composer，不挂模型气泡。
  */
 export function syncStatusAfterHydrate(runTurnPhase = "") {
   resetStatusLines();
-  if (!agentStore.awaitingTurn) return;
-  const phase = String(runTurnPhase || "").trim();
-  if (phase === "awaiting_tool_execution") return;
-  startStatus("thinking");
+  if (turnStateStore.phase === "idle" && runTurnPhase) {
+    // Compatibility with older nodes that do not return turn_state yet.
+    const phase = String(runTurnPhase || "").trim();
+    if (phase === "model_streaming") syncTurnStatus({ phase: "model_generating" });
+    else if (phase === "awaiting_tool_execution") syncTurnStatus({ phase: "tool_executing" });
+    return;
+  }
+  syncTurnStatus(turnStateStore);
 }
 
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
@@ -50,14 +54,7 @@ export async function hydrateAgent() {
   }
   applyHydrateSeqHint(data?.sse_seq_hint);
   ackAgentAfterHydrate(data?.notify_seq);
-  applyHydrateTurnState({
-    run_turn_phase: data?.run_turn_phase,
-    has_active_turn: !!data?.has_active_turn,
-    pending_hitl: data?.pending_hitl,
-  });
-  if (data?.pending_hitl?.items?.length) {
-    finishTurn();
-  }
+  applyAuthoritativeTurnState(data, { source: data?.turn_state ? "hydrate" : "hydrate_legacy" });
   syncStatusAfterHydrate(data?.run_turn_phase);
   return data;
 }

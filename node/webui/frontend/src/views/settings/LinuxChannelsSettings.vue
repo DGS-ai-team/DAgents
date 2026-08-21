@@ -16,7 +16,10 @@ const showChannelForm = ref(false);
 const editingChannelId = ref("");
 
 const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
-const channel = reactive({ display_name: "", host: "", port: 22, username: "", credential_id: "", remote_shell: "bash", default_cwd: "" });
+const channel = reactive({
+  display_name: "", host: "", port: 22, username: "", credential_id: "",
+  host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "",
+});
 
 const credentialAuthMeta = {
   private_key: { label: "SSH 私钥", description: "可直接输入私钥或引用环境变量，Node 不会把私钥放进工具参数。" },
@@ -30,14 +33,26 @@ const credentialReady = computed(() => {
   }
   return Boolean(credential.secret_ref.trim());
 });
+const hostKeyReady = computed(() => (
+  channel.host_key_policy !== "pinned" || channel.host_key_ref.trim().length > 0
+));
 const channelReady = computed(() => Boolean(
   channel.host.trim() &&
   channel.username.trim() &&
-  channel.credential_id,
+  channel.credential_id &&
+  hostKeyReady.value,
 ));
 
 function authTypeLabel(type) {
   return credentialAuthMeta[type]?.label || type || "未知认证";
+}
+
+function hostKeyPolicyLabel(policy) {
+  return policy === "pinned" ? "固定主机指纹" : "known_hosts";
+}
+
+function onHostKeyPolicyChange() {
+  channel.host_key_ref = "";
 }
 
 function credentialStatusLabel(item) {
@@ -62,7 +77,10 @@ function onCredentialSecretModeChange() {
 }
 
 function resetChannelForm() {
-  Object.assign(channel, { display_name: "", host: "", port: 22, username: "", credential_id: "", remote_shell: "bash", default_cwd: "" });
+  Object.assign(channel, {
+    display_name: "", host: "", port: 22, username: "", credential_id: "",
+    host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "",
+  });
 }
 
 function openCredentialForm() {
@@ -86,6 +104,8 @@ function openChannelForm(item = null) {
       port: item.port || 22,
       username: item.username || "",
       credential_id: item.credential_id || "",
+      host_key_policy: item.host_key_policy || "known_hosts",
+      host_key_ref: item.host_key_ref || "",
       remote_shell: item.remote_shell || "bash",
       default_cwd: item.default_cwd || "",
     });
@@ -184,6 +204,37 @@ async function testChannel(item) {
   }
 }
 
+async function pinTestFingerprint() {
+  const result = testResult.value;
+  const fingerprint = String(result?.host_key_fingerprint || "").trim();
+  const channelID = String(result?.channelId || "").trim();
+  if (!fingerprint || !channelID || result?.error_code !== "host_key_unknown" || saving.value) return;
+  const item = channels.value.find((entry) => entry.channel_id === channelID);
+  const label = item?.display_name || item?.host || channelID;
+  const confirmed = window.confirm(
+    `请先通过可信渠道核对主机指纹：\\n\\n${fingerprint}\\n\\n确认将 ${label} 保存为固定指纹吗？`,
+  );
+  if (!confirmed) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    await api.patchLinuxChannel(channelID, {
+      host_key_policy: "pinned",
+      host_key_ref: fingerprint,
+    });
+    const recheck = await api.testLinuxChannel(channelID);
+    testResult.value = { channelId: channelID, ...recheck };
+    status.value = recheck.available
+      ? `${label}：已保存固定指纹并验证成功`
+      : `${label}：固定指纹已保存，但复测仍未通过`;
+    await load();
+  } catch (e) {
+    error.value = e.message || "保存主机指纹失败";
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function removeChannel(item) {
   if (!item?.channel_id || !window.confirm(`删除通道 ${item.display_name || item.channel_id}？`)) return;
   try {
@@ -217,7 +268,19 @@ onMounted(() => void load());
       <div class="linux-settings__diagnostics-head">
         <strong>连接诊断</strong>
         <span v-if="testResult.error_code" class="linux-settings__diagnostics-code">{{ testResult.error_code }}</span>
+        <button
+          v-if="testResult.error_code === 'host_key_unknown' && testResult.host_key_fingerprint"
+          type="button"
+          class="btn btn--primary btn--sm"
+          :disabled="saving"
+          @click="pinTestFingerprint"
+        >
+          核对后保存为固定指纹
+        </button>
       </div>
+      <p v-if="testResult.host_key_fingerprint" class="linux-settings__fingerprint">
+        观测到的 SSH 主机指纹：<code>{{ testResult.host_key_fingerprint }}</code>
+      </p>
       <div class="linux-settings__stages">
         <div
           v-for="stage in testResult.stages || []"
@@ -265,7 +328,7 @@ onMounted(() => void load());
       <div v-if="!channels.length" class="linux-settings__empty settings-empty-state">还没有配置 Linux 通道。</div>
       <div v-else class="linux-settings__list">
         <div v-for="item in channels" :key="item.channel_id" class="linux-settings__row">
-          <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }}</small></div>
+          <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }} · {{ hostKeyPolicyLabel(item.host_key_policy) }}</small></div>
           <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="openChannelForm(item)">编辑</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
         </div>
       </div>
@@ -339,7 +402,13 @@ onMounted(() => void load());
             <div class="linux-settings__group-head"><strong>登录凭据</strong><span>选择已保存的认证方式</span></div>
             <div class="linux-settings__grid">
               <div class="linux-settings__field"><label>登录凭据 <span>必选</span></label><select v-model="channel.credential_id" class="settings-field__input"><option value="">选择已保存的凭据</option><option v-for="item in credentials" :key="item.credential_id" :value="item.credential_id">{{ item.display_name || "未命名凭据" }}（{{ authTypeLabel(item.auth_type) }}）</option></select></div>
-              <div class="linux-settings__field linux-settings__field--wide"><small>当前版本暂不配置主机密钥校验，连接时直接使用登录凭据建立 SSH 会话。</small></div>
+              <div class="linux-settings__field"><label>主机密钥策略 <span>必选</span></label><select v-model="channel.host_key_policy" class="settings-field__input" @change="onHostKeyPolicyChange"><option value="known_hosts">使用 known_hosts</option><option value="pinned">固定 SSH 主机指纹</option></select></div>
+              <div class="linux-settings__field linux-settings__field--wide">
+                <label>{{ channel.host_key_policy === "pinned" ? "SHA256 主机指纹" : "known_hosts 文件路径" }} <span>{{ channel.host_key_policy === "pinned" ? "必选" : "可选" }}</span></label>
+                <input v-model="channel.host_key_ref" class="settings-field__input" :placeholder="channel.host_key_policy === 'pinned' ? '例如：SHA256:xxxxxxxx' : '留空使用 Node 当前用户的 ~/.ssh/known_hosts'" />
+                <small v-if="channel.host_key_policy === 'pinned'">首次测试发现未知主机时，可在诊断结果中核对指纹后直接保存。</small>
+                <small v-else>Node 会在本机读取该文件；留空时使用当前运行 Node 的系统用户的 SSH known_hosts。</small>
+              </div>
             </div>
           </div>
           <div class="linux-settings__group">
@@ -379,6 +448,8 @@ onMounted(() => void load());
 .linux-settings__diagnostics { margin:12px 0 16px; padding:12px 14px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface-muted, #fbfcfd); }
 .linux-settings__diagnostics-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
 .linux-settings__diagnostics-code { color:var(--color-danger, #b42318); font-family:var(--font-mono, monospace); font-size:11px; }
+.linux-settings__fingerprint { margin:0 0 10px; color:var(--color-text-muted); font-size:12px; line-height:1.5; }
+.linux-settings__fingerprint code { color:var(--color-text); word-break:break-all; }
 .linux-settings__stages { display:grid; gap:5px; }
 .linux-settings__stage { display:grid; grid-template-columns:18px 112px minmax(0, 1fr) auto; align-items:center; gap:7px; min-height:26px; font-size:12px; }
 .linux-settings__stage-mark { display:grid; place-items:center; width:16px; height:16px; border-radius:50%; color:#fff; background:var(--color-success, #16803c); font-size:11px; font-weight:700; }

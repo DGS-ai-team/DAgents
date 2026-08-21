@@ -11,6 +11,7 @@
 | **[workgroup-d05-contracts.md](./workgroup-d05-contracts.md)** | D0.5 冻结契约 + fixtures |
 | **[v0.9.1-smoke-checklist.md](./v0.9.1-smoke-checklist.md)** | v0.9.1 预览验收清单 |
 | **[agent-instance-model.md](./agent-instance-model.md)** | 单 Node 多 Agent、模板、Web UI |
+| **[webui-event-coverage-audit.md](./webui-event-coverage-audit.md)** | WebUI SSE/异步事件覆盖矩阵与验证清单 |
 
 内置 Agent 模板：`packaging/agent-templates/`。
 

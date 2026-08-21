@@ -3,6 +3,7 @@ package turn
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -121,9 +122,20 @@ type CoordinatorSnapshot struct {
 	ContextSnapshot    *ModelContextSnapshot
 	RecoveryRequired   bool
 	ExternalFacts      int
+	ToolExecutions     []ToolExecutionView
 	Budget             TurnBudget
 	Usage              TurnUsage
 	HasActiveTurn      bool
+}
+
+// ToolExecutionView is the safe, compact execution projection used by the
+// UI. Arguments and result content stay in the lifecycle journal/history.
+type ToolExecutionView struct {
+	ID         string              `json:"id"`
+	ToolCallID string              `json:"tool_call_id"`
+	ToolName   string              `json:"tool_name"`
+	Status     ToolExecutionStatus `json:"status"`
+	Attempt    int                 `json:"attempt,omitempty"`
 }
 
 // TurnCoordinator owns the logical Turn/Step state machine for one Session.
@@ -1177,6 +1189,21 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 		result.ToolBatchID = c.step.ToolBatchID
 		result.FinalSummary = c.step.FinalSummary
 		result.AssistantMsgID = c.step.AssistantMsgID
+	}
+	if len(c.executions) > 0 {
+		result.ToolExecutions = make([]ToolExecutionView, 0, len(c.executions))
+		for _, execution := range c.executions {
+			if execution == nil {
+				continue
+			}
+			result.ToolExecutions = append(result.ToolExecutions, ToolExecutionView{
+				ID: execution.ID, ToolCallID: execution.ToolCallID, ToolName: execution.ToolName,
+				Status: execution.Status, Attempt: execution.Attempt,
+			})
+		}
+		sort.Slice(result.ToolExecutions, func(i, j int) bool {
+			return result.ToolExecutions[i].ID < result.ToolExecutions[j].ID
+		})
 	}
 	if c.interaction != nil {
 		result.InteractionID = c.interaction.ID

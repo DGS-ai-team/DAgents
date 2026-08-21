@@ -4,7 +4,6 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { copyText } from "../utils/clipboard.js";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
-import ThinkingIndicator from "./ThinkingIndicator.vue";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import BrowserCitationBlock from "./BrowserCitationBlock.vue";
 
@@ -142,15 +141,6 @@ function userImageThumb(src) {
         <BrowserCitationBlock v-if="!entry.streaming && browserRefs.length" :refs="browserRefs" />
         <div v-if="entry.usage" class="msg__usage">{{ entry.usage }}</div>
       </div>
-    </div>
-  </div>
-
-  <div
-    v-else-if="entry.kind === 'reasoning' && entry.streaming"
-    class="msg msg--reasoning msg--reasoning-active"
-  >
-    <div class="msg__body msg__body--hint-only">
-      <ThinkingIndicator />
     </div>
   </div>
 

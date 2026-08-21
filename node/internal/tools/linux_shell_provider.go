@@ -543,6 +543,14 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 		return linuxTestFailure(stages, "host_key_unavailable", err), nil
 	}
 	recordLinuxTestStage(&stages, "host_key", func() error { return nil })
+	var observedHostKeyFingerprint string
+	baseHostKey := hostKey
+	hostKey = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if key != nil {
+			observedHostKeyFingerprint = ssh.FingerprintSHA256(key)
+		}
+		return baseHostKey(hostname, remote, key)
+	}
 	connectTimeout := cfg.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -582,7 +590,9 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 		code := classifyLinuxSSHHandshakeError(err)
 		wrapped := fmt.Errorf("linux channel handshake failed: %w", err)
 		recordLinuxTestStageError(&stages, "ssh_handshake", code, wrapped)
-		return linuxTestFailure(stages, code, wrapped), nil
+		failure := linuxTestFailure(stages, code, wrapped)
+		failure.HostKeyFingerprint = observedHostKeyFingerprint
+		return failure, nil
 	}
 	client := ssh.NewClient(clientConn, chans, requests)
 	defer client.Close()
@@ -607,7 +617,12 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 		return linuxTestFailure(stages, "command_failed", wrapped), nil
 	}
 	recordLinuxTestStage(&stages, "command", func() error { return nil })
-	return TargetStatus{Available: true, Message: "linux SSH connection and command test succeeded", Stages: stages}, nil
+	return TargetStatus{
+		Available:          true,
+		Message:            "linux SSH connection and command test succeeded",
+		HostKeyFingerprint: observedHostKeyFingerprint,
+		Stages:             stages,
+	}, nil
 }
 
 func recordLinuxTestStage(stages *[]TargetStageStatus, name string, check func() error) error {
@@ -639,7 +654,10 @@ func classifyLinuxSSHHandshakeError(err error) string {
 	if strings.Contains(message, "unable to authenticate") || strings.Contains(message, "authentication") {
 		return "authentication_failed"
 	}
-	if strings.Contains(message, "knownhosts") || strings.Contains(message, "host key") || strings.Contains(message, "key is unknown") {
+	if strings.Contains(message, "key is unknown") || strings.Contains(message, "key is not known") {
+		return "host_key_unknown"
+	}
+	if strings.Contains(message, "knownhosts") || strings.Contains(message, "host key") {
 		return "host_key_mismatch"
 	}
 	return "ssh_handshake_failed"
