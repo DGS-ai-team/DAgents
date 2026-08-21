@@ -74,6 +74,7 @@ func (r *runtime) lifecycleDispatchLockedErr(command turn.TurnCommand) (turn.Coo
 			r.logger.Warn("persist tool batch audit marker failed", "session_id", r.session.ID, "error", err)
 		}
 	}
+	r.publishTurnState(snapshot, command.Type)
 	return snapshot, nil
 }
 

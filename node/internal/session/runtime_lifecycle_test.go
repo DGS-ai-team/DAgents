@@ -67,6 +67,42 @@ func TestRuntimeLifecycleBridgesToolContinuation(t *testing.T) {
 	}
 }
 
+func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	r := newLifecycleTestRuntime()
+	r.hub = hub
+	r.agentID = "agent-1"
+	events := hub.SubscribeAgent(0, "session-1")
+	defer hub.Unsubscribe(events)
+
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{{Role: "assistant", Content: "done"}}, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	phases := make([]string, 0, 5)
+	for len(phases) < cap(phases) {
+		select {
+		case event := <-events:
+			if event.Type != "turn_state" {
+				continue
+			}
+			phase, _ := event.Data["phase"].(string)
+			phases = append(phases, phase)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for turn_state events; phases=%v", phases)
+		}
+	}
+	if phases[0] != "queued" || phases[1] != "model_generating" {
+		t.Fatalf("initial turn_state phases = %v", phases)
+	}
+	if phases[len(phases)-1] != "completed" {
+		t.Fatalf("terminal turn_state phase = %q, all=%v", phases[len(phases)-1], phases)
+	}
+}
+
 func TestRuntimeLifecycleBridgesHITLResume(t *testing.T) {
 	r := newLifecycleTestRuntime()
 	r.lifecycleBeginHumanTurn()

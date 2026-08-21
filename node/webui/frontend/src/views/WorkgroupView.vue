@@ -2,6 +2,7 @@
 import { ref, watch, onUnmounted, computed, onMounted, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
+import { isKnownWorkgroupRealtimeEvent } from "../sse/workgroupEvents.js";
 import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
 import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
@@ -436,6 +437,12 @@ function applyRemoteRealtime(payload) {
     streamPhase.value = "";
     streamToolName.value = "";
     streamActorId.value = "";
+  } else if (!isKnownWorkgroupRealtimeEvent(eventType)) {
+    // Unknown realtime frames must not disappear silently. They are
+    // ephemeral by design, so reconcile from durable Timeline/queue state.
+    void loadTimeline().catch(() => {});
+    void loadPendingHitl();
+    void refreshHumanQueue();
   }
   void nextTick().then(maybeScrollTimelineTail);
 }

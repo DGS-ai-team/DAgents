@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, onActivated, onDeactivated, ref, watc
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
+import { getAgentStreamEventPolicy } from "../sse/agentEvents.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
@@ -15,9 +16,6 @@ import {
   ensureAgent,
   beginSubmit,
   beginImplicitTurn,
-  finishTurn,
-  markTurnContent,
-  shouldAcceptDone,
   isStaleEvent,
   isDuplicateEvent,
   markEventApplied,
@@ -81,10 +79,23 @@ import { chromeStore, setUsageFromSSE, resetUsageStrip } from "../stores/chrome.
 import {
   startStatus,
   finishStatus,
-  finishWaitingStatuses,
   hasStatus,
   resetStatusLines,
+  syncTurnStatus,
 } from "../stores/statusLines.js";
+import {
+  turnStateStore,
+  applyTurnState,
+  setOutputChannel,
+  markTurnAccepted,
+  failTurnSubmission,
+  beginTurnCancellation,
+  markTurnCancellationConfirmed,
+  markTurnCancellationFailed,
+  resetTurnState,
+  isTurnProcessing,
+  isTurnTerminal,
+} from "../stores/turnState.js";
 import { resetToolStream } from "../stores/toolStream.js";
 import {
   onChildCreated,
@@ -116,10 +127,35 @@ const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
+let doneReconcileTimer = null;
+
+function cancelDoneReconciliation() {
+  if (doneReconcileTimer) {
+    clearTimeout(doneReconcileTimer);
+    doneReconcileTimer = null;
+  }
+}
+
+function scheduleDoneReconciliation() {
+  cancelDoneReconciliation();
+  // `done` is emitted before the runtime persists the completed assistant
+  // message and before the terminal lifecycle facts. Give those boundaries a
+  // short window to arrive; otherwise a hydrate can overwrite newer SSE text
+  // with the pre-response transcript.
+  doneReconcileTimer = setTimeout(() => {
+    doneReconcileTimer = null;
+    if (isTurnTerminal() && turnStateStore.submitState === "idle") return;
+    void resyncAfterSSEGap("done");
+  }, 250);
+}
 
 const turnWatchdog = createTurnWatchdog({
-  isAwaiting: () => agentStore.awaitingTurn,
-  hasStuckStatus: () => hasStatus("prefilling") || hasStatus("thinking"),
+  isAwaiting: () => isTurnProcessing(),
+  hasStuckStatus: () =>
+    hasStatus("queued") ||
+    hasStatus("model_generating") ||
+    hasStatus("thinking") ||
+    hasStatus("assistant_generating"),
   onStuck: () => resyncAfterSSEGap("watchdog"),
 });
 
@@ -130,9 +166,9 @@ const canSend = computed(() => {
   if (hitlStore.busy) return false;
   if (hasUserInfoHitl.value) return true;
   if (hitlKind.value) return false;
-  return !agentStore.awaitingTurn;
+  return !isTurnProcessing();
 });
-const sending = computed(() => agentStore.awaitingTurn);
+const sending = computed(() => isTurnProcessing());
 const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
 const showNoAgentWelcome = computed(
   () => !agentStore.agentId && agentListCount.value === 0
@@ -228,7 +264,7 @@ async function activateAgentStream() {
   if (!agentStore.agentId) {
     clearTranscript();
     clearHitl();
-    finishTurn();
+    resetTurnState();
     streamHandle.value?.close();
     streamHandle.value = null;
     chromeStore.sseStatus = "idle";
@@ -322,65 +358,130 @@ function handleEvent(ev) {
 
     if (!skipRender) {
       switch (ev.type) {
+    case "turn_state":
+      if (applyTurnState(ev.data, { source: "event" })) {
+        syncTurnStatus(turnStateStore);
+        if (isTurnTerminal()) {
+          cancelDoneReconciliation();
+          // A terminal lifecycle event is newer than any `done`-triggered
+          // hydrate that may still be in flight.
+          sseResyncToken += 1;
+          if (["requesting", "confirmed"].includes(turnStateStore.cancelState)) {
+            markTurnCancellationConfirmed();
+          }
+          finalizeAssistant();
+          finalizeReasoning();
+          finalizePartialToolCalls({ interrupted: turnStateStore.phase !== "completed" });
+          resetToolStream();
+          syncChildAgentsFromApi();
+          refreshContextTokens();
+        }
+      }
+      break;
     case "assistant":
-      markTurnContent();
-      finishWaitingStatuses();
+      setOutputChannel("assistant");
+      syncTurnStatus(turnStateStore);
       appendAssistant(String(ev.data.content || ""));
       break;
     case "reasoning":
-      markTurnContent();
-      finishWaitingStatuses({ beforeReasoning: true });
-      if (!hasStatus("thinking")) startStatus("thinking");
+      setOutputChannel("reasoning");
+      syncTurnStatus(turnStateStore);
       appendReasoning(String(ev.data.content || ""));
       break;
     case "tool_call":
-      markTurnContent();
-      finishWaitingStatuses();
+      if (ev.data?.partial) {
+        setOutputChannel("tool_call");
+        syncTurnStatus(turnStateStore);
+      }
       upsertToolCallFromSSE(ev.data);
       refreshToolJobs(agentStore.agentId);
       break;
     case "tool_result":
-      markTurnContent();
-      finishWaitingStatuses();
       applyToolResult(ev.data);
       refreshToolJobs(agentStore.agentId);
+      break;
+    case "execution":
+      // Process output is already delivered through the terminal WebSocket
+      // and can be very frequent. Lifecycle edges are useful for refreshing
+      // the Activity rail, but output frames must not trigger HTTP polling.
+      if (String(ev.data?.event || "") !== "process_output") {
+        bumpActivityRefresh();
+      }
       break;
     case "usage":
       setUsageFromSSE(ev.data);
       applyRoundUsage(ev.data);
       break;
     case "error":
-      markTurnContent();
-      finishWaitingStatuses();
       finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
-      if (agentStore.awaitingTurn) finishTurn();
+      if (turnStateStore.authority !== "turn_coordinator") {
+        applyTurnState(
+          { phase: "failed", terminal: true, end_reason: ev.data.message || "error" },
+          { source: "event" },
+        );
+        syncTurnStatus(turnStateStore);
+      }
       break;
     case "system_notice":
       addSystem(String(ev.data?.message || "工具集已变更"));
       break;
+    case "runtime/config-changed":
+      agentPanelRef.value?.refresh?.();
+      addSystem(
+        ev.data?.applied === false
+          ? "运行时配置已更新，将在当前回合结束后生效。"
+          : "运行时配置已更新。",
+      );
+      break;
+    case "memory/changed":
+      addSystem(
+        ev.data?.next_turn === true || ev.data?.turn_boundary === "next_turn"
+          ? "长期记忆已更新，将在下一轮生效。"
+          : "长期记忆已更新。",
+      );
+      break;
+    case "skills/changed":
+      addSystem("技能目录已变化，将在下一轮边界重新评估。");
+      break;
+    case "mcp/catalog-changed":
+      addSystem(
+        ev.data?.applied === false
+          ? "MCP 工具目录已变化，将在当前回合结束后生效。"
+          : "MCP 工具目录已更新。",
+      );
+      break;
     case "done":
       finalizeAssistant();
       finalizeReasoning();
-      finishWaitingStatuses();
       finalizePartialToolCalls({ interrupted: true });
       refreshToolJobs(agentStore.agentId);
-      if (shouldAcceptDone(ev.seq)) {
-        finishTurn();
+      // done closes the content stream. The lifecycle projection owns the
+      // Turn terminal transition; keep the legacy fallback for older nodes.
+      if (turnStateStore.authority !== "turn_coordinator") {
         resetToolStream();
         syncChildAgentsFromApi();
+      } else {
+        // `done` closes model content, but is not the Turn terminal fact.
+        // Reconcile after the durable terminal boundary has had a chance to
+        // persist, so hydrate cannot overwrite newer streamed text.
+        scheduleDoneReconciliation();
       }
       refreshContextTokens();
       break;
     case "hitl_required":
       finalizeAssistant();
       finalizeReasoning();
-      finishWaitingStatuses();
-      // HITL 暂停即结束本段 awaitingTurn；勿依赖随后的 done（可能被慢消费者丢弃）
-      if (agentStore.awaitingTurn) finishTurn();
       {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
+      }
+      if (turnStateStore.authority !== "turn_coordinator") {
+        applyTurnState(
+          { phase: ev.data?.type === "user_information" ? "waiting_user" : "tool_waiting" },
+          { source: "event" },
+        );
+        syncTurnStatus(turnStateStore);
       }
       break;
     case "temporary_agent_created":
@@ -399,7 +500,8 @@ function handleEvent(ev) {
       break;
     case "side_effect_turn_start":
       beginImplicitTurn();
-    turnWatchdog.noteActivity();
+      syncTurnStatus({ phase: "queued" });
+      turnWatchdog.noteActivity();
       break;
     case "user_message_deferred":
       addDeferredUser(
@@ -419,6 +521,13 @@ function handleEvent(ev) {
       }
     }
 
+    // The registry and the view switch are intentionally checked together at
+    // runtime. It protects against adding a transport event and forgetting
+    // to give it a UI policy/handler in the same change.
+    if (getAgentStreamEventPolicy(ev.type) === "unknown") {
+      addSystem(`收到未识别的 Agent 事件：${String(ev.type || "unknown")}`);
+    }
+
     markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
   } finally {
     eventSpan.end();
@@ -436,6 +545,14 @@ function handleCompressionEvent(type, data) {
   }
 }
 
+function markSubmissionAccepted() {
+  markTurnAccepted();
+  // The POST acknowledgement means the turn is accepted, but its first
+  // durable turn_state event may still be in flight. Show the queue state
+  // during that gap instead of leaving the user with a blank busy composer.
+  syncTurnStatus({ phase: "queued" });
+}
+
 async function submitHitlApproval(approveAll, hitlIndex = 0) {
   const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "approval") return;
@@ -449,8 +566,8 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    markSubmissionAccepted();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -473,8 +590,8 @@ async function submitHitlOne(payload, approve) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    markSubmissionAccepted();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -494,8 +611,8 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    markSubmissionAccepted();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -530,8 +647,8 @@ async function submitHitlUserInfo(hitlIndex, text) {
     hitlStore.busyIndex = -1;
     hitlSelected.value = [];
     beginSubmit();
+    markSubmissionAccepted();
     turnWatchdog.noteActivity();
-    if (!agentStore.turnContentSeen) startStatus("thinking");
   } catch (e) {
     agentStore.error = e.message;
     hitlStore.busy = false;
@@ -560,7 +677,7 @@ async function onSendMessage(payload) {
     return;
   }
 
-  if (agentStore.awaitingTurn) {
+  if (isTurnProcessing()) {
     agentStore.error = "上一回合尚未结束";
     return;
   }
@@ -572,10 +689,11 @@ async function onSendMessage(payload) {
   turnWatchdog.noteActivity();
   try {
     await api.submitMessage(agentStore.agentId, text, contentParts);
-    if (!agentStore.turnContentSeen) startStatus("thinking");
+    markSubmissionAccepted();
   } catch (e) {
-    finishStatus("thinking");
-    finishTurn();
+    failTurnSubmission();
+    resetStatusLines();
+    resetTurnState();
     agentStore.error = e.message;
   }
 }
@@ -588,7 +706,7 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureAgent());
-    finishTurn();
+    resetTurnState();
     resetEventTracking();
     resetStatusLines();
     resetToolStream();
@@ -680,7 +798,7 @@ async function onAgentCreated(created) {
   resetRemoteWorkers();
   resetEventTracking();
   clearHitl();
-  finishTurn();
+  resetTurnState();
   restartStream();
   syncRouteAgent(id);
   pulseDesktopFocus();
@@ -703,7 +821,7 @@ async function switchAgent(id) {
   sseResyncToken += 1;
   streamHandle.value?.close();
   streamHandle.value = null;
-  finishTurn();
+  resetTurnState();
   resetStatusLines();
   resetToolStream();
   resetRemoteWorkers();
@@ -722,7 +840,7 @@ async function switchAgent(id) {
     clearTranscript();
     clearHitl();
     resetEventTracking();
-    finishTurn();
+    resetTurnState();
     resetStatusLines();
     return;
   }
@@ -756,7 +874,7 @@ async function deleteAgentById(payload) {
     streamHandle.value = null;
 
     if (deletingCurrent) {
-      finishTurn();
+      resetTurnState();
       hitlStore.busy = false;
       clearTranscript();
       clearHitl();
@@ -916,8 +1034,9 @@ async function bootstrapAgentFromRoute() {
 }
 
 async function cancelTurn() {
-  if (!agentStore.agentId || cancelling.value || !agentStore.awaitingTurn) return;
+  if (!agentStore.agentId || cancelling.value || !isTurnProcessing()) return;
   cancelling.value = true;
+  beginTurnCancellation();
   agentStore.error = "";
   try {
     const response = await api.cancelAgentTurn(agentStore.agentId);
@@ -931,21 +1050,27 @@ async function cancelTurn() {
     }
     const outcome = classifyCancelOutcome(response, hydrate);
     if (outcome === "not_cancelled") {
+      markTurnCancellationFailed();
       agentStore.error = hydrate
         ? "turn 仍在执行，取消未生效，请稍后重试"
         : "取消状态未确认，请稍后重试";
       return;
     }
 
-    finishWaitingStatuses();
+    if (outcome === "cancel_requested" && !isTurnTerminal()) {
+      markTurnCancellationConfirmed();
+      addSystem("正在取消本轮…");
+      return;
+    }
+    resetStatusLines();
     finalizePartialToolCalls({ interrupted: true });
-    finishTurn();
     clearHitl();
     finalizeAssistant();
     finalizeReasoning();
     resetToolStream();
     addSystem(outcome === "cancelled" ? "turn 已取消" : "当前没有正在执行的 turn");
   } catch (e) {
+    markTurnCancellationFailed();
     agentStore.error = e.message;
   } finally {
     cancelling.value = false;
@@ -1012,6 +1137,7 @@ onDeactivated(() => {
   // KeepAlive 切到设置页时：停心跳/轮询/看门狗，并断开 SSE，避免焦点与状态串台
   invalidateHydration();
   sseResyncToken += 1;
+  cancelDoneReconciliation();
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
@@ -1052,6 +1178,7 @@ watch(
 onUnmounted(() => {
   invalidateHydration();
   sseResyncToken += 1;
+  cancelDoneReconciliation();
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();

@@ -100,10 +100,11 @@ type TargetStageStatus struct {
 // TargetStatus describes provider reachability and diagnostic phases. The
 // original Available/Message fields remain stable for existing callers.
 type TargetStatus struct {
-	Available bool                `json:"available"`
-	Message   string              `json:"message"`
-	ErrorCode string              `json:"error_code,omitempty"`
-	Stages    []TargetStageStatus `json:"stages,omitempty"`
+	Available          bool                `json:"available"`
+	Message            string              `json:"message"`
+	ErrorCode          string              `json:"error_code,omitempty"`
+	HostKeyFingerprint string              `json:"host_key_fingerprint,omitempty"`
+	Stages             []TargetStageStatus `json:"stages,omitempty"`
 }
 
 type ProcessEventType string

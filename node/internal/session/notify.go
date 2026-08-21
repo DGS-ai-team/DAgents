@@ -78,7 +78,7 @@ func (m *Manager) NotificationState(sessionID string) NotificationState {
 		return NotificationState{}
 	}
 	pending := rec.RuntimeState.Pending
-	if lifecycle, projected, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID); projectionErr != nil {
+	if lifecycle, projected, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID); projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
 	} else if projected {
 		pending = pendingFromLifecycleSnapshot(lifecycle, nil)

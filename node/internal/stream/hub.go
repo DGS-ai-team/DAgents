@@ -137,7 +137,7 @@ func (h *Hub) CurrentSeq() int {
 
 func isCriticalSSEType(eventType string) bool {
 	switch eventType {
-	case "done", "error", "hitl_required":
+	case "done", "error", "hitl_required", "turn_state":
 		return true
 	default:
 		return false

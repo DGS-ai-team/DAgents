@@ -1,5 +1,6 @@
 import { extractToolApprovals } from "../stores/hitl.js";
 import { toolCallIdFromEntry, toolJobsStore } from "../stores/toolJobs.js";
+import { toolExecutionForCall, turnStateStore } from "../stores/turnState.js";
 
 function shouldSkipEntry(entry) {
   if (!entry) return true;
@@ -100,7 +101,7 @@ function awaitingApprovalCallIds(hitlQueue = []) {
  * 后端同批免审批工具并行执行：未完成的 final tool_call 一律 active（执行中）。
  * 仅当该 call 已出现在 HITL 审批队列时标 pending（尚未开跑）。
  */
-export function annotateToolExecutionHints(items, _jobs = toolJobsStore, hitlQueue = []) {
+export function annotateToolExecutionHints(items, _jobs = toolJobsStore, hitlQueue = [], authority = turnStateStore) {
   if (!Array.isArray(items) || !items.length) return items;
   const unfinished = items.filter(
     (item) =>
@@ -114,7 +115,25 @@ export function annotateToolExecutionHints(items, _jobs = toolJobsStore, hitlQue
   const awaiting = awaitingApprovalCallIds(hitlQueue);
   for (const item of unfinished) {
     const id = toolCallIdFromEntry(item.callEntry);
-    item.executionHint = id && awaiting.has(id) ? "pending" : "active";
+    const execution = id
+      ? (authority === turnStateStore ? toolExecutionForCall(id) : authority?.toolExecutions?.find((row) => row.toolCallId === id))
+      : null;
+    const status = String(execution?.status || "").trim().toLowerCase();
+    if (["succeeded", "denied", "cancelled", "timed_out", "unknown"].includes(status)) {
+      item.executionHint = status === "succeeded" ? "settled" : "failed";
+    } else if (["running"].includes(status)) {
+      item.executionHint = "active";
+    } else if (awaiting.has(id) || ["proposed", "pending"].includes(status)) {
+      item.executionHint = "pending";
+    } else if (authority?.authority === "turn_coordinator") {
+      // A final tool_call is an intent until the authoritative execution
+      // projection says it has started. Do not label it as running merely
+      // because the transcript has not received a result yet.
+      item.executionHint = "pending";
+    } else {
+      // Legacy nodes have no execution projection; retain the old fallback.
+      item.executionHint = "active";
+    }
   }
   return items;
 }
@@ -179,7 +198,12 @@ export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
 
   const annotated = annotateToolExecutionHints(items, jobs, hitlQueue);
   // 待批工具由 ApprovalBubble 独占展示，避免 ToolSummaryRow「待执行」与审批卡双份。
+  const awaiting = awaitingApprovalCallIds(hitlQueue);
   return annotated.filter(
-    (item) => !(item?.kind === "tool_step" && item.executionHint === "pending"),
+    (item) => {
+      if (item?.kind !== "tool_step" || item.executionHint !== "pending") return true;
+      const id = toolCallIdFromEntry(item.callEntry);
+      return !awaiting.has(id);
+    },
   );
 }

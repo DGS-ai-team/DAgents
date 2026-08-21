@@ -1,3 +1,5 @@
+import { AGENT_STREAM_EVENT_TYPES } from "./agentEvents.js";
+
 const RECONNECT_MS = 5000;
 
 /** 切 Agent 后旧连接事件应丢弃：双方 id 都非空且不一致时忽略。 */
@@ -77,30 +79,7 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, onRe
       }
     };
 
-    const types = [
-      "assistant",
-      "reasoning",
-      "execution",
-      "tool_call",
-      "tool_result",
-      "usage",
-      "error",
-      "done",
-      "hitl_required",
-      "temporary_agent_created",
-      "temporary_agent_completed",
-      "temporary_agent_cancelled",
-      "context_compression_blocking",
-      "context_compression_silent",
-      "user_message_deferred",
-      "side_effect_turn_start",
-      "side_effect_applied",
-      "side_effects_cleared",
-      "terminal.opened",
-      "terminal.updated",
-      "terminal.closed",
-    ];
-    types.forEach((type) => {
+    AGENT_STREAM_EVENT_TYPES.forEach((type) => {
       es.addEventListener(type, (ev) => {
         let envelope = {};
         try {

@@ -56,6 +56,9 @@ type runtime struct {
 	store *store.SQLiteStore
 	// 事件中心
 	hub *stream.Hub
+	// publisher 是编排器实际使用的事件出口。父 runtime 通常与 hub 相同，
+	// 子 runtime 则可能是 RelayHub；生命周期状态必须沿同一出口发布。
+	publisher stream.Publisher
 	// 代理 ID
 	agentID string
 	// 日志
@@ -161,6 +164,7 @@ func newRuntimeWithPublisher(
 		done:            make(chan struct{}),
 		store:           st,
 		hub:             eventHub,
+		publisher:       pub,
 		agentID:         agentID,
 		logger:          logger,
 		skillsCatalog:   catalog,
@@ -654,7 +658,7 @@ func (r *runtime) observeSkillCatalogChange() {
 	r.skillRevision = current
 	r.mu.Unlock()
 	if r.hub != nil {
-		r.hub.Publish(r.agentID, "skills/changed", map[string]any{
+		r.hub.Publish(r.session.ID, "skills/changed", map[string]any{
 			"agent_id":         r.agentID,
 			"previous":         previous,
 			"revision":         current,

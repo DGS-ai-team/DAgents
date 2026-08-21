@@ -163,11 +163,12 @@ func (s *Server) handleTestLinuxChannel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"channel_id": id,
-		"available":  status.Available,
-		"message":    status.Message,
-		"error_code": status.ErrorCode,
-		"stages":     status.Stages,
+		"channel_id":           id,
+		"available":            status.Available,
+		"message":              status.Message,
+		"error_code":           status.ErrorCode,
+		"host_key_fingerprint": status.HostKeyFingerprint,
+		"stages":               status.Stages,
 	})
 }
 

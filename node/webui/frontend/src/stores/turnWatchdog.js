@@ -1,4 +1,4 @@
-/** 卡住的 prefilling/thinking 看门狗：有 awaitingTurn 且状态相位长时间无 SSE 活动时触发对账。 */
+/** 权威 Turn 仍在生成且长时间无 SSE 活动时触发 hydrate 对账。 */
 
 export const STUCK_STATUS_MS = 30_000;
 export const WATCH_INTERVAL_MS = 5_000;
@@ -6,7 +6,7 @@ export const WATCH_INTERVAL_MS = 5_000;
 /**
  * @param {object} opts
  * @param {() => boolean} opts.isAwaiting
- * @param {() => boolean} opts.hasStuckStatus  prefilling/thinking 仍在展示
+ * @param {() => boolean} opts.hasStuckStatus  模型生成状态仍在展示
  * @param {() => (void|Promise<void>)} opts.onStuck
  * @param {number} [opts.stuckMs]
  * @param {number} [opts.intervalMs]

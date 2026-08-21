@@ -262,6 +262,7 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 
 type sessionHydrateResponse struct {
 	AgentID       string                    `json:"agent_id"`
+	TurnState     session.TurnStateView     `json:"turn_state"`
 	RunTurnPhase  string                    `json:"run_turn_phase"`
 	HasActiveTurn bool                      `json:"has_active_turn"`
 	QueuePending  int                       `json:"queue_pending"`
@@ -301,6 +302,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
 		AgentID:       view.SessionID,
+		TurnState:     view.TurnState,
 		RunTurnPhase:  view.RunTurnPhase,
 		HasActiveTurn: view.HasActiveTurn,
 		QueuePending:  view.QueuePending,

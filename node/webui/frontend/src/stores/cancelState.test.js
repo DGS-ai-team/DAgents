@@ -9,11 +9,11 @@ describe("cancelState", () => {
     })).toBe("not_cancelled");
   });
 
-  it("accepts a confirmed cancellation while runtime cleanup is settling", () => {
+  it("keeps the cancellation pending until hydrate reports a terminal turn", () => {
     expect(classifyCancelOutcome({ cancelled: true }, {
       has_active_turn: true,
       run_turn_phase: "awaiting_tool_execution",
-    })).toBe("cancelled");
+    })).toBe("cancel_requested");
   });
 
   it("distinguishes an already idle turn from a successful cancellation", () => {

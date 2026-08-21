@@ -363,6 +363,45 @@ func TestLinuxShellProviderRunsAgainstTestSSHServer(t *testing.T) {
 	}
 }
 
+func TestLinuxShellProviderReportsUnknownHostKeyFingerprint(t *testing.T) {
+	addr, fingerprint := startTestSSHServer(t)
+	host, portText, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portText, "%d", &port); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "unknown-key", Host: host, Port: port, Username: "test-user",
+			CredentialID: "cred", HostKeyPolicy: "known_hosts", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "test-secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "test-password", nil }).WithHostKeyResolver(
+		func(context.Context, LinuxChannelConfig) (ssh.HostKeyCallback, error) {
+			return func(string, net.Addr, ssh.PublicKey) error {
+				return fmt.Errorf("knownhosts: key is unknown")
+			}, nil
+		},
+	)
+	status, err := provider.Test(context.Background(), ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "unknown-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Available || status.ErrorCode != "host_key_unknown" {
+		t.Fatalf("unexpected unknown-key status: %+v", status)
+	}
+	if status.HostKeyFingerprint != fingerprint {
+		t.Fatalf("fingerprint=%q want=%q", status.HostKeyFingerprint, fingerprint)
+	}
+	last := status.Stages[len(status.Stages)-1]
+	if last.Name != "ssh_handshake" || last.Code != "host_key_unknown" {
+		t.Fatalf("unexpected failed stage: %+v", last)
+	}
+}
+
 func TestLinuxShellProviderOpensPTY(t *testing.T) {
 	addr, fingerprint := startTestSSHServer(t)
 	host, portString, err := net.SplitHostPort(addr)

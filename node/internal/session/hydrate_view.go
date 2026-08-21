@@ -14,6 +14,7 @@ type HydrateView struct {
 	SessionID     string
 	Transcript    []TranscriptEntry
 	PendingHITL   map[string]any
+	TurnState     TurnStateView
 	RunTurnPhase  string
 	HasActiveTurn bool
 	QueuePending  int
@@ -36,7 +37,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		pending := rt.pendingSnapshot()
 		lifecycle := rt.turnCoordinator.Snapshot()
 		hasActiveTurn := lifecycle.HasActiveTurn
-		return m.buildHydrateView(sessionID, messages, pending, state, queuePending, hasActiveTurn, notifySeq, ackSeq), nil
+		return m.buildHydrateView(sessionID, messages, pending, state, lifecycle, rt.lifecycleEventSequence(), queuePending, hasActiveTurn, notifySeq, ackSeq), nil
 	}
 	if m.store == nil {
 		return nil, fmt.Errorf("agent_not_found")
@@ -51,7 +52,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	pending := rec.RuntimeState.Pending
 	hasActiveTurn := pending != nil
 	state := turn.StateIdle
-	lifecycle, projected, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
+	lifecycle, projected, lifecycleSeq, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
 	} else if projected {
@@ -61,7 +62,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	} else if pending != nil {
 		state = turn.StateAwaitingTool
 	}
-	return m.buildHydrateView(sessionID, rec.Messages, pending, state, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
+	return m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
 }
 
 func (m *Manager) buildHydrateView(
@@ -69,6 +70,8 @@ func (m *Manager) buildHydrateView(
 	messages []llm.Message,
 	pending *turn.PendingHITL,
 	state turn.State,
+	lifecycle turn.CoordinatorSnapshot,
+	lifecycleSeq uint64,
 	queuePending int,
 	hasActiveTurn bool,
 	notifySeq int,
@@ -83,10 +86,20 @@ func (m *Manager) buildHydrateView(
 		mediaByCall := media.RehydrateFromMessages(reg, messages, callIndex)
 		EnrichTranscriptMedia(transcript, mediaByCall)
 	}
+	turnState := buildTurnStateView(lifecycle, lifecycleSeq)
+	if lifecycle.TurnID == "" && pending != nil {
+		turnState = TurnStateView{
+			Authority:       "hydrate_legacy",
+			Phase:           "tool_waiting",
+			Terminal:        false,
+			InteractionKind: "approval",
+		}
+	}
 	return &HydrateView{
 		SessionID:     sessionID,
 		Transcript:    transcript,
 		PendingHITL:   turn.BuildHITLRequiredSnapshot(pending),
+		TurnState:     turnState,
 		RunTurnPhase:  hydrateRunTurnPhase(messages, pending, state, hasActiveTurn),
 		HasActiveTurn: hasActiveTurn,
 		QueuePending:  queuePending,
