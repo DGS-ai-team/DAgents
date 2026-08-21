@@ -16,12 +16,12 @@ import (
 // CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 UI 提示精简。
 const CatalogBloatTokenThreshold = 4000
 
-// LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 tools.loadSkillsMetadataPrefix 一致）。
+// LoadSkillsMetadataPrefix 为可用 skills 目录的 token 估算前缀。
 const LoadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
 
 // CatalogTokenStats 为 skills 目录 token 估算分项（避免把未加载正文与 system prompt 重复计数）。
 type CatalogTokenStats struct {
-	// MetadataTokens：每步 tools schema 中 load_skills 附带的 catalog 元数据（name + description 列表）。
+	// MetadataTokens：system prompt 尾部 skills 目录的元数据（name + description 列表）。
 	MetadataTokens int
 	// MaxBodyTokens：单个 SKILL.md 正文的最大估算 token（load 后进入 system prompt，受 max_in_prompt 限制）。
 	MaxBodyTokens int
@@ -196,8 +196,9 @@ func (c *Catalog) applyVisible(defs []Definition) []Definition {
 
 // EstimateCatalogStats 估算 skills 目录 token 分项。
 //
-// 注意：catalog 正文不会进入 tools schema；仅 load 后写入 system prompt（已计入 system_prompt_estimated_tokens）。
-// 因此 skills_catalog_estimated_tokens 只反映 MetadataTokens，膨胀告警另看 MaxBodyTokens。
+// 注意：目录元数据进入启用 skills 的 Agent system prompt 尾部；skill 正文仅在
+// load 后写入 system prompt（已计入 system_prompt_estimated_tokens）。因此
+// skills_catalog_estimated_tokens 只反映 MetadataTokens，膨胀告警另看 MaxBodyTokens。
 func EstimateCatalogStats(defs []Definition) CatalogTokenStats {
 	metaSection := renderMetadataSection(defs)
 	stats := CatalogTokenStats{}
@@ -237,7 +238,7 @@ func (c *Catalog) EstimateCatalogStats() CatalogTokenStats {
 	return EstimateCatalogStats(c.List())
 }
 
-// EstimateCatalogMetadataTokens 返回 catalog 元数据在 tools schema 中的估算 token（API skills_catalog_estimated_tokens）。
+// EstimateCatalogMetadataTokens 返回 system prompt 尾部 catalog 元数据的估算 token（API skills_catalog_estimated_tokens）。
 func (c *Catalog) EstimateCatalogMetadataTokens() int {
 	return c.EstimateCatalogStats().MetadataTokens
 }

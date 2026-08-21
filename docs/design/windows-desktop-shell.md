@@ -28,7 +28,7 @@
 | 切换 session / 刷新页面后主聊天区空白 | Web UI `switchSession` 会 `clearTranscript()`；仅依赖 **`live=1` SSE** 增量，不做历史回放 |
 | 从 Shell 通知点进 UI 看不到待审批 | `clearHitl()` + 无 API 还原 `PendingHITL`；HITL 仅在有 **`hitl_required` SSE 实时事件** 时入队 |
 | `/context` 面板能看到最近 10 条摘要 | `GET /v1/sessions/{id}/context` 的 `recent_messages` **未** 灌入主 transcript；且无 HITL 展示载荷 |
-| Node 已持久化 messages + pending | SQLite `RuntimeState.Pending` 在 Node 重启后可恢复 **turn**，但 **Client UI 未 hydrate** |
+| Node 已持久化 messages + turn lifecycle | SQLite `turn_events` 在 Node 重启后恢复 Turn/Step；旧 `RuntimeState.Pending` 仅作为无事件老数据兼容输入 |
 
 因此：**Session 历史 + Pending HITL 恢复** 是跨端能力，**Web UI 为 P0**（Windows 默认 Client）；Shell 通知 → 打开 UI 的处理链 **依赖** 该能力。
 

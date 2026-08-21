@@ -21,6 +21,10 @@ func openLocalTerminal(ctx context.Context, req TerminalRequest) (Terminal, erro
 	if err != nil {
 		return nil, err
 	}
+	env, err := localEnvironment(req.Env, req.Environment)
+	if err != nil {
+		return nil, err
+	}
 	commandLine := make([]string, 0, 1+len(args))
 	commandLine = append(commandLine, syscall.EscapeArg(application))
 	for _, arg := range args {
@@ -30,7 +34,7 @@ func openLocalTerminal(ctx context.Context, req TerminalRequest) (Terminal, erro
 		ready:       make(chan struct{}),
 		commandLine: strings.Join(commandLine, " "),
 		cwd:         strings.TrimSpace(req.CWD),
-		env:         localEnvironment(req.Env),
+		env:         env,
 		rows:        req.Rows,
 		cols:        req.Cols,
 	}

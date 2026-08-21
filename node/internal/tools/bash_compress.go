@@ -9,9 +9,12 @@ import (
 
 // BashCompressConfig 控制 bash_run 输出压缩（P0：L1 清洗 + rune 安全截断）。
 type BashCompressConfig struct {
-	Enabled              bool
-	MaxOutputChars       int // stdout 最大 rune 数；0 表示默认 maxBashOutputRunes
-	MaxOutputCharsStderr int // stderr 最大 rune 数；0 表示与 stdout 相同
+	Enabled               bool
+	MaxOutputChars        int // stdout 最大 rune 数；0 表示默认 maxBashOutputRunes
+	MaxOutputCharsStderr  int // stderr 最大 rune 数；0 表示与 stdout 相同
+	OutputMode            string
+	TailOutputChars       int // head_tail 模式下 stdout 尾部最大 rune 数
+	TailOutputCharsStderr int // head_tail 模式下 stderr 尾部最大 rune 数；0 表示与 stdout 相同
 }
 
 // DefaultBashCompressConfig 为 P0 默认：开启清洗，stdout 12000 / stderr 16000 runes。
@@ -20,6 +23,7 @@ func DefaultBashCompressConfig() BashCompressConfig {
 		Enabled:              true,
 		MaxOutputChars:       maxBashOutputRunes,
 		MaxOutputCharsStderr: maxBashOutputStderrRunes,
+		OutputMode:           "head",
 	}
 }
 
@@ -31,7 +35,53 @@ func (c BashCompressConfig) normalized() BashCompressConfig {
 	if out.MaxOutputCharsStderr <= 0 {
 		out.MaxOutputCharsStderr = maxBashOutputStderrRunes
 	}
+	out.OutputMode = strings.ToLower(strings.TrimSpace(out.OutputMode))
+	if out.OutputMode == "" {
+		out.OutputMode = "head"
+	}
+	if out.OutputMode != "head" && out.OutputMode != "head_tail" {
+		out.OutputMode = "head"
+	}
+	if out.TailOutputCharsStderr <= 0 {
+		out.TailOutputCharsStderr = out.TailOutputChars
+	}
+	if out.TailOutputChars < 0 {
+		out.TailOutputChars = 0
+	}
+	if out.TailOutputCharsStderr < 0 {
+		out.TailOutputCharsStderr = 0
+	}
 	return out
+}
+
+// newBashOutputBuffer bounds bytes at the collection boundary. The later
+// rune-level compression is still needed for readable tool results, but it
+// must not be the first place where an unbounded command output is handled.
+func newBashOutputBuffer(cfg BashCompressConfig, stderr bool) *OutputBudget {
+	cfg = cfg.normalized()
+	maxRunes := cfg.MaxOutputChars
+	if stderr {
+		maxRunes = cfg.MaxOutputCharsStderr
+	}
+	maxInt := int(^uint(0) >> 1)
+	limit := maxInt
+	if maxRunes > 0 && maxRunes <= maxInt/4 {
+		limit = maxRunes * 4
+	}
+	if cfg.OutputMode == "head_tail" {
+		tailRunes := cfg.TailOutputChars
+		if stderr {
+			tailRunes = cfg.TailOutputCharsStderr
+		}
+		if tailRunes > 0 && tailRunes <= maxInt/4 {
+			return NewHeadTailOutputBudget(limit, tailRunes*4)
+		}
+		if tailRunes <= 0 {
+			return NewOutputBudget(limit)
+		}
+		return NewHeadTailOutputBudget(limit, maxInt)
+	}
+	return NewOutputBudget(limit)
 }
 
 // SetBashCompress 注入 bash 输出压缩配置（由 Node 启动时从 config.yaml 映射）。
@@ -180,14 +230,18 @@ type OutputCompressStats struct {
 }
 
 func (s *OutputCompressStats) SSEFields() map[string]any {
-	if s == nil || s.SavedPct <= 0 {
+	if s == nil || (s.SavedPct <= 0 && !s.Truncated) {
 		return nil
 	}
-	return map[string]any{
+	fields := map[string]any{
 		"output_compress_raw_runes": s.RawRunes,
 		"output_compress_out_runes": s.OutRunes,
 		"output_compress_saved_pct": s.SavedPct,
 	}
+	if s.Truncated {
+		fields["output_compress_truncated"] = true
+	}
+	return fields
 }
 
 func aggregateBashCompressStats(outMeta, errMeta bashStreamCompressMeta) *OutputCompressStats {

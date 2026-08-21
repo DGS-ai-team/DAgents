@@ -44,7 +44,7 @@ type terminalReadArgs struct {
 func terminalOpenToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_open",
-		Description: "按 terminal_config_list 返回的 config_id 打开一个可持续交互的终端会话。会话会在多次模型调用之间保留当前目录、环境和程序状态；打开后用 terminal_input 写入命令，用 terminal_read 读取输出。每个 Agent 的终端数量有限，达到上限时必须先 terminal_terminate 不再使用的终端。",
+		Description: "打开一个可持续保持 cwd、环境和进程状态的交互终端。先用 terminal_config_list 获取 config_id，再用 terminal_input 写入、terminal_read 读取；达到终端数量上限时先用 terminal_terminate 释放会话。",
 		Parameters: injectCallPurposeParam(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -62,7 +62,7 @@ func terminalOpenToolDef() ToolDef {
 func terminalConfigListToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_config_list",
-		Description: "列出当前 Agent 已绑定、可用于打开终端的配置。结果只包含配置 ID、显示名称、主机/IP、端口、用户名和备注，不包含密码、私钥或 secret_ref。打开不同目标前必须先使用这里返回的 config_id。",
+		Description: "列出当前 Agent 已绑定、可用于打开终端的配置。结果包含 config_id、显示名称、主机/IP、端口、用户名和备注，不包含密码或私钥；打开目标前必须先使用这里返回的 config_id。",
 		Parameters:  injectCallPurposeParam(objectParams(map[string]any{}, "")),
 	}}
 }
@@ -70,7 +70,7 @@ func terminalConfigListToolDef() ToolDef {
 func terminalInputToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_input",
-		Description: "向已打开的交互终端写入原始输入。可发送命令、回车、方向键或 Ctrl+C 等控制字符；不要用 bash_run 代替需要保持会话状态的交互操作。",
+		Description: "向已打开的交互终端写入原始输入；命令通常需要显式包含换行符，可发送回车、方向键或 Ctrl+C 等控制字符。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
 			"terminal_id": map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
 			"data":        map[string]any{"type": "string", "description": "要写入终端的原始文本或控制字符，命令通常需要显式包含换行符 \\n"},
@@ -81,7 +81,7 @@ func terminalInputToolDef() ToolDef {
 func terminalReadToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_read",
-		Description: "等待指定秒数后，读取交互终端从指定序号之后产生的输出。wait_seconds 是严格的读取前延时，不会因为提前出现输出而提前返回；首次读取 after_seq 留空，后续使用返回的 next_seq，避免重复读取。",
+		Description: "严格等待指定秒数后，读取交互终端从 after_seq 之后产生的输出；首次读取使用 0，后续使用返回的 next_seq，避免重复读取。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
 			"terminal_id":  map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
 			"after_seq":    map[string]any{"type": "integer", "minimum": 0, "description": "上次读取返回的 next_seq，可选，默认 0"},
@@ -241,7 +241,7 @@ func (r *Registry) execTerminalOpen(ctx context.Context, raw json.RawMessage) (s
 	info, err := broker.Open(ctx, r.agentID, TerminalRequest{
 		Target:   ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID},
 		ConfigID: config.ConfigID,
-		Context:  ExecutionContext{AgentID: r.agentID, SessionID: SessionIDFromContext(ctx), Target: ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID}},
+		Context:  ExecutionContext{AgentID: r.agentID, SessionID: SessionIDFromContext(ctx), ApprovalID: ApprovalIDFromContext(ctx), Target: ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID}},
 		CWD:      strings.TrimSpace(args.CWD),
 		Shell:    shell,
 		Rows:     args.Rows,
@@ -362,13 +362,14 @@ func (r *Registry) execTerminalTerminate(ctx context.Context, raw json.RawMessag
 		b.Write(chunk.Data)
 	}
 	result := map[string]any{
-		"terminal_id": id,
-		"status":      "terminated",
-		"output":      b.String(),
-		"next_seq":    out.NextSeq,
-		"exited":      out.Exited,
-		"graceful":    out.Graceful,
-		"forced":      out.Forced,
+		"terminal_id":        id,
+		"status":             "terminated",
+		"output":             b.String(),
+		"next_seq":           out.NextSeq,
+		"exited":             out.Exited,
+		"graceful":           out.Graceful,
+		"forced":             out.Forced,
+		"termination_status": out.TerminationStatus,
 	}
 	if out.ReplayGap {
 		result["replay_gap"] = true

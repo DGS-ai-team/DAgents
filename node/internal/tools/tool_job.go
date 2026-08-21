@@ -53,7 +53,7 @@ func backgroundJobCancelToolDef() ToolDef {
 	}
 }
 
-func (r *Registry) execBackgroundJobStatus(_ context.Context, raw json.RawMessage) (string, error) {
+func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMessage) (string, error) {
 	_, cleaned := ParseRunInBackground(string(raw))
 	var args backgroundJobIDArgs
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
@@ -63,7 +63,23 @@ func (r *Registry) execBackgroundJobStatus(_ context.Context, raw json.RawMessag
 	if !ok {
 		return fmt.Sprintf("ERROR: 未找到后台任务：%q", args.JobID), nil
 	}
-	return job.statusText(), nil
+	status := job.statusText()
+	job.mu.Lock()
+	jobStatus := job.status
+	var recovery RemoteProcessRecovery
+	if job.remoteRecovery != nil {
+		recovery = *job.remoteRecovery
+	}
+	job.mu.Unlock()
+	if jobStatus == jobStatusUnknown && recovery.JobToken != "" && r.linuxProvider != nil {
+		remoteStatus, err := r.linuxProvider.InspectRemoteProcess(ctx, r.agentID, recovery)
+		if err != nil {
+			status += "\nremote_status: unavailable"
+		} else {
+			status += "\nremote_status: " + remoteStatus
+		}
+	}
+	return status, nil
 }
 
 func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessage) (string, error) {
@@ -75,6 +91,12 @@ func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessag
 	job, ok := r.bgJobs.get(args.JobID)
 	if !ok {
 		return fmt.Sprintf("ERROR: 未找到后台任务：%q", args.JobID), nil
+	}
+	if message, handled, err := r.cancelRecoveredBackgroundJob(context.Background(), job); handled {
+		if err != nil {
+			return "", err
+		}
+		return message, nil
 	}
 	msg := job.cancelJob()
 	job.waitDone(5 * time.Second)

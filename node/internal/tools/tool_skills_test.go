@@ -18,6 +18,9 @@ func TestLoadSkillsToolDef_describesWhenToUse(t *testing.T) {
 			t.Fatalf("load_skills description missing %q: %s", sub, desc)
 		}
 	}
+	if strings.Contains(desc, "可用 skills（name: description）：") {
+		t.Fatalf("load_skills description should not embed the catalog: %s", desc)
+	}
 	params := def.Function.Parameters
 	skillNames, _ := params["properties"].(map[string]any)["skill_names"].(map[string]any)
 	paramDesc, _ := skillNames["description"].(string)

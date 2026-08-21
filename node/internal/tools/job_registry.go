@@ -11,28 +11,32 @@ import (
 )
 
 type backgroundJob struct {
-	id         string
-	sessionID  string
-	toolName   string
-	toolCallID string
-	mu         sync.Mutex
-	status     string // running / succeeded / failed / cancelled
-	result     string
-	startedAt  int64
-	finishedAt int64
-	done       chan struct{}
-	cancelFn   context.CancelFunc
+	id             string
+	sessionID      string
+	toolName       string
+	toolCallID     string
+	mu             sync.Mutex
+	status         string // running / succeeded / failed / cancelled
+	result         string
+	recoveryReason string
+	recoveredAt    int64
+	startedAt      int64
+	finishedAt     int64
+	done           chan struct{}
+	cancelFn       context.CancelFunc
 	// bash 超时自动降级：保留子进程由 collector 收割。
-	autoDegraded       bool
-	process            Process
-	bashCwd            string
-	bashTimeout        int
-	bashStdout         string
-	bashStderr         string
-	bashExitCode       *int
-	bashShellType      string
-	bashOutputEncoding string
-	compressStats      *OutputCompressStats
+	autoDegraded        bool
+	process             Process
+	remoteRecovery      *RemoteProcessRecovery
+	bashCwd             string
+	bashTimeout         int
+	bashStdout          string
+	bashStderr          string
+	bashOutputTruncated bool
+	bashExitCode        *int
+	bashShellType       string
+	bashOutputEncoding  string
+	compressStats       *OutputCompressStats
 	// notifyOnce 保证完成/取消只回灌一次（collector、cancel、降级竞态可并发触发）。
 	notifyOnce sync.Once
 }
@@ -338,7 +342,6 @@ func (r *Registry) StartBackground(
 	if err := r.rejectIfDisabled(parent, toolName); err != nil {
 		return "", err
 	}
-	jobCtx, cancel := context.WithCancel(WithBackgroundExecution(WithToolCallID(WithSession(parent, sessionID), toolCallID)))
 	job := &backgroundJob{
 		id:         newJobID(),
 		sessionID:  sessionID,
@@ -347,8 +350,12 @@ func (r *Registry) StartBackground(
 		status:     jobStatusRunning,
 		startedAt:  nowMs(),
 		done:       make(chan struct{}),
-		cancelFn:   cancel,
 	}
+	jobCtx, cancel := context.WithCancel(WithBackgroundJobID(
+		WithBackgroundExecution(WithToolCallID(WithSession(parent, sessionID), toolCallID)),
+		job.id,
+	))
+	job.cancelFn = cancel
 	r.bgJobs.put(job)
 
 	go func() {
@@ -379,6 +386,42 @@ func (r *Registry) StartBackground(
 	}()
 
 	return formatBackgroundJobAck(job), nil
+}
+
+// bindBackgroundProcess associates a running provider process with its job.
+// If cancellation won the race before the provider started, terminate the
+// process immediately after binding instead of allowing it to escape.
+func (r *Registry) bindBackgroundProcess(ctx context.Context, process Process) {
+	if r == nil || r.bgJobs == nil || process == nil {
+		return
+	}
+	jobID := BackgroundJobIDFromContext(ctx)
+	if jobID == "" {
+		return
+	}
+	job, ok := r.bgJobs.get(jobID)
+	if !ok {
+		return
+	}
+	job.mu.Lock()
+	if job.status == jobStatusRunning {
+		job.process = process
+		job.mu.Unlock()
+		if provider, ok := process.(interface {
+			RemoteProcessRecovery() (RemoteProcessRecovery, bool)
+		}); ok {
+			if recovery, exists := provider.RemoteProcessRecovery(); exists {
+				job.mu.Lock()
+				copy := recovery
+				job.remoteRecovery = &copy
+				job.mu.Unlock()
+				r.bgJobs.persist(job)
+			}
+		}
+		return
+	}
+	job.mu.Unlock()
+	_ = process.Terminate(context.Background())
 }
 
 // 后台 job 对模型/用户的统一说明（超时降级与内部 StartBackground ACK 共用）。
@@ -451,6 +494,18 @@ func (j *backgroundJob) statusText() string {
 	if j.autoDegraded {
 		lines = append(lines, "degraded_from_sync_timeout: true")
 	}
+	if j.recoveryReason != "" {
+		lines = append(lines, fmt.Sprintf("recovery_reason=%s", j.recoveryReason))
+	}
+	if j.recoveredAt > 0 {
+		lines = append(lines, fmt.Sprintf("recovered_at_unix_ms=%d", j.recoveredAt))
+	}
+	if j.process != nil {
+		lines = append(lines, fmt.Sprintf("process_id=%s", j.process.ID()))
+	}
+	if j.remoteRecovery != nil {
+		lines = append(lines, "remote_recovery: available")
+	}
 	if j.status != jobStatusRunning && j.result != "" {
 		preview, truncated := clipText(j.result, 2000)
 		lines = append(lines, "--- RESULT_PREVIEW ---", preview)
@@ -489,6 +544,41 @@ func (j *backgroundJob) cancelJob() string {
 	status := j.status
 	j.mu.Unlock()
 	return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=%s", id, status)
+}
+
+// cancelRecoveredBackgroundJob attempts explicit cleanup for an orphaned
+// remote Linux process. It returns handled=false when the job has no safe
+// remote identity, leaving the caller to report the existing unknown state.
+func (r *Registry) cancelRecoveredBackgroundJob(ctx context.Context, job *backgroundJob) (message string, handled bool, err error) {
+	if r == nil || r.linuxProvider == nil || job == nil {
+		return "", false, nil
+	}
+	job.mu.Lock()
+	status := job.status
+	var recovery RemoteProcessRecovery
+	if job.remoteRecovery != nil {
+		recovery = *job.remoteRecovery
+	}
+	jobID := job.id
+	job.mu.Unlock()
+	if status != jobStatusUnknown || recovery.JobToken == "" {
+		return "", false, nil
+	}
+	remoteStatus, err := r.linuxProvider.RecoverRemoteProcess(ctx, r.agentID, recovery)
+	if err != nil {
+		return "", true, err
+	}
+	job.mu.Lock()
+	if job.status == jobStatusUnknown {
+		job.status = jobStatusCancelled
+		job.result = "Node restart orphan reconciled; remote process status=" + remoteStatus
+		job.recoveryReason = "node_restart_orphan_reconciled"
+		job.finishedAt = nowMs()
+		job.remoteRecovery = nil
+	}
+	job.mu.Unlock()
+	r.bgJobs.persist(job)
+	return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=cancelled remote_status=%s", jobID, remoteStatus), true, nil
 }
 
 func clipText(s string, limit int) (string, bool) {

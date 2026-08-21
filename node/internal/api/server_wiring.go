@@ -160,10 +160,14 @@ func attachProcessEventSink(reg *tools.Registry, hub *stream.Hub, auditStore *st
 			return
 		}
 		payload := map[string]any{
-			"process_id": ev.ProcessID,
-			"event":      string(ev.Type),
-			"seq":        ev.Seq,
-			"stream":     ev.Stream,
+			"process_id":   ev.ProcessID,
+			"event":        string(ev.Type),
+			"seq":          ev.Seq,
+			"stream":       ev.Stream,
+			"output_bytes": ev.OutputBytes,
+		}
+		if ev.Context.CommandDigest != "" {
+			payload["command_digest"] = ev.Context.CommandDigest
 		}
 		if len(ev.Data) > 0 {
 			payload["data"] = ev.Data
@@ -207,6 +211,8 @@ func attachProcessEventSink(reg *tools.Registry, hub *stream.Hub, auditStore *st
 			PolicyDecision: ev.Context.PolicyDecision,
 			ApprovalID:     ev.Context.ApprovalID,
 			RiskLevel:      ev.Context.RiskLevel,
+			CommandDigest:  ev.Context.CommandDigest,
+			OutputBytes:    ev.OutputBytes,
 			ExitCode:       exitCode,
 			ExitError:      exitError,
 		}); err != nil && logger != nil {

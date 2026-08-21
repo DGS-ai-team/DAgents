@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 )
@@ -37,7 +38,6 @@ type Registry struct {
 	triggerStore           *triggers.Store
 	triggerSched           *triggers.Scheduler
 	agentID                string
-	skillsCatalogHolder
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
 	browser                *browser.Manager
@@ -115,6 +115,66 @@ func (r *Registry) SetTerminalConfigResolver(resolver TerminalConfigResolver) {
 	r.terminalConfigResolver = resolver
 }
 
+// resolveLinuxChannelID accepts the model-facing terminal config ID and the
+// legacy raw channel ID. New tools should pass the prefixed config ID returned
+// by terminal_config_list so the Agent binding is checked before execution.
+// Raw IDs remain accepted for compatibility, while the Linux provider still
+// performs its own live channel and binding checks immediately before use.
+func (r *Registry) resolveLinuxChannelID(ctx context.Context, requested string) (string, error) {
+	id := strings.TrimSpace(requested)
+	if id == "" {
+		return "", fmt.Errorf("config_id is required; call terminal_config_list first")
+	}
+	if !strings.HasPrefix(id, TerminalConfigLinuxPrefix) {
+		return id, nil
+	}
+	if r == nil || r.terminalConfigResolver == nil {
+		return "", fmt.Errorf("terminal config resolver is unavailable")
+	}
+	config, err := r.resolveTerminalConfig(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if config.TargetKind != executionTargetLinuxChannel {
+		return "", fmt.Errorf("terminal config %q is not a Linux channel config", id)
+	}
+	channelID := strings.TrimSpace(config.TargetID)
+	if channelID == "" {
+		return "", fmt.Errorf("terminal config %q has no Linux channel target", id)
+	}
+	return channelID, nil
+}
+
+func resolveLinuxToolID(configID, legacyChannelID string) (string, error) {
+	configID = strings.TrimSpace(configID)
+	legacyChannelID = strings.TrimSpace(legacyChannelID)
+	if configID != "" && legacyChannelID != "" && configID != legacyChannelID {
+		return "", fmt.Errorf("config_id and channel_id refer to different targets")
+	}
+	if configID != "" {
+		return configID, nil
+	}
+	if legacyChannelID != "" {
+		return legacyChannelID, nil
+	}
+	return "", fmt.Errorf("config_id is required; call terminal_config_list first")
+}
+
+func toolArgString(args map[string]any, key string) string {
+	if args == nil {
+		return ""
+	}
+	value, ok := args[key]
+	if !ok || value == nil {
+		return ""
+	}
+	text := strings.TrimSpace(fmt.Sprint(value))
+	if text == "<nil>" {
+		return ""
+	}
+	return text
+}
+
 // OpenTerminal routes local and Linux-channel terminals through the same
 // registry that owns model-facing tools. The registry fills in the owning
 // agent and runtime event sink so a terminal API cannot accidentally bypass
@@ -172,6 +232,57 @@ func (r *Registry) SetAgentID(agentID string) {
 		return
 	}
 	r.agentID = strings.TrimSpace(agentID)
+}
+
+// PreflightTool evaluates live provider policy before the orchestrator queues
+// a tool. The provider still repeats the check immediately before connecting.
+func (r *Registry) PreflightTool(ctx context.Context, name string, args map[string]any) (ToolPreflightDecision, bool) {
+	if r == nil || r.linuxProvider == nil {
+		return ToolPreflightDecision{}, false
+	}
+	name = strings.TrimSpace(name)
+	configID := toolArgString(args, "config_id")
+	legacyChannelID := toolArgString(args, "channel_id")
+	requestedID := ""
+	command := ""
+	switch name {
+	case "linux_exec":
+		command = toolArgString(args, "command")
+		var err error
+		requestedID, err = resolveLinuxToolID(configID, legacyChannelID)
+		if err != nil || command == "" {
+			return ToolPreflightDecision{}, false
+		}
+	case "linux_file_upload", "linux_file_download":
+		var err error
+		requestedID, err = resolveLinuxToolID(configID, legacyChannelID)
+		if err != nil {
+			return ToolPreflightDecision{}, false
+		}
+	case "terminal_open":
+		if configID == "" || r.terminalConfigResolver == nil {
+			return ToolPreflightDecision{}, false
+		}
+		config, err := r.resolveTerminalConfig(ctx, configID)
+		if err != nil {
+			return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: err.Error()}, true
+		}
+		if config.TargetKind != executionTargetLinuxChannel {
+			return ToolPreflightDecision{}, false
+		}
+		requestedID = config.TargetID
+	default:
+		return ToolPreflightDecision{}, false
+	}
+	channelID, err := r.resolveLinuxChannelID(ctx, requestedID)
+	if err != nil {
+		return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: err.Error()}, true
+	}
+	action, reason, err := r.linuxProvider.Preflight(ctx, r.agentID, channelID, command)
+	if err != nil {
+		return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: err.Error()}, true
+	}
+	return ToolPreflightDecision{Action: action, ApprovalReason: reason}, true
 }
 
 // WithBackgroundJobStoreForSession restores only jobs belonging to one
@@ -300,7 +411,7 @@ func (r *Registry) Definitions() []ToolDef {
 		base = append(base, linuxFileTransferToolDefs()...)
 	}
 	base = append(base, r.mcpToolDefs()...)
-	defs := r.enrichDefinitions(r.filterToolDefs(base))
+	defs := r.filterToolDefs(base)
 	// Keep the serialized tools prefix stable even when optional providers
 	// contribute definitions in a different order. MCP itself is already
 	// sorted, but normalizing the complete list also covers future providers.
@@ -327,6 +438,20 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
 	return h(ctx, json.RawMessage(arguments))
+}
+
+// ToolRetryAllowed is deliberately an allowlist. Unknown/custom tools and
+// commands that may mutate state are never retried automatically because a
+// process restart or transport error cannot prove whether their side effect
+// committed.
+func (r *Registry) ToolRetryAllowed(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files", "search_file",
+		"terminal_read", "terminal_list", "background_job_status":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Registry) registerBuiltins() {

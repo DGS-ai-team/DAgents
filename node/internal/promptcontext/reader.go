@@ -30,10 +30,10 @@ func flagOrDefault(v *bool, def bool) bool {
 // Reader 从内存 Content 读取侧车与长期记忆（由 agents.db 在 runtime 启动时注入）。
 // 用户称呼来自 Node 配置 PreferredName，不再使用 user.md 侧车正文。
 type Reader struct {
-	content        *Content
-	filter         Filter
-	preferredName  string
-	mu             sync.Mutex
+	content       *Content
+	filter        Filter
+	preferredName string
+	mu            sync.RWMutex
 }
 
 // NewReader 构造 Reader；runtimeDir 参数保留兼容，不再读盘。
@@ -46,7 +46,9 @@ func (r *Reader) SetFilter(f Filter) {
 	if r == nil {
 		return
 	}
+	r.mu.Lock()
 	r.filter = f
+	r.mu.Unlock()
 }
 
 // SetPreferredName 设置本机使用者称呼（Node 首配 / 通用设置）。
@@ -61,7 +63,10 @@ func (r *Reader) SetPreferredName(name string) {
 
 // ReadSoul 读取 soul；空白或缺失返回空串。
 func (r *Reader) ReadSoul() string {
-	if !flagOrDefault(r.filter.SoulEnabled, true) {
+	r.mu.RLock()
+	enabled := flagOrDefault(r.filter.SoulEnabled, true)
+	r.mu.RUnlock()
+	if !enabled {
 		return ""
 	}
 	return r.readContentField(soulField)
@@ -77,14 +82,17 @@ func (r *Reader) PreferredName() string {
 	if r == nil {
 		return ""
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.preferredName
 }
 
 // ReadCustom 读取 custom。
 func (r *Reader) ReadCustom() string {
-	if !flagOrDefault(r.filter.CustomEnabled, true) {
+	r.mu.RLock()
+	enabled := flagOrDefault(r.filter.CustomEnabled, true)
+	r.mu.RUnlock()
+	if !enabled {
 		return ""
 	}
 	return r.readContentField(customField)
@@ -92,7 +100,10 @@ func (r *Reader) ReadCustom() string {
 
 // ReadLongTermMemory 读取长期记忆（不存在或空白时不注入）。
 func (r *Reader) ReadLongTermMemory() string {
-	if !flagOrDefault(r.filter.LongTermEnabled, true) {
+	r.mu.RLock()
+	enabled := flagOrDefault(r.filter.LongTermEnabled, true)
+	r.mu.RUnlock()
+	if !enabled {
 		return ""
 	}
 	return r.readContentField("long_term")
@@ -152,9 +163,9 @@ func (r *Reader) readContentField(kind string) string {
 	if r == nil || r.content == nil {
 		return ""
 	}
-	r.mu.Lock()
+	r.mu.RLock()
 	c := *r.content
-	r.mu.Unlock()
+	r.mu.RUnlock()
 	var text string
 	switch kind {
 	case soulField:

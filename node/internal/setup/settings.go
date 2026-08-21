@@ -26,13 +26,13 @@ type LLMProfileSettings struct {
 
 // LLMSettings LLM 连接配置（支持多配置；列表顺序中第一条为默认）。
 type LLMSettings struct {
-	Active       string               `json:"active,omitempty"` // 运行时当前选用；缺省取 profiles[0]
-	Profiles     []LLMProfileSettings `json:"profiles"`
-	Provider  string `json:"provider"`
-	BaseURL   string `json:"base_url"`
-	Model     string `json:"model"`
-	APIKeyEnv string `json:"api_key_env,omitempty"`
-	Mock      bool   `json:"mock"`
+	Active    string               `json:"active,omitempty"` // 运行时当前选用；缺省取 profiles[0]
+	Profiles  []LLMProfileSettings `json:"profiles"`
+	Provider  string               `json:"provider"`
+	BaseURL   string               `json:"base_url"`
+	Model     string               `json:"model"`
+	APIKeyEnv string               `json:"api_key_env,omitempty"`
+	Mock      bool                 `json:"mock"`
 }
 
 // ManageSettings Manage 连接配置（安装向导原批次 2）。
@@ -132,17 +132,20 @@ type WeComSettings struct {
 	// HasWebhookKey GET 时表示是否已配置密钥（不回明文 key）。
 	HasWebhookKey bool `json:"has_webhook_key"`
 	// ClearWebhookKey 为 true 时清空密钥与 URL。
-	ClearWebhookKey bool `json:"clear_webhook_key,omitempty"`
+	ClearWebhookKey bool   `json:"clear_webhook_key,omitempty"`
 	APIBase         string `json:"api_base"`
 }
 
 // ToolsSettings 内置工具编码与 bash 压缩。
 type ToolsSettings struct {
-	BashOutputEncoding         string `json:"bash_output_encoding"`
-	FileEncoding               string `json:"file_encoding"`
-	BashCompressEnabled        bool   `json:"bash_compress_enabled"`
-	BashCompressMaxOutputChars int    `json:"bash_compress_max_output_chars"`
-	BashCompressMaxStderrChars int    `json:"bash_compress_max_stderr_chars"`
+	BashOutputEncoding          string `json:"bash_output_encoding"`
+	FileEncoding                string `json:"file_encoding"`
+	BashCompressEnabled         bool   `json:"bash_compress_enabled"`
+	BashCompressMaxOutputChars  int    `json:"bash_compress_max_output_chars"`
+	BashCompressMaxStderrChars  int    `json:"bash_compress_max_stderr_chars"`
+	BashCompressOutputMode      string `json:"bash_compress_output_mode"`
+	BashCompressTailChars       int    `json:"bash_compress_tail_chars"`
+	BashCompressTailStderrChars int    `json:"bash_compress_tail_stderr_chars"`
 }
 
 // HooksSettings 常用 Hook 开关（不含 plugin 列表）。
@@ -283,11 +286,14 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 		},
 		WeCom: weComSettingsFromConfig(cfg),
 		Tools: ToolsSettings{
-			BashOutputEncoding:         cfg.Tools.BashOutputEncoding,
-			FileEncoding:               cfg.Tools.FileEncoding,
-			BashCompressEnabled:        cfg.Tools.BashCompress.Enabled == nil || *cfg.Tools.BashCompress.Enabled,
-			BashCompressMaxOutputChars: cfg.Tools.BashCompress.MaxOutputChars,
-			BashCompressMaxStderrChars: cfg.Tools.BashCompress.MaxOutputCharsStderr,
+			BashOutputEncoding:          cfg.Tools.BashOutputEncoding,
+			FileEncoding:                cfg.Tools.FileEncoding,
+			BashCompressEnabled:         cfg.Tools.BashCompress.Enabled == nil || *cfg.Tools.BashCompress.Enabled,
+			BashCompressMaxOutputChars:  cfg.Tools.BashCompress.MaxOutputChars,
+			BashCompressMaxStderrChars:  cfg.Tools.BashCompress.MaxOutputCharsStderr,
+			BashCompressOutputMode:      cfg.Tools.BashCompress.OutputMode,
+			BashCompressTailChars:       cfg.Tools.BashCompress.TailOutputChars,
+			BashCompressTailStderrChars: cfg.Tools.BashCompress.TailOutputCharsStderr,
 		},
 		Hooks: HooksSettings{
 			DuplicateToolCallEnabled:       cfg.DuplicateToolCallHookEnabled(),
@@ -737,6 +743,13 @@ func applyToolsPatch(cfg *config.Config, p ToolsSettings) error {
 	}
 	if p.BashCompressMaxStderrChars > 0 {
 		cfg.Tools.BashCompress.MaxOutputCharsStderr = p.BashCompressMaxStderrChars
+	}
+	cfg.Tools.BashCompress.OutputMode = strings.TrimSpace(p.BashCompressOutputMode)
+	if p.BashCompressTailChars > 0 {
+		cfg.Tools.BashCompress.TailOutputChars = p.BashCompressTailChars
+	}
+	if p.BashCompressTailStderrChars > 0 {
+		cfg.Tools.BashCompress.TailOutputCharsStderr = p.BashCompressTailStderrChars
 	}
 	return nil
 }

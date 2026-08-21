@@ -162,7 +162,13 @@ func (s *Server) handleTestLinuxChannel(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "linux_channel_test_failed", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"channel_id": id, "available": status.Available, "message": status.Message})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"channel_id": id,
+		"available":  status.Available,
+		"message":    status.Message,
+		"error_code": status.ErrorCode,
+		"stages":     status.Stages,
+	})
 }
 
 func (s *Server) handleListLinuxCredentials(w http.ResponseWriter, r *http.Request) {

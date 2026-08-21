@@ -17,6 +17,69 @@ func (r *Registry) SetTriggerRuntime(store *triggers.Store, sched *triggers.Sche
 	r.agentID = strings.TrimSpace(agentID)
 }
 
+// triggerConditionSchema keeps the model-facing condition contract structured
+// without relying on provider-specific oneOf/anyOf support. Runtime validation
+// remains authoritative in node/internal/triggers.
+func triggerConditionSchema() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "调度条件必须且只能选择 interval_seconds、fire_at 或 schedule 之一；cmd 仅用于 schedule 门控。",
+		"properties": map[string]any{
+			"interval_seconds": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"description": "周期触发间隔（秒）。",
+			},
+			"fire_at": map[string]any{
+				"type":        "number",
+				"description": "单次触发时间，Unix 秒时间戳。",
+			},
+			"schedule": map[string]any{
+				"type":        "object",
+				"description": "日历触发：daily 需要 hour/minute；weekly 还需要 weekday（0=周日）；monthly 还需要 day（-1=最后一天）。",
+				"properties": map[string]any{
+					"kind": map[string]any{
+						"type":        "string",
+						"enum":        []string{"daily", "weekly", "monthly"},
+						"description": "日历类型。",
+					},
+					"hour": map[string]any{
+						"type":        "integer",
+						"minimum":     0,
+						"maximum":     23,
+						"description": "小时（0-23）。",
+					},
+					"minute": map[string]any{
+						"type":        "integer",
+						"minimum":     0,
+						"maximum":     59,
+						"description": "分钟（0-59）。",
+					},
+					"weekday": map[string]any{
+						"type":        "integer",
+						"minimum":     0,
+						"maximum":     6,
+						"description": "星期几（0=周日，6=周六），仅 weekly 使用。",
+					},
+					"day": map[string]any{
+						"type":        "integer",
+						"minimum":     -31,
+						"maximum":     31,
+						"description": "月份日期；正数为当月日期，-1 表示最后一天，仅 monthly 使用。",
+					},
+				},
+				"required":             []string{"kind", "hour", "minute"},
+				"additionalProperties": false,
+			},
+			"cmd": map[string]any{
+				"type":        "string",
+				"description": "可选的 bash 门控命令；仅 schedule 自动触发前执行，退出码为 0 才投递任务。",
+			},
+		},
+		"additionalProperties": false,
+	}
+}
+
 func triggerListToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
@@ -64,7 +127,7 @@ func triggerCreateToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "trigger_create",
-			Description: "新建触发器；condition 须含 interval_seconds、fire_at 或 schedule 之一",
+			Description: "新建触发器规则；condition 必须且只能选择一种调度方式。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -76,10 +139,7 @@ func triggerCreateToolDef() ToolDef {
 						"type":        "string",
 						"description": "触发时投递的任务正文模板（必填）；须自带必要上下文，避免触发后再次向用户追问",
 					},
-					"condition": map[string]any{
-						"type":        "object",
-						"description": "调度条件（必填，三选一）：{\"interval_seconds\":N} 周期；{\"fire_at\":unix秒} 单次；{\"schedule\":{\"kind\":\"daily|weekly|monthly\",...},\"cmd\":\"可选 bash 门控\"}。schedule 示例：daily {\"kind\":\"daily\",\"hour\":9,\"minute\":0}；weekly {\"kind\":\"weekly\",\"weekday\":0,\"hour\":10,\"minute\":0}（0=周日）；monthly {\"kind\":\"monthly\",\"day\":-1,\"hour\":8,\"minute\":0}（day 正数超当月跳月，-1=最后一天）。可选 cmd：仅 schedule 自动触发时 bash 执行，exit 0 才投递任务",
-					},
+					"condition": triggerConditionSchema(),
 				},
 				"required":             []string{"name", "task_template", "condition"},
 				"additionalProperties": false,
@@ -93,7 +153,7 @@ func triggerUpdateToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "trigger_update",
-			Description: "修改已有触发器；未传字段保持不变",
+			Description: "修改已有触发器；未传字段保持不变，condition 规则同 trigger_create。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -109,10 +169,7 @@ func triggerUpdateToolDef() ToolDef {
 						"type":        "string",
 						"description": "新任务模板（可选；未传则保持不变）",
 					},
-					"condition": map[string]any{
-						"type":        "object",
-						"description": "新调度条件（可选；未传则保持不变）。支持 interval_seconds / fire_at / schedule + 可选 cmd，规则同 trigger_create",
-					},
+					"condition": triggerConditionSchema(),
 				},
 				"required":             []string{"trigger_id"},
 				"additionalProperties": false,

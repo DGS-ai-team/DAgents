@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,8 @@ const (
 )
 
 type linuxExecArgs struct {
-	ChannelID      string `json:"channel_id"`
+	ConfigID       string `json:"config_id"`
+	ChannelID      string `json:"channel_id"` // legacy compatibility
 	Command        string `json:"command"`
 	CWD            string `json:"cwd"`
 	TimeoutMS      int    `json:"timeout_ms"`
@@ -30,17 +30,17 @@ func linuxExecToolDef() []ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "linux_exec",
-			Description: "在指定的 Linux SSH channel 上执行一次非交互命令，返回 stdout、stderr 和退出码。每次调用使用独立 SSH session，不共享 cwd、环境变量或后台进程。执行可能涉及远程写入，必须遵循当前 Agent 的审批策略。",
+			Description: "使用 terminal_config_list 返回的 config_id，在指定 Linux SSH 配置上执行一次非交互命令并返回 stdout、stderr 和退出码。每次调用使用独立会话，不保留 cwd、环境或后台进程；需要交互或保持状态时请使用 terminal_open。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"channel_id":       map[string]any{"type": "string", "description": "已绑定到当前 Agent 的 Linux channel ID。"},
+					"config_id":        map[string]any{"type": "string", "description": "terminal_config_list 返回的 Linux 配置 ID。"},
 					"command":          map[string]any{"type": "string", "description": "在远程 Linux 主机上执行的 shell 命令。"},
 					"cwd":              map[string]any{"type": "string", "description": "可选的远程工作目录；省略时使用 channel 默认目录。"},
 					"timeout_ms":       map[string]any{"type": "integer", "minimum": 1, "maximum": maxLinuxExecTimeoutMS, "description": "可选的命令超时，单位毫秒。"},
 					"max_output_bytes": map[string]any{"type": "integer", "minimum": 1, "maximum": maxLinuxExecOutputBytes, "description": "可选的 stdout/stderr 单独上限。"},
 				},
-				"required":             []string{"channel_id", "command"},
+				"required":             []string{"config_id", "command"},
 				"additionalProperties": false,
 			}),
 		},
@@ -58,10 +58,17 @@ func (r *Registry) execLinuxExec(ctx context.Context, raw json.RawMessage) (stri
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	args.ChannelID = strings.TrimSpace(args.ChannelID)
+	requestedID, err := resolveLinuxToolID(args.ConfigID, args.ChannelID)
+	if err != nil {
+		return "", err
+	}
+	channelID, err := r.resolveLinuxChannelID(ctx, requestedID)
+	if err != nil {
+		return "", err
+	}
 	args.Command = strings.TrimSpace(args.Command)
-	if args.ChannelID == "" || args.Command == "" {
-		return "", fmt.Errorf("channel_id and command are required")
+	if channelID == "" || args.Command == "" {
+		return "", fmt.Errorf("config_id and command are required")
 	}
 	timeout := args.TimeoutMS
 	if timeout <= 0 {
@@ -76,12 +83,15 @@ func (r *Registry) execLinuxExec(ctx context.Context, raw json.RawMessage) (stri
 	}
 
 	process, err := r.linuxProvider.Start(ctx, ExecRequest{
-		Target: ExecutionTarget{Kind: executionTargetLinuxChannel, ID: args.ChannelID},
+		Target: ExecutionTarget{Kind: executionTargetLinuxChannel, ID: channelID},
 		Context: ExecutionContext{
-			AgentID:    r.agentID,
-			SessionID:  sessionIDFromContext(ctx),
-			ToolCallID: toolCallIDFromContext(ctx),
-			Target:     ExecutionTarget{Kind: executionTargetLinuxChannel, ID: args.ChannelID},
+			AgentID:         r.agentID,
+			SessionID:       sessionIDFromContext(ctx),
+			ToolCallID:      toolCallIDFromContext(ctx),
+			BackgroundJobID: BackgroundJobIDFromContext(ctx),
+			ApprovalID:      ApprovalIDFromContext(ctx),
+			CommandDigest:   executionCommandDigest(args.Command),
+			Target:          ExecutionTarget{Kind: executionTargetLinuxChannel, ID: channelID},
 		},
 		Command:        args.Command,
 		CWD:            args.CWD,
@@ -106,14 +116,15 @@ func (r *Registry) execLinuxExec(ctx context.Context, raw json.RawMessage) (stri
 		_ = process.Close()
 		return "", err
 	}
-	var outBuf, errBuf boundedOutputBuffer
-	outBuf.limit, errBuf.limit = maxOutput, maxOutput
+	r.bindBackgroundProcess(ctx, process)
+	outBuf := NewOutputBudget(maxOutput)
+	errBuf := NewOutputBudget(maxOutput)
 	copyDone := make(chan struct{})
 	go func() {
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go func() { _, _ = io.Copy(&outBuf, stdout); wg.Done() }()
-		go func() { _, _ = io.Copy(&errBuf, stderr); wg.Done() }()
+		go func() { _, _ = io.Copy(outBuf, stdout); wg.Done() }()
+		go func() { _, _ = io.Copy(errBuf, stderr); wg.Done() }()
 		wg.Wait()
 		close(copyDone)
 	}()
@@ -130,33 +141,14 @@ func (r *Registry) execLinuxExec(ctx context.Context, raw json.RawMessage) (stri
 	}
 	<-copyDone
 	_ = process.Close()
-	return formatLinuxExecResult(outBuf.Bytes(), errBuf.Bytes(), process.ExitStatus(), waitErr, outBuf.truncated || errBuf.truncated), nil
+	terminationState := ""
+	if stateProvider, ok := process.(interface{ TerminationState() string }); ok {
+		terminationState = stateProvider.TerminationState()
+	}
+	return formatLinuxExecResult(outBuf.Bytes(), errBuf.Bytes(), process.ExitStatus(), waitErr, outBuf.truncated || errBuf.truncated, terminationState), nil
 }
 
-type boundedOutputBuffer struct {
-	bytes.Buffer
-	limit     int
-	truncated bool
-}
-
-func (b *boundedOutputBuffer) Write(data []byte) (int, error) {
-	if b.limit <= 0 {
-		return len(data), nil
-	}
-	remaining := b.limit - b.Len()
-	if remaining <= 0 {
-		b.truncated = true
-		return len(data), nil
-	}
-	if len(data) > remaining {
-		_, _ = b.Buffer.Write(data[:remaining])
-		b.truncated = true
-		return len(data), nil
-	}
-	return b.Buffer.Write(data)
-}
-
-func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr error, truncated bool) string {
+func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr error, truncated bool, terminationState string) string {
 	code := 1
 	if exit != nil {
 		code = exit.Code
@@ -175,6 +167,9 @@ func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr erro
 	}
 	if waitErr != nil && (exit == nil || exit.Error == "") {
 		parts = append(parts, "exit_error: "+waitErr.Error())
+	}
+	if strings.TrimSpace(terminationState) != "" {
+		parts = append(parts, "termination_status: "+strings.TrimSpace(terminationState))
 	}
 	return strings.Join(parts, "\n")
 }

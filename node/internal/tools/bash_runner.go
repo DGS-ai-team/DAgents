@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -133,10 +132,11 @@ func (r *Registry) startShellProcess(ctx context.Context, params shellRunParams)
 	return provider.Start(ctx, ExecRequest{
 		Target: ExecutionTarget{Kind: executionTargetLocal},
 		Context: ExecutionContext{
-			AgentID:    r.agentID,
-			SessionID:  sessionIDFromContext(ctx),
-			ToolCallID: toolCallIDFromContext(ctx),
-			Target:     ExecutionTarget{Kind: executionTargetLocal},
+			AgentID:       r.agentID,
+			SessionID:     sessionIDFromContext(ctx),
+			ToolCallID:    toolCallIDFromContext(ctx),
+			CommandDigest: executionCommandDigest(params.command),
+			Target:        ExecutionTarget{Kind: executionTargetLocal},
 		},
 		ShellType: string(params.shellType),
 		Command:   params.command,
@@ -152,11 +152,13 @@ func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shel
 	if err != nil {
 		return "", nil, err
 	}
-	var stdout, stderr bytes.Buffer
-	process.SetOutput(&stdout, &stderr)
+	stdout := newBashOutputBuffer(params.compress, false)
+	stderr := newBashOutputBuffer(params.compress, true)
+	process.SetOutput(stdout, stderr)
 	if err := process.Start(); err != nil {
 		return "", nil, err
 	}
+	r.bindBackgroundProcess(ctx, process)
 	waitErr := make(chan error, 1)
 	go func() { waitErr <- process.Wait() }()
 	var runErr error
@@ -172,7 +174,7 @@ func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shel
 	if params.shellType == shellPowerShell {
 		errText = decodePowerShellCLIXML(errText)
 	}
-	out, stats := formatShellCompletedOutput(params, outText, errText, process.ExitStatus(), runErr)
+	out, stats := formatShellCompletedOutputWithCapture(params, outText, errText, process.ExitStatus(), runErr, stdout.truncated || stderr.truncated)
 	return out, stats, nil
 }
 
@@ -288,14 +290,15 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 		}()
 		var wg sync.WaitGroup
 		wg.Add(2)
-		var stdoutBuf, stderrBuf bytes.Buffer
+		stdoutBuf := newBashOutputBuffer(params.compress, false)
+		stderrBuf := newBashOutputBuffer(params.compress, true)
 		var stdoutErr, stderrErr error
 		go func() {
-			_, stdoutErr = io.Copy(&stdoutBuf, stdoutPipe)
+			_, stdoutErr = io.Copy(stdoutBuf, stdoutPipe)
 			wg.Done()
 		}()
 		go func() {
-			_, stderrErr = io.Copy(&stderrBuf, stderrPipe)
+			_, stderrErr = io.Copy(stderrBuf, stderrPipe)
 			wg.Done()
 		}()
 		wg.Wait()
@@ -304,6 +307,7 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 		job.mu.Lock()
 		job.bashStdout = decodeShellOutput(stdoutBuf.Bytes(), params.outputEncoding)
 		job.bashStderr = decodeShellOutput(stderrBuf.Bytes(), params.outputEncoding)
+		job.bashOutputTruncated = stdoutBuf.truncated || stderrBuf.truncated
 		if params.shellType == shellPowerShell {
 			job.bashStderr = decodePowerShellCLIXML(job.bashStderr)
 		}
@@ -327,7 +331,7 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 			code = 1
 		}
 		job.bashExitCode = &code
-		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.process.ExitStatus(), waitErr)
+		result, stats := formatShellCompletedOutputWithCapture(params, job.bashStdout, job.bashStderr, job.process.ExitStatus(), waitErr, job.bashOutputTruncated)
 		if code == 0 {
 			job.transitionStatusLocked(jobStatusSucceeded, result)
 		} else {
@@ -362,6 +366,10 @@ func (r *Registry) markAutoDegradedAndMaybeNotify(job *backgroundJob) {
 }
 
 func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, exit *ExitStatus, runErr error) (string, *OutputCompressStats) {
+	return formatShellCompletedOutputWithCapture(params, stdout, stderr, exit, runErr, false)
+}
+
+func formatShellCompletedOutputWithCapture(params shellRunParams, stdout, stderr string, exit *ExitStatus, runErr error, capturedTruncated bool) (string, *OutputCompressStats) {
 	exitCode := 0
 	if runErr != nil {
 		exitCode = 1
@@ -371,9 +379,19 @@ func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, ex
 	}
 
 	cfg := params.compress.normalized()
-	outText, outMeta := sanitizeBashStream(cfg, stdout)
-	errText, errMeta := sanitizeBashStream(cfg, stderr)
+	outText, outMeta := compressBashStream(cfg, stdout, cfg.MaxOutputChars)
+	errText, errMeta := compressBashStream(cfg, stderr, cfg.MaxOutputCharsStderr)
 	stats := aggregateBashCompressStats(outMeta, errMeta)
+	if capturedTruncated {
+		if stats == nil {
+			stats = &OutputCompressStats{
+				RawRunes: outMeta.inRunes + errMeta.inRunes,
+				OutRunes: outMeta.outRunes + errMeta.outRunes,
+				SavedPct: 1,
+			}
+		}
+		stats.Truncated = true
+	}
 
 	header := fmt.Sprintf("[BASH_RESULT] exit=%d", exitCode)
 
@@ -386,6 +404,9 @@ func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, ex
 	}
 	if runErr != nil {
 		parts = append(parts, "exit_error: "+runErr.Error())
+	}
+	if stats != nil && stats.Truncated {
+		parts = append(parts, "output_truncated: true")
 	}
 	return strings.Join(parts, "\n"), stats
 }
