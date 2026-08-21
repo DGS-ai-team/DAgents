@@ -38,6 +38,7 @@ func (r *runtime) runTurnStep(
 		contextBeforeCount = len(r.messages)
 		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) {
 			contextCompacted = true
+			r.historyRevision++
 			contextAfterDigest = turn.Digest(r.messages)
 			contextAfterCount = len(r.messages)
 			if r.orch != nil {

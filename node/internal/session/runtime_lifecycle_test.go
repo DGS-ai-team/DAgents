@@ -72,6 +72,7 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	r := newLifecycleTestRuntime()
 	r.hub = hub
 	r.agentID = "agent-1"
+	r.queue = queue.NewMessageQueue()
 	events := hub.SubscribeAgent(0, "session-1")
 	defer hub.Unsubscribe(events)
 
@@ -83,6 +84,7 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	}
 
 	phases := make([]string, 0, 5)
+	var terminalHistoryRevision any
 	for len(phases) < cap(phases) {
 		select {
 		case event := <-events:
@@ -91,6 +93,9 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 			}
 			phase, _ := event.Data["phase"].(string)
 			phases = append(phases, phase)
+			if phase == "completed" {
+				terminalHistoryRevision = event.Data["history_revision"]
+			}
 		case <-time.After(time.Second):
 			t.Fatalf("timed out waiting for turn_state events; phases=%v", phases)
 		}
@@ -100,6 +105,24 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	}
 	if phases[len(phases)-1] != "completed" {
 		t.Fatalf("terminal turn_state phase = %q, all=%v", phases[len(phases)-1], phases)
+	}
+	if terminalHistoryRevision != uint64(1) {
+		t.Fatalf("terminal history revision event = %#v", terminalHistoryRevision)
+	}
+	if r.historyRevision != 1 || len(r.messages) != 1 || r.messages[0].Content != "done" {
+		t.Fatalf("terminal history projection = revision=%d messages=%#v", r.historyRevision, r.messages)
+	}
+	manager := NewManager("agent-1", hub, nil, nil, nil, nil, TurnOptions{}, logx.Discard())
+	manager.sessions[r.session.ID] = r
+	view, err := manager.GetHydrateView(r.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.TurnState.Terminal || view.HistoryRevision != 1 || view.TurnState.HistoryRevision != 1 {
+		t.Fatalf("terminal hydrate state = %#v", view)
+	}
+	if len(view.Transcript) != 1 || view.Transcript[0]["kind"] != "assistant" || view.Transcript[0]["text"] != "done" {
+		t.Fatalf("terminal hydrate transcript = %#v", view.Transcript)
 	}
 }
 

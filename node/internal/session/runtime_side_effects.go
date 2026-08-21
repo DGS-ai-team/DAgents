@@ -131,8 +131,6 @@ func (r *runtime) handleSideEffectContinue(parent context.Context, source string
 			outcome.Err = err
 		}
 	}
-	r.mu.Lock()
-	r.applyStepOutcome(&history, outcome)
-	r.mu.Unlock()
+	r.commitHistoryFallback(history)
 	r.afterToolStep(outcome)
 }

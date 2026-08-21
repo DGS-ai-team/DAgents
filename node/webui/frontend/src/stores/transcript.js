@@ -22,7 +22,6 @@ import {
   resetStreamReveal,
   scheduleReveal,
 } from "./streamReveal.js";
-import { formatInlineUsage, parseUsageRound } from "../utils/usage.js";
 import {
   attachBrowserRefsToAssistants,
   collectBrowserRefsFromEntries,
@@ -43,6 +42,8 @@ function readShowReasoningPref() {
 export const transcriptStore = reactive({
   entries: [],
   lastSeq: 0,
+  historyRevision: 0,
+  historyDirty: false,
   assistantBuffer: "",
   reasoningBuffer: "",
   showReasoning: readShowReasoningPref(),
@@ -72,8 +73,21 @@ export function noteSeq(seq) {
   if (seq > transcriptStore.lastSeq) transcriptStore.lastSeq = seq;
 }
 
+export function markLocalHistoryDirty() {
+  transcriptStore.historyDirty = true;
+}
+
+export function markHistoryCommitted(revision) {
+  const next = Number(revision) || 0;
+  if (next <= transcriptStore.historyRevision) return false;
+  transcriptStore.historyRevision = next;
+  transcriptStore.historyDirty = false;
+  return true;
+}
+
 export function addUser(text, images = []) {
   abortStreaming();
+  markLocalHistoryDirty();
   transcriptStore.entries.push({
     id: ++idSeq,
     kind: "user",
@@ -84,6 +98,7 @@ export function addUser(text, images = []) {
 
 export function addDeferredUser(text, userName = "", sideEffectSeq = 0) {
   abortStreaming();
+  markLocalHistoryDirty();
   transcriptStore.entries.push({
     id: ++idSeq,
     kind: "user_deferred",
@@ -130,6 +145,7 @@ export function addSystem(text) {
 
 export function appendAssistant(delta) {
   if (!delta) return;
+  markLocalHistoryDirty();
   finalizeReasoning();
   transcriptStore.assistantBuffer += delta;
   if (!hasStreamingKind("assistant")) upsertStreaming("assistant", "");
@@ -163,11 +179,9 @@ export function setShowReasoning(enabled) {
 export function finalizeAssistant() {
   flushReveal("assistant");
   const text = transcriptStore.assistantBuffer;
-  const usage = pendingUsageSuffix;
   const streamIdx = transcriptStore.entries.findIndex((e) => e.streaming && e.kind === "assistant");
   if (streamIdx >= 0) transcriptStore.entries.splice(streamIdx, 1);
   transcriptStore.assistantBuffer = "";
-  pendingUsageSuffix = "";
   resetRevealKind("assistant");
   if (!text) return;
   const insertAt = streamIdx >= 0 ? streamIdx : transcriptStore.entries.length;
@@ -176,7 +190,6 @@ export function finalizeAssistant() {
     id: ++idSeq,
     kind: "assistant",
     text,
-    usage,
   };
   if (browser_refs.length) row.browser_refs = browser_refs;
   // 保留 streaming 条目原位，避免 partial tool_call 插在正文后、finalize 却把正文推到工具后面。
@@ -191,35 +204,17 @@ export function finalizeReasoning() {
   resetRevealKind("reasoning");
 }
 
-let pendingUsageSuffix = "";
-
 function abortStreaming() {
   resetStreamReveal();
   removeStreaming("assistant");
   removeStreaming("reasoning");
   transcriptStore.assistantBuffer = "";
   transcriptStore.reasoningBuffer = "";
-  pendingUsageSuffix = "";
-}
-
-export function applyRoundUsage(data) {
-  const suffix = formatInlineUsage(parseUsageRound(data));
-  if (!suffix) return;
-  if (transcriptStore.assistantBuffer) {
-    pendingUsageSuffix = suffix;
-    return;
-  }
-  for (let i = transcriptStore.entries.length - 1; i >= 0; i--) {
-    const e = transcriptStore.entries[i];
-    if (e.kind === "assistant" && !e.streaming) {
-      e.usage = suffix;
-      return;
-    }
-  }
 }
 
 export function upsertToolCallFromSSE(data) {
   const partial = !!data?.partial;
+  markLocalHistoryDirty();
   // partial tool_call 到达时正文可能仍在继续（token 边界如 Not|epad）。
   // 提前 finalize 会把同一条回复拆成两个气泡，看起来像单词中间换行。
   // 仅在最终 tool_call（或 tool_result / done 等）时封存助手文本。
@@ -309,6 +304,7 @@ function removeToolCallByBlockId(blockId) {
 }
 
 export function applyToolResult(data) {
+  markLocalHistoryDirty();
   finalizeAssistant();
   finalizeReasoning();
   const callId = String(data?.tool_call_id || data?.id || "").trim();
@@ -406,13 +402,20 @@ export function patchBashResultStatus(toolCallId, status) {
 
 export function clearTranscript() {
   transcriptStore.entries = [];
+  transcriptStore.historyRevision = 0;
+  transcriptStore.historyDirty = false;
   abortStreaming();
 }
 
 /** 从 hydrate API 快照灌入 transcript（F-H7）；替换当前 entries。 */
-export function loadTranscriptFromHydrate(entries) {
+export function loadTranscriptFromHydrate(entries, { historyRevision } = {}) {
   abortStreaming();
   transcriptStore.entries = [];
+  const revision = Number(historyRevision) || 0;
+  if (revision > 0 || transcriptStore.historyRevision === 0) {
+    transcriptStore.historyRevision = revision;
+  }
+  transcriptStore.historyDirty = false;
   if (!Array.isArray(entries)) return;
   for (const raw of entries) {
     if (!raw || typeof raw !== "object") continue;

@@ -1248,6 +1248,25 @@ func isInternalSideEffectCallback(call llm.ToolCall) bool {
 	return name == "tool_callback" || name == "get_callback"
 }
 
+// withCommittedHistoryLocked makes the message snapshot and the lifecycle
+// projection visible as one transition. The caller callback runs while
+// lifecycleMu is held and must use lifecycleDispatchLockedErr for dispatches.
+func (r *runtime) withCommittedHistoryLocked(history []llm.Message, callback func() error) error {
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	r.commitHistoryForLifecycleLocked(history)
+	return callback()
+}
+
+func (r *runtime) commitHistoryForLifecycleLocked(history []llm.Message) {
+	r.mu.Lock()
+	changed := r.commitStepHistory(&history)
+	r.mu.Unlock()
+	if changed {
+		r.persist(context.Background())
+	}
+}
+
 // lifecycleAfterModelStep translates the existing StepOutcome/history result
 // into the new lifecycle projection. It deliberately does not alter the
 // existing execution result, so this adapter can be removed after the new
@@ -1295,10 +1314,45 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 		state = r.turnCoordinator.Snapshot()
 	}
 	if outcome.Err != nil {
-		if errors.Is(outcome.Err, turn.ErrBudgetExhausted) {
+		return r.withCommittedHistoryLocked(history, func() error {
+			state := r.turnCoordinator.Snapshot()
+			if errors.Is(outcome.Err, turn.ErrBudgetExhausted) {
+				if !state.StepStatus.Terminal() {
+					if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+						Type:       turn.CommandFailStep,
+						SessionID:  r.session.ID,
+						TurnID:     identity,
+						StepID:     state.StepID,
+						Generation: generation,
+						At:         now,
+						Reason:     outcome.Err.Error(),
+					}); err != nil {
+						return fmt.Errorf("fail budget-exhausted step lifecycle: %w", err)
+					}
+				}
+				if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
+					if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+						Type:       turn.CommandBudgetExhausted,
+						SessionID:  r.session.ID,
+						TurnID:     identity,
+						Generation: generation,
+						At:         now,
+						Reason:     outcome.Err.Error(),
+					}); err != nil {
+						return fmt.Errorf("record budget-exhausted turn lifecycle: %w", err)
+					}
+				}
+				return nil
+			}
+			commandType := turn.CommandFailStep
+			turnCommandType := turn.CommandFailTurn
+			if errors.Is(outcome.Err, context.Canceled) {
+				commandType = turn.CommandInterruptStep
+				turnCommandType = turn.CommandInterruptTurn
+			}
 			if !state.StepStatus.Terminal() {
-				if err := dispatch(turn.TurnCommand{
-					Type:       turn.CommandFailStep,
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+					Type:       commandType,
 					SessionID:  r.session.ID,
 					TurnID:     identity,
 					StepID:     state.StepID,
@@ -1306,106 +1360,79 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 					At:         now,
 					Reason:     outcome.Err.Error(),
 				}); err != nil {
-					return fmt.Errorf("fail budget-exhausted step lifecycle: %w", err)
+					return fmt.Errorf("finish failed step lifecycle: %w", err)
 				}
 			}
 			if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
-				if err := dispatch(turn.TurnCommand{
-					Type:       turn.CommandBudgetExhausted,
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+					Type:       turnCommandType,
 					SessionID:  r.session.ID,
 					TurnID:     identity,
 					Generation: generation,
 					At:         now,
 					Reason:     outcome.Err.Error(),
 				}); err != nil {
-					return fmt.Errorf("record budget-exhausted turn lifecycle: %w", err)
+					return fmt.Errorf("finish failed turn lifecycle: %w", err)
 				}
 			}
 			return nil
-		}
-		commandType := turn.CommandFailStep
-		turnCommandType := turn.CommandFailTurn
-		if errors.Is(outcome.Err, context.Canceled) {
-			commandType = turn.CommandInterruptStep
-			turnCommandType = turn.CommandInterruptTurn
-		}
-		if !state.StepStatus.Terminal() {
-			if err := dispatch(turn.TurnCommand{
-				Type:       commandType,
-				SessionID:  r.session.ID,
-				TurnID:     identity,
-				StepID:     state.StepID,
-				Generation: generation,
-				At:         now,
-				Reason:     outcome.Err.Error(),
-			}); err != nil {
-				return fmt.Errorf("finish failed step lifecycle: %w", err)
-			}
-		}
-		if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
-			if err := dispatch(turn.TurnCommand{
-				Type:       turnCommandType,
-				SessionID:  r.session.ID,
-				TurnID:     identity,
-				Generation: generation,
-				At:         now,
-				Reason:     outcome.Err.Error(),
-			}); err != nil {
-				return fmt.Errorf("finish failed turn lifecycle: %w", err)
-			}
-		}
-		return nil
+		})
 	}
 	if outcome.Pending != nil {
-		interactionID := state.InteractionID
-		toolExecutionID := ""
-		if len(outcome.Pending.Items) > 0 {
-			toolExecutionID = r.turnCoordinator.ToolExecutionID(outcome.Pending.Items[0].ToolCall.ID)
-		}
 		pendingPayload, _ := json.Marshal(outcome.Pending)
-		if err := dispatch(turn.TurnCommand{
-			Type:            turn.CommandInteractionRequested,
-			SessionID:       r.session.ID,
-			TurnID:          identity,
-			StepID:          state.StepID,
-			Generation:      generation,
-			InteractionID:   interactionID,
-			ToolExecutionID: toolExecutionID,
-			Payload:         pendingPayload,
-			At:              now,
-			Reason:          "pending_interaction",
-		}); err != nil {
-			return fmt.Errorf("record pending interaction lifecycle: %w", err)
-		}
-		return nil
+		return r.withCommittedHistoryLocked(history, func() error {
+			state := r.turnCoordinator.Snapshot()
+			toolExecutionID := ""
+			if len(outcome.Pending.Items) > 0 {
+				toolExecutionID = r.turnCoordinator.ToolExecutionID(outcome.Pending.Items[0].ToolCall.ID)
+			}
+			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+				Type:            turn.CommandInteractionRequested,
+				SessionID:       r.session.ID,
+				TurnID:          identity,
+				StepID:          state.StepID,
+				Generation:      generation,
+				InteractionID:   state.InteractionID,
+				ToolExecutionID: toolExecutionID,
+				Payload:         pendingPayload,
+				At:              now,
+				Reason:          "pending_interaction",
+			}); err != nil {
+				return fmt.Errorf("record pending interaction lifecycle: %w", err)
+			}
+			return nil
+		})
 	}
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		// Tool calls have only been proposed/accepted at this point. The Step
 		// remains executing_tools until a tool_result or a completed HITL
 		// resume reaches lifecycleBeginContinuationStep/lifecycleAfterResume.
+		return r.withCommittedHistoryLocked(history, func() error { return nil })
+	}
+	return r.withCommittedHistoryLocked(history, func() error {
+		state := r.turnCoordinator.Snapshot()
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+			Type:       turn.CommandCompleteStep,
+			SessionID:  r.session.ID,
+			TurnID:     identity,
+			StepID:     state.StepID,
+			Generation: generation,
+			At:         now,
+		}); err != nil {
+			return fmt.Errorf("complete step lifecycle: %w", err)
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+			Type:       turn.CommandCompleteTurn,
+			SessionID:  r.session.ID,
+			TurnID:     identity,
+			Generation: generation,
+			At:         now,
+			Reason:     "assistant_completed",
+		}); err != nil {
+			return fmt.Errorf("complete turn lifecycle: %w", err)
+		}
 		return nil
-	}
-	if err := dispatch(turn.TurnCommand{
-		Type:       turn.CommandCompleteStep,
-		SessionID:  r.session.ID,
-		TurnID:     identity,
-		StepID:     state.StepID,
-		Generation: generation,
-		At:         now,
-	}); err != nil {
-		return fmt.Errorf("complete step lifecycle: %w", err)
-	}
-	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
-		Type:       turn.CommandCompleteTurn,
-		SessionID:  r.session.ID,
-		TurnID:     identity,
-		Generation: generation,
-		At:         now,
-		Reason:     "assistant_completed",
-	}); err != nil {
-		return fmt.Errorf("complete turn lifecycle: %w", err)
-	}
-	return nil
+	})
 }
 
 func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.Message) error {
@@ -1439,79 +1466,88 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 		state = r.turnCoordinator.Snapshot()
 	}
 	if outcome.Err != nil {
-		if errors.Is(outcome.Err, turn.ErrBudgetExhausted) {
+		return r.withCommittedHistoryLocked(history, func() error {
+			state := r.turnCoordinator.Snapshot()
+			if errors.Is(outcome.Err, turn.ErrBudgetExhausted) {
+				if !state.StepStatus.Terminal() {
+					if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandFailStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
+						return fmt.Errorf("fail resumed budget step lifecycle: %w", err)
+					}
+				}
+				if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
+					if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandBudgetExhausted, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
+						return fmt.Errorf("record resumed budget turn lifecycle: %w", err)
+					}
+				}
+				return nil
+			}
+			stepType := turn.CommandFailStep
+			turnType := turn.CommandFailTurn
+			if errors.Is(outcome.Err, context.Canceled) {
+				stepType = turn.CommandInterruptStep
+				turnType = turn.CommandInterruptTurn
+			}
 			if !state.StepStatus.Terminal() {
-				if err := dispatch(turn.TurnCommand{Type: turn.CommandFailStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
-					return fmt.Errorf("fail resumed budget step lifecycle: %w", err)
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: stepType, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
+					return fmt.Errorf("finish resumed failed step lifecycle: %w", err)
 				}
 			}
 			if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
-				if err := dispatch(turn.TurnCommand{Type: turn.CommandBudgetExhausted, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
-					return fmt.Errorf("record resumed budget turn lifecycle: %w", err)
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turnType, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
+					return fmt.Errorf("finish resumed failed turn lifecycle: %w", err)
 				}
 			}
 			return nil
-		}
-		stepType := turn.CommandFailStep
-		turnType := turn.CommandFailTurn
-		if errors.Is(outcome.Err, context.Canceled) {
-			stepType = turn.CommandInterruptStep
-			turnType = turn.CommandInterruptTurn
-		}
-		if !state.StepStatus.Terminal() {
-			if err := dispatch(turn.TurnCommand{Type: stepType, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
-				return fmt.Errorf("finish resumed failed step lifecycle: %w", err)
-			}
-		}
-		if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
-			if err := dispatch(turn.TurnCommand{Type: turnType, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
-				return fmt.Errorf("finish resumed failed turn lifecycle: %w", err)
-			}
-		}
-		return nil
+		})
 	}
 	if outcome.Pending != nil {
 		pendingPayload, err := json.Marshal(outcome.Pending)
 		if err != nil {
 			return fmt.Errorf("marshal resumed pending interaction: %w", err)
 		}
-		toolExecutionID := ""
-		if len(outcome.Pending.Items) == 1 {
-			toolExecutionID = r.turnCoordinator.ToolExecutionID(outcome.Pending.Items[0].ToolCall.ID)
-		}
-		if err := dispatch(turn.TurnCommand{
-			Type:            turn.CommandInteractionRequested,
-			SessionID:       r.session.ID,
-			TurnID:          identity,
-			StepID:          state.StepID,
-			Generation:      generation,
-			InteractionID:   state.InteractionID,
-			InteractionKind: legacyPendingInteractionKind(outcome.Pending),
-			ToolExecutionID: toolExecutionID,
-			Payload:         pendingPayload,
-			At:              now,
-			Reason:          "pending_interaction",
-		}); err != nil {
-			return fmt.Errorf("record resumed pending interaction lifecycle: %w", err)
-		}
-		return nil
+		return r.withCommittedHistoryLocked(history, func() error {
+			state := r.turnCoordinator.Snapshot()
+			toolExecutionID := ""
+			if len(outcome.Pending.Items) == 1 {
+				toolExecutionID = r.turnCoordinator.ToolExecutionID(outcome.Pending.Items[0].ToolCall.ID)
+			}
+			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+				Type:            turn.CommandInteractionRequested,
+				SessionID:       r.session.ID,
+				TurnID:          identity,
+				StepID:          state.StepID,
+				Generation:      generation,
+				InteractionID:   state.InteractionID,
+				InteractionKind: legacyPendingInteractionKind(outcome.Pending),
+				ToolExecutionID: toolExecutionID,
+				Payload:         pendingPayload,
+				At:              now,
+				Reason:          "pending_interaction",
+			}); err != nil {
+				return fmt.Errorf("record resumed pending interaction lifecycle: %w", err)
+			}
+			return nil
+		})
 	}
 	if outcome.ScheduleToolResult {
 		// The model emitted another tool batch after the resumed execution. It
 		// is a new continuation Step boundary, so leave this Step executing
 		// until its results arrive instead of falsely settling the old batch.
+		return r.withCommittedHistoryLocked(history, func() error { return nil })
+	}
+	return r.withCommittedHistoryLocked(history, func() error {
+		state := r.turnCoordinator.Snapshot()
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolBatchSettled, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now}); err != nil {
+			return fmt.Errorf("settle resumed tool batch lifecycle: %w", err)
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: "interaction_resolved"}); err != nil {
+			return fmt.Errorf("complete resumed step lifecycle: %w", err)
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteTurn, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: "assistant_completed_after_interaction"}); err != nil {
+			return fmt.Errorf("complete resumed turn lifecycle: %w", err)
+		}
 		return nil
-	}
-	if err := dispatch(turn.TurnCommand{Type: turn.CommandToolBatchSettled, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now}); err != nil {
-		return fmt.Errorf("settle resumed tool batch lifecycle: %w", err)
-	}
-	if err := dispatch(turn.TurnCommand{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: "interaction_resolved"}); err != nil {
-		return fmt.Errorf("complete resumed step lifecycle: %w", err)
-	}
-	if err := dispatch(turn.TurnCommand{Type: turn.CommandCompleteTurn, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: "assistant_completed_after_interaction"}); err != nil {
-		return fmt.Errorf("complete resumed turn lifecycle: %w", err)
-	}
-	return nil
+	})
 }
 
 func (r *runtime) lifecycleCancel() error {
@@ -1633,6 +1669,7 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 	}
 	if !resultExists {
 		r.messages = append(r.messages, llm.ToolResultMessage(toolCallID, toolName, content))
+		r.historyRevision++
 	}
 	r.mu.Unlock()
 	state, err = r.lifecycleDispatchLockedErr(turn.TurnCommand{

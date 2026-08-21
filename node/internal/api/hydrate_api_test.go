@@ -35,6 +35,7 @@ func TestHandleSessionHydrate(t *testing.T) {
 			{Role: "assistant", Content: "pong"},
 		},
 		RuntimeState: store.RuntimeState{
+			HistoryRevision: 7,
 			Pending: &turn.PendingHITL{Items: []turn.PendingHITLItem{{
 				ToolCall: llm.ToolCall{
 					ID:   "call-1",
@@ -71,6 +72,9 @@ func TestHandleSessionHydrate(t *testing.T) {
 	}
 	if len(got.Transcript) != 2 {
 		t.Fatalf("transcript len = %d", len(got.Transcript))
+	}
+	if got.HistoryRevision != 7 || got.TurnState.HistoryRevision != 7 {
+		t.Fatalf("history revision = response:%d turn:%d", got.HistoryRevision, got.TurnState.HistoryRevision)
 	}
 	if got.PendingHITL == nil || got.PendingHITL["hitl_id"] == "" {
 		t.Fatalf("pending_hitl = %#v", got.PendingHITL)

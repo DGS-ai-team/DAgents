@@ -8,7 +8,7 @@ import {
   ensureAgent,
   persistAgentId,
 } from "./agent.js";
-import { loadTranscriptFromHydrate } from "./transcript.js";
+import { loadTranscriptFromHydrate, transcriptStore } from "./transcript.js";
 import { applyToolJobsSnapshot } from "./toolJobs.js";
 import { resetStatusLines, syncTurnStatus } from "./statusLines.js";
 import { turnStateStore } from "./turnState.js";
@@ -39,13 +39,35 @@ export function syncStatusAfterHydrate(runTurnPhase = "") {
   syncTurnStatus(turnStateStore);
 }
 
+function shouldApplyHydrateTranscript(data) {
+  const incoming = Number(data?.history_revision) || 0;
+  const current = Number(transcriptStore.historyRevision) || 0;
+  if (!transcriptStore.historyDirty) {
+    return incoming === 0 || incoming >= current;
+  }
+
+  // A locally streamed/user-visible history is newer than the last hydrate.
+  // Do not replace it while a Turn is still active, even if an older or
+  // partially committed snapshot reports a terminal lifecycle projection.
+  const phase = String(turnStateStore.phase || "").trim();
+  if (["posting", "accepted"].includes(turnStateStore.submitState)) {
+    return false;
+  }
+  if (["queued", "model_generating", "tool_executing", "tool_waiting", "waiting_user"].includes(phase)) {
+    return false;
+  }
+  return Boolean(data?.turn_state?.terminal) && incoming > current;
+}
+
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
 export async function hydrateAgent() {
   const generation = ++hydrationGeneration;
   const agentId = await ensureAgent();
   const data = await api.getAgentHydrate(agentId);
   if (generation !== hydrationGeneration) return null;
-  loadTranscriptFromHydrate(data?.transcript);
+  if (shouldApplyHydrateTranscript(data)) {
+    loadTranscriptFromHydrate(data?.transcript, { historyRevision: data?.history_revision });
+  }
   applyToolJobsSnapshot(data?.tool_jobs);
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
