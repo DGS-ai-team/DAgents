@@ -42,9 +42,14 @@ CREATE TABLE IF NOT EXISTS background_jobs (
   session_id TEXT NOT NULL DEFAULT '',
   tool_name TEXT NOT NULL DEFAULT '',
   tool_call_id TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL,
-  result TEXT NOT NULL DEFAULT '',
-  started_at INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL,
+	result TEXT NOT NULL DEFAULT '',
+	recovery_reason TEXT NOT NULL DEFAULT '',
+	recovered_at INTEGER NOT NULL DEFAULT 0,
+	remote_target_id TEXT NOT NULL DEFAULT '',
+	remote_job_token TEXT NOT NULL DEFAULT '',
+	remote_pid_file TEXT NOT NULL DEFAULT '',
+	started_at INTEGER NOT NULL DEFAULT 0,
   finished_at INTEGER NOT NULL DEFAULT 0,
   auto_degraded INTEGER NOT NULL DEFAULT 0,
   bash_cwd TEXT NOT NULL DEFAULT '',
@@ -59,6 +64,24 @@ CREATE TABLE IF NOT EXISTS background_jobs (
 		_ = db.Close()
 		return nil, err
 	}
+	// Older job databases predate explicit orphan recovery metadata.
+	_, _ = db.Exec(`ALTER TABLE background_jobs ADD COLUMN recovery_reason TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE background_jobs ADD COLUMN recovered_at INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE background_jobs ADD COLUMN remote_target_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE background_jobs ADD COLUMN remote_job_token TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE background_jobs ADD COLUMN remote_pid_file TEXT NOT NULL DEFAULT ''`)
+	// A process handle cannot survive a Node restart. Resolve every persisted
+	// running row once at store startup so a later per-session load cannot
+	// accidentally present an orphan as active.
+	recoveredAt := time.Now().UnixMilli()
+	_, _ = db.Exec(`
+UPDATE background_jobs
+SET status = 'unknown',
+    result = CASE WHEN TRIM(result) = '' THEN 'Node restarted before this task completed; the process can no longer be tracked.' ELSE result END,
+    recovery_reason = 'node_restart_orphan',
+    recovered_at = ?,
+    finished_at = CASE WHEN finished_at = 0 THEN ? ELSE finished_at END
+WHERE status = 'running'`, recoveredAt, recoveredAt)
 	return store, nil
 }
 
@@ -85,8 +108,16 @@ func (s *BackgroundJobStore) save(job *backgroundJob) error {
 		rawRunes = job.compressStats.RawRunes
 		outRunes = job.compressStats.OutRunes
 	}
+	remoteTargetID, remoteJobToken, remotePIDFile := "", "", ""
+	if job.remoteRecovery != nil {
+		remoteTargetID = job.remoteRecovery.TargetID
+		remoteJobToken = job.remoteRecovery.JobToken
+		remotePIDFile = job.remoteRecovery.PIDFile
+	}
 	args := []any{
 		job.id, job.sessionID, job.toolName, job.toolCallID, job.status, job.result,
+		job.recoveryReason, job.recoveredAt,
+		remoteTargetID, remoteJobToken, remotePIDFile,
 		job.startedAt, job.finishedAt, degraded, job.bashCwd, job.bashTimeout,
 		job.bashShellType, job.bashOutputEncoding, savedPct, rawRunes, outRunes, time.Now().UnixMilli(),
 	}
@@ -94,17 +125,24 @@ func (s *BackgroundJobStore) save(job *backgroundJob) error {
 	_, err := s.db.Exec(`
 INSERT INTO background_jobs(
   job_id, session_id, tool_name, tool_call_id, status, result,
+  recovery_reason, recovered_at,
+  remote_target_id, remote_job_token, remote_pid_file,
   started_at, finished_at, auto_degraded, bash_cwd, bash_timeout,
   bash_shell_type, bash_output_encoding, compress_saved_pct,
   compress_raw_runes, compress_out_runes, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(job_id) DO UPDATE SET
   session_id=excluded.session_id,
   tool_name=excluded.tool_name,
   tool_call_id=excluded.tool_call_id,
   status=excluded.status,
   result=excluded.result,
+  recovery_reason=excluded.recovery_reason,
+  recovered_at=excluded.recovered_at,
+  remote_target_id=excluded.remote_target_id,
+  remote_job_token=excluded.remote_job_token,
+  remote_pid_file=excluded.remote_pid_file,
   started_at=excluded.started_at,
   finished_at=excluded.finished_at,
   auto_degraded=excluded.auto_degraded,
@@ -125,6 +163,8 @@ func (s *BackgroundJobStore) load(sessionID string) ([]*backgroundJob, error) {
 	}
 	query := `
 SELECT job_id, session_id, tool_name, tool_call_id, status, result,
+       recovery_reason, recovered_at,
+       remote_target_id, remote_job_token, remote_pid_file,
        started_at, finished_at, auto_degraded, bash_cwd, bash_timeout,
        bash_shell_type, bash_output_encoding, compress_saved_pct,
        compress_raw_runes, compress_out_runes
@@ -144,14 +184,20 @@ FROM background_jobs`
 	for rows.Next() {
 		var job backgroundJob
 		var degraded, savedPct, rawRunes, outRunes int
+		var jobRemoteTargetID, jobRemoteJobToken, jobRemotePIDFile string
 		if err := rows.Scan(
 			&job.id, &job.sessionID, &job.toolName, &job.toolCallID, &job.status, &job.result,
+			&job.recoveryReason, &job.recoveredAt,
+			&jobRemoteTargetID, &jobRemoteJobToken, &jobRemotePIDFile,
 			&job.startedAt, &job.finishedAt, &degraded, &job.bashCwd, &job.bashTimeout,
 			&job.bashShellType, &job.bashOutputEncoding, &savedPct, &rawRunes, &outRunes,
 		); err != nil {
 			return nil, err
 		}
 		job.autoDegraded = degraded != 0
+		if jobRemoteJobToken != "" || jobRemotePIDFile != "" {
+			job.remoteRecovery = &RemoteProcessRecovery{TargetID: jobRemoteTargetID, JobToken: jobRemoteJobToken, PIDFile: jobRemotePIDFile}
+		}
 		if savedPct > 0 || rawRunes > 0 || outRunes > 0 {
 			job.compressStats = &OutputCompressStats{SavedPct: savedPct, RawRunes: rawRunes, OutRunes: outRunes}
 		}
@@ -159,6 +205,8 @@ FROM background_jobs`
 		close(job.done)
 		if job.status == jobStatusRunning {
 			job.status = jobStatusUnknown
+			job.recoveryReason = "node_restart_orphan"
+			job.recoveredAt = time.Now().UnixMilli()
 			if strings.TrimSpace(job.result) == "" {
 				job.result = "Node restarted before this task completed; the process can no longer be tracked."
 			}

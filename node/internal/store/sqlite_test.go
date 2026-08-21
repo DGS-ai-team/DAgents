@@ -124,6 +124,8 @@ func TestExecutionEventsPersistAndList(t *testing.T) {
 		ToolCallID:     "call-1",
 		TargetKind:     "local",
 		PolicyDecision: "auto",
+		CommandDigest:  "digest-1",
+		OutputBytes:    7,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +149,66 @@ func TestExecutionEventsPersistAndList(t *testing.T) {
 	}
 	if events[1].ExitCode == nil || *events[1].ExitCode != 0 {
 		t.Fatalf("exit code=%v", events[1].ExitCode)
+	}
+	if events[0].CommandDigest != "digest-1" || events[0].OutputBytes != 7 {
+		t.Fatalf("audit fields=%+v", events[0])
+	}
+}
+
+func TestExecutionEventsMigrateAuditColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE execution_events (
+  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL,
+  process_id TEXT NOT NULL,
+  process_seq INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  stream TEXT NOT NULL DEFAULT '',
+  turn_id TEXT NOT NULL DEFAULT '',
+  tool_call_id TEXT NOT NULL DEFAULT '',
+  target_kind TEXT NOT NULL DEFAULT '',
+  target_id TEXT NOT NULL DEFAULT '',
+  policy_decision TEXT NOT NULL DEFAULT '',
+  approval_id TEXT NOT NULL DEFAULT '',
+  risk_level TEXT NOT NULL DEFAULT '',
+  exit_code INTEGER,
+  exit_error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.AppendExecutionEvent(context.Background(), ExecutionEventRecord{
+		AgentID:       "agent-migrated",
+		SessionID:     "session-migrated",
+		ProcessID:     "process-migrated",
+		ProcessSeq:    1,
+		EventType:     "process_exited",
+		CommandDigest: "digest-migrated",
+		OutputBytes:   42,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.ListExecutionEvents(context.Background(), "session-migrated", 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	if events[0].CommandDigest != "digest-migrated" || events[0].OutputBytes != 42 {
+		t.Fatalf("migrated audit fields=%+v", events[0])
 	}
 }
 

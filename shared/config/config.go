@@ -24,19 +24,19 @@ const (
 type Config struct {
 	NodeID string `yaml:"node_id"`
 	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
-	LegacyAgentID string      `yaml:"agent_id,omitempty"`
-	Agent         AgentConfig `yaml:"agent"`
-	User          UserConfig  `yaml:"user"`
+	LegacyAgentID string           `yaml:"agent_id,omitempty"`
+	Agent         AgentConfig      `yaml:"agent"`
+	User          UserConfig       `yaml:"user"`
 	Onboarding    OnboardingConfig `yaml:"onboarding"`
-	Listen        ListenConfig    `yaml:"listen"`
-	Local         LocalConfig     `yaml:"local"`
-	Groups        []string        `yaml:"groups"`
+	Listen        ListenConfig     `yaml:"listen"`
+	Local         LocalConfig      `yaml:"local"`
+	Groups        []string         `yaml:"groups"`
 	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
-	FSRoot        string       `yaml:"-"`
-	LLM           LLMConfig    `yaml:"llm"`
-	Manage        ManageConfig `yaml:"manage"`
-	Skills        SkillsConfig       `yaml:"skills"`
-	Compression   CompressionConfig  `yaml:"compression"`
+	FSRoot            string                  `yaml:"-"`
+	LLM               LLMConfig               `yaml:"llm"`
+	Manage            ManageConfig            `yaml:"manage"`
+	Skills            SkillsConfig            `yaml:"skills"`
+	Compression       CompressionConfig       `yaml:"compression"`
 	Triggers          TriggersConfig          `yaml:"triggers"`
 	RawMessageHistory RawMessageHistoryConfig `yaml:"raw_message_history"`
 	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
@@ -154,12 +154,16 @@ type ToolsConfig struct {
 	BashCompress BashCompressConfig `yaml:"bash_compress"`
 }
 
-// BashCompressConfig 控制 bash_run 输出清洗（ANSI、重复行）；长度限制由 tool.after_each 落盘摘要负责。
+// BashCompressConfig 控制 bash_run 输出清洗和采集预算。
 type BashCompressConfig struct {
 	// Enabled 为 nil 时默认 true。
 	Enabled              *bool `yaml:"enabled"`
 	MaxOutputChars       int   `yaml:"max_output_chars"`
 	MaxOutputCharsStderr int   `yaml:"max_output_chars_stderr"`
+	// OutputMode 默认为 head；head_tail 会在达到总预算后保留尾部。
+	OutputMode            string `yaml:"output_mode"`
+	TailOutputChars       int    `yaml:"tail_output_chars"`
+	TailOutputCharsStderr int    `yaml:"tail_output_chars_stderr"`
 }
 
 const EnvRawMessageHistoryEnabled = "AGENT_RAW_MESSAGE_HISTORY_ENABLED"
@@ -199,11 +203,11 @@ type SkillsConfig struct {
 
 // CompressionConfig 控制上下文压缩阈值。
 type CompressionConfig struct {
-	SilentTriggerTokens          int `yaml:"silent_trigger_tokens"`
-	BlockingTriggerTokens        int `yaml:"blocking_trigger_tokens"`
-	IdleAutoCompressSeconds      int `yaml:"idle_auto_compress_seconds"`
-	IdleAutoCompressPollSeconds  int `yaml:"idle_auto_compress_poll_seconds"`
-	IdleAutoCompressMinTokens    int `yaml:"idle_auto_compress_min_tokens"`
+	SilentTriggerTokens         int `yaml:"silent_trigger_tokens"`
+	BlockingTriggerTokens       int `yaml:"blocking_trigger_tokens"`
+	IdleAutoCompressSeconds     int `yaml:"idle_auto_compress_seconds"`
+	IdleAutoCompressPollSeconds int `yaml:"idle_auto_compress_poll_seconds"`
+	IdleAutoCompressMinTokens   int `yaml:"idle_auto_compress_min_tokens"`
 }
 
 // HooksConfig 控制 Node turn Hook 行为。
@@ -379,13 +383,13 @@ type LLMConfig struct {
 
 // LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
 type LLMProfileConfig struct {
-	Provider           string `yaml:"provider"`
-	BaseURL            string `yaml:"base_url"`
-	Model              string `yaml:"model"`
-	APIKeyEnv          string `yaml:"api_key_env"`
-	Mock               bool   `yaml:"mock"`
-	Thinking           string `yaml:"thinking,omitempty"`
-	ReasoningEffort    string `yaml:"reasoning_effort,omitempty"`
+	Provider        string `yaml:"provider"`
+	BaseURL         string `yaml:"base_url"`
+	Model           string `yaml:"model"`
+	APIKeyEnv       string `yaml:"api_key_env"`
+	Mock            bool   `yaml:"mock"`
+	Thinking        string `yaml:"thinking,omitempty"`
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
 	// MultimodalEnabled 为 nil 时视为 false；切换档案时同步到顶层 multimodal.enabled。
 	MultimodalEnabled *bool `yaml:"multimodal_enabled,omitempty"`
 }

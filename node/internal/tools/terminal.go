@@ -11,15 +11,16 @@ import (
 // persistent stdin/stdout stream and must not inherit one-shot command
 // timeout or background-job semantics.
 type TerminalRequest struct {
-	Target    ExecutionTarget
-	Context   ExecutionContext
-	ConfigID  string
-	CWD       string
-	Env       map[string]string
-	Shell     string
-	Rows      int
-	Cols      int
-	EventSink ProcessEventSink
+	Target      ExecutionTarget
+	Context     ExecutionContext
+	ConfigID    string
+	CWD         string
+	Env         map[string]string
+	Environment EnvironmentPolicy
+	Shell       string
+	Rows        int
+	Cols        int
+	EventSink   ProcessEventSink
 }
 
 // Terminal is the provider-neutral contract for an interactive PTY. Output
@@ -105,13 +106,14 @@ type TerminalOutputChunk struct {
 // TerminalOutput is deliberately cursor-based so an Agent can poll without
 // copying an unbounded PTY transcript into every tool result.
 type TerminalOutput struct {
-	Chunks    []TerminalOutputChunk `json:"chunks"`
-	NextSeq   uint64                `json:"next_seq"`
-	ReplayGap bool                  `json:"replay_gap,omitempty"`
-	Exited    bool                  `json:"exited"`
-	Graceful  bool                  `json:"graceful,omitempty"`
-	Forced    bool                  `json:"forced,omitempty"`
-	Exit      *ExitStatus           `json:"exit,omitempty"`
+	Chunks            []TerminalOutputChunk `json:"chunks"`
+	NextSeq           uint64                `json:"next_seq"`
+	ReplayGap         bool                  `json:"replay_gap,omitempty"`
+	Exited            bool                  `json:"exited"`
+	Graceful          bool                  `json:"graceful,omitempty"`
+	Forced            bool                  `json:"forced,omitempty"`
+	TerminationStatus string                `json:"termination_status,omitempty"`
+	Exit              *ExitStatus           `json:"exit,omitempty"`
 }
 
 // TerminalSessionBroker is the lifecycle seam shared by the Agent terminal

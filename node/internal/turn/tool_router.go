@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
@@ -24,6 +26,18 @@ func (o *Orchestrator) processToolCalls(
 	history *[]llm.Message,
 	calls []llm.ToolCall,
 ) (*PendingHITL, string, error) {
+	if o.toolBudgetCheck != nil {
+		allowed, reason := o.toolBudgetCheck(sessionID)
+		if !allowed {
+			if strings.TrimSpace(reason) == "" {
+				reason = "turn_budget"
+			}
+			o.appendMissingToolResponses(sessionID, history, calls,
+				"ERROR: turn budget exhausted",
+				map[string]any{"budget_exhausted": true, "budget_reason": reason})
+			return nil, "", fmt.Errorf("%w: %s", ErrBudgetExhausted, reason)
+		}
+	}
 	var autoCalls []llm.ToolCall
 	var approvalCalls []pendingApprovalCall
 	var userInfo *llm.ToolCall
@@ -124,8 +138,12 @@ func (o *Orchestrator) processToolCalls(
 		return nil, "", nil
 	}
 	message, sseItems := buildHITLRequiredPayload(pendingItems)
-	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
+	// Complete the pause hook before publishing the resumable event. Clients
+	// may resume immediately after observing hitl_required; publishing first
+	// would let the resume path mutate the shared history while this turn is
+	// still applying hook effects to it.
 	o.runHITLBeforePausePhase(ctx, sessionID, history, "awaiting_hitl")
+	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
 	return pendingFromItems(pendingItems), "awaiting_hitl", nil
 }
 
@@ -137,25 +155,53 @@ func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID strin
 }
 
 func (o *Orchestrator) evaluateToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+	var decision hooks.ToolBeforeEachResult
 	if o.toolHooks == nil {
 		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
 		mode := policy.ModeRule
 		if o.policy != nil {
 			mode = o.policy.ToolApprovalMode(tc.Function.Name)
 		}
-		return hooks.ToolBeforeEachResult{Action: action, ToolMode: mode}
+		decision = hooks.ToolBeforeEachResult{Action: action, ToolMode: mode}
+	} else {
+		hc := hooks.BuildToolBeforeEachContext(hooks.ToolBeforeEachInput{
+			SessionID:    sessionID,
+			ToolName:     tc.Function.Name,
+			ToolArgs:     parseJSONArgs(tc.Function.Arguments),
+			RawArguments: tc.Function.Arguments,
+		})
+		out, err := o.runPhase(ctx, hooks.PhaseToolBeforeEach, hc, sessionID, history, "")
+		if err != nil {
+			return hooks.DefaultToolBeforeEachResult()
+		}
+		decision = hooks.ToolBeforeEachDecisionFrom(out)
 	}
-	hc := hooks.BuildToolBeforeEachContext(hooks.ToolBeforeEachInput{
-		SessionID:    sessionID,
-		ToolName:     tc.Function.Name,
-		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
-		RawArguments: tc.Function.Arguments,
-	})
-	out, err := o.runPhase(ctx, hooks.PhaseToolBeforeEach, hc, sessionID, history, "")
-	if err != nil {
-		return hooks.DefaultToolBeforeEachResult()
+	return o.mergeToolPreflightDecision(ctx, tc, decision)
+}
+
+func (o *Orchestrator) mergeToolPreflightDecision(ctx context.Context, tc llm.ToolCall, decision hooks.ToolBeforeEachResult) hooks.ToolBeforeEachResult {
+	preflight, ok := o.tools.(tools.ToolPreflight)
+	if !ok {
+		return decision
 	}
-	return hooks.ToolBeforeEachDecisionFrom(out)
+	live, applicable := preflight.PreflightTool(ctx, tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
+	if !applicable {
+		return decision
+	}
+	if live.Action == policy.ActionDeny {
+		decision.Action = policy.ActionDeny
+		if strings.TrimSpace(live.ApprovalReason) != "" {
+			decision.ApprovalReason = live.ApprovalReason
+		}
+		return decision
+	}
+	if live.Action == policy.ActionRequireApproval && decision.Action != policy.ActionDeny {
+		decision.Action = policy.ActionRequireApproval
+		if strings.TrimSpace(decision.ApprovalReason) == "" {
+			decision.ApprovalReason = live.ApprovalReason
+		}
+	}
+	return decision
 }
 
 func (o *Orchestrator) recordToolExecutionSuccess(tc llm.ToolCall, content string, rejected bool) {
@@ -260,12 +306,13 @@ func (o *Orchestrator) executeAutoBatch(
 		return o.executeTool(ctx, sessionID, history, autoCalls[0], plan)
 	}
 	type batchItem struct {
-		tc         llm.ToolCall
-		rejected   bool
-		extra      map[string]any
-		forClient  string
-		forHistory string
-		spillPath  string
+		tc           llm.ToolCall
+		rejected     bool
+		extra        map[string]any
+		forClient    string
+		forHistory   string
+		spillPath    string
+		lifecycleErr error
 	}
 	results := make([]batchItem, len(autoCalls))
 	var wg sync.WaitGroup
@@ -276,18 +323,33 @@ func (o *Orchestrator) executeAutoBatch(
 		go func(idx int) {
 			defer wg.Done()
 			tc := autoCalls[idx]
-			content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
+			var lifecycleErr error
+			content := ""
+			rejected := false
+			var extra map[string]any
+			if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
+				lifecycleErr = fmt.Errorf("record tool execution start: %w", err)
+				content = "ERROR: " + lifecycleErr.Error()
+				rejected = true
+			} else {
+				content, rejected, extra, lifecycleErr = o.invokeToolWithRetries(ctx, sessionID, tc, plan)
+				finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, rejected || strings.HasPrefix(strings.TrimSpace(content), "ERROR:"))
+				if lifecycleErr == nil {
+					lifecycleErr = finishErr
+				}
+			}
 			publishMu.Lock()
 			forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
 			o.publishToolResult(sessionID, tc, forClient, rejected, extra)
 			publishMu.Unlock()
 			results[idx] = batchItem{
-				tc:         tc,
-				rejected:   rejected,
-				extra:      extra,
-				forClient:  forClient,
-				forHistory: forHistory,
-				spillPath:  spillPath,
+				tc:           tc,
+				rejected:     rejected,
+				extra:        extra,
+				forClient:    forClient,
+				forHistory:   forHistory,
+				spillPath:    spillPath,
+				lifecycleErr: lifecycleErr,
 			}
 		}(i)
 	}
@@ -295,8 +357,15 @@ func (o *Orchestrator) executeAutoBatch(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	var lifecycleErr error
 	for _, item := range results {
 		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected)
+		if lifecycleErr == nil && item.lifecycleErr != nil {
+			lifecycleErr = item.lifecycleErr
+		}
+	}
+	if lifecycleErr != nil {
+		return lifecycleErr
 	}
 	return nil
 }
@@ -334,18 +403,20 @@ func (o *Orchestrator) persistToolResult(
 	}
 }
 
-func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any) {
+func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any, execErr error) {
 	runInBackground, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
 	if tools.IsBackgroundJobTool(tc.Function.Name) {
 		runInBackground = false
 	}
 	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)
+	if plan != nil && plan.IsApproved(tc.ID) {
+		toolCtx = tools.WithApprovalID(toolCtx, tc.ID)
+	}
 	if target := resolveTriggerSessionTarget(tc, plan); target != "" {
 		toolCtx = tools.WithTriggerSessionTarget(toolCtx, target)
 	}
 
 	var output string
-	var execErr error
 	if runInBackground {
 		output, execErr = o.tools.StartBackground(toolCtx, sessionID, tc.Function.Name, tc.ID, cleanedArgs)
 	} else {
@@ -353,9 +424,72 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
 	}
 	if execErr != nil {
-		return execErr.Error(), true, nil
+		return execErr.Error(), true, nil, execErr
 	}
-	return output, false, extra
+	return output, false, extra, nil
+}
+
+// invokeToolWithRetries retries only an executor-approved, read-like tool
+// after a transient execution error. The original ToolCall ID is retained and
+// the lifecycle sink records a ToolExecutionRetrying fact for each retry; a
+// generic mutation such as bash is therefore never replayed automatically.
+func (o *Orchestrator) invokeToolWithRetries(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (string, bool, map[string]any, error) {
+	content, rejected, extra, execErr := o.invokeTool(ctx, sessionID, tc, plan)
+	for retry := 0; execErr != nil && o.canRetryTool(sessionID, tc.Function.Name, execErr, retry); retry++ {
+		if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+			Type:            CommandToolExecutionRetrying,
+			ToolCallID:      tc.ID,
+			ToolExecutionID: tc.ID + "-execution",
+			ToolName:        tc.Function.Name,
+			ErrorKind:       toolErrorKind(execErr),
+			Reason:          "transient_tool_error",
+			At:              time.Now().UTC(),
+		}); err != nil {
+			return content, rejected, extra, fmt.Errorf("record tool retry: %w", err)
+		}
+		content, rejected, extra, execErr = o.invokeTool(ctx, sessionID, tc, plan)
+	}
+	return content, rejected, extra, nil
+}
+
+func (o *Orchestrator) canRetryTool(sessionID, toolName string, execErr error, retries int) bool {
+	if o == nil || execErr == nil || retries >= o.toolRetryLimit || !isTransientToolError(execErr) {
+		return false
+	}
+	policy, ok := o.tools.(tools.ToolRetryPolicy)
+	if !ok || !policy.ToolRetryAllowed(toolName) {
+		return false
+	}
+	if o.toolRetryCheck != nil {
+		allowed, _ := o.toolRetryCheck(sessionID)
+		if !allowed {
+			return false
+		}
+	}
+	return true
+}
+
+func isTransientToolError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, marker := range []string{"timeout", "timed out", "temporar", "unavailable", "connection reset", "broken pipe", "eof", "transport"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolErrorKind(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "transient_tool_error"
 }
 
 func (o *Orchestrator) executeTool(
@@ -366,9 +500,55 @@ func (o *Orchestrator) executeTool(
 	plan *clihitl.ApprovalPlan,
 ) error {
 	o.recordToolCall(sessionID, tc.Function.Name)
-	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
+	if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
+		content := "ERROR: " + err.Error()
+		o.commitToolResult(sessionID, history, tc, content, true, nil)
+		return fmt.Errorf("record tool execution start: %w", err)
+	}
+	content, rejected, extra, lifecycleErr := o.invokeToolWithRetries(ctx, sessionID, tc, plan)
+	finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, rejected || strings.HasPrefix(strings.TrimSpace(content), "ERROR:"))
 	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
-	return nil
+	if lifecycleErr != nil {
+		return lifecycleErr
+	}
+	return finishErr
+}
+
+func (o *Orchestrator) emitToolExecutionStarted(ctx context.Context, sessionID string, tc llm.ToolCall) error {
+	if strings.TrimSpace(tc.ID) == "" {
+		return nil
+	}
+	return o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+		Type:            CommandToolExecutionStarted,
+		ToolCallID:      tc.ID,
+		ToolExecutionID: tc.ID + "-execution",
+		ToolName:        tc.Function.Name,
+		At:              time.Now().UTC(),
+		Reason:          "tool_execution_started",
+	})
+}
+
+func (o *Orchestrator) emitToolExecutionFinished(ctx context.Context, sessionID string, tc llm.ToolCall, failed bool) error {
+	if strings.TrimSpace(tc.ID) == "" {
+		return nil
+	}
+	commandType := CommandToolExecutionCompleted
+	status := ToolExecutionStatusSucceeded
+	errorKind := ""
+	if failed {
+		commandType = CommandToolExecutionFailed
+		status = ToolExecutionStatusFailed
+		errorKind = "tool_execution_error"
+	}
+	return o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+		Type:            commandType,
+		ToolCallID:      tc.ID,
+		ToolExecutionID: tc.ID + "-execution",
+		ExecutionStatus: status,
+		ErrorKind:       errorKind,
+		At:              time.Now().UTC(),
+		Reason:          "tool_execution_finished",
+	})
 }
 
 func resolveTriggerSessionTarget(tc llm.ToolCall, plan *clihitl.ApprovalPlan) string {

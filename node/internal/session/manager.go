@@ -32,8 +32,17 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot            string
-	MaxToolLoops      int
+	FSRoot       string
+	MaxToolLoops int
+	// MaxModelRetries retries only transient provider failures within one Step;
+	// zero uses the default (2), -1 disables retries. Partial streamed output is
+	// never retried by the orchestrator.
+	MaxModelRetries int
+	// Budget provides hard lifecycle limits. Zero values mean unlimited.
+	Budget turn.TurnBudget
+	// ToolRetryLimit bounds automatic retries for explicitly retry-safe tools;
+	// zero uses one retry, and negative disables automatic retries.
+	ToolRetryLimit    int
 	SkillsRoot        string
 	SkillsEnabled     bool
 	SkillsMaxInPrompt int
@@ -121,6 +130,9 @@ func NewManager(
 	ctx, cancel := context.WithCancel(context.Background())
 	if turnOpts.MaxToolLoops <= 0 {
 		turnOpts.MaxToolLoops = turn.DefaultMaxToolLoops()
+	}
+	if turnOpts.MaxModelRetries == 0 {
+		turnOpts.MaxModelRetries = 2
 	}
 	return &Manager{
 		agentID:  agentID,
@@ -538,18 +550,45 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		return nil, fmt.Errorf("agent_not_found")
 	}
 	pending := rec.RuntimeState.Pending
+	stepCount := rec.RuntimeState.ToolLoopCount
+	lifecycle, hasLifecycleProjection, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
+	if projectionErr != nil {
+		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
+	} else if hasLifecycleProjection {
+		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
+		stepCount = lifecycle.Usage.Steps
+	}
 	view := &ContextView{
 		SessionID:             sessionID,
 		MessagesCount:         len(rec.Messages),
 		MessagesTotalTokens:   estimateMessageTokens(rec.Messages),
 		PendingToolCallsCount: pendingToolCallsCount(pending),
-		ToolLoopCount:         rec.RuntimeState.ToolLoopCount,
+		ToolLoopCount:         stepCount,
 		LoadedSkills:          rec.LoadedSkills,
 		Messages:              rec.Messages,
+		HasActiveTurn:         lifecycle.HasActiveTurn,
+		TurnID:                lifecycle.TurnID,
+		StepID:                lifecycle.StepID,
+		StepIndex:             lifecycle.StepIndex,
+		ContextEpoch:          lifecycle.ContextEpoch,
+		TurnStatus:            lifecycle.TurnStatus,
+		TurnEndReason:         lifecycle.TurnEndReason,
+		StepStatus:            lifecycle.StepStatus,
+		StepEndReason:         lifecycle.StepEndReason,
+		TurnGeneration:        lifecycle.Generation,
+		RuntimeRevision:       lifecycle.RuntimeRevision,
+		RuntimeDigest:         lifecycle.RuntimeDigest,
+		PromptDigest:          lifecycle.PromptDigest,
+		ToolDigest:            lifecycle.ToolDigest,
+		RecoveryRequired:      lifecycle.RecoveryRequired,
 	}
-	if pending != nil {
+	if !hasLifecycleProjection && pending != nil {
 		view.HasActiveTurn = true
 		view.TurnState = turn.StateAwaitingTool
+	} else if hasLifecycleProjection && lifecycle.StepStatus == turn.StepStatusWaitingInteraction {
+		view.TurnState = turn.StateAwaitingTool
+	} else if hasLifecycleProjection {
+		view.TurnState = turnStateFromCoordinatorSnapshot(lifecycle)
 	}
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
@@ -715,7 +754,14 @@ func (m *Manager) EnqueueMessage(
 			"session_id", sessionID,
 			"route", "direct_runtime",
 		)
-		if !rt.hasPendingHITL() {
+		pending := rt.hasPendingHITL()
+		state := rt.turnCoordinator.Snapshot()
+		// A duplicate resume may race with the first queued resume. Accept it
+		// while the logical Turn is still alive; the runtime consumer will treat
+		// it as an idempotent stale command after the interaction is resolved.
+		// Once the Turn is terminal, retain the strict no_pending_hitl guard.
+		resumeMayBeInFlight := state.HasActiveTurn && !state.TurnStatus.Terminal()
+		if !pending && !resumeMayBeInFlight {
 			m.logger.Warn("resume rejected no pending hitl",
 				"session_id", sessionID,
 				"resume_value", resumeValue,
@@ -776,6 +822,17 @@ func (m *Manager) EnqueueToolResult(sessionID string) error {
 		return fmt.Errorf("agent_not_found")
 	}
 	return rt.enqueueToolResult(nil, sessionID)
+}
+
+// ReconcileToolExecution resolves a side effect that was marked unknown after
+// restart. The runtime validates Turn/Step fencing and queues the next model
+// Step only after every unknown execution has a known terminal result.
+func (m *Manager) ReconcileToolExecution(ctx context.Context, sessionID, turnID, stepID, executionID string, status turn.ToolExecutionStatus, content string) error {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return fmt.Errorf("agent_not_found")
+	}
+	return rt.reconcileToolExecution(ctx, turnID, stepID, executionID, status, content)
 }
 
 // CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。

@@ -60,14 +60,14 @@ sequenceDiagram
 
 | 方法 | 场景 |
 |------|------|
-| `RunHumanMessageTurn` | 追加 user 消息后**单步**模型回合 |
+| `RunHumanMessageTurn` | 追加 user 消息后**单步**模型回合；Step 序号来自 `TurnExecutionContext` |
 | `RunToolMessageTurn` | history 已含 tool 结果后**单步**续跑 |
 | `ContinueAfterResume` | HITL resume 写入 tool 结果并调度续跑 |
 | `InterruptPending` | 新 user 消息打断 pending tool calls |
 
 旁路 side-effect（Produce/Apply/Continue）见 [`side_effect_messages.go`](./side_effect_messages.go)、[`task_complete.go`](./task_complete.go)；session 侧 [`../session/side_effects.go`](../session/side_effects.go)。规格：[`../../../docs/design/turn-side-effects-refactor.md`](../../../docs/design/turn-side-effects-refactor.md)。
 
-每步返回 `StepOutcome`：`Pending`、`LoopCount`、`ScheduleToolResult`、`Err`。
+每步返回 `StepOutcome`：`Pending`、`StepIndex`、`ScheduleToolResult`、`Err`。生产调用不再传递或维护独立的 tool-loop 计数。
 
 ---
 

@@ -20,6 +20,10 @@ type triggerSessionTargetContextKey struct{}
 
 type enabledBypassContextKey struct{}
 
+type approvalIDContextKey struct{}
+
+type backgroundJobIDContextKey struct{}
+
 // WithEnabledBypass 跳过 Registry.enabledOnly 检查（子 Agent 在自身 allowlist 校验后使用）。
 func WithEnabledBypass(ctx context.Context) context.Context {
 	if ctx == nil {
@@ -35,6 +39,45 @@ func EnabledBypassFromContext(ctx context.Context) bool {
 	}
 	v, _ := ctx.Value(enabledBypassContextKey{}).(bool)
 	return v
+}
+
+// WithApprovalID marks the tool call as having passed the current HITL
+// decision. Providers may use the opaque ID only as a presence signal; it is
+// never sent to the remote host.
+func WithApprovalID(ctx context.Context, approvalID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, approvalIDContextKey{}, strings.TrimSpace(approvalID))
+}
+
+func ApprovalIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(approvalIDContextKey{}).(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// WithBackgroundJobID correlates a background tool execution with its job
+// record so providers can bind the concrete Process after it starts.
+func WithBackgroundJobID(ctx context.Context, jobID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, backgroundJobIDContextKey{}, strings.TrimSpace(jobID))
+}
+
+func BackgroundJobIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(backgroundJobIDContextKey{}).(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 // WithSession 将 session_id 写入 context，供后台任务完成回调使用。

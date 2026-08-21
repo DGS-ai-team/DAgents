@@ -241,7 +241,7 @@ func (r *Registry) execTerminalOpen(ctx context.Context, raw json.RawMessage) (s
 	info, err := broker.Open(ctx, r.agentID, TerminalRequest{
 		Target:   ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID},
 		ConfigID: config.ConfigID,
-		Context:  ExecutionContext{AgentID: r.agentID, SessionID: SessionIDFromContext(ctx), Target: ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID}},
+		Context:  ExecutionContext{AgentID: r.agentID, SessionID: SessionIDFromContext(ctx), ApprovalID: ApprovalIDFromContext(ctx), Target: ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID}},
 		CWD:      strings.TrimSpace(args.CWD),
 		Shell:    shell,
 		Rows:     args.Rows,
@@ -362,13 +362,14 @@ func (r *Registry) execTerminalTerminate(ctx context.Context, raw json.RawMessag
 		b.Write(chunk.Data)
 	}
 	result := map[string]any{
-		"terminal_id": id,
-		"status":      "terminated",
-		"output":      b.String(),
-		"next_seq":    out.NextSeq,
-		"exited":      out.Exited,
-		"graceful":    out.Graceful,
-		"forced":      out.Forced,
+		"terminal_id":        id,
+		"status":             "terminated",
+		"output":             b.String(),
+		"next_seq":           out.NextSeq,
+		"exited":             out.Exited,
+		"graceful":           out.Graceful,
+		"forced":             out.Forced,
+		"termination_status": out.TerminationStatus,
 	}
 	if out.ReplayGap {
 		result["replay_gap"] = true

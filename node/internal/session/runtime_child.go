@@ -60,10 +60,11 @@ func (r *runtime) isChildSession() bool {
 	return r.childMeta != nil
 }
 
-func (r *runtime) toolLoopCountSnapshot() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.toolLoopCount
+func (r *runtime) stepIndexSnapshot() int {
+	if r == nil || r.turnCoordinator == nil {
+		return 0
+	}
+	return r.turnCoordinator.Snapshot().Usage.Steps
 }
 
 func (r *runtime) tryCompleteChildIfIdle() {
@@ -71,11 +72,12 @@ func (r *runtime) tryCompleteChildIfIdle() {
 		return
 	}
 	r.mu.Lock()
-	idle := r.pending == nil && r.queue.Len() == 0
+	queueEmpty := r.queue.Len() == 0
 	meta := r.childMeta
 	msgs := append([]llm.Message(nil), r.messages...)
-	loops := r.toolLoopCount
 	r.mu.Unlock()
+	loops := r.stepIndexSnapshot()
+	idle := r.pendingSnapshot() == nil && queueEmpty && !r.lifecycleExecutionBusy()
 	if !idle || meta.completing {
 		return
 	}

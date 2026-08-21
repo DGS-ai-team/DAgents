@@ -27,11 +27,11 @@ func (o *Orchestrator) runMessageEnqueuedPhase(ctx context.Context, sessionID st
 	_, _ = o.runPhase(ctx, hooks.PhaseMessageEnqueued, hc, sessionID, history, "")
 }
 
-func (o *Orchestrator) runTurnBeforeStepPhase(ctx context.Context, sessionID string, history *[]llm.Message, stepKind string, toolLoopCount int) {
+func (o *Orchestrator) runTurnBeforeStepPhase(ctx context.Context, sessionID string, history *[]llm.Message, stepKind string, stepIndex int) {
 	if o == nil || o.toolHooks == nil {
 		return
 	}
-	o.setHookHostRuntime(toolLoopCount, false)
+	o.setHookHostRuntime(stepIndex, false)
 	hc := &hooks.Context{
 		Phase:     hooks.PhaseTurnBeforeStep,
 		SessionID: sessionID,
@@ -47,7 +47,7 @@ func (o *Orchestrator) runHITLBeforePausePhase(ctx context.Context, sessionID st
 	if o == nil || o.toolHooks == nil {
 		return
 	}
-	o.setHookHostRuntime(0, true)
+	o.setHookHostRuntime(StepIndexFromContext(ctx), true)
 	hc := &hooks.Context{
 		Phase:     hooks.PhaseHITLBeforePause,
 		SessionID: sessionID,

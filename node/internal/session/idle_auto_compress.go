@@ -6,7 +6,6 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 // StartIdleAutoCompressScanner 启动 idle session 维护扫描（压缩 + 卸内存，F-NM2）。
@@ -173,15 +172,10 @@ func (m *Manager) tryRuntimeIdleAutoCompress(ctx context.Context, rt *runtime, t
 
 // isBusyForMaintenance turn 进行中或队列非空时跳过；pending HITL 暂停视为 idle（可 evict，F-NM4）。
 func (r *runtime) isBusyForMaintenance() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.queue.Len() > 0 {
 		return true
 	}
-	if r.pending != nil {
-		return false
-	}
-	return r.state != turn.StateIdle
+	return r.lifecycleExecutionBusy()
 }
 
 func (r *runtime) meetsIdleThreshold(idleThreshold time.Duration, now time.Time) bool {
@@ -203,13 +197,15 @@ func (r *runtime) eligibleForIdleAutoCompress(idleThreshold time.Duration, minTo
 		return false
 	}
 	r.mu.Lock()
-	if r.idleAutoCompressApplied {
-		r.mu.Unlock()
+	idleApplied := r.idleAutoCompressApplied
+	msgs := append([]llm.Message(nil), r.messages...)
+	queuePending := r.queue.Len() > 0
+	r.mu.Unlock()
+	pending := r.pendingSnapshot()
+	if idleApplied {
 		return false
 	}
-	busy := r.state != turn.StateIdle || r.pending != nil || r.queue.Len() > 0
-	msgs := append([]llm.Message(nil), r.messages...)
-	r.mu.Unlock()
+	busy := r.lifecycleExecutionBusy() || queuePending || pending != nil
 	if busy {
 		return false
 	}

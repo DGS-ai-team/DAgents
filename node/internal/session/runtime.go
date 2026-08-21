@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
@@ -36,13 +37,6 @@ func newContinuationID() string {
 	return "turn-" + hex.EncodeToString(b[:])
 }
 
-type continuationContextKey struct{}
-
-type continuationRef struct {
-	turnID     string
-	generation uint64
-}
-
 // Session 表示对外可见的 session 元数据。
 type Session struct {
 	ID      string
@@ -55,6 +49,9 @@ type runtime struct {
 	queue *queue.MessageQueue
 	// 编排器
 	orch *turn.Orchestrator
+	// New Turn/Step lifecycle coordinator; Orchestrator remains the execution
+	// engine, while lifecycle authority lives entirely in this projection.
+	turnCoordinator *turn.TurnCoordinator
 	// 存储
 	store *store.SQLiteStore
 	// 事件中心
@@ -74,21 +71,21 @@ type runtime struct {
 	done    chan struct{}
 
 	mu         sync.Mutex         // 互斥锁
-	state      turn.State         // 状态
 	turnCancel context.CancelFunc // 取消 turn 上下文
 	// sessionEpoch invalidates events queued before clear-context/rebuild.
 	sessionEpoch uint64
-	// turnID/generation identify internal continuations belonging to the active turn.
-	turnID               string
-	generation           uint64
-	continuationPending  bool
-	messages             []llm.Message        // 交互消息列表
-	loadedSkills         []skills.LoadedSkill // 加载的技能列表
-	pendingLongTermScope string               // scope changes wait for the next human Turn
-	pending              *turn.PendingHITL    // 暂停
-	toolLoopCount        int                  // tool 循环计数
-	fsRoot               string               // 文件系统根路径
-	media                *media.Registry      // session 媒体索引（F-M1）
+	// lifecycleMu serializes compound Coordinator transitions. The
+	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
+	// second lifecycle projection.
+	lifecycleMu           sync.Mutex
+	lifecycleCommandSeq   uint64
+	lifecycleEventSeq     uint64
+	lifecycleEventsLoaded bool
+	messages              []llm.Message        // 交互消息列表
+	loadedSkills          []skills.LoadedSkill // 加载的技能列表
+	pendingLongTermScope  string               // scope changes wait for the next human Turn
+	fsRoot                string               // 文件系统根路径
+	media                 *media.Registry      // session 媒体索引（F-M1）
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
@@ -104,6 +101,7 @@ type runtime struct {
 	configRevision  int64 // 兼容旧观测字段；值与 runtimeRevision 一致
 	runtimeRevision int64
 	runtimeDigest   string
+	turnBudget      turn.TurnBudget
 }
 
 // newRuntime 创建新的 session runtime
@@ -157,26 +155,24 @@ func newRuntimeWithPublisher(
 	}
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
-		session:       Session{ID: id, AgentID: agentID},
-		queue:         queue.NewMessageQueue(),
-		done:          make(chan struct{}),
-		store:         st,
-		hub:           eventHub,
-		agentID:       agentID,
-		logger:        logger,
-		skillsCatalog: catalog,
+		session:         Session{ID: id, AgentID: agentID},
+		queue:           queue.NewMessageQueue(),
+		turnCoordinator: turn.NewTurnCoordinator(id, agentID),
+		done:            make(chan struct{}),
+		store:           st,
+		hub:             eventHub,
+		agentID:         agentID,
+		logger:          logger,
+		skillsCatalog:   catalog,
 		compression: func() *compression.Coordinator {
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)
 			coord.SetRawMessageHistoryEnabled(turnOpts.RawMessageHistoryEnabled)
 			return coord
 		}(),
-		state:                   turn.StateIdle,
 		messages:                append([]llm.Message(nil), initial...),
 		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
 		skillRevision:           catalog.Revision(),
-		pending:                 initialPending,
-		toolLoopCount:           initialLoopCount,
 		fsRoot:                  turnOpts.FSRoot,
 		triggerDelivery:         triggerDelivery,
 		sideEffects:             newSideEffectStore(),
@@ -186,6 +182,7 @@ func newRuntimeWithPublisher(
 		configRevision:          firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
 		runtimeRevision:         firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
 		runtimeDigest:           strings.TrimSpace(turnOpts.RuntimeDigest),
+		turnBudget:              turnOpts.Budget,
 	}
 	if reg, err := media.NewRegistry(id, turnOpts.FSRoot); err == nil {
 		rt.media = reg
@@ -234,8 +231,84 @@ func newRuntimeWithPublisher(
 	)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
+	modelRetries := turnOpts.MaxModelRetries
+	if modelRetries == 0 {
+		modelRetries = 2
+	}
+	rt.orch.SetModelRetryLimit(modelRetries)
+	toolRetries := turnOpts.ToolRetryLimit
+	if toolRetries == 0 {
+		toolRetries = 1
+	}
+	rt.orch.SetToolRetryLimit(toolRetries)
 	rt.orch.SetMultimodalEnabled(turnOpts.MultimodalEnabled)
 	rt.orch.SetMediaRegistry(rt.media)
+	rt.orch.SetLifecycleMetadataProvider(func(sessionID string) map[string]any {
+		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
+			return nil
+		}
+		snapshot := rt.turnCoordinator.Snapshot()
+		return map[string]any{
+			"turn_id":              snapshot.TurnID,
+			"step_id":              snapshot.StepID,
+			"step_index":           snapshot.StepIndex,
+			"context_epoch":        snapshot.ContextEpoch,
+			"turn_status":          snapshot.TurnStatus,
+			"turn_end_reason":      snapshot.TurnEndReason,
+			"step_status":          snapshot.StepStatus,
+			"step_end_reason":      snapshot.StepEndReason,
+			"assistant_message_id": snapshot.AssistantMsgID,
+			"turn_generation":      snapshot.Generation,
+			"runtime_revision":     snapshot.RuntimeRevision,
+			"runtime_digest":       snapshot.RuntimeDigest,
+			"prompt_digest":        snapshot.PromptDigest,
+			"tool_digest":          snapshot.ToolDigest,
+			"event_seq":            rt.lifecycleEventSequence(),
+			"recovery_required":    snapshot.RecoveryRequired,
+		}
+	})
+	rt.orch.SetLifecycleCommandSink(func(sessionID string, command turn.TurnCommand) error {
+		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
+			return nil
+		}
+		state := rt.turnCoordinator.Snapshot()
+		execution := state.ExecutionContext()
+		if command.Type == turn.CommandTurnSnapshotCreated && state.RuntimeDigest != "" {
+			return nil
+		}
+		if command.TurnID == "" {
+			command.TurnID = execution.TurnID
+		}
+		if command.Generation == 0 {
+			command.Generation = execution.Generation
+		}
+		if command.StepID == "" {
+			command.StepID = state.StepID
+		}
+		_, err := rt.lifecycleDispatchErr(command)
+		return err
+	})
+	rt.orch.SetToolBudgetCheck(func(sessionID string) (bool, string) {
+		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
+			return true, ""
+		}
+		decision := rt.turnCoordinator.BudgetDecisionFor(turn.CommandToolCallRecorded)
+		return decision.Allowed, decision.Reason
+	})
+	rt.orch.SetToolRetryCheck(func(sessionID string) (bool, string) {
+		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
+			return true, ""
+		}
+		decision := rt.turnCoordinator.BudgetDecisionFor(turn.CommandToolExecutionRetrying)
+		return decision.Allowed, decision.Reason
+	})
+	rt.orch.SetModelRetryCheck(func(sessionID string) (bool, string) {
+		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
+			return true, ""
+		}
+		decision := rt.turnCoordinator.BudgetDecisionFor(turn.CommandModelRequestStarted)
+		return decision.Allowed, decision.Reason
+	})
 	if len(initialHookStore) > 0 {
 		rt.orch.SetHookStore(initialHookStore)
 	}
@@ -245,8 +318,29 @@ func newRuntimeWithPublisher(
 		rt.orch.SetLongTermStore(turnOpts.LongTermStore)
 	}
 	rt.orch.SyncLoadedSkillHooks(loaded)
+	rt.restoreLifecycleEvents()
+	rt.restoreLegacyPending(initialPending, initialLoopCount)
 	// 返回 runtime
 	return rt
+}
+
+func (r *runtime) lifecycleEventSequence() uint64 {
+	if r == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&r.lifecycleEventSeq)
+}
+
+func (r *runtime) setLifecycleEventSequence(sequence uint64) {
+	if r == nil {
+		return
+	}
+	for {
+		current := atomic.LoadUint64(&r.lifecycleEventSeq)
+		if sequence <= current || atomic.CompareAndSwapUint64(&r.lifecycleEventSeq, current, sequence) {
+			return
+		}
+	}
 }
 
 func firstNonZero(values ...int64) int64 {
@@ -331,27 +425,37 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		if !r.acceptEnvelope(env) {
 			continue
 		}
-		// Trigger delivery 在 Apply 成功时清除，不在 dequeue 时清除。
-		switch env.RequestType {
-		case queue.RequestTypeResume:
-			r.clearIdleAutoCompressMark()
-			r.logResumeDequeued(env.ResumeValue)
-			r.handleResume(ctx, env.ResumeValue)
-		case queue.RequestTypeAsyncToolResult:
-			r.clearIdleAutoCompressMark()
-			r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
-		case queue.RequestTypeTriggerMessage:
-			r.clearIdleAutoCompressMark()
-			r.handleSideEffectProduceExternal(ctx, env)
-		case queue.RequestTypeSideEffectContinue:
-			r.handleSideEffectContinue(ctx, env.SideEffectContinueSource)
-		case queue.RequestTypeToolResult:
-			r.handleToolResult(ctx)
-		case queue.RequestTypeMessage, "":
-			r.clearIdleAutoCompressMark()
-			r.handleHumanMessage(ctx, env)
-		default:
-		}
+		r.dispatchTurnRequest(ctx, env)
+	}
+}
+
+// dispatchTurnRequest is the single runtime entry point for queue commands.
+// The queue only transports an envelope; this boundary is responsible for
+// translating the legacy request type into one Turn/Step operation. Keeping
+// that translation in one place prevents new request producers from calling
+// the Orchestrator directly and bypassing lifecycle fencing, snapshots, or
+// recovery bookkeeping.
+func (r *runtime) dispatchTurnRequest(ctx context.Context, env queue.Envelope) {
+	// Trigger delivery 在 Apply 成功时清除，不在 dequeue 时清除。
+	switch env.RequestType {
+	case queue.RequestTypeResume:
+		r.clearIdleAutoCompressMark()
+		r.logResumeDequeued(env.ResumeValue)
+		r.handleResume(ctx, env.ResumeValue)
+	case queue.RequestTypeAsyncToolResult:
+		r.clearIdleAutoCompressMark()
+		r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
+	case queue.RequestTypeTriggerMessage:
+		r.clearIdleAutoCompressMark()
+		r.handleSideEffectProduceExternal(ctx, env)
+	case queue.RequestTypeSideEffectContinue:
+		r.handleSideEffectContinue(ctx, env.SideEffectContinueSource)
+	case queue.RequestTypeToolResult:
+		r.handleToolResult(ctx)
+	case queue.RequestTypeMessage, "":
+		r.clearIdleAutoCompressMark()
+		r.handleHumanMessage(ctx, env)
+	default:
 	}
 }
 
@@ -364,48 +468,32 @@ func (r *runtime) enqueueToolResult(ctx context.Context, _ string) error {
 		default:
 		}
 	}
-	r.mu.Lock()
 	if ctx != nil {
 		select {
 		case <-ctx.Done():
-			r.mu.Unlock()
 			return ctx.Err()
 		default:
 		}
 	}
-	if ctx != nil {
-		if ref, ok := ctx.Value(continuationContextKey{}).(continuationRef); ok {
-			if r.turnID != ref.turnID || r.generation != ref.generation {
-				// The step which owns this callback was cancelled or superseded. Do
-				// not let a late orchestrator callback create a new turn.
-				r.mu.Unlock()
-				return nil
-			}
-		}
+	if execution, ok := turn.ExecutionContextFromContext(ctx); ok && !r.turnCoordinator.IsCurrentExecution(execution) {
+		// The step which owns this callback was cancelled or superseded. Do not
+		// let a late orchestrator callback create a new continuation.
+		return nil
 	}
-	if r.turnID == "" {
-		r.turnID = newContinuationID()
-		r.generation++
+	state := r.turnCoordinator.Snapshot()
+	if !state.HasActiveTurn || state.TurnID == "" || state.Generation == 0 {
+		return fmt.Errorf("cannot schedule tool result without an active turn")
 	}
-	r.continuationPending = true
+	r.mu.Lock()
+	epoch := r.sessionEpoch
+	r.mu.Unlock()
 	env := queue.Envelope{
 		RequestType:  queue.RequestTypeToolResult,
-		SessionEpoch: r.sessionEpoch,
-		TurnID:       r.turnID,
-		Generation:   r.generation,
+		SessionEpoch: epoch,
+		TurnID:       state.TurnID,
+		Generation:   state.Generation,
 	}
-	r.mu.Unlock()
-	if err := r.enqueue(env, queue.PriorityToolResult); err != nil {
-		r.mu.Lock()
-		if r.turnID == env.TurnID && r.generation == env.Generation {
-			r.continuationPending = false
-			r.turnID = ""
-			r.generation++
-		}
-		r.mu.Unlock()
-		return err
-	}
-	return nil
+	return r.enqueue(env, queue.PriorityToolResult)
 }
 
 // scheduleToolResult 调度 tool 结果入队
@@ -416,37 +504,28 @@ func (r *runtime) scheduleToolResult() error {
 // applyStepOutcome 应用步骤结果
 func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutcome) {
 	r.messages = append([]llm.Message(nil), (*history)...)
-	if outcome.Pending != nil {
-		r.pending = outcome.Pending
-		r.toolLoopCount = outcome.LoopCount
-		return
-	}
-	r.pending = nil
-	if outcome.ScheduleToolResult {
-		r.toolLoopCount = outcome.LoopCount
-	} else {
-		r.toolLoopCount = 0
-	}
 }
 
 // acceptEnvelope filters stale internal continuations while preserving external
 // facts for side-effect reconciliation after a turn is cancelled.
 func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 	r.mu.Lock()
-	epoch, turnID, generation := r.sessionEpoch, r.turnID, r.generation
+	epoch := r.sessionEpoch
+	r.mu.Unlock()
+	state := r.turnCoordinator.Snapshot()
+	turnID, generation := state.TurnID, state.Generation
 	validEpoch := env.SessionEpoch == 0 || env.SessionEpoch == epoch
 	validTurn := true
 	switch env.RequestType {
 	case queue.RequestTypeToolResult, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
-		validTurn = env.TurnID != "" && env.TurnID == turnID && env.Generation == generation
-	}
-	if validEpoch && validTurn {
-		switch env.RequestType {
-		case queue.RequestTypeToolResult, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
-			r.continuationPending = false
+		if env.TurnID == "" && env.Generation == 0 && !state.HasActiveTurn {
+			// Legacy persisted HITL and post-cancel side-effect recovery may
+			// intentionally arrive before a new Coordinator Turn is opened.
+			validTurn = true
+		} else {
+			validTurn = state.HasActiveTurn && env.TurnID != "" && env.TurnID == turnID && env.Generation == generation
 		}
 	}
-	r.mu.Unlock()
 	if !validEpoch {
 		r.logger.Info("stale session event dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_epoch", env.SessionEpoch, "session_epoch", epoch)
 		return false
@@ -476,10 +555,9 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 		}
 		userMsg = persisted
 	}
+	pending := r.pendingSnapshot()
 	r.mu.Lock()
-	if r.pending != nil {
-		pending := r.pending
-		r.pending = nil
+	if pending != nil {
 		r.orch.InterruptPending(r.session.ID, &r.messages, pending)
 	}
 	if r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages) {
@@ -487,19 +565,33 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 			"session_id", r.session.ID,
 		)
 	}
-	r.toolLoopCount = 0
 	firstInteraction := len(r.messages) == 0
 	r.mu.Unlock()
 	r.applyPendingLongTermScope()
 	r.observeSkillCatalogChange()
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		r.mu.Lock()
+		r.messages = append(r.messages, userMsg)
+		r.mu.Unlock()
+		r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", err)
+		r.persist(context.Background())
+		return
+	}
+	historyStart := r.lifecycleHistoryLength()
 
 	if firstInteraction && r.orch != nil {
 		r.orch.ReloadLongTermMemory(parent)
 	}
 
-	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, userMsg, setState)
+	outcome, history := r.runTurnStepWithSideEffects(parent, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, userMsg)
 	})
+	if err := r.lifecycleAfterModelStep(outcome, history, historyStart); err != nil {
+		r.logger.Warn("finish model step lifecycle failed", "session_id", r.session.ID, "error", err)
+		if outcome.Err == nil {
+			outcome.Err = err
+		}
+	}
 	if outcome.Err != nil {
 		r.mu.Lock()
 		r.messages = history
@@ -587,10 +679,28 @@ func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 }
 
 func (r *runtime) handleToolResult(parent context.Context) {
-	loopCount := r.toolLoopCountSnapshot()
-	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history, setState, loopCount)
+	started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman)
+	if err != nil {
+		r.logger.Warn("start tool continuation lifecycle failed", "session_id", r.session.ID, "error", err)
+		r.persist(context.Background())
+		r.finishTurnIdle(turn.StepOutcome{})
+		return
+	}
+	if !started {
+		r.persist(context.Background())
+		r.finishTurnIdle(turn.StepOutcome{})
+		return
+	}
+	historyStart := r.lifecycleHistoryLength()
+	outcome, history := r.runTurnStepWithSideEffects(parent, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history)
 	})
+	if err := r.lifecycleAfterModelStep(outcome, history, historyStart); err != nil {
+		r.logger.Warn("finish tool continuation lifecycle failed", "session_id", r.session.ID, "error", err)
+		if outcome.Err == nil {
+			outcome.Err = err
+		}
+	}
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
@@ -598,10 +708,8 @@ func (r *runtime) handleToolResult(parent context.Context) {
 }
 
 func (r *runtime) handleResume(parent context.Context, resumeValue map[string]any) {
-	r.mu.Lock()
-	pending := r.pending
+	pending := r.pendingSnapshot()
 	if pending == nil {
-		r.mu.Unlock()
 		r.logger.Info("resume ignored no pending hitl",
 			"session_id", r.session.ID,
 			"resume_value", resumeValue,
@@ -609,8 +717,6 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		return
 	}
 	pendingKind, pendingToolCallID := pendingHITLLogFields(pending)
-	loopCount := r.toolLoopCount
-	r.mu.Unlock()
 
 	resumeKind := clihitl.ResumeValueKind(resumeValue)
 	if resumeKind != "nil" && resumeKind != "unknown" && pending != nil &&
@@ -631,10 +737,21 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		"resume_value_kind", resumeKind,
 		"resume_value", resumeValue,
 	)
+	if err := r.lifecyclePrepareResume(resumeValue); err != nil {
+		r.logger.Warn("prepare resume lifecycle failed", "session_id", r.session.ID, "error", err)
+		r.persist(context.Background())
+		return
+	}
 
-	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateAwaitingTool, false, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending, setState, loopCount)
+	outcome, history := r.runTurnStepWithSideEffects(parent, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending)
 	})
+	if err := r.lifecycleAfterResume(outcome, history); err != nil {
+		r.logger.Warn("finish resume lifecycle failed", "session_id", r.session.ID, "error", err)
+		if outcome.Err == nil {
+			outcome.Err = err
+		}
+	}
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
@@ -649,12 +766,12 @@ func (r *runtime) persist(ctx context.Context) {
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	pending := r.pending
-	loopCount := r.toolLoopCount
 	idleMarked := r.idleAutoCompressApplied
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	r.mu.Unlock()
+	pending := r.pendingSnapshot()
+	stepCount := r.stepIndexSnapshot()
 	_ = r.store.Save(ctx, store.Record{
 		AgentID:      r.session.ID,
 		NodeID:       r.session.AgentID,
@@ -662,7 +779,7 @@ func (r *runtime) persist(ctx context.Context) {
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{
 			Pending:                 pending,
-			ToolLoopCount:           loopCount,
+			ToolLoopCount:           stepCount,
 			HookStore:               hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
 			IdleAutoCompressApplied: idleMarked,
 			NotifySeq:               notifySeq,
@@ -682,20 +799,27 @@ func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	pending := r.pending
-	loopCount := r.toolLoopCount
 	idleMarked := r.idleAutoCompressApplied
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	r.mu.Unlock()
+	pending := r.pendingSnapshot()
+	stepCount := r.stepIndexSnapshot()
 	var hookStore map[string]json.RawMessage
 	if r.orch != nil {
 		hookStore = r.orch.HookStoreSnapshot()
 	}
-	return msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq
+	return msgs, loaded, pending, stepCount, hookStore, idleMarked, notifySeq, ackSeq
 }
 
 func (r *runtime) clearMessages(ctx context.Context) {
+	// Context clearing is a logical cancellation boundary. Keep the durable
+	// Turn terminal event even though the legacy message snapshot is removed;
+	// otherwise a restart could resurrect an in-flight Step from lifecycle
+	// events while the visible session is empty.
+	if err := r.lifecycleCancel(); err != nil && r.logger != nil {
+		r.logger.Warn("cancel lifecycle during clear failed", "session_id", r.session.ID, "error", err)
+	}
 	if r.compression != nil {
 		r.compression.CancelSession(r.session.ID)
 	}
@@ -704,13 +828,8 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	}
 	r.mu.Lock()
 	r.sessionEpoch++
-	r.turnID = ""
-	r.generation++
-	r.continuationPending = false
 	r.messages = nil
 	r.loadedSkills = nil
-	r.pending = nil
-	r.toolLoopCount = 0
 	r.mu.Unlock()
 	if r.orch != nil {
 		r.orch.ClearHookStore()
@@ -745,15 +864,29 @@ func (r *runtime) queueDepth() int {
 }
 
 func (r *runtime) turnState() turn.State {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.state
+	if r == nil || r.turnCoordinator == nil {
+		return turn.StateIdle
+	}
+	return turnStateFromCoordinatorSnapshot(r.turnCoordinator.Snapshot())
 }
 
 func (r *runtime) hasPendingHITL() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.pending != nil
+	return r.pendingSnapshot() != nil
+}
+
+// lifecycleExecutionBusy is the Coordinator-backed execution predicate used
+// by maintenance and compression boundaries. Waiting for client interaction
+// is deliberately not considered model execution, matching the old HITL
+// eviction behavior without consulting a second pending field.
+func (r *runtime) lifecycleExecutionBusy() bool {
+	if r == nil || r.turnCoordinator == nil {
+		return false
+	}
+	snapshot := r.turnCoordinator.Snapshot()
+	if !snapshot.HasActiveTurn {
+		return false
+	}
+	return snapshot.StepStatus != turn.StepStatusWaitingInteraction
 }
 
 // pendingHITLLogFields 提取 pending HITL 日志字段。
@@ -778,9 +911,7 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	if r.isChildSession() {
 		return compression.ForceResult{Status: "unsupported"}
 	}
-	r.mu.Lock()
-	busy := r.state != turn.StateIdle || r.pending != nil
-	r.mu.Unlock()
+	busy := r.lifecycleExecutionBusy()
 	if busy {
 		return compression.ForceResult{Status: "busy"}
 	}
@@ -802,25 +933,46 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 }
 
 func (r *runtime) contextView() *ContextView {
+	lifecycle := turn.CoordinatorSnapshot{}
+	if r.turnCoordinator != nil {
+		lifecycle = r.turnCoordinator.Snapshot()
+	}
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
+	queuePending := r.queue.Len()
+	state := r.turnState()
 	view := &ContextView{
-		SessionID:             r.session.ID,
-		MessagesCount:         len(r.messages),
-		MessagesTotalTokens:   estimateMessageTokens(r.messages),
-		PendingToolCallsCount: pendingToolCallsCount(r.pending),
-		ToolLoopCount:         r.toolLoopCount,
-		LoadedSkills:          loaded,
-		QueuePending:          r.queue.Len(),
-		TurnState:             r.state,
-		Messages:              msgs,
+		SessionID:           r.session.ID,
+		MessagesCount:       len(r.messages),
+		MessagesTotalTokens: estimateMessageTokens(r.messages),
+		ToolLoopCount:       lifecycle.Usage.Steps,
+		LoadedSkills:        loaded,
+		QueuePending:        queuePending,
+		HasActiveTurn:       lifecycle.HasActiveTurn,
+		TurnID:              lifecycle.TurnID,
+		StepID:              lifecycle.StepID,
+		StepIndex:           lifecycle.StepIndex,
+		ContextEpoch:        lifecycle.ContextEpoch,
+		TurnStatus:          lifecycle.TurnStatus,
+		TurnEndReason:       lifecycle.TurnEndReason,
+		StepStatus:          lifecycle.StepStatus,
+		StepEndReason:       lifecycle.StepEndReason,
+		TurnGeneration:      lifecycle.Generation,
+		RuntimeRevision:     lifecycle.RuntimeRevision,
+		RuntimeDigest:       lifecycle.RuntimeDigest,
+		PromptDigest:        lifecycle.PromptDigest,
+		ToolDigest:          lifecycle.ToolDigest,
+		RecoveryRequired:    lifecycle.RecoveryRequired,
+		TurnState:           state,
+		Messages:            msgs,
 	}
-	view.HasActiveTurn = r.state != turn.StateIdle || r.pending != nil
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
 	}
 	r.mu.Unlock()
+	pending := r.pendingSnapshot()
+	view.PendingToolCallsCount = pendingToolCallsCount(pending)
 	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
 	enrichContextPromptStats(view, r.skillsCatalog)
 	if r.compression != nil {
@@ -837,23 +989,27 @@ func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
 	if env.SessionEpoch == 0 {
 		env.SessionEpoch = r.sessionEpoch
 	}
+	epoch := r.sessionEpoch
+	r.mu.Unlock()
+	state := r.turnCoordinator.Snapshot()
 	internalContinuation := false
 	if env.RequestType == queue.RequestTypeResume || env.RequestType == queue.RequestTypeSideEffectContinue {
 		internalContinuation = true
 		if env.TurnID == "" {
-			if r.turnID == "" {
-				r.turnID = newContinuationID()
-				r.generation++
+			if state.HasActiveTurn {
+				env.TurnID = state.TurnID
+				env.Generation = state.Generation
 			}
-			env.TurnID = r.turnID
-			env.Generation = r.generation
 		}
 	}
-	if internalContinuation && (env.SessionEpoch != r.sessionEpoch || env.TurnID != r.turnID || env.Generation != r.generation) {
-		// The producer raced with cancel/clear-context after it captured the
-		// continuation identity. Do not re-arm continuationPending or enqueue a
+	if env.SessionEpoch != epoch {
+		// The producer raced with clear-context after it captured the session
+		// epoch. Do not enqueue an event that is guaranteed to be stale.
+		return nil
+	}
+	if internalContinuation && env.TurnID != "" && (!state.HasActiveTurn || env.TurnID != state.TurnID || env.Generation != state.Generation) {
+		// The producer raced with cancel or a new Turn. Do not enqueue a
 		// continuation that can only be rejected by the consumer.
-		r.mu.Unlock()
 		return nil
 	}
 	if env.RequestType == queue.RequestTypeAsyncToolResult || env.RequestType == queue.RequestTypeTriggerMessage {
@@ -862,16 +1018,9 @@ func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
 		// turn reconcile them later without allowing clear-context events back in.
 		internalContinuation = false
 	}
-	if internalContinuation {
-		r.continuationPending = true
-	}
-	r.mu.Unlock()
 	if env.RequestType == queue.RequestTypeResume {
 		before := r.resumeDiagSnapshot()
 		err := r.queue.Enqueue(env, priority)
-		if err != nil {
-			r.clearContinuationIfCurrent(env)
-		}
 		after := r.resumeDiagSnapshot()
 		r.logger.Info("resume enqueued",
 			"session_id", r.session.ID,
@@ -890,18 +1039,7 @@ func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
 		return err
 	}
 	err := r.queue.Enqueue(env, priority)
-	if err != nil && internalContinuation {
-		r.clearContinuationIfCurrent(env)
-	}
 	return err
-}
-
-func (r *runtime) clearContinuationIfCurrent(env queue.Envelope) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.turnID == env.TurnID && r.generation == env.Generation {
-		r.continuationPending = false
-	}
 }
 
 type resumeDiagSnapshot struct {
@@ -913,10 +1051,11 @@ type resumeDiagSnapshot struct {
 }
 
 func (r *runtime) resumeDiagSnapshot() resumeDiagSnapshot {
+	pending := r.pendingSnapshot()
+	pendingKind, pendingID := pendingHITLLogFields(pending)
 	r.mu.Lock()
-	pendingKind, pendingID := pendingHITLLogFields(r.pending)
-	state := r.state
 	r.mu.Unlock()
+	state := r.turnState()
 	return resumeDiagSnapshot{
 		queueLen:          r.queue.Len(),
 		resumeInQueue:     r.queue.CountByRequestType(queue.RequestTypeResume),
@@ -973,39 +1112,32 @@ func resumeFieldString(value map[string]any, key string) string {
 }
 
 func (r *runtime) cancelTurn() bool {
+	return r.cancelTurnWithReason("", nil)
+}
+
+func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[string]any) bool {
+	lifecycleWasActive := r.turnCoordinator != nil && r.turnCoordinator.Snapshot().HasActiveTurn
+	stateBefore := r.turnState()
+	pending := r.pendingSnapshot()
+	if err := r.lifecycleCancel(); err != nil && r.logger != nil {
+		r.logger.Warn("cancel lifecycle failed", "session_id", r.session.ID, "error", err)
+	}
 	r.mu.Lock()
 	cancel := r.turnCancel
-	state := r.state
-	pending := r.pending
-	continuationPending := r.continuationPending
-	active := cancel != nil && state != turn.StateIdle
-	changed := pending != nil || continuationPending || active
+	active := cancel != nil && stateBefore != turn.StateIdle
+	lifecycleActive := lifecycleWasActive
+	changed := pending != nil || lifecycleActive || active
 	if pending != nil {
-		r.generation++
-		r.turnID = ""
-		r.pending = nil
-		r.continuationPending = false
+		if interruptMessage == "" {
+			interruptMessage = "工具调用已被用户取消。"
+		}
 		r.orch.InterruptPendingWithReason(
 			r.session.ID,
 			&r.messages,
 			pending,
-			"工具调用已被用户取消。",
-			map[string]any{"cancelled_by_user": true},
+			interruptMessage,
+			metadata,
 		)
-	}
-	if active {
-		// Advance generation immediately so queued continuations from this turn
-		// are stale when dequeued after cancellation.
-		r.generation++
-		r.turnID = ""
-		r.continuationPending = false
-	}
-	if continuationPending && !active && pending == nil {
-		// The model/tool step can have returned to idle while its tool_result is
-		// still queued. Treat that continuation as an in-flight turn as well.
-		r.generation++
-		r.turnID = ""
-		r.continuationPending = false
 	}
 	if active {
 		r.mu.Unlock()
@@ -1016,9 +1148,6 @@ func (r *runtime) cancelTurn() bool {
 		return true
 	}
 	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
-	if pending != nil || repaired {
-		r.pending = nil
-	}
 	r.mu.Unlock()
 	if changed || repaired {
 		r.logger.Info("repaired orphan tool_calls on idle cancel",

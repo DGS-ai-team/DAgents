@@ -1,7 +1,5 @@
 package session
 
-import "github.com/DGS-ai-team/DAgents/node/internal/turn"
-
 // UpgradeReadiness 供 Shell apply 前查询 Node 是否可安全升级（F-ND1）。
 type UpgradeReadiness struct {
 	Ready            bool     `json:"ready"`
@@ -28,7 +26,8 @@ func (m *Manager) UpgradeReadiness() UpgradeReadiness {
 }
 
 func (r *runtime) isBusyForUpgrade() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.state != turn.StateIdle || r.pending != nil
+	if r == nil || r.turnCoordinator == nil {
+		return false
+	}
+	return r.turnCoordinator.Snapshot().HasActiveTurn
 }

@@ -5,7 +5,6 @@
 | 符号 | 说明 |
 |------|------|
 | `State` | turn 生命周期：`idle` / `model_streaming` / `awaiting_tool` |
-| `StateSetter` | 阶段切换回调（session 写入 `runtime.state`） |
 | `SkillAccess` | orchestrator 读写 session `loaded_skills`（Catalog + Get/Set） |
 | `Orchestrator` | LLM + 工具循环 + SSE |
 | `NewOrchestrator` | 构造；`policy` 默认加载、`maxToolLoops` 默认 16 |
@@ -94,7 +93,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | 符号 | 说明 |
 |------|------|
 | `RuntimeToolMessageContent` | tool_message 回合占位 content（`"tool_message"`） |
-| `StepOutcome` | 单步结果：Pending、LoopCount、ScheduleToolResult、Err |
+| `StepOutcome` | 单步结果：Pending、StepIndex、ScheduleToolResult、Err；StepIndex 来自 `TurnExecutionContext` |
 
 ## tool_result_messages.go
 

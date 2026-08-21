@@ -10,6 +10,7 @@ const saving = ref(false);
 const testing = ref("");
 const error = ref("");
 const status = ref("");
+const testResult = ref(null);
 const showCredentialForm = ref(false);
 const showChannelForm = ref(false);
 const editingChannelId = ref("");
@@ -171,8 +172,10 @@ async function testChannel(item) {
   if (!item?.channel_id || testing.value) return;
   testing.value = item.channel_id;
   error.value = "";
+  testResult.value = null;
   try {
     const result = await api.testLinuxChannel(item.channel_id);
+    testResult.value = { channelId: item.channel_id, ...result };
     status.value = `${item.display_name || item.channel_id}：${result.message || (result.available ? "配置有效" : "不可用")}`;
   } catch (e) {
     error.value = e.message || "测试通道失败";
@@ -210,6 +213,25 @@ onMounted(() => void load());
     <p v-if="loading" class="linux-settings__muted">加载中…</p>
     <p v-if="error" class="linux-settings__error">{{ error }}</p>
     <p v-if="status" class="linux-settings__ok">{{ status }}</p>
+    <section v-if="testResult" class="linux-settings__diagnostics" aria-live="polite">
+      <div class="linux-settings__diagnostics-head">
+        <strong>连接诊断</strong>
+        <span v-if="testResult.error_code" class="linux-settings__diagnostics-code">{{ testResult.error_code }}</span>
+      </div>
+      <div class="linux-settings__stages">
+        <div
+          v-for="stage in testResult.stages || []"
+          :key="stage.name"
+          class="linux-settings__stage"
+          :class="`linux-settings__stage--${stage.status}`"
+        >
+          <span class="linux-settings__stage-mark" aria-hidden="true">{{ stage.status === "passed" ? "✓" : "!" }}</span>
+          <span class="linux-settings__stage-name">{{ stage.name }}</span>
+          <span class="linux-settings__stage-message">{{ stage.message || "完成" }}</span>
+          <span class="linux-settings__stage-duration">{{ stage.duration_ms || 0 }}ms</span>
+        </div>
+      </div>
+    </section>
 
     <section class="settings-section settings-section--standalone">
       <div class="settings-section__head">
@@ -354,6 +376,16 @@ onMounted(() => void load());
 .linux-settings__group-head { display:flex; align-items:baseline; gap:9px; margin-bottom:13px; }
 .linux-settings__group-head strong { font-size:14px; }
 .linux-settings__group-head span { color:var(--color-text-muted); font-size:12px; }
+.linux-settings__diagnostics { margin:12px 0 16px; padding:12px 14px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface-muted, #fbfcfd); }
+.linux-settings__diagnostics-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
+.linux-settings__diagnostics-code { color:var(--color-danger, #b42318); font-family:var(--font-mono, monospace); font-size:11px; }
+.linux-settings__stages { display:grid; gap:5px; }
+.linux-settings__stage { display:grid; grid-template-columns:18px 112px minmax(0, 1fr) auto; align-items:center; gap:7px; min-height:26px; font-size:12px; }
+.linux-settings__stage-mark { display:grid; place-items:center; width:16px; height:16px; border-radius:50%; color:#fff; background:var(--color-success, #16803c); font-size:11px; font-weight:700; }
+.linux-settings__stage--failed .linux-settings__stage-mark { background:var(--color-danger, #b42318); }
+.linux-settings__stage-name { color:var(--color-text); font-weight:600; }
+.linux-settings__stage-message { min-width:0; overflow:hidden; color:var(--color-text-muted); text-overflow:ellipsis; white-space:nowrap; }
+.linux-settings__stage-duration { color:var(--color-text-muted); font-variant-numeric:tabular-nums; }
 .linux-settings__grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .linux-settings__grid--target { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .linux-settings__field { min-width:0; display:flex; flex-direction:column; gap:6px; }
@@ -386,4 +418,5 @@ onMounted(() => void load());
 .linux-settings__modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding-top:16px; border-top:1px solid var(--color-border); }
 @media(max-width:900px) { .linux-settings__grid--target { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:720px) { .linux-settings__row { align-items:stretch; flex-direction:column; } .linux-settings__summary,.linux-settings__editor,.linux-settings__grid,.linux-settings__grid--target { grid-template-columns:1fr; } .linux-settings__actions { justify-content:flex-start; } .linux-settings__form-actions { justify-content:flex-start; } .linux-settings__modal-backdrop { align-items:flex-start; padding:12px; } .linux-settings__modal { padding:16px; max-height:calc(100vh - 24px); } }
+@media(max-width:640px) { .linux-settings__stage { grid-template-columns:18px 96px minmax(0, 1fr); } .linux-settings__stage-duration { display:none; } }
 </style>

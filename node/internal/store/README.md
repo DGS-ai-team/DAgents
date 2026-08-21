@@ -7,7 +7,7 @@ Agent 对话运行时持久化（SQLite）。
 | 文件 | 说明 |
 |------|------|
 | `sqlite.go` | `SQLiteStore`：`agent_runtimes` 行读写、`messages_json`、`loaded_skills_json`；启动时将旧表 `sessions` 迁入 |
-| `runtime_state.go` | `RuntimeState`：`pending` HITL、`tool_loop_count` 等恢复字段 |
+| `runtime_state.go` | `RuntimeState`：旧版 `pending` / `tool_loop_count` 兼容镜像，以及 Hook/cursor 字段 |
 | `sqlite_test.go` | 存储 round-trip 与 legacy 迁移单测 |
 
 ## Schema
@@ -21,9 +21,9 @@ Agent 对话运行时持久化（SQLite）。
 
 ## 边界
 
-- **热状态**在 `session/runtime` 内存；`persist` 时全量快照写入本包。
+- **生命周期热状态**在 `turn.Coordinator` 内存；`persist` 时消息与兼容性镜像写入本包。
 - **JSONL 审计**在 `history/Journal`，与本包并行、不替代。
-- `RuntimeState` 嵌入 `turn.PendingHITL`，恢复后由 `session` 喂回 `turn` 续跑。
+- `turn_events` 是 Turn/Step 生命周期事实源；`RuntimeState.Pending` / `ToolLoopCount` 只用于无事件老数据迁移及旧读取方兼容，不作为新的执行位置。
 - Agent 元数据（模板/快照等）在 `agents.db`，与本库分离。
 
 ## 相关文档

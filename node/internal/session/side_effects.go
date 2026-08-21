@@ -148,10 +148,11 @@ func (s *sideEffectStore) ApplyReady(
 	orch *turn.Orchestrator,
 	history *[]llm.Message,
 	delivery triggers.DeliveryTracker,
+	factSinks ...func(readySideEffect),
 ) sideEffectApplyResult {
 	var result sideEffectApplyResult
 	for {
-		applied, seqs, cont := s.applyOneBatch(sessionID, orch, history, delivery)
+		applied, seqs, cont := s.applyOneBatch(sessionID, orch, history, delivery, factSinks...)
 		if applied == 0 {
 			break
 		}
@@ -172,6 +173,7 @@ func (s *sideEffectStore) applyOneBatch(
 	orch *turn.Orchestrator,
 	history *[]llm.Message,
 	delivery triggers.DeliveryTracker,
+	factSinks ...func(readySideEffect),
 ) (applied int, appliedSeqs []uint64, shouldContinue bool) {
 	batch := s.collectBatch(*history)
 	if len(batch) == 0 {
@@ -214,6 +216,14 @@ func (s *sideEffectStore) applyOneBatch(
 		return applied, appliedSeqs, false
 	}
 
+	for _, sink := range factSinks {
+		if sink == nil {
+			continue
+		}
+		for _, e := range pending {
+			sink(e)
+		}
+	}
 	orch.ApplySideEffectPlan(sessionID, history, site, plan)
 	for _, e := range pending {
 		s.removeEntry(e, delivery)
@@ -322,6 +332,7 @@ func (s *sideEffectStore) ReconcileAfterStep(
 	outcome turn.StepOutcome,
 	delivery triggers.DeliveryTracker,
 	scheduleContinue func(),
+	factSinks ...func(readySideEffect),
 ) turn.StepOutcome {
 	if outcome.ScheduleToolResult || pending != nil {
 		return outcome
@@ -329,7 +340,7 @@ func (s *sideEffectStore) ReconcileAfterStep(
 	if !turn.TaskComplete(*history, pending) {
 		return outcome
 	}
-	apply := s.ApplyReady(sessionID, orch, history, delivery)
+	apply := s.ApplyReady(sessionID, orch, history, delivery, factSinks...)
 	if apply.Continue {
 		scheduleContinue()
 	}

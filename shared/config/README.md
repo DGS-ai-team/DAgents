@@ -33,7 +33,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|------|
 | `bash_output_encoding` | 按平台 | `bash_run` 子进程 stdout/stderr 解码（如 `utf-8`、`gbk`） |
 | `file_encoding` | 按平台 | FS 工具读写磁盘默认编码；单次调用可用 `encoding` 参数覆盖 |
-| `bash_compress` | 见 example | `bash_run` 输出清洗与 rune 截断 |
+| `bash_compress` | 见 example | `bash_run` 输出清洗与 rune 截断；`output_mode: head_tail` 可额外保留尾部 |
 
 Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `defaults.tools.enabled_groups` 决定（空=不启用任何组）。组名与成员见 `ExpandBuiltinToolGroups` / `builtinToolGroups`。`tools.enabled` 仍会在加载时拒绝。
 

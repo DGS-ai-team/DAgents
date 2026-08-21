@@ -16,23 +16,23 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 	history *[]llm.Message,
 	resumeValue map[string]any,
 	pending *PendingHITL,
-	toolLoopCount int,
+	stepIndex int,
 ) StepOutcome {
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	var targetIdx = -1
 	if resumeToolCallID != "" {
 		if _, idx, ok := pending.findItem(resumeToolCallID); ok {
 			if !tools.IsAskUserInformation(pending.Items[idx].ToolCall.Function.Name) {
-				return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool_call_id %q is not user_information", resumeToolCallID)}
+				return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("tool_call_id %q is not user_information", resumeToolCallID)}
 			}
 			targetIdx = idx
 		} else {
-			return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unknown tool_call_id: %s", resumeToolCallID)}
+			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("unknown tool_call_id: %s", resumeToolCallID)}
 		}
 	} else {
 		userItems := pending.userInformationItems()
 		if len(userItems) != 1 {
-			return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool_call_id required when multiple user_information pending")}
+			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("tool_call_id required when multiple user_information pending")}
 		}
 		for i, item := range pending.Items {
 			if item.ToolCall.ID == userItems[0].ToolCall.ID {
@@ -42,7 +42,7 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 		}
 	}
 	if targetIdx < 0 {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("missing user_information tool call")}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("missing user_information tool call")}
 	}
 
 	tc := pending.Items[targetIdx].ToolCall
@@ -55,9 +55,9 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 
 	remaining := pending.withoutIndex(targetIdx)
 	if remaining == nil {
-		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
-	return StepOutcome{Pending: remaining, LoopCount: toolLoopCount}
+	return StepOutcome{Pending: remaining, StepIndex: stepIndex}
 }
 
 func (o *Orchestrator) continueAfterApprovalResume(
@@ -66,11 +66,11 @@ func (o *Orchestrator) continueAfterApprovalResume(
 	history *[]llm.Message,
 	resumeValue map[string]any,
 	pending *PendingHITL,
-	toolLoopCount int,
+	stepIndex int,
 ) StepOutcome {
 	approvalItems := pending.approvalItems()
 	if len(approvalItems) == 0 {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("no pending approval tool calls")}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("no pending approval tool calls")}
 	}
 
 	ids := make([]string, 0, len(approvalItems))
@@ -99,13 +99,13 @@ func (o *Orchestrator) continueAfterApprovalResume(
 			}
 		}
 		if err := o.executeAutoBatch(ctx, sessionID, history, approved, &plan); err != nil {
-			return StepOutcome{LoopCount: toolLoopCount, Err: err}
+			return StepOutcome{StepIndex: stepIndex, Err: err}
 		}
 	}
 
 	remainingItems := pending.nonApprovalItems()
 	if len(remainingItems) == 0 {
-		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
-	return StepOutcome{Pending: pendingFromItems(remainingItems), LoopCount: toolLoopCount}
+	return StepOutcome{Pending: pendingFromItems(remainingItems), StepIndex: stepIndex}
 }

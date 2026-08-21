@@ -59,6 +59,8 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/reload", s.handleAgentReload)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/execution-events", s.handleAgentExecutionEvents)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/timeline", s.handleAgentTimeline)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile", s.handleAgentReconcileToolExecution)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/context", s.handleAgentContext)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ack", s.handleAgentAck)
@@ -860,6 +862,8 @@ type executionEventResponse struct {
 	PolicyDecision string `json:"policy_decision,omitempty"`
 	ApprovalID     string `json:"approval_id,omitempty"`
 	RiskLevel      string `json:"risk_level,omitempty"`
+	CommandDigest  string `json:"command_digest,omitempty"`
+	OutputBytes    int64  `json:"output_bytes,omitempty"`
 	ExitCode       *int   `json:"exit_code,omitempty"`
 	ExitError      string `json:"exit_error,omitempty"`
 	CreatedAt      string `json:"created_at"`
@@ -902,6 +906,8 @@ func (s *Server) handleAgentExecutionEventsImpl(w http.ResponseWriter, r *http.R
 			PolicyDecision: event.PolicyDecision,
 			ApprovalID:     event.ApprovalID,
 			RiskLevel:      event.RiskLevel,
+			CommandDigest:  event.CommandDigest,
+			OutputBytes:    event.OutputBytes,
 			ExitCode:       event.ExitCode,
 			ExitError:      event.ExitError,
 			CreatedAt:      event.CreatedAt.Format(time.RFC3339Nano),

@@ -109,7 +109,7 @@ func TestDuplicateToolCallResumeUsesStandardApproval(t *testing.T) {
 
 	outcome := orch.ContinueAfterResume(context.Background(), "sess-1", &history, map[string]any{
 		"type": "approve",
-	}, pending, nil, 0)
+	}, pending)
 	if outcome.Err != nil {
 		t.Fatal(outcome.Err)
 	}

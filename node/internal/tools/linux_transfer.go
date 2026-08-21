@@ -34,6 +34,7 @@ type LinuxTransferEventSink func(agentID, eventType string, data map[string]any,
 type LinuxTransferRequest struct {
 	AgentID    string
 	ToolCallID string
+	ApprovalID string
 	ChannelID  string
 	Direction  string
 	LocalPath  string
@@ -315,7 +316,7 @@ func (m *LinuxTransferManager) run(job *linuxTransferJob) {
 func (m *LinuxTransferManager) execute(job *linuxTransferJob) (string, error) {
 	ctx, cancel := context.WithTimeout(job.ctx, DefaultLinuxTransferTimeout)
 	defer cancel()
-	_, client, agentConn, err := m.provider.openClient(ctx, job.request.ChannelID, job.request.AgentID)
+	_, client, agentConn, err := m.provider.openClient(ctx, job.request.ChannelID, job.request.AgentID, job.request.ApprovalID)
 	if err != nil {
 		return "", err
 	}
@@ -657,7 +658,8 @@ func isRemoteNotExist(err error) bool {
 }
 
 type linuxFileTransferArgs struct {
-	ChannelID  string `json:"channel_id"`
+	ConfigID   string `json:"config_id"`
+	ChannelID  string `json:"channel_id"` // legacy compatibility
 	LocalPath  string `json:"local_path"`
 	RemotePath string `json:"remote_path"`
 	Overwrite  bool   `json:"overwrite"`
@@ -665,7 +667,7 @@ type linuxFileTransferArgs struct {
 
 func linuxFileTransferToolDefs() []ToolDef {
 	base := map[string]any{
-		"channel_id":  map[string]any{"type": "string", "description": "已绑定到当前 Agent 的 Linux channel ID。"},
+		"config_id":   map[string]any{"type": "string", "description": "terminal_config_list 返回的 Linux 配置 ID。"},
 		"local_path":  map[string]any{"type": "string", "description": "Node 工作区内的相对文件路径。"},
 		"remote_path": map[string]any{"type": "string", "description": "远程 Linux 主机上的文件路径。"},
 		"overwrite":   map[string]any{"type": "boolean", "description": "目标文件存在时是否覆盖，默认 false。"},
@@ -673,13 +675,13 @@ func linuxFileTransferToolDefs() []ToolDef {
 	return []ToolDef{
 		{Type: "function", Function: FunctionDef{
 			Name:        "linux_file_upload",
-			Description: "通过指定的 Linux SSH 配置将 Node 工作区中的单个文件上传到远程主机。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
-			Parameters:  injectCallPurposeParam(objectParams(base, "channel_id", "local_path", "remote_path")),
+			Description: "使用 terminal_config_list 返回的 config_id，将 Node 工作区中的单个文件上传到 Linux 主机。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
+			Parameters:  injectCallPurposeParam(objectParams(base, "config_id", "local_path", "remote_path")),
 		}},
 		{Type: "function", Function: FunctionDef{
 			Name:        "linux_file_download",
-			Description: "通过指定的 Linux SSH 配置将远程主机中的单个文件下载到 Node 工作区。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
-			Parameters:  injectCallPurposeParam(objectParams(base, "channel_id", "local_path", "remote_path")),
+			Description: "使用 terminal_config_list 返回的 config_id，将 Linux 主机中的单个文件下载到 Node 工作区。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
+			Parameters:  injectCallPurposeParam(objectParams(base, "config_id", "local_path", "remote_path")),
 		}},
 	}
 }
@@ -700,10 +702,19 @@ func (r *Registry) execLinuxFileTransfer(ctx context.Context, raw json.RawMessag
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
+	requestedID, err := resolveLinuxToolID(args.ConfigID, args.ChannelID)
+	if err != nil {
+		return "", err
+	}
+	channelID, err := r.resolveLinuxChannelID(ctx, requestedID)
+	if err != nil {
+		return "", err
+	}
 	result, err := r.linuxTransferManager.Submit(ctx, LinuxTransferRequest{
 		AgentID:    r.agentID,
 		ToolCallID: toolCallIDFromContext(ctx),
-		ChannelID:  strings.TrimSpace(args.ChannelID),
+		ApprovalID: ApprovalIDFromContext(ctx),
+		ChannelID:  channelID,
 		Direction:  direction,
 		LocalPath:  strings.TrimSpace(args.LocalPath),
 		RemotePath: strings.TrimSpace(args.RemotePath),

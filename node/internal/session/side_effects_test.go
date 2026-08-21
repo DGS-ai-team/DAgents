@@ -33,8 +33,8 @@ func TestSideEffectProduceAsyncDoesNotMutateHistoryDuringHITL(t *testing.T) {
 		}},
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
@@ -66,15 +66,20 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	if err := mgr.EnqueueTriggerMessage(sess.ID, "trig-bridge", "trigger hello"); err != nil {
 		t.Fatal(err)
 	}
-	waitQueueDrain(t, rt, 5*time.Second)
+	messages := waitForRuntimeHistory(t, rt, 5*time.Second, func(messages []llm.Message) bool {
+		for _, message := range messages {
+			if message.Role == "user" && strings.Contains(message.Content, "trigger hello") {
+				return true
+			}
+		}
+		return false
+	})
 
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	if len(rt.messages) < 1 {
-		t.Fatalf("history len = %d, want bridge user after continue", len(rt.messages))
+	if len(messages) < 1 {
+		t.Fatalf("history len = %d, want bridge user after continue", len(messages))
 	}
 	found := false
-	for _, m := range rt.messages {
+	for _, m := range messages {
 		if m.Role == "user" && strings.Contains(m.Content, "trigger hello") {
 			found = true
 			break
@@ -82,6 +87,9 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("messages = %+v", rt.messages)
+	}
+	if facts := rt.turnCoordinator.Snapshot().ExternalFacts; facts == 0 {
+		t.Fatal("applied trigger must be recorded as an external lifecycle fact")
 	}
 }
 
@@ -147,12 +155,11 @@ func TestSideEffectFIFOApplyOrder(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitQueueDrain(t, rt, 3*time.Second)
-	if rt.sideEffects.Len() != 2 {
-		t.Fatalf("buffer len = %d, want 2", rt.sideEffects.Len())
-	}
+	waitForSideEffectLen(t, rt, 2, 3*time.Second)
 	_ = mgr.CancelTurn(sess.ID)
-	waitQueueDrain(t, rt, 8*time.Second)
+	waitForRuntimeHistory(t, rt, 8*time.Second, func(messages []llm.Message) bool {
+		return !rt.sideEffects.HasReady() && historyContainsJobID(messages, "job-1") && historyContainsJobID(messages, "job-2")
+	})
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -221,13 +228,12 @@ func TestDuplicateAsyncResultIsAppliedOnce(t *testing.T) {
 			t.Fatalf("async result %d enqueue: %v", i+1, err)
 		}
 	}
-	waitQueueDrain(t, rt, 3*time.Second)
-	if rt.sideEffects.Len() != 1 {
-		t.Fatalf("buffer len=%d, want one callback after duplicate enqueue", rt.sideEffects.Len())
-	}
+	waitForSideEffectLen(t, rt, 1, 3*time.Second)
 
 	_ = mgr.CancelTurn(sess.ID)
-	waitQueueDrain(t, rt, 8*time.Second)
+	waitForRuntimeHistory(t, rt, 8*time.Second, func(messages []llm.Message) bool {
+		return !rt.sideEffects.HasReady() && historyContainsJobID(messages, "job-duplicate")
+	})
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -261,4 +267,35 @@ func waitQueueDrain(t *testing.T, rt *runtime, timeout time.Duration) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+}
+
+func waitForSideEffectLen(t *testing.T, rt *runtime, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if rt.sideEffects.Len() >= want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for side-effect buffer length >= %d; got %d", want, rt.sideEffects.Len())
+}
+
+func waitForRuntimeHistory(t *testing.T, rt *runtime, timeout time.Duration, predicate func([]llm.Message) bool) []llm.Message {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		rt.mu.Lock()
+		messages := append([]llm.Message(nil), rt.messages...)
+		rt.mu.Unlock()
+		if predicate == nil || predicate(messages) {
+			return messages
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rt.mu.Lock()
+	messages := append([]llm.Message(nil), rt.messages...)
+	rt.mu.Unlock()
+	t.Fatalf("timeout waiting for runtime history condition; messages=%+v", messages)
+	return nil
 }

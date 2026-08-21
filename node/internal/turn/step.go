@@ -6,7 +6,7 @@ const RuntimeToolMessageContent = "tool_message"
 // StepOutcome 为单步 turn（一次模型请求 + 可选工具批处理）的结果。
 type StepOutcome struct {
 	Pending            *PendingHITL
-	LoopCount          int
+	StepIndex          int
 	ScheduleToolResult bool
 	Err                error
 }

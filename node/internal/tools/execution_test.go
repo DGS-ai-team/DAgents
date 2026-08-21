@@ -73,7 +73,11 @@ func TestLocalShellProviderEmitsSequencedLifecycleEvents(t *testing.T) {
 	process, err := provider.Start(context.Background(), ExecRequest{
 		Target:  ExecutionTarget{Kind: executionTargetLocal},
 		Command: command,
-		Context: ExecutionContext{SessionID: "session-events", ToolCallID: "call-events"},
+		Context: ExecutionContext{
+			SessionID:     "session-events",
+			ToolCallID:    "call-events",
+			CommandDigest: executionCommandDigest(command),
+		},
 		EventSink: func(event ProcessEvent) {
 			mu.Lock()
 			events = append(events, event)
@@ -106,11 +110,16 @@ func TestLocalShellProviderEmitsSequencedLifecycleEvents(t *testing.T) {
 		t.Fatalf("last event=%+v", got[len(got)-1])
 	}
 	var output string
+	var outputBytes int64
 	for i, event := range got {
 		if event.Seq != uint64(i+1) {
 			t.Fatalf("event seq=%d at index=%d, events=%+v", event.Seq, i, got)
 		}
 		if event.Type == ProcessEventOutput {
+			if event.OutputBytes < outputBytes {
+				t.Fatalf("output bytes regressed from %d to %d", outputBytes, event.OutputBytes)
+			}
+			outputBytes = event.OutputBytes
 			if event.Stream == "stdout" {
 				output += string(event.Data)
 			}
@@ -124,6 +133,15 @@ func TestLocalShellProviderEmitsSequencedLifecycleEvents(t *testing.T) {
 	}
 	if !strings.Contains(output, "event-output") {
 		t.Fatalf("output events=%q, all events=%+v", output, got)
+	}
+	if outputBytes != int64(len(output)) {
+		t.Fatalf("output bytes=%d, output length=%d, events=%+v", outputBytes, len(output), got)
+	}
+	if got[len(got)-1].OutputBytes != outputBytes {
+		t.Fatalf("exit output bytes=%d, output bytes=%d", got[len(got)-1].OutputBytes, outputBytes)
+	}
+	if got[0].Context.CommandDigest == "" {
+		t.Fatalf("command digest missing from event context: %+v", got[0].Context)
 	}
 	if got[len(got)-1].Exit == nil || got[len(got)-1].Exit.Code != 0 {
 		t.Fatalf("exit event=%+v", got[len(got)-1])
