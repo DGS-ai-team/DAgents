@@ -4,12 +4,15 @@
 > **关联**：[Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32)（async + open batch）  
 > **代码基准**：`dev` 合并 PR #33 之后
 
+> **Turn/Step 重构说明（2026-08）**：下文场景表中的 `pending`、`state`、`toolLoopCount` 是规格编写时的状态记号；当前代码以 `turn.Coordinator` 的生命周期事件和投影为准，`StepOutcome.LoopCount` 已替换为 `StepOutcome.StepIndex`。旁路 Produce/Apply/Continue 的行为不变。
+
 ## 实现摘要（2026-06）
 
 | 阶段 | 行为 |
 |------|------|
 | **Produce** | `async_tool_result` / `trigger_message` / `a2a_inbox_message` → 缓冲 + 立即 SSE；不改 `runtime.messages` |
 | **Apply** | `runTurnStepWithSideEffects` 步首 `ApplyReady`；≥2 条合并为 `get_callback` batch |
+| **Lifecycle fact** | Apply 同步向 `TurnCoordinator` 写入 `external.fact.recorded`；callback history 只服务模型上下文，不进入当前 ToolBatch，也不触发 ToolExecution |
 | **Continue** | `side_effect_continue`（priority -1）→ `PublishSideEffectTurnStart` → LLM |
 | **Cancel** | 无 pending + 有缓冲 → schedule continue；ClearContext/Delete 丢弃缓冲 |
 | **Client** | `user_message_deferred`、`side_effect_turn_start` → passive `beginImplicitTurn`；`side_effect_applied` / `side_effects_cleared` → 标记 Produce 行已入库/已失效 |

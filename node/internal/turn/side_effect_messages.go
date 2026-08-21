@@ -376,22 +376,18 @@ func (o *Orchestrator) ContinueAfterSideEffects(
 	ctx context.Context,
 	sessionID string,
 	history *[]llm.Message,
-	setState StateSetter,
-	toolLoopCount int,
 ) StepOutcome {
-	if setState == nil {
-		setState = func(State) {}
-	}
+	stepIndex := StepIndexFromContext(ctx)
 	if !shouldContinueAfterSideEffectApplyMessages(*history) {
-		return StepOutcome{LoopCount: toolLoopCount}
+		return StepOutcome{StepIndex: stepIndex}
 	}
 	tail := classifyToolResultTail(*history)
 	if tail == tailTool {
-		return o.RunToolMessageTurn(ctx, sessionID, history, setState, toolLoopCount)
+		return o.RunToolMessageTurn(ctx, sessionID, history)
 	}
 	o.logger.Info("turn side effect bridge continue",
 		"session_id", sessionID,
 		"user_name", (*history)[len(*history)-1].Name,
 	)
-	return o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
+	return o.runOneStep(ctx, sessionID, history)
 }

@@ -28,13 +28,14 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	if rt != nil {
 		rt.mu.Lock()
 		messages := append([]llm.Message(nil), rt.messages...)
-		pending := rt.pending
-		state := rt.state
 		queuePending := rt.queue.Len()
-		hasActiveTurn := rt.state != turn.StateIdle || rt.pending != nil
 		notifySeq := rt.notifySeq
 		ackSeq := rt.ackSeq
 		rt.mu.Unlock()
+		state := rt.turnState()
+		pending := rt.pendingSnapshot()
+		lifecycle := rt.turnCoordinator.Snapshot()
+		hasActiveTurn := lifecycle.HasActiveTurn
 		return m.buildHydrateView(sessionID, messages, pending, state, queuePending, hasActiveTurn, notifySeq, ackSeq), nil
 	}
 	if m.store == nil {
@@ -50,7 +51,14 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	pending := rec.RuntimeState.Pending
 	hasActiveTurn := pending != nil
 	state := turn.StateIdle
-	if pending != nil {
+	lifecycle, projected, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
+	if projectionErr != nil {
+		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
+	} else if projected {
+		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
+		hasActiveTurn = lifecycle.HasActiveTurn
+		state = turnStateFromCoordinatorSnapshot(lifecycle)
+	} else if pending != nil {
 		state = turn.StateAwaitingTool
 	}
 	return m.buildHydrateView(sessionID, rec.Messages, pending, state, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil

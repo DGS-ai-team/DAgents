@@ -19,17 +19,16 @@ func TestCancelInvalidatesQueuedToolResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := mgr.getRuntime(sess.ID)
-	rt.mu.Lock()
-	rt.turnID = "turn-old"
-	rt.generation = 7
-	rt.continuationPending = true
-	rt.mu.Unlock()
+	if err := rt.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := rt.turnCoordinator.Snapshot()
 
 	old := queue.Envelope{
 		RequestType:  queue.RequestTypeToolResult,
 		SessionEpoch: 0,
-		TurnID:       "turn-old",
-		Generation:   7,
+		TurnID:       state.TurnID,
+		Generation:   state.Generation,
 	}
 	if !mgr.CancelTurn(sess.ID) {
 		t.Fatal("queued continuation should be considered cancellable")
@@ -50,8 +49,6 @@ func TestExternalEventsSurviveTurnGenerationChange(t *testing.T) {
 	rt := mgr.getRuntime(sess.ID)
 	rt.mu.Lock()
 	rt.sessionEpoch = 3
-	rt.turnID = "turn-current"
-	rt.generation = 2
 	rt.mu.Unlock()
 
 	for _, env := range []queue.Envelope{
@@ -73,13 +70,13 @@ func TestCancelDoesNotLetLateToolCallbackCreateContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := mgr.getRuntime(sess.ID)
-	rt.mu.Lock()
-	rt.turnID = "turn-old"
-	rt.generation = 4
-	rt.mu.Unlock()
+	if err := rt.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	execution := rt.turnCoordinator.ExecutionContext()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = context.WithValue(ctx, continuationContextKey{}, continuationRef{turnID: "turn-old", generation: 4})
+	ctx = turn.WithExecutionContext(ctx, execution)
 	cancel()
 	if err := rt.enqueueToolResult(ctx, sess.ID); err != context.Canceled {
 		t.Fatalf("late callback error = %v, want context.Canceled", err)
@@ -88,13 +85,15 @@ func TestCancelDoesNotLetLateToolCallbackCreateContinuation(t *testing.T) {
 		t.Fatalf("late callback enqueued %d tool results", got)
 	}
 
-	// A callback from a completed turn with no context binding remains supported
-	// for the public compatibility API.
-	if err := rt.enqueueToolResult(nil, sess.ID); err != nil {
+	// An unbound callback cannot create a new lifecycle turn after cancellation.
+	if err := rt.lifecycleCancel(); err != nil {
 		t.Fatal(err)
 	}
-	if got := rt.queue.CountByRequestType(queue.RequestTypeToolResult); got != 1 {
-		t.Fatalf("unbound callback enqueued %d tool results, want 1", got)
+	if err := rt.enqueueToolResult(nil, sess.ID); err == nil {
+		t.Fatal("unbound callback should be rejected without an active step")
+	}
+	if got := rt.queue.CountByRequestType(queue.RequestTypeToolResult); got != 0 {
+		t.Fatalf("unbound callback enqueued %d tool results", got)
 	}
 }
 
@@ -120,10 +119,8 @@ func TestCancelPendingHITLRepairsToolResultOnce(t *testing.T) {
 		{Role: "user", Content: "run a command"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{call}},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}}
-	rt.turnID = "turn-pending-cancel"
-	rt.generation = 3
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}})
 
 	if !mgr.CancelTurn(sess.ID) {
 		t.Fatal("expected pending HITL cancellation to report changed=true")
@@ -134,8 +131,8 @@ func TestCancelPendingHITLRepairsToolResultOnce(t *testing.T) {
 
 	rt.mu.Lock()
 	msgs := append([]llm.Message(nil), rt.messages...)
-	pending := rt.pending
 	rt.mu.Unlock()
+	pending := rt.pendingSnapshot()
 	if pending != nil {
 		t.Fatalf("pending HITL was not cleared: %#v", pending)
 	}
@@ -176,8 +173,8 @@ func TestDuplicateResumeQueueProducesOneToolResult(t *testing.T) {
 		{Role: "user", Content: "read a file"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{call}},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}})
 
 	resume := map[string]any{
 		"type":     "selection",
@@ -193,8 +190,8 @@ func TestDuplicateResumeQueueProducesOneToolResult(t *testing.T) {
 
 	rt.mu.Lock()
 	msgs := append([]llm.Message(nil), rt.messages...)
-	pending := rt.pending
 	rt.mu.Unlock()
+	pending := rt.pendingSnapshot()
 	if pending != nil {
 		t.Fatalf("pending HITL remained after resume: %#v", pending)
 	}

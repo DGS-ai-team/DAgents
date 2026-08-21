@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	historypkg "github.com/DGS-ai-team/DAgents/node/internal/history"
@@ -32,9 +33,6 @@ const (
 	StateAwaitingTool   State = "awaiting_tool"
 )
 
-// StateSetter 在 turn 阶段切换时回调（session 写入 turn 状态）。
-type StateSetter func(State)
-
 // SkillAccess 为 orchestrator 读写 session loaded_skills 的回调。
 type SkillAccess struct {
 	Catalog *skills.Catalog
@@ -42,31 +40,40 @@ type SkillAccess struct {
 	Set     func([]skills.LoadedSkill)
 }
 
+// LifecycleCommandSink accepts one durable Turn/Step fact. Returning an
+// error lets execution boundaries stop before a side effect is opened when
+// the session-owned lifecycle projection cannot accept the fact.
+type LifecycleCommandSink func(sessionID string, command TurnCommand) error
+
 // Orchestrator 驱动 LLM + 工具循环并通过 Hub 推送 SSE。
 type Orchestrator struct {
-	llm            llm.Client
-	hub            stream.Publisher
-	agentID        string
-	fsRoot         string
-	tools          tools.Executor
-	policy         *policy.Engine
-	toolHooks      *hooks.Registry
-	toolExecLog    *hooks.ToolExecutionLog
-	skillAccess    SkillAccess
-	hookRuntimeCfg hooks.RuntimeConfig
-	hookHostCfg    HookHostConfig
-	hookHostState  *hookHostState
-	maxToolLoops   int
-	promptCtx      *promptcontext.Reader
-	longTermStore  LongTermStore
-	journal        *historypkg.Journal
-	logger         *slog.Logger
+	llm             llm.Client
+	hub             stream.Publisher
+	agentID         string
+	fsRoot          string
+	tools           tools.Executor
+	policy          *policy.Engine
+	toolHooks       *hooks.Registry
+	toolExecLog     *hooks.ToolExecutionLog
+	skillAccess     SkillAccess
+	hookRuntimeCfg  hooks.RuntimeConfig
+	hookHostCfg     HookHostConfig
+	hookHostState   *hookHostState
+	maxToolLoops    int
+	modelRetryLimit int
+	toolRetryLimit  int
+	promptCtx       *promptcontext.Reader
+	longTermStore   LongTermStore
+	journal         *historypkg.Journal
+	logger          *slog.Logger
 
 	childMgr       *childagent.Manager
 	isChildSession bool
 
 	turnUsageMu sync.Mutex
 	turnUsage   map[string]llm.Usage
+	summaryMu   sync.Mutex
+	summaryNext map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
@@ -77,6 +84,11 @@ type Orchestrator struct {
 
 	enqueueToolResult   func(ctx context.Context, sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
+	lifecycleMetadata   func(sessionID string) map[string]any
+	lifecycleCommand    LifecycleCommandSink
+	toolBudgetCheck     func(sessionID string) (bool, string)
+	toolRetryCheck      func(sessionID string) (bool, string)
+	modelRetryCheck     func(sessionID string) (bool, string)
 
 	multimodalEnabled bool
 	mediaReg          *media.Registry
@@ -110,6 +122,20 @@ func (o *Orchestrator) SetRuntimeIdentity(revision int64, digest string) {
 	o.runtimeDigest = strings.TrimSpace(digest)
 }
 
+// SetModelRetryLimit controls bounded retries for transient provider failures.
+// A retry stays inside the current Step and is recorded as a new ModelAttempt;
+// partial streamed output is never retried because replaying it would duplicate
+// user-visible text.
+func (o *Orchestrator) SetModelRetryLimit(limit int) {
+	if o == nil {
+		return
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	o.modelRetryLimit = limit
+}
+
 // SetExecutionGuard replaces the latest-state execution check. The default
 // guard delegates to the existing policy/hooks path; tool providers still do
 // their own channel and credential validation at the actual execution edge.
@@ -126,6 +152,16 @@ func (o *Orchestrator) ModelContextSnapshot(sessionID string) *ModelContextSnaps
 		return nil
 	}
 	return o.modelSnapshots.get(sessionID)
+}
+
+// RestoreModelContextSnapshot hydrates the frozen model inputs for an active
+// Turn after a Node restart. It is intentionally separate from normal setters
+// so callers cannot accidentally replace a live Turn snapshot mid-step.
+func (o *Orchestrator) RestoreModelContextSnapshot(sessionID string, snapshot *ModelContextSnapshot) {
+	if o == nil || snapshot == nil {
+		return
+	}
+	o.setModelContextSnapshot(sessionID, snapshot)
 }
 
 // SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
@@ -159,6 +195,92 @@ func (o *Orchestrator) SetToolResultEnqueuer(fn func(ctx context.Context, sessio
 	o.enqueueToolResult = fn
 }
 
+// SetLifecycleMetadataProvider attaches Turn/Step projection metadata to
+// outward SSE events without making the Orchestrator own SessionRuntime.
+func (o *Orchestrator) SetLifecycleMetadataProvider(fn func(sessionID string) map[string]any) {
+	if o == nil {
+		return
+	}
+	o.lifecycleMetadata = fn
+}
+
+// SetLifecycleCommandSink observes durable Turn/Step boundaries from the
+// actual model execution path. The SessionRuntime owns the coordinator; the
+// Orchestrator only emits facts and never mutates lifecycle state directly.
+func (o *Orchestrator) SetLifecycleCommandSink(fn LifecycleCommandSink) {
+	if o == nil {
+		return
+	}
+	o.lifecycleCommand = fn
+}
+
+// SetToolBudgetCheck attaches the runtime-owned preflight for a ToolBatch.
+// The callback runs after ToolCall facts are recorded but before any tool side
+// effect starts, preserving the durable proposed-before-executed invariant.
+func (o *Orchestrator) SetToolBudgetCheck(fn func(sessionID string) (bool, string)) {
+	if o == nil {
+		return
+	}
+	o.toolBudgetCheck = fn
+}
+
+// SetToolRetryLimit bounds automatic retries for one ToolExecution. A retry
+// keeps the original ToolCall ID and is only attempted when the executor's
+// ToolRetryPolicy explicitly marks the tool as side-effect safe.
+func (o *Orchestrator) SetToolRetryLimit(limit int) {
+	if o == nil {
+		return
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	o.toolRetryLimit = limit
+}
+
+// SetToolRetryCheck attaches the runtime-owned lifecycle budget preflight for
+// a retry edge. It is separate from the initial tool-call check because a
+// retry consumes a different budget dimension.
+func (o *Orchestrator) SetToolRetryCheck(fn func(sessionID string) (bool, string)) {
+	if o == nil {
+		return
+	}
+	o.toolRetryCheck = fn
+}
+
+// SetModelRetryCheck applies Turn-level token/time/cost limits before another
+// provider attempt is opened inside the current Step.
+func (o *Orchestrator) SetModelRetryCheck(fn func(sessionID string) (bool, string)) {
+	if o == nil {
+		return
+	}
+	o.modelRetryCheck = fn
+}
+
+func (o *Orchestrator) emitLifecycleCommand(ctx context.Context, sessionID string, command TurnCommand) error {
+	if o == nil || o.lifecycleCommand == nil {
+		return nil
+	}
+	if command.SessionID == "" {
+		command.SessionID = sessionID
+	}
+	if command.At.IsZero() {
+		command.At = time.Now().UTC()
+	}
+	if command.TurnID == "" || command.Generation == 0 {
+		execution, _ := ExecutionContextFromContext(ctx)
+		if command.TurnID == "" {
+			command.TurnID = execution.TurnID
+		}
+		if command.Generation == 0 {
+			command.Generation = execution.Generation
+		}
+		if command.StepID == "" {
+			command.StepID = execution.StepID
+		}
+	}
+	return o.lifecycleCommand(sessionID, command)
+}
+
 // SetPolicy 热更新策略引擎（policy API 写盘后调用）。
 func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	if engine == nil {
@@ -176,11 +298,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	sessionID string,
 	history *[]llm.Message,
 	userMsg llm.Message,
-	setState StateSetter,
 ) StepOutcome {
-	if setState == nil {
-		setState = func(State) {}
-	}
 	if userMsg.Role == "" {
 		userMsg.Role = "user"
 	}
@@ -201,7 +319,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 		"has_images", llm.MessageHasImages(userMsg),
 		"user_name", llm.NormalizeUserMessageName(userMsg.Name),
 	)
-	return o.runOneStep(ctx, sessionID, history, setState, 0)
+	return o.runOneStep(ctx, sessionID, history)
 }
 
 // RunToolMessageTurn 在 history 已含 tool 结果后执行单步模型回合（tool_message，不追加 user）。
@@ -209,17 +327,13 @@ func (o *Orchestrator) RunToolMessageTurn(
 	ctx context.Context,
 	sessionID string,
 	history *[]llm.Message,
-	setState StateSetter,
-	toolLoopCount int,
 ) StepOutcome {
-	if setState == nil {
-		setState = func(State) {}
-	}
 	if strings.TrimSpace(RuntimeToolMessageContent) == "" {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("missing tool_message content")}
+		return StepOutcome{StepIndex: StepIndexFromContext(ctx), Err: fmt.Errorf("missing tool_message content")}
 	}
-	o.logger.Info("turn tool message start", "session_id", sessionID, "loop", toolLoopCount)
-	return o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
+	stepIndex := StepIndexFromContext(ctx)
+	o.logger.Info("turn tool message start", "session_id", sessionID, "step_index", stepIndex)
+	return o.runOneStep(ctx, sessionID, history)
 }
 
 // ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并调度 tool_result 续跑。
@@ -229,14 +343,10 @@ func (o *Orchestrator) ContinueAfterResume(
 	history *[]llm.Message,
 	resumeValue map[string]any,
 	pending *PendingHITL,
-	setState StateSetter,
-	toolLoopCount int,
 ) StepOutcome {
+	stepIndex := StepIndexFromContext(ctx)
 	if pending == nil {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("no pending hitl")}
-	}
-	if setState == nil {
-		setState = func(State) {}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("no pending hitl")}
 	}
 	resumeKind := strings.TrimSpace(fmt.Sprint(resumeValue["type"]))
 	o.runHITLAfterResumePhase(ctx, sessionID, history, resumeKind)
@@ -256,13 +366,13 @@ func (o *Orchestrator) ContinueAfterResume(
 	)
 	switch hitl.ResumeValueKind(resumeValue) {
 	case "user_information":
-		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, stepIndex)
 	case "memory_conflict":
-		return o.continueAfterMemoryConflictResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+		return o.continueAfterMemoryConflictResume(ctx, sessionID, history, resumeValue, pending, stepIndex)
 	case "approval":
-		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, stepIndex)
 	default:
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unsupported resume type")}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("unsupported resume type")}
 	}
 }
 
@@ -298,26 +408,54 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:        agentID,
-		fsRoot:         fsRoot,
-		hub:            hub,
-		llm:            client,
-		tools:          toolExec,
-		policy:         policyEngine,
-		toolHooks:      toolHooks,
-		toolExecLog:    toolExecLog,
-		skillAccess:    skillAccess,
-		hookRuntimeCfg: hookCfg,
-		maxToolLoops:   maxToolLoops,
-		promptCtx:      promptCtx,
-		journal:        journal,
-		logger:         logx.OrDefault(logger),
-		ctxMetrics:     newContextMetricsStore(),
-		modelSnapshots: newModelContextSnapshotStore(),
+		agentID:         agentID,
+		fsRoot:          fsRoot,
+		hub:             hub,
+		llm:             client,
+		tools:           toolExec,
+		policy:          policyEngine,
+		toolHooks:       toolHooks,
+		toolExecLog:     toolExecLog,
+		skillAccess:     skillAccess,
+		hookRuntimeCfg:  hookCfg,
+		maxToolLoops:    maxToolLoops,
+		modelRetryLimit: 2,
+		toolRetryLimit:  1,
+		promptCtx:       promptCtx,
+		journal:         journal,
+		logger:          logx.OrDefault(logger),
+		ctxMetrics:      newContextMetricsStore(),
+		modelSnapshots:  newModelContextSnapshotStore(),
+		summaryNext:     make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
 	return orch
+}
+
+// SetNextStepFinalSummary marks the next model request as the reserved
+// no-tools summary step. The flag is consumed exactly once at Step start.
+func (o *Orchestrator) SetNextStepFinalSummary(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.summaryMu.Lock()
+	if o.summaryNext == nil {
+		o.summaryNext = make(map[string]bool)
+	}
+	o.summaryNext[sessionID] = true
+	o.summaryMu.Unlock()
+}
+
+func (o *Orchestrator) consumeNextStepFinalSummary(sessionID string) bool {
+	if o == nil {
+		return false
+	}
+	o.summaryMu.Lock()
+	defer o.summaryMu.Unlock()
+	marked := o.summaryNext[sessionID]
+	delete(o.summaryNext, sessionID)
+	return marked
 }
 
 // InterruptPending 在用户插入新 message 时打断 pending tool calls。
@@ -362,18 +500,17 @@ func (o *Orchestrator) runOneStep(
 	ctx context.Context,
 	sessionID string,
 	history *[]llm.Message,
-	setState StateSetter,
-	toolLoopCount int,
 ) StepOutcome {
+	stepIndex := StepIndexFromContext(ctx)
 	o.RepairUnrespondedToolCalls(sessionID, history)
-	o.runTurnBeforeStepPhase(ctx, sessionID, history, "model_step", toolLoopCount)
+	o.runTurnBeforeStepPhase(ctx, sessionID, history, "model_step", stepIndex)
+	finalSummary := o.consumeNextStepFinalSummary(sessionID)
 	finishReason := "stop"
 	var streamErr error
-	toolLoopCount++
-	o.recordToolLoop(sessionID, toolLoopCount)
+	o.recordToolLoop(sessionID, stepIndex)
 	// 超过 maxToolLoops 后不再硬失败：本步禁用 tools，若模型仍发起 tool_calls 则写入 soft tool_result，
-	// 让模型给出结论并询问用户；下一条 user 消息会重置 toolLoopCount。
-	overToolBudget := toolLoopCount > o.maxToolLoops
+	// 让模型给出结论并询问用户；下一条 human Turn 会重新从 Step 1 开始。
+	overToolBudget := stepIndex > o.maxToolLoops || finalSummary
 
 	var toolDefs []tools.ToolDef
 	var systemPrompt string
@@ -402,63 +539,77 @@ func (o *Orchestrator) runOneStep(
 			o.publishError(sessionID, hookErr.Error())
 			o.publishDone(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+			return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 		}
 		snapshot = NewModelContextSnapshot(systemPrompt, toolDefs, o.runtimeRevision, o.runtimeDigest)
 		o.setModelContextSnapshot(sessionID, snapshot)
 	}
 	*history = msgs
-	setState(StateModelStreaming)
-	publishedToolPartial := make(map[int]string)
 	llmMessages := media.ExpandMessagesForLLM(*history, o.mediaReg)
-	result, err := o.llm.StreamChat(ctx, llm.ChatRequest{
-		SystemPrompt: systemPrompt,
-		Messages:     llmMessages,
-		Tools:        toolDefs,
-	}, llm.StreamHandler{
-		OnDelta: func(delta string) {
-			o.publishAssistant(sessionID, delta)
-		},
-		OnReasoningDelta: func(delta string) {
-			o.publishReasoning(sessionID, delta)
-		},
-		OnToolCallDelta: func(calls []llm.ToolCall) {
-			for i, tc := range calls {
-				if strings.TrimSpace(tc.Function.Name) == "" {
-					continue
-				}
-				fp := tc.ID + "\x1e" + tc.Function.Name + "\x1e" + tc.Function.Arguments
-				if publishedToolPartial[i] == fp {
-					continue
-				}
-				publishedToolPartial[i] = fp
-				o.publishToolCall(sessionID, tc, true, i)
-			}
-		},
-		OnUsage: func(u llm.Usage) {
-			o.publishUsage(sessionID, toolLoopCount, u)
-		},
-	})
+	requestAt := time.Now().UTC()
+	if snapshot != nil {
+		if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+			Type:            CommandTurnSnapshotCreated,
+			At:              requestAt,
+			RuntimeRevision: snapshot.RuntimeRevision,
+			RuntimeDigest:   snapshot.RuntimeDigest,
+			PromptDigest:    snapshot.PromptDigest,
+			ToolDigest:      snapshot.ToolDigest,
+			ContextSnapshot: snapshot.Clone(),
+			Reason:          "model_context_snapshot_created",
+		}); err != nil {
+			o.runTurnErrorPhase(ctx, sessionID, history, err)
+			o.publishError(sessionID, err.Error())
+			o.publishDone(sessionID, "error")
+			o.clearModelContextSnapshot(sessionID)
+			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record turn snapshot: %w", err)}
+		}
+	}
+	requestDigest := Digest(struct {
+		SystemPrompt string
+		Messages     []llm.Message
+		Tools        []tools.ToolDef
+	}{systemPrompt, llmMessages, toolDefs})
+	result, err := o.runModelRequest(ctx, sessionID, systemPrompt, llmMessages, toolDefs, requestDigest, stepIndex)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+				Type:      CommandModelRequestFailed,
+				At:        time.Now().UTC(),
+				ErrorKind: modelErrorKind(err),
+				Reason:    err.Error(),
+			})
+		}
 		if errors.Is(err, context.Canceled) {
 			finishReason = "cancelled"
 			streamErr = err
 			o.runTurnCancelPhase(ctx, sessionID, history, "llm_stream_cancelled")
-			o.logger.Info("turn llm cancelled", "session_id", sessionID, "loop", toolLoopCount)
+			o.logger.Info("turn llm cancelled", "session_id", sessionID, "step_index", stepIndex)
 			o.persistCancelledStream(sessionID, history, result)
 		} else {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
 			finishReason = "error"
 			streamErr = err
-			o.logger.Error("turn llm failed", "session_id", sessionID, "loop", toolLoopCount, "error", err)
+			o.logger.Error("turn llm failed", "session_id", sessionID, "step_index", stepIndex, "error", err)
 		}
 		if finishReason == "cancelled" {
-			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
+			o.publishUsageIfAccumulated(sessionID, stepIndex)
 		}
 		o.publishDone(sessionID, finishReason)
 		o.clearModelContextSnapshot(sessionID)
-		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
+		return StepOutcome{StepIndex: stepIndex, Err: streamErr}
+	}
+	if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+		Type:   CommandModelResponseCompleted,
+		At:     time.Now().UTC(),
+		Reason: "model_response_completed",
+	}); err != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, err)
+		o.publishError(sessionID, err.Error())
+		o.publishDone(sessionID, "error")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record model response: %w", err)}
 	}
 
 	result, hookErr = o.runLLMAfterCallPhase(ctx, sessionID, result)
@@ -473,20 +624,52 @@ func (o *Orchestrator) runOneStep(
 		o.publishError(sessionID, msg)
 		o.publishDone(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
-		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+		return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 	}
 
 	assistant := assistantMessageFromResult(result)
 	o.appendHistory(sessionID, history, assistant)
+	if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+		Type:               CommandAssistantReceived,
+		At:                 time.Now().UTC(),
+		HasTools:           len(result.ToolCalls) > 0,
+		AssistantMessageID: Digest(assistant),
+		Reason:             "assistant_message_recorded",
+	}); err != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, err)
+		o.publishError(sessionID, err.Error())
+		o.publishDone(sessionID, "error")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record assistant message: %w", err)}
+	}
+	for _, toolCall := range result.ToolCalls {
+		if strings.TrimSpace(toolCall.ID) == "" {
+			continue
+		}
+		if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+			Type:       CommandToolCallRecorded,
+			At:         time.Now().UTC(),
+			ToolCallID: toolCall.ID,
+			ToolName:   toolCall.Function.Name,
+			Arguments:  []byte(toolCall.Function.Arguments),
+			Reason:     "tool_call_recorded_before_execution",
+		}); err != nil {
+			o.runTurnErrorPhase(ctx, sessionID, history, err)
+			o.publishError(sessionID, err.Error())
+			o.publishDone(sessionID, "error")
+			o.clearModelContextSnapshot(sessionID)
+			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record tool call: %w", err)}
+		}
+	}
 
 	if len(result.ToolCalls) == 0 {
 		o.publishDone(sessionID, finishReason)
-		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "loop", toolLoopCount)
+		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "step_index", stepIndex)
 		o.clearModelContextSnapshot(sessionID)
-		return StepOutcome{LoopCount: toolLoopCount}
+		return StepOutcome{StepIndex: stepIndex}
 	}
 
-	if toolLoopCount > o.maxToolLoops {
+	if stepIndex > o.maxToolLoops {
 		o.appendMissingToolResponses(
 			sessionID,
 			history,
@@ -497,34 +680,33 @@ func (o *Orchestrator) runOneStep(
 		o.logger.Info(
 			"tool loop soft limit",
 			"session_id", sessionID,
-			"loop", toolLoopCount,
+			"step_index", stepIndex,
 			"max_tool_loops", o.maxToolLoops,
 			"tool_calls", len(result.ToolCalls),
 		)
 		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
-		if toolLoopCount > o.maxToolLoops+1 {
+		if stepIndex > o.maxToolLoops+1 {
 			o.publishDone(sessionID, finishReason)
 			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{LoopCount: toolLoopCount}
+			return StepOutcome{StepIndex: stepIndex}
 		}
 		if o.enqueueToolResult != nil {
 			if err := o.enqueueToolResult(ctx, sessionID); err != nil {
 				o.clearModelContextSnapshot(sessionID)
-				return StepOutcome{LoopCount: toolLoopCount, Err: err}
+				return StepOutcome{StepIndex: stepIndex, Err: err}
 			}
-			return StepOutcome{LoopCount: toolLoopCount}
+			return StepOutcome{StepIndex: stepIndex}
 		}
-		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
 
-	setState(StateAwaitingTool)
 	pending, pauseReason, procErr := o.processToolCalls(ctx, sessionID, history, result.ToolCalls)
 	if procErr != nil {
 		if errors.Is(procErr, context.Canceled) {
 			finishReason = "cancelled"
 			o.runTurnCancelPhase(ctx, sessionID, history, "tool_processing_cancelled")
 			o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_stream_cancel": true})
-			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
+			o.publishUsageIfAccumulated(sessionID, stepIndex)
 		} else {
 			o.runTurnErrorPhase(ctx, sessionID, history, procErr)
 			finishReason = "error"
@@ -532,21 +714,21 @@ func (o *Orchestrator) runOneStep(
 		}
 		o.publishDone(sessionID, finishReason)
 		o.clearModelContextSnapshot(sessionID)
-		return StepOutcome{LoopCount: toolLoopCount, Err: procErr}
+		return StepOutcome{StepIndex: stepIndex, Err: procErr}
 	}
 	if pending != nil {
 		o.publishDone(sessionID, pauseReason)
-		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "loop", toolLoopCount)
-		return StepOutcome{Pending: pending, LoopCount: toolLoopCount}
+		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
+		return StepOutcome{Pending: pending, StepIndex: stepIndex}
 	}
 	if o.enqueueToolResult != nil {
 		if err := o.enqueueToolResult(ctx, sessionID); err != nil {
 			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{LoopCount: toolLoopCount, Err: err}
+			return StepOutcome{StepIndex: stepIndex, Err: err}
 		}
-		return StepOutcome{LoopCount: toolLoopCount}
+		return StepOutcome{StepIndex: stepIndex}
 	}
-	return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }
 
 func (o *Orchestrator) setModelContextSnapshot(sessionID string, snapshot *ModelContextSnapshot) {
@@ -557,6 +739,51 @@ func (o *Orchestrator) setModelContextSnapshot(sessionID string, snapshot *Model
 		o.modelSnapshots = newModelContextSnapshotStore()
 	}
 	o.modelSnapshots.set(sessionID, snapshot)
+}
+
+func waitModelRetry(ctx context.Context, attempt int) error {
+	// Keep retries bounded and cancellation-aware. The small exponential delay
+	// avoids hammering a provider during a transient outage without adding a
+	// visible delay to normal successful Steps.
+	delay := 100 * time.Millisecond * time.Duration(1<<(attempt-1))
+	if delay > 2*time.Second {
+		delay = 2 * time.Second
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isTransientModelError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"timeout", "temporar", "try again", "rate limit", "too many requests",
+		"429", "502", "503", "504", "connection reset", "connection refused",
+		"broken pipe", "eof", "service unavailable",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	if isTransientModelError(err) {
+		return "transient_provider_error"
+	}
+	return "provider_error"
 }
 
 func (o *Orchestrator) clearModelContextSnapshot(sessionID string) {

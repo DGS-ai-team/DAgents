@@ -11,6 +11,7 @@ import (
 
 // TurnContextMetrics WS5：单次用户任务（human_message → turn_complete）内的工具链上下文指标。
 type TurnContextMetrics struct {
+	mu                   sync.RWMutex
 	ToolLoops            int
 	ToolCalls            int
 	StatusPollCount      int
@@ -75,6 +76,8 @@ func (o *Orchestrator) recordToolLoop(sessionID string, loop int) {
 	if m == nil || loop <= 0 {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if loop > m.ToolLoops {
 		m.ToolLoops = loop
 	}
@@ -85,6 +88,8 @@ func (o *Orchestrator) recordToolCall(sessionID, toolName string) {
 	if m == nil {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	name := strings.ToLower(strings.TrimSpace(toolName))
 	if name == "" {
 		return
@@ -108,6 +113,8 @@ func (o *Orchestrator) recordToolResult(
 	if m == nil {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.HistoryResultChars += len(forHistory)
 	m.HistoryResultTokens += tokens.Estimate(forHistory)
 	if strings.TrimSpace(spillPath) != "" {
@@ -169,6 +176,8 @@ func (m *TurnContextMetrics) snapshot() map[string]any {
 	if m == nil {
 		return nil
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := map[string]any{
 		"tool_loops":             m.ToolLoops,
 		"tool_calls":             m.ToolCalls,
@@ -197,7 +206,25 @@ func (o *Orchestrator) logTurnContextMetrics(sessionID, finishReason string) {
 	if m == nil || o.logger == nil {
 		return
 	}
-	attrs := []any{
+	attrs := m.logAttrs(sessionID, finishReason)
+	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
+		attrs = append(attrs,
+			"runtime_revision", snapshot.RuntimeRevision,
+			"runtime_digest", snapshot.RuntimeDigest,
+			"prompt_digest", snapshot.PromptDigest,
+			"tool_digest", snapshot.ToolDigest,
+		)
+	}
+	o.logger.Info("turn context metrics", attrs...)
+}
+
+func (m *TurnContextMetrics) logAttrs(sessionID, finishReason string) []any {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return []any{
 		"session_id", sessionID,
 		"finish_reason", finishReason,
 		"tool_loops", m.ToolLoops,
@@ -213,15 +240,6 @@ func (o *Orchestrator) logTurnContextMetrics(sessionID, finishReason string) {
 		"encoding_garbled_hints", m.EncodingGarbledHints,
 		slog.Group("tool_calls_by_name", toolCallsByNameLogAttrs(m.ToolCallsByName)...),
 	}
-	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
-		attrs = append(attrs,
-			"runtime_revision", snapshot.RuntimeRevision,
-			"runtime_digest", snapshot.RuntimeDigest,
-			"prompt_digest", snapshot.PromptDigest,
-			"tool_digest", snapshot.ToolDigest,
-		)
-	}
-	o.logger.Info("turn context metrics", attrs...)
 }
 
 func toolCallsByNameLogAttrs(m map[string]int) []any {

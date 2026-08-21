@@ -44,11 +44,11 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 		{Role: "user", Content: "now run sync"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
 	}
-	rt.pending = &turn.PendingHITL{
+	pending := &turn.PendingHITL{
 		Items: []turn.PendingHITLItem{{ToolCall: approvalCall}},
 	}
-	rt.toolLoopCount = 1
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, pending)
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID:      "job-old",
@@ -74,10 +74,10 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	rt.mu.Lock()
-	pending := rt.pending
-	loopCount := rt.toolLoopCount
 	msgCount := len(rt.messages)
 	rt.mu.Unlock()
+	pending = rt.pendingSnapshot()
+	loopCount := rt.stepIndexSnapshot()
 
 	if pending == nil || len(pending.Items) != 1 {
 		t.Fatalf("pending HITL should be preserved, got %#v", pending)
@@ -127,8 +127,8 @@ func TestTriggerProduceDuringHITLDoesNotScheduleContinue(t *testing.T) {
 		{Role: "user", Content: "x"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueTriggerMessage(sess.ID, "trig-1", "deferred trigger"); err != nil {
 		t.Fatal(err)

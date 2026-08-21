@@ -19,8 +19,8 @@ func (r *runtime) handleSideEffectProduceAsync(_ context.Context, payload *queue
 	}
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
-	pending := r.pending
 	r.mu.Unlock()
+	pending := r.pendingSnapshot()
 
 	r.sideEffects.Produce(r.orch, r.session.ID, msgs, sideEffectProduceInput{
 		Kind:  turn.SideEffectAsync,
@@ -35,8 +35,8 @@ func (r *runtime) handleSideEffectProduceExternal(_ context.Context, env queue.E
 	}
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
-	pending := r.pending
 	r.mu.Unlock()
+	pending := r.pendingSnapshot()
 
 	r.sideEffects.Produce(r.orch, r.session.ID, msgs, sideEffectProduceInput{
 		Kind:           turn.SideEffectExternalMessage,
@@ -60,9 +60,7 @@ func (r *runtime) scheduleSideEffectContinue(source string) {
 	if !r.sideEffectsEnabled() {
 		return
 	}
-	r.mu.Lock()
-	pending := r.pending
-	r.mu.Unlock()
+	pending := r.pendingSnapshot()
 	if pending != nil {
 		return
 	}
@@ -86,8 +84,8 @@ func (r *runtime) maybeScheduleContinueAfterCancel() {
 	if !r.sideEffectsEnabled() {
 		return
 	}
+	pending := r.pendingSnapshot()
 	r.mu.Lock()
-	pending := r.pending
 	hasReady := r.sideEffects.HasReady()
 	r.mu.Unlock()
 	if pending != nil || !hasReady {
@@ -109,12 +107,30 @@ func (r *runtime) handleSideEffectContinue(parent context.Context, source string
 		source = "side_effect_continue"
 	}
 	pendingCount := r.sideEffects.Len()
+	started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceSideEffect)
+	if err != nil {
+		r.logger.Warn("start side-effect continuation lifecycle failed", "session_id", r.session.ID, "error", err)
+		r.persist(context.Background())
+		r.finishTurnIdle(turn.StepOutcome{})
+		return
+	}
+	if !started {
+		r.persist(context.Background())
+		r.finishTurnIdle(turn.StepOutcome{})
+		return
+	}
 	r.orch.PublishSideEffectTurnStart(r.session.ID, source, pendingCount)
 
-	loopCount := r.toolLoopCountSnapshot()
-	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.ContinueAfterSideEffects(ctx, r.session.ID, history, setState, loopCount)
+	historyStart := r.lifecycleHistoryLength()
+	outcome, history := r.runTurnStepWithSideEffects(parent, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+		return r.orch.ContinueAfterSideEffects(ctx, r.session.ID, history)
 	})
+	if err := r.lifecycleAfterModelStep(outcome, history, historyStart); err != nil {
+		r.logger.Warn("finish side-effect continuation lifecycle failed", "session_id", r.session.ID, "error", err)
+		if outcome.Err == nil {
+			outcome.Err = err
+		}
+	}
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()

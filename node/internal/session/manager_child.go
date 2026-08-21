@@ -194,7 +194,7 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 		turnCount := rec.TurnCount
 		rt := m.getRuntime(rec.ChildAgentID)
 		if rt != nil {
-			turnCount = rt.toolLoopCountSnapshot()
+			turnCount = rt.stepIndexSnapshot()
 		}
 		out = append(out, ChildAgentView{
 			ChildAgentID: rec.ChildAgentID,

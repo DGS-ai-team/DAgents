@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -11,9 +12,8 @@ import (
 // runTurnStep 执行单步 turn 的通用脚手架：可选步前压缩、turnCtx、状态回调、收尾 idle。
 func (r *runtime) runTurnStep(
 	parent context.Context,
-	initialState turn.State,
 	compressBefore bool,
-	run func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome,
+	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
 ) (turn.StepOutcome, []llm.Message) {
 	compressBeforeStep := compressBefore && r.compression != nil && r.compression.Enabled() && !r.isChildSession()
 	var sidecarPrefix compression.SidecarPrefix
@@ -27,37 +27,49 @@ func (r *runtime) runTurnStep(
 			}
 		}
 	}
+	contextCompacted := false
+	contextBeforeDigest := ""
+	contextAfterDigest := ""
+	contextBeforeCount := 0
+	contextAfterCount := 0
 	r.mu.Lock()
 	if compressBeforeStep {
-		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) && r.orch != nil {
-			r.orch.ReloadLongTermMemory(parent)
+		contextBeforeDigest = turn.Digest(r.messages)
+		contextBeforeCount = len(r.messages)
+		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) {
+			contextCompacted = true
+			contextAfterDigest = turn.Digest(r.messages)
+			contextAfterCount = len(r.messages)
+			if r.orch != nil {
+				r.orch.ReloadLongTermMemory(parent)
+			}
 		}
 	}
-	if r.turnID == "" {
-		r.turnID = newContinuationID()
-		r.generation++
+	execution := r.turnCoordinator.ExecutionContext()
+	if !execution.Valid() {
+		r.mu.Unlock()
+		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, r.messages
 	}
 	turnCtx, cancel := context.WithCancel(parent)
-	turnCtx = context.WithValue(turnCtx, continuationContextKey{}, continuationRef{turnID: r.turnID, generation: r.generation})
+	turnCtx = turn.WithExecutionContext(turnCtx, execution)
 	r.turnCancel = cancel
-	r.state = initialState
 	history := r.messages
 	r.mu.Unlock()
 
 	defer func() {
+		cancel()
 		r.mu.Lock()
-		r.state = turn.StateIdle
 		r.turnCancel = nil
 		r.mu.Unlock()
 	}()
 
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
+	if contextCompacted {
+		if err := r.lifecycleContextCompacted("context_compressed_before_step", contextBeforeDigest, contextAfterDigest, contextBeforeCount, contextAfterCount); err != nil {
+			return turn.StepOutcome{Err: fmt.Errorf("context compaction lifecycle failed: %w", err)}, history
+		}
 	}
 
-	outcome := run(turnCtx, &history, setState)
+	outcome := run(turnCtx, &history)
 	return outcome, history
 }
 
@@ -71,12 +83,9 @@ func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
 	// Keep the current turn identity alive until that continuation is consumed;
 	// otherwise the queue consumer would discard the freshly enqueued result as
 	// stale.
-	if r.continuationPending {
-		r.mu.Unlock()
+	r.mu.Unlock()
+	if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
 		return
 	}
-	r.turnID = ""
-	r.generation++
-	r.mu.Unlock()
 	r.tryCompleteChildIfIdle()
 }

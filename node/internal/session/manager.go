@@ -32,8 +32,17 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot            string
-	MaxToolLoops      int
+	FSRoot       string
+	MaxToolLoops int
+	// MaxModelRetries retries only transient provider failures within one Step;
+	// zero uses the default (2), -1 disables retries. Partial streamed output is
+	// never retried by the orchestrator.
+	MaxModelRetries int
+	// Budget provides hard lifecycle limits. Zero values mean unlimited.
+	Budget turn.TurnBudget
+	// ToolRetryLimit bounds automatic retries for explicitly retry-safe tools;
+	// zero uses one retry, and negative disables automatic retries.
+	ToolRetryLimit    int
 	SkillsRoot        string
 	SkillsEnabled     bool
 	SkillsMaxInPrompt int
@@ -121,6 +130,9 @@ func NewManager(
 	ctx, cancel := context.WithCancel(context.Background())
 	if turnOpts.MaxToolLoops <= 0 {
 		turnOpts.MaxToolLoops = turn.DefaultMaxToolLoops()
+	}
+	if turnOpts.MaxModelRetries == 0 {
+		turnOpts.MaxModelRetries = 2
 	}
 	return &Manager{
 		agentID:  agentID,
@@ -244,6 +256,77 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 	} else {
 		m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
 	}
+	return &rt.session, created, nil
+}
+
+// ReplaceWithOptions atomically replaces an existing runtime after the new
+// runtime has been fully hydrated and started. If loading the replacement
+// fails, the old runtime remains registered and continues serving requests.
+// This is the reload counterpart to CreateWithOptions; callers must only use
+// it at an idle boundary so the old Turn snapshot is not interrupted.
+func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor, policyEngine *policy.Engine) (*Session, bool, error) {
+	id := strings.TrimSpace(requestedID)
+	if id == "" {
+		return nil, false, fmt.Errorf("session id is required for ReplaceWithOptions")
+	}
+	if toolExec == nil {
+		toolExec = m.tools
+	}
+	if policyEngine == nil {
+		policyEngine = m.policy
+	}
+
+	m.mu.Lock()
+	old := m.sessions[id]
+	if old != nil && old.isChildSession() {
+		m.mu.Unlock()
+		return nil, false, fmt.Errorf("cannot replace child session")
+	}
+	var msgs []llm.Message
+	var loaded []skills.LoadedSkill
+	var pending *turn.PendingHITL
+	var loopCount int
+	var hookStore map[string]json.RawMessage
+	var idleMarked bool
+	var notifySeq, ackSeq int
+	if old != nil {
+		// Persist for cold-start recovery, but hydrate from the old runtime's
+		// in-memory snapshot. This avoids losing a last-minute state change when
+		// the store write fails or when the manager is embedded without a store.
+		old.persist(context.Background())
+		if m.store != nil {
+			if _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+				m.mu.Unlock()
+				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
+				return nil, false, err
+			}
+		}
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq = old.replacementData()
+	} else {
+		var err error
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err = m.loadSessionData(id)
+		if err != nil {
+			m.mu.Unlock()
+			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
+			return nil, false, err
+		}
+	}
+	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	m.attachUserChildTools(rt)
+	rt.start(m.ctx)
+	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
+	m.sessions[id] = rt
+	m.mu.Unlock()
+
+	if old != nil {
+		old.stop()
+	}
+	if created {
+		rt.persist(context.Background())
+	}
+	m.logger.Info("session replaced", "session_id", id, "had_previous_runtime", old != nil)
 	return &rt.session, created, nil
 }
 
@@ -467,18 +550,45 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		return nil, fmt.Errorf("agent_not_found")
 	}
 	pending := rec.RuntimeState.Pending
+	stepCount := rec.RuntimeState.ToolLoopCount
+	lifecycle, hasLifecycleProjection, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
+	if projectionErr != nil {
+		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
+	} else if hasLifecycleProjection {
+		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
+		stepCount = lifecycle.Usage.Steps
+	}
 	view := &ContextView{
 		SessionID:             sessionID,
 		MessagesCount:         len(rec.Messages),
 		MessagesTotalTokens:   estimateMessageTokens(rec.Messages),
 		PendingToolCallsCount: pendingToolCallsCount(pending),
-		ToolLoopCount:         rec.RuntimeState.ToolLoopCount,
+		ToolLoopCount:         stepCount,
 		LoadedSkills:          rec.LoadedSkills,
 		Messages:              rec.Messages,
+		HasActiveTurn:         lifecycle.HasActiveTurn,
+		TurnID:                lifecycle.TurnID,
+		StepID:                lifecycle.StepID,
+		StepIndex:             lifecycle.StepIndex,
+		ContextEpoch:          lifecycle.ContextEpoch,
+		TurnStatus:            lifecycle.TurnStatus,
+		TurnEndReason:         lifecycle.TurnEndReason,
+		StepStatus:            lifecycle.StepStatus,
+		StepEndReason:         lifecycle.StepEndReason,
+		TurnGeneration:        lifecycle.Generation,
+		RuntimeRevision:       lifecycle.RuntimeRevision,
+		RuntimeDigest:         lifecycle.RuntimeDigest,
+		PromptDigest:          lifecycle.PromptDigest,
+		ToolDigest:            lifecycle.ToolDigest,
+		RecoveryRequired:      lifecycle.RecoveryRequired,
 	}
-	if pending != nil {
+	if !hasLifecycleProjection && pending != nil {
 		view.HasActiveTurn = true
 		view.TurnState = turn.StateAwaitingTool
+	} else if hasLifecycleProjection && lifecycle.StepStatus == turn.StepStatusWaitingInteraction {
+		view.TurnState = turn.StateAwaitingTool
+	} else if hasLifecycleProjection {
+		view.TurnState = turnStateFromCoordinatorSnapshot(lifecycle)
 	}
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
@@ -644,7 +754,14 @@ func (m *Manager) EnqueueMessage(
 			"session_id", sessionID,
 			"route", "direct_runtime",
 		)
-		if !rt.hasPendingHITL() {
+		pending := rt.hasPendingHITL()
+		state := rt.turnCoordinator.Snapshot()
+		// A duplicate resume may race with the first queued resume. Accept it
+		// while the logical Turn is still alive; the runtime consumer will treat
+		// it as an idempotent stale command after the interaction is resolved.
+		// Once the Turn is terminal, retain the strict no_pending_hitl guard.
+		resumeMayBeInFlight := state.HasActiveTurn && !state.TurnStatus.Terminal()
+		if !pending && !resumeMayBeInFlight {
 			m.logger.Warn("resume rejected no pending hitl",
 				"session_id", sessionID,
 				"resume_value", resumeValue,
@@ -705,6 +822,17 @@ func (m *Manager) EnqueueToolResult(sessionID string) error {
 		return fmt.Errorf("agent_not_found")
 	}
 	return rt.enqueueToolResult(nil, sessionID)
+}
+
+// ReconcileToolExecution resolves a side effect that was marked unknown after
+// restart. The runtime validates Turn/Step fencing and queues the next model
+// Step only after every unknown execution has a known terminal result.
+func (m *Manager) ReconcileToolExecution(ctx context.Context, sessionID, turnID, stepID, executionID string, status turn.ToolExecutionStatus, content string) error {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return fmt.Errorf("agent_not_found")
+	}
+	return rt.reconcileToolExecution(ctx, turnID, stepID, executionID, status, content)
 }
 
 // CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。

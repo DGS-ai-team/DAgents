@@ -142,8 +142,8 @@ func TestIdleSessionMaintenanceEvictsPendingHITL(t *testing.T) {
 	rt := mgr.getRuntime(sess.ID)
 	rt.mu.Lock()
 	rt.messages = compressSampleMessages()
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: llm.ToolCall{ID: "call-1"}}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: llm.ToolCall{ID: "call-1"}}}})
 	rt.persist(context.Background())
 	if err := st.BackdateUpdatedAt(context.Background(), sess.ID, time.Now().Add(-2*time.Minute)); err != nil {
 		t.Fatal(err)

@@ -93,8 +93,8 @@ func TestCancelWithPendingAndBufferDoesNotScheduleContinue(t *testing.T) {
 		}},
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
@@ -147,8 +147,8 @@ func TestClearContextDropsSideEffectBuffer(t *testing.T) {
 		{Role: "user", Content: "x"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
@@ -193,8 +193,8 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 		}},
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
@@ -209,7 +209,9 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "human preempt", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	waitQueueDrain(t, rt, 8*time.Second)
+	waitForRuntimeHistory(t, rt, 8*time.Second, func(messages []llm.Message) bool {
+		return !rt.sideEffects.HasReady() && historyContainsJobID(messages, "job-1")
+	})
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -225,24 +227,9 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 // continue 可能在两次轮询之间被 consumer 立即处理，不能仅靠队列深度观测。
 func waitCancelRecoveryContinue(t *testing.T, rt *runtime, jobID string, timeout time.Duration) {
 	t.Helper()
-	deadline := time.After(timeout)
-	for {
-		if sideEffectContinueDepth(rt) > 0 {
-			waitQueueDrain(t, rt, timeout)
-			return
-		}
-		rt.mu.Lock()
-		recovered := !rt.sideEffects.HasReady() && historyContainsJobID(rt.messages, jobID)
-		rt.mu.Unlock()
-		if recovered {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for cancel recovery continue")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
+	waitForRuntimeHistory(t, rt, timeout, func(messages []llm.Message) bool {
+		return !rt.sideEffects.HasReady() && historyContainsJobID(messages, jobID)
+	})
 }
 
 func TestCancelRecoveryPublishesSideEffectTurnStartSSE(t *testing.T) {
@@ -394,8 +381,8 @@ func TestClearContextPublishesSideEffectsClearedSSE(t *testing.T) {
 		{Role: "user", Content: "x"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
 	}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",

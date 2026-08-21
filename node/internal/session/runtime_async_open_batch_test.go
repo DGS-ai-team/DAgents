@@ -46,11 +46,11 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 		}},
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1 status=accepted"},
 	}
-	rt.pending = &turn.PendingHITL{
+	pending := &turn.PendingHITL{
 		Items: []turn.PendingHITLItem{{ToolCall: approvalCall}},
 	}
-	rt.toolLoopCount = 1
 	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, pending)
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-job-1",
@@ -73,8 +73,8 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 
 	rt.mu.Lock()
 	msgs := append([]llm.Message(nil), rt.messages...)
-	pending := rt.pending
 	rt.mu.Unlock()
+	pending = rt.pendingSnapshot()
 
 	if pending == nil || len(pending.Items) != 1 {
 		t.Fatalf("pending approval should be preserved, got %#v", pending)

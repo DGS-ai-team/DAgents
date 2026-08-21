@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func testManager(t *testing.T) *Manager {
@@ -270,6 +272,116 @@ func TestPersistAfterTurn(t *testing.T) {
 	}
 }
 
+func TestPersistTurnLifecycleBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lifecycle.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := policy.LoadFile("")
+	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, st, TurnOptions{SkillsEnabled: false}, logx.Discard())
+	defer mgr.Stop()
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "lifecycle", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var events []turn.TurnEventEnvelope
+	for time.Now().Before(deadline) {
+		events, err = st.ListTurnEvents(context.Background(), s.ID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.EventType == turn.EventTurnCompleted {
+				break
+			}
+		}
+		if len(events) >= 8 && events[len(events)-1].EventType == turn.EventTurnCompleted {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	seen := make(map[turn.EventType]bool)
+	for _, event := range events {
+		seen[event.EventType] = true
+	}
+	for _, eventType := range []turn.EventType{
+		turn.EventTurnStarted, turn.EventStepStarted, turn.EventTurnSnapshotCreated,
+		turn.EventModelRequestStarted, turn.EventModelRequestCompleted,
+		turn.EventAssistantMessageRecorded, turn.EventStepCompleted, turn.EventTurnCompleted,
+	} {
+		if !seen[eventType] {
+			t.Fatalf("missing lifecycle event %s in %#v", eventType, events)
+		}
+	}
+}
+
+func TestPersistTurnLifecycleToolBatchBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tool-lifecycle.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := policy.LoadFile("")
+	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{EnableTools: true}, reg, pol, st, TurnOptions{SkillsEnabled: false}, logx.Discard())
+	defer mgr.Stop()
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "read", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var events []turn.TurnEventEnvelope
+	for time.Now().Before(deadline) {
+		events, err = st.ListTurnEvents(context.Background(), s.ID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) > 0 && events[len(events)-1].EventType == turn.EventTurnCompleted {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	seen := make(map[turn.EventType]bool)
+	for _, event := range events {
+		seen[event.EventType] = true
+	}
+	for _, eventType := range []turn.EventType{
+		turn.EventToolCallRecorded, turn.EventToolBatchCreated,
+		turn.EventToolExecutionStarted, turn.EventToolExecutionFailed,
+		turn.EventToolResultRecorded, turn.EventToolBatchSettled,
+	} {
+		if !seen[eventType] {
+			t.Fatalf("missing tool lifecycle event %s in %#v", eventType, events)
+		}
+	}
+	recovered := turn.NewTurnCoordinator(s.ID, "agent-1")
+	if err := recovered.Restore(events); err != nil {
+		t.Fatalf("restore tool lifecycle events: %v", err)
+	}
+	if snapshot := recovered.Snapshot(); snapshot.TurnStatus != turn.TurnStatusCompleted || snapshot.StepIndex != 2 {
+		t.Fatalf("restored tool lifecycle projection = %#v", snapshot)
+	} else if snapshot.ContextSnapshot == nil || snapshot.ContextSnapshot.SystemPrompt == "" {
+		t.Fatalf("restored model context snapshot = %#v", snapshot.ContextSnapshot)
+	}
+}
+
 func TestRestoreSessionFromStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.db")
 	st, err := store.Open(path)
@@ -302,15 +414,29 @@ func TestRestoreSessionFromStore(t *testing.T) {
 }
 
 type captureMultimodalLLM struct {
+	mu           sync.RWMutex
 	lastMessages []llm.Message
+	ready        chan struct{}
+	readyOnce    sync.Once
 }
 
 func (c *captureMultimodalLLM) StreamChat(_ context.Context, req llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	c.mu.Lock()
 	c.lastMessages = append([]llm.Message(nil), req.Messages...)
+	if c.ready != nil {
+		c.readyOnce.Do(func() { close(c.ready) })
+	}
+	c.mu.Unlock()
 	if handler.OnDelta != nil {
 		handler.OnDelta("ok")
 	}
 	return llm.ChatResult{Content: "ok", FinishReason: "stop"}, nil
+}
+
+func (c *captureMultimodalLLM) messages() []llm.Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]llm.Message(nil), c.lastMessages...)
 }
 
 func (c *captureMultimodalLLM) CompleteText(_ context.Context, _ llm.CompleteRequest) (string, error) {
@@ -329,7 +455,7 @@ func TestHumanMessageImageExpandedForLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	pol, _ := policy.LoadFile("")
-	capture := &captureMultimodalLLM{}
+	capture := &captureMultimodalLLM{ready: make(chan struct{})}
 	mgr := NewManager("agent-1", hub, capture, reg, pol, nil, TurnOptions{
 		FSRoot:            fsRoot,
 		SkillsEnabled:     false,
@@ -351,26 +477,23 @@ func TestHumanMessageImageExpandedForLLM(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 
-	deadline := time.After(3 * time.Second)
-	for capture.lastMessages == nil {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for llm call")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	select {
+	case <-capture.ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for llm call")
 	}
 
 	var userMsg *llm.Message
-	for i := range capture.lastMessages {
-		m := &capture.lastMessages[i]
+	messages := capture.messages()
+	for i := range messages {
+		m := &messages[i]
 		if m.Role == "user" && llm.MessageHasImages(*m) {
 			userMsg = m
 			break
 		}
 	}
 	if userMsg == nil {
-		t.Fatalf("no multimodal user message in llm request: %+v", capture.lastMessages)
+		t.Fatalf("no multimodal user message in llm request: %+v", messages)
 	}
 	gotURL := ""
 	for _, part := range userMsg.ContentParts {

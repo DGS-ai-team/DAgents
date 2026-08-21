@@ -35,6 +35,11 @@ import {
 } from "../utils/filePathPaste.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
+import {
+  canSubmitComposer,
+  hasPendingUserInformation,
+  shouldShowCancel,
+} from "../utils/composerState.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
@@ -290,18 +295,29 @@ function openActivityRail() {
   emit("open-activity");
 }
 
-const showCancel = computed(() => props.sending && !props.hitlBusy);
+const hasUserInformationHITL = computed(() => hasPendingUserInformation(props.hitlQueue));
+const showCancel = computed(() =>
+  shouldShowCancel({
+    sending: props.sending,
+    hitlBusy: props.hitlBusy,
+    hasUserInformation: hasUserInformationHITL.value,
+  }),
+);
 const multimodalEnabled = computed(() => {
   if (typeof chromeStore.llmSettings?.multimodal_enabled === "boolean") {
     return chromeStore.llmSettings.multimodal_enabled;
   }
   return Boolean(chromeStore.agentInfo?.multimodal_enabled);
 });
-const canSubmit = computed(
-  () =>
-    !props.disabled &&
-    !props.sending &&
-    (!!input.value.trim() || pendingImages.value.length > 0 || pendingFiles.value.length > 0),
+const canSubmit = computed(() =>
+  canSubmitComposer({
+    disabled: props.disabled,
+    cancelling: props.cancelling,
+    sending: props.sending,
+    hitlBusy: props.hitlBusy,
+    hasUserInformation: hasUserInformationHITL.value,
+    hasContent: !!input.value.trim() || pendingImages.value.length > 0 || pendingFiles.value.length > 0,
+  }),
 );
 
 function resizeTextarea() {
@@ -550,7 +566,7 @@ async function submit() {
   const text = input.value.trim();
   const images = pendingImages.value.slice();
   const files = pendingFiles.value.slice();
-  if ((!text && !images.length && !files.length) || props.disabled || props.sending) return;
+  if (!canSubmit.value) return;
   scrollToTail();
   const messageText = buildMessageWithFileReferences(
     text,
@@ -574,9 +590,9 @@ function onCancel() {
 
 function onKeydown(e) {
   if (e.key === "Enter" && !e.shiftKey) {
-    // 本轮执行中允许用户继续编辑下一条草稿，Enter 在此时插入换行，避免
-    // 看起来像发送成功但实际上被 turn gate 静默拦截。
-    if (props.sending) return;
+    // 普通 Turn 执行中允许继续编辑下一条草稿；但队首是 user_information
+    // 时，输入框承担 HITL 回答提交职责，必须允许 Enter 触发 resume。
+    if (props.sending && !hasUserInformationHITL.value) return;
     e.preventDefault();
     submit();
   }

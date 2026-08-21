@@ -10,22 +10,26 @@ import (
 // runTurnStepWithSideEffects 在标准 runTurnStep 上挂接旁路 Apply/Reconcile。
 func (r *runtime) runTurnStepWithSideEffects(
 	parent context.Context,
-	initialState turn.State,
 	compressBefore bool,
-	run func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome,
+	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
 ) (turn.StepOutcome, []llm.Message) {
-	outcome, history := r.runTurnStep(parent, initialState, compressBefore, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+	outcome, history := r.runTurnStep(parent, compressBefore, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		if r.sideEffectsEnabled() {
-			r.sideEffects.ApplyReady(r.session.ID, r.orch, history, r.triggerDelivery)
+			// A ready async callback is an external fact, but it must not mutate
+			// the history while any HITL item from the current tool batch is still
+			// pending. Applying it before ContinueAfterResume can split the
+			// assistant tool-call batch. The callback bridge is context-only;
+			// its acceptance is recorded separately as an external lifecycle fact.
+			if r.pendingSnapshot() == nil {
+				r.sideEffects.ApplyReady(r.session.ID, r.orch, history, r.triggerDelivery, r.recordSideEffectFact)
+			}
 		}
-		out := run(ctx, history, setState)
+		out := run(ctx, history)
 		if r.sideEffectsEnabled() {
-			r.mu.Lock()
-			pending := r.pending
-			r.mu.Unlock()
+			pending := r.pendingSnapshot()
 			out = r.sideEffects.ReconcileAfterStep(r.session.ID, r.orch, history, pending, out, r.triggerDelivery, func() {
 				r.scheduleSideEffectContinue("reconcile")
-			})
+			}, r.recordSideEffectFact)
 		}
 		return out
 	})
