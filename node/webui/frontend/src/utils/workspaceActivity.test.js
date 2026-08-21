@@ -31,4 +31,47 @@ describe("deriveActivityFromTranscript", () => {
     expect(snap.commands[0].command).toBe("ls");
     expect(snap.commands[0].status).toBe("ok");
   });
+
+  it("uses result status instead of inferring failure from content", () => {
+    const snap = deriveActivityFromTranscript([
+      {
+        kind: "tool_call",
+        blockId: "c-failed",
+        data: { tool_name: "bash_run", arguments: { command: "ls" } },
+      },
+      {
+        kind: "tool_result",
+        blockId: "c-failed",
+        data: {
+          tool_call_id: "c-failed",
+          tool_name: "bash_run",
+          status: "failed",
+          rejected: false,
+          content: "connection refused",
+          arguments: { command: "ls" },
+        },
+      },
+    ]);
+    expect(snap.commands[0].status).toBe("error");
+    expect(snap.commands[0].rejected).toBe(false);
+  });
+
+  it("does not label a failed file operation as policy denied", () => {
+    const snap = deriveActivityFromTranscript([
+      {
+        kind: "tool_result",
+        blockId: "c-write-failed",
+        data: {
+          tool_call_id: "c-write-failed",
+          tool_name: "write_file",
+          status: "failed",
+          rejected: false,
+          content: "ERROR: disk full",
+          arguments: { path: "a.txt" },
+        },
+      },
+    ]);
+    expect(snap.files[0].rejected).toBe(false);
+    expect(snap.files[0].failed).toBe(true);
+  });
 });

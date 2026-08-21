@@ -333,7 +333,8 @@ func (o *Orchestrator) executeAutoBatch(
 				rejected = true
 			} else {
 				content, rejected, extra, lifecycleErr = o.invokeToolWithRetries(ctx, sessionID, tc, plan)
-				finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, rejected || strings.HasPrefix(strings.TrimSpace(content), "ERROR:"))
+				resultMeta := tools.ClassifyToolResult(tc.Function.Name, content, rejected)
+				finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
 				if lifecycleErr == nil {
 					lifecycleErr = finishErr
 				}
@@ -391,14 +392,18 @@ func (o *Orchestrator) persistToolResult(
 	forClient, forHistory, spillPath string,
 	rejected bool,
 ) {
-	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
-	o.recordToolExecutionSuccess(tc, forClient, rejected)
+	resultMeta := tools.ClassifyToolResult(tc.Function.Name, forClient, rejected)
+	// Policy denial is not an execution result and should be excluded from
+	// context-success metrics. Failed/cancelled results, however, are valuable
+	// evidence for the next model step and must remain measurable.
+	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, resultMeta.Denied())
+	o.recordToolExecutionSuccess(tc, forClient, !resultMeta.Succeeded())
 	o.appendHistory(sessionID, history, llm.ToolResultMessage(
 		tc.ID,
 		tc.Function.Name,
 		forHistory,
 	))
-	if !rejected {
+	if resultMeta.Status != tools.ResultStatusDenied {
 		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)
 	}
 }
@@ -424,7 +429,18 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
 	}
 	if execErr != nil {
-		return execErr.Error(), true, nil, execErr
+		// Some providers return useful partial diagnostics together with an
+		// error (MCP, browser, SFTP and SSH are common examples). Never replace
+		// that body with only err.Error(); the result classifier and the model
+		// both need the provider evidence. Keep the legacy ERROR marker so old
+		// consumers still recognize the failure.
+		errText := strings.TrimSpace(execErr.Error())
+		if strings.TrimSpace(output) == "" {
+			output = "ERROR: " + errText
+		} else if !strings.HasPrefix(strings.TrimSpace(output), "ERROR:") {
+			output = strings.TrimRight(output, "\r\n") + "\nERROR: " + errText
+		}
+		return output, true, extra, execErr
 	}
 	return output, false, extra, nil
 }
@@ -506,7 +522,8 @@ func (o *Orchestrator) executeTool(
 		return fmt.Errorf("record tool execution start: %w", err)
 	}
 	content, rejected, extra, lifecycleErr := o.invokeToolWithRetries(ctx, sessionID, tc, plan)
-	finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, rejected || strings.HasPrefix(strings.TrimSpace(content), "ERROR:"))
+	resultMeta := tools.ClassifyToolResult(tc.Function.Name, content, rejected)
+	finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
 	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
 	if lifecycleErr != nil {
 		return lifecycleErr
@@ -528,14 +545,31 @@ func (o *Orchestrator) emitToolExecutionStarted(ctx context.Context, sessionID s
 	})
 }
 
-func (o *Orchestrator) emitToolExecutionFinished(ctx context.Context, sessionID string, tc llm.ToolCall, failed bool) error {
+func (o *Orchestrator) emitToolExecutionFinished(ctx context.Context, sessionID string, tc llm.ToolCall, resultMeta tools.ResultMetadata) error {
 	if strings.TrimSpace(tc.ID) == "" {
 		return nil
 	}
 	commandType := CommandToolExecutionCompleted
 	status := ToolExecutionStatusSucceeded
 	errorKind := ""
-	if failed {
+	switch resultMeta.Status {
+	case tools.ResultStatusDenied:
+		commandType = CommandToolExecutionFailed
+		status = ToolExecutionStatusDenied
+		errorKind = "policy_denied"
+	case tools.ResultStatusCancelled:
+		commandType = CommandToolExecutionFailed
+		status = ToolExecutionStatusCancelled
+		errorKind = "cancelled"
+	case tools.ResultStatusTimedOut:
+		commandType = CommandToolExecutionFailed
+		status = ToolExecutionStatusTimedOut
+		errorKind = "timeout"
+	case tools.ResultStatusUnknown:
+		commandType = CommandToolExecutionFailed
+		status = ToolExecutionStatusUnknown
+		errorKind = "unknown_tool_state"
+	case tools.ResultStatusFailed:
 		commandType = CommandToolExecutionFailed
 		status = ToolExecutionStatusFailed
 		errorKind = "tool_execution_error"

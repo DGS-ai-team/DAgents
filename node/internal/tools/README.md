@@ -12,6 +12,22 @@ N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步�
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
+## 工具结果契约
+
+工具 handler 为兼容已有模型上下文，继续返回原有正文格式；统一状态在
+`result_contract.go` 中分类，并由 turn 层附加到 `tool_result` SSE：
+
+| 字段 | 语义 |
+|------|------|
+| `status` | `succeeded`、`failed`、`denied`、`running`、`queued`、`cancelled`、`timed_out`、`awaiting_user`、`unknown` |
+| `error` | 失败状态的 `{code, message, retryable}`，策略拒绝使用 `policy_denied` |
+| `rejected` | 兼容字段，仅表示策略拒绝；执行失败不再误报为“已拒绝” |
+
+状态优先于正文是否为空、`ERROR:` 前缀或本地化文案。正文中的既有字段（例如
+`exit_code`、`stdout_bytes`、`output_empty`、`job_id`）继续作为工具证据保留。
+执行器若同时返回部分正文和 Go `error`，编排器会保留正文并追加错误诊断，不再丢失
+远端/MCP/SSH/SFTP 提供的证据。
+
 **`terminal_read` 延时读取**：可传入 `wait_seconds`，工具会严格等待指定秒数后再读取终端输出；默认 0，最大 60 秒。等待期间如果 turn 被取消，会立即结束等待并返回取消错误。输出仍使用 `after_seq` / `next_seq` 游标读取。
 
 ---
@@ -24,6 +40,7 @@ N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步�
 tools/
 ├── 核心 registry
 │   types.go                  # ToolDef、FunctionDef、handler
+│   result_contract.go        # 统一 tool_result status/error 分类
 │   registry.go               # Registry、NewRegistry、Definitions、Execute
 │   registry_path.go          # resolveFSRoot、resolvePath
 │   registry_enabled.go       # SetBuiltinEnabled、filterToolDefs

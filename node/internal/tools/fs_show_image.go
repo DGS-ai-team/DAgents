@@ -35,7 +35,8 @@ func showImageToolDef() ToolDef {
 						"description": "可选说明文字，显示在缩略图旁",
 					},
 				},
-				"required": []string{"path"},
+				"required":             []string{"path"},
+				"additionalProperties": false,
 			}),
 		},
 	}

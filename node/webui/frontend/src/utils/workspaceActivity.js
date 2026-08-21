@@ -51,7 +51,9 @@ export function deriveActivityFromTranscript(entries) {
     const name = String(data.tool_name || data.name || call?.data?.tool_name || "").trim();
     const args = resolveToolArgumentsFromData(data) || resolveToolArgumentsFromData(call?.data || {}) || {};
     const content = String(data.content || e.text || "");
-    const rejected = !!data.rejected || looksRejected(content);
+    const resultStatus = String(data.status || "").trim().toLowerCase();
+    const rejected = ["denied", "rejected"].includes(resultStatus) || (!resultStatus && (!!data.rejected || looksRejected(content)));
+    const failed = ["failed", "error", "timed_out", "unknown"].includes(resultStatus) || (!resultStatus && looksError(content));
 
     if (name === "write_file" || name === "search_replace") {
       const path = sanitize(args.path || args.file_path);
@@ -59,7 +61,7 @@ export function deriveActivityFromTranscript(entries) {
       const op = name === "search_replace" ? "replace" : "write";
       let rec = files.get(path);
       if (!rec) {
-        rec = { path, ops: [], last_tool_call_id: id, last_tool_name: name, rejected, preview: truncate(content, 120) };
+        rec = { path, ops: [], last_tool_call_id: id, last_tool_name: name, rejected, failed, preview: truncate(content, 120) };
         files.set(path, rec);
         fileOrder.push(path);
       }
@@ -67,6 +69,7 @@ export function deriveActivityFromTranscript(entries) {
       rec.last_tool_call_id = id;
       rec.last_tool_name = name;
       rec.rejected = rejected;
+      rec.failed = failed;
       rec.preview = truncate(content, 120);
     }
 
@@ -75,7 +78,10 @@ export function deriveActivityFromTranscript(entries) {
       if (!command) continue;
       let status = "ok";
       if (rejected) status = "rejected";
-      else if (looksError(content)) status = "error";
+      else if (failed) status = "error";
+      else if (["cancelled", "canceled"].includes(resultStatus)) status = "cancelled";
+      else if (["running", "queued"].includes(resultStatus)) status = "running";
+      else if (!resultStatus && looksError(content)) status = "error";
       commands.push({
         command,
         tool_call_id: id,

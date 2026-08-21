@@ -394,9 +394,19 @@ func formatShellCompletedOutputWithCapture(params shellRunParams, stdout, stderr
 	}
 
 	header := fmt.Sprintf("[BASH_RESULT] exit=%d", exitCode)
+	status := "SUCCEEDED"
+	if exitCode != 0 || runErr != nil {
+		status = "FAILED"
+	}
 
 	parts := []string{
 		header,
+		"status=" + status,
+		"target=local",
+		fmt.Sprintf("exit_code=%d", exitCode),
+		fmt.Sprintf("stdout_bytes=%d", len([]byte(outText))),
+		fmt.Sprintf("stderr_bytes=%d", len([]byte(errText))),
+		fmt.Sprintf("output_truncated: %t", stats != nil && stats.Truncated),
 		"--- STDOUT ---",
 		outText,
 		"--- STDERR ---",

@@ -47,7 +47,8 @@ func readImageToolDef() ToolDef {
 						"description": "OpenAI image_url detail，默认 auto",
 					},
 				},
-				"required": []string{"path"},
+				"required":             []string{"path"},
+				"additionalProperties": false,
 			}),
 		},
 	}

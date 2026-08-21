@@ -412,6 +412,9 @@ func (r *Registry) Definitions() []ToolDef {
 	}
 	base = append(base, r.mcpToolDefs()...)
 	defs := r.filterToolDefs(base)
+	for i := range defs {
+		defs[i].Function.Description = strings.TrimSpace(defs[i].Function.Description) + ResultDescriptionSuffixForTool(defs[i].Function.Name)
+	}
 	// Keep the serialized tools prefix stable even when optional providers
 	// contribute definitions in a different order. MCP itself is already
 	// sorted, but normalizing the complete list also covers future providers.
