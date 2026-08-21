@@ -19,7 +19,6 @@ export function parseUsageFields(data) {
   }
   return { prompt, completion, hit, rate, reasoning };
 }
-
 export function parseUsageRound(data) {
   if (!data || typeof data !== "object") return null;
   return parseUsageFields({
@@ -52,13 +51,6 @@ export function formatInputStripUsage(snap) {
         ? ` · hit ${formatCompactTokens(snap.hit)} (${Math.round(snap.rate * 100)}%)`
         : ` · hit ${formatCompactTokens(snap.hit)}`;
   }
-  if (snap.reasoning > 0) t += ` · think ${formatCompactTokens(snap.reasoning)}`;
-  return t;
-}
-
-export function formatInlineUsage(snap) {
-  if (!snap) return "";
-  let t = ` · ↑${formatCompactTokens(snap.prompt)} ↓${formatCompactTokens(snap.completion)}`;
   if (snap.reasoning > 0) t += ` · think ${formatCompactTokens(snap.reasoning)}`;
   return t;
 }

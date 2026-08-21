@@ -33,10 +33,10 @@ import {
   appendReasoning,
   finalizeAssistant,
   finalizeReasoning,
+  markHistoryCommitted,
   upsertToolCallFromSSE,
   applyToolResult,
   clearTranscript,
-  applyRoundUsage,
   setShowReasoning,
   finalizePartialToolCalls,
 } from "../stores/transcript.js";
@@ -127,27 +127,6 @@ const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
-let doneReconcileTimer = null;
-
-function cancelDoneReconciliation() {
-  if (doneReconcileTimer) {
-    clearTimeout(doneReconcileTimer);
-    doneReconcileTimer = null;
-  }
-}
-
-function scheduleDoneReconciliation() {
-  cancelDoneReconciliation();
-  // `done` is emitted before the runtime persists the completed assistant
-  // message and before the terminal lifecycle facts. Give those boundaries a
-  // short window to arrive; otherwise a hydrate can overwrite newer SSE text
-  // with the pre-response transcript.
-  doneReconcileTimer = setTimeout(() => {
-    doneReconcileTimer = null;
-    if (isTurnTerminal() && turnStateStore.submitState === "idle") return;
-    void resyncAfterSSEGap("done");
-  }, 250);
-}
 
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => isTurnProcessing(),
@@ -362,10 +341,12 @@ function handleEvent(ev) {
       if (applyTurnState(ev.data, { source: "event" })) {
         syncTurnStatus(turnStateStore);
         if (isTurnTerminal()) {
-          cancelDoneReconciliation();
-          // A terminal lifecycle event is newer than any `done`-triggered
-          // hydrate that may still be in flight.
+          // A terminal lifecycle event supersedes any reconnect/watchdog
+          // hydrate that may still be in flight. Its response must not be
+          // allowed to replace the now-committed final assistant snapshot.
+          invalidateHydration();
           sseResyncToken += 1;
+          markHistoryCommitted(turnStateStore.historyRevision);
           if (["requesting", "confirmed"].includes(turnStateStore.cancelState)) {
             markTurnCancellationConfirmed();
           }
@@ -410,7 +391,6 @@ function handleEvent(ev) {
       break;
     case "usage":
       setUsageFromSSE(ev.data);
-      applyRoundUsage(ev.data);
       break;
     case "error":
       finalizePartialToolCalls({ interrupted: true });
@@ -461,11 +441,6 @@ function handleEvent(ev) {
       if (turnStateStore.authority !== "turn_coordinator") {
         resetToolStream();
         syncChildAgentsFromApi();
-      } else {
-        // `done` closes model content, but is not the Turn terminal fact.
-        // Reconcile after the durable terminal boundary has had a chance to
-        // persist, so hydrate cannot overwrite newer streamed text.
-        scheduleDoneReconciliation();
       }
       refreshContextTokens();
       break;
@@ -1137,7 +1112,6 @@ onDeactivated(() => {
   // KeepAlive 切到设置页时：停心跳/轮询/看门狗，并断开 SSE，避免焦点与状态串台
   invalidateHydration();
   sseResyncToken += 1;
-  cancelDoneReconciliation();
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
@@ -1178,7 +1152,6 @@ watch(
 onUnmounted(() => {
   invalidateHydration();
   sseResyncToken += 1;
-  cancelDoneReconciliation();
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();

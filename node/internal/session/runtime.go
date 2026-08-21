@@ -85,6 +85,7 @@ type runtime struct {
 	lifecycleEventSeq     uint64
 	lifecycleEventsLoaded bool
 	messages              []llm.Message        // 交互消息列表
+	historyRevision       uint64               // committed message snapshot revision
 	loadedSkills          []skills.LoadedSkill // 加载的技能列表
 	pendingLongTermScope  string               // scope changes wait for the next human Turn
 	fsRoot                string               // 文件系统根路径
@@ -505,9 +506,24 @@ func (r *runtime) scheduleToolResult() error {
 	return r.enqueueToolResult(nil, r.session.ID)
 }
 
-// applyStepOutcome 应用步骤结果
-func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutcome) {
+// commitStepHistory publishes a new in-memory message snapshot. Callers must
+// hold r.mu while invoking it. The digest check makes fallback commits
+// idempotent when the lifecycle adapter has already committed the snapshot.
+func (r *runtime) commitStepHistory(history *[]llm.Message) bool {
+	if history == nil {
+		return false
+	}
+	if turn.Digest(r.messages) == turn.Digest(*history) {
+		return false
+	}
 	r.messages = append([]llm.Message(nil), (*history)...)
+	r.historyRevision++
+	return true
+}
+
+// applyStepOutcome is retained for non-terminal continuation callers.
+func (r *runtime) applyStepOutcome(history *[]llm.Message, _ turn.StepOutcome) {
+	r.commitStepHistory(history)
 }
 
 // acceptEnvelope filters stale internal continuations while preserving external
@@ -576,6 +592,7 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	if err := r.lifecycleBeginHumanTurn(); err != nil {
 		r.mu.Lock()
 		r.messages = append(r.messages, userMsg)
+		r.historyRevision++
 		r.mu.Unlock()
 		r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", err)
 		r.persist(context.Background())
@@ -596,17 +613,12 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 			outcome.Err = err
 		}
 	}
+	r.commitHistoryFallback(history)
 	if outcome.Err != nil {
-		r.mu.Lock()
-		r.messages = history
-		r.mu.Unlock()
 		r.persist(context.Background())
 		r.finishTurnIdle(outcome)
 		return
 	}
-	r.mu.Lock()
-	r.applyStepOutcome(&history, outcome)
-	r.mu.Unlock()
 	if outcome.ScheduleToolResult {
 		if err := r.scheduleToolResult(); err != nil {
 			r.logger.Warn("schedule tool result failed",
@@ -705,9 +717,7 @@ func (r *runtime) handleToolResult(parent context.Context) {
 			outcome.Err = err
 		}
 	}
-	r.mu.Lock()
-	r.applyStepOutcome(&history, outcome)
-	r.mu.Unlock()
+	r.commitHistoryFallback(history)
 	r.afterToolStep(outcome)
 }
 
@@ -756,10 +766,17 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 			outcome.Err = err
 		}
 	}
-	r.mu.Lock()
-	r.applyStepOutcome(&history, outcome)
-	r.mu.Unlock()
+	r.commitHistoryFallback(history)
 	r.afterToolStep(outcome)
+}
+
+func (r *runtime) commitHistoryFallback(history []llm.Message) {
+	r.mu.Lock()
+	changed := r.commitStepHistory(&history)
+	r.mu.Unlock()
+	if changed {
+		r.persist(context.Background())
+	}
 }
 
 // persist 持久化 session 数据
@@ -773,6 +790,7 @@ func (r *runtime) persist(ctx context.Context) {
 	idleMarked := r.idleAutoCompressApplied
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
+	historyRevision := r.historyRevision
 	r.mu.Unlock()
 	pending := r.pendingSnapshot()
 	stepCount := r.stepIndexSnapshot()
@@ -784,6 +802,7 @@ func (r *runtime) persist(ctx context.Context) {
 		RuntimeState: store.RuntimeState{
 			Pending:                 pending,
 			ToolLoopCount:           stepCount,
+			HistoryRevision:         historyRevision,
 			HookStore:               hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
 			IdleAutoCompressApplied: idleMarked,
 			NotifySeq:               notifySeq,
@@ -796,9 +815,9 @@ func (r *runtime) persist(ctx context.Context) {
 // a persistence store replaces a runtime. Production managers normally load
 // this state from SQLite after persist; keeping this fallback prevents tests
 // and embedded callers from losing history during a swap.
-func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int) {
+func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64) {
 	if r == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0
+		return nil, nil, nil, 0, nil, false, 0, 0, 0
 	}
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
@@ -806,6 +825,7 @@ func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.
 	idleMarked := r.idleAutoCompressApplied
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
+	historyRevision := r.historyRevision
 	r.mu.Unlock()
 	pending := r.pendingSnapshot()
 	stepCount := r.stepIndexSnapshot()
@@ -813,7 +833,7 @@ func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.
 	if r.orch != nil {
 		hookStore = r.orch.HookStoreSnapshot()
 	}
-	return msgs, loaded, pending, stepCount, hookStore, idleMarked, notifySeq, ackSeq
+	return msgs, loaded, pending, stepCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision
 }
 
 func (r *runtime) clearMessages(ctx context.Context) {
@@ -833,6 +853,7 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	r.mu.Lock()
 	r.sessionEpoch++
 	r.messages = nil
+	r.historyRevision++
 	r.loadedSkills = nil
 	r.mu.Unlock()
 	if r.orch != nil {
@@ -842,6 +863,10 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	}
 	if r.store != nil {
 		_ = r.store.ClearMessages(ctx, r.session.ID)
+		// ClearMessages intentionally resets the legacy snapshot. Persist the
+		// monotonic revision again so an older in-flight hydrate cannot become
+		// newer merely because the context was cleared.
+		r.persist(ctx)
 	}
 }
 
@@ -931,12 +956,16 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 		r.orch.ReloadLongTermMemory(ctx)
 	}
 	if result.Status == "applied" {
+		r.mu.Lock()
+		r.historyRevision++
+		r.mu.Unlock()
 		r.persist(ctx)
 	}
 	return result
 }
 
 func (r *runtime) contextView() *ContextView {
+	r.lifecycleMu.Lock()
 	lifecycle := turn.CoordinatorSnapshot{}
 	if r.turnCoordinator != nil {
 		lifecycle = r.turnCoordinator.Snapshot()
@@ -975,6 +1004,7 @@ func (r *runtime) contextView() *ContextView {
 		view.LoadedSkills = []skills.LoadedSkill{}
 	}
 	r.mu.Unlock()
+	r.lifecycleMu.Unlock()
 	pending := r.pendingSnapshot()
 	view.PendingToolCallsCount = pendingToolCallsCount(pending)
 	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
@@ -1131,6 +1161,7 @@ func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[str
 	active := cancel != nil && stateBefore != turn.StateIdle
 	lifecycleActive := lifecycleWasActive
 	changed := pending != nil || lifecycleActive || active
+	historyChanged := false
 	if pending != nil {
 		if interruptMessage == "" {
 			interruptMessage = "工具调用已被用户取消。"
@@ -1142,8 +1173,12 @@ func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[str
 			interruptMessage,
 			metadata,
 		)
+		historyChanged = true
 	}
 	if active {
+		if historyChanged {
+			r.historyRevision++
+		}
 		r.mu.Unlock()
 		cancel()
 		if pending == nil {
@@ -1152,8 +1187,14 @@ func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[str
 		return true
 	}
 	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
+	if repaired {
+		historyChanged = true
+	}
+	if historyChanged {
+		r.historyRevision++
+	}
 	r.mu.Unlock()
-	if changed || repaired {
+	if changed || repaired || historyChanged {
 		r.logger.Info("repaired orphan tool_calls on idle cancel",
 			"session_id", r.session.ID,
 		)

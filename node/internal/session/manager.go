@@ -238,7 +238,7 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 		m.logger.Info("session reuse", "session_id", id)
 		return &existing.session, false, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err := m.loadSessionData(id)
+	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
 		return nil, false, err
@@ -246,6 +246,7 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	rt.historyRevision = historyRevision
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -289,22 +290,23 @@ func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, t
 	var hookStore map[string]json.RawMessage
 	var idleMarked bool
 	var notifySeq, ackSeq int
+	var historyRevision uint64
 	if old != nil {
 		// Persist for cold-start recovery, but hydrate from the old runtime's
 		// in-memory snapshot. This avoids losing a last-minute state change when
 		// the store write fails or when the manager is embedded without a store.
 		old.persist(context.Background())
 		if m.store != nil {
-			if _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+			if _, _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
 				m.mu.Unlock()
 				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
 				return nil, false, err
 			}
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq = old.replacementData()
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision = old.replacementData()
 	} else {
 		var err error
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err = m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err = m.loadSessionData(id)
 		if err != nil {
 			m.mu.Unlock()
 			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
@@ -314,6 +316,7 @@ func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, t
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	rt.historyRevision = historyRevision
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
@@ -340,13 +343,14 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err := m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
+		rt.historyRevision = historyRevision
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
@@ -378,22 +382,22 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, error) {
+func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, nil
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, err
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, nil
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
 	}
 	var pending *turn.PendingHITL
 	if rec.RuntimeState.Pending != nil {
 		pending = rec.RuntimeState.Pending
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, nil
+	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, rec.RuntimeState.HistoryRevision, nil
 }
 
 func (m *Manager) sessionExistsInStore(sessionID string) bool {

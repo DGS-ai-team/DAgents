@@ -20,6 +20,7 @@ type TurnStateView struct {
 	StepIndex        int                      `json:"step_index,omitempty"`
 	Generation       uint64                   `json:"generation,omitempty"`
 	LifecycleSeq     uint64                   `json:"lifecycle_seq"`
+	HistoryRevision  uint64                   `json:"history_revision,omitempty"`
 	Terminal         bool                     `json:"terminal"`
 	EndReason        string                   `json:"end_reason,omitempty"`
 	InteractionKind  string                   `json:"interaction_kind,omitempty"`
@@ -50,8 +51,9 @@ func buildTurnStateView(snapshot turn.CoordinatorSnapshot, lifecycleSeq uint64) 
 	}
 }
 
-func turnStateEventData(snapshot turn.CoordinatorSnapshot, lifecycleSeq uint64, command turn.CommandType) map[string]any {
+func turnStateEventData(snapshot turn.CoordinatorSnapshot, lifecycleSeq, historyRevision uint64, command turn.CommandType) map[string]any {
 	view := buildTurnStateView(snapshot, lifecycleSeq)
+	view.HistoryRevision = historyRevision
 	return map[string]any{
 		"authority":         view.Authority,
 		"phase":             view.Phase,
@@ -62,6 +64,7 @@ func turnStateEventData(snapshot turn.CoordinatorSnapshot, lifecycleSeq uint64, 
 		"step_index":        view.StepIndex,
 		"generation":        view.Generation,
 		"lifecycle_seq":     view.LifecycleSeq,
+		"history_revision":  view.HistoryRevision,
 		"terminal":          view.Terminal,
 		"end_reason":        view.EndReason,
 		"interaction_kind":  view.InteractionKind,
@@ -89,7 +92,10 @@ func (r *runtime) publishTurnState(snapshot turn.CoordinatorSnapshot, command tu
 	// runtime.agentID is the owning Node ID in production. SSE subscribers
 	// filter by the session/Agent ID, which is the wire identity used by the
 	// Orchestrator's other events.
-	publisher.Publish(r.session.ID, "turn_state", turnStateEventData(snapshot, r.lifecycleEventSequence(), command))
+	r.mu.Lock()
+	historyRevision := r.historyRevision
+	r.mu.Unlock()
+	publisher.Publish(r.session.ID, "turn_state", turnStateEventData(snapshot, r.lifecycleEventSequence(), historyRevision, command))
 }
 
 func turnStatePhase(snapshot turn.CoordinatorSnapshot) string {

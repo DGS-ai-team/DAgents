@@ -92,6 +92,8 @@ describe("hydrateAgent lifecycle", () => {
     clearHitl();
     transcriptStore.entries = [];
     transcriptStore.lastSeq = 0;
+    transcriptStore.historyRevision = 0;
+    transcriptStore.historyDirty = false;
     resetTurnState();
     vi.mocked(api.getAgentHydrate).mockReset();
     vi.mocked(api.postAgentAck).mockClear();
@@ -149,6 +151,24 @@ describe("hydrateAgent lifecycle", () => {
     expect(hitlStore.queue).toHaveLength(0);
     expect(turnStateStore.phase).toBe("idle");
   });
+
+  it("keeps locally streamed history when hydrate has the same revision", async () => {
+    transcriptStore.historyRevision = 12;
+    transcriptStore.historyDirty = true;
+    transcriptStore.entries = [{ id: 1, kind: "assistant", text: "local answer" }];
+    vi.mocked(api.getAgentHydrate).mockResolvedValueOnce({
+      transcript: [{ kind: "user", text: "old snapshot" }],
+      history_revision: 12,
+      turn_state: { phase: "completed", terminal: true, history_revision: 12 },
+      pending_hitl: null,
+    });
+
+    await hydrateAgent();
+
+    expect(transcriptStore.entries).toHaveLength(1);
+    expect(transcriptStore.entries[0].text).toBe("local answer");
+    expect(transcriptStore.historyDirty).toBe(true);
+  });
 });
 
 function enqueueStaleApprovalForHydrateTest() {
@@ -167,6 +187,8 @@ describe("loadTranscriptFromHydrate", () => {
   beforeEach(() => {
     transcriptStore.entries = [];
     transcriptStore.lastSeq = 0;
+    transcriptStore.historyRevision = 0;
+    transcriptStore.historyDirty = false;
   });
 
   it("loads user and assistant entries with ids", () => {

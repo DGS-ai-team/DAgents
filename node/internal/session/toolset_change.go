@@ -30,8 +30,12 @@ func (r *runtime) notifyToolsetChanged() {
 	}
 	_ = r.cancelTurnWithReason(ToolsetChangedInterruptMessage, map[string]any{"interrupted_by_toolset_change": true})
 	r.mu.Lock()
+	historyChanged := false
 	if r.orch != nil {
-		_ = r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
+		historyChanged = r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
+		if historyChanged {
+			r.historyRevision++
+		}
 	}
 	r.mu.Unlock()
 

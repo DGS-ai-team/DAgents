@@ -139,7 +139,6 @@ function userImageThumb(src) {
           @click="onMarkdownAction"
         />
         <BrowserCitationBlock v-if="!entry.streaming && browserRefs.length" :refs="browserRefs" />
-        <div v-if="entry.usage" class="msg__usage">{{ entry.usage }}</div>
       </div>
     </div>
   </div>
@@ -250,13 +249,6 @@ function userImageThumb(src) {
 }
 .msg__text {
   white-space: pre-wrap;
-}
-.msg__usage {
-  margin-top: 8px;
-  text-align: right;
-  font-size: 11px;
-  color: var(--color-text-subtle);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .assistant-msg__stream-plain {
   margin: 0;

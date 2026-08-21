@@ -261,18 +261,19 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 }
 
 type sessionHydrateResponse struct {
-	AgentID       string                    `json:"agent_id"`
-	TurnState     session.TurnStateView     `json:"turn_state"`
-	RunTurnPhase  string                    `json:"run_turn_phase"`
-	HasActiveTurn bool                      `json:"has_active_turn"`
-	QueuePending  int                       `json:"queue_pending"`
-	Transcript    []session.TranscriptEntry `json:"transcript"`
-	PendingHITL   map[string]any            `json:"pending_hitl"`
-	SSESeqHint    int                       `json:"sse_seq_hint"`
-	NotifySeq     int                       `json:"notify_seq"`
-	AckSeq        int                       `json:"ack_seq"`
-	HasUnread     bool                      `json:"has_unread"`
-	ToolJobs      map[string]int            `json:"tool_jobs,omitempty"`
+	AgentID         string                    `json:"agent_id"`
+	TurnState       session.TurnStateView     `json:"turn_state"`
+	RunTurnPhase    string                    `json:"run_turn_phase"`
+	HasActiveTurn   bool                      `json:"has_active_turn"`
+	QueuePending    int                       `json:"queue_pending"`
+	Transcript      []session.TranscriptEntry `json:"transcript"`
+	PendingHITL     map[string]any            `json:"pending_hitl"`
+	HistoryRevision uint64                    `json:"history_revision"`
+	SSESeqHint      int                       `json:"sse_seq_hint"`
+	NotifySeq       int                       `json:"notify_seq"`
+	AckSeq          int                       `json:"ack_seq"`
+	HasUnread       bool                      `json:"has_unread"`
+	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -301,18 +302,19 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		toolJobs["background"] = c.Background
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		AgentID:       view.SessionID,
-		TurnState:     view.TurnState,
-		RunTurnPhase:  view.RunTurnPhase,
-		HasActiveTurn: view.HasActiveTurn,
-		QueuePending:  view.QueuePending,
-		Transcript:    transcript,
-		PendingHITL:   view.PendingHITL,
-		SSESeqHint:    s.stream.CurrentSeq(),
-		NotifySeq:     view.NotifySeq,
-		AckSeq:        view.AckSeq,
-		HasUnread:     view.HasUnread,
-		ToolJobs:      toolJobs,
+		AgentID:         view.SessionID,
+		TurnState:       view.TurnState,
+		RunTurnPhase:    view.RunTurnPhase,
+		HasActiveTurn:   view.HasActiveTurn,
+		QueuePending:    view.QueuePending,
+		Transcript:      transcript,
+		PendingHITL:     view.PendingHITL,
+		HistoryRevision: view.HistoryRevision,
+		SSESeqHint:      s.stream.CurrentSeq(),
+		NotifySeq:       view.NotifySeq,
+		AckSeq:          view.AckSeq,
+		HasUnread:       view.HasUnread,
+		ToolJobs:        toolJobs,
 	})
 }
 

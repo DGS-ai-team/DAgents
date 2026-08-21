@@ -84,9 +84,12 @@ func TestTurnStateEventDataIncludesSafeLifecycleFields(t *testing.T) {
 		TurnStatus: turn.TurnStatusRunning, StepStatus: turn.StepStatusRequesting,
 		HasActiveTurn: true,
 	}
-	data := turnStateEventData(snapshot, 9, turn.CommandModelRequestStarted)
+	data := turnStateEventData(snapshot, 9, 12, turn.CommandModelRequestStarted)
 	if data["phase"] != "model_generating" || data["lifecycle_seq"] != uint64(9) {
 		t.Fatalf("event data = %#v", data)
+	}
+	if data["history_revision"] != uint64(12) {
+		t.Fatalf("history revision = %#v", data["history_revision"])
 	}
 	if data["command"] != string(turn.CommandModelRequestStarted) {
 		t.Fatalf("event command = %#v", data["command"])
