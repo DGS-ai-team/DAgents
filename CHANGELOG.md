@@ -4,11 +4,45 @@
 
 ## [Unreleased]
 
+## [0.9.17] - 2026-08-21
+
+**Turn/Step 生命周期与远程 Linux 通道稳定性**：让 Agent 运行状态、前端展示和 SSH 主机密钥验证具备明确的权威状态边界。
+
+### 新增
+
+- 建立权威的 turn/step 生命周期投影与 SSE 事件处理，支持刷新恢复、重连、取消和异步回调状态收敛。
+- Linux SSH 通道支持严格的 `known_hosts` 与固定主机指纹策略；首次遇到未知主机时展示 SHA256 指纹，确认后才允许固定。
+- 增加前端 Agent/workgroup 事件适配器、turn 状态存储、状态看门狗及对应回归测试。
+
 ### 优化
 
-- 精简高频工具描述，减少工具 schema 对模型上下文和注意力的占用。
-- 将启用 skills 后的可用目录放入 system prompt 尾部，并在 snapshot 的 human turn 边界按目录 revision 更新。
-- 将触发器 condition 改为结构化参数 schema，降低模型构造调度条件时的歧义。
+- 将生成中、思考中、工具执行等状态统一展示在底部状态栏，移除语义不明确的 Changes 胶囊。
+- 改善连续对话、工具调用、取消和刷新恢复时的状态一致性，避免依赖模糊的前端推断。
+
+### 修复
+
+- 修复 SSH 未配置 known_hosts 时被错误归类为握手失败的问题，区分未知主机指纹与指纹不匹配。
+- 修复工具回调、取消确认和重连期间前端状态可能停留在生成中的问题。
+
+### 测试
+
+- Go 全量 Node/Client/共享配置测试、Web UI 270 项测试、Manage/Python 185 项测试全部通过。
+- 完成连续对话、工具调用、Turn 取消、取消后继续对话、刷新恢复及真实 Linux SSH 通道测试。
+
+## [0.9.16] - 2026-08-20
+
+**工具上下文与 schema 优化**：降低工具描述对模型上下文的占用，并改善 skills 与触发器参数的可发现性。
+
+### 优化
+
+- 精简 shell、terminal、Linux 执行/传输、浏览器状态、图片读取和人工询问等高频工具描述。
+- 将启用 skills 后的可用目录放入 system prompt 尾部，并在 Agent snapshot 的 human turn 边界按目录 revision 更新。
+- 移除旧的 registry 动态工具描述注入路径，保持工具定义稳定，减少消息级缓存失效。
+- 将 trigger condition 改为结构化参数 schema，保留运行时校验作为最终约束。
+
+### 测试
+
+- 增加 skills system prompt、trigger condition schema 和工具描述回归测试。
 
 ## [0.9.15] - 2026-08-19
 
