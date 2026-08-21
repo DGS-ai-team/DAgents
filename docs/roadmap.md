@@ -139,4 +139,4 @@
 - 安全见 [SECURITY.md](../SECURITY.md)。
 - **以实现 / CHANGELOG 为准**；本文冲突时欢迎 PR 修正。
 
-**最后更新**：2026-08-20 — 准备发布 v0.9.16（工具上下文与 schema 优化）；v0.9.1 为 Workgroup 预览主叙事。
+**最后更新**：2026-08-21 — 准备发布 v0.9.17（turn/step 生命周期、权威前端状态与 Linux SSH 主机密钥验证）；v0.9.1 为 Workgroup 预览主叙事。

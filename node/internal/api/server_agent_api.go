@@ -146,6 +146,20 @@ type sessionContextResponse struct {
 	ToolLoopCount                       int                                  `json:"tool_loop_count"`
 	QueuePending                        int                                  `json:"queue_pending"`
 	HasActiveTurn                       bool                                 `json:"has_active_turn"`
+	TurnID                              string                               `json:"turn_id,omitempty"`
+	StepID                              string                               `json:"step_id,omitempty"`
+	StepIndex                           int                                  `json:"step_index,omitempty"`
+	ContextEpoch                        int                                  `json:"context_epoch,omitempty"`
+	TurnStatus                          string                               `json:"turn_status,omitempty"`
+	TurnEndReason                       string                               `json:"turn_end_reason,omitempty"`
+	StepStatus                          string                               `json:"step_status,omitempty"`
+	StepEndReason                       string                               `json:"step_end_reason,omitempty"`
+	TurnGeneration                      uint64                               `json:"turn_generation,omitempty"`
+	RuntimeRevision                     int64                                `json:"runtime_revision,omitempty"`
+	RuntimeDigest                       string                               `json:"runtime_digest,omitempty"`
+	PromptDigest                        string                               `json:"prompt_digest,omitempty"`
+	ToolDigest                          string                               `json:"tool_digest,omitempty"`
+	RecoveryRequired                    bool                                 `json:"recovery_required,omitempty"`
 	TurnState                           string                               `json:"turn_state,omitempty"`
 	RunTurnPhase                        string                               `json:"run_turn_phase"`
 	SystemPrompt                        string                               `json:"system_prompt,omitempty"`
@@ -209,6 +223,20 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 		ToolLoopCount:                       view.ToolLoopCount,
 		QueuePending:                        view.QueuePending,
 		HasActiveTurn:                       view.HasActiveTurn,
+		TurnID:                              view.TurnID,
+		StepID:                              view.StepID,
+		StepIndex:                           view.StepIndex,
+		ContextEpoch:                        view.ContextEpoch,
+		TurnStatus:                          string(view.TurnStatus),
+		TurnEndReason:                       view.TurnEndReason,
+		StepStatus:                          string(view.StepStatus),
+		StepEndReason:                       view.StepEndReason,
+		TurnGeneration:                      view.TurnGeneration,
+		RuntimeRevision:                     view.RuntimeRevision,
+		RuntimeDigest:                       view.RuntimeDigest,
+		PromptDigest:                        view.PromptDigest,
+		ToolDigest:                          view.ToolDigest,
+		RecoveryRequired:                    view.RecoveryRequired,
 		SystemPrompt:                        view.SystemPrompt,
 		SystemPromptEstimatedTokens:         view.SystemPromptEstimatedTokens,
 		SkillsCatalogEstimatedTokens:        view.SkillsCatalogEstimatedTokens,
@@ -234,6 +262,7 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 
 type sessionHydrateResponse struct {
 	AgentID       string                    `json:"agent_id"`
+	TurnState     session.TurnStateView     `json:"turn_state"`
 	RunTurnPhase  string                    `json:"run_turn_phase"`
 	HasActiveTurn bool                      `json:"has_active_turn"`
 	QueuePending  int                       `json:"queue_pending"`
@@ -273,6 +302,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
 		AgentID:       view.SessionID,
+		TurnState:     view.TurnState,
 		RunTurnPhase:  view.RunTurnPhase,
 		HasActiveTurn: view.HasActiveTurn,
 		QueuePending:  view.QueuePending,
@@ -455,6 +485,13 @@ func toolsBashCompressFromConfig(toolsCfg config.ToolsConfig) tools.BashCompress
 	}
 	if toolsCfg.BashCompress.MaxOutputCharsStderr > 0 {
 		out.MaxOutputCharsStderr = toolsCfg.BashCompress.MaxOutputCharsStderr
+	}
+	out.OutputMode = toolsCfg.BashCompress.OutputMode
+	if toolsCfg.BashCompress.TailOutputChars > 0 {
+		out.TailOutputChars = toolsCfg.BashCompress.TailOutputChars
+	}
+	if toolsCfg.BashCompress.TailOutputCharsStderr > 0 {
+		out.TailOutputCharsStderr = toolsCfg.BashCompress.TailOutputCharsStderr
 	}
 	return out
 }

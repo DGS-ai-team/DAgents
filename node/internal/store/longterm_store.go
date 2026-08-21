@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,9 @@ const (
 	LongTermScopeGlobal = "global"
 	LongTermScopeAgent  = "agent"
 )
+
+// ErrLongTermEntryNotFound 表示指定作用域中不存在目标记忆条目。
+var ErrLongTermEntryNotFound = errors.New("long-term memory entry not found")
 
 // LongTermEntry 为单条长期记忆条目。
 type LongTermEntry struct {
@@ -138,6 +142,74 @@ WHERE scope = ? AND agent_id = ? AND updated_at = ?`,
 // SaveLongTermRecordOverwrite 覆盖写入条目（设置页保存，无 CAS）。
 func (s *AgentStore) SaveLongTermRecordOverwrite(ctx context.Context, rec LongTermRecord) error {
 	return s.saveLongTermRecord(ctx, rec)
+}
+
+// UpdateLongTermEntry 更新单条长期记忆，并通过 CAS 避免覆盖并发写入。
+func (s *AgentStore) UpdateLongTermEntry(ctx context.Context, scope, agentID, entryID, content string) (*LongTermRecord, error) {
+	entryID = strings.TrimSpace(entryID)
+	content = strings.TrimSpace(content)
+	if entryID == "" {
+		return nil, ErrLongTermEntryNotFound
+	}
+	if content == "" {
+		return nil, fmt.Errorf("long-term memory content is required")
+	}
+	return s.mutateLongTermEntries(ctx, scope, agentID, func(entries []LongTermEntry) ([]LongTermEntry, error) {
+		for i := range entries {
+			if strings.TrimSpace(entries[i].ID) != entryID {
+				continue
+			}
+			entries[i].Content = content
+			entries[i].UpdatedAt = time.Now().UTC()
+			return entries, nil
+		}
+		return nil, ErrLongTermEntryNotFound
+	})
+}
+
+// DeleteLongTermEntry 删除单条长期记忆，并通过 CAS 避免覆盖并发写入。
+func (s *AgentStore) DeleteLongTermEntry(ctx context.Context, scope, agentID, entryID string) (*LongTermRecord, error) {
+	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		return nil, ErrLongTermEntryNotFound
+	}
+	return s.mutateLongTermEntries(ctx, scope, agentID, func(entries []LongTermEntry) ([]LongTermEntry, error) {
+		for i := range entries {
+			if strings.TrimSpace(entries[i].ID) != entryID {
+				continue
+			}
+			return append(entries[:i:i], entries[i+1:]...), nil
+		}
+		return nil, ErrLongTermEntryNotFound
+	})
+}
+
+// mutateLongTermEntries 在有限次数内重试 CAS，让设置页的单条编辑/删除不把
+// 同时发生的 remember 写入静默覆盖掉。
+func (s *AgentStore) mutateLongTermEntries(ctx context.Context, scope, agentID string, mutate func([]LongTermEntry) ([]LongTermEntry, error)) (*LongTermRecord, error) {
+	if s == nil {
+		return nil, fmt.Errorf("agent store unavailable")
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		rec, err := s.EnsureLongTermRecord(ctx, scope, agentID, "", "")
+		if err != nil {
+			return nil, err
+		}
+		entries := append([]LongTermEntry(nil), rec.Entries...)
+		entries, err = mutate(entries)
+		if err != nil {
+			return nil, err
+		}
+		rec.Entries = entries
+		ok, err := s.SaveLongTermRecordCAS(ctx, *rec, rec.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return s.GetLongTermRecord(ctx, scope, agentID)
+		}
+	}
+	return nil, fmt.Errorf("long-term memory update conflict")
 }
 
 func (s *AgentStore) saveLongTermRecord(ctx context.Context, rec LongTermRecord) error {

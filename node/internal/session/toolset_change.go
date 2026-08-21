@@ -28,24 +28,12 @@ func (r *runtime) notifyToolsetChanged() {
 	if r == nil {
 		return
 	}
+	_ = r.cancelTurnWithReason(ToolsetChangedInterruptMessage, map[string]any{"interrupted_by_toolset_change": true})
 	r.mu.Lock()
-	if r.pending != nil && r.orch != nil {
-		pending := r.pending
-		r.pending = nil
-		r.orch.InterruptPendingWithReason(
-			r.session.ID,
-			&r.messages,
-			pending,
-			ToolsetChangedInterruptMessage,
-			map[string]any{"interrupted_by_toolset_change": true},
-		)
-	}
 	if r.orch != nil {
 		_ = r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
 	}
 	r.mu.Unlock()
-
-	_ = r.cancelTurn()
 
 	if r.hub != nil {
 		r.hub.Publish(r.session.ID, "system_notice", map[string]any{

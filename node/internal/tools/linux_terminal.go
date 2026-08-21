@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -56,13 +57,20 @@ func (p *LinuxShellProvider) OpenTerminal(ctx context.Context, req TerminalReque
 	if !cfg.Enabled {
 		return nil, fmt.Errorf("linux channel %q is disabled", cfg.ID)
 	}
+	var binding LinuxChannelBinding
 	if p.bindingResolver != nil {
-		binding, err := p.bindingResolver.ResolveLinuxBinding(ctx, strings.TrimSpace(req.Context.AgentID), cfg.ID)
+		binding, err = p.bindingResolver.ResolveLinuxBinding(ctx, strings.TrimSpace(req.Context.AgentID), cfg.ID)
 		if err != nil {
 			return nil, err
 		}
 		if !binding.Enabled {
 			return nil, fmt.Errorf("linux channel %q is not enabled for agent %q", cfg.ID, req.Context.AgentID)
+		}
+		if err := validateLinuxBindingMode(binding); err != nil {
+			return nil, err
+		}
+		if linuxBindingApprovalAction(binding) == policy.ActionRequireApproval && strings.TrimSpace(req.Context.ApprovalID) == "" {
+			return nil, fmt.Errorf("Linux channel %q requires approval before opening a terminal", cfg.ID)
 		}
 		if strings.TrimSpace(req.CWD) == "" && strings.TrimSpace(binding.RemoteCWD) != "" {
 			cfg.DefaultCWD = strings.TrimSpace(binding.RemoteCWD)
@@ -84,6 +92,20 @@ func (p *LinuxShellProvider) OpenTerminal(ctx context.Context, req TerminalReque
 	if err := validateRemoteShell(shell); err != nil {
 		return nil, err
 	}
+	releaseSlot, err := p.acquireChannelSlot(ctx,
+		strings.TrimSpace(req.Context.AgentID)+"\x00"+cfg.ID,
+		linuxChannelConcurrencyLimit(cfg.MaxSessions, binding.MaxConcurrency),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("linux channel concurrency limit: %w", err)
+	}
+	slotTransferred := false
+	defer func() {
+		if !slotTransferred {
+			releaseSlot()
+		}
+	}()
+	req.Context.PolicyDecision = "linux_channel_allowed"
 	initInput, err := buildTerminalInit(cfg, req)
 	if err != nil {
 		return nil, err
@@ -177,19 +199,21 @@ func (p *LinuxShellProvider) OpenTerminal(ctx context.Context, req TerminalReque
 	contextValue := req.Context
 	contextValue.Target = req.Target
 	seq := atomic.AddUint64(&linuxTerminalSequence, 1)
+	slotTransferred = true
 	return &linuxTerminal{
-		id:        fmt.Sprintf("linux-terminal-%d", seq),
-		client:    client,
-		session:   session,
-		agentConn: agentConn,
-		stdin:     stdin,
-		stdout:    stdout,
-		command:   shell + " -l",
-		initInput: initInput,
-		ctx:       contextValue,
-		sink:      req.EventSink,
-		rows:      rows,
-		cols:      cols,
+		id:          fmt.Sprintf("linux-terminal-%d", seq),
+		client:      client,
+		session:     session,
+		agentConn:   agentConn,
+		stdin:       stdin,
+		stdout:      stdout,
+		command:     shell + " -l",
+		initInput:   initInput,
+		ctx:         contextValue,
+		sink:        req.EventSink,
+		rows:        rows,
+		cols:        cols,
+		releaseSlot: releaseSlot,
 	}, nil
 }
 
@@ -231,29 +255,32 @@ func buildTerminalInit(cfg LinuxChannelConfig, req TerminalRequest) ([]byte, err
 }
 
 type linuxTerminal struct {
-	mu        sync.Mutex
-	inputMu   sync.Mutex
-	id        string
-	client    *ssh.Client
-	session   *ssh.Session
-	agentConn net.Conn
-	stdin     io.WriteCloser
-	stdout    io.Reader
-	command   string
-	initInput []byte
-	ctx       ExecutionContext
-	sink      ProcessEventSink
-	seq       uint64
-	rows      int
-	cols      int
-	started   bool
-	closed    bool
-	outputGot bool
-	waitOnce  sync.Once
-	waitErr   error
-	exitMu    sync.RWMutex
-	exit      *ExitStatus
-	eventMu   sync.Mutex
+	mu          sync.Mutex
+	inputMu     sync.Mutex
+	id          string
+	client      *ssh.Client
+	session     *ssh.Session
+	agentConn   net.Conn
+	stdin       io.WriteCloser
+	stdout      io.Reader
+	command     string
+	initInput   []byte
+	ctx         ExecutionContext
+	sink        ProcessEventSink
+	seq         uint64
+	rows        int
+	cols        int
+	started     bool
+	closed      bool
+	outputGot   bool
+	waitOnce    sync.Once
+	waitErr     error
+	exitMu      sync.RWMutex
+	exit        *ExitStatus
+	releaseSlot func()
+	releaseOnce sync.Once
+	eventMu     sync.Mutex
+	outputBytes int64
 }
 
 func (t *linuxTerminal) ID() string {
@@ -462,6 +489,11 @@ func (t *linuxTerminal) Close() error {
 	if agentConn != nil {
 		_ = agentConn.Close()
 	}
+	t.releaseOnce.Do(func() {
+		if t.releaseSlot != nil {
+			t.releaseSlot()
+		}
+	})
 	return first
 }
 
@@ -475,7 +507,19 @@ func (t *linuxTerminal) emit(kind ProcessEventType, stream string, data []byte, 
 	if len(data) > 0 {
 		data = append([]byte(nil), data...)
 	}
-	t.sink(ProcessEvent{Type: kind, ProcessID: t.id, Seq: seq, Context: t.ctx, Stream: stream, Data: data, Exit: exit})
+	if kind == ProcessEventOutput {
+		t.outputBytes += int64(len(data))
+	}
+	t.sink(ProcessEvent{
+		Type:        kind,
+		ProcessID:   t.id,
+		Seq:         seq,
+		Context:     t.ctx,
+		Stream:      stream,
+		Data:        data,
+		OutputBytes: t.outputBytes,
+		Exit:        exit,
+	})
 }
 
 type linuxTerminalReader struct {

@@ -77,7 +77,13 @@ func (m *Manager) NotificationState(sessionID string) NotificationState {
 	if err != nil || rec == nil {
 		return NotificationState{}
 	}
-	st := notificationFromRuntimeState(rec.RuntimeState.Pending, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
+	pending := rec.RuntimeState.Pending
+	if lifecycle, projected, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID); projectionErr != nil {
+		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
+	} else if projected {
+		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
+	}
+	st := notificationFromRuntimeState(pending, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
 	if st == nil {
 		return NotificationState{}
 	}
@@ -122,16 +128,19 @@ func (r *runtime) ackSession(ctx context.Context, sseSeq int) (*NotificationStat
 	}
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
-	pending := r.pending
 	r.mu.Unlock()
+	pending := r.pendingSnapshot()
 	r.persist(ctx)
 	return notificationFromRuntimeState(pending, notifySeq, ackSeq), nil
 }
 
 func (r *runtime) notificationState() NotificationState {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	st := notificationFromRuntimeState(r.pending, r.notifySeq, r.ackSeq)
+	notifySeq := r.notifySeq
+	ackSeq := r.ackSeq
+	r.mu.Unlock()
+	pending := r.pendingSnapshot()
+	st := notificationFromRuntimeState(pending, notifySeq, ackSeq)
 	if st == nil {
 		return NotificationState{}
 	}

@@ -135,7 +135,7 @@ func TestTerminalSessionTerminateInterruptsAndReturnsUnreadOutput(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !out.Graceful || out.Forced || !out.Exited {
+	if !out.Graceful || out.Forced || !out.Exited || out.TerminationStatus != "confirmed" {
 		t.Fatalf("termination status=%+v", out)
 	}
 	var output []byte

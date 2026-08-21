@@ -37,14 +37,20 @@ func drainToolResultSteps(
 ) {
 	t.Helper()
 	outcome := start
+	stepIndex := outcome.StepIndex + 1
+	if stepIndex <= 1 {
+		stepIndex = 2
+	}
 	for outcome.ScheduleToolResult {
-		outcome = orch.RunToolMessageTurn(ctx, sessionID, history, nil, outcome.LoopCount)
+		stepCtx := WithExecutionContext(ctx, TurnExecutionContext{SessionID: sessionID, StepIndex: stepIndex})
+		outcome = orch.RunToolMessageTurn(stepCtx, sessionID, history)
 		if outcome.Err != nil {
 			t.Fatalf("RunToolMessageTurn: %v", outcome.Err)
 		}
 		if outcome.Pending != nil {
 			return
 		}
+		stepIndex++
 	}
 }
 
@@ -56,29 +62,29 @@ func runMessageTurnInline(
 	sessionID string,
 	history *[]llm.Message,
 	userText string,
-	setState StateSetter,
+	_ func(State),
 ) (*PendingHITL, int, error) {
 	t.Helper()
-	if setState == nil {
-		setState = func(State) {}
-	}
-	outcome := orch.RunHumanMessageTurn(ctx, sessionID, history, llm.UserMessage(userText, llm.UserNameHuman), setState)
+	outcome := orch.RunHumanMessageTurn(WithExecutionContext(ctx, TurnExecutionContext{SessionID: sessionID, StepIndex: 1}), sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
 	if outcome.Err != nil {
-		return outcome.Pending, outcome.LoopCount, outcome.Err
+		return outcome.Pending, outcome.StepIndex, outcome.Err
 	}
 	if outcome.Pending != nil {
-		return outcome.Pending, outcome.LoopCount, nil
+		return outcome.Pending, outcome.StepIndex, nil
 	}
+	stepIndex := outcome.StepIndex + 1
 	for outcome.ScheduleToolResult {
-		outcome = orch.RunToolMessageTurn(ctx, sessionID, history, setState, outcome.LoopCount)
+		stepCtx := WithExecutionContext(ctx, TurnExecutionContext{SessionID: sessionID, StepIndex: stepIndex})
+		outcome = orch.RunToolMessageTurn(stepCtx, sessionID, history)
 		if outcome.Err != nil {
-			return outcome.Pending, outcome.LoopCount, outcome.Err
+			return outcome.Pending, outcome.StepIndex, outcome.Err
 		}
 		if outcome.Pending != nil {
-			return outcome.Pending, outcome.LoopCount, nil
+			return outcome.Pending, outcome.StepIndex, nil
 		}
+		stepIndex++
 	}
-	return nil, outcome.LoopCount, nil
+	return nil, outcome.StepIndex, nil
 }
 
 func continueResumeAndDrain(
@@ -92,7 +98,12 @@ func continueResumeAndDrain(
 	loopCount int,
 ) {
 	t.Helper()
-	outcome := orch.ContinueAfterResume(ctx, sessionID, history, resume, pending, nil, loopCount)
+	stepIndex := loopCount
+	if stepIndex <= 0 {
+		stepIndex = 1
+	}
+	resumeCtx := WithExecutionContext(ctx, TurnExecutionContext{SessionID: sessionID, StepIndex: stepIndex})
+	outcome := orch.ContinueAfterResume(resumeCtx, sessionID, history, resume, pending)
 	drainToolResultSteps(t, orch, ctx, sessionID, history, outcome)
 }
 
@@ -101,6 +112,66 @@ func testOrchestrator(t *testing.T, hub *stream.Hub, client llm.Client) *Orchest
 	reg := testRegistry(t)
 	pol, _ := policy.LoadFile("")
 	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+}
+
+type flakyRetryExecutor struct {
+	calls int
+}
+
+func (e *flakyRetryExecutor) Definitions() []tools.ToolDef {
+	return []tools.ToolDef{{Type: "function", Function: tools.FunctionDef{Name: "read_file"}}}
+}
+
+func (e *flakyRetryExecutor) Execute(context.Context, string, string) (string, error) {
+	e.calls++
+	if e.calls == 1 {
+		return "", fmt.Errorf("temporary timeout while reading")
+	}
+	return "read-after-retry", nil
+}
+
+func (*flakyRetryExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
+	return "", fmt.Errorf("background unsupported")
+}
+
+func (*flakyRetryExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (*flakyRetryExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
+func (*flakyRetryExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
+}
+func (*flakyRetryExecutor) ToolRetryAllowed(name string) bool { return name == "read_file" }
+
+func TestOrchestratorRetriesSafeTransientToolFailureWithoutNewToolCall(t *testing.T) {
+	executor := &flakyRetryExecutor{}
+	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), &llm.MockClient{}, executor, nil, SkillAccess{}, 4, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	orch.SetToolRetryLimit(1)
+	var lifecycle []CommandType
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		lifecycle = append(lifecycle, command.Type)
+		return nil
+	})
+	history := []llm.Message{}
+	err := orch.executeTool(context.Background(), "session-1", &history, llm.ToolCall{
+		ID: "call-retry", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{}`},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.calls != 2 {
+		t.Fatalf("executor calls = %d, want 2", executor.calls)
+	}
+	if len(history) != 1 || history[0].Content != "read-after-retry" {
+		t.Fatalf("history after retry = %#v", history)
+	}
+	want := []CommandType{CommandToolExecutionStarted, CommandToolExecutionRetrying, CommandToolExecutionCompleted}
+	if len(lifecycle) != len(want) {
+		t.Fatalf("lifecycle = %#v, want %#v", lifecycle, want)
+	}
+	for i := range want {
+		if lifecycle[i] != want[i] {
+			t.Fatalf("lifecycle[%d] = %s, want %s", i, lifecycle[i], want[i])
+		}
+	}
 }
 
 func TestRunMessageTurn(t *testing.T) {
@@ -140,6 +211,35 @@ func TestRunMessageTurn(t *testing.T) {
 	}
 	if text != "hi" {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestOrchestratorEmitsModelAndAssistantLifecycleFacts(t *testing.T) {
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), &llm.MockClient{})
+	var commands []TurnCommand
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		commands = append(commands, command)
+		return nil
+	})
+	var history []llm.Message
+	if _, _, err := runMessageTurnInline(t, orch, context.Background(), "session-1", &history, "hello", nil); err != nil {
+		t.Fatal(err)
+	}
+	var got []CommandType
+	for _, command := range commands {
+		got = append(got, command.Type)
+	}
+	want := []CommandType{CommandTurnSnapshotCreated, CommandModelRequestStarted, CommandModelUsageRecorded, CommandModelResponseCompleted, CommandAssistantReceived}
+	if len(got) != len(want) {
+		t.Fatalf("lifecycle commands = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("lifecycle command %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+	if commands[0].RuntimeDigest == "" || commands[1].RequestDigest == "" {
+		t.Fatalf("missing snapshot/request digest: %#v", commands)
 	}
 }
 
@@ -349,7 +449,7 @@ func TestProcessToolCallsMixedHITL(t *testing.T) {
 		"type":         "user_information",
 		"tool_call_id": "call-ask-1",
 		"answer":       "prod",
-	}, pending, nil, 1)
+	}, pending)
 	if outcome.Err != nil {
 		t.Fatal(outcome.Err)
 	}

@@ -25,17 +25,48 @@ func triggerConditionSchema() map[string]any {
 		"type":        "object",
 		"description": "调度条件必须且只能选择 interval_seconds、fire_at 或 schedule 之一；cmd 仅用于 schedule 门控。",
 		"properties": map[string]any{
-			"interval_seconds": map[string]any{"type": "integer", "minimum": 1, "description": "周期触发间隔（秒）。"},
-			"fire_at":          map[string]any{"type": "number", "description": "单次触发时间，Unix 秒时间戳。"},
+			"interval_seconds": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"description": "周期触发间隔（秒）。",
+			},
+			"fire_at": map[string]any{
+				"type":        "number",
+				"description": "单次触发时间，Unix 秒时间戳。",
+			},
 			"schedule": map[string]any{
 				"type":        "object",
 				"description": "日历触发：daily 需要 hour/minute；weekly 还需要 weekday（0=周日）；monthly 还需要 day（-1=最后一天）。",
 				"properties": map[string]any{
-					"kind":    map[string]any{"type": "string", "enum": []string{"daily", "weekly", "monthly"}, "description": "日历类型。"},
-					"hour":    map[string]any{"type": "integer", "minimum": 0, "maximum": 23, "description": "小时（0-23）。"},
-					"minute":  map[string]any{"type": "integer", "minimum": 0, "maximum": 59, "description": "分钟（0-59）。"},
-					"weekday": map[string]any{"type": "integer", "minimum": 0, "maximum": 6, "description": "星期几（0=周日，6=周六），仅 weekly 使用。"},
-					"day":     map[string]any{"type": "integer", "minimum": -31, "maximum": 31, "description": "月份日期；正数为当月日期，-1 表示最后一天，仅 monthly 使用。"},
+					"kind": map[string]any{
+						"type":        "string",
+						"enum":        []string{"daily", "weekly", "monthly"},
+						"description": "日历类型。",
+					},
+					"hour": map[string]any{
+						"type":        "integer",
+						"minimum":     0,
+						"maximum":     23,
+						"description": "小时（0-23）。",
+					},
+					"minute": map[string]any{
+						"type":        "integer",
+						"minimum":     0,
+						"maximum":     59,
+						"description": "分钟（0-59）。",
+					},
+					"weekday": map[string]any{
+						"type":        "integer",
+						"minimum":     0,
+						"maximum":     6,
+						"description": "星期几（0=周日，6=周六），仅 weekly 使用。",
+					},
+					"day": map[string]any{
+						"type":        "integer",
+						"minimum":     -31,
+						"maximum":     31,
+						"description": "月份日期；正数为当月日期，-1 表示最后一天，仅 monthly 使用。",
+					},
 				},
 				"required":             []string{"kind", "hour", "minute"},
 				"additionalProperties": false,

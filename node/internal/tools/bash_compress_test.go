@@ -88,6 +88,65 @@ func TestFormatShellCompletedOutputCompressStats(t *testing.T) {
 	}
 }
 
+func TestFormatShellCompletedOutputMarksCaptureTruncation(t *testing.T) {
+	params := shellRunParams{compress: DefaultBashCompressConfig()}
+	out, stats := formatShellCompletedOutputWithCapture(params, "partial", "", nil, nil, true)
+	if !strings.Contains(out, "output_truncated: true") {
+		t.Fatalf("truncation marker missing: %q", out)
+	}
+	if stats == nil || !stats.Truncated {
+		t.Fatalf("expected truncated stats, got %+v", stats)
+	}
+	if fields := stats.SSEFields(); fields["output_compress_truncated"] != true {
+		t.Fatalf("expected truncated SSE field, got %+v", fields)
+	}
+}
+
+func TestNewBashOutputBufferBoundsBytes(t *testing.T) {
+	buf := newBashOutputBuffer(DefaultBashCompressConfig(), false)
+	input := strings.Repeat("中", maxBashOutputRunes*2)
+	if _, err := buf.Write([]byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	if !buf.truncated {
+		t.Fatal("expected byte collector truncation")
+	}
+	if buf.Len() > maxBashOutputRunes*4 {
+		t.Fatalf("buffer exceeded byte budget: %d", buf.Len())
+	}
+}
+
+func TestNewBashOutputBufferBoundsStderrFlood(t *testing.T) {
+	cfg := DefaultBashCompressConfig()
+	cfg.MaxOutputCharsStderr = 32
+	buf := newBashOutputBuffer(cfg, true)
+	input := []byte(strings.Repeat("stderr-noise\n", 10000))
+	if n, err := buf.Write(input); err != nil || n != len(input) {
+		t.Fatalf("stderr write = (%d, %v), want %d bytes consumed", n, err, len(input))
+	}
+	if !buf.truncated {
+		t.Fatal("expected stderr flood to be truncated")
+	}
+	if buf.Len() > cfg.MaxOutputCharsStderr*4 {
+		t.Fatalf("stderr buffer exceeded byte budget: %d", buf.Len())
+	}
+}
+
+func TestBashOutputBufferHeadTailMode(t *testing.T) {
+	cfg := DefaultBashCompressConfig()
+	cfg.MaxOutputChars = 4
+	cfg.TailOutputChars = 1
+	cfg.OutputMode = "head_tail"
+	buf := newBashOutputBuffer(cfg, false)
+	input := []byte("0123456789abcdefg")
+	if n, err := buf.Write(input); err != nil || n != len(input) {
+		t.Fatalf("write = (%d, %v)", n, err)
+	}
+	if got := buf.String(); got != "0123456789ab\n[... output truncated; showing beginning and end ...]\ndefg" {
+		t.Fatalf("head/tail bash buffer = %q", got)
+	}
+}
+
 func TestBashRunIntegrationCompress(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)

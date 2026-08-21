@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -102,9 +104,18 @@ type LinuxShellProvider struct {
 	secretResolver  LinuxSecretResolver
 	hostKey         LinuxHostKeyResolver
 	agentSocket     string
+	concurrencyMu   sync.Mutex
+	concurrency     map[string]*linuxChannelConcurrency
+}
+
+type linuxChannelConcurrency struct {
+	limit   int
+	active  int
+	changed chan struct{}
 }
 
 var linuxProcessSequence uint64
+var linuxRemoteRecoverySequence uint64
 
 func NewLinuxShellProvider(resolver LinuxChannelResolver, secretResolver LinuxSecretResolver) *LinuxShellProvider {
 	return &LinuxShellProvider{resolver: resolver, secretResolver: secretResolver}
@@ -129,6 +140,175 @@ func (p *LinuxShellProvider) WithBindingResolver(resolver LinuxChannelBindingRes
 		p.bindingResolver = resolver
 	}
 	return p
+}
+
+func (p *LinuxShellProvider) acquireChannelSlot(ctx context.Context, key string, limit int) (func(), error) {
+	if p == nil {
+		return nil, fmt.Errorf("linux shell provider is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	p.concurrencyMu.Lock()
+	if p.concurrency == nil {
+		p.concurrency = make(map[string]*linuxChannelConcurrency)
+	}
+	state := p.concurrency[key]
+	if state == nil {
+		state = &linuxChannelConcurrency{limit: limit, changed: make(chan struct{})}
+		p.concurrency[key] = state
+	} else if limit != state.limit {
+		// A binding may be edited while the Node is running. Existing holders
+		// keep their slots; the new limit applies as soon as capacity permits.
+		state.limit = limit
+	}
+	for {
+		if state.active < state.limit {
+			state.active++
+			p.concurrencyMu.Unlock()
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					p.concurrencyMu.Lock()
+					if state.active > 0 {
+						state.active--
+					}
+					close(state.changed)
+					state.changed = make(chan struct{})
+					p.concurrencyMu.Unlock()
+				})
+			}, nil
+		}
+		changed := state.changed
+		p.concurrencyMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-changed:
+			p.concurrencyMu.Lock()
+		}
+	}
+}
+
+func linuxChannelConcurrencyLimit(channelMax, bindingMax int) int {
+	limit := channelMax
+	if limit <= 0 {
+		limit = 1
+	}
+	if bindingMax > 0 && bindingMax < limit {
+		limit = bindingMax
+	}
+	return limit
+}
+
+func linuxBindingCommandError(binding LinuxChannelBinding, command string) error {
+	command = strings.TrimSpace(command)
+	for _, rule := range binding.DeniedCommands {
+		matched, err := linuxCommandRuleMatches(rule, command)
+		if err != nil {
+			return fmt.Errorf("invalid denied command rule %q: %w", rule, err)
+		}
+		if matched {
+			return fmt.Errorf("command denied by Linux channel policy: %s", strings.TrimSpace(rule))
+		}
+	}
+	if len(binding.AllowedCommands) == 0 {
+		return nil
+	}
+	for _, rule := range binding.AllowedCommands {
+		matched, err := linuxCommandRuleMatches(rule, command)
+		if err != nil {
+			return fmt.Errorf("invalid allowed command rule %q: %w", rule, err)
+		}
+		if matched {
+			return nil
+		}
+	}
+	return fmt.Errorf("command is not allowed by Linux channel policy")
+}
+
+func linuxCommandRuleMatches(rule, command string) (bool, error) {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return false, nil
+	}
+	if strings.ContainsAny(rule, "*?[") {
+		return path.Match(rule, command)
+	}
+	return rule == command, nil
+}
+
+func validateLinuxBindingMode(binding LinuxChannelBinding) error {
+	switch strings.ToLower(strings.TrimSpace(binding.ApprovalMode)) {
+	case "", "auto", "allow", "never", "require_approval", "always", "deny":
+		return nil
+	default:
+		return fmt.Errorf("unsupported Linux channel approval mode %q", binding.ApprovalMode)
+	}
+}
+
+func linuxBindingApprovalAction(binding LinuxChannelBinding) policy.Action {
+	switch strings.ToLower(strings.TrimSpace(binding.ApprovalMode)) {
+	case "deny":
+		return policy.ActionDeny
+	case "require_approval", "always":
+		return policy.ActionRequireApproval
+	default:
+		return policy.ActionAuto
+	}
+}
+
+// Preflight checks only durable channel/binding policy. It intentionally does
+// not resolve credentials or open a socket; those checks remain at Start so a
+// stale approval can never bypass current connection state.
+func (p *LinuxShellProvider) Preflight(ctx context.Context, agentID, channelID, command string) (policy.Action, string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if p == nil || p.resolver == nil {
+		return policy.ActionDeny, "Linux channel provider is unavailable", nil
+	}
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return policy.ActionDeny, "Linux channel_id is required", nil
+	}
+	cfg, err := p.resolver.ResolveLinuxChannel(ctx, channelID)
+	if err != nil {
+		return policy.ActionDeny, fmt.Sprintf("Linux channel preflight failed: %v", err), nil
+	}
+	if err := validateLinuxChannelConfig(cfg); err != nil {
+		return policy.ActionDeny, err.Error(), nil
+	}
+	if !cfg.Enabled {
+		return policy.ActionDeny, fmt.Sprintf("Linux channel %q is disabled", cfg.ID), nil
+	}
+	if p.bindingResolver == nil {
+		return policy.ActionAuto, "", nil
+	}
+	binding, err := p.bindingResolver.ResolveLinuxBinding(ctx, strings.TrimSpace(agentID), cfg.ID)
+	if err != nil {
+		return policy.ActionDeny, fmt.Sprintf("Linux channel binding preflight failed: %v", err), nil
+	}
+	if !binding.Enabled {
+		return policy.ActionDeny, fmt.Sprintf("Linux channel %q is not enabled for agent %q", cfg.ID, agentID), nil
+	}
+	if err := validateLinuxBindingMode(binding); err != nil {
+		return policy.ActionDeny, err.Error(), nil
+	}
+	if strings.EqualFold(strings.TrimSpace(binding.ApprovalMode), "deny") {
+		return policy.ActionDeny, fmt.Sprintf("Linux channel %q is denied by binding policy", binding.ChannelID), nil
+	}
+	if err := linuxBindingCommandError(binding, command); err != nil {
+		return policy.ActionDeny, err.Error(), nil
+	}
+	action := linuxBindingApprovalAction(binding)
+	if action == policy.ActionRequireApproval {
+		return action, fmt.Sprintf("Linux channel %q requires approval for this operation", cfg.ID), nil
+	}
+	return action, "", nil
 }
 
 // DefaultLinuxHostKeyResolver uses an explicit channel path when provided or
@@ -186,13 +366,25 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 	if !cfg.Enabled {
 		return nil, fmt.Errorf("linux channel %q is disabled", cfg.ID)
 	}
+	var binding LinuxChannelBinding
 	if p.bindingResolver != nil {
-		binding, err := p.bindingResolver.ResolveLinuxBinding(ctx, strings.TrimSpace(req.Context.AgentID), cfg.ID)
+		binding, err = p.bindingResolver.ResolveLinuxBinding(ctx, strings.TrimSpace(req.Context.AgentID), cfg.ID)
 		if err != nil {
 			return nil, err
 		}
 		if !binding.Enabled {
 			return nil, fmt.Errorf("linux channel %q is not enabled for agent %q", cfg.ID, req.Context.AgentID)
+		}
+		if err := validateLinuxBindingMode(binding); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(req.Command) != "" {
+			if err := linuxBindingCommandError(binding, req.Command); err != nil {
+				return nil, err
+			}
+		}
+		if linuxBindingApprovalAction(binding) == policy.ActionRequireApproval && strings.TrimSpace(req.Context.ApprovalID) == "" {
+			return nil, fmt.Errorf("Linux channel %q requires approval before execution", cfg.ID)
 		}
 		if req.CWD == "" && strings.TrimSpace(binding.RemoteCWD) != "" {
 			cfg.DefaultCWD = strings.TrimSpace(binding.RemoteCWD)
@@ -201,6 +393,20 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 			cfg.RemoteShell = strings.TrimSpace(binding.Shell)
 		}
 	}
+	releaseSlot, err := p.acquireChannelSlot(ctx,
+		strings.TrimSpace(req.Context.AgentID)+"\x00"+cfg.ID,
+		linuxChannelConcurrencyLimit(cfg.MaxSessions, binding.MaxConcurrency),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("linux channel concurrency limit: %w", err)
+	}
+	slotTransferred := false
+	defer func() {
+		if !slotTransferred {
+			releaseSlot()
+		}
+	}()
+	req.Context.PolicyDecision = "linux_channel_allowed"
 	if req.Timeout <= 0 && cfg.CommandTimeout > 0 {
 		req.Timeout = cfg.CommandTimeout
 	}
@@ -260,7 +466,7 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 		}
 		return nil, fmt.Errorf("linux channel session failed: %w", err)
 	}
-	command, err := buildLinuxRemoteCommand(cfg, req)
+	command, processGroupMode, recovery, err := buildLinuxRemoteCommandWithRecovery(cfg, req)
 	if err != nil {
 		_ = session.Close()
 		_ = client.Close()
@@ -270,14 +476,19 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 		return nil, err
 	}
 	seq := atomic.AddUint64(&linuxProcessSequence, 1)
+	slotTransferred = true
 	return &linuxProcess{
-		id:        fmt.Sprintf("linux-process-%d", seq),
-		client:    client,
-		session:   session,
-		agentConn: agentConn,
-		command:   command,
-		ctx:       req.Context,
-		sink:      req.EventSink,
+		id:               fmt.Sprintf("linux-process-%d", seq),
+		provider:         p,
+		client:           client,
+		session:          session,
+		agentConn:        agentConn,
+		command:          command,
+		processGroupMode: processGroupMode,
+		remoteRecovery:   recovery,
+		ctx:              req.Context,
+		sink:             req.EventSink,
+		releaseSlot:      releaseSlot,
 	}, nil
 }
 
@@ -291,44 +502,83 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 	if target.Kind != executionTargetLinuxChannel {
 		return TargetStatus{Message: fmt.Sprintf("unsupported target %q", target.Kind)}, nil
 	}
+	stages := make([]TargetStageStatus, 0, 9)
 	cfg, err := p.resolver.ResolveLinuxChannel(ctx, strings.TrimSpace(target.ID))
 	if err != nil {
 		return TargetStatus{}, err
 	}
-	if err := validateLinuxChannelConfig(cfg); err != nil {
-		return TargetStatus{Message: err.Error()}, nil
+	if err := recordLinuxTestStage(&stages, "config", func() error {
+		return validateLinuxChannelConfig(cfg)
+	}); err != nil {
+		return linuxTestFailure(stages, "invalid_channel_config", err), nil
 	}
 	if !cfg.Enabled {
-		return TargetStatus{Message: fmt.Sprintf("linux channel %q is disabled", cfg.ID)}, nil
+		err := fmt.Errorf("linux channel %q is disabled", cfg.ID)
+		return linuxTestFailure(stages, "channel_disabled", err), nil
 	}
 	cred, err := p.resolver.ResolveLinuxCredential(ctx, cfg.CredentialID)
 	if err != nil {
 		return TargetStatus{}, err
 	}
-	if !cred.Enabled {
-		return TargetStatus{Message: fmt.Sprintf("linux credential %q is disabled", cred.ID)}, nil
+	if err := recordLinuxTestStage(&stages, "credential", func() error {
+		if !cred.Enabled {
+			return fmt.Errorf("linux credential %q is disabled", cred.ID)
+		}
+		return nil
+	}); err != nil {
+		return linuxTestFailure(stages, "credential_unavailable", err), nil
 	}
 	auth, agentConn, err := p.authMethod(ctx, cred)
 	if err != nil {
-		return TargetStatus{}, err
+		recordLinuxTestStageError(&stages, "authentication", "authentication_failed", err)
+		return linuxTestFailure(stages, "authentication_failed", err), nil
 	}
+	recordLinuxTestStage(&stages, "authentication", func() error { return nil })
 	if agentConn != nil {
 		defer agentConn.Close()
 	}
 	hostKey, err := p.hostKeyCallback(ctx, cfg)
 	if err != nil {
-		return TargetStatus{}, err
+		recordLinuxTestStageError(&stages, "host_key", "host_key_unavailable", err)
+		return linuxTestFailure(stages, "host_key_unavailable", err), nil
+	}
+	recordLinuxTestStage(&stages, "host_key", func() error { return nil })
+	var observedHostKeyFingerprint string
+	baseHostKey := hostKey
+	hostKey = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if key != nil {
+			observedHostKeyFingerprint = ssh.FingerprintSHA256(key)
+		}
+		return baseHostKey(hostname, remote, key)
 	}
 	connectTimeout := cfg.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
 	}
+	if err := recordLinuxTestStage(&stages, "dns", func() error {
+		if net.ParseIP(cfg.Host) != nil {
+			return nil
+		}
+		addresses, err := net.DefaultResolver.LookupHost(ctx, cfg.Host)
+		if err != nil {
+			return err
+		}
+		if len(addresses) == 0 {
+			return fmt.Errorf("host resolved to no addresses")
+		}
+		return nil
+	}); err != nil {
+		return linuxTestFailure(stages, "dns_failed", fmt.Errorf("resolve %q: %w", cfg.Host, err)), nil
+	}
 	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
 	if err != nil {
-		return TargetStatus{}, fmt.Errorf("linux channel connect failed: %w", err)
+		wrapped := fmt.Errorf("linux channel connect failed: %w", err)
+		recordLinuxTestStageError(&stages, "tcp", "tcp_connect_failed", wrapped)
+		return linuxTestFailure(stages, "tcp_connect_failed", wrapped), nil
 	}
+	recordLinuxTestStage(&stages, "tcp", func() error { return nil })
 	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            auth,
@@ -337,11 +587,80 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 	})
 	if err != nil {
 		_ = conn.Close()
-		return TargetStatus{}, fmt.Errorf("linux channel handshake failed: %w", err)
+		code := classifyLinuxSSHHandshakeError(err)
+		wrapped := fmt.Errorf("linux channel handshake failed: %w", err)
+		recordLinuxTestStageError(&stages, "ssh_handshake", code, wrapped)
+		failure := linuxTestFailure(stages, code, wrapped)
+		failure.HostKeyFingerprint = observedHostKeyFingerprint
+		return failure, nil
 	}
 	client := ssh.NewClient(clientConn, chans, requests)
-	_ = client.Close()
-	return TargetStatus{Available: true, Message: "linux SSH connection established"}, nil
+	defer client.Close()
+	recordLinuxTestStage(&stages, "ssh_handshake", func() error { return nil })
+	session, err := client.NewSession()
+	if err != nil {
+		code := "session_open_failed"
+		recordLinuxTestStageError(&stages, "session", code, err)
+		return linuxTestFailure(stages, code, err), nil
+	}
+	defer session.Close()
+	recordLinuxTestStage(&stages, "session", func() error { return nil })
+	command, err := buildLinuxRemoteCommand(cfg, ExecRequest{Command: "printf dagents-channel-probe"})
+	if err != nil {
+		recordLinuxTestStageError(&stages, "shell", "shell_build_failed", err)
+		return linuxTestFailure(stages, "shell_build_failed", err), nil
+	}
+	recordLinuxTestStage(&stages, "shell", func() error { return nil })
+	if _, err := session.Output(command); err != nil {
+		wrapped := fmt.Errorf("linux channel command test failed: %w", err)
+		recordLinuxTestStageError(&stages, "command", "command_failed", wrapped)
+		return linuxTestFailure(stages, "command_failed", wrapped), nil
+	}
+	recordLinuxTestStage(&stages, "command", func() error { return nil })
+	return TargetStatus{
+		Available:          true,
+		Message:            "linux SSH connection and command test succeeded",
+		HostKeyFingerprint: observedHostKeyFingerprint,
+		Stages:             stages,
+	}, nil
+}
+
+func recordLinuxTestStage(stages *[]TargetStageStatus, name string, check func() error) error {
+	started := time.Now()
+	err := check()
+	stage := TargetStageStatus{Name: name, Status: "passed", DurationMS: time.Since(started).Milliseconds()}
+	if err != nil {
+		stage.Status = "failed"
+		stage.Message = err.Error()
+	}
+	*stages = append(*stages, stage)
+	return err
+}
+
+func recordLinuxTestStageError(stages *[]TargetStageStatus, name, code string, err error) {
+	started := time.Now()
+	*stages = append(*stages, TargetStageStatus{
+		Name: name, Status: "failed", Code: code, Message: err.Error(),
+		DurationMS: time.Since(started).Milliseconds(),
+	})
+}
+
+func linuxTestFailure(stages []TargetStageStatus, code string, err error) TargetStatus {
+	return TargetStatus{Available: false, Message: err.Error(), ErrorCode: code, Stages: stages}
+}
+
+func classifyLinuxSSHHandshakeError(err error) string {
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "unable to authenticate") || strings.Contains(message, "authentication") {
+		return "authentication_failed"
+	}
+	if strings.Contains(message, "key is unknown") || strings.Contains(message, "key is not known") {
+		return "host_key_unknown"
+	}
+	if strings.Contains(message, "knownhosts") || strings.Contains(message, "host key") {
+		return "host_key_mismatch"
+	}
+	return "ssh_handshake_failed"
 }
 
 func validateLinuxChannelConfig(cfg LinuxChannelConfig) error {
@@ -429,7 +748,18 @@ func (p *LinuxShellProvider) resolveSecret(ctx context.Context, cred LinuxCreden
 // openClient creates an authenticated SSH client for one Linux channel. It is
 // shared by SFTP transfers and deliberately keeps the client private to the
 // provider so credentials never cross the tools boundary.
-func (p *LinuxShellProvider) openClient(ctx context.Context, channelID, agentID string) (LinuxChannelConfig, *ssh.Client, net.Conn, error) {
+func (p *LinuxShellProvider) openClient(ctx context.Context, channelID, agentID, approvalID string) (LinuxChannelConfig, *ssh.Client, net.Conn, error) {
+	return p.openClientWithOptions(ctx, channelID, agentID, approvalID, true)
+}
+
+// openClientForRecovery is used only to stop a previously approved orphaned
+// process. It still requires a live, enabled channel and binding, but does not
+// ask for a second HITL approval for the safety-improving cancellation.
+func (p *LinuxShellProvider) openClientForRecovery(ctx context.Context, channelID, agentID string) (LinuxChannelConfig, *ssh.Client, net.Conn, error) {
+	return p.openClientWithOptions(ctx, channelID, agentID, "", false)
+}
+
+func (p *LinuxShellProvider) openClientWithOptions(ctx context.Context, channelID, agentID, approvalID string, requireApproval bool) (LinuxChannelConfig, *ssh.Client, net.Conn, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -457,6 +787,15 @@ func (p *LinuxShellProvider) openClient(ctx context.Context, channelID, agentID 
 		}
 		if !binding.Enabled {
 			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel %q is not enabled for agent %q", cfg.ID, agentID)
+		}
+		if err := validateLinuxBindingMode(binding); err != nil {
+			return LinuxChannelConfig{}, nil, nil, err
+		}
+		if strings.EqualFold(strings.TrimSpace(binding.ApprovalMode), "deny") {
+			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("Linux channel %q is denied by binding policy", cfg.ID)
+		}
+		if requireApproval && linuxBindingApprovalAction(binding) == policy.ActionRequireApproval && strings.TrimSpace(approvalID) == "" {
+			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("Linux channel %q requires approval before transfer", cfg.ID)
 		}
 	}
 	cred, err := p.resolver.ResolveLinuxCredential(ctx, cfg.CredentialID)
@@ -506,6 +845,76 @@ func (p *LinuxShellProvider) openClient(ctx context.Context, channelID, agentID 
 	return cfg, ssh.NewClient(clientConn, chans, requests), agentConn, nil
 }
 
+// InspectRemoteProcess checks whether a remote process group is still alive
+// without sending it a signal. It is used for restart-recovered jobs where
+// Node can report remote state but must not silently mutate the process.
+func (p *LinuxShellProvider) InspectRemoteProcess(ctx context.Context, agentID string, recovery RemoteProcessRecovery) (string, error) {
+	return p.runRemoteRecovery(ctx, agentID, recovery, false)
+}
+
+// RecoverRemoteProcess terminates a remote process group only when the
+// persisted PID file contains the exact Node-generated token. It returns a
+// small status token and never returns remote command output.
+func (p *LinuxShellProvider) RecoverRemoteProcess(ctx context.Context, agentID string, recovery RemoteProcessRecovery) (string, error) {
+	return p.runRemoteRecovery(ctx, agentID, recovery, true)
+}
+
+func (p *LinuxShellProvider) runRemoteRecovery(ctx context.Context, agentID string, recovery RemoteProcessRecovery, terminate bool) (string, error) {
+	if !isSafeRemoteJobToken(recovery.JobToken) || recovery.TargetID == "" || recovery.PIDFile != remoteJobPIDFile(recovery.JobToken) {
+		return "", fmt.Errorf("remote recovery identity is invalid")
+	}
+	cfg, client, agentConn, err := p.openClientForRecovery(ctx, recovery.TargetID, agentID)
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()
+	if agentConn != nil {
+		defer agentConn.Close()
+	}
+	session, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("remote recovery session failed: %w", err)
+	}
+	defer session.Close()
+	steps := []string{
+		"record=$(cat " + shellQuote(recovery.PIDFile) + " 2>/dev/null) || { printf 'missing'; exit 0; }",
+		"pid=${record%%|*}",
+		"token=${record#*|}",
+		"case \"$pid\" in ''|*[!0-9]*) printf 'invalid_pid'; exit 0;; esac",
+		"if [ \"$token\" != " + shellQuote(recovery.JobToken) + " ]; then printf 'token_mismatch'; exit 0; fi",
+		"if ! kill -0 -\"$pid\" 2>/dev/null; then rm -f " + shellQuote(recovery.PIDFile) + "; printf 'not_running'; exit 0; fi",
+	}
+	if terminate {
+		steps = append(steps,
+			"if ! kill -TERM -\"$pid\" 2>/dev/null; then if ! kill -TERM \"$pid\" 2>/dev/null; then printf 'kill_failed'; exit 0; fi; fi",
+			"sleep 1",
+			"if kill -0 -\"$pid\" 2>/dev/null || kill -0 \"$pid\" 2>/dev/null; then if kill -KILL -\"$pid\" 2>/dev/null || kill -KILL \"$pid\" 2>/dev/null; then rm -f "+shellQuote(recovery.PIDFile)+"; printf 'force_terminated'; else printf 'force_failed'; fi; else rm -f "+shellQuote(recovery.PIDFile)+"; printf 'terminated'; fi",
+		)
+	} else {
+		steps = append(steps, "printf 'running'")
+	}
+	script := strings.Join(steps, "; ")
+	command, err := buildLinuxControlCommand(cfg, script)
+	if err != nil {
+		return "", err
+	}
+	output, err := session.CombinedOutput(command)
+	status := strings.TrimSpace(string(output))
+	if err != nil {
+		return "", fmt.Errorf("remote recovery failed: %w", err)
+	}
+	switch status {
+	case "missing":
+		return "not_running", nil
+	case "not_running", "terminated", "force_terminated", "running":
+		return status, nil
+	case "token_mismatch", "invalid_pid", "kill_failed", "force_failed":
+		return "", fmt.Errorf("remote recovery returned %s", status)
+	default:
+		return "", fmt.Errorf("remote recovery returned an invalid status")
+	}
+}
+
 func (p *LinuxShellProvider) hostKeyCallback(ctx context.Context, cfg LinuxChannelConfig) (ssh.HostKeyCallback, error) {
 	if p != nil && p.hostKey != nil {
 		callback, err := p.hostKey(ctx, cfg)
@@ -537,6 +946,27 @@ func pinnedHostKeyCallback(reference string) ssh.HostKeyCallback {
 }
 
 func buildLinuxRemoteCommand(cfg LinuxChannelConfig, req ExecRequest) (string, error) {
+	command, _, err := buildLinuxRemoteCommandWithMode(cfg, req)
+	return command, err
+}
+
+func buildLinuxControlCommand(cfg LinuxChannelConfig, script string) (string, error) {
+	shell := strings.TrimSpace(cfg.RemoteShell)
+	if shell == "" {
+		shell = "bash"
+	}
+	if strings.ContainsAny(shell, " \t\r\n;|&") {
+		return "", fmt.Errorf("invalid remote shell %q", shell)
+	}
+	return shell + " -lc " + shellQuote(script), nil
+}
+
+func buildLinuxRemoteCommandWithMode(cfg LinuxChannelConfig, req ExecRequest) (string, string, error) {
+	command, mode, _, err := buildLinuxRemoteCommandWithRecovery(cfg, req)
+	return command, mode, err
+}
+
+func buildLinuxRemoteCommandWithRecovery(cfg LinuxChannelConfig, req ExecRequest) (string, string, RemoteProcessRecovery, error) {
 	inner := strings.TrimSpace(req.Command)
 	cwd := strings.TrimSpace(req.CWD)
 	if cwd == "" {
@@ -549,7 +979,7 @@ func buildLinuxRemoteCommand(cfg LinuxChannelConfig, req ExecRequest) (string, e
 		keys := make([]string, 0, len(req.Env))
 		for key := range req.Env {
 			if !validEnvName(key) {
-				return "", fmt.Errorf("invalid remote environment variable %q", key)
+				return "", "", RemoteProcessRecovery{}, fmt.Errorf("invalid remote environment variable %q", key)
 			}
 			keys = append(keys, key)
 		}
@@ -565,9 +995,61 @@ func buildLinuxRemoteCommand(cfg LinuxChannelConfig, req ExecRequest) (string, e
 		shell = "bash"
 	}
 	if strings.ContainsAny(shell, " \t\r\n;|&") {
-		return "", fmt.Errorf("invalid remote shell %q", shell)
+		return "", "", RemoteProcessRecovery{}, fmt.Errorf("invalid remote shell %q", shell)
 	}
-	return shell + " -lc " + shellQuote(inner), nil
+	command := shell + " -lc " + shellQuote(inner)
+	// Run the remote shell in a dedicated session/process group when setsid is
+	// available. The wrapper has no stdout marker, keeps the command's exit
+	// status, and turns a signal delivered to the session leader into a group
+	// termination. The fallback preserves compatibility with minimal images;
+	// callers must treat termination as unconfirmed in that mode.
+	groupWrapper := strings.Join([]string{
+		`trap 'trap - INT TERM HUP; kill -TERM -- -$$ 2>/dev/null' INT TERM HUP`,
+		command + " & child=$!",
+		`wait "$child"`,
+	}, "; ")
+	recovery := RemoteProcessRecovery{}
+	jobToken := strings.TrimSpace(req.Context.BackgroundJobID)
+	if !isSafeRemoteJobToken(jobToken) {
+		jobToken = fmt.Sprintf("process-%d", atomic.AddUint64(&linuxRemoteRecoverySequence, 1))
+	}
+	pidFile := remoteJobPIDFile(jobToken)
+	recovery = RemoteProcessRecovery{TargetID: cfg.ID, JobToken: jobToken, PIDFile: pidFile}
+	groupWrapper = strings.Join([]string{
+		"printf '%s|%s\\n' \"$$\" " + shellQuote(jobToken) + " > " + shellQuote(pidFile) + " || exit 125",
+		"trap 'trap - INT TERM HUP; kill -TERM -- -$$ 2>/dev/null; rm -f " + pidFile + "' INT TERM HUP",
+		"trap 'rm -f " + pidFile + "' EXIT",
+		command + " & child=$!",
+		`wait "$child"`,
+	}, "; ")
+	fallbackWrapper := strings.Join([]string{
+		"trap 'trap - INT TERM HUP; kill -TERM -- -$$ 2>/dev/null; kill -TERM \"$child\" 2>/dev/null; rm -f " + pidFile + "' INT TERM HUP",
+		command + " & child=$!",
+		`wait "$child"`,
+	}, "; ")
+	wrapped := strings.Join([]string{
+		"printf '%s|%s\\n' \"$$\" " + shellQuote(jobToken) + " > " + shellQuote(pidFile) + " || exit 125",
+		"trap 'rm -f " + pidFile + "' EXIT",
+		"if command -v setsid >/dev/null 2>&1; then exec setsid sh -c " + shellQuote(groupWrapper) + "; else " + fallbackWrapper + "; fi",
+	}, "; ")
+	return wrapped, "setsid_or_fallback", recovery, nil
+}
+
+func isSafeRemoteJobToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	for _, r := range token {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func remoteJobPIDFile(jobToken string) string {
+	return "/tmp/dagents-job-" + jobToken + ".pid"
 }
 
 func shellQuote(value string) string {
@@ -588,26 +1070,34 @@ func validEnvName(value string) bool {
 }
 
 type linuxProcess struct {
-	mu        sync.Mutex
-	id        string
-	client    *ssh.Client
-	session   *ssh.Session
-	agentConn net.Conn
-	command   string
-	ctx       ExecutionContext
-	sink      ProcessEventSink
-	seq       uint64
-	started   bool
-	closed    bool
-	stdout    io.Reader
-	stderr    io.Reader
-	stdoutSet bool
-	stderrSet bool
-	stdoutOut io.Writer
-	stderrOut io.Writer
-	eventMu   sync.Mutex
-	exitMu    sync.RWMutex
-	exit      *ExitStatus
+	mu               sync.Mutex
+	id               string
+	provider         *LinuxShellProvider
+	client           *ssh.Client
+	session          *ssh.Session
+	agentConn        net.Conn
+	command          string
+	ctx              ExecutionContext
+	sink             ProcessEventSink
+	seq              uint64
+	started          bool
+	closed           bool
+	stdout           io.Reader
+	stderr           io.Reader
+	stdoutSet        bool
+	stderrSet        bool
+	stdoutOut        io.Writer
+	stderrOut        io.Writer
+	eventMu          sync.Mutex
+	outputBytes      int64
+	processGroupMode string
+	remoteRecovery   RemoteProcessRecovery
+	terminationMu    sync.RWMutex
+	terminationState string
+	exitMu           sync.RWMutex
+	exit             *ExitStatus
+	releaseSlot      func()
+	releaseOnce      sync.Once
 }
 
 func (p *linuxProcess) ID() string {
@@ -692,6 +1182,7 @@ func (p *linuxProcess) Start() error {
 	}
 	p.mu.Unlock()
 	if err := p.session.Start(p.command); err != nil {
+		_ = p.Close()
 		return err
 	}
 	p.emit(ProcessEventStarted, "", nil, nil)
@@ -729,10 +1220,76 @@ func (p *linuxProcess) Terminate(_ context.Context) error {
 		return nil
 	}
 	if p.ExitStatus() != nil {
+		p.setTerminationState("confirmed")
 		return nil
 	}
+	p.terminationMu.Lock()
+	p.terminationState = "requested"
+	p.terminationMu.Unlock()
 	p.emit(ProcessEventTerminateRequested, "", nil, nil)
-	return p.Close()
+
+	p.mu.Lock()
+	session := p.session
+	closed := p.closed
+	p.mu.Unlock()
+	if closed {
+		p.setTerminationState("unknown")
+		return nil
+	}
+	var signalErr error
+	if session != nil {
+		// SIGINT gives the remote wrapper a chance to clean up the complete
+		// process group before the SSH close fallback below.
+		signalErr = session.Signal(ssh.SIGINT)
+	}
+	closeErr := p.Close()
+	if p.provider != nil && p.remoteRecovery.JobToken != "" {
+		// The original SSH session is intentionally closed before reconnecting:
+		// the confirmation channel must not share a possibly half-closed session
+		// with the process being terminated. This also covers a remote shell that
+		// ignored SIGINT or detached its child after the first channel closed.
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		remoteStatus, recoveryErr := p.provider.RecoverRemoteProcess(recoveryCtx, p.ctx.AgentID, p.remoteRecovery)
+		cancel()
+		if recoveryErr == nil {
+			switch remoteStatus {
+			case "force_terminated":
+				p.setTerminationState("force_terminated")
+			case "terminated", "not_running":
+				p.setTerminationState("confirmed")
+			default:
+				p.setTerminationState("unknown")
+			}
+			return closeErr
+		}
+	}
+	p.setTerminationState("unknown")
+	if signalErr != nil {
+		return fmt.Errorf("remote termination signal was not acknowledged: %w", signalErr)
+	}
+	return closeErr
+}
+
+func (p *linuxProcess) setTerminationState(state string) {
+	p.terminationMu.Lock()
+	p.terminationState = state
+	p.terminationMu.Unlock()
+}
+
+func (p *linuxProcess) TerminationState() string {
+	if p == nil {
+		return ""
+	}
+	p.terminationMu.RLock()
+	defer p.terminationMu.RUnlock()
+	return p.terminationState
+}
+
+func (p *linuxProcess) RemoteProcessRecovery() (RemoteProcessRecovery, bool) {
+	if p == nil || p.remoteRecovery.JobToken == "" || p.remoteRecovery.PIDFile == "" {
+		return RemoteProcessRecovery{}, false
+	}
+	return p.remoteRecovery, true
 }
 
 func (p *linuxProcess) Close() error {
@@ -761,6 +1318,11 @@ func (p *linuxProcess) Close() error {
 	if agentConn != nil {
 		_ = agentConn.Close()
 	}
+	p.releaseOnce.Do(func() {
+		if p.releaseSlot != nil {
+			p.releaseSlot()
+		}
+	})
 	return first
 }
 
@@ -774,7 +1336,19 @@ func (p *linuxProcess) emit(kind ProcessEventType, stream string, data []byte, e
 	if len(data) > 0 {
 		data = append([]byte(nil), data...)
 	}
-	p.sink(ProcessEvent{Type: kind, ProcessID: p.id, Seq: seq, Context: p.ctx, Stream: stream, Data: data, Exit: exit})
+	if kind == ProcessEventOutput {
+		p.outputBytes += int64(len(data))
+	}
+	p.sink(ProcessEvent{
+		Type:        kind,
+		ProcessID:   p.id,
+		Seq:         seq,
+		Context:     p.ctx,
+		Stream:      stream,
+		Data:        data,
+		OutputBytes: p.outputBytes,
+		Exit:        exit,
+	})
 }
 
 func linuxExitStatus(err error) *ExitStatus {

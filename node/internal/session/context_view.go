@@ -9,22 +9,36 @@ import (
 
 // ContextView 为 GET /v1/agents/{id}/context 的聚合视图。
 type ContextView struct {
-	SessionID             string
-	MessagesCount         int
-	MessagesTotalTokens   int
-	PendingToolCallsCount int
-	ToolLoopCount         int
-	LoadedSkills          []skills.LoadedSkill
-	QueuePending          int
-	HasActiveTurn         bool
-	TurnState             turn.State
-	SystemPrompt          string
-	SystemPromptEstimatedTokens  int
-	SkillsCatalogEstimatedTokens      int
+	SessionID                           string
+	MessagesCount                       int
+	MessagesTotalTokens                 int
+	PendingToolCallsCount               int
+	ToolLoopCount                       int
+	LoadedSkills                        []skills.LoadedSkill
+	QueuePending                        int
+	HasActiveTurn                       bool
+	TurnID                              string
+	StepID                              string
+	StepIndex                           int
+	ContextEpoch                        int
+	TurnStatus                          turn.TurnStatus
+	TurnEndReason                       string
+	StepStatus                          turn.StepStatus
+	StepEndReason                       string
+	TurnGeneration                      uint64
+	RuntimeRevision                     int64
+	RuntimeDigest                       string
+	PromptDigest                        string
+	ToolDigest                          string
+	RecoveryRequired                    bool
+	TurnState                           turn.State
+	SystemPrompt                        string
+	SystemPromptEstimatedTokens         int
+	SkillsCatalogEstimatedTokens        int
 	SkillsCatalogMaxBodyEstimatedTokens int
-	SkillsCatalogBloatThreshold       int
-	Messages              []llm.Message
-	LastCompression       *compression.LastCompressionSnapshot
+	SkillsCatalogBloatThreshold         int
+	Messages                            []llm.Message
+	LastCompression                     *compression.LastCompressionSnapshot
 }
 
 func enrichContextPromptStats(view *ContextView, catalog *skills.Catalog) {

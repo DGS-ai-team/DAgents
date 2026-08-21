@@ -12,12 +12,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"golang.org/x/crypto/ssh"
 )
 
 type testLinuxResolver struct {
 	channel    LinuxChannelConfig
 	credential LinuxCredential
+}
+
+type testLinuxBindingResolver struct {
+	binding LinuxChannelBinding
+}
+
+func (r testLinuxBindingResolver) ResolveLinuxBinding(context.Context, string, string) (LinuxChannelBinding, error) {
+	return r.binding, nil
 }
 
 func (r testLinuxResolver) ResolveLinuxChannel(context.Context, string) (LinuxChannelConfig, error) {
@@ -48,6 +57,139 @@ func TestLinuxShellProviderValidatesStrictTargetAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestLinuxShellProviderEnforcesBindingCommandPolicy(t *testing.T) {
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "prod", Host: "127.0.0.1", Port: 22, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "SHA256:test", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "secret", nil }).WithBindingResolver(testLinuxBindingResolver{
+		binding: LinuxChannelBinding{
+			AgentID: "agent-1", ChannelID: "prod", Enabled: true,
+			AllowedCommands: []string{"git *"}, DeniedCommands: []string{"git push *"},
+		},
+	})
+	if _, err := provider.Start(context.Background(), ExecRequest{
+		Target:  ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "prod"},
+		Context: ExecutionContext{AgentID: "agent-1"}, Command: "git push origin main",
+	}); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("expected denied command, got %v", err)
+	}
+	if _, err := provider.Start(context.Background(), ExecRequest{
+		Target:  ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "prod"},
+		Context: ExecutionContext{AgentID: "agent-1"}, Command: "uname -a",
+	}); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("expected allow-list rejection, got %v", err)
+	}
+}
+
+func TestLinuxShellProviderPreflightAppliesBindingApproval(t *testing.T) {
+	resolver := testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "prod", Host: "127.0.0.1", Port: 22, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "SHA256:test", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "secret", Enabled: true},
+	}
+	provider := NewLinuxShellProvider(resolver, nil).WithBindingResolver(testLinuxBindingResolver{
+		binding: LinuxChannelBinding{AgentID: "agent-1", ChannelID: "prod", Enabled: true, ApprovalMode: "require_approval"},
+	})
+	action, reason, err := provider.Preflight(context.Background(), "agent-1", "prod", "git status")
+	if err != nil || action != policy.ActionRequireApproval || !strings.Contains(reason, "requires approval") {
+		t.Fatalf("unexpected approval preflight: action=%q reason=%q err=%v", action, reason, err)
+	}
+
+	provider = NewLinuxShellProvider(resolver, nil).WithBindingResolver(testLinuxBindingResolver{
+		binding: LinuxChannelBinding{AgentID: "agent-1", ChannelID: "prod", Enabled: true, DeniedCommands: []string{"git push *"}},
+	})
+	action, reason, err = provider.Preflight(context.Background(), "agent-1", "prod", "git push origin main")
+	if err != nil || action != policy.ActionDeny || !strings.Contains(reason, "denied") {
+		t.Fatalf("unexpected denied preflight: action=%q reason=%q err=%v", action, reason, err)
+	}
+}
+
+func TestLinuxShellProviderRejectsUnapprovedStartBeforeSSH(t *testing.T) {
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "prod", Host: "127.0.0.1", Port: 22, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "SHA256:test", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "secret", nil }).WithBindingResolver(testLinuxBindingResolver{
+		binding: LinuxChannelBinding{AgentID: "agent-1", ChannelID: "prod", Enabled: true, ApprovalMode: "require_approval"},
+	})
+	_, err := provider.Start(context.Background(), ExecRequest{
+		Target:  ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "prod"},
+		Context: ExecutionContext{AgentID: "agent-1"},
+		Command: "git status",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires approval") {
+		t.Fatalf("expected pre-SSH approval rejection, got %v", err)
+	}
+}
+
+func TestLinuxShellProviderRejectsUnapprovedTerminalBeforeSSH(t *testing.T) {
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "prod", Host: "127.0.0.1", Port: 22, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "SHA256:test", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "secret", nil }).WithBindingResolver(testLinuxBindingResolver{
+		binding: LinuxChannelBinding{AgentID: "agent-1", ChannelID: "prod", Enabled: true, ApprovalMode: "require_approval"},
+	})
+	_, err := provider.OpenTerminal(context.Background(), TerminalRequest{
+		Target:  ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "prod"},
+		Context: ExecutionContext{AgentID: "agent-1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires approval") {
+		t.Fatalf("expected pre-SSH terminal approval rejection, got %v", err)
+	}
+}
+
+func TestLinuxChannelConcurrencyWaitsAndReleases(t *testing.T) {
+	provider := NewLinuxShellProvider(nil, nil)
+	release, err := provider.acquireChannelSlot(context.Background(), "agent\x00channel", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := provider.acquireChannelSlot(ctx, "agent\x00channel", 1); err == nil {
+		t.Fatal("expected second slot to wait and time out")
+	}
+	release()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	release2, err := provider.acquireChannelSlot(ctx2, "agent\x00channel", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release2()
+}
+
+func TestLinuxShellProviderTestReportsStructuredTCPFailure(t *testing.T) {
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "unreachable", Host: "127.0.0.1", Port: 1, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "SHA256:test",
+			ConnectTimeout: 100 * time.Millisecond, Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "test-secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "secret", nil })
+	status, err := provider.Test(context.Background(), ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "unreachable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Available || status.ErrorCode != "tcp_connect_failed" {
+		t.Fatalf("unexpected failure status: %+v", status)
+	}
+	if len(status.Stages) < 6 || status.Stages[len(status.Stages)-1].Name != "tcp" || status.Stages[len(status.Stages)-1].Status != "failed" {
+		t.Fatalf("expected failed tcp stage, got %+v", status.Stages)
+	}
+}
+
 func TestBuildLinuxRemoteCommandQuotesCWDAndEnvironment(t *testing.T) {
 	command, err := buildLinuxRemoteCommand(LinuxChannelConfig{
 		RemoteShell: "bash", DefaultCWD: "/srv/it's-app",
@@ -68,6 +210,63 @@ func TestBuildLinuxRemoteCommandQuotesCWDAndEnvironment(t *testing.T) {
 		Command: "id", Env: map[string]string{"BAD-NAME": "x"},
 	}); err == nil {
 		t.Fatal("invalid environment name should be rejected")
+	}
+}
+
+func TestBuildLinuxRemoteCommandUsesDedicatedProcessGroupWrapper(t *testing.T) {
+	command, mode, err := buildLinuxRemoteCommandWithMode(LinuxChannelConfig{RemoteShell: "bash"}, ExecRequest{
+		Command: "sleep 10",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "setsid_or_fallback" {
+		t.Fatalf("process group mode=%q", mode)
+	}
+	for _, part := range []string{"command -v setsid", "exec setsid sh -c", "else", "kill -TERM", "\"$child\"", "sleep 10"} {
+		if !strings.Contains(command, part) {
+			t.Fatalf("remote command missing %q: %s", part, command)
+		}
+	}
+}
+
+func TestBuildLinuxRemoteCommandPersistsTokenForBackgroundRecovery(t *testing.T) {
+	command, _, recovery, err := buildLinuxRemoteCommandWithRecovery(LinuxChannelConfig{ID: "prod", RemoteShell: "bash"}, ExecRequest{
+		Command: "sleep 10",
+		Context: ExecutionContext{BackgroundJobID: "job-a1b2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovery.TargetID != "prod" || recovery.JobToken != "job-a1b2" || recovery.PIDFile != remoteJobPIDFile("job-a1b2") {
+		t.Fatalf("recovery=%+v", recovery)
+	}
+	for _, part := range []string{"printf", recovery.JobToken, recovery.PIDFile} {
+		if !strings.Contains(command, part) {
+			t.Fatalf("remote command missing %q: %s", part, command)
+		}
+	}
+}
+
+func TestBuildLinuxRemoteCommandCreatesRecoveryForSynchronousExecution(t *testing.T) {
+	_, _, recovery, err := buildLinuxRemoteCommandWithRecovery(LinuxChannelConfig{ID: "prod", RemoteShell: "bash"}, ExecRequest{
+		Command: "sleep 1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovery.TargetID != "prod" || recovery.JobToken == "" || !isSafeRemoteJobToken(recovery.JobToken) {
+		t.Fatalf("recovery=%+v", recovery)
+	}
+	if recovery.PIDFile != remoteJobPIDFile(recovery.JobToken) {
+		t.Fatalf("recovery pid file=%q", recovery.PIDFile)
+	}
+}
+
+func TestFormatLinuxExecResultReportsUnknownTermination(t *testing.T) {
+	result := formatLinuxExecResult(nil, nil, &ExitStatus{Code: 1}, context.Canceled, false, "unknown")
+	if !strings.Contains(result, "termination_status: unknown") {
+		t.Fatalf("termination status missing: %q", result)
 	}
 }
 
@@ -117,6 +316,14 @@ func TestLinuxShellProviderRunsAgainstTestSSHServer(t *testing.T) {
 	if err != nil || !status.Available {
 		t.Fatalf("connection test status=%+v err=%v", status, err)
 	}
+	if len(status.Stages) != 10 {
+		t.Fatalf("expected structured test stages, got %+v", status.Stages)
+	}
+	for _, stage := range status.Stages {
+		if stage.Status != "passed" {
+			t.Fatalf("stage failed: %+v", status.Stages)
+		}
+	}
 	process, err := provider.Start(context.Background(), ExecRequest{
 		Target:  ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "test"},
 		Command: "printf remote-ok",
@@ -153,6 +360,45 @@ func TestLinuxShellProviderRunsAgainstTestSSHServer(t *testing.T) {
 	}
 	if err := process.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLinuxShellProviderReportsUnknownHostKeyFingerprint(t *testing.T) {
+	addr, fingerprint := startTestSSHServer(t)
+	host, portText, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portText, "%d", &port); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "unknown-key", Host: host, Port: port, Username: "test-user",
+			CredentialID: "cred", HostKeyPolicy: "known_hosts", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "test-secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "test-password", nil }).WithHostKeyResolver(
+		func(context.Context, LinuxChannelConfig) (ssh.HostKeyCallback, error) {
+			return func(string, net.Addr, ssh.PublicKey) error {
+				return fmt.Errorf("knownhosts: key is unknown")
+			}, nil
+		},
+	)
+	status, err := provider.Test(context.Background(), ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "unknown-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Available || status.ErrorCode != "host_key_unknown" {
+		t.Fatalf("unexpected unknown-key status: %+v", status)
+	}
+	if status.HostKeyFingerprint != fingerprint {
+		t.Fatalf("fingerprint=%q want=%q", status.HostKeyFingerprint, fingerprint)
+	}
+	last := status.Stages[len(status.Stages)-1]
+	if last.Name != "ssh_handshake" || last.Code != "host_key_unknown" {
+		t.Fatalf("unexpected failed stage: %+v", last)
 	}
 }
 

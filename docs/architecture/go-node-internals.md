@@ -33,7 +33,8 @@ flowchart TB
                 direction LR
                 Q["L3 · queue.MessageQueue<br/>优先级入队 / 出队"]
                 LOOP["consumeLoop<br/>（goroutine）"]
-                STATE["会话状态<br/>messages · pending HITL<br/>toolLoopCount · loadedSkills"]
+                STATE["会话数据/兼容视图<br/>messages · loadedSkills"]
+                COORD["turn.Coordinator<br/>Turn/Step 生命周期投影"]
                 ORCH["L3 · turn.Orchestrator<br/>字段 orch"]
             end
 
@@ -47,6 +48,7 @@ flowchart TB
             RT --> Q
             RT --> LOOP
             RT --> STATE
+            RT --> COORD
             RT --> ORCH
             RT --> STORE
             RT --> COMP
@@ -125,7 +127,8 @@ HTTP / CLI（internal/api）
         ▼
   session.Manager  ──sessions[id]──►  runtime × N
                                         ├─ MessageQueue + consumeLoop
-                                        ├─ messages / pending / skills
+                                        ├─ messages / skills
+                                        ├─ turn.Coordinator（Turn/Step 投影）
                                         ├─ store · compression · catalog
                                         └─ orch *Orchestrator ──► LLM · Tools · Hub
 ```
@@ -140,7 +143,7 @@ HTTP / CLI（internal/api）
 | 层级 | 包 / 类型 | 职责 |
 |------|-----------|------|
 | **会话表** | `session.Manager` | 创建/恢复/删除 session；对外入队 API；skills 管理；子 Agent `SpawnChild`（`manager_child.go`） |
-| **会话运行时** | `session.runtime` | 每 session 独立队列与 consumer；维护 messages、HITL、tool 循环计数；步前压缩；SQLite 持久化 |
+| **会话运行时** | `session.runtime` | 每 session 独立队列与 consumer；维护 messages/skills 与执行边界；步前压缩；SQLite 持久化 |
 | **消息队列** | `queue.MessageQueue` | 进程内优先级队列；**无内嵌 consumer**（与 Python v1 相同约定） |
 | **Turn 编排** | `turn.Orchestrator` | 单步：system prompt → LLM 流式 → 工具分流/执行 → SSE；`tool_result` 续跑由 runtime 再次调用 |
 
@@ -204,14 +207,13 @@ side_effect_continue(-1) = tool_result(-1) > human(0) > resume(1) > async_comple
 2. `rt.orch = turn.NewOrchestrator(...)`
 3. `rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)`
 
-### 5.2 内存状态（runtime 权威）
+### 5.2 内存状态与生命周期权威
 
 | 字段 | 说明 |
 |------|------|
 | `messages` | OpenAI 格式对话历史 |
-| `pending` | 等待 HITL 的 `PendingHITL` |
-| `toolLoopCount` | 当前 human message 链上的工具步计数 |
-| `state` | `idle` / `model_streaming` / `awaiting_tool` |
+| `turnCoordinator` | Turn/Step、HITL、工具执行事实、StepIndex、generation 与恢复栅栏的唯一权威 |
+| `pending` / `toolLoopCount` / `state` | 不再是 runtime 字段；由 Coordinator 投影为兼容 API 视图。旧 SQLite 字段只用于迁移旧数据库 |
 | `loadedSkills` | 已加载 skill 元数据（持久化到 SQLite，子 session 不持久化） |
 
 Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。

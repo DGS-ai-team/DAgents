@@ -13,13 +13,11 @@ import ToolGroupRow from "./ToolGroupRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { groupConsecutiveToolSteps } from "../utils/streamDisplay.js";
 import { extractToolApprovals } from "../stores/hitl.js";
-import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
+import { hasStreamingTextContent } from "../stores/transcript.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
 import { statusStore, statusPhaseOrder, hasStatus, formatStatusText } from "../stores/statusLines.js";
-import { transcriptStore } from "../stores/transcript.js";
-import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import { countNewStreamItems } from "../utils/streamUnread.js";
 import { toolStepIsInProgress } from "../utils/toolUserLabel.js";
 import {
@@ -35,6 +33,11 @@ import {
 } from "../utils/filePathPaste.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
+import {
+  canSubmitComposer,
+  hasPendingUserInformation,
+  shouldShowCancel,
+} from "../utils/composerState.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
@@ -231,7 +234,6 @@ const activeStatusPhases = computed(() => {
   return statusPhaseOrder.filter((phase) => {
     if (!hasStatus(phase)) return false;
     if (hasActiveToolStep.value) return false;
-    if (phase === "thinking" && hasStreamingKind("reasoning")) return false;
     if (phase === "prefilling" && hasStreamingTextContent()) return false;
     return true;
   });
@@ -281,27 +283,33 @@ const composerPlaceholder = computed(() =>
   props.sending ? "本轮执行中，可先编辑下一条消息…" : "输入消息，或向助手提问…",
 );
 
-const activitySnap = computed(() => deriveActivityFromTranscript(transcriptStore.entries));
-const activityFileCount = computed(() => activitySnap.value.file_count || 0);
-const activityCmdCount = computed(() => activitySnap.value.command_count || 0);
-const showActivityPill = computed(() => activityFileCount.value > 0 || activityCmdCount.value > 0);
-
 function openActivityRail() {
   emit("open-activity");
 }
 
-const showCancel = computed(() => props.sending && !props.hitlBusy);
+const hasUserInformationHITL = computed(() => hasPendingUserInformation(props.hitlQueue));
+const showCancel = computed(() =>
+  shouldShowCancel({
+    sending: props.sending,
+    hitlBusy: props.hitlBusy,
+    hasUserInformation: hasUserInformationHITL.value,
+  }),
+);
 const multimodalEnabled = computed(() => {
   if (typeof chromeStore.llmSettings?.multimodal_enabled === "boolean") {
     return chromeStore.llmSettings.multimodal_enabled;
   }
   return Boolean(chromeStore.agentInfo?.multimodal_enabled);
 });
-const canSubmit = computed(
-  () =>
-    !props.disabled &&
-    !props.sending &&
-    (!!input.value.trim() || pendingImages.value.length > 0 || pendingFiles.value.length > 0),
+const canSubmit = computed(() =>
+  canSubmitComposer({
+    disabled: props.disabled,
+    cancelling: props.cancelling,
+    sending: props.sending,
+    hitlBusy: props.hitlBusy,
+    hasUserInformation: hasUserInformationHITL.value,
+    hasContent: !!input.value.trim() || pendingImages.value.length > 0 || pendingFiles.value.length > 0,
+  }),
 );
 
 function resizeTextarea() {
@@ -410,7 +418,7 @@ function buildContentParts(text, images) {
 /** 消息/HITL/状态条等内容变化指纹；流式 assistant 改 text 长度也会触发。 */
 const tailContentKey = computed(() => {
   return measureSync("tail.key", () => {
-    const parts = [stream.value.length, props.hitlQueue.length, activeStatusPhases.value.length];
+    const parts = [stream.value.length, props.hitlQueue.length];
     for (const entry of props.entries) {
       parts.push(entry.id, entry.kind, (entry.text || "").length, entry.streaming ? 1 : 0);
       // 工具气泡内容在 data 上，text 常为空；纳入 summary / content 长度以免漏钉尾
@@ -550,7 +558,7 @@ async function submit() {
   const text = input.value.trim();
   const images = pendingImages.value.slice();
   const files = pendingFiles.value.slice();
-  if ((!text && !images.length && !files.length) || props.disabled || props.sending) return;
+  if (!canSubmit.value) return;
   scrollToTail();
   const messageText = buildMessageWithFileReferences(
     text,
@@ -574,9 +582,9 @@ function onCancel() {
 
 function onKeydown(e) {
   if (e.key === "Enter" && !e.shiftKey) {
-    // 本轮执行中允许用户继续编辑下一条草稿，Enter 在此时插入换行，避免
-    // 看起来像发送成功但实际上被 turn gate 静默拦截。
-    if (props.sending) return;
+    // 普通 Turn 执行中允许继续编辑下一条草稿；但队首是 user_information
+    // 时，输入框承担 HITL 回答提交职责，必须允许 Enter 触发 resume。
+    if (props.sending && !hasUserInformationHITL.value) return;
     e.preventDefault();
     submit();
   }
@@ -743,11 +751,6 @@ defineExpose({
           @cancel="emit('memory-conflict-cancel', item.hitlIndex)"
         />
       </template>
-      <StreamStatusBubble
-        v-for="phase in activeStatusPhases"
-        :key="`status-${phase}`"
-        :phase="phase"
-      />
       </div>
       <ScrollToTailButton
         :visible="showScrollToTail"
@@ -945,17 +948,12 @@ defineExpose({
 
       <div class="chat__composer-statusline" aria-live="polite">
         <div class="chat__composer-statusline-left">
-          <button
-            v-if="showActivityPill"
-            type="button"
-            class="chat__activity-pill"
-            title="打开变更与上下文"
-            @click="openActivityRail"
-          >
-            <span class="chat__activity-pill-label">Changes</span>
-            <span v-if="activityFileCount" class="chat__activity-pill-add">+{{ activityFileCount }}</span>
-            <span v-if="activityCmdCount" class="chat__activity-pill-cmd">{{ activityCmdCount }} cmd</span>
-          </button>
+          <StreamStatusBubble
+            v-for="phase in activeStatusPhases"
+            :key="`status-${phase}`"
+            :phase="phase"
+            inline
+          />
           <span
             v-if="runningJobCount > 0"
             class="chat__activity-pill chat__activity-pill--static"

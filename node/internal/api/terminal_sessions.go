@@ -269,6 +269,7 @@ func (s *terminalSession) terminate(ctx context.Context) (tools.TerminalOutput, 
 	if s.hasExited() {
 		out := s.snapshotOutput(0, terminalReplayBytes, true)
 		out.Graceful = true
+		out.TerminationStatus = "confirmed"
 		return out, nil
 	}
 
@@ -290,14 +291,30 @@ func (s *terminalSession) terminate(ctx context.Context) (tools.TerminalOutput, 
 			out := s.snapshotOutput(0, terminalReplayBytes, true)
 			out.Graceful = false
 			out.Forced = true
+			out.TerminationStatus = "unknown"
 			return out, forceErr
 		}
-		s.waitForExitWithin(terminalForceWait)
+		if !s.waitForExitWithin(terminalForceWait) {
+			out := s.snapshotOutput(0, terminalReplayBytes, true)
+			out.Graceful = false
+			out.Forced = true
+			out.TerminationStatus = "unknown"
+			return out, nil
+		}
 	}
 
 	out := s.snapshotOutput(0, terminalReplayBytes, true)
 	out.Graceful = graceful
 	out.Forced = forced
+	if out.Exited {
+		if forced {
+			out.TerminationStatus = "force_terminated"
+		} else {
+			out.TerminationStatus = "confirmed"
+		}
+	} else {
+		out.TerminationStatus = "unknown"
+	}
 	return out, nil
 }
 

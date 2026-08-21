@@ -18,6 +18,62 @@ type fakeTerminalBroker struct {
 	terminated bool
 }
 
+type fakeTerminalConfigResolver struct {
+	config TerminalConfigInfo
+	err    error
+}
+
+func (r fakeTerminalConfigResolver) ListTerminalConfigs(context.Context, string) ([]TerminalConfigInfo, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return []TerminalConfigInfo{r.config}, nil
+}
+
+func (r fakeTerminalConfigResolver) ResolveTerminalConfig(context.Context, string, string) (TerminalConfigInfo, error) {
+	if r.err != nil {
+		return TerminalConfigInfo{}, r.err
+	}
+	return r.config, nil
+}
+
+func TestResolveLinuxChannelIDUsesTerminalConfigBinding(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetAgentID("agent-config-test")
+	reg.SetTerminalConfigResolver(fakeTerminalConfigResolver{config: TerminalConfigInfo{
+		ConfigID:   TerminalConfigLinuxPrefix + "channel-prod",
+		TargetKind: executionTargetLinuxChannel,
+		TargetID:   "channel-prod",
+	}})
+
+	got, err := reg.resolveLinuxChannelID(context.Background(), TerminalConfigLinuxPrefix+"channel-prod")
+	if err != nil || got != "channel-prod" {
+		t.Fatalf("resolved channel=%q err=%v", got, err)
+	}
+	legacy, err := reg.resolveLinuxChannelID(context.Background(), "channel-legacy")
+	if err != nil || legacy != "channel-legacy" {
+		t.Fatalf("legacy channel=%q err=%v", legacy, err)
+	}
+}
+
+func TestResolveLinuxChannelIDRejectsNonLinuxConfig(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetTerminalConfigResolver(fakeTerminalConfigResolver{config: TerminalConfigInfo{
+		ConfigID:   TerminalConfigLinuxPrefix + "wrong-target",
+		TargetKind: executionTargetLocal,
+		TargetID:   executionTargetLocal,
+	}})
+	if _, err := reg.resolveLinuxChannelID(context.Background(), TerminalConfigLinuxPrefix+"wrong-target"); err == nil || !strings.Contains(err.Error(), "not a Linux channel") {
+		t.Fatalf("expected non-Linux config rejection, got %v", err)
+	}
+}
+
 func (b *fakeTerminalBroker) Open(_ context.Context, agentID string, request TerminalRequest) (TerminalSessionInfo, error) {
 	b.opened++
 	b.request = request
@@ -36,7 +92,7 @@ func (b *fakeTerminalBroker) Input(_ context.Context, _, _ string, data []byte) 
 }
 func (b *fakeTerminalBroker) Terminate(context.Context, string, string) (TerminalOutput, error) {
 	b.terminated = true
-	return TerminalOutput{Chunks: []TerminalOutputChunk{{Seq: 2, Data: []byte("stopped\r\n")}}, NextSeq: 2, Exited: true, Graceful: true}, nil
+	return TerminalOutput{Chunks: []TerminalOutputChunk{{Seq: 2, Data: []byte("stopped\r\n")}}, NextSeq: 2, Exited: true, Graceful: true, TerminationStatus: "confirmed"}, nil
 }
 
 func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
@@ -102,7 +158,7 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	if err := json.Unmarshal([]byte(terminated), &terminatedPayload); err != nil {
 		t.Fatal(err)
 	}
-	if terminatedPayload["output"] != "stopped\r\n" || terminatedPayload["graceful"] != true {
+	if terminatedPayload["output"] != "stopped\r\n" || terminatedPayload["graceful"] != true || terminatedPayload["termination_status"] != "confirmed" {
 		t.Fatalf("terminated=%s", terminated)
 	}
 }

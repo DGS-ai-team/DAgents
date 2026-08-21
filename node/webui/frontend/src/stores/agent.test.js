@@ -14,6 +14,7 @@ vi.mock("../api/node.js", () => ({
 let agentStore;
 let markEventApplied;
 let resetEventTracking;
+let applyHydrateSeqHint;
 let ackAgentAfterHydrate;
 let shouldAckSSEEvent;
 let transcriptStore;
@@ -25,6 +26,7 @@ beforeAll(async () => {
   agentStore = mod.agentStore;
   markEventApplied = mod.markEventApplied;
   resetEventTracking = mod.resetEventTracking;
+  applyHydrateSeqHint = mod.applyHydrateSeqHint;
   ackAgentAfterHydrate = mod.ackAgentAfterHydrate;
   shouldAckSSEEvent = mod.shouldAckSSEEvent;
   transcriptStore = (await import("./transcript.js")).transcriptStore;
@@ -88,5 +90,19 @@ describe("agent ack", () => {
     ackAgentAfterHydrate(42);
     await Promise.resolve();
     expect(api.postAgentAck).toHaveBeenCalledWith("agt-test", 42);
+  });
+
+  it("resets the SSE sequence watermark after a Node restart", () => {
+    transcriptStore.lastSeq = 45;
+    applyHydrateSeqHint(0);
+    expect(transcriptStore.lastSeq).toBe(0);
+    expect(agentStore.seqFence).toBe(0);
+  });
+
+  it("switches to a lower sequence watermark when the stream epoch changes", () => {
+    transcriptStore.lastSeq = 45;
+    applyHydrateSeqHint(12);
+    expect(transcriptStore.lastSeq).toBe(12);
+    expect(agentStore.seqFence).toBe(12);
   });
 });

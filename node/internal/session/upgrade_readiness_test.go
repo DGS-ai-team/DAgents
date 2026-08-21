@@ -2,8 +2,6 @@ package session
 
 import (
 	"testing"
-
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func TestUpgradeReadiness_idle(t *testing.T) {
@@ -27,9 +25,9 @@ func TestUpgradeReadiness_activeTurn(t *testing.T) {
 	if rt == nil {
 		t.Fatal("runtime missing")
 	}
-	rt.mu.Lock()
-	rt.state = turn.StateModelStreaming
-	rt.mu.Unlock()
+	if err := rt.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
 
 	got := m.UpgradeReadiness()
 	if got.Ready || !got.HasActiveTurn || got.ActiveTurnCount != 1 {

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,54 +63,32 @@ func normalizeLocalTerminalRequest(req TerminalRequest) (TerminalRequest, error)
 	return req, nil
 }
 
-func localEnvironment(extra map[string]string) []string {
-	if len(extra) == 0 {
-		return nil
-	}
-	env := os.Environ()
-	values := make(map[string]string, len(env)+len(extra))
-	for _, item := range env {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			values[key] = value
-		}
-	}
-	for key, value := range extra {
-		values[key] = value
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	result := make([]string, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, key+"="+values[key])
-	}
-	return result
+func localEnvironment(extra map[string]string, policy EnvironmentPolicy) ([]string, error) {
+	return buildShellEnvironment(extra, policy)
 }
 
 type localTerminal struct {
-	mu        sync.Mutex
-	inputMu   sync.Mutex
-	id        string
-	input     io.Writer
-	output    io.Reader
-	startFn   func() error
-	waitFn    func() (*ExitStatus, error)
-	closeFn   func() error
-	resizeFn  func(rows, cols int) error
-	ctx       ExecutionContext
-	sink      ProcessEventSink
-	seq       uint64
-	started   bool
-	closed    bool
-	outputGot bool
-	waitOnce  sync.Once
-	waitErr   error
-	exitMu    sync.RWMutex
-	exit      *ExitStatus
-	eventMu   sync.Mutex
+	mu          sync.Mutex
+	inputMu     sync.Mutex
+	id          string
+	input       io.Writer
+	output      io.Reader
+	startFn     func() error
+	waitFn      func() (*ExitStatus, error)
+	closeFn     func() error
+	resizeFn    func(rows, cols int) error
+	ctx         ExecutionContext
+	sink        ProcessEventSink
+	seq         uint64
+	started     bool
+	closed      bool
+	outputGot   bool
+	waitOnce    sync.Once
+	waitErr     error
+	exitMu      sync.RWMutex
+	exit        *ExitStatus
+	eventMu     sync.Mutex
+	outputBytes int64
 }
 
 func newLocalTerminal(req TerminalRequest, input io.Writer, output io.Reader, startFn func() error, waitFn func() (*ExitStatus, error), closeFn func() error, resizeFn func(rows, cols int) error, sink ProcessEventSink) *localTerminal {
@@ -320,7 +296,19 @@ func (t *localTerminal) emit(kind ProcessEventType, stream string, data []byte, 
 	if len(data) > 0 {
 		data = append([]byte(nil), data...)
 	}
-	t.sink(ProcessEvent{Type: kind, ProcessID: t.id, Seq: seq, Context: t.ctx, Stream: stream, Data: data, Exit: exit})
+	if kind == ProcessEventOutput {
+		t.outputBytes += int64(len(data))
+	}
+	t.sink(ProcessEvent{
+		Type:        kind,
+		ProcessID:   t.id,
+		Seq:         seq,
+		Context:     t.ctx,
+		Stream:      stream,
+		Data:        data,
+		OutputBytes: t.outputBytes,
+		Exit:        exit,
+	})
 }
 
 type localTerminalReader struct {

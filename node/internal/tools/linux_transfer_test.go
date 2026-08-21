@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,31 @@ func TestStrictTransferPathRequiresWorkspaceRelativePath(t *testing.T) {
 	}
 }
 
+func TestLinuxTransferRejectsUnapprovedChannelBeforeSFTP(t *testing.T) {
+	root := t.TempDir()
+	localPath := "payload.txt"
+	if err := os.WriteFile(root+string(os.PathSeparator)+localPath, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "prod", Host: "127.0.0.1", Port: 22, Username: "deploy",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "SHA256:test", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "secret", Enabled: true},
+	}, func(context.Context, string) (string, error) { return "secret", nil }).WithBindingResolver(testLinuxBindingResolver{
+		binding: LinuxChannelBinding{AgentID: "agent-1", ChannelID: "prod", Enabled: true, ApprovalMode: "require_approval"},
+	})
+	manager := NewLinuxTransferManager(provider, root, 1, nil)
+	_, err := manager.Submit(context.Background(), LinuxTransferRequest{
+		AgentID: "agent-1", ChannelID: "prod", Direction: "upload",
+		LocalPath: localPath, RemotePath: "/tmp/payload.txt",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires approval") {
+		t.Fatalf("expected pre-SFTP approval rejection, got %v", err)
+	}
+}
+
 func TestLinuxFileTransferToolDefinitions(t *testing.T) {
 	defs := linuxFileTransferToolDefs()
 	if len(defs) != 2 {
@@ -30,10 +56,31 @@ func TestLinuxFileTransferToolDefinitions(t *testing.T) {
 		}
 		params := def.Function.Parameters
 		properties, ok := params["properties"].(map[string]any)
-		if !ok || properties[CallPurposeKey] == nil || properties["channel_id"] == nil {
+		if !ok || properties[CallPurposeKey] == nil || properties["config_id"] == nil {
 			t.Fatalf("tool %q missing common properties: %#v", def.Function.Name, params)
 		}
 	}
+}
+
+func TestLinuxExecToolDefinitionUsesTerminalConfigID(t *testing.T) {
+	params := linuxExecToolDef()[0].Function.Parameters
+	properties, ok := params["properties"].(map[string]any)
+	if !ok || properties["config_id"] == nil || properties["channel_id"] != nil {
+		t.Fatalf("linux_exec should expose config_id only: %#v", params)
+	}
+	required, ok := params["required"].([]string)
+	if !ok || !containsRequiredString(required, "config_id") || !containsRequiredString(required, "command") {
+		t.Fatalf("linux_exec required=%#v", params["required"])
+	}
+}
+
+func containsRequiredString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLinuxTransferRequestValidation(t *testing.T) {

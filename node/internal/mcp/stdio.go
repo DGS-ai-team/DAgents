@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -390,7 +391,7 @@ func resolveEnvironment(refs, literals map[string]string) ([]string, error) {
 	values := make(map[string]string)
 	for _, entry := range os.Environ() {
 		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) == 2 {
+		if len(parts) == 2 && !mcpScrubInheritedEnvironmentName(parts[0]) {
 			values[parts[0]] = parts[1]
 		}
 	}
@@ -399,18 +400,67 @@ func resolveEnvironment(refs, literals map[string]string) ([]string, error) {
 		if name == "" {
 			return nil, fmt.Errorf("mcp literal environment variable name cannot be empty")
 		}
+		if strings.ContainsRune(name, '=') || strings.ContainsRune(name, '\x00') {
+			return nil, fmt.Errorf("mcp literal environment variable name %q is invalid", name)
+		}
+		if strings.ContainsRune(value, '\x00') {
+			return nil, fmt.Errorf("mcp literal environment variable %q contains NUL", name)
+		}
 		values[name] = value
 	}
 	for childName, sourceName := range refs {
-		value, ok := os.LookupEnv(strings.TrimSpace(sourceName))
+		childName = strings.TrimSpace(childName)
+		sourceName = strings.TrimSpace(sourceName)
+		if childName == "" || strings.ContainsRune(childName, '=') || strings.ContainsRune(childName, '\x00') {
+			return nil, fmt.Errorf("mcp environment reference name %q is invalid", childName)
+		}
+		if sourceName == "" || strings.ContainsRune(sourceName, '=') || strings.ContainsRune(sourceName, '\x00') {
+			return nil, fmt.Errorf("mcp environment source name %q is invalid", sourceName)
+		}
+		value, ok := os.LookupEnv(sourceName)
 		if !ok {
 			return nil, fmt.Errorf("mcp environment variable %q is not set", sourceName)
 		}
-		values[strings.TrimSpace(childName)] = value
+		if strings.ContainsRune(value, '\x00') {
+			return nil, fmt.Errorf("mcp environment variable %q contains NUL", sourceName)
+		}
+		values[childName] = value
 	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	env := make([]string, 0, len(values))
-	for name, value := range values {
+	for _, name := range names {
+		value := values[name]
 		env = append(env, name+"="+value)
 	}
 	return env, nil
+}
+
+// mcpScrubInheritedEnvironmentName keeps ordinary runtime variables available
+// to a stdio server while preventing accidental inheritance of Node/API
+// credentials. Explicit env/env_refs entries are applied after this filter and
+// therefore remain available when the MCP server was configured to receive
+// them.
+func mcpScrubInheritedEnvironmentName(name string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(name))
+	if upper == "" {
+		return true
+	}
+	for _, prefix := range []string{"DAGENTS_", "CODEX_"} {
+		if strings.HasPrefix(upper, prefix) {
+			return true
+		}
+	}
+	for _, marker := range []string{
+		"KEY", "PASSWORD", "PASSWD", "SECRET", "TOKEN", "AUTH",
+		"CREDENTIAL", "PRIVATE_KEY", "COOKIE", "DSN", "ACCESS_KEY",
+	} {
+		if strings.Contains(upper, marker) {
+			return true
+		}
+	}
+	return false
 }

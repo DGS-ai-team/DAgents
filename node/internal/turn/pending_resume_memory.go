@@ -17,22 +17,22 @@ func (o *Orchestrator) continueAfterMemoryConflictResume(
 	history *[]llm.Message,
 	resumeValue map[string]any,
 	pending *PendingHITL,
-	toolLoopCount int,
+	stepIndex int,
 ) StepOutcome {
 	items := pending.memoryConflictItems()
 	if len(items) == 0 {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("no pending memory_conflict items")}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("no pending memory_conflict items")}
 	}
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	targetIdx := -1
 	if resumeToolCallID != "" {
 		if _, idx, ok := pending.findItem(resumeToolCallID); ok {
 			if pending.Items[idx].MemoryConflict == nil {
-				return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool_call_id %q is not memory_conflict", resumeToolCallID)}
+				return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("tool_call_id %q is not memory_conflict", resumeToolCallID)}
 			}
 			targetIdx = idx
 		} else {
-			return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unknown tool_call_id: %s", resumeToolCallID)}
+			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("unknown tool_call_id: %s", resumeToolCallID)}
 		}
 	} else if len(items) == 1 {
 		for i, item := range pending.Items {
@@ -42,10 +42,10 @@ func (o *Orchestrator) continueAfterMemoryConflictResume(
 			}
 		}
 	} else {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool_call_id required when multiple memory_conflict pending")}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("tool_call_id required when multiple memory_conflict pending")}
 	}
 	if targetIdx < 0 {
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("missing memory_conflict tool call")}
+		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("missing memory_conflict tool call")}
 	}
 
 	item := pending.Items[targetIdx]
@@ -70,9 +70,9 @@ func (o *Orchestrator) continueAfterMemoryConflictResume(
 
 	remaining := pending.withoutIndex(targetIdx)
 	if remaining == nil {
-		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
-	return StepOutcome{Pending: remaining, LoopCount: toolLoopCount}
+	return StepOutcome{Pending: remaining, StepIndex: stepIndex}
 }
 
 func (o *Orchestrator) applyMemoryConflictDecision(ctx context.Context, decision hitl.MemoryConflictDecision, meta *MemoryConflictMeta) (string, error) {

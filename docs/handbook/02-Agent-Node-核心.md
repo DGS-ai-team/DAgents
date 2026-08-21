@@ -1,5 +1,7 @@
 # 02 · Agent Node 核心
 
+> **当前实现说明（2026-08）**：本章早期示例中的 `setState`、`toolLoopCount` 和 runtime `pending` 是历史写法。当前实现由 `turn.TurnCoordinator` 维护 Turn/Step 生命周期，`TurnExecutionContext` 向 Orchestrator 提供 StepIndex；旧字段仅保留为持久化迁移和 API 兼容镜像。完整落点见 [`turn-step-runtime-implementation-status.md`](../design/turn-step-runtime-implementation-status.md)。
+
 ## 本章回答什么问题
 
 读完本章，你应能（**按推荐顺序**）：
@@ -48,16 +50,14 @@ Node 里 **一步（one step）** = **一次** `llm.StreamChat` 请求 + 将其�
 ### 1.2 跟读 `runOneStep`（建议打开 `orchestrator.go` 对照）
 
 ```text
-runOneStep(ctx, sessionID, history, setState, toolLoopCount)
+runOneStep(ctx, sessionID, history)
   │
   ├─ RepairUnrespondedToolCalls          // 修复 orphan tool_calls
-  ├─ toolLoopCount++                     // 本 user 链上的步序号
-  ├─ 若 > maxToolLoops → error + done    // 默认 16，config 可改
+  ├─ 从 TurnExecutionContext 读取 StepIndex
+  ├─ Coordinator 检查 Step / budget / generation
   │
   ├─ buildSystemPrompt(sessionID)        → prompt.go
   ├─ ToolDefinitions()                   → tools.Registry
-  ├─ setState(model_streaming)
-  │
   ├─ llm.StreamChat(system + history + tools)
   │     OnDelta            → SSE assistant
   │     OnReasoningDelta   → SSE reasoning
@@ -71,7 +71,7 @@ runOneStep(ctx, sessionID, history, setState, toolLoopCount)
   ├─ len(ToolCalls)==0 ?
   │     └─ publishDone(stop)             → SSE done，return
   │
-  └─ setState(awaiting_tool)
+  └─ Coordinator 更新工具/交互状态
         processToolCalls                 → tool_router.go
           ├─ auto      → Execute，SSE tool_result
           ├─ HITL       → PendingHITL.Items[]，SSE hitl_required
@@ -149,7 +149,7 @@ Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补
 ```go
 type StepOutcome struct {
     Pending            *PendingHITL   // 非 nil → 链暂停，等 resume
-    LoopCount          int            // 当前 user 链上已跑步数
+    StepIndex          int            // 当前 Turn 内的 Step 序号
     ScheduleToolResult bool           // true → runtime 入队 tool_result，稍后 RunToolMessageTurn
     Err                error
 }
@@ -180,9 +180,9 @@ consumeLoop 再次出队
 `runTurnStep`（`session/runtime_turn.go`）是 runtime 侧脚手架：
 
 - 可选步前 **压缩**（`compression.MaybeHandle`，仅父 session）  
-- 设置 `turnCancel`、更新 `state`  
+- 设置当前 Step 的执行 context 与 `turnCancel`
 - 调用传入的 `run` 闭包（内部是 `RunHumanMessageTurn` 等）  
-- 步末 `state → idle`  
+- 步末由 Coordinator 写入 Step/Turn 终态
 
 ### 2.4 测试路径：内联多步
 
@@ -202,8 +202,8 @@ consumeLoop 再次出队
 
 ### 2.6 Loop 上限与计数
 
-- `toolLoopCount`：当前 **一条 user 消息** 触发的链上，`runOneStep` 执行次数。  
-- 新 `handleHumanMessage` 时 **归零**。  
+- `StepIndex`：当前 Turn 内的 Step 序号，由 Coordinator 分配并通过 `TurnExecutionContext` 传递。
+- 新 `handleHumanMessage` 时创建新的 Turn；不再由 runtime 归零和递增独立计数器。
 - 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `done` 结束；下一条 user 消息会重置计数。
 
 ### 2.7 源码索引（§2）
@@ -388,7 +388,7 @@ flowchart TB
 |--------------------|----------------------|
 | `MessageQueue` | `llm.Client` |
 | `consumeLoop` goroutine | `tools.Registry` / `policy.Engine` |
-| `messages`、`pending`、`toolLoopCount` | `stream.Hub`（事件带 `session_id`） |
+| `messages`、Coordinator 生命周期投影 | `stream.Hub`（事件带 `session_id`） |
 | `turn.Orchestrator` 实例 | `TurnOptions`（FS 根、压缩阈值等） |
 | 父 session：`SQLiteStore` 持久化 | `agent_id`（单进程单 id） |
 

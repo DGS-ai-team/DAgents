@@ -50,7 +50,7 @@
 | `handleSideEffectProduceAsync` / `handleSideEffectProduceExternal` | 旁路 Produce（缓冲 + SSE） |
 | `handleSideEffectContinue` | 旁路 Apply + 被动 LLM 续跑 |
 | `handleResume` | HITL resume 续跑 |
-| `applyStepOutcome` | 同步 messages / pending / toolLoopCount |
+| `applyStepOutcome` | 同步当前 Step 的 messages；Pending 与步序从 Coordinator 投影读取 |
 | `persist` / `clearMessages` | SQLite 持久化 |
 | `enqueue` | 带优先级入队；高优先级项先出队（见 `queue/README.md`）；`human` 先于 `resume` |
 | `cancelTurn` / `stop` | 取消或停止 consumer |

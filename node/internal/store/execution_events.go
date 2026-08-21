@@ -26,6 +26,8 @@ type ExecutionEventRecord struct {
 	PolicyDecision string
 	ApprovalID     string
 	RiskLevel      string
+	CommandDigest  string
+	OutputBytes    int64
 	ExitCode       *int
 	ExitError      string
 	CreatedAt      time.Time
@@ -48,6 +50,8 @@ CREATE TABLE IF NOT EXISTS execution_events (
   policy_decision TEXT NOT NULL DEFAULT '',
   approval_id TEXT NOT NULL DEFAULT '',
   risk_level TEXT NOT NULL DEFAULT '',
+  command_digest TEXT NOT NULL DEFAULT '',
+  output_bytes INTEGER NOT NULL DEFAULT 0,
   exit_code INTEGER,
   exit_error TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
@@ -57,7 +61,15 @@ CREATE INDEX IF NOT EXISTS idx_execution_events_session
 CREATE INDEX IF NOT EXISTS idx_execution_events_process
   ON execution_events(process_id, process_seq);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	// Older runtime databases predate the audit fields. SQLite returns a
+	// duplicate-column error for already migrated databases; it is safe to
+	// ignore that error just like the existing store migrations do.
+	_, _ = s.db.Exec(`ALTER TABLE execution_events ADD COLUMN command_digest TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE execution_events ADD COLUMN output_bytes INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }
 
 // AppendExecutionEvent persists one lifecycle event. Callers should omit
@@ -87,13 +99,15 @@ func (s *SQLiteStore) AppendExecutionEvent(ctx context.Context, event ExecutionE
 INSERT INTO execution_events(
   agent_id, session_id, process_id, process_seq, event_type, stream,
   turn_id, tool_call_id, target_kind, target_id, policy_decision,
-  approval_id, risk_level, exit_code, exit_error, created_at
+  approval_id, risk_level, command_digest, output_bytes, exit_code,
+  exit_error, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.AgentID, event.SessionID, event.ProcessID, event.ProcessSeq,
 		event.EventType, event.Stream, event.TurnID, event.ToolCallID,
 		event.TargetKind, event.TargetID, event.PolicyDecision, event.ApprovalID,
-		event.RiskLevel, event.ExitCode, event.ExitError, created.Format(time.RFC3339Nano))
+		event.RiskLevel, event.CommandDigest, event.OutputBytes, event.ExitCode,
+		event.ExitError, created.Format(time.RFC3339Nano))
 	return err
 }
 
@@ -114,7 +128,8 @@ func (s *SQLiteStore) ListExecutionEvents(ctx context.Context, sessionID string,
 	rows, err := s.db.QueryContext(ctx, `
 SELECT event_id, agent_id, session_id, process_id, process_seq, event_type,
        stream, turn_id, tool_call_id, target_kind, target_id, policy_decision,
-       approval_id, risk_level, exit_code, exit_error, created_at
+       approval_id, risk_level, command_digest, output_bytes, exit_code,
+       exit_error, created_at
 FROM execution_events
 WHERE session_id = ?
 ORDER BY event_id ASC
@@ -133,7 +148,8 @@ LIMIT ?`, sessionID, limit)
 			&event.ProcessSeq, &event.EventType, &event.Stream, &event.TurnID,
 			&event.ToolCallID, &event.TargetKind, &event.TargetID,
 			&event.PolicyDecision, &event.ApprovalID, &event.RiskLevel,
-			&exitCode, &event.ExitError, &created,
+			&event.CommandDigest, &event.OutputBytes, &exitCode,
+			&event.ExitError, &created,
 		); err != nil {
 			return nil, err
 		}

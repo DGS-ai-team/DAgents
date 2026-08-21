@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,11 +54,47 @@ func TestBashRunBackgroundViaStartBackground(t *testing.T) {
 	for time.Now().Before(deadline) {
 		status, _ := reg.Execute(context.Background(), "background_job_status", `{"job_id":"`+jobID+`"}`)
 		if strings.Contains(status, "status=succeeded") {
+			if !strings.Contains(status, "process_id=") {
+				t.Fatalf("background status did not expose bound process: %q", status)
+			}
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("background bash did not succeed in time")
+}
+
+func TestBashRunBackgroundBoundsStderrCapture(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultBashCompressConfig()
+	cfg.MaxOutputChars = 32
+	cfg.MaxOutputCharsStderr = 32
+	reg.SetBashCompress(cfg)
+	command := `for i in $(seq 1 10000); do printf 'stderr-noise\n' >&2; done`
+	if runtime.GOOS == "windows" {
+		command = `1..10000 | ForEach-Object { [Console]::Error.WriteLine('stderr-noise') }`
+	}
+	ack, err := reg.StartBackground(context.Background(), "sess-bg-stderr", "bash_run", "call-bg-stderr", `{"command":`+strconv.Quote(command)+`}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := extractField(ack, "job_id=")
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		status, _ := reg.Execute(context.Background(), "background_job_status", `{"job_id":"`+jobID+`"}`)
+		if strings.Contains(status, "status=succeeded") || strings.Contains(status, "status=failed") {
+			if !strings.Contains(status, "output_truncated: true") {
+				t.Fatalf("background result did not report bounded stderr capture: %q", status)
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("background stderr flood did not finish in time")
 }
 
 func TestBashRunSyncTimeoutAutoDegrade(t *testing.T) {

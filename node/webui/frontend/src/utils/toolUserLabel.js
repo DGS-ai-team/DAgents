@@ -175,7 +175,7 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
 
 /**
  * 工具步骤相位（同批免审批 tool_call 后端并行执行）：
- * generating | running | background | pending | completed | cancelled | rejected | interrupted | idle
+ * generating | running | background | pending | completed | failed | cancelled | rejected | interrupted | idle
  *
  * @param {{ callEntry?: object, resultEntry?: object, executionHint?: 'active' | 'pending' | null }} args
  */
@@ -210,6 +210,9 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
     return executionHint === "pending" ? "pending" : "generating";
   }
 
+  if (executionHint === "settled") return "completed";
+  if (executionHint === "failed") return "failed";
+
   // 残留 RUNNING 但已不在后台队列 → 视为结束
   if (bashStatus === "RUNNING" || bashStatus === "SUCCEEDED") return "completed";
   if (resultEntry) return "completed";
@@ -239,6 +242,8 @@ export function toolStepStatusText({ callEntry, resultEntry, executionHint = nul
       return "待执行";
     case "cancelled":
       return "已终止";
+    case "failed":
+      return "执行失败";
     case "rejected":
       return "已拒绝";
     case "interrupted":

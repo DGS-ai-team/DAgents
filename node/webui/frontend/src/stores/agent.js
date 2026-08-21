@@ -1,6 +1,11 @@
 import { reactive } from "vue";
 import { transcriptStore, noteSeq } from "./transcript.js";
 import * as api from "../api/node.js";
+import {
+  applyHydrateTurnState as applyAuthoritativeHydrateTurnState,
+  beginTurnSubmission,
+  resetTurnState,
+} from "./turnState.js";
 
 const AGENT_KEY = "dagents_webui_agent_id";
 const LEGACY_SESSION_KEY = "dagents_webui_session_id";
@@ -86,8 +91,6 @@ async function flushAck() {
 export const agentStore = reactive({
   /** 当前激活的 Agent 实例 id（1 Agent = 1 主对话）。 */
   agentId: loadPersistedAgentId(),
-  awaitingTurn: false,
-  turnContentSeen: false,
   seqFence: 0,
   error: "",
 });
@@ -131,8 +134,7 @@ export function beginImplicitTurn() {
 }
 
 function beginTurnWait() {
-  agentStore.awaitingTurn = true;
-  agentStore.turnContentSeen = false;
+	beginTurnSubmission();
   agentStore.seqFence = transcriptStore.lastSeq;
   agentStore.error = "";
 }
@@ -172,40 +174,27 @@ export function resetEventTracking() {
 /** hydrate 后设置 SSE 去重水位（F-H9）：忽略 seq <= hint 的 replay。 */
 export function applyHydrateSeqHint(seq) {
   const hint = Number(seq) || 0;
-  if (hint > 0) noteSeq(hint);
+  // Hub 序号是 Node 进程内的水位，Node 重启后会重新从 0 开始。
+  // hydrate 返回较低水位时，说明前端仍持有上一进程的序号，必须切换纪元，
+  // 否则新进程的所有 SSE 事件都会被 isDuplicateEvent 当成旧事件丢弃。
+  if (hint < transcriptStore.lastSeq) {
+    transcriptStore.lastSeq = hint;
+  } else if (hint > 0) {
+    noteSeq(hint);
+  }
   agentStore.seqFence = hint > 0 ? hint : 0;
 }
 
-/** 根据 hydrate 的 turn 状态恢复 awaitingTurn（F-H7）。 */
-export function applyHydrateTurnState({ run_turn_phase, has_active_turn, pending_hitl }) {
-  const phase = String(run_turn_phase || "").trim();
-  const hasPending = pending_hitl && Array.isArray(pending_hitl.items) && pending_hitl.items.length > 0;
-  if (hasPending || phase === "awaiting_hitl") {
-    agentStore.awaitingTurn = false;
-    agentStore.turnContentSeen = false;
-    agentStore.error = "";
-    return;
-  }
-  const activePhases = new Set(["model_streaming", "awaiting_tool_execution"]);
-  if (has_active_turn && activePhases.has(phase)) {
-    agentStore.awaitingTurn = true;
-    agentStore.turnContentSeen = true;
-    agentStore.error = "";
-    return;
-  }
-  agentStore.awaitingTurn = false;
-  agentStore.turnContentSeen = false;
+/** hydrate 后恢复权威 Turn 状态；旧调用点保留名称以兼容外部集成。 */
+export function applyHydrateTurnState(data) {
+	return applyAuthoritativeHydrateTurnState(data);
 }
 
-export function finishTurn() {
-  agentStore.awaitingTurn = false;
+/** New lifecycle adapter used by ChatView; kept separate from transcript seq fencing. */
+export function applyAuthoritativeTurnState(data, options) {
+	return applyAuthoritativeHydrateTurnState(data, options);
 }
 
-export function markTurnContent() {
-  if (agentStore.awaitingTurn) agentStore.turnContentSeen = true;
-}
-
-export function shouldAcceptDone(seq) {
-  if (!agentStore.awaitingTurn) return false;
-  return agentStore.turnContentSeen || seq > agentStore.seqFence;
+export function resetAuthoritativeTurnState() {
+	resetTurnState();
 }

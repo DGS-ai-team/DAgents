@@ -14,10 +14,10 @@ const defaultMaxHookLLMCalls = 2
 
 // HookHostConfig 控制 session Host 行为。
 type HookHostConfig struct {
-	HistoryWindow    int
-	MaxLLMCalls      int
-	RuntimeDir       string
-	SkillsRoot       string
+	HistoryWindow int
+	MaxLLMCalls   int
+	RuntimeDir    string
+	SkillsRoot    string
 }
 
 func (c HookHostConfig) normalized() HookHostConfig {
@@ -34,10 +34,10 @@ type hookHostState struct {
 	store map[string]json.RawMessage
 	dirty bool
 
-	history       []llm.Message
-	toolLoopCount int
-	pendingHITL   bool
-	finishReason  string
+	history      []llm.Message
+	stepIndex    int
+	pendingHITL  bool
+	finishReason string
 
 	loadedSkills []skills.LoadedSkill
 	systemPrompt string
@@ -126,11 +126,11 @@ func (o *Orchestrator) ClearHookStore() {
 	o.hookHostState.dirty = true
 }
 
-func (o *Orchestrator) setHookHostRuntime(toolLoopCount int, pending bool) {
+func (o *Orchestrator) setHookHostRuntime(stepIndex int, pending bool) {
 	o.ensureHookHostState()
 	o.hookHostState.mu.Lock()
 	defer o.hookHostState.mu.Unlock()
-	o.hookHostState.toolLoopCount = toolLoopCount
+	o.hookHostState.stepIndex = stepIndex
 	o.hookHostState.pendingHITL = pending
 }
 
@@ -160,7 +160,7 @@ func (h *sessionHookHost) Snapshot() hooks.HostSnapshot {
 		SystemPrompt: h.state.systemPrompt,
 		LoadedSkills: loaded,
 		Runtime: hooks.RuntimeSummary{
-			ToolLoopCount: h.state.toolLoopCount,
+			ToolLoopCount: h.state.stepIndex,
 			FinishReason:  h.state.finishReason,
 			PendingHITL:   h.state.pendingHITL,
 		},

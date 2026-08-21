@@ -88,6 +88,13 @@ func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG.Tools.BashCompress.MaxOutputCharsStderr > 0 {
 		bc.MaxOutputCharsStderr = p.NodeCFG.Tools.BashCompress.MaxOutputCharsStderr
 	}
+	bc.OutputMode = p.NodeCFG.Tools.BashCompress.OutputMode
+	if p.NodeCFG.Tools.BashCompress.TailOutputChars > 0 {
+		bc.TailOutputChars = p.NodeCFG.Tools.BashCompress.TailOutputChars
+	}
+	if p.NodeCFG.Tools.BashCompress.TailOutputCharsStderr > 0 {
+		bc.TailOutputCharsStderr = p.NodeCFG.Tools.BashCompress.TailOutputCharsStderr
+	}
 	reg.SetBashCompress(bc)
 
 	// 技能能力仅由 Agent 快照中的工具组 skills 决定；未配置或空列表表示未启用。

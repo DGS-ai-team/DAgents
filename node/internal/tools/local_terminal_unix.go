@@ -31,9 +31,15 @@ func openLocalTerminal(ctx context.Context, req TerminalRequest) (Terminal, erro
 		_ = tty.Close()
 		return nil, fmt.Errorf("size local PTY: %w", err)
 	}
+	env, err := localEnvironment(req.Env, req.Environment)
+	if err != nil {
+		_ = master.Close()
+		_ = tty.Close()
+		return nil, err
+	}
 	cmd := exec.Command(shell, args...)
 	cmd.Dir = strings.TrimSpace(req.CWD)
-	cmd.Env = localEnvironment(req.Env)
+	cmd.Env = env
 	cmd.Stdin = tty
 	cmd.Stdout = tty
 	cmd.Stderr = tty

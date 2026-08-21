@@ -27,7 +27,7 @@ flowchart TB
 | 层 | 职责 |
 |----|------|
 | **`Manager`** | 会话 CRUD、入队 API、skills 管理、实现 `childagent.Host` |
-| **`runtime`** | 单 session 状态机：messages、pending HITL、tool 循环计数、消费队列 |
+| **`runtime`** | 单 session 队列与执行边界：messages、loaded skills、消费队列；Turn/Step 生命周期由 `turn.Coordinator` 维护 |
 | **`turn.Orchestrator`** | 每步 LLM + 工具；由 runtime 按队列类型调用 |
 | **`compression`** | 仅**父** session 在 human/tool 步前可能触发摘要压缩 |
 | **`childagent`** | 父 runtime 可创建临时 Agent；子 runtime 经 `RelayHub` 把 SSE 挂到父 `session_id` |

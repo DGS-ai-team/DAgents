@@ -195,8 +195,7 @@ func TestEnqueueResumeParentDoesNotDoubleEnqueue(t *testing.T) {
 	if rt == nil {
 		t.Fatal("parent runtime missing")
 	}
-	rt.mu.Lock()
-	rt.pending = &turn.PendingHITL{
+	setTestPendingHITL(t, rt, &turn.PendingHITL{
 		Items: []turn.PendingHITLItem{{
 			ToolCall: llm.ToolCall{
 				ID: "call-test-1",
@@ -206,8 +205,7 @@ func TestEnqueueResumeParentDoesNotDoubleEnqueue(t *testing.T) {
 				},
 			},
 		}},
-	}
-	rt.mu.Unlock()
+	})
 
 	resume := map[string]any{
 		"type":         "user_information",

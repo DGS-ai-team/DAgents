@@ -23,11 +23,13 @@ func TestHandleAgentExecutionEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AppendExecutionEvent(context.Background(), store.ExecutionEventRecord{
-		AgentID:    "agent-events-api",
-		SessionID:  "agent-events-api",
-		ProcessID:  "local-process-1",
-		ProcessSeq: 1,
-		EventType:  "process_started",
+		AgentID:       "agent-events-api",
+		SessionID:     "agent-events-api",
+		ProcessID:     "local-process-1",
+		ProcessSeq:    1,
+		EventType:     "process_started",
+		CommandDigest: "digest-api",
+		OutputBytes:   12,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,5 +52,8 @@ func TestHandleAgentExecutionEvents(t *testing.T) {
 	}
 	if body.Events[0].EventType != "process_started" || body.Events[0].ProcessSeq != 1 {
 		t.Fatalf("event=%+v", body.Events[0])
+	}
+	if body.Events[0].CommandDigest != "digest-api" || body.Events[0].OutputBytes != 12 {
+		t.Fatalf("audit fields=%+v", body.Events[0])
 	}
 }

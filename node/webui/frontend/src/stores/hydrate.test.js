@@ -10,6 +10,7 @@ import {
 import { agentStore, persistAgentId } from "./agent.js";
 import { clearHitl, hitlStore } from "./hitl.js";
 import { hasStatus, resetStatusLines, startStatus, statusStore } from "./statusLines.js";
+import { applyTurnState, resetTurnState, turnStateStore } from "./turnState.js";
 
 vi.mock("../api/node.js", () => ({
   ensureAgentRuntime: vi.fn(() => Promise.resolve({ ok: true })),
@@ -51,36 +52,36 @@ describe("consumeStartupURL", () => {
 describe("syncStatusAfterHydrate", () => {
   beforeEach(() => {
     resetStatusLines();
-    agentStore.awaitingTurn = false;
+    resetTurnState();
   });
 
   afterEach(() => {
     resetStatusLines();
-    agentStore.awaitingTurn = false;
+    resetTurnState();
   });
 
   it("clears leftover prefilling/thinking when turn is idle", () => {
     startStatus("prefilling");
     startStatus("thinking");
-    agentStore.awaitingTurn = false;
-    syncStatusAfterHydrate("idle");
+    applyTurnState({ phase: "idle", terminal: false }, { source: "hydrate" });
+    syncStatusAfterHydrate();
     expect(hasStatus("prefilling")).toBe(false);
     expect(hasStatus("thinking")).toBe(false);
     expect(Object.keys(statusStore.phases)).toHaveLength(0);
   });
 
-  it("restores thinking while model is streaming", () => {
+  it("restores the explicit model-generating phase while no output channel is known", () => {
     startStatus("prefilling");
-    agentStore.awaitingTurn = true;
-    syncStatusAfterHydrate("model_streaming");
+    applyTurnState({ phase: "model_generating", terminal: false }, { source: "hydrate" });
+    syncStatusAfterHydrate();
     expect(hasStatus("prefilling")).toBe(false);
-    expect(hasStatus("thinking")).toBe(true);
+    expect(hasStatus("model_generating")).toBe(true);
   });
 
   it("does not show thinking during tool execution", () => {
     startStatus("thinking");
-    agentStore.awaitingTurn = true;
-    syncStatusAfterHydrate("awaiting_tool_execution");
+    applyTurnState({ phase: "tool_executing", terminal: false }, { source: "hydrate" });
+    syncStatusAfterHydrate();
     expect(hasStatus("thinking")).toBe(false);
   });
 });
@@ -91,7 +92,7 @@ describe("hydrateAgent lifecycle", () => {
     clearHitl();
     transcriptStore.entries = [];
     transcriptStore.lastSeq = 0;
-    agentStore.awaitingTurn = false;
+    resetTurnState();
     vi.mocked(api.getAgentHydrate).mockReset();
     vi.mocked(api.postAgentAck).mockClear();
     invalidateHydration();
@@ -146,7 +147,7 @@ describe("hydrateAgent lifecycle", () => {
     const data = await hydrateAgent();
     expect(data?.pending_hitl).toBeNull();
     expect(hitlStore.queue).toHaveLength(0);
-    expect(agentStore.awaitingTurn).toBe(false);
+    expect(turnStateStore.phase).toBe("idle");
   });
 });
 

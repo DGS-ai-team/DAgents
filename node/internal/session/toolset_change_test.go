@@ -33,14 +33,14 @@ func TestNotifyToolsetChanged_publishesNoticeAndInterruptsPending(t *testing.T) 
 			},
 		}},
 	}}
-	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{
+	rt.mu.Unlock()
+	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{
 		ToolCall: llm.ToolCall{
-			ID:   "call-pending-1",
-			Type: "function",
+			ID:       "call-pending-1",
+			Type:     "function",
 			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"sleep 99"}`},
 		},
-	}}}
-	rt.mu.Unlock()
+	}}})
 
 	events := mgr.hub.SubscribeAgent(mgr.hub.CurrentSeq(), sess.ID)
 	defer mgr.hub.Unsubscribe(events)
@@ -66,11 +66,11 @@ func TestNotifyToolsetChanged_publishesNoticeAndInterruptsPending(t *testing.T) 
 		t.Fatal("expected system_notice")
 	}
 
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	if rt.pending != nil {
+	if rt.pendingSnapshot() != nil {
 		t.Fatal("pending should be cleared")
 	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 	found := false
 	for _, m := range rt.messages {
 		if m.Role == "tool" && m.ToolCallID == "call-pending-1" {

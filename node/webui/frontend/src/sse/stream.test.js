@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { buildStreamURL, shouldIgnoreSSEForAgent } from "./stream.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildStreamURL, connectStream, shouldIgnoreSSEForAgent } from "./stream.js";
+import { AGENT_STREAM_EVENT_TYPES } from "./agentEvents.js";
 
 describe("shouldIgnoreSSEForAgent", () => {
   it("ignores events from a different agent after switch", () => {
@@ -33,5 +34,49 @@ describe("buildStreamURL", () => {
     expect(buildStreamURL({ agentId: "agt-1", live: false, afterSeq: 0 })).toBe(
       "/v1/streams?agent_id=agt-1&live=1",
     );
+  });
+});
+
+describe("agent stream event registration", () => {
+  afterEach(() => {
+    delete globalThis.EventSource;
+  });
+
+  it("registers every event from the shared registry on EventSource", () => {
+    const instances = [];
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url;
+        this.listeners = new Map();
+        instances.push(this);
+      }
+
+      addEventListener(type, handler) {
+        this.listeners.set(type, handler);
+      }
+
+      close() {}
+    }
+    globalThis.EventSource = FakeEventSource;
+
+    const handle = connectStream({ getAgentId: () => "agt-1" });
+    expect([...instances[0].listeners.keys()]).toEqual(AGENT_STREAM_EVENT_TYPES);
+    handle.close();
+  });
+
+  it("includes runtime and notice events that are published by Node", () => {
+    expect(AGENT_STREAM_EVENT_TYPES).toEqual(
+      expect.arrayContaining([
+        "system_notice",
+        "runtime/config-changed",
+        "memory/changed",
+        "skills/changed",
+        "mcp/catalog-changed",
+      ]),
+    );
+  });
+
+  it("does not contain duplicate named event registrations", () => {
+    expect(new Set(AGENT_STREAM_EVENT_TYPES).size).toBe(AGENT_STREAM_EVENT_TYPES.length);
   });
 });
