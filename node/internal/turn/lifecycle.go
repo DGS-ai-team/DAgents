@@ -133,10 +133,14 @@ type TurnBudget struct {
 // StepUsage is deliberately provider-neutral. Provider-specific usage can be
 // retained in an event payload without coupling the lifecycle model to llm.
 type StepUsage struct {
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	TotalTokens  int     `json:"total_tokens"`
-	Cost         float64 `json:"cost"`
+	InputTokens                int     `json:"input_tokens"`
+	OutputTokens               int     `json:"output_tokens"`
+	TotalTokens                int     `json:"total_tokens"`
+	PromptCacheHitTokens       int     `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens      int     `json:"prompt_cache_miss_tokens"`
+	PromptCacheMetricsObserved bool    `json:"prompt_cache_metrics_observed"`
+	ReasoningTokens            int     `json:"reasoning_tokens"`
+	Cost                       float64 `json:"cost"`
 }
 
 // TurnUsage is the cumulative, provider-neutral accounting used for hard
@@ -144,14 +148,18 @@ type StepUsage struct {
 // several model/tool Steps can be resumed and audited without re-counting
 // provider events.
 type TurnUsage struct {
-	Steps        int     `json:"steps"`
-	ToolCalls    int     `json:"tool_calls"`
-	ToolRetries  int     `json:"tool_retries"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	TotalTokens  int     `json:"total_tokens"`
-	SummarySteps int     `json:"summary_steps"`
-	Cost         float64 `json:"cost"`
+	Steps                      int     `json:"steps"`
+	ToolCalls                  int     `json:"tool_calls"`
+	ToolRetries                int     `json:"tool_retries"`
+	InputTokens                int     `json:"input_tokens"`
+	OutputTokens               int     `json:"output_tokens"`
+	TotalTokens                int     `json:"total_tokens"`
+	PromptCacheHitTokens       int     `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens      int     `json:"prompt_cache_miss_tokens"`
+	PromptCacheMetricsObserved bool    `json:"prompt_cache_metrics_observed"`
+	ReasoningTokens            int     `json:"reasoning_tokens"`
+	SummarySteps               int     `json:"summary_steps"`
+	Cost                       float64 `json:"cost"`
 }
 
 // Turn is the logical user-goal cycle. It is intentionally independent from
@@ -380,7 +388,7 @@ func NextTurnStatus(current TurnStatus, event EventType) (TurnStatus, bool) {
 		}
 	case TurnStatusRunning:
 		switch event {
-		case EventStepStarted, EventTurnSnapshotCreated, EventStepCompleted, EventModelRequestStarted,
+		case EventStepStarted, EventTurnSnapshotCreated, EventModelContextChanged, EventStepCompleted, EventModelRequestStarted,
 			EventModelRequestCompleted, EventToolBatchCreated, EventToolResultRecorded:
 			return TurnStatusRunning, true
 		case EventStepSuspended, EventInteractionRequested:
@@ -419,9 +427,14 @@ func NextStepStatus(current StepStatus, event EventType) (StepStatus, bool) {
 		if event == EventStepStarted || event == EventModelRequestStarted {
 			return StepStatusRequesting, true
 		}
+		if event == EventModelContextChanged {
+			return StepStatusCreated, true
+		}
 	case StepStatusRequesting:
 		switch event {
 		case EventModelRequestStarted:
+			return StepStatusRequesting, true
+		case EventModelContextChanged:
 			return StepStatusRequesting, true
 		case EventAssistantMessageRecorded, EventModelRequestCompleted:
 			return StepStatusAssistantReceived, true

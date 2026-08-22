@@ -99,12 +99,18 @@ func (o *Orchestrator) runModelRequest(
 				}
 			},
 			OnUsage: func(usage llm.Usage) {
+				usage.Normalize()
 				o.publishUsage(sessionID, stepIndex, usage)
 				recordLifecycleErr(o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 					Type: CommandModelUsageRecorded, At: time.Now().UTC(),
 					Usage: StepUsage{
-						InputTokens: usage.PromptTokens, OutputTokens: usage.CompletionTokens,
-						TotalTokens: usage.TotalTokens,
+						InputTokens:                usage.PromptTokens,
+						OutputTokens:               usage.CompletionTokens,
+						TotalTokens:                usage.TotalTokens,
+						PromptCacheHitTokens:       usage.PromptCachedTokens(),
+						PromptCacheMissTokens:      usage.PromptCacheMissTokensEffective(),
+						PromptCacheMetricsObserved: usage.HasPromptCacheMetrics(),
+						ReasoningTokens:            usage.CompletionReasoningTokens(),
 					}, Reason: "model_usage_recorded",
 				}))
 			},

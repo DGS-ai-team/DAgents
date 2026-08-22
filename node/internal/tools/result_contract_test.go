@@ -19,6 +19,7 @@ func TestClassifyResultUsesOneAuthoritativeStatus(t *testing.T) {
 		{name: "background accepted", tool: "bash_run", content: "[TOOL_BACKGROUND] tool_name=bash_run status=accepted", status: ResultStatusQueued},
 		{name: "browser detail failure", tool: "browser_run_task", content: `{"ok":true,"detail":{"status":"failed"},"error":"step failed"}`, status: ResultStatusFailed},
 		{name: "policy denial", tool: "write_file", content: "rejected: policy_denied", rejected: true, status: ResultStatusDenied},
+		{name: "persisted policy denial", tool: "write_file", content: "rejected: policy_denied", status: ResultStatusDenied},
 		{name: "execution error is not denial", tool: "linux_exec", content: "ERROR: connection refused", rejected: true, status: ResultStatusFailed},
 		{name: "cancelled", tool: "terminal_read", content: "流式输出被用户中断。", status: ResultStatusCancelled},
 		{name: "timeout", tool: "browser_run_task", content: `{"ok":true,"wait_timed_out":true,"error":"use status"}`, status: ResultStatusTimedOut},
@@ -51,15 +52,34 @@ func TestResultEventFieldsExposeStatusAndKeepPolicyCompatibility(t *testing.T) {
 	}
 }
 
-func TestAllToolDescriptionsDeclareResultContract(t *testing.T) {
+func TestToolDefinitionsKeepCommonResultProtocolOutOfEachDescription(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, def := range reg.Definitions() {
-		if !strings.Contains(def.Function.Description, "Node tool_result 事件中的 status") {
-			t.Fatalf("tool %q missing result contract description: %s", def.Function.Name, def.Function.Description)
+	defs := reg.Definitions()
+	if len(defs) == 0 {
+		t.Fatal("expected builtin tool definitions")
+	}
+	common := strings.TrimSpace(ResultDescriptionSuffix())
+	if common == "" {
+		t.Fatal("common result contract must remain available to prompt builders")
+	}
+	for _, def := range defs {
+		if strings.Contains(def.Function.Description, common) {
+			t.Fatalf("tool %q repeats the common result protocol", def.Function.Name)
 		}
+	}
+
+	var terminalRead string
+	for _, def := range defs {
+		if def.Function.Name == "terminal_read" {
+			terminalRead = def.Function.Description
+			break
+		}
+	}
+	if terminalRead == "" || !strings.Contains(terminalRead, "output_empty") {
+		t.Fatalf("tool-specific evidence hint missing: %q", terminalRead)
 	}
 }
 

@@ -32,6 +32,9 @@ func TestBuildLastCompressionSnapshot(t *testing.T) {
 	if snap.PromptCacheHitTokens != 800 || snap.PromptCacheMissTokens != 200 {
 		t.Fatalf("cache = %+v", snap)
 	}
+	if !snap.PromptCacheAvailable {
+		t.Fatalf("availability = %+v", snap)
+	}
 	if snap.PromptCacheHitRate != 0.8 {
 		t.Fatalf("hit rate = %v", snap.PromptCacheHitRate)
 	}

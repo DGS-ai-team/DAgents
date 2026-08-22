@@ -22,6 +22,7 @@ type LastCompressionSnapshot struct {
 	TokenReductionRate     float64   `json:"token_reduction_rate,omitempty"`
 	PromptCacheHitTokens   int       `json:"prompt_cache_hit_tokens,omitempty"`
 	PromptCacheMissTokens  int       `json:"prompt_cache_miss_tokens,omitempty"`
+	PromptCacheAvailable   bool      `json:"prompt_cache_available"`
 	PromptCacheHitRate     float64   `json:"prompt_cache_hit_rate,omitempty"`
 }
 
@@ -40,6 +41,7 @@ func buildLastCompressionSnapshot(ready readyCompression, usage llm.Usage) LastC
 		TokenReductionRate:     tokenReductionRate(usage.PromptTokens, usage.CompletionTokens),
 		PromptCacheHitTokens:   usage.PromptCachedTokens(),
 		PromptCacheMissTokens:  usage.PromptCacheMissTokensEffective(),
+		PromptCacheAvailable:   usage.HasPromptCacheMetrics(),
 	}
 	if rate := usage.PromptCacheHitRate(); rate >= 0 {
 		snap.PromptCacheHitRate = rate
@@ -73,6 +75,7 @@ func (c *Coordinator) recordLastCompression(sessionID string, snap LastCompressi
 		"token_reduction_rate", snap.TokenReductionRate,
 		"prompt_cache_hit_tokens", snap.PromptCacheHitTokens,
 		"prompt_cache_miss_tokens", snap.PromptCacheMissTokens,
+		"prompt_cache_available", snap.PromptCacheAvailable,
 	}
 	if snap.PromptCacheHitRate >= 0 {
 		attrs = append(attrs, "prompt_cache_hit_rate", snap.PromptCacheHitRate)

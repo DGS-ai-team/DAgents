@@ -54,6 +54,7 @@ func terminalOpenToolDef() ToolDef {
 				"rows":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "终端行数，可选，默认 24"},
 				"cols":      map[string]any{"type": "integer", "minimum": 1, "maximum": 400, "description": "终端列数，可选，默认 80"},
 			},
+			"required":             []string{"config_id"},
 			"additionalProperties": false,
 		}),
 	}}

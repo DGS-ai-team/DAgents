@@ -1,10 +1,43 @@
 package llm
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 )
+
+func TestOpenAIClientStreamsAndNormalizesCacheUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("request path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":8,\"total_tokens\":108,\"prompt_cache_hit_tokens\":80,\"prompt_cache_miss_tokens\":20}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(OpenAIConfig{BaseURL: strings.TrimSuffix(server.URL, "/"), Model: "test-model", APIKey: "test-key"})
+	var gotUsage Usage
+	result, err := client.StreamChat(context.Background(), ChatRequest{SystemPrompt: "system", Messages: []Message{UserMessage("hello", "human")}}, StreamHandler{
+		OnUsage: func(usage Usage) { gotUsage = usage },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "ok" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if !gotUsage.HasPromptCacheMetrics() || gotUsage.PromptCachedTokens() != 80 || gotUsage.PromptCacheMissTokensEffective() != 20 {
+		t.Fatalf("usage = %+v", gotUsage)
+	}
+}
 
 func TestDeepSeekAdapter_toolCallbackKeepsEmptyReasoning(t *testing.T) {
 	adapter := deepSeekAdapter{}

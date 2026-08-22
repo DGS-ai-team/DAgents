@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,8 +37,13 @@ const (
 // SkillAccess 为 orchestrator 读写 session loaded_skills 的回调。
 type SkillAccess struct {
 	Catalog *skills.Catalog
-	Get     func() []skills.LoadedSkill
-	Set     func([]skills.LoadedSkill)
+	// CatalogToolMode enables the default-off list_available_skills
+	// experiment. The flag is fixed for the runtime and never changes inside
+	// an active model context.
+	CatalogToolMode   bool
+	Get               func() []skills.LoadedSkill
+	Set               func([]skills.LoadedSkill)
+	SetWithHookStatus func([]skills.LoadedSkill) SkillHooksSyncResult
 }
 
 // LifecycleCommandSink accepts one durable Turn/Step fact. Returning an
@@ -77,10 +83,12 @@ type Orchestrator struct {
 
 	ctxMetrics *contextMetricsStore
 
-	modelSnapshots  *modelContextSnapshotStore
-	runtimeRevision int64
-	runtimeDigest   string
-	executionGuard  ExecutionGuard
+	modelSnapshots        *modelContextSnapshotStore
+	contextMutationMu     sync.Mutex
+	contextMutationReason map[string]string
+	runtimeRevision       int64
+	runtimeDigest         string
+	executionGuard        ExecutionGuard
 
 	enqueueToolResult   func(ctx context.Context, sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
@@ -110,6 +118,17 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetSkillsCatalog replaces the model-facing Catalog view at an explicit
+// human-Turn or control-plane context boundary. It must not be called while a
+// model request is being built; the runtime invokes it before the next model
+// Step so the active snapshot remains immutable.
+func (o *Orchestrator) SetSkillsCatalog(catalog *skills.Catalog) {
+	if o == nil {
+		return
+	}
+	o.skillAccess.Catalog = catalog
 }
 
 // SetRuntimeIdentity attaches diagnostics to each Turn snapshot. These values
@@ -162,6 +181,36 @@ func (o *Orchestrator) RestoreModelContextSnapshot(sessionID string, snapshot *M
 		return
 	}
 	o.setModelContextSnapshot(sessionID, snapshot)
+}
+
+// RequestModelContextRefresh schedules a new model context snapshot at the
+// next model Step. It never mutates the active request in place, so an
+// in-flight model attempt and its streamed history remain stable.
+func (o *Orchestrator) RequestModelContextRefresh(sessionID, reason string) {
+	if o == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "context_mutation"
+	}
+	o.contextMutationMu.Lock()
+	if o.contextMutationReason == nil {
+		o.contextMutationReason = make(map[string]string)
+	}
+	o.contextMutationReason[sessionID] = reason
+	o.contextMutationMu.Unlock()
+}
+
+func (o *Orchestrator) consumeModelContextRefresh(sessionID string) string {
+	if o == nil {
+		return ""
+	}
+	o.contextMutationMu.Lock()
+	defer o.contextMutationMu.Unlock()
+	reason := strings.TrimSpace(o.contextMutationReason[sessionID])
+	delete(o.contextMutationReason, sessionID)
+	return reason
 }
 
 // SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
@@ -408,25 +457,26 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:         agentID,
-		fsRoot:          fsRoot,
-		hub:             hub,
-		llm:             client,
-		tools:           toolExec,
-		policy:          policyEngine,
-		toolHooks:       toolHooks,
-		toolExecLog:     toolExecLog,
-		skillAccess:     skillAccess,
-		hookRuntimeCfg:  hookCfg,
-		maxToolLoops:    maxToolLoops,
-		modelRetryLimit: 2,
-		toolRetryLimit:  1,
-		promptCtx:       promptCtx,
-		journal:         journal,
-		logger:          logx.OrDefault(logger),
-		ctxMetrics:      newContextMetricsStore(),
-		modelSnapshots:  newModelContextSnapshotStore(),
-		summaryNext:     make(map[string]bool),
+		agentID:               agentID,
+		fsRoot:                fsRoot,
+		hub:                   hub,
+		llm:                   client,
+		tools:                 toolExec,
+		policy:                policyEngine,
+		toolHooks:             toolHooks,
+		toolExecLog:           toolExecLog,
+		skillAccess:           skillAccess,
+		hookRuntimeCfg:        hookCfg,
+		maxToolLoops:          maxToolLoops,
+		modelRetryLimit:       2,
+		toolRetryLimit:        1,
+		promptCtx:             promptCtx,
+		journal:               journal,
+		logger:                logx.OrDefault(logger),
+		ctxMetrics:            newContextMetricsStore(),
+		modelSnapshots:        newModelContextSnapshotStore(),
+		contextMutationReason: make(map[string]string),
+		summaryNext:           make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
@@ -516,7 +566,14 @@ func (o *Orchestrator) runOneStep(
 	var systemPrompt string
 	var msgs []llm.Message
 	var hookErr error
+	contextMutationReason := o.consumeModelContextRefresh(sessionID)
+	contextReplaced := false
 	snapshot := o.ModelContextSnapshot(sessionID)
+	if contextMutationReason != "" && snapshot != nil {
+		o.clearModelContextSnapshot(sessionID)
+		contextReplaced = true
+		snapshot = nil
+	}
 	if snapshot != nil {
 		// A hard tool-loop budget is an execution safeguard, not a new runtime
 		// configuration. Keep the prompt snapshot but suppress tools for this
@@ -542,21 +599,31 @@ func (o *Orchestrator) runOneStep(
 			return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 		}
 		snapshot = NewModelContextSnapshot(systemPrompt, toolDefs, o.runtimeRevision, o.runtimeDigest)
+		o.attachSkillsSnapshotMetadata(snapshot)
 		o.setModelContextSnapshot(sessionID, snapshot)
 	}
 	*history = msgs
 	llmMessages := media.ExpandMessagesForLLM(*history, o.mediaReg)
+	// History/transcript retains the original tool body, while the model gets
+	// the authoritative status projection in a request-only copy.
+	llmMessages = llm.PrepareToolResultMessagesForModel(llmMessages)
 	requestAt := time.Now().UTC()
 	if snapshot != nil {
+		commandType := CommandTurnSnapshotCreated
+		reason := "model_context_snapshot_created"
+		if contextReplaced {
+			commandType = CommandModelContextChanged
+			reason = "model_context_changed:" + contextMutationReason
+		}
 		if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
-			Type:            CommandTurnSnapshotCreated,
+			Type:            commandType,
 			At:              requestAt,
 			RuntimeRevision: snapshot.RuntimeRevision,
 			RuntimeDigest:   snapshot.RuntimeDigest,
 			PromptDigest:    snapshot.PromptDigest,
 			ToolDigest:      snapshot.ToolDigest,
 			ContextSnapshot: snapshot.Clone(),
-			Reason:          "model_context_snapshot_created",
+			Reason:          reason,
 		}); err != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
@@ -731,6 +798,28 @@ func (o *Orchestrator) runOneStep(
 	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }
 
+// attachSkillsSnapshotMetadata records the skill inputs that accompanied the
+// frozen model context. The values are diagnostics only; the prompt and tool
+// snapshots remain authoritative for the active Turn.
+func (o *Orchestrator) attachSkillsSnapshotMetadata(snapshot *ModelContextSnapshot) {
+	if o == nil || snapshot == nil {
+		return
+	}
+	if o.skillAccess.Catalog != nil {
+		snapshot.SkillsCatalogRevision = o.skillAccess.Catalog.Revision()
+	}
+	if o.skillAccess.Get != nil {
+		loaded := o.skillAccess.Get()
+		snapshot.LoadedSkillsDigest = Digest(loaded)
+		if o.skillAccess.Catalog != nil && len(loaded) > 0 {
+			// Do not persist or expose the body itself in lifecycle metadata. The
+			// digest lets replay/diagnostics distinguish a body change from a
+			// loaded-set change without changing the model-facing protocol.
+			snapshot.LoadedSkillsContentDigest = Digest(o.skillAccess.Catalog.RenderLoadedSection(loaded))
+		}
+	}
+}
+
 func (o *Orchestrator) setModelContextSnapshot(sessionID string, snapshot *ModelContextSnapshot) {
 	if o == nil {
 		return
@@ -816,7 +905,34 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	if o == nil || o.tools == nil {
 		return nil
 	}
-	return o.tools.Definitions()
+	defs := o.tools.Definitions()
+	if !o.skillAccess.CatalogToolMode || o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
+		return defs
+	}
+	// The virtual tool is available only when the regular Skills group is
+	// already visible. This keeps allowlists and child restricted registries
+	// from exposing a discovery tool without load_skills.
+	hasLoadSkills := false
+	for _, def := range defs {
+		if def.Function.Name == "load_skills" {
+			hasLoadSkills = true
+			break
+		}
+	}
+	if !hasLoadSkills {
+		return defs
+	}
+	listDef := tools.ListAvailableSkillsToolDef()
+	listDef.Function.Description = strings.TrimSpace(listDef.Function.Description) + tools.ResultDescriptionSuffixForTool(listDef.Function.Name)
+	defs = append(defs, listDef)
+	sort.SliceStable(defs, func(i, j int) bool {
+		left, right := defs[i].Function.Name, defs[j].Function.Name
+		if left == right {
+			return defs[i].Type < defs[j].Type
+		}
+		return left < right
+	})
+	return defs
 }
 
 // ToolDefinitionsForSession returns the active Turn schema when a Turn
@@ -899,6 +1015,7 @@ func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 		SessionID:             sessionID,
 		Catalog:               o.skillAccess.Catalog,
 		Loaded:                loaded,
+		SkillsCatalogToolMode: o.skillAccess.CatalogToolMode,
 		PromptCtx:             o.promptCtx,
 		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}

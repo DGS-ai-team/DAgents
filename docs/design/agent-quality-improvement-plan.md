@@ -398,12 +398,13 @@ expires_at
 ### 阶段 0：已完成基础落地
 
 - 新增 `node/internal/eval` 确定性评测包。
-- 新增 12 个稳定 ID 的黄金场景。
+- 新增 16 个稳定 ID 的黄金场景，包含 Skills 同名消歧场景。
 - 新增 Trace、Scenario、Criterion、ScenarioResult 和 Scorecard 结构。
+- 新增 `CompareAB`，统一比较 treatment/control 的质量、验证、工具、重试、token、成本和 cache 观测，并对数据不足返回 `inconclusive`。
 - 缺少 Trace 时显式失败，避免评测数据缺失造成假阳性。
 - 已加入工具顺序、空输出、取消栅栏和完成验证等基础断言。
 
-当前阶段 0 仍可继续增加真实模型 A/B 适配器，但不阻塞第一轮提示词和工具契约改进。
+当前阶段 0 仍可继续增加真实模型 A/B 适配器，但不阻塞第一轮提示词和工具契约改进。真实运行适配器必须同时记录 cache 是否被 provider 返回，不能把缺失字段解释为缓存未命中。
 
 ### 阶段 1：已完成第一轮落地
 

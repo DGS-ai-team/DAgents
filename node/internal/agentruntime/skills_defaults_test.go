@@ -33,4 +33,15 @@ func TestSkillsFromDefaults(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+	t.Run("catalog tool mode is opt in", func(t *testing.T) {
+		got := SkillsFromDefaults(Snapshot{Defaults: map[string]any{
+			"skills": map[string]any{"catalog_tool_mode": true},
+		}})
+		if !got.CatalogToolMode {
+			t.Fatalf("got %+v", got)
+		}
+		if SkillsFromDefaults(Snapshot{}).CatalogToolMode {
+			t.Fatal("missing catalog_tool_mode must remain disabled")
+		}
+	})
 }

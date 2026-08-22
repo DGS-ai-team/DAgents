@@ -54,7 +54,10 @@ var resultStatusPattern = regexp.MustCompile(`(?i)(^|[\s,;\[])(status|execution_
 // rewritten at once.
 func ClassifyResult(toolName, content string, rejected bool) ResultMetadata {
 	trimmed := strings.TrimSpace(content)
-	if rejected && isPolicyRejection(trimmed) {
+	// A policy result may be reconstructed from persisted history without the
+	// transient rejected flag. The explicit rejection marker is therefore
+	// authoritative on its own; the flag remains for legacy ambiguous errors.
+	if isPolicyRejection(trimmed) {
 		return ResultMetadata{
 			Status: ResultStatusDenied,
 			Error:  &ResultError{Code: "policy_denied", Message: clipResultError(trimmed), Retryable: false},
@@ -132,15 +135,24 @@ func NormalizeResultStatus(raw string) ResultStatus {
 	return normalizeResultStatus(raw)
 }
 
-// ResultDescriptionSuffix documents the event-level contract without forcing
-// every existing large textual result into JSON (which would increase token
-// cost and break consumers that rely on the legacy body).
+// ResultDescriptionSuffix returns the legacy common contract text. It is kept
+// for callers that render a standalone tool description, but Registry no
+// longer appends it to every tool. The model receives this common behavior
+// once from the system prompt; per-tool definitions only carry their own
+// evidence hints.
 func ResultDescriptionSuffix() string {
-	return " 返回结果的统一状态由 Node tool_result 事件中的 status 给出：succeeded、failed、denied、running、queued、cancelled、timed_out、awaiting_user 或 unknown；失败时同时提供 error.code、error.message、error.retryable。不要仅根据正文是否为空或是否含有本地化错误词判断成功。正文仍保留本工具约定的字段与输出，status 优先。"
+	return " 返回结果的统一状态由 Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据给出：succeeded、failed、denied、running、queued、cancelled、timed_out、awaiting_user 或 unknown；失败时同时提供 error.code、error.message、error.retryable。优先依据 status 判断，不要仅根据正文是否为空或是否含有本地化错误词判断成功。元数据后的正文仍保留本工具约定的字段与输出。"
 }
 
-// ResultDescriptionSuffixForTool adds the small tool-specific decoding hint
-// that is otherwise easy for a model to miss in a long generic description.
+// ResultProtocolPrompt returns the common result behavior for the single
+// stable system-prompt section. Tool definitions should not repeat it.
+func ResultProtocolPrompt() string {
+	return strings.TrimSpace(ResultDescriptionSuffix())
+}
+
+// ResultDescriptionSuffixForTool adds only the small tool-specific decoding
+// hint that is otherwise easy for a model to miss in a long description. The
+// common result protocol is intentionally not repeated here.
 func ResultDescriptionSuffixForTool(name string) string {
 	shape := ""
 	switch strings.ToLower(strings.TrimSpace(name)) {
@@ -167,7 +179,9 @@ func ResultDescriptionSuffixForTool(name string) string {
 	case "background_job_status", "background_job_cancel":
 		shape = " 正文包含 job_id、status 和输出/错误摘要；后台任务完成通常还会通过 async_tool_result 自动回灌。"
 	case "load_skills", "unload_skills", "clear_skills":
-		shape = " 正文为 JSON，包含 action 和 loaded_skills；以 returned loaded_skills 作为下一步技能状态。"
+		shape = " skills 结果为 JSON，包含 action、requested、loaded_skills、rejected、session_state_applied_boundary、model_context_applied_boundary、hooks_status、hooks_loaded 和 hooks_failed；以 returned loaded_skills 作为下一步会话技能状态，并按 model_context_applied_boundary 判断正文何时可见。"
+	case "list_available_skills":
+		shape = " list_available_skills 结果为 JSON 元数据页，包含 status、catalog_revision、query、skills、has_more 和 next_cursor；skills 只含可见 Skill 的名称、目录名和 description，不包含 SKILL.md 正文。"
 	case "trigger_list", "trigger_get", "trigger_create", "trigger_update", "trigger_delete":
 		shape = " 触发器正文为 JSON，包含 ok 及 trigger 或错误信息；写操作成功后再用 get/list 验证。"
 	case "browser_run_task", "browser_task_status", "browser_task_cancel":
@@ -181,7 +195,7 @@ func ResultDescriptionSuffixForTool(name string) string {
 	case "remember":
 		shape = " 记忆写入可能进入 awaiting_user 处理冲突；只有明确成功结果才能认为已写入。"
 	}
-	return ResultDescriptionSuffix() + shape
+	return shape
 }
 
 func isPolicyRejection(content string) bool {

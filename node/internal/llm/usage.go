@@ -28,6 +28,10 @@ type Usage struct {
 	PromptCacheMissTokens   int                      `json:"prompt_cache_miss_tokens"`
 	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details"`
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details"`
+	// PromptCacheMetricsObserved distinguishes a provider that reported cache
+	// counters from one that omitted them. A zero hit count is meaningful only
+	// when this flag is true.
+	PromptCacheMetricsObserved bool `json:"-"`
 }
 
 // UnmarshalJSON 解析 usage；兼容 prompt_token_details / completion_token_details 别名，
@@ -53,13 +57,43 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	if aux.ReasoningTokens > 0 && u.CompletionReasoningTokens() <= 0 {
 		u.ensureCompletionDetails().ReasoningTokens = aux.ReasoningTokens
 	}
+	u.PromptCacheMetricsObserved = promptCacheMetricsPresent(data, u)
 	u.Normalize()
 	return nil
+}
+
+func promptCacheMetricsPresent(data []byte, usage *Usage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return false
+	}
+	for _, key := range []string{"prompt_cache_hit_tokens", "prompt_cache_miss_tokens"} {
+		if _, ok := fields[key]; ok {
+			return true
+		}
+	}
+	for _, key := range []string{"prompt_tokens_details", "prompt_token_details"} {
+		raw, ok := fields[key]
+		if !ok {
+			continue
+		}
+		var details map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &details); err == nil {
+			if _, ok := details["cached_tokens"]; ok {
+				return true
+			}
+		}
+	}
+	return usage != nil && (usage.PromptCacheHitTokens > 0 || usage.PromptCacheMissTokens > 0)
 }
 
 // Normalize 将 OpenAI / DeepSeek 不同字段名对齐为统一语义。
 func (u *Usage) Normalize() {
 	u.clampNonNegative()
+	if u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens > 0 ||
+		(u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0) {
+		u.PromptCacheMetricsObserved = true
+	}
 
 	cached := u.PromptCachedTokens()
 	hit := max(0, u.PromptCacheHitTokens)
@@ -143,6 +177,7 @@ func (u *Usage) AccumulateFrom(other Usage) {
 	u.TotalTokens += other.TotalTokens
 	u.PromptCacheHitTokens += other.PromptCacheHitTokens
 	u.PromptCacheMissTokens += other.PromptCacheMissTokens
+	u.PromptCacheMetricsObserved = u.PromptCacheMetricsObserved || other.PromptCacheMetricsObserved
 	if other.PromptTokensDetails != nil {
 		d := u.ensurePromptDetails()
 		d.CachedTokens += other.PromptTokensDetails.CachedTokens
@@ -154,6 +189,13 @@ func (u *Usage) AccumulateFrom(other Usage) {
 	u.Normalize()
 }
 
+// HasPromptCacheMetrics reports whether the provider supplied cache counters.
+// It deliberately does not infer availability from prompt_tokens alone.
+func (u Usage) HasPromptCacheMetrics() bool {
+	return u.PromptCacheMetricsObserved || u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens > 0 ||
+		(u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0)
+}
+
 // PromptCachedTokens 返回 prompt 侧 cache hit token 数（OpenAI cached_tokens 或 DeepSeek hit 对齐后）。
 func (u Usage) PromptCachedTokens() int {
 	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
@@ -162,8 +204,12 @@ func (u Usage) PromptCachedTokens() int {
 	return max(0, u.PromptCacheHitTokens)
 }
 
-// PromptCacheMissTokensEffective 返回 cache miss token 数；缺失时由 prompt - hit 推导。
+// PromptCacheMissTokensEffective 返回 cache miss token 数；provider 未返回 cache
+// 指标时返回 0，调用方应同时检查 HasPromptCacheMetrics。
 func (u Usage) PromptCacheMissTokensEffective() int {
+	if !u.HasPromptCacheMetrics() {
+		return 0
+	}
 	if u.PromptCacheMissTokens > 0 {
 		return u.PromptCacheMissTokens
 	}
@@ -175,8 +221,11 @@ func (u Usage) PromptCacheMissTokensEffective() int {
 	return 0
 }
 
-// PromptCacheHitRate 返回 cache 命中率 [0,1]；prompt 为 0 时返回 -1 表示不可用。
+// PromptCacheHitRate 返回 cache 命中率 [0,1]；指标缺失或 prompt 为 0 时返回 -1。
 func (u Usage) PromptCacheHitRate() float64 {
+	if !u.HasPromptCacheMetrics() {
+		return -1
+	}
 	prompt := max(0, u.PromptTokens)
 	if prompt <= 0 {
 		return -1
@@ -229,6 +278,7 @@ func (u Usage) sseFieldsWithPrefix(prefix string) map[string]any {
 		prefix + "prompt_cached_tokens":     norm.PromptCachedTokens(),
 		prefix + "prompt_cache_hit_tokens":  norm.PromptCachedTokens(),
 		prefix + "prompt_cache_miss_tokens": norm.PromptCacheMissTokensEffective(),
+		prefix + "prompt_cache_available":   norm.HasPromptCacheMetrics(),
 		prefix + "prompt_audio_tokens":      norm.PromptAudioTokens(),
 		prefix + "reasoning_tokens":         norm.CompletionReasoningTokens(),
 	}
@@ -249,6 +299,7 @@ func (u Usage) SSEPayload() map[string]any {
 		"prompt_cached_tokens":     norm.PromptCachedTokens(),
 		"prompt_cache_hit_tokens":  norm.PromptCachedTokens(),
 		"prompt_cache_miss_tokens": norm.PromptCacheMissTokensEffective(),
+		"prompt_cache_available":   norm.HasPromptCacheMetrics(),
 		"prompt_audio_tokens":      norm.PromptAudioTokens(),
 		"reasoning_tokens":         norm.CompletionReasoningTokens(),
 	}

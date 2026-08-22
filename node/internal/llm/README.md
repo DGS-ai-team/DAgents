@@ -9,7 +9,9 @@ OpenAI 兼容 Chat Completions 客户端与厂商消息适配。
 | `types.go` | `Message`、`ChatRequest`、`Client` 接口 |
 | `messages.go` | `MessagesWithSystem` |
 | `messageutil.go` | `CloneMessage`、`EstimateMessageTokens`、`MessageToDeepSeekAPIPayload`、`MessageToJournalPayload` |
+| `tool_result_visibility.go` | tool result status/error 的 history 元数据与模型请求侧 metadata 适配 |
 | `openai.go` | HTTP/SSE、`tool_calls` 增量合并 |
+| `usage.go` | OpenAI/DeepSeek usage 归一化、cache 可用性和 reasoning token 统计 |
 | `provider.go` | `MessageAdapter` 接口与工厂 |
 | `provider_openai.go` / `provider_deepseek.go` / `provider_qwen.go` / `provider_vllm.go` | 厂商存储规范化与出站序列化 |
 | `client_adapter.go` | `adapterClient` 包装 HTTP 客户端 |
@@ -20,6 +22,7 @@ OpenAI 兼容 Chat Completions 客户端与厂商消息适配。
 ```
 history Message
   → NormalizeAssistantForStorage   （写入 session history）
+  → PrepareToolResultMessagesForModel （仅请求副本增加 [TOOL_RESULT_METADATA]）
   → PrepareOutboundMessages        （出站前裁剪 []Message）
   → MarshalChatRequestMessages     （HTTP messages 字段；openai 返回 ok=false）
   → RequestExtra                   （合并进 POST body 顶层：user_id=agent_id + thinking 等）
@@ -36,6 +39,10 @@ history Message
 | `vllm` | `http://127.0.0.1:8000/v1` | 否（取决于部署模型） | 不展示 |
 
 DeepSeek / Qwen 的 `reasoning_content` 出站规则集中在对应 adapter；`openai.go` 不含厂商分支。
+
+工具结果的原始正文继续用于 hydrate、UI 和历史审计；模型请求副本在每条 `tool` 消息正文前增加紧凑的
+`[TOOL_RESULT_METADATA]`，让模型可读取运行时的 `status/error`，而 `MessageToAPIPayload` 不会把内部
+`tool_result_metadata` 字段作为非标准 provider 字段发送。
 
 `GET /v1/llm/settings` 会返回 `thinking_control`、`thinking_label` 和
 `thinking_secondary_label`，由前端按当前 provider/model 决定右下角显示的开关。
