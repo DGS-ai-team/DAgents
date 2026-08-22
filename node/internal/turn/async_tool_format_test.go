@@ -80,6 +80,9 @@ func TestBuildAsyncToolMessages_modelFriendly(t *testing.T) {
 	if !strings.Contains(built.ToolMessage.Content, "source_tool_call_id=call-bg-1") {
 		t.Fatalf("tool missing source call id: %q", built.ToolMessage.Content)
 	}
+	if built.ToolMessage.ToolResultMetadata == nil || built.ToolMessage.ToolResultMetadata.Status != "succeeded" {
+		t.Fatalf("async tool metadata = %+v", built.ToolMessage.ToolResultMetadata)
+	}
 
 	var args map[string]any
 	if err := json.Unmarshal([]byte(built.AssistantMessage.ToolCalls[0].Function.Arguments), &args); err != nil {
@@ -90,5 +93,19 @@ func TestBuildAsyncToolMessages_modelFriendly(t *testing.T) {
 	}
 	if args["source_tool_call_id"] != "call-bg-1" {
 		t.Fatalf("callback args = %+v", args)
+	}
+}
+
+func TestBuildAsyncToolMessages_modelMetadataPreservesTimeoutStatus(t *testing.T) {
+	hub := stream.NewHub(4, logx.Discard())
+	orch := testOrchestrator(t, hub, &llm.MockClient{})
+	built := orch.BuildSideEffectMessages(SideEffectAsync, "sess-1", nil, queue.AsyncToolResultPayload{
+		JobID: "job-timeout", ToolName: "bash_run", Status: "timed_out", ErrorText: "命令超时",
+	}, "", "")
+	if built.ToolMessage.ToolResultMetadata == nil || built.ToolMessage.ToolResultMetadata.Status != "timed_out" {
+		t.Fatalf("timeout metadata = %+v content=%q", built.ToolMessage.ToolResultMetadata, built.ToolMessage.Content)
+	}
+	if built.ToolMessage.ToolResultMetadata.Error == nil || built.ToolMessage.ToolResultMetadata.Error.Code != "tool_timeout" {
+		t.Fatalf("timeout error metadata = %+v", built.ToolMessage.ToolResultMetadata.Error)
 	}
 }

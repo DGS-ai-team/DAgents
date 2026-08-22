@@ -21,7 +21,7 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
@@ -60,7 +60,7 @@ func TestBuildSystemPrompt_appendsSkillsCatalogOnlyWhenEnabled(t *testing.T) {
 
 	enabled := skills.NewCatalog(root, true, 2)
 	prompt := BuildSystemPrompt(SystemPromptInput{Catalog: enabled})
-	if !containsAll(prompt, "## 可用 skills", "writer: Write docs", "load_skills") {
+	if !containsAll(prompt, "## 可用 skills", "writer: Write docs", "load_skills", "匹配且尚未加载") {
 		t.Fatalf("enabled prompt = %q", prompt)
 	}
 
@@ -68,6 +68,22 @@ func TestBuildSystemPrompt_appendsSkillsCatalogOnlyWhenEnabled(t *testing.T) {
 	without := BuildSystemPrompt(SystemPromptInput{Catalog: disabled})
 	if contains(without, "## 可用 skills") || contains(without, "writer: Write docs") {
 		t.Fatalf("disabled prompt should omit skills catalog: %q", without)
+	}
+}
+
+func TestBuildSystemPrompt_catalogToolModeReplacesInlineCatalog(t *testing.T) {
+	root := t.TempDir()
+	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
+
+	prompt := BuildSystemPrompt(SystemPromptInput{
+		Catalog:               skills.NewCatalog(root, true, 2),
+		SkillsCatalogToolMode: true,
+	})
+	if !containsAll(prompt, "list_available_skills", "load_skills", "只包含元数据", "下一个模型 Step") {
+		t.Fatalf("catalog tool mode prompt = %q", prompt)
+	}
+	if contains(prompt, "## 可用 skills") || contains(prompt, "writer: Write docs") || contains(prompt, "Write clearly.") {
+		t.Fatalf("catalog tool mode must not inline catalog or body: %q", prompt)
 	}
 }
 

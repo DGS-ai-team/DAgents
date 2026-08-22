@@ -24,6 +24,7 @@ func attachCompressionUsageMetrics(payload map[string]any, usage llm.Usage) {
 	payload["token_reduction_rate"] = tokenReductionRate(usage.PromptTokens, usage.CompletionTokens)
 	payload["prompt_cache_hit_tokens"] = usage.PromptCachedTokens()
 	payload["prompt_cache_miss_tokens"] = usage.PromptCacheMissTokensEffective()
+	payload["prompt_cache_available"] = usage.HasPromptCacheMetrics()
 	if rate := usage.PromptCacheHitRate(); rate >= 0 {
 		payload["prompt_cache_hit_rate"] = rate
 	}

@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -376,6 +377,75 @@ func TestTurnCoordinatorAdvancesContextEpoch(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorReplacesModelContextAtControlledBoundary(t *testing.T) {
+	now := time.Now().UTC()
+	coordinator := NewTurnCoordinator("session-1", "agent-1")
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-1", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandTurnSnapshotCreated, SessionID: "session-1", TurnID: "turn-1", Generation: 1, ContextSnapshot: NewModelContextSnapshot("prompt-v1", nil, 1, "runtime-v1"), At: now},
+	} {
+		if _, err := coordinator.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+
+	snapshot, err := coordinator.Dispatch(TurnCommand{
+		Type:            CommandModelContextChanged,
+		SessionID:       "session-1",
+		TurnID:          "turn-1",
+		StepID:          "step-1",
+		Generation:      1,
+		ContextSnapshot: NewModelContextSnapshot("prompt-v2", nil, 1, "runtime-v2"),
+		Reason:          "skills_load",
+		At:              now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ContextEpoch != 1 || snapshot.PromptDigest != Digest("prompt-v2") || snapshot.StepStatus != StepStatusRequesting || snapshot.TurnEndReason != "" || snapshot.StepEndReason != "" {
+		t.Fatalf("replaced context projection = %#v", snapshot)
+	}
+}
+
+func TestTurnCoordinatorReplaysModelContextChange(t *testing.T) {
+	now := time.Now().UTC()
+	first := NewModelContextSnapshot("prompt-v1", nil, 1, "runtime-v1")
+	second := NewModelContextSnapshot("prompt-v2", nil, 2, "runtime-v2")
+	second.SkillsCatalogRevision = "catalog-v2"
+	second.LoadedSkillsDigest = "loaded-v2"
+	second.LoadedSkillsContentDigest = "body-v2"
+	payload := func(generation uint64, snapshot *ModelContextSnapshot) []byte {
+		raw, err := json.Marshal(map[string]any{
+			"generation":       generation,
+			"context_snapshot": snapshot,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	events := []TurnEventEnvelope{
+		{SessionID: "session-1", TurnID: "turn-1", SessionSeq: 1, TurnSeq: 1, EventType: EventTurnStarted, EventVersion: 1, Source: string(TurnSourceHuman), CommandID: "start", CreatedAt: now, Payload: payload(1, nil)},
+		{SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", SessionSeq: 2, TurnSeq: 2, EventType: EventStepStarted, EventVersion: 1, CommandID: "step", CreatedAt: now, Payload: payload(1, nil)},
+		{SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", SessionSeq: 3, TurnSeq: 3, EventType: EventTurnSnapshotCreated, EventVersion: 1, CommandID: "snapshot", CreatedAt: now, Payload: payload(1, first)},
+		{SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", SessionSeq: 4, TurnSeq: 4, EventType: EventModelContextChanged, EventVersion: 1, CommandID: "context-change", CreatedAt: now.Add(time.Second), Payload: payload(1, second)},
+	}
+	coordinator := NewTurnCoordinator("session-1", "agent-1")
+	if err := coordinator.Restore(events); err != nil {
+		t.Fatal(err)
+	}
+	state := coordinator.Snapshot()
+	if state.ContextEpoch != 1 || state.PromptDigest != second.PromptDigest || state.RuntimeRevision != second.RuntimeRevision || state.ContextSnapshot == nil {
+		t.Fatalf("replayed context change projection = %#v", state)
+	}
+	if state.ContextSnapshot.SkillsCatalogRevision != "catalog-v2" ||
+		state.ContextSnapshot.LoadedSkillsDigest != "loaded-v2" ||
+		state.ContextSnapshot.LoadedSkillsContentDigest != "body-v2" {
+		t.Fatalf("replayed skill snapshot diagnostics = %#v", state.ContextSnapshot)
+	}
+}
+
 func TestTurnCoordinatorTracksSnapshotAttemptsAndToolExecution(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
@@ -472,10 +542,10 @@ func TestTurnCoordinatorAccumulatesModelUsageAcrossAttempts(t *testing.T) {
 		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-usage", Generation: 1, Source: TurnSourceHuman, At: now},
 		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandModelRequestStarted, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, RequestDigest: "attempt-1", At: now},
-		{Type: CommandModelUsageRecorded, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, Usage: StepUsage{InputTokens: 10, OutputTokens: 4, TotalTokens: 14}, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, Usage: StepUsage{InputTokens: 10, OutputTokens: 4, TotalTokens: 14, PromptCacheHitTokens: 6, PromptCacheMissTokens: 4, PromptCacheMetricsObserved: true, ReasoningTokens: 2}, At: now},
 		{Type: CommandModelRequestRetrying, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, ErrorKind: "timeout", At: now},
 		{Type: CommandModelRequestStarted, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, RequestDigest: "attempt-2", At: now},
-		{Type: CommandModelUsageRecorded, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, Usage: StepUsage{InputTokens: 20, OutputTokens: 6, TotalTokens: 26}, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "session-1", TurnID: "turn-usage", StepID: "step-1", Generation: 1, Usage: StepUsage{InputTokens: 20, OutputTokens: 6, TotalTokens: 26, PromptCacheHitTokens: 12, PromptCacheMissTokens: 8, PromptCacheMetricsObserved: true, ReasoningTokens: 3}, At: now},
 	}
 	for _, command := range commands {
 		if _, err := c.Dispatch(command); err != nil {
@@ -485,6 +555,10 @@ func TestTurnCoordinatorAccumulatesModelUsageAcrossAttempts(t *testing.T) {
 	state := c.Snapshot()
 	if state.Usage.InputTokens != 30 || state.Usage.OutputTokens != 10 || state.Usage.TotalTokens != 40 {
 		t.Fatalf("turn usage = %+v", state.Usage)
+	}
+	if state.Usage.PromptCacheHitTokens != 18 || state.Usage.PromptCacheMissTokens != 12 ||
+		!state.Usage.PromptCacheMetricsObserved || state.Usage.ReasoningTokens != 5 {
+		t.Fatalf("turn cache/reasoning usage = %+v", state.Usage)
 	}
 	if state.StepStatus != StepStatusRequesting || state.ModelAttempt != 2 {
 		t.Fatalf("attempt projection = %+v", state)

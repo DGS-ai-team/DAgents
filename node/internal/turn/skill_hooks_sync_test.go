@@ -11,8 +11,8 @@ import (
 
 type skillHookStub struct{}
 
-func (skillHookStub) Name() string                 { return hooks.SkillHookNamePrefix + "writer/log" }
-func (skillHookStub) Phases() []hooks.Phase        { return []hooks.Phase{hooks.PhaseTurnDone} }
+func (skillHookStub) Name() string          { return hooks.SkillHookNamePrefix + "writer/log" }
+func (skillHookStub) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhaseTurnDone} }
 func (skillHookStub) Run(context.Context, *hooks.Context, hooks.Host) (hooks.Result, error) {
 	return hooks.Result{Action: hooks.ActionContinue}, nil
 }
@@ -26,7 +26,10 @@ func TestSyncLoadedSkillHooks_registersAndClears(t *testing.T) {
 		skillAccess: SkillAccess{Catalog: catalog},
 	}
 	orch.toolHooks.RegisterPhaseHook(skillHookStub{}, hooks.RegisterOpts{})
-	orch.SyncLoadedSkillHooks([]skills.LoadedSkill{{SkillName: "writer"}})
+	result := orch.SyncLoadedSkillHooks([]skills.LoadedSkill{{SkillName: "writer"}})
+	if result.Status != "synchronized" || len(result.Loaded) != 0 || len(result.Failed) != 0 {
+		t.Fatalf("hook sync result = %+v", result)
+	}
 	if len(orch.toolHooks.PhaseHookNames(hooks.PhaseTurnDone)) != 0 {
 		t.Fatalf("turn_done hooks = %v, want 0 without .so plugins", orch.toolHooks.PhaseHookNames(hooks.PhaseTurnDone))
 	}

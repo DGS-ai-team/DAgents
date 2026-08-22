@@ -220,48 +220,192 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil
 	}
+	if tc.Function.Name == "list_available_skills" {
+		if !o.skillAccess.CatalogToolMode {
+			body, _ := json.Marshal(map[string]any{
+				"status":           "failed",
+				"catalog_revision": catalog.Revision(),
+				"query":            "",
+				"skills":           []skills.LoadedSkill{},
+				"has_more":         false,
+				"next_cursor":      "",
+				"error": map[string]any{
+					"code":      "experiment_disabled",
+					"message":   "list_available_skills 实验未启用",
+					"retryable": false,
+				},
+			})
+			output := string(body)
+			o.publishToolResult(sessionID, tc, output, true, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+			return nil
+		}
+		return o.executeListAvailableSkillsTool(sessionID, history, tc, catalog)
+	}
 	loaded := []skills.LoadedSkill{}
 	if o.skillAccess.Get != nil {
 		loaded = o.skillAccess.Get()
 	}
+	beforeLoadedDigest := Digest(loaded)
 	var payload map[string]any
 	_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	var output string
+	var action string
+	var requested []string
+	var rejectedDiagnostics []skills.SkillLoadRejection
 	switch tc.Function.Name {
 	case "load_skills":
-		names := stringSliceField(payload, "skill_names")
-		loaded = catalog.SetLoadedSkills(names)
-		body, _ := json.Marshal(map[string]any{
-			"action":        "set_loaded_skills",
-			"loaded_skills": loaded,
-		})
-		output = string(body)
+		action = "set_loaded_skills"
+		requested = stringSliceField(payload, "skill_names")
+		loadResult := catalog.SetLoadedSkillsDetailed(requested)
+		requested = loadResult.Requested
+		loaded = loadResult.Loaded
+		rejectedDiagnostics = loadResult.Rejected
 	case "unload_skills":
-		names := stringSliceField(payload, "skill_names")
-		loaded = catalog.UnloadSkills(loaded, names)
-		body, _ := json.Marshal(map[string]any{
-			"action":        "unload_skills",
-			"loaded_skills": loaded,
-		})
-		output = string(body)
+		action = "unload_skills"
+		requested = stringSliceField(payload, "skill_names")
+		before := append([]skills.LoadedSkill(nil), loaded...)
+		loaded = catalog.UnloadSkills(loaded, requested)
+		rejectedDiagnostics = skillUnloadRejections(before, requested)
 	case "clear_skills":
+		action = "clear_skills"
 		loaded = nil
-		body, _ := json.Marshal(map[string]any{
-			"action":        "clear_skills",
-			"loaded_skills": []skills.LoadedSkill{},
-		})
-		output = string(body)
 	default:
 		output = "ERROR: unknown skill tool"
 	}
-	if o.skillAccess.Set != nil {
+	hookSync := SkillHooksSyncResult{Status: "synchronized"}
+	if action != "" && o.skillAccess.SetWithHookStatus != nil {
+		hookSync = o.skillAccess.SetWithHookStatus(loaded)
+	} else if action != "" && o.skillAccess.Set != nil {
 		o.skillAccess.Set(loaded)
+	}
+	changed := beforeLoadedDigest != Digest(loaded)
+	if changed {
+		o.RequestModelContextRefresh(sessionID, "skills_"+tc.Function.Name)
+	}
+	if action != "" {
+		body, _ := json.Marshal(skillMutationResult(action, requested, loaded, rejectedDiagnostics, changed, hookSync))
+		output = string(body)
 	}
 	rejected := strings.HasPrefix(output, "ERROR:")
 	o.publishToolResult(sessionID, tc, output, rejected, nil)
 	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 	return nil
+}
+
+func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog *skills.Catalog) error {
+	var payload map[string]any
+	_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
+	query := strings.TrimSpace(fmt.Sprint(payload["query"]))
+	if query == "<nil>" {
+		query = ""
+	}
+	limit := 10
+	switch value := payload["limit"].(type) {
+	case float64:
+		limit = int(value)
+	case int:
+		limit = value
+	case int64:
+		limit = int(value)
+	}
+	cursor := strings.TrimSpace(fmt.Sprint(payload["cursor"]))
+	if cursor == "<nil>" {
+		cursor = ""
+	}
+	page, err := catalog.ListAvailableSkills(query, limit, cursor)
+	var output string
+	rejected := err != nil
+	if err != nil {
+		code := strings.TrimSpace(err.Error())
+		if code == "" {
+			code = "list_failed"
+		}
+		body, _ := json.Marshal(map[string]any{
+			"status":           "failed",
+			"catalog_revision": catalog.Revision(),
+			"query":            query,
+			"skills":           []skills.LoadedSkill{},
+			"has_more":         false,
+			"next_cursor":      "",
+			"error": map[string]any{
+				"code":      code,
+				"message":   code,
+				"retryable": false,
+			},
+		})
+		output = string(body)
+	} else {
+		body, _ := json.Marshal(map[string]any{
+			"status":           "succeeded",
+			"catalog_revision": page.CatalogRevision,
+			"query":            page.Query,
+			"skills":           page.Skills,
+			"has_more":         page.HasMore,
+			"next_cursor":      page.NextCursor,
+		})
+		output = string(body)
+	}
+	o.publishToolResult(sessionID, tc, output, rejected, nil)
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+	return nil
+}
+
+func skillMutationResult(action string, requested []string, loaded []skills.LoadedSkill, rejected []skills.SkillLoadRejection, changed bool, hookSync SkillHooksSyncResult) map[string]any {
+	modelContextBoundary := "unchanged"
+	if changed {
+		modelContextBoundary = "next_model_step"
+	}
+	// Keep the model-facing schema stable: collection fields are arrays even
+	// when the result is empty.  A null/omitted value forces the model and UI
+	// to infer whether the field was intentionally empty or unavailable.
+	requestedOut := append([]string{}, requested...)
+	loadedOut := append([]skills.LoadedSkill{}, loaded...)
+	rejectedOut := append([]skills.SkillLoadRejection{}, rejected...)
+	hooksLoadedOut := append([]string{}, hookSync.Loaded...)
+	hooksFailedOut := append([]SkillHookSyncFailure{}, hookSync.Failed...)
+	return map[string]any{
+		"action":                         action,
+		"requested":                      requestedOut,
+		"loaded_skills":                  loadedOut,
+		"rejected":                       rejectedOut,
+		"session_state_applied_boundary": "immediate",
+		"model_context_applied_boundary": modelContextBoundary,
+		"hooks_status":                   hookSync.Status,
+		"hooks_loaded":                   hooksLoadedOut,
+		"hooks_failed":                   hooksFailedOut,
+	}
+}
+
+func skillUnloadRejections(loaded []skills.LoadedSkill, names []string) []skills.SkillLoadRejection {
+	if len(names) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(loaded))
+	for _, item := range loaded {
+		known[item.SkillName] = struct{}{}
+		if item.DirectoryName != "" {
+			known[item.DirectoryName] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(names))
+	result := make([]skills.SkillLoadRejection, 0)
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		if _, ok := known[name]; !ok {
+			result = append(result, skills.SkillLoadRejection{Name: name, Reason: "not_loaded"})
+		}
+	}
+	return result
 }
 
 func stringSliceField(payload map[string]any, key string) []string {
@@ -398,10 +542,11 @@ func (o *Orchestrator) persistToolResult(
 	// evidence for the next model step and must remain measurable.
 	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, resultMeta.Denied())
 	o.recordToolExecutionSuccess(tc, forClient, !resultMeta.Succeeded())
-	o.appendHistory(sessionID, history, llm.ToolResultMessage(
+	o.appendHistory(sessionID, history, llm.ToolResultMessageWithMetadata(
 		tc.ID,
 		tc.Function.Name,
 		forHistory,
+		resultMeta,
 	))
 	if resultMeta.Status != tools.ResultStatusDenied {
 		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)

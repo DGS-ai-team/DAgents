@@ -490,6 +490,8 @@ func lifecycleEventType(command turn.CommandType) (turn.EventType, bool) {
 		return turn.EventStepStarted, true
 	case turn.CommandTurnSnapshotCreated:
 		return turn.EventTurnSnapshotCreated, true
+	case turn.CommandModelContextChanged:
+		return turn.EventModelContextChanged, true
 	case turn.CommandModelRequestStarted:
 		return turn.EventModelRequestStarted, true
 	case turn.CommandModelResponseCompleted:

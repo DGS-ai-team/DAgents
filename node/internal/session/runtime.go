@@ -64,9 +64,11 @@ type runtime struct {
 	// 日志
 	logger *slog.Logger
 
-	// 技能目录
-	skillsCatalog *skills.Catalog
-	skillRevision string
+	// 技能目录。skillsCatalog 是控制面使用的 live catalog；
+	// skillsTurnCatalog 是当前 human Turn 及其 continuation 使用的不可变视图。
+	skillsCatalog     *skills.Catalog
+	skillsTurnCatalog *skills.Catalog
+	skillRevision     string
 	// 上下文压缩逻辑
 	compression *compression.Coordinator
 
@@ -157,18 +159,23 @@ func newRuntimeWithPublisher(
 	if turnOpts.SkillsVisibleRestrict {
 		catalog.RestrictVisible(turnOpts.SkillsVisible)
 	}
+	turnCatalog := catalog.NewTurnView()
+	if turnCatalog == nil {
+		turnCatalog = catalog
+	}
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
-		session:         Session{ID: id, AgentID: agentID},
-		queue:           queue.NewMessageQueue(),
-		turnCoordinator: turn.NewTurnCoordinator(id, agentID),
-		done:            make(chan struct{}),
-		store:           st,
-		hub:             eventHub,
-		publisher:       pub,
-		agentID:         agentID,
-		logger:          logger,
-		skillsCatalog:   catalog,
+		session:           Session{ID: id, AgentID: agentID},
+		queue:             queue.NewMessageQueue(),
+		turnCoordinator:   turn.NewTurnCoordinator(id, agentID),
+		done:              make(chan struct{}),
+		store:             st,
+		hub:               eventHub,
+		publisher:         pub,
+		agentID:           agentID,
+		logger:            logger,
+		skillsCatalog:     catalog,
+		skillsTurnCatalog: turnCatalog,
 		compression: func() *compression.Coordinator {
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)
@@ -177,7 +184,7 @@ func newRuntimeWithPublisher(
 		}(),
 		messages:                append([]llm.Message(nil), initial...),
 		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
-		skillRevision:           catalog.Revision(),
+		skillRevision:           turnCatalog.Revision(),
 		fsRoot:                  turnOpts.FSRoot,
 		triggerDelivery:         triggerDelivery,
 		sideEffects:             newSideEffectStore(),
@@ -213,9 +220,11 @@ func newRuntimeWithPublisher(
 		toolExec,
 		policyEngine,
 		turn.SkillAccess{
-			Catalog: catalog,
-			Get:     rt.getLoadedSkills,
-			Set:     rt.setLoadedSkills,
+			Catalog:           turnCatalog,
+			CatalogToolMode:   turnOpts.SkillsCatalogToolMode,
+			Get:               rt.getLoadedSkills,
+			Set:               rt.setLoadedSkills,
+			SetWithHookStatus: rt.setLoadedSkillsWithHookStatus,
 		},
 		turnOpts.MaxToolLoops,
 		promptReader,
@@ -391,12 +400,22 @@ func (r *runtime) getLoadedSkills() []skills.LoadedSkill {
 
 // setLoadedSkills 设置加载的技能列表
 func (r *runtime) setLoadedSkills(items []skills.LoadedSkill) {
+	_ = r.setLoadedSkillsWithHookStatus(items)
+}
+
+func (r *runtime) setLoadedSkillsWithHookStatus(items []skills.LoadedSkill) turn.SkillHooksSyncResult {
+	before := r.loadedSkillsSnapshot()
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
+	hookSync := turn.SkillHooksSyncResult{Status: "unavailable"}
 	if r.orch != nil {
-		r.orch.SyncLoadedSkillHooks(items)
+		hookSync = r.orch.SyncLoadedSkillHooks(items)
+		if turn.Digest(before) != turn.Digest(items) && r.turnState() != turn.StateIdle {
+			r.orch.RequestModelContextRefresh(r.session.ID, "skills_api_update")
+		}
 	}
+	return hookSync
 }
 
 // setTriggerDelivery 设置 trigger 消息投递跟踪器
@@ -657,7 +676,11 @@ func (r *runtime) observeSkillCatalogChange() {
 	if r == nil || r.skillsCatalog == nil {
 		return
 	}
-	current := r.skillsCatalog.Revision()
+	view := r.skillsCatalog.NewTurnView()
+	if view == nil {
+		return
+	}
+	current := view.Revision()
 	if current == "" {
 		return
 	}
@@ -668,7 +691,11 @@ func (r *runtime) observeSkillCatalogChange() {
 		return
 	}
 	r.skillRevision = current
+	r.skillsTurnCatalog = view
 	r.mu.Unlock()
+	if r.orch != nil {
+		r.orch.SetSkillsCatalog(view)
+	}
 	if r.hub != nil {
 		r.hub.Publish(r.session.ID, "skills/changed", map[string]any{
 			"agent_id":         r.agentID,
@@ -676,6 +703,27 @@ func (r *runtime) observeSkillCatalogChange() {
 			"revision":         current,
 			"applied_boundary": "next_turn",
 		})
+	}
+}
+
+// refreshSkillsCatalogForExplicitMutation switches the model-facing view
+// after a control-plane mutation. Model-issued load_skills deliberately keeps
+// the existing Turn view; control-plane mutation is an explicit context
+// boundary and may expose the latest catalog at the next model Step.
+func (r *runtime) refreshSkillsCatalogForExplicitMutation() {
+	if r == nil || r.skillsCatalog == nil {
+		return
+	}
+	view := r.skillsCatalog.NewTurnView()
+	if view == nil {
+		return
+	}
+	r.mu.Lock()
+	r.skillsTurnCatalog = view
+	r.skillRevision = view.Revision()
+	r.mu.Unlock()
+	if r.orch != nil {
+		r.orch.SetSkillsCatalog(view)
 	}
 }
 

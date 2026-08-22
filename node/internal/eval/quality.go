@@ -66,22 +66,24 @@ type ToolResult struct {
 // Turn. Runtime adapters should populate it from authoritative lifecycle and
 // tool facts rather than scraping UI text.
 type Trace struct {
-	ScenarioID           string
-	FinalText            string
-	ToolCalls            []ToolCall
-	ToolResults          []ToolResult
-	Steps                int
-	Retries              int
-	DurationMS           int64
-	InputTokens          int
-	OutputTokens         int
-	Cost                 float64
-	CacheHit             bool
-	CacheObserved        bool
-	Cancelled            bool
-	ToolCallsAfterCancel int
-	CompletionStatus     string
-	VerificationStatus   string
+	ScenarioID            string
+	FinalText             string
+	ToolCalls             []ToolCall
+	ToolResults           []ToolResult
+	Steps                 int
+	Retries               int
+	DurationMS            int64
+	InputTokens           int
+	OutputTokens          int
+	Cost                  float64
+	CacheHit              bool
+	CacheObserved         bool
+	PromptCacheHitTokens  int
+	PromptCacheMissTokens int
+	Cancelled             bool
+	ToolCallsAfterCancel  int
+	CompletionStatus      string
+	VerificationStatus    string
 }
 
 // CriterionResult is the result of one scenario assertion.
@@ -101,25 +103,28 @@ type ScenarioResult struct {
 
 // Scorecard is the baseline report. Rates are in the range [0, 1].
 type Scorecard struct {
-	ScenarioCount          int
-	ScenarioPassCount      int
-	CriterionCount         int
-	CriterionPassCount     int
-	TaskSuccessRate        float64
-	CriterionPassRate      float64
-	VerificationCoverage   float64
-	CancellationViolations int
-	TotalSteps             int
-	TotalToolCalls         int
-	TotalToolFailures      int
-	TotalRetries           int
-	TotalDurationMS        int64
-	TotalInputTokens       int
-	TotalOutputTokens      int
-	TotalCost              float64
-	CacheObservedCount     int
-	CacheHitCount          int
-	Results                []ScenarioResult
+	ScenarioCount              int
+	ScenarioPassCount          int
+	CriterionCount             int
+	CriterionPassCount         int
+	TaskSuccessRate            float64
+	CriterionPassRate          float64
+	VerificationCoverage       float64
+	CancellationViolations     int
+	TotalSteps                 int
+	TotalToolCalls             int
+	TotalToolFailures          int
+	TotalRetries               int
+	TotalDurationMS            int64
+	TotalInputTokens           int
+	TotalOutputTokens          int
+	TotalCost                  float64
+	CacheObservedCount         int
+	CacheHitCount              int
+	TotalPromptCacheHitTokens  int
+	TotalPromptCacheMissTokens int
+	PromptCacheHitRate         float64
+	Results                    []ScenarioResult
 }
 
 // EvaluateScenario evaluates a trace without model-dependent judging.
@@ -162,6 +167,8 @@ func EvaluateSuite(scenarios []Scenario, traces map[string]Trace) Scorecard {
 		score.TotalCost += trace.Cost
 		if trace.CacheObserved {
 			score.CacheObservedCount++
+			score.TotalPromptCacheHitTokens += trace.PromptCacheHitTokens
+			score.TotalPromptCacheMissTokens += trace.PromptCacheMissTokens
 			if trace.CacheHit {
 				score.CacheHitCount++
 			}
@@ -192,6 +199,10 @@ func EvaluateSuite(scenarios []Scenario, traces map[string]Trace) Scorecard {
 	}
 	if score.ScenarioCount > 0 {
 		score.VerificationCoverage /= float64(score.ScenarioCount)
+	}
+	cacheTotal := score.TotalPromptCacheHitTokens + score.TotalPromptCacheMissTokens
+	if cacheTotal > 0 {
+		score.PromptCacheHitRate = float64(score.TotalPromptCacheHitTokens) / float64(cacheTotal)
 	}
 	return score
 }
@@ -360,6 +371,50 @@ func DefaultScenarios() []Scenario {
 			Criteria: []Criterion{
 				{ID: "load-skill", Kind: CheckToolCalled, Value: "load_skills", Description: "按目录元数据加载匹配 skill"},
 				{ID: "skill-evidence", Kind: CheckResultContains, Value: "验证", Description: "遵循 skill 的验证要求"},
+			},
+		},
+		{
+			ID: "skill-load-boundary", Name: "Skill 加载生效边界", Category: "skills",
+			UserInput: "加载与当前任务匹配的 skill，并确认模型何时可以使用其正文。",
+			Criteria: []Criterion{
+				{ID: "load-boundary-call", Kind: CheckToolCalled, Value: "load_skills", Description: "显式加载匹配 skill"},
+				{ID: "load-boundary-result", Kind: CheckResultContains, Value: "model_context_applied_boundary", Description: "结果说明模型上下文生效边界"},
+				{ID: "load-session-result", Kind: CheckResultContains, Value: "session_state_applied_boundary", Description: "结果区分会话状态和模型上下文状态"},
+			},
+		},
+		{
+			ID: "skill-load-diagnostics", Name: "Skill 加载诊断", Category: "skills",
+			UserInput: "加载一个存在的 skill 和一个不存在的 skill，并说明每个名称的处理结果。",
+			Criteria: []Criterion{
+				{ID: "diagnostic-call", Kind: CheckToolCalled, Value: "load_skills", Description: "执行 skill 加载"},
+				{ID: "diagnostic-requested", Kind: CheckResultContains, Value: "requested", Description: "返回请求名称"},
+				{ID: "diagnostic-rejected", Kind: CheckResultContains, Value: "rejected", Description: "返回未加载名称及原因"},
+			},
+		},
+		{
+			ID: "skill-load-ambiguous", Name: "Skill 同名消歧", Category: "skills",
+			UserInput: "当多个 Skill 使用相同逻辑名称时，不要静默选择其中一个；使用目录名或明确报告歧义。",
+			Criteria: []Criterion{
+				{ID: "ambiguous-call", Kind: CheckToolCalled, Value: "load_skills", Description: "尝试加载匹配 Skill"},
+				{ID: "ambiguous-result", Kind: CheckResultContains, Value: "ambiguous", Description: "拒绝静默选择并返回歧义原因"},
+			},
+		},
+		{
+			ID: "skill-catalog-boundary", Name: "Skill 目录版本边界", Category: "skills",
+			UserInput: "活动 Turn 中 Skill 文件发生外部修改时，不要把新正文混入当前上下文；明确说明何时重新加载。",
+			Criteria: []Criterion{
+				{ID: "catalog-boundary-call", Kind: CheckToolCalled, Value: "load_skills", Description: "尝试通过工具加载 Skill"},
+				{ID: "catalog-boundary-result", Kind: CheckResultContains, Value: "catalog_changed", Description: "拒绝把活动 Turn 外的新版本静默混入上下文"},
+				{ID: "catalog-boundary-final", Kind: CheckFinalContains, Value: "下一次 human Turn", Description: "说明新版本的生效边界"},
+			},
+		},
+		{
+			ID: "skill-unload-boundary", Name: "Skill 卸载边界", Category: "skills",
+			UserInput: "卸载当前不再需要的 skill，并确认其正文不会在错误的上下文中继续被使用。",
+			Criteria: []Criterion{
+				{ID: "unload-call", Kind: CheckToolCalled, Value: "unload_skills", Description: "执行 skill 卸载"},
+				{ID: "unload-state", Kind: CheckResultContains, Value: "loaded_skills", Description: "返回卸载后的技能状态"},
+				{ID: "unload-boundary", Kind: CheckResultContains, Value: "model_context_applied_boundary", Description: "返回模型上下文生效边界"},
 			},
 		},
 		{

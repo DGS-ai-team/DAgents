@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -68,6 +69,12 @@ func TestTurnKeepsModelContextSnapshotAcrossToolSteps(t *testing.T) {
 	}
 	if len(client.requests[0].Tools) != len(client.requests[1].Tools) {
 		t.Fatalf("tool schema count changed within Turn: %d != %d", len(client.requests[0].Tools), len(client.requests[1].Tools))
+	}
+	if len(client.requests[1].Messages) == 0 || !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "[TOOL_RESULT_METADATA]") {
+		t.Fatalf("model request did not receive tool result metadata: %+v", client.requests[1].Messages)
+	}
+	if len(history) == 0 || strings.Contains(history[len(history)-1].Content, "[TOOL_RESULT_METADATA]") {
+		t.Fatalf("persisted history should keep raw tool result: %+v", history)
 	}
 	if promptCalls == 0 {
 		t.Fatal("system prompt builder was not called")

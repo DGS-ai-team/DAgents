@@ -29,11 +29,11 @@ type readyCompression struct {
 
 // ForceResult 为手动触发阻塞压缩的结果（POST /compress）。
 type ForceResult struct {
-	Status                 string `json:"status"`
-	TriggerLevel           string `json:"trigger_level,omitempty"`
-	CompressedMessageCount int    `json:"compressed_message_count,omitempty"`
-	CompressionStart       int    `json:"compression_start,omitempty"`
-	CompressionEnd         int    `json:"compression_end,omitempty"`
+	Status                 string  `json:"status"`
+	TriggerLevel           string  `json:"trigger_level,omitempty"`
+	CompressedMessageCount int     `json:"compressed_message_count,omitempty"`
+	CompressionStart       int     `json:"compression_start,omitempty"`
+	CompressionEnd         int     `json:"compression_end,omitempty"`
 	MessagesCount          int     `json:"messages_count,omitempty"`
 	MessagesTotalTokens    int     `json:"messages_total_tokens,omitempty"`
 	PromptTokens           int     `json:"prompt_tokens,omitempty"`
@@ -42,6 +42,7 @@ type ForceResult struct {
 	TokenReductionRate     float64 `json:"token_reduction_rate,omitempty"`
 	PromptCacheHitTokens   int     `json:"prompt_cache_hit_tokens,omitempty"`
 	PromptCacheMissTokens  int     `json:"prompt_cache_miss_tokens,omitempty"`
+	PromptCacheAvailable   bool    `json:"prompt_cache_available"`
 }
 
 type applyOutcome struct {
@@ -85,9 +86,9 @@ func (t *compressionTask) forceResult(status string) ForceResult {
 
 // Coordinator 协调 silent 异步与 blocking 同步摘要压缩。
 type Coordinator struct {
-	client                llm.Client
-	silentTriggerTokens   int
-	blockingTriggerTokens int
+	client                   llm.Client
+	silentTriggerTokens      int
+	blockingTriggerTokens    int
 	rawMessageHistoryEnabled bool
 
 	mu                sync.Mutex
@@ -229,6 +230,7 @@ func (c *Coordinator) ForceBlocking(
 		TokenReductionRate:     tokenReductionRate(out.usage.PromptTokens, out.usage.CompletionTokens),
 		PromptCacheHitTokens:   out.usage.PromptCachedTokens(),
 		PromptCacheMissTokens:  out.usage.PromptCacheMissTokensEffective(),
+		PromptCacheAvailable:   out.usage.HasPromptCacheMetrics(),
 	}
 }
 

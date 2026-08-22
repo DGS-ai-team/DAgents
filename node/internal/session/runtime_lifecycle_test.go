@@ -490,6 +490,83 @@ func TestRuntimeLifecyclePersistsTurnAndStepEvents(t *testing.T) {
 	}
 }
 
+func TestRuntimeLifecyclePersistsProviderCacheUsage(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cache-usage.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	r := newLifecycleTestRuntime()
+	r.store = st
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type:       turn.CommandModelRequestStarted,
+		SessionID:  "session-1",
+		TurnID:     state.TurnID,
+		StepID:     state.StepID,
+		Generation: state.Generation,
+		At:         time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type:       turn.CommandModelUsageRecorded,
+		SessionID:  "session-1",
+		TurnID:     state.TurnID,
+		StepID:     state.StepID,
+		Generation: state.Generation,
+		Usage: turn.StepUsage{
+			InputTokens:                100,
+			OutputTokens:               8,
+			TotalTokens:                108,
+			PromptCacheHitTokens:       80,
+			PromptCacheMissTokens:      20,
+			PromptCacheMetricsObserved: true,
+		},
+		At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := st.ListTurnEvents(context.Background(), "session-1", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.EventType != turn.EventModelUsageRecorded {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		usage, ok := payload["usage"].(map[string]any)
+		if !ok {
+			t.Fatalf("usage payload = %#v", payload["usage"])
+		}
+		if usage["prompt_cache_hit_tokens"] != float64(80) || usage["prompt_cache_miss_tokens"] != float64(20) || usage["prompt_cache_metrics_observed"] != true {
+			t.Fatalf("persisted cache usage = %#v", usage)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatal("model usage event was not persisted")
+	}
+	recovered := newLifecycleTestRuntime()
+	recovered.store = st
+	recovered.restoreLifecycleEvents()
+	recoveredUsage := recovered.turnCoordinator.Snapshot().Usage
+	if recoveredUsage.PromptCacheHitTokens != 80 || recoveredUsage.PromptCacheMissTokens != 20 || !recoveredUsage.PromptCacheMetricsObserved {
+		t.Fatalf("replayed cache usage = %+v", recoveredUsage)
+	}
+}
+
 func TestRuntimeLifecycleRestoresCommandSequenceAfterTerminalTurn(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "terminal-sequence.db"))
 	if err != nil {

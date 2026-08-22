@@ -27,6 +27,10 @@ func TestCatalogRestrictVisible(t *testing.T) {
 	if len(loaded) != 2 {
 		t.Fatalf("loaded = %+v", loaded)
 	}
+	detailed := c.SetLoadedSkillsDetailed([]string{"alpha", "beta"})
+	if len(detailed.Loaded) != 1 || len(detailed.Rejected) != 1 || detailed.Rejected[0].Reason != "not_visible" {
+		t.Fatalf("detailed = %+v", detailed)
+	}
 }
 
 func TestCatalogRestrictVisibleEmptyMeansNone(t *testing.T) {

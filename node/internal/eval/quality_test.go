@@ -1,11 +1,14 @@
 package eval
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDefaultScenariosAreStableAndCoverBaseline(t *testing.T) {
 	scenarios := DefaultScenarios()
-	if len(scenarios) != 12 {
-		t.Fatalf("scenario count = %d, want 12", len(scenarios))
+	if len(scenarios) != 17 {
+		t.Fatalf("scenario count = %d, want 17", len(scenarios))
 	}
 	seen := make(map[string]struct{}, len(scenarios))
 	previous := ""
@@ -22,7 +25,7 @@ func TestDefaultScenariosAreStableAndCoverBaseline(t *testing.T) {
 		}
 		previous = scenario.ID
 	}
-	for _, want := range []string{"bash-empty-output", "linux-exec-sequence", "async-callback", "cancel-fencing", "mutation-verification"} {
+	for _, want := range []string{"bash-empty-output", "linux-exec-sequence", "async-callback", "cancel-fencing", "mutation-verification", "skill-catalog-boundary", "skill-load-ambiguous", "skill-load-boundary", "skill-load-diagnostics", "skill-unload-boundary"} {
 		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing baseline scenario %q", want)
 		}
@@ -64,17 +67,19 @@ func TestEvaluateSuiteAggregatesRuntimeAndCacheMetrics(t *testing.T) {
 	scenarios := []Scenario{{ID: "metrics", Criteria: nil}}
 	score := EvaluateSuite(scenarios, map[string]Trace{
 		"metrics": {
-			Steps:              3,
-			Retries:            2,
-			DurationMS:         150,
-			InputTokens:        100,
-			OutputTokens:       25,
-			Cost:               0.01,
-			CacheObserved:      true,
-			CacheHit:           true,
-			ToolCalls:          []ToolCall{{Name: "bash_run"}},
-			ToolResults:        []ToolResult{{Status: "failed", ExitCode: &exit}},
-			VerificationStatus: "passed",
+			Steps:                 3,
+			Retries:               2,
+			DurationMS:            150,
+			InputTokens:           100,
+			OutputTokens:          25,
+			Cost:                  0.01,
+			CacheObserved:         true,
+			CacheHit:              true,
+			PromptCacheHitTokens:  80,
+			PromptCacheMissTokens: 20,
+			ToolCalls:             []ToolCall{{Name: "bash_run"}},
+			ToolResults:           []ToolResult{{Status: "failed", ExitCode: &exit}},
+			VerificationStatus:    "passed",
 		},
 	})
 	if score.TotalSteps != 3 || score.TotalRetries != 2 || score.TotalDurationMS != 150 || score.TotalInputTokens != 100 || score.TotalOutputTokens != 25 {
@@ -85,6 +90,22 @@ func TestEvaluateSuiteAggregatesRuntimeAndCacheMetrics(t *testing.T) {
 	}
 	if score.CacheObservedCount != 1 || score.CacheHitCount != 1 || score.VerificationCoverage != 1 {
 		t.Fatalf("cache/verification metrics=%+v", score)
+	}
+	if score.TotalPromptCacheHitTokens != 80 || score.TotalPromptCacheMissTokens != 20 || score.PromptCacheHitRate != 0.8 {
+		t.Fatalf("cache token metrics=%+v", score)
+	}
+}
+
+func TestEvaluateSuiteIgnoresUnobservedCacheTokenClaims(t *testing.T) {
+	score := EvaluateSuite([]Scenario{{ID: "unknown", Criteria: nil}}, map[string]Trace{
+		"unknown": {
+			PromptCacheHitTokens:  100,
+			PromptCacheMissTokens: 0,
+			CacheObserved:         false,
+		},
+	})
+	if score.CacheObservedCount != 0 || score.TotalPromptCacheHitTokens != 0 || score.PromptCacheHitRate != 0 {
+		t.Fatalf("unobserved cache was aggregated = %+v", score)
 	}
 }
 
@@ -99,5 +120,46 @@ func TestEvaluateScenarioRequiresExplicitVerification(t *testing.T) {
 	result := EvaluateScenario(scenario, Trace{CompletionStatus: "complete", VerificationStatus: "passed"})
 	if !result.Passed {
 		t.Fatalf("verified result=%+v", result)
+	}
+}
+
+func TestSkillQualityScenariosPassStructuredLoadTrace(t *testing.T) {
+	traces := map[string]Trace{
+		"skill-contract": {
+			ToolCalls:   []ToolCall{{Name: "load_skills"}},
+			ToolResults: []ToolResult{{Name: "load_skills", Text: `{"action":"set_loaded_skills","loaded_skills":[{"skill_name":"writer"}],"model_context_applied_boundary":"next_model_step","verification":"验证"}`}},
+			FinalText:   "已按 skill 执行并完成验证。",
+		},
+		"skill-load-boundary": {
+			ToolCalls:   []ToolCall{{Name: "load_skills"}},
+			ToolResults: []ToolResult{{Name: "load_skills", Text: `{"requested":["writer"],"loaded_skills":[{"skill_name":"writer"}],"session_state_applied_boundary":"immediate","model_context_applied_boundary":"next_model_step"}`}},
+		},
+		"skill-load-diagnostics": {
+			ToolCalls:   []ToolCall{{Name: "load_skills"}},
+			ToolResults: []ToolResult{{Name: "load_skills", Text: `{"requested":["writer","missing"],"loaded_skills":[{"skill_name":"writer"}],"rejected":[{"name":"missing","reason":"not_found"}]}`}},
+		},
+		"skill-load-ambiguous": {
+			ToolCalls:   []ToolCall{{Name: "load_skills"}},
+			ToolResults: []ToolResult{{Name: "load_skills", Text: `{"requested":["writer"],"loaded_skills":[],"rejected":[{"name":"writer","reason":"ambiguous"}]}`}},
+		},
+		"skill-catalog-boundary": {
+			ToolCalls:   []ToolCall{{Name: "load_skills"}},
+			ToolResults: []ToolResult{{Name: "load_skills", Text: `{"requested":["writer"],"loaded_skills":[],"rejected":[{"name":"writer","reason":"catalog_changed"}]}`}},
+			FinalText:   "新版本将在下一次 human Turn 生效。",
+		},
+		"skill-unload-boundary": {
+			ToolCalls:   []ToolCall{{Name: "unload_skills"}},
+			ToolResults: []ToolResult{{Name: "unload_skills", Text: `{"loaded_skills":[],"model_context_applied_boundary":"next_model_step"}`}},
+		},
+	}
+	var scenarios []Scenario
+	for _, scenario := range DefaultScenarios() {
+		if strings.HasPrefix(scenario.ID, "skill-") {
+			scenarios = append(scenarios, scenario)
+		}
+	}
+	score := EvaluateSuite(scenarios, traces)
+	if score.ScenarioPassCount != len(scenarios) || score.CriterionPassRate != 1 {
+		t.Fatalf("skill score=%+v", score)
 	}
 }

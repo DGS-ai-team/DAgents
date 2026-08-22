@@ -46,4 +46,7 @@ func TestAttachCompressionUsageMetrics(t *testing.T) {
 	if payload["prompt_cache_miss_tokens"] != 200 {
 		t.Fatalf("miss = %v", payload["prompt_cache_miss_tokens"])
 	}
+	if payload["prompt_cache_available"] != true {
+		t.Fatalf("availability = %v", payload["prompt_cache_available"])
+	}
 }

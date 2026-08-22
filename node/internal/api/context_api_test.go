@@ -25,7 +25,20 @@ func TestSessionContextFullMessages(t *testing.T) {
 		Messages       []contextMessagePreview `json:"messages"`
 		RecentMessages []contextMessagePreview `json:"recent_messages"`
 	}
-	if err := json.NewDecoder(ctxResp.Body).Decode(&body); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(ctxResp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["skills_catalog_timing"]; !ok {
+		t.Fatal("expected skills_catalog_timing diagnostics in context response")
+	}
+	if err := json.Unmarshal(raw["messages_count"], &body.MessagesCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw["messages"], &body.Messages); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw["recent_messages"], &body.RecentMessages); err != nil {
 		t.Fatal(err)
 	}
 	if body.Messages == nil {

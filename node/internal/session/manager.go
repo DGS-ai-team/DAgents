@@ -46,6 +46,9 @@ type TurnOptions struct {
 	SkillsRoot        string
 	SkillsEnabled     bool
 	SkillsMaxInPrompt int
+	// SkillsCatalogToolMode enables the default-off metadata discovery
+	// experiment. It is fixed for the runtime and does not change mid-Turn.
+	SkillsCatalogToolMode bool
 	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
 	SkillsVisibleRestrict       bool
 	SkillsVisible               []string
@@ -869,28 +872,123 @@ func (m *Manager) ListSessionSkills(sessionID string) (loaded, available []skill
 	return loaded, available, nil
 }
 
-// LoadSessionSkill 向 session 加载单个 skill（追加到 loaded 集合，受 max 限制）。
-func (m *Manager) LoadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
+// SkillMutationOutcome 是控制面 skills API 的权威变更结果。模型侧
+// load_skills 使用 turn 层的同等字段；控制面也必须明确状态和生效边界，
+// 避免前端把“会话已更新”误认为“当前模型上下文已更新”。
+type SkillMutationOutcome struct {
+	Action                      string
+	Requested                   []string
+	Loaded                      []skills.LoadedSkill
+	Rejected                    []skills.SkillLoadRejection
+	Changed                     bool
+	SessionStateAppliedBoundary string
+	ModelContextAppliedBoundary string
+	HooksStatus                 string
+	HooksLoaded                 []string
+	HooksFailed                 []turn.SkillHookSyncFailure
+}
+
+func (m *Manager) skillMutationOutcome(rt *runtime, action string, requested []string, before, loaded []skills.LoadedSkill, rejected []skills.SkillLoadRejection, hookSync turn.SkillHooksSyncResult) SkillMutationOutcome {
+	changed := turn.Digest(before) != turn.Digest(loaded)
+	boundary := "unchanged"
+	if changed {
+		boundary = "next_human_turn"
+		if rt != nil && rt.turnState() != turn.StateIdle {
+			boundary = "next_model_step"
+		}
+	}
+	return SkillMutationOutcome{
+		Action:                      action,
+		Requested:                   append([]string{}, requested...),
+		Loaded:                      append([]skills.LoadedSkill{}, loaded...),
+		Rejected:                    append([]skills.SkillLoadRejection{}, rejected...),
+		Changed:                     changed,
+		SessionStateAppliedBoundary: "immediate",
+		ModelContextAppliedBoundary: boundary,
+		HooksStatus:                 hookSync.Status,
+		HooksLoaded:                 append([]string{}, hookSync.Loaded...),
+		HooksFailed:                 append([]turn.SkillHookSyncFailure{}, hookSync.Failed...),
+	}
+}
+
+// LoadSessionSkillDetailed 向 session 追加单个 skill，并返回拒绝原因、hook
+// 注册结果和模型上下文生效边界。
+func (m *Manager) LoadSessionSkillDetailed(sessionID, skillName string) (SkillMutationOutcome, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil, fmt.Errorf("agent_not_found")
+		return SkillMutationOutcome{}, fmt.Errorf("agent_not_found")
 	}
-	current := rt.loadedSkillsSnapshot()
-	names := make([]string, 0, len(current)+1)
-	for _, item := range current {
+	name := strings.TrimSpace(skillName)
+	before := rt.loadedSkillsSnapshot()
+	if rt.skillsCatalog == nil {
+		return m.skillMutationOutcome(rt, "load_skills", []string{name}, before, before,
+			[]skills.SkillLoadRejection{{Name: name, Reason: "skills_disabled"}}, turn.SkillHooksSyncResult{Status: "unavailable"}), nil
+	}
+	names := make([]string, 0, len(before)+1)
+	for _, item := range before {
 		names = append(names, item.SkillName)
 	}
-	names = append(names, skillName)
-	return rt.setLoadedSkillsByName(names), nil
+	names = append(names, name)
+	result := rt.skillsCatalog.SetLoadedSkillsDetailed(names)
+	hookSync := rt.setLoadedSkillsWithHookStatus(result.Loaded)
+	rt.persist(context.Background())
+	// Only expose diagnostics for the newly requested control-plane name; the
+	// already-loaded set is implementation context, not a new rejection.
+	rejected := make([]skills.SkillLoadRejection, 0, len(result.Rejected))
+	for _, item := range result.Rejected {
+		if strings.EqualFold(strings.TrimSpace(item.Name), name) {
+			rejected = append(rejected, item)
+		}
+	}
+	out := m.skillMutationOutcome(rt, "load_skills", []string{name}, before, result.Loaded, rejected, hookSync)
+	if out.Changed && rt.turnState() != turn.StateIdle {
+		rt.refreshSkillsCatalogForExplicitMutation()
+	}
+	return out, nil
+}
+
+// UnloadSessionSkillDetailed 从 session 移除单个 skill，并返回明确的未加载诊断。
+func (m *Manager) UnloadSessionSkillDetailed(sessionID, skillName string) (SkillMutationOutcome, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return SkillMutationOutcome{}, fmt.Errorf("agent_not_found")
+	}
+	name := strings.TrimSpace(skillName)
+	before := rt.loadedSkillsSnapshot()
+	loaded := before
+	matched := false
+	for _, item := range before {
+		if item.SkillName == name || item.DirectoryName == name {
+			matched = true
+			break
+		}
+	}
+	if rt.skillsCatalog != nil {
+		loaded = rt.skillsCatalog.UnloadSkills(before, []string{name})
+	}
+	hookSync := rt.setLoadedSkillsWithHookStatus(loaded)
+	rt.persist(context.Background())
+	var rejected []skills.SkillLoadRejection
+	if !matched {
+		rejected = []skills.SkillLoadRejection{{Name: name, Reason: "not_loaded"}}
+	}
+	out := m.skillMutationOutcome(rt, "unload_skills", []string{name}, before, loaded, rejected, hookSync)
+	if out.Changed && rt.turnState() != turn.StateIdle {
+		rt.refreshSkillsCatalogForExplicitMutation()
+	}
+	return out, nil
+}
+
+// LoadSessionSkill 向 session 加载单个 skill（追加到 loaded 集合，受 max 限制）。
+func (m *Manager) LoadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
+	out, err := m.LoadSessionSkillDetailed(sessionID, skillName)
+	return out.Loaded, err
 }
 
 // UnloadSessionSkill 从 session 卸载 skill。
 func (m *Manager) UnloadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
-	rt := m.getRuntime(sessionID)
-	if rt == nil {
-		return nil, fmt.Errorf("agent_not_found")
-	}
-	return rt.unloadSkillsByName([]string{skillName}), nil
+	out, err := m.UnloadSessionSkillDetailed(sessionID, skillName)
+	return out.Loaded, err
 }
 
 // SessionFSRoot 返回指定 session/agent 的有效 FSRoot（测试与调试用）。

@@ -23,7 +23,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"grep_files":             {CallPurposeKey, "directory", "pattern"},
 		"bash_run":               {CallPurposeKey, "command"},
 		"terminal_config_list":   {CallPurposeKey},
-		"terminal_open":          {CallPurposeKey},
+		"terminal_open":          {CallPurposeKey, "config_id"},
 		"terminal_input":         {CallPurposeKey, "terminal_id", "data"},
 		"terminal_read":          {CallPurposeKey, "terminal_id"},
 		"terminal_terminate":     {CallPurposeKey, "terminal_id"},
