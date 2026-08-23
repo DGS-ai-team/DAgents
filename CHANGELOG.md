@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+## [0.9.18] - 2026-08-23
+
+**Agent 上下文与终端工作台增强**：提升长对话上下文稳定性、运行时来源可追踪性，以及 MCP/终端操作的可见性和一致性。
+
+### 新增
+
+- 增加结构化消息 `source/provenance`，区分用户输入、运行时上下文、Skill 正文、工具结果、压缩摘要和异步回调。
+- 增加 MCP Node 级健康状态、阶段诊断和状态栏入口。
+- 增加 Terminal 工作台、终端会话清单、目标类型展示、Agent/终端工作区切换和终端操作状态反馈。
+- 增加结构化 `terminal_command` 以及基于 Terminal Session 的终端命令和文件传输能力。
+
+### 优化
+
+- 将运行环境、prompt sidecar 和当天日期迁移到 request-only `ContextInjection`，不再污染 durable history。
+- 将 Skill 正文作为独立上下文消息管理，保持 system prompt 稳定并支持版本过滤。
+- 改善 MCP 启动、握手、工具发现和调用失败的诊断信息与前端状态映射。
+- 统一终端、消息页和底部状态栏的布局、主题和交互行为。
+
+### 兼容性
+
+- 保留旧 `linux_exec` 历史和兼容路径；新 Agent 工具快照优先使用 `terminal_*` 工具。
+
+### 测试
+
+- Go 全量 Node/Client/共享配置测试通过。
+- Web UI 284 项测试通过，生产构建通过。
+- GitHub PR CI、CodeQL、Python、Tauri、Windows 构建和 Manage 构建全部通过。
+
 ## [0.9.17] - 2026-08-21
 
 **Turn/Step 生命周期与远程 Linux 通道稳定性**：让 Agent 运行状态、前端展示和 SSH 主机密钥验证具备明确的权威状态边界。
