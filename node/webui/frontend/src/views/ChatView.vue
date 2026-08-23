@@ -9,7 +9,8 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
-import TerminalDock from "../components/TerminalDock.vue";
+import ActivityPanel from "../components/ActivityPanel.vue";
+import TerminalWorkbench from "../components/TerminalWorkbench.vue";
 import {
   agentStore,
   persistAgentId,
@@ -774,6 +775,7 @@ async function onAgentCreated(created) {
   resetEventTracking();
   clearHitl();
   resetTurnState();
+  chromeStore.panel = null;
   restartStream();
   syncRouteAgent(id);
   pulseDesktopFocus();
@@ -803,6 +805,7 @@ async function switchAgent(id) {
   resetUsageStrip();
   resetEventTracking();
   clearHitl();
+  chromeStore.panel = null;
   persistAgentId(id);
   void syncCurrentAgentDisplayName();
   turnWatchdog.noteActivity();
@@ -971,7 +974,7 @@ async function handleThinkingCommand(arg) {
 }
 
 function openLeftActivity() {
-  agentPanelRef.value?.expandSection?.("activity");
+  chromeStore.panel = "activity";
 }
 
 function closePanel() {
@@ -1084,19 +1087,104 @@ watch(
 );
 
 const terminalOpen = computed(
-  () => Boolean(String(selectedTerminalId.value || "").trim() && selectedTerminalMeta.value),
+  () =>
+    Boolean(
+      agentStore.agentId &&
+        (String(route.query.view || "") === "terminal" ||
+          (String(selectedTerminalId.value || "").trim() && selectedTerminalMeta.value)),
+    ),
 );
+
+function terminalRouteQuery(terminalId = "") {
+  const query = { ...route.query };
+  const id = String(terminalId || "").trim();
+  if (id) {
+    query.view = "terminal";
+    query.terminal_id = id;
+  } else {
+    delete query.view;
+    delete query.terminal_id;
+  }
+  return query;
+}
+
+function openTerminalRouteQuery() {
+  const query = { ...route.query, view: "terminal" };
+  delete query.terminal_id;
+  return query;
+}
 
 function selectTerminal(item) {
   const id = String(item?.terminal_id || "").trim();
+  if (!id) return;
   selectedTerminalId.value = id;
-  selectedTerminalMeta.value = id ? item : null;
+  selectedTerminalMeta.value = item;
+  void router.replace({ name: "agents", params: { agentId: agentStore.agentId }, query: terminalRouteQuery(id) });
 }
 
 function closeTerminal() {
   selectedTerminalId.value = "";
   selectedTerminalMeta.value = null;
+  chromeStore.panel = null;
+  void router.replace({ name: "agents", params: { agentId: agentStore.agentId }, query: terminalRouteQuery() });
+  nextTick(() => {
+    document.querySelector(".chat__textarea")?.focus();
+  });
 }
+
+function clearTerminalSelection() {
+  selectedTerminalId.value = "";
+  selectedTerminalMeta.value = null;
+  chromeStore.panel = null;
+  void router.replace({
+    name: "agents",
+    params: { agentId: agentStore.agentId },
+    query: openTerminalRouteQuery(),
+  });
+}
+
+const workspaceView = computed(() => {
+  if (chromeStore.panel === "activity") return "activity";
+  return terminalOpen.value ? "terminal" : "messages";
+});
+
+function switchWorkspace(view) {
+  const next = String(view || "messages");
+  if (next === "activity") {
+    if (terminalOpen.value) closeTerminal();
+    chromeStore.panel = "activity";
+    return;
+  }
+  chromeStore.panel = null;
+  if (next === "terminal") {
+    void router.replace({
+      name: "agents",
+      params: { agentId: agentStore.agentId },
+      query: openTerminalRouteQuery(),
+    });
+    return;
+  }
+  if (terminalOpen.value) closeTerminal();
+}
+
+watch(
+  () => [route.query.view, route.query.terminal_id, agentStore.agentId],
+  ([view, terminalId]) => {
+    if (String(view || "") !== "terminal") {
+      if (selectedTerminalId.value || selectedTerminalMeta.value) {
+        selectedTerminalId.value = "";
+        selectedTerminalMeta.value = null;
+      }
+      return;
+    }
+    const id = String(terminalId || "").trim();
+    if (id && id !== selectedTerminalId.value) {
+      selectedTerminalId.value = id;
+      selectedTerminalMeta.value = null;
+    }
+  },
+  { immediate: true },
+);
 
 onActivated(() => {
   turnWatchdog.start();
@@ -1166,10 +1254,7 @@ onUnmounted(() => {
     <aside class="app__col app__col--agents">
       <NavRail
         ref="agentPanelRef"
-        :terminal-revision="terminalRevision"
-        :selected-terminal-id="selectedTerminalId"
         @switch="switchAgent"
-        @terminal-selected="selectTerminal"
         @create="openCreateWizard()"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
@@ -1219,6 +1304,10 @@ onUnmounted(() => {
           :thinking-supported="thinkingSupported"
           :llm-settings="chromeStore.llmSettings"
           :agent-title="currentAgentTitle"
+          :agent-id="agentStore.agentId"
+          :terminal-refresh-key="terminalRevision"
+          :workspace-view="workspaceView"
+          @workspace-change="switchWorkspace"
           @send="onSendMessage"
           @cancel="cancelTurn"
           @toggle-thinking="toggleThinkingMode"
@@ -1234,17 +1323,53 @@ onUnmounted(() => {
           @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
           @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
         />
-        <TerminalDock
+        <TerminalWorkbench
           v-if="terminalOpen"
           :agent-id="agentStore.agentId"
           :selected-terminal-id="selectedTerminalId"
-          :terminal-meta="selectedTerminalMeta"
+          :selected-terminal-meta="selectedTerminalMeta"
+          :refresh-key="terminalRevision"
+          :entries="entries"
+          :hitl-queue="hitlStore.queue"
+          :tool-verbose="transcriptStore.toolFoldVerbose"
+          :agent-disabled="!canSend && !sending"
+          :agent-input-disabled="!agentStore.agentId || hitlStore.busy || cancelling"
+          :sending="sending"
+          :cancelling="cancelling"
+          :error="agentStore.error"
+          :hitl-busy="hitlStore.busy"
+          :hitl-busy-index="hitlStore.busyIndex"
+          :thinking-supported="thinkingSupported"
+          :llm-settings="chromeStore.llmSettings"
+          :agent-title="currentAgentTitle"
           @close="closeTerminal"
+          @terminal-selected="selectTerminal"
+          @terminal-cleared="clearTerminalSelection"
+          @send-agent="onSendMessage"
+          @workspace-change="switchWorkspace"
+          @cancel-agent="cancelTurn"
+          @toggle-thinking="toggleThinkingMode"
+           @cycle-effort="cycleThinkingEffort"
+          @switch-profile="switchLLMProfile"
+          @open-activity="openLeftActivity"
+          @approve-all="(idx) => submitHitlApproval(true, idx)"
+          @reject-all="(idx) => submitHitlApproval(false, idx)"
+          @approve-one="(payload) => submitHitlOne(payload, true)"
+          @reject-one="(payload) => submitHitlOne(payload, false)"
+          @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
+          @user-info-selected="onHitlUserInfoSelected"
+          @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
+          @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
         />
       </div>
 
       <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel @close="closePanel" />
+      </div>
+      <div v-if="chromeStore.panel === 'activity'" class="panel-overlay" @click.self="closePanel">
+        <div class="activity-workspace-overlay">
+          <ActivityPanel @close="closePanel" />
+        </div>
       </div>
     </div>
 
@@ -1260,4 +1385,16 @@ onUnmounted(() => {
 <style scoped>
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
+.activity-workspace-overlay {
+  width: min(480px, 100%);
+  height: min(720px, 85vh);
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+.activity-workspace-overlay :deep(.activity-rail) {
+  border-left: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+}
 </style>

@@ -15,17 +15,19 @@ import (
 // mutations may replace the segment at the next model Step, never in place
 // during an active model request.
 type ModelContextSnapshot struct {
-	SystemPrompt          string
-	ToolDefinitions       []tools.ToolDef
-	RuntimeRevision       int64
-	RuntimeDigest         string
-	PromptDigest          string
-	ToolDigest            string
-	SkillsCatalogRevision string
-	LoadedSkillsDigest    string
+	SystemPrompt           string
+	ToolDefinitions        []tools.ToolDef
+	ContextInjections      []ContextInjection
+	ContextInjectionDigest string
+	RuntimeRevision        int64
+	RuntimeDigest          string
+	PromptDigest           string
+	ToolDigest             string
+	SkillsCatalogRevision  string
+	LoadedSkillsDigest     string
 	// LoadedSkillsContentDigest distinguishes the actual loaded SKILL.md
 	// bodies from the loaded-name set. It is diagnostic metadata only; the
-	// frozen SystemPrompt remains the source of truth for the active request.
+	// durable skill context messages in history remain the model-facing source.
 	LoadedSkillsContentDigest string
 }
 
@@ -40,6 +42,8 @@ func (s *ModelContextSnapshot) observability() map[string]any {
 		"runtime_digest":               s.RuntimeDigest,
 		"prompt_digest":                s.PromptDigest,
 		"tool_digest":                  s.ToolDigest,
+		"context_injection_digest":     s.ContextInjectionDigest,
+		"context_injection_count":      len(s.ContextInjections),
 		"skills_catalog_revision":      s.SkillsCatalogRevision,
 		"loaded_skills_digest":         s.LoadedSkillsDigest,
 		"loaded_skills_content_digest": s.LoadedSkillsContentDigest,
@@ -48,17 +52,32 @@ func (s *ModelContextSnapshot) observability() map[string]any {
 
 // NewModelContextSnapshot creates a defensive copy of the tool definitions.
 func NewModelContextSnapshot(systemPrompt string, defs []tools.ToolDef, revision int64, runtimeDigest string) *ModelContextSnapshot {
+	return NewModelContextSnapshotWithInjections(systemPrompt, defs, nil, revision, runtimeDigest)
+}
+
+// NewModelContextSnapshotWithInjections freezes the complete model-visible
+// request inputs for a Turn/Step segment. Context injections are cloned and
+// retained in the snapshot so a retry or lifecycle restore uses the exact
+// same request context.
+func NewModelContextSnapshotWithInjections(systemPrompt string, defs []tools.ToolDef, injections []ContextInjection, revision int64, runtimeDigest string) *ModelContextSnapshot {
 	copyDefs := cloneToolDefinitions(defs)
+	copyInjections := cloneContextInjections(injections)
+	injectionDigest := ""
+	if len(copyInjections) > 0 {
+		injectionDigest = Digest(copyInjections)
+	}
 	if strings.TrimSpace(runtimeDigest) == "" {
 		runtimeDigest = RuntimeDigestFromInputs(nil, systemPrompt, copyDefs)
 	}
 	return &ModelContextSnapshot{
-		SystemPrompt:    systemPrompt,
-		ToolDefinitions: copyDefs,
-		RuntimeRevision: revision,
-		RuntimeDigest:   strings.TrimSpace(runtimeDigest),
-		PromptDigest:    Digest(systemPrompt),
-		ToolDigest:      Digest(copyDefs),
+		SystemPrompt:           systemPrompt,
+		ToolDefinitions:        copyDefs,
+		ContextInjections:      copyInjections,
+		ContextInjectionDigest: injectionDigest,
+		RuntimeRevision:        revision,
+		RuntimeDigest:          strings.TrimSpace(runtimeDigest),
+		PromptDigest:           Digest(systemPrompt),
+		ToolDigest:             Digest(copyDefs),
 	}
 }
 
@@ -69,6 +88,7 @@ func (s *ModelContextSnapshot) Clone() *ModelContextSnapshot {
 	}
 	copy := *s
 	copy.ToolDefinitions = cloneToolDefinitions(s.ToolDefinitions)
+	copy.ContextInjections = cloneContextInjections(s.ContextInjections)
 	return &copy
 }
 

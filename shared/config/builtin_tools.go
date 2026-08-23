@@ -23,6 +23,9 @@ var knownBuiltinTools = map[string]struct{}{
 	"terminal_read":          {},
 	"terminal_terminate":     {},
 	"terminal_list":          {},
+	"terminal_command":       {},
+	"terminal_upload":        {},
+	"terminal_download":      {},
 	"linux_exec":             {},
 	"linux_file_upload":      {},
 	"linux_file_download":    {},
@@ -73,9 +76,9 @@ var builtinToolGroups = map[string][]string{
 		"terminal_read",
 		"terminal_terminate",
 		"terminal_list",
-		"linux_exec",
-		"linux_file_upload",
-		"linux_file_download",
+		"terminal_command",
+		"terminal_upload",
+		"terminal_download",
 	},
 	"hitl": {
 		"ask_user_information",
@@ -131,7 +134,14 @@ func init() {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := builtinToolToGroup[name]; !ok {
-			panic("config: tool " + name + " missing from builtinToolGroups")
+			// Deprecated Linux tool names remain accepted in old snapshots but
+			// are intentionally not part of the public terminal group.
+			switch name {
+			case "linux_exec", "linux_file_upload", "linux_file_download":
+				continue
+			default:
+				panic("config: tool " + name + " missing from builtinToolGroups")
+			}
 		}
 	}
 }

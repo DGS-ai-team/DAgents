@@ -73,6 +73,19 @@ func TestBuildSidecarChatRequest_includesToolsAndSystem(t *testing.T) {
 	}
 }
 
+func TestBuildSidecarChatRequest_omitsLegacyDateMessages(t *testing.T) {
+	req := BuildSidecarChatRequest(SidecarInput{
+		Messages: []llm.Message{
+			llm.UserMessage("当天日期为：20260719", llm.UserNameDate),
+			llm.UserMessage("hello", llm.UserNameHuman),
+		},
+		End: 1,
+	}, "summary")
+	if len(req.Messages) != 2 || req.Messages[0].Content != "hello" || req.Messages[1].Content != "summary" {
+		t.Fatalf("sidecar messages = %+v", req.Messages)
+	}
+}
+
 func TestBuildSidecarChatRequest_prefixLengthAndLastUser(t *testing.T) {
 	t.Parallel()
 

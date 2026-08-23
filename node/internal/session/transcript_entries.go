@@ -70,13 +70,9 @@ func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCa
 	return nil
 }
 
-// shouldSkipHydrateUser 隐藏注入型 user 消息（日期、异步回灌、压缩摘要等），避免污染对话展示。
+// shouldSkipHydrateUser 隐藏注入型 user 消息（日期、Skill 正文、异步回灌、压缩摘要等），避免污染对话展示。
 func shouldSkipHydrateUser(msg llm.Message) bool {
-	switch strings.TrimSpace(msg.Name) {
-	case llm.UserNameDate, llm.UserNameAsyncTool, llm.UserNameCompression, llm.UserNameCompressionSidecar, llm.UserNameToolVision:
-		return true
-	}
-	return false
+	return llm.IsHiddenInjectedUserMessage(msg)
 }
 
 func userEntry(msg llm.Message, reg *media.Registry) TranscriptEntry {

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -14,15 +15,66 @@ import (
 
 const defaultOperationTimeout = 30 * time.Second
 
+type operationError struct {
+	Stage       string
+	FailureKind string
+	Retryable   bool
+	Stderr      string
+	ExitCode    *int
+	Err         error
+}
+
+func (e *operationError) Error() string {
+	if e == nil || e.Err == nil {
+		return "mcp operation failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *operationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+type operationDiagnostic struct {
+	Stage       string
+	FailureKind string
+	Retryable   bool
+	Stderr      string
+	ExitCode    *int
+}
+
+func diagnosticForError(err error) operationDiagnostic {
+	if err == nil {
+		return operationDiagnostic{}
+	}
+	var opErr *operationError
+	if !errors.As(err, &opErr) {
+		return operationDiagnostic{Stage: "unknown", FailureKind: "unknown", Retryable: true}
+	}
+	diagnostic := operationDiagnostic{Stage: opErr.Stage, FailureKind: opErr.FailureKind, Retryable: opErr.Retryable, Stderr: opErr.Stderr, ExitCode: opErr.ExitCode}
+	if diagnostic.Stage == "" {
+		diagnostic.Stage = "unknown"
+	}
+	if diagnostic.FailureKind == "" {
+		diagnostic.FailureKind = "unknown"
+	}
+	return diagnostic
+}
+
 type Manager struct {
-	mu        sync.Mutex
-	configs   map[string]ServerConfig
-	clients   map[string]Client
-	catalogs  map[string][]Tool
-	views     map[string]ServerView
-	refreshMu map[string]*sync.Mutex
-	logger    *slog.Logger
-	closed    bool
+	mu             sync.Mutex
+	configs        map[string]ServerConfig
+	clients        map[string]Client
+	catalogs       map[string][]Tool
+	views          map[string]ServerView
+	refreshMu      map[string]*sync.Mutex
+	logger         *slog.Logger
+	statusRevision uint64
+	onStatusChange func(StatusEvent)
+	closed         bool
 }
 
 func NewManager(logger *slog.Logger) *Manager {
@@ -37,6 +89,17 @@ func NewManager(logger *slog.Logger) *Manager {
 		refreshMu: map[string]*sync.Mutex{},
 		logger:    logger,
 	}
+}
+
+// SetStatusListener receives Node-level MCP health transitions. The callback
+// is invoked outside the manager mutex and must not mutate the Manager.
+func (m *Manager) SetStatusListener(listener func(StatusEvent)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.onStatusChange = listener
+	m.mu.Unlock()
 }
 
 func (m *Manager) Configure(configs []ServerConfig) error {
@@ -134,6 +197,18 @@ func (m *Manager) List() []ServerView {
 	return out
 }
 
+// Health returns an aggregate over enabled services. Disabled services are
+// configuration state, not an outage; with no enabled service the Node is
+// reported as unconfigured.
+func (m *Manager) Health() HealthView {
+	if m == nil {
+		return HealthView{Status: HealthUnconfigured}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.healthLocked()
+}
+
 func (m *Manager) Get(id string) (ServerView, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -164,9 +239,10 @@ func (m *Manager) Refresh(ctx context.Context, id string) (ServerView, error) {
 	if !cfg.Enabled {
 		return m.updateView(id, StatusDisabled, "", nil), nil
 	}
+	m.updateView(id, StatusChecking, "", nil)
 	client, tools, err := m.startAndList(ctx, cfg)
 	if err != nil {
-		view := m.updateView(id, StatusError, err.Error(), nil)
+		view := m.updateViewWithFailure(id, StatusError, err, nil)
 		return view, err
 	}
 	markEnabledTools(tools, cfg.EnabledTools)
@@ -190,12 +266,13 @@ func (m *Manager) Test(ctx context.Context, id string) (ServerView, error) {
 	if !cfg.Enabled {
 		return m.updateView(id, StatusDisabled, "", nil), nil
 	}
+	m.updateView(id, StatusChecking, "", nil)
 	client, tools, err := m.startAndList(ctx, cfg)
 	if client != nil {
 		_ = client.Close()
 	}
 	if err != nil {
-		view := m.updateView(id, StatusError, err.Error(), nil)
+		view := m.updateViewWithFailure(id, StatusError, err, nil)
 		return view, err
 	}
 	markEnabledTools(tools, cfg.EnabledTools)
@@ -409,7 +486,19 @@ func (m *Manager) Call(ctx context.Context, serverID, toolName string, args json
 	if !catalogHasEnabledTool(catalog, cfg.EnabledTools, toolName) {
 		return CallResult{}, fmt.Errorf("mcp tool %q is not in the enabled catalog for server %q", toolName, serverID)
 	}
-	return client.CallTool(ctx, toolName, args)
+	result, err := client.CallTool(ctx, toolName, args)
+	if err == nil {
+		return result, nil
+	}
+	failure := classifyClientOperationError("call", err, client)
+	m.mu.Lock()
+	if m.clients[serverID] == client {
+		delete(m.clients, serverID)
+	}
+	m.mu.Unlock()
+	_ = client.Close()
+	m.updateViewWithFailure(serverID, StatusError, failure, catalog)
+	return CallResult{}, failure
 }
 
 func (m *Manager) startAndList(ctx context.Context, cfg ServerConfig) (Client, []Tool, error) {
@@ -424,20 +513,22 @@ func (m *Manager) startAndList(ctx context.Context, cfg ServerConfig) (Client, [
 		err = fmt.Errorf("unsupported mcp transport %q", cfg.Transport)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &operationError{Stage: "configure", FailureKind: "configuration", Retryable: false, Err: err}
 	}
 	startCtx, cancel := context.WithTimeout(ctx, defaultOperationTimeout)
 	defer cancel()
 	if err := client.Start(startCtx); err != nil {
+		failure := classifyClientOperationError("initialize", err, client)
 		_ = client.Close()
-		return nil, nil, err
+		return nil, nil, failure
 	}
 	listCtx, cancelList := context.WithTimeout(ctx, defaultOperationTimeout)
 	defer cancelList()
 	tools, err := client.ListTools(listCtx)
 	if err != nil {
+		failure := classifyClientOperationError("list_tools", err, client)
 		_ = client.Close()
-		return nil, nil, err
+		return nil, nil, failure
 	}
 	seen := map[string]struct{}{}
 	seenQualified := map[string]string{}
@@ -448,38 +539,179 @@ func (m *Manager) startAndList(ctx context.Context, cfg ServerConfig) (Client, [
 		qualified, err := QualifiedToolName(cfg.ID, tools[i].Name)
 		if err != nil {
 			_ = client.Close()
-			return nil, nil, err
+			return nil, nil, &operationError{Stage: "catalog", FailureKind: "invalid_catalog", Retryable: false, Err: err}
 		}
 		if previous, exists := seenQualified[qualified]; exists {
 			_ = client.Close()
-			return nil, nil, fmt.Errorf("mcp server %q returned tools %q and %q with the same LLM name %q", cfg.ID, previous, tools[i].Name, qualified)
+			return nil, nil, &operationError{Stage: "catalog", FailureKind: "invalid_catalog", Retryable: false, Err: fmt.Errorf("mcp server %q returned tools %q and %q with the same LLM name %q", cfg.ID, previous, tools[i].Name, qualified)}
 		}
 		seenQualified[qualified] = tools[i].Name
 		if _, exists := seen[tools[i].Name]; exists {
 			_ = client.Close()
-			return nil, nil, fmt.Errorf("mcp server %q returned duplicate tool %q", cfg.ID, tools[i].Name)
+			return nil, nil, &operationError{Stage: "catalog", FailureKind: "invalid_catalog", Retryable: false, Err: fmt.Errorf("mcp server %q returned duplicate tool %q", cfg.ID, tools[i].Name)}
 		}
 		seen[tools[i].Name] = struct{}{}
 	}
 	return client, tools, nil
 }
 
+func classifyOperationError(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	lower := strings.ToLower(err.Error())
+	kind := "transport"
+	retryable := true
+	switch {
+	case strings.Contains(lower, "postinstall") || strings.Contains(lower, "npm install") || strings.Contains(lower, "install script"):
+		kind = "installation"
+		retryable = false
+	case strings.Contains(lower, "deadline") || strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out"):
+		kind = "timeout"
+	case strings.Contains(lower, "auth") || strings.Contains(lower, "credential") || strings.Contains(lower, "permission") || strings.Contains(lower, "forbidden") || strings.Contains(lower, "401") || strings.Contains(lower, "403"):
+		kind = "authentication"
+		retryable = false
+	case strings.Contains(lower, "invalid") || strings.Contains(lower, "unsupported") || strings.Contains(lower, "duplicate"):
+		kind = "configuration"
+		retryable = false
+	}
+	return &operationError{Stage: stage, FailureKind: kind, Retryable: retryable, Err: err}
+}
+
+func classifyClientOperationError(stage string, err error, client Client) error {
+	classified := classifyOperationError(stage, err)
+	opErr, ok := classified.(*operationError)
+	if !ok || client == nil {
+		return classified
+	}
+	if provider, ok := client.(DiagnosticsProvider); ok {
+		diagnostics := provider.Diagnostics()
+		opErr.Stderr = diagnostics.Stderr
+		opErr.ExitCode = diagnostics.ExitCode
+		combined := strings.TrimSpace(strings.Join([]string{err.Error(), diagnostics.Stderr}, "\n"))
+		if combined != "" {
+			reclassified := classifyOperationError(stage, errors.New(combined)).(*operationError)
+			reclassified.Stderr = diagnostics.Stderr
+			reclassified.ExitCode = diagnostics.ExitCode
+			return reclassified
+		}
+	}
+	return opErr
+}
+
 func (m *Manager) updateView(id, status, lastError string, tools []Tool) ServerView {
+	var failure error
+	if strings.TrimSpace(lastError) != "" {
+		failure = errors.New(lastError)
+	}
+	return m.updateViewWithFailure(id, status, failure, tools)
+}
+
+func (m *Manager) updateViewWithFailure(id, status string, failure error, tools []Tool) ServerView {
+	var event StatusEvent
+	var listener func(StatusEvent)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	view := m.views[id]
+	previousStatus := view.Status
+	previousError := view.LastError
+	previousStage := view.HealthStage
+	previousFailureKind := view.FailureKind
+	previousRetryable := view.Retryable
 	view.Status = status
-	view.LastError = strings.TrimSpace(lastError)
+	view.LastError = ""
+	if failure != nil {
+		view.LastError = strings.TrimSpace(failure.Error())
+	}
+	view.HealthStage = ""
+	view.FailureKind = ""
+	view.Retryable = false
+	view.StderrSummary = ""
+	view.ExitCode = nil
+	if status == StatusChecking {
+		view.HealthStage = "checking"
+	} else if status == StatusReady {
+		view.HealthStage = "ready"
+	} else if failure != nil {
+		diagnostic := diagnosticForError(failure)
+		view.HealthStage = diagnostic.Stage
+		view.FailureKind = diagnostic.FailureKind
+		view.Retryable = diagnostic.Retryable
+		view.StderrSummary = diagnostic.Stderr
+		view.ExitCode = diagnostic.ExitCode
+	}
 	if tools != nil {
 		view.Tools = append([]Tool(nil), tools...)
 	}
 	view.ToolCount = len(view.Tools)
 	view.EnabledToolCount = countEnabledTools(view.Tools)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	view.LastChecked = now
+	view.ObservedAt = now
 	if status == StatusReady {
-		view.LastRefresh = time.Now().UTC().Format(time.RFC3339Nano)
+		view.LastRefresh = now
+	}
+	if previousStatus != view.Status || previousError != view.LastError || previousStage != view.HealthStage || previousFailureKind != view.FailureKind || previousRetryable != view.Retryable {
+		m.statusRevision++
+		view.StatusRevision = m.statusRevision
+		event = StatusEvent{ServerID: id, View: view, Revision: m.statusRevision, ObservedAt: now}
+		event.Health = m.healthLockedWithOverride(id, view)
+		listener = m.onStatusChange
 	}
 	m.views[id] = view
+	m.mu.Unlock()
+	if listener != nil && event.Revision > 0 {
+		listener(event)
+	}
 	return view
+}
+
+func (m *Manager) healthLocked() HealthView {
+	health := HealthView{Status: HealthUnconfigured, Revision: m.statusRevision}
+	for _, view := range m.views {
+		health.ServerCount++
+		if !view.Enabled {
+			continue
+		}
+		health.EnabledCount++
+		switch view.Status {
+		case StatusReady:
+			health.HealthyCount++
+		case StatusChecking:
+			health.CheckingCount++
+		case StatusError, StatusOffline:
+			health.ProblemCount++
+			if view.Retryable {
+				health.RetryableProblemCount++
+			}
+		}
+		if view.ObservedAt > health.ObservedAt {
+			health.ObservedAt = view.ObservedAt
+		}
+	}
+	if health.EnabledCount == 0 {
+		health.Status = HealthUnconfigured
+	} else if health.CheckingCount > 0 {
+		health.Status = HealthChecking
+	} else if health.ProblemCount > 0 {
+		health.Status = HealthDegraded
+	} else if health.HealthyCount == health.EnabledCount {
+		health.Status = HealthHealthy
+	} else {
+		health.Status = HealthDegraded
+	}
+	return health
+}
+
+func (m *Manager) healthLockedWithOverride(id string, override ServerView) HealthView {
+	original, exists := m.views[id]
+	m.views[id] = override
+	health := m.healthLocked()
+	if exists {
+		m.views[id] = original
+	} else {
+		delete(m.views, id)
+	}
+	return health
 }
 
 func markEnabledTools(tools []Tool, enabledNames []string) {

@@ -8,27 +8,33 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
 
-func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
-	prompt := BuildSystemPrompt(SystemPromptInput{
+func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
+	in := SystemPromptInput{
 		AgentID:   "ops-01",
 		FSRoot:    "/data/ws",
 		SessionID: "sess-abc",
-	})
+	}
+	prompt := BuildSystemPrompt(in)
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
-	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
-		t.Fatalf("system prompt should not expose fs_root path, got %q", prompt)
+	if contains(prompt, "ops-01") || contains(prompt, "sess-abc") || contains(prompt, "运行环境") {
+		t.Fatalf("system prompt should not contain request context, got %q", prompt)
 	}
 	if contains(prompt, "bash_run") || contains(prompt, "background_job") || contains(prompt, "## 可用 skills") {
 		t.Fatalf("system prompt should not embed tool-specific guidance, got %q", prompt)
+	}
+	injections := BuildContextInjections(in)
+	if len(injections) != 1 || !containsAll(injections[0].Content, "ops-01", "sess-abc", "运行环境") {
+		t.Fatalf("context injection = %+v", injections)
 	}
 }
 
@@ -62,6 +68,9 @@ func TestBuildSystemPrompt_appendsSkillsCatalogOnlyWhenEnabled(t *testing.T) {
 	prompt := BuildSystemPrompt(SystemPromptInput{Catalog: enabled})
 	if !containsAll(prompt, "## 可用 skills", "writer: Write docs", "load_skills", "匹配且尚未加载") {
 		t.Fatalf("enabled prompt = %q", prompt)
+	}
+	if contains(prompt, "Write clearly.") || contains(prompt, "已加载 skills") {
+		t.Fatalf("skill body must not be part of system prompt: %q", prompt)
 	}
 
 	disabled := skills.NewCatalog(root, false, 2)
@@ -115,14 +124,19 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	hostsnapshot.CaptureAtStartup()
 	r := promptcontext.NewContentReader(promptcontext.Content{User: "legacy user.md ignored"})
 	r.SetPreferredName("小明")
-	prompt := BuildSystemPrompt(SystemPromptInput{
+	in := SystemPromptInput{
 		AgentID:   "ops-01",
 		FSRoot:    "/data/ws",
 		SessionID: "sess-x",
 		PromptCtx: r,
-	})
-	if !containsAll(prompt, "以下是用户信息", "请称呼用户为：小明") {
-		t.Fatalf("prompt = %q", prompt)
+	}
+	prompt := BuildSystemPrompt(in)
+	if contains(prompt, "以下是用户信息") || contains(prompt, "请称呼用户为：小明") {
+		t.Fatalf("stable system prompt should omit prompt context: %q", prompt)
+	}
+	injections := BuildContextInjections(in)
+	if len(injections) != 1 || !containsAll(injections[0].Content, "以下是用户信息", "请称呼用户为：小明") {
+		t.Fatalf("context injection = %+v", injections)
 	}
 	if contains(prompt, "legacy user.md") || contains(prompt, "用户信息与偏好") {
 		t.Fatalf("should not inject user.md sidecar, got %q", prompt)
@@ -137,11 +151,15 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		SessionID: "child-abc",
 		Purpose:   "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "memory/", "运行环境", "工作区目录", "相对路径均基于工作区根目录") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "memory/", "工作区目录", "相对路径均基于工作区根目录") {
 		t.Fatalf("prompt = %q", prompt)
 	}
-	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
-		t.Fatalf("child prompt should not expose fs_root path, got %q", prompt)
+	if contains(prompt, "child-abc") || contains(prompt, "运行环境") {
+		t.Fatalf("child system prompt should omit request context, got %q", prompt)
+	}
+	injections := BuildChildContextInjections(ChildSystemPromptInput{AgentID: "ops-01", SessionID: "child-abc"})
+	if len(injections) != 1 || !containsAll(injections[0].Content, "child-abc", "运行环境") {
+		t.Fatalf("child context injection = %+v", injections)
 	}
 	if !containsAll(prompt, "任务执行契约", "工具调用成功不等于任务成功", "只有在缺少关键信息") {
 		t.Fatalf("child prompt missing execution contract: %q", prompt)
@@ -158,12 +176,12 @@ func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
 	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("scan logs"))
 	prompt := orch.buildSystemPrompt("child-xyz")
-	if !containsAll(prompt, "scan logs", "child-xyz", "临时子 Agent") {
+	if !containsAll(prompt, "scan logs", "临时子 Agent") || contains(prompt, "child-xyz") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
 
-func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
+func TestChildSystemPromptBuilder_keepsLoadedSkillsOutOfSystemPrompt(t *testing.T) {
 	root := t.TempDir()
 	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
 	catalog := skills.NewCatalog(root, true, 2)
@@ -174,8 +192,12 @@ func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
 	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("review"))
 	prompt := orch.buildSystemPrompt("child-xyz")
-	if !containsAll(prompt, "Write clearly.", "已加载 skills") {
-		t.Fatalf("prompt = %q", prompt)
+	if contains(prompt, "Write clearly.") || contains(prompt, "已加载 skills") {
+		t.Fatalf("child system prompt must not contain skill body: %q", prompt)
+	}
+	messages := orch.activeSkillInstructionMessages()
+	if len(messages) != 1 || messages[0].Name != llm.UserNameSkill || !contains(messages[0].Content, "Write clearly.") {
+		t.Fatalf("skill context messages = %+v", messages)
 	}
 }
 
@@ -190,8 +212,8 @@ func TestBuildSystemPrompt_runPromptBuildPhase(t *testing.T) {
 	if !contains(prompt, "## Injected By Hook") {
 		t.Fatalf("prompt = %q", prompt)
 	}
-	if !containsAll(prompt, "ops-01", "sess-hook") {
-		t.Fatalf("builtin system prompt missing base content: %q", prompt)
+	if containsAll(prompt, "ops-01", "sess-hook") {
+		t.Fatalf("stable system prompt unexpectedly contains request identity: %q", prompt)
 	}
 }
 

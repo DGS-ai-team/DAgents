@@ -105,6 +105,20 @@ func MessageToDeepSeekAPIPayload(m Message) (map[string]any, error) {
 	return payload, nil
 }
 
+// MessagesToAPIPayload serializes a complete message list without exposing
+// internal source/provenance fields. The list may include a system message.
+func MessagesToAPIPayload(messages []Message) ([]map[string]any, error) {
+	out := make([]map[string]any, len(messages))
+	for i, message := range messages {
+		payload, err := MessageToDeepSeekAPIPayload(message)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = payload
+	}
+	return out, nil
+}
+
 // MessageToJournalPayload 将消息转为 JSONL 行内 message 对象（assistant+tool_calls 保留 reasoning_content 键）。
 func MessageToJournalPayload(message Message) map[string]any {
 	payload, err := messageMapPayload(message)
@@ -112,6 +126,12 @@ func MessageToJournalPayload(message Message) map[string]any {
 		return map[string]any{"role": message.Role, "content": message.Content}
 	}
 	EnsureToolCallsAssistantReasoningKey(payload, message)
+	if message.Source != nil {
+		payload["source"] = message.Source
+	}
+	if message.Provenance != nil {
+		payload["provenance"] = message.Provenance
+	}
 	if message.Role == "tool" && message.ToolResultMetadata != nil {
 		payload["tool_result_metadata"] = message.ToolResultMetadata
 	}

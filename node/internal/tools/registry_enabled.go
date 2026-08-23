@@ -28,6 +28,7 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 	}
 	if len(names) == 0 {
 		r.enabledOnly = nil
+		r.legacyLinuxTools = false
 		return nil
 	}
 	set := make(map[string]struct{}, len(names))
@@ -46,6 +47,16 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 		return nil
 	}
 	r.enabledOnly = set
+	// Old Agent snapshots may still explicitly list the deprecated tools. Keep
+	// their model-visible definitions for one compatibility window, while a
+	// new snapshot using the terminal group receives only terminal_* tools.
+	r.legacyLinuxTools = false
+	for _, name := range []string{"linux_exec", "linux_file_upload", "linux_file_download"} {
+		if _, ok := set[name]; ok {
+			r.legacyLinuxTools = true
+			break
+		}
+	}
 	return nil
 }
 
@@ -70,6 +81,7 @@ func (r *Registry) SetBuiltinEnabledNone() {
 		return
 	}
 	r.enabledOnly = map[string]struct{}{}
+	r.legacyLinuxTools = false
 }
 
 // IsKnownBuiltinTool 判断是否为可配置的内置工具名。
@@ -119,6 +131,9 @@ var knownBuiltinTools = map[string]struct{}{
 	"terminal_read":          {},
 	"terminal_terminate":     {},
 	"terminal_list":          {},
+	"terminal_command":       {},
+	"terminal_upload":        {},
+	"terminal_download":      {},
 	"linux_exec":             {},
 	"linux_file_upload":      {},
 	"linux_file_download":    {},

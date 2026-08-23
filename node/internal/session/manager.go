@@ -76,7 +76,8 @@ type TurnOptions struct {
 	PromptContext PromptContextOptions
 	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
 	PromptContent *promptcontext.Content
-	// PreferredName 为本机使用者称呼（Node 首配）；注入 system prompt，替代 user.md。
+	// PreferredName 为本机使用者称呼（Node 首配）；通过 prompt context
+	// 注入模型请求，替代 user.md。
 	PreferredName string
 	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
 	LongTermStore turn.LongTermStore
@@ -588,6 +589,10 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		PromptDigest:          lifecycle.PromptDigest,
 		ToolDigest:            lifecycle.ToolDigest,
 		RecoveryRequired:      lifecycle.RecoveryRequired,
+	}
+	if lifecycle.ContextSnapshot != nil {
+		view.ContextInjectionDigest = lifecycle.ContextSnapshot.ContextInjectionDigest
+		view.ContextInjectionCount = len(lifecycle.ContextSnapshot.ContextInjections)
 	}
 	if !hasLifecycleProjection && pending != nil {
 		view.HasActiveTurn = true

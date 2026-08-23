@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
@@ -191,6 +190,10 @@ func TestHandlePutAgentPolicyProtectAskUserInformation(t *testing.T) {
 
 func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	srv, ts, agentID := testAgentPolicyServer(t)
+	contextBefore, err := srv.sessions.GetContextView(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	putBody := []byte(`{"soul_md":"我是助手","user_md":"用户偏好简洁","custom_md":"临时指令","long_term_md":"记得开会","long_term_scope":"global"}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/prompt-context", bytes.NewReader(putBody))
@@ -229,8 +232,8 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(contextView.SystemPrompt, "我是助手") {
-		t.Fatalf("live runtime prompt was not refreshed: %q", contextView.SystemPrompt)
+	if contextView.ContextInjectionCount == 0 || contextView.ContextInjectionDigest == contextBefore.ContextInjectionDigest {
+		t.Fatalf("live runtime context was not refreshed: before=%+v after=%+v", contextBefore, contextView)
 	}
 	rec, err := srv.agents.Get(t.Context(), agentID)
 	if err != nil || rec == nil {

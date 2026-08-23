@@ -664,6 +664,17 @@ func (r *terminalSessionRegistry) List(agentID string) []tools.TerminalSessionIn
 	return items
 }
 
+// Lookup returns the authoritative session metadata used to bind one-shot
+// commands and file transfers. It performs the same Agent ownership check as
+// input/read/terminate, so a terminal ID cannot be used across Agents.
+func (r *terminalSessionRegistry) Lookup(agentID, terminalID string) (tools.TerminalSessionInfo, error) {
+	session, err := r.get(strings.TrimSpace(terminalID), strings.TrimSpace(agentID))
+	if err != nil {
+		return tools.TerminalSessionInfo{}, err
+	}
+	return session.info(), nil
+}
+
 func (r *terminalSessionRegistry) ReadOutput(ctx context.Context, agentID, terminalID string, afterSeq uint64, maxBytes int) (tools.TerminalOutput, error) {
 	session, err := r.get(strings.TrimSpace(terminalID), strings.TrimSpace(agentID))
 	if err != nil {

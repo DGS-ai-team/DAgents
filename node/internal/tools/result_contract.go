@@ -176,6 +176,10 @@ func ResultDescriptionSuffixForTool(name string) string {
 		shape = " 成功表示输入已写入终端，不代表命令已经完成；需要 terminal_read 读取证据。"
 	case "terminal_read", "terminal_terminate":
 		shape = " 正文为 JSON，重点字段包括 output、output_bytes、output_empty、next_seq 和 exited；output_empty 不等于未执行。"
+	case "terminal_command":
+		shape = " 正文为 JSON，优先依据 status 和 exit_code 判断命令结果；stdout/stderr 为空可能是成功的零输出，output_truncated=true 时不能声称已看到完整输出。"
+	case "terminal_upload", "terminal_download":
+		shape = " 传输正文包含 transfer_id、status、bytes、sha256 及本地/远端路径；校验 sha256 后再宣称传输完成。"
 	case "background_job_status", "background_job_cancel":
 		shape = " 正文包含 job_id、status 和输出/错误摘要；后台任务完成通常还会通过 async_tool_result 自动回灌。"
 	case "load_skills", "unload_skills", "clear_skills":

@@ -408,6 +408,36 @@ func TestTurnCoordinatorReplacesModelContextAtControlledBoundary(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorRejectsChangedContextInjectionOnRepeatedSnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	coordinator := NewTurnCoordinator("session-1", "agent-1")
+	first := NewModelContextSnapshotWithInjections(
+		"stable-prompt", nil,
+		[]ContextInjection{{Name: "runtime_context", Source: "test", Content: "cwd=/one"}},
+		1, "runtime-v1",
+	)
+	second := NewModelContextSnapshotWithInjections(
+		"stable-prompt", nil,
+		[]ContextInjection{{Name: "runtime_context", Source: "test", Content: "cwd=/two"}},
+		1, "runtime-v1",
+	)
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-1", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandTurnSnapshotCreated, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, ContextSnapshot: first, At: now},
+	} {
+		if _, err := coordinator.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+	if _, err := coordinator.Dispatch(TurnCommand{
+		Type: CommandTurnSnapshotCreated, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1",
+		Generation: 1, ContextSnapshot: second, At: now.Add(time.Second),
+	}); err == nil {
+		t.Fatal("repeated snapshot with changed context injection should be rejected")
+	}
+}
+
 func TestTurnCoordinatorReplaysModelContextChange(t *testing.T) {
 	now := time.Now().UTC()
 	first := NewModelContextSnapshot("prompt-v1", nil, 1, "runtime-v1")

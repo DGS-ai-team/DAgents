@@ -37,7 +37,7 @@ func (c DuplicateConfig) windowDuration() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-// InjectTodayDateConfig 控制 turn.before_step 当天日期注入。
+// InjectTodayDateConfig 控制 request-only ContextInjection 中的当天日期。
 type InjectTodayDateConfig struct {
 	// Enabled 为 nil 时默认 true。
 	Enabled *bool

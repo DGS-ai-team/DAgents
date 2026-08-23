@@ -6,6 +6,11 @@
 >
 > 参考方向：Codex 的端到端执行协议、DeepSeek Harness 的能力模块化与运行轨迹可追踪设计。
 
+> **2026-08-23 更新**：本计划中早期“加载后把正文注入 system prompt”的描述已由
+> Codex 式 Skill context 方案替代。当前正文在激活时作为独立 `name=skill` durable
+> message 写入 history；system prompt 只保留 catalog 元数据和选择规则。历史实验数据
+> 仍可作为旧架构基线，当前验收以 [`non-user-user-message-injection-audit-2026-08-23.md`](./non-user-user-message-injection-audit-2026-08-23.md) 为准。
+
 ## 0. 本轮修改计划（2026-08-22）
 
 本轮先固定结构和生效边界，再决定是否改变 Skills 目录的呈现方式。默认方案如下：
@@ -24,7 +29,7 @@
 
 1. 不把工具名称、参数 schema、完整返回格式再复制到 system prompt；工具定义仍通过 API `tools` 参数传入。
 2. 暂时保留可用 Skills 的 `name/description` 目录在 system prompt 中。Skills 清单或工具清单变化造成的缓存失效是可接受成本，不为了节省缓存而牺牲模型选 Skill 的直接性。
-3. 已加载 Skill 的正文只在显式加载后的下一个模型 Step 注入 system prompt；不引入随工具循环不断追加的动态尾部。`list_available_skills` 已实现为默认关闭实验：只有 Agent snapshot 显式开启 `defaults.skills.catalog_tool_mode=true` 时才替代 system prompt 中的目录发现方式。
+3. 已加载 Skill 的正文只在显式加载后的下一个模型 Step 作为独立 `name=skill` durable context message 注入；不引入随工具循环不断追加的动态尾部，也不改写 system prompt。`list_available_skills` 已实现为默认关闭实验：只有 Agent snapshot 显式开启 `defaults.skills.catalog_tool_mode=true` 时才替代 system prompt 中的目录发现方式。
 
 ## 1. 先明确输入边界
 
@@ -62,13 +67,13 @@ tool result 消息 / 事件
 当前 system prompt 的主要段落顺序为：
 
 1. 静态角色、安全和任务执行契约。
-2. 主机环境和 Agent/session 标识。
-3. 工作区目录约定。
-4. 外置 CLI 目录说明。
-5. `prompt_context` 的稳定内容。
-6. 已加载 skills 正文。
-7. 自定义 prompt 内容。
-8. 可用 skills 的 name/description 目录。
+2. 工作区目录约定。
+3. 外置 CLI 目录说明。
+4. 可用 skills 的 name/description 目录。
+
+主机环境、Agent/session 标识、`prompt_context` 和自定义 prompt 作为 request-only
+`ContextInjection` 进入当前模型请求；已加载 skills 正文作为独立的
+`role=user`、`name=skill` durable context message 进入 history，不属于 system prompt。
 
 这里的最后一段是当前 Turn 的 skills 目录快照，不是执行过程中的动态尾部；活动 Turn 内不会因为磁盘变化而中途改写。
 
@@ -103,7 +108,7 @@ load_skills([])       → 清空 loaded
 2. 受 `max_in_prompt` 限制，超出部分不会进入 loaded 集合。
 3. 更新 session 的 `loadedSkills` 并持久化。
 4. 同步加载该 skill 的 hooks。
-5. 对显式 skills 变更，session/hook 状态立即更新，并请求在下一个模型 Step 重建 context；重建时把已加载 skill 正文注入 `## 已加载 skills`。未被显式加载触发的磁盘变化，普通观察路径仍延迟到下一次 human Turn。
+5. 对显式 skills 变更，session/hook 状态立即更新，并请求在下一个模型 Step 重建 context；重建时把已加载 skill 正文作为独立 skill context message 写入 history。未被显式加载触发的磁盘变化，普通观察路径仍延迟到下一次 human Turn。
 
 `unload_skills` 和 `clear_skills` 会更新 session 状态，并移除对应 hooks。当前已加载 skill 文件受到 `LoadedSkillFileGuardHook` 保护，不能通过受保护的文件工具或可识别的写命令直接修改。
 
@@ -132,7 +137,7 @@ session loadedSkills 更新，hooks 立即同步
 磁盘自动变化：普通观察路径在下一次 human Turn 边界应用
 ```
 
-当前实现只在显式 `load/unload/clear` 成功改变 loaded 集合时创建新的 context segment；不会中途改写正在进行的模型请求，也不会把执行计划或结果追加到动态尾部。这样接受一次可观测的 system prompt/cache 变化，换取模型在当前任务中立即使用 skill 正文。`model.context.changed` 会进入生命周期日志，重启回放后仍保留新 snapshot。
+当前实现只在显式 `load/unload/clear` 成功改变 loaded 集合时创建新的 context segment；不会中途改写正在进行的模型请求，也不会把执行计划或结果追加到动态尾部。Skill 正文通过独立 context message 在下一模型 Step 可见，稳定 system prompt 不变。`model.context.changed` 会进入生命周期日志，重启回放后仍保留新 snapshot。
 
 ### 2.5 外部 skill 文件变化
 
@@ -141,7 +146,7 @@ session loadedSkills 更新，hooks 立即同步
 - `Catalog.Revision()` 在新的 human Turn 边界被观察。
 - 变化通过 `skills/changed` 通知。
 - 当前 Turn snapshot 保持不变。
-- 下一次构造 system prompt 时重新读取目录和 loaded skill 正文。
+- 下一次 human Turn 创建新的 Catalog View；模型请求按当前 loaded set 生成独立 Skill context message。
 
 在人类消息正常进入下一轮、没有显式重新加载的情况下，这部分边界是正确的，应继续保留。当前实现已由 human Turn 边界的不可变 Catalog View 提供强隔离：如果外部进程恰好在活动 Turn 中修改了 `SKILL.md`，模型随后调用 `load_skills` 会得到 `catalog_changed`，不会静默读取新版本；下一 human Turn 才获得新的 Catalog View。代价是每个 human Turn 边界对可见 Skill 做一次内容摘要，后续可用文件系统事件/可信内容索引优化，但不能牺牲版本一致性。
 
@@ -163,7 +168,8 @@ Agent 配置
 
 human Turn 开始
   ├─ observeSkillCatalogChange：比较 revision，变化时发布 skills/changed
-  ├─ 构造 system prompt：静态契约 + 已加载正文 + 可用 name/description 目录
+  ├─ 构造 system prompt：静态契约 + 可用 name/description 目录
+  ├─ 为已加载正文准备独立 name=skill context message
   └─ 创建 ModelContextSnapshot：冻结 system prompt、tools、digest
 
 模型调用 load_skills
@@ -174,7 +180,7 @@ human Turn 开始
   └─ loaded 集合真的变化时，安排下一模型 Step 重建 context
 
 下一模型 Step
-  └─ 使用新的 system prompt 和完整 Skill 正文；历史消息连续保留
+  └─ 使用稳定 system prompt + 完整 Skill context message；历史消息连续保留
 ```
 
 当 `defaults.skills.catalog_tool_mode=true` 且 skills 工具组可见时，human Turn 的差异仅为：
@@ -501,10 +507,10 @@ model-visible loaded skill
 - 模型侧工具结果协议测试：成功、失败、拒绝、空正文、JSON 正文、历史 journal 持久化、provider payload 隔离和真实 Step 请求均有覆盖。
 - skills 结构化 trace 评测：相关场景全部通过，criterion pass rate 为 1.0。
 - 生命周期回放：新增 `model.context.changed` 回放测试，确认重启恢复后仍使用新 prompt/context snapshot。
-- 真实模型任务专项 A/B（隔离 Node、最终源码构建、Mimo 配置）在“skills 验收报告”上完成 3 组有效对照：3/3 treatment 调用 `load_skills`、产生 1 次 `model.context.changed`、第二 snapshot 含完整 skill 正文，最终均以 `QUALITY_GATE_OK` 开头；3/3 control 无 skills 工具调用，未完成技能契约。treatment 平均 2 次模型请求、1 次工具调用、约 5,088 input tokens；control 平均 1 次请求、0 次工具调用、约 1,121 input tokens。
+- 真实模型任务专项 A/B（旧 system-body 基线，隔离 Node、最终源码构建、Mimo 配置）在“skills 验收报告”上完成 3 组有效对照：3/3 treatment 调用 `load_skills`、产生 1 次 `model.context.changed`、第二 snapshot 含完整 skill 正文，最终均以 `QUALITY_GATE_OK` 开头；3/3 control 无 skills 工具调用，未完成技能契约。treatment 平均 2 次模型请求、1 次工具调用、约 5,088 input tokens；control 平均 1 次请求、0 次工具调用、约 1,121 input tokens。当前独立 Skill context 实现的行为以本报告更新和专项审计为准。
 - 额外跨任务对照覆盖“变更验收”和“故障诊断”：两个 treatment 都完成 skills 工具调用和 context mutation；故障诊断按正文输出 `INCIDENT_REPORT_OK`，变更验收在缺乏真实测试证据时按 skill 要求输出 `EVIDENCE_INCOMPLETE`；两个 control 均无 skills 工具调用并产生伪工具调用文本。该结果证明当前边界在多个任务上可工作，并支持策略 B，但样本仍小、只使用一个模型配置，不能替代全面效果结论。
 - 真实模型新增的工具 metadata 也已被模型实际读取：treatment 最终答案引用了 `[TOOL_RESULT_METADATA]` 中的 `status=succeeded`，而 hydrate 中保留的 tool 正文不含该标记，证明请求侧适配与历史/UI 隔离成立。
-- Catalog View 回归已覆盖 Catalog 单元、Turn/Session 集成和 race：活动 Turn 中对 `SKILL.md` 做同大小甚至同 mtime 的外部修改时，模型侧 `load_skills` 得到 `catalog_changed`，不会读取新正文；下一 human Turn 观察到新 revision 后，system prompt 才出现新 metadata/body。
+- Catalog View 回归已覆盖 Catalog 单元、Turn/Session 集成和 race：活动 Turn 中对 `SKILL.md` 做同大小甚至同 mtime 的外部修改时，模型侧 `load_skills` 得到 `catalog_changed`，不会读取新正文；下一 human Turn 观察到新 revision 后，system prompt 更新 metadata，Skill 正文在激活时进入独立 context message。
 - `list_available_skills` 已覆盖配置解析、默认关闭、API tool schema、受限工具集不泄露、稳定搜索/分页、元数据-only 返回和“不触发 context refresh”；默认模式的 system prompt 与 Registry tools 保持不变。
 - 详细样本、方法与限制见 [`prompt-tool-schema-skills-ab-report-2026-08-22.md`](./prompt-tool-schema-skills-ab-report-2026-08-22.md)。
 - 因此当前结论是“结构、确定性行为、模型侧 status 协议、Catalog 成本诊断和一组 n=3 真实任务对照已完成”；仍需可执行的多任务目录发现、多轮长上下文和 context mutation cache A/B 后再决定是否进一步改造 skills catalog。

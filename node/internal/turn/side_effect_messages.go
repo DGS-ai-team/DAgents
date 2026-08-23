@@ -193,12 +193,19 @@ func selectSideEffectSegments(built SideEffectMessages, tail toolResultTailKind)
 
 // bridgeApplyUserMessage 桥接态 Apply：单条合成 user（合并原 user 提示与 tool 正文）。
 func bridgeApplyUserMessage(built SideEffectMessages) llm.Message {
-	name := strings.TrimSpace(built.UserMessage.Name)
-	if name == "" {
-		name = llm.UserNameAsyncTool
+	message := llm.NormalizeMessageSource(built.UserMessage)
+	if strings.TrimSpace(message.Name) == "" {
+		message = llm.UserMessageWithSource(
+			message.Content,
+			llm.UserNameAsyncTool,
+			llm.MessageSource{Kind: llm.MessageSourceAsyncTool, Form: llm.MessageFormRelay},
+			&llm.MessageProvenance{Producer: llm.UserNameAsyncTool, Operation: "bridge"},
+		)
 	}
 	content := mergeBridgeUserContent(built)
-	return llm.UserMessage(content, name)
+	message.Content = content
+	message.ContentParts = nil
+	return message
 }
 
 func mergeBridgeUserContent(built SideEffectMessages) string {
@@ -214,9 +221,10 @@ func mergeBridgeUserContent(built SideEffectMessages) string {
 	}
 }
 
-func isSideEffectBridgeUserName(name string) bool {
-	switch strings.TrimSpace(name) {
-	case llm.UserNameAsyncTool, llm.UserNameTrigger, llm.UserNameA2AInbox, llm.UserNameChildTask:
+func isSideEffectBridgeUserMessage(message llm.Message) bool {
+	source := llm.EffectiveMessageSource(message)
+	switch source.Kind {
+	case llm.MessageSourceAsyncTool, llm.MessageSourceTrigger, llm.MessageSourceA2A, llm.MessageSourceChildAgent:
 		return true
 	default:
 		return false
@@ -228,7 +236,7 @@ func isSideEffectBridgeUserTail(messages []llm.Message) bool {
 		return false
 	}
 	last := messages[len(messages)-1]
-	return last.Role == "user" && isSideEffectBridgeUserName(last.Name)
+	return last.Role == "user" && isSideEffectBridgeUserMessage(last)
 }
 
 type mergedCallbackItem struct {
@@ -365,8 +373,11 @@ func SideEffectAlreadyApplied(messages []llm.Message, kind SideEffectKind, async
 		return false
 	}
 	last := messages[len(messages)-1]
-	if last.Role == "user" && last.Content == content && last.Name == userName {
-		return true
+	if last.Role == "user" && last.Content == content {
+		source, provenance := llm.MessageSourceForUserName(userName)
+		if llm.IsMessageSource(last, source.Kind, source.Form, provenance.Producer) {
+			return true
+		}
 	}
 	return false
 }

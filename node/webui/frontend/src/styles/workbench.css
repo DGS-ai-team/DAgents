@@ -531,46 +531,6 @@
   flex: 0 0 auto;
 }
 
-.chat__connection {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: var(--color-text-subtle);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.chat__connection-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.chat__connection--connected {
-  color: var(--color-success);
-}
-
-.chat__connection--connecting,
-.chat__connection--reconnecting {
-  color: var(--color-warning);
-}
-
-.chat__connection--connecting .chat__connection-dot,
-.chat__connection--reconnecting .chat__connection-dot {
-  animation: chat-connection-pulse 1.2s ease-in-out infinite;
-}
-
-.chat__connection--disconnected {
-  color: var(--color-danger);
-}
-
-@keyframes chat-connection-pulse {
-  50% { opacity: 0.35; }
-}
-
 .chat__header-btn {
   position: relative;
   width: 30px;
@@ -2663,6 +2623,20 @@ select.settings-field__input {
   flex: 0 0 auto;
 }
 
+/* 瞬时 turn/step 状态统一显示在输入栏右上方；底部状态线只保留稳定控制项。 */
+.chat__composer-runtime-rail {
+  min-width: 0;
+  min-height: 16px;
+  margin: 0 6px 2px;
+  overflow: hidden;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat__composer-statusline {
   display: flex;
   align-items: center;
@@ -3357,95 +3331,6 @@ select.settings-field__input {
 
 .nav-rail__member-mark svg {
   display: block;
-}
-
-.nav-rail__terminal-list {
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.nav-rail__terminal-item {
-  gap: 7px;
-  min-height: 34px;
-  padding-top: 5px;
-  padding-bottom: 5px;
-}
-
-.nav-rail__terminal-mark {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  display: grid;
-  place-items: center;
-  color: var(--color-text-subtle);
-}
-
-.nav-rail__terminal-mark svg {
-  display: block;
-}
-
-.nav-rail__terminal-main {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.nav-rail__terminal-title,
-.nav-rail__terminal-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nav-rail__terminal-title {
-  color: var(--color-text);
-  font-size: 12px;
-  line-height: 1.25;
-}
-
-.nav-rail__terminal-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-text-subtle);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.nav-rail__terminal-meta-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nav-rail__terminal-status-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 50%;
-  background: var(--color-text-subtle);
-}
-
-.nav-rail__terminal-status-dot--running {
-  background: var(--color-success, #3d9a5f);
-}
-
-.nav-rail__terminal-status-dot--exited {
-  background: var(--color-warning, #c28a24);
-}
-
-.nav-rail__terminal-status-dot--closed {
-  background: var(--color-danger, #c45757);
-}
-
-.nav-rail__terminal-config {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .nav-rail__error {
@@ -5482,16 +5367,6 @@ select.settings-field__input {
   .chat__header {
     min-height: 38px;
     padding: 7px 12px;
-  }
-
-  .chat__connection {
-    padding-inline: 3px;
-    font-size: 0;
-  }
-
-  .chat__connection-dot {
-    width: 7px;
-    height: 7px;
   }
 
   .chat__stream {

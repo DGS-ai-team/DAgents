@@ -4,7 +4,7 @@
 
 验证以下两类上下文变化的质量收益与缓存成本：
 
-1. 当前策略：system prompt 内保留可用 Skills 的 `name/description` 目录，正文通过 `load_skills` 在下一个模型 Step 生效。
+1. 当前策略：system prompt 内保留可用 Skills 的 `name/description` 目录，正文通过 `load_skills` 在下一个模型 Step 以独立 `name=skill` durable context message 生效。
 2. 候选策略：将可用 Skills 目录改为显式查询工具（仅在单独实验分支启用），比较首次选择质量、额外工具步数和 cache 成本。
 
 工具定义不复制到 system prompt。两组实验必须使用相同的工具 API schema、模型、历史任务和运行时版本；只有 Skills 目录注入方式不同。

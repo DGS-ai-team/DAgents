@@ -30,6 +30,8 @@ type ContextView struct {
 	RuntimeDigest                       string
 	PromptDigest                        string
 	ToolDigest                          string
+	ContextInjectionDigest              string
+	ContextInjectionCount               int
 	RecoveryRequired                    bool
 	TurnState                           turn.State
 	SystemPrompt                        string

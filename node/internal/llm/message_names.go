@@ -2,7 +2,9 @@ package llm
 
 import "strings"
 
-// user message name 常量：区分上下文中不同来源的 human 消息（对齐 DeepSeek Chat API name 字段）。
+// Legacy user message name constants. New code should use Message.Source and
+// Message.Provenance for decisions; Name remains a compatibility projection
+// for old history, event payloads, and providers that accept the field.
 //
 // 见 https://api-docs.deepseek.com/zh-cn/api/create-chat-completion
 const (
@@ -15,13 +17,23 @@ const (
 	UserNameCompressionSidecar = "compression_sidecar"
 	UserNameToolVision         = "tool_vision"
 	UserNameDate               = "date"
+	// UserNameSkill marks a durable, model-facing SKILL.md instruction
+	// message. It is distinct from a human request and is hidden from the
+	// normal transcript projection.
+	UserNameSkill = "skill"
+	// UserNameContext marks a request-only runtime context injection. These
+	// messages are never persisted into the session transcript.
+	UserNameContext = "context"
 )
 
-// UserMessage 构造纯文本 role=user 消息；name 为来源标识，空串则不设置。
+// UserMessage constructs a plain-text role=user message. The legacy name is
+// retained, while structured source/provenance are materialized automatically.
 func UserMessage(content, name string) Message {
-	m := Message{Role: "user", Content: content}
-	if n := strings.TrimSpace(name); n != "" {
-		m.Name = n
+	source, provenance := MessageSourceForUserName(name)
+	m := UserMessageWithSource(content, name, source, &provenance)
+	if strings.TrimSpace(name) == "" {
+		// Preserve the pre-source wire shape: empty legacy names remain omitted.
+		m.Name = ""
 	}
 	return m
 }

@@ -4,33 +4,33 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { TerminalSession } from "../terminal/terminalSession.js";
-import * as api from "../api/node.js";
+import { themeStore } from "../stores/theme.js";
 
 const props = defineProps({
   agentId: { type: String, required: true },
   terminalId: { type: String, default: "" },
   terminalMeta: { type: Object, default: null },
+  target: { type: Object, default: () => ({ kind: "local", shell: "powershell" }) },
   autoConnect: { type: Boolean, default: false },
   preserveSession: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
+  showActions: { type: Boolean, default: true },
 });
+
+const emit = defineEmits(["started", "status-changed", "exited", "error", "terminating"]);
 
 const outputRef = ref(null);
 const status = ref("idle");
 const error = ref("");
 const replayGap = ref(false);
 const autoScroll = ref(true);
-const selectedShell = ref("powershell");
-const defaultLocalShell = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent) ? "powershell" : "bash";
-const selectedTarget = ref(`local:${defaultLocalShell}`);
-const remoteChannels = ref([]);
-const targetLoading = ref(false);
 let session = null;
 let terminal = null;
 let fitAddon = null;
 let terminalDataDisposable = null;
 let terminalScrollDisposable = null;
 let resizeObserver = null;
+let mounted = false;
 
 const statusText = computed(
   () =>
@@ -38,6 +38,7 @@ const statusText = computed(
       idle: "未连接",
       connecting: "连接中",
       connected: "已连接",
+      terminating: "终止中",
       disconnected: "连接已断开",
       reconnecting: "重连中",
       exited: "进程已退出",
@@ -47,7 +48,7 @@ const statusText = computed(
 );
 
 function appendOutput(event) {
-  if (!terminal) return;
+  if (!mounted || !terminal) return;
   const shouldFollow = autoScroll.value;
   terminal.write(event.text, () => {
     if (shouldFollow) terminal.scrollToBottom();
@@ -62,12 +63,7 @@ function ensureTerminal() {
     scrollback: 5000,
     fontSize: 12,
     lineHeight: 1.35,
-    theme: {
-      background: "#17212b",
-      foreground: "#e8f0f7",
-      cursor: "#8cc8ff",
-      selectionBackground: "rgba(140, 200, 255, 0.28)",
-    },
+    theme: terminalTheme(),
   });
   fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
@@ -92,52 +88,39 @@ function connectTerminal() {
   replayGap.value = false;
   session = new TerminalSession(props.agentId, {
     onStatus: (nextStatus) => {
+      if (!mounted) return;
       status.value = nextStatus;
       if (nextStatus !== "error") error.value = "";
+      emit("status-changed", nextStatus);
     },
     onOutput: appendOutput,
     onReplayGap: () => {
+      if (!mounted) return;
       replayGap.value = true;
     },
     onError: (nextError) => {
+      if (!mounted) return;
       error.value = nextError?.message || String(nextError || "终端连接失败");
+      emit("error", nextError);
+    },
+    onEvent: (event) => {
+      if (!mounted) return;
+      if (event?.type === "started") emit("started", event);
+      if (["exited", "terminated", "closed"].includes(event?.type)) emit("exited", event);
     },
   });
   if (props.terminalId) {
     session.connect({ sessionId: props.terminalId, rows: 24, cols: 80 });
   } else {
-    const [targetKind, targetId = ""] = String(selectedTarget.value || `local:${defaultLocalShell}`).split(":");
-    const localShell = targetKind === "local" && targetId ? targetId : selectedShell.value;
+    const target = props.target || {};
+    const targetKind = String(target.kind || "local");
     session.connect({
-      targetKind: targetKind === "linux_channel" ? "linux_channel" : "local",
-      targetId: targetKind === "linux_channel" ? targetId : undefined,
-      shell: targetKind === "linux_channel" ? "bash" : localShell,
+      targetKind,
+      targetId: target.id || undefined,
+      shell: target.shell || (targetKind === "linux_channel" ? "bash" : "powershell"),
       rows: 24,
       cols: 80,
     });
-  }
-}
-
-async function loadRemoteChannels() {
-  if (!props.agentId || props.terminalId) return;
-  targetLoading.value = true;
-  try {
-    const [channelResult, bindingResult] = await Promise.all([
-      api.listLinuxChannels(),
-      api.getAgentLinuxChannels(props.agentId),
-    ]);
-    const enabled = new Set(
-      (bindingResult?.bindings || [])
-        .filter((item) => item.enabled !== false)
-        .map((item) => String(item.channel_id || "").trim())
-        .filter(Boolean),
-    );
-    remoteChannels.value = (Array.isArray(channelResult?.channels) ? channelResult.channels : [])
-      .filter((item) => item.enabled !== false && enabled.has(String(item.channel_id || "").trim()));
-  } catch {
-    remoteChannels.value = [];
-  } finally {
-    targetLoading.value = false;
   }
 }
 
@@ -151,7 +134,7 @@ function reconnectTerminal() {
 }
 
 function terminateTerminal() {
-  session?.terminate();
+  if (session?.terminate()) emit("terminating");
 }
 
 function clearOutput() {
@@ -175,6 +158,36 @@ watch(
   },
 );
 
+function themeColor(name, fallback) {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function terminalTheme() {
+  return {
+    background: themeColor("--color-editor", "#202020"),
+    foreground: themeColor("--color-text", "#e6e6e6"),
+    cursor: themeColor("--color-primary", "#60cdff"),
+    selectionBackground: themeColor("--color-selection", "rgba(96, 205, 255, 0.28)"),
+  };
+}
+
+function applyTerminalTheme() {
+  if (terminal) terminal.options.theme = terminalTheme();
+}
+
+watch(
+  () => props.autoConnect,
+  (next, previous) => {
+    if (next && !previous && status.value === "idle") connectTerminal();
+  },
+);
+
+watch(
+  () => themeStore.resolved,
+  () => nextTick(applyTerminalTheme),
+);
+
 watch(
   () => props.terminalId,
   (next, previous) => {
@@ -188,21 +201,8 @@ watch(
   },
 );
 
-watch(
-  () => props.terminalMeta?.shell,
-  (shell) => {
-    if (shell) selectedShell.value = String(shell);
-  },
-  { immediate: true },
-);
-
-watch(
-  () => props.agentId,
-  () => void loadRemoteChannels(),
-  { immediate: true },
-);
-
 onMounted(() => {
+  mounted = true;
   ensureTerminal();
   if (typeof ResizeObserver === "function" && outputRef.value) {
     resizeObserver = new ResizeObserver(() => resizeTerminal());
@@ -212,6 +212,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  mounted = false;
   resizeObserver?.disconnect();
   terminalDataDisposable?.dispose();
   terminalScrollDisposable?.dispose();
@@ -219,55 +220,63 @@ onBeforeUnmount(() => {
   if (props.preserveSession) session?.detach();
   else session?.close();
 });
+
+defineExpose({
+  getStatus: () => status.value,
+  reconnect: reconnectTerminal,
+  terminate: terminateTerminal,
+  clearOutput,
+});
 </script>
 
 <template>
   <section class="terminal-panel">
     <div class="terminal-panel__head">
-      <div>
+      <div class="terminal-panel__identity">
         <div class="terminal-panel__title">终端</div>
         <div class="terminal-panel__subtitle">
           <span class="terminal-panel__dot" :class="`terminal-panel__dot--${status}`"></span>
           {{ statusText }}
         </div>
       </div>
-      <div class="terminal-panel__actions">
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="status === 'connecting'" @click="reconnectTerminal">
-          {{ status === "idle" || status === "closed" || status === "exited" ? "连接" : status === "reconnecting" ? "重连中…" : "重连" }}
+      <div v-if="props.showActions" class="terminal-panel__actions">
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm terminal-panel__icon-btn"
+          :disabled="status === 'connecting' || status === 'connected' || status === 'terminating'"
+          :title="status === 'connected' ? '终端已连接' : status === 'terminating' ? '终止中' : status === 'idle' || status === 'closed' || status === 'exited' ? '连接终端' : status === 'reconnecting' ? '重连中' : '重连终端'"
+          :aria-label="status === 'connected' ? '终端已连接' : status === 'terminating' ? '终止中' : status === 'idle' || status === 'closed' || status === 'exited' ? '连接终端' : status === 'reconnecting' ? '重连中' : '重连终端'"
+          @click="reconnectTerminal"
+        >
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M16 9a6 6 0 1 0 1 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <path d="M16 4.5v4h-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
         <button
           type="button"
-          class="btn btn--ghost btn--sm"
+          class="btn btn--ghost btn--sm terminal-panel__icon-btn"
           :disabled="status !== 'connected'"
+          title="终止终端"
+          aria-label="终止终端"
           @click="terminateTerminal"
         >
-          终止
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <rect x="5" y="5" width="10" height="10" rx="1.3" fill="currentColor" />
+          </svg>
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" @click="clearOutput">清空</button>
+        <button type="button" class="btn btn--ghost btn--sm terminal-panel__icon-btn" title="清空终端输出" aria-label="清空终端输出" @click="clearOutput">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M4.5 6h11M8 3.5h4l.8 2.5H7.2L8 3.5ZM6 8v6.5a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V8M8.5 9.5v4M11.5 9.5v4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
       </div>
-    </div>
-
-    <div v-if="!props.terminalId" class="terminal-panel__options">
-      <label class="terminal-panel__field">
-        <span>连接目标</span>
-        <select v-model="selectedTarget" class="terminal-panel__select" :disabled="status === 'connected' || status === 'connecting' || targetLoading">
-          <option value="local:powershell">本机 · PowerShell</option>
-          <option value="local:bash">本机 · Bash</option>
-          <option value="local:wsl">本机 · WSL（默认发行版）</option>
-          <option value="local:cmd">本机 · CMD</option>
-          <option v-for="channel in remoteChannels" :key="channel.channel_id" :value="`linux_channel:${channel.channel_id}`">
-            {{ channel.display_name || channel.channel_id }} · Linux
-          </option>
-        </select>
-      </label>
-      <span class="terminal-panel__hint">WSL 使用本机 wsl.exe；Linux 目标来自当前 Agent 已绑定的通道。</span>
     </div>
 
     <div v-if="replayGap" class="terminal-panel__notice">
       重连期间的部分终端输出已超过服务端回放范围，当前内容可能不完整。
     </div>
     <div ref="outputRef" class="terminal-panel__output"></div>
-    <p class="terminal-panel__input-hint">连接后可直接在终端区域输入命令，支持方向键、Ctrl+C、粘贴和多行交互。</p>
     <p v-if="error" class="terminal-panel__error">{{ error }}</p>
   </section>
 </template>
@@ -278,11 +287,10 @@ onBeforeUnmount(() => {
   padding: 16px;
   border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--color-surface, #fff) 96%, #eef5ff);
+  background: var(--color-editor, #202020);
 }
 
-.terminal-panel__head,
-.terminal-panel__input-row {
+.terminal-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -331,35 +339,15 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.terminal-panel__options {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
+.terminal-panel__icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
 }
 
-.terminal-panel__field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text-subtle);
-  font-size: 12px;
-}
-
-.terminal-panel__select {
-  min-width: 150px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface, #fff);
-  color: var(--color-text);
-  font-size: 12px;
-}
-
-.terminal-panel__hint {
-  color: var(--color-text-subtle);
-  font-size: 11px;
+.terminal-panel__icon-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .terminal-panel__notice {
@@ -377,7 +365,7 @@ onBeforeUnmount(() => {
   margin: 14px 0 10px;
   overflow: hidden;
   border-radius: 8px;
-  background: #17212b;
+  background: var(--color-editor, #202020);
 }
 
 .terminal-panel__output :deep(.xterm) {
@@ -387,28 +375,11 @@ onBeforeUnmount(() => {
 
 .terminal-panel__output :deep(.xterm-viewport) {
   border-radius: 8px;
+  background: var(--color-editor, #202020) !important;
 }
 
-.terminal-panel__input-row {
-  align-items: flex-end;
-}
-
-.terminal-panel__input {
-  flex: 1;
-  min-width: 0;
-  resize: vertical;
-  padding: 9px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: var(--color-surface, #fff);
-  color: var(--color-text);
-  font: 12px/1.45 var(--font-mono, ui-monospace, monospace);
-}
-
-.terminal-panel__input-hint {
-  margin: 0 0 10px;
-  color: var(--color-text-subtle);
-  font-size: 11px;
+.terminal-panel__output :deep(.xterm-screen) {
+  background: var(--color-editor, #202020);
 }
 
 .terminal-panel__error {
@@ -418,8 +389,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
-  .terminal-panel__head,
-  .terminal-panel__input-row {
+  .terminal-panel__head {
     align-items: stretch;
     flex-direction: column;
   }

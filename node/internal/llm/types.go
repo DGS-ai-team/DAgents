@@ -18,6 +18,10 @@ type Message struct {
 	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID       string        `json:"tool_call_id,omitempty"`
 	Name             string        `json:"name,omitempty"`
+	// Source and Provenance are internal durable metadata. Provider adapters
+	// deliberately omit them from outbound API payloads.
+	Source     *MessageSource     `json:"source,omitempty"`
+	Provenance *MessageProvenance `json:"provenance,omitempty"`
 	// ToolResultMetadata is persisted with internal history but is never sent
 	// as a non-standard provider message field.  The outbound preparation
 	// layer renders it into the tool content so the model can observe the

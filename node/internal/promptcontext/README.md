@@ -1,6 +1,6 @@
 # promptcontext
 
-从 SQLite（`agents.db` → `agent_prompt_context`）经 `Content` 注入 system prompt；`EnsureAgentPromptContext` 仅在首次建 Agent 行时从旧版 `.runtime` 文件迁移。
+从 SQLite（`agents.db` → `agent_prompt_context`）经 `Content` 注入当前模型请求的运行时上下文；`EnsureAgentPromptContext` 仅在首次建 Agent 行时从旧版 `.runtime` 文件迁移。它不再拼接到稳定 system prompt。
 
 | 文件 | 职责 |
 |------|------|

@@ -11,7 +11,7 @@
 | `SetChildAgentManager` | 父 session 注入临时 Agent 管理器 |
 | `SetChildSession` | 子 session 标记；禁止管理类工具与 `ask_user` |
 | `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
-| `RunHumanMessageTurn` | 追加 user（含 `name` 来源标识）+ 单步 |
+| `RunHumanMessageTurn` | 追加 user（含结构化 `source/provenance`，保留 `name` 兼容字段）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |

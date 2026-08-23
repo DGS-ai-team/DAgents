@@ -47,11 +47,11 @@ func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 }
 
 type chatRequest struct {
-	Model         string          `json:"model"`
-	Messages      []Message       `json:"messages"`
-	Stream        bool            `json:"stream"`
-	Tools         []tools.ToolDef `json:"tools,omitempty"`
-	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
+	Model         string           `json:"model"`
+	Messages      []map[string]any `json:"messages"`
+	Stream        bool             `json:"stream"`
+	Tools         []tools.ToolDef  `json:"tools,omitempty"`
+	StreamOptions *streamOptions   `json:"stream_options,omitempty"`
 }
 
 type streamOptions struct {
@@ -104,9 +104,13 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		}, c.cfg.RequestExtra)
 	} else {
 		msgs := MessagesWithSystem(req.SystemPrompt, req.Messages)
+		payloads, payloadErr := MessagesToAPIPayload(msgs)
+		if payloadErr != nil {
+			return ChatResult{}, payloadErr
+		}
 		body, err = marshalChatRequest(chatRequest{
 			Model:         c.cfg.Model,
-			Messages:      msgs,
+			Messages:      payloads,
 			Stream:        true,
 			Tools:         req.Tools,
 			StreamOptions: &streamOptions{IncludeUsage: true},
@@ -250,8 +254,8 @@ func appendReasoningDetail(full *strings.Builder, detail string) string {
 }
 
 type completeRequestBody struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
+	Model    string           `json:"model"`
+	Messages []map[string]any `json:"messages"`
 }
 
 type completeResponseBody struct {
@@ -269,7 +273,11 @@ func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (s
 		return "", fmt.Errorf("llm api key is not configured")
 	}
 	msgs := MessagesWithSystem(req.SystemPrompt, []Message{{Role: "user", Content: req.UserPrompt}})
-	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: msgs}, c.cfg.RequestExtra)
+	payloads, err := MessagesToAPIPayload(msgs)
+	if err != nil {
+		return "", err
+	}
+	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads}, c.cfg.RequestExtra)
 	if err != nil {
 		return "", err
 	}

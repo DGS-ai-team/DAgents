@@ -24,7 +24,16 @@ func (h *systemPromptBuildHook) Run(_ context.Context, hc *hooks.Context, _ hook
 	if h == nil || h.compose == nil || hc == nil {
 		return hooks.Result{Action: hooks.ActionContinue}, nil
 	}
-	prompt := h.compose(hc.SessionID)
+	prompt := ""
+	if hc.PromptBuild != nil {
+		// buildSystemPromptWithInput supplies the snapshot-frozen base prompt.
+		// Reuse it so prompt.build hooks and ContextInjection do not observe
+		// different runtime inputs at a day boundary.
+		prompt = hc.PromptBuild.SystemPrompt
+	}
+	if prompt == "" {
+		prompt = h.compose(hc.SessionID)
+	}
 	return hooks.Result{
 		Action: hooks.ActionContinue,
 		Mutations: map[string]any{

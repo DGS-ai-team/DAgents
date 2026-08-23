@@ -28,6 +28,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"terminal_read":          {CallPurposeKey, "terminal_id"},
 		"terminal_terminate":     {CallPurposeKey, "terminal_id"},
 		"terminal_list":          {CallPurposeKey},
+		"terminal_command":       {CallPurposeKey, "terminal_id", "command"},
 		"background_job_status":  {CallPurposeKey, "job_id"},
 		"background_job_cancel":  {CallPurposeKey, "job_id"},
 		"ask_user_information":   {CallPurposeKey, "question"},
