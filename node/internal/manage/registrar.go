@@ -26,14 +26,31 @@ const agentIDHeader = "x-dagents-agent-id"
 // ToolNamesProvider 返回当前可用工具名列表（心跳时刷新）。
 type ToolNamesProvider func() []string
 
+// AgentCatalogEntry describes an existing local Agent that Manage may expose
+// as a Workgroup member candidate. The Node still owns the runtime; Manage
+// stores only this registration metadata.
+type AgentCatalogEntry struct {
+	ID           string
+	Name         string
+	Description  string
+	Capabilities []string
+	Tools        []string
+	Skills       []string
+	Card         map[string]any
+	Metadata     map[string]any
+}
+
+type AgentCatalogProvider func() []AgentCatalogEntry
+
 // Registrar 周期性向 Manage 注册并发送心跳。
 type Registrar struct {
-	cfg        *config.Config
-	logger     *slog.Logger
-	client     *http.Client
-	toolNames  ToolNamesProvider
-	interval   time.Duration
-	ttlSeconds int
+	cfg          *config.Config
+	logger       *slog.Logger
+	client       *http.Client
+	toolNames    ToolNamesProvider
+	agentCatalog AgentCatalogProvider
+	interval     time.Duration
+	ttlSeconds   int
 
 	mu         sync.RWMutex
 	registered bool
@@ -56,6 +73,10 @@ func NewRegistrar(cfg *config.Config, logger *slog.Logger) *Registrar {
 // SetToolNamesProvider 注入工具名提供者（通常为 session.Manager.ToolNames）。
 func (r *Registrar) SetToolNamesProvider(provider ToolNamesProvider) {
 	r.toolNames = provider
+}
+
+func (r *Registrar) SetAgentCatalogProvider(provider AgentCatalogProvider) {
+	r.agentCatalog = provider
 }
 
 // Registered 表示最近一次 register/heartbeat 是否成功。
@@ -162,6 +183,7 @@ func (r *Registrar) register(ctx context.Context) time.Duration {
 	}
 
 	r.setRegistered(true)
+	r.registerAgentCatalog(ctx)
 	r.logger.Info("manage registered", "agent_id", r.cfg.NodeID, "status", out.Agent.Status)
 	if out.HeartbeatIntervalSeconds > 0 {
 		return time.Duration(out.HeartbeatIntervalSeconds) * time.Second
@@ -198,7 +220,34 @@ func (r *Registrar) heartbeat(ctx context.Context) error {
 		return fmt.Errorf("heartbeat status %d: %s", resp.StatusCode, readErrorBody(resp.Body))
 	}
 	r.setRegistered(true)
+	r.registerAgentCatalog(ctx)
 	return nil
+}
+
+func (r *Registrar) registerAgentCatalog(ctx context.Context) {
+	if r == nil || r.agentCatalog == nil {
+		return
+	}
+	for _, entry := range r.agentCatalog() {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" || id == r.cfg.NodeID {
+			continue
+		}
+		payload := r.buildAgentRegisterPayload(entry)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		resp, err := r.doRequest(ctx, http.MethodPost, r.registryURL("/v1/registry/agents"), body)
+		if err != nil {
+			r.logger.Warn("manage agent catalog registration failed", "agent_id", id, "error", err)
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			r.logger.Warn("manage agent catalog registration rejected", "agent_id", id, "status", resp.StatusCode)
+		}
+	}
 }
 
 func (r *Registrar) deregister(ctx context.Context) error {
@@ -280,6 +329,34 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	}
 }
 
+func (r *Registrar) buildAgentRegisterPayload(entry AgentCatalogEntry) registerPayload {
+	return registerPayload{
+		NodeID:           r.cfg.NodeID,
+		AgentID:          strings.TrimSpace(entry.ID),
+		BaseURL:          strings.TrimRight(strings.TrimSpace(r.cfg.Local.Endpoint), "/"),
+		CapabilitiesHint: entry.Capabilities,
+		Capabilities:     entry.Capabilities,
+		Tools:            entry.Tools,
+		Skills:           entry.Skills,
+		TTLSeconds:       r.ttlSeconds,
+		Name:             strings.TrimSpace(entry.Name),
+		Description:      strings.TrimSpace(entry.Description),
+		Version:          version.Version,
+		Card:             entry.Card,
+		Metadata:         mergeCatalogMetadata(entry.Metadata, r.cfg.NodeID),
+	}
+}
+
+func mergeCatalogMetadata(metadata map[string]any, nodeID string) map[string]any {
+	out := make(map[string]any, len(metadata)+1)
+	for key, value := range metadata {
+		out[key] = value
+	}
+	out["node_id"] = nodeID
+	out["registration_kind"] = "agent_catalog"
+	return out
+}
+
 func displayMeta() map[string]any {
 	h := hostsnapshot.Get()
 	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
@@ -337,6 +414,7 @@ type registerPayload struct {
 	CapabilitiesHint []string       `json:"capabilities_hint,omitempty"`
 	Capabilities     []string       `json:"capabilities,omitempty"`
 	Tools            []string       `json:"tools,omitempty"`
+	Skills           []string       `json:"skills,omitempty"`
 	TTLSeconds       int            `json:"ttl_seconds"`
 	Name             string         `json:"name"`
 	Description      string         `json:"description,omitempty"`

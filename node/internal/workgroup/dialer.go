@@ -104,6 +104,15 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 	d.closed = false
 	d.mu.Unlock()
 	defer d.Close()
+	var writeMu sync.Mutex
+	// Agent session events are asynchronous: the local Agent runtime can keep
+	// producing deltas after the read loop has accepted the start command.
+	d.Worker.SetOutbound(func(frame map[string]any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return wsjson.Write(ctx, conn, frame)
+	})
+	defer d.Worker.SetOutbound(nil)
 	stopCloseOnCancel := make(chan struct{})
 	defer close(stopCloseOnCancel)
 	go func() {
@@ -141,7 +150,6 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 		return err
 	}
 
-	var writeMu sync.Mutex
 	go func() {
 		// 定期刷新订阅列表并 resume，避免「Manage 侧新建成员后 Node 已在线却不拉 pending」
 		ticker := time.NewTicker(15 * time.Second)

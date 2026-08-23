@@ -226,6 +226,37 @@ func (m *Manager) SessionTools(sessionID string) *tools.Registry {
 // CreateWithOptions 用指定 TurnOptions、工具执行器与可选策略引擎创建/复用 session（per-agent 沙箱用）。
 // toolExec 为 nil 时回退到 Manager 默认 Registry；policyEngine 为 nil 时回退到 Manager 默认策略。
 func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor, policyEngine *policy.Engine) (*Session, bool, error) {
+	return m.createWithOptions(requestedID, turnOpts, toolExec, policyEngine, m.llm, m.agentID)
+}
+
+// CreateWithOptionsAndLLM creates an isolated session runtime with an explicit
+// LLM client and logical Agent ID. It is used by Workgroup members that bind
+// to an existing Agent while keeping each workgroup session independent.
+func (m *Manager) CreateWithOptionsAndLLM(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, error) {
+	if llmClient == nil {
+		llmClient = m.llm
+	}
+	if strings.TrimSpace(runtimeAgentID) == "" {
+		runtimeAgentID = m.agentID
+	}
+	return m.createWithOptions(requestedID, turnOpts, toolExec, policyEngine, llmClient, runtimeAgentID)
+}
+
+func (m *Manager) createWithOptions(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, error) {
 	id := strings.TrimSpace(requestedID)
 	if id == "" {
 		return nil, false, fmt.Errorf("session id is required for CreateWithOptions")
@@ -248,7 +279,7 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 		return nil, false, err
 	}
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
+	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
 	rt.historyRevision = historyRevision
 	m.sessions[id] = rt
@@ -270,6 +301,37 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 // This is the reload counterpart to CreateWithOptions; callers must only use
 // it at an idle boundary so the old Turn snapshot is not interrupted.
 func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor, policyEngine *policy.Engine) (*Session, bool, error) {
+	return m.replaceWithOptions(requestedID, turnOpts, toolExec, policyEngine, m.llm, m.agentID)
+}
+
+// ReplaceWithOptionsAndLLM is the explicit-client counterpart used when a
+// workgroup session must retain the Agent's own LLM profile independently of
+// the process-wide focused Agent.
+func (m *Manager) ReplaceWithOptionsAndLLM(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, error) {
+	if llmClient == nil {
+		llmClient = m.llm
+	}
+	if strings.TrimSpace(runtimeAgentID) == "" {
+		runtimeAgentID = m.agentID
+	}
+	return m.replaceWithOptions(requestedID, turnOpts, toolExec, policyEngine, llmClient, runtimeAgentID)
+}
+
+func (m *Manager) replaceWithOptions(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, error) {
 	id := strings.TrimSpace(requestedID)
 	if id == "" {
 		return nil, false, fmt.Errorf("session id is required for ReplaceWithOptions")
@@ -318,7 +380,7 @@ func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, t
 		}
 	}
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
+	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
 	rt.historyRevision = historyRevision
 	m.attachUserChildTools(rt)

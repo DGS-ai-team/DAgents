@@ -67,6 +67,7 @@ const liveAssistant = ref(null);
 const remoteSending = ref(false);
 const remoteClientMessageId = ref("");
 const localClientMessageId = ref("");
+const workgroupRealtimeStatus = ref("disconnected");
 const streamPhase = ref(""); // thinking | tool | streaming
 const streamToolName = ref("");
 const streamMode = ref(""); // leader | direct | member
@@ -468,18 +469,24 @@ function stopWorkgroupEventStream() {
     workgroupEventSource.close();
     workgroupEventSource = null;
   }
+  workgroupRealtimeStatus.value = "disconnected";
 }
 
 function startWorkgroupEventStream() {
   stopWorkgroupEventStream();
   if (!workgroupId.value || typeof EventSource === "undefined") return;
+  workgroupRealtimeStatus.value = "connecting";
   const url = api.getWorkgroupEventsURL(workgroupId.value, workgroupEventSeq);
   const source = new EventSource(url);
   workgroupEventSource = source;
+  source.onopen = () => {
+    if (workgroupEventSource === source) workgroupRealtimeStatus.value = "connected";
+  };
   source.addEventListener("workgroup.timeline", handleWorkgroupEventMessage);
   source.addEventListener("workgroup.realtime", handleWorkgroupEventMessage);
   source.onerror = () => {
     if (workgroupEventSource !== source) return;
+    workgroupRealtimeStatus.value = "disconnected";
     source.close();
     void loadTimeline().catch(() => {});
     void refreshHumanQueue();
@@ -1893,6 +1900,7 @@ onUnmounted(() => {
     <aside class="app__col app__col--agents">
       <NavRail
         ref="panelRef"
+        :realtime-status="workgroupRealtimeStatus"
         @switch="(id) => router.push({ name: 'agents', params: { agentId: id } })"
         @create="router.push({ name: 'agents', query: { createAgent: '1' } })"
         @delete="onRailDeleteAgent"

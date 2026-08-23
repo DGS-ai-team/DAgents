@@ -1,6 +1,7 @@
 package workgroup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -39,6 +40,98 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 	}
 
 	switch env.Type {
+	case "agent.session.open":
+		if w.AgentSessions == nil {
+			return agentSessionFailureResult(env, "agent session handler not configured")
+		}
+		req, err := agentSessionOpenFromPayload(env.Payload)
+		if err != nil {
+			return agentSessionFailureResult(env, err.Error())
+		}
+		res, err := w.AgentSessions.OpenAgentSession(context.Background(), req)
+		if err != nil {
+			return agentSessionFailureResult(env, err.Error())
+		}
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     env.DeliverySeq > 0,
+			AckWorkgroupID: deliveryWorkgroupID(env, ""),
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type":    "agent.session.ready",
+				"payload": agentResponsePayload(env, agentSessionResultPayload(res), w.Session.Generation()),
+			},
+		}, nil
+
+	case "agent.turn.start":
+		if w.AgentSessions == nil {
+			return agentTurnFailureResult(env, "agent session handler not configured")
+		}
+		req, err := agentTurnStartFromPayload(env.Payload)
+		if err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		if err := w.AgentSessions.StartAgentTurn(context.Background(), req); err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     env.DeliverySeq > 0,
+			AckWorkgroupID: deliveryWorkgroupID(env, ""),
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type":    "agent.turn.accepted",
+				"payload": agentResponsePayload(env, agentTurnIdentityPayload(req), w.Session.Generation()),
+			},
+		}, nil
+
+	case "agent.turn.cancel":
+		if w.AgentSessions == nil {
+			return agentTurnFailureResult(env, "agent session handler not configured")
+		}
+		req, err := agentTurnCancelFromPayload(env.Payload)
+		if err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		if err := w.AgentSessions.CancelAgentTurn(context.Background(), req); err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     env.DeliverySeq > 0,
+			AckWorkgroupID: deliveryWorkgroupID(env, ""),
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type":    "agent.turn.cancelled",
+				"payload": agentResponsePayload(env, agentTurnCancelPayload(req), w.Session.Generation()),
+			},
+		}, nil
+
+	case "agent.session.close":
+		if w.AgentSessions == nil {
+			return agentSessionFailureResult(env, "agent session handler not configured")
+		}
+		req, err := agentSessionOpenFromPayload(env.Payload)
+		if err != nil {
+			return agentSessionFailureResult(env, err.Error())
+		}
+		if err := w.AgentSessions.CloseAgentSession(context.Background(), req); err != nil {
+			return agentSessionFailureResult(env, err.Error())
+		}
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     env.DeliverySeq > 0,
+			AckWorkgroupID: deliveryWorkgroupID(env, ""),
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type": "agent.session.closed",
+				"payload": agentResponsePayload(env, agentSessionResultPayload(AgentSessionResult{
+					WorkgroupID: req.WorkgroupID, MemberID: req.MemberID, AgentID: req.AgentID,
+					SessionID: req.SessionID, Status: "closed",
+				}), w.Session.Generation()),
+			},
+		}, nil
+
 	case "member.provision":
 		req, err := provisionFromPayload(env.Payload)
 		if err != nil {
@@ -224,6 +317,15 @@ func (w *Worker) CommitPendingAck(res *DispatchResult) error {
 		return nil
 	}
 	if err := w.Session.AckDelivery(res.AckWorkgroupID, res.AckDeliverySeq); err != nil {
+		// Manage may have queued a resume replay and a live frame from
+		// different request paths. If a lower sequence arrives after a higher
+		// one, the higher cursor already covers it; do not tear down the WS.
+		// Session.AckDelivery remains strict for direct callers/tests.
+		if conflict, ok := err.(*Error); ok && conflict.Code == CodeConflict &&
+			strings.HasPrefix(conflict.Message, "delivery_seq regress") {
+			res.PendingAck = false
+			return nil
+		}
 		return err
 	}
 	res.PendingAck = false
@@ -356,6 +458,141 @@ func toolCommandFailureResult(env WSEnvelope, cmd ToolCommand, err error) (*Disp
 			"payload": payload,
 		},
 	}, err
+}
+
+func agentSessionOpenFromPayload(payload map[string]any) (AgentSessionOpenRequest, error) {
+	var req AgentSessionOpenRequest
+	raw, _ := json.Marshal(payload)
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return req, errf(CodeSchemaMismatch, "agent.session payload: %v", err)
+	}
+	if strings.TrimSpace(req.WorkgroupID) == "" || strings.TrimSpace(req.MemberID) == "" ||
+		strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.SessionID) == "" {
+		return req, errf(CodeSchemaMismatch, "agent.session requires workgroup_id, member_id, agent_id, session_id")
+	}
+	return req, nil
+}
+
+func agentTurnStartFromPayload(payload map[string]any) (AgentTurnStartRequest, error) {
+	var req AgentTurnStartRequest
+	raw, _ := json.Marshal(payload)
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return req, errf(CodeSchemaMismatch, "agent.turn.start payload: %v", err)
+	}
+	if strings.TrimSpace(req.WorkgroupID) == "" || strings.TrimSpace(req.MemberID) == "" ||
+		strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.SessionID) == "" ||
+		strings.TrimSpace(req.AssignID) == "" || strings.TrimSpace(req.UserMessage) == "" {
+		return req, errf(CodeSchemaMismatch, "agent.turn.start requires workgroup_id, member_id, agent_id, session_id, assign_id, user_message")
+	}
+	return req, nil
+}
+
+func agentTurnCancelFromPayload(payload map[string]any) (AgentTurnCancelRequest, error) {
+	var req AgentTurnCancelRequest
+	raw, _ := json.Marshal(payload)
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return req, errf(CodeSchemaMismatch, "agent.turn.cancel payload: %v", err)
+	}
+	if strings.TrimSpace(req.WorkgroupID) == "" || strings.TrimSpace(req.MemberID) == "" ||
+		strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.AssignID) == "" {
+		return req, errf(CodeSchemaMismatch, "agent.turn.cancel requires workgroup_id, member_id, agent_id, session_id, assign_id")
+	}
+	return req, nil
+}
+
+func agentSessionResultPayload(res AgentSessionResult) map[string]any {
+	return map[string]any{
+		"workgroup_id": res.WorkgroupID,
+		"member_id":    res.MemberID,
+		"agent_id":     res.AgentID,
+		"session_id":   res.SessionID,
+		"status":       res.Status,
+		"message":      res.Message,
+	}
+}
+
+func agentTurnIdentityPayload(req AgentTurnStartRequest) map[string]any {
+	return map[string]any{
+		"workgroup_id":      req.WorkgroupID,
+		"member_id":         req.MemberID,
+		"agent_id":          req.AgentID,
+		"session_id":        req.SessionID,
+		"assign_id":         req.AssignID,
+		"turn_id":           req.TurnID,
+		"client_message_id": req.ClientMessageID,
+	}
+}
+
+func agentTurnCancelPayload(req AgentTurnCancelRequest) map[string]any {
+	return map[string]any{
+		"workgroup_id": req.WorkgroupID,
+		"member_id":    req.MemberID,
+		"agent_id":     req.AgentID,
+		"session_id":   req.SessionID,
+		"assign_id":    req.AssignID,
+		"status":       "canceled",
+	}
+}
+
+func agentResponsePayload(env WSEnvelope, base map[string]any, generation int64) map[string]any {
+	out := mergeMaps(base, map[string]any{
+		"workgroup_id":          firstNonEmpty(payloadString(base["workgroup_id"]), env.WorkgroupID),
+		"delivery_seq":          env.DeliverySeq,
+		"connection_generation": generation,
+	})
+	return out
+}
+
+func payloadString(value any) string {
+	s, _ := value.(string)
+	return strings.TrimSpace(s)
+}
+
+func agentSessionFailureResult(env WSEnvelope, message string) (*DispatchResult, error) {
+	payload := map[string]any{
+		"message":               message,
+		"status":                "error",
+		"workgroup_id":          env.Payload["workgroup_id"],
+		"member_id":             env.Payload["member_id"],
+		"agent_id":              env.Payload["agent_id"],
+		"session_id":            env.Payload["session_id"],
+		"connection_generation": env.ConnectionGeneration,
+		"delivery_seq":          env.DeliverySeq,
+	}
+	return &DispatchResult{
+		Handled:        true,
+		PendingAck:     env.DeliverySeq > 0,
+		AckWorkgroupID: deliveryWorkgroupID(env, ""),
+		AckDeliverySeq: env.DeliverySeq,
+		ErrorCode:      CodeConflict,
+		AckEnvelope: map[string]any{
+			"type": "agent.session.error", "payload": payload,
+		},
+	}, errf(CodeConflict, "%s", message)
+}
+
+func agentTurnFailureResult(env WSEnvelope, message string) (*DispatchResult, error) {
+	payload := map[string]any{
+		"message":               message,
+		"status":                "failed",
+		"workgroup_id":          env.Payload["workgroup_id"],
+		"member_id":             env.Payload["member_id"],
+		"agent_id":              env.Payload["agent_id"],
+		"session_id":            env.Payload["session_id"],
+		"assign_id":             env.Payload["assign_id"],
+		"connection_generation": env.ConnectionGeneration,
+		"delivery_seq":          env.DeliverySeq,
+	}
+	return &DispatchResult{
+		Handled:        true,
+		PendingAck:     env.DeliverySeq > 0,
+		AckWorkgroupID: deliveryWorkgroupID(env, ""),
+		AckDeliverySeq: env.DeliverySeq,
+		ErrorCode:      CodeConflict,
+		AckEnvelope: map[string]any{
+			"type": "agent.turn.result", "payload": payload,
+		},
+	}, errf(CodeConflict, "%s", message)
 }
 
 func provisionFromPayload(p map[string]any) (ProvisionRequest, error) {

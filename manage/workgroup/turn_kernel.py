@@ -197,7 +197,7 @@ class TurnKernel:
         self._assign_completer = completer
 
     def set_command_cancel_hook(self, hook: Callable[[str], None] | None) -> None:
-        """cancel_turn 时唤醒 VerticalLoop.wait_command_result（合成 canceled）。"""
+        """cancel_turn 时唤醒 Node command/AgentRef waiters。"""
         self._command_cancel_hook = hook
 
     def set_realtime_event_listener(
@@ -702,6 +702,11 @@ class TurnKernel:
         mode = str(meta.get("mode") or "")
         if not mode:
             # 无内存 turn 时仍尝试释放卡住的 assign / 工具等待
+            if self._command_cancel_hook is not None:
+                try:
+                    self._command_cancel_hook(workgroup_id)
+                except Exception:  # noqa: BLE001
+                    pass
             failed_ids = self._store.fail_active_assigns(
                 workgroup_id,
                 reason="cancelled by user",
@@ -711,11 +716,6 @@ class TurnKernel:
                 self._store.cancel_pending_hitls(workgroup_id)
             except Exception:  # noqa: BLE001
                 pass
-            if self._command_cancel_hook is not None:
-                try:
-                    self._command_cancel_hook(workgroup_id)
-                except Exception:  # noqa: BLE001
-                    pass
             return {
                 "cancelled": bool(failed_ids),
                 "mode": "idle" if not failed_ids else "orphan_assign",
@@ -725,6 +725,14 @@ class TurnKernel:
             }
 
         self._cancel_event(workgroup_id).set()
+        if self._command_cancel_hook is not None:
+            try:
+                # The hook must see active assigns before the durable store
+                # releases them below, so it can send AgentRef cancellation
+                # frames with the correct session identity.
+                self._command_cancel_hook(workgroup_id)
+            except Exception:  # noqa: BLE001
+                pass
         failed_ids = self._store.fail_active_assigns(
             workgroup_id,
             reason="cancelled by user",
@@ -734,11 +742,6 @@ class TurnKernel:
             self._store.cancel_pending_hitls(workgroup_id)
         except Exception:  # noqa: BLE001
             pass
-        if self._command_cancel_hook is not None:
-            try:
-                self._command_cancel_hook(workgroup_id)
-            except Exception:  # noqa: BLE001
-                pass
         leader_run_id = meta.get("leader_run_id")
         member_run_id = meta.get("member_run_id")
         member_run_ids = list(meta.get("member_run_ids") or [])

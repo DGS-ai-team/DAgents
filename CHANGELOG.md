@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-24
+
+**工作组 AgentRef 重构**：工作组成员从“绑定 Node 并创建受限 MemberSpec”迁移为引用 Node 上已有 Agent，并通过 Node 主动连接 Manage 的 WebSocket 建立独立会话。
+
+### 新增
+
+- Node Registrar 将本地已有 Agent 注册到 Manage Registry；Manage 工作组成员可直接选择 `agent_id`。
+- 增加 `agent.session.open/close`、`agent.turn.start/cancel`、`agent.turn.event/result` 协议，Manage 只通过已建立的 Node→Manage WS 下发控制。
+- 为每个 `workgroup_id + member_id` 建立稳定 `session_id`，隔离上下文、消息队列、工具运行、长期记忆和 LLM 配置；同一 Agent 可并行服务多个工作组会话。
+- Node UI 工作组成员弹窗展示已注册 Agent 选择器；过滤 hosting Node 兼容记录，避免选择不可执行的 Node 身份。
+
+### 修复与可靠性
+
+- 重放 `agent.turn.start` 时按 `assign_id` 幂等，避免断线重连重复执行模型 turn，并缓存终态结果供重连回放。
+- 修复 AgentRef assign 在 `ready → busy` 后被误报为 session 未就绪的问题。
+- 工作组取消通过 WS 下发 `agent.turn.cancel`，并丢弃取消后的迟到结果。
+- AgentRef 成员归档改为 `agent.session.close`，open/start/cancel/close 控制帧完成可靠 delivery ACK，避免重连重复回放。
+- 为同一 Node 的 resume 与实时 outbox 增加连接级发送串行化，并容忍已被更高游标覆盖的低序迟到 ACK，避免并发投递触发无意义重连。
+- 完成事件与历史快照存在微小提交顺序差异时，以流式 assistant 增量和短重试共同确定最终文本。
+- 修正工作组页导航栏连接状态复用消息页 SSE 状态的问题，改为展示当前工作组 EventSource 的权威实时事件状态。
+- 保留旧 `member.provision/tool.command` 路径，支持迁移期新旧成员并存。
+
+### 测试
+
+- Go 全量 Node/Client/共享配置测试通过。
+- Python 全量 189 项、Node Web UI 284 项测试通过；Node 与 Manage Console 生产构建通过。
+- 完成隔离端口双进程真实联调：Agent 注册、工作组绑定、会话 ready、真实 WS 消息往返、同一 Agent 两个工作组并发及历史隔离。
+- 完成 Node UI 真实检查：工作组成员 ready 状态、Agent 选择器、Node 兼容记录过滤、表单可提交条件和消息展示。
+
 ## [0.9.18] - 2026-08-23
 
 **Agent 上下文与终端工作台增强**：提升长对话上下文稳定性、运行时来源可追踪性，以及 MCP/终端操作的可见性和一致性。

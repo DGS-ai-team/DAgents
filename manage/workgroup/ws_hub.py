@@ -25,6 +25,9 @@ class NodeConnection:
     last_ack_by_workgroup: dict[str, int] = field(default_factory=dict)
     send: SendFn | None = None
     active: bool = True
+    # resume replay and live outbox delivery can originate from different
+    # request threads; keep their envelope order on one WebSocket.
+    send_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     # 旧连接被替换后仍保留世代，用于拒绝迟到帧
     fenced: bool = False
 
@@ -206,27 +209,28 @@ class WorkgroupWSHub:
             if self._frame_belongs_to_node(frame, node_id)
         ]
         batch: list[dict[str, Any]] = []
-        for frame in frames:
-            env = self.wrap_outbox(frame, connection_generation=conn.connection_generation)
-            batch.append(env.model_dump())
+        with conn.send_lock:
+            for frame in frames:
+                env = self.wrap_outbox(frame, connection_generation=conn.connection_generation)
+                batch.append(env.model_dump())
+                if conn.send is not None:
+                    try:
+                        conn.send(env.model_dump())
+                    except Exception:  # noqa: BLE001 - close and let Dialer reconnect
+                        self._mark_send_failed(node_id, conn)
+                        break
+            complete = {
+                "type": "resume.complete",
+                "payload": {
+                    "replayed": [f.delivery_seq for f in frames],
+                    "from_delivery_seq": last_ack_delivery_seq,
+                },
+            }
             if conn.send is not None:
                 try:
-                    conn.send(env.model_dump())
+                    conn.send(complete)
                 except Exception:  # noqa: BLE001 - close and let Dialer reconnect
                     self._mark_send_failed(node_id, conn)
-                    break
-        complete = {
-            "type": "resume.complete",
-            "payload": {
-                "replayed": [f.delivery_seq for f in frames],
-                "from_delivery_seq": last_ack_delivery_seq,
-            },
-        }
-        if conn.send is not None:
-            try:
-                conn.send(complete)
-            except Exception:  # noqa: BLE001 - close and let Dialer reconnect
-                self._mark_send_failed(node_id, conn)
         with self._lock:
             conn.last_ack_by_workgroup[wid] = last_ack_delivery_seq
             conn.last_ack_delivery_seq = max(
@@ -272,11 +276,12 @@ class WorkgroupWSHub:
                 return None
             env = self.wrap_outbox(frame, connection_generation=conn.connection_generation)
             send = conn.send
-        try:
-            send(env.model_dump())
-        except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
-            self._mark_send_failed(node_id, conn)
-            return None
+        with conn.send_lock:
+            try:
+                send(env.model_dump())
+            except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
+                self._mark_send_failed(node_id, conn)
+                return None
         return env
 
     def push_json_to_node(self, node_id: str, message: dict[str, Any]) -> bool:
@@ -286,11 +291,12 @@ class WorkgroupWSHub:
             if conn is None or not conn.active or conn.send is None:
                 return False
             send = conn.send
-        try:
-            send(dict(message))
-        except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
-            self._mark_send_failed(node_id, conn)
-            return False
+        with conn.send_lock:
+            try:
+                send(dict(message))
+            except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
+                self._mark_send_failed(node_id, conn)
+                return False
         return True
 
     def publish_timeline_event(self, event: Any) -> OutboxFrame:

@@ -139,4 +139,4 @@
 - 安全见 [SECURITY.md](../SECURITY.md)。
 - **以实现 / CHANGELOG 为准**；本文冲突时欢迎 PR 修正。
 
-**最后更新**：2026-08-23 — 准备发布 v0.9.18（Agent 上下文、MCP 健康状态与终端工作台增强）；v0.9.1 为 Workgroup 预览主叙事。
+**最后更新**：2026-08-24 — 准备发布 v0.10.0（Workgroup AgentRef：已有 Agent 注册、Node→Manage WS、隔离会话与 UI 选择器）；v0.9.1 为 Workgroup 预览主叙事。

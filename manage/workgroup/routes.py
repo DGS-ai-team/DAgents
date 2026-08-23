@@ -219,6 +219,17 @@ def build_workgroup_router(
     def create_member(workgroup_id: str, req: MemberCreateRequest, request: Request) -> dict:
         auth = authenticate(request)
         registry = getattr(request.app.state, "registry_store", None)
+        # AgentRef members bind an existing Node Agent. Resolve the owning Node
+        # from the Manage registry so the client does not need to invent a
+        # placement/home_node value.
+        if req.agent_id and registry is not None:
+            record = registry.get(req.agent_id.strip())
+            if record is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"code": "agent_not_found", "message": "agent not registered"},
+                )
+            req = req.model_copy(update={"home_node_id": record.node_id or record.agent_id})
 
         # Node 会话：Home 必须与当前 Node 共享至少一个 discovery_group
         if auth.session_kind == "node" or (auth.agent_id and not auth.is_admin):
@@ -243,7 +254,10 @@ def build_workgroup_router(
 
                 req = req.model_copy(update={"allow_tool_names": default_allow_tool_names()})
             member, spec = store.create_member(workgroup_id, req)
-            loop.enqueue_provision(workgroup_id, member.member_id)
+            if member.execution_mode == "agent_ref":
+                loop.enqueue_agent_session_open(workgroup_id, member.member_id)
+            else:
+                loop.enqueue_provision(workgroup_id, member.member_id)
             member = store.get_member(member.member_id) or member
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
@@ -263,7 +277,10 @@ def build_workgroup_router(
         auth = authenticate(request)
         try:
             member, spec = store.update_member(workgroup_id, member_id, req)
-            loop.enqueue_provision(workgroup_id, member.member_id)
+            if member.execution_mode == "agent_ref":
+                loop.enqueue_agent_session_open(workgroup_id, member.member_id)
+            else:
+                loop.enqueue_provision(workgroup_id, member.member_id)
             member = store.get_member(member.member_id) or member
         except WorkgroupError as exc:
             raise _http_error(exc) from exc

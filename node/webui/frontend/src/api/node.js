@@ -443,6 +443,10 @@ export function getMemberToolCatalog() {
   return apiFetch("/v1/workgroups/meta/member-tools");
 }
 
+export function listWorkgroupAgents() {
+  return apiFetch("/v1/workgroups/meta/agents");
+}
+
 export function createWorkgroup(displayName, { llmProfileId, llmProfileRevision } = {}) {
   const body = { display_name: displayName };
   if (llmProfileId) body.llm_profile_id = llmProfileId;

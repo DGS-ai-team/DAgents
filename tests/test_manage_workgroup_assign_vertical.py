@@ -22,6 +22,7 @@ from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.llm_chat import MockLLMClient  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
+    AssignCreateRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -369,6 +370,124 @@ class AssignVerticalLoopTests(unittest.TestCase):
             got = loop.wait_command_result(cmd["command_id"], timeout_s=2.0)
             self.assertEqual(got["status"], "succeeded")
             self.assertEqual(got["result_text"], "hello from node")
+
+    def test_agent_ref_assign_accepts_busy_member_owned_by_same_assign(self) -> None:
+        """Creating an assign marks the member busy before its AgentRef starts."""
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
+            loop = VerticalLoop(store, command_timeout_s=1.0)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="agent-ref", created_by_node_id="node-a")
+            )
+            store.patch_acl(
+                group.workgroup_id,
+                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
+            )
+            member, _ = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(
+                    agent_id="agt-existing",
+                    home_node_id="node-b",
+                    display_name="ref",
+                ),
+            )
+            store.mark_member_status(member.member_id, "ready", workgroup_id=group.workgroup_id)
+            store.publish_workgroup(group.workgroup_id)
+            assign = store.create_assign(
+                group.workgroup_id,
+                AssignCreateRequest(member_id=member.member_id, instruction="hello"),
+            )
+            self.assertEqual(store.get_member(member.member_id).status, "busy")
+            loop.enqueue_agent_turn_start = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+            loop.wait_agent_turn = lambda *_args, **_kwargs: {  # type: ignore[method-assign]
+                "status": "succeeded",
+                "final_text": "ok",
+            }
+            self.assertEqual(
+                loop.run_agent_ref_assign(
+                    group.workgroup_id,
+                    assign.assign_id,
+                    member.member_id,
+                    assign.instruction,
+                ),
+                "ok",
+            )
+
+    def test_agent_ref_cancel_sends_cancel_and_wakes_waiter(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
+            loop = VerticalLoop(store, command_timeout_s=1.0)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="agent-ref-cancel", created_by_node_id="node-a")
+            )
+            store.patch_acl(
+                group.workgroup_id,
+                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
+            )
+            member, _ = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(
+                    agent_id="agt-existing",
+                    home_node_id="node-b",
+                    display_name="ref",
+                ),
+            )
+            store.mark_member_status(member.member_id, "ready", workgroup_id=group.workgroup_id)
+            store.publish_workgroup(group.workgroup_id)
+            assign = store.create_assign(
+                group.workgroup_id,
+                AssignCreateRequest(member_id=member.member_id, instruction="slow"),
+            )
+            with loop._lock:  # noqa: SLF001 - exercise the waiter boundary directly
+                loop._agent_waiters[assign.assign_id] = threading.Event()  # noqa: SLF001
+            canceled = loop.cancel_pending_agent_turns(group.workgroup_id)
+            self.assertEqual(canceled, [assign.assign_id])
+            result = loop.wait_agent_turn(assign.assign_id, timeout_s=1.0)
+            self.assertEqual(result["status"], "canceled")
+            frame = store.list_outbox(group.workgroup_id)[-1]
+            self.assertEqual(frame.type, "agent.turn.cancel")
+
+    def test_agent_ref_archive_closes_session_and_ignores_late_close(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
+            loop = VerticalLoop(store, command_timeout_s=1.0)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="agent-ref-archive", created_by_node_id="node-a")
+            )
+            store.patch_acl(
+                group.workgroup_id,
+                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
+            )
+            member, _ = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(
+                    agent_id="agt-existing",
+                    home_node_id="node-b",
+                    display_name="ref",
+                ),
+            )
+            archived = store.archive_member(group.workgroup_id, member.member_id)
+            self.assertEqual(archived.status, "archived")
+
+            frame = loop.enqueue_member_tombstone(group.workgroup_id, member.member_id)
+            self.assertEqual(frame.type, "agent.session.close")
+            self.assertEqual(frame.payload["agent_id"], "agt-existing")
+            self.assertEqual(frame.payload["session_id"], member.session_id)
+
+            loop.handle_inbound(
+                "node-b",
+                "agent.session.closed",
+                {
+                    "workgroup_id": group.workgroup_id,
+                    "member_id": member.member_id,
+                    "agent_id": "agt-existing",
+                    "session_id": member.session_id,
+                    "status": "closed",
+                },
+            )
+            current = store.get_member(member.member_id)
+            assert current is not None
+            self.assertEqual(current.status, "archived")
 
     def test_create_app_ws_inbound_completes_provision(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

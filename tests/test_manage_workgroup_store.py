@@ -123,6 +123,33 @@ class WorkgroupStoreTests(unittest.TestCase):
             )
             self.assertEqual(assign.status, "queued")
 
+    def test_agent_ref_member_is_session_bound(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="AgentRef", created_by_node_id="node-a")
+            )
+            store.patch_acl(
+                group.workgroup_id,
+                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
+            )
+            member, spec = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(
+                    agent_id="agent-b",
+                    home_node_id="node-b",
+                    display_name="Existing Agent",
+                ),
+            )
+            self.assertEqual(member.execution_mode, "agent_ref")
+            self.assertEqual(member.agent_id, "agent-b")
+            self.assertTrue(member.session_id)
+            self.assertEqual(spec.agent_id, "agent-b")
+            ctx = store.member_execution_context(member.member_id)
+            self.assertEqual(ctx["execution_mode"], "agent_ref")
+            self.assertEqual(ctx["agent_id"], "agent-b")
+            self.assertEqual(ctx["session_id"], member.session_id)
+
     def test_acl_revision_cas(self) -> None:
         with TemporaryDirectory() as tmp:
             store = self._store(tmp)

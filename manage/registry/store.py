@@ -88,13 +88,14 @@ class AgentRegistryStore:
     def register(self, payload: AgentRegisterRequest) -> AgentRecord:
         now_unix = int(time.time())
         with self._lock:
-            node_key = (payload.node_id or payload.agent_id).strip()
-            existing = self._records.get(node_key)
+            agent_key = (payload.agent_id or payload.node_id).strip()
+            node_id = (payload.node_id or agent_key).strip()
+            existing = self._records.get(agent_key)
             registered_at = existing.registered_at_unix if existing else now_unix
             discovery_group = existing.discovery_group if existing else []
             stored = AgentStoredRecord(
-                agent_id=node_key,
-                node_id=node_key,
+                agent_id=agent_key,
+                node_id=node_id,
                 base_url=payload.base_url,
                 host_ips=(payload.host_ips or "").strip(),
                 discovery_group=discovery_group,
@@ -119,7 +120,7 @@ class AgentRegistryStore:
                 last_seen_unix=now_unix,
                 expires_at_unix=now_unix + int(payload.ttl_seconds),
             )
-            self._records[node_key] = stored
+            self._records[agent_key] = stored
             self._persist_locked()
             return stored_to_public(stored, now_unix=now_unix)
 
