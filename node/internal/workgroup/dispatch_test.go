@@ -6,6 +6,29 @@ import (
 	"testing"
 )
 
+func TestCommitPendingAckIgnoresOutOfOrderLowerFrame(t *testing.T) {
+	w := NewWorker(Config{NodeID: "node_b"})
+	w.Connect()
+	const workgroupID = "wg_01h00000000000000000000001"
+	if err := w.Session.AckDelivery(workgroupID, 3); err != nil {
+		t.Fatal(err)
+	}
+	res := &DispatchResult{
+		PendingAck:     true,
+		AckWorkgroupID: workgroupID,
+		AckDeliverySeq: 2,
+	}
+	if err := w.CommitPendingAck(res); err != nil {
+		t.Fatal(err)
+	}
+	if res.PendingAck {
+		t.Fatal("lower delivery frame should be considered covered by the higher cursor")
+	}
+	if got := w.Session.OfferResumeFor(workgroupID).LastAckDeliverySeq; got != 3 {
+		t.Fatalf("ack cursor moved backwards: %d", got)
+	}
+}
+
 func TestDispatchProvisionAndReadFile(t *testing.T) {
 	dir := t.TempDir()
 	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
@@ -229,7 +252,6 @@ func TestDispatchToolCancelPreventsExecution(t *testing.T) {
 		t.Fatalf("entry=%+v", entry)
 	}
 }
-
 
 func TestDispatchProvisionWrongHomeReturnsProvisionResult(t *testing.T) {
 	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})

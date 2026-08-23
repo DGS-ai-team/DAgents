@@ -346,6 +346,34 @@ func (c *ControlClient) OpenWorkgroupMessageStream(
 // jsonArray 便于 doJSON 解码任意 JSON 数组。
 type jsonArray []map[string]any
 
+// ListRegisteredAgents returns the Manage catalog of existing Agents. The
+// response is intentionally metadata-only; execution still happens on the
+// owning Node through the outbound Workgroup WS.
+func (c *ControlClient) ListRegisteredAgents(ctx context.Context) (jsonArray, error) {
+	var out struct {
+		Agents jsonArray `json:"agents"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/registry/agents?status=online&page_size=200", nil, &out); err != nil {
+		return nil, err
+	}
+	agents := make(jsonArray, 0, len(out.Agents))
+	for _, item := range out.Agents {
+		// The registry also contains one compatibility record for the hosting
+		// Node itself.  Workgroup AgentRef must expose only actual local Agent
+		// records; selecting the Node row would fail Node AgentStore.Get().
+		if strings.TrimSpace(payloadString(item["agent_id"])) == strings.TrimSpace(payloadString(item["node_id"])) {
+			continue
+		}
+		agents = append(agents, item)
+	}
+	return agents, nil
+}
+
+func payloadString(value any) string {
+	s, _ := value.(string)
+	return s
+}
+
 // ListWorkgroupMembers 列出成员。
 func (c *ControlClient) ListWorkgroupMembers(ctx context.Context, workgroupID string) (jsonArray, error) {
 	var out jsonArray

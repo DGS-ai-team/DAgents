@@ -41,8 +41,8 @@ def _normalize_string_list(value: Any, *, field_name: str, allow_empty: bool = T
 class AgentRegisterRequest(BaseModel):
     """Node 注册或心跳 upsert（discovery_group 由 Manage 分配，Node 不传）。
 
-    P5：`node_id` 为一等身份；`agent_id` 兼容旧客户端（历史上误用 agent_id 表示 node）。
-    当前 Registry 主键仍为 node 级：`agent_id == node_id`。
+    `node_id` 标识承载连接的 Node，`agent_id` 标识 Node 上可被工作组
+    选择的 Agent。旧客户端省略 agent_id 时仍自动注册一个同名 Node Agent。
     """
 
     agent_id: str = Field(default="", max_length=256)
@@ -127,17 +127,15 @@ class AgentRegisterRequest(BaseModel):
     def apply_defaults(self) -> "AgentRegisterRequest":
         node = (self.node_id or "").strip()
         agent = (self.agent_id or "").strip()
-        if node and agent and node != agent:
-            raise ValueError("node_id 与 agent_id 不一致（当前 Registry 主键仍为 node 级）")
         resolved = node or agent
         if not resolved:
             raise ValueError("node_id 或 agent_id 不能为空")
-        self.node_id = resolved
-        self.agent_id = resolved
+        self.node_id = node or resolved
+        self.agent_id = agent or resolved
         if not self.name:
-            self.name = resolved
+            self.name = self.agent_id
         meta = dict(self.metadata or {})
-        meta.setdefault("node_id", resolved)
+        meta.setdefault("node_id", self.node_id)
         self.metadata = meta
         return self
 

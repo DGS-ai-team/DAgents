@@ -36,6 +36,16 @@ const emit = defineEmits([
   "configure-member",
 ]);
 
+const props = defineProps({
+  // Agent chat and Workgroup pages own different EventSource connections.
+  // The parent may provide the authoritative status for its current stream;
+  // otherwise keep the existing Agent chat store as the fallback.
+  realtimeStatus: {
+    type: String,
+    default: "",
+  },
+});
+
 const route = useRoute();
 const router = useRouter();
 
@@ -94,15 +104,16 @@ const manualRefreshingWgs = ref(false);
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
-const online = computed(() => chromeStore.sseStatus === "connected");
+const effectiveRealtimeStatus = computed(() => props.realtimeStatus || chromeStore.sseStatus);
+const online = computed(() => effectiveRealtimeStatus.value === "connected");
 const statusClass = computed(() => {
   if (online.value) return "nav-rail__dot--online";
-  if (chromeStore.sseStatus === "connecting") return "nav-rail__dot--connecting";
+  if (effectiveRealtimeStatus.value === "connecting") return "nav-rail__dot--connecting";
   return "nav-rail__dot--offline";
 });
 const statusLabel = computed(() => {
   if (online.value) return "在线";
-  if (chromeStore.sseStatus === "connecting") return "连接中";
+  if (effectiveRealtimeStatus.value === "connecting") return "连接中";
   return "离线";
 });
 const themeLabel = computed(() => {
@@ -948,10 +959,10 @@ defineExpose({
     </div>
 
     <footer class="nav-rail__footer">
-      <div class="nav-rail__brand" :title="`DAgents · 本机智能助手 · 实时连接：${statusLabel}`">
+      <div class="nav-rail__brand" :title="`DAgents · 本机智能助手 · 实时事件：${statusLabel}`">
         <img class="nav-rail__brand-mark" :src="brandIcon" width="18" height="18" alt="" aria-hidden="true" />
         <span class="nav-rail__brand-name">DAgents</span>
-        <span class="nav-rail__dot" :class="statusClass" :aria-label="`实时连接：${statusLabel}`" />
+        <span class="nav-rail__dot" :class="statusClass" :aria-label="`实时事件：${statusLabel}`" />
       </div>
       <div class="nav-rail__footer-actions">
         <button

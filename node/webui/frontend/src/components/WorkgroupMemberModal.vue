@@ -40,6 +40,7 @@ const props = defineProps({
 const emit = defineEmits(["close", "saved"]);
 
 const groupOptions = ref(FALLBACK_GROUPS.map((g) => ({ ...g, toolIds: [...g.toolIds] })));
+const agentOptions = ref([]);
 const draft = reactive(emptyDraft());
 const busy = ref(false);
 const loadingSpec = ref(false);
@@ -60,7 +61,8 @@ const primaryLabel = computed(() => {
 });
 const canSubmit = computed(() => {
   if (busy.value || loadingSpec.value) return false;
-  return String(draft.displayName || "").trim().length > 0;
+  return String(draft.displayName || "").trim().length > 0 &&
+    (props.mode === "edit" || String(draft.agentId || "").trim().length > 0);
 });
 
 function defaultGroupIds(groups = groupOptions.value) {
@@ -93,6 +95,7 @@ function emptyDraft() {
   return {
     displayName: "",
     homeNodeId: "",
+    agentId: "",
     groups: defaultGroupIds(),
     soulMd: "",
     customMd: "",
@@ -161,6 +164,30 @@ async function loadToolCatalog() {
   }
 }
 
+async function loadAgentCatalog() {
+  if (!props.workgroupId) return;
+  try {
+    const res = await api.listWorkgroupAgents();
+    const rows = Array.isArray(res?.agents) ? res.agents : [];
+    agentOptions.value = rows
+      .map((item) => {
+        const id = String(item?.agent_id || "").trim();
+        const nodeId = String(item?.node_id || "").trim();
+        const name = String(item?.name || "").trim() || id;
+        return {
+          id,
+          nodeId,
+          status: String(item?.status || "unknown"),
+          label: nodeId && nodeId !== id ? `${name} · ${nodeId}` : name,
+        };
+      })
+      .filter((item) => item.id);
+  } catch (e) {
+    agentOptions.value = [];
+    error.value = e?.message || "加载可用 Agent 失败";
+  }
+}
+
 async function resetFromProps() {
   error.value = "";
   busy.value = false;
@@ -178,6 +205,7 @@ async function resetFromProps() {
   try {
     const spec = await api.getWorkgroupMemberSpec(props.workgroupId, props.memberId);
     draft.displayName = String(spec?.display_name || "").trim();
+    draft.agentId = String(spec?.agent_id || "").trim();
     draft.homeNodeId = String(spec?.home_node_id || props.defaultHomeNodeId || "").trim();
     const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
     draft.groups = allow.length
@@ -202,16 +230,27 @@ async function submit() {
   error.value = "";
   const name = String(draft.displayName || "").trim();
   if (!name || !props.workgroupId || busy.value) return;
-  const selected = draft.groups.length ? [...draft.groups] : defaultGroupIds();
-  const tools = expandGroupsToTools(selected);
   const body = {
     display_name: name,
-    allow_tool_names: tools,
-    prompt: {
+  };
+  if (props.mode !== "create") {
+    const selected = draft.groups.length ? [...draft.groups] : defaultGroupIds();
+    body.allow_tool_names = expandGroupsToTools(selected);
+    body.prompt = {
       soul_md: draft.soulMd,
       custom_md: draft.customMd,
-    },
-  };
+    };
+  }
+  if (props.mode === "create") {
+    const agentId = String(draft.agentId || "").trim();
+    if (!agentId) {
+      error.value = "请选择一个已注册的 Agent";
+      return;
+    }
+    body.agent_id = agentId;
+    const target = agentOptions.value.find((item) => item.id === agentId);
+    if (target?.nodeId) body.home_node_id = target.nodeId;
+  }
   const llm = String(draft.llmProfileId || "").trim();
   if (llm) {
     body.llm_profile_id = llm;
@@ -221,8 +260,6 @@ async function submit() {
   busy.value = true;
   try {
     if (props.mode === "create") {
-      const home = String(draft.homeNodeId || props.defaultHomeNodeId || "").trim();
-      if (home) body.home_node_id = home;
       await api.createWorkgroupMember(props.workgroupId, body);
     } else {
       await api.patchWorkgroupMember(props.workgroupId, props.memberId, body);
@@ -247,6 +284,7 @@ watch(
     if (visible) {
       void (async () => {
         await loadToolCatalog();
+        await loadAgentCatalog();
         await resetFromProps();
       })();
     }
@@ -309,7 +347,35 @@ onMounted(() => {
               />
             </label>
 
-            <fieldset class="wg-member-modal__tools">
+            <label v-if="props.mode === 'create'" class="wg-member-modal__field">
+              <span class="wg-member-modal__label">选择 Agent</span>
+              <select
+                v-model="draft.agentId"
+                class="wg-member-modal__input"
+                :disabled="busy || !agentOptions.length"
+                required
+              >
+                <option value="" disabled>
+                  {{ agentOptions.length ? "选择已注册的 Agent" : "暂无在线 Agent" }}
+                </option>
+                <option v-for="item in agentOptions" :key="item.id" :value="item.id">
+                  {{ item.label }}
+                </option>
+              </select>
+              <span class="wg-member-modal__hint-text">
+                直接复用 Node 上已有 Agent；会话与个人对话隔离。
+              </span>
+            </label>
+
+            <p v-if="!agentOptions.length && props.mode === 'create'" class="wg-member-modal__hint-text wg-member-modal__hint-text--warn">
+              未发现可用 Agent。请确认 Node 已连接 Manage，并完成 Agent 注册。
+            </p>
+
+            <p v-if="props.mode === 'create'" class="wg-member-modal__hint-text">
+              工具、提示词和 LLM 配置由所选 Agent 自己管理；工作组只建立独立会话。
+            </p>
+
+            <fieldset v-if="props.mode !== 'create'" class="wg-member-modal__tools">
               <legend class="wg-member-modal__label">工具组</legend>
               <p class="wg-member-modal__hint-text">
                 由本 Node 提供；默认文件系统，Shell 需显式开启。
@@ -350,6 +416,7 @@ onMounted(() => {
             </fieldset>
 
             <button
+              v-if="props.mode !== 'create'"
               type="button"
               class="wg-member-modal__advanced-toggle"
               :aria-expanded="advancedOpen"

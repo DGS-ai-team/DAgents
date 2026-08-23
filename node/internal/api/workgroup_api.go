@@ -17,6 +17,7 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups", s.handleListWorkgroups)
 	s.mux.HandleFunc("POST /v1/workgroups", s.handleCreateWorkgroup)
 	s.mux.HandleFunc("GET /v1/workgroups/meta/member-tools", s.handleGetMemberToolCatalog)
+	s.mux.HandleFunc("GET /v1/workgroups/meta/agents", s.handleListRegisteredAgents)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}", s.handleGetWorkgroup)
 	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}", s.handlePatchWorkgroup)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/publish", s.handlePublishWorkgroup)
@@ -173,6 +174,18 @@ func (s *Server) handleGetMemberToolCatalog(w http.ResponseWriter, r *http.Reque
 	// 目录来自仓库嵌入 JSON；Node 单机不连 Manage 也可读。不经 Manage HTTP。
 	_ = r
 	writeJSON(w, http.StatusOK, workgroup.MemberToolCatalogAPI())
+}
+
+func (s *Server) handleListRegisteredAgents(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	items, err := s.control.ListRegisteredAgents(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": items})
 }
 
 func (s *Server) handleGetWorkgroupACL(w http.ResponseWriter, r *http.Request) {

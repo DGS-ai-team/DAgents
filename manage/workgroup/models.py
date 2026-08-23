@@ -103,6 +103,7 @@ class MemberWorkspace(BaseModel):
 class MemberSpec(BaseModel):
     member_id: str = Field(pattern=_MB)
     workgroup_id: str = Field(pattern=_WG)
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
     home_node_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     description: str = Field(default="", max_length=256)
@@ -123,6 +124,9 @@ class MemberSpec(BaseModel):
 class WorkGroupMember(BaseModel):
     member_id: str = Field(pattern=_MB)
     workgroup_id: str = Field(pattern=_WG)
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    session_id: str | None = Field(default=None, min_length=1, max_length=512)
+    execution_mode: Literal["agent_ref", "legacy_member"] = "legacy_member"
     home_node_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1)
     status: Literal["requested", "provisioning", "ready", "busy", "archived", "error"]
@@ -183,7 +187,11 @@ class ACLPatchRequest(BaseModel):
 
 
 class MemberCreateRequest(BaseModel):
-    home_node_id: str = Field(min_length=1, max_length=128)
+    # agent_id selects a pre-existing Agent registered by a Node. home_node_id
+    # remains accepted for compatibility and is derived by the route when the
+    # registry record is available.
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    home_node_id: str = Field(default="", max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     description: str = Field(default="", max_length=256)
     llm_profile_id: str | None = None
