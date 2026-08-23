@@ -1,9 +1,67 @@
 // Package workgroup 实现 Node 侧 WorkgroupWorker（D2 骨架）。
 package workgroup
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const SchemaVersion = "0.5.0"
+
+// AgentSessionOpenRequest binds a Workgroup member to an already existing
+// Agent runtime on this Node. The session id is deliberately supplied by
+// Manage so it is stable across reconnects and isolated per workgroup.
+type AgentSessionOpenRequest struct {
+	WorkgroupID string `json:"workgroup_id"`
+	MemberID    string `json:"member_id"`
+	AgentID     string `json:"agent_id"`
+	SessionID   string `json:"session_id"`
+}
+
+type AgentSessionResult struct {
+	WorkgroupID string `json:"workgroup_id"`
+	MemberID    string `json:"member_id"`
+	AgentID     string `json:"agent_id"`
+	SessionID   string `json:"session_id"`
+	Status      string `json:"status"` // ready|error|closed
+	Message     string `json:"message,omitempty"`
+}
+
+// AgentTurnStartRequest is the session-scoped user turn sent by Manage.
+type AgentTurnStartRequest struct {
+	WorkgroupID     string `json:"workgroup_id"`
+	MemberID        string `json:"member_id"`
+	AgentID         string `json:"agent_id"`
+	SessionID       string `json:"session_id"`
+	AssignID        string `json:"assign_id"`
+	TurnID          string `json:"turn_id,omitempty"`
+	UserMessage     string `json:"user_message"`
+	ClientMessageID string `json:"client_message_id,omitempty"`
+}
+
+type AgentTurnCancelRequest struct {
+	WorkgroupID string `json:"workgroup_id"`
+	MemberID    string `json:"member_id"`
+	AgentID     string `json:"agent_id"`
+	SessionID   string `json:"session_id"`
+	AssignID    string `json:"assign_id"`
+}
+
+// AgentSessionHandler is implemented by the Node API bridge. It is separate
+// from the legacy WorkerBinding executor so an existing Agent is never
+// materialized as a restricted synthetic member.
+type AgentSessionHandler interface {
+	OpenAgentSession(context.Context, AgentSessionOpenRequest) (AgentSessionResult, error)
+	StartAgentTurn(context.Context, AgentTurnStartRequest) error
+	CancelAgentTurn(context.Context, AgentTurnCancelRequest) error
+	CloseAgentSession(context.Context, AgentSessionOpenRequest) error
+}
+
+// AgentEventEmitter is an optional hook used by asynchronous Node runtimes to
+// send streamed events back over the already established outbound WS.
+type AgentEventEmitter interface {
+	SetAgentEventEmitter(func(map[string]any) error)
+}
 
 // WorkerBinding 对应 D0.5 WorkerBinding.json；不进入本地 Agents API。
 type WorkerBinding struct {

@@ -122,6 +122,13 @@ def build_workgroup_ws_router(
                         "tool.result",
                         "member.provision_result",
                         "workgroup.tombstone_ack",
+                        "agent.session.ready",
+                        "agent.session.error",
+                        "agent.session.closed",
+                        "agent.turn.accepted",
+                        "agent.turn.cancelled",
+                        "agent.turn.event",
+                        "agent.turn.result",
                     }:
                         seq = int(
                             payload.get("delivery_seq")
@@ -138,6 +145,11 @@ def build_workgroup_ws_router(
                         if on_inbound is not None and mtype in {
                             "tool.result",
                             "member.provision_result",
+                            "agent.session.ready",
+                            "agent.session.error",
+                            "agent.session.closed",
+                            "agent.turn.event",
+                            "agent.turn.result",
                         }:
                             if gen <= 0:
                                 raise WorkgroupError(

@@ -27,8 +27,9 @@ class RegistryNodeIDTests(unittest.TestCase):
         self.assertEqual(legacy.node_id, "legacy-01")
         self.assertEqual(legacy.agent_id, "legacy-01")
 
-        with self.assertRaises(Exception):
-            AgentRegisterRequest(node_id="a", agent_id="b", base_url="http://x.local")
+        agent = AgentRegisterRequest(node_id="node-a", agent_id="agent-b", base_url="http://x.local")
+        self.assertEqual(agent.node_id, "node-a")
+        self.assertEqual(agent.agent_id, "agent-b")
 
     def test_register_via_node_id_only(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -65,6 +66,21 @@ class RegistryNodeIDTests(unittest.TestCase):
                 by_node = client.get("/v1/registry/nodes/node-p5")
                 self.assertEqual(by_node.status_code, 200, by_node.text)
                 self.assertEqual(by_node.json()["node_id"], "node-p5")
+
+                # One outbound Node registration can advertise multiple
+                # existing Agents without collapsing them into one Node row.
+                second = client.post(
+                    "/v1/registry/agents",
+                    json={
+                        "node_id": "node-p5",
+                        "agent_id": "agent-p5-b",
+                        "base_url": "http://p5.local",
+                        "name": "Second Agent",
+                    },
+                )
+                self.assertEqual(second.status_code, 200, second.text)
+                self.assertEqual(second.json()["agent"]["node_id"], "node-p5")
+                self.assertEqual(second.json()["agent"]["agent_id"], "agent-p5-b")
 
 
 if __name__ == "__main__":

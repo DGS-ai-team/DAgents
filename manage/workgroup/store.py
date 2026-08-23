@@ -425,6 +425,14 @@ class WorkGroupStore:
         with self._lock:
             group = self.require_mutable(workgroup_id)
             home = req.home_node_id.strip()
+            agent_id = (req.agent_id or "").strip() or None
+            if agent_id and not home:
+                raise WorkgroupError(
+                    "schema_mismatch",
+                    "home_node_id is required until registry lookup is enabled",
+                    http_status=400,
+                )
+            execution_mode = "agent_ref" if agent_id else "legacy_member"
             # home 必须在 ACL 内才可挂载成员
             self.assert_acl_member(workgroup_id, home)
             mid = ids.member_id()
@@ -436,6 +444,7 @@ class WorkGroupStore:
             draft = {
                 "member_id": mid,
                 "workgroup_id": workgroup_id,
+                "agent_id": agent_id,
                 "home_node_id": home,
                 "display_name": req.display_name.strip(),
                 "description": (req.description or "").strip(),
@@ -456,6 +465,9 @@ class WorkGroupStore:
             member = WorkGroupMember(
                 member_id=mid,
                 workgroup_id=workgroup_id,
+                agent_id=agent_id,
+                session_id=(f"wg:{workgroup_id}:member:{mid}" if agent_id else None),
+                execution_mode=execution_mode,
                 home_node_id=home,
                 display_name=spec.display_name,
                 status="provisioning",
@@ -535,6 +547,7 @@ class WorkGroupStore:
             draft = {
                 "member_id": member_id,
                 "workgroup_id": workgroup_id,
+				"agent_id": member.agent_id,
                 "home_node_id": member.home_node_id,
                 "display_name": display_name,
                 "description": description,
@@ -1182,6 +1195,9 @@ class WorkGroupStore:
                 runtime["lease_epoch"] = str(lease_epoch)
                 self._member_runtime[member_id] = runtime
             return {
+				"agent_id": member.agent_id or "",
+				"session_id": member.session_id or "",
+				"execution_mode": member.execution_mode,
                 "home_node_id": member.home_node_id,
                 "member_spec_digest": member.member_spec_digest,
                 "member_generation": member.member_generation,

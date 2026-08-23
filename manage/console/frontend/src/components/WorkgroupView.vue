@@ -55,6 +55,7 @@ const members = ref([]);
 const memberSpecs = ref({});
 const acl = ref(null);
 const nodeOptions = ref([]);
+const agentOptions = ref([]);
 const createOpen = ref(false);
 const ownerId = ref("console");
 const ownerLabel = ref("未登录");
@@ -76,6 +77,7 @@ const createForm = reactive({
 const memberForm = reactive({
   displayName: "",
   description: "",
+  agentId: "",
   homeNodeId: "",
   soulMd: "",
   customMd: "",
@@ -132,6 +134,8 @@ const configMembers = computed(() => {
       status: m.status,
       error_summary: [m.error_code, m.error_message].filter(Boolean).join(": "),
       home_node_id: m.home_node_id,
+      agent_id: m.agent_id || "",
+      execution_mode: m.execution_mode || "legacy_member",
       member_generation: m.member_generation,
       llm_profile_id: spec?.llm_profile_id || "",
       llm_profile_revision: spec?.llm_profile_revision || "",
@@ -243,6 +247,7 @@ function toggleMemberFormGroup(id) {
 function resetMemberForm() {
   memberForm.displayName = "";
   memberForm.description = "";
+  memberForm.agentId = "";
   memberForm.homeNodeId = "";
   memberForm.soulMd = "";
   memberForm.customMd = "";
@@ -424,14 +429,22 @@ async function ensureHomeInAcl(workgroupId, homeNodeId) {
 async function loadNodeOptions() {
   try {
     const byId = new Map();
+    const agentsById = new Map();
     const addAgent = (a) => {
-      const id = String(a?.agent_id || a?.node_id || "").trim();
+      const id = String(a?.agent_id || "").trim();
+      const nodeId = String(a?.node_id || id).trim();
       if (!id) return;
+      // Registry keeps a compatibility row for the hosting Node. It is not
+      // an AgentRef target and would fail when Node tries to open an Agent
+      // session by that id.
+      if (id === nodeId) return;
       const name = String(a?.name || "").trim();
       const label = name && name !== id ? `${name} (${id})` : name || id;
-      const prev = byId.get(id);
-      if (!prev || (name && (!prev.name || prev.name === id))) {
-        byId.set(id, { id, name: name || id, label });
+      agentsById.set(id, { id, nodeId, name: name || id, label, status: String(a?.status || "unknown") });
+      const nodeName = nodeId === id ? name : nodeId;
+      const prev = byId.get(nodeId);
+      if (!prev || (nodeName && (!prev.name || prev.name === nodeId))) {
+        byId.set(nodeId, { id: nodeId, name: nodeName || nodeId, label: nodeName && nodeName !== nodeId ? `${nodeName} (${nodeId})` : nodeId });
       }
     };
 
@@ -439,9 +452,11 @@ async function loadNodeOptions() {
       const groups = authGroups.value.length ? authGroups.value : [];
       if (!groups.length) {
         const id = String(ownerId.value || "").trim();
-        nodeOptions.value = id
+        const fallback = id
           ? [{ id, name: ownerLabel.value || id, label: ownerLabel.value && ownerLabel.value !== id ? `${ownerLabel.value} (${id})` : id }]
           : [];
+        nodeOptions.value = fallback;
+        agentOptions.value = fallback.map((item) => ({ ...item, nodeId: item.id, status: "unknown" }));
         return;
       }
       const pages = await Promise.all(
@@ -456,7 +471,7 @@ async function loadNodeOptions() {
         for (const a of agents) addAgent(a);
       }
       if (ownerId.value && !byId.has(ownerId.value)) {
-        addAgent({ agent_id: ownerId.value, name: ownerLabel.value });
+        addAgent({ agent_id: ownerId.value, node_id: ownerId.value, name: ownerLabel.value });
       }
     } else {
       const data = await fetchAgents({ page: 1, page_size: 100, status: "all" });
@@ -467,8 +482,12 @@ async function loadNodeOptions() {
     nodeOptions.value = [...byId.values()].sort((a, b) =>
       String(a.label).localeCompare(String(b.label), "zh"),
     );
+    agentOptions.value = [...agentsById.values()].sort((a, b) =>
+      String(a.label).localeCompare(String(b.label), "zh"),
+    );
   } catch {
     nodeOptions.value = [];
+    agentOptions.value = [];
   }
 }
 
@@ -502,8 +521,10 @@ async function addCollaborator() {
 async function submitCreateMember() {
   const wg = selectedWorkgroup.value;
   const displayName = memberForm.displayName.trim();
-  const home = memberForm.homeNodeId.trim();
-  if (!wg?.workgroup_id || !displayName || !home || creatingMember.value) return;
+  const agentId = memberForm.agentId.trim();
+  const agent = agentOptions.value.find((item) => item.id === agentId);
+  const home = String(agent?.nodeId || memberForm.homeNodeId || "").trim();
+  if (!wg?.workgroup_id || !displayName || !agentId || !home || creatingMember.value) return;
   creatingMember.value = true;
   try {
     await ensureHomeInAcl(wg.workgroup_id, home);
@@ -514,6 +535,7 @@ async function submitCreateMember() {
     const body = {
       display_name: displayName,
       description: memberForm.description.trim(),
+      agent_id: agentId,
       home_node_id: home,
       allow_tool_names: tools,
       prompt: {
@@ -530,7 +552,7 @@ async function submitCreateMember() {
     cancelMemberForm();
     await loadSettings();
     emit("toast", {
-      message: `已添加成员「${displayName}」，正在配置到 ${home}`,
+      message: `已添加 Agent「${displayName}」，正在建立会话`,
       type: "success",
     });
   } catch (err) {
@@ -730,6 +752,7 @@ function backToGrid() {
   memberSpecs.value = {};
   acl.value = null;
   nodeOptions.value = [];
+  agentOptions.value = [];
   collabDraft.value = "";
   cancelMemberForm();
 }
@@ -1090,30 +1113,21 @@ onMounted(async () => {
                 />
               </label>
               <label class="field">
-                <span>Home Node</span>
+                <span>选择 Agent</span>
                 <select
-                  v-if="isNodeSession || nodeOptions.length"
-                  v-model="memberForm.homeNodeId"
+                  v-model="memberForm.agentId"
                   required
-                  :disabled="creatingMember"
+                  :disabled="creatingMember || !agentOptions.length"
                 >
-                  <option value="" disabled>请选择执行节点</option>
-                  <option v-for="n in nodeOptions" :key="n.id" :value="n.id" :title="n.id">
-                    {{ n.label }}
+                  <option value="" disabled>
+                    {{ agentOptions.length ? "请选择已注册的 Agent" : "暂无在线 Agent" }}
+                  </option>
+                  <option v-for="agent in agentOptions" :key="agent.id" :value="agent.id" :title="agent.id">
+                    {{ agent.label }}
                   </option>
                 </select>
-                <input
-                  v-else
-                  v-model="memberForm.homeNodeId"
-                  type="text"
-                  list="wg-node-options"
-                  placeholder="执行该成员的 Node ID"
-                  required
-                  :disabled="creatingMember"
-                />
                 <span v-if="isNodeSession" class="muted" style="font-size: 12px">
-                  仅可选择与你同 discovery_group 的 Node
-                  <template v-if="authGroups.length">（{{ authGroups.join(", ") }}）</template>
+                  Agent 由 Node 注册；Manage 只保存成员绑定，不直接调用 Node。
                 </span>
               </label>
             </div>
@@ -1176,7 +1190,7 @@ onMounted(async () => {
                 :disabled="
                   creatingMember ||
                   !memberForm.displayName.trim() ||
-                  !memberForm.homeNodeId.trim()
+                  !memberForm.agentId.trim()
                 "
               >
                 {{ creatingMember ? "创建中…" : "创建成员" }}
@@ -1253,8 +1267,12 @@ onMounted(async () => {
               </header>
               <dl class="wg-settings-kv">
                 <div>
-                  <dt>{{ m.kind === 'supervisor' ? '运行位置' : 'Home Node' }}</dt>
-                  <dd>{{ m.home_node_id || "—" }}</dd>
+                  <dt>{{ m.kind === 'supervisor' ? '运行位置' : 'Agent / Node' }}</dt>
+                  <dd>{{ m.kind === 'supervisor' ? m.home_node_id : `${m.agent_id || "—"} · ${m.home_node_id || "—"}` }}</dd>
+                </div>
+                <div v-if="m.kind === 'member'">
+                  <dt>会话隔离</dt>
+                  <dd>工作组独立会话</dd>
                 </div>
                 <div>
                   <dt>Generation</dt>
@@ -1274,7 +1292,7 @@ onMounted(async () => {
                 </div>
               </dl>
 
-              <div v-if="m.kind === 'member'" class="wg-member-config__tools">
+              <div v-if="m.kind === 'member' && m.execution_mode !== 'agent_ref'" class="wg-member-config__tools">
                 <h5 class="wg-member-config__subtitle">工具组</h5>
                 <div class="wg-member-tool-row">
                   <button
@@ -1307,7 +1325,7 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div class="wg-member-config__llm">
+              <div v-if="m.execution_mode !== 'agent_ref'" class="wg-member-config__llm">
                 <h5 class="wg-member-config__subtitle">可选 LLM</h5>
                 <ul v-if="llmConfigs.length" class="wg-llm-list">
                   <li
@@ -1349,7 +1367,7 @@ onMounted(async () => {
           </p>
 
           <p class="muted wg-detail-section__note">
-            创建或修改成员后会自动向 Home Node 下发配置（含 LLM 与工具组）。
+            成员绑定的是 Node 已注册的 Agent；Manage 通过 Node 主动建立的 WS 会话请求执行，不直接访问 Node。
           </p>
         </section>
       </template>

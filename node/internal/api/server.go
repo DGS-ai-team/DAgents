@@ -64,6 +64,7 @@ type Server struct {
 	mediaRegister   tools.MediaRegisterFunc
 	workgroupWorker *workgroup.Worker
 	workgroupDialer *workgroup.Dialer
+	workgroupAgents *workgroupAgentBridge
 	terminals       *terminalSessionRegistry
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
@@ -397,6 +398,30 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	if cfg.Manage.Enabled {
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
+		registrar.SetAgentCatalogProvider(func() []manage.AgentCatalogEntry {
+			if agentsStore == nil {
+				return nil
+			}
+			records, err := agentsStore.List(context.Background())
+			if err != nil {
+				return nil
+			}
+			entries := make([]manage.AgentCatalogEntry, 0, len(records))
+			for _, rec := range records {
+				if strings.TrimSpace(rec.AgentID) == "" || rec.Archived {
+					continue
+				}
+				entries = append(entries, manage.AgentCatalogEntry{
+					ID:          rec.AgentID,
+					Name:        rec.DisplayName,
+					Description: "registered local Agent",
+					Metadata: map[string]any{
+						"runtime_revision": rec.RuntimeRevision,
+					},
+				})
+			}
+			return entries
+		})
 		if !manage.UpdateDelegatedToShell() {
 			updateChecker = manage.NewUpdateChecker(cfg, logger)
 		}
@@ -405,13 +430,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	control := manage.NewControlClient(cfg)
 	var wgWorker *workgroup.Worker
 	var wgDialer *workgroup.Dialer
+	var wgAgentBridge *workgroupAgentBridge
 	if cfg.ManageWorkgroupEnabled() {
+		wgAgentBridge = newWorkgroupAgentBridge(nil)
 		toolNames := []string{}
 		if mgr != nil {
 			toolNames = mgr.ToolNames()
 		}
 		wgWorker = workgroup.NewWorker(workgroup.Config{
 			NodeID:             cfg.NodeID,
+			AgentSessions:      wgAgentBridge,
 			NodeToolNames:      toolNames,
 			DataDir:            filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
 			BackgroundJobStore: backgroundJobs,
@@ -483,8 +511,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mediaRegister:        mediaRegister,
 		workgroupWorker:      wgWorker,
 		workgroupDialer:      wgDialer,
+		workgroupAgents:      wgAgentBridge,
 		terminals:            newTerminalSessionRegistry(),
 		pendingRuntimeReload: make(map[string]string),
+	}
+	if s.workgroupAgents != nil {
+		s.workgroupAgents.server = s
 	}
 	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
 		registry, err := s.terminalToolsRegistry(agentID)

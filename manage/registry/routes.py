@@ -41,8 +41,22 @@ def _ensure_member_groups(auth: AuthContext, groups: list[str]) -> None:
             raise HTTPException(status_code=403, detail=f"discovery_group={group!r} 不在 token 可见范围")
 
 
-def _ensure_node_agent_request(request: Request, agent_id: str, auth: AuthContext) -> None:
-    ensure_node_identity(request, agent_id, auth)
+def _ensure_node_agent_request(
+    request: Request,
+    agent_id: str,
+    auth: AuthContext,
+    *,
+    node_id: str | None = None,
+) -> None:
+    """Allow a Node connection to register/update one of its local Agents."""
+    expected_node = (node_id or agent_id or "").strip()
+    header_id = extract_agent_id(request)
+    if header_id and header_id not in {expected_node, str(agent_id or "").strip()}:
+        raise HTTPException(status_code=403, detail="x-dagents-agent-id 与 node_id/agent_id 不一致")
+    if auth.is_admin:
+        return
+    if auth.is_node and auth.agent_id and auth.agent_id not in {expected_node, str(agent_id or "").strip()}:
+        raise HTTPException(status_code=403, detail="node token 只能操作自身 node_id")
 
 
 def _resolve_discover_caller_groups(
@@ -119,7 +133,7 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     @router.post("/v1/registry/agents", response_model=AgentRegisterResponse)
     def register_agent(payload: AgentRegisterRequest, request: Request) -> AgentRegisterResponse:
         auth = authenticate(request)
-        _ensure_node_agent_request(request, payload.agent_id, auth)
+        _ensure_node_agent_request(request, payload.agent_id, auth, node_id=payload.node_id)
         record = store.register(payload)
         audit.record(
             actor=audit_actor(request, auth, fallback_agent_id=payload.agent_id),

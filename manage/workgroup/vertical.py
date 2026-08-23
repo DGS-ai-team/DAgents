@@ -151,6 +151,10 @@ class VerticalLoop:
         self._command_results: dict[str, dict[str, Any]] = {}
         # workgroup_id -> command_id -> {assign_id, member_id, home_node_id}
         self._wg_pending_commands: dict[str, dict[str, dict[str, str]]] = {}
+        # AgentRef session/turn waiters are keyed by assign_id. They are
+        # process-local only; the reliable start frame remains in the outbox.
+        self._agent_waiters: dict[str, threading.Event] = {}
+        self._agent_results: dict[str, dict[str, Any]] = {}
         self._turn_kernel: TurnKernel | None = None
 
     def set_turn_kernel(self, kernel: TurnKernel | None) -> None:
@@ -205,20 +209,143 @@ class VerticalLoop:
             self.store.ack_outbox(workgroup_id, frame.delivery_seq)
         return frame
 
+    def enqueue_agent_session_open(self, workgroup_id: str, member_id: str) -> OutboxFrame:
+        """Bind a Workgroup member to an existing Node Agent session."""
+        ctx = self.store.member_execution_context(member_id)
+        if str(ctx.get("execution_mode") or "") != "agent_ref":
+            raise WorkgroupError("conflict", "member is not an AgentRef", http_status=409)
+        frame = self.store.enqueue_outbox(
+            workgroup_id,
+            type="agent.session.open",
+            payload={
+                "workgroup_id": workgroup_id,
+                "member_id": member_id,
+                "agent_id": str(ctx.get("agent_id") or ""),
+                "session_id": str(ctx.get("session_id") or ""),
+                "home_node_id": str(ctx.get("home_node_id") or ""),
+            },
+        )
+        if self.hub is not None:
+            self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
+            self.hub.request_resume(ctx["home_node_id"], workgroup_id)
+        return frame
+
+    def enqueue_agent_turn_start(self, workgroup_id: str, assign_id: str) -> OutboxFrame:
+        assign = self.store.get_assign(assign_id)
+        if assign is None or assign.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "assign not found", http_status=404)
+        ctx = self.store.member_execution_context(assign.member_id)
+        if str(ctx.get("execution_mode") or "") != "agent_ref":
+            raise WorkgroupError("conflict", "member is not an AgentRef", http_status=409)
+        frame = self.store.enqueue_outbox(
+            workgroup_id,
+            type="agent.turn.start",
+            payload={
+                "workgroup_id": workgroup_id,
+                "member_id": assign.member_id,
+                "agent_id": str(ctx.get("agent_id") or ""),
+                "session_id": str(ctx.get("session_id") or ""),
+                "assign_id": assign_id,
+                "turn_id": assign.assign_id,
+                "user_message": assign.instruction,
+                "client_message_id": assign.leader_tool_call_id,
+                "home_node_id": str(ctx.get("home_node_id") or ""),
+            },
+        )
+        with self._lock:
+            self._agent_waiters[assign_id] = threading.Event()
+        if self.hub is not None:
+            self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
+            self.hub.request_resume(ctx["home_node_id"], workgroup_id)
+        return frame
+
+    def wait_agent_turn(
+        self,
+        assign_id: str,
+        *,
+        timeout_s: float | None = None,
+        cancel_check: Any | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            event = self._agent_waiters.get(assign_id)
+        if event is None:
+            raise WorkgroupError("conflict", "agent turn waiter not found", http_status=500)
+        deadline = time.monotonic() + (self.command_timeout_s if timeout_s is None else max(0.1, float(timeout_s)))
+        while True:
+            if cancel_check is not None and cancel_check():
+                raise WorkgroupError("canceled", "workgroup turn cancelled", http_status=409)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                with self._lock:
+                    self._agent_waiters.pop(assign_id, None)
+                raise WorkgroupError("conflict", "agent turn timed out", http_status=409, retryable=True)
+            if event.wait(min(0.2, remaining)):
+                break
+        with self._lock:
+            result = dict(self._agent_results.pop(assign_id, {}) or {})
+            self._agent_waiters.pop(assign_id, None)
+        if not result:
+            raise WorkgroupError("conflict", "agent turn result missing after wait", http_status=500)
+        return result
+
+    def run_agent_ref_assign(
+        self,
+        workgroup_id: str,
+        assign_id: str,
+        member_id: str,
+        instruction: str,
+        *,
+        cancel_check: Any | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
+        """Run one assignment on an existing Node Agent session."""
+        member = self.store.get_member(member_id)
+        if member is None or member.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "member not found", http_status=404)
+        if member.execution_mode != "agent_ref" or not member.agent_id:
+            raise WorkgroupError("conflict", "member is not an AgentRef", http_status=409)
+        if member.status != "ready" and not (
+            member.status == "busy" and member.active_assign_id == assign_id
+        ):
+            raise WorkgroupError("conflict", "agent session is not ready", http_status=409)
+        self.enqueue_agent_turn_start(workgroup_id, assign_id)
+        result = self.wait_agent_turn(assign_id, timeout_s=timeout_s, cancel_check=cancel_check)
+        status = str(result.get("status") or "failed").lower()
+        if status in {"canceled", "cancelled"}:
+            raise WorkgroupError("canceled", "agent turn cancelled", http_status=409)
+        if status not in {"succeeded", "awaiting"}:
+            raise WorkgroupError(
+                str(result.get("error_code") or "agent_turn_failed"),
+                str(result.get("message") or "agent turn failed"),
+                http_status=409,
+            )
+        return str(result.get("final_text") or "").strip()[:8000] or "(empty)"
+
     def enqueue_member_tombstone(self, workgroup_id: str, member_id: str) -> OutboxFrame:
-        """Tell the member Home Node to fence one archived member binding."""
+        """Close an AgentRef session or fence a legacy member binding."""
         member = self.store.get_member(member_id)
         if member is None or member.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "member not found", http_status=404)
         ctx = self.store.member_execution_context(member_id)
-        payload = {
-            "workgroup_id": workgroup_id,
-            "member_id": member_id,
-            "lease_epoch_at_archive": ctx["lease_epoch"],
-        }
+        if member.execution_mode == "agent_ref" and member.agent_id and member.session_id:
+            frame_type = "agent.session.close"
+            payload = {
+                "workgroup_id": workgroup_id,
+                "member_id": member_id,
+                "agent_id": member.agent_id,
+                "session_id": member.session_id,
+                "home_node_id": ctx["home_node_id"],
+            }
+        else:
+            frame_type = "workgroup.tombstone"
+            payload = {
+                "workgroup_id": workgroup_id,
+                "member_id": member_id,
+                "lease_epoch_at_archive": ctx["lease_epoch"],
+            }
         frame = self.store.enqueue_outbox(
             workgroup_id,
-            type="workgroup.tombstone",
+            type=frame_type,
             payload=payload,
         )
         if self.hub is not None:
@@ -518,7 +645,7 @@ class VerticalLoop:
         return dict(result)
 
     def cancel_pending_commands(self, workgroup_id: str) -> list[str]:
-        """下发 tool.cancel（若可）+ 合成 canceled result，唤醒 wait_command_result。"""
+        """取消 Node 工具与 AgentRef turn，并唤醒对应的本地 waiter。"""
         with self._lock:
             pending = dict(self._wg_pending_commands.get(workgroup_id) or {})
         woke: list[str] = []
@@ -559,11 +686,142 @@ class VerticalLoop:
             woke.append(command_id)
         with self._lock:
             self._wg_pending_commands.pop(workgroup_id, None)
+        self.cancel_pending_agent_turns(workgroup_id)
         return woke
+
+    def cancel_pending_agent_turns(self, workgroup_id: str) -> list[str]:
+        """通过已建立的 Node→Manage WS 取消工作组内 AgentRef turn。"""
+        canceled: list[str] = []
+        for assign in self.store.list_assigns(workgroup_id, active_only=True):
+            ctx = self.store.member_execution_context(assign.member_id)
+            if str(ctx.get("execution_mode") or "") != "agent_ref":
+                continue
+            payload = {
+                "workgroup_id": workgroup_id,
+                "member_id": assign.member_id,
+                "agent_id": str(ctx.get("agent_id") or ""),
+                "session_id": str(ctx.get("session_id") or ""),
+                "assign_id": assign.assign_id,
+                "home_node_id": str(ctx.get("home_node_id") or ""),
+            }
+            try:
+                frame = self.store.enqueue_outbox(
+                    workgroup_id,
+                    type="agent.turn.cancel",
+                    payload=payload,
+                )
+                if self.hub is not None and payload["home_node_id"]:
+                    self.hub.deliver_outbox_frame(frame, home_node_id=payload["home_node_id"])
+            except Exception:  # noqa: BLE001 — 本地取消仍需唤醒 waiter
+                pass
+            self._signal_agent_result(
+                assign.assign_id,
+                {
+                    **payload,
+                    "status": "canceled",
+                    "final_text": "",
+                    "error_code": "canceled",
+                    "message": "agent turn canceled",
+                },
+            )
+            canceled.append(assign.assign_id)
+        return canceled
+
+    def _signal_agent_result(self, assign_id: str, result: dict[str, Any]) -> None:
+        with self._lock:
+            self._agent_results[assign_id] = dict(result)
+            waiter = self._agent_waiters.get(assign_id)
+        if waiter is not None:
+            waiter.set()
 
     def handle_inbound(self, node_id: str, mtype: str, payload: dict[str, Any]) -> None:
         """WS 入站业务：provision_result / tool.result → 状态机 + 唤醒 waiters。"""
         _ = node_id
+        if mtype in {"agent.session.ready", "agent.session.error", "agent.session.closed"}:
+            workgroup_id = str(payload.get("workgroup_id") or "").strip()
+            member_id = str(payload.get("member_id") or "").strip()
+            if not workgroup_id or not member_id:
+                return
+            member = self.store.get_member(member_id)
+            if member is None or member.workgroup_id != workgroup_id or member.status == "archived":
+                # An archive is authoritative. A close/ready/error response
+                # from the old connection must not resurrect that member.
+                return
+            status = str(payload.get("status") or "error").strip().lower()
+            if mtype == "agent.session.ready" and status == "ready":
+                self.store.mark_member_status(member_id, "ready", workgroup_id=workgroup_id)
+                if self.hub is not None:
+                    self.hub.publish_realtime_event(
+                        workgroup_id,
+                        "agent_status",
+                        {"member_id": member_id, "status": status},
+                    )
+            elif mtype == "agent.session.closed":
+                self.store.mark_member_status(member_id, "provisioning", workgroup_id=workgroup_id)
+            else:
+                self.store.mark_member_status(
+                    member_id,
+                    "error",
+                    workgroup_id=workgroup_id,
+                    error_code=str(payload.get("error_code") or "agent_session_error"),
+                    error_message=str(payload.get("message") or "agent session failed"),
+                )
+            return
+        if mtype == "agent.turn.event":
+            workgroup_id = str(payload.get("workgroup_id") or "").strip()
+            member_id = str(payload.get("member_id") or "").strip()
+            if not workgroup_id or not member_id or self.hub is None:
+                return
+            event_type = str(payload.get("event_type") or "").strip()
+            data = dict(payload.get("data") or {})
+            data.update({"mode": "member", "member_id": member_id, "assign_id": payload.get("assign_id")})
+            if event_type == "assistant":
+                self.hub.publish_realtime_event(
+                    workgroup_id,
+                    "delta",
+                    {**data, "text": str(data.get("content") or "")},
+                )
+            elif event_type in {"reasoning", "turn_state"}:
+                self.hub.publish_realtime_event(workgroup_id, "status", data)
+            elif event_type == "tool_call":
+                self.hub.publish_realtime_event(
+                    workgroup_id,
+                    "status",
+                    {**data, "phase": "tool", "purpose": str(data.get("tool_name") or "执行工具")},
+                )
+            return
+        if mtype == "agent.turn.result":
+            assign_id = str(payload.get("assign_id") or "").strip()
+            workgroup_id = str(payload.get("workgroup_id") or "").strip()
+            member_id = str(payload.get("member_id") or "").strip()
+            if not assign_id or not workgroup_id or not member_id:
+                return
+            result = dict(payload)
+            assign = self.store.get_assign(assign_id)
+            if assign is not None and assign.status in {
+                "failed",
+                "canceled",
+                "succeeded",
+                "indeterminate",
+            }:
+                # A cancellation or a completed retry may race with a late
+                # Node frame. It must not revive the durable assign or emit a
+                # misleading final answer after cancellation.
+                return
+            if self.hub is not None:
+                self.hub.publish_realtime_event(
+                    workgroup_id,
+                    "assistant_final",
+                    {
+                        "mode": "member",
+                        "member_id": member_id,
+                        "assign_id": assign_id,
+                        "text": str(payload.get("final_text") or ""),
+                        "status": str(payload.get("status") or "failed"),
+                    },
+                )
+            self._signal_agent_result(assign_id, result)
+            return
         if mtype == "member.provision_result":
             workgroup_id = str(payload.get("workgroup_id") or "").strip()
             member_id = str(payload.get("member_id") or "").strip()
@@ -670,6 +928,15 @@ class VerticalLoop:
                 member.status == "busy" and member.active_assign_id == assign_id
             ):
                 raise WorkgroupError("conflict", "member not ready", http_status=409)
+            if member.execution_mode == "agent_ref" and member.agent_id:
+                return self.run_agent_ref_assign(
+                    workgroup_id,
+                    assign_id,
+                    member_id,
+                    instruction,
+                    cancel_check=lambda: kernel._is_cancelled(workgroup_id),
+                    timeout_s=timeout_s,
+                )
             spec = self.store.get_spec(member_id)
             if spec is None:
                 raise WorkgroupError("not_found", "member spec not found", http_status=404)
