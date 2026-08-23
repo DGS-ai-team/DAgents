@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,10 @@ func TestOpenAIClientStreamsAndNormalizesCacheUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			t.Fatalf("request path = %s", r.URL.Path)
+		}
+		raw, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(raw), `"source"`) || strings.Contains(string(raw), `"provenance"`) {
+			t.Fatalf("internal message provenance leaked into direct provider request: %s", raw)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n")

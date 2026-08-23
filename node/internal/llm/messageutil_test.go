@@ -68,6 +68,12 @@ func TestMessageToAPIPayloadDoesNotExposeInternalToolMetadataField(t *testing.T)
 	if payload["content"] != "body" {
 		t.Fatalf("provider payload should retain raw content: %+v", payload)
 	}
+	if _, ok := payload["source"]; ok {
+		t.Fatalf("internal source leaked into provider payload: %+v", payload)
+	}
+	if _, ok := payload["provenance"]; ok {
+		t.Fatalf("internal provenance leaked into provider payload: %+v", payload)
+	}
 }
 
 func TestMessageToJournalPayloadPersistsToolResultMetadata(t *testing.T) {
@@ -75,5 +81,16 @@ func TestMessageToJournalPayloadPersistsToolResultMetadata(t *testing.T) {
 	payload := MessageToJournalPayload(message)
 	if _, ok := payload["tool_result_metadata"]; !ok {
 		t.Fatalf("journal payload lost tool metadata: %+v", payload)
+	}
+}
+
+func TestMessageToJournalPayloadPersistsSourceAndProvenance(t *testing.T) {
+	message := UserMessage("skill body", UserNameSkill)
+	payload := MessageToJournalPayload(message)
+	if _, ok := payload["source"]; !ok {
+		t.Fatalf("journal payload lost source: %+v", payload)
+	}
+	if _, ok := payload["provenance"]; !ok {
+		t.Fatalf("journal payload lost provenance: %+v", payload)
 	}
 }

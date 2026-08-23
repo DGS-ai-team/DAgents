@@ -3,6 +3,7 @@ package turn
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -307,7 +308,8 @@ func findSingleHistoryInsert(old, full []llm.Message) (int, llm.Message, bool) {
 }
 
 func historyMessageEqual(a, b llm.Message) bool {
-	return a.Role == b.Role && a.Content == b.Content && a.Name == b.Name
+	return a.Role == b.Role && a.Content == b.Content && a.Name == b.Name &&
+		reflect.DeepEqual(a.Source, b.Source) && reflect.DeepEqual(a.Provenance, b.Provenance)
 }
 
 func (o *Orchestrator) runPhase(ctx context.Context, phase hooks.Phase, hc *hooks.Context, sessionID string, history *[]llm.Message, finishReason string) (hooks.Context, error) {

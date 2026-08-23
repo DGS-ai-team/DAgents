@@ -55,6 +55,14 @@ func TestTurnKeepsModelContextSnapshotAcrossToolSteps(t *testing.T) {
 		promptCalls++
 		return "prompt-version-" + string(rune('0'+promptCalls))
 	})
+	orch.SetContextInjectionBuilder(func(SystemPromptInput) []ContextInjection {
+		return []ContextInjection{{
+			Name:     "runtime_context",
+			Source:   "test",
+			Content:  "## 测试运行时上下文\ncontext-v1",
+			Position: "before_current_user",
+		}}
+	})
 
 	var history []llm.Message
 	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-1", &history, "读取", nil)
@@ -73,8 +81,29 @@ func TestTurnKeepsModelContextSnapshotAcrossToolSteps(t *testing.T) {
 	if len(client.requests[1].Messages) == 0 || !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "[TOOL_RESULT_METADATA]") {
 		t.Fatalf("model request did not receive tool result metadata: %+v", client.requests[1].Messages)
 	}
+	for index, request := range client.requests {
+		contextCount := 0
+		contextIndex := -1
+		for i, message := range request.Messages {
+			if message.Name == llm.UserNameContext {
+				contextCount++
+				contextIndex = i
+			}
+		}
+		if contextCount != 1 {
+			t.Fatalf("request %d context count = %d: %+v", index, contextCount, request.Messages)
+		}
+		if contextIndex < 0 || contextIndex+1 >= len(request.Messages) || request.Messages[contextIndex+1].Content != "读取" {
+			t.Fatalf("request %d context is not anchored before current user: %+v", index, request.Messages)
+		}
+	}
 	if len(history) == 0 || strings.Contains(history[len(history)-1].Content, "[TOOL_RESULT_METADATA]") {
 		t.Fatalf("persisted history should keep raw tool result: %+v", history)
+	}
+	for _, message := range history {
+		if message.Name == llm.UserNameContext {
+			t.Fatalf("request-only context leaked into durable history: %+v", history)
+		}
 	}
 	if promptCalls == 0 {
 		t.Fatal("system prompt builder was not called")

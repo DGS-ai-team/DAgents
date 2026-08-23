@@ -247,7 +247,7 @@ func TestRunMessageTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 3 || history[1].Content != "hi" || history[2].Content != "hi" {
+	if len(history) != 2 || history[0].Content != "hi" || history[1].Content != "hi" {
 		t.Fatalf("history = %+v", history)
 	}
 
@@ -887,10 +887,10 @@ func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(history) != 3 {
+	if len(history) != 2 {
 		t.Fatalf("history = %+v", history)
 	}
-	assistant := history[2]
+	assistant := history[1]
 	if assistant.Role != "assistant" || assistant.Content != "partial answer" {
 		t.Fatalf("assistant = %+v", assistant)
 	}

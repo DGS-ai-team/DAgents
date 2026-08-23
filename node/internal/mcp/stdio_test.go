@@ -47,6 +47,14 @@ func TestMCPStdioHelper(t *testing.T) {
 	}
 }
 
+func TestMCPStdioDiagnosticsHelper(t *testing.T) {
+	if os.Getenv("DAGENTS_MCP_DIAGNOSTICS_HELPER") != "1" {
+		return
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "MCP_DIAGNOSTICS_MARKER")
+	os.Exit(17)
+}
+
 func fakeConfig(t *testing.T) ServerConfig {
 	t.Helper()
 	t.Setenv("DAGENTS_MCP_HELPER", "1")
@@ -81,6 +89,40 @@ func TestStdioClientInitializeListAndCall(t *testing.T) {
 	}
 	if len(result.Content) != 1 || result.Content[0].Text != "hello" {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestStdioClientCapturesBoundedDiagnostics(t *testing.T) {
+	client, err := NewStdioClient(ServerConfig{
+		ID:      "diagnostics",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestMCPStdioDiagnosticsHelper", "--"},
+		EnvRefs: map[string]string{"DAGENTS_MCP_DIAGNOSTICS_HELPER": "DAGENTS_MCP_DIAGNOSTICS_HELPER"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	t.Setenv("DAGENTS_MCP_DIAGNOSTICS_HELPER", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Start(ctx); err == nil {
+		t.Fatal("expected stdio process failure")
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var diagnostics ClientDiagnostics
+	for time.Now().Before(deadline) {
+		diagnostics = client.Diagnostics()
+		if diagnostics.ExitCode != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(diagnostics.Stderr, "MCP_DIAGNOSTICS_MARKER") {
+		t.Fatalf("stderr=%q", diagnostics.Stderr)
+	}
+	if diagnostics.ExitCode == nil || *diagnostics.ExitCode != 17 {
+		t.Fatalf("exit code=%v", diagnostics.ExitCode)
 	}
 }
 

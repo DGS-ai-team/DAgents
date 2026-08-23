@@ -151,11 +151,11 @@ func TestLoadSkillsBodyBecomesVisibleOnNextModelStep(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("requests after load turn = %d", len(client.requests))
 	}
-	if client.requests[0].SystemPrompt == client.requests[1].SystemPrompt {
-		t.Fatal("explicit load_skills did not create a new model context segment")
+	if client.requests[0].SystemPrompt != client.requests[1].SystemPrompt {
+		t.Fatal("skill activation should not rewrite the stable system prompt")
 	}
-	if !strings.Contains(client.requests[1].SystemPrompt, "Write clearly.") {
-		t.Fatal("loaded skill body is missing from the next model step")
+	if !hasSkillBodyMessage(client.requests[1].Messages, "Write clearly.") {
+		t.Fatalf("loaded skill body is missing from the next model step: %+v", client.requests[1].Messages)
 	}
 
 	outcome := o.RunHumanMessageTurn(
@@ -165,9 +165,18 @@ func TestLoadSkillsBodyBecomesVisibleOnNextModelStep(t *testing.T) {
 	if outcome.Err != nil {
 		t.Fatal(outcome.Err)
 	}
-	if len(client.requests) != 3 || !strings.Contains(client.requests[2].SystemPrompt, "Write clearly.") {
-		t.Fatalf("next human prompt did not include loaded body: requests=%d prompt=%q", len(client.requests), client.requests[2].SystemPrompt)
+	if len(client.requests) != 3 || !hasSkillBodyMessage(client.requests[2].Messages, "Write clearly.") || strings.Contains(client.requests[2].SystemPrompt, "Write clearly.") {
+		t.Fatalf("next human request did not use durable skill body: requests=%d request=%+v", len(client.requests), client.requests[2])
 	}
+}
+
+func hasSkillBodyMessage(messages []llm.Message, body string) bool {
+	for _, message := range messages {
+		if message.Role == "user" && message.Name == llm.UserNameSkill && strings.Contains(message.Content, body) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSkillSnapshotRecordsLoadedBodyDigestSeparately(t *testing.T) {

@@ -14,3 +14,15 @@ type Client interface {
 	CallTool(context.Context, string, json.RawMessage) (CallResult, error)
 	Close() error
 }
+
+// DiagnosticsProvider exposes transport-level failure evidence without
+// widening the common Client interface. HTTP clients can omit it; stdio
+// clients use it to preserve bounded stderr and the child exit code.
+type DiagnosticsProvider interface {
+	Diagnostics() ClientDiagnostics
+}
+
+type ClientDiagnostics struct {
+	Stderr   string
+	ExitCode *int
+}

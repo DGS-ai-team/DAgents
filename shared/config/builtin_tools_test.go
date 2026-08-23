@@ -59,7 +59,7 @@ func TestExpandBuiltinToolGroups(t *testing.T) {
 
 func TestExpandBuiltinToolGroupsTerminal(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{"terminal"})
-	want := []string{"linux_exec", "linux_file_download", "linux_file_upload", "terminal_config_list", "terminal_input", "terminal_list", "terminal_open", "terminal_read", "terminal_terminate"}
+	want := []string{"terminal_command", "terminal_config_list", "terminal_download", "terminal_input", "terminal_list", "terminal_open", "terminal_read", "terminal_terminate", "terminal_upload"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}
@@ -141,6 +141,9 @@ func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := seen[name]; !ok {
+			if name == "linux_exec" || name == "linux_file_upload" || name == "linux_file_download" {
+				continue
+			}
 			t.Fatalf("tool %q not in any group", name)
 		}
 	}

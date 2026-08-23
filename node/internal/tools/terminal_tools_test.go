@@ -83,6 +83,12 @@ func (b *fakeTerminalBroker) Open(_ context.Context, agentID string, request Ter
 func (b *fakeTerminalBroker) List(_ string) []TerminalSessionInfo {
 	return []TerminalSessionInfo{b.info}
 }
+func (b *fakeTerminalBroker) Lookup(_ string, _ string) (TerminalSessionInfo, error) {
+	if b.info.ID == "" {
+		b.info = TerminalSessionInfo{ID: "terminal-test-1", AgentID: "agent-terminal-test", TargetKind: "local", Status: "running", CreatedAt: time.Now().UTC()}
+	}
+	return b.info, nil
+}
 func (b *fakeTerminalBroker) ReadOutput(_ context.Context, _, _ string, _ uint64, _ int) (TerminalOutput, error) {
 	return b.read, nil
 }
@@ -196,5 +202,40 @@ func TestTerminalReadWaitCanBeCancelled(t *testing.T) {
 	_, err = reg.Execute(ctx, "terminal_read", `{"terminal_id":"terminal-test-1","wait_seconds":60}`)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("terminal_read error=%v, want context.Canceled", err)
+	}
+}
+
+func TestTerminalCommandRequiresExistingSessionAndReturnsStructuredResult(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetAgentID("agent-terminal-command-test")
+	reg.SetTerminalSessionBroker(&fakeTerminalBroker{info: TerminalSessionInfo{
+		ID: "terminal-command-1", AgentID: "agent-terminal-command-test", TargetKind: executionTargetLocal, Status: "running",
+	}})
+	result, err := reg.Execute(context.Background(), "terminal_command", `{"terminal_id":"terminal-command-1","command":"echo terminal-command-ok","timeout_ms":5000}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload TerminalCommandResult
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Status != "SUCCEEDED" || payload.ExitCode != 0 || !strings.Contains(strings.ToLower(payload.Stdout), "terminal-command-ok") {
+		t.Fatalf("unexpected terminal command result: %+v", payload)
+	}
+}
+
+func TestNewRegistryDoesNotExposeDeprecatedLinuxTools(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range reg.Definitions() {
+		switch def.Function.Name {
+		case "linux_exec", "linux_file_upload", "linux_file_download":
+			t.Fatalf("deprecated tool %q exposed without an old snapshot allowlist", def.Function.Name)
+		}
 	}
 }

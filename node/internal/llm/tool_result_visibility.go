@@ -20,11 +20,18 @@ func ToolResultMessage(toolCallID, name, content string) Message {
 // ToolResultMessageWithMetadata preserves the raw history body while storing
 // the runtime status separately for the model outbound adapter.
 func ToolResultMessageWithMetadata(toolCallID, name, content string, metadata tools.ResultMetadata) Message {
+	source := MessageSource{Kind: MessageSourceTool, Form: MessageFormToolResult}
+	provenance := MessageProvenance{
+		Producer:  strings.TrimSpace(name),
+		Reference: strings.TrimSpace(toolCallID),
+	}
 	return Message{
 		Role:               "tool",
 		ToolCallID:         strings.TrimSpace(toolCallID),
 		Name:               strings.TrimSpace(name),
 		Content:            content,
+		Source:             &source,
+		Provenance:         &provenance,
 		ToolResultMetadata: toolResultMetadataFromResult(metadata),
 	}
 }

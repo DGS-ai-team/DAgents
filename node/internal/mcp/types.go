@@ -24,8 +24,13 @@ const (
 	TransportStreamableHTTP = "streamable_http"
 	StatusDisabled          = "disabled"
 	StatusOffline           = "offline"
+	StatusChecking          = "checking"
 	StatusReady             = "ready"
 	StatusError             = "error"
+	HealthUnconfigured      = "unconfigured"
+	HealthHealthy           = "healthy"
+	HealthChecking          = "checking"
+	HealthDegraded          = "degraded"
 )
 
 var toolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -109,7 +114,40 @@ type ServerView struct {
 	ToolCount        int    `json:"tool_count"`
 	EnabledToolCount int    `json:"enabled_tool_count"`
 	LastRefresh      string `json:"last_refresh,omitempty"`
+	LastChecked      string `json:"last_checked,omitempty"`
+	ObservedAt       string `json:"observed_at,omitempty"`
+	StatusRevision   uint64 `json:"status_revision"`
+	HealthStage      string `json:"health_stage,omitempty"`
+	FailureKind      string `json:"failure_kind,omitempty"`
+	Retryable        bool   `json:"retryable"`
+	StderrSummary    string `json:"stderr_summary,omitempty"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
 	Tools            []Tool `json:"tools,omitempty"`
+}
+
+// HealthView is the Node-level MCP health projection. It intentionally keeps
+// service health separate from Agent tool snapshots and prompt state.
+type HealthView struct {
+	Status                string `json:"status"`
+	Revision              uint64 `json:"revision"`
+	ObservedAt            string `json:"observed_at,omitempty"`
+	ServerCount           int    `json:"server_count"`
+	EnabledCount          int    `json:"enabled_count"`
+	HealthyCount          int    `json:"healthy_count"`
+	ProblemCount          int    `json:"problem_count"`
+	CheckingCount         int    `json:"checking_count"`
+	RetryableProblemCount int    `json:"retryable_problem_count"`
+}
+
+// StatusEvent is the safe, Node-level event emitted after an MCP service
+// lifecycle/health transition. It contains no env values, headers, or other
+// authentication material.
+type StatusEvent struct {
+	ServerID   string     `json:"server_id"`
+	View       ServerView `json:"server"`
+	Health     HealthView `json:"health"`
+	Revision   uint64     `json:"revision"`
+	ObservedAt string     `json:"observed_at"`
 }
 
 // EffectiveTool is the validated, per-Agent projection of a remote tool.

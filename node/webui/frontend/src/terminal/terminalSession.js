@@ -125,7 +125,16 @@ export class TerminalSession {
   }
 
   terminate() {
-    return this._send({ type: "terminate" });
+    const sent = this._send({ type: "terminate" });
+    if (sent) {
+      // An explicit user termination is authoritative for reconnect policy.
+      // The server may need a few seconds to force-close the PTY, but the
+      // browser must not resume a session that is being removed.
+      this.shouldReconnect = false;
+      this._clearReconnectTimer();
+      this._setStatus("terminating");
+    }
+    return sent;
   }
 
   close() {
@@ -234,6 +243,23 @@ export class TerminalSession {
         this.processExited = true;
         this.shouldReconnect = false;
         this._setStatus("exited");
+        safeCallback(this.callbacks.onExit, event);
+        break;
+      case "terminated":
+        // The server removes a session after an explicit terminate command and
+        // closes the socket. Treat that lifecycle event as terminal rather than
+        // allowing the reconnect loop to resume a session that no longer exists.
+        this.processExited = true;
+        this.shouldReconnect = false;
+        this._setStatus("exited");
+        safeCallback(this.callbacks.onExit, event);
+        break;
+      case "closed":
+        // A protocol-level close is also authoritative. This is distinct from
+        // a transport disconnect: the session must not be resumed implicitly.
+        this.processExited = true;
+        this.shouldReconnect = false;
+        this._setStatus("closed");
         safeCallback(this.callbacks.onExit, event);
         break;
       case "error":

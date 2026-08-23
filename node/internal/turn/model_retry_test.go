@@ -34,7 +34,7 @@ func TestOrchestratorRetriesTransientModelFailureInsideStep(t *testing.T) {
 	if client.Calls() != 2 {
 		t.Fatalf("provider calls = %d, want 2", client.Calls())
 	}
-	if len(history) != 3 || history[2].Content != "recovered" {
+	if len(history) != 2 || history[1].Content != "recovered" {
 		t.Fatalf("history = %+v", history)
 	}
 	if countLifecycleCommands(commands, CommandModelRequestRetrying) != 1 {
@@ -61,7 +61,7 @@ func TestOrchestratorChecksToolBudgetBeforeSideEffect(t *testing.T) {
 	if executor.calls != 0 {
 		t.Fatalf("tool side effect calls = %d, want 0", executor.calls)
 	}
-	if len(history) < 4 || history[len(history)-1].Role != "tool" || history[len(history)-1].Content != "ERROR: turn budget exhausted" {
+	if len(history) < 3 || history[len(history)-1].Role != "tool" || history[len(history)-1].Content != "ERROR: turn budget exhausted" {
 		t.Fatalf("budget history = %+v", history)
 	}
 }

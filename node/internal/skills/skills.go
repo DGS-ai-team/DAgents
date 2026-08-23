@@ -1,4 +1,4 @@
-// Package skills 扫描 .runtime/skills 并渲染 prompt 段（对齐 Python harness/skills）。
+// Package skills 扫描 .runtime/skills 并提供 metadata/body 读取（对齐 Python harness/skills）。
 package skills
 
 import (
@@ -29,7 +29,7 @@ const LoadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
 type CatalogTokenStats struct {
 	// MetadataTokens：system prompt 尾部 skills 目录的元数据（name + description 列表）。
 	MetadataTokens int
-	// MaxBodyTokens：单个 SKILL.md 正文的最大估算 token（load 后进入 system prompt，受 max_in_prompt 限制）。
+	// MaxBodyTokens：单个 SKILL.md 正文的最大估算 token（load 后进入独立 skill context，受 max_in_prompt 限制）。
 	MaxBodyTokens int
 }
 
@@ -87,6 +87,15 @@ type Definition struct {
 	DirectoryName string
 	Description   string
 	Content       string
+}
+
+// LoadedSkillContent is the model-facing body of an already selected skill.
+// It is deliberately separate from LoadedSkill: the latter is durable
+// session metadata while this type is read only when the body must be
+// injected into a model-visible context item.
+type LoadedSkillContent struct {
+	LoadedSkill
+	Content string
 }
 
 // Catalog 提供 skill 目录扫描与 prompt 渲染。
@@ -463,8 +472,8 @@ func (c *Catalog) applyVisible(defs []Definition) []Definition {
 // EstimateCatalogStats 估算 skills 目录 token 分项。
 //
 // 注意：目录元数据进入启用 skills 的 Agent system prompt 尾部；skill 正文仅在
-// load 后写入 system prompt（已计入 system_prompt_estimated_tokens）。因此
-// skills_catalog_estimated_tokens 只反映 MetadataTokens，膨胀告警另看 MaxBodyTokens。
+// load 后写入独立 skill context。因此 skills_catalog_estimated_tokens 只反映
+// MetadataTokens，正文膨胀告警另看 MaxBodyTokens。
 func EstimateCatalogStats(defs []Definition) CatalogTokenStats {
 	metaSection := renderMetadataSection(defs)
 	stats := CatalogTokenStats{}
@@ -572,7 +581,9 @@ func (c *Catalog) visibleMatches(defs []Definition, name string) []Definition {
 	return out
 }
 
-// RenderLoadedSection 渲染已加载 skill 正文段（不含外层标题，由 prompt 层拼标题）。
+// RenderLoadedSection renders a legacy inline body section for diagnostics and
+// compatibility. Runtime model requests must use ReadLoadedSkillContents and
+// the turn package's independent skill context messages instead.
 func (c *Catalog) RenderLoadedSection(loaded []LoadedSkill) string {
 	if len(loaded) == 0 {
 		return ""
@@ -594,6 +605,33 @@ func (c *Catalog) RenderLoadedSection(loaded []LoadedSkill) string {
 		b.WriteString(fmt.Sprintf("### %s\n%s\n\n", def.SkillName, body))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// ReadLoadedSkillContents reads the bodies for the selected skills in the
+// supplied order. It preserves the frozen Catalog view boundary and returns
+// only definitions whose body can be read successfully. The caller decides
+// how the bodies are represented in model history; this method intentionally
+// does not render a system-prompt section.
+func (c *Catalog) ReadLoadedSkillContents(loaded []LoadedSkill) []LoadedSkillContent {
+	if c == nil || len(loaded) == 0 {
+		return nil
+	}
+	out := make([]LoadedSkillContent, 0, len(loaded))
+	for _, item := range loaded {
+		lookup := item.SkillName
+		if strings.TrimSpace(item.DirectoryName) != "" {
+			lookup = item.DirectoryName
+		}
+		def, ok := c.SelectByName(lookup)
+		if !ok || strings.TrimSpace(def.Content) == "" {
+			continue
+		}
+		out = append(out, LoadedSkillContent{
+			LoadedSkill: item,
+			Content:     strings.TrimSpace(def.Content),
+		})
+	}
+	return out
 }
 
 // SetLoadedSkills 按名称整组替换 loaded skills（load_skills 语义）。

@@ -50,8 +50,57 @@ type StdioClient struct {
 	closeOnce sync.Once
 	errMu     sync.Mutex
 	err       error
+	stderr    boundedBuffer
+	exitCode  *int
 	started   bool
 	closed    bool
+}
+
+const maxDiagnosticStderr = 64 * 1024
+
+type boundedBuffer struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.max <= 0 {
+		b.max = maxDiagnosticStderr
+	}
+	if len(p) >= b.max {
+		b.buf = append(b.buf[:0], p[len(p)-b.max:]...)
+		return len(p), nil
+	}
+	if overflow := len(b.buf) + len(p) - b.max; overflow > 0 {
+		b.buf = append([]byte(nil), b.buf[overflow:]...)
+	}
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(append([]byte(nil), b.buf...)))
+}
+
+// Diagnostics returns bounded child-process evidence suitable for a status
+// API. It never includes the configured command arguments or environment.
+func (c *StdioClient) Diagnostics() ClientDiagnostics {
+	if c == nil {
+		return ClientDiagnostics{}
+	}
+	c.errMu.Lock()
+	defer c.errMu.Unlock()
+	var exitCode *int
+	if c.exitCode != nil {
+		value := *c.exitCode
+		exitCode = &value
+	}
+	return ClientDiagnostics{Stderr: c.stderr.String(), ExitCode: exitCode}
 }
 
 func NewStdioClient(cfg ServerConfig) (*StdioClient, error) {
@@ -91,6 +140,8 @@ func (c *StdioClient) Start(ctx context.Context) error {
 		return err
 	}
 	cmd.Env = env
+	c.stderr = boundedBuffer{max: maxDiagnosticStderr}
+	cmd.Stderr = &c.stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -306,6 +357,12 @@ func (c *StdioClient) readLoop() {
 
 func (c *StdioClient) waitLoop(cmd *exec.Cmd) {
 	err := cmd.Wait()
+	if cmd.ProcessState != nil {
+		exitCode := cmd.ProcessState.ExitCode()
+		c.errMu.Lock()
+		c.exitCode = &exitCode
+		c.errMu.Unlock()
+	}
 	if err != nil {
 		c.finish(fmt.Errorf("mcp server %q exited: %w", c.cfg.ID, err))
 		return

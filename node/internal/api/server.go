@@ -498,6 +498,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			s.stream.Publish(agentID, eventType, data)
 		}
 	})
+	s.mcpManager.SetStatusListener(func(event mcp.StatusEvent) {
+		if s.stream == nil {
+			return
+		}
+		s.stream.Publish("", "mcp/status-changed", map[string]any{
+			"server_id":   event.ServerID,
+			"server":      event.View,
+			"health":      event.Health,
+			"revision":    event.Revision,
+			"observed_at": event.ObservedAt,
+		})
+	})
 	if wgWorker != nil {
 		wgWorker.OnTimelineEvent = func(env workgroup.WSEnvelope) {
 			wid := strings.TrimSpace(env.WorkgroupID)

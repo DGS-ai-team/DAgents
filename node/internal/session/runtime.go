@@ -262,23 +262,31 @@ func newRuntimeWithPublisher(
 			return nil
 		}
 		snapshot := rt.turnCoordinator.Snapshot()
+		contextInjectionDigest := ""
+		contextInjectionCount := 0
+		if modelSnapshot := rt.orch.ModelContextSnapshot(sessionID); modelSnapshot != nil {
+			contextInjectionDigest = modelSnapshot.ContextInjectionDigest
+			contextInjectionCount = len(modelSnapshot.ContextInjections)
+		}
 		return map[string]any{
-			"turn_id":              snapshot.TurnID,
-			"step_id":              snapshot.StepID,
-			"step_index":           snapshot.StepIndex,
-			"context_epoch":        snapshot.ContextEpoch,
-			"turn_status":          snapshot.TurnStatus,
-			"turn_end_reason":      snapshot.TurnEndReason,
-			"step_status":          snapshot.StepStatus,
-			"step_end_reason":      snapshot.StepEndReason,
-			"assistant_message_id": snapshot.AssistantMsgID,
-			"turn_generation":      snapshot.Generation,
-			"runtime_revision":     snapshot.RuntimeRevision,
-			"runtime_digest":       snapshot.RuntimeDigest,
-			"prompt_digest":        snapshot.PromptDigest,
-			"tool_digest":          snapshot.ToolDigest,
-			"event_seq":            rt.lifecycleEventSequence(),
-			"recovery_required":    snapshot.RecoveryRequired,
+			"turn_id":                  snapshot.TurnID,
+			"step_id":                  snapshot.StepID,
+			"step_index":               snapshot.StepIndex,
+			"context_epoch":            snapshot.ContextEpoch,
+			"turn_status":              snapshot.TurnStatus,
+			"turn_end_reason":          snapshot.TurnEndReason,
+			"step_status":              snapshot.StepStatus,
+			"step_end_reason":          snapshot.StepEndReason,
+			"assistant_message_id":     snapshot.AssistantMsgID,
+			"turn_generation":          snapshot.Generation,
+			"runtime_revision":         snapshot.RuntimeRevision,
+			"runtime_digest":           snapshot.RuntimeDigest,
+			"prompt_digest":            snapshot.PromptDigest,
+			"tool_digest":              snapshot.ToolDigest,
+			"context_injection_digest": contextInjectionDigest,
+			"context_injection_count":  contextInjectionCount,
+			"event_seq":                rt.lifecycleEventSequence(),
+			"recovery_required":        snapshot.RecoveryRequired,
 		}
 	})
 	rt.orch.SetLifecycleCommandSink(func(sessionID string, command turn.TurnCommand) error {
@@ -1056,6 +1064,16 @@ func (r *runtime) contextView() *ContextView {
 	pending := r.pendingSnapshot()
 	view.PendingToolCallsCount = pendingToolCallsCount(pending)
 	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
+	if snapshot := r.orch.ModelContextSnapshot(r.session.ID); snapshot != nil {
+		view.ContextInjectionDigest = snapshot.ContextInjectionDigest
+		view.ContextInjectionCount = len(snapshot.ContextInjections)
+	} else {
+		injections := r.orch.ContextInjectionsForSession(r.session.ID)
+		view.ContextInjectionCount = len(injections)
+		if len(injections) > 0 {
+			view.ContextInjectionDigest = turn.Digest(injections)
+		}
+	}
 	enrichContextPromptStats(view, r.skillsCatalog)
 	if r.compression != nil {
 		if snap, ok := r.compression.LastCompression(r.session.ID); ok {

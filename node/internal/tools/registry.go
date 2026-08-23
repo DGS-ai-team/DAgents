@@ -32,6 +32,7 @@ type Registry struct {
 	localTerminalProvider  TerminalProvider
 	linuxProvider          *LinuxShellProvider
 	linuxTransferManager   *LinuxTransferManager
+	legacyLinuxTools       bool
 	terminalConfigResolver TerminalConfigResolver
 	processEventSink       ProcessEventSink
 	terminalBroker         TerminalSessionBroker
@@ -77,9 +78,9 @@ func (r *Registry) WithShellProvider(provider ShellProvider) error {
 	return nil
 }
 
-// WithLinuxShellProvider enables the separately named linux_exec tool. It is
-// kept separate from bash_run so a Linux channel can never be selected by
-// accidentally changing a local bash target.
+// WithLinuxShellProvider enables Linux-channel terminal targets. Legacy
+// linux_exec/file-transfer definitions are only exposed when an old Agent
+// snapshot explicitly enables those names; new snapshots use terminal_*.
 func (r *Registry) WithLinuxShellProvider(provider *LinuxShellProvider) error {
 	if r == nil {
 		return fmt.Errorf("registry is nil")
@@ -243,6 +244,7 @@ func (r *Registry) PreflightTool(ctx context.Context, name string, args map[stri
 	name = strings.TrimSpace(name)
 	configID := toolArgString(args, "config_id")
 	legacyChannelID := toolArgString(args, "channel_id")
+	terminalID := toolArgString(args, "terminal_id")
 	requestedID := ""
 	command := ""
 	switch name {
@@ -258,6 +260,24 @@ func (r *Registry) PreflightTool(ctx context.Context, name string, args map[stri
 		requestedID, err = resolveLinuxToolID(configID, legacyChannelID)
 		if err != nil {
 			return ToolPreflightDecision{}, false
+		}
+	case "terminal_command", "terminal_upload", "terminal_download":
+		if terminalID == "" || r.terminalBroker == nil {
+			return ToolPreflightDecision{}, false
+		}
+		info, err := r.terminalBroker.Lookup(r.agentID, terminalID)
+		if err != nil {
+			return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: err.Error()}, true
+		}
+		if info.TargetKind != executionTargetLinuxChannel || info.TargetID == "" {
+			if name == "terminal_command" && info.TargetKind == executionTargetLocal {
+				return ToolPreflightDecision{}, false
+			}
+			return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: "terminal session is not a Linux channel"}, true
+		}
+		requestedID = info.TargetID
+		if name == "terminal_command" {
+			command = toolArgString(args, "command")
 		}
 	case "terminal_open":
 		if configID == "" || r.terminalConfigResolver == nil {
@@ -386,6 +406,7 @@ func (r *Registry) Definitions() []ToolDef {
 		terminalReadToolDef(),
 		terminalTerminateToolDef(),
 		terminalListToolDef(),
+		terminalCommandToolDef(),
 		backgroundJobStatusToolDef(),
 		backgroundJobCancelToolDef(),
 		askUserInformationToolDef(),
@@ -407,8 +428,11 @@ func (r *Registry) Definitions() []ToolDef {
 	}
 	base = append(base, childAgentToolDefs()...)
 	if r.linuxProvider != nil {
-		base = append(base, linuxExecToolDef()...)
-		base = append(base, linuxFileTransferToolDefs()...)
+		base = append(base, terminalFileTransferToolDefs()...)
+		if r.legacyLinuxTools {
+			base = append(base, linuxExecToolDef()...)
+			base = append(base, linuxFileTransferToolDefs()...)
+		}
 	}
 	base = append(base, r.mcpToolDefs()...)
 	defs := r.filterToolDefs(base)
@@ -474,9 +498,12 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["terminal_read"] = r.execTerminalRead
 	r.handlers["terminal_terminate"] = r.execTerminalTerminate
 	r.handlers["terminal_list"] = r.execTerminalList
+	r.handlers["terminal_command"] = r.execTerminalCommand
 	r.handlers["linux_exec"] = r.execLinuxExec
 	r.handlers["linux_file_upload"] = r.execLinuxFileUpload
 	r.handlers["linux_file_download"] = r.execLinuxFileDownload
+	r.handlers["terminal_upload"] = r.execTerminalUpload
+	r.handlers["terminal_download"] = r.execTerminalDownload
 	r.handlers["background_job_status"] = r.execBackgroundJobStatus
 	r.handlers["background_job_cancel"] = r.execBackgroundJobCancel
 	r.handlers["ask_user_information"] = func(context.Context, json.RawMessage) (string, error) {

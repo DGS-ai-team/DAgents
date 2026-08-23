@@ -223,6 +223,10 @@ func TestCatalogSelectByNameAndRender(t *testing.T) {
 	if body == "" || !strings.Contains(body, "writer") || !strings.Contains(body, "Write clearly") {
 		t.Fatalf("loaded section = %q", body)
 	}
+	contents := c.ReadLoadedSkillContents(loaded)
+	if len(contents) != 1 || contents[0].SkillName != "writer" || contents[0].Content != "Write clearly." {
+		t.Fatalf("loaded contents = %+v", contents)
+	}
 }
 
 func TestCatalogUnloadAndDisabled(t *testing.T) {

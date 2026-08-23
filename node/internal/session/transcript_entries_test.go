@@ -72,6 +72,7 @@ func TestMessagesToTranscriptEntries_skipsInjectedUserMessages(t *testing.T) {
 		llm.UserMessage("当天日期为：20260720", llm.UserNameDate),
 		llm.UserMessage("异步工具结果回灌", llm.UserNameAsyncTool),
 		llm.UserMessage("压缩摘要", llm.UserNameCompression),
+		llm.UserMessage("<skill_instructions>正文</skill_instructions>", llm.UserNameSkill),
 		{Role: "user", Content: "真实用户问题"},
 	}
 	entries := MessagesToTranscriptEntries(messages)

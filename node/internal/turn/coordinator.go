@@ -746,9 +746,14 @@ func (c *TurnCoordinator) snapshotCreatedLocked(command TurnCommand) error {
 		// A repeated observer callback is harmless only when it describes the
 		// same frozen model inputs. A different digest would violate Turn
 		// immutability and must be rejected.
+		contextInjectionDigest := ""
+		if command.ContextSnapshot != nil {
+			contextInjectionDigest = command.ContextSnapshot.ContextInjectionDigest
+		}
 		if c.turn.ContextSnapshot.RuntimeDigest != command.RuntimeDigest ||
 			c.turn.ContextSnapshot.PromptDigest != command.PromptDigest ||
-			c.turn.ContextSnapshot.ToolDigest != command.ToolDigest {
+			c.turn.ContextSnapshot.ToolDigest != command.ToolDigest ||
+			c.turn.ContextSnapshot.ContextInjectionDigest != contextInjectionDigest {
 			return fmt.Errorf("turn context snapshot already frozen with different digest")
 		}
 		return nil

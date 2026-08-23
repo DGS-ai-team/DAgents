@@ -1,9 +1,13 @@
 <script setup>
 import { computed, ref, shallowRef, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { useRouter } from "vue-router";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
+import McpStatusIndicator from "./McpStatusIndicator.vue";
+import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
+import UsageSummary from "./UsageSummary.vue";
+import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import MessageBubble from "./MessageBubble.vue";
-import StreamStatusBubble from "./StreamStatusBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
 import UserInfoBubble from "./UserInfoBubble.vue";
 import MemoryConflictBubble from "./MemoryConflictBubble.vue";
@@ -13,13 +17,11 @@ import ToolGroupRow from "./ToolGroupRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { groupConsecutiveToolSteps } from "../utils/streamDisplay.js";
 import { extractToolApprovals } from "../stores/hitl.js";
-import { hasStreamingTextContent } from "../stores/transcript.js";
-import { chromeStore, inputStripRight } from "../stores/chrome.js";
+import { chromeStore } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
-import { statusStore, statusPhaseOrder, hasStatus, formatStatusText } from "../stores/statusLines.js";
+import { statusStore, hasStatus, formatStatusText } from "../stores/statusLines.js";
 import { countNewStreamItems } from "../utils/streamUnread.js";
-import { toolStepIsInProgress } from "../utils/toolUserLabel.js";
 import {
   measureSync,
   updateRuntimeMetrics,
@@ -38,6 +40,7 @@ import {
   hasPendingUserInformation,
   shouldShowCancel,
 } from "../utils/composerState.js";
+import * as api from "../api/node.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
@@ -51,7 +54,15 @@ const props = defineProps({
   llmSettings: { type: Object, default: null },
   agentTitle: { type: String, default: "" },
   error: { type: String, default: "" },
+  hideComposer: { type: Boolean, default: false },
+  compact: { type: Boolean, default: false },
+  workspaceView: { type: String, default: "messages" },
+  showWorkspaceSwitcher: { type: Boolean, default: true },
+  agentId: { type: String, default: "" },
+  terminalRefreshKey: { type: Number, default: 0 },
 });
+
+const router = useRouter();
 
 const emit = defineEmits([
   "send",
@@ -68,6 +79,7 @@ const emit = defineEmits([
   "memory-conflict-decide",
   "memory-conflict-cancel",
   "open-activity",
+  "workspace-change",
 ]);
 
 const thinkingEnabled = computed(() => {
@@ -102,6 +114,52 @@ const attachInputRef = ref(null);
 const textareaRef = ref(null);
 const streamRef = ref(null);
 const userInfoSelected = ref([]);
+const terminals = ref([]);
+const terminalLoading = ref(false);
+let terminalLoadSeq = 0;
+
+async function loadTerminals() {
+  const agentId = String(props.agentId || "").trim();
+  const seq = ++terminalLoadSeq;
+  if (!agentId || props.workspaceView !== "messages") {
+    if (seq === terminalLoadSeq) {
+      terminals.value = [];
+      terminalLoading.value = false;
+    }
+    return;
+  }
+  terminalLoading.value = true;
+  try {
+    const result = await api.listAgentTerminals(agentId);
+    if (seq !== terminalLoadSeq || String(props.agentId || "").trim() !== agentId) return;
+    terminals.value = Array.isArray(result?.terminals) ? result.terminals : [];
+  } catch {
+    if (seq === terminalLoadSeq) terminals.value = [];
+  } finally {
+    if (seq === terminalLoadSeq) terminalLoading.value = false;
+  }
+}
+
+watch(
+  () => [props.agentId, props.workspaceView, props.terminalRefreshKey],
+  () => void loadTerminals(),
+  { immediate: true },
+);
+
+function openTerminal(item) {
+  const id = String(item?.terminal_id || "").trim();
+  const agentId = String(props.agentId || "").trim();
+  if (!id || !agentId) return;
+  void router.replace({
+    name: "agents",
+    params: { agentId },
+    query: {
+      ...router.currentRoute.value.query,
+      view: "terminal",
+      terminal_id: id,
+    },
+  });
+}
 
 function onUserInfoSelected(next) {
   userInfoSelected.value = Array.isArray(next) ? [...next] : Number(next);
@@ -225,27 +283,6 @@ function streamGroupMemo(item) {
   ].join("|");
 }
 
-const hasActiveToolStep = computed(() =>
-  stream.value.some((item) => item?.kind === "tool_step" && toolStepIsInProgress(item)),
-);
-
-const activeStatusPhases = computed(() => {
-  void statusStore.tick;
-  return statusPhaseOrder.filter((phase) => {
-    if (!hasStatus(phase)) return false;
-    if (hasActiveToolStep.value) return false;
-    if (phase === "prefilling" && hasStreamingTextContent()) return false;
-    return true;
-  });
-});
-
-const compressionStatusText = computed(() => {
-  void statusStore.tick;
-  const state = statusStore.phases.compression;
-  if (!state) return "";
-  return formatStatusText("compression", state);
-});
-
 const pendingApprovals = computed(() =>
   props.hitlQueue
     .filter((h) => h.kind === "approval")
@@ -255,37 +292,38 @@ const pendingApprovals = computed(() =>
 const workerStrip = computed(() => workerStripText());
 const runningJobCount = computed(() => toolJobsStore.running);
 const backgroundJobCount = computed(() => toolJobsStore.background);
-
-const inputStripLeftText = computed(() => {
-  if (props.cancelling) return "正在取消…";
-  if (props.sending) return "本轮执行中，可先编辑下一条消息";
-  if (props.hitlQueue.length > 1 && pendingApprovals.value === 0) {
-    return `HITL 队列 ${props.hitlQueue.length}`;
+const runtimeStatusText = computed(() => {
+  void statusStore.tick;
+  const parts = [];
+  if (props.cancelling) parts.push("正在取消");
+  if (pendingApprovals.value > 0) parts.push(`待审批 ${pendingApprovals.value}`);
+  if (runningJobCount.value > 0) parts.push(`工具执行中 ${runningJobCount.value}`);
+  if (backgroundJobCount.value > 0) parts.push(`后台任务 ${backgroundJobCount.value}`);
+  const phase = [
+    "thinking",
+    "assistant_generating",
+    "model_generating",
+    "tool_executing",
+    "tool_waiting",
+    "waiting_user",
+    "queued",
+  ].find((candidate) => hasStatus(candidate));
+  if (phase) parts.push(formatStatusText(phase, statusStore.phases[phase]));
+  if (hasStatus("compression")) {
+    parts.push(formatStatusText("compression", statusStore.phases.compression));
   }
-  return "";
+  const workers = workerStrip.value;
+  if (workers) parts.push(workers);
+  return parts.join(" · ");
 });
-
-const inputStripRightText = computed(() => inputStripRight());
 const hitlQueueKey = computed(() =>
   props.hitlQueue
     .map((item) => `${item?.kind || ""}:${item?.data?.request_id || item?.data?.approval_id || ""}`)
     .join("\0"),
 );
-const connectionState = computed(() => {
-  const state = String(chromeStore.sseStatus || "idle").toLowerCase();
-  if (state === "connected") return { tone: "connected", label: "已连接", title: "实时消息连接正常" };
-  if (state === "connecting") return { tone: "connecting", label: "连接中", title: "正在建立实时消息连接" };
-  if (state === "reconnecting") return { tone: "reconnecting", label: "重连中", title: "实时消息连接中断，正在重连" };
-  if (state === "disconnected") return { tone: "disconnected", label: "已断开", title: "实时消息连接已断开" };
-  return { tone: "idle", label: "未连接", title: "实时消息连接尚未建立" };
-});
 const composerPlaceholder = computed(() =>
   props.sending ? "本轮执行中，可先编辑下一条消息…" : "输入消息，或向助手提问…",
 );
-
-function openActivityRail() {
-  emit("open-activity");
-}
 
 const hasUserInformationHITL = computed(() => hasPendingUserInformation(props.hitlQueue));
 const showCancel = computed(() =>
@@ -659,23 +697,18 @@ defineExpose({
 </script>
 
 <template>
-  <section class="panel panel--flex chat">
+  <section class="panel panel--flex chat" :class="{ 'chat--compact': compact }">
     <header class="chat__header">
       <div class="chat__title">
         <span class="chat__title-main">{{ agentTitle || "助手" }}</span>
       </div>
       <div class="chat__header-meta">
-        <span
-          class="chat__connection"
-          :class="`chat__connection--${connectionState.tone}`"
-          :title="connectionState.title"
-          role="status"
-          aria-live="polite"
-        >
-          <span class="chat__connection-dot" aria-hidden="true" />
-          <span>{{ connectionState.label }}</span>
-        </span>
         <span v-if="pendingApprovals > 0" class="pill pill--warn">{{ pendingApprovals }} 待审批</span>
+        <WorkspaceSwitcher
+          v-if="showWorkspaceSwitcher && !compact"
+          :active="workspaceView"
+          @change="(view) => emit('workspace-change', view)"
+        />
       </div>
     </header>
 
@@ -759,7 +792,7 @@ defineExpose({
       />
     </div>
 
-    <footer class="chat__composer">
+    <footer v-if="!hideComposer" class="chat__composer">
       <div v-if="error" class="chat__composer-alert" role="alert" aria-live="polite">
         <span class="chat__composer-alert-icon" aria-hidden="true">!</span>
         <span>{{ error }}</span>
@@ -842,6 +875,15 @@ defineExpose({
             </div>
           </div>
         </div>
+      </div>
+      <div
+        v-if="runtimeStatusText"
+        class="chat__composer-runtime-rail"
+        role="status"
+        aria-live="polite"
+        :title="runtimeStatusText"
+      >
+        {{ runtimeStatusText }}
       </div>
       <div class="chat__composer-pill">
         <input
@@ -946,62 +988,17 @@ defineExpose({
         </div>
       </div>
 
-      <div class="chat__composer-statusline" aria-live="polite">
+      <div class="chat__composer-statusline" aria-label="输入状态与工具栏">
         <div class="chat__composer-statusline-left">
-          <StreamStatusBubble
-            v-for="phase in activeStatusPhases"
-            :key="`status-${phase}`"
-            :phase="phase"
-            inline
+          <McpStatusIndicator />
+          <TerminalSessionIndicator
+            :terminals="terminals"
+            :loading="terminalLoading"
+            @terminal-select="openTerminal"
+            @refresh="loadTerminals"
           />
-          <span
-            v-if="runningJobCount > 0"
-            class="chat__activity-pill chat__activity-pill--static"
-            title="同步执行中的 bash"
-          >
-            <span class="chat__activity-pill-label">执行中</span>
-            <span class="chat__activity-pill-add">{{ runningJobCount }}</span>
-          </span>
-          <span
-            v-if="backgroundJobCount > 0"
-            class="chat__activity-pill chat__activity-pill--static"
-            title="后台执行中的 bash"
-          >
-            <span class="chat__activity-pill-label">后台</span>
-            <span class="chat__activity-pill-cmd">{{ backgroundJobCount }}</span>
-          </span>
-          <span
-            v-if="pendingApprovals > 0"
-            class="chat__activity-pill chat__activity-pill--static"
-            title="待审批工具"
-          >
-            <span class="chat__activity-pill-label">审批</span>
-            <span class="chat__activity-pill-cmd">{{ pendingApprovals }}</span>
-          </span>
-          <span
-            v-if="compressionStatusText"
-            class="chat__activity-pill chat__activity-pill--static chat__activity-pill--compress"
-            title="上下文压缩进行中"
-          >
-            <span class="chat__activity-pill-label">{{ compressionStatusText }}</span>
-          </span>
-          <button
-            v-if="workerStrip"
-            type="button"
-            class="chat__worker-strip chat__worker-strip--btn"
-            title="在侧栏活动中查看并取消子 Agent"
-            @click="openActivityRail"
-          >
-            {{ workerStrip }}
-          </button>
-          <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
         </div>
         <div class="chat__composer-statusline-right">
-          <span
-            v-if="inputStripRightText"
-            class="chat__input-strip-right"
-            :title="inputStripRightText"
-          >{{ inputStripRightText }}</span>
           <div v-if="thinkingSupported && thinkingControl" class="chat__statusline-thinking">
             <span
               v-if="thinkingFixed"
@@ -1032,6 +1029,7 @@ defineExpose({
               <span class="composer-toolbar__label">{{ thinkingSecondaryLabel }} {{ thinkingEffort }}</span>
             </button>
           </div>
+          <UsageSummary />
           <ContextMeter />
         </div>
       </div>

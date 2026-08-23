@@ -99,6 +99,24 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 			return direction + " Linux 文件（channel_id 未提供）", risk
 		}
 		return direction + " Linux 文件: " + channel + " · " + truncateRunes(local+" → "+remote, 200), risk
+	case "terminal_command":
+		risk = "high"
+		terminal := firstNonEmpty(args, "terminal_id")
+		cmd := firstNonEmpty(args, "command")
+		if terminal == "" {
+			return "在已打开终端上执行命令（terminal_id 未提供）", risk
+		}
+		return "在终端 " + terminal + " 上执行命令: " + truncateRunes(cmd, 160), risk
+	case "terminal_upload", "terminal_download":
+		risk = "high"
+		terminal := firstNonEmpty(args, "terminal_id")
+		local := firstNonEmpty(args, "local_path")
+		remote := firstNonEmpty(args, "remote_path")
+		direction := "上传"
+		if name == "terminal_download" {
+			direction = "下载"
+		}
+		return direction + "终端文件: " + terminal + " · " + truncateRunes(local+" → "+remote, 200), risk
 	case "write_file", "search_replace":
 		risk = "medium"
 		path := firstNonEmpty(args, "path", "file_path")

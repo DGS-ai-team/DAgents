@@ -159,7 +159,7 @@ func TestPackage_spillByTokenBudget(t *testing.T) {
 func TestDefaultToolResultTools_includesDefaultGroups(t *testing.T) {
 	cfg := DefaultConfig("")
 	want := map[string]bool{
-		"bash_run": true, "linux_exec": true, "read_file": true, "grep_file": true, "grep_files": true,
+		"bash_run": true, "terminal_command": true, "read_file": true, "grep_file": true, "grep_files": true,
 		"search_replace": true, "glob_files": true,
 	}
 	for _, name := range cfg.Tools {

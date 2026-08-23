@@ -126,6 +126,46 @@ describe("TerminalSession", () => {
     expect(session.status).toBe("closed");
   });
 
+  it("does not reconnect after the server confirms termination", () => {
+    vi.useFakeTimers();
+    const exits = [];
+    const session = new TerminalSession(
+      "agent-terminated",
+      { onExit: (event) => exits.push(event) },
+      { WebSocket: FakeWebSocket, reconnectDelay: 10, location: { protocol: "http:", host: "node.test" } },
+    );
+    session.connect();
+    const socket = FakeWebSocket.instances[0];
+    socket.open();
+    socket.message({ type: "started", session_id: "session-terminated" });
+    socket.message({ type: "terminated", session_id: "session-terminated" });
+    socket.disconnect();
+    vi.advanceTimersByTime(100);
+
+    expect(exits).toHaveLength(1);
+    expect(session.status).toBe("exited");
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("treats a protocol close as terminal and does not resume it", () => {
+    vi.useFakeTimers();
+    const session = new TerminalSession(
+      "agent-closed",
+      {},
+      { WebSocket: FakeWebSocket, reconnectDelay: 10, location: { protocol: "http:", host: "node.test" } },
+    );
+    session.connect();
+    const socket = FakeWebSocket.instances[0];
+    socket.open();
+    socket.message({ type: "started", session_id: "session-closed" });
+    socket.message({ type: "closed", session_id: "session-closed" });
+    socket.disconnect();
+    vi.advanceTimersByTime(100);
+
+    expect(session.status).toBe("closed");
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it("resumes an Agent-owned session and detaches without closing it", () => {
     const session = new TerminalSession(
       "agent-owned",

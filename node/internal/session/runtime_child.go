@@ -47,6 +47,7 @@ func newChildRuntime(
 	}
 	rt.orch.SetChildSession(true)
 	rt.orch.SetSystemPromptBuilder(turn.ChildSystemPromptBuilder(purpose))
+	rt.orch.SetContextInjectionBuilder(turn.ChildContextInjectionBuilder(purpose))
 	return rt
 }
 

@@ -296,6 +296,10 @@ export function listMcpServers() {
   return apiFetch("/v1/mcp/servers");
 }
 
+export function getMcpStatus() {
+  return apiFetch("/v1/mcp/status");
+}
+
 export function getMcpConfig() {
   return apiFetch("/v1/mcp/config");
 }

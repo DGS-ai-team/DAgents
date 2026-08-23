@@ -1,57 +1,92 @@
 package turn
 
 import (
-	"context"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/logx"
-	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-func TestInjectTodayDateHook_onHumanTurn(t *testing.T) {
-	hub := stream.NewHub(8, logx.Discard())
-	orch := testOrchestrator(t, hub, &llm.MockClient{})
-	today := time.Now().Format("20060102")
-	want := hooks.FormatTodayDateMessage(today)
-
-	var history []llm.Message
-	_, _, err := runMessageTurnInline(t, orch, context.Background(), "sess-date", &history, "hello", nil)
-	if err != nil {
-		t.Fatal(err)
+func TestBuildContextInjections_includesDateWithoutHistoryMutation(t *testing.T) {
+	in := SystemPromptInput{
+		AgentID:          "agent-date",
+		SessionID:        "session-date",
+		TodayDateEnabled: true,
+		CurrentDate:      "20260720",
 	}
-	if len(history) < 3 {
-		t.Fatalf("history too short: %+v", history)
+	injections := BuildContextInjections(in)
+	if len(injections) != 1 {
+		t.Fatalf("injections = %+v", injections)
 	}
-	if history[0].Role != "user" || history[0].Content != want || history[0].Name != hooks.TodayDateMessageName {
-		t.Fatalf("date msg = %+v, want %q", history[0], want)
-	}
-	if history[1].Role != "user" || history[1].Content != "hello" {
-		t.Fatalf("user msg = %+v", history[1])
-	}
-	if history[2].Role != "assistant" || history[2].Content != "hello" {
-		t.Fatalf("assistant = %+v", history[2])
+	if !containsAll(injections[0].Content, "## 当前日期", hooks.FormatTodayDateMessage("20260720")) {
+		t.Fatalf("date context = %q", injections[0].Content)
 	}
 
-	// 同日第二轮不再重复插入
-	prevLen := len(history)
-	_, _, err = runMessageTurnInline(t, orch, context.Background(), "sess-date", &history, "again", nil)
-	if err != nil {
-		t.Fatal(err)
+	history := []llm.Message{llm.UserMessage("hello", llm.UserNameHuman)}
+	request := ApplyContextInjections(history, injections)
+	if len(history) != 1 {
+		t.Fatalf("history was mutated: %+v", history)
 	}
-	dateCount := 0
-	for _, m := range history {
-		if m.Role == "user" && strings.TrimSpace(m.Content) == want {
-			dateCount++
-		}
+	if len(request) != 2 || request[0].Name != llm.UserNameContext {
+		t.Fatalf("request = %+v", request)
 	}
-	if dateCount != 1 {
-		t.Fatalf("date messages = %d, history=%+v", dateCount, history)
+	if !llm.IsMessageSource(request[0], llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") {
+		t.Fatalf("date context source = %+v", request[0].Source)
 	}
-	if len(history) != prevLen+2 { // user + assistant
-		t.Fatalf("len %d -> %d, want +2", prevLen, len(history))
+	if got := StripContextInjections(request); len(got) != 1 || got[0].Content != "hello" {
+		t.Fatalf("stripped request = %+v", got)
+	}
+}
+
+func TestBuildContextInjections_dateDisabled(t *testing.T) {
+	injections := BuildContextInjections(SystemPromptInput{
+		TodayDateEnabled: false,
+		CurrentDate:      "20260720",
+	})
+	if len(injections) != 1 {
+		t.Fatalf("injections = %+v", injections)
+	}
+	if contains(injections[0].Content, "当前日期") || contains(injections[0].Content, "20260720") {
+		t.Fatalf("disabled date leaked into context = %q", injections[0].Content)
+	}
+}
+
+func TestStripLegacyTodayDateMessages_keepsDurableHistoryUntouched(t *testing.T) {
+	history := []llm.Message{
+		llm.UserMessage(hooks.FormatTodayDateMessage("20260719"), hooks.TodayDateMessageName),
+		llm.UserMessage("hello", llm.UserNameHuman),
+	}
+	request := StripLegacyTodayDateMessages(history)
+	if len(history) != 2 {
+		t.Fatalf("durable history was changed: %+v", history)
+	}
+	if len(request) != 1 || request[0].Content != "hello" {
+		t.Fatalf("request = %+v", request)
+	}
+}
+
+func TestBuildChildContextInjections_includesDate(t *testing.T) {
+	injections := BuildChildContextInjections(ChildSystemPromptInput{
+		AgentID:          "child-agent",
+		SessionID:        "child-session",
+		TodayDateEnabled: true,
+		CurrentDate:      "20260720",
+	})
+	if len(injections) != 1 || !containsAll(injections[0].Content, "当前日期", "20260720", "child-session") {
+		t.Fatalf("child context = %+v", injections)
+	}
+}
+
+func TestOrchestratorDateConfigIsRequestOnly(t *testing.T) {
+	enabled := true
+	orch := NewOrchestrator("agent-date", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
+		InjectTodayDate: hooks.InjectTodayDateConfig{Enabled: &enabled},
+	}, nil)
+	in := orch.systemPromptInput("session-date")
+	if !in.TodayDateEnabled || len(in.CurrentDate) != 8 {
+		t.Fatalf("date input = %+v", in)
+	}
+	if got := orch.buildContextInjectionsWithInput(in); len(got) != 1 || !contains(got[0].Content, in.CurrentDate) {
+		t.Fatalf("orchestrator context = %+v", got)
 	}
 }
