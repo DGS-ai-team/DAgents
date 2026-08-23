@@ -106,6 +106,7 @@ func Build(p BuildParams) (Built, error) {
 	turnOpts.ToolResult.FSRoot = fsRoot
 	turnOpts.MultimodalEnabled = mm
 	turnOpts.SkillsEnabled = skillsOn
+	turnOpts.SkillsCatalogToolMode = skillsOn && skillsCfg.CatalogToolMode
 	if skillsOn {
 		turnOpts.SkillsRoot = p.NodeCFG.SkillsRoot()
 		turnOpts.SkillsMaxInPrompt = p.NodeCFG.Skills.MaxInPrompt

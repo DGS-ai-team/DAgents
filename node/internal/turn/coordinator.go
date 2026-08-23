@@ -18,6 +18,7 @@ const (
 	CommandStartTurn               CommandType = "start_turn"
 	CommandStartStep               CommandType = "start_step"
 	CommandTurnSnapshotCreated     CommandType = "turn_snapshot_created"
+	CommandModelContextChanged     CommandType = "model_context_changed"
 	CommandModelRequestStarted     CommandType = "model_request_started"
 	CommandModelResponseCompleted  CommandType = "model_response_completed"
 	CommandModelRequestFailed      CommandType = "model_request_failed"
@@ -359,6 +360,8 @@ func (c *TurnCoordinator) applyCommandLocked(command TurnCommand) error {
 		return c.startStepLocked(command)
 	case CommandTurnSnapshotCreated:
 		return c.snapshotCreatedLocked(command)
+	case CommandModelContextChanged:
+		return c.contextChangedLocked(command)
 	case CommandModelRequestStarted:
 		return c.startModelAttemptLocked(command)
 	case CommandModelResponseCompleted:
@@ -553,6 +556,8 @@ func replayCommand(event TurnEventEnvelope) (TurnCommand, bool, error) {
 		command.Type = CommandStartStep
 	case EventTurnSnapshotCreated:
 		command.Type = CommandTurnSnapshotCreated
+	case EventModelContextChanged:
+		command.Type = CommandModelContextChanged
 	case EventModelRequestStarted:
 		command.Type = CommandModelRequestStarted
 	case EventModelRequestCompleted:
@@ -741,9 +746,14 @@ func (c *TurnCoordinator) snapshotCreatedLocked(command TurnCommand) error {
 		// A repeated observer callback is harmless only when it describes the
 		// same frozen model inputs. A different digest would violate Turn
 		// immutability and must be rejected.
+		contextInjectionDigest := ""
+		if command.ContextSnapshot != nil {
+			contextInjectionDigest = command.ContextSnapshot.ContextInjectionDigest
+		}
 		if c.turn.ContextSnapshot.RuntimeDigest != command.RuntimeDigest ||
 			c.turn.ContextSnapshot.PromptDigest != command.PromptDigest ||
-			c.turn.ContextSnapshot.ToolDigest != command.ToolDigest {
+			c.turn.ContextSnapshot.ToolDigest != command.ToolDigest ||
+			c.turn.ContextSnapshot.ContextInjectionDigest != contextInjectionDigest {
 			return fmt.Errorf("turn context snapshot already frozen with different digest")
 		}
 		return nil
@@ -763,6 +773,28 @@ func (c *TurnCoordinator) snapshotCreatedLocked(command TurnCommand) error {
 		}
 	}
 	return c.turn.Advance(EventTurnSnapshotCreated, command.At, command.Reason)
+}
+
+func (c *TurnCoordinator) contextChangedLocked(command TurnCommand) error {
+	if c.turn == nil || c.step == nil {
+		return fmt.Errorf("model context change requires an active step")
+	}
+	if command.ContextSnapshot == nil {
+		return fmt.Errorf("model context change requires a snapshot")
+	}
+	if strings.TrimSpace(command.ContextSnapshot.PromptDigest) == "" || strings.TrimSpace(command.ContextSnapshot.ToolDigest) == "" {
+		return fmt.Errorf("model context change requires prompt and tool digests")
+	}
+	c.turn.ContextSnapshot = command.ContextSnapshot.Clone()
+	c.turn.RuntimeRevision = command.ContextSnapshot.RuntimeRevision
+	c.turn.ContextEpoch++
+	c.step.ContextEpoch = c.turn.ContextEpoch
+	// The mutation reason belongs to the durable event payload. It is not a
+	// terminal reason and must not overwrite the active Turn/Step end_reason.
+	if err := c.turn.Advance(EventModelContextChanged, command.At, ""); err != nil {
+		return err
+	}
+	return c.step.Advance(EventModelContextChanged, command.At, "")
 }
 
 func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
@@ -835,20 +867,32 @@ func (c *TurnCoordinator) recordModelUsageLocked(command TurnCommand) error {
 	c.step.Usage.InputTokens += delta.InputTokens
 	c.step.Usage.OutputTokens += delta.OutputTokens
 	c.step.Usage.TotalTokens += delta.TotalTokens
+	c.step.Usage.PromptCacheHitTokens += delta.PromptCacheHitTokens
+	c.step.Usage.PromptCacheMissTokens += delta.PromptCacheMissTokens
+	c.step.Usage.PromptCacheMetricsObserved = c.step.Usage.PromptCacheMetricsObserved || delta.PromptCacheMetricsObserved
+	c.step.Usage.ReasoningTokens += delta.ReasoningTokens
 	c.step.Usage.Cost += delta.Cost
 	c.turn.Usage.InputTokens += delta.InputTokens
 	c.turn.Usage.OutputTokens += delta.OutputTokens
 	c.turn.Usage.TotalTokens += delta.TotalTokens
+	c.turn.Usage.PromptCacheHitTokens += delta.PromptCacheHitTokens
+	c.turn.Usage.PromptCacheMissTokens += delta.PromptCacheMissTokens
+	c.turn.Usage.PromptCacheMetricsObserved = c.turn.Usage.PromptCacheMetricsObserved || delta.PromptCacheMetricsObserved
+	c.turn.Usage.ReasoningTokens += delta.ReasoningTokens
 	c.turn.Usage.Cost += delta.Cost
 	return nil
 }
 
 func usageDelta(current, previous StepUsage) StepUsage {
 	delta := StepUsage{
-		InputTokens:  current.InputTokens - previous.InputTokens,
-		OutputTokens: current.OutputTokens - previous.OutputTokens,
-		TotalTokens:  current.TotalTokens - previous.TotalTokens,
-		Cost:         current.Cost - previous.Cost,
+		InputTokens:                current.InputTokens - previous.InputTokens,
+		OutputTokens:               current.OutputTokens - previous.OutputTokens,
+		TotalTokens:                current.TotalTokens - previous.TotalTokens,
+		PromptCacheHitTokens:       current.PromptCacheHitTokens - previous.PromptCacheHitTokens,
+		PromptCacheMissTokens:      current.PromptCacheMissTokens - previous.PromptCacheMissTokens,
+		ReasoningTokens:            current.ReasoningTokens - previous.ReasoningTokens,
+		PromptCacheMetricsObserved: current.PromptCacheMetricsObserved || previous.PromptCacheMetricsObserved,
+		Cost:                       current.Cost - previous.Cost,
 	}
 	if delta.InputTokens < 0 {
 		delta.InputTokens = current.InputTokens
@@ -858,6 +902,15 @@ func usageDelta(current, previous StepUsage) StepUsage {
 	}
 	if delta.TotalTokens < 0 {
 		delta.TotalTokens = current.TotalTokens
+	}
+	if delta.PromptCacheHitTokens < 0 {
+		delta.PromptCacheHitTokens = current.PromptCacheHitTokens
+	}
+	if delta.PromptCacheMissTokens < 0 {
+		delta.PromptCacheMissTokens = current.PromptCacheMissTokens
+	}
+	if delta.ReasoningTokens < 0 {
+		delta.ReasoningTokens = current.ReasoningTokens
 	}
 	if delta.Cost < 0 {
 		delta.Cost = current.Cost

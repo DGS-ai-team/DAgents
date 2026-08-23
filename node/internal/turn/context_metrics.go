@@ -213,6 +213,8 @@ func (o *Orchestrator) logTurnContextMetrics(sessionID, finishReason string) {
 			"runtime_digest", snapshot.RuntimeDigest,
 			"prompt_digest", snapshot.PromptDigest,
 			"tool_digest", snapshot.ToolDigest,
+			"context_injection_digest", snapshot.ContextInjectionDigest,
+			"context_injection_count", len(snapshot.ContextInjections),
 		)
 	}
 	o.logger.Info("turn context metrics", attrs...)

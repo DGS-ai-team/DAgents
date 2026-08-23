@@ -188,4 +188,40 @@ func TestUsageNormalizeComputesMissFromPromptMinusHit(t *testing.T) {
 	if u.PromptCacheMissTokens != 20 {
 		t.Fatalf("miss = %d", u.PromptCacheMissTokens)
 	}
+	if !u.HasPromptCacheMetrics() {
+		t.Fatal("cache metrics should be marked observed")
+	}
+}
+
+func TestUsageDistinguishesUnavailableCacheMetrics(t *testing.T) {
+	var u Usage
+	if err := json.Unmarshal([]byte(`{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	if u.HasPromptCacheMetrics() {
+		t.Fatalf("cache metrics unexpectedly observed: %+v", u)
+	}
+	if got := u.PromptCacheMissTokensEffective(); got != 0 {
+		t.Fatalf("unavailable cache miss = %d, want 0", got)
+	}
+	if got := u.PromptCacheHitRate(); got != -1 {
+		t.Fatalf("unavailable cache rate = %v, want -1", got)
+	}
+	payload := u.SSEPayload()
+	if payload["prompt_cache_available"] != false {
+		t.Fatalf("availability payload = %#v", payload["prompt_cache_available"])
+	}
+	if _, ok := payload["prompt_cache_hit_rate"]; ok {
+		t.Fatalf("unavailable cache should not expose hit rate: %#v", payload)
+	}
+}
+
+func TestUsageExplicitZeroCacheMetricsAreObserved(t *testing.T) {
+	var u Usage
+	if err := json.Unmarshal([]byte(`{"prompt_tokens":100,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":100}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	if !u.HasPromptCacheMetrics() || u.PromptCacheHitRate() != 0 {
+		t.Fatalf("explicit zero-hit metrics = %+v rate=%v", u, u.PromptCacheHitRate())
+	}
 }

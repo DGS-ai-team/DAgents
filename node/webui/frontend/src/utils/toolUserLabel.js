@@ -182,6 +182,16 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
 export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null } = {}) {
   const entry = resultEntry || callEntry || {};
   if (entry.sideEffectApplied) return "completed";
+  const resultStatus = String(resultEntry?.data?.status || "").trim().toLowerCase();
+  if (resultEntry) {
+    if (resultStatus === "denied" || resultStatus === "rejected") return "rejected";
+    if (resultStatus === "failed" || resultStatus === "error" || resultStatus === "unknown") return "failed";
+    if (resultStatus === "cancelled" || resultStatus === "canceled" || resultStatus === "timed_out") return "cancelled";
+    if (resultStatus === "queued") return "background";
+    if (resultStatus === "running") return "running";
+    if (resultStatus === "awaiting_user") return "pending";
+    if (resultStatus === "succeeded") return "completed";
+  }
   if (resultEntry?.data?.rejected || callEntry?.data?.rejected) return "rejected";
   if (
     resultEntry?.data?.interrupted ||

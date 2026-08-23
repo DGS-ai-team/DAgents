@@ -20,24 +20,16 @@ func CloneMessage(message Message) Message {
 	return out
 }
 
-// ToolResultMessage 构造 tool 角色历史消息（含 function name，供 hydrate / Web UI 展示）。
-func ToolResultMessage(toolCallID, name, content string) Message {
-	return Message{
-		Role:       "tool",
-		ToolCallID: strings.TrimSpace(toolCallID),
-		Name:       strings.TrimSpace(name),
-		Content:    content,
-	}
-}
-
 // EstimateTextTokens 粗算纯文本 token（DeepSeek 字符权重），与 EstimateMessageTokens 一致。
 func EstimateTextTokens(text string) int {
 	return tokens.EstimateInt(text)
 }
 
-// EstimateMessageTokens 粗算 messages token（content/reasoning + 固定开销 + tool_calls 加权）。
-// 供 compression 触发与 GET /context 共用，避免两处公式漂移。
+// EstimateMessageTokens 粗算模型实际看到的 messages token（content/reasoning
+// + 固定开销 + tool_calls 加权）。工具结果的请求侧 metadata 也计入，保证
+// compression 与 GET /context 不会因 history 保留原始正文而低估模型输入。
 func EstimateMessageTokens(messages []Message) int {
+	messages = PrepareToolResultMessagesForModel(messages)
 	total := 0
 	for _, m := range messages {
 		total += EstimateMessageContentTokens(m) + 16
@@ -113,6 +105,20 @@ func MessageToDeepSeekAPIPayload(m Message) (map[string]any, error) {
 	return payload, nil
 }
 
+// MessagesToAPIPayload serializes a complete message list without exposing
+// internal source/provenance fields. The list may include a system message.
+func MessagesToAPIPayload(messages []Message) ([]map[string]any, error) {
+	out := make([]map[string]any, len(messages))
+	for i, message := range messages {
+		payload, err := MessageToDeepSeekAPIPayload(message)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = payload
+	}
+	return out, nil
+}
+
 // MessageToJournalPayload 将消息转为 JSONL 行内 message 对象（assistant+tool_calls 保留 reasoning_content 键）。
 func MessageToJournalPayload(message Message) map[string]any {
 	payload, err := messageMapPayload(message)
@@ -120,5 +126,14 @@ func MessageToJournalPayload(message Message) map[string]any {
 		return map[string]any{"role": message.Role, "content": message.Content}
 	}
 	EnsureToolCallsAssistantReasoningKey(payload, message)
+	if message.Source != nil {
+		payload["source"] = message.Source
+	}
+	if message.Provenance != nil {
+		payload["provenance"] = message.Provenance
+	}
+	if message.Role == "tool" && message.ToolResultMetadata != nil {
+		payload["tool_result_metadata"] = message.ToolResultMetadata
+	}
 	return payload
 }

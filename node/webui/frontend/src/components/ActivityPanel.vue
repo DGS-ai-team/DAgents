@@ -125,8 +125,8 @@ function primaryOp(ops) {
   return list[0] ? String(list[0]).slice(0, 1).toUpperCase() : "M";
 }
 
-function opClass(ops, rejected) {
-  if (rejected) return "activity-op--danger";
+function opClass(ops, rejected, failed) {
+  if (rejected || failed) return "activity-op--danger";
   const list = Array.isArray(ops) ? ops : [];
   if (list.includes("write")) return "activity-op--add";
   return "activity-op--mod";
@@ -134,7 +134,8 @@ function opClass(ops, rejected) {
 
 function statusClass(status) {
   if (status === "ok") return "activity-status--ok";
-  if (status === "error" || status === "rejected") return "activity-status--bad";
+  if (status === "error" || status === "rejected" || status === "cancelled") return "activity-status--bad";
+  if (status === "running") return "activity-status--muted";
   return "activity-status--muted";
 }
 
@@ -324,7 +325,7 @@ defineExpose({ refresh });
           <ul v-if="sectionOpen.files" class="activity-rows activity-rows--nested">
             <li v-if="!files.length" class="activity-rows__empty">尚无文件改动</li>
             <li v-for="f in files" :key="f.path" class="activity-row" :title="f.path">
-              <span class="activity-op" :class="opClass(f.ops, f.rejected)">{{ primaryOp(f.ops) }}</span>
+              <span class="activity-op" :class="opClass(f.ops, f.rejected, f.failed)">{{ primaryOp(f.ops) }}</span>
               <span class="activity-row__icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" fill="none">
                   <path d="M4.25 2.75h5.1L11.75 5.2v8.05H4.25V2.75Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
@@ -335,6 +336,7 @@ defineExpose({ refresh });
                 <span class="activity-row__name">{{ fileParts(f.path).name }}</span>
                 <span v-if="fileParts(f.path).dir" class="activity-row__meta">{{ fileParts(f.path).dir }}</span>
                 <span v-if="f.rejected" class="activity-row__meta activity-row__meta--danger">已拒绝</span>
+                <span v-else-if="f.failed" class="activity-row__meta activity-row__meta--danger">执行失败</span>
               </span>
             </li>
           </ul>

@@ -109,6 +109,11 @@ const toolPhase = computed(() =>
 );
 const isGenerating = computed(() => toolPhase.value === "generating");
 const isInterrupted = computed(() => interrupted.value || toolPhase.value === "interrupted");
+const isUnsuccessfulResult = computed(() =>
+  ["denied", "rejected", "failed", "error", "cancelled", "canceled", "timed_out", "unknown"].includes(
+    String(props.entry.data?.status || "").trim().toLowerCase(),
+  ),
+);
 const statusText = computed(() => {
   if (props.entry.sideEffectApplied) return "已入库";
   if (props.entry.sideEffectStale) return "已失效";
@@ -119,6 +124,15 @@ const statusText = computed(() => {
     if (toolPhase.value === "running") return "执行中";
     return "执行中";
   }
+  const resultStatus = String(props.entry.data?.status || "").trim().toLowerCase();
+  if (resultStatus === "denied" || resultStatus === "rejected") return "已拒绝";
+  if (resultStatus === "failed" || resultStatus === "error") return "执行失败";
+  if (resultStatus === "unknown") return "状态未知";
+  if (resultStatus === "timed_out") return "已超时";
+  if (resultStatus === "cancelled" || resultStatus === "canceled") return "已终止";
+  if (resultStatus === "queued") return "后台执行中";
+  if (resultStatus === "running") return "执行中";
+  if (resultStatus === "awaiting_user") return "等待输入";
   if (rejected.value) return "已拒绝";
   if (isInterrupted.value) return "已中断";
   const bashStatus = String(props.entry.data?.content || "").match(/\[BASH_RESULT\]\s+status=([A-Za-z_]+)/i);
@@ -198,7 +212,7 @@ onBeforeUnmount(clearCopyState);
             <span class="tool-exec-bubble__status" role="status" :aria-label="statusText">
               <span v-if="isGenerating" class="tool-exec-spinner" aria-hidden="true" />
               <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{
-                rejected || isInterrupted ? "−" : "✓"
+                rejected || isInterrupted || isUnsuccessfulResult ? "−" : "✓"
               }}</span>
               <span v-if="showStatusText">{{ statusText }}</span>
             </span>

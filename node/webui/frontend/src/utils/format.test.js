@@ -53,6 +53,20 @@ describe("formatToolResultDisplay", () => {
     expect(display.detail).toBe("file body");
   });
 
+  it("uses authoritative result status for failures", () => {
+    const display = formatToolResultDisplay({
+      data: {
+        name: "linux_exec",
+        status: "failed",
+        content: "ERROR: connection refused",
+        rejected: false,
+      },
+    });
+    expect(display.headline).toContain("执行失败");
+    expect(display.headline).not.toContain("已拒绝");
+    expect(display.detail).toContain("connection refused");
+  });
+
   it("removes WSL protocol and ANSI sequences from terminal results", () => {
     const output =
       "top -bn1 | head -20\r\n" +

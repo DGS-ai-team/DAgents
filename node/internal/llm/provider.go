@@ -29,7 +29,8 @@ type MessageAdapter interface {
 	NormalizeAssistantForStorage(existing []Message, msg Message, logger *slog.Logger) Message
 	PrepareOutboundMessages(messages []Message) ([]Message, error)
 	// MarshalChatRequestMessages 序列化出站 messages（已含 system）。
-	// ok=false 时由 OpenAIClient 使用 []Message 默认 JSON 编码；ok=true 时使用 payloads。
+	// ok=false 时由 OpenAIClient 使用统一的内部字段剥离逻辑；ok=true 时
+	// 使用适配器提供的最终 payloads。
 	MarshalChatRequestMessages(messages []Message) (payloads []map[string]any, ok bool, err error)
 }
 

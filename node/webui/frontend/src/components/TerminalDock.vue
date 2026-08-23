@@ -9,7 +9,7 @@ const props = defineProps({
   selectedTerminalId: { type: String, default: "" },
 });
 
-const emit = defineEmits(["update:selectedTerminalId", "count-changed"]);
+const emit = defineEmits(["update:selectedTerminalId", "count-changed", "close"]);
 const terminals = ref([]);
 const loading = ref(false);
 const error = ref("");
@@ -51,7 +51,10 @@ onMounted(load);
         <h2 class="terminal-dock__title">终端工作区</h2>
         <p class="terminal-dock__desc">Agent 打开的终端会持续运行；切回消息区不会中断终端。</p>
       </div>
-      <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
+      <div class="terminal-dock__actions">
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
+        <button type="button" class="btn btn--ghost btn--sm" @click="emit('close')">返回消息</button>
+      </div>
     </div>
 
     <p v-if="loading" class="terminal-dock__muted">加载终端列表中…</p>

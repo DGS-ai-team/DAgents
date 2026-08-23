@@ -15,6 +15,7 @@ const (
 	EventTurnStarted         EventType = "turn.started"
 	EventTurnInputAccepted   EventType = "turn.input.accepted"
 	EventTurnSnapshotCreated EventType = "turn.snapshot.created"
+	EventModelContextChanged EventType = "model.context.changed"
 	EventTurnCompleted       EventType = "turn.completed"
 	EventTurnFailed          EventType = "turn.failed"
 	EventTurnCancelled       EventType = "turn.cancelled"
@@ -53,7 +54,7 @@ const (
 )
 
 var lifecycleEventTypes = map[EventType]struct{}{
-	EventTurnStarted: {}, EventTurnInputAccepted: {}, EventTurnSnapshotCreated: {},
+	EventTurnStarted: {}, EventTurnInputAccepted: {}, EventTurnSnapshotCreated: {}, EventModelContextChanged: {},
 	EventTurnCompleted: {}, EventTurnFailed: {}, EventTurnCancelled: {},
 	EventTurnInterrupted: {}, EventTurnBudgetExhausted: {}, EventStepStarted: {},
 	EventStepResumed: {}, EventStepCompleted: {}, EventStepFailed: {},

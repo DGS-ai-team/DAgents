@@ -11,10 +11,6 @@ import {
   agentRecordId,
 } from "../utils/format.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
-import ActivityPanel from "./ActivityPanel.vue";
-import { transcriptStore } from "../stores/transcript.js";
-import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
-import { activeChildCount, remoteWorkerStore } from "../stores/remoteWorkers.js";
 import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
 
 const RAIL_CACHE_TTL_MS = 30_000;
@@ -30,16 +26,9 @@ const railCache = {
 let refreshTimer = null;
 let unreadRefreshTimer = null;
 let railRefreshInFlight = null;
-let terminalLoadToken = 0;
-
-const props = defineProps({
-  terminalRevision: { type: Number, default: 0 },
-  selectedTerminalId: { type: String, default: "" },
-});
 
 const emit = defineEmits([
   "switch",
-  "terminal-selected",
   "create",
   "delete",
   "agents-updated",
@@ -59,20 +48,14 @@ const workgroupsLoaded = ref(false);
 const agentsLoadError = ref("");
 const workgroupsLoadError = ref("");
 const manualRefreshingAgents = ref(false);
-const terminals = ref([]);
-const loadingTerminals = ref(false);
-const manualRefreshingTerminals = ref(false);
-const terminalError = ref("");
 const deletingId = ref("");
 const renamingId = ref("");
 const renameDraft = ref("");
 
-/** 分区展开：智能体 / 工作组 / 活动 */
+/** 分区展开：智能体 / 工作组 */
 const sectionOpen = ref({
   agents: true,
-  terminals: true,
   workgroups: true,
-  activity: false,
 });
 const mobileActionOpen = ref("");
 
@@ -108,98 +91,6 @@ const createWgBusy = ref(false);
 const createWgError = ref("");
 const manualRefreshingWgs = ref(false);
 
-const activitySnap = computed(() => {
-  if (route.name === "workgroups") {
-    return { files: [], commands: [], file_count: 0, command_count: 0 };
-  }
-  return deriveActivityFromTranscript(transcriptStore.entries);
-});
-const activityBadge = computed(() => {
-  void remoteWorkerStore.tick;
-  const n =
-    (activitySnap.value.file_count || 0) +
-    (activitySnap.value.command_count || 0) +
-    (route.name === "workgroups" ? 0 : activeChildCount());
-  return n > 0 ? n : 0;
-});
-
-const activeAgentId = computed(() => {
-  // 在工作组等其它主栏时不应保留智能体选中高亮
-  if (route.name !== "agents") return "";
-  return String(agentStore.agentId || "").trim();
-});
-
-async function loadTerminals({ manual = false } = {}) {
-  if (manual) manualRefreshingTerminals.value = true;
-  const agentId = String(activeAgentId.value || "").trim();
-  const token = ++terminalLoadToken;
-  if (!agentId) {
-    terminals.value = [];
-    terminalError.value = "";
-    if (manual) manualRefreshingTerminals.value = false;
-    return;
-  }
-  loadingTerminals.value = true;
-  terminalError.value = "";
-  try {
-    const result = await api.listAgentTerminals(agentId);
-    if (token !== terminalLoadToken || agentId !== activeAgentId.value) return;
-    terminals.value = Array.isArray(result?.terminals) ? result.terminals : [];
-    const selected = terminals.value.find(
-      (item) => String(item?.terminal_id || "") === String(props.selectedTerminalId || ""),
-    );
-    if (props.selectedTerminalId && !selected) {
-      emit("terminal-selected", null);
-    } else if (selected) {
-      // 刷新后同步最新状态、cwd 和目标信息到主区域。
-      emit("terminal-selected", selected);
-    }
-  } catch (e) {
-    if (token !== terminalLoadToken) return;
-    terminalError.value = e.message || "加载终端列表失败";
-  } finally {
-    if (token === terminalLoadToken) loadingTerminals.value = false;
-    if (manual) manualRefreshingTerminals.value = false;
-  }
-}
-
-function terminalLabel(item) {
-  const displayName = String(item?.display_name || item?.label || item?.name || "").trim();
-  if (displayName) return displayName;
-  const shell = String(item?.shell || "终端").trim();
-  const target = String(item?.target_kind || "local").trim() === "linux_channel"
-    ? `Linux · ${String(item?.target_id || "通道").trim()}`
-    : "本机";
-  return `${shell} · ${target}`;
-}
-
-function terminalMeta(item) {
-  const parts = [terminalStatusLabel(item?.status)];
-  const username = String(item?.username || item?.user || "").trim();
-  const host = String(item?.host || item?.hostname || "").trim();
-  if (username && host) parts.push(`${username}@${host}`);
-  else if (host) parts.push(host);
-  if (item?.config_id) parts.push(String(item.config_id));
-  return parts.join(" · ");
-}
-
-function terminalStatusLabel(status) {
-  switch (String(status || "").trim()) {
-    case "running":
-      return "运行中";
-    case "exited":
-      return "已退出";
-    case "closed":
-      return "已关闭";
-    default:
-      return String(status || "未知");
-  }
-}
-
-function selectTerminal(item) {
-  if (!item?.terminal_id) return;
-  emit("terminal-selected", item);
-}
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
@@ -552,14 +443,6 @@ watch(
   { immediate: true },
 );
 
-watch(
-  () => [activeAgentId.value, props.terminalRevision],
-  () => {
-    void loadTerminals();
-  },
-  { immediate: true },
-);
-
 function onVisibilityChange() {
   if (document.visibilityState === "visible") {
     void refresh({ force: true });
@@ -598,7 +481,6 @@ defineExpose({
   loadMembers,
   expandSection,
   toggleSection,
-  loadTerminals,
 });
 </script>
 
@@ -785,101 +667,6 @@ defineExpose({
         </li>
         <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
       </ul>
-      </div>
-    </section>
-
-    <!-- Terminals -->
-    <section v-if="activeAgentId" class="nav-rail__section">
-      <header
-        class="nav-rail__section-head"
-        :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'terminals' }"
-      >
-        <button
-          type="button"
-          class="nav-rail__section-toggle"
-          :aria-expanded="sectionOpen.terminals"
-          @click="toggleSection('terminals')"
-        >
-          <span class="nav-rail__section-icon" aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <rect x="2.25" y="3" width="11.5" height="10" rx="1.5" stroke="currentColor" stroke-width="1.15" />
-              <path d="m5 6 2 2-2 2M8.5 10h2.5" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </span>
-          <span class="nav-rail__section-title">终端</span>
-          <span v-if="terminals.length" class="nav-rail__section-count">{{ terminals.length }}</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.terminals ? "⌄" : "›" }}</span>
-        </button>
-        <div class="nav-rail__section-actions">
-        <button
-          type="button"
-          class="nav-rail__icon-btn nav-rail__section-action"
-          :class="{ 'nav-rail__icon-btn--spinning': manualRefreshingTerminals }"
-          title="刷新终端清单"
-          aria-label="刷新终端清单"
-          :disabled="manualRefreshingTerminals"
-          @click.stop="mobileActionOpen = ''; loadTerminals({ manual: true })"
-        >
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
-            <path
-              d="M17.65 6.35A7.98 7.98 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h7V4l-2.35 2.35Z"
-              fill="currentColor"
-            />
-          </svg>
-        </button>
-        </div>
-        <button
-          type="button"
-          class="nav-rail__icon-btn nav-rail__section-collapse"
-          :title="sectionOpen.terminals ? '收起终端' : '展开终端'"
-          :aria-label="sectionOpen.terminals ? '收起终端' : '展开终端'"
-          :aria-expanded="sectionOpen.terminals"
-          @click.stop="toggleSection('terminals')"
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
-            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="nav-rail__icon-btn nav-rail__section-more"
-          title="更多操作"
-          aria-label="更多操作"
-          :aria-expanded="mobileActionOpen === 'terminals'"
-          @click.stop="toggleSectionActions('terminals')"
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-            <circle cx="4" cy="8" r="1" fill="currentColor" /><circle cx="8" cy="8" r="1" fill="currentColor" /><circle cx="12" cy="8" r="1" fill="currentColor" />
-          </svg>
-        </button>
-      </header>
-      <div v-if="sectionOpen.terminals">
-        <p v-if="loadingTerminals && !terminals.length" class="nav-rail__hint">加载终端…</p>
-        <p v-else-if="terminalError" class="nav-rail__error">{{ terminalError }}</p>
-        <ul v-else class="nav-rail__list nav-rail__terminal-list">
-          <li
-            v-for="item in terminals"
-            :key="item.terminal_id"
-            class="nav-rail__item nav-rail__terminal-item"
-            :class="{ 'nav-rail__item--active': item.terminal_id === props.selectedTerminalId }"
-            :title="`${terminalLabel(item)} · ${item.terminal_id}`"
-            @click="selectTerminal(item)"
-          >
-            <span class="nav-rail__terminal-mark" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <path d="m3.5 4.5 2.5 2-2.5 2M7.5 9h4" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </span>
-            <span class="nav-rail__terminal-main">
-              <span class="nav-rail__terminal-title">{{ terminalLabel(item) }}</span>
-              <span class="nav-rail__terminal-meta">
-                <span class="nav-rail__terminal-status-dot" :class="`nav-rail__terminal-status-dot--${item.status}`"></span>
-                <span class="nav-rail__terminal-meta-text">{{ terminalMeta(item) }}</span>
-              </span>
-            </span>
-          </li>
-          <li v-if="!terminals.length" class="nav-rail__empty">暂无打开的终端</li>
-        </ul>
       </div>
     </section>
 
@@ -1158,44 +945,6 @@ defineExpose({
       </div>
     </section>
 
-    <!-- Activity -->
-    <section class="nav-rail__section">
-      <header class="nav-rail__section-head">
-        <button
-          type="button"
-          class="nav-rail__section-toggle"
-          :aria-expanded="sectionOpen.activity"
-          @click="toggleSection('activity')"
-        >
-          <span class="nav-rail__section-icon" aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <path
-                d="M3.5 3.5h9v2h-9v-2Zm0 3.5h9v2h-9V7Zm0 3.5h6V13h-6v-2.5Z"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </span>
-          <span class="nav-rail__section-title">活动</span>
-          <span v-if="activityBadge" class="nav-rail__section-count">{{ activityBadge }}</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.activity ? "⌄" : "›" }}</span>
-        </button>
-        <button
-          type="button"
-          class="nav-rail__icon-btn nav-rail__section-collapse"
-          :title="sectionOpen.activity ? '收起活动' : '展开活动'"
-          :aria-label="sectionOpen.activity ? '收起活动' : '展开活动'"
-          :aria-expanded="sectionOpen.activity"
-          @click.stop="toggleSection('activity')"
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
-            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-      </header>
-      <ActivityPanel v-if="sectionOpen.activity" embedded />
-    </section>
     </div>
 
     <footer class="nav-rail__footer">

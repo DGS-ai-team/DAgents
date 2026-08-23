@@ -11,33 +11,40 @@ import (
 
 // HydrateView 为 GET /v1/agents/{id}/hydrate 的聚合视图。
 type HydrateView struct {
-	SessionID     string
-	Transcript    []TranscriptEntry
-	PendingHITL   map[string]any
-	TurnState     TurnStateView
-	RunTurnPhase  string
-	HasActiveTurn bool
-	QueuePending  int
-	NotifySeq     int
-	AckSeq        int
-	HasUnread     bool
+	SessionID       string
+	Transcript      []TranscriptEntry
+	PendingHITL     map[string]any
+	TurnState       TurnStateView
+	RunTurnPhase    string
+	HasActiveTurn   bool
+	QueuePending    int
+	HistoryRevision uint64
+	NotifySeq       int
+	AckSeq          int
+	HasUnread       bool
 }
 
 // GetHydrateView 返回 session hydrate 快照（活跃 runtime 或 DB 持久化）。
 func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	rt := m.getRuntime(sessionID)
 	if rt != nil {
+		// Lifecycle transitions publish turn_state while holding lifecycleMu.
+		// Take the same lock before copying messages so a hydrate snapshot cannot
+		// combine a pre-commit history with a newer terminal projection.
+		rt.lifecycleMu.Lock()
 		rt.mu.Lock()
 		messages := append([]llm.Message(nil), rt.messages...)
+		historyRevision := rt.historyRevision
 		queuePending := rt.queue.Len()
 		notifySeq := rt.notifySeq
 		ackSeq := rt.ackSeq
-		rt.mu.Unlock()
 		state := rt.turnState()
 		pending := rt.pendingSnapshot()
 		lifecycle := rt.turnCoordinator.Snapshot()
 		hasActiveTurn := lifecycle.HasActiveTurn
-		return m.buildHydrateView(sessionID, messages, pending, state, lifecycle, rt.lifecycleEventSequence(), queuePending, hasActiveTurn, notifySeq, ackSeq), nil
+		rt.mu.Unlock()
+		rt.lifecycleMu.Unlock()
+		return m.buildHydrateView(sessionID, messages, pending, state, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq), nil
 	}
 	if m.store == nil {
 		return nil, fmt.Errorf("agent_not_found")
@@ -62,7 +69,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	} else if pending != nil {
 		state = turn.StateAwaitingTool
 	}
-	return m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
+	return m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
 }
 
 func (m *Manager) buildHydrateView(
@@ -72,6 +79,7 @@ func (m *Manager) buildHydrateView(
 	state turn.State,
 	lifecycle turn.CoordinatorSnapshot,
 	lifecycleSeq uint64,
+	historyRevision uint64,
 	queuePending int,
 	hasActiveTurn bool,
 	notifySeq int,
@@ -87,6 +95,7 @@ func (m *Manager) buildHydrateView(
 		EnrichTranscriptMedia(transcript, mediaByCall)
 	}
 	turnState := buildTurnStateView(lifecycle, lifecycleSeq)
+	turnState.HistoryRevision = historyRevision
 	if lifecycle.TurnID == "" && pending != nil {
 		turnState = TurnStateView{
 			Authority:       "hydrate_legacy",
@@ -95,17 +104,19 @@ func (m *Manager) buildHydrateView(
 			InteractionKind: "approval",
 		}
 	}
+	turnState.HistoryRevision = historyRevision
 	return &HydrateView{
-		SessionID:     sessionID,
-		Transcript:    transcript,
-		PendingHITL:   turn.BuildHITLRequiredSnapshot(pending),
-		TurnState:     turnState,
-		RunTurnPhase:  hydrateRunTurnPhase(messages, pending, state, hasActiveTurn),
-		HasActiveTurn: hasActiveTurn,
-		QueuePending:  queuePending,
-		NotifySeq:     notifySeq,
-		AckSeq:        ackSeq,
-		HasUnread:     notifySeq > ackSeq,
+		SessionID:       sessionID,
+		Transcript:      transcript,
+		PendingHITL:     turn.BuildHITLRequiredSnapshot(pending),
+		TurnState:       turnState,
+		RunTurnPhase:    hydrateRunTurnPhase(messages, pending, state, hasActiveTurn),
+		HasActiveTurn:   hasActiveTurn,
+		QueuePending:    queuePending,
+		HistoryRevision: historyRevision,
+		NotifySeq:       notifySeq,
+		AckSeq:          ackSeq,
+		HasUnread:       notifySeq > ackSeq,
 	}
 }
 

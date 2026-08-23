@@ -14,6 +14,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
@@ -25,6 +26,38 @@ func testRegistry(t *testing.T) *tools.Registry {
 		t.Fatal(err)
 	}
 	return reg
+}
+
+func TestToolDefinitions_catalogToolModeIsOptInAndRequiresSkillsTools(t *testing.T) {
+	root := t.TempDir()
+	reg := testRegistry(t)
+	catalog := skills.NewCatalog(filepath.Join(root, "skills"), true, 3)
+
+	defaultOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	for _, def := range defaultOrch.ToolDefinitions() {
+		if def.Function.Name == "list_available_skills" {
+			t.Fatal("default mode must not expose list_available_skills")
+		}
+	}
+
+	experimentOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog, CatalogToolMode: true}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	found := false
+	for _, def := range experimentOrch.ToolDefinitions() {
+		if def.Function.Name == "list_available_skills" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("experiment mode must expose list_available_skills when load_skills is visible")
+	}
+
+	reg.SetBuiltinEnabledNone()
+	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog, CatalogToolMode: true}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	for _, def := range restricted.ToolDefinitions() {
+		if def.Function.Name == "list_available_skills" {
+			t.Fatal("catalog discovery must not appear without load_skills")
+		}
+	}
 }
 
 func drainToolResultSteps(
@@ -118,6 +151,35 @@ type flakyRetryExecutor struct {
 	calls int
 }
 
+type cacheReportingClient struct{}
+
+func (cacheReportingClient) StreamChat(_ context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	if handler.OnDelta != nil {
+		handler.OnDelta("cache-aware")
+	}
+	if handler.OnUsage != nil {
+		handler.OnUsage(llm.Usage{
+			PromptTokens:          100,
+			CompletionTokens:      8,
+			TotalTokens:           108,
+			PromptCacheHitTokens:  80,
+			PromptCacheMissTokens: 20,
+			CompletionTokensDetails: &llm.CompletionTokensDetails{
+				ReasoningTokens: 3,
+			},
+		})
+	}
+	return llm.ChatResult{Content: "cache-aware", FinishReason: "stop"}, nil
+}
+
+func (cacheReportingClient) CompleteText(_ context.Context, _ llm.CompleteRequest) (string, error) {
+	return "summary", nil
+}
+
+func (cacheReportingClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func (e *flakyRetryExecutor) Definitions() []tools.ToolDef {
 	return []tools.ToolDef{{Type: "function", Function: tools.FunctionDef{Name: "read_file"}}}
 }
@@ -185,7 +247,7 @@ func TestRunMessageTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 3 || history[1].Content != "hi" || history[2].Content != "hi" {
+	if len(history) != 2 || history[0].Content != "hi" || history[1].Content != "hi" {
 		t.Fatalf("history = %+v", history)
 	}
 
@@ -241,6 +303,31 @@ func TestOrchestratorEmitsModelAndAssistantLifecycleFacts(t *testing.T) {
 	if commands[0].RuntimeDigest == "" || commands[1].RequestDigest == "" {
 		t.Fatalf("missing snapshot/request digest: %#v", commands)
 	}
+}
+
+func TestOrchestratorCarriesProviderCacheUsageIntoLifecycle(t *testing.T) {
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), cacheReportingClient{})
+	var commands []TurnCommand
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		commands = append(commands, command)
+		return nil
+	})
+	var history []llm.Message
+	if _, _, err := runMessageTurnInline(t, orch, context.Background(), "session-cache", &history, "measure", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range commands {
+		if command.Type != CommandModelUsageRecorded {
+			continue
+		}
+		if command.Usage.InputTokens != 100 || command.Usage.PromptCacheHitTokens != 80 ||
+			command.Usage.PromptCacheMissTokens != 20 || !command.Usage.PromptCacheMetricsObserved ||
+			command.Usage.ReasoningTokens != 3 {
+			t.Fatalf("lifecycle usage = %+v", command.Usage)
+		}
+		return
+	}
+	t.Fatal("model usage lifecycle command was not emitted")
 }
 
 func TestRunMessageTurnToolLoop(t *testing.T) {
@@ -800,10 +887,10 @@ func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(history) != 3 {
+	if len(history) != 2 {
 		t.Fatalf("history = %+v", history)
 	}
-	assistant := history[2]
+	assistant := history[1]
 	if assistant.Role != "assistant" || assistant.Content != "partial answer" {
 		t.Fatalf("assistant = %+v", assistant)
 	}

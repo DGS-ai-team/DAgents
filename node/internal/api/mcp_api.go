@@ -32,6 +32,7 @@ func (s *Server) registerMCPRoutes() {
 	s.mux.HandleFunc("GET /v1/mcp/config", s.handleGetMCPConfig)
 	s.mux.HandleFunc("PUT /v1/mcp/config", s.handlePutMCPConfig)
 	s.mux.HandleFunc("GET /v1/mcp/servers", s.handleListMCPServers)
+	s.mux.HandleFunc("GET /v1/mcp/status", s.handleMCPStatus)
 	s.mux.HandleFunc("POST /v1/mcp/servers", s.handleCreateMCPServer)
 	s.mux.HandleFunc("PATCH /v1/mcp/servers/{server_id}", s.handlePatchMCPServer)
 	s.mux.HandleFunc("DELETE /v1/mcp/servers/{server_id}", s.handleDeleteMCPServer)
@@ -111,6 +112,17 @@ func (s *Server) handleListMCPServers(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": s.mcpManager.List()})
+}
+
+func (s *Server) handleMCPStatus(w http.ResponseWriter, _ *http.Request) {
+	if s.mcpManager == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "mcp_unavailable", "MCP manager is not configured", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"health":  s.mcpManager.Health(),
+		"servers": s.mcpManager.List(),
+	})
 }
 
 func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {

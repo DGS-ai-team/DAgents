@@ -1,4 +1,4 @@
-// Package hostsnapshot 提供进程级主机环境快照（启动时采集，供 system prompt 等读取）。
+// Package hostsnapshot 提供进程级主机环境快照（启动时采集，供模型请求上下文等读取）。
 package hostsnapshot
 
 import (
@@ -100,7 +100,7 @@ func inferOSKind() string {
 	}
 }
 
-// FormatEnvironmentSection 格式化为 system prompt「当前运行环境」正文。
+// FormatEnvironmentSection 格式化为模型请求上下文中的「当前运行环境」正文。
 func FormatEnvironmentSection(s Snapshot) string {
 	loginDisplay := strings.TrimSpace(s.LoginName)
 	if loginDisplay == "" {

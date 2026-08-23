@@ -14,7 +14,8 @@ const TodayDateMessagePrefix = "当天日期为："
 // TodayDateMessageName 为日期消息的 user name（与 llm.UserNameDate 对齐）。
 const TodayDateMessageName = llm.UserNameDate
 
-// InjectTodayDateHook 在 turn.before_step 检查 history，必要时追加当天日期 human message。
+// InjectTodayDateHook 保留旧 Hook 标识以兼容已有配置和诊断，但不再修改
+// durable history。当天日期由 turn 的 request-only ContextInjection 负责。
 type InjectTodayDateHook struct {
 	cfg InjectTodayDateConfig
 	now func() time.Time
@@ -41,37 +42,11 @@ func (h *InjectTodayDateHook) Name() string { return "builtin.inject_today_date"
 // Phases 返回支持的 phase 列表。
 func (h *InjectTodayDateHook) Phases() []Phase { return []Phase{PhaseTurnBeforeStep} }
 
-// Run 若 history 中尚无「当天日期为：YYYYMMDD」则插入一条 user 消息。
-// 插入位置：若末条为非日期 user，则插在其前，避免盖住本轮用户问题；否则追加到末尾。
-func (h *InjectTodayDateHook) Run(_ context.Context, hc *Context, _ Host) (Result, error) {
-	if h == nil || !h.cfg.IsEnabled() {
-		return Result{Action: ActionContinue}, nil
-	}
-	nowFn := h.now
-	if nowFn == nil {
-		nowFn = time.Now
-	}
-	today := nowFn().Format("20060102")
-	want := FormatTodayDateMessage(today)
-	msgs := hc.History
-	if HasTodayDateMessage(msgs, today) {
-		return Result{Action: ActionContinue}, nil
-	}
-	idx := len(msgs)
-	if idx > 0 && strings.TrimSpace(msgs[idx-1].Role) == "user" {
-		if _, ok := ParseTodayDateMessage(llm.MessageTextSummary(msgs[idx-1])); !ok {
-			idx = idx - 1
-		}
-	}
-	return Result{
-		Action: ActionContinue,
-		Mutations: map[string]any{
-			MutationHistoryInsert: HistoryInsertMutation{
-				Index:   idx,
-				Message: llm.UserMessage(want, TodayDateMessageName),
-			},
-		},
-	}, nil
+func (h *InjectTodayDateHook) Run(_ context.Context, _ *Context, _ Host) (Result, error) {
+	// Do not derive the date from Hook history anymore. A Hook mutation would
+	// turn a runtime fact into a durable user message and would also make old
+	// dates participate in hydrate, compression and cache prefixes.
+	return Result{Action: ActionContinue}, nil
 }
 
 // FormatTodayDateMessage 返回「当天日期为：YYYYMMDD」。

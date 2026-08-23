@@ -33,6 +33,7 @@ export const turnStateStore = reactive({
   stepIndex: 0,
   generation: 0,
   lifecycleSeq: 0,
+  historyRevision: 0,
   terminal: false,
   endReason: "",
   interactionKind: "",
@@ -70,6 +71,7 @@ export function normalizeTurnState(raw = {}, { source = "event" } = {}) {
     stepIndex: Number(payload?.step_index || payload?.stepIndex) || 0,
     generation: Number(payload?.generation || payload?.turn_generation) || 0,
     lifecycleSeq: Number(payload?.lifecycle_seq || payload?.lifecycleSeq) || 0,
+    historyRevision: Number(payload?.history_revision || payload?.historyRevision) || 0,
     terminal,
     endReason: trim(payload?.end_reason || payload?.reason || payload?.turn_end_reason),
     interactionKind: trim(payload?.interaction_kind || payload?.interactionKind),
@@ -111,7 +113,11 @@ export function applyTurnState(raw, { source = "event" } = {}) {
   const cancellationPending = ["requesting", "confirmed"].includes(turnStateStore.cancelState);
   const identityChanged =
     next.turnId !== turnStateStore.turnId || next.generation !== turnStateStore.generation;
+  const previousHistoryRevision = turnStateStore.historyRevision;
   Object.assign(turnStateStore, next);
+  if (next.historyRevision === 0 && previousHistoryRevision > 0) {
+    turnStateStore.historyRevision = previousHistoryRevision;
+  }
   if (identityChanged || next.phase !== "model_generating") {
     turnStateStore.outputChannel = "none";
     turnStateStore.outputStartedAt = 0;

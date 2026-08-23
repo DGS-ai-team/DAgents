@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
 // publishAssistant 推送 assistant SSE。
@@ -80,11 +81,19 @@ func (o *Orchestrator) publishToolCall(sessionID string, tc llm.ToolCall, partia
 
 // publishToolResult 推送 tool result SSE。
 func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, rejected bool, extra map[string]any) {
+	resultFields := tools.ResultEventFields(tc.Function.Name, content, rejected)
+	if rawStatus, ok := extra["async_status"].(string); ok {
+		if status := tools.NormalizeResultStatus(rawStatus); status != "" {
+			resultFields = tools.ResultEventFieldsWithStatus(tc.Function.Name, content, rejected, status)
+		}
+	}
 	payload := map[string]any{
 		"tool_call_id": tc.ID,
 		"tool_name":    tc.Function.Name,
 		"content":      content,
-		"rejected":     rejected,
+	}
+	for key, value := range resultFields {
+		payload[key] = value
 	}
 	if args := parseJSONArgs(tc.Function.Arguments); len(args) > 0 {
 		payload["arguments"] = args
@@ -93,6 +102,9 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 		payload["raw_arguments"] = raw
 	}
 	for k, v := range extra {
+		if k == "status" || k == "rejected" || k == "error" || k == "retryable" {
+			continue
+		}
 		payload[k] = v
 	}
 	o.hub.Publish(sessionID, "tool_result", o.withLifecycleMetadata(sessionID, payload))

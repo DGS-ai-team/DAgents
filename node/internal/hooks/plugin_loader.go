@@ -138,23 +138,52 @@ func RegisterPlugins(r *Registry, cfg PluginsConfig, logger *slog.Logger) error 
 
 // LoadSkillPluginsFromDir 扫描 skills/<name>/hooks/*.so 并注册。
 func LoadSkillPluginsFromDir(r *Registry, hooksDir, skillName string, logger *slog.Logger) error {
-	if r == nil || strings.TrimSpace(hooksDir) == "" || strings.TrimSpace(skillName) == "" {
+	result := LoadSkillPluginsFromDirDetailed(r, hooksDir, skillName, logger)
+	if len(result.Failed) == 0 {
 		return nil
+	}
+	return fmt.Errorf("%s: %s", result.Failed[0].Path, result.Failed[0].Error)
+}
+
+// SkillPluginLoadFailure identifies one hook plugin that failed to register.
+type SkillPluginLoadFailure struct {
+	Path  string
+	Error string
+}
+
+// SkillPluginLoadResult keeps successful and failed plugin files separate so
+// callers can report the actual registration result instead of treating a
+// skill directory with no hooks as a loaded hook.
+type SkillPluginLoadResult struct {
+	Loaded []string
+	Failed []SkillPluginLoadFailure
+}
+
+// LoadSkillPluginsFromDirDetailed scans skills/<name>/hooks/*.so and returns
+// per-file registration results while continuing after one bad plugin.
+func LoadSkillPluginsFromDirDetailed(r *Registry, hooksDir, skillName string, logger *slog.Logger) SkillPluginLoadResult {
+	result := SkillPluginLoadResult{}
+	if r == nil || strings.TrimSpace(hooksDir) == "" || strings.TrimSpace(skillName) == "" {
+		return result
 	}
 	entries, err := filepath.Glob(filepath.Join(hooksDir, "*.so"))
 	if err != nil {
-		return err
+		result.Failed = append(result.Failed, SkillPluginLoadFailure{Path: hooksDir, Error: err.Error()})
+		return result
 	}
 	prefix := SkillHookNamePrefix + strings.TrimSpace(skillName) + "/"
 	for _, path := range entries {
 		entry := PluginHookEntry{Path: path}
 		if err := loadPluginFile(r, entry, prefix, logger); err != nil {
+			result.Failed = append(result.Failed, SkillPluginLoadFailure{Path: path, Error: err.Error()})
 			if logger != nil {
 				logger.Warn("skill hook plugin load failed", "skill", skillName, "path", path, "error", err)
 			}
+			continue
 		}
+		result.Loaded = append(result.Loaded, path)
 	}
-	return nil
+	return result
 }
 
 func loadPluginFile(r *Registry, entry PluginHookEntry, namePrefix string, logger *slog.Logger) error {

@@ -128,31 +128,31 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 
 // AgentContext 为 GET /v1/agents/{id}/context 响应。
 type AgentContext struct {
-	AgentID               string `json:"agent_id"`
-	MessagesCount         int    `json:"messages_count"`
-	PendingToolCallsCount int    `json:"pending_tool_calls_count"`
-	MessagesTotalTokens   int    `json:"messages_total_tokens"`
-	ToolLoopCount         int    `json:"tool_loop_count"`
-	QueuePending          int    `json:"queue_pending"`
-	HasActiveTurn         bool   `json:"has_active_turn"`
-	TurnState             string `json:"turn_state"`
-	RunTurnPhase          string `json:"run_turn_phase"`
-	SystemPrompt                   string `json:"system_prompt"`
-	SystemPromptEstimatedTokens    int    `json:"system_prompt_estimated_tokens"`
-	SkillsCatalogEstimatedTokens        int    `json:"skills_catalog_estimated_tokens"`
-	SkillsCatalogMaxBodyEstimatedTokens int    `json:"skills_catalog_max_body_estimated_tokens"`
-	SkillsCatalogBloatThreshold         int    `json:"skills_catalog_bloat_threshold"`
-	LoadedSkills                   []LoadedSkillSummary `json:"loaded_skills"`
-	RecentMessages        []ContextMessagePreview `json:"recent_messages"`
+	AgentID                             string                  `json:"agent_id"`
+	MessagesCount                       int                     `json:"messages_count"`
+	PendingToolCallsCount               int                     `json:"pending_tool_calls_count"`
+	MessagesTotalTokens                 int                     `json:"messages_total_tokens"`
+	ToolLoopCount                       int                     `json:"tool_loop_count"`
+	QueuePending                        int                     `json:"queue_pending"`
+	HasActiveTurn                       bool                    `json:"has_active_turn"`
+	TurnState                           string                  `json:"turn_state"`
+	RunTurnPhase                        string                  `json:"run_turn_phase"`
+	SystemPrompt                        string                  `json:"system_prompt"`
+	SystemPromptEstimatedTokens         int                     `json:"system_prompt_estimated_tokens"`
+	SkillsCatalogEstimatedTokens        int                     `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogMaxBodyEstimatedTokens int                     `json:"skills_catalog_max_body_estimated_tokens"`
+	SkillsCatalogBloatThreshold         int                     `json:"skills_catalog_bloat_threshold"`
+	LoadedSkills                        []LoadedSkillSummary    `json:"loaded_skills"`
+	RecentMessages                      []ContextMessagePreview `json:"recent_messages"`
 }
 
 // CompressContextResult 为 POST /v1/agents/{id}/compress 响应。
 type CompressContextResult struct {
-	Status                 string `json:"status"`
-	TriggerLevel           string `json:"trigger_level"`
-	CompressedMessageCount int    `json:"compressed_message_count"`
-	CompressionStart       int    `json:"compression_start"`
-	CompressionEnd         int    `json:"compression_end"`
+	Status                 string  `json:"status"`
+	TriggerLevel           string  `json:"trigger_level"`
+	CompressedMessageCount int     `json:"compressed_message_count"`
+	CompressionStart       int     `json:"compression_start"`
+	CompressionEnd         int     `json:"compression_end"`
 	MessagesCount          int     `json:"messages_count"`
 	MessagesTotalTokens    int     `json:"messages_total_tokens"`
 	PromptTokens           int     `json:"prompt_tokens"`
@@ -161,6 +161,7 @@ type CompressContextResult struct {
 	TokenReductionRate     float64 `json:"token_reduction_rate"`
 	PromptCacheHitTokens   int     `json:"prompt_cache_hit_tokens"`
 	PromptCacheMissTokens  int     `json:"prompt_cache_miss_tokens"`
+	PromptCacheAvailable   bool    `json:"prompt_cache_available"`
 }
 
 // LoadedSkillSummary 为 context/skills 中的已加载 skill 摘要。

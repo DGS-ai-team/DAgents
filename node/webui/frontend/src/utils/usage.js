@@ -7,26 +7,35 @@ export function parseUsageFields(data) {
   let hit = intVal(data.prompt_cache_hit_tokens);
   const cached = intVal(data.prompt_cached_tokens);
   if (hit <= 0 && cached > 0) hit = cached;
+  const cacheAvailability = data.prompt_cache_available;
+  const cacheObserved =
+    cacheAvailability === true || cacheAvailability === false
+      ? cacheAvailability
+      : data.prompt_cache_hit_tokens != null ||
+        data.prompt_cache_miss_tokens != null ||
+        data.prompt_cached_tokens != null ||
+        hit > 0;
   let rate = -1;
   if (typeof data.prompt_cache_hit_rate === "number" && data.prompt_cache_hit_rate >= 0) {
     rate = data.prompt_cache_hit_rate;
-  } else if (prompt > 0 && hit > 0) {
+  } else if (cacheObserved && prompt > 0) {
     rate = Math.min(1, hit / prompt);
   }
   let reasoning = intVal(data.reasoning_tokens);
   if (reasoning <= 0 && data.completion_tokens_details) {
     reasoning = intVal(data.completion_tokens_details.reasoning_tokens);
   }
-  return { prompt, completion, hit, rate, reasoning };
+  return { prompt, completion, hit, rate, reasoning, cacheObserved };
 }
-
 export function parseUsageRound(data) {
   if (!data || typeof data !== "object") return null;
   return parseUsageFields({
     prompt_tokens: data.round_prompt_tokens,
     completion_tokens: data.round_completion_tokens,
     prompt_cache_hit_tokens: data.round_prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens: data.round_prompt_cache_miss_tokens,
     prompt_cached_tokens: data.round_prompt_cached_tokens,
+    prompt_cache_available: data.round_prompt_cache_available,
     prompt_cache_hit_rate: data.round_prompt_cache_hit_rate,
     reasoning_tokens: data.round_reasoning_tokens,
     completion_tokens_details: data.round_completion_tokens_details,
@@ -52,13 +61,6 @@ export function formatInputStripUsage(snap) {
         ? ` · hit ${formatCompactTokens(snap.hit)} (${Math.round(snap.rate * 100)}%)`
         : ` · hit ${formatCompactTokens(snap.hit)}`;
   }
-  if (snap.reasoning > 0) t += ` · think ${formatCompactTokens(snap.reasoning)}`;
-  return t;
-}
-
-export function formatInlineUsage(snap) {
-  if (!snap) return "";
-  let t = ` · ↑${formatCompactTokens(snap.prompt)} ↓${formatCompactTokens(snap.completion)}`;
   if (snap.reasoning > 0) t += ` · think ${formatCompactTokens(snap.reasoning)}`;
   return t;
 }

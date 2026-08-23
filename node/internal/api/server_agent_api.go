@@ -167,6 +167,7 @@ type sessionContextResponse struct {
 	SkillsCatalogEstimatedTokens        int                                  `json:"skills_catalog_estimated_tokens"`
 	SkillsCatalogMaxBodyEstimatedTokens int                                  `json:"skills_catalog_max_body_estimated_tokens"`
 	SkillsCatalogBloatThreshold         int                                  `json:"skills_catalog_bloat_threshold"`
+	SkillsCatalogTiming                 skills.CatalogTiming                 `json:"skills_catalog_timing"`
 	LoadedSkills                        []skills.LoadedSkill                 `json:"loaded_skills"`
 	RecentMessages                      []contextMessagePreview              `json:"recent_messages"`
 	Messages                            *[]contextMessagePreview             `json:"messages,omitempty"`
@@ -242,6 +243,7 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 		SkillsCatalogEstimatedTokens:        view.SkillsCatalogEstimatedTokens,
 		SkillsCatalogMaxBodyEstimatedTokens: view.SkillsCatalogMaxBodyEstimatedTokens,
 		SkillsCatalogBloatThreshold:         view.SkillsCatalogBloatThreshold,
+		SkillsCatalogTiming:                 view.SkillsCatalogTiming,
 		LoadedSkills:                        view.LoadedSkills,
 		RecentMessages:                      recent,
 		LastCompression:                     view.LastCompression,
@@ -261,18 +263,19 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 }
 
 type sessionHydrateResponse struct {
-	AgentID       string                    `json:"agent_id"`
-	TurnState     session.TurnStateView     `json:"turn_state"`
-	RunTurnPhase  string                    `json:"run_turn_phase"`
-	HasActiveTurn bool                      `json:"has_active_turn"`
-	QueuePending  int                       `json:"queue_pending"`
-	Transcript    []session.TranscriptEntry `json:"transcript"`
-	PendingHITL   map[string]any            `json:"pending_hitl"`
-	SSESeqHint    int                       `json:"sse_seq_hint"`
-	NotifySeq     int                       `json:"notify_seq"`
-	AckSeq        int                       `json:"ack_seq"`
-	HasUnread     bool                      `json:"has_unread"`
-	ToolJobs      map[string]int            `json:"tool_jobs,omitempty"`
+	AgentID         string                    `json:"agent_id"`
+	TurnState       session.TurnStateView     `json:"turn_state"`
+	RunTurnPhase    string                    `json:"run_turn_phase"`
+	HasActiveTurn   bool                      `json:"has_active_turn"`
+	QueuePending    int                       `json:"queue_pending"`
+	Transcript      []session.TranscriptEntry `json:"transcript"`
+	PendingHITL     map[string]any            `json:"pending_hitl"`
+	HistoryRevision uint64                    `json:"history_revision"`
+	SSESeqHint      int                       `json:"sse_seq_hint"`
+	NotifySeq       int                       `json:"notify_seq"`
+	AckSeq          int                       `json:"ack_seq"`
+	HasUnread       bool                      `json:"has_unread"`
+	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -301,18 +304,19 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		toolJobs["background"] = c.Background
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		AgentID:       view.SessionID,
-		TurnState:     view.TurnState,
-		RunTurnPhase:  view.RunTurnPhase,
-		HasActiveTurn: view.HasActiveTurn,
-		QueuePending:  view.QueuePending,
-		Transcript:    transcript,
-		PendingHITL:   view.PendingHITL,
-		SSESeqHint:    s.stream.CurrentSeq(),
-		NotifySeq:     view.NotifySeq,
-		AckSeq:        view.AckSeq,
-		HasUnread:     view.HasUnread,
-		ToolJobs:      toolJobs,
+		AgentID:         view.SessionID,
+		TurnState:       view.TurnState,
+		RunTurnPhase:    view.RunTurnPhase,
+		HasActiveTurn:   view.HasActiveTurn,
+		QueuePending:    view.QueuePending,
+		Transcript:      transcript,
+		PendingHITL:     view.PendingHITL,
+		HistoryRevision: view.HistoryRevision,
+		SSESeqHint:      s.stream.CurrentSeq(),
+		NotifySeq:       view.NotifySeq,
+		AckSeq:          view.AckSeq,
+		HasUnread:       view.HasUnread,
+		ToolJobs:        toolJobs,
 	})
 }
 
@@ -432,7 +436,7 @@ func (s *Server) handleAgentLoadSkillImpl(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	loaded, err := s.sessions.LoadSessionSkill(sessionID, req.SkillName)
+	out, err := s.sessions.LoadSessionSkillDetailed(sessionID, req.SkillName)
 	if err != nil {
 		if err.Error() == "agent_not_found" {
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
@@ -441,10 +445,7 @@ func (s *Server) handleAgentLoadSkillImpl(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":      sessionID,
-		"loaded_skills": loaded,
-	})
+	writeJSON(w, http.StatusOK, skillMutationResponse(sessionID, out))
 }
 
 func (s *Server) handleAgentUnloadSkillImpl(w http.ResponseWriter, r *http.Request) {
@@ -454,7 +455,7 @@ func (s *Server) handleAgentUnloadSkillImpl(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	loaded, err := s.sessions.UnloadSessionSkill(sessionID, req.SkillName)
+	out, err := s.sessions.UnloadSessionSkillDetailed(sessionID, req.SkillName)
 	if err != nil {
 		if err.Error() == "agent_not_found" {
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
@@ -463,10 +464,28 @@ func (s *Server) handleAgentUnloadSkillImpl(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":      sessionID,
-		"loaded_skills": loaded,
-	})
+	writeJSON(w, http.StatusOK, skillMutationResponse(sessionID, out))
+}
+
+func skillMutationResponse(agentID string, out session.SkillMutationOutcome) map[string]any {
+	requested := append([]string{}, out.Requested...)
+	loaded := append([]skills.LoadedSkill{}, out.Loaded...)
+	rejected := append([]skills.SkillLoadRejection{}, out.Rejected...)
+	hooksLoaded := append([]string{}, out.HooksLoaded...)
+	hooksFailed := append([]turn.SkillHookSyncFailure{}, out.HooksFailed...)
+	return map[string]any{
+		"agent_id":                       agentID,
+		"action":                         out.Action,
+		"requested":                      requested,
+		"loaded_skills":                  loaded,
+		"rejected":                       rejected,
+		"changed":                        out.Changed,
+		"session_state_applied_boundary": out.SessionStateAppliedBoundary,
+		"model_context_applied_boundary": out.ModelContextAppliedBoundary,
+		"hooks_status":                   out.HooksStatus,
+		"hooks_loaded":                   hooksLoaded,
+		"hooks_failed":                   hooksFailed,
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

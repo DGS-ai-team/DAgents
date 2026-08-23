@@ -61,7 +61,7 @@ func bashRunToolDef() ToolDef {
 }
 
 func bashRunToolDescription(isWindows bool) string {
-	common := "传入 timeout_seconds 时，超时自动转为后台 job 并返回 job_id；省略时超时终止。长输出会按配置清洗并截断。需要保持目录、环境或进程状态时，请使用 terminal_open。"
+	common := "结果包含 status、exit_code、stdout_bytes、stderr_bytes 和 output_truncated；exit_code=0 表示进程成功结束，但 stdout 仍可能为空。传入 timeout_seconds 时，超时自动转为后台 job 并返回 job_id；省略时超时终止。长输出会按配置清洗并截断。需要保持目录、环境或进程状态时，请使用 terminal_open。"
 	if isWindows {
 		return "在 Node 所在 Windows 主机执行一次本地 PowerShell 命令并返回结果。cwd 省略时使用工作区根目录；省略 shell_type 时使用 powershell。" + common
 	}

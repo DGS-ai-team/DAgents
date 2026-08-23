@@ -9,6 +9,12 @@
 > snapshot / Catalog revision 在下一个 human turn 边界更新。下文关于“catalog 不写入 system”
 > 和 `registry_enrich.go` 的描述属于历史状态。
 
+> **架构更新（2026-08-23）**：Loaded 正文的注入方式已更新：SKILL.md 正文不再进入
+> system prompt，而是在激活时作为 `name=skill` 的独立 durable context message 写入
+> history；出站请求只保留当前激活版本。本文 §1～§4 对“Loaded 正文位于 system prompt”
+> 的成本数字仍可用于解释旧版本基线，不代表当前实现；当前消息来源与持久化边界以
+> [`non-user-user-message-injection-audit-2026-08-23.md`](./non-user-user-message-injection-audit-2026-08-23.md) 为准。
+
 ---
 
 ## 1. 背景：Skills 在账单里的位置

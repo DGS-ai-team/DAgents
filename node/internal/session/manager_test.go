@@ -379,6 +379,8 @@ func TestPersistTurnLifecycleToolBatchBoundaries(t *testing.T) {
 		t.Fatalf("restored tool lifecycle projection = %#v", snapshot)
 	} else if snapshot.ContextSnapshot == nil || snapshot.ContextSnapshot.SystemPrompt == "" {
 		t.Fatalf("restored model context snapshot = %#v", snapshot.ContextSnapshot)
+	} else if snapshot.ContextSnapshot.ContextInjectionDigest == "" || len(snapshot.ContextSnapshot.ContextInjections) == 0 {
+		t.Fatalf("restored context injection snapshot = %#v", snapshot.ContextSnapshot)
 	}
 }
 

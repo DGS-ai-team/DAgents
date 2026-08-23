@@ -46,6 +46,9 @@ type TurnOptions struct {
 	SkillsRoot        string
 	SkillsEnabled     bool
 	SkillsMaxInPrompt int
+	// SkillsCatalogToolMode enables the default-off metadata discovery
+	// experiment. It is fixed for the runtime and does not change mid-Turn.
+	SkillsCatalogToolMode bool
 	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
 	SkillsVisibleRestrict       bool
 	SkillsVisible               []string
@@ -73,7 +76,8 @@ type TurnOptions struct {
 	PromptContext PromptContextOptions
 	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
 	PromptContent *promptcontext.Content
-	// PreferredName 为本机使用者称呼（Node 首配）；注入 system prompt，替代 user.md。
+	// PreferredName 为本机使用者称呼（Node 首配）；通过 prompt context
+	// 注入模型请求，替代 user.md。
 	PreferredName string
 	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
 	LongTermStore turn.LongTermStore
@@ -238,7 +242,7 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 		m.logger.Info("session reuse", "session_id", id)
 		return &existing.session, false, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err := m.loadSessionData(id)
+	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
 		return nil, false, err
@@ -246,6 +250,7 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	rt.historyRevision = historyRevision
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -289,22 +294,23 @@ func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, t
 	var hookStore map[string]json.RawMessage
 	var idleMarked bool
 	var notifySeq, ackSeq int
+	var historyRevision uint64
 	if old != nil {
 		// Persist for cold-start recovery, but hydrate from the old runtime's
 		// in-memory snapshot. This avoids losing a last-minute state change when
 		// the store write fails or when the manager is embedded without a store.
 		old.persist(context.Background())
 		if m.store != nil {
-			if _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+			if _, _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
 				m.mu.Unlock()
 				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
 				return nil, false, err
 			}
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq = old.replacementData()
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision = old.replacementData()
 	} else {
 		var err error
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err = m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err = m.loadSessionData(id)
 		if err != nil {
 			m.mu.Unlock()
 			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
@@ -314,6 +320,7 @@ func (m *Manager) ReplaceWithOptions(requestedID string, turnOpts TurnOptions, t
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	rt.historyRevision = historyRevision
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
@@ -340,13 +347,14 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err := m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
+		rt.historyRevision = historyRevision
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
@@ -378,22 +386,22 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, error) {
+func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, nil
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, err
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, nil
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
 	}
 	var pending *turn.PendingHITL
 	if rec.RuntimeState.Pending != nil {
 		pending = rec.RuntimeState.Pending
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, nil
+	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, rec.RuntimeState.HistoryRevision, nil
 }
 
 func (m *Manager) sessionExistsInStore(sessionID string) bool {
@@ -581,6 +589,10 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		PromptDigest:          lifecycle.PromptDigest,
 		ToolDigest:            lifecycle.ToolDigest,
 		RecoveryRequired:      lifecycle.RecoveryRequired,
+	}
+	if lifecycle.ContextSnapshot != nil {
+		view.ContextInjectionDigest = lifecycle.ContextSnapshot.ContextInjectionDigest
+		view.ContextInjectionCount = len(lifecycle.ContextSnapshot.ContextInjections)
 	}
 	if !hasLifecycleProjection && pending != nil {
 		view.HasActiveTurn = true
@@ -865,28 +877,123 @@ func (m *Manager) ListSessionSkills(sessionID string) (loaded, available []skill
 	return loaded, available, nil
 }
 
-// LoadSessionSkill 向 session 加载单个 skill（追加到 loaded 集合，受 max 限制）。
-func (m *Manager) LoadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
+// SkillMutationOutcome 是控制面 skills API 的权威变更结果。模型侧
+// load_skills 使用 turn 层的同等字段；控制面也必须明确状态和生效边界，
+// 避免前端把“会话已更新”误认为“当前模型上下文已更新”。
+type SkillMutationOutcome struct {
+	Action                      string
+	Requested                   []string
+	Loaded                      []skills.LoadedSkill
+	Rejected                    []skills.SkillLoadRejection
+	Changed                     bool
+	SessionStateAppliedBoundary string
+	ModelContextAppliedBoundary string
+	HooksStatus                 string
+	HooksLoaded                 []string
+	HooksFailed                 []turn.SkillHookSyncFailure
+}
+
+func (m *Manager) skillMutationOutcome(rt *runtime, action string, requested []string, before, loaded []skills.LoadedSkill, rejected []skills.SkillLoadRejection, hookSync turn.SkillHooksSyncResult) SkillMutationOutcome {
+	changed := turn.Digest(before) != turn.Digest(loaded)
+	boundary := "unchanged"
+	if changed {
+		boundary = "next_human_turn"
+		if rt != nil && rt.turnState() != turn.StateIdle {
+			boundary = "next_model_step"
+		}
+	}
+	return SkillMutationOutcome{
+		Action:                      action,
+		Requested:                   append([]string{}, requested...),
+		Loaded:                      append([]skills.LoadedSkill{}, loaded...),
+		Rejected:                    append([]skills.SkillLoadRejection{}, rejected...),
+		Changed:                     changed,
+		SessionStateAppliedBoundary: "immediate",
+		ModelContextAppliedBoundary: boundary,
+		HooksStatus:                 hookSync.Status,
+		HooksLoaded:                 append([]string{}, hookSync.Loaded...),
+		HooksFailed:                 append([]turn.SkillHookSyncFailure{}, hookSync.Failed...),
+	}
+}
+
+// LoadSessionSkillDetailed 向 session 追加单个 skill，并返回拒绝原因、hook
+// 注册结果和模型上下文生效边界。
+func (m *Manager) LoadSessionSkillDetailed(sessionID, skillName string) (SkillMutationOutcome, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil, fmt.Errorf("agent_not_found")
+		return SkillMutationOutcome{}, fmt.Errorf("agent_not_found")
 	}
-	current := rt.loadedSkillsSnapshot()
-	names := make([]string, 0, len(current)+1)
-	for _, item := range current {
+	name := strings.TrimSpace(skillName)
+	before := rt.loadedSkillsSnapshot()
+	if rt.skillsCatalog == nil {
+		return m.skillMutationOutcome(rt, "load_skills", []string{name}, before, before,
+			[]skills.SkillLoadRejection{{Name: name, Reason: "skills_disabled"}}, turn.SkillHooksSyncResult{Status: "unavailable"}), nil
+	}
+	names := make([]string, 0, len(before)+1)
+	for _, item := range before {
 		names = append(names, item.SkillName)
 	}
-	names = append(names, skillName)
-	return rt.setLoadedSkillsByName(names), nil
+	names = append(names, name)
+	result := rt.skillsCatalog.SetLoadedSkillsDetailed(names)
+	hookSync := rt.setLoadedSkillsWithHookStatus(result.Loaded)
+	rt.persist(context.Background())
+	// Only expose diagnostics for the newly requested control-plane name; the
+	// already-loaded set is implementation context, not a new rejection.
+	rejected := make([]skills.SkillLoadRejection, 0, len(result.Rejected))
+	for _, item := range result.Rejected {
+		if strings.EqualFold(strings.TrimSpace(item.Name), name) {
+			rejected = append(rejected, item)
+		}
+	}
+	out := m.skillMutationOutcome(rt, "load_skills", []string{name}, before, result.Loaded, rejected, hookSync)
+	if out.Changed && rt.turnState() != turn.StateIdle {
+		rt.refreshSkillsCatalogForExplicitMutation()
+	}
+	return out, nil
+}
+
+// UnloadSessionSkillDetailed 从 session 移除单个 skill，并返回明确的未加载诊断。
+func (m *Manager) UnloadSessionSkillDetailed(sessionID, skillName string) (SkillMutationOutcome, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return SkillMutationOutcome{}, fmt.Errorf("agent_not_found")
+	}
+	name := strings.TrimSpace(skillName)
+	before := rt.loadedSkillsSnapshot()
+	loaded := before
+	matched := false
+	for _, item := range before {
+		if item.SkillName == name || item.DirectoryName == name {
+			matched = true
+			break
+		}
+	}
+	if rt.skillsCatalog != nil {
+		loaded = rt.skillsCatalog.UnloadSkills(before, []string{name})
+	}
+	hookSync := rt.setLoadedSkillsWithHookStatus(loaded)
+	rt.persist(context.Background())
+	var rejected []skills.SkillLoadRejection
+	if !matched {
+		rejected = []skills.SkillLoadRejection{{Name: name, Reason: "not_loaded"}}
+	}
+	out := m.skillMutationOutcome(rt, "unload_skills", []string{name}, before, loaded, rejected, hookSync)
+	if out.Changed && rt.turnState() != turn.StateIdle {
+		rt.refreshSkillsCatalogForExplicitMutation()
+	}
+	return out, nil
+}
+
+// LoadSessionSkill 向 session 加载单个 skill（追加到 loaded 集合，受 max 限制）。
+func (m *Manager) LoadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
+	out, err := m.LoadSessionSkillDetailed(sessionID, skillName)
+	return out.Loaded, err
 }
 
 // UnloadSessionSkill 从 session 卸载 skill。
 func (m *Manager) UnloadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
-	rt := m.getRuntime(sessionID)
-	if rt == nil {
-		return nil, fmt.Errorf("agent_not_found")
-	}
-	return rt.unloadSkillsByName([]string{skillName}), nil
+	out, err := m.UnloadSessionSkillDetailed(sessionID, skillName)
+	return out.Loaded, err
 }
 
 // SessionFSRoot 返回指定 session/agent 的有效 FSRoot（测试与调试用）。

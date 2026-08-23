@@ -295,6 +295,24 @@ POST /v1/agents/{agent_id}/skills/unload
 
 与工具 `load_skills` 语义一致；HTTP 供 Client 设置页使用。
 
+`POST /skills/load` 和 `POST /skills/unload` 的响应除 `loaded_skills` 外还包含：
+
+```json
+{
+  "requested": ["writer"],
+  "rejected": [],
+  "changed": true,
+  "session_state_applied_boundary": "immediate",
+  "model_context_applied_boundary": "next_human_turn",
+  "hooks_status": "synchronized",
+  "hooks_loaded": [],
+  "hooks_failed": []
+}
+```
+
+控制面 load 是单项追加，unload 是单项移除；`load_skills` 工具仍是整组替换。`next_model_step` 只在
+活动 Turn 中返回，空闲时返回 `next_human_turn`，未改变 loaded 集合时返回 `unchanged`。
+
 ### 2.6 Policy（工具 / shell；按 Agent）
 
 | 方法 | 路径 | 说明 |
@@ -308,6 +326,29 @@ POST /v1/agents/{agent_id}/skills/unload
 写盘后 Node 热更新该 Agent runtime 的 policy engine；`ask_user_information` 禁止设为 `deny`。全局 `/v1/policy*` 已移除（404）。
 
 Web UI：Agents 设置页 Policy 面板。
+
+### 2.7 Context 诊断中的 Skills 成本
+
+`GET /v1/agents/{agent_id}/context` 返回 `skills_catalog_timing`，用于诊断 Skills 目录的运行时成本：
+
+```json
+{
+  "metadata_scan_count": 1,
+  "metadata_scan_duration_ns": 12000,
+  "body_read_count": 1,
+  "body_read_duration_ns": 8000,
+  "body_read_bytes": 2400,
+  "body_cache_hit_count": 1,
+  "boundary_digest_count": 1,
+  "boundary_digest_duration_ns": 5000,
+  "token_estimate_count": 1,
+  "token_estimate_duration_ns": 3000
+}
+```
+
+这些字段仅用于观测，不进入 system prompt、API tool schema、Catalog revision 或 provider cache key。
+普通模型 Step 的 prompt 构建只加载已加载 Skill 正文，不执行全量目录 token 估算；后者属于 context
+诊断路径。
 
 ---
 

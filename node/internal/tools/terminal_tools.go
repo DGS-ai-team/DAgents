@@ -54,6 +54,7 @@ func terminalOpenToolDef() ToolDef {
 				"rows":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "终端行数，可选，默认 24"},
 				"cols":      map[string]any{"type": "integer", "minimum": 1, "maximum": 400, "description": "终端列数，可选，默认 80"},
 			},
+			"required":             []string{"config_id"},
 			"additionalProperties": false,
 		}),
 	}}
@@ -81,7 +82,7 @@ func terminalInputToolDef() ToolDef {
 func terminalReadToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_read",
-		Description: "严格等待指定秒数后，读取交互终端从 after_seq 之后产生的输出；首次读取使用 0，后续使用返回的 next_seq，避免重复读取。",
+		Description: "严格等待指定秒数后，读取交互终端从 after_seq 之后产生的输出；结果包含 output、output_bytes、output_empty、next_seq 和 exited。首次读取使用 0，后续使用返回的 next_seq，避免重复读取；output_empty=true 表示本次没有新输出，不代表终端未执行。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
 			"terminal_id":  map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
 			"after_seq":    map[string]any{"type": "integer", "minimum": 0, "description": "上次读取返回的 next_seq，可选，默认 0"},
@@ -324,9 +325,12 @@ func (r *Registry) execTerminalRead(ctx context.Context, raw json.RawMessage) (s
 	for _, chunk := range out.Chunks {
 		b.Write(chunk.Data)
 	}
+	outputText := b.String()
 	result := map[string]any{
 		"terminal_id":  strings.TrimSpace(args.TerminalID),
-		"output":       b.String(),
+		"output":       outputText,
+		"output_bytes": len([]byte(outputText)),
+		"output_empty": len([]byte(outputText)) == 0,
 		"next_seq":     out.NextSeq,
 		"exited":       out.Exited,
 		"wait_seconds": waitSeconds,
@@ -361,10 +365,13 @@ func (r *Registry) execTerminalTerminate(ctx context.Context, raw json.RawMessag
 	for _, chunk := range out.Chunks {
 		b.Write(chunk.Data)
 	}
+	outputText := b.String()
 	result := map[string]any{
 		"terminal_id":        id,
 		"status":             "terminated",
-		"output":             b.String(),
+		"output":             outputText,
+		"output_bytes":       len([]byte(outputText)),
+		"output_empty":       len([]byte(outputText)) == 0,
 		"next_seq":           out.NextSeq,
 		"exited":             out.Exited,
 		"graceful":           out.Graceful,

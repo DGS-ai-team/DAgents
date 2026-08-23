@@ -30,6 +30,8 @@ type ContextView struct {
 	RuntimeDigest                       string
 	PromptDigest                        string
 	ToolDigest                          string
+	ContextInjectionDigest              string
+	ContextInjectionCount               int
 	RecoveryRequired                    bool
 	TurnState                           turn.State
 	SystemPrompt                        string
@@ -37,6 +39,7 @@ type ContextView struct {
 	SkillsCatalogEstimatedTokens        int
 	SkillsCatalogMaxBodyEstimatedTokens int
 	SkillsCatalogBloatThreshold         int
+	SkillsCatalogTiming                 skills.CatalogTiming
 	Messages                            []llm.Message
 	LastCompression                     *compression.LastCompressionSnapshot
 }
@@ -51,6 +54,7 @@ func enrichContextPromptStats(view *ContextView, catalog *skills.Catalog) {
 		stats := catalog.EstimateCatalogStats()
 		view.SkillsCatalogEstimatedTokens = stats.MetadataTokens
 		view.SkillsCatalogMaxBodyEstimatedTokens = stats.MaxBodyTokens
+		view.SkillsCatalogTiming = catalog.TimingSnapshot()
 	}
 }
 

@@ -12,7 +12,7 @@ const (
 // DefaultToolResultTools WS3 默认启用落盘摘要的工具；与 shared/config ToolResultHookTools 默认一致。
 var DefaultToolResultTools = []string{
 	"bash_run",
-	"linux_exec",
+	"terminal_command",
 	"read_file",
 	"grep_file",
 	"grep_files",

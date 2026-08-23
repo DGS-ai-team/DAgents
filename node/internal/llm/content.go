@@ -94,18 +94,17 @@ func NormalizeUserInput(text string, parts []ContentPart) (string, []ContentPart
 	return summary, out, nil
 }
 
-// BuildUserMessage 构造 role=user 消息；name 为来源标识，空串则不设置。
+// BuildUserMessage 构造 role=user 消息；name 仅作为兼容字段，结构化来源
+// 由 MessageSourceForUserName 自动生成，空串仍不写入 wire name。
 func BuildUserMessage(text string, parts []ContentPart, name string) (Message, error) {
 	summary, normalized, err := NormalizeUserInput(text, parts)
 	if err != nil {
 		return Message{}, err
 	}
-	m := Message{Role: "user", Content: summary}
+	source, provenance := MessageSourceForUserName(name)
+	m := UserMessageWithSource(summary, name, source, &provenance)
 	if len(normalized) > 0 {
 		m.ContentParts = normalized
-	}
-	if n := strings.TrimSpace(name); n != "" {
-		m.Name = n
 	}
 	return m, nil
 }

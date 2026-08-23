@@ -72,6 +72,7 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	r := newLifecycleTestRuntime()
 	r.hub = hub
 	r.agentID = "agent-1"
+	r.queue = queue.NewMessageQueue()
 	events := hub.SubscribeAgent(0, "session-1")
 	defer hub.Unsubscribe(events)
 
@@ -83,6 +84,7 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	}
 
 	phases := make([]string, 0, 5)
+	var terminalHistoryRevision any
 	for len(phases) < cap(phases) {
 		select {
 		case event := <-events:
@@ -91,6 +93,9 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 			}
 			phase, _ := event.Data["phase"].(string)
 			phases = append(phases, phase)
+			if phase == "completed" {
+				terminalHistoryRevision = event.Data["history_revision"]
+			}
 		case <-time.After(time.Second):
 			t.Fatalf("timed out waiting for turn_state events; phases=%v", phases)
 		}
@@ -100,6 +105,24 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	}
 	if phases[len(phases)-1] != "completed" {
 		t.Fatalf("terminal turn_state phase = %q, all=%v", phases[len(phases)-1], phases)
+	}
+	if terminalHistoryRevision != uint64(1) {
+		t.Fatalf("terminal history revision event = %#v", terminalHistoryRevision)
+	}
+	if r.historyRevision != 1 || len(r.messages) != 1 || r.messages[0].Content != "done" {
+		t.Fatalf("terminal history projection = revision=%d messages=%#v", r.historyRevision, r.messages)
+	}
+	manager := NewManager("agent-1", hub, nil, nil, nil, nil, TurnOptions{}, logx.Discard())
+	manager.sessions[r.session.ID] = r
+	view, err := manager.GetHydrateView(r.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.TurnState.Terminal || view.HistoryRevision != 1 || view.TurnState.HistoryRevision != 1 {
+		t.Fatalf("terminal hydrate state = %#v", view)
+	}
+	if len(view.Transcript) != 1 || view.Transcript[0]["kind"] != "assistant" || view.Transcript[0]["text"] != "done" {
+		t.Fatalf("terminal hydrate transcript = %#v", view.Transcript)
 	}
 }
 
@@ -464,6 +487,83 @@ func TestRuntimeLifecyclePersistsTurnAndStepEvents(t *testing.T) {
 	}
 	if got := recovered.turnCoordinator.ExecutionContext(); !got.Valid() || got.TurnID != snapshot.TurnID || got.Generation != snapshot.Generation {
 		t.Fatalf("recovered execution context=%#v projection=%#v", got, snapshot)
+	}
+}
+
+func TestRuntimeLifecyclePersistsProviderCacheUsage(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cache-usage.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	r := newLifecycleTestRuntime()
+	r.store = st
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type:       turn.CommandModelRequestStarted,
+		SessionID:  "session-1",
+		TurnID:     state.TurnID,
+		StepID:     state.StepID,
+		Generation: state.Generation,
+		At:         time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type:       turn.CommandModelUsageRecorded,
+		SessionID:  "session-1",
+		TurnID:     state.TurnID,
+		StepID:     state.StepID,
+		Generation: state.Generation,
+		Usage: turn.StepUsage{
+			InputTokens:                100,
+			OutputTokens:               8,
+			TotalTokens:                108,
+			PromptCacheHitTokens:       80,
+			PromptCacheMissTokens:      20,
+			PromptCacheMetricsObserved: true,
+		},
+		At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := st.ListTurnEvents(context.Background(), "session-1", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.EventType != turn.EventModelUsageRecorded {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		usage, ok := payload["usage"].(map[string]any)
+		if !ok {
+			t.Fatalf("usage payload = %#v", payload["usage"])
+		}
+		if usage["prompt_cache_hit_tokens"] != float64(80) || usage["prompt_cache_miss_tokens"] != float64(20) || usage["prompt_cache_metrics_observed"] != true {
+			t.Fatalf("persisted cache usage = %#v", usage)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatal("model usage event was not persisted")
+	}
+	recovered := newLifecycleTestRuntime()
+	recovered.store = st
+	recovered.restoreLifecycleEvents()
+	recoveredUsage := recovered.turnCoordinator.Snapshot().Usage
+	if recoveredUsage.PromptCacheHitTokens != 80 || recoveredUsage.PromptCacheMissTokens != 20 || !recoveredUsage.PromptCacheMetricsObserved {
+		t.Fatalf("replayed cache usage = %+v", recoveredUsage)
 	}
 }
 

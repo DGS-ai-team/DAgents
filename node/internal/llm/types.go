@@ -18,6 +18,28 @@ type Message struct {
 	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID       string        `json:"tool_call_id,omitempty"`
 	Name             string        `json:"name,omitempty"`
+	// Source and Provenance are internal durable metadata. Provider adapters
+	// deliberately omit them from outbound API payloads.
+	Source     *MessageSource     `json:"source,omitempty"`
+	Provenance *MessageProvenance `json:"provenance,omitempty"`
+	// ToolResultMetadata is persisted with internal history but is never sent
+	// as a non-standard provider message field.  The outbound preparation
+	// layer renders it into the tool content so the model can observe the
+	// authoritative status without changing the UI/transcript body.
+	ToolResultMetadata *ToolResultMetadata `json:"tool_result_metadata,omitempty"`
+}
+
+// ToolResultMetadata is the compact model-facing projection of the runtime
+// tool_result envelope.  Tool-specific content remains in Message.Content.
+type ToolResultMetadata struct {
+	Status string                 `json:"status"`
+	Error  *ToolResultErrorDetail `json:"error,omitempty"`
+}
+
+type ToolResultErrorDetail struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
 }
 
 // ToolCall 为 assistant 消息中的 tool_calls 项。

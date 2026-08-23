@@ -58,7 +58,16 @@ func BuildSidecarChatRequest(in SidecarInput, userPrompt string) llm.ChatRequest
 	}
 	start := leadingSystemSkip(in.Messages)
 
-	msgs := append([]llm.Message(nil), in.Messages[start:prefixEnd+1]...)
+	msgs := make([]llm.Message, 0, prefixEnd-start+1)
+	for _, message := range in.Messages[start : prefixEnd+1] {
+		// Dates written by versions before request-only ContextInjection remain
+		// in durable history for audit, but must not be summarized as dialogue
+		// or consume the compression sidecar's model context.
+		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormNotice, llm.UserNameDate) {
+			continue
+		}
+		msgs = append(msgs, message)
+	}
 	switch in.SidecarAppend {
 	case sidecarAppendAssistantAndUser:
 		msgs = append(msgs,

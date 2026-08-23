@@ -30,7 +30,7 @@ func linuxExecToolDef() []ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "linux_exec",
-			Description: "使用 terminal_config_list 返回的 config_id，在指定 Linux SSH 配置上执行一次非交互命令并返回 stdout、stderr 和退出码。每次调用使用独立会话，不保留 cwd、环境或后台进程；需要交互或保持状态时请使用 terminal_open。",
+			Description: "使用 terminal_config_list 返回的 config_id，在指定 Linux SSH 配置上执行一次非交互命令。结果包含 status、exit_code、stdout_bytes、stderr_bytes、stdout、stderr 和 output_truncated；exit_code=0 表示进程成功结束，但 stdout 仍可能为空。每次调用使用独立会话，不保留 cwd、环境或后台进程；需要交互或保持状态时请使用 terminal_open。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -155,8 +155,18 @@ func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr erro
 	} else if waitErr == nil {
 		code = 0
 	}
+	status := "SUCCEEDED"
+	if code != 0 || waitErr != nil {
+		status = "FAILED"
+	}
 	parts := []string{
 		fmt.Sprintf("[LINUX_RESULT] exit=%d", code),
+		"status=" + status,
+		"target=linux_channel",
+		fmt.Sprintf("exit_code=%d", code),
+		fmt.Sprintf("stdout_bytes=%d", len(stdout)),
+		fmt.Sprintf("stderr_bytes=%d", len(stderr)),
+		fmt.Sprintf("output_truncated: %t", truncated),
 		"--- STDOUT ---",
 		string(stdout),
 		"--- STDERR ---",

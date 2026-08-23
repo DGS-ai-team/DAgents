@@ -36,7 +36,7 @@ func TestHasTodayDateMessage(t *testing.T) {
 	}
 }
 
-func TestInjectTodayDateHook_insertsBeforeLastUserWhenMissing(t *testing.T) {
+func TestInjectTodayDateHook_doesNotMutateHistoryWhenMissing(t *testing.T) {
 	hook := NewInjectTodayDateHook(DefaultInjectTodayDateConfig())
 	hook.SetNow(func() time.Time {
 		return time.Date(2026, 7, 20, 9, 0, 0, 0, time.Local)
@@ -49,15 +49,8 @@ func TestInjectTodayDateHook_insertsBeforeLastUserWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ins, ok := res.Mutations[MutationHistoryInsert].(HistoryInsertMutation)
-	if !ok {
-		t.Fatalf("mutations = %+v", res.Mutations)
-	}
-	if ins.Index != 0 {
-		t.Fatalf("index = %d, want 0 (before last user)", ins.Index)
-	}
-	if ins.Message.Content != "当天日期为：20260720" || ins.Message.Name != TodayDateMessageName {
-		t.Fatalf("msg = %+v", ins.Message)
+	if len(res.Mutations) != 0 {
+		t.Fatalf("date hook must not mutate durable history, got %+v", res.Mutations)
 	}
 }
 
@@ -82,7 +75,7 @@ func TestInjectTodayDateHook_skipsWhenTodayPresent(t *testing.T) {
 	}
 }
 
-func TestInjectTodayDateHook_insertsWhenStaleDate(t *testing.T) {
+func TestInjectTodayDateHook_doesNotReplaceStaleHistoryDate(t *testing.T) {
 	hook := NewInjectTodayDateHook(DefaultInjectTodayDateConfig())
 	hook.SetNow(func() time.Time {
 		return time.Date(2026, 7, 20, 9, 0, 0, 0, time.Local)
@@ -98,9 +91,8 @@ func TestInjectTodayDateHook_insertsWhenStaleDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ins, ok := res.Mutations[MutationHistoryInsert].(HistoryInsertMutation)
-	if !ok || ins.Message.Content != "当天日期为：20260720" || ins.Index != 1 {
-		t.Fatalf("mutations = %+v", res.Mutations)
+	if len(res.Mutations) != 0 {
+		t.Fatalf("date hook must not replace durable history, got %+v", res.Mutations)
 	}
 }
 
