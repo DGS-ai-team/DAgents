@@ -107,6 +107,36 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			},
 		}, nil
 
+	case "agent.turn.resume":
+		if w.AgentSessions == nil {
+			return agentTurnFailureResult(env, "agent session handler not configured")
+		}
+		req, err := agentTurnResumeFromPayload(env.Payload)
+		if err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		if err := w.AgentSessions.ResumeAgentTurn(context.Background(), req); err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     env.DeliverySeq > 0,
+			AckWorkgroupID: deliveryWorkgroupID(env, ""),
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type": "agent.turn.resumed",
+				"payload": agentResponsePayload(env, map[string]any{
+					"workgroup_id": req.WorkgroupID,
+					"member_id":    req.MemberID,
+					"agent_id":     req.AgentID,
+					"session_id":   req.SessionID,
+					"assign_id":    req.AssignID,
+					"hitl_id":      req.HitlID,
+					"status":       "resumed",
+				}, w.Session.Generation()),
+			},
+		}, nil
+
 	case "agent.session.close":
 		if w.AgentSessions == nil {
 			return agentSessionFailureResult(env, "agent session handler not configured")
@@ -496,6 +526,20 @@ func agentTurnCancelFromPayload(payload map[string]any) (AgentTurnCancelRequest,
 	if strings.TrimSpace(req.WorkgroupID) == "" || strings.TrimSpace(req.MemberID) == "" ||
 		strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.AssignID) == "" {
 		return req, errf(CodeSchemaMismatch, "agent.turn.cancel requires workgroup_id, member_id, agent_id, session_id, assign_id")
+	}
+	return req, nil
+}
+
+func agentTurnResumeFromPayload(payload map[string]any) (AgentTurnResumeRequest, error) {
+	var req AgentTurnResumeRequest
+	raw, _ := json.Marshal(payload)
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return req, errf(CodeSchemaMismatch, "agent.turn.resume payload: %v", err)
+	}
+	if strings.TrimSpace(req.WorkgroupID) == "" || strings.TrimSpace(req.MemberID) == "" ||
+		strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.SessionID) == "" ||
+		strings.TrimSpace(req.AssignID) == "" || len(req.ResumeValue) == 0 {
+		return req, errf(CodeSchemaMismatch, "agent.turn.resume requires workgroup_id, member_id, agent_id, session_id, assign_id, resume_value")
 	}
 	return req, nil
 }

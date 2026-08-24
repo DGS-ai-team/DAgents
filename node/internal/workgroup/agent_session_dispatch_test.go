@@ -32,6 +32,10 @@ func (f *fakeAgentSessionHandler) CancelAgentTurn(_ context.Context, req AgentTu
 	return nil
 }
 
+func (f *fakeAgentSessionHandler) ResumeAgentTurn(context.Context, AgentTurnResumeRequest) error {
+	return nil
+}
+
 func (f *fakeAgentSessionHandler) CloseAgentSession(context.Context, AgentSessionOpenRequest) error {
 	return nil
 }

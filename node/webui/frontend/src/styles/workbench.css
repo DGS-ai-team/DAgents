@@ -507,7 +507,8 @@
 }
 
 /* 主栏聊天区与侧栏平接：去掉 panel 外圆角/描边，避免 stream/composer 接缝发虚 */
-.app__main-col > .chat.panel {
+.app__main-col > .chat.panel,
+.chat-workspace > .chat.panel {
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -2638,6 +2639,8 @@ select.settings-field__input {
 }
 
 .chat__composer-statusline {
+  position: relative;
+  z-index: 12;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2657,7 +2660,7 @@ select.settings-field__input {
 
 .chat__composer-statusline-left {
   flex: 1 1 auto;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .chat__activity-pill {

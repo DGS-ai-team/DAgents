@@ -520,6 +520,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
 		registry, err := s.terminalToolsRegistry(agentID)
+		if err != nil && s.workgroupAgents != nil {
+			if scoped := s.workgroupAgents.registryForSession(req.Context.SessionID); scoped != nil {
+				registry = scoped
+				err = nil
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

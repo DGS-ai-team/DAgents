@@ -10,15 +10,25 @@ const props = defineProps({
 const emit = defineEmits(["select", "refresh"]);
 const open = ref(false);
 
+function openMenu() {
+  open.value = true;
+  emit("refresh");
+}
+
 function toggle() {
-  open.value = !open.value;
-  if (open.value) emit("refresh");
+  if (open.value) {
+    open.value = false;
+    return;
+  }
+  openMenu();
 }
 
 function choose(target) {
   open.value = false;
   emit("select", target);
 }
+
+defineExpose({ open: openMenu, close: () => { open.value = false; } });
 </script>
 
 <template>

@@ -4,11 +4,14 @@ import * as api from "../api/node.js";
 import MainChatPanel from "./MainChatPanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import TerminalWorkbenchComposer from "./TerminalWorkbenchComposer.vue";
-import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
+import TerminalActionMenu from "./TerminalActionMenu.vue";
 import TerminalTargetMenu from "./TerminalTargetMenu.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import { extractToolApprovals } from "../stores/hitl.js";
-import { terminalTargetLabel as formatTerminalTargetLabel } from "../utils/terminalWorkbench.js";
+import {
+  terminalStatusLabel,
+  terminalTargetLabel as formatTerminalTargetLabel,
+} from "../utils/terminalWorkbench.js";
 
 const props = defineProps({
   agentId: { type: String, required: true },
@@ -72,6 +75,7 @@ const remoteTargets = ref([]);
 const selectedTarget = ref({ kind: "local", id: "", shell: "powershell", label: "本机 · PowerShell", description: "Windows PowerShell" });
 const agentPanelCollapsed = ref(false);
 const terminalPanelRef = ref(null);
+const targetMenuRef = ref(null);
 const terminalStatus = ref("idle");
 const terminatingTerminalId = ref("");
 let newTerminalSequence = 0;
@@ -88,6 +92,35 @@ const selectedTerminal = computed(
 );
 
 const hasTerminal = computed(() => Boolean(newSession.value || selectedTerminal.value));
+const terminalHeader = computed(() => {
+  const terminalRecord = selectedTerminal.value || {};
+  const terminalKind = String(terminalRecord.target_kind || terminalRecord.kind || "").trim().toLowerCase();
+  const terminalTargetId = String(terminalRecord.target_id || terminalRecord.config_id || "").trim();
+  const configuredTarget = remoteTargets.value.find((candidate) => candidate.id === terminalTargetId) || {};
+  const source = {
+    ...(selectedTarget.value || {}),
+    ...(terminalKind === "linux_channel" || terminalKind === "linux" ? configuredTarget : {}),
+    ...terminalRecord,
+  };
+  const kind = String(source.target_kind || source.kind || "local").trim().toLowerCase();
+  const shell = String(source.shell || (kind === "linux_channel" ? "bash" : "powershell")).trim().toLowerCase();
+  const shellLabel = {
+    powershell: "PowerShell",
+    bash: "Bash",
+    sh: "Shell",
+    wsl: "WSL",
+    cmd: "CMD",
+  }[shell] || shell || "终端";
+  const remote = kind === "linux_channel" || kind === "linux";
+  const host = String(source.host || "").trim();
+  const port = Number(source.port || 0);
+  return {
+    type: remote ? `远程 Linux · ${shellLabel}` : shellLabel,
+    endpoint: remote ? (host ? `${host}${port ? `:${port}` : ""}` : "远程 Linux") : "本机",
+    username: String(source.username || source.user || "").trim(),
+    status: terminalStatusLabel(terminalStatus.value),
+  };
+});
 const panelOwnsAttachedSession = computed(
   () => Boolean(attachedSessionId.value && attachedSessionId.value === activeTerminalId.value),
 );
@@ -115,12 +148,18 @@ function targetFromTerminal(item) {
   const kind = String(item?.target_kind || "local").trim() || "local";
   const shell = String(item?.shell || (kind === "linux_channel" ? "bash" : "powershell"));
   if (kind === "linux_channel") {
+    const targetId = String(item?.target_id || item?.config_id || "");
+    const configured = remoteTargets.value.find((candidate) => candidate.id === targetId) || {};
     return {
+      ...configured,
       kind,
-      id: String(item?.target_id || item?.config_id || ""),
+      id: targetId,
       shell,
       label: formatTerminalTargetLabel(item),
       description: [item?.username && item?.host ? `${item.username}@${item.host}` : "远程 Linux", item?.port ? `端口 ${item.port}` : ""].filter(Boolean).join(" · "),
+      username: item?.username || configured.username,
+      host: item?.host || configured.host,
+      port: item?.port || configured.port,
     };
   }
   const local = localTargets.find((candidate) => candidate.shell === shell) || localTargets[0];
@@ -181,11 +220,18 @@ function selectTerminal(item) {
 }
 
 function openNewTerminal(target = null) {
+  // Only a terminal target selected from TerminalTargetMenu may start a
+  // session. A bare click handler otherwise passes MouseEvent as the first
+  // argument, which used to be treated as a target and auto-created the
+  // default PowerShell terminal.
+  const selected = target && typeof target === "object" && String(target.kind || "").trim()
+    ? target
+    : null;
   terminatingTerminalId.value = "";
   if (terminationPollTimer) clearTimeout(terminationPollTimer);
   terminationPollTimer = null;
-  if (target) selectedTarget.value = target;
-  autoConnectNewSession.value = Boolean(target);
+  if (selected) selectedTarget.value = selected;
+  autoConnectNewSession.value = Boolean(selected);
   pendingTerminal.value = null;
   attachedSessionId.value = "";
   newTerminalSequence += 1;
@@ -194,6 +240,10 @@ function openNewTerminal(target = null) {
   activeTerminalId.value = "";
   terminalStatus.value = "idle";
   error.value = "";
+}
+
+function openTargetMenu() {
+  targetMenuRef.value?.open?.();
 }
 
 function clearTerminatingPoll() {
@@ -449,6 +499,7 @@ defineExpose({ load, openNewTerminal });
           <span v-else-if="props.error" class="terminal-workbench__agent-trigger-badge terminal-workbench__agent-trigger-badge--error" aria-hidden="true">!</span>
         </button>
         <TerminalTargetMenu
+          ref="targetMenuRef"
           :targets="connectableTargets"
           :loading="targetMenuLoading"
           :error="targetMenuError"
@@ -465,8 +516,30 @@ defineExpose({ load, openNewTerminal });
         <p v-else-if="error" class="terminal-workbench__error" role="alert">{{ error }}</p>
         <div v-else-if="emptyState" class="terminal-workbench__empty">
           <strong>当前没有打开的终端</strong>
-          <span>可以新建本机、WSL 或当前 Agent 已绑定的远程 Linux 终端。</span>
-          <button type="button" class="btn btn--primary btn--sm" @click="openNewTerminal">新建终端</button>
+          <span>请点击右上角的添加按钮，选择要连接的终端。</span>
+        </div>
+
+        <div v-if="hasTerminal" class="terminal-workbench__terminal-bar" aria-label="当前终端">
+          <div class="terminal-workbench__terminal-meta">
+            <svg class="terminal-workbench__terminal-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
+              <path d="m5.75 7 2.5 2.25-2.5 2.25M10.5 12h3.25" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <strong>{{ terminalHeader.type }}</strong>
+            <span class="terminal-workbench__terminal-separator" aria-hidden="true">·</span>
+            <span>{{ terminalHeader.endpoint }}</span>
+            <template v-if="terminalHeader.username">
+              <span class="terminal-workbench__terminal-separator" aria-hidden="true">·</span>
+              <span>用户 {{ terminalHeader.username }}</span>
+            </template>
+            <span
+              class="terminal-workbench__terminal-status"
+              :class="`terminal-workbench__terminal-status--${terminalStatus}`"
+              :title="terminalHeader.status"
+              :aria-label="terminalHeader.status"
+            ></span>
+          </div>
+          <TerminalActionMenu :status="terminalStatus" @action="onTerminalAction" />
         </div>
 
         <TerminalPanel
@@ -554,7 +627,6 @@ defineExpose({ load, openNewTerminal });
       @cycle-effort="emit('cycle-effort')"
       @switch-profile="(id) => emit('switch-profile', id)"
       @select-terminal="selectTerminal"
-      @terminal-action="onTerminalAction"
       @refresh-terminals="load"
     />
   </section>
@@ -663,6 +735,50 @@ defineExpose({ load, openNewTerminal });
   border-radius: 10px;
   background: var(--color-surface, #fff);
 }
+
+.terminal-workbench__terminal-bar {
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 7px 3px 10px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface, #fff);
+}
+
+.terminal-workbench__terminal-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.terminal-workbench__terminal-meta > span:not(.terminal-workbench__terminal-separator):not(.terminal-workbench__terminal-status) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-workbench__terminal-meta strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.terminal-workbench__terminal-icon { width: 15px; height: 15px; flex: 0 0 auto; color: var(--color-text-muted); }
+.terminal-workbench__terminal-separator { color: var(--color-text-subtle); }
+.terminal-workbench__terminal-status { width: 6px; height: 6px; flex: 0 0 auto; margin-left: 2px; border-radius: 50%; background: var(--color-text-subtle); }
+.terminal-workbench__terminal-status--connected { background: var(--color-success, #3d9a5f); }
+.terminal-workbench__terminal-status--running { background: var(--color-success, #3d9a5f); }
+.terminal-workbench__terminal-status--error { background: var(--color-danger, #c45757); }
+.terminal-workbench__terminal-status--terminating { background: var(--color-warning, #c28a24); }
 
 .terminal-workbench__agent-area {
   position: relative;

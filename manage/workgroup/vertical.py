@@ -259,6 +259,42 @@ class VerticalLoop:
             self.hub.request_resume(ctx["home_node_id"], workgroup_id)
         return frame
 
+    def enqueue_agent_turn_resume(
+        self,
+        workgroup_id: str,
+        hitl_id: str,
+        resolution: dict[str, Any],
+    ) -> OutboxFrame:
+        """Return a resolved Node AgentRef HITL to its owning session."""
+        hitl = self.store.get_hitl(hitl_id)
+        if hitl is None or hitl.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "hitl not found", http_status=404)
+        meta = dict(hitl.metadata or {})
+        if meta.get("source") != "agent_ref":
+            raise WorkgroupError("conflict", "hitl is not bound to an AgentRef", http_status=409)
+        required = ("member_id", "agent_id", "session_id", "assign_id", "home_node_id")
+        if any(not str(meta.get(key) or "").strip() for key in required):
+            raise WorkgroupError("conflict", "agent_ref hitl routing metadata is incomplete", http_status=409)
+        payload = {
+            "workgroup_id": workgroup_id,
+            "member_id": str(meta["member_id"]),
+            "agent_id": str(meta["agent_id"]),
+            "session_id": str(meta["session_id"]),
+            "assign_id": str(meta["assign_id"]),
+            "hitl_id": str(meta.get("node_hitl_id") or ""),
+            "resume_value": dict(resolution or {}),
+            "home_node_id": str(meta["home_node_id"]),
+        }
+        frame = self.store.enqueue_outbox(workgroup_id, type="agent.turn.resume", payload=payload)
+        if self.hub is not None:
+            self.hub.deliver_outbox_frame(frame, home_node_id=payload["home_node_id"])
+            # `deliver_outbox_frame` is the live path. Do not immediately call
+            # request_resume as well: on an already connected Node that would
+            # replay the same resume before the live delivery ACK and queue a
+            # second continuation. The durable outbox is replayed on the next
+            # reconnect, which is the only gap-fill path needed here.
+        return frame
+
     def wait_agent_turn(
         self,
         assign_id: str,
@@ -775,7 +811,48 @@ class VerticalLoop:
             event_type = str(payload.get("event_type") or "").strip()
             data = dict(payload.get("data") or {})
             data.update({"mode": "member", "member_id": member_id, "assign_id": payload.get("assign_id")})
-            if event_type == "assistant":
+            if event_type == "hitl_required":
+                assign_id = str(payload.get("assign_id") or "").strip()
+                node_hitl_id = str(data.get("hitl_id") or "").strip()
+                if not assign_id or not node_hitl_id:
+                    return
+                existing = next(
+                    (
+                        item
+                        for item in self.store.list_hitl(workgroup_id, pending_only=True)
+                        if str((item.metadata or {}).get("source") or "") == "agent_ref"
+                        and str((item.metadata or {}).get("assign_id") or "") == assign_id
+                        and str((item.metadata or {}).get("node_hitl_id") or "") == node_hitl_id
+                    ),
+                    None,
+                )
+                hitl = existing or self.store.create_hitl(
+                    workgroup_id,
+                    prompt=str(data.get("message") or "成员请求确认工具执行"),
+                    metadata={
+                        "source": "agent_ref",
+                        "node_hitl_id": node_hitl_id,
+                        "member_id": member_id,
+                        "agent_id": str(payload.get("agent_id") or ""),
+                        "session_id": str(payload.get("session_id") or ""),
+                        "assign_id": assign_id,
+                        "home_node_id": node_id,
+                        "items": list(data.get("items") or []),
+                    },
+                )
+                self.hub.publish_realtime_event(
+                    workgroup_id,
+                    "hitl_required",
+                    {
+                        "mode": "member",
+                        "member_id": member_id,
+                        "assign_id": assign_id,
+                        "hitl_id": hitl.hitl_id,
+                        "prompt": hitl.prompt,
+                        "items": list((hitl.metadata or {}).get("items") or []),
+                    },
+                )
+            elif event_type == "assistant":
                 self.hub.publish_realtime_event(
                     workgroup_id,
                     "delta",
@@ -1002,6 +1079,19 @@ class VerticalLoop:
         hitl = self.store.resolve_hitl_cas(workgroup_id, hitl_id, resolution=req.resolution)
         if not had_waiter and self._turn_kernel is not None:
             self._turn_kernel.resume_resolved_hitl(hitl)
+        if (hitl.metadata or {}).get("source") == "agent_ref":
+            resume = dict(req.resolution or {})
+            # The current Manage composer submits an answer string. Keep that
+            # UI compatible while mapping the common approval words to the
+            # Node-native approval protocol. Callers that already send a
+            # structured selection/approve/reject value pass through intact.
+            if not str(resume.get("type") or "").strip():
+                answer = str(resume.get("answer") or "").strip().lower()
+                if answer in {"yes", "y", "ok", "approve", "approved", "allow", "同意", "批准", "允许", "确认"}:
+                    resume = {"type": "approve"}
+                else:
+                    resume = {"type": "reject"}
+            self.enqueue_agent_turn_resume(workgroup_id, hitl.hitl_id, resume)
         return hitl
 
     def archive_with_tombstone(self, workgroup_id: str) -> dict[str, Any]:
