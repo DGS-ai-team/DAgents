@@ -13,7 +13,16 @@ func (r *runtime) runTurnStepWithSideEffects(
 	compressBefore bool,
 	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
 ) (turn.StepOutcome, []llm.Message) {
-	outcome, history := r.runTurnStep(parent, compressBefore, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+	return r.runTurnStepWithSideEffectsAtEpoch(parent, compressBefore, 0, run)
+}
+
+func (r *runtime) runTurnStepWithSideEffectsAtEpoch(
+	parent context.Context,
+	compressBefore bool,
+	expectedEpoch uint64,
+	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
+) (turn.StepOutcome, []llm.Message) {
+	outcome, history := r.runTurnStepAtEpoch(parent, compressBefore, expectedEpoch, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		if r.sideEffectsEnabled() {
 			// A ready async callback is an external fact, but it must not mutate
 			// the history while any HITL item from the current tool batch is still

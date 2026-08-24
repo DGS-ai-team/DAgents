@@ -384,7 +384,7 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 			}
 		}
 		if linuxBindingApprovalAction(binding) == policy.ActionRequireApproval && strings.TrimSpace(req.Context.ApprovalID) == "" {
-			return nil, fmt.Errorf("Linux channel %q requires approval before execution", cfg.ID)
+			return nil, fmt.Errorf("linux channel %q requires approval before execution", cfg.ID)
 		}
 		if req.CWD == "" && strings.TrimSpace(binding.RemoteCWD) != "" {
 			cfg.DefaultCWD = strings.TrimSpace(binding.RemoteCWD)
@@ -792,10 +792,10 @@ func (p *LinuxShellProvider) openClientWithOptions(ctx context.Context, channelI
 			return LinuxChannelConfig{}, nil, nil, err
 		}
 		if strings.EqualFold(strings.TrimSpace(binding.ApprovalMode), "deny") {
-			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("Linux channel %q is denied by binding policy", cfg.ID)
+			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel %q is denied by binding policy", cfg.ID)
 		}
 		if requireApproval && linuxBindingApprovalAction(binding) == policy.ActionRequireApproval && strings.TrimSpace(approvalID) == "" {
-			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("Linux channel %q requires approval before transfer", cfg.ID)
+			return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel %q requires approval before transfer", cfg.ID)
 		}
 	}
 	cred, err := p.resolver.ResolveLinuxCredential(ctx, cfg.CredentialID)
@@ -1003,11 +1003,6 @@ func buildLinuxRemoteCommandWithRecovery(cfg LinuxChannelConfig, req ExecRequest
 	// status, and turns a signal delivered to the session leader into a group
 	// termination. The fallback preserves compatibility with minimal images;
 	// callers must treat termination as unconfirmed in that mode.
-	groupWrapper := strings.Join([]string{
-		`trap 'trap - INT TERM HUP; kill -TERM -- -$$ 2>/dev/null' INT TERM HUP`,
-		command + " & child=$!",
-		`wait "$child"`,
-	}, "; ")
 	recovery := RemoteProcessRecovery{}
 	jobToken := strings.TrimSpace(req.Context.BackgroundJobID)
 	if !isSafeRemoteJobToken(jobToken) {
@@ -1015,7 +1010,7 @@ func buildLinuxRemoteCommandWithRecovery(cfg LinuxChannelConfig, req ExecRequest
 	}
 	pidFile := remoteJobPIDFile(jobToken)
 	recovery = RemoteProcessRecovery{TargetID: cfg.ID, JobToken: jobToken, PIDFile: pidFile}
-	groupWrapper = strings.Join([]string{
+	groupWrapper := strings.Join([]string{
 		"printf '%s|%s\\n' \"$$\" " + shellQuote(jobToken) + " > " + shellQuote(pidFile) + " || exit 125",
 		"trap 'trap - INT TERM HUP; kill -TERM -- -$$ 2>/dev/null; rm -f " + pidFile + "' INT TERM HUP",
 		"trap 'rm -f " + pidFile + "' EXIT",

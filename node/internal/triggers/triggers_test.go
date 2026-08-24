@@ -1,6 +1,7 @@
 package triggers
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -229,11 +230,11 @@ func TestSchedulerTickIntervalWhenDue(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 1)
-	sched.RunOnceForTest(nil, now.Add(500*time.Millisecond))
+	sched.RunOnceForTest(context.Background(), now.Add(500*time.Millisecond))
 	if len(sub.messages) != 0 {
 		t.Fatalf("early tick should not fire: %v", sub.messages)
 	}
-	sched.RunOnceForTest(nil, now.Add(1100*time.Millisecond))
+	sched.RunOnceForTest(context.Background(), now.Add(1100*time.Millisecond))
 	if len(sub.messages) != 1 {
 		t.Fatalf("expected 1 message, got %v", sub.messages)
 	}
@@ -261,7 +262,7 @@ func TestSchedulerTickIntervalOverdueStillFires(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	sched.RunOnceForTest(nil, now)
+	sched.RunOnceForTest(context.Background(), now)
 	if len(sub.messages) != 1 {
 		t.Fatalf("overdue interval should still fire once, got %v", sub.messages)
 	}

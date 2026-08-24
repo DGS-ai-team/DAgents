@@ -95,6 +95,10 @@ export const VIEW_META = {
     title: "Node 列表",
     subtitle: "已注册 Node、在线状态与发现组",
   },
+  agents: {
+    title: "Agent 列表",
+    subtitle: "Node 暴露的可用 Agent 与当前能力快照",
+  },
   permissions: {
     title: "发现组",
     subtitle: "创建组并关联 Node，控制登录后的可见范围",

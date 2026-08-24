@@ -224,7 +224,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 完整设置：前端展开模板后提交 defaults；无 defaults 时用模板种子或内置默认。
-	baseDefaults := map[string]any{}
+	var baseDefaults map[string]any
 	fullSettings := req.Defaults != nil
 	if fullSettings {
 		baseDefaults = agentruntime.MergeDefaults(nil, req.Defaults)

@@ -21,6 +21,7 @@ from manage.storage.sqlite import SQLiteDatabase
 
 @dataclass(frozen=True)
 class AgentListQuery:
+    kind: Literal["all", "node", "agent"] = "all"
     discovery_group: str | None = None
     team: str | None = None
     status: AgentStatus | Literal["all"] = "online"
@@ -35,6 +36,13 @@ def stored_to_public(record: AgentStoredRecord, *, now_unix: int | None = None) 
     return AgentRecord(**record.model_dump(mode="python"), status=status)
 
 
+def record_kind(record: AgentStoredRecord | AgentRecord) -> Literal["node", "agent"]:
+    raw = str(getattr(record, "kind", "") or "").strip().lower()
+    if raw in {"node", "agent"}:
+        return raw  # type: ignore[return-value]
+    return "node" if record_node_id(record) == str(getattr(record, "agent_id", "")).strip() else "agent"
+
+
 def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
     migrated = dict(data)
     registered = int(migrated.get("registered_at_unix") or 0)
@@ -47,6 +55,8 @@ def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
     if not node_id:
         node_id = agent_id
     migrated["node_id"] = node_id
+    kind = str(migrated.get("kind") or "").strip().lower()
+    migrated["kind"] = kind if kind in {"node", "agent"} else ("node" if agent_id == node_id else "agent")
     if not migrated.get("name"):
         migrated["name"] = agent_id or node_id
     for key in ("description", "owner", "team", "version"):
@@ -96,6 +106,7 @@ class AgentRegistryStore:
             stored = AgentStoredRecord(
                 agent_id=agent_key,
                 node_id=node_id,
+                kind="node" if agent_key == node_id else "agent",
                 base_url=payload.base_url,
                 host_ips=(payload.host_ips or "").strip(),
                 discovery_group=discovery_group,
@@ -270,6 +281,7 @@ class AgentRegistryStore:
                 AgentDiscoverRecord(
                     agent_id=item.agent_id,
                     node_id=record_node_id(item) or item.agent_id,
+                    kind=record_kind(item),
                     discovery_group=item.discovery_group,
                     capabilities=caps,
                     capabilities_hint=item.capabilities_hint,
@@ -286,6 +298,8 @@ class AgentRegistryStore:
     @staticmethod
     def _apply_filters(records: list[AgentRecord], query: AgentListQuery) -> list[AgentRecord]:
         filtered = records
+        if query.kind != "all":
+            filtered = [item for item in filtered if record_kind(item) == query.kind]
         if query.discovery_group is not None:
             filtered = [item for item in filtered if query.discovery_group in item.discovery_group]
         if query.team:

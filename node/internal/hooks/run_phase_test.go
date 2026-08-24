@@ -12,10 +12,9 @@ import (
 )
 
 type stubPhaseHook struct {
-	name     string
-	phases   []Phase
-	priority int
-	fn       func(ctx context.Context, hc *Context, host Host) (Result, error)
+	name   string
+	phases []Phase
+	fn     func(ctx context.Context, hc *Context, host Host) (Result, error)
 }
 
 func (h stubPhaseHook) Name() string    { return h.name }
@@ -46,8 +45,8 @@ func TestRunPhase_priorityOrder(t *testing.T) {
 	}, RegisterOpts{Priority: 10})
 
 	out, err := reg.RunPhase(context.Background(), PhasePromptBuild, &Context{
-		SessionID: "s1",
-		TurnID:    "t1",
+		SessionID:   "s1",
+		TurnID:      "t1",
 		PromptBuild: &PromptBuildPayload{SystemPrompt: "base"},
 	}, NoopHost())
 	if err != nil {

@@ -122,7 +122,10 @@ const configMembers = computed(() => {
   }
   for (const m of sortedMembers.value) {
     const spec = memberSpecs.value[m.member_id] || null;
-    const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
+    const currentAgent = agentOptions.value.find((item) => item.id === m.agent_id);
+    const allow = m.execution_mode === "agent_ref"
+      ? (Array.isArray(currentAgent?.tools) ? currentAgent.tools : [])
+      : (Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : []);
     const groupIds = allow.length
       ? memberGroupsFromAllowNames(allow, memberGroupOptions.value)
       : defaultMemberGroupIds(memberGroupOptions.value);
@@ -142,7 +145,9 @@ const configMembers = computed(() => {
       max_tool_loops: spec?.max_tool_loops ?? null,
       allow_tool_names: allow,
       tool_group_ids: groupIds,
-      tool_group_labels: formatMemberGroupLabels(groupIds, memberGroupOptions.value),
+      tool_group_labels: m.execution_mode === "agent_ref"
+        ? (allow.length ? `Agent 当前工具 ${allow.length} 项${groupIds.length ? ` · ${formatMemberGroupLabels(groupIds, memberGroupOptions.value)}` : ""}` : "以 Agent 当前配置为准")
+        : formatMemberGroupLabels(groupIds, memberGroupOptions.value),
       hint: String(spec?.description || "").trim(),
     });
   }
@@ -249,8 +254,6 @@ function resetMemberForm() {
   memberForm.description = "";
   memberForm.agentId = "";
   memberForm.homeNodeId = "";
-  memberForm.soulMd = "";
-  memberForm.customMd = "";
   memberForm.groups = defaultMemberGroupIds(memberGroupOptions.value);
 }
 
@@ -434,14 +437,13 @@ async function loadNodeOptions() {
       const id = String(a?.agent_id || "").trim();
       const nodeId = String(a?.node_id || id).trim();
       if (!id) return;
-      // Registry keeps a compatibility row for the hosting Node. It is not
-      // an AgentRef target and would fail when Node tries to open an Agent
-      // session by that id.
-      if (id === nodeId) return;
       const name = String(a?.name || "").trim();
       const label = name && name !== id ? `${name} (${id})` : name || id;
-      agentsById.set(id, { id, nodeId, name: name || id, label, status: String(a?.status || "unknown") });
-      const nodeName = nodeId === id ? name : nodeId;
+      const kind = String(a?.kind || (id === nodeId ? "node" : "agent")).trim();
+      if (kind === "agent" && id !== nodeId) {
+        agentsById.set(id, { id, nodeId, name: name || id, label, status: String(a?.status || "unknown"), tools: [...(a?.tools || [])], skills: [...(a?.skills || [])] });
+      }
+      const nodeName = kind === "node" ? name : nodeId;
       const prev = byId.get(nodeId);
       if (!prev || (nodeName && (!prev.name || prev.name === nodeId))) {
         byId.set(nodeId, { id: nodeId, name: nodeName || nodeId, label: nodeName && nodeName !== nodeId ? `${nodeName} (${nodeId})` : nodeId });
@@ -460,11 +462,11 @@ async function loadNodeOptions() {
         return;
       }
       const pages = await Promise.all(
-        groups.map((g) =>
-          fetchAgents({ page: 1, page_size: 100, status: "online", discovery_group: g }).catch(() => ({
+        groups.flatMap((g) => ["node", "agent"].map((kind) =>
+          fetchAgents({ page: 1, page_size: 100, status: "online", kind, discovery_group: g }).catch(() => ({
             agents: [],
           })),
-        ),
+        )),
       );
       for (const data of pages) {
         const agents = Array.isArray(data?.agents) ? data.agents : [];
@@ -474,8 +476,13 @@ async function loadNodeOptions() {
         addAgent({ agent_id: ownerId.value, node_id: ownerId.value, name: ownerLabel.value });
       }
     } else {
-      const data = await fetchAgents({ page: 1, page_size: 100, status: "all" });
-      const agents = Array.isArray(data?.agents) ? data.agents : Array.isArray(data) ? data : [];
+      const [nodeData, agentData] = await Promise.all([
+        fetchAgents({ page: 1, page_size: 100, status: "all", kind: "node" }),
+        fetchAgents({ page: 1, page_size: 100, status: "all", kind: "agent" }),
+      ]);
+      const nodes = Array.isArray(nodeData?.agents) ? nodeData.agents : [];
+      const agents = Array.isArray(agentData?.agents) ? agentData.agents : [];
+      for (const a of nodes) addAgent(a);
       for (const a of agents) addAgent(a);
     }
 
@@ -528,26 +535,12 @@ async function submitCreateMember() {
   creatingMember.value = true;
   try {
     await ensureHomeInAcl(wg.workgroup_id, home);
-    const selected = memberForm.groups.length
-      ? [...memberForm.groups]
-      : defaultMemberGroupIds(memberGroupOptions.value);
-    const tools = expandMemberGroupsToTools(selected, memberGroupOptions.value);
     const body = {
       display_name: displayName,
       description: memberForm.description.trim(),
       agent_id: agentId,
       home_node_id: home,
-      allow_tool_names: tools,
-      prompt: {
-        soul_md: memberForm.soulMd,
-        user_md: "",
-        custom_md: memberForm.customMd,
-      },
     };
-    if (wg.llm_profile_id) {
-      body.llm_profile_id = wg.llm_profile_id;
-      body.llm_profile_revision = wg.llm_profile_revision || "1";
-    }
     await createWorkgroupMember(wg.workgroup_id, body);
     cancelMemberForm();
     await loadSettings();
@@ -1132,48 +1125,9 @@ onMounted(async () => {
               </label>
             </div>
 
-            <fieldset class="wg-member-create__tools">
-              <legend>工具组</legend>
-              <p class="muted wg-member-create__tools-hint">
-                默认文件系统；Shell 需显式勾选。提交时展开为工具白名单。
-              </p>
-              <div class="wg-member-tool-row">
-                <button
-                  v-for="opt in memberGroupOptions"
-                  :key="opt.id"
-                  type="button"
-                  class="wg-member-tool-chip"
-                  :class="{ 'wg-member-tool-chip--on': memberForm.groups.includes(opt.id) }"
-                  :disabled="creatingMember"
-                  :title="opt.hint || opt.id"
-                  @click="toggleMemberFormGroup(opt.id)"
-                >
-                  {{ opt.label }}
-                </button>
-              </div>
-            </fieldset>
-
-            <details class="wg-member-create__prompt">
-              <summary>高级：Prompt 侧车（可选）</summary>
-              <label class="field">
-                <span>Soul</span>
-                <textarea
-                  v-model="memberForm.soulMd"
-                  rows="3"
-                  placeholder="soul.md 正文（可空）"
-                  :disabled="creatingMember"
-                />
-              </label>
-              <label class="field">
-                <span>Custom</span>
-                <textarea
-                  v-model="memberForm.customMd"
-                  rows="2"
-                  placeholder="custom.md 正文（可空）"
-                  :disabled="creatingMember"
-                />
-              </label>
-            </details>
+            <p class="muted wg-member-create__tools-hint">
+              成员直接绑定 Node 已注册的 Agent；工具、Skills、Prompt 与模型配置均以该 Agent 当前运行时快照为准。
+            </p>
 
             <div class="wg-member-create__actions">
               <button

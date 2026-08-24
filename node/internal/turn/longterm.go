@@ -154,11 +154,6 @@ func NewLongTermEntry(content string, now time.Time) LongTermEntry {
 	}
 }
 
-func stripLongTermEntryPrefix(line string) string {
-	content, _, _ := parseLongTermEntryPrefix(line)
-	return content
-}
-
 func parseLongTermEntryPrefix(line string) (string, time.Time, bool) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "- [") {

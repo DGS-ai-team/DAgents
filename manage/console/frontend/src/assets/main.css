@@ -4236,6 +4236,28 @@ code {
   white-space: nowrap;
 }
 
+.wg-inline-cancel {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--chat-text-subtle, var(--chat-text-muted));
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.wg-inline-cancel:hover:not(:disabled) {
+  color: var(--danger, #b45309);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.wg-inline-cancel:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .wg-task__dots {
   --stream-meta-dot-size: 4px;
   --stream-meta-dot-gap: 2px;

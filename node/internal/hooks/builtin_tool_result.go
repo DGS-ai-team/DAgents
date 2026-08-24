@@ -2,7 +2,6 @@ package hooks
 
 import (
 	"context"
-	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
 )
@@ -27,12 +26,6 @@ func (h *ToolResultPackageHook) Run(ctx context.Context, hc *Context, host Host)
 }
 
 func (h *ToolResultPackageHook) RunToolAfterEach(_ context.Context, in ToolAfterEachInput, out *ToolAfterEachOutput) error {
-	raw := strings.TrimSpace(in.RawResult)
-	if raw == "" && in.RawResult == "" {
-		raw = ""
-	} else if raw == "" {
-		raw = in.RawResult
-	}
 	if out.ForClient == "" {
 		out.ForClient = in.RawResult
 	}

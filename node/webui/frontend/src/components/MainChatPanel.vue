@@ -5,7 +5,6 @@ import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
 import McpStatusIndicator from "./McpStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
-import UsageSummary from "./UsageSummary.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import MessageBubble from "./MessageBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
@@ -1029,7 +1028,6 @@ defineExpose({
               <span class="composer-toolbar__label">{{ thinkingSecondaryLabel }} {{ thinkingEffort }}</span>
             </button>
           </div>
-          <UsageSummary />
           <ContextMeter />
         </div>
       </div>

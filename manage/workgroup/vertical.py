@@ -499,9 +499,24 @@ class VerticalLoop:
             assign_id=assign.assign_id,
             member_id=member_id,
             home_node_id=str(ctx.get("home_node_id") or ""),
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
         )
         frame = self.store.enqueue_outbox(workgroup_id, type="tool.command", payload=command)
         self.store.set_assign_status(assign.assign_id, "running")
+        try:
+            self.store.append_timeline(
+                workgroup_id,
+                type="tool_started",
+                actor_id=member_id,
+                assign_id=assign.assign_id,
+                tool_call_id=tool_call_id,
+                command_id=cmd_id,
+                tool_name=tool_name,
+                status="running",
+            )
+        except Exception:  # noqa: BLE001 - progress must not block execution
+            pass
         if self.hub is not None:
             delivered = self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
             # 与 provision 对齐：未在线时落库，在线但游标落后时补 resume gap-fill
@@ -581,6 +596,10 @@ class VerticalLoop:
         if assign is None or assign.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "assign not found", http_status=404)
         ignored_assign_update = False
+        with self._lock:
+            command_meta = dict(
+                (self._wg_pending_commands.get(workgroup_id) or {}).get(req.command_id) or {}
+            )
         if assign.status in {"succeeded", "failed", "indeterminate", "canceled"}:
             # 迟到 result：仍唤醒 waiter，禁止把已终态 assign 拉回 running
             ignored_assign_update = True
@@ -605,6 +624,20 @@ class VerticalLoop:
                 "command_id": req.command_id,
             },
         )
+        if not ignored_assign_update:
+            try:
+                self.store.append_timeline(
+                    workgroup_id,
+                    type="tool_finished",
+                    actor_id=req.member_id,
+                    assign_id=req.assign_id,
+                    tool_call_id=str(command_meta.get("tool_call_id") or "") or None,
+                    command_id=req.command_id,
+                    tool_name=str(command_meta.get("tool_name") or "") or None,
+                    status=req.status,
+                )
+            except Exception:  # noqa: BLE001 - progress must not block result delivery
+                pass
         self._forget_pending_command(workgroup_id, req.command_id)
         return {
             "assign": assign,
@@ -682,20 +715,43 @@ class VerticalLoop:
 
     def cancel_pending_commands(self, workgroup_id: str) -> list[str]:
         """取消 Node 工具与 AgentRef turn，并唤醒对应的本地 waiter。"""
+        return self._cancel_pending_commands(workgroup_id)
+
+    def _cancel_pending_commands(
+        self,
+        workgroup_id: str,
+        *,
+        assign_id: str | None = None,
+        tool_call_id: str | None = None,
+        cancel_agent_turn: bool = True,
+    ) -> list[str]:
+        target_assign_id = assign_id
         with self._lock:
-            pending = dict(self._wg_pending_commands.get(workgroup_id) or {})
+            all_pending = dict(self._wg_pending_commands.get(workgroup_id) or {})
+            pending = {
+                command_id: meta
+                for command_id, meta in all_pending.items()
+                if target_assign_id is None
+                or str((meta or {}).get("assign_id") or "") == target_assign_id
+            }
+            if tool_call_id is not None:
+                pending = {
+                    command_id: meta
+                    for command_id, meta in pending.items()
+                    if str((meta or {}).get("tool_call_id") or "") == tool_call_id
+                }
         woke: list[str] = []
         for command_id, meta in pending.items():
             with self._lock:
                 if command_id in self._command_results:
                     continue
-            assign_id = str((meta or {}).get("assign_id") or "")
+            command_assign_id = str((meta or {}).get("assign_id") or "")
             member_id = str((meta or {}).get("member_id") or "")
             home_node_id = str((meta or {}).get("home_node_id") or "")
             cancel_payload = {
                 "command_id": command_id,
                 "workgroup_id": workgroup_id,
-                "assign_id": assign_id,
+                "assign_id": command_assign_id,
                 "member_id": member_id,
                 "status": "canceled",
                 "error_code": "canceled",
@@ -715,20 +771,45 @@ class VerticalLoop:
                     "result_text": "",
                     "error_code": "canceled",
                     "command_id": command_id,
-                    "assign_id": assign_id,
+                    "assign_id": command_assign_id,
                     "member_id": member_id,
                 },
             )
+            try:
+                self.store.append_timeline(
+                    workgroup_id,
+                    type="tool_finished",
+                    actor_id=member_id,
+                    assign_id=command_assign_id or None,
+                    tool_call_id=str((meta or {}).get("tool_call_id") or "") or None,
+                    command_id=command_id,
+                    tool_name=str((meta or {}).get("tool_name") or "") or None,
+                    status="canceled",
+                )
+            except Exception:  # noqa: BLE001
+                pass
             woke.append(command_id)
         with self._lock:
-            self._wg_pending_commands.pop(workgroup_id, None)
-        self.cancel_pending_agent_turns(workgroup_id)
+            if target_assign_id is None:
+                self._wg_pending_commands.pop(workgroup_id, None)
+            else:
+                remaining = self._wg_pending_commands.get(workgroup_id) or {}
+                for command_id in pending:
+                    remaining.pop(command_id, None)
+                if not remaining:
+                    self._wg_pending_commands.pop(workgroup_id, None)
+        if cancel_agent_turn:
+            self.cancel_pending_agent_turns(workgroup_id, assign_id=target_assign_id)
         return woke
 
-    def cancel_pending_agent_turns(self, workgroup_id: str) -> list[str]:
+    def cancel_pending_agent_turns(
+        self, workgroup_id: str, *, assign_id: str | None = None
+    ) -> list[str]:
         """通过已建立的 Node→Manage WS 取消工作组内 AgentRef turn。"""
         canceled: list[str] = []
         for assign in self.store.list_assigns(workgroup_id, active_only=True):
+            if assign_id is not None and assign.assign_id != assign_id:
+                continue
             ctx = self.store.member_execution_context(assign.member_id)
             if str(ctx.get("execution_mode") or "") != "agent_ref":
                 continue
@@ -762,6 +843,48 @@ class VerticalLoop:
             )
             canceled.append(assign.assign_id)
         return canceled
+
+    def cancel_assign_runtime(self, workgroup_id: str, assign_id: str) -> list[str]:
+        """Cancel only the Node-side work belonging to one Assign."""
+        return self._cancel_pending_commands(workgroup_id, assign_id=assign_id)
+
+    def cancel_tool_runtime(self, workgroup_id: str, assign_id: str, tool_call_id: str) -> list[str]:
+        """Cancel one pending command or AgentRef bash execution."""
+        command_ids = self._cancel_pending_commands(
+            workgroup_id,
+            assign_id=assign_id,
+            tool_call_id=tool_call_id,
+            cancel_agent_turn=False,
+        )
+        if command_ids:
+            return command_ids
+        assign = self.store.get_assign(assign_id)
+        if assign is None or assign.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "assign not found", http_status=404)
+        ctx = self.store.member_execution_context(assign.member_id)
+        if str(ctx.get("execution_mode") or "") != "agent_ref":
+            return []
+        tool_name = ""
+        for event in reversed(self.store.list_timeline(workgroup_id)):
+            if event.assign_id == assign_id and event.tool_call_id == tool_call_id and event.type == "tool_started":
+                tool_name = str(event.tool_name or "").strip()
+                break
+        if not tool_name:
+            return []
+        payload = {
+            "workgroup_id": workgroup_id,
+            "member_id": assign.member_id,
+            "agent_id": str(ctx.get("agent_id") or ""),
+            "session_id": str(ctx.get("session_id") or ""),
+            "assign_id": assign_id,
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "home_node_id": str(ctx.get("home_node_id") or ""),
+        }
+        frame = self.store.enqueue_outbox(workgroup_id, type="agent.tool.cancel", payload=payload)
+        if self.hub is not None and payload["home_node_id"]:
+            self.hub.deliver_outbox_frame(frame, home_node_id=payload["home_node_id"])
+        return [f"agent-tool:{tool_call_id}"]
 
     def _signal_agent_result(self, assign_id: str, result: dict[str, Any]) -> None:
         with self._lock:
@@ -861,10 +984,55 @@ class VerticalLoop:
             elif event_type in {"reasoning", "turn_state"}:
                 self.hub.publish_realtime_event(workgroup_id, "status", data)
             elif event_type == "tool_call":
+                tool_calls = [] if bool(data.get("partial")) else list(data.get("tool_calls") or [])
+                for call in tool_calls:
+                    if not isinstance(call, dict):
+                        continue
+                    function = dict(call.get("function") or {})
+                    tool_call_id = str(call.get("id") or data.get("tool_call_id") or "").strip()
+                    tool_name = str(
+                        data.get("tool_name") or function.get("name") or call.get("name") or ""
+                    ).strip()
+                    if not tool_call_id and not tool_name:
+                        continue
+                    try:
+                        self.store.append_timeline(
+                            workgroup_id,
+                            type="tool_started",
+                            actor_id=member_id,
+                            assign_id=str(payload.get("assign_id") or "") or None,
+                            tool_call_id=tool_call_id or None,
+                            tool_name=tool_name or None,
+                            status="running",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                 self.hub.publish_realtime_event(
                     workgroup_id,
                     "status",
                     {**data, "phase": "tool", "purpose": str(data.get("tool_name") or "执行工具")},
+                )
+            elif event_type == "tool_result":
+                assign_id = str(payload.get("assign_id") or "").strip()
+                tool_call_id = str(data.get("tool_call_id") or "").strip()
+                tool_name = str(data.get("tool_name") or "").strip()
+                status = str(data.get("status") or data.get("result_status") or "succeeded").strip()
+                try:
+                    self.store.append_timeline(
+                        workgroup_id,
+                        type="tool_finished",
+                        actor_id=member_id,
+                        assign_id=assign_id or None,
+                        tool_call_id=tool_call_id or None,
+                        tool_name=tool_name or None,
+                        status=status or "succeeded",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                self.hub.publish_realtime_event(
+                    workgroup_id,
+                    "status",
+                    {**data, "phase": "tool_result", "purpose": tool_name or "工具已完成"},
                 )
             return
         if mtype == "agent.turn.result":
@@ -1011,7 +1179,8 @@ class VerticalLoop:
                     assign_id,
                     member_id,
                     instruction,
-                    cancel_check=lambda: kernel._is_cancelled(workgroup_id),
+                    cancel_check=lambda: kernel._is_cancelled(workgroup_id)
+                    or kernel._is_assign_cancelled(assign_id),
                     timeout_s=timeout_s,
                 )
             spec = self.store.get_spec(member_id)
@@ -1046,6 +1215,7 @@ class VerticalLoop:
                 tool_runner=tool_runner,
             )
             kernel._raise_if_cancelled(workgroup_id)
+            kernel._raise_if_assign_cancelled(assign_id)
             current = self.store.get_assign(assign_id)
             if current is not None and current.status in {"failed", "canceled"}:
                 raise WorkgroupError(
@@ -1145,6 +1315,8 @@ class VerticalLoop:
         assign_id: str = "",
         member_id: str = "",
         home_node_id: str = "",
+        tool_call_id: str = "",
+        tool_name: str = "",
     ) -> None:
         with self._lock:
             self._command_waiters.setdefault(command_id, threading.Event())
@@ -1154,6 +1326,8 @@ class VerticalLoop:
                     "assign_id": str(assign_id or ""),
                     "member_id": str(member_id or ""),
                     "home_node_id": str(home_node_id or ""),
+                    "tool_call_id": str(tool_call_id or ""),
+                    "tool_name": str(tool_name or ""),
                 }
 
     def _forget_pending_command(self, workgroup_id: str, command_id: str) -> None:

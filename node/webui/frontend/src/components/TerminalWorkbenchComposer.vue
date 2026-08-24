@@ -4,7 +4,6 @@ import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
 import McpStatusIndicator from "./McpStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
-import UsageSummary from "./UsageSummary.vue";
 import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
 
 const props = defineProps({
@@ -169,7 +168,6 @@ defineExpose({ focusInput, submit });
             <span class="composer-toolbar__label">{{ thinkingSecondaryLabel }} {{ thinkingEffort }}</span>
           </button>
         </div>
-        <UsageSummary />
         <ContextMeter />
       </div>
     </div>
