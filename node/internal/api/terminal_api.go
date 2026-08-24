@@ -128,7 +128,7 @@ func (s *Server) handleAgentTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	registry, err := s.terminalToolsRegistry(agentID)
+	_, err := s.terminalToolsRegistry(agentID)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "agent_runtime_missing", err.Error(), map[string]any{"agent_id": agentID})
 		return
@@ -167,22 +167,21 @@ func (s *Server) handleAgentTerminalWS(w http.ResponseWriter, r *http.Request) {
 			Rows:  open.Rows,
 			Cols:  open.Cols,
 		}
-		terminal, openErr := registry.OpenTerminal(ctx, request)
+		// UI-created sessions must use the same broker path as terminal_open.
+		// Besides keeping the session registry authoritative for both callers,
+		// this gives a detached UI session the same keep-alive semantics as an
+		// Agent-owned session. Leaving the terminal view is therefore a detach,
+		// not an implicit close; explicit terminate/close still removes it.
+		info, openErr := s.terminals.Open(ctx, agentID, request)
 		if openErr != nil {
 			_ = writeTerminalWSEvent(ctx, conn, &sync.Mutex{}, terminalWSEvent{Type: "error", Error: openErr.Error()})
 			return
 		}
-		session, err = newTerminalSession(agentID, terminal, s.terminals, request, false)
+		session, err = s.terminals.get(info.ID, agentID)
 		if err != nil {
 			_ = writeTerminalWSEvent(ctx, conn, &sync.Mutex{}, terminalWSEvent{Type: "error", Error: err.Error()})
 			return
 		}
-		if err := s.terminals.add(session); err != nil {
-			session.shutdown()
-			_ = writeTerminalWSEvent(ctx, conn, &sync.Mutex{}, terminalWSEvent{Type: "error", Error: err.Error()})
-			return
-		}
-		s.terminals.publishChange(session, "terminal.opened")
 	case "resume":
 		session, err = s.terminals.get(strings.TrimSpace(open.SessionID), agentID)
 		if err != nil {

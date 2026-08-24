@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.10.0-green" alt="v0.10.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.10.1-green" alt="v0.10.1"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
 </p>
 
@@ -32,7 +32,7 @@
 
 它不是拖拽式「万能工作流」平台，而是面向企业与团队的 **本地优先助手控制台**——能管工具权限、能等人确认、能把对话与文件留在自己这边。
 
-当前版本为 **v0.10.0**（工作组 AgentRef 重构版）：Node 中已有 Agent 可注册到 Manage，工作组直接引用 Agent，并通过 Node 主动建立的 WS 创建隔离会话、执行 turn 和回传事件；同时保留旧 MemberSpec/provision 兼容路径。能力边界与验收步骤见 [AgentRef 方案](docs/design/workgroup-agent-membership-v1.md) 和 [真实测试清单](docs/design/workgroup-agent-membership-smoke-checklist.md)。
+当前版本为 **v0.10.1**（工作组 AgentRef 稳定性版）：在 AgentRef 重构基础上补齐人工确认恢复、会话工具作用域和终端工作台稳定性。Node 中已有 Agent 可注册到 Manage，工作组直接引用 Agent，并通过 Node 主动建立的 WS 创建隔离会话、执行 turn 和回传事件；同时保留旧 MemberSpec/provision 兼容路径。能力边界与验收步骤见 [AgentRef 方案](docs/design/workgroup-agent-membership-v1.md) 和 [真实测试清单](docs/design/workgroup-agent-membership-smoke-checklist.md)。
 
 ---
 

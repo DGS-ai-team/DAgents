@@ -190,13 +190,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.mcp-status-indicator { position: relative; display: inline-flex; }
+.mcp-status-indicator { position: relative; display: inline-flex; flex: 0 0 auto; min-width: 26px; }
 .mcp-status-indicator__trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
+  min-width: 26px;
   height: 26px;
+  flex: 0 0 26px;
   padding: 4px;
   border: 1px solid transparent;
   border-radius: 6px;

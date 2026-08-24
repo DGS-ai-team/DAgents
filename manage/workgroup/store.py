@@ -1788,6 +1788,7 @@ class WorkGroupStore:
         prompt: str,
         run_id: str | None = None,
         tool_call_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
         reserve_waiter: bool = False,
     ) -> HITLRequest:
         with self._lock:
@@ -1803,6 +1804,7 @@ class WorkGroupStore:
                 created_at=_now(),
                 run_id=(run_id or "").strip() or None,
                 tool_call_id=(tool_call_id or "").strip() or None,
+                metadata=dict(metadata or {}),
             )
             self._hitl[hitl.hitl_id] = hitl
             self._put(
