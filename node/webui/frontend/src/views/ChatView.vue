@@ -1090,8 +1090,7 @@ const terminalOpen = computed(
   () =>
     Boolean(
       agentStore.agentId &&
-        (String(route.query.view || "") === "terminal" ||
-          (String(selectedTerminalId.value || "").trim() && selectedTerminalMeta.value)),
+        String(route.query.view || "") === "terminal",
     ),
 );
 
@@ -1123,8 +1122,9 @@ function selectTerminal(item) {
 }
 
 function closeTerminal() {
-  selectedTerminalId.value = "";
-  selectedTerminalMeta.value = null;
+  // Leaving the workbench only hides its view. The selected session remains
+  // resumable through the status bar and is cleared only by an authoritative
+  // terminal.closed/terminated event or an explicit session removal.
   chromeStore.panel = null;
   void router.replace({ name: "agents", params: { agentId: agentStore.agentId }, query: terminalRouteQuery() });
   nextTick(() => {
@@ -1171,10 +1171,6 @@ watch(
   () => [route.query.view, route.query.terminal_id, agentStore.agentId],
   ([view, terminalId]) => {
     if (String(view || "") !== "terminal") {
-      if (selectedTerminalId.value || selectedTerminalMeta.value) {
-        selectedTerminalId.value = "";
-        selectedTerminalMeta.value = null;
-      }
       return;
     }
     const id = String(terminalId || "").trim();

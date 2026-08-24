@@ -25,11 +25,12 @@ import (
 type workgroupAgentBridge struct {
 	server *Server
 
-	mu        sync.Mutex
-	bindings  map[string]workgroupAgentBinding // session_id -> binding
-	turns     map[string]workgroupAgentTurn    // assign_id -> turn
-	completed map[string]map[string]any        // assign_id -> terminal result, for replay
-	emit      func(map[string]any) error
+	mu         sync.Mutex
+	bindings   map[string]workgroupAgentBinding // session_id -> binding
+	registries map[string]*tools.Registry       // session_id -> scoped tool registry
+	turns      map[string]workgroupAgentTurn    // assign_id -> turn
+	completed  map[string]map[string]any        // assign_id -> terminal result, for replay
+	emit       func(map[string]any) error
 }
 
 type workgroupAgentBinding struct {
@@ -46,10 +47,11 @@ type workgroupAgentTurn struct {
 
 func newWorkgroupAgentBridge(server *Server) *workgroupAgentBridge {
 	return &workgroupAgentBridge{
-		server:    server,
-		bindings:  make(map[string]workgroupAgentBinding),
-		turns:     make(map[string]workgroupAgentTurn),
-		completed: make(map[string]map[string]any),
+		server:     server,
+		bindings:   make(map[string]workgroupAgentBinding),
+		registries: make(map[string]*tools.Registry),
+		turns:      make(map[string]workgroupAgentTurn),
+		completed:  make(map[string]map[string]any),
 	}
 }
 
@@ -111,6 +113,7 @@ func (b *workgroupAgentBridge) OpenAgentSession(ctx context.Context, req workgro
 	}
 
 	b.mu.Lock()
+	b.registries[req.SessionID] = registry
 	b.bindings[req.SessionID] = workgroupAgentBinding{
 		workgroupID: req.WorkgroupID,
 		memberID:    req.MemberID,
@@ -125,6 +128,20 @@ func (b *workgroupAgentBridge) OpenAgentSession(ctx context.Context, req workgro
 		SessionID:   req.SessionID,
 		Status:      "ready",
 	}, nil
+}
+
+// registryForSession lets Node-owned brokers open a resource on behalf of a
+// workgroup session without falling back to the personal Agent runtime. The
+// workgroup session owns the tool snapshot and policy; the terminal registry
+// still owns the long-lived PTY itself.
+func (b *workgroupAgentBridge) registryForSession(sessionID string) *tools.Registry {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	registry := b.registries[strings.TrimSpace(sessionID)]
+	b.mu.Unlock()
+	return registry
 }
 
 func (b *workgroupAgentBridge) buildAgentSessionRuntime(
@@ -285,9 +302,13 @@ func (b *workgroupAgentBridge) runAgentTurn(
 				},
 			})
 			if ev.Type == "done" {
-				status := "succeeded"
+				// A workgroup assignment owns the whole Agent turn, not one model
+				// step.  `done` is also emitted when the turn pauses for HITL; it
+				// must not be interpreted as a successful member result.  For the
+				// normal tool loop the next lifecycle events arrive on this same
+				// subscription, so keep waiting until the terminal done event.
 				if complete, ok := data["turn_complete"].(bool); ok && !complete {
-					status = "awaiting"
+					continue
 				}
 				text := strings.TrimSpace(assistantText.String())
 				if text == "" {
@@ -296,7 +317,7 @@ func (b *workgroupAgentBridge) runAgentTurn(
 					// without making the final result depend on a single snapshot read.
 					text = b.lastAssistantTextWithRetry(req.SessionID)
 				}
-				b.publishTurnResult(req, b.turnResultPayload(req, status, text, "", stringValue(data["finish_reason"])))
+				b.publishTurnResult(req, b.turnResultPayload(req, "succeeded", text, "", stringValue(data["finish_reason"])))
 				return
 			}
 			if ev.Type == "error" {
@@ -341,9 +362,42 @@ func (b *workgroupAgentBridge) CancelAgentTurn(_ context.Context, req workgroup.
 	return nil
 }
 
+func (b *workgroupAgentBridge) ResumeAgentTurn(_ context.Context, req workgroup.AgentTurnResumeRequest) error {
+	if b == nil || b.server == nil || b.server.sessions == nil {
+		return fmt.Errorf("node turn runtime unavailable")
+	}
+	b.mu.Lock()
+	binding, bound := b.bindings[req.SessionID]
+	_, running := b.turns[req.AssignID]
+	b.mu.Unlock()
+	if !bound || binding.agentID != req.AgentID || binding.memberID != req.MemberID ||
+		binding.workgroupID != req.WorkgroupID {
+		return fmt.Errorf("agent session is not bound")
+	}
+	if !running {
+		return fmt.Errorf("agent assign is not running")
+	}
+	if _, err := b.server.sessions.EnqueueMessage(
+		context.Background(), req.SessionID, "resume", "", nil, req.ResumeValue, "human",
+	); err != nil {
+		// The Manage hub deliberately does both live delivery and reconnect
+		// gap-fill. A resume can therefore be delivered twice around the ACK;
+		// the first copy consumes the pending HITL and the second copy observes
+		// no_pending_hitl. Once the assignment is still running, that duplicate
+		// is already satisfied and must not turn a successful recovery into a
+		// failed assignment.
+		if err.Error() == "no_pending_hitl" {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (b *workgroupAgentBridge) CloseAgentSession(_ context.Context, req workgroup.AgentSessionOpenRequest) error {
 	b.mu.Lock()
 	delete(b.bindings, req.SessionID)
+	delete(b.registries, req.SessionID)
 	b.mu.Unlock()
 	// Session history remains durable for reconnect and later assignments; a
 	// close only removes the Workgroup binding, not the user's Agent session.

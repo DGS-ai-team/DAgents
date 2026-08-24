@@ -28,7 +28,6 @@ const emit = defineEmits([
   "cycle-effort",
   "switch-profile",
   "select-terminal",
-  "terminal-action",
   "refresh-terminals",
 ]);
 
@@ -140,7 +139,6 @@ defineExpose({ focusInput, submit });
           :active-terminal-status="props.activeTerminalStatus"
           :loading="props.terminalLoading"
           @terminal-select="(item) => emit('select-terminal', item)"
-          @terminal-action="(action) => emit('terminal-action', action)"
           @refresh="emit('refresh-terminals')"
         />
       </div>
@@ -179,9 +177,6 @@ defineExpose({ focusInput, submit });
 </template>
 
 <style scoped>
-.terminal-workbench-composer { padding: 8px 14px 10px; }
-.terminal-workbench-composer :deep(.chat__composer-pill-left) { min-width: 8px; }
+.terminal-workbench-composer :deep(.chat__composer-pill-left) { min-width: 30px; }
 .terminal-workbench-composer :deep(.chat__textarea) { font-family: inherit; }
-.terminal-workbench-composer :deep(.chat__composer-statusline) { position: relative; z-index: 5; margin-top: 5px; }
-.terminal-workbench-composer :deep(.chat__composer-statusline-left) { overflow: visible; }
 </style>

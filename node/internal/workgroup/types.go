@@ -47,6 +47,19 @@ type AgentTurnCancelRequest struct {
 	AssignID    string `json:"assign_id"`
 }
 
+// AgentTurnResumeRequest resumes the pending HITL in an AgentRef session.
+// The resume value is intentionally opaque to the Workgroup protocol; Node's
+// turn runtime remains the authority for validating its concrete shape.
+type AgentTurnResumeRequest struct {
+	WorkgroupID string         `json:"workgroup_id"`
+	MemberID    string         `json:"member_id"`
+	AgentID     string         `json:"agent_id"`
+	SessionID   string         `json:"session_id"`
+	AssignID    string         `json:"assign_id"`
+	HitlID      string         `json:"hitl_id,omitempty"`
+	ResumeValue map[string]any `json:"resume_value"`
+}
+
 // AgentSessionHandler is implemented by the Node API bridge. It is separate
 // from the legacy WorkerBinding executor so an existing Agent is never
 // materialized as a restricted synthetic member.
@@ -54,6 +67,7 @@ type AgentSessionHandler interface {
 	OpenAgentSession(context.Context, AgentSessionOpenRequest) (AgentSessionResult, error)
 	StartAgentTurn(context.Context, AgentTurnStartRequest) error
 	CancelAgentTurn(context.Context, AgentTurnCancelRequest) error
+	ResumeAgentTurn(context.Context, AgentTurnResumeRequest) error
 	CloseAgentSession(context.Context, AgentSessionOpenRequest) error
 }
 

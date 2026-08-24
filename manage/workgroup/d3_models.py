@@ -61,6 +61,10 @@ class HITLRequest(BaseModel):
     # information requests may leave these fields empty.
     run_id: str | None = Field(default=None, pattern=_RN)
     tool_call_id: str | None = Field(default=None, min_length=1)
+    # Opaque routing metadata for Node AgentRef HITL. It is not exposed as
+    # prompt text, but makes the pending approval recoverable across Manage
+    # restarts and lets resolution return to the originating Node session.
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueuedHumanRecord(BaseModel):

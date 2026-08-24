@@ -127,6 +127,7 @@ def build_workgroup_ws_router(
                         "agent.session.closed",
                         "agent.turn.accepted",
                         "agent.turn.cancelled",
+                        "agent.turn.resumed",
                         "agent.turn.event",
                         "agent.turn.result",
                     }:

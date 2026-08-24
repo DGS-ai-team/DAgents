@@ -120,6 +120,18 @@ func TestAgentTerminalWebSocketRunsPTY(t *testing.T) {
 	if started.Type != "started" || started.TerminalID == "" {
 		t.Fatalf("started=%+v", started)
 	}
+	srv.terminals.mu.Lock()
+	uiSession := srv.terminals.sessions[started.SessionID]
+	srv.terminals.mu.Unlock()
+	if uiSession == nil {
+		t.Fatalf("UI terminal session %q was not registered", started.SessionID)
+	}
+	uiSession.mu.Lock()
+	keepAlive := uiSession.keepAlive
+	uiSession.mu.Unlock()
+	if !keepAlive {
+		t.Fatal("UI-created terminal session is not keep-alive")
+	}
 	if err := wsjson.Write(ctx, conn, terminalWSCommand{Type: "resize", Rows: 40, Cols: 120}); err != nil {
 		t.Fatal(err)
 	}
@@ -248,6 +260,19 @@ func TestAgentTerminalWebSocketDisconnectCanResume(t *testing.T) {
 	}
 	if !detached {
 		t.Fatal("terminal session was not detached after WebSocket disconnect")
+	}
+	srv.terminals.mu.Lock()
+	resumedSession := srv.terminals.sessions[started.SessionID]
+	srv.terminals.mu.Unlock()
+	if resumedSession == nil {
+		t.Fatal("detached UI terminal session was removed instead of retained")
+	}
+	resumedSession.mu.Lock()
+	keepAlive := resumedSession.keepAlive
+	expiry := resumedSession.expiry
+	resumedSession.mu.Unlock()
+	if !keepAlive || expiry != nil {
+		t.Fatalf("detached UI session retention: keepAlive=%v expiry=%v", keepAlive, expiry)
 	}
 
 	resumeConn, _, err := websocket.Dial(ctx, wsURL, nil)
