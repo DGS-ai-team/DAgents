@@ -16,6 +16,7 @@ const props = defineProps({
   online: { type: [Number, String], default: "—" },
   offline: { type: [Number, String], default: "—" },
   registered: { type: [Number, String], default: "—" },
+  kind: { type: String, default: "node" },
 });
 
 const emit = defineEmits(["open", "filter-change", "page-prev", "page-next"]);
@@ -32,6 +33,7 @@ watch(
 );
 
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)));
+const kindLabel = computed(() => props.kind === "agent" ? "Agent" : "Node");
 const pagerLabel = computed(
   () => `第 ${props.page} / ${totalPages.value} 页（共 ${props.total} 条）`,
 );
@@ -82,7 +84,7 @@ function emitFilters(immediate = false) {
           <input
             v-model="localFilters.q"
             type="search"
-            placeholder="名称 / node_id / 描述"
+            :placeholder="`名称 / ${kindLabel} ID / 描述`"
             autocomplete="off"
             @input="emitFilters()"
           />
@@ -103,6 +105,7 @@ function emitFilters(immediate = false) {
 
     <AgentTable
       :agents="agents"
+      :kind="kind"
       :loading="loading"
       :error="error"
       @open="emit('open', $event)"

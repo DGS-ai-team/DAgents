@@ -212,12 +212,15 @@ class WorkgroupVerticalTests(unittest.TestCase):
 
             timeline = loop.store.list_timeline(wid)
             types = [e.type for e in timeline]
-            self.assertEqual(types, ["human_message", "actor_final_text"])
+            self.assertEqual(
+                types,
+                ["human_message", "tool_started", "tool_finished", "actor_final_text"],
+            )
             for ev in timeline:
                 dumped = ev.model_dump()
                 for forbidden in ("tool_arguments", "tool_result", "raw_tool_payload"):
                     self.assertNotIn(forbidden, dumped)
-            # leader 侧 tool 配对成功且未写入 Timeline（仅 human + final）
+            # tool 执行现在以结构化事件出现，但原始工具载荷仍不进 Timeline。
             self.assertEqual(bridge.executions[dispatched["command"]["command_id"]], 1)
 
     def test_info_hitl_cas_once(self) -> None:

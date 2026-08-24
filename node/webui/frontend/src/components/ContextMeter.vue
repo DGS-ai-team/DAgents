@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { chromeStore } from "../stores/chrome.js";
+import { formatCompactTokens } from "../utils/usage.js";
 
 const RADIUS = 7;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -38,11 +39,34 @@ const tone = computed(() => {
   return "ok";
 });
 
+const usage = computed(() => chromeStore.usageStrip || {});
+const usageVisible = computed(() => {
+  return Number(usage.value.prompt) > 0 || Number(usage.value.completion) > 0;
+});
+const usageDetail = computed(() => {
+  if (!usageVisible.value) return "";
+  const prompt = formatCompactTokens(Number(usage.value.prompt) || 0);
+  const completion = formatCompactTokens(Number(usage.value.completion) || 0);
+  const total = formatCompactTokens(
+    (Number(usage.value.prompt) || 0) + (Number(usage.value.completion) || 0),
+  );
+  const parts = [`总计 ${total} tokens`, `输入 ${prompt}`, `输出 ${completion}`];
+  const rate = Number(usage.value.rate);
+  if (usage.value.cacheObserved === true || Number(usage.value.hit) > 0 || rate >= 0) {
+    parts.push(rate >= 0 ? `缓存命中 ${Math.round(rate * 100)}%` : `缓存命中 ${formatCompactTokens(Number(usage.value.hit) || 0)}`);
+  }
+  if (Number(usage.value.reasoning) > 0) {
+    parts.push(`思考 ${formatCompactTokens(Number(usage.value.reasoning) || 0)}`);
+  }
+  return parts.join(" · ");
+});
+
 const title = computed(() => {
   if (!visible.value) return "";
   const used = tokens.value.toLocaleString("en-US");
   const lim = limit.value.toLocaleString("en-US");
-  return `上下文 ${used} / ${lim} tokens · 已用 ${usedPercent.value}%`;
+  const context = `上下文 ${used} / ${lim} tokens · 已用 ${usedPercent.value}%`;
+  return usageDetail.value ? `${context}\n${usageDetail.value}` : context;
 });
 </script>
 
@@ -73,7 +97,6 @@ const title = computed(() => {
         transform="rotate(-90 9 9)"
       />
     </svg>
-    <span class="context-meter__label">上下文 {{ usedPercent }}%</span>
   </div>
 </template>
 
@@ -99,14 +122,6 @@ const title = computed(() => {
 .context-meter__fill {
   stroke: var(--color-text-subtle);
   transition: stroke-dashoffset 0.35s ease;
-}
-
-.context-meter__label {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-  color: inherit;
 }
 
 .context-meter--ok .context-meter__fill {

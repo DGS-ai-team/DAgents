@@ -128,27 +128,18 @@ func (r *Registry) execLinuxExec(ctx context.Context, raw json.RawMessage) (stri
 		wg.Wait()
 		close(copyDone)
 	}()
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- process.Wait() }()
-	cmdCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
-	defer cancel()
-	var waitErr error
-	select {
-	case waitErr = <-waitDone:
-	case <-cmdCtx.Done():
-		_ = process.Terminate(cmdCtx)
-		waitErr = <-waitDone
-	}
-	<-copyDone
+	waitErr, timedOut := waitForProcess(ctx, process, time.Duration(timeout)*time.Millisecond)
+	waitForOutputReaders(copyDone, stdout, stderr)
 	_ = process.Close()
 	terminationState := ""
 	if stateProvider, ok := process.(interface{ TerminationState() string }); ok {
 		terminationState = stateProvider.TerminationState()
 	}
-	return formatLinuxExecResult(outBuf.Bytes(), errBuf.Bytes(), process.ExitStatus(), waitErr, outBuf.truncated || errBuf.truncated, terminationState), nil
+	return formatLinuxExecResult(outBuf.Bytes(), errBuf.Bytes(), process.ExitStatus(), waitErr, outBuf.truncated || errBuf.truncated, terminationState, timedOut), nil
 }
 
-func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr error, truncated bool, terminationState string) string {
+func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr error, truncated bool, terminationState string, timedOut ...bool) string {
+	timedOutValue := len(timedOut) > 0 && timedOut[0]
 	code := 1
 	if exit != nil {
 		code = exit.Code
@@ -156,7 +147,7 @@ func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr erro
 		code = 0
 	}
 	status := "SUCCEEDED"
-	if code != 0 || waitErr != nil {
+	if code != 0 || waitErr != nil || timedOutValue {
 		status = "FAILED"
 	}
 	parts := []string{
@@ -167,6 +158,7 @@ func formatLinuxExecResult(stdout, stderr []byte, exit *ExitStatus, waitErr erro
 		fmt.Sprintf("stdout_bytes=%d", len(stdout)),
 		fmt.Sprintf("stderr_bytes=%d", len(stderr)),
 		fmt.Sprintf("output_truncated: %t", truncated),
+		fmt.Sprintf("timed_out: %t", timedOutValue),
 		"--- STDOUT ---",
 		string(stdout),
 		"--- STDERR ---",

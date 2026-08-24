@@ -41,10 +41,7 @@ func (c *Coordinator) shouldStartSilent(sessionID string, messages []llm.Message
 		return true
 	}
 	current := llm.EstimateMessageTokens(messages)
-	if current-state.lastAppliedTokens >= SilentCooldownTokenGrowth {
-		return true
-	}
-	return false
+	return current-state.lastAppliedTokens >= SilentCooldownTokenGrowth
 }
 
 func (c *Coordinator) markSilentCooldownApplied(sessionID string, messages []llm.Message) {

@@ -89,7 +89,7 @@ func TestCancelDoesNotLetLateToolCallbackCreateContinuation(t *testing.T) {
 	if err := rt.lifecycleCancel(); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.enqueueToolResult(nil, sess.ID); err == nil {
+	if err := rt.enqueueToolResult(context.Background(), sess.ID); err == nil {
 		t.Fatal("unbound callback should be rejected without an active step")
 	}
 	if got := rt.queue.CountByRequestType(queue.RequestTypeToolResult); got != 0 {

@@ -55,6 +55,7 @@ const stats = reactive({
 });
 
 const registry = reactive({
+  kind: "node",
   page: 1,
   total: 0,
   pageSize: 50,
@@ -254,6 +255,7 @@ async function loadStatsSnapshot(group) {
   try {
     const params = { status: "all", page: 1, page_size: 200 };
     if (group) params.discovery_group = group;
+    params.kind = registry.kind;
     const data = await fetchAgents(params);
     Object.assign(stats, computeStats(data.agents || []));
   } catch {
@@ -267,6 +269,7 @@ async function loadAgents() {
   registry.pageSize = registry.filters.pageSize || 50;
   const group = registry.filters.group.trim();
   const params = {
+    kind: registry.kind,
     status: registry.filters.status,
     q: registry.filters.q.trim(),
     page: registry.page,
@@ -309,7 +312,8 @@ function navigate(nextView) {
     return;
   }
   view.value = target;
-  if (target === "nodes") {
+  if (target === "nodes" || target === "agents") {
+    registry.kind = target === "agents" ? "agent" : "node";
     loadAgents();
   }
   applyDocumentTitle();
@@ -470,7 +474,7 @@ onMounted(() => {
             @toast="showToast($event.message, $event.type)"
           />
 
-          <template v-if="view === 'nodes'">
+          <template v-if="view === 'nodes' || view === 'agents'">
             <RegistryView
               :agents="registry.agents"
               :loading="registry.loading"
@@ -482,6 +486,7 @@ onMounted(() => {
               :online="stats.online"
               :offline="stats.offline"
               :registered="stats.total"
+              :kind="registry.kind"
               @open="drawerAgent = $event"
               @filter-change="onRegistryFilterChange"
               @page-prev="registryPrevPage"

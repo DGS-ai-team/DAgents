@@ -13,6 +13,8 @@ import {
   sendWorkgroupHumanQueueItemNow,
   postWorkgroupMessageStream,
   cancelWorkgroupTurn,
+  cancelWorkgroupAssign,
+  cancelWorkgroupTool,
   listWorkgroupHITL,
   resolveWorkgroupHITL,
   listWorkgroupRuns,
@@ -34,6 +36,8 @@ const loading = ref(false);
 const loadingMembers = ref(false);
 const sending = ref(false);
 const cancelling = ref(false);
+const cancellingAssign = ref("");
+const cancellingTool = ref("");
 /** @type {import('vue').Ref<Array<Record<string, any>>>} */
 const humanQueueItems = ref([]);
 const editingQueueId = ref("");
@@ -291,6 +295,7 @@ function buildAssignIndex(list) {
   const startedByAssign = {};
   const memberFinalByAssign = {};
   const assistantContentByAssign = {};
+  const toolEventsByAssign = {};
   for (const ev of list || []) {
     const t = String(ev?.type || "");
     const aid = String(ev?.assign_id || "").trim();
@@ -311,6 +316,9 @@ function buildAssignIndex(list) {
     } else if (t === "assistant_content") {
       if (!assistantContentByAssign[aid]) assistantContentByAssign[aid] = [];
       assistantContentByAssign[aid].push(ev);
+    } else if (t === "tool_started" || t === "tool_finished") {
+      if (!toolEventsByAssign[aid]) toolEventsByAssign[aid] = [];
+      toolEventsByAssign[aid].push(ev);
     }
   }
   return {
@@ -321,6 +329,7 @@ function buildAssignIndex(list) {
     startedByAssign,
     memberFinalByAssign,
     assistantContentByAssign,
+    toolEventsByAssign,
   };
 }
 
@@ -383,7 +392,15 @@ function toolKindLabel(toolName) {
   return "tool";
 }
 
-function makeAssignRow(started, finished, notices, isDirect, memberFinal, assistantContents = []) {
+function makeAssignRow(
+  started,
+  finished,
+  notices,
+  isDirect,
+  memberFinal,
+  assistantContents = [],
+  toolEvents = [],
+) {
   const noticeList = Array.isArray(notices) ? notices : notices ? [notices] : [];
   const lastNotice = noticeList.length ? noticeList[noticeList.length - 1] : null;
   const noticeText = lastNotice ? String(lastNotice.text || "").trim() : "";
@@ -403,7 +420,36 @@ function makeAssignRow(started, finished, notices, isDirect, memberFinal, assist
     : "";
   const mention = parsed.mention || reportActorLabel || "";
   const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
-  const steps = noticeList.map((ev, idx) => {
+  const structuredEvents = Array.isArray(toolEvents) ? toolEvents : [];
+  const structuredStarts = structuredEvents.filter((ev) => String(ev?.type || "") === "tool_started");
+  const structuredFinishes = structuredEvents.filter((ev) => String(ev?.type || "") === "tool_finished");
+  const structuredSteps = structuredStarts.map((ev, idx) => {
+    const toolCallId = String(ev?.tool_call_id || "").trim();
+    const commandId = String(ev?.command_id || "").trim();
+    const finish = structuredFinishes.find((item) => {
+      const sameCall = toolCallId && String(item?.tool_call_id || "").trim() === toolCallId;
+      const sameCommand = commandId && String(item?.command_id || "").trim() === commandId;
+      return sameCall || sameCommand;
+    });
+    const toolName = String(ev?.tool_name || "").trim() || "tool";
+    const status = String(finish?.status || "").toLowerCase();
+    const failedStep = Boolean(finish && ["failed", "rejected", "indeterminate", "canceled", "cancelled"].includes(status));
+    const done = Boolean(finish) || Boolean(finished);
+    return {
+      key: ev.event_id || `tool-${ev.seq || idx}`,
+      assignId,
+      toolCallId,
+      toolName,
+      toolKind: toolKindLabel(toolName),
+      summary: toolName,
+      statusText: !done ? "执行中" : failedStep ? "已中断" : "已完成",
+      done,
+      failed: failedStep,
+      inProgress: !done,
+      canCancel: !done && Boolean(assignId && toolCallId && (commandId || toolName === "bash_run")),
+    };
+  });
+  const legacySteps = noticeList.map((ev, idx) => {
     const p = parseNoticeTool(ev?.text);
     const isLast = idx === noticeList.length - 1;
     const done = Boolean(finished) || !isLast;
@@ -416,12 +462,16 @@ function makeAssignRow(started, finished, notices, isDirect, memberFinal, assist
       done,
       failed: Boolean(failed && done && isLast),
       inProgress: !done,
+      canCancel: false,
     };
   });
+  const steps = structuredStarts.length ? structuredSteps : legacySteps;
   const contentList = Array.isArray(assistantContents) ? assistantContents : [];
   const activity = [
     ...contentList.map((ev) => ({ kind: "content", ev })),
-    ...noticeList.map((ev) => ({ kind: "tool", ev })),
+    ...(structuredStarts.length
+      ? structuredStarts.map((ev) => ({ kind: "tool", ev }))
+      : noticeList.map((ev) => ({ kind: "tool", ev }))),
   ].sort((a, b) => Number(a.ev?.seq || 0) - Number(b.ev?.seq || 0));
   const stepByKey = new Map(steps.map((step) => [step.key, step]));
   const renderedSteps = activity.flatMap((entry, index) => {
@@ -444,6 +494,7 @@ function makeAssignRow(started, finished, notices, isDirect, memberFinal, assist
       done: Boolean(finished),
       failed: false,
       inProgress: !finished,
+      canCancel: false,
     }];
   });
   return {
@@ -471,6 +522,7 @@ function makeAssignRow(started, finished, notices, isDirect, memberFinal, assist
     phase: "",
     tool: "",
     progress: false,
+    canCancel: !finished && Boolean(assignId),
   };
 }
 
@@ -570,6 +622,7 @@ const displayGroups = computed(() => {
         false,
         memberFinal,
         aid ? assistantContentByAssign[aid] || [] : [],
+        aid ? toolEventsByAssign[aid] || [] : [],
       );
       row.actorId = actorId;
       row.actor = eventActorLabel({ ...ev, actor_id: actorId, type: "assign_started" });
@@ -592,12 +645,17 @@ const displayGroups = computed(() => {
         false,
         memberFinal,
         aid ? assistantContentByAssign[aid] || [] : [],
+        aid ? toolEventsByAssign[aid] || [] : [],
       );
       row.actorId = actorId;
       row.actor = eventActorLabel({ ...ev, actor_id: actorId, type: "assign_finished" });
       pushRow("assistant", actorId, row.actor || "Supervisor", row);
       continue;
     }
+
+    // Structured tool events are consumed by the surrounding Assign card;
+    // they must not also appear as standalone chat messages.
+    if (t === "tool_started" || t === "tool_finished") continue;
 
     if (t === "actor_final_text") {
       const actor = String(ev?.actor_id || "").trim();
@@ -1139,6 +1197,35 @@ async function cancelTurn() {
   }
 }
 
+async function cancelAssign(assignId) {
+  const id = String(assignId || "").trim();
+  if (!props.workgroupId || !id || cancellingAssign.value) return;
+  cancellingAssign.value = id;
+  try {
+    await cancelWorkgroupAssign(props.workgroupId, id);
+    await loadTimeline().catch(() => {});
+  } catch (err) {
+    emit("toast", { message: err.message || "中断任务失败", type: "error" });
+  } finally {
+    cancellingAssign.value = "";
+  }
+}
+
+async function cancelTool(assignId, toolCallId) {
+  const aid = String(assignId || "").trim();
+  const callId = String(toolCallId || "").trim();
+  if (!props.workgroupId || !aid || !callId || cancellingTool.value) return;
+  cancellingTool.value = `${aid}:${callId}`;
+  try {
+    await cancelWorkgroupTool(props.workgroupId, aid, callId);
+    await loadTimeline().catch(() => {});
+  } catch (err) {
+    emit("toast", { message: err.message || "中断工具失败", type: "error" });
+  } finally {
+    cancellingTool.value = "";
+  }
+}
+
 async function refreshHumanQueue() {
   if (!props.workgroupId) {
     humanQueueItems.value = [];
@@ -1596,6 +1683,16 @@ onUnmounted(() => {
                         <span v-if="row.done && !row.failed" class="wg-task__check" aria-hidden="true">✓</span>
                         <span v-else-if="row.failed" class="wg-task__mark" aria-hidden="true">−</span>
                         {{ row.statusText }}
+                        <button
+                          v-if="row.canCancel"
+                          type="button"
+                          class="wg-inline-cancel"
+                          title="中断任务"
+                          :disabled="cancellingAssign === row.assignId"
+                          @click.stop="cancelAssign(row.assignId)"
+                        >
+                          {{ cancellingAssign === row.assignId ? "…" : "中断" }}
+                        </button>
                       </span>
                     </div>
                     <div class="wg-task__body">{{ row.taskText }}</div>
@@ -1630,6 +1727,16 @@ onUnmounted(() => {
                               compact
                             />
                             {{ step.statusText }}
+                            <button
+                              v-if="step.canCancel"
+                              type="button"
+                              class="wg-inline-cancel"
+                              title="中断工具"
+                              :disabled="cancellingTool === `${step.assignId}:${step.toolCallId}`"
+                              @click.stop="cancelTool(step.assignId, step.toolCallId)"
+                            >
+                              {{ cancellingTool === `${step.assignId}:${step.toolCallId}` ? "…" : "中断" }}
+                            </button>
                           </span>
                         </div>
                         </div>
@@ -1690,6 +1797,16 @@ onUnmounted(() => {
                         compact
                       />
                       {{ row.statusText }}
+                      <button
+                        v-if="row.canCancel && row.toolCallId"
+                        type="button"
+                        class="wg-inline-cancel"
+                        title="中断工具"
+                        :disabled="cancellingTool === `${row.assignId}:${row.toolCallId}`"
+                        @click.stop="cancelTool(row.assignId, row.toolCallId)"
+                      >
+                        {{ cancellingTool === `${row.assignId}:${row.toolCallId}` ? "…" : "中断" }}
+                      </button>
                     </span>
                   </div>
                 </div>

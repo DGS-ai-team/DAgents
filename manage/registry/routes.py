@@ -86,6 +86,7 @@ def _resolve_discover_caller_groups(
 def _resolve_list_query(
     auth: AuthContext,
     *,
+    kind: Literal["all", "node", "agent"],
     discovery_group: str | None,
     team: str | None,
     status: AgentStatus | Literal["all"],
@@ -98,6 +99,7 @@ def _resolve_list_query(
     if discovery_group and not auth.allows_discovery_group(discovery_group):
         raise HTTPException(status_code=403, detail=f"discovery_group={discovery_group!r} 不在 token 可见范围")
     return AgentListQuery(
+        kind=kind,
         discovery_group=discovery_group,
         team=team,
         status=status,
@@ -229,6 +231,7 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     @router.get("/v1/registry/agents", response_model=AgentListResponse)
     def list_agents(
         request: Request,
+        kind: Literal["all", "node", "agent"] = Query(default="all"),
         discovery_group: str | None = Query(default=None),
         team: str | None = Query(default=None),
         status: AgentStatus | Literal["all"] = Query(default="all"),
@@ -239,6 +242,31 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
         auth = authenticate(request)
         query = _resolve_list_query(
             auth,
+            kind=kind,
+            discovery_group=discovery_group,
+            team=team,
+            status=status,
+            q=q,
+            page=page,
+            page_size=page_size,
+        )
+        agents, total = store.list(query)
+        return AgentListResponse(agents=agents, page=query.page, page_size=query.page_size, total=total)
+
+    @router.get("/v1/registry/nodes", response_model=AgentListResponse)
+    def list_nodes(
+        request: Request,
+        discovery_group: str | None = Query(default=None),
+        team: str | None = Query(default=None),
+        status: AgentStatus | Literal["all"] = Query(default="all"),
+        q: str | None = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200),
+    ) -> AgentListResponse:
+        auth = authenticate(request)
+        query = _resolve_list_query(
+            auth,
+            kind="node",
             discovery_group=discovery_group,
             team=team,
             status=status,

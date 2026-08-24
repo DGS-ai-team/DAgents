@@ -1262,6 +1262,10 @@ func (r *runtime) withCommittedHistoryLocked(history []llm.Message, callback fun
 
 func (r *runtime) commitHistoryForLifecycleLocked(history []llm.Message) {
 	r.mu.Lock()
+	if !r.turnEpochCurrentLocked() {
+		r.mu.Unlock()
+		return
+	}
 	changed := r.commitStepHistory(&history)
 	r.mu.Unlock()
 	if changed {

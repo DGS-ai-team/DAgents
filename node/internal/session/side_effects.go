@@ -268,9 +268,7 @@ func (s *sideEffectStore) collectBatch(history []llm.Message) []readySideEffect 
 		}
 		batch = append(batch, e)
 		plan := turn.PlanSingleSideEffectApply(sim, e.built)
-		for _, m := range plan.Messages {
-			sim = append(sim, m)
-		}
+		sim = append(sim, plan.Messages...)
 	}
 	return batch
 }

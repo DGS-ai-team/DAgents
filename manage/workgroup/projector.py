@@ -151,6 +151,10 @@ def _event_brief(ev: TimelineEvent) -> dict[str, Any]:
         "protocol_name": ev.protocol_name or protocol_name_for_actor(ev.actor_id),
         "content_text": ev.text,
         "direct_member_id": ev.direct_member_id,
+        "tool_call_id": ev.tool_call_id,
+        "command_id": ev.command_id,
+        "tool_name": ev.tool_name,
+        "status": ev.status,
     }
 
 

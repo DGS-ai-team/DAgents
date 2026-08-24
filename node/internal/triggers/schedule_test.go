@@ -1,6 +1,7 @@
 package triggers
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -167,7 +168,7 @@ func TestSchedulerCmdGateBlocksFire(t *testing.T) {
 	sched := NewScheduler(store, sub, 5)
 	gate := &stubCmdGate{ok: false, detail: "exit_code=1"}
 	sched.SetCmdGate(gate)
-	sched.RunOnceForTest(nil, past.Add(time.Minute))
+	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
 	if gate.called != 1 || gate.last != "false" {
 		t.Fatalf("gate called=%d last=%q", gate.called, gate.last)
 	}
@@ -208,7 +209,7 @@ func TestSchedulerCmdGateAllowsFire(t *testing.T) {
 	sched := NewScheduler(store, sub, 5)
 	gate := &stubCmdGate{ok: true, detail: "exit 0"}
 	sched.SetCmdGate(gate)
-	sched.RunOnceForTest(nil, past.Add(time.Minute))
+	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
 	if len(sub.messages) != 1 {
 		t.Fatalf("messages = %v", sub.messages)
 	}

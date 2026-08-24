@@ -84,7 +84,3 @@ func toolResultFromResponse(resp Response) ToolResult {
 	}
 	return out
 }
-
-func errorResult(msg string) string {
-	return FormatToolResult(ToolResult{OK: false, Error: msg})
-}
