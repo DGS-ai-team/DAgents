@@ -362,6 +362,29 @@ func (b *workgroupAgentBridge) CancelAgentTurn(_ context.Context, req workgroup.
 	return nil
 }
 
+func (b *workgroupAgentBridge) CancelAgentTool(_ context.Context, req workgroup.AgentToolCancelRequest) error {
+	if b == nil || b.server == nil || b.server.sessions == nil {
+		return fmt.Errorf("node turn runtime unavailable")
+	}
+	b.mu.Lock()
+	binding, ok := b.bindings[req.SessionID]
+	b.mu.Unlock()
+	if !ok || binding.agentID != req.AgentID || binding.memberID != req.MemberID || binding.workgroupID != req.WorkgroupID {
+		return fmt.Errorf("agent session is not bound")
+	}
+	if strings.TrimSpace(req.ToolName) != "bash_run" {
+		return fmt.Errorf("tool %q does not support independent cancellation", req.ToolName)
+	}
+	registry := b.server.sessions.SessionTools(req.SessionID)
+	if registry == nil {
+		return fmt.Errorf("agent session tools unavailable")
+	}
+	if err := registry.CancelSyncBash(req.SessionID, req.ToolCallID); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (b *workgroupAgentBridge) ResumeAgentTurn(_ context.Context, req workgroup.AgentTurnResumeRequest) error {
 	if b == nil || b.server == nil || b.server.sessions == nil {
 		return fmt.Errorf("node turn runtime unavailable")

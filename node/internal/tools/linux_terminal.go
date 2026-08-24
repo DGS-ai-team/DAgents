@@ -70,7 +70,7 @@ func (p *LinuxShellProvider) OpenTerminal(ctx context.Context, req TerminalReque
 			return nil, err
 		}
 		if linuxBindingApprovalAction(binding) == policy.ActionRequireApproval && strings.TrimSpace(req.Context.ApprovalID) == "" {
-			return nil, fmt.Errorf("Linux channel %q requires approval before opening a terminal", cfg.ID)
+			return nil, fmt.Errorf("linux channel %q requires approval before opening a terminal", cfg.ID)
 		}
 		if strings.TrimSpace(req.CWD) == "" && strings.TrimSpace(binding.RemoteCWD) != "" {
 			cfg.DefaultCWD = strings.TrimSpace(binding.RemoteCWD)

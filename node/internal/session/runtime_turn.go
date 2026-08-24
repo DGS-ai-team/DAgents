@@ -15,6 +15,18 @@ func (r *runtime) runTurnStep(
 	compressBefore bool,
 	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
 ) (turn.StepOutcome, []llm.Message) {
+	return r.runTurnStepAtEpoch(parent, compressBefore, 0, run)
+}
+
+// runTurnStepAtEpoch is the same execution scaffold with an optional queue
+// epoch fence. Human messages use the envelope epoch so clear-context cannot
+// create a new fence for an already accepted, but now stale, handler.
+func (r *runtime) runTurnStepAtEpoch(
+	parent context.Context,
+	compressBefore bool,
+	expectedEpoch uint64,
+	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
+) (turn.StepOutcome, []llm.Message) {
 	compressBeforeStep := compressBefore && r.compression != nil && r.compression.Enabled() && !r.isChildSession()
 	var sidecarPrefix compression.SidecarPrefix
 	if compressBeforeStep {
@@ -33,6 +45,11 @@ func (r *runtime) runTurnStep(
 	contextBeforeCount := 0
 	contextAfterCount := 0
 	r.mu.Lock()
+	if expectedEpoch != 0 && expectedEpoch != r.sessionEpoch {
+		history := append([]llm.Message(nil), r.messages...)
+		r.mu.Unlock()
+		return turn.StepOutcome{Err: context.Canceled}, history
+	}
 	if compressBeforeStep {
 		contextBeforeDigest = turn.Digest(r.messages)
 		contextBeforeCount = len(r.messages)
@@ -51,16 +68,24 @@ func (r *runtime) runTurnStep(
 		r.mu.Unlock()
 		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, r.messages
 	}
+	executionEpoch := r.sessionEpoch
 	turnCtx, cancel := context.WithCancel(parent)
+	cancelToken := &struct{}{}
 	turnCtx = turn.WithExecutionContext(turnCtx, execution)
 	r.turnCancel = cancel
+	r.turnCancelToken = cancelToken
+	r.turnEpoch = executionEpoch
+	r.turnFenceActive = true
 	history := r.messages
 	r.mu.Unlock()
 
 	defer func() {
 		cancel()
 		r.mu.Lock()
-		r.turnCancel = nil
+		if r.turnCancelToken == cancelToken {
+			r.turnCancel = nil
+			r.turnCancelToken = nil
+		}
 		r.mu.Unlock()
 	}()
 
@@ -78,13 +103,11 @@ func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
 	if outcome.ScheduleToolResult || outcome.Pending != nil {
 		return
 	}
-	r.mu.Lock()
 	// The orchestrator may enqueue the next tool step directly and return an
 	// otherwise empty outcome (for example after a child-agent tool finishes).
 	// Keep the current turn identity alive until that continuation is consumed;
 	// otherwise the queue consumer would discard the freshly enqueued result as
 	// stale.
-	r.mu.Unlock()
 	if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
 		return
 	}

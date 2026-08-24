@@ -31,6 +31,7 @@ from manage.workgroup.models import (
     ACLPatchRequest,
     MemberCreateRequest,
     MemberPatchRequest,
+    MemberPrompt,
     MemberSpec,
     MemberTools,
     MemberWorkspace,
@@ -437,9 +438,12 @@ class WorkGroupStore:
             self.assert_acl_member(workgroup_id, home)
             mid = ids.member_id()
             now = _now()
+            # AgentRef members execute inside the selected Node Agent. Their
+            # prompt, tools, skills and model are authoritative on that Agent;
+            # storing a Manage-side copy would create a stale shadow config.
             tools = MemberTools(
-                allow_names=list(req.allow_tool_names),
-                side_effect_classes=list(req.side_effect_classes),
+                allow_names=[] if agent_id else list(req.allow_tool_names),
+                side_effect_classes=[] if agent_id else list(req.side_effect_classes),
             )
             draft = {
                 "member_id": mid,
@@ -449,10 +453,10 @@ class WorkGroupStore:
                 "display_name": req.display_name.strip(),
                 "description": (req.description or "").strip(),
                 "member_generation": 1,
-                "llm_profile_id": (req.llm_profile_id or group.llm_profile_id).strip(),
-                "llm_profile_revision": (req.llm_profile_revision or group.llm_profile_revision).strip(),
+                "llm_profile_id": (group.llm_profile_id if agent_id else (req.llm_profile_id or group.llm_profile_id)).strip(),
+                "llm_profile_revision": (group.llm_profile_revision if agent_id else (req.llm_profile_revision or group.llm_profile_revision)).strip(),
                 "max_tool_loops": req.max_tool_loops,
-                "prompt": req.prompt.model_dump(),
+                "prompt": MemberPrompt().model_dump() if agent_id else req.prompt.model_dump(),
                 "memory": req.memory.model_dump(),
                 "tools": tools.model_dump(),
                 "policy_ceiling": dict(req.policy_ceiling),
@@ -515,25 +519,28 @@ class WorkGroupStore:
             description = (
                 req.description.strip() if req.description is not None else spec.description
             )
+            group = self._groups[workgroup_id]
             llm_profile_id = (
-                req.llm_profile_id.strip() if req.llm_profile_id is not None else spec.llm_profile_id
+                group.llm_profile_id
+                if member.execution_mode == "agent_ref"
+                else (req.llm_profile_id.strip() if req.llm_profile_id is not None else spec.llm_profile_id)
             )
             llm_profile_revision = (
-                req.llm_profile_revision.strip()
-                if req.llm_profile_revision is not None
-                else spec.llm_profile_revision
+                group.llm_profile_revision
+                if member.execution_mode == "agent_ref"
+                else (req.llm_profile_revision.strip() if req.llm_profile_revision is not None else spec.llm_profile_revision)
             )
             max_tool_loops = (
                 int(req.max_tool_loops) if req.max_tool_loops is not None else spec.max_tool_loops
             )
-            prompt = req.prompt if req.prompt is not None else spec.prompt
+            prompt = MemberPrompt() if member.execution_mode == "agent_ref" else (req.prompt if req.prompt is not None else spec.prompt)
             allow_names = (
-                list(req.allow_tool_names)
+                [] if member.execution_mode == "agent_ref" else list(req.allow_tool_names)
                 if req.allow_tool_names is not None
                 else list(spec.tools.allow_names)
             )
             side_effect_classes = (
-                list(req.side_effect_classes)
+                [] if member.execution_mode == "agent_ref" else list(req.side_effect_classes)
                 if req.side_effect_classes is not None
                 else list(spec.tools.side_effect_classes)
             )
@@ -1203,7 +1210,7 @@ class WorkGroupStore:
                 "member_generation": member.member_generation,
                 "lease_id": lease_id,
                 "lease_epoch": lease_epoch,
-                "tool_allow_names": list(spec.tools.allow_names) if spec is not None else [],
+                "tool_allow_names": [] if member.execution_mode == "agent_ref" else (list(spec.tools.allow_names) if spec is not None else []),
             }
 
     def mark_member_status(
@@ -1559,6 +1566,10 @@ class WorkGroupStore:
         protocol_name: str | None = None,
         assign_id: str | None = None,
         direct_member_id: str | None = None,
+        tool_call_id: str | None = None,
+        command_id: str | None = None,
+        tool_name: str | None = None,
+        status: str | None = None,
     ) -> TimelineEvent:
         listener: Callable[[TimelineEvent], None] | None = None
         with self._lock:
@@ -1584,6 +1595,10 @@ class WorkGroupStore:
                 protocol_name=pname,
                 assign_id=assign_id,
                 direct_member_id=direct_member_id,
+                tool_call_id=(tool_call_id or "").strip() or None,
+                command_id=(command_id or "").strip() or None,
+                tool_name=(tool_name or "").strip() or None,
+                status=(status or "").strip() or None,
             )
             events.append(event)
             frame = self._new_timeline_outbox_frame_unlocked(event)
@@ -1948,6 +1963,30 @@ class WorkGroupStore:
                 h
                 for h in self._hitl.values()
                 if h.workgroup_id == workgroup_id and h.status == "pending"
+            ]
+        for hitl in pending:
+            try:
+                self.resolve_hitl_cas(
+                    workgroup_id,
+                    hitl.hitl_id,
+                    resolution={"canceled": True, "answer": ""},
+                )
+                canceled.append(hitl.hitl_id)
+            except WorkgroupError:
+                continue
+        return canceled
+
+    def cancel_pending_hitls_for_assign(self, workgroup_id: str, assign_id: str) -> list[str]:
+        """Cancel only HITL requests routed to one AgentRef Assign."""
+        canceled: list[str] = []
+        with self._lock:
+            self._ensure_loaded()
+            pending = [
+                h
+                for h in self._hitl.values()
+                if h.workgroup_id == workgroup_id
+                and h.status == "pending"
+                and str((h.metadata or {}).get("assign_id") or "") == assign_id
             ]
         for hitl in pending:
             try:

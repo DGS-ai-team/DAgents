@@ -139,4 +139,4 @@
 - 安全见 [SECURITY.md](../SECURITY.md)。
 - **以实现 / CHANGELOG 为准**；本文冲突时欢迎 PR 修正。
 
-**最后更新**：2026-08-24 — 准备发布 v0.10.1（Workgroup AgentRef 稳定性：HITL 恢复、会话工具作用域与终端工作台）；v0.9.1 为 Workgroup 预览主叙事。
+**最后更新**：2026-08-24 — 准备发布 v0.10.2（工作组工具事件/取消、Agent 运行 fence、Linux 命令有界等待与上下文计量）；v0.9.1 为 Workgroup 预览主叙事。

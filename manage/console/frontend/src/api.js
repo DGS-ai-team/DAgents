@@ -422,6 +422,22 @@ export async function cancelWorkgroupTurn(workgroupId, body = {}) {
   );
 }
 
+export async function cancelWorkgroupAssign(workgroupId, assignId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/assigns/${encodeURIComponent(assignId)}/cancel`,
+    {},
+    { method: "POST", body: {} },
+  );
+}
+
+export async function cancelWorkgroupTool(workgroupId, assignId, toolCallId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/assigns/${encodeURIComponent(assignId)}/tools/${encodeURIComponent(toolCallId)}/cancel`,
+    {},
+    { method: "POST", body: {} },
+  );
+}
+
 export async function fetchWorkgroupHumanQueue(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue`);
 }

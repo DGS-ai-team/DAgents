@@ -75,18 +75,7 @@ func (o *Orchestrator) BuildSideEffectMessages(
 }
 
 func sideEffectFromAsync(b asyncToolMessages) SideEffectMessages {
-	return SideEffectMessages{
-		UserMessage:            b.UserMessage,
-		AssistantMessage:       b.AssistantMessage,
-		ToolMessage:            b.ToolMessage,
-		ForClientContent:       b.ForClientContent,
-		ToolName:               b.ToolName,
-		ToolCallID:             b.ToolCallID,
-		Status:                 b.Status,
-		OutputCompressSavedPct: b.OutputCompressSavedPct,
-		OutputCompressRawRunes: b.OutputCompressRawRunes,
-		OutputCompressOutRunes: b.OutputCompressOutRunes,
-	}
+	return SideEffectMessages(b)
 }
 
 func (o *Orchestrator) buildExternalSideEffectMessages(_ string, content, userName string) SideEffectMessages {

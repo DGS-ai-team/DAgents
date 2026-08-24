@@ -23,6 +23,8 @@ class TimelineEvent(BaseModel):
         "assistant_content",
         "actor_final_text",
         "system_notice",
+        "tool_started",
+        "tool_finished",
         "assign_started",
         "assign_finished",
     ]
@@ -37,6 +39,11 @@ class TimelineEvent(BaseModel):
     assign_id: str | None = None
     # 结构化直达关系；仅由成员选择器写入，不能从 text 中推断。
     direct_member_id: str | None = None
+    # 结构化工具进度；公开 Timeline 仅包含元数据，不包含参数/结果正文。
+    tool_call_id: str | None = None
+    command_id: str | None = None
+    tool_name: str | None = None
+    status: str | None = None
 
 
 class OutboxFrame(BaseModel):

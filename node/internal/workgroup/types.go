@@ -47,6 +47,20 @@ type AgentTurnCancelRequest struct {
 	AssignID    string `json:"assign_id"`
 }
 
+// AgentToolCancelRequest cancels one tool execution inside an AgentRef turn.
+// The Node remains the authority for whether that concrete tool is
+// cancellable; unsupported tools return an explicit error instead of
+// accidentally cancelling the whole turn.
+type AgentToolCancelRequest struct {
+	WorkgroupID string `json:"workgroup_id"`
+	MemberID    string `json:"member_id"`
+	AgentID     string `json:"agent_id"`
+	SessionID   string `json:"session_id"`
+	AssignID    string `json:"assign_id"`
+	ToolCallID  string `json:"tool_call_id"`
+	ToolName    string `json:"tool_name"`
+}
+
 // AgentTurnResumeRequest resumes the pending HITL in an AgentRef session.
 // The resume value is intentionally opaque to the Workgroup protocol; Node's
 // turn runtime remains the authority for validating its concrete shape.
@@ -69,6 +83,12 @@ type AgentSessionHandler interface {
 	CancelAgentTurn(context.Context, AgentTurnCancelRequest) error
 	ResumeAgentTurn(context.Context, AgentTurnResumeRequest) error
 	CloseAgentSession(context.Context, AgentSessionOpenRequest) error
+}
+
+// AgentToolCancelHandler is optional for compatibility with older embedded
+// AgentSessionHandler implementations.
+type AgentToolCancelHandler interface {
+	CancelAgentTool(context.Context, AgentToolCancelRequest) error
 }
 
 // AgentEventEmitter is an optional hook used by asynchronous Node runtimes to

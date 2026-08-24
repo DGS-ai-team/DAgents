@@ -154,20 +154,8 @@ func (r *Registry) runTerminalCommand(ctx context.Context, req TerminalCommandRe
 		wg.Wait()
 		close(copyDone)
 	}()
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- process.Wait() }()
-	timedOut := false
-	commandCtx, cancel := context.WithTimeout(ctx, req.Timeout)
-	defer cancel()
-	var waitErr error
-	select {
-	case waitErr = <-waitDone:
-	case <-commandCtx.Done():
-		timedOut = true
-		_ = process.Terminate(commandCtx)
-		waitErr = <-waitDone
-	}
-	<-copyDone
+	waitErr, timedOut := waitForProcess(ctx, process, req.Timeout)
+	waitForOutputReaders(copyDone, stdout, stderr)
 	_ = process.Close()
 	exit := process.ExitStatus()
 	code := 1

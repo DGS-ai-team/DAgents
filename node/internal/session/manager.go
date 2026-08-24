@@ -895,7 +895,7 @@ func (m *Manager) EnqueueToolResult(sessionID string) error {
 		m.logger.Warn("tool result enqueue skipped: session not found", "session_id", sessionID)
 		return fmt.Errorf("agent_not_found")
 	}
-	return rt.enqueueToolResult(nil, sessionID)
+	return rt.enqueueToolResult(context.Background(), sessionID)
 }
 
 // ReconcileToolExecution resolves a side effect that was marked unknown after

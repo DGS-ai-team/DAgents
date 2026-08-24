@@ -75,10 +75,18 @@ type runtime struct {
 	started bool
 	done    chan struct{}
 
-	mu         sync.Mutex         // 互斥锁
-	turnCancel context.CancelFunc // 取消 turn 上下文
+	mu              sync.Mutex         // 互斥锁
+	turnCancel      context.CancelFunc // 取消 turn 上下文
+	turnCancelToken *struct{}          // prevents a stale step defer from clearing a newer cancel handle
 	// sessionEpoch invalidates events queued before clear-context/rebuild.
 	sessionEpoch uint64
+	// turnEpoch fences the in-flight model step from clear-context.  A clear
+	// can run concurrently with the provider call; its late history must not
+	// be committed back over the freshly cleared snapshot.
+	turnEpoch uint64
+	// turnFenceActive distinguishes production model steps from direct lifecycle
+	// transitions that intentionally do not install a provider fence.
+	turnFenceActive bool
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
 	// second lifecycle projection.
@@ -165,10 +173,13 @@ func newRuntimeWithPublisher(
 	}
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
-		session:           Session{ID: id, AgentID: agentID},
-		queue:             queue.NewMessageQueue(),
-		turnCoordinator:   turn.NewTurnCoordinator(id, agentID),
-		done:              make(chan struct{}),
+		session:         Session{ID: id, AgentID: agentID},
+		queue:           queue.NewMessageQueue(),
+		turnCoordinator: turn.NewTurnCoordinator(id, agentID),
+		done:            make(chan struct{}),
+		// Zero is reserved for legacy envelopes without an epoch. Starting at
+		// one makes the first human message fenceable against clear-context.
+		sessionEpoch:      1,
 		store:             st,
 		hub:               eventHub,
 		publisher:         pub,
@@ -530,7 +541,7 @@ func (r *runtime) enqueueToolResult(ctx context.Context, _ string) error {
 
 // scheduleToolResult 调度 tool 结果入队
 func (r *runtime) scheduleToolResult() error {
-	return r.enqueueToolResult(nil, r.session.ID)
+	return r.enqueueToolResult(context.Background(), r.session.ID)
 }
 
 // commitStepHistory publishes a new in-memory message snapshot. Callers must
@@ -546,11 +557,6 @@ func (r *runtime) commitStepHistory(history *[]llm.Message) bool {
 	r.messages = append([]llm.Message(nil), (*history)...)
 	r.historyRevision++
 	return true
-}
-
-// applyStepOutcome is retained for non-terminal continuation callers.
-func (r *runtime) applyStepOutcome(history *[]llm.Message, _ turn.StepOutcome) {
-	r.commitStepHistory(history)
 }
 
 // acceptEnvelope filters stale internal continuations while preserving external
@@ -588,6 +594,10 @@ func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 }
 
 func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope) {
+	if !r.sessionEpochCurrent(env.SessionEpoch) {
+		r.logger.Info("stale human message dropped after session clear", "session_id", r.session.ID)
+		return
+	}
 	userName := llm.NormalizeUserMessageName(env.UserName)
 	userMsg, err := llm.BuildUserMessage(env.Content, env.ContentParts, userName)
 	if err != nil {
@@ -625,13 +635,20 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 		r.persist(context.Background())
 		return
 	}
+	// Clear-context may have won the race while lifecycleBeginHumanTurn was
+	// opening the new turn. Do not let an already accepted queue envelope from
+	// before the clear become the first message of the new context.
+	if !r.sessionEpochCurrent(env.SessionEpoch) {
+		r.cancelTurn()
+		return
+	}
 	historyStart := r.lifecycleHistoryLength()
 
 	if firstInteraction && r.orch != nil {
 		r.orch.ReloadLongTermMemory(parent)
 	}
 
-	outcome, history := r.runTurnStepWithSideEffects(parent, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffectsAtEpoch(parent, true, env.SessionEpoch, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, userMsg)
 	})
 	if err := r.lifecycleAfterModelStep(outcome, history, historyStart); err != nil {
@@ -828,11 +845,28 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 
 func (r *runtime) commitHistoryFallback(history []llm.Message) {
 	r.mu.Lock()
+	if !r.turnEpochCurrentLocked() {
+		r.mu.Unlock()
+		return
+	}
 	changed := r.commitStepHistory(&history)
 	r.mu.Unlock()
 	if changed {
 		r.persist(context.Background())
 	}
+}
+
+func (r *runtime) sessionEpochCurrent(epoch uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return epoch == 0 || epoch == r.sessionEpoch
+}
+
+func (r *runtime) turnEpochCurrentLocked() bool {
+	if !r.turnFenceActive {
+		return true
+	}
+	return r.turnEpoch == r.sessionEpoch
 }
 
 // persist 持久化 session 数据
@@ -1153,8 +1187,6 @@ type resumeDiagSnapshot struct {
 func (r *runtime) resumeDiagSnapshot() resumeDiagSnapshot {
 	pending := r.pendingSnapshot()
 	pendingKind, pendingID := pendingHITLLogFields(pending)
-	r.mu.Lock()
-	r.mu.Unlock()
 	state := r.turnState()
 	return resumeDiagSnapshot{
 		queueLen:          r.queue.Len(),
@@ -1295,24 +1327,4 @@ func (r *runtime) waitStopped() {
 func (r *runtime) stop() {
 	r.requestStop()
 	r.waitStopped()
-}
-
-func (r *runtime) setLoadedSkillsByName(names []string) []skills.LoadedSkill {
-	if r.skillsCatalog == nil {
-		return nil
-	}
-	loaded := r.skillsCatalog.SetLoadedSkills(names)
-	r.setLoadedSkills(loaded)
-	r.persist(context.Background())
-	return loaded
-}
-
-func (r *runtime) unloadSkillsByName(names []string) []skills.LoadedSkill {
-	if r.skillsCatalog == nil {
-		return r.loadedSkillsSnapshot()
-	}
-	loaded := r.skillsCatalog.UnloadSkills(r.loadedSkillsSnapshot(), names)
-	r.setLoadedSkills(loaded)
-	r.persist(context.Background())
-	return loaded
 }

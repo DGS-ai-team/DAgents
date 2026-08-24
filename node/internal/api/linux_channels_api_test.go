@@ -37,7 +37,7 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 		return resp.StatusCode, out
 	}
 
-	credentialBody := map[string]any{}
+	var credentialBody map[string]any
 	if status, body := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
 		"credential_id": "client-supplied-id", "auth_type": "password", "secret_ref": "env:SSH_PASSWORD",
 	}); status != http.StatusCreated || body["credential_id"] == "client-supplied-id" || !strings.HasPrefix(body["credential_id"].(string), "cred_") {
@@ -76,7 +76,7 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 	} else if got, err := linuxStore.ResolveSecret(t.Context(), stored.SecretRef); err != nil || got != privateKey {
 		t.Fatalf("resolved private key=%q err=%v", got, err)
 	}
-	channelBody := map[string]any{}
+	var channelBody map[string]any
 	if status, body := postJSON(http.MethodPost, "/v1/linux/channels", map[string]any{
 		"channel_id": "client-supplied-channel", "host": "127.0.0.1", "username": "root", "credential_id": credentialID,
 	}); status != http.StatusCreated || body["channel_id"] == "client-supplied-channel" || !strings.HasPrefix(body["channel_id"].(string), "channel_") {

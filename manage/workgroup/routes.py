@@ -106,6 +106,7 @@ def build_workgroup_router(
         )
     kernel.set_assign_completer(loop.make_assign_completer(kernel))
     kernel.set_command_cancel_hook(loop.cancel_pending_commands)
+    kernel.set_assign_cancel_hook(loop.cancel_assign_runtime)
     kernel.resume_persisted_queues()
     kernel.resume_persisted_hitls()
 
@@ -249,7 +250,7 @@ def build_workgroup_router(
                     )
 
         try:
-            if not req.allow_tool_names:
+            if not req.agent_id and not req.allow_tool_names:
                 from manage.workgroup.member_tools import default_allow_tool_names
 
                 req = req.model_copy(update={"allow_tool_names": default_allow_tool_names()})
@@ -602,6 +603,50 @@ def build_workgroup_router(
             target_agent_id=workgroup_id,
         )
         return TurnCancelResponse.model_validate(out)
+
+    @router.post("/{workgroup_id}/assigns/{assign_id}/cancel", response_model=dict)
+    def cancel_workgroup_assign(workgroup_id: str, assign_id: str, request: Request) -> dict:
+        auth = authenticate(request)
+        try:
+            out = kernel.cancel_assign(workgroup_id, assign_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.assign.cancel",
+            target_agent_id=assign_id,
+        )
+        return out
+
+    @router.post(
+        "/{workgroup_id}/assigns/{assign_id}/tools/{tool_call_id}/cancel",
+        response_model=dict,
+    )
+    def cancel_workgroup_tool(
+        workgroup_id: str, assign_id: str, tool_call_id: str, request: Request
+    ) -> dict:
+        auth = authenticate(request)
+        assign = store.get_assign(assign_id)
+        if assign is None or assign.workgroup_id != workgroup_id:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "assign not found"})
+        try:
+            command_ids = loop.cancel_tool_runtime(workgroup_id, assign_id, tool_call_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        if not command_ids:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "tool_not_cancellable",
+                    "message": "tool execution is not a pending Manage command",
+                },
+            )
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.tool.cancel",
+            target_agent_id=tool_call_id,
+        )
+        return {"cancelled": True, "assign_id": assign_id, "tool_call_id": tool_call_id, "command_ids": command_ids}
 
     @router.post("/{workgroup_id}/messages/stream")
     def post_human_message_stream(

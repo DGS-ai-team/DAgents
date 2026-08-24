@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -177,10 +176,4 @@ func isHiddenCompanionAgent(rec store.AgentRecord) bool {
 		return true
 	}
 	return agentruntime.IsBrowserCompanionRecord(rec.ConfigSnapshot)
-}
-
-// companionMetaJSON 供测试/调试序列化。
-func companionMetaJSON(meta agentruntime.CompanionMeta) json.RawMessage {
-	raw, _ := json.Marshal(meta)
-	return raw
 }

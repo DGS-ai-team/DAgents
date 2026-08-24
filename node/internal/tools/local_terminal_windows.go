@@ -97,7 +97,7 @@ type windowsLocalTerminalState struct {
 
 func (s *windowsLocalTerminalState) start() error {
 	if s == nil {
-		return fmt.Errorf("Windows ConPTY is unavailable")
+		return fmt.Errorf("windows ConPTY is unavailable")
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -132,7 +132,7 @@ func (s *windowsLocalTerminalState) start() error {
 
 func (s *windowsLocalTerminalState) waitPTY() (*conpty.ConPty, error) {
 	if s == nil {
-		return nil, fmt.Errorf("Windows ConPTY is unavailable")
+		return nil, fmt.Errorf("windows ConPTY is unavailable")
 	}
 	<-s.ready
 	s.mu.Lock()

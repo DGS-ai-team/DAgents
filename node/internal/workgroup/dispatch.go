@@ -107,6 +107,29 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			},
 		}, nil
 
+	case "agent.tool.cancel":
+		handler, ok := w.AgentSessions.(AgentToolCancelHandler)
+		if !ok {
+			return agentTurnFailureResult(env, "agent tool cancellation is not supported")
+		}
+		req, err := agentToolCancelFromPayload(env.Payload)
+		if err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		if err := handler.CancelAgentTool(context.Background(), req); err != nil {
+			return agentTurnFailureResult(env, err.Error())
+		}
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     env.DeliverySeq > 0,
+			AckWorkgroupID: deliveryWorkgroupID(env, ""),
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type":    "agent.tool.cancelled",
+				"payload": agentResponsePayload(env, agentToolCancelPayload(req), w.Session.Generation()),
+			},
+		}, nil
+
 	case "agent.turn.resume":
 		if w.AgentSessions == nil {
 			return agentTurnFailureResult(env, "agent session handler not configured")
@@ -530,6 +553,21 @@ func agentTurnCancelFromPayload(payload map[string]any) (AgentTurnCancelRequest,
 	return req, nil
 }
 
+func agentToolCancelFromPayload(payload map[string]any) (AgentToolCancelRequest, error) {
+	var req AgentToolCancelRequest
+	raw, _ := json.Marshal(payload)
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return req, errf(CodeSchemaMismatch, "agent.tool.cancel payload: %v", err)
+	}
+	if strings.TrimSpace(req.WorkgroupID) == "" || strings.TrimSpace(req.MemberID) == "" ||
+		strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.SessionID) == "" ||
+		strings.TrimSpace(req.AssignID) == "" || strings.TrimSpace(req.ToolCallID) == "" ||
+		strings.TrimSpace(req.ToolName) == "" {
+		return req, errf(CodeSchemaMismatch, "agent.tool.cancel requires workgroup_id, member_id, agent_id, session_id, assign_id, tool_call_id, tool_name")
+	}
+	return req, nil
+}
+
 func agentTurnResumeFromPayload(payload map[string]any) (AgentTurnResumeRequest, error) {
 	var req AgentTurnResumeRequest
 	raw, _ := json.Marshal(payload)
@@ -574,6 +612,19 @@ func agentTurnCancelPayload(req AgentTurnCancelRequest) map[string]any {
 		"agent_id":     req.AgentID,
 		"session_id":   req.SessionID,
 		"assign_id":    req.AssignID,
+		"status":       "canceled",
+	}
+}
+
+func agentToolCancelPayload(req AgentToolCancelRequest) map[string]any {
+	return map[string]any{
+		"workgroup_id": req.WorkgroupID,
+		"member_id":    req.MemberID,
+		"agent_id":     req.AgentID,
+		"session_id":   req.SessionID,
+		"assign_id":    req.AssignID,
+		"tool_call_id": req.ToolCallID,
+		"tool_name":    req.ToolName,
 		"status":       "canceled",
 	}
 }

@@ -5,6 +5,7 @@ defineProps({
   agents: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   error: { type: String, default: "" },
+  kind: { type: String, default: "node" },
 });
 
 const emit = defineEmits(["open"]);
@@ -24,7 +25,7 @@ function statusLabel(status) {
         <thead>
           <tr>
             <th>名称</th>
-            <th>Node ID</th>
+            <th>{{ kind === "agent" ? "Agent ID" : "Node ID" }}</th>
             <th>状态</th>
             <th>版本</th>
             <th>最近心跳</th>
@@ -42,7 +43,7 @@ function statusLabel(status) {
           </tr>
           <tr v-else-if="!agents.length">
             <td colspan="6" class="empty">
-              <div class="empty-state">无匹配 Node</div>
+              <div class="empty-state">无匹配 {{ kind === "agent" ? "Agent" : "Node" }}</div>
             </td>
           </tr>
           <tr

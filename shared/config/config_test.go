@@ -10,7 +10,14 @@ import (
 func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Chdir(dir)
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldDir) })
 	// fs_root 写死为 DefaultFSRoot；chdir 到 TempDir，相对路径落在隔离目录。
 	runtimeDir = DefaultFSRoot
 	path := filepath.Join(dir, "config.yaml")

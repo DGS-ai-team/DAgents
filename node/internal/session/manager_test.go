@@ -11,6 +11,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -146,6 +147,55 @@ func TestCancelTurn(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	if !mgr.CancelTurn(s.ID) {
 		t.Fatal("expected cancel true")
+	}
+}
+
+func TestClearContextDoesNotRestoreStaleTurnBeforeFirstNewHumanMessage(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	reg, _ := tools.NewRegistry(t.TempDir(), 30)
+	pol, _ := policy.LoadFile("")
+	mgr := NewManager("agent-1", hub, &slowMockLLM{delay: 2 * time.Second}, reg, pol, nil, TurnOptions{}, logx.Discard())
+	defer mgr.Stop()
+
+	sess, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, queue.RequestTypeMessage, "stale-before-clear", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(sess.ID)
+	deadline := time.Now().Add(2 * time.Second)
+	for !rt.turnCoordinator.Snapshot().HasActiveTurn {
+		if time.Now().After(deadline) {
+			t.Fatal("turn did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if _, err := mgr.ClearContext(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, queue.RequestTypeMessage, "first-after-clear", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		messages := rt.messagesSnapshot()
+		if len(messages) >= 2 {
+			if messages[0].Role != "user" || messages[0].Content != "first-after-clear" {
+				t.Fatalf("stale history restored before first post-clear message: %+v", messages)
+			}
+			if len(messages) != 2 || messages[1].Role != "assistant" || messages[1].Content != "x" {
+				t.Fatalf("unexpected post-clear history: %+v", messages)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("post-clear message was not processed: %+v", messages)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

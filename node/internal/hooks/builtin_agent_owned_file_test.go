@@ -23,13 +23,6 @@ func (f *fakePathStater) StatRelPath(relPath string) (bool, time.Time, error) {
 	return false, time.Time{}, nil
 }
 
-func (f *fakePathStater) set(relPath string, mtime time.Time) {
-	if f.files == nil {
-		f.files = make(map[string]time.Time)
-	}
-	f.files[NormalizePathKey(relPath)] = mtime
-}
-
 func TestAgentOwnedFileHook_trustHitAuto(t *testing.T) {
 	mt := time.Unix(100, 0)
 	stater := &fakePathStater{files: map[string]time.Time{"a.txt": mt}}

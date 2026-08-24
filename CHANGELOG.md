@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-24
+
+**工作组执行可观测性与 Agent 运行稳定性增强**：让成员来源、工具执行、取消和上下文计量都拥有更明确的状态边界。
+
+### 新增
+
+- Manage 注册表将 Node 与 Agent 分开展示；工作组成员直接选择 Node 上已注册 Agent，并以 Agent 当前工具、Skill、模型配置为准，不再维护容易漂移的 prompt/工具侧车配置。
+- 工作组时间线增加结构化 `tool_started` / `tool_finished` 事件；assign 和单个工具调用均可独立中断，AgentRef 的可取消 bash 调用通过 Node→Manage WS 回传。
+- Agent Node 增加 turn epoch/session fence，修复中断 turn 或 `/clear` 后第一条手工 human message 被旧 turn 恢复逻辑覆盖的问题。
+- Linux/终端命令等待增加超时、取消、进程终止和输出读取的有界收敛，避免远程命令偶发长时间不返回。
+
+### 优化
+
+- Node Web UI 右下角仅保留模型配置与上下文计量圆环，token 详情改为悬浮信息，不再单独占用消息区域。
+- 工作组控制台按结构化事件展示成员任务与工具执行清单，并保留旧事件的兼容展示路径。
+
+### 测试
+
+- Go Node/Client/共享配置测试通过；Python 全量 189 项、Node Web UI 284 项测试通过。
+- Manage Console 与 Node Web UI 生产构建通过；完成工作组页面与 Node 对话页浏览器级回归检查。
+
 ## [0.10.1] - 2026-08-24
 
 **工作组 AgentRef 与终端工作台稳定性修复**：补齐远程 Agent 人工确认恢复链路，并让终端会话在离开工作台后保持可恢复状态。

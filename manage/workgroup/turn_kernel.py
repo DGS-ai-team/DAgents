@@ -175,6 +175,8 @@ class TurnKernel:
         self._legacy_hitl_resolutions: dict[str, dict[str, Any]] = {}
         # workgroup_id -> cancel flag（用户中断当前 turn）
         self._cancel_flags: dict[str, threading.Event] = {}
+        # assign_id -> cancel flag（只中断单个成员任务，不影响 Supervisor/其他 Assign）
+        self._assign_cancel_flags: dict[str, threading.Event] = {}
         self._active_turn: dict[str, dict[str, Any]] = {}
         self._turn_lock = threading.Lock()
         # workgroup_id -> FIFO human 队列（进程内；对齐 Node MessageQueue 单飞）
@@ -184,6 +186,7 @@ class TurnKernel:
             for records in [self._store.list_human_queue_records(workgroup_id)]
         }
         self._command_cancel_hook: Callable[[str], None] | None = None
+        self._assign_cancel_hook: Callable[[str, str], None] | None = None
         self._realtime_event_listener: Callable[
             [str, str, dict[str, Any], str | None], None
         ] | None = None
@@ -199,6 +202,10 @@ class TurnKernel:
     def set_command_cancel_hook(self, hook: Callable[[str], None] | None) -> None:
         """cancel_turn 时唤醒 Node command/AgentRef waiters。"""
         self._command_cancel_hook = hook
+
+    def set_assign_cancel_hook(self, hook: Callable[[str, str], None] | None) -> None:
+        """取消单个 Assign 时仅通知其 Node command/AgentRef waiter。"""
+        self._assign_cancel_hook = hook
 
     def set_realtime_event_listener(
         self,
@@ -692,6 +699,63 @@ class TurnKernel:
     def _raise_if_cancelled(self, workgroup_id: str) -> None:
         if self._is_cancelled(workgroup_id):
             raise WorkgroupError("canceled", "workgroup turn cancelled", http_status=409)
+
+    def _assign_cancel_event(self, assign_id: str) -> threading.Event:
+        with self._turn_lock:
+            event = self._assign_cancel_flags.get(assign_id)
+            if event is None:
+                event = threading.Event()
+                self._assign_cancel_flags[assign_id] = event
+            return event
+
+    def _is_assign_cancelled(self, assign_id: str) -> bool:
+        return bool(assign_id) and self._assign_cancel_event(assign_id).is_set()
+
+    def _raise_if_assign_cancelled(self, assign_id: str) -> None:
+        if self._is_assign_cancelled(assign_id):
+            raise WorkgroupError("canceled", "assign cancelled", http_status=409)
+
+    def cancel_assign(self, workgroup_id: str, assign_id: str) -> dict[str, Any]:
+        """Cancel one active Assign without setting the workgroup turn flag."""
+        assign = self._store.get_assign(assign_id)
+        if assign is None or assign.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "assign not found", http_status=404)
+        if assign.status not in {"queued", "running", "awaiting_hitl"}:
+            return {"cancelled": False, "assign": assign, "assign_id": assign_id}
+        self._assign_cancel_event(assign_id).set()
+        if self._assign_cancel_hook is not None:
+            try:
+                self._assign_cancel_hook(workgroup_id, assign_id)
+            except Exception:  # noqa: BLE001 - durable cancellation still wins
+                pass
+        updated = self._store.set_assign_status(
+            assign_id,
+            "canceled",
+            result_summary="cancelled by user",
+            error_code="canceled",
+        )
+        for run in self._store.list_actor_runs(workgroup_id, actor_id=assign.member_id, limit=100):
+            if run.assign_id != assign_id:
+                continue
+            try:
+                self._heal_open_tool_calls(run.run_id, reason="assign cancelled by user")
+                if run.status in {"running", "awaiting_hitl"}:
+                    self._store.update_actor_run(run.run_id, status="canceled")
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            self._store.cancel_pending_hitls_for_assign(workgroup_id, assign_id)
+        except Exception:  # noqa: BLE001
+            pass
+        self._store.append_timeline(
+            workgroup_id,
+            type="assign_finished",
+            actor_id=assign.member_id,
+            text="已中断",
+            protocol_name=protocol_name_for_actor(assign.member_id),
+            assign_id=assign_id,
+        )
+        return {"cancelled": True, "assign": updated, "assign_id": assign_id}
 
     def cancel_turn(self, workgroup_id: str) -> dict[str, Any]:
         """取消当前工作组活跃 turn：置位 cancel flag + fail active assigns + heal open tools。"""
@@ -1489,6 +1553,7 @@ class TurnKernel:
 
         while True:
             self._raise_if_cancelled(workgroup_id)
+            self._raise_if_assign_cancelled(run.assign_id or "")
             hist = self._store.ensure_run_history(run)
             healed = self._heal_open_tool_calls(
                 run_id,
@@ -2002,6 +2067,8 @@ class TurnKernel:
                             tc.arguments or "{}",
                         )
                 except WorkgroupError as exc:
+                    if self._is_assign_cancelled(run.assign_id or ""):
+                        raise
                     content = f"ERROR ({exc.code}): {exc.message}"
                 except Exception as exc:  # noqa: BLE001
                     content = f"ERROR: {exc or exc.__class__.__name__}"

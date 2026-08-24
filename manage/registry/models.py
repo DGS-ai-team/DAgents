@@ -12,6 +12,7 @@ from manage.registry.status import AgentStatus
 
 AuthMethod = Literal["shared_token", "mtls", "none"]
 RiskLevel = Literal["low", "medium", "high"]
+RegistryKind = Literal["node", "agent"]
 
 
 def _normalize_string_list(value: Any, *, field_name: str, allow_empty: bool = True) -> list[str]:
@@ -187,6 +188,10 @@ class AgentGroupsUpdateRequest(BaseModel):
 class AgentStoredRecord(BaseModel):
     agent_id: str
     node_id: str = ""
+    # A Node is the transport/runtime host; an Agent is a selectable runtime
+    # registered by that Node.  Keep this explicit in the public contract so
+    # consumers do not have to infer type from identifiers.
+    kind: RegistryKind = "agent"
     base_url: str
     host_ips: str = ""
     discovery_group: list[str]
@@ -219,6 +224,7 @@ class AgentRecord(AgentStoredRecord):
 class AgentDiscoverRecord(BaseModel):
     agent_id: str
     node_id: str = ""
+    kind: RegistryKind = "agent"
     discovery_group: list[str]
     capabilities: list[str] = Field(default_factory=list)
     capabilities_hint: list[str] = Field(default_factory=list)
