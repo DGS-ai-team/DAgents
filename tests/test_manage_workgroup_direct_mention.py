@@ -243,6 +243,49 @@ class DirectMemberRouteTests(unittest.TestCase):
             self.assertFalse(out["cancelled"])
             self.assertEqual(out["mode"], "idle")
 
+    def test_cancel_after_restart_converges_persisted_hitl_run(self) -> None:
+        """重启后无 active-turn 内存索引时，取消仍收口 run/HITL/assign。"""
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, wid, member = self._ready_group(tmp)
+            from manage.workgroup.models import AssignCreateRequest
+
+            restarted = TurnKernel(store, mock_llm=True)
+            leader = restarted.start_leader_run(wid)
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(
+                    member_id=member.member_id,
+                    instruction="等待审批的任务",
+                    leader_run_id=leader.run_id,
+                    leader_tool_call_id="call_restart_cancel",
+                ),
+            )
+            member_run = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id=member.member_id, assign_id=assign.assign_id),
+            )
+            store.set_assign_status(assign.assign_id, "awaiting_hitl")
+            store.update_actor_run(leader.run_id, status="awaiting_hitl")
+            store.update_actor_run(member_run.run_id, status="awaiting_hitl")
+            hitl = store.create_hitl(
+                wid,
+                prompt="确认工具调用",
+                run_id=leader.run_id,
+                tool_call_id="call_restart_cancel",
+            )
+
+            out = restarted.cancel_turn(wid)
+
+            self.assertTrue(out["cancelled"])
+            self.assertEqual(out["mode"], "orphan_assign")
+            self.assertEqual(store.get_actor_run(leader.run_id).status, "canceled")
+            self.assertEqual(store.get_actor_run(member_run.run_id).status, "canceled")
+            self.assertEqual(store.get_hitl(hitl.hitl_id).status, "resolved")
+            self.assertEqual(store.get_member(member.member_id).status, "ready")
+            finished = [e for e in store.list_timeline(wid) if e.type == "assign_finished"]
+            self.assertEqual(len(finished), 1)
+            self.assertIn("中断", finished[0].text or "")
+
     def test_cancel_during_direct_completer(self) -> None:
         """直连执行中 cancel：置位 flag、fail assign、heal；序列收口为已中断。"""
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

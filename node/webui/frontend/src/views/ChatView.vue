@@ -128,6 +128,8 @@ const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
+let hitlReconcileInFlight = false;
+let hitlReconciledTurnId = "";
 
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => isTurnProcessing(),
@@ -341,12 +343,24 @@ function handleEvent(ev) {
     case "turn_state":
       if (applyTurnState(ev.data, { source: "event" })) {
         syncTurnStatus(turnStateStore);
+        if (
+          ["tool_waiting", "waiting_user"].includes(String(turnStateStore.phase || "")) &&
+          hitlStore.queue.length === 0
+        ) {
+          void reconcilePendingHitl(ev.data);
+        }
         if (isTurnTerminal()) {
           // A terminal lifecycle event supersedes any reconnect/watchdog
           // hydrate that may still be in flight. Its response must not be
           // allowed to replace the now-committed final assistant snapshot.
           invalidateHydration();
           sseResyncToken += 1;
+          // HITL cards are projections of the current turn's pending
+          // approval. Once the authoritative lifecycle reaches a terminal
+          // phase, no approval can remain actionable, even when the
+          // approval was resolved from another tab or connection.
+          clearHitl();
+          hitlReconciledTurnId = "";
           markHistoryCommitted(turnStateStore.historyRevision);
           if (["requesting", "confirmed"].includes(turnStateStore.cancelState)) {
             markTurnCancellationConfirmed();
@@ -394,6 +408,7 @@ function handleEvent(ev) {
       setUsageFromSSE(ev.data);
       break;
     case "error":
+      clearHitl();
       finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
       if (turnStateStore.authority !== "turn_coordinator") {
@@ -433,6 +448,9 @@ function handleEvent(ev) {
       );
       break;
     case "done":
+      // Legacy nodes may only emit done without a terminal turn_state.
+      // Reconcile the local approval projection on that path as well.
+      clearHitl();
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
@@ -518,6 +536,27 @@ function handleCompressionEvent(type, data) {
   }
   if (phase === "end") {
     finishStatus("compression");
+  }
+}
+
+/**
+ * HITL 卡片是 hydrate 的权威投影。正常情况下 hitl_required SSE 会直接入队，
+ * 但在 tool_call / turn_state 紧邻发布、重连或序号对账时，客户端可能只收到
+ * tool_waiting 而漏掉 hitl_required。此时只对当前 Turn 做一次 hydrate 对账，
+ * 避免把“待审批”误显示成普通的待执行工具，也避免循环请求。
+ */
+async function reconcilePendingHitl(turnState) {
+  if (hitlReconcileInFlight || hitlStore.queue.length > 0) return;
+  const turnId = String(turnState?.turn_id || turnStateStore.turnId || "").trim();
+  if (turnId && hitlReconciledTurnId === turnId) return;
+  if (turnId) hitlReconciledTurnId = turnId;
+  hitlReconcileInFlight = true;
+  try {
+    await hydrateAgent();
+  } catch {
+    // SSE 仍是主通道；hydrate 失败时交给重连/看门狗再次对账。
+  } finally {
+    hitlReconcileInFlight = false;
   }
 }
 

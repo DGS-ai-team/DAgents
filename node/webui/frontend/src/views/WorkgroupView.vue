@@ -111,6 +111,7 @@ let timelineReqSeq = 0;
 let pollInFlight = false;
 let workgroupEventSource = null;
 let workgroupEventSeq = 0;
+const cancelledRealtimeMessageIds = new Set();
 
 const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
 const hitlMode = computed(() => Boolean(activeHitl.value));
@@ -253,6 +254,19 @@ function clearLive() {
   statusWatermarkSeq.value = 0;
 }
 
+function rememberCancelledMessageIds(...ids) {
+  for (const id of ids) {
+    const value = String(id || "").trim();
+    if (!value) continue;
+    cancelledRealtimeMessageIds.add(value);
+  }
+  while (cancelledRealtimeMessageIds.size > 64) {
+    const oldest = cancelledRealtimeMessageIds.values().next().value;
+    if (!oldest) break;
+    cancelledRealtimeMessageIds.delete(oldest);
+  }
+}
+
 const memberNameById = computed(() => {
   const map = {};
   for (const m of members.value || []) {
@@ -347,6 +361,12 @@ function applyTimelineEvent(event) {
   const seq = Number(event?.seq || 0);
   noteWorkgroupTimeline(workgroupId.value, seq);
   markWorkgroupRead(workgroupId.value, seq);
+  if (event.type === "assign_started" || event.type === "assign_finished") {
+    // Member occupancy is durable state owned by Manage. Reconcile it from
+    // the authoritative assignment event instead of leaving the sidebar in
+    // `busy` until a full page reload.
+    void loadMembers();
+  }
   if (
     !sending.value &&
     remoteSending.value &&
@@ -364,6 +384,7 @@ function applyRemoteRealtime(payload) {
     clientMessageId || remoteClientMessageId.value || `remote-${workgroupId.value}`;
   const eventType = String(payload.event_type || "");
   const data = payload.data && typeof payload.data === "object" ? payload.data : {};
+  if (cancelledRealtimeMessageIds.has(liveMessageId)) return;
   // The originating Node already receives leader/direct frames through POST
   // streaming. Member frames are emitted from the nested member run, so keep
   // those SSE frames to make the local view identical to other subscribers.
@@ -872,6 +893,7 @@ async function send() {
       {
         signal: streamAbort.signal,
         onEvent: async (eventName, data) => {
+          if (cancelledRealtimeMessageIds.has(clientMessageId)) return;
           if (eventName === "queued") {
             becameQueued = true;
             applyQueuePayload(data);
@@ -982,9 +1004,12 @@ function pickMention(member) {
 }
 
 async function cancelTurn() {
-  if (!workgroupId.value || !sending.value || cancelling.value) return;
+  // A pending HITL may be restored after a page reload, when `sending` is
+  // false even though the workgroup turn is still awaiting a decision.
+  if (!workgroupId.value || (!sending.value && !hitlMode.value) || cancelling.value) return;
   cancelling.value = true;
   try {
+    rememberCancelledMessageIds(localClientMessageId.value, remoteClientMessageId.value);
     await api.cancelWorkgroupTurn(workgroupId.value);
     if (streamAbort) {
       try {
@@ -993,7 +1018,13 @@ async function cancelTurn() {
         /* ignore */
       }
     }
-    await loadTimeline();
+    sending.value = false;
+    clearLive();
+    await Promise.all([
+      loadTimeline(),
+      loadPendingHitl(),
+      loadMembers(),
+    ]);
   } catch (e) {
     error.value = e?.message || "取消失败";
   } finally {
@@ -1210,6 +1241,7 @@ function buildAssignIndex(list) {
   const memberFinalByAssign = {};
   const assistantContentByAssign = {};
   const noticeIndexByEventId = {};
+  const toolEventsByAssign = {};
   for (const ev of list || []) {
     const t = String(ev?.type || "");
     const aid = String(ev?.assign_id || "").trim();
@@ -1231,6 +1263,9 @@ function buildAssignIndex(list) {
     } else if (t === "assistant_content") {
       if (!assistantContentByAssign[aid]) assistantContentByAssign[aid] = [];
       assistantContentByAssign[aid].push(ev);
+    } else if (t === "tool_started" || t === "tool_finished") {
+      if (!toolEventsByAssign[aid]) toolEventsByAssign[aid] = [];
+      toolEventsByAssign[aid].push(ev);
     }
   }
   return {
@@ -1242,6 +1277,7 @@ function buildAssignIndex(list) {
     memberFinalByAssign,
     assistantContentByAssign,
     noticeIndexByEventId,
+    toolEventsByAssign,
   };
 }
 
@@ -1274,8 +1310,8 @@ function taskDetailsId(item) {
   return `wg-task-details-${key}`;
 }
 
-function parseNoticeTool(text) {
-  const raw = String(text || "").trim();
+function parseNoticeTool(text, fallbackToolName = "") {
+  const raw = String(text || "").trim() || String(fallbackToolName || "").trim();
   if (!raw) return { toolName: "tool", summary: "执行成员工具" };
   const parts = raw.split(/\s*·\s*/);
   const toolName = String(parts[0] || "tool").trim() || "tool";
@@ -1306,6 +1342,15 @@ function parseNoticeTool(text) {
     toolName,
     summary: purpose,
   };
+}
+
+function toolEventMatches(left, right) {
+  const leftCall = String(left?.tool_call_id || "").trim();
+  const rightCall = String(right?.tool_call_id || "").trim();
+  if (leftCall || rightCall) return Boolean(leftCall && rightCall && leftCall === rightCall);
+  const leftCommand = String(left?.command_id || "").trim();
+  const rightCommand = String(right?.command_id || "").trim();
+  return Boolean(leftCommand && rightCommand && leftCommand === rightCommand);
 }
 
 function toolKindLabel(toolName) {
@@ -1398,18 +1443,30 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal, assis
   };
 }
 
-function makeDirectToolItem(ev, { assignFinished, isLast, failed }) {
-  const parsed = parseNoticeTool(ev?.text);
-  const done = Boolean(assignFinished) || !isLast;
+function makeDirectToolItem(ev, { assignFinished, isLast, failed, toolFinished = null }) {
+  const parsed = parseNoticeTool(ev?.text, ev?.tool_name);
+  const finishStatus = String(toolFinished?.status || "").toLowerCase();
+  const terminalToolResult = [
+    "succeeded",
+    "failed",
+    "rejected",
+    "indeterminate",
+    "canceled",
+    "cancelled",
+    "timed_out",
+  ].includes(finishStatus);
+  const done = Boolean(assignFinished) || terminalToolResult || (!toolFinished && !isLast);
+  const failedResult =
+    Boolean(failed) || ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(finishStatus);
   return {
     key: ev.event_id || `tool-${ev.seq}`,
     kind: "tool",
     toolName: parsed.toolName,
     toolKind: toolKindLabel(parsed.toolName),
     summary: parsed.summary,
-    statusText: !done ? "执行中" : failed ? "已中断" : "已完成",
+    statusText: !done ? "执行中" : failedResult ? "已中断" : "已完成",
     done,
-    failed: Boolean(failed && done && isLast),
+    failed: Boolean(failedResult && done),
     inProgress: !done,
   };
 }
@@ -1490,6 +1547,7 @@ const eventGroups = computed(() => {
     memberFinalByAssign,
     assistantContentByAssign,
     noticeIndexByEventId,
+    toolEventsByAssign,
   } = buildAssignIndex(list);
   const consumedFinished = new Set();
 
@@ -1527,7 +1585,26 @@ const eventGroups = computed(() => {
       if (aid && startedByAssign[aid]) continue;
       if (aid && consumedFinished.has(aid)) continue;
       const isDirect = Boolean(aid && directAssignIds.has(aid));
-      if (isDirect) continue;
+      if (isDirect) {
+        // Direct turns normally render the persisted member final text. If a
+        // turn was canceled/failed before that text existed, keep a durable
+        // status row visible instead of dropping the whole task.
+        if (memberFinalByAssign[aid] || (toolEventsByAssign[aid] || []).length) continue;
+        flat.push({
+          role: "assistant",
+          actorId: String(ev?.actor_id || "").trim(),
+          label: eventLabel({ ...ev, type: "assign_finished" }),
+          item: makeDirectToolItem(
+            { ...ev, text: "tool", tool_name: "tool" },
+            {
+              assignFinished: true,
+              isLast: true,
+              failed: /失败|中断/.test(String(ev?.text || "")),
+            },
+          ),
+        });
+        continue;
+      }
       const actorId = String(ev?.actor_id || "leader").trim() || "leader";
       const notices = aid ? noticesByAssign[aid] || [] : [];
       const memberFinal = aid ? memberFinalByAssign[aid] || null : null;
@@ -1544,6 +1621,44 @@ const eventGroups = computed(() => {
           aid ? assistantContentByAssign[aid] || [] : [],
         ),
       });
+      continue;
+    }
+
+    if (t === "tool_started" || t === "tool_finished") {
+      const isDirect = Boolean(aid && directAssignIds.has(aid));
+      if (isDirect) {
+        const chain = toolEventsByAssign[aid] || [];
+        const starts = chain.filter((item) => item?.type === "tool_started");
+        const matchingStart = starts.find((item) => toolEventMatches(item, ev));
+        // A structured tool_finished closes the preceding tool_started; one
+        // row is enough for the user and avoids doubled start/finish entries.
+        if (t === "tool_finished" && matchingStart) continue;
+        const renderEvent = matchingStart || ev;
+        const index = starts.findIndex((item) => item?.event_id === renderEvent?.event_id);
+        const matchingFinish = chain.find(
+          (item) => item?.type === "tool_finished" && toolEventMatches(item, renderEvent),
+        );
+        const finished = finishedByAssign[aid] || null;
+        const failed = Boolean(
+          (finished && /失败|中断/.test(String(finished.text || ""))) ||
+            ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(
+              String(matchingFinish?.status || "").toLowerCase(),
+            ),
+        );
+        flat.push({
+          role: "assistant",
+          actorId: String(renderEvent?.actor_id || ev?.actor_id || "").trim(),
+          label: eventLabel({ ...renderEvent, type: "assign_started" }),
+          item: makeDirectToolItem(renderEvent, {
+            assignFinished: Boolean(finished),
+            isLast: index < 0 || index === starts.length - 1,
+            failed,
+            toolFinished: matchingFinish,
+          }),
+        });
+      }
+      // Structured tool events are represented by the direct tool row or the
+      // surrounding assign card; never leak raw tool_started/tool_finished.
       continue;
     }
 
@@ -1566,6 +1681,7 @@ const eventGroups = computed(() => {
       if (String(ev?.text || "").startsWith("已直达")) continue;
       const actorId = String(ev?.actor_id || "").trim();
       if (aid && directAssignIds.has(aid)) {
+        if ((toolEventsByAssign[aid] || []).length) continue;
         const chain = noticesByAssign[aid] || [];
         const idx = ev.event_id ? noticeIndexByEventId[ev.event_id] ?? -1 : -1;
         const isLast = idx < 0 || idx === chain.length - 1;
@@ -2470,11 +2586,11 @@ onUnmounted(() => {
             </div>
             <div class="chat__composer-pill-right">
               <button
-                v-if="sending && !hitlMode"
+                v-if="sending || hitlMode"
                 type="button"
                 class="chat__composer-send chat__composer-send--cancel"
-                title="取消"
-                aria-label="取消"
+                :title="cancelling ? '正在取消…' : '取消本轮'"
+                :aria-label="cancelling ? '正在取消本轮' : '取消本轮'"
                 :disabled="cancelling"
                 @click="cancelTurn"
               >
@@ -2488,7 +2604,7 @@ onUnmounted(() => {
                 </svg>
               </button>
               <button
-                v-else-if="hitlMode"
+                v-if="hitlMode"
                 type="button"
                 class="chat__composer-send"
                 title="提交回答"
@@ -2507,7 +2623,7 @@ onUnmounted(() => {
                 </svg>
               </button>
               <button
-                v-else
+                v-if="!sending && !hitlMode"
                 type="button"
                 class="chat__composer-send"
                 title="发送"

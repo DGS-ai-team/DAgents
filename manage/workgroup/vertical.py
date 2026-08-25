@@ -27,6 +27,7 @@ from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.member_tools import side_effect_for_tool
 from manage.workgroup.models import AssignCreateRequest
+from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
 
 if TYPE_CHECKING:
@@ -1053,6 +1054,33 @@ class VerticalLoop:
                 # Node frame. It must not revive the durable assign or emit a
                 # misleading final answer after cancellation.
                 return
+            final_text = str(payload.get("final_text") or "").strip()
+            timeline_event = None
+            if str(payload.get("status") or "").strip().lower() in {"succeeded", "awaiting"} and final_text:
+                # AgentRef runs do not execute the local Member LLM loop, so
+                # their final text arrives through this inbound frame. Persist
+                # it before broadcasting the ephemeral final frame; otherwise
+                # the originating Node clears its live bubble and a reload has
+                # no durable member reply to render.
+                timeline_event = next(
+                    (
+                        event
+                        for event in reversed(self.store.list_timeline(workgroup_id))
+                        if event.assign_id == assign_id
+                        and event.type == "actor_final_text"
+                        and event.actor_id == member_id
+                    ),
+                    None,
+                )
+                if timeline_event is None:
+                    timeline_event = self.store.append_timeline(
+                        workgroup_id,
+                        type="actor_final_text",
+                        actor_id=member_id,
+                        text=final_text,
+                        protocol_name=protocol_name_for_actor(member_id),
+                        assign_id=assign_id,
+                    )
             if self.hub is not None:
                 self.hub.publish_realtime_event(
                     workgroup_id,
@@ -1061,8 +1089,13 @@ class VerticalLoop:
                         "mode": "member",
                         "member_id": member_id,
                         "assign_id": assign_id,
-                        "text": str(payload.get("final_text") or ""),
+                        "text": final_text,
                         "status": str(payload.get("status") or "failed"),
+                        "timeline_event": (
+                            timeline_event.model_dump(mode="json")
+                            if timeline_event is not None
+                            else None
+                        ),
                     },
                 )
             self._signal_agent_result(assign_id, result)

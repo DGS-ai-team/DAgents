@@ -60,6 +60,7 @@ type Server struct {
 	tools           *tools.Registry
 	transfers       *tools.LinuxTransferManager
 	backgroundJobs  *tools.BackgroundJobStore
+	browserMu       sync.RWMutex
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
 	workgroupWorker *workgroup.Worker

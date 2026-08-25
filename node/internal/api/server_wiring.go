@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -89,14 +90,13 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
 	attachBackgroundJobNotifier(reg, s.sessions, s.logger)
+	attachBrowserTaskNotifier(reg, s.sessions, s.logger)
 	attachProcessEventSink(reg, s.stream, s.store, s.logger)
 	reg.SetTerminalSessionBroker(s.terminals)
 	if s.mediaRegister != nil {
 		reg.SetMediaRegister(s.mediaRegister)
 	}
-	if s.browserMgr != nil {
-		reg.SetBrowserManager(s.browserMgr)
-	}
+	reg.SetBrowserManager(s.browserManager())
 	if s.agents != nil {
 		agents := s.agents
 		reg.SetBrowserCompanionExists(func(ctx context.Context, companionAgentID string) (bool, error) {
@@ -106,6 +106,67 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 			}
 			return rec != nil && !rec.Archived, nil
 		})
+	}
+}
+
+// attachBrowserTaskNotifier 将 browser_run_task(wait=false) 的终态回灌到
+// Agent session；Node 只向已建立的本地 runtime 入队，不需要 sidecar 主动访问 Node。
+func attachBrowserTaskNotifier(reg *tools.Registry, mgr *session.Manager, logger *slog.Logger) {
+	if reg == nil || mgr == nil {
+		return
+	}
+	reg.SetBrowserTaskNotifier(func(sessionID string, done tools.BrowserTaskDone) {
+		if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
+			JobID:      done.TaskID,
+			ToolName:   "browser_run_task",
+			ToolCallID: done.ToolCallID,
+			Status:     done.Status,
+			ResultText: done.ResultText,
+			ErrorText:  done.ErrorText,
+		}); err != nil && logger != nil {
+			logger.Warn("browser task completion enqueue failed", "session_id", sessionID, "task_id", done.TaskID, "error", err)
+		}
+	})
+}
+
+// browserManager returns the current process-level browser manager. Browser
+// capability settings can be changed without restarting Node, so callers
+// must not retain the field directly while a settings patch is in flight.
+func (s *Server) browserManager() *browser.Manager {
+	if s == nil {
+		return nil
+	}
+	s.browserMu.RLock()
+	defer s.browserMu.RUnlock()
+	return s.browserMgr
+}
+
+// installBrowserManager atomically swaps the process-level browser manager
+// and rebinds all loaded Agent/workgroup registries. The session manager
+// requests a model-context refresh rather than mutating an active Step's
+// frozen tool snapshot.
+func (s *Server) installBrowserManager(next *browser.Manager) {
+	if s == nil {
+		if next != nil {
+			_ = next.Close()
+		}
+		return
+	}
+	s.browserMu.Lock()
+	previous := s.browserMgr
+	s.browserMgr = next
+	s.browserMu.Unlock()
+
+	if s.tools != nil {
+		s.tools.SetBrowserManager(next)
+	}
+	if s.sessions != nil {
+		s.sessions.SetBrowserManager(next)
+	}
+	if previous != nil && previous != next {
+		if err := previous.Close(); err != nil && s.logger != nil {
+			s.logger.Warn("previous browser manager close failed", "error", err)
+		}
 	}
 }
 
