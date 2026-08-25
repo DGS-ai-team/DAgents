@@ -29,6 +29,7 @@ from manage.workgroup.turn_kernel import (  # noqa: E402
     mock_leader_script_assign_then_answer,
     mock_member_script_read_file_then_answer,
 )
+from manage.workgroup.native_tools import NativeToolDispatcher  # noqa: E402
 
 
 class LeaderLoopTests(unittest.TestCase):
@@ -57,6 +58,21 @@ class LeaderLoopTests(unittest.TestCase):
             assert hist is not None
             # 无工具路径：不应写入 tool 消息
             self.assertEqual([m.role for m in hist.messages].count("tool"), 0)
+
+    def test_supervisor_member_listing_does_not_expose_tool_allowlist(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, _ = self._ready_group(store)
+            payload = json.loads(
+                NativeToolDispatcher(store, leader_run_id="rn_test").dispatch(
+                    workgroup_id=wid,
+                    tool_name="list_workgroup_members",
+                    tool_call_id="call_list",
+                    arguments_json="{}",
+                )
+            )
+            self.assertTrue(payload["members"])
+            self.assertNotIn("tool_allow_names", payload["members"][0])
 
     def test_first_human_message_survives_ahead_watermark(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

@@ -66,7 +66,7 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 			return h.runExecutor(cmd, *existing)
 		}
 		// 进程重启后 journal 残留 running、但本进程已无执行上下文：升格 indeterminate，
-		// 避免只回 tool.ack 导致 Manage 空等 60s。
+		// 避免只回 tool.ack 导致 Manage 空等到默认超时。
 		if existing.Status == "running" && !h.isTrackedRunning(cmd.CommandID) {
 			now := time.Now().UTC().Format(time.RFC3339)
 			existing.Status = "indeterminate"

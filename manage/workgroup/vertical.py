@@ -33,7 +33,10 @@ from manage.workgroup.store import WorkGroupStore
 if TYPE_CHECKING:
     from manage.workgroup.turn_kernel import TurnKernel
 
-_DEFAULT_COMMAND_TIMEOUT_S = 60.0
+# A member AgentRef turn remains suspended while its Node-side Agent waits for
+# a human tool approval.  One minute is too short for a real operator to
+# inspect the request; keep the wait aligned with the ten-minute UI contract.
+_DEFAULT_COMMAND_TIMEOUT_S = 10 * 60.0
 _READ_FILE_TOOL = "read_file"
 
 

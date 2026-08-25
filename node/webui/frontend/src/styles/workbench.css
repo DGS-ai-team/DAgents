@@ -2626,6 +2626,10 @@ select.settings-field__input {
 
 /* 瞬时 turn/step 状态统一显示在输入栏右上方；底部状态线只保留稳定控制项。 */
 .chat__composer-runtime-rail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
   min-width: 0;
   min-height: 16px;
   margin: 0 6px 2px;

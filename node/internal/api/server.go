@@ -434,14 +434,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var wgAgentBridge *workgroupAgentBridge
 	if cfg.ManageWorkgroupEnabled() {
 		wgAgentBridge = newWorkgroupAgentBridge(nil)
-		toolNames := []string{}
-		if mgr != nil {
-			toolNames = mgr.ToolNames()
-		}
 		wgWorker = workgroup.NewWorker(workgroup.Config{
 			NodeID:             cfg.NodeID,
 			AgentSessions:      wgAgentBridge,
-			NodeToolNames:      toolNames,
 			DataDir:            filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
 			BackgroundJobStore: backgroundJobs,
 		})

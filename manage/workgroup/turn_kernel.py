@@ -85,7 +85,7 @@ def leader_tool_purpose(tool_name: str) -> str:
 _LEADER_SYSTEM_RULES = (
     "你是工作组 Leader（Supervisor）。"
     "你只通过 Manage 侧编排工具进行协调，绝不亲自执行 shell / 文件系统 / 浏览器操作。"
-    "用 list_workgroup_members 查看成员状态与工具白名单。"
+    "用 list_workgroup_members 查看成员状态、描述与运行环境。"
     "用 assign_workgroup_task 把实际工作委派给就绪成员；"
     "成员会跑自己的 LLM 循环，并调用自己的工具完成你发布的任务。"
     "指令写清楚；不要编造宿主机绝对路径——"
@@ -1383,6 +1383,7 @@ class TurnKernel:
             text=f"直达 · {brief}",
             protocol_name=protocol_name_for_actor(mid),
             assign_id=assign.assign_id,
+            direct_member_id=mid,
         )
 
         completer = self._assign_completer
@@ -1412,6 +1413,7 @@ class TurnKernel:
                 text="已完成",
                 protocol_name=protocol_name_for_actor(mid),
                 assign_id=assign.assign_id,
+                direct_member_id=mid,
             )
         except WorkgroupError as exc:
             status = "canceled" if exc.code == "canceled" else "failed"
@@ -1437,6 +1439,7 @@ class TurnKernel:
                     text="已中断" if status == "canceled" else f"失败：{msg}",
                     protocol_name=protocol_name_for_actor(mid),
                     assign_id=assign.assign_id,
+                    direct_member_id=mid,
                 )
             final_text = msg
             if exc.code != "canceled":
@@ -1456,6 +1459,7 @@ class TurnKernel:
                 text=f"失败：{msg}",
                 protocol_name=protocol_name_for_actor(mid),
                 assign_id=assign.assign_id,
+                direct_member_id=mid,
             )
             raise WorkgroupError("conflict", msg, http_status=500) from exc
 

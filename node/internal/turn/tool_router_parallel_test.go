@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,8 +17,32 @@ import (
 
 // parallelDelayExecutor 按工具名阻塞不同时长，用于验证并行批次完成即推送 SSE。
 type parallelDelayExecutor struct {
-	delays map[string]time.Duration
+	delays  map[string]time.Duration
 	started atomic.Int32
+}
+
+type cancelParallelExecutor struct {
+	cancel  context.CancelFunc
+	started atomic.Int32
+}
+
+func (s *cancelParallelExecutor) Definitions() []tools.ToolDef { return nil }
+
+func (s *cancelParallelExecutor) Execute(_ context.Context, name, _ string) (string, error) {
+	if s.started.Add(1) >= 2 {
+		s.cancel()
+	}
+	return "ok:" + name, nil
+}
+
+func (s *cancelParallelExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
+	return "", nil
+}
+
+func (s *cancelParallelExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s *cancelParallelExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
+func (s *cancelParallelExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
 }
 
 func (s *parallelDelayExecutor) Definitions() []tools.ToolDef { return nil }
@@ -35,7 +60,7 @@ func (s *parallelDelayExecutor) StartBackground(context.Context, string, string,
 }
 
 func (s *parallelDelayExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
-func (s *parallelDelayExecutor) TakeToolResultMediaForCall(string) map[string]any    { return nil }
+func (s *parallelDelayExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
 func (s *parallelDelayExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
 	return nil
 }
@@ -115,6 +140,40 @@ func TestExecuteAutoBatch_publishesResultAsEachToolCompletes(t *testing.T) {
 		t.Fatalf("history len=%d want 4", len(history))
 	}
 	for i, wantID := range []string{"c-fast", "c-slow1", "c-slow2"} {
+		msg := history[i+1]
+		if msg.Role != "tool" || msg.ToolCallID != wantID {
+			t.Fatalf("history[%d]=role=%s id=%s want tool/%s", i+1, msg.Role, msg.ToolCallID, wantID)
+		}
+	}
+}
+
+func TestExecuteAutoBatch_persistsCompletedResultsBeforeCancellation(t *testing.T) {
+	root := t.TempDir()
+	exec := &cancelParallelExecutor{}
+	orch := NewOrchestrator(
+		"a1", root, stream.NewHub(32, logx.Discard()), &llm.MockClient{},
+		exec,
+		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		hooks.RuntimeConfig{},
+		logx.Discard(),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	exec.cancel = cancel
+	calls := []llm.ToolCall{
+		{ID: "c-cancel-1", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"a"}`}},
+		{ID: "c-cancel-2", Type: "function", Function: llm.ToolCallFunction{Name: "list_dir", Arguments: `{"path":"."}`}},
+	}
+	history := []llm.Message{{Role: "assistant", ToolCalls: calls}}
+
+	err := orch.executeAutoBatch(ctx, "sess-cancel", &history, calls, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("executeAutoBatch err=%v, want context.Canceled", err)
+	}
+	if len(history) != 3 {
+		t.Fatalf("history len=%d want 3 (assistant + 2 tool results)", len(history))
+	}
+	for i, wantID := range []string{"c-cancel-1", "c-cancel-2"} {
 		msg := history[i+1]
 		if msg.Role != "tool" || msg.ToolCallID != wantID {
 			t.Fatalf("history[%d]=role=%s id=%s want tool/%s", i+1, msg.Role, msg.ToolCallID, wantID)

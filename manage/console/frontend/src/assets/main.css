@@ -4310,6 +4310,113 @@ code {
   background: color-mix(in srgb, var(--chat-text) 1.5%, var(--chat-surface));
 }
 
+.wg-task__approval {
+  margin: 4px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--chat-border));
+  border-left: 3px solid var(--primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 5%, var(--chat-surface));
+}
+.wg-task__approval--inline {
+  margin: 6px 8px 8px;
+}
+.wg-task__approval-head,
+.wg-task__approval-item-head,
+.wg-task__approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wg-task__approval-head {
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.wg-task__approval-badge {
+  color: var(--primary);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.wg-task__approval-count {
+  color: var(--chat-text-muted);
+  font-size: 11px;
+}
+.wg-task__approval-item + .wg-task__approval-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--chat-border) 80%, transparent);
+}
+.wg-task__approval-item-head {
+  min-width: 0;
+}
+.wg-task__approval-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--chat-text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wg-task__approval-risk {
+  flex: 0 0 auto;
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 600;
+}
+.wg-task__approval-reason,
+.wg-task__approval-hint {
+  margin-top: 4px;
+  color: var(--chat-text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wg-task__approval-hint {
+  color: var(--chat-text-subtle);
+}
+.wg-task__approval-actions {
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+.wg-task__approval-bulk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--chat-border) 80%, transparent);
+  color: var(--chat-text-muted);
+  font-size: 11px;
+}
+.wg-task__approval-bulk .wg-task__approval-actions {
+  margin-top: 0;
+}
+.wg-task__approval-actions .approval-action-btn {
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--chat-border);
+  border-radius: 5px;
+  background: var(--chat-surface);
+  color: var(--chat-text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.wg-task__approval-actions .approval-action-btn--approve {
+  border-color: color-mix(in srgb, #0f7b0f 45%, var(--chat-border));
+  color: #0f7b0f;
+}
+.wg-task__approval-actions .approval-action-btn--reject {
+  color: var(--chat-text-muted);
+}
+.wg-task__approval-actions .approval-action-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .wg-task__report {
   border-top: 1px solid var(--chat-border);
 }
@@ -4909,6 +5016,24 @@ code {
 .chat__composer-send:disabled {
   opacity: 0.28;
   cursor: not-allowed;
+}
+
+/* 瞬时 turn/step 状态统一显示在输入栏右上方；底部状态线只保留稳定控制项。 */
+.chat__composer-runtime-rail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  min-height: 16px;
+  margin: 0 6px 2px;
+  overflow: hidden;
+  color: var(--chat-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat__composer-statusline {

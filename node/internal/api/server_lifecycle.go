@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	mcpHealthProbeTimeout = 35 * time.Second
+	mcpHealthPollInterval = 30 * time.Second
+)
+
 // Handler 返回可用于 http.Server 的根 Handler（含 onboarding gate 与 access log）。
 func (s *Server) Handler() http.Handler {
 	return accessLogMiddleware(s.logger, s.onboardingGateMiddleware(s.mux))
@@ -35,6 +40,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.manageStarted = false
 	s.manageMu.Unlock()
 	s.maybeStartManageSidecars()
+	s.startMCPHealthMonitor(regCtx)
 	if s.updateChecker != nil {
 		s.updateChecker.Start(regCtx)
 	}
@@ -104,6 +110,54 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 		return nil
 	}
+}
+
+// startMCPHealthMonitor restores MCP connections after every Node process
+// restart and retries services that were temporarily offline. Configure only
+// restores persisted definitions; the child process/HTTP client itself is
+// intentionally recreated here, after the Node has entered its serving
+// lifecycle and the status SSE listener is installed.
+func (s *Server) startMCPHealthMonitor(ctx context.Context) {
+	if s == nil || s.mcpManager == nil || ctx == nil {
+		return
+	}
+	go func() {
+		probe := func() {
+			views := s.mcpManager.List()
+			changed := false
+			for _, before := range views {
+				if !before.Enabled {
+					continue
+				}
+				probeCtx, cancel := context.WithTimeout(ctx, mcpHealthProbeTimeout)
+				after, err := s.mcpManager.RefreshIfNeeded(probeCtx, before.ID)
+				cancel()
+				if err != nil {
+					s.logger.Warn("startup MCP health probe failed", "server_id", before.ID, "error", err)
+				}
+				if after.Status != before.Status {
+					changed = true
+				}
+			}
+			// A successful startup refresh may expose a catalog to Agents that
+			// were loaded before the background probe completed.
+			if changed && ctx.Err() == nil {
+				s.reloadMCPBoundAgents(ctx)
+			}
+		}
+
+		probe()
+		ticker := time.NewTicker(mcpHealthPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				probe()
+			}
+		}
+	}()
 }
 
 // maybeStartManageSidecars 在首配完成且 Manage 已启用时启动 registrar / workgroup dialer（可热启动一次）。
