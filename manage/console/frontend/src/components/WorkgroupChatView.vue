@@ -21,7 +21,7 @@ import {
   getWorkgroupRunHistory,
 } from "../api.js";
 import { renderMarkdown } from "../utils/markdown.js";
-import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../../../../../node/webui/frontend/src/utils/format.js";
+import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../../../../../node/webui/frontend/src/utils/toolCalls.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
 
