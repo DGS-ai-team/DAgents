@@ -765,7 +765,9 @@ class TurnKernel:
             meta = dict(self._active_turn.get(workgroup_id) or {})
         mode = str(meta.get("mode") or "")
         if not mode:
-            # 无内存 turn 时仍尝试释放卡住的 assign / 工具等待
+            # Manage 重启后，进程内的 active-turn 索引会丢失，但持久化的
+            # ActorRun/HITL/Assign 仍可能处于 awaiting_hitl。取消必须以持久化
+            # 状态为准，否则 UI 虽然能收起 HITL，Supervisor run 会继续悬挂。
             if self._command_cancel_hook is not None:
                 try:
                     self._command_cancel_hook(workgroup_id)
@@ -780,12 +782,47 @@ class TurnKernel:
                 self._store.cancel_pending_hitls(workgroup_id)
             except Exception:  # noqa: BLE001
                 pass
+            run_ids: list[str] = []
+            for run in self._store.list_actor_runs(workgroup_id, limit=100):
+                if run.status not in {"running", "awaiting_hitl"}:
+                    continue
+                try:
+                    self._heal_open_tool_calls(run.run_id, reason="turn cancelled after restart")
+                except Exception:  # noqa: BLE001 - cancellation must still converge
+                    pass
+                try:
+                    self._store.update_actor_run(run.run_id, status="canceled")
+                    run_ids.append(run.run_id)
+                except Exception:  # noqa: BLE001
+                    pass
+            finished_assign_ids = {
+                str(event.assign_id or "").strip()
+                for event in self._store.list_timeline(workgroup_id)
+                if event.type == "assign_finished" and event.assign_id
+            }
+            for assign_id in failed_ids:
+                if assign_id in finished_assign_ids:
+                    continue
+                try:
+                    assign = self._store.get_assign(assign_id)
+                    actor = (assign.member_id if assign else None) or "leader"
+                    self._store.append_timeline(
+                        workgroup_id,
+                        type="assign_finished",
+                        actor_id=actor,
+                        text="已中断",
+                        protocol_name=protocol_name_for_actor(actor),
+                        assign_id=assign_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             return {
-                "cancelled": bool(failed_ids),
+                "cancelled": bool(failed_ids or run_ids),
                 "mode": "idle" if not failed_ids else "orphan_assign",
                 "failed_assign_ids": list(failed_ids),
                 "leader_run_id": None,
                 "member_run_id": None,
+                "run_ids": run_ids,
             }
 
         self._cancel_event(workgroup_id).set()

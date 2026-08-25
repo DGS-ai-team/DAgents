@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -95,6 +96,128 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	if reloaded2.Compression.SilentTriggerTokens != 60000 || reloaded2.Compression.BlockingTriggerTokens != 90000 {
 		t.Fatalf("file compression = %+v", reloaded2.Compression)
 	}
+}
+
+func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/browser/call" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer service.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := testConfig(t)
+	cfg.Browser.ServiceURL = service.URL
+	if err := config.SaveFile(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	sessionID := createTestRuntime(t, srv)
+	patch := []byte(`{"features":{"browser_enabled":true}}`)
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("enable status=%d body=%s", resp.StatusCode, raw)
+	}
+	if srv.browserManager() == nil || !srv.browserManager().Enabled() {
+		t.Fatal("browser manager was not installed")
+	}
+	if !hasToolDefinition(srv.tools.Definitions(), "browser_run_task") {
+		t.Fatal("default registry missing browser_run_task after enable")
+	}
+	if !hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_run_task") {
+		t.Fatal("loaded session registry missing browser_run_task after enable")
+	}
+
+	disablePatch := []byte(`{"features":{"browser_enabled":false}}`)
+	disableReq, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(disablePatch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disableReq.Header.Set("Content-Type", "application/json")
+	disableResp, err := http.DefaultClient.Do(disableReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer disableResp.Body.Close()
+	if disableResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(disableResp.Body)
+		t.Fatalf("disable status=%d body=%s", disableResp.StatusCode, raw)
+	}
+	if srv.browserManager() != nil {
+		t.Fatal("browser manager remained installed after disable")
+	}
+	if hasToolDefinition(srv.tools.Definitions(), "browser_run_task") {
+		t.Fatal("default registry retained browser_run_task after disable")
+	}
+	if hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_run_task") {
+		t.Fatal("loaded session registry retained browser_run_task after disable")
+	}
+}
+
+func TestHandlePatchSetupConfigBrowserFailsBeforePersisting(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := testConfig(t)
+	cfg.Browser.ServiceURL = "http://127.0.0.1:1"
+	if err := config.SaveFile(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	patch := []byte(`{"features":{"browser_enabled":true}}`)
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+	if cfg.BrowserEnabled() {
+		t.Fatal("browser config was enabled after failed service preflight")
+	}
+	reloaded, err := config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.BrowserEnabled() {
+		t.Fatal("persisted browser config after failed service preflight")
+	}
+}
+
+func hasToolDefinition(defs []tools.ToolDef, name string) bool {
+	for _, def := range defs {
+		if def.Function.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHandlePatchSetupConfig_noConfigPath(t *testing.T) {

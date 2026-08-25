@@ -71,6 +71,8 @@ const debugHistory = ref(null);
 const debugError = ref("");
 /** 当前发送的 AbortController，取消时 abort SSE */
 let streamAbort = null;
+let activeClientMessageId = "";
+const cancelledTurnMessageIds = new Set();
 
 /** 发送中的本地气泡：user 乐观消息 + assistant 流式占位 */
 const liveUser = ref(null);
@@ -345,8 +347,8 @@ function toggleMemberReport(key) {
   };
 }
 
-function parseNoticeTool(text) {
-  const raw = String(text || "").trim();
+function parseNoticeTool(text, fallbackToolName = "") {
+  const raw = String(text || "").trim() || String(fallbackToolName || "").trim();
   if (!raw) return { toolName: "tool", summary: "执行成员工具" };
   const parts = raw.split(/\s*·\s*/);
   const toolName = String(parts[0] || "tool").trim() || "tool";
@@ -526,18 +528,46 @@ function makeAssignRow(
   };
 }
 
-function makeDirectToolRow(ev, { assignFinished, isLast, failed }) {
-  const parsed = parseNoticeTool(ev?.text);
-  const done = Boolean(assignFinished) || !isLast;
+function toolEventMatches(left, right) {
+  const leftCall = String(left?.tool_call_id || "").trim();
+  const rightCall = String(right?.tool_call_id || "").trim();
+  if (leftCall || rightCall) return Boolean(leftCall && rightCall && leftCall === rightCall);
+  const leftCommand = String(left?.command_id || "").trim();
+  const rightCommand = String(right?.command_id || "").trim();
+  return Boolean(leftCommand && rightCommand && leftCommand === rightCommand);
+}
+
+function makeDirectToolRow(ev, { assignFinished, isLast, failed, toolFinished = null }) {
+  const parsed = parseNoticeTool(ev?.text, ev?.tool_name);
+  const finishStatus = String(toolFinished?.status || "").toLowerCase();
+  const terminalToolResult = [
+    "succeeded",
+    "failed",
+    "rejected",
+    "indeterminate",
+    "canceled",
+    "cancelled",
+    "timed_out",
+  ].includes(finishStatus);
+  const done = Boolean(assignFinished) || terminalToolResult || (!toolFinished && !isLast);
+  const failedResult =
+    Boolean(failed) || [
+      "failed",
+      "rejected",
+      "indeterminate",
+      "canceled",
+      "cancelled",
+      "timed_out",
+    ].includes(finishStatus);
   return {
     key: ev.event_id || `tool-${ev.seq}`,
     kind: "tool",
     toolName: parsed.toolName,
     toolKind: toolKindLabel(parsed.toolName),
     summary: parsed.summary,
-    statusText: !done ? "执行中" : failed ? "已中断" : "已完成",
+    statusText: !done ? "执行中" : failedResult ? "已中断" : "已完成",
     done,
-    failed: Boolean(failed && done && isLast),
+    failed: Boolean(failedResult && done),
     inProgress: !done,
     role: "assistant",
     actorId: String(ev?.actor_id || "").trim(),
@@ -653,9 +683,41 @@ const displayGroups = computed(() => {
       continue;
     }
 
-    // Structured tool events are consumed by the surrounding Assign card;
-    // they must not also appear as standalone chat messages.
-    if (t === "tool_started" || t === "tool_finished") continue;
+    if (t === "tool_started" || t === "tool_finished") {
+      const isDirect = Boolean(aid && directAssignIds.has(aid));
+      if (isDirect) {
+        const chain = toolEventsByAssign[aid] || [];
+        const starts = chain.filter((item) => item?.type === "tool_started");
+        const matchingStart = starts.find((item) => toolEventMatches(item, ev));
+        if (t === "tool_finished" && matchingStart) continue;
+        const renderEvent = matchingStart || ev;
+        const index = starts.findIndex((item) => item?.event_id === renderEvent?.event_id);
+        const matchingFinish = chain.find(
+          (item) => item?.type === "tool_finished" && toolEventMatches(item, renderEvent),
+        );
+        const finished = finishedByAssign[aid] || null;
+        const failed = Boolean(
+          (finished && /失败|中断/.test(String(finished.text || ""))) ||
+            ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(
+              String(matchingFinish?.status || "").toLowerCase(),
+            ),
+        );
+        pushRow(
+          "assistant",
+          String(renderEvent?.actor_id || ev?.actor_id || "").trim(),
+          eventActorLabel({ ...renderEvent, type: "assign_started" }),
+          makeDirectToolRow(renderEvent, {
+            assignFinished: Boolean(finished),
+            isLast: index < 0 || index === starts.length - 1,
+            failed,
+            toolFinished: matchingFinish,
+          }),
+        );
+      }
+      // Structured tool events belong to the direct tool row or surrounding
+      // assign card; never leak raw tool_started/tool_finished messages.
+      continue;
+    }
 
     if (t === "actor_final_text") {
       const actor = String(ev?.actor_id || "").trim();
@@ -673,6 +735,7 @@ const displayGroups = computed(() => {
       if (String(ev?.text || "").startsWith("已直达")) continue;
       const actorId = String(ev?.actor_id || "").trim();
       if (aid && directAssignIds.has(aid)) {
+        if ((toolEventsByAssign[aid] || []).length) continue;
         const chain = noticesByAssign[aid] || [];
         const idx = chain.findIndex((n) => n === ev || n.event_id === ev.event_id);
         const isLast = idx < 0 || idx === chain.length - 1;
@@ -1122,6 +1185,13 @@ async function loadTimeline() {
   }
 }
 
+async function refreshMembersAfterAssignment() {
+  // Assignment completion is the durable boundary for member occupancy.
+  // Reconcile the member rail after cancellation instead of waiting for a
+  // manual reload of the Manage console.
+  await loadMembers().catch(() => {});
+}
+
 async function loadWorkgroupMeta() {
   if (!props.workgroupId) {
     workgroupStatus.value = "";
@@ -1177,10 +1247,24 @@ function clearLive() {
   statusWatermarkSeq.value = 0;
 }
 
+function rememberCancelledMessageId(id) {
+  const value = String(id || "").trim();
+  if (!value) return;
+  cancelledTurnMessageIds.add(value);
+  while (cancelledTurnMessageIds.size > 64) {
+    const oldest = cancelledTurnMessageIds.values().next().value;
+    if (!oldest) break;
+    cancelledTurnMessageIds.delete(oldest);
+  }
+}
+
 async function cancelTurn() {
-  if (!props.workgroupId || !sending.value || cancelling.value) return;
+  // A pending HITL can be restored after a reload, when `sending` is false
+  // while the workgroup turn is still awaiting a decision.
+  if (!props.workgroupId || (!sending.value && !hitlMode.value) || cancelling.value) return;
   cancelling.value = true;
   try {
+    rememberCancelledMessageId(activeClientMessageId);
     await cancelWorkgroupTurn(props.workgroupId);
     if (streamAbort) {
       try {
@@ -1189,7 +1273,11 @@ async function cancelTurn() {
         /* ignore */
       }
     }
+    sending.value = false;
+    clearLive();
     await loadTimeline().catch(() => {});
+    await loadPendingHitl();
+    await refreshMembersAfterAssignment();
   } catch (err) {
     emit("toast", { message: err.message || "取消失败", type: "error" });
   } finally {
@@ -1204,6 +1292,7 @@ async function cancelAssign(assignId) {
   try {
     await cancelWorkgroupAssign(props.workgroupId, id);
     await loadTimeline().catch(() => {});
+    await refreshMembersAfterAssignment();
   } catch (err) {
     emit("toast", { message: err.message || "中断任务失败", type: "error" });
   } finally {
@@ -1219,6 +1308,7 @@ async function cancelTool(assignId, toolCallId) {
   try {
     await cancelWorkgroupTool(props.workgroupId, aid, callId);
     await loadTimeline().catch(() => {});
+    await refreshMembersAfterAssignment();
   } catch (err) {
     emit("toast", { message: err.message || "中断工具失败", type: "error" });
   } finally {
@@ -1338,6 +1428,7 @@ async function sendMessage() {
   }
 
   const clientMessageId = newClientMessageId();
+  activeClientMessageId = clientMessageId;
   const enqueueOnly = sending.value;
   followTail.value = true;
   input.value = "";
@@ -1407,6 +1498,7 @@ async function sendMessage() {
       {
         signal: streamAbort.signal,
         onEvent: async (eventName, data) => {
+          if (cancelledTurnMessageIds.has(clientMessageId)) return;
           if (eventName === "queued") {
             becameQueued = true;
             applyQueuePayload(data);
@@ -1475,6 +1567,7 @@ async function sendMessage() {
     await loadPendingHitl().catch(() => {});
     if (debugOpen.value) await loadDebugRuns().catch(() => {});
   } finally {
+    if (activeClientMessageId === clientMessageId) activeClientMessageId = "";
     streamAbort = null;
     stopWorkPoll();
     sending.value = false;
@@ -2027,18 +2120,18 @@ onUnmounted(() => {
           </div>
           <div class="chat__composer-pill-right">
             <button
-              v-if="sending && !hitlMode"
+              v-if="sending || hitlMode"
               type="button"
               class="chat__composer-send chat__composer-send--cancel"
-              title="取消"
-              aria-label="取消"
+              :title="cancelling ? '正在取消…' : '取消本轮'"
+              :aria-label="cancelling ? '正在取消本轮' : '取消本轮'"
               :disabled="cancelling"
               @click="cancelTurn"
             >
               {{ cancelling ? "…" : "□" }}
             </button>
             <button
-              v-else-if="hitlMode"
+              v-if="hitlMode"
               type="button"
               class="chat__composer-send"
               title="提交回答"
@@ -2057,7 +2150,7 @@ onUnmounted(() => {
               </svg>
             </button>
             <button
-              v-else
+              v-if="!sending && !hitlMode"
               type="button"
               class="chat__composer-send"
               title="发送"

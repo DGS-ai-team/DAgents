@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -58,6 +59,28 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_setup_config", err.Error(), nil)
 		return
+	}
+
+	// BrowserManager is a live process dependency rather than a passive config
+	// value. Prepare and ping the replacement before persisting browser enable
+	// or endpoint changes; otherwise the UI can report an enabled browser while
+	// the Agent registry still has no executable browser tools.
+	browserRuntimeChange := patch.Features != nil || patch.Browser != nil
+	var preparedBrowserManager *browser.Manager
+	if browserRuntimeChange && updated.BrowserEnabled() {
+		preparedBrowserManager, err = browser.NewManager(updated, nil)
+		if err != nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "browser_service_unavailable", err.Error(), nil)
+			return
+		}
+	}
+	browserManagerCommitted := false
+	if preparedBrowserManager != nil {
+		defer func() {
+			if !browserManagerCommitted {
+				_ = preparedBrowserManager.Close()
+			}
+		}()
 	}
 
 	needsLLMPersist := patch.LLM != nil && len(patch.LLM.Profiles) > 0 && s.llmConfigs != nil
@@ -125,6 +148,10 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	setup.CopyConfig(s.cfg, updated)
+	if browserRuntimeChange {
+		s.installBrowserManager(preparedBrowserManager)
+		browserManagerCommitted = true
+	}
 	s.syncLLMRuntimeFromStore(r.Context())
 	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	s.attachNodeRuntimeDeps(s.tools, s.cfg.NodeID)
@@ -133,7 +160,9 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	s.enrichLLMSettingsView(&view.LLM)
 	view.ConfigPath = s.configPath
 	view.ConfigWritable = s.setupWritable()
-	view.RestartRequired = true
+	// Browser changes are applied to the live manager and loaded registries in
+	// this request. Other legacy settings retain the existing restart signal.
+	view.RestartRequired = !browserRuntimeChange
 	writeJSON(w, http.StatusOK, view)
 }
 

@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-08-25
+
+**多模态与浏览器任务可靠性版**：让真实图片输入、异步浏览器任务和审批状态在 Node、sidecar 与 Web UI 之间形成闭环。
+
+### 新增
+
+- LLM 配置增加多模态能力标记；真实 `mimo-v2.5` profile 可接收上传图片，并通过视觉工具 follow-up 完成图片识别。
+- `browser_run_task(wait=false)` 增加 Node 侧终态轮询与 `async_tool_result` 自动回灌，不要求 browser sidecar 反向访问 Node。
+- browser sidecar 支持从任务归档读取已完成任务，使 Node 或 sidecar 重启后仍可查询终态结果。
+
+### 修复与安全边界
+
+- 修复 `tool_waiting` 与 `hitl_required` SSE 紧邻或漏序时审批卡片不出现的问题；前端按当前 Turn 做一次 hydrate 对账，并在权威终态清理过期卡片。
+- 修复 browser 任务取消时的启动时间异常，补齐排队态与运行态取消的协作停止和强制收敛路径。
+- browser 导航运行时拒绝 `file:`、`javascript:` 等未允许 URL scheme；默认仅允许 `http/https`。
+- browser sidecar 根据多模态配置启用视觉能力，并保留独立进程的模型配置边界。
+
+### 测试
+
+- 真实 Node + Mimo 图片输入测试通过；准确识别截图界面、工具执行状态和关键数值。
+- 真实 `wait=false` browser 任务自动回灌测试通过：任务完成后 UI 自动收到 `Example Domain` 结果。
+- Web UI 284 项、Go Node/Client/共享配置全量测试通过；browser Python 回归测试、归档查询、URL scheme 防护和取消测试通过。
+
 ## [0.10.2] - 2026-08-24
 
 **工作组执行可观测性与 Agent 运行稳定性增强**：让成员来源、工具执行、取消和上下文计量都拥有更明确的状态边界。
