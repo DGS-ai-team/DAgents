@@ -116,6 +116,9 @@ class DirectMemberRouteTests(unittest.TestCase):
             started = next(e for e in store.list_timeline(wid) if e.type == "assign_started")
             self.assertTrue(started.text.startswith("直达"))
             self.assertEqual(started.actor_id, member.member_id)
+            self.assertEqual(started.direct_member_id, member.member_id)
+            finished = next(e for e in store.list_timeline(wid) if e.type == "assign_finished")
+            self.assertEqual(finished.direct_member_id, member.member_id)
             # 直连 Timeline 不应出现 Supervisor（leader）分派事件
             self.assertFalse(
                 any(

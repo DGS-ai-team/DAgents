@@ -130,6 +130,8 @@ let agentNameSyncToken = 0;
 let sseResyncToken = 0;
 let hitlReconcileInFlight = false;
 let hitlReconciledTurnId = "";
+let agentSwitchToken = 0;
+let agentSwitchPromise = null;
 
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => isTurnProcessing(),
@@ -224,7 +226,7 @@ function restartStream() {
 }
 
 /** SSE 断线重连或状态卡住时：hydrate 对账 turn/status/HITL（不重启已恢复的流）。 */
-async function resyncAfterSSEGap(_reason) {
+async function resyncAfterSSEGap(reason) {
   if (!agentStore.agentId) return;
   const token = ++sseResyncToken;
   const agentId = agentStore.agentId;
@@ -236,6 +238,13 @@ async function resyncAfterSSEGap(_reason) {
     turnWatchdog.noteActivity();
     bumpActivityRefresh();
     await refreshToolJobs(agentStore.agentId);
+    // A Node restart can complete while the NavRail is still serving its
+    // cached agent list. Reconcile it after the stream has reconnected so a
+    // newly created/registered Agent becomes selectable without waiting for
+    // the periodic 30-second rail refresh.
+    if (reason === "reconnect") {
+      await agentPanelRef.value?.refresh?.({ force: true });
+    }
   } catch (e) {
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     agentStore.error = e.message || String(e);
@@ -266,6 +275,13 @@ async function activateAgentStream() {
 
 /** 发消息时：流已在则只 ensure runtime，避免每次全量 hydrate。 */
 async function ensureStreamReady() {
+  // Sidebar/route switching is asynchronous. A message submitted during the
+  // switch must wait until the target Agent has finished hydrate and stream
+  // setup; otherwise it can be posted against a half-reset global transcript
+  // and the old stream may consume the visible lifecycle events.
+  if (agentSwitchPromise) {
+    await agentSwitchPromise;
+  }
   if (!agentStore.agentId) {
     await activateAgentStream();
     return;
@@ -721,6 +737,11 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureAgent());
+    // clearContext is a durable boundary. Remove the old local projection
+    // before hydrate so the dirty-history guard cannot preserve pre-clear
+    // messages when the response races with the clear acknowledgement.
+    invalidateHydration();
+    clearTranscript();
     resetTurnState();
     resetEventTracking();
     resetStatusLines();
@@ -832,6 +853,11 @@ async function onAgentCreated(created) {
 }
 
 async function switchAgent(id) {
+  const targetID = String(id || "").trim();
+  if (!targetID) return;
+  if (targetID === agentStore.agentId && streamHandle.value) return;
+  const token = ++agentSwitchToken;
+  const run = (async () => {
   // 先断开旧 SSE，避免切 Agent 间隙里旧连接继续改全局 status/transcript
   invalidateHydration();
   sseResyncToken += 1;
@@ -845,14 +871,22 @@ async function switchAgent(id) {
   resetEventTracking();
   clearHitl();
   chromeStore.panel = null;
-  persistAgentId(id);
+  // transcriptStore is shared by the KeepAlive ChatView. It must be cleared
+  // before the target hydrate; otherwise historyDirty/historyRevision can
+  // intentionally reject the target snapshot and leave the previous Agent's
+  // messages on screen.
+  clearTranscript();
+  currentAgentDisplayName.value = "";
+  persistAgentId(targetID);
   void syncCurrentAgentDisplayName();
   turnWatchdog.noteActivity();
   try {
     const data = await hydrateAgent();
-    if (data === null) return;
+    if (data === null || token !== agentSwitchToken || agentStore.agentId !== targetID) return;
     await refreshLLMSettings();
+    if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
   } catch (e) {
+    if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
     agentStore.error = e.message;
     clearTranscript();
     clearHitl();
@@ -862,15 +896,24 @@ async function switchAgent(id) {
     return;
   }
   restartStream();
+  if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
   refreshContextTokens();
   await syncChildAgentsFromApi();
-  syncRouteAgent(id);
+  if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
+  syncRouteAgent(targetID);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
   bumpActivityRefresh();
   await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
+  })();
+  agentSwitchPromise = run;
+  try {
+    await run;
+  } finally {
+    if (agentSwitchPromise === run) agentSwitchPromise = null;
+  }
 }
 
 async function deleteAgentById(payload) {
@@ -1245,7 +1288,7 @@ onDeactivated(() => {
 
 watch(
   () => route.params.agentId,
-  async (id, prev) => {
+  async (id) => {
     const aid = String(id || "").trim();
     if (!aid) {
       if (agentStore.agentId) {
@@ -1254,7 +1297,11 @@ watch(
       }
       return;
     }
-    if (aid === agentStore.agentId || aid === prev) return;
+    // The route value and the hydrated Agent can temporarily diverge during
+    // KeepAlive/router transitions. The switch token suppresses the duplicate
+    // watcher triggered by syncRouteAgent(), while this guard only skips an
+    // already-active Agent.
+    if (aid === agentStore.agentId) return;
     await switchAgent(aid);
   },
 );

@@ -223,7 +223,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		res, err := w.HandleCommand(cmd)
 		// rejected 时 HandleCommand 仍返回 AcceptResult + error
 		if res == nil {
-			// 绑定缺失等：必须回 tool.result，否则 Manage wait_command_result 空等至 60s 超时
+			// 绑定缺失等：必须回 tool.result，否则 Manage wait_command_result 空等至默认超时
 			return toolCommandFailureResult(env, cmd, err)
 		}
 		wgID := deliveryWorkgroupID(env, cmd.WorkgroupID)

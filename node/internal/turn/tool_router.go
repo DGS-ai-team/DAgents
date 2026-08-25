@@ -499,15 +499,21 @@ func (o *Orchestrator) executeAutoBatch(
 		}(i)
 	}
 	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+	// Cancellation stops the model continuation, but it must not discard tool
+	// results that have already completed. In particular, a parallel batch can
+	// finish all providers just before the turn cancellation is observed here.
+	// Persist the batch first so the next turn sees a closed tool-call pair and
+	// the durable history remains truthful; return the cancellation only after
+	// the terminal tool facts have been committed.
 	var lifecycleErr error
 	for _, item := range results {
 		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected)
 		if lifecycleErr == nil && item.lifecycleErr != nil {
 			lifecycleErr = item.lifecycleErr
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if lifecycleErr != nil {
 		return lifecycleErr

@@ -91,6 +91,7 @@ type TerminalCommandResult struct {
 	StdoutBytes     int    `json:"stdout_bytes"`
 	StderrBytes     int    `json:"stderr_bytes"`
 	OutputTruncated bool   `json:"output_truncated"`
+	Cancelled       bool   `json:"cancelled,omitempty"`
 	TimedOut        bool   `json:"timed_out"`
 	Error           string `json:"error,omitempty"`
 }

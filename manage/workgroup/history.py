@@ -115,13 +115,50 @@ def build_assign_tool_result_content(
     return json.dumps(body, ensure_ascii=False)
 
 
+def _sanitize_member_listing_content(content: str | None) -> str | None:
+    """Remove the retired global tool allowlist from persisted Supervisor history.
+
+    Older runs may still contain ``tool_allow_names`` in a
+    ``list_workgroup_members`` tool result.  That field was a Node-wide
+    capability snapshot, not a reliable capability of the selected AgentRef;
+    keep the old history replayable while preventing it from reaching the LLM.
+    """
+    if not content:
+        return content
+    try:
+        payload = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
+        return content
+    if not isinstance(payload, dict) or not isinstance(payload.get("members"), list):
+        return content
+    changed = False
+    members: list[Any] = []
+    for raw in payload["members"]:
+        if not isinstance(raw, dict):
+            members.append(raw)
+            continue
+        member = dict(raw)
+        if "tool_allow_names" in member:
+            member.pop("tool_allow_names", None)
+            changed = True
+        members.append(member)
+    if not changed:
+        return content
+    clean = dict(payload)
+    clean["members"] = members
+    return json.dumps(clean, ensure_ascii=False)
+
+
 def to_provider_messages(messages: list[RunHistoryMessage] | list[dict[str, Any]]) -> list[dict[str, Any]]:
     """转为 OpenAI-compatible chat messages；确保 tool.name 永远是工具函数名。"""
     out: list[dict[str, Any]] = []
     for m in (_as_msg(x) for x in messages):
         item: dict[str, Any] = {"role": m.role}
-        if m.content is not None:
-            item["content"] = m.content
+        content = m.content
+        if m.role == "tool" and m.name == "list_workgroup_members":
+            content = _sanitize_member_listing_content(content)
+        if content is not None:
+            item["content"] = content
         if m.role == "tool":
             if m.tool_call_id:
                 item["tool_call_id"] = m.tool_call_id
