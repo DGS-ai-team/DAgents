@@ -194,7 +194,7 @@ jobs:
           ls -la dist/dagents-local-assistant-*
 
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dagents-local-assistant-linux-amd64
           path: dist/dagents-local-assistant-linux-amd64-*.*
@@ -243,7 +243,7 @@ jobs:
           cp "${OUT_DIR}/bin/dagents-client.exe" dist/dagents-client.exe
 
       - name: Upload Go binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-win-go
           path: |
@@ -306,7 +306,7 @@ jobs:
           test -f dist/dagents-shell.exe
 
       - name: Upload shell binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-win-shell
           path: |
@@ -339,7 +339,7 @@ jobs:
         run: bash scripts/ci/build_dagents_browser.sh
 
       - name: Upload browser binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-win-browser
           path: dist/dagents-browser.exe
@@ -395,14 +395,14 @@ jobs:
           ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
 
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dagents-local-assistant-windows-amd64
           path: dist/dagents-local-assistant-windows-amd64-*.*
           if-no-files-found: error
 
       - name: Upload Windows installer (Inno)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dagents-windows-installer
           path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
@@ -432,7 +432,7 @@ jobs:
           ls -la dist/dagents-manage-bundle-*
 
       - name: Upload Manage offline bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dagents-manage-bundle
           path: dist/dagents-manage-bundle-*.tar.gz
