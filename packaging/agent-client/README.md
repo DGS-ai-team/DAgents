@@ -69,4 +69,4 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml
 ```
 
-Manage 与工作组见 [manage/README.md](../../manage/README.md)、[docs/handbook/05-Manage与A2A.md](../../docs/handbook/05-Manage与A2A.md)。
+Manage 与工作组见 [manage/README.md](../../manage/README.md)、[docs/user/workgroups.md](../../docs/user/workgroups.md)。

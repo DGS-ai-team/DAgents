@@ -16,7 +16,7 @@
 3. **主 Agent 仅任务级工具**（`browser_run_task` / `browser_task_status` / `browser_task_cancel`）；细粒度 DOM 动作在 sidecar `browser_use.Agent` 内闭环。
 4. 演示轨迹 **`demonstration/v1`** 与引擎无关；步骤可来自 CDP 录制或 Chrome 扩展导出（Phase 2+）。
 
-**相关索引**：[go-node-compatibility.md](../architecture/go-node-compatibility.md)、[go-node-internals.md](../architecture/go-node-internals.md)、[04-能力与策略.md](../handbook/04-能力与策略.md)。
+**相关索引**：[架构](../architecture.md)、[go-node-internals.md](../architecture/go-node-internals.md)、[04-能力与策略.md](../handbook/04-能力与策略.md)。
 
 ---
 
@@ -90,7 +90,7 @@
 
 ### 4.1 dagents-node 核心（不变）
 
-见 [go-node-compatibility.md](../architecture/go-node-compatibility.md)：**Win Server 2012 R2+**（Go 静态二进制）。
+核心 Node 的构建与部署见 [运维与发布](../user/operations.md)；旧 OS 验收矩阵仅作历史参考。
 
 ### 4.2 `browser_*` / 演示录制
 

@@ -37,7 +37,7 @@ Web UI：通用设置 → Node 信息 + 远端 Placement；连接设置 → 接�
 
 ### P2 模型演进
 
-8. **跨机器** → **仅工作组**（[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)）；**拆除** Placement / 远程 Agent / Edge。  
+8. **跨机器** → **仅工作组**（[workgroup-and-node-gateway.md](../../design/workgroup-and-node-gateway.md)）；**拆除** Placement / 远程 Agent / Edge。  
 9. **权限** → ACL 以 **`node_id`** 为单位；解散 **归档**。  
 10. **产品内沙箱** → 废弃；隔离 = 独立 Node。  
 11. **InboxPoller / Node 级 invoke / ops·compliance** → 删除。  

@@ -2,19 +2,19 @@
 
 单进程 Agent 运行时：LLM turn loop、工具执行、会话与 SQLite 持久化（N5）。
 
-配置模型见 [`shared/config/`](../shared/config/)。内部协作见 [`docs/architecture/go-node-internals.md`](../docs/architecture/go-node-internals.md)；联调见 [`docs/architecture/local-assistant.md`](../docs/architecture/local-assistant.md)。
+配置模型见 [`shared/config/`](../shared/config/)。内部协作见 [`docs/architecture/go-node-internals.md`](../docs/architecture/go-node-internals.md)；联调见 [`docs/development.md`](../docs/development.md)。
 
 ## `internal/` 包评估（2026-06）
 
 | 包 | 规模 | 职责 | 评估 | 阶段 A 建议 |
 |----|------|------|------|-------------|
 | **`api`** | 10 文件 ~2.2k | HTTP/SSE、`NewServer` 装配 | `server.go` 偏大（~870 行），路由+装配耦合 | 后续拆 `server_routes.go` / `server_wire.go`；测试 `FSRoot` 用 `t.TempDir()` |
-| **`session`** | 15 文件 ~2.8k | Manager、runtime、队列消费、A2A inbox/HITL | 边界清晰；`runtime.go` ~630 行可接受 | A2A 文件保持独立；`runtime_*.go` 命名已合理 |
+| **`session`** | 15 文件 ~2.8k | Manager、runtime、队列消费、HITL 与 Workgroup Session | 边界清晰；`runtime.go` ~630 行可接受 | 保持 runtime/turn 边界；继续补恢复测试 |
 | **`turn`** | 15 文件 ~2.6k | Orchestrator、tool 路由、HITL、prompt | `orchestrator.go` ~525 行、`tool_router.go` ~369 行 | 暂不动；单测已按 concern 拆分 |
 | **`tools`** | 46 文件 ~5.7k | Registry、fs/bash/job/领域 tool | **已完成阶段 A**（见下） | 阶段 B：子 package + `Register` |
 | **`triggers`** | 12 文件 ~2.1k | 存储、schedule、HTTP API | 与 `tools/tool_triggers` 分工明确 | 保持 |
-| **`manage`** | 9 文件 ~1.3k | 注册、inbox、compliance | 与 `a2aclient` 拆分正确 | 保持 |
-| **`a2aclient`** | 2 文件 ~390 | Manage A2A HTTP | 薄客户端，合适 | 保持 |
+| **`manage`** | 9 文件 ~1.3k | 注册、Release、Workgroup Dialer | 与运行时边界清晰 | 保持出站连接模型 |
+| **`a2aclient`** | 2 文件 ~390 | 历史兼容适配 | 不作为新产品入口 | 仅维护迁移兼容 |
 | **`childagent`** | 10 文件 ~1.3k | 子 Agent 生命周期 | 与 `tools/tool_childagent` 分工明确 | 保持 |
 | **`llm`** | 16 文件 ~1.8k | OpenAI/DeepSeek 适配 | provider 分文件合理 | 保持 |
 | **`policy`** | 10 文件 ~1.3k | 审批策略引擎 | 独立专题包 | 保持 |
@@ -38,8 +38,8 @@
 | `internal/turn/` | turn 编排 + 工具循环 + system prompt |
 | `internal/tools/` | 本地工具 Registry（**阶段 A 已按域重命名**，见 [`internal/tools/README.md`](internal/tools/README.md)） |
 | `internal/triggers/` | 触发器存储与调度 |
-| `internal/manage/` | Manage 注册与 inbox 侧车 |
-| `internal/a2aclient/` | Manage A2A HTTP 客户端 |
+| `internal/manage/` | Manage 注册、Release 与 Workgroup 出站集成 |
+| `internal/a2aclient/` | 历史 A2A 兼容客户端 |
 | `internal/childagent/` | 临时子 Agent |
 | `internal/llm/` | LLM 客户端与消息适配 |
 | `internal/store/`、`history/` | SQLite 与 JSONL 审计 |

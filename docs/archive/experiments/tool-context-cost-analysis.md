@@ -2,8 +2,8 @@
 
 > 分支：`feat/tool-context-cost-optimization`（**已落地**）  
 > 范围：Go Node 内置工具、`turn` 工具结果写回、编排 dispatch  
-> 正交专题：[context-compression-cache-analysis.md](./context-compression-cache-analysis.md)（history 体量 + 侧车 cache）  
-> 实录索引：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md) §2
+> 正交专题：[context-compression-cache-analysis.md](../../design/context-compression-cache-analysis.md)（history 体量 + 侧车 cache）  
+> 实录索引：[handbook/附录/重大设计变更实录.md](../../handbook/附录/重大设计变更实录.md) §2
 
 ---
 
@@ -71,7 +71,7 @@ Agent 账单 ≈ **LLM 往返次数** × **每次 input（含 replay）** × **�
 | ID | 内容 | 状态 |
 |----|------|------|
 | **WS1** | bash ACK/status 文案引导 async；status **保持瞬时** | ✅ |
-| **WS6** | `hooks.duplicate_tool_call` + HITL；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | ✅ |
+| **WS6** | `hooks.duplicate_tool_call` + HITL；详见 [tool-before-hook-duplicate-approval.md](../../design/tool-before-hook-duplicate-approval.md) | ✅ |
 | **WS3** | `hooks.tool_result` spill：bash、fs（含编码缓存）、a2a；`spill_threshold_tokens` 默认 12000 | ✅ |
 | **WS5** | `tool_context_metrics` on `done` SSE + 日志 | ✅（基础） |
 | **WS2** | 子 Agent status long-poll | ❌ 不做 |
@@ -121,10 +121,10 @@ tools:
 
 - `enabled_groups` 按任务减面（降 tools schema 体积）
 - triggers 结果 spill、WS5 Prometheus
-- 子 Agent **WS2**、写审批信任链 [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)
+- 子 Agent **WS2**、写审批信任链 [ux-agent-owned-file-approval.md](../../design/ux-agent-owned-file-approval.md)
 
 ---
 
 ## 5. 文档格式说明
 
-后续大型优化专题建议采用本文四段结构：**背景与痛点 → 分析 → 优化思路 → 落地方案**；细节实录写入 [handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md)，专题文保持可扫读。
+后续大型优化专题建议采用本文四段结构：**背景与痛点 → 分析 → 优化思路 → 落地方案**；细节实录写入 [handbook/附录/重大设计变更实录.md](../../handbook/附录/重大设计变更实录.md)，专题文保持可扫读。

@@ -144,5 +144,5 @@ http://127.0.0.1:18765/ui/
 - [内置工具参考](../../docs/handbook/附录/内置工具参考.md)
 - [Client 运维命令](../../client/README.md)
 - [Agent Node API](../../docs/architecture/agent-node-api.md)
-- [本地助手架构](../../docs/architecture/local-assistant.md)
-- [Go Node 兼容矩阵](../../docs/architecture/go-node-compatibility.md)
+- [项目架构](../../docs/architecture.md)
+- [Go Node 兼容矩阵（历史）](../../docs/archive/architecture-go-node-compatibility.md)

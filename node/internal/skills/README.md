@@ -24,7 +24,7 @@ hooks 使用同一 view。正文仍然按需读取，但首次读取会校验边
 边界摘要只在 human Turn 边界计算，不在每个模型 Step 重算；它用于弥补 mtime/size
 签名对“内容变化但文件属性未变化”的检测盲区。
 
-启用 skills 工具组时，可用 catalog 元数据追加到 system prompt；SKILL.md 正文不再拼入 system prompt。模型首次使用已加载 skill 时，turn 编排器按 Codex 式语义将正文包装为独立的 `role=user`、`source=plugin/instructions` 上下文消息写入 session history，并保留 `name=skill` 作为兼容字段；后续请求中只保留当前激活版本。tool loop 中 `load_skills` 使用详细加载结果并按需读取正文。
+启用 skills 工具组时，可用 catalog 元数据追加到 system prompt；SKILL.md 正文不再拼入 system prompt。模型首次使用已加载 skill 时，turn 编排器按 Codex 式语义将正文包装为独立的 `role=user`、`source=plugin`、`form=instructions` 上下文消息写入 session history，并保留 `name=skill` 作为兼容字段；后续请求中只保留当前激活版本。tool loop 中 `load_skills` 使用详细加载结果并按需读取正文。
 
 Catalog 还累计记录 metadata scan、正文读取/缓存命中、human-Turn 边界摘要和 token estimate 的耗时，供
 `GET /v1/agents/{id}/context` 的 `skills_catalog_timing` 诊断字段使用。该字段不进入模型 prompt、工具定义、revision

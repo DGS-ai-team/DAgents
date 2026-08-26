@@ -35,7 +35,7 @@
 - `py -3 -m unittest discover -s tests -p "test_*.py" -v`：Python 185 个测试通过。
 - 新增冷 session 投影回归：Context / Hydrate / Notification 在旧 RuntimeState 镜像与事件投影冲突时均以 Coordinator 重放结果为准。
 - 真实 Node 进程重启 E2E 覆盖 HITL resume 与 unknown tool reconciliation；全量复测通过。
-- Node + Web UI 浏览器冒烟覆盖：Mock 对话往返、Context / Timeline 终态断言，以及刷新后的 transcript / SSE 恢复；详见 [ui-e2e-smoke-checklist.md](./ui-e2e-smoke-checklist.md)。
+- Node + Web UI 浏览器冒烟覆盖：Mock 对话往返、Context / Timeline 终态断言，以及刷新后的 transcript / SSE 恢复；详见 [ui-e2e-smoke-checklist.md](../releases/ui-e2e-smoke-checklist.md)。
 
 ## 后续演进项（不阻塞本轮 Turn / Step 重构）
 

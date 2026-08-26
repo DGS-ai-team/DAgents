@@ -1,7 +1,5 @@
-# `docs/future/`
+# 远期方案
 
-尚未完全落地的远期方案索引。现网能力以 [handbook/README.md](../handbook/README.md) 为准。
+本目录只保留尚未进入当前设计、且暂时没有稳定落地计划的主题。当前实现以 [../architecture.md](../architecture.md) 为准；已排期工作见 [../roadmap.md](../roadmap.md)；具体方案仍放在 [../design/](../design/README.md)，并标注规划状态。
 
-原 `a2a-via-manage.md` 已退役，见 [../archive/a2a-via-manage.md](../archive/a2a-via-manage.md)。
-
-后续规划：[manage-phase2-capabilities.md](../design/manage-phase2-capabilities.md)、[agent-instance-model.md](../design/agent-instance-model.md)。
+目前没有独立的远期方案文件。新增远期主题前，先说明它与当前架构的差异、为什么不能直接进入 `design/`，以及退出/转正条件。

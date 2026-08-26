@@ -44,7 +44,7 @@
 
 Manage Console 负责 Agent Registry 和成员选择；Node UI 负责本地 Agent 的个人 Session 和本 Node 工作组 Session 展示。两者均不得要求 Manage 反向访问 Node。
 
-## v0.10.0 已落地 UI
+## v0.10.4 已落地 UI
 
 - Node UI 的工作组成员弹窗改为从 `/v1/workgroups/meta/agents` 加载已有 Agent，按 Agent 名称、ID、Node 展示并要求选择 `agent_id`。
 - Manage Console 的工作组成员添加流程同样提交 `agent_id`，过滤承载 Node 自身的兼容注册行，避免把 Node 误显示为可加入的 Agent。

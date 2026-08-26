@@ -27,5 +27,5 @@
 
 ## 延伸阅读
 
-- [Go Node 兼容矩阵](../docs/architecture/go-node-compatibility.md)
+- [Go Node 兼容矩阵（历史）](../docs/archive/architecture-go-node-compatibility.md)
 - [Agent Node API](../docs/architecture/agent-node-api.md)

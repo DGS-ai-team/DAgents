@@ -84,7 +84,7 @@ sequenceDiagram
 4. 可用 skills 目录元数据（启用 skills 工具组时）
 
 主机环境、Agent/session 身份与 `prompt_context` 由 request-only `ContextInjection` 注入；
-已加载 skill 的完整正文由独立的 `role=user`、`source=plugin/form=instructions` 持久化上下文消息注入，`name=skill` 仅为兼容字段，不属于 system prompt。
+已加载 skill 的完整正文由独立的 `role=user`、`source=plugin`、`form=instructions` 持久化上下文消息注入，`name=skill` 仅为兼容字段，不属于 system prompt。
 
 启用 skills 工具组时，skills **目录元数据**追加到 system prompt 尾部；已加载 skill 正文在激活时按会话状态写入独立 context message。目录 revision 在下一个 human turn 边界观察，避免磁盘变化中途修改上下文。`load_skills` 会立即更新 session 和 hooks，显式变更在下一个模型 Step 创建新的 context segment，工具结果明确返回模型上下文的生效边界。
 

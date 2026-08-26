@@ -1,6 +1,6 @@
 # 工作组 D0.5 契约（开工门槛）
 
-> **状态**：**D0.5 已冻结**（§19 Verdict A）— D0.9–**D4 已完成**；**D5 Placement 产品拆除已完成**（Cut1–8；旧 A2A 另轨）；**禁止**跳过契约另开平行协议  
+> **状态**：字段级兼容契约与 fixtures（D0.5，历史冻结稿）。当前产品正文以 [`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md) 为准；本文保留 MemberSpec/Grant/旧协议的迁移约束，不能单独推出新的产品路径。  
 > **产品方向**：[`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md)（§0–§13）  
 > **本文件职责**：可测试的 schema、状态机、权限矩阵、投影规则、WS/工具恢复协议、威胁模型、旧数据处置、契约测试清单  
 > **JSON Schema 附录**：[`fixtures/workgroup-d05/schemas/`](./fixtures/workgroup-d05/schemas/)  

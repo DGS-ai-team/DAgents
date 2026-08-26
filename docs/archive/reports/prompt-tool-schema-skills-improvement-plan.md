@@ -9,7 +9,7 @@
 > **2026-08-23 更新**：本计划中早期“加载后把正文注入 system prompt”的描述已由
 > Codex 式 Skill context 方案替代。当前正文在激活时作为独立 `name=skill` durable
 > message 写入 history；system prompt 只保留 catalog 元数据和选择规则。历史实验数据
-> 仍可作为旧架构基线，当前验收以 [`non-user-user-message-injection-audit-2026-08-23.md`](./non-user-user-message-injection-audit-2026-08-23.md) 为准。
+> 仍可作为旧架构基线，当前验收以 [`agent-quality.md`](../../design/agent-quality.md) 为准；原审计见 [`non-user-user-message-injection-audit-2026-08-23.md`](./non-user-user-message-injection-audit-2026-08-23.md)。
 
 ## 0. 本轮修改计划（2026-08-22）
 
@@ -459,7 +459,7 @@ model-visible loaded skill
 
 ### 阶段 4：可选的 skills catalog 工具化
 
-- [x] 设计 `list_available_skills` 的返回上限、截断、搜索和权限过滤（见 [`skills-list-tool-experiment.md`](./skills-list-tool-experiment.md)）。
+- [x] 设计 `list_available_skills` 的返回上限、截断、搜索和权限过滤（见 [`skills-list-tool-experiment.md`](../experiments/skills-list-tool-experiment.md)）。
 - [x] 实现默认关闭的实验开关和 deterministic contract test；实验模式不得改变默认 system prompt/catalog 行为。
 - [x] 对比“system prompt 内置目录”和“显式 list 工具”两种方案；已完成修正配置后的真实 Mimo 发现 A/B，但出现额外 Step、工具失败和一组循环长尾，结论暂为不启用。
 - [x] 已按门槛评估目录工具：虽然发现链路可执行，但存在额外模型 Step、工具失败和循环长尾，且长上下文 cache 无明确收益；因此门槛未满足，明确保持 system prompt 目录并关闭实验开关。
@@ -518,4 +518,4 @@ model-visible loaded skill
 - 额外修正：工具 status/error 已通过请求侧 metadata 适配层进入模型可见的 tool message；历史和前端仍保留原始正文，避免把状态协议重复注入工具定义或 UI 展示。
 - cache 观测链路已补齐：OpenAI/DeepSeek cache 字段统一归一化，`prompt_cache_available` 区分未知与明确零命中；`StepUsage`/`TurnUsage`、`model.usage.recorded`、SSE 和质量评估均可读取命中/未命中 token。后续隔离 Node 的 Mimo 样本已确认 provider 会返回 cache 字段（例如 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`），因此真实 cache A/B 已具备前置条件；此前报告中的“未观测”仅适用于首轮样本，需修正为“首轮未观测”。
 - 质量评估新增 `eval.CompareAB`：相同场景不足 3 个、双方样本不完整或 cache 未全量观测时只输出差值和 `inconclusive`，不会自动推动策略变更。
-- 真实 cache A/B 的执行步骤、权威事件采集和结论门槛见 [`prompt-tool-schema-skills-cache-ab-runbook.md`](./prompt-tool-schema-skills-cache-ab-runbook.md)。本轮已补齐同一 provider 的多轮、显式 mutation 和长上下文探索性样本；下一步只需在新增 provider 或真实业务任务集上持续观测，不再改变当前默认架构。
+- 真实 cache A/B 的执行步骤、权威事件采集和结论门槛见 [`prompt-tool-schema-skills-cache-ab-runbook.md`](../experiments/prompt-tool-schema-skills-cache-ab-runbook.md)。本轮已补齐同一 provider 的多轮、显式 mutation 和长上下文探索性样本；下一步只需在新增 provider 或真实业务任务集上持续观测，不再改变当前默认架构。

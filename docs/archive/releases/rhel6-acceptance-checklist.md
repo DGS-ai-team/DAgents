@@ -1,8 +1,8 @@
 # RHEL 6.9 验收清单（归档）
 
-> **现行人机入口是 Web UI**。本清单含早期 Client/TUI 步骤，仅供老环境脚本对照；日常部署见手册 [06-运维与案例](../handbook/06-运维与案例.md)。
+> **现行人机入口是 Web UI**。本清单含早期 Client/TUI 步骤，仅供老环境脚本对照；日常部署见手册 [06-运维与案例](../../handbook/06-运维与案例.md)。
 
-在 **RHEL 6.9 无 GUI、SSH 交互** 场景下，按序执行并记录结果。构建矩阵见 [go-node-compatibility.md](./go-node-compatibility.md)。
+在 **RHEL 6.9 无 GUI、SSH 交互** 场景下，按序执行并记录结果。构建矩阵见 [go-node-compatibility.md](../architecture-go-node-compatibility.md)。
 
 ---
 

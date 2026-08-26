@@ -1148,7 +1148,7 @@
 
 ### 文档
 
-- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 handbook [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md) §2。
+- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增历史 [tool-context-cost-analysis.md](docs/archive/experiments/tool-context-cost-analysis.md) 与 handbook [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md) §2。
 
 （Git **tag**：`v0.3.6`。）
 
@@ -1453,7 +1453,7 @@
 - **Go / Python TUI `/compress`**：调用上述 API；已有压缩任务进行中时展示 `in_progress` 及 `trigger_level` 等字段，不重复执行。
 - **`GET /v1/sessions/{id}/context`** 与 **`/context`**：响应/展示 **`system_prompt`**（与 turn 构建逻辑一致）。
 - **预编译包 Node 自启动**：Linux **`dagents`**、Windows **`dagents.cmd`** 支持 **`--withnode`**（Client 前探活并后台启动 Node）与 **`node --background`**（日志 `.runtime/logs/node.log`）。
-- **Windows 发布包内置 OfficeCLI**：[`scripts/ci/vendor_officecli.sh`](scripts/ci/vendor_officecli.sh) 打入 **`.runtime/scripts/officecli.exe`** 与 **`.runtime/skills/officecli*`**（上游 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，AGPL-3.0）；Linux tarball **不含** OfficeCLI。
+- **Windows 发布包内置 OfficeCLI**：当时由 `scripts/ci/vendor_officecli.sh` 打入 **`.runtime/scripts/officecli.exe`** 与 **`.runtime/skills/officecli*`**（上游 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，AGPL-3.0）；Linux tarball **不含** OfficeCLI。该脚本已随后续版本移除。
 - **`.runtime/scripts` 进 PATH**：Linux **`install.sh`** / systemd 服务、Windows 安装包，便于 Agent 与用户调用扩展 CLI。
 
 ### 变更
@@ -1729,7 +1729,7 @@
 
 ### 已知限制（0.2.0）
 
-- **N7 真机验收**：RHEL6 / Windows Server 2012 等待测清单见 `docs/architecture/rhel6-acceptance-checklist.md`。
+- **N7 真机验收**：RHEL6 / Windows Server 2012 等待测清单见 `docs/archive/releases/rhel6-acceptance-checklist.md`。
 - **plain REPL**：工具审批仅 y/N 全批/全拒；无 full TUI 的逐项勾选；回合等待期间不可用 `/cancel`。
 - **A2A 工具**：随 Python Agent API 移除；Register Center relay/broadcast 仍可用，Agent 侧 A2A 需后续在 Go/Manage 落地。
 - **历史文档**：`docs/api-reference.md`、`docs/architecture/python-runtime.md` 描述已删除的 Python API，仅作参考；现行契约见 `docs/architecture/agent-node-api.md`。

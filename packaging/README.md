@@ -50,7 +50,7 @@ Linux Release CI：Runner **ubuntu-latest**；Go 二进制 **CGO_ENABLED=0** 静
 | **`manage/`** | **Manage 控制面 Docker 镜像**（Registry + A2A + Console；见 [`manage/README.md`](manage/README.md)） |
 | **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
 
-架构与联调见 [local-assistant.md](../docs/architecture/local-assistant.md)。
+架构与联调见 [docs/architecture.md](../docs/architecture.md) 与 [docs/development.md](../docs/development.md)。
 
 ## 推荐 CLI 工具
 

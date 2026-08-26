@@ -81,7 +81,7 @@ bin\dagents-client.exe -config config.yaml tui --plain
 
 ## 4. RHEL 6 部署注意
 
-**Docker 特性导览**：[`cases/centos7-feature-tour/`](../../cases/centos7-feature-tour/)（CentOS 7 + `./scripts/verify.sh`）。RHEL 6 真机仍见 [rhel6-acceptance-checklist.md](./rhel6-acceptance-checklist.md)。
+**Docker 特性导览**：[`cases/centos7-feature-tour/`](../../cases/centos7-feature-tour/)（CentOS 7 + `./scripts/verify.sh`）。RHEL 6 真机验收见 [releases/rhel6-acceptance-checklist.md](releases/rhel6-acceptance-checklist.md)。
 
 | 项 | 做法 |
 |----|------|
@@ -101,6 +101,5 @@ bin\dagents-client.exe -config config.yaml tui --plain
 
 ## 6. 相关文档
 
-- [client-packaging.md](./client-packaging.md)
-- [local-assistant.md](./local-assistant.md)
-- [agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) § N7
+- 当前构建、测试和发布：[docs/development.md](../development.md)
+- 当前用户入口：[docs/user/operations.md](../user/operations.md)
