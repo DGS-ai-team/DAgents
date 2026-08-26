@@ -22,6 +22,7 @@ import {
 } from "../api.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../../../../../node/webui/frontend/src/utils/toolCalls.js";
+import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
 
@@ -62,6 +63,13 @@ const expandedMemberReports = ref({});
 const pendingHitl = ref([]);
 const hitlBusy = ref(false);
 const hitlDraft = ref("");
+const pendingHitlRefresh = createSerializedRefresh(
+  () => listWorkgroupHITL(props.workgroupId, true),
+  (list) => {
+    pendingHitl.value = Array.isArray(list) ? list : [];
+  },
+);
+let timelineReqSeq = 0;
 /** RunHistory 调试 */
 const debugOpen = ref(false);
 const debugLoading = ref(false);
@@ -1244,12 +1252,15 @@ async function loadNodeDirectory() {
 }
 
 let workPollTimer = null;
+let workPollInFlight = null;
+let workPollQueued = false;
 
 function stopWorkPoll() {
   if (workPollTimer) {
     clearInterval(workPollTimer);
     workPollTimer = null;
   }
+  workPollQueued = false;
 }
 
 function startWorkPoll() {
@@ -1259,16 +1270,36 @@ function startWorkPoll() {
   }, 900);
 }
 
-async function refreshTimelineQuiet() {
-  if (!props.workgroupId) return;
-  try {
-    timeline.value = await fetchWorkgroupTimeline(props.workgroupId);
-    await loadPendingHitl();
-    await nextTick();
-    scrollToBottom();
-  } catch {
-    /* ignore during live poll */
+function refreshTimelineQuiet() {
+  if (!props.workgroupId) return Promise.resolve();
+  if (workPollInFlight) {
+    workPollQueued = true;
+    return workPollInFlight;
   }
+
+  const pollWorkgroupId = props.workgroupId;
+  const run = (async () => {
+    do {
+      workPollQueued = false;
+      try {
+        const reqSeq = ++timelineReqSeq;
+        const nextTimeline = await fetchWorkgroupTimeline(pollWorkgroupId);
+        if (reqSeq !== timelineReqSeq || pollWorkgroupId !== props.workgroupId) return;
+        await loadPendingHitl();
+        if (reqSeq !== timelineReqSeq || pollWorkgroupId !== props.workgroupId) return;
+        timeline.value = nextTimeline;
+        await nextTick();
+        scrollToBottom();
+      } catch {
+        /* ignore during live poll */
+      }
+    } while (workPollQueued && pollWorkgroupId === props.workgroupId);
+  })();
+  workPollInFlight = run;
+  run.finally(() => {
+    if (workPollInFlight === run) workPollInFlight = null;
+  });
+  return run;
 }
 
 async function loadPendingHitl() {
@@ -1276,12 +1307,7 @@ async function loadPendingHitl() {
     pendingHitl.value = [];
     return;
   }
-  try {
-    const list = await listWorkgroupHITL(props.workgroupId, true);
-    pendingHitl.value = Array.isArray(list) ? list : [];
-  } catch {
-    /* ignore */
-  }
+  await pendingHitlRefresh.refresh();
 }
 
 async function submitHitlAnswer() {
@@ -1417,19 +1443,25 @@ function formatDebugMsg(m) {
 }
 
 async function loadTimeline() {
+  const reqSeq = ++timelineReqSeq;
+  const requestedWorkgroupId = props.workgroupId;
   if (!props.workgroupId) {
     timeline.value = [];
     return;
   }
   loading.value = true;
   try {
-    timeline.value = await fetchWorkgroupTimeline(props.workgroupId);
+    const nextTimeline = await fetchWorkgroupTimeline(requestedWorkgroupId);
+    if (reqSeq !== timelineReqSeq || requestedWorkgroupId !== props.workgroupId) return;
+    timeline.value = nextTimeline;
     await nextTick();
     scrollToBottom(true);
   } catch (err) {
-    emit("toast", { message: err.message || "加载对话失败", type: "error" });
+    if (reqSeq === timelineReqSeq) {
+      emit("toast", { message: err.message || "加载对话失败", type: "error" });
+    }
   } finally {
-    loading.value = false;
+    if (reqSeq === timelineReqSeq) loading.value = false;
   }
 }
 
@@ -1854,6 +1886,8 @@ watch(
   () => [props.active, props.workgroupId],
   ([active, id]) => {
     if (active && id) {
+      stopWorkPoll();
+      pendingHitlRefresh.reset();
       clearLive();
       expandedMemberReports.value = {};
       pendingHitl.value = [];
@@ -1880,6 +1914,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  stopWorkPoll();
   stopQueuePoll();
 });
 </script>
