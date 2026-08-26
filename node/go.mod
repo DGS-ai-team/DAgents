@@ -11,10 +11,10 @@ require (
 	github.com/coder/websocket v1.8.13
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
-	github.com/pkg/sftp v1.13.7
+	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.51.0
 )
