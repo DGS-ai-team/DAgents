@@ -1,6 +1,6 @@
 # 仓库根目录：pip install -r requirements.txt
 python-dotenv>=1.2.2
-pydantic>=2.7.0
+pydantic>=2.13.4
 fastapi>=0.115.0
 python-multipart
 uvicorn>=0.30.0
