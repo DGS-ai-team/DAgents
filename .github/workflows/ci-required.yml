@@ -33,6 +33,11 @@ jobs:
     name: Packaging
     uses: ./.github/workflows/packaging-smoke.yml
 
+  release-preflight:
+    name: Release metadata
+    if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
+    uses: ./.github/workflows/release-preflight.yml
+
   required:
     name: CI / required
     if: ${{ always() }}
@@ -41,6 +46,7 @@ jobs:
       - python
       - tauri
       - packaging
+      - release-preflight
     runs-on: ubuntu-latest
     steps:
       - name: Verify required checks
@@ -51,7 +57,9 @@ jobs:
           echo "python=${{ needs.python.result }}"
           echo "tauri=${{ needs.tauri.result }}"
           echo "packaging=${{ needs.packaging.result }}"
+          echo "release-preflight=${{ needs.release-preflight.result }}"
           [[ "${{ needs.go.result }}" == "success" ]]
           [[ "${{ needs.python.result }}" == "success" ]]
           [[ "${{ needs.tauri.result }}" == "success" ]]
           [[ "${{ needs.packaging.result }}" == "success" ]]
+          [[ "${{ needs.release-preflight.result }}" == "success" || "${{ needs.release-preflight.result }}" == "skipped" ]]
