@@ -45,6 +45,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/.cargo"
+          # The prebuilt image intentionally contains only the native Linux
+          # libraries and cargo cache. Keep formatting on the host toolchain;
+          # older cached images may not include the rustfmt component.
+          cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           image_available=false
           max_pull_attempts=6
           pull_retry_delay_seconds=20
@@ -73,7 +77,7 @@ jobs:
               --volume "${HOME}/.cargo:/cargo" \
               --workdir /workspace/desktop/tray-tauri/src-tauri \
               "${TAURI_LINUX_CI_IMAGE}" \
-              sh -c 'cargo fmt --check && cargo test --locked'
+              sh -c 'cargo test --locked'
           else
             echo "::warning::Tauri Linux CI image is unavailable after ${max_pull_attempts} attempts; using the bootstrap apt path."
             sudo apt-get update
@@ -83,7 +87,6 @@ jobs:
               librsvg2-dev \
               patchelf \
               libssl-dev
-            cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
             cargo test --locked --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           fi
 
