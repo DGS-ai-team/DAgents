@@ -1,4 +1,4 @@
 browser-use>=0.13.1
-fastapi>=0.115.0
+fastapi>=0.141.1
 uvicorn>=0.32.0
 pyyaml>=6.0.2
