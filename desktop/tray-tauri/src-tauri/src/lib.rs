@@ -213,8 +213,7 @@ pub fn run() {
                     MenuItem::with_id(app, "update", "更新：检查中…", false, None::<&str>)?;
                 let start = MenuItem::with_id(app, "start", "启动 Node", true, None::<&str>)?;
                 let stop = MenuItem::with_id(app, "stop", "停止 Node", true, None::<&str>)?;
-                let restart =
-                    MenuItem::with_id(app, "restart", "重启 Node", true, None::<&str>)?;
+                let restart = MenuItem::with_id(app, "restart", "重启 Node", true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "退出 Shell", true, None::<&str>)?;
                 let sep1 = PredefinedMenuItem::separator(app)?;
                 let sep2 = PredefinedMenuItem::separator(app)?;
@@ -257,10 +256,8 @@ pub fn run() {
                 let menu_shared = Arc::clone(&shared);
                 let tray_app = app.handle().clone();
                 // 使用高分辨率 PNG，避免 Windows 从小尺寸 ICO 帧放大导致托盘/标题栏模糊。
-                let icon = tauri::image::Image::from_bytes(include_bytes!(
-                    "../icons/icon.png"
-                ))
-                .map_err(|e| format!("加载托盘图标失败: {e}"))?;
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                    .map_err(|e| format!("加载托盘图标失败: {e}"))?;
 
                 // TrayIcon 在最后一次 drop 时会从系统托盘移除，必须托管到 App 状态以保持存活。
                 let tray = TrayIconBuilder::with_id("main")
@@ -305,7 +302,9 @@ pub fn run() {
                 shared.update_checker.set_upgrade_callback({
                     let shared = Arc::clone(&shared);
                     move |status| {
-                        let _ = shared.notifier.push_update_available(&status.latest_version);
+                        let _ = shared
+                            .notifier
+                            .push_update_available(&status.latest_version);
                         refresh_update_ui(&shared);
                     }
                 });
@@ -368,9 +367,7 @@ fn is_navigation_allowed(url: &Url, endpoint: &str) -> bool {
     }
 
     // 本地 stub（devUrl / 偶发 localhost）
-    if matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
-        && url.port() == Some(1422)
-    {
+    if matches!(url.host_str(), Some("localhost") | Some("127.0.0.1")) && url.port() == Some(1422) {
         return true;
     }
 
@@ -435,7 +432,9 @@ fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
         "update" => open_update_settings(shared, app),
         "start" => {
             shared.hold_stopped.store(false, Ordering::SeqCst);
-            run_action(shared, "启动", |s| nodectl::start(&s.layout, &s.cfg, WAIT_READY));
+            run_action(shared, "启动", |s| {
+                nodectl::start(&s.layout, &s.cfg, WAIT_READY)
+            });
         }
         "stop" => {
             shared.hold_stopped.store(true, Ordering::SeqCst);
@@ -557,10 +556,12 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
                             win.eval("window.location.reload()")
                                 .map_err(|e| format!("刷新失败: {e}"))?;
                         } else {
-                            win.navigate(url.clone()).map_err(|e| format!("导航失败: {e}"))?;
+                            win.navigate(url.clone())
+                                .map_err(|e| format!("导航失败: {e}"))?;
                         }
                     } else if !already_target {
-                        win.navigate(url.clone()).map_err(|e| format!("导航失败: {e}"))?;
+                        win.navigate(url.clone())
+                            .map_err(|e| format!("导航失败: {e}"))?;
                     }
                     win.set_skip_taskbar(false)
                         .map_err(|e| format!("显示任务栏失败: {e}"))?;
@@ -866,7 +867,10 @@ mod nav_tests {
             &Url::parse("http://localhost:1422/").unwrap(),
             ep
         ));
-        assert!(is_navigation_allowed(&Url::parse("about:blank").unwrap(), ep));
+        assert!(is_navigation_allowed(
+            &Url::parse("about:blank").unwrap(),
+            ep
+        ));
         assert!(!is_navigation_allowed(
             &Url::parse("https://example.com/").unwrap(),
             ep

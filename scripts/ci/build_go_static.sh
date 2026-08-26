@@ -13,6 +13,14 @@ OUT_DIR="${OUT_DIR:-${REPO_ROOT}/dist/go-linux-amd64}"
 GOOS="${GOOS:-linux}"
 GOARCH="${GOARCH:-amd64}"
 LDFLAGS="${LDFLAGS:--s -w}"
+if [[ -z "${VERSION:-}" ]]; then
+  VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
+fi
+if [[ -z "${VERSION}" ]]; then
+  echo "[build] VERSION is empty; pass VERSION or populate ${REPO_ROOT}/VERSION" >&2
+  exit 1
+fi
+LDFLAGS="${LDFLAGS} -X github.com/DGS-ai-team/DAgents/node/internal/version.Version=${VERSION}"
 
 if [[ "${SKIP_WEBUI_BUILD:-0}" != "1" ]]; then
   echo "[build] embedding Web UI (node/webui/build.sh)"

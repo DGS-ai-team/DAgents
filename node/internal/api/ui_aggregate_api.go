@@ -17,12 +17,12 @@ func (s *Server) registerUIAggregateRoutes() {
 
 // uiBootstrapResponse 聚合 Chat 首屏常用只读信息，减少并行 GET。
 type uiBootstrapResponse struct {
-	Health     healthResponse      `json:"health"`
-	Info       agentInfoResponse   `json:"info"`
-	LLM        llm.LLMSettingsView `json:"llm"`
-	User       uiBootstrapUser     `json:"user"`
+	Health     healthResponse        `json:"health"`
+	Info       agentInfoResponse     `json:"info"`
+	LLM        llm.LLMSettingsView   `json:"llm"`
+	User       uiBootstrapUser       `json:"user"`
 	Onboarding uiBootstrapOnboarding `json:"onboarding"`
-	Agent      uiBootstrapAgent    `json:"agent"`
+	Agent      uiBootstrapAgent      `json:"agent"`
 }
 
 type uiBootstrapUser struct {
@@ -86,8 +86,8 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 }
 
 type workspaceActivityResponse struct {
-	AgentID     string                `json:"agent_id"`
-	GeneratedAt string                `json:"generated_at"`
+	AgentID     string `json:"agent_id"`
+	GeneratedAt string `json:"generated_at"`
 	activity.Snapshot
 }
 

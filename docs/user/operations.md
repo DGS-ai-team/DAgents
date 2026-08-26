@@ -25,7 +25,7 @@ Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙
 npm test --prefix node/webui/frontend -- --run
 npm run build --prefix node/webui/frontend
 npm run build --prefix manage/console/frontend
-go test ./node/... ./client/... ./shared/config/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 git diff --check
 ```

@@ -97,10 +97,7 @@ pub fn acquire(layout: &Layout) -> Result<InstanceGuard, InstanceError> {
             }
         }
         let _ = writeln!(file, "{}", std::process::id());
-        Ok(InstanceGuard {
-            _file: file,
-            path,
-        })
+        Ok(InstanceGuard { _file: file, path })
     }
 }
 

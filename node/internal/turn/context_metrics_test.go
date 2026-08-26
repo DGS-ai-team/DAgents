@@ -118,7 +118,7 @@ func (stubStatusPollExecutor) StartBackground(context.Context, string, string, s
 }
 
 func (stubStatusPollExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
-func (stubStatusPollExecutor) TakeToolResultMediaForCall(string) map[string]any    { return nil }
+func (stubStatusPollExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
 func (stubStatusPollExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
 	return nil
 }

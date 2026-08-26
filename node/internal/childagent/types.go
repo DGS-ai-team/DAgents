@@ -32,26 +32,26 @@ type CreateInput struct {
 // Result 为交付给父 Agent 的终态结果。
 type Result struct {
 	ChildAgentID string   `json:"child_agent_id"`
-	Status         Status   `json:"status"`
-	Summary        string   `json:"summary"`
-	TurnCount      int      `json:"turn_count"`
-	Error          string   `json:"error,omitempty"`
-	Artifacts      []string `json:"artifacts"`
+	Status       Status   `json:"status"`
+	Summary      string   `json:"summary"`
+	TurnCount    int      `json:"turn_count"`
+	Error        string   `json:"error,omitempty"`
+	Artifacts    []string `json:"artifacts"`
 }
 
 // ActiveAgent 跟踪单个活跃临时 Agent 的元数据与同步等待（Manager 内存账本，非 session runtime）。
 type ActiveAgent struct {
 	ChildAgentID  string
 	ParentAgentID string
-	Purpose         string
-	AllowedTools    []string
-	LoadedSkills    []string
-	Status          Status
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
-	MaxTurns        int
-	TurnCount       int
-	WaitSync        bool
+	Purpose       string
+	AllowedTools  []string
+	LoadedSkills  []string
+	Status        Status
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	MaxTurns      int
+	TurnCount     int
+	WaitSync      bool
 
 	mu             sync.Mutex
 	terminalResult *Result
@@ -62,15 +62,15 @@ func newActiveAgent(parentID string, input CreateInput, childID string, expiresA
 	return &ActiveAgent{
 		ChildAgentID:  childID,
 		ParentAgentID: parentID,
-		Purpose:         input.Purpose,
-		AllowedTools:    append([]string(nil), input.AllowedTools...),
-		LoadedSkills:    append([]string(nil), input.SkillNames...),
-		Status:          StatusCreating,
-		CreatedAt:       time.Now(),
-		ExpiresAt:       expiresAt,
-		MaxTurns:        input.MaxTurns,
-		WaitSync:        input.Wait,
-		settledCh:       make(chan struct{}),
+		Purpose:       input.Purpose,
+		AllowedTools:  append([]string(nil), input.AllowedTools...),
+		LoadedSkills:  append([]string(nil), input.SkillNames...),
+		Status:        StatusCreating,
+		CreatedAt:     time.Now(),
+		ExpiresAt:     expiresAt,
+		MaxTurns:      input.MaxTurns,
+		WaitSync:      input.Wait,
+		settledCh:     make(chan struct{}),
 	}
 }
 
@@ -92,8 +92,8 @@ func (a *ActiveAgent) resultSnapshot() Result {
 	}
 	return Result{
 		ChildAgentID: a.ChildAgentID,
-		Status:         a.Status,
-		TurnCount:      a.TurnCount,
-		Artifacts:      []string{},
+		Status:       a.Status,
+		TurnCount:    a.TurnCount,
+		Artifacts:    []string{},
 	}
 }

@@ -74,12 +74,15 @@ jobs:
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Go test
         run: |
-          go test ./shared/config/...
-          go test ./node/...
-          go test ./client/...
+          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+          go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -90,7 +93,9 @@ jobs:
       - name: Python test
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock -r requirements-dev.txt
+          python -m ruff check manage scripts tests
+          python -m pyright --project pyrightconfig.json
           python -m unittest discover -s tests -p "test_*.py" -v
 
   build-linux-assistant:
@@ -119,6 +124,10 @@ jobs:
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Build Go binaries (dagents-node + dagents-client)
         shell: bash
@@ -148,7 +157,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/rocky8-pyenv
-          key: rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-${{ hashFiles('browser-service/requirements.txt', 'requirements.txt') }}
+          key: rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-${{ hashFiles('browser-service/requirements.lock', 'requirements.lock') }}
           restore-keys: |
             rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-
 
@@ -210,6 +219,10 @@ jobs:
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Build Go binaries
         shell: bash
@@ -257,6 +270,10 @@ jobs:
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -273,6 +290,7 @@ jobs:
       - name: Build dagents-shell (Tauri + Go legacy)
         shell: bash
         run: |
+          cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           chmod +x scripts/ci/build_dagents_shell_tauri.sh scripts/ci/build_dagents_shell.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell.sh

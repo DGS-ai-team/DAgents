@@ -16,9 +16,9 @@ import (
 var catalogJSON []byte
 
 type catalogFile struct {
-	SchemaVersion int           `json:"schema_version"`
+	SchemaVersion int            `json:"schema_version"`
 	Groups        []CatalogGroup `json:"groups"`
-	Tools         []CatalogTool `json:"tools"`
+	Tools         []CatalogTool  `json:"tools"`
 }
 
 // CatalogGroup 工具分组（UI）。

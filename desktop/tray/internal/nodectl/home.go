@@ -14,10 +14,10 @@ const EnvHome = "DAGENTS_HOME"
 
 // Layout 描述安装根目录下的关键路径。
 type Layout struct {
-	Home       string
-	ConfigPath string
-	NodeExe    string
-	PidFile    string
+	Home        string
+	ConfigPath  string
+	NodeExe     string
+	PidFile     string
 	LogOut      string
 	LogErr      string
 	ShellLog    string

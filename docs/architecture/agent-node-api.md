@@ -70,7 +70,7 @@ GET /health
 { "status": "ok", "agent_id": "ops-win-01", "version": "0.5.1" }
 ```
 
-`version` 字段为全项目唯一语义化版本（源码：`node/internal/version/version.go`）。探活中的身份字段以 **`node_id`** 为准。
+`version` 字段为全项目唯一语义化版本（权威来源：根目录 `VERSION`；Release 构建注入 `node/internal/version.Version`）。探活中的身份字段以 **`node_id`** 为准。
 
 ```http
 GET /v1/agent/info

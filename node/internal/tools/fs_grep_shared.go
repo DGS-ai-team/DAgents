@@ -8,14 +8,14 @@ import (
 )
 
 type lineSearchOptions struct {
-	rawPattern     string
-	literal        bool
-	caseSensitive  bool
-	indexOffset    int
-	countLimit     int
-	contextLines   int
+	rawPattern      string
+	literal         bool
+	caseSensitive   bool
+	indexOffset     int
+	countLimit      int
+	contextLines    int
 	maxOutputTokens float64
-	fileEncoding   *string
+	fileEncoding    *string
 }
 
 func compileLinePattern(rawPat string, literal, caseSensitive bool) (*regexp.Regexp, error) {

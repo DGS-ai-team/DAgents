@@ -35,21 +35,37 @@ jobs:
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t go_files < <(git ls-files '*.go')
+          test -z "$(gofmt -l "${go_files[@]}")"
 
       - name: Download modules
         run: |
           go mod download -C shared/config
+          go mod download -C shared/logfiles
+          go mod download -C shared/update
+          go mod download -C shared/workgroup
           go mod download -C node
           go mod download -C client
+          go mod download -C desktop/tray
 
       - name: Build protect-loaded-skill plugin
         run: go build -buildmode=plugin -o /tmp/protect-loaded-skill.so ./node/plugins/protect-loaded-skill
 
       - name: Test
         run: |
-          go test ./shared/config/...
-          go test ./node/...
-          go test ./client/...
+          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+
+      - name: Vet
+        run: go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
 
       - name: Build
         run: |

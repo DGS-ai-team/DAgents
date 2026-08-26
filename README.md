@@ -116,7 +116,7 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ### 可选：集中控制台 + 工作组
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock
 npm run build --prefix manage/console/frontend
 python3 run_manage.py
 ```

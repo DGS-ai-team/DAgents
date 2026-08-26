@@ -15,7 +15,7 @@ python3.13 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install --upgrade pip wheel
 mkdir -p wheels
-pip download -r requirements.txt -d wheels
+pip download -r requirements.lock -d wheels
 ```
 
 可将 `packaging/OFFLINE_INSTALL.md` 复制到发布目录，便于内网用户查阅。
@@ -26,7 +26,7 @@ pip download -r requirements.txt -d wheels
 cd /path/to/DAgents
 python3.13 -m venv .venv
 source .venv/bin/activate
-pip install --no-index --find-links=wheels -r requirements.txt
+pip install --no-index --find-links=wheels -r requirements.lock
 cp .env.example .env
 python run_agent_api.py
 ```

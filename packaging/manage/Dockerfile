@@ -27,8 +27,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY VERSION .
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 # Runtime workgroup schemas live under manage/ so they ship with the Python app.
 COPY manage/ ./manage/

@@ -37,12 +37,12 @@ type FSPaths struct {
 
 // HostSnapshot 为 Host 只读快照。
 type HostSnapshot struct {
-	History      []llm.Message          `json:"history,omitempty"`
-	SystemPrompt string                 `json:"system_prompt,omitempty"`
-	LoadedSkills []LoadedSkillInfo      `json:"loaded_skills,omitempty"`
-	Runtime      RuntimeSummary         `json:"runtime"`
+	History      []llm.Message              `json:"history,omitempty"`
+	SystemPrompt string                     `json:"system_prompt,omitempty"`
+	LoadedSkills []LoadedSkillInfo          `json:"loaded_skills,omitempty"`
+	Runtime      RuntimeSummary             `json:"runtime"`
 	SessionStore map[string]json.RawMessage `json:"session_store,omitempty"`
-	FSPaths      FSPaths                `json:"fs_paths,omitempty"`
+	FSPaths      FSPaths                    `json:"fs_paths,omitempty"`
 }
 
 // LLMCompleteRequest 为 Hook 内二次 LLM 补全请求。

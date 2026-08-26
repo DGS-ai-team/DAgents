@@ -59,7 +59,7 @@ GET /health
 → { "status": "ok", "node_id": "...", "version": "0.10.4" }
 ```
 
-`version` 与 `node/internal/version/version.go` 及发版 tag 一致（全项目唯一语义化版本）。
+`version` 与根目录 `VERSION` 及发版 tag 一致（全项目唯一语义化版本；Release 构建注入 `node/internal/version.Version`）。
 
 ```http
 GET /v1/agent/info

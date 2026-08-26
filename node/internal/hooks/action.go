@@ -5,7 +5,7 @@ type Action string
 
 const (
 	ActionContinue      Action = "continue"
-	ActionSkip          Action = "skip"           // 跳过本 phase 剩余 hook
+	ActionSkip          Action = "skip" // 跳过本 phase 剩余 hook
 	ActionAbortTurn     Action = "abort_turn"
 	ActionAbortTool     Action = "abort_tool"
 	ActionRejectEnqueue Action = "reject_enqueue"

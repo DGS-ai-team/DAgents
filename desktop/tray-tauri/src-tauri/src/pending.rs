@@ -245,7 +245,10 @@ mod tests {
         let store = Store::new();
         assert!(sync_from_agents(
             &store,
-            &[agent("a1", "Alpha", true, true, 2), agent("a2", "", false, true, 0)]
+            &[
+                agent("a1", "Alpha", true, true, 2),
+                agent("a2", "", false, true, 0)
+            ]
         ));
         let sum = store.summary();
         assert_eq!(sum.agent_count, 2);

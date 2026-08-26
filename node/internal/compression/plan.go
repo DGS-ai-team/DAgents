@@ -109,6 +109,7 @@ func compressionSlice(messages []llm.Message, plan compressionPlan) []llm.Messag
 //   - tool 结果（多 tool_call 时仅该批最后一条 tool）；
 //   - 无 tool_calls 的 assistant；
 //   - user 且下一条为 assistant（情况一：在 user 处切，保留 tail assistant）。
+//
 // 前缀闭合由 computePrefixClosure 一次 O(n) 判定；非法 messages 序列不压缩、不修复。
 func buildCompressionPlan(messages []llm.Message) (compressionPlan, bool) {
 	lastA := lastAssistantIndex(messages)

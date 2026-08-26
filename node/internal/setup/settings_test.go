@@ -11,7 +11,7 @@ func testBaseConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
 		NodeID: "setup-test",
-		FSRoot:  t.TempDir(),
+		FSRoot: t.TempDir(),
 	}
 	cfg.ApplyDefaults()
 	cfg.LLM.Provider = "deepseek"
@@ -251,4 +251,3 @@ func TestApplyPatch_completeNodeProfile(t *testing.T) {
 		t.Fatalf("view=%+v", view)
 	}
 }
-

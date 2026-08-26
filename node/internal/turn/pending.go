@@ -25,9 +25,9 @@ const (
 
 // PendingHITLItem 为单条待 HITL 的 tool call（类型由 tool name 推断，不再单独区分 kind）。
 type PendingHITLItem struct {
-	ToolCall       llm.ToolCall        `json:"tool_call"`
+	ToolCall       llm.ToolCall         `json:"tool_call"`
 	DuplicateMeta  *hooks.DuplicateMeta `json:"duplicate_meta,omitempty"`
-	MemoryConflict *MemoryConflictMeta `json:"memory_conflict,omitempty"`
+	MemoryConflict *MemoryConflictMeta  `json:"memory_conflict,omitempty"`
 }
 
 // PendingHITL 保存 HITL 暂停时的待处理 tool call 批次。

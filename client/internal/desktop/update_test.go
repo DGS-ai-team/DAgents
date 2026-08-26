@@ -13,14 +13,14 @@ import (
 func TestResolveAgentUpdateDelegatesToShell(t *testing.T) {
 	shell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"current_version":    "0.7.0",
-			"latest_version":     "0.7.1",
-			"upgrade_available":  true,
-			"manage_reachable":   true,
-			"channel":            "stable",
-			"platform":           "windows-amd64",
-			"message":            "新版本 0.7.1 可用",
-			"apply_command":      "dagents update",
+			"current_version":   "0.7.0",
+			"latest_version":    "0.7.1",
+			"upgrade_available": true,
+			"manage_reachable":  true,
+			"channel":           "stable",
+			"platform":          "windows-amd64",
+			"message":           "新版本 0.7.1 可用",
+			"apply_command":     "dagents update",
 		})
 	}))
 	defer shell.Close()

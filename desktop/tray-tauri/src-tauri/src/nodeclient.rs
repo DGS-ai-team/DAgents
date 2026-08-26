@@ -173,9 +173,7 @@ impl Client {
             .set("Accept", "text/event-stream");
         // 勿设 timeout(0)：ureq/Windows 会当成零读超时，空闲 SSE 立刻失败并重连刷屏。
         // 不设 overall timeout，与 Go tray `http.Client{Timeout: 0}`（无限）对齐。
-        let resp = req
-            .call()
-            .map_err(|e| format!("GET /v1/streams: {e}"))?;
+        let resp = req.call().map_err(|e| format!("GET /v1/streams: {e}"))?;
         if resp.status() != 200 {
             return Err(format!("GET /v1/streams: status {}", resp.status()));
         }
@@ -247,7 +245,11 @@ where
     Ok(handler(ev))
 }
 
-fn decode_stream_event(event_type: &str, event_id: &str, data: &str) -> Result<StreamEvent, String> {
+fn decode_stream_event(
+    event_type: &str,
+    event_id: &str,
+    data: &str,
+) -> Result<StreamEvent, String> {
     let envelope: StreamEnvelope =
         serde_json::from_str(data).map_err(|e| format!("decode sse data: {e}"))?;
     let typ = if event_type.trim().is_empty() {

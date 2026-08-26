@@ -65,7 +65,6 @@ func TestUIBootstrap_onboardingIncomplete(t *testing.T) {
 	}
 }
 
-
 func TestWorkspaceActivity(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}

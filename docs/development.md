@@ -1,6 +1,6 @@
 # 开发与验证
 
-本文是 DAgents 的开发者入口。当前发布基线为 v0.10.4；版本事实以根目录 `CHANGELOG.md` 为准。
+本文是 DAgents 的开发者入口。当前发布基线为 v0.10.4；机器可读版本唯一来源是根目录 `VERSION`，变更说明以 `CHANGELOG.md` 为准。
 
 ## 1. 环境
 
@@ -39,9 +39,14 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 | Node Web UI | `npm test --prefix node/webui/frontend -- --run` | Vitest |
 | Node UI 构建 | `npm run build --prefix node/webui/frontend` | 生成 Go embed 静态资源 |
 | Manage Console 构建 | `npm run build --prefix manage/console/frontend` | 生成 Console 静态资源 |
-| Go | `go test ./node/... ./client/... ./shared/config/...` | Node、Client、共用配置 |
+| Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
+| Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
 | Python | `python3 -m unittest discover -s tests -p "test_*.py" -v` | 默认不发现 `tests/integration/` |
+| Python 质量 | `python3 -m ruff check manage scripts tests && python3 -m pyright --project pyrightconfig.json` | 错误与类型门禁 |
+| API/Fixture 契约 | `python3 scripts/ci/check_contracts.py` | OpenAPI 路由与 Workgroup Schema/fixture |
 | 差异检查 | `git diff --check` | 提交前必须通过 |
+
+快速运行全部门禁：`scripts/verify.sh`；Windows 使用 `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1`。
 
 涉及工作组、HITL、消息队列或恢复协议时，应同时运行对应 Go/Python 单测和浏览器清单。真实 LLM、真实远程终端、WSS、断线恢复属于环境验收，不能用 Mock 结果替代。
 
@@ -84,9 +89,9 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 
 ## 7. 发布前检查
 
-1. 更新 `CHANGELOG.md` 和版本来源；
+1. 更新根目录 `VERSION`，再由 `scripts/release/prepare_release.py` 同步包元数据和 `CHANGELOG.md`；
 2. 构建两套前端并确认静态产物未被意外提交；
-3. 运行 Go、Python、Vitest 与 `git diff --check`；
+3. 运行 `scripts/verify.sh`（Windows 使用 `scripts/verify.ps1`）；
 4. 对新增接口检查旧客户端、重连、重复消息和错误路径；
 5. 真实 UI 测试至少覆盖对话、工具、HITL、取消、刷新恢复；工作组变更还要覆盖 Agent 注册、成员加入、任务分派、审批和断线；
 6. PR 描述列出行为变化、数据迁移、验证命令和未覆盖环境。

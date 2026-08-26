@@ -13,12 +13,12 @@ import (
 const cfHDrop = 15
 
 var (
-	user32             = windows.NewLazySystemDLL("user32.dll")
-	shell32            = windows.NewLazySystemDLL("shell32.dll")
-	procOpenClipboard  = user32.NewProc("OpenClipboard")
-	procCloseClipboard = user32.NewProc("CloseClipboard")
+	user32               = windows.NewLazySystemDLL("user32.dll")
+	shell32              = windows.NewLazySystemDLL("shell32.dll")
+	procOpenClipboard    = user32.NewProc("OpenClipboard")
+	procCloseClipboard   = user32.NewProc("CloseClipboard")
 	procGetClipboardData = user32.NewProc("GetClipboardData")
-	procDragQuery      = shell32.NewProc("DragQueryFileW")
+	procDragQuery        = shell32.NewProc("DragQueryFileW")
 )
 
 func filePaths() ([]string, error) {

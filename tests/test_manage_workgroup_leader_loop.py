@@ -643,7 +643,7 @@ class LeaderLoopTests(unittest.TestCase):
                 run_id=run.run_id,
                 tool_call_id="call_hitl_resume",
             )
-            resolved = store.resolve_hitl_cas(
+            store.resolve_hitl_cas(
                 group.workgroup_id,
                 hitl.hitl_id,
                 resolution={"answer": "yes"},

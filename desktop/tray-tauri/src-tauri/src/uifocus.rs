@@ -35,7 +35,11 @@ impl Store {
             return;
         };
         prune_expired(&mut state.claims);
-        let source_id = if source_id.is_empty() { "legacy" } else { source_id };
+        let source_id = if source_id.is_empty() {
+            "legacy"
+        } else {
+            source_id
+        };
         if agent_id.is_empty() {
             state.claims.remove(source_id);
             return;
@@ -58,7 +62,10 @@ impl Store {
             return false;
         };
         prune_expired(&mut state.claims);
-        state.claims.values().any(|claim| claim.agent_id == agent_id)
+        state
+            .claims
+            .values()
+            .any(|claim| claim.agent_id == agent_id)
     }
 
     #[cfg(test)]

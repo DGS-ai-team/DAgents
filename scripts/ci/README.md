@@ -24,6 +24,8 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 - Windows 三路产物合流后再 assemble + Inno；
 - Manage 离线包**只依赖** `linux-amd64` 助手包（不再空等 Windows）。
 
-**Go 测试**：`.github/workflows/go-ac.yml` 在仓库根执行 `go test ./node/... ./client/...`。
+**统一本地门禁**：仓库根运行 `scripts/verify.sh`；Windows 运行 `scripts/verify.ps1`。CI 的 Go 门禁覆盖全部模块，并同时执行 `gofmt`、`go vet`、单测和构建。
+
+Python 运行时依赖使用根目录 `requirements.lock`；浏览器打包依赖使用 `browser-service/requirements.lock`。源文件格式由 `.editorconfig` 和 `.gitattributes` 统一。
 
 legacy **`packaging/linux/build-deb.sh`** / **`build-rpm.sh`**（Python backend 安装包）当前 Release **未使用**。

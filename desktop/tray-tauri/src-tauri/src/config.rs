@@ -273,7 +273,10 @@ mod tests {
         let path = write_temp("local:\n  endpoint: http://127.0.0.1:18765\n");
         let cfg = ShellConfig::load(&path).unwrap();
         let _ = fs::remove_file(&path);
-        assert_eq!(cfg.agent_url("agent 1"), "http://127.0.0.1:18765/ui/agents/agent%201");
+        assert_eq!(
+            cfg.agent_url("agent 1"),
+            "http://127.0.0.1:18765/ui/agents/agent%201"
+        );
         assert_eq!(
             cfg.settings_about_url(),
             "http://127.0.0.1:18765/ui/settings/about"

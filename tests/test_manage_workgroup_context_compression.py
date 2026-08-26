@@ -17,7 +17,6 @@ from manage.workgroup.context_compression import (  # noqa: E402
     context_messages,
     make_snapshot,
 )
-from manage.workgroup.d3_models import HITLRequest  # noqa: E402
 from manage.workgroup.history import RunHistoryMessage, ToolCall, ToolCallFunction  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ActorRunCreateRequest,

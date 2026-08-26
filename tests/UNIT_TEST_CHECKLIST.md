@@ -142,7 +142,7 @@
 **本地一键**：
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock -r requirements-dev.txt
 python -m unittest discover -s tests -p "test_*.py" -v
 go test ./shared/config/... ./node/... ./client/...
 ```

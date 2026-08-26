@@ -49,7 +49,7 @@ pyenv global "${PYENV_PYTHON_VERSION}"
 
 cd /src
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt pyinstaller
+python -m pip install -r requirements.lock pyinstaller
 
 if [[ -z "${API_PI_ARGS:-}" && -z "${RC_PI_ARGS:-}" && -z "${CLI_PI_ARGS:-}" ]]; then
   echo "[build_linux_focal_pyenv] at least one of API_PI_ARGS, RC_PI_ARGS, CLI_PI_ARGS is required" >&2

@@ -156,7 +156,6 @@ class AssignVerticalLoopTests(unittest.TestCase):
             store, loop, bridge, wid, mid = self._ready(tmp, with_bridge=True)
             assert bridge is not None
             # expand allowlist to include glob + write
-            from manage.workgroup.models import MemberCreateRequest
 
             # recreate member with full tools via patching spec allow list in store internals
             spec = store.get_spec(mid)

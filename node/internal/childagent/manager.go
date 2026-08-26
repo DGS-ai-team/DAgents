@@ -42,10 +42,10 @@ type Host interface {
 type SpawnSpec struct {
 	ChildAgentID  string
 	ParentAgentID string
-	AllowedTools    []string
-	SkillNames      []string
-	MaxTurns        int
-	Purpose         string
+	AllowedTools  []string
+	SkillNames    []string
+	MaxTurns      int
+	Purpose       string
 }
 
 // Manager 跟踪子 Agent 记录、交付结果与 TTL。
@@ -154,10 +154,10 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 	if err := m.host.SpawnChild(SpawnSpec{
 		ChildAgentID:  childID,
 		ParentAgentID: parentSessionID,
-		AllowedTools:    allowed,
-		SkillNames:      append([]string(nil), input.SkillNames...),
-		MaxTurns:        input.MaxTurns,
-		Purpose:         input.Purpose,
+		AllowedTools:  allowed,
+		SkillNames:    append([]string(nil), input.SkillNames...),
+		MaxTurns:      input.MaxTurns,
+		Purpose:       input.Purpose,
 	}); err != nil {
 		m.unregisterActive(childID)
 		return "ERROR: " + err.Error(), nil
@@ -185,26 +185,26 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 			return "ERROR: " + waitErr.Error(), nil
 		}
 		body, _ := json.Marshal(map[string]any{
-			"kind":             "result",
+			"kind":           "result",
 			"child_agent_id": res.ChildAgentID,
-			"status":           res.Status,
-			"summary":          res.Summary,
-			"turn_count":       res.TurnCount,
-			"artifacts":        res.Artifacts,
-			"error":            res.Error,
+			"status":         res.Status,
+			"summary":        res.Summary,
+			"turn_count":     res.TurnCount,
+			"artifacts":      res.Artifacts,
+			"error":          res.Error,
 		})
 		return string(body), nil
 	}
 
 	// 返回结果
 	body, _ := json.Marshal(map[string]any{
-		"kind":             "handle",
+		"kind":           "handle",
 		"child_agent_id": childID,
-		"status":           StatusActive,
-		"purpose":          input.Purpose,
-		"loaded_skills":    append([]string(nil), input.SkillNames...),
-		"expires_at":       expiresAt.Format(time.RFC3339),
-		"max_turns":        input.MaxTurns,
+		"status":         StatusActive,
+		"purpose":        input.Purpose,
+		"loaded_skills":  append([]string(nil), input.SkillNames...),
+		"expires_at":     expiresAt.Format(time.RFC3339),
+		"max_turns":      input.MaxTurns,
 	})
 	return string(body), nil
 }
@@ -337,11 +337,11 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	agent.Status = status
 	out := Result{
 		ChildAgentID: childSessionID,
-		Status:         status,
-		Summary:        summary,
-		TurnCount:      agent.TurnCount,
-		Error:          errText,
-		Artifacts:      []string{},
+		Status:       status,
+		Summary:      summary,
+		TurnCount:    agent.TurnCount,
+		Error:        errText,
+		Artifacts:    []string{},
 	}
 	agent.terminalResult = &out
 	select {
@@ -447,12 +447,12 @@ func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool)
 	m.hub.Publish(parentID, EventTemporaryAgentCreated, map[string]any{
 		"child_agent_id":  agent.ChildAgentID,
 		"parent_agent_id": parentID,
-		"purpose":           agent.Purpose,
-		"loaded_skills":     append([]string(nil), agent.LoadedSkills...),
-		"status":            StatusActive,
-		"expires_at":        agent.ExpiresAt.Format(time.RFC3339),
-		"max_turns":         agent.MaxTurns,
-		"wait":              wait,
+		"purpose":         agent.Purpose,
+		"loaded_skills":   append([]string(nil), agent.LoadedSkills...),
+		"status":          StatusActive,
+		"expires_at":      agent.ExpiresAt.Format(time.RFC3339),
+		"max_turns":       agent.MaxTurns,
+		"wait":            wait,
 	})
 }
 
@@ -463,11 +463,11 @@ func (m *Manager) publishCompleted(parentID string, res *Result) {
 	m.hub.Publish(parentID, EventTemporaryAgentCompleted, map[string]any{
 		"child_agent_id":  res.ChildAgentID,
 		"parent_agent_id": parentID,
-		"status":            res.Status,
-		"summary":           res.Summary,
-		"turn_count":        res.TurnCount,
-		"error":             res.Error,
-		"artifacts":         res.Artifacts,
+		"status":          res.Status,
+		"summary":         res.Summary,
+		"turn_count":      res.TurnCount,
+		"error":           res.Error,
+		"artifacts":       res.Artifacts,
 	})
 }
 
@@ -478,9 +478,9 @@ func (m *Manager) publishCancelled(parentID, childID, reason, previous string) {
 	m.hub.Publish(parentID, EventTemporaryAgentCancelled, map[string]any{
 		"child_agent_id":  childID,
 		"parent_agent_id": parentID,
-		"status":            StatusCancelled,
-		"reason":            reason,
-		"previous_status":   previous,
+		"status":          StatusCancelled,
+		"reason":          reason,
+		"previous_status": previous,
 	})
 }
 

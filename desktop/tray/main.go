@@ -15,14 +15,14 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/desktopapi"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/events"
-	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodectl"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodectl"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/notify"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/shelllog"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/singleinstance"
-	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/uifocus"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
@@ -36,10 +36,10 @@ var iconData []byte
 var iconPendingData []byte
 
 const (
-	ensureNodeTimeout    = 45 * time.Second
-	probeInterval        = 3 * time.Second
-	maxPendingMenuSlots  = 8
-	iconBlinkInterval    = 600 * time.Millisecond
+	ensureNodeTimeout   = 45 * time.Second
+	probeInterval       = 3 * time.Second
+	maxPendingMenuSlots = 8
+	iconBlinkInterval   = 600 * time.Millisecond
 )
 
 func main() {
@@ -113,16 +113,16 @@ type trayApp struct {
 	recovering  bool
 	sup         supervisor
 
-	nodeClient   *nodeclient.Client
-	pendingStore *pending.Store
-	notifier     *notify.Notifier
+	nodeClient    *nodeclient.Client
+	pendingStore  *pending.Store
+	notifier      *notify.Notifier
 	updateChecker *update.Checker
 	updateApplier *update.Applier
-	desktopAPI   *desktopapi.Server
-	uiFocus      *uifocus.Store
-	bgCancel     context.CancelFunc
-	sseSub       *events.Subscriber
-	sseCancel    context.CancelFunc
+	desktopAPI    *desktopapi.Server
+	uiFocus       *uifocus.Store
+	bgCancel      context.CancelFunc
+	sseSub        *events.Subscriber
+	sseCancel     context.CancelFunc
 
 	pendingSessionIDs [maxPendingMenuSlots]string
 

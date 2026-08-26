@@ -1,6 +1,6 @@
 # DAgents 路线图
 
-> 版本事实以 [`CHANGELOG.md`](../CHANGELOG.md) 和代码为准。本页只保留当前产品方向、已完成基线和下一阶段优先级。
+> 机器可读版本事实以根目录 [`VERSION`](../VERSION) 为准，变更说明以 [`CHANGELOG.md`](../CHANGELOG.md) 为准。本页只保留当前产品方向、已完成基线和下一阶段优先级。
 
 ## 1. 产品定位
 
