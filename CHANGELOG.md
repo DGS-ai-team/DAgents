@@ -4,6 +4,50 @@
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-08-25
+
+**工作组审批与 Agent 终端稳定性版**：统一 Node 与 Manage 的工作组任务、审批和运行状态体验，并收紧终端与工具执行的可靠性边界。
+
+### 新增与优化
+
+- 工作组任务卡片展示成员工具执行清单，审批按单项/批量区分，支持逐项处理和批量批准/拒绝，并避免累计重复展示审批卡片。
+- 工作组消息区移除重复的瞬时执行状态，统一在输入栏上方运行状态栏展示；Node 与 Manage 行为保持一致。
+- 完善 turn/step、工具路由、上下文与消息队列的恢复、取消和并行执行边界。
+- 完善本地与 Linux/SSH 终端命令执行的取消、超时、输出读取和连接上下文处理。
+
+### 修复
+
+- 修复工作组成员工具审批、直达成员任务和历史事件投影之间的状态错配问题。
+- 修复终端命令执行过程中异常退出、迟到结果和会话状态不一致等问题。
+
+### 测试
+
+- Node Web UI 284 项单元测试通过；Node、Manage 前端生产构建通过。
+- 完成 Node/Manage 工作组页面、审批状态和运行状态栏浏览器级回归验证。
+
+## [0.10.3] - 2026-08-25
+
+**多模态与浏览器任务可靠性版**：让真实图片输入、异步浏览器任务和审批状态在 Node、sidecar 与 Web UI 之间形成闭环。
+
+### 新增
+
+- LLM 配置增加多模态能力标记；真实 `mimo-v2.5` profile 可接收上传图片，并通过视觉工具 follow-up 完成图片识别。
+- `browser_run_task(wait=false)` 增加 Node 侧终态轮询与 `async_tool_result` 自动回灌，不要求 browser sidecar 反向访问 Node。
+- browser sidecar 支持从任务归档读取已完成任务，使 Node 或 sidecar 重启后仍可查询终态结果。
+
+### 修复与安全边界
+
+- 修复 `tool_waiting` 与 `hitl_required` SSE 紧邻或漏序时审批卡片不出现的问题；前端按当前 Turn 做一次 hydrate 对账，并在权威终态清理过期卡片。
+- 修复 browser 任务取消时的启动时间异常，补齐排队态与运行态取消的协作停止和强制收敛路径。
+- browser 导航运行时拒绝 `file:`、`javascript:` 等未允许 URL scheme；默认仅允许 `http/https`。
+- browser sidecar 根据多模态配置启用视觉能力，并保留独立进程的模型配置边界。
+
+### 测试
+
+- 真实 Node + Mimo 图片输入测试通过；准确识别截图界面、工具执行状态和关键数值。
+- 真实 `wait=false` browser 任务自动回灌测试通过：任务完成后 UI 自动收到 `Example Domain` 结果。
+- Web UI 284 项、Go Node/Client/共享配置全量测试通过；browser Python 回归测试、归档查询、URL scheme 防护和取消测试通过。
+
 ## [0.10.2] - 2026-08-24
 
 **工作组执行可观测性与 Agent 运行稳定性增强**：让成员来源、工具执行、取消和上下文计量都拥有更明确的状态边界。
@@ -1104,7 +1148,7 @@
 
 ### 文档
 
-- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 handbook [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md) §2。
+- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增历史 [tool-context-cost-analysis.md](docs/archive/experiments/tool-context-cost-analysis.md) 与 handbook [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md) §2。
 
 （Git **tag**：`v0.3.6`。）
 
@@ -1409,7 +1453,7 @@
 - **Go / Python TUI `/compress`**：调用上述 API；已有压缩任务进行中时展示 `in_progress` 及 `trigger_level` 等字段，不重复执行。
 - **`GET /v1/sessions/{id}/context`** 与 **`/context`**：响应/展示 **`system_prompt`**（与 turn 构建逻辑一致）。
 - **预编译包 Node 自启动**：Linux **`dagents`**、Windows **`dagents.cmd`** 支持 **`--withnode`**（Client 前探活并后台启动 Node）与 **`node --background`**（日志 `.runtime/logs/node.log`）。
-- **Windows 发布包内置 OfficeCLI**：[`scripts/ci/vendor_officecli.sh`](scripts/ci/vendor_officecli.sh) 打入 **`.runtime/scripts/officecli.exe`** 与 **`.runtime/skills/officecli*`**（上游 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，AGPL-3.0）；Linux tarball **不含** OfficeCLI。
+- **Windows 发布包内置 OfficeCLI**：当时由 `scripts/ci/vendor_officecli.sh` 打入 **`.runtime/scripts/officecli.exe`** 与 **`.runtime/skills/officecli*`**（上游 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，AGPL-3.0）；Linux tarball **不含** OfficeCLI。该脚本已随后续版本移除。
 - **`.runtime/scripts` 进 PATH**：Linux **`install.sh`** / systemd 服务、Windows 安装包，便于 Agent 与用户调用扩展 CLI。
 
 ### 变更
@@ -1685,7 +1729,7 @@
 
 ### 已知限制（0.2.0）
 
-- **N7 真机验收**：RHEL6 / Windows Server 2012 等待测清单见 `docs/architecture/rhel6-acceptance-checklist.md`。
+- **N7 真机验收**：RHEL6 / Windows Server 2012 等待测清单见 `docs/archive/releases/rhel6-acceptance-checklist.md`。
 - **plain REPL**：工具审批仅 y/N 全批/全拒；无 full TUI 的逐项勾选；回合等待期间不可用 `/cancel`。
 - **A2A 工具**：随 Python Agent API 移除；Register Center relay/broadcast 仍可用，Agent 侧 A2A 需后续在 Go/Manage 落地。
 - **历史文档**：`docs/api-reference.md`、`docs/architecture/python-runtime.md` 描述已删除的 Python API，仅作参考；现行契约见 `docs/architecture/agent-node-api.md`。

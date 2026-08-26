@@ -449,7 +449,7 @@ func (p *LinuxShellProvider) Start(ctx context.Context, req ExecRequest) (Proces
 		HostKeyCallback: hostKey,
 		Timeout:         connectTimeout,
 	}
-	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), clientConfig)
+	clientConn, chans, requests, err := newSSHClientConnContext(ctx, conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), clientConfig)
 	if err != nil {
 		_ = conn.Close()
 		if agentConn != nil {
@@ -579,7 +579,7 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 		return linuxTestFailure(stages, "tcp_connect_failed", wrapped), nil
 	}
 	recordLinuxTestStage(&stages, "tcp", func() error { return nil })
-	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
+	clientConn, chans, requests, err := newSSHClientConnContext(ctx, conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            auth,
 		HostKeyCallback: hostKey,
@@ -829,7 +829,7 @@ func (p *LinuxShellProvider) openClientWithOptions(ctx context.Context, channelI
 		}
 		return LinuxChannelConfig{}, nil, nil, fmt.Errorf("linux channel connect failed: %w", err)
 	}
-	clientConn, chans, requests, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
+	clientConn, chans, requests, err := newSSHClientConnContext(ctx, conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            auth,
 		HostKeyCallback: hostKey,

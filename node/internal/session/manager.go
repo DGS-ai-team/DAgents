@@ -14,6 +14,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -164,6 +165,57 @@ func (m *Manager) SetMultimodalEnabled(enabled bool) {
 	m.turn.MultimodalEnabled = enabled
 	if m.tools != nil {
 		m.tools.SetMultimodalEnabled(enabled)
+	}
+}
+
+// SetBrowserManager rebinds the process-level browser capability to the
+// default and all loaded session registries. A live Turn keeps its frozen
+// ModelContextSnapshot; the next model Step rebuilds the snapshot with the
+// new browser tool definitions.
+func (m *Manager) SetBrowserManager(manager *browser.Manager) {
+	if m == nil {
+		return
+	}
+	type runtimeBinding struct {
+		id  string
+		reg *tools.Registry
+	}
+	m.mu.RLock()
+	bindings := make([]runtimeBinding, 0, len(m.sessions)+1)
+	if m.tools != nil {
+		bindings = append(bindings, runtimeBinding{reg: m.tools})
+	}
+	for id, rt := range m.sessions {
+		if rt == nil || rt.orch == nil {
+			continue
+		}
+		if reg := rt.orch.ToolRegistry(); reg != nil {
+			bindings = append(bindings, runtimeBinding{id: id, reg: reg})
+		}
+	}
+	m.mu.RUnlock()
+
+	seen := make(map[*tools.Registry]struct{}, len(bindings))
+	for _, binding := range bindings {
+		if binding.reg == nil {
+			continue
+		}
+		if _, ok := seen[binding.reg]; ok {
+			continue
+		}
+		seen[binding.reg] = struct{}{}
+		binding.reg.SetBrowserManager(manager)
+	}
+	for _, binding := range bindings {
+		if binding.id == "" {
+			continue
+		}
+		m.mu.RLock()
+		rt := m.sessions[binding.id]
+		m.mu.RUnlock()
+		if rt != nil && rt.orch != nil {
+			rt.orch.RequestModelContextRefresh(binding.id, "browser_runtime_changed")
+		}
 	}
 }
 

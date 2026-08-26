@@ -2,7 +2,7 @@
 
 **状态（2026-06）**：**已落地**（Go Node `tool.before_each` / `tool.after_each`）。  
 **前置条件**：`write_file` / `search_replace` 策略须为 **`rule`**；`always` 为强制全审，信任链不生效。
-**专题边界**：降低 **HITL 审批摩擦**，**不**减少 tool 结果写入 history 的体积（后者见 [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) WS3）。
+**专题边界**：降低 **HITL 审批摩擦**，**不**减少 tool 结果写入 history 的体积（后者见历史实验 [tool-context-cost-analysis.md](../archive/experiments/tool-context-cost-analysis.md) WS3）。
 
 ---
 
@@ -20,7 +20,7 @@
 
 - path 级 HITL 策略配置 UI
 - 将 `write_file` 全局改为 `never`
-- 与 [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §3.2.2 的 **read 去重 / short_circuit**（已否决）
+- 与历史 [tool-context-cost-analysis.md](../archive/experiments/tool-context-cost-analysis.md) §3.2.2 的 **read 去重 / short_circuit**（已否决）
 
 ---
 
@@ -119,7 +119,7 @@ hooks:
 
 | 文档 | 关系 |
 |------|------|
-| [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | 正交：管 history token，不管 HITL 次数 |
+| [tool-context-cost-analysis.md](../archive/experiments/tool-context-cost-analysis.md) | 正交：管 history token，不管 HITL 次数 |
 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | 同 `tool.before_each` 链；duplicate 仅 `rule`+auto，且跳过写工具 |
 | [handbook/04-能力与策略.md](../handbook/04-能力与策略.md) | 写盘与工具策略 |
 

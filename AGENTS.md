@@ -20,7 +20,7 @@ This is a polyglot monorepo (Go Agent Node + Go/Python clients + Vue Web UI + op
 - **Process lock:** Node creates `packaging/agent-client/.dagents-node-*.lock`. If a restart fails with “another instance is already running”, remove the stale lock after confirming no live `dagents-node` process.
 - **Python:** use `python3` (no `python` alias in this environment). Prefer `python3 run_manage.py` / `python3 -m unittest …` over bare `uvicorn` CLI (`~/.local/bin` may be missing from `PATH`).
 - **Mock LLM echoes** the user text as the assistant reply. Real DeepSeek returns original answers — do not treat identical text as a UI failure when `mock: true`.
-- **Workgroup（v0.9.1 预览）**：需 Manage + Node `manage.workgroup`；成员默认工具仅 fs（bash 需勾选）。说明见 [docs/handbook/07-Workgroup协作.md](docs/handbook/07-Workgroup协作.md)；验收 [docs/design/v0.9.1-smoke-checklist.md](docs/design/v0.9.1-smoke-checklist.md)。
+- **Workgroup（v0.10.4）**：需 Manage + Node `manage.workgroup`；成员使用 Node 已注册的 AgentRef，工具权限仍由 Agent 快照与 Node policy 共同约束。操作说明见 [docs/user/workgroups.md](docs/user/workgroups.md)，回归入口见 [docs/development.md](docs/development.md)。
 - **Windows 无 bash 时**：`npm run build --prefix node/webui/frontend` 与 `npm run build --prefix manage/console/frontend` 等价于 `build.sh`。
 
 ### Lint / test / run (pointers)

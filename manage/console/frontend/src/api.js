@@ -340,11 +340,11 @@ export async function listWorkgroupHITL(workgroupId, pendingOnly = true) {
   });
 }
 
-export async function resolveWorkgroupHITL(workgroupId, hitlId, answer) {
+export async function resolveWorkgroupHITL(workgroupId, hitlId, answer, resolution = null) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
     {},
-    { method: "POST", body: { answer, resolution: { answer } } },
+    { method: "POST", body: { answer, resolution: resolution || { answer } } },
   );
 }
 

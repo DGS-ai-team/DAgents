@@ -6,4 +6,4 @@
 > CI 产物：`dist/dagents-shell-legacy.exe`（`scripts/ci/build_dagents_shell.sh`）  
 > 安装时写入 `bin\dagents-shell.exe`（与 Tauri 轨互斥二选一）
 
-功能与菜单说明见历史实现与 [`docs/design/windows-desktop-shell.md`](../../docs/design/windows-desktop-shell.md)。
+功能与菜单说明见历史实现与 [`docs/archive/design/windows-desktop-shell.md`](../../docs/archive/design/windows-desktop-shell.md)。

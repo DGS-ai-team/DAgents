@@ -17,7 +17,7 @@
 | `LoadedSkills` / `ListSessionSkills` / `LoadSessionSkill` / `UnloadSessionSkill` | skills 读写 |
 | `ClearContext` / `Delete` / `Release` | 清空消息、删除 session，或卸内存保留 DB（F-NM1） |
 | `EnqueueMessage` | user / resume / 高优先级消息入队 |
-| `RunInboxTurn` | A2A inbox：单步 turn（首条 message 或 HITL resume） |
+| `RunInboxTurn` | 历史 A2A inbox 兼容入口；新跨机协作不使用，改走 Workgroup Session |
 | `EnqueueAsyncToolResult` / `EnqueueToolResult` | 工具续跑与异步回灌 |
 | `CancelTurn` | 取消当前 turn 上下文 |
 | `attachUserChildTools` | 父 runtime 上 `SetChildAgentManager(mgr)` |

@@ -702,12 +702,12 @@ export function createWorkgroupHITL(workgroupId, prompt) {
   });
 }
 
-export function resolveWorkgroupHITL(workgroupId, hitlId, answer) {
+export function resolveWorkgroupHITL(workgroupId, hitlId, answer, resolution = null) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
     {
       method: "POST",
-      body: { answer, resolution: { answer } },
+      body: { answer, resolution: resolution || { answer } },
     },
   );
 }

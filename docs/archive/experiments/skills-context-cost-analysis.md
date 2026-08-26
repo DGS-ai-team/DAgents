@@ -2,7 +2,7 @@
 
 > **状态**：**搁置** — 不改动 skills 现网机制（成本评估见本文 §4、§9）。  
 > 分支：`feat/tool-context-cost-optimization`  
-> 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md)
+> 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[handbook/附录/重大设计变更实录.md](../../handbook/附录/重大设计变更实录.md)
 
 > **现网注记（2026-08-20）**：本文保留历史分析口径；现网已将可用 skills 目录从
 > `load_skills` 工具描述移到启用 `skills` 工具组时的 system prompt 尾部，并按 Agent
@@ -13,7 +13,7 @@
 > system prompt，而是在激活时作为 `name=skill` 的独立 durable context message 写入
 > history；出站请求只保留当前激活版本。本文 §1～§4 对“Loaded 正文位于 system prompt”
 > 的成本数字仍可用于解释旧版本基线，不代表当前实现；当前消息来源与持久化边界以
-> [`non-user-user-message-injection-audit-2026-08-23.md`](./non-user-user-message-injection-audit-2026-08-23.md) 为准。
+> [`non-user-user-message-injection-audit-2026-08-23.md`](../reports/non-user-user-message-injection-audit-2026-08-23.md) 为准。
 
 ---
 
@@ -332,7 +332,7 @@ POST /chat/completions
 |------|------|
 | 生产期 catalog 与版本绑定，变更可预期 | 依赖 Manage；本地 `.runtime/skills` 仍要 A |
 
-面向远期 [manage-architecture.md](./manage-architecture.md)；本地 Node **先做 A**。
+面向远期 [manage-architecture.md](../../design/manage-architecture.md)；本地 Node **先做 A**。
 
 ---
 
@@ -358,7 +358,7 @@ POST /chat/completions
 
 - 取消 `load_skills` 步或合并进 read_file（破坏产品语义）；
 - 把 SKILL 正文塞回 tools schema；
-- 用 `pathEncCache` 或审批信任表缓存 catalog（语义正交，见 [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)）。
+- 用 `pathEncCache` 或审批信任表缓存 catalog（语义正交，见 [ux-agent-owned-file-approval.md](../../design/ux-agent-owned-file-approval.md)）。
 
 ### 7.3 验收标准
 

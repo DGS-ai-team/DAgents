@@ -2,7 +2,7 @@
 
 **状态（2026-07）**：**v0.6.1 已发布**（`show_image` + Media API）。  
 **范围**：Agent Node 将工具截图、读图结果、用户上传图等 **展示到 Web UI**（含 SSE 实时与 Hydrate 回放）。  
-**读者**：Node / Web UI 实现；与 [browser-remote-service-mode-a.md](./browser-remote-service-mode-a.md)、[windows-desktop-shell.md](./windows-desktop-shell.md) §3.9 Hydrate 配套。
+**读者**：Node / Web UI 实现；与现行 [browser-remote-service-mode-a.md](../../design/browser-remote-service-mode-a.md) 配套。本文为旧版本媒体方案。
 
 ---
 
@@ -139,7 +139,7 @@ Web UI
     → Node 读 rel_path → stream bytes（Content-Type / Cache-Control）
 ```
 
-与 [windows-desktop-shell.md](./windows-desktop-shell.md) D24 一致：**窄 HTTP GET**，不走 Shell 代理。
+与旧 Shell 设计 D24 一致：**窄 HTTP GET**，不走 Shell 代理。
 
 ---
 
@@ -307,7 +307,7 @@ read_image / browser 截图
 | `utils/showImage.js`（新） | `isShowImageTool(name)`，与 `readFilePreview.js` 并列 |
 | `utils/media.js` | `fetchMediaBlob(sessionId, item)` + object URL |
 
-参照已有 [`ReadFileResultPreview.vue`](../../node/webui/frontend/src/components/ReadFileResultPreview.vue) 模式：**工具特化预览**，而非改全局 transcript 形态。
+参照已有 [`ReadFileResultPreview.vue`](../../../node/webui/frontend/src/components/ReadFileResultPreview.vue) 模式：**工具特化预览**，而非改全局 transcript 形态。
 
 ### 6.2 Client 解析规则（正式）
 
@@ -356,7 +356,7 @@ read_image / browser 截图
 
 ### 版本归属
 
-见 **[v0.6-v0.7-roadmap.md](./v0.6-v0.7-roadmap.md)**：
+见当前 [docs/roadmap.md](../../roadmap.md)；下表中的版本归属仅保留历史信息：
 
 | 版本 | F-M* |
 |------|------|
@@ -386,8 +386,8 @@ read_image / browser 截图
 | SSE tool_result | `node/internal/turn/sse_publish.go` |
 | Web 工具气泡 | `node/webui/frontend/src/components/ToolExecBubble.vue` |
 | 用户多模态 | `node/webui/frontend/src/components/MainChatPanel.vue` |
-| Hydrate 设计 | [windows-desktop-shell.md](./windows-desktop-shell.md) §3.9 |
-| **v0.6–v0.7 总路线图** | [v0.6-v0.7-roadmap.md](./v0.6-v0.7-roadmap.md) |
+| Hydrate 设计 | 当前实现见 `node/internal/session/` 与 `node/internal/turn/` |
+| 当前路线图 | [docs/roadmap.md](../../roadmap.md) |
 
 ---
 

@@ -1877,7 +1877,7 @@ class WorkGroupStore:
         self,
         hitl_id: str,
         *,
-        timeout_s: float = 300.0,
+        timeout_s: float = 10 * 60.0,
     ) -> HITLRequest:
         """阻塞直到 HITL 被 resolve（或超时）。供 Leader ask_workgroup_user 使用。"""
         hid = (hitl_id or "").strip()

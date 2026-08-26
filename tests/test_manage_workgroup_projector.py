@@ -47,6 +47,27 @@ class ProjectorFixtureTests(unittest.TestCase):
         for forbidden in fix["then"]["forbidden_tool_message_names"]:
             self.assertNotEqual(tool_msg["name"], forbidden)
 
+    def test_retired_member_tool_allowlist_is_removed_from_provider_history(self) -> None:
+        msgs = to_provider_messages(
+            [
+                {
+                    "role": "tool",
+                    "name": "list_workgroup_members",
+                    "tool_call_id": "call-list",
+                    "content": json.dumps(
+                        {
+                            "members": [
+                                {"member_id": "m1", "tool_allow_names": ["bash_run"]},
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ]
+        )
+        self.assertNotIn("tool_allow_names", msgs[0]["content"])
+        self.assertIn("member_id", msgs[0]["content"])
+
     def test_parallel_tool_calls_must_pair_all(self) -> None:
         fix = _load("parallel_tool_calls_must_pair_all.json")
         given = fix["given"]

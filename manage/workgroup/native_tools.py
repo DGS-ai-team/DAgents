@@ -19,6 +19,7 @@ _ASSIGN_TOOL_SCHEMA = (
     / "schemas"
     / "assign_workgroup_task.openai.json"
 )
+_DEFAULT_HITL_TIMEOUT_S = 10 * 60.0
 
 
 def load_assign_workgroup_task_tool() -> dict[str, Any]:
@@ -36,9 +37,8 @@ def leader_native_tools() -> list[dict[str, Any]]:
                 "name": "list_workgroup_members",
                 "description": (
                     "List members with short description, status, home node host_ips "
-                    "(semicolon-separated LAN IPs, no port), and tool allowlist "
-                    "(workspace fs/bash tools when enabled; use this to answer capability questions; "
-                    "do not assign a fake probe task)."
+                    "(semicolon-separated LAN IPs, no port); use this to answer member "
+                    "availability and environment questions; do not assign a fake probe task."
                 ),
                 "parameters": {
                     "type": "object",
@@ -158,7 +158,6 @@ class NativeToolDispatcher:
             members = self.store.list_members(workgroup_id)
             payload = []
             for m in members:
-                ctx = self.store.member_execution_context(m.member_id)
                 spec = self.store.get_spec(m.member_id)
                 description = (spec.description if spec is not None else "") or ""
                 payload.append(
@@ -169,7 +168,6 @@ class NativeToolDispatcher:
                         "status": m.status,
                         "home_node_id": m.home_node_id,
                         "host_ips": self._host_ips_for_node(m.home_node_id),
-                        "tool_allow_names": list(ctx.get("tool_allow_names") or []),
                         "workspace_root_kind": "member_workspace",
                         "read_file_path_rule": "relative_to_member_workspace_only",
                     }
@@ -198,7 +196,7 @@ class NativeToolDispatcher:
         )
         if self.on_hitl_created is not None:
             self.on_hitl_created(hitl)
-        resolved = self.store.wait_hitl_resolved(hitl.hitl_id, timeout_s=300.0)
+        resolved = self.store.wait_hitl_resolved(hitl.hitl_id, timeout_s=_DEFAULT_HITL_TIMEOUT_S)
         if self.on_hitl_resolved is not None:
             self.on_hitl_resolved(resolved)
         return format_hitl_resolution(resolved)

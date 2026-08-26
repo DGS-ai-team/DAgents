@@ -9,7 +9,9 @@ import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
 import ScrollToTailButton from "../components/ScrollToTailButton.vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
+import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../utils/format.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
+import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import { markWorkgroupRead, noteWorkgroupTimeline } from "../stores/unread.js";
 
@@ -78,6 +80,13 @@ let streamAbort = null;
 const pendingHitl = ref([]);
 const hitlBusy = ref(false);
 const hitlDraft = ref("");
+const pendingHitlRefresh = createSerializedRefresh(
+  () => api.listWorkgroupHITL(workgroupId.value, true),
+  (res) => {
+    const list = Array.isArray(res) ? res : res?.hitl || [];
+    pendingHitl.value = Array.isArray(list) ? list : [];
+  },
+);
 
 /** RunHistory 调试面板（mock / LLM 可观测） */
 const debugOpen = ref(false);
@@ -111,14 +120,49 @@ let timelineReqSeq = 0;
 let pollInFlight = false;
 let workgroupEventSource = null;
 let workgroupEventSeq = 0;
+const cancelledRealtimeMessageIds = new Set();
 
 const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
 const hitlMode = computed(() => Boolean(activeHitl.value));
+const memberApprovalByAssign = computed(() => {
+  const out = {};
+  for (const hitl of pendingHitl.value || []) {
+    const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
+    const source = String(metadata.source || hitl?.source || "").trim();
+    const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
+    const items = workgroupApprovalItemsFromMetadata(metadata);
+    // 新记录带 source=agent_ref；兼容早期 Manage 记录时，以 assign_id
+    // 和 execute_tool items 作为成员审批的稳定判据。
+    if (!assignId || (source !== "agent_ref" && items.length === 0)) continue;
+    // A reconnect or a slow resolve can briefly expose more than one pending
+    // projection for the same assignment.  The newest request is the only
+    // actionable approval; rendering all of them makes each later tool show
+    // every earlier approval again.
+    const current = out[assignId];
+    const currentAt = String(current?.created_at || "");
+    const nextAt = String(hitl?.created_at || "");
+    if (!current || nextAt > currentAt || (nextAt === currentAt && String(hitl?.hitl_id || "") > String(current?.hitl_id || ""))) {
+      out[assignId] = hitl;
+    }
+  }
+  return out;
+});
+const supervisorHitl = computed(() => {
+  const hitl = activeHitl.value;
+  const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
+  const source = String(metadata.source || hitl?.source || "").trim();
+  const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
+  const hasMemberApprovalItems = workgroupApprovalItemsFromMetadata(metadata).length > 0;
+  return hitl && source !== "agent_ref" && !(assignId && hasMemberApprovalItems) ? hitl : null;
+});
 // Assigned member content is already represented by the task card. Keep the
 // live bubble for Supervisor and direct @member turns, where it is the actual
 // conversational reply.
 const showLiveAssistant = computed(
-  () => Boolean(liveAssistant.value) && streamMode.value !== "member",
+  () =>
+    Boolean(liveAssistant.value) &&
+    Boolean(String(liveAssistant.value?.text || "").trim()) &&
+    streamMode.value !== "member",
 );
 const debugLlmBadge = computed(() => {
   const mode = String(debugLlm.value?.mode || "").trim();
@@ -204,13 +248,7 @@ async function loadPendingHitl() {
     pendingHitl.value = [];
     return;
   }
-  try {
-    const res = await api.listWorkgroupHITL(workgroupId.value, true);
-    const list = Array.isArray(res) ? res : res?.hitl || [];
-    pendingHitl.value = Array.isArray(list) ? list : [];
-  } catch {
-    /* 轮询期忽略 */
-  }
+  await pendingHitlRefresh.refresh();
 }
 
 async function submitHitlAnswer() {
@@ -235,6 +273,49 @@ async function submitHitlAnswer() {
   }
 }
 
+async function resolveMemberApproval(approval, callId, approve) {
+  const hitlId = String(approval?.hitlId || "").trim();
+  if (!hitlId || !workgroupId.value || hitlBusy.value) return;
+  const allIds = (approval?.allItems || approval?.items || [])
+    .map((item) => String(item?.callId || "").trim())
+    .filter(Boolean);
+  const selectedId = String(callId || "").trim();
+  const approved = selectedId
+    ? approve
+      ? [selectedId]
+      : []
+    : approve
+      ? allIds
+      : [];
+  const rejected = selectedId
+    ? approve
+      ? allIds.filter((id) => id !== selectedId)
+      : allIds
+    : approve
+      ? []
+      : allIds;
+  hitlBusy.value = true;
+  error.value = "";
+  try {
+    await api.resolveWorkgroupHITL(
+      workgroupId.value,
+      hitlId,
+      approve ? "approve" : "reject",
+      { type: "selection", approved, rejected },
+    );
+    await loadPendingHitl();
+    await loadTimeline();
+  } catch (e) {
+    if (/already_resolved|409/.test(String(e?.message || ""))) {
+      await loadPendingHitl();
+    } else {
+      error.value = e?.message || "提交审批结果失败";
+    }
+  } finally {
+    hitlBusy.value = false;
+  }
+}
+
 function newClientMessageId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -251,6 +332,19 @@ function clearLive() {
   streamMode.value = "";
   streamActorId.value = "";
   statusWatermarkSeq.value = 0;
+}
+
+function rememberCancelledMessageIds(...ids) {
+  for (const id of ids) {
+    const value = String(id || "").trim();
+    if (!value) continue;
+    cancelledRealtimeMessageIds.add(value);
+  }
+  while (cancelledRealtimeMessageIds.size > 64) {
+    const oldest = cancelledRealtimeMessageIds.values().next().value;
+    if (!oldest) break;
+    cancelledRealtimeMessageIds.delete(oldest);
+  }
 }
 
 const memberNameById = computed(() => {
@@ -347,6 +441,12 @@ function applyTimelineEvent(event) {
   const seq = Number(event?.seq || 0);
   noteWorkgroupTimeline(workgroupId.value, seq);
   markWorkgroupRead(workgroupId.value, seq);
+  if (event.type === "assign_started" || event.type === "assign_finished") {
+    // Member occupancy is durable state owned by Manage. Reconcile it from
+    // the authoritative assignment event instead of leaving the sidebar in
+    // `busy` until a full page reload.
+    void loadMembers();
+  }
   if (
     !sending.value &&
     remoteSending.value &&
@@ -364,6 +464,7 @@ function applyRemoteRealtime(payload) {
     clientMessageId || remoteClientMessageId.value || `remote-${workgroupId.value}`;
   const eventType = String(payload.event_type || "");
   const data = payload.data && typeof payload.data === "object" ? payload.data : {};
+  if (cancelledRealtimeMessageIds.has(liveMessageId)) return;
   // The originating Node already receives leader/direct frames through POST
   // streaming. Member frames are emitted from the nested member run, so keep
   // those SSE frames to make the local view identical to other subscribers.
@@ -872,6 +973,7 @@ async function send() {
       {
         signal: streamAbort.signal,
         onEvent: async (eventName, data) => {
+          if (cancelledRealtimeMessageIds.has(clientMessageId)) return;
           if (eventName === "queued") {
             becameQueued = true;
             applyQueuePayload(data);
@@ -982,9 +1084,12 @@ function pickMention(member) {
 }
 
 async function cancelTurn() {
-  if (!workgroupId.value || !sending.value || cancelling.value) return;
+  // A pending HITL may be restored after a page reload, when `sending` is
+  // false even though the workgroup turn is still awaiting a decision.
+  if (!workgroupId.value || (!sending.value && !hitlMode.value) || cancelling.value) return;
   cancelling.value = true;
   try {
+    rememberCancelledMessageIds(localClientMessageId.value, remoteClientMessageId.value);
     await api.cancelWorkgroupTurn(workgroupId.value);
     if (streamAbort) {
       try {
@@ -993,7 +1098,13 @@ async function cancelTurn() {
         /* ignore */
       }
     }
-    await loadTimeline();
+    sending.value = false;
+    clearLive();
+    await Promise.all([
+      loadTimeline(),
+      loadPendingHitl(),
+      loadMembers(),
+    ]);
   } catch (e) {
     error.value = e?.message || "取消失败";
   } finally {
@@ -1210,6 +1321,7 @@ function buildAssignIndex(list) {
   const memberFinalByAssign = {};
   const assistantContentByAssign = {};
   const noticeIndexByEventId = {};
+  const toolEventsByAssign = {};
   for (const ev of list || []) {
     const t = String(ev?.type || "");
     const aid = String(ev?.assign_id || "").trim();
@@ -1231,6 +1343,9 @@ function buildAssignIndex(list) {
     } else if (t === "assistant_content") {
       if (!assistantContentByAssign[aid]) assistantContentByAssign[aid] = [];
       assistantContentByAssign[aid].push(ev);
+    } else if (t === "tool_started" || t === "tool_finished") {
+      if (!toolEventsByAssign[aid]) toolEventsByAssign[aid] = [];
+      toolEventsByAssign[aid].push(ev);
     }
   }
   return {
@@ -1242,6 +1357,7 @@ function buildAssignIndex(list) {
     memberFinalByAssign,
     assistantContentByAssign,
     noticeIndexByEventId,
+    toolEventsByAssign,
   };
 }
 
@@ -1274,8 +1390,8 @@ function taskDetailsId(item) {
   return `wg-task-details-${key}`;
 }
 
-function parseNoticeTool(text) {
-  const raw = String(text || "").trim();
+function parseNoticeTool(text, fallbackToolName = "") {
+  const raw = String(text || "").trim() || String(fallbackToolName || "").trim();
   if (!raw) return { toolName: "tool", summary: "执行成员工具" };
   const parts = raw.split(/\s*·\s*/);
   const toolName = String(parts[0] || "tool").trim() || "tool";
@@ -1308,6 +1424,15 @@ function parseNoticeTool(text) {
   };
 }
 
+function toolEventMatches(left, right) {
+  const leftCall = String(left?.tool_call_id || "").trim();
+  const rightCall = String(right?.tool_call_id || "").trim();
+  if (leftCall || rightCall) return Boolean(leftCall && rightCall && leftCall === rightCall);
+  const leftCommand = String(left?.command_id || "").trim();
+  const rightCommand = String(right?.command_id || "").trim();
+  return Boolean(leftCommand && rightCommand && leftCommand === rightCommand);
+}
+
 function toolKindLabel(toolName) {
   const kind = inferToolKind(toolName);
   if (kind === "fs") return "fs";
@@ -1318,8 +1443,97 @@ function toolKindLabel(toolName) {
   return "tool";
 }
 
-function makeAssignItem(started, finished, notices, isDirect, memberFinal, assistantContents = []) {
+function workgroupApprovalItemsFromMetadata(metadata) {
+  const value = metadata && typeof metadata === "object" ? metadata : {};
+  const approvalArgs =
+    value.approval_args && typeof value.approval_args === "object"
+      ? value.approval_args
+      : {};
+  const raw = value.items || approvalArgs.tool_calls || [];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item) => !item?.hitl_type || item.hitl_type === "execute_tool");
+}
+
+function workgroupApprovalItems(hitl) {
+  const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
+  const approvalArgs =
+    metadata.approval_args && typeof metadata.approval_args === "object"
+      ? metadata.approval_args
+      : {};
+  const raw = metadata.items || approvalArgs.tool_calls || hitl?.items || [];
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  return raw
+    .filter((item) => !item?.hitl_type || item.hitl_type === "execute_tool")
+    .map((item) => ({
+      callId: String(item?.id || item?.tool_call_id || "").trim(),
+      name: String(item?.name || item?.tool_name || "").trim() || "unknown",
+      arguments: item?.arguments && typeof item.arguments === "object" ? item.arguments : {},
+      rawArgs: String(item?.raw_arguments || ""),
+      reason: String(item?.approval_reason || "").trim(),
+      risk: String(item?.risk_level || "").trim().toLowerCase(),
+      duplicateWindowSec: Number(
+        item?.duplicate_meta?.window_seconds || item?.duplicate_meta?.window_sec || 0,
+      ) || 0,
+      duplicatePreview: String(item?.duplicate_meta?.result_preview || "").trim(),
+    }))
+    .filter((item) => item.callId)
+    .filter((item) => {
+      if (seen.has(item.callId)) return false;
+      seen.add(item.callId);
+      return true;
+    });
+}
+
+function approvalForTool(assignId, toolCallId, toolName = "", allowNameFallback = false) {
+  const hitl = memberApprovalByAssign.value[String(assignId || "").trim()] || null;
+  if (!hitl) return null;
+  const callId = String(toolCallId || "").trim();
+  const name = String(toolName || "").trim();
+  const items = workgroupApprovalItems(hitl);
+  const item =
+    items.find((entry) => callId && entry.callId === callId) ||
+    (allowNameFallback ? items.find((entry) => name && entry.name === name) : null);
+  if (!item) return null;
+  return {
+    hitlId: String(hitl.hitl_id || hitl.id || ""),
+    items: [item],
+    allItems: items,
+  };
+}
+
+function approvalCount(approval) {
+  const all = Array.isArray(approval?.allItems) ? approval.allItems : [];
+  if (all.length) return all.length;
+  return Array.isArray(approval?.items) ? approval.items.length : 0;
+}
+
+function approvalIsBatch(approval) {
+  return approvalCount(approval) > 1;
+}
+
+function approvalRejectLabel(approval) {
+  return approvalIsBatch(approval) ? "拒绝本批" : "拒绝";
+}
+
+function approvalApproveLabel(approval) {
+  if (hitlBusy.value) return "处理中…";
+  return approvalIsBatch(approval) ? "仅批准此项" : "批准";
+}
+
+function makeAssignItem(
+  started,
+  finished,
+  notices,
+  isDirect,
+  memberFinal,
+  assistantContents = [],
+  toolEvents = [],
+) {
   const noticeList = Array.isArray(notices) ? notices : notices ? [notices] : [];
+  const structuredEvents = Array.isArray(toolEvents) ? toolEvents : [];
+  const structuredStarts = structuredEvents.filter((ev) => String(ev?.type || "") === "tool_started");
+  const structuredFinishes = structuredEvents.filter((ev) => String(ev?.type || "") === "tool_finished");
   const lastNotice = noticeList.length ? noticeList[noticeList.length - 1] : null;
   const noticeText = lastNotice ? String(lastNotice.text || "").trim() : "";
   const parsed = parseAssignStartedText(started?.text || "");
@@ -1340,22 +1554,65 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal, assis
     reportActorLabel ||
     "";
   const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
+  const structuredSteps = structuredStarts.map((ev, idx) => {
+    const toolCallId = String(ev?.tool_call_id || "").trim();
+    const commandId = String(ev?.command_id || "").trim();
+    const toolFinished = structuredFinishes.find((item) => {
+      const sameCall = toolCallId && String(item?.tool_call_id || "").trim() === toolCallId;
+      const sameCommand = commandId && String(item?.command_id || "").trim() === commandId;
+      return sameCall || sameCommand;
+    });
+    const toolName = String(ev?.tool_name || "").trim() || "tool";
+    const status = String(toolFinished?.status || "").toLowerCase();
+    const failedStep = ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(status);
+    const done = Boolean(toolFinished) || Boolean(finished);
+    return {
+      key: ev.event_id || `tool-${ev.seq || idx}`,
+      kind: "tool",
+      assignId,
+      toolCallId,
+      commandId,
+      toolName,
+      toolKind: toolKindLabel(toolName),
+      summary: parseNoticeTool("", toolName).summary,
+      statusText: !done ? "执行中" : failedStep ? "已中断" : "已完成",
+      done,
+      failed: failedStep,
+      inProgress: !done,
+    };
+  });
   const contentList = Array.isArray(assistantContents) ? assistantContents : [];
   const activity = [
     ...contentList.map((ev) => ({ kind: "content", ev })),
-    ...noticeList.map((ev) => ({ kind: "tool", ev })),
+    ...(structuredStarts.length
+      ? structuredStarts.map((ev) => ({ kind: "tool", ev }))
+      : noticeList.map((ev) => ({ kind: "tool", ev }))),
   ].sort((a, b) => Number(a.ev?.seq || 0) - Number(b.ev?.seq || 0));
+  const stepByKey = new Map(structuredSteps.map((step) => [step.key, step]));
   const lastToolIndex = activity.reduce(
     (last, entry, index) => (entry.kind === "tool" ? index : last),
     -1,
   );
-  const steps = activity.flatMap((entry, idx) => {
+  const baseSteps = activity.flatMap((entry, idx) => {
     const ev = entry.ev;
     if (entry.kind === "content") {
       return [{
         key: ev.event_id || `content-${ev.seq || idx}`,
         kind: "content",
         text: String(ev.text || ""),
+      }];
+    }
+    if (structuredStarts.length) {
+      return [stepByKey.get(ev.event_id) || {
+        key: ev.event_id || `tool-${ev.seq || idx}`,
+        kind: "tool",
+        toolName: String(ev?.tool_name || "tool"),
+        toolKind: toolKindLabel(ev?.tool_name),
+        summary: parseNoticeTool("", ev?.tool_name).summary,
+        statusText: finished ? "已完成" : "执行中",
+        done: Boolean(finished),
+        failed: false,
+        inProgress: !finished,
       }];
     }
     const p = parseNoticeTool(ev?.text);
@@ -1373,6 +1630,114 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal, assis
       inProgress: !done,
     };
   });
+  const approvalHitl = memberApprovalByAssign.value[assignId] || null;
+  const approvalItems = workgroupApprovalItems(approvalHitl);
+  const approvalByCall = new Map(approvalItems.map((item) => [item.callId, item]));
+  const assignedApprovalByStep = new Map();
+  const matchedApprovalIds = new Set();
+  // Prefer the protocol call id.  This is the only unambiguous association.
+  for (const step of baseSteps) {
+    if (step.kind !== "tool" || !step.toolCallId) continue;
+    const item = approvalByCall.get(step.toolCallId);
+    if (item) {
+      assignedApprovalByStep.set(step.key, item);
+      matchedApprovalIds.add(item.callId);
+    }
+  }
+  // Older timelines may not have tool_call_id on tool_started.  In that case
+  // associate a name match with the newest unmatched step only.  The previous
+  // implementation matched the same approval to every same-named step, which
+  // produced 1, then 2, then 3 approval cards as the turn progressed.
+  for (let i = baseSteps.length - 1; i >= 0; i -= 1) {
+    const step = baseSteps[i];
+    if (
+      step.kind !== "tool" ||
+      step.toolCallId ||
+      assignedApprovalByStep.has(step.key)
+    ) continue;
+    const item = approvalItems.find(
+      (entry) => !matchedApprovalIds.has(entry.callId) && entry.name === step.toolName,
+    );
+    if (!item) continue;
+    assignedApprovalByStep.set(step.key, item);
+    matchedApprovalIds.add(item.callId);
+  }
+  let steps;
+  if (approvalItems.length > 1 && approvalHitl) {
+    // A batch is one approval interaction.  Keep it as one card with all
+    // calls, anchored to the first matching tool step, instead of rendering
+    // one card per step and making the batch appear cumulative.
+    const anchorKey = baseSteps.find((step) => assignedApprovalByStep.has(step.key))?.key || "";
+    steps = baseSteps.map((step) => {
+      if (step.key !== anchorKey) return step;
+      return {
+        ...step,
+        summary: `批量审批 · ${approvalItems.length} 个工具调用`,
+        statusText: "等待确认",
+        done: false,
+        inProgress: false,
+        approval: {
+          hitlId: String(approvalHitl.hitl_id || approvalHitl.id || ""),
+          items: approvalItems,
+          allItems: approvalItems,
+        },
+      };
+    });
+    if (!anchorKey) {
+      steps.push({
+        key: `approval-${approvalHitl.hitl_id}`,
+        kind: "tool",
+        toolCallId: "",
+        toolName: "tool",
+        toolKind: "tool",
+        summary: `批量审批 · ${approvalItems.length} 个工具调用`,
+        statusText: "等待确认",
+        done: false,
+        failed: false,
+        inProgress: false,
+        approval: {
+          hitlId: String(approvalHitl.hitl_id || ""),
+          items: approvalItems,
+          allItems: approvalItems,
+        },
+      });
+    }
+  } else {
+    steps = baseSteps.map((step) => {
+      const item = assignedApprovalByStep.get(step.key);
+      if (!item || !approvalHitl) return step;
+      return {
+        ...step,
+        summary: approvalItemDisplayName(item),
+        approval: {
+          hitlId: String(approvalHitl.hitl_id || approvalHitl.id || ""),
+          items: [item],
+          allItems: approvalItems,
+        },
+      };
+    });
+    const remainingApprovalItems = approvalItems.filter((item) => !matchedApprovalIds.has(item.callId));
+    if (approvalHitl && remainingApprovalItems.length) {
+      const item = remainingApprovalItems[0];
+      steps.push({
+      key: `approval-${approvalHitl.hitl_id}`,
+      kind: "tool",
+      toolCallId: item?.callId || "",
+      toolName: item?.name || "tool",
+      toolKind: toolKindLabel(item?.name || "tool"),
+      summary: approvalItemDisplayName(item),
+      statusText: "等待确认",
+      done: false,
+      failed: false,
+      inProgress: false,
+      approval: {
+        hitlId: String(approvalHitl.hitl_id || ""),
+        items: [item],
+        allItems: approvalItems,
+      },
+      });
+    }
+  }
   return {
     key: (started || finished)?.event_id || `assign-${(started || finished)?.seq}`,
     kind: "assign",
@@ -1398,19 +1763,37 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal, assis
   };
 }
 
-function makeDirectToolItem(ev, { assignFinished, isLast, failed }) {
-  const parsed = parseNoticeTool(ev?.text);
-  const done = Boolean(assignFinished) || !isLast;
+function makeDirectToolItem(ev, { assignFinished, isLast, failed, toolFinished = null }) {
+  const parsed = parseNoticeTool(ev?.text, ev?.tool_name);
+  const finishStatus = String(toolFinished?.status || "").toLowerCase();
+  const terminalToolResult = [
+    "succeeded",
+    "failed",
+    "rejected",
+    "indeterminate",
+    "canceled",
+    "cancelled",
+    "timed_out",
+  ].includes(finishStatus);
+  const done = Boolean(assignFinished) || terminalToolResult || (!toolFinished && !isLast);
+  const failedResult =
+    Boolean(failed) || ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(finishStatus);
+  const assignId = String(ev?.assign_id || "").trim();
+  const toolCallId = String(ev?.tool_call_id || "").trim();
+  const toolName = String(ev?.tool_name || "").trim();
   return {
     key: ev.event_id || `tool-${ev.seq}`,
     kind: "tool",
     toolName: parsed.toolName,
     toolKind: toolKindLabel(parsed.toolName),
     summary: parsed.summary,
-    statusText: !done ? "执行中" : failed ? "已中断" : "已完成",
+    statusText: !done ? "执行中" : failedResult ? "已中断" : "已完成",
     done,
-    failed: Boolean(failed && done && isLast),
+    failed: Boolean(failedResult && done),
     inProgress: !done,
+    assignId,
+    toolCallId,
+    approval: approvalForTool(assignId, toolCallId, toolName, isLast),
   };
 }
 
@@ -1470,6 +1853,10 @@ function renderItemToken(item) {
     lastStep?.statusText,
     lastStep?.inProgress ? 1 : 0,
     lastStep?.failed ? 1 : 0,
+    lastStep?.approval?.hitlId,
+    lastStep?.approval?.items?.length || 0,
+    item?.approval?.hitlId,
+    item?.approval?.items?.length || 0,
   ].join("|");
 }
 
@@ -1490,6 +1877,7 @@ const eventGroups = computed(() => {
     memberFinalByAssign,
     assistantContentByAssign,
     noticeIndexByEventId,
+    toolEventsByAssign,
   } = buildAssignIndex(list);
   const consumedFinished = new Set();
 
@@ -1518,6 +1906,7 @@ const eventGroups = computed(() => {
           false,
           memberFinal,
           aid ? assistantContentByAssign[aid] || [] : [],
+          aid ? toolEventsByAssign[aid] || [] : [],
         ),
       });
       continue;
@@ -1527,7 +1916,26 @@ const eventGroups = computed(() => {
       if (aid && startedByAssign[aid]) continue;
       if (aid && consumedFinished.has(aid)) continue;
       const isDirect = Boolean(aid && directAssignIds.has(aid));
-      if (isDirect) continue;
+      if (isDirect) {
+        // Direct turns normally render the persisted member final text. If a
+        // turn was canceled/failed before that text existed, keep a durable
+        // status row visible instead of dropping the whole task.
+        if (memberFinalByAssign[aid] || (toolEventsByAssign[aid] || []).length) continue;
+        flat.push({
+          role: "assistant",
+          actorId: String(ev?.actor_id || "").trim(),
+          label: eventLabel({ ...ev, type: "assign_finished" }),
+          item: makeDirectToolItem(
+            { ...ev, text: "tool", tool_name: "tool" },
+            {
+              assignFinished: true,
+              isLast: true,
+              failed: /失败|中断/.test(String(ev?.text || "")),
+            },
+          ),
+        });
+        continue;
+      }
       const actorId = String(ev?.actor_id || "leader").trim() || "leader";
       const notices = aid ? noticesByAssign[aid] || [] : [];
       const memberFinal = aid ? memberFinalByAssign[aid] || null : null;
@@ -1542,8 +1950,47 @@ const eventGroups = computed(() => {
           false,
           memberFinal,
           aid ? assistantContentByAssign[aid] || [] : [],
+          aid ? toolEventsByAssign[aid] || [] : [],
         ),
       });
+      continue;
+    }
+
+    if (t === "tool_started" || t === "tool_finished") {
+      const isDirect = Boolean(aid && directAssignIds.has(aid));
+      if (isDirect) {
+        const chain = toolEventsByAssign[aid] || [];
+        const starts = chain.filter((item) => item?.type === "tool_started");
+        const matchingStart = starts.find((item) => toolEventMatches(item, ev));
+        // A structured tool_finished closes the preceding tool_started; one
+        // row is enough for the user and avoids doubled start/finish entries.
+        if (t === "tool_finished" && matchingStart) continue;
+        const renderEvent = matchingStart || ev;
+        const index = starts.findIndex((item) => item?.event_id === renderEvent?.event_id);
+        const matchingFinish = chain.find(
+          (item) => item?.type === "tool_finished" && toolEventMatches(item, renderEvent),
+        );
+        const finished = finishedByAssign[aid] || null;
+        const failed = Boolean(
+          (finished && /失败|中断/.test(String(finished.text || ""))) ||
+            ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(
+              String(matchingFinish?.status || "").toLowerCase(),
+            ),
+        );
+        flat.push({
+          role: "assistant",
+          actorId: String(renderEvent?.actor_id || ev?.actor_id || "").trim(),
+          label: eventLabel({ ...renderEvent, type: "assign_started" }),
+          item: makeDirectToolItem(renderEvent, {
+            assignFinished: Boolean(finished),
+            isLast: index < 0 || index === starts.length - 1,
+            failed,
+            toolFinished: matchingFinish,
+          }),
+        });
+      }
+      // Structured tool events are represented by the direct tool row or the
+      // surrounding assign card; never leak raw tool_started/tool_finished.
       continue;
     }
 
@@ -1566,6 +2013,7 @@ const eventGroups = computed(() => {
       if (String(ev?.text || "").startsWith("已直达")) continue;
       const actorId = String(ev?.actor_id || "").trim();
       if (aid && directAssignIds.has(aid)) {
+        if ((toolEventsByAssign[aid] || []).length) continue;
         const chain = noticesByAssign[aid] || [];
         const idx = ev.event_id ? noticeIndexByEventId[ev.event_id] ?? -1 : -1;
         const isLast = idx < 0 || idx === chain.length - 1;
@@ -1592,17 +2040,8 @@ const eventGroups = computed(() => {
         });
         continue;
       }
-      flat.push({
-        role: "assistant",
-        actorId,
-        label: eventLabel(ev),
-        item: {
-          key: ev.event_id || `notice-${ev.seq}`,
-          kind: "progress",
-          ev,
-          text: String(ev?.text || ""),
-        },
-      });
+      // Transient member progress is rendered by the composer runtime rail;
+      // keeping it in the message stream duplicates the same status.
       continue;
     }
 
@@ -1754,6 +2193,20 @@ const liveStatusLabel = computed(() => {
   return "思考中…";
 });
 
+const composerRuntimeLabel = computed(() => {
+  if (hitlMode.value) {
+    const hitl = activeHitl.value;
+    const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
+    const source = String(metadata.source || hitl?.source || "").trim();
+    if (source === "agent_ref") return "等待工具审批…";
+    return hitlBusy.value ? "提交回答中…" : "等待你的回答…";
+  }
+  if (sending.value || remoteSending.value) {
+    return liveStatusLabel.value || "协作进行中…";
+  }
+  return "";
+});
+
 const toolbarTitle = computed(() => {
   const name = String(workgroupMeta.value?.display_name || "").trim();
   if (name) return name;
@@ -1824,6 +2277,7 @@ watch(
       }
       streamAbort = null;
     }
+    pendingHitlRefresh.reset();
     pendingHitl.value = [];
     hitlDraft.value = "";
     hitlBusy.value = false;
@@ -2118,6 +2572,99 @@ onUnmounted(() => {
                             v-html="renderMarkdown(step.text)"
                           />
                           <div
+                            v-else-if="step.kind === 'approval'"
+                            class="wg-task__approval"
+                          >
+                            <div class="wg-task__approval-head">
+                              <span class="wg-task__approval-badge">需要批准</span>
+                              <span class="wg-task__approval-count">
+                                {{ approvalIsBatch(step.approval) ? `批量审批 · ${approvalCount(step.approval)} 个工具调用` : "单项审批" }}
+                              </span>
+                            </div>
+                            <div
+                              v-for="approvalItem in step.approval?.items || []"
+                              :key="approvalItem.callId"
+                              class="wg-task__approval-item"
+                            >
+                              <div class="wg-task__approval-item-head">
+                                <span class="wg-task__approval-name">
+                                  {{ approvalItemDisplayName(approvalItem) }}
+                                </span>
+                                <span
+                                  v-if="approvalItem.risk === 'high' || approvalItem.risk === 'medium'"
+                                  class="wg-task__approval-risk"
+                                >
+                                  {{ approvalItem.risk === 'high' ? '高风险' : '中风险' }}
+                                </span>
+                              </div>
+                              <div v-if="approvalItem.reason" class="wg-task__approval-reason">
+                                {{ approvalItem.reason }}
+                              </div>
+                              <div
+                                v-if="approvalItem.duplicateWindowSec > 0"
+                                class="wg-task__approval-hint"
+                              >
+                                重复调用 · {{ approvalItem.duplicateWindowSec }}s 内
+                              </div>
+                              <details v-if="approvalItem.duplicatePreview" class="wg-task__approval-raw">
+                                <summary>上次结果摘要</summary>
+                                <pre>{{ approvalItem.duplicatePreview }}</pre>
+                              </details>
+                              <div
+                                v-if="approvalItemHintVisible(approvalItem)"
+                                class="wg-task__approval-hint"
+                              >
+                                {{ approvalItemHint(approvalItem) }}
+                              </div>
+                              <details v-if="approvalItem.rawArgs" class="wg-task__approval-raw">
+                                <summary>参数详情</summary>
+                                <pre>{{ approvalItem.rawArgs }}</pre>
+                              </details>
+                              <div class="wg-task__approval-actions">
+                                <button
+                                  type="button"
+                                  class="approval-action-btn approval-action-btn--reject"
+                                  :disabled="hitlBusy"
+                                  @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, false)"
+                                >
+                                  {{ approvalRejectLabel(step.approval) }}
+                                </button>
+                                <button
+                                  type="button"
+                                  class="approval-action-btn approval-action-btn--approve"
+                                  :disabled="hitlBusy"
+                                  @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, true)"
+                                >
+                                  {{ approvalApproveLabel(step.approval) }}
+                                </button>
+                              </div>
+                            </div>
+                            <div
+                              v-if="approvalIsBatch(step.approval)"
+                              class="wg-task__approval-bulk"
+                            >
+                              <span>{{ approvalCount(step.approval) }} 个工具调用待处理</span>
+                              <div class="wg-task__approval-actions">
+                                <button
+                                  type="button"
+                                  class="approval-action-btn approval-action-btn--reject"
+                                  :disabled="hitlBusy"
+                                  @click.stop="resolveMemberApproval(step.approval, '', false)"
+                                >
+                                  全部拒绝
+                                </button>
+                                <button
+                                  type="button"
+                                  class="approval-action-btn approval-action-btn--approve"
+                                  :disabled="hitlBusy"
+                                  @click.stop="resolveMemberApproval(step.approval, '', true)"
+                                >
+                                  全部批准
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div
                             v-else
                             class="wg-tool-row"
                             :class="{
@@ -2143,6 +2690,95 @@ onUnmounted(() => {
                               {{ step.statusText }}
                             </span>
                           </div>
+                            <div
+                              v-if="step.approval"
+                              class="wg-task__approval wg-task__approval--inline"
+                            >
+                              <div class="wg-task__approval-head">
+                                <span class="wg-task__approval-badge">需要批准</span>
+                                <span class="wg-task__approval-count">
+                                  {{ approvalIsBatch(step.approval) ? `批量审批 · ${approvalCount(step.approval)} 个工具调用` : "单项审批" }}
+                                </span>
+                              </div>
+                              <div
+                                v-for="approvalItem in step.approval.items || []"
+                                :key="approvalItem.callId"
+                                class="wg-task__approval-item"
+                              >
+                                <div class="wg-task__approval-item-head">
+                                  <span class="wg-task__approval-name">
+                                    {{ approvalItemDisplayName(approvalItem) }}
+                                  </span>
+                                  <span
+                                    v-if="approvalItem.risk === 'high' || approvalItem.risk === 'medium'"
+                                    class="wg-task__approval-risk"
+                                  >
+                                    {{ approvalItem.risk === 'high' ? '高风险' : '中风险' }}
+                                  </span>
+                                </div>
+                                <div v-if="approvalItem.reason" class="wg-task__approval-reason">
+                                  {{ approvalItem.reason }}
+                                </div>
+                                <div
+                                  v-if="approvalItem.duplicateWindowSec > 0"
+                                  class="wg-task__approval-hint"
+                                >
+                                  重复调用 · {{ approvalItem.duplicateWindowSec }}s 内
+                                </div>
+                                <details v-if="approvalItem.duplicatePreview" class="wg-task__approval-raw">
+                                  <summary>上次结果摘要</summary>
+                                  <pre>{{ approvalItem.duplicatePreview }}</pre>
+                                </details>
+                                <div
+                                  v-if="approvalItemHintVisible(approvalItem)"
+                                  class="wg-task__approval-hint"
+                                >
+                                  {{ approvalItemHint(approvalItem) }}
+                                </div>
+                                <div class="wg-task__approval-actions">
+                                  <button
+                                    type="button"
+                                    class="approval-action-btn approval-action-btn--reject"
+                                    :disabled="hitlBusy"
+                                    @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, false)"
+                                  >
+                                    {{ approvalRejectLabel(step.approval) }}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="approval-action-btn approval-action-btn--approve"
+                                    :disabled="hitlBusy"
+                                    @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, true)"
+                                  >
+                                    {{ approvalApproveLabel(step.approval) }}
+                                  </button>
+                                </div>
+                              </div>
+                              <div
+                                v-if="approvalIsBatch(step.approval)"
+                                class="wg-task__approval-bulk"
+                              >
+                                <span>{{ approvalCount(step.approval) }} 个工具调用待处理</span>
+                                <div class="wg-task__approval-actions">
+                                  <button
+                                    type="button"
+                                    class="approval-action-btn approval-action-btn--reject"
+                                    :disabled="hitlBusy"
+                                    @click.stop="resolveMemberApproval(step.approval, '', false)"
+                                  >
+                                    全部拒绝
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="approval-action-btn approval-action-btn--approve"
+                                    :disabled="hitlBusy"
+                                    @click.stop="resolveMemberApproval(step.approval, '', true)"
+                                  >
+                                    全部批准
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </template>
                       </div>
@@ -2203,12 +2839,99 @@ onUnmounted(() => {
                         {{ item.statusText }}
                       </span>
                     </div>
-                  </div>
-                  <div
-                    v-else-if="item.kind === 'progress'"
-                    class="msg__hint msg__hint--stream-meta"
-                  >
-                    {{ item.text }}
+                    <div
+                      v-if="item.approval"
+                      class="wg-task__approval wg-task__approval--inline"
+                    >
+                      <div class="wg-task__approval-head">
+                        <span class="wg-task__approval-badge">需要批准</span>
+                        <span class="wg-task__approval-count">
+                          {{ approvalIsBatch(item.approval) ? `批量审批 · ${approvalCount(item.approval)} 个工具调用` : "单项审批" }}
+                        </span>
+                      </div>
+                      <div
+                        v-for="approvalItem in item.approval.items || []"
+                        :key="approvalItem.callId"
+                        class="wg-task__approval-item"
+                      >
+                        <div class="wg-task__approval-item-head">
+                          <span class="wg-task__approval-name">
+                            {{ approvalItemDisplayName(approvalItem) }}
+                          </span>
+                          <span
+                            v-if="approvalItem.risk === 'high' || approvalItem.risk === 'medium'"
+                            class="wg-task__approval-risk"
+                          >
+                            {{ approvalItem.risk === 'high' ? '高风险' : '中风险' }}
+                          </span>
+                        </div>
+                        <div v-if="approvalItem.reason" class="wg-task__approval-reason">
+                          {{ approvalItem.reason }}
+                        </div>
+                        <div
+                          v-if="approvalItem.duplicateWindowSec > 0"
+                          class="wg-task__approval-hint"
+                        >
+                          重复调用 · {{ approvalItem.duplicateWindowSec }}s 内
+                        </div>
+                        <details v-if="approvalItem.duplicatePreview" class="wg-task__approval-raw">
+                          <summary>上次结果摘要</summary>
+                          <pre>{{ approvalItem.duplicatePreview }}</pre>
+                        </details>
+                        <div
+                          v-if="approvalItemHintVisible(approvalItem)"
+                          class="wg-task__approval-hint"
+                        >
+                          {{ approvalItemHint(approvalItem) }}
+                        </div>
+                        <details v-if="approvalItem.rawArgs" class="wg-task__approval-raw">
+                          <summary>参数详情</summary>
+                          <pre>{{ approvalItem.rawArgs }}</pre>
+                        </details>
+                        <div class="wg-task__approval-actions">
+                          <button
+                            type="button"
+                            class="approval-action-btn approval-action-btn--reject"
+                            :disabled="hitlBusy"
+                            @click.stop="resolveMemberApproval(item.approval, approvalItem.callId, false)"
+                          >
+                            {{ approvalRejectLabel(item.approval) }}
+                          </button>
+                          <button
+                            type="button"
+                            class="approval-action-btn approval-action-btn--approve"
+                            :disabled="hitlBusy"
+                            @click.stop="resolveMemberApproval(item.approval, approvalItem.callId, true)"
+                          >
+                            {{ approvalApproveLabel(item.approval) }}
+                          </button>
+                        </div>
+                      </div>
+                      <div
+                        v-if="approvalIsBatch(item.approval)"
+                        class="wg-task__approval-bulk"
+                      >
+                        <span>{{ approvalCount(item.approval) }} 个工具调用待处理</span>
+                        <div class="wg-task__approval-actions">
+                          <button
+                            type="button"
+                            class="approval-action-btn approval-action-btn--reject"
+                            :disabled="hitlBusy"
+                            @click.stop="resolveMemberApproval(item.approval, '', false)"
+                          >
+                            全部拒绝
+                          </button>
+                          <button
+                            type="button"
+                            class="approval-action-btn approval-action-btn--approve"
+                            :disabled="hitlBusy"
+                            @click.stop="resolveMemberApproval(item.approval, '', true)"
+                          >
+                            全部批准
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div
                     v-else-if="item.kind === 'live_user'"
@@ -2226,20 +2949,7 @@ onUnmounted(() => {
                     v-else-if="item.kind === 'live_assistant'"
                     class="msg__bubble msg__bubble--assistant-md"
                   >
-                    <div
-                      v-if="!item.text"
-                      class="msg__hint msg__hint--stream-meta"
-                      role="status"
-                    >
-                      <span class="msg__meta-label">{{ liveStatusLabel || "思考中…" }}</span>
-                      <BrandActivityIndicator
-                        :label="liveStatusLabel || '思考中…'"
-                        mode="generating"
-                        :show-label="false"
-                        compact
-                      />
-                    </div>
-                    <pre v-else class="assistant-msg__stream-plain">{{ item.text }}</pre>
+                    <pre class="assistant-msg__stream-plain">{{ item.text }}</pre>
                   </div>
                   <div
                     v-else
@@ -2269,7 +2979,7 @@ onUnmounted(() => {
               </div>
             </article>
             <article
-              v-if="activeHitl"
+              v-if="supervisorHitl"
               class="msg msg--assistant"
             >
               <div class="msg__body msg__body--grouped">
@@ -2281,32 +2991,8 @@ onUnmounted(() => {
                 </div>
                 <div class="wg-hitl-bubble">
                   <div class="wg-hitl-bubble__badge">询问</div>
-                  <p class="wg-hitl-bubble__prompt">{{ activeHitl.prompt }}</p>
+                  <p class="wg-hitl-bubble__prompt">{{ supervisorHitl.prompt }}</p>
                   <p class="wg-hitl-bubble__hint">在下方输入框回答后 Enter 提交</p>
-                </div>
-              </div>
-            </article>
-            <article
-              v-if="
-                (sending || remoteSending) &&
-                !activeHitl &&
-                !showLiveAssistant
-              "
-              class="msg msg--assistant msg--progress"
-            >
-              <div class="msg__body msg__body--hint-only">
-                <div
-                  class="msg__hint msg__hint--stream-meta"
-                  role="status"
-                  :aria-label="liveStatusLabel || '协作进行中'"
-                >
-                  <span class="msg__meta-label">{{ liveStatusLabel || "协作进行中" }}</span>
-                  <BrandActivityIndicator
-                    :label="liveStatusLabel || '协作进行中'"
-                    mode="generating"
-                    :show-label="false"
-                    compact
-                  />
                 </div>
               </div>
             </article>
@@ -2410,6 +3096,20 @@ onUnmounted(() => {
               </template>
             </div>
           </div>
+          <div
+            v-if="composerRuntimeLabel"
+            class="chat__composer-runtime-rail"
+            role="status"
+            aria-live="polite"
+          >
+            <BrandActivityIndicator
+              :label="composerRuntimeLabel"
+              mode="generating"
+              :show-label="false"
+              compact
+            />
+            <span>{{ composerRuntimeLabel }}</span>
+          </div>
           <div class="chat__composer-pill" style="position: relative">
             <div
               v-if="mentionOpen && mentionCandidates.length && !hitlMode"
@@ -2470,11 +3170,11 @@ onUnmounted(() => {
             </div>
             <div class="chat__composer-pill-right">
               <button
-                v-if="sending && !hitlMode"
+                v-if="sending || hitlMode"
                 type="button"
                 class="chat__composer-send chat__composer-send--cancel"
-                title="取消"
-                aria-label="取消"
+                :title="cancelling ? '正在取消…' : '取消本轮'"
+                :aria-label="cancelling ? '正在取消本轮' : '取消本轮'"
                 :disabled="cancelling"
                 @click="cancelTurn"
               >
@@ -2488,7 +3188,7 @@ onUnmounted(() => {
                 </svg>
               </button>
               <button
-                v-else-if="hitlMode"
+                v-if="hitlMode"
                 type="button"
                 class="chat__composer-send"
                 title="提交回答"
@@ -2507,7 +3207,7 @@ onUnmounted(() => {
                 </svg>
               </button>
               <button
-                v-else
+                v-if="!sending && !hitlMode"
                 type="button"
                 class="chat__composer-send"
                 title="发送"
@@ -2534,15 +3234,9 @@ onUnmounted(() => {
                   ? hitlBusy
                     ? "提交回答中…"
                     : "回答询问 · Enter 提交"
-                  : sending
-                    ? cancelling
-                      ? "正在取消…"
-                      : liveStatusLabel || "协作进行中…"
-                    : remoteSending
-                      ? liveStatusLabel || "其他 Node 协作中…"
-                    : directMember
-                      ? "直达成员 · Enter 发送 · 点击 @ 取消"
-                      : "Enter 发送 · @ 直达成员"
+                  : directMember
+                    ? "直达成员 · Enter 发送 · 点击 @ 取消"
+                    : "Enter 发送 · @ 直达成员"
               }}</span>
             </div>
           </div>
@@ -3101,6 +3795,110 @@ onUnmounted(() => {
 .wg-task__steps .wg-tool-row {
   margin: 0;
   background: color-mix(in srgb, var(--color-text, #111827) 1.5%, var(--color-surface, #fff));
+}
+.wg-task__approval {
+  margin: 4px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary, #0078d4) 28%, var(--color-border, #d1d5db));
+  border-left: 3px solid var(--color-primary, #0078d4);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 5%, var(--color-surface, #fff));
+}
+.wg-task__approval--inline {
+  margin: 6px 8px 8px;
+}
+.wg-task__approval-head,
+.wg-task__approval-item-head,
+.wg-task__approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wg-task__approval-head {
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.wg-task__approval-badge {
+  color: var(--color-primary, #0078d4);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.wg-task__approval-count {
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+}
+.wg-task__approval-item + .wg-task__approval-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border, #d1d5db) 80%, transparent);
+}
+.wg-task__approval-item-head {
+  min-width: 0;
+}
+.wg-task__approval-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text, #111827);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wg-task__approval-risk {
+  flex: 0 0 auto;
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 600;
+}
+.wg-task__approval-reason,
+.wg-task__approval-hint {
+  margin-top: 4px;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wg-task__approval-hint {
+  color: var(--color-text-subtle, #9ca3af);
+}
+.wg-task__approval-actions {
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+.wg-task__approval-bulk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border, #d1d5db) 80%, transparent);
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+}
+.wg-task__approval-bulk .wg-task__approval-actions {
+  margin-top: 0;
+}
+.wg-task__approval-raw {
+  margin-top: 5px;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+}
+.wg-task__approval-raw summary {
+  cursor: pointer;
+}
+.wg-task__approval-raw pre {
+  max-height: 160px;
+  margin: 5px 0 0;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-text, #111827) 4%, var(--color-surface, #fff));
+  font: 11px/1.45 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .wg-task__pre-tool {
   padding: 2px 4px 6px;

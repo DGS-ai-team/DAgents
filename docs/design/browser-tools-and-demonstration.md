@@ -16,7 +16,7 @@
 3. **主 Agent 仅任务级工具**（`browser_run_task` / `browser_task_status` / `browser_task_cancel`）；细粒度 DOM 动作在 sidecar `browser_use.Agent` 内闭环。
 4. 演示轨迹 **`demonstration/v1`** 与引擎无关；步骤可来自 CDP 录制或 Chrome 扩展导出（Phase 2+）。
 
-**相关索引**：[go-node-compatibility.md](../architecture/go-node-compatibility.md)、[go-node-internals.md](../architecture/go-node-internals.md)、[04-能力与策略.md](../handbook/04-能力与策略.md)。
+**相关索引**：[架构](../architecture.md)、[go-node-internals.md](../architecture/go-node-internals.md)、[04-能力与策略.md](../handbook/04-能力与策略.md)。
 
 ---
 
@@ -90,7 +90,7 @@
 
 ### 4.1 dagents-node 核心（不变）
 
-见 [go-node-compatibility.md](../architecture/go-node-compatibility.md)：**Win Server 2012 R2+**（Go 静态二进制）。
+核心 Node 的构建与部署见 [运维与发布](../user/operations.md)；旧 OS 验收矩阵仅作历史参考。
 
 ### 4.2 `browser_*` / 演示录制
 
@@ -258,6 +258,33 @@ Skill 禁止默认 `bash_run` Playwright 脚本。
 ---
 
 ## 13. 验收标准
+
+### 13.1 2026-08-25 回归结果
+
+本轮使用真实 LLM、Node `18765` 与本机 browser sidecar 完成以下验证：
+
+| 场景 | 结果 | 证据/结论 |
+|---|---|---|
+| `wait=true` 只读任务 | ✅ | example.com 成功返回标题、正文、URL、步骤摘要与截图路径 |
+| `wait=false` + `task_status` | ✅ | 先返回 `queued/task_id`，后续查询返回 `completed/success=true` |
+| `wait=false` 自动回灌 | ✅ | Node 轮询 sidecar 终态并通过 `async_tool_result` 自动启动回灌回合；真实 UI 收到 Example Domain |
+| 排队态立即取消 | ✅ | 稳定返回 `cancelled`，不再暴露 browser-use 的 `_task_start_time` 异常 |
+| 运行态取消 | ✅ | 先观察到 `running`，取消后返回 `cancelled` |
+| 多 session 并发 | ✅ | example.com / example.org 使用不同 debug port、task_id 与 URL，未串线 |
+| 同 session 连续任务 | ✅ | 第二个任务能基于前一任务留下的页面继续导航，结果正确 |
+| 失败后恢复 | ✅ | 失败任务 `status=completed, success=false` 且保留 errors；后续任务成功 |
+| HITL UI 实时审批恢复 | ✅ | `tool_waiting` 丢失 `hitl_required` 时自动 hydrate；无需刷新即可显示审批卡片 |
+| HITL UI 终态收敛 | ✅ | 后端 `pending_hitl=null` 后，审批卡片不再残留 |
+| 真实多模态图片输入 | ✅ | Node 使用 `mimo-v2.5` 接收上传图片，经 `read_image` 视觉 follow-up 准确识别界面、工具状态和关键数值 |
+| 已归档任务查询 | ✅ | sidecar 重启后可从 `tasks/{task_id}.json` 恢复已完成任务状态；运行中的任务仍不能跨重启续接 |
+| URL scheme 硬拦截 | ✅ | sidecar 导航边界拒绝 `file:` / `javascript:` 等未允许 scheme；默认只允许 `http/https` |
+
+当前已确认的产品缺口：
+
+1. sidecar 重启后只能恢复已归档的终态任务；重启前仍在运行的任务无法恢复执行或取消，需要后续引入 Node 侧任务索引与恢复协议。
+2. 当前已对 URL scheme 做运行时硬拦截，但还没有 host/domain allowlist；生产部署仍应增加按 Agent 或 Node 配置的域名白名单。
+3. 取消采用协作停止，必要时再强制取消，响应可能等待数秒；UI 已展示 `正在取消`，但 sidecar 仍可进一步提供更细的取消进度。
+4. browser sidecar 是独立进程；Node 的 LLM profile 变更不会替已运行的 sidecar 热切换模型，切换 browser 视觉模型后需要重启/重载 sidecar 配置。
 
 **Phase 1 / 1.5（伴生 + CDP）**
 

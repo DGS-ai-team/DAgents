@@ -9,7 +9,7 @@ N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步�
 
 内部仍保留 `StartBackground` / `job_registry` 供降级、UI 转后台与测试使用。
 
-**配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
+**配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
 ## 工具结果契约
@@ -94,7 +94,7 @@ tools/
 - **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_create` 等始终同步完成。
 - **`bash_run` 显式 timeout**：同步等待 `timeout_seconds`；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
 - **`bash_run` 省略 timeout**：硬上限（默认 600s）到期杀进程并返回 ERROR（不转后台）；UI 可提前终止或转后台。
-- **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../docs/design/ux-agent-owned-file-approval.md)）。
+- **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../../docs/design/ux-agent-owned-file-approval.md)）。
 - **内部 `StartBackground`**：不在 tool schema 暴露；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段。
 
 触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md).

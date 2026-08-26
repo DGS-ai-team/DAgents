@@ -1,4 +1,9 @@
+import asyncio
+import tempfile
+
 from dagents_browser.agent_prompt import build_extend_system_message
+from dagents_browser.config import BrowserServiceSettings
+from dagents_browser.driver import BrowserUseDriver, navigation_url_allowed
 from dagents_browser.ports import allocate_debug_port
 from dagents_browser.task_result import summarize_agent_history, task_status_response
 
@@ -13,6 +18,13 @@ def test_allocate_debug_port_unique():
 
 def test_allocate_debug_port_attach_mode():
     assert allocate_debug_port("any", base_port=9333, cdp_url="http://127.0.0.1:9333") == 9333
+
+
+def test_navigation_url_scheme_guard():
+    assert navigation_url_allowed("https://example.com", ["https", "http"])
+    assert navigation_url_allowed("/relative/path", ["https", "http"])
+    assert not navigation_url_allowed("file:///C:/secret.txt", ["https", "http"])
+    assert not navigation_url_allowed("javascript:alert(1)", ["https", "http"])
 
 
 def test_extend_system_message_contains_dagents_rules():
@@ -129,3 +141,26 @@ def test_extend_includes_recent_block():
     )
     assert "btask-x" in msg
     assert "tasks/<task_id>.md" in msg
+
+
+def test_archived_task_status_survives_driver_restart():
+    from dagents_browser.task_archive import archive_task
+
+    with tempfile.TemporaryDirectory() as root:
+        archive_task(
+            agent_fs=f"{root}/browser/agent_fs/agt-browser",
+            task_id="btask-persisted",
+            task="打开 example.com",
+            status="completed",
+            result={"summary": "Example Domain", "success": True, "done": True, "steps": 2},
+            session_key="agt-browser",
+        )
+        driver = BrowserUseDriver(BrowserServiceSettings(fs_root=root))
+        out = asyncio.run(driver.call({
+            "op": "task_status",
+            "session_key": "agt-browser",
+            "task_id": "btask-persisted",
+        }))
+        assert out["ok"] is True
+        assert out["detail"]["status"] == "completed"
+        assert out["detail"]["summary"] == "Example Domain"

@@ -1,4 +1,6 @@
-# Node + Web UI 全链路冒烟验收
+# Node + Web UI 全链路冒烟验收（归档）
+
+> 本清单对应早期 Node + Web UI 冒烟；现行回归清单见 [`../../design/ui-e2e-regression-checklist.md`](../../design/ui-e2e-regression-checklist.md)。
 
 本文用于验证 Agent Node 内嵌 Web UI 的最小可复现闭环，重点检查 Turn / Step 重构后的客户端可见行为。
 
@@ -16,7 +18,7 @@
 
 本验收不把 Manage、Desktop focus service 或 browser service 作为 Node + Web UI 的前置依赖。
 
-完整的工具、HITL、取消、连续对话和异步后台回调回归项见 [ui-e2e-regression-checklist.md](./ui-e2e-regression-checklist.md)。
+完整的工具、HITL、取消、连续对话和异步后台回调回归项见 [ui-e2e-regression-checklist.md](../../design/ui-e2e-regression-checklist.md)。
 
 ## Windows 前置条件
 

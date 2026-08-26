@@ -181,6 +181,16 @@ func (r *Registry) execBrowserRunTask(ctx context.Context, raw json.RawMessage) 
 	if err != nil {
 		return "", err
 	}
+	if !wait && out.OK {
+		if taskID, ok := out.Detail["task_id"].(string); ok {
+			r.watchBrowserTask(
+				sessionIDFromContext(ctx),
+				sid,
+				strings.TrimSpace(taskID),
+				toolCallIDFromContext(ctx),
+			)
+		}
+	}
 	r.registerBrowserTaskScreenshots(ctx, "browser_run_task", out)
 	return browser.FormatToolResult(out), nil
 }

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -157,6 +158,14 @@ func (r *Registry) runTerminalCommand(ctx context.Context, req TerminalCommandRe
 	waitErr, timedOut := waitForProcess(ctx, process, req.Timeout)
 	waitForOutputReaders(copyDone, stdout, stderr)
 	_ = process.Close()
+	cancelled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(waitErr, context.Canceled)
+	if cancelled {
+		// Cancellation is a normal terminal outcome of an interrupted Turn. It
+		// must remain a structured tool result so the orchestrator can persist
+		// the tool result and release the next continuation instead of leaving
+		// the tool call in an indeterminate/pending state.
+		timedOut = false
+	}
 	exit := process.ExitStatus()
 	code := 1
 	if exit != nil {
@@ -165,19 +174,23 @@ func (r *Registry) runTerminalCommand(ctx context.Context, req TerminalCommandRe
 		code = 0
 	}
 	status := "SUCCEEDED"
-	if code != 0 || waitErr != nil || timedOut {
+	if cancelled {
+		status = "CANCELLED"
+	} else if code != 0 || waitErr != nil || timedOut {
 		status = "FAILED"
 	}
 	result := TerminalCommandResult{
 		Status: status, TerminalID: req.TerminalID, TargetKind: req.Target.Kind, ExitCode: code,
 		Stdout: string(outBuf.Bytes()), Stderr: string(errBuf.Bytes()),
 		StdoutBytes: len(outBuf.Bytes()), StderrBytes: len(errBuf.Bytes()),
-		OutputTruncated: outBuf.truncated || errBuf.truncated, TimedOut: timedOut,
+		OutputTruncated: outBuf.truncated || errBuf.truncated, Cancelled: cancelled, TimedOut: timedOut,
 	}
 	if exit != nil && exit.Error != "" {
 		result.Error = exit.Error
 	} else if waitErr != nil && !timedOut {
 		result.Error = waitErr.Error()
+	} else if cancelled {
+		result.Error = "terminal command cancelled"
 	} else if timedOut {
 		result.Error = "terminal command timed out"
 	}

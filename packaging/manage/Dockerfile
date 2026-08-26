@@ -10,6 +10,9 @@ COPY manage/console/frontend/ ./
 COPY shared/branding/ /src/shared/branding/
 # WorkgroupChatView reuses the Node-side branded activity indicator.
 COPY node/webui/frontend/src/components/BrandActivityIndicator.vue /src/node/webui/frontend/src/components/BrandActivityIndicator.vue
+COPY node/webui/frontend/src/utils/toolCalls.js /src/node/webui/frontend/src/utils/toolCalls.js
+COPY node/webui/frontend/src/utils/textTruncate.js /src/node/webui/frontend/src/utils/textTruncate.js
+COPY shared/frontend/serializedRefresh.js /src/shared/frontend/serializedRefresh.js
 RUN npm run build
 
 FROM python:3.12-slim-bookworm

@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -111,6 +112,51 @@ func TestManagerRunTaskWait(t *testing.T) {
 	}
 	if polls < 2 {
 		t.Fatalf("expected poll, polls=%d", polls)
+	}
+}
+
+func TestManagerRunTaskWaitTimeoutKeepsTaskReference(t *testing.T) {
+	on := true
+	mock := &MockDriver{
+		Handler: func(_ context.Context, req Request) (Response, error) {
+			switch req.Op {
+			case "start":
+				return Response{OK: true}, nil
+			case "run_task":
+				return Response{OK: true, Detail: map[string]any{"task_id": "btask-timeout", "status": "queued"}}, nil
+			case "task_status":
+				return Response{OK: true, Detail: map[string]any{
+					"task_id": req.TaskID,
+					"status":  "running",
+				}}, nil
+			default:
+				return Response{OK: false, Error: "unexpected " + req.Op}, nil
+			}
+		},
+	}
+	cfg := &config.Config{
+		Browser: config.BrowserConfig{Enabled: &on, MaxSessions: 2, ServiceURL: "http://127.0.0.1:18766"},
+	}
+	cfg.ApplyDefaults()
+	mgr, err := NewManager(cfg, mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	out, err := mgr.RunTaskWithOpts(context.Background(), "agt-timeout-browser", "keep running", RunTaskOpts{
+		MaxSteps: 10, Wait: true, WaitTimeoutSec: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.OK || out.Detail["status"] != "running" || out.Detail["wait_timed_out"] != true {
+		t.Fatalf("unexpected timeout result: %+v", out)
+	}
+	if out.Detail["task_id"] != "btask-timeout" {
+		t.Fatalf("timeout result lost task reference: %+v", out)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("wait timeout took too long: %s", elapsed)
 	}
 }
 

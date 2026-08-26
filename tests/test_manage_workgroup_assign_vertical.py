@@ -371,6 +371,35 @@ class AssignVerticalLoopTests(unittest.TestCase):
             self.assertEqual(got["status"], "succeeded")
             self.assertEqual(got["result_text"], "hello from node")
 
+    def test_agent_ref_result_persists_member_final_text(self) -> None:
+        """AgentRef final frames remain visible after the live stream closes."""
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, _, wid, mid = self._ready(tmp, with_bridge=False)
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="执行只读检查"),
+            )
+
+            payload = {
+                "workgroup_id": wid,
+                "member_id": mid,
+                "assign_id": assign.assign_id,
+                "status": "succeeded",
+                "final_text": "MEMBER_RESULT_PERSISTED",
+            }
+            loop.handle_inbound("node-b", "agent.turn.result", payload)
+            loop.handle_inbound("node-b", "agent.turn.result", payload)
+
+            finals = [
+                event
+                for event in store.list_timeline(wid)
+                if event.type == "actor_final_text"
+                and event.actor_id == mid
+                and event.assign_id == assign.assign_id
+            ]
+            self.assertEqual(len(finals), 1)
+            self.assertEqual(finals[0].text, "MEMBER_RESULT_PERSISTED")
+
     def test_agent_ref_assign_accepts_busy_member_owned_by_same_assign(self) -> None:
         """Creating an assign marks the member busy before its AgentRef starts."""
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

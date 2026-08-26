@@ -128,6 +128,10 @@ const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
+let hitlReconcileInFlight = false;
+let hitlReconciledTurnId = "";
+let agentSwitchToken = 0;
+let agentSwitchPromise = null;
 
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => isTurnProcessing(),
@@ -222,7 +226,7 @@ function restartStream() {
 }
 
 /** SSE 断线重连或状态卡住时：hydrate 对账 turn/status/HITL（不重启已恢复的流）。 */
-async function resyncAfterSSEGap(_reason) {
+async function resyncAfterSSEGap(reason) {
   if (!agentStore.agentId) return;
   const token = ++sseResyncToken;
   const agentId = agentStore.agentId;
@@ -234,6 +238,13 @@ async function resyncAfterSSEGap(_reason) {
     turnWatchdog.noteActivity();
     bumpActivityRefresh();
     await refreshToolJobs(agentStore.agentId);
+    // A Node restart can complete while the NavRail is still serving its
+    // cached agent list. Reconcile it after the stream has reconnected so a
+    // newly created/registered Agent becomes selectable without waiting for
+    // the periodic 30-second rail refresh.
+    if (reason === "reconnect") {
+      await agentPanelRef.value?.refresh?.({ force: true });
+    }
   } catch (e) {
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     agentStore.error = e.message || String(e);
@@ -264,6 +275,13 @@ async function activateAgentStream() {
 
 /** 发消息时：流已在则只 ensure runtime，避免每次全量 hydrate。 */
 async function ensureStreamReady() {
+  // Sidebar/route switching is asynchronous. A message submitted during the
+  // switch must wait until the target Agent has finished hydrate and stream
+  // setup; otherwise it can be posted against a half-reset global transcript
+  // and the old stream may consume the visible lifecycle events.
+  if (agentSwitchPromise) {
+    await agentSwitchPromise;
+  }
   if (!agentStore.agentId) {
     await activateAgentStream();
     return;
@@ -341,12 +359,24 @@ function handleEvent(ev) {
     case "turn_state":
       if (applyTurnState(ev.data, { source: "event" })) {
         syncTurnStatus(turnStateStore);
+        if (
+          ["tool_waiting", "waiting_user"].includes(String(turnStateStore.phase || "")) &&
+          hitlStore.queue.length === 0
+        ) {
+          void reconcilePendingHitl(ev.data);
+        }
         if (isTurnTerminal()) {
           // A terminal lifecycle event supersedes any reconnect/watchdog
           // hydrate that may still be in flight. Its response must not be
           // allowed to replace the now-committed final assistant snapshot.
           invalidateHydration();
           sseResyncToken += 1;
+          // HITL cards are projections of the current turn's pending
+          // approval. Once the authoritative lifecycle reaches a terminal
+          // phase, no approval can remain actionable, even when the
+          // approval was resolved from another tab or connection.
+          clearHitl();
+          hitlReconciledTurnId = "";
           markHistoryCommitted(turnStateStore.historyRevision);
           if (["requesting", "confirmed"].includes(turnStateStore.cancelState)) {
             markTurnCancellationConfirmed();
@@ -394,6 +424,7 @@ function handleEvent(ev) {
       setUsageFromSSE(ev.data);
       break;
     case "error":
+      clearHitl();
       finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
       if (turnStateStore.authority !== "turn_coordinator") {
@@ -433,6 +464,9 @@ function handleEvent(ev) {
       );
       break;
     case "done":
+      // Legacy nodes may only emit done without a terminal turn_state.
+      // Reconcile the local approval projection on that path as well.
+      clearHitl();
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
@@ -518,6 +552,27 @@ function handleCompressionEvent(type, data) {
   }
   if (phase === "end") {
     finishStatus("compression");
+  }
+}
+
+/**
+ * HITL 卡片是 hydrate 的权威投影。正常情况下 hitl_required SSE 会直接入队，
+ * 但在 tool_call / turn_state 紧邻发布、重连或序号对账时，客户端可能只收到
+ * tool_waiting 而漏掉 hitl_required。此时只对当前 Turn 做一次 hydrate 对账，
+ * 避免把“待审批”误显示成普通的待执行工具，也避免循环请求。
+ */
+async function reconcilePendingHitl(turnState) {
+  if (hitlReconcileInFlight || hitlStore.queue.length > 0) return;
+  const turnId = String(turnState?.turn_id || turnStateStore.turnId || "").trim();
+  if (turnId && hitlReconciledTurnId === turnId) return;
+  if (turnId) hitlReconciledTurnId = turnId;
+  hitlReconcileInFlight = true;
+  try {
+    await hydrateAgent();
+  } catch {
+    // SSE 仍是主通道；hydrate 失败时交给重连/看门狗再次对账。
+  } finally {
+    hitlReconcileInFlight = false;
   }
 }
 
@@ -682,6 +737,11 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureAgent());
+    // clearContext is a durable boundary. Remove the old local projection
+    // before hydrate so the dirty-history guard cannot preserve pre-clear
+    // messages when the response races with the clear acknowledgement.
+    invalidateHydration();
+    clearTranscript();
     resetTurnState();
     resetEventTracking();
     resetStatusLines();
@@ -793,6 +853,11 @@ async function onAgentCreated(created) {
 }
 
 async function switchAgent(id) {
+  const targetID = String(id || "").trim();
+  if (!targetID) return;
+  if (targetID === agentStore.agentId && streamHandle.value) return;
+  const token = ++agentSwitchToken;
+  const run = (async () => {
   // 先断开旧 SSE，避免切 Agent 间隙里旧连接继续改全局 status/transcript
   invalidateHydration();
   sseResyncToken += 1;
@@ -806,14 +871,22 @@ async function switchAgent(id) {
   resetEventTracking();
   clearHitl();
   chromeStore.panel = null;
-  persistAgentId(id);
+  // transcriptStore is shared by the KeepAlive ChatView. It must be cleared
+  // before the target hydrate; otherwise historyDirty/historyRevision can
+  // intentionally reject the target snapshot and leave the previous Agent's
+  // messages on screen.
+  clearTranscript();
+  currentAgentDisplayName.value = "";
+  persistAgentId(targetID);
   void syncCurrentAgentDisplayName();
   turnWatchdog.noteActivity();
   try {
     const data = await hydrateAgent();
-    if (data === null) return;
+    if (data === null || token !== agentSwitchToken || agentStore.agentId !== targetID) return;
     await refreshLLMSettings();
+    if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
   } catch (e) {
+    if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
     agentStore.error = e.message;
     clearTranscript();
     clearHitl();
@@ -823,15 +896,24 @@ async function switchAgent(id) {
     return;
   }
   restartStream();
+  if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
   refreshContextTokens();
   await syncChildAgentsFromApi();
-  syncRouteAgent(id);
+  if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
+  syncRouteAgent(targetID);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
   bumpActivityRefresh();
   await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
+  })();
+  agentSwitchPromise = run;
+  try {
+    await run;
+  } finally {
+    if (agentSwitchPromise === run) agentSwitchPromise = null;
+  }
 }
 
 async function deleteAgentById(payload) {
@@ -1206,7 +1288,7 @@ onDeactivated(() => {
 
 watch(
   () => route.params.agentId,
-  async (id, prev) => {
+  async (id) => {
     const aid = String(id || "").trim();
     if (!aid) {
       if (agentStore.agentId) {
@@ -1215,7 +1297,11 @@ watch(
       }
       return;
     }
-    if (aid === agentStore.agentId || aid === prev) return;
+    // The route value and the hydrated Agent can temporarily diverge during
+    // KeepAlive/router transitions. The switch token suppresses the duplicate
+    // watcher triggered by syncRouteAgent(), while this guard only skips an
+    // already-active Agent.
+    if (aid === agentStore.agentId) return;
     await switchAgent(aid);
   },
 );

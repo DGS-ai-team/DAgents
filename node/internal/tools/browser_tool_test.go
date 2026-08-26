@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -98,6 +99,78 @@ func TestBrowserToolsTaskOnlyWithMockManager(t *testing.T) {
 	_, err = reg.Execute(ctx, "browser_navigate", `{"url":"https://example.com"}`)
 	if err == nil {
 		t.Fatal("expected browser_navigate to be unavailable")
+	}
+}
+
+func TestBrowserRunTaskWaitFalseAutoCallbacksOnCompletion(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusCalls := 0
+	mock := &browser.MockDriver{
+		Handler: func(_ context.Context, req browser.Request) (browser.Response, error) {
+			switch req.Op {
+			case "start":
+				return browser.Response{OK: true}, nil
+			case "run_task":
+				return browser.Response{OK: true, Detail: map[string]any{
+					"task_id": "btask-auto",
+					"status":  "queued",
+				}}, nil
+			case "task_status":
+				statusCalls++
+				if statusCalls == 1 {
+					return browser.Response{OK: true, Detail: map[string]any{
+						"task_id": "btask-auto",
+						"status":  "running",
+					}}, nil
+				}
+				return browser.Response{OK: true, Detail: map[string]any{
+					"task_id": "btask-auto",
+					"status":  "completed",
+					"success": true,
+					"summary": "Example Domain",
+				}}, nil
+			default:
+				return browser.Response{OK: true}, nil
+			}
+		},
+	}
+	mgr, err := browser.NewManager(testBrowserConfig(t), mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	reg.SetBrowserManager(mgr)
+	done := make(chan BrowserTaskDone, 1)
+	reg.SetBrowserTaskNotifier(func(sessionID string, result BrowserTaskDone) {
+		if sessionID != "sess-main" {
+			t.Errorf("callback session_id=%q", sessionID)
+		}
+		done <- result
+	})
+
+	ctx := WithToolCallID(WithSession(context.Background(), "sess-main"), "call-browser-1")
+	out, err := reg.Execute(ctx, "browser_run_task", `{"task":"open https://example.com","wait":false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"task_id":"btask-auto"`) {
+		t.Fatalf("run_task out=%s", out)
+	}
+
+	select {
+	case result := <-done:
+		if result.TaskID != "btask-auto" || result.ToolCallID != "call-browser-1" {
+			t.Fatalf("callback identity=%+v", result)
+		}
+		if result.Status != "succeeded" || !strings.Contains(result.ResultText, "Example Domain") {
+			t.Fatalf("callback result=%+v", result)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("timed out waiting for browser task callback")
 	}
 }
 

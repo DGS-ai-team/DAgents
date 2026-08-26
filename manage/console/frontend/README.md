@@ -10,7 +10,7 @@ npm install
 npm run dev   # http://127.0.0.1:5173/console/ ，API 代理到 :8020
 ```
 
-另开终端启动 Manage：`python run_manage.py`
+另开终端启动 Manage：`python3 run_manage.py`
 
 ## 生产构建
 

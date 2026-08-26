@@ -7,7 +7,7 @@
 ## 连接
 
 ```http
-GET /v1/stream?after_seq=0
+GET /v1/streams?after_seq=0
 Accept: text/event-stream
 ```
 
@@ -29,12 +29,12 @@ Accept: text/event-stream
 | `hitl_required` | 本地 turn 统一 HITL（含 ask + 审批，见下） | Client 分步 resume |
 | `approval_required` | 需审批（A2A 中继 / 子 Agent） | Client resume |
 | `user_information_required` | 需用户输入（A2A 中继） | Client resume |
-| `usage` | token 统计 | 展示独占一行 |
+| `usage` | token 统计与缓存命中数据 | 供状态栏/诊断使用，不作为独立 transcript 消息 |
 | `temporary_agent_created` | 子 Agent 创建 | 父 session UI |
 | `temporary_agent_completed` | 子 Agent 完成 | |
 | `temporary_agent_cancelled` | 子 Agent 取消 | |
 | `error` | 错误 | turn 可能结束 |
-| `done` | **轮到用户**（见下） | Client 解锁输入 |
+| `done` | **本次编排阶段结束**（见下） | Client 根据字段解锁输入或等待恢复 |
 
 A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../05-Manage与A2A.md) §5。
 

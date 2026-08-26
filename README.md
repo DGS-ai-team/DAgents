@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.10.2-green" alt="v0.10.2"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.10.4-green" alt="v0.10.4"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
 </p>
 
@@ -32,7 +32,7 @@
 
 它不是拖拽式「万能工作流」平台，而是面向企业与团队的 **本地优先助手控制台**——能管工具权限、能等人确认、能把对话与文件留在自己这边。
 
-当前版本为 **v0.10.2**（工作组执行可观测性与 Agent 运行稳定性版）：在 AgentRef 重构基础上补齐成员来源、结构化工具事件、assign/工具级取消、turn 清理隔离和 Linux 命令有界等待。Node 中已有 Agent 可注册到 Manage，工作组直接引用 Agent，并通过 Node 主动建立的 WS 创建隔离会话、执行 turn 和回传事件；同时保留旧 MemberSpec/provision 兼容路径。能力边界与验收步骤见 [AgentRef 方案](docs/design/workgroup-agent-membership-v1.md) 和 [真实测试清单](docs/design/workgroup-agent-membership-smoke-checklist.md)。
+当前版本为 **v0.10.4**（工作组审批与 Agent 终端稳定性版）：在多模态与浏览器任务可靠性的基础上，统一工作组工具审批、任务卡片、运行状态和终端命令的闭环行为，补齐 Node 与 Manage 的一致性展示与恢复路径。能力边界与验收步骤见 [浏览器工具与演示](docs/design/browser-tools-and-demonstration.md)。
 
 ---
 
@@ -118,7 +118,7 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```bash
 pip install -r requirements.txt
 npm run build --prefix manage/console/frontend
-python run_manage.py
+python3 run_manage.py
 ```
 
 浏览器打开 **http://127.0.0.1:8020/console/**。本机设置里启用集中服务与工作组后即可建组协作。
@@ -143,7 +143,7 @@ python run_manage.py
 |---------|--------|
 | 特性之后的技术全貌 | [项目手册](docs/handbook/README.md) |
 | 工作组逐步操作 | [07 · 工作组协作](docs/handbook/07-Workgroup协作.md) |
-| 预览验收勾选 | [v0.9.1 清单](docs/design/v0.9.1-smoke-checklist.md) |
+| 开发与回归验收 | [开发与测试](docs/development.md) · [Node UI 回归清单](docs/design/ui-e2e-regression-checklist.md) |
 | 版本改了什么 | [CHANGELOG](CHANGELOG.md) |
 | 安装包与离线安装 | [packaging 说明](packaging/agent-client/README.md) · [离线安装](packaging/OFFLINE_INSTALL.md) |
 | 产品路线 | [roadmap](docs/roadmap.md) |
