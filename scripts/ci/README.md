@@ -5,6 +5,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | 文件 | 说明 |
 |------|------|
 | **`build_go_static.sh`** | Go `dagents-node` 静态交叉编译；`BUILD_CLIENT=1` 时额外编 `dagents-client`（probe/update） |
+| **`run_staticcheck.sh`** | 使用固定版本的 Go Staticcheck 检查全部 Go module |
 | **`build_go_linux_static.sh`** | 兼容入口（等同 `GOOS=linux`） |
 | **`build_dagents_browser.sh`** | PyInstaller 单文件 **`dagents-browser`**（browser-use 薄服务） |
 | **`build_linux_rocky8_pyenv.sh`** | **Release CI 默认**：Rocky Linux 8 容器（glibc **2.28**）内 pyenv + PyInstaller（`BROWSER_PI_ARGS`）；`SKIP_DNF=1` 配合预装镜像 |

@@ -5,8 +5,9 @@ import {
   isCalendarScheduleKind,
 } from "../../utils/triggerForm.js";
 
+const form = defineModel("form", { type: Object, required: true });
+
 defineProps({
-  form: { type: Object, required: true },
   formError: { type: String, default: "" },
   busy: { type: Boolean, default: false },
   submitLabel: { type: String, default: "保存" },

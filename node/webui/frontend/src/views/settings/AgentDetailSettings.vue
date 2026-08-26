@@ -175,7 +175,7 @@ onUnmounted(() => stopConfigurationEvents());
     <p v-if="loading" class="agent-detail__status">加载中…</p>
     <template v-else>
       <AgentSettingsForm
-        :draft="draft"
+        v-model:draft="draft"
         :llm-profiles="llmProfiles"
         :available-tool-groups="availableToolGroups"
         v-model:show-advanced="showAdvanced"

@@ -37,7 +37,10 @@ func NewChecker(cfg *config.Config, installHome string, logger *slog.Logger) *Ch
 	if logger == nil {
 		logger = slog.Default()
 	}
-	channel := strings.TrimSpace(cfg.Manage.Update.Channel)
+	channel := sharedupdate.DefaultChannel
+	if cfg != nil {
+		channel = strings.TrimSpace(cfg.Manage.Update.Channel)
+	}
 	if channel == "" {
 		channel = sharedupdate.DefaultChannel
 	}

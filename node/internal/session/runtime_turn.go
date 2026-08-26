@@ -9,15 +9,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// runTurnStep 执行单步 turn 的通用脚手架：可选步前压缩、turnCtx、状态回调、收尾 idle。
-func (r *runtime) runTurnStep(
-	parent context.Context,
-	compressBefore bool,
-	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
-) (turn.StepOutcome, []llm.Message) {
-	return r.runTurnStepAtEpoch(parent, compressBefore, 0, run)
-}
-
 // runTurnStepAtEpoch is the same execution scaffold with an optional queue
 // epoch fence. Human messages use the envelope epoch so clear-context cannot
 // create a new fence for an already accepted, but now stale, handler.

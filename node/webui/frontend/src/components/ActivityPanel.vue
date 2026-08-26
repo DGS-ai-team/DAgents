@@ -15,7 +15,7 @@ import {
 } from "../composables/useChildAgents.js";
 import { shortId } from "../utils/panelFormat.js";
 
-const props = defineProps({
+defineProps({
   /** 当前 Agent 列表行（含 origin / host） */
   agent: { type: Object, default: null },
   /** 嵌入左侧 NavRail：无关闭钮、紧凑样式 */

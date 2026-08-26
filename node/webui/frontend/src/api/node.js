@@ -1,3 +1,11 @@
+async function readJSON(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 async function apiFetch(path, { method = "GET", body, params } = {}) {
   const url = new URL(path, window.location.origin);
   if (params) {
@@ -12,12 +20,7 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
     init.body = JSON.stringify(body);
   }
   const resp = await fetch(url, init);
-  let data = null;
-  try {
-    data = await resp.json();
-  } catch {
-    data = null;
-  }
+  const data = await readJSON(resp);
   if (!resp.ok) {
     const msg = data?.error?.message || data?.message || `HTTP ${resp.status}`;
     throw new Error(msg);

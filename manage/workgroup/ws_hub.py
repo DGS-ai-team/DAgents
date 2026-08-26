@@ -9,9 +9,18 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from manage.platform.metrics import record_workgroup_ws_event
 from manage.workgroup import ids
 from manage.workgroup.d3_models import OutboxFrame, WSEnvelope
 from manage.workgroup.errors import WorkgroupError
+from manage.workgroup.protocol import (
+    MANAGE_CAPABILITIES,
+    PROTOCOL_VERSION,
+    SCHEMA_VERSION,
+    normalize_capabilities,
+    validate_schema_version,
+    validate_protocol_version,
+)
 from manage.workgroup.store import WorkGroupStore, _now
 
 SendFn = Callable[[dict[str, Any]], None]
@@ -50,11 +59,19 @@ class WorkgroupWSHub:
         *,
         last_ack_delivery_seq: int = 0,
         send: SendFn | None = None,
+        protocol_version: str = PROTOCOL_VERSION,
+        schema_version: str = SCHEMA_VERSION,
+        agent_catalog_revision: str = "",
+        capabilities: list[str] | None = None,
+        client_time: str = "",
     ) -> dict[str, Any]:
         """session.hello：抬升 connection_generation，旧连接 fencing。"""
         node_id = node_id.strip()
         if not node_id:
             raise WorkgroupError("schema_mismatch", "node_id required")
+        protocol_version = validate_protocol_version(protocol_version)
+        schema_version = validate_schema_version(schema_version)
+        normalize_capabilities(capabilities)
         with self._lock:
             old = self._conns.get(node_id)
             if old is not None:
@@ -78,12 +95,18 @@ class WorkgroupWSHub:
                 "payload": {
                     "node_id": node_id,
                     "connection_generation": gen,
-                    "schema_version": "0.5.0",
+                    "protocol_version": protocol_version,
+                    "schema_version": schema_version,
+                    "agent_catalog_revision": str(agent_catalog_revision or "").strip(),
+                    "capabilities": list(MANAGE_CAPABILITIES),
+                    "server_time": _now(),
                 },
             }
+            record_workgroup_ws_event(direction="lifecycle", event="session.hello")
             if send is not None:
                 try:
                     send(welcome)
+                    record_workgroup_ws_event(direction="outbound", event="session.welcome")
                 except Exception:  # noqa: BLE001 - failed socket must not remain active
                     conn.active = False
                     conn.send = None
@@ -135,6 +158,7 @@ class WorkgroupWSHub:
                 return False
             conn.active = False
             conn.send = None
+            record_workgroup_ws_event(direction="lifecycle", event="disconnect")
             return True
 
     def _mark_send_failed(self, node_id: str, conn: NodeConnection) -> None:
@@ -279,6 +303,7 @@ class WorkgroupWSHub:
         with conn.send_lock:
             try:
                 send(env.model_dump())
+                record_workgroup_ws_event(direction="outbound", event=env.type)
             except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
                 self._mark_send_failed(node_id, conn)
                 return None
@@ -294,6 +319,9 @@ class WorkgroupWSHub:
         with conn.send_lock:
             try:
                 send(dict(message))
+                record_workgroup_ws_event(
+                    direction="outbound", event=str(message.get("type") or "other")
+                )
             except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
                 self._mark_send_failed(node_id, conn)
                 return False

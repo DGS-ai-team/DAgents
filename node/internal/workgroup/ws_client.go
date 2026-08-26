@@ -2,6 +2,7 @@ package workgroup
 
 import (
 	"encoding/json"
+	"time"
 )
 
 // ClientSession 将本地 Session 与 Manage 侧 hello/resume 载荷对齐（无真实拨号）。
@@ -18,9 +19,14 @@ func (c *ClientSession) BuildHello() map[string]any {
 	return map[string]any{
 		"type": "session.hello",
 		"payload": map[string]any{
-			"node_id":               c.Worker.NodeID,
-			"last_ack_delivery_seq": cur.LastAckDeliverySeq,
-			"connection_generation": gen,
+			"node_id":                c.Worker.NodeID,
+			"protocol_version":       ProtocolVersion,
+			"schema_version":         SchemaVersion,
+			"last_ack_delivery_seq":  cur.LastAckDeliverySeq,
+			"connection_generation":  gen,
+			"agent_catalog_revision": c.Worker.CatalogRevision,
+			"capabilities":           append([]string(nil), c.Worker.Capabilities...),
+			"client_time":            time.Now().UTC().Format(time.RFC3339Nano),
 		},
 	}
 }

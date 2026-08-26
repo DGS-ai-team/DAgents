@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from manage.platform.metrics import record_workgroup_timeline_event
 from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
@@ -1641,6 +1642,7 @@ class WorkGroupStore:
                     frames.pop()
                 raise
             listener = self._timeline_listener
+        record_workgroup_timeline_event(event.type)
         if listener is not None:
             try:
                 listener(event)

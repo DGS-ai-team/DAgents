@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -141,6 +142,14 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 latest_timeline = client.get(f"/v1/workgroups/{wid}/timeline", params={"limit": 1})
                 self.assertEqual(latest_timeline.status_code, 200, latest_timeline.text)
                 self.assertEqual(len(latest_timeline.json()), 1)
+
+                exported = client.get(f"/v1/workgroups/{wid}/timeline/export.jsonl")
+                self.assertEqual(exported.status_code, 200, exported.text)
+                self.assertTrue(exported.headers["content-type"].startswith("application/x-ndjson"))
+                self.assertIn(f'{wid}-timeline.jsonl', exported.headers["content-disposition"])
+                exported_events = [json.loads(line) for line in exported.text.splitlines()]
+                self.assertEqual(exported_events[0]["type"], "human_message")
+                self.assertEqual(exported_events[0]["seq"], 1)
 
                 hitl = client.post(
                     f"/v1/workgroups/{wid}/hitl",

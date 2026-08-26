@@ -84,11 +84,17 @@ jobs:
           npm ci --prefix node/webui/frontend
           npm test --prefix node/webui/frontend
 
+      - name: Lint Web UI
+        run: npm run lint --prefix node/webui/frontend
+
       - name: Build Web UI
         run: bash node/webui/build.sh
 
       - name: Build Manage Console
         run: bash manage/console/build.sh
+
+      - name: Lint Manage Console
+        run: npm run lint --prefix manage/console/frontend
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -107,6 +113,7 @@ jobs:
         run: |
           go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
           go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+          bash scripts/ci/run_staticcheck.sh
 
       - name: Setup Python
         uses: actions/setup-python@v5

@@ -43,7 +43,6 @@ import {
 } from "../stores/transcript.js";
 import {
   hitlStore,
-  enqueueHitl,
   getHitlAt,
   dequeueHitlAt,
   peekHitl,
@@ -160,12 +159,6 @@ const showNoAgentWelcome = computed(
 const currentAgentTitle = computed(() => {
   if (!String(agentStore.agentId || "").trim()) return "";
   return String(currentAgentDisplayName.value || "").trim() || "未命名 Agent";
-});
-
-const currentAgentRecord = computed(() => {
-  const id = String(agentStore.agentId || "").trim();
-  if (!id) return null;
-  return agentList.value.find((a) => agentRecordId(a) === id) || null;
 });
 
 async function syncCurrentAgentDisplayName() {

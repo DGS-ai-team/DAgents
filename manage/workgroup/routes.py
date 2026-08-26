@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 import json
 
@@ -708,10 +708,40 @@ def build_workgroup_router(
         authenticate(request)
         if store.get_workgroup(workgroup_id) is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        if limit < 0 or limit > 5000:
+            raise HTTPException(status_code=422, detail="limit must be between 0 and 5000")
         events = _timeline_for_ui(store, store.list_timeline(workgroup_id))
         if limit > 0:
             events = events[-limit:]
         return events
+
+    @router.get("/{workgroup_id}/timeline/export.jsonl")
+    def export_timeline(workgroup_id: str, request: Request, limit: int = 5000) -> Response:
+        """Export the durable Timeline as bounded, line-delimited JSON."""
+
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "workgroup not found"},
+            )
+        if limit < 0 or limit > 5000:
+            raise HTTPException(status_code=422, detail="limit must be between 0 and 5000")
+        events = store.list_timeline(workgroup_id)
+        if limit > 0:
+            events = events[-limit:]
+        body = "".join(
+            json.dumps(event.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+            + "\n"
+            for event in events
+        )
+        return Response(
+            content=body,
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition": f'attachment; filename="{workgroup_id}-timeline.jsonl"',
+            },
+        )
 
     @router.get("/{workgroup_id}/outbox", response_model=list[OutboxFrame])
     def get_outbox(

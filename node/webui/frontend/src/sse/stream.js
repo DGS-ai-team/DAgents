@@ -81,12 +81,7 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, onRe
 
     AGENT_STREAM_EVENT_TYPES.forEach((type) => {
       es.addEventListener(type, (ev) => {
-        let envelope = {};
-        try {
-          envelope = JSON.parse(ev.data || "{}");
-        } catch {
-          envelope = {};
-        }
+        const envelope = parseEventEnvelope(ev.data);
         const data = envelope.data && typeof envelope.data === "object" ? envelope.data : envelope;
         const seq = Number(ev.lastEventId || envelope.seq || data.seq || 0);
         const eventAgentId = String(envelope.agent_id || data.agent_id || "").trim();
@@ -109,4 +104,11 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, onRe
       es = null;
     },
   };
+}
+function parseEventEnvelope(raw) {
+  try {
+    return JSON.parse(raw || "{}");
+  } catch {
+    return {};
+  }
 }

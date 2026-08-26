@@ -22,10 +22,12 @@ echo "[verify] install and build Node Web UI"
 npm ci --prefix node/webui/frontend
 npm run build --prefix node/webui/frontend
 npm test --prefix node/webui/frontend
+npm run lint --prefix node/webui/frontend
 
 echo "[verify] build Manage Console"
 npm ci --prefix manage/console/frontend
 npm run build --prefix manage/console/frontend
+npm run lint --prefix manage/console/frontend
 
 echo "[verify] Python quality"
 python3 -m pip install --requirement requirements.lock --requirement requirements-dev.txt
@@ -39,6 +41,8 @@ echo "[verify] Go formatting, vet, tests, and build"
 mapfile -t GO_FILES < <(git ls-files '*.go')
 test -z "$(gofmt -l "${GO_FILES[@]}")"
 go vet "${GO_PACKAGES[@]}"
+echo "[verify] Staticcheck"
+bash scripts/ci/run_staticcheck.sh
 go test "${GO_PACKAGES[@]}"
 go build -o "${TMPDIR:-/tmp}/dagents-node-verify" ./node/cmd/dagents-node
 go build -o "${TMPDIR:-/tmp}/dagents-client-verify" ./client/cmd/dagents-client

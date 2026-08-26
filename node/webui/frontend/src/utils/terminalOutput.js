@@ -1,3 +1,5 @@
+/* ANSI control sequences intentionally contain control characters. */
+/* eslint-disable no-control-regex */
 const TERMINAL_RESULT_TOOLS = new Set(["terminal_read", "terminal_terminate"]);
 
 export function isTerminalResultTool(name) {
@@ -48,4 +50,3 @@ export function normalizeTerminalResultContent(content) {
     return normalizeTerminalOutput(text);
   }
 }
-

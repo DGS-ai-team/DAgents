@@ -7,7 +7,6 @@ import TerminalWorkbenchComposer from "./TerminalWorkbenchComposer.vue";
 import TerminalActionMenu from "./TerminalActionMenu.vue";
 import TerminalTargetMenu from "./TerminalTargetMenu.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
-import { extractToolApprovals } from "../stores/hitl.js";
 import {
   terminalStatusLabel,
   terminalTargetLabel as formatTerminalTargetLabel,
@@ -56,7 +55,7 @@ const emit = defineEmits([
 
 const terminals = ref([]);
 const loading = ref(false);
-const error = ref("");
+const terminalError = ref("");
 const activeTerminalId = ref(String(props.selectedTerminalId || ""));
 // A terminal workspace without a selected session is an empty state. The
 // new-session state starts only after the user explicitly chooses a target.
@@ -128,7 +127,7 @@ const terminalPanelId = computed(() => (panelOwnsAttachedSession.value || newSes
 const terminalPanelAutoConnect = computed(
   () => autoConnectNewSession.value || (!newSession.value && !panelOwnsAttachedSession.value),
 );
-const emptyState = computed(() => !loading.value && !error.value && !hasTerminal.value);
+const emptyState = computed(() => !loading.value && !terminalError.value && !hasTerminal.value);
 const agentActionRequired = computed(() => props.hitlQueue.length > 0 || Boolean(String(props.error || "").trim()));
 
 watch(agentActionRequired, (required, wasRequired) => {
@@ -239,11 +238,7 @@ function openNewTerminal(target = null) {
   newSession.value = true;
   activeTerminalId.value = "";
   terminalStatus.value = "idle";
-  error.value = "";
-}
-
-function openTargetMenu() {
-  targetMenuRef.value?.open?.();
+  terminalError.value = "";
 }
 
 function clearTerminatingPoll() {
@@ -267,7 +262,7 @@ function clearActiveTerminal(id) {
   newSession.value = false;
   newTerminalSequence += 1;
   terminalPanelKey.value = `new-terminal-${newTerminalSequence}`;
-  error.value = "";
+  terminalError.value = "";
   emit("terminal-cleared", terminalId);
 }
 
@@ -286,7 +281,7 @@ async function reconcileTerminatingTerminal(id) {
   terminationPollCount += 1;
   if (terminationPollCount >= 20) {
     clearTerminatingPoll();
-    error.value = "终端终止请求尚未确认，请刷新终端列表。";
+    terminalError.value = "终端终止请求尚未确认，请刷新终端列表。";
     return;
   }
   terminationPollTimer = setTimeout(() => void reconcileTerminatingTerminal(terminalId), 300);
@@ -299,14 +294,14 @@ function onTerminalTerminating() {
   terminatingTerminalId.value = id;
   pendingTerminal.value = null;
   attachedSessionId.value = "";
-  error.value = "";
+  terminalError.value = "";
   terminationPollTimer = setTimeout(() => void reconcileTerminatingTerminal(id), 250);
 }
 
 async function load() {
   if (!props.agentId) return;
   loading.value = true;
-  error.value = "";
+  terminalError.value = "";
   try {
     const result = await api.listAgentTerminals(props.agentId);
     const listed = Array.isArray(result?.terminals) ? result.terminals : [];
@@ -334,7 +329,7 @@ async function load() {
       clearActiveTerminal(activeTerminalId.value);
     }
   } catch (e) {
-    error.value = e.message || "加载终端列表失败";
+    terminalError.value = e.message || "加载终端列表失败";
   } finally {
     loading.value = false;
   }
@@ -377,7 +372,7 @@ async function onTerminalStarted(event) {
 
 function onTerminalStatus(next) {
   terminalStatus.value = String(next || "idle");
-  if (String(next || "") === "error") error.value = "终端连接错误";
+  if (String(next || "") === "error") terminalError.value = "终端连接错误";
 }
 
 function onTerminalExited(event) {
@@ -402,7 +397,7 @@ function onTerminalError(nextError) {
     clearActiveTerminal(activeTerminalId.value);
     return;
   }
-  error.value = message;
+  terminalError.value = message;
 }
 
 function onTerminalAction(action) {
@@ -435,7 +430,7 @@ watch(
       attachedSessionId.value = "";
       activeTerminalId.value = "";
       newSession.value = false;
-      error.value = "";
+      terminalError.value = "";
       return;
     }
     // The newly-created panel is already attached to this session. Do not
@@ -513,7 +508,7 @@ defineExpose({ load, openNewTerminal });
     <div class="terminal-workbench__body" :class="{ 'terminal-workbench__body--agent-open': !agentPanelCollapsed }">
       <section class="terminal-workbench__terminal-area" aria-label="终端区域">
         <p v-if="loading && !terminals.length" class="terminal-workbench__muted">加载终端列表中…</p>
-        <p v-else-if="error" class="terminal-workbench__error" role="alert">{{ error }}</p>
+        <p v-else-if="terminalError" class="terminal-workbench__error" role="alert">{{ terminalError }}</p>
         <div v-else-if="emptyState" class="terminal-workbench__empty">
           <strong>当前没有打开的终端</strong>
           <span>请点击右上角的添加按钮，选择要连接的终端。</span>

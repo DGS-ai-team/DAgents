@@ -73,3 +73,26 @@ func TestClientSessionHandlesRealtimeFrame(t *testing.T) {
 		t.Fatalf("payload=%+v", got)
 	}
 }
+
+func TestClientSessionBuildHelloIncludesProtocolContract(t *testing.T) {
+	w := NewWorker(Config{NodeID: "node_a", NodeToolNames: []string{"read_file"}})
+	cs := &ClientSession{Worker: w}
+	hello := cs.BuildHello()
+	payload, ok := hello["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("hello payload type=%T", hello["payload"])
+	}
+	if payload["protocol_version"] != ProtocolVersion || payload["schema_version"] != SchemaVersion {
+		t.Fatalf("hello versions=%+v", payload)
+	}
+	if payload["node_id"] != "node_a" || payload["agent_catalog_revision"] == "" {
+		t.Fatalf("hello identity/catalog=%+v", payload)
+	}
+	capabilities, ok := payload["capabilities"].([]string)
+	if !ok || len(capabilities) == 0 {
+		t.Fatalf("hello capabilities=%T %v", payload["capabilities"], payload["capabilities"])
+	}
+	if _, ok := payload["client_time"].(string); !ok {
+		t.Fatalf("hello client_time=%T", payload["client_time"])
+	}
+}

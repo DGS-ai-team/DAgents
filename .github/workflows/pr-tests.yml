@@ -27,6 +27,9 @@ jobs:
       - name: Build Manage Console
         run: bash manage/console/build.sh
 
+      - name: Lint Manage Console
+        run: npm run lint --prefix manage/console/frontend
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:

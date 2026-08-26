@@ -14,8 +14,9 @@ import {
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiSelect from "./UiSelect.vue";
 
+const draft = defineModel("draft", { type: Object, required: true });
+
 const props = defineProps({
-  draft: { type: Object, required: true },
   llmProfiles: { type: Array, default: () => [] },
   showAdvanced: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
@@ -121,25 +122,25 @@ watch(advancedOpen, (open) => {
 });
 
 function toggleGroup(name) {
-  const set = new Set(props.draft.toolGroups || []);
+  const set = new Set(draft.value.toolGroups || []);
   if (set.has(name)) set.delete(name);
   else set.add(name);
-  props.draft.toolGroups = [...set].sort();
+  draft.value.toolGroups = [...set].sort();
 }
 
 function isSkillVisible(name) {
-  if (props.draft.visibleSkills === null || props.draft.visibleSkills === undefined) {
+  if (draft.value.visibleSkills === null || draft.value.visibleSkills === undefined) {
     return true;
   }
-  return Array.isArray(props.draft.visibleSkills) && props.draft.visibleSkills.includes(name);
+  return Array.isArray(draft.value.visibleSkills) && draft.value.visibleSkills.includes(name);
 }
 
 function toggleSkillVisible(name) {
   const allNames = catalogSkills.value.map((s) => s.skill_name);
   let current =
-    props.draft.visibleSkills === null || props.draft.visibleSkills === undefined
+    draft.value.visibleSkills === null || draft.value.visibleSkills === undefined
       ? [...allNames]
-      : [...(props.draft.visibleSkills || [])];
+      : [...(draft.value.visibleSkills || [])];
   if (current.includes(name)) {
     current = current.filter((x) => x !== name);
   } else {
@@ -147,22 +148,22 @@ function toggleSkillVisible(name) {
   }
   current = [...new Set(current.map((x) => String(x || "").trim()).filter(Boolean))];
   if (allNames.length > 0 && current.length === allNames.length && allNames.every((n) => current.includes(n))) {
-    props.draft.visibleSkills = null;
+    draft.value.visibleSkills = null;
   } else {
-    props.draft.visibleSkills = current;
+    draft.value.visibleSkills = current;
   }
 }
 
 function selectAllSkills() {
-  props.draft.visibleSkills = null;
+  draft.value.visibleSkills = null;
 }
 
 function clearAllSkills() {
-  props.draft.visibleSkills = [];
+  draft.value.visibleSkills = [];
 }
 
-const skillsToolEnabled = computed(() => skillsEnabledFromToolGroups(props.draft.toolGroups));
-const memoryToolEnabled = computed(() => memoryEnabledFromToolGroups(props.draft.toolGroups));
+const skillsToolEnabled = computed(() => skillsEnabledFromToolGroups(draft.value.toolGroups));
+const memoryToolEnabled = computed(() => memoryEnabledFromToolGroups(draft.value.toolGroups));
 
 const llmProfileOptions = computed(() =>
   (props.llmProfiles || []).map((p) => ({
