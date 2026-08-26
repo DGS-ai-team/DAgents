@@ -10,7 +10,7 @@
     "lint": "eslint . --quiet"
   },
   "dependencies": {
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.14",
     "highlight.js": "^11.11.2",
     "marked": "^15.0.12",
     "page-agent": "^1.7.1",
