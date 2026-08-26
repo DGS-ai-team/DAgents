@@ -1,43 +1,30 @@
 # 文档归档
 
-本目录存放**不再作为现行产品说明**的材料，避免新人把过期叙事当现状。
+归档材料仅用于理解历史决策、迁移数据或复现旧版本，不代表当前产品行为。当前入口统一从 [../README.md](../README.md) 开始。
 
-## 原则
+## 归档范围
 
-| 类别 | 处理 |
-|------|------|
-| **现行** | `docs/handbook/`、现行 `docs/design/`、`docs/architecture/` |
-| **冻结契约** | `docs/design/workgroup-d05-contracts.md` + fixtures |
-| **归档** | 本目录；**不**链到根 README / handbook 主路径 |
-| **远期未落地** | `docs/future/`（仅索引；具体稿可迁入本目录） |
+| 目录 | 内容 |
+|---|---|
+| `design/` | 已被 Workgroup、AgentRef 或当前 Node 架构取代的旧设计 |
+| `releases/` | 旧版本 smoke、发布收口和验收记录 |
+| `reports/` | 已完成的专项审计、实施计划和一次性验证报告 |
+| `experiments/` | 已停止或结论已吸收到当前设计的实验 |
+| 根目录文件 | 早期 A2A、Python Agent、旧安全/通信叙事 |
 
-## 根目录迁入
+## 阅读规则
 
-| 文档 | 说明 |
-|------|------|
-| [manage-communication.md](./manage-communication.md) | Manage 通信长文（含已拆除 A2A）；现行见 handbook/05 |
-| [security-rollout.md](./security-rollout.md) | 早期安全分阶段验收；要点已并入 handbook/06 |
-| [os-compatibility.md](./os-compatibility.md) | CPython/PyInstaller 兼容矩阵（Python Agent 时代） |
-| [a2a-via-manage.md](./a2a-via-manage.md) | A2A Task 模型（已退役） |
+- 归档文档中的 API、版本号和目录路径可能失效；不要据此实现新功能。
+- 若历史文档与代码冲突，以代码、测试、Schema/OpenAPI 和当前 [架构](../architecture.md) 为准。
+- 过程文档迁入归档后，当前文档只保留结论、现行约束和验证入口。
 
-## `design/` 归档
+## 现行替代入口
 
-| 文档 | 说明 |
-|------|------|
-| [design/remote-agent-placement.md](./design/remote-agent-placement.md) | SUPERSEDED → Workgroup |
-| [design/node-centric-architecture-cleanup.md](./design/node-centric-architecture-cleanup.md) | 一次性清理清单 |
-| [design/v0.6.0-smoke-checklist.md](./design/v0.6.0-smoke-checklist.md) | 旧发版 smoke |
-| [design/v0.6.1-smoke-checklist.md](./design/v0.6.1-smoke-checklist.md) | 旧发版 smoke |
-| [design/v0.6.2-smoke-checklist.md](./design/v0.6.2-smoke-checklist.md) | 旧发版 smoke |
-| [design/v0.7.0-smoke-checklist.md](./design/v0.7.0-smoke-checklist.md) | 旧发版 smoke |
+| 历史主题 | 当前入口 |
+|---|---|
+| 旧 Node/Client 架构 | [../architecture.md](../architecture.md) |
+| 旧 Workgroup Placement/A2A | [../user/workgroups.md](../user/workgroups.md)、[../design/workgroup-d05-contracts.md](../design/workgroup-d05-contracts.md) |
+| 旧版本验收 | [../development.md](../development.md) 与当前 [UI 回归清单](../design/ui-e2e-regression-checklist.md) |
+| 旧兼容性矩阵 | [../user/operations.md](../user/operations.md) 和发布包说明 |
 
-已删除 stub：`design/major-changes.md`、`design/background-and-motivation.md`、`docs/triggers-design.md`（→ `node/internal/triggers/README.md`）。
-
-## 其它
-
-| 入口 | 说明 |
-|------|------|
-| [`../design/workgroup-and-node-gateway.md`](../design/workgroup-and-node-gateway.md) §15–§16 | 历史审核纪要 |
-| [`../future/`](../future/) | 远期索引（空壳时可删） |
-
-现行验收：[v0.9.1-smoke-checklist.md](../design/v0.9.1-smoke-checklist.md)。
+带日期的报告、实验和版本清单分别按 `reports/`、`experiments/`、`releases/` 归档；归档文件内部链接只用于追溯，不作为当前实现入口。

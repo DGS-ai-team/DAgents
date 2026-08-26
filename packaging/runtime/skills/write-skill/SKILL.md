@@ -75,7 +75,7 @@ description: 单行：做什么 + 何时用。
 
 - 加载本 skill 后，可视为进入「编写 skill」流程；注意：
   - 在 skill **定稿前勿加载正在编写的 skill**；**修改 SKILL.md 前先 `unload_skills` 卸载该 skill**（或 `clear_skills`），避免旧正文残留在会话、且频繁改动导致上下文缓存失效。
-  - 定稿后可用 **`load_skills` 加载验证**，并用 **`/context`** 或 **`/skill load <name>`** 确认 `loaded_skills` 与 system prompt 中的正文段正确。
+  - 定稿后可用 **`load_skills` 加载验证**，并用 **`/context`** 或 **`/skill load <name>`** 确认 `loaded_skills` 与后续 Step 的独立 skill ContextInjection 正确。
   - 若在用户引导下边做任务边写 skill，**每完成一阶段须先落地步骤或转为 `scripts/` 脚本**。
   - 步骤若多次试错，**成功后须记录可行做法**（写入正文或 `reference/`）。
   - **重要步骤与成果须及时写入磁盘**，避免上下文压缩后丢失。

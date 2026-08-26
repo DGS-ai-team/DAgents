@@ -56,7 +56,7 @@
 
 ```http
 GET /health
-→ { "status": "ok", "node_id": "...", "version": "0.9.5" }
+→ { "status": "ok", "node_id": "...", "version": "0.10.4" }
 ```
 
 `version` 与 `node/internal/version/version.go` 及发版 tag 一致（全项目唯一语义化版本）。

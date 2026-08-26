@@ -118,7 +118,7 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```bash
 pip install -r requirements.txt
 npm run build --prefix manage/console/frontend
-python run_manage.py
+python3 run_manage.py
 ```
 
 浏览器打开 **http://127.0.0.1:8020/console/**。本机设置里启用集中服务与工作组后即可建组协作。
@@ -143,7 +143,7 @@ python run_manage.py
 |---------|--------|
 | 特性之后的技术全貌 | [项目手册](docs/handbook/README.md) |
 | 工作组逐步操作 | [07 · 工作组协作](docs/handbook/07-Workgroup协作.md) |
-| 预览验收勾选 | [v0.9.1 清单](docs/design/v0.9.1-smoke-checklist.md) |
+| 开发与回归验收 | [开发与测试](docs/development.md) · [Node UI 回归清单](docs/design/ui-e2e-regression-checklist.md) |
 | 版本改了什么 | [CHANGELOG](CHANGELOG.md) |
 | 安装包与离线安装 | [packaging 说明](packaging/agent-client/README.md) · [离线安装](packaging/OFFLINE_INSTALL.md) |
 | 产品路线 | [roadmap](docs/roadmap.md) |

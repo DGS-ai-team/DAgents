@@ -305,6 +305,6 @@ Resume、异步工具、trigger 入队路径见 `runtime.consumeLoop` 的 `switc
 |------|------|
 | [agent-node-api.md](./agent-node-api.md) | HTTP 路径、SSE `type`、`done` 语义 |
 | [child-agent-tools.md](./child-agent-tools.md) | 临时子 Agent 工具与生命周期 |
-| [local-assistant.md](./local-assistant.md) | Node + Client 联调 |
+| [development.md](../development.md) | Node 构建、启动与测试 |
 | [context-compression-cache-analysis.md](../design/context-compression-cache-analysis.md) | 压缩与 prompt 侧车（Go：`compression` 包） |
 | [design/agent-hooks.md](../design/agent-hooks.md) | **Hook 扩展点**（已落地）：Registry、phase 锚点、与 runtime/Orchestrator 映射 |

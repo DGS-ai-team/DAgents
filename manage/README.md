@@ -21,7 +21,7 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 
 ```bash
 # 仓库根目录
-python run_manage.py
+python3 run_manage.py
 ```
 
 依赖见根目录 `requirements.txt`（含 **`websockets`**：工作组 Dialer WS 必需；缺库时握手 404，成员会一直停在「配置中」）。
@@ -207,7 +207,7 @@ manage:
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：
 
-通信与协作见 [handbook/05-Manage与A2A.md](../docs/handbook/05-Manage与A2A.md)、[handbook/07-Workgroup协作.md](../docs/handbook/07-Workgroup协作.md)。
+通信与协作见 [docs/design/manage-architecture.md](../docs/design/manage-architecture.md)、[docs/user/workgroups.md](../docs/user/workgroups.md)。
 
 ```bash
 curl -X PATCH http://127.0.0.1:8020/v1/registry/agents/ops-linux-01/groups \

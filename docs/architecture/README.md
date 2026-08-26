@@ -1,15 +1,13 @@
-# 架构文档
+# 深入架构与协议
 
-> **项目手册** → [../handbook/README.md](../handbook/README.md)  
-> **Agent 实例模型** → [../design/agent-instance-model.md](../design/agent-instance-model.md)
+跨组件架构的入口已统一到 [../architecture.md](../architecture.md)。本目录只保留需要按接口或源码深入阅读的材料，不再承担产品介绍、路线图或历史版本验收。
 
-本目录保留 **Node 内部结构、HTTP/SSE 契约** 等专题；与手册章节对应关系：
+| 文档 | 内容 | 状态 |
+|---|---|---|
+| [agent-node-api.md](agent-node-api.md) | Node HTTP/SSE API 详细契约 | 当前参考 |
+| [openapi-node.yaml](openapi-node.yaml) | Node OpenAPI 文档 | 机器可验证 |
+| [go-node-internals.md](go-node-internals.md) | Go Node 内部调用与 runtime 结构 | 当前参考 |
+| [child-agent-tools.md](child-agent-tools.md) | 临时子 Agent 工具与生命周期 | 当前参考 |
+| [overview.md](overview.md) | 旧版架构总览兼容页 | 逐步收敛到 `docs/architecture.md` |
 
-| 文件 | 手册章节 | 说明 |
-|------|----------|------|
-| `overview.md` | [01-愿景与架构](../handbook/01-愿景与架构.md) | 总览 |
-| `go-node-internals.md` | [02-Agent-Node-核心](../handbook/02-Agent-Node-核心.md) | 内部结构 |
-| `agent-node-api.md` | [03](../handbook/03-API与Client.md) | HTTP/SSE |
-| `child-agent-tools.md` | [04](../handbook/04-能力与策略.md) §5 | 临时子 Agent |
-
-构建 / OS 矩阵见手册 [06-运维与案例](../handbook/06-运维与案例.md)。
+构建矩阵、RHEL 旧环境和历史 Client/TUI 验收已不再是当前架构正文，见 [archive/README.md](../archive/README.md)。

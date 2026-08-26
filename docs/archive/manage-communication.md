@@ -1,11 +1,11 @@
 # Manage 通信逻辑全量参考（归档）
 
-> **已归档**。现行叙述见 [handbook/05-Manage与A2A.md](../handbook/05-Manage与A2A.md) · [07-Workgroup协作.md](../handbook/07-Workgroup协作.md)。  
+> **已归档**。现行叙述见 [docs/design/manage-architecture.md](../design/manage-architecture.md) · [docs/user/workgroups.md](../user/workgroups.md)。  
 > 下文含已拆除的 A2A / TUI Client 叙述，仅供溯源。
 
-> **设计原则**（[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md) 历史稿）：  
+> **设计原则**（[manage-architecture.md](../design/manage-architecture.md)、[a2a-via-manage.md](./a2a-via-manage.md) 历史稿）：  
 > **Node 仅出站连 Manage**；**禁止 Node-to-Node**；**Client 不连 Manage**。  
-> 扩展域（Skills / LLM / Releases / Cases / Workgroup 等）API 见 [manage/README.md](../manage/README.md)。
+> 扩展域（Skills / LLM / Releases / Cases / Workgroup 等）API 见 [manage/README.md](../../manage/README.md)。
 
 ---
 
@@ -321,4 +321,4 @@ manage:
 | `node/internal/api/server.go` | 启动 registrar |
 | （案例） | A2A Docker 案例已拆除；跨机见工作组 |
 
-**相关设计文档**：[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md)、[three-component-model.md](./design/three-component-model.md)。
+**相关设计文档**：[manage-architecture.md](../design/manage-architecture.md)、[a2a-via-manage.md](./a2a-via-manage.md)。旧三组件模型已不再保留。

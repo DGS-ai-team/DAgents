@@ -1,7 +1,7 @@
 # Manage 后续能力规划（Phase 2+）
 
-> **状态**：规划稿（2026-06-18）  
-> **对齐**：[manage-architecture.md](./manage-architecture.md)  
+> **状态**：规划稿（历史基线，2026-06-18）  
+> **对齐**：[manage-architecture.md](../../design/manage-architecture.md)  
 > **读者**：Manage / Node 开发者、PR #31 及后续迭代作者
 
 PR #31 交付 Manage 侧 **LLM 配置注册**、**Skills 精简分发**、**Blob API** 与 Console 管理页。本文定义 **Phase 2+** 四条主线，并要求在 PR #31 及后续实现中 **预留接口契约**，避免与「全量强推同步」绑死。
@@ -73,7 +73,7 @@ Node  GET /v1/marketplace/catalog（或 manifest）
 
 ## 2. 版本发布中枢（Release Hub）
 
-> **实现状态（2026-07）**：**Manage 侧已落地**（`manage/releases/`、`GET /v1/releases/check`、Console 版本发布页）；Node `UpdateChecker` 已对接。本文 §2.2 路径为早期草图，**现网 API 见 [release-update-hub.md](./release-update-hub.md) 与 [manage/README.md](../../manage/README.md)**。
+> **实现状态（2026-07）**：**Manage 侧已落地**（`manage/releases/`、`GET /v1/releases/check`、Console 版本发布页）；Node `UpdateChecker` 已对接。本文 §2.2 路径为早期草图，**现网 API 见 [release-update-hub.md](../../design/release-update-hub.md) 与 [manage/README.md](../../../manage/README.md)**。 
 
 ### 2.1 定位
 
@@ -105,18 +105,18 @@ Manage 登记 **DAgents 各组件**（`dagents-node`、`dagents-client`、`dagen
 
 ### 3.1 定位
 
-在现有 **单条 A2A Task**（`agent_invoke` 一问一答）之上，Manage 作为 **多 Agent 枢纽**，支持 **结构化执行计划（Workflow）**：
+在现有 **Workgroup Assign**（成员 AgentRef + 独立 Session）之上，Manage 作为 **多 Agent 枢纽**，支持 **结构化执行计划（Workflow）**：
 
 - 不只一段自然语言 `content`，而是 **有向步骤图 / 阶段列表**
 - 指定 **哪些 Agent、什么顺序、每步输入/验收条件、最终目标**
 - Manage 负责 **状态机、依赖、重试、汇总**；各步仍由各 Node 执行 turn
 
-### 3.2 与现有 A2A 关系
+### 3.2 与现有 Workgroup 关系
 
 | 现有 | Workflow |
 |------|----------|
-| `POST /v1/a2a/tasks` 单 Task | `POST /v1/workflows` 创建计划实例 |
-| caller → callee 一步 | 多步：discover → invoke → 等待 → 下一步 |
+| Workgroup Assign 单任务 | `POST /v1/workflows` 创建计划实例 |
+| supervisor → member 一步 | 多步：选择成员 → assign → 等待 → 下一步 |
 | `status: completed/failed` | `workflow_run` + `step_runs[]` 细粒度状态 |
 
 ### 3.3 预留数据模型（草案）
@@ -126,7 +126,7 @@ workflow_id: "incident-diagnosis-v1"
 steps:
   - id: collect-metrics
     agent_selector: { discovery_group: ops, capability: metrics }
-    task_template: { kind: invoke, content: "..." }
+    task_template: { kind: assign, content: "..." }
     acceptance: { type: json_schema, schema: {...} }  # 或 llm_judge / human_gate
   - id: analyze-logs
     depends_on: [collect-metrics]
@@ -196,7 +196,7 @@ PR #31 已有 `POST/GET /v1/blobs`；Phase 2 增加 **artifact 元数据层**（
 |----|------|-------------|------|
 | **M3b** | 能力市场 API + Node 可选安装 | Skills catalog、Blob | 扩展 manifest / installs |
 | **M4b** | Release Hub | — | 新表 + `/v1/releases/*` |
-| **M6** | Workflow 线性版 | A2A Task M2 | 新模块 `manage/workflows/` |
+| **M6** | Workflow 线性版 | Workgroup Assign | 新模块 `manage/workflows/` |
 | **M3c** | Shared Artifacts | Blob API | `manage/artifacts/` |
 
 ---
@@ -208,9 +208,9 @@ PR #31 已有 `POST/GET /v1/blobs`；Phase 2 增加 **artifact 元数据层**（
 - [ ] `sync/manifest` 信封可扩展（`catalog_version` + `items[]` 字段不写死仅 skill）
 - [ ] `skill_packages` payload 可增 `allowed_groups`、`artifact_kind` 而不破坏迁移
 - [ ] Blob `blob_id` 与 artifact 分层文档化（避免与 §4 重复造轮）
-- [ ] A2A Task payload 文档预留 `attachments[]` / `workflow_run_id` 可选字段
+- [ ] Workgroup Assign payload 文档预留 `attachments[]` / `workflow_run_id` 可选字段
 - [ ] 不在 PR #31 实现「publish 即全员安装」
 
 ---
 
-**维护**：能力落地后更新 [manage-architecture.md](./manage-architecture.md) 对应章，并在 [CHANGELOG.md](../../CHANGELOG.md) 记版本。
+**维护**：能力落地后更新 [manage-architecture.md](../../design/manage-architecture.md) 对应章，并在 [CHANGELOG.md](../../../CHANGELOG.md) 记版本。

@@ -2,7 +2,7 @@
 
 本文描述 **Go Agent Node** 在 turn 全链路中引入 **统一 Hook 框架** 的目标边界、阶段锚点、核心接口、配置形态与落地顺序。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
 
-**状态（2026-06）**：**Hook 统一 in-process 插件栈已落地** — 内置 Hook、全局 `hooks.plugins`、skill `hooks/*.so` 共用 `Hook.Run(ctx, *Context, Host)`；`tool.before_each` / `tool.after_each` / `prompt.build` / `llm.before_call` / `llm.after_call` / `turn.done` 及多数 phase 已接线。已**废弃** command/http YAML 外部 Hook。
+**状态（v0.10.4）**：**Hook 统一 in-process 插件栈已落地** — 内置 Hook、全局 `hooks.plugins`、skill `hooks/*.so` 共用 `Hook.Run(ctx, *Context, Host)`；`tool.before_each` / `tool.after_each` / `prompt.build` / `llm.before_call` / `llm.after_call` / `turn.done` 及多数 phase 已接线。已**废弃** command/http YAML 外部 Hook。
 
 **首版落地候选**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)（`tool.before_each` + policy 三档收敛；**duplicate 仅 `rule`+auto** + 三选项审批）。
 
@@ -47,7 +47,7 @@ Go Node 已具备若干 **「类 Hook」** 扩展点，但缺少统一命名、�
 
 ## 2. 设计原则
 
-1. **Hook 落在 Go Node** — 与 [v2 代码布局](../../.cursor/rules/v2-code-layout.mdc) 一致；Manage 做 fleet 观测 / 策略，不替代单 turn 细粒度 Hook。
+1. **Hook 落在 Go Node** — 与仓库开发约定一致；Manage 做 fleet 观测 / 策略，不替代单 turn 细粒度 Hook。
 2. **分三层，避免一开始做万能插件**：
    - **L1 进程内接口**（同步、低延迟、可改 context）
    - **L2 配置驱动**（YAML 注册 `hooks.plugins` 全局 `.so`；skill `hooks/*.so` 随 load_skills 加载）
@@ -146,7 +146,7 @@ flowchart TD
 
 ---
 
-## 5. 核心接口（Go 草案）
+## 5. 核心接口（Go 约定）
 
 ```go
 package hooks

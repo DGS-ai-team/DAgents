@@ -120,7 +120,7 @@ DeepSeek 官方文档说明，后续请求只有完整匹配已持久化的缓�
 
 ### 4.2 tools schema 修改
 
-`Registry.Definitions()` 在每次模型请求前生成工具定义。Skill 元数据还会附加到 `load_skills` description 中。[registry_enrich.go](../../node/internal/tools/registry_enrich.go)
+`Registry.Definitions()` 在每次模型请求前生成工具定义。Skill 元数据还会附加到 `load_skills` description 中。[registry.go](../../node/internal/tools/registry.go)
 
 因此以下变化可能导致 tools 前缀变化：
 
@@ -129,7 +129,7 @@ DeepSeek 官方文档说明，后续请求只有完整匹配已持久化的缓�
 - Skill 新增、删除或 frontmatter description 变化；
 - 工具描述、参数顺序或序列化顺序变化。
 
-特别是 Skill 元数据直接嵌入 `load_skills.description`，单个 Skill description 的变化可能影响整个 tools JSON。该问题在 [skills-context-cost-analysis.md](../design/skills-context-cost-analysis.md) 中已记录为 SK1。
+特别是 Skill 元数据直接嵌入 `load_skills.description`，单个 Skill description 的变化可能影响整个 tools JSON。该问题在历史实验 [skills-context-cost-analysis.md](../archive/experiments/skills-context-cost-analysis.md) 中已记录为 SK1。
 
 ### 4.3 历史追加
 

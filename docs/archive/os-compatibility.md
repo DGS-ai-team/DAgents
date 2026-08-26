@@ -92,4 +92,4 @@ PEP 11 中 **Tier 2** 含 **`x86_64-apple-darwin`**，**Tier 1** 含 **`aarch64-
 - [PEP 11 – CPython platform support](https://peps.python.org/pep-0011/)  
 - [Using Python on Windows（3.11）](https://docs.python.org/3.11/using/windows.html)  
 - [Using Python on Unix platforms（3.11）](https://docs.python.org/3.11/using/unix.html)  
-- 本仓库：**[README.md](../README.md)**（Python 版本声明）、**[`.github/workflows/build-and-release.yml`](../.github/workflows/build-and-release.yml)**（PyInstaller 矩阵）、**[`scripts/ci/README.md`](../scripts/ci/README.md)**（Linux 容器构建脚本说明）
+- 本仓库：**[README.md](../../README.md)**（Python 版本声明）、**[`.github/workflows/build-and-release.yml`](../../.github/workflows/build-and-release.yml)**（PyInstaller 矩阵）、**[`scripts/ci/README.md`](../../scripts/ci/README.md)**（Linux 容器构建脚本说明）

@@ -2,7 +2,7 @@
 
 > 状态：**已落地**（WS6，`feat/tool-context-cost-optimization`）  
 > 配置：`hooks.duplicate_tool_call`（`enabled`、`window_seconds`，默认 60）  
-> 前置：[agent-hooks.md](./agent-hooks.md) · [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)  
+> 前置：[agent-hooks.md](./agent-hooks.md) · [tool-context-cost-analysis.md](../archive/experiments/tool-context-cost-analysis.md)  
 > 实录：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md#3-tool-before-hook-与重复调用审批已落地-ws6)
 
 ---

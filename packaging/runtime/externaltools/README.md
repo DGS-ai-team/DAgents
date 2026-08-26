@@ -16,4 +16,4 @@ Agent 通过 **`bash_run`** 调用的 **shell 脚本、编译二进制与第三�
 
 索引文件：**[`../externaltools_menu.md`](../externaltools_menu.md)**（Agent 执行任务前应查阅；新增工具请同步更新）。
 
-Node 启动时会将 **`externaltools_menu.md`** 与非占位可执行文件清单注入 system prompt（`node/internal/externaltools`）。
+Node 启动时会将 **`externaltools_menu.md`** 与非占位可执行文件清单作为能力说明注入模型上下文（`node/internal/externaltools`）；完整工具 schema 仍通过 API `tools` 字段发送。

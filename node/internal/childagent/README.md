@@ -40,7 +40,7 @@ flowchart TB
 | **`turn/orchestrator`** | 识别 4 个临时 Agent 工具，转给 `Manager.HandleParentTool` |
 | **`RelayHub`** | 子 turn 的 SSE **全部挂到父 `session_id`** 上 |
 
-工具 schema 定义在 [`node/internal/tools/child_agent_tools.go`](../tools/child_agent_tools.go)（LLM 可见契约，不在本包内）。
+工具 schema 定义在 [`node/internal/tools/tool_childagent.go`](../tools/tool_childagent.go)（LLM 可见契约，不在本包内）。
 
 ---
 

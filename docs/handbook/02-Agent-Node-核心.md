@@ -1,6 +1,6 @@
 # 02 · Agent Node 核心
 
-> **当前实现说明（2026-08）**：本章早期示例中的 `setState`、`toolLoopCount` 和 runtime `pending` 是历史写法。当前实现由 `turn.TurnCoordinator` 维护 Turn/Step 生命周期，`TurnExecutionContext` 向 Orchestrator 提供 StepIndex；旧字段仅保留为持久化迁移和 API 兼容镜像。完整落点见 [`turn-step-runtime-implementation-status.md`](../design/turn-step-runtime-implementation-status.md)。
+> **当前实现说明（2026-08）**：本章早期示例中的 `setState`、`toolLoopCount` 和 runtime `pending` 是历史写法。当前实现由 `turn.TurnCoordinator` 维护 Turn/Step 生命周期，`TurnExecutionContext` 向 Orchestrator 提供 StepIndex；旧字段仅保留为持久化迁移和 API 兼容镜像。迁移过程记录见 [`turn-step-runtime-implementation-status.md`](../archive/reports/turn-step-runtime-implementation-status.md)。
 
 ## 本章回答什么问题
 

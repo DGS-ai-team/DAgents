@@ -2,7 +2,7 @@
 
 **状态（2026-08）**：安装包 **双轨 Shell**——推荐轨 `desktop/tray-tauri/`（Win10/11 + WebView2，内嵌 Web UI），兼容轨 `desktop/tray/`（Go，低版本 Windows）；落地均为 `bin\dagents-shell.exe`。  
 **范围**：**仅 Windows**（不含 Linux/macOS 桌面壳）。  
-**读者**：产品 / 实现 / 安装包；与 [local-assistant.md](../architecture/local-assistant.md)、[client-packaging.md](../architecture/client-packaging.md) 配套。
+**读者**：产品 / 实现 / 安装包；本文为旧桌面 Shell 设计，当前运行和发布入口见 [docs/user/operations.md](../../user/operations.md)。
 
 > **API 注记（2026-07 后）**：文中历史路径 `/v1/sessions*` 已移除（404）。现行契约为 `/v1/agents/{agent_id}/...`；托盘待办同步走 `GET /v1/agents`，hydrate/ack 走 agents 路径。
 
@@ -130,7 +130,7 @@
 | # | 决策 | 说明 |
 |---|------|------|
 | D36 | **Windows 桌面：Shell 负责安装态更新** | **查版本、提醒用户、停 Node、换文件、再起 Node** 由 Shell orchestrate；Node **不再**作为 Release Hub 的 poll 主体（`UpdateChecker` / `GET /v1/agent/update` 在 Windows+Shell 路径 **逐步下线**）。 |
-| D37 | **Apply 前须 Node 空闲** | Shell 执行 apply 前向 Node 查询 **无 active turn / 无队列**；忙碌时 **仅通知、不静默升级**（与 [release-update-hub.md](./release-update-hub.md)「非静默升级」一致）。 |
+| D37 | **Apply 前须 Node 空闲** | Shell 执行 apply 前向 Node 查询 **无 active turn / 无队列**；忙碌时 **仅通知、不静默升级**（与当前 [release-update-hub.md](../../design/release-update-hub.md)「非静默升级」一致）。 |
 | D38 | **共享 update 逻辑** | Manage check URL、manifest 解析、下载校验等抽到 **`shared/update`**（或 `desktop/shell/internal/update` 复用 Node 现有实现），避免 Shell/Node 双份维护。 |
 
 ### 2.11 明确不做（当前阶段）
@@ -346,7 +346,7 @@ scanIdleSessionMaintenance()   // 原 scanIdleAutoCompress，已扩展
 
 ### 3.11 版本检查与升级（Release Hub · D36–D38）
 
-**现状**：[`release-update-hub.md`](./release-update-hub.md) 规定 Client 经 **`GET /v1/agent/update`**（Node `UpdateChecker` poll Manage）；Windows `dagents.cmd update` 经 client 下载后 **shutdown_node → 覆盖 bin → restart_node**。
+**现状**：[`release-update-hub.md`](../../design/release-update-hub.md) 规定 Client 经 **`GET /v1/agent/update`**（Node `UpdateChecker` poll Manage）；Windows `dagents.cmd update` 经 client 下载后 **shutdown_node → 覆盖 bin → restart_node**。
 
 **目标（Windows + Shell）**：安装态更新 **与 Node 运行时解耦**；Shell 为 orchestrator，Node 仅回答 **能否现在升**。
 
@@ -376,7 +376,7 @@ Node（运行时）
 
 **与 v0.6.0**：§4.1 中 **架构决策 D36–D38 写入**；**实现**（F-U5/U6、F-ND*、F-X8）标 **v0.6.x**；v0.6.0 可先让 **`dagents update` 的 stop/start 走 Shell**（与 F-L10 一致），Node `UpdateChecker` **暂保留**。
 
-**详见**：[release-update-hub.md §10](./release-update-hub.md#10-windows-shell-路径例外)。
+**详见历史**：[release-update-hub.md](../../design/release-update-hub.md)。
 
 ### 3.8 降级 / 可选（原「系统入口」，非 P0）
 
@@ -398,7 +398,7 @@ Node（运行时）
 
 ### 4.1 v0.6.0 发布范围
 
-> **完整 v0.6.0 – v0.7.0 开发路径**（含 `show_image`、Shell 自更新、TUI hydrate）见 **[v0.6-v0.7-roadmap.md](./v0.6-v0.7-roadmap.md)**。
+> **完整 v0.6.0 – v0.7.0 开发路径**（含 `show_image`、Shell 自更新、TUI hydrate）属于历史资料；当前路线见 [docs/roadmap.md](../../roadmap.md)。
 
 **版本定位**：在 Windows 上交付 **默认 Client = Shell + Web UI** 的首个完整闭环；Git tag **`v0.6.0`**。
 
@@ -433,7 +433,7 @@ Node（运行时）
 | F-H4–H6 | 0.7+（A2A relay hydrate 完善、TUI hydrate） |
 | F-L6–L7, F-I5 | 远期 |
 | **F-U5–U6, F-N9, F-I11–I12, F-X8, F-ND1–ND2** | **v0.6.2**（Shell 更新 orchestrator） |
-| **F-M0–M8**（`show_image` + Media API） | **v0.6.1 / v0.7.0**（见 [node-ui-media-display.md](./node-ui-media-display.md)、[roadmap](./v0.6-v0.7-roadmap.md)） |
+| **F-M0–M8**（`show_image` + Media API） | **v0.6.1 / v0.7.0** 历史交付（见 [node-ui-media-display.md](./node-ui-media-display.md)） |
 
 #### 实现顺序（建议）
 
@@ -450,7 +450,7 @@ Node（运行时）
 
 #### 验收要点（Smoke）
 
-完整检查表（归档）：[`../archive/design/v0.6.0-smoke-checklist.md`](../archive/design/v0.6.0-smoke-checklist.md)
+完整检查表（归档）：[`v0.6.0-smoke-checklist.md`](./v0.6.0-smoke-checklist.md)
 
 1. 安装后登录 → Shell 自启 → Node health 正常。  
 2. Web UI 关闭时触发 HITL → **一条** Toast → 点击 → 深链 session → **transcript + pending** 可见并可 resume。  
@@ -763,7 +763,7 @@ Apply 流程（Windows）：
 | Release Hub / 更新 | `docs/design/release-update-hub.md` |
 | Node UpdateChecker | `node/internal/manage/update_checker.go` |
 | Client update | `client/internal/update/update.go` |
-| 本地助手架构 | `docs/architecture/local-assistant.md` |
+| 本地助手架构 | `docs/architecture.md` |
 
 ---
 
@@ -777,6 +777,6 @@ Apply 流程（Windows）：
 | 2026-07 | D34–D35：idle 压缩与内存 evict 绑定为同一扫描器（§3.10） |
 | 2026-07 | 补项 F-L12/13/15、F-E11/12、F-H14/17、F-I8–I10；§4.1 v0.6.0 发布范围 |
 | 2026-07 | D36–D38、§3.11、§8.7：Shell 为 Windows 安装态更新 orchestrator；联动 release-update-hub §10 |
-| 2026-07 | §4.1 链至 [v0.6-v0.7-roadmap.md](./v0.6-v0.7-roadmap.md) |
+| 2026-07 | §4.1 链至旧版本路线图（现已归档） |
 | 2026-07 | D39–D40、F-E13、F-N10：托盘图标待办态 + 未读 assistant 回复纳入待办 |
 | 2026-07 | F-E13 IM cursor：`notify_seq`/`ack_seq`/`POST /ack`；Shell 从 Node 同步，§8.5.1 |

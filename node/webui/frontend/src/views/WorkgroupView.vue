@@ -11,6 +11,7 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
 import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../utils/format.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
+import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import { markWorkgroupRead, noteWorkgroupTimeline } from "../stores/unread.js";
 
@@ -79,6 +80,13 @@ let streamAbort = null;
 const pendingHitl = ref([]);
 const hitlBusy = ref(false);
 const hitlDraft = ref("");
+const pendingHitlRefresh = createSerializedRefresh(
+  () => api.listWorkgroupHITL(workgroupId.value, true),
+  (res) => {
+    const list = Array.isArray(res) ? res : res?.hitl || [];
+    pendingHitl.value = Array.isArray(list) ? list : [];
+  },
+);
 
 /** RunHistory 调试面板（mock / LLM 可观测） */
 const debugOpen = ref(false);
@@ -240,13 +248,7 @@ async function loadPendingHitl() {
     pendingHitl.value = [];
     return;
   }
-  try {
-    const res = await api.listWorkgroupHITL(workgroupId.value, true);
-    const list = Array.isArray(res) ? res : res?.hitl || [];
-    pendingHitl.value = Array.isArray(list) ? list : [];
-  } catch {
-    /* 轮询期忽略 */
-  }
+  await pendingHitlRefresh.refresh();
 }
 
 async function submitHitlAnswer() {
@@ -2275,6 +2277,7 @@ watch(
       }
       streamAbort = null;
     }
+    pendingHitlRefresh.reset();
     pendingHitl.value = [];
     hitlDraft.value = "";
     hitlBusy.value = false;
