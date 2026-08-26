@@ -120,6 +120,47 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                     acked = ws.receive_json()
                     self.assertEqual(acked["type"], "delivery.acked")
 
+    def test_hello_exposes_protocol_contract_and_rejects_unknown_version(self) -> None:
+        app = create_app()
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+            ) as ws:
+                ws.send_json(
+                    {
+                        "type": "session.hello",
+                        "payload": {
+                            "node_id": "node_a",
+                            "protocol_version": "1",
+                            "schema_version": "0.5.0",
+                            "agent_catalog_revision": "rev_test",
+                            "capabilities": ["resume", "timeline"],
+                            "client_time": "2026-08-26T00:00:00Z",
+                        },
+                    }
+                )
+                welcome = ws.receive_json()
+                payload = welcome["payload"]
+                self.assertEqual(payload["protocol_version"], "1")
+                self.assertEqual(payload["schema_version"], "0.5.0")
+                self.assertEqual(payload["agent_catalog_revision"], "rev_test")
+                self.assertIn("resume", payload["capabilities"])
+                self.assertIn("server_time", payload)
+
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+            ) as ws:
+                ws.send_json(
+                    {
+                        "type": "session.hello",
+                        "payload": {"node_id": "node_a", "protocol_version": "2"},
+                    }
+                )
+                error = ws.receive_json()
+                self.assertEqual(error["type"], "session.error")
+                self.assertEqual(error["payload"]["code"], "schema_mismatch")
+
 
 if __name__ == "__main__":
     unittest.main()

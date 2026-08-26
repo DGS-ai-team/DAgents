@@ -7,8 +7,11 @@ import json
 from typing import Any, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from manage.platform.auth import AGENT_ID_HEADER, AuthContext, is_open_mode
+from manage.platform.metrics import record_workgroup_ws_event
+from manage.workgroup.d3_models import SessionHello
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.ws_hub import WorkgroupWSHub
 
@@ -83,6 +86,7 @@ def build_workgroup_ws_router(
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
+                    record_workgroup_ws_event(direction="inbound", event="invalid_json")
                     await outbound.put(
                         {
                             "type": "session.error",
@@ -91,13 +95,21 @@ def build_workgroup_ws_router(
                     )
                     continue
                 mtype = str(msg.get("type") or "")
+                record_workgroup_ws_event(direction="inbound", event=mtype or "other")
                 payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else msg
                 if not isinstance(payload, dict):
                     payload = {}
 
                 try:
                     if mtype == "session.hello" or (not mtype and "node_id" in payload):
-                        hello_node_id = str(payload.get("node_id") or "").strip()
+                        try:
+                            hello = SessionHello.model_validate(payload)
+                        except ValidationError as exc:
+                            raise WorkgroupError(
+                                "schema_mismatch",
+                                "invalid session.hello payload",
+                            ) from exc
+                        hello_node_id = hello.node_id.strip()
                         if hello_node_id and hello_node_id != node_id:
                             raise WorkgroupError(
                                 "not_authorized",
@@ -105,8 +117,17 @@ def build_workgroup_ws_router(
                                 http_status=403,
                             )
                         nid = hello_node_id or node_id
-                        last_ack = int(payload.get("last_ack_delivery_seq") or 0)
-                        welcome = hub.hello(nid, last_ack_delivery_seq=last_ack, send=sync_send)
+                        last_ack = hello.last_ack_delivery_seq
+                        welcome = hub.hello(
+                            nid,
+                            last_ack_delivery_seq=last_ack,
+                            send=sync_send,
+                            protocol_version=hello.protocol_version,
+                            schema_version=hello.schema_version,
+                            agent_catalog_revision=hello.agent_catalog_revision,
+                            capabilities=hello.capabilities,
+                            client_time=hello.client_time or "",
+                        )
                         connection_generation = int(
                             (welcome.get("payload") or {}).get("connection_generation") or 0
                         )

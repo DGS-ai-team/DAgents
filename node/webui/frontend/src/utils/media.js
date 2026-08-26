@@ -25,7 +25,7 @@ export function mediaFullUrl(url) {
 
 export function mediaDownloadName(item) {
   const label = String(item?.label || item?.caption || item?.alt || "").trim();
-  if (label) return label.replace(/[^\w.\-]+/g, "_");
+  if (label) return label.replace(/[^\w.-]+/g, "_");
   const src = mediaFullUrl(item?.src || item?.url || "");
   const tail = src.split("/").pop()?.split("?")[0] || "";
   return tail || "image";

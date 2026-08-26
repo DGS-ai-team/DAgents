@@ -1,5 +1,13 @@
 const REGISTRY_API = "/v1/registry/agents";
 
+async function readJSON(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function apiFetch(path, params = {}, options = {}) {
   const url = new URL(path, window.location.origin);
   Object.entries(params).forEach(([key, value]) => {
@@ -15,12 +23,7 @@ export async function apiFetch(path, params = {}, options = {}) {
     init.body = JSON.stringify(options.body);
   }
   const resp = await fetch(url, init);
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const detail = body?.detail;
     const message = typeof detail === "string" ? detail : `HTTP ${resp.status}`;
@@ -133,12 +136,7 @@ export async function uploadSkillPackage({ skillId, version, name, riskLevel, fi
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
   const resp = await fetch(new URL("/v1/skills/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     const err = new Error(message);
@@ -170,12 +168,7 @@ export async function uploadExternalToolPackage({ toolId, version, name, platfor
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
   const resp = await fetch(new URL("/v1/externaltools/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     const err = new Error(message);
@@ -207,12 +200,7 @@ export async function uploadPluginPackage({ pluginId, version, name, platform, r
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
   const resp = await fetch(new URL("/v1/plugins/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     const err = new Error(message);
@@ -273,12 +261,7 @@ export async function uploadReleasePackage({
   form.set("set_latest", setLatest ? "true" : "false");
   form.set("file", file);
   const resp = await fetch(new URL("/v1/releases/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     const err = new Error(message);
@@ -562,12 +545,7 @@ export async function parseCaseJsonl(file) {
   const form = new FormData();
   form.set("file", file);
   const resp = await fetch(new URL("/v1/cases/parse-jsonl", window.location.origin), { method: "POST", body: form, credentials: "include" });
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     throw new Error(message);
@@ -599,12 +577,7 @@ export async function createCase({
   form.set("externaltool_ids", (externaltoolIds || []).join(", "));
   if (file) form.set("file", file);
   const resp = await fetch(new URL("/v1/cases", window.location.origin), { method: "POST", body: form, credentials: "include" });
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     throw new Error(message);
@@ -628,12 +601,7 @@ export async function importCaseJsonl(caseId, file, { replace = true } = {}) {
     new URL(`/v1/cases/${encodeURIComponent(caseId)}/import-jsonl`, window.location.origin),
     { method: "POST", body: form, credentials: "include" },
   );
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     throw new Error(message);
@@ -685,12 +653,7 @@ export async function uploadCaseAttachment(caseId, file) {
     new URL(`/v1/cases/${encodeURIComponent(caseId)}/attachments`, window.location.origin),
     { method: "POST", body: form, credentials: "include" },
   );
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJSON(resp);
   if (!resp.ok) {
     const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
     throw new Error(message);

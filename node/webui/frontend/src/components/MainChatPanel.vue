@@ -252,36 +252,6 @@ const hasEarlierStreamItems = computed(
 );
 const earlierStreamItemCount = computed(() => Math.max(0, streamWindowStart.value));
 
-function streamItemMemo(item) {
-  const call = item?.callEntry;
-  const result = item?.resultEntry;
-  const entry = item?.entry;
-  const hitl = item?.hitl;
-  return [
-    item?.key,
-    item?.kind,
-    item?.executionHint,
-    call?.partial ? 1 : 0,
-    call?.text?.length || call?.data?.arguments?.length || 0,
-    result?.text?.length || result?.data?.content?.length || 0,
-    entry?.text?.length || 0,
-    entry?.streaming ? 1 : 0,
-    hitl?.data?.request_id || hitl?.data?.approval_id || "",
-    props.toolVerbose ? 1 : 0,
-    props.hitlBusy ? 1 : 0,
-    props.hitlBusyIndex,
-    JSON.stringify(userInfoSelected.value),
-  ].join("|");
-}
-
-function streamGroupMemo(item) {
-  return [
-    item?.key,
-    item?.steps?.length || 0,
-    ...(item?.steps || []).map((step) => streamItemMemo(step)),
-  ].join("|");
-}
-
 const pendingApprovals = computed(() =>
   props.hitlQueue
     .filter((h) => h.kind === "approval")
@@ -737,12 +707,10 @@ defineExpose({
       </button>
       <template v-for="item in renderedStream" :key="item.key">
         <MessageBubble
-          v-memo="[streamItemMemo(item)]"
           v-if="['user', 'assistant', 'reasoning', 'system'].includes(item.kind)"
           :entry="item.entry"
         />
         <ToolSummaryRow
-          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'tool_step'"
           :call-entry="item.callEntry"
           :result-entry="item.resultEntry"
@@ -750,13 +718,11 @@ defineExpose({
           :verbose="toolVerbose"
         />
         <ToolGroupRow
-          v-memo="[streamGroupMemo(item), toolVerbose]"
           v-else-if="item.kind === 'tool_group'"
           :steps="item.steps"
           :verbose="toolVerbose"
         />
         <ApprovalBubble
-          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'approval'"
           :data="item.hitl.data"
           :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"
@@ -766,7 +732,6 @@ defineExpose({
           @reject-one="(id) => emit('reject-one', { index: item.hitlIndex, callId: id })"
         />
         <UserInfoBubble
-          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'user_information'"
           :data="item.hitl.data"
           :selected="userInfoSelected"
@@ -775,7 +740,6 @@ defineExpose({
           @submit="emit('user-info-submit', item.hitlIndex)"
         />
         <MemoryConflictBubble
-          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'memory_conflict'"
           :data="item.hitl.data"
           :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"

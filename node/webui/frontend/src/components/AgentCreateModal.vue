@@ -347,7 +347,7 @@ watch(
 
           <AgentSettingsForm
             v-else-if="step === 'details'"
-            :draft="draft"
+            v-model:draft="draft"
             :llm-profiles="llmProfiles"
             :field-errors="fieldErrors"
             mode="create-basics"
@@ -356,7 +356,7 @@ watch(
 
           <AgentSettingsForm
             v-else
-            :draft="draft"
+            v-model:draft="draft"
             :llm-profiles="llmProfiles"
             :available-tool-groups="availableToolGroups"
             mode="create-capabilities"

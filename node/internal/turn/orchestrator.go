@@ -631,7 +631,11 @@ func (o *Orchestrator) runOneStep(
 		requestHistory = append([]llm.Message(nil), msgs...)
 	}
 	*history = msgs
-	requestHistory = ApplyContextInjections(requestHistory, snapshot.ContextInjections)
+	var snapshotInjections []ContextInjection
+	if snapshot != nil {
+		snapshotInjections = snapshot.ContextInjections
+	}
+	requestHistory = ApplyContextInjections(requestHistory, snapshotInjections)
 	requestHistory = StripLegacyTodayDateMessages(requestHistory)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)

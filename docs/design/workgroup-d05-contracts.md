@@ -724,11 +724,12 @@ Manage 在发 command 前校验：`tool_name ∈ Spec.allow_names ∩ manifest`�
 
 ### 8.1 会话
 
-1. Node 用**独立凭据**连接（fail-closed）  
-2. `session.hello` → Manage 确认 `connection_generation`  
-3. 同 `node_id` 新连接成功 → 旧 generation **立即 fencing**  
-4. `resume.offer(last_ack_delivery_seq)` → 从 outbox 按 `delivery_seq` gap-fill  
-5. 若 cursor 早于保留窗口 → `cursor_too_old`（客户端先拉快照再 resume）
+1. Node 用**独立凭据**连接（fail-closed）；凭据通过 WebSocket 传输层 header 携带
+2. `session.hello` 携带 `protocol_version`、`schema_version`、`node_id`、`agent_catalog_revision`、`capabilities`、`client_time`；Manage 返回 `server_time` 和已接受的能力
+3. `session.hello` → Manage 确认 `connection_generation`
+4. 同 `node_id` 新连接成功 → 旧 generation **立即 fencing**
+5. `resume.offer(last_ack_delivery_seq)` → 从 outbox 按 `delivery_seq` gap-fill
+6. 若 cursor 早于保留窗口 → `cursor_too_old`（客户端先拉快照再 resume）
 
 ### 8.2 序号
 

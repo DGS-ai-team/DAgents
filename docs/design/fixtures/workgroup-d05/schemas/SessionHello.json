@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/SessionHello.json",
+  "title": "SessionHello",
+  "type": "object",
+  "required": [
+    "node_id",
+    "protocol_version",
+    "schema_version",
+    "last_ack_delivery_seq",
+    "agent_catalog_revision",
+    "capabilities",
+    "client_time"
+  ],
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "protocol_version": {
+      "const": "1"
+    },
+    "schema_version": {
+      "const": "0.5.0"
+    },
+    "last_ack_delivery_seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "agent_catalog_revision": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64
+    },
+    "client_time": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -200,7 +200,7 @@ onMounted(load);
         <section v-if="editingId === 'new'" class="command-section trigger-editor-section">
           <h3 class="command-section__title">新建定时任务</h3>
           <TriggerEditor
-            :form="form"
+            v-model:form="form"
             :form-error="formError"
             :busy="rowBusy('save:new')"
             submit-label="创建"
@@ -217,7 +217,7 @@ onMounted(load);
                 <template v-if="editingId === item.trigger_id">
                   <h4 class="trigger-form__heading">编辑 · {{ item.name || "(未命名)" }}</h4>
                   <TriggerEditor
-                    :form="form"
+                    v-model:form="form"
                     :form-error="formError"
                     :busy="rowBusy(`save:${item.trigger_id}`)"
                     enabled-label="启用"

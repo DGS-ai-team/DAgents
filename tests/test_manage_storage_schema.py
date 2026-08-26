@@ -2,7 +2,9 @@
 import tempfile
 import unittest
 from pathlib import Path
-from manage.storage.sqlite import SQLiteDatabase
+
+from manage.storage.sqlite import SCHEMA_VERSION, SQLiteDatabase
+
 
 class SchemaTest(unittest.TestCase):
     def test_connection_context_closes_connection(self):
@@ -47,7 +49,26 @@ class SchemaTest(unittest.TestCase):
             )
             # Blob 元数据在 sidecar JSON，不入 SQLite：blobs 表不应存在。
             self.assertNotIn("blobs", rows)
+            self.assertEqual(db.schema_version, SCHEMA_VERSION)
+
+    def test_schema_initialization_is_idempotent_and_rejects_newer_databases(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+            path = Path(d) / "m.db"
+            db = SQLiteDatabase(path)
             with db.connect() as conn:
-                ver = conn.execute(
-                    "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            self.assertEqual(ver, "15")
+                conn.execute(
+                    "UPDATE schema_meta SET value=? WHERE key='schema_version'",
+                    (str(SCHEMA_VERSION - 1),),
+                )
+                conn.commit()
+
+            self.assertEqual(SQLiteDatabase(path).schema_version, SCHEMA_VERSION)
+
+            with SQLiteDatabase(path).connect() as conn:
+                conn.execute(
+                    "UPDATE schema_meta SET value=? WHERE key='schema_version'",
+                    (str(SCHEMA_VERSION + 1),),
+                )
+                conn.commit()
+            with self.assertRaisesRegex(RuntimeError, "newer than supported"):
+                SQLiteDatabase(path)

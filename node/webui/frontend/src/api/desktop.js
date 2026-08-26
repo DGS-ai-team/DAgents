@@ -3,6 +3,14 @@ import { getAgentUpdate } from "./node.js";
 
 export const DESKTOP_API_BASE = "http://127.0.0.1:18767";
 
+async function readJSON(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 async function desktopFetch(path, { method = "GET", body } = {}) {
   const headers = { Accept: "application/json" };
   const init = { method, headers };
@@ -11,12 +19,7 @@ async function desktopFetch(path, { method = "GET", body } = {}) {
     init.body = JSON.stringify(body);
   }
   const resp = await fetch(`${DESKTOP_API_BASE}${path}`, init);
-  let data = null;
-  try {
-    data = await resp.json();
-  } catch {
-    data = null;
-  }
+  const data = await readJSON(resp);
   if (!resp.ok) {
     const msg = data?.message || data?.error?.message || `HTTP ${resp.status}`;
     throw new Error(msg);

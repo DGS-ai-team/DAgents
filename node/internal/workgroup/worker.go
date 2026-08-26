@@ -11,6 +11,8 @@ import (
 type Worker struct {
 	mu               sync.Mutex
 	NodeID           string
+	CatalogRevision  string
+	Capabilities     []string
 	Bindings         BindingStore
 	Journal          CommandJournal
 	Session          Session
@@ -82,11 +84,20 @@ func NewWorker(cfg Config) *Worker {
 	}
 	// 工作区工具由 Worker Executor 提供，不依赖本地 Agent Registry 枚举名。
 	nodeTools := mergeToolNames(cfg.NodeToolNames, WorkspaceExecutableToolNames())
+	manifest := BuildManifest(cfg.NodeID, nodeTools, WorkspaceToolSchemas(), WorkspaceSideEffectClasses())
 	w.Provision = &Provisioner{
 		NodeID:           cfg.NodeID,
 		Bindings:         bindings,
 		MemberTombstones: w.MemberTombstones,
 		NodeToolNames:    nodeTools,
+	}
+	w.CatalogRevision = manifest.ToolCatalogRevision
+	w.Capabilities = []string{
+		"fencing",
+		"idempotency",
+		"resume",
+		"timeline",
+		"tool_execution",
 	}
 	w.Commands = &CommandHandler{
 		Bindings:             bindings,

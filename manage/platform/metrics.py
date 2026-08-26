@@ -10,9 +10,66 @@ REGISTRY_OPERATIONS_TOTAL = Counter(
     labelnames=("operation", "status"),
 )
 
+WORKGROUP_WS_EVENTS_TOTAL = Counter(
+    "dagents_manage_workgroup_ws_events_total",
+    "Workgroup WebSocket 事件次数（标签值受控）",
+    labelnames=("direction", "event"),
+)
+
+WORKGROUP_TIMELINE_EVENTS_TOTAL = Counter(
+    "dagents_manage_workgroup_timeline_events_total",
+    "Workgroup Timeline 持久化事件次数",
+    labelnames=("event_type",),
+)
+
+_WS_EVENT_LABELS = frozenset(
+    {
+        "session.hello",
+        "session.welcome",
+        "resume.offer",
+        "resume.complete",
+        "resume.error",
+        "timeline.event",
+        "tool.command",
+        "tool.ack",
+        "tool.result",
+        "member.provision",
+        "member.provision_result",
+        "workgroup.tombstone",
+        "workgroup.tombstone_ack",
+        "delivery.ack",
+        "delivery.acked",
+        "invalid_json",
+        "disconnect",
+    }
+)
+_TIMELINE_EVENT_LABELS = frozenset(
+    {
+        "human_message",
+        "assistant_content",
+        "actor_final_text",
+        "system_notice",
+        "tool_started",
+        "tool_finished",
+        "assign_started",
+        "assign_finished",
+    }
+)
+
 
 def record_registry_operation(*, operation: str, status: str) -> None:
     REGISTRY_OPERATIONS_TOTAL.labels(operation or "unknown", status or "unknown").inc()
+
+
+def record_workgroup_ws_event(*, direction: str, event: str) -> None:
+    direction_label = direction if direction in {"inbound", "outbound", "lifecycle"} else "other"
+    event_label = event if event in _WS_EVENT_LABELS else "other"
+    WORKGROUP_WS_EVENTS_TOTAL.labels(direction_label, event_label).inc()
+
+
+def record_workgroup_timeline_event(event_type: str) -> None:
+    label = event_type if event_type in _TIMELINE_EVENT_LABELS else "other"
+    WORKGROUP_TIMELINE_EVENTS_TOTAL.labels(label).inc()
 
 
 def metrics_text() -> tuple[bytes, str]:

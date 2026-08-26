@@ -31,23 +31,6 @@ function isSkippableBetweenTools(entry) {
   return shouldSkipEntry(entry);
 }
 
-function findMatchingToolResult(entries, startIdx, blockId) {
-  const bid = String(blockId || "").trim();
-  if (!bid) return -1;
-  for (let j = startIdx + 1; j < entries.length; j += 1) {
-    const next = entries[j];
-    if (isSkippableBetweenTools(next)) continue;
-    if (next.kind === "tool_result" && entryBlockId(next) === bid) {
-      return j;
-    }
-    // 遇到其它非可跳过内容则停止（例如真正的 user/assistant 气泡）
-    if (next.kind !== "tool_result") {
-      return -1;
-    }
-  }
-  return -1;
-}
-
 function buildToolResultMatches(entries) {
   const matches = new Map();
   let calls = [];

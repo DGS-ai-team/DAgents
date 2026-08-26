@@ -1003,13 +1003,12 @@ func buildLinuxRemoteCommandWithRecovery(cfg LinuxChannelConfig, req ExecRequest
 	// status, and turns a signal delivered to the session leader into a group
 	// termination. The fallback preserves compatibility with minimal images;
 	// callers must treat termination as unconfirmed in that mode.
-	recovery := RemoteProcessRecovery{}
 	jobToken := strings.TrimSpace(req.Context.BackgroundJobID)
 	if !isSafeRemoteJobToken(jobToken) {
 		jobToken = fmt.Sprintf("process-%d", atomic.AddUint64(&linuxRemoteRecoverySequence, 1))
 	}
 	pidFile := remoteJobPIDFile(jobToken)
-	recovery = RemoteProcessRecovery{TargetID: cfg.ID, JobToken: jobToken, PIDFile: pidFile}
+	recovery := RemoteProcessRecovery{TargetID: cfg.ID, JobToken: jobToken, PIDFile: pidFile}
 	groupWrapper := strings.Join([]string{
 		"printf '%s|%s\\n' \"$$\" " + shellQuote(jobToken) + " > " + shellQuote(pidFile) + " || exit 125",
 		"trap 'trap - INT TERM HUP; kill -TERM -- -$$ 2>/dev/null; rm -f " + pidFile + "' INT TERM HUP",

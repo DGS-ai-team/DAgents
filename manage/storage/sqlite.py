@@ -6,6 +6,9 @@ import sqlite3
 import threading
 from pathlib import Path
 
+SCHEMA_VERSION = 15
+SCHEMA_VERSION_KEY = "schema_version"
+
 
 class _ClosingConnection(sqlite3.Connection):
     """Close SQLite connections when their transaction context exits."""
@@ -48,7 +51,6 @@ class SQLiteDatabase:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
-                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '15');
 
                 CREATE TABLE IF NOT EXISTS registry_agents (
                     agent_id TEXT PRIMARY KEY,
@@ -169,8 +171,39 @@ class SQLiteDatabase:
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
+            row = conn.execute(
+                "SELECT value FROM schema_meta WHERE key=?",
+                (SCHEMA_VERSION_KEY,),
+            ).fetchone()
+            if row is not None:
+                try:
+                    stored_version = int(row[0])
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("invalid Manage SQLite schema version") from exc
+                if stored_version > SCHEMA_VERSION:
+                    raise RuntimeError(
+                        f"Manage SQLite schema version {stored_version} is newer than "
+                        f"supported version {SCHEMA_VERSION}"
+                    )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','15') "
-                "ON CONFLICT(key) DO UPDATE SET value='15'"
+                "INSERT INTO schema_meta(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (SCHEMA_VERSION_KEY, str(SCHEMA_VERSION)),
             )
             conn.commit()
+
+    @property
+    def schema_version(self) -> int:
+        """Return the checked-in schema version for this database."""
+
+        with self._lock, self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM schema_meta WHERE key=?",
+                (SCHEMA_VERSION_KEY,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Manage SQLite schema version is missing")
+        try:
+            return int(row[0])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("invalid Manage SQLite schema version") from exc

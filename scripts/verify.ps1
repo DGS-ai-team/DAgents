@@ -24,8 +24,10 @@ $goPackages = @(
 Invoke-Step "install Node Web UI dependencies" { npm ci --prefix node/webui/frontend }
 Invoke-Step "build Node Web UI" { npm run build --prefix node/webui/frontend }
 Invoke-Step "test Node Web UI" { npm test --prefix node/webui/frontend }
+Invoke-Step "lint Node Web UI" { npm run lint --prefix node/webui/frontend }
 Invoke-Step "install Manage Console dependencies" { npm ci --prefix manage/console/frontend }
 Invoke-Step "build Manage Console" { npm run build --prefix manage/console/frontend }
+Invoke-Step "lint Manage Console" { npm run lint --prefix manage/console/frontend }
 Invoke-Step "install Python dependencies" {
     python -m pip install --requirement requirements.lock --requirement requirements-dev.txt
 }
@@ -41,6 +43,37 @@ if ($gofmtOutput.Count -ne 0) {
     throw "unformatted Go files:`n$($gofmtOutput -join "`n")"
 }
 Invoke-Step "Go vet" { go vet $goPackages }
+function Invoke-Staticcheck {
+    $staticcheckCommand = Get-Command staticcheck -ErrorAction SilentlyContinue
+    $toolDir = $null
+    if ($null -eq $staticcheckCommand) {
+        $toolDir = Join-Path ([IO.Path]::GetTempPath()) ("dagents-go-tools-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $toolDir | Out-Null
+        $previousGobin = $env:GOBIN
+        $env:GOBIN = $toolDir
+        try {
+            Invoke-Step "install Staticcheck" { go install honnef.co/go/tools/cmd/staticcheck@v0.6.1 }
+        } finally {
+            if ($null -eq $previousGobin) { Remove-Item Env:GOBIN -ErrorAction SilentlyContinue }
+            else { $env:GOBIN = $previousGobin }
+        }
+        $staticcheckPath = Join-Path $toolDir "staticcheck.exe"
+    } else {
+        $staticcheckPath = $staticcheckCommand.Source
+    }
+    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "shared/workgroup", "node", "client", "desktop/tray")) {
+        Invoke-Step "Staticcheck $module" {
+            Push-Location $module
+            try {
+                & $staticcheckPath ./...
+                if ($LASTEXITCODE -ne 0) { throw "Staticcheck failed for $module" }
+            } finally {
+                Pop-Location
+            }
+        }
+    }
+}
+Invoke-Staticcheck
 Invoke-Step "Go tests" { go test $goPackages }
 $verifyDir = Join-Path ([IO.Path]::GetTempPath()) ("dagents-verify-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $verifyDir | Out-Null

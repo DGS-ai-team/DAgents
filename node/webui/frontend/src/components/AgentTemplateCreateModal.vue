@@ -140,7 +140,7 @@ watch(
           </section>
 
           <AgentSettingsForm
-            :draft="draft"
+            v-model:draft="draft"
             :llm-profiles="llmProfiles"
             v-model:show-advanced="showAdvanced"
           />
