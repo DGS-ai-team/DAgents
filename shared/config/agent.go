@@ -72,4 +72,3 @@ func (c *Config) RegistrationCapabilities() []string {
 	}
 	return append([]string(nil), c.Agent.Capabilities...)
 }
-

@@ -10,9 +10,9 @@ func TestRegistrationCard_fromConfig(t *testing.T) {
 	cfg := &config.Config{
 		NodeID: "node-a",
 		Agent: config.AgentConfig{
-			Name:        "合规助手",
-			Description: "合规审查",
-			Role:        "compliance",
+			Name:         "合规助手",
+			Description:  "合规审查",
+			Role:         "compliance",
 			Capabilities: []string{"compliance_review"},
 			Metadata: map[string]any{
 				"department": "内控合规部",

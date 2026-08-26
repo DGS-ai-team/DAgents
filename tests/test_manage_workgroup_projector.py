@@ -133,7 +133,6 @@ class ProjectorFixtureTests(unittest.TestCase):
         fix = _load("deepseek_leader_sees_member_final.json")
         given = fix["given"]
         from manage.workgroup.history import RunHistoryMessage, build_assign_tool_result_content
-        from manage.workgroup.history import ToolCall, ToolCallFunction
 
         own = [RunHistoryMessage.model_validate(m) for m in given["own_run_history"]]
         final = given["member_final_timeline"]

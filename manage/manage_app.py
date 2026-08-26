@@ -34,6 +34,7 @@ from manage.plugins.store import PluginPackageStore
 from manage.skills.routes import build_skills_router
 from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
+from manage.version import read_version
 from manage.workgroup.routes import build_workgroup_router
 from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.vertical import VerticalLoop
@@ -65,7 +66,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DAgents Manage",
-        version="0.5.4",
+        version=read_version(),
         description="统一控制面：Registry + 工作组 + Platform（制品/案例/发布）。",
         lifespan=lifespan,
     )

@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 python -m pip install --upgrade pip
-python -m pip install -r browser-service/requirements.txt pyinstaller
+python -m pip install -r browser-service/requirements.lock pyinstaller
 
 if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
   BROWSER_PI_ARGS='--onefile --name dagents-browser --paths browser-service --collect-submodules browser_use --collect-submodules uvicorn --collect-submodules fastapi --collect-submodules pydantic --hidden-import=dagents_browser --hidden-import=dagents_browser.main --hidden-import=dagents_browser.server --hidden-import=dagents_browser.driver --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan --hidden-import=uvicorn.lifespan.on browser-service/run_dagents_browser.py'

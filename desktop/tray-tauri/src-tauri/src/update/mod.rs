@@ -258,10 +258,7 @@ impl Applier {
         let readiness = match self.node_client.upgrade_readiness() {
             Ok(r) => r,
             Err(e) => {
-                return Some((
-                    EXIT_NODE_BUSY,
-                    format!("无法确认 Node 升级就绪: {e}"),
-                ));
+                return Some((EXIT_NODE_BUSY, format!("无法确认 Node 升级就绪: {e}")));
             }
         };
         if readiness.ready {
@@ -347,8 +344,12 @@ fn check(req: CheckRequest) -> Status {
         message: "无法连接 Manage，暂无法检查更新".into(),
         ..Status::default()
     };
-    let endpoint = match check_url(&req.manage_url, &base.current_version, &base.platform, &channel)
-    {
+    let endpoint = match check_url(
+        &req.manage_url,
+        &base.current_version,
+        &base.platform,
+        &channel,
+    ) {
         Ok(url) => url,
         Err(e) => {
             base.message = e;
@@ -469,7 +470,12 @@ pub fn release_platform() -> String {
     }
 }
 
-fn check_url(manage_url: &str, current: &str, platform: &str, channel: &str) -> Result<String, String> {
+fn check_url(
+    manage_url: &str,
+    current: &str,
+    platform: &str,
+    channel: &str,
+) -> Result<String, String> {
     let base = manage_url.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err("manage.url is empty".into());
@@ -500,7 +506,10 @@ fn normalize_asset_urls(
     } else {
         format!("/{raw}")
     };
-    out.insert("download_url".into(), Value::String(format!("{base}{path}")));
+    out.insert(
+        "download_url".into(),
+        Value::String(format!("{base}{path}")),
+    );
     out
 }
 
@@ -512,7 +521,10 @@ fn install_release_package(home: &Path, pkg_path: &Path) -> Result<(), String> {
         let bundle = find_bundle_root(&staging)?;
         let bin_src = bundle.join("bin");
         if !bin_src.is_dir() {
-            return Err(format!("release bundle missing bin/: {}", bin_src.display()));
+            return Err(format!(
+                "release bundle missing bin/: {}",
+                bin_src.display()
+            ));
         }
         copy_tree(&bin_src, &home.join("bin"))?;
         copy_if_exists(&bundle.join("dagents.cmd"), &home.join("dagents.cmd"))?;

@@ -190,17 +190,17 @@ func (r *Registry) registerExistingFile(id string, opts RegisterOpts) (*Artifact
 		return nil, ErrInvalidImage
 	}
 	art := &Artifact{
-		ID:        id,
-		AgentID:   r.sessionID,
-		Kind:      kindImage,
-		MIME:      mime,
-		Source:    strings.TrimSpace(opts.Source),
+		ID:         id,
+		AgentID:    r.sessionID,
+		Kind:       kindImage,
+		MIME:       mime,
+		Source:     strings.TrimSpace(opts.Source),
 		ToolCallID: strings.TrimSpace(opts.ToolCallID),
-		RelPath:   filepath.ToSlash(rel),
-		Label:     strings.TrimSpace(opts.Label),
-		Caption:   strings.TrimSpace(opts.Caption),
-		Bytes:     info.Size(),
-		CreatedAt: time.Now().UTC(),
+		RelPath:    filepath.ToSlash(rel),
+		Label:      strings.TrimSpace(opts.Label),
+		Caption:    strings.TrimSpace(opts.Caption),
+		Bytes:      info.Size(),
+		CreatedAt:  time.Now().UTC(),
 	}
 	r.mu.Lock()
 	r.byID[id] = art

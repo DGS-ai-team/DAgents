@@ -42,7 +42,10 @@ pub fn plan_sync(
             next.insert(id.to_string(), prev.clone());
         }
     }
-    SyncPlan { to_push, next_last: next }
+    SyncPlan {
+        to_push,
+        next_last: next,
+    }
 }
 
 pub struct Notifier {
@@ -106,7 +109,10 @@ fn agent_url(endpoint: &str, agent_id: &str) -> String {
 
 #[cfg(windows)]
 fn settings_about_url(endpoint: &str) -> String {
-    format!("{}/ui/settings/about", endpoint.trim().trim_end_matches('/'))
+    format!(
+        "{}/ui/settings/about",
+        endpoint.trim().trim_end_matches('/')
+    )
 }
 
 fn path_escape(value: &str) -> String {
@@ -183,7 +189,11 @@ mod tests {
     fn plan_sync_dedupes_unchanged_entries() {
         let mut last = HashMap::new();
         last.insert("a1".into(), entry("a1", 1, false));
-        let plan = plan_sync(&last, &[entry("a1", 1, false), entry("a2", 0, true)], &HashSet::new());
+        let plan = plan_sync(
+            &last,
+            &[entry("a1", 1, false), entry("a2", 0, true)],
+            &HashSet::new(),
+        );
         assert_eq!(plan.to_push.len(), 1);
         assert!(plan.next_last.contains_key("a1"));
         assert!(plan.next_last.contains_key("a2"));

@@ -73,7 +73,7 @@ jobs:
               --volume "${HOME}/.cargo:/cargo" \
               --workdir /workspace/desktop/tray-tauri/src-tauri \
               "${TAURI_LINUX_CI_IMAGE}" \
-              cargo test --locked
+              sh -c 'cargo fmt --check && cargo test --locked'
           else
             echo "::warning::Tauri Linux CI image is unavailable after ${max_pull_attempts} attempts; using the bootstrap apt path."
             sudo apt-get update
@@ -83,6 +83,7 @@ jobs:
               librsvg2-dev \
               patchelf \
               libssl-dev
+            cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
             cargo test --locked --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           fi
 
@@ -113,6 +114,7 @@ jobs:
       - name: Build Tauri shell
         shell: bash
         run: |
+          cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           chmod +x scripts/ci/build_dagents_shell_tauri.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
           test -f dist/dagents-shell.exe

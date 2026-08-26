@@ -61,9 +61,9 @@ type applyRequest struct {
 }
 
 type applyResponse struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message,omitempty"`
-	Code    int    `json:"code,omitempty"`
+	OK      bool                `json:"ok"`
+	Message string              `json:"message,omitempty"`
+	Code    int                 `json:"code,omitempty"`
 	Status  sharedupdate.Status `json:"status,omitempty"`
 }
 

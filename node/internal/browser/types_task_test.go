@@ -4,8 +4,8 @@ import "testing"
 
 func TestToolResultLiftsSummary(t *testing.T) {
 	out := toolResultFromResponse(Response{
-		OK: true,
-		URL: "https://example.com",
+		OK:             true,
+		URL:            "https://example.com",
 		ScreenshotPath: "/tmp/shot.png",
 		Detail: map[string]any{
 			"task_id": "btask-1",

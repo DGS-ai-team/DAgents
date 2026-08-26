@@ -10,7 +10,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VERSION="${VERSION:-0.3.8}"
+if [[ -z "${VERSION:-}" ]]; then
+  VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
+fi
+if [[ -z "${VERSION}" ]]; then
+  echo "[package] VERSION is empty; pass VERSION or populate ${REPO_ROOT}/VERSION" >&2
+  exit 1
+fi
 
 case "$(uname -s)" in
   Linux)

@@ -20,12 +20,12 @@ func TestWorkspaceExecutorReadGlobWrite(t *testing.T) {
 
 	bindings := NewMemoryBindingStore()
 	b := WorkerBinding{
-		MemberID:        "mb_01h00000000000000000000002",
-		WorkgroupID:     "wg_01h00000000000000000000001",
-		HomeNodeID:      "node_b",
-		WorkspacePath:   ws,
-		ToolAllowNames:  WorkspaceExecutableToolNames(),
-		LeaseEpoch:      1,
+		MemberID:         "mb_01h00000000000000000000002",
+		WorkgroupID:      "wg_01h00000000000000000000001",
+		HomeNodeID:       "node_b",
+		WorkspacePath:    ws,
+		ToolAllowNames:   WorkspaceExecutableToolNames(),
+		LeaseEpoch:       1,
 		MemberGeneration: 1,
 	}
 	if err := bindings.Put(b); err != nil {

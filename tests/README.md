@@ -66,9 +66,9 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 ## 运行（仓库根目录）
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock -r requirements-dev.txt
 python -m unittest discover -s tests -p "test_*.py" -v
-go test ./shared/config/... ./node/... ./client/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
 ```
 
 单文件示例：

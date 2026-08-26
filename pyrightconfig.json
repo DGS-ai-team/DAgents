@@ -1,0 +1,15 @@
+{
+  "include": ["manage", "scripts"],
+  "exclude": ["**/__pycache__"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportArgumentType": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportPossiblyUnboundVariable": "none"
+}

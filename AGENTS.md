@@ -25,7 +25,7 @@ This is a polyglot monorepo (Go Agent Node + Go/Python clients + Vue Web UI + op
 
 ### Lint / test / run (pointers)
 
-- Go tests/build: see README and `.github/workflows/go-ac.yml` (`go test ./node/... ./client/... ./shared/config/...`; build Web UI first).
+- Go tests/build: see README and `.github/workflows/go-ac.yml` (all Go modules are covered; build Web UI first).
 - Python tests: `python3 -m unittest discover -s tests -p "test_*.py" -v` (build Manage Console first; see `.github/workflows/pr-tests.yml`).
 - Web UI unit tests: `npm test --prefix node/webui/frontend`.
 - No repo-level ESLint/golangci-lint gate; CI is unittest + Go test + vitest.

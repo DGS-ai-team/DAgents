@@ -12,7 +12,6 @@ from manage.platform.auth import (
     AuthContext,
     audit_actor,
     authenticate,
-    ensure_node_identity,
     extract_agent_id,
     require_admin,
 )

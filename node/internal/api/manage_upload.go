@@ -7,11 +7,11 @@ import (
 )
 
 type manageUploadSkillBody struct {
-	Path     string `json:"path"`
-	SkillID  string `json:"skill_id"`
-	Version  string `json:"version"`
-	Name     string `json:"name"`
-	Publish  bool   `json:"publish"`
+	Path    string `json:"path"`
+	SkillID string `json:"skill_id"`
+	Version string `json:"version"`
+	Name    string `json:"name"`
+	Publish bool   `json:"publish"`
 }
 
 type manageUploadExternalToolBody struct {

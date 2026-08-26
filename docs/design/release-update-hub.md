@@ -41,7 +41,7 @@ Node UpdateChecker
 
 ## 4. 发布验证
 
-1. 由版本变量和 `node/internal/version/version.go` 生成同一版本号。
+1. 由根目录 `VERSION` 生成同一版本号；Release 构建通过 `-ldflags` 注入 `node/internal/version.Version`。
 2. 分别构建 Linux/Windows 产物并检查包内 Node、配置模板、静态资源和启动脚本。
 3. 在干净 runtime 中启动并验证 `/health`、Web UI、配置迁移和基本对话。
 4. 若使用 Manage，验证上传、发布、latest、下载和 Node check 的状态转换。

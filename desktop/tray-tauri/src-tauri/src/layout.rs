@@ -30,9 +30,7 @@ impl Layout {
             }
             None => home.join("config.yaml"),
         };
-        let cfg = cfg
-            .canonicalize()
-            .unwrap_or_else(|_| absolutize(&cfg));
+        let cfg = cfg.canonicalize().unwrap_or_else(|_| absolutize(&cfg));
 
         let runtime = home.join(".runtime");
         let log_dir = runtime.join("logs");
@@ -73,15 +71,9 @@ fn resolve_home() -> Result<PathBuf, String> {
         .parent()
         .ok_or_else(|| "可执行文件无父目录".to_string())?
         .to_path_buf();
-    let base = dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let base = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if base.eq_ignore_ascii_case("bin") {
-        return Ok(dir
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or(dir));
+        return Ok(dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir));
     }
     env::current_dir().map_err(|e| format!("无法获取工作目录: {e}"))
 }

@@ -82,9 +82,9 @@ func (m *Manager) HandleCancelTool(parentSessionID, argsJSON string) (string, er
 		return "ERROR: " + err.Error(), nil
 	}
 	body, _ := json.Marshal(map[string]any{
-		"child_agent_id": childID,
-		"status":           StatusCancelled,
-		"previous_status":  prev,
+		"child_agent_id":  childID,
+		"status":          StatusCancelled,
+		"previous_status": prev,
 	})
 	return string(body), nil
 }

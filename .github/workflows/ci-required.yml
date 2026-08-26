@@ -25,6 +25,10 @@ jobs:
     name: Python
     uses: ./.github/workflows/pr-tests.yml
 
+  contracts:
+    name: Contracts
+    uses: ./.github/workflows/contracts.yml
+
   tauri:
     name: Tauri
     uses: ./.github/workflows/tauri-shell.yml
@@ -44,6 +48,7 @@ jobs:
     needs:
       - go
       - python
+      - contracts
       - tauri
       - packaging
       - release-preflight
@@ -55,11 +60,13 @@ jobs:
           set -euo pipefail
           echo "go=${{ needs.go.result }}"
           echo "python=${{ needs.python.result }}"
+          echo "contracts=${{ needs.contracts.result }}"
           echo "tauri=${{ needs.tauri.result }}"
           echo "packaging=${{ needs.packaging.result }}"
           echo "release-preflight=${{ needs.release-preflight.result }}"
           [[ "${{ needs.go.result }}" == "success" ]]
           [[ "${{ needs.python.result }}" == "success" ]]
+          [[ "${{ needs.contracts.result }}" == "success" ]]
           [[ "${{ needs.tauri.result }}" == "success" ]]
           [[ "${{ needs.packaging.result }}" == "success" ]]
           [[ "${{ needs.release-preflight.result }}" == "success" || "${{ needs.release-preflight.result }}" == "skipped" ]]

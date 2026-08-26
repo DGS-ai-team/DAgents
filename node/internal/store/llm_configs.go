@@ -14,18 +14,18 @@ import (
 
 // LLMConfigRecord 为一条 LLM 连接配置（API Key 以密文存库）。
 type LLMConfigRecord struct {
-	ID                 string
-	SortOrder          int
-	Provider           string
-	BaseURL            string
-	Model              string
-	APIKeyCiphertext   string
-	Mock               bool
-	Thinking           string
-	ReasoningEffort    string
-	MultimodalEnabled  bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                string
+	SortOrder         int
+	Provider          string
+	BaseURL           string
+	Model             string
+	APIKeyCiphertext  string
+	Mock              bool
+	Thinking          string
+	ReasoningEffort   string
+	MultimodalEnabled bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // LLMConfigStore 持久化 LLM 配置列表（llm_configs.db）。
@@ -252,9 +252,9 @@ type llmConfigScanner interface {
 
 func scanLLMConfig(row llmConfigScanner) (LLMConfigRecord, error) {
 	var (
-		rec            LLMConfigRecord
-		mock           int
-		mm             int
+		rec              LLMConfigRecord
+		mock             int
+		mm               int
 		created, updated string
 	)
 	err := row.Scan(

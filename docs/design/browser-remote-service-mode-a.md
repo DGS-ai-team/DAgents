@@ -42,7 +42,7 @@ tools:
 
 ```bash
 cd browser-service
-pip install -r requirements.txt
+pip install -r browser-service/requirements.lock
 python -m dagents_browser.main --config /path/to/config.yaml --listen 127.0.0.1:18766
 ```
 

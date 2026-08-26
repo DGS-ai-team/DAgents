@@ -8,12 +8,12 @@ import (
 
 // Context 为 RunPhase 传入的 phase 上下文；按 Phase 仅填充对应 Payload 字段。
 type Context struct {
-	Phase           Phase
-	SessionID       string
-	AgentID         string
-	TurnID          string
+	Phase         Phase
+	SessionID     string
+	AgentID       string
+	TurnID        string
 	ParentAgentID string
-	Metadata        map[string]any
+	Metadata      map[string]any
 
 	MessageEnqueued    *MessageEnqueuedPayload
 	TurnBeforeCompress *TurnBeforeCompressPayload
@@ -27,20 +27,20 @@ type Context struct {
 	ToolDecision *ToolBeforeEachResult
 	// ToolAfterEachOutput 为 tool.after_each 链的结果拆分（RunPhase 链读写）。
 	ToolAfterEachOutput *ToolAfterEachOutput
-	HITLBeforePause    *HITLBeforePausePayload
-	HITLAfterResume    *HITLAfterResumePayload
-	TurnDone           *TurnDonePayload
-	TurnError          *TurnErrorPayload
-	TurnCancel         *TurnCancelPayload
-	SessionLifecycle   *SessionLifecyclePayload
+	HITLBeforePause     *HITLBeforePausePayload
+	HITLAfterResume     *HITLAfterResumePayload
+	TurnDone            *TurnDonePayload
+	TurnError           *TurnErrorPayload
+	TurnCancel          *TurnCancelPayload
+	SessionLifecycle    *SessionLifecyclePayload
 
 	// 以下字段由 EnrichContext 从 Host 快照注入，供 in-process Hook 读取。
-	History      []llm.Message          `json:"history,omitempty"`
-	SystemPrompt string                 `json:"system_prompt,omitempty"`
-	LoadedSkills []LoadedSkillInfo      `json:"loaded_skills,omitempty"`
-	Runtime      RuntimeSummary         `json:"runtime"`
+	History      []llm.Message              `json:"history,omitempty"`
+	SystemPrompt string                     `json:"system_prompt,omitempty"`
+	LoadedSkills []LoadedSkillInfo          `json:"loaded_skills,omitempty"`
+	Runtime      RuntimeSummary             `json:"runtime"`
 	SessionStore map[string]json.RawMessage `json:"session_store,omitempty"`
-	FSPaths      *FSPaths               `json:"fs_paths,omitempty"`
+	FSPaths      *FSPaths                   `json:"fs_paths,omitempty"`
 }
 
 // MessageEnqueuedPayload 对应 message.enqueued。

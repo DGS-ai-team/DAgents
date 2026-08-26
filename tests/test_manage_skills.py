@@ -100,7 +100,8 @@ class SkillStoreTest(unittest.TestCase):
     def _mk(self, **kw):
         base = dict(skill_id="svc-restart", version="1.0.0", name="Service Restart",
                     risk_level="medium", blob_id="deadbeef")
-        base.update(kw); return SkillPackageCreate(**base)
+        base.update(kw)
+        return SkillPackageCreate(**base)
 
     def test_draft_then_publish_appears_in_catalog(self):
         s = _skill_store()
@@ -113,7 +114,8 @@ class SkillStoreTest(unittest.TestCase):
 
     def test_sync_manifest_since(self):
         s = _skill_store()
-        s.create(self._mk(), now=1); s.publish("svc-restart", "1.0.0", now=2)
+        s.create(self._mk(), now=1)
+        s.publish("svc-restart", "1.0.0", now=2)
         self.assertEqual(len(s.sync_manifest(since=0)), 1)
         self.assertEqual(s.sync_manifest(since=1), [])   # nothing new past current version
 

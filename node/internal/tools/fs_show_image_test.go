@@ -27,11 +27,11 @@ func TestExecShowImage_registersMedia(t *testing.T) {
 			t.Fatalf("relPath=%q source=%q", relPath, source)
 		}
 		return &MediaArtifactRef{
-			ID:    "med_demo",
-			Kind:  "image",
-			MIME:  "image/png",
-			URL:   "/v1/agents/s1/media/med_demo",
-			Label: label,
+			ID:      "med_demo",
+			Kind:    "image",
+			MIME:    "image/png",
+			URL:     "/v1/agents/s1/media/med_demo",
+			Label:   label,
 			Caption: caption,
 		}, nil
 	})

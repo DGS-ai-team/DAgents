@@ -1,5 +1,6 @@
 # tests/test_manage_storage_schema.py
-import tempfile, unittest
+import tempfile
+import unittest
 from pathlib import Path
 from manage.storage.sqlite import SQLiteDatabase
 
