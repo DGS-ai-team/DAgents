@@ -60,7 +60,7 @@ func TestProcessRestartRecovery(t *testing.T) {
 		second.Kill(t)
 
 		if got := llmServer.Calls(); got != 2 {
-			t.Fatalf("LLM calls=%d, want initial tool call plus post-reconcile continuation", got)
+			t.Fatalf("LLM calls=%d, want initial tool call plus post-reconcile continuation; requests=%v", got, llmServer.Requests())
 		}
 	})
 
@@ -110,9 +110,10 @@ const (
 
 type processLLMServer struct {
 	*httptest.Server
-	mu    sync.Mutex
-	mode  processLLMMode
-	calls int
+	mu       sync.Mutex
+	mode     processLLMMode
+	calls    int
+	requests []string
 }
 
 func newProcessLLMServer(t *testing.T, mode processLLMMode) *processLLMServer {
@@ -128,15 +129,38 @@ func (s *processLLMServer) Calls() int {
 	return s.calls
 }
 
+func (s *processLLMServer) Requests() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.requests...)
+}
+
 func (s *processLLMServer) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
 		http.NotFound(w, r)
 		return
 	}
+	body, _ := io.ReadAll(r.Body)
+	var request struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	_ = json.Unmarshal(body, &request)
 	s.mu.Lock()
 	s.calls++
 	call := s.calls
 	mode := s.mode
+	parts := make([]string, 0, len(request.Messages))
+	for _, message := range request.Messages {
+		content := strings.ReplaceAll(strings.TrimSpace(message.Content), "\n", "\\n")
+		if len(content) > 160 {
+			content = content[:160] + "…"
+		}
+		parts = append(parts, fmt.Sprintf("%s:%q", message.Role, content))
+	}
+	s.requests = append(s.requests, fmt.Sprintf("call=%d bytes=%d messages=%v", call, len(body), parts))
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/event-stream")
