@@ -271,7 +271,9 @@ type sessionHydrateResponse struct {
 	Transcript      []session.TranscriptEntry `json:"transcript"`
 	PendingHITL     map[string]any            `json:"pending_hitl"`
 	HistoryRevision uint64                    `json:"history_revision"`
-	SSESeqHint      int                       `json:"sse_seq_hint"`
+	StreamEpoch     string                    `json:"stream_epoch"`
+	StreamSeqHint   int                       `json:"stream_seq_hint"`
+	AgentSeqHint    int                       `json:"agent_seq_hint"`
 	NotifySeq       int                       `json:"notify_seq"`
 	AckSeq          int                       `json:"ack_seq"`
 	HasUnread       bool                      `json:"has_unread"`
@@ -312,7 +314,9 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		Transcript:      transcript,
 		PendingHITL:     view.PendingHITL,
 		HistoryRevision: view.HistoryRevision,
-		SSESeqHint:      s.stream.CurrentSeq(),
+		StreamEpoch:     s.stream.Epoch(),
+		StreamSeqHint:   s.stream.CurrentSeq(),
+		AgentSeqHint:    s.stream.CurrentAgentSeq(sessionID),
 		NotifySeq:       view.NotifySeq,
 		AckSeq:          view.AckSeq,
 		HasUnread:       view.HasUnread,
@@ -321,7 +325,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 }
 
 type sessionAckRequest struct {
-	SSESeq int `json:"sse_seq"`
+	AgentSeq int `json:"agent_seq"`
 }
 
 type sessionAckResponse struct {
@@ -342,16 +346,16 @@ func (s *Server) handleAgentAckImpl(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		return
 	}
-	if req.SSESeq <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sse_seq must be positive", nil)
+	if req.AgentSeq <= 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "agent_seq must be positive", nil)
 		return
 	}
-	state, err := s.sessions.AckSession(r.Context(), sessionID, req.SSESeq)
+	state, err := s.sessions.AckSession(r.Context(), sessionID, req.AgentSeq)
 	if err != nil {
 		switch err.Error() {
 		case "agent_not_found":
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		case "agent_id is required", "sse_seq must be positive":
+		case "agent_id is required", "agent_seq must be positive":
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		default:
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)

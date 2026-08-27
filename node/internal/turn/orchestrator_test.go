@@ -264,7 +264,7 @@ func TestRunMessageTurn(t *testing.T) {
 				}
 			case "usage":
 				gotUsage = true
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:
@@ -362,7 +362,7 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 				if c, ok := ev.Data["content"].(string); !ok || !strings.Contains(c, "file-body") {
 					t.Fatalf("tool result = %+v", ev.Data)
 				}
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:
@@ -390,23 +390,13 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 
 	deadline := time.After(3 * time.Second)
 	var pending *PendingHITL
-	var gotHitlDone bool
 	var gotUserInfo bool
-	for !(gotHitlDone && gotUserInfo) {
+	for !gotUserInfo {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
-			case "done":
-				if ev.Data["finish_reason"] != "awaiting_hitl" {
-					t.Fatalf("unexpected done finish_reason: %+v", ev.Data)
-				}
-				if ev.Data["turn_complete"] != false {
-					t.Fatalf("turn_complete = %v, want false", ev.Data["turn_complete"])
-				}
-				if ev.Data["awaiting"] != "hitl" {
-					t.Fatalf("awaiting = %v", ev.Data["awaiting"])
-				}
-				gotHitlDone = true
+			case "turn_finished":
+				t.Fatalf("HITL pause must not emit turn_finished: %+v", ev.Data)
 			case "hitl_required":
 				items, ok := ev.Data["items"].([]any)
 				if !ok || len(items) != 1 {
@@ -433,7 +423,7 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 				gotUserInfo = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout hitl_done=%v user_info=%v", gotHitlDone, gotUserInfo)
+			t.Fatalf("timeout user_info=%v", gotUserInfo)
 		}
 	}
 	continueResumeAndDrain(t, orch, context.Background(), "sess-1", &history, map[string]any{
@@ -476,7 +466,7 @@ resumeApproval:
 	for {
 		select {
 		case ev := <-ch:
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				<-done
 				return
 			}
@@ -607,7 +597,7 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 			switch ev.Type {
 			case "error":
 				t.Fatalf("unexpected error SSE: %+v", ev.Data)
-			case "done":
+			case "turn_finished":
 				if reason, _ := ev.Data["finish_reason"].(string); reason != "stop" {
 					t.Fatalf("done finish_reason = %q, want stop", reason)
 				}
@@ -859,7 +849,7 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	for finish == "" {
 		select {
 		case ev := <-ch:
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				finish, _ = ev.Data["finish_reason"].(string)
 			}
 		case <-deadline:
@@ -948,7 +938,7 @@ func TestRunMessageTurnLLMError(t *testing.T) {
 			switch ev.Type {
 			case "error":
 				gotError = true
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:

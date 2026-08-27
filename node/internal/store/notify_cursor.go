@@ -26,7 +26,7 @@ func (s *SQLiteStore) BumpNotifySeq(ctx context.Context, agentID string, seq int
 }
 
 // AckSession 更新 ack_seq 并返回更新后的 RuntimeState；Agent 不存在时返回 nil, nil。
-func (s *SQLiteStore) AckSession(ctx context.Context, agentID string, sseSeq int) (*RuntimeState, error) {
+func (s *SQLiteStore) AckSession(ctx context.Context, agentID string, agentSeq int) (*RuntimeState, error) {
 	if s == nil {
 		return nil, fmt.Errorf("store is nil")
 	}
@@ -34,8 +34,8 @@ func (s *SQLiteStore) AckSession(ctx context.Context, agentID string, sseSeq int
 	if agentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
 	}
-	if sseSeq <= 0 {
-		return nil, fmt.Errorf("sse_seq must be positive")
+	if agentSeq <= 0 {
+		return nil, fmt.Errorf("agent_seq must be positive")
 	}
 	rec, err := s.Load(ctx, agentID)
 	if err != nil {
@@ -44,8 +44,8 @@ func (s *SQLiteStore) AckSession(ctx context.Context, agentID string, sseSeq int
 	if rec == nil {
 		return nil, nil
 	}
-	if sseSeq > rec.RuntimeState.AckSeq {
-		rec.RuntimeState.AckSeq = sseSeq
+	if agentSeq > rec.RuntimeState.AckSeq {
+		rec.RuntimeState.AckSeq = agentSeq
 		if err := s.Save(ctx, *rec); err != nil {
 			return nil, err
 		}

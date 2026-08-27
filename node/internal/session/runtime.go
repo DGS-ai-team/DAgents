@@ -479,8 +479,19 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 			continue
 		}
 		if record, ok := r.popInputIfIdle(); ok {
+			// Persist the ownership transfer before executing the Turn. If the
+			// process stops during a tool call, startup can recover this input
+			// alongside the lifecycle projection instead of replaying it after
+			// the recovered continuation.
+			r.persist(context.Background())
 			if r.acceptEnvelope(record.Env) {
 				r.dispatchInput(ctx, record)
+			}
+			if r.inputBox != nil {
+				r.inputBox.MarkCompleted(record.Seq)
+				r.persist(context.Background())
+				r.inputBox.Ack(record.Seq)
+				r.persist(context.Background())
 			}
 			r.signalInputBox()
 			continue
@@ -639,19 +650,10 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		r.logger.Info("stale human message dropped after session clear", "session_id", r.session.ID)
 		return
 	}
-	userName := llm.NormalizeUserMessageName(env.UserName)
-	userMsg, err := llm.BuildUserMessage(env.Content, env.ContentParts, userName)
+	userMsg, err := r.buildInputUserMessage(env)
 	if err != nil {
 		r.logger.Warn("invalid user message", "session_id", r.session.ID, "error", err)
 		return
-	}
-	if r.media != nil && llm.MessageHasImages(userMsg) {
-		persisted, perr := media.PersistUserMessageImages(r.media, userMsg)
-		if perr != nil {
-			r.logger.Warn("persist user images failed", "session_id", r.session.ID, "error", perr)
-			return
-		}
-		userMsg = persisted
 	}
 	// A new input must never preempt an active Turn. InputBox normally pops only
 	// while idle; keep this defensive guard for races and direct test fixtures.
@@ -675,7 +677,6 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		r.historyRevision++
 		r.mu.Unlock()
 		r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", err)
-		r.persist(context.Background())
 		return
 	}
 	// Clear-context may have won the race while lifecycleBeginHumanTurn was
@@ -703,7 +704,22 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 	r.commitHistoryFallback(history)
 	outcome = r.runInlineToolContinuationChain(parent, env.SessionEpoch, outcome)
 	r.finishTurnIdle(outcome)
-	r.persist(context.Background())
+}
+
+func (r *runtime) buildInputUserMessage(env queue.Envelope) (llm.Message, error) {
+	userName := llm.NormalizeUserMessageName(env.UserName)
+	userMsg, err := llm.BuildUserMessage(env.Content, env.ContentParts, userName)
+	if err != nil {
+		return llm.Message{}, err
+	}
+	if r.media != nil && llm.MessageHasImages(userMsg) {
+		persisted, perr := media.PersistUserMessageImages(r.media, userMsg)
+		if perr != nil {
+			return llm.Message{}, perr
+		}
+		userMsg = persisted
+	}
+	return userMsg, nil
 }
 
 // runInlineToolContinuationChain keeps tool results inside the logical Turn.
@@ -963,6 +979,66 @@ func (r *runtime) restoreInputBoxState(raw json.RawMessage) {
 	if err := r.inputBox.Restore(raw); err != nil && r.logger != nil {
 		r.logger.Warn("restore input box state failed", "session_id", r.session.ID, "error", err)
 	}
+}
+
+// reconcileRestoredInputBox closes the crash window around Pop. An input that
+// was already driving a live Turn is represented by the lifecycle projection,
+// so it must not be replayed after its recovered continuation. Its user
+// message may not have reached the history snapshot before the process
+// stopped, therefore restore it before dropping the in-flight marker.
+func (r *runtime) reconcileRestoredInputBox() {
+	if r == nil || r.inputBox == nil || r.turnCoordinator == nil {
+		return
+	}
+	record, ok := r.inputBox.InFlight()
+	if !ok {
+		return
+	}
+	state := r.turnCoordinator.Snapshot()
+	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
+		if userMsg, err := r.buildInputUserMessage(record.Env); err == nil {
+			r.mu.Lock()
+			if !r.historyHasUserMessageLocked(userMsg) {
+				r.messages = append(r.messages, userMsg)
+				r.historyRevision++
+			}
+			r.mu.Unlock()
+		} else if r.logger != nil {
+			r.logger.Warn("restore in-flight input message failed", "session_id", r.session.ID, "seq", record.Seq, "error", err)
+		}
+		// The active lifecycle Turn is authoritative. Mark this input complete
+		// before acknowledging it so history and ownership are persisted in the
+		// same snapshot boundary.
+		r.inputBox.MarkCompleted(record.Seq)
+		r.persist(context.Background())
+		r.inputBox.Ack(record.Seq)
+		r.persist(context.Background())
+		return
+	}
+	if record.Completed {
+		// A completed marker means the result history was persisted before the
+		// final acknowledgement. Discard it instead of starting a duplicate
+		// Turn after restart.
+		r.inputBox.Ack(record.Seq)
+		r.persist(context.Background())
+		return
+	}
+	// The process stopped after Pop but before a Turn became durable. Replay
+	// the input at the head of the FIFO, preserving its original sequence.
+	r.inputBox.RequeueInFlight()
+	r.persist(context.Background())
+}
+
+func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
+	for index := len(r.messages) - 1; index >= 0; index-- {
+		message := r.messages[index]
+		if message.Role != "user" {
+			continue
+		}
+		return llm.MessageTextSummary(message) == llm.MessageTextSummary(target) &&
+			llm.NormalizeUserMessageName(message.Name) == llm.NormalizeUserMessageName(target.Name)
+	}
+	return false
 }
 
 // replacementData returns the in-memory state needed when a manager without

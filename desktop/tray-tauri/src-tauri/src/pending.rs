@@ -138,7 +138,7 @@ pub fn should_sync_on_event(ev: &StreamEvent) -> bool {
     if !event_has_agent(ev) {
         return false;
     }
-    matches!(ev.event_type.as_str(), "hitl_required" | "done")
+    matches!(ev.event_type.as_str(), "hitl_required" | "turn_finished")
 }
 
 pub fn event_has_agent(ev: &StreamEvent) -> bool {
@@ -264,6 +264,10 @@ mod tests {
             session_id: "a1".into(),
             agent_id: String::new(),
             seq: 0,
+            agent_seq: 0,
+            event_version: 1,
+            stream_epoch: "test".into(),
+            delivery: "replayable".into(),
             data: HashMap::new(),
         };
         assert!(should_sync_on_event(&ev));

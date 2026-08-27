@@ -135,7 +135,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 			if c, ok := envelope.Data["content"].(string); ok {
 				assistant.WriteString(c)
 			}
-		case "done":
+		case "turn_finished":
 			gotDone = true
 		}
 	}

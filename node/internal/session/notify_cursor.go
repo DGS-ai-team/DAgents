@@ -10,27 +10,21 @@ func ShouldBumpNotifySeq(ev stream.Event) bool {
 	switch ev.Type {
 	case "hitl_required":
 		return true
-	case "done":
-		return shouldBumpNotifyOnDone(ev.Data)
+	case "turn_finished":
+		return shouldBumpNotifyOnTurnFinished(ev.Data)
 	}
 	return false
 }
 
-func shouldBumpNotifyOnDone(data map[string]any) bool {
+func shouldBumpNotifyOnTurnFinished(data map[string]any) bool {
 	if data == nil {
-		return false
-	}
-	if awaiting, _ := data["awaiting"].(string); awaiting == "hitl" {
-		return false
+		return true
 	}
 	finish, _ := data["finish_reason"].(string)
 	switch finish {
-	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval", "error", "cancelled":
+	case "error", "cancelled":
 		return false
+	default:
+		return true
 	}
-	turnComplete, ok := data["turn_complete"].(bool)
-	if ok {
-		return turnComplete
-	}
-	return finish == "stop" || finish == ""
 }

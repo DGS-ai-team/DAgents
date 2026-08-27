@@ -604,7 +604,7 @@ func (o *Orchestrator) runOneStep(
 		if hookErr != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
 			o.publishError(sessionID, hookErr.Error())
-			o.publishDone(sessionID, "error")
+			o.publishTurnFinished(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 		}
@@ -646,7 +646,7 @@ func (o *Orchestrator) runOneStep(
 		}); err != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
-			o.publishDone(sessionID, "error")
+			o.publishTurnFinished(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record turn snapshot: %w", err)}
 		}
@@ -682,7 +682,7 @@ func (o *Orchestrator) runOneStep(
 		if finishReason == "cancelled" {
 			o.publishUsageIfAccumulated(sessionID, stepIndex)
 		}
-		o.publishDone(sessionID, finishReason)
+		o.publishTurnFinished(sessionID, finishReason)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: streamErr}
 	}
@@ -693,7 +693,7 @@ func (o *Orchestrator) runOneStep(
 	}); err != nil {
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, err.Error())
-		o.publishDone(sessionID, "error")
+		o.publishTurnFinished(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record model response: %w", err)}
 	}
@@ -708,7 +708,7 @@ func (o *Orchestrator) runOneStep(
 			o.logger.Warn("llm.after_call hook failed", "session_id", sessionID, "error", hookErr)
 		}
 		o.publishError(sessionID, msg)
-		o.publishDone(sessionID, "error")
+		o.publishTurnFinished(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 	}
@@ -724,7 +724,7 @@ func (o *Orchestrator) runOneStep(
 	}); err != nil {
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, err.Error())
-		o.publishDone(sessionID, "error")
+		o.publishTurnFinished(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record assistant message: %w", err)}
 	}
@@ -742,14 +742,14 @@ func (o *Orchestrator) runOneStep(
 		}); err != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
-			o.publishDone(sessionID, "error")
+			o.publishTurnFinished(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record tool call: %w", err)}
 		}
 	}
 
 	if len(result.ToolCalls) == 0 {
-		o.publishDone(sessionID, finishReason)
+		o.publishTurnFinished(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "step_index", stepIndex)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex}
@@ -772,7 +772,7 @@ func (o *Orchestrator) runOneStep(
 		)
 		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
 		if stepIndex > o.maxToolLoops+1 {
-			o.publishDone(sessionID, finishReason)
+			o.publishTurnFinished(sessionID, finishReason)
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex}
 		}
@@ -791,12 +791,11 @@ func (o *Orchestrator) runOneStep(
 			finishReason = "error"
 			o.publishError(sessionID, procErr.Error())
 		}
-		o.publishDone(sessionID, finishReason)
+		o.publishTurnFinished(sessionID, finishReason)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: procErr}
 	}
 	if pending != nil {
-		o.publishDone(sessionID, pauseReason)
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
 		return StepOutcome{Pending: pending, StepIndex: stepIndex}
 	}

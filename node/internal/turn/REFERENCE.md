@@ -15,7 +15,7 @@
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `CancelPendingToolCalls` | 显式 `CancelTurn` 时闭合 pending tool calls；普通输入不调用 |
 | `PublishSideEffectCallback` / `PublishSideEffectApplied` / `PublishSideEffectsCleared` | 旁路 Produce/Apply UX SSE |
-| `publishDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
+| `publishTurnFinished` | `turn_finished` SSE；只表示 turn 进入终态，含 **`tool_context_metrics`**（WS5） |
 
 SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / `publishToolResult` / `publishError` / `publishUsage` 等）。
 
@@ -28,7 +28,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | `TurnContextMetrics` | 单用户任务内工具链指标快照 |
 | `recordToolCall` / `recordToolResult` / `recordToolLoop` | 编排器内埋点 |
 | `logTurnContextMetrics` | 指标结构化日志（非 SSE） |
-| `snapshot()` | 序列化为 `done.tool_context_metrics` |
+| `snapshot()` | 序列化为 `turn_finished.tool_context_metrics` |
 
 ## sse_publish.go
 
@@ -40,7 +40,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | `publishToolCall` / `publishToolResult` | 工具 SSE |
 | `PublishSideEffectCallback` | 异步工具 Produce SSE |
 | `PublishSideEffectApplied` / `PublishSideEffectsCleared` | Apply / ClearContext UX SSE |
-| `publishDone` | `done` SSE |
+| `publishTurnFinished` | `turn_finished` SSE |
 | `publishUsage` / `publishUsageIfAccumulated` | `usage` SSE |
 
 ## tool_router.go

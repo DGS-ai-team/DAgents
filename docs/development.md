@@ -67,7 +67,7 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 
 前端展示的运行态必须来自权威事件或持久化快照：
 
-- 普通 Agent：SSE + hydrate；`done`、`failed`、`cancelled` 等终态负责收敛临时状态；
+- 普通 Agent：SSE + hydrate；`turn_state` 是生命周期权威，`turn_finished`、`failed`、`cancelled` 等终态负责收敛临时状态；
 - Workgroup：Timeline 是可恢复事实，`workgroup.realtime` 只承担临时流式状态；
 - Terminal：WebSocket terminal snapshot/output 是终端权威来源；
 - MCP/配置/skills：使用对应 revision/event 触发刷新，不根据 UI 轮询先后顺序猜测状态。

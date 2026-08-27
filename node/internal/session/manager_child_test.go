@@ -68,7 +68,7 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 				if s, ok := ev.Data["summary"].(string); ok && !strings.Contains(s, "README") {
 					t.Fatalf("unexpected summary: %q", s)
 				}
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:

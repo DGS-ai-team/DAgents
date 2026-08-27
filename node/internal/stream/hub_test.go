@@ -12,7 +12,7 @@ func TestHubPublishSubscribe(t *testing.T) {
 	defer h.Unsubscribe(ch)
 
 	h.Publish("sess-1", "assistant", map[string]any{"content": "hi"})
-	h.Publish("sess-1", "done", map[string]any{"finish_reason": "stop"})
+	h.Publish("sess-1", "turn_finished", map[string]any{"finish_reason": "stop"})
 
 	var types []string
 	for i := 0; i < 2; i++ {
@@ -22,7 +22,7 @@ func TestHubPublishSubscribe(t *testing.T) {
 			t.Fatalf("seq = %d, want %d", ev.Seq, i+1)
 		}
 	}
-	if types[0] != "assistant" || types[1] != "done" {
+	if types[0] != "assistant" || types[1] != "turn_finished" {
 		t.Fatalf("unexpected types: %v", types)
 	}
 }
@@ -74,6 +74,56 @@ func TestHubCurrentSeq(t *testing.T) {
 	}
 }
 
+func TestHubAgentCursorSkipsForeignAndEphemeralEvents(t *testing.T) {
+	h := NewHub(16, nil)
+	first := h.Publish("agt-a", "assistant", map[string]any{"content": "one"})
+	h.PublishEphemeral("agt-a", "execution", map[string]any{"event": "process_output"})
+	h.Publish("agt-b", "assistant", map[string]any{"content": "foreign"})
+	finished := h.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})
+
+	if first.AgentSeq != 1 || finished.AgentSeq != 2 {
+		t.Fatalf("agent seq = %d, %d; want 1, 2", first.AgentSeq, finished.AgentSeq)
+	}
+	if first.StreamEpoch == "" || first.StreamEpoch != finished.StreamEpoch {
+		t.Fatalf("stream epoch not stable: %q / %q", first.StreamEpoch, finished.StreamEpoch)
+	}
+	if first.Delivery != "replayable" {
+		t.Fatalf("replayable delivery = %q", first.Delivery)
+	}
+
+	sub := h.SubscribeAgentCursor(1, 1, "agt-a")
+	defer h.Unsubscribe(sub.Events)
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != "turn_finished" || ev.AgentSeq != 2 {
+			t.Fatalf("unexpected agent replay: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent replay")
+	}
+	select {
+	case ev := <-sub.Events:
+		t.Fatalf("unexpected extra agent replay: %+v", ev)
+	default:
+	}
+}
+
+func TestHubAgentCursorReportsHistoryTruncation(t *testing.T) {
+	h := NewHub(2, nil)
+	h.Publish("agt-a", "assistant", map[string]any{"content": "one"})
+	h.Publish("agt-a", "assistant", map[string]any{"content": "two"})
+	h.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})
+
+	sub := h.SubscribeAgentCursor(0, 0, "agt-a")
+	defer h.Unsubscribe(sub.Events)
+	if !sub.ResyncRequired {
+		t.Fatal("expected resync when requested agent history is truncated")
+	}
+	if sub.StreamEpoch == "" || sub.CurrentAgentSeq != 3 {
+		t.Fatalf("bad subscription cursor: %+v", sub)
+	}
+}
+
 func TestHubSubscribeLiveSkipsHistory(t *testing.T) {
 	h := NewHub(16, nil)
 	h.Publish("s", "assistant", map[string]any{"content": "old"})
@@ -111,7 +161,7 @@ func TestEventFormatSSE(t *testing.T) {
 	}
 }
 
-func TestHubCriticalDoneDeliveredWhenBufferFull(t *testing.T) {
+func TestHubCriticalTurnFinishedDeliveredWhenBufferFull(t *testing.T) {
 	h := NewHub(16, nil)
 	ch := h.Subscribe(0)
 	defer h.Unsubscribe(ch)
@@ -119,11 +169,11 @@ func TestHubCriticalDoneDeliveredWhenBufferFull(t *testing.T) {
 	gotDone := make(chan struct{})
 	go func() {
 		for ev := range ch {
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				close(gotDone)
 				return
 			}
-			// 模拟慢消费者：慢慢排空缓冲，给锁外补送 done 让路
+			// 模拟慢消费者：慢慢排空缓冲，给锁外补送终态事件让路
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -131,12 +181,12 @@ func TestHubCriticalDoneDeliveredWhenBufferFull(t *testing.T) {
 	for i := 0; i < 400; i++ {
 		h.Publish("agt-1", "assistant", map[string]any{"content": "x"})
 	}
-	h.Publish("agt-1", "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+	h.Publish("agt-1", "turn_finished", map[string]any{"finish_reason": "stop", "turn_complete": true})
 
 	select {
 	case <-gotDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("critical done was dropped while subscriber buffer was full")
+		t.Fatal("critical turn_finished was dropped while subscriber buffer was full")
 	}
 }
 
@@ -146,9 +196,9 @@ func TestHubSubscribeAgentFiltersOtherAgents(t *testing.T) {
 	defer h.Unsubscribe(chA)
 
 	h.Publish("agt-b", "assistant", map[string]any{"content": "noise"})
-	h.Publish("agt-b", "done", map[string]any{"finish_reason": "stop"})
+	h.Publish("agt-b", "turn_finished", map[string]any{"finish_reason": "stop"})
 	h.Publish("agt-a", "assistant", map[string]any{"content": "mine"})
-	h.Publish("agt-a", "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+	h.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop", "turn_complete": true})
 
 	var types []string
 	for i := 0; i < 2; i++ {
@@ -162,7 +212,7 @@ func TestHubSubscribeAgentFiltersOtherAgents(t *testing.T) {
 			t.Fatalf("timeout waiting for agt-a event %d", i)
 		}
 	}
-	if types[0] != "assistant" || types[1] != "done" {
+	if types[0] != "assistant" || types[1] != "turn_finished" {
 		t.Fatalf("types = %v", types)
 	}
 	select {
@@ -181,14 +231,14 @@ func TestHubSubscribeAgentIgnoresForeignFlood(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		h.Publish("agt-b", "assistant", map[string]any{"content": "x"})
 	}
-	h.Publish("agt-a", "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+	h.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop", "turn_complete": true})
 
 	select {
 	case ev := <-chA:
-		if ev.Type != "done" || ev.AgentID != "agt-a" {
-			t.Fatalf("expected agt-a done, got %+v", ev)
+		if ev.Type != "turn_finished" || ev.AgentID != "agt-a" {
+			t.Fatalf("expected agt-a turn_finished, got %+v", ev)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("agt-a done blocked/dropped by foreign agent flood")
+		t.Fatal("agt-a turn_finished blocked/dropped by foreign agent flood")
 	}
 }

@@ -253,7 +253,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 2. `llm.StreamChat` → 推送 `assistant` / `reasoning` / `usage`
 3. 若有 `tool_calls` → `processToolCalls`（policy、临时 Agent 工具、skills 工具、auto 批执行）
 4. 无待处理 HITL 且需续跑 → `ScheduleToolResult=true`
-5. 回合结束 → `done` SSE（语义见 [agent-node-api.md](./agent-node-api.md) §2.4.1）
+5. 回合结束 → `turn_finished` SSE（语义见 [agent-node-api.md](./agent-node-api.md) §2.4.1）
 
 ### 6.3 与 runtime 的边界
 
@@ -301,7 +301,7 @@ Resume、异步工具、trigger 入队路径见 `runtime.consumeLoop` 的 `switc
 
 | 文档 | 内容 |
 |------|------|
-| [agent-node-api.md](./agent-node-api.md) | HTTP 路径、SSE `type`、`done` 语义 |
+| [agent-node-api.md](./agent-node-api.md) | HTTP 路径、SSE `type`、`turn_finished` 语义 |
 | [child-agent-tools.md](./child-agent-tools.md) | 临时子 Agent 工具与生命周期 |
 | [development.md](../development.md) | Node 构建、启动与测试 |
 | [context-compression-cache-analysis.md](../design/context-compression-cache-analysis.md) | 压缩与 prompt 侧车（Go：`compression` 包） |

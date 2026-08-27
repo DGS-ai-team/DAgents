@@ -12,7 +12,7 @@ func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
 		return false
 	}
 	switch ev.Type {
-	case "hitl_required", "done":
+	case "hitl_required", "turn_finished":
 		return true
 	}
 	return false

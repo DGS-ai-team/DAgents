@@ -78,7 +78,7 @@ func TestEnqueueMessageTurn(t *testing.T) {
 				if c, ok := ev.Data["content"].(string); ok {
 					assistantText += c
 				}
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:

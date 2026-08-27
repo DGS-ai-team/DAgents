@@ -189,52 +189,56 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 ### 2.4 SSE 事件流
 
 ```http
-GET /v1/streams?agent_id=agt-xxx
+GET /v1/streams?agent_id=agt-xxx&live=1
 Accept: text/event-stream
-Last-Event-ID: 42
+
+# reconnect
+GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 ```
 
-- Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
+- `live=1` 首连由 Hub 原子确定订阅点；Agent 过滤流重连使用 `after_agent_seq`。
+- `seq` 是进程级诊断序号；`agent_seq` 是当前 Agent 的可重放连续游标。Node 重启通过 `stream_epoch` 区分新旧事件纪元。
+- 历史被截断时发送 `resync_required`，Client 必须 hydrate 后继续，不得静默跳过缺失事件。
 - 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`hitl_required`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`turn_state`、`hitl_required`、`turn_finished`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。
 
 **本地 turn** 统一使用 `hitl_required`。子 Agent 相关路径仍可能出现 `approval_required` / `user_information_required`，UI 按同类 HITL 处理即可。
 
-#### 2.4.1 `done` 事件（语义 B：轮到用户）
+#### 2.4.1 `turn_finished` 与 `turn_state`
 
-`done` **仅**表示编排器在当前步暂停、**轮到用户交互**（解锁 Client 等待、进入 HITL 或自由输入）。**不**表示 assistant 流式段落结束（换行由 `assistant` / `tool_call` / `reasoning` 等事件在 Client 侧收束）。
+`turn_state` 是 Turn Coordinator 的生命周期唯一权威，包含当前 turn/step、phase、工具执行态、交互态和终态。`hitl_required` 是需要用户交互的事实事件；`turn_state.phase=tool_waiting|waiting_user` 是暂停状态。
 
-实现：`node/internal/turn/sse_publish.go` 中 `publishDone`。
+`turn_finished` 只表示当前 turn 已真正进入终态，不能表示 HITL 暂停。实现：`node/internal/turn/sse_publish.go` 中 `publishTurnFinished`。
 
 **载荷字段**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `finish_reason` | string | `stop` \| `awaiting_hitl` \| `error` \| `cancelled` |
-| `turn_complete` | bool | `true`：本条用户 `message` 驱动的链已结束，可自由输入；`false`：HITL 暂停，链未结束 |
-| `awaiting` | string \| null | HITL 暂停时：`hitl`；链结束时为 `null` |
+| `finish_reason` | string | `stop` \| `error` \| `cancelled` 等终态原因 |
+| `turn_complete` | bool | 固定为 `true`；事件只在 turn 终态发送 |
+| `tool_context_metrics` | object | 本 turn 工具链观测指标（可选） |
 
-**何时发送 `done`**
+**何时发送 `turn_finished`**
 
-| 场景 | 发送 | `turn_complete` | `awaiting` |
-|------|------|-----------------|------------|
-| 模型一步结束且无 `tool_calls` | ✅ | `true` | `null` |
-| `ask_user_information` / 审批 pending | ✅ | `false` | `hitl` |
-| LLM/工具错误、取消、超循环上限 | ✅ | `true` | `null` |
-| 自动工具执行后 `tool_result` 续跑 | ❌ | — | — |
-| 客户端 `resume` 刚处理完、链继续 | ❌ | — | — |
+| 场景 | 发送 |
+|------|------|
+| 模型一步结束且无 `tool_calls` | ✅ |
+| `ask_user_information` / 审批 pending | ❌，仅发 `hitl_required` + 等待态 `turn_state` |
+| LLM/工具错误、取消、超循环上限 | ✅ |
+| 自动工具执行后 `tool_result` 续跑 | ❌ |
+| 客户端 `resume` 刚处理完、链继续 | ❌，最终终态时再发 |
 
-**一次 `submit` 可有多条 `done`**（例如连续多轮 `ask_user_information`），每次 HITL 暂停一条；最终以 `finish_reason=stop` 且 `turn_complete=true` 收束。
+一次 submit 可经历多次 `hitl_required` / resume，但只在整个 turn 终态时发送一次 `turn_finished`。
 
 **与其它事件分工**
 
 - **`hitl_required`**：本地 turn 统一 HITL 事件；`items[]` 每项含 `hitl_type`：`user_information`（`ask_user_information`）或 `execute_tool`（需审批工具）。UI 按 item 类型展示并分别 `POST resume`；同批可混合 ask + approval，Node 侧为单一 `PendingHITL.Items`。
 - **`approval_required` / `user_information_required`**：子 Agent 等路径仍可能使用；UI 按同类 HITL 处理。
 - `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
-- 子 Agent 内部 `done`：**不**转发到父 SSE（`node/internal/childagent/relay_hub.go`）。
+- 子 Agent 内部 `turn_finished`：**不**转发为父 Agent 终态（`node/internal/childagent/relay_hub.go`）。
 
-**Web UI 等交互客户端**：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。`submit_message` 后等待语义 B 的 `done`（`turn_complete=false` 时 HITL 暂停正常结束等待）。
+**Web UI 等交互客户端**：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。等待审批期间不能因为普通 human message 清除卡片；只有显式 cancel 或 resume 才改变该 turn。
 
 #### 2.4.2 `hitl_required` 载荷（本地 turn）
 
@@ -268,18 +272,18 @@ async tool result 在 **任务未完成**（HITL、open batch、tool loop）时 
 |------|----------------|-------------------|
 | Produce ×N | 缓冲 | N 条 callback 工具行（SSE 已发） |
 | Apply（步首，可合并 `get_callback`） | 写入 1 条或多条 | **`side_effect_applied`**（无新 callback SSE） |
-| Continue LLM | 正常 assistant 流 | 流式 + `done` |
+| Continue LLM | 正常 assistant 流 | 流式 + `turn_finished` |
 
-**`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `assistant` / `done`。
+**`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `assistant` / `turn_finished`。
 
 **Cancel 与缓冲**（`POST /v1/agents/{id}/cancel`）：
 
 | 条件 | 行为 |
 |------|------|
-| 在途 LLM（`state != idle`） | `turnCtx` cancel → `done(cancelled)` |
+| 在途 LLM（`state != idle`） | `turnCtx` cancel → `turn_finished(cancelled)` |
 | 缓冲非空 **且** `pending == nil` | 额外 `scheduleSideEffectContinue("cancel_recovery")` → `side_effect_turn_start` → Apply + LLM |
 | 缓冲空 | 仅 abort，**不** schedule continue |
-| `pending` HITL **且** 缓冲非空 | **不** schedule continue；resume / human 步首 Apply |
+| `pending` HITL **且** 缓冲非空 | **不** schedule continue；仅 resume 步首 Apply（普通 human message 不打断 pending） |
 | `POST .../clear-context` / `DELETE ...` | **丢弃** server 缓冲并发送 `side_effects_cleared`（与 Cancel 保留缓冲不同） |
 
 实现：`session/side_effects.go`、`session/runtime_side_effects.go`、`turn/sse_publish.go` → `PublishSideEffectCallback` / `PublishSideEffectTurnStart` / `PublishSideEffectApplied` / `PublishSideEffectsCleared`。
@@ -397,17 +401,17 @@ Web UI：Agents 设置页 Policy 面板。
 
 工具由 turn loop 内部调度，**不**对 Client 暴露 `POST /tools/execute`。
 
-执行生命周期通过 SSE 表达（**自动工具**路径中间**不发** `done`，见 §2.4.1）：
+执行生命周期通过 SSE 表达（**自动工具**路径中间**不发** `turn_finished`，见 §2.4.1）：
 
 ```text
 # 自动工具（无 HITL）
-tool_call → tool_result → assistant … → done { turn_complete: true }
+tool_call → tool_result → assistant … → turn_finished { turn_complete: true }
 
 # 需 HITL（审批 / ask_user）
 tool_call → hitl_required { items: [ user_information?, execute_tool*, … ] }
-         → done { turn_complete: false, awaiting: hitl, finish_reason: awaiting_hitl }
+         → turn_state { phase: tool_waiting, terminal: false }
          →（用户 resume，可多次：type=user_information / type=approval|selection）
-         → tool_result → assistant … → done { turn_complete: true }
+         → tool_result → assistant … → turn_finished { turn_complete: true }
 ```
 
 Node 内部分层（实现参考，非 HTTP）：

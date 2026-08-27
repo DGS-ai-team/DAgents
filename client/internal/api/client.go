@@ -34,11 +34,15 @@ func New(base string, httpClient *http.Client) *Client {
 
 // StreamEvent 表示一条 SSE 业务事件（已解析 JSON data 行）。
 type StreamEvent struct {
-	ID      string
-	Type    string
-	AgentID string
-	Seq     int
-	Data    map[string]any
+	ID           string
+	Type         string
+	AgentID      string
+	Seq          int
+	AgentSeq     int
+	EventVersion int
+	StreamEpoch  string
+	Delivery     string
+	Data         map[string]any
 }
 
 // EnsureAgent 调用 POST /v1/agents/{id}/ensure。
@@ -254,7 +258,9 @@ type AgentHydrate struct {
 	QueuePending  int               `json:"queue_pending"`
 	Transcript    []TranscriptEntry `json:"transcript"`
 	PendingHITL   map[string]any    `json:"pending_hitl"`
-	SSESeqHint    int               `json:"sse_seq_hint"`
+	StreamEpoch   string            `json:"stream_epoch"`
+	StreamSeqHint int               `json:"stream_seq_hint"`
+	AgentSeqHint  int               `json:"agent_seq_hint"`
 	NotifySeq     int               `json:"notify_seq"`
 	AckSeq        int               `json:"ack_seq"`
 	HasUnread     bool              `json:"has_unread"`
@@ -274,14 +280,14 @@ func (c *Client) GetAgentHydrate(ctx context.Context, agentID string) (*AgentHyd
 	return &out, nil
 }
 
-// PostAgentAck 调用 POST /v1/agents/{id}/ack（IM cursor）。
-func (c *Client) PostAgentAck(ctx context.Context, agentID string, sseSeq int) error {
+// PostAgentAck 调用 POST /v1/agents/{id}/ack（Agent cursor）。
+func (c *Client) PostAgentAck(ctx context.Context, agentID string, agentSeq int) error {
 	id := strings.TrimSpace(agentID)
-	if id == "" || sseSeq <= 0 {
+	if id == "" || agentSeq <= 0 {
 		return nil
 	}
 	path := "/v1/agents/" + url.PathEscape(id) + "/ack"
-	return c.postJSON(ctx, path, map[string]any{"sse_seq": sseSeq}, nil)
+	return c.postJSON(ctx, path, map[string]any{"agent_seq": agentSeq}, nil)
 }
 
 // CancelTurn 调用 POST /v1/agents/{id}/cancel，取消在途 turn。
@@ -557,18 +563,23 @@ func (c *Client) ListChildAgents(ctx context.Context, parentAgentID string) ([]C
 
 // StreamEvents 订阅 GET /v1/streams，按 agent_id 过滤（可选），逐条回调 handler。
 // handler 返回 false 时提前结束；ctx 取消时退出。
+// lastAgentSeq 是过滤 Agent 流的连续重放游标；传 0 表示从当前 live 点开始。
 // 异常：非 200、读流错误向上返回。
 func (c *Client) StreamEvents(
 	ctx context.Context,
 	agentID string,
-	lastEventID int,
+	lastAgentSeq int,
 	handler func(StreamEvent) bool,
 ) error {
 	q := url.Values{}
-	if strings.TrimSpace(agentID) != "" {
-		q.Set("agent_id", agentID)
+	if id := strings.TrimSpace(agentID); id != "" {
+		q.Set("agent_id", id)
 	}
-	q.Set("live", "1")
+	if strings.TrimSpace(agentID) != "" && lastAgentSeq > 0 {
+		q.Set("after_agent_seq", strconv.Itoa(lastAgentSeq))
+	} else {
+		q.Set("live", "1")
+	}
 	streamURL := c.base + "/v1/streams"
 	if encoded := q.Encode(); encoded != "" {
 		streamURL += "?" + encoded
@@ -579,9 +590,6 @@ func (c *Client) StreamEvents(
 		return err
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	if lastEventID > 0 {
-		req.Header.Set("Last-Event-ID", strconv.Itoa(lastEventID))
-	}
 
 	// SSE 长连接：单独 client，不设总超时。
 	streamClient := &http.Client{Timeout: 0}
@@ -718,10 +726,14 @@ func parseSSE(ctx context.Context, r io.Reader, handler func(StreamEvent) bool) 
 
 func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error) {
 	var envelope struct {
-		AgentID string         `json:"agent_id"`
-		Type    string         `json:"type"`
-		Seq     int            `json:"seq"`
-		Data    map[string]any `json:"data"`
+		AgentID      string         `json:"agent_id"`
+		Type         string         `json:"type"`
+		Seq          int            `json:"seq"`
+		AgentSeq     int            `json:"agent_seq"`
+		EventVersion int            `json:"event_version"`
+		StreamEpoch  string         `json:"stream_epoch"`
+		Delivery     string         `json:"delivery"`
+		Data         map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(dataLine), &envelope); err != nil {
 		return StreamEvent{}, fmt.Errorf("decode sse data: %w", err)
@@ -735,10 +747,14 @@ func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error)
 		seq, _ = strconv.Atoi(eventID)
 	}
 	return StreamEvent{
-		ID:      eventID,
-		Type:    typ,
-		AgentID: envelope.AgentID,
-		Seq:     seq,
-		Data:    envelope.Data,
+		ID:           eventID,
+		Type:         typ,
+		AgentID:      envelope.AgentID,
+		Seq:          seq,
+		AgentSeq:     envelope.AgentSeq,
+		EventVersion: envelope.EventVersion,
+		StreamEpoch:  envelope.StreamEpoch,
+		Delivery:     envelope.Delivery,
+		Data:         envelope.Data,
 	}, nil
 }

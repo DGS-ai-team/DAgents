@@ -36,50 +36,35 @@ function resetAckScheduler() {
   ackInFlight = false;
 }
 
-/** 对齐运行时 ShouldBumpNotifySeq：仅完整消息/HITL 才推进 ack。 */
+/** 对齐运行时 ShouldBumpNotifySeq：仅 HITL/turn_finished 才推进 ack。 */
 export function shouldAckSSEEvent(type, data) {
   switch (type) {
     case "hitl_required":
       return true;
-    case "done":
-      return shouldAckOnDone(data);
+    case "turn_finished": {
+      const finishReason = String(data?.finish_reason || "").trim().toLowerCase();
+      return finishReason !== "error" && finishReason !== "cancelled";
+    }
     default:
       return false;
   }
 }
 
-function shouldAckOnDone(data) {
-  if (!data || typeof data !== "object") return false;
-  if (String(data.awaiting || "") === "hitl") return false;
-  const finish = String(data.finish_reason || "");
-  if (
-    finish === "awaiting_hitl" ||
-    finish === "awaiting_user_information" ||
-    finish === "awaiting_tool_approval" ||
-    finish === "error" ||
-    finish === "cancelled"
-  ) {
-    return false;
-  }
-  if (typeof data.turn_complete === "boolean") return data.turn_complete;
-  return finish === "stop" || finish === "";
-}
-
 function requestAck(seq) {
-  const sseSeq = Number(seq) || 0;
-  if (sseSeq <= 0) return;
-  if (sseSeq > pendingAckSeq) pendingAckSeq = sseSeq;
+  const agentSeq = Number(seq) || 0;
+  if (agentSeq <= 0) return;
+  if (agentSeq > pendingAckSeq) pendingAckSeq = agentSeq;
   void flushAck();
 }
 
 async function flushAck() {
   const agentId = agentStore.agentId?.trim();
-  const sseSeq = pendingAckSeq;
-  if (!agentId || sseSeq <= 0 || sseSeq <= lastAckedSeq || ackInFlight) return;
+  const agentSeq = pendingAckSeq;
+  if (!agentId || agentSeq <= 0 || agentSeq <= lastAckedSeq || ackInFlight) return;
   ackInFlight = true;
   try {
-    await api.postAgentAck(agentId, sseSeq);
-    lastAckedSeq = sseSeq;
+    await api.postAgentAck(agentId, agentSeq);
+    lastAckedSeq = agentSeq;
   } catch {
     /* ignore transient ack failures; later events will reschedule */
   } finally {
@@ -92,6 +77,7 @@ export const agentStore = reactive({
   /** 当前激活的 Agent 实例 id（1 Agent = 1 主对话）。 */
   agentId: loadPersistedAgentId(),
   seqFence: 0,
+  agentSeqFence: 0,
   error: "",
 });
 
@@ -136,56 +122,91 @@ export function beginImplicitTurn() {
 function beginTurnWait() {
 	beginTurnSubmission();
   agentStore.seqFence = transcriptStore.lastSeq;
+  agentStore.agentSeqFence = transcriptStore.lastAgentSeq;
   agentStore.error = "";
 }
 
-/** 对齐 Go TurnGate.IsStale：seq<=seqFence 的在途/回放事件一律忽略。 */
-export function isStaleEvent(seq) {
-  return seq > 0 && seq <= agentStore.seqFence;
+/** 对齐 Go TurnGate.IsStale：Agent 游标优先，兼容无 Agent 游标的内部事件。 */
+export function isStaleEvent(seq, agentSeq = 0, epoch = "") {
+  if (epoch && transcriptStore.streamEpoch && epoch !== transcriptStore.streamEpoch) return false;
+  const cursor = Number(agentSeq) > 0 ? Number(agentSeq) : Number(seq);
+  const fence = Number(agentSeq) > 0 ? agentStore.agentSeqFence : agentStore.seqFence;
+  return cursor > 0 && cursor <= fence;
 }
 
-/** 同一 seq 的重复投递（双 SSE 连接等）。 */
-export function isDuplicateEvent(seq) {
-  return seq > 0 && seq <= transcriptStore.lastSeq;
+/** 同一游标的重复投递（双 SSE 连接等）。 */
+export function isDuplicateEvent(seq, agentSeq = 0, epoch = "") {
+  if (epoch && transcriptStore.streamEpoch && epoch !== transcriptStore.streamEpoch) return false;
+  const cursor = Number(agentSeq) > 0 ? Number(agentSeq) : Number(seq);
+  const last = Number(agentSeq) > 0 ? transcriptStore.lastAgentSeq : transcriptStore.lastSeq;
+  return cursor > 0 && cursor <= last;
 }
 
-/** 更新 SSE 去重水位；ack 仅在与 notify_seq 对齐的完整消息时发送。 */
-export function markEventApplied(seq, { ack = false } = {}) {
-  noteSeq(seq);
-  if (ack) requestAck(seq);
+/** 更新 SSE 去重水位；ack 使用本 Agent 的连续游标。 */
+export function markEventApplied(seq, { agentSeq = 0, epoch = "", ack = false } = {}) {
+  noteSeq(Number(seq) || 0, Number(agentSeq) || 0, epoch);
+  if (ack) requestAck(Number(agentSeq) > 0 ? agentSeq : seq);
 }
 
 export function ackAgentAfterHydrate(notifySeq) {
-  // 用本 Agent 的 notify_seq 对齐未读游标，避免 sse_seq_hint（全局 CurrentSeq）把他 Agent 流量算进 ack。
+  // 用本 Agent 的 notify_seq 对齐未读游标，避免进程级 stream seq 把其他 Agent 流量算进 ack。
   const n = Number(notifySeq);
   if (Number.isFinite(n) && n > 0) {
     pendingAckSeq = n;
   } else {
-    pendingAckSeq = transcriptStore.lastSeq;
+    pendingAckSeq = transcriptStore.lastAgentSeq || transcriptStore.lastSeq;
   }
   void flushAck();
 }
 
 export function resetEventTracking() {
   agentStore.seqFence = 0;
+  agentStore.agentSeqFence = 0;
   resetAckScheduler();
 }
 
-/** hydrate 后设置 SSE 去重水位（F-H9）：忽略 seq <= hint 的 replay。 */
-export function applyHydrateSeqHint(seq) {
-  const hint = Number(seq) || 0;
-  // Hub 序号是 Node 进程内的水位，Node 重启后会重新从 0 开始。
-  // hydrate 返回较低水位时，说明前端仍持有上一进程的序号，必须切换纪元，
-  // 否则新进程的所有 SSE 事件都会被 isDuplicateEvent 当成旧事件丢弃。
-  if (hint < transcriptStore.lastSeq) {
-    transcriptStore.lastSeq = hint;
-  } else if (hint > 0) {
-    noteSeq(hint);
+/**
+ * 判断当前 Agent 游标是否出现不可解释的跳跃。ephemeral 事件不推进
+ * agent_seq，因此它们不会制造假洞；调用方应 hydrate 修复真实断点。
+ */
+export function observeEventContinuity(agentSeq, epoch = "") {
+  const next = Number(agentSeq) || 0;
+  const currentEpoch = String(transcriptStore.streamEpoch || "");
+  const incomingEpoch = String(epoch || "");
+  if (incomingEpoch && currentEpoch && incomingEpoch !== currentEpoch) {
+    return { epochChanged: true, gap: false };
   }
-  agentStore.seqFence = hint > 0 ? hint : 0;
+  if (next <= 0 || transcriptStore.lastAgentSeq <= 0) {
+    return { epochChanged: false, gap: false };
+  }
+  return { epochChanged: false, gap: next > transcriptStore.lastAgentSeq + 1 };
 }
 
-/** hydrate 后恢复权威 Turn 状态；旧调用点保留名称以兼容外部集成。 */
+/** hydrate 后设置 Node 事件纪元与 Agent 级重放水位。 */
+export function applyHydrateSeqHint(data) {
+  const payload = data || {};
+  const epoch = String(payload.stream_epoch || "").trim();
+  if (
+    epoch &&
+    ((transcriptStore.streamEpoch && epoch !== transcriptStore.streamEpoch) ||
+      (!transcriptStore.streamEpoch && (transcriptStore.lastSeq > 0 || transcriptStore.lastAgentSeq > 0)))
+  ) {
+    transcriptStore.lastSeq = 0;
+    transcriptStore.lastAgentSeq = 0;
+    resetAckScheduler();
+  }
+  if (epoch) transcriptStore.streamEpoch = epoch;
+  const streamHint = Number(payload.stream_seq_hint) || 0;
+  const agentHint = Number(payload.agent_seq_hint) || 0;
+  // A hydrate response may race with an already applied live/replayed event;
+  // never move the cursor backwards within one epoch.
+  if (streamHint > transcriptStore.lastSeq) transcriptStore.lastSeq = streamHint;
+  if (agentHint > transcriptStore.lastAgentSeq) transcriptStore.lastAgentSeq = agentHint;
+  agentStore.seqFence = streamHint > 0 ? streamHint : 0;
+  agentStore.agentSeqFence = agentHint > 0 ? agentHint : 0;
+}
+
+/** hydrate 后恢复权威 Turn 状态。 */
 export function applyHydrateTurnState(data) {
 	return applyAuthoritativeHydrateTurnState(data);
 }

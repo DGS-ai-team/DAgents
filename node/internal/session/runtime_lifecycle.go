@@ -835,10 +835,6 @@ func (r *runtime) lifecycleBeginInputTurn(source turn.TurnSource) error {
 	return r.lifecycleBeginInputTurnLocked(source)
 }
 
-func (r *runtime) lifecycleBeginHumanTurnLocked() error {
-	return r.lifecycleBeginInputTurnLocked(turn.TurnSourceHuman)
-}
-
 func (r *runtime) lifecycleBeginInputTurnLocked(source turn.TurnSource) error {
 	if r == nil || r.turnCoordinator == nil {
 		return fmt.Errorf("turn coordinator is unavailable")
