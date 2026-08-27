@@ -61,3 +61,59 @@ func TestInputBoxDropStalePreservesSequence(t *testing.T) {
 		t.Fatalf("sequence after drop = %d, want 3", seq)
 	}
 }
+
+func TestInputBoxInFlightSurvivesRestartAndAcknowledgement(t *testing.T) {
+	box := NewInputBox()
+	seq, err := box.Append(InputKindUser, queue.Envelope{Content: "recover me", SessionEpoch: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := box.Pop(); !ok || got.Seq != seq {
+		t.Fatalf("popped input = %+v, ok=%v", got, ok)
+	}
+
+	restored := NewInputBox()
+	if err := restored.Restore(box.Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := restored.InFlight(); !ok || got.Seq != seq || got.Completed {
+		t.Fatalf("restored in-flight input = %+v, ok=%v", got, ok)
+	}
+	if !restored.MarkCompleted(seq) {
+		t.Fatal("MarkCompleted returned false")
+	}
+	completed := NewInputBox()
+	if err := completed.Restore(restored.Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := completed.InFlight(); !ok || !got.Completed {
+		t.Fatalf("completed in-flight input = %+v, ok=%v", got, ok)
+	}
+	if !completed.Ack(seq) || completed.Len() != 0 {
+		t.Fatal("ack did not clear in-flight input")
+	}
+}
+
+func TestInputBoxRequeueInFlightPreservesFIFO(t *testing.T) {
+	box := NewInputBox()
+	first, _ := box.Append(InputKindUser, queue.Envelope{Content: "first"})
+	second, _ := box.Append(InputKindUser, queue.Envelope{Content: "second"})
+	got, ok := box.Pop()
+	if !ok || got.Seq != first {
+		t.Fatalf("popped input = %+v, ok=%v", got, ok)
+	}
+	if !box.RequeueInFlight() {
+		t.Fatal("RequeueInFlight returned false")
+	}
+	got, ok = box.Pop()
+	if !ok || got.Seq != first {
+		t.Fatalf("requeued input = %+v, ok=%v", got, ok)
+	}
+	if !box.Ack(first) {
+		t.Fatal("ack requeued input returned false")
+	}
+	got, ok = box.Pop()
+	if !ok || got.Seq != second {
+		t.Fatalf("second input = %+v, ok=%v", got, ok)
+	}
+}

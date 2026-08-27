@@ -112,6 +112,7 @@ func (m *Manager) ensureRuntime(sessionID string) (*runtime, error) {
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
 	rt.restoreInputBoxState(inputBoxState)
 	rt.historyRevision = historyRevision
+	rt.reconcileRestoredInputBox()
 	m.sessions[sessionID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)

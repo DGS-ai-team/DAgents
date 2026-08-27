@@ -335,6 +335,7 @@ func (m *Manager) createWithOptions(
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(inputBoxState)
 	rt.historyRevision = historyRevision
+	rt.reconcileRestoredInputBox()
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -438,6 +439,7 @@ func (m *Manager) replaceWithOptions(
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(inputBoxState)
 	rt.historyRevision = historyRevision
+	rt.reconcileRestoredInputBox()
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
@@ -473,6 +475,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
 		rt.restoreInputBoxState(inputBoxState)
 		rt.historyRevision = historyRevision
+		rt.reconcileRestoredInputBox()
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)

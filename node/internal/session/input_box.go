@@ -25,14 +25,16 @@ const (
 // append time and is never reused.  The queue.Envelope is retained as a
 // compatibility transport while callers migrate away from MessageQueue.
 type InputRecord struct {
-	Seq  uint64         `json:"seq"`
-	Kind InputKind      `json:"kind"`
-	Env  queue.Envelope `json:"env"`
+	Seq       uint64         `json:"seq"`
+	Kind      InputKind      `json:"kind"`
+	Env       queue.Envelope `json:"env"`
+	Completed bool           `json:"completed,omitempty"`
 }
 
 type inputBoxState struct {
-	Seq   uint64        `json:"seq"`
-	Items []InputRecord `json:"items,omitempty"`
+	Seq      uint64        `json:"seq"`
+	Items    []InputRecord `json:"items,omitempty"`
+	InFlight *InputRecord  `json:"in_flight,omitempty"`
 }
 
 func inputBoxPendingCount(raw []byte) int {
@@ -51,11 +53,12 @@ func inputBoxPendingCount(raw []byte) int {
 // coalesced notification; consumers must always drain with Peek/Pop so a
 // notification cannot represent the data itself.
 type InputBox struct {
-	mu     sync.Mutex
-	seq    uint64
-	items  []InputRecord
-	wake   chan struct{}
-	closed bool
+	mu       sync.Mutex
+	seq      uint64
+	items    []InputRecord
+	inFlight *InputRecord
+	wake     chan struct{}
+	closed   bool
 }
 
 func NewInputBox() *InputBox {
@@ -105,7 +108,77 @@ func (b *InputBox) Pop() (InputRecord, bool) {
 	}
 	record := b.items[0]
 	b.items = b.items[1:]
+	b.inFlight = &record
 	return record, true
+}
+
+// InFlight returns the input currently owned by the consumer. It is kept out
+// of the FIFO tail while a Turn is running, but remains durable so a process
+// restart can distinguish an accepted input from an unconsumed one.
+func (b *InputBox) InFlight() (InputRecord, bool) {
+	if b == nil {
+		return InputRecord{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inFlight == nil {
+		return InputRecord{}, false
+	}
+	return *b.inFlight, true
+}
+
+// MarkCompleted records that the consumer finished the input's Turn. The
+// record is cleared only after this marker has been persisted together with
+// the resulting history, which closes the crash window between execution and
+// acknowledgement.
+func (b *InputBox) MarkCompleted(seq uint64) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inFlight == nil || b.inFlight.Seq != seq {
+		return false
+	}
+	b.inFlight.Completed = true
+	return true
+}
+
+// Ack clears a completed or otherwise discarded in-flight input.
+func (b *InputBox) Ack(seq uint64) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inFlight == nil || b.inFlight.Seq != seq {
+		return false
+	}
+	b.inFlight = nil
+	return true
+}
+
+// RequeueInFlight puts an uncompleted input back at the head of the FIFO.
+// It is used when startup finds that the consumer had not entered a live Turn
+// before the process stopped.
+func (b *InputBox) RequeueInFlight() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inFlight == nil {
+		return false
+	}
+	record := *b.inFlight
+	record.Completed = false
+	b.items = append([]InputRecord{record}, b.items...)
+	b.inFlight = nil
+	select {
+	case b.wake <- struct{}{}:
+	default:
+	}
+	return true
 }
 
 func (b *InputBox) Len() int {
@@ -127,6 +200,10 @@ func (b *InputBox) Snapshot() json.RawMessage {
 	state := inputBoxState{
 		Seq:   b.seq,
 		Items: append([]InputRecord(nil), b.items...),
+	}
+	if b.inFlight != nil {
+		record := *b.inFlight
+		state.InFlight = &record
 	}
 	b.mu.Unlock()
 	raw, err := json.Marshal(state)
@@ -159,6 +236,14 @@ func (b *InputBox) Restore(raw []byte) error {
 			maxSeq = item.Seq
 		}
 	}
+	if state.InFlight != nil {
+		if state.InFlight.Seq == 0 {
+			return errors.New("input box state contains zero in-flight sequence")
+		}
+		if state.InFlight.Seq > maxSeq {
+			maxSeq = state.InFlight.Seq
+		}
+	}
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -166,6 +251,11 @@ func (b *InputBox) Restore(raw []byte) error {
 	}
 	b.seq = maxSeq
 	b.items = append([]InputRecord(nil), state.Items...)
+	b.inFlight = nil
+	if state.InFlight != nil {
+		record := *state.InFlight
+		b.inFlight = &record
+	}
 	b.mu.Unlock()
 	if len(state.Items) > 0 {
 		b.Signal()
@@ -191,6 +281,10 @@ func (b *InputBox) DropStale(epoch uint64) int {
 		kept = append(kept, item)
 	}
 	b.items = kept
+	if b.inFlight != nil && b.inFlight.Env.SessionEpoch != 0 && b.inFlight.Env.SessionEpoch != epoch {
+		b.inFlight = nil
+		dropped++
+	}
 	return dropped
 }
 
