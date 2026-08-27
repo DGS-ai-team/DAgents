@@ -25,4 +25,4 @@
 | `SetWeComClient(client)` | 注入企业微信 webhook 客户端（暴露 wecom_*） |
 | `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` | 触发器工具 |
 | `IsBackgroundJobTool(name)` | 后台管理工具（强制同步） |
-| `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`applyMaxTokensToBody`、`mergeLineRanges` 等 |
+| `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`clipReadBodyToTokenBudget`、`mergeLineRanges` 等 |

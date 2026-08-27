@@ -103,12 +103,25 @@ func formatNumberedLines(lines []string, startLine int) []string {
 	return out
 }
 
-func applyMaxTokensToBody(body string, maxTokens float64, truncateHint string) (string, bool) {
+// clipReadBodyToTokenBudget clips a read_file window and returns the first
+// original file line whose content is not fully represented in the clipped
+// prefix. The token budget is applied after line-window selection, so the
+// unread line may be inside the requested window rather than after it.
+func clipReadBodyToTokenBudget(body string, maxTokens float64, firstLine int) (string, bool, int) {
 	clipped, truncated := tokens.ClipToTokenBudget(body, maxTokens)
 	if !truncated {
-		return body, false
+		return body, false, 0
 	}
-	return clipped + "\n\n[TRUNCATED] " + truncateHint, true
+
+	line := firstLine + strings.Count(clipped, "\n")
+	fullRunes := []rune(body)
+	clippedRunes := []rune(clipped)
+	if len(clippedRunes) < len(fullRunes) && fullRunes[len(clippedRunes)] == '\n' {
+		// The complete current line was included but its separator was not.
+		// Resume at the following line instead of rereading that complete line.
+		line++
+	}
+	return clipped, true, line
 }
 
 func applyMaxTokensToOutput(full string, maxTokens float64) (string, bool) {
