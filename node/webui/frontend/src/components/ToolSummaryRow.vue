@@ -177,7 +177,13 @@ async function onCancel(ev) {
       </button>
     </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
-      <ToolExecBubble :entry="detailEntry" :verbose="verbose" embedded />
+      <ToolExecBubble
+        :entry="detailEntry"
+        :call-entry="callEntry"
+        :result-entry="resultEntry"
+        :verbose="verbose"
+        embedded
+      />
     </div>
   </div>
 </template>

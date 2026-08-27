@@ -234,7 +234,7 @@ func TestHandleStreamsAfterSeqReplaysHistory(t *testing.T) {
 	for !sawFinished {
 		select {
 		case <-deadline:
-		t.Fatal("timeout waiting for replayed turn_finished")
+			t.Fatal("timeout waiting for replayed turn_finished")
 		default:
 		}
 		line, err := reader.ReadString('\n')
