@@ -147,9 +147,9 @@ func (s *processLLMServer) handle(w http.ResponseWriter, r *http.Request) {
 		if mode == processLLMReconcile {
 			toolName = "bash_run"
 			if runtime.GOOS == "windows" {
-				arguments = `{"command":"Start-Sleep -Seconds 8","shell_type":"powershell"}`
+				arguments = `{"command":"Start-Sleep -Seconds 60","timeout_seconds":120,"shell_type":"powershell"}`
 			} else {
-				arguments = `{"command":"sleep 8","shell_type":"bash"}`
+				arguments = `{"command":"sleep 60","timeout_seconds":120,"shell_type":"bash"}`
 			}
 		}
 		writeProcessSSE(w, map[string]any{
