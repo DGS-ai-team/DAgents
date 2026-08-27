@@ -90,7 +90,6 @@ type Orchestrator struct {
 	runtimeDigest         string
 	executionGuard        ExecutionGuard
 
-	enqueueToolResult       func(ctx context.Context, sessionID string) error
 	systemPromptBuilder     SystemPromptBuilder
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
@@ -249,11 +248,6 @@ func (o *Orchestrator) SetChildSession(isChild bool) {
 	o.isChildSession = isChild
 }
 
-// SetToolResultEnqueuer 注入 tool_result 入队回调；生产 session 必须设置以对齐 Python 队列语义。
-func (o *Orchestrator) SetToolResultEnqueuer(fn func(ctx context.Context, sessionID string) error) {
-	o.enqueueToolResult = fn
-}
-
 // SetLifecycleMetadataProvider attaches Turn/Step projection metadata to
 // outward SSE events without making the Orchestrator own SessionRuntime.
 func (o *Orchestrator) SetLifecycleMetadataProvider(fn func(sessionID string) map[string]any) {
@@ -399,7 +393,7 @@ func (o *Orchestrator) RunToolMessageTurn(
 	return o.runOneStep(ctx, sessionID, history)
 }
 
-// ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并调度 tool_result 续跑。
+// ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并返回继续执行结果。
 func (o *Orchestrator) ContinueAfterResume(
 	ctx context.Context,
 	sessionID string,
@@ -522,19 +516,9 @@ func (o *Orchestrator) consumeNextStepFinalSummary(sessionID string) bool {
 	return marked
 }
 
-// InterruptPending 在用户插入新 message 时打断 pending tool calls。
-func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message, pending *PendingHITL) {
-	o.InterruptPendingWithReason(
-		sessionID,
-		history,
-		pending,
-		ToolUserInterruptedMessage,
-		map[string]any{"interrupted_by_user_message": true},
-	)
-}
-
-// InterruptPendingWithReason 以自定义文案/元数据打断 pending tool calls。
-func (o *Orchestrator) InterruptPendingWithReason(
+// CancelPendingToolCalls closes pending tool calls as part of an explicit
+// Turn cancellation. Ordinary input never calls this method.
+func (o *Orchestrator) CancelPendingToolCalls(
 	sessionID string,
 	history *[]llm.Message,
 	pending *PendingHITL,
@@ -549,7 +533,7 @@ func (o *Orchestrator) InterruptPendingWithReason(
 		msg = ToolUserInterruptedMessage
 	}
 	if meta == nil {
-		meta = map[string]any{"interrupted_by_user_message": true}
+		meta = map[string]any{"interrupted_by_turn_cancel": true}
 	}
 	o.insertMissingToolResponsesAfterAssistant(
 		sessionID,
@@ -792,13 +776,6 @@ func (o *Orchestrator) runOneStep(
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex}
 		}
-		if o.enqueueToolResult != nil {
-			if err := o.enqueueToolResult(ctx, sessionID); err != nil {
-				o.clearModelContextSnapshot(sessionID)
-				return StepOutcome{StepIndex: stepIndex, Err: err}
-			}
-			return StepOutcome{StepIndex: stepIndex}
-		}
 		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
 
@@ -822,13 +799,6 @@ func (o *Orchestrator) runOneStep(
 		o.publishDone(sessionID, pauseReason)
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
 		return StepOutcome{Pending: pending, StepIndex: stepIndex}
-	}
-	if o.enqueueToolResult != nil {
-		if err := o.enqueueToolResult(ctx, sessionID); err != nil {
-			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{StepIndex: stepIndex, Err: err}
-		}
-		return StepOutcome{StepIndex: stepIndex}
 	}
 	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }

@@ -53,7 +53,7 @@ func TestSideEffectProduceAsyncDoesNotMutateHistoryDuringHITL(t *testing.T) {
 	}
 }
 
-func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
+func TestInputBoxTriggerStartsTurnOnEmptyHistory(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()
 
@@ -88,8 +88,15 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	if !found {
 		t.Fatalf("messages = %+v", rt.messages)
 	}
-	if facts := rt.turnCoordinator.Snapshot().ExternalFacts; facts == 0 {
-		t.Fatal("applied trigger must be recorded as an external lifecycle fact")
+	foundTrigger := false
+	for _, message := range messages {
+		if llm.IsMessageSource(message, llm.MessageSourceTrigger, llm.MessageFormRequest, llm.UserNameTrigger) {
+			foundTrigger = true
+			break
+		}
+	}
+	if !foundTrigger {
+		t.Fatalf("trigger should be recorded as a normal trigger input: %+v", messages)
 	}
 }
 

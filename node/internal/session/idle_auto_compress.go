@@ -104,12 +104,13 @@ func (m *Manager) ensureRuntime(sessionID string) (*runtime, error) {
 	if existing, ok := m.sessions[sessionID]; ok {
 		return existing, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(sessionID)
+	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	rt := newRuntime(sessionID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
+	rt.restoreInputBoxState(inputBoxState)
 	rt.historyRevision = historyRevision
 	m.sessions[sessionID] = rt
 	m.attachUserChildTools(rt)
@@ -201,6 +202,9 @@ func (r *runtime) eligibleForIdleAutoCompress(idleThreshold time.Duration, minTo
 	idleApplied := r.idleAutoCompressApplied
 	msgs := append([]llm.Message(nil), r.messages...)
 	queuePending := r.queue.Len() > 0
+	if r.inputBox != nil {
+		queuePending = queuePending || r.inputBox.Len() > 0
+	}
 	r.mu.Unlock()
 	pending := r.pendingSnapshot()
 	if idleApplied {

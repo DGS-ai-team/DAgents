@@ -23,8 +23,7 @@ Accept: text/event-stream
 | `assistant_delta` | 流式 assistant 正文 | 继续流式 |
 | `reasoning_delta` | 推理链片段 | DeepSeek 等 |
 | `tool_call` | 模型发起工具调用 | 执行或 HITL |
-| `tool_result` | 工具返回 | 入队 `tool_result` 续跑 |
-| `user_message_deferred` | 旁路 external Produce（桥接态） | 展示 deferred user；不结束 turn |
+| `tool_result` | 工具返回 | 当前 Turn 内 inline 续跑 |
 | `side_effect_turn_start` | 被动 side-effect 续跑 LLM 前 | Client `beginImplicitTurn` |
 | `hitl_required` | 本地 turn 统一 HITL（含 ask + 审批，见下） | Client 分步 resume |
 | `approval_required` | 需审批（A2A 中继 / 子 Agent） | Client resume |
@@ -54,7 +53,7 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 |------|-------------|-----------------|
 | 无 tool_calls 正常结束 | ✅ | `true` |
 | 审批 / ask_user  pending | ✅ | `false` |
-| 自动工具后 `tool_result` 续跑 | ❌ | — |
+| 自动工具后 inline 续跑 | ❌ | — |
 | resume 后继续链 | ❌ | — |
 
 实现：`publishDone`（`sse_publish.go`）。
@@ -94,10 +93,9 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 
 | 事件 | 含义 | Client |
 |------|------|--------|
-| `user_message_deferred` | trigger/a2a 桥接 Produce | deferred 样式 user 行 |
 | `side_effect_turn_start` | `side_effect_continue` 跑 LLM 前 | `BeginImplicitTurn` / `beginImplicitTurn` |
-| `side_effect_applied` | Apply 写入 history | 标 deferred/callback 为 **已入库** |
-| `side_effects_cleared` | ClearContext/Delete 丢弃缓冲 | 标未入库条目为 **已失效** |
+| `side_effect_applied` | Apply 写入 history | 标 callback 工具行 **已入库** |
+| `side_effects_cleared` | ClearContext/Delete 丢弃缓冲 | 标未入库 callback 工具行为 **已失效** |
 | Produce 的 `tool_call`/`tool_result` | async 回灌预览 | 正常渲染；含 `side_effect_seq`；idle 时不 `finishTurn` |
 
 **Cancel 序列**：`done(cancelled)` → `finishTurn` → `side_effect_turn_start` → 被动 turn → `assistant`… → `done(stop)`。
@@ -110,7 +108,7 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 
 | 文件 | 职责 |
 |------|------|
-| `turn/sse_publish.go` | assistant / done / usage / side-effect deferred |
+| `turn/sse_publish.go` | assistant / done / usage / side-effect callback |
 | `turn/tool_router.go` | tool_call / tool_result |
 | `turn/hitl_payload.go` | `hitl_required` 载荷 |
 | `turn/approval_payload.go` | execute_tool item 展示字段 |

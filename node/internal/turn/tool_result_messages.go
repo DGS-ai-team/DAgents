@@ -16,20 +16,7 @@ const (
 	tailAssistantWithToolCalls    toolResultTailKind = "tail_assistant_with_tool_calls"
 	tailAssistantWithoutToolCalls toolResultTailKind = "tail_assistant_without_tool_calls"
 	tailOther                     toolResultTailKind = "other"
-
-	// TailAssistantWithoutToolCalls 供 session 等外部包判定桥接态。
-	TailAssistantWithoutToolCalls = tailAssistantWithoutToolCalls
 )
-
-// ClassifyToolResultTail 导出尾部形态判定。
-func ClassifyToolResultTail(messages []llm.Message) toolResultTailKind {
-	return classifyToolResultTail(messages)
-}
-
-// IsBridgeTail 任务已完成桥接态（尾部纯 assistant）。
-func IsBridgeTail(messages []llm.Message) bool {
-	return classifyToolResultTail(messages) == tailAssistantWithoutToolCalls
-}
 
 func classifyToolResultTail(messages []llm.Message) toolResultTailKind {
 	if len(messages) == 0 {

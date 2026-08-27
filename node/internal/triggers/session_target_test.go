@@ -29,7 +29,7 @@ func (s *seqSubmitter) EnsureSession(requestedID string) (string, error) {
 
 func (s *seqSubmitter) SubmitTriggerMessage(sessionID, triggerID, content string) error {
 	s.lastEnv = capturedSubmit{
-		RequestType: "trigger_message",
+		RequestType: "message",
 		Content:     content,
 		TriggerID:   triggerID,
 	}
@@ -125,7 +125,7 @@ func TestLatestActiveFireUsesResolver(t *testing.T) {
 	if len(sub.sessions) != 1 || sub.sessions[0] != "sess-active" {
 		t.Fatalf("sessions = %v", sub.sessions)
 	}
-	if sub.lastEnv.RequestType != "trigger_message" {
+	if sub.lastEnv.RequestType != "message" {
 		t.Fatalf("request_type = %q", sub.lastEnv.RequestType)
 	}
 }

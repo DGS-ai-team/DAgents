@@ -2,6 +2,8 @@
 
 本文是 Node 内嵌 Web UI 的可重复回归清单，覆盖真实模型、工具调用、HITL、Turn 取消、连续对话和异步后台回调。测试目标是验证“浏览器 → SSE → Node MessageQueue → Turn/Step → 工具/后台 job → 回灌 → UI”的完整链路。
 
+> **状态说明（2026-08-27）**：本文中“bash 超时转后台、自动 `async_tool_result` 回调”和“普通输入打断 pending”的条目是历史回归记录，保留用于追溯，不是当前验收标准。当前 bash_run 超时直接失败；user/trigger/A2A 进入 InputBox FIFO；审批等待期间普通输入排队，使用显式 turn cancel 取消，用户询问使用 typed resume。
+
 ## 1. 测试前置
 
 | 项目 | 要求 |

@@ -9,27 +9,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-func TestPlanSingleSideEffectApply_emptyHistoryBridge(t *testing.T) {
-	hub := stream.NewHub(4, logx.Discard())
-	orch := testOrchestrator(t, hub, &llm.MockClient{})
-
-	built := orch.BuildSideEffectMessages(SideEffectExternalMessage, "sess-1", nil, queue.AsyncToolResultPayload{}, "hello inbox", llm.UserNameA2AInbox)
-	plan := PlanSingleSideEffectApply(nil, built)
-	if len(plan.Messages) != 1 {
-		t.Fatalf("messages = %d, want 1 (bridge user only)", len(plan.Messages))
-	}
-	if plan.Messages[0].Role != "user" {
-		t.Fatalf("bridge message role = %q", plan.Messages[0].Role)
-	}
-	if !plan.Continue || plan.Mode != "empty_history_bridge" {
-		t.Fatalf("plan = %+v", plan)
-	}
-	site := ResolveSideEffectInsertSite(nil, built)
-	if !site.Ready || site.InsertAt != 0 {
-		t.Fatalf("site = %+v", site)
-	}
-}
-
 func TestBuildMergedCallbackBatch_twoAsync(t *testing.T) {
 	hub := stream.NewHub(4, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
@@ -45,13 +24,11 @@ func TestBuildMergedCallbackBatch_twoAsync(t *testing.T) {
 	async1 := queue.AsyncToolResultPayload{JobID: "job-1", ToolName: "bash_run", Status: "succeeded", ResultText: "done"}
 	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "bash_run", Status: "failed", ErrorText: "exit 1"}
 	e1 := SideEffectBatchEntry{
-		Kind:  SideEffectAsync,
-		Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async1, "", ""),
+		Built: orch.BuildAsyncSideEffectMessages("s", history, async1),
 		Async: async1,
 	}
 	e2 := SideEffectBatchEntry{
-		Kind:  SideEffectAsync,
-		Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async2, "", ""),
+		Built: orch.BuildAsyncSideEffectMessages("s", history, async2),
 		Async: async2,
 	}
 	plan := BuildMergedCallbackBatch([]SideEffectBatchEntry{e1, e2}, history)

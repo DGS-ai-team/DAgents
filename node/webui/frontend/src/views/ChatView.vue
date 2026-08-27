@@ -26,7 +26,6 @@ import {
 import {
   transcriptStore,
   addUser,
-  addDeferredUser,
   markSideEffectsApplied,
   markSideEffectsStale,
   addSystem,
@@ -505,13 +504,6 @@ function handleEvent(ev) {
       beginImplicitTurn();
       syncTurnStatus({ phase: "queued" });
       turnWatchdog.noteActivity();
-      break;
-    case "user_message_deferred":
-      addDeferredUser(
-        String(ev.data.content || ""),
-        String(ev.data.user_name || ""),
-        Number(ev.data.side_effect_seq) || 0,
-      );
       break;
     case "side_effect_applied":
       markSideEffectsApplied(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);

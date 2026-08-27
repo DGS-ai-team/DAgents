@@ -8,13 +8,6 @@ defaults:
     role: assistant
     description: 通用 AI 助手
   llm:
-    active: default
-    profiles:
-      default:
-        provider: deepseek
-        model: deepseek-chat
-        api_key_env: OPENAI_API_KEY
-        multimodal_enabled: false
     max_tool_loops: 32
   tools:
     enabled_groups: [fs, skills]

@@ -10,11 +10,10 @@
 | `NewOrchestrator` | 构造；`policy` 默认加载、`maxToolLoops` 默认 16 |
 | `SetChildAgentManager` | 父 session 注入临时 Agent 管理器 |
 | `SetChildSession` | 子 session 标记；禁止管理类工具与 `ask_user` |
-| `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
 | `RunHumanMessageTurn` | 追加 user（含结构化 `source/provenance`，保留 `name` 兼容字段）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
-| `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
+| `CancelPendingToolCalls` | 显式 `CancelTurn` 时闭合 pending tool calls；普通输入不调用 |
 | `PublishSideEffectCallback` / `PublishSideEffectApplied` / `PublishSideEffectsCleared` | 旁路 Produce/Apply UX SSE |
 | `publishDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
 
@@ -39,7 +38,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | `publishError` | `error` SSE |
 | `publishHITLRequired` | 本地 turn 统一 HITL SSE（A2A 中继在 session/a2a 层发 `approval_required` / `user_information_required`） |
 | `publishToolCall` / `publishToolResult` | 工具 SSE |
-| `PublishSideEffectCallback` / `PublishExternalSideEffectDeferred` | 旁路 Produce SSE |
+| `PublishSideEffectCallback` | 异步工具 Produce SSE |
 | `PublishSideEffectApplied` / `PublishSideEffectsCleared` | Apply / ClearContext UX SSE |
 | `publishDone` | `done` SSE |
 | `publishUsage` / `publishUsageIfAccumulated` | `usage` SSE |
@@ -86,7 +85,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | `ToolLoopLimitExceededMessage` | 单轮工具次数用尽时的 soft tool 结果文案 |
 | `PendingHITLItem` | 单条待 HITL tool call（含可选 `DuplicateMeta`） |
 | `PendingHITL` | 暂停时的待处理批次（`Items[]`）；JSON 兼容旧 `kind`/`tool_calls` |
-| `PendingHITL.AllToolCalls` | 用于 `InterruptPending` 的 call 列表 |
+| `PendingHITL.AllToolCalls` | 用于显式取消时闭合 pending tool calls |
 
 ## step.go
 
@@ -110,8 +109,8 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 
 | 符号 | 说明 |
 |------|------|
-| `SideEffectKind` / `SideEffectMessages` | async / external 旁路 bundle |
-| `BuildSideEffectMessages` | Produce/Apply 用消息预构建 |
+| `SideEffectMessages` | async 工具结果旁路 bundle |
+| `BuildAsyncSideEffectMessages` | async Produce/Apply 用消息预构建 |
 | `ResolveSideEffectInsertSite` / `PlanSingleSideEffectApply` | 按 tail 解析 Apply 插入点 |
 | `BuildMergedCallbackBatch` | ≥2 条合并为 `get_callback` tool 消息 |
 | `ContinueAfterSideEffects` | 被动 LLM 续跑（`RunToolMessageTurn`） |

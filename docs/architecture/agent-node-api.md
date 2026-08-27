@@ -197,7 +197,7 @@ Last-Event-ID: 42
 - Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
 - 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`hitl_required`、`user_message_deferred`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`hitl_required`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
 
 **本地 turn** 统一使用 `hitl_required`。子 Agent 相关路径仍可能出现 `approval_required` / `user_information_required`，UI 按同类 HITL 处理即可。
 
@@ -253,21 +253,20 @@ Last-Event-ID: 42
 
 #### 2.4.3 旁路 side-effect 事件（Produce / 被动续跑）
 
-async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool loop）时 **Produce**：立即 SSE、写入 `sideEffectStore`，**不改** `runtime.messages`、**不**跑 LLM。Apply 在 `runTurnStep` 步首；被动续跑经内部队列 `side_effect_continue`（与 `tool_result` 同优先级 -1）。
+async tool result 在 **任务未完成**（HITL、open batch、tool loop）时 **Produce**：立即 SSE、写入 `sideEffectStore`，**不改** `runtime.messages`、**不**跑 LLM。Apply 在 `runTurnStep` 步首；被动续跑经内部队列 `side_effect_continue`。
 
 | 事件 | 何时发送 | 典型 `data` | Client 行为 |
 |------|----------|-------------|-------------|
-| `user_message_deferred` | external Produce 且 tail 为**任务已完成桥接态**（纯 assistant stop） | `content`、`user_name`、`deferred: true`、`side_effect_seq?`、`trigger_id?` | transcript 插入 **deferred** 样式 user 行；**不** `finishTurn` |
 | `side_effect_turn_start` | `handleSideEffectContinue` **跑 LLM 之前** | `source`（`side_effect_continue` \| `cancel_recovery` \| `task_complete_produce`）、`side_effect_pending`、`implicit_turn: true` | **`beginImplicitTurn` / `beginSubmit`**，进入被动等待态 |
-| `side_effect_applied` | `ApplyReady` 成功写入 history 后 | `seqs: number[]` | 将 `side_effect_seq` 匹配的 deferred / callback 行标为 **已入库** |
+| `side_effect_applied` | `ApplyReady` 成功写入 history 后 | `seqs: number[]` | 将 `side_effect_seq` 匹配的 callback 行标为 **已入库** |
 | `side_effects_cleared` | `ClearContext` / `Delete` 丢弃 server 缓冲 | `dropped`、`seqs: number[]` | 将未入库条目标为 **已失效** |
-| `tool_call` / `tool_result`（Produce） | async / 非桥接 external Produce | 与正常工具事件相同，可含 `deferred: true`、`side_effect_seq` | idle 时仍渲染；**不**因 Produce 单独 `finishTurn` |
+| `tool_call` / `tool_result`（Produce） | async tool result Produce | 与正常工具事件相同，可含 `deferred: true`、`side_effect_seq` | idle 时仍渲染；**不**因 Produce 单独 `finishTurn` |
 
 **Produce vs Apply**
 
 | 时刻 | Server history | Client transcript |
 |------|----------------|-------------------|
-| Produce ×N | 缓冲 | N 条 callback / deferred user（SSE 已发） |
+| Produce ×N | 缓冲 | N 条 callback 工具行（SSE 已发） |
 | Apply（步首，可合并 `get_callback`） | 写入 1 条或多条 | **`side_effect_applied`**（无新 callback SSE） |
 | Continue LLM | 正常 assistant 流 | 流式 + `done` |
 
@@ -283,7 +282,7 @@ async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool l
 | `pending` HITL **且** 缓冲非空 | **不** schedule continue；resume / human 步首 Apply |
 | `POST .../clear-context` / `DELETE ...` | **丢弃** server 缓冲并发送 `side_effects_cleared`（与 Cancel 保留缓冲不同） |
 
-实现：`session/side_effects.go`、`session/runtime_side_effects.go`、`turn/sse_publish.go` → `PublishExternalSideEffectDeferred` / `PublishSideEffectTurnStart` / `PublishSideEffectApplied` / `PublishSideEffectsCleared`。
+实现：`session/side_effects.go`、`session/runtime_side_effects.go`、`turn/sse_publish.go` → `PublishSideEffectCallback` / `PublishSideEffectTurnStart` / `PublishSideEffectApplied` / `PublishSideEffectsCleared`。
 
 ### 2.5 Skills（可选 HTTP；也可仅 tool）
 

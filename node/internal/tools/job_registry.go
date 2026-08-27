@@ -11,21 +11,19 @@ import (
 )
 
 type backgroundJob struct {
-	id             string
-	sessionID      string
-	toolName       string
-	toolCallID     string
-	mu             sync.Mutex
-	status         string // running / succeeded / failed / cancelled
-	result         string
-	recoveryReason string
-	recoveredAt    int64
-	startedAt      int64
-	finishedAt     int64
-	done           chan struct{}
-	cancelFn       context.CancelFunc
-	// bash 超时自动降级：保留子进程由 collector 收割。
-	autoDegraded        bool
+	id                  string
+	sessionID           string
+	toolName            string
+	toolCallID          string
+	mu                  sync.Mutex
+	status              string // running / succeeded / failed / cancelled
+	result              string
+	recoveryReason      string
+	recoveredAt         int64
+	startedAt           int64
+	finishedAt          int64
+	done                chan struct{}
+	cancelFn            context.CancelFunc
 	process             Process
 	remoteRecovery      *RemoteProcessRecovery
 	bashCwd             string
@@ -37,7 +35,7 @@ type backgroundJob struct {
 	bashShellType       string
 	bashOutputEncoding  string
 	compressStats       *OutputCompressStats
-	// notifyOnce 保证完成/取消只回灌一次（collector、cancel、降级竞态可并发触发）。
+	// notifyOnce 保证完成/取消只回灌一次（collector、cancel 竞态可并发触发）。
 	notifyOnce sync.Once
 }
 
@@ -342,6 +340,9 @@ func (r *Registry) StartBackground(
 	if err := r.rejectIfDisabled(parent, toolName); err != nil {
 		return "", err
 	}
+	if strings.TrimSpace(toolName) == "bash_run" {
+		return "", ErrBackgroundUnsupported
+	}
 	job := &backgroundJob{
 		id:         newJobID(),
 		sessionID:  sessionID,
@@ -424,7 +425,7 @@ func (r *Registry) bindBackgroundProcess(ctx context.Context, process Process) {
 	_ = process.Terminate(context.Background())
 }
 
-// 后台 job 对模型/用户的统一说明（超时降级与内部 StartBackground ACK 共用）。
+// 后台 job 对模型/用户的统一说明（仅用于明确支持后台执行的工具）。
 const (
 	backgroundJobAutoResultHint   = "完成后将自动回灌结果（async_tool_result），通常无需轮询 background_job_status；"
 	backgroundJobOptionalMgmtHint = "若需取消或主动确认进度，可使用 background_job_cancel / background_job_status。"
@@ -434,24 +435,6 @@ func formatBackgroundJobAck(job *backgroundJob) string {
 	return strings.Join([]string{
 		fmt.Sprintf("[TOOL_BACKGROUND] tool_name=%s job_id=%s status=accepted", job.toolName, job.id),
 		"任务已在后台执行。",
-		backgroundJobAutoResultHint,
-		backgroundJobOptionalMgmtHint,
-	}, "\n")
-}
-
-func formatShellRunningResult(job *backgroundJob, params shellRunParams, reason string) string {
-	st := params.shellType
-	if job.bashShellType != "" {
-		st = shellType(job.bashShellType)
-	}
-	reasonLine := "命令超过同步等待时间，已自动降级为后台任务。"
-	if reason == "user" {
-		reasonLine = "已按用户请求转为后台任务。"
-	}
-	return strings.Join([]string{
-		fmt.Sprintf("[BASH_RESULT] status=RUNNING job_id=%s", job.id),
-		fmt.Sprintf("shell_type=%s", st),
-		reasonLine,
 		backgroundJobAutoResultHint,
 		backgroundJobOptionalMgmtHint,
 	}, "\n")
@@ -471,9 +454,9 @@ func formatShellCancelledResult(job *backgroundJob, params shellRunParams) strin
 
 func formatShellHardTimeoutResult(timeoutSec int) string {
 	return strings.Join([]string{
-		"[BASH_RESULT] status=ERROR",
-		fmt.Sprintf("ERROR: 命令超过硬上限 %d 秒仍未结束，已终止（未转为后台）。", timeoutSec),
-		"若需超时后自动转后台，请显式传入 timeout_seconds；也可在执行中通过 UI「转后台」。",
+		"[BASH_RESULT] status=TIMED_OUT",
+		fmt.Sprintf("ERROR: 命令超过 timeout_seconds=%d 仍未结束，已终止。", timeoutSec),
+		"bash_run 始终同步执行；如需保持长期运行状态，请使用 terminal_open。",
 	}, "\n")
 }
 
@@ -490,9 +473,6 @@ func (j *backgroundJob) statusText() string {
 	}
 	if j.bashTimeout > 0 {
 		lines = append(lines, fmt.Sprintf("timeout_seconds=%d", j.bashTimeout))
-	}
-	if j.autoDegraded {
-		lines = append(lines, "degraded_from_sync_timeout: true")
 	}
 	if j.recoveryReason != "" {
 		lines = append(lines, fmt.Sprintf("recovery_reason=%s", j.recoveryReason))

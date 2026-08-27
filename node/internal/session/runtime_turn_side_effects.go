@@ -30,13 +30,13 @@ func (r *runtime) runTurnStepWithSideEffectsAtEpoch(
 			// assistant tool-call batch. The callback bridge is context-only;
 			// its acceptance is recorded separately as an external lifecycle fact.
 			if r.pendingSnapshot() == nil {
-				r.sideEffects.ApplyReady(r.session.ID, r.orch, history, r.triggerDelivery, r.recordSideEffectFact)
+				r.sideEffects.ApplyReady(r.session.ID, r.orch, history, r.recordSideEffectFact)
 			}
 		}
 		out := run(ctx, history)
 		if r.sideEffectsEnabled() {
 			pending := r.pendingSnapshot()
-			out = r.sideEffects.ReconcileAfterStep(r.session.ID, r.orch, history, pending, out, r.triggerDelivery, func() {
+			out = r.sideEffects.ReconcileAfterStep(r.session.ID, r.orch, history, pending, out, func() {
 				r.scheduleSideEffectContinue("reconcile")
 			}, r.recordSideEffectFact)
 		}

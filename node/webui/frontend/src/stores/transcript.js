@@ -96,20 +96,6 @@ export function addUser(text, images = []) {
   });
 }
 
-export function addDeferredUser(text, userName = "", sideEffectSeq = 0) {
-  abortStreaming();
-  markLocalHistoryDirty();
-  transcriptStore.entries.push({
-    id: ++idSeq,
-    kind: "user_deferred",
-    text,
-    userName: String(userName || "").trim(),
-    sideEffectSeq: Number(sideEffectSeq) || 0,
-    sideEffectApplied: false,
-    sideEffectStale: false,
-  });
-}
-
 function sideEffectSeqFromData(data) {
   const raw = data?.side_effect_seq;
   const n = Number(raw);

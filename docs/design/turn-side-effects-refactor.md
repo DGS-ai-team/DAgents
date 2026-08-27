@@ -6,6 +6,8 @@
 
 > **Turn/Step 重构说明（2026-08）**：下文场景表中的 `pending`、`state`、`toolLoopCount` 是规格编写时的状态记号；当前代码以 `turn.Coordinator` 的生命周期事件和投影为准，`StepOutcome.LoopCount` 已替换为 `StepOutcome.StepIndex`。旁路 Produce/Apply/Continue 的行为不变。
 
+> **后续语义修订（2026-08-27）**：本文的旁路场景和第 1.3、6–10 节保留为历史设计/验收背景，不再完整代表当前运行时。现行实现中，user/trigger/A2A 输入进入 session `InputBox` FIFO；活动 Turn（包括审批等待）期间只排队，普通输入不会调用 `InterruptPending`，只有显式 `turn cancel` 才会取消当前 Turn。`ask_user_information` 仍通过 typed `resume` 回答；`bash_run` 始终同步执行，超时直接失败，不创建后台 job。当前规范以 [`docs/architecture/go-node-internals.md`](../architecture/go-node-internals.md) 和 session/tools README 为准。
+
 ## 实现摘要（2026-06）
 
 | 阶段 | 行为 |

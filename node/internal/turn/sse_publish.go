@@ -179,7 +179,7 @@ func (o *Orchestrator) publishUsageIfAccumulated(sessionID string, llmStep int) 
 	o.hub.Publish(sessionID, "usage", o.withLifecycleMetadata(sessionID, payload))
 }
 
-// PublishSideEffectCallback Produce 时推送 callback 形态 SSE（async / external tool loop）。
+// PublishSideEffectCallback Produce 时推送 async callback 形态 SSE。
 func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEffectMessages, sideEffectSeq uint64) {
 	o.publishToolCallPayload(sessionID, map[string]any{
 		"assistant_content": "",
@@ -209,20 +209,6 @@ func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEff
 		extra["async_status"] = built.Status
 	}
 	o.publishToolResult(sessionID, tc, built.ForClientContent, false, extra)
-}
-
-// PublishExternalSideEffectDeferred Produce 桥接态 user_message_deferred SSE。
-func (o *Orchestrator) PublishExternalSideEffectDeferred(sessionID, content, userName, triggerID string, seq uint64) {
-	payload := map[string]any{
-		"content":         content,
-		"user_name":       llm.NormalizeUserMessageName(userName),
-		"deferred":        true,
-		"side_effect_seq": seq,
-	}
-	if strings.TrimSpace(triggerID) != "" {
-		payload["trigger_id"] = triggerID
-	}
-	o.hub.Publish(sessionID, "user_message_deferred", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // PublishSideEffectTurnStart 被动续跑 LLM 前通知 Client。

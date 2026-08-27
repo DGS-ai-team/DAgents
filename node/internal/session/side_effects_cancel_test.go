@@ -171,7 +171,7 @@ func TestClearContextDropsSideEffectBuffer(t *testing.T) {
 	}
 }
 
-func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
+func TestHumanMessageDuringPendingHITLWaitsForExplicitCancel(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()
 
@@ -203,14 +203,31 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 	}
 	waitQueueDrain(t, rt, 3*time.Second)
 	if sideEffectContinueDepth(rt) != 0 {
-		t.Fatal("human preempt path must not rely on cancel recovery continue")
+		t.Fatal("pending HITL must not schedule side-effect continuation")
 	}
 
-	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "human preempt", nil, nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "human question", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
+	deadline := time.Now().Add(2 * time.Second)
+	for rt.inputBox.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rt.inputBox.Len() != 1 {
+		t.Fatal("human message should wait in InputBox")
+	}
+	if !rt.sideEffects.HasReady() {
+		t.Fatal("pending HITL should keep the side effect buffered")
+	}
+	if got := rt.messageCount(); got != 3 {
+		t.Fatalf("human message must not mutate history while pending, got %d", got)
+	}
+
+	if !mgr.CancelTurn(sess.ID) {
+		t.Fatal("explicit cancel should interrupt the pending turn")
+	}
 	waitForRuntimeHistory(t, rt, 8*time.Second, func(messages []llm.Message) bool {
-		return !rt.sideEffects.HasReady() && historyContainsJobID(messages, "job-1")
+		return !rt.sideEffects.HasReady() && historyContainsJobID(messages, "job-1") && historyContainsContent(messages, "human question")
 	})
 
 	rt.mu.Lock()
@@ -219,7 +236,7 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 		t.Fatal("buffer should be applied during human turn step")
 	}
 	if !historyContainsJobID(rt.messages, "job-1") {
-		t.Fatal("human turn should apply buffered async side effect at step start")
+		t.Fatal("post-cancel human turn should apply buffered async side effect at step start")
 	}
 }
 
@@ -425,6 +442,15 @@ func historyContainsJobID(messages []llm.Message, jobID string) bool {
 	needle := "job_id：" + jobID
 	for _, m := range messages {
 		if strings.Contains(m.Content, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func historyContainsContent(messages []llm.Message, content string) bool {
+	for _, m := range messages {
+		if strings.Contains(m.Content, content) {
 			return true
 		}
 	}

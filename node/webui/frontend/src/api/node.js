@@ -154,13 +154,6 @@ export function cancelAgentToolCall(agentId, toolCallId) {
   );
 }
 
-export function backgroundAgentToolCall(agentId, toolCallId) {
-  return apiFetch(
-    `/v1/agents/${encodeURIComponent(agentId)}/tool-calls/${encodeURIComponent(toolCallId)}/background`,
-    { method: "POST", body: {} },
-  );
-}
-
 export function getAgentToolJobs(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/tool-jobs`);
 }

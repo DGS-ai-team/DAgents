@@ -55,7 +55,7 @@ POST /v1/messages
 
 同一 runtime 同时只有一个 consumer。一次 human message 可以跨多个模型 Step；每个 Step 都有独立生命周期事件，工具结果通过队列续跑，而不是在 HTTP handler 中递归调用下一轮模型。
 
-队列中的主要来源是 `message`、`resume`、`tool_result`、`async_tool_result`、`trigger_message` 和 `side_effect_continue`。`tool_result` 优先闭合已经发出的工具批；用户消息仍可打断等待中的 HITL，具体规则见 [turn / session 包文档](subsystems/README.md)。
+外部 `message`/trigger/A2A 输入进入每个 session 的 `InputBox` FIFO；`resume`、异步工具事实和恢复 continuation 由 `MessageQueue` 承载。活动 Turn（包括等待 HITL）期间，普通用户消息只排队，不会打断；只有显式 turn cancel 才会终止当前 Turn。工具结果在同一 Turn 链内 inline 续跑。
 
 ## 3. Session、Turn、Step
 

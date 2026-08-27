@@ -199,7 +199,7 @@ func TestClearContextDoesNotRestoreStaleTurnBeforeFirstNewHumanMessage(t *testin
 	}
 }
 
-func TestCancelTurnCancelsDetachedBashJobs(t *testing.T) {
+func TestCancelTurnDoesNotCreateDetachedBashJobs(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()
 
@@ -211,34 +211,11 @@ func TestCancelTurnCancelsDetachedBashJobs(t *testing.T) {
 	if reg == nil {
 		t.Fatal("session tool registry is nil")
 	}
-	if _, err := reg.StartBackground(tools.WithSession(context.Background(), s.ID), s.ID, "bash_run", "call-detached", `{"command":"sleep 30"}`); err != nil {
-		t.Fatalf("start background bash: %v", err)
+	if _, err := reg.StartBackground(tools.WithSession(context.Background(), s.ID), s.ID, "bash_run", "call-detached", `{"command":"sleep 30"}`); err == nil {
+		t.Fatal("bash_run must not create a detached background job")
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		counts := reg.SessionToolJobCounts(s.ID)
-		if counts.Background > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("background job not registered: %+v", counts)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	if !mgr.CancelTurn(s.ID) {
-		t.Fatal("expected cancel true for detached background job")
-	}
-	deadline = time.Now().Add(3 * time.Second)
-	for {
-		counts := reg.SessionToolJobCounts(s.ID)
-		if counts.Running == 0 && counts.Background == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("background job still active after turn cancel: %+v", counts)
-		}
-		time.Sleep(20 * time.Millisecond)
+	if mgr.CancelTurn(s.ID) {
+		t.Fatal("idle cancel should not report a detached bash job")
 	}
 }
 

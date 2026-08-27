@@ -22,7 +22,6 @@ export const AGENT_STREAM_EVENT_POLICIES = Object.freeze({
   temporary_agent_cancelled: "child-agent",
   context_compression_blocking: "compression",
   context_compression_silent: "compression",
-  user_message_deferred: "side-effect",
   side_effect_turn_start: "side-effect",
   side_effect_applied: "side-effect",
   side_effects_cleared: "side-effect",

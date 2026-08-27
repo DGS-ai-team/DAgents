@@ -8,13 +8,6 @@ defaults:
     role: ops
     description: 执行运维与自动化任务
   llm:
-    active: default
-    profiles:
-      default:
-        provider: deepseek
-        model: deepseek-chat
-        api_key_env: OPENAI_API_KEY
-        multimodal_enabled: false
     max_tool_loops: 24
   tools:
     enabled_groups: [fs, bash, terminal]

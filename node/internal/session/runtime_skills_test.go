@@ -31,7 +31,6 @@ func TestRuntimeSkillCatalogViewBlocksMidTurnBodyChangeUntilNextHumanTurn(t *tes
 	// This test drives the runtime's model-facing catalog path directly; the
 	// lifecycle projection is covered by the existing runtime lifecycle suite.
 	rt.orch.SetLifecycleCommandSink(nil)
-	rt.orch.SetToolResultEnqueuer(nil)
 
 	history := []llm.Message{}
 	outcome := rt.orch.RunHumanMessageTurn(context.Background(), rt.session.ID, &history, llm.UserMessage("使用写作 skill", llm.UserNameHuman))

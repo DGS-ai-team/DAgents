@@ -6,19 +6,13 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
-	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 type readySideEffect struct {
-	seq            uint64
-	kind           turn.SideEffectKind
-	ssePublished   bool
-	built          turn.SideEffectMessages
-	async          queue.AsyncToolResultPayload
-	messageContent string
-	userName       string
-	triggerID      string
+	seq   uint64
+	built turn.SideEffectMessages
+	async queue.AsyncToolResultPayload
 }
 
 type sideEffectStore struct {
@@ -64,11 +58,7 @@ func (s *sideEffectStore) clearContinuePending() {
 }
 
 type sideEffectProduceInput struct {
-	Kind           turn.SideEffectKind
-	Async          *queue.AsyncToolResultPayload
-	MessageContent string
-	UserName       string
-	TriggerID      string
+	Async *queue.AsyncToolResultPayload
 }
 
 func (s *sideEffectStore) Produce(
@@ -77,30 +67,28 @@ func (s *sideEffectStore) Produce(
 	messages []llm.Message,
 	in sideEffectProduceInput,
 ) {
-	var async queue.AsyncToolResultPayload
-	if in.Async != nil {
-		async = *in.Async
+	if in.Async == nil {
+		return
 	}
-	if in.Kind == turn.SideEffectAsync {
-		jobID := strings.TrimSpace(async.JobID)
-		if jobID != "" {
-			// History-level idempotence handles callbacks that arrive after the
-			// first callback was applied. This check handles duplicates that race
-			// before either callback reaches history.
-			if turn.SideEffectAlreadyApplied(messages, in.Kind, async, "", "") {
-				return
-			}
-			s.mu.Lock()
-			if s.asyncJobs == nil {
-				s.asyncJobs = make(map[string]struct{})
-			}
-			if _, exists := s.asyncJobs[jobID]; exists {
-				s.mu.Unlock()
-				return
-			}
-			s.asyncJobs[jobID] = struct{}{}
-			s.mu.Unlock()
+	async := *in.Async
+	jobID := strings.TrimSpace(async.JobID)
+	if jobID != "" {
+		// History-level idempotence handles callbacks that arrive after the
+		// first callback was applied. This check handles duplicates that race
+		// before either callback reaches history.
+		if turn.SideEffectAlreadyApplied(messages, async) {
+			return
 		}
+		s.mu.Lock()
+		if s.asyncJobs == nil {
+			s.asyncJobs = make(map[string]struct{})
+		}
+		if _, exists := s.asyncJobs[jobID]; exists {
+			s.mu.Unlock()
+			return
+		}
+		s.asyncJobs[jobID] = struct{}{}
+		s.mu.Unlock()
 	}
 
 	s.mu.Lock()
@@ -108,29 +96,13 @@ func (s *sideEffectStore) Produce(
 	seq := s.seq
 	s.mu.Unlock()
 
-	built := orch.BuildSideEffectMessages(in.Kind, sessionID, messages, async, in.MessageContent, in.UserName)
-
-	switch in.Kind {
-	case turn.SideEffectAsync:
-		orch.PublishSideEffectCallback(sessionID, built, seq)
-	case turn.SideEffectExternalMessage:
-		if turn.IsBridgeTail(messages) {
-			orch.PublishExternalSideEffectDeferred(sessionID, in.MessageContent, in.UserName, in.TriggerID, seq)
-			orch.PublishSideEffectCallback(sessionID, built, seq)
-		} else {
-			orch.PublishSideEffectCallback(sessionID, built, seq)
-		}
-	}
+	built := orch.BuildAsyncSideEffectMessages(sessionID, messages, async)
+	orch.PublishSideEffectCallback(sessionID, built, seq)
 
 	entry := readySideEffect{
-		seq:            seq,
-		kind:           in.Kind,
-		ssePublished:   true,
-		built:          built,
-		async:          async,
-		messageContent: in.MessageContent,
-		userName:       in.UserName,
-		triggerID:      in.TriggerID,
+		seq:   seq,
+		built: built,
+		async: async,
 	}
 	s.mu.Lock()
 	s.queue = append(s.queue, entry)
@@ -147,12 +119,11 @@ func (s *sideEffectStore) ApplyReady(
 	sessionID string,
 	orch *turn.Orchestrator,
 	history *[]llm.Message,
-	delivery triggers.DeliveryTracker,
 	factSinks ...func(readySideEffect),
 ) sideEffectApplyResult {
 	var result sideEffectApplyResult
 	for {
-		applied, seqs, cont := s.applyOneBatch(sessionID, orch, history, delivery, factSinks...)
+		applied, seqs, cont := s.applyOneBatch(sessionID, orch, history, factSinks...)
 		if applied == 0 {
 			break
 		}
@@ -172,7 +143,6 @@ func (s *sideEffectStore) applyOneBatch(
 	sessionID string,
 	orch *turn.Orchestrator,
 	history *[]llm.Message,
-	delivery triggers.DeliveryTracker,
 	factSinks ...func(readySideEffect),
 ) (applied int, appliedSeqs []uint64, shouldContinue bool) {
 	batch := s.collectBatch(*history)
@@ -183,8 +153,8 @@ func (s *sideEffectStore) applyOneBatch(
 	// 幂等 skip
 	var pending []readySideEffect
 	for _, e := range batch {
-		if turn.SideEffectAlreadyApplied(*history, e.kind, e.async, e.messageContent, e.userName) {
-			s.removeEntry(e, delivery)
+		if turn.SideEffectAlreadyApplied(*history, e.async) {
+			s.removeEntry(e)
 			applied++
 			appliedSeqs = append(appliedSeqs, e.seq)
 			continue
@@ -226,7 +196,7 @@ func (s *sideEffectStore) applyOneBatch(
 	}
 	orch.ApplySideEffectPlan(sessionID, history, site, plan)
 	for _, e := range pending {
-		s.removeEntry(e, delivery)
+		s.removeEntry(e)
 		appliedSeqs = append(appliedSeqs, e.seq)
 	}
 	return applied + len(pending), appliedSeqs, plan.Continue
@@ -239,7 +209,7 @@ func (s *sideEffectStore) collectBatch(history []llm.Message) []readySideEffect 
 		return nil
 	}
 	head := s.queue[0]
-	if turn.SideEffectAlreadyApplied(history, head.kind, head.async, head.messageContent, head.userName) {
+	if turn.SideEffectAlreadyApplied(history, head.async) {
 		return []readySideEffect{head}
 	}
 	site := turn.ResolveSideEffectInsertSite(history, head.built)
@@ -251,7 +221,7 @@ func (s *sideEffectStore) collectBatch(history []llm.Message) []readySideEffect 
 	var batch []readySideEffect
 	for i := 0; i < len(s.queue); i++ {
 		e := s.queue[i]
-		if turn.SideEffectAlreadyApplied(sim, e.kind, e.async, e.messageContent, e.userName) {
+		if turn.SideEffectAlreadyApplied(sim, e.async) {
 			batch = append(batch, e)
 			continue
 		}
@@ -275,16 +245,12 @@ func (s *sideEffectStore) collectBatch(history []llm.Message) []readySideEffect 
 
 func sideEffectEntryToBatch(e readySideEffect) turn.SideEffectBatchEntry {
 	return turn.SideEffectBatchEntry{
-		Kind:           e.kind,
-		Built:          e.built,
-		Async:          e.async,
-		MessageContent: e.messageContent,
-		UserName:       e.userName,
-		TriggerID:      e.triggerID,
+		Built: e.built,
+		Async: e.async,
 	}
 }
 
-func (s *sideEffectStore) removeEntry(e readySideEffect, delivery triggers.DeliveryTracker) {
+func (s *sideEffectStore) removeEntry(e readySideEffect) {
 	s.mu.Lock()
 	out := s.queue[:0]
 	for _, item := range s.queue {
@@ -295,17 +261,9 @@ func (s *sideEffectStore) removeEntry(e readySideEffect, delivery triggers.Deliv
 	}
 	s.queue = out
 	s.mu.Unlock()
-	clearTriggerDelivery(delivery, e.triggerID)
 }
 
-func clearTriggerDelivery(delivery triggers.DeliveryTracker, triggerID string) {
-	if delivery == nil || triggerID == "" {
-		return
-	}
-	delivery.ClearPendingDelivery(triggerID)
-}
-
-func (s *sideEffectStore) ClearSession(sessionID string, orch *turn.Orchestrator, delivery triggers.DeliveryTracker) {
+func (s *sideEffectStore) ClearSession(sessionID string, orch *turn.Orchestrator) {
 	s.mu.Lock()
 	items := append([]readySideEffect(nil), s.queue...)
 	s.queue = nil
@@ -315,7 +273,6 @@ func (s *sideEffectStore) ClearSession(sessionID string, orch *turn.Orchestrator
 	seqs := make([]uint64, 0, len(items))
 	for _, e := range items {
 		seqs = append(seqs, e.seq)
-		clearTriggerDelivery(delivery, e.triggerID)
 	}
 	if orch != nil && len(seqs) > 0 {
 		orch.PublishSideEffectsCleared(sessionID, len(seqs), seqs)
@@ -328,7 +285,6 @@ func (s *sideEffectStore) ReconcileAfterStep(
 	history *[]llm.Message,
 	pending *turn.PendingHITL,
 	outcome turn.StepOutcome,
-	delivery triggers.DeliveryTracker,
 	scheduleContinue func(),
 	factSinks ...func(readySideEffect),
 ) turn.StepOutcome {
@@ -338,7 +294,7 @@ func (s *sideEffectStore) ReconcileAfterStep(
 	if !turn.TaskComplete(*history, pending) {
 		return outcome
 	}
-	apply := s.ApplyReady(sessionID, orch, history, delivery, factSinks...)
+	apply := s.ApplyReady(sessionID, orch, history, factSinks...)
 	if apply.Continue {
 		scheduleContinue()
 	}

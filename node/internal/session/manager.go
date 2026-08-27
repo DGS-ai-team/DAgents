@@ -93,7 +93,7 @@ type PromptContextOptions struct {
 	LongTermScope   *string // global | agent
 }
 
-// Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
+// Manager 维护 session 表；每个 session 独立 InputBox、控制队列与 consumer goroutine。
 type Manager struct {
 	agentID string
 	hub     *stream.Hub
@@ -325,7 +325,7 @@ func (m *Manager) createWithOptions(
 		m.logger.Info("session reuse", "session_id", id)
 		return &existing.session, false, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(id)
+	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
 		return nil, false, err
@@ -333,6 +333,7 @@ func (m *Manager) createWithOptions(
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(inputBoxState)
 	rt.historyRevision = historyRevision
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
@@ -409,22 +410,23 @@ func (m *Manager) replaceWithOptions(
 	var idleMarked bool
 	var notifySeq, ackSeq int
 	var historyRevision uint64
+	var inputBoxState json.RawMessage
 	if old != nil {
 		// Persist for cold-start recovery, but hydrate from the old runtime's
 		// in-memory snapshot. This avoids losing a last-minute state change when
 		// the store write fails or when the manager is embedded without a store.
 		old.persist(context.Background())
 		if m.store != nil {
-			if _, _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+			if _, _, _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
 				m.mu.Unlock()
 				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
 				return nil, false, err
 			}
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision = old.replacementData()
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState = old.replacementData()
 	} else {
 		var err error
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err = m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err = m.loadSessionData(id)
 		if err != nil {
 			m.mu.Unlock()
 			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
@@ -434,6 +436,7 @@ func (m *Manager) replaceWithOptions(
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(inputBoxState)
 	rt.historyRevision = historyRevision
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -461,13 +464,14 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, err := m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
+		rt.restoreInputBoxState(inputBoxState)
 		rt.historyRevision = historyRevision
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
@@ -500,22 +504,22 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, error) {
+func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, json.RawMessage, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, err
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
+		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, nil
 	}
 	var pending *turn.PendingHITL
 	if rec.RuntimeState.Pending != nil {
 		pending = rec.RuntimeState.Pending
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, rec.RuntimeState.HistoryRevision, nil
+	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, rec.RuntimeState.HistoryRevision, rec.RuntimeState.InputBoxState, nil
 }
 
 func (m *Manager) sessionExistsInStore(sessionID string) bool {
@@ -652,7 +656,11 @@ func (m *Manager) RuntimeInfo(sessionID string) (queuePending int, hasActiveTurn
 		return 0, false, "", fmt.Errorf("agent_not_found")
 	}
 	state := rt.turnState()
-	return rt.queueDepth(), state != turn.StateIdle, state, nil
+	queuePending = rt.queueDepth()
+	if rt.inputBox != nil {
+		queuePending += rt.inputBox.Len()
+	}
+	return queuePending, state != turn.StateIdle, state, nil
 }
 
 // GetContextView 返回 session context 摘要（活跃 runtime 或 DB 持久化）。
@@ -687,6 +695,7 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		PendingToolCallsCount: pendingToolCallsCount(pending),
 		ToolLoopCount:         stepCount,
 		LoadedSkills:          rec.LoadedSkills,
+		QueuePending:          inputBoxPendingCount(rec.RuntimeState.InputBoxState),
 		Messages:              rec.Messages,
 		HasActiveTurn:         lifecycle.HasActiveTurn,
 		TurnID:                lifecycle.TurnID,
@@ -920,7 +929,11 @@ func (m *Manager) EnqueueMessage(
 		UserName:     userMessageName,
 		ResumeValue:  resumeValue,
 	}
-	if err := rt.enqueue(env, p); err != nil {
+	if requestType == queue.RequestTypeMessage {
+		if _, err := rt.appendInput(InputKindUser, env); err != nil {
+			return "", err
+		}
+	} else if err := rt.enqueue(env, p); err != nil {
 		return "", err
 	}
 	return string(p), nil
@@ -940,18 +953,7 @@ func (m *Manager) EnqueueAsyncToolResult(sessionID string, payload queue.AsyncTo
 	return rt.enqueue(env, queue.PriorityAsyncCompletion)
 }
 
-// EnqueueToolResult 将 tool_result 续跑请求入队（同步工具批处理完成后使用）。
-func (m *Manager) EnqueueToolResult(sessionID string) error {
-	rt := m.getRuntime(sessionID)
-	if rt == nil {
-		m.logger.Warn("tool result enqueue skipped: session not found", "session_id", sessionID)
-		return fmt.Errorf("agent_not_found")
-	}
-	return rt.enqueueToolResult(context.Background(), sessionID)
-}
-
 // ReconcileToolExecution resolves a side effect that was marked unknown after
-// restart. The runtime validates Turn/Step fencing and queues the next model
 // Step only after every unknown execution has a known terminal result.
 func (m *Manager) ReconcileToolExecution(ctx context.Context, sessionID, turnID, stepID, executionID string, status turn.ToolExecutionStatus, content string) error {
 	rt := m.getRuntime(sessionID)
@@ -967,9 +969,9 @@ func (m *Manager) CancelTurn(sessionID string) bool {
 	if rt == nil {
 		return false
 	}
-	// Canceling the composer turn must also cancel bash jobs that already
-	// detached from the turn after timeout auto-degradation. Otherwise the UI
-	// reports a canceled turn while the shell keeps running in the background.
+	// Canceling the composer turn also cancels any synchronous bash process
+	// currently registered for UI cancellation. bash_run never detaches on
+	// timeout; long-lived processes belong to terminal_open.
 	turnCancelled := rt.cancelTurn()
 	jobsCancelled := false
 	if reg := m.SessionTools(sessionID); reg != nil {

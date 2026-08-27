@@ -36,6 +36,9 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		messages := append([]llm.Message(nil), rt.messages...)
 		historyRevision := rt.historyRevision
 		queuePending := rt.queue.Len()
+		if rt.inputBox != nil {
+			queuePending += rt.inputBox.Len()
+		}
 		notifySeq := rt.notifySeq
 		ackSeq := rt.ackSeq
 		state := rt.turnState()
@@ -69,7 +72,8 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	} else if pending != nil {
 		state = turn.StateAwaitingTool
 	}
-	return m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
+	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
+	return m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
 }
 
 func (m *Manager) buildHydrateView(

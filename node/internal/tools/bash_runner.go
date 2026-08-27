@@ -17,25 +17,17 @@ type shellRunParams struct {
 	cwd            string
 	shellType      shellType
 	timeoutSec     int
-	userTimeout    bool // 模型显式传入 timeout_seconds 时为 true（超时可降后台）
 	outputEncoding string
 	compress       BashCompressConfig
 }
 
-// WithBackgroundExecution 标记当前 Execute 由 StartBackground 发起，bash_run 不做同步窗口超时。
+// WithBackgroundExecution 标记通用后台工具的 Execute。bash_run 不接受
+// StartBackground，因此不会走该后台语义。
 func WithBackgroundExecution(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, backgroundExecContextKey{}, true)
-}
-
-func isBackgroundExecution(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	v, ok := ctx.Value(backgroundExecContextKey{}).(bool)
-	return ok && v
 }
 
 func (r *Registry) execBashRun(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -51,15 +43,7 @@ func (r *Registry) execBashRun(ctx context.Context, raw json.RawMessage) (string
 		return errMsg, nil
 	}
 
-	if isBackgroundExecution(ctx) {
-		out, stats, err := runShellUntilDoneWithRegistry(r, ctx, params)
-		if err != nil {
-			return fmt.Sprintf("ERROR: %v", err), nil
-		}
-		r.stashBashCompressStats(toolCallIDFromContext(ctx), stats)
-		return out, nil
-	}
-	out, stats, err := runShellSyncWithAutoDegrade(r, ctx, params)
+	out, stats, err := runShellSync(r, ctx, params)
 	if err != nil {
 		return "", err
 	}
@@ -111,7 +95,6 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 		cwd:            cwd,
 		shellType:      st,
 		timeoutSec:     timeout,
-		userTimeout:    userTimeout,
 		outputEncoding: resolveShellOutputEncoding(st, encConfigured),
 		compress:       r.bashCompress.normalized(),
 	}, "", nil
@@ -146,41 +129,9 @@ func (r *Registry) startShellProcess(ctx context.Context, params shellRunParams)
 	})
 }
 
-// runShellUntilDoneWithRegistry 在 ctx 有效期内等待 shell 结束。
-func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
-	process, err := r.startShellProcess(ctx, params)
-	if err != nil {
-		return "", nil, err
-	}
-	stdout := newBashOutputBuffer(params.compress, false)
-	stderr := newBashOutputBuffer(params.compress, true)
-	process.SetOutput(stdout, stderr)
-	if err := process.Start(); err != nil {
-		return "", nil, err
-	}
-	r.bindBackgroundProcess(ctx, process)
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- process.Wait() }()
-	var runErr error
-	select {
-	case runErr = <-waitErr:
-	case <-ctx.Done():
-		_ = process.Terminate(ctx)
-		runErr = <-waitErr
-	}
-	_ = process.Close()
-	outText := decodeShellOutput(stdout.Bytes(), params.outputEncoding)
-	errText := decodeShellOutput(stderr.Bytes(), params.outputEncoding)
-	if params.shellType == shellPowerShell {
-		errText = decodePowerShellCLIXML(errText)
-	}
-	out, stats := formatShellCompletedOutputWithCapture(params, outText, errText, process.ExitStatus(), runErr, stdout.truncated || stderr.truncated)
-	return out, stats, nil
-}
-
-// runShellSyncWithAutoDegrade 同步等待；显式 timeout 到期可降后台，未传 timeout 则硬上限杀进程。
-// 等待期间可通过 syncShellGate 接受 UI 的终止 / 转后台请求。
-func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
+// runShellSync waits for one bash_run process. Timeout and cancellation both
+// terminate this process; neither path creates a background job.
+func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	process, err := r.startShellProcess(ctx, params)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil, nil
@@ -246,11 +197,6 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 			return formatShellCancelledResult(job, params), nil, nil
 		}
 		return result, stats, nil
-	case <-gate.bgCh:
-		// 与 collector 并发：先置 autoDegraded，若进程已结束则立即回灌，避免丢 async 回调。
-		r.markAutoDegradedAndMaybeNotify(job)
-		r.syncShells.remove(toolCallID)
-		return formatShellRunningResult(job, params, "user"), nil, nil
 	case <-gate.cancelCh:
 		job.mu.Lock()
 		job.transitionStatusLocked(jobStatusCancelled, "cancelled")
@@ -259,11 +205,6 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		<-collectDone
 		return formatShellCancelledResult(job, params), nil, nil
 	case <-timer.C:
-		if params.userTimeout {
-			r.markAutoDegradedAndMaybeNotify(job)
-			r.syncShells.remove(toolCallID)
-			return formatShellRunningResult(job, params, "timeout"), nil, nil
-		}
 		job.mu.Lock()
 		job.transitionStatusLocked(jobStatusCancelled, formatShellHardTimeoutResult(params.timeoutSec))
 		job.mu.Unlock()
@@ -338,31 +279,9 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 			job.transitionStatusLocked(jobStatusFailed, result)
 		}
 		job.compressStats = stats
-		autoDegraded := job.autoDegraded
 		job.mu.Unlock()
-
-		if autoDegraded && r.bgJobs != nil {
-			r.bgJobs.notifyJobDone(job)
-		}
 	}()
 	return done
-}
-
-// markAutoDegradedAndMaybeNotify 标记同步 bash 已转入后台；若 collector 已先完成则立刻回灌。
-func (r *Registry) markAutoDegradedAndMaybeNotify(job *backgroundJob) {
-	if job == nil {
-		return
-	}
-	job.mu.Lock()
-	job.autoDegraded = true
-	finished := job.finishedAt != 0
-	job.mu.Unlock()
-	if r.bgJobs != nil {
-		r.bgJobs.put(job)
-		if finished {
-			r.bgJobs.notifyJobDone(job)
-		}
-	}
 }
 
 func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, exit *ExitStatus, runErr error) (string, *OutputCompressStats) {
