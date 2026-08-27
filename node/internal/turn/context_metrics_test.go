@@ -45,21 +45,21 @@ func TestTurnContextMetrics_statusPollAndDoneSSE(t *testing.T) {
 	if m == nil || m.StatusPollCount != 1 || m.ToolCalls != 1 {
 		t.Fatalf("metrics after executeTool = %+v", m)
 	}
-	orch.publishDone("sess-m", "stop")
-	var donePayload map[string]any
+	orch.publishTurnFinished("sess-m", "stop")
+	var finishedPayload map[string]any
 	for i := 0; i < 5; i++ {
 		ev := <-ch
-		if ev.Type == "done" {
-			donePayload = ev.Data
+		if ev.Type == "turn_finished" {
+			finishedPayload = ev.Data
 			break
 		}
 	}
-	if donePayload == nil {
-		t.Fatal("missing done event")
+	if finishedPayload == nil {
+		t.Fatal("missing turn_finished event")
 	}
-	raw, ok := donePayload["tool_context_metrics"].(map[string]any)
+	raw, ok := finishedPayload["tool_context_metrics"].(map[string]any)
 	if !ok {
-		t.Fatalf("missing tool_context_metrics: %+v", donePayload)
+		t.Fatalf("missing tool_context_metrics: %+v", finishedPayload)
 	}
 	if n, ok := raw["status_poll_count"].(int); !ok || n != 1 {
 		if f, ok := raw["status_poll_count"].(float64); !ok || int(f) != 1 {

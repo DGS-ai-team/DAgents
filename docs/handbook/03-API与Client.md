@@ -114,23 +114,24 @@ Content-Type: application/json
 ### 2.4 SSE 订阅
 
 ```http
-GET /v1/streams?agent_id=agt-...
+GET /v1/streams?agent_id=agt-...&live=1
 ```
 
-- Web UI 通常维持一条 SSE；可用 `agent_id` query 过滤。  
-- `Last-Event-ID` / `live=1`：断点与增量；见 [02 §4.6](./02-Agent-Node-核心.md)。  
+- Web UI 通常维持一条 SSE；可用 `agent_id` query 过滤。
+- 过滤流重连使用 `after_agent_seq`；无 Agent 过滤的 Node 级流才使用 `after_seq`。`stream_epoch` 变化或收到 `resync_required` 时必须 hydrate。
 - 事件类型速查：[附录/SSE事件速查](./附录/SSE事件速查.md)。
 
 **关键事件**：
 
 | 事件 | 含义 |
 |------|------|
-| `assistant_delta` | 流式正文 |
-| `reasoning_delta` | 推理链（若模型支持） |
+| `assistant` | 流式正文 |
+| `reasoning` | 推理链（若模型支持） |
 | `tool_call` / `tool_result` | 工具调用与结果 |
+| `turn_state` | Turn Coordinator 权威生命周期快照 |
 | `hitl_required` | 本地 turn 统一 HITL（`items[]` 含 ask / 审批） |
+| `turn_finished` | 真正的 turn 终态；HITL 暂停不发送 |
 | `usage` | token 统计 |
-| `done` | 本步 turn 结束（**不等于**整个多步工具链结束） |
 
 ---
 

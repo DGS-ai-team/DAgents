@@ -41,7 +41,7 @@ sequenceDiagram
             O-->>RT: PendingHITL
         end
     else 无 tool_calls
-        O-->>H: done SSE
+        O-->>H: turn_finished SSE
     end
 ```
 
@@ -97,7 +97,7 @@ sequenceDiagram
 
 - **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 始终同步；超时直接失败，不转后台；长期任务使用 `terminal_open`）
 - **HITL pending**：`ask_user_information` 与 `require_approval` 工具合并为 **`PendingHITL.Items[]`**（不再区分 `HITLKind`）
-- **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；`done` 为 `awaiting_hitl` / `awaiting=hitl`
+- **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；HITL 暂停不发终态事件。真正结束时发送 **`turn_finished`**，其 payload 含 `finish_reason`、`turn_complete=true` 与工具上下文指标。
 
 ### 工具结果状态
 

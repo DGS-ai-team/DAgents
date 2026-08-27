@@ -110,17 +110,13 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 	o.hub.Publish(sessionID, "tool_result", o.withLifecycleMetadata(sessionID, payload))
 }
 
-// publishDone 推送 done SSE：finish_reason、turn_complete/awaiting、tool_context_metrics。
-func (o *Orchestrator) publishDone(sessionID, finishReason string) {
+// publishTurnFinished 推送 turn_finished SSE。它只表示一个 turn 已进入
+// 终态；HITL 暂停不发送该事件，暂停事实由 hitl_required + turn_state 表达。
+func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
 	o.runTurnDonePhase(sessionID, finishReason)
-	payload := map[string]any{"finish_reason": finishReason}
-	switch finishReason {
-	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval":
-		payload["turn_complete"] = false
-		payload["awaiting"] = "hitl"
-	default:
-		payload["turn_complete"] = true
-		payload["awaiting"] = nil
+	payload := map[string]any{
+		"finish_reason": finishReason,
+		"turn_complete": true,
 	}
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()
@@ -129,7 +125,7 @@ func (o *Orchestrator) publishDone(sessionID, finishReason string) {
 		payload["model_context_snapshot"] = snapshot.observability()
 	}
 	o.logTurnContextMetrics(sessionID, finishReason)
-	o.hub.Publish(sessionID, "done", o.withLifecycleMetadata(sessionID, payload))
+	o.hub.Publish(sessionID, "turn_finished", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // publishUsage 推送 usage SSE。

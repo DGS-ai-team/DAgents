@@ -77,7 +77,7 @@ log:
   level: info   # debug | info | warn | error
 ```
 
-或 `-log-level debug`。SSE **`done`** 语义见 [`docs/architecture/agent-node-api.md`](../docs/architecture/agent-node-api.md) §2.4.1。
+或 `-log-level debug`。SSE **`turn_finished`** 语义见 [`docs/architecture/agent-node-api.md`](../docs/architecture/agent-node-api.md) §2.4.1。
 
 ## 测试
 

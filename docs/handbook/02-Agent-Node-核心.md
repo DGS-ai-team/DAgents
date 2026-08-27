@@ -64,12 +64,12 @@ runOneStep(ctx, sessionID, history)
   │     OnToolCallDelta    → SSE tool_call（流式参数）
   │     OnUsage            → SSE usage（累计）
   │
-  ├─ 错误 / cancel → persistCancelledStream、done、return Err
+  ├─ 错误 / cancel → persistCancelledStream、turn_finished、return Err
   │
   ├─ appendHistory(assistant)            // 整段 assistant 落库
   │
   ├─ len(ToolCalls)==0 ?
-  │     └─ publishDone(stop)             → SSE done，return
+  │     └─ publishTurnFinished(stop)     → SSE turn_finished，return
   │
   └─ Coordinator 更新工具/交互状态
         processToolCalls                 → tool_router.go
@@ -77,7 +77,7 @@ runOneStep(ctx, sessionID, history)
           ├─ HITL       → PendingHITL.Items[]，SSE hitl_required
           │               （ask_user + approval 同批；分步 resume）
           └─ childagent → HandleParentTool
-        pending ? → done(awaiting_hitl)，return Pending（可部分 resume 后仍 pending）
+        pending ? → turn_state(tool_waiting)，return Pending（可部分 resume 后仍 pending）
         否则 enqueueToolResult 或 ScheduleToolResult=true
 ```
 
@@ -108,9 +108,9 @@ runOneStep(ctx, sessionID, history)
 | 推理流 | `reasoning` |
 | 工具参数流 | `tool_call`（partial） |
 | 用量 | `usage` |
-| 本步结束 | `done`（语义 B：轮到用户，见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |
+| 本步结束 | `turn_finished`（终态；见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |
 
-Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补占位 `tool` 消息，再 `done(cancelled)`。
+Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补占位 `tool` 消息，再 `turn_finished(cancelled)`。
 
 ### 1.5 本步内的工具处理（预告）
 
@@ -157,10 +157,10 @@ type StepOutcome struct {
 
 | Outcome | 含义 | 下一步 |
 |---------|------|--------|
-| 无 Pending，无 Schedule，无 Err | 本步模型已给出最终回答 | `done(turn_complete=true)`，链结束 |
+| 无 Pending，无 Schedule，无 Err | 本步模型已给出最终回答 | `turn_finished(turn_complete=true)`，链结束 |
 | `Pending != nil` | HITL | Client `resume` → §3 → `ContinueAfterResume` |
 | `ScheduleToolResult` | auto 工具已执行，history 已闭合 | inline `RunToolMessageTurn` → 又一次 §1 |
-| `Err != nil` | LLM/工具/cancel/超限 | `done` + 持久化，链结束 |
+| `Err != nil` | LLM/工具/cancel/超限 | `turn_finished` + 持久化，链结束 |
 
 ### 2.3 生产路径：单步执行 + Turn 链内续跑
 
@@ -193,7 +193,7 @@ handleInputMessage
 |------|------|
 | 新 user 消息到达且存在 `pending` | 进入 InputBox FIFO，保持 pending；不会自动打断当前链 |
 | 审批 / 用户输入 | `handleResume` → `ContinueAfterResume`：写 `tool` 结果，`ScheduleToolResult` 或继续 loop |
-| `done` 与 HITL | HITL 暂停时 `turn_complete=false`；resume 后续跑 **不再** 立即发 `done`（见 SSE 速查） |
+| `turn_finished` 与 HITL | HITL 暂停时不发送 `turn_finished`；resume 后续跑，最终终态时再发送 |
 
 **文件**：`turn/pending.go`、`session/runtime.go` → `handleResume`；Client 载荷见 [03 §2.3](./03-API与Client.md)。
 
@@ -201,7 +201,7 @@ handleInputMessage
 
 - `StepIndex`：当前 Turn 内的 Step 序号，由 Coordinator 分配并通过 `TurnExecutionContext` 传递。
 - 新 `handleHumanMessage` 时创建新的 Turn；不再由 runtime 归零和递增独立计数器。
-- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `done` 结束；下一条 user 消息会重置计数。
+- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `turn_finished` 结束；下一条 user 消息会重置计数。
 
 ### 2.7 源码索引（§2）
 

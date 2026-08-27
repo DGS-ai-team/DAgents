@@ -44,7 +44,7 @@ func TestHumanMessageWithCompressionAndHooksDoesNotDeadlock(t *testing.T) {
 	for !gotDone {
 		select {
 		case ev := <-ch:
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				gotDone = true
 			}
 		case <-deadline:

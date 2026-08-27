@@ -214,7 +214,7 @@ OnChildSettled → finishWithEvent(completed)
 
 子 runtime 的 `Publisher` 替换为 `RelayHub`：
 
-1. **忽略子 turn 的 `done`** — 避免 Client 误判父 session 回合结束
+1. **忽略子 turn 的 `turn_finished`** — 避免 Client 误判父 session 回合结束
 2. **所有事件附加 `child_agent_id`**
 3. **`approval_required` 附加** `hitl_scope=temporary_agent`、`child_purpose`（子 turn 仍走该事件；父 session 本地 turn 为 **`hitl_required`**）
 4. **统一 `Publish` 到父 `session_id`**

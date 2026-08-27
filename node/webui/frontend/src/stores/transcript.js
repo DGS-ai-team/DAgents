@@ -42,6 +42,8 @@ function readShowReasoningPref() {
 export const transcriptStore = reactive({
   entries: [],
   lastSeq: 0,
+  lastAgentSeq: 0,
+  streamEpoch: "",
   historyRevision: 0,
   historyDirty: false,
   assistantBuffer: "",
@@ -69,8 +71,10 @@ export function hasStreamingTextContent() {
   return hasStreamingKind("assistant") || hasStreamingKind("reasoning");
 }
 
-export function noteSeq(seq) {
+export function noteSeq(seq, agentSeq = 0, epoch = "") {
   if (seq > transcriptStore.lastSeq) transcriptStore.lastSeq = seq;
+  if (agentSeq > transcriptStore.lastAgentSeq) transcriptStore.lastAgentSeq = agentSeq;
+  if (epoch) transcriptStore.streamEpoch = String(epoch);
 }
 
 export function markLocalHistoryDirty() {
@@ -203,7 +207,7 @@ export function upsertToolCallFromSSE(data) {
   markLocalHistoryDirty();
   // partial tool_call 到达时正文可能仍在继续（token 边界如 Not|epad）。
   // 提前 finalize 会把同一条回复拆成两个气泡，看起来像单词中间换行。
-  // 仅在最终 tool_call（或 tool_result / done 等）时封存助手文本。
+  // 仅在最终 tool_call（或 tool_result / turn_finished 等）时封存助手文本。
   if (!partial) {
     finalizeAssistant();
     finalizeReasoning();
@@ -388,6 +392,9 @@ export function patchBashResultStatus(toolCallId, status) {
 
 export function clearTranscript() {
   transcriptStore.entries = [];
+  transcriptStore.lastSeq = 0;
+  transcriptStore.lastAgentSeq = 0;
+  transcriptStore.streamEpoch = "";
   transcriptStore.historyRevision = 0;
   transcriptStore.historyDirty = false;
   abortStreaming();

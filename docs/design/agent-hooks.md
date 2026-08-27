@@ -133,7 +133,7 @@ flowchart TD
 | `tool.before_each` / `tool.after_each` | `processToolCalls` 内各 tool 执行前后 | `node/internal/turn/tool_router.go` |
 | `hitl.before_pause` | `processToolCalls` 返回 `PendingHITL` 前 | `node/internal/turn/tool_router.go` |
 | `hitl.after_resume` | `ContinueAfterResume` 入口 | `node/internal/turn/orchestrator.go` |
-| `turn.done` | `publishDone`（finish_reason 为 stop 时） | `node/internal/turn/sse_publish.go` |
+| `turn.done` | `publishTurnFinished`（终态事件） | `node/internal/turn/sse_publish.go` |
 | `turn.error` / `turn.cancel` | `runOneStep` 错误 / cancel 分支 | `node/internal/turn/orchestrator.go` |
 | `session.lifecycle` | `Manager` 创建 / 删除 session | `node/internal/session/manager.go` |
 

@@ -209,11 +209,11 @@ func TestHandleStreamsAfterSeqReplaysHistory(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 	first := srv.stream.Publish(sessionID, "assistant", map[string]any{"content": "hi"})
-	_ = srv.stream.Publish(sessionID, "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+	_ = srv.stream.Publish(sessionID, "turn_finished", map[string]any{"finish_reason": "stop", "turn_complete": true})
 
 	req, err := http.NewRequest(
 		http.MethodGet,
-		ts.URL+"/v1/streams?agent_id="+sessionID+"&after_seq="+strconv.Itoa(first.Seq),
+		ts.URL+"/v1/streams?agent_id="+sessionID+"&after_agent_seq="+strconv.Itoa(first.AgentSeq),
 		nil,
 	)
 	if err != nil {
@@ -230,19 +230,49 @@ func TestHandleStreamsAfterSeqReplaysHistory(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	reader := bufio.NewReader(resp.Body)
-	sawDone := false
-	for !sawDone {
+	sawFinished := false
+	for !sawFinished {
 		select {
 		case <-deadline:
-			t.Fatal("timeout waiting for replayed done")
+		t.Fatal("timeout waiting for replayed turn_finished")
 		default:
 		}
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			t.Fatalf("read sse: %v", err)
 		}
-		if strings.HasPrefix(line, "event: done") {
-			sawDone = true
+		if strings.HasPrefix(line, "event: turn_finished") {
+			sawFinished = true
+		}
+	}
+}
+
+func TestHandleStreamsReportsResyncWhenAgentHistoryWasTruncated(t *testing.T) {
+	srv, ts := newTestServer(t)
+	defer ts.Close()
+
+	sessionID := createTestRuntime(t, srv)
+	for i := 0; i < 300; i++ {
+		srv.stream.Publish(sessionID, "assistant", map[string]any{"content": "x"})
+	}
+
+	resp, err := http.Get(ts.URL + "/v1/streams?agent_id=" + sessionID + "&after_agent_seq=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d", resp.StatusCode)
+	}
+	reader := bufio.NewReader(resp.Body)
+	seenResync := false
+	for !seenResync {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "event: resync_required") {
+			seenResync = true
 		}
 	}
 }
@@ -279,7 +309,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 		t.Fatalf("message status = %d body=%s", msgResp.StatusCode, body)
 	}
 
-	// 从 SSE 读取 assistant + done
+	// 从 SSE 读取 assistant + turn_finished
 	deadline := time.After(3 * time.Second)
 	reader := bufio.NewReader(streamResp.Body)
 	var assistantText strings.Builder
@@ -314,7 +344,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 			if c, ok := envelope.Data["content"].(string); ok {
 				assistantText.WriteString(c)
 			}
-		case "done":
+		case "turn_finished":
 			gotDone = true
 		}
 	}

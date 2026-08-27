@@ -52,11 +52,11 @@ func TestClientCreateMessageStream(t *testing.T) {
 		flusher.Flush()
 
 		donePayload := map[string]any{
-			"agent_id": sessionID, "type": "done", "seq": 2,
+			"agent_id": sessionID, "type": "turn_finished", "seq": 2, "agent_seq": 2,
 			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"finish_reason": "stop"},
 		}
 		b2, _ := json.Marshal(donePayload)
-		_, _ = w.Write([]byte("id: 2\nevent: done\ndata: " + string(b2) + "\n\n"))
+		_, _ = w.Write([]byte("id: 2\nevent: turn_finished\ndata: " + string(b2) + "\n\n"))
 		flusher.Flush()
 
 		<-r.Context().Done()
@@ -83,7 +83,7 @@ func TestClientCreateMessageStream(t *testing.T) {
 					text.WriteString(s)
 				}
 			}
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				close(doneCh)
 				return false
 			}

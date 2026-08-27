@@ -92,6 +92,8 @@ describe("hydrateAgent lifecycle", () => {
     clearHitl();
     transcriptStore.entries = [];
     transcriptStore.lastSeq = 0;
+    transcriptStore.lastAgentSeq = 0;
+    transcriptStore.streamEpoch = "";
     transcriptStore.historyRevision = 0;
     transcriptStore.historyDirty = false;
     resetTurnState();
@@ -125,7 +127,9 @@ describe("hydrateAgent lifecycle", () => {
         hitl_id: "hitl-1",
         items: [{ hitl_type: "execute_tool", id: "call-1", tool_name: "bash_run" }],
       },
-      sse_seq_hint: 10,
+      stream_epoch: "test-epoch",
+      stream_seq_hint: 10,
+      agent_seq_hint: 8,
       notify_seq: 10,
     });
 
@@ -140,9 +144,10 @@ describe("hydrateAgent lifecycle", () => {
     vi.mocked(api.getAgentHydrate).mockResolvedValueOnce({
       transcript: [{ kind: "assistant", text: "done" }],
       pending_hitl: null,
-      run_turn_phase: "complete",
-      has_active_turn: false,
-      sse_seq_hint: 20,
+      turn_state: { phase: "idle", terminal: false },
+      stream_epoch: "test-epoch",
+      stream_seq_hint: 20,
+      agent_seq_hint: 10,
       notify_seq: 20,
     });
 

@@ -181,10 +181,10 @@ export function compressContext(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/compress`, { method: "POST", body: {} });
 }
 
-export function postAgentAck(agentId, sseSeq) {
+export function postAgentAck(agentId, agentSeq) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ack`, {
     method: "POST",
-    body: { sse_seq: sseSeq },
+    body: { agent_seq: agentSeq },
   });
 }
 

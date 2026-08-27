@@ -1,106 +1,81 @@
 # SSE 事件速查
 
-实现：`node/internal/stream/`、`node/internal/turn/orchestrator.go`。Client 订阅：`GET /v1/streams?agent_id=`（以实现为准）。
+实现：`node/internal/stream/`、`node/internal/turn/sse_publish.go`。Web UI 订阅：`GET /v1/streams?agent_id=`。
 
 ---
 
-## 连接
+## 连接与恢复
 
 ```http
-GET /v1/streams?after_seq=0
+GET /v1/streams?agent_id=agt-xxx&live=1
 Accept: text/event-stream
 ```
 
-- `after_seq`：只接收该序号**之后**的事件（Hub `CurrentSeq()`）。  
-- 事件 JSON 含 `agent_id`、`seq`、`type`、`ts`、`data`（无顶层 `session_id`）。
+首连使用 `live=1`，订阅点由 Node 在注册订阅者时原子确定，不会漏掉紧邻到达的事件。Agent 过滤流重连使用：
 
----
+```http
+GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
+```
 
-## 事件一览
+`after_agent_seq` 只计算当前 Agent 的可重放事件；其他 Agent 和 `delivery=ephemeral` 的高频事件不会制造假洞。无 Agent 过滤的 Node 级订阅才使用 `after_seq`。
 
-| 事件 | 含义 | 典型后续 |
-|------|------|----------|
-| `assistant_delta` | 流式 assistant 正文 | 继续流式 |
-| `reasoning_delta` | 推理链片段 | DeepSeek 等 |
-| `tool_call` | 模型发起工具调用 | 执行或 HITL |
-| `tool_result` | 工具返回 | 当前 Turn 内 inline 续跑 |
-| `side_effect_turn_start` | 被动 side-effect 续跑 LLM 前 | Client `beginImplicitTurn` |
-| `hitl_required` | 本地 turn 统一 HITL（含 ask + 审批，见下） | Client 分步 resume |
-| `approval_required` | 需审批（A2A 中继 / 子 Agent） | Client resume |
-| `user_information_required` | 需用户输入（A2A 中继） | Client resume |
-| `usage` | token 统计与缓存命中数据 | 供状态栏/诊断使用，不作为独立 transcript 消息 |
-| `temporary_agent_created` | 子 Agent 创建 | 父 session UI |
-| `temporary_agent_completed` | 子 Agent 完成 | |
-| `temporary_agent_cancelled` | 子 Agent 取消 | |
-| `error` | 错误 | turn 可能结束 |
-| `done` | **本次编排阶段结束**（见下） | Client 根据字段解锁输入或等待恢复 |
+每条事件 envelope 都包含：
 
-A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../05-Manage与A2A.md) §5。
-
----
-
-## `done` 语义（语义 B）
-
-`done` **仅**表示编排器暂停、**轮到用户**——不是 assistant 段落结束。
-
-| 字段 | 说明 |
+| 字段 | 含义 |
 |------|------|
-| `finish_reason` | `stop` \| `awaiting_hitl` \| `error` \| `cancelled` |
-| `turn_complete` | `true`：本条 user message 链已结束；`false`：HITL 暂停 |
-| `awaiting` | HITL 时：`hitl`；否则 `null` |
+| `event_version` | 事件协议版本，当前为 `1` |
+| `stream_epoch` | Node 进程事件纪元；进程重启后变化 |
+| `seq` | Hub 进程级传输序号，主要用于诊断和 SSE `id` |
+| `agent_seq` | 当前 Agent 的可重放连续序号；ephemeral 事件不设置 |
+| `delivery` | `replayable` 或 `ephemeral` |
+| `agent_id` / `type` / `ts` / `data` | 事件身份、名称、时间和业务数据 |
 
-| 场景 | 发 `done`？ | `turn_complete` |
-|------|-------------|-----------------|
-| 无 tool_calls 正常结束 | ✅ | `true` |
-| 审批 / ask_user  pending | ✅ | `false` |
-| 自动工具后 inline 续跑 | ❌ | — |
-| resume 后继续链 | ❌ | — |
-
-实现：`publishDone`（`sse_publish.go`）。
+当请求游标早于 Hub 保留历史时，流先发送 `resync_required`，其 `data.requires_hydrate=true`。客户端必须调用 Agent hydrate，以权威快照修复 transcript、HITL、工具和 turn 状态，然后从新的 `stream_epoch` / `agent_seq_hint` 继续接收事件。
 
 ---
 
-## HITL 事件分工
+## 事件分工
 
-### `hitl_required`（本地 turn）
+| 事件 | 含义 | 客户端职责 |
+|------|------|------------|
+| `assistant` | assistant 正文 delta | 追加流式正文 |
+| `reasoning` | 推理 delta | 更新思考输出 |
+| `tool_call` | 模型发起工具调用 | 展示工具行 |
+| `tool_result` | 工具返回结果 | 更新工具行/继续 turn |
+| `turn_state` | Turn Coordinator 权威生命周期快照 | 更新 phase、终态、取消和工具执行态 |
+| `hitl_required` | 当前 turn 需要用户交互的事实 | 展开审批/询问队列，等待 resume |
+| `turn_finished` | 当前 turn 真正进入终态 | 收束流式输出；不负责判断 HITL |
+| `error` | 错误事实 | 展示错误；终态由 `turn_state` 收敛 |
+| `usage` | token/cache 统计 | 更新状态栏和诊断 |
+| `resync_required` | 恢复游标不可覆盖当前历史 | 立即 hydrate |
+| `side_effect_turn_start` | 旁路结果触发被动 LLM turn | 开启 implicit turn |
+| `side_effect_applied` / `side_effects_cleared` | 旁路结果入库/失效 | 更新 callback 工具行 |
+| `temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled` | 子 Agent 生命周期 | 更新子 Agent 面板 |
 
-单事件携带整批 pending；Client 按 `items[].hitl_type` 展示并分别 resume。
+核心原则：`hitl_required` 和 `turn_state.phase=tool_waiting|waiting_user` 表示暂停；暂停不发送 `turn_finished`。`turn_finished` 的 `turn_complete` 固定为 `true`，不再携带 `awaiting` 这种会改变语义的字段。
 
-| 字段 | 说明 |
-|------|------|
-| `hitl_id` | 批次 id（展开为 approval 时写入 `approval_id`） |
-| `message` | 摘要文案 |
-| `items[]` | 待交互项列表 |
+---
 
-| `items[].hitl_type` | 含义 | Client resume |
-|---------------------|------|---------------|
+## HITL
+
+`hitl_required` 一次携带整批 `PendingHITL.Items[]`：
+
+| `items[].hitl_type` | 含义 | resume |
+|---------------------|------|--------|
 | `user_information` | `ask_user_information` | `type=user_information` + `tool_call_id` |
-| `execute_tool` | 需审批工具 | `type=approval` / `selection` |
+| `execute_tool` | 需要审批的工具 | `type=approval` / `selection` |
 
-同批可含 **ask_user + 多个 execute_tool**；Node `PendingHITL.Items` 与 SSE 一一对应，支持**分步 resume**。
+同批可以混合询问和审批，并支持分步 resume。Node 保存的 pending 状态是唯一事实源；如果实时事件丢失，`turn_state` 进入等待态后客户端 hydrate 对账，不把普通工具行当成审批卡片。
 
-### 兼容事件
-
-- `approval_required` / `user_information_required`：A2A caller 中继、子 Agent 等仍使用。  
-- `tool_call`：转录工具行；**不**替代 HITL 块。  
-- 子 Agent 内部 `done`：**不**转发到父 SSE（`relay_hub.go`）。
-
-**Web UI 展开**：`node/webui/frontend/src/stores/hitl.js` → `expandHitlRequired`。当前 Go Client 仅提供 probe/update/version 等运维命令，不负责对话展示。
+子 Agent 的内部 `turn_finished` 不中继为父 Agent 的终态；父 Agent 仍由自己的 `turn_state` / `turn_finished` 收束。子 Agent 的 HITL 仍可通过带 `child_agent_id` 的 `hitl_required` 展示。
 
 ---
 
-## 旁路 side-effect（Produce / 被动续跑）
+## 旁路 side-effect
 
-| 事件 | 含义 | Client |
-|------|------|--------|
-| `side_effect_turn_start` | `side_effect_continue` 跑 LLM 前 | `BeginImplicitTurn` / `beginImplicitTurn` |
-| `side_effect_applied` | Apply 写入 history | 标 callback 工具行 **已入库** |
-| `side_effects_cleared` | ClearContext/Delete 丢弃缓冲 | 标未入库 callback 工具行为 **已失效** |
-| Produce 的 `tool_call`/`tool_result` | async 回灌预览 | 正常渲染；含 `side_effect_seq`；idle 时不 `finishTurn` |
+Produce 阶段的 `tool_call` / `tool_result` 只展示回调预览并携带 `side_effect_seq`；Apply 写入 history 后发送 `side_effect_applied`，ClearContext/Delete 丢弃时发送 `side_effects_cleared`。旁路被动续跑前发送 `side_effect_turn_start`，后续是普通 `turn_state`、assistant/tool 事件和最终 `turn_finished`。
 
-**Cancel 序列**：`done(cancelled)` → `finishTurn` → `side_effect_turn_start` → 被动 turn → `assistant`… → `done(stop)`。
-
-详述：[agent-node-api.md §2.4.3](../../architecture/agent-node-api.md)、[turn-side-effects-refactor.md](../../design/turn-side-effects-refactor.md)。
+取消仍由显式 cancel API 驱动：取消请求不会被普通 human message 抢占；Node 以取消生命周期事件和权威 `turn_state` 收敛状态。取消过程中产生的 side-effect 缓冲按既有 cancel recovery 流程处理。
 
 ---
 
@@ -108,12 +83,11 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 
 | 文件 | 职责 |
 |------|------|
-| `turn/sse_publish.go` | assistant / done / usage / side-effect callback |
-| `turn/tool_router.go` | tool_call / tool_result |
-| `turn/hitl_payload.go` | `hitl_required` 载荷 |
-| `turn/approval_payload.go` | execute_tool item 展示字段 |
-| `stream/hub.go` | 序号与订阅 |
-| `childagent/relay_hub.go` | 子 Agent 过滤 |
-
-Web UI：`node/webui/frontend/src/` — 负责 SSE 订阅、消息流与 HITL 展示。
-Go Client：`client/cmd/dagents-client` — 仅提供 probe/update/version 等运维命令。
+| `node/internal/stream/hub.go` | 事件版本、epoch、全局/Agent 游标、历史与 resync 判定 |
+| `node/internal/api/server_messages.go` | SSE 连接、live/after_agent_seq、resync_required |
+| `node/internal/api/server_agent_api.go` | hydrate 的 stream_epoch/stream_seq_hint/agent_seq_hint |
+| `node/internal/turn/sse_publish.go` | assistant / HITL / turn_finished / usage / side-effect 事件 |
+| `node/internal/session/turn_state_view.go` | Turn Coordinator 权威状态快照 |
+| `node/internal/childagent/relay_hub.go` | 子 Agent 终态隔离 |
+| `node/webui/frontend/src/sse/stream.js` | SSE 事件解析和 Agent 游标重连 |
+| `node/webui/frontend/src/views/ChatView.vue` | 事件路由、HITL 和 turn 投影 |

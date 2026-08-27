@@ -53,11 +53,11 @@ func TestSyncFromAgents(t *testing.T) {
 }
 
 func TestShouldSyncOnEvent(t *testing.T) {
-	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "done", SessionID: "s1"}) {
-		t.Fatal("done should trigger sync")
+	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "turn_finished", SessionID: "s1"}) {
+		t.Fatal("turn_finished should trigger sync")
 	}
-	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "done", AgentID: "agt-1"}) {
-		t.Fatal("done with agent_id should trigger sync")
+	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "turn_finished", AgentID: "agt-1"}) {
+		t.Fatal("turn_finished with agent_id should trigger sync")
 	}
 	if ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "assistant", SessionID: "s1"}) {
 		t.Fatal("assistant should not trigger sync")

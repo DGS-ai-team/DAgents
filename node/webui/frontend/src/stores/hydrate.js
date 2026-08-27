@@ -27,15 +27,8 @@ export function invalidateHydration() {
  * 模型生成时按已知输出通道展示模型生成中；思考内容到达后由 reasoning
  * 事件把展示细分切换为思考中。工具执行中只锁 composer，不挂模型气泡。
  */
-export function syncStatusAfterHydrate(runTurnPhase = "") {
+export function syncStatusAfterHydrate() {
   resetStatusLines();
-  if (turnStateStore.phase === "idle" && runTurnPhase) {
-    // Compatibility with older nodes that do not return turn_state yet.
-    const phase = String(runTurnPhase || "").trim();
-    if (phase === "model_streaming") syncTurnStatus({ phase: "model_generating" });
-    else if (phase === "awaiting_tool_execution") syncTurnStatus({ phase: "tool_executing" });
-    return;
-  }
   syncTurnStatus(turnStateStore);
 }
 
@@ -74,10 +67,10 @@ export async function hydrateAgent() {
   if (approval?.child_agent_id) {
     setChildAwaitingApproval(approval.child_agent_id, true);
   }
-  applyHydrateSeqHint(data?.sse_seq_hint);
+  applyHydrateSeqHint(data);
   ackAgentAfterHydrate(data?.notify_seq);
-  applyAuthoritativeTurnState(data, { source: data?.turn_state ? "hydrate" : "hydrate_legacy" });
-  syncStatusAfterHydrate(data?.run_turn_phase);
+  applyAuthoritativeTurnState(data, { source: "hydrate" });
+  syncStatusAfterHydrate();
   return data;
 }
 

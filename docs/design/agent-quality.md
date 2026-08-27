@@ -37,7 +37,7 @@ human message
   → tool_call / HITL
   → Step 1: tool result + LLM
   → …
-  → done（turn 完成或等待用户）
+  → turn_finished（仅 turn 完成）；HITL 等待由 hitl_required + turn_state 表达
 ```
 
 取消、压缩、skill 变更和异步结果都必须在明确的队列/Step 边界处理；不能在流式输出中途悄悄替换 prompt 或工具定义。

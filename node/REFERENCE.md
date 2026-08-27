@@ -38,7 +38,7 @@
 | `RunTurnPhase` | Node 状态 → Python 兼容 `run_turn_phase` |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
 | `RunHumanMessageTurn` / `RunToolMessageTurn` | 单步 LLM + 工具；生产经 session 队列续跑 |
-| `publishDone` | 语义 B 的 `done`：`finish_reason` + `turn_complete` + `awaiting`；实现见 `node/internal/turn/sse_publish.go` |
+| `publishTurnFinished` | `turn_finished` 终态事件；实现见 `node/internal/turn/sse_publish.go` |
 
 ## `internal/queue/queue.go`
 
