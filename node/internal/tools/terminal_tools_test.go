@@ -10,12 +10,14 @@ import (
 )
 
 type fakeTerminalBroker struct {
-	opened     int
-	input      string
-	request    TerminalRequest
-	info       TerminalSessionInfo
-	read       TerminalOutput
-	terminated bool
+	opened        int
+	input         string
+	request       TerminalRequest
+	info          TerminalSessionInfo
+	read          TerminalOutput
+	command       TerminalCommandRequest
+	commandResult TerminalCommandResult
+	terminated    bool
 }
 
 type fakeTerminalConfigResolver struct {
@@ -95,6 +97,16 @@ func (b *fakeTerminalBroker) ReadOutput(_ context.Context, _, _ string, _ uint64
 func (b *fakeTerminalBroker) Input(_ context.Context, _, _ string, data []byte) error {
 	b.input = string(data)
 	return nil
+}
+func (b *fakeTerminalBroker) RunCommand(_ context.Context, _, terminalID string, request TerminalCommandRequest) (TerminalCommandResult, error) {
+	b.command = request
+	if b.commandResult.TerminalID == "" {
+		b.commandResult = TerminalCommandResult{
+			Status: "SUCCEEDED", TerminalID: terminalID, TargetKind: request.Target.Kind,
+			ExitCode: 0, Stdout: "terminal-command-ok\r\n", StdoutBytes: len("terminal-command-ok\r\n"),
+		}
+	}
+	return b.commandResult, nil
 }
 func (b *fakeTerminalBroker) Terminate(context.Context, string, string) (TerminalOutput, error) {
 	b.terminated = true
@@ -211,9 +223,10 @@ func TestTerminalCommandRequiresExistingSessionAndReturnsStructuredResult(t *tes
 		t.Fatal(err)
 	}
 	reg.SetAgentID("agent-terminal-command-test")
-	reg.SetTerminalSessionBroker(&fakeTerminalBroker{info: TerminalSessionInfo{
+	broker := &fakeTerminalBroker{info: TerminalSessionInfo{
 		ID: "terminal-command-1", AgentID: "agent-terminal-command-test", TargetKind: executionTargetLocal, Status: "running",
-	}})
+	}}
+	reg.SetTerminalSessionBroker(broker)
 	result, err := reg.Execute(context.Background(), "terminal_command", `{"terminal_id":"terminal-command-1","command":"echo terminal-command-ok","timeout_ms":5000}`)
 	if err != nil {
 		t.Fatal(err)
@@ -224,6 +237,9 @@ func TestTerminalCommandRequiresExistingSessionAndReturnsStructuredResult(t *tes
 	}
 	if payload.Status != "SUCCEEDED" || payload.ExitCode != 0 || !strings.Contains(strings.ToLower(payload.Stdout), "terminal-command-ok") {
 		t.Fatalf("unexpected terminal command result: %+v", payload)
+	}
+	if broker.command.TerminalID != "terminal-command-1" || broker.command.Command != "echo terminal-command-ok" || broker.command.Timeout != 5*time.Second {
+		t.Fatalf("command was not delegated to the shared session: %+v", broker.command)
 	}
 }
 

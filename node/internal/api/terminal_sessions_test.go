@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,35 @@ type interruptibleTestTerminal struct {
 	exit     *tools.ExitStatus
 	waitDone chan struct{}
 	closeOne sync.Once
+}
+
+type commandTestTerminal struct {
+	*interruptibleTestTerminal
+}
+
+func (t *commandTestTerminal) Input(ctx context.Context, data []byte) error {
+	if bytes.Equal(data, []byte{0x03}) {
+		return t.interruptibleTestTerminal.Input(ctx, data)
+	}
+	t.mu.Lock()
+	t.input = append(t.input, data...)
+	t.mu.Unlock()
+	text := string(data)
+	startAt := strings.Index(text, "__DAGENTS_COMMAND_START_")
+	if startAt < 0 {
+		return nil
+	}
+	tokenStart := startAt + len("__DAGENTS_COMMAND_START_")
+	closing := strings.Index(text[tokenStart:], "__")
+	if closing < 0 {
+		return nil
+	}
+	startEnd := tokenStart + closing + 2
+	start := text[startAt:startEnd]
+	token := strings.TrimSuffix(strings.TrimPrefix(start, "__DAGENTS_COMMAND_START_"), "__")
+	endPrefix := "__DAGENTS_COMMAND_END_" + token + "_"
+	_, err := t.writer.Write([]byte(start + "\r\ncommand-output\r\n" + endPrefix + "0__\r\n"))
+	return err
 }
 
 func newInterruptibleTestTerminal() *interruptibleTestTerminal {
@@ -110,6 +140,48 @@ func waitForTerminalFrames(t *testing.T, session *terminalSession, want uint64) 
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("terminal output was not collected")
+}
+
+func TestTerminalSessionRunCommandUsesExistingPTYAndConsumesTranscript(t *testing.T) {
+	terminal := &commandTestTerminal{interruptibleTestTerminal: newInterruptibleTestTerminal()}
+	session, err := newTerminalSession("agent-command", terminal, nil, tools.TerminalRequest{
+		Target: tools.ExecutionTarget{Kind: "linux_channel", ID: "channel-test"}, Shell: "bash",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := session.runCommand(context.Background(), tools.TerminalCommandRequest{
+		TerminalID: "terminal-session-test", Command: "printf command-output", Timeout: time.Second, MaxOutputBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "SUCCEEDED" || result.ExitCode != 0 || result.Stdout != "command-output" {
+		t.Fatalf("unexpected command result: %+v", result)
+	}
+	input := string(terminal.inputBytes())
+	if !strings.Contains(input, "printf") || !strings.Contains(input, "__DAGENTS_COMMAND_START_") {
+		t.Fatalf("command was not written to existing terminal input: %q", input)
+	}
+	read := session.snapshotOutput(0, terminalReplayBytes, true)
+	if len(read.Chunks) != 0 {
+		t.Fatalf("command transcript was returned a second time by terminal_read: %+v", read)
+	}
+	session.shutdown()
+}
+
+func TestParseTerminalCommandTranscriptDropsPTYPromptNoise(t *testing.T) {
+	output, code, done, started := parseTerminalCommandTranscript([]byte(
+		"__DAGENTS_COMMAND_START_token__\n"+
+			"\x1b[?2004hdevuser@host:/$ \x1b[?2004l\r\r\n"+
+			"\x1b[?2004h> \x1b[?2004l\r\r\n"+
+			" 12:00:00 up 1 day, 1:02, 1 user, load average: 0.00, 0.00, 0.00\r\n"+
+			"__DAGENTS_COMMAND_END_token_0__\n",
+	), "__DAGENTS_COMMAND_START_token__", "__DAGENTS_COMMAND_END_token_")
+	if !done || !started || code != 0 || !bytes.Contains(output, []byte("12:00:00 up 1 day")) || bytes.Contains(output, []byte("2004")) {
+		t.Fatalf("unexpected parsed output=%q code=%d done=%v started=%v", output, code, done, started)
+	}
 }
 
 func TestTerminalSessionTerminateInterruptsAndReturnsUnreadOutput(t *testing.T) {
