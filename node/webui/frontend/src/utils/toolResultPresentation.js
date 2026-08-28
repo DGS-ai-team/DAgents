@@ -176,20 +176,8 @@ function baseModel(name, args, resultEntry, content) {
   };
 }
 
-function addPurposeAndCommonInput(model, args) {
-  const purpose = stringValue(args.call_purpose);
-  if (purpose) addField(model.inputFields, "执行目的", purpose);
-}
-
 function addBashInput(model, args) {
-  addPurposeAndCommonInput(model, args);
   addField(model.inputFields, "命令", args.command, "code");
-  addField(model.inputFields, "Shell", args.shell_type);
-  addField(model.inputFields, "工作目录", args.cwd);
-  if (finiteNumber(args.timeout_seconds) > 0) {
-    addField(model.inputFields, "超时", `${finiteNumber(args.timeout_seconds)} 秒`);
-  }
-  addField(model.inputFields, "输出编码", args.output_encoding);
 }
 
 function parseDelimitedShellResult(content) {
@@ -229,13 +217,11 @@ function parseDelimitedShellResult(content) {
 function addShellResult(model, content) {
   const parsed = parseDelimitedShellResult(content);
   const meta = parsed.metadata;
-  addField(model.resultFields, "退出码", meta.exit_code || meta.exit);
-  if (meta.stdout_bytes != null) addField(model.resultFields, "stdout", `${meta.stdout_bytes} B`);
-  if (meta.stderr_bytes != null) addField(model.resultFields, "stderr", `${meta.stderr_bytes} B`);
-  if (meta.output_truncated != null) {
-    addField(model.resultFields, "输出完整性", /true/i.test(meta.output_truncated) ? "已截断" : "完整");
+  const exitCode = meta.exit_code || meta.exit;
+  if (exitCode != null && String(exitCode) !== "0") addField(model.resultFields, "退出码", exitCode);
+  if (/true/i.test(meta.output_truncated || "")) {
+    addField(model.resultFields, "输出完整性", "已截断");
   }
-  addField(model.resultFields, "执行目标", meta.target);
   addField(model.resultFields, "错误原因", meta.exit_error || meta.error);
   addBlock(model.resultBlocks, "stdout", parsed.stdout, "code");
   addBlock(model.resultBlocks, "stderr", parsed.stderr, "error");
@@ -252,31 +238,26 @@ function addShellResult(model, content) {
 }
 
 function addTerminalInput(model, args) {
-  addPurposeAndCommonInput(model, args);
   addField(model.inputFields, "命令", args.command, "code");
   addField(model.inputFields, "终端", args.terminal_id);
-  addField(model.inputFields, "目标", args.config_id || args.channel_id);
   addField(model.inputFields, "工作目录", args.cwd);
-  if (finiteNumber(args.timeout) > 0) addField(model.inputFields, "超时", `${finiteNumber(args.timeout)} 毫秒`);
 }
 
-function addStructuredTerminalResult(model, content) {
+function addStructuredTerminalResult(model, content, name) {
   const payload = parseJSONObject(content);
   if (!payload) {
     addShellResult(model, content);
     return;
   }
   const detail = payload.detail && typeof payload.detail === "object" ? payload.detail : payload;
-  addField(model.resultFields, "终端", detail.terminal_id || payload.terminal_id, "mono");
-  addField(model.resultFields, "状态", detail.status || payload.status);
-  addField(model.resultFields, "退出码", detail.exit_code);
-  addField(model.resultFields, "stdout", detail.stdout_bytes != null ? `${detail.stdout_bytes} B` : "");
-  addField(model.resultFields, "stderr", detail.stderr_bytes != null ? `${detail.stderr_bytes} B` : "");
-  if (detail.output_truncated != null) {
-    addField(model.resultFields, "输出完整性", detail.output_truncated ? "已截断" : "完整");
+  if (name === "terminal_open") {
+    addField(model.resultFields, "终端 ID", detail.terminal_id || payload.terminal_id, "mono");
+    if (detail.exited != null) addField(model.resultFields, "终端状态", detail.exited ? "已退出" : "运行中");
+  } else {
+    const exitCode = detail.exit_code;
+    if (exitCode != null && String(exitCode) !== "0") addField(model.resultFields, "退出码", exitCode);
+    if (detail.output_truncated) addField(model.resultFields, "输出完整性", "已截断");
   }
-  addField(model.resultFields, "下一序号", detail.next_seq);
-  if (detail.exited != null) addField(model.resultFields, "终端状态", detail.exited ? "已退出" : "运行中");
   addField(model.resultFields, "错误", payload.error || detail.error);
   addBlock(model.resultBlocks, "stdout", detail.stdout || detail.output, "code");
   addBlock(model.resultBlocks, "stderr", detail.stderr, "error");
@@ -304,7 +285,6 @@ function triggerConditionText(condition) {
 }
 
 function addTriggerInput(model, args, name) {
-  addPurposeAndCommonInput(model, args);
   addField(model.inputFields, "任务名称", args.name);
   addField(model.inputFields, "触发器 ID", args.trigger_id, "mono");
   addField(model.inputFields, "触发频率", triggerConditionText(args.condition));
@@ -320,17 +300,19 @@ function triggerTargetText(item) {
   return id ? `${mode || "绑定目标"} · ${shortId(id, 18)}` : mode;
 }
 
-function addTriggerObjectResult(model, trigger) {
+function addTriggerObjectResult(model, trigger, name) {
   if (!trigger || typeof trigger !== "object") return;
-  addField(model.resultFields, "触发器 ID", trigger.trigger_id, "mono");
-  addField(model.resultFields, "任务名称", trigger.name);
+  if (name === "trigger_create") addField(model.resultFields, "触发器 ID", trigger.trigger_id, "mono");
   addField(model.resultFields, "状态", trigger.enabled == null ? "" : trigger.enabled ? "已启用" : "已禁用");
-  addField(model.resultFields, "触发频率", triggerConditionText(trigger.condition));
   addField(model.resultFields, "下次执行", formatUnixTime(trigger.next_fire_at));
-  addField(model.resultFields, "执行目标", triggerTargetText(trigger));
-  if (trigger.fire_count != null) addField(model.resultFields, "触发次数", `${trigger.fire_count} 次`);
-  addField(model.resultFields, "触发前门控命令", trigger.condition?.cmd, "code");
-  addBlock(model.resultBlocks, "任务模板", trigger.task_template, "multiline");
+  if (name === "trigger_get") {
+    addField(model.resultFields, "任务名称", trigger.name);
+    addField(model.resultFields, "触发频率", triggerConditionText(trigger.condition));
+    addField(model.resultFields, "执行目标", triggerTargetText(trigger));
+    if (trigger.fire_count != null) addField(model.resultFields, "触发次数", `${trigger.fire_count} 次`);
+    addField(model.resultFields, "触发前门控命令", trigger.condition?.cmd, "code");
+    addBlock(model.resultBlocks, "任务模板", trigger.task_template, "multiline");
+  }
 }
 
 function addTriggerResult(model, name, content) {
@@ -344,7 +326,7 @@ function addTriggerResult(model, name, content) {
     return;
   }
   if (payload.trigger) {
-    addTriggerObjectResult(model, payload.trigger);
+    addTriggerObjectResult(model, payload.trigger, name);
     return;
   }
   if (Array.isArray(payload.triggers)) {
@@ -366,14 +348,12 @@ function addTriggerResult(model, name, content) {
   }
   if (name === "trigger_delete") {
     addField(model.resultFields, "删除结果", payload.deleted ? "已删除" : "未找到");
-    addField(model.resultFields, "触发器 ID", payload.trigger_id, "mono");
     return;
   }
   addField(model.resultFields, "结果", "操作成功");
 }
 
 function addBrowserInput(model, args) {
-  addPurposeAndCommonInput(model, args);
   addField(model.inputFields, "任务", args.task, "multiline");
   addField(model.inputFields, "任务 ID", args.task_id, "mono");
   addField(model.inputFields, "最大步数", args.max_steps);
@@ -381,14 +361,14 @@ function addBrowserInput(model, args) {
   if (finiteNumber(args.wait_timeout_seconds) > 0) addField(model.inputFields, "等待超时", `${finiteNumber(args.wait_timeout_seconds)} 秒`);
 }
 
-function addBrowserResult(model, content) {
+function addBrowserResult(model, content, name) {
   const payload = parseJSONObject(content);
   if (!payload) {
     addBlock(model.resultBlocks, "结果", content, "text");
     return;
   }
   const detail = payload.detail && typeof payload.detail === "object" ? payload.detail : payload;
-  addField(model.resultFields, "任务 ID", detail.task_id || payload.task_id, "mono");
+  if (name === "browser_run_task") addField(model.resultFields, "任务 ID", detail.task_id || payload.task_id, "mono");
   addField(model.resultFields, "执行步数", detail.steps);
   addField(model.resultFields, "最终地址", payload.url || detail.url);
   addField(model.resultFields, "页面标题", payload.title || detail.title);
@@ -397,7 +377,6 @@ function addBrowserResult(model, content) {
 }
 
 function addFileInput(model, args, name) {
-  addPurposeAndCommonInput(model, args);
   addField(model.inputFields, "路径", args.path || args.file_path || args.directory, "mono");
   if (name === "read_file") {
     addField(model.inputFields, "起始行", args.line_offset);
@@ -422,10 +401,6 @@ function addReadFileResult(model, content) {
   const known = [
     ["文件编码", "文件编码"],
     ["文件总行数", "文件总行数"],
-    ["本页行区间", "本页范围"],
-    ["next_line_offset", "下一行偏移"],
-    ["后方是否还有未读取内容", "还有未读取内容"],
-    ["本页内容是否因 token 上限截断", "Token 截断"],
   ];
   for (const [source, label] of known) {
     const match = stringValue(content).match(new RegExp(`^${source}:\\s*(.+)$`, "m"));
@@ -476,8 +451,7 @@ function addSearchResult(model, content, name) {
 }
 
 function addGenericInput(model, args) {
-  addPurposeAndCommonInput(model, args);
-  const keys = Object.keys(args).filter((key) => !["call_purpose", "run_in_background"].includes(key)).sort();
+  const keys = Object.keys(args).filter((key) => !["call_purpose", "purpose", "run_in_background"].includes(key)).sort();
   for (const key of keys.slice(0, 8)) {
     const value = displayValue(args[key], { max: 120 });
     if (value) addField(model.inputFields, key, value, typeof args[key] === "string" && String(args[key]).length > 80 ? "multiline" : "text");
@@ -494,7 +468,23 @@ function addGenericResult(model, content) {
   const detail = payload.detail && typeof payload.detail === "object" ? payload.detail : payload;
   let hasField = false;
   for (const [key, value] of Object.entries(detail)) {
-    if (["output", "stdout", "stderr", "summary", "extracted_content", "llm_representation", "items", "triggers"].includes(key)) continue;
+    if ([
+      "ok",
+      "status",
+      "call_purpose",
+      "purpose",
+      "terminal_id",
+      "trigger_id",
+      "task_id",
+      "output",
+      "stdout",
+      "stderr",
+      "summary",
+      "extracted_content",
+      "llm_representation",
+      "items",
+      "triggers",
+    ].includes(key)) continue;
     if (!(key in IMPORTANT_RESULT_LABELS) && typeof value === "object") continue;
     const valueText = displayValue(value);
     if (!valueText) continue;
@@ -524,22 +514,19 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
       break;
     case "terminal_command":
       addTerminalInput(model, args);
-      if (resultEntry) addStructuredTerminalResult(model, content);
+      if (resultEntry) addStructuredTerminalResult(model, content, name);
       break;
     case "terminal_open":
-      addPurposeAndCommonInput(model, args);
       addField(model.inputFields, "目标", args.config_id || args.target);
       addField(model.inputFields, "工作目录", args.cwd);
-      if (resultEntry) addStructuredTerminalResult(model, content);
+      if (resultEntry) addStructuredTerminalResult(model, content, name);
       break;
     case "terminal_input":
     case "terminal_read":
     case "terminal_terminate":
-      addPurposeAndCommonInput(model, args);
       addField(model.inputFields, "终端", args.terminal_id, "mono");
-      addField(model.inputFields, "读取序号", args.after_seq ?? args.next_seq);
-      addField(model.inputFields, "输入内容", args.input, "code");
-      if (resultEntry) addStructuredTerminalResult(model, content);
+      addField(model.inputFields, "输入内容", args.data, "code");
+      if (resultEntry) addStructuredTerminalResult(model, content, name);
       break;
     case "trigger_list":
     case "trigger_get":
@@ -553,7 +540,7 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
     case "browser_task_status":
     case "browser_task_cancel":
       addBrowserInput(model, args);
-      if (resultEntry) addBrowserResult(model, content);
+      if (resultEntry) addBrowserResult(model, content, name);
       break;
     case "read_file":
     case "write_file":

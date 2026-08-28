@@ -373,7 +373,7 @@ async function onCancel(ev) {
 }
 
 .tool-summary-row__detail {
-  padding: 0 8px 8px 30px;
+  padding: 0 8px 8px;
   border-top: 1px solid var(--color-border);
 }
 

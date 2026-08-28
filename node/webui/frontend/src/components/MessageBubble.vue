@@ -31,20 +31,7 @@ async function onMarkdownAction(event) {
   if (!code) return;
   button.dataset.defaultLabel = button.textContent || "复制代码";
   try {
-    if (button.dataset.markdownAction === "download") {
-      const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "markdown-code.txt";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      button.textContent = "已下载";
-    } else {
-      button.textContent = (await copyText(code)) ? "已复制" : "复制失败";
-    }
+    button.textContent = (await copyText(code)) ? "已复制" : "复制失败";
   } catch {
     button.textContent = "操作失败";
   }

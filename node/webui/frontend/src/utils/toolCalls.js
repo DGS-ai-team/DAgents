@@ -195,13 +195,128 @@ export function approvalItemDisplayName(item) {
   return toolDisplayName(name, args);
 }
 
+const APPROVAL_TOOL_LABELS = {
+  bash_run: "bash",
+  linux_exec: "Linux 命令",
+  linux_file_upload: "上传 Linux 文件",
+  linux_file_download: "下载 Linux 文件",
+  terminal_command: "终端命令",
+  terminal_input: "终端输入",
+  terminal_open: "打开终端",
+  terminal_read: "读取终端",
+  terminal_terminate: "关闭终端",
+  browser_run_task: "浏览器任务",
+  browser_task_status: "查询浏览器任务",
+  browser_task_cancel: "取消浏览器任务",
+  read_file: "读取文件",
+  write_file: "写入文件",
+  search_replace: "替换文件内容",
+  glob_files: "查找文件",
+  grep_file: "搜索文件",
+  grep_files: "搜索文件",
+  trigger_create: "创建定时任务",
+  trigger_update: "更新定时任务",
+  trigger_delete: "删除定时任务",
+  background_job_cancel: "取消后台任务",
+};
+
+const APPROVAL_ACTION_LABELS = {
+  bash_run: "将执行 Shell 命令",
+  linux_exec: "执行 Linux SSH 命令",
+  linux_file_upload: "上传 Linux 文件",
+  linux_file_download: "下载 Linux 文件",
+  terminal_command: "将在终端执行命令",
+  terminal_input: "向终端发送输入",
+  terminal_open: "将打开终端",
+  terminal_terminate: "将关闭终端",
+  write_file: "将修改本地文件",
+  search_replace: "将修改本地文件",
+  trigger_create: "将创建定时触发器",
+  trigger_update: "将更新定时触发器",
+  trigger_delete: "将删除定时触发器",
+  background_job_cancel: "将取消后台任务",
+};
+
+const APPROVAL_REASON_PREFIXES = {
+  bash_run: ["将执行 Shell 命令"],
+  linux_exec: ["执行 Linux SSH 命令", "在 Linux SSH channel"],
+  linux_file_upload: ["上传 Linux 文件"],
+  linux_file_download: ["下载 Linux 文件"],
+  terminal_command: ["在终端"],
+  terminal_input: ["向终端"],
+  terminal_open: ["将打开终端"],
+  terminal_terminate: ["将关闭终端"],
+  write_file: ["将修改本地文件"],
+  search_replace: ["将修改本地文件"],
+  trigger_create: ["将创建定时触发器"],
+  trigger_update: ["将更新定时触发器"],
+  trigger_delete: ["将删除定时触发器"],
+  background_job_cancel: ["将取消后台任务"],
+};
+
+function approvalItemArguments(item) {
+  if (
+    item?.arguments &&
+    typeof item.arguments === "object" &&
+    !Array.isArray(item.arguments) &&
+    Object.keys(item.arguments).length
+  ) {
+    return item.arguments;
+  }
+  return parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
+}
+
+/** 审批卡片标题只标识工具，不把参数再次拼到标题中。 */
+export function approvalItemToolLabel(item) {
+  const name = String(item?.name || "unknown").trim() || "unknown";
+  return APPROVAL_TOOL_LABELS[name] || name;
+}
+
+/**
+ * 审批原因与关键参数分开呈现。
+ * 内置策略原因中的动态参数已经会在表单中展示，因此只保留动作描述；
+ * 自定义策略原因则保留冒号前的说明，避免丢失“为什么需要审批”。
+ */
+export function approvalItemReason(item) {
+  const reason = String(item?.reason || "").trim();
+  if (!reason) return "";
+  const name = String(item?.name || "").trim();
+  const args = approvalItemArguments(item);
+  const overlaps = Object.values(args).some((value) => {
+    if (value == null || typeof value === "object") return false;
+    const text = sanitizeInline(value);
+    return text.length >= 2 && reason.includes(text);
+  });
+  if (!overlaps) return reason;
+
+  const prefix = reason.split(/[:：]/, 1)[0].trim();
+  const knownPrefixes = APPROVAL_REASON_PREFIXES[name] || [];
+  if (knownPrefixes.some((candidate) => prefix.startsWith(candidate))) {
+    return APPROVAL_ACTION_LABELS[name] || prefix;
+  }
+  return prefix || reason;
+}
+
+/** 将审批参数格式化为默认折叠的原始 JSON，解析失败时保留原文。 */
+export function formatApprovalRawArguments(raw, args = {}) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (text) {
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
+  }
+  if (args && typeof args === "object" && !Array.isArray(args) && Object.keys(args).length) {
+    return JSON.stringify(args, null, 2);
+  }
+  return "";
+}
+
 /** HITL 卡片副文案：突出自然语言目标，避免只看 raw JSON。 */
 export function approvalItemHint(item) {
   const name = String(item?.name || "").trim();
-  const args =
-    item?.arguments && typeof item.arguments === "object"
-      ? item.arguments
-      : parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
+  const args = approvalItemArguments(item);
   if (name === "browser_run_task") {
     const task = sanitizeInline(args.task);
     return task ? `目标：${task}` : "";

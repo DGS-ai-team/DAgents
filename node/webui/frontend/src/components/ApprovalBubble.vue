@@ -1,8 +1,15 @@
 <script setup>
 import { computed } from "vue";
-import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../utils/format.js";
+import {
+  approvalItemHint,
+  approvalItemHintVisible,
+  approvalItemReason,
+  approvalItemToolLabel,
+  formatApprovalRawArguments,
+} from "../utils/format.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
+import { buildToolCardModel } from "../utils/toolResultPresentation.js";
 
 const props = defineProps({
   data: { type: Object, required: true },
@@ -12,8 +19,34 @@ const props = defineProps({
 const emit = defineEmits(["approve-one", "reject-one", "approve-all", "reject-all"]);
 
 const items = computed(() => extractToolApprovals(props.data));
+const itemCards = computed(() =>
+  items.value.map((item) => {
+    const card = buildToolCardModel({
+      callEntry: {
+        data: {
+          tool_name: item.name,
+          arguments: item.arguments,
+          raw_arguments: item.rawArgs,
+        },
+      },
+    });
+    return {
+      ...item,
+      toolLabel: approvalItemToolLabel(item),
+      reasonText: approvalItemReason(item),
+      keyFields: card.inputFields,
+      rawJson: formatApprovalRawArguments(item.rawArgs, item.arguments),
+      hint: approvalItemHintVisible(item) ? approvalItemHint(item) : "",
+    };
+  }),
+);
 const visual = computed(() => resolveToolVisual({ data: props.data }));
-const batchMessage = computed(() => String(props.data?.message || "").trim());
+const batchMessage = computed(() => {
+  const message = String(props.data?.message || "").trim();
+  // This transport fallback only repeats the badge and action state.
+  if (/^检测到工具调用[，,]\s*等待用户确认后继续执行[。.]?$/.test(message)) return "";
+  return message;
+});
 const childPurpose = computed(() => String(props.data?.child_purpose || "").trim());
 const multi = computed(() => items.value.length > 1);
 const maxRisk = computed(() => {
@@ -81,12 +114,12 @@ function approveOneLabel() {
         <p v-else-if="batchMessage" class="approval-bubble__context">{{ batchMessage }}</p>
 
         <ul class="approval-tool-list">
-          <li v-for="it in items" :key="it.callId" class="approval-tool-item">
+          <li v-for="it in itemCards" :key="it.callId" class="approval-tool-item">
             <header class="approval-tool-item__head">
               <div class="approval-bubble__title">
-                <span class="approval-bubble__name">{{ approvalItemDisplayName(it) }}</span>
+                <span class="approval-bubble__name">{{ it.toolLabel }}</span>
                 <span
-                  v-if="it.risk === 'high' || it.risk === 'medium'"
+                  v-if="multi && (it.risk === 'high' || it.risk === 'medium')"
                   class="approval-risk approval-risk--inline"
                   :class="riskClass(it.risk)"
                 >{{ it.risk === 'high' ? '高风险' : '中风险' }}</span>
@@ -111,30 +144,47 @@ function approveOneLabel() {
                   {{ approveOneLabel() }}
                 </button>
               </div>
-            </header>
-            <div v-if="it.reason" class="approval-tool-item__policy">
-              <div class="approval-tool-item__reason">{{ it.reason }}</div>
-            </div>
-            <p
-              v-if="it.duplicateWindowSec > 0"
-              class="approval-tool-item__dup"
-            >
-              重复调用
-              <template v-if="it.duplicateWindowSec"> · {{ it.duplicateWindowSec }}s 内</template>
-            </p>
-            <p v-if="approvalItemHintVisible(it)" class="approval-tool-item__hint">
-              {{ approvalItemHint(it) }}
-            </p>
-            <details v-if="it.duplicatePreview" class="approval-tool-item__raw">
-              <summary>上次结果摘要</summary>
-              <pre class="tool-card__args tool-card__args--compact">{{ it.duplicatePreview }}</pre>
-            </details>
-            <details v-if="it.rawArgs" class="approval-tool-item__raw">
-              <summary>参数详情</summary>
-              <pre class="tool-card__args tool-card__args--compact">{{ it.rawArgs }}</pre>
-            </details>
-          </li>
-        </ul>
+          </header>
+          <div v-if="it.reasonText" class="approval-tool-item__policy">
+            <span class="approval-tool-item__policy-label">审批原因</span>
+            <div class="approval-tool-item__reason">{{ it.reasonText }}</div>
+          </div>
+
+          <dl v-if="it.keyFields.length" class="approval-tool-item__fields">
+            <template v-for="field in it.keyFields" :key="`${it.callId}-${field.label}`">
+              <div v-if="field.kind === 'code'" class="approval-tool-item__code-field">
+                <dt>{{ field.label }}</dt>
+                <dd><pre>{{ field.value || '—' }}</pre></dd>
+              </div>
+              <div v-else class="approval-tool-item__field">
+                <dt>{{ field.label }}</dt>
+                <dd>
+                  <pre v-if="field.kind === 'multiline'">{{ field.value }}</pre>
+                  <span v-else>{{ field.value }}</span>
+                </dd>
+              </div>
+            </template>
+          </dl>
+          <p
+            v-if="it.duplicateWindowSec > 0"
+            class="approval-tool-item__dup"
+          >
+            重复调用
+            <template v-if="it.duplicateWindowSec"> · {{ it.duplicateWindowSec }}s 内</template>
+          </p>
+          <p v-if="it.hint && !it.keyFields.length" class="approval-tool-item__hint">
+            {{ it.hint }}
+          </p>
+          <details v-if="it.duplicatePreview" class="approval-tool-item__raw">
+            <summary>上次结果摘要</summary>
+            <pre class="approval-tool-item__raw-content">{{ it.duplicatePreview }}</pre>
+          </details>
+          <details v-if="it.rawJson" class="approval-tool-item__raw">
+            <summary>展开原始 JSON</summary>
+            <pre class="approval-tool-item__raw-content">{{ it.rawJson }}</pre>
+          </details>
+        </li>
+      </ul>
         <div v-if="multi" class="approval-bubble__bulk-actions approval-bubble__bulk-actions--footer">
           <span class="approval-bubble__bulk-text">{{ items.length }} 个工具调用待处理</span>
           <div class="approval-tool-item__inline-actions">
@@ -224,6 +274,80 @@ function approveOneLabel() {
   font-size: 0.8rem;
 }
 
+.approval-tool-item__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+
+.approval-tool-item__field,
+.approval-tool-item__code-field {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.approval-tool-item__field {
+  display: grid;
+  grid-template-columns: minmax(48px, 78px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px 8px;
+}
+
+.approval-tool-item__field dt,
+.approval-tool-item__code-field dt {
+  color: var(--color-text-subtle, #6b7280);
+  font-weight: 500;
+}
+
+.approval-tool-item__field dd,
+.approval-tool-item__code-field dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text, inherit);
+  overflow-wrap: anywhere;
+}
+
+.approval-tool-item__field pre,
+.approval-tool-item__code-field pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-tool-item__code-field {
+  grid-column: 1 / -1;
+  overflow: hidden;
+}
+
+.approval-tool-item__code-field dt {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  font-size: 11px;
+}
+
+.approval-tool-item__code-field dd {
+  padding: 8px 10px;
+  background: var(--color-code-bg, #f8fafc);
+  color: var(--color-text, #1f2937);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.approval-tool-item__policy-label {
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .approval-tool-item__raw {
   margin-top: 0.35rem;
   font-size: 0.78rem;
@@ -235,8 +359,30 @@ function approveOneLabel() {
   user-select: none;
 }
 
-.approval-tool-item__raw pre {
-  margin-top: 0.25rem;
+.approval-tool-item__raw-content {
+  margin: 0.25rem 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-code-bg, #f8fafc);
+  color: var(--color-text, #1f2937);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .approval-tool-item__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .approval-tool-item__code-field {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 640px) {

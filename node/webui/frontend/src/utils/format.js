@@ -1,9 +1,26 @@
-import { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible, parseToolArguments } from "./toolCalls.js";
+import {
+  toolDisplayName,
+  approvalItemDisplayName,
+  approvalItemHint,
+  approvalItemHintVisible,
+  approvalItemReason,
+  approvalItemToolLabel,
+  formatApprovalRawArguments,
+  parseToolArguments,
+} from "./toolCalls.js";
 import { truncateGraphemes } from "./textTruncate.js";
 import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
 import { isTerminalResultTool, normalizeTerminalResultContent } from "./terminalOutput.js";
 
-export { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible };
+export {
+  toolDisplayName,
+  approvalItemDisplayName,
+  approvalItemHint,
+  approvalItemHintVisible,
+  approvalItemReason,
+  approvalItemToolLabel,
+  formatApprovalRawArguments,
+};
 
 function normalizedResultStatus(data) {
   const status = String(data?.status || "").trim().toLowerCase();

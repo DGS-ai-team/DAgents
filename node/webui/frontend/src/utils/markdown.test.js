@@ -66,7 +66,7 @@ describe("renderMarkdown", () => {
     expect(html).toContain('class="hljs language-bash"');
     expect(html).toContain("hello");
     expect(html).toContain('data-markdown-action="copy"');
-    expect(html).toContain('data-markdown-action="download"');
+    expect(html).not.toContain('data-markdown-action="download"');
     expect(html).not.toContain('data-code="echo hello"');
   });
 
