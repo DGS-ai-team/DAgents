@@ -61,7 +61,7 @@ func (o *Orchestrator) processToolCalls(
 				continue
 			}
 			_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
-			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs)
+			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
 			if err != nil {
 				return nil, "", err
 			}

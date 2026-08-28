@@ -3,6 +3,7 @@ package childagent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
@@ -76,5 +77,55 @@ func TestResolveAllowedToolsDefault(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("got %v want %v", got, want)
 		}
+	}
+}
+
+func TestObserveChildEventPublishesRefreshableProgress(t *testing.T) {
+	hub := stream.NewHub(16, nil)
+	m := NewManager(Config{Enabled: true}, hub, "agent-1", nil)
+	agent := newActiveAgent("sess-parent", CreateInput{Purpose: "inspect files", MaxTurns: 8}, "child-1", time.Now().Add(time.Hour))
+	agent.ToolCallID = "call-child-1"
+	agent.Status = StatusActive
+	agent.Progress.Status = StatusActive
+	agent.Progress.MaxTurns = 8
+	m.mu.Lock()
+	m.activeByID[agent.ChildAgentID] = agent
+	m.activeIDsByParent[agent.ParentAgentID] = []string{agent.ChildAgentID}
+	m.childToParent[agent.ChildAgentID] = agent.ParentAgentID
+	m.mu.Unlock()
+
+	ch := hub.Subscribe(0)
+	defer hub.Unsubscribe(ch)
+	m.ObserveChildEvent(agent.ChildAgentID, "turn_state", map[string]any{
+		"phase":      "tool_executing",
+		"step_index": 2,
+		"tool_executions": []any{map[string]any{
+			"tool_call_id": "child-call-2",
+			"tool_name":    "bash_run",
+			"status":       "running",
+		}},
+	})
+
+	select {
+	case ev := <-ch:
+		if ev.Type != EventTemporaryAgentProgress {
+			t.Fatalf("event type = %q", ev.Type)
+		}
+		if ev.Data["tool_call_id"] != "call-child-1" {
+			t.Fatalf("parent tool call id = %v", ev.Data["tool_call_id"])
+		}
+		if ev.Data["phase"] != "tool_executing" || ev.Data["current_tool"] != "bash_run" {
+			t.Fatalf("progress payload = %#v", ev.Data)
+		}
+		if ev.Data["turn_count"] != 2 {
+			t.Fatalf("turn count = %v", ev.Data["turn_count"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for child progress event")
+	}
+
+	snapshot := agent.ProgressSnapshot()
+	if snapshot.Revision != 1 || snapshot.CurrentToolCallID != "child-call-2" {
+		t.Fatalf("progress snapshot = %+v", snapshot)
 	}
 }

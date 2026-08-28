@@ -19,6 +19,7 @@ export const AGENT_STREAM_EVENT_POLICIES = Object.freeze({
   resync_required: "transport",
   hitl_required: "hitl",
   temporary_agent_created: "child-agent",
+  temporary_agent_progress: "child-agent",
   temporary_agent_completed: "child-agent",
   temporary_agent_cancelled: "child-agent",
   context_compression_blocking: "compression",

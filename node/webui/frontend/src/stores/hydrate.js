@@ -1,6 +1,6 @@
 import * as api from "../api/node.js";
 import { clearHitl, enqueueHitlRequired } from "./hitl.js";
-import { setChildAwaitingApproval } from "./remoteWorkers.js";
+import { replaceChildrenFromApi, setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
   applyHydrateSeqHint,
   applyAuthoritativeTurnState,
@@ -62,6 +62,9 @@ export async function hydrateAgent() {
     loadTranscriptFromHydrate(data?.transcript, { historyRevision: data?.history_revision });
   }
   applyToolJobsSnapshot(data?.tool_jobs);
+  if (Array.isArray(data?.child_agents)) {
+    replaceChildrenFromApi(data.child_agents);
+  }
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
   if (approval?.child_agent_id) {

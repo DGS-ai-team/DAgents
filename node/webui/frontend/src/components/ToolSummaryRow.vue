@@ -16,11 +16,15 @@ import {
   isBashBackgroundActive,
   parseBashResultStatus,
   toolCallIdFromEntry,
+  toolNameFromEntry,
   toolJobsStore,
 } from "../stores/toolJobs.js";
+import { childProgressForTool } from "../stores/remoteWorkers.js";
+import { childAgentIdsFromResult, isTemporaryAgentTool } from "../utils/temporaryAgentResults.js";
 import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
+import ChildAgentProgressPanel from "./ChildAgentProgressPanel.vue";
 
 const props = defineProps({
   callEntry: { type: Object, default: null },
@@ -56,6 +60,14 @@ const visual = computed(() => resolveToolVisual(props.resultEntry || props.callE
 const toolCallId = computed(
   () => toolCallIdFromEntry(props.callEntry) || toolCallIdFromEntry(props.resultEntry),
 );
+const toolName = computed(() => toolNameFromEntry(props.callEntry) || toolNameFromEntry(props.resultEntry));
+const childAgentIds = computed(() =>
+  childAgentIdsFromResult(toolName.value, props.resultEntry?.data?.content),
+);
+const childProgress = computed(() => {
+  if (!isTemporaryAgentTool(toolName.value)) return [];
+  return childProgressForTool(toolCallId.value, childAgentIds.value);
+});
 const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] || "");
 
 const status = computed(() => {
@@ -184,6 +196,7 @@ async function onCancel(ev) {
         :verbose="verbose"
         embedded
       />
+      <ChildAgentProgressPanel v-if="childProgress.length" :items="childProgress" />
     </div>
   </div>
 </template>

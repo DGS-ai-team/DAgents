@@ -7,6 +7,7 @@ const (
 	HitlScopeTemporaryAgent = "temporary_agent"
 
 	EventTemporaryAgentCreated   = "temporary_agent_created"
+	EventTemporaryAgentProgress  = "temporary_agent_progress"
 	EventTemporaryAgentCompleted = "temporary_agent_completed"
 	EventTemporaryAgentCancelled = "temporary_agent_cancelled"
 

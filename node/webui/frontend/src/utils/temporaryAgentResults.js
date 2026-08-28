@@ -149,6 +149,30 @@ export function parseTemporaryAgentToolResult(toolName, content) {
   return null;
 }
 
+/** 从工具结果中提取 child_agent_id，供进度卡片在结果到达后继续关联。 */
+export function childAgentIdsFromResult(toolName, content) {
+  if (!TEMPORARY_AGENT_TOOLS.has(String(toolName || "").trim())) return [];
+  let payload;
+  try {
+    payload = JSON.parse(String(content || "").trim());
+  } catch {
+    return [];
+  }
+  const ids = [];
+  const add = (value) => {
+    const id = String(value || "").trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  const collect = (item) => {
+    if (!item || typeof item !== "object") return;
+    add(item.child_agent_id);
+    if (Array.isArray(item.results)) item.results.forEach(collect);
+  };
+  if (Array.isArray(payload)) payload.forEach(collect);
+  else collect(payload);
+  return ids;
+}
+
 export function isTemporaryAgentTool(name) {
   return TEMPORARY_AGENT_TOOLS.has(String(name || "").trim());
 }

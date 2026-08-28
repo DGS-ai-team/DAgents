@@ -115,6 +115,36 @@ func TestChildAgentAsyncCreateAndWait(t *testing.T) {
 	}
 }
 
+func TestHydrateIncludesActiveChildProgressAndParentToolCall(t *testing.T) {
+	mock := &delayedEchoMock{delay: 2 * time.Second}
+	mgr, cm, _ := newManagerWithChildAgents(t, mock)
+	defer mgr.Stop()
+
+	parent, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cm.HandleParentTool(context.Background(), parent.ID, childagent.ToolCreateTemporaryAgent,
+		`{"task":"slow job","purpose":"hydrate test","wait":false}`, "call-parent-child-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := mgr.GetHydrateView(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.ChildAgents) != 1 {
+		t.Fatalf("hydrate child agents = %+v", view.ChildAgents)
+	}
+	child := view.ChildAgents[0]
+	if child.ToolCallID != "call-parent-child-1" || child.Purpose != "hydrate test" {
+		t.Fatalf("hydrate child = %+v", child)
+	}
+	if child.Progress.Status != childagent.StatusActive || child.Progress.MaxTurns <= 0 {
+		t.Fatalf("hydrate progress = %+v", child.Progress)
+	}
+}
+
 type delayedEchoMock struct {
 	delay time.Duration
 }

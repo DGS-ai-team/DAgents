@@ -66,6 +66,7 @@ func (o *Orchestrator) runModelRequest(
 		}); err != nil {
 			return result, fmt.Errorf("record model request start: %w", err)
 		}
+		o.resetUsageAttempt(sessionID, stepIndex)
 		attemptProducedOutput := false
 		result, err = o.llm.StreamChat(ctx, llm.ChatRequest{
 			SystemPrompt: systemPrompt,
