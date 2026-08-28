@@ -8,6 +8,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("POST /v1/desktop/ui/focus", s.handleDesktopUIFocus)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
+	s.mux.HandleFunc("GET /v1/desktop/runtime-config", s.handleDesktopRuntimeConfig)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()

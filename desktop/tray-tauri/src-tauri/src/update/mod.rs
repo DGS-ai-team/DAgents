@@ -13,13 +13,12 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const EXIT_UP_TO_DATE: i32 = 3;
 pub const EXIT_NODE_BUSY: i32 = 4;
-const DEFAULT_NODE_STOP_WAIT: Duration = Duration::from_secs(30);
 const DEFAULT_NODE_START_WAIT: Duration = Duration::from_secs(45);
 const TOKEN_HEADER: &str = "x-dagents-a2a-token";
 const AGENT_ID_HEADER: &str = "x-dagents-agent-id";
@@ -30,6 +29,12 @@ pub struct Status {
     pub latest_version: String,
     pub upgrade_available: bool,
     pub manage_reachable: bool,
+    #[serde(default)]
+    pub manage_enabled: bool,
+    #[serde(default)]
+    pub update_enabled: bool,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub check_interval_seconds: u64,
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub last_checked_at: String,
     pub channel: String,
@@ -63,15 +68,18 @@ pub struct ApplyResult {
 }
 
 pub struct Checker {
-    cfg: Arc<ShellConfig>,
+    cfg: Arc<RwLock<Arc<ShellConfig>>>,
     home: PathBuf,
+    node_client: Arc<Client>,
     status: Mutex<Status>,
+    check_mu: Mutex<()>,
+    started: AtomicBool,
     last_upgrade_toast: Mutex<String>,
     on_upgrade: Mutex<Option<Arc<dyn Fn(Status) + Send + Sync>>>,
 }
 
 impl Checker {
-    pub fn new(cfg: Arc<ShellConfig>, home: PathBuf) -> Self {
+    pub fn new(cfg: Arc<ShellConfig>, home: PathBuf, node_client: Arc<Client>) -> Self {
         let channel = cfg.manage.update.channel.trim();
         let channel = if channel.is_empty() {
             DEFAULT_UPDATE_CHANNEL.to_string()
@@ -85,15 +93,21 @@ impl Checker {
             channel,
             platform: release_platform(),
             apply_command: "dagents update".into(),
+            manage_enabled: cfg.manage.enabled,
+            update_enabled: cfg.manage_update_enabled(),
+            check_interval_seconds: cfg.manage.update.check_interval_seconds,
             ..Status::default()
         };
         if !cfg.manage_update_enabled() {
             status.message = "Manage 未启用，无法检查更新".into();
         }
         Self {
-            cfg,
+            cfg: Arc::new(RwLock::new(cfg)),
             home,
+            node_client,
             status: Mutex::new(status),
+            check_mu: Mutex::new(()),
+            started: AtomicBool::new(false),
             last_upgrade_toast: Mutex::new(String::new()),
             on_upgrade: Mutex::new(None),
         }
@@ -109,24 +123,58 @@ impl Checker {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
+    pub fn refresh_config(&self) -> Result<(), String> {
+        let runtime = self.node_client.runtime_config()?;
+        let mut cfg = self
+            .cfg
+            .read()
+            .map_err(|_| "读取 Shell 配置失败".to_string())?
+            .as_ref()
+            .clone();
+        cfg.apply_runtime_config(&runtime);
+        let mut guard = self
+            .cfg
+            .write()
+            .map_err(|_| "更新 Shell 配置失败".to_string())?;
+        *guard = Arc::new(cfg);
+        Ok(())
+    }
+
+    pub fn config_snapshot(&self) -> Arc<ShellConfig> {
+        self.cfg
+            .read()
+            .map(|cfg| Arc::clone(&cfg))
+            .unwrap_or_else(|err| Arc::clone(&err.into_inner()))
+    }
+
     pub fn start(self: &Arc<Self>, stop: Arc<AtomicBool>) {
-        if !self.cfg.manage_update_enabled() {
+        if self
+            .started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             return;
         }
         let checker = Arc::clone(self);
         thread::spawn(move || {
-            checker.check_once();
-            let interval = checker.cfg.manage_update_check_interval();
+            let mut status = checker.check_once();
             while !stop.load(Ordering::SeqCst) {
+                let interval = if status.check_interval_seconds > 0 {
+                    Duration::from_secs(status.check_interval_seconds)
+                } else {
+                    checker.config_snapshot().manage_update_check_interval()
+                };
                 sleep_until_stopped(&stop, interval);
                 if !stop.load(Ordering::SeqCst) {
-                    checker.check_once();
+                    status = checker.check_once();
                 }
             }
         });
     }
 
     pub fn check_once(&self) -> Status {
+        let _check_guard = self.check_mu.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = self.refresh_config();
         let status = self.fetch_check();
         let mut cb: Option<Arc<dyn Fn(Status) + Send + Sync>> = None;
         let mut notify = false;
@@ -154,20 +202,46 @@ impl Checker {
     }
 
     fn fetch_check(&self) -> Status {
-        check(CheckRequest {
-            manage_url: self.cfg.manage.url.clone(),
+        let cfg = self.config_snapshot();
+        if !cfg.manage_update_enabled() {
+            return Status {
+                current_version: read_install_version(&self.home),
+                latest_version: read_install_version(&self.home),
+                channel: cfg.manage.update.channel.clone(),
+                platform: release_platform(),
+                apply_command: "dagents update".into(),
+                manage_enabled: cfg.manage.enabled,
+                update_enabled: false,
+                check_interval_seconds: cfg.manage.update.check_interval_seconds as u64,
+                message: if cfg.manage.enabled {
+                    "自动更新检查未启用".into()
+                } else {
+                    "Manage 未启用，无法检查更新".into()
+                },
+                ..Status::default()
+            };
+        }
+        let mut status = check(CheckRequest {
+            manage_url: cfg.manage.url.clone(),
             current_version: read_install_version(&self.home),
             platform: release_platform(),
-            channel: self.cfg.manage.update.channel.clone(),
-            agent_id: self.cfg.node_id.clone(),
-            node_token: self.cfg.manage.node_token.clone(),
+            channel: cfg.manage.update.channel.clone(),
+            agent_id: cfg.node_id.clone(),
+            node_token: cfg.manage.node_token.clone(),
             apply_command: "dagents update".into(),
-        })
+        });
+        status.manage_enabled = cfg.manage.enabled;
+        status.update_enabled = cfg.manage_update_enabled();
+        status.check_interval_seconds = cfg.manage.update.check_interval_seconds as u64;
+        if !status.manage_enabled {
+            status.message = "Manage 未启用，无法检查更新".into();
+        }
+        status
     }
 }
 
 pub struct Applier {
-    cfg: Arc<ShellConfig>,
+    cfg: Arc<RwLock<Arc<ShellConfig>>>,
     layout: Layout,
     checker: Arc<Checker>,
     node_client: Arc<Client>,
@@ -175,14 +249,9 @@ pub struct Applier {
 }
 
 impl Applier {
-    pub fn new(
-        cfg: Arc<ShellConfig>,
-        layout: Layout,
-        checker: Arc<Checker>,
-        node_client: Arc<Client>,
-    ) -> Self {
+    pub fn new(layout: Layout, checker: Arc<Checker>, node_client: Arc<Client>) -> Self {
         Self {
-            cfg,
+            cfg: Arc::clone(&checker.cfg),
             layout,
             checker,
             node_client,
@@ -237,14 +306,30 @@ impl Applier {
             }
         };
         let install_result = (|| {
-            nodectl::stop(&self.layout, &self.cfg)?;
-            install_release_package(&self.layout.home, &pkg_path)?;
-            nodectl::start(&self.layout, &self.cfg, DEFAULT_NODE_START_WAIT)
+            let cfg = self.config_snapshot();
+            nodectl::stop(&self.layout, &cfg)?;
+            let transaction = install_release_package(&self.layout.home, &pkg_path)?;
+            if let Err(start_err) = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT) {
+                let rollback = transaction.rollback();
+                let old_start = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT);
+                return Err(match (rollback, old_start) {
+                    (Ok(()), Ok(())) => {
+                        format!("新版本启动失败: {start_err}（已回滚并恢复旧版本）")
+                    }
+                    (Ok(()), Err(old_err)) => {
+                        format!("新版本启动失败: {start_err}；旧版本恢复启动失败: {old_err}")
+                    }
+                    (Err(rb), _) => format!("新版本启动失败: {start_err}；回滚失败: {rb}"),
+                });
+            }
+            transaction.commit();
+            Ok(())
         })();
         let _ = fs::remove_file(&pkg_path);
         if let Err(e) = install_result {
             eprintln!("install failed: {e}");
-            let _ = nodectl::start(&self.layout, &self.cfg, DEFAULT_NODE_STOP_WAIT);
+            let cfg = self.config_snapshot();
+            let _ = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT);
             result.message = format!("install failed: {e}");
             return (result, 1);
         }
@@ -252,6 +337,13 @@ impl Applier {
         result.message = format!("已升级到 {}", status.latest_version);
         println!("update complete: {}", status.latest_version);
         (result, 0)
+    }
+
+    fn config_snapshot(&self) -> Arc<ShellConfig> {
+        self.cfg
+            .read()
+            .map(|cfg| Arc::clone(&cfg))
+            .unwrap_or_else(|err| Arc::clone(&err.into_inner()))
     }
 
     fn ensure_upgrade_ready(&self) -> Option<(i32, String)> {
@@ -276,6 +368,7 @@ impl Applier {
     }
 
     fn download_package(&self, status: &Status) -> Result<PathBuf, String> {
+        let cfg = self.config_snapshot();
         let asset = status
             .asset
             .as_ref()
@@ -304,8 +397,8 @@ impl Applier {
             url: download_url.to_string(),
             dest_path: pkg.clone(),
             expected_sha256: expected_sha,
-            agent_id: self.cfg.node_id.clone(),
-            node_token: self.cfg.manage.node_token.clone(),
+            agent_id: cfg.node_id.clone(),
+            node_token: cfg.manage.node_token.clone(),
         })?;
         Ok(pkg)
     }
@@ -338,6 +431,7 @@ fn check(req: CheckRequest) -> Status {
         current_version: current.clone(),
         latest_version: current,
         manage_reachable: false,
+        last_checked_at: rfc3339_now(),
         channel: channel.clone(),
         platform: req.platform,
         apply_command,
@@ -427,30 +521,35 @@ fn download_package(req: DownloadRequest) -> Result<(), String> {
         return Err(format!("download HTTP {}", resp.status()));
     }
     let tmp = req.dest_path.with_extension("part");
-    let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
-    let mut reader = resp.into_reader();
-    let mut hasher = Sha256::new();
-    let mut buf = [0_u8; 64 * 1024];
-    loop {
-        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
+    let result = (|| {
+        let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        let mut reader = resp.into_reader();
+        let mut hasher = Sha256::new();
+        let mut buf = [0_u8; 64 * 1024];
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
         }
-        hasher.update(&buf[..n]);
-        out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-    }
-    out.flush().map_err(|e| e.to_string())?;
-    if !req.expected_sha256.trim().is_empty() {
-        let got = hex::encode(hasher.finalize());
-        if got != req.expected_sha256.trim().to_ascii_lowercase() {
-            let _ = fs::remove_file(&tmp);
-            return Err(format!(
-                "sha256 mismatch: expected {}, got {got}",
-                req.expected_sha256.trim()
-            ));
+        out.flush().map_err(|e| e.to_string())?;
+        if !req.expected_sha256.trim().is_empty() {
+            let got = hex::encode(hasher.finalize());
+            if got != req.expected_sha256.trim().to_ascii_lowercase() {
+                return Err(format!(
+                    "sha256 mismatch: expected {}, got {got}",
+                    req.expected_sha256.trim()
+                ));
+            }
         }
+        fs::rename(&tmp, &req.dest_path).map_err(|e| e.to_string())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, &req.dest_path).map_err(|e| e.to_string())
+    result
 }
 
 pub fn read_install_version(home: &Path) -> String {
@@ -459,6 +558,10 @@ pub fn read_install_version(home: &Path) -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "dev".into())
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
 }
 
 pub fn release_platform() -> String {
@@ -513,10 +616,29 @@ fn normalize_asset_urls(
     out
 }
 
-fn install_release_package(home: &Path, pkg_path: &Path) -> Result<(), String> {
+struct InstallTransaction {
+    backup: PathBuf,
+    home: PathBuf,
+}
+
+impl InstallTransaction {
+    fn commit(self) {
+        let _ = fs::remove_dir_all(&self.backup);
+    }
+
+    fn rollback(self) -> Result<(), String> {
+        restore_install_backup(&self.home, &self.backup)
+    }
+}
+
+fn install_release_package(home: &Path, pkg_path: &Path) -> Result<InstallTransaction, String> {
     let staging = std::env::temp_dir().join(format!("dagents-update-{}", unix_nanos()));
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let result = (|| {
+    let backup = home
+        .join(".runtime")
+        .join(format!("dagents-update-backup-{}", unix_nanos()));
+    fs::create_dir_all(&backup).map_err(|e| e.to_string())?;
+    let install_result = (|| {
         extract_package(pkg_path, &staging)?;
         let bundle = find_bundle_root(&staging)?;
         let bin_src = bundle.join("bin");
@@ -526,13 +648,80 @@ fn install_release_package(home: &Path, pkg_path: &Path) -> Result<(), String> {
                 bin_src.display()
             ));
         }
+        // Move the complete old installation aside before copying. This keeps
+        // a failed/partial replacement recoverable, including Windows files
+        // that may be replaced in a different order.
+        for rel in ["bin", "dagents.cmd", "VERSION"] {
+            move_if_exists(&home.join(rel), &backup.join(rel))?;
+        }
         copy_tree(&bin_src, &home.join("bin"))?;
         copy_if_exists(&bundle.join("dagents.cmd"), &home.join("dagents.cmd"))?;
         copy_if_exists(&bundle.join("VERSION"), &home.join("VERSION"))?;
         Ok(())
     })();
+    let result = match install_result {
+        Ok(()) => Ok(InstallTransaction {
+            backup,
+            home: home.to_path_buf(),
+        }),
+        Err(err) => {
+            let rollback = restore_install_backup(home, &backup);
+            let message = match rollback {
+                Ok(()) => format!("{err}（已回滚旧版本）"),
+                Err(rb) => format!("{err}；回滚失败: {rb}"),
+            };
+            Err(message)
+        }
+    };
     let _ = fs::remove_dir_all(&staging);
     result
+}
+
+fn move_if_exists(src: &Path, dest: &Path) -> Result<(), String> {
+    if !src.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::rename(src, dest).map_err(|e| format!("移动 {} -> {}: {e}", src.display(), dest.display()))
+}
+
+fn remove_path(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_dir() {
+        fs::remove_dir_all(path).map_err(|e| e.to_string())
+    } else {
+        fs::remove_file(path).map_err(|e| e.to_string())
+    }
+}
+
+fn restore_install_backup(home: &Path, backup: &Path) -> Result<(), String> {
+    let mut first_error: Option<String> = None;
+    for rel in ["bin", "dagents.cmd", "VERSION"] {
+        let current = home.join(rel);
+        let old = backup.join(rel);
+        if let Err(err) = remove_path(&current) {
+            if first_error.is_none() {
+                first_error = Some(format!("清理新文件 {}: {err}", current.display()));
+            }
+            continue;
+        }
+        if old.exists() {
+            if let Err(err) = move_if_exists(&old, &current) {
+                if first_error.is_none() {
+                    first_error = Some(format!("恢复 {}: {err}", current.display()));
+                }
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(backup);
+    match first_error {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 fn extract_package(pkg_path: &Path, dest: &Path) -> Result<(), String> {
@@ -747,5 +936,26 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         assert_eq!(read_install_version(&dir), "dev");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restores_install_backup_after_partial_replacement() {
+        let home = std::env::temp_dir().join(format!("dagents-rollback-{}", unix_nanos()));
+        let old_bin = home.join("bin");
+        let backup = home.join(".runtime").join("backup");
+        fs::create_dir_all(&old_bin).unwrap();
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(old_bin.join("node.txt"), "old").unwrap();
+        fs::rename(&old_bin, backup.join("bin")).unwrap();
+        fs::create_dir_all(&old_bin).unwrap();
+        fs::write(old_bin.join("node.txt"), "partial-new").unwrap();
+
+        restore_install_backup(&home, &backup).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(home.join("bin/node.txt")).unwrap(),
+            "old"
+        );
+        let _ = fs::remove_dir_all(&home);
     }
 }

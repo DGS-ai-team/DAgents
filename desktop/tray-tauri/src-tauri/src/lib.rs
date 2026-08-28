@@ -55,8 +55,11 @@ struct Shared {
     ui_focus: Arc<uifocus::Store>,
     sse_subscriber: Mutex<Option<events::Subscriber>>,
     hold_stopped: AtomicBool,
+    node_running: AtomicBool,
     recovering: AtomicBool,
+    lifecycle_busy: AtomicBool,
     blink_running: AtomicBool,
+    update_check_in_flight: AtomicBool,
     webui_open_in_flight: AtomicBool,
     last_err: Mutex<Option<String>>,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
@@ -64,6 +67,10 @@ struct Shared {
     pending_slots: Mutex<Vec<MenuItem<tauri::Wry>>>,
     pending_session_ids: Mutex<Vec<String>>,
     update_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    open_manage_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    start_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    stop_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    restart_item: Mutex<Option<MenuItem<tauri::Wry>>>,
 }
 
 fn _assert_shared_send_sync() {
@@ -124,9 +131,12 @@ pub fn run() {
     let node_client = Arc::new(nodeclient::Client::new(&cfg.endpoint));
     let pending_store = Arc::new(pending::Store::new());
     let notifier = Arc::new(notify::Notifier::new(cfg.endpoint.clone()));
-    let update_checker = Arc::new(update::Checker::new(Arc::clone(&cfg), layout.home.clone()));
-    let update_applier = Arc::new(update::Applier::new(
+    let update_checker = Arc::new(update::Checker::new(
         Arc::clone(&cfg),
+        layout.home.clone(),
+        Arc::clone(&node_client),
+    ));
+    let update_applier = Arc::new(update::Applier::new(
         layout.clone(),
         Arc::clone(&update_checker),
         Arc::clone(&node_client),
@@ -146,8 +156,11 @@ pub fn run() {
         ui_focus,
         sse_subscriber: Mutex::new(None),
         hold_stopped: AtomicBool::new(false),
+        node_running: AtomicBool::new(false),
         recovering: AtomicBool::new(false),
+        lifecycle_busy: AtomicBool::new(false),
         blink_running: AtomicBool::new(false),
+        update_check_in_flight: AtomicBool::new(false),
         webui_open_in_flight: AtomicBool::new(false),
         last_err: Mutex::new(None),
         status_item: Mutex::new(None),
@@ -155,6 +168,10 @@ pub fn run() {
         pending_slots: Mutex::new(Vec::new()),
         pending_session_ids: Mutex::new(vec![String::new(); MAX_PENDING_MENU_SLOTS]),
         update_item: Mutex::new(None),
+        open_manage_item: Mutex::new(None),
+        start_item: Mutex::new(None),
+        stop_item: Mutex::new(None),
+        restart_item: Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -208,12 +225,12 @@ pub fn run() {
                 let open =
                     MenuItem::with_id(app, "open_console", "打开控制台", true, None::<&str>)?;
                 let open_manage =
-                    MenuItem::with_id(app, "open_manage", "打开 Manage", true, None::<&str>)?;
+                    MenuItem::with_id(app, "open_manage", "打开 Manage", false, None::<&str>)?;
                 let update =
                     MenuItem::with_id(app, "update", "更新：检查中…", false, None::<&str>)?;
                 let start = MenuItem::with_id(app, "start", "启动 Node", true, None::<&str>)?;
-                let stop = MenuItem::with_id(app, "stop", "停止 Node", true, None::<&str>)?;
-                let restart = MenuItem::with_id(app, "restart", "重启 Node", true, None::<&str>)?;
+                let stop = MenuItem::with_id(app, "stop", "停止 Node", false, None::<&str>)?;
+                let restart = MenuItem::with_id(app, "restart", "重启 Node", false, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "退出 Shell", true, None::<&str>)?;
                 let sep1 = PredefinedMenuItem::separator(app)?;
                 let sep2 = PredefinedMenuItem::separator(app)?;
@@ -234,6 +251,22 @@ pub fn run() {
                 {
                     let mut slot = shared.update_item.lock().unwrap();
                     *slot = Some(update.clone());
+                }
+                {
+                    let mut slot = shared.open_manage_item.lock().unwrap();
+                    *slot = Some(open_manage.clone());
+                }
+                {
+                    let mut slot = shared.start_item.lock().unwrap();
+                    *slot = Some(start.clone());
+                }
+                {
+                    let mut slot = shared.stop_item.lock().unwrap();
+                    *slot = Some(stop.clone());
+                }
+                {
+                    let mut slot = shared.restart_item.lock().unwrap();
+                    *slot = Some(restart.clone());
                 }
 
                 let items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
@@ -281,11 +314,24 @@ pub fn run() {
                     .build(app)?;
                 app.manage(tray);
 
+                let bg_stop = Arc::clone(&shared.desktop_api_stop);
+                shared.update_checker.set_upgrade_callback({
+                    let shared = Arc::clone(&shared);
+                    move |status| {
+                        let _ = shared
+                            .notifier
+                            .push_update_available(&status.latest_version);
+                        refresh_update_ui(&shared);
+                    }
+                });
+
                 // 启动 ensure Node + 轮询
                 let boot = Arc::clone(&shared);
                 let app_handle = app.handle().clone();
+                let checker_stop = Arc::clone(&bg_stop);
                 thread::spawn(move || {
                     ensure_node(&boot);
+                    boot.update_checker.start(checker_stop);
                     refresh_status(&boot);
                     refresh_update_ui(&boot);
                     refresh_pending_ui(&boot, &app_handle);
@@ -298,17 +344,6 @@ pub fn run() {
                     }
                 });
 
-                let bg_stop = Arc::clone(&shared.desktop_api_stop);
-                shared.update_checker.set_upgrade_callback({
-                    let shared = Arc::clone(&shared);
-                    move |status| {
-                        let _ = shared
-                            .notifier
-                            .push_update_available(&status.latest_version);
-                        refresh_update_ui(&shared);
-                    }
-                });
-                shared.update_checker.start(Arc::clone(&bg_stop));
                 let api = Arc::new(desktopapi::Server::new(
                     Arc::clone(&shared.update_checker),
                     Arc::clone(&shared.update_applier),
@@ -429,7 +464,7 @@ fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
         "pending" => open_first_pending(shared, app),
         "open_console" => open_console(shared, app),
         "open_manage" => open_manage(shared),
-        "update" => open_update_settings(shared, app),
+        "update" => handle_update_menu(shared, app),
         "start" => {
             shared.hold_stopped.store(false, Ordering::SeqCst);
             run_action(shared, "启动", |s| {
@@ -464,6 +499,36 @@ fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
 
 fn open_update_settings(shared: &Arc<Shared>, app: &AppHandle) {
     open_webui_url(shared, app, shared.cfg.settings_about_url());
+}
+
+fn handle_update_menu(shared: &Arc<Shared>, app: &AppHandle) {
+    if shared.update_checker.snapshot().upgrade_available {
+        open_update_settings(shared, app);
+    } else {
+        check_update_now(shared);
+    }
+}
+
+fn check_update_now(shared: &Arc<Shared>) {
+    if shared
+        .update_check_in_flight
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    if let Ok(guard) = shared.update_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_text("更新：检查中…");
+            let _ = item.set_enabled(false);
+        }
+    }
+    let shared = Arc::clone(shared);
+    thread::spawn(move || {
+        let _ = shared.update_checker.check_once();
+        shared.update_check_in_flight.store(false, Ordering::SeqCst);
+        refresh_update_ui(&shared);
+    });
 }
 
 fn open_first_pending(shared: &Arc<Shared>, app: &AppHandle) {
@@ -501,6 +566,14 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
     }
     let shared = Arc::clone(shared);
     let app = app.clone();
+    if shared
+        .lifecycle_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        shared.webui_open_in_flight.store(false, Ordering::SeqCst);
+        return;
+    }
     thread::spawn(move || {
         struct InFlightGuard(Arc<Shared>);
         impl Drop for InFlightGuard {
@@ -509,8 +582,16 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
             }
         }
         let _guard = InFlightGuard(Arc::clone(&shared));
+        struct LifecycleGuard(Arc<Shared>);
+        impl Drop for LifecycleGuard {
+            fn drop(&mut self) {
+                self.0.lifecycle_busy.store(false, Ordering::SeqCst);
+            }
+        }
+        let lifecycle_guard = LifecycleGuard(Arc::clone(&shared));
         if let Err(e) = nodectl::start(&shared.layout, &shared.cfg, WAIT_READY) {
             set_err(&shared, Some(e));
+            drop(lifecycle_guard);
             refresh_status(&shared);
             return;
         }
@@ -527,6 +608,7 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
             Ok(u) => u,
             Err(e) => {
                 set_err(&shared, Some(format!("无效 Web UI URL {url_str}: {e}")));
+                drop(lifecycle_guard);
                 refresh_status(&shared);
                 return;
             }
@@ -574,6 +656,7 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
         });
         if let Err(e) = schedule {
             set_err(&shared, Some(format!("调度主线程失败: {e}")));
+            drop(lifecycle_guard);
             refresh_status(&shared);
             return;
         }
@@ -582,22 +665,45 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
             Ok(Err(e)) => set_err(&shared, Some(e)),
             Err(_) => set_err(&shared, Some("打开 Web UI 超时".into())),
         }
+        drop(lifecycle_guard);
         refresh_status(&shared);
     });
 }
 
 fn open_manage(shared: &Arc<Shared>) {
+    if shared
+        .lifecycle_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
     let shared = Arc::clone(shared);
     thread::spawn(move || {
+        struct LifecycleGuard(Arc<Shared>);
+        impl Drop for LifecycleGuard {
+            fn drop(&mut self) {
+                self.0.lifecycle_busy.store(false, Ordering::SeqCst);
+            }
+        }
+        let lifecycle_guard = LifecycleGuard(Arc::clone(&shared));
         match nodectl::open_manage(&shared.layout, &shared.cfg, WAIT_READY) {
             Ok(()) => set_err(&shared, None),
             Err(e) => set_err(&shared, Some(e)),
         }
+        drop(lifecycle_guard);
         refresh_status(&shared);
     });
 }
 
 fn ensure_node(shared: &Arc<Shared>) {
+    if shared
+        .lifecycle_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
     match nodectl::start(&shared.layout, &shared.cfg, WAIT_READY) {
         Ok(()) => set_err(shared, None),
         Err(e) => {
@@ -605,6 +711,7 @@ fn ensure_node(shared: &Arc<Shared>) {
             set_err(shared, Some(e));
         }
     }
+    shared.lifecycle_busy.store(false, Ordering::SeqCst);
 }
 
 fn run_action(
@@ -612,9 +719,23 @@ fn run_action(
     label: &str,
     f: impl FnOnce(&Shared) -> Result<(), String> + Send + 'static,
 ) {
+    if shared
+        .lifecycle_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
     let shared = Arc::clone(shared);
     let label = label.to_string();
     thread::spawn(move || {
+        struct ActionGuard(Arc<Shared>);
+        impl Drop for ActionGuard {
+            fn drop(&mut self) {
+                self.0.lifecycle_busy.store(false, Ordering::SeqCst);
+            }
+        }
+        let guard = ActionGuard(Arc::clone(&shared));
         match f(&shared) {
             Ok(()) => set_err(&shared, None),
             Err(e) => {
@@ -622,6 +743,7 @@ fn run_action(
                 set_err(&shared, Some(e));
             }
         }
+        drop(guard);
         refresh_status(&shared);
     });
 }
@@ -633,7 +755,10 @@ fn set_err(shared: &Shared, err: Option<String>) {
 }
 
 fn refresh_status(shared: &Shared) {
-    let text = match nodectl::probe(&shared.cfg) {
+    let health = nodectl::probe(&shared.cfg);
+    let running = matches!(&health, Ok(h) if h.ok);
+    shared.node_running.store(running, Ordering::SeqCst);
+    let text = match health {
         Ok(h) if h.ok => format_running(&h),
         Ok(h) => format!("状态：异常 ({})", h.status),
         Err(_) => {
@@ -657,6 +782,36 @@ fn refresh_status(shared: &Shared) {
             let _ = item.set_text(text.clone());
         }
     }
+    let busy = shared.lifecycle_busy.load(Ordering::SeqCst);
+    if let Ok(guard) = shared.start_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_enabled(!busy && !running);
+        }
+    }
+    if let Ok(guard) = shared.stop_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_enabled(!busy && running);
+        }
+    }
+    if let Ok(guard) = shared.restart_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_enabled(!busy && running);
+        }
+    }
+    let manage_available = if running {
+        shared
+            .node_client
+            .agent_info()
+            .map(|info| info.manage_enabled && !info.manage_url.trim().is_empty())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+    if let Ok(guard) = shared.open_manage_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_enabled(manage_available);
+        }
+    }
 }
 
 fn format_running(h: &Health) -> String {
@@ -671,7 +826,14 @@ fn maybe_recover(shared: &Arc<Shared>) {
     if shared.hold_stopped.load(Ordering::SeqCst) {
         return;
     }
-    if nodectl::is_running(&shared.cfg) {
+    if shared.node_running.load(Ordering::SeqCst) {
+        return;
+    }
+    if shared
+        .lifecycle_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return;
     }
     if shared
@@ -679,10 +841,18 @@ fn maybe_recover(shared: &Arc<Shared>) {
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
+        shared.lifecycle_busy.store(false, Ordering::SeqCst);
         return;
     }
     let shared = Arc::clone(shared);
     thread::spawn(move || {
+        struct RecoveryGuard(Arc<Shared>);
+        impl Drop for RecoveryGuard {
+            fn drop(&mut self) {
+                self.0.lifecycle_busy.store(false, Ordering::SeqCst);
+            }
+        }
+        let guard = RecoveryGuard(Arc::clone(&shared));
         let result = nodectl::start(&shared.layout, &shared.cfg, WAIT_READY);
         match result {
             Ok(()) => set_err(&shared, None),
@@ -692,23 +862,28 @@ fn maybe_recover(shared: &Arc<Shared>) {
             }
         }
         shared.recovering.store(false, Ordering::SeqCst);
+        drop(guard);
         refresh_status(&shared);
     });
     let _ = ENSURE_TIMEOUT;
 }
 
 fn refresh_update_ui(shared: &Shared) {
-    let text_enabled = if !shared.cfg.manage_update_enabled() {
+    if shared.node_running.load(Ordering::SeqCst) {
+        let _ = shared.update_checker.refresh_config();
+    }
+    let cfg = shared.update_checker.config_snapshot();
+    let status = shared.update_checker.snapshot();
+    let text_enabled = if !cfg.manage.enabled || !cfg.manage_update_enabled() {
         ("更新：未启用".to_string(), false)
+    } else if status.last_checked_at.trim().is_empty() {
+        ("更新：检查中…".to_string(), false)
+    } else if !status.manage_reachable {
+        ("更新：检查失败（点击重试）".to_string(), true)
+    } else if status.upgrade_available {
+        (format!("更新：新版本 {} 可用", status.latest_version), true)
     } else {
-        let status = shared.update_checker.snapshot();
-        if !status.manage_reachable {
-            ("更新：Manage 不可达".to_string(), false)
-        } else if status.upgrade_available {
-            (format!("更新：新版本 {} 可用", status.latest_version), true)
-        } else {
-            ("更新：已是最新".to_string(), false)
-        }
+        ("更新：已是最新（点击重试）".to_string(), true)
     };
     if let Ok(guard) = shared.update_item.lock() {
         if let Some(item) = guard.as_ref() {

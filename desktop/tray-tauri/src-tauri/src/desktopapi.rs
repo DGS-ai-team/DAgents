@@ -163,8 +163,12 @@ pub fn run_update_command(args: &[String], layout: Layout, cfg: Arc<ShellConfig>
         return post_update_apply(force);
     }
     let client = Arc::new(Client::new(&cfg.endpoint));
-    let checker = Arc::new(Checker::new(Arc::clone(&cfg), layout.home.clone()));
-    let applier = Applier::new(cfg, layout, checker, client);
+    let checker = Arc::new(Checker::new(
+        Arc::clone(&cfg),
+        layout.home.clone(),
+        Arc::clone(&client),
+    ));
+    let applier = Applier::new(layout, checker, client);
     let (result, code) = applier.run(ApplyOptions {
         check_only,
         force,

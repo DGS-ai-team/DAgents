@@ -67,7 +67,7 @@ func (a *Applier) Run(ctx context.Context, opt ApplyOptions) (ApplyResult, int) 
 	if a == nil || a.cfg == nil || a.layout == nil || a.checker == nil {
 		return ApplyResult{}, 1
 	}
-	a.checker.checkOnce()
+	a.checker.CheckNow()
 	status := a.checker.Snapshot()
 	result := ApplyResult{Status: status, Message: status.Message}
 
@@ -120,25 +120,41 @@ func (a *Applier) Run(ctx context.Context, opt ApplyOptions) (ApplyResult, int) 
 
 	stopCtx, cancelStop := context.WithTimeout(ctx, defaultNodeStopWait)
 	defer cancelStop()
-	if err := nodectl.Stop(stopCtx, a.layout, a.cfg); err != nil {
+	cfg := a.checker.ConfigSnapshot()
+	if cfg == nil {
+		fmt.Fprintln(optErr(opt), "Shell 配置不可用")
+		return result, 1
+	}
+	if err := nodectl.Stop(stopCtx, a.layout, cfg); err != nil {
 		fmt.Fprintf(optErr(opt), "stop node failed: %v\n", err)
 		return result, 1
 	}
 
-	if err := installReleasePackage(a.layout.Home, pkgPath); err != nil {
+	transaction, err := installReleasePackage(a.layout.Home, pkgPath)
+	if err != nil {
 		fmt.Fprintf(optErr(opt), "install failed: %v\n", err)
-		_ = nodectl.Start(context.Background(), a.layout, a.cfg, defaultNodeStartWait)
+		_ = nodectl.Start(context.Background(), a.layout, cfg, defaultNodeStartWait)
 		return result, 1
 	}
 
 	startCtx, cancelStart := context.WithTimeout(ctx, defaultNodeStartWait)
 	defer cancelStart()
-	if err := nodectl.Start(startCtx, a.layout, a.cfg, defaultNodeStartWait); err != nil {
-		fmt.Fprintf(optErr(opt), "start node failed: %v\n", err)
+	if err := nodectl.Start(startCtx, a.layout, cfg, defaultNodeStartWait); err != nil {
+		rollbackErr := transaction.Rollback()
+		oldStartErr := nodectl.Start(context.Background(), a.layout, cfg, defaultNodeStartWait)
+		switch {
+		case rollbackErr != nil:
+			fmt.Fprintf(optErr(opt), "start node failed: %v; rollback failed: %v\n", err, rollbackErr)
+		case oldStartErr != nil:
+			fmt.Fprintf(optErr(opt), "start node failed: %v; old version restart failed: %v\n", err, oldStartErr)
+		default:
+			fmt.Fprintf(optErr(opt), "start node failed: %v; rolled back to the previous version\n", err)
+		}
 		return result, 1
 	}
+	transaction.Commit()
 
-	a.checker.checkOnce()
+	a.checker.CheckNow()
 	result.Status = a.checker.Snapshot()
 	result.Message = fmt.Sprintf("已升级到 %s", status.LatestVersion)
 	fmt.Fprintf(optOut(opt), "update complete: %s\n", status.LatestVersion)
@@ -165,6 +181,10 @@ func (a *Applier) ensureUpgradeReady(ctx context.Context) (ready bool, exitCode 
 }
 
 func (a *Applier) downloadPackage(ctx context.Context, status sharedupdate.Status) (string, error) {
+	cfg := a.checker.ConfigSnapshot()
+	if cfg == nil {
+		return "", fmt.Errorf("shell config unavailable")
+	}
 	if status.Asset == nil {
 		return "", fmt.Errorf("update response missing asset")
 	}
@@ -183,8 +203,8 @@ func (a *Applier) downloadPackage(ctx context.Context, status sharedupdate.Statu
 		URL:            downloadURL,
 		DestPath:       pkgPath,
 		ExpectedSHA256: expectedSHA,
-		AgentID:        a.cfg.NodeID,
-		NodeToken:      a.cfg.Manage.NodeToken,
+		AgentID:        cfg.NodeID,
+		NodeToken:      cfg.Manage.NodeToken,
 		Client:         a.httpClient,
 	}); err != nil {
 		return "", err

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 
@@ -74,8 +75,68 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// desktopRuntimeConfig exposes the small effective-config subset needed by a
+// local desktop Shell. The Shell must not read node_settings.db itself: Node
+// is the owner of the merged bootstrap/YAML/SQLite configuration. The token
+// is returned only on this localhost-facing integration endpoint so the Shell
+// can authenticate package downloads without duplicating Node's storage code.
+type desktopRuntimeConfig struct {
+	NodeID                           string `json:"node_id"`
+	ManageEnabled                    bool   `json:"manage_enabled"`
+	ManageURL                        string `json:"manage_url,omitempty"`
+	ManageNodeToken                  string `json:"manage_node_token,omitempty"`
+	ManageUpdateEnabled              bool   `json:"manage_update_enabled"`
+	ManageUpdateCheckIntervalSeconds int    `json:"manage_update_check_interval_seconds"`
+	ManageUpdateChannel              string `json:"manage_update_channel"`
+}
+
+func (s *Server) handleDesktopRuntimeConfig(w http.ResponseWriter, r *http.Request) {
+	// This response contains the Manage credential needed for package
+	// downloads. Do not expose it when Node is bound beyond localhost.
+	if !isLoopbackRequest(r) {
+		writeAPIError(w, http.StatusForbidden, "local_only", "desktop runtime config 仅允许本机访问", nil)
+		return
+	}
+	if s == nil || s.cfg == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "config_unavailable", "Node 配置不可用", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, desktopRuntimeConfig{
+		NodeID:                           s.cfg.NodeID,
+		ManageEnabled:                    s.cfg.Manage.Enabled,
+		ManageURL:                        strings.TrimSpace(s.cfg.Manage.URL),
+		ManageNodeToken:                  strings.TrimSpace(s.cfg.Manage.NodeToken),
+		ManageUpdateEnabled:              s.cfg.ManageUpdateEnabled(),
+		ManageUpdateCheckIntervalSeconds: int(s.cfg.ManageUpdateCheckInterval().Seconds()),
+		ManageUpdateChannel:              strings.TrimSpace(s.cfg.Manage.Update.Channel),
+	})
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
 	if manage.UpdateDelegatedToShell() {
+		// Node owns the effective settings (including node_settings.db). A
+		// Shell request may ask Node for an on-demand check without receiving
+		// the Manage token or reimplementing config loading.
+		if s.updateChecker != nil {
+			status := s.updateChecker.CheckNow()
+			status.Deprecated = true
+			status.Delegate = "shell"
+			status.DesktopAPI = manage.ShellDesktopAPIBase + "/v1/desktop/update"
+			writeJSON(w, http.StatusOK, status)
+			return
+		}
 		channel := "stable"
 		if s.cfg != nil {
 			channel = strings.TrimSpace(s.cfg.Manage.Update.Channel)

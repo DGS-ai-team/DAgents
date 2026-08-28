@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 )
 
 const (
@@ -41,7 +43,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.manageMu.Unlock()
 	s.maybeStartManageSidecars()
 	s.startMCPHealthMonitor(regCtx)
-	if s.updateChecker != nil {
+	if s.updateChecker != nil && !manage.UpdateDelegatedToShell() {
 		s.updateChecker.Start(regCtx)
 	}
 	go func() {
