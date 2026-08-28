@@ -111,16 +111,6 @@
   flex-direction: column;
 }
 
-.agent-list-item__badge--unread {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-}
-
-.agent-list-item__badge--hitl {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
 .chat-error-banner {
   margin-bottom: 8px;
   padding: 10px 12px;
