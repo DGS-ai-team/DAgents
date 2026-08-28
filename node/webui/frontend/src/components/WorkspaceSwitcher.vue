@@ -2,9 +2,6 @@
 const props = defineProps({
   active: { type: String, default: "messages" },
   terminalAvailable: { type: Boolean, default: true },
-  activityAvailable: { type: Boolean, default: true },
-  terminalBadge: { type: [String, Number], default: "" },
-  activityBadge: { type: [String, Number], default: "" },
 });
 
 const emit = defineEmits(["change"]);
@@ -12,19 +9,11 @@ const emit = defineEmits(["change"]);
 const items = [
   { id: "messages", label: "消息" },
   { id: "terminal", label: "终端" },
-  { id: "activity", label: "活动" },
 ];
 
 function available(id) {
   if (id === "terminal") return props.terminalAvailable;
-  if (id === "activity") return props.activityAvailable;
   return true;
-}
-
-function badge(id) {
-  if (id === "terminal") return props.terminalBadge;
-  if (id === "activity") return props.activityBadge;
-  return "";
 }
 
 function select(id) {
@@ -44,6 +33,7 @@ function select(id) {
       :disabled="!available(item.id)"
       :aria-selected="props.active === item.id"
       :aria-disabled="!available(item.id)"
+      :aria-label="item.label"
       :title="available(item.id) ? item.label : `${item.label}暂不可用`"
       role="tab"
       @click="select(item.id)"
@@ -55,14 +45,6 @@ function select(id) {
         <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
         <path d="m5.75 7 2.5 2.25-2.5 2.25M10.5 12h3.25" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
-      <svg v-else viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M4 5h12M4 10h12M4 15h12" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
-        <circle cx="7" cy="5" r="1.35" fill="currentColor" />
-        <circle cx="12" cy="10" r="1.35" fill="currentColor" />
-        <circle cx="9" cy="15" r="1.35" fill="currentColor" />
-      </svg>
-      <span class="workspace-switcher__label">{{ item.label }}</span>
-      <span v-if="badge(item.id)" class="workspace-switcher__badge">{{ badge(item.id) }}</span>
     </button>
   </nav>
 </template>
@@ -71,7 +53,7 @@ function select(id) {
 .workspace-switcher {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   padding: 2px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -82,16 +64,15 @@ function select(id) {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: 26px;
-  padding: 4px 8px;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 4px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--color-text-subtle);
   cursor: pointer;
-  font-size: 11px;
-  white-space: nowrap;
 }
 
 .workspace-switcher__item svg {
@@ -116,19 +97,4 @@ function select(id) {
   opacity: 0.42;
 }
 
-.workspace-switcher__badge {
-  min-width: 14px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--color-primary, #3689d6);
-  color: #fff;
-  font-size: 9px;
-  line-height: 14px;
-  text-align: center;
-}
-
-@media (max-width: 640px) {
-  .workspace-switcher__label { display: none; }
-  .workspace-switcher__item { width: 30px; justify-content: center; padding-inline: 4px; }
-}
 </style>

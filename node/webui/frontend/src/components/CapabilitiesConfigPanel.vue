@@ -36,7 +36,7 @@ onMounted(load);
 <template>
   <ConfigPanelShell
     title="能力设置"
-    subtitle="进程级服务与配额；各 Agent 的工具组在 Agents 中配置。运行中的子 Agent 见侧栏「活动」。"
+    subtitle="进程级服务与配额；各 Agent 的工具组在 Agents 中配置。运行中的子 Agent 见侧栏。"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"

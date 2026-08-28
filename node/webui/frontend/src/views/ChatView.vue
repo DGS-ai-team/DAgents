@@ -9,7 +9,6 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
-import ActivityPanel from "../components/ActivityPanel.vue";
 import TerminalWorkbench from "../components/TerminalWorkbench.vue";
 import {
   agentStore,
@@ -104,7 +103,6 @@ import {
   setChildAwaitingApproval,
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
-import { bumpActivityRefresh } from "../stores/activity.js";
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
@@ -232,7 +230,6 @@ async function resyncAfterSSEGap(reason) {
     if (data === null) return;
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     turnWatchdog.noteActivity();
-    bumpActivityRefresh();
     await refreshToolJobs(agentStore.agentId);
     // A Node restart can complete while the NavRail is still serving its
     // cached agent list. Reconcile it after the stream has reconnected so a
@@ -417,14 +414,6 @@ function handleEvent(ev) {
     case "tool_result":
       applyToolResult(ev.data);
       refreshToolJobs(agentStore.agentId);
-      break;
-    case "execution":
-      // Process output is already delivered through the terminal WebSocket
-      // and can be very frequent. Lifecycle edges are useful for refreshing
-      // the Activity rail, but output frames must not trigger HTTP polling.
-      if (String(ev.data?.event || "") !== "process_output") {
-        bumpActivityRefresh();
-      }
       break;
     case "usage":
       setUsageFromSSE(ev.data);
@@ -734,7 +723,6 @@ async function handleCommand(cmd) {
     if (data === null) return;
     restartStream();
     await refreshToolJobs(agentStore.agentId);
-    bumpActivityRefresh();
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
     return;
   }
@@ -884,7 +872,6 @@ async function switchAgent(id) {
   syncRouteAgent(targetID);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
-  bumpActivityRefresh();
   await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
@@ -1034,10 +1021,6 @@ async function handleThinkingCommand(arg) {
   }
   chromeStore.llmSettings = await api.patchLLMSettings(patch);
   addSystem(`thinking: ${chromeStore.llmSettings.thinking || "-"}`);
-}
-
-function openLeftActivity() {
-  chromeStore.panel = "activity";
 }
 
 function closePanel() {
@@ -1207,17 +1190,11 @@ function clearTerminalSelection() {
 }
 
 const workspaceView = computed(() => {
-  if (chromeStore.panel === "activity") return "activity";
   return terminalOpen.value ? "terminal" : "messages";
 });
 
 function switchWorkspace(view) {
   const next = String(view || "messages");
-  if (next === "activity") {
-    if (terminalOpen.value) closeTerminal();
-    chromeStore.panel = "activity";
-    return;
-  }
   chromeStore.panel = null;
   if (next === "terminal") {
     void router.replace({
@@ -1376,7 +1353,6 @@ onUnmounted(() => {
           @toggle-thinking="toggleThinkingMode"
           @cycle-effort="cycleThinkingEffort"
           @switch-profile="switchLLMProfile"
-          @open-activity="openLeftActivity"
           @approve-all="(idx) => submitHitlApproval(true, idx)"
           @reject-all="(idx) => submitHitlApproval(false, idx)"
           @approve-one="(payload) => submitHitlOne(payload, true)"
@@ -1414,7 +1390,6 @@ onUnmounted(() => {
           @toggle-thinking="toggleThinkingMode"
            @cycle-effort="cycleThinkingEffort"
           @switch-profile="switchLLMProfile"
-          @open-activity="openLeftActivity"
           @approve-all="(idx) => submitHitlApproval(true, idx)"
           @reject-all="(idx) => submitHitlApproval(false, idx)"
           @approve-one="(payload) => submitHitlOne(payload, true)"
@@ -1428,11 +1403,6 @@ onUnmounted(() => {
 
       <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel @close="closePanel" />
-      </div>
-      <div v-if="chromeStore.panel === 'activity'" class="panel-overlay" @click.self="closePanel">
-        <div class="activity-workspace-overlay">
-          <ActivityPanel @close="closePanel" />
-        </div>
       </div>
     </div>
 
@@ -1448,16 +1418,4 @@ onUnmounted(() => {
 <style scoped>
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
-.activity-workspace-overlay {
-  width: min(480px, 100%);
-  height: min(720px, 85vh);
-  overflow: hidden;
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-}
-.activity-workspace-overlay :deep(.activity-rail) {
-  border-left: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-}
 </style>

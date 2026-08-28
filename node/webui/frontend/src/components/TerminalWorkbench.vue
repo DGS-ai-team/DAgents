@@ -49,7 +49,6 @@ const emit = defineEmits([
   "user-info-selected",
   "memory-conflict-decide",
   "memory-conflict-cancel",
-  "open-activity",
   "workspace-change",
 ]);
 
@@ -416,8 +415,6 @@ function switchWorkspace(view) {
   const next = String(view || "terminal");
   if (next === "messages") {
     emit("close");
-  } else if (next === "activity") {
-    emit("workspace-change", next);
   }
 }
 
@@ -599,7 +596,6 @@ defineExpose({ load, openNewTerminal });
           @user-info-selected="(value) => emit('user-info-selected', value)"
           @memory-conflict-decide="(payload) => emit('memory-conflict-decide', payload)"
           @memory-conflict-cancel="(idx) => emit('memory-conflict-cancel', idx)"
-          @open-activity="emit('open-activity')"
         />
       </aside>
     </div>

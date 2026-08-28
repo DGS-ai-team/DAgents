@@ -41,10 +41,6 @@ export function getUIBootstrap() {
   return apiFetch("/v1/ui/bootstrap");
 }
 
-export function getWorkspaceActivity(agentId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/workspace-activity`);
-}
-
 export function getAgentUpdate() {
   return apiFetch("/v1/agent/update");
 }
