@@ -11,6 +11,7 @@ import ImageResultPreview from "./ImageResultPreview.vue";
 import { hasToolMedia, isShowImageTool } from "../utils/showImage.js";
 import { copyText } from "../utils/clipboard.js";
 import { buildToolCardModel } from "../utils/toolResultPresentation.js";
+import ToolCardFieldList from "./ToolCardFieldList.vue";
 
 const FOLD_LINE_THRESHOLD = 8;
 const FOLD_CHAR_THRESHOLD = 480;
@@ -79,18 +80,13 @@ const showImagePreview = computed(
 );
 
 const isShellOutput = computed(() => toolName.value === "bash_run" || visual.value.kind === "shell");
+function formatResultBlocks(blocks) {
+  return blocks.map((item) => `${item.label}\n${item.content}`).join("\n\n");
+}
+
 const outputText = computed(() => {
-  if (isBashDetail.value) {
-    if (!resultEntry.value || !card.value.resultBlocks.length) return "";
-    return card.value.resultBlocks
-      .map((item) => `${item.label}\n${item.content}`)
-      .join("\n\n");
-  }
-  if (card.value.resultBlocks.length) {
-    return card.value.resultBlocks
-      .map((item) => `${item.label}\n${item.content}`)
-      .join("\n\n");
-  }
+  if (isBashDetail.value && !resultEntry.value) return "";
+  if (card.value.resultBlocks.length) return formatResultBlocks(card.value.resultBlocks);
   if (isCall.value && codePreview.value) return codePreview.value;
   return "";
 });
@@ -209,12 +205,6 @@ async function copyInputValue(value) {
   await copyValue(value);
 }
 
-function copyFieldLabel(label) {
-  if (label === "命令") return "复制命令";
-  if (label === "输入内容") return "复制输入内容";
-  return `复制${label || "文本"}`;
-}
-
 onBeforeUnmount(clearCopyState);
 </script>
 
@@ -273,31 +263,11 @@ onBeforeUnmount(clearCopyState);
 
         <section v-else-if="card.inputFields.length" class="tool-card__section tool-card__section--input">
           <div class="tool-card__section-title">输入</div>
-          <dl class="tool-card__fields tool-card__fields--compact">
-            <template v-for="item in card.inputFields" :key="`input-${item.label}`">
-              <div v-if="item.kind === 'code'" class="tool-card__code-panel">
-                <div class="tool-card__code-panel-heading">
-                  <span class="tool-card__code-panel-label">{{ item.label }}</span>
-                  <button
-                    v-if="item.value"
-                    type="button"
-                    class="tool-output__action"
-                    :aria-label="copyFieldLabel(item.label)"
-                    :title="copyFieldLabel(item.label)"
-                    @click.stop="copyInputValue(item.value)"
-                  >{{ copyState || copyFieldLabel(item.label) }}</button>
-                </div>
-                <pre class="tool-exec-bubble__code tool-card__code-block">{{ item.value || "—" }}</pre>
-              </div>
-              <div v-else class="tool-card__field">
-                <dt>{{ item.label }}</dt>
-                <dd :class="`tool-card__value tool-card__value--${item.kind}`">
-                  <pre v-if="item.kind === 'multiline'">{{ item.value }}</pre>
-                  <span v-else>{{ item.value }}</span>
-                </dd>
-              </div>
-            </template>
-          </dl>
+          <ToolCardFieldList
+            :fields="card.inputFields"
+            :copy-state="copyState"
+            @copy="copyInputValue"
+          />
         </section>
 
         <section
@@ -305,28 +275,11 @@ onBeforeUnmount(clearCopyState);
           class="tool-card__section tool-card__section--result"
         >
           <div class="tool-card__section-title">结果</div>
-          <dl v-if="card.resultFields.length" class="tool-card__fields tool-card__fields--compact">
-            <template v-for="item in card.resultFields" :key="`result-${item.label}`">
-              <div v-if="item.kind === 'code'" class="tool-card__code-panel">
-                <div class="tool-card__code-panel-heading">
-                  <span class="tool-card__code-panel-label">{{ item.label }}</span>
-                  <button
-                    v-if="item.value"
-                    type="button"
-                    class="tool-output__action"
-                    :aria-label="copyFieldLabel(item.label)"
-                    :title="copyFieldLabel(item.label)"
-                    @click.stop="copyInputValue(item.value)"
-                  >{{ copyState || copyFieldLabel(item.label) }}</button>
-                </div>
-                <pre class="tool-exec-bubble__code tool-card__code-block">{{ item.value || "—" }}</pre>
-              </div>
-              <div v-else class="tool-card__field">
-                <dt>{{ item.label }}</dt>
-                <dd :class="`tool-card__value tool-card__value--${item.kind}`">{{ item.value }}</dd>
-              </div>
-            </template>
-          </dl>
+          <ToolCardFieldList
+            :fields="card.resultFields"
+            :copy-state="copyState"
+            @copy="copyInputValue"
+          />
         </section>
 
         <ReadFileResultPreview
@@ -415,101 +368,6 @@ onBeforeUnmount(clearCopyState);
   width: 100%;
   box-sizing: border-box;
 }
-.tool-card__fields {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  min-width: 0;
-}
-.tool-card__fields--compact {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-}
-.tool-card__fields--compact .tool-card__code-panel {
-  grid-column: 1 / -1;
-}
-.tool-card__field {
-  display: grid;
-  grid-template-columns: minmax(44px, 72px) minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  min-width: 0;
-  padding: 7px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.tool-card__field dt {
-  color: var(--color-text-subtle);
-  font-weight: 500;
-  line-height: 1.45;
-}
-.tool-card__field dd {
-  margin: 0;
-  min-width: 0;
-  color: var(--color-text);
-  overflow-wrap: anywhere;
-}
-.tool-card__value--code,
-.tool-card__value--mono {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
-}
-.tool-card__value--code {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 5px;
-}
-.tool-card__value--code,
-.tool-card__value--multiline {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.tool-card__value--error {
-  color: var(--color-danger, #b42318) !important;
-}
-.tool-card__value pre {
-  margin: 0;
-  white-space: inherit;
-  font: inherit;
-}
-.tool-card__code-panel {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-code-bg);
-}
-.tool-card__code-panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
-  padding: 3px 7px 3px 8px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
-}
-.tool-card__code-panel-label {
-  min-width: 0;
-  color: var(--color-text-subtle);
-  font-size: 10.5px;
-  line-height: 1.35;
-}
-.tool-card__code-panel > .tool-exec-bubble__code {
-  width: 100%;
-  box-sizing: border-box;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 8px 10px 9px;
-}
 .tool-output {
   min-width: 0;
 }
@@ -527,17 +385,5 @@ onBeforeUnmount(clearCopyState);
 }
 .tool-output__pre--shell {
   max-height: none;
-}
-@media (max-width: 640px) {
-  .tool-card__fields--compact {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .tool-card__fields--compact .tool-card__code-panel {
-    grid-column: auto;
-  }
-  .tool-card__field {
-    grid-template-columns: minmax(42px, 64px) minmax(0, 1fr);
-    gap: 8px;
-  }
 }
 </style>

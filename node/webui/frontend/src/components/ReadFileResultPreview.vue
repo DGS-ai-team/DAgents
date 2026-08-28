@@ -50,7 +50,7 @@ onBeforeUnmount(clearCopyState);
         @click="copyContent"
       >{{ copyState || "复制内容" }}</button>
     </div>
-    <div class="write-file-tool__preview read-file-structured__preview-wrap">
+    <div class="read-file-tool__preview">
       <div
         v-if="preview.mode === 'markdown'"
         class="tool-exec-bubble__markdown read-file-structured"
@@ -105,7 +105,7 @@ onBeforeUnmount(clearCopyState);
   font-size: 10.5px;
   line-height: 1.35;
 }
-.write-file-tool__preview.read-file-structured__preview-wrap {
+.read-file-tool__preview {
   border: 0;
   border-radius: 0;
   background: transparent;

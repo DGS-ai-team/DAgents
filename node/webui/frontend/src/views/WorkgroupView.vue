@@ -5,11 +5,14 @@ import * as api from "../api/node.js";
 import { isKnownWorkgroupRealtimeEvent } from "../sse/workgroupEvents.js";
 import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
+import WorkgroupApprovalCard from "../components/WorkgroupApprovalCard.vue";
+import WorkgroupDebugPanel from "../components/WorkgroupDebugPanel.vue";
+import WorkgroupToolRow from "../components/WorkgroupToolRow.vue";
 import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
 import ScrollToTailButton from "../components/ScrollToTailButton.vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
-import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../utils/format.js";
+import { approvalItemDisplayName } from "../utils/format.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
@@ -88,14 +91,7 @@ const pendingHitlRefresh = createSerializedRefresh(
   },
 );
 
-/** RunHistory 调试面板（mock / LLM 可观测） */
 const debugOpen = ref(false);
-const debugLoading = ref(false);
-const debugRuns = ref([]);
-const debugLlm = ref(null);
-const debugSelectedRunId = ref("");
-const debugHistory = ref(null);
-const debugError = ref("");
 
 function friendlyWorkgroupError(error, fallback = "操作失败") {
   const raw = String(error?.message || error || "").trim();
@@ -164,83 +160,8 @@ const showLiveAssistant = computed(
     Boolean(String(liveAssistant.value?.text || "").trim()) &&
     streamMode.value !== "member",
 );
-const debugLlmBadge = computed(() => {
-  const mode = String(debugLlm.value?.mode || "").trim();
-  if (mode === "mock") return "Mock · 回声/脚本";
-  if (mode === "live") {
-    const model = String(debugLlm.value?.model || "").trim();
-    return model ? `Live · ${model}` : "Live";
-  }
-  return "";
-});
-
-async function loadDebugRuns() {
-  if (!workgroupId.value) {
-    debugRuns.value = [];
-    debugLlm.value = null;
-    return;
-  }
-  debugLoading.value = true;
-  debugError.value = "";
-  try {
-    const res = await api.listWorkgroupRuns(workgroupId.value, { limit: 12 });
-    debugRuns.value = Array.isArray(res?.runs) ? res.runs : [];
-    debugLlm.value = res?.llm || null;
-    if (!debugSelectedRunId.value && debugRuns.value.length) {
-      await selectDebugRun(debugRuns.value[0].run_id);
-    } else if (debugSelectedRunId.value) {
-      const still = debugRuns.value.some((r) => r.run_id === debugSelectedRunId.value);
-      if (still) await selectDebugRun(debugSelectedRunId.value);
-      else if (debugRuns.value.length) await selectDebugRun(debugRuns.value[0].run_id);
-      else {
-        debugHistory.value = null;
-        debugSelectedRunId.value = "";
-      }
-    }
-  } catch (e) {
-    debugError.value = e?.message || "加载 Run 失败";
-    debugRuns.value = [];
-  } finally {
-    debugLoading.value = false;
-  }
-}
-
-async function selectDebugRun(runId) {
-  const id = String(runId || "").trim();
-  if (!id || !workgroupId.value) return;
-  debugSelectedRunId.value = id;
-  debugLoading.value = true;
-  debugError.value = "";
-  try {
-    const res = await api.getWorkgroupRunHistory(workgroupId.value, id);
-    debugHistory.value = res?.history || null;
-    if (res?.llm) debugLlm.value = res.llm;
-  } catch (e) {
-    debugError.value = e?.message || "加载 History 失败";
-    debugHistory.value = null;
-  } finally {
-    debugLoading.value = false;
-  }
-}
-
-async function toggleDebugPanel() {
+function toggleDebugPanel() {
   debugOpen.value = !debugOpen.value;
-  if (debugOpen.value) await loadDebugRuns();
-}
-
-function formatDebugMsg(m) {
-  const role = String(m?.role || "");
-  if (role === "assistant" && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
-    const names = m.tool_calls.map((tc) => tc?.function?.name || tc?.name || "?").join(", ");
-    const body = String(m?.content || "").trim();
-    return body ? `${body}\n\ntool_calls: ${names}` : `tool_calls: ${names}`;
-  }
-  if (role === "tool") {
-    const body = String(m?.content || "").trim();
-    return body.length > 180 ? `${body.slice(0, 180)}…` : body || "(empty)";
-  }
-  const body = String(m?.content || "").trim();
-  return body.length > 220 ? `${body.slice(0, 220)}…` : body || "(empty)";
 }
 
 async function loadPendingHitl() {
@@ -1021,7 +942,6 @@ async function send() {
     await loadTimeline();
     await loadPendingHitl();
     await refreshHumanQueue();
-    if (debugOpen.value) await loadDebugRuns();
     scrollTimelineTail();
     if (becameQueued) startQueuePoll();
   } catch (e) {
@@ -1034,7 +954,6 @@ async function send() {
     }
     await loadTimeline().catch(() => {});
     await loadPendingHitl();
-    if (debugOpen.value) await loadDebugRuns().catch(() => {});
   } finally {
     streamAbort = null;
     stopWorkPoll();
@@ -1500,25 +1419,6 @@ function approvalForTool(assignId, toolCallId, toolName = "", allowNameFallback 
     items: [item],
     allItems: items,
   };
-}
-
-function approvalCount(approval) {
-  const all = Array.isArray(approval?.allItems) ? approval.allItems : [];
-  if (all.length) return all.length;
-  return Array.isArray(approval?.items) ? approval.items.length : 0;
-}
-
-function approvalIsBatch(approval) {
-  return approvalCount(approval) > 1;
-}
-
-function approvalRejectLabel(approval) {
-  return approvalIsBatch(approval) ? "拒绝本批" : "拒绝";
-}
-
-function approvalApproveLabel(approval) {
-  if (hitlBusy.value) return "处理中…";
-  return approvalIsBatch(approval) ? "仅批准此项" : "批准";
 }
 
 function makeAssignItem(
@@ -2282,11 +2182,6 @@ watch(
     hitlDraft.value = "";
     hitlBusy.value = false;
     debugOpen.value = false;
-    debugRuns.value = [];
-    debugLlm.value = null;
-    debugSelectedRunId.value = "";
-    debugHistory.value = null;
-    debugError.value = "";
     error.value = "";
     workgroupAccessError.value = "";
     await Promise.all([
@@ -2571,215 +2466,18 @@ onUnmounted(() => {
                             class="wg-task__pre-tool tool-exec-bubble__markdown assistant-msg__md"
                             v-html="renderMarkdown(step.text)"
                           />
-                          <div
+                          <WorkgroupApprovalCard
                             v-else-if="step.kind === 'approval'"
-                            class="wg-task__approval"
-                          >
-                            <div class="wg-task__approval-head">
-                              <span class="wg-task__approval-badge">需要批准</span>
-                              <span class="wg-task__approval-count">
-                                {{ approvalIsBatch(step.approval) ? `批量审批 · ${approvalCount(step.approval)} 个工具调用` : "单项审批" }}
-                              </span>
-                            </div>
-                            <div
-                              v-for="approvalItem in step.approval?.items || []"
-                              :key="approvalItem.callId"
-                              class="wg-task__approval-item"
-                            >
-                              <div class="wg-task__approval-item-head">
-                                <span class="wg-task__approval-name">
-                                  {{ approvalItemDisplayName(approvalItem) }}
-                                </span>
-                                <span
-                                  v-if="approvalItem.risk === 'high' || approvalItem.risk === 'medium'"
-                                  class="wg-task__approval-risk"
-                                >
-                                  {{ approvalItem.risk === 'high' ? '高风险' : '中风险' }}
-                                </span>
-                              </div>
-                              <div v-if="approvalItem.reason" class="wg-task__approval-reason">
-                                {{ approvalItem.reason }}
-                              </div>
-                              <div
-                                v-if="approvalItem.duplicateWindowSec > 0"
-                                class="wg-task__approval-hint"
-                              >
-                                重复调用 · {{ approvalItem.duplicateWindowSec }}s 内
-                              </div>
-                              <details v-if="approvalItem.duplicatePreview" class="wg-task__approval-raw">
-                                <summary>上次结果摘要</summary>
-                                <pre>{{ approvalItem.duplicatePreview }}</pre>
-                              </details>
-                              <div
-                                v-if="approvalItemHintVisible(approvalItem)"
-                                class="wg-task__approval-hint"
-                              >
-                                {{ approvalItemHint(approvalItem) }}
-                              </div>
-                              <details v-if="approvalItem.rawArgs" class="wg-task__approval-raw">
-                                <summary>参数详情</summary>
-                                <pre>{{ approvalItem.rawArgs }}</pre>
-                              </details>
-                              <div class="wg-task__approval-actions">
-                                <button
-                                  type="button"
-                                  class="approval-action-btn approval-action-btn--reject"
-                                  :disabled="hitlBusy"
-                                  @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, false)"
-                                >
-                                  {{ approvalRejectLabel(step.approval) }}
-                                </button>
-                                <button
-                                  type="button"
-                                  class="approval-action-btn approval-action-btn--approve"
-                                  :disabled="hitlBusy"
-                                  @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, true)"
-                                >
-                                  {{ approvalApproveLabel(step.approval) }}
-                                </button>
-                              </div>
-                            </div>
-                            <div
-                              v-if="approvalIsBatch(step.approval)"
-                              class="wg-task__approval-bulk"
-                            >
-                              <span>{{ approvalCount(step.approval) }} 个工具调用待处理</span>
-                              <div class="wg-task__approval-actions">
-                                <button
-                                  type="button"
-                                  class="approval-action-btn approval-action-btn--reject"
-                                  :disabled="hitlBusy"
-                                  @click.stop="resolveMemberApproval(step.approval, '', false)"
-                                >
-                                  全部拒绝
-                                </button>
-                                <button
-                                  type="button"
-                                  class="approval-action-btn approval-action-btn--approve"
-                                  :disabled="hitlBusy"
-                                  @click.stop="resolveMemberApproval(step.approval, '', true)"
-                                >
-                                  全部批准
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                          <div
+                            :approval="step.approval"
+                            :hitl-busy="hitlBusy"
+                            @resolve="(callId, approve) => resolveMemberApproval(step.approval, callId, approve)"
+                          />
+                          <WorkgroupToolRow
                             v-else
-                            class="wg-tool-row"
-                            :class="{
-                              'wg-tool-row--progress': step.inProgress,
-                              [`wg-tool-row--${step.toolKind || 'tool'}`]: true,
-                            }"
-                          >
-                          <div class="wg-tool-row__bar">
-                            <span class="wg-tool-row__glyph" aria-hidden="true">
-                              <span v-if="step.inProgress" class="tool-exec-spinner" />
-                              <span v-else-if="step.failed" class="wg-tool-row__mark">−</span>
-                              <span v-else class="wg-tool-row__check">✓</span>
-                            </span>
-                            <span class="wg-tool-row__text">{{ step.summary }}</span>
-                            <span class="wg-tool-row__status">
-                              <BrandActivityIndicator
-                                v-if="step.inProgress"
-                                class="wg-tool-row__dots"
-                                mode="tool"
-                                :show-label="false"
-                                compact
-                              />
-                              {{ step.statusText }}
-                            </span>
-                          </div>
-                            <div
-                              v-if="step.approval"
-                              class="wg-task__approval wg-task__approval--inline"
-                            >
-                              <div class="wg-task__approval-head">
-                                <span class="wg-task__approval-badge">需要批准</span>
-                                <span class="wg-task__approval-count">
-                                  {{ approvalIsBatch(step.approval) ? `批量审批 · ${approvalCount(step.approval)} 个工具调用` : "单项审批" }}
-                                </span>
-                              </div>
-                              <div
-                                v-for="approvalItem in step.approval.items || []"
-                                :key="approvalItem.callId"
-                                class="wg-task__approval-item"
-                              >
-                                <div class="wg-task__approval-item-head">
-                                  <span class="wg-task__approval-name">
-                                    {{ approvalItemDisplayName(approvalItem) }}
-                                  </span>
-                                  <span
-                                    v-if="approvalItem.risk === 'high' || approvalItem.risk === 'medium'"
-                                    class="wg-task__approval-risk"
-                                  >
-                                    {{ approvalItem.risk === 'high' ? '高风险' : '中风险' }}
-                                  </span>
-                                </div>
-                                <div v-if="approvalItem.reason" class="wg-task__approval-reason">
-                                  {{ approvalItem.reason }}
-                                </div>
-                                <div
-                                  v-if="approvalItem.duplicateWindowSec > 0"
-                                  class="wg-task__approval-hint"
-                                >
-                                  重复调用 · {{ approvalItem.duplicateWindowSec }}s 内
-                                </div>
-                                <details v-if="approvalItem.duplicatePreview" class="wg-task__approval-raw">
-                                  <summary>上次结果摘要</summary>
-                                  <pre>{{ approvalItem.duplicatePreview }}</pre>
-                                </details>
-                                <div
-                                  v-if="approvalItemHintVisible(approvalItem)"
-                                  class="wg-task__approval-hint"
-                                >
-                                  {{ approvalItemHint(approvalItem) }}
-                                </div>
-                                <div class="wg-task__approval-actions">
-                                  <button
-                                    type="button"
-                                    class="approval-action-btn approval-action-btn--reject"
-                                    :disabled="hitlBusy"
-                                    @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, false)"
-                                  >
-                                    {{ approvalRejectLabel(step.approval) }}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    class="approval-action-btn approval-action-btn--approve"
-                                    :disabled="hitlBusy"
-                                    @click.stop="resolveMemberApproval(step.approval, approvalItem.callId, true)"
-                                  >
-                                    {{ approvalApproveLabel(step.approval) }}
-                                  </button>
-                                </div>
-                              </div>
-                              <div
-                                v-if="approvalIsBatch(step.approval)"
-                                class="wg-task__approval-bulk"
-                              >
-                                <span>{{ approvalCount(step.approval) }} 个工具调用待处理</span>
-                                <div class="wg-task__approval-actions">
-                                  <button
-                                    type="button"
-                                    class="approval-action-btn approval-action-btn--reject"
-                                    :disabled="hitlBusy"
-                                    @click.stop="resolveMemberApproval(step.approval, '', false)"
-                                  >
-                                    全部拒绝
-                                  </button>
-                                  <button
-                                    type="button"
-                                    class="approval-action-btn approval-action-btn--approve"
-                                    :disabled="hitlBusy"
-                                    @click.stop="resolveMemberApproval(step.approval, '', true)"
-                                  >
-                                    全部批准
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
+                            :item="step"
+                            :hitl-busy="hitlBusy"
+                            @resolve="(callId, approve) => resolveMemberApproval(step.approval, callId, approve)"
+                          />
                         </template>
                       </div>
                       <div v-if="item.hasReport" class="wg-task__report">
@@ -2813,126 +2511,12 @@ onUnmounted(() => {
                       </div>
                     </div>
                   </div>
-                  <div
+                  <WorkgroupToolRow
                     v-else-if="item.kind === 'tool'"
-                    class="wg-tool-row"
-                    :class="{
-                      'wg-tool-row--progress': item.inProgress,
-                      [`wg-tool-row--${item.toolKind || 'tool'}`]: true,
-                    }"
-                  >
-                    <div class="wg-tool-row__bar">
-                      <span class="wg-tool-row__glyph" aria-hidden="true">
-                        <span v-if="item.inProgress" class="tool-exec-spinner" />
-                        <span v-else-if="item.failed" class="wg-tool-row__mark">−</span>
-                        <span v-else class="wg-tool-row__check">✓</span>
-                      </span>
-                      <span class="wg-tool-row__text">{{ item.summary }}</span>
-                      <span class="wg-tool-row__status">
-                        <BrandActivityIndicator
-                          v-if="item.inProgress"
-                          class="wg-tool-row__dots"
-                          mode="tool"
-                          :show-label="false"
-                          compact
-                        />
-                        {{ item.statusText }}
-                      </span>
-                    </div>
-                    <div
-                      v-if="item.approval"
-                      class="wg-task__approval wg-task__approval--inline"
-                    >
-                      <div class="wg-task__approval-head">
-                        <span class="wg-task__approval-badge">需要批准</span>
-                        <span class="wg-task__approval-count">
-                          {{ approvalIsBatch(item.approval) ? `批量审批 · ${approvalCount(item.approval)} 个工具调用` : "单项审批" }}
-                        </span>
-                      </div>
-                      <div
-                        v-for="approvalItem in item.approval.items || []"
-                        :key="approvalItem.callId"
-                        class="wg-task__approval-item"
-                      >
-                        <div class="wg-task__approval-item-head">
-                          <span class="wg-task__approval-name">
-                            {{ approvalItemDisplayName(approvalItem) }}
-                          </span>
-                          <span
-                            v-if="approvalItem.risk === 'high' || approvalItem.risk === 'medium'"
-                            class="wg-task__approval-risk"
-                          >
-                            {{ approvalItem.risk === 'high' ? '高风险' : '中风险' }}
-                          </span>
-                        </div>
-                        <div v-if="approvalItem.reason" class="wg-task__approval-reason">
-                          {{ approvalItem.reason }}
-                        </div>
-                        <div
-                          v-if="approvalItem.duplicateWindowSec > 0"
-                          class="wg-task__approval-hint"
-                        >
-                          重复调用 · {{ approvalItem.duplicateWindowSec }}s 内
-                        </div>
-                        <details v-if="approvalItem.duplicatePreview" class="wg-task__approval-raw">
-                          <summary>上次结果摘要</summary>
-                          <pre>{{ approvalItem.duplicatePreview }}</pre>
-                        </details>
-                        <div
-                          v-if="approvalItemHintVisible(approvalItem)"
-                          class="wg-task__approval-hint"
-                        >
-                          {{ approvalItemHint(approvalItem) }}
-                        </div>
-                        <details v-if="approvalItem.rawArgs" class="wg-task__approval-raw">
-                          <summary>参数详情</summary>
-                          <pre>{{ approvalItem.rawArgs }}</pre>
-                        </details>
-                        <div class="wg-task__approval-actions">
-                          <button
-                            type="button"
-                            class="approval-action-btn approval-action-btn--reject"
-                            :disabled="hitlBusy"
-                            @click.stop="resolveMemberApproval(item.approval, approvalItem.callId, false)"
-                          >
-                            {{ approvalRejectLabel(item.approval) }}
-                          </button>
-                          <button
-                            type="button"
-                            class="approval-action-btn approval-action-btn--approve"
-                            :disabled="hitlBusy"
-                            @click.stop="resolveMemberApproval(item.approval, approvalItem.callId, true)"
-                          >
-                            {{ approvalApproveLabel(item.approval) }}
-                          </button>
-                        </div>
-                      </div>
-                      <div
-                        v-if="approvalIsBatch(item.approval)"
-                        class="wg-task__approval-bulk"
-                      >
-                        <span>{{ approvalCount(item.approval) }} 个工具调用待处理</span>
-                        <div class="wg-task__approval-actions">
-                          <button
-                            type="button"
-                            class="approval-action-btn approval-action-btn--reject"
-                            :disabled="hitlBusy"
-                            @click.stop="resolveMemberApproval(item.approval, '', false)"
-                          >
-                            全部拒绝
-                          </button>
-                          <button
-                            type="button"
-                            class="approval-action-btn approval-action-btn--approve"
-                            :disabled="hitlBusy"
-                            @click.stop="resolveMemberApproval(item.approval, '', true)"
-                          >
-                            全部批准
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    :item="item"
+                    :hitl-busy="hitlBusy"
+                    @resolve="(callId, approve) => resolveMemberApproval(item.approval, callId, approve)"
+                  />
                   <div
                     v-else-if="item.kind === 'live_user'"
                     class="msg__bubble msg__bubble--user"
@@ -3005,57 +2589,10 @@ onUnmounted(() => {
             </div>
             </div>
           </div>
-          <aside v-if="debugOpen" class="wg-debug" aria-label="RunHistory 调试">
-            <header class="wg-debug__head">
-              <strong>RunHistory</strong>
-              <span v-if="debugLlmBadge" class="wg-debug__badge" :data-mode="debugLlm?.mode">
-                {{ debugLlmBadge }}
-              </span>
-              <button type="button" class="wg-debug__refresh" :disabled="debugLoading" @click="loadDebugRuns">
-                刷新
-              </button>
-            </header>
-            <p v-if="debugError" class="wg-debug__error">{{ debugError }}</p>
-            <p v-else-if="debugLoading && !debugRuns.length" class="wg-debug__muted">加载中…</p>
-            <p v-else-if="!debugRuns.length" class="wg-debug__muted">暂无 ActorRun（发一条消息后会出现）</p>
-            <ul v-else class="wg-debug__runs">
-              <li v-for="r in debugRuns" :key="r.run_id">
-                <button
-                  type="button"
-                  class="wg-debug__run"
-                  :class="{ 'wg-debug__run--active': r.run_id === debugSelectedRunId }"
-                  @click="selectDebugRun(r.run_id)"
-                >
-                  <span class="wg-debug__run-actor">{{ r.actor_id === 'leader' ? 'Supervisor' : r.actor_id }}</span>
-                  <span class="wg-debug__run-status">{{ r.status }}</span>
-                  <span class="wg-debug__run-id" :title="r.run_id">{{ r.run_id.slice(-8) }}</span>
-                </button>
-              </li>
-            </ul>
-            <div v-if="debugHistory" class="wg-debug__msgs">
-              <div
-                v-for="(m, i) in debugHistory.messages || []"
-                :key="i"
-                class="wg-debug__msg"
-                :data-role="m.role"
-              >
-                <div class="wg-debug__msg-role">{{ m.role }}</div>
-                <pre class="wg-debug__msg-body">{{ formatDebugMsg(m) }}</pre>
-                <details
-                  v-if="m.role === 'assistant' && m.tool_calls?.length"
-                  class="wg-debug__details"
-                >
-                  <summary>工具参数</summary>
-                  <pre
-                    v-for="(tc, ti) in m.tool_calls"
-                    :key="ti"
-                    class="wg-debug__msg-body"
-                  >{{ tc.function?.name || '?' }}
-{{ tc.function?.arguments || '{}' }}</pre>
-                </details>
-              </div>
-            </div>
-          </aside>
+          <WorkgroupDebugPanel
+            v-if="debugOpen"
+            :workgroup-id="workgroupId"
+          />
         </div>
 
         <footer class="chat__composer">
@@ -3421,126 +2958,6 @@ onUnmounted(() => {
 .wg-chat__body--debug .wg-chat__timeline-wrap {
   flex: 1 1 58%;
 }
-.wg-debug {
-  flex: 0 0 320px;
-  max-width: 38%;
-  min-width: 260px;
-  border-left: 1px solid var(--color-border, #e5e7eb);
-  background: var(--color-surface, #fafafa);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.wg-debug__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
-  font-size: 13px;
-}
-.wg-debug__badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--color-primary, #0078d4) 12%, transparent);
-  color: var(--color-primary, #0078d4);
-}
-.wg-debug__badge[data-mode="mock"] {
-  background: color-mix(in srgb, #c50f1f 12%, transparent);
-  color: #c50f1f;
-}
-.wg-debug__refresh {
-  margin-left: auto;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted, #6b7280);
-  font-size: 12px;
-  cursor: pointer;
-}
-.wg-debug__error {
-  margin: 8px 12px;
-  color: #c50f1f;
-  font-size: 12px;
-}
-.wg-debug__muted {
-  margin: 12px;
-  color: var(--color-text-muted, #6b7280);
-  font-size: 12px;
-}
-.wg-debug__runs {
-  list-style: none;
-  margin: 0;
-  padding: 6px;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
-  max-height: 28%;
-  overflow: auto;
-}
-.wg-debug__run {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 6px;
-  align-items: center;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--color-text, #111827);
-}
-.wg-debug__run:hover,
-.wg-debug__run--active {
-  background: color-mix(in srgb, var(--color-primary, #0078d4) 10%, transparent);
-}
-.wg-debug__run-status {
-  color: var(--color-text-muted, #6b7280);
-}
-.wg-debug__run-id {
-  font-family: ui-monospace, Consolas, monospace;
-  color: var(--color-text-muted, #6b7280);
-}
-.wg-debug__msgs {
-  flex: 1;
-  overflow: auto;
-  padding: 8px 10px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.wg-debug__msg {
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: var(--color-editor, #fff);
-}
-.wg-debug__msg-role {
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted, #6b7280);
-  margin-bottom: 4px;
-}
-.wg-debug__msg-body {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 12px;
-  line-height: 1.45;
-  font-family: ui-monospace, Consolas, monospace;
-}
-.wg-debug__details {
-  margin-top: 4px;
-  font-size: 12px;
-}
-.wg-debug__details summary {
-  cursor: pointer;
-  color: var(--color-primary, #0078d4);
-}
 .wg-chat__timeline.chat__stream {
   flex: 1;
   min-width: 0;
@@ -3796,110 +3213,6 @@ onUnmounted(() => {
   margin: 0;
   background: color-mix(in srgb, var(--color-text, #111827) 1.5%, var(--color-surface, #fff));
 }
-.wg-task__approval {
-  margin: 4px 0 2px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--color-primary, #0078d4) 28%, var(--color-border, #d1d5db));
-  border-left: 3px solid var(--color-primary, #0078d4);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-primary, #0078d4) 5%, var(--color-surface, #fff));
-}
-.wg-task__approval--inline {
-  margin: 6px 8px 8px;
-}
-.wg-task__approval-head,
-.wg-task__approval-item-head,
-.wg-task__approval-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.wg-task__approval-head {
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-.wg-task__approval-badge {
-  color: var(--color-primary, #0078d4);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-.wg-task__approval-count {
-  color: var(--color-text-muted, #6b7280);
-  font-size: 11px;
-}
-.wg-task__approval-item + .wg-task__approval-item {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--color-border, #d1d5db) 80%, transparent);
-}
-.wg-task__approval-item-head {
-  min-width: 0;
-}
-.wg-task__approval-name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text, #111827);
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wg-task__approval-risk {
-  flex: 0 0 auto;
-  color: #b45309;
-  font-size: 10px;
-  font-weight: 600;
-}
-.wg-task__approval-reason,
-.wg-task__approval-hint {
-  margin-top: 4px;
-  color: var(--color-text-muted, #6b7280);
-  font-size: 11.5px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.wg-task__approval-hint {
-  color: var(--color-text-subtle, #9ca3af);
-}
-.wg-task__approval-actions {
-  justify-content: flex-end;
-  margin-top: 7px;
-}
-.wg-task__approval-bulk {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--color-border, #d1d5db) 80%, transparent);
-  color: var(--color-text-muted, #6b7280);
-  font-size: 11px;
-}
-.wg-task__approval-bulk .wg-task__approval-actions {
-  margin-top: 0;
-}
-.wg-task__approval-raw {
-  margin-top: 5px;
-  color: var(--color-text-muted, #6b7280);
-  font-size: 11px;
-}
-.wg-task__approval-raw summary {
-  cursor: pointer;
-}
-.wg-task__approval-raw pre {
-  max-height: 160px;
-  margin: 5px 0 0;
-  overflow: auto;
-  padding: 6px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--color-text, #111827) 4%, var(--color-surface, #fff));
-  font: 11px/1.45 ui-monospace, Consolas, monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 .wg-task__pre-tool {
   padding: 2px 4px 6px;
   color: var(--color-text, #111827);
@@ -3976,92 +3289,6 @@ onUnmounted(() => {
 }
 .wg-task__report-body :deep(p:last-child) {
   margin-bottom: 0;
-}
-.wg-tool-row {
-  width: 100%;
-  max-width: 100%;
-  margin: 2px 0;
-  border-radius: 6px;
-  border: 1px solid var(--color-border, #d1d5db);
-  background: var(--color-surface, #fff);
-  color: var(--color-text, #111827);
-}
-.wg-tool-row:hover,
-.wg-tool-row--progress {
-  border-color: var(--color-border, #d1d5db);
-  background: var(--color-surface, #fff);
-}
-.wg-tool-row__bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  padding: 5px 8px;
-}
-.wg-tool-row__glyph {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  color: var(--color-success, #0f7b0f);
-  font-size: 12px;
-}
-.wg-tool-row__check {
-  opacity: 0.9;
-}
-.wg-tool-row__mark {
-  opacity: 0.75;
-  color: var(--color-text-subtle, #9ca3af);
-}
-.wg-tool-row__kind {
-  flex: 0 0 auto;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  line-height: 1.4;
-  padding: 1px 5px;
-  border-radius: 3px;
-  color: var(--color-text-subtle, #9ca3af);
-  border: 1px solid var(--color-border, #d1d5db);
-  background: var(--color-surface-elevated, #f8fafc);
-}
-.wg-tool-row--fs .wg-tool-row__kind {
-  color: var(--color-success, #0f7b0f);
-  border-color: rgba(137, 209, 133, 0.25);
-  background: var(--color-success-soft, rgba(15, 123, 15, 0.12));
-}
-.wg-tool-row--shell .wg-tool-row__kind {
-  color: #e2a053;
-  border-color: rgba(226, 160, 83, 0.25);
-  background: rgba(226, 160, 83, 0.08);
-}
-.wg-tool-row__text {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 12.5px;
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-  color: var(--color-text, #111827);
-}
-.wg-tool-row__status {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--color-text-subtle, #9ca3af);
-  white-space: nowrap;
-}
-.wg-tool-row__dots {
-  --stream-meta-dot-size: 4px;
-  --stream-meta-dot-gap: 2px;
 }
 .wg-mention-menu {
   position: absolute;
