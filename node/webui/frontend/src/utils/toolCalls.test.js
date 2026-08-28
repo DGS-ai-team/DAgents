@@ -3,7 +3,6 @@ import {
   USER_INFORMATION_TOOL,
   approvalItemDisplayName,
   approvalItemHintVisible,
-  approvalItemPurpose,
   approvalItemToolLabel,
   extractToolCallsFromEvent,
   formatApprovalRawArguments,
@@ -115,14 +114,14 @@ describe("approvalItemHintVisible", () => {
 });
 
 describe("approval card presentation", () => {
-  it("keeps the original call purpose as a separate user-facing field", () => {
+  it("keeps the original call purpose in the tool title", () => {
     expect(
-      approvalItemPurpose({
+      approvalItemToolLabel({
         name: "bash_run",
         arguments: { call_purpose: "检查发布前的环境状态", command: "Get-Date" },
       }),
-    ).toBe("检查发布前的环境状态");
-    expect(approvalItemPurpose({ name: "bash_run", arguments: { command: "Get-Date" } })).toBe("");
+    ).toBe("bash(检查发布前的环境状态)");
+    expect(approvalItemToolLabel({ name: "bash_run", arguments: { command: "Get-Date" } })).toBe("bash");
   });
 
   it("keeps tool title free of arguments", () => {

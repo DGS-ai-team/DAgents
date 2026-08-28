@@ -232,16 +232,18 @@ function approvalItemArguments(item) {
   return parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
 }
 
-/** 审批卡片标题只标识工具，不把参数再次拼到标题中。 */
+/** 审批卡片标题保留原始的“工具名(执行目的)”展示形式。 */
 export function approvalItemToolLabel(item) {
   const name = String(item?.name || "unknown").trim() || "unknown";
-  return APPROVAL_TOOL_LABELS[name] || name;
+  const base = APPROVAL_TOOL_LABELS[name] || name;
+  const purpose = approvalItemPurpose(item);
+  return purpose ? `${base}(${purpose})` : base;
 }
 
-/** 审批卡片保留模型提供的原始调用目的，但不把它拼进工具标题。 */
+/** 读取模型提供的原始调用目的，供审批卡片标题使用。 */
 export function approvalItemPurpose(item) {
   const args = approvalItemArguments(item);
-  return String(args.call_purpose || "").trim();
+  return toolCallPurpose(args);
 }
 
 /** 将审批参数格式化为默认折叠的原始 JSON，解析失败时保留原文。 */
