@@ -1,5 +1,6 @@
 //! Node REST/SSE client used by the desktop shell.
 
+use crate::config::RuntimeConfig;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -37,6 +38,16 @@ pub struct AgentSummary {
     pub has_pending_hitl: bool,
     #[serde(default)]
     pub pending_hitl_items: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct AgentInfo {
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub manage_enabled: bool,
+    #[serde(default)]
+    pub manage_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,6 +142,44 @@ impl Client {
             .into_json()
             .map_err(|e| format!("GET /v1/agents JSON: {e}"))?;
         Ok(out.agents)
+    }
+
+    pub fn agent_info(&self) -> Result<AgentInfo, String> {
+        if self.base.is_empty() {
+            return Err("node client: empty base URL".into());
+        }
+        let req = self.authorize(ureq::get(&format!("{}/v1/agent/info", self.base)));
+        let resp = req
+            .timeout(Duration::from_secs(5))
+            .call()
+            .map_err(|e| format!("GET /v1/agent/info: {e}"))?;
+        if resp.status() != 200 {
+            return Err(format!("GET /v1/agent/info: status {}", resp.status()));
+        }
+        resp.into_json()
+            .map_err(|e| format!("GET /v1/agent/info JSON: {e}"))
+    }
+
+    pub fn runtime_config(&self) -> Result<RuntimeConfig, String> {
+        if self.base.is_empty() {
+            return Err("node client: empty base URL".into());
+        }
+        let req = self.authorize(ureq::get(&format!(
+            "{}/v1/desktop/runtime-config",
+            self.base
+        )));
+        let resp = req
+            .timeout(Duration::from_secs(5))
+            .call()
+            .map_err(|e| format!("GET /v1/desktop/runtime-config: {e}"))?;
+        if resp.status() != 200 {
+            return Err(format!(
+                "GET /v1/desktop/runtime-config: status {}",
+                resp.status()
+            ));
+        }
+        resp.into_json()
+            .map_err(|e| format!("GET /v1/desktop/runtime-config JSON: {e}"))
     }
 
     pub fn upgrade_readiness(&self) -> Result<UpgradeReadiness, String> {

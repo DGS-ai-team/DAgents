@@ -17,6 +17,26 @@ pub struct ShellConfig {
     pub manage: ManageConfig,
 }
 
+/// Effective settings returned by Node after its bootstrap/YAML/SQLite merge.
+/// Shell uses this DTO instead of opening node_settings.db itself.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct RuntimeConfig {
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub manage_enabled: bool,
+    #[serde(default)]
+    pub manage_url: String,
+    #[serde(default)]
+    pub manage_node_token: String,
+    #[serde(default)]
+    pub manage_update_enabled: bool,
+    #[serde(default)]
+    pub manage_update_check_interval_seconds: u64,
+    #[serde(default)]
+    pub manage_update_channel: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ManageConfig {
     pub enabled: bool,
@@ -185,6 +205,23 @@ impl ShellConfig {
         }
         Duration::from_secs(self.manage.update.check_interval_seconds)
     }
+
+    pub fn apply_runtime_config(&mut self, runtime: &RuntimeConfig) {
+        if !runtime.node_id.trim().is_empty() {
+            self.node_id = runtime.node_id.trim().to_string();
+        }
+        self.manage.enabled = runtime.manage_enabled;
+        self.manage.url = runtime.manage_url.trim().trim_end_matches('/').to_string();
+        self.manage.node_token = runtime.manage_node_token.trim().to_string();
+        self.manage.update.enabled = Some(runtime.manage_update_enabled);
+        if runtime.manage_update_check_interval_seconds > 0 {
+            self.manage.update.check_interval_seconds =
+                runtime.manage_update_check_interval_seconds;
+        }
+        if !runtime.manage_update_channel.trim().is_empty() {
+            self.manage.update.channel = runtime.manage_update_channel.trim().to_string();
+        }
+    }
 }
 
 fn first_non_empty(values: &[Option<&str>]) -> Option<String> {
@@ -266,6 +303,28 @@ mod tests {
         let cfg = ShellConfig::load(&path).unwrap();
         let _ = fs::remove_file(&path);
         assert!(!cfg.manage_update_enabled());
+    }
+
+    #[test]
+    fn applies_node_runtime_config_over_bootstrap_values() {
+        let path = write_temp("listen:\n  port: 19111\nmanage:\n  enabled: false\n");
+        let mut cfg = ShellConfig::load(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        cfg.apply_runtime_config(&RuntimeConfig {
+            node_id: "node-runtime".into(),
+            manage_enabled: true,
+            manage_url: "http://manage.local/".into(),
+            manage_node_token: "secret".into(),
+            manage_update_enabled: true,
+            manage_update_check_interval_seconds: 42,
+            manage_update_channel: "beta".into(),
+        });
+        assert_eq!(cfg.node_id, "node-runtime");
+        assert!(cfg.manage_update_enabled());
+        assert_eq!(cfg.manage.url, "http://manage.local");
+        assert_eq!(cfg.manage.node_token, "secret");
+        assert_eq!(cfg.manage.update.check_interval_seconds, 42);
+        assert_eq!(cfg.manage.update.channel, "beta");
     }
 
     #[test]

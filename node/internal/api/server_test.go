@@ -127,6 +127,45 @@ func TestHandleAgentInfo(t *testing.T) {
 	}
 }
 
+func TestHandleDesktopRuntimeConfig(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Manage.Enabled = true
+	cfg.Manage.URL = "http://manage.local/"
+	cfg.Manage.NodeToken = "node-secret"
+	cfg.Manage.Update.CheckIntervalSeconds = 17
+	cfg.Manage.Update.Channel = "beta"
+	srv := NewServer(cfg, nil, WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/desktop/runtime-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var got desktopRuntimeConfig
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.ManageEnabled || got.ManageURL != "http://manage.local/" || got.ManageNodeToken != "node-secret" {
+		t.Fatalf("unexpected manage config: %+v", got)
+	}
+	if got.ManageUpdateCheckIntervalSeconds != 17 || got.ManageUpdateChannel != "beta" || !got.ManageUpdateEnabled {
+		t.Fatalf("unexpected update config: %+v", got)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/desktop/runtime-config", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	recorder := httptest.NewRecorder()
+	srv.handleDesktopRuntimeConfig(recorder, req)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+}
+
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	reg, err := tools.NewRegistry(t.TempDir(), 30)

@@ -140,7 +140,9 @@ type trayApp struct {
 	iconBlinkMu   sync.Mutex
 	iconBlinkStop chan struct{}
 
-	webuiOpenInFlight atomic.Bool
+	webuiOpenInFlight   atomic.Bool
+	updateCheckInFlight atomic.Bool
+	lifecycleInFlight   atomic.Bool
 }
 
 func (a *trayApp) onReady() {
@@ -160,12 +162,16 @@ func (a *trayApp) onReady() {
 	systray.AddSeparator()
 	a.mOpenConsole = systray.AddMenuItem("打开控制台", "在浏览器中打开 Web UI")
 	a.mOpenManage = systray.AddMenuItem("打开 Manage", "用本机 node_id 打开 Manage Console")
+	a.mOpenManage.Disable()
 	a.mUpdate = systray.AddMenuItem("更新：检查中…", "查看版本与升级")
 	a.mUpdate.Disable()
 	systray.AddSeparator()
 	a.mStart = systray.AddMenuItem("启动 Node", "后台启动 dagents-node")
 	a.mStop = systray.AddMenuItem("停止 Node", "停止 dagents-node")
 	a.mRestart = systray.AddMenuItem("重启 Node", "重启 dagents-node")
+	a.mStart.Disable()
+	a.mStop.Disable()
+	a.mRestart.Disable()
 	systray.AddSeparator()
 	a.mQuit = systray.AddMenuItem("退出 Shell", "退出并停止 dagents-node")
 
@@ -215,6 +221,13 @@ func (a *trayApp) stopSSESubscriber() {
 }
 
 func (a *trayApp) ensureNodeOnStart() {
+	if !a.lifecycleInFlight.CompareAndSwap(false, true) {
+		return
+	}
+	defer func() {
+		a.lifecycleInFlight.Store(false)
+		a.refreshStatus()
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 	defer cancel()
 	if err := nodectl.Start(ctx, a.layout, a.cfg, 30*time.Second); err != nil {
@@ -223,7 +236,6 @@ func (a *trayApp) ensureNodeOnStart() {
 		a.lastErr = err
 		a.mu.Unlock()
 	}
-	a.refreshStatus()
 }
 
 func (a *trayApp) onExit() {
@@ -247,7 +259,11 @@ func (a *trayApp) clickLoop() {
 		case <-a.mOpenManage.ClickedCh:
 			a.openManage()
 		case <-a.mUpdate.ClickedCh:
-			a.openUpdateSettings()
+			if a.updateChecker.Snapshot().UpgradeAvailable {
+				a.openUpdateSettings()
+			} else {
+				a.checkUpdateNow()
+			}
 		case <-a.mStart.ClickedCh:
 			a.setHoldStopped(false)
 			a.runAction("启动", func(ctx context.Context) error {
@@ -302,7 +318,14 @@ func (a *trayApp) openConsole() {
 }
 
 func (a *trayApp) openManage() {
+	if !a.lifecycleInFlight.CompareAndSwap(false, true) {
+		return
+	}
 	go func() {
+		defer func() {
+			a.lifecycleInFlight.Store(false)
+			a.refreshStatus()
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 		defer cancel()
 		if err := webui.OpenManage(ctx, a.layout, a.cfg); err != nil {
@@ -310,7 +333,6 @@ func (a *trayApp) openManage() {
 			a.mu.Lock()
 			a.lastErr = err
 			a.mu.Unlock()
-			a.refreshStatus()
 		}
 	}()
 }
@@ -321,19 +343,37 @@ func (a *trayApp) openUpdateSettings() {
 	}, "open update settings")
 }
 
+func (a *trayApp) checkUpdateNow() {
+	if !a.updateCheckInFlight.CompareAndSwap(false, true) {
+		return
+	}
+	a.mUpdate.SetTitle("更新：检查中…")
+	a.mUpdate.Disable()
+	go func() {
+		a.updateChecker.CheckNow()
+		a.updateCheckInFlight.Store(false)
+		a.refreshUpdateUI()
+	}()
+}
+
 func (a *trayApp) refreshUpdateUI() {
 	if a.mUpdate == nil || a.updateChecker == nil {
 		return
 	}
 	status := a.updateChecker.Snapshot()
-	if !a.cfg.ManageUpdateEnabled() {
+	if !status.ManageEnabled || !status.UpdateEnabled {
 		a.mUpdate.SetTitle("更新：未启用")
 		a.mUpdate.Disable()
 		return
 	}
-	if !status.ManageReachable {
-		a.mUpdate.SetTitle("更新：Manage 不可达")
+	if status.LastCheckedAt == "" {
+		a.mUpdate.SetTitle("更新：检查中…")
 		a.mUpdate.Disable()
+		return
+	}
+	if !status.ManageReachable {
+		a.mUpdate.SetTitle("更新：检查失败（点击重试）")
+		a.mUpdate.Enable()
 		return
 	}
 	if status.UpgradeAvailable {
@@ -341,8 +381,8 @@ func (a *trayApp) refreshUpdateUI() {
 		a.mUpdate.Enable()
 		return
 	}
-	a.mUpdate.SetTitle("更新：已是最新")
-	a.mUpdate.Disable()
+	a.mUpdate.SetTitle("更新：已是最新（点击重试）")
+	a.mUpdate.Enable()
 }
 
 func (a *trayApp) openFirstPendingSession() {
@@ -379,8 +419,16 @@ func (a *trayApp) openWebUI(fn func(context.Context) error, label string) {
 	if !a.webuiOpenInFlight.CompareAndSwap(false, true) {
 		return
 	}
+	if !a.lifecycleInFlight.CompareAndSwap(false, true) {
+		a.webuiOpenInFlight.Store(false)
+		return
+	}
 	go func() {
-		defer a.webuiOpenInFlight.Store(false)
+		defer func() {
+			a.webuiOpenInFlight.Store(false)
+			a.lifecycleInFlight.Store(false)
+			a.refreshStatus()
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 		defer cancel()
 		if err := fn(ctx); err != nil {
@@ -396,7 +444,14 @@ func (a *trayApp) setHoldStopped(v bool) {
 }
 
 func (a *trayApp) runAction(label string, fn func(context.Context) error) {
+	if !a.lifecycleInFlight.CompareAndSwap(false, true) {
+		return
+	}
 	go func() {
+		defer func() {
+			a.lifecycleInFlight.Store(false)
+			a.refreshStatus()
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 		defer cancel()
 		if err := fn(ctx); err != nil {
@@ -415,7 +470,6 @@ func (a *trayApp) runAction(label string, fn func(context.Context) error) {
 			}
 			a.mu.Unlock()
 		}
-		a.refreshStatus()
 	}()
 }
 
@@ -430,10 +484,14 @@ func (a *trayApp) pollLoop() {
 }
 
 func (a *trayApp) maybeRecoverNode() {
+	if !a.lifecycleInFlight.CompareAndSwap(false, true) {
+		return
+	}
 	now := time.Now()
 	a.mu.Lock()
 	if !a.sup.shouldRecover(now, a.holdStopped, a.recovering) {
 		a.mu.Unlock()
+		a.lifecycleInFlight.Store(false)
 		return
 	}
 	a.sup.markRecoverAttempt(now)
@@ -445,6 +503,8 @@ func (a *trayApp) maybeRecoverNode() {
 			a.mu.Lock()
 			a.recovering = false
 			a.mu.Unlock()
+			a.lifecycleInFlight.Store(false)
+			a.refreshStatus()
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 		defer cancel()
@@ -458,7 +518,6 @@ func (a *trayApp) maybeRecoverNode() {
 		a.mu.Lock()
 		a.sup.recordRecoverOK()
 		a.mu.Unlock()
-		a.refreshStatus()
 	}()
 }
 
@@ -487,6 +546,7 @@ func (a *trayApp) refreshStatus() {
 	showRunning := a.sup.showRunning()
 	displayHealth := a.lastGood
 	a.mu.Unlock()
+	busy := a.lifecycleInFlight.Load()
 
 	if showRunning {
 		agentID := "…"
@@ -494,14 +554,38 @@ func (a *trayApp) refreshStatus() {
 			agentID = displayHealth.NodeID
 		}
 		a.mStatus.SetTitle(fmt.Sprintf("状态：运行中 (%s)", agentID))
-		a.mStart.Disable()
-		a.mStop.Enable()
-		a.mRestart.Enable()
+		if busy {
+			a.mStart.Disable()
+			a.mStop.Disable()
+			a.mRestart.Disable()
+		} else {
+			a.mStart.Disable()
+			a.mStop.Enable()
+			a.mRestart.Enable()
+		}
 	} else {
 		a.mStatus.SetTitle("状态：未运行")
-		a.mStart.Enable()
-		a.mStop.Disable()
-		a.mRestart.Disable()
+		if busy {
+			a.mStart.Disable()
+			a.mStop.Disable()
+			a.mRestart.Disable()
+		} else {
+			a.mStart.Enable()
+			a.mStop.Disable()
+			a.mRestart.Disable()
+		}
+	}
+	manageAvailable := false
+	if showRunning && a.nodeClient != nil {
+		infoCtx, infoCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		info, infoErr := a.nodeClient.AgentInfo(infoCtx)
+		infoCancel()
+		manageAvailable = infoErr == nil && info.ManageEnabled && info.ManageURL != ""
+	}
+	if manageAvailable {
+		a.mOpenManage.Enable()
+	} else {
+		a.mOpenManage.Disable()
 	}
 	a.refreshTooltip(showRunning)
 	a.refreshPendingUI()
