@@ -31,19 +31,9 @@ describe("buildToolCardModel", () => {
     });
 
     expect(model.inputFields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "命令", value: "npm test", kind: "code" }),
-        expect.objectContaining({ label: "工作目录", value: "D:/repo" }),
-        expect.objectContaining({ label: "超时", value: "30 秒" }),
-      ]),
+      [{ label: "命令", value: "npm test", kind: "code" }],
     );
-    expect(model.resultFields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "退出码", value: "0" }),
-        expect.objectContaining({ label: "stdout", value: "8 B" }),
-        expect.objectContaining({ label: "输出完整性", value: "完整" }),
-      ]),
-    );
+    expect(model.resultFields).toEqual([]);
     expect(model.resultBlocks).toEqual([
       expect.objectContaining({ label: "stdout", content: "all good" }),
     ]);
@@ -90,9 +80,7 @@ describe("buildToolCardModel", () => {
         expect.objectContaining({ label: "下次执行", value: expect.stringMatching(/^\d{4}-\d{2}-\d{2}/) }),
       ]),
     );
-    expect(model.resultBlocks).toEqual([
-      expect.objectContaining({ label: "任务模板", content: "请检查项目状态" }),
-    ]);
+    expect(model.resultBlocks).toEqual([]);
     expect(model.resultBlocks.some((item) => item.content.includes('"trigger_id"'))).toBe(false);
   });
 
@@ -143,17 +131,12 @@ describe("buildToolCardModel", () => {
       }),
     });
 
-    expect(model.resultFields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "退出码", value: "0" }),
-        expect.objectContaining({ label: "输出完整性", value: "完整" }),
-      ]),
-    );
+    expect(model.resultFields).toEqual([]);
     expect(model.resultBlocks).toContainEqual(expect.objectContaining({ label: "stdout", content: "/workspace" }));
     expect(model.resultBlocks.some((item) => item.content.includes('"stdout"'))).toBe(false);
   });
 
-  it("shows read_file pagination metadata while leaving body to the file preview", () => {
+  it("shows only essential read_file metadata while leaving body to the file preview", () => {
     const model = buildToolCardModel({
       callEntry: entry("tool_call", {
         tool_name: "read_file",
@@ -162,6 +145,7 @@ describe("buildToolCardModel", () => {
       resultEntry: entry("tool_result", {
         tool_name: "read_file",
         content: [
+          "文件编码: utf-8",
           "文件总行数: 200",
           "本页行区间: 1-100 / 200",
           "next_line_offset: 83",
@@ -173,12 +157,12 @@ describe("buildToolCardModel", () => {
       }),
     });
 
-    expect(model.resultFields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "下一行偏移", value: "83" }),
-        expect.objectContaining({ label: "Token 截断", value: "是" }),
-      ]),
-    );
+    expect(model.resultFields).toEqual([
+      expect.objectContaining({ label: "文件编码", value: "utf-8" }),
+      expect.objectContaining({ label: "文件总行数", value: "200" }),
+    ]);
+    expect(model.resultFields.some((item) => item.label === "下一行偏移")).toBe(false);
+    expect(model.resultFields.some((item) => item.label === "Token 截断")).toBe(false);
     expect(model.resultBlocks).toHaveLength(0);
   });
 
@@ -195,11 +179,45 @@ describe("buildToolCardModel", () => {
     });
 
     expect(model.resultFields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "调用结果", value: "是" }),
-        expect.objectContaining({ label: "状态", value: "ready" }),
-      ]),
+      [expect.objectContaining({ label: "count", value: "3" })],
     );
     expect(model.resultFields.some((item) => item.value.includes("secret"))).toBe(false);
+  });
+
+  it("does not repeat the call purpose in expanded card input", () => {
+    const model = buildToolCardModel({
+      callEntry: entry("tool_call", {
+        tool_name: "terminal_command",
+        arguments: {
+          call_purpose: "查看当前目录",
+          terminal_id: "term-1",
+          command: "pwd",
+        },
+      }),
+    });
+
+    expect(model.inputFields.some((item) => item.label === "执行目的")).toBe(false);
+    expect(model.inputFields).toEqual([
+      { label: "命令", value: "pwd", kind: "code" },
+      { label: "终端", value: "term-1", kind: "text" },
+    ]);
+  });
+
+  it("renders terminal input data as code instead of plain text", () => {
+    const model = buildToolCardModel({
+      callEntry: entry("tool_call", {
+        tool_name: "terminal_input",
+        arguments: {
+          call_purpose: "在交互终端中执行命令",
+          terminal_id: "local-terminal-1",
+          data: "Get-Location\n",
+        },
+      }),
+    });
+
+    expect(model.inputFields).toEqual([
+      { label: "终端", value: "local-terminal-1", kind: "mono" },
+      { label: "输入内容", value: "Get-Location", kind: "code" },
+    ]);
   });
 });

@@ -373,24 +373,6 @@
   gap: 6px;
 }
 
-.approval-tool-item__policy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-muted);
-  color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.approval-tool-item__reason {
-  color: var(--color-text);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 .approval-tool-item__mode {
   color: var(--color-text-subtle);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

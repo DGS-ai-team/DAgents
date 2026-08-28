@@ -56,6 +56,11 @@ const toolTitle = computed(() => {
   if (userSummary) return userSummary;
   return toolDisplayName(toolName.value || "tool", toolArgs.value);
 });
+const isBashDetail = computed(() => props.embedded && toolName.value === "bash_run");
+const bashCommand = computed(() => {
+  const commandField = card.value.inputFields.find((item) => item.label === "命令");
+  return String(commandField?.value || toolArgs.value.command || "").trim();
+});
 const resultDetail = computed(() => resultDisplay.value?.detail || "");
 const codePreview = computed(() => props.entry.codePreview || "");
 const readFilePath = computed(() => {
@@ -75,6 +80,12 @@ const showImagePreview = computed(
 
 const isShellOutput = computed(() => toolName.value === "bash_run" || visual.value.kind === "shell");
 const outputText = computed(() => {
+  if (isBashDetail.value) {
+    if (!resultEntry.value || !card.value.resultBlocks.length) return "";
+    return card.value.resultBlocks
+      .map((item) => `${item.label}\n${item.content}`)
+      .join("\n\n");
+  }
   if (card.value.resultBlocks.length) {
     return card.value.resultBlocks
       .map((item) => `${item.label}\n${item.content}`)
@@ -171,11 +182,10 @@ function clearCopyState() {
   }
 }
 
-async function copyOutput() {
-  const value = outputText.value;
+async function copyValue(value, successLabel = "已复制") {
   if (!value) return;
   try {
-    copyState.value = (await copyText(value)) ? "已复制" : "复制失败";
+    copyState.value = (await copyText(value)) ? successLabel : "复制失败";
   } catch {
     copyState.value = "复制失败";
   }
@@ -184,35 +194,25 @@ async function copyOutput() {
     copyState.value = "";
     copyTimer = null;
   }, 1600);
+}
+
+async function copyOutput() {
+  await copyValue(outputText.value);
 }
 
 async function copyCommand() {
   const command = card.value.inputFields.find((item) => item.label === "命令")?.value || "";
-  if (!command) return;
-  try {
-    copyState.value = (await copyText(command)) ? "命令已复制" : "复制失败";
-  } catch {
-    copyState.value = "复制失败";
-  }
-  clearCopyState();
-  copyTimer = setTimeout(() => {
-    copyState.value = "";
-    copyTimer = null;
-  }, 1600);
+  await copyValue(command, "命令已复制");
 }
 
-function downloadOutput() {
-  const value = outputText.value;
-  if (!value) return;
-  const blob = new Blob([value], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `${isShellOutput.value ? "terminal-output" : "tool-output"}-${Date.now()}.txt`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+async function copyInputValue(value) {
+  await copyValue(value);
+}
+
+function copyFieldLabel(label) {
+  if (label === "命令") return "复制命令";
+  if (label === "输入内容") return "复制输入内容";
+  return `复制${label || "文本"}`;
 }
 
 onBeforeUnmount(clearCopyState);
@@ -253,37 +253,79 @@ onBeforeUnmount(clearCopyState);
           <div v-if="isCall" class="tool-exec-bubble__summary">{{ formatToolCallLine(entry) }}</div>
         </template>
 
-        <section v-if="card.inputFields.length" class="tool-card__section tool-card__section--input">
+        <section v-if="isBashDetail" class="tool-card__section tool-card__section--input">
           <div class="tool-card__section-title">输入</div>
-          <dl class="tool-card__fields">
-            <div v-for="item in card.inputFields" :key="`input-${item.label}`" class="tool-card__field">
-              <dt>{{ item.label }}</dt>
-              <dd :class="`tool-card__value tool-card__value--${item.kind}`">
-                <pre v-if="item.kind === 'code' || item.kind === 'multiline'">{{ item.value }}</pre>
-                <span v-else>{{ item.value }}</span>
-                <button
-                  v-if="item.label === '命令' && item.value"
-                  type="button"
-                  class="tool-output__action tool-card__copy-input"
-                  aria-label="复制执行命令"
-                  title="复制执行命令"
-                  @click.stop="copyCommand"
-                >{{ copyState || "复制" }}</button>
-              </dd>
+          <div class="tool-card__code-panel">
+            <div class="tool-card__code-panel-heading">
+              <span class="tool-card__code-panel-label">命令</span>
+              <button
+                v-if="bashCommand"
+                type="button"
+                class="tool-output__action"
+                aria-label="复制执行命令"
+                title="复制执行命令"
+                @click.stop="copyCommand"
+              >{{ copyState || "复制命令" }}</button>
             </div>
+            <pre class="tool-exec-bubble__code tool-card__code-block">{{ bashCommand || "—" }}</pre>
+          </div>
+        </section>
+
+        <section v-else-if="card.inputFields.length" class="tool-card__section tool-card__section--input">
+          <div class="tool-card__section-title">输入</div>
+          <dl class="tool-card__fields tool-card__fields--compact">
+            <template v-for="item in card.inputFields" :key="`input-${item.label}`">
+              <div v-if="item.kind === 'code'" class="tool-card__code-panel">
+                <div class="tool-card__code-panel-heading">
+                  <span class="tool-card__code-panel-label">{{ item.label }}</span>
+                  <button
+                    v-if="item.value"
+                    type="button"
+                    class="tool-output__action"
+                    :aria-label="copyFieldLabel(item.label)"
+                    :title="copyFieldLabel(item.label)"
+                    @click.stop="copyInputValue(item.value)"
+                  >{{ copyState || copyFieldLabel(item.label) }}</button>
+                </div>
+                <pre class="tool-exec-bubble__code tool-card__code-block">{{ item.value || "—" }}</pre>
+              </div>
+              <div v-else class="tool-card__field">
+                <dt>{{ item.label }}</dt>
+                <dd :class="`tool-card__value tool-card__value--${item.kind}`">
+                  <pre v-if="item.kind === 'multiline'">{{ item.value }}</pre>
+                  <span v-else>{{ item.value }}</span>
+                </dd>
+              </div>
+            </template>
           </dl>
         </section>
 
         <section
-          v-if="resultEntry && (card.resultFields.length || showReadFilePreview || showImagePreview || outputText)"
+          v-if="!isBashDetail && resultEntry && card.resultFields.length"
           class="tool-card__section tool-card__section--result"
         >
           <div class="tool-card__section-title">结果</div>
-          <dl v-if="card.resultFields.length" class="tool-card__fields">
-            <div v-for="item in card.resultFields" :key="`result-${item.label}`" class="tool-card__field">
-              <dt>{{ item.label }}</dt>
-              <dd :class="`tool-card__value tool-card__value--${item.kind}`">{{ item.value }}</dd>
-            </div>
+          <dl v-if="card.resultFields.length" class="tool-card__fields tool-card__fields--compact">
+            <template v-for="item in card.resultFields" :key="`result-${item.label}`">
+              <div v-if="item.kind === 'code'" class="tool-card__code-panel">
+                <div class="tool-card__code-panel-heading">
+                  <span class="tool-card__code-panel-label">{{ item.label }}</span>
+                  <button
+                    v-if="item.value"
+                    type="button"
+                    class="tool-output__action"
+                    :aria-label="copyFieldLabel(item.label)"
+                    :title="copyFieldLabel(item.label)"
+                    @click.stop="copyInputValue(item.value)"
+                  >{{ copyState || copyFieldLabel(item.label) }}</button>
+                </div>
+                <pre class="tool-exec-bubble__code tool-card__code-block">{{ item.value || "—" }}</pre>
+              </div>
+              <div v-else class="tool-card__field">
+                <dt>{{ item.label }}</dt>
+                <dd :class="`tool-card__value tool-card__value--${item.kind}`">{{ item.value }}</dd>
+              </div>
+            </template>
           </dl>
         </section>
 
@@ -294,10 +336,14 @@ onBeforeUnmount(clearCopyState);
         />
         <ImageResultPreview v-if="showImagePreview" :entry="entry" />
 
-        <div v-if="outputText" class="tool-output">
-          <div class="tool-output__head">
-            <span class="tool-output__label">{{ isShellOutput ? "命令输出" : "结果详情" }}</span>
-            <div class="tool-output__actions">
+        <section
+          v-if="outputText || (isBashDetail && resultEntry)"
+          class="tool-card__section tool-card__section--output tool-output"
+        >
+          <div class="tool-card__section-title">输出</div>
+          <div class="tool-card__code-panel">
+            <div class="tool-card__code-panel-heading">
+              <span class="tool-card__code-panel-label">文本</span>
               <button
                 type="button"
                 class="tool-output__action"
@@ -305,21 +351,14 @@ onBeforeUnmount(clearCopyState);
                 title="复制工具输出"
                 @click="copyOutput"
               >
-                {{ copyState || "复制" }}
+                {{ copyState || "复制输出" }}
               </button>
-              <button
-                type="button"
-                class="tool-output__action"
-                aria-label="下载工具输出"
-                title="下载工具输出"
-                @click="downloadOutput"
-              >下载</button>
             </div>
+            <pre
+              class="tool-exec-bubble__code tool-exec-bubble__result-detail"
+              :class="{ 'tool-output__pre--shell': isShellOutput }"
+            >{{ shouldFoldOutput && !outputExpanded ? previewText : outputText || "（无输出）" }}</pre>
           </div>
-          <pre
-            class="tool-exec-bubble__code tool-exec-bubble__result-detail"
-            :class="{ 'tool-output__pre--shell': isShellOutput }"
-          >{{ shouldFoldOutput && !outputExpanded ? previewText : outputText }}</pre>
           <button
             v-if="shouldFoldOutput"
             type="button"
@@ -328,7 +367,7 @@ onBeforeUnmount(clearCopyState);
           >
             {{ outputExpanded ? "收起输出" : `展开输出（${foldMeta}）` }}
           </button>
-        </div>
+        </section>
       </div>
     </div>
   </div>
@@ -342,15 +381,15 @@ onBeforeUnmount(clearCopyState);
   opacity: 0.55;
 }
 .tool-exec-bubble--embedded {
-  padding: 6px 0 0;
-  gap: 6px;
+  padding: 8px 0 0;
+  gap: 0;
 }
 .tool-card__section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--color-border);
 }
 .tool-card__section:first-of-type {
@@ -360,28 +399,54 @@ onBeforeUnmount(clearCopyState);
 }
 .tool-card__section-title {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+.tool-card__section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+.tool-card__code-block {
+  width: 100%;
+  box-sizing: border-box;
 }
 .tool-card__fields {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   margin: 0;
   min-width: 0;
 }
+.tool-card__fields--compact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+.tool-card__fields--compact .tool-card__code-panel {
+  grid-column: 1 / -1;
+}
 .tool-card__field {
   display: grid;
-  grid-template-columns: minmax(72px, 100px) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: minmax(44px, 72px) minmax(0, 1fr);
+  gap: 10px;
   align-items: start;
   min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
   font-size: 12px;
   line-height: 1.45;
 }
 .tool-card__field dt {
   color: var(--color-text-subtle);
+  font-weight: 500;
+  line-height: 1.45;
 }
 .tool-card__field dd {
   margin: 0;
@@ -392,6 +457,12 @@ onBeforeUnmount(clearCopyState);
 .tool-card__value--code,
 .tool-card__value--mono {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+}
+.tool-card__value--code {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
 }
 .tool-card__value--code,
 .tool-card__value--multiline {
@@ -406,14 +477,40 @@ onBeforeUnmount(clearCopyState);
   white-space: inherit;
   font: inherit;
 }
-.tool-card__copy-input {
-  margin-left: 6px;
-  vertical-align: top;
-}
-.tool-output {
+.tool-card__code-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-code-bg);
+}
+.tool-card__code-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  padding: 3px 7px 3px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+}
+.tool-card__code-panel-label {
+  min-width: 0;
+  color: var(--color-text-subtle);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.tool-card__code-panel > .tool-exec-bubble__code {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 10px 9px;
+}
+.tool-output {
   min-width: 0;
 }
 .tool-output__toggle {
@@ -432,8 +529,15 @@ onBeforeUnmount(clearCopyState);
   max-height: none;
 }
 @media (max-width: 640px) {
+  .tool-card__fields--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tool-card__fields--compact .tool-card__code-panel {
+    grid-column: auto;
+  }
   .tool-card__field {
-    grid-template-columns: minmax(64px, 82px) minmax(0, 1fr);
+    grid-template-columns: minmax(42px, 64px) minmax(0, 1fr);
+    gap: 8px;
   }
 }
 </style>

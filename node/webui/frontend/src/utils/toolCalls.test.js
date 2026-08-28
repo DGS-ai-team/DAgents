@@ -3,7 +3,9 @@ import {
   USER_INFORMATION_TOOL,
   approvalItemDisplayName,
   approvalItemHintVisible,
+  approvalItemToolLabel,
   extractToolCallsFromEvent,
+  formatApprovalRawArguments,
   normalizeToolCallItem,
   parseToolArguments,
   resolveToolArgumentsFromData,
@@ -108,6 +110,32 @@ describe("approvalItemHintVisible", () => {
         reason: "高风险 shell 需确认",
       }),
     ).toBe(true);
+  });
+});
+
+describe("approval card presentation", () => {
+  it("keeps the original call purpose in the tool title", () => {
+    expect(
+      approvalItemToolLabel({
+        name: "bash_run",
+        arguments: { call_purpose: "检查发布前的环境状态", command: "Get-Date" },
+      }),
+    ).toBe("bash(检查发布前的环境状态)");
+    expect(approvalItemToolLabel({ name: "bash_run", arguments: { command: "Get-Date" } })).toBe("bash");
+  });
+
+  it("keeps tool title free of arguments", () => {
+    expect(approvalItemToolLabel({ name: "bash_run", arguments: { command: "rm -rf /tmp/x" } })).toBe(
+      "bash",
+    );
+  });
+
+  it("formats raw approval arguments as optional readable JSON", () => {
+    expect(formatApprovalRawArguments('{"command":"echo hi","timeout":3}')).toBe(
+      '{\n  "command": "echo hi",\n  "timeout": 3\n}',
+    );
+    expect(formatApprovalRawArguments("{partial")).toBe("{partial");
+    expect(formatApprovalRawArguments("", { path: "/tmp/a.txt" })).toContain('"path": "/tmp/a.txt"');
   });
 });
 
