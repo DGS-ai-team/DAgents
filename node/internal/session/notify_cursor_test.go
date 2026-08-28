@@ -18,20 +18,20 @@ func TestShouldBumpNotifySeq(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "done stop",
+			name: "turn finished stop",
 			ev: stream.Event{
 				SessionID: "s1",
-				Type:      "done",
+				Type:      "turn_finished",
 				Data:      map[string]any{"finish_reason": "stop", "turn_complete": true},
 			},
 			want: true,
 		},
 		{
-			name: "done awaiting hitl",
+			name: "turn finished error",
 			ev: stream.Event{
 				SessionID: "s1",
-				Type:      "done",
-				Data:      map[string]any{"finish_reason": "awaiting_hitl", "awaiting": "hitl"},
+				Type:      "turn_finished",
+				Data:      map[string]any{"finish_reason": "error", "turn_complete": true},
 			},
 			want: false,
 		},

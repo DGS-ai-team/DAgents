@@ -14,9 +14,9 @@ func TestBridgeApplyUserMessage_mergesToolBody(t *testing.T) {
 	hub := stream.NewHub(4, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
 
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "s", nil, queue.AsyncToolResultPayload{
+	built := orch.BuildAsyncSideEffectMessages("s", nil, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", Status: "succeeded", ResultText: "done",
-	}, "", "")
+	})
 
 	msg := bridgeApplyUserMessage(built)
 	if msg.Role != "user" || msg.Name != llm.UserNameAsyncTool {

@@ -61,9 +61,9 @@ func TestBuildAsyncToolMessages_modelFriendly(t *testing.T) {
 		}}},
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[BASH_RESULT] status=RUNNING job_id=job-1"},
 	}
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "sess-1", history, queue.AsyncToolResultPayload{
+	built := orch.BuildAsyncSideEffectMessages("sess-1", history, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "call-bg-1", Status: "succeeded", ResultText: "done",
-	}, "", "")
+	})
 
 	if !strings.Contains(built.UserMessage.Content, "job_id=job-1") {
 		t.Fatalf("user = %q", built.UserMessage.Content)
@@ -99,9 +99,9 @@ func TestBuildAsyncToolMessages_modelFriendly(t *testing.T) {
 func TestBuildAsyncToolMessages_modelMetadataPreservesTimeoutStatus(t *testing.T) {
 	hub := stream.NewHub(4, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "sess-1", nil, queue.AsyncToolResultPayload{
+	built := orch.BuildAsyncSideEffectMessages("sess-1", nil, queue.AsyncToolResultPayload{
 		JobID: "job-timeout", ToolName: "bash_run", Status: "timed_out", ErrorText: "命令超时",
-	}, "", "")
+	})
 	if built.ToolMessage.ToolResultMetadata == nil || built.ToolMessage.ToolResultMetadata.Status != "timed_out" {
 		t.Fatalf("timeout metadata = %+v content=%q", built.ToolMessage.ToolResultMetadata, built.ToolMessage.Content)
 	}

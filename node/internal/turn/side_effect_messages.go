@@ -10,14 +10,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 )
 
-// SideEffectKind 旁路回灌类型。
-type SideEffectKind string
-
-const (
-	SideEffectAsync           SideEffectKind = "async"
-	SideEffectExternalMessage SideEffectKind = "external_message"
-)
-
 // SideEffectMessages 旁路写回 history / SSE 的消息 bundle。
 type SideEffectMessages struct {
 	UserMessage            llm.Message
@@ -47,71 +39,28 @@ type SideEffectApplyPlan struct {
 	Mode     string
 }
 
-// BuildSideEffectMessages 预构建 Produce/Apply 用的消息 bundle。
-func (o *Orchestrator) BuildSideEffectMessages(
-	kind SideEffectKind,
+// BuildAsyncSideEffectMessages 预构建异步工具结果的 Produce/Apply 消息 bundle。
+func (o *Orchestrator) BuildAsyncSideEffectMessages(
 	sessionID string,
 	history []llm.Message,
 	async queue.AsyncToolResultPayload,
-	content, userName string,
 ) SideEffectMessages {
-	switch kind {
-	case SideEffectAsync:
-		built := o.buildAsyncToolMessages(sessionID, history, AsyncToolResultInput{
-			JobID:                  async.JobID,
-			ToolName:               async.ToolName,
-			ToolCallID:             async.ToolCallID,
-			Status:                 async.Status,
-			ResultText:             async.ResultText,
-			ErrorText:              async.ErrorText,
-			OutputCompressSavedPct: async.OutputCompressSavedPct,
-			OutputCompressRawRunes: async.OutputCompressRawRunes,
-			OutputCompressOutRunes: async.OutputCompressOutRunes,
-		})
-		return sideEffectFromAsync(built)
-	default:
-		return o.buildExternalSideEffectMessages(sessionID, content, userName)
-	}
+	built := o.buildAsyncToolMessages(sessionID, history, AsyncToolResultInput{
+		JobID:                  async.JobID,
+		ToolName:               async.ToolName,
+		ToolCallID:             async.ToolCallID,
+		Status:                 async.Status,
+		ResultText:             async.ResultText,
+		ErrorText:              async.ErrorText,
+		OutputCompressSavedPct: async.OutputCompressSavedPct,
+		OutputCompressRawRunes: async.OutputCompressRawRunes,
+		OutputCompressOutRunes: async.OutputCompressOutRunes,
+	})
+	return sideEffectFromAsync(built)
 }
 
 func sideEffectFromAsync(b asyncToolMessages) SideEffectMessages {
 	return SideEffectMessages(b)
-}
-
-func (o *Orchestrator) buildExternalSideEffectMessages(_ string, content, userName string) SideEffectMessages {
-	content = strings.TrimSpace(content)
-	userName = llm.NormalizeUserMessageName(userName)
-	toolCallID := fmt.Sprintf("external-%s", shortHash(content+userName))
-	toolName := "tool_callback"
-	argsJSON := fmt.Sprintf(`{"source":%q,"user_name":%q}`, userName, userName)
-	toolText := content
-	if toolText == "" {
-		toolText = "(empty external message)"
-	}
-	return SideEffectMessages{
-		UserMessage: llm.UserMessage(content, userName),
-		AssistantMessage: llm.Message{
-			Role:    "assistant",
-			Content: "",
-			ToolCalls: []llm.ToolCall{{
-				ID:   toolCallID,
-				Type: "function",
-				Function: llm.ToolCallFunction{
-					Name:      toolName,
-					Arguments: argsJSON,
-				},
-			}},
-		},
-		ToolMessage: llm.ToolResultMessage(
-			toolCallID,
-			toolName,
-			fmt.Sprintf("外部消息（%s）：%s", userName, toolText),
-		),
-		ForClientContent: toolText,
-		ToolName:         toolName,
-		ToolCallID:       toolCallID,
-		Status:           "delivered",
-	}
 }
 
 func shortHash(s string) string {
@@ -229,13 +178,11 @@ func isSideEffectBridgeUserTail(messages []llm.Message) bool {
 }
 
 type mergedCallbackItem struct {
-	Kind      string `json:"kind"`
-	JobID     string `json:"job_id,omitempty"`
-	ToolName  string `json:"tool_name,omitempty"`
-	Status    string `json:"status,omitempty"`
-	TriggerID string `json:"trigger_id,omitempty"`
-	UserName  string `json:"user_name,omitempty"`
-	Content   string `json:"content"`
+	Kind     string `json:"kind"`
+	JobID    string `json:"job_id,omitempty"`
+	ToolName string `json:"tool_name,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Content  string `json:"content"`
 }
 
 // BuildMergedCallbackBatch 多条合并为 get_callback 批次。
@@ -247,24 +194,15 @@ func BuildMergedCallbackBatch(entries []SideEffectBatchEntry, messages []llm.Mes
 	items := make([]mergedCallbackItem, 0, len(entries))
 	for _, e := range entries {
 		item := mergedCallbackItem{
-			Kind:     string(e.Kind),
-			Content:  e.Built.ForClientContent,
-			UserName: e.UserName,
-			Status:   e.Built.Status,
+			Kind:    "async",
+			Content: e.Built.ForClientContent,
+			Status:  e.Built.Status,
 		}
-		if e.Kind == SideEffectAsync {
-			item.JobID = strings.TrimSpace(e.Async.JobID)
-			item.ToolName = strings.TrimSpace(e.Async.ToolName)
-			item.Status = strings.TrimSpace(e.Async.Status)
-			if item.Content == "" {
-				item.Content = strings.TrimSpace(e.Async.ResultText)
-			}
-		}
-		if e.TriggerID != "" {
-			item.TriggerID = e.TriggerID
-		}
+		item.JobID = strings.TrimSpace(e.Async.JobID)
+		item.ToolName = strings.TrimSpace(e.Async.ToolName)
+		item.Status = strings.TrimSpace(e.Async.Status)
 		if item.Content == "" {
-			item.Content = strings.TrimSpace(e.MessageContent)
+			item.Content = strings.TrimSpace(e.Async.ResultText)
 		}
 		items = append(items, item)
 	}
@@ -304,12 +242,8 @@ func formatMergedBridgeUserMessage(items []mergedCallbackItem) string {
 
 // SideEffectBatchEntry Apply 批量收集条目。
 type SideEffectBatchEntry struct {
-	Kind           SideEffectKind
-	Built          SideEffectMessages
-	Async          queue.AsyncToolResultPayload
-	MessageContent string
-	UserName       string
-	TriggerID      string
+	Built SideEffectMessages
+	Async queue.AsyncToolResultPayload
 }
 
 // ApplySideEffectPlan 按 site/plan 写入 history（不发 SSE）。
@@ -342,29 +276,14 @@ func ShouldContinueAfterSideEffectApply(messages []llm.Message) bool {
 	return shouldContinueAfterSideEffectApplyMessages(messages)
 }
 
-// SideEffectAlreadyApplied 幂等：async job_id 或 external 内容已在 history。
-func SideEffectAlreadyApplied(messages []llm.Message, kind SideEffectKind, async queue.AsyncToolResultPayload, content, userName string) bool {
+// SideEffectAlreadyApplied 根据 async job_id 判断结果是否已经写入 history。
+func SideEffectAlreadyApplied(messages []llm.Message, async queue.AsyncToolResultPayload) bool {
 	jobID := strings.TrimSpace(async.JobID)
-	if kind == SideEffectAsync && jobID != "" {
-		for _, m := range messages {
-			if asyncToolResultAppliedInHistory(m.Content, jobID) {
-				return true
-			}
-		}
+	if jobID == "" {
 		return false
 	}
-	content = strings.TrimSpace(content)
-	userName = llm.NormalizeUserMessageName(userName)
-	if content == "" {
-		return false
-	}
-	if len(messages) == 0 {
-		return false
-	}
-	last := messages[len(messages)-1]
-	if last.Role == "user" && last.Content == content {
-		source, provenance := llm.MessageSourceForUserName(userName)
-		if llm.IsMessageSource(last, source.Kind, source.Form, provenance.Producer) {
+	for _, m := range messages {
+		if asyncToolResultAppliedInHistory(m.Content, jobID) {
 			return true
 		}
 	}

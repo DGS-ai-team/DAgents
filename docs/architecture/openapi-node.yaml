@@ -813,14 +813,6 @@ paths:
         "200":
           description: OK
 
-  /v1/agents/{agent_id}/tool-calls/{tool_call_id}/background:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/agents/{agent_id}/tool-calls/{tool_call_id}/cancel:
     post:
       x-contract-status: surface-only

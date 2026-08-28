@@ -448,7 +448,7 @@ Node 逻辑：
 2. 若 `resume_value.child_agent_id` 非空 → `RouteResume` 投递到**子 runtime** 的 `handleResume`；
 3. 否则 → `RouteResume` 经 `DeliverParentResume` 入队父 runtime **一次**（勿重复 enqueue）。
 
-父 session HITL 的 `done` 带 `turn_complete` / `awaiting`，语义见 [agent-node-api.md §2.4.1](./agent-node-api.md)。
+父 session HITL 以 `hitl_required` + `turn_state.phase=tool_waiting` 表达；`turn_finished` 只表示终态，语义见 [agent-node-api.md §2.4.1](./agent-node-api.md)。
 
 Web UI 在收到带 `child_agent_id` 的 `approval_required` 时，展示时标注「子任务：{purpose}」，**SubmitResume 仍用父 session_id**，并在 `resume_value` 中回传 `child_agent_id`。
 

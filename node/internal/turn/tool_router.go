@@ -561,7 +561,10 @@ func (o *Orchestrator) persistToolResult(
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any, execErr error) {
 	runInBackground, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
-	if tools.IsBackgroundJobTool(tc.Function.Name) {
+	// bash_run is deliberately synchronous.  Keep parsing the historical
+	// run_in_background field for wire compatibility, but never let it change
+	// execution semantics; long-lived shell sessions use terminal_open.
+	if tc.Function.Name == "bash_run" || tools.IsBackgroundJobTool(tc.Function.Name) {
 		runInBackground = false
 	}
 	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)

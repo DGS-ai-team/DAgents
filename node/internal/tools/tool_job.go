@@ -16,13 +16,13 @@ func backgroundJobStatusToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "background_job_status",
-			Description: "查询 bash_run 后台任务状态与输出摘要。任务完成后通常已由 async_tool_result 自动回灌，无需轮询；仅在需取消或主动确认进度时使用。",
+			Description: "查询支持后台执行的工具任务状态与输出摘要。bash_run 始终同步执行；后台任务完成通常会通过 async_tool_result 回灌。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"job_id": map[string]any{
 						"type":        "string",
-						"description": "bash_run 超时降级或历史后台任务返回的 job_id（必填）",
+						"description": "后台工具返回的 job_id（必填）；bash_run 不会生成该 ID",
 					},
 				},
 				"required":             []string{"job_id"},
@@ -37,13 +37,13 @@ func backgroundJobCancelToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "background_job_cancel",
-			Description: "取消 bash_run 仍在运行的后台任务（含同步超时降级产生的 job）。",
+			Description: "取消支持后台执行的工具任务；bash_run 不会生成后台任务。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"job_id": map[string]any{
 						"type":        "string",
-						"description": "要取消的后台 job_id（必填）；须为 bash_run 超时降级产生且仍在运行",
+						"description": "要取消的后台工具 job_id（必填）",
 					},
 				},
 				"required":             []string{"job_id"},
@@ -100,7 +100,7 @@ func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessag
 	}
 	msg := job.cancelJob()
 	job.waitDone(5 * time.Second)
-	// 超时降级的 collector 在 cancelled 时不会 notifyDone；工具取消也必须回灌。
+	// 取消后的后台任务也必须回灌一次终态通知；notifyJobDone 负责幂等。
 	if r.bgJobs != nil {
 		r.bgJobs.notifyJobDone(job)
 	}

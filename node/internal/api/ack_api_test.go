@@ -39,7 +39,7 @@ func TestHandleSessionAck(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	body, _ := json.Marshal(map[string]any{"sse_seq": 42})
+	body, _ := json.Marshal(map[string]any{"agent_seq": 42})
 	resp, err := http.Post(ts.URL+"/v1/agents/"+sessionID+"/ack", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)

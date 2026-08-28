@@ -14,6 +14,10 @@ import (
 type RuntimeState struct {
 	Pending       *turn.PendingHITL `json:"pending,omitempty"`
 	ToolLoopCount int               `json:"tool_loop_count"`
+	// InputBoxState is the serialized FIFO tail of external user/trigger/A2A
+	// inputs. Resume/cancel remain control-plane operations and are not stored
+	// here.
+	InputBoxState json.RawMessage `json:"input_box_state,omitempty"`
 	// HistoryRevision monotonically identifies the committed message snapshot.
 	// It is independent from the SSE Hub sequence and the Turn lifecycle
 	// sequence, so hydrate callers can reject an older transcript projection.

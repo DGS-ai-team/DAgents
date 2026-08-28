@@ -64,12 +64,12 @@ runOneStep(ctx, sessionID, history)
   │     OnToolCallDelta    → SSE tool_call（流式参数）
   │     OnUsage            → SSE usage（累计）
   │
-  ├─ 错误 / cancel → persistCancelledStream、done、return Err
+  ├─ 错误 / cancel → persistCancelledStream、turn_finished、return Err
   │
   ├─ appendHistory(assistant)            // 整段 assistant 落库
   │
   ├─ len(ToolCalls)==0 ?
-  │     └─ publishDone(stop)             → SSE done，return
+  │     └─ publishTurnFinished(stop)     → SSE turn_finished，return
   │
   └─ Coordinator 更新工具/交互状态
         processToolCalls                 → tool_router.go
@@ -77,7 +77,7 @@ runOneStep(ctx, sessionID, history)
           ├─ HITL       → PendingHITL.Items[]，SSE hitl_required
           │               （ask_user + approval 同批；分步 resume）
           └─ childagent → HandleParentTool
-        pending ? → done(awaiting_hitl)，return Pending（可部分 resume 后仍 pending）
+        pending ? → turn_state(tool_waiting)，return Pending（可部分 resume 后仍 pending）
         否则 enqueueToolResult 或 ScheduleToolResult=true
 ```
 
@@ -108,9 +108,9 @@ runOneStep(ctx, sessionID, history)
 | 推理流 | `reasoning` |
 | 工具参数流 | `tool_call`（partial） |
 | 用量 | `usage` |
-| 本步结束 | `done`（语义 B：轮到用户，见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |
+| 本步结束 | `turn_finished`（终态；见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |
 
-Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补占位 `tool` 消息，再 `done(cancelled)`。
+Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补占位 `tool` 消息，再 `turn_finished(cancelled)`。
 
 ### 1.5 本步内的工具处理（预告）
 
@@ -150,30 +150,27 @@ Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补
 type StepOutcome struct {
     Pending            *PendingHITL   // 非 nil → 链暂停，等 resume
     StepIndex          int            // 当前 Turn 内的 Step 序号
-    ScheduleToolResult bool           // true → runtime 入队 tool_result，稍后 RunToolMessageTurn
+    ScheduleToolResult bool           // true → runtime 在同一 Turn 链内 inline RunToolMessageTurn
     Err                error
 }
 ```
 
 | Outcome | 含义 | 下一步 |
 |---------|------|--------|
-| 无 Pending，无 Schedule，无 Err | 本步模型已给出最终回答 | `done(turn_complete=true)`，链结束 |
+| 无 Pending，无 Schedule，无 Err | 本步模型已给出最终回答 | `turn_finished(turn_complete=true)`，链结束 |
 | `Pending != nil` | HITL | Client `resume` → §3 → `ContinueAfterResume` |
-| `ScheduleToolResult` | auto 工具已执行，history 已闭合 | 入队 `tool_result` → `RunToolMessageTurn` → 又一次 §1 |
-| `Err != nil` | LLM/工具/cancel/超限 | `done` + 持久化，链结束 |
+| `ScheduleToolResult` | auto 工具已执行，history 已闭合 | inline `RunToolMessageTurn` → 又一次 §1 |
+| `Err != nil` | LLM/工具/cancel/超限 | `turn_finished` + 持久化，链结束 |
 
-### 2.3 生产路径：单步执行 + 队列续跑
+### 2.3 生产路径：单步执行 + Turn 链内续跑
 
-**生产环境**（`runtime` + `consumeLoop`）每次只跑 **一步** Orchestrator API，续跑靠 **MessageQueue**（§3）：
+**生产环境**（`runtime` + `consumeLoop`）每次只跑一步 Orchestrator API；工具结果返回后由 runtime 在同一个逻辑 Turn 内 inline 续跑：
 
 ```text
-handleHumanMessage
+handleInputMessage
   → runTurnStep → RunHumanMessageTurn → runOneStep        // 第 1 次 LLM
   → ScheduleToolResult ?
-        → enqueue(tool_result)
-consumeLoop 再次出队
-  → handleToolResult
-  → runTurnStep → RunToolMessageTurn → runOneStep         // 第 2 次 LLM
+        → runTurnStep → RunToolMessageTurn → runOneStep   // 第 2 次 LLM
   → … 直到无 ScheduleToolResult
 ```
 
@@ -186,17 +183,17 @@ consumeLoop 再次出队
 
 ### 2.4 测试路径：内联多步
 
-单测在 `orchestrator_test.go` 用 **`runMessageTurnInline`**（`RunHumanMessageTurn` + `RunToolMessageTurn` 循环）在 **同一 goroutine** 内跑完工具链，等价于生产「单步 + 队列入队 `tool_result`」的语义，但无需 session 队列。
+单测在 `orchestrator_test.go` 用 **`runMessageTurnInline`**（`RunHumanMessageTurn` + `RunToolMessageTurn` 循环）在 **同一 goroutine** 内跑完工具链，与生产 runtime 的 inline Turn 链一致。
 
-读源码时：生产 turn 走 **queue + handleToolResult**；内联 helper 仅存在于 `_test.go`。
+读源码时：生产 turn 由 runtime 在当前 Turn 链内 inline 调用 `RunToolMessageTurn`；控制队列仅承载 resume、异步事实与恢复 continuation。
 
 ### 2.5 HITL 打断与 resume
 
 | 场景 | 行为 |
 |------|------|
-| 新 user 消息到达且存在 `pending` | `InterruptPending`：orphan tool_calls 补中断说明，再开新链 |
+| 新 user 消息到达且存在 `pending` | 进入 InputBox FIFO，保持 pending；不会自动打断当前链 |
 | 审批 / 用户输入 | `handleResume` → `ContinueAfterResume`：写 `tool` 结果，`ScheduleToolResult` 或继续 loop |
-| `done` 与 HITL | HITL 暂停时 `turn_complete=false`；resume 后续跑 **不再** 立即发 `done`（见 SSE 速查） |
+| `turn_finished` 与 HITL | HITL 暂停时不发送 `turn_finished`；resume 后续跑，最终终态时再发送 |
 
 **文件**：`turn/pending.go`、`session/runtime.go` → `handleResume`；Client 载荷见 [03 §2.3](./03-API与Client.md)。
 
@@ -204,7 +201,7 @@ consumeLoop 再次出队
 
 - `StepIndex`：当前 Turn 内的 Step 序号，由 Coordinator 分配并通过 `TurnExecutionContext` 传递。
 - 新 `handleHumanMessage` 时创建新的 Turn；不再由 runtime 归零和递增独立计数器。
-- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `done` 结束；下一条 user 消息会重置计数。
+- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `turn_finished` 结束；下一条 user 消息会重置计数。
 
 ### 2.7 源码索引（§2）
 
@@ -214,7 +211,7 @@ consumeLoop 再次出队
 | 单测内联多步 | `orchestrator_test.go` → `runMessageTurnInline` |
 | Resume | `orchestrator.go` → `ContinueAfterResume` |
 | runtime 脚手架 | `session/runtime_turn.go` → `runTurnStep` |
-| 应用 outcome | `session/runtime.go` → `applyStepOutcome`、`afterToolStep` |
+| 应用 outcome | `session/runtime.go` → `runInlineToolContinuationChain`、`finishTurnIdle` |
 | HITL 状态 | `turn/pending.go` |
 
 ---
@@ -229,19 +226,19 @@ consumeLoop 再次出队
 |------|------|
 | **Client** | `POST /v1/messages`（`request_type: message`） |
 | **HITL resume** | `POST /v1/messages`（`request_type: resume`） |
-| **工具续跑** | Orchestrator 在本步 auto 工具完成后 `enqueue(tool_result)` |
+| **工具续跑** | Orchestrator 返回 `ScheduleToolResult`，runtime 在同一 Turn 链内 inline 续跑 |
 | **异步工具** | 后台 job 完成 → `async_tool_result` |
-| **Trigger** | 调度器 fire → `trigger_message`（`TriggerID` + `UserName=trigger`） |
+| **Trigger** | 调度器 fire → InputBox FIFO（`TriggerID` + `UserName=trigger`） |
 
-若全部同步调用 Orchestrator，会难以保证 **tool_result 优先闭合序列**、**resume 与 human 的竞态**、**单 session 串行消费**。  
-因此：**每 session 一个 `MessageQueue` + 单 goroutine `consumeLoop`**，统一出队后再进入 §2。
+外部输入需要稳定的 FIFO，并且在 pending HITL 时不能抢占当前 Turn；因此采用 **每 session 一个 `InputBox` + 一个控制 `MessageQueue` + 单 goroutine `consumeLoop`**。InputBox 只负责 user/trigger/A2A 的顺序与缓存，resume 和异步事实仍由控制队列驱动。
 
 ### 3.2 队列模型
 
 **路径**：`node/internal/queue/`
 
 ```text
-Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)  ──►  consumeLoop
+InputBox.Append(InputRecord) ──► FIFO seq ──► Pop when idle ──► consumeLoop
+MessageQueue.Enqueue(control) ──► priority ──► Dequeue(ctx) ──► consumeLoop
 ```
 
 - **无内嵌 consumer**：队列只负责存与取；**谁消费** 是 runtime 的 `consumeLoop`。  
@@ -254,11 +251,10 @@ Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)
 
 | `RequestType` | 常量 | 典型来源 | consume 处理 |
 |---------------|------|----------|--------------|
-| `message` | `RequestTypeMessage` | Client user | `handleHumanMessage` |
+| `message` | `RequestTypeMessage` | Client user（兼容 envelope） | InputBox → `handleInputMessage` |
 | `resume` | `RequestTypeResume` | Client HITL 提交 | `handleResume` |
-| `tool_result` | `RequestTypeToolResult` | Orchestrator 回调 | `handleToolResult` |
 | `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleSideEffectProduceAsync`（Produce） |
-| `trigger_message` | `RequestTypeTriggerMessage` | trigger fire | `handleSideEffectProduceExternal` |
+| `turn_continuation` | `RequestTypeTurnContinuation` | 恢复/重启补偿 | `handleTurnContinuation` |
 | `side_effect_continue` | `RequestTypeSideEffectContinue` | Apply 后被动续跑 | `handleSideEffectContinue` |
 
 `Envelope` 还携带：`Content`、`UserName`（trigger 等可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
@@ -268,24 +264,24 @@ Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)
 出队顺序（数值越小越优先；同档 FIFO 按 `seq`）：
 
 ```text
-tool_result > human > resume > async_completion > other
+turn_continuation / side_effect_continue > resume > async_completion > other
 ```
 
 | 档位 | 整数值 | 典型 `request_type` |
 |------|--------|---------------------|
-| `tool_result` | -1 | `tool_result` / `side_effect_continue` |
-| `human` | 0 | `message`（CLI/API user） |
+| `continuation` | -1 | `turn_continuation` / `side_effect_continue` |
+| InputBox | — | user / trigger / A2A，按 session seq FIFO |
 | `resume` | 1 | `resume` |
 | `async_completion` | 2 | `async_tool_result` |
-| `other` | 10 | `trigger_message` |
+| `other` | 10 | 预留 |
 
 **设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
 
-1. **`tool_result` 最高**：同步工具批闭合后尽快续跑，避免 `assistant(tool_calls)` 长期缺 `tool`。
-2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略。
-3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌与 trigger。
-4. **`async_completion` 低于 human/resume**：审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
-5. **`other` 最低**：trigger 不抢 human / resume / tool 闭环。
+1. **`continuation` 最高**：恢复或旁路 Apply 后尽快续跑；同步工具结果已经在当前 Turn 链内 inline 处理。
+2. **InputBox 与控制队列分离**：新 user message 不参与 resume 的优先级竞争；pending HITL 时只留在 InputBox，显式 `CancelTurn` 或有效 `resume` 结束当前链后再消费。
+3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌。
+4. **InputBox 不参与控制队列优先级**：普通输入在活动 Turn（包括 pending HITL）期间只缓存，显式 cancel 或有效 resume 后按 FIFO 消费。
+5. **`other` 最低**：仅作预留。
 
 ### 3.5 `consumeLoop` 分流
 
@@ -293,16 +289,14 @@ tool_result > human > resume > async_completion > other
 
 ```text
 consumeLoop(ctx)
-  env := queue.Dequeue(ctx)
-  switch env.RequestType:
-    resume              → handleResume
-    async_tool_result   → handleSideEffectProduceAsync
-    trigger_message     → handleSideEffectProduceExternal
-    side_effect_continue → handleSideEffectContinue
-    tool_result         → handleToolResult
-    message / ""        → handleHumanMessage
+  if control queue non-empty:
+    env := queue.Dequeue(ctx) → resume / async / continuation / side-effect
+  else if turn idle and InputBox non-empty:
+    record := InputBox.Pop() → handleInputMessage
+  else:
+    wait for either wake signal
 ```
-旁路条目 **Produce 时**不改 history；**Apply** 在 `runTurnStep` 步首或 `side_effect_continue` 前写入。Trigger `ClearPendingDelivery` 在 **Apply 成功**时，非 dequeue。详见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
+旁路条目 **Produce 时**不改 history；**Apply** 在 `runTurnStep` 步首或 `side_effect_continue` 前写入。InputBox trigger 在被消费并进入 `handleInputMessage` 后清除 pending delivery。
 
 **串行保证**：同一 session 上任意时刻只有一个 handler 在跑；不会出现两个 `runOneStep` 并发写同一 `history`。
 
@@ -310,11 +304,12 @@ consumeLoop(ctx)
 
 | 层 | 职责 | 不负责 |
 |----|------|--------|
-| **MessageQueue** | **何时**跑下一步；合并多来源；优先级 | 调 LLM、执行工具 |
+| **InputBox** | 外部输入的 session seq/FIFO；pending 期间缓存 | 调 LLM、执行工具、resume |
+| **MessageQueue** | 控制项何时处理；resume/异步事实/恢复项优先级 | 调 LLM、执行工具、外部输入排序 |
 | **Orchestrator** | **这一步**跑什么（§1 单次调用） | 消费队列、session CRUD |
 | **runtime** | 拥有 queue + orch + history；`consumeLoop` 桥接二者 | 进程级 session 表（Manager） |
 
-Orchestrator 通过 `SetToolResultEnqueuer(rt.enqueueToolResult)` **回调入队**，不在 orchestrator 内直接 `handleToolResult`。
+工具结果由 runtime 在当前 Turn 内 inline 调用下一个 Step；只有恢复状态需要补偿时，才使用 `turn_continuation` 控制事件。
 
 ### 3.7 从 HTTP 到队列（Client 路径）
 
@@ -322,8 +317,8 @@ Orchestrator 通过 `SetToolResultEnqueuer(rt.enqueueToolResult)` **回调入队
 POST /v1/messages
   → api/messages.go
   → Manager.EnqueueMessage(sessionID, content, …)
-  → runtime.enqueue(Envelope{RequestType: message}, PriorityHuman)
-  → consumeLoop → handleHumanMessage → §2
+  → runtime.appendInput(InputRecord{Kind: user})
+  → InputBox FIFO → consumeLoop（idle 时 Pop）→ handleInputMessage → §2
 ```
 
 `POST resume` 同理，优先级 `PriorityResume`。
@@ -403,7 +398,7 @@ newRuntimeWithPublisher
   ├─ queue.NewMessageQueue()
   ├─ compression.Coordinator（父 session）
   ├─ orch = turn.NewOrchestrator(..., hub, llm, tools, policy, ...)
-  ├─ orch.SetToolResultEnqueuer(enqueueToolResult)
+  ├─ runtime inline tool continuation（恢复时使用 turn_continuation）
   ├─ orch.SetChildAgentManager(childMgr)          // 父 session
   ├─ orch.SetChildSession(true)                   // 子 session
   └─ go consumeLoop(ctx)
@@ -473,23 +468,23 @@ sequenceDiagram
     participant API as api
     participant M as Manager
     participant RT as runtime
-    participant Q as MessageQueue
+    participant I as InputBox FIFO
+    participant Q as MessageQueue control
     participant L as consumeLoop
     participant O as Orchestrator
 
     C->>API: POST /v1/messages
     API->>M: EnqueueMessage
-    M->>RT: enqueue(message)
-    RT->>Q: Enqueue
-    L->>Q: Dequeue
-    L->>RT: handleHumanMessage
+    M->>RT: appendInput(user)
+    RT->>I: Append(seq)
+    L->>I: Pop when idle
+    I-->>L: InputRecord
+    L->>RT: handleInputMessage
     RT->>O: RunHumanMessageTurn → runOneStep
     Note over O: §1 单次 LLM
     alt auto 工具
         O-->>RT: ScheduleToolResult
-        RT->>Q: Enqueue(tool_result)
-        L->>RT: handleToolResult
-        RT->>O: RunToolMessageTurn → runOneStep
+        RT->>O: inline RunToolMessageTurn
         Note over O: §2 第 N 次 LLM
     else HITL
         O-->>RT: Pending
@@ -505,8 +500,8 @@ sequenceDiagram
 
 1. `turn/orchestrator.go` → `runOneStep`（**§1**）  
 2. `turn/orchestrator.go` → `RunHumanMessageTurn`、`RunToolMessageTurn`（**§2**）  
-3. `session/runtime.go` → `consumeLoop`、`handleHumanMessage`、`handleToolResult`（**§3**）  
-4. `queue/queue.go`、`queue/envelope.go`（**§3**）  
+3. `session/runtime.go` → `consumeLoop`、`handleInputMessage`、`handleResume`（**§3**）
+4. `session/input_box.go`、`queue/queue.go`、`queue/envelope.go`（**§3**）
 5. `session/manager.go`、`runtime.go` → `newRuntimeWithPublisher`（**§4**）  
 6. `turn/tool_router.go` → `processToolCalls`（§1 工具分支）  
 7. `api/messages.go`（HTTP → 队列）

@@ -24,7 +24,13 @@ func (m *Manager) OnStreamEvent(ev stream.Event) {
 	if !ShouldBumpNotifySeq(ev) {
 		return
 	}
-	m.bumpNotifySeq(ev.SessionID, ev.Seq)
+	seq := ev.AgentSeq
+	if seq <= 0 {
+		// Internal synthetic events in tests may not have a Hub cursor. The
+		// production Hub always supplies AgentSeq for replayable Agent events.
+		seq = ev.Seq
+	}
+	m.bumpNotifySeq(ev.SessionID, seq)
 }
 
 func (m *Manager) bumpNotifySeq(sessionID string, seq int) {
@@ -40,22 +46,22 @@ func (m *Manager) bumpNotifySeq(sessionID string, seq int) {
 	}
 }
 
-// AckSession 更新 ack_seq；sseSeq 取各 Client 上报的最大值。
-func (m *Manager) AckSession(ctx context.Context, sessionID string, sseSeq int) (*NotificationState, error) {
+// AckSession 更新 ack_seq；agentSeq 取各 Client 上报的最大 Agent 游标。
+func (m *Manager) AckSession(ctx context.Context, sessionID string, agentSeq int) (*NotificationState, error) {
 	sessionID = trimSessionID(sessionID)
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	if sseSeq <= 0 {
-		return nil, fmt.Errorf("sse_seq must be positive")
+	if agentSeq <= 0 {
+		return nil, fmt.Errorf("agent_seq must be positive")
 	}
 	if rt := m.getRuntime(sessionID); rt != nil {
-		return rt.ackSession(ctx, sseSeq)
+		return rt.ackSession(ctx, agentSeq)
 	}
 	if m.store == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
-	state, err := m.store.AckSession(ctx, sessionID, sseSeq)
+	state, err := m.store.AckSession(ctx, sessionID, agentSeq)
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +127,10 @@ func (r *runtime) bumpNotifySeq(seq int) {
 	r.persist(context.Background())
 }
 
-func (r *runtime) ackSession(ctx context.Context, sseSeq int) (*NotificationState, error) {
+func (r *runtime) ackSession(ctx context.Context, agentSeq int) (*NotificationState, error) {
 	r.mu.Lock()
-	if sseSeq > r.ackSeq {
-		r.ackSeq = sseSeq
+	if agentSeq > r.ackSeq {
+		r.ackSeq = agentSeq
 	}
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq

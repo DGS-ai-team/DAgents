@@ -24,7 +24,6 @@ function normalizeIDList(raw) {
   }
   return out;
 }
-
 export function applyToolJobsSnapshot(data) {
   const prevBackground = new Set(toolJobsStore.backgroundCallIds);
   const running = Number(data?.running);
@@ -100,10 +99,6 @@ export function canControlBashTool(args) {
   return bashControlMode(args) != null;
 }
 
-export function canBackgroundBashTool(args) {
-  return bashControlMode(args) === "running";
-}
-
 export async function refreshToolJobs(agentId) {
   const id = String(agentId || "").trim();
   if (!id) {
@@ -149,18 +144,6 @@ export async function cancelBashToolCall(agentId, toolCallId) {
     }
     // 先改写气泡终态，再刷新队列，避免短暂仍显示「后台执行中」。
     patchBashResultStatus(id, "CANCELLED");
-    await refreshToolJobs(agentId);
-  } finally {
-    delete toolJobsStore.busyCallIds[id];
-  }
-}
-
-export async function backgroundBashToolCall(agentId, toolCallId) {
-  const id = String(toolCallId || "").trim();
-  if (!id) return;
-  toolJobsStore.busyCallIds[id] = "background";
-  try {
-    await api.backgroundAgentToolCall(agentId, id);
     await refreshToolJobs(agentId);
   } finally {
     delete toolJobsStore.busyCallIds[id];

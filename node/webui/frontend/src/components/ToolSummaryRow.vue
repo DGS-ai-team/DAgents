@@ -11,9 +11,7 @@ import {
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import {
-  backgroundBashToolCall,
   bashControlMode,
-  canBackgroundBashTool,
   cancelBashToolCall,
   isBashBackgroundActive,
   parseBashResultStatus,
@@ -52,7 +50,6 @@ const backgroundActive = computed(() =>
 const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const inProgress = computed(() => stepInProgress.value || backgroundActive.value || controlMode.value === "background");
 const showBashControls = computed(() => controlMode.value != null);
-const showBackgroundAction = computed(() => canBackgroundBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
 const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
@@ -118,18 +115,6 @@ async function onCancel(ev) {
   }
 }
 
-async function onBackground(ev) {
-  ev?.stopPropagation?.();
-  actionError.value = "";
-  const agentId = agentStore.agentId;
-  const callId = toolCallId.value;
-  if (!agentId || !callId || busyAction.value) return;
-  try {
-    await backgroundBashToolCall(agentId, callId);
-  } catch (err) {
-    actionError.value = err?.message || "转后台失败";
-  }
-}
 </script>
 
 <template>
@@ -177,16 +162,6 @@ async function onBackground(ev) {
         >
           {{ busyAction === "cancel" ? "终止中…" : "终止" }}
         </button>
-        <button
-          v-if="showBackgroundAction"
-          type="button"
-          class="tool-summary-row__action tool-summary-row__action--secondary"
-          :disabled="!!busyAction"
-          :title="actionError || undefined"
-          @click="onBackground"
-        >
-          {{ busyAction === "background" ? "转后台中…" : "转后台" }}
-        </button>
       </div>
       <span v-if="status" class="tool-summary-row__status">
         {{ status }}
@@ -202,7 +177,13 @@ async function onBackground(ev) {
       </button>
     </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
-      <ToolExecBubble :entry="detailEntry" :verbose="verbose" embedded />
+      <ToolExecBubble
+        :entry="detailEntry"
+        :call-entry="callEntry"
+        :result-entry="resultEntry"
+        :verbose="verbose"
+        embedded
+      />
     </div>
   </div>
 </template>

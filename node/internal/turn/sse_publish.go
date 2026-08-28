@@ -110,17 +110,13 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 	o.hub.Publish(sessionID, "tool_result", o.withLifecycleMetadata(sessionID, payload))
 }
 
-// publishDone 推送 done SSE：finish_reason、turn_complete/awaiting、tool_context_metrics。
-func (o *Orchestrator) publishDone(sessionID, finishReason string) {
+// publishTurnFinished 推送 turn_finished SSE。它只表示一个 turn 已进入
+// 终态；HITL 暂停不发送该事件，暂停事实由 hitl_required + turn_state 表达。
+func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
 	o.runTurnDonePhase(sessionID, finishReason)
-	payload := map[string]any{"finish_reason": finishReason}
-	switch finishReason {
-	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval":
-		payload["turn_complete"] = false
-		payload["awaiting"] = "hitl"
-	default:
-		payload["turn_complete"] = true
-		payload["awaiting"] = nil
+	payload := map[string]any{
+		"finish_reason": finishReason,
+		"turn_complete": true,
 	}
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()
@@ -129,7 +125,7 @@ func (o *Orchestrator) publishDone(sessionID, finishReason string) {
 		payload["model_context_snapshot"] = snapshot.observability()
 	}
 	o.logTurnContextMetrics(sessionID, finishReason)
-	o.hub.Publish(sessionID, "done", o.withLifecycleMetadata(sessionID, payload))
+	o.hub.Publish(sessionID, "turn_finished", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // publishUsage 推送 usage SSE。
@@ -179,7 +175,7 @@ func (o *Orchestrator) publishUsageIfAccumulated(sessionID string, llmStep int) 
 	o.hub.Publish(sessionID, "usage", o.withLifecycleMetadata(sessionID, payload))
 }
 
-// PublishSideEffectCallback Produce 时推送 callback 形态 SSE（async / external tool loop）。
+// PublishSideEffectCallback Produce 时推送 async callback 形态 SSE。
 func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEffectMessages, sideEffectSeq uint64) {
 	o.publishToolCallPayload(sessionID, map[string]any{
 		"assistant_content": "",
@@ -209,20 +205,6 @@ func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEff
 		extra["async_status"] = built.Status
 	}
 	o.publishToolResult(sessionID, tc, built.ForClientContent, false, extra)
-}
-
-// PublishExternalSideEffectDeferred Produce 桥接态 user_message_deferred SSE。
-func (o *Orchestrator) PublishExternalSideEffectDeferred(sessionID, content, userName, triggerID string, seq uint64) {
-	payload := map[string]any{
-		"content":         content,
-		"user_name":       llm.NormalizeUserMessageName(userName),
-		"deferred":        true,
-		"side_effect_seq": seq,
-	}
-	if strings.TrimSpace(triggerID) != "" {
-		payload["trigger_id"] = triggerID
-	}
-	o.hub.Publish(sessionID, "user_message_deferred", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // PublishSideEffectTurnStart 被动续跑 LLM 前通知 Client。

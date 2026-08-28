@@ -12,8 +12,10 @@ Go Node **会话运行时**：维护 `Manager` 会话表，每个 session 一个
 flowchart TB
     API["HTTP / CLI 入队"] --> Mgr["Manager"]
     Mgr --> RT["runtime × N"]
-    RT --> Q["MessageQueue"]
-    Q --> Loop["consumeLoop"]
+    RT --> IB["InputBox FIFO"]
+    RT --> Q["MessageQueue 控制/恢复"]
+    IB --> Loop["consumeLoop"]
+    Q --> Loop
     Loop --> Orch["turn.Orchestrator"]
     Orch --> LLM["llm.Client"]
     Orch --> Tools["tools.Executor"]
@@ -27,7 +29,7 @@ flowchart TB
 | 层 | 职责 |
 |----|------|
 | **`Manager`** | 会话 CRUD、入队 API、skills 管理、实现 `childagent.Host` |
-| **`runtime`** | 单 session 队列与执行边界：messages、loaded skills、消费队列；Turn/Step 生命周期由 `turn.Coordinator` 维护 |
+| **`runtime`** | 单 session 输入与执行边界：InputBox、控制队列、messages、loaded skills；Turn/Step 生命周期由 `turn.Coordinator` 维护 |
 | **`turn.Orchestrator`** | 每步 LLM + 工具；由 runtime 按队列类型调用 |
 | **`compression`** | 仅**父** session 在 human/tool 步前可能触发摘要压缩 |
 | **`childagent`** | 父 runtime 可创建临时 Agent；子 runtime 经 `RelayHub` 把 SSE 挂到父 `session_id` |
@@ -49,28 +51,27 @@ flowchart TB
 | `SetChildSession` | 不调用 | `true`（禁止管理类临时 Agent 工具与 `ask_user`） |
 | 终态 | 用户持久化 / 恢复 | `tryCompleteChildIfIdle` → `OnChildSettled` |
 
-建议跟读路径：`Manager.Create` → `consumeLoop` → `handleHumanMessage` / `handleToolResult` / `handleResume`；子 Agent：`SpawnChild` → `newChildRuntime` → `EnqueueChildTask`。
+建议跟读路径：`Manager.Create` → `InputBox.Append` / `consumeLoop` → `handleInputMessage` / `handleTurnContinuation` / `handleResume`；子 Agent：`SpawnChild` → `newChildRuntime` → `EnqueueChildTask`。
 
 ---
 
 ## 队列与 turn 调度
 
-每个 `runtime` 启动 `consumeLoop`，按 `queue.Envelope.RequestType` 分流：
+每个 `runtime` 启动 `consumeLoop`。外部 user/trigger/A2A 输入进入 InputBox FIFO；resume、异步工具事实和恢复 continuation 走控制队列：
 
 | RequestType | 处理函数 | 说明 |
 |-------------|----------|------|
-| `message` / 空 | `handleHumanMessage` | 新 user 消息；若有 pending HITL 先 `InterruptPending`；步首 Apply 缓冲 |
-| `tool_result` | `handleToolResult` | 工具批执行后的续跑（`RunToolMessageTurn`） |
+| InputBox `user` / `trigger` / `a2a` | `handleInputMessage` | 仅在 runtime idle 时取出并启动新 Turn；活动 Turn（含 pending HITL）期间只排队 |
 | `async_tool_result` | `handleSideEffectProduceAsync` | 后台 job **Produce**（SSE + 缓冲，不 inline 改 history） |
-| `trigger_message` | `handleSideEffectProduceExternal` | trigger **Produce** |
+| `turn_continuation` | `handleTurnContinuation` | 恢复/重启后补偿性续跑 |
 | `side_effect_continue` | `handleSideEffectContinue` | 步首 Apply 缓冲 + `ContinueAfterSideEffects` |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
 
-旁路缓冲见 `side_effects.go` / `runtime_side_effects.go`：`ApplyReady` 在 `runTurnStepWithSideEffects` 步首；`ReconcileAfterStep` 在步末于 `TaskComplete` 时 schedule continue。Trigger delivery 在 **Apply 成功**时清除，不在 dequeue 时清除。
+异步旁路缓冲见 `side_effects.go` / `runtime_side_effects.go`：`ApplyReady` 在 `runTurnStepWithSideEffects` 步首；`ReconcileAfterStep` 在步末于 `TaskComplete` 时 schedule continue。Trigger delivery 在 InputBox 输入被消费后清除。
 
-生产路径下，orchestrator 工具步结束后通过 `SetToolResultEnqueuer` 入队 `tool_result`，**单步执行 + 队列续跑**（对齐 Python 语义）。单测可用 `orchestrator_test.go` 的 `runMessageTurnInline` 内联多步。
+生产路径下，orchestrator 工具步结束后由 runtime 在同一 Turn 链内 inline 续跑下一个 Step，不再把 `tool_result` 作为新的 MessageQueue 请求；resume 仍通过控制队列恢复原 Turn。
 
-`handleHumanMessage` / `handleToolResult` 在步前对**非子** session 调用 `compression.MaybeHandle`；步末 `persist`（子 session 的 `store` 为 nil 时 no-op）。
+`handleInputMessage` / `handleTurnContinuation` 在步前对**非子** session 调用 `compression.MaybeHandle`；步末 `persist`（子 session 的 `store` 为 nil 时 no-op）。
 
 ---
 

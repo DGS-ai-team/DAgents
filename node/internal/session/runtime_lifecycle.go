@@ -14,14 +14,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// lifecycleDispatch is retained for legacy test/recovery fixtures that build
-// projections directly. Production runtime boundaries use lifecycleDispatchErr
-// so a durable lifecycle failure cannot be silently ignored.
-func (r *runtime) lifecycleDispatch(command turn.TurnCommand) turn.CoordinatorSnapshot {
-	snapshot, _ := r.lifecycleDispatchErr(command)
-	return snapshot
-}
-
 // lifecycleDispatchErr is the strict adapter used by runtime boundaries and
 // external reconciliation. Invalid transitions or durable-write failures are
 // returned to the caller instead of allowing execution to continue with a
@@ -219,8 +211,8 @@ func (r *runtime) restoreLifecycleEvents() {
 			} else if !started {
 				return
 			}
-			if err := r.enqueueToolResult(context.Background(), r.session.ID); err != nil && r.logger != nil {
-				r.logger.Warn("schedule recovered tool result failed", "session_id", r.session.ID, "error", err)
+			if err := r.enqueueTurnContinuation(context.Background()); err != nil && r.logger != nil {
+				r.logger.Warn("schedule recovered turn continuation failed", "session_id", r.session.ID, "error", err)
 			}
 		} else if r.logger != nil {
 			r.logger.Warn("turn recovery requires external tool execution decision", "session_id", r.session.ID, "turn_id", snapshot.TurnID, "step_id", snapshot.StepID)
@@ -632,11 +624,10 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 	return nil
 }
 
-// recordSideEffectFact is the lifecycle boundary for results that arrive from
-// outside the current model/tool request. The history bridge may still write
-// a model-readable callback message, but that message is never registered as
-// a ToolCall. This fact is the durable evidence that the external result was
-// accepted exactly once by the active Turn.
+// recordSideEffectFact is the lifecycle boundary for async tool results that
+// arrive after the original model/tool request. The callback bridge may write
+// a model-readable result, but it never registers a new ToolCall. This fact is
+// the durable evidence that the result was accepted exactly once.
 func (r *runtime) recordSideEffectFact(entry readySideEffect) {
 	if r == nil || r.turnCoordinator == nil {
 		return
@@ -644,27 +635,27 @@ func (r *runtime) recordSideEffectFact(entry readySideEffect) {
 	state := r.turnCoordinator.Snapshot()
 	if !state.HasActiveTurn || state.StepID == "" {
 		if r.logger != nil {
-			r.logger.Debug("skip external side-effect fact without active step", "session_id", r.session.ID, "seq", entry.seq)
+			r.logger.Debug("skip async side-effect fact without active step", "session_id", r.session.ID, "seq", entry.seq)
 		}
 		return
 	}
-	factID := fmt.Sprintf("%s:%d", entry.kind, entry.seq)
+	factID := fmt.Sprintf("async:%s", strings.TrimSpace(entry.async.JobID))
+	if entry.async.JobID == "" {
+		factID = fmt.Sprintf("async:seq:%d", entry.seq)
+	}
 	payload, err := json.Marshal(map[string]any{
-		"seq":             entry.seq,
-		"kind":            entry.kind,
-		"job_id":          entry.async.JobID,
-		"tool_call_id":    entry.async.ToolCallID,
-		"tool_name":       entry.async.ToolName,
-		"status":          entry.async.Status,
-		"result_text":     entry.async.ResultText,
-		"error_text":      entry.async.ErrorText,
-		"message_content": entry.messageContent,
-		"user_name":       entry.userName,
-		"trigger_id":      entry.triggerID,
+		"seq":          entry.seq,
+		"kind":         "async",
+		"job_id":       entry.async.JobID,
+		"tool_call_id": entry.async.ToolCallID,
+		"tool_name":    entry.async.ToolName,
+		"status":       entry.async.Status,
+		"result_text":  entry.async.ResultText,
+		"error_text":   entry.async.ErrorText,
 	})
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("marshal external side-effect fact failed", "session_id", r.session.ID, "seq", entry.seq, "error", err)
+			r.logger.Warn("marshal async side-effect fact failed", "session_id", r.session.ID, "seq", entry.seq, "error", err)
 		}
 		return
 	}
@@ -675,7 +666,7 @@ func (r *runtime) recordSideEffectFact(entry readySideEffect) {
 		StepID:           state.StepID,
 		Generation:       state.Generation,
 		ExternalFactID:   factID,
-		ExternalFactKind: string(entry.kind),
+		ExternalFactKind: "async",
 		ToolCallID:       entry.async.ToolCallID,
 		ToolName:         entry.async.ToolName,
 		ResultContent:    entry.built.ForClientContent,
@@ -683,7 +674,7 @@ func (r *runtime) recordSideEffectFact(entry readySideEffect) {
 		At:               time.Now().UTC(),
 		Reason:           "side_effect_applied",
 	}); err != nil && r.logger != nil {
-		r.logger.Warn("record external side-effect fact failed", "session_id", r.session.ID, "seq", entry.seq, "error", err)
+		r.logger.Warn("record async side-effect fact failed", "session_id", r.session.ID, "seq", entry.seq, "error", err)
 	}
 }
 
@@ -827,47 +818,30 @@ func lifecycleStepID(turnID string, index int) string {
 	return fmt.Sprintf("%s-step-%d", turnID, index)
 }
 
-// lifecycleBeginHumanTurn closes the old logical Turn when a new human input
-// interrupts it, then creates a fresh Turn and its first Step. Queue fencing
-// is derived from the Coordinator projection.
+// lifecycleBeginHumanTurn creates a fresh Turn and its first Step.  A live
+// Turn is not implicitly interrupted by a new human input; callers must use
+// the explicit cancel control path first.  Queue/InputBox fencing is derived
+// from the Coordinator projection.
 func (r *runtime) lifecycleBeginHumanTurn() error {
+	return r.lifecycleBeginInputTurn(turn.TurnSourceHuman)
+}
+
+func (r *runtime) lifecycleBeginInputTurn(source turn.TurnSource) error {
 	if r == nil || r.turnCoordinator == nil {
 		return fmt.Errorf("turn coordinator is unavailable")
 	}
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
-	return r.lifecycleBeginHumanTurnLocked()
+	return r.lifecycleBeginInputTurnLocked(source)
 }
 
-func (r *runtime) lifecycleBeginHumanTurnLocked() error {
+func (r *runtime) lifecycleBeginInputTurnLocked(source turn.TurnSource) error {
 	if r == nil || r.turnCoordinator == nil {
 		return fmt.Errorf("turn coordinator is unavailable")
 	}
 	old := r.turnCoordinator.Snapshot()
-	if old.HasActiveTurn {
-		if old.StepID != "" && !old.StepStatus.Terminal() {
-			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-				Type:       turn.CommandInterruptStep,
-				SessionID:  r.session.ID,
-				TurnID:     old.TurnID,
-				StepID:     old.StepID,
-				Generation: old.Generation,
-				At:         time.Now().UTC(),
-				Reason:     "interrupted_by_new_human_input",
-			}); err != nil {
-				return fmt.Errorf("interrupt previous step: %w", err)
-			}
-		}
-		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-			Type:       turn.CommandInterruptTurn,
-			SessionID:  r.session.ID,
-			TurnID:     old.TurnID,
-			Generation: old.Generation,
-			At:         time.Now().UTC(),
-			Reason:     "interrupted_by_new_human_input",
-		}); err != nil {
-			return fmt.Errorf("interrupt previous turn: %w", err)
-		}
+	if old.HasActiveTurn && !old.TurnStatus.Terminal() {
+		return fmt.Errorf("active turn must be cancelled before accepting a new human input")
 	}
 
 	turnID := newContinuationID()
@@ -877,7 +851,7 @@ func (r *runtime) lifecycleBeginHumanTurnLocked() error {
 		Type:      turn.CommandStartTurn,
 		SessionID: r.session.ID,
 		TurnID:    turnID,
-		Source:    turn.TurnSourceHuman,
+		Source:    source,
 		Budget:    r.turnBudget,
 		At:        now,
 	}); err != nil {
@@ -1411,7 +1385,7 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 	}
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		// Tool calls have only been proposed/accepted at this point. The Step
-		// remains executing_tools until a tool_result or a completed HITL
+		// remains executing_tools until the inline continuation or a completed HITL
 		// resume reaches lifecycleBeginContinuationStep/lifecycleAfterResume.
 		return r.withCommittedHistoryLocked(history, func() error { return nil })
 	}
@@ -1704,7 +1678,7 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 		r.persist(ctx)
 		return nil
 	}
-	if err := r.enqueueToolResult(ctx, r.session.ID); err != nil {
+	if err := r.enqueueTurnContinuation(ctx); err != nil {
 		r.persist(ctx)
 		return err
 	}

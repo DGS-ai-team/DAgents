@@ -157,7 +157,7 @@ func ResultDescriptionSuffixForTool(name string) string {
 	shape := ""
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "read_file":
-		shape = " read_file 正文包含文件行数、当前行窗口和 next_line_offset；有下一页时继续按该 offset 读取。"
+		shape = " read_file 正文包含文件行数、当前行窗口和 next_line_offset；有下一页时继续按该 offset 读取；若 token 上限在行中间截断，next_line_offset 会指向该未完整读取的行。"
 	case "write_file":
 		shape = " write_file 成功正文包含写入字节数和路径；成功写入不等于后续业务验证已完成。"
 	case "glob_files":

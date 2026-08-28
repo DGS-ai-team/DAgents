@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
   canControlBashTool,
-  canBackgroundBashTool,
   bashControlMode,
   toolCallIdFromEntry,
   toolJobsStripText,
@@ -33,11 +32,9 @@ describe("toolJobs", () => {
 
     applyToolJobsSnapshot({ running: 1, running_call_ids: ["c1"] });
     expect(bashControlMode({ callEntry: call, resultEntry: null })).toBe("running");
-    expect(canBackgroundBashTool({ callEntry: call, resultEntry: null })).toBe(true);
 
     applyToolJobsSnapshot({ running: 0, background: 1, background_call_ids: ["c1"] });
     expect(bashControlMode({ callEntry: call, resultEntry: null })).toBe("background");
-    expect(canBackgroundBashTool({ callEntry: call, resultEntry: null })).toBe(false);
 
     expect(
       canControlBashTool({
@@ -67,7 +64,6 @@ describe("toolJobs", () => {
     expect(bashControlMode({ callEntry: call, resultEntry: result })).toBe(null);
     applyToolJobsSnapshot({ background: 1, background_call_ids: ["c9"] });
     expect(bashControlMode({ callEntry: call, resultEntry: result })).toBe("background");
-    expect(canBackgroundBashTool({ callEntry: call, resultEntry: result })).toBe(false);
   });
 
   it("treats RUNNING content as inactive once removed from background list", () => {

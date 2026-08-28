@@ -7,18 +7,15 @@ import (
 	"time"
 )
 
-// syncShellGate 允许 UI 在同步等待期间请求终止或转后台。
+// syncShellGate 允许 UI 在同步等待期间请求终止。
 type syncShellGate struct {
 	cancelOnce sync.Once
-	bgOnce     sync.Once
 	cancelCh   chan struct{}
-	bgCh       chan struct{}
 }
 
 func newSyncShellGate() *syncShellGate {
 	return &syncShellGate{
 		cancelCh: make(chan struct{}),
-		bgCh:     make(chan struct{}),
 	}
 }
 
@@ -29,18 +26,6 @@ func (g *syncShellGate) RequestCancel() bool {
 	ok := false
 	g.cancelOnce.Do(func() {
 		close(g.cancelCh)
-		ok = true
-	})
-	return ok
-}
-
-func (g *syncShellGate) RequestBackground() bool {
-	if g == nil {
-		return false
-	}
-	ok := false
-	g.bgOnce.Do(func() {
-		close(g.bgCh)
 		ok = true
 	})
 	return ok
@@ -159,13 +144,16 @@ func (r *Registry) SessionToolJobCounts(sessionID string) ToolJobCounts {
 	}
 }
 
-// ErrSyncShellNotFound 表示没有可控制的同步/后台 bash。
+// ErrSyncShellNotFound 表示没有可控制的同步 bash。
 var ErrSyncShellNotFound = fmt.Errorf("sync bash tool call not found")
 
-// ErrSyncShellNotBash 预留：非 bash 工具暂不支持。
-var ErrSyncShellNotBash = fmt.Errorf("only bash_run supports cancel/background")
+// ErrSyncShellNotBash 预留：非 bash 工具暂不支持同步终止。
+var ErrSyncShellNotBash = fmt.Errorf("only bash_run supports synchronous cancel")
 
-// CancelSyncBash 终止仍在同步等待或已转后台的 bash_run（按 tool_call_id）。
+// ErrBackgroundUnsupported 表示工具不支持后台执行。
+var ErrBackgroundUnsupported = fmt.Errorf("background execution is unsupported")
+
+// CancelSyncBash 终止仍在同步等待的 bash_run（按 tool_call_id）。
 func (r *Registry) CancelSyncBash(sessionID, toolCallID string) error {
 	if r == nil {
 		return ErrSyncShellNotFound
@@ -184,10 +172,10 @@ func (r *Registry) CancelSyncBash(sessionID, toolCallID string) error {
 			}
 		}
 	}
-	return r.cancelBackgroundBashByToolCall(sessionID, toolCallID)
+	return ErrSyncShellNotFound
 }
 
-// CancelAllSessionJobs 取消该 session 下全部同步/后台 bash 任务，返回成功取消数。
+// CancelAllSessionJobs 取消该 session 下全部同步 bash 和后台任务。
 func (r *Registry) CancelAllSessionJobs(sessionID string) int {
 	if r == nil {
 		return 0
@@ -209,12 +197,16 @@ func (r *Registry) CancelAllSessionJobs(sessionID string) int {
 		seen[id] = struct{}{}
 		if err := r.CancelSyncBash(sessionID, id); err == nil {
 			n++
+			continue
+		}
+		if err := r.cancelBackgroundJobByToolCall(sessionID, id); err == nil {
+			n++
 		}
 	}
 	return n
 }
 
-func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) error {
+func (r *Registry) cancelBackgroundJobByToolCall(sessionID, toolCallID string) error {
 	if r == nil || r.bgJobs == nil {
 		return ErrSyncShellNotFound
 	}
@@ -222,33 +214,9 @@ func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) 
 	if !ok || job == nil {
 		return ErrSyncShellNotFound
 	}
-	if job.toolName != "" && job.toolName != "bash_run" {
-		return ErrSyncShellNotBash
-	}
 	_ = job.cancelJob()
 	job.waitDone(5 * time.Second)
 	// collector 在 status=cancelled 时不会 notifyDone；此处一律回灌（幂等）。
 	r.bgJobs.notifyJobDone(job)
-	return nil
-}
-
-// BackgroundSyncBash 将仍在同步等待的 bash_run 转为后台任务。
-func (r *Registry) BackgroundSyncBash(sessionID, toolCallID string) error {
-	if r == nil || r.syncShells == nil {
-		return ErrSyncShellNotFound
-	}
-	entry, ok := r.syncShells.get(toolCallID)
-	if !ok || entry == nil || entry.gate == nil {
-		return ErrSyncShellNotFound
-	}
-	if sid := strings.TrimSpace(sessionID); sid != "" && entry.sessionID != "" && entry.sessionID != sid {
-		return ErrSyncShellNotFound
-	}
-	if entry.job != nil && entry.job.toolName != "" && entry.job.toolName != "bash_run" {
-		return ErrSyncShellNotBash
-	}
-	if !entry.gate.RequestBackground() {
-		return ErrSyncShellNotFound
-	}
 	return nil
 }

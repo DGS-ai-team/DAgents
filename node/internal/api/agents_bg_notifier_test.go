@@ -10,17 +10,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// 复现并回归：per-agent Registry 必须挂 BackgroundJobNotifier，否则 status=succeeded 但无 async 回灌。
-func TestPerAgentBackgroundJobNotifiesAsyncCallback(t *testing.T) {
+// bash_run is deliberately synchronous: a timeout is a terminal tool result,
+// not an implicit background job which later injects an async callback.
+func TestPerAgentBashTimeoutDoesNotCreateAsyncCallback(t *testing.T) {
 	root, err := os.MkdirTemp("", "dagents-per-agent-bg-notify-*")
 	if err != nil {
 		t.Fatal(err)
@@ -77,82 +76,16 @@ defaults:
 		t.Fatal("expected distinct per-agent registry")
 	}
 
-	ctx := tools.WithToolCallID(tools.WithSession(context.Background(), created.AgentID), "call-per-agent-bg")
-	done := make(chan string, 1)
-	go func() {
-		out, execErr := reg.Execute(ctx, "bash_run", `{"command":"sleep 1","timeout_seconds":30}`)
-		if execErr != nil {
-			done <- "ERR:" + execErr.Error()
-			return
-		}
-		done <- out
-	}()
-
-	bgDeadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(bgDeadline) {
-		if err := reg.BackgroundSyncBash(created.AgentID, "call-per-agent-bg"); err == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	ctx := tools.WithToolCallID(tools.WithSession(context.Background(), created.AgentID), "call-per-agent-timeout")
+	out, err := reg.Execute(ctx, "bash_run", `{"command":"sleep 2","timeout_seconds":1}`)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	select {
-	case out := <-done:
-		if strings.HasPrefix(out, "ERR:") || !strings.Contains(out, "status=RUNNING") {
-			t.Fatalf("expected RUNNING degrade, got %q", out)
-		}
-		jobID := extractBashJobID(out)
-		if jobID == "" {
-			t.Fatalf("missing job_id in %q", out)
-		}
-
-		deadline := time.Now().Add(8 * time.Second)
-		for time.Now().Before(deadline) {
-			statusOut, _ := reg.Execute(context.Background(), "background_job_status", `{"job_id":"`+jobID+`"}`)
-			if !strings.Contains(statusOut, "status=succeeded") {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			view, err := srv.sessions.GetHydrateView(created.AgentID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if hydrateContainsJobID(view, jobID) {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-
-		statusOut, _ := reg.Execute(context.Background(), "background_job_status", `{"job_id":"`+jobID+`"}`)
-		view, _ := srv.sessions.GetHydrateView(created.AgentID)
-		t.Fatalf("job status=%q but async callback not applied; hydrate=%+v", statusOut, view)
-	case <-time.After(10 * time.Second):
-		t.Fatal("bash did not return after background")
+	if !strings.Contains(out, "status=TIMED_OUT") || strings.Contains(out, "job_id=") {
+		t.Fatalf("expected synchronous timeout without job, got %q", out)
 	}
-}
-
-func extractBashJobID(text string) string {
-	idx := strings.Index(text, "job_id=")
-	if idx < 0 {
-		return ""
+	counts := reg.SessionToolJobCounts(created.AgentID)
+	if counts.Running != 0 || counts.Background != 0 {
+		t.Fatalf("timed out bash left jobs behind: %+v", counts)
 	}
-	rest := text[idx+len("job_id="):]
-	end := strings.IndexAny(rest, " \n")
-	if end < 0 {
-		return strings.TrimSpace(rest)
-	}
-	return rest[:end]
-}
-
-func hydrateContainsJobID(view *session.HydrateView, jobID string) bool {
-	if view == nil {
-		return false
-	}
-	for _, e := range view.Transcript {
-		raw, _ := json.Marshal(e)
-		if strings.Contains(string(raw), jobID) {
-			return true
-		}
-	}
-	return false
 }

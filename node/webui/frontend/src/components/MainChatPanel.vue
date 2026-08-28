@@ -672,7 +672,6 @@ defineExpose({
         <span class="chat__title-main">{{ agentTitle || "助手" }}</span>
       </div>
       <div class="chat__header-meta">
-        <span v-if="pendingApprovals > 0" class="pill pill--warn">{{ pendingApprovals }} 待审批</span>
         <WorkspaceSwitcher
           v-if="showWorkspaceSwitcher && !compact"
           :active="workspaceView"

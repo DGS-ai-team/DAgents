@@ -3,11 +3,11 @@
 N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。
 
 **`bash_run` 超时语义**：
-- **显式传入 `timeout_seconds`**：同步等待该秒数，超时**自动降级**为后台 job（返回 `job_id`），完成后 `async_tool_result` 回灌。
-- **省略 `timeout_seconds`**：最长等待硬上限（默认 600 秒），超时**终止并报错**（不转后台）。
-- **UI 控制**（仅 bash）：执行中可「终止」或「转后台」；HTTP `POST /v1/agents/{id}/tool-calls/{tool_call_id}/cancel|background`。
+- **显式传入 `timeout_seconds`**：同步等待该秒数，超时**终止并返回 `timed_out` 失败结果**，不会创建后台 job。
+- **省略 `timeout_seconds`**：最长等待硬上限（默认 600 秒），超时同样**终止并报错**。
+- **UI 控制**（仅 bash）：执行中可「终止」；不支持把 bash_run 转为后台。需要长期运行状态时使用 `terminal_open`。
 
-内部仍保留 `StartBackground` / `job_registry` 供降级、UI 转后台与测试使用。
+`StartBackground` / `job_registry` 仍服务于明确支持后台执行的其他工具；bash_run 会显式拒绝后台入口。
 
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
@@ -92,9 +92,9 @@ tools/
 ## 执行模式
 
 - **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_create` 等始终同步完成。
-- **`bash_run` 显式 timeout**：同步等待 `timeout_seconds`；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
-- **`bash_run` 省略 timeout**：硬上限（默认 600s）到期杀进程并返回 ERROR（不转后台）；UI 可提前终止或转后台。
+- **`bash_run`**：始终同步调用；到达显式 timeout 或默认硬上限后杀进程并返回 `TIMED_OUT`，不登记后台 job，也不产生异步回灌。
+- **`terminal_open`**：用于需要保持目录、环境或进程状态的长期交互任务。
 - **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../../docs/design/ux-agent-owned-file-approval.md)）。
-- **内部 `StartBackground`**：不在 tool schema 暴露；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段。
+- **内部 `StartBackground`**：仅供支持后台的工具使用；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段，但 bash_run 不接受该语义。
 
 触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md).

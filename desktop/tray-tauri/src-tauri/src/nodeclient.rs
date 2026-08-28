@@ -51,6 +51,10 @@ pub struct StreamEvent {
     pub session_id: String,
     pub agent_id: String,
     pub seq: i32,
+    pub agent_seq: i32,
+    pub event_version: i32,
+    pub stream_epoch: String,
+    pub delivery: String,
     pub data: HashMap<String, Value>,
 }
 
@@ -62,6 +66,14 @@ struct StreamEnvelope {
     event_type: String,
     #[serde(default)]
     seq: i32,
+    #[serde(default)]
+    agent_seq: i32,
+    #[serde(default)]
+    event_version: i32,
+    #[serde(default)]
+    stream_epoch: String,
+    #[serde(default)]
+    delivery: String,
     #[serde(default)]
     data: HashMap<String, Value>,
 }
@@ -268,6 +280,10 @@ fn decode_stream_event(
         session_id: agent_id.clone(),
         agent_id,
         seq,
+        agent_seq: envelope.agent_seq,
+        event_version: envelope.event_version,
+        stream_epoch: envelope.stream_epoch,
+        delivery: envelope.delivery,
         data: envelope.data,
     })
 }

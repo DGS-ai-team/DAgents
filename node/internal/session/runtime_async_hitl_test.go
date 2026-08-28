@@ -133,10 +133,15 @@ func TestTriggerProduceDuringHITLDoesNotScheduleContinue(t *testing.T) {
 	if err := mgr.EnqueueTriggerMessage(sess.ID, "trig-1", "deferred trigger"); err != nil {
 		t.Fatal(err)
 	}
-	waitQueueDrain(t, rt, 3*time.Second)
-
-	if !rt.sideEffects.HasReady() {
-		t.Fatal("trigger should be buffered")
+	deadline := time.Now().Add(3 * time.Second)
+	for rt.inputBox.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rt.inputBox.Len() != 1 {
+		t.Fatal("trigger should be buffered in InputBox")
+	}
+	if rt.sideEffects.HasReady() {
+		t.Fatal("trigger must not be converted into a side effect")
 	}
 	if sideEffectContinueDepth(rt) != 0 {
 		t.Fatalf("HITL should defer continue, depth=%d", sideEffectContinueDepth(rt))

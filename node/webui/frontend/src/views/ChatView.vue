@@ -19,6 +19,7 @@ import {
   beginImplicitTurn,
   isStaleEvent,
   isDuplicateEvent,
+  observeEventContinuity,
   markEventApplied,
   shouldAckSSEEvent,
   resetEventTracking,
@@ -26,7 +27,6 @@ import {
 import {
   transcriptStore,
   addUser,
-  addDeferredUser,
   markSideEffectsApplied,
   markSideEffectsStale,
   addSystem,
@@ -127,6 +127,7 @@ const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
+let sseResyncInFlight = false;
 let hitlReconcileInFlight = false;
 let hitlReconciledTurnId = "";
 let agentSwitchToken = 0;
@@ -207,6 +208,7 @@ function restartStream() {
   streamHandle.value = connectStream({
     getAgentId: () => agentStore.agentId,
     getAfterSeq: () => transcriptStore.lastSeq,
+    getAfterAgentSeq: () => transcriptStore.lastAgentSeq,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
@@ -220,7 +222,8 @@ function restartStream() {
 
 /** SSE 断线重连或状态卡住时：hydrate 对账 turn/status/HITL（不重启已恢复的流）。 */
 async function resyncAfterSSEGap(reason) {
-  if (!agentStore.agentId) return;
+  if (!agentStore.agentId || sseResyncInFlight) return;
+  sseResyncInFlight = true;
   const token = ++sseResyncToken;
   const agentId = agentStore.agentId;
   turnWatchdog.noteActivity();
@@ -241,6 +244,8 @@ async function resyncAfterSSEGap(reason) {
   } catch (e) {
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     agentStore.error = e.message || String(e);
+  } finally {
+    sseResyncInFlight = false;
   }
 }
 
@@ -337,7 +342,15 @@ function handleEvent(ev) {
   // 防御：忽略非当前 Agent 的事件（切 Agent 时旧 EventSource 可能仍投递）
   if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
 
-  if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
+  const continuity = observeEventContinuity(ev.agentSeq, ev.epoch);
+  if (continuity.epochChanged) {
+    void resyncAfterSSEGap("epoch-change");
+    return;
+  }
+  if (continuity.gap) {
+    void resyncAfterSSEGap("sequence-gap");
+  }
+  if (isStaleEvent(ev.seq, ev.agentSeq, ev.epoch) || isDuplicateEvent(ev.seq, ev.agentSeq, ev.epoch)) return;
   recordSSEEvent(ev.type, ev.seq);
   const eventSpan = startPerformanceSpan("sse.handle", { type: ev.type });
   try {
@@ -417,16 +430,7 @@ function handleEvent(ev) {
       setUsageFromSSE(ev.data);
       break;
     case "error":
-      clearHitl();
-      finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
-      if (turnStateStore.authority !== "turn_coordinator") {
-        applyTurnState(
-          { phase: "failed", terminal: true, end_reason: ev.data.message || "error" },
-          { source: "event" },
-        );
-        syncTurnStatus(turnStateStore);
-      }
       break;
     case "system_notice":
       addSystem(String(ev.data?.message || "工具集已变更"));
@@ -456,21 +460,15 @@ function handleEvent(ev) {
           : "MCP 工具目录已更新。",
       );
       break;
-    case "done":
-      // Legacy nodes may only emit done without a terminal turn_state.
-      // Reconcile the local approval projection on that path as well.
-      clearHitl();
+    case "turn_finished":
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
       refreshToolJobs(agentStore.agentId);
-      // done closes the content stream. The lifecycle projection owns the
-      // Turn terminal transition; keep the legacy fallback for older nodes.
-      if (turnStateStore.authority !== "turn_coordinator") {
-        resetToolStream();
-        syncChildAgentsFromApi();
-      }
       refreshContextTokens();
+      break;
+    case "resync_required":
+      void resyncAfterSSEGap("server-resync");
       break;
     case "hitl_required":
       finalizeAssistant();
@@ -478,13 +476,6 @@ function handleEvent(ev) {
       {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
-      }
-      if (turnStateStore.authority !== "turn_coordinator") {
-        applyTurnState(
-          { phase: ev.data?.type === "user_information" ? "waiting_user" : "tool_waiting" },
-          { source: "event" },
-        );
-        syncTurnStatus(turnStateStore);
       }
       break;
     case "temporary_agent_created":
@@ -506,13 +497,6 @@ function handleEvent(ev) {
       syncTurnStatus({ phase: "queued" });
       turnWatchdog.noteActivity();
       break;
-    case "user_message_deferred":
-      addDeferredUser(
-        String(ev.data.content || ""),
-        String(ev.data.user_name || ""),
-        Number(ev.data.side_effect_seq) || 0,
-      );
-      break;
     case "side_effect_applied":
       markSideEffectsApplied(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
       break;
@@ -531,7 +515,11 @@ function handleEvent(ev) {
       addSystem(`收到未识别的 Agent 事件：${String(ev.type || "unknown")}`);
     }
 
-    markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+    markEventApplied(ev.seq, {
+      agentSeq: ev.agentSeq,
+      epoch: ev.epoch,
+      ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data),
+    });
   } finally {
     eventSpan.end();
   }
@@ -558,10 +546,10 @@ async function reconcilePendingHitl(turnState) {
   if (hitlReconcileInFlight || hitlStore.queue.length > 0) return;
   const turnId = String(turnState?.turn_id || turnStateStore.turnId || "").trim();
   if (turnId && hitlReconciledTurnId === turnId) return;
-  if (turnId) hitlReconciledTurnId = turnId;
   hitlReconcileInFlight = true;
   try {
-    await hydrateAgent();
+    const data = await hydrateAgent();
+    if (data !== null && turnId) hitlReconciledTurnId = turnId;
   } catch {
     // SSE 仍是主通道；hydrate 失败时交给重连/看门狗再次对账。
   } finally {

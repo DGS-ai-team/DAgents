@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -74,10 +75,14 @@ func TestSaveLoadRuntimeState(t *testing.T) {
 		}},
 	}
 	if err := s.Save(ctx, Record{
-		AgentID:      "sess-pending",
-		NodeID:       "a1",
-		Messages:     []llm.Message{{Role: "user", Content: "hi"}},
-		RuntimeState: RuntimeState{Pending: pending, ToolLoopCount: 2},
+		AgentID:  "sess-pending",
+		NodeID:   "a1",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+		RuntimeState: RuntimeState{
+			Pending:       pending,
+			ToolLoopCount: 2,
+			InputBoxState: json.RawMessage(`{"seq":2,"items":[]}`),
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +92,9 @@ func TestSaveLoadRuntimeState(t *testing.T) {
 	}
 	if rec.RuntimeState.ToolLoopCount != 2 {
 		t.Fatalf("loop count = %d", rec.RuntimeState.ToolLoopCount)
+	}
+	if string(rec.RuntimeState.InputBoxState) != `{"seq":2,"items":[]}` {
+		t.Fatalf("input box state = %s", rec.RuntimeState.InputBoxState)
 	}
 }
 

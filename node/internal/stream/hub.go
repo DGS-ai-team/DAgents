@@ -12,16 +12,33 @@ import (
 
 const defaultHistorySize = 256
 const defaultSubscriberBuffer = 256
+const CurrentEventVersion = 1
 
 // Event 为写入 SSE 的标准事件结构。
 // 线协议仅暴露 agent_id（对话/Agent 实例 id）；SessionID 仅供进程内路由（notify/filter）。
 type Event struct {
-	SessionID string         `json:"-"`
-	AgentID   string         `json:"agent_id"`
-	Type      string         `json:"type"`
-	Seq       int            `json:"seq"`
-	TS        string         `json:"ts"`
-	Data      map[string]any `json:"data"`
+	SessionID    string         `json:"-"`
+	AgentID      string         `json:"agent_id"`
+	Type         string         `json:"type"`
+	Seq          int            `json:"seq"`
+	AgentSeq     int            `json:"agent_seq,omitempty"`
+	EventVersion int            `json:"event_version"`
+	StreamEpoch  string         `json:"stream_epoch"`
+	Delivery     string         `json:"delivery"`
+	TS           string         `json:"ts"`
+	Data         map[string]any `json:"data"`
+}
+
+// Subscription is the result of a cursor-aware subscription. Events is kept
+// as a channel so existing in-process consumers can continue to range over it.
+// ResyncRequired means the requested replay cursor is older than the retained
+// history and the client must hydrate before trusting the live projection.
+type Subscription struct {
+	Events          chan Event
+	ResyncRequired  bool
+	StreamEpoch     string
+	CurrentSeq      int
+	CurrentAgentSeq int
 }
 
 type subscriber struct {
@@ -29,10 +46,12 @@ type subscriber struct {
 	agentFilter string // 空 = 接收全部（Shell 全局订阅）
 }
 
-// Hub 维护全局递增 seq、历史缓冲与订阅者 fan-out。
+// Hub 维护进程内全局 seq、每 Agent 的可重放 cursor、历史缓冲与订阅者 fan-out。
 type Hub struct {
 	mu        sync.RWMutex
 	seq       int
+	agentSeq  map[string]int
+	epoch     string
 	history   []Event
 	historyN  int
 	subs      map[chan Event]*subscriber
@@ -47,6 +66,8 @@ func NewHub(historyN int, logger *slog.Logger) *Hub {
 	}
 	return &Hub{
 		historyN: historyN,
+		agentSeq: make(map[string]int),
+		epoch:    itoa(int(time.Now().UnixNano())),
 		subs:     make(map[chan Event]*subscriber),
 		logger:   logx.OrDefault(logger),
 	}
@@ -82,13 +103,22 @@ func (h *Hub) publish(agentID, eventType string, data map[string]any, replayable
 	h.mu.Lock()
 
 	h.seq++
+	agentSeq := 0
+	if replayable && strings.TrimSpace(agentID) != "" {
+		h.agentSeq[agentID]++
+		agentSeq = h.agentSeq[agentID]
+	}
 	ev := Event{
-		SessionID: agentID,
-		AgentID:   agentID,
-		Type:      eventType,
-		Seq:       h.seq,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		Data:      data,
+		SessionID:    agentID,
+		AgentID:      agentID,
+		Type:         eventType,
+		Seq:          h.seq,
+		AgentSeq:     agentSeq,
+		EventVersion: CurrentEventVersion,
+		StreamEpoch:  h.epoch,
+		Delivery:     deliveryKind(replayable),
+		TS:           time.Now().UTC().Format(time.RFC3339Nano),
+		Data:         data,
 	}
 	if replayable {
 		h.history = append(h.history, ev)
@@ -135,9 +165,32 @@ func (h *Hub) CurrentSeq() int {
 	return h.seq
 }
 
+// CurrentAgentSeq returns the replayable cursor for one Agent. Ephemeral
+// events deliberately do not advance this cursor.
+func (h *Hub) CurrentAgentSeq(agentID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.agentSeq[strings.TrimSpace(agentID)]
+}
+
+// Epoch identifies the current in-process event stream. It changes whenever
+// a Hub is created, so a restarted Node cannot be confused with the old stream.
+func (h *Hub) Epoch() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.epoch
+}
+
+func deliveryKind(replayable bool) string {
+	if replayable {
+		return "replayable"
+	}
+	return "ephemeral"
+}
+
 func isCriticalSSEType(eventType string) bool {
 	switch eventType {
-	case "done", "error", "hitl_required", "turn_state":
+	case "turn_finished", "error", "hitl_required", "turn_state", "resync_required":
 		return true
 	default:
 		return false
@@ -187,15 +240,67 @@ func (h *Hub) Subscribe(afterSeq int) chan Event {
 	return h.SubscribeAgent(afterSeq, "")
 }
 
-// SubscribeAgent 注册订阅者；agentFilter 非空时仅接收该 Agent 的事件（含历史回放），
-// 避免多 Agent 流量占满缓冲导致本 Agent 的 done/hitl 被挤掉。
+// SubscribeAgent 注册订阅者；agentFilter 非空时仅接收该 Agent 的事件（含历史回放）。
+// 它保留给进程内消费者；HTTP Agent 流应使用 SubscribeAgentCursor/Live。
 func (h *Hub) SubscribeAgent(afterSeq int, agentFilter string) chan Event {
 	filter := strings.TrimSpace(agentFilter)
-	ch := make(chan Event, defaultSubscriberBuffer)
-	sub := &subscriber{ch: ch, agentFilter: filter}
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.subscribeLocked(afterSeq, 0, filter, true, false).Events
+}
+
+// SubscribeAgentCursor subscribes with a global cursor for unfiltered streams
+// and an Agent cursor for filtered streams. The Agent cursor is the one that
+// must be persisted by the Web UI because global seq also contains other
+// Agents and ephemeral traffic.
+func (h *Hub) SubscribeAgentCursor(afterGlobalSeq, afterAgentSeq int, agentFilter string) *Subscription {
+	filter := strings.TrimSpace(agentFilter)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.subscribeLocked(afterGlobalSeq, afterAgentSeq, filter, true, filter != "")
+}
+
+// SubscribeAgentLive subscribes at the current cursor while holding the Hub
+// lock, so no event can land between taking the live snapshot and registering.
+func (h *Hub) SubscribeAgentLive(agentFilter string) *Subscription {
+	filter := strings.TrimSpace(agentFilter)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	afterAgent := 0
+	if filter != "" {
+		afterAgent = h.agentSeq[filter]
+	}
+	return h.subscribeLocked(h.seq, afterAgent, filter, false, false)
+}
+
+func (h *Hub) subscribeLocked(afterGlobalSeq, afterAgentSeq int, filter string, checkRetention, useAgentCursor bool) *Subscription {
+	buffer := defaultSubscriberBuffer
+	if len(h.history)+1 > buffer {
+		buffer = len(h.history) + 1
+	}
+	ch := make(chan Event, buffer)
+	sub := &subscriber{ch: ch, agentFilter: filter}
+	resync := false
+	if checkRetention && len(h.history) > 0 {
+		first := h.history[0]
+		if filter == "" {
+			resync = afterGlobalSeq < first.Seq-1
+		} else if useAgentCursor {
+			firstAgent := firstRetainedAgentSeq(h.history, filter)
+			currentAgent := h.agentSeq[filter]
+			if currentAgent > afterAgentSeq {
+				resync = firstAgent == 0 || afterAgentSeq < firstAgent-1
+			}
+		} else {
+			resync = afterGlobalSeq < first.Seq-1
+		}
+	}
 	for _, ev := range h.history {
-		if ev.Seq <= afterSeq {
+		if filter == "" || !useAgentCursor {
+			if ev.Seq <= afterGlobalSeq {
+				continue
+			}
+		} else if ev.AgentSeq <= afterAgentSeq {
 			continue
 		}
 		if filter != "" && !subscriberMatches(sub, ev.AgentID) {
@@ -204,8 +309,22 @@ func (h *Hub) SubscribeAgent(afterSeq int, agentFilter string) chan Event {
 		ch <- ev
 	}
 	h.subs[ch] = sub
-	h.mu.Unlock()
-	return ch
+	return &Subscription{
+		Events:          ch,
+		ResyncRequired:  resync,
+		StreamEpoch:     h.epoch,
+		CurrentSeq:      h.seq,
+		CurrentAgentSeq: h.agentSeq[filter],
+	}
+}
+
+func firstRetainedAgentSeq(history []Event, agentID string) int {
+	for _, ev := range history {
+		if ev.AgentID == agentID && ev.AgentSeq > 0 {
+			return ev.AgentSeq
+		}
+	}
+	return 0
 }
 
 // Unsubscribe 移除订阅并关闭 channel；重复调用安全。

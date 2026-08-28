@@ -41,14 +41,13 @@ sequenceDiagram
             O-->>RT: PendingHITL
         end
     else 无 tool_calls
-        O-->>H: done SSE
+        O-->>H: turn_finished SSE
     end
 ```
 
 **构造**：`NewOrchestrator(agentID, fsRoot, hub, client, toolExec, policy, skillAccess, maxToolLoops, promptCtx, journal, logger)`  
 **事后注入**（由 `session.newRuntimeWithPublisher` 完成）：
 
-- `SetToolResultEnqueuer`：工具步结束后入队 `tool_result`（生产必须）
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
 - `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
@@ -62,8 +61,8 @@ sequenceDiagram
 |------|------|
 | `RunHumanMessageTurn` | 追加 user 消息后**单步**模型回合；Step 序号来自 `TurnExecutionContext` |
 | `RunToolMessageTurn` | history 已含 tool 结果后**单步**续跑 |
-| `ContinueAfterResume` | HITL resume 写入 tool 结果并调度续跑 |
-| `InterruptPending` | 新 user 消息打断 pending tool calls |
+| `ContinueAfterResume` | HITL resume 写入 tool 结果并返回 inline 续跑结果 |
+| `CancelPendingToolCalls` | 显式 `CancelTurn` 时闭合 pending tool calls；普通输入不调用 |
 
 旁路 side-effect（Produce/Apply/Continue）见 [`side_effect_messages.go`](./side_effect_messages.go)、[`task_complete.go`](./task_complete.go)；session 侧 [`../session/side_effects.go`](../session/side_effects.go)。规格：[`../../../docs/design/turn-side-effects-refactor.md`](../../../docs/design/turn-side-effects-refactor.md)。
 
@@ -96,9 +95,9 @@ sequenceDiagram
 
 `processToolCalls` 按 `policy.DecideTool` 将 tool calls 分为：
 
-- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 仅在显式 `timeout_seconds` 时超时降级；历史参数仍可走内部 `StartBackground`）
+- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 始终同步；超时直接失败，不转后台；长期任务使用 `terminal_open`）
 - **HITL pending**：`ask_user_information` 与 `require_approval` 工具合并为 **`PendingHITL.Items[]`**（不再区分 `HITLKind`）
-- **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；`done` 为 `awaiting_hitl` / `awaiting=hitl`
+- **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；HITL 暂停不发终态事件。真正结束时发送 **`turn_finished`**，其 payload 含 `finish_reason`、`turn_complete=true` 与工具上下文指标。
 
 ### 工具结果状态
 
@@ -117,7 +116,7 @@ sequenceDiagram
 
 **分步 resume**：Client 按 item 类型提交 `resume`（`type=user_information` 或 `type=approval|selection`）；Node `ContinueAfterResume` 部分消 pending，全部 resolved 后 `ScheduleToolResult`。
 
-**仍用旧事件的路径**：A2A caller 中继（`approval_required` / `user_information_required`）、子 Agent 审批 relay（`approval_required` + `child_agent_id`）。
+**中继事件路径**：A2A caller 中继（`approval_required` / `user_information_required`）、子 Agent 审批 relay（`approval_required` + `child_agent_id`）。
 
 临时 Agent 四类工具在父 session 转 `childagent.Manager.HandleParentTool`；子 session 调用管理类工具会被拒绝。
 

@@ -15,8 +15,8 @@ type RelayHub struct {
 
 // Publish 实现 stream.Publisher；忽略 orchestrator 传入的 agentID，统一发往父 Agent。
 func (h *RelayHub) Publish(_agentID, eventType string, data map[string]any) stream.Event {
-	if eventType == "done" {
-		// 子 turn 的 done 不代表父 Agent 回合结束，避免 Client 误判。
+	if eventType == "turn_finished" {
+		// 子 turn 的终态不代表父 Agent 回合结束，避免 Client 误判。
 		return stream.Event{}
 	}
 	if data == nil {

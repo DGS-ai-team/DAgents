@@ -1066,8 +1066,8 @@ func (c *TurnCoordinator) advanceToolExecutionLocked(command TurnCommand) error 
 }
 
 // recordExternalFactLocked records a result that arrived from outside the
-// active tool execution boundary (for example an async job completion or an
-// external trigger). It deliberately does not create a ToolExecution: the
+// active tool execution boundary (for example an async job completion). It
+// deliberately does not create a ToolExecution: the
 // fact is evidence for the current Turn, not a new model-requested tool.
 func (c *TurnCoordinator) recordExternalFactLocked(command TurnCommand) error {
 	if c.turn == nil || c.step == nil {

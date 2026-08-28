@@ -6,6 +6,8 @@
 
 > **Turn/Step 重构说明（2026-08）**：下文场景表中的 `pending`、`state`、`toolLoopCount` 是规格编写时的状态记号；当前代码以 `turn.Coordinator` 的生命周期事件和投影为准，`StepOutcome.LoopCount` 已替换为 `StepOutcome.StepIndex`。旁路 Produce/Apply/Continue 的行为不变。
 
+> **后续语义修订（2026-08-27）**：本文的旁路场景和第 1.3、6–10 节保留为历史设计/验收背景，不再完整代表当前运行时。现行实现中，user/trigger/A2A 输入进入 session `InputBox` FIFO；活动 Turn（包括审批等待）期间只排队，普通输入不会调用 `InterruptPending`，只有显式 `turn cancel` 才会取消当前 Turn。`ask_user_information` 仍通过 typed `resume` 回答；`bash_run` 始终同步执行，超时直接失败，不创建后台 job。当前规范以 [`docs/architecture/go-node-internals.md`](../architecture/go-node-internals.md) 和 session/tools README 为准。
+
 ## 实现摘要（2026-06）
 
 | 阶段 | 行为 |
@@ -150,7 +152,7 @@ sequenceDiagram
 | B6 | batch 闭合、无 pending → **`enqueueToolResult()`**（在 `runOneStep` 内） | 同上 | `H₀` | **`[tool_result]`** | — |
 | B7 | `runOneStep` 返回 `StepOutcome{LoopCount:1}`（无 `ScheduleToolResult`） | 同上 | `H₀` | `[tool_result]` | — |
 | B8 | `applyStepOutcome` **commit** | — | **`H₁ = H₀+U+A₁+T₁`** | `[tool_result]` | — |
-| B9 | handler 结束；`ScheduleToolResult==false` → `persist` | — | `H₁` | `[tool_result]` | 第一步结束后 Client 已见工具 SSE；`done` 在 B5–B6 附近由 orchestrator 推送（本路径无 pending） |
+| B9 | handler 结束；`ScheduleToolResult==false` → `persist` | — | `H₁` | `[tool_result]` | 第一步结束后 Client 已见工具 SSE；`turn_finished` 在 B5–B6 附近由 orchestrator 推送（本路径无 pending） |
 
 **要点**
 
@@ -173,7 +175,7 @@ H₁ = [ … , user(U), assistant(tool_calls=[tc₁]), tool(tc₁ → result) ]
 | C2 | `toolLoopCountSnapshot()` → 0；`runTurnStep`，`history := H₁` | `h = H₁` | `H₁` | `[]` |
 | C3 | `RunToolMessageTurn` → `runOneStep`（**不**追加 user） | `h = H₁` | `H₁` | `[]` |
 | C4 | `StreamChat` → 无 `tool_calls` | `… + A₂(text)` | `H₁` | `[]` |
-| C5 | `publishDone(stop)` | 同上 | `H₁` | `[]` |
+| C5 | `publishTurnFinished(stop)` | 同上 | `H₁` | `[]` |
 | C6 | `StepOutcome{LoopCount:1}` | 同上 | `H₁` | `[]` |
 | C7 | `applyStepOutcome` commit | — | **`H₂ = H₁ + A₂`** | `[]` |
 | C8 | 无后续 enqueue → `persist`，idle | — | `H₂` | `[]` |
@@ -250,7 +252,7 @@ sequenceDiagram
     Loop->>RTS: handleHumanMessage
     RTS->>Orch: RunHumanMessageTurn → runOneStep
     Note over Orch: h: +user +assistant(text)
-    Orch->>Loop: publishDone(stop)
+    Orch->>Loop: publishTurnFinished(stop)
     RTS->>Loop: applyStepOutcome → H commit
     Note over Q: 无 tool_result 入队
 ```
@@ -262,7 +264,7 @@ sequenceDiagram
 | A1 | 入队 `message` | `H₀` | `[message]` | idle |
 | B1 | Dequeue → `handleHumanMessage` | `H₀` | `[]` | — |
 | B2 | `appendHistory(user)` + `runOneStep` | `H₀+U+A(text)` | `[]` | 步内 streaming |
-| B3 | 无 tool_calls → `publishDone(stop)` | 同上 | `[]` | — |
+| B3 | 无 tool_calls → `publishTurnFinished(stop)` | 同上 | `[]` | — |
 | B4 | `StepOutcome{LoopCount:1}`；**不** enqueue | 同上 | `[]` | — |
 | B5 | `applyStepOutcome` commit | **`H₁=H₀+U+A(text)`** | `[]` | idle, pending=nil, toolLoopCount=0 |
 | B6 | `persist` | `H₁` | `[]` | — |
@@ -279,7 +281,7 @@ H:  H₀ → H₀ + user + assistant(终稿)
 
 - **仅 1 次** `handleHumanMessage`，无 `handleToolResult`。
 - `runOneStep` 在 `len(result.ToolCalls)==0` 分支直接结束，**从不**调用 `enqueueToolResult`。
-- Client 仅见一轮 `assistant` + `done(turn_complete=true)`。
+- Client 仅见一轮 `assistant` + `turn_finished(turn_complete=true)`。
 
 ### 4.6 不变量
 
@@ -347,7 +349,7 @@ H:  H₀ → H₀+U+A+T₁…Tₙ → …+assistant(终稿)
 
 - 模型第一步返回 **2 个** tool_calls：`tc_auto`（policy auto）、`tc_appr`（require approval）。
 - `processToolCalls` 顺序：先 `executeAutoBatch([tc_auto])`，再因 `approvalCalls` 非空返回 `PendingHITL`。
-- **不** enqueue `tool_result`；Client 见 `hitl_required` + `done(awaiting=hitl)`。
+- **不** enqueue `tool_result`；Client 见 `hitl_required` + `turn_state(tool_waiting)`。
 
 ### 6.2 总览时序
 
@@ -514,7 +516,7 @@ H:  H₁(open)
 | A commit | `H₁ = H₀+U+A(tc)+T(ACK)` | `[tool_result]` |
 | B commit | `H₂ = H₁+A₂` | `[]` |
 
-若 `A₂` 为纯文本，此时 Client 已见 `done(stop)`，但 job 未完成。
+若 `A₂` 为纯文本，此时 Client 已见 `turn_finished(stop)`，但 job 未完成。
 
 ### 8.4 阶段 C — Produce / Apply / `side_effect_continue`
 
@@ -554,7 +556,7 @@ H:  H₀ → H₁(ACK) → H₂(+A₂) → H₃(+callback+终稿)
 | tool 第一步内容 | 最终结果 | ACK |
 | 续跑次数 | 1× `tool_result` | 1× `tool_result` + **1× `side_effect_continue`** |
 | 旁路入队 | 无 | `async_tool_result` → Produce；Continue 经内部队列 |
-| SSE | 一次 done 链 | 可能 **两次** done（B 与 C 各一次）+ `side_effect_applied` |
+| SSE | 一次 turn_finished 链 | 可能 **两次** turn_finished（B 与 C 各一次）+ `side_effect_applied` |
 
 ### 8.7 不变量（当前实现）
 

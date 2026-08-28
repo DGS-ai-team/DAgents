@@ -115,17 +115,6 @@ function userImageThumb(src) {
     </div>
   </div>
 
-  <div v-else-if="entry.kind === 'user_deferred'" class="msg msg--user msg--user-deferred" :class="{ 'msg--user-applied': entry.sideEffectApplied, 'msg--user-stale': entry.sideEffectStale }">
-    <div class="msg__body">
-      <div class="msg__bubble msg__bubble--user msg__bubble--deferred">
-        <span v-if="entry.userName" class="msg__deferred-tag">{{ entry.userName }}</span>
-        <span v-if="entry.sideEffectApplied" class="msg__applied-tag">已入库</span>
-        <span v-else-if="entry.sideEffectStale" class="msg__stale-tag">已失效</span>
-        {{ entry.text }}
-      </div>
-    </div>
-  </div>
-
   <div v-else-if="entry.kind === 'assistant'" class="msg msg--assistant" data-kind="assistant" :class="{ 'msg--generating': entry.streaming }">
     <div class="msg__body">
       <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
@@ -258,29 +247,6 @@ function userImageThumb(src) {
   font-size: 13px;
   line-height: 1.55;
   color: var(--color-text);
-}
-.msg__bubble--deferred {
-  opacity: 0.85;
-}
-.msg--user-applied .msg__bubble--deferred {
-  opacity: 1;
-}
-.msg--user-stale .msg__bubble--deferred {
-  opacity: 0.55;
-  text-decoration: line-through;
-}
-.msg__applied-tag,
-.msg__stale-tag {
-  display: inline-block;
-  margin-right: 6px;
-  font-size: 10px;
-  text-transform: uppercase;
-}
-.msg__applied-tag {
-  color: var(--color-success);
-}
-.msg__stale-tag {
-  color: var(--color-text-subtle);
 }
 .msg__deferred-tag {
   display: inline-block;

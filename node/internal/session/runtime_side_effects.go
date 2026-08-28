@@ -23,26 +23,7 @@ func (r *runtime) handleSideEffectProduceAsync(_ context.Context, payload *queue
 	pending := r.pendingSnapshot()
 
 	r.sideEffects.Produce(r.orch, r.session.ID, msgs, sideEffectProduceInput{
-		Kind:  turn.SideEffectAsync,
 		Async: payload,
-	})
-	r.maybeScheduleSideEffectContinueAfterProduce(msgs, pending)
-}
-
-func (r *runtime) handleSideEffectProduceExternal(_ context.Context, env queue.Envelope) {
-	if !r.sideEffectsEnabled() {
-		return
-	}
-	r.mu.Lock()
-	msgs := append([]llm.Message(nil), r.messages...)
-	r.mu.Unlock()
-	pending := r.pendingSnapshot()
-
-	r.sideEffects.Produce(r.orch, r.session.ID, msgs, sideEffectProduceInput{
-		Kind:           turn.SideEffectExternalMessage,
-		MessageContent: env.Content,
-		UserName:       env.UserName,
-		TriggerID:      env.TriggerID,
 	})
 	r.maybeScheduleSideEffectContinueAfterProduce(msgs, pending)
 }
@@ -70,7 +51,7 @@ func (r *runtime) scheduleSideEffectContinue(source string) {
 	if err := r.enqueue(queue.Envelope{
 		RequestType:              queue.RequestTypeSideEffectContinue,
 		SideEffectContinueSource: source,
-	}, queue.PriorityToolResult); err != nil {
+	}, queue.PriorityContinuation); err != nil {
 		r.sideEffects.clearContinuePending()
 		r.logger.Warn("side_effect_continue enqueue failed",
 			"session_id", r.session.ID,
@@ -132,5 +113,7 @@ func (r *runtime) handleSideEffectContinue(parent context.Context, source string
 		}
 	}
 	r.commitHistoryFallback(history)
-	r.afterToolStep(outcome)
+	outcome = r.runInlineToolContinuationChain(parent, 0, outcome)
+	r.finishTurnIdle(outcome)
+	r.persist(context.Background())
 }
