@@ -207,8 +207,30 @@ func TestQualifiedToolNameRejectsUnsafeNames(t *testing.T) {
 	if _, err := QualifiedToolName("server", "has/slash"); err == nil {
 		t.Fatal("expected unsafe tool name error")
 	}
-	if _, err := QualifiedToolName("server", fmt.Sprintf("%060s", "tool")); err == nil {
-		t.Fatal("expected long tool name error")
+	if _, err := QualifiedToolName("server", ""); err == nil {
+		t.Fatal("expected empty tool name error")
+	}
+}
+
+func TestQualifiedToolNameTruncatesLongNamesWithStableHash(t *testing.T) {
+	remote := fmt.Sprintf("%060s", "tool")
+	got, err := QualifiedToolName("server", remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != maxLLMToolNameLength {
+		t.Fatalf("qualified name length = %d, name=%q", len(got), got)
+	}
+	if got[:len("mcp__server__")] != "mcp__server__" {
+		t.Fatalf("qualified name lost readable prefix: %q", got)
+	}
+	want, err := QualifiedToolName("server", remote)
+	if err != nil || got != want {
+		t.Fatalf("qualified name is not stable: got=%q want=%q err=%v", got, want, err)
+	}
+	other, err := QualifiedToolName("server", remote+"x")
+	if err != nil || got == other {
+		t.Fatalf("different remote names should not share long alias: got=%q other=%q err=%v", got, other, err)
 	}
 }
 
