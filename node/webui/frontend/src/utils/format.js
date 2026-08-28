@@ -3,7 +3,7 @@ import {
   approvalItemDisplayName,
   approvalItemHint,
   approvalItemHintVisible,
-  approvalItemReason,
+  approvalItemPurpose,
   approvalItemToolLabel,
   formatApprovalRawArguments,
   parseToolArguments,
@@ -17,7 +17,7 @@ export {
   approvalItemDisplayName,
   approvalItemHint,
   approvalItemHintVisible,
-  approvalItemReason,
+  approvalItemPurpose,
   approvalItemToolLabel,
   formatApprovalRawArguments,
 };

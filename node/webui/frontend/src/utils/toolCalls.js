@@ -220,40 +220,6 @@ const APPROVAL_TOOL_LABELS = {
   background_job_cancel: "取消后台任务",
 };
 
-const APPROVAL_ACTION_LABELS = {
-  bash_run: "将执行 Shell 命令",
-  linux_exec: "执行 Linux SSH 命令",
-  linux_file_upload: "上传 Linux 文件",
-  linux_file_download: "下载 Linux 文件",
-  terminal_command: "将在终端执行命令",
-  terminal_input: "向终端发送输入",
-  terminal_open: "将打开终端",
-  terminal_terminate: "将关闭终端",
-  write_file: "将修改本地文件",
-  search_replace: "将修改本地文件",
-  trigger_create: "将创建定时触发器",
-  trigger_update: "将更新定时触发器",
-  trigger_delete: "将删除定时触发器",
-  background_job_cancel: "将取消后台任务",
-};
-
-const APPROVAL_REASON_PREFIXES = {
-  bash_run: ["将执行 Shell 命令"],
-  linux_exec: ["执行 Linux SSH 命令", "在 Linux SSH channel"],
-  linux_file_upload: ["上传 Linux 文件"],
-  linux_file_download: ["下载 Linux 文件"],
-  terminal_command: ["在终端"],
-  terminal_input: ["向终端"],
-  terminal_open: ["将打开终端"],
-  terminal_terminate: ["将关闭终端"],
-  write_file: ["将修改本地文件"],
-  search_replace: ["将修改本地文件"],
-  trigger_create: ["将创建定时触发器"],
-  trigger_update: ["将更新定时触发器"],
-  trigger_delete: ["将删除定时触发器"],
-  background_job_cancel: ["将取消后台任务"],
-};
-
 function approvalItemArguments(item) {
   if (
     item?.arguments &&
@@ -272,29 +238,10 @@ export function approvalItemToolLabel(item) {
   return APPROVAL_TOOL_LABELS[name] || name;
 }
 
-/**
- * 审批原因与关键参数分开呈现。
- * 内置策略原因中的动态参数已经会在表单中展示，因此只保留动作描述；
- * 自定义策略原因则保留冒号前的说明，避免丢失“为什么需要审批”。
- */
-export function approvalItemReason(item) {
-  const reason = String(item?.reason || "").trim();
-  if (!reason) return "";
-  const name = String(item?.name || "").trim();
+/** 审批卡片保留模型提供的原始调用目的，但不把它拼进工具标题。 */
+export function approvalItemPurpose(item) {
   const args = approvalItemArguments(item);
-  const overlaps = Object.values(args).some((value) => {
-    if (value == null || typeof value === "object") return false;
-    const text = sanitizeInline(value);
-    return text.length >= 2 && reason.includes(text);
-  });
-  if (!overlaps) return reason;
-
-  const prefix = reason.split(/[:：]/, 1)[0].trim();
-  const knownPrefixes = APPROVAL_REASON_PREFIXES[name] || [];
-  if (knownPrefixes.some((candidate) => prefix.startsWith(candidate))) {
-    return APPROVAL_ACTION_LABELS[name] || prefix;
-  }
-  return prefix || reason;
+  return String(args.call_purpose || "").trim();
 }
 
 /** 将审批参数格式化为默认折叠的原始 JSON，解析失败时保留原文。 */

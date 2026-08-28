@@ -3,7 +3,7 @@ import {
   USER_INFORMATION_TOOL,
   approvalItemDisplayName,
   approvalItemHintVisible,
-  approvalItemReason,
+  approvalItemPurpose,
   approvalItemToolLabel,
   extractToolCallsFromEvent,
   formatApprovalRawArguments,
@@ -115,31 +115,20 @@ describe("approvalItemHintVisible", () => {
 });
 
 describe("approval card presentation", () => {
-  it("keeps tool title free of arguments and removes duplicated built-in detail", () => {
-    const item = {
-      name: "bash_run",
-      arguments: { command: "rm -rf /tmp/x" },
-      reason: "将执行 Shell 命令: rm -rf /tmp/x",
-    };
-    expect(approvalItemToolLabel(item)).toBe("bash");
-    expect(approvalItemReason(item)).toBe("将执行 Shell 命令");
+  it("keeps the original call purpose as a separate user-facing field", () => {
+    expect(
+      approvalItemPurpose({
+        name: "bash_run",
+        arguments: { call_purpose: "检查发布前的环境状态", command: "Get-Date" },
+      }),
+    ).toBe("检查发布前的环境状态");
+    expect(approvalItemPurpose({ name: "bash_run", arguments: { command: "Get-Date" } })).toBe("");
   });
 
-  it("preserves custom approval explanations while removing only the repeated value", () => {
-    expect(
-      approvalItemReason({
-        name: "write_file",
-        arguments: { path: "/tmp/a.txt" },
-        reason: "策略要求审批：/tmp/a.txt",
-      }),
-    ).toBe("策略要求审批");
-    expect(
-      approvalItemReason({
-        name: "mcp__server__tool",
-        arguments: { target: "production" },
-        reason: "需要确认 production 的变更",
-      }),
-    ).toBe("需要确认 production 的变更");
+  it("keeps tool title free of arguments", () => {
+    expect(approvalItemToolLabel({ name: "bash_run", arguments: { command: "rm -rf /tmp/x" } })).toBe(
+      "bash",
+    );
   });
 
   it("formats raw approval arguments as optional readable JSON", () => {

@@ -3,7 +3,7 @@ import { computed } from "vue";
 import {
   approvalItemHint,
   approvalItemHintVisible,
-  approvalItemReason,
+  approvalItemPurpose,
   approvalItemToolLabel,
   formatApprovalRawArguments,
 } from "../utils/format.js";
@@ -33,7 +33,7 @@ const itemCards = computed(() =>
     return {
       ...item,
       toolLabel: approvalItemToolLabel(item),
-      reasonText: approvalItemReason(item),
+      purpose: approvalItemPurpose(item),
       keyFields: card.inputFields,
       rawJson: formatApprovalRawArguments(item.rawArgs, item.arguments),
       hint: approvalItemHintVisible(item) ? approvalItemHint(item) : "",
@@ -144,47 +144,47 @@ function approveOneLabel() {
                   {{ approveOneLabel() }}
                 </button>
               </div>
-          </header>
-          <div v-if="it.reasonText" class="approval-tool-item__policy">
-            <span class="approval-tool-item__policy-label">审批原因</span>
-            <div class="approval-tool-item__reason">{{ it.reasonText }}</div>
-          </div>
+            </header>
+            <div v-if="it.purpose" class="approval-tool-item__purpose">
+              <span class="approval-tool-item__purpose-label">执行目的</span>
+              <span class="approval-tool-item__purpose-value">{{ it.purpose }}</span>
+            </div>
 
-          <dl v-if="it.keyFields.length" class="approval-tool-item__fields">
-            <template v-for="field in it.keyFields" :key="`${it.callId}-${field.label}`">
-              <div v-if="field.kind === 'code'" class="approval-tool-item__code-field">
-                <dt>{{ field.label }}</dt>
-                <dd><pre>{{ field.value || '—' }}</pre></dd>
-              </div>
-              <div v-else class="approval-tool-item__field">
-                <dt>{{ field.label }}</dt>
-                <dd>
-                  <pre v-if="field.kind === 'multiline'">{{ field.value }}</pre>
-                  <span v-else>{{ field.value }}</span>
-                </dd>
-              </div>
-            </template>
-          </dl>
-          <p
-            v-if="it.duplicateWindowSec > 0"
-            class="approval-tool-item__dup"
-          >
-            重复调用
-            <template v-if="it.duplicateWindowSec"> · {{ it.duplicateWindowSec }}s 内</template>
-          </p>
-          <p v-if="it.hint && !it.keyFields.length" class="approval-tool-item__hint">
-            {{ it.hint }}
-          </p>
-          <details v-if="it.duplicatePreview" class="approval-tool-item__raw">
-            <summary>上次结果摘要</summary>
-            <pre class="approval-tool-item__raw-content">{{ it.duplicatePreview }}</pre>
-          </details>
-          <details v-if="it.rawJson" class="approval-tool-item__raw">
-            <summary>展开原始 JSON</summary>
-            <pre class="approval-tool-item__raw-content">{{ it.rawJson }}</pre>
-          </details>
-        </li>
-      </ul>
+            <dl v-if="it.keyFields.length" class="approval-tool-item__fields">
+              <template v-for="field in it.keyFields" :key="`${it.callId}-${field.label}`">
+                <div v-if="field.kind === 'code'" class="approval-tool-item__code-field">
+                  <dt>{{ field.label }}</dt>
+                  <dd><pre>{{ field.value || '—' }}</pre></dd>
+                </div>
+                <div v-else class="approval-tool-item__field">
+                  <dt>{{ field.label }}</dt>
+                  <dd>
+                    <pre v-if="field.kind === 'multiline'">{{ field.value }}</pre>
+                    <span v-else>{{ field.value }}</span>
+                  </dd>
+                </div>
+              </template>
+            </dl>
+            <p
+              v-if="it.duplicateWindowSec > 0"
+              class="approval-tool-item__dup"
+            >
+              重复调用
+              <template v-if="it.duplicateWindowSec"> · {{ it.duplicateWindowSec }}s 内</template>
+            </p>
+            <p v-if="it.hint && !it.keyFields.length" class="approval-tool-item__hint">
+              {{ it.hint }}
+            </p>
+            <details v-if="it.duplicatePreview" class="approval-tool-item__raw">
+              <summary>上次结果摘要</summary>
+              <pre class="approval-tool-item__raw-content">{{ it.duplicatePreview }}</pre>
+            </details>
+            <details v-if="it.rawJson" class="approval-tool-item__raw">
+              <summary>展开原始 JSON</summary>
+              <pre class="approval-tool-item__raw-content">{{ it.rawJson }}</pre>
+            </details>
+          </li>
+        </ul>
         <div v-if="multi" class="approval-bubble__bulk-actions approval-bubble__bulk-actions--footer">
           <span class="approval-bubble__bulk-text">{{ items.length }} 个工具调用待处理</span>
           <div class="approval-tool-item__inline-actions">
@@ -342,10 +342,30 @@ function approveOneLabel() {
   line-height: 1.5;
 }
 
-.approval-tool-item__policy-label {
+.approval-tool-item__purpose {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.approval-tool-item__purpose-label {
   color: var(--color-text-subtle);
   font-size: 11px;
   font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.approval-tool-item__purpose-value {
+  min-width: 0;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .approval-tool-item__raw {
