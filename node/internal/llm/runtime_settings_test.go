@@ -22,11 +22,11 @@ func TestRuntimeSettings_RequestExtra_userIDWithDeepSeekThinking(t *testing.T) {
 }
 
 func TestBuildRequestExtra_deepseek(t *testing.T) {
-	extra := BuildRequestExtra("deepseek", "enabled", "max")
+	extra := BuildRequestExtraForModel("deepseek", "", "enabled", "max")
 	if extra["reasoning_effort"] != "max" {
 		t.Fatalf("effort = %v", extra["reasoning_effort"])
 	}
-	disabled := BuildRequestExtra("deepseek", "disabled", "max")
+	disabled := BuildRequestExtraForModel("deepseek", "", "disabled", "max")
 	if disabled["reasoning_effort"] != nil {
 		t.Fatalf("disabled should not set effort: %v", disabled)
 	}
@@ -57,14 +57,14 @@ func TestRuntimeSettingsApplyPatch(t *testing.T) {
 }
 
 func TestBuildRequestExtra_qwen(t *testing.T) {
-	extra := BuildRequestExtra("qwen", "enabled", "max")
+	extra := BuildRequestExtraForModel("qwen", "", "enabled", "max")
 	if extra["enable_thinking"] != true {
 		t.Fatalf("enable_thinking = %v", extra["enable_thinking"])
 	}
 	if extra["thinking_budget"] != 32768 {
 		t.Fatalf("thinking_budget = %v", extra["thinking_budget"])
 	}
-	disabled := BuildRequestExtra("qwen", "disabled", "max")
+	disabled := BuildRequestExtraForModel("qwen", "", "disabled", "max")
 	if disabled["enable_thinking"] != false {
 		t.Fatalf("disabled = %v", disabled)
 	}
@@ -176,7 +176,7 @@ func TestBuildRequestExtra_newProviders(t *testing.T) {
 		{provider: "mimo", wantKey: "thinking"},
 	}
 	for _, tc := range cases {
-		extra := BuildRequestExtra(tc.provider, "enabled", "high")
+		extra := BuildRequestExtraForModel(tc.provider, "", "enabled", "high")
 		if tc.provider == "glm" {
 			thinking, ok := extra["thinking"].(map[string]any)
 			if !ok || thinking[tc.wantKey] != false {
@@ -188,7 +188,7 @@ func TestBuildRequestExtra_newProviders(t *testing.T) {
 			t.Fatalf("provider=%s extra=%v missing %s", tc.provider, extra, tc.wantKey)
 		}
 	}
-	if got := BuildRequestExtra("mimo", "disabled", "high")["thinking"].(map[string]string)["type"]; got != "disabled" {
+	if got := BuildRequestExtraForModel("mimo", "", "disabled", "high")["thinking"].(map[string]string)["type"]; got != "disabled" {
 		t.Fatalf("mimo thinking type = %q", got)
 	}
 }

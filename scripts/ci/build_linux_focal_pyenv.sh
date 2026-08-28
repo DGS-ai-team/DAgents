@@ -10,7 +10,7 @@
 #
 # 约定：
 # - 工作区挂载为 /src（与 GitHub Actions `docker -v` 一致）；
-# - **CLI_PI_ARGS**（必填之一）：Textual TUI 单文件参数；**API_PI_ARGS** / **RC_PI_ARGS** 可选（legacy backend）；
+# - **BROWSER_PI_ARGS**：传给 `python -m PyInstaller` 的完整 browser-service 参数串；
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时较长，建议在 workflow 上为该 step 设置足够 **timeout**。
@@ -51,16 +51,10 @@ cd /src
 python -m pip install --upgrade pip
 python -m pip install -r requirements.lock pyinstaller
 
-if [[ -z "${API_PI_ARGS:-}" && -z "${RC_PI_ARGS:-}" && -z "${CLI_PI_ARGS:-}" ]]; then
-  echo "[build_linux_focal_pyenv] at least one of API_PI_ARGS, RC_PI_ARGS, CLI_PI_ARGS is required" >&2
+if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
+  echo "[build_linux_focal_pyenv] BROWSER_PI_ARGS is required" >&2
   exit 1
 fi
-if [[ -n "${API_PI_ARGS:-}" ]]; then
-  eval python -m PyInstaller ${API_PI_ARGS}
-fi
-if [[ -n "${RC_PI_ARGS:-}" ]]; then
-  eval python -m PyInstaller ${RC_PI_ARGS}
-fi
-if [[ -n "${CLI_PI_ARGS:-}" ]]; then
-  eval python -m PyInstaller ${CLI_PI_ARGS}
-fi
+python -m pip install -r browser-service/requirements.lock
+# shellcheck disable=SC2086
+python -m PyInstaller ${BROWSER_PI_ARGS}

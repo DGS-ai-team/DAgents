@@ -10,7 +10,8 @@
 
 | 内容 | 传给模型的方式 | 变化边界 |
 |---|---|---|
-| 稳定行为规则、身份、工作区约定 | system prompt | 仅在稳定配置/Hook/Agent 快照变化时重建 |
+| 稳定行为规则、工作区约定 | system prompt | 仅在稳定配置/Hook/Agent 快照变化时重建 |
+| Session 身份、主机快照和其他运行时状态 | request-only `ContextInjection` | 仅在目标 Session 的请求快照中注入，不写入历史 |
 | 工具定义 | API `tools` 字段 | 工具清单或 schema 变化时接受前缀缓存失效 |
 | Skill 目录 | system prompt 中的 metadata | catalog 变化时在下一个 human turn 观察 |
 | Skill 正文 | 独立 `role=user` ContextInjection/context message | `load/unload` 在下一个模型 Step 生效 |

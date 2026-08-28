@@ -56,19 +56,19 @@ class PathFromInstructionTests(unittest.TestCase):
 
     def test_rejects_host_absolute_paths(self) -> None:
         from manage.workgroup.errors import WorkgroupError
-        from manage.workgroup.vertical import validate_member_read_path
+        from manage.workgroup.vertical import validate_member_workspace_path
 
         with self.assertRaises(WorkgroupError) as ctx:
-            validate_member_read_path(r"D:\Program Files\DAgents\config.yaml")
+            validate_member_workspace_path(r"D:\Program Files\DAgents\config.yaml", tool_name="read_file")
         self.assertEqual(ctx.exception.code, "not_authorized")
         self.assertIn("relative", ctx.exception.message.lower())
 
         with self.assertRaises(WorkgroupError) as ctx2:
-            validate_member_read_path("/etc/passwd")
+            validate_member_workspace_path("/etc/passwd", tool_name="read_file")
         self.assertEqual(ctx2.exception.code, "not_authorized")
 
-        self.assertEqual(validate_member_read_path("README"), "README")
-        self.assertEqual(validate_member_read_path("notes/a.md"), "notes/a.md")
+        self.assertEqual(validate_member_workspace_path("README", tool_name="read_file"), "README")
+        self.assertEqual(validate_member_workspace_path("notes/a.md", tool_name="read_file"), "notes/a.md")
 
 
 class AssignVerticalLoopTests(unittest.TestCase):

@@ -60,7 +60,7 @@ func (o *Orchestrator) processToolCalls(
 				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 				continue
 			}
-			_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+			_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs)
 			if err != nil {
 				return nil, "", err
@@ -248,7 +248,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	}
 	beforeLoadedDigest := Digest(loaded)
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	var output string
 	var action string
@@ -296,7 +296,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 
 func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog *skills.Catalog) error {
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	query := strings.TrimSpace(fmt.Sprint(payload["query"]))
 	if query == "<nil>" {
@@ -560,7 +560,7 @@ func (o *Orchestrator) persistToolResult(
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any, execErr error) {
-	runInBackground, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+	runInBackground, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	// bash_run is deliberately synchronous.  Keep parsing the historical
 	// run_in_background field for wire compatibility, but never let it change
 	// execution semantics; long-lived shell sessions use terminal_open.

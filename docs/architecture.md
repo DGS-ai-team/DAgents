@@ -44,16 +44,16 @@ DAgents 由一个本地优先的 Agent Node 和一个可选的 Manage 控制面�
 POST /v1/messages
   → api 解析与鉴权
   → session.Manager.EnqueueMessage
-  → runtime.queue（按 request type / priority 排序）
+  → runtime.InputBox（普通输入按 seq FIFO）
   → consumeLoop
   → turn.Orchestrator.runOneStep
   → LLM 流式响应
   → tool policy：auto / HITL / deny / background
-  → tool result 入队或等待 resume
+  → auto 结果在同一 Turn 链内 inline 续跑；HITL 等待 resume
   → persist + SSE
 ```
 
-同一 runtime 同时只有一个 consumer。一次 human message 可以跨多个模型 Step；每个 Step 都有独立生命周期事件，工具结果通过队列续跑，而不是在 HTTP handler 中递归调用下一轮模型。
+同一 runtime 同时只有一个 consumer。一次 human message 可以跨多个模型 Step；auto 工具结果由 runtime 在同一 Turn 链内 inline 续跑，不通过 MessageQueue 重新排队，也不在 HTTP handler 中递归调用下一轮模型。
 
 外部 `message`/trigger/A2A 输入进入每个 session 的 `InputBox` FIFO；`resume`、异步工具事实和恢复 continuation 由 `MessageQueue` 承载。活动 Turn（包括等待 HITL）期间，普通用户消息只排队，不会打断；只有显式 turn cancel 才会终止当前 Turn。工具结果在同一 Turn 链内 inline 续跑。
 

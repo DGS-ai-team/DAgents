@@ -7,7 +7,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | 文件 | 说明 |
 |------|------|
 | `config.go` | `Config` 结构体、`LoadFile`、`Validate`、`ApplyDefaults` |
-| `agent_id.go` | `ResolveAgentID`、`AgentIDFilePath`：`.runtime/agent/agent_id` 持久化 |
+| `node_id.go` | `ResolveNodeID`、`NodeIDFilePath`：`.runtime/node/node_id` 持久化；旧 `.runtime/agent/agent_id` 仅用于升级迁移 |
 | `resolve.go` | `ResolveConfigPath`：`-config` / `DAGENTS_CONFIG` / 默认候选路径 |
 | `config_test.go` | 默认值、必填项、环境变量展开单测 |
 

@@ -200,7 +200,7 @@ listen:
 | `policy/` | 审批策略（可按 Agent） |
 | `skills/` | skills 目录 |
 | `triggers/` | trigger 持久化 |
-| `prompt_context/` | soul / user / long_term |
+| `prompt_context/` | soul / custom / long_term；`user.md` 仅兼容迁移 |
 | `node/` | `node_id` 等 |
 
 ### 4.4 发布形态

@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func TestParseRunInBackground(t *testing.T) {
-	bg, cleaned := ParseRunInBackground(`{"command":"echo hi","run_in_background":true}`)
+func TestParseToolCallArguments(t *testing.T) {
+	bg, cleaned := ParseToolCallArguments(`{"command":"echo hi","run_in_background":true}`)
 	if !bg || strings.Contains(cleaned, "run_in_background") {
 		t.Fatalf("bg=%v cleaned=%q", bg, cleaned)
 	}
-	bg2, _ := ParseRunInBackground(`{"path":"a.txt"}`)
+	bg2, _ := ParseToolCallArguments(`{"path":"a.txt"}`)
 	if bg2 {
 		t.Fatal("expected false by default")
 	}

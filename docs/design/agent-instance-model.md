@@ -51,7 +51,7 @@ Session runtime
 
 system prompt、API `tools` schema、skill metadata 和动态 ContextInjection 的边界不同：
 
-- 稳定规则、身份和工作区约定进入 system prompt；
+- 稳定规则和工作区约定进入 system prompt；Session 身份、主机快照和其他运行时状态通过 request-only ContextInjection 注入；
 - 工具定义通过模型 API 的 `tools` 字段发送，不在 system prompt 中复制完整 schema；
 - skill 目录只追加元数据；正文在加载生效的 Step 作为独立 context message；
 - 当前终端、附件、工具状态等运行时信息只在需要的 Session 中注入，不污染其他 Session。

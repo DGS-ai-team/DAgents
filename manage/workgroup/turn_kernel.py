@@ -122,10 +122,6 @@ def build_leader_system_prompt(*, workgroup: WorkGroup) -> str:
         ]
     )
 
-
-# 兼容旧引用名（测试 / 外部若仍导入）
-_LEADER_SYSTEM = _LEADER_SYSTEM_RULES
-
 # (workgroup_id, assign_id, member_id, tool_name, tool_call_id, arguments_json) -> tool result content
 MemberToolRunner = Callable[[str, str, str, str, str, str], str]
 
@@ -170,9 +166,6 @@ class TurnKernel:
             and self._context_blocking_trigger_tokens < self._context_silent_trigger_tokens
         ):
             raise ValueError("context_blocking_trigger_tokens must be >= context_silent_trigger_tokens")
-        # Compatibility for the old standalone CAS skeleton. Real HITL rows
-        # always use the durable Store path in resolve_hitl_cas below.
-        self._legacy_hitl_resolutions: dict[str, dict[str, Any]] = {}
         # workgroup_id -> cancel flag（用户中断当前 turn）
         self._cancel_flags: dict[str, threading.Event] = {}
         # assign_id -> cancel flag（只中断单个成员任务，不影响 Supervisor/其他 Assign）
@@ -1086,41 +1079,6 @@ class TurnKernel:
             hitl.status == "pending" and (not hitl.run_id or hitl.run_id == run.run_id)
             for hitl in self._store.list_hitl(run.workgroup_id, pending_only=True)
         )
-
-    def resolve_hitl_cas(
-        self,
-        hitl_id: str,
-        *,
-        expected_status: str = "pending",
-        resolution: dict[str, Any],
-    ) -> dict[str, Any]:
-        """HITL 乐观 CAS 占位：同 id 二次决议 → already_resolved。"""
-        durable = self._store.get_hitl(hitl_id)
-        if durable is not None:
-            if expected_status != "pending":
-                raise WorkgroupError(
-                    "conflict",
-                    f"unexpected HITL status={expected_status}",
-                    http_status=409,
-                )
-            return self._store.resolve_hitl_cas(
-                durable.workgroup_id,
-                hitl_id,
-                resolution=resolution,
-            ).model_dump(mode="json")
-        existing = self._legacy_hitl_resolutions.get(hitl_id)
-        if existing is not None:
-            raise WorkgroupError(
-                "already_resolved",
-                "HITL already resolved",
-                http_status=409,
-                details={"hitl_id": hitl_id, "existing": existing},
-            )
-        if expected_status != "pending":
-            raise WorkgroupError("conflict", f"unexpected HITL status={expected_status}", http_status=409)
-        stored = {"hitl_id": hitl_id, "status": "resolved", "resolution": resolution}
-        self._legacy_hitl_resolutions[hitl_id] = stored
-        return stored
 
     def handle_human_message(
         self,

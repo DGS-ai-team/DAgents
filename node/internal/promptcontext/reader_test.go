@@ -27,13 +27,12 @@ func TestReaderSidecarAndCustom(t *testing.T) {
 	}
 }
 
-func TestReaderIgnoresUserSidecarContent(t *testing.T) {
-	r := promptcontext.NewContentReader(promptcontext.Content{
-		User: "should ignore",
-	})
+func TestReaderUsesPreferredNameForUserInfo(t *testing.T) {
+	r := promptcontext.NewContentReader(promptcontext.Content{})
+	r.SetPreferredName("小明")
 	stable := r.BuildStableContextSections()
-	if strings.Contains(stable, "should ignore") || strings.Contains(stable, "用户信息") {
-		t.Fatalf("user.md must not inject without preferred name, got %q", stable)
+	if !strings.Contains(stable, "用户信息") || !strings.Contains(stable, "小明") {
+		t.Fatalf("preferred name should provide user info, got %q", stable)
 	}
 }
 

@@ -57,8 +57,8 @@ runOneStep(ctx, sessionID, history)
   ├─ Coordinator 检查 Step / budget / generation
   │
   ├─ buildSystemPrompt(sessionID)        → prompt.go
-  ├─ ToolDefinitions()                   → tools.Registry
-  ├─ llm.StreamChat(system + history + tools)
+  ├─ ToolDefinitions() + ContextInjections()
+  ├─ llm.StreamChat(system + context + history + tools)
   │     OnDelta            → SSE assistant
   │     OnReasoningDelta   → SSE reasoning
   │     OnToolCallDelta    → SSE tool_call（流式参数）
@@ -78,21 +78,20 @@ runOneStep(ctx, sessionID, history)
           │               （ask_user + approval 同批；分步 resume）
           └─ childagent → HandleParentTool
         pending ? → turn_state(tool_waiting)，return Pending（可部分 resume 后仍 pending）
-        否则 enqueueToolResult 或 ScheduleToolResult=true
+        否则 ScheduleToolResult=true，由 runtime 在同一 Turn 链内 inline 续跑
 ```
 
-**要点**：单次调用结束时，要么 **没有 tool_calls**（模型直接回答），要么 **tool_calls 已在本步内处理完**（auto 执行）或 **挂起**（HITL），或 **交给队列续跑**（`ScheduleToolResult`）。
+**要点**：单次调用结束时，要么 **没有 tool_calls**（模型直接回答），要么 **tool_calls 已在本步内处理完**（auto 执行）或 **挂起**（HITL）；auto 结果由 runtime 通过 `ScheduleToolResult` 在同一 Turn 链内 inline 续跑。
 
 ### 1.3 输入：system prompt 与 history
 
-**System prompt**（`turn/prompt.go` → `BuildSystemPrompt`）每步重建，顺序：
+**System prompt**（`turn/prompt.go` → `BuildSystemPrompt`）每步重建，内容保持稳定边界：
 
-1. 静态行为准则（**不含**各工具用法——用法在 tool schema）  
-2. 主机快照 + `agent_id` / `session_id`  
-3. 工作区子目录约定  
-4. `prompt_context`（soul / user / long_term）  
-5. 已加载 skills 正文  
-6. `custom.md`  
+1. 静态行为准则（**不含**各工具用法——用法在 tool schema）
+2. 工作区目录约定与外部工具目录
+3. skills 可用目录元数据（若当前 Agent 启用了 skills）
+
+主机快照、`agent_id` / `session_id`、请求级 prompt context（soul / custom / long_term，用户称呼由 Node 的 `PreferredName` 提供）和已加载 skill 正文，都通过 request-only context 注入，不写入会话历史；旧 `user.md` 仅用于迁移。
 
 **History**：`[]llm.Message`，由 **runtime** 持有；`runOneStep` 通过指针读写，步末由 runtime `applyStepOutcome` 写回。
 
@@ -116,7 +115,7 @@ Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补
 
 `processToolCalls`（`tool_router.go`）在 **同一步** 内同步跑完 **auto** 工具批；需要人介入则返回 `PendingHITL`，**不会**在同一步内再次调用 LLM。
 
-**下一步 LLM 调用** 属于 §2 的 loop——由队列触发 `RunToolMessageTurn`，history 已闭合 `assistant(tool_calls) → tool(s)`。
+**下一步 LLM 调用** 属于 §2 的 loop——由 runtime 在同一 Turn 链内调用 `RunToolMessageTurn`，history 已闭合 `assistant(tool_calls) → tool(s)`。
 
 ### 1.6 源码索引（§1）
 

@@ -99,11 +99,6 @@ def validate_member_workspace_path(path: str, *, tool_name: str = "read_file") -
     return rel
 
 
-def validate_member_read_path(path: str) -> str:
-    """兼容旧名：校验 read_file 相对路径。"""
-    return validate_member_workspace_path(path, tool_name="read_file")
-
-
 _PATH_ARG_TOOLS = frozenset(
     {
         "read_file",

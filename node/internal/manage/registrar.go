@@ -293,7 +293,7 @@ func (r *Registrar) registryURL(path string) string {
 }
 
 func (r *Registrar) buildRegisterPayload() registerPayload {
-	name := r.cfg.AgentDisplayName()
+	name := r.cfg.NodeDisplayName()
 	description := r.cfg.AgentDescription()
 	host := hostsnapshot.Get()
 	caps := r.cfg.RegistrationCapabilities()

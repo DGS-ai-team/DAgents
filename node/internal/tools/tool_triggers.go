@@ -211,7 +211,7 @@ func (r *Registry) execTriggerList(_ context.Context, raw json.RawMessage) (stri
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args struct {
 		IncludeDisabled *bool `json:"include_disabled"`
 	}
@@ -238,7 +238,7 @@ func (r *Registry) execTriggerGet(_ context.Context, raw json.RawMessage) (strin
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args struct {
 		TriggerID string `json:"trigger_id"`
 	}
@@ -257,7 +257,7 @@ func (r *Registry) execTriggerCreate(ctx context.Context, raw json.RawMessage) (
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args struct {
 		Name         string         `json:"name"`
 		TaskTemplate string         `json:"task_template"`
@@ -296,7 +296,7 @@ func (r *Registry) execTriggerUpdate(_ context.Context, raw json.RawMessage) (st
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args struct {
 		TriggerID    string         `json:"trigger_id"`
 		Name         *string        `json:"name"`
@@ -331,7 +331,7 @@ func (r *Registry) execTriggerDelete(_ context.Context, raw json.RawMessage) (st
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args struct {
 		TriggerID string `json:"trigger_id"`
 	}

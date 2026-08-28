@@ -239,7 +239,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 | `toolExec` | `tools.Executor`（父：完整 Registry；子：白名单 `RestrictedRegistry`） |
 | `policy` | 工具 auto / approval / deny |
 | `skillAccess` | skills 目录与 loaded 读写 |
-| `promptCtx` | `.runtime/prompt_context/` 侧车（子 session 当前与父共用构造路径，见改进项） |
+| `promptCtx` | `agents.db` 中的 soul/custom/long_term；旧 `.runtime/prompt_context/user.md` 仅作迁移来源 |
 | `maxToolLoops` | 单条 user 消息内工具循环上限 |
 
 事后设置：
@@ -249,10 +249,10 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 
 ### 6.2 单步主路径（`runOneStep`）
 
-1. `buildSystemPrompt(sessionID)` → [`BuildSystemPrompt`](../../node/internal/turn/prompt.go)
+1. `buildSystemPrompt(sessionID)` + request-only `ContextInjection` → [`BuildSystemPrompt`](../../node/internal/turn/prompt.go)
 2. `llm.StreamChat` → 推送 `assistant` / `reasoning` / `usage`
 3. 若有 `tool_calls` → `processToolCalls`（policy、临时 Agent 工具、skills 工具、auto 批执行）
-4. 无待处理 HITL 且需续跑 → `ScheduleToolResult=true`
+4. 无待处理 HITL 且需续跑 → `ScheduleToolResult=true`，由 runtime 在同一 Turn 链内 inline 续跑
 5. 回合结束 → `turn_finished` SSE（语义见 [agent-node-api.md](./agent-node-api.md) §2.4.1）
 
 ### 6.3 与 runtime 的边界

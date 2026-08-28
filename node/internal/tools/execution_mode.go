@@ -211,8 +211,3 @@ func ParseToolCallArguments(arguments string) (background bool, cleaned string) 
 	}
 	return background, string(b)
 }
-
-// ParseRunInBackground 兼容别名；同 ParseToolCallArguments。
-func ParseRunInBackground(arguments string) (background bool, cleaned string) {
-	return ParseToolCallArguments(arguments)
-}
