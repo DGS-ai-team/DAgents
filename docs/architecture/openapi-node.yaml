@@ -303,6 +303,14 @@ paths:
         "200":
           description: OK
 
+  /v1/desktop/runtime-config:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
   /v1/agent/update:
     get:
       x-contract-status: surface-only
