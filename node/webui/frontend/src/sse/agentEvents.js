@@ -9,7 +9,7 @@
 export const AGENT_STREAM_EVENT_POLICIES = Object.freeze({
   assistant: "transcript",
   reasoning: "transcript",
-  execution: "activity",
+  execution: "execution",
   tool_call: "transcript",
   tool_result: "transcript",
   usage: "transcript",

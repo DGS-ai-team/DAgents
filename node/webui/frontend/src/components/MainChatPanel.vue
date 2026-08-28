@@ -53,7 +53,6 @@ const emit = defineEmits([
   "user-info-selected",
   "memory-conflict-decide",
   "memory-conflict-cancel",
-  "open-activity",
   "workspace-change",
 ]);
 
