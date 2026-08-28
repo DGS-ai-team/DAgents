@@ -181,6 +181,21 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	}
 }
 
+func TestTerminalInputDescriptionDocumentsJSONControls(t *testing.T) {
+	definition := terminalInputToolDef()
+	if !strings.Contains(definition.Function.Description, `JSON 字符串中的 \n 会解析为实际换行符`) {
+		t.Fatalf("terminal_input description does not document JSON newline decoding: %q", definition.Function.Description)
+	}
+	properties, ok := definition.Function.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("terminal_input properties are missing")
+	}
+	data, ok := properties["data"].(map[string]any)
+	if !ok || !strings.Contains(data["description"].(string), `\u0003 表示 Ctrl+C`) {
+		t.Fatalf("terminal_input data description does not document Ctrl+C: %#v", properties["data"])
+	}
+}
+
 func TestTerminalReadWaitsBeforeSnapshot(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {

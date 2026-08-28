@@ -71,10 +71,10 @@ func terminalConfigListToolDef() ToolDef {
 func terminalInputToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_input",
-		Description: "向已打开的交互终端写入原始输入；命令通常需要显式包含换行符，可发送回车、方向键或 Ctrl+C 等控制字符。",
+		Description: "向 terminal_open 返回的持久交互终端写入原始输入。必须传入 terminal_id；不会自动补回车。JSON 字符串中的 \\n 会解析为实际换行符，相当于按 Enter；例如 data=\"pwd\\n\" 执行 pwd，data=\"\\u0003\" 发送 Ctrl+C。也可发送多行文本或方向键；写入后使用 terminal_read 获取输出。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
 			"terminal_id": map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
-			"data":        map[string]any{"type": "string", "description": "要写入终端的原始文本或控制字符，命令通常需要显式包含换行符 \\n"},
+			"data":        map[string]any{"type": "string", "description": "要写入终端的原始文本或控制字符；JSON 中的 \\n 表示换行/Enter，\\u0003 表示 Ctrl+C。若不包含换行符，终端只接收输入，不会提交命令。"},
 		}, "terminal_id", "data")),
 	}}
 }
