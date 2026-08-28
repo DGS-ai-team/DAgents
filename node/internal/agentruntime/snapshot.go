@@ -296,9 +296,6 @@ func PromptContextFromDefaults(snap Snapshot) *session.PromptContextOptions {
 	if v, ok := boolPtrFromAny(m["soul_enabled"]); ok {
 		out.SoulEnabled = v
 	}
-	if v, ok := boolPtrFromAny(m["user_enabled"]); ok {
-		out.UserEnabled = v
-	}
 	if v, ok := boolPtrFromAny(m["custom_enabled"]); ok {
 		out.CustomEnabled = v
 	}

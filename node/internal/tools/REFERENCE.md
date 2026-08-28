@@ -19,7 +19,7 @@
 | `applyShellProcAttr` / `signalKillProcessGroup` | POSIX/Windows 进程组（`shell_platform_*.go`） |
 | `WithBackgroundExecution` | 内部：标记通用后台 Execute（不对 schema 暴露）；bash_run 不使用该路径 |
 | `StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)` | 对支持后台的工具执行并返回 ACK；bash_run 返回 unsupported |
-| `ParseRunInBackground(arguments)` | 剥离 call_purpose / 历史 run_in_background |
+| `ParseToolCallArguments(arguments)` | 剥离 call_purpose / 历史 run_in_background |
 | `injectCallPurposeParam` | 注入 call_purpose（加入 required） |
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
 | `SetWeComClient(client)` | 注入企业微信 webhook 客户端（暴露 wecom_*） |

@@ -133,7 +133,7 @@ copy_tree() {
 
 # 用户运行时数据目录：安装包可不含内容，仅确保存在，不从 bundle 覆盖。
 # agents/agents.db 等由 Node 创建；此处保证常用空目录与升级兼容路径存在。
-RUNTIME_USER_DATA_DIRS=(memory history logs agent agents agent-templates data node workgroup-workers)
+RUNTIME_USER_DATA_DIRS=(memory history logs agents agent-templates data node workgroup-workers)
 
 ensure_runtime_user_dirs() {
   local d

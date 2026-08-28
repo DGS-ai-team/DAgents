@@ -342,14 +342,8 @@ func NormalizeThinkingSettingsForModel(provider, model, thinking, effort string)
 	return t, e
 }
 
-// BuildRequestExtra 按 provider 与 thinking 参数构造出站 JSON 扩展字段。
-func BuildRequestExtra(provider, thinking, effort string) map[string]any {
-	return BuildRequestExtraForModel(provider, "", thinking, effort)
-}
-
 // BuildRequestExtraForModel builds provider-specific request fields with model-aware
-// restrictions. BuildRequestExtra remains as a compatibility wrapper for callers that
-// do not have a model name.
+// restrictions.
 func BuildRequestExtraForModel(provider, model, thinking, effort string) map[string]any {
 	if !ThinkingSupported(provider) {
 		return nil

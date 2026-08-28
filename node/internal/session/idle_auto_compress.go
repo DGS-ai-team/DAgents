@@ -74,11 +74,6 @@ func (m *Manager) scanIdleSessionMaintenance(ctx context.Context) {
 	}
 }
 
-// scanIdleAutoCompress 保留旧名供测试调用。
-func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
-	m.scanIdleSessionMaintenance(ctx)
-}
-
 func (m *Manager) tryPersistedIdleMaintenance(ctx context.Context, sum store.Summary, threshold time.Duration, minTokens int, now time.Time) {
 	rec, err := m.store.Load(ctx, sum.AgentID)
 	if err != nil || rec == nil || len(rec.Messages) == 0 {

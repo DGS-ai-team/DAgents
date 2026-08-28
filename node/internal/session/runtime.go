@@ -217,7 +217,7 @@ func newRuntimeWithPublisher(
 	} else if logger != nil {
 		logger.Warn("session media registry init failed", "session_id", id, "error", err)
 	}
-	promptReader := promptcontext.NewReader(turnOpts.RuntimeDir)
+	promptReader := promptcontext.NewReader()
 	if turnOpts.PromptContent != nil {
 		promptReader.SetContent(*turnOpts.PromptContent)
 	}

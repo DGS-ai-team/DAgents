@@ -135,19 +135,10 @@ func NormalizeResultStatus(raw string) ResultStatus {
 	return normalizeResultStatus(raw)
 }
 
-// ResultDescriptionSuffix returns the legacy common contract text. It is kept
-// for callers that render a standalone tool description, but Registry no
-// longer appends it to every tool. The model receives this common behavior
-// once from the system prompt; per-tool definitions only carry their own
-// evidence hints.
-func ResultDescriptionSuffix() string {
-	return " 返回结果的统一状态由 Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据给出：succeeded、failed、denied、running、queued、cancelled、timed_out、awaiting_user 或 unknown；失败时同时提供 error.code、error.message、error.retryable。优先依据 status 判断，不要仅根据正文是否为空或是否含有本地化错误词判断成功。元数据后的正文仍保留本工具约定的字段与输出。"
-}
-
 // ResultProtocolPrompt returns the common result behavior for the single
 // stable system-prompt section. Tool definitions should not repeat it.
 func ResultProtocolPrompt() string {
-	return strings.TrimSpace(ResultDescriptionSuffix())
+	return "返回结果的统一状态由 Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据给出：succeeded、failed、denied、running、queued、cancelled、timed_out、awaiting_user 或 unknown；失败时同时提供 error.code、error.message、error.retryable。优先依据 status 判断，不要仅根据正文是否为空或是否含有本地化错误词判断成功。元数据后的正文仍保留本工具约定的字段与输出。"
 }
 
 // ResultDescriptionSuffixForTool adds only the small tool-specific decoding

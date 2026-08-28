@@ -18,7 +18,7 @@ func TestBuildContextInjections_includesDateWithoutHistoryMutation(t *testing.T)
 	if len(injections) != 1 {
 		t.Fatalf("injections = %+v", injections)
 	}
-	if !containsAll(injections[0].Content, "## 当前日期", hooks.FormatTodayDateMessage("20260720")) {
+	if !containsAll(injections[0].Content, "## 当前日期", "当天日期为：20260720") {
 		t.Fatalf("date context = %q", injections[0].Content)
 	}
 
@@ -53,7 +53,12 @@ func TestBuildContextInjections_dateDisabled(t *testing.T) {
 
 func TestStripLegacyTodayDateMessages_keepsDurableHistoryUntouched(t *testing.T) {
 	history := []llm.Message{
-		llm.UserMessage(hooks.FormatTodayDateMessage("20260719"), hooks.TodayDateMessageName),
+		llm.UserMessageWithSource(
+			"当天日期为：20260719",
+			llm.UserNameDate,
+			llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormNotice},
+			nil,
+		),
 		llm.UserMessage("hello", llm.UserNameHuman),
 	}
 	request := StripLegacyTodayDateMessages(history)

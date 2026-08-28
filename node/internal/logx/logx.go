@@ -24,11 +24,6 @@ func ParseLevel(raw string) (slog.Level, bool) {
 	}
 }
 
-// NewLogger 创建写入指定 writer 的 text handler logger（兼容旧调用）。
-func NewLogger(w io.Writer, level slog.Level) *slog.Logger {
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: level}))
-}
-
 // NewSplitLogger 将 >= level 的日志写入 full，并将 >= Error 的日志额外写入 errW。
 // 配合启动器 stdout→*.log、stderr→*.err.log：*.log 为完整日志，*.err.log 仅错误。
 func NewSplitLogger(full, errW io.Writer, level slog.Level) *slog.Logger {

@@ -6,7 +6,7 @@
 |------|------|------|
 | `DefaultListenHost` | `const string` | 默认监听 `127.0.0.1` |
 | `DefaultListenPort` | `const int` | 默认端口 `18765` |
-| `Config` | `struct` | 根配置：agent_id、listen、local、llm、fs_root、manage 等 |
+| `Config` | `struct` | 根配置：node_id、listen、local、llm、fs_root、manage 等；旧 YAML `agent_id` 仅用于迁移 |
 | `ListenConfig` | `struct` | HTTP 监听 host/port |
 | `LocalConfig` | `struct` | Client 用 endpoint 与可选 agent_id 校验 |
 | `LLMConfig` | `struct` | LLM 配置；`mock=true` 时用 MockClient；工具轮次上限见 Agent snapshot `max_tool_loops` |
@@ -29,7 +29,7 @@
 | `ManageRegistrationConfig` | `struct` | `base_url`、`interval_seconds`（默认 30）、`ttl_seconds`（默认 60）、`team` |
 | `LoadFile` | `func(path string) (*Config, error)` | 读 YAML、展开 env、默认值、校验 |
 | `(c *Config) ApplyDefaults` | `method` | 填充 listen/local/manage 缺省 |
-| `(c *Config) Validate` | `method` | 校验 agent_id、端口、endpoint；manage.enabled 时要求 url |
+| `(c *Config) Validate` | `method` | 校验 node_id、端口、endpoint；manage.enabled 时要求 url |
 | `(c *Config) DiscoveryGroups` | `method` | YAML `groups` 字段（**不**发往 Manage） |
 | `(c *Config) ManageRegistrationInterval` | `method` | 注册/心跳轮询间隔 |
 | `(c *Config) ManageRegistryBaseURL` | `method` | 上报 Manage 的 base_url（优先 registration.base_url） |
@@ -48,13 +48,14 @@
 | `(c *Config) TriggersStorePath` | `method` | 默认 `{fs_root}/triggers/triggers.json` |
 | `(c *Config) Capabilities` | `method` | 能力列表（含可选 triggers） |
 
-## `agent_id.go`
+## `node_id.go`
 
 | 符号 | 类型 | 说明 |
 |------|------|------|
-| `EnvAgentID` | `const string` | 环境变量名 `AGENT_ID` |
-| `(c *Config) AgentIDFilePath` | `method` | 默认 `.runtime/agent/agent_id` |
-| `(c *Config) ResolveAgentID` | `method` | 从文件/环境/YAML 解析 agent_id 并持久化 |
+| `EnvNodeID` | `const string` | 主环境变量名 `NODE_ID` |
+| `EnvAgentID` | `const string` | 旧环境变量名 `AGENT_ID`，仅作为回退 |
+| `(c *Config) NodeIDFilePath` | `method` | 默认 `.runtime/node/node_id` |
+| `(c *Config) ResolveNodeID` | `method` | 从文件/环境/YAML 解析 node_id 并持久化；必要时迁移旧 agent ID |
 
 ## `resolve.go`
 

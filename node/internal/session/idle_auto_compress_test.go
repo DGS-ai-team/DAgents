@@ -59,7 +59,7 @@ func TestIdleAutoCompressMarksAndSkipsRescan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr.scanIdleAutoCompress(context.Background())
+	mgr.scanIdleSessionMaintenance(context.Background())
 	rec, err := st.Load(context.Background(), sess.ID)
 	if err != nil || rec == nil || !rec.RuntimeState.IdleAutoCompressApplied {
 		t.Fatal("expected idle auto compress mark in DB after scan")
@@ -68,7 +68,7 @@ func TestIdleAutoCompressMarksAndSkipsRescan(t *testing.T) {
 		t.Fatal("expected session evicted after maintenance scan")
 	}
 	before := llmClient.streamCalls.Load()
-	mgr.scanIdleAutoCompress(context.Background())
+	mgr.scanIdleSessionMaintenance(context.Background())
 	if llmClient.streamCalls.Load() != before {
 		t.Fatalf("expected no second compress, stream calls %d -> %d", before, llmClient.streamCalls.Load())
 	}
@@ -115,7 +115,7 @@ func TestIdleAutoCompressSkipsBelowMinTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr.scanIdleAutoCompress(context.Background())
+	mgr.scanIdleSessionMaintenance(context.Background())
 	rec, err := st.Load(context.Background(), sess.ID)
 	if err != nil || rec == nil {
 		t.Fatal(err)

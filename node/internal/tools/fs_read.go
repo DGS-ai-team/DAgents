@@ -21,7 +21,7 @@ func readFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "read_file",
-			Description: "侧车 soul/user/custom 与长期记忆已作为当前请求的运行时上下文提供（存于数据库），通常无需 read_file 读取。" +
+			Description: "侧车 soul/custom 与长期记忆已作为当前请求的运行时上下文提供（存于数据库），用户称呼由 Node PreferredName 注入；旧 user.md 仅用于迁移，通常无需 read_file 读取。" +
 				" history/ 下 JSONL 为原始对话审计（`history/YYYYMMDD/<session_id>.jsonl`），需复盘历史 utterance 时可分页读取。" +
 				" 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{

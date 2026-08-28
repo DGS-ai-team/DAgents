@@ -54,7 +54,7 @@ func backgroundJobCancelToolDef() ToolDef {
 }
 
 func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMessage) (string, error) {
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args backgroundJobIDArgs
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -83,7 +83,7 @@ func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMess
 }
 
 func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessage) (string, error) {
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args backgroundJobIDArgs
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)

@@ -87,7 +87,6 @@ type TurnOptions struct {
 // PromptContextOptions 为侧车 / 长期记忆注入开关。
 type PromptContextOptions struct {
 	SoulEnabled     *bool
-	UserEnabled     *bool // deprecated：用户信息改走 PreferredName，保留字段兼容旧快照
 	CustomEnabled   *bool
 	LongTermEnabled *bool
 	LongTermScope   *string // global | agent

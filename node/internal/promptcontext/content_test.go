@@ -5,7 +5,6 @@ import "testing"
 func TestContentReaderIgnoresDisk(t *testing.T) {
 	r := NewContentReader(Content{
 		Soul:     "from-db",
-		User:     "user-db",
 		Custom:   "custom-db",
 		LongTerm: "lt-db",
 	})

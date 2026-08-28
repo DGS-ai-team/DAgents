@@ -12,10 +12,8 @@ const (
 )
 
 // Filter 控制侧车 / 长期记忆是否注入；nil 指针表示默认启用。
-// UserEnabled 已废弃（用户称呼改走 PreferredName），保留字段兼容旧调用方。
 type Filter struct {
 	SoulEnabled     *bool
-	UserEnabled     *bool
 	CustomEnabled   *bool
 	LongTermEnabled *bool
 }
@@ -36,12 +34,12 @@ type Reader struct {
 	mu            sync.RWMutex
 }
 
-// NewReader 构造 Reader；runtimeDir 参数保留兼容，不再读盘。
-func NewReader(_ string) *Reader {
+// NewReader 构造一个以内存 Content 为数据源的 Reader。
+func NewReader() *Reader {
 	return &Reader{}
 }
 
-// SetFilter 设置侧车注入开关（缺省全开）。UserEnabled 已忽略（用户信息改走 PreferredName）。
+// SetFilter 设置侧车注入开关（缺省全开）。
 func (r *Reader) SetFilter(f Filter) {
 	if r == nil {
 		return
@@ -70,11 +68,6 @@ func (r *Reader) ReadSoul() string {
 		return ""
 	}
 	return r.readContentField(soulField)
-}
-
-// ReadUser 已废弃：用户信息改由 PreferredName 注入；保留空实现以免旧调用方崩溃。
-func (r *Reader) ReadUser() string {
-	return ""
 }
 
 // PreferredName 返回本机使用者称呼。

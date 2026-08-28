@@ -4,7 +4,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `reader.go` | `Reader`：读取 soul/user/custom/long_term、`UpdateLongTerm` |
+| `reader.go` | `Reader`：读取 soul/custom/long_term，并注入 `PreferredName`、`UpdateLongTerm` |
 | `content.go` | `Content`、`SetContent` |
 
 **长期记忆加载时机**（`Orchestrator.ReloadLongTermMemory`）：

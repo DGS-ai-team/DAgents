@@ -27,11 +27,16 @@ cd /path/to/DAgents
 python3.13 -m venv .venv
 source .venv/bin/activate
 pip install --no-index --find-links=wheels -r requirements.lock
-cp .env.example .env
-python run_agent_api.py
 ```
 
-Manage 控制面：`python3 run_manage.py`（或 Docker，见 `packaging/manage/README.md`）。
+Node（当前 Agent 运行时）请使用 Go Node；源码运行示例：
+
+```bash
+cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
+go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
+```
+
+Manage 控制面（可选）：`python3 run_manage.py`（或 Docker，见 `packaging/manage/README.md`）。
 
 ## 使用其它 Python 版本
 

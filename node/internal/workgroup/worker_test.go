@@ -374,7 +374,7 @@ func TestMemberArchiveTombstoneStopsProvisionReplay(t *testing.T) {
 }
 
 func TestEmptyAllowNamesMeansNoTools(t *testing.T) {
-	names := EffectiveToolNames([]string{}, []string{"read_file"}, []string{"read_file", "bash"})
+	names := EffectiveToolNames([]string{}, []string{"read_file", "bash"})
 	if len(names) != 0 {
 		t.Fatalf("effective=%v", names)
 	}

@@ -61,7 +61,7 @@ func TestToolDefinitionsKeepCommonResultProtocolOutOfEachDescription(t *testing.
 	if len(defs) == 0 {
 		t.Fatal("expected builtin tool definitions")
 	}
-	common := strings.TrimSpace(ResultDescriptionSuffix())
+	common := strings.TrimSpace(ResultProtocolPrompt())
 	if common == "" {
 		t.Fatal("common result contract must remain available to prompt builders")
 	}

@@ -81,7 +81,6 @@ class MemberSystemPromptTests(unittest.TestCase):
     def test_includes_static_env_workspace_user_info_and_soul(self) -> None:
         prompt = build_member_system_prompt(
             soul_md="资料员",
-            user_md="这段旧 user.md 不应再出现",
             host_env={
                 "home_node_id": "node-a",
                 "os_kind": "linux",

@@ -758,7 +758,8 @@ echo   --foreground   Run Node in foreground (blocks terminal)
 echo   --no-wait      Background start without waiting for probe (--background alias)
 echo.
 echo Config:
-echo   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
+echo   config.yaml is bootstrap-only (listen/local); configure LLM and Node settings in Web UI.
+echo   It is created from config.example.yaml on first run.
 echo   A2A / Registry: deploy Manage separately (packaging/manage/README.md).
 echo   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
 popd >nul

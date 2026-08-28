@@ -26,21 +26,17 @@ func CheckCommandFencing(cmd ToolCommand, binding WorkerBinding, catalogRev stri
 	return nil
 }
 
-// EffectiveToolNames = SpecAllow ∩ NodeAvailable（第二参数保留兼容，与 SpecAllow 相同即可）。
+// EffectiveToolNames = SpecAllow ∩ NodeAvailable。
 // SpecAllow 为空 ⇒ 无工具（fail-closed）。
-func EffectiveToolNames(specAllow, grantAllow, nodeAvailable []string) []string {
+func EffectiveToolNames(specAllow, nodeAvailable []string) []string {
 	if len(specAllow) == 0 {
 		return nil
 	}
-	grantSet := toSet(grantAllow)
 	nodeSet := toSet(nodeAvailable)
 	out := make([]string, 0, len(specAllow))
 	seen := map[string]struct{}{}
 	for _, name := range specAllow {
 		if name == "" {
-			continue
-		}
-		if _, ok := grantSet[name]; !ok {
 			continue
 		}
 		if len(nodeSet) > 0 {

@@ -122,7 +122,7 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 
 func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	hostsnapshot.CaptureAtStartup()
-	r := promptcontext.NewContentReader(promptcontext.Content{User: "legacy user.md ignored"})
+	r := promptcontext.NewContentReader(promptcontext.Content{})
 	r.SetPreferredName("小明")
 	in := SystemPromptInput{
 		AgentID:   "ops-01",
