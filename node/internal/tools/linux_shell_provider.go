@@ -325,6 +325,20 @@ func DefaultLinuxHostKeyResolver(_ context.Context, cfg LinuxChannelConfig) (ssh
 		}
 		path = filepath.Join(home.HomeDir, ".ssh", "known_hosts")
 	}
+	// knownhosts.New requires the file to exist. Creating the empty file here
+	// keeps first-use on a new Linux channel deterministic while preserving the
+	// strict host-key policy: an empty file still rejects an unknown host until
+	// its key is explicitly added.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create known_hosts directory %q: %w", filepath.Dir(path), err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create known_hosts %q: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("close known_hosts %q: %w", path, err)
+	}
 	callback, err := knownhosts.New(path)
 	if err != nil {
 		return nil, fmt.Errorf("load known_hosts %q: %w", path, err)

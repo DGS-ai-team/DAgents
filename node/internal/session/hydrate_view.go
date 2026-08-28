@@ -22,6 +22,7 @@ type HydrateView struct {
 	NotifySeq       int
 	AckSeq          int
 	HasUnread       bool
+	ChildAgents     []ChildAgentView
 }
 
 // GetHydrateView 返回 session hydrate 快照（活跃 runtime 或 DB 持久化）。
@@ -47,7 +48,9 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		hasActiveTurn := lifecycle.HasActiveTurn
 		rt.mu.Unlock()
 		rt.lifecycleMu.Unlock()
-		return m.buildHydrateView(sessionID, messages, pending, state, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq), nil
+		view := m.buildHydrateView(sessionID, messages, pending, state, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq)
+		view.ChildAgents, _ = m.ListChildAgents(sessionID)
+		return view, nil
 	}
 	if m.store == nil {
 		return nil, fmt.Errorf("agent_not_found")
@@ -73,7 +76,9 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		state = turn.StateAwaitingTool
 	}
 	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
-	return m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
+	view := m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
+	view.ChildAgents = []ChildAgentView{}
+	return view, nil
 }
 
 func (m *Manager) buildHydrateView(
@@ -121,6 +126,7 @@ func (m *Manager) buildHydrateView(
 		NotifySeq:       notifySeq,
 		AckSeq:          ackSeq,
 		HasUnread:       notifySeq > ackSeq,
+		ChildAgents:     []ChildAgentView{},
 	}
 }
 

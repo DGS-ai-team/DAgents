@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +56,26 @@ func TestLinuxShellProviderValidatesStrictTargetAndConfiguration(t *testing.T) {
 		Target: ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "prod"}, Command: "id",
 	}); err == nil || !strings.Contains(err.Error(), "known_hosts host key callback") {
 		t.Fatalf("provider should fail closed without host key callback: %v", err)
+	}
+}
+
+func TestDefaultLinuxHostKeyResolverCreatesMissingKnownHostsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "ssh", "known_hosts")
+	callback, err := DefaultLinuxHostKeyResolver(context.Background(), LinuxChannelConfig{
+		HostKeyPolicy: "known_hosts", HostKeyRef: path,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callback == nil {
+		t.Fatal("expected strict known_hosts callback")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.IsDir() {
+		t.Fatalf("known_hosts path is a directory: %s", path)
 	}
 }
 

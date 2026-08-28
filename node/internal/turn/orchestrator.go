@@ -78,8 +78,11 @@ type Orchestrator struct {
 
 	turnUsageMu sync.Mutex
 	turnUsage   map[string]llm.Usage
-	summaryMu   sync.Mutex
-	summaryNext map[string]bool
+	// turnUsageLast stores the last provider snapshot for each model step.
+	// Providers may emit cumulative usage more than once during a stream.
+	turnUsageLast map[string]map[int]llm.Usage
+	summaryMu     sync.Mutex
+	summaryNext   map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
@@ -482,6 +485,8 @@ func NewOrchestrator(
 		journal:               journal,
 		logger:                logx.OrDefault(logger),
 		ctxMetrics:            newContextMetricsStore(),
+		turnUsage:             make(map[string]llm.Usage),
+		turnUsageLast:         make(map[string]map[int]llm.Usage),
 		modelSnapshots:        newModelContextSnapshotStore(),
 		contextMutationReason: make(map[string]string),
 		summaryNext:           make(map[string]bool),
@@ -893,6 +898,21 @@ func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	}
 	o.turnUsageMu.Lock()
 	delete(o.turnUsage, sessionID)
+	delete(o.turnUsageLast, sessionID)
+	o.turnUsageMu.Unlock()
+}
+
+// resetUsageAttempt clears the provider snapshot cursor for one model step.
+// A retry is a new provider completion and must not be treated as a
+// continuation of the previous attempt's cumulative counters.
+func (o *Orchestrator) resetUsageAttempt(sessionID string, llmStep int) {
+	if o == nil {
+		return
+	}
+	o.turnUsageMu.Lock()
+	if o.turnUsageLast != nil {
+		delete(o.turnUsageLast[sessionID], llmStep)
+	}
 	o.turnUsageMu.Unlock()
 }
 

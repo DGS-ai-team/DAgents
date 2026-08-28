@@ -18,7 +18,7 @@ const editingChannelId = ref("");
 const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
 const channel = reactive({
   display_name: "", host: "", port: 22, username: "", credential_id: "",
-  host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "",
+  host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "", max_sessions: 4,
 });
 
 const credentialAuthMeta = {
@@ -40,7 +40,8 @@ const channelReady = computed(() => Boolean(
   channel.host.trim() &&
   channel.username.trim() &&
   channel.credential_id &&
-  hostKeyReady.value,
+  hostKeyReady.value &&
+  Number(channel.max_sessions) >= 1 && Number(channel.max_sessions) <= 64,
 ));
 
 function authTypeLabel(type) {
@@ -79,7 +80,7 @@ function onCredentialSecretModeChange() {
 function resetChannelForm() {
   Object.assign(channel, {
     display_name: "", host: "", port: 22, username: "", credential_id: "",
-    host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "",
+    host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "", max_sessions: 4,
   });
 }
 
@@ -108,6 +109,7 @@ function openChannelForm(item = null) {
       host_key_ref: item.host_key_ref || "",
       remote_shell: item.remote_shell || "bash",
       default_cwd: item.default_cwd || "",
+      max_sessions: item.max_sessions || 4,
     });
   }
   error.value = "";
@@ -328,7 +330,7 @@ onMounted(() => void load());
       <div v-if="!channels.length" class="linux-settings__empty settings-empty-state">还没有配置 Linux 通道。</div>
       <div v-else class="linux-settings__list">
         <div v-for="item in channels" :key="item.channel_id" class="linux-settings__row">
-          <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }} · {{ hostKeyPolicyLabel(item.host_key_policy) }}</small></div>
+          <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }} · {{ hostKeyPolicyLabel(item.host_key_policy) }} · 最大并发会话 {{ item.max_sessions || 1 }}</small></div>
           <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="openChannelForm(item)">编辑</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
         </div>
       </div>
@@ -416,6 +418,7 @@ onMounted(() => void load());
             <div class="linux-settings__grid">
               <div class="linux-settings__field"><label>默认远程目录 <span>可选</span></label><input v-model="channel.default_cwd" class="settings-field__input" placeholder="例如：/opt/app" /></div>
               <div class="linux-settings__field"><label>远程 Shell <span>可选</span></label><input v-model="channel.remote_shell" class="settings-field__input" placeholder="bash" /></div>
+              <div class="linux-settings__field"><label>最大并发会话 <span>必选</span></label><input v-model.number="channel.max_sessions" type="number" min="1" max="64" class="settings-field__input" placeholder="4" /><small>同一 Linux 通道允许同时打开的持久终端数量；智能体绑定时还可以设置更小的上限。</small></div>
             </div>
           </div>
         </div>

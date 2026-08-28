@@ -98,6 +98,7 @@ import {
 import { resetToolStream } from "../stores/toolStream.js";
 import {
   onChildCreated,
+  onChildProgress,
   onChildFinished,
   resetRemoteWorkers,
   setChildAwaitingApproval,
@@ -470,6 +471,9 @@ function handleEvent(ev) {
     case "temporary_agent_created":
       onChildCreated(ev.data);
       addSystem(formatChildLifecycle(ev.type, ev.data));
+      break;
+    case "temporary_agent_progress":
+      onChildProgress(ev.data);
       break;
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":

@@ -339,6 +339,7 @@ type sessionHydrateResponse struct {
 	AckSeq          int                       `json:"ack_seq"`
 	HasUnread       bool                      `json:"has_unread"`
 	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
+	ChildAgents     []session.ChildAgentView  `json:"child_agents"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -382,6 +383,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		AckSeq:          view.AckSeq,
 		HasUnread:       view.HasUnread,
 		ToolJobs:        toolJobs,
+		ChildAgents:     view.ChildAgents,
 	})
 }
 

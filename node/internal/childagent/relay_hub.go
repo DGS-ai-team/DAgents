@@ -11,6 +11,9 @@ type RelayHub struct {
 	AgentID       string
 	ChildAgentID  string
 	ChildPurpose  string
+	// Observe receives child runtime events before they are projected to the
+	// parent stream, allowing the manager to maintain a refreshable snapshot.
+	Observe func(eventType string, data map[string]any)
 }
 
 // Publish 实现 stream.Publisher；忽略 orchestrator 传入的 agentID，统一发往父 Agent。
@@ -26,6 +29,9 @@ func (h *RelayHub) Publish(_agentID, eventType string, data map[string]any) stre
 	if eventType == "hitl_required" {
 		data["hitl_scope"] = HitlScopeTemporaryAgent
 		data["child_purpose"] = h.ChildPurpose
+	}
+	if h.Observe != nil {
+		h.Observe(eventType, data)
 	}
 	return h.Inner.Publish(h.ParentAgentID, eventType, data)
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 )
 
 type childAgentListResponse struct {
@@ -12,14 +14,16 @@ type childAgentListResponse struct {
 }
 
 type sessionChildAgentViewJSON struct {
-	ChildAgentID string   `json:"child_agent_id"`
-	Status       string   `json:"status"`
-	Purpose      string   `json:"purpose"`
-	AllowedTools []string `json:"allowed_tools"`
-	CreatedAt    string   `json:"created_at"`
-	ExpiresAt    string   `json:"expires_at"`
-	TurnCount    int      `json:"turn_count"`
-	MaxTurns     int      `json:"max_turns"`
+	ChildAgentID string              `json:"child_agent_id"`
+	ToolCallID   string              `json:"tool_call_id,omitempty"`
+	Status       string              `json:"status"`
+	Purpose      string              `json:"purpose"`
+	AllowedTools []string            `json:"allowed_tools"`
+	CreatedAt    string              `json:"created_at"`
+	ExpiresAt    string              `json:"expires_at"`
+	TurnCount    int                 `json:"turn_count"`
+	MaxTurns     int                 `json:"max_turns"`
+	Progress     childagent.Progress `json:"progress"`
 }
 
 type childAgentCancelRequest struct {
@@ -50,6 +54,7 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 	for _, it := range items {
 		out.Items = append(out.Items, sessionChildAgentViewJSON{
 			ChildAgentID: it.ChildAgentID,
+			ToolCallID:   it.ToolCallID,
 			Status:       it.Status,
 			Purpose:      it.Purpose,
 			AllowedTools: append([]string(nil), it.AllowedTools...),
@@ -57,6 +62,7 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
 			TurnCount:    it.TurnCount,
 			MaxTurns:     it.MaxTurns,
+			Progress:     it.Progress,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -74,6 +80,7 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 		if it.ChildAgentID == childID {
 			writeJSON(w, http.StatusOK, sessionChildAgentViewJSON{
 				ChildAgentID: it.ChildAgentID,
+				ToolCallID:   it.ToolCallID,
 				Status:       it.Status,
 				Purpose:      it.Purpose,
 				AllowedTools: append([]string(nil), it.AllowedTools...),
@@ -81,6 +88,7 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 				ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
 				TurnCount:    it.TurnCount,
 				MaxTurns:     it.MaxTurns,
+				Progress:     it.Progress,
 			})
 			return
 		}

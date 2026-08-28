@@ -62,10 +62,11 @@ type TerminalSessionInfo struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// TerminalCommandRequest is the bounded, one-shot command contract attached
-// to an already-open terminal session. The terminal_id is validated by the
-// session broker before this request reaches a provider; Target/ConfigID are
-// filled from the authoritative session metadata and are not model supplied.
+// TerminalCommandRequest is the bounded command contract attached to an
+// already-open terminal session. The command is written to that session's
+// existing PTY; it must never cause a provider to open a second transport.
+// terminal_id is validated by the session broker. Target/ConfigID are filled
+// from authoritative session metadata and are not model supplied.
 type TerminalCommandRequest struct {
 	TerminalID     string
 	Target         ExecutionTarget
@@ -77,10 +78,9 @@ type TerminalCommandRequest struct {
 	MaxOutputBytes int
 }
 
-// TerminalCommandResult keeps stdout/stderr and exit semantics separate from
-// the interactive PTY transcript. A command still requires an open terminal
-// so target ownership and authorization cannot be bypassed by guessing a
-// Linux channel ID.
+// TerminalCommandResult keeps command completion and exit semantics separate
+// from the interactive PTY transcript. Since a PTY is one combined stream,
+// providers may return diagnostic output in Stdout rather than Stderr.
 type TerminalCommandResult struct {
 	Status          string `json:"status"`
 	TerminalID      string `json:"terminal_id"`
@@ -159,5 +159,6 @@ type TerminalSessionBroker interface {
 	Lookup(agentID, terminalID string) (TerminalSessionInfo, error)
 	ReadOutput(ctx context.Context, agentID, terminalID string, afterSeq uint64, maxBytes int) (TerminalOutput, error)
 	Input(ctx context.Context, agentID, terminalID string, data []byte) error
+	RunCommand(ctx context.Context, agentID, terminalID string, req TerminalCommandRequest) (TerminalCommandResult, error)
 	Terminate(ctx context.Context, agentID, terminalID string) (TerminalOutput, error)
 }
