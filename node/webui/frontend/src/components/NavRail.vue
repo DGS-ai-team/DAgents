@@ -57,6 +57,7 @@ const agentsLoaded = ref(false);
 const workgroupsLoaded = ref(false);
 const agentsLoadError = ref("");
 const workgroupsLoadError = ref("");
+const workgroupsEnabled = ref(true);
 const manualRefreshingAgents = ref(false);
 const deletingId = ref("");
 const renamingId = ref("");
@@ -104,6 +105,7 @@ const manualRefreshingWgs = ref(false);
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
+const showWorkgroups = computed(() => workgroupsEnabled.value || !!activeWorkgroupId.value);
 const effectiveRealtimeStatus = computed(() => props.realtimeStatus || chromeStore.sseStatus);
 const online = computed(() => effectiveRealtimeStatus.value === "connected");
 const statusClass = computed(() => {
@@ -202,10 +204,24 @@ async function refreshWorkgroups({ force = false, manual = false } = {}) {
     workgroups.value = [...railCache.workgroups];
     workgroupsLoaded.value = true;
     workgroupsLoadError.value = "";
-  } catch {
+  } catch (error) {
     // Keep the last successful list during transient refresh failures and
     // expose the stale state in the section header instead of replacing rows.
-    workgroupsLoadError.value = "工作组列表暂时不可用";
+    const message = String(error?.message || "");
+    const disabled = /manage is not enabled|workgroup.*disabled|manage_disabled|workgroup_disabled/i.test(message);
+    if (disabled) {
+      workgroupsEnabled.value = false;
+      // Do not let a cached successful response make a disabled feature
+      // reappear when the rail is remounted within the cache window.
+      railCache.workgroups = [];
+      railCache.workgroupsFetchedAt = Date.now();
+      workgroups.value = [];
+      workgroupsLoaded.value = true;
+      workgroupsLoadError.value = "";
+    } else {
+      workgroupsEnabled.value = true;
+      workgroupsLoadError.value = "工作组列表暂时不可用";
+    }
   } finally {
     loadingWgs.value = false;
     if (manual) manualRefreshingWgs.value = false;
@@ -682,7 +698,7 @@ defineExpose({
     </section>
 
     <!-- Workgroups -->
-    <section class="nav-rail__section">
+    <section v-if="showWorkgroups" class="nav-rail__section">
       <header
         class="nav-rail__section-head"
         :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'workgroups' }"

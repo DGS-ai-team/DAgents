@@ -3,10 +3,10 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { formatToolElapsed } from "../utils/format.js";
 import {
   resolveToolStepPhase,
-  toolStepPurpose,
   toolStepIsInProgress,
   toolStepIsPending,
   toolStepStatusText,
+  toolStepToolLabel,
 } from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
@@ -44,7 +44,7 @@ const stepArgs = computed(() => ({
   resultEntry: props.resultEntry,
   executionHint: props.executionHint,
 }));
-const purpose = computed(() => toolStepPurpose(stepArgs.value));
+const toolLabel = computed(() => toolStepToolLabel(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
 const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
 const stepPending = computed(() => toolStepIsPending(stepArgs.value));
@@ -154,7 +154,7 @@ async function onCancel(ev) {
         <span class="tool-summary-row__visual" :title="visual.label">
           <ToolGroupIcon :name="visual.kind" />
         </span>
-        <span v-if="purpose" class="tool-summary-row__text">{{ purpose }}</span>
+        <span class="tool-summary-row__text" :title="toolLabel">{{ toolLabel }}</span>
         <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
           <img
             class="tool-summary-row__thumb"
@@ -363,8 +363,11 @@ async function onCancel(ev) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 4.5em;
+  justify-content: flex-end;
   font-size: 11px;
   color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 

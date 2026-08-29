@@ -52,17 +52,18 @@ function copyFieldLabel(label) {
 .tool-card__fields--compact {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
   align-items: start;
 }
 .tool-card__fields--compact .tool-card__code-panel {
   grid-column: 1 / -1;
 }
 .tool-card__field {
-  display: grid;
-  grid-template-columns: minmax(44px, 72px) minmax(0, 1fr);
-  gap: 10px;
+  display: flex;
+  gap: 8px;
   align-items: start;
   min-width: 0;
+  min-height: 31px;
   padding: 7px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -71,11 +72,15 @@ function copyFieldLabel(label) {
   line-height: 1.45;
 }
 .tool-card__field dt {
+  flex: 0 0 auto;
+  max-width: 9em;
   color: var(--color-text-subtle);
   font-weight: 500;
   line-height: 1.45;
+  white-space: nowrap;
 }
 .tool-card__field dd {
+  flex: 1 1 auto;
   margin: 0;
   min-width: 0;
   color: var(--color-text);
@@ -145,7 +150,6 @@ function copyFieldLabel(label) {
     grid-column: auto;
   }
   .tool-card__field {
-    grid-template-columns: minmax(42px, 64px) minmax(0, 1fr);
     gap: 8px;
   }
 }
