@@ -57,6 +57,34 @@ func TestEnsureLoadedSkillInstructionsAppendsAfterSkillToolResult(t *testing.T) 
 	}
 }
 
+func TestEnsureLoadedSkillInstructionsRestoresAfterCompression(t *testing.T) {
+	root := t.TempDir()
+	writeSkillInjectionTestSkill(t, root, "writer", "Write clearly.")
+	catalog := skills.NewCatalog(root, true, 2).NewTurnView()
+	loaded := catalog.SetLoadedSkills([]string{"writer"})
+	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{
+		Catalog: catalog,
+		Get:     func() []skills.LoadedSkill { return loaded },
+	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+
+	// Compression replaces the old skill message with a summary. The durable
+	// loaded set is the source of truth, so the next model step must restore the
+	// current body before the next human message is sent.
+	history := []llm.Message{
+		llm.UserMessage("此前已完成写作任务的摘要", llm.UserNameCompression),
+		llm.UserMessage("继续写作", llm.UserNameHuman),
+	}
+	o.ensureLoadedSkillInstructions("session-1", &history)
+	if len(history) != 3 || history[1].Name != llm.UserNameSkill || !strings.Contains(history[1].Content, "Write clearly.") {
+		t.Fatalf("restored skill context = %+v", history)
+	}
+
+	o.ensureLoadedSkillInstructions("session-1", &history)
+	if len(history) != 3 {
+		t.Fatalf("restored skill context duplicated after compression: %+v", history)
+	}
+}
+
 func TestFilterSkillInstructionMessagesRemovesStaleAndUnloadedBodies(t *testing.T) {
 	root := t.TempDir()
 	writeSkillInjectionTestSkill(t, root, "writer", "new body")

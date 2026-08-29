@@ -1202,9 +1202,13 @@ func (c *TurnCoordinator) contextCompactedLocked(command TurnCommand) error {
 	if c.turn == nil || c.step == nil {
 		return fmt.Errorf("context compaction requires an active step")
 	}
-	c.turn.ContextEpoch++
-	c.step.ContextEpoch = c.turn.ContextEpoch
-	return c.step.Advance(EventContextCompacted, command.At, command.Reason)
+	// Compaction changes the durable history boundary, but it does not become
+	// a new model-context segment until the next model request has rebuilt and
+	// published its ModelContextSnapshot. Keeping the epoch tied to
+	// ModelContextChanged avoids counting one rebuild twice.
+	// The compaction reason belongs to the event payload, not to the active
+	// Step's terminal end reason.
+	return c.step.Advance(EventContextCompacted, command.At, "")
 }
 
 func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {

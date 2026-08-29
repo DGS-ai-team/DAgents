@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import * as api from "../../api/node.js";
+import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const channels = ref([]);
@@ -253,15 +254,23 @@ onMounted(() => void load());
 
 <template>
   <div class="settings-page settings-embedded linux-settings">
-    <header class="settings-page__header">
-      <div class="settings-page__header-main">
-        <h1 class="settings-page__title">Linux 通道</h1>
-        <p class="settings-page__intro">先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。密码可直接输入或引用环境变量，敏感信息不会进入工具参数或会话上下文。</p>
-      </div>
-      <div class="settings-page__header-actions">
+    <SettingsPageHeader
+      title="Linux 通道"
+      eyebrow="全局工具设置"
+      description="先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。敏感信息不会进入工具参数或会话上下文。"
+    >
+      <template #actions>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
-      </div>
-    </header>
+      </template>
+    </SettingsPageHeader>
+
+    <div class="linux-settings__flow" aria-label="Linux 通道配置流程">
+      <span class="linux-settings__flow-step"><b>1</b>保存凭据</span>
+      <span class="linux-settings__flow-line" aria-hidden="true"></span>
+      <span class="linux-settings__flow-step"><b>2</b>创建 SSH 通道</span>
+      <span class="linux-settings__flow-line" aria-hidden="true"></span>
+      <span class="linux-settings__flow-step"><b>3</b>绑定到智能体</span>
+    </div>
 
     <p v-if="loading" class="linux-settings__muted">加载中…</p>
     <p v-if="error" class="linux-settings__error">{{ error }}</p>
@@ -301,7 +310,7 @@ onMounted(() => void load());
     <section class="settings-section settings-section--standalone">
       <div class="settings-section__head">
         <div>
-          <h2 class="settings-section__title">凭据清单</h2>
+          <h2 class="settings-section__title">凭据</h2>
           <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；直接输入内容会加密存储。</p>
         </div>
         <div class="settings-section__actions">
@@ -320,7 +329,7 @@ onMounted(() => void load());
     <section class="settings-section settings-section--standalone">
       <div class="settings-section__head">
         <div>
-          <h2 class="settings-section__title">通道清单</h2>
+          <h2 class="settings-section__title">SSH 通道</h2>
           <p class="settings-section__desc">保存后在智能体详情中绑定；未绑定的通道不会对智能体暴露。</p>
         </div>
         <div class="settings-section__actions">
@@ -433,6 +442,10 @@ onMounted(() => void load());
 
 <style scoped>
 .linux-settings { max-width: 1180px; }
+.linux-settings__flow { display:flex; align-items:center; gap:10px; margin:-6px 0 4px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--color-primary, #1575c5) 18%, var(--color-border)); border-radius:10px; background:color-mix(in srgb, var(--color-primary, #1575c5) 5%, var(--color-surface)); color:var(--color-text-muted); font-size:12px; }
+.linux-settings__flow-step { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.linux-settings__flow-step b { display:grid; place-items:center; width:18px; height:18px; border-radius:50%; color:var(--color-primary-strong); background:var(--color-primary-soft); font-size:11px; }
+.linux-settings__flow-line { flex:0 1 28px; height:1px; background:var(--color-border); }
 .linux-settings__actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex:0 0 auto; }
 .linux-settings__summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:22px 0 4px; }
 .linux-settings__summary-card { display:flex; flex-direction:column; gap:3px; padding:14px 16px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface-muted, #f8fafc); }

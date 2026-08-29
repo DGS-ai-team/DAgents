@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import * as api from "../../api/node.js";
+import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const DEFAULT_CONFIG = `{
@@ -25,7 +26,76 @@ const toolSaving = ref("");
 const error = ref("");
 const status = ref("");
 const toolQuery = ref("");
+const redactedSecrets = ref({});
 const draft = reactive({ configText: "" });
+
+const REDACTED_SECRET = "__DAGENTS_SECRET_REDACTED__";
+
+function isReferenceValue(value) {
+  return /^\$\{[^}]+\}$/.test(value) || /^env:/i.test(value);
+}
+
+function isSensitiveField(key, parents) {
+  const normalized = String(key || "").toLowerCase();
+  return parents.some((parent) => parent === "headers" || parent === "env")
+    || /token|secret|password|api[_-]?key|authorization|credential/.test(normalized);
+}
+
+function maskConfigValue(value, path, parents, secrets) {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => maskConfigValue(item, `${path}.${index}`, parents, secrets));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        maskConfigValue(child, path ? `${path}.${key}` : key, [...parents, key.toLowerCase()], secrets),
+      ]),
+    );
+  }
+  if (typeof value === "string" && value && isSensitiveField(parents.at(-1), parents.slice(0, -1)) && !isReferenceValue(value)) {
+    secrets[path] = value;
+    return REDACTED_SECRET;
+  }
+  return value;
+}
+
+function restoreConfigValue(value, path, secrets) {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => restoreConfigValue(item, `${path}.${index}`, secrets));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        restoreConfigValue(child, path ? `${path}.${key}` : key, secrets),
+      ]),
+    );
+  }
+  return value === REDACTED_SECRET && secrets[path] !== undefined ? secrets[path] : value;
+}
+
+function maskConfigText(text) {
+  try {
+    const secrets = {};
+    const parsed = JSON.parse(text);
+    const masked = maskConfigValue(parsed, "", [], secrets);
+    redactedSecrets.value = secrets;
+    return `${JSON.stringify(masked, null, 2)}\n`;
+  } catch {
+    redactedSecrets.value = {};
+    return text;
+  }
+}
+
+function configTextForSave(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return `${JSON.stringify(restoreConfigValue(parsed, "", redactedSecrets.value), null, 2)}\n`;
+  } catch {
+    return text;
+  }
+}
 
 const activeServer = computed(() => servers.value.find((item) => item.id === activeServerId.value) || null);
 const activeTools = computed(() => {
@@ -38,7 +108,7 @@ const activeTools = computed(() => {
 function setConfigFromResponse(result) {
   const text = String(result?.config_text || "").trim();
   configText.value = text || '{\n  "mcpServers": {}\n}\n';
-  draft.configText = configText.value;
+  draft.configText = maskConfigText(configText.value);
   servers.value = Array.isArray(result?.servers) ? result.servers : [];
   if (activeServerId.value && !servers.value.some((server) => server.id === activeServerId.value)) {
     activeServerId.value = "";
@@ -62,7 +132,7 @@ async function save() {
   error.value = "";
   status.value = "";
   try {
-    const result = await api.saveMcpConfig(draft.configText);
+    const result = await api.saveMcpConfig(configTextForSave(draft.configText));
     setConfigFromResponse(result);
     notifyConfigurationChanged("mcp");
     status.value = "MCP 配置已保存并刷新服务目录";
@@ -158,23 +228,26 @@ onMounted(() => {
 
 <template>
   <div class="settings-page settings-embedded mcp-settings">
-    <header class="settings-page__header">
-      <div class="settings-page__header-main">
-        <h1 class="settings-page__title">MCP 外部服务</h1>
-        <p class="settings-page__intro">
-          使用标准 mcpServers JSON 配置多个 MCP 服务。保存后会加载服务目录，工具默认不暴露给智能体；点击服务条目后再启用需要的工具。
-        </p>
-      </div>
-      <div class="settings-page__header-actions">
+    <SettingsPageHeader
+      title="MCP 服务"
+      eyebrow="全局工具设置"
+      description="管理 Node 全局可用的 MCP 服务和工具目录；具体智能体的启用范围在智能体设置中绑定。"
+    >
+      <template #actions>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="reloadDraft">重新加载</button>
-      </div>
-    </header>
+      </template>
+    </SettingsPageHeader>
 
-    <section class="mcp-settings__editor settings-section settings-section--standalone">
+    <details class="mcp-settings__advanced">
+      <summary>
+        <span>高级：编辑 mcpServers JSON</span>
+        <small>适用于导入、批量修改或配置 stdio 服务</small>
+      </summary>
+      <section class="mcp-settings__editor settings-section settings-section--standalone">
       <div class="settings-section__head">
         <div>
-          <h2 class="settings-section__title">MCP 配置</h2>
-          <p class="settings-section__desc">兼容常见 MCP 客户端的 mcpServers 格式。凭据可以填写明文，也可以写成 ${ENV_NAME} 环境变量引用；明文内容会加密存储。</p>
+          <h2 class="settings-section__title">原始配置</h2>
+          <p class="settings-section__desc">支持标准 mcpServers 格式。敏感值建议使用环境变量引用，例如 <code>${ENV_NAME}</code>；直接输入的凭据会加密存储。</p>
         </div>
         <div class="settings-section__actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="formatDraft">格式化</button>
@@ -187,13 +260,15 @@ onMounted(() => {
         v-model="draft.configText"
         class="mcp-settings__textarea"
         spellcheck="false"
+        autocomplete="off"
         aria-label="MCP 原始配置"
         placeholder='{
   "mcpServers": {}
 }'
       ></textarea>
-      <p class="mcp-settings__hint">stdio 示例：command、args、env；远程服务示例：type、url、headers。明文凭据仅在编辑器中输入，保存后会在本机 Node 配置中加密存储。</p>
-    </section>
+      <p class="mcp-settings__hint">stdio 示例：command、args、env；远程服务示例：type、url、headers。不要把访问令牌提交到截图、日志或聊天记录中。</p>
+      </section>
+    </details>
 
     <p v-if="loading" class="mcp-settings__muted">加载中…</p>
     <p v-if="error" class="mcp-settings__error">{{ error }}</p>
@@ -275,6 +350,38 @@ onMounted(() => {
 .mcp-settings__editor,
 .mcp-settings__servers,
 .mcp-settings__detail { margin-top: 16px; }
+.mcp-settings__advanced {
+  margin-top: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-muted, #fbfcfd);
+}
+.mcp-settings__advanced > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style-position: inside;
+}
+.mcp-settings__advanced > summary::marker { color: var(--color-primary); }
+.mcp-settings__advanced > summary small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.mcp-settings__advanced[open] > summary {
+  border-bottom: 1px solid var(--color-border);
+}
+.mcp-settings__advanced .mcp-settings__editor {
+  margin-top: 0;
+  padding: 16px 14px 14px;
+  border-top: 0;
+}
 .mcp-settings__textarea {
   display: block;
   width: 100%;
@@ -298,13 +405,14 @@ onMounted(() => {
 .mcp-settings__error { color: var(--color-danger); }
 .mcp-settings__ok { color: var(--color-success, #3d9a5f); }
 .mcp-settings__count { color: var(--color-text-muted); font-size: 12px; }
-.mcp-settings__server-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-top: 14px; }
+.mcp-settings__server-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 10px; margin-top: 14px; }
 .mcp-settings__server-card {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-height: 70px;
   padding: 13px;
   border: 1px solid var(--color-border);
   border-radius: 10px;

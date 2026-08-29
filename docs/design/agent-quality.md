@@ -13,7 +13,7 @@
 | 稳定行为规则、工作区约定 | system prompt | 仅在稳定配置/Hook/Agent 快照变化时重建 |
 | Session 身份、主机快照和其他运行时状态 | request-only `ContextInjection` | 仅在目标 Session 的请求快照中注入，不写入历史 |
 | 工具定义 | API `tools` 字段 | 工具清单或 schema 变化时接受前缀缓存失效 |
-| Skill 目录 | system prompt 中的 metadata | catalog 变化时在下一个 human turn 观察 |
+| Skill 目录 | context boundary 时写入 system prompt；实时变化由 `list_available_skills` 查询 | 新会话、压缩或其他上下文重建时刷新 |
 | Skill 正文 | 独立 `role=user` ContextInjection/context message | `load/unload` 在下一个模型 Step 生效 |
 | 用户输入、工具结果、成员产出 | 合法消息序列/结构化来源 | 只追加，不用动态 system prompt 伪造状态 |
 | 当前 terminal、附件、焦点页面 | 带 provenance 的 Session ContextInjection | 仅注入目标 Session，生命周期明确 |

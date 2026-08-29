@@ -441,7 +441,18 @@ function handleEvent(ev) {
       );
       break;
     case "skills/changed":
-      addSystem("技能目录已变化，将在下一轮边界重新评估。");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("dagents:skills-changed", { detail: ev.data || {} }));
+      }
+      addSystem(
+        ev.data?.change === "loaded_set"
+          ? ev.data?.applied_boundary === "next_model_step"
+            ? "技能状态已更新，将在下一步模型请求生效。"
+            : "技能状态已更新，将在下一轮生效。"
+          : ev.data?.applied_boundary === "next_model_step"
+            ? "技能目录已更新，将在上下文重建后的下一步模型请求生效。"
+            : "技能目录已变化，将在下一轮上下文边界更新。",
+      );
       break;
     case "mcp/catalog-changed":
       addSystem(

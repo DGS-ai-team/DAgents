@@ -73,8 +73,7 @@ func TestListAvailableSkillsIsMetadataOnlyAndDoesNotMutateContext(t *testing.T) 
 	writeLifecycleSkill(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nSECRET BODY\n")
 	catalog := skills.NewCatalog(root, true, 2)
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
-		Catalog:         catalog,
-		CatalogToolMode: true,
+		Catalog: catalog,
 	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	history := []llm.Message{}
@@ -114,7 +113,7 @@ func TestListAvailableSkillsIsMetadataOnlyAndDoesNotMutateContext(t *testing.T) 
 	}
 }
 
-func TestListAvailableSkillsIsRejectedWhenExperimentIsDisabled(t *testing.T) {
+func TestListAvailableSkillsIsAvailableWhenSkillsAreEnabled(t *testing.T) {
 	root := t.TempDir()
 	writeLifecycleSkill(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nBody\n")
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
@@ -127,8 +126,41 @@ func TestListAvailableSkillsIsRejectedWhenExperimentIsDisabled(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(history[0].Content, "experiment_disabled") {
-		t.Fatalf("disabled experiment result = %q", history[0].Content)
+	if strings.Contains(history[0].Content, "experiment_disabled") || !strings.Contains(history[0].Content, `"status":"succeeded"`) {
+		t.Fatalf("list result = %q", history[0].Content)
+	}
+}
+
+func TestListAvailableSkillsUsesLiveCatalogWithoutRewritingPromptMetadata(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "writer", "SKILL.md")
+	writeLifecycleSkill(t, root, "writer", "---\nname: writer\ndescription: v1\n---\nBody\n")
+	live := skills.NewCatalog(root, true, 2)
+	frozen := live.NewTurnView()
+	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
+		Catalog:     frozen,
+		LiveCatalog: live,
+	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	initialPrompt := o.buildSystemPrompt("session-1")
+	if !strings.Contains(initialPrompt, "writer: v1") {
+		t.Fatalf("initial prompt missing frozen metadata: %q", initialPrompt)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: writer\ndescription: v2\n---\nBody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	history := []llm.Message{}
+	if err := o.executeSkillTool("session-1", &history, llm.ToolCall{ID: "list-live", Function: llm.ToolCallFunction{
+		Name:      "list_available_skills",
+		Arguments: `{}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || !strings.Contains(history[0].Content, `"description":"v2"`) {
+		t.Fatalf("live discovery did not return latest metadata: %+v", history)
+	}
+	unchangedPrompt := o.buildSystemPrompt("session-1")
+	if unchangedPrompt != initialPrompt || strings.Contains(unchangedPrompt, "v2") {
+		t.Fatalf("list discovery rewrote frozen system prompt metadata: %q", unchangedPrompt)
 	}
 }
 
@@ -262,6 +294,16 @@ func (c *skillBoundaryClient) CompleteText(context.Context, llm.CompleteRequest)
 
 func (c *skillBoundaryClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
 	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func TestContextRefreshKeepsDistinctMutationReasons(t *testing.T) {
+	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	o.RequestModelContextRefresh("session-1", "skills_load")
+	o.RequestModelContextRefresh("session-1", "context_compression")
+	o.RequestModelContextRefresh("session-1", "skills_load")
+	if got := o.consumeModelContextRefresh("session-1"); got != "skills_load,context_compression" {
+		t.Fatalf("context refresh reasons = %q", got)
+	}
 }
 
 func writeLifecycleSkill(t *testing.T, root, name, content string) {

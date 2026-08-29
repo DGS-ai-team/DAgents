@@ -7,7 +7,7 @@ func loadSkillsToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "load_skills",
-			Description: "按名称整组替换当前会话的 loaded skills，并同步注册各 skill 的 hooks/ 目录下 Hook（unload/clear 时移除）。会话状态和 hooks 立即更新；当前模型请求保持稳定，skill 正文在显式变更后的下一个模型 Step 以独立的 skill 上下文消息生效。" +
+			Description: "按名称整组替换当前会话已启用的 skills，并同步注册各 skill 的 hooks（unload/clear 时移除）。会话状态和 hooks 立即更新；当前模型请求保持稳定，skill 正文在显式变更后的下一个模型 Step 以独立的会话上下文消息生效。" +
 				"整组替换当前已加载列表（非追加）；skill_names 传 [] 清空。" +
 				"一次可加载多个 name，数量受配置上限约束；返回 requested、loaded_skills、rejected、session_state_applied_boundary、model_context_applied_boundary、hooks_status、hooks_loaded 和 hooks_failed；不再需要时用 unload_skills 或 clear_skills。" +
 				"注意：模型只有在正文进入模型上下文后才能依赖 skill.md 内容；如果需要修改文件，不要直接改动当前已加载 skill 文件。",
@@ -17,7 +17,7 @@ func loadSkillsToolDef() ToolDef {
 					"skill_names": map[string]any{
 						"type":  "array",
 						"items": map[string]any{"type": "string"},
-						"description": "要加载的 skill 名称（必填）。须与 system prompt 中的可用 skills 目录或 skills/<name> 目录一致；" +
+						"description": "要加载的 skill 名称（必填）。应使用 list_available_skills 返回的 skill_name 或 directory_name；" +
 							"通常等于 skills/<name> 目录名（skill_name）及 SKILL.md frontmatter 的 name 字段",
 					},
 				},
@@ -33,7 +33,7 @@ func unloadSkillsToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "unload_skills",
-			Description: "从当前会话已加载 skills 中移除指定项；会话状态和 hooks 立即更新，当前模型请求保持稳定，移除结果在显式变更后的下一个模型 Step 从模型上下文中生效。返回 loaded_skills、未加载名称的 rejected 诊断以及 hooks_status/hooks_loaded/hooks_failed。",
+			Description: "从当前会话已启用 skills 中移除指定项；会话状态和 hooks 立即更新，当前模型请求保持稳定，移除结果在显式变更后的下一个模型 Step 从模型上下文中生效。返回 loaded_skills、未加载名称的 rejected 诊断以及 hooks_status/hooks_loaded/hooks_failed。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -55,7 +55,7 @@ func clearSkillsToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "clear_skills",
-			Description: "清空当前会话已加载的全部 skills，等价于 load_skills([])；会话状态和 hooks 立即更新，当前模型请求保持稳定，清空结果在显式变更后的下一个模型 Step 从模型上下文中生效，并返回 hooks_status/hooks_loaded/hooks_failed。",
+			Description: "清空当前会话已启用的全部 skills，等价于 load_skills([])；会话状态和 hooks 立即更新，当前模型请求保持稳定，清空结果在显式变更后的下一个模型 Step 从模型上下文中生效，并返回 hooks_status/hooks_loaded/hooks_failed。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type":                 "object",
 				"properties":           map[string]any{},
@@ -66,15 +66,14 @@ func clearSkillsToolDef() ToolDef {
 	}
 }
 
-// ListAvailableSkillsToolDef is only appended by the optional Skills catalog
-// experiment. Keeping it out of Registry.Definitions preserves the default
-// model-visible tools schema byte-for-byte.
+// ListAvailableSkillsToolDef describes the metadata-only discovery tool. It is
+// appended by the turn orchestrator when the Skills tool group is visible.
 func ListAvailableSkillsToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
 			Name: "list_available_skills",
-			Description: "查询当前可见的 skills 元数据（名称、目录名和用途摘要），不读取或返回 SKILL.md 正文；" +
+			Description: "查询当前可见的 skills 元数据（名称、目录名和用途摘要），不写入 system prompt，不读取或返回 SKILL.md 正文；" +
 				"支持 query 搜索和有限分页，获得名称后再调用 load_skills 加载正文。返回 status、catalog_revision、query、skills、has_more 和 next_cursor。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",

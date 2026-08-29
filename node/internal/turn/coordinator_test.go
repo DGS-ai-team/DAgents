@@ -349,7 +349,7 @@ func TestTurnCoordinatorRestoreRollsBackCorruptReplay(t *testing.T) {
 	}
 }
 
-func TestTurnCoordinatorAdvancesContextEpoch(t *testing.T) {
+func TestTurnCoordinatorRecordsCompactionBeforeContextRebuild(t *testing.T) {
 	now := time.Now()
 	coordinator := NewTurnCoordinator("session-1", "agent-1")
 	for _, command := range []TurnCommand{
@@ -372,8 +372,39 @@ func TestTurnCoordinatorAdvancesContextEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.ContextEpoch != 1 {
-		t.Fatalf("context epoch = %d, want 1", snapshot.ContextEpoch)
+	if snapshot.ContextEpoch != 0 {
+		t.Fatalf("context epoch = %d, want 0 before model context rebuild", snapshot.ContextEpoch)
+	}
+}
+
+func TestTurnCoordinatorCompactsWhileWaitingForInteraction(t *testing.T) {
+	now := time.Now().UTC()
+	coordinator := NewTurnCoordinator("session-1", "agent-1")
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-1", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, HasTools: true, At: now},
+		{Type: CommandInteractionRequested, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, InteractionKind: "approval", At: now},
+	}
+	for _, command := range commands {
+		if _, err := coordinator.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+	snapshot, err := coordinator.Dispatch(TurnCommand{
+		Type:       CommandContextCompacted,
+		SessionID:  "session-1",
+		TurnID:     "turn-1",
+		StepID:     "step-1",
+		Generation: 1,
+		Reason:     "manual_compression",
+		At:         now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TurnStatus != TurnStatusWaiting || snapshot.StepStatus != StepStatusWaitingInteraction || snapshot.ContextEpoch != 0 || snapshot.StepEndReason != "" {
+		t.Fatalf("waiting interaction compaction projection = %#v", snapshot)
 	}
 }
 

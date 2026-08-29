@@ -196,13 +196,13 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if homeNodeID != "" && homeNodeID != s.cfgNodeID() {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request",
-			"远程 Placement 已下线：跨机器协作请使用工作组",
+			"跨机器协作请使用工作组",
 			map[string]any{"home_node_id": homeNodeID})
 		return
 	}
 	if store.NormalizeAgentOrigin(req.Origin) == store.AgentOriginRemote {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request",
-			"远程 Placement 已下线：跨机器协作请使用工作组",
+			"跨机器协作请使用工作组",
 			map[string]any{"origin": store.AgentOriginRemote})
 		return
 	}

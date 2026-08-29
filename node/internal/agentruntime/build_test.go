@@ -175,9 +175,8 @@ func TestBuild_appliesSkillsVisibleAllowlist(t *testing.T) {
 			Defaults: map[string]any{
 				"tools": map[string]any{"enabled_groups": []any{"skills"}},
 				"skills": map[string]any{
-					"enabled":           true,
-					"catalog_tool_mode": true,
-					"visible":           []any{"keep-me"},
+					"enabled": true,
+					"visible": []any{"keep-me"},
 				},
 			},
 		},
@@ -190,8 +189,5 @@ func TestBuild_appliesSkillsVisibleAllowlist(t *testing.T) {
 	}
 	if len(built.TurnOptions.SkillsVisible) != 1 || built.TurnOptions.SkillsVisible[0] != "keep-me" {
 		t.Fatalf("visible=%v", built.TurnOptions.SkillsVisible)
-	}
-	if !built.TurnOptions.SkillsCatalogToolMode {
-		t.Fatal("expected explicit catalog_tool_mode=true to reach TurnOptions")
 	}
 }

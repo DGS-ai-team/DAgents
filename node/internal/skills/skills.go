@@ -22,14 +22,14 @@ import (
 // CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 UI 提示精简。
 const CatalogBloatTokenThreshold = 4000
 
-// LoadSkillsMetadataPrefix 为可用 skills 目录的 token 估算前缀。
+// LoadSkillsMetadataPrefix 为 skills 目录估算使用的文本前缀；该估算不进入模型请求。
 const LoadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
 
-// CatalogTokenStats 为 skills 目录 token 估算分项（避免把未加载正文与 system prompt 重复计数）。
+// CatalogTokenStats 为 skills 目录维护成本的估算分项，不代表当前模型请求的输入。
 type CatalogTokenStats struct {
-	// MetadataTokens：system prompt 尾部 skills 目录的元数据（name + description 列表）。
+	// MetadataTokens：目录元数据（name + description 列表）的估算值。
 	MetadataTokens int
-	// MaxBodyTokens：单个 SKILL.md 正文的最大估算 token（load 后进入独立 skill context，受 max_in_prompt 限制）。
+	// MaxBodyTokens：单个 SKILL.md 正文的最大估算 token（加载后进入独立 skill context）。
 	MaxBodyTokens int
 }
 
@@ -70,9 +70,9 @@ type SkillLoadResult struct {
 	Rejected  []SkillLoadRejection `json:"rejected,omitempty"`
 }
 
-// AvailableSkillsPage is the bounded, metadata-only projection used by the
-// optional list_available_skills experiment. It intentionally reuses
-// LoadedSkill so directory and logical names have the same shape everywhere.
+// AvailableSkillsPage is the bounded, metadata-only projection returned by
+// list_available_skills. It intentionally reuses LoadedSkill so directory and
+// logical names have the same shape everywhere.
 type AvailableSkillsPage struct {
 	CatalogRevision string
 	Query           string
@@ -469,11 +469,9 @@ func (c *Catalog) applyVisible(defs []Definition) []Definition {
 	return out
 }
 
-// EstimateCatalogStats 估算 skills 目录 token 分项。
-//
-// 注意：目录元数据进入启用 skills 的 Agent system prompt 尾部；skill 正文仅在
-// load 后写入独立 skill context。因此 skills_catalog_estimated_tokens 只反映
-// MetadataTokens，正文膨胀告警另看 MaxBodyTokens。
+// EstimateCatalogStats 估算 skills 目录维护成本的 token 分项。
+// 元数据会在 context boundary 写入 system prompt；实时目录由
+// list_available_skills 按需返回，正文仅在 load 后写入独立 skill context。
 func EstimateCatalogStats(defs []Definition) CatalogTokenStats {
 	metaSection := renderMetadataSection(defs)
 	stats := CatalogTokenStats{}
@@ -521,12 +519,13 @@ func (c *Catalog) EstimateCatalogStats() CatalogTokenStats {
 	return EstimateCatalogStats(defs)
 }
 
-// EstimateCatalogMetadataTokens 返回 system prompt 尾部 catalog 元数据的估算 token（API skills_catalog_estimated_tokens）。
+// EstimateCatalogMetadataTokens 返回目录元数据的估算 token（仅用于诊断）。
 func (c *Catalog) EstimateCatalogMetadataTokens() int {
 	return c.EstimateCatalogStats().MetadataTokens
 }
 
-// RenderMetadataSection 渲染可用 skills 元数据段。
+// RenderMetadataSection 渲染可见 skills 元数据段，用于 context-boundary
+// system prompt；实时目录查询使用 ListAvailableSkills。
 func (c *Catalog) RenderMetadataSection() string {
 	return renderMetadataSection(c.List())
 }
@@ -581,9 +580,9 @@ func (c *Catalog) visibleMatches(defs []Definition, name string) []Definition {
 	return out
 }
 
-// RenderLoadedSection renders a legacy inline body section for diagnostics and
-// compatibility. Runtime model requests must use ReadLoadedSkillContents and
-// the turn package's independent skill context messages instead.
+// RenderLoadedSection renders a body projection for diagnostics. Runtime model
+// requests use ReadLoadedSkillContents and the turn package's independent
+// skill context messages instead.
 func (c *Catalog) RenderLoadedSection(loaded []LoadedSkill) string {
 	if len(loaded) == 0 {
 		return ""

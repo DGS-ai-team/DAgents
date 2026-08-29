@@ -237,7 +237,7 @@ func newRuntimeWithPublisher(
 		policyEngine,
 		turn.SkillAccess{
 			Catalog:           turnCatalog,
-			CatalogToolMode:   turnOpts.SkillsCatalogToolMode,
+			LiveCatalog:       catalog,
 			Get:               rt.getLoadedSkills,
 			Set:               rt.setLoadedSkills,
 			SetWithHookStatus: rt.setLoadedSkillsWithHookStatus,
@@ -430,12 +430,25 @@ func (r *runtime) setLoadedSkillsWithHookStatus(items []skills.LoadedSkill) turn
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
+	changed := turn.Digest(before) != turn.Digest(items)
 	hookSync := turn.SkillHooksSyncResult{Status: "unavailable"}
 	if r.orch != nil {
 		hookSync = r.orch.SyncLoadedSkillHooks(items)
-		if turn.Digest(before) != turn.Digest(items) && r.turnState() != turn.StateIdle {
+		if changed && r.turnState() != turn.StateIdle {
 			r.orch.RequestModelContextRefresh(r.session.ID, "skills_api_update")
 		}
+	}
+	if changed && r.hub != nil {
+		boundary := "next_human_turn"
+		if r.turnState() != turn.StateIdle {
+			boundary = "next_model_step"
+		}
+		r.hub.Publish(r.session.ID, "skills/changed", map[string]any{
+			"agent_id":         r.agentID,
+			"loaded_skills":    append([]skills.LoadedSkill(nil), items...),
+			"applied_boundary": boundary,
+			"change":           "loaded_set",
+		})
 	}
 	return hookSync
 }
@@ -770,9 +783,10 @@ func (r *runtime) applyPendingLongTermScope() {
 	r.orch.ReloadLongTermMemory(context.Background())
 }
 
-// observeSkillCatalogChange applies external Skill edits only at a new human
-// Turn boundary. The active Turn snapshot remains untouched.
-func (r *runtime) observeSkillCatalogChange() {
+// refreshSkillsCatalogView captures the live directory at an explicit model
+// context boundary. The resulting view is used by system prompt metadata and
+// skill body loading; list_available_skills uses the live catalog separately.
+func (r *runtime) refreshSkillsCatalogView(appliedBoundary string) {
 	if r == nil || r.skillsCatalog == nil {
 		return
 	}
@@ -786,45 +800,41 @@ func (r *runtime) observeSkillCatalogChange() {
 	}
 	r.mu.Lock()
 	previous := r.skillRevision
-	if previous == current {
-		r.mu.Unlock()
-		return
-	}
 	r.skillRevision = current
 	r.skillsTurnCatalog = view
 	r.mu.Unlock()
 	if r.orch != nil {
 		r.orch.SetSkillsCatalog(view)
 	}
-	if r.hub != nil {
+	if previous != current && r.hub != nil {
 		r.hub.Publish(r.session.ID, "skills/changed", map[string]any{
 			"agent_id":         r.agentID,
 			"previous":         previous,
 			"revision":         current,
-			"applied_boundary": "next_turn",
+			"applied_boundary": appliedBoundary,
+			"change":           "catalog_revision",
 		})
 	}
 }
 
-// refreshSkillsCatalogForExplicitMutation switches the model-facing view
-// after a control-plane mutation. Model-issued load_skills deliberately keeps
-// the existing Turn view; control-plane mutation is an explicit context
-// boundary and may expose the latest catalog at the next model Step.
-func (r *runtime) refreshSkillsCatalogForExplicitMutation() {
-	if r == nil || r.skillsCatalog == nil {
+// scheduleModelContextRebuild is the single runtime boundary for changes
+// that must be visible to the next model request. It invalidates the
+// Orchestrator's request snapshot and refreshes the frozen Skills view before
+// the next build; neither operation mutates an in-flight model request.
+func (r *runtime) scheduleModelContextRebuild(reason, appliedBoundary string) {
+	if r == nil {
 		return
 	}
-	view := r.skillsCatalog.NewTurnView()
-	if view == nil {
-		return
-	}
-	r.mu.Lock()
-	r.skillsTurnCatalog = view
-	r.skillRevision = view.Revision()
-	r.mu.Unlock()
 	if r.orch != nil {
-		r.orch.SetSkillsCatalog(view)
+		r.orch.RequestModelContextRefresh(r.session.ID, reason)
 	}
+	r.refreshSkillsCatalogView(appliedBoundary)
+}
+
+// observeSkillCatalogChange applies external Skill edits only at a new human
+// Turn boundary. The active Turn snapshot remains untouched.
+func (r *runtime) observeSkillCatalogChange() {
+	r.refreshSkillsCatalogView("next_human_turn")
 }
 
 func (r *runtime) handleTurnContinuation(parent context.Context) {
@@ -1188,10 +1198,22 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
 	prefix := r.sidecarPrefix()
 	r.mu.Lock()
+	beforeDigest := turn.Digest(r.messages)
+	beforeCount := len(r.messages)
 	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
+	afterDigest := turn.Digest(r.messages)
+	afterCount := len(r.messages)
 	r.mu.Unlock()
 	if result.Status == "applied" && r.orch != nil {
 		r.orch.ReloadLongTermMemory(ctx)
+	}
+	if result.Status == "applied" {
+		// Manual compression has the same semantics as pre-step compression:
+		// the next model request must build a fresh context segment.
+		r.scheduleModelContextRebuild("context_compression_manual", "next_model_step")
+		if err := r.lifecycleContextCompacted("context_compressed_manual", beforeDigest, afterDigest, beforeCount, afterCount); err != nil && r.logger != nil {
+			r.logger.Warn("record manual context compaction lifecycle failed", "session_id", r.session.ID, "error", err)
+		}
 	}
 	if result.Status == "applied" {
 		r.mu.Lock()
@@ -1211,6 +1233,10 @@ func (r *runtime) contextView() *ContextView {
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
+	promptCatalog := r.skillsTurnCatalog
+	if promptCatalog == nil {
+		promptCatalog = r.skillsCatalog
+	}
 	queuePending := r.queue.Len()
 	if r.inputBox != nil {
 		queuePending += r.inputBox.Len()
@@ -1259,7 +1285,10 @@ func (r *runtime) contextView() *ContextView {
 			view.ContextInjectionDigest = turn.Digest(injections)
 		}
 	}
-	enrichContextPromptStats(view, r.skillsCatalog)
+	// Diagnostics must describe the same frozen catalog view as the active
+	// model prompt. The live catalog is reserved for discovery and may already
+	// contain edits that will not apply until the next context boundary.
+	enrichContextPromptStats(view, promptCatalog)
 	if r.compression != nil {
 		if snap, ok := r.compression.LastCompression(r.session.ID); ok {
 			s := snap

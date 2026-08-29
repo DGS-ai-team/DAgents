@@ -49,12 +49,12 @@
 | `handleSideEffectProduceAsync` | 异步工具结果 Produce（缓冲 + SSE） |
 | `handleSideEffectContinue` | 旁路 Apply + 被动 LLM 续跑 |
 | `handleResume` | HITL resume 续跑 |
-| `applyStepOutcome` | 同步当前 Step 的 messages；Pending 与步序从 Coordinator 投影读取 |
+| `lifecycleAfterModelStep` / `lifecycleAfterResume` | 将单步结果映射为 Coordinator 生命周期状态，并同步当前 Step 的 messages |
 | `persist` / `clearMessages` | SQLite 持久化 |
 | `enqueue` | 仅传输 resume、异步事实和恢复控制项；外部输入不再经过优先级队列 |
 | `cancelTurn` / `stop` | 取消或停止 consumer |
 | `contextView` | 组装 `ContextView` |
-| `runTurnStep` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在 `applyStepOutcome` 后触发子 Agent 结算 |
+| `runTurnStepAtEpoch` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在生命周期收尾后触发子 Agent 结算 |
 | `getLoadedSkills` / `setLoadedSkills` / `setLoadedSkillsByName` 等 | skills 内存状态 |
 
 ## runtime_child.go

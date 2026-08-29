@@ -214,33 +214,24 @@ func (o *Orchestrator) recordToolExecutionSuccess(tc llm.ToolCall, content strin
 
 func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message, tc llm.ToolCall) error {
 	catalog := o.skillAccess.Catalog
+	if tc.Function.Name == "list_available_skills" {
+		discoveryCatalog := o.skillAccess.LiveCatalog
+		if discoveryCatalog == nil {
+			discoveryCatalog = catalog
+		}
+		if discoveryCatalog == nil || !discoveryCatalog.Enabled() {
+			output := "ERROR: skills 功能已禁用"
+			o.publishToolResult(sessionID, tc, output, true, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+			return nil
+		}
+		return o.executeListAvailableSkillsTool(sessionID, history, tc, discoveryCatalog)
+	}
 	if catalog == nil || !catalog.Enabled() {
 		output := "ERROR: skills 功能已禁用"
 		o.publishToolResult(sessionID, tc, output, true, nil)
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil
-	}
-	if tc.Function.Name == "list_available_skills" {
-		if !o.skillAccess.CatalogToolMode {
-			body, _ := json.Marshal(map[string]any{
-				"status":           "failed",
-				"catalog_revision": catalog.Revision(),
-				"query":            "",
-				"skills":           []skills.LoadedSkill{},
-				"has_more":         false,
-				"next_cursor":      "",
-				"error": map[string]any{
-					"code":      "experiment_disabled",
-					"message":   "list_available_skills 实验未启用",
-					"retryable": false,
-				},
-			})
-			output := string(body)
-			o.publishToolResult(sessionID, tc, output, true, nil)
-			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
-			return nil
-		}
-		return o.executeListAvailableSkillsTool(sessionID, history, tc, catalog)
 	}
 	loaded := []skills.LoadedSkill{}
 	if o.skillAccess.Get != nil {

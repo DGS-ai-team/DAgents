@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,11 +35,11 @@ const (
 
 // SkillAccess 为 orchestrator 读写 session loaded_skills 的回调。
 type SkillAccess struct {
+	// Catalog is the frozen metadata/body view for the active human Turn.
 	Catalog *skills.Catalog
-	// CatalogToolMode enables the default-off list_available_skills
-	// experiment. The flag is fixed for the runtime and never changes inside
-	// an active model context.
-	CatalogToolMode   bool
+	// LiveCatalog is used only by list_available_skills so a directory change
+	// can be inspected without rewriting the active system prompt.
+	LiveCatalog       *skills.Catalog
 	Get               func() []skills.LoadedSkill
 	Set               func([]skills.LoadedSkill)
 	SetWithHookStatus func([]skills.LoadedSkill) SkillHooksSyncResult
@@ -210,8 +209,28 @@ func (o *Orchestrator) RequestModelContextRefresh(sessionID, reason string) {
 	if o.contextMutationReason == nil {
 		o.contextMutationReason = make(map[string]string)
 	}
-	o.contextMutationReason[sessionID] = reason
+	o.contextMutationReason[sessionID] = appendContextMutationReason(o.contextMutationReason[sessionID], reason)
 	o.contextMutationMu.Unlock()
+}
+
+// appendContextMutationReason keeps all distinct invalidation causes until
+// the next model Step consumes them. A single string is retained for wire and
+// lifecycle compatibility, but later mutations must not hide earlier ones.
+func appendContextMutationReason(previous, next string) string {
+	previous = strings.TrimSpace(previous)
+	next = strings.TrimSpace(next)
+	if previous == "" {
+		return next
+	}
+	if next == "" || previous == next {
+		return previous
+	}
+	for _, item := range strings.Split(previous, ",") {
+		if strings.TrimSpace(item) == next {
+			return previous
+		}
+	}
+	return previous + "," + next
 }
 
 func (o *Orchestrator) consumeModelContextRefresh(sessionID string) string {
@@ -943,12 +962,12 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 		return nil
 	}
 	defs := o.tools.Definitions()
-	if !o.skillAccess.CatalogToolMode || o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
+	if o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
 		return defs
 	}
-	// The virtual tool is available only when the regular Skills group is
-	// already visible. This keeps allowlists and child restricted registries
-	// from exposing a discovery tool without load_skills.
+	// Discovery is a regular part of the Skills tool group. It is appended only
+	// when load_skills is visible, so child/allowlisted registries keep the same
+	// permission boundary as the other Skills tools.
 	hasLoadSkills := false
 	for _, def := range defs {
 		if def.Function.Name == "load_skills" {
@@ -962,13 +981,6 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	listDef := tools.ListAvailableSkillsToolDef()
 	listDef.Function.Description = strings.TrimSpace(listDef.Function.Description) + tools.ResultDescriptionSuffixForTool(listDef.Function.Name)
 	defs = append(defs, listDef)
-	sort.SliceStable(defs, func(i, j int) bool {
-		left, right := defs[i].Function.Name, defs[j].Function.Name
-		if left == right {
-			return defs[i].Type < defs[j].Type
-		}
-		return left < right
-	})
 	return defs
 }
 
@@ -1067,18 +1079,12 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	if o == nil {
 		return SystemPromptInput{}
 	}
-	var loaded []skills.LoadedSkill
-	if o.skillAccess.Get != nil {
-		loaded = o.skillAccess.Get()
-	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
 		FSRoot:                o.fsRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
 		Catalog:               o.skillAccess.Catalog,
-		Loaded:                loaded,
-		SkillsCatalogToolMode: o.skillAccess.CatalogToolMode,
 		PromptCtx:             o.promptCtx,
 		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}

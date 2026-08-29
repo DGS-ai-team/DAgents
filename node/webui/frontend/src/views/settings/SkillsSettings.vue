@@ -1,19 +1,15 @@
 <script setup>
 import SkillsPanel from "../../components/SkillsPanel.vue";
+import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 </script>
 
 <template>
   <div class="settings-page settings-embedded">
-    <header class="settings-page__header">
-      <div class="settings-page__header-main">
-        <h1 class="settings-page__title">技能</h1>
-        <p class="settings-page__hint">
-          对应当前对话中的智能体；进程级注入上限在
-          <router-link to="/settings/capabilities">能力 › 运行配额</router-link>
-          。
-        </p>
-      </div>
-    </header>
+    <SettingsPageHeader
+      title="技能"
+      eyebrow="运行时设置"
+      description="查看当前会话已启用的技能与可发现的技能目录。模型会按需加载技能内容。"
+    />
     <SkillsPanel embedded @close="() => {}" />
   </div>
 </template>

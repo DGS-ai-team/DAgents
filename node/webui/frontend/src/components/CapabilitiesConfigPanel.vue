@@ -197,10 +197,10 @@ onMounted(load);
 
     <section class="settings-section">
       <h2 class="settings-section__title">运行配额</h2>
-      <p class="settings-section__desc">技能注入条数与定时任务轮询间隔（进程级）。</p>
+      <p class="settings-section__desc">同时启用的技能数量与定时任务轮询间隔（进程级）。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
-          <span class="settings-field__label">技能注入上限</span>
+          <span class="settings-field__label">同时启用技能数上限</span>
           <input
             v-model.number="form.features.skills_max_in_prompt"
             class="settings-field__input"
