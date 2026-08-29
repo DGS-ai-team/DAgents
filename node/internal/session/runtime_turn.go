@@ -84,6 +84,11 @@ func (r *runtime) runTurnStepAtEpoch(
 		if err := r.lifecycleContextCompacted("context_compressed_before_step", contextBeforeDigest, contextAfterDigest, contextBeforeCount, contextAfterCount); err != nil {
 			return turn.StepOutcome{Err: fmt.Errorf("context compaction lifecycle failed: %w", err)}, history
 		}
+		// Compression changes the model-visible history boundary. Invalidate the
+		// active context segment so the next request rebuilds system prompt,
+		// tools, request-only injections and skill metadata from the compacted
+		// history instead of combining new messages with an old snapshot.
+		r.scheduleModelContextRebuild("context_compression", "next_model_step")
 	}
 
 	outcome := run(turnCtx, &history)

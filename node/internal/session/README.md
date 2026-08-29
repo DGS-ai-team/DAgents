@@ -83,7 +83,7 @@ flowchart TB
 |------|------|
 | `FSRoot` | 工具沙箱根目录（不在 system prompt 中暴露绝对路径；子目录约定见 prompt 与 tool schema） |
 | `MaxToolLoops` | 单条 human message 内工具循环上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
-| `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与 prompt 元数据 |
+| `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与同时启用数量上限 |
 | `RuntimeDir` | `promptcontext.Reader` 根目录 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
 | `IdleAutoCompressSeconds` / `IdleAutoCompressPollSeconds` / `IdleAutoCompressMinTokens` | idle 维护：无动作自动压缩 + **卸内存**（见 `idle_auto_compress.go`、`release.go`） |
@@ -98,13 +98,28 @@ flowchart TB
 | `manager.go` | `Manager`、`TurnOptions`、会话 CRUD、入队、skills、上下文 API |
 | `idle_auto_compress.go` | idle 维护扫描：可选压缩 + `Release` 卸内存（F-NM2–NM5） |
 | `release.go` | `Manager.Release`：persist → stop → 移出 map，保留 SQLite（F-NM1） |
-| `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理、持久化 |
+| `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理 |
+| `runtime_persistence.go` | 运行时快照持久化、InputBox 崩溃恢复与替换数据提取 |
+| `runtime_skills_boundary.go` | skills 目录快照与模型上下文边界变更 |
 | `runtime_turn.go` | `runTurnStep` 单步 turn 脚手架 |
 | `runtime_child.go` | `newChildRuntime`、子 session 元数据、`tryCompleteChildIfIdle` |
 | `manager_child.go` | `SpawnChild` / `StopChild`、`childagent.Host`、子任务入队与 resume 路由 |
 | `context_view.go` | `ContextView`（`GET /context`）、token 粗算 |
 | `triggers.go` | `TriggerSubmitter`、`EnqueueTriggerMessage` |
 | `*_test.go` | 单测 |
+
+### 状态事实源
+
+- **InputBox**：外部 user/trigger/A2A 输入的有界 FIFO，只负责接收、序号和
+  崩溃恢复，不负责执行 turn 或改写 history。
+- **MessageQueue**：resume、cancel、重启续跑和异步 side-effect 等控制事件；
+  它不是普通用户输入的第二个排序队列。
+- **TurnCoordinator**：Turn/Step 生命周期、审批等待和终态的唯一事实源；
+  `runtime` 中的 legacy pending/tool-loop 字段只做兼容投影。
+- **SQLite runtime snapshot**：transcript、InputBox checkpoint 和兼容字段的
+  持久化快照；生命周期事件用于恢复时重建 Turn 投影，两者不能互相冒充。
+- **ModelContextSnapshot**：冻结一次模型请求可见的 prompt/tool/skills 输入；
+  step 更新通过 SSE/生命周期事件发送，只有上下文边界才重建快照。
 
 ---
 

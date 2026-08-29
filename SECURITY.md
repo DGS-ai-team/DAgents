@@ -24,7 +24,9 @@
    在本仓库页面打开 **「Security」** → **「Report a vulnerability」**（或 **「Advisories」** 下提交私有报告）。若仓库未开启该功能，请联系仓库管理员在 **Settings → Security** 中启用 **Private vulnerability reporting**。
 
 2. **定向联系维护者**  
-   若你的组织使用内部安全邮箱或工单系统，请将报告发往维护团队约定的 **私密** 渠道，并在主题中注明 **`[SECURITY] DAgents`**。
+   若仓库尚未开启私有漏洞报告，请先通过 GitHub 私密联系维护者，或联系
+   仓库管理员开启 **Private vulnerability reporting**。不要在公开 Issue
+   或 PR 中粘贴漏洞细节。
 
 报告建议包含（在不泄露利用细节的前提下尽量完整）：
 
@@ -35,6 +37,10 @@
 - 若已有修复思路或补丁，可附 **私有** 附件或后续在 Advisory 中沟通
 
 维护者一般会在 **7 个工作日内** 确认收悉；复杂问题可能需要更长时间，会在 Advisory 或邮件中同步进度。
+
+仓库启用的自动化安全门禁应至少包括 CodeQL、secret scanning、依赖漏洞
+扫描和发布前的许可证检查。自动检查不能替代私密漏洞报告，也不能成为
+公开披露未修复漏洞的理由。
 
 ---
 

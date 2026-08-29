@@ -1559,17 +1559,17 @@ func (r *runtime) lifecycleCancelLocked() error {
 	return nil
 }
 
-// lifecycleContextCompacted records a context epoch change at the Step
-// boundary where compression actually happened. Keeping this as metadata
-// avoids changing the model-visible prompt shape beyond the existing
-// compaction behavior while making cache-invalidating boundaries observable.
+// lifecycleContextCompacted records the durable history compaction boundary.
+// The following ModelContextChanged fact advances ContextEpoch once the next
+// model request has rebuilt its model-visible context segment.
 func (r *runtime) lifecycleContextCompacted(reason, beforeDigest, afterDigest string, beforeCount, afterCount int) error {
 	if r == nil || r.turnCoordinator == nil {
 		return nil
 	}
 	identity, generation := r.lifecycleIdentity()
 	state := r.turnCoordinator.Snapshot()
-	if !state.HasActiveTurn || state.StepID == "" || state.StepStatus != turn.StepStatusRequesting {
+	if !state.HasActiveTurn || state.StepID == "" ||
+		(state.StepStatus != turn.StepStatusRequesting && state.StepStatus != turn.StepStatusWaitingInteraction) {
 		return nil
 	}
 	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{

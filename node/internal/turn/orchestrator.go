@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,11 +35,11 @@ const (
 
 // SkillAccess 为 orchestrator 读写 session loaded_skills 的回调。
 type SkillAccess struct {
+	// Catalog is the frozen metadata/body view for the active human Turn.
 	Catalog *skills.Catalog
-	// CatalogToolMode enables the default-off list_available_skills
-	// experiment. The flag is fixed for the runtime and never changes inside
-	// an active model context.
-	CatalogToolMode   bool
+	// LiveCatalog is used only by list_available_skills so a directory change
+	// can be inspected without rewriting the active system prompt.
+	LiveCatalog       *skills.Catalog
 	Get               func() []skills.LoadedSkill
 	Set               func([]skills.LoadedSkill)
 	SetWithHookStatus func([]skills.LoadedSkill) SkillHooksSyncResult
@@ -86,12 +85,12 @@ type Orchestrator struct {
 
 	ctxMetrics *contextMetricsStore
 
-	modelSnapshots        *modelContextSnapshotStore
-	contextMutationMu     sync.Mutex
-	contextMutationReason map[string]string
-	runtimeRevision       int64
-	runtimeDigest         string
-	executionGuard        ExecutionGuard
+	modelSnapshots    *modelContextSnapshotStore
+	contextMutationMu sync.Mutex
+	contextMutations  map[string][]ContextMutation
+	runtimeRevision   int64
+	runtimeDigest     string
+	executionGuard    ExecutionGuard
 
 	systemPromptBuilder     SystemPromptBuilder
 	contextInjectionBuilder ContextInjectionBuilder
@@ -207,22 +206,25 @@ func (o *Orchestrator) RequestModelContextRefresh(sessionID, reason string) {
 		reason = "context_mutation"
 	}
 	o.contextMutationMu.Lock()
-	if o.contextMutationReason == nil {
-		o.contextMutationReason = make(map[string]string)
+	if o.contextMutations == nil {
+		o.contextMutations = make(map[string][]ContextMutation)
 	}
-	o.contextMutationReason[sessionID] = reason
+	o.contextMutations[sessionID] = appendContextMutation(o.contextMutations[sessionID], reason)
 	o.contextMutationMu.Unlock()
 }
 
+// consumeModelContextRefresh keeps the lifecycle/wire-compatible string at
+// the boundary. Internally, distinct invalidation causes are stored as typed
+// mutations so callers do not need to parse a delimiter-based field.
 func (o *Orchestrator) consumeModelContextRefresh(sessionID string) string {
 	if o == nil {
 		return ""
 	}
 	o.contextMutationMu.Lock()
 	defer o.contextMutationMu.Unlock()
-	reason := strings.TrimSpace(o.contextMutationReason[sessionID])
-	delete(o.contextMutationReason, sessionID)
-	return reason
+	mutations := o.contextMutations[sessionID]
+	delete(o.contextMutations, sessionID)
+	return contextMutationReasons(mutations)
 }
 
 // SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
@@ -468,28 +470,28 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:               agentID,
-		fsRoot:                fsRoot,
-		hub:                   hub,
-		llm:                   client,
-		tools:                 toolExec,
-		policy:                policyEngine,
-		toolHooks:             toolHooks,
-		toolExecLog:           toolExecLog,
-		skillAccess:           skillAccess,
-		hookRuntimeCfg:        hookCfg,
-		maxToolLoops:          maxToolLoops,
-		modelRetryLimit:       2,
-		toolRetryLimit:        1,
-		promptCtx:             promptCtx,
-		journal:               journal,
-		logger:                logx.OrDefault(logger),
-		ctxMetrics:            newContextMetricsStore(),
-		turnUsage:             make(map[string]llm.Usage),
-		turnUsageLast:         make(map[string]map[int]llm.Usage),
-		modelSnapshots:        newModelContextSnapshotStore(),
-		contextMutationReason: make(map[string]string),
-		summaryNext:           make(map[string]bool),
+		agentID:          agentID,
+		fsRoot:           fsRoot,
+		hub:              hub,
+		llm:              client,
+		tools:            toolExec,
+		policy:           policyEngine,
+		toolHooks:        toolHooks,
+		toolExecLog:      toolExecLog,
+		skillAccess:      skillAccess,
+		hookRuntimeCfg:   hookCfg,
+		maxToolLoops:     maxToolLoops,
+		modelRetryLimit:  2,
+		toolRetryLimit:   1,
+		promptCtx:        promptCtx,
+		journal:          journal,
+		logger:           logx.OrDefault(logger),
+		ctxMetrics:       newContextMetricsStore(),
+		turnUsage:        make(map[string]llm.Usage),
+		turnUsageLast:    make(map[string]map[int]llm.Usage),
+		modelSnapshots:   newModelContextSnapshotStore(),
+		contextMutations: make(map[string][]ContextMutation),
+		summaryNext:      make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
@@ -943,12 +945,12 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 		return nil
 	}
 	defs := o.tools.Definitions()
-	if !o.skillAccess.CatalogToolMode || o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
+	if o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
 		return defs
 	}
-	// The virtual tool is available only when the regular Skills group is
-	// already visible. This keeps allowlists and child restricted registries
-	// from exposing a discovery tool without load_skills.
+	// Discovery is a regular part of the Skills tool group. It is appended only
+	// when load_skills is visible, so child/allowlisted registries keep the same
+	// permission boundary as the other Skills tools.
 	hasLoadSkills := false
 	for _, def := range defs {
 		if def.Function.Name == "load_skills" {
@@ -962,13 +964,6 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	listDef := tools.ListAvailableSkillsToolDef()
 	listDef.Function.Description = strings.TrimSpace(listDef.Function.Description) + tools.ResultDescriptionSuffixForTool(listDef.Function.Name)
 	defs = append(defs, listDef)
-	sort.SliceStable(defs, func(i, j int) bool {
-		left, right := defs[i].Function.Name, defs[j].Function.Name
-		if left == right {
-			return defs[i].Type < defs[j].Type
-		}
-		return left < right
-	})
 	return defs
 }
 
@@ -1067,18 +1062,12 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	if o == nil {
 		return SystemPromptInput{}
 	}
-	var loaded []skills.LoadedSkill
-	if o.skillAccess.Get != nil {
-		loaded = o.skillAccess.Get()
-	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
 		FSRoot:                o.fsRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
 		Catalog:               o.skillAccess.Catalog,
-		Loaded:                loaded,
-		SkillsCatalogToolMode: o.skillAccess.CatalogToolMode,
 		PromptCtx:             o.promptCtx,
 		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}

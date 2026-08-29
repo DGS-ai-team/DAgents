@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"time"
 )
 
@@ -53,7 +54,7 @@ func accessLogMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
-			"query", r.URL.RawQuery,
+			"query_keys", queryKeys(r),
 			"status", rec.status,
 			"duration_ms", durMS,
 		}
@@ -67,4 +68,19 @@ func accessLogMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 			logger.Info("http request", attrs...)
 		}
 	})
+}
+
+// queryKeys keeps request observability while ensuring access logs never copy
+// query-string values, which may contain tokens or user-provided content.
+func queryKeys(r *http.Request) []string {
+	if r == nil || r.URL == nil {
+		return nil
+	}
+	values := r.URL.Query()
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

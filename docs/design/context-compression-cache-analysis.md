@@ -160,7 +160,7 @@ user:   "待压缩文本块：" + buildHumanBlock(picked) + "；后续文本为�
 
 | 因素 | 位置 | 影响 |
 |------|------|------|
-| **System prompt 重建** | 每 tool loop 步 `buildSystemPrompt` | skills 加载/卸载、侧车 mtime 变更 → system 变 → **整段 prefix miss** |
+| **System prompt 重建** | 新会话、压缩或其他 context boundary | frozen Skills catalog 元数据快照变化 → **变化点之后的 prefix miss**；普通目录变化由 `list_available_skills` 查询，不改写当前 prompt |
 | **Tools schema** | 每步 `Definitions()` 随请求发送 | **续写模型下 tools 计入前缀**；列表/enrich/顺序变化 → 自 tools 段起 miss |
 | **DeepSeek thinking** | `RequestExtra` | 一般不影响 messages prefix，但独立计费维度 |
 | **流式增量** | 每 turn 仅尾部新增 assistant/tool | 理想情况下 **前缀 messages 不变则 hit**；tool 结果 append 只 miss 尾部 |

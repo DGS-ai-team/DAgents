@@ -80,12 +80,12 @@ sequenceDiagram
 1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
 2. 工作区子目录约定（`data/`、`memory/`、`externaltools/` 外置 CLI 等；path 相对工作区根）
 3. **外置 CLI 与工具**（`externaltools_menu.md` + `externaltools/` 可执行文件扫描，见 [`../externaltools/`](../externaltools/)）
-4. 可用 skills 目录元数据（启用 skills 工具组时）
+4. Skills 目录元数据（仅使用 context boundary 固定的 Catalog view；实时变化由 `list_available_skills` 查询）
 
 主机环境、Agent/session 身份与 `prompt_context` 由 request-only `ContextInjection` 注入；
-已加载 skill 的完整正文由独立的 `role=user`、`source=plugin`、`form=instructions` 持久化上下文消息注入，`name=skill` 仅为兼容字段，不属于 system prompt。
+已加载 skill 的完整正文由独立的 `role=user`、`source=plugin`、`form=instructions` 持久化上下文消息注入，不属于 system prompt。
 
-启用 skills 工具组时，skills **目录元数据**追加到 system prompt 尾部；已加载 skill 正文在激活时按会话状态写入独立 context message。目录 revision 在下一个 human turn 边界观察，避免磁盘变化中途修改上下文。`load_skills` 会立即更新 session 和 hooks，显式变更在下一个模型 Step 创建新的 context segment，工具结果明确返回模型上下文的生效边界。
+启用 skills 工具组时，context boundary 会把目录元数据快照追加到 system prompt；模型也可通过 `list_available_skills` 查询最新目录，再通过 `load_skills` 选择技能。实时查询不会改写当前 system prompt。已加载 skill 正文按会话状态写入独立 context message。目录 revision 在下一个 human turn 或上下文重建边界观察，避免磁盘变化中途修改 prompt 快照。`load_skills` / `unload_skills` 会立即更新 session 和 hooks，显式变更在下一个模型 Step 创建新的 context segment，工具结果明确返回模型上下文的生效边界。压缩后下一步会按持久化 loaded 集合重新附加当前 skill 正文，并刷新目录元数据快照。
 
 父与子 session **同一套** prompt 逻辑，暂无子专用分支。压缩摘要使用独立 system prompt，见 [`../compression/coordinator.go`](../compression/coordinator.go)。
 

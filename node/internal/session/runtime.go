@@ -237,7 +237,7 @@ func newRuntimeWithPublisher(
 		policyEngine,
 		turn.SkillAccess{
 			Catalog:           turnCatalog,
-			CatalogToolMode:   turnOpts.SkillsCatalogToolMode,
+			LiveCatalog:       catalog,
 			Get:               rt.getLoadedSkills,
 			Set:               rt.setLoadedSkills,
 			SetWithHookStatus: rt.setLoadedSkillsWithHookStatus,
@@ -430,12 +430,25 @@ func (r *runtime) setLoadedSkillsWithHookStatus(items []skills.LoadedSkill) turn
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
+	changed := turn.Digest(before) != turn.Digest(items)
 	hookSync := turn.SkillHooksSyncResult{Status: "unavailable"}
 	if r.orch != nil {
 		hookSync = r.orch.SyncLoadedSkillHooks(items)
-		if turn.Digest(before) != turn.Digest(items) && r.turnState() != turn.StateIdle {
+		if changed && r.turnState() != turn.StateIdle {
 			r.orch.RequestModelContextRefresh(r.session.ID, "skills_api_update")
 		}
+	}
+	if changed && r.hub != nil {
+		boundary := "next_human_turn"
+		if r.turnState() != turn.StateIdle {
+			boundary = "next_model_step"
+		}
+		r.hub.Publish(r.session.ID, "skills/changed", map[string]any{
+			"agent_id":         r.agentID,
+			"loaded_skills":    append([]skills.LoadedSkill(nil), items...),
+			"applied_boundary": boundary,
+			"change":           "loaded_set",
+		})
 	}
 	return hookSync
 }
@@ -770,63 +783,6 @@ func (r *runtime) applyPendingLongTermScope() {
 	r.orch.ReloadLongTermMemory(context.Background())
 }
 
-// observeSkillCatalogChange applies external Skill edits only at a new human
-// Turn boundary. The active Turn snapshot remains untouched.
-func (r *runtime) observeSkillCatalogChange() {
-	if r == nil || r.skillsCatalog == nil {
-		return
-	}
-	view := r.skillsCatalog.NewTurnView()
-	if view == nil {
-		return
-	}
-	current := view.Revision()
-	if current == "" {
-		return
-	}
-	r.mu.Lock()
-	previous := r.skillRevision
-	if previous == current {
-		r.mu.Unlock()
-		return
-	}
-	r.skillRevision = current
-	r.skillsTurnCatalog = view
-	r.mu.Unlock()
-	if r.orch != nil {
-		r.orch.SetSkillsCatalog(view)
-	}
-	if r.hub != nil {
-		r.hub.Publish(r.session.ID, "skills/changed", map[string]any{
-			"agent_id":         r.agentID,
-			"previous":         previous,
-			"revision":         current,
-			"applied_boundary": "next_turn",
-		})
-	}
-}
-
-// refreshSkillsCatalogForExplicitMutation switches the model-facing view
-// after a control-plane mutation. Model-issued load_skills deliberately keeps
-// the existing Turn view; control-plane mutation is an explicit context
-// boundary and may expose the latest catalog at the next model Step.
-func (r *runtime) refreshSkillsCatalogForExplicitMutation() {
-	if r == nil || r.skillsCatalog == nil {
-		return
-	}
-	view := r.skillsCatalog.NewTurnView()
-	if view == nil {
-		return
-	}
-	r.mu.Lock()
-	r.skillsTurnCatalog = view
-	r.skillRevision = view.Revision()
-	r.mu.Unlock()
-	if r.orch != nil {
-		r.orch.SetSkillsCatalog(view)
-	}
-}
-
 func (r *runtime) handleTurnContinuation(parent context.Context) {
 	started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman)
 	if err != nil {
@@ -931,143 +887,6 @@ func (r *runtime) turnEpochCurrentLocked() bool {
 		return true
 	}
 	return r.turnEpoch == r.sessionEpoch
-}
-
-// persist 持久化 session 数据
-func (r *runtime) persist(ctx context.Context) {
-	if r.store == nil || r.isChildSession() {
-		return
-	}
-	r.persistMu.Lock()
-	defer r.persistMu.Unlock()
-	r.mu.Lock()
-	msgs := append([]llm.Message(nil), r.messages...)
-	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	idleMarked := r.idleAutoCompressApplied
-	notifySeq := r.notifySeq
-	ackSeq := r.ackSeq
-	historyRevision := r.historyRevision
-	r.mu.Unlock()
-	var inputBoxState json.RawMessage
-	if r.inputBox != nil {
-		inputBoxState = r.inputBox.Snapshot()
-	}
-	pending := r.pendingSnapshot()
-	stepCount := r.stepIndexSnapshot()
-	_ = r.store.Save(ctx, store.Record{
-		AgentID:      r.session.ID,
-		NodeID:       r.session.AgentID,
-		Messages:     msgs,
-		LoadedSkills: loaded,
-		RuntimeState: store.RuntimeState{
-			Pending:                 pending,
-			ToolLoopCount:           stepCount,
-			InputBoxState:           inputBoxState,
-			HistoryRevision:         historyRevision,
-			HookStore:               hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
-			IdleAutoCompressApplied: idleMarked,
-			NotifySeq:               notifySeq,
-			AckSeq:                  ackSeq,
-		},
-	})
-}
-
-func (r *runtime) restoreInputBoxState(raw json.RawMessage) {
-	if r == nil || r.inputBox == nil || len(raw) == 0 {
-		return
-	}
-	if err := r.inputBox.Restore(raw); err != nil && r.logger != nil {
-		r.logger.Warn("restore input box state failed", "session_id", r.session.ID, "error", err)
-	}
-}
-
-// reconcileRestoredInputBox closes the crash window around Pop. An input that
-// was already driving a live Turn is represented by the lifecycle projection,
-// so it must not be replayed after its recovered continuation. Its user
-// message may not have reached the history snapshot before the process
-// stopped, therefore restore it before dropping the in-flight marker.
-func (r *runtime) reconcileRestoredInputBox() {
-	if r == nil || r.inputBox == nil || r.turnCoordinator == nil {
-		return
-	}
-	record, ok := r.inputBox.InFlight()
-	if !ok {
-		return
-	}
-	state := r.turnCoordinator.Snapshot()
-	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
-		if userMsg, err := r.buildInputUserMessage(record.Env); err == nil {
-			r.mu.Lock()
-			if !r.historyHasUserMessageLocked(userMsg) {
-				r.messages = append(r.messages, userMsg)
-				r.historyRevision++
-			}
-			r.mu.Unlock()
-		} else if r.logger != nil {
-			r.logger.Warn("restore in-flight input message failed", "session_id", r.session.ID, "seq", record.Seq, "error", err)
-		}
-		// The active lifecycle Turn is authoritative. Mark this input complete
-		// before acknowledging it so history and ownership are persisted in the
-		// same snapshot boundary.
-		r.inputBox.MarkCompleted(record.Seq)
-		r.persist(context.Background())
-		r.inputBox.Ack(record.Seq)
-		r.persist(context.Background())
-		return
-	}
-	if record.Completed {
-		// A completed marker means the result history was persisted before the
-		// final acknowledgement. Discard it instead of starting a duplicate
-		// Turn after restart.
-		r.inputBox.Ack(record.Seq)
-		r.persist(context.Background())
-		return
-	}
-	// The process stopped after Pop but before a Turn became durable. Replay
-	// the input at the head of the FIFO, preserving its original sequence.
-	r.inputBox.RequeueInFlight()
-	r.persist(context.Background())
-}
-
-func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
-	for index := len(r.messages) - 1; index >= 0; index-- {
-		message := r.messages[index]
-		if message.Role != "user" {
-			continue
-		}
-		return llm.MessageTextSummary(message) == llm.MessageTextSummary(target) &&
-			llm.NormalizeUserMessageName(message.Name) == llm.NormalizeUserMessageName(target.Name)
-	}
-	return false
-}
-
-// replacementData returns the in-memory state needed when a manager without
-// a persistence store replaces a runtime. Production managers normally load
-// this state from SQLite after persist; keeping this fallback prevents tests
-// and embedded callers from losing history during a swap.
-func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, json.RawMessage) {
-	if r == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
-	}
-	r.mu.Lock()
-	msgs := append([]llm.Message(nil), r.messages...)
-	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	idleMarked := r.idleAutoCompressApplied
-	notifySeq := r.notifySeq
-	ackSeq := r.ackSeq
-	historyRevision := r.historyRevision
-	r.mu.Unlock()
-	pending := r.pendingSnapshot()
-	stepCount := r.stepIndexSnapshot()
-	var hookStore map[string]json.RawMessage
-	if r.orch != nil {
-		hookStore = r.orch.HookStoreSnapshot()
-	}
-	var inputBoxState json.RawMessage
-	if r.inputBox != nil {
-		inputBoxState = r.inputBox.Snapshot()
-	}
-	return msgs, loaded, pending, stepCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState
 }
 
 func (r *runtime) clearMessages(ctx context.Context) {
@@ -1188,10 +1007,22 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
 	prefix := r.sidecarPrefix()
 	r.mu.Lock()
+	beforeDigest := turn.Digest(r.messages)
+	beforeCount := len(r.messages)
 	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
+	afterDigest := turn.Digest(r.messages)
+	afterCount := len(r.messages)
 	r.mu.Unlock()
 	if result.Status == "applied" && r.orch != nil {
 		r.orch.ReloadLongTermMemory(ctx)
+	}
+	if result.Status == "applied" {
+		// Manual compression has the same semantics as pre-step compression:
+		// the next model request must build a fresh context segment.
+		r.scheduleModelContextRebuild("context_compression_manual", "next_model_step")
+		if err := r.lifecycleContextCompacted("context_compressed_manual", beforeDigest, afterDigest, beforeCount, afterCount); err != nil && r.logger != nil {
+			r.logger.Warn("record manual context compaction lifecycle failed", "session_id", r.session.ID, "error", err)
+		}
 	}
 	if result.Status == "applied" {
 		r.mu.Lock()
@@ -1200,73 +1031,6 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 		r.persist(ctx)
 	}
 	return result
-}
-
-func (r *runtime) contextView() *ContextView {
-	r.lifecycleMu.Lock()
-	lifecycle := turn.CoordinatorSnapshot{}
-	if r.turnCoordinator != nil {
-		lifecycle = r.turnCoordinator.Snapshot()
-	}
-	r.mu.Lock()
-	msgs := append([]llm.Message(nil), r.messages...)
-	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	queuePending := r.queue.Len()
-	if r.inputBox != nil {
-		queuePending += r.inputBox.Len()
-	}
-	state := r.turnState()
-	view := &ContextView{
-		SessionID:           r.session.ID,
-		MessagesCount:       len(r.messages),
-		MessagesTotalTokens: estimateMessageTokens(r.messages),
-		ToolLoopCount:       lifecycle.Usage.Steps,
-		LoadedSkills:        loaded,
-		QueuePending:        queuePending,
-		HasActiveTurn:       lifecycle.HasActiveTurn,
-		TurnID:              lifecycle.TurnID,
-		StepID:              lifecycle.StepID,
-		StepIndex:           lifecycle.StepIndex,
-		ContextEpoch:        lifecycle.ContextEpoch,
-		TurnStatus:          lifecycle.TurnStatus,
-		TurnEndReason:       lifecycle.TurnEndReason,
-		StepStatus:          lifecycle.StepStatus,
-		StepEndReason:       lifecycle.StepEndReason,
-		TurnGeneration:      lifecycle.Generation,
-		RuntimeRevision:     lifecycle.RuntimeRevision,
-		RuntimeDigest:       lifecycle.RuntimeDigest,
-		PromptDigest:        lifecycle.PromptDigest,
-		ToolDigest:          lifecycle.ToolDigest,
-		RecoveryRequired:    lifecycle.RecoveryRequired,
-		TurnState:           state,
-		Messages:            msgs,
-	}
-	if view.LoadedSkills == nil {
-		view.LoadedSkills = []skills.LoadedSkill{}
-	}
-	r.mu.Unlock()
-	r.lifecycleMu.Unlock()
-	pending := r.pendingSnapshot()
-	view.PendingToolCallsCount = pendingToolCallsCount(pending)
-	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
-	if snapshot := r.orch.ModelContextSnapshot(r.session.ID); snapshot != nil {
-		view.ContextInjectionDigest = snapshot.ContextInjectionDigest
-		view.ContextInjectionCount = len(snapshot.ContextInjections)
-	} else {
-		injections := r.orch.ContextInjectionsForSession(r.session.ID)
-		view.ContextInjectionCount = len(injections)
-		if len(injections) > 0 {
-			view.ContextInjectionDigest = turn.Digest(injections)
-		}
-	}
-	enrichContextPromptStats(view, r.skillsCatalog)
-	if r.compression != nil {
-		if snap, ok := r.compression.LastCompression(r.session.ID); ok {
-			s := snap
-			view.LastCompression = &s
-		}
-	}
-	return view
 }
 
 func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
@@ -1508,4 +1272,7 @@ func (r *runtime) waitStopped() {
 func (r *runtime) stop() {
 	r.requestStop()
 	r.waitStopped()
+	if r.orch != nil {
+		r.orch.ForgetSession(r.session.ID)
+	}
 }

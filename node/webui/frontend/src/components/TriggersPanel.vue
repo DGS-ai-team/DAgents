@@ -210,7 +210,13 @@ onMounted(load);
         </section>
 
         <section class="command-section">
-          <h3 class="command-section__title">已配置 ({{ triggers.length }})</h3>
+          <div class="command-section__intro">
+            <div>
+              <h3 class="command-section__title">已配置任务</h3>
+              <p class="command-section__hint">任务会按调度条件自动投递；禁用后保留配置但不会触发。</p>
+            </div>
+            <span class="command-section__count">{{ triggers.length }}</span>
+          </div>
           <ul v-if="triggers.length" class="command-card-list">
             <li v-for="item in triggers" :key="item.trigger_id" class="command-card">
               <div class="command-card__main">
@@ -288,7 +294,11 @@ onMounted(load);
               </div>
             </li>
           </ul>
-          <p v-else class="command-panel__empty">暂无定时任务，点击「新建」添加。</p>
+          <div v-else class="command-panel__empty-card">
+            <strong>暂无定时任务</strong>
+            <span>创建后，任务会按照设定的频率向目标智能体投递消息。</span>
+            <button type="button" class="btn btn--secondary btn--sm" @click="startCreate">新建定时任务</button>
+          </div>
         </section>
       </template>
     </div>

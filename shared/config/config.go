@@ -195,7 +195,7 @@ type TriggersConfig struct {
 	PollSeconds int  `yaml:"poll_seconds"`
 }
 
-// SkillsConfig 控制 session skills 扫描与 prompt 注入。
+// SkillsConfig 控制 session skills 目录扫描与同时启用数量。
 type SkillsConfig struct {
 	Enabled     bool `yaml:"enabled"`
 	MaxInPrompt int  `yaml:"max_in_prompt"`

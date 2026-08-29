@@ -74,12 +74,10 @@ type SystemPromptInput struct {
 	// build a request snapshot should provide it once so system prompt hooks
 	// and ContextInjection observe the same value across a day boundary.
 	CurrentDate string
-	Catalog     *skills.Catalog
-	Loaded      []skills.LoadedSkill
-	// SkillsCatalogToolMode is the default-off experiment that moves the
-	// available-skills metadata list out of system prompt into a query tool.
-	SkillsCatalogToolMode bool
-	PromptCtx             *promptcontext.Reader
+	// Catalog is the immutable metadata view captured at a context boundary.
+	// The live discovery catalog is intentionally not used here.
+	Catalog   *skills.Catalog
+	PromptCtx *promptcontext.Reader
 	// IncludeHistoryJournal 为 true 时在工作区说明中追加 history/ JSONL 审计目录约定。
 	IncludeHistoryJournal bool
 }
@@ -110,10 +108,11 @@ func DefaultMaxToolLoops() int {
 
 // BuildSystemPrompt 构造稳定的单次 LLM 请求 system prompt。
 //
-// 拼接顺序：静态规则 → 工作区子目录约定 → 外部工具目录 → 可用 skills
-// 目录。运行环境、Agent/session 身份、prompt sidecar 与已加载 skill 正文
-// 不属于 system prompt：前者由 BuildContextInjections 以请求级 user-role
-// context 注入，后者由 SkillInstructions 作为独立的持久化上下文消息注入。
+// 拼接顺序：静态规则 → 工作区子目录约定 → 外部工具目录 → context
+// boundary 固定的 Skills 元数据。运行时身份、prompt sidecar、实时目录和
+// 已加载 skill 正文不属于 system prompt：前两者由请求级上下文注入，实时
+// 目录由 list_available_skills 查询，正文由 SkillInstructions 作为独立的
+// 持久化上下文消息注入。
 func BuildSystemPrompt(in SystemPromptInput) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(staticSystemPrompt))
@@ -125,16 +124,10 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 		b.WriteString(section)
 	}
 
-	// 可用 skill 目录只在当前 Agent snapshot 启用了 skills 工具组时注入，
-	// 并固定放在 system prompt 尾部。目录变化由 Catalog.Revision 在下一个
-	// human turn 边界观察，避免活动 turn 中途改变模型上下文。
 	if in.Catalog != nil && in.Catalog.Enabled() {
-		if in.SkillsCatalogToolMode {
-			b.WriteString("\n\n## Skills 选择\n\n")
-			b.WriteString("需要选择 Skill 时先调用 list_available_skills 查询可见的名称和用途，再调用 load_skills 加载；查询结果只包含元数据，不包含 SKILL.md 正文。Skill 正文会在显式加载后的下一个模型 Step 作为独立的 skill 上下文消息生效。")
-		} else if section := in.Catalog.RenderMetadataSection(); section != "" {
+		if section := in.Catalog.RenderMetadataSection(); section != "" {
 			b.WriteString("\n\n## 可用 skills\n\n")
-			b.WriteString("当任务与下列 skill 描述匹配且尚未加载时，先调用 load_skills；skill_names 必须使用下列名称。\n\n")
+			b.WriteString("以下是本次上下文构建时可见的 skills 元数据。如需确认最新目录或发现新增/变化的 skill，调用 list_available_skills；该查询不会改写当前 system prompt。需要使用匹配的 skill 时调用 load_skills。\n\n")
 			b.WriteString(section)
 		}
 	}

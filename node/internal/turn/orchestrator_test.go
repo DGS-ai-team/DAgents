@@ -28,31 +28,55 @@ func testRegistry(t *testing.T) *tools.Registry {
 	return reg
 }
 
-func TestToolDefinitions_catalogToolModeIsOptInAndRequiresSkillsTools(t *testing.T) {
+func TestOrchestratorForgetSessionReleasesRuntimeState(t *testing.T) {
+	o := NewOrchestrator("agent", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	const sessionID = "session-cleanup"
+	o.RequestModelContextRefresh(sessionID, "skills_load")
+	o.SetNextStepFinalSummary(sessionID)
+	o.recordToolCall(sessionID, "terminal_command")
+	o.setModelContextSnapshot(sessionID, NewModelContextSnapshot("system", nil, 1, "digest"))
+
+	o.ForgetSession(sessionID)
+
+	if got := o.ModelContextSnapshot(sessionID); got != nil {
+		t.Fatalf("model context snapshot was retained: %#v", got)
+	}
+	o.contextMutationMu.Lock()
+	_, hasMutation := o.contextMutations[sessionID]
+	o.contextMutationMu.Unlock()
+	o.summaryMu.Lock()
+	_, hasSummary := o.summaryNext[sessionID]
+	o.summaryMu.Unlock()
+	o.turnUsageMu.Lock()
+	_, hasUsage := o.turnUsage[sessionID]
+	_, hasUsageLast := o.turnUsageLast[sessionID]
+	o.turnUsageMu.Unlock()
+	o.ctxMetrics.mu.Lock()
+	_, hasMetrics := o.ctxMetrics.data[sessionID]
+	o.ctxMetrics.mu.Unlock()
+	if hasMutation || hasSummary || hasUsage || hasUsageLast || hasMetrics {
+		t.Fatalf("session state was not fully released: mutation=%v summary=%v usage=%v usage_last=%v metrics=%v", hasMutation, hasSummary, hasUsage, hasUsageLast, hasMetrics)
+	}
+}
+
+func TestToolDefinitions_exposesSkillDiscoveryWithSkillsTools(t *testing.T) {
 	root := t.TempDir()
 	reg := testRegistry(t)
 	catalog := skills.NewCatalog(filepath.Join(root, "skills"), true, 3)
 
 	defaultOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
-	for _, def := range defaultOrch.ToolDefinitions() {
-		if def.Function.Name == "list_available_skills" {
-			t.Fatal("default mode must not expose list_available_skills")
-		}
-	}
-
-	experimentOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog, CatalogToolMode: true}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
 	found := false
-	for _, def := range experimentOrch.ToolDefinitions() {
+	for _, def := range defaultOrch.ToolDefinitions() {
 		if def.Function.Name == "list_available_skills" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("experiment mode must expose list_available_skills when load_skills is visible")
+		t.Fatal("Skills group must expose list_available_skills when load_skills is visible")
 	}
 
 	reg.SetBuiltinEnabledNone()
-	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog, CatalogToolMode: true}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
 	for _, def := range restricted.ToolDefinitions() {
 		if def.Function.Name == "list_available_skills" {
 			t.Fatal("catalog discovery must not appear without load_skills")

@@ -22,6 +22,22 @@ func newLifecycleTestRuntime() *runtime {
 	}
 }
 
+func TestRuntimePersistReportsStoreErrors(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newLifecycleTestRuntime()
+	r.store = st
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.persist(context.Background()); err == nil {
+		t.Fatal("expected persist to report a closed store")
+	}
+}
+
 func setTestPendingHITL(t *testing.T, r *runtime, pending *turn.PendingHITL) {
 	t.Helper()
 	r.restoreLegacyPending(pending)

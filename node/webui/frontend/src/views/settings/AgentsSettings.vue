@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import AgentTemplateCreateModal from "../../components/AgentTemplateCreateModal.vue";
+import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { agentHostLabel } from "../../utils/agentTemplateForm.js";
 
 const router = useRouter();
@@ -88,16 +89,21 @@ onMounted(load);
 
 <template>
   <div class="settings-page settings-embedded">
-    <header class="settings-page__header">
-      <div class="settings-page__header-main">
-        <h1 class="settings-page__title">智能体</h1>
-        <p class="settings-page__desc">管理本机智能体的名称、模型与能力；创建请在对话页进行。</p>
-      </div>
-    </header>
+    <SettingsPageHeader
+      title="智能体"
+      eyebrow="智能体与自动化"
+      description="管理本机智能体的名称、模型与能力；新建智能体请从对话页开始。"
+    />
 
     <section class="agents-settings__section">
       <div class="settings-section__head agents-settings__section-head">
-        <h2 class="agents-settings__section-title">已创建</h2>
+        <div>
+          <div class="agents-settings__section-title-row">
+            <h2 class="agents-settings__section-title">已创建</h2>
+            <span v-if="!loading && !error" class="agents-settings__count">{{ agents.length }}</span>
+          </div>
+          <p class="agents-settings__section-desc">选择一个智能体进入详细配置。</p>
+        </div>
       </div>
       <p v-if="loading" class="agents-settings__status">加载中…</p>
       <p v-else-if="error" class="agents-settings__error">{{ error }}</p>
@@ -115,7 +121,10 @@ onMounted(load);
                 <template v-if="a.template_id"> · 模板 {{ a.template_id }}</template>
               </span>
             </div>
-            <span class="agents-settings__chevron" aria-hidden="true">›</span>
+            <span class="agents-settings__card-action">
+              <span>配置</span>
+              <span class="agents-settings__chevron" aria-hidden="true">›</span>
+            </span>
           </button>
         </li>
       </ul>
@@ -189,6 +198,12 @@ onMounted(load);
   font-weight: 600;
 }
 
+.agents-settings__section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .agents-settings__section-head .agents-settings__section-title {
   margin-bottom: 4px;
 }
@@ -198,6 +213,20 @@ onMounted(load);
   font-size: 12.5px;
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+
+.agents-settings__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .agents-settings__status,
@@ -268,6 +297,16 @@ onMounted(load);
   font-size: 18px;
   line-height: 1;
   color: var(--color-text-muted);
+}
+
+.agents-settings__card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--color-primary-strong);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .agents-settings__template-item {

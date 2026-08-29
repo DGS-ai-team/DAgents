@@ -28,7 +28,7 @@ zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-winrt-notification = "0.5.1"
+winrt-notification = { package = "tauri-winrt-notification", version = "0.8.1" }
 
 [profile.release]
 codegen-units = 1

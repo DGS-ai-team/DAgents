@@ -1,6 +1,6 @@
 # node/internal/skills
 
-Go Node 侧 skills 目录扫描、元数据与 prompt 渲染（对齐 Python `harness/skills`）。
+Go Node 侧 skills 目录扫描、元数据与正文读取。
 
 | 文件 | 用途 |
 |------|------|
@@ -24,7 +24,7 @@ hooks 使用同一 view。正文仍然按需读取，但首次读取会校验边
 边界摘要只在 human Turn 边界计算，不在每个模型 Step 重算；它用于弥补 mtime/size
 签名对“内容变化但文件属性未变化”的检测盲区。
 
-启用 skills 工具组时，可用 catalog 元数据追加到 system prompt；SKILL.md 正文不再拼入 system prompt。模型首次使用已加载 skill 时，turn 编排器按 Codex 式语义将正文包装为独立的 `role=user`、`source=plugin`、`form=instructions` 上下文消息写入 session history，并保留 `name=skill` 作为兼容字段；后续请求中只保留当前激活版本。tool loop 中 `load_skills` 使用详细加载结果并按需读取正文。
+启用 skills 工具组时，context boundary 会把当时可见的元数据写入 system prompt；模型也可通过 `list_available_skills` 查询最新目录，再调用 `load_skills` 选择技能。实时查询不会改写当前 system prompt。模型加载 skill 后，turn 编排器将正文包装为独立的 `role=user`、`source=plugin`、`form=instructions` 上下文消息写入 session history；后续请求只保留当前激活版本。`unload_skills` / `clear_skills` 用于释放不再需要的会话上下文。
 
 Catalog 还累计记录 metadata scan、正文读取/缓存命中、human-Turn 边界摘要和 token estimate 的耗时，供
 `GET /v1/agents/{id}/context` 的 `skills_catalog_timing` 诊断字段使用。该字段不进入模型 prompt、工具定义、revision
@@ -46,6 +46,6 @@ description: 单行摘要（做什么 + 何时用）
 - 目录下所有含 `SKILL.md` 的子目录均参与元数据扫描（无 per-skill `enabled`）。
 - 可选 **`hooks/`** 子目录：`load_skills` 时 `plugin.Open` 其中 `*.so`（导出 `Register`）；`unload_skills` / `clear_skills` 时按已记录的目录名移除。
 
-`load_skills` 会立即更新 session 状态和 hooks；正在进行的模型请求保持不变，但显式变更会在下一个模型 Step 创建新的 context segment，并追加独立的 skill 正文消息。卸载或正文版本变化不会改写旧 history；出站模型请求只保留当前激活且 digest 匹配的正文，避免旧版本继续影响模型。活动 Turn 中若发现正文边界摘要变化，会返回 `catalog_changed`；普通磁盘变化在下一次 human Turn 创建新 view。工具结果会同时返回请求、成功、拒绝和两个生效边界。
+`load_skills` 会立即更新 session 状态和 hooks；正在进行的模型请求保持不变，但显式变更会在下一个模型 Step 创建新的 context segment，并追加独立的 skill 正文消息。卸载或正文版本变化不会改写旧 history；出站模型请求只保留当前激活且 digest 匹配的正文，避免旧版本继续影响模型。上下文压缩会把旧正文压进摘要，下一次模型 Step 根据持久化的 loaded 集合重新附加当前正文，因此压缩不会丢失已启用技能。活动 Turn 中若发现正文边界摘要变化，会返回 `catalog_changed`；普通磁盘变化在下一次 human Turn 创建新 view。工具结果会同时返回请求、成功、拒绝和两个生效边界。
 
 配置见 `shared/config.Config.Skills`（全局 `enabled`、`root`、`max_in_prompt`）。

@@ -10,10 +10,11 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-// ModelContextSnapshot freezes the model-visible runtime inputs for one
+// ModelContextSnapshot freezes the model-visible non-history inputs for one
 // context segment. History is still appended normally; explicit context
 // mutations may replace the segment at the next model Step, never in place
-// during an active model request.
+// during an active model request. Compression also invalidates this segment
+// before the next request so compacted history is not paired with stale inputs.
 type ModelContextSnapshot struct {
 	SystemPrompt           string
 	ToolDefinitions        []tools.ToolDef

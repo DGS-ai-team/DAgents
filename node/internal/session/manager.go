@@ -47,9 +47,6 @@ type TurnOptions struct {
 	SkillsRoot        string
 	SkillsEnabled     bool
 	SkillsMaxInPrompt int
-	// SkillsCatalogToolMode enables the default-off metadata discovery
-	// experiment. It is fixed for the runtime and does not change mid-Turn.
-	SkillsCatalogToolMode bool
 	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
 	SkillsVisibleRestrict       bool
 	SkillsVisible               []string
@@ -1064,9 +1061,6 @@ func (m *Manager) LoadSessionSkillDetailed(sessionID, skillName string) (SkillMu
 		}
 	}
 	out := m.skillMutationOutcome(rt, "load_skills", []string{name}, before, result.Loaded, rejected, hookSync)
-	if out.Changed && rt.turnState() != turn.StateIdle {
-		rt.refreshSkillsCatalogForExplicitMutation()
-	}
 	return out, nil
 }
 
@@ -1096,9 +1090,6 @@ func (m *Manager) UnloadSessionSkillDetailed(sessionID, skillName string) (Skill
 		rejected = []skills.SkillLoadRejection{{Name: name, Reason: "not_loaded"}}
 	}
 	out := m.skillMutationOutcome(rt, "unload_skills", []string{name}, before, loaded, rejected, hookSync)
-	if out.Changed && rt.turnState() != turn.StateIdle {
-		rt.refreshSkillsCatalogForExplicitMutation()
-	}
 	return out, nil
 }
 

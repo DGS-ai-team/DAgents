@@ -89,13 +89,13 @@ runOneStep(ctx, sessionID, history)
 
 1. 静态行为准则（**不含**各工具用法——用法在 tool schema）
 2. 工作区目录约定与外部工具目录
-3. skills 可用目录元数据（若当前 Agent 启用了 skills）
+3. context boundary 固定的 Skills 元数据（若当前 Agent 启用了 skills）
 
 主机快照、`agent_id` / `session_id`、请求级 prompt context（soul / custom / long_term，用户称呼由 Node 的 `PreferredName` 提供）和已加载 skill 正文，都通过 request-only context 注入，不写入会话历史；旧 `user.md` 仅用于迁移。
 
 **History**：`[]llm.Message`，由 **runtime** 持有；`runOneStep` 通过指针读写，步末由 runtime `applyStepOutcome` 写回。
 
-**Tools**：本步可见的 function 列表来自 `Registry.Definitions()`（skills 元数据通过 `load_skills` description 注入，见 [04 §4.3](./04-能力与策略.md)）。
+**Tools**：本步可见的 function 列表来自 `Registry.Definitions()`；启用 skills 后会提供 `list_available_skills` 实时发现入口，模型再按需调用 `load_skills`，见 [04 §4.3](./04-能力与策略.md)。
 
 ### 1.4 流式与 SSE
 

@@ -1,7 +1,16 @@
-# 默认维护者；组件负责人可在后续按实际团队替换或追加。
-* @AphroditeOotsuka
+# Component ownership is explicit so future maintainers can replace one area
+# without rewriting the whole file. Until additional component owners are
+# nominated, the current maintainer is the fallback owner for every area.
+/node/ @AphroditeOotsuka
+/node/webui/ @AphroditeOotsuka
+/manage/ @AphroditeOotsuka
+/client/ @AphroditeOotsuka
+/desktop/ @AphroditeOotsuka
+/shared/ @AphroditeOotsuka
+/docs/ @AphroditeOotsuka
 
-# 关键工程门禁与发布流程需要仓库维护者审阅。
+# Repository-wide policy and release files require maintainer review.
+* @AphroditeOotsuka
 /.github/ @AphroditeOotsuka
 /scripts/ci/ @AphroditeOotsuka
 /scripts/release/ @AphroditeOotsuka
