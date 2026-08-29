@@ -164,9 +164,6 @@ onUnmounted(() => stopConfigurationEvents());
         <h1 class="settings-page__title">
           {{ agentMeta?.display_name || "智能体配置" }}
         </h1>
-        <p v-if="agentMeta" class="agent-detail__id" :title="agentMeta.agent_id">
-          {{ agentMeta.agent_id }}
-        </p>
         <p class="agent-detail__intro">管理这个智能体的行为、工具权限和运行连接。</p>
       </div>
       <div class="settings-page__header-actions">
@@ -262,13 +259,6 @@ onUnmounted(() => stopConfigurationEvents());
   color: var(--color-text-muted);
   font-size: 13px;
   line-height: 1.5;
-}
-
-.agent-detail__id {
-  margin: 0;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--color-text-subtle);
 }
 
 .agent-detail__subnav {

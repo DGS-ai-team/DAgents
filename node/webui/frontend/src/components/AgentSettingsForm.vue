@@ -447,7 +447,21 @@ const longTermScopeOptions = computed(() =>
   margin: 0;
 }
 
-.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(2),
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(2) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(3) {
+  grid-column: 1;
+  grid-row: 2;
+}
+
 .agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
   grid-column: 1 / -1;
 }
@@ -826,9 +840,10 @@ const longTermScopeOptions = computed(() =>
     grid-template-columns: 1fr;
   }
 
-  .agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(2),
+  .agent-settings-form--full .agent-settings-section__body > .agent-settings-field,
   .agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
     grid-column: auto;
+    grid-row: auto;
   }
 }
 </style>

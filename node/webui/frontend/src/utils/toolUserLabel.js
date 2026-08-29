@@ -124,6 +124,15 @@ export function toolStepPurpose({ callEntry, resultEntry } = {}) {
   return directPurpose ? truncateGraphemes(directPurpose, 48) : "";
 }
 
+/** 工具行标题保留稳定的“工具名(执行目的)”结构；详情面板不再重复目的。 */
+export function toolStepToolLabel({ callEntry, resultEntry } = {}) {
+  const name = toolNameFromStep(callEntry, resultEntry);
+  if (!name) return GENERIC_TOOL_LABEL;
+  const base = name === "bash_run" ? "bash" : name;
+  const purpose = toolStepPurpose({ callEntry, resultEntry });
+  return purpose ? `${base}(${purpose})` : base;
+}
+
 /**
  * 用户向一行摘要（F-UI6）；禁止出现裸 tool()。
  */

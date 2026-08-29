@@ -81,6 +81,9 @@ const showImagePreview = computed(
 
 const isShellOutput = computed(() => toolName.value === "bash_run" || visual.value.kind === "shell");
 function formatResultBlocks(blocks) {
+  if (blocks.length === 1 && blocks[0].kind === "code" && blocks[0].label === "stdout") {
+    return blocks[0].content;
+  }
   return blocks.map((item) => `${item.label}\n${item.content}`).join("\n\n");
 }
 

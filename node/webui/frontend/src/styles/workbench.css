@@ -359,10 +359,10 @@
 .chat__stream {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 24px 28px 32px;
+  padding: 20px clamp(20px, 4vw, 56px) 28px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
   background: var(--color-editor);
   /* 勿用 smooth：流式高频 pin 时动画未到新底部会触发 @scroll，误关 stick-to-bottom */
 }
@@ -555,6 +555,29 @@
 
 .msg--assistant {
   max-width: 100%;
+}
+
+/* Agent 对话区使用稳定的阅读列；输入栏仍由 ChatComposer 原样占据底部。 */
+.app__body--chat-v61 .chat__stream > .msg--user,
+.app__body--chat-v61 .chat__stream > .msg--assistant,
+.app__body--chat-v61 .chat__stream > .msg--system {
+  width: min(860px, 100%);
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.app__body--chat-v61 .chat__stream > .msg--approval,
+.app__body--chat-v61 .chat__stream > .msg--tool-centered,
+.app__body--chat-v61 .chat__stream > .tool-summary-row,
+.app__body--chat-v61 .chat__stream > .tool-group-row {
+  width: min(960px, 100%);
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.app__body--chat-v61 .chat__stream > .msg--user,
+.app__body--chat-v61 .chat__stream > .msg--system {
+  align-self: auto;
 }
 
 .msg--tool .msg__bubble {
