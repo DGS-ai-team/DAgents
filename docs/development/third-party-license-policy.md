@@ -14,9 +14,9 @@ license metadata require an explicit maintainer/legal review before merging.
 Do not solve a license failure by changing the allowlist without recording the
 package, version, license text, distribution impact, and approval in the PR.
 
-The CI license check scans installed package metadata for both shipped Vue
-applications. `package-lock.json` remains the version lock, `npm audit` checks
-known npm vulnerabilities, and Go dependencies are checked with
+The CI license check scans installed package metadata for all three shipped
+Vue applications. `package-lock.json` remains the version lock, `npm audit`
+checks known npm vulnerabilities, and Go dependencies are checked with
 `govulncheck`; new Go or Python dependencies still require a human license
 review in the PR because their licenses are not inferred from module names.
 

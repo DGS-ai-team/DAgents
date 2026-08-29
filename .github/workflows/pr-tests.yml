@@ -22,7 +22,10 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: manage/console/frontend/package-lock.json
+          cache-dependency-path: |
+            node/webui/frontend/package-lock.json
+            manage/console/frontend/package-lock.json
+            desktop/tray-tauri/package-lock.json
 
       - name: Build Manage Console
         run: bash manage/console/build.sh
@@ -33,8 +36,10 @@ jobs:
       - name: Audit frontend dependencies
         run: |
           npm ci --prefix node/webui/frontend
+          npm ci --prefix desktop/tray-tauri
           npm audit --audit-level=high --prefix node/webui/frontend
           npm audit --audit-level=high --prefix manage/console/frontend
+          npm audit --audit-level=high --prefix desktop/tray-tauri
 
       - name: Check third-party license policy
         run: python scripts/ci/check_npm_license_policy.py

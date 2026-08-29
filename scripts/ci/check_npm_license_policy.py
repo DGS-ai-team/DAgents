@@ -21,6 +21,8 @@ ALLOWED_LICENSES = {
     "BlueOak-1.0.0",
     "ISC",
     "MIT",
+    "Apache-2.0 OR MIT",
+    "MIT OR Apache-2.0",
     "MPL-2.0 OR Apache-2.0",
     "(MPL-2.0 OR Apache-2.0)",
 }
@@ -58,6 +60,7 @@ def main() -> int:
     roots = [
         Path("node/webui/frontend/node_modules"),
         Path("manage/console/frontend/node_modules"),
+        Path("desktop/tray-tauri/node_modules"),
     ]
     failures: list[str] = []
     inspected: set[tuple[str, str]] = set()
