@@ -27,25 +27,13 @@ func (r *Registry) browserToolDefs() []ToolDef {
 }
 
 func (r *Registry) registerBrowserTools() {
-	retired := []string{
-		"browser_start", "browser_stop", "browser_navigate", "browser_click",
-		"browser_click_coordinate", "browser_fill", "browser_press",
-		"browser_screenshot", "browser_wait", "browser_snapshot",
-		"browser_search", "browser_go_back", "browser_scroll", "browser_find_text",
-		"browser_switch_tab", "browser_close_tab", "browser_extract", "browser_evaluate",
-		"browser_find_elements", "browser_search_page", "browser_upload_file",
-		"browser_dropdown_options", "browser_select_dropdown",
-	}
 	if r.browser == nil || !r.browser.Enabled() {
-		for _, name := range append([]string{
+		for _, name := range []string{
 			"browser_run_task", "browser_task_status", "browser_task_cancel",
-		}, retired...) {
+		} {
 			delete(r.handlers, name)
 		}
 		return
-	}
-	for _, name := range retired {
-		delete(r.handlers, name)
 	}
 	r.handlers["browser_run_task"] = r.execBrowserRunTask
 	r.handlers["browser_task_status"] = r.execBrowserTaskStatus

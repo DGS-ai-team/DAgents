@@ -199,42 +199,6 @@
         },
         "required": ["command"]
       }
-    },
-    {
-      "id": "background_job_status",
-      "label": "后台任务状态",
-      "group": "bash",
-      "group_label": "Shell",
-      "hint": "background_job_status",
-      "default": false,
-      "side_effect": "shell",
-      "description": "Query status of a bash_run background job started in this member workspace.",
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "job_id": {"type": "string", "description": "Background job id"}
-        },
-        "required": ["job_id"]
-      }
-    },
-    {
-      "id": "background_job_cancel",
-      "label": "取消后台任务",
-      "group": "bash",
-      "group_label": "Shell",
-      "hint": "background_job_cancel",
-      "default": false,
-      "side_effect": "shell",
-      "description": "Cancel a still-running bash_run background job in this member workspace.",
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "job_id": {"type": "string", "description": "Background job id to cancel"}
-        },
-        "required": ["job_id"]
-      }
     }
   ]
 }

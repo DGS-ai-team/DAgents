@@ -5,7 +5,7 @@
 ## Python
 
 - `test_smoke.py`：验证工作区基础模块可导入。
-- `test_manage_*.py`：Manage Registry、A2A、Skills、LLM、Release、Cases、Admin 与 Workgroup。
+- `test_manage_*.py`：Manage Registry、Skills、LLM、Release、Cases、Admin 与 Workgroup。
 - `test_workgroup_*.py`：Workgroup D05 索引和 store golden 用例。
 - `integration/`：可选的真实 LLM 冒烟，不属于默认 discovery；详见 [`integration/README.md`](integration/README.md)。
 - `test_support/`：测试替身与公共辅助代码；详见 [`test_support/REFERENCE.md`](test_support/REFERENCE.md)。

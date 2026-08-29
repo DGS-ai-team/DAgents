@@ -46,7 +46,7 @@ tools:
 
 func TestExpandBuiltinToolGroups(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{" hitl ", "hitl", "bash", "memory"})
-	want := []string{"ask_user_information", "background_job_cancel", "background_job_status", "bash_run", "remember"}
+	want := []string{"ask_user_information", "bash_run", "remember"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}
@@ -166,8 +166,8 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 	if _, ok := BuiltinToolGroupMembers("nope"); ok {
 		t.Fatal("expected false for unknown group")
 	}
-	if members, ok := BuiltinToolGroupMembers("bash"); !ok || len(members) != 3 {
-		t.Fatalf("bash members = %v ok=%v want bash_run + 2 background tools", members, ok)
+	if members, ok := BuiltinToolGroupMembers("bash"); !ok || len(members) != 1 || members[0] != "bash_run" {
+		t.Fatalf("bash members = %v ok=%v want [bash_run]", members, ok)
 	}
 	if members, ok := BuiltinToolGroupMembers("terminal"); !ok || len(members) != 9 {
 		t.Fatalf("terminal members = %v ok=%v want 9 terminal/Linux tools", members, ok)

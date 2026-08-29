@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 // SetMultimodalEnabled 控制 read_image、browser 视觉模式与 vision 载荷暂存；默认 false。
@@ -114,51 +116,16 @@ func (r *Registry) filterToolDefs(defs []ToolDef) []ToolDef {
 	return out
 }
 
-// knownBuiltinTools 与 shared/config/builtin_tools.go 保持一致。
-var knownBuiltinTools = map[string]struct{}{
-	"read_file":              {},
-	"show_image":             {},
-	"read_image":             {},
-	"write_file":             {},
-	"glob_files":             {},
-	"grep_file":              {},
-	"grep_files":             {},
-	"search_replace":         {},
-	"bash_run":               {},
-	"terminal_config_list":   {},
-	"terminal_open":          {},
-	"terminal_input":         {},
-	"terminal_read":          {},
-	"terminal_terminate":     {},
-	"terminal_list":          {},
-	"terminal_command":       {},
-	"terminal_upload":        {},
-	"terminal_download":      {},
-	"linux_exec":             {},
-	"linux_file_upload":      {},
-	"linux_file_download":    {},
-	"background_job_status":  {},
-	"background_job_cancel":  {},
-	"ask_user_information":   {},
-	"remember":               {},
-	"load_skills":            {},
-	"unload_skills":          {},
-	"clear_skills":           {},
-	"trigger_list":           {},
-	"trigger_get":            {},
-	"trigger_create":         {},
-	"trigger_update":         {},
-	"trigger_delete":         {},
-	"create_temporary_agent": {},
-	"wait_temporary_agents":  {},
-	"temporary_agent_status": {},
-	"cancel_temporary_agent": {},
-	"browser_run_task":       {},
-	"browser_task_status":    {},
-	"browser_task_cancel":    {},
-	"wecom_send_markdown":    {},
-	"wecom_send_file":        {},
-}
+// knownBuiltinTools 使用 shared/config 的唯一工具目录，避免 Node 和配置模块
+// 分别维护一份容易漂移的工具名清单。
+var knownBuiltinTools = func() map[string]struct{} {
+	names := config.AllBuiltinToolNames()
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		set[name] = struct{}{}
+	}
+	return set
+}()
 
 func unknownBuiltinToolError(name string) error {
 	return &unknownBuiltinTool{name: name}

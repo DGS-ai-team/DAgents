@@ -1,6 +1,6 @@
 # Bash 与 Shell 执行层设计方案
 
-> 状态：Phase A-C 已实现；Phase D 已落地 Terminal 契约、本地原生 PTY 与 SSH PTY provider，HTTP/WebSocket transport 与断线恢复仍待实现
+> 状态：Phase A-D 已实现；`terminal_*` 是当前终端主路径，`linux_exec` 仅作为旧 Agent 快照的兼容入口保留。HTTP/WebSocket transport 与断线恢复仍待实现。
 >
 > 目标：在保留现有 `bash_run` 行为兼容性的前提下，抽象统一的本地/远程 Shell 执行层，为 Linux channel、PTY、容器和后续 Exec Server 提供共同基础。
 
@@ -9,9 +9,9 @@
 不建议把 `bash_run` 直接改成同时支持本地和远程：
 
 ```text
-bash_run   → 本地 Node 执行
-linux_exec → 指定 Linux channel 执行
-terminal_* → 后续持久 PTY
+bash_run   → 本地 Node 一次性执行
+terminal_* → 本地或 Linux channel 的持久终端
+linux_exec → 旧 Agent 快照的兼容入口
 ```
 
 但内部共用同一个执行抽象：
@@ -41,10 +41,10 @@ Executor Provider
 - Linux 下通过 `bash -lc` 执行；
 - Windows 下支持 `cmd`/PowerShell；
 - `cwd` 受 `fs_root` 限制；
-- 有超时、后台任务、取消和进程树终止；
+- 有超时、取消和进程树终止；旧后台任务仅由兼容层保留；
 - 有 stdout/stderr 捕获和输出压缩；
 - 通过 Agent policy 和 shell policy 进行审批；
-- 已接入 SSE、HITL、后台 job 查询和取消。
+- 已接入 SSE、HITL；旧后台 job 查询和取消不再进入当前模型工具目录。
 
 因此后续重点不是重写 Bash 工具，而是把现有执行逻辑从 Tool Registry 中抽出为可替换 Provider。
 
@@ -356,7 +356,7 @@ Tool policy
 
 - 从 `bash_run` 中抽出 `ExecRequest`；
 - 将本地 `exec.Cmd` 封装为 `LocalProcess`；
-- 保留现有 tool 参数、后台 job、timeout、cancel 和结果格式；
+- 保留现有 tool 参数、timeout、cancel 和结果格式；旧后台 job 只保留历史 wire 兼容；
 - 现有测试全部继续通过。
 
 ### Phase B：统一事件和 Process 生命周期

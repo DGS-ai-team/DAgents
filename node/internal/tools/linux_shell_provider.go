@@ -102,7 +102,6 @@ type LinuxShellProvider struct {
 	bindingResolver LinuxChannelBindingResolver
 	secretResolver  LinuxSecretResolver
 	hostKey         LinuxHostKeyResolver
-	agentSocket     string
 	concurrencyMu   sync.Mutex
 	concurrency     map[string]*linuxChannelConcurrency
 }
@@ -123,13 +122,6 @@ func NewLinuxShellProvider(resolver LinuxChannelResolver, secretResolver LinuxSe
 func (p *LinuxShellProvider) WithHostKeyResolver(resolver LinuxHostKeyResolver) *LinuxShellProvider {
 	if p != nil {
 		p.hostKey = resolver
-	}
-	return p
-}
-
-func (p *LinuxShellProvider) WithSSHAgentSocket(socket string) *LinuxShellProvider {
-	if p != nil {
-		p.agentSocket = strings.TrimSpace(socket)
 	}
 	return p
 }
@@ -723,10 +715,7 @@ func (p *LinuxShellProvider) authMethod(ctx context.Context, cred LinuxCredentia
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil, nil
 	case "ssh_agent":
-		socket := strings.TrimSpace(p.agentSocket)
-		if socket == "" {
-			socket = strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK"))
-		}
+		socket := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK"))
 		if socket == "" {
 			return nil, nil, fmt.Errorf("SSH_AUTH_SOCK is not configured")
 		}

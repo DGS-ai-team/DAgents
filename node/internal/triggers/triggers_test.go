@@ -14,7 +14,7 @@ func TestEnsureScheduleConditionRejectsEmpty(t *testing.T) {
 	}
 }
 
-func TestStoreCreateUpdateDuePersist(t *testing.T) {
+func TestStoreCreateUpdatePersist(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "triggers.json")
 	store, err := OpenStore(path, 50)
@@ -32,10 +32,6 @@ func TestStoreCreateUpdateDuePersist(t *testing.T) {
 	}
 	if _, err := store.CreateTrigger(def); err != nil {
 		t.Fatal(err)
-	}
-	due := store.DueTriggers(now.Add(11 * time.Second))
-	if len(due) != 1 {
-		t.Fatalf("due = %d", len(due))
 	}
 	name := "renamed"
 	updated, err := store.UpdateTrigger(def.TriggerID, UpdatePatch{Name: &name}, now.Add(20*time.Second))

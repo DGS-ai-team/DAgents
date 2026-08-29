@@ -62,7 +62,7 @@ flowchart TB
 | RequestType | 处理函数 | 说明 |
 |-------------|----------|------|
 | InputBox `user` / `trigger` / `a2a` | `handleInputMessage` | 仅在 runtime idle 时取出并启动新 Turn；活动 Turn（含 pending HITL）期间只排队 |
-| `async_tool_result` | `handleSideEffectProduceAsync` | 后台 job **Produce**（SSE + 缓冲，不 inline 改 history） |
+| `async_tool_result` | `handleSideEffectProduceAsync` | 浏览器异步任务 **Produce**（SSE + 缓冲，不 inline 改 history）；旧后台 job 仅兼容 |
 | `turn_continuation` | `handleTurnContinuation` | 恢复/重启后补偿性续跑 |
 | `side_effect_continue` | `handleSideEffectContinue` | 步首 Apply 缓冲 + `ContinueAfterSideEffects` |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |

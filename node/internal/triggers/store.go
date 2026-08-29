@@ -151,22 +151,6 @@ func (s *Store) DeleteTrigger(id string) bool {
 	return true
 }
 
-func (s *Store) DueTriggers(now time.Time) []Definition {
-	current := float64(now.UnixNano()) / 1e9
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]Definition, 0)
-	for _, trigger := range s.triggers {
-		if !trigger.Enabled || trigger.NextFireAt == nil {
-			continue
-		}
-		if *trigger.NextFireAt <= current {
-			out = append(out, trigger)
-		}
-	}
-	return out
-}
-
 // ListEnabledTriggers 返回 enabled 触发器快照（调度 tick 用）。
 func (s *Store) ListEnabledTriggers() []Definition {
 	s.mu.RLock()

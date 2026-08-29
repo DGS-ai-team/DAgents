@@ -29,8 +29,6 @@ var knownBuiltinTools = map[string]struct{}{
 	"linux_exec":             {},
 	"linux_file_upload":      {},
 	"linux_file_download":    {},
-	"background_job_status":  {},
-	"background_job_cancel":  {},
 	"ask_user_information":   {},
 	"remember":               {},
 	"load_skills":            {},
@@ -66,8 +64,6 @@ var builtinToolGroups = map[string][]string{
 	},
 	"bash": {
 		"bash_run",
-		"background_job_status",
-		"background_job_cancel",
 	},
 	"terminal": {
 		"terminal_config_list",

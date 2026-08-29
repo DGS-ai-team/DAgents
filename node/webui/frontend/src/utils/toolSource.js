@@ -19,7 +19,7 @@ const FS_TOOLS = new Set([
   "read_image",
 ]);
 
-const SHELL_TOOLS = new Set(["bash_run", "bash", "background_job_status", "background_job_cancel"]);
+const SHELL_TOOLS = new Set(["bash_run", "bash"]);
 
 const LINUX_TOOLS = new Set(["linux_exec", "linux_file_upload", "linux_file_download"]);
 

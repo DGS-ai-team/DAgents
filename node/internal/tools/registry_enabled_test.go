@@ -63,6 +63,18 @@ func TestSetBuiltinEnabledEmptyMeansAll(t *testing.T) {
 	}
 }
 
+func TestLegacyBackgroundJobToolsAreNotModelVisible(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "background_job_status" || def.Function.Name == "background_job_cancel" {
+			t.Fatalf("legacy background tool %q must not be model-visible", def.Function.Name)
+		}
+	}
+}
+
 func TestSetMultimodalEnabledFiltersReadImage(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {

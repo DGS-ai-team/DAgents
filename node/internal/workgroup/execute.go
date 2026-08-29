@@ -40,12 +40,6 @@ var workspaceRegistries sync.Map // string -> *tools.Registry
 
 // NewWorkspaceToolExecutor 在 binding workspace 下执行 allowlist 内的 FS/bash 工具；尊重 ctx 取消。
 func NewWorkspaceToolExecutor(bindings BindingStore) CommandExecutor {
-	return NewWorkspaceToolExecutorWithBackgroundJobStore(bindings, nil)
-}
-
-// NewWorkspaceToolExecutorWithBackgroundJobStore is the Node runtime variant
-// that shares background bash metadata with regular Agent tools.
-func NewWorkspaceToolExecutorWithBackgroundJobStore(bindings BindingStore, jobStore *tools.BackgroundJobStore) CommandExecutor {
 	return func(ctx context.Context, cmd ToolCommand) (string, error) {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -66,7 +60,7 @@ func NewWorkspaceToolExecutorWithBackgroundJobStore(bindings BindingStore, jobSt
 			// 工作区 read_file：整文件 {path,content}；与 Agent Registry 行窗口版 schema/返回值不同，勿混用。
 			return execReadFile(ctx, binding.WorkspacePath, cmd.ArgumentsJSON)
 		default:
-			return execViaRegistry(ctx, binding.WorkspacePath, name, cmd.ArgumentsJSON, jobStore)
+			return execViaRegistry(ctx, binding.WorkspacePath, name, cmd.ArgumentsJSON)
 		}
 	}
 }
@@ -108,26 +102,15 @@ func execReadFile(ctx context.Context, workspaceRoot, argumentsJSON string) (str
 	return string(out), nil
 }
 
-func registryForWorkspace(workspaceRoot string, jobStore *tools.BackgroundJobStore) (*tools.Registry, error) {
+func registryForWorkspace(workspaceRoot string) (*tools.Registry, error) {
 	key := filepath.Clean(workspaceRoot)
-	sessionID := workspaceSessionID(key)
 	if v, ok := workspaceRegistries.Load(key); ok {
 		reg := v.(*tools.Registry)
-		if jobStore != nil {
-			if err := reg.WithBackgroundJobStoreForSession(jobStore, sessionID); err != nil {
-				return nil, err
-			}
-		}
 		return reg, nil
 	}
 	reg, err := tools.NewRegistry(workspaceRoot, 30)
 	if err != nil {
 		return nil, err
-	}
-	if jobStore != nil {
-		if err := reg.WithBackgroundJobStoreForSession(jobStore, sessionID); err != nil {
-			return nil, err
-		}
 	}
 	reg.SetMultimodalEnabled(true)
 	actual, _ := workspaceRegistries.LoadOrStore(key, reg)
@@ -138,7 +121,7 @@ func workspaceSessionID(workspaceRoot string) string {
 	return "workgroup:" + filepath.Clean(workspaceRoot)
 }
 
-func execViaRegistry(ctx context.Context, workspaceRoot, toolName, argumentsJSON string, jobStore *tools.BackgroundJobStore) (string, error) {
+func execViaRegistry(ctx context.Context, workspaceRoot, toolName, argumentsJSON string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -170,7 +153,7 @@ func execViaRegistry(ctx context.Context, workspaceRoot, toolName, argumentsJSON
 			}
 		}
 	}
-	reg, err := registryForWorkspace(workspaceRoot, jobStore)
+	reg, err := registryForWorkspace(workspaceRoot)
 	if err != nil {
 		return "", errf(CodeConflict, "workspace tools: %v", err)
 	}

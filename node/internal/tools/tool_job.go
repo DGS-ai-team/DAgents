@@ -11,48 +11,6 @@ type backgroundJobIDArgs struct {
 	JobID string `json:"job_id"`
 }
 
-func backgroundJobStatusToolDef() ToolDef {
-	return ToolDef{
-		Type: "function",
-		Function: FunctionDef{
-			Name:        "background_job_status",
-			Description: "查询支持后台执行的工具任务状态与输出摘要。bash_run 始终同步执行；后台任务完成通常会通过 async_tool_result 回灌。",
-			Parameters: injectCallPurposeParam(map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"job_id": map[string]any{
-						"type":        "string",
-						"description": "后台工具返回的 job_id（必填）；bash_run 不会生成该 ID",
-					},
-				},
-				"required":             []string{"job_id"},
-				"additionalProperties": false,
-			}),
-		},
-	}
-}
-
-func backgroundJobCancelToolDef() ToolDef {
-	return ToolDef{
-		Type: "function",
-		Function: FunctionDef{
-			Name:        "background_job_cancel",
-			Description: "取消支持后台执行的工具任务；bash_run 不会生成后台任务。",
-			Parameters: injectCallPurposeParam(map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"job_id": map[string]any{
-						"type":        "string",
-						"description": "要取消的后台工具 job_id（必填）",
-					},
-				},
-				"required":             []string{"job_id"},
-				"additionalProperties": false,
-			}),
-		},
-	}
-}
-
 func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMessage) (string, error) {
 	_, cleaned := ParseToolCallArguments(string(raw))
 	var args backgroundJobIDArgs

@@ -439,7 +439,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			NodeID:             cfg.NodeID,
 			AgentSessions:      wgAgentBridge,
 			DataDir:            filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
-			BackgroundJobStore: backgroundJobs,
 		})
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,

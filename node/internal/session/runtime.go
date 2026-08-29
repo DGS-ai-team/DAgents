@@ -116,7 +116,6 @@ type runtime struct {
 	notifySeq int // F-E13：最后需 Client 关注的 SSE seq
 	ackSeq    int // F-E13：Client 已确认看到的最大 SSE seq
 
-	configRevision  int64 // 兼容旧观测字段；值与 runtimeRevision 一致
 	runtimeRevision int64
 	runtimeDigest   string
 	turnBudget      turn.TurnBudget
@@ -207,7 +206,6 @@ func newRuntimeWithPublisher(
 		idleAutoCompressApplied: idleAutoCompressApplied,
 		notifySeq:               initialNotifySeq,
 		ackSeq:                  initialAckSeq,
-		configRevision:          firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
 		runtimeRevision:         firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
 		runtimeDigest:           strings.TrimSpace(turnOpts.RuntimeDigest),
 		turnBudget:              turnOpts.Budget,
