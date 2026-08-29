@@ -35,7 +35,6 @@ func FormatChildTask(task string) string {
 func ParentDelegatableTools() []string {
 	return []string{
 		"read_file", "write_file", "glob_files", "grep_file", "grep_files", "search_replace", "bash_run",
-		"background_job_status", "background_job_cancel",
 	}
 }
 

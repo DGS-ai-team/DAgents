@@ -1,13 +1,13 @@
 # node/internal/tools
 
-N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。
+N3 在 Node 进程内本地执行；面向模型的普通 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。`browser_run_task(wait=false)` 是独立的显式异步任务接口，使用自己的 task_id 和状态查询，不属于通用后台 job。
 
 **`bash_run` 超时语义**：
 - **显式传入 `timeout_seconds`**：同步等待该秒数，超时**终止并返回 `timed_out` 失败结果**，不会创建后台 job。
 - **省略 `timeout_seconds`**：最长等待硬上限（默认 600 秒），超时同样**终止并报错**。
 - **UI 控制**（仅 bash）：执行中可「终止」；不支持把 bash_run 转为后台。需要长期运行状态时使用 `terminal_open`。
 
-`StartBackground` / `job_registry` 仍服务于明确支持后台执行的其他工具；bash_run 会显式拒绝后台入口。
+`StartBackground` / `job_registry` 只保留历史后台任务兼容实现；当前 bash_run 不接受后台入口，browser_run_task 也不经过该通用 job 层。
 
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
@@ -62,7 +62,7 @@ tools/
 │   bash_*_test.go
 ├── 后台 job_*
 │   job_registry.go           # backgroundJobRegistry
-│   tool_job.go               # background_job_status/cancel
+│   tool_job.go               # legacy background-job direct-call handlers
 │   job_registry_test.go
 ├── 领域 tool_*
 │   tool_skills.go / tool_hitl.go / tool_triggers.go
@@ -77,7 +77,7 @@ tools/
 
 | 在 Registry 执行 | 在 turn 编排器执行 |
 |------------------|-------------------|
-| fs、bash、trigger CRUD、后台 job | `load_skills` / `unload_skills` / `clear_skills` |
+| fs、bash、trigger CRUD；旧后台 job 兼容处理 | `load_skills` / `unload_skills` / `clear_skills` |
 | | `ask_user_information` |
 | | 子 Agent 管理类（registry 为 stub） |
 
@@ -95,6 +95,6 @@ tools/
 - **`bash_run`**：始终同步调用；到达显式 timeout 或默认硬上限后杀进程并返回 `TIMED_OUT`，不登记后台 job，也不产生异步回灌。
 - **`terminal_open`**：用于需要保持目录、环境或进程状态的长期交互任务。
 - **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../../docs/design/ux-agent-owned-file-approval.md)）。
-- **内部 `StartBackground`**：仅供支持后台的工具使用；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段，但 bash_run 不接受该语义。
+- **内部 `StartBackground`**：历史兼容实现，当前没有普通模型工具使用；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段，但 bash_run 不接受该语义。
 
 触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md).

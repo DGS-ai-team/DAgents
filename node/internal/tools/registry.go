@@ -411,8 +411,6 @@ func (r *Registry) Definitions() []ToolDef {
 		terminalTerminateToolDef(),
 		terminalListToolDef(),
 		terminalCommandToolDef(),
-		backgroundJobStatusToolDef(),
-		backgroundJobCancelToolDef(),
 		askUserInformationToolDef(),
 		rememberToolDef(),
 		loadSkillsToolDef(),
@@ -477,8 +475,8 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 // committed.
 func (r *Registry) ToolRetryAllowed(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files", "search_file",
-		"terminal_read", "terminal_list", "background_job_status":
+	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files",
+		"terminal_read", "terminal_list":
 		return true
 	default:
 		return false

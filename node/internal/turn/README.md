@@ -34,7 +34,7 @@ sequenceDiagram
     alt 有 tool_calls
         O->>O: processToolCalls (policy 分流)
         alt auto
-            O->>T: Execute / StartBackground
+            O->>T: Execute（旧后台 wire 仅作兼容）
             O-->>H: tool_call / tool_result SSE
             O-->>RT: ScheduleToolResult=true
         else HITL
@@ -104,7 +104,7 @@ sequenceDiagram
 所有 `tool_result` SSE 都经过 `tools.ClassifyToolResult`，统一包含 `status`；失败时包含
 `error.code`、`error.message`、`error.retryable`。`rejected` 仅代表策略拒绝，不能再用于
 泛化判断执行失败。原始 `content` 不做全量 JSON 重包，以避免大输出额外消耗 token 并保持
-历史正文兼容；终端、后台 job、浏览器、MCP、Linux SSH 等工具的专有证据仍在 `content`
+历史正文兼容；终端、浏览器、MCP、Linux SSH 等工具的专有证据仍在 `content`；旧后台 job 仅作为历史正文兼容
 中。模型继续请求时，tool history 的请求副本会在正文前增加 `[TOOL_RESULT_METADATA]`，因此模型
 也能读取统一状态；hydrate/UI 仍只展示原始正文。异步 side-effect 若客户端内容已被清洗，则使用
 `async_status` 覆盖事件状态。

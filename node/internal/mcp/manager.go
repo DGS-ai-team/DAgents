@@ -152,19 +152,6 @@ func (m *Manager) Configure(configs []ServerConfig) error {
 	return nil
 }
 
-func (m *Manager) Upsert(cfg ServerConfig) error {
-	m.mu.Lock()
-	configs := make([]ServerConfig, 0, len(m.configs)+1)
-	for _, existing := range m.configs {
-		if existing.ID != cfg.ID {
-			configs = append(configs, existing)
-		}
-	}
-	configs = append(configs, cfg)
-	m.mu.Unlock()
-	return m.Configure(configs)
-}
-
 func (m *Manager) Delete(id string) error {
 	id = strings.TrimSpace(id)
 	m.mu.Lock()

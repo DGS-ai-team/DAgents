@@ -47,7 +47,7 @@ Linux Release CI：Runner **ubuntu-latest**；Go 二进制 **CGO_ENABLED=0** 静
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等；**`RECOMMENDED_CLI_TOOLS.md`** 推荐第三方 CLI） |
 | **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |
 | **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + 分步配置向导 + `write-install-config.ps1`） |
-| **`manage/`** | **Manage 控制面 Docker 镜像**（Registry + A2A + Console；见 [`manage/README.md`](manage/README.md)） |
+| **`manage/`** | **Manage 控制面 Docker 镜像**（Registry + Workgroup + Console；见 [`manage/README.md`](manage/README.md)） |
 | **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
 
 架构与联调见 [docs/architecture.md](../docs/architecture.md) 与 [docs/development.md](../docs/development.md)。

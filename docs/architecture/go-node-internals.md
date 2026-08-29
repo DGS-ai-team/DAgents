@@ -164,7 +164,7 @@ HTTP / CLI（internal/api）
 | HITL 恢复 | `resume` | 审批 / `ask_user_information` 提交 | `handleResume` |
 | 工具续跑 | inline | runtime 在同一 Turn 链内继续调用 | `handleTurnContinuation`（仅恢复入口） |
 | 旁路续跑 | `side_effect_continue` | Produce 后 / Cancel 恢复 | `handleSideEffectContinue` |
-| 异步工具完成 | `async_tool_result` | 后台 job 完成 | `handleSideEffectProduceAsync`（Produce） |
+| 异步工具完成 | `async_tool_result` | 浏览器异步任务完成（旧后台 job 仅兼容） | `handleSideEffectProduceAsync`（Produce） |
 | Trigger（新路径） | InputBox record | trigger fire | `handleInputMessage` |
 
 ### 4.2 优先级（`Priority`）
@@ -180,7 +180,7 @@ continuation(-1) > resume(1) > async_completion(2) > other(10)
 | `continuation` | `turn_continuation` / `side_effect_continue` | 恢复或旁路 Apply 后续跑 LLM |
 | InputBox | user / trigger / A2A | 新外部输入；活动 Turn 或 pending HITL 期间只缓存 |
 | `resume` | `resume` | HITL 提交 |
-| `async_completion` | `async_tool_result` | 后台 job **Produce**（缓冲 + SSE） |
+| `async_completion` | `async_tool_result` | 浏览器任务 **Produce**（缓冲 + SSE） |
 | `other` | — | 预留 |
 
 **注意**：`async_tool_result` 等在 pending HITL 期间仍会被 **Produce**，但 **不** inline 改 history（`sideEffectStore`）。open batch 下 Apply 在步首或 TaskComplete/Cancel 时 continue。见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。

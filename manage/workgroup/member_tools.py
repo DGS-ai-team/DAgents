@@ -64,8 +64,6 @@ MEMBER_TOOL_PURPOSE: dict[str, str] = {
     "grep_files": "搜索内容",
     "search_replace": "替换内容",
     "bash_run": "执行命令",
-    "background_job_status": "查看后台任务",
-    "background_job_cancel": "取消后台任务",
 }
 
 

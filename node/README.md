@@ -4,7 +4,9 @@
 
 配置模型见 [`shared/config/`](../shared/config/)。内部协作见 [`docs/architecture/go-node-internals.md`](../docs/architecture/go-node-internals.md)；联调见 [`docs/development.md`](../docs/development.md)。
 
-## `internal/` 包评估（2026-06）
+## `internal/` 包历史评估（非当前契约）
+
+> 本节保留架构演进记录；包规模和阶段建议可能过时，当前目录与职责以源码和下方目录说明为准。
 
 | 包 | 规模 | 职责 | 评估 | 阶段 A 建议 |
 |----|------|------|------|-------------|
@@ -14,7 +16,6 @@
 | **`tools`** | 46 文件 ~5.7k | Registry、fs/bash/job/领域 tool | **已完成阶段 A**（见下） | 阶段 B：子 package + `Register` |
 | **`triggers`** | 12 文件 ~2.1k | 存储、schedule、HTTP API | 与 `tools/tool_triggers` 分工明确 | 保持 |
 | **`manage`** | 9 文件 ~1.3k | 注册、Release、Workgroup Dialer | 与运行时边界清晰 | 保持出站连接模型 |
-| **`a2aclient`** | 2 文件 ~390 | 历史兼容适配 | 不作为新产品入口 | 仅维护迁移兼容 |
 | **`childagent`** | 10 文件 ~1.3k | 子 Agent 生命周期 | 与 `tools/tool_childagent` 分工明确 | 保持 |
 | **`llm`** | 16 文件 ~1.8k | OpenAI/DeepSeek 适配 | provider 分文件合理 | 保持 |
 | **`policy`** | 10 文件 ~1.3k | 审批策略引擎 | 独立专题包 | 保持 |
@@ -39,7 +40,6 @@
 | `internal/tools/` | 本地工具 Registry（**阶段 A 已按域重命名**，见 [`internal/tools/README.md`](internal/tools/README.md)） |
 | `internal/triggers/` | 触发器存储与调度 |
 | `internal/manage/` | Manage 注册、Release 与 Workgroup 出站集成 |
-| `internal/a2aclient/` | 历史 A2A 兼容客户端 |
 | `internal/childagent/` | 临时子 Agent |
 | `internal/llm/` | LLM 客户端与消息适配 |
 | `internal/store/`、`history/` | SQLite 与 JSONL 审计 |

@@ -226,7 +226,7 @@ handleInputMessage
 | **Client** | `POST /v1/messages`（`request_type: message`） |
 | **HITL resume** | `POST /v1/messages`（`request_type: resume`） |
 | **工具续跑** | Orchestrator 返回 `ScheduleToolResult`，runtime 在同一 Turn 链内 inline 续跑 |
-| **异步工具** | 后台 job 完成 → `async_tool_result` |
+| **异步工具** | `browser_run_task(wait=false)` 完成 → `async_tool_result` |
 | **Trigger** | 调度器 fire → InputBox FIFO（`TriggerID` + `UserName=trigger`） |
 
 外部输入需要稳定的 FIFO，并且在 pending HITL 时不能抢占当前 Turn；因此采用 **每 session 一个 `InputBox` + 一个控制 `MessageQueue` + 单 goroutine `consumeLoop`**。InputBox 只负责 user/trigger/A2A 的顺序与缓存，resume 和异步事实仍由控制队列驱动。
@@ -252,7 +252,7 @@ MessageQueue.Enqueue(control) ──► priority ──► Dequeue(ctx) ──�
 |---------------|------|----------|--------------|
 | `message` | `RequestTypeMessage` | Client user（兼容 envelope） | InputBox → `handleInputMessage` |
 | `resume` | `RequestTypeResume` | Client HITL 提交 | `handleResume` |
-| `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleSideEffectProduceAsync`（Produce） |
+| `async_tool_result` | `RequestTypeAsyncToolResult` | 浏览器异步任务完成 | `handleSideEffectProduceAsync`（Produce） |
 | `turn_continuation` | `RequestTypeTurnContinuation` | 恢复/重启补偿 | `handleTurnContinuation` |
 | `side_effect_continue` | `RequestTypeSideEffectContinue` | Apply 后被动续跑 | `handleSideEffectContinue` |
 

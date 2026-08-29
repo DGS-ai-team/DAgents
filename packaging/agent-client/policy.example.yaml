@@ -12,8 +12,6 @@ tools:
   write_file: require_approval
   search_replace: require_approval
   bash_run: require_approval
-  background_job_status: auto
-  background_job_cancel: require_approval
   trigger_list: auto
   trigger_get: auto
   trigger_create: require_approval

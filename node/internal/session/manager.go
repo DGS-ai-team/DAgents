@@ -539,16 +539,6 @@ func (m *Manager) Get(sessionID string) *Session {
 	return nil
 }
 
-// ConfigRevision 返回内存 runtime 装入时的配置版本；不存在返回 0。
-func (m *Manager) ConfigRevision(sessionID string) int64 {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if rt, ok := m.sessions[strings.TrimSpace(sessionID)]; ok {
-		return rt.configRevision
-	}
-	return 0
-}
-
 // RuntimeRevision 返回内存 runtime 装入时的独立配置版本。
 func (m *Manager) RuntimeRevision(sessionID string) int64 {
 	if m == nil {

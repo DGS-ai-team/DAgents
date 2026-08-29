@@ -144,7 +144,7 @@
 
 | 项 | 默认 |
 |----|------|
-| `allowed_tools`（未指定时） | `read_file`, `search_file`, `bash_run` |
+| `allowed_tools`（未指定时） | `read_file`, `grep_file`, `bash_run` |
 | `max_turns`（未指定时） | `child_agents.default_max_turns`（默认 20） |
 
 `allowed_tools` 须为 §8 可下放列表的子集，并与父 Agent 全局可用工具求交。临时 Agent **不得**使用 `load_skills` / `unload_skills` / `clear_skills`（仅父 Agent 会话可加载技能）。
@@ -155,7 +155,7 @@
 
 **可下放（父有则子可申请）：**
 
-`read_file`, `write_file`, `search_file`, `search_replace`, `bash_run`, `background_job_status`, `background_job_cancel`
+`read_file`, `write_file`, `grep_file`, `grep_files`, `search_replace`, `bash_run`
 
 **永不下放：**
 
@@ -269,7 +269,7 @@ GET /v1/agents/{parent_agent_id}/child-agents
       "child_agent_id": "child-a1b2c3d4e5f6",
       "status": "active",
       "purpose": "review patch",
-      "allowed_tools": ["read_file", "search_file"],
+      "allowed_tools": ["read_file", "grep_file"],
       "created_at": "2026-05-30T12:00:00+08:00",
       "expires_at": "2026-05-30T12:30:00+08:00",
       "turn_count": 2,
@@ -501,7 +501,7 @@ Web UI 在收到带 `child_agent_id` 的 `approval_required` 时，展示时标�
 create_temporary_agent({
   "purpose": "审查 login 改动",
   "task": "你是代码审查助手，只读检查 src/auth/login.go，列出风险，不要改文件",
-  "allowed_tools": ["read_file", "search_file"],
+  "allowed_tools": ["read_file", "grep_file"],
   "wait": true
 })
 ```

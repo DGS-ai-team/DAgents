@@ -27,7 +27,6 @@ read_file=rule
 glob_files=rule
 grep_file=rule
 grep_files=rule
-background_job_status=rule
 
 # --- 上下文治理：写盘（WS3 spill；rule 时信任链可免重复审批）---
 write_file=rule
@@ -36,7 +35,6 @@ search_replace=rule
 # --- 必须审批：任务取消等 ---
 # write_file=always 可显式关闭信任链绕过
 # 旧 A2A 工具（agent_invoke / agent_broadcast / agent_send_message 等）已拆除，勿再写入种子。
-background_job_cancel=always
 
 # --- Browser：主 Agent 任务级伴生派发（sidecar browser_use.Agent）---
 browser_run_task=always
