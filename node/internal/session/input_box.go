@@ -21,6 +21,36 @@ const (
 	InputKindA2A     InputKind = "a2a"
 )
 
+const (
+	// InputBoxMaxItems bounds accepted external inputs while a session is
+	// busy. Control-plane resume/cancel commands do not enter this mailbox.
+	InputBoxMaxItems = 256
+	// InputBoxMaxRecordBytes prevents a single trigger/A2A payload from
+	// exhausting the session runtime before the model can consume it.
+	InputBoxMaxRecordBytes = 1 << 20
+)
+
+var (
+	ErrInputBoxFull      = errors.New("input box is full")
+	ErrInputRecordTooBig = errors.New("input record is too large")
+	ErrInvalidInputKind  = errors.New("invalid input kind")
+	ErrInputSequenceFull = errors.New("input sequence exhausted")
+)
+
+func validateInputRecord(record InputRecord) error {
+	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindA2A {
+		return fmt.Errorf("%w: %q", ErrInvalidInputKind, record.Kind)
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("encode input record: %w", err)
+	}
+	if len(raw) > InputBoxMaxRecordBytes {
+		return ErrInputRecordTooBig
+	}
+	return nil
+}
+
 // InputRecord is the FIFO record accepted by a session.  Seq is assigned at
 // append time and is never reused.  The queue.Envelope is retained as a
 // compatibility transport while callers migrate away from MessageQueue.
@@ -75,8 +105,17 @@ func (b *InputBox) Append(kind InputKind, env queue.Envelope) (uint64, error) {
 	if b.closed {
 		return 0, errors.New("input box closed")
 	}
-	b.seq++
-	record := InputRecord{Seq: b.seq, Kind: kind, Env: env}
+	if len(b.items) >= InputBoxMaxItems {
+		return 0, ErrInputBoxFull
+	}
+	record := InputRecord{Seq: b.seq + 1, Kind: kind, Env: env}
+	if record.Seq == 0 {
+		return 0, ErrInputSequenceFull
+	}
+	if err := validateInputRecord(record); err != nil {
+		return 0, err
+	}
+	b.seq = record.Seq
 	b.items = append(b.items, record)
 	select {
 	case b.wake <- struct{}{}:
@@ -227,10 +266,21 @@ func (b *InputBox) Restore(raw []byte) error {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return fmt.Errorf("decode input box state: %w", err)
 	}
+	if len(state.Items) > InputBoxMaxItems {
+		return fmt.Errorf("input box state exceeds %d items", InputBoxMaxItems)
+	}
 	maxSeq := state.Seq
+	seen := make(map[uint64]struct{}, len(state.Items)+1)
 	for _, item := range state.Items {
 		if item.Seq == 0 {
 			return errors.New("input box state contains zero sequence")
+		}
+		if _, ok := seen[item.Seq]; ok {
+			return fmt.Errorf("input box state contains duplicate sequence %d", item.Seq)
+		}
+		seen[item.Seq] = struct{}{}
+		if err := validateInputRecord(item); err != nil {
+			return fmt.Errorf("invalid input box item %d: %w", item.Seq, err)
 		}
 		if item.Seq > maxSeq {
 			maxSeq = item.Seq
@@ -239,6 +289,12 @@ func (b *InputBox) Restore(raw []byte) error {
 	if state.InFlight != nil {
 		if state.InFlight.Seq == 0 {
 			return errors.New("input box state contains zero in-flight sequence")
+		}
+		if _, ok := seen[state.InFlight.Seq]; ok {
+			return fmt.Errorf("input box state contains duplicate sequence %d", state.InFlight.Seq)
+		}
+		if err := validateInputRecord(*state.InFlight); err != nil {
+			return fmt.Errorf("invalid in-flight input %d: %w", state.InFlight.Seq, err)
 		}
 		if state.InFlight.Seq > maxSeq {
 			maxSeq = state.InFlight.Seq

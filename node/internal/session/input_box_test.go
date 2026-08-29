@@ -1,10 +1,38 @@
 package session
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 )
+
+func TestInputBoxRejectsInvalidAndOversizedInputs(t *testing.T) {
+	box := NewInputBox()
+	if _, err := box.Append(InputKind("control"), queue.Envelope{Content: "not external"}); !errors.Is(err, ErrInvalidInputKind) {
+		t.Fatalf("invalid kind error = %v", err)
+	}
+	if _, err := box.Append(InputKindUser, queue.Envelope{Content: strings.Repeat("x", InputBoxMaxRecordBytes)}); !errors.Is(err, ErrInputRecordTooBig) {
+		t.Fatalf("oversized input error = %v", err)
+	}
+	for i := 0; i < InputBoxMaxItems; i++ {
+		if _, err := box.Append(InputKindUser, queue.Envelope{Content: "bounded"}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if _, err := box.Append(InputKindUser, queue.Envelope{Content: "overflow"}); !errors.Is(err, ErrInputBoxFull) {
+		t.Fatalf("overflow error = %v", err)
+	}
+}
+
+func TestInputBoxRestoreRejectsDuplicateSequences(t *testing.T) {
+	box := NewInputBox()
+	raw := []byte(`{"seq":1,"items":[{"seq":1,"kind":"user","env":{}},{"seq":1,"kind":"trigger","env":{}}]}`)
+	if err := box.Restore(raw); err == nil {
+		t.Fatal("expected duplicate sequence restore to fail")
+	}
+}
 
 func TestInputBoxFIFOSequenceAndRestore(t *testing.T) {
 	box := NewInputBox()

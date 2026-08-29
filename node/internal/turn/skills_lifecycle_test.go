@@ -87,7 +87,7 @@ func TestListAvailableSkillsIsMetadataOnlyAndDoesNotMutateContext(t *testing.T) 
 		t.Fatalf("history len = %d", len(history))
 	}
 	o.contextMutationMu.Lock()
-	_, refreshed := o.contextMutationReason["session-1"]
+	_, refreshed := o.contextMutations["session-1"]
 	o.contextMutationMu.Unlock()
 	if refreshed {
 		t.Fatal("list query must not request context refresh")

@@ -85,12 +85,12 @@ type Orchestrator struct {
 
 	ctxMetrics *contextMetricsStore
 
-	modelSnapshots        *modelContextSnapshotStore
-	contextMutationMu     sync.Mutex
-	contextMutationReason map[string]string
-	runtimeRevision       int64
-	runtimeDigest         string
-	executionGuard        ExecutionGuard
+	modelSnapshots    *modelContextSnapshotStore
+	contextMutationMu sync.Mutex
+	contextMutations  map[string][]ContextMutation
+	runtimeRevision   int64
+	runtimeDigest     string
+	executionGuard    ExecutionGuard
 
 	systemPromptBuilder     SystemPromptBuilder
 	contextInjectionBuilder ContextInjectionBuilder
@@ -206,42 +206,25 @@ func (o *Orchestrator) RequestModelContextRefresh(sessionID, reason string) {
 		reason = "context_mutation"
 	}
 	o.contextMutationMu.Lock()
-	if o.contextMutationReason == nil {
-		o.contextMutationReason = make(map[string]string)
+	if o.contextMutations == nil {
+		o.contextMutations = make(map[string][]ContextMutation)
 	}
-	o.contextMutationReason[sessionID] = appendContextMutationReason(o.contextMutationReason[sessionID], reason)
+	o.contextMutations[sessionID] = appendContextMutation(o.contextMutations[sessionID], reason)
 	o.contextMutationMu.Unlock()
 }
 
-// appendContextMutationReason keeps all distinct invalidation causes until
-// the next model Step consumes them. A single string is retained for wire and
-// lifecycle compatibility, but later mutations must not hide earlier ones.
-func appendContextMutationReason(previous, next string) string {
-	previous = strings.TrimSpace(previous)
-	next = strings.TrimSpace(next)
-	if previous == "" {
-		return next
-	}
-	if next == "" || previous == next {
-		return previous
-	}
-	for _, item := range strings.Split(previous, ",") {
-		if strings.TrimSpace(item) == next {
-			return previous
-		}
-	}
-	return previous + "," + next
-}
-
+// consumeModelContextRefresh keeps the lifecycle/wire-compatible string at
+// the boundary. Internally, distinct invalidation causes are stored as typed
+// mutations so callers do not need to parse a delimiter-based field.
 func (o *Orchestrator) consumeModelContextRefresh(sessionID string) string {
 	if o == nil {
 		return ""
 	}
 	o.contextMutationMu.Lock()
 	defer o.contextMutationMu.Unlock()
-	reason := strings.TrimSpace(o.contextMutationReason[sessionID])
-	delete(o.contextMutationReason, sessionID)
-	return reason
+	mutations := o.contextMutations[sessionID]
+	delete(o.contextMutations, sessionID)
+	return contextMutationReasons(mutations)
 }
 
 // SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
@@ -487,28 +470,28 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:               agentID,
-		fsRoot:                fsRoot,
-		hub:                   hub,
-		llm:                   client,
-		tools:                 toolExec,
-		policy:                policyEngine,
-		toolHooks:             toolHooks,
-		toolExecLog:           toolExecLog,
-		skillAccess:           skillAccess,
-		hookRuntimeCfg:        hookCfg,
-		maxToolLoops:          maxToolLoops,
-		modelRetryLimit:       2,
-		toolRetryLimit:        1,
-		promptCtx:             promptCtx,
-		journal:               journal,
-		logger:                logx.OrDefault(logger),
-		ctxMetrics:            newContextMetricsStore(),
-		turnUsage:             make(map[string]llm.Usage),
-		turnUsageLast:         make(map[string]map[int]llm.Usage),
-		modelSnapshots:        newModelContextSnapshotStore(),
-		contextMutationReason: make(map[string]string),
-		summaryNext:           make(map[string]bool),
+		agentID:          agentID,
+		fsRoot:           fsRoot,
+		hub:              hub,
+		llm:              client,
+		tools:            toolExec,
+		policy:           policyEngine,
+		toolHooks:        toolHooks,
+		toolExecLog:      toolExecLog,
+		skillAccess:      skillAccess,
+		hookRuntimeCfg:   hookCfg,
+		maxToolLoops:     maxToolLoops,
+		modelRetryLimit:  2,
+		toolRetryLimit:   1,
+		promptCtx:        promptCtx,
+		journal:          journal,
+		logger:           logx.OrDefault(logger),
+		ctxMetrics:       newContextMetricsStore(),
+		turnUsage:        make(map[string]llm.Usage),
+		turnUsageLast:    make(map[string]map[int]llm.Usage),
+		modelSnapshots:   newModelContextSnapshotStore(),
+		contextMutations: make(map[string][]ContextMutation),
+		summaryNext:      make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
