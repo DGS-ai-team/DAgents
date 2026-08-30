@@ -1,6 +1,6 @@
 # Release Hub 与更新链路
 
-> **状态**：当前实现说明（v0.10.4）。发布事实以 [`CHANGELOG.md`](../../CHANGELOG.md) 与 CI 为准；桌面 Shell 的旧方案已归档。
+> **状态**：当前实现说明（v0.10.5）。发布事实以 [`CHANGELOG.md`](../../CHANGELOG.md) 与 CI 为准；桌面 Shell 的旧方案已归档。
 
 ## 1. 组件职责
 
@@ -25,6 +25,8 @@ Node 和 Web UI 的运行时 API 仍然只连本机 Node；Manage 不反向访�
 | GET | `/v1/releases/packages/.../latest/download` | 下载 latest |
 
 包文件存放在 `MANAGE_RELEASES_DIR`；Docker/离线 bundle 可在镜像中预置 release seed。
+
+当前发布格式为 Linux `.tar.gz` 与 Windows Inno `.exe` 安装包；历史 Windows `.zip` 仍可被旧升级流程读取。Windows Shell 检测到 `.exe` 资产后，会先停止 Node，再静默启动 Inno 安装器，由安装器完成文件替换并重新启动 Shell；因此新版本不再需要 Windows 免安装归档。
 
 ## 3. Node 检查路径
 

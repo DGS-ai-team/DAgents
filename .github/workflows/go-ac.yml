@@ -98,3 +98,6 @@ jobs:
           BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 OUT_DIR=dist/go-windows-amd64 GOOS=windows GOARCH=amd64 bash scripts/ci/build_go_static.sh
           test -f dist/go-windows-amd64/bin/dagents-node.exe
           test -f dist/go-windows-amd64/bin/dagents-client.exe
+          BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 OUT_DIR=dist/go-windows-386 GOOS=windows GOARCH=386 bash scripts/ci/build_go_static.sh
+          test -f dist/go-windows-386/bin/dagents-node.exe
+          test -f dist/go-windows-386/bin/dagents-client.exe

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -305,9 +305,24 @@ impl Applier {
                 return (result, 1);
             }
         };
+        let cfg = self.config_snapshot();
+        if let Err(e) = nodectl::stop(&self.layout, &cfg) {
+            eprintln!("stop node failed: {e}");
+            result.message = format!("stop node failed: {e}");
+            return (result, 1);
+        }
+        if is_windows_installer_asset(&status) {
+            if let Err(e) = launch_windows_installer(&pkg_path, &self.layout.home) {
+                let _ = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT);
+                eprintln!("{e}");
+                result.message = e;
+                return (result, 1);
+            }
+            result.message = format!("Windows 安装包已启动，将升级到 {}", status.latest_version);
+            println!("{}", result.message);
+            return (result, 0);
+        }
         let install_result = (|| {
-            let cfg = self.config_snapshot();
-            nodectl::stop(&self.layout, &cfg)?;
             let transaction = install_release_package(&self.layout.home, &pkg_path)?;
             if let Err(start_err) = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT) {
                 let rollback = transaction.rollback();
@@ -387,11 +402,7 @@ impl Applier {
             .to_string();
         let runtime = self.layout.home.join(".runtime");
         fs::create_dir_all(&runtime).map_err(|e| e.to_string())?;
-        let ext = if download_url.to_ascii_lowercase().contains(".zip") {
-            "zip"
-        } else {
-            "pkg"
-        };
+        let ext = package_extension(&status);
         let pkg = runtime.join(format!("{}.{}", unix_nanos(), ext));
         download_package(DownloadRequest {
             url: download_url.to_string(),
@@ -402,6 +413,62 @@ impl Applier {
         })?;
         Ok(pkg)
     }
+}
+
+fn is_windows_installer_asset(status: &Status) -> bool {
+    if !status.platform.to_ascii_lowercase().starts_with("windows-") {
+        return false;
+    }
+    let Some(asset) = status.asset.as_ref() else {
+        return false;
+    };
+    ["filename", "download_url"].iter().any(|key| {
+        asset
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase().ends_with(".exe"))
+            .unwrap_or(false)
+    })
+}
+
+fn package_extension(status: &Status) -> &'static str {
+    if is_windows_installer_asset(status) {
+        return "exe";
+    }
+    status
+        .asset
+        .as_ref()
+        .and_then(|asset| asset.get("filename").and_then(Value::as_str))
+        .or_else(|| {
+            status
+                .asset
+                .as_ref()
+                .and_then(|asset| asset.get("download_url").and_then(Value::as_str))
+        })
+        .map(|value| {
+            if value.trim().to_ascii_lowercase().ends_with(".zip") {
+                "zip"
+            } else {
+                "pkg"
+            }
+        })
+        .unwrap_or("pkg")
+}
+
+fn launch_windows_installer(installer_path: &Path, home: &Path) -> Result<(), String> {
+    Command::new(installer_path)
+        .args([
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/CLOSEAPPLICATIONS",
+        ])
+        .current_dir(home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("start Windows installer: {err}"))
 }
 
 #[derive(Debug)]
@@ -568,6 +635,7 @@ pub fn release_platform() -> String {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "aarch64") => "linux-arm64".into(),
         ("linux", _) => "linux-amd64".into(),
+        ("windows", "x86") => "windows-386".into(),
         ("windows", _) => "windows-amd64".into(),
         (os, arch) => format!("{os}-{arch}"),
     }
@@ -928,6 +996,35 @@ mod tests {
             out.get("download_url").and_then(Value::as_str),
             Some("http://m/base/files/a.zip")
         );
+    }
+
+    #[test]
+    fn recognizes_windows_inno_asset_and_keeps_legacy_archive_mode() {
+        let mut installer_asset = HashMap::new();
+        installer_asset.insert(
+            "filename".into(),
+            Value::String("dagents-local-assistant-windows-amd64-installer-0.10.5.exe".into()),
+        );
+        let installer = Status {
+            platform: "windows-amd64".into(),
+            asset: Some(installer_asset),
+            ..Status::default()
+        };
+        assert!(is_windows_installer_asset(&installer));
+        assert_eq!(package_extension(&installer), "exe");
+
+        let mut archive_asset = HashMap::new();
+        archive_asset.insert(
+            "filename".into(),
+            Value::String("dagents-local-assistant-windows-amd64-0.10.4.zip".into()),
+        );
+        let archive = Status {
+            platform: "windows-amd64".into(),
+            asset: Some(archive_asset),
+            ..Status::default()
+        };
+        assert!(!is_windows_installer_asset(&archive));
+        assert_eq!(package_extension(&archive), "zip");
     }
 
     #[test]

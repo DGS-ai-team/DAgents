@@ -9,7 +9,7 @@ _SLUG = r"^[A-Za-z0-9._-]+$"
 DEFAULT_ARTIFACT = "dagents-local-assistant"
 DEFAULT_CHANNEL = "stable"
 
-PLATFORMS = frozenset({"linux-amd64", "linux-arm64", "windows-amd64"})
+PLATFORMS = frozenset({"linux-amd64", "linux-arm64", "windows-amd64", "windows-386"})
 
 
 class ReleasePublishBody(BaseModel):

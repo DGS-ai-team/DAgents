@@ -27,7 +27,7 @@
 | **推荐**（默认，有 WebView2 时） | `dagents-shell-tauri.exe` | [`desktop/tray-tauri/`](../../desktop/tray-tauri/)，内嵌 Web UI |
 | **兼容模式** | `dagents-shell-legacy.exe` | [`desktop/tray/`](../../desktop/tray/) Go Shell，系统浏览器 |
 
-静默：`/TASKS=shellmodern` 或 `/TASKS=shelllegacy`。zip 包默认 `dagents-shell.exe` 为 Tauri，并附带两套命名产物。
+静默：`/TASKS=shellmodern` 或 `/TASKS=shelllegacy`。Windows 发布只提供 Inno 安装包，不再提供免安装 zip。
 
 **API Key** 可在 Web UI 中直接输入并由 Node 加密保存；`api_key_env` 仍作为兼容方式保留。使用环境变量时，修改变量后需要重启 Node 才能让进程读取新值。
 
@@ -36,9 +36,16 @@
 ## 构建
 
 ```bash
-PLATFORM=windows-amd64 VERSION=0.x.x scripts/ci/assemble_local_assistant_bundle.sh
-VERSION=0.x.x scripts/ci/build_windows_installer.sh
+for platform in windows-amd64 windows-386; do
+  PLATFORM=$platform VERSION=0.x.x scripts/ci/assemble_local_assistant_bundle.sh
+  PLATFORM=$platform VERSION=0.x.x scripts/ci/build_windows_installer.sh
+done
 ```
+
+产物命名为 `dagents-local-assistant-windows-amd64-installer-*.exe`（x64）和
+`dagents-local-assistant-windows-386-installer-*.exe`（x86）。两套安装包内的
+Node、Client、Browser 和 Desktop Shell 均使用对应架构构建；x86 安装包可运行在
+32 位 Windows，也可安装在 64 位 Windows 的 32 位兼容目录中。
 
 需安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，并设置 `ISCC` 指向 `ISCC.exe`。
 

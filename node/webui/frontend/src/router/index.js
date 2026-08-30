@@ -1,20 +1,38 @@
 import { createRouter, createWebHistory } from "vue-router";
 import ChatLayout from "../layouts/ChatLayout.vue";
-import SettingsLayout from "../layouts/SettingsLayout.vue";
 import ChatView from "../views/ChatView.vue";
-import WorkgroupView from "../views/WorkgroupView.vue";
-import GeneralSettings from "../views/settings/GeneralSettings.vue";
-import SkillsSettings from "../views/settings/SkillsSettings.vue";
-import TriggersSettings from "../views/settings/TriggersSettings.vue";
-import SecuritySettings from "../views/settings/SecuritySettings.vue";
-import AboutSettings from "../views/settings/AboutSettings.vue";
-import ContextSettings from "../views/settings/ContextSettings.vue";
-import ConnectionSettings from "../views/settings/ConnectionSettings.vue";
-import McpSettings from "../views/settings/McpSettings.vue";
-import LinuxChannelsSettings from "../views/settings/LinuxChannelsSettings.vue";
-import CapabilitiesSettings from "../views/settings/CapabilitiesSettings.vue";
-import AgentsSettings from "../views/settings/AgentsSettings.vue";
-import AgentDetailSettings from "../views/settings/AgentDetailSettings.vue";
+import * as api from "../api/node.js";
+
+const SettingsLayout = () => import("../layouts/SettingsLayout.vue");
+const WorkgroupView = () => import("../views/WorkgroupView.vue");
+const GeneralSettings = () => import("../views/settings/GeneralSettings.vue");
+const SkillsSettings = () => import("../views/settings/SkillsSettings.vue");
+const TriggersSettings = () => import("../views/settings/TriggersSettings.vue");
+const SecuritySettings = () => import("../views/settings/SecuritySettings.vue");
+const AboutSettings = () => import("../views/settings/AboutSettings.vue");
+const ContextSettings = () => import("../views/settings/ContextSettings.vue");
+const ConnectionSettings = () => import("../views/settings/ConnectionSettings.vue");
+const McpSettings = () => import("../views/settings/McpSettings.vue");
+const LinuxChannelsSettings = () => import("../views/settings/LinuxChannelsSettings.vue");
+const CapabilitiesSettings = () => import("../views/settings/CapabilitiesSettings.vue");
+const AgentsSettings = () => import("../views/settings/AgentsSettings.vue");
+const AgentDetailSettings = () => import("../views/settings/AgentDetailSettings.vue");
+
+async function requireWorkgroupEnabled() {
+  try {
+    const bootstrap = await api.getUIBootstrap();
+    if (bootstrap?.info?.workgroup_enabled) return true;
+    return {
+      name: "agents",
+      query: { notice: "workgroup-disabled" },
+      replace: true,
+    };
+  } catch {
+    // Let the Workgroup page surface transient connection failures. The guard
+    // only redirects when the Node explicitly reports that the feature is off.
+    return true;
+  }
+}
 
 const router = createRouter({
   history: createWebHistory("/ui/"),
@@ -28,6 +46,7 @@ const router = createRouter({
     {
       path: "/workgroups/:workgroupId?",
       component: ChatLayout,
+      beforeEnter: requireWorkgroupEnabled,
       children: [{ path: "", name: "workgroups", component: WorkgroupView }],
     },
     {

@@ -50,6 +50,7 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 		Capabilities:      nil,
 		MultimodalEnabled: false,
 		ManageEnabled:     false,
+		WorkgroupEnabled:  false,
 		ManageURL:         "",
 		ManageRegistered:  registered,
 		LLM:               llmView,
@@ -63,6 +64,7 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 		info.Capabilities = s.cfg.Capabilities()
 		info.MultimodalEnabled = s.cfg.MultimodalEnabled()
 		info.ManageEnabled = s.cfg.Manage.Enabled
+		info.WorkgroupEnabled = s.cfg.ManageWorkgroupEnabled()
 		info.ManageURL = strings.TrimSpace(s.cfg.Manage.URL)
 		user.PreferredName = s.cfg.PreferredName()
 		onboarding.NodeProfileCompleted = s.cfg.NodeProfileCompleted()

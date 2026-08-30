@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -129,6 +130,16 @@ func (a *Applier) Run(ctx context.Context, opt ApplyOptions) (ApplyResult, int) 
 		fmt.Fprintf(optErr(opt), "stop node failed: %v\n", err)
 		return result, 1
 	}
+	if isWindowsInstallerAsset(status) {
+		if err := launchWindowsInstaller(pkgPath, a.layout.Home); err != nil {
+			_ = nodectl.Start(context.Background(), a.layout, cfg, defaultNodeStartWait)
+			fmt.Fprintf(optErr(opt), "start Windows installer failed: %v\n", err)
+			return result, 1
+		}
+		result.Message = fmt.Sprintf("Windows 安装包已启动，将升级到 %s", status.LatestVersion)
+		fmt.Fprintln(optOut(opt), result.Message)
+		return result, 0
+	}
 
 	transaction, err := installReleasePackage(a.layout.Home, pkgPath)
 	if err != nil {
@@ -198,7 +209,11 @@ func (a *Applier) downloadPackage(ctx context.Context, status sharedupdate.Statu
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		return "", err
 	}
-	pkgPath := fmt.Sprintf("%s%s%d.pkg", runtimeDir, string(os.PathSeparator), time.Now().UnixNano())
+	ext := "pkg"
+	if isWindowsInstallerAsset(status) {
+		ext = "exe"
+	}
+	pkgPath := fmt.Sprintf("%s%s%d.%s", runtimeDir, string(os.PathSeparator), time.Now().UnixNano(), ext)
 	if err := sharedupdate.DownloadPackage(ctx, sharedupdate.DownloadRequest{
 		URL:            downloadURL,
 		DestPath:       pkgPath,
@@ -210,6 +225,26 @@ func (a *Applier) downloadPackage(ctx context.Context, status sharedupdate.Statu
 		return "", err
 	}
 	return pkgPath, nil
+}
+
+func isWindowsInstallerAsset(status sharedupdate.Status) bool {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(status.Platform)), "windows-") || status.Asset == nil {
+		return false
+	}
+	for _, key := range []string{"filename", "download_url"} {
+		if value, ok := status.Asset[key].(string); ok && strings.HasSuffix(strings.ToLower(strings.TrimSpace(value)), ".exe") {
+			return true
+		}
+	}
+	return false
+}
+
+func launchWindowsInstaller(installerPath, home string) error {
+	cmd := exec.Command(installerPath, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS")
+	cmd.Dir = home
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Start()
 }
 
 func (a *Applier) printStatus(opt ApplyOptions, status sharedupdate.Status) {

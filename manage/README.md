@@ -145,7 +145,7 @@ Manage 在 `MANAGE_RELEASES_DIR`（默认 `/data/releases`）托管 `dagents-loc
 | GET | `/v1/releases/check` | Node 版本检查 |
 | GET | `/v1/releases/packages/.../latest/download` | 下载 latest |
 
-发版时 CI 将同版本 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
+发版时 CI 将同版本 Linux `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）；Windows x64/x86 Inno `.exe` 可按对应平台上传到 Release Hub。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
 
 Node：`GET /v1/agent/update`（需 `manage.enabled`）。
 

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, onActivated, onDeactivated, ref, watch, nextTick } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
@@ -9,7 +9,7 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
-import TerminalWorkbench from "../components/TerminalWorkbench.vue";
+const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
 import {
   agentStore,
   persistAgentId,
@@ -111,6 +111,8 @@ import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmCont
 const router = useRouter();
 const route = useRoute();
 
+const routeNotice = ref("");
+let routeNoticeTimer = null;
 const hitlSelected = ref([]);
 const cancelling = ref(false);
 const streamHandle = ref(null);
@@ -1261,6 +1263,23 @@ onDeactivated(() => {
 });
 
 watch(
+  () => route.query.notice,
+  (value) => {
+    if (String(value || "") !== "workgroup-disabled") return;
+    routeNotice.value = "工作组尚未启用，已返回智能体工作区。";
+    const query = { ...route.query };
+    delete query.notice;
+    void router.replace({ query });
+    if (routeNoticeTimer) clearTimeout(routeNoticeTimer);
+    routeNoticeTimer = setTimeout(() => {
+      routeNotice.value = "";
+      routeNoticeTimer = null;
+    }, 4000);
+  },
+  { immediate: true },
+);
+
+watch(
   () => route.params.agentId,
   async (id) => {
     const aid = String(id || "").trim();
@@ -1294,6 +1313,7 @@ watch(
 );
 
 onUnmounted(() => {
+  if (routeNoticeTimer) clearTimeout(routeNoticeTimer);
   invalidateHydration();
   sseResyncToken += 1;
   turnWatchdog.stop();
@@ -1334,6 +1354,7 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
+      <div v-if="routeNotice" class="chat-notice-banner" role="status">{{ routeNotice }}</div>
       <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
       <AgentEmptyState
         v-if="showNoAgentWelcome"

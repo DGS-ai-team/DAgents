@@ -102,7 +102,7 @@ def remove_package_tree(releases_dir: Path, pkg: ReleasePackage) -> None:
 
 def allowed_release_filename(name: str) -> bool:
     lower = str(name or "").lower()
-    return lower.endswith(".tar.gz") or lower.endswith(".zip")
+    return lower.endswith(".tar.gz") or lower.endswith(".zip") or lower.endswith(".exe")
 
 
 def content_type_for_filename(name: str) -> str:

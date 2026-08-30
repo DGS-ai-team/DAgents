@@ -29,6 +29,9 @@ func TestUIBootstrap(t *testing.T) {
 	if out.Info.NodeID == "" {
 		t.Fatalf("info=%+v", out.Info)
 	}
+	if out.Info.WorkgroupEnabled != cfg.ManageWorkgroupEnabled() {
+		t.Fatalf("workgroup_enabled=%v want=%v", out.Info.WorkgroupEnabled, cfg.ManageWorkgroupEnabled())
+	}
 	if !out.Onboarding.NodeProfileCompleted {
 		t.Fatal("legacy/nil onboarding should report completed=true")
 	}

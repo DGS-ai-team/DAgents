@@ -70,7 +70,7 @@ def build_releases_router(
         root = _require_releases_dir()
         filename = str(file.filename or "").strip()
         if not allowed_release_filename(filename):
-            raise HTTPException(status_code=422, detail="file must be .tar.gz or .zip")
+            raise HTTPException(status_code=422, detail="file must be .tar.gz, .zip, or .exe")
         try:
             artifact = validate_slug(artifact, "artifact")
             version = validate_slug(version, "version")

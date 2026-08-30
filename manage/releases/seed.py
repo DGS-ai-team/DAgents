@@ -49,7 +49,7 @@ def _find_package_file(version_path: Path, manifest: dict | None) -> Path | None
         candidate = version_path / str(manifest.get("filename") or "")
         if candidate.is_file():
             return candidate
-    for pattern in ("*.tar.gz", "*.zip"):
+    for pattern in ("*.tar.gz", "*.zip", "*.exe"):
         matches = sorted(version_path.glob(pattern))
         if matches:
             return matches[0]

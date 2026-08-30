@@ -24,15 +24,12 @@ const props = defineProps({
    * full：设置页完整表单
    * create-basics：创建弹窗身份步
    * create-capabilities：创建弹窗能力步
-   * lite：兼容旧用法，等同 create-basics
    */
   mode: {
     type: String,
     default: "full",
-    validator: (v) => ["full", "create-basics", "create-capabilities", "lite"].includes(v),
+    validator: (v) => ["full", "create-basics", "create-capabilities"].includes(v),
   },
-  /** @deprecated 使用 mode="create-basics" */
-  lite: { type: Boolean, default: false },
   /** 创建校验：替换对应字段标签文案 */
   fieldErrors: {
     type: Object,
@@ -47,10 +44,7 @@ const props = defineProps({
 
 const emit = defineEmits(["update:showAdvanced", "clear-field-error"]);
 
-const resolvedMode = computed(() => {
-  if (props.mode === "lite" || props.lite) return "create-basics";
-  return props.mode;
-});
+const resolvedMode = computed(() => props.mode);
 const isCreateBasics = computed(() => resolvedMode.value === "create-basics");
 const isCreateCapabilities = computed(() => resolvedMode.value === "create-capabilities");
 const isFull = computed(() => resolvedMode.value === "full");
@@ -182,7 +176,7 @@ const longTermScopeOptions = computed(() =>
     class="agent-settings-form"
     :class="{
       'agent-settings-form--compact': compact,
-      'agent-settings-form--lite': useConversationalLabels,
+      'agent-settings-form--create': useConversationalLabels,
       'agent-settings-form--full': isFull,
       'agent-settings-form--create-basics': isCreateBasics,
       'agent-settings-form--create-capabilities': isCreateCapabilities,
@@ -550,14 +544,14 @@ const longTermScopeOptions = computed(() =>
   border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
-.agent-settings-form--lite {
+.agent-settings-form--create {
   gap: 14px;
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
 }
 
-.agent-settings-form--lite .agent-settings-section {
+.agent-settings-form--create .agent-settings-section {
   padding: 0;
   border: none;
   border-radius: 0;
@@ -595,8 +589,8 @@ const longTermScopeOptions = computed(() =>
   resize: none;
 }
 
-.agent-settings-form--lite .agent-settings-field :deep(.ui-select__trigger),
-.agent-settings-form--lite .agent-settings-input {
+.agent-settings-form--create .agent-settings-field :deep(.ui-select__trigger),
+.agent-settings-form--create .agent-settings-input {
   background: var(--color-input, var(--color-surface));
 }
 

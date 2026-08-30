@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
+	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 )
 
 func TestCheckerFetchCheck(t *testing.T) {
@@ -54,5 +55,49 @@ func TestReadInstallVersion(t *testing.T) {
 	}
 	if got := ReadInstallVersion(dir); got != "0.6.2" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestIsWindowsInstallerAsset(t *testing.T) {
+	tests := []struct {
+		name   string
+		status sharedupdate.Status
+		want   bool
+	}{
+		{
+			name: "x64 installer",
+			status: sharedupdate.Status{
+				Platform: "windows-amd64",
+				Asset: map[string]any{
+					"filename": "dagents-local-assistant-windows-amd64-installer-0.10.5.exe",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "legacy archive",
+			status: sharedupdate.Status{
+				Platform: "windows-386",
+				Asset: map[string]any{
+					"filename": "dagents-local-assistant-windows-386-0.10.4.zip",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "linux executable name",
+			status: sharedupdate.Status{
+				Platform: "linux-amd64",
+				Asset:    map[string]any{"filename": "tool.exe"},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isWindowsInstallerAsset(tt.status); got != tt.want {
+				t.Fatalf("isWindowsInstallerAsset() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

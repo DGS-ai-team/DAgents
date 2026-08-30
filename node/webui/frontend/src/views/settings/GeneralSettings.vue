@@ -8,8 +8,8 @@ import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
   <div class="settings-page settings-embedded">
     <SettingsPageHeader
       title="通用"
-      eyebrow="工作区设置"
-      description="管理 Node 的身份、日志与当前运行状态。"
+      eyebrow="本机设置"
+      description="管理本机节点的显示信息、日志和运行状态。"
     />
     <GeneralConfigPanel />
     <StatusPanel embedded @close="() => {}" />

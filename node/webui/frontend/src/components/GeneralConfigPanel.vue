@@ -35,8 +35,8 @@ onMounted(load);
     @save="saveGeneral"
   >
     <section class="settings-section">
-      <h2 class="settings-section__title">Node 地址</h2>
-      <p class="settings-section__desc">监听地址需修改本地配置文件后重启生效。</p>
+      <h2 class="settings-section__title">访问地址</h2>
+      <p class="settings-section__desc">以下地址由启动配置决定，修改后需要重启节点。</p>
       <div class="setup-config-panel__readonly-grid">
         <div class="command-stat">
           <span class="command-stat__label">监听</span>
@@ -50,27 +50,8 @@ onMounted(load);
     </section>
 
     <section class="settings-section">
-      <h2 class="settings-section__title">身份与路径</h2>
-      <div class="setup-config-panel__field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">Node ID</span>
-          <input v-model="form.runtime.node_id" class="settings-field__input" type="text" autocomplete="off" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">日志级别</span>
-          <select v-model="form.runtime.log_level" class="settings-field__input">
-            <option value="debug">debug</option>
-            <option value="info">info</option>
-            <option value="warn">warn</option>
-            <option value="error">error</option>
-          </select>
-        </label>
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <h2 class="settings-section__title">Node 信息</h2>
-      <p class="settings-section__desc">注册到 Manage 后的展示名（peers / Console）；与具体 Agent 实例名称无关。</p>
+      <h2 class="settings-section__title">显示信息</h2>
+      <p class="settings-section__desc">用于界面和协作场景中的识别，不影响具体智能体的名称。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">怎么称呼你</span>
@@ -83,12 +64,28 @@ onMounted(load);
           />
         </label>
         <label class="settings-field">
-          <span class="settings-field__label">Node 名称</span>
-          <input v-model="form.agent.name" class="settings-field__input" type="text" placeholder="空则显示 Node ID" autocomplete="off" />
+          <span class="settings-field__label">节点名称</span>
+          <input v-model="form.agent.name" class="settings-field__input" type="text" placeholder="例如：开发机" autocomplete="off" />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">简介</span>
           <input v-model="form.agent.description" class="settings-field__input" type="text" autocomplete="off" />
+        </label>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h2 class="settings-section__title">诊断</h2>
+      <p class="settings-section__desc">一般使用保持 info；排查问题时再临时提高日志详细度。</p>
+      <div class="setup-config-panel__field-grid">
+        <label class="settings-field">
+          <span class="settings-field__label">日志级别</span>
+          <select v-model="form.runtime.log_level" class="settings-field__input">
+            <option value="debug">debug</option>
+            <option value="info">info</option>
+            <option value="warn">warn</option>
+            <option value="error">error</option>
+          </select>
         </label>
       </div>
     </section>
