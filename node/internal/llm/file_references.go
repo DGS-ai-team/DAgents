@@ -73,8 +73,8 @@ func fileReferenceKey(path string) string {
 }
 
 func fileReferenceBaseName(path string) string {
-	path = strings.TrimRight(path, `/\\`)
-	if index := strings.LastIndexAny(path, `/\\`); index >= 0 {
+	path = strings.TrimRight(path, "/\\")
+	if index := strings.LastIndexAny(path, "/\\"); index >= 0 {
 		return path[index+1:]
 	}
 	return path
