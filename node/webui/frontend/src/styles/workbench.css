@@ -570,7 +570,7 @@
 .app__body--chat-v61 .chat__stream > .msg--tool-centered,
 .app__body--chat-v61 .chat__stream > .tool-summary-row,
 .app__body--chat-v61 .chat__stream > .tool-group-row {
-  width: min(960px, 100%);
+  width: min(860px, 100%);
   max-width: 100%;
   margin-inline: auto;
 }
