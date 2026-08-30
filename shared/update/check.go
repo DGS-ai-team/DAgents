@@ -65,6 +65,9 @@ func ReleasePlatform() string {
 		}
 		return "linux-amd64"
 	case "windows":
+		if runtime.GOARCH == "386" {
+			return "windows-386"
+		}
 		return "windows-amd64"
 	default:
 		return runtime.GOOS + "-" + runtime.GOARCH

@@ -27,6 +27,7 @@
 | [tool-before-hook-duplicate-approval.md](tool-before-hook-duplicate-approval.md) | 重复工具调用的审批策略 |
 | [ux-agent-owned-file-approval.md](ux-agent-owned-file-approval.md) | Agent 自有文件写入的审批信任链 |
 | [ui-e2e-regression-checklist.md](ui-e2e-regression-checklist.md) | 当前 Node Web UI 回归清单 |
+| [ui-product-grade-redesign.md](ui-product-grade-redesign.md) | Node Web UI 产品级评审、已落地的核心改造与持续精修基线 |
 
 ## 规划中
 

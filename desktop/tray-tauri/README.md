@@ -1,6 +1,6 @@
 # `desktop/tray-tauri/` — DAgents Shell（Tauri，推荐轨）
 
-用 **Tauri 2** 实现的 Windows 桌面托盘 Shell（内嵌 WebView2）。安装包「**推荐**」选项与 zip 默认 `bin/dagents-shell.exe` 均使用本实现。
+用 **Tauri 2** 实现的 Windows 桌面托盘 Shell（内嵌 WebView2）。Windows x64/x86 Inno 安装包的「**推荐**」Shell 均使用本实现；发布不再提供免安装 zip。
 
 ## 与兼容轨的关系
 

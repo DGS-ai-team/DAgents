@@ -142,8 +142,8 @@
 .settings-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  gap: 24px;
-  padding: var(--space-4) var(--space-5) var(--space-5);
+  gap: 0;
+  padding: 0;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -154,14 +154,26 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 0;
+  padding: var(--space-4) var(--space-3);
   min-height: 0;
   overflow: hidden;
+  border-right: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-sidebar) 82%, transparent);
+}
+
+.chat-notice-banner {
+  margin: 8px 12px 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--status-info) 24%, var(--border-default));
+  border-radius: var(--radius-md);
+  background: var(--color-info-soft);
+  color: var(--text-primary);
+  font-size: var(--font-size-secondary);
 }
 
 .settings-layout__nav-head {
   flex: 0 0 auto;
-  padding: 0 8px 16px;
+  padding: 0 0 16px;
 }
 
 .settings-layout__identity {
@@ -182,7 +194,7 @@
 .settings-layout__nav-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 0 8px 8px;
+  padding: 0 0 8px;
   overflow: auto;
 }
 
@@ -253,15 +265,15 @@
   overflow: auto;
   width: 100%;
   min-width: 0;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .settings-layout__main > .settings-page {
-  width: min(1180px, 100%);
-  max-width: 1180px;
+  width: min(var(--content-settings-max), 100%);
+  max-width: var(--content-settings-max);
   margin: 0 auto;
 }
 
@@ -275,8 +287,8 @@
 @media (max-width: 900px) {
   .settings-layout {
     grid-template-columns: 196px minmax(0, 1fr);
-    gap: 16px;
-    padding: var(--space-3);
+    gap: 0;
+    padding: 0;
   }
 }
 

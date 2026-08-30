@@ -7,9 +7,9 @@ import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
   <div class="settings-page settings-embedded">
     <SettingsPageHeader
       title="技能"
-      eyebrow="运行时设置"
-      description="查看当前会话已启用的技能与可发现的技能目录。模型会按需加载技能内容。"
+      eyebrow="全局工具目录"
+      description="管理 Node 可发现的技能元数据；具体 Agent 的可见范围在智能体设置中绑定。"
     />
-    <SkillsPanel embedded @close="() => {}" />
+    <SkillsPanel embedded />
   </div>
 </template>

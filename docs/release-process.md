@@ -14,7 +14,7 @@
 2. 使用 `scripts/release/validate_release.py` 本地检查 `VERSION`、所有包元数据、`CHANGELOG.md`、`README.md`、手册和路线图是否一致。
 3. 创建 `dev -> main` 的发布 Pull Request；针对 `main` 的 PR 会额外运行 Release metadata 预检，等待必需 CI 和审查通过后合并。
 4. 在合并后的 `main` 最新提交上创建并推送 `vX.Y.Z` 标签。
-5. `build-and-release.yml` 校验标签、`VERSION` 和所有包元数据，并构建 GitHub Release、Node 本地助手包、Windows 安装器和 Manage 离线包；发布中同时生成 `SHA256SUMS` 和 `release-manifest.json`。
+5. `build-and-release.yml` 校验标签、`VERSION` 和所有包元数据，并构建 GitHub Release、Linux Node 本地助手包、Windows x64/x86 Inno 安装器和 Manage 离线包；Windows 不再发布免安装归档，发布中同时生成 `SHA256SUMS` 和 `release-manifest.json`。
 6. 发布成功后工作流自动创建 `main -> dev` 同步 PR（不自动合并），避免发布提交（版本号、CHANGELOG 或 hotfix）在开发线上丢失。
 
 因此，发版时应该把经过验证的 `dev` 合入 `main`，但不应该让每次开发提交自动同步到 `main`，也不应该让发布工作流自动替用户完成分支合并。发布 PR 是版本冻结、审查和回滚边界。

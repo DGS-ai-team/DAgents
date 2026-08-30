@@ -561,7 +561,7 @@
 .app__body--chat-v61 .chat__stream > .msg--user,
 .app__body--chat-v61 .chat__stream > .msg--assistant,
 .app__body--chat-v61 .chat__stream > .msg--system {
-  width: min(860px, 100%);
+  width: min(var(--content-chat-max), 100%);
   max-width: 100%;
   margin-inline: auto;
 }
@@ -570,7 +570,7 @@
 .app__body--chat-v61 .chat__stream > .msg--tool-centered,
 .app__body--chat-v61 .chat__stream > .tool-summary-row,
 .app__body--chat-v61 .chat__stream > .tool-group-row {
-  width: min(860px, 100%);
+  width: min(var(--content-chat-max), 100%);
   max-width: 100%;
   margin-inline: auto;
 }
@@ -596,7 +596,7 @@
   padding: 2px 0;
 }
 
-/* ---------- app shell???????????????????---------- */
+/* ---------- app shell ---------- */
 
 /* ---------- settings page ---------- */
 
@@ -606,10 +606,10 @@
 }
 
 .settings-layout__main .settings-page {
-  width: min(1120px, 100%);
-  max-width: 1120px;
+  width: min(var(--content-settings-max), 100%);
+  max-width: var(--content-settings-max);
   margin: 0 auto;
-  padding: 28px 32px 40px;
+  padding: 32px 40px 48px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -627,7 +627,7 @@
 }
 
 .settings-layout__main .settings-page__header {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
   padding-bottom: 20px;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
 }
@@ -647,10 +647,10 @@
 .settings-page__eyebrow {
   display: block;
   margin-bottom: 6px;
-  color: var(--color-primary-strong);
-  font-size: 11px;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-caption);
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.03em;
 }
 
 .settings-page__header .settings-page__title {
@@ -678,7 +678,14 @@
 
 .settings-section {
   margin-bottom: 0;
-  padding-bottom: 20px;
+  padding-bottom: 24px;
+}
+
+.settings-section + .settings-section,
+.settings-embedded .settings-section + .settings-section {
+  margin-top: 8px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .settings-layout__main .settings-field__input {
@@ -735,14 +742,14 @@
 
 .settings-section__title {
   margin: 0 0 10px;
-  font-size: 15px;
+  font-size: var(--font-size-section);
   font-weight: 600;
 }
 
 .settings-section__desc {
   margin: 0 0 12px;
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: var(--font-size-secondary);
+  line-height: 1.55;
   color: var(--color-text-muted);
 }
 
@@ -1244,8 +1251,8 @@ select.settings-field__input {
 
 .read-file-structured {
   display: block;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--font-size-secondary);
+  line-height: 1.55;
 }
 
 .tool-exec-bubble__name {
@@ -2173,6 +2180,11 @@ select.settings-field__input {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat__composer-runtime-rail--idle {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .chat__composer-statusline {
@@ -3877,6 +3889,82 @@ select.settings-field__input {
   line-height: 1.5;
   color: var(--color-text-subtle);
   word-break: break-word;
+}
+
+.skills-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.skills-catalog__head {
+  margin: 0;
+  padding: 0;
+}
+
+.skills-catalog__refresh {
+  width: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0;
+}
+
+.skills-catalog__refresh svg {
+  width: 15px;
+  height: 15px;
+}
+
+.skills-catalog__lifecycle {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--status-info) 22%, var(--border-default));
+  border-radius: var(--radius-container);
+  background: var(--color-info-soft);
+  color: var(--text-secondary);
+  font-size: var(--font-size-secondary);
+  line-height: 1.55;
+}
+
+.skills-catalog__lifecycle strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-body);
+}
+
+.skills-catalog__lifecycle code {
+  color: var(--text-primary);
+}
+
+.skills-catalog__list {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-container);
+  background: var(--surface-panel);
+}
+
+.skills-catalog__item {
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.skills-catalog__item + .skills-catalog__item {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.skills-catalog__status {
+  flex: 0 0 auto;
+  color: var(--status-success);
+  font-size: var(--font-size-caption);
+}
+
+.skills-catalog__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 0;
 }
 
 /* ---------- shared command panels ---------- */

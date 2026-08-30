@@ -38,6 +38,7 @@ type agentInfoResponse struct {
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
 	ManageEnabled     bool                `json:"manage_enabled"`
+	WorkgroupEnabled  bool                `json:"workgroup_enabled"`
 	ManageURL         string              `json:"manage_url,omitempty"`
 	ManageRegistered  bool                `json:"manage_registered"`
 	LLM               llm.LLMSettingsView `json:"llm"`
@@ -69,6 +70,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageEnabled:     s.cfg != nil && s.cfg.Manage.Enabled,
+		WorkgroupEnabled:  s.cfg != nil && s.cfg.ManageWorkgroupEnabled(),
 		ManageURL:         strings.TrimSpace(s.cfg.Manage.URL),
 		ManageRegistered:  registered,
 		LLM:               llmView,

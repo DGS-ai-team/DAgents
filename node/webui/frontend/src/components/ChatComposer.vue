@@ -471,13 +471,14 @@ defineExpose({
       {{ attachmentNotice }}
     </div>
     <div
-      v-if="runtimeStatusText"
       class="chat__composer-runtime-rail"
+      :class="{ 'chat__composer-runtime-rail--idle': !runtimeStatusText }"
       role="status"
       aria-live="polite"
       :title="runtimeStatusText"
+      :aria-hidden="!runtimeStatusText"
     >
-      {{ runtimeStatusText }}
+      {{ runtimeStatusText || "空闲" }}
     </div>
     <div class="chat__composer-pill">
       <input

@@ -25,6 +25,7 @@ const reloading = ref(false);
 const error = ref("");
 const statusMessage = ref("");
 const showAdvanced = ref(false);
+const activeSection = ref("behavior");
 const policyRefreshKey = ref(0);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
@@ -33,10 +34,28 @@ const savedLongTermScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
+const detailSections = [
+  { id: "behavior", label: "基本设置" },
+  { id: "memory", label: "记忆" },
+  { id: "resources", label: "连接与资源" },
+  { id: "policy", label: "工具审批" },
+];
+
+function normalizedSection(value) {
+  const section = String(value || "").trim();
+  return detailSections.some((item) => item.id === section) ? section : "behavior";
+}
+
+function setActiveSection(section) {
+  const next = normalizedSection(section);
+  activeSection.value = next;
+  if (String(route.query.section || "") === next) return;
+  void router.replace({ query: { ...route.query, section: next } });
+}
 
 async function load() {
   if (!agentId.value) {
-    error.value = "缺少 agent_id";
+    error.value = "缺少智能体标识";
     loading.value = false;
     return;
   }
@@ -144,6 +163,14 @@ watch(agentId, () => {
   void load();
 });
 
+watch(
+  () => route.query.section,
+  (section) => {
+    activeSection.value = normalizedSection(section);
+  },
+  { immediate: true },
+);
+
 let stopConfigurationEvents = () => {};
 onMounted(() => {
   void load();
@@ -174,20 +201,28 @@ onUnmounted(() => stopConfigurationEvents());
     <p v-if="loading" class="agent-detail__status">加载中…</p>
     <template v-else>
       <nav class="agent-detail__subnav" aria-label="智能体配置区段">
-        <a href="#agent-behavior">行为与能力</a>
-        <a href="#agent-memory">记忆</a>
-        <a href="#agent-mcp">MCP</a>
-        <a href="#agent-linux">Linux 通道</a>
-        <a href="#agent-policy">工具审批</a>
+        <button
+          v-for="item in detailSections"
+          :key="item.id"
+          type="button"
+          class="agent-detail__subnav-item"
+          :class="{ 'agent-detail__subnav-item--active': activeSection === item.id }"
+          :aria-current="activeSection === item.id ? 'page' : undefined"
+          @click="setActiveSection(item.id)"
+        >
+          {{ item.label }}
+        </button>
       </nav>
 
-      <section id="agent-behavior" class="agent-detail__section agent-detail__section--first">
+      <p v-if="error && !agentMeta" class="agent-detail__error" role="alert">{{ error }}</p>
+
+      <section v-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
         <div class="agent-detail__section-heading">
           <div>
             <span class="agent-detail__section-kicker">核心配置</span>
-            <h2>行为与能力</h2>
+            <h2>基本设置</h2>
           </div>
-          <span>影响该智能体的每次对话</span>
+          <span>影响该智能体的每次新对话</span>
         </div>
         <AgentSettingsForm
           v-model:draft="draft"
@@ -195,44 +230,51 @@ onUnmounted(() => stopConfigurationEvents());
           :available-tool-groups="availableToolGroups"
           v-model:show-advanced="showAdvanced"
         />
+        <div class="agent-detail__actions">
+          <div class="agent-detail__actions-copy">
+            <strong>应用基本设置</strong>
+            <span>保存后重新加载当前智能体运行配置</span>
+          </div>
+          <div class="agent-detail__action-buttons">
+            <button
+              type="button"
+              class="btn btn--ghost"
+              :disabled="reloading || saving"
+              title="不改配置，仅重新加载当前已保存的设置"
+              @click="reloadRuntime"
+            >
+              {{ reloading ? "加载中…" : "重新加载" }}
+            </button>
+            <button type="button" class="btn btn--primary" :disabled="saving" @click="save">
+              {{ saving ? "保存中…" : "保存并应用" }}
+            </button>
+          </div>
+        </div>
+        <div class="agent-detail__feedback" aria-live="polite">
+          <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
+          <p v-if="error" class="agent-detail__error" role="alert">{{ error }}</p>
+        </div>
       </section>
 
-      <div class="agent-detail__actions">
-        <div class="agent-detail__actions-copy">
-          <strong>应用配置</strong>
-          <span>保存后立即应用到当前智能体</span>
-        </div>
-        <div class="agent-detail__action-buttons">
-          <button type="button" class="btn btn--primary" :disabled="saving" @click="save">
-            {{ saving ? "保存中…" : "保存并应用" }}
-          </button>
-          <button
-            type="button"
-            class="btn btn--ghost"
-            :disabled="reloading || saving"
-            title="不改配置，仅重新加载当前已保存的设置"
-            @click="reloadRuntime"
-          >
-            {{ reloading ? "加载中…" : "重新加载" }}
-          </button>
-        </div>
-      </div>
-      <div class="agent-detail__feedback" aria-live="polite">
-        <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
-        <p v-if="error" class="agent-detail__error" role="alert">{{ error }}</p>
-      </div>
-
-      <section id="agent-memory" class="agent-detail__section">
+      <section v-else-if="activeSection === 'memory'" class="agent-detail__section agent-detail__section--first">
         <MemoryPanel :agent-id="agentId" :scope="savedLongTermScope" />
       </section>
-      <section id="agent-mcp" class="agent-detail__section">
-        <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
-      </section>
-      <section id="agent-linux" class="agent-detail__section">
-        <LinuxAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
+
+      <section v-else-if="activeSection === 'resources'" class="agent-detail__section agent-detail__section--first">
+        <div class="agent-detail__section-heading">
+          <div>
+            <span class="agent-detail__section-kicker">运行连接</span>
+            <h2>连接与资源</h2>
+          </div>
+          <span>限定该智能体可以发现和使用的外部能力</span>
+        </div>
+        <div class="agent-detail__resource-stack">
+          <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
+          <LinuxAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
+        </div>
       </section>
 
-      <section id="agent-policy" class="agent-detail__section agent-detail__policy">
+      <section v-else class="agent-detail__section agent-detail__section--first agent-detail__policy">
         <div class="agent-detail__policy-title">工具审批</div>
         <div class="agent-detail__policy-body">
           <PolicyPanel embedded :agent-id="agentId" :refresh-key="policyRefreshKey" @close="() => {}" />
@@ -262,36 +304,42 @@ onUnmounted(() => stopConfigurationEvents());
 }
 
 .agent-detail__subnav {
-  position: sticky;
-  top: 0;
-  z-index: 4;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 40px;
-  margin: -4px 0 24px;
+  min-height: 38px;
+  margin: -4px 0 28px;
   padding: 4px;
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
+  background: var(--color-surface-alt, var(--color-surface));
 }
 
-.agent-detail__subnav a {
+.agent-detail__subnav-item {
   flex: 0 0 auto;
-  padding: 6px 10px;
+  min-height: 28px;
+  padding: 0 11px;
+  border: 0;
   border-radius: 5px;
+  background: transparent;
   color: var(--color-text-muted);
   font-size: 12px;
-  text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.agent-detail__subnav a:hover,
-.agent-detail__subnav a:focus-visible {
+.agent-detail__subnav-item:hover,
+.agent-detail__subnav-item:focus-visible {
   color: var(--color-text);
   background: var(--color-surface-hover);
+}
+
+.agent-detail__subnav-item--active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
+  font-weight: 600;
 }
 
 .agent-detail__section {
@@ -333,16 +381,9 @@ onUnmounted(() => stopConfigurationEvents());
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  position: sticky;
-  bottom: 14px;
-  z-index: 3;
-  margin: 20px 0 0;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(10px);
+  margin: 24px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--color-border);
 }
 
 .agent-detail__actions-copy {
@@ -396,8 +437,10 @@ onUnmounted(() => stopConfigurationEvents());
 }
 
 .agent-detail__policy {
-  padding-top: 24px;
+  padding-top: 0;
 }
+
+.agent-detail__resource-stack { display: grid; gap: 22px; }
 
 .agent-detail__policy-toggle {
   display: flex;

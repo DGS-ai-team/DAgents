@@ -110,6 +110,39 @@ class ReleaseRoutesTest(unittest.TestCase):
         stored = releases_dir / "dagents-local-assistant/stable/linux-amd64/0.5.2"
         self.assertTrue(stored.is_dir())
 
+    def test_upload_windows_installer(self):
+        client, store, releases_dir = _release_client()
+        data = b"MZ-fake-inno-installer"
+        r = client.post(
+            "/v1/releases/packages",
+            data={
+                "artifact": "dagents-local-assistant",
+                "version": "0.10.5",
+                "platform": "windows-386",
+                "channel": "stable",
+                "publish": "true",
+                "set_latest": "true",
+            },
+            files={
+                "file": (
+                    "dagents-local-assistant-windows-386-installer-0.10.5.exe",
+                    data,
+                    "application/octet-stream",
+                )
+            },
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["platform"], "windows-386")
+        self.assertEqual(r.json()["status"], "published")
+        self.assertEqual(
+            (releases_dir / r.json()["rel_path"]).read_bytes(),
+            data,
+        )
+        self.assertEqual(
+            store.get_latest("dagents-local-assistant", "stable", "windows-386").filename,
+            "dagents-local-assistant-windows-386-installer-0.10.5.exe",
+        )
+
 
 class ReleaseSeedTest(unittest.TestCase):
     def test_seed_bundled_releases(self):

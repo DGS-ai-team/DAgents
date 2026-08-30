@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 将已编译的 dagents-node + dagents-client + dagents-browser
-# 与配置、.runtime、scripts/ 组装为发布目录并压缩。
+# 与配置、.runtime、scripts/ 组装为发布目录；Linux 再生成 tar.gz 归档。
 #
 # 用法：
 #   PLATFORM=linux-amd64 VERSION=0.2.2 scripts/ci/assemble_local_assistant_bundle.sh
@@ -50,6 +50,7 @@ fi
 BUNDLE_NAME="dagents-local-assistant-${PLATFORM}"
 BUNDLE_DIR="${REPO_ROOT}/dist/${BUNDLE_NAME}"
 ARCHIVE_BASE="${REPO_ROOT}/dist/${BUNDLE_NAME}-${VERSION}"
+ARCHIVE=""
 
 rm -rf "${BUNDLE_DIR}"
 mkdir -p "${BUNDLE_DIR}/bin" "${BUNDLE_DIR}/.runtime"
@@ -162,14 +163,7 @@ Optional third-party CLIs (not bundled; see .runtime/RECOMMENDED_CLI_TOOLS.md):
 
 See docs/architecture/local-assistant.md
 EOF
-  ARCHIVE="${ARCHIVE_BASE}.zip"
-  rm -f "${ARCHIVE}"
-  if command -v zip >/dev/null 2>&1; then
-    (cd "${REPO_ROOT}/dist" && zip -rq "$(basename "${ARCHIVE}")" "$(basename "${BUNDLE_DIR}")")
-  else
-    ARCHIVE="${ARCHIVE_BASE}.tar.gz"
-    tar -C "${REPO_ROOT}/dist" -czf "${ARCHIVE}" "$(basename "${BUNDLE_DIR}")"
-  fi
+  echo "[assemble] Windows portable archive disabled; staging directory is for Inno Setup only"
 else
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
 DAgents Local Assistant（Go Node + Web UI）
@@ -213,4 +207,7 @@ EOF
   tar -C "${REPO_ROOT}/dist" -czf "${ARCHIVE}" "$(basename "${BUNDLE_DIR}")"
 fi
 
-echo "[done] ${ARCHIVE}"
+echo "[done] ${BUNDLE_DIR}"
+if [[ -n "${ARCHIVE}" ]]; then
+  echo "[done] ${ARCHIVE}"
+fi

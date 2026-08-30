@@ -103,7 +103,7 @@ onMounted(() => void load());
 
 <template>
   <section class="linux-agent-panel">
-    <div class="linux-agent-panel__head"><div><h2 class="linux-agent-panel__title">Linux 通道</h2><p class="linux-agent-panel__desc">只向这个智能体暴露选中的 SSH 通道；同一 terminal_id 下的 command/input 复用同一个持久会话。并发限制用于控制该智能体同时打开的终端数。</p></div><button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button></div>
+    <div class="linux-agent-panel__head"><div><h2 class="linux-agent-panel__title">Linux 通道</h2><p class="linux-agent-panel__desc">选择这个智能体可以使用的远程终端；可同时打开的终端数由通道配置决定。</p></div><button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button></div>
     <p v-if="loading" class="linux-agent-panel__muted">加载中…</p>
     <p v-else-if="error" class="linux-agent-panel__error">{{ error }}</p>
     <p v-else-if="!channels.length" class="linux-agent-panel__muted">尚未配置 Linux 通道，请先到“设置 › Linux 通道”添加。</p>

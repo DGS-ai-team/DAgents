@@ -79,18 +79,20 @@ const emit = defineEmits([
       </div>
     </div>
     <div
-      v-if="composerRuntimeLabel"
       class="chat__composer-runtime-rail"
+      :class="{ 'chat__composer-runtime-rail--idle': !composerRuntimeLabel }"
       role="status"
       aria-live="polite"
+      :aria-hidden="!composerRuntimeLabel"
     >
       <BrandActivityIndicator
+        v-if="composerRuntimeLabel"
         :label="composerRuntimeLabel"
         mode="generating"
         :show-label="false"
         compact
       />
-      <span>{{ composerRuntimeLabel }}</span>
+      <span>{{ composerRuntimeLabel || "空闲" }}</span>
     </div>
     <div class="chat__composer-pill" style="position: relative">
       <div

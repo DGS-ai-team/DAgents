@@ -33,9 +33,12 @@ const emit = defineEmits([
 
 const text = ref("");
 const inputRef = ref(null);
+const recipientLabel = computed(() => String(props.agentTitle || "Agent").trim() || "Agent");
 
 const placeholder = computed(() =>
-  props.agentSending ? "本轮执行中，可先编辑下一条消息…" : "输入消息，或向助手提问…",
+  props.agentSending
+    ? `${recipientLabel.value} 正在执行，可先编辑下一条消息…`
+    : "输入消息…",
 );
 const canSubmit = computed(() => Boolean(
   String(text.value || "").trim() &&
@@ -76,12 +79,25 @@ defineExpose({ focusInput, submit });
 
 <template>
   <section class="chat__composer terminal-workbench-composer" aria-label="Agent 输入">
-    <div v-if="props.agentSending" class="chat__composer-runtime-rail" role="status" aria-live="polite">
-      本轮执行中
+    <div
+      class="chat__composer-runtime-rail"
+      :class="{ 'chat__composer-runtime-rail--idle': !props.agentSending }"
+      role="status"
+      aria-live="polite"
+      :aria-hidden="!props.agentSending"
+    >
+      {{ props.agentSending ? "本轮执行中" : "空闲" }}
     </div>
 
     <div class="chat__composer-pill">
-      <div class="chat__composer-pill-left" aria-hidden="true"></div>
+      <div class="chat__composer-pill-left">
+        <span class="terminal-workbench-composer__recipient" :title="`消息将发送给 ${recipientLabel}`">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3.25 3.75h9.5v6.5h-5l-2.5 1.75v-1.75h-2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+          </svg>
+          <span>发给 {{ recipientLabel }}</span>
+        </span>
+      </div>
       <div class="chat__composer-pill-center">
         <textarea
           ref="inputRef"
@@ -176,6 +192,25 @@ defineExpose({ focusInput, submit });
 </template>
 
 <style scoped>
-.terminal-workbench-composer :deep(.chat__composer-pill-left) { min-width: 30px; }
+.terminal-workbench-composer :deep(.chat__composer-pill-left) { min-width: 0; }
 .terminal-workbench-composer :deep(.chat__textarea) { font-family: inherit; }
+
+.terminal-workbench-composer__recipient {
+  display: inline-flex;
+  max-width: 180px;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface-subtle, var(--color-surface-hover));
+  color: var(--color-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.terminal-workbench-composer__recipient svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.terminal-workbench-composer__recipient span { overflow: hidden; text-overflow: ellipsis; }
 </style>

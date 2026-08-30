@@ -154,6 +154,7 @@ onMounted(() => {
             <option value="linux-amd64">linux-amd64</option>
             <option value="linux-arm64">linux-arm64</option>
             <option value="windows-amd64">windows-amd64</option>
+            <option value="windows-386">windows-386</option>
           </select>
         </label>
         <label>
@@ -165,8 +166,8 @@ onMounted(() => {
           <input v-model="form.releaseNotes" placeholder="可选" />
         </label>
         <label class="form-grid__wide">
-          <span>安装包 (.tar.gz / .zip)</span>
-          <input ref="fileInput" type="file" accept=".tar.gz,.zip,application/gzip,application/zip" @change="onFile" />
+          <span>安装包 (.tar.gz / .zip / .exe)</span>
+          <input ref="fileInput" type="file" accept=".tar.gz,.zip,.exe,application/gzip,application/zip,application/octet-stream" @change="onFile" />
         </label>
       </div>
       <div class="form-options">

@@ -57,6 +57,36 @@ jobs:
           test -f "${bundle}/bin/dagents-node"
           test -f "${bundle}/bin/dagents-client"
 
+      - name: Assemble Windows staging for both architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          input_dir="${RUNNER_TEMP}/dagents-windows-bundle-input"
+          mkdir -p "${input_dir}"
+          for name in dagents-node.exe dagents-client.exe dagents-browser.exe dagents-shell-tauri.exe dagents-shell-legacy.exe dagents-shell.exe; do
+            touch "${input_dir}/${name}"
+            chmod +x "${input_dir}/${name}"
+          done
+
+          for platform in windows-amd64 windows-386; do
+            PLATFORM="${platform}" \
+            VERSION=0.0.0-ci \
+            NODE_BIN="${input_dir}/dagents-node.exe" \
+            CLIENT_BIN="${input_dir}/dagents-client.exe" \
+            BROWSER_BIN="${input_dir}/dagents-browser.exe" \
+            SHELL_TAURI_BIN="${input_dir}/dagents-shell-tauri.exe" \
+            SHELL_LEGACY_BIN="${input_dir}/dagents-shell-legacy.exe" \
+            SHELL_BIN="${input_dir}/dagents-shell.exe" \
+              bash scripts/ci/assemble_local_assistant_bundle.sh
+            bundle="dist/dagents-local-assistant-${platform}"
+            test -f "${bundle}/VERSION"
+            test -f "${bundle}/bin/dagents-shell.exe"
+          done
+          if compgen -G 'dist/dagents-local-assistant-windows-*.zip' > /dev/null; then
+            echo 'Windows portable archives must not be generated' >&2
+            exit 1
+          fi
+
   installer-contract:
     name: Windows installer contract
     runs-on: ubuntu-latest
@@ -74,3 +104,5 @@ jobs:
           test -f desktop/tray/assets/icon.ico
           grep -Fq '#define MyAppVersion' packaging/windows/dagents-installer.iss
           grep -Fq 'SetupIconFile=' packaging/windows/dagents-installer.iss
+          grep -Fq 'ArchitecturesAllowed=x64compatible' packaging/windows/dagents-installer.iss
+          grep -Fq 'ArchitecturesAllowed=x86compatible' packaging/windows/dagents-installer.iss

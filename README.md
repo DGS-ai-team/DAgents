@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.10.4-green" alt="v0.10.4"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.10.5-green" alt="v0.10.5"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
 </p>
 
@@ -32,7 +32,7 @@
 
 它不是拖拽式「万能工作流」平台，而是面向企业与团队的 **本地优先助手控制台**——能管工具权限、能等人确认、能把对话与文件留在自己这边。
 
-当前版本为 **v0.10.4**（工作组审批与 Agent 终端稳定性版）：在多模态与浏览器任务可靠性的基础上，统一工作组工具审批、任务卡片、运行状态和终端命令的闭环行为，补齐 Node 与 Manage 的一致性展示与恢复路径。能力边界与验收步骤见 [浏览器工具与演示](docs/design/browser-tools-and-demonstration.md)。
+当前版本为 **v0.10.5**（产品级 UI 与 Windows 发布工程增强版）：收敛 Agent 工作台、终端、设置和 Skills 的信息层级，修复运行状态布局抖动，并将 Windows 发布统一为 x64/x86 安装包。能力边界与验收步骤见 [浏览器工具与演示](docs/design/browser-tools-and-demonstration.md)。
 
 ---
 

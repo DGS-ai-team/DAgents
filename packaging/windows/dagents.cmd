@@ -687,9 +687,11 @@ if errorlevel 1 (
 )
 powershell -NoProfile -Command ^
   "$pkg='%TMP_PKG%'; $prefix='%DAGENTS_HOME%';" ^
+  "$magic=$null; try { $magic=[System.IO.File]::ReadAllBytes($pkg) } catch { exit 2 };" ^
+  "if ($magic.Length -ge 2 -and $magic[0] -eq 0x4D -and $magic[1] -eq 0x5A) { $installer=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString() + '.exe'); Copy-Item -LiteralPath $pkg -Destination $installer -Force; Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS'; exit 10 };" ^
   "$staging=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString());" ^
   "New-Item -ItemType Directory -Path $staging | Out-Null;" ^
-  "try { if ($pkg -match '\.zip$') { Expand-Archive -Path $pkg -DestinationPath $staging -Force } else { tar -xf $pkg -C $staging } } catch { exit 2 };" ^
+  "$archive=$null; try { if ($magic.Length -ge 2 -and $magic[0] -eq 0x50 -and $magic[1] -eq 0x4B) { $archive=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString() + '.zip'); Copy-Item -LiteralPath $pkg -Destination $archive -Force; Expand-Archive -Path $archive -DestinationPath $staging -Force } else { tar -xf $pkg -C $staging } } catch { exit 2 } finally { if ($archive -and (Test-Path -LiteralPath $archive)) { Remove-Item -LiteralPath $archive -Force } };" ^
   "$bundle=Get-ChildItem -Path $staging -Directory | Select-Object -First 1;" ^
   "if (-not $bundle) { exit 2 };" ^
   "Copy-Item -Path (Join-Path $bundle.FullName 'bin\*') -Destination (Join-Path $prefix 'bin') -Recurse -Force;" ^
@@ -698,6 +700,11 @@ powershell -NoProfile -Command ^
   "Remove-Item -Recurse -Force $staging; exit 0"
 set "INSTALL_RC=!ERRORLEVEL!"
 if exist "!TMP_PKG!" del /f /q "!TMP_PKG!"
+if "!INSTALL_RC!"=="10" (
+  echo [dagents] Windows installer started; the new Shell will restart after setup completes
+  set "EXIT_CODE=0"
+  goto cli_exit
+)
 if not "!INSTALL_RC!"=="0" (
   echo [dagents] update install failed
   set "EXIT_CODE=!INSTALL_RC!"
