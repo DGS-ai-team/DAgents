@@ -5,6 +5,11 @@
 ## [Unreleased]
 
 
+
+## [0.10.6] - 2026-08-31
+
+修复 Windows x86 browser 构建依赖并完善双架构发布流程。
+
 ## [0.10.5] - 2026-08-30
 
 **产品级 UI 与 Windows 发布工程增强版**：收敛 Agent 工作台的信息层级，补齐 Workgroup/Skills/终端状态边界，并将 Windows 发布产物统一为架构对应的安装包。

@@ -1,6 +1,6 @@
 [package]
 name = "dagents-shell"
-version = "0.10.5"
+version = "0.10.6"
 description = "DAgents Windows Desktop Shell (Tauri tray)"
 authors = ["DAgents"]
 edition = "2021"

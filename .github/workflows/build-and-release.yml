@@ -390,6 +390,7 @@ jobs:
         shell: bash
         env:
           BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
+          BROWSER_CRYPTOGRAPHY_VERSION: ${{ matrix.python_arch == 'x86' && '48.0.1' || '' }}
         run: |
           bash scripts/ci/build_dagents_browser.sh
           mkdir -p "dist/${{ matrix.platform }}"

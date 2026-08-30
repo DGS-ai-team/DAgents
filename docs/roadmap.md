@@ -6,7 +6,7 @@
 
 DAgents 是本地优先的 Agent 控制台：数据与工具默认留在 Node 所在机器，通过工具权限、policy、审批和审计控制风险；需要跨机协作时使用 Manage Workgroup。
 
-## 2. 当前基线（v0.10.5）
+## 2. 当前基线（v0.10.6）
 
 - Go Agent Node：多 Agent、Web UI、HTTP/SSE、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
 - Node Web UI：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口。
@@ -51,4 +51,4 @@ DAgents 是本地优先的 Agent 控制台：数据与工具默认留在 Node �
 - 跨组件设计从 [`docs/design/README.md`](./design/README.md) 进入；用户操作从 [`docs/user/README.md`](./user/README.md) 进入。
 - 发现实现与文档不一致时，以代码和测试为准，提交修正文档的 PR。
 
-**最后更新**：2026-08-26。
+**最后更新**：2026-08-31。
