@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
 import McpStatusIndicator from "./McpStatusIndicator.vue";
+import SkillsStatusIndicator from "./SkillsStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
 import { chromeStore } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
@@ -583,13 +584,13 @@ defineExpose({
 
     <div class="chat__composer-statusline" aria-label="输入状态与工具栏">
       <div class="chat__composer-statusline-left">
-        <McpStatusIndicator />
+        <McpStatusIndicator :agent-id="agentId" />
         <TerminalSessionIndicator
           :terminals="terminals"
           :loading="terminalLoading"
           @terminal-select="openTerminal"
-          @refresh="loadTerminals"
         />
+        <SkillsStatusIndicator :agent-id="agentId" />
       </div>
       <div class="chat__composer-statusline-right">
         <div v-if="thinkingSupported && thinkingControl" class="chat__statusline-thinking">
