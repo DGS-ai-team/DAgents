@@ -1,12 +1,12 @@
 # DAgents 路线图
 
-> 版本事实以 [`CHANGELOG.md`](../CHANGELOG.md) 和代码为准。本页只保留当前产品方向、已完成基线和下一阶段优先级。
+> 机器可读版本事实以根目录 [`VERSION`](../VERSION) 为准，变更说明以 [`CHANGELOG.md`](../CHANGELOG.md) 为准。本页只保留当前产品方向、已完成基线和下一阶段优先级。
 
 ## 1. 产品定位
 
 DAgents 是本地优先的 Agent 控制台：数据与工具默认留在 Node 所在机器，通过工具权限、policy、审批和审计控制风险；需要跨机协作时使用 Manage Workgroup。
 
-## 2. 当前基线（v0.10.4）
+## 2. 当前基线（v0.10.5）
 
 - Go Agent Node：多 Agent、Web UI、HTTP/SSE、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
 - Node Web UI：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口。

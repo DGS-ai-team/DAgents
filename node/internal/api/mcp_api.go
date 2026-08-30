@@ -315,7 +315,53 @@ func (s *Server) handleGetAgentMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bindings := mcp.BindingsFromDefaults(snap.Defaults)
-	writeJSON(w, http.StatusOK, map[string]any{"agent_id": id, "bindings": bindings})
+	// Return only the services bound to this Agent. The composer uses this
+	// projection as a read-only summary and must not fall back to the Node-wide
+	// MCP catalog, otherwise unrelated services would appear in the Agent UI.
+	servers := make([]map[string]any, 0, len(bindings))
+	for _, binding := range bindings {
+		server := map[string]any{
+			"id":      binding.ServerID,
+			"enabled": binding.Enabled,
+			"status":  mcp.StatusOffline,
+		}
+		if s.mcpManager != nil {
+			if view, exists := s.mcpManager.Get(binding.ServerID); exists {
+				server["display_name"] = view.DisplayName
+				server["transport"] = view.Transport
+				server["status"] = view.Status
+				boundToolCount := 0
+				for _, tool := range view.Tools {
+					if !tool.Enabled || !agentMCPToolAllowed(binding, tool.Name) {
+						continue
+					}
+					boundToolCount++
+				}
+				server["tool_count"] = boundToolCount
+				server["enabled_tool_count"] = boundToolCount
+				if view.LastError != "" {
+					server["last_error"] = view.LastError
+				}
+			}
+		}
+		if _, ok := server["display_name"]; !ok {
+			server["display_name"] = binding.ServerID
+		}
+		servers = append(servers, server)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agent_id": id, "bindings": bindings, "servers": servers})
+}
+
+func agentMCPToolAllowed(binding mcp.Binding, name string) bool {
+	if len(binding.ToolAllowlist) == 0 {
+		return true
+	}
+	for _, allowed := range binding.ToolAllowlist {
+		if strings.TrimSpace(allowed) == strings.TrimSpace(name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handlePutAgentMCP(w http.ResponseWriter, r *http.Request) {

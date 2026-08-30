@@ -242,13 +242,6 @@ function isAclNode(nodeId) {
   return owners.includes(nid) || collaborators.includes(nid);
 }
 
-function toggleMemberFormGroup(id) {
-  const set = new Set(memberForm.groups);
-  if (set.has(id)) set.delete(id);
-  else set.add(id);
-  memberForm.groups = [...set];
-}
-
 function resetMemberForm() {
   memberForm.displayName = "";
   memberForm.description = "";

@@ -15,13 +15,13 @@
 | `auth.py` | `AuthContext`, `authenticate`, `require_admin`, `TOKEN_HEADER` |
 | `audit.py` | `AuditEvent`, `AuditLog` |
 | `blob.py` | `BlobStore`, `BlobStoreConfig` |
-| `metrics.py` | `record_registry_operation`, `metrics_text` |
+| `metrics.py` | `record_registry_operation`, `record_workgroup_ws_event`, `record_workgroup_timeline_event`, `metrics_text` |
 
 ## storage/
 
 | 模块 | 符号 |
 |------|------|
-| `sqlite.py` | `SQLiteDatabase` |
+| `sqlite.py` | `SQLiteDatabase`, `SCHEMA_VERSION`（当前 15；旧库可重复初始化，更新库 fail-closed） |
 
 ## registry/
 
@@ -71,6 +71,9 @@ Console 功能：Node 列表、discovery 分组、工作组、案例库、Node �
 | `native_tools.py` | `assign_workgroup_task` / `list_workgroup_members` |
 | `vertical.py` | `VerticalLoop`（脚本化 read_file 纵向路径） |
 | `ws_hub.py` / `ws_routes.py` | Node Worker WS outbox |
+| `protocol.py` | Workgroup WS `protocol_version` / `schema_version` / capability constants and validation |
+
+工作组 Timeline：`GET /v1/workgroups/{workgroup_id}/timeline` 返回 UI 投影；`GET /v1/workgroups/{workgroup_id}/timeline/export.jsonl` 返回持久化事实事件的 NDJSON（默认/最大 5000 条）。
 
 | 路径 | 说明 |
 |------|------|

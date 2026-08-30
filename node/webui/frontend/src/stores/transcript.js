@@ -26,6 +26,10 @@ import {
   attachBrowserRefsToAssistants,
   collectBrowserRefsFromEntries,
 } from "../utils/browserRefs.js";
+import {
+  extractFileReferencesFromMessage,
+  normalizeFileReferences,
+} from "../utils/filePathPaste.js";
 
 let idSeq = 0;
 
@@ -42,6 +46,8 @@ function readShowReasoningPref() {
 export const transcriptStore = reactive({
   entries: [],
   lastSeq: 0,
+  lastAgentSeq: 0,
+  streamEpoch: "",
   historyRevision: 0,
   historyDirty: false,
   assistantBuffer: "",
@@ -69,8 +75,10 @@ export function hasStreamingTextContent() {
   return hasStreamingKind("assistant") || hasStreamingKind("reasoning");
 }
 
-export function noteSeq(seq) {
+export function noteSeq(seq, agentSeq = 0, epoch = "") {
   if (seq > transcriptStore.lastSeq) transcriptStore.lastSeq = seq;
+  if (agentSeq > transcriptStore.lastAgentSeq) transcriptStore.lastAgentSeq = agentSeq;
+  if (epoch) transcriptStore.streamEpoch = String(epoch);
 }
 
 export function markLocalHistoryDirty() {
@@ -85,28 +93,16 @@ export function markHistoryCommitted(revision) {
   return true;
 }
 
-export function addUser(text, images = []) {
+export function addUser(text, images = [], fileRefs = []) {
   abortStreaming();
   markLocalHistoryDirty();
+  const normalizedRefs = normalizeFileReferences(fileRefs);
   transcriptStore.entries.push({
     id: ++idSeq,
     kind: "user",
     text,
     images: Array.isArray(images) ? images.filter(Boolean) : [],
-  });
-}
-
-export function addDeferredUser(text, userName = "", sideEffectSeq = 0) {
-  abortStreaming();
-  markLocalHistoryDirty();
-  transcriptStore.entries.push({
-    id: ++idSeq,
-    kind: "user_deferred",
-    text,
-    userName: String(userName || "").trim(),
-    sideEffectSeq: Number(sideEffectSeq) || 0,
-    sideEffectApplied: false,
-    sideEffectStale: false,
+    ...(normalizedRefs.length ? { file_refs: normalizedRefs } : {}),
   });
 }
 
@@ -217,7 +213,7 @@ export function upsertToolCallFromSSE(data) {
   markLocalHistoryDirty();
   // partial tool_call 到达时正文可能仍在继续（token 边界如 Not|epad）。
   // 提前 finalize 会把同一条回复拆成两个气泡，看起来像单词中间换行。
-  // 仅在最终 tool_call（或 tool_result / done 等）时封存助手文本。
+  // 仅在最终 tool_call（或 tool_result / turn_finished 等）时封存助手文本。
   if (!partial) {
     finalizeAssistant();
     finalizeReasoning();
@@ -402,6 +398,9 @@ export function patchBashResultStatus(toolCallId, status) {
 
 export function clearTranscript() {
   transcriptStore.entries = [];
+  transcriptStore.lastSeq = 0;
+  transcriptStore.lastAgentSeq = 0;
+  transcriptStore.streamEpoch = "";
   transcriptStore.historyRevision = 0;
   transcriptStore.historyDirty = false;
   abortStreaming();
@@ -429,6 +428,15 @@ export function loadTranscriptFromHydrate(entries, { historyRevision } = {}) {
       partial: raw.partial === true,
       streaming: false,
     };
+    if (kind === "user") {
+      const legacy = extractFileReferencesFromMessage(row.text);
+      const refs = normalizeFileReferences(
+        Array.isArray(row.file_refs) && row.file_refs.length ? row.file_refs : legacy.fileRefs,
+      );
+      row.text = legacy.text;
+      if (refs.length) row.file_refs = refs;
+      else delete row.file_refs;
+    }
     if (kind === "tool_call" || kind === "tool_result") {
       const blockId = String(row.blockId || row.data?.tool_call_id || row.data?.id || "").trim();
       if (blockId) row.blockId = blockId;

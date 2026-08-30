@@ -14,8 +14,9 @@ import {
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiSelect from "./UiSelect.vue";
 
+const draft = defineModel("draft", { type: Object, required: true });
+
 const props = defineProps({
-  draft: { type: Object, required: true },
   llmProfiles: { type: Array, default: () => [] },
   showAdvanced: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
@@ -23,15 +24,12 @@ const props = defineProps({
    * full：设置页完整表单
    * create-basics：创建弹窗身份步
    * create-capabilities：创建弹窗能力步
-   * lite：兼容旧用法，等同 create-basics
    */
   mode: {
     type: String,
     default: "full",
-    validator: (v) => ["full", "create-basics", "create-capabilities", "lite"].includes(v),
+    validator: (v) => ["full", "create-basics", "create-capabilities"].includes(v),
   },
-  /** @deprecated 使用 mode="create-basics" */
-  lite: { type: Boolean, default: false },
   /** 创建校验：替换对应字段标签文案 */
   fieldErrors: {
     type: Object,
@@ -46,10 +44,7 @@ const props = defineProps({
 
 const emit = defineEmits(["update:showAdvanced", "clear-field-error"]);
 
-const resolvedMode = computed(() => {
-  if (props.mode === "lite" || props.lite) return "create-basics";
-  return props.mode;
-});
+const resolvedMode = computed(() => props.mode);
 const isCreateBasics = computed(() => resolvedMode.value === "create-basics");
 const isCreateCapabilities = computed(() => resolvedMode.value === "create-capabilities");
 const isFull = computed(() => resolvedMode.value === "full");
@@ -121,25 +116,25 @@ watch(advancedOpen, (open) => {
 });
 
 function toggleGroup(name) {
-  const set = new Set(props.draft.toolGroups || []);
+  const set = new Set(draft.value.toolGroups || []);
   if (set.has(name)) set.delete(name);
   else set.add(name);
-  props.draft.toolGroups = [...set].sort();
+  draft.value.toolGroups = [...set].sort();
 }
 
 function isSkillVisible(name) {
-  if (props.draft.visibleSkills === null || props.draft.visibleSkills === undefined) {
+  if (draft.value.visibleSkills === null || draft.value.visibleSkills === undefined) {
     return true;
   }
-  return Array.isArray(props.draft.visibleSkills) && props.draft.visibleSkills.includes(name);
+  return Array.isArray(draft.value.visibleSkills) && draft.value.visibleSkills.includes(name);
 }
 
 function toggleSkillVisible(name) {
   const allNames = catalogSkills.value.map((s) => s.skill_name);
   let current =
-    props.draft.visibleSkills === null || props.draft.visibleSkills === undefined
+    draft.value.visibleSkills === null || draft.value.visibleSkills === undefined
       ? [...allNames]
-      : [...(props.draft.visibleSkills || [])];
+      : [...(draft.value.visibleSkills || [])];
   if (current.includes(name)) {
     current = current.filter((x) => x !== name);
   } else {
@@ -147,22 +142,22 @@ function toggleSkillVisible(name) {
   }
   current = [...new Set(current.map((x) => String(x || "").trim()).filter(Boolean))];
   if (allNames.length > 0 && current.length === allNames.length && allNames.every((n) => current.includes(n))) {
-    props.draft.visibleSkills = null;
+    draft.value.visibleSkills = null;
   } else {
-    props.draft.visibleSkills = current;
+    draft.value.visibleSkills = current;
   }
 }
 
 function selectAllSkills() {
-  props.draft.visibleSkills = null;
+  draft.value.visibleSkills = null;
 }
 
 function clearAllSkills() {
-  props.draft.visibleSkills = [];
+  draft.value.visibleSkills = [];
 }
 
-const skillsToolEnabled = computed(() => skillsEnabledFromToolGroups(props.draft.toolGroups));
-const memoryToolEnabled = computed(() => memoryEnabledFromToolGroups(props.draft.toolGroups));
+const skillsToolEnabled = computed(() => skillsEnabledFromToolGroups(draft.value.toolGroups));
+const memoryToolEnabled = computed(() => memoryEnabledFromToolGroups(draft.value.toolGroups));
 
 const llmProfileOptions = computed(() =>
   (props.llmProfiles || []).map((p) => ({
@@ -181,7 +176,8 @@ const longTermScopeOptions = computed(() =>
     class="agent-settings-form"
     :class="{
       'agent-settings-form--compact': compact,
-      'agent-settings-form--lite': useConversationalLabels,
+      'agent-settings-form--create': useConversationalLabels,
+      'agent-settings-form--full': isFull,
       'agent-settings-form--create-basics': isCreateBasics,
       'agent-settings-form--create-capabilities': isCreateCapabilities,
     }"
@@ -278,9 +274,20 @@ const longTermScopeOptions = computed(() =>
 
     <template v-if="isFull">
       <section class="agent-settings-section agent-settings-section--flat">
-        <div class="agent-settings-section__title agent-settings-section__title--inline">能力与角色</div>
+        <details
+          class="agent-settings-disclosure-wrap"
+          :open="advancedOpen"
+          @toggle="advancedOpen = $event.currentTarget.open"
+        >
+          <summary class="agent-settings-disclosure">
+            <span>
+              <strong>能力与角色</strong>
+              <small>工具、技能白名单、角色设定与记忆范围</small>
+            </span>
+            <span class="agent-settings-disclosure__action">展开</span>
+          </summary>
 
-        <div class="agent-settings-advanced agent-settings-section__body">
+          <div class="agent-settings-advanced agent-settings-section__body">
           <div class="agent-settings-advanced__block">
             <h4 class="agent-settings-subsection__title">工具能力</h4>
             <p class="agent-settings-hint">点选启用；都不选则不开放任何工具。</p>
@@ -308,7 +315,7 @@ const longTermScopeOptions = computed(() =>
           <div v-if="skillsToolEnabled" class="agent-settings-advanced__block">
             <h4 class="agent-settings-subsection__title">可见技能</h4>
             <p class="agent-settings-hint">
-              选择该智能体可用的技能。全选表示不限制（新技能会自动出现）；否则仅白名单内可用。
+              选择该智能体可发现和加载的技能。全选表示不限制（新技能会自动出现）；否则仅白名单内可用。
             </p>
             <div class="agent-settings-field__head">
               <span class="agent-settings-hint" style="margin: 0">
@@ -374,7 +381,8 @@ const longTermScopeOptions = computed(() =>
               <UiSelect v-model="draft.promptLongTermScope" :options="longTermScopeOptions" />
             </label>
           </div>
-        </div>
+          </div>
+        </details>
       </section>
     </template>
   </div>
@@ -403,10 +411,57 @@ const longTermScopeOptions = computed(() =>
 
 /* 区块标题顶格；字段内容缩进一级，避免与标题同级 */
 .agent-settings-section__body {
-  padding-left: 12px;
+  padding-left: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.agent-settings-form--full {
+  gap: 0;
+}
+
+.agent-settings-form--full .agent-settings-section--flat {
+  padding-bottom: 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+}
+
+.agent-settings-form--full .agent-settings-section--flat + .agent-settings-section--flat {
+  padding-top: 24px;
+}
+
+.agent-settings-form--full .agent-settings-section__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field {
+  min-width: 0;
+  margin: 0;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(2) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(3) {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
+  grid-column: 1 / -1;
+}
+
+.agent-settings-disclosure-wrap {
+  width: 100%;
 }
 
 .agent-settings-disclosure {
@@ -414,13 +469,60 @@ const longTermScopeOptions = computed(() =>
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  margin: 0 0 6px;
-  padding: 0;
+  gap: 16px;
+  margin: 0;
+  padding: 0 0 10px;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
+  list-style: none;
   text-align: left;
+}
+
+.agent-settings-disclosure::-webkit-details-marker {
+  display: none;
+}
+
+.agent-settings-disclosure > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agent-settings-disclosure strong {
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.agent-settings-disclosure small {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-settings-disclosure__action {
+  margin-left: auto;
+  color: var(--color-primary-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-settings-disclosure__action::before {
+  content: "查看";
+}
+
+.agent-settings-disclosure-wrap[open] .agent-settings-disclosure__action::before {
+  content: "收起";
+}
+
+.agent-settings-disclosure__action {
+  font-size: 0;
+}
+
+.agent-settings-disclosure__action::before {
+  font-size: 12px;
 }
 
 .agent-settings-disclosure__chevron {
@@ -442,14 +544,14 @@ const longTermScopeOptions = computed(() =>
   border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
-.agent-settings-form--lite {
+.agent-settings-form--create {
   gap: 14px;
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
 }
 
-.agent-settings-form--lite .agent-settings-section {
+.agent-settings-form--create .agent-settings-section {
   padding: 0;
   border: none;
   border-radius: 0;
@@ -487,8 +589,8 @@ const longTermScopeOptions = computed(() =>
   resize: none;
 }
 
-.agent-settings-form--lite .agent-settings-field :deep(.ui-select__trigger),
-.agent-settings-form--lite .agent-settings-input {
+.agent-settings-form--create .agent-settings-field :deep(.ui-select__trigger),
+.agent-settings-form--create .agent-settings-input {
   background: var(--color-input, var(--color-surface));
 }
 
@@ -572,7 +674,7 @@ const longTermScopeOptions = computed(() =>
 
 .agent-settings-section__title {
   margin: 0 0 12px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
 }
@@ -711,5 +813,31 @@ const longTermScopeOptions = computed(() =>
   flex-direction: column;
   gap: 0;
   margin-top: 8px;
+}
+
+.agent-settings-form--full .agent-settings-advanced {
+  margin-top: 14px;
+}
+
+.agent-settings-form--full .agent-settings-toggles--tiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 860px) {
+  .agent-settings-form--full .agent-settings-toggles--tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .agent-settings-form--full .agent-settings-section__body {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-settings-form--full .agent-settings-section__body > .agent-settings-field,
+  .agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
+    grid-column: auto;
+    grid-row: auto;
+  }
 }
 </style>

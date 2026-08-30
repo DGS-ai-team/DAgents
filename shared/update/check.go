@@ -22,20 +22,26 @@ const (
 
 // Status 为 Manage /v1/releases/check 结果的 Client 视图。
 type Status struct {
-	CurrentVersion   string         `json:"current_version"`
-	LatestVersion    string         `json:"latest_version"`
-	UpgradeAvailable bool           `json:"upgrade_available"`
-	ManageReachable  bool           `json:"manage_reachable"`
-	LastCheckedAt    string         `json:"last_checked_at,omitempty"`
-	Channel          string         `json:"channel"`
-	Platform         string         `json:"platform"`
-	ReleaseNotes     string         `json:"release_notes,omitempty"`
-	Message          string         `json:"message,omitempty"`
-	ApplyCommand     string         `json:"apply_command"`
-	Asset            map[string]any `json:"asset,omitempty"`
-	Deprecated       bool           `json:"deprecated,omitempty"`
-	Delegate         string         `json:"delegate,omitempty"`
-	DesktopAPI       string         `json:"desktop_api,omitempty"`
+	CurrentVersion   string `json:"current_version"`
+	LatestVersion    string `json:"latest_version"`
+	UpgradeAvailable bool   `json:"upgrade_available"`
+	ManageReachable  bool   `json:"manage_reachable"`
+	// ManageEnabled distinguishes a disabled Manage integration from a
+	// temporarily unreachable one. Desktop shells use this to decide whether
+	// the update action should be offered and whether it can be retried.
+	ManageEnabled        bool           `json:"manage_enabled"`
+	UpdateEnabled        bool           `json:"update_enabled"`
+	CheckIntervalSeconds int            `json:"check_interval_seconds,omitempty"`
+	LastCheckedAt        string         `json:"last_checked_at,omitempty"`
+	Channel              string         `json:"channel"`
+	Platform             string         `json:"platform"`
+	ReleaseNotes         string         `json:"release_notes,omitempty"`
+	Message              string         `json:"message,omitempty"`
+	ApplyCommand         string         `json:"apply_command"`
+	Asset                map[string]any `json:"asset,omitempty"`
+	Deprecated           bool           `json:"deprecated,omitempty"`
+	Delegate             string         `json:"delegate,omitempty"`
+	DesktopAPI           string         `json:"desktop_api,omitempty"`
 }
 
 // CheckRequest 控制一次 Manage 版本检查。
@@ -59,6 +65,9 @@ func ReleasePlatform() string {
 		}
 		return "linux-amd64"
 	case "windows":
+		if runtime.GOARCH == "386" {
+			return "windows-386"
+		}
 		return "windows-amd64"
 	default:
 		return runtime.GOOS + "-" + runtime.GOARCH
@@ -120,6 +129,7 @@ func Check(req CheckRequest) Status {
 		CurrentVersion:  current,
 		LatestVersion:   current,
 		ManageReachable: false,
+		LastCheckedAt:   time.Now().UTC().Format(time.RFC3339),
 		Channel:         channel,
 		Platform:        platform,
 		ApplyCommand:    applyCommand,

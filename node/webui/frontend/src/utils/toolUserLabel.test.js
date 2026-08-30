@@ -5,6 +5,7 @@ import {
   toolStepIsPending,
   toolStepPurpose,
   toolStepStatusText,
+  toolStepToolLabel,
   toolStepUserSummary,
 } from "./toolUserLabel.js";
 import { applyToolJobsSnapshot } from "../stores/toolJobs.js";
@@ -101,6 +102,27 @@ describe("toolStepPurpose", () => {
         },
       }),
     ).toBe("整理接口文档");
+  });
+});
+
+describe("toolStepToolLabel", () => {
+  it("keeps the tool name and purpose in the compact row", () => {
+    expect(
+      toolStepToolLabel({
+        callEntry: {
+          kind: "tool_call",
+          data: { tool_name: "bash_run", arguments: { call_purpose: "检查服务状态" } },
+        },
+      }),
+    ).toBe("bash(检查服务状态)");
+  });
+
+  it("does not synthesize an empty parentheses suffix", () => {
+    expect(
+      toolStepToolLabel({
+        callEntry: { kind: "tool_call", data: { tool_name: "terminal_command", arguments: {} } },
+      }),
+    ).toBe("terminal_command");
   });
 });
 

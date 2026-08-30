@@ -5,10 +5,10 @@
 | 符号 | 说明 |
 |------|------|
 | `TurnOptions` | turn 编排配置（FS_ROOT、MaxToolLoops、skills、压缩、journal） |
-| `Manager` | 会话表；每 session 独立 runtime + 队列 |
+| `Manager` | 会话表；每 session 独立 runtime + InputBox + 控制队列 |
 | `NewManager` | 绑定 agent、Hub、LLM、Registry、policy、store、TurnOptions |
 | `SetChildAgentManager` | 注入 `childagent.Manager` 并 `BindHost` |
-| `SetTriggerDeliveryTracker` | trigger Apply/ClearSession 时清除 pending delivery |
+| `SetTriggerDeliveryTracker` | trigger 输入被消费或 session 清理时清除 pending delivery |
 | `Stop` | 取消 Manager 上下文并停止所有 runtime |
 | `Create` | 创建或恢复 session；`newRuntime` + `attachUserChildTools` + `start` |
 | `Get` / `ListActive` / `ListPersisted` | 查询活跃或持久化会话 |
@@ -16,9 +16,8 @@
 | `GetContextView` / `ContextSummary` | 上下文聚合视图 |
 | `LoadedSkills` / `ListSessionSkills` / `LoadSessionSkill` / `UnloadSessionSkill` | skills 读写 |
 | `ClearContext` / `Delete` / `Release` | 清空消息、删除 session，或卸内存保留 DB（F-NM1） |
-| `EnqueueMessage` | user / resume / 高优先级消息入队 |
-| `RunInboxTurn` | 历史 A2A inbox 兼容入口；新跨机协作不使用，改走 Workgroup Session |
-| `EnqueueAsyncToolResult` / `EnqueueToolResult` | 工具续跑与异步回灌 |
+| `EnqueueMessage` | user 进入 InputBox；resume 进入控制队列 |
+| `EnqueueAsyncToolResult` | 异步工具完成事实回灌 |
 | `CancelTurn` | 取消当前 turn 上下文 |
 | `attachUserChildTools` | 父 runtime 上 `SetChildAgentManager(mgr)` |
 
@@ -41,21 +40,21 @@
 | 符号 | 说明 |
 |------|------|
 | `Session` | 对外可见的 `ID` + `AgentID` |
-| `runtime` | 单 session 内部状态（未导出） |
+| `runtime` | 单 session 内部状态（未导出；InputBox 是外部输入入口） |
 | `newRuntime` | 父 session 构造入口 → `newRuntimeWithPublisher` |
-| `newRuntimeWithPublisher` | 创建 `runtime` + `turn.NewOrchestrator` + `SetToolResultEnqueuer` |
-| `start` / `consumeLoop` | 启动队列消费 goroutine |
-| `handleHumanMessage` | human_message 单步 + 可选入队 tool_result |
-| `handleToolResult` | tool_message 单步续跑 |
-| `handleSideEffectProduceAsync` / `handleSideEffectProduceExternal` | 旁路 Produce（缓冲 + SSE） |
+| `newRuntimeWithPublisher` | 创建 `runtime` + `InputBox` + `turn.NewOrchestrator` |
+| `start` / `consumeLoop` | 启动 InputBox/控制队列消费 goroutine |
+| `handleInputMessage` | user/trigger 输入启动新 Turn；活动 Turn 期间不抢占 |
+| `handleTurnContinuation` | 恢复/重启后的 tool message 单步续跑 |
+| `handleSideEffectProduceAsync` | 异步工具结果 Produce（缓冲 + SSE） |
 | `handleSideEffectContinue` | 旁路 Apply + 被动 LLM 续跑 |
 | `handleResume` | HITL resume 续跑 |
-| `applyStepOutcome` | 同步当前 Step 的 messages；Pending 与步序从 Coordinator 投影读取 |
+| `lifecycleAfterModelStep` / `lifecycleAfterResume` | 将单步结果映射为 Coordinator 生命周期状态，并同步当前 Step 的 messages |
 | `persist` / `clearMessages` | SQLite 持久化 |
-| `enqueue` | 带优先级入队；高优先级项先出队（见 `queue/README.md`）；`human` 先于 `resume` |
+| `enqueue` | 仅传输 resume、异步事实和恢复控制项；外部输入不再经过优先级队列 |
 | `cancelTurn` / `stop` | 取消或停止 consumer |
 | `contextView` | 组装 `ContextView` |
-| `runTurnStep` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在 `applyStepOutcome` 后触发子 Agent 结算 |
+| `runTurnStepAtEpoch` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在生命周期收尾后触发子 Agent 结算 |
 | `getLoadedSkills` / `setLoadedSkills` / `setLoadedSkillsByName` 等 | skills 内存状态 |
 
 ## runtime_child.go
@@ -90,14 +89,14 @@
 | `TriggerSubmitter` | trigger 模块用的 session 创建与入队适配器 |
 | `EnsureSession` | `Manager.Create` 包装 |
 | `SubmitTriggerMessage` | 入队 trigger 渲染后的 user 消息 |
-| `EnqueueTriggerMessage` | 校验 content → EnsureSession → `PriorityOther` 入队 |
+| `EnqueueTriggerMessage` | 校验 content → EnsureSession → InputBox FIFO |
 
 ## side_effects.go / runtime_side_effects.go
 
 | 符号 | 说明 |
 |------|------|
 | `sideEffectStore` | 旁路 Produce 缓冲（FIFO seq）；`Produce` / `ApplyReady` / `ReconcileAfterStep` |
-| `handleSideEffectProduceAsync` / `handleSideEffectProduceExternal` | consumeLoop → Produce + SSE |
+| `handleSideEffectProduceAsync` | consumeLoop → Produce + SSE |
 | `handleSideEffectContinue` | Apply + `ContinueAfterSideEffects` 被动 LLM |
 | `runTurnStepWithSideEffects` | 步首 `ApplyReady`、步末 `ReconcileAfterStep` |
 | `maybeScheduleContinueAfterCancel` | Cancel 三分法：无 pending 且有缓冲 → continue |

@@ -7,6 +7,7 @@ const (
 	HitlScopeTemporaryAgent = "temporary_agent"
 
 	EventTemporaryAgentCreated   = "temporary_agent_created"
+	EventTemporaryAgentProgress  = "temporary_agent_progress"
 	EventTemporaryAgentCompleted = "temporary_agent_completed"
 	EventTemporaryAgentCancelled = "temporary_agent_cancelled"
 
@@ -34,7 +35,6 @@ func FormatChildTask(task string) string {
 func ParentDelegatableTools() []string {
 	return []string{
 		"read_file", "write_file", "glob_files", "grep_file", "grep_files", "search_replace", "bash_run",
-		"background_job_status", "background_job_cancel",
 	}
 }
 

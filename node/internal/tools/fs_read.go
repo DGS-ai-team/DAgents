@@ -21,7 +21,7 @@ func readFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "read_file",
-			Description: "侧车 soul/user/custom 与长期记忆已作为当前请求的运行时上下文提供（存于数据库），通常无需 read_file 读取。" +
+			Description: "侧车 soul/custom 与长期记忆已作为当前请求的运行时上下文提供（存于数据库），用户称呼由 Node PreferredName 注入；旧 user.md 仅用于迁移，通常无需 read_file 读取。" +
 				" history/ 下 JSONL 为原始对话审计（`history/YYYYMMDD/<session_id>.jsonl`），需复盘历史 utterance 时可分页读取。" +
 				" 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{
@@ -99,14 +99,18 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 		bodyLines = formatNumberedLines(windowLines, start+1)
 	}
 	body := strings.Join(bodyLines, "\n")
-	truncateHint := fmt.Sprintf(
-		"当前窗口超过约 %d tokens（DeepSeek 粗算）；请减小 line_limit，下一页建议 line_offset=%d（若后方仍有行）。",
-		defaultReadMaxTokens, end+1,
-	)
-	body, tokenTruncated := applyMaxTokensToBody(body, defaultReadMaxTokens, truncateHint)
+	body, tokenTruncated, tokenNextLine := clipReadBodyToTokenBudget(body, defaultReadMaxTokens, start+1)
 
 	nextLine := "无"
-	if hasMoreAfter {
+	hasUnreadAfter := hasMoreAfter
+	if tokenTruncated {
+		nextLine = fmt.Sprintf("%d", tokenNextLine)
+		hasUnreadAfter = true
+		body += fmt.Sprintf(
+			"\n\n[TRUNCATED] 当前窗口超过约 %d tokens（DeepSeek 粗算）；请减小 line_limit，下一页建议 line_offset=%d（若后方仍有内容）。",
+			defaultReadMaxTokens, tokenNextLine,
+		)
+	} else if hasMoreAfter {
 		nextLine = fmt.Sprintf("%d", end+1)
 	}
 	pageStart, pageEnd := start+1, end
@@ -121,7 +125,7 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 		fmt.Sprintf("文件总行数: %d", total),
 		fmt.Sprintf("本页行区间: %d-%d / %d", pageStart, pageEnd, total),
 		fmt.Sprintf("next_line_offset: %s", nextLine),
-		fmt.Sprintf("后方是否还有未读取行: %s", yesNo(hasMoreAfter)),
+		fmt.Sprintf("后方是否还有未读取内容: %s", yesNo(hasUnreadAfter)),
 		fmt.Sprintf("正文是否包含行号: %s", yesNo(args.IncludeLineNumbers)),
 		fmt.Sprintf("本页内容是否因 token 上限截断: %s", yesNo(tokenTruncated)),
 		"---",

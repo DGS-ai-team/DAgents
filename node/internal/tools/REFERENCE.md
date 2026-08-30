@@ -14,15 +14,15 @@
 | `Definitions()` | LLM tools 列表 |
 | `Execute(ctx, name, arguments)` | 执行工具 |
 | `execReadFile` / `execWriteFile` / `execSearchReplace` / `execGlobFiles` / `execGrepFile` / `execGrepFiles` / `execSearchFile` | 内置实现（`search_file` 为 `grep_file` 别名） |
-| `runBashSyncWithAutoDegrade` | bash 同步等待；显式 timeout 可降后台，省略则硬上限杀进程；支持 UI 终止/转后台 |
+| `runShellSync` | bash 始终同步等待；超时直接终止并返回 `TIMED_OUT`；支持 UI 终止 |
 | `resolveRunCWD` / `resolveShellType` / `blockedNonRootPasswordPromptingShell` | bash_run 参数与安全策略 |
 | `applyShellProcAttr` / `signalKillProcessGroup` | POSIX/Windows 进程组（`shell_platform_*.go`） |
-| `WithBackgroundExecution` | 内部：标记后台 Execute，跳过同步窗口（不对 schema 暴露） |
-| `StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)` | 后台执行并返回 ACK |
-| `ParseRunInBackground(arguments)` | 剥离 call_purpose / 历史 run_in_background |
+| `WithBackgroundExecution` | 内部：标记通用后台 Execute（不对 schema 暴露）；bash_run 不使用该路径 |
+| `StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)` | 历史 wire 兼容入口；当前模型工具目录不暴露后台启动能力，bash_run 返回 unsupported |
+| `ParseToolCallArguments(arguments)` | 剥离 call_purpose / 历史 run_in_background |
 | `injectCallPurposeParam` | 注入 call_purpose（加入 required） |
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
 | `SetWeComClient(client)` | 注入企业微信 webhook 客户端（暴露 wecom_*） |
 | `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` | 触发器工具 |
 | `IsBackgroundJobTool(name)` | 后台管理工具（强制同步） |
-| `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`applyMaxTokensToBody`、`mergeLineRanges` 等 |
+| `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`clipReadBodyToTokenBudget`、`mergeLineRanges` 等 |

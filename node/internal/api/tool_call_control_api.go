@@ -10,7 +10,6 @@ import (
 
 func (s *Server) registerToolCallControlRoutes() {
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/tool-calls/{tool_call_id}/cancel", s.handleAgentToolCallCancel)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/tool-calls/{tool_call_id}/background", s.handleAgentToolCallBackground)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/tool-jobs", s.handleAgentToolJobs)
 }
 
@@ -47,29 +46,6 @@ func (s *Server) handleAgentToolCallCancel(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-func (s *Server) handleAgentToolCallBackground(w http.ResponseWriter, r *http.Request) {
-	reg, agentID, ok := s.agentToolsRegistry(r.PathValue("agent_id"))
-	if !ok {
-		writeAPIError(w, http.StatusNotFound, "agent_runtime_missing", "agent runtime 未就绪", map[string]any{"agent_id": agentID})
-		return
-	}
-	toolCallID := strings.TrimSpace(r.PathValue("tool_call_id"))
-	if toolCallID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_tool_call", "tool_call_id is required", nil)
-		return
-	}
-	if err := reg.BackgroundSyncBash(agentID, toolCallID); err != nil {
-		writeSyncShellControlError(w, err, agentID, toolCallID)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":           true,
-		"agent_id":     agentID,
-		"tool_call_id": toolCallID,
-		"action":       "background",
-	})
-}
-
 func (s *Server) handleAgentToolJobs(w http.ResponseWriter, r *http.Request) {
 	reg, agentID, ok := s.agentToolsRegistry(r.PathValue("agent_id"))
 	if !ok {
@@ -95,7 +71,7 @@ func writeSyncShellControlError(w http.ResponseWriter, err error, agentID, toolC
 		return
 	}
 	if errors.Is(err, tools.ErrSyncShellNotBash) {
-		writeAPIError(w, http.StatusBadRequest, "unsupported_tool", "仅 bash_run 支持终止/转后台", map[string]any{
+		writeAPIError(w, http.StatusBadRequest, "unsupported_tool", "仅 bash_run 支持终止", map[string]any{
 			"agent_id":     agentID,
 			"tool_call_id": toolCallID,
 		})

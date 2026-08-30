@@ -60,8 +60,8 @@ func (o *Orchestrator) processToolCalls(
 				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 				continue
 			}
-			_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
-			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs)
+			_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
 			if err != nil {
 				return nil, "", err
 			}
@@ -214,33 +214,24 @@ func (o *Orchestrator) recordToolExecutionSuccess(tc llm.ToolCall, content strin
 
 func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message, tc llm.ToolCall) error {
 	catalog := o.skillAccess.Catalog
+	if tc.Function.Name == "list_available_skills" {
+		discoveryCatalog := o.skillAccess.LiveCatalog
+		if discoveryCatalog == nil {
+			discoveryCatalog = catalog
+		}
+		if discoveryCatalog == nil || !discoveryCatalog.Enabled() {
+			output := "ERROR: skills 功能已禁用"
+			o.publishToolResult(sessionID, tc, output, true, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+			return nil
+		}
+		return o.executeListAvailableSkillsTool(sessionID, history, tc, discoveryCatalog)
+	}
 	if catalog == nil || !catalog.Enabled() {
 		output := "ERROR: skills 功能已禁用"
 		o.publishToolResult(sessionID, tc, output, true, nil)
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil
-	}
-	if tc.Function.Name == "list_available_skills" {
-		if !o.skillAccess.CatalogToolMode {
-			body, _ := json.Marshal(map[string]any{
-				"status":           "failed",
-				"catalog_revision": catalog.Revision(),
-				"query":            "",
-				"skills":           []skills.LoadedSkill{},
-				"has_more":         false,
-				"next_cursor":      "",
-				"error": map[string]any{
-					"code":      "experiment_disabled",
-					"message":   "list_available_skills 实验未启用",
-					"retryable": false,
-				},
-			})
-			output := string(body)
-			o.publishToolResult(sessionID, tc, output, true, nil)
-			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
-			return nil
-		}
-		return o.executeListAvailableSkillsTool(sessionID, history, tc, catalog)
 	}
 	loaded := []skills.LoadedSkill{}
 	if o.skillAccess.Get != nil {
@@ -248,7 +239,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	}
 	beforeLoadedDigest := Digest(loaded)
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	var output string
 	var action string
@@ -296,7 +287,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 
 func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog *skills.Catalog) error {
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	query := strings.TrimSpace(fmt.Sprint(payload["query"]))
 	if query == "<nil>" {
@@ -560,8 +551,11 @@ func (o *Orchestrator) persistToolResult(
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any, execErr error) {
-	runInBackground, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
-	if tools.IsBackgroundJobTool(tc.Function.Name) {
+	runInBackground, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	// bash_run is deliberately synchronous.  Keep parsing the historical
+	// run_in_background field for wire compatibility, but never let it change
+	// execution semantics; long-lived shell sessions use terminal_open.
+	if tc.Function.Name == "bash_run" || tools.IsBackgroundJobTool(tc.Function.Name) {
 		runInBackground = false
 	}
 	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)

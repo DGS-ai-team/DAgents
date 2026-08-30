@@ -85,7 +85,7 @@ func (o *Orchestrator) executeRememberTool(
 	}
 
 	var args rememberArgs
-	_, cleaned := tools.ParseRunInBackground(tc.Function.Arguments)
+	_, cleaned := tools.ParseToolCallArguments(tc.Function.Arguments)
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		msg := "ERROR: invalid remember arguments: " + err.Error()
 		o.publishToolResult(sessionID, tc, msg, true, nil)

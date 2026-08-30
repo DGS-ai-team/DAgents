@@ -11,50 +11,8 @@ type backgroundJobIDArgs struct {
 	JobID string `json:"job_id"`
 }
 
-func backgroundJobStatusToolDef() ToolDef {
-	return ToolDef{
-		Type: "function",
-		Function: FunctionDef{
-			Name:        "background_job_status",
-			Description: "查询 bash_run 后台任务状态与输出摘要。任务完成后通常已由 async_tool_result 自动回灌，无需轮询；仅在需取消或主动确认进度时使用。",
-			Parameters: injectCallPurposeParam(map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"job_id": map[string]any{
-						"type":        "string",
-						"description": "bash_run 超时降级或历史后台任务返回的 job_id（必填）",
-					},
-				},
-				"required":             []string{"job_id"},
-				"additionalProperties": false,
-			}),
-		},
-	}
-}
-
-func backgroundJobCancelToolDef() ToolDef {
-	return ToolDef{
-		Type: "function",
-		Function: FunctionDef{
-			Name:        "background_job_cancel",
-			Description: "取消 bash_run 仍在运行的后台任务（含同步超时降级产生的 job）。",
-			Parameters: injectCallPurposeParam(map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"job_id": map[string]any{
-						"type":        "string",
-						"description": "要取消的后台 job_id（必填）；须为 bash_run 超时降级产生且仍在运行",
-					},
-				},
-				"required":             []string{"job_id"},
-				"additionalProperties": false,
-			}),
-		},
-	}
-}
-
 func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMessage) (string, error) {
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args backgroundJobIDArgs
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -83,7 +41,7 @@ func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMess
 }
 
 func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessage) (string, error) {
-	_, cleaned := ParseRunInBackground(string(raw))
+	_, cleaned := ParseToolCallArguments(string(raw))
 	var args backgroundJobIDArgs
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -100,7 +58,7 @@ func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessag
 	}
 	msg := job.cancelJob()
 	job.waitDone(5 * time.Second)
-	// 超时降级的 collector 在 cancelled 时不会 notifyDone；工具取消也必须回灌。
+	// 取消后的后台任务也必须回灌一次终态通知；notifyJobDone 负责幂等。
 	if r.bgJobs != nil {
 		r.bgJobs.notifyJobDone(job)
 	}

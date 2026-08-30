@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 编译 Tauri 版 Windows Desktop Shell → dist/dagents-shell.exe
+# 编译 Tauri 版 Windows Desktop Shell → dist/dagents-shell*.exe
 #
 # 须在 Windows 上运行（MSVC + WebView2；GitHub windows-2022 即可）。
 #
@@ -14,6 +14,7 @@ APP_DIR="${REPO_ROOT}/desktop/tray-tauri"
 
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/dist}"
 SKIP_BUNDLE="${SKIP_BUNDLE:-1}"
+TAURI_TARGET="${TAURI_TARGET:-}"
 
 uname_s="$(uname -s 2>/dev/null || true)"
 case "${uname_s}" in
@@ -51,6 +52,9 @@ if [[ "${SKIP_BUNDLE}" == "1" ]]; then
   # 只要 release 可执行文件，跳过 NSIS（CI 更快）
   BUNDLE_ARGS+=(--no-bundle)
 fi
+if [[ -n "${TAURI_TARGET}" ]]; then
+  BUNDLE_ARGS+=(--target "${TAURI_TARGET}")
+fi
 
 echo "[build] tauri build ${BUNDLE_ARGS[*]:-}"
 (
@@ -59,18 +63,22 @@ echo "[build] tauri build ${BUNDLE_ARGS[*]:-}"
   npx --no-install tauri build "${BUNDLE_ARGS[@]}"
 )
 
-SRC="${APP_DIR}/src-tauri/target/release/dagents-shell.exe"
+TARGET_RELEASE_DIR="${APP_DIR}/src-tauri/target/release"
+if [[ -n "${TAURI_TARGET}" ]]; then
+  TARGET_RELEASE_DIR="${APP_DIR}/src-tauri/target/${TAURI_TARGET}/release"
+fi
+SRC="${TARGET_RELEASE_DIR}/dagents-shell.exe"
 if [[ ! -f "${SRC}" ]]; then
   echo "[build] expected binary missing: ${SRC}" >&2
-  ls -la "${APP_DIR}/src-tauri/target/release/" >&2 || true
+  ls -la "${TARGET_RELEASE_DIR}/" >&2 || true
   exit 1
 fi
 
-# 安装包组件名与 zip 默认壳均使用 tauri 后缀；assemble 会再复制为 dagents-shell.exe。
+# 安装包组件名与默认壳均使用 tauri 后缀；assemble 会再复制为 dagents-shell.exe。
 DEST_TAURI="${OUT_DIR}/dagents-shell-tauri.exe"
 DEST_DEFAULT="${OUT_DIR}/dagents-shell.exe"
 cp "${SRC}" "${DEST_TAURI}"
 cp "${SRC}" "${DEST_DEFAULT}"
 echo "[done] ${DEST_TAURI}"
-echo "[done] ${DEST_DEFAULT} (default / zip)"
+echo "[done] ${DEST_DEFAULT} (default shell)"
 ls -la "${DEST_TAURI}" "${DEST_DEFAULT}"

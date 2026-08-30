@@ -17,6 +17,7 @@ let resetEventTracking;
 let applyHydrateSeqHint;
 let ackAgentAfterHydrate;
 let shouldAckSSEEvent;
+let observeEventContinuity;
 let transcriptStore;
 let api;
 
@@ -29,6 +30,7 @@ beforeAll(async () => {
   applyHydrateSeqHint = mod.applyHydrateSeqHint;
   ackAgentAfterHydrate = mod.ackAgentAfterHydrate;
   shouldAckSSEEvent = mod.shouldAckSSEEvent;
+  observeEventContinuity = mod.observeEventContinuity;
   transcriptStore = (await import("./transcript.js")).transcriptStore;
 });
 
@@ -38,15 +40,16 @@ describe("shouldAckSSEEvent", () => {
     expect(shouldAckSSEEvent("approval_required", {})).toBe(false);
   });
 
-  it("acks done when turn completes", () => {
-    expect(shouldAckSSEEvent("done", { finish_reason: "stop", turn_complete: true })).toBe(true);
+  it("acks the unambiguous terminal event", () => {
+    expect(shouldAckSSEEvent("turn_finished", { finish_reason: "stop" })).toBe(true);
+    expect(shouldAckSSEEvent("turn_finished", { finish_reason: "error" })).toBe(false);
+    expect(shouldAckSSEEvent("turn_finished", { finish_reason: "cancelled" })).toBe(false);
   });
 
-  it("skips streaming chunks and incomplete done", () => {
+  it("skips streaming chunks and non-terminal events", () => {
     expect(shouldAckSSEEvent("assistant", {})).toBe(false);
     expect(shouldAckSSEEvent("reasoning", {})).toBe(false);
     expect(shouldAckSSEEvent("tool_call", {})).toBe(false);
-    expect(shouldAckSSEEvent("done", { finish_reason: "awaiting_hitl", awaiting: "hitl" })).toBe(false);
   });
 });
 
@@ -55,6 +58,8 @@ describe("agent ack", () => {
     vi.mocked(api.postAgentAck).mockClear();
     agentStore.agentId = "agt-test";
     transcriptStore.lastSeq = 0;
+    transcriptStore.lastAgentSeq = 0;
+    transcriptStore.streamEpoch = "";
     resetEventTracking();
   });
 
@@ -94,15 +99,33 @@ describe("agent ack", () => {
 
   it("resets the SSE sequence watermark after a Node restart", () => {
     transcriptStore.lastSeq = 45;
-    applyHydrateSeqHint(0);
+    transcriptStore.lastAgentSeq = 45;
+    applyHydrateSeqHint({ stream_epoch: "new", stream_seq_hint: 0, agent_seq_hint: 0 });
     expect(transcriptStore.lastSeq).toBe(0);
+    expect(transcriptStore.lastAgentSeq).toBe(0);
     expect(agentStore.seqFence).toBe(0);
   });
 
   it("switches to a lower sequence watermark when the stream epoch changes", () => {
     transcriptStore.lastSeq = 45;
-    applyHydrateSeqHint(12);
+    transcriptStore.streamEpoch = "old";
+    applyHydrateSeqHint({ stream_epoch: "new", stream_seq_hint: 12, agent_seq_hint: 4 });
     expect(transcriptStore.lastSeq).toBe(12);
+    expect(transcriptStore.lastAgentSeq).toBe(4);
     expect(agentStore.seqFence).toBe(12);
+  });
+
+  it("detects a gap only in replayable Agent events", () => {
+    transcriptStore.streamEpoch = "epoch-1";
+    transcriptStore.lastAgentSeq = 4;
+    expect(observeEventContinuity(5, "epoch-1")).toEqual({ epochChanged: false, gap: false });
+    expect(observeEventContinuity(7, "epoch-1")).toEqual({ epochChanged: false, gap: true });
+    expect(observeEventContinuity(0, "epoch-1")).toEqual({ epochChanged: false, gap: false });
+  });
+
+  it("forces reconciliation when the Node stream epoch changes", () => {
+    transcriptStore.streamEpoch = "epoch-old";
+    transcriptStore.lastAgentSeq = 99;
+    expect(observeEventContinuity(1, "epoch-new")).toEqual({ epochChanged: true, gap: false });
   });
 });

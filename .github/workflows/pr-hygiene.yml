@@ -1,0 +1,38 @@
+name: PR hygiene
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  required-sections:
+    name: Required PR sections
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_sections=(
+            "## 变更摘要"
+            "## 契约与兼容性"
+            "## 验证"
+            "## 风险与未覆盖环境"
+          )
+          for section in "${required_sections[@]}"; do
+            if ! grep -Fq "$section" <<<"${PR_BODY}"; then
+              echo "PR description is missing required section: ${section}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify immutable action pins
+        run: python scripts/ci/check_workflow_pins.py

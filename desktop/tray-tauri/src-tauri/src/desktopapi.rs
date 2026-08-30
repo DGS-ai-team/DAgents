@@ -23,11 +23,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(
-        updates: Arc<Checker>,
-        applier: Arc<Applier>,
-        ui_focus: Arc<UIFocusStore>,
-    ) -> Self {
+    pub fn new(updates: Arc<Checker>, applier: Arc<Applier>, ui_focus: Arc<UIFocusStore>) -> Self {
         Self {
             updates,
             applier,
@@ -68,9 +64,7 @@ impl Server {
             (Method::Get, "/v1/desktop/update") => {
                 json_response(StatusCode(200), &self.updates.snapshot())
             }
-            (Method::Post, "/v1/desktop/update/apply") => {
-                self.handle_update_apply(&mut req)
-            }
+            (Method::Post, "/v1/desktop/update/apply") => self.handle_update_apply(&mut req),
             (Method::Get, "/v1/desktop/clipboard/files") => match clipboard::file_paths() {
                 Ok(paths) => json_response(StatusCode(200), &json!({ "paths": paths })),
                 Err(err) => json_response(
@@ -169,8 +163,12 @@ pub fn run_update_command(args: &[String], layout: Layout, cfg: Arc<ShellConfig>
         return post_update_apply(force);
     }
     let client = Arc::new(Client::new(&cfg.endpoint));
-    let checker = Arc::new(Checker::new(Arc::clone(&cfg), layout.home.clone()));
-    let applier = Applier::new(cfg, layout, checker, client);
+    let checker = Arc::new(Checker::new(
+        Arc::clone(&cfg),
+        layout.home.clone(),
+        Arc::clone(&client),
+    ));
+    let applier = Applier::new(layout, checker, client);
     let (result, code) = applier.run(ApplyOptions {
         check_only,
         force,
@@ -281,7 +279,10 @@ fn empty_response(status: StatusCode) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_data(Vec::new()).with_status_code(status)
 }
 
-fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response<std::io::Cursor<Vec<u8>>> {
+fn json_response<T: Serialize>(
+    status: StatusCode,
+    value: &T,
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = serde_json::to_vec(value).unwrap_or_else(|_| b"{}".to_vec());
     add_header(
         Response::from_data(body).with_status_code(status),
@@ -303,7 +304,11 @@ fn with_cors(
     if is_localhost_origin(&origin) {
         response = add_header(response, "Access-Control-Allow-Origin", &origin);
         response = add_header(response, "Vary", "Origin");
-        response = add_header(response, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        response = add_header(
+            response,
+            "Access-Control-Allow-Methods",
+            "GET, POST, OPTIONS",
+        );
         response = add_header(
             response,
             "Access-Control-Allow-Headers",

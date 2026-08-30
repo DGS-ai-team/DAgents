@@ -9,15 +9,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// runTurnStep 执行单步 turn 的通用脚手架：可选步前压缩、turnCtx、状态回调、收尾 idle。
-func (r *runtime) runTurnStep(
-	parent context.Context,
-	compressBefore bool,
-	run func(ctx context.Context, history *[]llm.Message) turn.StepOutcome,
-) (turn.StepOutcome, []llm.Message) {
-	return r.runTurnStepAtEpoch(parent, compressBefore, 0, run)
-}
-
 // runTurnStepAtEpoch is the same execution scaffold with an optional queue
 // epoch fence. Human messages use the envelope epoch so clear-context cannot
 // create a new fence for an already accepted, but now stale, handler.
@@ -93,6 +84,11 @@ func (r *runtime) runTurnStepAtEpoch(
 		if err := r.lifecycleContextCompacted("context_compressed_before_step", contextBeforeDigest, contextAfterDigest, contextBeforeCount, contextAfterCount); err != nil {
 			return turn.StepOutcome{Err: fmt.Errorf("context compaction lifecycle failed: %w", err)}, history
 		}
+		// Compression changes the model-visible history boundary. Invalidate the
+		// active context segment so the next request rebuilds system prompt,
+		// tools, request-only injections and skill metadata from the compacted
+		// history instead of combining new messages with an old snapshot.
+		r.scheduleModelContextRebuild("context_compression", "next_model_step")
 	}
 
 	outcome := run(turnCtx, &history)

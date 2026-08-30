@@ -23,7 +23,6 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 | 文件 | 说明 |
 |------|------|
 | `test_manage_m0_m1.py` | Registry：注册、心跳、discover |
-| `test_manage_m2_a2a.py`、`test_manage_a2a_store.py` | A2A Task、inbox、HITL 中继 |
 | `test_manage_skills.py`、`test_manage_llm.py` | Skills / LLM 目录 API |
 | `test_manage_releases.py` | Release Hub 上传与发布 |
 | `test_manage_cases.py`、`test_manage_case_tool_resolve.py` | Cases CRUD |
@@ -66,9 +65,9 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 ## 运行（仓库根目录）
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock -r requirements-dev.txt
 python -m unittest discover -s tests -p "test_*.py" -v
-go test ./shared/config/... ./node/... ./client/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
 ```
 
 单文件示例：

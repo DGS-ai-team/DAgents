@@ -1,6 +1,8 @@
 # Web UI 回归测试清单
 
-本文是 Node 内嵌 Web UI 的可重复回归清单，覆盖真实模型、工具调用、HITL、Turn 取消、连续对话和异步后台回调。测试目标是验证“浏览器 → SSE → Node MessageQueue → Turn/Step → 工具/后台 job → 回灌 → UI”的完整链路。
+本文是 Node 内嵌 Web UI 的可重复回归清单，覆盖真实模型、工具调用、HITL、Turn 取消、连续对话和异步工具回灌。测试目标是验证“浏览器 → SSE → Node MessageQueue → Turn/Step → 工具或浏览器任务 → 回灌 → UI”的完整链路。
+
+> **状态说明（2026-08-27）**：本文中“bash 超时转后台、自动 `async_tool_result` 回调”和“普通输入打断 pending”的条目是历史回归记录，保留用于追溯，不是当前验收标准。当前 bash_run 超时直接失败；user/trigger 进入 InputBox FIFO；审批等待期间普通输入排队，使用显式 turn cancel 取消，用户询问使用 typed resume。当前异步工具路径仅指 `browser_run_task(wait=false)`。
 
 ## 1. 测试前置
 
@@ -162,68 +164,46 @@
 
 预期：第二条正确回复“连续对话校验”，且两轮都产生独立完整的 `turn.completed`。
 
-## 8. 异步后台回调（消息队列重点）
+## 8. 浏览器异步回灌（当前异步路径）
 
-本组测试前临时启用“命令行”，确保 `bash_run` 策略允许安全测试命令；结束后关闭。
+本组测试需要启用浏览器能力，并确保伴生 browser service 可用；它不再使用 `bash_run` 的超时降级或通用后台 job。
 
 发送：
 
 ```text
-请调用 bash_run 工具执行一次异步回调测试：command 使用 PowerShell 语句 Start-Sleep -Seconds 3; Write-Output async-callback-ok，timeout_seconds 使用 1，shell_type 使用 powershell。工具如果返回后台 job 或 RUNNING，不要调用 background_job_status 轮询，等待系统自动回调 async_tool_result；收到回调结果后只回复 callback-ok。不要调用其他工具。
+请调用 browser_run_task，wait=false，执行一个只读页面检查。任务完成后只回复 browser-callback-ok。
 ```
-
-若 UI 将该命令判定为高风险，批准本次无副作用测试命令。
 
 预期：
 
-1. 第一次工具卡片显示“已提交后台任务，等待系统自动回调结果…”；
-2. 后台 job 完成后出现“已入库”；
-3. UI 展示 `callback-ok`；
-4. 模型收到异步结果并完成后续回复；
-5. 不需要 `background_job_status` 轮询；
-6. `GET /v1/agents/{agent_id}/tool-jobs` 最终显示 `running=0`、`background=0`；
-7. Context 最终为无 active turn、无 pending tool call、Turn/Step completed；
-8. 不出现重复 callback 或重复 assistant 回复。
+1. 工具立即返回 `task_id` 和已受理状态；
+2. 浏览器任务完成后通过 `async_tool_result` 回灌一次终态；
+3. 模型收到异步结果并完成后续回复；
+4. Context 最终为无 active turn、无 pending tool call、Turn/Step completed；
+5. 不出现重复 callback 或重复 assistant 回复。
 
 该测试对应的 Node 内部链路是：
 
 ```text
-bash_run 超时
-  → background job
+browser_run_task(wait=false)
+  → browser task watcher
+  → BrowserTaskNotifier
   → async_tool_result
-  → MessageQueue async_completion
-  → side-effect Produce / SSE
-  → Apply / continuation
+  → side-effect Produce / Apply / Continue
   → 后续模型 Step
   → turn.completed
 ```
 
-### T-07：异步回调与用户询问并行挂起（已修复）
+### T-07：HITL 与同步 bash
 
-用于验证消息队列在同一工具批次同时包含 `ask_user_information` 与超时降级的 `bash_run` 时，是否能分别处理两个待处理项。
+用于验证 `ask_user_information` 和同步 `bash_run` 在同一轮中的审批、取消和消息序列边界。`bash_run` 超时或用户终止后直接产生失败/取消结果，不创建后台 job，也不等待异步回灌。
 
 测试步骤：
 
-1. 同一条用户消息要求模型同时调用 `ask_user_information` 和 `bash_run`；
-2. 在 Turn 仍处于执行状态时，通过输入框回答用户问题，验证 Enter/发送可以提交 HITL resume；
-3. 批准 `bash_run`，等待后台 job 自动回调；
-4. 等待模型完成，并检查生命周期、队列和后台任务状态。
-
-复测结果（2026-08-21，真实模型 `mimo-v2.5-pro`，重启到本次重构后的 Node 二进制）：
-
-- UI 在 `sending=true` 且队首为 `user_information` 时允许输入并提交回答；普通执行中的草稿发送门控仍保持不变；
-- 部分 resume 后，生命周期投影会保存“剩余 HITL”而不是从原始 assistant 工具批次恢复完整队列；
-- 异步结果在 HITL 未清空前保持旁路缓冲，清空后只应用一次；callback history 只作为模型上下文，不再注册为新的 ToolExecution；
-- Timeline 出现 `external.fact.recorded`，`external_fact_kind=async`，绑定原始 bash `tool_call_id`，未生成 callback ToolExecution；
-- 重启后的真实混合场景最终回复为 `fresh-external-fact-complete`，`has_active_turn=false`、无 pending HITL、无后台任务；
-- 旧进程上的先前混合场景仍可恢复，最终回复为 `mixed-refactor-complete`；未出现重复 callback 或 `cannot start from succeeded`。
-
-已落地的修复点：
-
-1. `MainChatPanel` 对 `user_information` 队首提供独立的发送门控；
-2. `lifecycleAfterResume` 持久化部分 resume 后的剩余 HITL payload；
-3. 异步 side effect 在 HITL 清空前不修改历史；生命周期只接受当前 ToolBatch 已登记的工具调用，并将 Apply 记录为 external fact；
-4. 增加对应的前端单元测试、生命周期回归测试和本清单中的真实 UI 混合场景验证。
+1. 同一条用户消息要求模型询问用户并执行一个安全的短命令；
+2. 通过输入框提交 HITL resume，确认审批链按 turn 继续；
+3. 用工具卡片的终止按钮取消正在执行的 bash，确认 turn 进入取消状态；
+4. 检查没有 pending HITL、running job、未闭合 tool call 或重复 assistant 回复。
 
 ## 9. 每轮通用 API 检查
 
@@ -267,20 +247,16 @@ $timeline = Invoke-RestMethod "http://127.0.0.1:18765/v1/agents/$($agent.agent_i
 - Turn 取消：通过；
 - 取消后的连续对话与上下文回忆：通过；
 - 连续对话第一轮/第二轮 `continuity-one` → `continuity-two`：通过；
-- 重启本次重构后的 Node 后重新执行混合 HITL + async：通过，并观测到 `external.fact.recorded`；
-- bash 超时降级后台 job → `async_tool_result` 自动回灌 → 后续回复：通过；
-- 普通异步回调（单独运行）：通过；
-- 异步回调与用户询问并行挂起：通过，见 T-07；
 - 最终工具组恢复为 `fs + skills`；
-- 测试收尾后无 active turn、无 pending HITL、无 pending tool call，后台 job 数为 0；混合场景 Turn 终态为 completed；
+- 测试收尾后无 active turn、无 pending HITL、无 pending tool call；Turn 终态为 completed；
 - 浏览器无新增 error，仅有未启动 Desktop focus service 的预期 503 warning。
 
 ## 12. 当前未覆盖项
 
 以下功能需要额外环境或配置，不纳入本次基线：
 
-- Linux SSH 通道与远程命令异步回调；
+- Linux SSH 通道与远程命令；
 - MCP 服务工具；
 - 子 Agent 与父 Agent 消息回传；
 - 浏览器服务工具；
-- Trigger / Workgroup / A2A 外部消息回调。
+- Trigger / Workgroup 外部消息回调。

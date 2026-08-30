@@ -74,14 +74,14 @@ fi
 "${PYENV_PYTHON}" -m pip install --upgrade pip wheel
 
 cd /src
-"${PYENV_PYTHON}" -m pip install -r requirements.txt pyinstaller
+"${PYENV_PYTHON}" -m pip install -r requirements.lock pyinstaller
 
 if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
   echo "[build_linux_rocky8_pyenv] BROWSER_PI_ARGS is required" >&2
   exit 1
 fi
 if [[ -n "${BROWSER_PI_ARGS:-}" ]]; then
-  "${PYENV_PYTHON}" -m pip install -r /src/browser-service/requirements.txt
+  "${PYENV_PYTHON}" -m pip install -r /src/browser-service/requirements.lock
   eval "${PYENV_PYTHON}" -m PyInstaller ${BROWSER_PI_ARGS}
 fi
 

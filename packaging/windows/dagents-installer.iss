@@ -24,8 +24,14 @@ OutputDir=..\..\dist-installer
 OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
 SolidCompression=yes
-ArchitecturesAllowed={#MyAppArch}
-ArchitecturesInstallIn64BitMode=x64
+CloseApplications=yes
+RestartApplications=yes
+#if MyAppArch == "x64"
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+#else
+ArchitecturesAllowed=x86compatible
+#endif
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\assets\dagents.ico
@@ -89,7 +95,8 @@ Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"; IconFilen
 
 [Run]
 Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "验证安装文件 (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
-Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Shell（托盘监护 Node）"; Flags: postinstall nowait skipifsilent runascurrentuser
+; Silent upgrades launched by the Shell must start the new Shell after replacement.
+Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Shell（托盘监护 Node）"; Flags: postinstall nowait runascurrentuser
 
 [UninstallDelete]
 Type: files; Name: "{userdesktop}\DAgents Shell（系统托盘）.lnk"
@@ -404,8 +411,6 @@ begin
   AppDir := ExpandConstant('{app}');
   if FileExists(AppDir + '\dagents.cmd') then
   begin
-    if FileExists(AppDir + '\bin\dagents-shell.exe') then
-      Exec(AppDir + '\dagents.cmd', 'shell stop', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(AppDir + '\dagents.cmd', 'node shutdown', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;

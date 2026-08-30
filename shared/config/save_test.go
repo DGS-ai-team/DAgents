@@ -12,7 +12,7 @@ func TestSaveFile_roundTrip(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	cfg := &Config{
 		NodeID: "save-test",
-		FSRoot:  dir,
+		FSRoot: dir,
 	}
 	cfg.LLM.Provider = "deepseek"
 	cfg.LLM.Model = "deepseek-chat"

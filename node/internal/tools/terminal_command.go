@@ -3,11 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -28,13 +25,13 @@ type terminalCommandArgs struct {
 func terminalCommandToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_command",
-		Description: "在已通过 terminal_open 打开的终端目标上执行一次非交互命令。必须传入 terminal_id；目标、Agent 权限和 Linux 通道由已打开的会话绑定，不能自行传 config_id 或 channel_id。结果返回结构化 status、exit_code、stdout、stderr、字节数和截断标记；需要保持交互状态时改用 terminal_input 与 terminal_read。",
+		Description: "在已通过 terminal_open 打开的终端目标上执行一次非交互命令。必须传入 terminal_id；命令会复用该终端的现有 PTY/SSH 会话，不会新建第二个连接。目标、Agent 权限和 Linux 通道由已打开的会话绑定，不能自行传 config_id 或 channel_id。结果返回结构化 status、exit_code、stdout、stderr、字节数和截断标记；需要保持交互状态时改用 terminal_input 与 terminal_read。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
 			"terminal_id":      map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
-			"command":          map[string]any{"type": "string", "description": "在已打开目标上执行的 shell 命令"},
-			"cwd":              map[string]any{"type": "string", "description": "可选；覆盖本次命令的工作目录，不改变终端默认 cwd"},
+			"command":          map[string]any{"type": "string", "description": "在已打开目标的现有 shell 会话上执行的命令"},
+			"cwd":              map[string]any{"type": "string", "description": "可选；只覆盖本次命令的工作目录，不改变终端默认 cwd"},
 			"timeout_ms":       map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxTerminalCommandTimeout / time.Millisecond), "description": "可选的命令超时，单位毫秒"},
-			"max_output_bytes": map[string]any{"type": "integer", "minimum": 1, "maximum": maxTerminalCommandOutputBytes, "description": "可选的 stdout/stderr 单独上限"},
+			"max_output_bytes": map[string]any{"type": "integer", "minimum": 1, "maximum": maxTerminalCommandOutputBytes, "description": "可选的命令输出上限"},
 		}, "terminal_id", "command")),
 	}}
 }
@@ -74,7 +71,7 @@ func (r *Registry) execTerminalCommand(ctx context.Context, raw json.RawMessage)
 	if maxOutput <= 0 || maxOutput > maxTerminalCommandOutputBytes {
 		maxOutput = maxTerminalCommandOutputBytes
 	}
-	result, err := r.runTerminalCommand(ctx, TerminalCommandRequest{
+	result, err := broker.RunCommand(ctx, r.agentID, id, TerminalCommandRequest{
 		TerminalID:     id,
 		Target:         ExecutionTarget{Kind: info.TargetKind, ID: info.TargetID},
 		ConfigID:       info.ConfigID,
@@ -88,111 +85,4 @@ func (r *Registry) execTerminalCommand(ctx context.Context, raw json.RawMessage)
 		return "", err
 	}
 	return marshalTerminalResult(result)
-}
-
-func (r *Registry) runTerminalCommand(ctx context.Context, req TerminalCommandRequest) (TerminalCommandResult, error) {
-	if r == nil {
-		return TerminalCommandResult{}, fmt.Errorf("terminal registry is unavailable")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	provider := r.shellProvider
-	if req.Target.Kind == executionTargetLinuxChannel {
-		provider = r.linuxProvider
-	}
-	if provider == nil {
-		return TerminalCommandResult{}, fmt.Errorf("terminal command provider is unavailable")
-	}
-	if req.Target.Kind != "" && req.Target.Kind != executionTargetLocal && req.Target.Kind != executionTargetLinuxChannel {
-		return TerminalCommandResult{}, fmt.Errorf("unsupported terminal target %q", req.Target.Kind)
-	}
-	process, err := provider.Start(ctx, ExecRequest{
-		Target: req.Target,
-		Context: ExecutionContext{
-			AgentID:       r.agentID,
-			SessionID:     sessionIDFromContext(ctx),
-			ToolCallID:    toolCallIDFromContext(ctx),
-			ApprovalID:    ApprovalIDFromContext(ctx),
-			CommandDigest: executionCommandDigest(req.Command),
-			Target:        req.Target,
-		},
-		ShellType:      req.Shell,
-		Command:        req.Command,
-		CWD:            req.CWD,
-		Timeout:        req.Timeout,
-		MaxOutputBytes: req.MaxOutputBytes,
-		EventSink:      r.processEventSink,
-	})
-	if err != nil {
-		return TerminalCommandResult{}, err
-	}
-	stdout, err := process.StdoutPipe()
-	if err != nil {
-		_ = process.Close()
-		return TerminalCommandResult{}, err
-	}
-	stderr, err := process.StderrPipe()
-	if err != nil {
-		_ = stdout.Close()
-		_ = process.Close()
-		return TerminalCommandResult{}, err
-	}
-	if err := process.Start(); err != nil {
-		_ = stdout.Close()
-		_ = stderr.Close()
-		_ = process.Close()
-		return TerminalCommandResult{}, err
-	}
-	outBuf := NewOutputBudget(req.MaxOutputBytes)
-	errBuf := NewOutputBudget(req.MaxOutputBytes)
-	copyDone := make(chan struct{})
-	go func() {
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { _, _ = io.Copy(outBuf, stdout); wg.Done() }()
-		go func() { _, _ = io.Copy(errBuf, stderr); wg.Done() }()
-		wg.Wait()
-		close(copyDone)
-	}()
-	waitErr, timedOut := waitForProcess(ctx, process, req.Timeout)
-	waitForOutputReaders(copyDone, stdout, stderr)
-	_ = process.Close()
-	cancelled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(waitErr, context.Canceled)
-	if cancelled {
-		// Cancellation is a normal terminal outcome of an interrupted Turn. It
-		// must remain a structured tool result so the orchestrator can persist
-		// the tool result and release the next continuation instead of leaving
-		// the tool call in an indeterminate/pending state.
-		timedOut = false
-	}
-	exit := process.ExitStatus()
-	code := 1
-	if exit != nil {
-		code = exit.Code
-	} else if waitErr == nil {
-		code = 0
-	}
-	status := "SUCCEEDED"
-	if cancelled {
-		status = "CANCELLED"
-	} else if code != 0 || waitErr != nil || timedOut {
-		status = "FAILED"
-	}
-	result := TerminalCommandResult{
-		Status: status, TerminalID: req.TerminalID, TargetKind: req.Target.Kind, ExitCode: code,
-		Stdout: string(outBuf.Bytes()), Stderr: string(errBuf.Bytes()),
-		StdoutBytes: len(outBuf.Bytes()), StderrBytes: len(errBuf.Bytes()),
-		OutputTruncated: outBuf.truncated || errBuf.truncated, Cancelled: cancelled, TimedOut: timedOut,
-	}
-	if exit != nil && exit.Error != "" {
-		result.Error = exit.Error
-	} else if waitErr != nil && !timedOut {
-		result.Error = waitErr.Error()
-	} else if cancelled {
-		result.Error = "terminal command cancelled"
-	} else if timedOut {
-		result.Error = "terminal command timed out"
-	}
-	return result, nil
 }

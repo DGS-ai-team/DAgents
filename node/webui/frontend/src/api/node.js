@@ -1,3 +1,11 @@
+async function readJSON(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 async function apiFetch(path, { method = "GET", body, params } = {}) {
   const url = new URL(path, window.location.origin);
   if (params) {
@@ -12,12 +20,7 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
     init.body = JSON.stringify(body);
   }
   const resp = await fetch(url, init);
-  let data = null;
-  try {
-    data = await resp.json();
-  } catch {
-    data = null;
-  }
+  const data = await readJSON(resp);
   if (!resp.ok) {
     const msg = data?.error?.message || data?.message || `HTTP ${resp.status}`;
     throw new Error(msg);
@@ -36,10 +39,6 @@ export function getAgentInfo() {
 /** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
 export function getUIBootstrap() {
   return apiFetch("/v1/ui/bootstrap");
-}
-
-export function getWorkspaceActivity(agentId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/workspace-activity`);
 }
 
 export function getAgentUpdate() {
@@ -151,13 +150,6 @@ export function cancelAgentToolCall(agentId, toolCallId) {
   );
 }
 
-export function backgroundAgentToolCall(agentId, toolCallId) {
-  return apiFetch(
-    `/v1/agents/${encodeURIComponent(agentId)}/tool-calls/${encodeURIComponent(toolCallId)}/background`,
-    { method: "POST", body: {} },
-  );
-}
-
 export function getAgentToolJobs(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/tool-jobs`);
 }
@@ -185,17 +177,23 @@ export function compressContext(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/compress`, { method: "POST", body: {} });
 }
 
-export function postAgentAck(agentId, sseSeq) {
+export function postAgentAck(agentId, agentSeq) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ack`, {
     method: "POST",
-    body: { sse_seq: sseSeq },
+    body: { agent_seq: agentSeq },
   });
 }
 
-export function submitMessage(agentId, content, contentParts = null) {
+export function submitMessage(agentId, content, contentParts = null, fileRefs = null) {
   const body = { agent_id: agentId, request_type: "message", content: content || "" };
   if (Array.isArray(contentParts) && contentParts.length) {
     body.content_parts = contentParts;
+  }
+  if (Array.isArray(fileRefs) && fileRefs.length) {
+    body.file_refs = fileRefs.map((file) => ({
+      path: file?.path || "",
+      name: file?.name || "",
+    }));
   }
   return apiFetch("/v1/messages", { method: "POST", body });
 }

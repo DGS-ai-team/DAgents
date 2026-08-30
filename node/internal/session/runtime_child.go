@@ -34,6 +34,11 @@ func newChildRuntime(
 		AgentID:       agentID,
 		ChildAgentID:  id,
 		ChildPurpose:  purpose,
+		Observe: func(eventType string, data map[string]any) {
+			if childMgr != nil {
+				childMgr.ObserveChildEvent(id, eventType, data)
+			}
+		},
 	}
 	// 创建子 runtime
 	rt := newRuntimeWithPublisher(

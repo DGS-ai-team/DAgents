@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,11 +35,11 @@ const (
 
 // SkillAccess 为 orchestrator 读写 session loaded_skills 的回调。
 type SkillAccess struct {
+	// Catalog is the frozen metadata/body view for the active human Turn.
 	Catalog *skills.Catalog
-	// CatalogToolMode enables the default-off list_available_skills
-	// experiment. The flag is fixed for the runtime and never changes inside
-	// an active model context.
-	CatalogToolMode   bool
+	// LiveCatalog is used only by list_available_skills so a directory change
+	// can be inspected without rewriting the active system prompt.
+	LiveCatalog       *skills.Catalog
 	Get               func() []skills.LoadedSkill
 	Set               func([]skills.LoadedSkill)
 	SetWithHookStatus func([]skills.LoadedSkill) SkillHooksSyncResult
@@ -78,19 +77,21 @@ type Orchestrator struct {
 
 	turnUsageMu sync.Mutex
 	turnUsage   map[string]llm.Usage
-	summaryMu   sync.Mutex
-	summaryNext map[string]bool
+	// turnUsageLast stores the last provider snapshot for each model step.
+	// Providers may emit cumulative usage more than once during a stream.
+	turnUsageLast map[string]map[int]llm.Usage
+	summaryMu     sync.Mutex
+	summaryNext   map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
-	modelSnapshots        *modelContextSnapshotStore
-	contextMutationMu     sync.Mutex
-	contextMutationReason map[string]string
-	runtimeRevision       int64
-	runtimeDigest         string
-	executionGuard        ExecutionGuard
+	modelSnapshots    *modelContextSnapshotStore
+	contextMutationMu sync.Mutex
+	contextMutations  map[string][]ContextMutation
+	runtimeRevision   int64
+	runtimeDigest     string
+	executionGuard    ExecutionGuard
 
-	enqueueToolResult       func(ctx context.Context, sessionID string) error
 	systemPromptBuilder     SystemPromptBuilder
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
@@ -205,22 +206,25 @@ func (o *Orchestrator) RequestModelContextRefresh(sessionID, reason string) {
 		reason = "context_mutation"
 	}
 	o.contextMutationMu.Lock()
-	if o.contextMutationReason == nil {
-		o.contextMutationReason = make(map[string]string)
+	if o.contextMutations == nil {
+		o.contextMutations = make(map[string][]ContextMutation)
 	}
-	o.contextMutationReason[sessionID] = reason
+	o.contextMutations[sessionID] = appendContextMutation(o.contextMutations[sessionID], reason)
 	o.contextMutationMu.Unlock()
 }
 
+// consumeModelContextRefresh keeps the lifecycle/wire-compatible string at
+// the boundary. Internally, distinct invalidation causes are stored as typed
+// mutations so callers do not need to parse a delimiter-based field.
 func (o *Orchestrator) consumeModelContextRefresh(sessionID string) string {
 	if o == nil {
 		return ""
 	}
 	o.contextMutationMu.Lock()
 	defer o.contextMutationMu.Unlock()
-	reason := strings.TrimSpace(o.contextMutationReason[sessionID])
-	delete(o.contextMutationReason, sessionID)
-	return reason
+	mutations := o.contextMutations[sessionID]
+	delete(o.contextMutations, sessionID)
+	return contextMutationReasons(mutations)
 }
 
 // SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
@@ -247,11 +251,6 @@ func (o *Orchestrator) SetChildAgentManager(m *childagent.Manager) {
 // SetChildSession 标记当前 orchestrator 运行在子 session（禁止管理类工具与 ask_user）。
 func (o *Orchestrator) SetChildSession(isChild bool) {
 	o.isChildSession = isChild
-}
-
-// SetToolResultEnqueuer 注入 tool_result 入队回调；生产 session 必须设置以对齐 Python 队列语义。
-func (o *Orchestrator) SetToolResultEnqueuer(fn func(ctx context.Context, sessionID string) error) {
-	o.enqueueToolResult = fn
 }
 
 // SetLifecycleMetadataProvider attaches Turn/Step projection metadata to
@@ -399,7 +398,7 @@ func (o *Orchestrator) RunToolMessageTurn(
 	return o.runOneStep(ctx, sessionID, history)
 }
 
-// ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并调度 tool_result 续跑。
+// ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并返回继续执行结果。
 func (o *Orchestrator) ContinueAfterResume(
 	ctx context.Context,
 	sessionID string,
@@ -471,26 +470,28 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:               agentID,
-		fsRoot:                fsRoot,
-		hub:                   hub,
-		llm:                   client,
-		tools:                 toolExec,
-		policy:                policyEngine,
-		toolHooks:             toolHooks,
-		toolExecLog:           toolExecLog,
-		skillAccess:           skillAccess,
-		hookRuntimeCfg:        hookCfg,
-		maxToolLoops:          maxToolLoops,
-		modelRetryLimit:       2,
-		toolRetryLimit:        1,
-		promptCtx:             promptCtx,
-		journal:               journal,
-		logger:                logx.OrDefault(logger),
-		ctxMetrics:            newContextMetricsStore(),
-		modelSnapshots:        newModelContextSnapshotStore(),
-		contextMutationReason: make(map[string]string),
-		summaryNext:           make(map[string]bool),
+		agentID:          agentID,
+		fsRoot:           fsRoot,
+		hub:              hub,
+		llm:              client,
+		tools:            toolExec,
+		policy:           policyEngine,
+		toolHooks:        toolHooks,
+		toolExecLog:      toolExecLog,
+		skillAccess:      skillAccess,
+		hookRuntimeCfg:   hookCfg,
+		maxToolLoops:     maxToolLoops,
+		modelRetryLimit:  2,
+		toolRetryLimit:   1,
+		promptCtx:        promptCtx,
+		journal:          journal,
+		logger:           logx.OrDefault(logger),
+		ctxMetrics:       newContextMetricsStore(),
+		turnUsage:        make(map[string]llm.Usage),
+		turnUsageLast:    make(map[string]map[int]llm.Usage),
+		modelSnapshots:   newModelContextSnapshotStore(),
+		contextMutations: make(map[string][]ContextMutation),
+		summaryNext:      make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
@@ -522,19 +523,9 @@ func (o *Orchestrator) consumeNextStepFinalSummary(sessionID string) bool {
 	return marked
 }
 
-// InterruptPending 在用户插入新 message 时打断 pending tool calls。
-func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message, pending *PendingHITL) {
-	o.InterruptPendingWithReason(
-		sessionID,
-		history,
-		pending,
-		ToolUserInterruptedMessage,
-		map[string]any{"interrupted_by_user_message": true},
-	)
-}
-
-// InterruptPendingWithReason 以自定义文案/元数据打断 pending tool calls。
-func (o *Orchestrator) InterruptPendingWithReason(
+// CancelPendingToolCalls closes pending tool calls as part of an explicit
+// Turn cancellation. Ordinary input never calls this method.
+func (o *Orchestrator) CancelPendingToolCalls(
 	sessionID string,
 	history *[]llm.Message,
 	pending *PendingHITL,
@@ -549,7 +540,7 @@ func (o *Orchestrator) InterruptPendingWithReason(
 		msg = ToolUserInterruptedMessage
 	}
 	if meta == nil {
-		meta = map[string]any{"interrupted_by_user_message": true}
+		meta = map[string]any{"interrupted_by_turn_cancel": true}
 	}
 	o.insertMissingToolResponsesAfterAssistant(
 		sessionID,
@@ -620,7 +611,7 @@ func (o *Orchestrator) runOneStep(
 		if hookErr != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
 			o.publishError(sessionID, hookErr.Error())
-			o.publishDone(sessionID, "error")
+			o.publishTurnFinished(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 		}
@@ -631,7 +622,11 @@ func (o *Orchestrator) runOneStep(
 		requestHistory = append([]llm.Message(nil), msgs...)
 	}
 	*history = msgs
-	requestHistory = ApplyContextInjections(requestHistory, snapshot.ContextInjections)
+	var snapshotInjections []ContextInjection
+	if snapshot != nil {
+		snapshotInjections = snapshot.ContextInjections
+	}
+	requestHistory = ApplyContextInjections(requestHistory, snapshotInjections)
 	requestHistory = StripLegacyTodayDateMessages(requestHistory)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
@@ -658,7 +653,7 @@ func (o *Orchestrator) runOneStep(
 		}); err != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
-			o.publishDone(sessionID, "error")
+			o.publishTurnFinished(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record turn snapshot: %w", err)}
 		}
@@ -694,7 +689,7 @@ func (o *Orchestrator) runOneStep(
 		if finishReason == "cancelled" {
 			o.publishUsageIfAccumulated(sessionID, stepIndex)
 		}
-		o.publishDone(sessionID, finishReason)
+		o.publishTurnFinished(sessionID, finishReason)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: streamErr}
 	}
@@ -705,7 +700,7 @@ func (o *Orchestrator) runOneStep(
 	}); err != nil {
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, err.Error())
-		o.publishDone(sessionID, "error")
+		o.publishTurnFinished(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record model response: %w", err)}
 	}
@@ -720,7 +715,7 @@ func (o *Orchestrator) runOneStep(
 			o.logger.Warn("llm.after_call hook failed", "session_id", sessionID, "error", hookErr)
 		}
 		o.publishError(sessionID, msg)
-		o.publishDone(sessionID, "error")
+		o.publishTurnFinished(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 	}
@@ -736,7 +731,7 @@ func (o *Orchestrator) runOneStep(
 	}); err != nil {
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, err.Error())
-		o.publishDone(sessionID, "error")
+		o.publishTurnFinished(sessionID, "error")
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record assistant message: %w", err)}
 	}
@@ -754,14 +749,14 @@ func (o *Orchestrator) runOneStep(
 		}); err != nil {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
-			o.publishDone(sessionID, "error")
+			o.publishTurnFinished(sessionID, "error")
 			o.clearModelContextSnapshot(sessionID)
 			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record tool call: %w", err)}
 		}
 	}
 
 	if len(result.ToolCalls) == 0 {
-		o.publishDone(sessionID, finishReason)
+		o.publishTurnFinished(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "step_index", stepIndex)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex}
@@ -784,15 +779,8 @@ func (o *Orchestrator) runOneStep(
 		)
 		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
 		if stepIndex > o.maxToolLoops+1 {
-			o.publishDone(sessionID, finishReason)
+			o.publishTurnFinished(sessionID, finishReason)
 			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{StepIndex: stepIndex}
-		}
-		if o.enqueueToolResult != nil {
-			if err := o.enqueueToolResult(ctx, sessionID); err != nil {
-				o.clearModelContextSnapshot(sessionID)
-				return StepOutcome{StepIndex: stepIndex, Err: err}
-			}
 			return StepOutcome{StepIndex: stepIndex}
 		}
 		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
@@ -810,21 +798,13 @@ func (o *Orchestrator) runOneStep(
 			finishReason = "error"
 			o.publishError(sessionID, procErr.Error())
 		}
-		o.publishDone(sessionID, finishReason)
+		o.publishTurnFinished(sessionID, finishReason)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: procErr}
 	}
 	if pending != nil {
-		o.publishDone(sessionID, pauseReason)
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
 		return StepOutcome{Pending: pending, StepIndex: stepIndex}
-	}
-	if o.enqueueToolResult != nil {
-		if err := o.enqueueToolResult(ctx, sessionID); err != nil {
-			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{StepIndex: stepIndex, Err: err}
-		}
-		return StepOutcome{StepIndex: stepIndex}
 	}
 	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }
@@ -920,6 +900,21 @@ func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	}
 	o.turnUsageMu.Lock()
 	delete(o.turnUsage, sessionID)
+	delete(o.turnUsageLast, sessionID)
+	o.turnUsageMu.Unlock()
+}
+
+// resetUsageAttempt clears the provider snapshot cursor for one model step.
+// A retry is a new provider completion and must not be treated as a
+// continuation of the previous attempt's cumulative counters.
+func (o *Orchestrator) resetUsageAttempt(sessionID string, llmStep int) {
+	if o == nil {
+		return
+	}
+	o.turnUsageMu.Lock()
+	if o.turnUsageLast != nil {
+		delete(o.turnUsageLast[sessionID], llmStep)
+	}
 	o.turnUsageMu.Unlock()
 }
 
@@ -950,12 +945,12 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 		return nil
 	}
 	defs := o.tools.Definitions()
-	if !o.skillAccess.CatalogToolMode || o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
+	if o.skillAccess.Catalog == nil || !o.skillAccess.Catalog.Enabled() {
 		return defs
 	}
-	// The virtual tool is available only when the regular Skills group is
-	// already visible. This keeps allowlists and child restricted registries
-	// from exposing a discovery tool without load_skills.
+	// Discovery is a regular part of the Skills tool group. It is appended only
+	// when load_skills is visible, so child/allowlisted registries keep the same
+	// permission boundary as the other Skills tools.
 	hasLoadSkills := false
 	for _, def := range defs {
 		if def.Function.Name == "load_skills" {
@@ -969,13 +964,6 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	listDef := tools.ListAvailableSkillsToolDef()
 	listDef.Function.Description = strings.TrimSpace(listDef.Function.Description) + tools.ResultDescriptionSuffixForTool(listDef.Function.Name)
 	defs = append(defs, listDef)
-	sort.SliceStable(defs, func(i, j int) bool {
-		left, right := defs[i].Function.Name, defs[j].Function.Name
-		if left == right {
-			return defs[i].Type < defs[j].Type
-		}
-		return left < right
-	})
 	return defs
 }
 
@@ -1074,18 +1062,12 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	if o == nil {
 		return SystemPromptInput{}
 	}
-	var loaded []skills.LoadedSkill
-	if o.skillAccess.Get != nil {
-		loaded = o.skillAccess.Get()
-	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
 		FSRoot:                o.fsRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
 		Catalog:               o.skillAccess.Catalog,
-		Loaded:                loaded,
-		SkillsCatalogToolMode: o.skillAccess.CatalogToolMode,
 		PromptCtx:             o.promptCtx,
 		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}

@@ -22,6 +22,22 @@ func newLifecycleTestRuntime() *runtime {
 	}
 }
 
+func TestRuntimePersistReportsStoreErrors(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newLifecycleTestRuntime()
+	r.store = st
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.persist(context.Background()); err == nil {
+		t.Fatal("expected persist to report a closed store")
+	}
+}
+
 func setTestPendingHITL(t *testing.T, r *runtime, pending *turn.PendingHITL) {
 	t.Helper()
 	r.restoreLegacyPending(pending)
@@ -628,18 +644,18 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 	first := newRuntime()
 	first.lifecycleBeginHumanTurn()
 	state := first.turnCoordinator.Snapshot()
-	first.lifecycleDispatch(turn.TurnCommand{
+	first.lifecycleDispatchErr(turn.TurnCommand{
 		Type: turn.CommandAssistantReceived, SessionID: "session-1", TurnID: state.TurnID,
 		StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC(),
 	})
 	state = first.turnCoordinator.Snapshot()
-	first.lifecycleDispatch(turn.TurnCommand{
+	first.lifecycleDispatchErr(turn.TurnCommand{
 		Type: turn.CommandToolCallRecorded, SessionID: "session-1", TurnID: state.TurnID,
 		StepID: state.StepID, Generation: state.Generation, ToolCallID: "call-restart",
 		ToolName: "bash", Arguments: []byte(`{"command":"touch marker"}`), At: time.Now().UTC(),
 	})
 	state = first.turnCoordinator.Snapshot()
-	first.lifecycleDispatch(turn.TurnCommand{
+	first.lifecycleDispatchErr(turn.TurnCommand{
 		Type: turn.CommandToolExecutionStarted, SessionID: "session-1", TurnID: state.TurnID,
 		StepID: state.StepID, Generation: state.Generation, ToolCallID: "call-restart",
 		ToolExecutionID: "call-restart-execution", At: time.Now().UTC(),
@@ -662,8 +678,8 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 	if final.RecoveryRequired || final.StepIndex != 2 || final.StepStatus != turn.StepStatusRequesting {
 		t.Fatalf("post-reconciliation projection = %+v", final)
 	}
-	if second.queue.CountByRequestType(queue.RequestTypeToolResult) != 1 {
-		t.Fatalf("expected one resumed tool-result request, queue=%d", second.queue.CountByRequestType(queue.RequestTypeToolResult))
+	if second.queue.CountByRequestType(queue.RequestTypeTurnContinuation) != 1 {
+		t.Fatalf("expected one resumed turn continuation, queue=%d", second.queue.CountByRequestType(queue.RequestTypeTurnContinuation))
 	}
 	if len(second.messages) != 1 || second.messages[0].Role != "tool" || second.messages[0].ToolCallID != "call-restart" {
 		t.Fatalf("reconciled history = %#v", second.messages)
@@ -681,18 +697,18 @@ func TestRuntimeLifecycleRecoversCompletedToolResultFromHistory(t *testing.T) {
 	first.store = st
 	first.lifecycleBeginHumanTurn()
 	state := first.turnCoordinator.Snapshot()
-	first.lifecycleDispatch(turn.TurnCommand{
+	first.lifecycleDispatchErr(turn.TurnCommand{
 		Type: turn.CommandAssistantReceived, SessionID: "session-1", TurnID: state.TurnID,
 		StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC(),
 	})
 	state = first.turnCoordinator.Snapshot()
-	first.lifecycleDispatch(turn.TurnCommand{
+	first.lifecycleDispatchErr(turn.TurnCommand{
 		Type: turn.CommandToolCallRecorded, SessionID: "session-1", TurnID: state.TurnID,
 		StepID: state.StepID, Generation: state.Generation, ToolCallID: "call-history",
 		ToolName: "read_file", Arguments: []byte(`{"path":"README.md"}`), At: time.Now().UTC(),
 	})
 	state = first.turnCoordinator.Snapshot()
-	first.lifecycleDispatch(turn.TurnCommand{
+	first.lifecycleDispatchErr(turn.TurnCommand{
 		Type: turn.CommandToolExecutionStarted, SessionID: "session-1", TurnID: state.TurnID,
 		StepID: state.StepID, Generation: state.Generation, ToolCallID: "call-history",
 		ToolExecutionID: "call-history-execution", At: time.Now().UTC(),
@@ -715,7 +731,7 @@ func TestRuntimeLifecycleRecoversCompletedToolResultFromHistory(t *testing.T) {
 	if state.RecoveryRequired || state.StepIndex != 2 || state.StepStatus != turn.StepStatusRequesting {
 		t.Fatalf("history recovery projection = %+v", state)
 	}
-	if recovered.queue.CountByRequestType(queue.RequestTypeToolResult) != 1 {
-		t.Fatalf("expected one resumed tool-result request, queue=%d", recovered.queue.CountByRequestType(queue.RequestTypeToolResult))
+	if recovered.queue.CountByRequestType(queue.RequestTypeTurnContinuation) != 1 {
+		t.Fatalf("expected one resumed turn continuation, queue=%d", recovered.queue.CountByRequestType(queue.RequestTypeTurnContinuation))
 	}
 }

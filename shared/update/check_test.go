@@ -61,3 +61,13 @@ func TestCheck(t *testing.T) {
 		t.Fatalf("asset=%v", status.Asset)
 	}
 }
+
+func TestCheckRecordsAttemptWhenManageUnavailable(t *testing.T) {
+	status := Check(CheckRequest{ManageURL: "", CurrentVersion: "0.9.0"})
+	if status.ManageReachable {
+		t.Fatal("expected Manage to be unreachable")
+	}
+	if status.LastCheckedAt == "" {
+		t.Fatal("expected failed check to record an attempt timestamp")
+	}
+}

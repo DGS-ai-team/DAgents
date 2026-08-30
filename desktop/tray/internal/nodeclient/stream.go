@@ -14,11 +14,15 @@ import (
 
 // StreamEvent 为一条 SSE 业务事件。
 type StreamEvent struct {
-	Type      string
-	SessionID string
-	AgentID   string
-	Seq       int
-	Data      map[string]any
+	Type         string
+	SessionID    string
+	AgentID      string
+	Seq          int
+	AgentSeq     int
+	EventVersion int
+	StreamEpoch  string
+	Delivery     string
+	Data         map[string]any
 }
 
 // StreamEvents 订阅 GET /v1/streams?live=1（全局）；handler 返回 false 时结束。
@@ -106,10 +110,14 @@ func parseSSE(ctx context.Context, r io.Reader, handler func(StreamEvent) bool) 
 
 func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error) {
 	var envelope struct {
-		AgentID string         `json:"agent_id"`
-		Type    string         `json:"type"`
-		Seq     int            `json:"seq"`
-		Data    map[string]any `json:"data"`
+		AgentID      string         `json:"agent_id"`
+		Type         string         `json:"type"`
+		Seq          int            `json:"seq"`
+		AgentSeq     int            `json:"agent_seq"`
+		EventVersion int            `json:"event_version"`
+		StreamEpoch  string         `json:"stream_epoch"`
+		Delivery     string         `json:"delivery"`
+		Data         map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(dataLine), &envelope); err != nil {
 		return StreamEvent{}, fmt.Errorf("decode sse data: %w", err)
@@ -128,10 +136,14 @@ func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error)
 	}
 	aid := strings.TrimSpace(envelope.AgentID)
 	return StreamEvent{
-		Type:      typ,
-		SessionID: aid, // 与 AgentID 同源（待办键历史字段）
-		AgentID:   aid,
-		Seq:       seq,
-		Data:      data,
+		Type:         typ,
+		SessionID:    aid, // 与 AgentID 同源（待办键历史字段）
+		AgentID:      aid,
+		Seq:          seq,
+		AgentSeq:     envelope.AgentSeq,
+		EventVersion: envelope.EventVersion,
+		StreamEpoch:  envelope.StreamEpoch,
+		Delivery:     envelope.Delivery,
+		Data:         data,
 	}, nil
 }

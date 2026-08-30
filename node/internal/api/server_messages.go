@@ -7,15 +7,17 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
 type postMessageRequest struct {
-	AgentID         string            `json:"agent_id"`
-	RequestType     string            `json:"request_type"`
-	Content         string            `json:"content"`
-	ContentParts    []llm.ContentPart `json:"content_parts,omitempty"`
-	UserMessageName string            `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any    `json:"resume_value"`
+	AgentID         string              `json:"agent_id"`
+	RequestType     string              `json:"request_type"`
+	Content         string              `json:"content"`
+	ContentParts    []llm.ContentPart   `json:"content_parts,omitempty"`
+	FileReferences  []llm.FileReference `json:"file_refs,omitempty"`
+	UserMessageName string              `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any      `json:"resume_value"`
 }
 
 type postMessageResponse struct {
@@ -61,7 +63,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		requestType = "message"
 	}
 
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
+	priority, err := s.sessions.EnqueueMessageWithFileReferences(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.FileReferences, req.ResumeValue, req.UserMessageName)
 	if err != nil {
 		switch err.Error() {
 		case "agent_not_found":
@@ -108,7 +110,9 @@ func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleStreams 提供按 Agent 过滤的 SSE 事件流，支持断点续传和 live 模式。
+// handleStreams 提供按 Agent 过滤的 SSE 事件流，支持 Agent 级断点续传和
+// live 模式。全局 seq 只用于线协议诊断/Last-Event-ID；过滤流的恢复游标
+// 必须使用 after_agent_seq，避免其他 Agent 或 ephemeral 事件制造假洞。
 func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -125,16 +129,18 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
+	lastAgentSeq := parseLastEventID(r.URL.Query().Get("after_agent_seq"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
-	if live {
-		lastSeq = s.stream.CurrentSeq()
-	} else if afterRaw := strings.TrimSpace(r.URL.Query().Get("after_seq")); afterRaw != "" {
-		lastSeq = parseLastEventID(afterRaw)
+	if !live {
+		if afterRaw := strings.TrimSpace(r.URL.Query().Get("after_seq")); afterRaw != "" {
+			lastSeq = parseLastEventID(afterRaw)
+		}
 	}
 	s.logger.Info("sse subscribe",
 		"agent_id", agentFilter,
 		"live", live,
 		"after_seq", lastSeq,
+		"after_agent_seq", lastAgentSeq,
 		"remote", r.RemoteAddr,
 	)
 	defer s.logger.Debug("sse unsubscribe", "agent_id", agentFilter, "remote", r.RemoteAddr)
@@ -144,12 +150,38 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	events := s.stream.SubscribeAgent(lastSeq, agentFilter)
+	var subscription *stream.Subscription
+	if live {
+		subscription = s.stream.SubscribeAgentLive(agentFilter)
+	} else {
+		subscription = s.stream.SubscribeAgentCursor(lastSeq, lastAgentSeq, agentFilter)
+	}
+	events := subscription.Events
 	defer s.stream.Unsubscribe(events)
 	if _, err := fmt.Fprintf(w, ": connected\n\n"); err != nil {
 		return
 	}
 	flusher.Flush()
+	if subscription.ResyncRequired {
+		resync := stream.Event{
+			AgentID:      agentFilter,
+			Type:         "resync_required",
+			EventVersion: stream.CurrentEventVersion,
+			StreamEpoch:  subscription.StreamEpoch,
+			Delivery:     "replayable",
+			Data: map[string]any{
+				"reason":           "history_truncated",
+				"stream_epoch":     subscription.StreamEpoch,
+				"seq":              subscription.CurrentSeq,
+				"agent_seq":        subscription.CurrentAgentSeq,
+				"requires_hydrate": true,
+			},
+		}
+		if _, err := w.Write([]byte(resync.FormatSSE())); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()

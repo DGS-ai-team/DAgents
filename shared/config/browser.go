@@ -10,14 +10,14 @@ type BrowserConfig struct {
 	// Enabled 为 nil 时默认 false（须显式启用）。
 	Enabled *bool `yaml:"enabled"`
 	// Headed 为 nil 时默认 true（演示/回放场景）。
-	Headed *bool `yaml:"headed"`
-	DefaultTimeoutMS  int    `yaml:"default_timeout_ms"`
-	OutputDir         string `yaml:"output_dir"`
-	ChromePath        string `yaml:"chrome_path"`
-	CDPURL            string `yaml:"cdp_url"`
-	DebugPort         int    `yaml:"debug_port"`
-	MaxSessions       int    `yaml:"max_sessions"`
-	IdleStopSeconds   int    `yaml:"idle_stop_seconds"`
+	Headed            *bool    `yaml:"headed"`
+	DefaultTimeoutMS  int      `yaml:"default_timeout_ms"`
+	OutputDir         string   `yaml:"output_dir"`
+	ChromePath        string   `yaml:"chrome_path"`
+	CDPURL            string   `yaml:"cdp_url"`
+	DebugPort         int      `yaml:"debug_port"`
+	MaxSessions       int      `yaml:"max_sessions"`
+	IdleStopSeconds   int      `yaml:"idle_stop_seconds"`
 	AllowedURLSchemes []string `yaml:"allowed_url_schemes"`
 	// ServiceURL dagents-browser 基址；默认 http://127.0.0.1:18766。
 	ServiceURL string `yaml:"service_url"`

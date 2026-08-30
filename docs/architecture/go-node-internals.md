@@ -1,6 +1,6 @@
 # Go Agent Node 内部结构
 
-本文说明 **`node/`** 内会话运行时核心组件的职责与协作关系：**Manager**、**runtime**、**MessageQueue**、**Orchestrator**，以及它们与 HTTP/SSE、工具、持久化的边界。
+本文说明 **`node/`** 内会话运行时核心组件的职责与协作关系：**Manager**、**runtime**、**InputBox**、**MessageQueue**、**Orchestrator**，以及它们与 HTTP/SSE、工具、持久化的边界。
 
 实现细节见代码目录 README：
 
@@ -31,9 +31,10 @@ flowchart TB
 
             subgraph OwnedByRuntime["runtime 直接拥有"]
                 direction LR
-                Q["L3 · queue.MessageQueue<br/>优先级入队 / 出队"]
+                INPUT["L3 · session.InputBox<br/>外部输入 FIFO"]
+                Q["L3 · queue.MessageQueue<br/>控制/恢复入队"]
                 LOOP["consumeLoop<br/>（goroutine）"]
-                STATE["会话数据/兼容视图<br/>messages · loadedSkills"]
+                STATE["会话数据/观测视图<br/>messages · loadedSkills"]
                 COORD["turn.Coordinator<br/>Turn/Step 生命周期投影"]
                 ORCH["L3 · turn.Orchestrator<br/>字段 orch"]
             end
@@ -45,6 +46,7 @@ flowchart TB
                 CAT["skills.Catalog"]
             end
 
+            RT --> INPUT
             RT --> Q
             RT --> LOOP
             RT --> STATE
@@ -66,8 +68,8 @@ flowchart TB
 
     API -->|"EnqueueMessage 等"| MGR
     MGR -->|"1 : N"| RT
-    LOOP -->|"Dequeue → handle*"| ORCH
-    ORCH -->|"SetToolResultEnqueuer"| Q
+    LOOP -->|"InputBox/Queue → handle*"| ORCH
+    RT -->|"inline tool continuation"| ORCH
 
     ORCH --> LLM
     ORCH --> TOOLS
@@ -82,10 +84,10 @@ flowchart TB
 | 关系 | 说明 |
 |------|------|
 | **Manager → runtime** | 一对多；`Create` / `SpawnChild` 时插入 `sessions` 表 |
-| **runtime → MessageQueue** | 每个 runtime **独占** 一个队列；Manager 不直接操作队列 |
+| **runtime → InputBox / MessageQueue** | 每个 runtime 独占一个 InputBox 和一个控制/恢复队列；Manager 不直接操作队列 |
 | **runtime → Orchestrator** | `orch` 是 runtime 的**成员字段**；Orchestrator **不包含** runtime |
-| **consumeLoop → Orchestrator** | 队列消费者 **调用** orchestrator 的单步 API，而非 orchestrator 消费队列 |
-| **Orchestrator → Queue** | 仅通过 `enqueueToolResult` **回调入队** `tool_result`，不拥有队列 |
+| **consumeLoop → Orchestrator** | consumer 取 InputBox/控制项并调用 orchestrator；orchestrator 不消费输入 |
+| **Orchestrator → runtime** | 工具结果由 runtime 在同一 Turn 链内 inline 续跑 |
 | **Hub / LLM / Tools** | Manager 构造时注入，经 runtime 传给 Orchestrator 或步前压缩使用 |
 
 父 session 与临时子 session **层级相同**（都是 `Manager` 下的一条 `runtime`）；子 runtime 的差异是 `RelayHub`、`RestrictedRegistry`、`store=nil`，图中未单独展开。
@@ -99,22 +101,20 @@ sequenceDiagram
     participant API as internal/api
     participant M as Manager
     participant RT as runtime
-    participant Q as MessageQueue
+    participant I as InputBox FIFO
+    participant Q as MessageQueue control
     participant L as consumeLoop
     participant O as Orchestrator
 
     API->>M: EnqueueMessage
-    M->>RT: enqueue(human)
-    RT->>Q: Enqueue
-    L->>Q: Dequeue
-    Q-->>L: Envelope
-    L->>RT: handleHumanMessage
+    M->>RT: appendInput(user)
+    RT->>I: Append(seq)
+    L->>I: Pop when idle
+    I-->>L: InputRecord
+    L->>RT: handleInputMessage
     RT->>O: RunHumanMessageTurn
     O-->>RT: ScheduleToolResult
-    RT->>Q: Enqueue(tool_result)
-    L->>Q: Dequeue
-    L->>RT: handleToolResult
-    RT->>O: RunToolMessageTurn
+    RT->>O: inline RunToolMessageTurn
 ```
 
 ---
@@ -126,7 +126,7 @@ HTTP / CLI（internal/api）
         │ EnqueueMessage / EnqueueResume / …
         ▼
   session.Manager  ──sessions[id]──►  runtime × N
-                                        ├─ MessageQueue + consumeLoop
+        ├─ InputBox + MessageQueue + consumeLoop
                                         ├─ messages / skills
                                         ├─ turn.Coordinator（Turn/Step 投影）
                                         ├─ store · compression · catalog
@@ -143,9 +143,10 @@ HTTP / CLI（internal/api）
 | 层级 | 包 / 类型 | 职责 |
 |------|-----------|------|
 | **会话表** | `session.Manager` | 创建/恢复/删除 session；对外入队 API；skills 管理；子 Agent `SpawnChild`（`manager_child.go`） |
-| **会话运行时** | `session.runtime` | 每 session 独立队列与 consumer；维护 messages/skills 与执行边界；步前压缩；SQLite 持久化 |
-| **消息队列** | `queue.MessageQueue` | 进程内优先级队列；**无内嵌 consumer**（与 Python v1 相同约定） |
-| **Turn 编排** | `turn.Orchestrator` | 单步：system prompt → LLM 流式 → 工具分流/执行 → SSE；`tool_result` 续跑由 runtime 再次调用 |
+| **会话运行时** | `session.runtime` | 每 session 独立 InputBox、控制队列与 consumer；维护 messages/skills 与执行边界；步前压缩；SQLite 持久化 |
+| **输入邮箱** | `session.InputBox` | 外部 user/trigger/A2A 输入的单调 seq FIFO；活动 Turn 期间只缓存，不打断 |
+| **消息队列** | `queue.MessageQueue` | resume、异步工具事实和恢复控制项的进程内优先级队列；**无内嵌 consumer** |
+| **Turn 编排** | `turn.Orchestrator` | 单步：system prompt → LLM 流式 → 工具分流/执行 → SSE；连续工具 Step 由 runtime 在同一 Turn 内 inline 续跑 |
 
 ---
 
@@ -153,42 +154,40 @@ HTTP / CLI（internal/api）
 
 **路径**：`node/internal/queue/`
 
-每个 `runtime` 在构造时创建 **一个** `MessageQueue`。`Manager.EnqueueMessage` 等 API 最终调用 `runtime.enqueue`。
+每个 `runtime` 在构造时创建 **一个** InputBox 和一个 MessageQueue。`Manager.EnqueueMessage` 将 user 输入追加到 InputBox；resume 等控制项仍调用 `runtime.enqueue`。
 
 ### 4.1 入队类型（`Envelope.RequestType`）
 
 | 类型 | 常量 | 典型来源 | consume 处理 |
 |------|------|----------|--------------|
-| 用户消息 | `message` | `POST /v1/messages` | `handleHumanMessage`（步首 Apply 缓冲） |
+| 用户消息 / trigger / A2A | InputBox record | HTTP、trigger、child relay | `handleInputMessage`；活动 Turn 期间只排队 |
 | HITL 恢复 | `resume` | 审批 / `ask_user_information` 提交 | `handleResume` |
-| 工具续跑 | `tool_result` | orchestrator 经 `SetToolResultEnqueuer` 回调 | `handleToolResult` |
+| 工具续跑 | inline | runtime 在同一 Turn 链内继续调用 | `handleTurnContinuation`（仅恢复入口） |
 | 旁路续跑 | `side_effect_continue` | Produce 后 / Cancel 恢复 | `handleSideEffectContinue` |
-| 异步工具完成 | `async_tool_result` | 后台 job 完成 | `handleSideEffectProduceAsync`（Produce） |
-| Trigger | `trigger_message` | trigger fire | `handleSideEffectProduceExternal` |
-| A2A inbox | `a2a_inbox_message` | Manage inbox | `handleSideEffectProduceExternal` |
+| 异步工具完成 | `async_tool_result` | 浏览器异步任务完成（旧后台 job 仅兼容） | `handleSideEffectProduceAsync`（Produce） |
+| Trigger（新路径） | InputBox record | trigger fire | `handleInputMessage` |
 
 ### 4.2 优先级（`Priority`）
 
-高优先级项先出队（同优先级 FIFO 按 `seq`）。实现见 `queue.go` → `priorityValue`。
+控制队列内高优先级项先出队（同优先级 FIFO 按 `seq`）。外部输入不参与该优先级排序，而按 InputBox 的单调 seq FIFO 处理。
 
 ```text
-side_effect_continue(-1) = tool_result(-1) > human(0) > resume(1) > async_completion(2) > other(10)
+continuation(-1) > resume(1) > async_completion(2) > other(10)
 ```
 
 | 档位 | 典型 `request_type` | 说明 |
 |------|----------------------|------|
-| `tool_result` | `tool_result` / `side_effect_continue` | 同步工具闭合续跑；旁路 Apply 后续跑 LLM |
-| `human` | `message` | 新 user 输入；**高于**排队的 `resume` |
+| `continuation` | `turn_continuation` / `side_effect_continue` | 恢复或旁路 Apply 后续跑 LLM |
+| InputBox | user / trigger / A2A | 新外部输入；活动 Turn 或 pending HITL 期间只缓存 |
 | `resume` | `resume` | HITL 提交 |
-| `async_completion` | `async_tool_result` | 后台 job **Produce**（缓冲 + SSE） |
-| `other` | `trigger_message` / `a2a_inbox_message` | trigger / A2A inbox **Produce** |
+| `async_completion` | `async_tool_result` | 浏览器任务 **Produce**（缓冲 + SSE） |
+| `other` | — | 预留 |
 
 **注意**：`async_tool_result` 等在 pending HITL 期间仍会被 **Produce**，但 **不** inline 改 history（`sideEffectStore`）。open batch 下 Apply 在步首或 TaskComplete/Cancel 时 continue。见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
 
 ### 4.3 与 turn 的关系
 
-队列负责 **「何时跑下一步」**；orchestrator 负责 **「这一步跑什么」**。  
-生产路径下，一次 `handleHumanMessage` 通常只执行 **一步** `RunHumanMessageTurn`；若产生工具调用且需续跑，orchestrator 返回 `ScheduleToolResult=true`，runtime 入队 `tool_result`，consumer 稍后调用 `RunToolMessageTurn`。时序见图 **[§1.1](#11-单-session-内调用方向时序)**。
+InputBox 负责外部输入的 **FIFO 顺序**；控制队列负责 resume、异步事实和恢复项；orchestrator 负责 **这一步跑什么**。orchestrator 返回 `ScheduleToolResult=true` 后，runtime 直接在同一 Turn 链内调用 `RunToolMessageTurn`，不把工具结果重新放回 MessageQueue。
 
 ---
 
@@ -203,9 +202,9 @@ side_effect_continue(-1) = tool_result(-1) > human(0) > resume(1) > async_comple
 
 `newRuntimeWithPublisher` 内：
 
-1. 创建 `skills.Catalog`、`compression.Coordinator`、`history.Journal`
+1. 创建 `InputBox`、控制 `MessageQueue`、`skills.Catalog`、`compression.Coordinator`、`history.Journal`
 2. `rt.orch = turn.NewOrchestrator(...)`
-3. `rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)`
+3. 工具续跑由 runtime inline 处理；恢复 continuation 只在持久化状态需要补偿时入队
 
 ### 5.2 内存状态与生命周期权威
 
@@ -220,9 +219,9 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 
 ### 5.3 consumeLoop
 
-单 goroutine 串行处理同一 session 上所有出队项；新 `message` 到达时若存在 pending HITL，先 `InterruptPending` 再开新 turn。
+单 goroutine 串行处理同一 session 上的控制项和 InputBox 输入；InputBox 只在 runtime idle 时 Pop，因此新 user/trigger 到达 pending HITL 时保持排队。只有显式 `CancelTurn` 才结束当前 Turn，取消后再消费 FIFO 尾部。
 
-**父 session 专有**：`handleHumanMessage` / `handleToolResult` 步前可调用 `compression.MaybeHandle`。  
+**父 session 专有**：`handleInputMessage` / `handleTurnContinuation` 步前可调用 `compression.MaybeHandle`。
 **子 session**：跳过压缩；空闲且末条为 assistant 时 `tryCompleteChildIfIdle` → `childagent.OnChildSettled`。
 
 ---
@@ -240,22 +239,21 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 | `toolExec` | `tools.Executor`（父：完整 Registry；子：白名单 `RestrictedRegistry`） |
 | `policy` | 工具 auto / approval / deny |
 | `skillAccess` | skills 目录与 loaded 读写 |
-| `promptCtx` | `.runtime/prompt_context/` 侧车（子 session 当前与父共用构造路径，见改进项） |
+| `promptCtx` | `agents.db` 中的 soul/custom/long_term；旧 `.runtime/prompt_context/user.md` 仅作迁移来源 |
 | `maxToolLoops` | 单条 user 消息内工具循环上限 |
 
 事后设置：
 
-- `SetToolResultEnqueuer` — 工具步结束后入队 `tool_result`
 - `SetChildAgentManager(mgr)` — 父 session 注入管理器，可 `create_temporary_agent`
 - `SetChildSession(true)` — 子 session 禁止管理类工具
 
 ### 6.2 单步主路径（`runOneStep`）
 
-1. `buildSystemPrompt(sessionID)` → [`BuildSystemPrompt`](../../node/internal/turn/prompt.go)
+1. `buildSystemPrompt(sessionID)` + request-only `ContextInjection` → [`BuildSystemPrompt`](../../node/internal/turn/prompt.go)
 2. `llm.StreamChat` → 推送 `assistant` / `reasoning` / `usage`
 3. 若有 `tool_calls` → `processToolCalls`（policy、临时 Agent 工具、skills 工具、auto 批执行）
-4. 无待处理 HITL 且需续跑 → `ScheduleToolResult=true`
-5. 回合结束 → `done` SSE（语义见 [agent-node-api.md](./agent-node-api.md) §2.4.1）
+4. 无待处理 HITL 且需续跑 → `ScheduleToolResult=true`，由 runtime 在同一 Turn 链内 inline 续跑
+5. 回合结束 → `turn_finished` SSE（语义见 [agent-node-api.md](./agent-node-api.md) §2.4.1）
 
 ### 6.3 与 runtime 的边界
 
@@ -287,10 +285,10 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 ```text
 POST /v1/messages
   → Manager.EnqueueMessage
-  → runtime.enqueue(PriorityHuman)
-  → consumeLoop → handleHumanMessage
+  → runtime.appendInput(InputBox FIFO)
+  → consumeLoop（idle 时 Pop）→ handleInputMessage
   → orch.RunHumanMessageTurn
-  → [可选] enqueue tool_result → handleToolResult → RunToolMessageTurn
+  → [可选] inline RunToolMessageTurn（同一 Turn 链）
   → persist
   → Hub 事件 → GET /v1/streams（Client 订阅）
 ```
@@ -303,7 +301,7 @@ Resume、异步工具、trigger 入队路径见 `runtime.consumeLoop` 的 `switc
 
 | 文档 | 内容 |
 |------|------|
-| [agent-node-api.md](./agent-node-api.md) | HTTP 路径、SSE `type`、`done` 语义 |
+| [agent-node-api.md](./agent-node-api.md) | HTTP 路径、SSE `type`、`turn_finished` 语义 |
 | [child-agent-tools.md](./child-agent-tools.md) | 临时子 Agent 工具与生命周期 |
 | [development.md](../development.md) | Node 构建、启动与测试 |
 | [context-compression-cache-analysis.md](../design/context-compression-cache-analysis.md) | 压缩与 prompt 侧车（Go：`compression` 包） |

@@ -18,7 +18,7 @@ func countToolResponses(history []llm.Message, toolCallID string) int {
 	return n
 }
 
-func TestInterruptPendingThenRepair_noDuplicate(t *testing.T) {
+func TestCancelPendingThenRepair_noDuplicate(t *testing.T) {
 	hub := stream.NewHub(8, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
 
@@ -37,7 +37,7 @@ func TestInterruptPendingThenRepair_noDuplicate(t *testing.T) {
 		}},
 	}
 
-	orch.InterruptPending("sess-1", &history, pending)
+	orch.CancelPendingToolCalls("sess-1", &history, pending, ToolUserInterruptedMessage, map[string]any{"cancelled_by_turn": true})
 	orch.RepairUnrespondedToolCalls("sess-1", &history)
 
 	if got := countToolResponses(history, "call-bash"); got != 1 {
@@ -48,7 +48,7 @@ func TestInterruptPendingThenRepair_noDuplicate(t *testing.T) {
 	}
 }
 
-func TestRepairThenInterrupt_noDuplicate(t *testing.T) {
+func TestRepairThenCancelPending_noDuplicate(t *testing.T) {
 	hub := stream.NewHub(8, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
 
@@ -68,14 +68,14 @@ func TestRepairThenInterrupt_noDuplicate(t *testing.T) {
 	}
 
 	orch.RepairUnrespondedToolCalls("sess-1", &history)
-	orch.InterruptPending("sess-1", &history, pending)
+	orch.CancelPendingToolCalls("sess-1", &history, pending, ToolUserInterruptedMessage, map[string]any{"cancelled_by_turn": true})
 
 	if got := countToolResponses(history, "call-bash"); got != 1 {
 		t.Fatalf("tool response count = %d, want 1: %+v", got, history)
 	}
 }
 
-func TestInterruptPending_twiceNoDuplicate(t *testing.T) {
+func TestCancelPendingTwiceNoDuplicate(t *testing.T) {
 	hub := stream.NewHub(8, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
 
@@ -88,8 +88,8 @@ func TestInterruptPending_twiceNoDuplicate(t *testing.T) {
 		}},
 	}
 
-	orch.InterruptPending("sess-1", &history, pending)
-	orch.InterruptPending("sess-1", &history, pending)
+	orch.CancelPendingToolCalls("sess-1", &history, pending, ToolUserInterruptedMessage, map[string]any{"cancelled_by_turn": true})
+	orch.CancelPendingToolCalls("sess-1", &history, pending, ToolUserInterruptedMessage, map[string]any{"cancelled_by_turn": true})
 
 	if got := countToolResponses(history, "call-bash"); got != 1 {
 		t.Fatalf("tool response count = %d, want 1: %+v", got, history)

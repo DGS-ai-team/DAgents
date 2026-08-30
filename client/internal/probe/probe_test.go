@@ -19,7 +19,7 @@ func TestNode_success(t *testing.T) {
 	})
 	mux.HandleFunc("GET /v1/agent/info", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"node_id": "a1",
+			"node_id":      "a1",
 			"capabilities": []string{"shell"}, "manage_registered": false,
 		})
 	})

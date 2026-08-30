@@ -64,8 +64,6 @@ MEMBER_TOOL_PURPOSE: dict[str, str] = {
     "grep_files": "搜索内容",
     "search_replace": "替换内容",
     "bash_run": "执行命令",
-    "background_job_status": "查看后台任务",
-    "background_job_cancel": "取消后台任务",
 }
 
 
@@ -365,14 +363,12 @@ def build_member_system_prompt(
     workgroup_name: str = "",
     created_by_node_id: str = "",
     workspace_path: str = "",
-    user_md: str = "",  # deprecated：不再注入；保留参数兼容旧调用
 ) -> str:
     """组装成员 system prompt。
 
     顺序对齐 Node Agent：静态规则 → 运行环境 → 工作区 → Soul → 用户信息 → Custom。
     环境取自 Home Node Registry；用户信息说明工作组协作语境与 Node 归属（不再使用 user.md）。
     """
-    _ = user_md  # 显式忽略废弃字段
     parts = [
         _MEMBER_STATIC_RULES.strip(),
         _format_member_environment_section(host_env=host_env),

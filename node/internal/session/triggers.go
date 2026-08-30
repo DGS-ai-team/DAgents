@@ -22,17 +22,17 @@ func (t *TriggerSubmitter) EnsureSession(requestedID string) (string, error) {
 	return sess.ID, nil
 }
 
-// SubmitTriggerMessage 以 other 优先级入队 trigger 渲染后的 user 消息。
+// SubmitTriggerMessage 将 trigger 作为 FIFO 外部输入提交。
 func (t *TriggerSubmitter) SubmitTriggerMessage(sessionID, triggerID, content string) error {
 	return t.Mgr.EnqueueTriggerMessage(sessionID, triggerID, content)
 }
 
-// EnqueueTriggerMessage 将 trigger 任务入队；session 不存在时会先 Create。
+// EnqueueTriggerMessage 将 trigger 任务写入 session InputBox；session 不存在时会先 Create。
 
 // 逻辑：
 // 1. 校验 content 非空；
 // 2. EnsureSession（空 ID 则新建）；
-// 3. 以 PriorityOther 入队，Envelope.TriggerID 供 dequeue 后清除 pending。
+// 3. 按 session input_seq FIFO，Envelope.TriggerID 供消费后清除 pending。
 func (m *Manager) EnqueueTriggerMessage(sessionID, triggerID, content string) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -46,6 +46,7 @@ func (m *Manager) EnqueueTriggerMessage(sessionID, triggerID, content string) er
 	if rt == nil {
 		return fmt.Errorf("agent_not_found")
 	}
-	env := queue.Envelope{RequestType: queue.RequestTypeTriggerMessage, Content: content, TriggerID: strings.TrimSpace(triggerID), UserName: llm.UserNameTrigger}
-	return rt.enqueue(env, queue.PriorityOther)
+	env := queue.Envelope{RequestType: queue.RequestTypeMessage, Content: content, TriggerID: strings.TrimSpace(triggerID), UserName: llm.UserNameTrigger}
+	_, err = rt.appendInput(InputKindTrigger, env)
+	return err
 }

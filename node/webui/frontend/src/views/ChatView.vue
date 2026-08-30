@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, onActivated, onDeactivated, ref, watch, nextTick } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, onActivated, onDeactivated, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
@@ -9,8 +9,7 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
-import ActivityPanel from "../components/ActivityPanel.vue";
-import TerminalWorkbench from "../components/TerminalWorkbench.vue";
+const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
 import {
   agentStore,
   persistAgentId,
@@ -19,6 +18,7 @@ import {
   beginImplicitTurn,
   isStaleEvent,
   isDuplicateEvent,
+  observeEventContinuity,
   markEventApplied,
   shouldAckSSEEvent,
   resetEventTracking,
@@ -26,7 +26,6 @@ import {
 import {
   transcriptStore,
   addUser,
-  addDeferredUser,
   markSideEffectsApplied,
   markSideEffectsStale,
   addSystem,
@@ -43,7 +42,6 @@ import {
 } from "../stores/transcript.js";
 import {
   hitlStore,
-  enqueueHitl,
   getHitlAt,
   dequeueHitlAt,
   peekHitl,
@@ -100,12 +98,12 @@ import {
 import { resetToolStream } from "../stores/toolStream.js";
 import {
   onChildCreated,
+  onChildProgress,
   onChildFinished,
   resetRemoteWorkers,
   setChildAwaitingApproval,
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
-import { bumpActivityRefresh } from "../stores/activity.js";
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
@@ -113,6 +111,8 @@ import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmCont
 const router = useRouter();
 const route = useRoute();
 
+const routeNotice = ref("");
+let routeNoticeTimer = null;
 const hitlSelected = ref([]);
 const cancelling = ref(false);
 const streamHandle = ref(null);
@@ -128,6 +128,7 @@ const selectedTerminalMeta = ref(null);
 const terminalRevision = ref(0);
 let agentNameSyncToken = 0;
 let sseResyncToken = 0;
+let sseResyncInFlight = false;
 let hitlReconcileInFlight = false;
 let hitlReconciledTurnId = "";
 let agentSwitchToken = 0;
@@ -160,12 +161,6 @@ const showNoAgentWelcome = computed(
 const currentAgentTitle = computed(() => {
   if (!String(agentStore.agentId || "").trim()) return "";
   return String(currentAgentDisplayName.value || "").trim() || "未命名 Agent";
-});
-
-const currentAgentRecord = computed(() => {
-  const id = String(agentStore.agentId || "").trim();
-  if (!id) return null;
-  return agentList.value.find((a) => agentRecordId(a) === id) || null;
 });
 
 async function syncCurrentAgentDisplayName() {
@@ -214,6 +209,7 @@ function restartStream() {
   streamHandle.value = connectStream({
     getAgentId: () => agentStore.agentId,
     getAfterSeq: () => transcriptStore.lastSeq,
+    getAfterAgentSeq: () => transcriptStore.lastAgentSeq,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
@@ -227,7 +223,8 @@ function restartStream() {
 
 /** SSE 断线重连或状态卡住时：hydrate 对账 turn/status/HITL（不重启已恢复的流）。 */
 async function resyncAfterSSEGap(reason) {
-  if (!agentStore.agentId) return;
+  if (!agentStore.agentId || sseResyncInFlight) return;
+  sseResyncInFlight = true;
   const token = ++sseResyncToken;
   const agentId = agentStore.agentId;
   turnWatchdog.noteActivity();
@@ -236,7 +233,6 @@ async function resyncAfterSSEGap(reason) {
     if (data === null) return;
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     turnWatchdog.noteActivity();
-    bumpActivityRefresh();
     await refreshToolJobs(agentStore.agentId);
     // A Node restart can complete while the NavRail is still serving its
     // cached agent list. Reconcile it after the stream has reconnected so a
@@ -248,6 +244,8 @@ async function resyncAfterSSEGap(reason) {
   } catch (e) {
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     agentStore.error = e.message || String(e);
+  } finally {
+    sseResyncInFlight = false;
   }
 }
 
@@ -344,7 +342,15 @@ function handleEvent(ev) {
   // 防御：忽略非当前 Agent 的事件（切 Agent 时旧 EventSource 可能仍投递）
   if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
 
-  if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
+  const continuity = observeEventContinuity(ev.agentSeq, ev.epoch);
+  if (continuity.epochChanged) {
+    void resyncAfterSSEGap("epoch-change");
+    return;
+  }
+  if (continuity.gap) {
+    void resyncAfterSSEGap("sequence-gap");
+  }
+  if (isStaleEvent(ev.seq, ev.agentSeq, ev.epoch) || isDuplicateEvent(ev.seq, ev.agentSeq, ev.epoch)) return;
   recordSSEEvent(ev.type, ev.seq);
   const eventSpan = startPerformanceSpan("sse.handle", { type: ev.type });
   try {
@@ -412,28 +418,11 @@ function handleEvent(ev) {
       applyToolResult(ev.data);
       refreshToolJobs(agentStore.agentId);
       break;
-    case "execution":
-      // Process output is already delivered through the terminal WebSocket
-      // and can be very frequent. Lifecycle edges are useful for refreshing
-      // the Activity rail, but output frames must not trigger HTTP polling.
-      if (String(ev.data?.event || "") !== "process_output") {
-        bumpActivityRefresh();
-      }
-      break;
     case "usage":
       setUsageFromSSE(ev.data);
       break;
     case "error":
-      clearHitl();
-      finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
-      if (turnStateStore.authority !== "turn_coordinator") {
-        applyTurnState(
-          { phase: "failed", terminal: true, end_reason: ev.data.message || "error" },
-          { source: "event" },
-        );
-        syncTurnStatus(turnStateStore);
-      }
       break;
     case "system_notice":
       addSystem(String(ev.data?.message || "工具集已变更"));
@@ -454,7 +443,18 @@ function handleEvent(ev) {
       );
       break;
     case "skills/changed":
-      addSystem("技能目录已变化，将在下一轮边界重新评估。");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("dagents:skills-changed", { detail: ev.data || {} }));
+      }
+      addSystem(
+        ev.data?.change === "loaded_set"
+          ? ev.data?.applied_boundary === "next_model_step"
+            ? "技能状态已更新，将在下一步模型请求生效。"
+            : "技能状态已更新，将在下一轮生效。"
+          : ev.data?.applied_boundary === "next_model_step"
+            ? "技能目录已更新，将在上下文重建后的下一步模型请求生效。"
+            : "技能目录已变化，将在下一轮上下文边界更新。",
+      );
       break;
     case "mcp/catalog-changed":
       addSystem(
@@ -463,21 +463,15 @@ function handleEvent(ev) {
           : "MCP 工具目录已更新。",
       );
       break;
-    case "done":
-      // Legacy nodes may only emit done without a terminal turn_state.
-      // Reconcile the local approval projection on that path as well.
-      clearHitl();
+    case "turn_finished":
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
       refreshToolJobs(agentStore.agentId);
-      // done closes the content stream. The lifecycle projection owns the
-      // Turn terminal transition; keep the legacy fallback for older nodes.
-      if (turnStateStore.authority !== "turn_coordinator") {
-        resetToolStream();
-        syncChildAgentsFromApi();
-      }
       refreshContextTokens();
+      break;
+    case "resync_required":
+      void resyncAfterSSEGap("server-resync");
       break;
     case "hitl_required":
       finalizeAssistant();
@@ -486,17 +480,13 @@ function handleEvent(ev) {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
       }
-      if (turnStateStore.authority !== "turn_coordinator") {
-        applyTurnState(
-          { phase: ev.data?.type === "user_information" ? "waiting_user" : "tool_waiting" },
-          { source: "event" },
-        );
-        syncTurnStatus(turnStateStore);
-      }
       break;
     case "temporary_agent_created":
       onChildCreated(ev.data);
       addSystem(formatChildLifecycle(ev.type, ev.data));
+      break;
+    case "temporary_agent_progress":
+      onChildProgress(ev.data);
       break;
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":
@@ -512,13 +502,6 @@ function handleEvent(ev) {
       beginImplicitTurn();
       syncTurnStatus({ phase: "queued" });
       turnWatchdog.noteActivity();
-      break;
-    case "user_message_deferred":
-      addDeferredUser(
-        String(ev.data.content || ""),
-        String(ev.data.user_name || ""),
-        Number(ev.data.side_effect_seq) || 0,
-      );
       break;
     case "side_effect_applied":
       markSideEffectsApplied(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
@@ -538,7 +521,11 @@ function handleEvent(ev) {
       addSystem(`收到未识别的 Agent 事件：${String(ev.type || "unknown")}`);
     }
 
-    markEventApplied(ev.seq, { ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data) });
+    markEventApplied(ev.seq, {
+      agentSeq: ev.agentSeq,
+      epoch: ev.epoch,
+      ack: !skipRender && shouldAckSSEEvent(ev.type, ev.data),
+    });
   } finally {
     eventSpan.end();
   }
@@ -565,10 +552,10 @@ async function reconcilePendingHitl(turnState) {
   if (hitlReconcileInFlight || hitlStore.queue.length > 0) return;
   const turnId = String(turnState?.turn_id || turnStateStore.turnId || "").trim();
   if (turnId && hitlReconciledTurnId === turnId) return;
-  if (turnId) hitlReconciledTurnId = turnId;
   hitlReconcileInFlight = true;
   try {
-    await hydrateAgent();
+    const data = await hydrateAgent();
+    if (data !== null && turnId) hitlReconciledTurnId = turnId;
   } catch {
     // SSE 仍是主通道；hydrate 失败时交给重连/看门狗再次对账。
   } finally {
@@ -692,6 +679,7 @@ async function onSendMessage(payload) {
   const text = typeof payload === "string" ? payload : String(payload?.text || "").trim();
   const contentParts = typeof payload === "string" ? null : payload?.contentParts;
   const images = typeof payload === "string" ? [] : payload?.images || [];
+  const fileRefs = typeof payload === "string" ? [] : payload?.fileRefs || [];
 
   if (text.startsWith("/")) {
     await handleCommand(text);
@@ -715,11 +703,11 @@ async function onSendMessage(payload) {
 
   await ensureStreamReady();
   clearHitl();
-  addUser(text, images);
+  addUser(text, images, fileRefs);
   beginSubmit();
   turnWatchdog.noteActivity();
   try {
-    await api.submitMessage(agentStore.agentId, text, contentParts);
+    await api.submitMessage(agentStore.agentId, text, contentParts, fileRefs);
     markSubmissionAccepted();
   } catch (e) {
     failTurnSubmission();
@@ -753,7 +741,6 @@ async function handleCommand(cmd) {
     if (data === null) return;
     restartStream();
     await refreshToolJobs(agentStore.agentId);
-    bumpActivityRefresh();
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
     return;
   }
@@ -903,7 +890,6 @@ async function switchAgent(id) {
   syncRouteAgent(targetID);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
-  bumpActivityRefresh();
   await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
@@ -1053,10 +1039,6 @@ async function handleThinkingCommand(arg) {
   }
   chromeStore.llmSettings = await api.patchLLMSettings(patch);
   addSystem(`thinking: ${chromeStore.llmSettings.thinking || "-"}`);
-}
-
-function openLeftActivity() {
-  chromeStore.panel = "activity";
 }
 
 function closePanel() {
@@ -1226,17 +1208,11 @@ function clearTerminalSelection() {
 }
 
 const workspaceView = computed(() => {
-  if (chromeStore.panel === "activity") return "activity";
   return terminalOpen.value ? "terminal" : "messages";
 });
 
 function switchWorkspace(view) {
   const next = String(view || "messages");
-  if (next === "activity") {
-    if (terminalOpen.value) closeTerminal();
-    chromeStore.panel = "activity";
-    return;
-  }
   chromeStore.panel = null;
   if (next === "terminal") {
     void router.replace({
@@ -1287,6 +1263,23 @@ onDeactivated(() => {
 });
 
 watch(
+  () => route.query.notice,
+  (value) => {
+    if (String(value || "") !== "workgroup-disabled") return;
+    routeNotice.value = "工作组尚未启用，已返回智能体工作区。";
+    const query = { ...route.query };
+    delete query.notice;
+    void router.replace({ query });
+    if (routeNoticeTimer) clearTimeout(routeNoticeTimer);
+    routeNoticeTimer = setTimeout(() => {
+      routeNotice.value = "";
+      routeNoticeTimer = null;
+    }, 4000);
+  },
+  { immediate: true },
+);
+
+watch(
   () => route.params.agentId,
   async (id) => {
     const aid = String(id || "").trim();
@@ -1320,6 +1313,7 @@ watch(
 );
 
 onUnmounted(() => {
+  if (routeNoticeTimer) clearTimeout(routeNoticeTimer);
   invalidateHydration();
   sseResyncToken += 1;
   turnWatchdog.stop();
@@ -1360,6 +1354,7 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
+      <div v-if="routeNotice" class="chat-notice-banner" role="status">{{ routeNotice }}</div>
       <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
       <AgentEmptyState
         v-if="showNoAgentWelcome"
@@ -1395,7 +1390,6 @@ onUnmounted(() => {
           @toggle-thinking="toggleThinkingMode"
           @cycle-effort="cycleThinkingEffort"
           @switch-profile="switchLLMProfile"
-          @open-activity="openLeftActivity"
           @approve-all="(idx) => submitHitlApproval(true, idx)"
           @reject-all="(idx) => submitHitlApproval(false, idx)"
           @approve-one="(payload) => submitHitlOne(payload, true)"
@@ -1433,7 +1427,6 @@ onUnmounted(() => {
           @toggle-thinking="toggleThinkingMode"
            @cycle-effort="cycleThinkingEffort"
           @switch-profile="switchLLMProfile"
-          @open-activity="openLeftActivity"
           @approve-all="(idx) => submitHitlApproval(true, idx)"
           @reject-all="(idx) => submitHitlApproval(false, idx)"
           @approve-one="(payload) => submitHitlOne(payload, true)"
@@ -1447,11 +1440,6 @@ onUnmounted(() => {
 
       <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel @close="closePanel" />
-      </div>
-      <div v-if="chromeStore.panel === 'activity'" class="panel-overlay" @click.self="closePanel">
-        <div class="activity-workspace-overlay">
-          <ActivityPanel @close="closePanel" />
-        </div>
       </div>
     </div>
 
@@ -1467,16 +1455,4 @@ onUnmounted(() => {
 <style scoped>
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
-.activity-workspace-overlay {
-  width: min(480px, 100%);
-  height: min(720px, 85vh);
-  overflow: hidden;
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-}
-.activity-workspace-overlay :deep(.activity-rail) {
-  border-left: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-}
 </style>

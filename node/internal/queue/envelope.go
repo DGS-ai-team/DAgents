@@ -5,8 +5,7 @@ const (
 	RequestTypeMessage            = "message"
 	RequestTypeResume             = "resume"
 	RequestTypeAsyncToolResult    = "async_tool_result"
-	RequestTypeToolResult         = "tool_result"
-	RequestTypeTriggerMessage     = "trigger_message"
+	RequestTypeTurnContinuation   = "turn_continuation"
 	RequestTypeSideEffectContinue = "side_effect_continue"
 )
 

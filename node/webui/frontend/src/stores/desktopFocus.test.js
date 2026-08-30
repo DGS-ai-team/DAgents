@@ -18,7 +18,6 @@ vi.mock("../api/desktop.js", () => ({
 let reportDesktopUIFocus;
 let startDesktopFocusHeartbeat;
 let stopDesktopFocusHeartbeat;
-let pulseDesktopFocus;
 
 beforeEach(async () => {
   vi.useFakeTimers();
@@ -27,7 +26,6 @@ beforeEach(async () => {
   const mod = await import("./desktopFocus.js");
   startDesktopFocusHeartbeat = mod.startDesktopFocusHeartbeat;
   stopDesktopFocusHeartbeat = mod.stopDesktopFocusHeartbeat;
-  pulseDesktopFocus = mod.pulseDesktopFocus;
 });
 
 afterEach(() => {

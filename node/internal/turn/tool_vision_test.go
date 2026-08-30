@@ -99,7 +99,7 @@ func TestExecuteTool_readImageSkipsVisionWhenMultimodalDisabled(t *testing.T) {
 func hooksRuntimeConfig(t *testing.T) hooks.RuntimeConfig {
 	t.Helper()
 	return hooks.RuntimeConfig{
-		Duplicate:    hooks.DefaultDuplicateConfig(),
-		ToolResult:   hooks.DefaultToolResultConfig(t.TempDir()),
+		Duplicate:  hooks.DefaultDuplicateConfig(),
+		ToolResult: hooks.DefaultToolResultConfig(t.TempDir()),
 	}
 }

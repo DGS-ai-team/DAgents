@@ -15,7 +15,7 @@
 | 文件 | 覆盖 | 备注 |
 |------|------|------|
 | `test_smoke.py` | 横切 | 工作区可导入 |
-| `test_manage_*.py` | §13 Manage | Registry、A2A、Skills、LLM、Releases、Cases、Admin、Workgroup |
+| `test_manage_*.py` | §13 Manage | Registry、Skills、LLM、Releases、Cases、Admin、Workgroup |
 | `test_workgroup_*.py` | Workgroup | D05 索引与 store golden 用例 |
 | `integration/live_llm_smoke.py` | §14 | 显式模块运行，非 discover |
 
@@ -79,7 +79,6 @@
 | 优先级 | 主题 | 建议用例 | 断言方向 | 状态 |
 |--------|------|----------|----------|------|
 | P1 | Registry | `test_manage_m0_m1.py` | 注册、心跳、discover | ✅ |
-| P1 | A2A Task | `test_manage_m2_a2a.py`、`test_manage_a2a_store.py` | inbox、HITL 中继 | ✅ |
 | P2 | Skills / LLM / Releases | `test_manage_skills.py`、`test_manage_llm.py`、`test_manage_releases.py` | 上传、发布、check | ✅ |
 | P2 | Cases / ExternalTools | `test_manage_cases.py`、`test_manage_externaltools.py` | CRUD、JSONL | ✅ |
 | P2 | Admin / Schema | `test_manage_admin.py`、`test_manage_storage_schema.py` | 只读列表、DB schema | ✅ |
@@ -119,7 +118,7 @@
 
 ## 建议实施顺序（迭代）
 
-1. **已完成主干**：Manage Registry/A2A、Go Node/Client 核心包与 Workgroup 协作。
+1. **已完成主干**：Manage Registry、Go Node/Client 核心包与 Workgroup 协作。
 2. **Go 缺口**：`node/internal/hostsnapshot`、可选 cmd smoke。  
 3. **Python 下一批**：Manage Workflow 落地后补 `test_manage_workflows.py`；integration 慢测按需。  
 4. **P3**：manual 脚本归档、Node Prometheus 指标单测（落地后）。
@@ -142,7 +141,7 @@
 **本地一键**：
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock -r requirements-dev.txt
 python -m unittest discover -s tests -p "test_*.py" -v
 go test ./shared/config/... ./node/... ./client/...
 ```

@@ -42,10 +42,10 @@ type Host interface {
 type SpawnSpec struct {
 	ChildAgentID  string
 	ParentAgentID string
-	AllowedTools    []string
-	SkillNames      []string
-	MaxTurns        int
-	Purpose         string
+	AllowedTools  []string
+	SkillNames    []string
+	MaxTurns      int
+	Purpose       string
 }
 
 // Manager 跟踪子 Agent 记录、交付结果与 TTL。
@@ -112,6 +112,10 @@ func (m *Manager) Enabled() bool {
 
 // HandleCreate 实现 create_temporary_agent 工具。
 func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON string) (string, error) {
+	return m.handleCreate(ctx, parentSessionID, argsJSON, "")
+}
+
+func (m *Manager) handleCreate(ctx context.Context, parentSessionID, argsJSON, toolCallID string) (string, error) {
 	if !m.cfg.Enabled {
 		return "", fmt.Errorf("child agents disabled")
 	}
@@ -142,6 +146,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 	expiresAt := time.Now().Add(time.Duration(input.TTLSeconds) * time.Second)
 	agent := newActiveAgent(parentSessionID, input, childID, expiresAt)
 	agent.AllowedTools = allowed
+	agent.ToolCallID = strings.TrimSpace(toolCallID)
 	agent.Status = StatusCreating
 
 	m.mu.Lock()
@@ -154,10 +159,10 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 	if err := m.host.SpawnChild(SpawnSpec{
 		ChildAgentID:  childID,
 		ParentAgentID: parentSessionID,
-		AllowedTools:    allowed,
-		SkillNames:      append([]string(nil), input.SkillNames...),
-		MaxTurns:        input.MaxTurns,
-		Purpose:         input.Purpose,
+		AllowedTools:  allowed,
+		SkillNames:    append([]string(nil), input.SkillNames...),
+		MaxTurns:      input.MaxTurns,
+		Purpose:       input.Purpose,
 	}); err != nil {
 		m.unregisterActive(childID)
 		return "ERROR: " + err.Error(), nil
@@ -172,6 +177,11 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 
 	agent.mu.Lock()
 	agent.Status = StatusActive
+	agent.Progress.Status = StatusActive
+	agent.Progress.Phase = "queued"
+	agent.Progress.MaxTurns = agent.MaxTurns
+	agent.Progress.Revision++
+	agent.Progress.UpdatedAt = time.Now().UTC()
 	agent.mu.Unlock()
 	// 发布创建事件
 	m.publishCreated(parentSessionID, agent, input.Wait)
@@ -185,26 +195,26 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 			return "ERROR: " + waitErr.Error(), nil
 		}
 		body, _ := json.Marshal(map[string]any{
-			"kind":             "result",
+			"kind":           "result",
 			"child_agent_id": res.ChildAgentID,
-			"status":           res.Status,
-			"summary":          res.Summary,
-			"turn_count":       res.TurnCount,
-			"artifacts":        res.Artifacts,
-			"error":            res.Error,
+			"status":         res.Status,
+			"summary":        res.Summary,
+			"turn_count":     res.TurnCount,
+			"artifacts":      res.Artifacts,
+			"error":          res.Error,
 		})
 		return string(body), nil
 	}
 
 	// 返回结果
 	body, _ := json.Marshal(map[string]any{
-		"kind":             "handle",
+		"kind":           "handle",
 		"child_agent_id": childID,
-		"status":           StatusActive,
-		"purpose":          input.Purpose,
-		"loaded_skills":    append([]string(nil), input.SkillNames...),
-		"expires_at":       expiresAt.Format(time.RFC3339),
-		"max_turns":        input.MaxTurns,
+		"status":         StatusActive,
+		"purpose":        input.Purpose,
+		"loaded_skills":  append([]string(nil), input.SkillNames...),
+		"expires_at":     expiresAt.Format(time.RFC3339),
+		"max_turns":      input.MaxTurns,
 	})
 	return string(body), nil
 }
@@ -246,7 +256,7 @@ func (m *Manager) Cancel(parentSessionID, childSessionID, reason string) (Result
 		m.mu.Unlock()
 		return out, nil
 	}
-	prev := agent.Status
+	prev := agent.Snapshot().Status
 	m.mu.Unlock()
 
 	reason = strings.TrimSpace(reason)
@@ -335,13 +345,23 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	}
 	agent.mu.Lock()
 	agent.Status = status
+	agent.Progress.Status = status
+	agent.Progress.Phase = string(status)
+	agent.Progress.PendingApproval = false
+	agent.Progress.Summary = strings.TrimSpace(summary)
+	agent.Progress.Error = strings.TrimSpace(errText)
+	agent.Progress.TurnCount = agent.TurnCount
+	agent.Progress.MaxTurns = agent.MaxTurns
+	agent.Progress.Revision++
+	agent.Progress.UpdatedAt = time.Now().UTC()
+	terminalProgress := agent.Progress
 	out := Result{
 		ChildAgentID: childSessionID,
-		Status:         status,
-		Summary:        summary,
-		TurnCount:      agent.TurnCount,
-		Error:          errText,
-		Artifacts:      []string{},
+		Status:       status,
+		Summary:      summary,
+		TurnCount:    agent.TurnCount,
+		Error:        errText,
+		Artifacts:    []string{},
 	}
 	agent.terminalResult = &out
 	select {
@@ -357,6 +377,7 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	m.settledResults[childSessionID] = out
 	m.mu.Unlock()
 
+	m.publishProgress(parentID, agent, terminalProgress)
 	if cancelledEvent {
 		m.publishCancelled(parentID, childSessionID, errText, previousStatus)
 	} else {
@@ -434,7 +455,7 @@ func (m *Manager) runTTLTimer(childID string, ttl time.Duration) {
 		return
 	}
 	parentID := agent.ParentAgentID
-	prev := string(agent.Status)
+	prev := string(agent.Snapshot().Status)
 	m.mu.Unlock()
 	m.finishWithEvent(childID, StatusExpired, "", "ttl expired", false, prev)
 	m.logger.Info("child agent expired", "child_agent_id", childID, "parent_agent_id", parentID)
@@ -444,31 +465,40 @@ func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool)
 	if m.hub == nil {
 		return
 	}
-	m.hub.Publish(parentID, EventTemporaryAgentCreated, map[string]any{
-		"child_agent_id":  agent.ChildAgentID,
+	snapshot := agent.Snapshot()
+	payload := map[string]any{
+		"child_agent_id":  snapshot.ChildAgentID,
 		"parent_agent_id": parentID,
-		"purpose":           agent.Purpose,
-		"loaded_skills":     append([]string(nil), agent.LoadedSkills...),
-		"status":            StatusActive,
-		"expires_at":        agent.ExpiresAt.Format(time.RFC3339),
-		"max_turns":         agent.MaxTurns,
-		"wait":              wait,
-	})
+		"purpose":         snapshot.Purpose,
+		"loaded_skills":   append([]string(nil), snapshot.LoadedSkills...),
+		"status":          StatusActive,
+		"expires_at":      snapshot.ExpiresAt.Format(time.RFC3339),
+		"max_turns":       snapshot.MaxTurns,
+		"wait":            wait,
+		"phase":           snapshot.Progress.Phase,
+		"revision":        snapshot.Progress.Revision,
+		"updated_at":      snapshot.Progress.UpdatedAt,
+	}
+	if snapshot.ToolCallID != "" {
+		payload["tool_call_id"] = snapshot.ToolCallID
+	}
+	m.hub.Publish(parentID, EventTemporaryAgentCreated, payload)
 }
 
 func (m *Manager) publishCompleted(parentID string, res *Result) {
 	if m.hub == nil || res == nil {
 		return
 	}
-	m.hub.Publish(parentID, EventTemporaryAgentCompleted, map[string]any{
+	payload := map[string]any{
 		"child_agent_id":  res.ChildAgentID,
 		"parent_agent_id": parentID,
-		"status":            res.Status,
-		"summary":           res.Summary,
-		"turn_count":        res.TurnCount,
-		"error":             res.Error,
-		"artifacts":         res.Artifacts,
-	})
+		"status":          res.Status,
+		"summary":         res.Summary,
+		"turn_count":      res.TurnCount,
+		"error":           res.Error,
+		"artifacts":       res.Artifacts,
+	}
+	m.hub.Publish(parentID, EventTemporaryAgentCompleted, payload)
 }
 
 func (m *Manager) publishCancelled(parentID, childID, reason, previous string) {
@@ -478,9 +508,9 @@ func (m *Manager) publishCancelled(parentID, childID, reason, previous string) {
 	m.hub.Publish(parentID, EventTemporaryAgentCancelled, map[string]any{
 		"child_agent_id":  childID,
 		"parent_agent_id": parentID,
-		"status":            StatusCancelled,
-		"reason":            reason,
-		"previous_status":   previous,
+		"status":          StatusCancelled,
+		"reason":          reason,
+		"previous_status": previous,
 	})
 }
 

@@ -691,21 +691,6 @@ ON CONFLICT(agent_id, channel_id) DO UPDATE SET
 	return err
 }
 
-func (s *LinuxChannelStore) DeleteBinding(ctx context.Context, agentID, channelID string) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("linux channel store unavailable")
-	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM agent_linux_channels WHERE agent_id = ? AND channel_id = ?`, strings.TrimSpace(agentID), strings.TrimSpace(channelID))
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("linux channel binding not found")
-	}
-	return nil
-}
-
 // ResolveLinuxChannel implements tools.LinuxChannelResolver without exposing
 // credential secret material to the execution package.
 func (s *LinuxChannelStore) ResolveLinuxChannel(ctx context.Context, id string) (tools.LinuxChannelConfig, error) {

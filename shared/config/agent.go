@@ -22,11 +22,6 @@ func (c *Config) AgentRole() string {
 
 // NodeDisplayName 返回 Manage / peers 展示名；空则回退 node_id。
 func (c *Config) NodeDisplayName() string {
-	return c.AgentDisplayName()
-}
-
-// AgentDisplayName 同 NodeDisplayName（兼容旧调用点）。
-func (c *Config) AgentDisplayName() string {
 	if c == nil {
 		return ""
 	}
@@ -72,4 +67,3 @@ func (c *Config) RegistrationCapabilities() []string {
 	}
 	return append([]string(nil), c.Agent.Capabilities...)
 }
-

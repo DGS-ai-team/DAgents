@@ -48,14 +48,9 @@ CREATE TABLE IF NOT EXISTS background_jobs (
 	recovered_at INTEGER NOT NULL DEFAULT 0,
 	remote_target_id TEXT NOT NULL DEFAULT '',
 	remote_job_token TEXT NOT NULL DEFAULT '',
-	remote_pid_file TEXT NOT NULL DEFAULT '',
-	started_at INTEGER NOT NULL DEFAULT 0,
+  remote_pid_file TEXT NOT NULL DEFAULT '',
+  started_at INTEGER NOT NULL DEFAULT 0,
   finished_at INTEGER NOT NULL DEFAULT 0,
-  auto_degraded INTEGER NOT NULL DEFAULT 0,
-  bash_cwd TEXT NOT NULL DEFAULT '',
-  bash_timeout INTEGER NOT NULL DEFAULT 0,
-  bash_shell_type TEXT NOT NULL DEFAULT '',
-  bash_output_encoding TEXT NOT NULL DEFAULT '',
   compress_saved_pct INTEGER NOT NULL DEFAULT 0,
   compress_raw_runes INTEGER NOT NULL DEFAULT 0,
   compress_out_runes INTEGER NOT NULL DEFAULT 0,
@@ -98,10 +93,6 @@ func (s *BackgroundJobStore) save(job *backgroundJob) error {
 		return nil
 	}
 	job.mu.Lock()
-	degraded := 0
-	if job.autoDegraded {
-		degraded = 1
-	}
 	savedPct, rawRunes, outRunes := 0, 0, 0
 	if job.compressStats != nil {
 		savedPct = job.compressStats.SavedPct
@@ -118,8 +109,7 @@ func (s *BackgroundJobStore) save(job *backgroundJob) error {
 		job.id, job.sessionID, job.toolName, job.toolCallID, job.status, job.result,
 		job.recoveryReason, job.recoveredAt,
 		remoteTargetID, remoteJobToken, remotePIDFile,
-		job.startedAt, job.finishedAt, degraded, job.bashCwd, job.bashTimeout,
-		job.bashShellType, job.bashOutputEncoding, savedPct, rawRunes, outRunes, time.Now().UnixMilli(),
+		job.startedAt, job.finishedAt, savedPct, rawRunes, outRunes, time.Now().UnixMilli(),
 	}
 	job.mu.Unlock()
 	_, err := s.db.Exec(`
@@ -127,11 +117,10 @@ INSERT INTO background_jobs(
   job_id, session_id, tool_name, tool_call_id, status, result,
   recovery_reason, recovered_at,
   remote_target_id, remote_job_token, remote_pid_file,
-  started_at, finished_at, auto_degraded, bash_cwd, bash_timeout,
-  bash_shell_type, bash_output_encoding, compress_saved_pct,
+  started_at, finished_at, compress_saved_pct,
   compress_raw_runes, compress_out_runes, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(job_id) DO UPDATE SET
   session_id=excluded.session_id,
   tool_name=excluded.tool_name,
@@ -145,11 +134,6 @@ ON CONFLICT(job_id) DO UPDATE SET
   remote_pid_file=excluded.remote_pid_file,
   started_at=excluded.started_at,
   finished_at=excluded.finished_at,
-  auto_degraded=excluded.auto_degraded,
-  bash_cwd=excluded.bash_cwd,
-  bash_timeout=excluded.bash_timeout,
-  bash_shell_type=excluded.bash_shell_type,
-  bash_output_encoding=excluded.bash_output_encoding,
   compress_saved_pct=excluded.compress_saved_pct,
   compress_raw_runes=excluded.compress_raw_runes,
   compress_out_runes=excluded.compress_out_runes,
@@ -165,8 +149,7 @@ func (s *BackgroundJobStore) load(sessionID string) ([]*backgroundJob, error) {
 SELECT job_id, session_id, tool_name, tool_call_id, status, result,
        recovery_reason, recovered_at,
        remote_target_id, remote_job_token, remote_pid_file,
-       started_at, finished_at, auto_degraded, bash_cwd, bash_timeout,
-       bash_shell_type, bash_output_encoding, compress_saved_pct,
+       started_at, finished_at, compress_saved_pct,
        compress_raw_runes, compress_out_runes
 FROM background_jobs`
 	args := []any{}
@@ -183,18 +166,16 @@ FROM background_jobs`
 	var out []*backgroundJob
 	for rows.Next() {
 		var job backgroundJob
-		var degraded, savedPct, rawRunes, outRunes int
+		var savedPct, rawRunes, outRunes int
 		var jobRemoteTargetID, jobRemoteJobToken, jobRemotePIDFile string
 		if err := rows.Scan(
 			&job.id, &job.sessionID, &job.toolName, &job.toolCallID, &job.status, &job.result,
 			&job.recoveryReason, &job.recoveredAt,
 			&jobRemoteTargetID, &jobRemoteJobToken, &jobRemotePIDFile,
-			&job.startedAt, &job.finishedAt, &degraded, &job.bashCwd, &job.bashTimeout,
-			&job.bashShellType, &job.bashOutputEncoding, &savedPct, &rawRunes, &outRunes,
+			&job.startedAt, &job.finishedAt, &savedPct, &rawRunes, &outRunes,
 		); err != nil {
 			return nil, err
 		}
-		job.autoDegraded = degraded != 0
 		if jobRemoteJobToken != "" || jobRemotePIDFile != "" {
 			job.remoteRecovery = &RemoteProcessRecovery{TargetID: jobRemoteTargetID, JobToken: jobRemoteJobToken, PIDFile: jobRemotePIDFile}
 		}

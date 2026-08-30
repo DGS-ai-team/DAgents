@@ -1,5 +1,6 @@
 //! Node REST/SSE client used by the desktop shell.
 
+use crate::config::RuntimeConfig;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -39,6 +40,16 @@ pub struct AgentSummary {
     pub pending_hitl_items: i32,
 }
 
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct AgentInfo {
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub manage_enabled: bool,
+    #[serde(default)]
+    pub manage_url: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ListAgentsResponse {
     #[serde(default)]
@@ -51,6 +62,10 @@ pub struct StreamEvent {
     pub session_id: String,
     pub agent_id: String,
     pub seq: i32,
+    pub agent_seq: i32,
+    pub event_version: i32,
+    pub stream_epoch: String,
+    pub delivery: String,
     pub data: HashMap<String, Value>,
 }
 
@@ -62,6 +77,14 @@ struct StreamEnvelope {
     event_type: String,
     #[serde(default)]
     seq: i32,
+    #[serde(default)]
+    agent_seq: i32,
+    #[serde(default)]
+    event_version: i32,
+    #[serde(default)]
+    stream_epoch: String,
+    #[serde(default)]
+    delivery: String,
     #[serde(default)]
     data: HashMap<String, Value>,
 }
@@ -121,6 +144,44 @@ impl Client {
         Ok(out.agents)
     }
 
+    pub fn agent_info(&self) -> Result<AgentInfo, String> {
+        if self.base.is_empty() {
+            return Err("node client: empty base URL".into());
+        }
+        let req = self.authorize(ureq::get(&format!("{}/v1/agent/info", self.base)));
+        let resp = req
+            .timeout(Duration::from_secs(5))
+            .call()
+            .map_err(|e| format!("GET /v1/agent/info: {e}"))?;
+        if resp.status() != 200 {
+            return Err(format!("GET /v1/agent/info: status {}", resp.status()));
+        }
+        resp.into_json()
+            .map_err(|e| format!("GET /v1/agent/info JSON: {e}"))
+    }
+
+    pub fn runtime_config(&self) -> Result<RuntimeConfig, String> {
+        if self.base.is_empty() {
+            return Err("node client: empty base URL".into());
+        }
+        let req = self.authorize(ureq::get(&format!(
+            "{}/v1/desktop/runtime-config",
+            self.base
+        )));
+        let resp = req
+            .timeout(Duration::from_secs(5))
+            .call()
+            .map_err(|e| format!("GET /v1/desktop/runtime-config: {e}"))?;
+        if resp.status() != 200 {
+            return Err(format!(
+                "GET /v1/desktop/runtime-config: status {}",
+                resp.status()
+            ));
+        }
+        resp.into_json()
+            .map_err(|e| format!("GET /v1/desktop/runtime-config JSON: {e}"))
+    }
+
     pub fn upgrade_readiness(&self) -> Result<UpgradeReadiness, String> {
         if self.base.is_empty() {
             return Err("node client: empty base URL".into());
@@ -173,9 +234,7 @@ impl Client {
             .set("Accept", "text/event-stream");
         // 勿设 timeout(0)：ureq/Windows 会当成零读超时，空闲 SSE 立刻失败并重连刷屏。
         // 不设 overall timeout，与 Go tray `http.Client{Timeout: 0}`（无限）对齐。
-        let resp = req
-            .call()
-            .map_err(|e| format!("GET /v1/streams: {e}"))?;
+        let resp = req.call().map_err(|e| format!("GET /v1/streams: {e}"))?;
         if resp.status() != 200 {
             return Err(format!("GET /v1/streams: status {}", resp.status()));
         }
@@ -247,7 +306,11 @@ where
     Ok(handler(ev))
 }
 
-fn decode_stream_event(event_type: &str, event_id: &str, data: &str) -> Result<StreamEvent, String> {
+fn decode_stream_event(
+    event_type: &str,
+    event_id: &str,
+    data: &str,
+) -> Result<StreamEvent, String> {
     let envelope: StreamEnvelope =
         serde_json::from_str(data).map_err(|e| format!("decode sse data: {e}"))?;
     let typ = if event_type.trim().is_empty() {
@@ -266,6 +329,10 @@ fn decode_stream_event(event_type: &str, event_id: &str, data: &str) -> Result<S
         session_id: agent_id.clone(),
         agent_id,
         seq,
+        agent_seq: envelope.agent_seq,
+        event_version: envelope.event_version,
+        stream_epoch: envelope.stream_epoch,
+        delivery: envelope.delivery,
         data: envelope.data,
     })
 }

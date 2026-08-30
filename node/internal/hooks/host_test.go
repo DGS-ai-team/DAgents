@@ -59,7 +59,7 @@ type memoryHost struct {
 	snap HostSnapshot
 }
 
-func (h *memoryHost) Snapshot() HostSnapshot { return h.snap }
+func (h *memoryHost) Snapshot() HostSnapshot             { return h.snap }
 func (h *memoryHost) SessionStoreGet(string) (any, bool) { return nil, false }
 func (h *memoryHost) SessionStoreSet(string, any) error  { return nil }
 func (h *memoryHost) SessionStoreDelete(string) error    { return nil }

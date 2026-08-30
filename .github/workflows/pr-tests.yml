@@ -15,20 +15,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: manage/console/frontend/package-lock.json
+          cache-dependency-path: |
+            node/webui/frontend/package-lock.json
+            manage/console/frontend/package-lock.json
+            desktop/tray-tauri/package-lock.json
 
       - name: Build Manage Console
         run: bash manage/console/build.sh
 
+      - name: Lint Manage Console
+        run: npm run lint --prefix manage/console/frontend
+
+      - name: Audit frontend dependencies
+        run: |
+          npm ci --prefix node/webui/frontend
+          npm ci --prefix desktop/tray-tauri
+          npm audit --audit-level=high --prefix node/webui/frontend
+          npm audit --audit-level=high --prefix manage/console/frontend
+          npm audit --audit-level=high --prefix desktop/tray-tauri
+
+      - name: Check third-party license policy
+        run: python scripts/ci/check_npm_license_policy.py
+
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           # 与 `.github/workflows/build-and-release.yml` 保持一致
           python-version: "3.13"
@@ -37,7 +54,29 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock -r requirements-dev.txt
+
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install pip-audit==2.10.1
+          pip-audit -r requirements.lock
+          # browser-use 0.13.8 pins these exact versions. Keep the known
+          # upstream-blocked findings explicit; any new finding still fails.
+          # The lock includes Windows-only packages (for PyInstaller). Audit
+          # the pinned records without resolving a Linux virtualenv.
+          pip-audit --no-deps -r browser-service/requirements.lock \
+            --ignore-vuln PYSEC-2026-2132 \
+            --ignore-vuln PYSEC-2026-3481 \
+            --ignore-vuln PYSEC-2026-3482 \
+            --ignore-vuln PYSEC-2026-3483 \
+            --ignore-vuln PYSEC-2026-3655 \
+            --ignore-vuln PYSEC-2026-3656
+
+      - name: Ruff
+        run: python -m ruff check manage scripts tests
+
+      - name: Pyright
+        run: python -m pyright --project pyrightconfig.json
 
       - name: Run unittest discovery
         run: python -m unittest discover -s tests -p "test_*.py" -v

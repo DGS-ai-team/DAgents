@@ -127,6 +127,45 @@ func TestHandleAgentInfo(t *testing.T) {
 	}
 }
 
+func TestHandleDesktopRuntimeConfig(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Manage.Enabled = true
+	cfg.Manage.URL = "http://manage.local/"
+	cfg.Manage.NodeToken = "node-secret"
+	cfg.Manage.Update.CheckIntervalSeconds = 17
+	cfg.Manage.Update.Channel = "beta"
+	srv := NewServer(cfg, nil, WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/desktop/runtime-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var got desktopRuntimeConfig
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.ManageEnabled || got.ManageURL != "http://manage.local/" || got.ManageNodeToken != "node-secret" {
+		t.Fatalf("unexpected manage config: %+v", got)
+	}
+	if got.ManageUpdateCheckIntervalSeconds != 17 || got.ManageUpdateChannel != "beta" || !got.ManageUpdateEnabled {
+		t.Fatalf("unexpected update config: %+v", got)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/desktop/runtime-config", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	recorder := httptest.NewRecorder()
+	srv.handleDesktopRuntimeConfig(recorder, req)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+}
+
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	reg, err := tools.NewRegistry(t.TempDir(), 30)
@@ -209,11 +248,11 @@ func TestHandleStreamsAfterSeqReplaysHistory(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 	first := srv.stream.Publish(sessionID, "assistant", map[string]any{"content": "hi"})
-	_ = srv.stream.Publish(sessionID, "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+	_ = srv.stream.Publish(sessionID, "turn_finished", map[string]any{"finish_reason": "stop", "turn_complete": true})
 
 	req, err := http.NewRequest(
 		http.MethodGet,
-		ts.URL+"/v1/streams?agent_id="+sessionID+"&after_seq="+strconv.Itoa(first.Seq),
+		ts.URL+"/v1/streams?agent_id="+sessionID+"&after_agent_seq="+strconv.Itoa(first.AgentSeq),
 		nil,
 	)
 	if err != nil {
@@ -230,19 +269,49 @@ func TestHandleStreamsAfterSeqReplaysHistory(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	reader := bufio.NewReader(resp.Body)
-	sawDone := false
-	for !sawDone {
+	sawFinished := false
+	for !sawFinished {
 		select {
 		case <-deadline:
-			t.Fatal("timeout waiting for replayed done")
+			t.Fatal("timeout waiting for replayed turn_finished")
 		default:
 		}
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			t.Fatalf("read sse: %v", err)
 		}
-		if strings.HasPrefix(line, "event: done") {
-			sawDone = true
+		if strings.HasPrefix(line, "event: turn_finished") {
+			sawFinished = true
+		}
+	}
+}
+
+func TestHandleStreamsReportsResyncWhenAgentHistoryWasTruncated(t *testing.T) {
+	srv, ts := newTestServer(t)
+	defer ts.Close()
+
+	sessionID := createTestRuntime(t, srv)
+	for i := 0; i < 300; i++ {
+		srv.stream.Publish(sessionID, "assistant", map[string]any{"content": "x"})
+	}
+
+	resp, err := http.Get(ts.URL + "/v1/streams?agent_id=" + sessionID + "&after_agent_seq=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d", resp.StatusCode)
+	}
+	reader := bufio.NewReader(resp.Body)
+	seenResync := false
+	for !seenResync {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "event: resync_required") {
+			seenResync = true
 		}
 	}
 }
@@ -279,7 +348,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 		t.Fatalf("message status = %d body=%s", msgResp.StatusCode, body)
 	}
 
-	// 从 SSE 读取 assistant + done
+	// 从 SSE 读取 assistant + turn_finished
 	deadline := time.After(3 * time.Second)
 	reader := bufio.NewReader(streamResp.Body)
 	var assistantText strings.Builder
@@ -314,7 +383,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 			if c, ok := envelope.Data["content"].(string); ok {
 				assistantText.WriteString(c)
 			}
-		case "done":
+		case "turn_finished":
 			gotDone = true
 		}
 	}

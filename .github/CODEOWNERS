@@ -1,0 +1,18 @@
+# Component ownership is explicit so future maintainers can replace one area
+# without rewriting the whole file. Until additional component owners are
+# nominated, the current maintainer is the fallback owner for every area.
+/node/ @AphroditeOotsuka
+/node/webui/ @AphroditeOotsuka
+/manage/ @AphroditeOotsuka
+/client/ @AphroditeOotsuka
+/desktop/ @AphroditeOotsuka
+/shared/ @AphroditeOotsuka
+/docs/ @AphroditeOotsuka
+
+# Repository-wide policy and release files require maintainer review.
+* @AphroditeOotsuka
+/.github/ @AphroditeOotsuka
+/scripts/ci/ @AphroditeOotsuka
+/scripts/release/ @AphroditeOotsuka
+/VERSION @AphroditeOotsuka
+/go.work @AphroditeOotsuka

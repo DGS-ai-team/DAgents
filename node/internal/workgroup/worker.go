@@ -3,14 +3,14 @@ package workgroup
 import (
 	"path/filepath"
 	"sync"
-
-	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
 // Worker 聚合 D2 骨架能力：provision / journal / fencing / manifest / session。
 type Worker struct {
 	mu               sync.Mutex
 	NodeID           string
+	CatalogRevision  string
+	Capabilities     []string
 	Bindings         BindingStore
 	Journal          CommandJournal
 	Session          Session
@@ -28,12 +28,11 @@ type Worker struct {
 
 // Config 构造 Worker。
 type Config struct {
-	NodeID             string
-	Bindings           BindingStore
-	Journal            CommandJournal
-	AgentSessions      AgentSessionHandler
-	NodeToolNames      []string
-	BackgroundJobStore *tools.BackgroundJobStore
+	NodeID        string
+	Bindings      BindingStore
+	Journal       CommandJournal
+	AgentSessions AgentSessionHandler
+	NodeToolNames []string
 	// DataDir 非空时默认使用目录持久化 Binding + CommandJournal（重启后可继续执行）。
 	// 显式 Bindings/Journal 优先。
 	DataDir string
@@ -82,11 +81,20 @@ func NewWorker(cfg Config) *Worker {
 	}
 	// 工作区工具由 Worker Executor 提供，不依赖本地 Agent Registry 枚举名。
 	nodeTools := mergeToolNames(cfg.NodeToolNames, WorkspaceExecutableToolNames())
+	manifest := BuildManifest(cfg.NodeID, nodeTools, WorkspaceToolSchemas(), WorkspaceSideEffectClasses())
 	w.Provision = &Provisioner{
 		NodeID:           cfg.NodeID,
 		Bindings:         bindings,
 		MemberTombstones: w.MemberTombstones,
 		NodeToolNames:    nodeTools,
+	}
+	w.CatalogRevision = manifest.ToolCatalogRevision
+	w.Capabilities = []string{
+		"fencing",
+		"idempotency",
+		"resume",
+		"timeline",
+		"tool_execution",
 	}
 	w.Commands = &CommandHandler{
 		Bindings:             bindings,
@@ -94,7 +102,7 @@ func NewWorker(cfg Config) *Worker {
 		ConnectionGeneration: 0,
 		Tombstones:           w.Tombstones,
 		MemberTombstones:     w.MemberTombstones,
-		Executor:             NewWorkspaceToolExecutorWithBackgroundJobStore(bindings, cfg.BackgroundJobStore),
+		Executor:             NewWorkspaceToolExecutor(bindings),
 	}
 	return w
 }

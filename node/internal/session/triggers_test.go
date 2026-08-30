@@ -1,12 +1,10 @@
 package session
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
@@ -22,17 +20,15 @@ func TestEnqueueTriggerMessageCarriesTriggerID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	env, err := rt.queue.Dequeue(ctx)
-	if err != nil {
-		t.Fatal(err)
+	record, ok := rt.inputBox.Pop()
+	if !ok {
+		t.Fatal("trigger was not appended to InputBox")
 	}
-	if env.RequestType != queue.RequestTypeTriggerMessage {
-		t.Fatalf("request_type = %q, want %q", env.RequestType, queue.RequestTypeTriggerMessage)
+	if record.Kind != InputKindTrigger {
+		t.Fatalf("input kind = %q, want %q", record.Kind, InputKindTrigger)
 	}
-	if env.TriggerID != "trig-abc" || env.Content != "hello trigger" {
-		t.Fatalf("env = %+v", env)
+	if record.Env.TriggerID != "trig-abc" || record.Env.Content != "hello trigger" {
+		t.Fatalf("env = %+v", record.Env)
 	}
 }
 

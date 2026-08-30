@@ -82,9 +82,9 @@ func (m *Manager) HandleCancelTool(parentSessionID, argsJSON string) (string, er
 		return "ERROR: " + err.Error(), nil
 	}
 	body, _ := json.Marshal(map[string]any{
-		"child_agent_id": childID,
-		"status":           StatusCancelled,
-		"previous_status":  prev,
+		"child_agent_id":  childID,
+		"status":          StatusCancelled,
+		"previous_status": prev,
 	})
 	return string(body), nil
 }
@@ -101,11 +101,11 @@ func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previ
 		return "", fmt.Errorf("child_agent_id not found or not owned by parent")
 	}
 	if agent.isTerminal() {
-		prev := string(agent.Status)
+		prev := string(agent.Snapshot().Status)
 		m.mu.Unlock()
 		return prev, nil
 	}
-	prev := string(agent.Status)
+	prev := string(agent.Snapshot().Status)
 	m.mu.Unlock()
 	_, err = m.Cancel(parentSessionID, childID, reason)
 	return prev, err
@@ -137,7 +137,7 @@ func (m *Manager) allTerminalOrFailFast(ids []string, failFast bool) (done bool,
 		terminal := agent == nil || agent.isTerminal()
 		status := StatusActive
 		if agent != nil {
-			status = agent.Status
+			status = agent.Snapshot().Status
 		}
 		m.mu.Unlock()
 		if !terminal {
@@ -208,10 +208,14 @@ func parseIDListFromMap(raw map[string]any) ([]string, error) {
 }
 
 // HandleParentTool 分发父 Agent 临时 Agent 管理工具（非 A2A）。
-func (m *Manager) HandleParentTool(ctx context.Context, parentSessionID, toolName, argsJSON string) (string, error) {
+func (m *Manager) HandleParentTool(ctx context.Context, parentSessionID, toolName, argsJSON string, toolCallIDs ...string) (string, error) {
 	switch toolName {
 	case ToolCreateTemporaryAgent:
-		return m.HandleCreate(ctx, parentSessionID, argsJSON)
+		toolCallID := ""
+		if len(toolCallIDs) > 0 {
+			toolCallID = toolCallIDs[0]
+		}
+		return m.handleCreate(ctx, parentSessionID, argsJSON, toolCallID)
 	case ToolWaitTemporaryAgents:
 		return m.HandleWait(ctx, parentSessionID, argsJSON)
 	case ToolTemporaryAgentStatus:

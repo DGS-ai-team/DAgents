@@ -1,6 +1,6 @@
 name: Tauri Shell (Windows)
 
-# 构建 desktop/tray-tauri → dist/dagents-shell.exe（安装包唯一 Shell）。
+# 构建 desktop/tray-tauri → x86/x64 Shell 二进制（安装器组件）。
 on:
   workflow_call:
   workflow_dispatch:
@@ -21,10 +21,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -33,10 +33,10 @@ jobs:
       # Keep a bootstrap path for the first run, before the GHCR image has
       # been published by the main-branch image workflow.
       - name: Setup Rust (bootstrap fallback)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: desktop/tray-tauri/src-tauri -> target
 
@@ -45,6 +45,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/.cargo"
+          # The prebuilt image intentionally contains only the native Linux
+          # libraries and cargo cache. Keep formatting on the host toolchain;
+          # older cached images may not include the rustfmt component.
+          cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           image_available=false
           max_pull_attempts=6
           pull_retry_delay_seconds=20
@@ -73,7 +77,7 @@ jobs:
               --volume "${HOME}/.cargo:/cargo" \
               --workdir /workspace/desktop/tray-tauri/src-tauri \
               "${TAURI_LINUX_CI_IMAGE}" \
-              cargo test --locked
+              sh -c 'cargo test --locked'
           else
             echo "::warning::Tauri Linux CI image is unavailable after ${max_pull_attempts} attempts; using the bootstrap apt path."
             sudo apt-get update
@@ -87,42 +91,53 @@ jobs:
           fi
 
   build-windows:
-    name: Build dagents-shell (windows-amd64)
+    name: Build dagents-shell (${{ matrix.label }})
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            platform: windows-amd64
+            tauri_target: x86_64-pc-windows-msvc
+          - label: x86
+            platform: windows-386
+            tauri_target: i686-pc-windows-msvc
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: desktop/tray-tauri/package-lock.json
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.tauri_target }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: desktop/tray-tauri/src-tauri -> target
 
       - name: Build Tauri shell
         shell: bash
         run: |
+          cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           chmod +x scripts/ci/build_dagents_shell_tauri.sh
-          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
-          test -f dist/dagents-shell.exe
-          test -f dist/dagents-shell-tauri.exe
+          OUT_DIR="${GITHUB_WORKSPACE}/dist/${{ matrix.platform }}" \
+            TAURI_TARGET="${{ matrix.tauri_target }}" \
+            bash scripts/ci/build_dagents_shell_tauri.sh
+          test -f "dist/${{ matrix.platform }}/dagents-shell.exe"
+          test -f "dist/${{ matrix.platform }}/dagents-shell-tauri.exe"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dagents-shell-tauri-windows-amd64
-          path: |
-            dist/dagents-shell.exe
-            dist/dagents-shell-tauri.exe
+          name: dagents-shell-tauri-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/*
           if-no-files-found: error

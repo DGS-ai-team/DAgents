@@ -6,6 +6,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,6 +37,16 @@ const (
 
 var toolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 var llmToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+const (
+	// maxLLMToolNameLength is the portable limit used by the OpenAI-compatible
+	// providers supported by Node. Keep this limit here rather than relying on
+	// a provider-specific failure after the full MCP catalog has been built.
+	maxLLMToolNameLength = 64
+	// A 12-character SHA-256 suffix keeps a truncated name readable while
+	// making collisions between long remote names practically impossible.
+	longToolNameHashLength = 12
+)
 
 // ServerConfig is persisted by Node. EnvRefs/HeaderRefs map a child-process
 // variable or HTTP header to an existing Node process environment variable.
@@ -349,8 +361,14 @@ func QualifiedToolName(serverID, remoteName string) (string, error) {
 	if !llmToolNamePattern.MatchString(name) {
 		return "", fmt.Errorf("mcp qualified tool name is not LLM-compatible: %q", name)
 	}
-	if len(name) > 64 {
-		return "", fmt.Errorf("qualified mcp tool name is too long: %q", name)
+	if len(name) > maxLLMToolNameLength {
+		// Keep the public name stable and deterministic. The complete identity is
+		// still retained by EffectiveTool, so this is only a model-facing alias;
+		// Call uses the untouched remoteName when sending tools/call to MCP.
+		digest := sha256.Sum256([]byte(serverID + "\x00" + remoteName))
+		hash := hex.EncodeToString(digest[:])[:longToolNameHashLength]
+		suffix := "_" + hash
+		name = name[:maxLLMToolNameLength-len(suffix)] + suffix
 	}
 	return name, nil
 }

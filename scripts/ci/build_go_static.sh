@@ -13,6 +13,14 @@ OUT_DIR="${OUT_DIR:-${REPO_ROOT}/dist/go-linux-amd64}"
 GOOS="${GOOS:-linux}"
 GOARCH="${GOARCH:-amd64}"
 LDFLAGS="${LDFLAGS:--s -w}"
+if [[ -z "${VERSION:-}" ]]; then
+  VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
+fi
+if [[ -z "${VERSION}" ]]; then
+  echo "[build] VERSION is empty; pass VERSION or populate ${REPO_ROOT}/VERSION" >&2
+  exit 1
+fi
+LDFLAGS="${LDFLAGS} -X github.com/DGS-ai-team/DAgents/node/internal/version.Version=${VERSION}"
 
 if [[ "${SKIP_WEBUI_BUILD:-0}" != "1" ]]; then
   echo "[build] embedding Web UI (node/webui/build.sh)"
@@ -53,7 +61,7 @@ if [[ "${BUILD_CLIENT}" == "1" ]]; then
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node + Client (Go static build, Windows)
 
-1. copy config.example.yaml to config.yaml and edit llm / agent_id
+1. copy config.example.yaml to config.yaml (bootstrap: listen/local; configure LLM in Web UI)
 2. bin\dagents-node.exe -config config.yaml
 3. Open Web UI: http://127.0.0.1:<listen.port>/ui/ (default 18765; ui.enabled defaults to true)
 4. bin\dagents-client.exe -config config.yaml probe
@@ -65,7 +73,7 @@ EOF
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node + Client (Go static build)
 
-1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
+1. cp config.example.yaml config.yaml（bootstrap：listen/local；LLM 等用 Web UI 配置）
 2. ./bin/dagents-node -config config.yaml
 3. 浏览器打开 http://127.0.0.1:<listen.port>/ui/（默认 18765；ui.enabled 默认 true）
 4. ./bin/dagents-client -config config.yaml probe

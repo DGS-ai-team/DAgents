@@ -27,8 +27,8 @@ onMounted(load);
 
 <template>
   <ConfigPanelShell
-    title="输出与防护"
-    subtitle="工具 / Shell 审批已按智能体区分，请到「智能体」详情配置"
+    title="保护策略"
+    subtitle="保存后对新发起的工具调用生效；工具 / Shell 审批请到智能体详情配置"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"

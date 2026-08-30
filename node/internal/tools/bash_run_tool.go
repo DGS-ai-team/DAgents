@@ -37,7 +37,7 @@ func bashRunToolDef() ToolDef {
 						"type":        "integer",
 						"minimum":     1,
 						"maximum":     maxBashTimeoutSec,
-						"description": "同步等待秒数（可选，1-600）。显式传入时超时自动降为后台 job；省略则最长等待硬上限后终止（不转后台）。",
+						"description": "同步等待秒数（可选，1-600）。超时直接终止命令并返回 timed_out 失败结果，不会转为后台任务。",
 					},
 					"cwd": map[string]any{
 						"type":        "string",
@@ -61,7 +61,7 @@ func bashRunToolDef() ToolDef {
 }
 
 func bashRunToolDescription(isWindows bool) string {
-	common := "结果包含 status、exit_code、stdout_bytes、stderr_bytes 和 output_truncated；exit_code=0 表示进程成功结束，但 stdout 仍可能为空。传入 timeout_seconds 时，超时自动转为后台 job 并返回 job_id；省略时超时终止。长输出会按配置清洗并截断。需要保持目录、环境或进程状态时，请使用 terminal_open。"
+	common := "结果包含 status、exit_code、stdout_bytes、stderr_bytes 和 output_truncated；exit_code=0 表示进程成功结束，但 stdout 仍可能为空。命令始终同步等待；超时会终止进程并返回 timed_out 失败结果，不会创建后台 job。长输出会按配置清洗并截断。需要保持目录、环境或进程状态时，请使用 terminal_open。"
 	if isWindows {
 		return "在 Node 所在 Windows 主机执行一次本地 PowerShell 命令并返回结果。cwd 省略时使用工作区根目录；省略 shell_type 时使用 powershell。" + common
 	}

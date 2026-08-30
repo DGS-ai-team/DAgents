@@ -140,7 +140,7 @@ type ProcessEventSink func(ProcessEvent)
 
 // Process is the provider-neutral lifecycle handle used by synchronous and
 // background shell execution. Pipes are acquired before Start so callers can
-// keep the current stdout/stderr collection and auto-degrade behavior.
+// keep the current stdout/stderr collection and synchronous timeout behavior.
 type Process interface {
 	ID() string
 	StdoutPipe() (io.ReadCloser, error)

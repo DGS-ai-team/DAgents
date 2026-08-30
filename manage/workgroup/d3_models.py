@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from manage.workgroup.protocol import SCHEMA_VERSION
+
 _WG = r"^wg_[0-9a-z]{26}$"
 _EV = r"^ev_[0-9a-z]{26}$"
 _HT = r"^ht_[0-9a-z]{26}$"
@@ -160,7 +162,7 @@ _EN = r"^en_[0-9a-z]{26}$"
 
 class WSEnvelope(BaseModel):
     envelope_id: str = Field(pattern=_EN)
-    schema_version: Literal["0.5.0"] = "0.5.0"
+    schema_version: Literal["0.5.0"] = SCHEMA_VERSION
     type: str
     workgroup_id: str | None = None
     delivery_seq: int = Field(ge=1)
@@ -171,7 +173,14 @@ class WSEnvelope(BaseModel):
 
 class SessionHello(BaseModel):
     node_id: str = Field(min_length=1)
+    protocol_version: Literal["1"] = "1"
+    schema_version: Literal["0.5.0"] = SCHEMA_VERSION
     last_ack_delivery_seq: int = Field(ge=0, default=0)
+    agent_catalog_revision: str = Field(default="", max_length=256)
+    capabilities: list[str] = Field(default_factory=list, max_length=64)
+    # Authentication is carried by the WebSocket transport header; this is
+    # the client clock used for diagnostics and skew monitoring.
+    client_time: str | None = None
 
 
 class ResumeOffer(BaseModel):

@@ -164,6 +164,10 @@ mod tests {
             agent_id: "a1".into(),
             session_id: "a1".into(),
             seq: 1,
+            agent_seq: 1,
+            event_version: 1,
+            stream_epoch: "test".into(),
+            delivery: "replayable".into(),
             data: HashMap::<String, Value>::new(),
         };
         assert!(should_sync_while_hitl_pending(&store, &ev));

@@ -423,9 +423,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 			return entries
 		})
-		if !manage.UpdateDelegatedToShell() {
-			updateChecker = manage.NewUpdateChecker(cfg, logger)
-		}
+		// On Windows Shell owns the periodic schedule and apply operation, but
+		// Node still exposes an on-demand check using effective runtime config.
+		// This keeps secrets and node_settings.db inside Node.
+		updateChecker = manage.NewUpdateChecker(cfg, logger)
 		packageUploader = manage.NewPackageUploader(cfg, logger)
 	}
 	control := manage.NewControlClient(cfg)
@@ -435,10 +436,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	if cfg.ManageWorkgroupEnabled() {
 		wgAgentBridge = newWorkgroupAgentBridge(nil)
 		wgWorker = workgroup.NewWorker(workgroup.Config{
-			NodeID:             cfg.NodeID,
-			AgentSessions:      wgAgentBridge,
-			DataDir:            filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
-			BackgroundJobStore: backgroundJobs,
+			NodeID:        cfg.NodeID,
+			AgentSessions: wgAgentBridge,
+			DataDir:       filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
 		})
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,

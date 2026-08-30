@@ -60,39 +60,36 @@ func TestBuildSystemPrompt_omitsHistoryJournalWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_appendsSkillsCatalogOnlyWhenEnabled(t *testing.T) {
+func TestBuildSystemPrompt_includesFrozenSkillsMetadataWithoutBody(t *testing.T) {
 	root := t.TempDir()
 	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
-
-	enabled := skills.NewCatalog(root, true, 2)
-	prompt := BuildSystemPrompt(SystemPromptInput{Catalog: enabled})
-	if !containsAll(prompt, "## 可用 skills", "writer: Write docs", "load_skills", "匹配且尚未加载") {
-		t.Fatalf("enabled prompt = %q", prompt)
+	catalog := skills.NewCatalog(root, true, 2).NewTurnView()
+	prompt := BuildSystemPrompt(SystemPromptInput{Catalog: catalog})
+	if !contains(prompt, "## 可用 skills") || !contains(prompt, "writer: Write docs") || !contains(prompt, "list_available_skills") {
+		t.Fatalf("frozen skills metadata is missing from system prompt: %q", prompt)
 	}
-	if contains(prompt, "Write clearly.") || contains(prompt, "已加载 skills") {
+	if contains(prompt, "Write clearly.") {
 		t.Fatalf("skill body must not be part of system prompt: %q", prompt)
-	}
-
-	disabled := skills.NewCatalog(root, false, 2)
-	without := BuildSystemPrompt(SystemPromptInput{Catalog: disabled})
-	if contains(without, "## 可用 skills") || contains(without, "writer: Write docs") {
-		t.Fatalf("disabled prompt should omit skills catalog: %q", without)
 	}
 }
 
-func TestBuildSystemPrompt_catalogToolModeReplacesInlineCatalog(t *testing.T) {
+func TestBuildSystemPrompt_keepsSkillsMetadataAtContextBoundary(t *testing.T) {
 	root := t.TempDir()
-	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
-
-	prompt := BuildSystemPrompt(SystemPromptInput{
-		Catalog:               skills.NewCatalog(root, true, 2),
-		SkillsCatalogToolMode: true,
-	})
-	if !containsAll(prompt, "list_available_skills", "load_skills", "只包含元数据", "下一个模型 Step") {
-		t.Fatalf("catalog tool mode prompt = %q", prompt)
+	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: v1\n---\nBody\n")
+	skillPath := filepath.Join(root, "writer", "SKILL.md")
+	catalog := skills.NewCatalog(root, true, 2)
+	frozen := catalog.NewTurnView()
+	first := BuildSystemPrompt(SystemPromptInput{Catalog: frozen})
+	if err := os.WriteFile(skillPath, []byte("---\nname: writer\ndescription: v2\n---\nBody\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if contains(prompt, "## 可用 skills") || contains(prompt, "writer: Write docs") || contains(prompt, "Write clearly.") {
-		t.Fatalf("catalog tool mode must not inline catalog or body: %q", prompt)
+	unchanged := BuildSystemPrompt(SystemPromptInput{Catalog: frozen})
+	if unchanged != first || contains(unchanged, "v2") {
+		t.Fatalf("active context prompt changed after live catalog edit: first=%q unchanged=%q", first, unchanged)
+	}
+	latest := BuildSystemPrompt(SystemPromptInput{Catalog: catalog.NewTurnView()})
+	if !contains(latest, "v2") {
+		t.Fatalf("new context boundary did not refresh skills metadata: %q", latest)
 	}
 }
 
@@ -122,7 +119,7 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 
 func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	hostsnapshot.CaptureAtStartup()
-	r := promptcontext.NewContentReader(promptcontext.Content{User: "legacy user.md ignored"})
+	r := promptcontext.NewContentReader(promptcontext.Content{})
 	r.SetPreferredName("小明")
 	in := SystemPromptInput{
 		AgentID:   "ops-01",

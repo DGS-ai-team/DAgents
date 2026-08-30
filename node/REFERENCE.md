@@ -34,11 +34,11 @@
 | 符号 | 说明 |
 |------|------|
 | `State` | `idle` / `model_streaming` / `awaiting_tool` |
-| `BuildSystemPrompt` | 最小 system prompt（静态规则 + agent/FS_ROOT） |
+| `BuildSystemPrompt` | 稳定 system prompt（行为规则、工作区与可用能力目录；运行时身份通过 ContextInjection 注入） |
 | `RunTurnPhase` | Node 状态 → Python 兼容 `run_turn_phase` |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
-| `RunHumanMessageTurn` / `RunToolMessageTurn` | 单步 LLM + 工具；生产经 session 队列续跑 |
-| `publishDone` | 语义 B 的 `done`：`finish_reason` + `turn_complete` + `awaiting`；实现见 `node/internal/turn/sse_publish.go` |
+| `RunHumanMessageTurn` / `RunToolMessageTurn` | 单步 LLM + 工具；生产由 session runtime 在同一 Turn 链内 inline 续跑 |
+| `publishTurnFinished` | `turn_finished` 终态事件；实现见 `node/internal/turn/sse_publish.go` |
 
 ## `internal/queue/queue.go`
 

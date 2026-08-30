@@ -28,7 +28,7 @@ export const FALLBACK_MEMBER_TOOL_GROUPS = /** @type {MemberToolGroup[]} */ ([
     label: "Shell",
     hint: "bash_run 等（无额外沙箱，默认不勾选）",
     defaultOn: false,
-    toolIds: ["bash_run", "background_job_status", "background_job_cancel"],
+    toolIds: ["bash_run"],
   },
 ]);
 

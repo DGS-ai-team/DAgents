@@ -16,7 +16,7 @@ import (
 type Priority string
 
 const (
-	PriorityToolResult      Priority = "tool_result"
+	PriorityContinuation    Priority = "continuation"
 	PriorityHuman           Priority = "human"
 	PriorityResume          Priority = "resume"
 	PriorityAsyncCompletion Priority = "async_completion"
@@ -29,14 +29,15 @@ type Envelope struct {
 	// SessionEpoch 用于使 clear-context 之前排队的事件失效。
 	SessionEpoch uint64
 	// TurnID/Generation 仅用于需要绑定当前 turn 的内部 continuation。
-	// 外部事实事件（async callback、trigger）只绑定 SessionEpoch。
+	// async callback 只绑定 SessionEpoch，因为它可以在原 Turn cancel 后恢复。
 	TurnID                   string
 	Generation               uint64
 	Content                  string
 	ContentParts             []llm.ContentPart
+	FileReferences           []llm.FileReference
 	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
 	ResumeValue              map[string]any
-	TriggerID                string // 非空表示 trigger fire 投递；Apply 成功后清除 pending 标记
+	TriggerID                string // 非空表示 trigger fire 投递；输入被消费后清除 pending 标记
 	AsyncToolResult          *AsyncToolResultPayload
 	SideEffectContinueSource string // side_effect_continue 来源（task_complete_produce / cancel_recovery 等）
 }
@@ -112,6 +113,26 @@ func (q *MessageQueue) Dequeue(ctx context.Context) (Envelope, error) {
 	}
 }
 
+// Wake exposes the coalesced enqueue notification to a runtime that also
+// listens to another input source.  The notification is only a hint; callers
+// must re-check Len and then call Dequeue so no payload is lost.
+func (q *MessageQueue) Wake() <-chan struct{} {
+	if q == nil {
+		return nil
+	}
+	return q.notify
+}
+
+// Closed reports whether no further envelopes can be enqueued.
+func (q *MessageQueue) Closed() bool {
+	if q == nil {
+		return true
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.closed
+}
+
 // Close 关闭队列；唤醒等待中的 Dequeue。
 func (q *MessageQueue) Close() {
 	q.mu.Lock()
@@ -152,7 +173,7 @@ func (q *MessageQueue) TotalEnqueued() uint64 {
 
 func priorityValue(p Priority) int {
 	switch p {
-	case PriorityToolResult:
+	case PriorityContinuation:
 		return -1
 	case PriorityHuman:
 		return 0
@@ -169,7 +190,7 @@ func priorityValue(p Priority) int {
 func ParsePriority(raw string) (Priority, bool) {
 	p := Priority(strings.TrimSpace(raw))
 	switch p {
-	case PriorityToolResult, PriorityHuman, PriorityResume, PriorityAsyncCompletion, PriorityOther:
+	case PriorityContinuation, PriorityHuman, PriorityResume, PriorityAsyncCompletion, PriorityOther:
 		return p, true
 	default:
 		return "", false

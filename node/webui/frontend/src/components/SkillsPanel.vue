@@ -1,175 +1,110 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import * as api from "../api/node.js";
-import { agentStore } from "../stores/agent.js";
 
-const props = defineProps({
-  agentId: { type: String, default: "" },
+defineProps({
   embedded: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["close"]);
-
 const loading = ref(false);
-const busySkill = ref("");
 const error = ref("");
 const data = ref(null);
-
-const resolvedAgentId = computed(() => String(props.agentId || agentStore.agentId || "").trim());
-
-const loadedSkills = computed(() => {
-  const rows = data.value?.loaded_skills;
-  return Array.isArray(rows) ? rows : [];
-});
 
 const availableSkills = computed(() => {
   const rows = data.value?.available_skills;
   return Array.isArray(rows) ? rows : [];
 });
 
-const loadedNameSet = computed(() => {
-  const set = new Set();
-  for (const sk of loadedSkills.value) {
-    const name = skillName(sk);
-    if (name) set.add(name);
-  }
-  return set;
-});
+const catalogEnabled = computed(() => data.value?.enabled !== false);
 
-function skillName(sk) {
-  return String(sk?.skill_name || sk?.name || "").trim();
+function skillName(skill) {
+  return String(skill?.skill_name || skill?.name || "").trim();
 }
 
-function skillDescription(sk) {
-  return String(sk?.description || "").trim();
-}
-
-function isLoaded(name) {
-  return loadedNameSet.value.has(name);
+function skillDescription(skill) {
+  return String(skill?.description || "").trim();
 }
 
 async function load() {
-  const sid = props.agentId || agentStore.agentId;
-  if (!sid) {
-    data.value = null;
-    error.value = "";
-    loading.value = false;
-    return;
-  }
   loading.value = true;
   error.value = "";
   try {
-    data.value = await api.listSkills(sid);
-  } catch (e) {
-    error.value = e.message;
+    data.value = await api.listNodeSkillsCatalog();
+  } catch (cause) {
+    error.value = cause?.message || "无法读取技能目录";
     data.value = null;
   } finally {
     loading.value = false;
   }
 }
 
-async function handleLoad(name) {
-  const sid = props.agentId || agentStore.agentId;
-  if (!sid || !name || busySkill.value) return;
-  busySkill.value = name;
-  error.value = "";
-  try {
-    await api.loadSkill(sid, name);
-    await load();
-  } catch (e) {
-    error.value = e.message;
-  } finally {
-    busySkill.value = "";
-  }
+function onSkillsChanged() {
+  void load();
 }
 
-async function handleUnload(name) {
-  const sid = props.agentId || agentStore.agentId;
-  if (!sid || !name || busySkill.value) return;
-  busySkill.value = name;
-  error.value = "";
-  try {
-    await api.unloadSkill(sid, name);
-    await load();
-  } catch (e) {
-    error.value = e.message;
-  } finally {
-    busySkill.value = "";
-  }
-}
+onMounted(() => {
+  void load();
+  window.addEventListener("dagents:skills-changed", onSkillsChanged);
+});
 
-onMounted(load);
-watch(() => props.agentId || agentStore.agentId, load);
+onBeforeUnmount(() => {
+  window.removeEventListener("dagents:skills-changed", onSkillsChanged);
+});
 </script>
 
 <template>
-  <section class="panel panel-overlay__card skills-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header v-if="!embedded" class="panel__header skills-panel__header">
+  <section class="skills-catalog" :class="{ 'settings-embedded-panel': embedded }">
+    <div class="settings-section__head skills-catalog__head">
       <div>
-        <div class="panel__title">技能</div>
-        <div class="skills-panel__subtitle">{{ resolvedAgentId || "—" }}</div>
+        <h2 class="settings-section__title">技能目录</h2>
+        <p class="settings-section__desc">
+          展示 Node 当前发现的技能元数据。技能内容由模型在需要时读取，不需要在这里加载或卸载。
+        </p>
       </div>
-      <div class="skills-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
-      </div>
-    </header>
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm skills-catalog__refresh"
+        :disabled="loading"
+        :title="loading ? '正在刷新技能目录' : '刷新技能目录'"
+        :aria-label="loading ? '正在刷新技能目录' : '刷新技能目录'"
+        @click="load"
+      >
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M12.5 5.25A5 5 0 1 0 13 9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
+          <path d="M10.25 3.5h2.5V6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </div>
 
-    <div class="panel__body skills-panel__body">
-      <div v-if="!resolvedAgentId" class="skills-panel__empty">请先在对话中打开一个智能体。</div>
-      <div v-else-if="loading && !data" class="skills-panel__loading">加载中…</div>
-      <div v-else-if="error" class="skills-panel__error">{{ error }}</div>
-      <template v-else-if="data">
-        <section class="skills-section">
-          <h3 class="skills-section__title">已加载 ({{ loadedSkills.length }})</h3>
-          <ul v-if="loadedSkills.length" class="skills-list">
-            <li v-for="sk in loadedSkills" :key="skillName(sk)" class="skills-item skills-item--loaded">
-              <div class="skills-item__main">
-                <div class="skills-item__name">{{ skillName(sk) }}</div>
-                <div v-if="skillDescription(sk)" class="skills-item__desc">{{ skillDescription(sk) }}</div>
-              </div>
-              <button
-                type="button"
-                class="btn btn--ghost btn--sm btn--danger"
-                :disabled="!!busySkill"
-                @click="handleUnload(skillName(sk))"
-              >
-                {{ busySkill === skillName(sk) ? "…" : "卸载" }}
-              </button>
-            </li>
-          </ul>
-          <p v-else class="skills-panel__empty">当前智能体未加载任何技能</p>
-        </section>
+    <div class="skills-catalog__lifecycle" role="note">
+      <strong>会话中的更新方式</strong>
+      <span>
+        新会话或上下文重建时会写入最新技能元数据；会话进行中只发送变更事件，模型可调用
+        <code>list_available_skills</code> 获取最新目录。
+      </span>
+    </div>
 
-        <section class="skills-section">
-          <h3 class="skills-section__title">可用 ({{ availableSkills.length }})</h3>
-          <ul v-if="availableSkills.length" class="skills-list">
-            <li
-              v-for="sk in availableSkills"
-              :key="skillName(sk)"
-              class="skills-item"
-              :class="{ 'skills-item--loaded': isLoaded(skillName(sk)) }"
-            >
-              <div class="skills-item__main">
-                <div class="skills-item__name">
-                  {{ skillName(sk) }}
-                  <span v-if="isLoaded(skillName(sk))" class="skills-item__badge">已加载</span>
-                </div>
-                <div v-if="skillDescription(sk)" class="skills-item__desc">{{ skillDescription(sk) }}</div>
-              </div>
-              <button
-                v-if="!isLoaded(skillName(sk))"
-                type="button"
-                class="btn btn--primary btn--sm"
-                :disabled="!!busySkill"
-                @click="handleLoad(skillName(sk))"
-              >
-                {{ busySkill === skillName(sk) ? "…" : "加载" }}
-              </button>
-            </li>
-          </ul>
-          <p v-else class="skills-panel__empty">目录中暂无可用技能</p>
-        </section>
-      </template>
+    <div v-if="loading && !data" class="skills-panel__loading">正在读取技能目录…</div>
+    <div v-else-if="error" class="skills-panel__error" role="alert">
+      <span>{{ error }}</span>
+      <button type="button" class="btn btn--ghost btn--sm" @click="load">重试</button>
+    </div>
+    <div v-else-if="!catalogEnabled" class="settings-empty-state">
+      <strong>技能能力未启用</strong>
+      <span>启用 Skills 能力后，Node 会在这里展示可发现的技能。</span>
+    </div>
+    <ul v-else-if="availableSkills.length" class="skills-list skills-catalog__list">
+      <li v-for="skill in availableSkills" :key="skillName(skill)" class="skills-item skills-catalog__item">
+        <div class="skills-item__main">
+          <div class="skills-item__name">{{ skillName(skill) }}</div>
+          <div v-if="skillDescription(skill)" class="skills-item__desc">{{ skillDescription(skill) }}</div>
+        </div>
+        <span class="skills-catalog__status">可发现</span>
+      </li>
+    </ul>
+    <div v-else class="settings-empty-state skills-catalog__empty">
+      <strong>暂无可发现的技能</strong>
+      <span>将技能安装到 Node 的 Skills 目录后，此处会自动更新。</span>
     </div>
   </section>
 </template>

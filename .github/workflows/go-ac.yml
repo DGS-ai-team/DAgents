@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -27,29 +27,59 @@ jobs:
       - name: Test Web UI
         run: npm test --prefix node/webui/frontend
 
+      - name: Lint Web UI
+        run: npm run lint --prefix node/webui/frontend
+
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.13"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t go_files < <(git ls-files '*.go')
+          test -z "$(gofmt -l "${go_files[@]}")"
 
       - name: Download modules
         run: |
           go mod download -C shared/config
+          go mod download -C shared/logfiles
+          go mod download -C shared/update
+          go mod download -C shared/workgroup
           go mod download -C node
           go mod download -C client
+          go mod download -C desktop/tray
 
       - name: Build protect-loaded-skill plugin
         run: go build -buildmode=plugin -o /tmp/protect-loaded-skill.so ./node/plugins/protect-loaded-skill
 
       - name: Test
         run: |
-          go test ./shared/config/...
-          go test ./node/...
-          go test ./client/...
+          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+
+      - name: Vet
+        run: go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+
+      - name: Staticcheck
+        run: bash scripts/ci/run_staticcheck.sh
+
+      - name: Concurrency regression
+        run: |
+          cd node
+          go test -race ./internal/session ./internal/turn ./internal/queue
+
+      - name: Go vulnerability scan
+        run: bash scripts/ci/run_govulncheck.sh
 
       - name: Build
         run: |
@@ -68,3 +98,6 @@ jobs:
           BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 OUT_DIR=dist/go-windows-amd64 GOOS=windows GOARCH=amd64 bash scripts/ci/build_go_static.sh
           test -f dist/go-windows-amd64/bin/dagents-node.exe
           test -f dist/go-windows-amd64/bin/dagents-client.exe
+          BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 OUT_DIR=dist/go-windows-386 GOOS=windows GOARCH=386 bash scripts/ci/build_go_static.sh
+          test -f dist/go-windows-386/bin/dagents-node.exe
+          test -f dist/go-windows-386/bin/dagents-client.exe

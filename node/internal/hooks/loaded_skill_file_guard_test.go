@@ -93,11 +93,11 @@ func TestToolDenyMessage(t *testing.T) {
 
 func TestRelPathTouchesLoadedSkill(t *testing.T) {
 	cases := map[string]bool{
-		"skills/writer/SKILL.md":     true,
+		"skills/writer/SKILL.md":      true,
 		".runtime/skills/writer/x.md": true,
-		"skills/writer":              true,
-		"skills/other/x.md":          false,
-		"notes/writer.txt":           false,
+		"skills/writer":               true,
+		"skills/other/x.md":           false,
+		"notes/writer.txt":            false,
 	}
 	for path, want := range cases {
 		got := relPathTouchesLoadedSkill(path, []string{"writer"})

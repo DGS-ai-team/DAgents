@@ -53,11 +53,11 @@ func ManageConsoleURL(ctx context.Context, cfg *config.Config) (string, error) {
 	}
 	manageBase := strings.TrimRight(strings.TrimSpace(info.ManageURL), "/")
 	if manageBase == "" {
-		return "", fmt.Errorf("Manage URL 为空")
+		return "", fmt.Errorf("manage URL 为空")
 	}
 	nodeID := strings.TrimSpace(info.NodeID)
 	if nodeID == "" {
-		return "", fmt.Errorf("Node ID 为空")
+		return "", fmt.Errorf("node ID 为空")
 	}
 	_ = info.ManageRegistered
 	return manageBase + "/console/?node_id=" + url.QueryEscape(nodeID), nil

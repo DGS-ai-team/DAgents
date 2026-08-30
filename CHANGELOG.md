@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+
+## [0.10.5] - 2026-08-30
+
+**产品级 UI 与 Windows 发布工程增强版**：收敛 Agent 工作台的信息层级，补齐 Workgroup/Skills/终端状态边界，并将 Windows 发布产物统一为架构对应的安装包。
+
+### 新增与优化
+
+- Agent 设置页改为分区导航，简化状态面板、子 Agent、远程终端与全局 Skills 的信息结构，移除重复字段和过时兼容性说明。
+- 终端工作台以终端会话为主，保留 Agent 消息上下文；支持可持久化的 Agent 面板宽度调整，输入栏明确消息接收方并稳定运行状态栏高度。
+- Workgroup 未启用时隐藏入口并保护直达路由；全局 Skills 页面改为目录/发现语义，元数据在上下文重建时更新，会话中通过变更事件保持同步。
+- 引入统一设计 token、扁平化设置布局、按需加载设置和终端代码分包，降低首屏与路由加载负担。
+
+### 修复
+
+- 修复 Agent 输出期间状态栏因消息与终端内容累积造成的布局抖动。
+- 修复终端页重复展示当前会话信息、设置页暴露无关 Agent ID，以及 Workgroup 禁用后仍可进入页面的问题。
+- 修复前端生产构建的重复大体积依赖分包问题，并补充 Workgroup 能力开关与聚合接口测试。
+
+### 发布与打包
+
+- Windows Release 与手动打包改为 x64（`windows-amd64`）和 x86/32 位（`windows-386`）矩阵，分别构建 Node、Client、Browser、Tauri Shell 与 legacy Shell。
+- Windows 仅发布 Inno Setup 安装包，不再生成或上传免安装归档；Linux 继续发布 tar.gz，所有发布资产继续生成 SHA256 校验和清单。
+- Release Hub 支持托管 Windows `.exe` 安装包；Shell 更新时会启动对应 Inno 安装器，旧版本的 zip/tar 更新包仍保持兼容读取。
+
+### 测试
+
+- Node Web UI 308 项单元测试、Node Go 测试、前端 lint 与生产构建通过；完成 Agent、终端、设置、Skills、Workgroup 路由及浅色/深色主题的浏览器级验收。
+
 ## [0.10.4] - 2026-08-25
 
 **工作组审批与 Agent 终端稳定性版**：统一 Node 与 Manage 的工作组任务、审批和运行状态体验，并收紧终端与工具执行的可靠性边界。

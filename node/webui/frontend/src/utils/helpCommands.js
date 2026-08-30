@@ -11,7 +11,7 @@ export const HELP_SECTIONS = [
   {
     title: "对话控制",
     items: [
-      { cmd: "/clear", desc: "清空对话与 Activity（命令/文件变更），并终止未完成命令与临时子 Agent" },
+      { cmd: "/clear", desc: "清空对话中的命令、文件变更和临时子 Agent 状态，并终止未完成命令与临时子 Agent" },
       { cmd: "/compress", desc: "手动触发一次上下文压缩" },
     ],
   },

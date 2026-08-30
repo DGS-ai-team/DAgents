@@ -177,6 +177,9 @@ type Turn struct {
 	StepIndex     int
 
 	RuntimeRevision int64
+	// ContextEpoch identifies the model-visible context segment. It advances
+	// when a new ModelContextSnapshot is accepted, not when compaction merely
+	// rewrites durable history before that segment is rebuilt.
 	ContextEpoch    int
 	ContextSnapshot *ModelContextSnapshot
 	Budget          TurnBudget
@@ -410,6 +413,8 @@ func NextTurnStatus(current TurnStatus, event EventType) (TurnStatus, bool) {
 		switch event {
 		case EventInteractionResolved, EventStepResumed:
 			return TurnStatusRunning, true
+		case EventContextCompacted:
+			return TurnStatusWaiting, true
 		case EventTurnCancelled:
 			return TurnStatusCancelled, true
 		case EventTurnInterrupted:
@@ -475,6 +480,8 @@ func NextStepStatus(current StepStatus, event EventType) (StepStatus, bool) {
 		}
 	case StepStatusWaitingInteraction:
 		switch event {
+		case EventContextCompacted:
+			return StepStatusWaitingInteraction, true
 		case EventInteractionResolved:
 			return StepStatusExecutingTools, true
 		case EventStepInterrupted:

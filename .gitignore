@@ -47,6 +47,7 @@ node/dagents-node
 client/dagents-client
 **/go.sum
 **/__debug_bin*
+**/.tmp-gocache/
 
 # Node Web UI (npm ci in CI / build.sh)
 node/webui/frontend/node_modules/

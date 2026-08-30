@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -41,6 +41,10 @@ jobs:
             echo "Invalid release tag: ${GITHUB_REF_NAME}; expected vX.Y.Z or a SemVer prerelease" >&2
             exit 1
           fi
+          if [[ "${{ github.event.forced }}" == "true" ]]; then
+            echo "Release tags must never be force-updated" >&2
+            exit 1
+          fi
 
           git fetch --no-tags origin main --depth=1
           if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
@@ -50,7 +54,7 @@ jobs:
           fi
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
 
@@ -64,10 +68,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -80,29 +84,39 @@ jobs:
           npm ci --prefix node/webui/frontend
           npm test --prefix node/webui/frontend
 
+      - name: Lint Web UI
+        run: npm run lint --prefix node/webui/frontend
+
       - name: Build Web UI
         run: bash node/webui/build.sh
 
       - name: Build Manage Console
         run: bash manage/console/build.sh
 
+      - name: Lint Manage Console
+        run: npm run lint --prefix manage/console/frontend
+
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.13"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Go test
         run: |
-          go test ./shared/config/...
-          go test ./node/...
-          go test ./client/...
+          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+          go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+          bash scripts/ci/run_staticcheck.sh
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
           cache: pip
@@ -110,7 +124,13 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock -r requirements-dev.txt
+
+      - name: Ruff
+        run: python -m ruff check manage scripts tests
+
+      - name: Pyright
+        run: python -m pyright --project pyrightconfig.json
 
       - name: Python unittest
         run: python -m unittest discover -s tests -p "test_*.py" -v
@@ -122,23 +142,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.13"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Build Go binaries (dagents-node + dagents-client)
         shell: bash
@@ -152,10 +176,10 @@ jobs:
           cp "${OUT_DIR}/bin/dagents-client" dist/dagents-client
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build Rocky8 browser builder image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: packaging/ci/Dockerfile.rocky8-browser
@@ -165,10 +189,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=rocky8-browser-builder
 
       - name: Cache Rocky8 pyenv (CPython)
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .cache/rocky8-pyenv
-          key: rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-${{ hashFiles('browser-service/requirements.txt', 'requirements.txt') }}
+          key: rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-${{ hashFiles('browser-service/requirements.lock', 'requirements.lock') }}
           restore-keys: |
             rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-
 
@@ -198,89 +222,117 @@ jobs:
           ls -la dist/dagents-local-assistant-*
 
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dagents-local-assistant-linux-amd64
           path: dist/dagents-local-assistant-linux-amd64-*.*
           if-no-files-found: error
 
   build-windows-go:
-    name: Build Windows Go binaries
+    name: Build Windows Go binaries (${{ matrix.label }})
     if: startsWith(github.ref, 'refs/tags/v')
     needs: unit-tests
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            platform: windows-amd64
+            goarch: amd64
+          - label: x86
+            platform: windows-386
+            goarch: '386'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.13"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Build Go binaries
         shell: bash
         run: |
           set -euo pipefail
-          OUT_DIR="${GITHUB_WORKSPACE}/dist/go-build-windows-amd64"
-          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS=windows GOARCH=amd64 \
+          OUT_DIR="${GITHUB_WORKSPACE}/dist/${{ matrix.platform }}"
+          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS=windows GOARCH=${{ matrix.goarch }} \
             bash scripts/ci/build_go_static.sh
           mkdir -p dist
-          cp "${OUT_DIR}/bin/dagents-node.exe" dist/dagents-node.exe
-          cp "${OUT_DIR}/bin/dagents-client.exe" dist/dagents-client.exe
+          cp "${OUT_DIR}/bin/dagents-node.exe" "dist/${{ matrix.platform }}/dagents-node.exe"
+          cp "${OUT_DIR}/bin/dagents-client.exe" "dist/${{ matrix.platform }}/dagents-client.exe"
 
       - name: Upload Go binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ci-win-go
-          path: |
-            dist/dagents-node.exe
-            dist/dagents-client.exe
+          name: ci-win-go-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/*
           if-no-files-found: error
 
   build-windows-shell:
-    name: Build Windows shell (Tauri + legacy)
+    name: Build Windows shell (${{ matrix.label }})
     if: startsWith(github.ref, 'refs/tags/v')
     needs: unit-tests
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            platform: windows-amd64
+            goarch: amd64
+            tauri_target: x86_64-pc-windows-msvc
+          - label: x86
+            platform: windows-386
+            goarch: '386'
+            tauri_target: i686-pc-windows-msvc
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: desktop/tray-tauri/package-lock.json
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.13"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
             shared/config/go.sum
+            shared/logfiles/go.sum
+            shared/update/go.sum
+            shared/workgroup/go.sum
+            desktop/tray/go.sum
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.tauri_target }}
 
       - name: Rust cache (Tauri tray shell)
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: |
             desktop/tray-tauri/src-tauri -> target
@@ -289,49 +341,65 @@ jobs:
       - name: Build dagents-shell (Tauri + Go legacy)
         shell: bash
         run: |
+          cargo fmt --check --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml
           chmod +x scripts/ci/build_dagents_shell_tauri.sh scripts/ci/build_dagents_shell.sh
-          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
-          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell.sh
-          test -f dist/dagents-shell-tauri.exe
-          test -f dist/dagents-shell-legacy.exe
-          test -f dist/dagents-shell.exe
+          OUT_DIR="${GITHUB_WORKSPACE}/dist/${{ matrix.platform }}" \
+            TAURI_TARGET="${{ matrix.tauri_target }}" \
+            bash scripts/ci/build_dagents_shell_tauri.sh
+          OUT_DIR="${GITHUB_WORKSPACE}/dist/${{ matrix.platform }}" \
+            GOOS=windows GOARCH=${{ matrix.goarch }} \
+            bash scripts/ci/build_dagents_shell.sh
+          test -f "dist/${{ matrix.platform }}/dagents-shell-tauri.exe"
+          test -f "dist/${{ matrix.platform }}/dagents-shell-legacy.exe"
+          test -f "dist/${{ matrix.platform }}/dagents-shell.exe"
 
       - name: Upload shell binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ci-win-shell
-          path: |
-            dist/dagents-shell.exe
-            dist/dagents-shell-tauri.exe
-            dist/dagents-shell-legacy.exe
+          name: ci-win-shell-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/*
           if-no-files-found: error
 
   build-windows-browser:
-    name: Build Windows browser (PyInstaller)
+    name: Build Windows browser (${{ matrix.label }})
     if: startsWith(github.ref, 'refs/tags/v')
     needs: unit-tests
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            platform: windows-amd64
+            python_arch: x64
+          - label: x86
+            platform: windows-386
+            python_arch: x86
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
+          architecture: ${{ matrix.python_arch }}
           cache: pip
 
       - name: Build dagents-browser
         shell: bash
         env:
           BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
-        run: bash scripts/ci/build_dagents_browser.sh
+        run: |
+          bash scripts/ci/build_dagents_browser.sh
+          mkdir -p "dist/${{ matrix.platform }}"
+          cp dist/dagents-browser.exe "dist/${{ matrix.platform }}/dagents-browser.exe"
 
       - name: Upload browser binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ci-win-browser
-          path: dist/dagents-browser.exe
+          name: ci-win-browser-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/*
           if-no-files-found: error
 
   build-windows-assistant:
@@ -344,57 +412,86 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Download Go binaries
-        uses: actions/download-artifact@v4
+      - name: Download Windows x64 Go binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-win-go
-          path: dist
+          name: ci-win-go-windows-amd64
+          path: dist/windows-amd64
 
-      - name: Download shell binaries
-        uses: actions/download-artifact@v4
+      - name: Download Windows x86 Go binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-win-shell
-          path: dist
+          name: ci-win-go-windows-386
+          path: dist/windows-386
 
-      - name: Download browser binary
-        uses: actions/download-artifact@v4
+      - name: Download Windows x64 shell binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: ci-win-browser
-          path: dist
+          name: ci-win-shell-windows-amd64
+          path: dist/windows-amd64
 
-      - name: Assemble release archive
+      - name: Download Windows x86 shell binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-win-shell-windows-386
+          path: dist/windows-386
+
+      - name: Download Windows x64 browser binary
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-win-browser-windows-amd64
+          path: dist/windows-amd64
+
+      - name: Download Windows x86 browser binary
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-win-browser-windows-386
+          path: dist/windows-386
+
+      - name: Assemble Windows installer staging directories
         shell: bash
         run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          PLATFORM=windows-amd64 VERSION="${VERSION}" \
-            bash scripts/ci/assemble_local_assistant_bundle.sh
+          for platform in windows-amd64 windows-386; do
+            PLATFORM="${platform}" VERSION="${VERSION}" \
+              NODE_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-node.exe" \
+              CLIENT_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-client.exe" \
+              BROWSER_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-browser.exe" \
+              SHELL_TAURI_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell-tauri.exe" \
+              SHELL_LEGACY_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell-legacy.exe" \
+              SHELL_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell.exe" \
+              bash scripts/ci/assemble_local_assistant_bundle.sh
+          done
+          if compgen -G 'dist/dagents-local-assistant-windows-*.zip' > /dev/null; then
+            echo 'Windows portable archives must not be generated' >&2
+            exit 1
+          fi
           ls -la dist/dagents-local-assistant-*
 
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      - name: Build Windows installer (Inno)
+      - name: Build Windows installers (Inno x64 + x86)
         shell: bash
         run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
-          ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
-
-      - name: Upload archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: dagents-local-assistant-windows-amd64
-          path: dist/dagents-local-assistant-windows-amd64-*.*
-          if-no-files-found: error
+          for platform in windows-amd64 windows-386; do
+            PLATFORM="${platform}" VERSION="${VERSION}" \
+              BUNDLE_SRC="${GITHUB_WORKSPACE}/dist/dagents-local-assistant-${platform}" \
+              bash scripts/ci/build_windows_installer.sh
+          done
+          ls -la dist-installer dist/dagents-local-assistant-windows-*-installer-*.exe
 
       - name: Upload Windows installer (Inno)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dagents-windows-installer
-          path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
+          name: dagents-windows-installers
+          path: dist/dagents-local-assistant-windows-*-installer-*.exe
           if-no-files-found: error
 
   build-manage-docker:
@@ -406,10 +503,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download linux-amd64 local assistant
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dagents-local-assistant-linux-amd64
           path: dist
@@ -423,7 +520,7 @@ jobs:
           ls -la dist/dagents-manage-bundle-*
 
       - name: Upload Manage offline bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dagents-manage-bundle
           path: dist/dagents-manage-bundle-*.tar.gz
@@ -440,7 +537,7 @@ jobs:
 
     steps:
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: dagents-*
           merge-multiple: true
@@ -454,7 +551,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          mapfile -t assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.exe' \) -print | sort)
+          mapfile -t assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.exe' \) -print | sort)
           if [[ "${#assets[@]}" -eq 0 ]]; then
             echo "No release assets were downloaded" >&2
             exit 1
@@ -471,7 +568,7 @@ jobs:
           dist = Path("dist")
           assets = sorted(
               path for path in dist.iterdir()
-              if path.is_file() and path.name.endswith((".tar.gz", ".zip", ".exe"))
+              if path.is_file() and path.name.endswith((".tar.gz", ".exe"))
           )
           manifest = {
               "version": os.environ["VERSION"],
@@ -494,12 +591,11 @@ jobs:
           cat dist/release-manifest.json
 
       - name: Create release and upload bundles
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/dagents-local-assistant-*.tar.gz
-            dist/dagents-local-assistant-*.zip
-            dist/dagents-local-assistant-windows-amd64-installer-*.exe
+            dist/dagents-local-assistant-windows-*-installer-*.exe
             dist/dagents-manage-bundle-*.tar.gz
             dist/SHA256SUMS
             dist/release-manifest.json
@@ -516,7 +612,7 @@ jobs:
       actions: write
     steps:
       - name: Create or update main to dev sync PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         with:

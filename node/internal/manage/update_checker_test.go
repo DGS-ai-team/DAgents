@@ -16,9 +16,9 @@ func TestUpdateCheckerFetchCheck(t *testing.T) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"latest":             "0.9.0",
-			"upgrade_available":  true,
-			"release_notes":      "test",
+			"latest":            "0.9.0",
+			"upgrade_available": true,
+			"release_notes":     "test",
 			"asset": map[string]any{
 				"download_url": "/v1/releases/packages/dagents-local-assistant/stable/linux-amd64/latest/download",
 			},

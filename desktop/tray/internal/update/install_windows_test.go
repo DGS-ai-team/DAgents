@@ -15,9 +15,11 @@ func TestInstallReleasePackage_zip(t *testing.T) {
 	if err := writeTestReleaseZip(pkgPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := installReleasePackage(home, pkgPath); err != nil {
+	transaction, err := installReleasePackage(home, pkgPath)
+	if err != nil {
 		t.Fatal(err)
 	}
+	transaction.Commit()
 	got, err := os.ReadFile(filepath.Join(home, "bin", "dagents-node.exe"))
 	if err != nil {
 		t.Fatal(err)

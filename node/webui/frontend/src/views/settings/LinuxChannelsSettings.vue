@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import * as api from "../../api/node.js";
+import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const channels = ref([]);
@@ -18,7 +19,7 @@ const editingChannelId = ref("");
 const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
 const channel = reactive({
   display_name: "", host: "", port: 22, username: "", credential_id: "",
-  host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "",
+  host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "", max_sessions: 4,
 });
 
 const credentialAuthMeta = {
@@ -40,7 +41,8 @@ const channelReady = computed(() => Boolean(
   channel.host.trim() &&
   channel.username.trim() &&
   channel.credential_id &&
-  hostKeyReady.value,
+  hostKeyReady.value &&
+  Number(channel.max_sessions) >= 1 && Number(channel.max_sessions) <= 64,
 ));
 
 function authTypeLabel(type) {
@@ -79,7 +81,7 @@ function onCredentialSecretModeChange() {
 function resetChannelForm() {
   Object.assign(channel, {
     display_name: "", host: "", port: 22, username: "", credential_id: "",
-    host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "",
+    host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "", max_sessions: 4,
   });
 }
 
@@ -108,6 +110,7 @@ function openChannelForm(item = null) {
       host_key_ref: item.host_key_ref || "",
       remote_shell: item.remote_shell || "bash",
       default_cwd: item.default_cwd || "",
+      max_sessions: item.max_sessions || 4,
     });
   }
   error.value = "";
@@ -251,15 +254,23 @@ onMounted(() => void load());
 
 <template>
   <div class="settings-page settings-embedded linux-settings">
-    <header class="settings-page__header">
-      <div class="settings-page__header-main">
-        <h1 class="settings-page__title">Linux 通道</h1>
-        <p class="settings-page__intro">先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。密码可直接输入或引用环境变量，敏感信息不会进入工具参数或会话上下文。</p>
-      </div>
-      <div class="settings-page__header-actions">
+    <SettingsPageHeader
+      title="Linux 通道"
+      eyebrow="全局工具设置"
+      description="先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。敏感信息不会进入工具参数或会话上下文。"
+    >
+      <template #actions>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
-      </div>
-    </header>
+      </template>
+    </SettingsPageHeader>
+
+    <div class="linux-settings__flow" aria-label="Linux 通道配置流程">
+      <span class="linux-settings__flow-step"><b>1</b>保存凭据</span>
+      <span class="linux-settings__flow-line" aria-hidden="true"></span>
+      <span class="linux-settings__flow-step"><b>2</b>创建 SSH 通道</span>
+      <span class="linux-settings__flow-line" aria-hidden="true"></span>
+      <span class="linux-settings__flow-step"><b>3</b>绑定到智能体</span>
+    </div>
 
     <p v-if="loading" class="linux-settings__muted">加载中…</p>
     <p v-if="error" class="linux-settings__error">{{ error }}</p>
@@ -299,7 +310,7 @@ onMounted(() => void load());
     <section class="settings-section settings-section--standalone">
       <div class="settings-section__head">
         <div>
-          <h2 class="settings-section__title">凭据清单</h2>
+          <h2 class="settings-section__title">凭据</h2>
           <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；直接输入内容会加密存储。</p>
         </div>
         <div class="settings-section__actions">
@@ -318,7 +329,7 @@ onMounted(() => void load());
     <section class="settings-section settings-section--standalone">
       <div class="settings-section__head">
         <div>
-          <h2 class="settings-section__title">通道清单</h2>
+          <h2 class="settings-section__title">SSH 通道</h2>
           <p class="settings-section__desc">保存后在智能体详情中绑定；未绑定的通道不会对智能体暴露。</p>
         </div>
         <div class="settings-section__actions">
@@ -328,7 +339,7 @@ onMounted(() => void load());
       <div v-if="!channels.length" class="linux-settings__empty settings-empty-state">还没有配置 Linux 通道。</div>
       <div v-else class="linux-settings__list">
         <div v-for="item in channels" :key="item.channel_id" class="linux-settings__row">
-          <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }} · {{ hostKeyPolicyLabel(item.host_key_policy) }}</small></div>
+          <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }} · {{ hostKeyPolicyLabel(item.host_key_policy) }} · 最大并发会话 {{ item.max_sessions || 1 }}</small></div>
           <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="openChannelForm(item)">编辑</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
         </div>
       </div>
@@ -416,6 +427,7 @@ onMounted(() => void load());
             <div class="linux-settings__grid">
               <div class="linux-settings__field"><label>默认远程目录 <span>可选</span></label><input v-model="channel.default_cwd" class="settings-field__input" placeholder="例如：/opt/app" /></div>
               <div class="linux-settings__field"><label>远程 Shell <span>可选</span></label><input v-model="channel.remote_shell" class="settings-field__input" placeholder="bash" /></div>
+              <div class="linux-settings__field"><label>最大并发会话 <span>必选</span></label><input v-model.number="channel.max_sessions" type="number" min="1" max="64" class="settings-field__input" placeholder="4" /><small>同一 Linux 通道允许同时打开的持久终端数量；智能体绑定时还可以设置更小的上限。</small></div>
             </div>
           </div>
         </div>
@@ -430,6 +442,10 @@ onMounted(() => void load());
 
 <style scoped>
 .linux-settings { max-width: 1180px; }
+.linux-settings__flow { display:flex; align-items:center; gap:10px; margin:-6px 0 4px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--color-primary, #1575c5) 18%, var(--color-border)); border-radius:10px; background:color-mix(in srgb, var(--color-primary, #1575c5) 5%, var(--color-surface)); color:var(--color-text-muted); font-size:12px; }
+.linux-settings__flow-step { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.linux-settings__flow-step b { display:grid; place-items:center; width:18px; height:18px; border-radius:50%; color:var(--color-primary-strong); background:var(--color-primary-soft); font-size:11px; }
+.linux-settings__flow-line { flex:0 1 28px; height:1px; background:var(--color-border); }
 .linux-settings__actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex:0 0 auto; }
 .linux-settings__summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:22px 0 4px; }
 .linux-settings__summary-card { display:flex; flex-direction:column; gap:3px; padding:14px 16px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface-muted, #f8fafc); }

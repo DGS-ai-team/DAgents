@@ -49,20 +49,12 @@ function trim(value) {
   return String(value || "").trim();
 }
 
-function legacyPhase({ run_turn_phase, has_active_turn, pending_hitl } = {}) {
-  const hasPending = Array.isArray(pending_hitl?.items) && pending_hitl.items.length > 0;
-  if (hasPending || trim(run_turn_phase) === "awaiting_hitl") return "tool_waiting";
-  if (has_active_turn && trim(run_turn_phase) === "awaiting_tool_execution") return "tool_executing";
-  if (has_active_turn && trim(run_turn_phase) === "model_streaming") return "model_generating";
-  return "idle";
-}
-
 export function normalizeTurnState(raw = {}, { source = "event" } = {}) {
   const payload = raw?.turn_state && typeof raw.turn_state === "object" ? raw.turn_state : raw;
-  const phase = trim(payload?.phase) || legacyPhase(payload);
+  const phase = trim(payload?.phase) || "idle";
   const terminal = Boolean(payload?.terminal) || TERMINAL_SET.has(phase);
   return {
-    authority: trim(payload?.authority) || (source === "hydrate_legacy" ? "hydrate_legacy" : "turn_coordinator"),
+    authority: trim(payload?.authority) || "turn_coordinator",
     phase,
     turnStatus: trim(payload?.turn_status || payload?.turnStatus),
     stepStatus: trim(payload?.step_status || payload?.stepStatus),
@@ -89,7 +81,7 @@ export function normalizeTurnState(raw = {}, { source = "event" } = {}) {
 }
 
 function canAccept(next, current, source) {
-  if (source === "hydrate" || source === "hydrate_legacy") return true;
+  if (source === "hydrate") return true;
   if (current.lifecycleSeq > 0 && next.lifecycleSeq > 0 && next.lifecycleSeq < current.lifecycleSeq) return false;
   if (current.generation > 0 && next.generation > 0 && next.generation < current.generation) return false;
   if (
@@ -134,15 +126,7 @@ export function applyTurnState(raw, { source = "event" } = {}) {
 }
 
 export function applyHydrateTurnState(data = {}) {
-  const source = data?.turn_state ? "hydrate" : "hydrate_legacy";
-  return applyTurnState(
-    data?.turn_state || {
-      run_turn_phase: data?.run_turn_phase,
-      has_active_turn: data?.has_active_turn,
-      pending_hitl: data?.pending_hitl,
-    },
-    { source },
-  );
+  return applyTurnState(data?.turn_state || {}, { source: "hydrate" });
 }
 
 export function setOutputChannel(channel) {

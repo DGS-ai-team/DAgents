@@ -195,7 +195,7 @@ type TriggersConfig struct {
 	PollSeconds int  `yaml:"poll_seconds"`
 }
 
-// SkillsConfig 控制 session skills 扫描与 prompt 注入。
+// SkillsConfig 控制 session skills 目录扫描与同时启用数量。
 type SkillsConfig struct {
 	Enabled     bool `yaml:"enabled"`
 	MaxInPrompt int  `yaml:"max_in_prompt"`
@@ -257,7 +257,7 @@ type DuplicateToolCallHookConfig struct {
 	WindowSeconds int `yaml:"window_seconds"`
 }
 
-// InjectTodayDateHookConfig 控制 turn.before_step 注入「当天日期为：YYYYMMDD」human message。
+// InjectTodayDateHookConfig 控制 request-only context 中的「当天日期为：YYYYMMDD」提示。
 type InjectTodayDateHookConfig struct {
 	// Enabled 为 nil 时默认 true。
 	Enabled *bool `yaml:"enabled"`
@@ -297,7 +297,7 @@ func (c *Config) DuplicateToolCallWindowSeconds() int {
 	return c.Hooks.DuplicateToolCall.WindowSeconds
 }
 
-// InjectTodayDateHookEnabled 是否启用当天日期注入 Hook。
+// InjectTodayDateHookEnabled 是否启用 request-only 日期提示。
 func (c *Config) InjectTodayDateHookEnabled() bool {
 	if c == nil || c.Hooks.InjectTodayDate.Enabled == nil {
 		return true

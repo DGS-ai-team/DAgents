@@ -24,7 +24,7 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 python3 run_manage.py
 ```
 
-依赖见根目录 `requirements.txt`（含 **`websockets`**：工作组 Dialer WS 必需；缺库时握手 404，成员会一直停在「配置中」）。
+依赖约束见根目录 `requirements.txt`，实际安装使用 `requirements.lock`（含 **`websockets`**：工作组 Dialer WS 必需；缺库时握手 404，成员会一直停在「配置中」）。
 
 默认 **`0.0.0.0:8020`**（`MANAGE_HOST` / `MANAGE_PORT` 可配置）。
 
@@ -145,7 +145,7 @@ Manage 在 `MANAGE_RELEASES_DIR`（默认 `/data/releases`）托管 `dagents-loc
 | GET | `/v1/releases/check` | Node 版本检查 |
 | GET | `/v1/releases/packages/.../latest/download` | 下载 latest |
 
-发版时 CI 将同版本 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
+发版时 CI 将同版本 Linux `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）；Windows x64/x86 Inno `.exe` 可按对应平台上传到 Release Hub。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
 
 Node：`GET /v1/agent/update`（需 `manage.enabled`）。
 

@@ -104,7 +104,7 @@ paths:
           description: OK
   /v1/agents/{agent_id}/prompt-context:
     get:
-      summary: 读取侧车正文（soul/user/custom/long_term，SQLite）
+      summary: 读取 Agent prompt context（soul/custom/long_term；user_md 仅兼容迁移字段，SQLite）
       parameters:
         - $ref: "#/components/parameters/AgentID"
       responses:
@@ -154,6 +154,824 @@ paths:
       responses:
         "404":
           description: Not Found
+
+  /v1/agent-templates/{id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/prompt-context/memory/{entry_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/linux/channels/{channel_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/linux/credentials/{credential_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/servers/{server_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/triggers/{trigger_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/human-queue/{queueId}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/subscribe:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /ui:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agent-templates:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agent/info:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/desktop/runtime-config:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agent/update:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agent/upgrade-readiness:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/child-agents:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/child-agents/{child_agent_id}:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/context:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/execution-events:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/linux-channels:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    put:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/mcp:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    put:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/mcp/effective-tools:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/media/{media_id}:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/screen/status:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/screen/stream:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/skills:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/terminals:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/terminals/ws:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/timeline:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/tool-jobs:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/linux/channels:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/linux/credentials:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/llm/settings:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/config:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    put:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/servers:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/servers/{server_id}/tools:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/status:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/setup/config:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/skills/catalog:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/transfers:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/transfers/events:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/triggers:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/triggers/{trigger_id}/history:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/ui/bootstrap:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/meta/agents:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/meta/member-tools:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/acl:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/events:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/hitl:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/human-queue:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/llm-configs:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/members:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/members/{memberId}/spec:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/runs:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/runs/{runId}/history:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/timeline:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/members/{memberId}:
+    patch:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/ack:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/cancel:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/child-agents/{child_agent_id}/cancel:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/clear-context:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/compress:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/skills/load:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/skills/unload:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/tool-calls/{tool_call_id}/cancel:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/desktop/ui/focus:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/linux/channels/{channel_id}/test:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/manage/upload/externaltool:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/manage/upload/plugin:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/manage/upload/skill:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/servers/{server_id}/refresh:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/mcp/servers/{server_id}/test:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/setup/llm/probe-models:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/transfers/{transfer_id}/cancel:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/triggers/{trigger_id}/fire:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/collaborators:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/hitl/{hitlId}/resolve:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/human-queue/{queueId}/send-now:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/members/{memberId}/archive:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/messages:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/messages/stream:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/publish:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/workgroups/{workgroupId}/turn/cancel:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
 components:
   parameters:
     AgentID:

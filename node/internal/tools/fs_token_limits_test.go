@@ -41,6 +41,60 @@ func TestReadFile_truncatesByTokenBudget(t *testing.T) {
 	}
 }
 
+func TestReadFileTokenTruncationNextOffsetStartsAtPartialLine(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for i := 0; i < 120; i++ {
+		lines = append(lines, strings.Repeat("测", 60))
+	}
+	_, err = reg.Execute(context.Background(), "write_file", `{"path":"partial.txt","content":`+mustJSON(strings.Join(lines, "\n"))+`}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := reg.Execute(context.Background(), "read_file", `{"path":"partial.txt","line_offset":1,"line_limit":120}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "本页内容是否因 token 上限截断: 是") {
+		t.Fatalf("expected token truncation: %q", out)
+	}
+	if !strings.Contains(out, "next_line_offset: 83") {
+		t.Fatalf("next offset must point at the partially truncated line: %q", out)
+	}
+	if strings.Contains(out, "next_line_offset: 121") {
+		t.Fatalf("next offset skipped the truncated line: %q", out)
+	}
+}
+
+func TestReadFileTokenTruncationOnLastLineKeepsOffset(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Repeat("测", 10000)
+	_, err = reg.Execute(context.Background(), "write_file", `{"path":"last-line.txt","content":`+mustJSON(content)+`}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := reg.Execute(context.Background(), "read_file", `{"path":"last-line.txt","line_offset":1,"line_limit":1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "next_line_offset: 1") {
+		t.Fatalf("last-line truncation must be reread from line 1: %q", out)
+	}
+	if !strings.Contains(out, "后方是否还有未读取内容: 是") {
+		t.Fatalf("last-line truncation must report unread content: %q", out)
+	}
+}
+
 func TestGrepFile_truncatesByTokenBudget(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)

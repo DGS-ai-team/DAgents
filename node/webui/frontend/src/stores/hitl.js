@@ -360,6 +360,7 @@ export function shouldSkipChildRuntimeDisplay(eventType, data) {
   switch (eventType) {
     case "hitl_required":
     case "temporary_agent_created":
+    case "temporary_agent_progress":
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":
       return false;

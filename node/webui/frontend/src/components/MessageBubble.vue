@@ -31,20 +31,7 @@ async function onMarkdownAction(event) {
   if (!code) return;
   button.dataset.defaultLabel = button.textContent || "复制代码";
   try {
-    if (button.dataset.markdownAction === "download") {
-      const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "markdown-code.txt";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      button.textContent = "已下载";
-    } else {
-      button.textContent = (await copyText(code)) ? "已复制" : "复制失败";
-    }
+    button.textContent = (await copyText(code)) ? "已复制" : "复制失败";
   } catch {
     button.textContent = "操作失败";
   }
@@ -68,6 +55,10 @@ const userImageSrcs = computed(() => {
   const media = Array.isArray(props.entry.media) ? props.entry.media : [];
   return media.map((item) => String(item?.url || "").trim()).filter(Boolean);
 });
+const userFileRefs = computed(() => {
+  if (props.entry.kind !== "user") return [];
+  return Array.isArray(props.entry.file_refs) ? props.entry.file_refs : [];
+});
 
 function openUserImage(index) {
   openLightbox(
@@ -86,6 +77,26 @@ function userImageThumb(src) {
     <div class="msg__body">
       <div v-if="entry.text" class="msg__bubble msg__bubble--user">
         <div class="msg__text">{{ entry.text }}</div>
+      </div>
+      <div v-if="userFileRefs.length" class="msg__file-refs" aria-label="引用文件">
+        <div class="msg__file-refs-heading">
+          <span>引用文件</span>
+          <span class="msg__file-refs-count">{{ userFileRefs.length }}</span>
+        </div>
+        <div class="msg__file-refs-list">
+          <div v-for="file in userFileRefs" :key="file.path" class="msg__file-ref" :title="file.path">
+            <span class="msg__file-ref-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none">
+                <path d="M5.25 2.75h6.1L15.5 6.9v10.35H5.25z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
+                <path d="M11.25 2.75V7h4.25" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="msg__file-ref-info">
+              <strong>{{ file.name || file.path }}</strong>
+              <small>{{ file.displayPath || file.path }}</small>
+            </span>
+          </div>
+        </div>
       </div>
       <div v-if="userImageSrcs.length" class="msg__images" aria-label="发送的图片">
         <button
@@ -111,17 +122,6 @@ function userImageThumb(src) {
             </span>
           </span>
         </button>
-      </div>
-    </div>
-  </div>
-
-  <div v-else-if="entry.kind === 'user_deferred'" class="msg msg--user msg--user-deferred" :class="{ 'msg--user-applied': entry.sideEffectApplied, 'msg--user-stale': entry.sideEffectStale }">
-    <div class="msg__body">
-      <div class="msg__bubble msg__bubble--user msg__bubble--deferred">
-        <span v-if="entry.userName" class="msg__deferred-tag">{{ entry.userName }}</span>
-        <span v-if="entry.sideEffectApplied" class="msg__applied-tag">已入库</span>
-        <span v-else-if="entry.sideEffectStale" class="msg__stale-tag">已失效</span>
-        {{ entry.text }}
       </div>
     </div>
   </div>
@@ -165,6 +165,77 @@ function userImageThumb(src) {
   width: min(420px, 100%);
   gap: 6px;
   margin-top: 6px;
+}
+.msg__file-refs {
+  width: min(440px, 100%);
+  margin-top: 7px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--color-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-primary-soft) 42%, var(--color-surface));
+}
+.msg__file-refs-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.msg__file-refs-count {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.msg__file-refs-list {
+  display: grid;
+  gap: 4px;
+}
+.msg__file-ref {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+}
+.msg__file-ref-icon {
+  flex: 0 0 auto;
+  color: var(--color-primary-strong);
+  line-height: 0;
+}
+.msg__file-ref-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.msg__file-ref-info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.msg__file-ref-info strong,
+.msg__file-ref-info small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg__file-ref-info strong {
+  color: var(--color-text);
+  font-size: 11.5px;
+}
+.msg__file-ref-info small {
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 .msg__image-frame {
   position: relative;
@@ -258,29 +329,6 @@ function userImageThumb(src) {
   font-size: 13px;
   line-height: 1.55;
   color: var(--color-text);
-}
-.msg__bubble--deferred {
-  opacity: 0.85;
-}
-.msg--user-applied .msg__bubble--deferred {
-  opacity: 1;
-}
-.msg--user-stale .msg__bubble--deferred {
-  opacity: 0.55;
-  text-decoration: line-through;
-}
-.msg__applied-tag,
-.msg__stale-tag {
-  display: inline-block;
-  margin-right: 6px;
-  font-size: 10px;
-  text-transform: uppercase;
-}
-.msg__applied-tag {
-  color: var(--color-success);
-}
-.msg__stale-tag {
-  color: var(--color-text-subtle);
 }
 .msg__deferred-tag {
   display: inline-block;

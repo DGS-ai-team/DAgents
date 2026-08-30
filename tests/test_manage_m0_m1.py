@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory

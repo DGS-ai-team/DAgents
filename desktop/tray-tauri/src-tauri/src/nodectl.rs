@@ -39,9 +39,7 @@ pub fn probe(cfg: &ShellConfig) -> Result<Health, String> {
     if resp.status() != 200 {
         return Err(format!("health status {}", resp.status()));
     }
-    let payload: HealthPayload = resp
-        .into_json()
-        .map_err(|e| format!("health JSON: {e}"))?;
+    let payload: HealthPayload = resp.into_json().map_err(|e| format!("health JSON: {e}"))?;
     Ok(Health {
         ok: payload.status == "ok",
         status: payload.status,
@@ -247,7 +245,10 @@ pub fn manage_console_url(cfg: &ShellConfig) -> Result<String, String> {
     if !info.manage_registered {
         // 仍可打开；Console 会提示未注册。
     }
-    Ok(format!("{base}/console/?node_id={}", urlencoding_node_id(node_id)))
+    Ok(format!(
+        "{base}/console/?node_id={}",
+        urlencoding_node_id(node_id)
+    ))
 }
 
 fn urlencoding_node_id(node_id: &str) -> String {

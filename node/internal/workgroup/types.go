@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-const SchemaVersion = "0.5.0"
+const (
+	ProtocolVersion = "1"
+	SchemaVersion   = "0.5.0"
+)
 
 // AgentSessionOpenRequest binds a Workgroup member to an already existing
 // Agent runtime on this Node. The session id is deliberately supplied by

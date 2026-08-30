@@ -28,31 +28,55 @@ func testRegistry(t *testing.T) *tools.Registry {
 	return reg
 }
 
-func TestToolDefinitions_catalogToolModeIsOptInAndRequiresSkillsTools(t *testing.T) {
+func TestOrchestratorForgetSessionReleasesRuntimeState(t *testing.T) {
+	o := NewOrchestrator("agent", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	const sessionID = "session-cleanup"
+	o.RequestModelContextRefresh(sessionID, "skills_load")
+	o.SetNextStepFinalSummary(sessionID)
+	o.recordToolCall(sessionID, "terminal_command")
+	o.setModelContextSnapshot(sessionID, NewModelContextSnapshot("system", nil, 1, "digest"))
+
+	o.ForgetSession(sessionID)
+
+	if got := o.ModelContextSnapshot(sessionID); got != nil {
+		t.Fatalf("model context snapshot was retained: %#v", got)
+	}
+	o.contextMutationMu.Lock()
+	_, hasMutation := o.contextMutations[sessionID]
+	o.contextMutationMu.Unlock()
+	o.summaryMu.Lock()
+	_, hasSummary := o.summaryNext[sessionID]
+	o.summaryMu.Unlock()
+	o.turnUsageMu.Lock()
+	_, hasUsage := o.turnUsage[sessionID]
+	_, hasUsageLast := o.turnUsageLast[sessionID]
+	o.turnUsageMu.Unlock()
+	o.ctxMetrics.mu.Lock()
+	_, hasMetrics := o.ctxMetrics.data[sessionID]
+	o.ctxMetrics.mu.Unlock()
+	if hasMutation || hasSummary || hasUsage || hasUsageLast || hasMetrics {
+		t.Fatalf("session state was not fully released: mutation=%v summary=%v usage=%v usage_last=%v metrics=%v", hasMutation, hasSummary, hasUsage, hasUsageLast, hasMetrics)
+	}
+}
+
+func TestToolDefinitions_exposesSkillDiscoveryWithSkillsTools(t *testing.T) {
 	root := t.TempDir()
 	reg := testRegistry(t)
 	catalog := skills.NewCatalog(filepath.Join(root, "skills"), true, 3)
 
 	defaultOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
-	for _, def := range defaultOrch.ToolDefinitions() {
-		if def.Function.Name == "list_available_skills" {
-			t.Fatal("default mode must not expose list_available_skills")
-		}
-	}
-
-	experimentOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog, CatalogToolMode: true}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
 	found := false
-	for _, def := range experimentOrch.ToolDefinitions() {
+	for _, def := range defaultOrch.ToolDefinitions() {
 		if def.Function.Name == "list_available_skills" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("experiment mode must expose list_available_skills when load_skills is visible")
+		t.Fatal("Skills group must expose list_available_skills when load_skills is visible")
 	}
 
 	reg.SetBuiltinEnabledNone()
-	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog, CatalogToolMode: true}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
 	for _, def := range restricted.ToolDefinitions() {
 		if def.Function.Name == "list_available_skills" {
 			t.Fatal("catalog discovery must not appear without load_skills")
@@ -264,7 +288,7 @@ func TestRunMessageTurn(t *testing.T) {
 				}
 			case "usage":
 				gotUsage = true
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:
@@ -362,7 +386,7 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 				if c, ok := ev.Data["content"].(string); !ok || !strings.Contains(c, "file-body") {
 					t.Fatalf("tool result = %+v", ev.Data)
 				}
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:
@@ -390,23 +414,13 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 
 	deadline := time.After(3 * time.Second)
 	var pending *PendingHITL
-	var gotHitlDone bool
 	var gotUserInfo bool
-	for !(gotHitlDone && gotUserInfo) {
+	for !gotUserInfo {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
-			case "done":
-				if ev.Data["finish_reason"] != "awaiting_hitl" {
-					t.Fatalf("unexpected done finish_reason: %+v", ev.Data)
-				}
-				if ev.Data["turn_complete"] != false {
-					t.Fatalf("turn_complete = %v, want false", ev.Data["turn_complete"])
-				}
-				if ev.Data["awaiting"] != "hitl" {
-					t.Fatalf("awaiting = %v", ev.Data["awaiting"])
-				}
-				gotHitlDone = true
+			case "turn_finished":
+				t.Fatalf("HITL pause must not emit turn_finished: %+v", ev.Data)
 			case "hitl_required":
 				items, ok := ev.Data["items"].([]any)
 				if !ok || len(items) != 1 {
@@ -433,7 +447,7 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 				gotUserInfo = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout hitl_done=%v user_info=%v", gotHitlDone, gotUserInfo)
+			t.Fatalf("timeout user_info=%v", gotUserInfo)
 		}
 	}
 	continueResumeAndDrain(t, orch, context.Background(), "sess-1", &history, map[string]any{
@@ -476,7 +490,7 @@ resumeApproval:
 	for {
 		select {
 		case ev := <-ch:
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				<-done
 				return
 			}
@@ -607,7 +621,7 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 			switch ev.Type {
 			case "error":
 				t.Fatalf("unexpected error SSE: %+v", ev.Data)
-			case "done":
+			case "turn_finished":
 				if reason, _ := ev.Data["finish_reason"].(string); reason != "stop" {
 					t.Fatalf("done finish_reason = %q, want stop", reason)
 				}
@@ -859,7 +873,7 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	for finish == "" {
 		select {
 		case ev := <-ch:
-			if ev.Type == "done" {
+			if ev.Type == "turn_finished" {
 				finish, _ = ev.Data["finish_reason"].(string)
 			}
 		case <-deadline:
@@ -948,7 +962,7 @@ func TestRunMessageTurnLLMError(t *testing.T) {
 			switch ev.Type {
 			case "error":
 				gotError = true
-			case "done":
+			case "turn_finished":
 				gotDone = true
 			}
 		case <-deadline:

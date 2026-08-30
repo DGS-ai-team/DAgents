@@ -34,6 +34,7 @@ type terminalOutputFrame struct {
 type terminalSession struct {
 	mu           sync.Mutex
 	writeMu      sync.Mutex
+	commandMu    sync.Mutex
 	id           string
 	agentID      string
 	terminal     tools.Terminal
@@ -51,6 +52,7 @@ type terminalSession struct {
 	lastActivity time.Time
 	registry     *terminalSessionRegistry
 	outputDone   chan struct{}
+	outputWake   chan struct{}
 	targetKind   string
 	targetID     string
 	shell        string
@@ -75,6 +77,7 @@ func newTerminalSession(agentID string, terminal tools.Terminal, registry *termi
 		output:     output,
 		registry:   registry,
 		outputDone: make(chan struct{}),
+		outputWake: make(chan struct{}),
 		targetKind: strings.TrimSpace(req.Target.Kind),
 		targetID:   strings.TrimSpace(req.Target.ID),
 		shell:      strings.TrimSpace(req.Shell),
@@ -128,7 +131,10 @@ func (s *terminalSession) appendOutput(data []byte) {
 		s.dropped = true
 	}
 	conn := s.conn
+	wake := s.outputWake
+	s.outputWake = make(chan struct{})
 	s.mu.Unlock()
+	close(wake)
 	s.touchActivity()
 	if conn != nil {
 		_ = writeTerminalWSEventWithTimeout(conn, terminalWSEvent{
@@ -155,7 +161,10 @@ func (s *terminalSession) waitForExit() {
 	s.exited = event
 	conn := s.conn
 	shouldExpire := conn == nil
+	wake := s.outputWake
+	s.outputWake = make(chan struct{})
 	s.mu.Unlock()
+	close(wake)
 	if conn != nil {
 		_ = writeTerminalWSEventWithTimeout(conn, *event)
 	}
@@ -427,7 +436,10 @@ func (s *terminalSession) shutdown() {
 	}
 	conn := s.conn
 	s.conn = nil
+	wake := s.outputWake
+	s.outputWake = make(chan struct{})
 	s.mu.Unlock()
+	close(wake)
 	_ = s.terminal.Close()
 	_ = s.output.Close()
 	if conn != nil {
@@ -664,9 +676,9 @@ func (r *terminalSessionRegistry) List(agentID string) []tools.TerminalSessionIn
 	return items
 }
 
-// Lookup returns the authoritative session metadata used to bind one-shot
-// commands and file transfers. It performs the same Agent ownership check as
-// input/read/terminate, so a terminal ID cannot be used across Agents.
+// Lookup returns authoritative session metadata. It performs the same Agent
+// ownership check as input/read/command/terminate, so a terminal ID cannot be
+// used across Agents.
 func (r *terminalSessionRegistry) Lookup(agentID, terminalID string) (tools.TerminalSessionInfo, error) {
 	session, err := r.get(strings.TrimSpace(terminalID), strings.TrimSpace(agentID))
 	if err != nil {
@@ -746,6 +758,25 @@ func (r *terminalSessionRegistry) Input(ctx context.Context, agentID, terminalID
 		return err
 	}
 	return session.input(ctx, data)
+}
+
+// RunCommand executes through the already-open terminal. In particular, this
+// method must not call a provider's one-shot Start method: that would create a
+// second SSH/PTY session and break the terminal_id contract.
+func (r *terminalSessionRegistry) RunCommand(ctx context.Context, agentID, terminalID string, req tools.TerminalCommandRequest) (tools.TerminalCommandResult, error) {
+	session, err := r.get(strings.TrimSpace(terminalID), strings.TrimSpace(agentID))
+	if err != nil {
+		return tools.TerminalCommandResult{}, err
+	}
+	info := session.info()
+	if info.Status != "running" {
+		return tools.TerminalCommandResult{}, fmt.Errorf("terminal session %q is %s; open a new terminal first", terminalID, info.Status)
+	}
+	req.TerminalID = info.ID
+	req.Target = tools.ExecutionTarget{Kind: info.TargetKind, ID: info.TargetID}
+	req.ConfigID = info.ConfigID
+	req.Shell = info.Shell
+	return session.runCommand(ctx, req)
 }
 
 func (r *terminalSessionRegistry) Resize(ctx context.Context, agentID, terminalID string, rows, cols int) error {

@@ -6,7 +6,12 @@ function shouldSkipEntry(entry) {
   if (!entry) return true;
   // 思考内容仅流式时展示动态指示器，历史/落盘 reasoning 一律隐藏
   if (entry.kind === "reasoning") return !entry.streaming;
-  if ((entry.kind === "assistant" || entry.kind === "user") && !entry.text?.trim() && !entry.streaming) return true;
+  if (
+    (entry.kind === "assistant" || entry.kind === "user") &&
+    !entry.text?.trim() &&
+    !entry.streaming &&
+    !(entry.kind === "user" && Array.isArray(entry.file_refs) && entry.file_refs.length)
+  ) return true;
   // 兜底：过滤注入型 user（日期 / 异步回灌等），与后端 hydrate 跳过对齐
   if (entry.kind === "user") {
     const name = String(entry.name || entry.data?.name || "").trim();
@@ -29,23 +34,6 @@ function isSkippableBetweenTools(entry) {
   // 扫描匹配 result 时允许越过其它 tool_call。
   if (entry.kind === "tool_call") return true;
   return shouldSkipEntry(entry);
-}
-
-function findMatchingToolResult(entries, startIdx, blockId) {
-  const bid = String(blockId || "").trim();
-  if (!bid) return -1;
-  for (let j = startIdx + 1; j < entries.length; j += 1) {
-    const next = entries[j];
-    if (isSkippableBetweenTools(next)) continue;
-    if (next.kind === "tool_result" && entryBlockId(next) === bid) {
-      return j;
-    }
-    // 遇到其它非可跳过内容则停止（例如真正的 user/assistant 气泡）
-    if (next.kind !== "tool_result") {
-      return -1;
-    }
-  }
-  return -1;
 }
 
 function buildToolResultMatches(entries) {

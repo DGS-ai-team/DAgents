@@ -19,6 +19,24 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL("../../internal/webui/static", import.meta.url)),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/@xterm/")) return "vendor-terminal";
+          if (
+            id.includes("node_modules/highlight.js/")
+            || id.includes("node_modules/marked/")
+            || id.includes("node_modules/dompurify/")
+          ) return "vendor-markdown";
+          if (
+            id.includes("node_modules/vue/")
+            || id.includes("node_modules/@vue/")
+            || id.includes("node_modules/vue-router/")
+          ) return "vendor-vue";
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: true,

@@ -8,8 +8,10 @@ Example:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -20,12 +22,20 @@ except ImportError:  # Support direct execution: python scripts/release/prepare_
 
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION_FILE = ROOT / "node/internal/version/version.go"
+CANONICAL_VERSION_FILE = ROOT / "VERSION"
 CHANGELOG_FILE = ROOT / "CHANGELOG.md"
 README_FILE = ROOT / "README.md"
 HANDBOOK_FILE = ROOT / "docs/handbook/README.md"
 ROADMAP_FILE = ROOT / "docs/roadmap.md"
-VERSION_CONST = re.compile(r'(const\s+Version\s*=\s*")[^"]+("\s*)')
+PACKAGE_FILES = (
+    ROOT / "node/webui/frontend/package.json",
+    ROOT / "manage/console/frontend/package.json",
+    ROOT / "desktop/tray-tauri/package.json",
+)
+APP_VERSION_FILES = (ROOT / "desktop/tray-tauri/src-tauri/tauri.conf.json",)
+PACKAGE_LOCK_FILES = tuple(path.with_name("package-lock.json") for path in PACKAGE_FILES)
+CARGO_FILE = ROOT / "desktop/tray-tauri/src-tauri/Cargo.toml"
+CARGO_LOCK_FILE = ROOT / "desktop/tray-tauri/src-tauri/Cargo.lock"
 ROADMAP_RELEASE = re.compile(r"准备发布 v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?")
 
 
@@ -34,6 +44,53 @@ def replace_once(text: str, pattern: str | re.Pattern[str], replacement: str, la
     if count != 1:
         raise ValueError(f"{label}: expected exactly one match in {source}, found {count}")
     return updated
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """Replace one metadata file atomically after all release edits validate."""
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
+        tmp.write(text)
+        temp_name = Path(tmp.name)
+    temp_name.replace(path)
+
+
+def update_package_json(text: str, version: str, path: Path) -> str:
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path}: package metadata is not a JSON object")
+    if not isinstance(payload.get("version"), str):
+        raise ValueError(f"{path}: package version is missing")
+    payload["version"] = version
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def update_package_lock(text: str, version: str, path: Path) -> str:
+    updated = replace_once(
+        text,
+        r'("version"\s*:\s*")[^"]+("\s*,\s*"lockfileVersion")',
+        rf"\g<1>{version}\g<2>",
+        "lockfile version",
+        path,
+    )
+    return replace_once(
+        updated,
+        r'("":\s*\{\s*"name"\s*:\s*"[^"]+",\s*"version"\s*:\s*")[^"]+("\s*,)',
+        rf"\g<1>{version}\g<2>",
+        "lock root package version",
+        path,
+    )
+
+
+def update_cargo_package(text: str, version: str, path: Path) -> str:
+    section = r"\[\[package\]\]" if path.name == "Cargo.lock" else r"\[package\]"
+    return replace_once(
+        text,
+        rf'(?m)(^{section}\s*\nname\s*=\s*"dagents-shell"\s*\nversion\s*=\s*")[^"]+("\s*)',
+        rf"\g<1>{version}\g<2>",
+        "Cargo package version",
+        path,
+    )
 
 
 def prepare(version: str, summary: str, release_date: str) -> None:
@@ -46,7 +103,7 @@ def prepare(version: str, summary: str, release_date: str) -> None:
     except ValueError as error:
         raise ValueError(f"invalid release date: {release_date!r}; expected YYYY-MM-DD") from error
 
-    version_text = VERSION_FILE.read_text(encoding="utf-8")
+    canonical_version = CANONICAL_VERSION_FILE.read_text(encoding="utf-8")
     changelog = CHANGELOG_FILE.read_text(encoding="utf-8")
     if f"## [{version}]" in changelog:
         raise ValueError(f"CHANGELOG.md already contains a section for {version}")
@@ -56,13 +113,24 @@ def prepare(version: str, summary: str, release_date: str) -> None:
     handbook = HANDBOOK_FILE.read_text(encoding="utf-8")
     roadmap = ROADMAP_FILE.read_text(encoding="utf-8")
 
-    version_updated = replace_once(
-        version_text,
-        VERSION_CONST,
-        rf'\g<1>{version}\g<2>',
-        "version constant",
-        VERSION_FILE,
+    metadata_updates: dict[Path, str] = {
+        CANONICAL_VERSION_FILE: f"{version}\n",
+    }
+    for path in PACKAGE_FILES:
+        metadata_updates[path] = update_package_json(path.read_text(encoding="utf-8"), version, path)
+    for path in APP_VERSION_FILES:
+        metadata_updates[path] = update_package_json(path.read_text(encoding="utf-8"), version, path)
+    for path in PACKAGE_LOCK_FILES:
+        metadata_updates[path] = update_package_lock(path.read_text(encoding="utf-8"), version, path)
+    metadata_updates[CARGO_FILE] = update_cargo_package(
+        CARGO_FILE.read_text(encoding="utf-8"), version, CARGO_FILE
     )
+    metadata_updates[CARGO_LOCK_FILE] = update_cargo_package(
+        CARGO_LOCK_FILE.read_text(encoding="utf-8"), version, CARGO_LOCK_FILE
+    )
+
+    if not canonical_version.strip():
+        raise ValueError(f"{CANONICAL_VERSION_FILE} is empty")
     readme_updated = replace_once(
         readme,
         r"release-v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?-green",
@@ -97,12 +165,13 @@ def prepare(version: str, summary: str, release_date: str) -> None:
     if changelog_count != 1:
         raise ValueError("CHANGELOG.md has no [Unreleased] section")
 
-    VERSION_FILE.write_text(version_updated, encoding="utf-8")
-    README_FILE.write_text(readme_updated, encoding="utf-8")
-    HANDBOOK_FILE.write_text(handbook_updated, encoding="utf-8")
+    for path, content in metadata_updates.items():
+        atomic_write(path, content)
+    atomic_write(README_FILE, readme_updated)
+    atomic_write(HANDBOOK_FILE, handbook_updated)
     if roadmap_count:
-        ROADMAP_FILE.write_text(roadmap_updated, encoding="utf-8")
-    CHANGELOG_FILE.write_text(changelog_updated, encoding="utf-8")
+        atomic_write(ROADMAP_FILE, roadmap_updated)
+    atomic_write(CHANGELOG_FILE, changelog_updated)
 
 
 def main() -> int:

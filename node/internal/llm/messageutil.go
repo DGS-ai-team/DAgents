@@ -45,6 +45,10 @@ func EstimateMessageTokens(messages []Message) int {
 
 // MessageToAPIPayload 序列化单条消息为 OpenAI chat/completions messages[] 元素。
 func MessageToAPIPayload(m Message) (map[string]any, error) {
+	return messageToAPIPayload(messageWithFileReferencePrompt(m))
+}
+
+func messageToAPIPayload(m Message) (map[string]any, error) {
 	payload := map[string]any{"role": m.Role}
 	if n := strings.TrimSpace(m.Name); n != "" {
 		payload["name"] = n
@@ -67,9 +71,37 @@ func MessageToAPIPayload(m Message) (map[string]any, error) {
 	return payload, nil
 }
 
+func messageWithFileReferencePrompt(m Message) Message {
+	if m.Role != "user" || len(m.FileReferences) == 0 {
+		return m
+	}
+	prompt := FileReferencePrompt(m.FileReferences)
+	if prompt == "" {
+		return m
+	}
+	if len(m.ContentParts) == 0 {
+		m.Content = strings.TrimSpace(strings.Join([]string{prompt, m.Content}, "\n\n"))
+		return m
+	}
+	parts := append([]ContentPart(nil), m.ContentParts...)
+	for i := range parts {
+		if parts[i].Type != "text" {
+			continue
+		}
+		parts[i].Text = strings.TrimSpace(strings.Join([]string{prompt, parts[i].Text}, "\n\n"))
+		m.Content = ""
+		m.ContentParts = parts
+		return m
+	}
+	parts = append([]ContentPart{{Type: "text", Text: prompt}}, parts...)
+	m.Content = ""
+	m.ContentParts = parts
+	return m
+}
+
 // messageMapPayload 将 Message 转为 map，供出站 API / JSONL 二次加工。
 func messageMapPayload(m Message) (map[string]any, error) {
-	payload, err := MessageToAPIPayload(m)
+	payload, err := messageToAPIPayload(m)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +129,7 @@ func ApplyDeepSeekOutboundReasoning(payload map[string]any, m Message) {
 
 // MessageToDeepSeekAPIPayload 序列化单条消息为 DeepSeek chat/completions 请求形态。
 func MessageToDeepSeekAPIPayload(m Message) (map[string]any, error) {
-	payload, err := messageMapPayload(m)
+	payload, err := MessageToAPIPayload(m)
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +163,9 @@ func MessageToJournalPayload(message Message) map[string]any {
 	}
 	if message.Provenance != nil {
 		payload["provenance"] = message.Provenance
+	}
+	if len(message.FileReferences) > 0 {
+		payload["file_refs"] = message.FileReferences
 	}
 	if message.Role == "tool" && message.ToolResultMetadata != nil {
 		payload["tool_result_metadata"] = message.ToolResultMetadata

@@ -248,8 +248,10 @@ func (b *workgroupAgentBridge) StartAgentTurn(_ context.Context, req workgroup.A
 	b.turns[req.AssignID] = workgroupAgentTurn{binding: binding, cancel: cancel}
 	b.mu.Unlock()
 
-	afterSeq := b.server.stream.CurrentSeq()
-	ch := b.server.stream.SubscribeAgent(afterSeq, req.SessionID)
+	// Register the filtered subscription before enqueueing the turn. The live
+	// cursor is captured under the Hub lock, so the first turn_state cannot be
+	// lost in the enqueue/subscribe gap.
+	ch := b.server.stream.SubscribeAgentLive(req.SessionID).Events
 	go b.runAgentTurn(ctx, req, ch)
 	return nil
 }
@@ -284,7 +286,8 @@ func (b *workgroupAgentBridge) runAgentTurn(
 				return
 			}
 			data := cloneMap(ev.Data)
-			if ev.Type == "assistant" {
+			isChildEvent := strings.TrimSpace(stringValue(data["child_agent_id"])) != ""
+			if ev.Type == "assistant" && !isChildEvent {
 				assistantText.WriteString(stringValue(data["content"]))
 			}
 			_ = b.emitFrame(map[string]any{
@@ -301,15 +304,9 @@ func (b *workgroupAgentBridge) runAgentTurn(
 					"connection_generation": 0,
 				},
 			})
-			if ev.Type == "done" {
-				// A workgroup assignment owns the whole Agent turn, not one model
-				// step.  `done` is also emitted when the turn pauses for HITL; it
-				// must not be interpreted as a successful member result.  For the
-				// normal tool loop the next lifecycle events arrive on this same
-				// subscription, so keep waiting until the terminal done event.
-				if complete, ok := data["turn_complete"].(bool); ok && !complete {
-					continue
-				}
+			if ev.Type == "turn_finished" {
+				// A workgroup assignment owns the whole Agent turn. HITL pauses do
+				// not emit turn_finished, so this event is unambiguously terminal.
 				text := strings.TrimSpace(assistantText.String())
 				if text == "" {
 					// The stream event and durable history are committed by adjacent

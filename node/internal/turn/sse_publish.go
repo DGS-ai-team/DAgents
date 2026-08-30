@@ -110,17 +110,13 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 	o.hub.Publish(sessionID, "tool_result", o.withLifecycleMetadata(sessionID, payload))
 }
 
-// publishDone 推送 done SSE：finish_reason、turn_complete/awaiting、tool_context_metrics。
-func (o *Orchestrator) publishDone(sessionID, finishReason string) {
+// publishTurnFinished 推送 turn_finished SSE。它只表示一个 turn 已进入
+// 终态；HITL 暂停不发送该事件，暂停事实由 hitl_required + turn_state 表达。
+func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
 	o.runTurnDonePhase(sessionID, finishReason)
-	payload := map[string]any{"finish_reason": finishReason}
-	switch finishReason {
-	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval":
-		payload["turn_complete"] = false
-		payload["awaiting"] = "hitl"
-	default:
-		payload["turn_complete"] = true
-		payload["awaiting"] = nil
+	payload := map[string]any{
+		"finish_reason": finishReason,
+		"turn_complete": true,
 	}
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()
@@ -129,7 +125,7 @@ func (o *Orchestrator) publishDone(sessionID, finishReason string) {
 		payload["model_context_snapshot"] = snapshot.observability()
 	}
 	o.logTurnContextMetrics(sessionID, finishReason)
-	o.hub.Publish(sessionID, "done", o.withLifecycleMetadata(sessionID, payload))
+	o.hub.Publish(sessionID, "turn_finished", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // publishUsage 推送 usage SSE。
@@ -137,14 +133,24 @@ func (o *Orchestrator) publishUsage(sessionID string, llmStep int, u llm.Usage) 
 	if o == nil {
 		return
 	}
+	u.Normalize()
 	o.turnUsageMu.Lock()
 	if o.turnUsage == nil {
 		o.turnUsage = make(map[string]llm.Usage)
 	}
+	if o.turnUsageLast == nil {
+		o.turnUsageLast = make(map[string]map[int]llm.Usage)
+	}
+	if o.turnUsageLast[sessionID] == nil {
+		o.turnUsageLast[sessionID] = make(map[int]llm.Usage)
+	}
+	previous := o.turnUsageLast[sessionID][llmStep]
+	delta := usageSnapshotDelta(u, previous)
+	o.turnUsageLast[sessionID][llmStep] = u
 	acc := o.turnUsage[sessionID]
-	acc.AccumulateFrom(u)
+	acc.AccumulateFrom(delta)
 	o.turnUsage[sessionID] = acc
-	payload := llm.UsageSSEEvent(llmStep, u, acc)
+	payload := llm.UsageSSEEvent(llmStep, delta, acc)
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		for key, value := range snapshot.observability() {
 			payload[key] = value
@@ -152,6 +158,59 @@ func (o *Orchestrator) publishUsage(sessionID string, llmStep int, u llm.Usage) 
 	}
 	o.turnUsageMu.Unlock()
 	o.hub.Publish(sessionID, "usage", o.withLifecycleMetadata(sessionID, payload))
+}
+
+// usageSnapshotDelta converts a provider's cumulative snapshot into the
+// increment since the previous callback. Gateways differ on whether they emit
+// one final usage chunk or several cumulative chunks, so the accounting edge
+// must support both forms.
+func usageSnapshotDelta(current, previous llm.Usage) llm.Usage {
+	current.Normalize()
+	previous.Normalize()
+	delta := llm.Usage{
+		PromptTokens:               nonNegativeSnapshotDelta(current.PromptTokens, previous.PromptTokens),
+		CompletionTokens:           nonNegativeSnapshotDelta(current.CompletionTokens, previous.CompletionTokens),
+		TotalTokens:                nonNegativeSnapshotDelta(current.TotalTokens, previous.TotalTokens),
+		PromptCacheHitTokens:       nonNegativeSnapshotDelta(current.PromptCacheHitTokens, previous.PromptCacheHitTokens),
+		PromptCacheMissTokens:      nonNegativeSnapshotDelta(current.PromptCacheMissTokens, previous.PromptCacheMissTokens),
+		PromptCacheMetricsObserved: current.HasPromptCacheMetrics() || previous.HasPromptCacheMetrics(),
+	}
+	if current.PromptTokensDetails != nil || previous.PromptTokensDetails != nil {
+		delta.PromptTokensDetails = &llm.PromptTokensDetails{
+			CachedTokens: nonNegativeSnapshotDelta(promptDetailsValue(current.PromptTokensDetails, "cached"), promptDetailsValue(previous.PromptTokensDetails, "cached")),
+			AudioTokens:  nonNegativeSnapshotDelta(promptDetailsValue(current.PromptTokensDetails, "audio"), promptDetailsValue(previous.PromptTokensDetails, "audio")),
+		}
+	}
+	if current.CompletionTokensDetails != nil || previous.CompletionTokensDetails != nil {
+		delta.CompletionTokensDetails = &llm.CompletionTokensDetails{
+			ReasoningTokens: nonNegativeSnapshotDelta(current.CompletionReasoningTokens(), previous.CompletionReasoningTokens()),
+		}
+	}
+	delta.Normalize()
+	return delta
+}
+
+func nonNegativeSnapshotDelta(current, previous int) int {
+	if current < previous {
+		// A provider reset its counter (normally a retry or a new snapshot
+		// shape); count the current snapshot as a fresh segment.
+		return current
+	}
+	return current - previous
+}
+
+func promptDetailsValue(details *llm.PromptTokensDetails, kind string) int {
+	if details == nil {
+		return 0
+	}
+	switch kind {
+	case "cached":
+		return details.CachedTokens
+	case "audio":
+		return details.AudioTokens
+	default:
+		return 0
+	}
 }
 
 // publishUsageIfAccumulated 在 turn 取消时补发已累计 usage，避免客户端 strip 丢失末次快照。
@@ -179,7 +238,7 @@ func (o *Orchestrator) publishUsageIfAccumulated(sessionID string, llmStep int) 
 	o.hub.Publish(sessionID, "usage", o.withLifecycleMetadata(sessionID, payload))
 }
 
-// PublishSideEffectCallback Produce 时推送 callback 形态 SSE（async / external tool loop）。
+// PublishSideEffectCallback Produce 时推送 async callback 形态 SSE。
 func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEffectMessages, sideEffectSeq uint64) {
 	o.publishToolCallPayload(sessionID, map[string]any{
 		"assistant_content": "",
@@ -209,20 +268,6 @@ func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEff
 		extra["async_status"] = built.Status
 	}
 	o.publishToolResult(sessionID, tc, built.ForClientContent, false, extra)
-}
-
-// PublishExternalSideEffectDeferred Produce 桥接态 user_message_deferred SSE。
-func (o *Orchestrator) PublishExternalSideEffectDeferred(sessionID, content, userName, triggerID string, seq uint64) {
-	payload := map[string]any{
-		"content":         content,
-		"user_name":       llm.NormalizeUserMessageName(userName),
-		"deferred":        true,
-		"side_effect_seq": seq,
-	}
-	if strings.TrimSpace(triggerID) != "" {
-		payload["trigger_id"] = triggerID
-	}
-	o.hub.Publish(sessionID, "user_message_deferred", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // PublishSideEffectTurnStart 被动续跑 LLM 前通知 Client。

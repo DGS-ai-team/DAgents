@@ -31,7 +31,7 @@ tools:
 
 ```bash
 # 同机另起（与 Node 共用 config.yaml）
-cd browser-service && pip install -r requirements.txt
+cd browser-service && pip install -r requirements.lock
 python -m dagents_browser.main --config /path/to/config.yaml
 ```
 

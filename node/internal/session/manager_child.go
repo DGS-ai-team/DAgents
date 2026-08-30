@@ -110,7 +110,8 @@ func (m *Manager) EnqueueChildTask(childSessionID, content string) error {
 	if rt == nil || !rt.isChildSession() {
 		return fmt.Errorf("child session not found")
 	}
-	return rt.enqueue(queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask}, queue.PriorityHuman)
+	_, err := rt.appendInput(InputKindA2A, queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask})
+	return err
 }
 
 // ChildHasPendingHITL 实现 childagent.Host。
@@ -191,20 +192,27 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 		if rec == nil {
 			continue
 		}
-		turnCount := rec.TurnCount
-		rt := m.getRuntime(rec.ChildAgentID)
+		snapshot := rec.Snapshot()
+		turnCount := snapshot.TurnCount
+		progress := snapshot.Progress
+		rt := m.getRuntime(snapshot.ChildAgentID)
 		if rt != nil {
 			turnCount = rt.stepIndexSnapshot()
+			if turnCount > progress.TurnCount {
+				progress.TurnCount = turnCount
+			}
 		}
 		out = append(out, ChildAgentView{
-			ChildAgentID: rec.ChildAgentID,
-			Status:       string(rec.Status),
-			Purpose:      rec.Purpose,
-			AllowedTools: append([]string(nil), rec.AllowedTools...),
-			CreatedAt:    rec.CreatedAt,
-			ExpiresAt:    rec.ExpiresAt,
+			ChildAgentID: snapshot.ChildAgentID,
+			ToolCallID:   snapshot.ToolCallID,
+			Status:       string(snapshot.Status),
+			Purpose:      snapshot.Purpose,
+			AllowedTools: append([]string(nil), snapshot.AllowedTools...),
+			CreatedAt:    snapshot.CreatedAt,
+			ExpiresAt:    snapshot.ExpiresAt,
 			TurnCount:    turnCount,
-			MaxTurns:     rec.MaxTurns,
+			MaxTurns:     snapshot.MaxTurns,
+			Progress:     progress,
 		})
 	}
 	return out, nil
@@ -220,14 +228,16 @@ func (m *Manager) CancelChildAgent(parentSessionID, childSessionID, reason strin
 
 // ChildAgentView 为 HTTP 列表项。
 type ChildAgentView struct {
-	ChildAgentID string    `json:"child_agent_id"`
-	Status       string    `json:"status"`
-	Purpose      string    `json:"purpose"`
-	AllowedTools []string  `json:"allowed_tools"`
-	CreatedAt    time.Time `json:"created_at"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	TurnCount    int       `json:"turn_count"`
-	MaxTurns     int       `json:"max_turns"`
+	ChildAgentID string              `json:"child_agent_id"`
+	ToolCallID   string              `json:"tool_call_id,omitempty"`
+	Status       string              `json:"status"`
+	Purpose      string              `json:"purpose"`
+	AllowedTools []string            `json:"allowed_tools"`
+	CreatedAt    time.Time           `json:"created_at"`
+	ExpiresAt    time.Time           `json:"expires_at"`
+	TurnCount    int                 `json:"turn_count"`
+	MaxTurns     int                 `json:"max_turns"`
+	Progress     childagent.Progress `json:"progress"`
 }
 
 func lastAssistantSummary(msgs []llm.Message) string {

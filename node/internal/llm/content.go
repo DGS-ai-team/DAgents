@@ -32,6 +32,13 @@ func UserInputValid(text string, parts []ContentPart) bool {
 	return err == nil
 }
 
+// UserInputValidWithFileReferences also accepts a message containing only
+// explicitly selected local files.
+func UserInputValidWithFileReferences(text string, parts []ContentPart, refs []FileReference) bool {
+	_, _, _, err := NormalizeUserInputWithFileReferences(text, parts, refs)
+	return err == nil
+}
+
 // UserInputHasImages 判断 user 输入是否含 image_url part。
 func UserInputHasImages(_ string, parts []ContentPart) bool {
 	for _, part := range parts {
@@ -44,7 +51,18 @@ func UserInputHasImages(_ string, parts []ContentPart) bool {
 
 // NormalizeUserInput 合并 content 与 content_parts，并校验多模态载荷。
 func NormalizeUserInput(text string, parts []ContentPart) (string, []ContentPart, error) {
+	summary, normalized, _, err := NormalizeUserInputWithFileReferences(text, parts, nil)
+	return summary, normalized, err
+}
+
+// NormalizeUserInputWithFileReferences normalizes multimodal content and
+// durable file metadata together at the user-message boundary.
+func NormalizeUserInputWithFileReferences(text string, parts []ContentPart, refs []FileReference) (string, []ContentPart, []FileReference, error) {
 	text = strings.TrimSpace(text)
+	normalizedRefs, err := NormalizeFileReferences(refs)
+	if err != nil {
+		return "", nil, nil, err
+	}
 	out := make([]ContentPart, 0, len(parts)+1)
 	hasTextPart := false
 	imageCount := 0
@@ -60,19 +78,19 @@ func NormalizeUserInput(text string, parts []ContentPart) (string, []ContentPart
 			hasTextPart = true
 		case "image_url":
 			if part.ImageURL == nil {
-				return "", nil, fmt.Errorf("image_url part missing image_url")
+				return "", nil, nil, fmt.Errorf("image_url part missing image_url")
 			}
 			normalized, err := normalizeImageURLPart(*part.ImageURL)
 			if err != nil {
-				return "", nil, err
+				return "", nil, nil, err
 			}
 			imageCount++
 			if imageCount > MaxUserImages {
-				return "", nil, fmt.Errorf("too many images (max %d)", MaxUserImages)
+				return "", nil, nil, fmt.Errorf("too many images (max %d)", MaxUserImages)
 			}
 			out = append(out, ContentPart{Type: "image_url", ImageURL: &normalized})
 		default:
-			return "", nil, fmt.Errorf("unsupported content part type %q", part.Type)
+			return "", nil, nil, fmt.Errorf("unsupported content part type %q", part.Type)
 		}
 	}
 
@@ -80,18 +98,18 @@ func NormalizeUserInput(text string, parts []ContentPart) (string, []ContentPart
 		out = append([]ContentPart{{Type: "text", Text: text}}, out...)
 		hasTextPart = true
 	}
-	if len(out) == 0 {
-		return "", nil, fmt.Errorf("content is required")
+	if len(out) == 0 && len(normalizedRefs) == 0 {
+		return "", nil, nil, fmt.Errorf("content is required")
 	}
 	if len(out) > MaxUserContentParts {
-		return "", nil, fmt.Errorf("too many content parts (max %d)", MaxUserContentParts)
+		return "", nil, nil, fmt.Errorf("too many content parts (max %d)", MaxUserContentParts)
 	}
 
 	summary := MessageTextFromParts(out)
 	if !hasTextPart && imageCount > 0 {
-		return summary, out, nil
+		return summary, out, normalizedRefs, nil
 	}
-	return summary, out, nil
+	return summary, out, normalizedRefs, nil
 }
 
 // BuildUserMessage 构造 role=user 消息；name 仅作为兼容字段，结构化来源
@@ -105,6 +123,24 @@ func BuildUserMessage(text string, parts []ContentPart, name string) (Message, e
 	m := UserMessageWithSource(summary, name, source, &provenance)
 	if len(normalized) > 0 {
 		m.ContentParts = normalized
+	}
+	return m, nil
+}
+
+// BuildUserMessageWithFileReferences constructs a durable user message while
+// keeping file references out of the visible text content.
+func BuildUserMessageWithFileReferences(text string, parts []ContentPart, name string, refs []FileReference) (Message, error) {
+	summary, normalized, normalizedRefs, err := NormalizeUserInputWithFileReferences(text, parts, refs)
+	if err != nil {
+		return Message{}, err
+	}
+	source, provenance := MessageSourceForUserName(name)
+	m := UserMessageWithSource(summary, name, source, &provenance)
+	if len(normalized) > 0 {
+		m.ContentParts = normalized
+	}
+	if len(normalizedRefs) > 0 {
+		m.FileReferences = normalizedRefs
 	}
 	return m, nil
 }
@@ -146,6 +182,7 @@ func MessageHasImages(m Message) bool {
 
 // EstimateMessageContentTokens 粗算单条 message 的 content token（含图片固定开销）。
 func EstimateMessageContentTokens(m Message) int {
+	m = messageWithFileReferencePrompt(m)
 	total := tokensEstimateText(m.Content)
 	if len(m.ContentParts) == 0 {
 		return total

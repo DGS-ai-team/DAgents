@@ -56,9 +56,9 @@ func TestPlanSingleSideEffectApply_tailToolAppendsCallbackNotUser(t *testing.T) 
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "accepted"},
 	}
 
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "sess-1", history, queue.AsyncToolResultPayload{
+	built := orch.BuildAsyncSideEffectMessages("sess-1", history, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-job-1", Status: "succeeded", ResultText: "done",
-	}, "", "")
+	})
 	plan := PlanSingleSideEffectApply(history, built)
 	if len(plan.Messages) != 2 {
 		t.Fatalf("plan messages = %d, want 2 (assistant+tool)", len(plan.Messages))

@@ -9,7 +9,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["terminal-select", "refresh"]);
+const emit = defineEmits(["terminal-select"]);
 const open = ref(false);
 const rootRef = ref(null);
 const summary = computed(() => `${props.terminals.length}`);
@@ -17,7 +17,6 @@ const countBadge = computed(() => (props.terminals.length > 9 ? "9+" : summary.v
 
 function toggle() {
   open.value = !open.value;
-  if (open.value) emit("refresh");
 }
 
 function onDocumentPointerDown(event) {
@@ -59,9 +58,7 @@ onBeforeUnmount(() => {
     <div v-if="open" class="terminal-session-indicator__popover" role="dialog" aria-label="终端列表">
       <div class="terminal-session-indicator__head">
         <strong>终端列表</strong>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="props.loading" @click="emit('refresh')">
-          {{ props.loading ? "读取中…" : "刷新" }}
-        </button>
+        <span v-if="props.loading" class="terminal-session-indicator__loading">读取中…</span>
       </div>
       <p v-if="props.loading && !props.terminals.length" class="terminal-session-indicator__muted">读取中…</p>
       <p v-else-if="!props.terminals.length" class="terminal-session-indicator__muted">当前没有打开的终端。</p>
@@ -94,6 +91,7 @@ onBeforeUnmount(() => {
 .terminal-session-indicator__popover { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 30; width: min(320px, calc(100vw - 24px)); padding: 10px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-surface, #fff); box-shadow: 0 10px 28px rgb(20 35 50 / 16%); }
 .terminal-session-indicator__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .terminal-session-indicator__head strong { color: var(--color-text); font-size: 12px; }
+.terminal-session-indicator__loading { color: var(--color-text-subtle); font-size: 10px; }
 .terminal-session-indicator__list { display: grid; gap: 5px; max-height: 280px; margin: 9px 0 0; padding: 0; overflow: auto; list-style: none; }
 .terminal-session-indicator__item { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--color-text); cursor: pointer; text-align: left; }
 .terminal-session-indicator__item:hover, .terminal-session-indicator__item:focus-visible, .terminal-session-indicator__item--active { border-color: var(--color-border); background: var(--color-surface-alt, #f5f7f9); }

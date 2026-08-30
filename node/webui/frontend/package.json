@@ -1,13 +1,14 @@
 {
   "name": "dagents-node-webui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.10.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint . --quiet"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -19,7 +20,11 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^5.2.1",
+    "eslint": "^10.9.1",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.11.0",
     "vite": "^6.0.3",
     "vitest": "^3.0.5"
   }

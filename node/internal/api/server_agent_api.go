@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
@@ -36,6 +38,7 @@ type agentInfoResponse struct {
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
 	ManageEnabled     bool                `json:"manage_enabled"`
+	WorkgroupEnabled  bool                `json:"workgroup_enabled"`
 	ManageURL         string              `json:"manage_url,omitempty"`
 	ManageRegistered  bool                `json:"manage_registered"`
 	LLM               llm.LLMSettingsView `json:"llm"`
@@ -67,6 +70,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageEnabled:     s.cfg != nil && s.cfg.Manage.Enabled,
+		WorkgroupEnabled:  s.cfg != nil && s.cfg.ManageWorkgroupEnabled(),
 		ManageURL:         strings.TrimSpace(s.cfg.Manage.URL),
 		ManageRegistered:  registered,
 		LLM:               llmView,
@@ -74,8 +78,68 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// desktopRuntimeConfig exposes the small effective-config subset needed by a
+// local desktop Shell. The Shell must not read node_settings.db itself: Node
+// is the owner of the merged bootstrap/YAML/SQLite configuration. The token
+// is returned only on this localhost-facing integration endpoint so the Shell
+// can authenticate package downloads without duplicating Node's storage code.
+type desktopRuntimeConfig struct {
+	NodeID                           string `json:"node_id"`
+	ManageEnabled                    bool   `json:"manage_enabled"`
+	ManageURL                        string `json:"manage_url,omitempty"`
+	ManageNodeToken                  string `json:"manage_node_token,omitempty"`
+	ManageUpdateEnabled              bool   `json:"manage_update_enabled"`
+	ManageUpdateCheckIntervalSeconds int    `json:"manage_update_check_interval_seconds"`
+	ManageUpdateChannel              string `json:"manage_update_channel"`
+}
+
+func (s *Server) handleDesktopRuntimeConfig(w http.ResponseWriter, r *http.Request) {
+	// This response contains the Manage credential needed for package
+	// downloads. Do not expose it when Node is bound beyond localhost.
+	if !isLoopbackRequest(r) {
+		writeAPIError(w, http.StatusForbidden, "local_only", "desktop runtime config 仅允许本机访问", nil)
+		return
+	}
+	if s == nil || s.cfg == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "config_unavailable", "Node 配置不可用", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, desktopRuntimeConfig{
+		NodeID:                           s.cfg.NodeID,
+		ManageEnabled:                    s.cfg.Manage.Enabled,
+		ManageURL:                        strings.TrimSpace(s.cfg.Manage.URL),
+		ManageNodeToken:                  strings.TrimSpace(s.cfg.Manage.NodeToken),
+		ManageUpdateEnabled:              s.cfg.ManageUpdateEnabled(),
+		ManageUpdateCheckIntervalSeconds: int(s.cfg.ManageUpdateCheckInterval().Seconds()),
+		ManageUpdateChannel:              strings.TrimSpace(s.cfg.Manage.Update.Channel),
+	})
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
 	if manage.UpdateDelegatedToShell() {
+		// Node owns the effective settings (including node_settings.db). A
+		// Shell request may ask Node for an on-demand check without receiving
+		// the Manage token or reimplementing config loading.
+		if s.updateChecker != nil {
+			status := s.updateChecker.CheckNow()
+			status.Deprecated = true
+			status.Delegate = "shell"
+			status.DesktopAPI = manage.ShellDesktopAPIBase + "/v1/desktop/update"
+			writeJSON(w, http.StatusOK, status)
+			return
+		}
 		channel := "stable"
 		if s.cfg != nil {
 			channel = strings.TrimSpace(s.cfg.Manage.Update.Channel)
@@ -271,11 +335,14 @@ type sessionHydrateResponse struct {
 	Transcript      []session.TranscriptEntry `json:"transcript"`
 	PendingHITL     map[string]any            `json:"pending_hitl"`
 	HistoryRevision uint64                    `json:"history_revision"`
-	SSESeqHint      int                       `json:"sse_seq_hint"`
+	StreamEpoch     string                    `json:"stream_epoch"`
+	StreamSeqHint   int                       `json:"stream_seq_hint"`
+	AgentSeqHint    int                       `json:"agent_seq_hint"`
 	NotifySeq       int                       `json:"notify_seq"`
 	AckSeq          int                       `json:"ack_seq"`
 	HasUnread       bool                      `json:"has_unread"`
 	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
+	ChildAgents     []session.ChildAgentView  `json:"child_agents"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -312,16 +379,19 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		Transcript:      transcript,
 		PendingHITL:     view.PendingHITL,
 		HistoryRevision: view.HistoryRevision,
-		SSESeqHint:      s.stream.CurrentSeq(),
+		StreamEpoch:     s.stream.Epoch(),
+		StreamSeqHint:   s.stream.CurrentSeq(),
+		AgentSeqHint:    s.stream.CurrentAgentSeq(sessionID),
 		NotifySeq:       view.NotifySeq,
 		AckSeq:          view.AckSeq,
 		HasUnread:       view.HasUnread,
 		ToolJobs:        toolJobs,
+		ChildAgents:     view.ChildAgents,
 	})
 }
 
 type sessionAckRequest struct {
-	SSESeq int `json:"sse_seq"`
+	AgentSeq int `json:"agent_seq"`
 }
 
 type sessionAckResponse struct {
@@ -342,16 +412,16 @@ func (s *Server) handleAgentAckImpl(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		return
 	}
-	if req.SSESeq <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sse_seq must be positive", nil)
+	if req.AgentSeq <= 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "agent_seq must be positive", nil)
 		return
 	}
-	state, err := s.sessions.AckSession(r.Context(), sessionID, req.SSESeq)
+	state, err := s.sessions.AckSession(r.Context(), sessionID, req.AgentSeq)
 	if err != nil {
 		switch err.Error() {
 		case "agent_not_found":
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
-		case "agent_id is required", "sse_seq must be positive":
+		case "agent_id is required", "agent_seq must be positive":
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		default:
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
@@ -402,10 +472,31 @@ func (s *Server) handleAgentListSkillsImpl(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	visibleSkills := []string{}
+	visibleSkillsRestricted := false
+	skillsEnabled := false
+	if s.agents != nil {
+		if rec, recordErr := s.agents.Get(r.Context(), sessionID); recordErr == nil && rec != nil {
+			if snap, snapshotErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot); snapshotErr == nil {
+				for _, group := range agentruntime.EnabledToolGroups(snap) {
+					if strings.EqualFold(strings.TrimSpace(group), "skills") {
+						skillsEnabled = true
+						break
+					}
+				}
+				config := agentruntime.SkillsFromDefaults(snap)
+				visibleSkillsRestricted = config.VisibleRestrict
+				visibleSkills = append([]string(nil), config.Visible...)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":         sessionID,
-		"loaded_skills":    loaded,
-		"available_skills": available,
+		"agent_id":                  sessionID,
+		"loaded_skills":             loaded,
+		"available_skills":          available,
+		"skills_enabled":            skillsEnabled,
+		"visible_skills_restricted": visibleSkillsRestricted,
+		"visible_skills":            visibleSkills,
 	})
 }
 

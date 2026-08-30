@@ -13,7 +13,6 @@ from manage.workgroup.history import (
     RunHistoryMessage,
     extract_assign_ids_from_tool_results,
     open_tool_call_ids,
-    to_provider_messages,
 )
 from manage.workgroup.models import ActorRun, WorkGroupMember
 from manage.workgroup.protocol_names import protocol_name_for_actor

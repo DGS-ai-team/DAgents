@@ -10,12 +10,14 @@ import (
 )
 
 type fakeTerminalBroker struct {
-	opened     int
-	input      string
-	request    TerminalRequest
-	info       TerminalSessionInfo
-	read       TerminalOutput
-	terminated bool
+	opened        int
+	input         string
+	request       TerminalRequest
+	info          TerminalSessionInfo
+	read          TerminalOutput
+	command       TerminalCommandRequest
+	commandResult TerminalCommandResult
+	terminated    bool
 }
 
 type fakeTerminalConfigResolver struct {
@@ -96,6 +98,16 @@ func (b *fakeTerminalBroker) Input(_ context.Context, _, _ string, data []byte) 
 	b.input = string(data)
 	return nil
 }
+func (b *fakeTerminalBroker) RunCommand(_ context.Context, _, terminalID string, request TerminalCommandRequest) (TerminalCommandResult, error) {
+	b.command = request
+	if b.commandResult.TerminalID == "" {
+		b.commandResult = TerminalCommandResult{
+			Status: "SUCCEEDED", TerminalID: terminalID, TargetKind: request.Target.Kind,
+			ExitCode: 0, Stdout: "terminal-command-ok\r\n", StdoutBytes: len("terminal-command-ok\r\n"),
+		}
+	}
+	return b.commandResult, nil
+}
 func (b *fakeTerminalBroker) Terminate(context.Context, string, string) (TerminalOutput, error) {
 	b.terminated = true
 	return TerminalOutput{Chunks: []TerminalOutputChunk{{Seq: 2, Data: []byte("stopped\r\n")}}, NextSeq: 2, Exited: true, Graceful: true, TerminationStatus: "confirmed"}, nil
@@ -169,6 +181,21 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	}
 }
 
+func TestTerminalInputDescriptionDocumentsJSONControls(t *testing.T) {
+	definition := terminalInputToolDef()
+	if !strings.Contains(definition.Function.Description, `JSON 字符串中的 \n 会解析为实际换行符`) {
+		t.Fatalf("terminal_input description does not document JSON newline decoding: %q", definition.Function.Description)
+	}
+	properties, ok := definition.Function.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("terminal_input properties are missing")
+	}
+	data, ok := properties["data"].(map[string]any)
+	if !ok || !strings.Contains(data["description"].(string), `\u0003 表示 Ctrl+C`) {
+		t.Fatalf("terminal_input data description does not document Ctrl+C: %#v", properties["data"])
+	}
+}
+
 func TestTerminalReadWaitsBeforeSnapshot(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {
@@ -211,9 +238,10 @@ func TestTerminalCommandRequiresExistingSessionAndReturnsStructuredResult(t *tes
 		t.Fatal(err)
 	}
 	reg.SetAgentID("agent-terminal-command-test")
-	reg.SetTerminalSessionBroker(&fakeTerminalBroker{info: TerminalSessionInfo{
+	broker := &fakeTerminalBroker{info: TerminalSessionInfo{
 		ID: "terminal-command-1", AgentID: "agent-terminal-command-test", TargetKind: executionTargetLocal, Status: "running",
-	}})
+	}}
+	reg.SetTerminalSessionBroker(broker)
 	result, err := reg.Execute(context.Background(), "terminal_command", `{"terminal_id":"terminal-command-1","command":"echo terminal-command-ok","timeout_ms":5000}`)
 	if err != nil {
 		t.Fatal(err)
@@ -224,6 +252,9 @@ func TestTerminalCommandRequiresExistingSessionAndReturnsStructuredResult(t *tes
 	}
 	if payload.Status != "SUCCEEDED" || payload.ExitCode != 0 || !strings.Contains(strings.ToLower(payload.Stdout), "terminal-command-ok") {
 		t.Fatalf("unexpected terminal command result: %+v", payload)
+	}
+	if broker.command.TerminalID != "terminal-command-1" || broker.command.Command != "echo terminal-command-ok" || broker.command.Timeout != 5*time.Second {
+		t.Fatalf("command was not delegated to the shared session: %+v", broker.command)
 	}
 }
 

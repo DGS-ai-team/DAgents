@@ -7,11 +7,7 @@ import TerminalWorkbenchComposer from "./TerminalWorkbenchComposer.vue";
 import TerminalActionMenu from "./TerminalActionMenu.vue";
 import TerminalTargetMenu from "./TerminalTargetMenu.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
-import { extractToolApprovals } from "../stores/hitl.js";
-import {
-  terminalStatusLabel,
-  terminalTargetLabel as formatTerminalTargetLabel,
-} from "../utils/terminalWorkbench.js";
+import { terminalTargetLabel as formatTerminalTargetLabel } from "../utils/terminalWorkbench.js";
 
 const props = defineProps({
   agentId: { type: String, required: true },
@@ -50,13 +46,12 @@ const emit = defineEmits([
   "user-info-selected",
   "memory-conflict-decide",
   "memory-conflict-cancel",
-  "open-activity",
   "workspace-change",
 ]);
 
 const terminals = ref([]);
 const loading = ref(false);
-const error = ref("");
+const terminalError = ref("");
 const activeTerminalId = ref(String(props.selectedTerminalId || ""));
 // A terminal workspace without a selected session is an empty state. The
 // new-session state starts only after the user explicitly chooses a target.
@@ -74,6 +69,8 @@ const targetMenuError = ref("");
 const remoteTargets = ref([]);
 const selectedTarget = ref({ kind: "local", id: "", shell: "powershell", label: "本机 · PowerShell", description: "Windows PowerShell" });
 const agentPanelCollapsed = ref(false);
+const agentPaneWidth = ref(420);
+const bodyRef = ref(null);
 const terminalPanelRef = ref(null);
 const targetMenuRef = ref(null);
 const terminalStatus = ref("idle");
@@ -81,6 +78,15 @@ const terminatingTerminalId = ref("");
 let newTerminalSequence = 0;
 let terminationPollTimer = null;
 let terminationPollCount = 0;
+let stopAgentPaneResize = null;
+
+const AGENT_PANE_MIN = 360;
+const AGENT_PANE_MAX = 560;
+const AGENT_PANE_STORAGE_KEY = "dagents.terminal.agent-pane-width";
+
+const bodyGridStyle = computed(() => ({
+  "--terminal-agent-pane-width": `${agentPaneWidth.value}px`,
+}));
 
 const selectedTerminal = computed(
   () =>
@@ -92,35 +98,6 @@ const selectedTerminal = computed(
 );
 
 const hasTerminal = computed(() => Boolean(newSession.value || selectedTerminal.value));
-const terminalHeader = computed(() => {
-  const terminalRecord = selectedTerminal.value || {};
-  const terminalKind = String(terminalRecord.target_kind || terminalRecord.kind || "").trim().toLowerCase();
-  const terminalTargetId = String(terminalRecord.target_id || terminalRecord.config_id || "").trim();
-  const configuredTarget = remoteTargets.value.find((candidate) => candidate.id === terminalTargetId) || {};
-  const source = {
-    ...(selectedTarget.value || {}),
-    ...(terminalKind === "linux_channel" || terminalKind === "linux" ? configuredTarget : {}),
-    ...terminalRecord,
-  };
-  const kind = String(source.target_kind || source.kind || "local").trim().toLowerCase();
-  const shell = String(source.shell || (kind === "linux_channel" ? "bash" : "powershell")).trim().toLowerCase();
-  const shellLabel = {
-    powershell: "PowerShell",
-    bash: "Bash",
-    sh: "Shell",
-    wsl: "WSL",
-    cmd: "CMD",
-  }[shell] || shell || "终端";
-  const remote = kind === "linux_channel" || kind === "linux";
-  const host = String(source.host || "").trim();
-  const port = Number(source.port || 0);
-  return {
-    type: remote ? `远程 Linux · ${shellLabel}` : shellLabel,
-    endpoint: remote ? (host ? `${host}${port ? `:${port}` : ""}` : "远程 Linux") : "本机",
-    username: String(source.username || source.user || "").trim(),
-    status: terminalStatusLabel(terminalStatus.value),
-  };
-});
 const panelOwnsAttachedSession = computed(
   () => Boolean(attachedSessionId.value && attachedSessionId.value === activeTerminalId.value),
 );
@@ -128,7 +105,7 @@ const terminalPanelId = computed(() => (panelOwnsAttachedSession.value || newSes
 const terminalPanelAutoConnect = computed(
   () => autoConnectNewSession.value || (!newSession.value && !panelOwnsAttachedSession.value),
 );
-const emptyState = computed(() => !loading.value && !error.value && !hasTerminal.value);
+const emptyState = computed(() => !loading.value && !terminalError.value && !hasTerminal.value);
 const agentActionRequired = computed(() => props.hitlQueue.length > 0 || Boolean(String(props.error || "").trim()));
 
 watch(agentActionRequired, (required, wasRequired) => {
@@ -239,11 +216,7 @@ function openNewTerminal(target = null) {
   newSession.value = true;
   activeTerminalId.value = "";
   terminalStatus.value = "idle";
-  error.value = "";
-}
-
-function openTargetMenu() {
-  targetMenuRef.value?.open?.();
+  terminalError.value = "";
 }
 
 function clearTerminatingPoll() {
@@ -267,7 +240,7 @@ function clearActiveTerminal(id) {
   newSession.value = false;
   newTerminalSequence += 1;
   terminalPanelKey.value = `new-terminal-${newTerminalSequence}`;
-  error.value = "";
+  terminalError.value = "";
   emit("terminal-cleared", terminalId);
 }
 
@@ -286,7 +259,7 @@ async function reconcileTerminatingTerminal(id) {
   terminationPollCount += 1;
   if (terminationPollCount >= 20) {
     clearTerminatingPoll();
-    error.value = "终端终止请求尚未确认，请刷新终端列表。";
+    terminalError.value = "终端终止请求尚未确认，请刷新终端列表。";
     return;
   }
   terminationPollTimer = setTimeout(() => void reconcileTerminatingTerminal(terminalId), 300);
@@ -299,14 +272,14 @@ function onTerminalTerminating() {
   terminatingTerminalId.value = id;
   pendingTerminal.value = null;
   attachedSessionId.value = "";
-  error.value = "";
+  terminalError.value = "";
   terminationPollTimer = setTimeout(() => void reconcileTerminatingTerminal(id), 250);
 }
 
 async function load() {
   if (!props.agentId) return;
   loading.value = true;
-  error.value = "";
+  terminalError.value = "";
   try {
     const result = await api.listAgentTerminals(props.agentId);
     const listed = Array.isArray(result?.terminals) ? result.terminals : [];
@@ -334,7 +307,7 @@ async function load() {
       clearActiveTerminal(activeTerminalId.value);
     }
   } catch (e) {
-    error.value = e.message || "加载终端列表失败";
+    terminalError.value = e.message || "加载终端列表失败";
   } finally {
     loading.value = false;
   }
@@ -377,7 +350,7 @@ async function onTerminalStarted(event) {
 
 function onTerminalStatus(next) {
   terminalStatus.value = String(next || "idle");
-  if (String(next || "") === "error") error.value = "终端连接错误";
+  if (String(next || "") === "error") terminalError.value = "终端连接错误";
 }
 
 function onTerminalExited(event) {
@@ -402,7 +375,7 @@ function onTerminalError(nextError) {
     clearActiveTerminal(activeTerminalId.value);
     return;
   }
-  error.value = message;
+  terminalError.value = message;
 }
 
 function onTerminalAction(action) {
@@ -421,9 +394,61 @@ function switchWorkspace(view) {
   const next = String(view || "terminal");
   if (next === "messages") {
     emit("close");
-  } else if (next === "activity") {
-    emit("workspace-change", next);
   }
+}
+
+function clampAgentPaneWidth(value) {
+  const bodyWidth = Number(bodyRef.value?.getBoundingClientRect?.().width || 0);
+  const responsiveMax = bodyWidth > 0 ? Math.floor(bodyWidth * 0.46) : AGENT_PANE_MAX;
+  return Math.max(AGENT_PANE_MIN, Math.min(AGENT_PANE_MAX, responsiveMax, Math.round(Number(value) || 420)));
+}
+
+function commitAgentPaneWidth(value) {
+  agentPaneWidth.value = clampAgentPaneWidth(value);
+  window.localStorage.setItem(AGENT_PANE_STORAGE_KEY, String(agentPaneWidth.value));
+}
+
+function beginAgentPaneResize(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = agentPaneWidth.value;
+  document.body.classList.add("is-resizing-terminal-agent-pane");
+
+  const onMove = (moveEvent) => {
+    agentPaneWidth.value = clampAgentPaneWidth(startWidth + startX - moveEvent.clientX);
+  };
+  const onUp = () => {
+    document.body.classList.remove("is-resizing-terminal-agent-pane");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.localStorage.setItem(AGENT_PANE_STORAGE_KEY, String(agentPaneWidth.value));
+    stopAgentPaneResize = null;
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
+  stopAgentPaneResize = onUp;
+}
+
+function resizeAgentPaneWithKeyboard(event) {
+  if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === "Home") {
+    commitAgentPaneWidth(420);
+    return;
+  }
+  commitAgentPaneWidth(agentPaneWidth.value + (event.key === "ArrowLeft" ? 24 : -24));
+}
+
+function terminalTabLabel(item) {
+  const label = String(item?.display_name || item?.title || "").trim();
+  if (label) return label;
+  return formatTerminalTargetLabel(item) || "终端";
+}
+
+function openTargetMenu() {
+  targetMenuRef.value?.open?.();
 }
 
 watch(
@@ -435,7 +460,7 @@ watch(
       attachedSessionId.value = "";
       activeTerminalId.value = "";
       newSession.value = false;
-      error.value = "";
+      terminalError.value = "";
       return;
     }
     // The newly-created panel is already attached to this session. Do not
@@ -462,9 +487,16 @@ watch(
   { immediate: true },
 );
 
-onMounted(() => void load());
+onMounted(() => {
+  const persistedWidth = Number(window.localStorage.getItem(AGENT_PANE_STORAGE_KEY));
+  if (Number.isFinite(persistedWidth) && persistedWidth > 0) {
+    agentPaneWidth.value = clampAgentPaneWidth(persistedWidth);
+  }
+  void load();
+});
 
 onBeforeUnmount(() => {
+  stopAgentPaneResize?.();
   clearTerminatingPoll();
 });
 
@@ -493,7 +525,8 @@ defineExpose({ load, openNewTerminal });
           @click="toggleAgentPanel"
         >
           <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="M4 4.25h12a1.75 1.75 0 0 1 1.75 1.75v6A1.75 1.75 0 0 1 16 13.75H9l-3.5 2v-2H4A1.75 1.75 0 0 1 2.25 12V6A1.75 1.75 0 0 1 4 4.25Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
+            <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
+            <path d="M12.25 3.5v12.75" stroke="currentColor" stroke-width="1.35" />
           </svg>
           <span v-if="props.hitlQueue.length" class="terminal-workbench__agent-trigger-badge" aria-hidden="true">{{ props.hitlQueue.length > 9 ? "9+" : props.hitlQueue.length }}</span>
           <span v-else-if="props.error" class="terminal-workbench__agent-trigger-badge terminal-workbench__agent-trigger-badge--error" aria-hidden="true">!</span>
@@ -510,36 +543,40 @@ defineExpose({ load, openNewTerminal });
       </div>
     </header>
 
-    <div class="terminal-workbench__body" :class="{ 'terminal-workbench__body--agent-open': !agentPanelCollapsed }">
+    <div
+      ref="bodyRef"
+      class="terminal-workbench__body"
+      :class="{ 'terminal-workbench__body--agent-open': !agentPanelCollapsed }"
+      :style="bodyGridStyle"
+    >
       <section class="terminal-workbench__terminal-area" aria-label="终端区域">
+        <nav v-if="terminals.length" class="terminal-workbench__terminal-tabs" aria-label="终端会话">
+          <button
+            v-for="item in terminals"
+            :key="item.terminal_id"
+            type="button"
+            class="terminal-workbench__terminal-tab"
+            :class="{ 'terminal-workbench__terminal-tab--active': String(item.terminal_id || '') === activeTerminalId }"
+            :aria-current="String(item.terminal_id || '') === activeTerminalId ? 'page' : undefined"
+            :title="terminalTabLabel(item)"
+            @click="selectTerminal(item)"
+          >
+            <span class="terminal-workbench__terminal-tab-status" :class="`terminal-workbench__terminal-tab-status--${item.status || 'idle'}`" aria-hidden="true"></span>
+            <span>{{ terminalTabLabel(item) }}</span>
+          </button>
+          <TerminalActionMenu
+            v-if="hasTerminal"
+            class="terminal-workbench__terminal-tab-actions"
+            :status="terminalStatus"
+            @action="onTerminalAction"
+          />
+        </nav>
         <p v-if="loading && !terminals.length" class="terminal-workbench__muted">加载终端列表中…</p>
-        <p v-else-if="error" class="terminal-workbench__error" role="alert">{{ error }}</p>
+        <p v-else-if="terminalError" class="terminal-workbench__error" role="alert">{{ terminalError }}</p>
         <div v-else-if="emptyState" class="terminal-workbench__empty">
           <strong>当前没有打开的终端</strong>
-          <span>请点击右上角的添加按钮，选择要连接的终端。</span>
-        </div>
-
-        <div v-if="hasTerminal" class="terminal-workbench__terminal-bar" aria-label="当前终端">
-          <div class="terminal-workbench__terminal-meta">
-            <svg class="terminal-workbench__terminal-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
-              <path d="m5.75 7 2.5 2.25-2.5 2.25M10.5 12h3.25" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <strong>{{ terminalHeader.type }}</strong>
-            <span class="terminal-workbench__terminal-separator" aria-hidden="true">·</span>
-            <span>{{ terminalHeader.endpoint }}</span>
-            <template v-if="terminalHeader.username">
-              <span class="terminal-workbench__terminal-separator" aria-hidden="true">·</span>
-              <span>用户 {{ terminalHeader.username }}</span>
-            </template>
-            <span
-              class="terminal-workbench__terminal-status"
-              :class="`terminal-workbench__terminal-status--${terminalStatus}`"
-              :title="terminalHeader.status"
-              :aria-label="terminalHeader.status"
-            ></span>
-          </div>
-          <TerminalActionMenu :status="terminalStatus" @action="onTerminalAction" />
+          <span>新建一个本机或远程终端，开始执行命令。</span>
+          <button type="button" class="btn btn--primary btn--sm" @click="openTargetMenu">新建终端</button>
         </div>
 
         <TerminalPanel
@@ -563,6 +600,18 @@ defineExpose({ load, openNewTerminal });
       </section>
 
       <aside v-if="!agentPanelCollapsed" class="terminal-workbench__agent-area" aria-label="Agent 消息">
+        <div
+          class="terminal-workbench__agent-resizer"
+          role="separator"
+          aria-label="调整 Agent 消息区域宽度"
+          aria-orientation="vertical"
+          :aria-valuemin="AGENT_PANE_MIN"
+          :aria-valuemax="AGENT_PANE_MAX"
+          :aria-valuenow="agentPaneWidth"
+          tabindex="0"
+          @pointerdown="beginAgentPaneResize"
+          @keydown="resizeAgentPaneWithKeyboard"
+        ></div>
         <div class="terminal-workbench__agent-head">
           <div class="terminal-workbench__agent-title"><strong>Agent 消息</strong></div>
           <div class="terminal-workbench__agent-actions">
@@ -604,12 +653,12 @@ defineExpose({ load, openNewTerminal });
           @user-info-selected="(value) => emit('user-info-selected', value)"
           @memory-conflict-decide="(payload) => emit('memory-conflict-decide', payload)"
           @memory-conflict-cancel="(idx) => emit('memory-conflict-cancel', idx)"
-          @open-activity="emit('open-activity')"
         />
       </aside>
     </div>
 
     <TerminalWorkbenchComposer
+      :agent-id="props.agentId"
       :agent-title="props.agentTitle"
       :agent-can-send="!props.agentDisabled && !props.sending && !props.cancelling"
       :agent-input-disabled="props.agentInputDisabled"
@@ -627,7 +676,6 @@ defineExpose({ load, openNewTerminal });
       @cycle-effort="emit('cycle-effort')"
       @switch-profile="(id) => emit('switch-profile', id)"
       @select-terminal="selectTerminal"
-      @refresh-terminals="load"
     />
   </section>
 </template>
@@ -721,7 +769,7 @@ defineExpose({ load, openNewTerminal });
 }
 
 .terminal-workbench__body--agent-open {
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 31%);
+  grid-template-columns: minmax(0, 1fr) minmax(360px, var(--terminal-agent-pane-width));
 }
 
 .terminal-workbench__terminal-area,
@@ -736,54 +784,107 @@ defineExpose({ load, openNewTerminal });
   background: var(--color-surface, #fff);
 }
 
-.terminal-workbench__terminal-bar {
+.terminal-workbench__terminal-tabs {
   display: flex;
-  min-width: 0;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 3px 7px 3px 10px;
+  gap: 2px;
+  padding: 4px 7px 0;
+  overflow-x: auto;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface, #fff);
+  background: color-mix(in srgb, var(--color-surface, #fff) 96%, var(--color-text, #111));
+  scrollbar-width: thin;
 }
 
-.terminal-workbench__terminal-meta {
-  display: flex;
-  min-width: 0;
+.terminal-workbench__terminal-tab-actions { margin-left: auto; flex: 0 0 auto; }
+
+.terminal-workbench__terminal-tab {
+  display: inline-flex;
+  min-width: 92px;
+  max-width: 190px;
+  height: 29px;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 0 10px;
+  flex: 0 0 auto;
   overflow: hidden;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
+  cursor: pointer;
+}
+
+.terminal-workbench__terminal-tab > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.terminal-workbench__terminal-meta > span:not(.terminal-workbench__terminal-separator):not(.terminal-workbench__terminal-status) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.terminal-workbench__terminal-meta strong {
-  overflow: hidden;
+.terminal-workbench__terminal-tab:hover,
+.terminal-workbench__terminal-tab:focus-visible {
+  background: var(--color-surface-hover);
   color: var(--color-text);
-  font-size: 11px;
-  font-weight: 600;
-  text-overflow: ellipsis;
 }
 
-.terminal-workbench__terminal-icon { width: 15px; height: 15px; flex: 0 0 auto; color: var(--color-text-muted); }
-.terminal-workbench__terminal-separator { color: var(--color-text-subtle); }
-.terminal-workbench__terminal-status { width: 6px; height: 6px; flex: 0 0 auto; margin-left: 2px; border-radius: 50%; background: var(--color-text-subtle); }
-.terminal-workbench__terminal-status--connected { background: var(--color-success, #3d9a5f); }
-.terminal-workbench__terminal-status--running { background: var(--color-success, #3d9a5f); }
-.terminal-workbench__terminal-status--error { background: var(--color-danger, #c45757); }
-.terminal-workbench__terminal-status--terminating { background: var(--color-warning, #c28a24); }
+.terminal-workbench__terminal-tab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
+.terminal-workbench__terminal-tab--active {
+  border-color: var(--color-border);
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.terminal-workbench__terminal-tab-status {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+}
+
+.terminal-workbench__terminal-tab-status--running,
+.terminal-workbench__terminal-tab-status--connected { background: var(--color-success, #3d9a5f); }
+.terminal-workbench__terminal-tab-status--error { background: var(--color-danger, #c45757); }
 
 .terminal-workbench__agent-area {
   position: relative;
   width: auto;
   box-shadow: none;
+}
+
+.terminal-workbench__agent-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: -7px;
+  width: 12px;
+  cursor: col-resize;
+}
+
+.terminal-workbench__agent-resizer::after {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+  transition: background 120ms ease;
+}
+
+.terminal-workbench__agent-resizer:hover::after,
+.terminal-workbench__agent-resizer:focus-visible::after { background: var(--color-primary); }
+.terminal-workbench__agent-resizer:focus-visible { outline: none; }
+
+:global(body.is-resizing-terminal-agent-pane) {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .terminal-workbench__terminal-area :deep(.terminal-panel) {

@@ -12,7 +12,7 @@
 
 ```bash
 cd browser-service
-pip install -r requirements.txt
+pip install -r requirements.lock
 python -m dagents_browser.main --config ../packaging/agent-client/config.yaml --listen 127.0.0.1:18766
 ```
 

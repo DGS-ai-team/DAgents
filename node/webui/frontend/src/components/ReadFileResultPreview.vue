@@ -1,6 +1,8 @@
 <script setup>
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { buildReadFilePreview } from "../utils/readFilePreview.js";
+import { copyText } from "../utils/clipboard.js";
+import { fileNameFromPath } from "../utils/filePathPaste.js";
 
 const props = defineProps({
   path: { type: String, default: "" },
@@ -8,17 +10,53 @@ const props = defineProps({
 });
 
 const preview = computed(() => buildReadFilePreview(props.path, props.content));
+const copyState = ref("");
+let copyTimer = null;
+const copyValue = computed(() => (preview.value.mode === "json" ? preview.value.jsonText : preview.value.body));
+const fileName = computed(() => fileNameFromPath(props.path) || "文本");
+const pageRange = computed(() => preview.value.metaFields?.["本页行区间"] || "");
+
+function clearCopyState() {
+  if (copyTimer) {
+    clearTimeout(copyTimer);
+    copyTimer = null;
+  }
+}
+
+async function copyContent() {
+  if (!copyValue.value) return;
+  try {
+    copyState.value = (await copyText(copyValue.value)) ? "已复制" : "复制失败";
+  } catch {
+    copyState.value = "复制失败";
+  }
+  clearCopyState();
+  copyTimer = setTimeout(() => {
+    copyState.value = "";
+    copyTimer = null;
+  }, 1600);
+}
+
+onBeforeUnmount(clearCopyState);
 </script>
 
 <template>
   <div class="read-file-tool">
-    <div v-if="preview.meta" class="read-file-structured-meta-bar">
-      <span class="read-file-structured-meta-bar__item">
-        <span class="read-file-structured-meta-bar__label">文件</span>
-        <span class="read-file-structured-meta-bar__value">{{ preview.path || "—" }}</span>
+    <div class="read-file-tool__code-heading">
+      <span class="read-file-tool__file-context" :title="path">
+        <strong>{{ fileName }}</strong>
+        <small>{{ pageRange || "文本预览" }}</small>
       </span>
+      <button
+        v-if="copyValue"
+        type="button"
+        class="tool-output__action"
+        aria-label="复制读取内容"
+        title="复制读取内容"
+        @click="copyContent"
+      >{{ copyState || "复制内容" }}</button>
     </div>
-    <div class="write-file-tool__preview read-file-structured__preview-wrap">
+    <div class="read-file-tool__preview">
       <div
         v-if="preview.mode === 'markdown'"
         class="tool-exec-bubble__markdown read-file-structured"
@@ -47,6 +85,60 @@ const preview = computed(() => buildReadFilePreview(props.path, props.content));
 </template>
 
 <style scoped>
+.read-file-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-code-bg);
+}
+.read-file-tool__code-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  padding: 3px 7px 3px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+}
+.read-file-tool__code-label {
+  min-width: 0;
+  color: var(--color-text-subtle);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.read-file-tool__file-context {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.read-file-tool__file-context strong,
+.read-file-tool__file-context small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.read-file-tool__file-context strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.read-file-tool__file-context small {
+  color: var(--color-text-subtle);
+  font-size: 10px;
+}
+.read-file-tool__preview {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 10px 10px;
+}
 .read-file-html-frame {
   width: 100%;
   min-height: 120px;
