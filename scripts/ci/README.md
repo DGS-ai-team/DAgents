@@ -27,4 +27,4 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 
 **统一本地门禁**：仓库根运行 `scripts/verify.sh`；Windows 运行 `scripts/verify.ps1`。CI 的 Go 门禁覆盖全部模块，并同时执行 `gofmt`、`go vet`、单测和构建。
 
-Python 运行时依赖使用根目录 `requirements.lock`；浏览器打包依赖使用 `browser-service/requirements.lock`。源文件格式由 `.editorconfig` 和 `.gitattributes` 统一。
+Python 运行时依赖使用根目录 `requirements.lock`；浏览器打包依赖使用 `browser-service/requirements.lock`。Windows x86 browser 构建可通过 `BROWSER_CRYPTOGRAPHY_VERSION` 临时选择有 win32 wheel 的兼容版本，x64/Linux 仍使用锁定版本。源文件格式由 `.editorconfig` 和 `.gitattributes` 统一。
