@@ -719,7 +719,7 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 
 func (r *runtime) buildInputUserMessage(env queue.Envelope) (llm.Message, error) {
 	userName := llm.NormalizeUserMessageName(env.UserName)
-	userMsg, err := llm.BuildUserMessage(env.Content, env.ContentParts, userName)
+	userMsg, err := llm.BuildUserMessageWithFileReferences(env.Content, env.ContentParts, userName, env.FileReferences)
 	if err != nil {
 		return llm.Message{}, err
 	}

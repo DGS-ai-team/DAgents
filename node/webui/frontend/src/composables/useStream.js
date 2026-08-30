@@ -6,7 +6,12 @@ function shouldSkipEntry(entry) {
   if (!entry) return true;
   // 思考内容仅流式时展示动态指示器，历史/落盘 reasoning 一律隐藏
   if (entry.kind === "reasoning") return !entry.streaming;
-  if ((entry.kind === "assistant" || entry.kind === "user") && !entry.text?.trim() && !entry.streaming) return true;
+  if (
+    (entry.kind === "assistant" || entry.kind === "user") &&
+    !entry.text?.trim() &&
+    !entry.streaming &&
+    !(entry.kind === "user" && Array.isArray(entry.file_refs) && entry.file_refs.length)
+  ) return true;
   // 兜底：过滤注入型 user（日期 / 异步回灌等），与后端 hydrate 跳过对齐
   if (entry.kind === "user") {
     const name = String(entry.name || entry.data?.name || "").trim();

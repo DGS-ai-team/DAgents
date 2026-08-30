@@ -89,6 +89,7 @@ const streamInputKey = computed(() => {
       entry.id,
       entry.kind,
       (entry.text || "").length,
+      Array.isArray(entry.file_refs) ? entry.file_refs.map((file) => file?.path || "").join(",") : "",
       entry.streaming ? 1 : 0,
       entry.partial ? 1 : 0,
       String(entry.summary || "").length,
@@ -162,7 +163,13 @@ const tailContentKey = computed(() => {
   return measureSync("tail.key", () => {
     const parts = [stream.value.length, props.hitlQueue.length];
     for (const entry of props.entries) {
-      parts.push(entry.id, entry.kind, (entry.text || "").length, entry.streaming ? 1 : 0);
+      parts.push(
+        entry.id,
+        entry.kind,
+        (entry.text || "").length,
+        Array.isArray(entry.file_refs) ? entry.file_refs.length : 0,
+        entry.streaming ? 1 : 0,
+      );
       // 工具气泡内容在 data 上，text 常为空；纳入 summary / content 长度以免漏钉尾
       if (entry.kind === "tool_call" || entry.kind === "tool_result") {
         parts.push(

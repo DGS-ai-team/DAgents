@@ -12,7 +12,8 @@ import { extractToolApprovals } from "../stores/hitl.js";
 import { statusStore, hasStatus, formatStatusText } from "../stores/statusLines.js";
 import { getDesktopClipboardFiles } from "../api/desktop.js";
 import {
-  buildMessageWithFileReferences,
+  fileReferenceKey,
+  normalizeFileReferences,
   pathsFromFileList,
   pathsFromUriList,
   shouldResolvePathsViaShell,
@@ -75,6 +76,7 @@ const thinkingSecondarySupported = computed(
 const input = ref("");
 const pendingImages = ref([]);
 const pendingFiles = ref([]);
+const attachmentNotice = ref("");
 const imageInputRef = ref(null);
 const attachInputRef = ref(null);
 const textareaRef = ref(null);
@@ -227,18 +229,16 @@ function removePendingImage(index) {
 
 const MAX_PENDING_FILES = 8;
 
-function fileNameFromPath(path) {
-  const value = String(path || "").trim();
-  return value.split(/[\\/]/).filter(Boolean).pop() || value;
-}
-
-function addPendingFiles(paths) {
-  for (const rawPath of paths || []) {
-    const path = String(rawPath || "").trim();
-    if (!path || pendingFiles.value.length >= MAX_PENDING_FILES) break;
-    if (pendingFiles.value.some((file) => file.path === path)) continue;
-    pendingFiles.value.push({ path, name: fileNameFromPath(path) });
+function addPendingFiles(paths, source = "unknown") {
+  let added = 0;
+  for (const file of normalizeFileReferences((paths || []).map((path) => ({ path, source })))) {
+    if (!file || pendingFiles.value.length >= MAX_PENDING_FILES) break;
+    if (pendingFiles.value.some((item) => fileReferenceKey(item.path) === fileReferenceKey(file.path))) continue;
+    pendingFiles.value.push(file);
+    added += 1;
   }
+  if (added) attachmentNotice.value = "";
+  return added;
 }
 
 function removePendingFile(index) {
@@ -265,11 +265,10 @@ async function onAttachmentSelected(event) {
 
   const paths = pathsFromFileList(files);
   if (paths.length) {
-    addPendingFiles(paths);
+    addPendingFiles(paths, "picker");
     return;
   }
-  const names = files.map((file) => file.name).filter(Boolean);
-  if (names.length) addPendingFiles(names);
+  attachmentNotice.value = "无法获取文件真实路径，请通过拖拽文件或桌面端粘贴添加。";
 }
 
 const attachDisabled = computed(() => props.disabled || props.cancelling);
@@ -292,18 +291,16 @@ function submit() {
   const images = pendingImages.value.slice();
   const files = pendingFiles.value.slice();
   if (!canSubmit.value) return;
-  const messageText = buildMessageWithFileReferences(
-    text,
-    files.map((file) => file.path),
-  );
   emit("send", {
-    text: messageText,
-    contentParts: buildContentParts(messageText, images),
+    text,
+    contentParts: buildContentParts(text, images),
     images: images.map((image) => image.url),
+    fileRefs: files,
   });
   input.value = "";
   pendingImages.value = [];
   pendingFiles.value = [];
+  attachmentNotice.value = "";
 }
 
 function onCancel() {
@@ -354,8 +351,10 @@ async function onComposerPaste(event) {
     uriList: dataTransfer.getData("text/uri-list") || dataTransfer.getData("text/plain"),
   });
   if (paths.length) {
-    addPendingFiles(paths);
+    addPendingFiles(paths, "paste");
     event.preventDefault();
+  } else if (files.length || text.includes("file:")) {
+    attachmentNotice.value = "无法解析文件路径，请确认文件来自本机并重新粘贴。";
   }
 }
 
@@ -369,7 +368,7 @@ async function onComposerDrop(event) {
     uriList: dataTransfer.getData("text/uri-list") || dataTransfer.getData("text/plain"),
   });
   if (paths.length) {
-    addPendingFiles(paths);
+    addPendingFiles(paths, "drop");
     return;
   }
   if (multimodalEnabled.value && isImageOnlyFileList(dataTransfer.files)) {
@@ -396,30 +395,32 @@ defineExpose({
       aria-label="待发送附件"
     >
       <div v-if="pendingFiles.length" class="chat__pending-files" aria-label="待引用文件">
+        <div class="chat__pending-files-heading">
+          <span>引用文件</span>
+          <span class="chat__pending-files-count">{{ pendingFiles.length }}</span>
+        </div>
         <div class="chat__pending-files-list">
           <div
             v-for="(file, idx) in pendingFiles"
-            :key="`${file.path}-${idx}`"
+            :key="file.path"
             class="chat__pending-file"
-            tabindex="0"
-            :aria-label="`第 ${idx + 1} 个待引用文件：${file.path}`"
+            :class="{ 'chat__pending-file--invalid': file.status !== 'ready' }"
           >
             <span class="chat__pending-file-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" fill="none">
                 <path d="M5.25 2.75h6.1L15.5 6.9v10.35H5.25z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
                 <path d="M11.25 2.75V7h4.25M7.75 10h5.5M7.75 13h5.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
               </svg>
-              <span class="chat__pending-file-index">{{ idx + 1 }}</span>
             </span>
-            <span class="chat__pending-file-preview" aria-hidden="true">
+            <span class="chat__pending-file-info" :title="file.path">
               <strong>{{ file.name }}</strong>
-              <small>{{ file.path }}</small>
+              <small>{{ file.displayPath || file.path }}</small>
             </span>
             <button
               type="button"
               class="chat__pending-file-remove"
-              aria-label="移除待引用文件"
-              title="移除文件"
+              :aria-label="`移除 ${file.name}`"
+              :title="`移除 ${file.name}`"
               @click="removePendingFile(idx)"
             >
               <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -464,6 +465,9 @@ defineExpose({
           </div>
         </div>
       </div>
+    </div>
+    <div v-if="attachmentNotice" class="chat__composer-attachment-notice" role="status" aria-live="polite">
+      {{ attachmentNotice }}
     </div>
     <div
       v-if="runtimeStatusText"

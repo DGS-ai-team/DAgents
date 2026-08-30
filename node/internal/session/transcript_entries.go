@@ -80,6 +80,9 @@ func userEntry(msg llm.Message, reg *media.Registry) TranscriptEntry {
 		"kind": "user",
 		"text": llm.MessageTextSummary(msg),
 	}
+	if len(msg.FileReferences) > 0 {
+		entry["file_refs"] = msg.FileReferences
+	}
 	if reg != nil {
 		images, mediaItems := media.UserMediaFromMessage(msg, reg)
 		if len(images) > 0 {

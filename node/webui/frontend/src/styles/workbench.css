@@ -1844,12 +1844,39 @@ select.settings-field__input {
   pointer-events: auto;
 }
 
+.chat__pending-files {
+  width: min(620px, 100%);
+}
+
+.chat__pending-files-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 5px;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.chat__pending-files-count {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .chat__pending-files-list,
 .chat__pending-images-list {
   display: flex;
   align-items: flex-end;
-  flex-wrap: nowrap;
-  gap: 0;
+  flex-wrap: wrap;
+  gap: 6px;
   min-width: 0;
   overflow: visible;
   padding: 1px 4px 5px;
@@ -1863,112 +1890,77 @@ select.settings-field__input {
 
 .chat__pending-file {
   position: relative;
-  flex: 0 0 56px;
-  width: 56px;
-  height: 56px;
-  margin-left: -16px;
+  display: flex;
+  flex: 1 1 190px;
+  align-items: center;
+  gap: 8px;
+  min-width: 170px;
+  max-width: 300px;
+  min-height: 42px;
+  padding: 6px 28px 6px 8px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-editor);
+  border-radius: 8px;
+  background: var(--color-surface);
   outline: none;
-  transition: transform 0.16s ease, z-index 0s linear 0.16s;
-}
-
-.chat__pending-file:first-child {
-  margin-left: 0;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .chat__pending-file:hover,
-.chat__pending-file:focus-within,
-.chat__pending-file:focus-visible {
-  z-index: 20;
-  transform: translateY(-4px);
-  transition-delay: 0s;
+.chat__pending-file:focus-within {
+  border-color: var(--color-primary);
+  background: var(--color-surface-hover);
 }
 
 .chat__pending-file-icon {
   position: relative;
   display: grid;
-  width: 100%;
-  height: 100%;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--color-surface-hover);
   color: var(--color-text-muted);
 }
 
 .chat__pending-file-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-.chat__pending-file-index {
-  position: absolute;
-  left: 4px;
-  bottom: 4px;
-  min-width: 16px;
+  width: 16px;
   height: 16px;
-  padding: 0 4px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.58);
-  color: #fff;
-  font-size: 10px;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
 }
 
-.chat__pending-file-preview {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 10px);
+.chat__pending-file-info {
   display: flex;
-  width: min(300px, 72vw);
+  min-width: 0;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  background: var(--color-editor);
-  box-shadow: var(--shadow-lg);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(8px) scale(0.96);
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  gap: 2px;
 }
 
-.chat__pending-file:hover .chat__pending-file-preview,
-.chat__pending-file:focus-within .chat__pending-file-preview,
-.chat__pending-file:focus-visible .chat__pending-file-preview {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.chat__pending-file-preview strong,
-.chat__pending-file-preview small {
+.chat__pending-file-info strong,
+.chat__pending-file-info small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat__pending-file-preview strong {
+.chat__pending-file-info strong {
   color: var(--color-text);
   font-size: 12px;
 }
 
-.chat__pending-file-preview small {
+.chat__pending-file-info small {
   color: var(--color-text-subtle);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .chat__pending-file-remove {
   position: absolute;
-  top: -7px;
-  right: -7px;
-  z-index: 2;
-  width: 20px;
-  height: 20px;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
   display: inline-grid;
   place-items: center;
   border-radius: 999px;
@@ -1987,6 +1979,22 @@ select.settings-field__input {
 .chat__pending-file-remove:focus-visible {
   background: var(--color-surface-hover);
   color: var(--color-danger);
+}
+
+.chat__pending-file--invalid {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+}
+
+.chat__composer-attachment-notice {
+  margin: 2px 4px 7px;
+  color: var(--color-warning);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.chat__pending-images-list {
+  flex-wrap: nowrap;
+  gap: 0;
 }
 
 .chat__pending-image {

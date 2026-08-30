@@ -34,6 +34,7 @@ type Envelope struct {
 	Generation               uint64
 	Content                  string
 	ContentParts             []llm.ContentPart
+	FileReferences           []llm.FileReference
 	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
 	ResumeValue              map[string]any
 	TriggerID                string // 非空表示 trigger fire 投递；输入被消费后清除 pending 标记

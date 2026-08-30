@@ -6,6 +6,19 @@ function entry(id, kind, extra = {}) {
 }
 
 describe("buildStream", () => {
+  it("keeps a file-only user entry visible", () => {
+    const items = buildStream([
+      {
+        id: 1,
+        kind: "user",
+        text: "",
+        file_refs: [{ path: "D:\\work\\README.md", name: "README.md" }],
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe("user");
+  });
+
   it("pairs parallel tool calls and results without rescanning the tail", () => {
     const items = buildStream([
       entry(1, "assistant", { text: "准备执行" }),

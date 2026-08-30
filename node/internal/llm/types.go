@@ -11,13 +11,14 @@ import (
 //
 // 纯文本时仅使用 Content；多模态 user 消息使用 ContentParts，Content 为 text part 摘要。
 type Message struct {
-	Role             string        `json:"role"`
-	Content          string        `json:"content,omitempty"`
-	ContentParts     []ContentPart `json:"content_parts,omitempty"`
-	ReasoningContent string        `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID       string        `json:"tool_call_id,omitempty"`
-	Name             string        `json:"name,omitempty"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content,omitempty"`
+	ContentParts     []ContentPart   `json:"content_parts,omitempty"`
+	FileReferences   []FileReference `json:"file_refs,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
 	// Source and Provenance are internal durable metadata. Provider adapters
 	// deliberately omit them from outbound API payloads.
 	Source     *MessageSource     `json:"source,omitempty"`

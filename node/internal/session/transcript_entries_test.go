@@ -48,6 +48,26 @@ func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
 	}
 }
 
+func TestMessagesToTranscriptEntries_userFileReferences(t *testing.T) {
+	t.Parallel()
+	messages := []llm.Message{{
+		Role:           "user",
+		Content:        "请读取",
+		FileReferences: []llm.FileReference{{Path: `D:\work\README.md`, Name: "README.md"}},
+	}}
+	entries := MessagesToTranscriptEntries(messages)
+	if len(entries) != 1 {
+		t.Fatalf("len = %d, want 1", len(entries))
+	}
+	if entries[0]["text"] != "请读取" {
+		t.Fatalf("text = %#v", entries[0]["text"])
+	}
+	refs, ok := entries[0]["file_refs"].([]llm.FileReference)
+	if !ok || len(refs) != 1 || refs[0].Path != `D:\work\README.md` {
+		t.Fatalf("file_refs = %#v", entries[0]["file_refs"])
+	}
+}
+
 func TestMessagesToTranscriptEntries_skipsAskUserInformationToolCall(t *testing.T) {
 	t.Parallel()
 	messages := []llm.Message{

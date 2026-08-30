@@ -26,6 +26,10 @@ import {
   attachBrowserRefsToAssistants,
   collectBrowserRefsFromEntries,
 } from "../utils/browserRefs.js";
+import {
+  extractFileReferencesFromMessage,
+  normalizeFileReferences,
+} from "../utils/filePathPaste.js";
 
 let idSeq = 0;
 
@@ -89,14 +93,16 @@ export function markHistoryCommitted(revision) {
   return true;
 }
 
-export function addUser(text, images = []) {
+export function addUser(text, images = [], fileRefs = []) {
   abortStreaming();
   markLocalHistoryDirty();
+  const normalizedRefs = normalizeFileReferences(fileRefs);
   transcriptStore.entries.push({
     id: ++idSeq,
     kind: "user",
     text,
     images: Array.isArray(images) ? images.filter(Boolean) : [],
+    ...(normalizedRefs.length ? { file_refs: normalizedRefs } : {}),
   });
 }
 
@@ -422,6 +428,15 @@ export function loadTranscriptFromHydrate(entries, { historyRevision } = {}) {
       partial: raw.partial === true,
       streaming: false,
     };
+    if (kind === "user") {
+      const legacy = extractFileReferencesFromMessage(row.text);
+      const refs = normalizeFileReferences(
+        Array.isArray(row.file_refs) && row.file_refs.length ? row.file_refs : legacy.fileRefs,
+      );
+      row.text = legacy.text;
+      if (refs.length) row.file_refs = refs;
+      else delete row.file_refs;
+    }
     if (kind === "tool_call" || kind === "tool_result") {
       const blockId = String(row.blockId || row.data?.tool_call_id || row.data?.id || "").trim();
       if (blockId) row.blockId = blockId;
