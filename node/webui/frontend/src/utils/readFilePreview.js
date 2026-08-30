@@ -45,6 +45,15 @@ export function splitReadFileOutput(raw) {
   return { meta: "", body: text };
 }
 
+export function readFileMetaFields(meta) {
+  const fields = {};
+  for (const line of String(meta || "").split(/\r?\n/)) {
+    const match = line.match(/^([^:：]+)[:：]\s*(.+)$/);
+    if (match) fields[match[1].trim()] = match[2].trim();
+  }
+  return fields;
+}
+
 export function fileExtension(path) {
   const base = String(path || "").trim().split(/[/\\]/).pop() || "";
   const dot = base.lastIndexOf(".");
@@ -85,11 +94,13 @@ export function formatJsonBody(text) {
 
 export function buildReadFilePreview(path, rawContent) {
   const { meta, body } = splitReadFileOutput(rawContent);
+  const metaFields = readFileMetaFields(meta);
   const mode = readFilePreviewMode(path);
   const filePath = String(path || "").trim();
   return {
     mode,
     meta,
+    metaFields,
     body,
     path: filePath,
     html: mode === "markdown" ? renderMarkdown(body) : "",

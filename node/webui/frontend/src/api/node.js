@@ -184,10 +184,16 @@ export function postAgentAck(agentId, agentSeq) {
   });
 }
 
-export function submitMessage(agentId, content, contentParts = null) {
+export function submitMessage(agentId, content, contentParts = null, fileRefs = null) {
   const body = { agent_id: agentId, request_type: "message", content: content || "" };
   if (Array.isArray(contentParts) && contentParts.length) {
     body.content_parts = contentParts;
+  }
+  if (Array.isArray(fileRefs) && fileRefs.length) {
+    body.file_refs = fileRefs.map((file) => ({
+      path: file?.path || "",
+      name: file?.name || "",
+    }));
   }
   return apiFetch("/v1/messages", { method: "POST", body });
 }

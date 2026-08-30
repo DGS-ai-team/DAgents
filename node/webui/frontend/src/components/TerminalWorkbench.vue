@@ -601,6 +601,7 @@ defineExpose({ load, openNewTerminal });
     </div>
 
     <TerminalWorkbenchComposer
+      :agent-id="props.agentId"
       :agent-title="props.agentTitle"
       :agent-can-send="!props.agentDisabled && !props.sending && !props.cancelling"
       :agent-input-disabled="props.agentInputDisabled"
@@ -618,7 +619,6 @@ defineExpose({ load, openNewTerminal });
       @cycle-effort="emit('cycle-effort')"
       @switch-profile="(id) => emit('switch-profile', id)"
       @select-terminal="selectTerminal"
-      @refresh-terminals="load"
     />
   </section>
 </template>

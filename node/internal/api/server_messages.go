@@ -11,12 +11,13 @@ import (
 )
 
 type postMessageRequest struct {
-	AgentID         string            `json:"agent_id"`
-	RequestType     string            `json:"request_type"`
-	Content         string            `json:"content"`
-	ContentParts    []llm.ContentPart `json:"content_parts,omitempty"`
-	UserMessageName string            `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any    `json:"resume_value"`
+	AgentID         string              `json:"agent_id"`
+	RequestType     string              `json:"request_type"`
+	Content         string              `json:"content"`
+	ContentParts    []llm.ContentPart   `json:"content_parts,omitempty"`
+	FileReferences  []llm.FileReference `json:"file_refs,omitempty"`
+	UserMessageName string              `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any      `json:"resume_value"`
 }
 
 type postMessageResponse struct {
@@ -62,7 +63,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		requestType = "message"
 	}
 
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
+	priority, err := s.sessions.EnqueueMessageWithFileReferences(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.FileReferences, req.ResumeValue, req.UserMessageName)
 	if err != nil {
 		switch err.Error() {
 		case "agent_not_found":

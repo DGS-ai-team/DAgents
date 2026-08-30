@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
@@ -469,10 +470,31 @@ func (s *Server) handleAgentListSkillsImpl(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	visibleSkills := []string{}
+	visibleSkillsRestricted := false
+	skillsEnabled := false
+	if s.agents != nil {
+		if rec, recordErr := s.agents.Get(r.Context(), sessionID); recordErr == nil && rec != nil {
+			if snap, snapshotErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot); snapshotErr == nil {
+				for _, group := range agentruntime.EnabledToolGroups(snap) {
+					if strings.EqualFold(strings.TrimSpace(group), "skills") {
+						skillsEnabled = true
+						break
+					}
+				}
+				config := agentruntime.SkillsFromDefaults(snap)
+				visibleSkillsRestricted = config.VisibleRestrict
+				visibleSkills = append([]string(nil), config.Visible...)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":         sessionID,
-		"loaded_skills":    loaded,
-		"available_skills": available,
+		"agent_id":                  sessionID,
+		"loaded_skills":             loaded,
+		"available_skills":          available,
+		"skills_enabled":            skillsEnabled,
+		"visible_skills_restricted": visibleSkillsRestricted,
+		"visible_skills":            visibleSkills,
 	})
 }
 

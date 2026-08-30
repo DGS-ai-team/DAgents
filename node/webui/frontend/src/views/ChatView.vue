@@ -677,6 +677,7 @@ async function onSendMessage(payload) {
   const text = typeof payload === "string" ? payload : String(payload?.text || "").trim();
   const contentParts = typeof payload === "string" ? null : payload?.contentParts;
   const images = typeof payload === "string" ? [] : payload?.images || [];
+  const fileRefs = typeof payload === "string" ? [] : payload?.fileRefs || [];
 
   if (text.startsWith("/")) {
     await handleCommand(text);
@@ -700,11 +701,11 @@ async function onSendMessage(payload) {
 
   await ensureStreamReady();
   clearHitl();
-  addUser(text, images);
+  addUser(text, images, fileRefs);
   beginSubmit();
   turnWatchdog.noteActivity();
   try {
-    await api.submitMessage(agentStore.agentId, text, contentParts);
+    await api.submitMessage(agentStore.agentId, text, contentParts, fileRefs);
     markSubmissionAccepted();
   } catch (e) {
     failTurnSubmission();

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { buildReadFilePreview } from "../utils/readFilePreview.js";
 import { copyText } from "../utils/clipboard.js";
+import { fileNameFromPath } from "../utils/filePathPaste.js";
 
 const props = defineProps({
   path: { type: String, default: "" },
@@ -12,6 +13,8 @@ const preview = computed(() => buildReadFilePreview(props.path, props.content));
 const copyState = ref("");
 let copyTimer = null;
 const copyValue = computed(() => (preview.value.mode === "json" ? preview.value.jsonText : preview.value.body));
+const fileName = computed(() => fileNameFromPath(props.path) || "文本");
+const pageRange = computed(() => preview.value.metaFields?.["本页行区间"] || "");
 
 function clearCopyState() {
   if (copyTimer) {
@@ -40,7 +43,10 @@ onBeforeUnmount(clearCopyState);
 <template>
   <div class="read-file-tool">
     <div class="read-file-tool__code-heading">
-      <span class="read-file-tool__code-label">文本</span>
+      <span class="read-file-tool__file-context" :title="path">
+        <strong>{{ fileName }}</strong>
+        <small>{{ pageRange || "文本预览" }}</small>
+      </span>
       <button
         v-if="copyValue"
         type="button"
@@ -104,6 +110,28 @@ onBeforeUnmount(clearCopyState);
   color: var(--color-text-subtle);
   font-size: 10.5px;
   line-height: 1.35;
+}
+.read-file-tool__file-context {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.read-file-tool__file-context strong,
+.read-file-tool__file-context small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.read-file-tool__file-context strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.read-file-tool__file-context small {
+  color: var(--color-text-subtle);
+  font-size: 10px;
 }
 .read-file-tool__preview {
   border: 0;

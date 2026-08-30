@@ -841,6 +841,30 @@ func (m *Manager) EnqueueMessage(
 	resumeValue map[string]any,
 	userMessageName string,
 ) (priority string, err error) {
+	return m.enqueueMessage(sessionID, requestType, content, contentParts, nil, resumeValue, userMessageName)
+}
+
+// EnqueueMessageWithFileReferences accepts structured local file metadata
+// alongside the visible user text. The legacy method above remains for
+// internal callers that do not attach files.
+func (m *Manager) EnqueueMessageWithFileReferences(
+	_ context.Context,
+	sessionID, requestType, content string,
+	contentParts []llm.ContentPart,
+	fileReferences []llm.FileReference,
+	resumeValue map[string]any,
+	userMessageName string,
+) (priority string, err error) {
+	return m.enqueueMessage(sessionID, requestType, content, contentParts, fileReferences, resumeValue, userMessageName)
+}
+
+func (m *Manager) enqueueMessage(
+	sessionID, requestType, content string,
+	contentParts []llm.ContentPart,
+	fileReferences []llm.FileReference,
+	resumeValue map[string]any,
+	userMessageName string,
+) (priority string, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
 		m.logger.Warn("enqueue message session not found", "session_id", sessionID)
@@ -904,7 +928,7 @@ func (m *Manager) EnqueueMessage(
 		return "", err
 	}
 	if requestType == "message" {
-		if !llm.UserInputValid(content, contentParts) {
+		if !llm.UserInputValidWithFileReferences(content, contentParts, fileReferences) {
 			return "", fmt.Errorf("invalid_message")
 		}
 		if !m.turn.MultimodalEnabled && llm.UserInputHasImages(content, contentParts) {
@@ -912,11 +936,12 @@ func (m *Manager) EnqueueMessage(
 		}
 	}
 	env := queue.Envelope{
-		RequestType:  requestType,
-		Content:      content,
-		ContentParts: contentParts,
-		UserName:     userMessageName,
-		ResumeValue:  resumeValue,
+		RequestType:    requestType,
+		Content:        content,
+		ContentParts:   contentParts,
+		FileReferences: fileReferences,
+		UserName:       userMessageName,
+		ResumeValue:    resumeValue,
 	}
 	if requestType == queue.RequestTypeMessage {
 		if _, err := rt.appendInput(InputKindUser, env); err != nil {

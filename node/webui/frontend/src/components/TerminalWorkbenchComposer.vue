@@ -3,10 +3,12 @@ import { computed, nextTick, ref, watch } from "vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
 import McpStatusIndicator from "./McpStatusIndicator.vue";
+import SkillsStatusIndicator from "./SkillsStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
 import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
 
 const props = defineProps({
+  agentId: { type: String, default: "" },
   agentTitle: { type: String, default: "Agent" },
   agentCanSend: { type: Boolean, default: false },
   agentInputDisabled: { type: Boolean, default: false },
@@ -27,7 +29,6 @@ const emit = defineEmits([
   "cycle-effort",
   "switch-profile",
   "select-terminal",
-  "refresh-terminals",
 ]);
 
 const text = ref("");
@@ -131,15 +132,15 @@ defineExpose({ focusInput, submit });
 
     <div class="chat__composer-statusline" aria-label="输入状态与工具栏">
       <div class="chat__composer-statusline-left">
-        <McpStatusIndicator />
+        <McpStatusIndicator :agent-id="props.agentId" />
         <TerminalSessionIndicator
           :terminals="props.terminals"
           :active-terminal-id="props.activeTerminalId"
           :active-terminal-status="props.activeTerminalStatus"
           :loading="props.terminalLoading"
           @terminal-select="(item) => emit('select-terminal', item)"
-          @refresh="emit('refresh-terminals')"
         />
+        <SkillsStatusIndicator :agent-id="props.agentId" />
       </div>
       <div class="chat__composer-statusline-right">
         <div v-if="props.thinkingSupported && thinkingControl" class="chat__statusline-thinking">
