@@ -113,22 +113,11 @@ func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 	if active != "" && profiles != nil {
 		if p, ok := profiles[active].(map[string]any); ok {
 			if v, ok := p["multimodal_enabled"].(bool); ok {
-				profile := config.LLMProfileConfig{
-					Provider: stringValue(p["provider"]),
-					Model:    stringValue(p["model"]),
-				}
-				profile.MultimodalEnabled = &v
-				b := config.ProfileMultimodalEnabled(profile)
-				return &b
+				return &v
 			}
 		}
 	}
 	return nil
-}
-
-func stringValue(v any) string {
-	s, _ := v.(string)
-	return strings.TrimSpace(s)
 }
 
 // EffectiveMultimodalEnabled 解析 Agent 生效的多模态开关：

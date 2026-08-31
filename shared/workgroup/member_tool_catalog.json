@@ -47,7 +47,7 @@
       "label": "读图片",
       "group": "fs",
       "group_label": "文件系统",
-      "hint": "read_image（需多模态）",
+      "hint": "read_image（需启用多模态）",
       "default": true,
       "side_effect": "fs_read",
       "description": "Read an image from the member workspace for multimodal understanding (jpg/png/gif/webp, max 10MB).",

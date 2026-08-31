@@ -118,9 +118,9 @@ type runtime struct {
 
 	runtimeRevision int64
 	runtimeDigest   string
-	// runtimeMultimodalEnabled is the capability snapshot used when this
-	// Agent runtime was built. It lets the API detect a stale runtime even
-	// when the persisted Agent revision did not change.
+	// runtimeMultimodalEnabled is the user-selected multimodal setting captured
+	// when this Agent runtime was built. It lets the API detect a stale runtime
+	// even when the persisted Agent revision did not change.
 	runtimeMultimodalEnabled bool
 	turnBudget               turn.TurnBudget
 }

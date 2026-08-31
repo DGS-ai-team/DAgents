@@ -566,7 +566,7 @@ func (m *Manager) RuntimeRevision(sessionID string) int64 {
 	return 0
 }
 
-// RuntimeMultimodalEnabled 返回内存 runtime 装载时的多模态能力快照。
+// RuntimeMultimodalEnabled 返回内存 runtime 装载时的多模态设置快照。
 // ok=false 表示 Agent runtime 尚未装入内存。
 func (m *Manager) RuntimeMultimodalEnabled(sessionID string) (enabled, ok bool) {
 	if m == nil {

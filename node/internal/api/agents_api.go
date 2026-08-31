@@ -690,7 +690,7 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 			// The runtime revision covers persisted Agent settings, but the
 			// process-level LLM profile can change when another Agent is
 			// focused. Rebuild when that switch also changes the effective
-			// model capability (for example Mimo vision support).
+			// multimodal setting selected for this Agent.
 			snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 			if err != nil {
 				return fmt.Errorf("parse agent snapshot: %w", err)

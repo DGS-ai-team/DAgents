@@ -266,7 +266,7 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 	if got := cfg.LLM.ActiveProfileID(); got != "profile-b" {
 		t.Fatalf("after creating B active profile=%q", got)
 	}
-	// Simulate a profile capability change without changing the Agent
+	// Simulate a profile multimodal setting change without changing the Agent
 	// snapshot revision. ensure must rebuild the already-loaded runtime.
 	cfg.LLM.Profiles["profile-a"] = config.LLMProfileConfig{
 		Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &off,

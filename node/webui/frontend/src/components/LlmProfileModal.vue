@@ -65,10 +65,6 @@ const useModelSelect = computed(() => probedModels.value.length > 0 && !modelMan
 const modelOptions = computed(() =>
   probedModels.value.map((m) => ({ value: m, label: m })),
 );
-const multimodalSupported = computed(() => {
-  if (String(draft.provider || "").trim().toLowerCase() !== "mimo") return true;
-  return String(draft.model || "").trim().toLowerCase() === "mimo-v2.5";
-});
 
 function emptyDraft() {
   return {
@@ -219,7 +215,7 @@ function submit() {
     has_api_key: draft.has_api_key,
     clear_api_key: !!draft.clear_api_key,
     mock: draft.mock || draft.provider === "mock",
-    multimodal_enabled: multimodalSupported.value && !!draft.multimodal_enabled,
+    multimodal_enabled: !!draft.multimodal_enabled,
   });
 }
 
@@ -243,12 +239,6 @@ watch(
   }
 );
 
-watch(
-  () => [draft.provider, draft.model],
-  () => {
-    if (!multimodalSupported.value) draft.multimodal_enabled = false;
-  },
-);
 </script>
 
 <template>
@@ -355,13 +345,10 @@ watch(
               <span>Mock 模式</span>
             </label>
             <label class="settings-toggle">
-              <input v-model="draft.multimodal_enabled" type="checkbox" :disabled="!multimodalSupported" />
+              <input v-model="draft.multimodal_enabled" type="checkbox" />
               <span>多模态 / Vision</span>
             </label>
           </div>
-          <p v-if="!multimodalSupported" class="settings-field__hint">
-            MiMo 的 <code>mimo-v2.5-pro</code> 当前不支持图片输入；需要截图或 Computer Use 时请选择 <code>mimo-v2.5</code>。
-          </p>
         </div>
 
         <footer class="llm-profile-modal__footer">

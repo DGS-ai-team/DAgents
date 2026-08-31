@@ -319,21 +319,12 @@ func normalizeLLMProfile(p LLMProfileConfig) LLMProfileConfig {
 		Thinking:        strings.TrimSpace(p.Thinking),
 		ReasoningEffort: strings.TrimSpace(p.ReasoningEffort),
 	}
-	v := p.MultimodalEnabled != nil && *p.MultimodalEnabled && ProfileSupportsMultimodal(out)
+	v := p.MultimodalEnabled != nil && *p.MultimodalEnabled
 	out.MultimodalEnabled = &v
 	return out
 }
 
-// ProfileSupportsMultimodal 返回模型是否支持当前 Node 使用的图片输入路径。
-// Mimo 的 pro 模型目前是文本模型，只有 mimo-v2.5 支持图片输入。
-func ProfileSupportsMultimodal(p LLMProfileConfig) bool {
-	if strings.EqualFold(strings.TrimSpace(p.Provider), "mimo") {
-		return strings.EqualFold(strings.TrimSpace(p.Model), "mimo-v2.5")
-	}
-	return true
-}
-
-// ProfileMultimodalEnabled 返回档案的多模态开关（nil/缺省或模型不支持时视为 false）。
+// ProfileMultimodalEnabled 返回档案中由用户设置的多模态开关。
 func ProfileMultimodalEnabled(p LLMProfileConfig) bool {
-	return p.MultimodalEnabled != nil && *p.MultimodalEnabled && ProfileSupportsMultimodal(p)
+	return p.MultimodalEnabled != nil && *p.MultimodalEnabled
 }

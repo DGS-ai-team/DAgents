@@ -69,8 +69,8 @@ func screenCaptureToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "screen_capture",
-			Description: "截取当前主机的真实虚拟桌面；使用多模态模型时会把图像附加到下一次模型输入，否则仍作为工具结果图片展示。" +
-				" 多模态模型收到的截图会叠加像素坐标网格，顶部和左侧数字表示截图坐标；返回截图像素尺寸与操作坐标系，computer_use 的坐标必须基于最近一次截图。" +
+			Description: "截取当前主机的真实虚拟桌面；启用多模态时会把图像附加到下一次模型输入，否则仍作为工具结果图片展示。" +
+				" 启用多模态后收到的截图会叠加像素坐标网格，顶部和左侧数字表示截图坐标；返回截图像素尺寸与操作坐标系，computer_use 的坐标必须基于最近一次截图。" +
 				" 多显示器会合并为一张图；图形会话不可用时明确失败。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
@@ -208,7 +208,7 @@ func (r *Registry) execComputerUse(ctx context.Context, raw json.RawMessage) (st
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	if !r.multimodalEnabled {
-		err := fmt.Errorf("computer_use requires a multimodal model so it can inspect each screenshot")
+		err := fmt.Errorf("computer_use requires multimodal to be enabled so it can inspect each screenshot")
 		return desktopFailure("computer_use", err), err
 	}
 	r.desktopMu.Lock()

@@ -27,13 +27,13 @@ func TestDesktopToolDefinitions(t *testing.T) {
 	}
 }
 
-func TestComputerUseRequiresMultimodalModel(t *testing.T) {
+func TestComputerUseRequiresMultimodalEnabled(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := reg.execComputerUse(context.Background(), []byte(`{"action":"key","key":"escape"}`))
-	if err == nil || !strings.Contains(err.Error(), "requires a multimodal model") {
+	if err == nil || !strings.Contains(err.Error(), "requires multimodal to be enabled") {
 		t.Fatalf("err = %v, want multimodal requirement", err)
 	}
 	if !strings.Contains(result, `"status":"failed"`) {

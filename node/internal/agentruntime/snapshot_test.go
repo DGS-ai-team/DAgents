@@ -104,7 +104,7 @@ func TestEffectiveMultimodalEnabled_fromNodeProfile(t *testing.T) {
 	}
 }
 
-func TestEffectiveMultimodalEnabled_rejectsUnsupportedMimoSnapshot(t *testing.T) {
+func TestEffectiveMultimodalEnabled_usesSnapshotCheckboxRegardlessOfModel(t *testing.T) {
 	enabled := true
 	snap := Snapshot{Defaults: map[string]any{
 		"llm": map[string]any{
@@ -118,8 +118,8 @@ func TestEffectiveMultimodalEnabled_rejectsUnsupportedMimoSnapshot(t *testing.T)
 			},
 		},
 	}}
-	if EffectiveMultimodalEnabled(nil, snap) {
-		t.Fatal("mimo-v2.5-pro must not enable multimodal from an old snapshot")
+	if !EffectiveMultimodalEnabled(nil, snap) {
+		t.Fatal("enabled multimodal checkbox should be honored regardless of model")
 	}
 }
 
