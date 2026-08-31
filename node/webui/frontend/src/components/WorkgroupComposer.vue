@@ -10,6 +10,7 @@ defineProps({
   mentionOpen: { type: Boolean, default: false },
   mentionCandidates: { type: Array, default: () => [] },
   hitlMode: { type: Boolean, default: false },
+  pendingInteraction: { type: Boolean, default: false },
   directMember: { type: Object, default: null },
   hitlDraft: { type: String, default: "" },
   canChat: { type: Boolean, default: false },
@@ -155,7 +156,7 @@ const emit = defineEmits([
       </div>
       <div class="chat__composer-pill-right">
         <button
-          v-if="sending || hitlMode"
+          v-if="sending || pendingInteraction"
           type="button"
           class="chat__composer-send chat__composer-send--cancel"
           :title="cancelling ? '正在取消…' : '取消本轮'"

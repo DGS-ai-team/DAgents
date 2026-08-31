@@ -17,6 +17,8 @@ const TOOL_USER_LABELS = {
   grep_files: "搜索文件",
   read_image: "读取图片",
   show_image: "展示图片",
+  screen_capture: "截取屏幕",
+  computer_use: "操作桌面",
   browser_run_task: "浏览器任务",
   browser_task_status: "查询浏览器任务",
   browser_task_cancel: "取消浏览器任务",

@@ -37,6 +37,16 @@ func ExtractAllToolMediaPaths(toolName, content string, args map[string]any) []T
 			return []ToolMediaPath{got}
 		}
 		return nil
+	case "screen_capture", "computer_use":
+		paths := screenshotPathsFromContent(content)
+		if len(paths) == 0 {
+			return nil
+		}
+		return []ToolMediaPath{{
+			RelPath: paths[len(paths)-1],
+			Source:  "computer",
+			Label:   name,
+		}}
 	default:
 		if !strings.HasPrefix(name, "browser_") {
 			return nil

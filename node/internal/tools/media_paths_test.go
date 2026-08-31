@@ -31,6 +31,14 @@ func TestExtractAllToolMediaPaths_browserRunTaskScreenshots(t *testing.T) {
 	}
 }
 
+func TestExtractToolMediaPaths_screenCapture(t *testing.T) {
+	content := `{"ok":true,"screenshot_path":"C:\\Temp\\dagents\\capture.jpg"}`
+	got, ok := ExtractToolMediaPaths("screen_capture", content, nil)
+	if !ok || got.RelPath != `C:\Temp\dagents\capture.jpg` || got.Source != "computer" {
+		t.Fatalf("got=%+v ok=%v", got, ok)
+	}
+}
+
 func TestExtractToolMediaPaths_readImageFromContent(t *testing.T) {
 	got, ok := ExtractToolMediaPaths("read_image", "[READ_IMAGE]\npath=pic.png\nstatus=ok", nil)
 	if !ok || got.RelPath != "pic.png" {

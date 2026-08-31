@@ -563,6 +563,24 @@ func TestProcessToolCallsMixedHITL(t *testing.T) {
 	if outcome.Pending.Items[0].ToolCall.ID != "call-bash-1" {
 		t.Fatalf("remaining pending = %+v", outcome.Pending.Items[0])
 	}
+	republishDeadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type != "hitl_required" {
+				continue
+			}
+			items := hitlSSEItems(ev.Data)
+			if len(items) != 1 || items[0]["id"] != "call-bash-1" {
+				t.Fatalf("republished hitl items = %+v", items)
+			}
+			goto republished
+		case <-republishDeadline:
+			t.Fatal("timeout waiting remaining hitl_required SSE")
+		}
+	}
+
+republished:
 	continueResumeAndDrain(t, orch, context.Background(), "sess-1", &history, map[string]any{"type": "approve"}, outcome.Pending, 1)
 }
 

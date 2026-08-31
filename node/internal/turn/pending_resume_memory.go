@@ -72,6 +72,7 @@ func (o *Orchestrator) continueAfterMemoryConflictResume(
 	if remaining == nil {
 		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
+	o.publishRemainingHITL(sessionID, remaining)
 	return StepOutcome{Pending: remaining, StepIndex: stepIndex}
 }
 

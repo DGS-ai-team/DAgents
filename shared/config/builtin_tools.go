@@ -17,6 +17,8 @@ var knownBuiltinTools = map[string]struct{}{
 	"grep_files":             {},
 	"search_replace":         {},
 	"bash_run":               {},
+	"screen_capture":         {},
+	"computer_use":           {},
 	"terminal_config_list":   {},
 	"terminal_open":          {},
 	"terminal_input":         {},
@@ -64,6 +66,10 @@ var builtinToolGroups = map[string][]string{
 	},
 	"bash": {
 		"bash_run",
+	},
+	"computer": {
+		"screen_capture",
+		"computer_use",
 	},
 	"terminal": {
 		"terminal_config_list",

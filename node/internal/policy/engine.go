@@ -112,7 +112,7 @@ func (e *Engine) decideToolRuleFallback(toolName string, toolArgs map[string]any
 
 func isRuleAutoReadTool(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "read_file", "show_image", "glob_files", "grep_file", "grep_files":
+	case "read_file", "show_image", "glob_files", "grep_file", "grep_files", "screen_capture":
 		return true
 	default:
 		return false
@@ -262,6 +262,8 @@ func defaultEngine() *Engine {
 			"write_file":            ModeRule,
 			"search_replace":        ModeRule,
 			"bash_run":              ModeRule,
+			"screen_capture":        ModeRule,
+			"computer_use":          ModeAlways,
 			"terminal_command":      ModeAlways,
 			"terminal_upload":       ModeAlways,
 			"terminal_download":     ModeAlways,
