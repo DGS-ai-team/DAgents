@@ -55,7 +55,7 @@ type Orchestrator struct {
 	llm             llm.Client
 	hub             stream.Publisher
 	agentID         string
-	fsRoot          string
+	workspaceRoot   string
 	runtimeRoot     string
 	tools           tools.Executor
 	policy          *policy.Engine
@@ -122,7 +122,7 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 	o.hookHostCfg = cfg.normalized()
 	if o.hookHostState != nil {
 		o.hookHostState.mu.Lock()
-		o.hookHostState.fsRoot = o.fsRoot
+		o.hookHostState.workspaceRoot = o.workspaceRoot
 		o.hookHostState.mu.Unlock()
 	}
 }
@@ -449,7 +449,7 @@ func (o *Orchestrator) ContinueAfterResume(
 }
 
 func NewOrchestrator(
-	agentID, fsRoot string,
+	agentID, workspaceRoot string,
 	hub stream.Publisher,
 	client llm.Client,
 	toolExec tools.Executor,
@@ -467,8 +467,8 @@ func NewOrchestrator(
 	toolExecLog := &hooks.ToolExecutionLog{}
 	agentFileTrust := hooks.NewAgentFileTrust()
 	hookCfg = hooks.RuntimeConfigOrDefault(hookCfg)
-	if strings.TrimSpace(hookCfg.ToolResult.FSRoot) == "" {
-		hookCfg.ToolResult.FSRoot = fsRoot
+	if strings.TrimSpace(hookCfg.ToolResult.WorkspaceRoot) == "" {
+		hookCfg.ToolResult.WorkspaceRoot = workspaceRoot
 	}
 	toolHooks := hooks.NewRegistry(policyEngine, hookCfg)
 	toolHooks.SetToolExecutionLog(toolExecLog)
@@ -481,7 +481,7 @@ func NewOrchestrator(
 	}
 	orch := &Orchestrator{
 		agentID:          agentID,
-		fsRoot:           fsRoot,
+		workspaceRoot:    workspaceRoot,
 		hub:              hub,
 		llm:              client,
 		tools:            toolExec,
@@ -1074,9 +1074,8 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
-		WorkspaceRoot:         o.fsRoot,
+		WorkspaceRoot:         o.workspaceRoot,
 		RuntimeRoot:           o.runtimeRoot,
-		FSRoot:                o.fsRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
 		Catalog:               o.skillAccess.Catalog,

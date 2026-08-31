@@ -45,7 +45,7 @@ sequenceDiagram
     end
 ```
 
-**构造**：`NewOrchestrator(agentID, fsRoot, hub, client, toolExec, policy, skillAccess, maxToolLoops, promptCtx, journal, logger)`  
+**构造**：`NewOrchestrator(agentID, workspaceRoot, hub, client, toolExec, policy, skillAccess, maxToolLoops, promptCtx, journal, logger)`
 **事后注入**（由 `session.newRuntimeWithPublisher` 完成）：
 
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
@@ -78,8 +78,8 @@ sequenceDiagram
 拼接顺序（对齐 Python `get_system_prompt`）：
 
 1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
-2. 工作区子目录约定（`data/`、`memory/`、`externaltools/` 外置 CLI 等；path 相对工作区根）
-3. **外置 CLI 与工具**（`externaltools_menu.md` + `externaltools/` 可执行文件扫描，见 [`../externaltools/`](../externaltools/)）
+2. 工作区与 Node 运行目录的路径作用域约定（Agent path 相对 workspace root；Node 管理目录使用 `<runtime_root>/...`）
+3. **外置 CLI 与工具**（`<runtime_root>/externaltools_menu.md` + `<runtime_root>/externaltools/` 可执行文件扫描，见 [`../externaltools/`](../externaltools/)）
 4. Skills 目录元数据（仅使用 context boundary 固定的 Catalog view；实时变化由 `list_available_skills` 查询）
 
 主机环境、Agent/session 身份与 `prompt_context` 由 request-only `ContextInjection` 注入；

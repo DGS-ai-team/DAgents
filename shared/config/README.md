@@ -19,8 +19,8 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
 | `llm` | 模型连接（迁移种子）；工具轮次上限见 Agent snapshot |
-| `fs_root` | **不可配置**；固定 `./.runtime`。`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
-| `skills` | 技能开关与 prompt 上限（目录固定为 `{fs_root}/skills`） |
+| `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `data/`、`memory/`、`skills/`、`policy/` 等管理目录相对此根 |
+| `skills` | 技能开关与 prompt 上限（目录固定为 `{runtime_root}/skills`；不属于 Agent workspace） |
 | `compression` | 上下文压缩 token 阈值 |
 | `triggers` | 触发器调度（见下表） |
 | `tools` | 内置工具编码与 bash 压缩（工具组见 Agent 快照） |
@@ -60,7 +60,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `enabled` | `true` | 是否启动后台调度轮询 |
 | `poll_seconds` | `5` | 到期扫描间隔（秒，至少 1） |
 
-持久化路径固定为 `{fs_root}/triggers/triggers.json`。
+持久化路径固定为 `{runtime_root}/triggers/triggers.json`。
 
 condition 语义（interval / fire_at / schedule / cmd）见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
 

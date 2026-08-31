@@ -42,7 +42,7 @@ tools/
 │   types.go                  # ToolDef、FunctionDef、handler
 │   result_contract.go        # 统一 tool_result status/error 分类
 │   registry.go               # Registry、NewRegistry、Definitions、Execute
-│   registry_path.go          # resolveFSRoot、resolvePath
+│   registry_path.go          # resolveWorkspaceRoot、resolvePath（Agent workspace）
 │   registry_enabled.go       # SetBuiltinEnabled、filterToolDefs
 │   executor.go               # Executor 接口
 │   execution_mode.go         # call_purpose、StartBackground（内部）

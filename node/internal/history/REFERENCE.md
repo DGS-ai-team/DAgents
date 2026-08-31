@@ -11,7 +11,7 @@
 | `(j *Journal) AppendMessage` | `method` | append 已规范化 history → JSONL |
 | `(j *Journal) InsertMessage` | `method` | insert 已规范化 history → JSONL |
 | `journalFilePath` | `func(baseDir, sessionID string) string` | `<baseDir>/YYYYMMDD/<session>.jsonl` |
-| `JournalRelativePath` | `func(sessionID string, at time.Time) string` | 工作区相对路径 `history/YYYYMMDD/<session>.jsonl` |
+| `RuntimeJournalRelativePath` | `func(sessionID string, at time.Time) string` | Node runtime root 相对路径 `history/YYYYMMDD/<session>.jsonl` |
 
 ## 相关
 

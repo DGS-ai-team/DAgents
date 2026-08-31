@@ -187,14 +187,14 @@ func TestSearchReplace_failKeepsDiagnostics(t *testing.T) {
 	}
 }
 
-func TestResolveFSRootCreatesDir(t *testing.T) {
+func TestResolveWorkspaceRootCreatesDir(t *testing.T) {
 	dir := filepath.Join(os.TempDir(), "dagents-test-root")
 	_ = os.RemoveAll(dir)
 	reg, err := NewRegistry(dir, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reg.fsRoot != dir {
-		t.Fatalf("fsRoot = %q", reg.fsRoot)
+	if reg.workspaceRoot != dir {
+		t.Fatalf("workspaceRoot = %q", reg.workspaceRoot)
 	}
 }

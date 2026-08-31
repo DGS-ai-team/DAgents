@@ -1,4 +1,4 @@
-// Package agentruntime 根据 Agent 模板快照构造 per-agent 运行时参数（FSRoot / 工具组等）。
+// Package agentruntime 根据 Agent 模板快照构造 per-agent 运行时参数（workspace / 工具组等）。
 package agentruntime
 
 import (
@@ -32,12 +32,14 @@ func ParseSnapshot(raw json.RawMessage) (Snapshot, error) {
 	return snap, nil
 }
 
-// EffectiveFSRoot is retained as a compatibility helper for callers that only
-// need a string. New runtime construction should use EffectiveWorkspaceRoot.
-func EffectiveFSRoot(nodeFSRoot, agentID string, snap Snapshot) string {
-	root, err := EffectiveWorkspaceRoot(nodeFSRoot, agentID, snap.Workspace)
+// EffectiveFSRoot is retained as a compatibility helper for old callers that
+// used the pre-workspace name. New runtime construction should use
+// EffectiveWorkspaceRoot.
+// Deprecated: use EffectiveWorkspaceRoot.
+func EffectiveFSRoot(runtimeRoot, agentID string, snap Snapshot) string {
+	root, err := EffectiveWorkspaceRoot(runtimeRoot, agentID, snap.Workspace)
 	if err != nil {
-		return strings.TrimSpace(nodeFSRoot)
+		return strings.TrimSpace(runtimeRoot)
 	}
 	return root
 }

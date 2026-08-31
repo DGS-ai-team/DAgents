@@ -2,7 +2,7 @@
 
 权威源：仓库根 `shared/workgroup/member_tool_catalog.json`（与 Node go:embed 同一文件）。
 Node 单机不连 Manage 时读嵌入副本；Manage/Console 读磁盘同一文件——禁止运行时互相 HTTP 拉目录。
-仅包含能在 member workspace（Registry fs_root）内独立执行的工具（fs + bash）。
+仅包含能在 member workspace（Registry workspace root）内独立执行的工具（fs + bash）。
 """
 
 from __future__ import annotations

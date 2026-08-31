@@ -28,7 +28,7 @@ type Artifact struct {
 	Source     string    `json:"source"`
 	ToolCallID string    `json:"tool_call_id,omitempty"`
 	RelPath    string    `json:"rel_path"`
-	AbsPath    string    `json:"-"` // fs_root 外绝对路径；非空时 OpenFile 直接读取
+	AbsPath    string    `json:"-"` // workspace 外绝对路径；非空时 OpenFile 直接读取
 	Label      string    `json:"label,omitempty"`
 	Caption    string    `json:"caption,omitempty"`
 	Bytes      int64     `json:"bytes"`
@@ -47,7 +47,7 @@ func (a Artifact) ThumbnailURL() string {
 
 // RegisterOpts 注册媒体时的元数据。
 type RegisterOpts struct {
-	Path       string // 相对 fs_root 或绝对路径
+	Path       string // 相对 workspace 或绝对路径
 	RelPath    string // Path 别名（兼容旧调用）
 	Source     string
 	ToolCallID string
@@ -57,26 +57,26 @@ type RegisterOpts struct {
 
 // Registry 维护单 session 的 media 索引（内存，F-M1）。
 type Registry struct {
-	sessionID string
-	fsRoot    string
-	mu        sync.RWMutex
-	byID      map[string]*Artifact
+	sessionID     string
+	workspaceRoot string
+	mu            sync.RWMutex
+	byID          map[string]*Artifact
 }
 
 // NewRegistry 创建 session 绑定的媒体注册表。
-func NewRegistry(sessionID, fsRoot string) (*Registry, error) {
-	root, err := ResolveFSRoot(fsRoot)
+func NewRegistry(sessionID, workspaceRoot string) (*Registry, error) {
+	root, err := ResolveWorkspaceRoot(workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
 	return &Registry{
-		sessionID: strings.TrimSpace(sessionID),
-		fsRoot:    root,
-		byID:      make(map[string]*Artifact),
+		sessionID:     strings.TrimSpace(sessionID),
+		workspaceRoot: root,
+		byID:          make(map[string]*Artifact),
 	}, nil
 }
 
-// RegisterFromRelPath 引用已有图片文件（相对 fs_root 或绝对路径）。
+// RegisterFromRelPath 引用已有图片文件（相对 workspace 或绝对路径）。
 func (r *Registry) RegisterFromRelPath(opts RegisterOpts) (*Artifact, error) {
 	if strings.TrimSpace(opts.Path) == "" {
 		opts.Path = opts.RelPath
@@ -84,7 +84,7 @@ func (r *Registry) RegisterFromRelPath(opts RegisterOpts) (*Artifact, error) {
 	return r.RegisterFromPath(opts)
 }
 
-// RegisterFromPath 注册可读图片；相对路径在 fs_root 内解析，绝对路径可直接引用。
+// RegisterFromPath 注册可读图片；相对路径在 workspace 内解析，绝对路径可直接引用。
 func (r *Registry) RegisterFromPath(opts RegisterOpts) (*Artifact, error) {
 	raw := strings.TrimSpace(opts.Path)
 	if raw == "" {
@@ -97,7 +97,7 @@ func (r *Registry) RegisterFromPath(opts RegisterOpts) (*Artifact, error) {
 	if mime == "" {
 		return nil, ErrInvalidImage
 	}
-	abs, external, err := ResolveImagePath(r.fsRoot, raw)
+	abs, external, err := ResolveImagePath(r.workspaceRoot, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (r *Registry) RegisterFromPath(opts RegisterOpts) (*Artifact, error) {
 		art.AbsPath = abs
 		art.RelPath = filepath.ToSlash(abs)
 	} else {
-		rel, err := filepath.Rel(r.fsRoot, abs)
+		rel, err := filepath.Rel(r.workspaceRoot, abs)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +181,7 @@ func (r *Registry) artifactAbsPath(art *Artifact) (string, error) {
 	if p := strings.TrimSpace(art.AbsPath); p != "" {
 		return filepath.Abs(p)
 	}
-	return ResolveUnderRoot(r.fsRoot, art.RelPath)
+	return ResolveUnderRoot(r.workspaceRoot, art.RelPath)
 }
 
 func newMediaID() (string, error) {

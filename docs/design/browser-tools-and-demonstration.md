@@ -80,7 +80,7 @@
 | | **attach（`cdp_url` 非空）** | **launch（默认）** |
 |--|---------------------------|-------------------|
 | 浏览器来源 | **已有 Chrome 实例** | Agent 按 session 启动 Chrome |
-| profile | 用户已有 profile | `fs_root/browser/profiles/{session}` |
+| profile | 用户已有 profile | `<runtime_root>/browser/profiles/{session}` |
 | stop 行为 | 仅关闭 tab，**不**关闭浏览器 | 关闭浏览器并清理 launcher |
 | SSO / 内网登录 | **可复用已登录会话** | 独立 profile，需重新登录 |
 
@@ -189,7 +189,7 @@ tools:
 ### 8.1 存储
 
 ```text
-{fs_root}/demonstrations/{demo_id}/
+{runtime_root}/demonstrations/{demo_id}/
   manifest.json
   steps/*.png
 ```
@@ -253,7 +253,7 @@ Skill 禁止默认 `bash_run` Playwright 脚本。
 - `browser_run_task` 默认 HITL（种子 `always`，可按 Agent 策略调整）。  
 - 内网 URL 可选 host 白名单（P2）。  
 - manifest 密码字段 `redacted: true`。  
-- 演示数据默认不出 `fs_root`。
+- 演示数据默认不出 `runtime_root`。
 
 ---
 

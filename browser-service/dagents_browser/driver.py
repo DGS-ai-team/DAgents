@@ -58,7 +58,7 @@ class BrowserUseDriver:
         self._session_latest_task: dict[str, str] = {}
 
     def _task_fs(self, session_key: str) -> Path:
-        return Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+        return Path(self.settings.runtime_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
 
     def _load_archived_task(self, session_key: str, task_id: str) -> dict[str, Any] | None:
         """恢复 sidecar 重启前已归档的终态任务，供 task_status 只读查询。"""
@@ -184,7 +184,7 @@ class BrowserUseDriver:
         if req.get("headed") is not None:
             headed = bool(req["headed"])
         profile_dir = (
-            Path(self.settings.fs_root) / "browser" / "profiles" / sanitize_segment(session_key)
+            Path(self.settings.runtime_root) / "browser" / "profiles" / sanitize_segment(session_key)
         )
         profile_dir.mkdir(parents=True, exist_ok=True)
         args = [
@@ -302,7 +302,7 @@ class BrowserUseDriver:
                     from browser_use import Agent
 
                     task_fs = str(
-                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                        Path(self.settings.runtime_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
                     )
                     Path(task_fs).mkdir(parents=True, exist_ok=True)
                     recent = load_recent_tasks(task_fs)
@@ -322,7 +322,8 @@ class BrowserUseDriver:
                         ),
                         use_thinking=self.settings.llm.provider != "mimo",
                         extend_system_message=build_extend_system_message(
-                            fs_root=self.settings.fs_root,
+                            workspace_root=task_fs,
+                            runtime_root=self.settings.runtime_root,
                             allowed_url_schemes=self.settings.allowed_url_schemes,
                             recent_tasks_block=format_recent_tasks_for_prompt(recent),
                         ),
@@ -372,7 +373,7 @@ class BrowserUseDriver:
                 entry["error"] = str(exc)
                 try:
                     task_fs = str(
-                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                        Path(self.settings.runtime_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
                     )
                     archived = archive_task(
                         agent_fs=task_fs,

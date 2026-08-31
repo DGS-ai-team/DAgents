@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
 import yaml
 
 from dagents_browser.llm import LLMSettings, create_extraction_llm, llm_settings_from_config
@@ -15,7 +13,9 @@ DEFAULT_SERVICE_URL = f"http://127.0.0.1:{DEFAULT_LISTEN_PORT}"
 
 @dataclass
 class BrowserServiceSettings:
-    fs_root: str
+    # Node-managed runtime directory. Browser task workspaces are scoped below
+    # runtime_root/browser/agent_fs/<session>.
+    runtime_root: str
     headed: bool = True
     chrome_path: str = ""
     cdp_url: str = ""
@@ -34,14 +34,14 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
         raise ValueError("config path required (-config or DAGENTS_CONFIG)")
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     browser = raw.get("browser") or {}
-    fs_root = str(raw.get("fs_root") or "").strip()
-    if not fs_root:
-        raise ValueError("fs_root is required in config")
+    # runtime_root is canonical. Read legacy fs_root during migration so an
+    # existing companion configuration keeps working after the rename.
+    runtime_root = str(raw.get("runtime_root") or raw.get("fs_root") or "./.runtime").strip()
     headed = browser.get("headed")
     if headed is None:
         headed = True
     return BrowserServiceSettings(
-        fs_root=os.path.abspath(fs_root),
+        runtime_root=os.path.abspath(runtime_root),
         headed=bool(headed),
         chrome_path=str(browser.get("chrome_path") or "").strip(),
         cdp_url=str(browser.get("cdp_url") or "").strip(),

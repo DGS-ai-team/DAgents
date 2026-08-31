@@ -8,7 +8,7 @@ import (
 
 func TestResolveNodeID_migratesLegacyFile(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &Config{FSRoot: dir}
+	cfg := &Config{RuntimeRoot: dir}
 	cfg.ApplyDefaults()
 	legacy := filepath.Join(dir, "agent", "agent_id")
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
@@ -33,7 +33,7 @@ func TestResolveNodeID_migratesLegacyFile(t *testing.T) {
 }
 
 func TestApplyDefaults_mergesLegacyAgentIDYAML(t *testing.T) {
-	cfg := &Config{LegacyAgentID: "from-yaml-agent-id", FSRoot: t.TempDir()}
+	cfg := &Config{LegacyAgentID: "from-yaml-agent-id", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	if cfg.NodeID != "from-yaml-agent-id" {
 		t.Fatalf("NodeID=%q", cfg.NodeID)
@@ -44,7 +44,7 @@ func TestApplyDefaults_mergesLegacyAgentIDYAML(t *testing.T) {
 }
 
 func TestAgentsDBPath(t *testing.T) {
-	cfg := &Config{FSRoot: "/tmp/runtime-x"}
+	cfg := &Config{RuntimeRoot: "/tmp/runtime-x"}
 	cfg.ApplyDefaults()
 	want := filepath.Join("/tmp/runtime-x", "agents.db")
 	if cfg.AgentsDBPath() != want {

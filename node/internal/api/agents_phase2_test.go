@@ -24,7 +24,7 @@ func TestPhase2_agentMessageByAgentID(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
 	cfg.LLM.Mock = true
 
@@ -67,13 +67,13 @@ defaults:
 		t.Fatal(err)
 	}
 
-	fsRoot, ok := srv.sessions.SessionFSRoot(created.AgentID)
+	workspaceRoot, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID)
 	if !ok {
 		t.Fatal("runtime missing")
 	}
-	wantFSRoot := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "workspace")
-	if fsRoot != wantFSRoot {
-		t.Fatalf("fsRoot=%q want Agent workspace %q", fsRoot, wantFSRoot)
+	wantWorkspaceRoot := filepath.Join(cfg.RuntimeDir(), "agents", created.AgentID, "workspace")
+	if workspaceRoot != wantWorkspaceRoot {
+		t.Fatalf("workspaceRoot=%q want Agent workspace %q", workspaceRoot, wantWorkspaceRoot)
 	}
 
 	msgBody, _ := json.Marshal(map[string]any{
@@ -123,7 +123,7 @@ func TestPhase3_ensureAgentRuntimeAfterRelease(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
 	cfg.LLM.Mock = true
 
@@ -165,15 +165,15 @@ defaults:
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	wantFS := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "workspace")
-	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
-		t.Fatalf("initial fsRoot=%q ok=%v want %q", fs, ok, wantFS)
+	wantWorkspace := filepath.Join(cfg.RuntimeDir(), "agents", created.AgentID, "workspace")
+	if workspace, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID); !ok || workspace != wantWorkspace {
+		t.Fatalf("initial workspaceRoot=%q ok=%v want %q", workspace, ok, wantWorkspace)
 	}
 
 	if _, err := srv.sessions.Release(created.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := srv.sessions.SessionFSRoot(created.AgentID); ok {
+	if _, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID); ok {
 		t.Fatal("expected runtime released")
 	}
 
@@ -183,12 +183,12 @@ defaults:
 	if rr.Code != http.StatusOK {
 		t.Fatalf("ensure status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	fsRoot, ok := srv.sessions.SessionFSRoot(created.AgentID)
+	workspaceRoot, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID)
 	if !ok {
 		t.Fatal("runtime missing after ensure")
 	}
-	if fsRoot != wantFS {
-		t.Fatalf("fsRoot after ensure=%q want %q", fsRoot, wantFS)
+	if workspaceRoot != wantWorkspace {
+		t.Fatalf("workspaceRoot after ensure=%q want %q", workspaceRoot, wantWorkspace)
 	}
 
 	// hydrate 也应隐式 ensure
@@ -201,8 +201,8 @@ defaults:
 	if rr.Code != http.StatusOK {
 		t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
-		t.Fatalf("hydrate ensure fsRoot=%q ok=%v", fs, ok)
+	if workspace, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID); !ok || workspace != wantWorkspace {
+		t.Fatalf("hydrate ensure workspaceRoot=%q ok=%v", workspace, ok)
 	}
 }
 
@@ -213,7 +213,7 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
 		"profile-a": {Provider: "mock", Model: "model-a", Mock: true},
 		"profile-b": {Provider: "mock", Model: "model-b", Mock: true},

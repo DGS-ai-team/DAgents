@@ -9,9 +9,9 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
+func TestBuild_usesAgentWorkspaceAndToolGroups(t *testing.T) {
 	root := t.TempDir()
-	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: root}
 	cfg.ApplyDefaults()
 	cfg.Skills.Enabled = true
 
@@ -23,7 +23,7 @@ func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
 	}
 	built, err := Build(BuildParams{
 		NodeCFG:  cfg,
-		BaseTurn: session.TurnOptions{FSRoot: root},
+		BaseTurn: session.TurnOptions{WorkspaceRoot: root},
 		AgentID:  "agt-abc",
 		Snapshot: snap,
 	})
@@ -33,8 +33,8 @@ func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
 	if built.TurnOptions.MaxToolLoops != DefaultMaxToolLoops {
 		t.Fatalf("MaxToolLoops=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.MaxToolLoops, DefaultMaxToolLoops)
 	}
-	if built.FSRoot != root || built.TurnOptions.FSRoot != root {
-		t.Fatalf("fsRoot=%q turn=%q want %q", built.FSRoot, built.TurnOptions.FSRoot, root)
+	if built.WorkspaceRoot != root || built.TurnOptions.WorkspaceRoot != root {
+		t.Fatalf("workspaceRoot=%q turn=%q want %q", built.WorkspaceRoot, built.TurnOptions.WorkspaceRoot, root)
 	}
 	if len(built.ToolGroups) != 2 || built.ToolGroups[0] != "fs" || built.ToolGroups[1] != "skills" {
 		t.Fatalf("tool groups=%v", built.ToolGroups)
@@ -50,11 +50,11 @@ func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
 func TestBuild_usesCustomWorkspaceRoot(t *testing.T) {
 	nodeRoot := t.TempDir()
 	workspace := t.TempDir()
-	cfg := &config.Config{NodeID: "n1", FSRoot: nodeRoot}
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: nodeRoot}
 	cfg.ApplyDefaults()
 	built, err := Build(BuildParams{
 		NodeCFG:  cfg,
-		BaseTurn: session.TurnOptions{FSRoot: nodeRoot},
+		BaseTurn: session.TurnOptions{WorkspaceRoot: nodeRoot},
 		AgentID:  "agt-custom",
 		Snapshot: Snapshot{Workspace: WorkspaceConfig{Mode: WorkspaceModeCustom, Path: workspace}},
 	})
@@ -69,23 +69,23 @@ func TestBuild_usesCustomWorkspaceRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if built.WorkspaceRoot != wantWorkspace || built.FSRoot != wantWorkspace || built.Registry.WorkspaceRoot() != wantWorkspace {
-		t.Fatalf("workspace root built=%q alias=%q registry=%q want %q", built.WorkspaceRoot, built.FSRoot, built.Registry.WorkspaceRoot(), wantWorkspace)
+	if built.WorkspaceRoot != wantWorkspace || built.Registry.WorkspaceRoot() != wantWorkspace {
+		t.Fatalf("workspace root built=%q registry=%q want %q", built.WorkspaceRoot, built.Registry.WorkspaceRoot(), wantWorkspace)
 	}
-	if built.TurnOptions.WorkspaceRoot != wantWorkspace || built.TurnOptions.FSRoot != wantWorkspace {
-		t.Fatalf("turn workspace=%q fs=%q want %q", built.TurnOptions.WorkspaceRoot, built.TurnOptions.FSRoot, wantWorkspace)
+	if built.TurnOptions.WorkspaceRoot != wantWorkspace {
+		t.Fatalf("turn workspace=%q want %q", built.TurnOptions.WorkspaceRoot, wantWorkspace)
 	}
 }
 
 func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 	root := t.TempDir()
-	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: root}
 	cfg.ApplyDefaults()
 	cfg.Skills.Enabled = true
 
 	built, err := Build(BuildParams{
 		NodeCFG:  cfg,
-		BaseTurn: session.TurnOptions{FSRoot: root, SkillsEnabled: true},
+		BaseTurn: session.TurnOptions{WorkspaceRoot: root, SkillsEnabled: true},
 		AgentID:  "agt-skills",
 		Snapshot: Snapshot{
 			Defaults: map[string]any{
@@ -103,7 +103,7 @@ func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 
 func TestBuild_emptyOrMissingToolGroupsMeansNone(t *testing.T) {
 	root := t.TempDir()
-	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: root}
 	cfg.ApplyDefaults()
 
 	for _, tc := range []struct {
@@ -124,7 +124,7 @@ func TestBuild_emptyOrMissingToolGroupsMeansNone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			built, err := Build(BuildParams{
 				NodeCFG:  cfg,
-				BaseTurn: session.TurnOptions{FSRoot: root},
+				BaseTurn: session.TurnOptions{WorkspaceRoot: root},
 				AgentID:  "agt-none",
 				Snapshot: tc.snap,
 			})
@@ -149,13 +149,13 @@ func TestBuild_emptyOrMissingToolGroupsMeansNone(t *testing.T) {
 
 func TestBuild_ignoresLegacySkillsEnabledFalse(t *testing.T) {
 	root := t.TempDir()
-	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: root}
 	cfg.ApplyDefaults()
 	cfg.Skills.Enabled = true
 
 	built, err := Build(BuildParams{
 		NodeCFG:  cfg,
-		BaseTurn: session.TurnOptions{FSRoot: root},
+		BaseTurn: session.TurnOptions{WorkspaceRoot: root},
 		AgentID:  "agt-legacy-skills",
 		Snapshot: Snapshot{
 			Defaults: map[string]any{
@@ -188,14 +188,14 @@ func TestBuild_appliesSkillsVisibleAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: root}
 	cfg.ApplyDefaults()
 	cfg.Skills.Enabled = true
 
 	built, err := Build(BuildParams{
 		NodeCFG: cfg,
 		BaseTurn: session.TurnOptions{
-			FSRoot:            root,
+			WorkspaceRoot:     root,
 			SkillsRoot:        skillsRoot,
 			SkillsEnabled:     true,
 			SkillsMaxInPrompt: 3,

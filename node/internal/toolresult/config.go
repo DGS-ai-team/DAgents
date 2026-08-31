@@ -5,7 +5,7 @@ import "strings"
 const (
 	// DefaultSpillThresholdTokens 单条 tool 结果写入 history 前触发落盘摘要的 token 阈值（DeepSeek 粗算）。
 	DefaultSpillThresholdTokens = 12000
-	// spillSubdir 相对 fs_root 的固定落盘目录（不可配置）。
+	// spillSubdir 相对 Agent workspace 的固定落盘目录（不可配置）。
 	spillSubdir = "tool_outputs"
 )
 
@@ -26,17 +26,17 @@ type Config struct {
 	// SpillThresholdTokens 单条 tool 结果超过该估算 token 数时落盘并对 history 做头尾摘要。
 	SpillThresholdTokens int
 	// Tools 为启用 spill/摘要 的工具名列表；空表示不处理任何工具。
-	Tools  []string
-	FSRoot string // 绝对路径，用于落盘
+	Tools         []string
+	WorkspaceRoot string // Agent workspace 绝对路径，用于落盘
 }
 
 // DefaultConfig 返回 WS3 默认（bash + fs）。
-func DefaultConfig(fsRoot string) Config {
+func DefaultConfig(workspaceRoot string) Config {
 	return Config{
 		Enabled:              true,
 		SpillThresholdTokens: DefaultSpillThresholdTokens,
 		Tools:                append([]string(nil), DefaultToolResultTools...),
-		FSRoot:               strings.TrimSpace(fsRoot),
+		WorkspaceRoot:        strings.TrimSpace(workspaceRoot),
 	}
 }
 
@@ -46,7 +46,7 @@ func (c Config) Normalized() Config {
 	if out.SpillThresholdTokens <= 0 {
 		out.SpillThresholdTokens = DefaultSpillThresholdTokens
 	}
-	out.FSRoot = strings.TrimSpace(out.FSRoot)
+	out.WorkspaceRoot = strings.TrimSpace(out.WorkspaceRoot)
 	return out
 }
 

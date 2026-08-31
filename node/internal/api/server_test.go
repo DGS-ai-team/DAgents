@@ -25,10 +25,10 @@ import (
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		NodeID: "ops-linux-01",
-		Agent:  config.AgentConfig{Name: "ops-linux"},
-		Manage: config.ManageConfig{},
-		FSRoot: t.TempDir(),
+		NodeID:      "ops-linux-01",
+		Agent:       config.AgentConfig{Name: "ops-linux"},
+		Manage:      config.ManageConfig{},
+		RuntimeRoot: t.TempDir(),
 		Compression: config.CompressionConfig{
 			SilentTriggerTokens:   80000,
 			BlockingTriggerTokens: 100000,
@@ -54,7 +54,7 @@ func createTestRuntime(t *testing.T, srv *Server) string {
 	return sess.ID
 }
 
-// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 FSRoot。
+// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 runtime root。
 func waitSessionIdle(t *testing.T, srv *Server, sessionID string) {
 	t.Helper()
 	waitSessionIdleDeadline(t, srv, sessionID, 3*time.Second)
@@ -174,7 +174,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	srv := NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
-	// 须在 testConfig 的 t.TempDir 清理之前关闭 Server，否则 FSRoot 仍被后台写入。
+	// 须在 testConfig 的 t.TempDir 清理之前关闭 Server，否则 runtime root 仍被后台写入。
 	t.Cleanup(func() {
 		ts.Close()
 		time.Sleep(50 * time.Millisecond)

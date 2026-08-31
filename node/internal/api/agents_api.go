@@ -274,12 +274,12 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Workspace != nil {
 		workspace = *req.Workspace
 	}
-	workspace, err = agentruntime.NormalizeWorkspaceConfig(s.cfg.FSRoot, agentID, workspace)
+	workspace, err = agentruntime.NormalizeWorkspaceConfig(s.cfg.RuntimeDir(), agentID, workspace)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_workspace", err.Error(), nil)
 		return
 	}
-	if _, err := agentruntime.EnsureWorkspace(s.cfg.FSRoot, agentID, workspace); err != nil {
+	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), agentID, workspace); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "workspace_unavailable", err.Error(), nil)
 		return
 	}
@@ -720,7 +720,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
 	}
-	if _, err := agentruntime.EnsureWorkspace(s.cfg.FSRoot, id, snapParsed.Workspace); err != nil {
+	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), id, snapParsed.Workspace); err != nil {
 		return fmt.Errorf("ensure agent workspace: %w", err)
 	}
 	var policyEngine *policy.Engine

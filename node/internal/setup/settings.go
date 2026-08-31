@@ -79,9 +79,9 @@ type NodeEndpointView struct {
 
 // RuntimeSettings 运行时路径与日志（不含 listen/local）。
 type RuntimeSettings struct {
-	NodeID   string `json:"node_id"`
-	FSRoot   string `json:"fs_root"`
-	LogLevel string `json:"log_level"`
+	NodeID      string `json:"node_id"`
+	RuntimeRoot string `json:"runtime_root"`
+	LogLevel    string `json:"log_level"`
 }
 
 // AgentSettings Node 展示身份（历史字段名 agent；UI 称 Node 名称）。
@@ -251,9 +251,9 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
 		},
 		Runtime: RuntimeSettings{
-			NodeID:   cfg.NodeID,
-			FSRoot:   cfg.FSRoot,
-			LogLevel: cfg.Log.Level,
+			NodeID:      cfg.NodeID,
+			RuntimeRoot: cfg.RuntimeDir(),
+			LogLevel:    cfg.Log.Level,
 		},
 		Agent: AgentSettings{
 			Name:        cfg.Agent.Name,
@@ -587,7 +587,7 @@ func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
 	if id := strings.TrimSpace(p.NodeID); id != "" {
 		cfg.NodeID = id
 	}
-	// fs_root 写死不可配置，忽略 PATCH 中的值。
+	// runtime_root 写死不可配置，忽略 PATCH 中的值。
 	if level := strings.ToLower(strings.TrimSpace(p.LogLevel)); level != "" {
 		switch level {
 		case "debug", "info", "warn", "error":

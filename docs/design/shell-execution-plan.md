@@ -40,7 +40,7 @@ Executor Provider
 
 - Linux 下通过 `bash -lc` 执行；
 - Windows 下支持 `cmd`/PowerShell；
-- `cwd` 受 `fs_root` 限制；
+- `cwd` 受 Agent `workspace_root` 限制；
 - 有超时、取消和进程树终止；旧后台任务仅由兼容层保留；
 - 有 stdout/stderr 捕获和输出压缩；
 - 通过 Agent policy 和 shell policy 进行审批；
@@ -220,7 +220,7 @@ SandboxProvider.Prepare(request)
 ExecutorProvider.Start(request)
 ```
 
-本地执行可以使用 fs_root、进程限制和后续 Landlock/bwrap；远程执行使用 channel 的远程 cwd、用户权限和 command policy；容器执行使用容器挂载和网络策略。
+本地执行可以使用 Agent `workspace_root`、进程限制和后续 Landlock/bwrap；远程执行使用 channel 的远程 cwd、用户权限和 command policy；容器执行使用容器挂载和网络策略。Node 管理文件使用独立的 `runtime_root`，不作为 Agent 工具相对路径基准。
 
 ## 5. DAgents 推荐内部接口
 
@@ -276,7 +276,7 @@ type ExecutionContext struct {
 
 - 默认本地执行；
 - `shell_type` 继续支持 bash/cmd/powershell；
-- `cwd` 继续受本地 `fs_root` 限制；
+- `cwd` 继续受本地 Agent `workspace_root` 限制；
 - 保留 timeout、background、cancel、output compression；
 - 继续使用当前 `bash_run` policy 和 shell policy；
 - 不新增 `channel_id` 参数。

@@ -1,4 +1,4 @@
-// Package externaltools 索引 `.runtime/externaltools/` 外置 CLI、编译二进制与 shell 脚本。
+// Package externaltools 索引 `<runtime_root>/externaltools/` 外置 CLI、编译二进制与 shell 脚本。
 package externaltools
 
 import (
@@ -18,7 +18,8 @@ var reservedSubdirs = map[string]struct{}{
 	"serve": {},
 }
 
-// Catalog 读取 externaltools_menu.md 并扫描 externaltools/ 下的可执行文件。
+// Catalog 读取 `<runtime_root>/externaltools_menu.md` 并扫描
+// `<runtime_root>/externaltools/` 下的可执行文件。
 type Catalog struct {
 	runtimeDir string
 }
@@ -70,8 +71,8 @@ func (c *Catalog) RenderPromptSection() string {
 	var b strings.Builder
 	b.WriteString("\n\n## 外置 CLI 与工具\n\n")
 	b.WriteString(
-		"Node 管理的 `externaltools/` 用于放置 **shell 脚本、编译好的二进制与第三方 CLI**，与工作区中的文件和 Markdown 技能区分。" +
-			"安装后通常已加入 `PATH`；详细说明见 Node 运行时的 `externaltools_menu.md`。\n",
+		"Node 管理的 `<runtime_root>/externaltools/` 用于放置 **shell 脚本、编译好的二进制与第三方 CLI**，与工作区中的文件和 Markdown 技能区分。" +
+			"安装后通常已加入 `PATH`；详细说明见 `<runtime_root>/externaltools_menu.md`。\n",
 	)
 	if menu != "" {
 		b.WriteString("\n")
@@ -79,7 +80,7 @@ func (c *Catalog) RenderPromptSection() string {
 		b.WriteByte('\n')
 	}
 	if len(bins) > 0 {
-		b.WriteString("\n当前 `externaltools/` 目录中的可执行文件（自动扫描，不含子目录）：\n\n")
+		b.WriteString("\n当前 `<runtime_root>/externaltools/` 目录中的可执行文件（自动扫描，不含子目录）：\n\n")
 		for _, name := range bins {
 			b.WriteString("- `")
 			b.WriteString(name)

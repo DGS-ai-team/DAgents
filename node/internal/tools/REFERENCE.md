@@ -4,7 +4,7 @@
 |------|------|
 | `ToolDef` / `FunctionDef` | OpenAI tools JSON 结构 |
 | `Registry` | 工具注册与 dispatch |
-| `NewRegistry(fsRoot, bashTimeoutSeconds, encodings...)` | 创建 registry；`encodings[0]`=bash 输出编码，`encodings[1]`=文件编码 |
+| `NewRegistry(workspaceRoot, bashTimeoutSeconds, encodings...)` | 创建 registry；`encodings[0]`=bash 输出编码，`encodings[1]`=文件编码 |
 | `resolveShellOutputEncoding` / `decodeShellOutput` | bash_run 输出按 GBK/UTF-8 等解码为 UTF-8 |
 | `encodeFileContent` / `encodeTextToLegacyChinese` | 写盘编码；GBK 失败回退 GB18030，再失败按 rune 替换 `?` |
 | `choosePathEncoding` / `readTextLinesAt` / `rememberPathEncoding` | 路径编码：参数 → 缓存(mtime) → 字节检测 → 配置默认；读写后写缓存 |

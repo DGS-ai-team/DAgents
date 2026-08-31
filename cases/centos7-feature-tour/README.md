@@ -119,7 +119,7 @@ http://127.0.0.1:18765/ui/
 |------|------|
 | `/etc/dagents/config.yaml` | Node 配置（构建时从案例 `config.yaml` 打入） |
 | `/usr/local/bin/dagents-node` | **CGO_ENABLED=0** 静态二进制 |
-| `/workspace/.runtime/` | **`fs_root`**（volume 挂载到宿主机 `./workspace/`） |
+| `/workspace/.runtime/` | **`runtime_root`**（volume 挂载到宿主机 `./workspace/`） |
 | `/workspace/.runtime/skills/` | Skill 目录（首次从种子复制，含 **`write-skill`**） |
 | `/workspace/.runtime/policy/` | 工具审批策略（种子含 **`write_file=rule`** + Agent 自有文件信任链；显式 **`write_file=always`** 可关闭信任链） |
 | `/workspace/.runtime/demo/hello.txt` | 演示只读文件（entrypoint 首次创建） |
@@ -132,7 +132,7 @@ http://127.0.0.1:18765/ui/
 
 | 路径 | 内容摘要 |
 |------|----------|
-| `config.yaml` | `agent_id: case-write-skill`；`fs_root: /workspace/.runtime`；skills 开启；**`llm.mock: true`**（entrypoint 可覆盖）；DeepSeek 兼容端点 |
+| `config.yaml` | `node_id: case-write-skill`；runtime_root 固定为 `/workspace/.runtime` 的运行环境；skills 开启；**`llm.mock: true`**（entrypoint 可覆盖）；DeepSeek 兼容端点 |
 | `local-run/client.yaml` | 可选的宿主机 Client 运维命令配置，连接 `http://127.0.0.1:18765` |
 | `workspace/` | 挂载为容器 `.runtime`；本地可查看 demo、policy、session 数据 |
 

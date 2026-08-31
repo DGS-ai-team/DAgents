@@ -47,7 +47,7 @@ func ParsePublicMediaURL(raw string) (mediaID string, ok bool) {
 	return id, true
 }
 
-// UserUploadRelPath 返回用户上传图片相对 fs_root 的路径。
+// UserUploadRelPath 返回用户上传图片相对 workspace 的路径。
 func UserUploadRelPath(sessionID, mediaID, ext string) string {
 	sessionID = strings.TrimSpace(sessionID)
 	mediaID = strings.TrimSpace(mediaID)

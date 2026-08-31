@@ -38,7 +38,7 @@ tools:
 
 ### dagents-browser
 
-与 Node **共用** `config.yaml`（`fs_root`、`browser.*` 须一致）：
+与 Node **共用** `config.yaml`（`runtime_root`、`browser.*` 须一致；`runtime_root` 缺省为 `./.runtime`）：
 
 ```bash
 cd browser-service

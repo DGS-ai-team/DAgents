@@ -46,7 +46,7 @@ func screenCaptureToolDef() ToolDef {
 		Function: FunctionDef{
 			Name: "screen_capture",
 			Description: "截取当前主机的真实虚拟桌面；使用多模态模型时会把图像附加到下一次模型输入，否则仍作为工具结果图片展示。" +
-				" 返回截图像素尺寸与操作坐标系；computer_use 的坐标必须基于最近一次截图。" +
+				" 多模态模型收到的截图会叠加像素坐标网格，顶部和左侧数字表示截图坐标；返回截图像素尺寸与操作坐标系，computer_use 的坐标必须基于最近一次截图。" +
 				" 多显示器会合并为一张图；图形会话不可用时明确失败。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
@@ -70,6 +70,7 @@ func computerUseToolDef() ToolDef {
 			Name: "computer_use",
 			Description: "在当前主机桌面执行一次鼠标或键盘动作，并自动返回动作后的屏幕截图。" +
 				" 调用坐标动作前必须先调用 screen_capture；x/y 与 from_x/from_y 使用最近截图返回的像素坐标系，不是操作系统原始坐标。" +
+				" 截图中的坐标网格可用于定位目标，顶部和左侧的数字是截图像素坐标。" +
 				" action 支持 move、click、double_click、drag、scroll、key、type_text。" +
 				" scroll_y 为 -20..20，正数向下、负数向上；key 可配 modifiers（ctrl/alt/shift/meta）。" +
 				" 桌面操作默认进入审批，不得用于输入密码、验证码、支付信息或绕过系统安全提示。",
@@ -145,6 +146,7 @@ func (r *Registry) execScreenCapture(ctx context.Context, raw json.RawMessage) (
 	return desktopSuccess("screen_capture", "capture", frame, path, map[string]any{
 		"backend":         screen.Default().Backend(),
 		"vision_attached": r.multimodalEnabled,
+		"coordinate_grid": coordinateGridMetadata(frame.Width, frame.Height, r.multimodalEnabled),
 	}), nil
 }
 
@@ -187,6 +189,7 @@ func (r *Registry) execComputerUse(ctx context.Context, raw json.RawMessage) (st
 	extra := map[string]any{
 		"backend":         status.Backend,
 		"vision_attached": r.multimodalEnabled,
+		"coordinate_grid": coordinateGridMetadata(frame.Width, frame.Height, r.multimodalEnabled),
 	}
 	if action.HasPoint {
 		extra["os_point"] = map[string]any{"x": action.X, "y": action.Y}
@@ -282,11 +285,17 @@ func (r *Registry) captureDesktopForTool(ctx context.Context, source, detail str
 	callID := toolCallIDFromContext(ctx)
 	r.registerToolMedia(ctx, callID, path, source, source, "")
 	if r.multimodalEnabled {
+		modelJPEG, err := screen.AnnotateCoordinates(frame.JPEG)
+		if err != nil {
+			return frame, path, fmt.Errorf("annotate coordinate grid: %w", err)
+		}
+		gridStep := screen.CoordinateGridStep(frame.Width, frame.Height)
 		prompt := fmt.Sprintf(
-			"%s 已返回当前桌面。图像坐标系为 %dx%d；后续 computer_use 的坐标必须直接使用这张图中的像素位置。原始虚拟桌面范围为 x=%d, y=%d, width=%d, height=%d。请根据图像继续任务。",
+			"%s 已返回当前桌面。图像坐标系为 %dx%d，截图已叠加坐标网格，网格间距为 %d 像素，顶部和左侧数字表示截图像素坐标；后续 computer_use 的坐标必须直接使用这张图中的像素位置。原始虚拟桌面范围为 x=%d, y=%d, width=%d, height=%d。请根据图像继续任务。",
 			source,
 			frame.Width,
 			frame.Height,
+			gridStep,
 			frame.Bounds.X,
 			frame.Bounds.Y,
 			frame.Bounds.Width,
@@ -295,7 +304,7 @@ func (r *Registry) captureDesktopForTool(ctx context.Context, source, detail str
 		r.stashReadImageVision(callID, &ReadImageVisionPayload{
 			RelPath: path,
 			Detail:  detail,
-			DataURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(frame.JPEG),
+			DataURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(modelJPEG),
 			Prompt:  prompt,
 		})
 	}
@@ -385,6 +394,18 @@ func waitForDesktopPaint(ctx context.Context, delay time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func coordinateGridMetadata(width, height int, enabled bool) map[string]any {
+	metadata := map[string]any{
+		"enabled": enabled,
+		"origin":  "top_left",
+	}
+	if enabled {
+		metadata["step"] = screen.CoordinateGridStep(width, height)
+		metadata["labels"] = "screenshot_pixels"
+	}
+	return metadata
 }
 
 func desktopSuccess(toolName, action string, frame screen.Frame, path string, extra map[string]any) string {

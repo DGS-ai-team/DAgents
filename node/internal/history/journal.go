@@ -136,11 +136,18 @@ func journalFilePath(baseDir, sessionID string) string {
 	return filepath.Join(baseDir, day, safeSID+".jsonl")
 }
 
-// JournalRelativePath 返回相对工作区根的 JSONL 审计路径（history/YYYYMMDD/<session>.jsonl）。
-func JournalRelativePath(sessionID string, at time.Time) string {
+// RuntimeJournalRelativePath 返回相对 Node runtime root 的 JSONL 审计路径
+// （history/YYYYMMDD/<session>.jsonl）。
+func RuntimeJournalRelativePath(sessionID string, at time.Time) string {
 	day := at.Format("20060102")
 	safeSID := sanitizeSessionIDForFilename(sessionID)
 	return fmt.Sprintf("history/%s/%s.jsonl", day, safeSID)
+}
+
+// JournalRelativePath 保留旧调用方兼容；新代码应使用 RuntimeJournalRelativePath。
+// Deprecated: use RuntimeJournalRelativePath.
+func JournalRelativePath(sessionID string, at time.Time) string {
+	return RuntimeJournalRelativePath(sessionID, at)
 }
 
 func formatRecordedAt(t time.Time) string {

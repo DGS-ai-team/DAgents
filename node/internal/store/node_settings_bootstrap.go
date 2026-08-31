@@ -32,7 +32,7 @@ func BootstrapNodeSettings(ctx context.Context, cfg *config.Config, configPath s
 			logger.Info("migrating node settings from YAML to SQLite", "path", cfg.NodeSettingsDBPath())
 		} else {
 			seed = ProductNodeSettingsSeed()
-			// 保留引导层已解析的 node_id；fs_root 写死为 DefaultFSRoot
+			// 保留引导层已解析的 node_id；runtime_root 写死为 DefaultRuntimeRoot
 			seed.NodeID = cfg.NodeID
 			logger.Info("seeding product node settings", "path", cfg.NodeSettingsDBPath())
 		}

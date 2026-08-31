@@ -32,7 +32,7 @@ func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 		Agent: config.AgentConfig{
 			Role: "compliance",
 		},
-		FSRoot: filepath.Join(root, "runtime"),
+		RuntimeRoot: filepath.Join(root, "runtime"),
 		Compression: config.CompressionConfig{
 			SilentTriggerTokens:   80000,
 			BlockingTriggerTokens: 100000,

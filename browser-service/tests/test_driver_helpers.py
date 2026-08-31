@@ -1,8 +1,9 @@
 import asyncio
+import os
 import tempfile
 
 from dagents_browser.agent_prompt import build_extend_system_message
-from dagents_browser.config import BrowserServiceSettings
+from dagents_browser.config import BrowserServiceSettings, load_settings
 from dagents_browser.driver import BrowserUseDriver, navigation_url_allowed
 from dagents_browser.ports import allocate_debug_port
 from dagents_browser.task_result import summarize_agent_history, task_status_response
@@ -27,10 +28,31 @@ def test_navigation_url_scheme_guard():
     assert not navigation_url_allowed("javascript:alert(1)", ["https", "http"])
 
 
+def test_load_settings_uses_runtime_root(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"runtime_root: {runtime_root.as_posix()}\n", encoding="utf-8")
+    settings = load_settings(str(config_path))
+    assert settings.runtime_root == os.path.abspath(str(runtime_root))
+
+
+def test_load_settings_reads_legacy_fs_root(tmp_path):
+    legacy_root = tmp_path / "legacy-runtime"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"fs_root: {legacy_root.as_posix()}\n", encoding="utf-8")
+    settings = load_settings(str(config_path))
+    assert settings.runtime_root == os.path.abspath(str(legacy_root))
+
+
 def test_extend_system_message_contains_dagents_rules():
-    msg = build_extend_system_message(fs_root="/tmp/runtime", allowed_url_schemes=["https", "http"])
+    msg = build_extend_system_message(
+        workspace_root="/tmp/workspace",
+        runtime_root="/tmp/runtime",
+        allowed_url_schemes=["https", "http"],
+    )
     assert "dagents_companion_rules" in msg
     assert "简体中文" in msg
+    assert "/tmp/workspace" in msg
     assert "/tmp/runtime" in msg
     assert "不要尝试登录" in msg
     assert "done" in msg
@@ -136,7 +158,8 @@ def test_archive_and_recent(tmp_path):
 def test_extend_includes_recent_block():
     from dagents_browser.agent_prompt import build_extend_system_message
     msg = build_extend_system_message(
-        fs_root="/tmp/r",
+        workspace_root="/tmp/workspace",
+        runtime_root="/tmp/r",
         recent_tasks_block="<recent_browser_tasks>\n1. [btask-x]\n</recent_browser_tasks>",
     )
     assert "btask-x" in msg
@@ -155,7 +178,7 @@ def test_archived_task_status_survives_driver_restart():
             result={"summary": "Example Domain", "success": True, "done": True, "steps": 2},
             session_key="agt-browser",
         )
-        driver = BrowserUseDriver(BrowserServiceSettings(fs_root=root))
+        driver = BrowserUseDriver(BrowserServiceSettings(runtime_root=root))
         out = asyncio.run(driver.call({
             "op": "task_status",
             "session_key": "agt-browser",

@@ -24,7 +24,7 @@ func triggersTestConfig(t *testing.T) *config.Config {
 func newTriggersTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	cfg := triggersTestConfig(t)
-	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
+	reg, err := tools.NewRegistry(cfg.RuntimeDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}

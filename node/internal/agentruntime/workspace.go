@@ -27,7 +27,7 @@ type WorkspaceConfig struct {
 // NormalizeWorkspaceConfig validates a creation request and returns the
 // immutable representation that should be written into the Agent snapshot.
 // Empty mode means the new Agent-private workspace.
-func NormalizeWorkspaceConfig(nodeFSRoot, agentID string, requested WorkspaceConfig) (WorkspaceConfig, error) {
+func NormalizeWorkspaceConfig(runtimeRoot, agentID string, requested WorkspaceConfig) (WorkspaceConfig, error) {
 	mode := strings.ToLower(strings.TrimSpace(requested.Mode))
 	if mode == "" {
 		mode = WorkspaceModePrivate
@@ -43,14 +43,14 @@ func NormalizeWorkspaceConfig(nodeFSRoot, agentID string, requested WorkspaceCon
 		if err != nil {
 			return WorkspaceConfig{}, fmt.Errorf("normalize workspace path: %w", err)
 		}
-		if pathWithin(clean, nodeRuntimeRoot(nodeFSRoot)) {
+		if pathWithin(clean, nodeRuntimeRoot(runtimeRoot)) {
 			return WorkspaceConfig{}, fmt.Errorf("custom workspace cannot be inside the Node runtime directory")
 		}
 		path, err := canonicalWorkspacePath(strings.TrimSpace(requested.Path))
 		if err != nil {
 			return WorkspaceConfig{}, err
 		}
-		if pathWithin(path, nodeRuntimeRoot(nodeFSRoot)) {
+		if pathWithin(path, nodeRuntimeRoot(runtimeRoot)) {
 			return WorkspaceConfig{}, fmt.Errorf("custom workspace cannot be inside the Node runtime directory")
 		}
 		if strings.TrimSpace(agentID) == "" {
@@ -67,10 +67,10 @@ func NormalizeWorkspaceConfig(nodeFSRoot, agentID string, requested WorkspaceCon
 // EffectiveWorkspaceRoot resolves a persisted workspace. A missing workspace
 // field is deliberately treated as legacy_shared so existing Agents retain
 // their old Node-global behavior after an upgrade.
-func EffectiveWorkspaceRoot(nodeFSRoot, agentID string, workspace WorkspaceConfig) (string, error) {
-	root := strings.TrimSpace(nodeFSRoot)
+func EffectiveWorkspaceRoot(runtimeRoot, agentID string, workspace WorkspaceConfig) (string, error) {
+	root := strings.TrimSpace(runtimeRoot)
 	if root == "" {
-		return "", fmt.Errorf("node fs root is required")
+		return "", fmt.Errorf("Node runtime root is required")
 	}
 	mode := strings.ToLower(strings.TrimSpace(workspace.Mode))
 	switch mode {
@@ -103,8 +103,8 @@ func EffectiveWorkspaceRoot(nodeFSRoot, agentID string, workspace WorkspaceConfi
 
 // EnsureWorkspace creates the effective directory for a private/custom Agent.
 // It is safe to call during runtime reloads and after a Node restart.
-func EnsureWorkspace(nodeFSRoot, agentID string, workspace WorkspaceConfig) (string, error) {
-	root, err := EffectiveWorkspaceRoot(nodeFSRoot, agentID, workspace)
+func EnsureWorkspace(runtimeRoot, agentID string, workspace WorkspaceConfig) (string, error) {
+	root, err := EffectiveWorkspaceRoot(runtimeRoot, agentID, workspace)
 	if err != nil {
 		return "", err
 	}

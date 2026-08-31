@@ -170,9 +170,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			llmRuntime.SyncFromConfig(cfg)
 		}
 	}
-	// 生产路径：按 FSRoot 注册内置工具；失败时回退 "." 以免 API 完全不可用。
+	// 生产路径：Node 级工具使用 runtime root；失败时回退 "." 以免 API 完全不可用。
 	if o.tools == nil {
-		reg, err := tools.NewRegistry(cfg.FSRoot, 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
+		reg, err := tools.NewRegistry(cfg.RuntimeDir(), 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		if err != nil {
 			logger.Error("tools registry init failed", "error", err)
 			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
@@ -284,7 +284,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	transferHub := stream.NewHub(256, logger)
 	var transferManager *tools.LinuxTransferManager
 	if linuxProvider != nil {
-		transferManager = tools.NewLinuxTransferManager(linuxProvider, cfg.FSRoot, tools.DefaultLinuxTransferConcurrency,
+		transferManager = tools.NewLinuxTransferManager(linuxProvider, cfg.RuntimeDir(), tools.DefaultLinuxTransferConcurrency,
 			func(agentID, eventType string, data map[string]any, replayable bool) {
 				if replayable {
 					transferHub.Publish(agentID, eventType, data)
@@ -298,8 +298,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
-		WorkspaceRoot: cfg.FSRoot,
-		FSRoot:        cfg.FSRoot, // compatibility alias for non-Agent sessions
+		WorkspaceRoot: cfg.RuntimeDir(),
 		// MaxToolLoops 由各 Agent config_snapshot（defaults.llm.max_tool_loops）在装入 runtime 时写入。
 		SkillsRoot:                  cfg.SkillsRoot(),
 		SkillsEnabled:               cfg.Skills.Enabled,
@@ -320,7 +319,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			Enabled:              cfg.ToolResultHookEnabled(),
 			SpillThresholdTokens: cfg.ToolResultSpillThresholdTokens(),
 			Tools:                cfg.ToolResultHookTools(),
-			FSRoot:               cfg.FSRoot,
+			WorkspaceRoot:        cfg.RuntimeDir(),
 		},
 		InjectTodayDate: hooks.InjectTodayDateConfig{Enabled: &injectTodayDateEnabled},
 		PluginHooks:     hooks.PluginsConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),

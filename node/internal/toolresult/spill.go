@@ -18,7 +18,7 @@ func spillPaths(cfg Config, sessionID, toolCallID string) (relPath, absPath stri
 	}
 	subdir := spillSubdir
 	relPath = filepath.ToSlash(filepath.Join(subdir, sessionID, toolCallID+".txt"))
-	absPath = filepath.Join(cfg.FSRoot, filepath.FromSlash(relPath))
+	absPath = filepath.Join(cfg.WorkspaceRoot, filepath.FromSlash(relPath))
 	return relPath, absPath, nil
 }
 

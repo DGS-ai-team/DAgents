@@ -2,7 +2,7 @@
 
 原始 OpenAI 消息 **JSONL 审计侧车**（对齐原 Python `raw_message_journal`）。
 
-**落盘路径**：`<runtime>/history/YYYYMMDD/<session_id>.jsonl`（按自然日分子目录；文件名经 sanitize）。
+**落盘路径**：`<runtime_root>/history/YYYYMMDD/<session_id>.jsonl`（按自然日分子目录；文件名经 sanitize；不属于 Agent workspace）。
 
 | 文件 | 说明 |
 |------|------|

@@ -25,7 +25,7 @@ func TestPatchAgent_toolDisableSoftRejectAndNotice(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
 	cfg.LLM.Mock = true
 

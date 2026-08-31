@@ -32,7 +32,7 @@ func SaveFile(path string, cfg *Config) error {
 	return writeAtomic(path, out)
 }
 
-// BootstrapConfig 为进程引导 YAML：仅 listen / local（运行时根固定 DefaultFSRoot）。
+// BootstrapConfig 为进程引导 YAML：仅 listen / local（运行时根固定 DefaultRuntimeRoot）。
 type BootstrapConfig struct {
 	Listen ListenConfig `yaml:"listen"`
 	Local  LocalConfig  `yaml:"local"`

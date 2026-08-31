@@ -11,7 +11,7 @@ import (
 type Result struct {
 	ForClient  string
 	ForHistory string
-	SpillPath  string // 相对 FSRoot，供 read_file
+	SpillPath  string // 相对 workspace root，供 read_file
 	Spilled    bool
 }
 
@@ -30,8 +30,8 @@ func Package(cfg Config, sessionID, toolCallID, toolName, normalized string) (Re
 	if totalTokens <= float64(cfg.SpillThresholdTokens) {
 		return out, nil
 	}
-	if cfg.FSRoot == "" {
-		return out, fmt.Errorf("toolresult: FSRoot required to spill tool output")
+	if cfg.WorkspaceRoot == "" {
+		return out, fmt.Errorf("toolresult: WorkspaceRoot required to spill tool output")
 	}
 	relPath, absPath, err := spillPaths(cfg, sessionID, toolCallID)
 	if err != nil {

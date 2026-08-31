@@ -19,8 +19,8 @@ import (
 
 func TestAgentsAPI_CRUD(t *testing.T) {
 	cfg := &config.Config{
-		NodeID: "node-test",
-		FSRoot: t.TempDir(),
+		NodeID:      "node-test",
+		RuntimeRoot: t.TempDir(),
 	}
 	cfg.ApplyDefaults()
 
@@ -131,7 +131,7 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 }
 
 func TestAgentTemplatesAPI_list(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
@@ -156,7 +156,7 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 }
 
 func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -211,7 +211,7 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 }
 
 func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -247,7 +247,7 @@ func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
 }
 
 func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -271,7 +271,7 @@ func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
 }
 
 func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -331,7 +331,7 @@ func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
 }
 
 func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
@@ -370,7 +370,7 @@ func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
 
 func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &config.Config{NodeID: "node-triggers", FSRoot: dir}
+	cfg := &config.Config{NodeID: "node-triggers", RuntimeRoot: dir}
 	cfg.ApplyDefaults()
 	cfg.Triggers.Enabled = true
 

@@ -21,7 +21,7 @@
 | **默认本机绑定** | 默认 `127.0.0.1`；人机为 Web UI `/ui/` |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
 | **跨 Node 协作** | 经 Manage **Workgroup**（Dialer / 反代） |
-| **工具边界** | 工具组 + policy + `fs_root`；无独立沙箱进程 |
+| **工具边界** | 工具组 + policy + Agent `workspace_root`；Node 管理目录使用 `runtime_root`，无独立沙箱进程 |
 | **会话态在 Node** | Agent 对话上下文、队列、持久化由 Node 负责（SQLite） |
 
 ### 1.1 基础路径
@@ -443,7 +443,7 @@ TurnOrchestrator
 
 ```yaml
 # /etc/dagents/agent.yaml（示意）
-agent_id: ops-win-01
+node_id: ops-win-01
 listen:
   host: 127.0.0.1
   port: 18765
@@ -452,11 +452,12 @@ manage:
   url: https://manage.example.com
   registration:
     base_url: http://192.168.1.10:18765
-fs_root: D:\agent-workspace
 llm:
   provider: openai
   model: gpt-4.1
 ```
+
+Node 的 `runtime_root` 固定为 `./.runtime`；Agent 的 `workspace_root` 不在 Node YAML 中配置，而是在创建 Agent 时选择。
 
 Client 同目录 `client.yaml` 仅引用：
 

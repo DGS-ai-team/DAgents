@@ -50,7 +50,7 @@ func TestResolveRunCWDDefaultAndSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	cwd, err := reg.resolveRunCWD("")
-	if err != nil || cwd != reg.fsRoot {
+	if err != nil || cwd != reg.workspaceRoot {
 		t.Fatalf("default cwd = %q err=%v", cwd, err)
 	}
 	cwd2, err := reg.resolveRunCWD("sub")

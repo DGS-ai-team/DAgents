@@ -12,7 +12,7 @@ func TestFinalizeCompressionSummary_appendsJournalHint(t *testing.T) {
 	if !strings.HasPrefix(got, "summary body") {
 		t.Fatalf("got = %q", got)
 	}
-	if !strings.Contains(got, "历史的原始消息请查阅 history/20260621/sess-a.jsonl。") {
+	if !strings.Contains(got, "Node 已将原始消息记录到 <runtime_root>/history/20260621/sess-a.jsonl") {
 		t.Fatalf("got = %q", got)
 	}
 }

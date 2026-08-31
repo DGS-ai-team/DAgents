@@ -4,7 +4,7 @@
 
 | 符号 | 说明 |
 |------|------|
-| `TurnOptions` | turn 编排配置（FS_ROOT、MaxToolLoops、skills、压缩、journal） |
+| `TurnOptions` | turn 编排配置（workspace root、MaxToolLoops、skills、压缩、journal） |
 | `Manager` | 会话表；每 session 独立 runtime + InputBox + 控制队列 |
 | `NewManager` | 绑定 agent、Hub、LLM、Registry、policy、store、TurnOptions |
 | `SetChildAgentManager` | 注入 `childagent.Manager` 并 `BindHost` |

@@ -74,7 +74,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | `SystemPromptInput` | `BuildSystemPrompt` 入参 |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
 | `BuildSystemPrompt` | 拼接完整 system prompt |
-| `formatWorkspaceSubdirsSection` | 工作区子目录约定；`includeHistoryJournal` 为 true 时含 `history/YYYYMMDD/` JSONL 说明 |
+| `formatWorkspaceSubdirsSection` | 工作区与 Node runtime 路径作用域约定；`includeHistoryJournal` 为 true 时含 `<runtime_root>/history/YYYYMMDD/` JSONL 说明 |
 | `RunTurnPhase` | `State` → Python 兼容 phase 名 |
 
 ## pending.go

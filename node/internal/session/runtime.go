@@ -102,7 +102,7 @@ type runtime struct {
 	historyRevision       uint64               // committed message snapshot revision
 	loadedSkills          []skills.LoadedSkill // 加载的技能列表
 	pendingLongTermScope  string               // scope changes wait for the next human Turn
-	fsRoot                string               // 文件系统根路径
+	workspaceRoot         string               // Agent 工作区根路径
 	media                 *media.Registry      // session 媒体索引（F-M1）
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
@@ -167,8 +167,8 @@ func newRuntimeWithPublisher(
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	workspaceRoot := effectiveWorkspaceRoot(turnOpts)
-	if strings.TrimSpace(turnOpts.FSRoot) == "" {
-		turnOpts.FSRoot = workspaceRoot
+	if strings.TrimSpace(turnOpts.WorkspaceRoot) == "" {
+		turnOpts.WorkspaceRoot = workspaceRoot
 	}
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
 	if turnOpts.SkillsVisibleRestrict {
@@ -204,7 +204,7 @@ func newRuntimeWithPublisher(
 		messages:                append([]llm.Message(nil), initial...),
 		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
 		skillRevision:           turnCatalog.Revision(),
-		fsRoot:                  workspaceRoot,
+		workspaceRoot:           workspaceRoot,
 		triggerDelivery:         triggerDelivery,
 		sideEffects:             newSideEffectStore(),
 		idleAutoCompressApplied: idleAutoCompressApplied,
@@ -253,7 +253,7 @@ func newRuntimeWithPublisher(
 				Enabled:              turnOpts.ToolResult.Enabled,
 				SpillThresholdTokens: turnOpts.ToolResult.SpillThresholdTokens,
 				Tools:                turnOpts.ToolResult.Tools,
-				FSRoot:               workspaceRoot,
+				WorkspaceRoot:        workspaceRoot,
 			}),
 			InjectTodayDate: hooks.InjectTodayDateConfigOrDefault(turnOpts.InjectTodayDate),
 			Plugins:         turnOpts.PluginHooks,

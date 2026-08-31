@@ -109,7 +109,7 @@ func (r *Registry) execTerminalFileTransfer(ctx context.Context, raw json.RawMes
 	return r.linuxTransferManager.Submit(ctx, LinuxTransferRequest{
 		AgentID: r.agentID, ToolCallID: toolCallIDFromContext(ctx), ApprovalID: ApprovalIDFromContext(ctx),
 		TerminalID: info.ID, ChannelID: info.TargetID, Direction: direction,
-		WorkspaceRoot: r.fsRoot,
+		WorkspaceRoot: r.workspaceRoot,
 		LocalPath:     strings.TrimSpace(args.LocalPath), RemotePath: strings.TrimSpace(args.RemotePath), Overwrite: args.Overwrite,
 	})
 }
@@ -137,7 +137,7 @@ func (r *Registry) execLinuxFileTransfer(ctx context.Context, raw json.RawMessag
 		TerminalID:    "",
 		ChannelID:     channelID,
 		Direction:     direction,
-		WorkspaceRoot: r.fsRoot,
+		WorkspaceRoot: r.workspaceRoot,
 		LocalPath:     strings.TrimSpace(args.LocalPath),
 		RemotePath:    strings.TrimSpace(args.RemotePath),
 		Overwrite:     args.Overwrite,

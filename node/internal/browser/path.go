@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// SessionScreenshotPath 生成 session 下截图绝对路径；rel 返回相对 fs_root 的路径。
-func SessionScreenshotPath(fsRoot, outputDir, sessionKey, name string) (abs, rel string, err error) {
-	root, err := filepath.Abs(strings.TrimSpace(fsRoot))
+// SessionScreenshotPath 生成 workspace 下截图绝对路径；rel 返回相对 workspace 的路径。
+func SessionScreenshotPath(workspaceRoot, outputDir, sessionKey, name string) (abs, rel string, err error) {
+	root, err := filepath.Abs(strings.TrimSpace(workspaceRoot))
 	if err != nil {
 		return "", "", err
 	}

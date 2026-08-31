@@ -14,9 +14,9 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 )
 
-// Registry 注册内置工具并在 FS_ROOT 内执行。
+// Registry 注册内置工具并在 Agent workspace 内执行。
 type Registry struct {
-	fsRoot                 string
+	workspaceRoot          string
 	bashTimeout            int
 	bashHardLimitSec       int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
 	shellOutputEncoding    string
@@ -65,7 +65,7 @@ func (r *Registry) WorkspaceRoot() string {
 	if r == nil {
 		return ""
 	}
-	return r.fsRoot
+	return r.workspaceRoot
 }
 
 // ResolveLocalTerminalCWD applies the same workspace-relative path policy as
@@ -371,10 +371,10 @@ func (r *Registry) withBackgroundJobStore(st *BackgroundJobStore, sessionID stri
 	return nil
 }
 
-// NewRegistry 创建工具表；fsRoot 为空时用当前目录。
+// NewRegistry 创建工具表；workspaceRoot 为空时用当前目录。
 // encodings[0]=tools.bash_output_encoding，encodings[1]=tools.file_encoding；空串表示按平台/shell 自动选择。
-func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*Registry, error) {
-	root, err := resolveFSRoot(fsRoot)
+func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...string) (*Registry, error) {
+	root, err := resolveWorkspaceRoot(workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +391,7 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 	}
 	localProvider := NewLocalShellProvider()
 	r := &Registry{
-		fsRoot:                root,
+		workspaceRoot:         root,
 		bashTimeout:           bashTimeoutSeconds,
 		bashHardLimitSec:      maxBashTimeoutSec,
 		shellOutputEncoding:   shellEnc,
