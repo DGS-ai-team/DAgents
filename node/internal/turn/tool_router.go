@@ -498,11 +498,15 @@ func (o *Orchestrator) executeAutoBatch(
 	// the terminal tool facts have been committed.
 	var lifecycleErr error
 	for _, item := range results {
-		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected)
+		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected, false)
 		if lifecycleErr == nil && item.lifecycleErr != nil {
 			lifecycleErr = item.lifecycleErr
 		}
 	}
+	// A parallel tool batch gets one synthetic multimodal user message even
+	// when several tools returned images. This keeps the Chat Completions
+	// history compact and preserves the original tool-result ordering.
+	o.appendToolVisionUserMessages(sessionID, history, autoCalls)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -522,7 +526,7 @@ func (o *Orchestrator) commitToolResult(
 ) {
 	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
 	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
-	o.persistToolResult(sessionID, history, tc, forClient, forHistory, spillPath, rejected)
+	o.persistToolResult(sessionID, history, tc, forClient, forHistory, spillPath, rejected, true)
 }
 
 // persistToolResult 将已推送（或即将仅落盘）的工具结果写入 metrics / history。
@@ -532,6 +536,7 @@ func (o *Orchestrator) persistToolResult(
 	tc llm.ToolCall,
 	forClient, forHistory, spillPath string,
 	rejected bool,
+	appendVision bool,
 ) {
 	resultMeta := tools.ClassifyToolResult(tc.Function.Name, forClient, rejected)
 	// Policy denial is not an execution result and should be excluded from
@@ -545,7 +550,7 @@ func (o *Orchestrator) persistToolResult(
 		forHistory,
 		resultMeta,
 	))
-	if resultMeta.Status != tools.ResultStatusDenied {
+	if appendVision && resultMeta.Status != tools.ResultStatusDenied {
 		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)
 	}
 }

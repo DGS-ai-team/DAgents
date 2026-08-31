@@ -33,6 +33,13 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
+	// WorkspaceRoot is the Agent-facing root for files, bash, local terminals,
+	// media and user-visible tool artifacts.
+	WorkspaceRoot string
+	// FSRoot is the pre-workspace compatibility alias. New callers must use
+	// WorkspaceRoot so Node runtime storage cannot be confused with an Agent
+	// workspace.
+	// Deprecated: use WorkspaceRoot.
 	FSRoot       string
 	MaxToolLoops int
 	// MaxModelRetries retries only transient provider failures within one Step;
@@ -79,6 +86,13 @@ type TurnOptions struct {
 	PreferredName string
 	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
 	LongTermStore turn.LongTermStore
+}
+
+func effectiveWorkspaceRoot(opts TurnOptions) string {
+	if root := strings.TrimSpace(opts.WorkspaceRoot); root != "" {
+		return root
+	}
+	return strings.TrimSpace(opts.FSRoot)
 }
 
 // PromptContextOptions 为侧车 / 长期记忆注入开关。
@@ -338,7 +352,7 @@ func (m *Manager) createWithOptions(
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
 	if created {
 		rt.persist(context.Background())
-		m.logger.Info("session created", "session_id", id, "restored", false, "fs_root", turnOpts.FSRoot)
+		m.logger.Info("session created", "session_id", id, "restored", false, "workspace_root", effectiveWorkspaceRoot(turnOpts))
 	} else {
 		m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
 	}
@@ -1120,13 +1134,19 @@ func (m *Manager) UnloadSessionSkill(sessionID, skillName string) ([]skills.Load
 	return out.Loaded, err
 }
 
-// SessionFSRoot 返回指定 session/agent 的有效 FSRoot（测试与调试用）。
-func (m *Manager) SessionFSRoot(sessionID string) (string, bool) {
+// SessionWorkspaceRoot 返回指定 session/agent 的有效 Agent workspace（测试与调试用）。
+func (m *Manager) SessionWorkspaceRoot(sessionID string) (string, bool) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
 		return "", false
 	}
-	return rt.fsRoot, true
+	return rt.workspaceRoot, true
+}
+
+// SessionFSRoot 保留旧调用方兼容；新代码应使用 SessionWorkspaceRoot。
+// Deprecated: use SessionWorkspaceRoot.
+func (m *Manager) SessionFSRoot(sessionID string) (string, bool) {
+	return m.SessionWorkspaceRoot(sessionID)
 }
 
 func (m *Manager) getRuntime(sessionID string) *runtime {

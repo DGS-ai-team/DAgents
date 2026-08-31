@@ -178,11 +178,11 @@ func testBrowserConfig(t *testing.T) *config.Config {
 	return testBrowserConfigWithRoot(t, t.TempDir())
 }
 
-func testBrowserConfigWithRoot(t *testing.T, fsRoot string) *config.Config {
+func testBrowserConfigWithRoot(t *testing.T, workspaceRoot string) *config.Config {
 	t.Helper()
 	enabled := true
 	cfg := &config.Config{
-		FSRoot: fsRoot,
+		RuntimeRoot: workspaceRoot,
 		Browser: config.BrowserConfig{
 			Enabled:           &enabled,
 			DefaultTimeoutMS:  5000,

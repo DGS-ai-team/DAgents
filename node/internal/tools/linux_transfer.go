@@ -32,15 +32,16 @@ const (
 type LinuxTransferEventSink func(agentID, eventType string, data map[string]any, replayable bool)
 
 type LinuxTransferRequest struct {
-	AgentID    string
-	ToolCallID string
-	ApprovalID string
-	TerminalID string
-	ChannelID  string
-	Direction  string
-	LocalPath  string
-	RemotePath string
-	Overwrite  bool
+	AgentID       string
+	ToolCallID    string
+	ApprovalID    string
+	TerminalID    string
+	ChannelID     string
+	Direction     string
+	LocalPath     string
+	RemotePath    string
+	WorkspaceRoot string // Agent workspace; empty keeps the Node-global compatibility root.
+	Overwrite     bool
 }
 
 type LinuxTransferSnapshot struct {
@@ -86,11 +87,11 @@ type linuxTransferJob struct {
 // LinuxTransferManager owns the process-wide queue. A transfer is counted as
 // one file regardless of its direction; queued work waits FIFO for a slot.
 type LinuxTransferManager struct {
-	provider *LinuxShellProvider
-	fsRoot   string
-	max      int
-	queueMax int
-	sink     LinuxTransferEventSink
+	provider      *LinuxShellProvider
+	workspaceRoot string
+	max           int
+	queueMax      int
+	sink          LinuxTransferEventSink
 
 	mu      sync.Mutex
 	active  int
@@ -100,24 +101,24 @@ type LinuxTransferManager struct {
 
 var linuxTransferSequence uint64
 
-func NewLinuxTransferManager(provider *LinuxShellProvider, fsRoot string, maxConcurrent int, sink LinuxTransferEventSink) *LinuxTransferManager {
+func NewLinuxTransferManager(provider *LinuxShellProvider, workspaceRoot string, maxConcurrent int, sink LinuxTransferEventSink) *LinuxTransferManager {
 	if maxConcurrent <= 0 {
 		maxConcurrent = DefaultLinuxTransferConcurrency
 	}
 	if maxConcurrent > 8 {
 		maxConcurrent = 8
 	}
-	root, err := filepath.Abs(strings.TrimSpace(fsRoot))
+	root, err := filepath.Abs(strings.TrimSpace(workspaceRoot))
 	if err != nil || root == "" {
 		root = "."
 	}
 	return &LinuxTransferManager{
-		provider: provider,
-		fsRoot:   root,
-		max:      maxConcurrent,
-		queueMax: DefaultLinuxTransferQueueLimit,
-		sink:     sink,
-		jobs:     make(map[string]*linuxTransferJob),
+		provider:      provider,
+		workspaceRoot: root,
+		max:           maxConcurrent,
+		queueMax:      DefaultLinuxTransferQueueLimit,
+		sink:          sink,
+		jobs:          make(map[string]*linuxTransferJob),
 	}
 }
 
@@ -348,7 +349,7 @@ func (m *LinuxTransferManager) execute(job *linuxTransferJob) (string, error) {
 }
 
 func (m *LinuxTransferManager) upload(ctx context.Context, client *sftp.Client, job *linuxTransferJob) (string, error) {
-	local, err := strictTransferPath(m.fsRoot, job.request.LocalPath, true)
+	local, err := strictTransferPath(m.transferWorkspaceRoot(job), job.request.LocalPath, true)
 	if err != nil {
 		return "", err
 	}
@@ -410,7 +411,7 @@ func (m *LinuxTransferManager) upload(ctx context.Context, client *sftp.Client, 
 }
 
 func (m *LinuxTransferManager) download(ctx context.Context, client *sftp.Client, job *linuxTransferJob) (string, error) {
-	local, err := strictTransferPath(m.fsRoot, job.request.LocalPath, false)
+	local, err := strictTransferPath(m.transferWorkspaceRoot(job), job.request.LocalPath, false)
 	if err != nil {
 		return "", err
 	}
@@ -471,6 +472,13 @@ func (m *LinuxTransferManager) download(ctx context.Context, client *sftp.Client
 		return "", fmt.Errorf("commit local file: %w", err)
 	}
 	return transferResult(job, stat.Size(), hex.EncodeToString(hash.Sum(nil))), nil
+}
+
+func (m *LinuxTransferManager) transferWorkspaceRoot(job *linuxTransferJob) string {
+	if job != nil && strings.TrimSpace(job.request.WorkspaceRoot) != "" {
+		return strings.TrimSpace(job.request.WorkspaceRoot)
+	}
+	return m.workspaceRoot
 }
 
 type transferProgressReader struct {

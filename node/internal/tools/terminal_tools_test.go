@@ -139,6 +139,9 @@ func TestTerminalToolsUseSharedSessionBroker(t *testing.T) {
 	if broker.opened != 1 || !strings.Contains(opened, "terminal-test-1") {
 		t.Fatalf("opened=%q broker=%+v", opened, broker)
 	}
+	if broker.request.CWD != reg.WorkspaceRoot() {
+		t.Fatalf("local terminal cwd=%q want workspace root %q", broker.request.CWD, reg.WorkspaceRoot())
+	}
 	if strings.Contains(configs, `"config_id":"local-wsl"`) {
 		wslOpened, err := reg.Execute(context.Background(), "terminal_open", `{"config_id":"local-wsl"}`)
 		if err != nil {

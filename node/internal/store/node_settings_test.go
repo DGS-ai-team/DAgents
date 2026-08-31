@@ -23,7 +23,7 @@ func TestNodeSettings_roundTrip(t *testing.T) {
 	}
 
 	seed := ProductNodeSettingsSeed()
-	seed.FSRoot = dir
+	seed.RuntimeRoot = dir
 	if err := s.Save(context.Background(), seed); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestBootstrapNodeSettings_seedsProductDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.FSRoot = dir
+	cfg.RuntimeRoot = dir
 	ns, err := BootstrapNodeSettings(context.Background(), cfg, cfgPath, nil)
 	if err != nil {
 		t.Fatal(err)

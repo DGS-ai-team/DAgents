@@ -81,10 +81,10 @@ flowchart TB
 
 | 字段 | 作用 |
 |------|------|
-| `FSRoot` | 工具沙箱根目录（不在 system prompt 中暴露绝对路径；子目录约定见 prompt 与 tool schema） |
+| `WorkspaceRoot` | Agent 工具工作区根目录（相对路径参数的基准；不在 system prompt 中暴露绝对路径） |
 | `MaxToolLoops` | 单条 human message 内工具循环上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与同时启用数量上限 |
-| `RuntimeDir` | `promptcontext.Reader` 根目录 |
+| `RuntimeDir` | Node runtime root，供 `promptcontext.Reader` 使用 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
 | `IdleAutoCompressSeconds` / `IdleAutoCompressPollSeconds` / `IdleAutoCompressMinTokens` | idle 维护：无动作自动压缩 + **卸内存**（见 `idle_auto_compress.go`、`release.go`） |
 | `RawMessageHistoryEnabled` / `RawMessageHistoryDir` | 原始 message journal |

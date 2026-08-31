@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// StatRelPath 在 FS_ROOT 沙箱内 Stat 相对路径（供 Agent 文件信任链 Hook 使用）。
+// StatRelPath 在 Agent workspace 内 Stat 相对路径（供 Agent 文件信任链 Hook 使用）。
 func (r *Registry) StatRelPath(relPath string) (exists bool, mtime time.Time, err error) {
 	if r == nil {
 		return false, time.Time{}, os.ErrInvalid

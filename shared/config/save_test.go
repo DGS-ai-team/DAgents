@@ -11,8 +11,8 @@ func TestSaveFile_roundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	cfg := &Config{
-		NodeID: "save-test",
-		FSRoot: dir,
+		NodeID:      "save-test",
+		RuntimeRoot: dir,
 	}
 	cfg.LLM.Provider = "deepseek"
 	cfg.LLM.Model = "deepseek-chat"
@@ -44,7 +44,7 @@ func TestSaveFile_roundTrip(t *testing.T) {
 func TestSaveFile_rejectsInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	cfg := &Config{FSRoot: dir}
+	cfg := &Config{RuntimeRoot: dir}
 	cfg.ApplyDefaults()
 	cfg.LLM.Mock = false
 	cfg.LLM.Model = ""

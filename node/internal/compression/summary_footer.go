@@ -17,6 +17,6 @@ func FinalizeCompressionSummary(summary, sessionID string, journalEnabled bool, 
 	if sid == "" {
 		return summary
 	}
-	rel := history.JournalRelativePath(sid, at)
-	return summary + "\n\n历史的原始消息请查阅 " + rel + "。"
+	rel := history.RuntimeJournalRelativePath(sid, at)
+	return summary + "\n\nNode 已将原始消息记录到 <runtime_root>/" + rel + "（该目录不属于 Agent workspace）。"
 }

@@ -7,9 +7,8 @@ const { loading, saving, error, statusMessage, configPath, configWritable, form,
   useSetupConfig();
 
 async function saveGeneral() {
-  const { fs_root: _ignored, ...runtime } = form.runtime;
   await save({
-    runtime,
+    runtime: { log_level: form.runtime.log_level },
     agent: {
       name: form.agent.name || "",
       description: form.agent.description || "",

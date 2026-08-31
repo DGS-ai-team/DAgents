@@ -20,6 +20,8 @@ const props = defineProps({
   llmProfiles: { type: Array, default: () => [] },
   showAdvanced: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  /** 模板编辑没有固定工作目录；Agent 设置/创建才显示 placement。 */
+  showWorkspace: { type: Boolean, default: true },
   /**
    * full：设置页完整表单
    * create-basics：创建弹窗身份步
@@ -33,7 +35,7 @@ const props = defineProps({
   /** 创建校验：替换对应字段标签文案 */
   fieldErrors: {
     type: Object,
-    default: () => ({ name: "", llm: "" }),
+    default: () => ({ name: "", llm: "", workspace: "" }),
   },
   /** Node 当前可勾选工具组（已按 browser/wecom 进程开关过滤）；缺省用全量 TOOL_GROUPS */
   availableToolGroups: {
@@ -245,6 +247,55 @@ const longTermScopeOptions = computed(() =>
         <p v-if="isCreateBasics" class="agent-settings-hint agent-settings-hint--later">
           角色设定、技能白名单等，创建后可在智能体设置里慢慢调。
         </p>
+      </div>
+    </section>
+
+    <section v-if="isCreateBasics && showWorkspace" class="agent-settings-workspace">
+      <div class="agent-settings-workspace__heading">
+        <span
+          class="agent-settings-field__label"
+          :class="{ 'agent-settings-field__label--error': fieldErrors?.workspace }"
+        >
+          {{ fieldErrors?.workspace || "工作目录" }}
+        </span>
+        <span class="agent-settings-workspace__required">创建后不可修改</span>
+      </div>
+      <div class="agent-settings-workspace__options">
+        <label class="agent-settings-workspace__option">
+          <input v-model="draft.workspaceMode" type="radio" value="private" />
+          <span>
+            <strong>Agent 私有目录</strong>
+            <small>为它创建独立目录，适合大多数情况</small>
+          </span>
+        </label>
+        <label class="agent-settings-workspace__option">
+          <input v-model="draft.workspaceMode" type="radio" value="custom" />
+          <span>
+            <strong>选择本机目录</strong>
+            <small>使用已有项目目录；请输入 Windows 或 Linux 的绝对路径</small>
+          </span>
+        </label>
+      </div>
+      <input
+        v-if="draft.workspaceMode === 'custom'"
+        v-model="draft.workspacePath"
+        type="text"
+        class="agent-settings-input"
+        :class="{ 'agent-settings-input--error': !!fieldErrors?.workspace }"
+        placeholder="例如：D:\\workspace\\my-project"
+      />
+      <p class="agent-settings-hint">工作目录会作为文件、命令行和本机终端的默认位置。</p>
+    </section>
+
+    <section v-if="isFull && showWorkspace" class="agent-settings-section agent-settings-section--flat agent-settings-workspace-readonly">
+      <div class="agent-settings-workspace-readonly__row">
+        <div>
+          <h3 class="agent-settings-section__title agent-settings-section__title--inline">工作目录</h3>
+          <p class="agent-settings-hint">创建时绑定，不能在设置页修改。</p>
+        </div>
+        <code v-if="draft.workspaceMode === 'custom' && draft.workspacePath">{{ draft.workspacePath }}</code>
+        <span v-else-if="draft.workspaceMode === 'private'">Agent 私有目录</span>
+        <span v-else>Node 共享目录（旧 Agent）</span>
       </div>
     </section>
 
@@ -598,6 +649,94 @@ const longTermScopeOptions = computed(() =>
   margin-top: auto;
   margin-bottom: 0;
   padding-top: 4px;
+}
+
+.agent-settings-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.agent-settings-workspace__heading,
+.agent-settings-workspace-readonly__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-settings-workspace__required {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.agent-settings-workspace__options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-settings-workspace__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-input, var(--color-surface));
+  cursor: pointer;
+}
+
+.agent-settings-workspace__option input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.agent-settings-workspace__option span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agent-settings-workspace__option strong {
+  color: var(--color-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.agent-settings-workspace__option small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.agent-settings-workspace-readonly {
+  padding-top: 20px;
+}
+
+.agent-settings-workspace-readonly__row > :last-child {
+  max-width: 65%;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 12px;
+  text-align: right;
+}
+
+.agent-settings-workspace-readonly__row code {
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+}
+
+@media (max-width: 640px) {
+  .agent-settings-workspace__options {
+    grid-template-columns: 1fr;
+  }
 }
 
 .agent-settings-toggles--fill {

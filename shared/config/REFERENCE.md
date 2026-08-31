@@ -6,7 +6,7 @@
 |------|------|------|
 | `DefaultListenHost` | `const string` | 默认监听 `127.0.0.1` |
 | `DefaultListenPort` | `const int` | 默认端口 `18765` |
-| `Config` | `struct` | 根配置：node_id、listen、local、llm、fs_root、manage 等；旧 YAML `agent_id` 仅用于迁移 |
+| `Config` | `struct` | 根配置：node_id、listen、local、llm、runtime_root、manage 等；旧 YAML `agent_id` 仅用于迁移 |
 | `ListenConfig` | `struct` | HTTP 监听 host/port |
 | `LocalConfig` | `struct` | Client 用 endpoint 与可选 agent_id 校验 |
 | `LLMConfig` | `struct` | LLM 配置；`mock=true` 时用 MockClient；工具轮次上限见 Agent snapshot `max_tool_loops` |
@@ -35,17 +35,17 @@
 | `(c *Config) ManageRegistryBaseURL` | `method` | 上报 Manage 的 base_url（优先 registration.base_url） |
 | `(c *Config) ManageRegistryBaseURLIsLoopback` | `method` | 上报地址是否为 loopback |
 | `(c *Config) ListenAddr` | `method` | 返回 `host:port` |
-| `(c *Config) RuntimeDir` | `method` | 与 `fs_root` 一致（默认 `./.runtime`） |
-| `(c *Config) DataDir` | `method` | 默认 `{fs_root}/data` 临时工作区 |
-| `(c *Config) SkillsRoot` | `method` | 默认 `{fs_root}/skills` |
-| `(c *Config) PolicyDir` | `method` | 默认 `{fs_root}/policy` |
+| `(c *Config) RuntimeDir` | `method` | 返回 Node 运行目录（默认 `./.runtime`） |
+| `(c *Config) DataDir` | `method` | 默认 `{runtime_root}/data` Node 临时目录 |
+| `(c *Config) SkillsRoot` | `method` | 默认 `{runtime_root}/skills`，不属于 Agent workspace |
+| `(c *Config) PolicyDir` | `method` | 默认 `{runtime_root}/policy` |
 | `(c *Config) ToolPolicyPath` | `method` | 默认 `.runtime/policy/tool.approval.txt` |
 | `(c *Config) ShellPolicyDir` | `method` | 默认 `.runtime/policy/shell` |
 | `(c *Config) MemoryDir` | `method` | 默认 `.runtime/memory` |
 | `(c *Config) SessionDBPath` | `method` | 默认 `{runtime}/memory/sessions.db` |
 | `(c *Config) RawMessageHistoryEnabled` | `method` | 是否写 JSONL；env 优先，默认 true |
 | `(c *Config) RawMessageHistoryDir` | `method` | 默认 `.runtime/history` |
-| `(c *Config) TriggersStorePath` | `method` | 默认 `{fs_root}/triggers/triggers.json` |
+| `(c *Config) TriggersStorePath` | `method` | 默认 `{runtime_root}/triggers/triggers.json` |
 | `(c *Config) Capabilities` | `method` | 能力列表（含可选 triggers） |
 
 ## `node_id.go`

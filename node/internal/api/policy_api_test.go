@@ -18,7 +18,7 @@ import (
 
 func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -30,7 +30,7 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	_ = os.MkdirAll(userDir, 0o755)
 	_ = os.WriteFile(filepath.Join(userDir, "general.yaml"), []byte("id: general\ndisplay_name: G\n"), 0o644)
 
-	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
+	reg, err := tools.NewRegistry(cfg.RuntimeDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}

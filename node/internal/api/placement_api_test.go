@@ -13,7 +13,7 @@ import (
 )
 
 func TestPlacementAPI_PeersRouteRemoved(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-owner", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-owner", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 
@@ -26,7 +26,7 @@ func TestPlacementAPI_PeersRouteRemoved(t *testing.T) {
 }
 
 func TestPlacementAPI_InternalRoutesRemoved(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-home", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-home", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 
@@ -47,7 +47,7 @@ func TestPlacementAPI_InternalRoutesRemoved(t *testing.T) {
 }
 
 func TestPlacementAPI_LocalCreateAttachesHost(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-local", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-local", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-func TestCreateWithOptions_perAgentFSRoot(t *testing.T) {
+func TestCreateWithOptions_perAgentWorkspaceRoot(t *testing.T) {
 	nodeRoot := t.TempDir()
 	agentRoot := filepath.Join(t.TempDir(), "agent-data")
 	baseReg, err := tools.NewRegistry(nodeRoot, 30)
@@ -25,14 +25,14 @@ func TestCreateWithOptions_perAgentFSRoot(t *testing.T) {
 	pol, _ := policy.LoadFile("")
 	hub := stream.NewHub(32, logx.Discard())
 	mgr := NewManager("node-1", hub, &llm.MockClient{}, baseReg, pol, nil, TurnOptions{
-		FSRoot:       nodeRoot,
-		MaxToolLoops: 4,
+		WorkspaceRoot: nodeRoot,
+		MaxToolLoops:  4,
 	}, logx.Discard())
 	defer mgr.Stop()
 
 	sess, created, err := mgr.CreateWithOptions("agt-sandbox-1", TurnOptions{
-		FSRoot:       agentRoot,
-		MaxToolLoops: 4,
+		WorkspaceRoot: agentRoot,
+		MaxToolLoops:  4,
 	}, agentReg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -40,8 +40,8 @@ func TestCreateWithOptions_perAgentFSRoot(t *testing.T) {
 	if !created || sess.ID != "agt-sandbox-1" {
 		t.Fatalf("sess=%+v created=%v", sess, created)
 	}
-	got, ok := mgr.SessionFSRoot("agt-sandbox-1")
+	got, ok := mgr.SessionWorkspaceRoot("agt-sandbox-1")
 	if !ok || got != agentRoot {
-		t.Fatalf("fsRoot=%q ok=%v want %q", got, ok, agentRoot)
+		t.Fatalf("workspaceRoot=%q ok=%v want %q", got, ok, agentRoot)
 	}
 }

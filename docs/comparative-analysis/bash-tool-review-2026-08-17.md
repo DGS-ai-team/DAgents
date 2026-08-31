@@ -8,7 +8,7 @@
 
 1. 输出上限配置没有落到实际采集路径，`bytes.Buffer` 可能在压缩和 tool-result spill 之前无限增长。
 2. 本地 Bash 默认继承 Node 的完整进程环境，可能把 `OPENAI_API_KEY`、数据库密码等敏感变量暴露给模型命令。
-3. `cwd`/`fs_root` 主要是词法路径检查，符号链接、junction、bind mount 等可以使执行目录指向根目录外；它不是 OS 级沙箱。
+3. `cwd`/`workspace_root` 主要是词法路径检查，符号链接、junction、bind mount 等可以使执行目录指向根目录外；它不是 OS 级沙箱。
 4. Linux channel 的部分绑定策略已经存储并返回，但 Provider 当前只执行 `Enabled`、远程 cwd 和 shell，`AllowedCommands`、`DeniedCommands`、`MaxConcurrency`、`ApprovalMode` 还没有真正进入执行决策。
 
 因此不建议重写 `bash_run` 的模型接口。建议保留现有接口，把“采集、环境、进程生命周期、目标策略”继续下沉到统一执行层，并新增明确的 `EnvironmentPolicy`、`OutputBudget`、`TargetPolicy` 和远程进程终止契约。
@@ -20,7 +20,7 @@
 | Shell 层 | `bash -lc`、PowerShell、cmd；工具与执行准备逻辑仍较紧密 | `tool-bash` 只是 Consumer；`ctx.shell` 负责 Shell，`ctx.subprocess` 负责进程 | Shell handler 负责参数、审批、环境和 runtime；统一执行可落到本地或 exec-server | 保留 `bash_run`，继续把工具参数和执行 Provider 分开 |
 | 输出 | 同步/后台 Bash 使用 `bytes.Buffer`；结果后处理才做 sanitize/spill | Subprocess 按 stream 限制内存，超出后保留 tail，并可 spill 完整输出 | `HeadTailBuffer` 保留 head/tail；exec-server 按 `seq` 读取和回放 | 必须在 IO 采集入口限流，不能只在结果生成后截断 |
 | 环境 | `req.Env` 为空时 `exec.Cmd.Env=nil`，继承完整 Node 环境 | `scrubbedParentEnv` 删除 credential-shaped 和 Harness 内部变量；显式 env 再覆盖 | `ShellEnvironmentPolicy` 支持 inherit/exclude/include-only/set，并按 environment 生效 | 引入默认 scrub + 显式 allow/set；环境策略必须可审计 |
-| 工作目录/隔离 | `fs_root` 下的词法路径检查；无独立 sandbox 进程 | `ctx.sandbox` 可使用 bwrap、Landlock、Seatbelt、Windows ACL，并对不可用 runner fail closed | Sandbox transform、权限 profile、网络策略可按 execution environment 生效 | `fs_root` 只能是应用边界，不能对外宣称安全沙箱；逐步接入 OS sandbox |
+| 工作目录/隔离 | `workspace_root` 下的词法路径检查；无独立 sandbox 进程 | `ctx.sandbox` 可使用 bwrap、Landlock、Seatbelt、Windows ACL，并对不可用 runner fail closed | Sandbox transform、权限 profile、网络策略可按 execution environment 生效 | `workspace_root` 只能是应用边界，不能对外宣称安全沙箱；逐步接入 OS sandbox |
 | 进程生命周期 | `Process` 有 Start/Wait/Terminate；POSIX session、Windows Job Object；后台 job 有 SQLite 状态 | 独立 Subprocess seam 管理 detached tree、SIGTERM→SIGKILL、waitForExit | `process/start/read/write/terminate`，PTY、输出 seq、断线清理和远程环境 | 统一进程协议应支持 read cursor、write、terminate、closed 和 whole-tree wait |
 | 交互式执行 | `bash_run` 非 PTY；另有 Terminal/SSH Terminal 抽象 | Bash one-shot 与 persistent Terminal 分开，Terminal 自己管理 PTY/readiness | unified exec 和 exec-server 原生支持 PTY、stdin、signal | 继续区分 `bash_run`、`linux_exec`、`terminal_*`，不要把交互状态塞进一次性命令 |
 | 远程执行 | `linux_exec` 每次新建 SSH session，绑定到 Agent/channel | 通过 capability/provider 替换执行世界，另有 E2B subprocess | environment registry + exec-server，远程 transport 有过程协议 | channel 是 execution target，不应只是 command 前缀或连接配置 |
@@ -60,9 +60,9 @@
 
 参考实现：[Harness scrubbedParentEnv](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/subprocess/subprocess/src/index.ts)、[Codex ShellEnvironmentPolicy](https://raw.githubusercontent.com/openai/codex/main/codex-rs/config/src/shell_environment_policy.rs)。
 
-### P1：`fs_root` 检查不是安全隔离边界
+### P1：`workspace_root` 检查不是安全隔离边界
 
-`resolveRunCWD` 和 `resolvePath` 对字符串规范化后的路径做前缀检查，但没有对目标目录执行 `EvalSymlinks`，也没有使用 OS sandbox。`fs_root/link-to-outside` 这样的符号链接或 Windows junction 可以让 Shell 在根目录外工作。即使增加 realpath 检查，检查和真正 `exec` 之间仍有 TOCTOU 问题。
+`resolveRunCWD` 和 `resolvePath` 对字符串规范化后的路径做前缀检查，但没有对目标目录执行 `EvalSymlinks`，也没有使用 OS sandbox。`workspace_root/link-to-outside` 这样的符号链接或 Windows junction 可以让 Shell 在根目录外工作。即使增加 realpath 检查，检查和真正 `exec` 之间仍有 TOCTOU 问题。
 
 建议分层处理：
 
@@ -131,7 +131,7 @@ DAgents 已有后台任务 SQLite 状态，这是优点，但当前应补充每 
 
 1. 把 Bash stdout/stderr 改成有上限的采集器；修正 `formatShellCompletedOutput` 使用上限；
 2. 默认环境 scrub，补充显式 env allow/set；
-3. 增加 symlink/junction/TOCTOU 的测试与文档，明确 `fs_root` 不是 sandbox；
+3. 增加 symlink/junction/TOCTOU 的测试与文档，明确 `workspace_root` 不是 sandbox；
 4. 为 channel binding 的 command policy、approval mode 和 concurrency 加执行路径。
 
 ### 第二阶段：完善远程生命周期
@@ -152,4 +152,3 @@ DAgents 已有后台任务 SQLite 状态，这是优点，但当前应补充每 
 - DAgents：[bash_run_tool.go](../../node/internal/tools/bash_run_tool.go)、[bash_runner.go](../../node/internal/tools/bash_runner.go)、[bash_compress.go](../../node/internal/tools/bash_compress.go)、[execution.go](../../node/internal/tools/execution.go)、[bash_shell.go](../../node/internal/tools/bash_shell.go)、[linux_shell_provider.go](../../node/internal/tools/linux_shell_provider.go)、[linux_exec_tool.go](../../node/internal/tools/linux_exec_tool.go)。
 - Harness：[tool-bash](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/shell/tool-bash/src/index.ts)、[bash-local](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/shell/bash-local/src/index.ts)、[subprocess types](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/subprocess/subprocess/src/types.ts)、[terminal-bash](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/terminal/terminal-bash/src/session.ts)。
 - Codex：[shell handler](https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/tools/handlers/shell.rs)、[unified exec process](https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/unified_exec/process.rs)、[exec-server protocol](https://raw.githubusercontent.com/openai/codex/main/codex-rs/exec-server/README.md)、[environment policy](https://raw.githubusercontent.com/openai/codex/main/codex-rs/config/src/shell_environment_policy.rs)。
-

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
@@ -18,8 +19,8 @@ import (
 
 func TestAgentsAPI_CRUD(t *testing.T) {
 	cfg := &config.Config{
-		NodeID: "node-test",
-		FSRoot: t.TempDir(),
+		NodeID:      "node-test",
+		RuntimeRoot: t.TempDir(),
 	}
 	cfg.ApplyDefaults()
 
@@ -130,7 +131,7 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 }
 
 func TestAgentTemplatesAPI_list(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
@@ -155,7 +156,7 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 }
 
 func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -167,8 +168,10 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	srv.agents = agentsDB
 
+	customRoot := filepath.Join(t.TempDir(), "project")
 	body, _ := json.Marshal(map[string]any{
 		"display_name": "空白 Agent",
+		"workspace":    map[string]any{"mode": "custom", "path": customRoot},
 		"defaults": map[string]any{
 			"llm": map[string]any{"max_tool_loops": 16},
 		},
@@ -189,10 +192,26 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	if created.DisplayName != "空白 Agent" {
 		t.Fatalf("created = %+v", created)
 	}
+	if created.Workspace == nil || created.Workspace.Mode != agentruntime.WorkspaceModeCustom || created.Workspace.Path == "" {
+		t.Fatalf("workspace = %+v", created.Workspace)
+	}
+	if _, err := os.Stat(created.Workspace.Path); err != nil {
+		t.Fatalf("custom workspace was not created: %v", err)
+	}
+
+	patch, _ := json.Marshal(map[string]any{
+		"workspace": map[string]any{"mode": agentruntime.WorkspaceModePrivate},
+	})
+	req = httptest.NewRequest(http.MethodPatch, "/v1/agents/"+created.AgentID, bytes.NewReader(patch))
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "workspace_immutable") {
+		t.Fatalf("workspace patch status=%d body=%s", rr.Code, rr.Body.String())
+	}
 }
 
 func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -228,7 +247,7 @@ func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
 }
 
 func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -252,7 +271,7 @@ func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
 }
 
 func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -312,7 +331,7 @@ func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
 }
 
 func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
@@ -351,7 +370,7 @@ func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
 
 func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &config.Config{NodeID: "node-triggers", FSRoot: dir}
+	cfg := &config.Config{NodeID: "node-triggers", RuntimeRoot: dir}
 	cfg.ApplyDefaults()
 	cfg.Triggers.Enabled = true
 

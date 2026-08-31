@@ -92,7 +92,7 @@ func TestBlockingCompressionApplies(t *testing.T) {
 	if msgs[0].Role != "user" || msgs[0].Name != llm.UserNameCompression || !strings.Contains(msgs[0].Content, "阶段性总结论") {
 		t.Fatalf("replacement = %+v", msgs[0])
 	}
-	if !strings.Contains(msgs[0].Content, "历史的原始消息请查阅 history/") {
+	if !strings.Contains(msgs[0].Content, "Node 已将原始消息记录到 <runtime_root>/history/") {
 		t.Fatalf("expected journal footer, got %q", msgs[0].Content)
 	}
 	if msgs[1].Role != "assistant" || msgs[1].Content != "好的" {

@@ -120,6 +120,18 @@ func TestFormatLongTermEntries(t *testing.T) {
 	}
 }
 
+func TestHasExactLongTermContent(t *testing.T) {
+	entries := []LongTermEntry{
+		{Content: "  user prefers concise answers  "},
+	}
+	if !hasExactLongTermContent(entries, "user prefers concise answers") {
+		t.Fatal("expected trimmed exact content to match")
+	}
+	if hasExactLongTermContent(entries, "user prefers detailed answers") {
+		t.Fatal("unexpected non-matching content")
+	}
+}
+
 func TestEntriesFromFormattedConflictPreservesEntryDate(t *testing.T) {
 	entries := EntriesFromFormattedConflict("- [lt-old] [20260813] old fact")
 	if len(entries) != 1 || entries[0].Content != "old fact" {

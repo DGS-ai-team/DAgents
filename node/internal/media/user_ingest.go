@@ -29,7 +29,7 @@ func IngestDataURL(reg *Registry, dataURL string) (*Artifact, error) {
 		return nil, err
 	}
 	rel := UserUploadRelPath(reg.sessionID, id, ext)
-	abs, err := ResolveUnderRoot(reg.fsRoot, rel)
+	abs, err := ResolveUnderRoot(reg.workspaceRoot, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (r *Registry) registerExistingFile(id string, opts RegisterOpts) (*Artifact
 	if mime == "" {
 		return nil, ErrInvalidImage
 	}
-	abs, err := ResolveUnderRoot(r.fsRoot, rel)
+	abs, err := ResolveUnderRoot(r.workspaceRoot, rel)
 	if err != nil {
 		return nil, err
 	}

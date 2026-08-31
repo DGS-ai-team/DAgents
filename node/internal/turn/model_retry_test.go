@@ -50,7 +50,7 @@ func TestOrchestratorChecksToolBudgetBeforeSideEffect(t *testing.T) {
 	executor := &countingExecutor{Registry: reg}
 	pol, _ := policy.LoadFile("")
 	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), alwaysToolMock{}, executor, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
-		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{FSRoot: t.TempDir()})}, logx.Discard())
+		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{WorkspaceRoot: t.TempDir()})}, logx.Discard())
 	orch.SetToolBudgetCheck(func(string) (bool, string) { return false, "max_tool_calls" })
 
 	var history []llm.Message

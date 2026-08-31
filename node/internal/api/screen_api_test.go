@@ -16,7 +16,7 @@ import (
 )
 
 func TestScreenAPI_Status(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-home", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-home", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -45,7 +45,7 @@ func TestScreenAPI_Status(t *testing.T) {
 }
 
 func TestScreenAPI_StreamUnavailableOrFrames(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-home", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-home", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -99,7 +99,7 @@ func TestScreenAPI_StreamUnavailableOrFrames(t *testing.T) {
 }
 
 func TestScreenAPI_RemoteStubRetired(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-owner", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-owner", RuntimeRoot: t.TempDir()}
 	cfg.Manage.Enabled = false
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())

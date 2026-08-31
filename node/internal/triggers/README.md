@@ -71,7 +71,7 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 
 - HTTP：`node/internal/api/` → `/v1/triggers*`
 - Agent 工具：`node/internal/tools/triggers.go`
-- 配置：`shared/config` 的 `triggers.enabled` / `poll_seconds`；存储路径固定 `{fs_root}/triggers/triggers.json`
+- 配置：`shared/config` 的 `triggers.enabled` / `poll_seconds`；存储路径固定 `<runtime_root>/triggers/triggers.json`
 
 ## 日志
 

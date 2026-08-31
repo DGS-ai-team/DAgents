@@ -132,6 +132,9 @@ type createAgentRequest struct {
 	DisplayName string         `json:"display_name"`
 	Origin      string         `json:"origin"` // 仅允许 local（或缺省）；remote 拒绝
 	Defaults    map[string]any `json:"defaults"`
+	// Workspace is placement data, not an editable Agent setting. It is copied
+	// into the immutable config snapshot only during creation.
+	Workspace *agentruntime.WorkspaceConfig `json:"workspace"`
 	// Placement 旧 Placement 请求字段；非本机 home_node_id 一律拒绝。
 	Placement *struct {
 		HomeNodeID string `json:"home_node_id"`
@@ -139,16 +142,17 @@ type createAgentRequest struct {
 }
 
 type agentView struct {
-	AgentID        string          `json:"agent_id"`
-	DisplayName    string          `json:"display_name"`
-	TemplateID     string          `json:"template_id"`
-	Origin         string          `json:"origin"`
-	ConfigSnapshot json.RawMessage `json:"config_snapshot,omitempty"`
-	Placement      json.RawMessage `json:"placement,omitempty"`
-	Host           json.RawMessage `json:"host,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	LastActiveAt   string          `json:"last_active_at,omitempty"`
+	AgentID        string                        `json:"agent_id"`
+	DisplayName    string                        `json:"display_name"`
+	TemplateID     string                        `json:"template_id"`
+	Origin         string                        `json:"origin"`
+	ConfigSnapshot json.RawMessage               `json:"config_snapshot,omitempty"`
+	Workspace      *agentruntime.WorkspaceConfig `json:"workspace,omitempty"`
+	Placement      json.RawMessage               `json:"placement,omitempty"`
+	Host           json.RawMessage               `json:"host,omitempty"`
+	CreatedAt      string                        `json:"created_at"`
+	UpdatedAt      string                        `json:"updated_at"`
+	LastActiveAt   string                        `json:"last_active_at,omitempty"`
 	// 以下字段供托盘 / 通知同步（agent_id 与内部 session 1:1）。
 	Active           bool   `json:"active,omitempty"`
 	HasActiveTurn    bool   `json:"has_active_turn,omitempty"`
@@ -169,6 +173,13 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		ConfigSnapshot: rec.ConfigSnapshot,
 		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err == nil {
+		workspace := snap.Workspace
+		if strings.TrimSpace(workspace.Mode) == "" {
+			workspace.Mode = agentruntime.WorkspaceModeLegacyShared
+		}
+		v.Workspace = &workspace
 	}
 	if len(rec.PlacementJSON) > 0 && string(rec.PlacementJSON) != "{}" {
 		v.Placement = rec.PlacementJSON
@@ -259,7 +270,21 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapRaw, err := marshalAgentSnapshot(tplID, baseDefaults)
+	workspace := agentruntime.WorkspaceConfig{Mode: agentruntime.WorkspaceModePrivate}
+	if req.Workspace != nil {
+		workspace = *req.Workspace
+	}
+	workspace, err = agentruntime.NormalizeWorkspaceConfig(s.cfg.RuntimeDir(), agentID, workspace)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_workspace", err.Error(), nil)
+		return
+	}
+	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), agentID, workspace); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "workspace_unavailable", err.Error(), nil)
+		return
+	}
+
+	snapRaw, err := marshalAgentSnapshot(tplID, baseDefaults, workspace)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 		return
@@ -426,9 +451,10 @@ func (s *Server) enrichAgentNotify(v agentView) agentView {
 }
 
 type patchAgentRequest struct {
-	DisplayName *string        `json:"display_name"`
-	LLMActive   *string        `json:"llm_active"` // 兼容快捷字段；等价于 defaults.llm.active
-	Defaults    map[string]any `json:"defaults"`   // 深合并进快照
+	DisplayName *string                       `json:"display_name"`
+	LLMActive   *string                       `json:"llm_active"` // 兼容快捷字段；等价于 defaults.llm.active
+	Defaults    map[string]any                `json:"defaults"`   // 深合并进快照
+	Workspace   *agentruntime.WorkspaceConfig `json:"workspace"`
 }
 
 func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +478,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	var req patchAgentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if req.Workspace != nil {
+		writeAPIError(w, http.StatusBadRequest, "workspace_immutable", "workspace cannot be changed after Agent creation", nil)
 		return
 	}
 	if req.DisplayName == nil && req.LLMActive == nil && req.Defaults == nil {
@@ -504,7 +534,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if runtimeDirty {
-		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults)
+		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults, snap.Workspace)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 			return
@@ -690,6 +720,9 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
 	}
+	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), id, snapParsed.Workspace); err != nil {
+		return fmt.Errorf("ensure agent workspace: %w", err)
+	}
 	var policyEngine *policy.Engine
 	if s.agents != nil {
 		engine, err := s.agents.LoadAgentPolicyEngine(ctx, id, s.runtimeDir())
@@ -754,7 +787,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return err
 	}
 	s.clearRuntimeReloadPending(id)
-	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
+	s.logger.Info("agent runtime ready", "agent_id", id, "workspace_root", built.WorkspaceRoot, "tool_groups", built.ToolGroups)
 	if !agentruntime.IsBrowserCompanionRecord(rec.ConfigSnapshot) && !agentruntime.IsCompanionBrowserAgentID(id) {
 		if err := s.syncBrowserCompanion(ctx, rec); err != nil {
 			s.logger.Warn("browser companion sync on reload failed", "agent_id", id, "error", err)

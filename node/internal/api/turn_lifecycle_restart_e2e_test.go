@@ -69,11 +69,11 @@ func seedRestartRecord(t *testing.T, st *store.SQLiteStore, sessionID string, me
 	}
 }
 
-func newRestartE2EServer(t *testing.T, st *store.SQLiteStore, cfgFSRoot string, client llm.Client) (*Server, *httptest.Server) {
+func newRestartE2EServer(t *testing.T, st *store.SQLiteStore, runtimeRoot string, client llm.Client) (*Server, *httptest.Server) {
 	t.Helper()
 	cfg := testConfig(t)
-	cfg.FSRoot = cfgFSRoot
-	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
+	cfg.RuntimeRoot = runtimeRoot
+	reg, err := tools.NewRegistry(cfg.RuntimeDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}

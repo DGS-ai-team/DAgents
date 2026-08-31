@@ -6,7 +6,7 @@ description: 指导在技能目录中编写符合约定的 Agent 技能（SKILL.
 ## 目录与标识
 
 1. **name**：与**技能目录名**一致，为唯一标识；仅使用小写字母、数字、连字符（如 `write-skill`、`my-task`）。**若 frontmatter `name` 与目录名不一致，`load_skills` 可能无法按目录名加载**——务必保持二者相同。
-2. **文件路径（`{fs_root}/skills/` 下，常见为 `.runtime/skills/`）**：
+2. **文件路径（`{runtime_root}/skills/` 下，常见为 `.runtime/skills/`；该目录属于 Node 运行目录，不是 Agent workspace）**：
    - **`skills/<name>/SKILL.md`**（必选）
    - **`skills/<name>/assets/`**：示例、图片等静态资源
    - **`skills/<name>/scripts/`**：可复用脚本（目录名自定亦可，正文须写清路径）

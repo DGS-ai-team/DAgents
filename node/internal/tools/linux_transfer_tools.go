@@ -109,7 +109,8 @@ func (r *Registry) execTerminalFileTransfer(ctx context.Context, raw json.RawMes
 	return r.linuxTransferManager.Submit(ctx, LinuxTransferRequest{
 		AgentID: r.agentID, ToolCallID: toolCallIDFromContext(ctx), ApprovalID: ApprovalIDFromContext(ctx),
 		TerminalID: info.ID, ChannelID: info.TargetID, Direction: direction,
-		LocalPath: strings.TrimSpace(args.LocalPath), RemotePath: strings.TrimSpace(args.RemotePath), Overwrite: args.Overwrite,
+		WorkspaceRoot: r.workspaceRoot,
+		LocalPath:     strings.TrimSpace(args.LocalPath), RemotePath: strings.TrimSpace(args.RemotePath), Overwrite: args.Overwrite,
 	})
 }
 
@@ -130,15 +131,16 @@ func (r *Registry) execLinuxFileTransfer(ctx context.Context, raw json.RawMessag
 		return "", err
 	}
 	result, err := r.linuxTransferManager.Submit(ctx, LinuxTransferRequest{
-		AgentID:    r.agentID,
-		ToolCallID: toolCallIDFromContext(ctx),
-		ApprovalID: ApprovalIDFromContext(ctx),
-		TerminalID: "",
-		ChannelID:  channelID,
-		Direction:  direction,
-		LocalPath:  strings.TrimSpace(args.LocalPath),
-		RemotePath: strings.TrimSpace(args.RemotePath),
-		Overwrite:  args.Overwrite,
+		AgentID:       r.agentID,
+		ToolCallID:    toolCallIDFromContext(ctx),
+		ApprovalID:    ApprovalIDFromContext(ctx),
+		TerminalID:    "",
+		ChannelID:     channelID,
+		Direction:     direction,
+		WorkspaceRoot: r.workspaceRoot,
+		LocalPath:     strings.TrimSpace(args.LocalPath),
+		RemotePath:    strings.TrimSpace(args.RemotePath),
+		Overwrite:     args.Overwrite,
 	})
 	if err != nil {
 		return result, err

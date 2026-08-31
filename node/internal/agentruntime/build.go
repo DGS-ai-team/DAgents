@@ -26,25 +26,28 @@ type BuildParams struct {
 
 // Built 为 per-agent 运行时产物。
 type Built struct {
-	FSRoot      string
-	TurnOptions session.TurnOptions
-	Registry    *tools.Registry
-	ToolGroups  []string
+	WorkspaceRoot string
+	TurnOptions   session.TurnOptions
+	Registry      *tools.Registry
+	ToolGroups    []string
 }
 
-// Build 根据快照构造 effective FSRoot、工具组与独立 Registry。
+// Build 根据快照构造 Agent workspace、工具组与独立 Registry。
 func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG == nil {
 		return Built{}, fmt.Errorf("node config required")
 	}
-	fsRoot := EffectiveFSRoot(p.NodeCFG.FSRoot, p.AgentID, p.Snapshot)
+	workspaceRoot, err := EnsureWorkspace(p.NodeCFG.RuntimeDir(), p.AgentID, p.Snapshot.Workspace)
+	if err != nil {
+		return Built{}, err
+	}
 	groups := EnabledToolGroups(p.Snapshot)
 
 	timeout := p.BashTimeout
 	if timeout <= 0 {
 		timeout = 30
 	}
-	reg, err := tools.NewRegistry(fsRoot, timeout, p.NodeCFG.Tools.BashOutputEncoding, p.NodeCFG.Tools.FileEncoding)
+	reg, err := tools.NewRegistry(workspaceRoot, timeout, p.NodeCFG.Tools.BashOutputEncoding, p.NodeCFG.Tools.FileEncoding)
 	if err != nil {
 		return Built{}, err
 	}
@@ -102,8 +105,8 @@ func Build(p BuildParams) (Built, error) {
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
 
 	turnOpts := p.BaseTurn
-	turnOpts.FSRoot = fsRoot
-	turnOpts.ToolResult.FSRoot = fsRoot
+	turnOpts.WorkspaceRoot = workspaceRoot
+	turnOpts.ToolResult.WorkspaceRoot = workspaceRoot
 	turnOpts.MultimodalEnabled = mm
 	turnOpts.SkillsEnabled = skillsOn
 	if skillsOn {
@@ -117,10 +120,10 @@ func Build(p BuildParams) (Built, error) {
 		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
 	}
 	return Built{
-		FSRoot:      fsRoot,
-		TurnOptions: turnOpts,
-		Registry:    reg,
-		ToolGroups:  groups,
+		WorkspaceRoot: workspaceRoot,
+		TurnOptions:   turnOpts,
+		Registry:      reg,
+		ToolGroups:    groups,
 	}, nil
 }
 

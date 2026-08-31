@@ -40,9 +40,9 @@ type hookHostState struct {
 	pendingHITL  bool
 	finishReason string
 
-	loadedSkills []skills.LoadedSkill
-	systemPrompt string
-	fsRoot       string
+	loadedSkills  []skills.LoadedSkill
+	systemPrompt  string
+	workspaceRoot string
 
 	llmCalls int
 }
@@ -69,7 +69,7 @@ func (o *Orchestrator) newSessionHookHost(sessionID string, history []llm.Messag
 		st.loadedSkills = append([]skills.LoadedSkill(nil), o.skillAccess.Get()...)
 	}
 	st.systemPrompt = o.composeSystemPrompt(sessionID)
-	st.fsRoot = o.fsRoot
+	st.workspaceRoot = o.workspaceRoot
 	return &sessionHookHost{
 		o:         o,
 		sessionID: sessionID,
@@ -167,9 +167,9 @@ func (h *sessionHookHost) Snapshot() hooks.HostSnapshot {
 		},
 		SessionStore: hooks.CloneSessionStore(h.state.store),
 		FSPaths: hooks.FSPaths{
-			FSRoot:     h.state.fsRoot,
-			RuntimeDir: h.cfg.RuntimeDir,
-			SkillsRoot: h.cfg.SkillsRoot,
+			WorkspaceRoot: h.state.workspaceRoot,
+			RuntimeRoot:   h.cfg.RuntimeDir,
+			SkillsRoot:    h.cfg.SkillsRoot,
 		},
 	}
 }

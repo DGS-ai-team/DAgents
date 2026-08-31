@@ -25,7 +25,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 /** 字段级校验（替换标签，不进页脚） */
-const fieldErrors = reactive({ name: "", llm: "" });
+const fieldErrors = reactive({ name: "", llm: "", workspace: "" });
 const templates = ref([]);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
@@ -193,6 +193,7 @@ function pickTemplate(template) {
 function clearFieldErrors() {
   fieldErrors.name = "";
   fieldErrors.llm = "";
+  fieldErrors.workspace = "";
 }
 
 function clearFieldError(key) {
@@ -209,6 +210,10 @@ function validateBasics() {
   }
   if (!draft.llmProfileId) {
     fieldErrors.llm = "选一个模型配置吧";
+    return false;
+  }
+  if (draft.workspaceMode === "custom" && !String(draft.workspacePath || "").trim()) {
+    fieldErrors.workspace = "填写一个本机绝对路径吧";
     return false;
   }
   return true;
@@ -295,6 +300,13 @@ watch(
   () => draft.llmProfileId,
   () => {
     if (fieldErrors.llm) fieldErrors.llm = "";
+  },
+);
+
+watch(
+  () => [draft.workspaceMode, draft.workspacePath],
+  () => {
+    if (fieldErrors.workspace) fieldErrors.workspace = "";
   },
 );
 </script>

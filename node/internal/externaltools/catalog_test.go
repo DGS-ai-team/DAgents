@@ -38,7 +38,7 @@ func TestRenderPromptSection_menuAndBinaries(t *testing.T) {
 		"officecli",
 		"helper.sh",
 		"externaltools_menu.md",
-		"`externaltools/`",
+		"`<runtime_root>/externaltools/`",
 	} {
 		if !strings.Contains(section, want) {
 			t.Fatalf("section missing %q:\n%s", want, section)

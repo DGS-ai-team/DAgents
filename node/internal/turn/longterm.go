@@ -68,6 +68,23 @@ func FormatLongTermEntries(entries []LongTermEntry) string {
 	return strings.TrimSpace(b.String())
 }
 
+// hasExactLongTermContent prevents an identical remember request from
+// needlessly invoking conflict analysis or creating another entry. More
+// semantic normalization remains an LLM concern; this fast path is limited
+// to an exact trimmed-content match.
+func hasExactLongTermContent(entries []LongTermEntry, content string) bool {
+	target := strings.TrimSpace(content)
+	if target == "" {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Content) == target {
+			return true
+		}
+	}
+	return false
+}
+
 // longTermEntryDate returns the date of the latest version of an entry.
 // UpdatedAt is preferred so replacements expose when the remembered fact was
 // last changed; legacy entries with only CreatedAt still get a stable date.

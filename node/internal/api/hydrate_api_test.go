@@ -16,7 +16,7 @@ import (
 
 func TestHandleSessionHydrate(t *testing.T) {
 	cfg := testConfig(t)
-	dbPath := filepath.Join(cfg.FSRoot, "sessions.db")
+	dbPath := filepath.Join(cfg.RuntimeDir(), "sessions.db")
 	st, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)

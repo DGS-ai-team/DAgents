@@ -63,7 +63,15 @@ var childStaticSystemPrompt = `
 
 // SystemPromptInput 为 BuildSystemPrompt 所需上下文。
 type SystemPromptInput struct {
-	AgentID   string
+	AgentID string
+	// WorkspaceRoot is the Agent-facing root described to the model.
+	WorkspaceRoot string
+	// RuntimeRoot contains Node-managed infrastructure such as skills and
+	// externaltools. It is a separate path scope and is never the base for
+	// relative Agent tool paths.
+	RuntimeRoot string
+	// FSRoot is the pre-workspace compatibility alias for WorkspaceRoot.
+	// Deprecated: use WorkspaceRoot.
 	FSRoot    string
 	SessionID string
 	// TodayDateEnabled controls whether the current date is included in the
@@ -78,14 +86,14 @@ type SystemPromptInput struct {
 	// The live discovery catalog is intentionally not used here.
 	Catalog   *skills.Catalog
 	PromptCtx *promptcontext.Reader
-	// IncludeHistoryJournal 为 true 时在工作区说明中追加 history/ JSONL 审计目录约定。
+	// IncludeHistoryJournal 为 true 时在工作区说明中提示 Node 管理的审计目录不属于工作区。
 	IncludeHistoryJournal bool
 }
 
 // ChildSystemPromptInput 为 BuildChildSystemPrompt 所需上下文。
 type ChildSystemPromptInput struct {
 	AgentID          string
-	FSRoot           string
+	WorkspaceRoot    string
 	SessionID        string
 	Purpose          string
 	TodayDateEnabled bool
@@ -114,13 +122,14 @@ func DefaultMaxToolLoops() int {
 // 目录由 list_available_skills 查询，正文由 SkillInstructions 作为独立的
 // 持久化上下文消息注入。
 func BuildSystemPrompt(in SystemPromptInput) string {
+	runtimeRoot := strings.TrimSpace(in.RuntimeRoot)
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(staticSystemPrompt))
 
 	b.WriteString("\n\n## 工作区目录\n\n")
 	b.WriteString(formatWorkspaceSubdirsSection(in.IncludeHistoryJournal))
 
-	if section := externaltools.NewCatalog(in.FSRoot).RenderPromptSection(); section != "" {
+	if section := externaltools.NewCatalog(runtimeRoot).RenderPromptSection(); section != "" {
 		b.WriteString(section)
 	}
 
@@ -160,7 +169,7 @@ func ChildSystemPromptBuilder(purpose string) SystemPromptBuilder {
 		var b strings.Builder
 		b.WriteString(BuildChildSystemPrompt(ChildSystemPromptInput{
 			AgentID:          in.AgentID,
-			FSRoot:           in.FSRoot,
+			WorkspaceRoot:    workspaceRootFromPromptInput(in),
 			SessionID:        in.SessionID,
 			Purpose:          purpose,
 			TodayDateEnabled: in.TodayDateEnabled,
@@ -201,7 +210,7 @@ func ChildContextInjectionBuilder(_ string) ContextInjectionBuilder {
 	return func(in SystemPromptInput) []ContextInjection {
 		return BuildChildContextInjections(ChildSystemPromptInput{
 			AgentID:          in.AgentID,
-			FSRoot:           in.FSRoot,
+			WorkspaceRoot:    workspaceRootFromPromptInput(in),
 			SessionID:        in.SessionID,
 			TodayDateEnabled: in.TodayDateEnabled,
 			CurrentDate:      in.CurrentDate,
@@ -209,23 +218,32 @@ func ChildContextInjectionBuilder(_ string) ContextInjectionBuilder {
 	}
 }
 
+func workspaceRootFromPromptInput(in SystemPromptInput) string {
+	if root := strings.TrimSpace(in.WorkspaceRoot); root != "" {
+		return root
+	}
+	return strings.TrimSpace(in.FSRoot)
+}
+
 func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
 	lines := []string{
-		"所有工具的 path、directory、cwd 等路径参数：相对路径均基于工作区根目录（`.` 表示根）。" +
+		"路径作用域：`workspace_root` 是当前 Agent 的工作区，所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准（`.` 表示工作区根）。" +
 			"操作工作区内资源时请使用相对路径；如需访问工作区外请使用绝对路径。",
+		"`runtime_root` 是 Node 的运行目录，与 `workspace_root` 不同；它不属于 Agent 工作区，也不是相对路径参数的基准。",
 		"",
-		"以下为内置目录。",
+		"工作区内置目录：",
 		"",
 		"- `data/`：临时工作区（输出、中间产物，可清理）",
-		"- `memory/`：持久化（会话库 sessions.db；长期记忆由 remember 工具写入数据库，不在此目录编辑）",
-		"- `skills/`：Agent 技能（`SKILL.md`）",
-		"- `externaltools/`：外置 CLI / 编译二进制 / shell 脚本（索引见 `externaltools_menu.md`；安装后多在 `PATH` 中）",
+		"- `tool_outputs/`：工具结果过长时的可读落盘文件，可按工具结果中的路径读取",
+		"",
+		"Node 运行目录中的管理目录（不属于工作区）：",
+		"",
+		"- `<runtime_root>/skills/`：skills 元数据与正文；通过 skills 工具发现和加载；引用此目录时不要省略 `<runtime_root>/` 前缀。",
+		"- `<runtime_root>/externaltools/`：Node 管理的外置 CLI；通常通过 PATH 调用；引用此目录时不要省略 `<runtime_root>/` 前缀。",
 	}
 	if includeHistoryJournal {
 		lines = append(lines,
-			"- `history/`：原始对话 JSONL 审计（按自然日分子目录 `history/YYYYMMDD/<session_id>.jsonl`；"+
-				"每行一条 JSON，含 `recorded_at` 与 `message`）。"+
-				"非 LLM 上下文的一部分；需复盘或检索历史 utterance 时可用 `grep_file`,`read_file`等工具 分页读取对应文件。",
+			"- `<runtime_root>/history/`：原始对话审计，由 Node 独立管理，不属于当前工作区，也不是 LLM 上下文的一部分。",
 		)
 	}
 	return strings.Join(lines, "\n")

@@ -7,7 +7,7 @@
 | `LoadedSkill` | struct | 会话已加载 skill 元数据（`skill_name`、`description`、可选 `directory_name`） |
 | `LoadedSkillContent` | struct | 按需读取的已加载 skill 正文，不直接渲染到 system prompt |
 | `Definition` | struct | 磁盘 skill 定义（逻辑 name、目录名、description、按需正文） |
-| `Catalog` | struct | 扫描 `{root}/*/SKILL.md`、元数据分页与正文读取 |
+| `Catalog` | struct | 扫描 `<runtime_root>/skills/*/SKILL.md`、元数据分页与正文读取 |
 | `NewCatalog` | func | 构造 Catalog（全局 `skills.enabled`、root、max_in_prompt） |
 | `(c *Catalog) NewTurnView` | method | 创建 human Turn 不可变 Catalog view；固定元数据和正文边界摘要 |
 | `(c *Catalog) Enabled` | method | skills 功能总开关 |
@@ -24,7 +24,7 @@
 
 ## Skill hooks
 
-skill 级 Hook 为 `skills/<name>/hooks/*.so`（Go in-process plugin，导出 `Register`）；`load_skills` 后由 `hooks.LoadSkillPluginsFromDir` 加载，`turn.SyncLoadedSkillHooks` 在 load/unload/clear-context 时同步 Registry。
+skill 级 Hook 为 `<runtime_root>/skills/<name>/hooks/*.so`（Go in-process plugin，导出 `Register`）；`load_skills` 后由 `hooks.LoadSkillPluginsFromDir` 加载，`turn.SyncLoadedSkillHooks` 在 load/unload/clear-context 时同步 Registry。
 
 ## SKILL.md 约定
 

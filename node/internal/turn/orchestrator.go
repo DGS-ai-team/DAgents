@@ -55,7 +55,8 @@ type Orchestrator struct {
 	llm             llm.Client
 	hub             stream.Publisher
 	agentID         string
-	fsRoot          string
+	workspaceRoot   string
+	runtimeRoot     string
 	tools           tools.Executor
 	policy          *policy.Engine
 	toolHooks       *hooks.Registry
@@ -104,6 +105,15 @@ type Orchestrator struct {
 	mediaReg          *media.Registry
 }
 
+// SetRuntimeRoot separates Node-managed runtime assets from the Agent
+// workspace used by tools and the model-facing workspace description.
+func (o *Orchestrator) SetRuntimeRoot(root string) {
+	if o == nil {
+		return
+	}
+	o.runtimeRoot = strings.TrimSpace(root)
+}
+
 // SetHookHostConfig 注入 Host 路径与配额配置。
 func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 	if o == nil {
@@ -112,7 +122,7 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 	o.hookHostCfg = cfg.normalized()
 	if o.hookHostState != nil {
 		o.hookHostState.mu.Lock()
-		o.hookHostState.fsRoot = o.fsRoot
+		o.hookHostState.workspaceRoot = o.workspaceRoot
 		o.hookHostState.mu.Unlock()
 	}
 }
@@ -439,7 +449,7 @@ func (o *Orchestrator) ContinueAfterResume(
 }
 
 func NewOrchestrator(
-	agentID, fsRoot string,
+	agentID, workspaceRoot string,
 	hub stream.Publisher,
 	client llm.Client,
 	toolExec tools.Executor,
@@ -457,8 +467,8 @@ func NewOrchestrator(
 	toolExecLog := &hooks.ToolExecutionLog{}
 	agentFileTrust := hooks.NewAgentFileTrust()
 	hookCfg = hooks.RuntimeConfigOrDefault(hookCfg)
-	if strings.TrimSpace(hookCfg.ToolResult.FSRoot) == "" {
-		hookCfg.ToolResult.FSRoot = fsRoot
+	if strings.TrimSpace(hookCfg.ToolResult.WorkspaceRoot) == "" {
+		hookCfg.ToolResult.WorkspaceRoot = workspaceRoot
 	}
 	toolHooks := hooks.NewRegistry(policyEngine, hookCfg)
 	toolHooks.SetToolExecutionLog(toolExecLog)
@@ -471,7 +481,7 @@ func NewOrchestrator(
 	}
 	orch := &Orchestrator{
 		agentID:          agentID,
-		fsRoot:           fsRoot,
+		workspaceRoot:    workspaceRoot,
 		hub:              hub,
 		llm:              client,
 		tools:            toolExec,
@@ -630,6 +640,12 @@ func (o *Orchestrator) runOneStep(
 	requestHistory = StripLegacyTodayDateMessages(requestHistory)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
+	if !o.multimodalEnabled {
+		// The history may have been created while a vision profile was active.
+		// Keep those image parts durable for the UI, but never send them to a
+		// text-only model after the Agent/profile has switched capabilities.
+		llmMessages = llm.PrepareMessagesForTextOnly(llmMessages)
+	}
 	// History/transcript retains the original tool body, while the model gets
 	// the authoritative status projection in a request-only copy.
 	llmMessages = llm.PrepareToolResultMessagesForModel(llmMessages)
@@ -1064,7 +1080,8 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
-		FSRoot:                o.fsRoot,
+		WorkspaceRoot:         o.workspaceRoot,
+		RuntimeRoot:           o.runtimeRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
 		Catalog:               o.skillAccess.Catalog,

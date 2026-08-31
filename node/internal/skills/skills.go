@@ -242,7 +242,7 @@ func (c *Catalog) Enabled() bool {
 	return c != nil && c.enabled
 }
 
-// Root 返回 skills 目录根路径（{fs_root}/skills）。
+// Root 返回 Node 管理的 skills 目录根路径（{runtime_root}/skills）。
 func (c *Catalog) Root() string {
 	if c == nil {
 		return ""

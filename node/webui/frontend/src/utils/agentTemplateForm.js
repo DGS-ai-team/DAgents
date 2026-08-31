@@ -102,6 +102,9 @@ export function emptyAgentDraft() {
     promptLongTermScope: "agent",
     promptSoulMd: "",
     promptCustomMd: "",
+    // 工作目录是创建时的 placement，创建后不可修改。
+    workspaceMode: "private",
+    workspacePath: "",
   };
 }
 
@@ -241,6 +244,9 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
   draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
   draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
+  const workspace = asObject(agent?.workspace || snap.workspace);
+  draft.workspaceMode = String(workspace.mode || "legacy_shared").trim() || "legacy_shared";
+  draft.workspacePath = String(workspace.path || "").trim();
 
   const fromSnap = String(llm.active || "").trim();
   const ids = Array.isArray(llmProfileIds) ? llmProfileIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
@@ -295,6 +301,9 @@ export function buildCreateAgentPayload(draft) {
           : {}),
       },
     },
+    workspace: String(draft.workspaceMode || "private").trim() === "custom"
+      ? { mode: "custom", path: String(draft.workspacePath || "").trim() }
+      : { mode: "private" },
   };
   const tpl = String(draft.templateId || "").trim();
   if (tpl && tpl !== BLANK_TEMPLATE_ID) payload.template_id = tpl;

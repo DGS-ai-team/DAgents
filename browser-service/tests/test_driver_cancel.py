@@ -12,7 +12,7 @@ from dagents_browser.llm import LLMSettings
 def test_cancel_before_agent_start_is_stable() -> None:
     async def scenario() -> None:
         settings = BrowserServiceSettings(
-            fs_root=tempfile.mkdtemp(prefix="dagents-browser-cancel-"),
+            runtime_root=tempfile.mkdtemp(prefix="dagents-browser-cancel-"),
             llm=LLMSettings(provider="mimo", model="test-model"),
         )
         driver = BrowserUseDriver(settings)

@@ -40,7 +40,7 @@ func shouldSkipWalkDir(name string) bool {
 	return ok
 }
 
-// collectGlobMatches 在 dirAbs 下按 glob（相对 directory 根，支持 **）收集路径，返回相对 fsRoot 的路径。
+// collectGlobMatches 在 dirAbs 下按 glob（相对 directory 根，支持 **）收集路径，返回相对 workspace root 的路径。
 func (r *Registry) collectGlobMatches(dirRel, globPattern string, opt globCollectOptions) ([]string, int, error) {
 	dirRel = strings.TrimSpace(dirRel)
 	if dirRel == "" {
@@ -108,7 +108,7 @@ func (r *Registry) collectGlobMatches(dirRel, globPattern string, opt globCollec
 			return nil
 		}
 
-		relFromRoot, err := filepath.Rel(r.fsRoot, walkPath)
+		relFromRoot, err := filepath.Rel(r.workspaceRoot, walkPath)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (r *Registry) collectGlobMatches(dirRel, globPattern string, opt globCollec
 	return all[offset:end], total, nil
 }
 
-// collectGlobFilePaths 在 directory 下收集匹配 glob 的普通文件路径（相对 fs_root），受 maxFiles 限制。
+// collectGlobFilePaths 在 directory 下收集匹配 glob 的普通文件路径（相对 workspace root），受 maxFiles 限制。
 func (r *Registry) collectGlobFilePaths(dirRel, globPattern string, maxFiles int) ([]string, int, error) {
 	dirRel = strings.TrimSpace(dirRel)
 	if dirRel == "" {
@@ -190,7 +190,7 @@ func (r *Registry) collectGlobFilePaths(dirRel, globPattern string, maxFiles int
 			return nil
 		}
 
-		relFromRoot, err := filepath.Rel(r.fsRoot, walkPath)
+		relFromRoot, err := filepath.Rel(r.workspaceRoot, walkPath)
 		if err != nil {
 			return err
 		}

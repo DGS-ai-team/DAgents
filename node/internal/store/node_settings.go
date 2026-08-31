@@ -133,6 +133,7 @@ func SnapshotNodeSettings(cfg *config.Config) config.Config {
 	out := *cfg
 	out.Listen = config.ListenConfig{}
 	out.Local = config.LocalConfig{}
+	out.RuntimeRoot = ""
 	out.FSRoot = ""
 	// LLM 档案权威在 llm_configs.db；快照不保留 profiles/key。
 	out.LLM = config.LLMConfig{
@@ -147,21 +148,22 @@ func SnapshotNodeSettings(cfg *config.Config) config.Config {
 	return out
 }
 
-// OverlayNodeSettings 将快照覆盖到 dst（保留 dst 的 listen/local/fs_root）。
+// OverlayNodeSettings 将快照覆盖到 dst（保留 dst 的 listen/local/runtime_root）。
 func OverlayNodeSettings(dst *config.Config, snap *config.Config) {
 	if dst == nil || snap == nil {
 		return
 	}
 	listen := dst.Listen
 	local := dst.Local
-	fsRoot := dst.FSRoot
+	runtimeRoot := dst.RuntimeDir()
 	*dst = *snap
 	dst.Listen = listen
 	dst.Local = local
-	dst.FSRoot = fsRoot
-	if strings.TrimSpace(dst.FSRoot) == "" {
-		dst.FSRoot = config.DefaultFSRoot
+	dst.RuntimeRoot = runtimeRoot
+	if strings.TrimSpace(dst.RuntimeRoot) == "" {
+		dst.RuntimeRoot = config.DefaultRuntimeRoot
 	}
+	dst.FSRoot = dst.RuntimeRoot
 }
 
 // ProductNodeSettingsSeed 空库且无 YAML 种子时的开箱默认。
@@ -180,7 +182,7 @@ func ProductNodeSettingsSeed() *config.Config {
 		Onboarding: config.OnboardingConfig{
 			NodeProfileCompleted: &profileDone,
 		},
-		FSRoot: config.DefaultFSRoot,
+		RuntimeRoot: config.DefaultRuntimeRoot,
 		LLM: config.LLMConfig{
 			Mock:     true,
 			Provider: "mock",

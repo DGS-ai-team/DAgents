@@ -1,4 +1,4 @@
-// Package agentruntime 根据 Agent 模板快照构造 per-agent 运行时参数（FSRoot / 工具组等）。
+// Package agentruntime 根据 Agent 模板快照构造 per-agent 运行时参数（workspace / 工具组等）。
 package agentruntime
 
 import (
@@ -16,6 +16,7 @@ import (
 type Snapshot struct {
 	TemplateID string          `json:"template_id"`
 	Defaults   map[string]any  `json:"defaults"`
+	Workspace  WorkspaceConfig `json:"workspace,omitempty"`
 	Sandbox    json.RawMessage `json:"sandbox,omitempty"`
 }
 
@@ -31,9 +32,16 @@ func ParseSnapshot(raw json.RawMessage) (Snapshot, error) {
 	return snap, nil
 }
 
-// EffectiveFSRoot 返回该 Agent 的工具工作区根（始终为 Node 全局 fs_root）。
-func EffectiveFSRoot(nodeFSRoot, _agentID string, _snap Snapshot) string {
-	return strings.TrimSpace(nodeFSRoot)
+// EffectiveFSRoot is retained as a compatibility helper for old callers that
+// used the pre-workspace name. New runtime construction should use
+// EffectiveWorkspaceRoot.
+// Deprecated: use EffectiveWorkspaceRoot.
+func EffectiveFSRoot(runtimeRoot, agentID string, snap Snapshot) string {
+	root, err := EffectiveWorkspaceRoot(runtimeRoot, agentID, snap.Workspace)
+	if err != nil {
+		return strings.TrimSpace(runtimeRoot)
+	}
+	return root
 }
 
 // EnabledToolGroups 从 defaults.tools.enabled_groups 读取。

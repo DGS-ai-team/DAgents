@@ -15,15 +15,15 @@ import (
 
 func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
 	in := SystemPromptInput{
-		AgentID:   "ops-01",
-		FSRoot:    "/data/ws",
-		SessionID: "sess-abc",
+		AgentID:       "ops-01",
+		WorkspaceRoot: "/data/ws",
+		SessionID:     "sess-abc",
 	}
 	prompt := BuildSystemPrompt(in)
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "data/", "tool_outputs/", "临时工作区", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "workspace_root", "runtime_root", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "ops-01") || contains(prompt, "sess-abc") || contains(prompt, "运行环境") {
@@ -44,7 +44,7 @@ func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
 		SessionID:             "sess-a",
 		IncludeHistoryJournal: true,
 	})
-	if !containsAll(prompt, "history/", "YYYYMMDD", "read_file") {
+	if !containsAll(prompt, "<runtime_root>/history/", "Node 独立管理", "不是 LLM 上下文的一部分") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
@@ -109,11 +109,29 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	}
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildSystemPrompt(SystemPromptInput{
-		AgentID: "ops-01",
-		FSRoot:  root,
+		AgentID:     "ops-01",
+		RuntimeRoot: root,
 	})
 	if !containsAll(prompt, "外置 CLI 与工具", "mycli.cmd", "externaltools_menu.md", "编译好的二进制") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_doesNotTreatWorkspaceAsRuntimeRoot(t *testing.T) {
+	workspace := t.TempDir()
+	cliDir := filepath.Join(workspace, "externaltools")
+	if err := os.MkdirAll(cliDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cliDir, "workspace-only.cmd"), []byte("@echo off\r\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prompt := BuildSystemPrompt(SystemPromptInput{WorkspaceRoot: workspace})
+	if contains(prompt, "workspace-only.cmd") {
+		t.Fatalf("workspace was incorrectly scanned as runtime root: %q", prompt)
+	}
+	if !containsAll(prompt, "workspace_root", "runtime_root", "与 `workspace_root` 不同") {
+		t.Fatalf("path scopes are missing: %q", prompt)
 	}
 }
 
@@ -122,10 +140,10 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	r := promptcontext.NewContentReader(promptcontext.Content{})
 	r.SetPreferredName("小明")
 	in := SystemPromptInput{
-		AgentID:   "ops-01",
-		FSRoot:    "/data/ws",
-		SessionID: "sess-x",
-		PromptCtx: r,
+		AgentID:       "ops-01",
+		WorkspaceRoot: "/data/ws",
+		SessionID:     "sess-x",
+		PromptCtx:     r,
 	}
 	prompt := BuildSystemPrompt(in)
 	if contains(prompt, "以下是用户信息") || contains(prompt, "请称呼用户为：小明") {
@@ -143,12 +161,12 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing.T) {
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildChildSystemPrompt(ChildSystemPromptInput{
-		AgentID:   "ops-01",
-		FSRoot:    "/data/ws",
-		SessionID: "child-abc",
-		Purpose:   "review patch",
+		AgentID:       "ops-01",
+		WorkspaceRoot: "/data/ws",
+		SessionID:     "child-abc",
+		Purpose:       "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "memory/", "工作区目录", "相对路径均基于工作区根目录") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "data/", "tool_outputs/", "工作区目录", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "child-abc") || contains(prompt, "运行环境") {

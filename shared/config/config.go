@@ -17,8 +17,11 @@ import (
 const (
 	DefaultListenHost = "127.0.0.1"
 	DefaultListenPort = 18765
-	// DefaultFSRoot 为 Node 运行时根目录，写死不可配置（YAML / Web UI / setup PATCH 均忽略）。
-	DefaultFSRoot = "./.runtime"
+	// DefaultRuntimeRoot 为 Node 运行时根目录，写死不可配置（YAML / Web UI / setup PATCH 均忽略）。
+	DefaultRuntimeRoot = "./.runtime"
+	// DefaultFSRoot 保留给旧 Go 调用方；新代码应使用 DefaultRuntimeRoot。
+	// Deprecated: use DefaultRuntimeRoot.
+	DefaultFSRoot = DefaultRuntimeRoot
 )
 
 // Config 为 Node 与 Client 共享的配置根结构；Client 仅使用 local 等子集。
@@ -32,7 +35,10 @@ type Config struct {
 	Listen        ListenConfig     `yaml:"listen"`
 	Local         LocalConfig      `yaml:"local"`
 	Groups        []string         `yaml:"groups"`
-	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
+	// RuntimeRoot 固定为 DefaultRuntimeRoot，不从 YAML 读取；测试可在内存中直接赋值。
+	RuntimeRoot string `yaml:"-"`
+	// FSRoot 是旧 Go 调用方的兼容别名，不参与新运行时逻辑。
+	// Deprecated: use RuntimeRoot.
 	FSRoot            string                  `yaml:"-"`
 	LLM               LLMConfig               `yaml:"llm"`
 	Manage            ManageConfig            `yaml:"manage"`
@@ -452,7 +458,7 @@ func LoadFile(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
-	cfg.FSRoot = DefaultFSRoot
+	cfg.RuntimeRoot = DefaultRuntimeRoot
 	cfg.ApplyDefaults()
 	if err := cfg.ResolveNodeID(); err != nil {
 		return nil, err
@@ -484,8 +490,14 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Local.Endpoint) == "" {
 		c.Local.Endpoint = fmt.Sprintf("http://%s", c.ListenAddr())
 	}
+	if strings.TrimSpace(c.RuntimeRoot) == "" {
+		c.RuntimeRoot = strings.TrimSpace(c.FSRoot)
+	}
+	if strings.TrimSpace(c.RuntimeRoot) == "" {
+		c.RuntimeRoot = DefaultRuntimeRoot
+	}
 	if strings.TrimSpace(c.FSRoot) == "" {
-		c.FSRoot = DefaultFSRoot
+		c.FSRoot = c.RuntimeRoot
 	}
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
@@ -556,21 +568,21 @@ func (c *Config) IdleAutoCompressPollInterval() time.Duration {
 	return time.Duration(c.Compression.IdleAutoCompressPollSeconds) * time.Second
 }
 
-// RuntimeDir 返回运行时根目录（固定 DefaultFSRoot；子目录路径均相对此根硬编码）。
+// RuntimeDir 返回运行时根目录（固定 DefaultRuntimeRoot；子目录路径均相对此根硬编码）。
 func (c *Config) RuntimeDir() string {
-	root := strings.TrimRight(strings.TrimSpace(c.FSRoot), "/")
+	root := strings.TrimRight(strings.TrimSpace(c.RuntimeRoot), "/")
 	if root == "" {
-		return DefaultFSRoot
+		return DefaultRuntimeRoot
 	}
 	return root
 }
 
-// DataDir 返回临时工作区目录（`<fs_root>/data`）。
+// DataDir 返回 Node 运行目录下的共享临时目录（`<runtime_root>/data`）。
 func (c *Config) DataDir() string {
 	return filepath.Join(c.RuntimeDir(), "data")
 }
 
-// SkillsRoot 返回 skills 目录（`<fs_root>/skills`）。
+// SkillsRoot 返回 Node 管理的 skills 目录（`<runtime_root>/skills`）。
 func (c *Config) SkillsRoot() string {
 	return filepath.Join(c.RuntimeDir(), "skills")
 }
@@ -766,7 +778,7 @@ func parseEnvBool(value string, defaultVal bool) bool {
 	}
 }
 
-// TriggersStorePath 返回 triggers.json 路径（`<fs_root>/triggers/triggers.json`）。
+// TriggersStorePath 返回 triggers.json 路径（`<runtime_root>/triggers/triggers.json`）。
 func (c *Config) TriggersStorePath() string {
 	return filepath.Join(c.RuntimeDir(), "triggers", "triggers.json")
 }
@@ -786,7 +798,7 @@ func (c *Config) ShellPolicyDir() string {
 	return filepath.Join(c.PolicyDir(), "shell")
 }
 
-// ExternalToolsDir 返回外置 CLI/工具目录（`<fs_root>/externaltools`）。
+// ExternalToolsDir 返回 Node 管理的外置 CLI/工具目录（`<runtime_root>/externaltools`）。
 func (c *Config) ExternalToolsDir() string {
 	return filepath.Join(c.RuntimeDir(), "externaltools")
 }

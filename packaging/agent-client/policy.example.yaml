@@ -2,7 +2,7 @@
 #
 # 本地使用：
 #   cp packaging/agent-client/policy.example.yaml packaging/agent-client/policy.yaml
-# 生产环境请编辑 fs_root/policy/*.approval.txt（见 packaging/runtime/policy 种子文件）。
+# 生产环境请编辑 <runtime_root>/policy/*.approval.txt（见 packaging/runtime/policy 种子文件）。
 
 default: require_approval
 

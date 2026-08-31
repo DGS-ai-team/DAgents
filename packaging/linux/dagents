@@ -24,7 +24,7 @@ die() {
   exit 1
 }
 
-# 对齐 packaging/windows/dagents.cmd 的 pushd：Node 的 fs_root（默认 ./.runtime）相对进程 cwd 解析。
+# 对齐 packaging/windows/dagents.cmd 的 pushd：Node 的 runtime_root（默认 ./.runtime）相对进程 cwd 解析。
 cd "${ROOT}" || die "cannot cd to ${DAGENTS_HOME}"
 
 CFG="${DAGENTS_CONFIG:-config.yaml}"

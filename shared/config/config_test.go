@@ -18,8 +18,8 @@ func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldDir) })
-	// fs_root 写死为 DefaultFSRoot；chdir 到 TempDir，相对路径落在隔离目录。
-	runtimeDir = DefaultFSRoot
+	// runtime_root 写死为 DefaultRuntimeRoot；chdir 到 TempDir，相对路径落在隔离目录。
+	runtimeDir = DefaultRuntimeRoot
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -55,8 +55,8 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	if cfg.Local.Endpoint != wantEndpoint {
 		t.Fatalf("local.endpoint = %q, want %q", cfg.Local.Endpoint, wantEndpoint)
 	}
-	if cfg.FSRoot != DefaultFSRoot {
-		t.Fatalf("fs_root = %q, want %q", cfg.FSRoot, DefaultFSRoot)
+	if cfg.RuntimeRoot != DefaultRuntimeRoot {
+		t.Fatalf("runtime_root = %q, want %q", cfg.RuntimeRoot, DefaultRuntimeRoot)
 	}
 	wantDB := filepath.Join(runtimeDir, "memory", "sessions.db")
 	if cfg.SessionDBPath() != wantDB {
@@ -72,14 +72,26 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadFile_ignoresYAMLFSRoot(t *testing.T) {
-	path, _ := testConfigPath(t, "node_id: fixed-root\nfs_root: /should/be/ignored\n")
+func TestLoadFile_ignoresYAMLRuntimeRoot(t *testing.T) {
+	path, _ := testConfigPath(t, "node_id: fixed-root\nruntime_root: /should/be/ignored\n")
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.FSRoot != DefaultFSRoot {
-		t.Fatalf("fs_root = %q, want fixed %q", cfg.FSRoot, DefaultFSRoot)
+	if cfg.RuntimeRoot != DefaultRuntimeRoot {
+		t.Fatalf("runtime_root = %q, want fixed %q", cfg.RuntimeRoot, DefaultRuntimeRoot)
+	}
+}
+
+func TestApplyDefaults_readsDeprecatedFSRootAlias(t *testing.T) {
+	legacyRoot := filepath.Join(t.TempDir(), "legacy-runtime")
+	cfg := &Config{FSRoot: legacyRoot}
+	cfg.ApplyDefaults()
+	if cfg.RuntimeRoot != legacyRoot {
+		t.Fatalf("runtime_root = %q, want legacy root %q", cfg.RuntimeRoot, legacyRoot)
+	}
+	if cfg.FSRoot != legacyRoot {
+		t.Fatalf("fs_root compatibility alias = %q, want %q", cfg.FSRoot, legacyRoot)
 	}
 }
 

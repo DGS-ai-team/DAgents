@@ -43,7 +43,7 @@ func (c *Config) BrowserHeaded() bool {
 	return *c.Browser.Headed
 }
 
-// BrowserOutputDir 返回相对 fs_root 的截图输出目录。
+// BrowserOutputDir 返回相对 Agent workspace 的截图输出目录。
 func (c *Config) BrowserOutputDir() string {
 	if c == nil {
 		return "browser"
