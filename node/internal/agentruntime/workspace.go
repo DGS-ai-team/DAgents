@@ -70,7 +70,7 @@ func NormalizeWorkspaceConfig(runtimeRoot, agentID string, requested WorkspaceCo
 func EffectiveWorkspaceRoot(runtimeRoot, agentID string, workspace WorkspaceConfig) (string, error) {
 	root := strings.TrimSpace(runtimeRoot)
 	if root == "" {
-		return "", fmt.Errorf("Node runtime root is required")
+		return "", fmt.Errorf("node runtime root is required")
 	}
 	mode := strings.ToLower(strings.TrimSpace(workspace.Mode))
 	switch mode {
