@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -103,6 +104,10 @@ func (c *Config) AvailableAgentToolGroups() []string {
 			}
 		case "wecom":
 			if !c.WeComEnabled() {
+				continue
+			}
+		case "computer":
+			if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
 				continue
 			}
 		}

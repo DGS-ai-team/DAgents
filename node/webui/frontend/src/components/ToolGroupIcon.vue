@@ -32,6 +32,11 @@ defineProps({
       <circle cx="17.5" cy="16.5" r="2.25" stroke="currentColor" stroke-width="1.5" />
       <path d="M12 8.75v3.5M12 12.25 7.75 15M12 12.25l4.25 2.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
     </template>
+    <!-- 桌面控制 -->
+    <template v-else-if="name === 'computer'">
+      <rect x="3.5" y="4.5" width="17" height="12" rx="2" stroke="currentColor" stroke-width="1.5" />
+      <path d="M8 19.5h8M12 16.5v3M9 8.5l6 4M9 8.5l1.4 7 1.7-2.6 2.9-.4-6-4Z" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+    </template>
     <!-- MCP 服务 -->
     <template v-else-if="name === 'mcp'">
       <circle cx="6" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5" />

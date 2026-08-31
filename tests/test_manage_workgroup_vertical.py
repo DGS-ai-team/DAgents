@@ -237,6 +237,49 @@ class WorkgroupVerticalTests(unittest.TestCase):
                 )
             self.assertEqual(ctx.exception.code, "already_resolved")
 
+    def test_agent_ref_user_information_answer_uses_node_resume_protocol(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            loop, _, wid, mid = self._setup(tmp)
+            hitl = loop.store.create_hitl(
+                wid,
+                prompt="成员需要部署环境",
+                metadata={
+                    "source": "agent_ref",
+                    "node_hitl_id": "node-hitl-1",
+                    "member_id": mid,
+                    "agent_id": "agent-1",
+                    "session_id": "session-1",
+                    "assign_id": "assign-1",
+                    "home_node_id": "node-b",
+                    "items": [
+                        {
+                            "hitl_type": "user_information",
+                            "id": "call-question",
+                            "name": "ask_user_information",
+                            "content": "部署到哪个环境？",
+                        }
+                    ],
+                },
+            )
+
+            loop.resolve_info_hitl(
+                wid,
+                hitl.hitl_id,
+                HITLResolveRequest(resolution={"answer": "production"}),
+            )
+
+            frame = [
+                item for item in loop.store.list_outbox(wid) if item.type == "agent.turn.resume"
+            ][-1]
+            self.assertEqual(
+                frame.payload["resume_value"],
+                {
+                    "type": "user_information",
+                    "tool_call_id": "call-question",
+                    "answer": "production",
+                },
+            )
+
     def test_archive_fencing_and_indeterminate_reconcile(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             loop, bridge, wid, mid = self._setup(tmp)

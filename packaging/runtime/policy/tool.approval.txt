@@ -27,6 +27,7 @@ read_file=rule
 glob_files=rule
 grep_file=rule
 grep_files=rule
+screen_capture=rule
 
 # --- 上下文治理：写盘（WS3 spill；rule 时信任链可免重复审批）---
 write_file=rule
@@ -40,6 +41,9 @@ search_replace=rule
 browser_run_task=always
 browser_task_status=never
 browser_task_cancel=always
+
+# --- 桌面控制：截图只读；键鼠动作默认每次审批 ---
+computer_use=always
 
 # --- 企业微信消息推送（webhook markdown_v2 / file）---
 wecom_send_markdown=rule

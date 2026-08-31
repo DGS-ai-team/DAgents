@@ -495,6 +495,51 @@ function addGenericResult(model, content) {
   if (!hasField && !model.resultBlocks.length) addField(model.resultFields, "结果", "已返回");
 }
 
+function addDesktopInput(model, args, name) {
+  if (name === "screen_capture") {
+    addField(model.inputFields, "图像细节", args.detail || "high");
+    return;
+  }
+  addField(model.inputFields, "动作", args.action);
+  if (args.x != null && args.y != null) addField(model.inputFields, "目标坐标", `${args.x}, ${args.y}`, "mono");
+  if (args.from_x != null && args.from_y != null) addField(model.inputFields, "起点坐标", `${args.from_x}, ${args.from_y}`, "mono");
+  addField(model.inputFields, "鼠标按钮", args.button);
+  addField(model.inputFields, "滚动", args.scroll_y);
+  const key = [
+    ...(Array.isArray(args.modifiers) ? args.modifiers : []),
+    args.key,
+  ].filter(Boolean).join(" + ");
+  addField(model.inputFields, "按键", key, "mono");
+  addField(model.inputFields, "输入文本", args.text, "code");
+}
+
+function addDesktopResult(model, content) {
+  const payload = parseJSONObject(content);
+  if (!payload) {
+    addBlock(model.resultBlocks, "结果", content, "text");
+    return;
+  }
+  const coordinate = payload.coordinate_space && typeof payload.coordinate_space === "object"
+    ? payload.coordinate_space
+    : {};
+  const bounds = payload.virtual_bounds && typeof payload.virtual_bounds === "object"
+    ? payload.virtual_bounds
+    : {};
+  if (coordinate.width && coordinate.height) {
+    addField(model.resultFields, "截图尺寸", `${coordinate.width} × ${coordinate.height}`, "mono");
+  }
+  if (bounds.width && bounds.height) {
+    addField(
+      model.resultFields,
+      "虚拟桌面",
+      `${bounds.x || 0}, ${bounds.y || 0} · ${bounds.width} × ${bounds.height}`,
+      "mono",
+    );
+  }
+  addField(model.resultFields, "桌面后端", payload.backend);
+  addField(model.resultFields, "错误", payload.error, "error");
+}
+
 export function buildToolCardModel({ callEntry = null, resultEntry = null, entry = null } = {}) {
   const fallback = entry || resultEntry || callEntry || {};
   const name = resolveName(callEntry, resultEntry, fallback);
@@ -503,6 +548,11 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
   const model = baseModel(name, args, resultEntry, content);
 
   switch (name) {
+    case "screen_capture":
+    case "computer_use":
+      addDesktopInput(model, args, name);
+      if (resultEntry) addDesktopResult(model, content);
+      break;
     case "bash_run":
     case "linux_exec":
       if (name === "bash_run") addBashInput(model, args);

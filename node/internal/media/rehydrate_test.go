@@ -87,3 +87,26 @@ func TestRehydrateFromMessages_showImage(t *testing.T) {
 		t.Fatalf("media=%v", out)
 	}
 }
+
+func TestRehydrateFromMessages_screenCapture(t *testing.T) {
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "capture.jpg")
+	if err := os.WriteFile(imgPath, []byte{0xff, 0xd8, 0xff, 0xd9}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry("sess-screen", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := []llm.Message{{
+		Role:       "tool",
+		ToolCallID: "call-screen",
+		Name:       "screen_capture",
+		Content:    fmt.Sprintf(`{"ok":true,"screenshot_path":%q}`, imgPath),
+	}}
+	out := RehydrateFromMessages(reg, messages, nil)
+	items := out["call-screen"]
+	if len(items) != 1 || items[0]["url"] == "" || items[0]["label"] != "screen_capture" {
+		t.Fatalf("media=%v", out)
+	}
+}

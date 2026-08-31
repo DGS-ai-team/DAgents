@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { inferToolKind, resolveToolGroupVisual, resolveToolVisual } from "./toolSource.js";
 
 describe("inferToolKind", () => {
+  it("classifies desktop tools as computer", () => {
+    expect(inferToolKind("screen_capture")).toBe("computer");
+    expect(inferToolKind("computer_use")).toBe("computer");
+  });
   it("maps fs tools", () => {
     expect(inferToolKind("glob_files")).toBe("fs");
     expect(inferToolKind("read_file")).toBe("fs");

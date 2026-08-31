@@ -53,6 +53,8 @@ type Registry struct {
 	mediaMu                sync.Mutex
 	mediaRegister          MediaRegisterFunc
 	toolResultMedia        map[string][]map[string]any
+	desktopMu              sync.Mutex
+	desktopFrames          map[string]screenGeometry
 	mcpTools               map[string]MCPTool
 }
 
@@ -411,6 +413,8 @@ func (r *Registry) Definitions() []ToolDef {
 		terminalTerminateToolDef(),
 		terminalListToolDef(),
 		terminalCommandToolDef(),
+		screenCaptureToolDef(),
+		computerUseToolDef(),
 		askUserInformationToolDef(),
 		rememberToolDef(),
 		loadSkillsToolDef(),
@@ -475,7 +479,7 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 // committed.
 func (r *Registry) ToolRetryAllowed(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files",
+	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files", "screen_capture",
 		"terminal_read", "terminal_list":
 		return true
 	default:
@@ -501,6 +505,8 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["terminal_terminate"] = r.execTerminalTerminate
 	r.handlers["terminal_list"] = r.execTerminalList
 	r.handlers["terminal_command"] = r.execTerminalCommand
+	r.handlers["screen_capture"] = r.execScreenCapture
+	r.handlers["computer_use"] = r.execComputerUse
 	r.handlers["linux_exec"] = r.execLinuxExec
 	r.handlers["linux_file_upload"] = r.execLinuxFileUpload
 	r.handlers["linux_file_download"] = r.execLinuxFileDownload

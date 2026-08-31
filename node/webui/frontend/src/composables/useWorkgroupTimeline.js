@@ -215,6 +215,8 @@ function parseNoticeTool(text, fallbackToolName = "") {
     grep_files: "搜索内容",
     search_replace: "替换内容",
     bash_run: "执行命令",
+    screen_capture: "截取屏幕",
+    computer_use: "操作桌面",
     background_job_status: "查看后台任务",
     background_job_cancel: "取消后台任务",
   };
