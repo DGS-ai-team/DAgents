@@ -10,7 +10,7 @@ const PROVIDER_PRESETS = {
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
   glm: { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2" },
   minimax: { base_url: "https://api.minimaxi.com/v1", model: "MiniMax-M3" },
-  mimo: { base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-pro" },
+  mimo: { base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5" },
   mock: { base_url: "", model: "mock" },
 };
 
@@ -65,6 +65,10 @@ const useModelSelect = computed(() => probedModels.value.length > 0 && !modelMan
 const modelOptions = computed(() =>
   probedModels.value.map((m) => ({ value: m, label: m })),
 );
+const multimodalSupported = computed(() => {
+  if (String(draft.provider || "").trim().toLowerCase() !== "mimo") return true;
+  return String(draft.model || "").trim().toLowerCase() === "mimo-v2.5";
+});
 
 function emptyDraft() {
   return {
@@ -215,7 +219,7 @@ function submit() {
     has_api_key: draft.has_api_key,
     clear_api_key: !!draft.clear_api_key,
     mock: draft.mock || draft.provider === "mock",
-    multimodal_enabled: !!draft.multimodal_enabled,
+    multimodal_enabled: multimodalSupported.value && !!draft.multimodal_enabled,
   });
 }
 
@@ -237,6 +241,13 @@ watch(
       probeState.message = "";
     }
   }
+);
+
+watch(
+  () => [draft.provider, draft.model],
+  () => {
+    if (!multimodalSupported.value) draft.multimodal_enabled = false;
+  },
 );
 </script>
 
@@ -344,10 +355,13 @@ watch(
               <span>Mock 模式</span>
             </label>
             <label class="settings-toggle">
-              <input v-model="draft.multimodal_enabled" type="checkbox" />
+              <input v-model="draft.multimodal_enabled" type="checkbox" :disabled="!multimodalSupported" />
               <span>多模态 / Vision</span>
             </label>
           </div>
+          <p v-if="!multimodalSupported" class="settings-field__hint">
+            MiMo 的 <code>mimo-v2.5-pro</code> 当前不支持图片输入；需要截图或 Computer Use 时请选择 <code>mimo-v2.5</code>。
+          </p>
         </div>
 
         <footer class="llm-profile-modal__footer">

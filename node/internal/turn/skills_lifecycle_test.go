@@ -164,6 +164,32 @@ func TestListAvailableSkillsUsesLiveCatalogWithoutRewritingPromptMetadata(t *tes
 	}
 }
 
+func TestListAvailableSkillsLiveCatalogCannotWidenVisibility(t *testing.T) {
+	root := t.TempDir()
+	writeLifecycleSkill(t, root, "allowed", "---\nname: allowed\ndescription: Allowed\n---\nBody\n")
+	writeLifecycleSkill(t, root, "hidden", "---\nname: hidden\ndescription: Hidden\n---\nSecret\n")
+	policyCatalog := skills.NewCatalog(root, true, 2).RestrictVisible([]string{"allowed"})
+	liveCatalog := skills.NewCatalog(root, true, 2)
+	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
+		Catalog:     policyCatalog,
+		LiveCatalog: liveCatalog,
+	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+
+	history := []llm.Message{}
+	if err := o.executeSkillTool("session-1", &history, llm.ToolCall{ID: "list-call", Function: llm.ToolCallFunction{
+		Name:      "list_available_skills",
+		Arguments: `{}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d", len(history))
+	}
+	if strings.Contains(history[0].Content, `"skill_name":"hidden"`) || !strings.Contains(history[0].Content, `"skill_name":"allowed"`) {
+		t.Fatalf("list result crossed visibility boundary: %s", history[0].Content)
+	}
+}
+
 func TestLoadSkillsBodyBecomesVisibleOnNextModelStep(t *testing.T) {
 	root := t.TempDir()
 	writeLifecycleSkill(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")

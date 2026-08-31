@@ -21,13 +21,16 @@ func (c *Config) normalizeLLMProfiles() {
 		if id == "" {
 			id = defaultLLMProfileID
 		}
-		c.LLM.Profiles[id] = c.snapshotLLMProfile()
+		c.LLM.Profiles[id] = normalizeLLMProfile(c.snapshotLLMProfile())
 		c.LLM.Active = id
 		c.applyLLMProfile(id)
 		return
 	}
 	// 旧配置仅有顶层 multimodal.enabled 时，迁移到尚未声明该字段的档案。
 	c.migrateMultimodalIntoProfiles()
+	for id, profile := range c.LLM.Profiles {
+		c.LLM.Profiles[id] = normalizeLLMProfile(profile)
+	}
 	active := strings.TrimSpace(c.LLM.Active)
 	if active == "" || !c.LLM.hasProfile(active) {
 		if p := c.snapshotLLMProfile(); c.LLM.looksConfigured(p) {
@@ -117,10 +120,7 @@ func (c *Config) applyLLMProfile(id string) {
 	if !ok {
 		return
 	}
-	enabled := false
-	if p.MultimodalEnabled != nil {
-		enabled = *p.MultimodalEnabled
-	}
+	enabled := ProfileMultimodalEnabled(p)
 	c.Multimodal.Enabled = boolPtrCopy(enabled)
 }
 
@@ -319,17 +319,21 @@ func normalizeLLMProfile(p LLMProfileConfig) LLMProfileConfig {
 		Thinking:        strings.TrimSpace(p.Thinking),
 		ReasoningEffort: strings.TrimSpace(p.ReasoningEffort),
 	}
-	if p.MultimodalEnabled != nil {
-		v := *p.MultimodalEnabled
-		out.MultimodalEnabled = &v
-	} else {
-		f := false
-		out.MultimodalEnabled = &f
-	}
+	v := p.MultimodalEnabled != nil && *p.MultimodalEnabled && ProfileSupportsMultimodal(out)
+	out.MultimodalEnabled = &v
 	return out
 }
 
-// ProfileMultimodalEnabled 返回档案的多模态开关（nil/缺省视为 false）。
+// ProfileSupportsMultimodal 返回模型是否支持当前 Node 使用的图片输入路径。
+// Mimo 的 pro 模型目前是文本模型，只有 mimo-v2.5 支持图片输入。
+func ProfileSupportsMultimodal(p LLMProfileConfig) bool {
+	if strings.EqualFold(strings.TrimSpace(p.Provider), "mimo") {
+		return strings.EqualFold(strings.TrimSpace(p.Model), "mimo-v2.5")
+	}
+	return true
+}
+
+// ProfileMultimodalEnabled 返回档案的多模态开关（nil/缺省或模型不支持时视为 false）。
 func ProfileMultimodalEnabled(p LLMProfileConfig) bool {
-	return p.MultimodalEnabled != nil && *p.MultimodalEnabled
+	return p.MultimodalEnabled != nil && *p.MultimodalEnabled && ProfileSupportsMultimodal(p)
 }

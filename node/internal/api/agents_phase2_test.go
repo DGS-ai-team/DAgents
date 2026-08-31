@@ -214,9 +214,11 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
+	on := true
+	off := false
 	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
-		"profile-a": {Provider: "mock", Model: "model-a", Mock: true},
-		"profile-b": {Provider: "mock", Model: "model-b", Mock: true},
+		"profile-a": {Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &on},
+		"profile-b": {Provider: "mock", Model: "model-b", Mock: true, MultimodalEnabled: &off},
 	}
 	cfg.LLM.ProfileOrder = []string{"profile-a", "profile-b"}
 	cfg.LLM.Active = "profile-a"
@@ -264,6 +266,11 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 	if got := cfg.LLM.ActiveProfileID(); got != "profile-b" {
 		t.Fatalf("after creating B active profile=%q", got)
 	}
+	// Simulate a profile capability change without changing the Agent
+	// snapshot revision. ensure must rebuild the already-loaded runtime.
+	cfg.LLM.Profiles["profile-a"] = config.LLMProfileConfig{
+		Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &off,
+	}
 
 	// Both runtimes are already loaded and their revisions are unchanged. This
 	// is the path that used to return early and leave profile-b active for A.
@@ -283,6 +290,9 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 		if got := cfg.LLM.ActiveProfileID(); got != tc.want {
 			t.Fatalf("ensure %s active profile=%q want %q", tc.id, got, tc.want)
 		}
+	}
+	if got, ok := srv.sessions.RuntimeMultimodalEnabled(agentA); !ok || got {
+		t.Fatalf("agent A runtime multimodal=%v ok=%v, want false after profile switch", got, ok)
 	}
 }
 

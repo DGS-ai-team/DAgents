@@ -361,6 +361,18 @@ func (c *Catalog) ListMetadata() []LoadedSkill {
 // cursor is an opaque base64-encoded offset valid for the current Catalog
 // view; callers should restart from the first page after a revision changes.
 func (c *Catalog) ListAvailableSkills(query string, limit int, cursor string) (AvailableSkillsPage, error) {
+	return c.listAvailableSkills(nil, query, limit, cursor)
+}
+
+// ListAvailableSkillsWithVisibility returns live metadata while enforcing the
+// visibility policy from policyCatalog. This is used when the live directory
+// and the frozen Turn view are separate objects; a live catalog must never
+// widen the Agent's skill permission boundary.
+func (c *Catalog) ListAvailableSkillsWithVisibility(policyCatalog *Catalog, query string, limit int, cursor string) (AvailableSkillsPage, error) {
+	return c.listAvailableSkills(policyCatalog, query, limit, cursor)
+}
+
+func (c *Catalog) listAvailableSkills(policyCatalog *Catalog, query string, limit int, cursor string) (AvailableSkillsPage, error) {
 	page := AvailableSkillsPage{
 		CatalogRevision: c.Revision(),
 		Query:           strings.TrimSpace(query),
@@ -380,6 +392,9 @@ func (c *Catalog) ListAvailableSkills(query string, limit int, cursor string) (A
 		return page, err
 	}
 	defs := c.List()
+	if policyCatalog != nil && policyCatalog != c {
+		defs = policyCatalog.applyVisible(defs)
+	}
 	sort.SliceStable(defs, func(i, j int) bool {
 		if defs[i].DirectoryName == defs[j].DirectoryName {
 			return defs[i].SkillName < defs[j].SkillName

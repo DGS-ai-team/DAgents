@@ -219,13 +219,15 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 		if discoveryCatalog == nil {
 			discoveryCatalog = catalog
 		}
-		if discoveryCatalog == nil || !discoveryCatalog.Enabled() {
+		// Catalog is the permission authority for the current Agent/Turn;
+		// LiveCatalog may only provide fresher metadata, never more access.
+		if catalog == nil || !catalog.Enabled() || discoveryCatalog == nil || !discoveryCatalog.Enabled() {
 			output := "ERROR: skills 功能已禁用"
 			o.publishToolResult(sessionID, tc, output, true, nil)
 			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 			return nil
 		}
-		return o.executeListAvailableSkillsTool(sessionID, history, tc, discoveryCatalog)
+		return o.executeListAvailableSkillsTool(sessionID, history, tc, discoveryCatalog, catalog)
 	}
 	if catalog == nil || !catalog.Enabled() {
 		output := "ERROR: skills 功能已禁用"
@@ -285,7 +287,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	return nil
 }
 
-func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog *skills.Catalog) error {
+func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog, policyCatalog *skills.Catalog) error {
 	var payload map[string]any
 	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
@@ -306,7 +308,7 @@ func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history 
 	if cursor == "<nil>" {
 		cursor = ""
 	}
-	page, err := catalog.ListAvailableSkills(query, limit, cursor)
+	page, err := catalog.ListAvailableSkillsWithVisibility(policyCatalog, query, limit, cursor)
 	var output string
 	rejected := err != nil
 	if err != nil {

@@ -104,6 +104,25 @@ func TestEffectiveMultimodalEnabled_fromNodeProfile(t *testing.T) {
 	}
 }
 
+func TestEffectiveMultimodalEnabled_rejectsUnsupportedMimoSnapshot(t *testing.T) {
+	enabled := true
+	snap := Snapshot{Defaults: map[string]any{
+		"llm": map[string]any{
+			"active": "mimo-pro",
+			"profiles": map[string]any{
+				"mimo-pro": map[string]any{
+					"provider":           "mimo",
+					"model":              "mimo-v2.5-pro",
+					"multimodal_enabled": enabled,
+				},
+			},
+		},
+	}}
+	if EffectiveMultimodalEnabled(nil, snap) {
+		t.Fatal("mimo-v2.5-pro must not enable multimodal from an old snapshot")
+	}
+}
+
 func TestApplyDefaultsToTurnOptions_maxToolLoopsFromSnapshot(t *testing.T) {
 	var turn session.TurnOptions
 	ApplyDefaultsToTurnOptions(&turn, Snapshot{Defaults: map[string]any{

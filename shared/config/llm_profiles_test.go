@@ -116,3 +116,23 @@ func TestMigrateMultimodalIntoProfiles(t *testing.T) {
 		t.Fatal("expected multimodal still enabled after normalize")
 	}
 }
+
+func TestMimoProfileMultimodalCapability(t *testing.T) {
+	on := true
+	pro := LLMProfileConfig{Provider: "mimo", Model: "mimo-v2.5-pro", MultimodalEnabled: &on}
+	if ProfileSupportsMultimodal(pro) {
+		t.Fatal("mimo-v2.5-pro must not advertise image input support")
+	}
+	if ProfileMultimodalEnabled(pro) {
+		t.Fatal("mimo-v2.5-pro must not enable multimodal")
+	}
+	normalized := normalizeLLMProfile(pro)
+	if normalized.MultimodalEnabled == nil || *normalized.MultimodalEnabled {
+		t.Fatalf("normalized profile = %+v, want multimodal disabled", normalized)
+	}
+
+	vision := LLMProfileConfig{Provider: "mimo", Model: "mimo-v2.5", MultimodalEnabled: &on}
+	if !ProfileSupportsMultimodal(vision) || !ProfileMultimodalEnabled(vision) {
+		t.Fatal("mimo-v2.5 should support enabled multimodal")
+	}
+}
