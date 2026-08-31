@@ -86,6 +86,7 @@ describe("agentTemplateForm", () => {
     });
     expect(payload.template_id).toBe("general");
     expect(payload.display_name).toBe("我的助手");
+    expect(payload.workspace).toEqual({ mode: "private" });
     expect(payload.sandbox).toBeUndefined();
     expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_loops: 16 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
@@ -123,6 +124,22 @@ describe("agentTemplateForm", () => {
       toolGroups: ["fs"],
     });
     expect(payload.placement).toBeUndefined();
+  });
+
+  it("includes an immutable custom workspace only in create payload", () => {
+    const draft = {
+      displayName: "项目助手",
+      llmProfileId: "default",
+      maxToolLoops: 32,
+      toolGroups: ["fs"],
+      workspaceMode: "custom",
+      workspacePath: "D:\\workspace\\project",
+    };
+    expect(buildCreateAgentPayload(draft).workspace).toEqual({
+      mode: "custom",
+      path: "D:\\workspace\\project",
+    });
+    expect(buildPatchAgentPayload(draft).workspace).toBeUndefined();
   });
 
   it("builds patch payload without template_id", () => {
@@ -167,6 +184,7 @@ describe("agentTemplateForm", () => {
     expect(draft.toolGroups).toEqual(["bash"]);
     expect(draft.visibleSkills).toEqual(["write-skill"]);
     expect(draft.llmProfileId).toBe("deepseek");
+    expect(draft.workspaceMode).toBe("legacy_shared");
   });
 
   it("migrates a saved Linux group when opening agent settings", () => {

@@ -166,6 +166,10 @@ func newRuntimeWithPublisher(
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
+	workspaceRoot := effectiveWorkspaceRoot(turnOpts)
+	if strings.TrimSpace(turnOpts.FSRoot) == "" {
+		turnOpts.FSRoot = workspaceRoot
+	}
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
 	if turnOpts.SkillsVisibleRestrict {
 		catalog.RestrictVisible(turnOpts.SkillsVisible)
@@ -200,7 +204,7 @@ func newRuntimeWithPublisher(
 		messages:                append([]llm.Message(nil), initial...),
 		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
 		skillRevision:           turnCatalog.Revision(),
-		fsRoot:                  turnOpts.FSRoot,
+		fsRoot:                  workspaceRoot,
 		triggerDelivery:         triggerDelivery,
 		sideEffects:             newSideEffectStore(),
 		idleAutoCompressApplied: idleAutoCompressApplied,
@@ -210,7 +214,7 @@ func newRuntimeWithPublisher(
 		runtimeDigest:           strings.TrimSpace(turnOpts.RuntimeDigest),
 		turnBudget:              turnOpts.Budget,
 	}
-	if reg, err := media.NewRegistry(id, turnOpts.FSRoot); err == nil {
+	if reg, err := media.NewRegistry(id, workspaceRoot); err == nil {
 		rt.media = reg
 	} else if logger != nil {
 		logger.Warn("session media registry init failed", "session_id", id, "error", err)
@@ -228,7 +232,7 @@ func newRuntimeWithPublisher(
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
 		agentID,
-		turnOpts.FSRoot,
+		workspaceRoot,
 		pub,
 		llmClient,
 		toolExec,
@@ -249,7 +253,7 @@ func newRuntimeWithPublisher(
 				Enabled:              turnOpts.ToolResult.Enabled,
 				SpillThresholdTokens: turnOpts.ToolResult.SpillThresholdTokens,
 				Tools:                turnOpts.ToolResult.Tools,
-				FSRoot:               turnOpts.FSRoot,
+				FSRoot:               workspaceRoot,
 			}),
 			InjectTodayDate: hooks.InjectTodayDateConfigOrDefault(turnOpts.InjectTodayDate),
 			Plugins:         turnOpts.PluginHooks,
@@ -257,6 +261,7 @@ func newRuntimeWithPublisher(
 		},
 		logger,
 	)
+	rt.orch.SetRuntimeRoot(turnOpts.RuntimeDir)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
 	modelRetries := turnOpts.MaxModelRetries

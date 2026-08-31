@@ -94,6 +94,7 @@ export function createAgent(payload = {}) {
   }
   if (payload.origin) body.origin = payload.origin;
   if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
+  if (payload.workspace && typeof payload.workspace === "object") body.workspace = payload.workspace;
   return apiFetch("/v1/agents", { method: "POST", body });
 }
 

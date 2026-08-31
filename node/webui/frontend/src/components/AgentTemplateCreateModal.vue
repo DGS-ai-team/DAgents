@@ -142,6 +142,7 @@ watch(
           <AgentSettingsForm
             v-model:draft="draft"
             :llm-profiles="llmProfiles"
+            :show-workspace="false"
             v-model:show-advanced="showAdvanced"
           />
         </div>

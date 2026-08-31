@@ -23,7 +23,7 @@ func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "data/", "tool_outputs/", "临时工作区", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "ops-01") || contains(prompt, "sess-abc") || contains(prompt, "运行环境") {
@@ -44,7 +44,7 @@ func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
 		SessionID:             "sess-a",
 		IncludeHistoryJournal: true,
 	})
-	if !containsAll(prompt, "history/", "YYYYMMDD", "read_file") {
+	if !containsAll(prompt, "Node 在运行时目录中独立管理", "不是 LLM 上下文的一部分") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
@@ -148,7 +148,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		SessionID: "child-abc",
 		Purpose:   "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "memory/", "工作区目录", "相对路径均基于工作区根目录") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "data/", "tool_outputs/", "工作区目录", "相对路径均基于工作区根目录") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "child-abc") || contains(prompt, "运行环境") {

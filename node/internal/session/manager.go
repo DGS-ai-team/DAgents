@@ -33,8 +33,12 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot       string
-	MaxToolLoops int
+	// WorkspaceRoot is the Agent-facing root for files, bash, local terminals,
+	// media and user-visible tool artifacts. FSRoot remains as a compatibility
+	// alias for callers that predate immutable Agent workspaces.
+	WorkspaceRoot string
+	FSRoot        string
+	MaxToolLoops  int
 	// MaxModelRetries retries only transient provider failures within one Step;
 	// zero uses the default (2), -1 disables retries. Partial streamed output is
 	// never retried by the orchestrator.
@@ -79,6 +83,13 @@ type TurnOptions struct {
 	PreferredName string
 	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
 	LongTermStore turn.LongTermStore
+}
+
+func effectiveWorkspaceRoot(opts TurnOptions) string {
+	if root := strings.TrimSpace(opts.WorkspaceRoot); root != "" {
+		return root
+	}
+	return strings.TrimSpace(opts.FSRoot)
 }
 
 // PromptContextOptions 为侧车 / 长期记忆注入开关。

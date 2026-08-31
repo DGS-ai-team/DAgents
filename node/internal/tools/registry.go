@@ -58,6 +58,25 @@ type Registry struct {
 	mcpTools               map[string]MCPTool
 }
 
+// WorkspaceRoot returns the effective Agent workspace used by file, bash and
+// local terminal tools. It is intentionally read-only; placement is fixed
+// when the Agent is created.
+func (r *Registry) WorkspaceRoot() string {
+	if r == nil {
+		return ""
+	}
+	return r.fsRoot
+}
+
+// ResolveLocalTerminalCWD applies the same workspace-relative path policy as
+// bash_run. An empty value resolves to the Agent workspace root.
+func (r *Registry) ResolveLocalTerminalCWD(raw string) (string, error) {
+	if r == nil {
+		return "", fmt.Errorf("registry is nil")
+	}
+	return r.resolveRunCWD(raw)
+}
+
 // WithBackgroundJobStore binds a persistent job store to a Registry. It is
 // intended for Node runtime construction; tests and embedded callers may omit
 // it to keep jobs in memory only.

@@ -47,6 +47,36 @@ func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
 	}
 }
 
+func TestBuild_usesCustomWorkspaceRoot(t *testing.T) {
+	nodeRoot := t.TempDir()
+	workspace := t.TempDir()
+	cfg := &config.Config{NodeID: "n1", FSRoot: nodeRoot}
+	cfg.ApplyDefaults()
+	built, err := Build(BuildParams{
+		NodeCFG:  cfg,
+		BaseTurn: session.TurnOptions{FSRoot: nodeRoot},
+		AgentID:  "agt-custom",
+		Snapshot: Snapshot{Workspace: WorkspaceConfig{Mode: WorkspaceModeCustom, Path: workspace}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWorkspace, err = filepath.Abs(wantWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.WorkspaceRoot != wantWorkspace || built.FSRoot != wantWorkspace || built.Registry.WorkspaceRoot() != wantWorkspace {
+		t.Fatalf("workspace root built=%q alias=%q registry=%q want %q", built.WorkspaceRoot, built.FSRoot, built.Registry.WorkspaceRoot(), wantWorkspace)
+	}
+	if built.TurnOptions.WorkspaceRoot != wantWorkspace || built.TurnOptions.FSRoot != wantWorkspace {
+		t.Fatalf("turn workspace=%q fs=%q want %q", built.TurnOptions.WorkspaceRoot, built.TurnOptions.FSRoot, wantWorkspace)
+	}
+}
+
 func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{NodeID: "n1", FSRoot: root}

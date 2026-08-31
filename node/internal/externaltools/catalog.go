@@ -70,9 +70,8 @@ func (c *Catalog) RenderPromptSection() string {
 	var b strings.Builder
 	b.WriteString("\n\n## 外置 CLI 与工具\n\n")
 	b.WriteString(
-		"`externaltools/` 目录用于放置 **shell 脚本、编译好的二进制与第三方 CLI**（与 `skills/` 的 Markdown 技能区分）。" +
-			"安装后通常已加入 `PATH`；也可在 `bash_run` 中用相对路径调用，例如 `externaltools/<tool>`。" +
-			"详细说明见根目录 **`externaltools_menu.md`**。\n",
+		"Node 管理的 `externaltools/` 用于放置 **shell 脚本、编译好的二进制与第三方 CLI**，与工作区中的文件和 Markdown 技能区分。" +
+			"安装后通常已加入 `PATH`；详细说明见 Node 运行时的 `externaltools_menu.md`。\n",
 	)
 	if menu != "" {
 		b.WriteString("\n")

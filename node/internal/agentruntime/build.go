@@ -26,10 +26,13 @@ type BuildParams struct {
 
 // Built 为 per-agent 运行时产物。
 type Built struct {
-	FSRoot      string
-	TurnOptions session.TurnOptions
-	Registry    *tools.Registry
-	ToolGroups  []string
+	// FSRoot is kept as the tool-root compatibility name. It now points to the
+	// Agent workspace, while Node-level databases remain under RuntimeDir.
+	FSRoot        string
+	WorkspaceRoot string
+	TurnOptions   session.TurnOptions
+	Registry      *tools.Registry
+	ToolGroups    []string
 }
 
 // Build 根据快照构造 effective FSRoot、工具组与独立 Registry。
@@ -37,7 +40,11 @@ func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG == nil {
 		return Built{}, fmt.Errorf("node config required")
 	}
-	fsRoot := EffectiveFSRoot(p.NodeCFG.FSRoot, p.AgentID, p.Snapshot)
+	workspaceRoot, err := EnsureWorkspace(p.NodeCFG.FSRoot, p.AgentID, p.Snapshot.Workspace)
+	if err != nil {
+		return Built{}, err
+	}
+	fsRoot := workspaceRoot
 	groups := EnabledToolGroups(p.Snapshot)
 
 	timeout := p.BashTimeout
@@ -102,6 +109,7 @@ func Build(p BuildParams) (Built, error) {
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
 
 	turnOpts := p.BaseTurn
+	turnOpts.WorkspaceRoot = workspaceRoot
 	turnOpts.FSRoot = fsRoot
 	turnOpts.ToolResult.FSRoot = fsRoot
 	turnOpts.MultimodalEnabled = mm
@@ -117,10 +125,11 @@ func Build(p BuildParams) (Built, error) {
 		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
 	}
 	return Built{
-		FSRoot:      fsRoot,
-		TurnOptions: turnOpts,
-		Registry:    reg,
-		ToolGroups:  groups,
+		FSRoot:        fsRoot,
+		WorkspaceRoot: workspaceRoot,
+		TurnOptions:   turnOpts,
+		Registry:      reg,
+		ToolGroups:    groups,
 	}, nil
 }
 

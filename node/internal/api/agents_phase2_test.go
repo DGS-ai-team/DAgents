@@ -71,8 +71,9 @@ defaults:
 	if !ok {
 		t.Fatal("runtime missing")
 	}
-	if fsRoot != cfg.FSRoot {
-		t.Fatalf("fsRoot=%q want shared node fs_root %q", fsRoot, cfg.FSRoot)
+	wantFSRoot := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "workspace")
+	if fsRoot != wantFSRoot {
+		t.Fatalf("fsRoot=%q want Agent workspace %q", fsRoot, wantFSRoot)
 	}
 
 	msgBody, _ := json.Marshal(map[string]any{
@@ -164,7 +165,7 @@ defaults:
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	wantFS := cfg.FSRoot
+	wantFS := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "workspace")
 	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
 		t.Fatalf("initial fsRoot=%q ok=%v want %q", fs, ok, wantFS)
 	}

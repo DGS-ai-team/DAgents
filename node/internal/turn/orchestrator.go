@@ -56,6 +56,7 @@ type Orchestrator struct {
 	hub             stream.Publisher
 	agentID         string
 	fsRoot          string
+	runtimeRoot     string
 	tools           tools.Executor
 	policy          *policy.Engine
 	toolHooks       *hooks.Registry
@@ -102,6 +103,15 @@ type Orchestrator struct {
 
 	multimodalEnabled bool
 	mediaReg          *media.Registry
+}
+
+// SetRuntimeRoot separates Node-managed runtime assets from the Agent
+// workspace used by tools and the model-facing workspace description.
+func (o *Orchestrator) SetRuntimeRoot(root string) {
+	if o == nil {
+		return
+	}
+	o.runtimeRoot = strings.TrimSpace(root)
 }
 
 // SetHookHostConfig 注入 Host 路径与配额配置。
@@ -1064,6 +1074,8 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
+		WorkspaceRoot:         o.fsRoot,
+		RuntimeRoot:           o.runtimeRoot,
 		FSRoot:                o.fsRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
