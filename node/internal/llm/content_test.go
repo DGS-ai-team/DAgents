@@ -86,6 +86,34 @@ func TestMessageToDeepSeekAPIPayload_multimodal(t *testing.T) {
 	}
 }
 
+func TestPrepareMessagesForTextOnly_stripsImagesFromOutboundCopy(t *testing.T) {
+	withText := Message{
+		Role:    "user",
+		Content: "describe",
+		ContentParts: []ContentPart{
+			{Type: "text", Text: "describe"},
+			{Type: "image_url", ImageURL: &ImageURLPart{URL: "https://example.com/a.png"}},
+		},
+	}
+	imageOnly := Message{
+		Role: "user",
+		ContentParts: []ContentPart{
+			{Type: "image_url", ImageURL: &ImageURLPart{URL: "https://example.com/b.png"}},
+		},
+	}
+	history := []Message{withText, imageOnly}
+	out := PrepareMessagesForTextOnly(history)
+	if MessageHasImages(out[0]) || MessageHasImages(out[1]) {
+		t.Fatalf("outbound messages still contain images: %+v", out)
+	}
+	if out[0].Content != "describe" || out[1].Content != textOnlyImageOmissionNotice {
+		t.Fatalf("outbound text = %#v", []string{out[0].Content, out[1].Content})
+	}
+	if !MessageHasImages(history[0]) || !MessageHasImages(history[1]) {
+		t.Fatal("text-only preparation mutated persisted history")
+	}
+}
+
 func TestValidateImage_rejectsLargeDataURL(t *testing.T) {
 	large := make([]byte, MaxImageBytes+1)
 	url := "data:image/png;base64," + base64.StdEncoding.EncodeToString(large)

@@ -109,6 +109,12 @@ func (o *Orchestrator) executeRememberTool(
 			return nil, nil
 		}
 		existingText := FormatLongTermEntries(snap.Entries)
+		if hasExactLongTermContent(snap.Entries, info) {
+			output := "长期记忆已存在（未重复写入）。"
+			o.publishToolResult(sessionID, tc, output, false, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+			return nil, nil
+		}
 
 		analysis, err := o.analyzeRememberConflict(ctx, existingText, info)
 		if err != nil {

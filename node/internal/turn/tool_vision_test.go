@@ -96,6 +96,39 @@ func TestExecuteTool_readImageSkipsVisionWhenMultimodalDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildToolVisionUserMessageGroupsImages(t *testing.T) {
+	msg, err := buildToolVisionUserMessage([]*tools.ReadImageVisionPayload{
+		{
+			RelPath: "one.png",
+			Detail:  "low",
+			DataURL: "data:image/png;base64,b25l",
+			Prompt:  "inspect first",
+			FrameID: "frame-one",
+		},
+		{
+			RelPath: "two.png",
+			Detail:  "high",
+			DataURL: "data:image/png;base64,dHdv",
+			Prompt:  "inspect second",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Role != "user" || msg.Name != llm.UserNameToolVision {
+		t.Fatalf("message = %+v", msg)
+	}
+	if len(msg.ContentParts) != 4 {
+		t.Fatalf("content parts = %d, want 4", len(msg.ContentParts))
+	}
+	if msg.ContentParts[1].Type != "image_url" || msg.ContentParts[3].Type != "image_url" {
+		t.Fatalf("content parts = %+v", msg.ContentParts)
+	}
+	if !strings.Contains(msg.ContentParts[0].Text, "frame-one") {
+		t.Fatalf("first prompt = %q, want frame id", msg.ContentParts[0].Text)
+	}
+}
+
 func hooksRuntimeConfig(t *testing.T) hooks.RuntimeConfig {
 	t.Helper()
 	return hooks.RuntimeConfig{

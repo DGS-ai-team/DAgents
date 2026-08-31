@@ -640,6 +640,12 @@ func (o *Orchestrator) runOneStep(
 	requestHistory = StripLegacyTodayDateMessages(requestHistory)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
+	if !o.multimodalEnabled {
+		// The history may have been created while a vision profile was active.
+		// Keep those image parts durable for the UI, but never send them to a
+		// text-only model after the Agent/profile has switched capabilities.
+		llmMessages = llm.PrepareMessagesForTextOnly(llmMessages)
+	}
 	// History/transcript retains the original tool body, while the model gets
 	// the authoritative status projection in a request-only copy.
 	llmMessages = llm.PrepareToolResultMessagesForModel(llmMessages)

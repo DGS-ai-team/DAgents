@@ -180,6 +180,37 @@ func MessageHasImages(m Message) bool {
 	return false
 }
 
+const textOnlyImageOmissionNotice = "[图片内容未发送：当前模型未启用图片输入支持。]"
+
+// PrepareMessagesForTextOnly creates the model-facing copy used when the
+// active Agent/profile does not support image input. Persisted history keeps
+// its original image parts for the UI and for a later vision-capable profile;
+// only the outbound request copy is reduced to text so stale image history
+// cannot make an otherwise valid text request fail at the provider.
+func PrepareMessagesForTextOnly(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]Message, len(messages))
+	for i, message := range messages {
+		if !MessageHasImages(message) {
+			out[i] = message
+			continue
+		}
+		out[i] = CloneMessage(message)
+		text := strings.TrimSpace(out[i].Content)
+		if partsText := strings.TrimSpace(MessageTextFromParts(out[i].ContentParts)); partsText != "" {
+			text = partsText
+		}
+		if text == "" {
+			text = textOnlyImageOmissionNotice
+		}
+		out[i].Content = text
+		out[i].ContentParts = nil
+	}
+	return out
+}
+
 // EstimateMessageContentTokens 粗算单条 message 的 content token（含图片固定开销）。
 func EstimateMessageContentTokens(m Message) int {
 	m = messageWithFileReferencePrompt(m)
