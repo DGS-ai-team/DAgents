@@ -26,13 +26,13 @@ func TestCreateWithOptions_perAgentWorkspaceRoot(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	mgr := NewManager("node-1", hub, &llm.MockClient{}, baseReg, pol, nil, TurnOptions{
 		WorkspaceRoot: nodeRoot,
-		MaxToolLoops: 4,
+		MaxToolLoops:  4,
 	}, logx.Discard())
 	defer mgr.Stop()
 
 	sess, created, err := mgr.CreateWithOptions("agt-sandbox-1", TurnOptions{
 		WorkspaceRoot: agentRoot,
-		MaxToolLoops: 4,
+		MaxToolLoops:  4,
 	}, agentReg, nil)
 	if err != nil {
 		t.Fatal(err)
