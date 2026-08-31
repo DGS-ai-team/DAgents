@@ -8,10 +8,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-func buildReadImageVisionUserMessage(payload *tools.ReadImageVisionPayload) (llm.Message, error) {
-	return buildToolVisionUserMessage([]*tools.ReadImageVisionPayload{payload})
-}
-
 func (o *Orchestrator) maybeAppendToolVisionUserMessage(sessionID string, history *[]llm.Message, tc llm.ToolCall) {
 	o.appendToolVisionUserMessages(sessionID, history, []llm.ToolCall{tc})
 }
