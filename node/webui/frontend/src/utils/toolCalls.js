@@ -218,6 +218,8 @@ const APPROVAL_TOOL_LABELS = {
   trigger_update: "更新定时任务",
   trigger_delete: "删除定时任务",
   background_job_cancel: "取消后台任务",
+  screen_capture: "截取屏幕",
+  computer_use: "操作桌面",
 };
 
 function approvalItemArguments(item) {

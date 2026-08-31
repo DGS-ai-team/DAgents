@@ -6,6 +6,7 @@ import { isKnownWorkgroupRealtimeEvent } from "../sse/workgroupEvents.js";
 import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
 import WorkgroupApprovalCard from "../components/WorkgroupApprovalCard.vue";
+import WorkgroupUserInformationCard from "../components/WorkgroupUserInformationCard.vue";
 import WorkgroupDebugPanel from "../components/WorkgroupDebugPanel.vue";
 import WorkgroupToolRow from "../components/WorkgroupToolRow.vue";
 import WorkgroupComposer from "../components/WorkgroupComposer.vue";
@@ -14,6 +15,7 @@ import ScrollToTailButton from "../components/ScrollToTailButton.vue";
 import { useWorkgroupTimeline } from "../composables/useWorkgroupTimeline.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import { workgroupApprovalItemsFromMetadata } from "../utils/workgroupApproval.js";
+import { workgroupMemberInformationRequests } from "../utils/workgroupUserInformation.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
@@ -119,18 +121,16 @@ let workgroupEventSource = null;
 let workgroupEventSeq = 0;
 const cancelledRealtimeMessageIds = new Set();
 
-const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
-const hitlMode = computed(() => Boolean(activeHitl.value));
+const hasPendingInteraction = computed(() => (pendingHitl.value || []).length > 0);
 const memberApprovalByAssign = computed(() => {
   const out = {};
   for (const hitl of pendingHitl.value || []) {
     const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
-    const source = String(metadata.source || hitl?.source || "").trim();
     const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
     const items = workgroupApprovalItemsFromMetadata(metadata);
     // 新记录带 source=agent_ref；兼容早期 Manage 记录时，以 assign_id
     // 和 execute_tool items 作为成员审批的稳定判据。
-    if (!assignId || (source !== "agent_ref" && items.length === 0)) continue;
+    if (!assignId || items.length === 0) continue;
     // A reconnect or a slow resolve can briefly expose more than one pending
     // projection for the same assignment.  The newest request is the only
     // actionable approval; rendering all of them makes each later tool show
@@ -145,13 +145,18 @@ const memberApprovalByAssign = computed(() => {
   return out;
 });
 const supervisorHitl = computed(() => {
-  const hitl = activeHitl.value;
-  const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
-  const source = String(metadata.source || hitl?.source || "").trim();
-  const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
-  const hasMemberApprovalItems = workgroupApprovalItemsFromMetadata(metadata).length > 0;
-  return hitl && source !== "agent_ref" && !(assignId && hasMemberApprovalItems) ? hitl : null;
+  return (pendingHitl.value || []).find((hitl) => {
+    const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
+    const source = String(metadata.source || hitl?.source || "").trim();
+    const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
+    const hasMemberApprovalItems = workgroupApprovalItemsFromMetadata(metadata).length > 0;
+    return source !== "agent_ref" && !(assignId && hasMemberApprovalItems);
+  }) || null;
 });
+const hitlMode = computed(() => Boolean(supervisorHitl.value));
+const memberInformationRequests = computed(() =>
+  workgroupMemberInformationRequests(pendingHitl.value, memberNameById.value),
+);
 // Assigned member content is already represented by the task card. Keep the
 // live bubble for Supervisor and direct @member turns, where it is the actual
 // conversational reply.
@@ -174,7 +179,7 @@ async function loadPendingHitl() {
 }
 
 async function submitHitlAnswer() {
-  const hitl = activeHitl.value;
+  const hitl = supervisorHitl.value;
   const answer = hitlDraft.value.trim();
   if (!hitl || !workgroupId.value || !answer || hitlBusy.value) return;
   hitlBusy.value = true;
@@ -189,6 +194,31 @@ async function submitHitlAnswer() {
       await loadPendingHitl();
     } else {
       error.value = e?.message || "提交回答失败";
+    }
+  } finally {
+    hitlBusy.value = false;
+  }
+}
+
+async function resolveMemberInformation(request, resolution) {
+  const hitlId = String(request?.hitlId || "").trim();
+  if (!hitlId || !workgroupId.value || hitlBusy.value) return;
+  hitlBusy.value = true;
+  error.value = "";
+  try {
+    await api.resolveWorkgroupHITL(
+      workgroupId.value,
+      hitlId,
+      String(resolution?.answer || ""),
+      resolution,
+    );
+    await loadPendingHitl();
+    await loadTimeline();
+  } catch (e) {
+    if (/already_resolved|409/.test(String(e?.message || ""))) {
+      await loadPendingHitl();
+    } else {
+      error.value = e?.message || "提交成员回答失败";
     }
   } finally {
     hitlBusy.value = false;
@@ -1006,7 +1036,7 @@ function pickMention(member) {
 async function cancelTurn() {
   // A pending HITL may be restored after a page reload, when `sending` is
   // false even though the workgroup turn is still awaiting a decision.
-  if (!workgroupId.value || (!sending.value && !hitlMode.value) || cancelling.value) return;
+  if (!workgroupId.value || (!sending.value && !hasPendingInteraction.value) || cancelling.value) return;
   cancelling.value = true;
   try {
     rememberCancelledMessageIds(localClientMessageId.value, remoteClientMessageId.value);
@@ -1236,12 +1266,12 @@ const liveStatusLabel = computed(() => {
 
 const composerRuntimeLabel = computed(() => {
   if (hitlMode.value) {
-    const hitl = activeHitl.value;
-    const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
-    const source = String(metadata.source || hitl?.source || "").trim();
-    if (source === "agent_ref") return "等待工具审批…";
     return hitlBusy.value ? "提交回答中…" : "等待你的回答…";
   }
+  if (memberInformationRequests.value.length) {
+    return hitlBusy.value ? "提交成员回答中…" : "成员正在等待你的回答…";
+  }
+  if (Object.keys(memberApprovalByAssign.value).length) return "等待工具审批…";
   if (sending.value || remoteSending.value) {
     return liveStatusLabel.value || "协作进行中…";
   }
@@ -1704,6 +1734,25 @@ onUnmounted(() => {
               </div>
             </article>
             <article
+              v-for="request in memberInformationRequests"
+              :key="request.key"
+              class="msg msg--assistant"
+            >
+              <div class="msg__body msg__body--grouped">
+                <div class="msg__hint wg-chat__message-hint">
+                  <span class="wg-chat__message-mark" aria-hidden="true">
+                    <img :src="brandIcon" alt="" />
+                  </span>
+                  <span>{{ request.memberLabel }}</span>
+                </div>
+                <WorkgroupUserInformationCard
+                  :request="request"
+                  :busy="hitlBusy"
+                  @resolve="(resolution) => resolveMemberInformation(request, resolution)"
+                />
+              </div>
+            </article>
+            <article
               v-if="supervisorHitl"
               class="msg msg--assistant"
             >
@@ -1745,6 +1794,7 @@ onUnmounted(() => {
             :mention-open="mentionOpen"
             :mention-candidates="mentionCandidates"
             :hitl-mode="hitlMode"
+            :pending-interaction="hasPendingInteraction"
             :direct-member="directMember"
             :hitl-draft="hitlDraft"
             :can-chat="canChat"

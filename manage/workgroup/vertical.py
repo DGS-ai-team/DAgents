@@ -1282,16 +1282,29 @@ class VerticalLoop:
             self._turn_kernel.resume_resolved_hitl(hitl)
         if (hitl.metadata or {}).get("source") == "agent_ref":
             resume = dict(req.resolution or {})
-            # The current Manage composer submits an answer string. Keep that
-            # UI compatible while mapping the common approval words to the
-            # Node-native approval protocol. Callers that already send a
-            # structured selection/approve/reject value pass through intact.
             if not str(resume.get("type") or "").strip():
-                answer = str(resume.get("answer") or "").strip().lower()
-                if answer in {"yes", "y", "ok", "approve", "approved", "allow", "同意", "批准", "允许", "确认"}:
-                    resume = {"type": "approve"}
+                items = list((hitl.metadata or {}).get("items") or [])
+                questions = [
+                    item
+                    for item in items
+                    if isinstance(item, dict)
+                    and str(item.get("hitl_type") or "").strip() == "user_information"
+                ]
+                if questions:
+                    resume["type"] = "user_information"
+                    if not str(resume.get("tool_call_id") or "").strip():
+                        resume["tool_call_id"] = str(
+                            questions[0].get("id") or questions[0].get("tool_call_id") or ""
+                        ).strip()
                 else:
-                    resume = {"type": "reject"}
+                    # Compatibility for the old approval composer, which sent
+                    # only an answer string. Structured approval resolutions
+                    # and member questions pass through unchanged.
+                    answer = str(resume.get("answer") or "").strip().lower()
+                    if answer in {"yes", "y", "ok", "approve", "approved", "allow", "同意", "批准", "允许", "确认"}:
+                        resume = {"type": "approve"}
+                    else:
+                        resume = {"type": "reject"}
             self.enqueue_agent_turn_resume(workgroup_id, hitl.hitl_id, resume)
         return hitl
 

@@ -20,6 +20,7 @@ const FS_TOOLS = new Set([
 ]);
 
 const SHELL_TOOLS = new Set(["bash_run", "bash"]);
+const COMPUTER_TOOLS = new Set(["screen_capture", "computer_use"]);
 
 const LINUX_TOOLS = new Set(["linux_exec", "linux_file_upload", "linux_file_download"]);
 
@@ -31,6 +32,7 @@ const KIND_META = {
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
   browser: { label: "browser", short: "browser", icon: "◉" },
+  computer: { label: "computer", short: "computer", icon: "▣" },
   wecom: { label: "wecom", short: "wecom", icon: "✉" },
   triggers: { label: "triggers", short: "triggers", icon: "⏱" },
   skills: { label: "skills", short: "skills", icon: "S" },
@@ -46,6 +48,7 @@ export function inferToolKind(name, data = {}) {
   if (n.startsWith(MCP_TOOL_PREFIX)) return "mcp";
   if (data?.child_agent_id || CHILD_AGENT_TOOLS.has(n)) return "child";
   if (n.startsWith("browser_")) return "browser";
+  if (COMPUTER_TOOLS.has(n)) return "computer";
   if (n.startsWith("wecom_")) return "wecom";
   if (n.startsWith("trigger_")) return "triggers";
   if (n.startsWith("terminal_")) return "terminal";

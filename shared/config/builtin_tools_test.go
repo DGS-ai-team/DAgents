@@ -70,6 +70,19 @@ func TestExpandBuiltinToolGroupsTerminal(t *testing.T) {
 	}
 }
 
+func TestExpandBuiltinToolGroupsComputer(t *testing.T) {
+	got := ExpandBuiltinToolGroups([]string{"computer"})
+	want := []string{"computer_use", "screen_capture"}
+	if len(got) != len(want) {
+		t.Fatalf("got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestLinuxToolGroupAliasUsesTerminal(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{"linux"})
 	want := ExpandBuiltinToolGroups([]string{"terminal"})

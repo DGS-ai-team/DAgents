@@ -6,6 +6,32 @@ function entry(kind, data) {
 }
 
 describe("buildToolCardModel", () => {
+  it("presents computer actions and screenshot coordinate space", () => {
+    const model = buildToolCardModel({
+      callEntry: {
+        data: {
+          tool_name: "computer_use",
+          arguments: { action: "click", x: 320, y: 180, button: "left" },
+        },
+      },
+      resultEntry: {
+        data: {
+          tool_name: "computer_use",
+          content: JSON.stringify({
+            ok: true,
+            status: "succeeded",
+            backend: "windows-sendinput",
+            coordinate_space: { width: 1280, height: 720 },
+            virtual_bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+          }),
+        },
+      },
+    });
+    expect(model.inputFields).toContainEqual({ label: "动作", value: "click", kind: "text" });
+    expect(model.inputFields).toContainEqual({ label: "目标坐标", value: "320, 180", kind: "mono" });
+    expect(model.resultFields).toContainEqual({ label: "截图尺寸", value: "1280 × 720", kind: "mono" });
+    expect(model.resultFields).toContainEqual({ label: "桌面后端", value: "windows-sendinput", kind: "text" });
+  });
   it("keeps bash input and presents structured shell result fields", () => {
     const model = buildToolCardModel({
       callEntry: entry("tool_call", {

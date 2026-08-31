@@ -2164,25 +2164,53 @@ select.settings-field__input {
   flex: 0 0 auto;
 }
 
-/* 瞬时 turn/step 状态统一显示在输入栏右上方；底部状态线只保留稳定控制项。 */
+/*
+ * 瞬时 turn/step 状态悬浮在消息/终端工作区右下角，不参与输入区排版。
+ * 右侧为“回到底部”等浮动控件预留空间；底部状态线只保留稳定控制项。
+ */
 .chat__composer-runtime-rail {
+  position: absolute;
+  right: 68px;
+  bottom: calc(100% + 8px);
+  z-index: 15;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+  max-width: min(520px, calc(100% - 92px));
   min-width: 0;
-  min-height: 16px;
-  margin: 0 6px 2px;
+  min-height: 24px;
+  margin: 0;
+  padding: 3px 9px;
   overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
   color: var(--color-text-subtle);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
   font-size: 11px;
   line-height: 1.45;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+}
+
+.chat__composer-runtime-rail::before {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-primary);
+  content: "";
+  animation: composer-pulse 1.2s ease-in-out infinite;
 }
 
 .chat__composer-runtime-rail--idle {
+  opacity: 0;
+  transform: translateY(4px);
   visibility: hidden;
   pointer-events: none;
 }
