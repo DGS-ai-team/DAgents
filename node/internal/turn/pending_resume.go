@@ -57,7 +57,6 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 	if remaining == nil {
 		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
-	o.publishRemainingHITL(sessionID, remaining)
 	return StepOutcome{Pending: remaining, StepIndex: stepIndex}
 }
 
@@ -109,17 +108,5 @@ func (o *Orchestrator) continueAfterApprovalResume(
 		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
 	remaining := pendingFromItems(remainingItems)
-	o.publishRemainingHITL(sessionID, remaining)
 	return StepOutcome{Pending: remaining, StepIndex: stepIndex}
-}
-
-// publishRemainingHITL makes a partially resolved mixed batch actionable
-// again. The remaining call IDs produce a new stable HITL identity, allowing
-// local and Workgroup clients to persist and resolve the next interaction.
-func (o *Orchestrator) publishRemainingHITL(sessionID string, pending *PendingHITL) {
-	if o == nil || pending == nil || len(pending.Items) == 0 {
-		return
-	}
-	message, items := buildHITLRequiredPayload(pending.Items)
-	o.publishHITLRequired(sessionID, StableHITLID(pending), message, items)
 }

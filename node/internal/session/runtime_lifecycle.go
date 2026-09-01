@@ -1360,7 +1360,7 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 	}
 	if outcome.Pending != nil {
 		pendingPayload, _ := json.Marshal(outcome.Pending)
-		return r.withCommittedHistoryLocked(history, func() error {
+		err := r.withCommittedHistoryLocked(history, func() error {
 			state := r.turnCoordinator.Snapshot()
 			toolExecutionID := ""
 			if len(outcome.Pending.Items) > 0 {
@@ -1382,6 +1382,11 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 			}
 			return nil
 		})
+		if err != nil {
+			return err
+		}
+		r.orch.PublishPendingHITL(r.session.ID, outcome.Pending)
+		return nil
 	}
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		// Tool calls have only been proposed/accepted at this point. The Step
@@ -1485,7 +1490,7 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 		if err != nil {
 			return fmt.Errorf("marshal resumed pending interaction: %w", err)
 		}
-		return r.withCommittedHistoryLocked(history, func() error {
+		err = r.withCommittedHistoryLocked(history, func() error {
 			state := r.turnCoordinator.Snapshot()
 			toolExecutionID := ""
 			if len(outcome.Pending.Items) == 1 {
@@ -1508,6 +1513,11 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 			}
 			return nil
 		})
+		if err != nil {
+			return err
+		}
+		r.orch.PublishPendingHITL(r.session.ID, outcome.Pending)
+		return nil
 	}
 	if outcome.ScheduleToolResult {
 		// The model emitted another tool batch after the resumed execution. It

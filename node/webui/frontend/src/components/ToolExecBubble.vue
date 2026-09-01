@@ -269,6 +269,7 @@ onBeforeUnmount(clearCopyState);
           <ToolCardFieldList
             :fields="card.inputFields"
             :copy-state="copyState"
+            :layout="card.inputLayout"
             @copy="copyInputValue"
           />
         </section>

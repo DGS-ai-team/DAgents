@@ -103,12 +103,11 @@ type OnboardingSettings struct {
 
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
 type ChildAgentsLimits struct {
-	DefaultTTLSeconds         int `json:"default_ttl_seconds"`
-	MaxTTLSeconds             int `json:"max_ttl_seconds"`
-	DefaultMaxTurns           int `json:"default_max_turns"`
-	MaxMaxTurns               int `json:"max_max_turns"`
-	MaxActivePerParent        int `json:"max_active_per_parent"`
-	DefaultWaitTimeoutSeconds int `json:"default_wait_timeout_seconds"`
+	DefaultTTLSeconds  int `json:"default_ttl_seconds"`
+	MaxTTLSeconds      int `json:"max_ttl_seconds"`
+	DefaultMaxTurns    int `json:"default_max_turns"`
+	MaxMaxTurns        int `json:"max_max_turns"`
+	MaxActivePerParent int `json:"max_active_per_parent"`
 }
 
 // BrowserSettings Browser 工具参数（enabled 见 features）。
@@ -267,12 +266,11 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			NodeProfileCompleted: cfg.NodeProfileCompleted(),
 		},
 		ChildAgents: ChildAgentsLimits{
-			DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
-			MaxTTLSeconds:             cfg.ChildAgents.MaxTTLSeconds,
-			DefaultMaxTurns:           cfg.ChildAgents.DefaultMaxTurns,
-			MaxMaxTurns:               cfg.ChildAgents.MaxMaxTurns,
-			MaxActivePerParent:        cfg.ChildAgents.MaxActivePerParent,
-			DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
+			DefaultTTLSeconds:  cfg.ChildAgents.DefaultTTLSeconds,
+			MaxTTLSeconds:      cfg.ChildAgents.MaxTTLSeconds,
+			DefaultMaxTurns:    cfg.ChildAgents.DefaultMaxTurns,
+			MaxMaxTurns:        cfg.ChildAgents.MaxMaxTurns,
+			MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 		},
 		Browser: BrowserSettings{
 			ServiceURL:        cfg.Browser.ServiceURL,
@@ -626,7 +624,7 @@ func applyOnboardingPatch(cfg *config.Config, p OnboardingSettings) error {
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 	if p.DefaultTTLSeconds < 0 || p.MaxTTLSeconds < 0 || p.DefaultMaxTurns < 0 ||
-		p.MaxMaxTurns < 0 || p.MaxActivePerParent < 0 || p.DefaultWaitTimeoutSeconds < 0 {
+		p.MaxMaxTurns < 0 || p.MaxActivePerParent < 0 {
 		return fmt.Errorf("child_agents limits must be >= 0")
 	}
 	if p.DefaultTTLSeconds > 0 {
@@ -643,9 +641,6 @@ func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 	}
 	if p.MaxActivePerParent > 0 {
 		cfg.ChildAgents.MaxActivePerParent = p.MaxActivePerParent
-	}
-	if p.DefaultWaitTimeoutSeconds > 0 {
-		cfg.ChildAgents.DefaultWaitTimeoutSeconds = p.DefaultWaitTimeoutSeconds
 	}
 	return nil
 }

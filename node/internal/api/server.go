@@ -332,14 +332,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		MultimodalEnabled: cfg.MultimodalEnabled(),
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
-		Enabled:                   true,
-		DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
-		MaxTTLSeconds:             cfg.ChildAgents.MaxTTLSeconds,
-		DefaultMaxTurns:           cfg.ChildAgents.DefaultMaxTurns,
-		MaxMaxTurns:               cfg.ChildAgents.MaxMaxTurns,
-		MaxActivePerParent:        cfg.ChildAgents.MaxActivePerParent,
-		DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
+		Enabled:            true,
+		DefaultTTLSeconds:  cfg.ChildAgents.DefaultTTLSeconds,
+		MaxTTLSeconds:      cfg.ChildAgents.MaxTTLSeconds,
+		DefaultMaxTurns:    cfg.ChildAgents.DefaultMaxTurns,
+		MaxMaxTurns:        cfg.ChildAgents.MaxMaxTurns,
+		MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 	}, hub, cfg.NodeID, logger)
+	childMgr.SetRunRepository(session.NewChildRunRepository(st))
 	mgr.SetChildAgentManager(childMgr)
 	if cfg.IdleAutoCompressEnabled() {
 		mgr.StartIdleAutoCompressScanner()

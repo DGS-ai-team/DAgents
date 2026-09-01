@@ -96,6 +96,10 @@ func (r *runtime) runTurnStepAtEpoch(
 }
 
 func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
+	if outcome.Err != nil && r.isChildSession() && r.childMeta != nil && r.childMeta.childMgr != nil {
+		r.childMeta.childMgr.OnChildFailed(r.session.ID, outcome.Err.Error(), r.stepIndexSnapshot())
+		return
+	}
 	if outcome.ScheduleToolResult || outcome.Pending != nil {
 		return
 	}

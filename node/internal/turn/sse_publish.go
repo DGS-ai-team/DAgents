@@ -42,6 +42,17 @@ func (o *Orchestrator) publishHITLRequired(sessionID, hitlID, message string, it
 	}))
 }
 
+// PublishPendingHITL 在生命周期投影已提交后发布可恢复的 HITL 卡片。
+// 先提交 pending、再发事件，避免客户端看到卡片后立即 resume 却命中
+// no_pending_hitl 的竞态。
+func (o *Orchestrator) PublishPendingHITL(sessionID string, pending *PendingHITL) {
+	if o == nil || pending == nil || len(pending.Items) == 0 {
+		return
+	}
+	message, items := buildHITLRequiredPayload(pending.Items)
+	o.publishHITLRequired(sessionID, StableHITLID(pending), message, items)
+}
+
 // publishToolCallPayload 推送 tool call payload SSE。
 func (o *Orchestrator) publishToolCallPayload(sessionID string, payload map[string]any) {
 	o.hub.Publish(sessionID, "tool_call", o.withLifecycleMetadata(sessionID, payload))

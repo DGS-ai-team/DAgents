@@ -361,14 +361,14 @@ Web UI：Agents 设置页 Policy 面板。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下**未交付**的活跃子 Agent |
+| GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下的活跃与最近终态子 Agent 快照 |
 | GET | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}` | 查询单个子 Agent 状态 |
 | POST | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
-- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** Agent 的 `GET /v1/streams`。
-- 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。
+- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，创建工具同步等待子 Agent 终态，**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_progress` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** Agent 的 `GET /v1/streams`。
+- 子 Agent 完成、失败、取消、过期或因 Node 重启中断后，都会保留轻量 ChildRun 快照供 UI hydrate；完整 transcript 不复制到父会话。
 
-父 Agent 工具（非 HTTP）：`create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent`。
+父 Agent 工具（非 HTTP）：`create_temporary_agent`、`cancel_temporary_agent`。
 
 ---
 
@@ -386,7 +386,7 @@ Web UI：Agents 设置页 Policy 面板。
 |----|------|
 | **HTTP** | §2.8 list / get / cancel（用户与 Client） |
 | **工具** | `create_temporary_agent` 等（父 Agent turn loop） |
-| **进程内** | `node/internal/childagent/`：`Create` / `Deliver` / `Cancel` / `Wait` |
+| **进程内** | `node/internal/childagent/`：`Create` / `Cancel` / `ListSnapshots` / `RouteResume` |
 
 字段、SSE、生命周期见 **[child-agent-tools.md](./child-agent-tools.md)**。
 

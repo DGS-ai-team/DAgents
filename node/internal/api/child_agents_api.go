@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 )
@@ -19,8 +20,10 @@ type sessionChildAgentViewJSON struct {
 	Status       string              `json:"status"`
 	Purpose      string              `json:"purpose"`
 	AllowedTools []string            `json:"allowed_tools"`
+	LoadedSkills []string            `json:"loaded_skills"`
 	CreatedAt    string              `json:"created_at"`
 	ExpiresAt    string              `json:"expires_at"`
+	FinishedAt   string              `json:"finished_at,omitempty"`
 	TurnCount    int                 `json:"turn_count"`
 	MaxTurns     int                 `json:"max_turns"`
 	Progress     childagent.Progress `json:"progress"`
@@ -58,8 +61,10 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 			Status:       it.Status,
 			Purpose:      it.Purpose,
 			AllowedTools: append([]string(nil), it.AllowedTools...),
+			LoadedSkills: append([]string(nil), it.LoadedSkills...),
 			CreatedAt:    it.CreatedAt.Format(timeRFC3339),
 			ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
+			FinishedAt:   formatOptionalTime(it.FinishedAt),
 			TurnCount:    it.TurnCount,
 			MaxTurns:     it.MaxTurns,
 			Progress:     it.Progress,
@@ -84,8 +89,10 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 				Status:       it.Status,
 				Purpose:      it.Purpose,
 				AllowedTools: append([]string(nil), it.AllowedTools...),
+				LoadedSkills: append([]string(nil), it.LoadedSkills...),
 				CreatedAt:    it.CreatedAt.Format(timeRFC3339),
 				ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
+				FinishedAt:   formatOptionalTime(it.FinishedAt),
 				TurnCount:    it.TurnCount,
 				MaxTurns:     it.MaxTurns,
 				Progress:     it.Progress,
@@ -133,3 +140,10 @@ func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) 
 }
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
+
+func formatOptionalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format(timeRFC3339)
+}

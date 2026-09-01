@@ -33,8 +33,8 @@ func newManagerWithChildAgents(t *testing.T, llmClient llm.Client) (*Manager, *c
 	return mgr, cm, hub
 }
 
-// TestChildAgentParentTurnWaitTrue 父 turn 经 mock LLM 调用 create_temporary_agent(wait=true) 并收到 SSE。
-func TestChildAgentParentTurnWaitTrue(t *testing.T) {
+// TestChildAgentParentTurnSynchronous 父 turn 通过同步 create 工具完成子任务并收到 SSE。
+func TestChildAgentParentTurnSynchronous(t *testing.T) {
 	mock := &llm.ChildAgentFlowMock{FinalReply: "委派完成"}
 	mgr, _, hub := newManagerWithChildAgents(t, mock)
 	defer mgr.Stop()
@@ -54,12 +54,22 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 
 	deadline := time.After(8 * time.Second)
 	var gotCreated, gotCompleted, gotDone bool
+	var approved bool
 	var childID string
 	for !(gotCreated && gotCompleted && gotDone) {
 		select {
 		case ev := <-ch:
 			t.Logf("sse type=%s data=%v", ev.Type, ev.Data)
 			switch ev.Type {
+			case "hitl_required":
+				if !approved {
+					approved = true
+					if _, err := mgr.EnqueueMessage(ctx, parent.ID, "resume", "", nil, map[string]any{
+						"type": "selection", "approved": []any{"call-create-child-1"}, "rejected": []any{},
+					}, ""); err != nil {
+						t.Fatal(err)
+					}
+				}
 			case "temporary_agent_created":
 				gotCreated = true
 				childID, _ = ev.Data["child_agent_id"].(string)
@@ -80,8 +90,8 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 	}
 }
 
-// TestChildAgentAsyncCreateAndWait 异步创建后通过 wait_temporary_agents 汇总。
-func TestChildAgentAsyncCreateAndWait(t *testing.T) {
+// TestChildAgentCreateIsSynchronous 创建工具返回前必须已经拿到子 Agent 终态。
+func TestChildAgentCreateIsSynchronous(t *testing.T) {
 	mock := &llm.MockClient{}
 	mgr, cm, _ := newManagerWithChildAgents(t, mock)
 	defer mgr.Stop()
@@ -92,26 +102,21 @@ func TestChildAgentAsyncCreateAndWait(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	createOut, err := cm.HandleCreate(ctx, parent.ID, `{"task":"列出目录","purpose":"async test","wait":false}`)
+	createOut, err := cm.HandleCreate(ctx, parent.ID, `{"task":"列出目录","purpose":"sync test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var handle map[string]any
-	if err := json.Unmarshal([]byte(createOut), &handle); err != nil {
+	var result map[string]any
+	if err := json.Unmarshal([]byte(createOut), &result); err != nil {
 		t.Fatal(err)
 	}
-	childID, _ := handle["child_agent_id"].(string)
+	childID, _ := result["child_agent_id"].(string)
 	if childID == "" {
 		t.Fatalf("missing child id: %s", createOut)
 	}
 
-	// 子 Agent 在后台完成；wait 轮询直至终态（含记录回收后 rec==nil 视为 terminal）。
-	waitOut, err := cm.HandleWait(ctx, parent.ID, `{"child_agent_ids":["`+childID+`"],"timeout_seconds":5}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(waitOut, `"status":"completed"`) && !strings.Contains(waitOut, "completed") {
-		t.Fatalf("unexpected wait output: %s", waitOut)
+	if result["kind"] != "result" || result["status"] != string(childagent.StatusCompleted) {
+		t.Fatalf("unexpected synchronous result: %s", createOut)
 	}
 }
 
@@ -124,9 +129,19 @@ func TestHydrateIncludesActiveChildProgressAndParentToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cm.HandleParentTool(context.Background(), parent.ID, childagent.ToolCreateTemporaryAgent,
-		`{"task":"slow job","purpose":"hydrate test","wait":false}`, "call-parent-child-1"); err != nil {
-		t.Fatal(err)
+	created := make(chan error, 1)
+	go func() {
+		_, err := cm.HandleParentTool(context.Background(), parent.ID, childagent.ToolCreateTemporaryAgent,
+			`{"task":"slow job","purpose":"hydrate test"}`, "call-parent-child-1")
+		created <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		view, _ := mgr.GetHydrateView(parent.ID)
+		if len(view.ChildAgents) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	view, err := mgr.GetHydrateView(parent.ID)
@@ -142,6 +157,9 @@ func TestHydrateIncludesActiveChildProgressAndParentToolCall(t *testing.T) {
 	}
 	if child.Progress.Status != childagent.StatusActive || child.Progress.MaxTurns <= 0 {
 		t.Fatalf("hydrate progress = %+v", child.Progress)
+	}
+	if err := <-created; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -182,13 +200,31 @@ func TestChildAgentCancelBeforeComplete(t *testing.T) {
 	defer hub.Unsubscribe(ch)
 
 	ctx := context.Background()
-	createOut, err := cm.HandleCreate(ctx, parent.ID, `{"task":"slow job","purpose":"cancel test","wait":false}`)
-	if err != nil {
-		t.Fatal(err)
+	created := make(chan string, 1)
+	go func() {
+		out, err := cm.HandleCreate(ctx, parent.ID, `{"task":"slow job","purpose":"cancel test"}`)
+		if err != nil {
+			created <- ""
+			return
+		}
+		var result map[string]any
+		_ = json.Unmarshal([]byte(out), &result)
+		childID, _ := result["child_agent_id"].(string)
+		created <- childID
+	}()
+	var childID string
+	deadline := time.Now().Add(time.Second)
+	for childID == "" && time.Now().Before(deadline) {
+		items, _ := mgr.ListChildAgents(parent.ID)
+		if len(items) > 0 {
+			childID = items[0].ChildAgentID
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	var handle map[string]any
-	_ = json.Unmarshal([]byte(createOut), &handle)
-	childID, _ := handle["child_agent_id"].(string)
+	if childID == "" {
+		t.Fatal("child was not created")
+	}
 
 	cancelOut, err := cm.HandleCancelTool(parent.ID, `{"child_agent_id":"`+childID+`","reason":"test cancel"}`)
 	if err != nil {
@@ -197,8 +233,9 @@ func TestChildAgentCancelBeforeComplete(t *testing.T) {
 	if !strings.Contains(cancelOut, `"status":"cancelled"`) {
 		t.Fatalf("unexpected cancel: %s", cancelOut)
 	}
+	<-created
 
-	deadline := time.After(3 * time.Second)
+	cancelDeadline := time.After(3 * time.Second)
 	gotCancelled := false
 	for !gotCancelled {
 		select {
@@ -206,7 +243,7 @@ func TestChildAgentCancelBeforeComplete(t *testing.T) {
 			if ev.Type == "temporary_agent_cancelled" {
 				gotCancelled = true
 			}
-		case <-deadline:
+		case <-cancelDeadline:
 			t.Fatal("timeout waiting for temporary_agent_cancelled")
 		}
 	}
@@ -288,7 +325,7 @@ func TestSpawnChildPreloadsSkills(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	out, err := cm.HandleCreate(ctx, parent.ID, `{"task":"write summary","purpose":"docs","skill_names":["writer"],"wait":false}`)
+	out, err := cm.HandleCreate(ctx, parent.ID, `{"task":"write summary","purpose":"docs","skill_names":["writer"]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,13 +340,12 @@ func TestSpawnChildPreloadsSkills(t *testing.T) {
 	if childID == "" {
 		t.Fatalf("missing child_agent_id in %v", payload)
 	}
-	childRT := mgr.getRuntime(childID)
-	if childRT == nil {
-		t.Fatal("child runtime missing")
+	items, err := mgr.ListChildAgents(parent.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	loaded := childRT.getLoadedSkills()
-	if len(loaded) != 1 || loaded[0].SkillName != "writer" {
-		t.Fatalf("loaded skills = %+v", loaded)
+	if len(items) != 1 || len(items[0].LoadedSkills) != 1 || items[0].LoadedSkills[0] != "writer" {
+		t.Fatalf("loaded skills = %+v", items)
 	}
 }
 
@@ -334,7 +370,7 @@ func TestSpawnChildRejectsUnknownSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := cm.HandleCreate(context.Background(), parent.ID, `{"task":"x","purpose":"y","skill_names":["missing"],"wait":false}`)
+	out, err := cm.HandleCreate(context.Background(), parent.ID, `{"task":"x","purpose":"y","skill_names":["missing"]}`)
 	if err != nil {
 		t.Fatal(err)
 	}

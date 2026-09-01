@@ -107,7 +107,7 @@ func (o *Orchestrator) recordToolCall(sessionID, toolName string) {
 	m.ToolCalls++
 	m.ToolCallsByName[name]++
 	switch name {
-	case "background_job_status", "temporary_agent_status":
+	case "background_job_status":
 		m.StatusPollCount++
 	}
 }

@@ -95,6 +95,10 @@ func (r *runtime) tryCompleteChildIfIdle() {
 		return
 	}
 	meta.completing = true
+	if len(last.ToolCalls) > 0 {
+		meta.childMgr.OnChildFailed(r.session.ID, "child agent stopped with unresolved tool calls", loops)
+		return
+	}
 	summary := lastAssistantSummary(msgs)
 	meta.childMgr.OnChildSettled(r.session.ID, summary, loops)
 }

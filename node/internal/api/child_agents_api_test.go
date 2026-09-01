@@ -63,7 +63,7 @@ func newChildAgentTestServer(t *testing.T, llmClient llm.Client) (*Server, *http
 	return srv, ts
 }
 
-// TestChildAgentMockLLME2E 经 HTTP + mock LLM 走通 create(wait=true) 全链路。
+// TestChildAgentMockLLME2E 经 HTTP + mock LLM 走通同步 create 全链路。
 func TestChildAgentMockLLME2E(t *testing.T) {
 	mock := &llm.ChildAgentFlowMock{FinalReply: "HTTP 联调完成"}
 	srv, ts := newChildAgentTestServer(t, mock)
@@ -95,6 +95,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	deadline := time.After(10 * time.Second)
 	reader := bufio.NewReader(streamResp.Body)
 	var gotCreated, gotCompleted, gotDone bool
+	var approved bool
 	var childID string
 	var assistant strings.Builder
 
@@ -126,6 +127,16 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 		}
 		t.Logf("sse %s", envelope.Type)
 		switch envelope.Type {
+		case "hitl_required":
+			if !approved {
+				approved = true
+				resume := `{"agent_id":"` + parentID + `","request_type":"resume","resume_value":{"type":"selection","approved":["call-create-child-1"],"rejected":[]}}`
+				resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(resume))
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp.Body.Close()
+			}
 		case "temporary_agent_created":
 			gotCreated = true
 			childID, _ = envelope.Data["child_agent_id"].(string)
@@ -147,7 +158,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 		t.Fatalf("unexpected assistant: %q", assistant.String())
 	}
 
-	// 完成后列表应为空（记录已回收）
+	// 完成后列表仍保留最近终态，供刷新恢复卡片。
 	listResp, err := http.Get(ts.URL + "/v1/agents/" + parentID + "/child-agents")
 	if err != nil {
 		t.Fatal(err)
@@ -157,8 +168,8 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	if err := json.NewDecoder(listResp.Body).Decode(&list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Items) != 0 {
-		t.Fatalf("expected empty active list, got %d", len(list.Items))
+	if len(list.Items) != 1 || list.Items[0].Status != "completed" {
+		t.Fatalf("expected one completed child snapshot, got %+v", list.Items)
 	}
 }
 
@@ -209,7 +220,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"启动异步子任务"}`
+	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"启动同步子任务"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -219,6 +230,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	deadline := time.After(8 * time.Second)
 	reader := bufio.NewReader(streamResp.Body)
 	var childID string
+	approved := false
 	for childID == "" {
 		select {
 		case <-deadline:
@@ -236,6 +248,15 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 		var envelope struct {
 			Type string         `json:"type"`
 			Data map[string]any `json:"data"`
+		}
+		if json.Unmarshal([]byte(payload), &envelope) == nil && envelope.Type == "hitl_required" && !approved {
+			approved = true
+			resume := `{"agent_id":"` + parentID + `","request_type":"resume","resume_value":{"type":"selection","approved":["call-create-async"],"rejected":[]}}`
+			resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(resume))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
 		}
 		if json.Unmarshal([]byte(payload), &envelope) == nil && envelope.Type == "temporary_agent_created" {
 			childID, _ = envelope.Data["child_agent_id"].(string)
@@ -283,7 +304,7 @@ func (d *sessionDelayedEchoMock) StreamChat(ctx context.Context, req llm.ChatReq
 	case <-time.After(d.delay):
 	}
 	if d.isParent(req.Tools) && !d.hasToolResult(req.Messages) {
-		args := `{"task":"slow","purpose":"http cancel","wait":false}`
+		args := `{"task":"slow","purpose":"http cancel"}`
 		tc := llm.ToolCall{
 			ID: "call-create-async", Type: "function",
 			Function: llm.ToolCallFunction{Name: "create_temporary_agent", Arguments: args},

@@ -42,8 +42,6 @@ var knownBuiltinTools = map[string]struct{}{
 	"trigger_update":         {},
 	"trigger_delete":         {},
 	"create_temporary_agent": {},
-	"wait_temporary_agents":  {},
-	"temporary_agent_status": {},
 	"cancel_temporary_agent": {},
 	"browser_run_task":       {},
 	"browser_task_status":    {},
@@ -102,8 +100,6 @@ var builtinToolGroups = map[string][]string{
 	},
 	"child_agents": {
 		"create_temporary_agent",
-		"wait_temporary_agents",
-		"temporary_agent_status",
 		"cancel_temporary_agent",
 	},
 	// browser：主 Agent 任务级派发（伴生 Chrome + sidecar browser_use.Agent）。

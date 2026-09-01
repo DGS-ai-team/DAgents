@@ -2,7 +2,7 @@ import { reactive } from "vue";
 import * as api from "../api/node.js";
 import { agentStore } from "./agent.js";
 
-/** 父 Agent 下活跃临时子 Agent。 */
+/** 父 Agent 下子 Agent 的实时/终态投影。 */
 const entries = reactive(new Map());
 
 export const remoteWorkerStore = reactive({
@@ -18,6 +18,25 @@ function text(value) {
   return String(value || "").trim();
 }
 
+function recentToolsFrom(raw, fallback = []) {
+  const items = Array.isArray(raw) ? raw : Array.isArray(fallback) ? fallback : [];
+  return items
+    .map((item) => {
+      const toolName = text(item?.tool_name || item?.toolName);
+      if (!toolName) return null;
+      return {
+        toolCallId: text(item?.tool_call_id || item?.toolCallId),
+        toolName,
+        status: text(item?.status || "running") || "running",
+        inputSummary: text(item?.input_summary || item?.inputSummary),
+        outputPreview: text(item?.output_preview || item?.outputPreview),
+        startedAt: text(item?.started_at || item?.startedAt),
+        finishedAt: text(item?.finished_at || item?.finishedAt),
+      };
+    })
+    .filter(Boolean);
+}
+
 function progressFrom(item, fallback = {}) {
   const raw = item?.progress && typeof item.progress === "object" ? item.progress : item || {};
   return {
@@ -29,7 +48,12 @@ function progressFrom(item, fallback = {}) {
     currentToolCallId: text(raw.current_tool_call_id || raw.currentToolCallId || fallback.current_tool_call_id || fallback.currentToolCallId),
     currentToolStatus: text(raw.current_tool_status || raw.currentToolStatus || fallback.current_tool_status || fallback.currentToolStatus),
     lastOutputPreview: text(raw.last_output_preview || raw.lastOutputPreview || fallback.last_output_preview || fallback.lastOutputPreview),
+    recentTools: recentToolsFrom(
+      raw.recent_tools ?? raw.recentTools,
+      fallback.recent_tools ?? fallback.recentTools,
+    ),
     pendingApproval: raw.pending_approval === true || raw.pendingApproval === true || fallback.pending_approval === true || fallback.pendingApproval === true,
+    pendingApprovalData: raw.pending_approval_data || raw.pendingApprovalData || fallback.pending_approval_data || fallback.pendingApprovalData || null,
     summary: text(raw.summary || fallback.summary),
     error: text(raw.error || fallback.error),
     updatedAt: text(raw.updated_at || raw.updatedAt || fallback.updated_at || fallback.updatedAt),
@@ -42,11 +66,12 @@ function entryFrom(item, previous = null) {
   if (previous?.progress && progress.revision < previous.progress.revision) {
     progress = { ...previous.progress };
   }
+  const terminal = ["completed", "failed", "cancelled", "expired", "interrupted"].includes(progress.status);
   return {
     childAgentId: text(item?.child_agent_id || previous?.childAgentId),
     toolCallId: text(item?.tool_call_id || previous?.toolCallId),
     purpose: text(item?.purpose || previous?.purpose),
-    awaitingApproval: progress.pendingApproval || previous?.awaitingApproval === true,
+    awaitingApproval: progress.pendingApproval || (!terminal && previous?.awaitingApproval === true),
     progress,
   };
 }
@@ -78,10 +103,19 @@ export function onChildProgress(data) {
 }
 
 export function onChildFinished(childOrData) {
-  const id = text(typeof childOrData === "object" ? childOrData?.child_agent_id : childOrData);
-  if (!id) return;
-  entries.delete(id);
-  bump();
+	const data = typeof childOrData === "object" ? childOrData : { child_agent_id: childOrData };
+	const id = text(data?.child_agent_id);
+	if (!id) return;
+	const previous = entries.get(id);
+	const status = text(data?.status || "completed");
+	entries.set(id, entryFrom({
+		...data,
+		status,
+		phase: data?.phase || status,
+		summary: data?.summary,
+		error: data?.error || data?.reason,
+	}, previous));
+	bump();
 }
 
 export function setChildAwaitingApproval(childId, on) {
@@ -108,7 +142,7 @@ export function replaceChildrenFromApi(items) {
     entries.set(id, entryFrom(item, entries.get(id)));
   }
   // 保留刚由 SSE 观测到、但查询快照在请求发出时尚未包含的活跃 child；
-  // 后续 completed/cancelled 事件会将其移除。
+  // 终态由 API 的持久快照补齐，避免刷新后把已完成任务伪装成 active。
   for (const [id, entry] of entries) {
     if (incoming.has(id)) continue;
     if (entry.progress.revision > 0 && ["creating", "active"].includes(entry.progress.status)) continue;

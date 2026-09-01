@@ -8,7 +8,6 @@ import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
-import ChildrenPanel from "../components/ChildrenPanel.vue";
 const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
 import {
   agentStore,
@@ -71,9 +70,6 @@ import {
 import { classifyCancelOutcome } from "../stores/cancelState.js";
 import { createTurnWatchdog } from "../stores/turnWatchdog.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
-import {
-  formatChildLifecycle,
-} from "../utils/activityFormat.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "../stores/chrome.js";
 import {
   startStatus,
@@ -483,15 +479,13 @@ function handleEvent(ev) {
       break;
     case "temporary_agent_created":
       onChildCreated(ev.data);
-      addSystem(formatChildLifecycle(ev.type, ev.data));
       break;
     case "temporary_agent_progress":
       onChildProgress(ev.data);
       break;
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":
-      onChildFinished(ev.data?.child_agent_id);
-      addSystem(formatChildLifecycle(ev.type, ev.data));
+      onChildFinished(ev.data);
       break;
     case "context_compression_blocking":
     case "context_compression_silent":
@@ -1438,9 +1432,6 @@ onUnmounted(() => {
         />
       </div>
 
-      <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
-        <ChildrenPanel @close="closePanel" />
-      </div>
     </div>
 
     <AgentCreateModal

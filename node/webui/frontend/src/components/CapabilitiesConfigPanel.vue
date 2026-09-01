@@ -271,15 +271,6 @@ onMounted(load);
             min="1"
           />
         </label>
-        <label class="settings-field">
-          <span class="settings-field__label">默认等待超时（秒）</span>
-          <input
-            v-model.number="form.child_agents.default_wait_timeout_seconds"
-            class="settings-field__input"
-            type="number"
-            min="1"
-          />
-        </label>
       </div>
     </section>
   </ConfigPanelShell>
