@@ -2,8 +2,6 @@ package turn
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -832,12 +830,6 @@ func parseJSONArgs(argsJSON string) map[string]any {
 		return map[string]any{}
 	}
 	return m
-}
-
-func newShortID(prefix string) string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return prefix + hex.EncodeToString(b[:])
 }
 
 func mergeToolResultExtra(parts ...map[string]any) map[string]any {
