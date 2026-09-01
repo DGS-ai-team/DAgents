@@ -20,11 +20,11 @@ describe("formatToolResultDisplay", () => {
     const display = formatToolResultDisplay({
       data: {
         name: "create_temporary_agent",
-        content: JSON.stringify({ child_agent_id: "x", purpose: "test" }),
+        content: JSON.stringify({ kind: "result", child_agent_id: "x", status: "completed", summary: "test" }),
         duration_seconds: 1.2,
       },
     });
-    expect(display.headline).toContain("已创建临时 Agent");
+    expect(display.headline).toContain("临时 Agent 完成");
     expect(display.headline).toContain("1.2s");
   });
 

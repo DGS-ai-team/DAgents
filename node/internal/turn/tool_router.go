@@ -60,13 +60,17 @@ func (o *Orchestrator) processToolCalls(
 				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 				continue
 			}
-			_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
-			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
-			if err != nil {
-				return nil, "", err
+			decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
+			switch decision.Action {
+			case policy.ActionDeny:
+				msg := hooks.ToolDenyMessage(decision)
+				o.publishToolResult(sessionID, tc, msg, true, nil)
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+			case policy.ActionRequireApproval:
+				approvalCalls = append(approvalCalls, pendingApprovalCall{tc: tc})
+			default:
+				autoCalls = append(autoCalls, tc)
 			}
-			o.publishToolResult(sessionID, tc, output, strings.HasPrefix(output, "ERROR:"), nil)
-			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 			continue
 		}
 
@@ -137,13 +141,10 @@ func (o *Orchestrator) processToolCalls(
 	if len(pendingItems) == 0 {
 		return nil, "", nil
 	}
-	message, sseItems := buildHITLRequiredPayload(pendingItems)
 	// Complete the pause hook before publishing the resumable event. Clients
-	// may resume immediately after observing hitl_required; publishing first
-	// would let the resume path mutate the shared history while this turn is
-	// still applying hook effects to it.
+	// receive the event only after runtime lifecycle has committed the pending
+	// interaction; this keeps the resume route race-free.
 	o.runHITLBeforePausePhase(ctx, sessionID, history, "awaiting_hitl")
-	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
 	return pendingFromItems(pendingItems), "awaiting_hitl", nil
 }
 
@@ -425,7 +426,7 @@ func stringSliceField(payload map[string]any, key string) []string {
 
 // executeAutoBatch 并行执行一批免审批工具（对齐 Python gather）。
 // 每个工具完成后立刻推送 tool_result SSE，便于 UI 反映并行进度；
-// Wait 后按原始 tool_calls 顺序写入 history（不重复推送 SSE）。
+// 所有执行协程结束后，按原始 tool_calls 顺序写入 history（不重复推送 SSE）。
 func (o *Orchestrator) executeAutoBatch(
 	ctx context.Context,
 	sessionID string,
@@ -438,6 +439,19 @@ func (o *Orchestrator) executeAutoBatch(
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// Child management is synchronous and may wait for an entire child Turn.
+	// Keep a batch containing one of these calls on the ordered path so it
+	// cannot be sent to the generic executor or race another child lifecycle.
+	for _, tc := range autoCalls {
+		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
+			for _, ordered := range autoCalls {
+				if err := o.executeTool(ctx, sessionID, history, ordered, plan); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 	}
 	if len(autoCalls) == 1 {
 		return o.executeTool(ctx, sessionID, history, autoCalls[0], plan)
@@ -667,6 +681,9 @@ func (o *Orchestrator) executeTool(
 	tc llm.ToolCall,
 	plan *clihitl.ApprovalPlan,
 ) error {
+	if childagent.IsTemporaryAgentTool(tc.Function.Name) {
+		return o.executeChildManagementTool(ctx, sessionID, history, tc)
+	}
 	o.recordToolCall(sessionID, tc.Function.Name)
 	if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
 		content := "ERROR: " + err.Error()
@@ -681,6 +698,32 @@ func (o *Orchestrator) executeTool(
 		return lifecycleErr
 	}
 	return finishErr
+}
+
+// executeChildManagementTool 执行父 Agent 的同步子 Agent 控制工具。
+// 它仍通过普通 tool_result 进入当前消息序列，因此审批恢复和普通创建
+// 都保持合法的 assistant(tool_call) → tool(tool_result) 配对。
+func (o *Orchestrator) executeChildManagementTool(
+	ctx context.Context,
+	sessionID string,
+	history *[]llm.Message,
+	tc llm.ToolCall,
+) error {
+	if o.childMgr == nil || !o.childMgr.Enabled() {
+		output := "ERROR: child agents disabled"
+		o.publishToolResult(sessionID, tc, output, true, nil)
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+		return nil
+	}
+	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
+	if err != nil {
+		output = "ERROR: " + err.Error()
+	}
+	rejected := strings.HasPrefix(strings.TrimSpace(output), "ERROR:")
+	o.publishToolResult(sessionID, tc, output, rejected, nil)
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+	return nil
 }
 
 func (o *Orchestrator) emitToolExecutionStarted(ctx context.Context, sessionID string, tc llm.ToolCall) error {

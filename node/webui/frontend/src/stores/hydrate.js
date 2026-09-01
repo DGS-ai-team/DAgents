@@ -70,6 +70,16 @@ export async function hydrateAgent() {
   if (approval?.child_agent_id) {
     setChildAwaitingApproval(approval.child_agent_id, true);
   }
+  // 子 Agent 的 runtime transcript 不进入父 hydrate，但其待审批请求会
+  // 作为 ChildRun 轻量快照保存；刷新后按同一 HITL 数据结构恢复卡片。
+  for (const child of data?.child_agents || []) {
+    const pending = child?.progress?.pending_approval_data;
+    if (!pending?.items?.length) continue;
+    const { approval: childApproval } = enqueueHitlRequired(pending);
+    if (childApproval?.child_agent_id) {
+      setChildAwaitingApproval(childApproval.child_agent_id, true);
+    }
+  }
   applyHydrateSeqHint(data);
   ackAgentAfterHydrate(data?.notify_seq);
   applyAuthoritativeTurnState(data, { source: "hydrate" });

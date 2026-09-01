@@ -3,8 +3,6 @@ const MCP_TOOL_PREFIX = "mcp__";
 
 const CHILD_AGENT_TOOLS = new Set([
   "create_temporary_agent",
-  "wait_temporary_agents",
-  "temporary_agent_status",
   "cancel_temporary_agent",
 ]);
 

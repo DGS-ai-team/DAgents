@@ -43,9 +43,9 @@ describe("toolDisplayName", () => {
     expect(toolDisplayName("bash_run", { command: cmd })).toBe(`bash(${"x".repeat(47)}…)`);
   });
 
-  it("formats create_temporary_agent with purpose", () => {
-    expect(toolDisplayName("create_temporary_agent", { purpose: "research", wait: true })).toBe(
-      "创建临时 Agent · research (wait)",
+  it("formats synchronous create_temporary_agent with purpose", () => {
+    expect(toolDisplayName("create_temporary_agent", { purpose: "research" })).toBe(
+      "创建临时 Agent · research",
     );
   });
 

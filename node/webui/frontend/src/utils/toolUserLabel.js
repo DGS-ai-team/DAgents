@@ -31,8 +31,6 @@ const TOOL_USER_LABELS = {
   get_callback: "获取回调",
   ask_user_information: "向你提问",
   create_temporary_agent: "创建子任务",
-  wait_temporary_agents: "等待子任务",
-  temporary_agent_status: "查询子任务",
   cancel_temporary_agent: "取消子任务",
 };
 

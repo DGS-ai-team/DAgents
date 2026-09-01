@@ -5,66 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 )
-
-// HandleWait 实现 wait_temporary_agents 工具。
-func (m *Manager) HandleWait(ctx context.Context, parentSessionID, argsJSON string) (string, error) {
-	ids, timeoutSec, failFast, err := parseWaitInput(argsJSON, m.cfg.DefaultWaitTimeoutSeconds)
-	if err != nil {
-		return "ERROR: " + err.Error(), nil
-	}
-	if len(ids) == 0 {
-		return "ERROR: child_agent_ids is required", nil
-	}
-	for _, id := range ids {
-		if err := m.validateOwnership(parentSessionID, id); err != nil {
-			return "ERROR: " + err.Error(), nil
-		}
-	}
-	if timeoutSec == 0 {
-		return m.formatWaitResults(ids, false)
-	}
-	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
-	for {
-		done, timedOut := m.allTerminalOrFailFast(ids, failFast)
-		if done {
-			return m.formatWaitResults(ids, timedOut)
-		}
-		if time.Now().After(deadline) {
-			return m.formatWaitResults(ids, true)
-		}
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-}
-
-// HandleStatus 实现 temporary_agent_status 工具。
-func (m *Manager) HandleStatus(parentSessionID, argsJSON string) (string, error) {
-	ids, err := parseIDList(argsJSON)
-	if err != nil {
-		return "ERROR: " + err.Error(), nil
-	}
-	if len(ids) == 0 {
-		return "ERROR: child_agent_ids is required", nil
-	}
-	results := make([]Result, 0, len(ids))
-	for _, id := range ids {
-		if err := m.validateOwnership(parentSessionID, id); err != nil {
-			return "ERROR: " + err.Error(), nil
-		}
-		res, err := m.GetResult(id)
-		if err != nil {
-			return "ERROR: " + err.Error(), nil
-		}
-		results = append(results, res)
-	}
-	body, _ := json.Marshal(results)
-	return string(body), nil
-}
 
 // HandleCancelTool 实现 cancel_temporary_agent 工具。
 func (m *Manager) HandleCancelTool(parentSessionID, argsJSON string) (string, error) {
@@ -111,102 +52,6 @@ func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previ
 	return prev, err
 }
 
-func (m *Manager) validateOwnership(parentSessionID, childID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if agent, ok := m.activeByID[childID]; ok {
-		if agent.ParentAgentID != parentSessionID {
-			return fmt.Errorf("child_agent_id not found or not owned by parent")
-		}
-		return nil
-	}
-	if owner, ok := m.childToParent[childID]; ok {
-		if owner != parentSessionID {
-			return fmt.Errorf("child_agent_id not found or not owned by parent")
-		}
-		return nil
-	}
-	return fmt.Errorf("child_agent_id not found or not owned by parent")
-}
-
-func (m *Manager) allTerminalOrFailFast(ids []string, failFast bool) (done bool, timedOut bool) {
-	allTerminal := true
-	for _, id := range ids {
-		m.mu.Lock()
-		agent := m.activeByID[id]
-		terminal := agent == nil || agent.isTerminal()
-		status := StatusActive
-		if agent != nil {
-			status = agent.Snapshot().Status
-		}
-		m.mu.Unlock()
-		if !terminal {
-			allTerminal = false
-		}
-		if failFast && (status == StatusFailed || status == StatusCancelled || status == StatusExpired) {
-			return true, false
-		}
-	}
-	return allTerminal, false
-}
-
-func (m *Manager) formatWaitResults(ids []string, timedOut bool) (string, error) {
-	results := make([]Result, 0, len(ids))
-	for _, id := range ids {
-		res, err := m.GetResult(id)
-		if err != nil {
-			results = append(results, Result{ChildAgentID: id, Status: StatusCompleted})
-			continue
-		}
-		results = append(results, res)
-	}
-	body, _ := json.Marshal(map[string]any{
-		"timed_out": timedOut,
-		"results":   results,
-	})
-	return string(body), nil
-}
-
-func parseWaitInput(argsJSON string, defaultTimeout int) (ids []string, timeoutSec int, failFast bool, err error) {
-	var raw map[string]any
-	if err = json.Unmarshal([]byte(argsJSON), &raw); err != nil {
-		return nil, 0, false, err
-	}
-	ids, err = parseIDListFromMap(raw)
-	if err != nil {
-		return nil, 0, false, err
-	}
-	timeoutSec = defaultTimeout
-	if v, ok := raw["timeout_seconds"].(float64); ok {
-		timeoutSec = int(v)
-	}
-	failFast, _ = raw["fail_fast"].(bool)
-	return ids, timeoutSec, failFast, nil
-}
-
-func parseIDList(argsJSON string) ([]string, error) {
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &raw); err != nil {
-		return nil, err
-	}
-	return parseIDListFromMap(raw)
-}
-
-func parseIDListFromMap(raw map[string]any) ([]string, error) {
-	arr, ok := raw["child_agent_ids"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("child_agent_ids must be array")
-	}
-	out := make([]string, 0, len(arr))
-	for _, item := range arr {
-		s := strings.TrimSpace(fmt.Sprint(item))
-		if s != "" && s != "<nil>" {
-			out = append(out, s)
-		}
-	}
-	return out, nil
-}
-
 // HandleParentTool 分发父 Agent 临时 Agent 管理工具（非 A2A）。
 func (m *Manager) HandleParentTool(ctx context.Context, parentSessionID, toolName, argsJSON string, toolCallIDs ...string) (string, error) {
 	switch toolName {
@@ -216,10 +61,6 @@ func (m *Manager) HandleParentTool(ctx context.Context, parentSessionID, toolNam
 			toolCallID = toolCallIDs[0]
 		}
 		return m.handleCreate(ctx, parentSessionID, argsJSON, toolCallID)
-	case ToolWaitTemporaryAgents:
-		return m.HandleWait(ctx, parentSessionID, argsJSON)
-	case ToolTemporaryAgentStatus:
-		return m.HandleStatus(parentSessionID, argsJSON)
 	case ToolCancelTemporaryAgent:
 		return m.HandleCancelTool(parentSessionID, argsJSON)
 	default:

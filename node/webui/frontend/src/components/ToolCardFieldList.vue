@@ -1,7 +1,8 @@
 <script setup>
-defineProps({
+const props = defineProps({
   fields: { type: Array, default: () => [] },
   copyState: { type: String, default: "" },
+  layout: { type: String, default: "compact" },
 });
 
 const emit = defineEmits(["copy"]);
@@ -14,8 +15,12 @@ function copyFieldLabel(label) {
 </script>
 
 <template>
-  <dl v-if="fields.length" class="tool-card__fields tool-card__fields--compact">
-    <template v-for="item in fields" :key="item.label">
+    <dl
+      v-if="props.fields.length"
+      class="tool-card__fields"
+      :class="`tool-card__fields--${props.layout}`"
+    >
+      <template v-for="item in props.fields" :key="item.label">
       <div v-if="item.kind === 'code'" class="tool-card__code-panel">
         <div class="tool-card__code-panel-heading">
           <span class="tool-card__code-panel-label">{{ item.label }}</span>
@@ -26,11 +31,17 @@ function copyFieldLabel(label) {
             :aria-label="copyFieldLabel(item.label)"
             :title="copyFieldLabel(item.label)"
             @click.stop="emit('copy', item.value)"
-          >{{ copyState || copyFieldLabel(item.label) }}</button>
+          >{{ props.copyState || copyFieldLabel(item.label) }}</button>
         </div>
         <pre class="tool-exec-bubble__code tool-card__code-block">{{ item.value || "—" }}</pre>
       </div>
-      <div v-else class="tool-card__field">
+      <div
+        v-else
+        class="tool-card__field"
+        :class="{
+          'tool-card__field--wide': props.layout === 'child-agent' && item.label === '任务',
+        }"
+      >
         <dt>{{ item.label }}</dt>
         <dd :class="`tool-card__value tool-card__value--${item.kind}`">
           <pre v-if="item.kind === 'multiline'">{{ item.value }}</pre>
@@ -55,7 +66,25 @@ function copyFieldLabel(label) {
   gap: 6px 8px;
   align-items: start;
 }
-.tool-card__fields--compact .tool-card__code-panel {
+.tool-card__fields--child-agent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: stretch;
+}
+.tool-card__fields--child-agent .tool-card__field {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.tool-card__fields--child-agent .tool-card__field--wide {
+  flex: 1 0 100%;
+}
+.tool-card__fields--child-agent .tool-card__field--wide dd {
+  max-height: 6.3em;
+  overflow: auto;
+}
+.tool-card__fields--compact .tool-card__code-panel,
+.tool-card__fields--child-agent .tool-card__code-panel {
   grid-column: 1 / -1;
 }
 .tool-card__field {
@@ -148,6 +177,9 @@ function copyFieldLabel(label) {
   }
   .tool-card__fields--compact .tool-card__code-panel {
     grid-column: auto;
+  }
+  .tool-card__fields--child-agent .tool-card__field {
+    flex-basis: 100%;
   }
   .tool-card__field {
     gap: 8px;

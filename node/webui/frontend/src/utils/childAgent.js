@@ -1,4 +1,4 @@
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "expired"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "expired", "interrupted"]);
 
 export function isChildAgentActive(status) {
   const s = String(status || "").trim().toLowerCase();
@@ -19,6 +19,8 @@ export function formatChildAgentStatus(status) {
       return "已取消";
     case "expired":
       return "已过期";
+    case "interrupted":
+      return "已中断";
     default:
       return status || "未知";
   }

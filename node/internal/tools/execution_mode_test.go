@@ -46,8 +46,6 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"trigger_update":         {CallPurposeKey, "trigger_id"},
 		"trigger_delete":         {CallPurposeKey, "trigger_id"},
 		"create_temporary_agent": {CallPurposeKey, "task", "purpose"},
-		"wait_temporary_agents":  {CallPurposeKey, "child_agent_ids"},
-		"temporary_agent_status": {CallPurposeKey, "child_agent_ids"},
 		"cancel_temporary_agent": {CallPurposeKey, "child_agent_id"},
 	}
 

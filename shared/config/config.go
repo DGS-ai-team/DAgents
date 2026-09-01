@@ -186,13 +186,12 @@ type RawMessageHistoryConfig struct {
 
 // ChildAgentsConfig 控制临时子 Agent（见 docs/architecture/child-agent-tools.md）。
 type ChildAgentsConfig struct {
-	Enabled                   bool `yaml:"enabled"`
-	DefaultTTLSeconds         int  `yaml:"default_ttl_seconds"`
-	MaxTTLSeconds             int  `yaml:"max_ttl_seconds"`
-	DefaultMaxTurns           int  `yaml:"default_max_turns"`
-	MaxMaxTurns               int  `yaml:"max_max_turns"`
-	MaxActivePerParent        int  `yaml:"max_active_per_parent"`
-	DefaultWaitTimeoutSeconds int  `yaml:"default_wait_timeout_seconds"`
+	Enabled            bool `yaml:"enabled"`
+	DefaultTTLSeconds  int  `yaml:"default_ttl_seconds"`
+	MaxTTLSeconds      int  `yaml:"max_ttl_seconds"`
+	DefaultMaxTurns    int  `yaml:"default_max_turns"`
+	MaxMaxTurns        int  `yaml:"max_max_turns"`
+	MaxActivePerParent int  `yaml:"max_active_per_parent"`
 }
 
 // LogConfig 控制 Node 进程日志级别（完整日志→stdout / *.log，错误→stderr / *.err.log）。
@@ -532,9 +531,6 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.ChildAgents.MaxActivePerParent <= 0 {
 		c.ChildAgents.MaxActivePerParent = 8
-	}
-	if c.ChildAgents.DefaultWaitTimeoutSeconds <= 0 {
-		c.ChildAgents.DefaultWaitTimeoutSeconds = 300
 	}
 	if c.Manage.Registration.IntervalSeconds <= 0 {
 		c.Manage.Registration.IntervalSeconds = 30

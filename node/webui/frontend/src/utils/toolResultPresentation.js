@@ -172,6 +172,7 @@ function baseModel(name, args, resultEntry, content) {
     inputFields: [],
     resultFields: [],
     resultBlocks: [],
+    inputLayout: "compact",
     hasResult: !!resultEntry,
   };
 }
@@ -459,6 +460,22 @@ function addGenericInput(model, args) {
   if (keys.length > 8) addField(model.inputFields, "其他参数", `${keys.length - 8} 项`);
 }
 
+function addChildAgentInput(model, args) {
+  model.inputLayout = "child-agent";
+  addField(model.inputFields, "任务", args.task, "multiline");
+  const allowedTools = Array.isArray(args.allowed_tools)
+    ? args.allowed_tools.filter(Boolean).join(" · ")
+    : args.allowed_tools;
+  addField(model.inputFields, "可用工具", allowedTools || "默认工具");
+  const skillNames = Array.isArray(args.skill_names)
+    ? args.skill_names.filter(Boolean).join(" · ")
+    : args.skill_names;
+  if (skillNames) addField(model.inputFields, "预加载技能", skillNames);
+  if (finiteNumber(args.ttl_seconds) > 0) {
+    addField(model.inputFields, "生命周期", `${finiteNumber(args.ttl_seconds)} 秒`);
+  }
+}
+
 function addGenericResult(model, content) {
   const payload = parseJSONObject(content);
   if (!payload) {
@@ -591,6 +608,10 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
     case "browser_task_cancel":
       addBrowserInput(model, args);
       if (resultEntry) addBrowserResult(model, content, name);
+      break;
+    case "create_temporary_agent":
+      addChildAgentInput(model, args);
+      if (resultEntry) addGenericResult(model, content);
       break;
     case "read_file":
     case "write_file":

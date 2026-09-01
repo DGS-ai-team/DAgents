@@ -48,7 +48,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `memory` | `remember` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
 | `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
-| `child_agents` | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
+| `child_agents` | `create_temporary_agent`、`cancel_temporary_agent` |
 | `browser` | 任务级：`browser_run_task` / `browser_task_status` / `browser_task_cancel`（伴生 Chrome） |
 
 各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。

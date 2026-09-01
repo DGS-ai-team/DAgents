@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
 	if err := s.initTurnEventSchema(); err != nil {
 		return err
 	}
+	if err := s.initChildRunSchema(); err != nil {
+		return err
+	}
 	return s.migrateLegacySessionsTable()
 }
 

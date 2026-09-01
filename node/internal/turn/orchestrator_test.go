@@ -127,6 +127,9 @@ func runMessageTurnInline(
 		return outcome.Pending, outcome.StepIndex, outcome.Err
 	}
 	if outcome.Pending != nil {
+		// Direct orchestrator tests do not run the SessionRuntime lifecycle
+		// adapter, so publish the event explicitly at this boundary.
+		orch.PublishPendingHITL(sessionID, outcome.Pending)
 		return outcome.Pending, outcome.StepIndex, nil
 	}
 	stepIndex := outcome.StepIndex + 1
@@ -137,6 +140,7 @@ func runMessageTurnInline(
 			return outcome.Pending, outcome.StepIndex, outcome.Err
 		}
 		if outcome.Pending != nil {
+			orch.PublishPendingHITL(sessionID, outcome.Pending)
 			return outcome.Pending, outcome.StepIndex, nil
 		}
 		stepIndex++
@@ -529,6 +533,7 @@ func TestProcessToolCallsMixedHITL(t *testing.T) {
 	if pending == nil || len(pending.Items) != 2 {
 		t.Fatalf("pending = %+v", pending)
 	}
+	orch.PublishPendingHITL("sess-1", pending)
 
 	deadline := time.After(2 * time.Second)
 	gotHitl := false
@@ -563,6 +568,7 @@ func TestProcessToolCallsMixedHITL(t *testing.T) {
 	if outcome.Pending.Items[0].ToolCall.ID != "call-bash-1" {
 		t.Fatalf("remaining pending = %+v", outcome.Pending.Items[0])
 	}
+	orch.PublishPendingHITL("sess-1", outcome.Pending)
 	republishDeadline := time.After(2 * time.Second)
 	for {
 		select {

@@ -77,7 +77,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	}
 	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
 	view := m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
-	view.ChildAgents = []ChildAgentView{}
+	view.ChildAgents, _ = m.ListChildAgents(sessionID)
 	return view, nil
 }
 
