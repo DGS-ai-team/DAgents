@@ -118,7 +118,11 @@ type runtime struct {
 
 	runtimeRevision int64
 	runtimeDigest   string
-	turnBudget      turn.TurnBudget
+	// runtimeMultimodalEnabled is the user-selected multimodal setting captured
+	// when this Agent runtime was built. It lets the API detect a stale runtime
+	// even when the persisted Agent revision did not change.
+	runtimeMultimodalEnabled bool
+	turnBudget               turn.TurnBudget
 }
 
 // newRuntime 创建新的 session runtime
@@ -201,18 +205,19 @@ func newRuntimeWithPublisher(
 			coord.SetRawMessageHistoryEnabled(turnOpts.RawMessageHistoryEnabled)
 			return coord
 		}(),
-		messages:                append([]llm.Message(nil), initial...),
-		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
-		skillRevision:           turnCatalog.Revision(),
-		workspaceRoot:           workspaceRoot,
-		triggerDelivery:         triggerDelivery,
-		sideEffects:             newSideEffectStore(),
-		idleAutoCompressApplied: idleAutoCompressApplied,
-		notifySeq:               initialNotifySeq,
-		ackSeq:                  initialAckSeq,
-		runtimeRevision:         firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
-		runtimeDigest:           strings.TrimSpace(turnOpts.RuntimeDigest),
-		turnBudget:              turnOpts.Budget,
+		messages:                 append([]llm.Message(nil), initial...),
+		loadedSkills:             append([]skills.LoadedSkill(nil), loaded...),
+		skillRevision:            turnCatalog.Revision(),
+		workspaceRoot:            workspaceRoot,
+		triggerDelivery:          triggerDelivery,
+		sideEffects:              newSideEffectStore(),
+		idleAutoCompressApplied:  idleAutoCompressApplied,
+		notifySeq:                initialNotifySeq,
+		ackSeq:                   initialAckSeq,
+		runtimeRevision:          firstNonZero(turnOpts.RuntimeRevision, turnOpts.ConfigRevision),
+		runtimeDigest:            strings.TrimSpace(turnOpts.RuntimeDigest),
+		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
+		turnBudget:               turnOpts.Budget,
 	}
 	if reg, err := media.NewRegistry(id, workspaceRoot); err == nil {
 		rt.media = reg

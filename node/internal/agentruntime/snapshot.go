@@ -113,8 +113,7 @@ func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 	if active != "" && profiles != nil {
 		if p, ok := profiles[active].(map[string]any); ok {
 			if v, ok := p["multimodal_enabled"].(bool); ok {
-				b := v
-				return &b
+				return &v
 			}
 		}
 	}

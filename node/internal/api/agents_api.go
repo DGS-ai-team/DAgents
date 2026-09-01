@@ -687,6 +687,19 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 			if err := s.applyAgentLLMProfile(*rec); err != nil {
 				return err
 			}
+			// The runtime revision covers persisted Agent settings, but the
+			// process-level LLM profile can change when another Agent is
+			// focused. Rebuild when that switch also changes the effective
+			// multimodal setting selected for this Agent.
+			snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+			if err != nil {
+				return fmt.Errorf("parse agent snapshot: %w", err)
+			}
+			desiredMultimodal := agentruntime.EffectiveMultimodalEnabled(s.cfg, snapParsed)
+			if currentMultimodal, ok := s.sessions.RuntimeMultimodalEnabled(id); ok && currentMultimodal != desiredMultimodal {
+				_, err := s.reloadAgentRuntimeIfIdle(ctx, *rec, "llm_profile_multimodal")
+				return err
+			}
 			return nil
 		}
 		if _, active, state, _ := s.sessions.RuntimeInfo(id); active {

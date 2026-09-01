@@ -11,7 +11,7 @@ const PROVIDER_PRESETS = {
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
   glm: { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2" },
   minimax: { base_url: "https://api.minimaxi.com/v1", model: "MiniMax-M3" },
-  mimo: { base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-pro" },
+  mimo: { base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5" },
 };
 
 const PROVIDER_OPTIONS = [

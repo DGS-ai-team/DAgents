@@ -36,7 +36,7 @@ export const TOOL_GROUPS = [
   { name: "bash", label: "命令行" },
   { name: "browser", label: "浏览器", beta: true, hint: "任务级派发至伴生（需真实 LLM）" },
   { name: "child_agents", label: "子智能体" },
-  { name: "computer", label: "桌面控制", beta: true, hint: "屏幕截图与键鼠操作（需多模态模型；Linux 当前支持 X11 并需 xdotool）" },
+  { name: "computer", label: "桌面控制", beta: true, hint: "屏幕截图与键鼠操作（需启用多模态；Linux 当前支持 X11 并需 xdotool）" },
   { name: "fs", label: "文件" },
   { name: "hitl", label: "用户询问" },
   { name: "memory", label: "记忆" },

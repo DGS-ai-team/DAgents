@@ -641,9 +641,9 @@ func (o *Orchestrator) runOneStep(
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
 	if !o.multimodalEnabled {
-		// The history may have been created while a vision profile was active.
-		// Keep those image parts durable for the UI, but never send them to a
-		// text-only model after the Agent/profile has switched capabilities.
+		// The history may have been created while multimodal was enabled.
+		// Keep those image parts durable for the UI, but never send them to the
+		// model while the Agent setting is disabled.
 		llmMessages = llm.PrepareMessagesForTextOnly(llmMessages)
 	}
 	// History/transcript retains the original tool body, while the model gets

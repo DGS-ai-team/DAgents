@@ -91,11 +91,11 @@ func TestLLMProfile_multimodalFollowsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !cfg.MultimodalEnabled() {
-		t.Fatal("vision profile should enable multimodal")
+		t.Fatal("enabled profile should enable multimodal")
 	}
 	p, ok := cfg.LLM.GetProfile("vision")
 	if !ok || !ProfileMultimodalEnabled(p) {
-		t.Fatalf("vision profile = %+v", p)
+		t.Fatalf("enabled profile = %+v", p)
 	}
 }
 
@@ -114,5 +114,23 @@ func TestMigrateMultimodalIntoProfiles(t *testing.T) {
 	}
 	if !cfg.MultimodalEnabled() {
 		t.Fatal("expected multimodal still enabled after normalize")
+	}
+}
+
+func TestLLMProfileMultimodalFollowsCheckboxRegardlessOfModel(t *testing.T) {
+	on := true
+	off := false
+	pro := LLMProfileConfig{Provider: "mimo", Model: "mimo-v2.5-pro", MultimodalEnabled: &on}
+	if !ProfileMultimodalEnabled(pro) {
+		t.Fatal("enabled checkbox should enable multimodal regardless of model")
+	}
+	normalized := normalizeLLMProfile(pro)
+	if normalized.MultimodalEnabled == nil || !*normalized.MultimodalEnabled {
+		t.Fatalf("normalized profile = %+v, want multimodal enabled", normalized)
+	}
+
+	text := LLMProfileConfig{Provider: "mimo", Model: "mimo-v2.5", MultimodalEnabled: &off}
+	if ProfileMultimodalEnabled(text) {
+		t.Fatal("disabled checkbox should disable multimodal regardless of model")
 	}
 }
