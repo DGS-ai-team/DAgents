@@ -233,8 +233,8 @@ func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
 		"",
 		"工作区内置目录：",
 		"",
-		"- `data/`：临时工作区（输出、中间产物，可清理）",
-		"- `tool_outputs/`：工具结果过长时的可读落盘文件，可按工具结果中的路径读取",
+		"- `tool_outputs/<agent_id>/`：工具结果过长时的可读落盘文件，可按工具结果中的路径读取；其中 agent_id 用于隔离共享工作区",
+		"- `.dagents/<agent_id>/`：当前 Agent 的私有侧车状态；不要把其中内容当作用户项目文件",
 		"",
 		"Node 运行目录中的管理目录（不属于工作区）：",
 		"",
@@ -243,7 +243,7 @@ func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
 	}
 	if includeHistoryJournal {
 		lines = append(lines,
-			"- `<runtime_root>/history/`：原始对话审计，由 Node 独立管理，不属于当前工作区，也不是 LLM 上下文的一部分。",
+			"- `.dagents/<agent_id>/history/`：原始对话审计，由 Node 写入当前 workspace 的 Agent 私有状态；不是 LLM 上下文的一部分。",
 		)
 	}
 	return strings.Join(lines, "\n")

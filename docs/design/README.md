@@ -33,6 +33,7 @@
 
 | 文档 | 说明 |
 |---|---|
+| [memory-v2-architecture-and-refactor-guide.md](memory-v2-architecture-and-refactor-guide.md) | 长期记忆分层、Turn 级召回、冲突判定、Workspace 存储与分阶段重构指引；Phase 0–5 核心已落地，Phase 6 处于兼容迁移窗口 |
 | [linux-channel-plan.md](linux-channel-plan.md) | Linux/SSH 通道产品方案；实现状态以代码为准 |
 | [workgroup-agent-membership-ui.md](workgroup-agent-membership-ui.md) | Workgroup 成员 UI 的后续增强 |
 

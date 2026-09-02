@@ -10,7 +10,7 @@ defaults:
   llm:
     max_tool_loops: 16
   tools:
-    enabled_groups: [fs, skills]
+    enabled_groups: [fs, skills, memory]
   skills:
     enabled: true
   child_agents:

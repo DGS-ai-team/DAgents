@@ -31,6 +31,7 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	// 用户模板目录放入 general，避免依赖 cwd 下 packaging 路径。
@@ -166,6 +167,7 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	customRoot := filepath.Join(t.TempDir(), "project")
@@ -392,6 +394,7 @@ func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 
 	out, err := built.Registry.Execute(context.Background(), "trigger_list", `{"call_purpose":"test"}`)
 	if err != nil {

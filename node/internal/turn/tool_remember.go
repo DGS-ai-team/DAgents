@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
@@ -16,7 +17,21 @@ import (
 const rememberMaxCASRetries = 3
 
 type rememberArgs struct {
-	Information string `json:"information"`
+	Information string            `json:"information"`
+	Kind        memory.Kind       `json:"kind"`
+	Tier        memory.Tier       `json:"tier"`
+	SemanticKey string            `json:"semantic_key"`
+	Subject     string            `json:"subject"`
+	Predicate   string            `json:"predicate"`
+	Cardinality string            `json:"cardinality"`
+	Importance  int               `json:"importance"`
+	Confidence  int               `json:"confidence"`
+	Value       any               `json:"value"`
+	Qualifiers  map[string]string `json:"qualifiers"`
+	Sensitivity string            `json:"sensitivity"`
+	ValidFrom   string            `json:"valid_from"`
+	ValidTo     string            `json:"valid_to"`
+	ExpiresAt   string            `json:"expires_at"`
 }
 
 type rememberAnalysis struct {
@@ -32,6 +47,8 @@ type rememberAnalysis struct {
 
 // MemoryConflictMeta 为 remember 冲突时 HITL 展示与 resume 决策所需元数据。
 type MemoryConflictMeta struct {
+	ConflictID          string `json:"conflict_id,omitempty"`
+	Scope               string `json:"scope,omitempty"`
 	ExistingContent     string `json:"existing"`
 	NewInformation      string `json:"new_information"`
 	ConflictDescription string `json:"conflict_description"`
@@ -48,11 +65,18 @@ func (o *Orchestrator) SetLongTermStore(store LongTermStore) {
 // SetLongTermScope updates the persistence scope for future memory reads and
 // writes without changing the active Turn snapshot.
 func (o *Orchestrator) SetLongTermScope(scope string) {
-	if o == nil || o.longTermStore == nil {
+	if o == nil {
 		return
 	}
 	if setter, ok := o.longTermStore.(LongTermScopeSetter); ok {
 		setter.SetLongTermScope(scope)
+	}
+	if o.memoryService != nil {
+		if strings.EqualFold(strings.TrimSpace(scope), LongTermScopeGlobal) {
+			o.memoryService.SetScope(memory.ScopeGlobal)
+		} else {
+			o.memoryService.SetScope(memory.ScopeAgent)
+		}
 	}
 }
 
@@ -77,7 +101,7 @@ func (o *Orchestrator) executeRememberTool(
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		return nil, nil
 	}
-	if o.longTermStore == nil {
+	if o.memoryService == nil && o.longTermStore == nil {
 		msg := "ERROR: long-term memory store unavailable"
 		o.publishToolResult(sessionID, tc, msg, true, nil)
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
@@ -98,6 +122,9 @@ func (o *Orchestrator) executeRememberTool(
 		o.publishToolResult(sessionID, tc, msg, true, nil)
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		return nil, nil
+	}
+	if o.memoryService != nil {
+		return o.executeRememberWithMemoryService(ctx, sessionID, history, tc, args, info)
 	}
 
 	for attempt := 0; attempt < rememberMaxCASRetries; attempt++ {
@@ -157,6 +184,89 @@ func (o *Orchestrator) executeRememberTool(
 	o.publishToolResult(sessionID, tc, msg, true, nil)
 	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 	return nil, nil
+}
+
+func (o *Orchestrator) executeRememberWithMemoryService(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall, args rememberArgs, info string) (*PendingHITLItem, error) {
+	request := memory.RememberRequest{
+		Information:   info,
+		Kind:          args.Kind,
+		Tier:          args.Tier,
+		SemanticKey:   args.SemanticKey,
+		Subject:       args.Subject,
+		Predicate:     args.Predicate,
+		Value:         args.Value,
+		Qualifiers:    args.Qualifiers,
+		Cardinality:   args.Cardinality,
+		Importance:    args.Importance,
+		Confidence:    args.Confidence,
+		Sensitivity:   args.Sensitivity,
+		SourceType:    "model_remember",
+		SourceSession: sessionID,
+		SourceMessage: tc.ID,
+	}
+	request.ValidFrom = parseOptionalTime(args.ValidFrom)
+	request.ValidTo = parseOptionalTime(args.ValidTo)
+	request.ExpiresAt = parseOptionalTime(args.ExpiresAt)
+	result, err := o.memoryService.Remember(ctx, request)
+	if err != nil {
+		msg := "ERROR: remember memory: " + err.Error()
+		o.publishToolResult(sessionID, tc, msg, true, nil)
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+		return nil, nil
+	}
+	if result.Outcome == memory.WritePendingConflict && result.Conflict != nil {
+		var existing strings.Builder
+		for _, entry := range result.Conflict.Existing {
+			if text := strings.TrimSpace(entry.Content); text != "" {
+				if existing.Len() > 0 {
+					existing.WriteString("\n")
+				}
+				existing.WriteString("- ")
+				existing.WriteString(text)
+			}
+		}
+		return &PendingHITLItem{ToolCall: tc, MemoryConflict: &MemoryConflictMeta{
+			ConflictID:          result.Conflict.ID,
+			Scope:               string(result.Conflict.Candidate.Scope),
+			ExistingContent:     existing.String(),
+			NewInformation:      info,
+			ConflictDescription: result.Conflict.Description,
+		}}, nil
+	}
+	output := memoryWriteOutcomeMessage(result)
+	o.publishToolResult(sessionID, tc, output, false, nil)
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+	if o.hub != nil {
+		o.hub.Publish(o.agentID, "memory/changed", map[string]any{
+			"agent_id": o.agentID, "store_revision": result.StoreRevision,
+			"outcome": string(result.Outcome), "turn_boundary": "next_turn",
+		})
+	}
+	return nil, nil
+}
+
+func parseOptionalTime(raw string) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil
+	}
+	t = t.UTC()
+	return &t
+}
+
+func memoryWriteOutcomeMessage(result memory.WriteResult) string {
+	switch result.Outcome {
+	case memory.WriteDuplicate:
+		return "长期记忆已存在（未重复写入）。"
+	case memory.WriteSuperseded:
+		return fmt.Sprintf("已写入长期记忆，并替代 %d 条旧记忆。", len(result.Superseded))
+	default:
+		return "已写入长期记忆。"
+	}
 }
 
 func (o *Orchestrator) analyzeRememberConflict(ctx context.Context, existing, info string) (rememberAnalysis, error) {

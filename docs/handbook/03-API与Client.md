@@ -196,12 +196,12 @@ Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`
 
 | 子目录 | 用途 |
 |--------|------|
-| `runtime_root/memory/` / `agents.db` | Agent 与消息持久化 |
+| `runtime_root/memory/` / `agents.db` | Node 控制面 Agent 元数据与消息快照；记录按 `agent_id` 隔离 |
 | `runtime_root/policy/` | 审批策略（可按 Agent） |
 | `runtime_root/skills/` | Node 管理的 skills 目录 |
 | `runtime_root/triggers/` | trigger 持久化 |
 | `runtime_root/prompt_context/` | soul / custom / long_term；`user.md` 仅兼容迁移 |
-| `workspace_root/` | 当前 Agent 的文件、bash、终端与工具结果工作区；创建 Agent 时选择，之后不可修改 |
+| `workspace_root/` | 当前 Agent 的文件、bash、终端与工具结果工作区；创建 Agent 时选择，之后不可修改。Agent 私有侧车位于 `.dagents/<agent_id>/`，支持多个 Agent 共享该目录 |
 
 ### 4.4 发布形态
 

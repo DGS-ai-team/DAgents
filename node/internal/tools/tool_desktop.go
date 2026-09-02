@@ -407,7 +407,7 @@ func (r *Registry) captureDesktopForTool(ctx context.Context, source, detail str
 	if err != nil {
 		return screen.Frame{}, "", desktopCaptureInfo{}, err
 	}
-	path, err := persistDesktopFrame(ctx, frame)
+	path, err := r.persistDesktopFrame(ctx, frame)
 	if err != nil {
 		return screen.Frame{}, "", desktopCaptureInfo{}, err
 	}
@@ -491,12 +491,19 @@ func desktopFrameID(frame screen.Frame) string {
 
 var desktopFilePartPattern = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
-func persistDesktopFrame(ctx context.Context, frame screen.Frame) (string, error) {
+func (r *Registry) persistDesktopFrame(ctx context.Context, frame screen.Frame) (string, error) {
 	session := desktopFilePartPattern.ReplaceAllString(desktopSessionKey(ctx), "-")
 	if session == "" {
 		session = "session"
 	}
-	root := filepath.Join(os.TempDir(), "dagents", "screenshots")
+	if r == nil || strings.TrimSpace(r.workspaceRoot) == "" {
+		return "", fmt.Errorf("workspace root is required for screenshot persistence")
+	}
+	owner := desktopFilePartPattern.ReplaceAllString(strings.TrimSpace(r.agentID), "-")
+	if owner == "" {
+		owner = session
+	}
+	root := filepath.Join(r.workspaceRoot, ".dagents", owner, "screenshots")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", fmt.Errorf("create screenshot root: %w", err)
 	}

@@ -70,6 +70,22 @@ func TestPackage_longBashSpillsAndHeadTail(t *testing.T) {
 	}
 }
 
+func TestPackage_longBashSpillIsolatedByAgentID(t *testing.T) {
+	root := t.TempDir()
+	cfg := DefaultConfig(root)
+	cfg.AgentID = "agt-shared-a"
+	res, err := Package(cfg, "sess-a", "call-a", "bash_run", strings.Repeat("o", 50000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.SpillPath, "tool_outputs/agt-shared-a/") {
+		t.Fatalf("spill path=%q", res.SpillPath)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(res.SpillPath))); err != nil {
+		t.Fatalf("isolated spill file missing: %v", err)
+	}
+}
+
 func TestPackage_longReadFileSpills(t *testing.T) {
 	root := t.TempDir()
 	long := strings.Repeat("o", 50000)

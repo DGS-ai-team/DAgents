@@ -10,7 +10,7 @@ defaults:
   llm:
     max_tool_loops: 24
   tools:
-    enabled_groups: [fs, bash, terminal]
+    enabled_groups: [fs, bash, terminal, memory]
   skills:
     enabled: true
   child_agents:

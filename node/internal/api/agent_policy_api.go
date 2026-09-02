@@ -11,6 +11,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -292,6 +293,24 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), nil)
 		return
 	}
+	snap := mustParseAgentSnapshot(rec)
+	scope := agentruntime.LongTermScopeFromDefaults(snap)
+	scopeChanged := false
+	if body.LongTermScope != nil {
+		nextScope := normalizePromptLongTermScope(*body.LongTermScope)
+		scopeChanged = nextScope != scope
+		scope = nextScope
+	}
+	var memoryService *memory.LocalService
+	if opened, openErr := s.openAgentMemoryService(id, rec); openErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, "memory_store_open_failed", openErr.Error(), nil)
+		return
+	} else {
+		memoryService = opened
+	}
+	if memoryService != nil {
+		defer memoryService.Close()
+	}
 	if body.SoulMD != nil {
 		pc.SoulMD = *body.SoulMD
 	}
@@ -305,17 +324,15 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		pc.LongTermMD = *body.LongTermMD
 	}
 	pc.AgentID = id
-	if err := s.agents.SaveAgentPromptContext(r.Context(), *pc); err != nil {
+	savePromptContext := s.agents.SaveAgentPromptContext
+	if memoryService != nil {
+		// long_term_md is a compatibility projection once v2 is enabled;
+		// settings writes for it are handled by ReplaceAll below.
+		savePromptContext = s.agents.SaveAgentPromptContextMetadata
+	}
+	if err := savePromptContext(r.Context(), *pc); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "prompt_context_save_failed", err.Error(), nil)
 		return
-	}
-	snap := mustParseAgentSnapshot(rec)
-	scope := agentruntime.LongTermScopeFromDefaults(snap)
-	scopeChanged := false
-	if body.LongTermScope != nil {
-		nextScope := normalizePromptLongTermScope(*body.LongTermScope)
-		scopeChanged = nextScope != scope
-		scope = nextScope
 	}
 	if scopeChanged {
 		if parsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err != nil {
@@ -349,13 +366,12 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		entries := longTermViewsToEntries(*body.LongTermEntries)
 		memoryChanged = true
 		memoryCount = len(entries)
-		ltRec := store.LongTermRecord{
-			Scope:     scope,
-			AgentID:   id,
-			Entries:   entries,
-			UpdatedAt: time.Now().UTC(),
-		}
-		if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), ltRec); err != nil {
+		if memoryService != nil {
+			if err := memoryService.ReplaceAll(r.Context(), memory.Scope(scope), legacyViewsToMemoryEntries(*body.LongTermEntries, memory.Scope(scope))); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
+				return
+			}
+		} else if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), store.LongTermRecord{Scope: scope, AgentID: id, Entries: entries, UpdatedAt: time.Now().UTC()}); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
 			return
 		}
@@ -363,13 +379,13 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		entries := store.EntriesFromLegacyMarkdown(*body.LongTermMD, time.Now().UTC())
 		memoryChanged = true
 		memoryCount = len(entries)
-		ltRec := store.LongTermRecord{
-			Scope:     scope,
-			AgentID:   id,
-			Entries:   entries,
-			UpdatedAt: time.Now().UTC(),
-		}
-		if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), ltRec); err != nil {
+		views := longTermEntriesToViews(entries)
+		if memoryService != nil {
+			if err := memoryService.ReplaceAll(r.Context(), memory.Scope(scope), legacyViewsToMemoryEntries(views, memory.Scope(scope))); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
+				return
+			}
+		} else if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), store.LongTermRecord{Scope: scope, AgentID: id, Entries: entries, UpdatedAt: time.Now().UTC()}); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
 			return
 		}
@@ -423,12 +439,33 @@ func (s *Server) handlePatchAgentMemoryEntry(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusBadRequest, "invalid_content", "content is required", nil)
 		return
 	}
-	updated, err := s.agents.UpdateLongTermEntry(r.Context(), scope, id, entryID, content)
-	if err != nil {
-		writeMemoryMutationError(w, err)
+	var count int
+	if service, openErr := s.openAgentMemoryService(id, rec); openErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, "memory_store_open_failed", openErr.Error(), nil)
 		return
+	} else if service != nil {
+		defer service.Close()
+		// Settings is an explicit control-plane operation and may edit either
+		// projection, even when the Agent's model scope is the other one.
+		service.SetScope(memory.Scope(scope))
+		if _, err := service.UpdateContent(r.Context(), memory.Scope(scope), entryID, content); err != nil {
+			writeMemoryMutationError(w, err)
+			return
+		}
+		entries, listErr := service.List(r.Context(), memory.Scope(scope), false)
+		if listErr != nil {
+			return
+		}
+		count = len(entries)
+	} else {
+		updated, err := s.agents.UpdateLongTermEntry(r.Context(), scope, id, entryID, content)
+		if err != nil {
+			writeMemoryMutationError(w, err)
+			return
+		}
+		count = len(updated.Entries)
 	}
-	if err := s.refreshMemoryRuntime(r, id, rec, len(updated.Entries)); err != nil {
+	if err := s.refreshMemoryRuntime(r, id, rec, count); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "memory_runtime_refresh_failed", err.Error(), nil)
 		return
 	}
@@ -450,12 +487,33 @@ func (s *Server) handleDeleteAgentMemoryEntry(w http.ResponseWriter, r *http.Req
 		writeAPIError(w, http.StatusBadRequest, "invalid_scope", err.Error(), nil)
 		return
 	}
-	updated, err := s.agents.DeleteLongTermEntry(r.Context(), scope, id, entryID)
-	if err != nil {
-		writeMemoryMutationError(w, err)
+	var count int
+	if service, openErr := s.openAgentMemoryService(id, rec); openErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, "memory_store_open_failed", openErr.Error(), nil)
 		return
+	} else if service != nil {
+		defer service.Close()
+		// See the PATCH handler: UI memory management is allowed to target the
+		// selected projection, while model tools remain scope-restricted.
+		service.SetScope(memory.Scope(scope))
+		if _, err := service.Forget(r.Context(), memory.Scope(scope), entryID, "settings_delete"); err != nil {
+			writeMemoryMutationError(w, err)
+			return
+		}
+		entries, listErr := service.List(r.Context(), memory.Scope(scope), false)
+		if listErr != nil {
+			return
+		}
+		count = len(entries)
+	} else {
+		updated, err := s.agents.DeleteLongTermEntry(r.Context(), scope, id, entryID)
+		if err != nil {
+			writeMemoryMutationError(w, err)
+			return
+		}
+		count = len(updated.Entries)
 	}
-	if err := s.refreshMemoryRuntime(r, id, rec, len(updated.Entries)); err != nil {
+	if err := s.refreshMemoryRuntime(r, id, rec, count); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "memory_runtime_refresh_failed", err.Error(), nil)
 		return
 	}
@@ -477,7 +535,7 @@ func parseMemoryScope(bodyScope, queryScope string) (string, error) {
 }
 
 func writeMemoryMutationError(w http.ResponseWriter, err error) {
-	if errors.Is(err, store.ErrLongTermEntryNotFound) {
+	if errors.Is(err, store.ErrLongTermEntryNotFound) || errors.Is(err, memory.ErrNotFound) {
 		writeAPIError(w, http.StatusNotFound, "memory_entry_not_found", err.Error(), nil)
 		return
 	}
@@ -527,6 +585,37 @@ func (s *Server) writeMemoryMutationResponse(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) buildAgentPromptContextView(ctx context.Context, id string, agentRec *store.AgentRecord, pc *store.AgentPromptContextRecord) (agentPromptContextView, error) {
 	scope := agentruntime.LongTermScopeFromDefaults(mustParseAgentSnapshot(agentRec))
+	if service, err := s.openAgentMemoryService(id, agentRec); err != nil {
+		return agentPromptContextView{}, err
+	} else if service != nil {
+		defer service.Close()
+		if err := migrateLegacyMemory(ctx, s.agents, s.runtimeDir(), id, service); err != nil && s.logger != nil {
+			s.logger.Warn("legacy memory projection is no longer current", "agent_id", id, "error", err)
+		}
+		agentEntries, err := service.List(ctx, memory.ScopeAgent, false)
+		if err != nil {
+			return agentPromptContextView{}, err
+		}
+		globalEntries, err := service.List(ctx, memory.ScopeGlobal, false)
+		if err != nil {
+			return agentPromptContextView{}, err
+		}
+		activeEntries := agentEntries
+		if scope == store.LongTermScopeGlobal {
+			activeEntries = globalEntries
+		}
+		return agentPromptContextView{
+			AgentID:               id,
+			SoulMD:                pc.SoulMD,
+			UserMD:                pc.UserMD,
+			CustomMD:              pc.CustomMD,
+			LongTermMD:            turn.FormatLongTermEntries(memoryEntriesToTurn(activeEntries)),
+			LongTermScope:         scope,
+			LongTermEntries:       memoryEntriesToViews(agentEntries),
+			GlobalLongTermEntries: memoryEntriesToViews(globalEntries),
+			Source:                "workspace_memory",
+		}, nil
+	}
 	agentLT, err := s.agents.EnsureLongTermRecord(ctx, store.LongTermScopeAgent, id, s.runtimeDir(), pc.LongTermMD)
 	if err != nil {
 		return agentPromptContextView{}, err

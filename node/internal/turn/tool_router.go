@@ -95,6 +95,12 @@ func (o *Orchestrator) processToolCalls(
 			}
 			continue
 		}
+		if tools.IsMemoryTool(tc.Function.Name) {
+			if err := o.executeMemoryTool(ctx, sessionID, history, tc); err != nil {
+				return nil, "", err
+			}
+			continue
+		}
 		if tools.IsSkillTool(tc.Function.Name) {
 			if err := o.executeSkillTool(sessionID, history, tc); err != nil {
 				return nil, "", err

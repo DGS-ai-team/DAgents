@@ -3,9 +3,11 @@ package agentruntime
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -32,12 +34,31 @@ type Built struct {
 	ToolGroups    []string
 }
 
+// Close releases resources created while building a runtime. Callers that
+// successfully hand TurnOptions to session.Manager transfer ownership to the
+// runtime; callers that only inspect a Built value (including tests) should
+// call Close themselves.
+func (b Built) Close() error {
+	if closer, ok := b.TurnOptions.MemoryService.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 // Build 根据快照构造 Agent workspace、工具组与独立 Registry。
 func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG == nil {
 		return Built{}, fmt.Errorf("node config required")
 	}
 	workspaceRoot, err := EnsureWorkspace(p.NodeCFG.RuntimeDir(), p.AgentID, p.Snapshot.Workspace)
+	if err != nil {
+		return Built{}, err
+	}
+	workspaceStateRoot, err := EnsureWorkspaceState(workspaceRoot, p.AgentID)
+	if err != nil {
+		return Built{}, err
+	}
+	historyRelativeRoot, err := WorkspaceStateRelativeRoot(p.AgentID)
 	if err != nil {
 		return Built{}, err
 	}
@@ -106,7 +127,43 @@ func Build(p BuildParams) (Built, error) {
 
 	turnOpts := p.BaseTurn
 	turnOpts.WorkspaceRoot = workspaceRoot
+	turnOpts.AgentID = strings.TrimSpace(p.AgentID)
+	turnOpts.WorkspaceStateRoot = workspaceStateRoot
+	turnOpts.RawMessageHistoryDir = filepath.Join(workspaceStateRoot, "history")
+	turnOpts.RawMessageHistoryRelativeRoot = historyRelativeRoot
 	turnOpts.ToolResult.WorkspaceRoot = workspaceRoot
+	turnOpts.ToolResult.AgentID = strings.TrimSpace(p.AgentID)
+	// Automatic recall and model-facing memory tools are separate capabilities.
+	// long_term_enabled controls the former; the memory tool group controls the
+	// latter. The service must exist when either capability is enabled.
+	memoryToolsOn := toolGroupSelected(groups, "memory")
+	// New Agent snapshots write this flag explicitly. Keep legacy/incomplete
+	// snapshots opt-in so merely opening an old Agent does not create a SQLite
+	// memory handle or change its model context unexpectedly.
+	memoryAutoRecall := false
+	if promptCtx := PromptContextFromDefaults(p.Snapshot); promptCtx != nil && promptCtx.LongTermEnabled != nil {
+		memoryAutoRecall = *promptCtx.LongTermEnabled
+	}
+	if memoryAutoRecall || memoryToolsOn {
+		memoryScope := memory.ScopeAgent
+		if LongTermScopeFromDefaults(p.Snapshot) == string(memory.ScopeGlobal) {
+			memoryScope = memory.ScopeGlobal
+		}
+		memoryService, openErr := memory.OpenLocalService(
+			filepath.Join(workspaceStateRoot, "memory", "memory.db"),
+			filepath.Join(p.NodeCFG.RuntimeDir(), "memory", "global.db"),
+			memoryScope,
+		)
+		if openErr != nil {
+			return Built{}, fmt.Errorf("open memory store: %w", openErr)
+		}
+		turnOpts.MemoryService = memoryService
+		turnOpts.MemoryAutoExtract = p.NodeCFG.Memory.AutoExtract
+		turnOpts.MemoryCandidateQueueSize = p.NodeCFG.Memory.CandidateQueueSize
+		turnOpts.MemoryCandidateMaxItems = p.NodeCFG.Memory.MaxCandidates
+		turnOpts.MemoryCoreBudgetTokens = p.NodeCFG.Memory.CoreBudgetTokens
+		turnOpts.MemoryAutoRecall = memoryAutoRecall
+	}
 	turnOpts.MultimodalEnabled = mm
 	turnOpts.SkillsEnabled = skillsOn
 	if skillsOn {

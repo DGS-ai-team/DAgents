@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
@@ -144,6 +145,38 @@ func TestBlockingCompressionApplies(t *testing.T) {
 	}
 	if snap.PromptTokens != 1000 || snap.PromptCacheHitTokens != 800 {
 		t.Fatalf("last compression = %+v", snap)
+	}
+}
+
+func TestCompressionSubmitsFrozenCandidateSliceWithoutBlocking(t *testing.T) {
+	submitter := &captureCandidateSubmitter{accepted: make(chan memory.ExtractionInput, 1)}
+	coord := NewCoordinator(&countingLLM{}, 0, 50)
+	coord.SetCandidateSubmitter(submitter)
+	messages := sampleMessages()
+	coord.MaybeHandle(context.Background(), "session-candidates", "agent-candidates", nil, &messages, testSidecarPrefix())
+	select {
+	case input := <-submitter.accepted:
+		if input.AgentID != "agent-candidates" || input.SessionID != "session-candidates" || input.SourceFingerprint == "" {
+			t.Fatalf("candidate input metadata = %+v", input)
+		}
+		if len(input.Messages) == 0 || input.Messages[0].Role != "user" {
+			t.Fatalf("candidate slice = %+v", input.Messages)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("compression did not submit candidate slice")
+	}
+}
+
+type captureCandidateSubmitter struct {
+	accepted chan memory.ExtractionInput
+}
+
+func (s *captureCandidateSubmitter) Submit(input memory.ExtractionInput) bool {
+	select {
+	case s.accepted <- input:
+		return true
+	default:
+		return false
 	}
 }
 

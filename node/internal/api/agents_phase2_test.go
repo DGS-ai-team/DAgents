@@ -94,9 +94,13 @@ defaults:
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
+	sawTurn := false
 	for {
 		_, hasTurn, _, err := srv.sessions.RuntimeInfo(created.AgentID)
-		if err == nil && !hasTurn {
+		if err == nil && hasTurn {
+			sawTurn = true
+		}
+		if err == nil && sawTurn && !hasTurn {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -113,6 +117,13 @@ defaults:
 	}
 	if !strings.Contains(rr.Body.String(), "agent_id") && !strings.Contains(rr.Body.String(), created.AgentID) {
 		t.Fatalf("hydrate body unexpected: %s", rr.Body.String())
+	}
+	historyFiles, err := filepath.Glob(filepath.Join(workspaceRoot, ".dagents", created.AgentID, "history", "*", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(historyFiles) == 0 {
+		t.Fatalf("workspace-scoped raw history was not written under %q", filepath.Join(workspaceRoot, ".dagents", created.AgentID, "history"))
 	}
 }
 

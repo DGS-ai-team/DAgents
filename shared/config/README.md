@@ -19,9 +19,10 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
 | `llm` | 模型连接（迁移种子）；工具轮次上限见 Agent snapshot |
-| `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `data/`、`memory/`、`skills/`、`policy/` 等管理目录相对此根 |
+| `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `memory/`、`skills/`、`policy/` 等控制面目录相对此根；Agent workspace 另由创建时绑定 |
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{runtime_root}/skills`；不属于 Agent workspace） |
 | `compression` | 上下文压缩 token 阈值 |
+| `memory` | 压缩后的可选候选提取与后台整理；默认不调用 LLM |
 | `triggers` | 触发器调度（见下表） |
 | `tools` | 内置工具编码与 bash 压缩（工具组见 Agent 快照） |
 | `log` | Node stderr 日志级别 |
@@ -45,7 +46,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `bash` | `bash_run` |
 | `terminal` | `terminal_config_list`、`terminal_open`、`terminal_input`、`terminal_read`、`terminal_terminate`、`terminal_list` |
 | `hitl` | `ask_user_information` |
-| `memory` | `remember` |
+| `memory` | `remember`、`memory_search`、`memory_get`、`memory_forget` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
 | `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
 | `child_agents` | `create_temporary_agent`、`cancel_temporary_agent` |

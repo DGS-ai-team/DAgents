@@ -28,6 +28,7 @@ type Config struct {
 	// Tools 为启用 spill/摘要 的工具名列表；空表示不处理任何工具。
 	Tools         []string
 	WorkspaceRoot string // Agent workspace 绝对路径，用于落盘
+	AgentID       string // 用于共享 workspace 时隔离 Agent 结果文件
 }
 
 // DefaultConfig 返回 WS3 默认（bash + fs）。

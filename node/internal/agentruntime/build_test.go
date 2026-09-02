@@ -30,6 +30,7 @@ func TestBuild_usesAgentWorkspaceAndToolGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 	if built.TurnOptions.MaxToolLoops != DefaultMaxToolLoops {
 		t.Fatalf("MaxToolLoops=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.MaxToolLoops, DefaultMaxToolLoops)
 	}
@@ -65,6 +66,7 @@ func TestBuild_usesCustomWorkspaceRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 	wantWorkspace, err = filepath.Abs(wantWorkspace)
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +76,22 @@ func TestBuild_usesCustomWorkspaceRoot(t *testing.T) {
 	}
 	if built.TurnOptions.WorkspaceRoot != wantWorkspace {
 		t.Fatalf("turn workspace=%q want %q", built.TurnOptions.WorkspaceRoot, wantWorkspace)
+	}
+	stateRoot, err := WorkspaceStateRoot(wantWorkspace, "agt-custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.TurnOptions.AgentID != "agt-custom" || built.TurnOptions.WorkspaceStateRoot != stateRoot {
+		t.Fatalf("workspace identity/state=%q/%q want %q/%q", built.TurnOptions.AgentID, built.TurnOptions.WorkspaceStateRoot, "agt-custom", stateRoot)
+	}
+	if built.TurnOptions.RawMessageHistoryDir != filepath.Join(stateRoot, "history") {
+		t.Fatalf("history dir=%q want %q", built.TurnOptions.RawMessageHistoryDir, filepath.Join(stateRoot, "history"))
+	}
+	if built.TurnOptions.RawMessageHistoryRelativeRoot != ".dagents/agt-custom" {
+		t.Fatalf("history relative root=%q", built.TurnOptions.RawMessageHistoryRelativeRoot)
+	}
+	if built.TurnOptions.ToolResult.AgentID != "agt-custom" {
+		t.Fatalf("tool result agent id=%q", built.TurnOptions.ToolResult.AgentID)
 	}
 }
 
@@ -96,6 +114,7 @@ func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 	if built.TurnOptions.SkillsEnabled {
 		t.Fatal("skills group absent: SkillsEnabled should be false")
 	}
@@ -131,6 +150,7 @@ func TestBuild_emptyOrMissingToolGroupsMeansNone(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = built.Close() })
 			if len(built.ToolGroups) != 0 {
 				t.Fatalf("tool groups=%v want empty", built.ToolGroups)
 			}
@@ -167,8 +187,81 @@ func TestBuild_ignoresLegacySkillsEnabledFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 	if !built.TurnOptions.SkillsEnabled {
 		t.Fatal("legacy defaults.skills.enabled=false must not disable skills when tool group present")
+	}
+}
+
+func TestBuildSeparatesAutomaticMemoryRecallFromMemoryTools(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{NodeID: "n1", RuntimeRoot: root}
+	cfg.ApplyDefaults()
+
+	tests := []struct {
+		name           string
+		groups         []any
+		longTerm       any
+		wantService    bool
+		wantAutoRecall bool
+		wantMemoryTool bool
+	}{
+		{
+			name:           "automatic recall without memory tools",
+			groups:         []any{"fs"},
+			longTerm:       true,
+			wantService:    true,
+			wantAutoRecall: true,
+			wantMemoryTool: false,
+		},
+		{
+			name:           "memory tools without automatic recall",
+			groups:         []any{"memory"},
+			longTerm:       false,
+			wantService:    true,
+			wantAutoRecall: false,
+			wantMemoryTool: true,
+		},
+		{
+			name:           "neither capability",
+			groups:         []any{"fs"},
+			longTerm:       false,
+			wantService:    false,
+			wantMemoryTool: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			built, err := Build(BuildParams{
+				NodeCFG:  cfg,
+				BaseTurn: session.TurnOptions{WorkspaceRoot: root},
+				AgentID:  "agt-memory-capability",
+				Snapshot: Snapshot{Defaults: map[string]any{
+					"tools":          map[string]any{"enabled_groups": tc.groups},
+					"prompt_context": map[string]any{"long_term_enabled": tc.longTerm},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = built.Close() })
+			if (built.TurnOptions.MemoryService != nil) != tc.wantService {
+				t.Fatalf("memory service present=%v want %v", built.TurnOptions.MemoryService != nil, tc.wantService)
+			}
+			if built.TurnOptions.MemoryAutoRecall != tc.wantAutoRecall {
+				t.Fatalf("MemoryAutoRecall=%v want %v", built.TurnOptions.MemoryAutoRecall, tc.wantAutoRecall)
+			}
+			hasMemoryTool := false
+			for _, definition := range built.Registry.Definitions() {
+				if definition.Function.Name == "memory_search" {
+					hasMemoryTool = true
+					break
+				}
+			}
+			if hasMemoryTool != tc.wantMemoryTool {
+				t.Fatalf("memory_search present=%v want %v", hasMemoryTool, tc.wantMemoryTool)
+			}
+		})
 	}
 }
 
@@ -214,6 +307,7 @@ func TestBuild_appliesSkillsVisibleAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 	if !built.TurnOptions.SkillsVisibleRestrict {
 		t.Fatal("expected visible restrict")
 	}

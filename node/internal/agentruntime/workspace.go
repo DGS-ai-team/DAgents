@@ -14,6 +14,10 @@ const (
 	WorkspaceModePrivate      = "private"
 	WorkspaceModeCustom       = "custom"
 	WorkspaceModeLegacyShared = "legacy_shared"
+	// workspaceStateDir is intentionally hidden from the model's normal file
+	// listing. It contains Agent-owned sidecars which must live with the
+	// selected workspace, while remaining isolated when Agents share it.
+	workspaceStateDir = ".dagents"
 )
 
 // WorkspaceConfig describes the user-facing working directory of an Agent.
@@ -111,7 +115,78 @@ func EnsureWorkspace(runtimeRoot, agentID string, workspace WorkspaceConfig) (st
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", fmt.Errorf("create workspace %q: %w", root, err)
 	}
+	// Do not create data/ here. It is retained only as a compatibility path for
+	// existing workspaces; new workspaces should remain free of this directory.
 	return root, nil
+}
+
+// WorkspaceStateRoot returns the private state namespace for one Agent inside
+// its selected workspace. User files remain directly under workspaceRoot;
+// Agent-owned sidecars use this namespace so two Agents can safely share the
+// same workspace without sharing their history or generated artifacts.
+func WorkspaceStateRoot(workspaceRoot, agentID string) (string, error) {
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		return "", fmt.Errorf("workspace root is required")
+	}
+	id := strings.TrimSpace(agentID)
+	if err := validateWorkspaceStateID(id); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("normalize workspace root: %w", err)
+	}
+	return filepath.Join(abs, workspaceStateDir, id), nil
+}
+
+// EnsureWorkspaceState creates the hidden per-Agent state namespace. The
+// subdirectories are created eagerly so their ownership is explicit, while
+// individual files remain lazily created by their owning components.
+func EnsureWorkspaceState(workspaceRoot, agentID string) (string, error) {
+	stateRoot, err := WorkspaceStateRoot(workspaceRoot, agentID)
+	if err != nil {
+		return "", err
+	}
+	for _, subdir := range []string{"history", "memory"} {
+		if err := os.MkdirAll(filepath.Join(stateRoot, subdir), 0o755); err != nil {
+			return "", fmt.Errorf("create Agent workspace state %q: %w", stateRoot, err)
+		}
+	}
+	return stateRoot, nil
+}
+
+// WorkspaceHistoryRelativeRoot is the model-visible relative path prefix for
+// raw message journals. It deliberately includes agent_id even though the
+// state root is already per-Agent, making the ownership obvious in a shared
+// workspace and in exported logs.
+func WorkspaceHistoryRelativeRoot(agentID string) (string, error) {
+	root, err := WorkspaceStateRelativeRoot(agentID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Join(root, "history")), nil
+}
+
+// WorkspaceStateRelativeRoot returns the workspace-relative private state
+// directory used as the base for Agent-owned sidecars.
+func WorkspaceStateRelativeRoot(agentID string) (string, error) {
+	id := strings.TrimSpace(agentID)
+	if err := validateWorkspaceStateID(id); err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Join(workspaceStateDir, id)), nil
+}
+
+func validateWorkspaceStateID(agentID string) error {
+	if agentID == "" {
+		return fmt.Errorf("agent_id is required for workspace state")
+	}
+	if strings.IndexByte(agentID, 0) >= 0 || agentID == "." || agentID == ".." ||
+		strings.ContainsAny(agentID, `/\\`) {
+		return fmt.Errorf("agent_id is invalid for workspace state")
+	}
+	return nil
 }
 
 func canonicalWorkspacePath(raw string) (string, error) {

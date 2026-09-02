@@ -2,6 +2,7 @@ package compression
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -111,5 +112,17 @@ func (c *Coordinator) SetRawMessageHistoryEnabled(enabled bool) {
 	}
 	c.mu.Lock()
 	c.rawMessageHistoryEnabled = enabled
+	c.mu.Unlock()
+}
+
+// SetRawMessageHistoryRelativeRoot sets the workspace-relative path prefix
+// used in compression hints. The actual journal write path remains owned by
+// the session runtime's Journal instance.
+func (c *Coordinator) SetRawMessageHistoryRelativeRoot(root string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.rawMessageHistoryRelativeRoot = strings.TrimSpace(root)
 	c.mu.Unlock()
 }

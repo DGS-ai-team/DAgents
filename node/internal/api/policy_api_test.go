@@ -40,13 +40,18 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 		WithSkipStore(),
 	)
 	srv.agents = agentsDB
+	t.Cleanup(func() {
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"template_id":  "general",
 		"display_name": "策略测试",
 		"defaults": map[string]any{
 			"llm":   map[string]any{"active": "mock"},
-			"tools": map[string]any{"enabled_groups": []string{"fs", "bash"}},
+			"tools": map[string]any{"enabled_groups": []string{"fs", "bash", "memory"}},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
@@ -222,11 +227,11 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
 		t.Fatal(err)
 	}
-	if view.SoulMD != "我是助手" || view.Source != "sqlite" {
+	if view.SoulMD != "我是助手" || view.Source != "workspace_memory" {
 		t.Fatalf("view = %+v", view)
 	}
-	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].Content != "记得开会" {
-		t.Fatalf("long_term entries = %+v md=%q", view.LongTermEntries, view.LongTermMD)
+	if len(view.GlobalLongTermEntries) != 1 || view.GlobalLongTermEntries[0].Content != "记得开会" {
+		t.Fatalf("global long_term entries = %+v md=%q", view.GlobalLongTermEntries, view.LongTermMD)
 	}
 	contextView, err := srv.sessions.GetContextView(agentID)
 	if err != nil {
@@ -245,6 +250,13 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	}
 	if got := agentruntime.LongTermScopeFromDefaults(snap); got != "global" {
 		t.Fatalf("long_term_scope was not persisted to agent snapshot: %q", got)
+	}
+	pc, err := srv.agents.GetAgentPromptContext(t.Context(), agentID)
+	if err != nil || pc == nil {
+		t.Fatalf("load prompt context after v2 write: pc=%v err=%v", pc, err)
+	}
+	if pc.LongTermMD != "" {
+		t.Fatalf("v2 prompt context must keep legacy long_term_md read-only, got %q", pc.LongTermMD)
 	}
 }
 

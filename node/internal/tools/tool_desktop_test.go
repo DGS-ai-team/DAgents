@@ -124,6 +124,9 @@ func TestExecScreenCaptureUsesRealDisplay(t *testing.T) {
 	if !payload.OK || payload.Screenshot == "" {
 		t.Fatalf("unexpected result: %s", result)
 	}
+	if !strings.Contains(filepath.ToSlash(payload.Screenshot), "/.dagents/desktop-test/screenshots/") {
+		t.Fatalf("screenshot is not workspace-scoped: %q", payload.Screenshot)
+	}
 	t.Cleanup(func() { _ = os.Remove(payload.Screenshot) })
 	info, err := os.Stat(payload.Screenshot)
 	if err != nil {

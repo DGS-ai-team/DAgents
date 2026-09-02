@@ -70,6 +70,16 @@ type CompressionSettings struct {
 	IdleAutoCompressMinTokens   int `json:"idle_auto_compress_min_tokens"`
 }
 
+// MemorySettings controls the optional compression-to-memory background
+// pipeline. Automatic extraction is disabled by default because it costs an
+// LLM call and inferred candidates are kept behind the consolidation boundary.
+type MemorySettings struct {
+	AutoExtract        bool `json:"auto_extract"`
+	CandidateQueueSize int  `json:"candidate_queue_size"`
+	MaxCandidates      int  `json:"max_candidates"`
+	CoreBudgetTokens   int  `json:"core_budget_tokens"`
+}
+
 // NodeEndpointView 只读：Node 监听地址（须改 config.yaml 并重启）。
 type NodeEndpointView struct {
 	ListenHost    string `json:"listen_host"`
@@ -166,6 +176,7 @@ type SettingsView struct {
 	Manage          ManageSettings      `json:"manage"`
 	Features        FeatureSettings     `json:"features"`
 	Compression     CompressionSettings `json:"compression"`
+	Memory          MemorySettings      `json:"memory"`
 	Runtime         RuntimeSettings     `json:"runtime"`
 	Agent           AgentSettings       `json:"agent"`
 	User            UserSettings        `json:"user"`
@@ -185,6 +196,7 @@ type SettingsPatch struct {
 	Manage      *ManageSettings      `json:"manage,omitempty"`
 	Features    *FeatureSettings     `json:"features,omitempty"`
 	Compression *CompressionSettings `json:"compression,omitempty"`
+	Memory      *MemorySettings      `json:"memory,omitempty"`
 	Runtime     *RuntimeSettings     `json:"runtime,omitempty"`
 	Agent       *AgentSettings       `json:"agent,omitempty"`
 	User        *UserSettings        `json:"user,omitempty"`
@@ -248,6 +260,12 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
 			IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
 			IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
+		},
+		Memory: MemorySettings{
+			AutoExtract:        cfg.Memory.AutoExtract,
+			CandidateQueueSize: cfg.Memory.CandidateQueueSize,
+			MaxCandidates:      cfg.Memory.MaxCandidates,
+			CoreBudgetTokens:   cfg.Memory.CoreBudgetTokens,
 		},
 		Runtime: RuntimeSettings{
 			NodeID:      cfg.NodeID,
@@ -327,6 +345,11 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Compression != nil {
 		if err := applyCompressionPatch(&out, *patch.Compression); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Memory != nil {
+		if err := applyMemoryPatch(&out, *patch.Memory); err != nil {
 			return nil, err
 		}
 	}
@@ -578,6 +601,29 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 	cfg.Compression.IdleAutoCompressSeconds = p.IdleAutoCompressSeconds
 	cfg.Compression.IdleAutoCompressPollSeconds = p.IdleAutoCompressPollSeconds
 	cfg.Compression.IdleAutoCompressMinTokens = p.IdleAutoCompressMinTokens
+	return nil
+}
+
+func applyMemoryPatch(cfg *config.Config, p MemorySettings) error {
+	if p.CandidateQueueSize < 0 {
+		return fmt.Errorf("memory.candidate_queue_size must be >= 0")
+	}
+	if p.MaxCandidates < 0 {
+		return fmt.Errorf("memory.max_candidates must be >= 0")
+	}
+	if p.CoreBudgetTokens < 0 {
+		return fmt.Errorf("memory.core_budget_tokens must be >= 0")
+	}
+	cfg.Memory.AutoExtract = p.AutoExtract
+	if p.CandidateQueueSize > 0 {
+		cfg.Memory.CandidateQueueSize = p.CandidateQueueSize
+	}
+	if p.MaxCandidates > 0 {
+		cfg.Memory.MaxCandidates = p.MaxCandidates
+	}
+	if p.CoreBudgetTokens > 0 {
+		cfg.Memory.CoreBudgetTokens = p.CoreBudgetTokens
+	}
 	return nil
 }
 

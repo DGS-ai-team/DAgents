@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -34,6 +35,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{
@@ -53,9 +55,18 @@ defaults:
 	if created.AgentID == "" || created.DisplayName != "审查A" {
 		t.Fatalf("created = %+v", created)
 	}
-	ws := filepath.Join(cfg.AgentsDir(), created.AgentID, "data")
-	if st, err := os.Stat(ws); err != nil || !st.IsDir() {
-		t.Fatalf("workspace missing: %v", err)
+	workspaceRoot, err := agentruntime.EffectiveWorkspaceRoot(cfg.RuntimeDir(), created.AgentID, agentruntime.WorkspaceConfig{Mode: agentruntime.WorkspaceModePrivate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateRoot, err := agentruntime.WorkspaceStateRoot(workspaceRoot, created.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subdir := range []string{"history", "memory"} {
+		if st, err := os.Stat(filepath.Join(stateRoot, subdir)); err != nil || !st.IsDir() {
+			t.Fatalf("workspace state %q missing: %v", subdir, err)
+		}
 	}
 }
 
@@ -69,6 +80,7 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{

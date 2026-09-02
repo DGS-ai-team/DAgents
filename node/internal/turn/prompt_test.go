@@ -23,8 +23,11 @@ func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "data/", "tool_outputs/", "临时工作区", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "workspace_root", "runtime_root", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "tool_outputs/", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "workspace_root", "runtime_root", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "`data/`") {
+		t.Fatalf("system prompt should not describe compatibility data directory, got %q", prompt)
 	}
 	if contains(prompt, "ops-01") || contains(prompt, "sess-abc") || contains(prompt, "运行环境") {
 		t.Fatalf("system prompt should not contain request context, got %q", prompt)
@@ -44,7 +47,7 @@ func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
 		SessionID:             "sess-a",
 		IncludeHistoryJournal: true,
 	})
-	if !containsAll(prompt, "<runtime_root>/history/", "Node 独立管理", "不是 LLM 上下文的一部分") {
+	if !containsAll(prompt, ".dagents/<agent_id>/history/", "Node 写入", "不是 LLM 上下文的一部分") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
@@ -166,8 +169,11 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		SessionID:     "child-abc",
 		Purpose:       "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "data/", "tool_outputs/", "工作区目录", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "tool_outputs/", "工作区目录", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "`data/`") {
+		t.Fatalf("child system prompt should not describe compatibility data directory, got %q", prompt)
 	}
 	if contains(prompt, "child-abc") || contains(prompt, "运行环境") {
 		t.Fatalf("child system prompt should omit request context, got %q", prompt)

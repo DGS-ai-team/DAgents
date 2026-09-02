@@ -25,6 +25,11 @@ func newChildRuntime(
 	initialLoaded []skills.LoadedSkill,
 	childMgr *childagent.Manager,
 ) *runtime {
+	// Child sessions have their own scoped execution transcript and must not
+	// write to or recall the parent Agent's workspace memory automatically.
+	// The parent can still relay the child result as ordinary task context.
+	turnOpts.MemoryService = nil
+	turnOpts.MemoryAutoExtract = false
 	// 创建受限工具注册表
 	restricted := childagent.NewRestrictedRegistry(baseRegistry, allowedTools)
 	// 创建子 Agent 消息中继

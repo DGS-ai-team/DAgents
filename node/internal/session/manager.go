@@ -20,6 +20,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -36,6 +37,14 @@ type TurnOptions struct {
 	// WorkspaceRoot is the Agent-facing root for files, bash, local terminals,
 	// media and user-visible tool artifacts.
 	WorkspaceRoot string
+	// AgentID identifies the owner of workspace-scoped private state. It is
+	// separate from the Node identity because multiple Agents may share one
+	// WorkspaceRoot.
+	AgentID string
+	// WorkspaceStateRoot is the hidden per-Agent namespace under WorkspaceRoot
+	// for sidecars such as raw message history. It is derived at runtime and is
+	// not a model-facing path base.
+	WorkspaceStateRoot string
 	// FSRoot is the pre-workspace compatibility alias. New callers must use
 	// WorkspaceRoot so Node runtime storage cannot be confused with an Agent
 	// workspace.
@@ -65,12 +74,15 @@ type TurnOptions struct {
 	IdleAutoCompressMinTokens   int
 	RawMessageHistoryEnabled    bool
 	RawMessageHistoryDir        string
-	DuplicateToolCall           hooks.DuplicateConfig
-	ToolResult                  hooks.ToolResultConfig
-	InjectTodayDate             hooks.InjectTodayDateConfig
-	PluginHooks                 hooks.PluginsConfig
-	HookHost                    turn.HookHostConfig
-	MultimodalEnabled           bool
+	// RawMessageHistoryRelativeRoot is the workspace-relative path shown in
+	// compression hints; the actual write root is RawMessageHistoryDir.
+	RawMessageHistoryRelativeRoot string
+	DuplicateToolCall             hooks.DuplicateConfig
+	ToolResult                    hooks.ToolResultConfig
+	InjectTodayDate               hooks.InjectTodayDateConfig
+	PluginHooks                   hooks.PluginsConfig
+	HookHost                      turn.HookHostConfig
+	MultimodalEnabled             bool
 	// ConfigRevision 保留兼容旧调用方；新代码使用 RuntimeRevision。
 	ConfigRevision int64
 	// RuntimeRevision 是独立于 agents.updated_at 的 Agent runtime 版本。
@@ -84,8 +96,22 @@ type TurnOptions struct {
 	// PreferredName 为本机使用者称呼（Node 首配）；通过 prompt context
 	// 注入模型请求，替代 user.md。
 	PreferredName string
-	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
+	// LongTermStore 是迁移期间保留的 legacy 长期记忆 adapter；新 runtime
+	// 优先使用下方的 MemoryService。
 	LongTermStore turn.LongTermStore
+	// MemoryService is the v2 workspace memory authority. It is recalled at
+	// each fresh model-context boundary and never injected into system prompt.
+	MemoryService memory.Service
+	// MemoryAutoRecall controls the automatic per-turn memory projection. It is
+	// independent from MemoryService being available for model-facing tools.
+	MemoryAutoRecall bool
+	// MemoryAutoExtract enables the optional compression candidate pipeline.
+	// It is intentionally false by default because each compression can add an
+	// LLM call; extracted candidates remain pending until consolidation.
+	MemoryAutoExtract        bool
+	MemoryCandidateQueueSize int
+	MemoryCandidateMaxItems  int
+	MemoryCoreBudgetTokens   int
 }
 
 func effectiveWorkspaceRoot(opts TurnOptions) string {
