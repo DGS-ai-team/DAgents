@@ -57,9 +57,9 @@ func (s *ModelContextSnapshot) observability() map[string]any {
 		"memory_snapshot_id":           s.MemorySnapshotID,
 		"memory_store_revision":        s.MemoryStoreRevision,
 		"memory_digest":                s.MemoryDigest,
-		"memory_core_count":             s.MemoryCoreCount,
-		"memory_recall_count":           s.MemoryRecallCount,
-		"memory_estimated_tokens":       s.MemoryEstimatedTokens,
+		"memory_core_count":            s.MemoryCoreCount,
+		"memory_recall_count":          s.MemoryRecallCount,
+		"memory_estimated_tokens":      s.MemoryEstimatedTokens,
 	}
 }
 
