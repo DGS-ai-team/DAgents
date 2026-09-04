@@ -32,7 +32,7 @@ Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙
 - 旧 Agent 快照缺少 `workspace` 配置时，升级后使用 `.runtime/agents/<agent_id>/workspace`。系统不会把旧 Node 根目录下的项目文件、JSONL 或旧长期记忆文件自动复制到新位置；需要保留时请先备份，再人工复制/整理。
 - workspace 在 Agent 创建时固定，升级期间不要通过修改 API 请求尝试变更已有 Agent 的 workspace。需要新目录时应创建新的 Agent，并按业务需要迁移项目文件。
 - `workspace_root` 只表示 Agent 可操作的文件、命令、终端和工具结果范围；`runtime_root` 只表示 Node 的管理目录。旧集成若仍传 `fs_root`，应在升级前改为明确的其中一个路径语义。
-- 旧长期记忆兼容文件不再自动导入新 SQLite memory service。确认备份后，可通过记忆设置或受控导入流程重新整理；不要直接把旧文件放入 `.dagents/<agent_id>/memory/` 伪装成新数据库。
+- 旧长期记忆兼容文件不再自动导入新 SQLite memory service。确认备份后，由维护者人工整理内容，再通过现行 memory API 或设置重新写入；不要直接把旧文件放入 `.dagents/<agent_id>/memory/` 伪装成新数据库。
 
 ### 升级后检查
 
