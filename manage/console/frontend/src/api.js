@@ -281,10 +281,6 @@ export async function fetchWorkgroups(params = {}) {
   return apiFetch("/v1/workgroups", params);
 }
 
-export async function fetchMemberToolCatalog() {
-  return apiFetch("/v1/workgroups/meta/member-tools");
-}
-
 export async function fetchWorkgroup(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`);
 }
@@ -323,11 +319,11 @@ export async function listWorkgroupHITL(workgroupId, pendingOnly = true) {
   });
 }
 
-export async function resolveWorkgroupHITL(workgroupId, hitlId, answer, resolution = null) {
+export async function resolveWorkgroupHITL(workgroupId, hitlId, resolution) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
     {},
-    { method: "POST", body: { answer, resolution: resolution || { answer } } },
+    { method: "POST", body: { resolution: resolution || {} } },
   );
 }
 
@@ -349,12 +345,6 @@ export async function fetchWorkgroupLLMConfigs(workgroupId) {
 
 export async function fetchWorkgroupMembers(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`);
-}
-
-export async function fetchWorkgroupMemberSpec(workgroupId, memberId) {
-  return apiFetch(
-    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
-  );
 }
 
 export async function fetchWorkgroupACL(workgroupId) {
@@ -539,6 +529,82 @@ export async function postWorkgroupMessageStream(workgroupId, body, { onEvent, s
     throw err;
   }
   return { finalText };
+}
+
+/**
+ * 工作组持久事件流；以 Timeline seq 恢复，断线时由调用方重新连接。
+ * 该流只负责 Manage 的规范化投影，不复用 Node↔Manage 的身份 WS。
+ */
+export async function streamWorkgroupEvents(
+  workgroupId,
+  { afterSeq = 0, onEvent, signal } = {},
+) {
+  const url = new URL(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/events`,
+    window.location.origin,
+  );
+  url.searchParams.set("after_seq", String(Math.max(0, Number(afterSeq) || 0)));
+  const resp = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!resp.ok) {
+    let message = `HTTP ${resp.status}`;
+    try {
+      const errBody = await resp.json();
+      const detail = errBody?.detail;
+      if (typeof detail === "string") message = detail;
+      else if (detail?.message) message = detail.message;
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
+  if (!resp.body) throw new Error("事件流不可用");
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  const flushBlock = (block) => {
+    const lines = block.split(/\r?\n/);
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim() || "message";
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (!dataLines.length && eventName === "message") return;
+    let data = {};
+    const raw = dataLines.join("\n");
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { raw };
+      }
+    }
+    if (typeof onEvent === "function") onEvent(eventName, data);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, "\n");
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if (block.trim()) flushBlock(block);
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) flushBlock(buffer);
 }
 
 export async function parseCaseJsonl(file) {

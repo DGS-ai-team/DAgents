@@ -37,12 +37,6 @@ const modules = [
     tone: "workgroup",
   },
   {
-    id: "templates",
-    label: "Agent 模板",
-    hint: "维护可复用蓝图，工作组加成员时一键选用",
-    tone: "templates",
-  },
-  {
     id: "marketplace",
     label: "能力市场",
     hint: "上传与分发 Skills、Hooks、External Tools",
@@ -94,7 +88,7 @@ defineExpose({ refresh: loadDashboard });
       <img class="home-hero-mark" :src="brandIcon" alt="" aria-hidden="true" />
       <p class="home-hero-kicker">Overview</p>
       <h1 class="home-hero-status">{{ statusLine }}</h1>
-      <p class="home-hero-note">从工作组开始协作，用模板快速构建成员，在能力市场扩展 Node。</p>
+      <p class="home-hero-note">从工作组开始协作，在能力市场扩展 Node。</p>
     </header>
 
     <p v-if="error" class="state state-error">{{ error }}</p>
@@ -131,10 +125,6 @@ defineExpose({ refresh: loadDashboard });
             <circle cx="16.5" cy="9.5" r="2.5" />
             <path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5" />
             <path d="M14 14.2c1.4-.7 3.2-.6 4.8.5 1.1.8 1.8 2 2 3.3" />
-          </svg>
-          <svg v-else-if="item.tone === 'templates'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="4" y="3" width="16" height="18" rx="2" />
-            <path d="M8 8h8M8 12h8M8 16h5" />
           </svg>
           <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M4 8l8-4 8 4v8l-8 4-8-4V8z" />

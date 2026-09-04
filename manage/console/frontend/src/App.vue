@@ -14,7 +14,6 @@ import DetailDrawer from "./components/DetailDrawer.vue";
 import LoginView from "./components/LoginView.vue";
 import HomeDashboard from "./components/HomeDashboard.vue";
 import MarketplaceView from "./components/MarketplaceView.vue";
-import TemplatesView from "./components/TemplatesView.vue";
 import PermissionsView from "./components/PermissionsView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import WorkgroupView from "./components/WorkgroupView.vue";
@@ -461,11 +460,6 @@ onMounted(() => {
             :display-name="chatSession.displayName"
             @toast="showToast($event.message, $event.type)"
             @close="closeWorkgroupChat"
-          />
-
-          <TemplatesView
-            v-if="view === 'templates'"
-            :active="view === 'templates'"
           />
 
           <MarketplaceView
