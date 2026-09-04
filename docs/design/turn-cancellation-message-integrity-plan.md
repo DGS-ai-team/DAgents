@@ -1,8 +1,8 @@
 # Turn 取消与模型消息完整性重构计划
 
-> **状态**：已落地；当前文档同步记录现行取消、恢复与历史校验边界（前端 Vitest 需在依赖恢复后执行）  
-> **制定日期**：2026-09-02  
-> **适用范围**：Agent Node 的 LLM 流式响应、显式 Turn 取消、工具执行取消、消息持久化、会话恢复与 Web UI hydrate  
+> **状态**：已落地；当前文档同步记录现行取消、恢复与历史校验边界（前端 Vitest 需在依赖恢复后执行）
+> **制定日期**：2026-09-02
+> **适用范围**：Agent Node 的 LLM 流式响应、显式 Turn 取消、工具执行取消、消息持久化、会话恢复与 Web UI hydrate
 > **问题样本**：取消发生在 `assistant.tool_calls[].function.arguments` 流式生成中间时，半成品被写入历史，下一条消息发送给 OpenAI-compatible provider 后返回 HTTP 400
 
 ## 0. 决策摘要
