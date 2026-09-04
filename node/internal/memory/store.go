@@ -547,7 +547,7 @@ func memorySearchTerms(query string) []string {
 	}
 
 	var word, han []rune
-	for _, r := range []rune(query) {
+	for _, r := range query {
 		switch {
 		case unicode.Is(unicode.Han, r):
 			flushWord(&word)
