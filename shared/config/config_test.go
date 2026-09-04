@@ -62,10 +62,6 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	if cfg.SessionDBPath() != wantDB {
 		t.Fatalf("SessionDBPath = %q, want %q", cfg.SessionDBPath(), wantDB)
 	}
-	wantData := filepath.Join(runtimeDir, "data")
-	if cfg.DataDir() != wantData {
-		t.Fatalf("DataDir = %q, want %q", cfg.DataDir(), wantData)
-	}
 	wantSkills := filepath.Join(runtimeDir, "skills")
 	if cfg.SkillsRoot() != wantSkills {
 		t.Fatalf("SkillsRoot = %q, want %q", cfg.SkillsRoot(), wantSkills)
@@ -80,18 +76,6 @@ func TestLoadFile_ignoresYAMLRuntimeRoot(t *testing.T) {
 	}
 	if cfg.RuntimeRoot != DefaultRuntimeRoot {
 		t.Fatalf("runtime_root = %q, want fixed %q", cfg.RuntimeRoot, DefaultRuntimeRoot)
-	}
-}
-
-func TestApplyDefaults_readsDeprecatedFSRootAlias(t *testing.T) {
-	legacyRoot := filepath.Join(t.TempDir(), "legacy-runtime")
-	cfg := &Config{FSRoot: legacyRoot}
-	cfg.ApplyDefaults()
-	if cfg.RuntimeRoot != legacyRoot {
-		t.Fatalf("runtime_root = %q, want legacy root %q", cfg.RuntimeRoot, legacyRoot)
-	}
-	if cfg.FSRoot != legacyRoot {
-		t.Fatalf("fs_root compatibility alias = %q, want %q", cfg.FSRoot, legacyRoot)
 	}
 }
 

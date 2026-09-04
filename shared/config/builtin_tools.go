@@ -28,9 +28,6 @@ var knownBuiltinTools = map[string]struct{}{
 	"terminal_command":       {},
 	"terminal_upload":        {},
 	"terminal_download":      {},
-	"linux_exec":             {},
-	"linux_file_upload":      {},
-	"linux_file_download":    {},
 	"ask_user_information":   {},
 	"remember":               {},
 	"memory_search":          {},
@@ -121,12 +118,6 @@ var builtinToolGroups = map[string][]string{
 	},
 }
 
-// builtinToolGroupAliases 保留旧配置中的 linux 组名，统一映射到 terminal。
-// 新配置只暴露 terminal，避免本机终端与 Linux 通道被误认为是两套能力。
-var builtinToolGroupAliases = map[string]string{
-	"linux": "terminal",
-}
-
 var builtinToolToGroup map[string]string
 
 func init() {
@@ -138,14 +129,7 @@ func init() {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := builtinToolToGroup[name]; !ok {
-			// Deprecated Linux tool names remain accepted in old snapshots but
-			// are intentionally not part of the public terminal group.
-			switch name {
-			case "linux_exec", "linux_file_upload", "linux_file_download":
-				continue
-			default:
-				panic("config: tool " + name + " missing from builtinToolGroups")
-			}
+			panic("config: tool " + name + " missing from builtinToolGroups")
 		}
 	}
 }
@@ -211,11 +195,7 @@ func NormalizeBuiltinToolGroups(groups []string) []string {
 }
 
 func canonicalBuiltinToolGroup(raw string) string {
-	name := strings.TrimSpace(raw)
-	if alias, ok := builtinToolGroupAliases[name]; ok {
-		return alias
-	}
-	return name
+	return strings.TrimSpace(raw)
 }
 
 // ExpandBuiltinToolGroups 将工具组展开为工具名列表；空切片表示未选任何组。
@@ -250,16 +230,6 @@ func ValidateBuiltinToolGroups(groups []string) error {
 		}
 	}
 	return validateBuiltinToolNames(ExpandBuiltinToolGroups(groups))
-}
-
-func validateToolsEnabledConfig(t *ToolsConfig) error {
-	if t == nil {
-		return nil
-	}
-	if len(t.Enabled) > 0 {
-		return fmt.Errorf("tools.enabled is deprecated and removed; configure Agent defaults.tools.enabled_groups instead (groups: %s)", strings.Join(AllBuiltinToolGroupNames(), ", "))
-	}
-	return nil
 }
 
 func validateBuiltinToolNames(names []string) error {

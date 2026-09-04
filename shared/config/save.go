@@ -10,7 +10,7 @@ import (
 )
 
 // SaveFile 将配置写入 YAML 文件（原子替换；不保留原文件注释）。
-// 兼容旧路径：仍可写出完整 Config。新流程请优先 SaveBootstrapFile + node_settings.db。
+// 该 API 供独立 Client 与无持久化的测试使用；Node 运行时设置写入 node_settings.db。
 func SaveFile(path string, cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("nil config")
@@ -66,32 +66,6 @@ func SaveBootstrapFile(path string, cfg *Config) error {
 	}
 	header := []byte("# DAgents Node bootstrap（仅 listen/local）\n# 其余设置保存在 ./.runtime/node_settings.db 与 llm_configs.db，请用 Web UI 修改。\n")
 	return writeAtomic(path, append(header, out...))
-}
-
-// FileHasMigratableSettings 判断引导 YAML 是否仍含 listen/local 以外的顶层键（胖配置，应迁入 SQLite）。
-// 必须读原始文件：LoadFile+ApplyDefaults 会注入 llm.profiles 等，无法用 Config 结构体可靠判断。
-func FileHasMigratableSettings(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return false
-	}
-	for k := range raw {
-		switch strings.ToLower(strings.TrimSpace(k)) {
-		case "listen", "local":
-			continue
-		default:
-			return true
-		}
-	}
-	return false
 }
 
 func writeAtomic(path string, out []byte) error {

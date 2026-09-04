@@ -99,24 +99,6 @@ func TestLLMProfile_multimodalFollowsActive(t *testing.T) {
 	}
 }
 
-func TestMigrateMultimodalIntoProfiles(t *testing.T) {
-	on := true
-	cfg := &Config{}
-	cfg.Multimodal.Enabled = &on
-	cfg.LLM.Profiles = map[string]LLMProfileConfig{
-		"default": {Provider: "openai", Model: "gpt-4o", APIKeyEnv: "OPENAI_API_KEY"},
-	}
-	cfg.LLM.Active = "default"
-	cfg.ApplyDefaults()
-	p, ok := cfg.LLM.GetProfile("default")
-	if !ok || !ProfileMultimodalEnabled(p) {
-		t.Fatalf("expected legacy multimodal.enabled migrated onto profile, got %+v", p)
-	}
-	if !cfg.MultimodalEnabled() {
-		t.Fatal("expected multimodal still enabled after normalize")
-	}
-}
-
 func TestLLMProfileMultimodalFollowsCheckboxRegardlessOfModel(t *testing.T) {
 	on := true
 	off := false

@@ -9,7 +9,6 @@
 # --- 免审批：低风险且无需重复调用拦截 ---
 ask_user_information=never
 load_skills=never
-search_file=never
 
 # --- 触发器 ---
 trigger_list=never
@@ -20,9 +19,6 @@ trigger_delete=always
 
 # --- 上下文治理：只读 + status 轮询（WS3 spill + WS6 duplicate guard）---
 bash_run=rule
-linux_exec=always
-linux_file_upload=always
-linux_file_download=always
 read_file=rule
 glob_files=rule
 grep_file=rule

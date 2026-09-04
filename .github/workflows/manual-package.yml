@@ -82,13 +82,12 @@ jobs:
             shared/config/go.sum
             shared/logfiles/go.sum
             shared/update/go.sum
-            shared/workgroup/go.sum
             desktop/tray/go.sum
 
       - name: Go test
         run: |
-          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
-          go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
+          go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
           bash scripts/ci/run_staticcheck.sh
 
       - name: Setup Python
@@ -127,14 +126,13 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.25.13"
+          go-version: "1.26.8"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
             shared/config/go.sum
             shared/logfiles/go.sum
             shared/update/go.sum
-            shared/workgroup/go.sum
             desktop/tray/go.sum
 
       - name: Build Go binaries (dagents-node + dagents-client)
@@ -239,7 +237,6 @@ jobs:
             shared/config/go.sum
             shared/logfiles/go.sum
             shared/update/go.sum
-            shared/workgroup/go.sum
             desktop/tray/go.sum
 
       - name: Build Go binaries
@@ -300,7 +297,6 @@ jobs:
             shared/config/go.sum
             shared/logfiles/go.sum
             shared/update/go.sum
-            shared/workgroup/go.sum
             desktop/tray/go.sum
 
       - name: Setup Rust

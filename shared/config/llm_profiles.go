@@ -26,8 +26,6 @@ func (c *Config) normalizeLLMProfiles() {
 		c.applyLLMProfile(id)
 		return
 	}
-	// 旧配置仅有顶层 multimodal.enabled 时，迁移到尚未声明该字段的档案。
-	c.migrateMultimodalIntoProfiles()
 	for id, profile := range c.LLM.Profiles {
 		c.LLM.Profiles[id] = normalizeLLMProfile(profile)
 	}
@@ -50,22 +48,6 @@ func (c *Config) normalizeLLMProfiles() {
 		}
 	}
 	c.applyLLMProfile(c.LLM.Active)
-}
-
-// migrateMultimodalIntoProfiles 将遗留的顶层 multimodal.enabled=true
-// 写入尚未设置 multimodal_enabled 的档案（避免升级后丢失开关）。
-func (c *Config) migrateMultimodalIntoProfiles() {
-	if c == nil || !c.MultimodalEnabled() || len(c.LLM.Profiles) == 0 {
-		return
-	}
-	for id, p := range c.LLM.Profiles {
-		if p.MultimodalEnabled != nil {
-			continue
-		}
-		v := true
-		p.MultimodalEnabled = &v
-		c.LLM.Profiles[id] = p
-	}
 }
 
 func (l LLMConfig) hasProfile(id string) bool {

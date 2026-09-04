@@ -1,9 +1,6 @@
 package config
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestValidateBuiltinToolNames(t *testing.T) {
 	if err := validateBuiltinToolNames([]string{"read_file", "bash_run"}); err != nil {
@@ -11,36 +8,6 @@ func TestValidateBuiltinToolNames(t *testing.T) {
 	}
 	if err := validateBuiltinToolNames([]string{"not_a_tool"}); err == nil {
 		t.Fatal("expected error")
-	}
-}
-
-func TestLoadFile_ignoresLegacyNodeEnabledGroups(t *testing.T) {
-	path, _ := testConfigPath(t, `
-node_id: test-agent
-tools:
-  enabled_groups:
-    - fs
-    - fake_group
-`)
-	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile err = %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("nil config")
-	}
-}
-
-func TestLoadFile_rejectsDeprecatedToolsEnabled(t *testing.T) {
-	path, _ := testConfigPath(t, `
-node_id: test-agent
-tools:
-  enabled:
-    - read_file
-`)
-	_, err := LoadFile(path)
-	if err == nil || !strings.Contains(err.Error(), "tools.enabled") {
-		t.Fatalf("LoadFile err = %v", err)
 	}
 }
 
@@ -83,23 +50,16 @@ func TestExpandBuiltinToolGroupsComputer(t *testing.T) {
 	}
 }
 
-func TestLinuxToolGroupAliasUsesTerminal(t *testing.T) {
-	got := ExpandBuiltinToolGroups([]string{"linux"})
-	want := ExpandBuiltinToolGroups([]string{"terminal"})
-	if len(got) != len(want) {
-		t.Fatalf("linux alias expanded to %v, terminal expanded to %v", got, want)
+func TestLinuxToolGroupWasRemoved(t *testing.T) {
+	if got := ExpandBuiltinToolGroups([]string{"linux"}); got != nil {
+		t.Fatalf("removed linux group should not expand, got %v", got)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("linux alias expanded to %v, terminal expanded to %v", got, want)
-		}
-	}
-	if _, ok := BuiltinToolGroupMembers("linux"); !ok {
-		t.Fatal("legacy linux group should remain readable")
+	if _, ok := BuiltinToolGroupMembers("linux"); ok {
+		t.Fatal("removed linux group should not remain readable")
 	}
 	for _, name := range AllBuiltinToolGroupNames() {
 		if name == "linux" {
-			t.Fatal("linux should not be exposed as an independent tool group")
+			t.Fatal("linux should not be exposed as a tool group")
 		}
 	}
 }
@@ -114,13 +74,6 @@ func TestExpandBuiltinToolGroupsBrowser(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("got=%v want=%v", got, want)
 		}
-	}
-	ops := ExpandBuiltinToolGroups([]string{"browser_ops"})
-	if ops != nil {
-		t.Fatalf("retired browser_ops should expand to nil, got %v", ops)
-	}
-	if err := ValidateBuiltinToolGroups([]string{"browser_ops"}); err == nil {
-		t.Fatal("expected error for retired browser_ops")
 	}
 }
 
@@ -137,9 +90,6 @@ func TestValidateBuiltinToolGroups(t *testing.T) {
 	if err := ValidateBuiltinToolGroups([]string{"fake_group"}); err == nil {
 		t.Fatal("expected error")
 	}
-	if err := ValidateBuiltinToolGroups([]string{"a2a"}); err == nil {
-		t.Fatal("expected error for retired a2a")
-	}
 }
 
 func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
@@ -154,9 +104,6 @@ func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := seen[name]; !ok {
-			if name == "linux_exec" || name == "linux_file_upload" || name == "linux_file_download" {
-				continue
-			}
 			t.Fatalf("tool %q not in any group", name)
 		}
 	}
@@ -184,17 +131,5 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 	}
 	if members, ok := BuiltinToolGroupMembers("terminal"); !ok || len(members) != 9 {
 		t.Fatalf("terminal members = %v ok=%v want 9 terminal/Linux tools", members, ok)
-	}
-}
-
-func TestLoadFile_ignoresRetiredA2AGroupInLegacyNodeConfig(t *testing.T) {
-	path, _ := testConfigPath(t, `
-node_id: test-agent
-tools:
-  enabled_groups:
-    - a2a
-`)
-	if _, err := LoadFile(path); err != nil {
-		t.Fatalf("legacy node enabled_groups must be ignored: %v", err)
 	}
 }

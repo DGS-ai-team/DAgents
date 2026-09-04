@@ -39,9 +39,6 @@ type Status struct {
 	Message              string         `json:"message,omitempty"`
 	ApplyCommand         string         `json:"apply_command"`
 	Asset                map[string]any `json:"asset,omitempty"`
-	Deprecated           bool           `json:"deprecated,omitempty"`
-	Delegate             string         `json:"delegate,omitempty"`
-	DesktopAPI           string         `json:"desktop_api,omitempty"`
 }
 
 // CheckRequest 控制一次 Manage 版本检查。
