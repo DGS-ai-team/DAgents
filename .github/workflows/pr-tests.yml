@@ -87,13 +87,19 @@ jobs:
           # upstream-blocked findings explicit; any new finding still fails.
           # The lock includes Windows-only packages (for PyInstaller). Audit
           # the pinned records without resolving a Linux virtualenv.
+          # browser-use 0.13.8 pins pypdf==6.14.2; these CVEs are blocked
+          # upstream until browser-use publishes a compatible dependency.
           pip-audit --no-deps -r browser-service/requirements.lock \
             --ignore-vuln PYSEC-2026-2132 \
             --ignore-vuln PYSEC-2026-3481 \
             --ignore-vuln PYSEC-2026-3482 \
             --ignore-vuln PYSEC-2026-3483 \
             --ignore-vuln PYSEC-2026-3655 \
-            --ignore-vuln PYSEC-2026-3656
+            --ignore-vuln PYSEC-2026-3656 \
+            --ignore-vuln CVE-2026-82398 \
+            --ignore-vuln CVE-2026-84309 \
+            --ignore-vuln CVE-2026-84310 \
+            --ignore-vuln CVE-2026-84311
 
       - name: Ruff
         run: python -m ruff check manage scripts tests
