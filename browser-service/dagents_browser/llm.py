@@ -33,6 +33,11 @@ class _MimoChatProxy:
         self.completions = _MimoCompletionsProxy(inner.completions)
 
 
+class _MimoClientProxy:
+    def __init__(self, inner: Any) -> None:
+        self.chat = _MimoChatProxy(inner.chat)
+
+
 class MimoChatOpenAI(ChatOpenAI):
     """browser-use ChatOpenAI with MiMo-compatible request extras."""
 
@@ -50,9 +55,7 @@ class MimoChatOpenAI(ChatOpenAI):
 
     def get_client(self) -> Any:
         client = super().get_client()
-        proxy = type("_MimoClientProxy", (), {})()
-        proxy.chat = _MimoChatProxy(client.chat)
-        return proxy
+        return _MimoClientProxy(client)
 
 
 @dataclass
@@ -61,27 +64,35 @@ class LLMSettings:
     base_url: str = ""
     model: str = ""
     api_key_env: str = "OPENAI_API_KEY"
+    api_key: str = ""
+    mock: bool = False
     multimodal_enabled: bool = False
+    thinking: str = ""
+    reasoning_effort: str = ""
 
 
-def llm_settings_from_config(raw: dict[str, Any]) -> LLMSettings | None:
+def llm_settings_from_request(raw: dict[str, Any]) -> LLMSettings | None:
     llm = raw.get("llm") or {}
+    if not isinstance(llm, dict):
+        return None
     model = str(llm.get("model") or "").strip()
     if not model:
-        return None
-    if bool(llm.get("mock")):
         return None
     return LLMSettings(
         provider=str(llm.get("provider") or "openai").strip().lower(),
         base_url=str(llm.get("base_url") or "").strip(),
         model=model,
         api_key_env=str(llm.get("api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY",
+        api_key=str(llm.get("api_key") or "").strip(),
+        mock=bool(llm.get("mock")),
         multimodal_enabled=bool(llm.get("multimodal_enabled")),
+        thinking=str(llm.get("thinking") or "").strip(),
+        reasoning_effort=str(llm.get("reasoning_effort") or "").strip(),
     )
 
 
 def create_extraction_llm(settings: LLMSettings) -> BaseChatModel:
-    api_key = os.environ.get(settings.api_key_env, "").strip() or None
+    api_key = settings.api_key.strip() or os.environ.get(settings.api_key_env, "").strip() or None
     provider = settings.provider
     if provider in ("openai", "deepseek", "qwen", "vllm", "glm", "minimax", "mimo"):
         kwargs: dict[str, Any] = {"model": settings.model, "api_key": api_key}

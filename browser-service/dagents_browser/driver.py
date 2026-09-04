@@ -13,7 +13,7 @@ from browser_use import BrowserProfile, BrowserSession
 
 from dagents_browser.config import BrowserServiceSettings
 from dagents_browser.agent_prompt import build_extend_system_message
-from dagents_browser.llm import create_extraction_llm
+from dagents_browser.llm import create_extraction_llm, llm_settings_from_request
 from dagents_browser.ports import allocate_debug_port
 from dagents_browser.task_archive import (
     archive_task,
@@ -247,7 +247,8 @@ class BrowserUseDriver:
             started = await self._start({"session_key": session_key, "headed": req.get("headed")})
             if not started.get("ok"):
                 return started
-        if self.settings.llm is None:
+        llm_settings = llm_settings_from_request(req)
+        if llm_settings is None or llm_settings.mock:
             return {
                 "ok": False,
                 "error": (
@@ -256,7 +257,7 @@ class BrowserUseDriver:
                 ),
             }
         try:
-            llm = create_extraction_llm(self.settings.llm)
+            llm = create_extraction_llm(llm_settings)
         except Exception as exc:
             return {"ok": False, "error": f"browser llm init failed: {exc}"}
 
@@ -317,10 +318,10 @@ class BrowserUseDriver:
                         # MiMo text profiles must keep screenshots disabled, but
                         # the explicitly multimodal profile can consume them.
                         use_vision=(
-                            self.settings.llm.provider != "mimo"
-                            or self.settings.llm.multimodal_enabled
+                            llm_settings.provider != "mimo"
+                            or llm_settings.multimodal_enabled
                         ),
-                        use_thinking=self.settings.llm.provider != "mimo",
+                        use_thinking=llm_settings.provider != "mimo",
                         extend_system_message=build_extend_system_message(
                             workspace_root=task_fs,
                             runtime_root=self.settings.runtime_root,
@@ -411,7 +412,7 @@ class BrowserUseDriver:
         }
 
     def _task_public(self, entry: dict[str, Any]) -> dict[str, Any]:
-        # 兼容取消等仍返回扁平 detail 的调用方
+        # Keep the public status projection flat for the task-status response.
         return task_status_response(entry).get("detail") or {}
 
     async def _task_status(self, req: dict[str, Any]) -> dict[str, Any]:

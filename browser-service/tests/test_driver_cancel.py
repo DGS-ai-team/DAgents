@@ -6,14 +6,12 @@ import tempfile
 import dagents_browser.driver as driver_module
 from dagents_browser.config import BrowserServiceSettings
 from dagents_browser.driver import BrowserUseDriver
-from dagents_browser.llm import LLMSettings
 
 
 def test_cancel_before_agent_start_is_stable() -> None:
     async def scenario() -> None:
         settings = BrowserServiceSettings(
             runtime_root=tempfile.mkdtemp(prefix="dagents-browser-cancel-"),
-            llm=LLMSettings(provider="mimo", model="test-model"),
         )
         driver = BrowserUseDriver(settings)
         # Avoid starting a real Chrome process; the task only needs a session
@@ -28,6 +26,7 @@ def test_cancel_before_agent_start_is_stable() -> None:
                     "op": "run_task",
                     "session_key": "cancel-race",
                     "task": "do not start",
+                    "llm": {"provider": "mimo", "model": "test-model"},
                 }
             )
             task_id = queued["detail"]["task_id"]
