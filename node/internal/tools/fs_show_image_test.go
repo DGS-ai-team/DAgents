@@ -53,7 +53,7 @@ func TestExecShowImage_registersMedia(t *testing.T) {
 	}
 }
 
-func TestExecShowImage_registersMediaOutsideFSRoot(t *testing.T) {
+func TestExecShowImage_registersMediaOutsideWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	reg, err := NewRegistry(root, 30)
 	if err != nil {
@@ -89,7 +89,7 @@ func TestExecShowImage_registersMediaOutsideFSRoot(t *testing.T) {
 	}
 }
 
-func TestExecShowImage_acceptsAbsolutePathUnderFSRoot(t *testing.T) {
+func TestExecShowImage_acceptsAbsolutePathUnderWorkspaceRoot(t *testing.T) {
 	dir := t.TempDir()
 	pngPath := filepath.Join(dir, "nested", "demo.png")
 	if err := os.MkdirAll(filepath.Dir(pngPath), 0o755); err != nil {

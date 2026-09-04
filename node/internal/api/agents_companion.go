@@ -58,7 +58,7 @@ func (s *Server) syncBrowserCompanion(ctx context.Context, parent store.AgentRec
 			"description": "Browser companion for " + strings.TrimSpace(parent.DisplayName),
 		},
 		"llm": map[string]any{
-			"max_tool_loops": agentruntime.DefaultMaxToolLoops,
+			"max_steps": agentruntime.DefaultMaxSteps,
 		},
 		// 方案 A：Chrome 由 sidecar browser_use.Agent 驱动；伴生不挂细粒度工具给 LLM。
 		"tools": map[string]any{
@@ -86,8 +86,6 @@ func (s *Server) syncBrowserCompanion(ctx context.Context, parent store.AgentRec
 	if existing != nil && !existing.Archived {
 		existing.DisplayName = name
 		existing.ConfigSnapshot = compSnap
-		existing.SandboxEnabled = false
-		existing.SandboxBackend = "process"
 		existing.UpdatedAt = now
 		if err := s.agents.Save(ctx, *existing); err != nil {
 			return err
@@ -99,9 +97,6 @@ func (s *Server) syncBrowserCompanion(ctx context.Context, parent store.AgentRec
 		AgentID:        companionID,
 		DisplayName:    name,
 		TemplateID:     strings.TrimSpace(parent.TemplateID),
-		Origin:         store.AgentOriginLocal,
-		SandboxEnabled: false,
-		SandboxBackend: "process",
 		ConfigSnapshot: compSnap,
 		HostJSON:       encodeJSONRaw(localHostPayload()),
 		CreatedAt:      now,

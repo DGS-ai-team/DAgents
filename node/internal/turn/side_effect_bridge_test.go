@@ -34,7 +34,12 @@ func TestShouldContinueAfterSideEffectApplyMessages_bridgeUserTail(t *testing.T)
 	msgs := []llm.Message{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "done"},
-		{Role: "user", Content: "callback", Name: llm.UserNameAsyncTool},
+		llm.UserMessageWithSource(
+			"callback",
+			llm.UserNameAsyncTool,
+			llm.MessageSource{Kind: llm.MessageSourceAsyncTool, Form: llm.MessageFormRelay},
+			&llm.MessageProvenance{Producer: llm.UserNameAsyncTool},
+		),
 	}
 	if !ShouldContinueAfterSideEffectApply(msgs) {
 		t.Fatal("expected bridge user tail to continue")

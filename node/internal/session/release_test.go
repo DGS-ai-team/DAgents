@@ -96,7 +96,7 @@ func TestIdleSessionMaintenanceEvictsWithoutCompressBelowMinTokens(t *testing.T)
 
 	llmClient := &idleCompressMockLLM{}
 	mgr := NewManager("agent-1", stream.NewHub(8, logx.Discard()), llmClient, mustRegistry(t, dir), mustPolicy(t), st, TurnOptions{
-		FSRoot:                      dir,
+		WorkspaceRoot:               dir,
 		SkillsEnabled:               false,
 		IdleAutoCompressSeconds:     1,
 		IdleAutoCompressMinTokens:   1_000_000,
@@ -151,8 +151,12 @@ func TestIdleSessionMaintenanceEvictsPendingHITL(t *testing.T) {
 
 	mgr.scanIdleSessionMaintenance(context.Background())
 	rec, err := st.Load(context.Background(), sess.ID)
-	if err != nil || rec == nil || rec.RuntimeState.Pending == nil {
-		t.Fatalf("pending should remain in DB: %#v err=%v", rec, err)
+	if err != nil || rec == nil {
+		t.Fatalf("session should remain in DB: %#v err=%v", rec, err)
+	}
+	lifecycle, projected, _, err := mgr.loadLifecycleProjection(context.Background(), sess.ID, "agent-1")
+	if err != nil || !projected || lifecycle.StepStatus != turn.StepStatusWaitingInteraction {
+		t.Fatalf("pending lifecycle should remain in DB: projected=%v lifecycle=%#v err=%v", projected, lifecycle, err)
 	}
 	if mgr.getRuntime(sess.ID) != nil {
 		t.Fatal("expected pending HITL session evicted")
@@ -195,7 +199,7 @@ func newIdleMaintenanceTestManager(t *testing.T, dir string, st *store.SQLiteSto
 		client = llmClient[0]
 	}
 	return NewManager("agent-1", stream.NewHub(8, logx.Discard()), client, mustRegistry(t, dir), mustPolicy(t), st, TurnOptions{
-		FSRoot:                      dir,
+		WorkspaceRoot:               dir,
 		SkillsEnabled:               false,
 		CompressionSilent:           0,
 		CompressionBlocking:         0,
@@ -216,9 +220,5 @@ func mustRegistry(t *testing.T, dir string) *tools.Registry {
 
 func mustPolicy(t *testing.T) *policy.Engine {
 	t.Helper()
-	pol, err := policy.LoadFile("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pol
+	return policy.NewDefaultEngine()
 }

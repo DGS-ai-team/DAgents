@@ -8,9 +8,9 @@ import (
 
 func TestPriorityOrder(t *testing.T) {
 	q := NewMessageQueue()
-	_ = q.Enqueue(Envelope{RequestType: "message", Content: "other"}, PriorityOther)
 	_ = q.Enqueue(Envelope{RequestType: "message", Content: "human"}, PriorityHuman)
 	_ = q.Enqueue(Envelope{RequestType: "resume"}, PriorityResume)
+	_ = q.Enqueue(Envelope{RequestType: "async_tool_result"}, PriorityAsyncCompletion)
 
 	ctx := context.Background()
 	first, err := q.Dequeue(ctx)
@@ -22,7 +22,7 @@ func TestPriorityOrder(t *testing.T) {
 		t.Fatalf("second = %+v err=%v", second, err)
 	}
 	third, err := q.Dequeue(ctx)
-	if err != nil || third.Content != "other" {
+	if err != nil || third.RequestType != "async_tool_result" {
 		t.Fatalf("third = %+v err=%v", third, err)
 	}
 }
@@ -51,14 +51,5 @@ func TestDequeueContextCancel(t *testing.T) {
 	_, err := q.Dequeue(ctx)
 	if err == nil {
 		t.Fatal("expected cancel")
-	}
-}
-
-func TestParsePriority(t *testing.T) {
-	if p, ok := ParsePriority("human"); !ok || p != PriorityHuman {
-		t.Fatalf("human = %q ok=%v", p, ok)
-	}
-	if _, ok := ParsePriority("unknown"); ok {
-		t.Fatal("unknown priority should fail")
 	}
 }

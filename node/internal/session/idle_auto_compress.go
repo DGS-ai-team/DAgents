@@ -99,20 +99,20 @@ func (m *Manager) ensureRuntime(sessionID string) (*runtime, error) {
 	if existing, ok := m.sessions[sessionID]; ok {
 		return existing, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(sessionID)
+	restore, err := m.loadSessionData(sessionID)
 	if err != nil {
 		return nil, err
 	}
+	turnOpts := withInitialLifecycleEvents(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	rt := newRuntime(sessionID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
-	rt.restoreInputBoxState(inputBoxState)
-	rt.historyRevision = historyRevision
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
 	m.sessions[sessionID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), sessionID, "create")
-	m.logger.Info("session restored for idle maintenance", "session_id", sessionID, "messages", len(msgs))
+	m.logger.Info("session restored for idle maintenance", "session_id", sessionID, "messages", len(restore.Messages))
 	return rt, nil
 }
 

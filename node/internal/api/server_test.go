@@ -35,6 +35,7 @@ func testConfig(t *testing.T) *config.Config {
 		},
 	}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	return cfg
 }
 
@@ -124,6 +125,28 @@ func TestHandleAgentInfo(t *testing.T) {
 	}
 	if got.Compression.SilentTriggerTokens != 80000 || got.Compression.BlockingTriggerTokens != 100000 {
 		t.Fatalf("compression = %+v", got.Compression)
+	}
+}
+
+func TestHandleAgentCancelExposesTurnScope(t *testing.T) {
+	srv, ts := newTestServer(t)
+	defer ts.Close()
+
+	sessionID := createTestRuntime(t, srv)
+	resp, err := http.Post(ts.URL+"/v1/agents/"+sessionID+"/cancel", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var got cancelTurnResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != sessionID || got.Scope != "turn" || got.Cancelled || got.Terminal {
+		t.Fatalf("idle cancel response = %+v", got)
 	}
 }
 
@@ -454,9 +477,6 @@ func TestCreateRuntimeActiveFields(t *testing.T) {
 	}
 	if state != turn.StateIdle {
 		t.Fatalf("state = %q", state)
-	}
-	if turn.RunTurnPhase(state) == "" {
-		t.Fatal("run_turn_phase should be set for active session")
 	}
 }
 

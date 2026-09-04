@@ -31,9 +31,10 @@ func TestProcessRestartRecovery(t *testing.T) {
 		root, baseURL := startProcessNode(t, binary, llmServer.URL)
 		first := newNodeProcess(t, binary, root)
 		waitNodeHealthy(t, first, baseURL)
+		completeProcessOnboarding(t, baseURL, llmServer.URL)
 
 		agentID := createProcessAgent(t, baseURL, []string{"bash"})
-		setProcessToolPolicy(t, baseURL, agentID, "bash_run", "allow_auto")
+		setProcessToolPolicy(t, baseURL, agentID, "bash_run", "never")
 		postProcessMessage(t, baseURL, agentID, "run a long process")
 
 		started := waitProcessEvent(t, baseURL, agentID, "tool.execution.started", 12*time.Second)
@@ -71,6 +72,7 @@ func TestProcessRestartRecovery(t *testing.T) {
 		root, baseURL := startProcessNode(t, binary, llmServer.URL)
 		first := newNodeProcess(t, binary, root)
 		waitNodeHealthy(t, first, baseURL)
+		completeProcessOnboarding(t, baseURL, llmServer.URL)
 
 		agentID := createProcessAgent(t, baseURL, []string{"hitl"})
 		postProcessMessage(t, baseURL, agentID, "ask me for the environment")
@@ -229,8 +231,6 @@ func startProcessNode(t *testing.T, binary, llmURL string) (string, string) {
 	port := freeProcessPort(t)
 	configPath := filepath.Join(root, "config.yaml")
 	config := fmt.Sprintf(`node_id: process-e2e-node
-onboarding:
-  node_profile_completed: true
 listen:
   host: 127.0.0.1
   port: %d
@@ -255,6 +255,22 @@ log:
 		t.Fatal(err)
 	}
 	return root, fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+func completeProcessOnboarding(t *testing.T, baseURL, llmURL string) {
+	t.Helper()
+	postProcessJSON(t, http.MethodPatch, baseURL+"/v1/setup/config", map[string]any{
+		"agent": map[string]any{"name": "process-e2e-node", "description": "process restart test"},
+		"user":  map[string]any{"preferred_name": "process-e2e-user"},
+		"llm": map[string]any{
+			"active": "default",
+			"profiles": []map[string]any{{
+				"id": "default", "provider": "openai", "base_url": llmURL,
+				"model": "process-e2e", "api_key_env": "E2E_API_KEY", "mock": false,
+			}},
+		},
+		"onboarding": map[string]any{"node_profile_completed": true},
+	})
 }
 
 type nodeProcess struct {
@@ -340,7 +356,7 @@ func createProcessAgent(t *testing.T, baseURL string, groups []string) string {
 	resp := postProcessJSON(t, http.MethodPost, baseURL+"/v1/agents", map[string]any{
 		"display_name": "process-e2e-agent",
 		"defaults": map[string]any{
-			"llm":   map[string]any{"max_tool_loops": 4},
+			"llm":   map[string]any{"max_steps": 4},
 			"tools": map[string]any{"enabled_groups": groups},
 		},
 	})
@@ -356,10 +372,10 @@ func createProcessAgent(t *testing.T, baseURL string, groups []string) string {
 	return body.AgentID
 }
 
-func setProcessToolPolicy(t *testing.T, baseURL, agentID, tool, decision string) {
+func setProcessToolPolicy(t *testing.T, baseURL, agentID, tool, mode string) {
 	t.Helper()
 	postProcessJSON(t, http.MethodPut, baseURL+"/v1/agents/"+agentID+"/policy/tools", map[string]any{
-		"updates": []map[string]any{{"name": tool, "decision": decision}},
+		"updates": []map[string]any{{"name": tool, "mode": mode}},
 	})
 }
 

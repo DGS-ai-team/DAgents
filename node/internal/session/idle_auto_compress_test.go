@@ -31,10 +31,10 @@ func TestIdleAutoCompressMarksAndSkipsRescan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	llmClient := &idleCompressMockLLM{}
 	mgr := NewManager("agent-1", hub, llmClient, reg, pol, st, TurnOptions{
-		FSRoot:                      dir,
+		WorkspaceRoot:               dir,
 		SkillsEnabled:               false,
 		CompressionSilent:           0,
 		CompressionBlocking:         0,
@@ -89,10 +89,10 @@ func TestIdleAutoCompressSkipsBelowMinTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	llmClient := &idleCompressMockLLM{}
 	mgr := NewManager("agent-1", hub, llmClient, reg, pol, st, TurnOptions{
-		FSRoot:                      dir,
+		WorkspaceRoot:               dir,
 		SkillsEnabled:               false,
 		CompressionSilent:           0,
 		CompressionBlocking:         0,
@@ -146,10 +146,10 @@ func TestIdleAutoCompressClearsMarkOnUserMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	llmClient := &idleCompressMockLLM{humanReply: "ok"}
 	mgr := NewManager("agent-1", hub, llmClient, reg, pol, st, TurnOptions{
-		FSRoot:                  dir,
+		WorkspaceRoot:           dir,
 		SkillsEnabled:           false,
 		CompressionSilent:       0,
 		CompressionBlocking:     0,

@@ -40,7 +40,7 @@ type LinuxTransferRequest struct {
 	Direction     string
 	LocalPath     string
 	RemotePath    string
-	WorkspaceRoot string // Agent workspace; empty keeps the Node-global compatibility root.
+	WorkspaceRoot string // Agent workspace root.
 	Overwrite     bool
 }
 
@@ -87,11 +87,10 @@ type linuxTransferJob struct {
 // LinuxTransferManager owns the process-wide queue. A transfer is counted as
 // one file regardless of its direction; queued work waits FIFO for a slot.
 type LinuxTransferManager struct {
-	provider      *LinuxShellProvider
-	workspaceRoot string
-	max           int
-	queueMax      int
-	sink          LinuxTransferEventSink
+	provider *LinuxShellProvider
+	max      int
+	queueMax int
+	sink     LinuxTransferEventSink
 
 	mu      sync.Mutex
 	active  int
@@ -101,24 +100,19 @@ type LinuxTransferManager struct {
 
 var linuxTransferSequence uint64
 
-func NewLinuxTransferManager(provider *LinuxShellProvider, workspaceRoot string, maxConcurrent int, sink LinuxTransferEventSink) *LinuxTransferManager {
+func NewLinuxTransferManager(provider *LinuxShellProvider, maxConcurrent int, sink LinuxTransferEventSink) *LinuxTransferManager {
 	if maxConcurrent <= 0 {
 		maxConcurrent = DefaultLinuxTransferConcurrency
 	}
 	if maxConcurrent > 8 {
 		maxConcurrent = 8
 	}
-	root, err := filepath.Abs(strings.TrimSpace(workspaceRoot))
-	if err != nil || root == "" {
-		root = "."
-	}
 	return &LinuxTransferManager{
-		provider:      provider,
-		workspaceRoot: root,
-		max:           maxConcurrent,
-		queueMax:      DefaultLinuxTransferQueueLimit,
-		sink:          sink,
-		jobs:          make(map[string]*linuxTransferJob),
+		provider: provider,
+		max:      maxConcurrent,
+		queueMax: DefaultLinuxTransferQueueLimit,
+		sink:     sink,
+		jobs:     make(map[string]*linuxTransferJob),
 	}
 }
 
@@ -475,10 +469,10 @@ func (m *LinuxTransferManager) download(ctx context.Context, client *sftp.Client
 }
 
 func (m *LinuxTransferManager) transferWorkspaceRoot(job *linuxTransferJob) string {
-	if job != nil && strings.TrimSpace(job.request.WorkspaceRoot) != "" {
-		return strings.TrimSpace(job.request.WorkspaceRoot)
+	if job == nil || strings.TrimSpace(job.request.WorkspaceRoot) == "" {
+		return ""
 	}
-	return m.workspaceRoot
+	return strings.TrimSpace(job.request.WorkspaceRoot)
 }
 
 type transferProgressReader struct {
@@ -607,6 +601,9 @@ func validateLinuxTransferRequest(req LinuxTransferRequest) error {
 	if strings.TrimSpace(req.ChannelID) == "" {
 		return fmt.Errorf("channel_id is required")
 	}
+	if strings.TrimSpace(req.WorkspaceRoot) == "" {
+		return fmt.Errorf("workspace_root is required")
+	}
 	if req.Direction != "upload" && req.Direction != "download" {
 		return fmt.Errorf("direction must be upload or download")
 	}
@@ -620,6 +617,9 @@ func validateLinuxTransferRequest(req LinuxTransferRequest) error {
 }
 
 func strictTransferPath(root, raw string, mustExist bool) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("workspace root is required")
+	}
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return "", fmt.Errorf("local_path is required")

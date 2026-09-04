@@ -91,11 +91,11 @@ func (o *Orchestrator) publishToolCall(sessionID string, tc llm.ToolCall, partia
 }
 
 // publishToolResult 推送 tool result SSE。
-func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, rejected bool, extra map[string]any) {
-	resultFields := tools.ResultEventFields(tc.Function.Name, content, rejected)
+func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, failureHint bool, extra map[string]any) {
+	resultFields := tools.ResultEventFields(tc.Function.Name, content, failureHint)
 	if rawStatus, ok := extra["async_status"].(string); ok {
 		if status := tools.NormalizeResultStatus(rawStatus); status != "" {
-			resultFields = tools.ResultEventFieldsWithStatus(tc.Function.Name, content, rejected, status)
+			resultFields = tools.ResultEventFieldsWithStatus(tc.Function.Name, content, failureHint, status)
 		}
 	}
 	payload := map[string]any{

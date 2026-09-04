@@ -133,6 +133,56 @@ func TestTurnCoordinatorRejectsStaleCommands(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorCancelTurnClosesActiveWorkAtomically(t *testing.T) {
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	c := NewTurnCoordinator("session-1", "agent-1")
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-cancel", Generation: 7, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, HasTools: true, At: now},
+		{Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolCallID: "call-running", ToolName: "bash_run", Arguments: json.RawMessage(`{"command":"sleep 10"}`), At: now},
+		{Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolCallID: "call-complete", ToolName: "read_file", Arguments: json.RawMessage(`{"path":"README.md"}`), At: now},
+		{Type: CommandToolExecutionStarted, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolExecutionID: "call-running-execution", At: now},
+		{Type: CommandToolExecutionStarted, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolExecutionID: "call-complete-execution", At: now},
+		{Type: CommandToolExecutionCompleted, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolExecutionID: "call-complete-execution", ExecutionStatus: ToolExecutionStatusSucceeded, At: now},
+		{Type: CommandInteractionRequested, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, InteractionID: "approval-1", InteractionKind: "approval", ToolExecutionID: "call-running-execution", At: now},
+	}
+	for _, command := range commands {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+
+	snapshot, err := c.Dispatch(TurnCommand{
+		Type: CommandCancelTurn, SessionID: "session-1", TurnID: "turn-cancel", Generation: 7, At: now.Add(time.Second), Reason: "cancelled_by_user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TurnStatus != TurnStatusCancelled || snapshot.StepStatus != StepStatusCancelled || snapshot.HasActiveTurn {
+		t.Fatalf("cancelled projection = %+v", snapshot)
+	}
+	statuses := map[string]ToolExecutionStatus{}
+	for _, execution := range snapshot.ToolExecutions {
+		statuses[execution.ToolCallID] = execution.Status
+	}
+	if statuses["call-running"] != ToolExecutionStatusCancelled {
+		t.Fatalf("running execution status = %q, want cancelled", statuses["call-running"])
+	}
+	if statuses["call-complete"] != ToolExecutionStatusSucceeded {
+		t.Fatalf("completed execution was overwritten: %q", statuses["call-complete"])
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.batch == nil || c.batch.Status != "cancelled" {
+		t.Fatalf("tool batch status = %#v, want cancelled", c.batch)
+	}
+	if c.interaction == nil || c.interaction.Status != InteractionStatusCancelled {
+		t.Fatalf("interaction status = %#v, want cancelled", c.interaction)
+	}
+}
+
 func TestTurnCoordinatorRecordsExternalFactWithoutCreatingToolExecution(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")

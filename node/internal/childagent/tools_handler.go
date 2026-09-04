@@ -52,7 +52,7 @@ func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previ
 	return prev, err
 }
 
-// HandleParentTool 分发父 Agent 临时 Agent 管理工具（非 A2A）。
+// HandleParentTool 分发父 Agent 临时 Agent 管理工具（不经过外部 Workgroup）。
 func (m *Manager) HandleParentTool(ctx context.Context, parentSessionID, toolName, argsJSON string, toolCallIDs ...string) (string, error) {
 	switch toolName {
 	case ToolCreateTemporaryAgent:

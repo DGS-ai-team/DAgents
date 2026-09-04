@@ -22,8 +22,6 @@ func TestAgentStore_CRUD(t *testing.T) {
 		AgentID:        "agt-1",
 		DisplayName:    "测试助手",
 		TemplateID:     "general",
-		SandboxEnabled: false,
-		SandboxBackend: "process",
 		ConfigSnapshot: snap,
 	}
 	if err := st.Save(ctx, rec); err != nil {
@@ -36,20 +34,13 @@ func TestAgentStore_CRUD(t *testing.T) {
 	if got.DisplayName != "测试助手" || got.TemplateID != "general" {
 		t.Fatalf("got = %+v", got)
 	}
-	if got.Origin != AgentOriginLocal {
-		t.Fatalf("origin = %q, want local", got.Origin)
-	}
 	got.DisplayName = "改名"
-	got.Origin = AgentOriginRemote
 	if err := st.Save(ctx, *got); err != nil {
 		t.Fatal(err)
 	}
 	list, err := st.List(ctx)
 	if err != nil || len(list) != 1 || list[0].DisplayName != "改名" {
 		t.Fatalf("list = %+v err=%v", list, err)
-	}
-	if list[0].Origin != AgentOriginRemote {
-		t.Fatalf("list origin = %q", list[0].Origin)
 	}
 	if err := st.SoftDelete(ctx, "agt-1"); err != nil {
 		t.Fatal(err)
@@ -60,8 +51,8 @@ func TestAgentStore_CRUD(t *testing.T) {
 	}
 }
 
-func TestAgentStore_PlacementAndHostJSON(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents-placement.db")
+func TestAgentStore_HostJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents-host.db")
 	st, err := OpenAgents(path)
 	if err != nil {
 		t.Fatal(err)
@@ -70,24 +61,18 @@ func TestAgentStore_PlacementAndHostJSON(t *testing.T) {
 
 	ctx := context.Background()
 	rec := AgentRecord{
-		AgentID:        "agt-remote",
-		DisplayName:    "远端引用",
+		AgentID:        "agt-host",
+		DisplayName:    "主机信息",
 		TemplateID:     "",
-		Origin:         AgentOriginRemote,
-		SandboxBackend: "process",
 		ConfigSnapshot: json.RawMessage(`{}`),
-		PlacementJSON:  json.RawMessage(`{"role":"owner_ref","owner_node_id":"n1","home_node_id":"n2","status":"online"}`),
 		HostJSON:       json.RawMessage(`{"os_kind":"linux","display_label":"Linux","display_available":false}`),
 	}
 	if err := st.Save(ctx, rec); err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.Get(ctx, "agt-remote")
+	got, err := st.Get(ctx, "agt-host")
 	if err != nil || got == nil {
 		t.Fatalf("get = %+v err=%v", got, err)
-	}
-	if string(got.PlacementJSON) == "" || !strings.Contains(string(got.PlacementJSON), "owner_ref") {
-		t.Fatalf("placement = %s", got.PlacementJSON)
 	}
 	if string(got.HostJSON) == "" || !strings.Contains(string(got.HostJSON), "Linux") {
 		t.Fatalf("host = %s", got.HostJSON)

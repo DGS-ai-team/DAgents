@@ -49,9 +49,6 @@ func (r *runtime) runTurnStepAtEpoch(
 			r.historyRevision++
 			contextAfterDigest = turn.Digest(r.messages)
 			contextAfterCount = len(r.messages)
-			if r.orch != nil {
-				r.orch.ReloadLongTermMemory(parent)
-			}
 		}
 	}
 	execution := r.turnCoordinator.ExecutionContext()

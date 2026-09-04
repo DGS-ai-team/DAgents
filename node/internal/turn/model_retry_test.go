@@ -48,8 +48,8 @@ func TestOrchestratorRetriesTransientModelFailureInsideStep(t *testing.T) {
 func TestOrchestratorChecksToolBudgetBeforeSideEffect(t *testing.T) {
 	reg := testRegistry(t)
 	executor := &countingExecutor{Registry: reg}
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), alwaysToolMock{}, executor, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), alwaysToolMock{}, executor, pol, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{WorkspaceRoot: t.TempDir()})}, logx.Discard())
 	orch.SetToolBudgetCheck(func(string) (bool, string) { return false, "max_tool_calls" })
 
@@ -86,8 +86,8 @@ func TestOrchestratorStopsBeforeModelWhenLifecycleFactFails(t *testing.T) {
 func TestOrchestratorStopsBeforeToolWhenExecutionFactFails(t *testing.T) {
 	reg := testRegistry(t)
 	executor := &countingExecutor{Registry: reg}
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), alwaysToolMock{}, executor, pol, SkillAccess{}, 4, nil, nil,
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), alwaysToolMock{}, executor, pol, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{}, logx.Discard())
 	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
 		if command.Type == CommandToolExecutionStarted {

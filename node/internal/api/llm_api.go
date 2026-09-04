@@ -82,7 +82,7 @@ func (s *Server) persistActiveLLMThinking(ctx context.Context) error {
 	if thinking == "" {
 		thinking = "enabled"
 	}
-	if view.ReasoningEffortSupported && effort == "" {
+	if llm.ReasoningEffortSupported(view.Provider) && effort == "" {
 		effort = "high"
 	}
 

@@ -8,8 +8,6 @@ import (
 )
 
 const (
-	// RunInBackgroundKey 为历史/内部参数名；已不在 tool schema 暴露，ParseToolCallArguments 仍兼容剥离。
-	RunInBackgroundKey = "run_in_background"
 	// CallPurposeKey 为各工具通用必填参数：简短说明调用目的（Client 首行展示）。
 	CallPurposeKey = "call_purpose"
 )
@@ -21,8 +19,6 @@ type triggerSessionTargetContextKey struct{}
 type enabledBypassContextKey struct{}
 
 type approvalIDContextKey struct{}
-
-type backgroundJobIDContextKey struct{}
 
 // WithEnabledBypass 跳过 Registry.enabledOnly 检查（子 Agent 在自身 allowlist 校验后使用）。
 func WithEnabledBypass(ctx context.Context) context.Context {
@@ -56,25 +52,6 @@ func ApprovalIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	if v, ok := ctx.Value(approvalIDContextKey{}).(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
-
-// WithBackgroundJobID correlates a background tool execution with its job
-// record so providers can bind the concrete Process after it starts.
-func WithBackgroundJobID(ctx context.Context, jobID string) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, backgroundJobIDContextKey{}, strings.TrimSpace(jobID))
-}
-
-func BackgroundJobIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	if v, ok := ctx.Value(backgroundJobIDContextKey{}).(string); ok {
 		return strings.TrimSpace(v)
 	}
 	return ""
@@ -187,27 +164,23 @@ func containsString(list []string, target string) bool {
 	return false
 }
 
-// ParseToolCallArguments 剥离 call_purpose（及历史 run_in_background）后返回 handler 用 JSON。
-func ParseToolCallArguments(arguments string) (background bool, cleaned string) {
+// ParseToolCallArguments 剥离只供界面展示的 call_purpose 后返回 handler 用 JSON。
+func ParseToolCallArguments(arguments string) string {
 	arguments = strings.TrimSpace(arguments)
 	if arguments == "" {
-		return false, "{}"
+		return "{}"
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(arguments), &raw); err != nil {
-		return false, arguments
-	}
-	if v, ok := raw[RunInBackgroundKey]; ok {
-		_ = json.Unmarshal(v, &background)
-		delete(raw, RunInBackgroundKey)
+		return arguments
 	}
 	delete(raw, CallPurposeKey)
 	if len(raw) == 0 {
-		return background, "{}"
+		return "{}"
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return background, arguments
+		return arguments
 	}
-	return background, string(b)
+	return string(b)
 }

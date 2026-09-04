@@ -27,7 +27,7 @@ func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "`data/`") {
-		t.Fatalf("system prompt should not describe compatibility data directory, got %q", prompt)
+		t.Fatalf("system prompt should not describe the retired data directory, got %q", prompt)
 	}
 	if contains(prompt, "ops-01") || contains(prompt, "sess-abc") || contains(prompt, "运行环境") {
 		t.Fatalf("system prompt should not contain request context, got %q", prompt)
@@ -156,7 +156,7 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	if len(injections) != 1 || !containsAll(injections[0].Content, "以下是用户信息", "请称呼用户为：小明") {
 		t.Fatalf("context injection = %+v", injections)
 	}
-	if contains(prompt, "legacy user.md") || contains(prompt, "用户信息与偏好") {
+	if contains(prompt, "user.md") || contains(prompt, "用户信息与偏好") {
 		t.Fatalf("should not inject user.md sidecar, got %q", prompt)
 	}
 }
@@ -173,7 +173,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "`data/`") {
-		t.Fatalf("child system prompt should not describe compatibility data directory, got %q", prompt)
+		t.Fatalf("child system prompt should not describe the retired data directory, got %q", prompt)
 	}
 	if contains(prompt, "child-abc") || contains(prompt, "运行环境") {
 		t.Fatalf("child system prompt should omit request context, got %q", prompt)
@@ -194,7 +194,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 }
 
 func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
-	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("scan logs"))
 	prompt := orch.buildSystemPrompt("child-xyz")
 	if !containsAll(prompt, "scan logs", "临时子 Agent") || contains(prompt, "child-xyz") {
@@ -210,7 +210,7 @@ func TestChildSystemPromptBuilder_keepsLoadedSkillsOutOfSystemPrompt(t *testing.
 	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
+	}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("review"))
 	prompt := orch.buildSystemPrompt("child-xyz")
 	if contains(prompt, "Write clearly.") || contains(prompt, "已加载 skills") {
@@ -223,7 +223,7 @@ func TestChildSystemPromptBuilder_keepsLoadedSkillsOutOfSystemPrompt(t *testing.
 }
 
 func TestBuildSystemPrompt_runPromptBuildPhase(t *testing.T) {
-	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{
 		Duplicate:  hooks.DefaultDuplicateConfig(),
 		ToolResult: hooks.DefaultToolResultConfig("/data/ws"),
 	}, nil)
@@ -264,12 +264,6 @@ func writeSkillForPromptTest(t *testing.T, root, name, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRunTurnPhase_mapsAwaitingTool(t *testing.T) {
-	if got := RunTurnPhase(StateAwaitingTool); got != "awaiting_tool_execution" {
-		t.Fatalf("RunTurnPhase = %q", got)
 	}
 }
 

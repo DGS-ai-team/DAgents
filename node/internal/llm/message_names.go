@@ -2,15 +2,13 @@ package llm
 
 import "strings"
 
-// Legacy user message name constants. New code should use Message.Source and
-// Message.Provenance for decisions; Name remains a compatibility projection
-// for old history, event payloads, and providers that accept the field.
+// User message name constants. Message.Source and Message.Provenance are the
+// durable semantic fields; Name is the provider/UI projection.
 //
 // 见 https://api-docs.deepseek.com/zh-cn/api/create-chat-completion
 const (
 	UserNameHuman              = "human"
 	UserNameTrigger            = "trigger"
-	UserNameA2AInbox           = "a2a_inbox"
 	UserNameChildTask          = "child_task"
 	UserNameCompression        = "compression"
 	UserNameAsyncTool          = "async_tool"
@@ -29,13 +27,13 @@ const (
 	UserNameMemoryContext = "memory_context"
 )
 
-// UserMessage constructs a plain-text role=user message. The legacy name is
-// retained, while structured source/provenance are materialized automatically.
+// UserMessage constructs a plain-text role=user message with structured
+// source/provenance.
 func UserMessage(content, name string) Message {
 	source, provenance := MessageSourceForUserName(name)
 	m := UserMessageWithSource(content, name, source, &provenance)
 	if strings.TrimSpace(name) == "" {
-		// Preserve the pre-source wire shape: empty legacy names remain omitted.
+		// Empty names remain omitted from the provider payload.
 		m.Name = ""
 	}
 	return m

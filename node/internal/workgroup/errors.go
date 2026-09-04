@@ -2,23 +2,14 @@ package workgroup
 
 import "fmt"
 
-// ErrorCode 对齐 D0.5 §7.4。
+// ErrorCode 是当前 AgentRef WS 协议的错误码集合。
 type ErrorCode string
 
 const (
-	CodeNotAuthorized     ErrorCode = "not_authorized"
-	CodeFencingRejected   ErrorCode = "fencing_rejected"
-	CodeDigestMismatch    ErrorCode = "digest_mismatch"
-	CodeCatalogDrift      ErrorCode = "catalog_drift"
-	CodePayloadConflict   ErrorCode = "payload_conflict"
-	CodeAlreadyResolved   ErrorCode = "already_resolved"
-	CodePolicyDenied      ErrorCode = "policy_denied"
-	CodeSchemaMismatch    ErrorCode = "schema_mismatch"
-	CodeIndeterminate     ErrorCode = "indeterminate"
-	CodeWorkgroupArchived ErrorCode = "workgroup_archived"
-	CodeNotFound          ErrorCode = "not_found"
-	CodeConflict          ErrorCode = "conflict"
-	CodeCanceled          ErrorCode = "canceled"
+	CodeNotAuthorized   ErrorCode = "not_authorized"
+	CodeFencingRejected ErrorCode = "fencing_rejected"
+	CodeSchemaMismatch  ErrorCode = "schema_mismatch"
+	CodeConflict        ErrorCode = "conflict"
 )
 
 // Error 为可映射到契约错误码的 Worker 错误。

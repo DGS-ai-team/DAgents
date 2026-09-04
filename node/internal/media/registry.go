@@ -48,7 +48,7 @@ func (a Artifact) ThumbnailURL() string {
 // RegisterOpts 注册媒体时的元数据。
 type RegisterOpts struct {
 	Path       string // 相对 workspace 或绝对路径
-	RelPath    string // Path 别名（兼容旧调用）
+	RelPath    string // 已存在 workspace 文件的相对路径（内部恢复用）
 	Source     string
 	ToolCallID string
 	Label      string
@@ -76,20 +76,9 @@ func NewRegistry(sessionID, workspaceRoot string) (*Registry, error) {
 	}, nil
 }
 
-// RegisterFromRelPath 引用已有图片文件（相对 workspace 或绝对路径）。
-func (r *Registry) RegisterFromRelPath(opts RegisterOpts) (*Artifact, error) {
-	if strings.TrimSpace(opts.Path) == "" {
-		opts.Path = opts.RelPath
-	}
-	return r.RegisterFromPath(opts)
-}
-
 // RegisterFromPath 注册可读图片；相对路径在 workspace 内解析，绝对路径可直接引用。
 func (r *Registry) RegisterFromPath(opts RegisterOpts) (*Artifact, error) {
 	raw := strings.TrimSpace(opts.Path)
-	if raw == "" {
-		raw = strings.TrimSpace(opts.RelPath)
-	}
 	if raw == "" {
 		return nil, ErrInvalidImage
 	}

@@ -7,14 +7,6 @@ import (
 	"strings"
 )
 
-type linuxFileTransferArgs struct {
-	ConfigID   string `json:"config_id"`
-	ChannelID  string `json:"channel_id"` // legacy compatibility
-	LocalPath  string `json:"local_path"`
-	RemotePath string `json:"remote_path"`
-	Overwrite  bool   `json:"overwrite"`
-}
-
 type terminalFileTransferArgs struct {
 	TerminalID string `json:"terminal_id"`
 	LocalPath  string `json:"local_path"`
@@ -41,35 +33,6 @@ func terminalFileTransferToolDefs() []ToolDef {
 			Parameters:  injectCallPurposeParam(objectParams(base, "terminal_id", "local_path", "remote_path")),
 		}},
 	}
-}
-
-func linuxFileTransferToolDefs() []ToolDef {
-	base := map[string]any{
-		"config_id":   map[string]any{"type": "string", "description": "terminal_config_list 返回的 Linux 配置 ID。"},
-		"local_path":  map[string]any{"type": "string", "description": "Node 工作区内的相对文件路径。"},
-		"remote_path": map[string]any{"type": "string", "description": "远程 Linux 主机上的文件路径。"},
-		"overwrite":   map[string]any{"type": "boolean", "description": "目标文件存在时是否覆盖，默认 false。"},
-	}
-	return []ToolDef{
-		{Type: "function", Function: FunctionDef{
-			Name:        "linux_file_upload",
-			Description: "使用 terminal_config_list 返回的 config_id，将 Node 工作区中的单个文件上传到 Linux 主机。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
-			Parameters:  injectCallPurposeParam(objectParams(base, "config_id", "local_path", "remote_path")),
-		}},
-		{Type: "function", Function: FunctionDef{
-			Name:        "linux_file_download",
-			Description: "使用 terminal_config_list 返回的 config_id，将 Linux 主机中的单个文件下载到 Node 工作区。任务可能排队；返回表示传输完成，文件内容不会写入消息历史。",
-			Parameters:  injectCallPurposeParam(objectParams(base, "config_id", "local_path", "remote_path")),
-		}},
-	}
-}
-
-func (r *Registry) execLinuxFileUpload(ctx context.Context, raw json.RawMessage) (string, error) {
-	return r.execLinuxFileTransfer(ctx, raw, "upload")
-}
-
-func (r *Registry) execLinuxFileDownload(ctx context.Context, raw json.RawMessage) (string, error) {
-	return r.execLinuxFileTransfer(ctx, raw, "download")
 }
 
 func (r *Registry) execTerminalUpload(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -112,38 +75,4 @@ func (r *Registry) execTerminalFileTransfer(ctx context.Context, raw json.RawMes
 		WorkspaceRoot: r.workspaceRoot,
 		LocalPath:     strings.TrimSpace(args.LocalPath), RemotePath: strings.TrimSpace(args.RemotePath), Overwrite: args.Overwrite,
 	})
-}
-
-func (r *Registry) execLinuxFileTransfer(ctx context.Context, raw json.RawMessage, direction string) (string, error) {
-	if r == nil || r.linuxTransferManager == nil {
-		return "", fmt.Errorf("linux file transfer is not configured")
-	}
-	var args linuxFileTransferArgs
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-	requestedID, err := resolveLinuxToolID(args.ConfigID, args.ChannelID)
-	if err != nil {
-		return "", err
-	}
-	channelID, err := r.resolveLinuxChannelID(ctx, requestedID)
-	if err != nil {
-		return "", err
-	}
-	result, err := r.linuxTransferManager.Submit(ctx, LinuxTransferRequest{
-		AgentID:       r.agentID,
-		ToolCallID:    toolCallIDFromContext(ctx),
-		ApprovalID:    ApprovalIDFromContext(ctx),
-		TerminalID:    "",
-		ChannelID:     channelID,
-		Direction:     direction,
-		WorkspaceRoot: r.workspaceRoot,
-		LocalPath:     strings.TrimSpace(args.LocalPath),
-		RemotePath:    strings.TrimSpace(args.RemotePath),
-		Overwrite:     args.Overwrite,
-	})
-	if err != nil {
-		return result, err
-	}
-	return result, nil
 }

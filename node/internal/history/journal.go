@@ -144,12 +144,6 @@ func RuntimeJournalRelativePath(sessionID string, at time.Time) string {
 	return fmt.Sprintf("history/%s/%s.jsonl", day, safeSID)
 }
 
-// JournalRelativePath 保留旧调用方兼容；新代码应使用 RuntimeJournalRelativePath。
-// Deprecated: use RuntimeJournalRelativePath.
-func JournalRelativePath(sessionID string, at time.Time) string {
-	return RuntimeJournalRelativePath(sessionID, at)
-}
-
 func formatRecordedAt(t time.Time) string {
 	local := t.In(time.Local)
 	ms := local.Nanosecond() / int(time.Millisecond)

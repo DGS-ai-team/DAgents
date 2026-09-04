@@ -19,7 +19,7 @@ func NewPolicyToolHook(engine *policy.Engine) *PolicyToolHook {
 // SetEngine 热更新策略引擎（与 turn.Orchestrator.SetPolicy 同步）。
 func (h *PolicyToolHook) SetEngine(engine *policy.Engine) {
 	if engine == nil {
-		engine, _ = policy.LoadFile("")
+		engine = policy.NewDefaultEngine()
 	}
 	h.engine = engine
 }

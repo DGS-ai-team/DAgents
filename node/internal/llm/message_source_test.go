@@ -15,16 +15,6 @@ func TestUserMessageMaterializesStructuredSource(t *testing.T) {
 	}
 }
 
-func TestEffectiveSourceReadsLegacyMessage(t *testing.T) {
-	m := Message{Role: "user", Name: UserNameCompression}
-	if !IsMessageSource(m, MessageSourceCompression, MessageFormSummary, UserNameCompression) {
-		t.Fatalf("legacy source not recognized: %#v", EffectiveMessageSource(m))
-	}
-	if !IsHiddenInjectedUserMessage(m) {
-		t.Fatal("legacy compression message should remain hidden")
-	}
-}
-
 func TestMessageSourceSurvivesJSONRoundTrip(t *testing.T) {
 	original := UserMessageWithSource(
 		"body",

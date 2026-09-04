@@ -26,7 +26,7 @@ func newManagerWithChildAgents(t *testing.T, llmClient llm.Client) (*Manager, *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, llmClient, reg, pol, nil, TurnOptions{SkillsEnabled: false, CompressionBlocking: 0}, logx.Discard())
 	cm := childagent.NewManager(childagent.Config{Enabled: true}, hub, "agent-1", nil)
 	mgr.SetChildAgentManager(cm)
@@ -308,7 +308,7 @@ func TestSpawnChildPreloadsSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{
 		SkillsRoot:          skillsRoot,
 		SkillsEnabled:       true,
@@ -356,7 +356,7 @@ func TestSpawnChildRejectsUnknownSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{
 		SkillsRoot:        skillsRoot,
 		SkillsEnabled:     true,

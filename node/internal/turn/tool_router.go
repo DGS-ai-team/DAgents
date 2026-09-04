@@ -42,6 +42,9 @@ func (o *Orchestrator) processToolCalls(
 	var memoryConflicts []PendingHITLItem
 
 	for i, tc := range calls {
+		if !o.executionBoundaryOpen(ctx) {
+			return nil, "", context.Canceled
+		}
 		o.publishToolCall(sessionID, tc, false, i)
 		o.recordToolCall(sessionID, tc.Function.Name)
 
@@ -246,7 +249,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	}
 	beforeLoadedDigest := Digest(loaded)
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	var output string
 	var action string
@@ -294,7 +297,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 
 func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog, policyCatalog *skills.Catalog) error {
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	query := strings.TrimSpace(fmt.Sprint(payload["query"]))
 	if query == "<nil>" {
@@ -441,8 +444,8 @@ func (o *Orchestrator) executeAutoBatch(
 	if len(autoCalls) == 0 {
 		return nil
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	if !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
 	}
 	// Child management is synchronous and may wait for an entire child Turn.
 	// Keep a batch containing one of these calls on the ordered path so it
@@ -482,15 +485,24 @@ func (o *Orchestrator) executeAutoBatch(
 			content := ""
 			rejected := false
 			var extra map[string]any
-			if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
+			if !o.executionBoundaryOpen(ctx) {
+				content = ToolUserInterruptedMessage
+				lifecycleErr = context.Canceled
+			} else if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
 				lifecycleErr = fmt.Errorf("record tool execution start: %w", err)
 				content = "ERROR: " + lifecycleErr.Error()
 				rejected = true
 			} else {
 				content, rejected, extra, lifecycleErr = o.invokeToolWithRetries(ctx, sessionID, tc, plan)
-				resultMeta := tools.ClassifyToolResult(tc.Function.Name, content, rejected)
+				if o.toolCancellationWon(ctx, sessionID, tc.ID) {
+					content = ToolUserInterruptedMessage
+					rejected = false
+					extra = nil
+					lifecycleErr = nil
+				}
+				resultMeta := tools.ClassifyResult(tc.Function.Name, content, rejected)
 				finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
-				if lifecycleErr == nil {
+				if lifecycleErr == nil && !o.toolCancellationWon(ctx, sessionID, tc.ID) {
 					lifecycleErr = finishErr
 				}
 			}
@@ -527,8 +539,8 @@ func (o *Orchestrator) executeAutoBatch(
 	// when several tools returned images. This keeps the Chat Completions
 	// history compact and preserves the original tool-result ordering.
 	o.appendToolVisionUserMessages(sessionID, history, autoCalls)
-	if err := ctx.Err(); err != nil {
-		return err
+	if !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
 	}
 	if lifecycleErr != nil {
 		return lifecycleErr
@@ -558,7 +570,7 @@ func (o *Orchestrator) persistToolResult(
 	rejected bool,
 	appendVision bool,
 ) {
-	resultMeta := tools.ClassifyToolResult(tc.Function.Name, forClient, rejected)
+	resultMeta := tools.ClassifyResult(tc.Function.Name, forClient, rejected)
 	// Policy denial is not an execution result and should be excluded from
 	// context-success metrics. Failed/cancelled results, however, are valuable
 	// evidence for the next model step and must remain measurable.
@@ -576,13 +588,7 @@ func (o *Orchestrator) persistToolResult(
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any, execErr error) {
-	runInBackground, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
-	// bash_run is deliberately synchronous.  Keep parsing the historical
-	// run_in_background field for wire compatibility, but never let it change
-	// execution semantics; long-lived shell sessions use terminal_open.
-	if tc.Function.Name == "bash_run" || tools.IsBackgroundJobTool(tc.Function.Name) {
-		runInBackground = false
-	}
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)
 	if plan != nil && plan.IsApproved(tc.ID) {
 		toolCtx = tools.WithApprovalID(toolCtx, tc.ID)
@@ -591,19 +597,14 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		toolCtx = tools.WithTriggerSessionTarget(toolCtx, target)
 	}
 
-	var output string
-	if runInBackground {
-		output, execErr = o.tools.StartBackground(toolCtx, sessionID, tc.Function.Name, tc.ID, cleanedArgs)
-	} else {
-		output, execErr = o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
-		extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
-	}
+	output, execErr := o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
+	extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
 	if execErr != nil {
 		// Some providers return useful partial diagnostics together with an
 		// error (MCP, browser, SFTP and SSH are common examples). Never replace
 		// that body with only err.Error(); the result classifier and the model
-		// both need the provider evidence. Keep the legacy ERROR marker so old
-		// consumers still recognize the failure.
+		// both need the provider evidence. Keep the provider-visible ERROR marker
+		// so the result classifier can recognize the failure.
 		errText := strings.TrimSpace(execErr.Error())
 		if strings.TrimSpace(output) == "" {
 			output = "ERROR: " + errText
@@ -689,17 +690,36 @@ func (o *Orchestrator) executeTool(
 		return o.executeChildManagementTool(ctx, sessionID, history, tc)
 	}
 	o.recordToolCall(sessionID, tc.Function.Name)
+	if !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
+	}
 	if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
 		content := "ERROR: " + err.Error()
+		if o.toolCancellationWon(ctx, sessionID, tc.ID) {
+			content = ToolUserInterruptedMessage
+		}
 		o.commitToolResult(sessionID, history, tc, content, true, nil)
+		if o.toolCancellationWon(ctx, sessionID, tc.ID) {
+			return context.Canceled
+		}
 		return fmt.Errorf("record tool execution start: %w", err)
 	}
 	content, rejected, extra, lifecycleErr := o.invokeToolWithRetries(ctx, sessionID, tc, plan)
-	resultMeta := tools.ClassifyToolResult(tc.Function.Name, content, rejected)
+	cancelledByTurn := o.toolCancellationWon(ctx, sessionID, tc.ID)
+	if cancelledByTurn {
+		content = ToolUserInterruptedMessage
+		rejected = false
+		extra = nil
+		lifecycleErr = nil
+	}
+	resultMeta := tools.ClassifyResult(tc.Function.Name, content, rejected)
 	finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
 	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
 	if lifecycleErr != nil {
 		return lifecycleErr
+	}
+	if cancelledByTurn || !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
 	}
 	return finishErr
 }
@@ -719,7 +739,7 @@ func (o *Orchestrator) executeChildManagementTool(
 		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil
 	}
-	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
 	if err != nil {
 		output = "ERROR: " + err.Error()

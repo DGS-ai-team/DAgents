@@ -2,7 +2,7 @@ package turn
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,7 +29,7 @@ func testRegistry(t *testing.T) *tools.Registry {
 }
 
 func TestOrchestratorForgetSessionReleasesRuntimeState(t *testing.T) {
-	o := NewOrchestrator("agent", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	o := NewOrchestrator("agent", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
 	const sessionID = "session-cleanup"
 	o.RequestModelContextRefresh(sessionID, "skills_load")
 	o.SetNextStepFinalSummary(sessionID)
@@ -64,7 +64,7 @@ func TestToolDefinitions_exposesSkillDiscoveryWithSkillsTools(t *testing.T) {
 	reg := testRegistry(t)
 	catalog := skills.NewCatalog(filepath.Join(root, "skills"), true, 3)
 
-	defaultOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	defaultOrch := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, nil, nil, hooks.RuntimeConfig{}, nil)
 	found := false
 	for _, def := range defaultOrch.ToolDefinitions() {
 		if def.Function.Name == "list_available_skills" {
@@ -76,7 +76,7 @@ func TestToolDefinitions_exposesSkillDiscoveryWithSkillsTools(t *testing.T) {
 	}
 
 	reg.SetBuiltinEnabledNone()
-	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	restricted := NewOrchestrator("agent", root, nil, nil, reg, nil, SkillAccess{Catalog: catalog}, nil, nil, hooks.RuntimeConfig{}, nil)
 	for _, def := range restricted.ToolDefinitions() {
 		if def.Function.Name == "list_available_skills" {
 			t.Fatal("catalog discovery must not appear without load_skills")
@@ -171,8 +171,8 @@ func continueResumeAndDrain(
 func testOrchestrator(t *testing.T, hub *stream.Hub, client llm.Client) *Orchestrator {
 	t.Helper()
 	reg := testRegistry(t)
-	pol, _ := policy.LoadFile("")
-	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	pol := policy.NewDefaultEngine()
+	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 }
 
 type flakyRetryExecutor struct {
@@ -180,6 +180,69 @@ type flakyRetryExecutor struct {
 }
 
 type cacheReportingClient struct{}
+
+type fenceTestClient struct {
+	calls       int
+	cancelAfter bool
+	open        *bool
+}
+
+func (c *fenceTestClient) StreamChat(_ context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if c.cancelAfter && c.open != nil {
+		*c.open = false
+	}
+	return llm.ChatResult{Content: "provider response", FinishReason: "stop"}, nil
+}
+
+func (*fenceTestClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "summary", nil
+}
+
+func (*fenceTestClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func TestOrchestratorExecutionFenceBlocksProviderRequest(t *testing.T) {
+	client := &fenceTestClient{}
+	o := testOrchestrator(t, stream.NewHub(8, logx.Discard()), client)
+	o.SetExecutionFence(func(TurnExecutionContext) bool { return false })
+	history := []llm.Message{}
+	ctx := WithExecutionContext(context.Background(), TurnExecutionContext{
+		SessionID: "session-fence", TurnID: "turn-fence", StepID: "step-1", Generation: 1, StepIndex: 1,
+	})
+	outcome := o.RunHumanMessageTurn(ctx, "session-fence", &history, llm.UserMessage("不要发起请求", llm.UserNameHuman))
+	if !errors.Is(outcome.Err, context.Canceled) {
+		t.Fatalf("outcome error = %v, want context.Canceled", outcome.Err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", client.calls)
+	}
+	if len(history) != 1 || history[0].Role != "user" {
+		t.Fatalf("cancelled preflight history = %#v", history)
+	}
+}
+
+func TestOrchestratorExecutionFenceDropsResponseBeforeAssistantCommit(t *testing.T) {
+	open := true
+	client := &fenceTestClient{cancelAfter: true, open: &open}
+	o := testOrchestrator(t, stream.NewHub(8, logx.Discard()), client)
+	o.SetExecutionFence(func(TurnExecutionContext) bool { return open })
+	history := []llm.Message{}
+	ctx := WithExecutionContext(context.Background(), TurnExecutionContext{
+		SessionID: "session-fence", TurnID: "turn-fence", StepID: "step-1", Generation: 1, StepIndex: 1,
+	})
+	outcome := o.RunHumanMessageTurn(ctx, "session-fence", &history, llm.UserMessage("响应返回后取消", llm.UserNameHuman))
+	if !errors.Is(outcome.Err, context.Canceled) {
+		t.Fatalf("outcome error = %v, want context.Canceled", outcome.Err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", client.calls)
+	}
+	if len(history) != 1 || history[0].Role != "user" {
+		t.Fatalf("cancelled response history = %#v", history)
+	}
+}
 
 func (cacheReportingClient) StreamChat(_ context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
 	if handler.OnDelta != nil {
@@ -220,10 +283,6 @@ func (e *flakyRetryExecutor) Execute(context.Context, string, string) (string, e
 	return "read-after-retry", nil
 }
 
-func (*flakyRetryExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
-	return "", fmt.Errorf("background unsupported")
-}
-
 func (*flakyRetryExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
 func (*flakyRetryExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
 func (*flakyRetryExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
@@ -233,7 +292,7 @@ func (*flakyRetryExecutor) ToolRetryAllowed(name string) bool { return name == "
 
 func TestOrchestratorRetriesSafeTransientToolFailureWithoutNewToolCall(t *testing.T) {
 	executor := &flakyRetryExecutor{}
-	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), &llm.MockClient{}, executor, nil, SkillAccess{}, 4, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), &llm.MockClient{}, executor, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	orch.SetToolRetryLimit(1)
 	var lifecycle []CommandType
 	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
@@ -364,7 +423,7 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 	ctx := context.Background()
 	_, _ = reg.Execute(ctx, "write_file", `{"path":"hello.txt","content":"file-body"}`)
 
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{EnableTools: true}, reg, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{EnableTools: true}, reg, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
@@ -473,7 +532,7 @@ func TestRunMessageTurnApproval(t *testing.T) {
 	var history []llm.Message
 	go func() {
 		defer close(done)
-		_, _, _ = runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "run echo", nil)
+		_, _, _ = runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "run git status", nil)
 	}()
 
 	deadline := time.After(3 * time.Second)
@@ -511,6 +570,10 @@ func TestProcessToolCallsMixedHITL(t *testing.T) {
 	defer hub.Unsubscribe(ch)
 
 	var history []llm.Message
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{
+		{ID: "call-ask-1", Type: "function", Function: llm.ToolCallFunction{Name: "ask_user_information", Arguments: `{"question":"Which env?"}`}},
+		{ID: "call-bash-1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"git status"}`}},
+	}})
 	pending, state, err := orch.processToolCalls(context.Background(), "sess-1", &history, []llm.ToolCall{
 		{
 			ID: "call-ask-1", Type: "function",
@@ -521,7 +584,7 @@ func TestProcessToolCallsMixedHITL(t *testing.T) {
 		},
 		{
 			ID: "call-bash-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo ok"}`},
+			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"git status"}`},
 		},
 	})
 	if err != nil {
@@ -608,69 +671,6 @@ func hitlSSEItems(data map[string]any) []map[string]any {
 	}
 }
 
-func TestPendingHITLLegacyJSON(t *testing.T) {
-	var pending PendingHITL
-	if err := json.Unmarshal([]byte(`{"kind":"approval","tool_calls":[{"id":"c1","type":"function","function":{"name":"bash_run"}}]}`), &pending); err != nil {
-		t.Fatal(err)
-	}
-	if len(pending.Items) != 1 || pending.Items[0].ToolCall.ID != "c1" {
-		t.Fatalf("pending = %+v", pending.Items)
-	}
-}
-
-func TestRunMessageTurnMaxToolLoops(t *testing.T) {
-	hub := stream.NewHub(32, logx.Discard())
-	reg := testRegistry(t)
-	hookCfg := hooks.RuntimeConfig{
-		Duplicate:  hooks.DuplicateConfig{Enabled: false, WindowSeconds: 1},
-		ToolResult: hooks.DefaultToolResultConfig(t.TempDir()),
-	}
-	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, hookCfg, logx.Discard())
-	ch := hub.Subscribe(0)
-	defer hub.Unsubscribe(ch)
-
-	done := make(chan struct{})
-	var turnErr error
-	var history []llm.Message
-	go func() {
-		defer close(done)
-		_, _, turnErr = runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "loop", nil)
-	}()
-
-	deadline := time.After(3 * time.Second)
-	var gotDone bool
-	for !gotDone {
-		select {
-		case ev := <-ch:
-			switch ev.Type {
-			case "error":
-				t.Fatalf("unexpected error SSE: %+v", ev.Data)
-			case "turn_finished":
-				if reason, _ := ev.Data["finish_reason"].(string); reason != "stop" {
-					t.Fatalf("done finish_reason = %q, want stop", reason)
-				}
-				gotDone = true
-			}
-		case <-deadline:
-			t.Fatalf("timeout done=%v turnErr=%v", gotDone, turnErr)
-		}
-	}
-	<-done
-	if turnErr != nil {
-		t.Fatalf("runMessageTurnInline err = %v, want nil (soft tool_result)", turnErr)
-	}
-	gotSoft := false
-	for _, msg := range history {
-		if msg.Role == "tool" && strings.Contains(msg.Content, "已超过单轮工具调用次数") {
-			gotSoft = true
-			break
-		}
-	}
-	if !gotSoft {
-		t.Fatalf("history missing soft tool_result; history=%+v", history)
-	}
-}
-
 func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	root := t.TempDir()
@@ -682,15 +682,10 @@ func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644)
 	_ = os.WriteFile(filepath.Join(root, "b.txt"), []byte("beta"), 0o644)
 
-	polPath := filepath.Join(t.TempDir(), "policy.yaml")
-	if err := os.WriteFile(polPath, []byte("default: deny\ntools:\n  read_file: auto\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	pol, err := policy.LoadFile(polPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	pol := policy.NewEngineFromMaps(policy.Maps{
+		Tools: map[string]policy.ApprovalMode{"read_file": policy.ModeNever},
+	})
+	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
 	var history []llm.Message
 	pending, _, err := runMessageTurnInline(t, orch, ctx, "sess-1", &history, "读两个文件", nil)
@@ -802,7 +797,7 @@ func (m *bashApprovalMock) StreamChat(ctx context.Context, req llm.ChatRequest, 
 		return llm.ChatResult{
 			ToolCalls: []llm.ToolCall{{
 				ID: "call-bash-1", Type: "function",
-				Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo ok"}`},
+				Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"git status"}`},
 			}},
 			FinishReason: "tool_calls",
 		}, nil
@@ -909,7 +904,7 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	}
 }
 
-func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
+func TestRunMessageTurnCancelledDropsPartialAssistant(t *testing.T) {
 	hub := stream.NewHub(16, logx.Discard())
 	orch := testOrchestrator(t, hub, &partialCancelMock{
 		content:   "partial answer",
@@ -925,15 +920,37 @@ func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(history) != 2 {
+	if len(history) != 1 {
 		t.Fatalf("history = %+v", history)
 	}
-	assistant := history[1]
-	if assistant.Role != "assistant" || assistant.Content != "partial answer" {
-		t.Fatalf("assistant = %+v", assistant)
+	if history[0].Role != "user" || history[0].Content != "hi" {
+		t.Fatalf("history user = %+v", history[0])
 	}
-	if assistant.ReasoningContent != "partial think" {
-		t.Fatalf("reasoning_content = %q", assistant.ReasoningContent)
+}
+
+func TestRunMessageTurnCancelledDropsPartialToolCallAndContent(t *testing.T) {
+	hub := stream.NewHub(16, logx.Discard())
+	call := llm.ToolCall{
+		ID: "call-partial", Type: "function",
+		Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"Get-Process"`},
+	}
+	orch := testOrchestrator(t, hub, &partialCancelMock{
+		content:   "partial answer",
+		reasoning: "partial think",
+		toolCalls: []llm.ToolCall{call},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var history []llm.Message
+	go func() {
+		defer close(done)
+		_, _, _ = runMessageTurnInline(t, orch, ctx, "sess-1", &history, "run", nil)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+	if len(history) != 1 || history[0].Role != "user" || history[0].Content != "run" {
+		t.Fatalf("history with partial tool call = %+v", history)
 	}
 }
 

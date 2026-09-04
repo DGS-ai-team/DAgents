@@ -41,11 +41,11 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	if got.ConfigPath != configPath || !got.ConfigWritable {
 		t.Fatalf("config meta = path %q writable %v", got.ConfigPath, got.ConfigWritable)
 	}
-	if got.LLM.Model != "deepseek-chat" {
+	if len(got.LLM.Profiles) == 0 || got.LLM.Profiles[0].Model != "deepseek-chat" {
 		t.Fatalf("llm = %+v", got.LLM)
 	}
 
-	patchBody := []byte(`{"llm":{"provider":"mock","model":"mock","mock":true}}`)
+	patchBody := []byte(`{"llm":{"profiles":[{"id":"default","provider":"mock","model":"mock","mock":true}]}}`)
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(patchBody))
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	if err := json.NewDecoder(patchResp.Body).Decode(&patched); err != nil {
 		t.Fatal(err)
 	}
-	if !patched.RestartRequired || patched.LLM.Provider != "mock" {
+	if !patched.RestartRequired || len(patched.LLM.Profiles) == 0 || patched.LLM.Profiles[0].Provider != "mock" {
 		t.Fatalf("patched = %+v", patched)
 	}
 
@@ -225,7 +225,7 @@ func TestHandlePatchSetupConfig_noConfigPath(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	body := []byte(`{"llm":{"provider":"mock","model":"mock","mock":true}}`)
+	body := []byte(`{"llm":{"profiles":[{"id":"default","provider":"mock","model":"mock","mock":true}]}}`)
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)

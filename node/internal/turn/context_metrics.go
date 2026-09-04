@@ -14,7 +14,6 @@ type TurnContextMetrics struct {
 	mu                   sync.RWMutex
 	ToolLoops            int
 	ToolCalls            int
-	StatusPollCount      int
 	HistoryResultTokens  float64
 	HistoryResultChars   int
 	SpillCount           int
@@ -106,10 +105,6 @@ func (o *Orchestrator) recordToolCall(sessionID, toolName string) {
 	}
 	m.ToolCalls++
 	m.ToolCallsByName[name]++
-	switch name {
-	case "background_job_status":
-		m.StatusPollCount++
-	}
 }
 
 func (o *Orchestrator) recordToolResult(
@@ -191,7 +186,6 @@ func (m *TurnContextMetrics) snapshot() map[string]any {
 	out := map[string]any{
 		"tool_loops":             m.ToolLoops,
 		"tool_calls":             m.ToolCalls,
-		"status_poll_count":      m.StatusPollCount,
 		"history_result_tokens":  int(m.HistoryResultTokens + 0.5),
 		"history_result_chars":   m.HistoryResultChars,
 		"spill_count":            m.SpillCount,
@@ -241,7 +235,6 @@ func (m *TurnContextMetrics) logAttrs(sessionID, finishReason string) []any {
 		"finish_reason", finishReason,
 		"tool_loops", m.ToolLoops,
 		"tool_calls", m.ToolCalls,
-		"status_poll_count", m.StatusPollCount,
 		"history_result_tokens", int(m.HistoryResultTokens + 0.5),
 		"history_result_chars", m.HistoryResultChars,
 		"spill_count", m.SpillCount,

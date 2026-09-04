@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// ResultStatus is the authoritative state of a tool result.  The raw tool
-// body remains backwards compatible, while the orchestrator/UI use this
-// status instead of guessing from an empty body or a localized error string.
+// ResultStatus is the authoritative state of a tool result. The raw tool body
+// remains tool-specific, while the orchestrator/UI use this status instead of
+// guessing from an empty body or a localized error string.
 type ResultStatus string
 
 const (
@@ -48,15 +48,15 @@ func (m ResultMetadata) Denied() bool {
 
 var resultStatusPattern = regexp.MustCompile(`(?i)(^|[\s,;\[])(status|execution_status)\s*[:=]\s*([a-z_]+)`)
 
-// ClassifyResult is the single compatibility boundary for legacy tool text.
-// It understands existing JSON results, shell result headers, background
-// acknowledgements and policy messages without requiring every handler to be
-// rewritten at once.
-func ClassifyResult(toolName, content string, rejected bool) ResultMetadata {
+// ClassifyResult is the single boundary for provider result text. It
+// understands JSON results, shell result headers and policy messages without
+// requiring every handler to share one response body format.
+func ClassifyResult(toolName, content string, failureHint bool) ResultMetadata {
 	trimmed := strings.TrimSpace(content)
 	// A policy result may be reconstructed from persisted history without the
-	// transient rejected flag. The explicit rejection marker is therefore
-	// authoritative on its own; the flag remains for legacy ambiguous errors.
+	// transient execution hint. The explicit rejection marker is therefore
+	// authoritative on its own; the hint only classifies an otherwise unmarked
+	// failure at the execution boundary.
 	if isPolicyRejection(trimmed) {
 		return ResultMetadata{
 			Status: ResultStatusDenied,
@@ -87,37 +87,30 @@ func ClassifyResult(toolName, content string, rejected bool) ResultMetadata {
 	case strings.HasPrefix(trimmed, "ERROR:"),
 		strings.HasPrefix(strings.ToUpper(trimmed), "ERROR "):
 		return metadataForStatus(ResultStatusFailed, toolName, "", trimmed)
-	case rejected:
+	case failureHint:
 		return metadataForStatus(ResultStatusFailed, toolName, "", trimmed)
 	default:
 		return ResultMetadata{Status: ResultStatusSucceeded}
 	}
 }
 
-// ClassifyToolResult is kept as a descriptive alias for call sites that deal
-// with a model-facing tool result rather than a generic provider response.
-func ClassifyToolResult(toolName, content string, rejected bool) ResultMetadata {
-	return ClassifyResult(toolName, content, rejected)
-}
-
-// ResultEventFields returns stable fields that can be merged into SSE or
-// audit payloads.  The legacy rejected field is only true for policy denial;
-// status is authoritative for all other outcomes.
-func ResultEventFields(toolName, content string, rejected bool) map[string]any {
-	return ResultEventFieldsWithStatus(toolName, content, rejected, "")
+// ResultEventFields returns the stable status/error projection that can be
+// merged into SSE or audit payloads. Status is the only outcome field; callers
+// must not infer policy denial from a second boolean projection.
+func ResultEventFields(toolName, content string, failureHint bool) map[string]any {
+	return ResultEventFieldsWithStatus(toolName, content, failureHint, "")
 }
 
 // ResultEventFieldsWithStatus lets asynchronous bridges provide the durable
 // job status when the client-facing body is intentionally a short/cleaned
 // preview and no longer contains the original status marker.
-func ResultEventFieldsWithStatus(toolName, content string, rejected bool, explicitStatus ResultStatus) map[string]any {
-	meta := ClassifyResult(toolName, content, rejected)
+func ResultEventFieldsWithStatus(toolName, content string, failureHint bool, explicitStatus ResultStatus) map[string]any {
+	meta := ClassifyResult(toolName, content, failureHint)
 	if explicitStatus != "" {
 		meta = metadataForStatus(explicitStatus, toolName, "", content)
 	}
 	fields := map[string]any{
-		"status":   string(meta.Status),
-		"rejected": meta.Denied(),
+		"status": string(meta.Status),
 	}
 	if meta.Error != nil {
 		fields["error"] = map[string]any{
@@ -173,8 +166,6 @@ func ResultDescriptionSuffixForTool(name string) string {
 		shape = " 正文为 JSON，优先依据 status 和 exit_code 判断命令结果；stdout/stderr 为空可能是成功的零输出，output_truncated=true 时不能声称已看到完整输出。"
 	case "terminal_upload", "terminal_download":
 		shape = " 传输正文包含 transfer_id、status、bytes、sha256 及本地/远端路径；校验 sha256 后再宣称传输完成。"
-	case "background_job_status", "background_job_cancel":
-		shape = " 正文包含 job_id、status 和输出/错误摘要；后台任务完成通常还会通过 async_tool_result 自动回灌。"
 	case "load_skills", "unload_skills", "clear_skills":
 		shape = " skills 结果为 JSON，包含 action、requested、loaded_skills、rejected、session_state_applied_boundary、model_context_applied_boundary、hooks_status、hooks_loaded 和 hooks_failed；以 returned loaded_skills 作为下一步会话技能状态，并按 model_context_applied_boundary 判断正文何时可见。"
 	case "list_available_skills":
@@ -183,8 +174,6 @@ func ResultDescriptionSuffixForTool(name string) string {
 		shape = " 触发器正文为 JSON，包含 ok 及 trigger 或错误信息；写操作成功后再用 get/list 验证。"
 	case "browser_run_task", "browser_task_status", "browser_task_cancel":
 		shape = " 浏览器正文为 JSON，包含 ok、detail.status、摘要、截图/URL 和 error；detail.status 优先于 ok 判断任务终态。"
-	case "linux_file_upload", "linux_file_download":
-		shape = " 传输正文包含 transfer_id、status、bytes、sha256 及本地/远端路径；校验 sha256 后再宣称传输完成。"
 	case "wecom_send_markdown", "wecom_send_file":
 		shape = " 企微正文为 JSON，包含 ok、message 和必要的 remote_id/error；ok=true 才表示已受理。"
 	case "ask_user_information":

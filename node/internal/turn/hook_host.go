@@ -60,16 +60,25 @@ func (o *Orchestrator) newSessionHookHost(sessionID string, history []llm.Messag
 		return hooks.NoopHost()
 	}
 	o.ensureHookHostState()
+	// Do not hold hookHostState.mu while reading the runtime-backed skill set
+	// or composing the prompt. The runtime persistence path reads session state
+	// first and then snapshots the hook store; taking the locks in the opposite
+	// order here can deadlock when a reconcile enqueues an immediate
+	// continuation during persistence.
+	var loadedSkills []skills.LoadedSkill
+	if o.skillAccess.Get != nil {
+		loadedSkills = append([]skills.LoadedSkill(nil), o.skillAccess.Get()...)
+	}
+	systemPrompt := o.composeSystemPrompt(sessionID)
+	workspaceRoot := o.workspaceRoot
 	st := o.hookHostState
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.history = append([]llm.Message(nil), history...)
 	st.finishReason = finishReason
-	if o.skillAccess.Get != nil {
-		st.loadedSkills = append([]skills.LoadedSkill(nil), o.skillAccess.Get()...)
-	}
-	st.systemPrompt = o.composeSystemPrompt(sessionID)
-	st.workspaceRoot = o.workspaceRoot
+	st.loadedSkills = loadedSkills
+	st.systemPrompt = systemPrompt
+	st.workspaceRoot = workspaceRoot
 	return &sessionHookHost{
 		o:         o,
 		sessionID: sessionID,

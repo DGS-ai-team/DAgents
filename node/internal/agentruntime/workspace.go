@@ -11,9 +11,8 @@ import (
 // Workspace modes are persisted in an Agent snapshot.  The mode is part of
 // the placement of an Agent and is intentionally not editable after creation.
 const (
-	WorkspaceModePrivate      = "private"
-	WorkspaceModeCustom       = "custom"
-	WorkspaceModeLegacyShared = "legacy_shared"
+	WorkspaceModePrivate = "private"
+	WorkspaceModeCustom  = "custom"
 	// workspaceStateDir is intentionally hidden from the model's normal file
 	// listing. It contains Agent-owned sidecars which must live with the
 	// selected workspace, while remaining isolated when Agents share it.
@@ -21,8 +20,8 @@ const (
 )
 
 // WorkspaceConfig describes the user-facing working directory of an Agent.
-// Custom paths are stored as canonical absolute paths. Private and legacy
-// shared paths are derived from the Node runtime and therefore keep Path empty.
+// Custom paths are stored as canonical absolute paths. Private paths are
+// derived from the Node runtime and therefore keep Path empty.
 type WorkspaceConfig struct {
 	Mode string `json:"mode"`
 	Path string `json:"path,omitempty"`
@@ -61,16 +60,13 @@ func NormalizeWorkspaceConfig(runtimeRoot, agentID string, requested WorkspaceCo
 			return WorkspaceConfig{}, fmt.Errorf("agent_id is required for workspace validation")
 		}
 		return WorkspaceConfig{Mode: mode, Path: path}, nil
-	case WorkspaceModeLegacyShared:
-		return WorkspaceConfig{}, fmt.Errorf("legacy_shared is reserved for migrated Agents")
 	default:
 		return WorkspaceConfig{}, fmt.Errorf("unsupported workspace mode %q", requested.Mode)
 	}
 }
 
-// EffectiveWorkspaceRoot resolves a persisted workspace. A missing workspace
-// field is deliberately treated as legacy_shared so existing Agents retain
-// their old Node-global behavior after an upgrade.
+// EffectiveWorkspaceRoot resolves a persisted workspace. An omitted mode uses
+// the private workspace default.
 func EffectiveWorkspaceRoot(runtimeRoot, agentID string, workspace WorkspaceConfig) (string, error) {
 	root := strings.TrimSpace(runtimeRoot)
 	if root == "" {
@@ -78,12 +74,7 @@ func EffectiveWorkspaceRoot(runtimeRoot, agentID string, workspace WorkspaceConf
 	}
 	mode := strings.ToLower(strings.TrimSpace(workspace.Mode))
 	switch mode {
-	case "", WorkspaceModeLegacyShared:
-		// Keep the legacy string semantics intact. Besides preserving existing
-		// snapshots, this avoids changing relative test/runtime roots merely by
-		// loading an old Agent.
-		return root, nil
-	case WorkspaceModePrivate:
+	case "", WorkspaceModePrivate:
 		if strings.TrimSpace(agentID) == "" {
 			return "", fmt.Errorf("agent_id is required for private workspace")
 		}
@@ -115,8 +106,6 @@ func EnsureWorkspace(runtimeRoot, agentID string, workspace WorkspaceConfig) (st
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", fmt.Errorf("create workspace %q: %w", root, err)
 	}
-	// Do not create data/ here. It is retained only as a compatibility path for
-	// existing workspaces; new workspaces should remain free of this directory.
 	return root, nil
 }
 

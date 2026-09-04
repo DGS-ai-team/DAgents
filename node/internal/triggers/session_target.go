@@ -6,14 +6,6 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 )
 
-// EffectiveSessionTargetMode 缺省为 fixed（兼容旧 triggers.json）。
-func (d Definition) EffectiveSessionTargetMode() SessionTargetMode {
-	if strings.TrimSpace(string(d.SessionTargetMode)) != "" {
-		return d.SessionTargetMode
-	}
-	return SessionTargetFixed
-}
-
 func hasBoundSessionID(d Definition) bool {
 	return d.TargetSessionID != nil && strings.TrimSpace(*d.TargetSessionID) != ""
 }
@@ -47,7 +39,7 @@ func FireOptionsFromApprovalTarget(approvalTarget, currentSessionID string, def 
 		target = clihitl.TriggerSessionSame
 	}
 	if target == clihitl.TriggerSessionNew &&
-		def.EffectiveSessionTargetMode() == SessionTargetFixed &&
+		def.SessionTargetMode == SessionTargetFixed &&
 		hasBoundSessionID(def) {
 		return nil
 	}

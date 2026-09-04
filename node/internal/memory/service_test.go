@@ -207,49 +207,6 @@ func TestLocalServiceRecallContextBudgetIncludesFraming(t *testing.T) {
 	}
 }
 
-func TestStoreImportLegacyIsIdempotent(t *testing.T) {
-	store, err := OpenStore(t.TempDir()+"/memory.db", ScopeAgent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	entries := []Entry{{ID: "legacy-1", Content: "旧记忆", Scope: ScopeAgent}}
-	digest := DigestEntries(entries)
-	first, err := store.ImportLegacy(context.Background(), entries, digest)
-	if err != nil || !first {
-		t.Fatalf("first import=%v err=%v", first, err)
-	}
-	second, err := store.ImportLegacy(context.Background(), entries, digest)
-	if err != nil || second {
-		t.Fatalf("second import=%v err=%v", second, err)
-	}
-	got, err := store.List(context.Background(), false)
-	if err != nil || len(got) != 1 || got[0].ID != "legacy-1" {
-		t.Fatalf("entries=%+v err=%v", got, err)
-	}
-}
-
-func TestStoreImportLegacyNeverOverwritesAfterCutover(t *testing.T) {
-	store, err := OpenStore(t.TempDir()+"/memory.db", ScopeAgent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	first := []Entry{{ID: "legacy-1", Content: "首次导入", Scope: ScopeAgent}}
-	if ok, err := store.ImportLegacy(ctx, first, DigestEntries(first)); err != nil || !ok {
-		t.Fatalf("first import=%v err=%v", ok, err)
-	}
-	changed := []Entry{{ID: "legacy-1", Content: "旧版本后来修改", Scope: ScopeAgent}}
-	if ok, err := store.ImportLegacy(ctx, changed, DigestEntries(changed)); err != nil || ok {
-		t.Fatalf("changed import=%v err=%v, want no-op after cutover", ok, err)
-	}
-	entries, err := store.List(ctx, false)
-	if err != nil || len(entries) != 1 || entries[0].Content != "首次导入" {
-		t.Fatalf("post-cutover entries=%+v err=%v", entries, err)
-	}
-}
-
 func TestLocalServiceModelOperationsCannotWidenConfiguredScope(t *testing.T) {
 	service, err := OpenLocalService(t.TempDir()+"/agent.db", t.TempDir()+"/global.db", ScopeAgent)
 	if err != nil {

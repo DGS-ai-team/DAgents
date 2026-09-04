@@ -46,6 +46,9 @@ func (o *Orchestrator) runModelRequest(
 	}
 	publishedToolPartial := make(map[int]string)
 	for attempt := 0; ; attempt++ {
+		if !o.executionBoundaryOpen(ctx) {
+			return result, context.Canceled
+		}
 		if attempt > 0 {
 			if o.modelRetryCheck != nil {
 				allowed, reason := o.modelRetryCheck(sessionID)
@@ -64,6 +67,9 @@ func (o *Orchestrator) runModelRequest(
 			Type: CommandModelRequestStarted, At: time.Now().UTC(),
 			RequestDigest: requestDigest, Reason: "model_request_started",
 		}); err != nil {
+			if !o.executionBoundaryOpen(ctx) {
+				return result, context.Canceled
+			}
 			return result, fmt.Errorf("record model request start: %w", err)
 		}
 		o.resetUsageAttempt(sessionID, stepIndex)
@@ -117,6 +123,9 @@ func (o *Orchestrator) runModelRequest(
 			},
 		})
 		if lifecycleErr := getLifecycleErr(); lifecycleErr != nil {
+			if !o.executionBoundaryOpen(ctx) {
+				return result, context.Canceled
+			}
 			return result, fmt.Errorf("record model usage: %w", lifecycleErr)
 		}
 		if err == nil {

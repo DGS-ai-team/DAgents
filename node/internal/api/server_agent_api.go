@@ -127,39 +127,33 @@ func isLoopbackRequest(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
-	if manage.UpdateDelegatedToShell() {
-		// Node owns the effective settings (including node_settings.db). A
-		// Shell request may ask Node for an on-demand check without receiving
-		// the Manage token or reimplementing config loading.
-		if s.updateChecker != nil {
-			status := s.updateChecker.CheckNow()
-			status.Deprecated = true
-			status.Delegate = "shell"
-			status.DesktopAPI = manage.ShellDesktopAPIBase + "/v1/desktop/update"
-			writeJSON(w, http.StatusOK, status)
-			return
-		}
-		channel := "stable"
-		if s.cfg != nil {
-			channel = strings.TrimSpace(s.cfg.Manage.Update.Channel)
-		}
-		writeJSON(w, http.StatusOK, manage.ShellDelegateUpdateStatus(channel))
-		return
-	}
+func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	applyAvailable := s.platformAvailable(r.Context())
 	if s.updateChecker == nil {
-		writeJSON(w, http.StatusOK, manage.UpdateStatus{
-			CurrentVersion:  version.Version,
-			LatestVersion:   version.Version,
-			ManageReachable: false,
-			Platform:        manage.ReleasePlatform(),
-			Channel:         "stable",
-			ApplyCommand:    "dagents update",
-			Message:         "Manage 未启用，无法检查更新",
+		writeJSON(w, http.StatusOK, struct {
+			manage.UpdateStatus
+			ApplyAvailable bool `json:"apply_available"`
+		}{
+			UpdateStatus: manage.UpdateStatus{
+				CurrentVersion:  version.Version,
+				LatestVersion:   version.Version,
+				ManageReachable: false,
+				Platform:        manage.ReleasePlatform(),
+				Channel:         "stable",
+				ApplyCommand:    "dagents update",
+				Message:         "Manage 未启用，无法检查更新",
+			},
+			ApplyAvailable: applyAvailable,
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.updateChecker.Snapshot())
+	writeJSON(w, http.StatusOK, struct {
+		manage.UpdateStatus
+		ApplyAvailable bool `json:"apply_available"`
+	}{
+		UpdateStatus:   s.updateChecker.Snapshot(),
+		ApplyAvailable: applyAvailable,
+	})
 }
 
 func (s *Server) handleAgentUpgradeReadiness(w http.ResponseWriter, _ *http.Request) {
@@ -225,7 +219,6 @@ type sessionContextResponse struct {
 	ToolDigest                          string                               `json:"tool_digest,omitempty"`
 	RecoveryRequired                    bool                                 `json:"recovery_required,omitempty"`
 	TurnState                           string                               `json:"turn_state,omitempty"`
-	RunTurnPhase                        string                               `json:"run_turn_phase"`
 	SystemPrompt                        string                               `json:"system_prompt,omitempty"`
 	SystemPromptEstimatedTokens         int                                  `json:"system_prompt_estimated_tokens"`
 	SkillsCatalogEstimatedTokens        int                                  `json:"skills_catalog_estimated_tokens"`
@@ -311,7 +304,6 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 		LoadedSkills:                        view.LoadedSkills,
 		RecentMessages:                      recent,
 		LastCompression:                     view.LastCompression,
-		RunTurnPhase:                        turn.RunTurnPhase(view.TurnState),
 	}
 	if queryBoolParam(r, "full_messages") {
 		msgs := buildContextMessagePreviews(view.Messages, contextMessagePreviewRunes)
@@ -329,7 +321,6 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 type sessionHydrateResponse struct {
 	AgentID         string                    `json:"agent_id"`
 	TurnState       session.TurnStateView     `json:"turn_state"`
-	RunTurnPhase    string                    `json:"run_turn_phase"`
 	HasActiveTurn   bool                      `json:"has_active_turn"`
 	QueuePending    int                       `json:"queue_pending"`
 	Transcript      []session.TranscriptEntry `json:"transcript"`
@@ -364,16 +355,14 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 	if transcript == nil {
 		transcript = []session.TranscriptEntry{}
 	}
-	toolJobs := map[string]int{"running": 0, "background": 0}
+	toolJobs := map[string]int{"running": 0}
 	if reg := s.sessions.SessionTools(sessionID); reg != nil {
 		c := reg.SessionToolJobCounts(sessionID)
 		toolJobs["running"] = c.Running
-		toolJobs["background"] = c.Background
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
 		AgentID:         view.SessionID,
 		TurnState:       view.TurnState,
-		RunTurnPhase:    view.RunTurnPhase,
 		HasActiveTurn:   view.HasActiveTurn,
 		QueuePending:    view.QueuePending,
 		Transcript:      transcript,

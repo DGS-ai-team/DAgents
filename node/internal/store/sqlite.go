@@ -90,10 +90,6 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
 	if err != nil {
 		return err
 	}
-	// 兼容极早版本仅建了空表后缺列的情况。
-	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN loaded_skills_json TEXT NOT NULL DEFAULT '[]'`)
-	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN runtime_state_json TEXT NOT NULL DEFAULT '{}'`)
-	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN node_id TEXT NOT NULL DEFAULT ''`)
 	if err := s.initExecutionEventSchema(); err != nil {
 		return err
 	}
@@ -102,49 +98,6 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
 	}
 	if err := s.initChildRunSchema(); err != nil {
 		return err
-	}
-	return s.migrateLegacySessionsTable()
-}
-
-func (s *SQLiteStore) tableExists(name string) (bool, error) {
-	var n int
-	err := s.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
-}
-
-// migrateLegacySessionsTable 将旧表 sessions(session_id, agent_id=NodeID) 迁到 agent_runtimes。
-func (s *SQLiteStore) migrateLegacySessionsTable() error {
-	exists, err := s.tableExists("sessions")
-	if err != nil || !exists {
-		return err
-	}
-	// 旧库可能缺列；先补齐再拷贝。
-	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN loaded_skills_json TEXT NOT NULL DEFAULT '[]'`)
-	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN runtime_state_json TEXT NOT NULL DEFAULT '{}'`)
-	_, err = s.db.Exec(`
-INSERT OR IGNORE INTO agent_runtimes(
-  agent_id, node_id, messages_json, loaded_skills_json, runtime_state_json,
-  first_user_message, created_at, updated_at
-)
-SELECT
-  session_id,
-  COALESCE(agent_id, ''),
-  COALESCE(messages_json, '[]'),
-  COALESCE(loaded_skills_json, '[]'),
-  COALESCE(runtime_state_json, '{}'),
-  COALESCE(first_user_message, ''),
-  created_at,
-  updated_at
-FROM sessions
-`)
-	if err != nil {
-		return fmt.Errorf("migrate sessions→agent_runtimes: %w", err)
-	}
-	if _, err := s.db.Exec(`DROP TABLE sessions`); err != nil {
-		return fmt.Errorf("drop legacy sessions: %w", err)
 	}
 	return nil
 }

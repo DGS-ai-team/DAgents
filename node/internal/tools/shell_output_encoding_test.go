@@ -32,16 +32,14 @@ func TestDecodeShellOutputUTF8Passthrough(t *testing.T) {
 }
 
 func TestResolveShellOutputEncodingOverride(t *testing.T) {
-	if got := resolveShellOutputEncoding(shellCmd, "utf-8"); got != "utf-8" {
+	if got := resolveShellOutputEncoding("utf-8"); got != "utf-8" {
 		t.Fatalf("override = %q", got)
 	}
 }
 
 func TestResolveShellOutputEncodingDefaultsUTF8(t *testing.T) {
-	for _, st := range []shellType{shellCmd, shellBash, shellPowerShell} {
-		if got := resolveShellOutputEncoding(st, ""); got != "utf-8" {
-			t.Fatalf("%s default = %q, want utf-8", st, got)
-		}
+	if got := resolveShellOutputEncoding(""); got != "utf-8" {
+		t.Fatalf("default = %q, want utf-8", got)
 	}
 }
 

@@ -78,12 +78,16 @@ func TestAgentSessionDispatchUsesStableIdentityAndDeliveryAck(t *testing.T) {
 	base.Type = "agent.turn.start"
 	base.DeliverySeq = 8
 	base.Payload = map[string]any{
-		"workgroup_id": base.WorkgroupID,
-		"member_id":    fake.opened.MemberID,
-		"agent_id":     fake.opened.AgentID,
-		"session_id":   fake.opened.SessionID,
-		"assign_id":    "as_01h00000000000000000000001",
-		"user_message": "inspect the repository",
+		"workgroup_id":   base.WorkgroupID,
+		"member_id":      fake.opened.MemberID,
+		"agent_id":       fake.opened.AgentID,
+		"session_id":     fake.opened.SessionID,
+		"assign_id":      "as_01h00000000000000000000001",
+		"source":         "direct_member",
+		"parent_turn_id": "tr_01h00000000000000000000001",
+		"child_turn_id":  "tr_01h00000000000000000000002",
+		"attempt_id":     "at_01h00000000000000000000001",
+		"user_message":   "inspect the repository",
 	}
 	res, err = w.DispatchEnvelope(base)
 	if err != nil {
@@ -102,11 +106,13 @@ func TestAgentSessionDispatchUsesStableIdentityAndDeliveryAck(t *testing.T) {
 	base.Type = "agent.turn.cancel"
 	base.DeliverySeq = 9
 	base.Payload = map[string]any{
-		"workgroup_id": base.WorkgroupID,
-		"member_id":    fake.opened.MemberID,
-		"agent_id":     fake.opened.AgentID,
-		"session_id":   fake.opened.SessionID,
-		"assign_id":    "as_01h00000000000000000000001",
+		"workgroup_id":  base.WorkgroupID,
+		"member_id":     fake.opened.MemberID,
+		"agent_id":      fake.opened.AgentID,
+		"session_id":    fake.opened.SessionID,
+		"assign_id":     "as_01h00000000000000000000001",
+		"child_turn_id": "tr_01h00000000000000000000002",
+		"attempt_id":    "at_01h00000000000000000000001",
 	}
 	res, err = w.DispatchEnvelope(base)
 	if err != nil {

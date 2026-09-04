@@ -26,13 +26,11 @@ type Registry struct {
 	bashCompressStats      map[string]*OutputCompressStats
 	visionMu               sync.Mutex
 	readImageVision        map[string]*ReadImageVisionPayload
-	bgJobs                 *backgroundJobRegistry
 	syncShells             *syncShellTracker
 	shellProvider          ShellProvider
 	localTerminalProvider  TerminalProvider
 	linuxProvider          *LinuxShellProvider
 	linuxTransferManager   *LinuxTransferManager
-	legacyLinuxTools       bool
 	terminalConfigResolver TerminalConfigResolver
 	processEventSink       ProcessEventSink
 	terminalBroker         TerminalSessionBroker
@@ -43,6 +41,7 @@ type Registry struct {
 	multimodalEnabled      bool
 	browser                *browser.Manager
 	browserCompanionExists BrowserCompanionExistsFunc
+	browserLLMResolver     BrowserLLMResolver
 	browserTaskMu          sync.Mutex
 	browserTaskNotifier    BrowserTaskNotifier
 	browserTaskWatchers    map[string]struct{}
@@ -77,13 +76,6 @@ func (r *Registry) ResolveLocalTerminalCWD(raw string) (string, error) {
 	return r.resolveRunCWD(raw)
 }
 
-// WithBackgroundJobStore binds a persistent job store to a Registry. It is
-// intended for Node runtime construction; tests and embedded callers may omit
-// it to keep jobs in memory only.
-func (r *Registry) WithBackgroundJobStore(st *BackgroundJobStore) error {
-	return r.withBackgroundJobStore(st, "")
-}
-
 // WithShellProvider replaces the execution backend used by shell tools. It
 // is intentionally an internal seam for the current Local provider and
 // future SSH/container/exec-server providers; tool policy remains in the
@@ -102,9 +94,7 @@ func (r *Registry) WithShellProvider(provider ShellProvider) error {
 	return nil
 }
 
-// WithLinuxShellProvider enables Linux-channel terminal targets. Legacy
-// linux_exec/file-transfer definitions are only exposed when an old Agent
-// snapshot explicitly enables those names; new snapshots use terminal_*.
+// WithLinuxShellProvider enables Linux-channel terminal targets.
 func (r *Registry) WithLinuxShellProvider(provider *LinuxShellProvider) error {
 	if r == nil {
 		return fmt.Errorf("registry is nil")
@@ -138,51 +128,6 @@ func (r *Registry) SetTerminalConfigResolver(resolver TerminalConfigResolver) {
 		return
 	}
 	r.terminalConfigResolver = resolver
-}
-
-// resolveLinuxChannelID accepts the model-facing terminal config ID and the
-// legacy raw channel ID. New tools should pass the prefixed config ID returned
-// by terminal_config_list so the Agent binding is checked before execution.
-// Raw IDs remain accepted for compatibility, while the Linux provider still
-// performs its own live channel and binding checks immediately before use.
-func (r *Registry) resolveLinuxChannelID(ctx context.Context, requested string) (string, error) {
-	id := strings.TrimSpace(requested)
-	if id == "" {
-		return "", fmt.Errorf("config_id is required; call terminal_config_list first")
-	}
-	if !strings.HasPrefix(id, TerminalConfigLinuxPrefix) {
-		return id, nil
-	}
-	if r == nil || r.terminalConfigResolver == nil {
-		return "", fmt.Errorf("terminal config resolver is unavailable")
-	}
-	config, err := r.resolveTerminalConfig(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if config.TargetKind != executionTargetLinuxChannel {
-		return "", fmt.Errorf("terminal config %q is not a Linux channel config", id)
-	}
-	channelID := strings.TrimSpace(config.TargetID)
-	if channelID == "" {
-		return "", fmt.Errorf("terminal config %q has no Linux channel target", id)
-	}
-	return channelID, nil
-}
-
-func resolveLinuxToolID(configID, legacyChannelID string) (string, error) {
-	configID = strings.TrimSpace(configID)
-	legacyChannelID = strings.TrimSpace(legacyChannelID)
-	if configID != "" && legacyChannelID != "" && configID != legacyChannelID {
-		return "", fmt.Errorf("config_id and channel_id refer to different targets")
-	}
-	if configID != "" {
-		return configID, nil
-	}
-	if legacyChannelID != "" {
-		return legacyChannelID, nil
-	}
-	return "", fmt.Errorf("config_id is required; call terminal_config_list first")
 }
 
 func toolArgString(args map[string]any, key string) string {
@@ -267,24 +212,10 @@ func (r *Registry) PreflightTool(ctx context.Context, name string, args map[stri
 	}
 	name = strings.TrimSpace(name)
 	configID := toolArgString(args, "config_id")
-	legacyChannelID := toolArgString(args, "channel_id")
 	terminalID := toolArgString(args, "terminal_id")
 	requestedID := ""
 	command := ""
 	switch name {
-	case "linux_exec":
-		command = toolArgString(args, "command")
-		var err error
-		requestedID, err = resolveLinuxToolID(configID, legacyChannelID)
-		if err != nil || command == "" {
-			return ToolPreflightDecision{}, false
-		}
-	case "linux_file_upload", "linux_file_download":
-		var err error
-		requestedID, err = resolveLinuxToolID(configID, legacyChannelID)
-		if err != nil {
-			return ToolPreflightDecision{}, false
-		}
 	case "terminal_command", "terminal_upload", "terminal_download":
 		if terminalID == "" || r.terminalBroker == nil {
 			return ToolPreflightDecision{}, false
@@ -318,57 +249,15 @@ func (r *Registry) PreflightTool(ctx context.Context, name string, args map[stri
 	default:
 		return ToolPreflightDecision{}, false
 	}
-	channelID, err := r.resolveLinuxChannelID(ctx, requestedID)
-	if err != nil {
-		return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: err.Error()}, true
+	channelID := strings.TrimSpace(requestedID)
+	if channelID == "" {
+		return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: "Linux channel target is missing"}, true
 	}
 	action, reason, err := r.linuxProvider.Preflight(ctx, r.agentID, channelID, command)
 	if err != nil {
 		return ToolPreflightDecision{Action: policy.ActionDeny, ApprovalReason: err.Error()}, true
 	}
 	return ToolPreflightDecision{Action: action, ApprovalReason: reason}, true
-}
-
-// WithBackgroundJobStoreForSession restores only jobs belonging to one
-// agent/session runtime, preventing per-agent registries from leaking job
-// metadata across agents.
-func (r *Registry) WithBackgroundJobStoreForSession(st *BackgroundJobStore, sessionID string) error {
-	return r.withBackgroundJobStore(st, sessionID)
-}
-
-func (r *Registry) withBackgroundJobStore(st *BackgroundJobStore, sessionID string) error {
-	if r == nil {
-		return fmt.Errorf("registry is nil")
-	}
-	jobs, err := newBackgroundJobRegistryWithStore(st, sessionID)
-	if err != nil {
-		return err
-	}
-	// Rebinding can happen while an Agent runtime is being rebuilt. Preserve
-	// in-process jobs (and their cancellation handles) instead of replacing
-	// them with only the rows loaded from SQLite.
-	if current := r.bgJobs; current != nil {
-		current.mu.RLock()
-		for id, job := range current.jobs {
-			if job == nil {
-				continue
-			}
-			job.mu.Lock()
-			jobSessionID := strings.TrimSpace(job.sessionID)
-			job.mu.Unlock()
-			if sessionID != "" && jobSessionID != "" && jobSessionID != sessionID {
-				continue
-			}
-			if _, exists := jobs.jobs[id]; !exists {
-				jobs.jobs[id] = job
-				jobs.persist(job)
-			}
-		}
-		jobs.onDone = current.onDone
-		current.mu.RUnlock()
-	}
-	r.bgJobs = jobs
-	return nil
 }
 
 // NewRegistry 创建工具表；workspaceRoot 为空时用当前目录。
@@ -397,7 +286,6 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 		shellOutputEncoding:   shellEnc,
 		fileEncoding:          fileEnc,
 		bashCompress:          DefaultBashCompressConfig(),
-		bgJobs:                newBackgroundJobRegistry(),
 		syncShells:            newSyncShellTracker(),
 		shellProvider:         localProvider,
 		localTerminalProvider: localProvider,
@@ -457,10 +345,6 @@ func (r *Registry) Definitions() []ToolDef {
 	base = append(base, childAgentToolDefs()...)
 	if r.linuxProvider != nil {
 		base = append(base, terminalFileTransferToolDefs()...)
-		if r.legacyLinuxTools {
-			base = append(base, linuxExecToolDef()...)
-			base = append(base, linuxFileTransferToolDefs()...)
-		}
 	}
 	base = append(base, r.mcpToolDefs()...)
 	defs := r.filterToolDefs(base)
@@ -517,7 +401,6 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["glob_files"] = r.execGlobFiles
 	r.handlers["grep_file"] = r.execGrepFile
 	r.handlers["grep_files"] = r.execGrepFiles
-	r.handlers["search_file"] = r.execSearchFile
 	r.handlers["search_replace"] = r.execSearchReplace
 	r.handlers["bash_run"] = r.execBashRun
 	r.handlers["terminal_config_list"] = r.execTerminalConfigList
@@ -529,13 +412,8 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["terminal_command"] = r.execTerminalCommand
 	r.handlers["screen_capture"] = r.execScreenCapture
 	r.handlers["computer_use"] = r.execComputerUse
-	r.handlers["linux_exec"] = r.execLinuxExec
-	r.handlers["linux_file_upload"] = r.execLinuxFileUpload
-	r.handlers["linux_file_download"] = r.execLinuxFileDownload
 	r.handlers["terminal_upload"] = r.execTerminalUpload
 	r.handlers["terminal_download"] = r.execTerminalDownload
-	r.handlers["background_job_status"] = r.execBackgroundJobStatus
-	r.handlers["background_job_cancel"] = r.execBackgroundJobCancel
 	r.handlers["ask_user_information"] = func(context.Context, json.RawMessage) (string, error) {
 		return "", fmt.Errorf("ask_user_information must be handled by orchestrator")
 	}

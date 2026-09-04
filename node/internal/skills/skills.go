@@ -279,7 +279,12 @@ func (c *Catalog) NewTurnView() *Catalog {
 	if c == nil {
 		return nil
 	}
-	defs := c.listDefinitions()
+	// An explicit turn boundary must observe metadata edits even when the file
+	// system preserves the same mtime and byte size (which is common on Windows
+	// for rapid same-size replacements). The boundary is infrequent; a fresh
+	// metadata scan is preferable to freezing stale names/descriptions into the
+	// next Turn view.
+	defs := c.scanDefinitions()
 	statRevision := c.Revision()
 	bodyDigests := make(map[string]string, len(defs))
 	digestStarted := time.Now()

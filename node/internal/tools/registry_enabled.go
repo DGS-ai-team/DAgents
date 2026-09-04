@@ -23,14 +23,13 @@ func (r *Registry) MultimodalEnabled() bool {
 }
 
 // SetBuiltinEnabled 设置 LLM 可见/可执行的内置工具允许列表；names 为空表示全部启用。
-// 未列入的工具仍保留 handler（供子 Agent bypass 委托），但 Execute/StartBackground 会 soft reject。
+// 未列入的工具仍保留 handler（供子 Agent bypass 委托），但 Execute 会 soft reject。
 func (r *Registry) SetBuiltinEnabled(names []string) error {
 	if r == nil {
 		return nil
 	}
 	if len(names) == 0 {
 		r.enabledOnly = nil
-		r.legacyLinuxTools = false
 		return nil
 	}
 	set := make(map[string]struct{}, len(names))
@@ -49,16 +48,6 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 		return nil
 	}
 	r.enabledOnly = set
-	// Old Agent snapshots may still explicitly list the deprecated tools. Keep
-	// their model-visible definitions for one compatibility window, while a
-	// new snapshot using the terminal group receives only terminal_* tools.
-	r.legacyLinuxTools = false
-	for _, name := range []string{"linux_exec", "linux_file_upload", "linux_file_download"} {
-		if _, ok := set[name]; ok {
-			r.legacyLinuxTools = true
-			break
-		}
-	}
 	return nil
 }
 
@@ -83,7 +72,6 @@ func (r *Registry) SetBuiltinEnabledNone() {
 		return
 	}
 	r.enabledOnly = map[string]struct{}{}
-	r.legacyLinuxTools = false
 }
 
 // IsKnownBuiltinTool 判断是否为可配置的内置工具名。

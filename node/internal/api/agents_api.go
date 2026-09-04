@@ -12,38 +12,14 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
-	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// errRemoteAgentNotLocal 已删除：遗留 remote stub 在 ensure 时归档并按 agent_not_found 处理。
-
-func (s *Server) archiveRetiredRemoteStub(ctx context.Context, agentID string) {
-	id := strings.TrimSpace(agentID)
-	if s.agents == nil || id == "" {
-		return
-	}
-	_ = s.agents.SoftDelete(ctx, id)
-	if s.sessions != nil {
-		_, _ = s.sessions.Delete(id)
-	}
-}
-
 func (s *Server) writeAgentNotFound(w http.ResponseWriter, agentID string) {
 	writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在",
 		map[string]any{"agent_id": strings.TrimSpace(agentID)})
-}
-
-// retireRemoteStubIfNeeded 归档遗留 Placement remote 引用并写 404；返回 true 表示调用方应停止。
-func (s *Server) retireRemoteStubIfNeeded(ctx context.Context, w http.ResponseWriter, rec *store.AgentRecord) bool {
-	if rec == nil || store.NormalizeAgentOrigin(rec.Origin) != store.AgentOriginRemote {
-		return false
-	}
-	s.archiveRetiredRemoteStub(ctx, rec.AgentID)
-	s.writeAgentNotFound(w, rec.AgentID)
-	return true
 }
 
 func (s *Server) registerAgentRoutes() {
@@ -111,16 +87,16 @@ func defaultAgentCreationDefaults() map[string]any {
 			"description": "",
 		},
 		"llm": map[string]any{
-			"max_tool_loops": agentruntime.DefaultMaxToolLoops,
+			"max_steps": agentruntime.DefaultMaxSteps,
 		},
 		"tools": map[string]any{
 			"enabled_groups": []any{},
 		},
 		"skills": map[string]any{},
 		"prompt_context": map[string]any{
-			"soul_enabled":      true,
-			"custom_enabled":    true,
-			"long_term_enabled": true,
+			"soul_enabled":   true,
+			"custom_enabled": true,
+			"memory_enabled": true,
 		},
 	}
 }
@@ -129,38 +105,29 @@ type createAgentRequest struct {
 	// TemplateID 仅作溯源（可选）；配置由前端展开后通过 defaults 完整提交。
 	TemplateID  string         `json:"template_id"`
 	DisplayName string         `json:"display_name"`
-	Origin      string         `json:"origin"` // 仅允许 local（或缺省）；remote 拒绝
 	Defaults    map[string]any `json:"defaults"`
-	// Workspace is placement data, not an editable Agent setting. It is copied
-	// into the immutable config snapshot only during creation.
+	// Workspace is copied into the immutable config snapshot only during creation.
 	Workspace *agentruntime.WorkspaceConfig `json:"workspace"`
-	// Placement 旧 Placement 请求字段；非本机 home_node_id 一律拒绝。
-	Placement *struct {
-		HomeNodeID string `json:"home_node_id"`
-	} `json:"placement"`
 }
 
 type agentView struct {
 	AgentID        string                        `json:"agent_id"`
 	DisplayName    string                        `json:"display_name"`
 	TemplateID     string                        `json:"template_id"`
-	Origin         string                        `json:"origin"`
 	ConfigSnapshot json.RawMessage               `json:"config_snapshot,omitempty"`
 	Workspace      *agentruntime.WorkspaceConfig `json:"workspace,omitempty"`
-	Placement      json.RawMessage               `json:"placement,omitempty"`
 	Host           json.RawMessage               `json:"host,omitempty"`
 	CreatedAt      string                        `json:"created_at"`
 	UpdatedAt      string                        `json:"updated_at"`
 	LastActiveAt   string                        `json:"last_active_at,omitempty"`
 	// 以下字段供托盘 / 通知同步（agent_id 与内部 session 1:1）。
-	Active           bool   `json:"active,omitempty"`
-	HasActiveTurn    bool   `json:"has_active_turn,omitempty"`
-	RunTurnPhase     string `json:"run_turn_phase,omitempty"`
-	NotifySeq        int    `json:"notify_seq,omitempty"`
-	AckSeq           int    `json:"ack_seq,omitempty"`
-	HasUnread        bool   `json:"has_unread,omitempty"`
-	HasPendingHITL   bool   `json:"has_pending_hitl,omitempty"`
-	PendingHITLItems int    `json:"pending_hitl_items,omitempty"`
+	Active           bool `json:"active,omitempty"`
+	HasActiveTurn    bool `json:"has_active_turn,omitempty"`
+	NotifySeq        int  `json:"notify_seq,omitempty"`
+	AckSeq           int  `json:"ack_seq,omitempty"`
+	HasUnread        bool `json:"has_unread,omitempty"`
+	HasPendingHITL   bool `json:"has_pending_hitl,omitempty"`
+	PendingHITLItems int  `json:"pending_hitl_items,omitempty"`
 }
 
 func agentViewFromRecord(rec store.AgentRecord) agentView {
@@ -168,20 +135,13 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		AgentID:        rec.AgentID,
 		DisplayName:    rec.DisplayName,
 		TemplateID:     rec.TemplateID,
-		Origin:         store.NormalizeAgentOrigin(rec.Origin),
 		ConfigSnapshot: rec.ConfigSnapshot,
 		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err == nil {
 		workspace := snap.Workspace
-		if strings.TrimSpace(workspace.Mode) == "" {
-			workspace.Mode = agentruntime.WorkspaceModeLegacyShared
-		}
 		v.Workspace = &workspace
-	}
-	if len(rec.PlacementJSON) > 0 && string(rec.PlacementJSON) != "{}" {
-		v.Placement = rec.PlacementJSON
 	}
 	if len(rec.HostJSON) > 0 && string(rec.HostJSON) != "{}" {
 		v.Host = rec.HostJSON
@@ -197,23 +157,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	var req createAgentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
-		return
-	}
-
-	homeNodeID := ""
-	if req.Placement != nil {
-		homeNodeID = strings.TrimSpace(req.Placement.HomeNodeID)
-	}
-	if homeNodeID != "" && homeNodeID != s.cfgNodeID() {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request",
-			"跨机器协作请使用工作组",
-			map[string]any{"home_node_id": homeNodeID})
-		return
-	}
-	if store.NormalizeAgentOrigin(req.Origin) == store.AgentOriginRemote {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request",
-			"跨机器协作请使用工作组",
-			map[string]any{"origin": store.AgentOriginRemote})
 		return
 	}
 
@@ -293,9 +236,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		AgentID:        agentID,
 		DisplayName:    name,
 		TemplateID:     tplID,
-		Origin:         store.NormalizeAgentOrigin(req.Origin),
-		SandboxEnabled: false,
-		SandboxBackend: "process",
 		ConfigSnapshot: snapRaw,
 		HostJSON:       encodeJSONRaw(localHostPayload()),
 		CreatedAt:      now,
@@ -305,10 +245,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
 	}
-	if _, err := s.agents.EnsureAgentPolicy(r.Context(), agentID, s.runtimeDir()); err != nil {
-		s.logger.Warn("agent policy seed failed", "agent_id", agentID, "error", err)
+	if _, err := s.agents.EnsureAgentPolicy(r.Context(), agentID); err != nil {
+		s.logger.Warn("agent policy initialization failed", "agent_id", agentID, "error", err)
 	}
-	if _, err := s.agents.EnsureAgentPromptContext(r.Context(), agentID, s.runtimeDir()); err != nil {
+	if _, err := s.agents.EnsureAgentPromptContext(r.Context(), agentID); err != nil {
 		s.logger.Warn("agent prompt context seed failed", "agent_id", agentID, "error", err)
 	} else if soulMD != "" || customMD != "" {
 		if err := s.applyPromptContextBodies(r.Context(), agentID, soulMD, customMD); err != nil {
@@ -344,17 +284,6 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	views := make([]agentView, 0, len(list))
 	lastActiveAt := s.loadAgentLastActiveAt(r.Context())
 	for _, rec := range list {
-		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-			// D5 Cut6：列表时归档遗留 remote stub（不依赖 Manage Control DELETE）。
-			if err := s.agents.SoftDelete(r.Context(), rec.AgentID); err != nil {
-				if s.logger != nil {
-					s.logger.Warn("remote stub soft-delete failed", "agent_id", rec.AgentID, "error", err)
-				}
-			} else if s.sessions != nil {
-				_, _ = s.sessions.Delete(rec.AgentID)
-			}
-			continue
-		}
 		if isHiddenCompanionAgent(rec) {
 			continue
 		}
@@ -388,9 +317,6 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if rec == nil || rec.Archived {
 		s.writeAgentNotFound(w, id)
-		return
-	}
-	if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 		return
 	}
 	view := s.enrichAgentNotify(agentViewFromRecord(*rec))
@@ -437,19 +363,15 @@ func (s *Server) enrichAgentNotify(v agentView) agentView {
 	v.PendingHITLItems = notify.PendingHITLItems
 	if s.sessions.Get(v.AgentID) != nil {
 		v.Active = true
-		_, hasActiveTurn, turnState, _ := s.sessions.RuntimeInfo(v.AgentID)
+		_, hasActiveTurn, _, _ := s.sessions.RuntimeInfo(v.AgentID)
 		v.HasActiveTurn = hasActiveTurn
-		v.RunTurnPhase = turn.RunTurnPhase(turnState)
-	} else if notify.HasPendingHITL {
-		v.RunTurnPhase = "waiting_hitl"
 	}
 	return v
 }
 
 type patchAgentRequest struct {
 	DisplayName *string                       `json:"display_name"`
-	LLMActive   *string                       `json:"llm_active"` // 兼容快捷字段；等价于 defaults.llm.active
-	Defaults    map[string]any                `json:"defaults"`   // 深合并进快照
+	Defaults    map[string]any                `json:"defaults"` // 深合并进快照
 	Workspace   *agentruntime.WorkspaceConfig `json:"workspace"`
 }
 
@@ -468,9 +390,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		s.writeAgentNotFound(w, id)
 		return
 	}
-	if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
-		return
-	}
 	var req patchAgentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
@@ -480,7 +399,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "workspace_immutable", "workspace cannot be changed after Agent creation", nil)
 		return
 	}
-	if req.DisplayName == nil && req.LLMActive == nil && req.Defaults == nil {
+	if req.DisplayName == nil && req.Defaults == nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "no patch fields", nil)
 		return
 	}
@@ -508,27 +427,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
 		runtimeDirty = true
 	}
-	if req.LLMActive != nil {
-		active := strings.TrimSpace(*req.LLMActive)
-		if active == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_patch", "llm_active cannot be empty", nil)
-			return
-		}
-		if s.cfg != nil {
-			if _, ok := s.cfg.LLM.GetProfile(active); !ok {
-				writeAPIError(w, http.StatusBadRequest, "invalid_patch", fmt.Sprintf("llm profile %q not found", active), nil)
-				return
-			}
-		}
-		llmMap, _ := snap.Defaults["llm"].(map[string]any)
-		if llmMap == nil {
-			llmMap = map[string]any{}
-		}
-		llmMap["active"] = active
-		snap.Defaults["llm"] = llmMap
-		runtimeDirty = true
-	}
-
 	if runtimeDirty {
 		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults, snap.Workspace)
 		if err != nil {
@@ -536,8 +434,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rec.ConfigSnapshot = raw
-		rec.SandboxEnabled = false
-		rec.SandboxBackend = "process"
 	}
 	rec.UpdatedAt = time.Now().UTC()
 	if err := s.agents.Save(r.Context(), *rec); err != nil {
@@ -639,16 +535,7 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 	if rec == nil || rec.Archived {
 		return fmt.Errorf("agent_not_found")
 	}
-	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-		s.archiveRetiredRemoteStub(ctx, id)
-		return fmt.Errorf("agent_not_found")
-	}
 	rev := rec.RuntimeRevision
-	if rev <= 0 {
-		// Old databases are migrated with a default revision. Keep this fallback
-		// for stores created by older test fixtures that do not expose it yet.
-		rev = 1
-	}
 	if !forceReload && s.hasRuntimeReloadPending(id) {
 		if s.sessions.Get(id) != nil {
 			if _, active, state, _ := s.sessions.RuntimeInfo(id); active {
@@ -664,23 +551,12 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 	}
 	if !forceReload && s.sessions.Get(id) != nil {
 		if s.sessions.RuntimeRevision(id) == rev {
-			// Runtime 已经加载并不代表进程级 LLM 仍然属于当前 Agent：
-			// 切换 Agent 后，另一个 Agent 的配置可能已经切换了全局 active
-			// profile。即使 runtime revision 没变，也必须重新应用当前绑定。
-			if err := s.applyAgentLLMProfile(*rec); err != nil {
+			_, desiredDigest, err := s.llmClientForAgent(ctx, rec, id)
+			if err != nil {
 				return err
 			}
-			// The runtime revision covers persisted Agent settings, but the
-			// process-level LLM profile can change when another Agent is
-			// focused. Rebuild when that switch also changes the effective
-			// multimodal setting selected for this Agent.
-			snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
-			if err != nil {
-				return fmt.Errorf("parse agent snapshot: %w", err)
-			}
-			desiredMultimodal := agentruntime.EffectiveMultimodalEnabled(s.cfg, snapParsed)
-			if currentMultimodal, ok := s.sessions.RuntimeMultimodalEnabled(id); ok && currentMultimodal != desiredMultimodal {
-				_, err := s.reloadAgentRuntimeIfIdle(ctx, *rec, "llm_profile_multimodal")
+			if currentDigest := s.sessions.RuntimeLLMProfileDigest(id); currentDigest != desiredDigest {
+				_, err := s.reloadAgentRuntimeIfIdle(ctx, *rec, "llm_profile")
 				return err
 			}
 			return nil
@@ -709,21 +585,21 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err != nil {
 		return fmt.Errorf("parse agent snapshot: %w", err)
 	}
-	// 装入/聚焦 Agent 时应用其绑定的 LLM 档案（进程级共享 LLM 的过渡方案）。
-	if err := s.applyAgentLLMProfile(rec); err != nil {
-		s.logger.Warn("apply agent-bound llm failed", "agent_id", id, "error", err)
-	}
 	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), id, snapParsed.Workspace); err != nil {
 		return fmt.Errorf("ensure agent workspace: %w", err)
 	}
 	var policyEngine *policy.Engine
 	if s.agents != nil {
-		engine, err := s.agents.LoadAgentPolicyEngine(ctx, id, s.runtimeDir())
+		engine, err := s.agents.LoadAgentPolicyEngine(ctx, id)
 		if err != nil {
 			s.logger.Warn("agent policy load failed", "agent_id", id, "error", err)
 		} else {
 			policyEngine = engine
 		}
+	}
+	client, llmProfileDigest, err := s.llmClientForAgent(ctx, &rec, id)
+	if err != nil {
+		return fmt.Errorf("resolve agent llm: %w", err)
 	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
 		NodeCFG:  s.cfg,
@@ -737,31 +613,16 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	}
 	s.attachNodeRuntimeDeps(built.Registry, id)
 	rev := rec.RuntimeRevision
-	if rev <= 0 {
-		rev = 1
-	}
-	built.TurnOptions.ConfigRevision = rev // compatibility for older observers
 	built.TurnOptions.RuntimeRevision = rev
+	built.TurnOptions.LLMProfileDigest = llmProfileDigest
 	if s.cfg != nil {
 		built.TurnOptions.PreferredName = s.cfg.PreferredName()
 	}
 	if s.agents != nil {
-		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id, s.runtimeDir()); err != nil {
+		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id); err != nil {
 			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)
 		} else {
 			built.TurnOptions.PromptContent = promptContentFromRecord(pc)
-			scope := agentruntime.LongTermScopeFromDefaults(snapParsed)
-			built.TurnOptions.LongTermStore = &agentLongTermStore{
-				agents:     s.agents,
-				agentID:    id,
-				runtimeDir: s.runtimeDir(),
-				scope:      scope,
-			}
-		}
-	}
-	if service, ok := built.TurnOptions.MemoryService.(*memory.LocalService); ok && s.agents != nil {
-		if err := migrateLegacyMemory(ctx, s.agents, s.runtimeDir(), id, service); err != nil {
-			s.logger.Warn("legacy memory migration failed", "agent_id", id, "error", err)
 		}
 	}
 	// Runtime digest is an identity of the built model-visible inputs. The
@@ -781,7 +642,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	// Build and hydrate the replacement before swapping the manager entry. A
 	// failed load/start therefore leaves the previous good runtime serving
 	// requests instead of creating a release-then-create gap.
-	if _, _, err := s.sessions.ReplaceWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
+	if _, _, err := s.sessions.ReplaceWithOptionsAndLLM(id, built.TurnOptions, built.Registry, policyEngine, client, id); err != nil {
 		_ = built.Close()
 		return err
 	}
@@ -793,25 +654,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		}
 	}
 	return nil
-}
-
-// applyAgentLLMProfile keeps the process-level LLM selection aligned with the
-// Agent being focused. Runtime loading can be skipped when the Agent revision
-// is unchanged, but the active profile is still shared by the process and may
-// have been changed while another Agent was selected.
-func (s *Server) applyAgentLLMProfile(rec store.AgentRecord) error {
-	if s == nil || s.cfg == nil {
-		return nil
-	}
-	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
-	if err != nil {
-		return fmt.Errorf("parse agent snapshot: %w", err)
-	}
-	active := agentruntime.LLMActiveFromDefaults(snapParsed)
-	if active == "" || active == s.cfg.LLM.ActiveProfileID() {
-		return nil
-	}
-	return s.switchActiveLLMProfile(active)
 }
 
 func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {

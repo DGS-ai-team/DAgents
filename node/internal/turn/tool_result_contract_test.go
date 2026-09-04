@@ -10,14 +10,14 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-func TestPublishToolResultUsesAuthoritativeStatusAndPreservesLegacyFields(t *testing.T) {
+func TestPublishToolResultUsesAuthoritativeStatusWithoutDuplicateFields(t *testing.T) {
 	hub := stream.NewHub(8, logx.Discard())
-	o := NewOrchestrator("agent-1", t.TempDir(), hub, &llm.MockClient{}, nil, nil, SkillAccess{}, 4, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	o := NewOrchestrator("agent-1", t.TempDir(), hub, &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	ch := hub.Subscribe(hub.CurrentSeq())
 	defer hub.Unsubscribe(ch)
 
 	o.publishToolResult("session-1", llm.ToolCall{
-		ID: "call-1", Type: "function", Function: llm.ToolCallFunction{Name: "linux_exec"},
+		ID: "call-1", Type: "function", Function: llm.ToolCallFunction{Name: "terminal_command"},
 	}, "ERROR: connection refused", true, nil)
 
 	select {
@@ -28,8 +28,8 @@ func TestPublishToolResultUsesAuthoritativeStatusAndPreservesLegacyFields(t *tes
 		if event.Data["status"] != "failed" {
 			t.Fatalf("status=%v data=%+v", event.Data["status"], event.Data)
 		}
-		if event.Data["rejected"] != false {
-			t.Fatalf("execution failure must not be policy rejection: %+v", event.Data)
+		if _, ok := event.Data["rejected"]; ok {
+			t.Fatalf("tool result must not expose duplicate rejected field: %+v", event.Data)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for tool_result")
@@ -39,7 +39,7 @@ func TestPublishToolResultUsesAuthoritativeStatusAndPreservesLegacyFields(t *tes
 
 func TestPublishToolResultUsesAsyncStatusWhenPreviewIsCleaned(t *testing.T) {
 	hub := stream.NewHub(8, logx.Discard())
-	o := NewOrchestrator("agent-1", t.TempDir(), hub, &llm.MockClient{}, nil, nil, SkillAccess{}, 4, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	o := NewOrchestrator("agent-1", t.TempDir(), hub, &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	ch := hub.Subscribe(hub.CurrentSeq())
 	defer hub.Unsubscribe(ch)
 

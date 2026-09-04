@@ -49,9 +49,6 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
-			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
-				return
-			}
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})
 				return
@@ -89,8 +86,12 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 type cancelTurnResponse struct {
-	AgentID   string `json:"agent_id"`
-	Cancelled bool   `json:"cancelled"`
+	AgentID    string `json:"agent_id"`
+	Scope      string `json:"scope"`
+	Cancelled  bool   `json:"cancelled"`
+	TurnID     string `json:"turn_id,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
+	Terminal   bool   `json:"terminal"`
 }
 
 func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
@@ -103,10 +104,14 @@ func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		return
 	}
-	cancelled := s.sessions.CancelTurn(sessionID)
+	result := s.sessions.CancelTurnWithResult(sessionID)
 	writeJSON(w, http.StatusOK, cancelTurnResponse{
-		AgentID:   sessionID,
-		Cancelled: cancelled,
+		AgentID:    sessionID,
+		Scope:      "turn",
+		Cancelled:  result.Cancelled,
+		TurnID:     result.TurnID,
+		Generation: result.Generation,
+		Terminal:   result.Terminal,
 	})
 }
 
@@ -121,13 +126,6 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentFilter := strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	if agentFilter != "" && s.agents != nil {
-		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
-			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
-				return
-			}
-		}
-	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	lastAgentSeq := parseLastEventID(r.URL.Query().Get("after_agent_seq"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"

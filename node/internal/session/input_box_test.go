@@ -1,11 +1,15 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
+	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
 func TestInputBoxRejectsInvalidAndOversizedInputs(t *testing.T) {
@@ -143,5 +147,34 @@ func TestInputBoxRequeueInFlightPreservesFIFO(t *testing.T) {
 	got, ok = box.Pop()
 	if !ok || got.Seq != second {
 		t.Fatalf("second input = %+v, ok=%v", got, ok)
+	}
+}
+
+func TestActiveTurnDefersPoppedInputWithoutDroppingIt(t *testing.T) {
+	hub := stream.NewHub(8, logx.Discard())
+	rt := newRuntimeWithPublisher(
+		"session-input-race", "agent-1", hub, hub, &llm.MockClient{}, nil, nil, nil,
+		logx.Discard(), nil, nil, nil, false, 0, 0, TurnOptions{}, nil,
+	)
+	if err := rt.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	seq, err := rt.inputBox.Append(InputKindUser, queue.Envelope{Content: "keep me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, ok := rt.inputBox.Pop()
+	if !ok || record.Seq != seq {
+		t.Fatalf("popped input = %+v, ok=%v", record, ok)
+	}
+
+	if consumed := rt.dispatchInput(context.Background(), record); consumed {
+		t.Fatal("active Turn consumed an input instead of deferring it")
+	}
+	if _, inFlight := rt.inputBox.InFlight(); inFlight {
+		t.Fatal("deferred input remained in-flight")
+	}
+	if got, ok := rt.inputBox.Peek(); !ok || got.Seq != seq || got.Env.Content != "keep me" {
+		t.Fatalf("deferred input = %+v, ok=%v", got, ok)
 	}
 }

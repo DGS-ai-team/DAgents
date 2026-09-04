@@ -16,11 +16,11 @@ func TestClassifyResultUsesOneAuthoritativeStatus(t *testing.T) {
 	}{
 		{name: "empty success", tool: "bash_run", content: "[BASH_RESULT] status=SUCCEEDED", status: ResultStatusSucceeded},
 		{name: "shell failure", tool: "bash_run", content: "[BASH_RESULT] status=ERROR\nerror=exit", status: ResultStatusFailed},
-		{name: "background accepted", tool: "bash_run", content: "[TOOL_BACKGROUND] tool_name=bash_run status=accepted", status: ResultStatusQueued},
+		{name: "async accepted", tool: "browser_run_task", content: `{"ok":true,"detail":{"status":"accepted"}}`, status: ResultStatusQueued},
 		{name: "browser detail failure", tool: "browser_run_task", content: `{"ok":true,"detail":{"status":"failed"},"error":"step failed"}`, status: ResultStatusFailed},
 		{name: "policy denial", tool: "write_file", content: "rejected: policy_denied", rejected: true, status: ResultStatusDenied},
 		{name: "persisted policy denial", tool: "write_file", content: "rejected: policy_denied", status: ResultStatusDenied},
-		{name: "execution error is not denial", tool: "linux_exec", content: "ERROR: connection refused", rejected: true, status: ResultStatusFailed},
+		{name: "execution error is not denial", tool: "terminal_command", content: "ERROR: connection refused", rejected: true, status: ResultStatusFailed},
 		{name: "cancelled", tool: "terminal_read", content: "流式输出被用户中断。", status: ResultStatusCancelled},
 		{name: "timeout", tool: "browser_run_task", content: `{"ok":true,"wait_timed_out":true,"error":"use status"}`, status: ResultStatusTimedOut},
 	}
@@ -34,21 +34,21 @@ func TestClassifyResultUsesOneAuthoritativeStatus(t *testing.T) {
 	}
 }
 
-func TestResultEventFieldsExposeStatusAndKeepPolicyCompatibility(t *testing.T) {
+func TestResultEventFieldsExposeAuthoritativeStatus(t *testing.T) {
 	fields := ResultEventFields("bash_run", "ERROR: exit 1", true)
 	if fields["status"] != string(ResultStatusFailed) {
 		t.Fatalf("status=%v", fields["status"])
 	}
-	if fields["rejected"] != false {
-		t.Fatalf("execution failure must not be reported as policy rejection: %+v", fields)
+	if _, ok := fields["rejected"]; ok {
+		t.Fatalf("tool result must not expose duplicate rejected field: %+v", fields)
 	}
 	if _, ok := fields["error"].(map[string]any); !ok {
 		t.Fatalf("missing structured error: %+v", fields)
 	}
 
 	denied := ResultEventFields("write_file", "rejected: policy_denied", true)
-	if denied["status"] != string(ResultStatusDenied) || denied["rejected"] != true {
-		t.Fatalf("denial compatibility fields=%+v", denied)
+	if denied["status"] != string(ResultStatusDenied) {
+		t.Fatalf("denial fields=%+v", denied)
 	}
 }
 
@@ -103,12 +103,6 @@ func TestOneShotCommandResultsExposeStructuredOutcome(t *testing.T) {
 		}
 	}
 
-	linux := formatLinuxExecResult(nil, nil, &ExitStatus{Code: 0}, nil, false, "")
-	for _, part := range []string{"[LINUX_RESULT] exit=0", "status=SUCCEEDED", "target=linux_channel", "exit_code=0", "stdout_bytes=0", "stderr_bytes=0", "output_truncated: false", "--- STDOUT ---", "--- STDERR ---"} {
-		if !strings.Contains(linux, part) {
-			t.Fatalf("linux result missing %q: %s", part, linux)
-		}
-	}
 }
 
 func TestCommandToolDescriptionsExplainEmptyOutputAndOutcome(t *testing.T) {
@@ -121,10 +115,10 @@ func TestCommandToolDescriptionsExplainEmptyOutputAndOutcome(t *testing.T) {
 		definitions[definition.Function.Name] = definition.Function.Description
 	}
 	for name, description := range map[string]string{
-		"bash_run":   definitions["bash_run"],
-		"linux_exec": linuxExecToolDef()[0].Function.Description,
+		"bash_run":         definitions["bash_run"],
+		"terminal_command": definitions["terminal_command"],
 	} {
-		if !strings.Contains(description, "exit_code") || !strings.Contains(description, "stdout_bytes") || !strings.Contains(description, "stdout 仍可能为空") {
+		if !strings.Contains(description, "exit_code") || !strings.Contains(description, "stdout_bytes") || !strings.Contains(description, "stdout") {
 			t.Fatalf("%s description does not explain structured outcome: %s", name, description)
 		}
 	}

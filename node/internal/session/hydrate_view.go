@@ -15,7 +15,6 @@ type HydrateView struct {
 	Transcript      []TranscriptEntry
 	PendingHITL     map[string]any
 	TurnState       TurnStateView
-	RunTurnPhase    string
 	HasActiveTurn   bool
 	QueuePending    int
 	HistoryRevision uint64
@@ -42,13 +41,12 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		}
 		notifySeq := rt.notifySeq
 		ackSeq := rt.ackSeq
-		state := rt.turnState()
 		pending := rt.pendingSnapshot()
 		lifecycle := rt.turnCoordinator.Snapshot()
 		hasActiveTurn := lifecycle.HasActiveTurn
 		rt.mu.Unlock()
 		rt.lifecycleMu.Unlock()
-		view := m.buildHydrateView(sessionID, messages, pending, state, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq)
+		view := m.buildHydrateView(sessionID, messages, pending, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq)
 		view.ChildAgents, _ = m.ListChildAgents(sessionID)
 		return view, nil
 	}
@@ -62,21 +60,17 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	if rec == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
-	pending := rec.RuntimeState.Pending
-	hasActiveTurn := pending != nil
-	state := turn.StateIdle
+	pending := (*turn.PendingHITL)(nil)
+	hasActiveTurn := false
 	lifecycle, projected, lifecycleSeq, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
 	} else if projected {
-		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
+		pending = pendingFromLifecycleSnapshot(lifecycle)
 		hasActiveTurn = lifecycle.HasActiveTurn
-		state = turnStateFromCoordinatorSnapshot(lifecycle)
-	} else if pending != nil {
-		state = turn.StateAwaitingTool
 	}
 	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
-	view := m.buildHydrateView(sessionID, rec.Messages, pending, state, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
+	view := m.buildHydrateView(sessionID, rec.Messages, pending, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
 	view.ChildAgents, _ = m.ListChildAgents(sessionID)
 	return view, nil
 }
@@ -85,7 +79,6 @@ func (m *Manager) buildHydrateView(
 	sessionID string,
 	messages []llm.Message,
 	pending *turn.PendingHITL,
-	state turn.State,
 	lifecycle turn.CoordinatorSnapshot,
 	lifecycleSeq uint64,
 	historyRevision uint64,
@@ -105,21 +98,11 @@ func (m *Manager) buildHydrateView(
 	}
 	turnState := buildTurnStateView(lifecycle, lifecycleSeq)
 	turnState.HistoryRevision = historyRevision
-	if lifecycle.TurnID == "" && pending != nil {
-		turnState = TurnStateView{
-			Authority:       "hydrate_legacy",
-			Phase:           "tool_waiting",
-			Terminal:        false,
-			InteractionKind: "approval",
-		}
-	}
-	turnState.HistoryRevision = historyRevision
 	return &HydrateView{
 		SessionID:       sessionID,
 		Transcript:      transcript,
 		PendingHITL:     turn.BuildHITLRequiredSnapshot(pending),
 		TurnState:       turnState,
-		RunTurnPhase:    hydrateRunTurnPhase(messages, pending, state, hasActiveTurn),
 		HasActiveTurn:   hasActiveTurn,
 		QueuePending:    queuePending,
 		HistoryRevision: historyRevision,
@@ -128,14 +111,4 @@ func (m *Manager) buildHydrateView(
 		HasUnread:       notifySeq > ackSeq,
 		ChildAgents:     []ChildAgentView{},
 	}
-}
-
-func hydrateRunTurnPhase(messages []llm.Message, pending *turn.PendingHITL, state turn.State, hasActiveTurn bool) string {
-	if pending != nil {
-		return string(turn.TaskPhaseAwaitingHITL)
-	}
-	if hasActiveTurn && state != turn.StateIdle {
-		return turn.RunTurnPhase(state)
-	}
-	return string(turn.TaskPhaseOf(messages, pending))
 }

@@ -44,8 +44,6 @@ func (s *ModelContextSnapshot) observability() map[string]any {
 	}
 	return map[string]any{
 		"runtime_revision":             s.RuntimeRevision,
-		"runtime_generation":           s.RuntimeRevision,
-		"context_revision":             s.RuntimeRevision,
 		"runtime_digest":               s.RuntimeDigest,
 		"prompt_digest":                s.PromptDigest,
 		"tool_digest":                  s.ToolDigest,

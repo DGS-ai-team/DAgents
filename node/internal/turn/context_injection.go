@@ -18,7 +18,6 @@ type ContextInjection struct {
 	Position    string                `json:"position"`
 	MessageKind llm.MessageSourceKind `json:"message_kind,omitempty"`
 	MessageForm llm.MessageSourceForm `json:"message_form,omitempty"`
-	LegacyName  string                `json:"legacy_name,omitempty"`
 }
 
 const (
@@ -42,16 +41,13 @@ func (c ContextInjection) Message() llm.Message {
 	if form == "" {
 		form = llm.MessageFormSnapshot
 	}
-	legacyName := strings.TrimSpace(c.LegacyName)
-	if legacyName == "" {
-		legacyName = llm.UserNameContext
-		if kind == llm.MessageSourceMemory {
-			legacyName = llm.UserNameMemoryContext
-		}
+	name := llm.UserNameContext
+	if kind == llm.MessageSourceMemory {
+		name = llm.UserNameMemoryContext
 	}
 	source := llm.MessageSource{Kind: kind, Form: form}
 	provenance := &llm.MessageProvenance{Producer: c.Source, Operation: c.Name}
-	return llm.UserMessageWithSource(c.Content, legacyName, source, provenance)
+	return llm.UserMessageWithSource(c.Content, name, source, provenance)
 }
 
 func cloneContextInjections(in []ContextInjection) []ContextInjection {
@@ -98,7 +94,6 @@ func BuildContextInjections(in SystemPromptInput) []ContextInjection {
 		Position:    contextInjectionPosition,
 		MessageKind: llm.MessageSourceRuntime,
 		MessageForm: llm.MessageFormSnapshot,
-		LegacyName:  llm.UserNameContext,
 	}}
 }
 
@@ -128,7 +123,6 @@ func BuildChildContextInjections(in ChildSystemPromptInput) []ContextInjection {
 		Position:    contextInjectionPosition,
 		MessageKind: llm.MessageSourceRuntime,
 		MessageForm: llm.MessageFormSnapshot,
-		LegacyName:  llm.UserNameContext,
 	}}
 }
 
@@ -190,24 +184,6 @@ func ApplyContextInjections(history []llm.Message, injections []ContextInjection
 	return out
 }
 
-// StripLegacyTodayDateMessages removes only pre-migration date messages from
-// a request copy. The durable history passed by the caller is left unchanged;
-// this keeps old transcripts auditable while preventing stale dates from
-// consuming model context or entering compression sidecar requests.
-func StripLegacyTodayDateMessages(history []llm.Message) []llm.Message {
-	if len(history) == 0 {
-		return nil
-	}
-	out := make([]llm.Message, 0, len(history))
-	for _, message := range history {
-		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormNotice, llm.UserNameDate) {
-			continue
-		}
-		out = append(out, message)
-	}
-	return out
-}
-
 // StripContextInjections removes request-only context messages from a hook
 // result before it is committed back to durable history. Hooks observe the
 // complete request copy, but generated context remains owned by the snapshot.
@@ -244,7 +220,7 @@ func isContextRootUser(message llm.Message) bool {
 	}
 	source := llm.EffectiveMessageSource(message)
 	switch source.Kind {
-	case llm.MessageSourceUser, llm.MessageSourceTrigger, llm.MessageSourceA2A, llm.MessageSourceChildAgent:
+	case llm.MessageSourceUser, llm.MessageSourceTrigger, llm.MessageSourceChildAgent:
 		return true
 	default:
 		return false

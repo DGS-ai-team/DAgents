@@ -170,13 +170,6 @@ func TestResolveAllowedToolsDefault(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsRemovedWaitParameter(t *testing.T) {
-	_, err := parseCreateInput(`{"task":"do work","purpose":"demo","wait":false}`, Config{DefaultTTLSeconds: 60, MaxTTLSeconds: 300, DefaultMaxTurns: 1, MaxMaxTurns: 3})
-	if err == nil || !strings.Contains(err.Error(), "wait is no longer supported") {
-		t.Fatalf("parse wait = %v", err)
-	}
-}
-
 func TestSetRunRepositoryMarksOrphanedRunsInterrupted(t *testing.T) {
 	repo := &memoryRunRepository{records: []RunRecord{{
 		ChildAgentID:  "child-restarted",

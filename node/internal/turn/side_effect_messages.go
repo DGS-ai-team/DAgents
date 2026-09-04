@@ -26,7 +26,6 @@ type SideEffectMessages struct {
 
 // SideEffectInsertSite Apply 插入点。
 type SideEffectInsertSite struct {
-	Ready    bool
 	InsertAt int
 	Mode     string
 	Continue bool
@@ -73,13 +72,12 @@ func shortHash(s string) string {
 }
 
 // ResolveSideEffectInsertSite 按 tail 解析单条插入点（kind 无关）。
-func ResolveSideEffectInsertSite(messages []llm.Message, built SideEffectMessages) SideEffectInsertSite {
+func ResolveSideEffectInsertSite(messages []llm.Message) SideEffectInsertSite {
 	if len(messages) == 0 {
-		return SideEffectInsertSite{Ready: true, InsertAt: 0, Mode: "empty_history_bridge", Continue: true}
+		return SideEffectInsertSite{InsertAt: 0, Mode: "empty_history_bridge", Continue: true}
 	}
-	_ = built
 	tail := classifyToolResultTail(messages)
-	site := SideEffectInsertSite{Ready: true, Continue: shouldContinueAfterSideEffectApply(tail)}
+	site := SideEffectInsertSite{Continue: shouldContinueAfterAsyncTool(tail)}
 	switch tail {
 	case tailTool:
 		site.InsertAt = len(messages)
@@ -107,10 +105,7 @@ func PlanSingleSideEffectApply(messages []llm.Message, built SideEffectMessages)
 			Mode:     "empty_history_bridge",
 		}
 	}
-	site := ResolveSideEffectInsertSite(messages, built)
-	if !site.Ready {
-		return SideEffectApplyPlan{}
-	}
+	site := ResolveSideEffectInsertSite(messages)
 	tail := classifyToolResultTail(messages)
 	msgs := selectSideEffectSegments(built, tail)
 	return SideEffectApplyPlan{
@@ -131,7 +126,7 @@ func selectSideEffectSegments(built SideEffectMessages, tail toolResultTailKind)
 
 // bridgeApplyUserMessage 桥接态 Apply：单条合成 user（合并原 user 提示与 tool 正文）。
 func bridgeApplyUserMessage(built SideEffectMessages) llm.Message {
-	message := llm.NormalizeMessageSource(built.UserMessage)
+	message := built.UserMessage
 	if strings.TrimSpace(message.Name) == "" {
 		message = llm.UserMessageWithSource(
 			message.Content,
@@ -162,7 +157,7 @@ func mergeBridgeUserContent(built SideEffectMessages) string {
 func isSideEffectBridgeUserMessage(message llm.Message) bool {
 	source := llm.EffectiveMessageSource(message)
 	switch source.Kind {
-	case llm.MessageSourceAsyncTool, llm.MessageSourceTrigger, llm.MessageSourceA2A, llm.MessageSourceChildAgent:
+	case llm.MessageSourceAsyncTool, llm.MessageSourceTrigger, llm.MessageSourceChildAgent:
 		return true
 	default:
 		return false
@@ -222,7 +217,7 @@ func BuildMergedCallbackBatch(entries []SideEffectBatchEntry, messages []llm.Mes
 	}
 	toolMsg := llm.ToolResultMessage(toolCallID, "get_callback", string(body))
 	out := SideEffectApplyPlan{
-		Continue: shouldContinueAfterSideEffectApply(tail),
+		Continue: shouldContinueAfterAsyncTool(tail),
 		Mode:     "merged_get_callback",
 	}
 	if tail == tailAssistantWithoutToolCalls {
@@ -260,12 +255,8 @@ func (o *Orchestrator) ApplySideEffectPlan(sessionID string, history *[]llm.Mess
 	}
 }
 
-func shouldContinueAfterSideEffectApply(tail toolResultTailKind) bool {
-	return shouldContinueAfterAsyncTool(tail)
-}
-
 func shouldContinueAfterSideEffectApplyMessages(messages []llm.Message) bool {
-	if shouldContinueAfterSideEffectApply(classifyToolResultTail(messages)) {
+	if shouldContinueAfterAsyncTool(classifyToolResultTail(messages)) {
 		return true
 	}
 	return isSideEffectBridgeUserTail(messages)

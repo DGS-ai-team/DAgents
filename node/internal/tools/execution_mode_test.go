@@ -33,8 +33,6 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		// computer_use accepts either the legacy single action or a bounded
 		// actions array, so neither branch is globally required at the top level.
 		"computer_use":           {CallPurposeKey},
-		"background_job_status":  {CallPurposeKey, "job_id"},
-		"background_job_cancel":  {CallPurposeKey, "job_id"},
 		"ask_user_information":   {CallPurposeKey, "question"},
 		"remember":               {CallPurposeKey, "information"},
 		"memory_search":          {CallPurposeKey, "query"},
@@ -78,11 +76,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 			t.Fatalf("tool %q: call_purpose should be first, got %v", name, req)
 		}
 
-		// run_in_background 已移出 schema，不得出现在 properties。
 		props, _ := params["properties"].(map[string]any)
-		if _, ok := props[RunInBackgroundKey]; ok {
-			t.Fatalf("tool %q: run_in_background must not appear in schema properties", name)
-		}
 
 		// required 中每项须在 properties 存在（顶层 object）。
 		for _, field := range req {
@@ -94,11 +88,8 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 }
 
 func TestParseToolCallArgumentsSearchReplaceShape(t *testing.T) {
-	raw := `{"call_purpose":"替换表头","path":"data/x.txt","old_string":"a","new_string":"b","run_in_background":false}`
-	bg, cleaned := ParseToolCallArguments(raw)
-	if bg {
-		t.Fatal("expected sync")
-	}
+	raw := `{"call_purpose":"替换表头","path":"data/x.txt","old_string":"a","new_string":"b"}`
+	cleaned := ParseToolCallArguments(raw)
 	var got map[string]string
 	if err := json.Unmarshal([]byte(cleaned), &got); err != nil {
 		t.Fatalf("cleaned json: %v", err)

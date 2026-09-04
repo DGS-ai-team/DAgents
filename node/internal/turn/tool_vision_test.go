@@ -27,8 +27,8 @@ func TestExecuteTool_readImageAppendsVisionUserMessage(t *testing.T) {
 	}
 	reg.SetMultimodalEnabled(true)
 	hub := stream.NewHub(8, logx.Discard())
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooksRuntimeConfig(t), logx.Discard())
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, nil, nil, hooksRuntimeConfig(t), logx.Discard())
 	orch.SetMultimodalEnabled(true)
 
 	history := []llm.Message{
@@ -71,8 +71,8 @@ func TestExecuteTool_readImageSkipsVisionWhenMultimodalDisabled(t *testing.T) {
 	}
 	reg.SetMultimodalEnabled(true)
 	hub := stream.NewHub(8, logx.Discard())
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooksRuntimeConfig(t), logx.Discard())
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, nil, nil, hooksRuntimeConfig(t), logx.Discard())
 
 	history := []llm.Message{
 		{Role: "user", Content: "describe chart"},

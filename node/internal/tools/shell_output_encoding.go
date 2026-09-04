@@ -12,11 +12,10 @@ import (
 // resolveShellOutputEncoding 决定子进程 stdout/stderr 的字节编码，解码为 UTF-8 后交给 LLM。
 //
 // 优先级：bash_run output_encoding > config.yaml tools.bash_output_encoding > 默认 utf-8。
-func resolveShellOutputEncoding(st shellType, configured string) string {
+func resolveShellOutputEncoding(configured string) string {
 	if enc := normalizeOutputEncoding(configured); enc != "" {
 		return enc
 	}
-	_ = st
 	return defaultOutputEnc
 }
 

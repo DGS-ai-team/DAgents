@@ -154,15 +154,6 @@ func (c *ControlClient) ListWorkgroupLLMConfigs(ctx context.Context, workgroupID
 	return out, nil
 }
 
-// GetMemberToolCatalog 拉取 Manage 侧成员工具目录（与仓库 JSON 同源；Node WebUI 优先用本地嵌入，不必经此调用）。
-func (c *ControlClient) GetMemberToolCatalog(ctx context.Context) (map[string]any, error) {
-	var out map[string]any
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/workgroups/meta/member-tools", nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // GetWorkgroupACL 读取 ACL。
 func (c *ControlClient) GetWorkgroupACL(ctx context.Context, workgroupID string) (map[string]any, error) {
 	var out map[string]any
@@ -358,7 +349,7 @@ func (c *ControlClient) ListRegisteredAgents(ctx context.Context) (jsonArray, er
 	}
 	agents := make(jsonArray, 0, len(out.Agents))
 	for _, item := range out.Agents {
-		// The registry also contains one compatibility record for the hosting
+		// The registry also contains one record for the hosting
 		// Node itself.  Workgroup AgentRef must expose only actual local Agent
 		// records; selecting the Node row would fail Node AgentStore.Get().
 		if strings.TrimSpace(payloadString(item["agent_id"])) == strings.TrimSpace(payloadString(item["node_id"])) {
@@ -399,16 +390,6 @@ func (c *ControlClient) PatchWorkgroupMember(ctx context.Context, workgroupID, m
 	var out map[string]any
 	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members/" + strings.TrimSpace(memberID)
 	if err := c.doJSON(ctx, http.MethodPatch, path, body, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// GetWorkgroupMemberSpec 读取成员 MemberSpec 快照。
-func (c *ControlClient) GetWorkgroupMemberSpec(ctx context.Context, workgroupID, memberID string) (map[string]any, error) {
-	var out map[string]any
-	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members/" + strings.TrimSpace(memberID) + "/spec"
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

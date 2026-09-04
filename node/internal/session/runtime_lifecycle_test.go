@@ -40,7 +40,38 @@ func TestRuntimePersistReportsStoreErrors(t *testing.T) {
 
 func setTestPendingHITL(t *testing.T, r *runtime, pending *turn.PendingHITL) {
 	t.Helper()
-	r.restoreLegacyPending(pending)
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range pending.Items {
+		if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+			Type: turn.CommandToolCallRecorded, SessionID: r.session.ID, TurnID: state.TurnID,
+			StepID: state.StepID, Generation: state.Generation, ToolCallID: item.ToolCall.ID,
+			ToolName: item.ToolCall.Function.Name, Arguments: []byte(item.ToolCall.Function.Arguments),
+			At: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state = r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandInteractionRequested, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, InteractionID: state.StepID + "-interaction",
+		InteractionKind: pendingInteractionKind(pending), Payload: payload, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if got := r.pendingSnapshot(); got == nil {
 		t.Fatalf("pending HITL projection was not installed: %#v", pending)
 	}
@@ -83,10 +114,36 @@ func TestRuntimeLifecycleBridgesToolContinuation(t *testing.T) {
 	}
 }
 
+func TestRestoreActiveToolCallMessageMovesAssistantAndResultsAsOneBatch(t *testing.T) {
+	r := newLifecycleTestRuntime()
+	call := llm.ToolCall{
+		ID:   "call-recover",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "bash_run",
+			Arguments: `{ "command": "echo recovered" }`,
+		},
+	}
+	r.messages = []llm.Message{
+		{Role: "assistant", ToolCalls: []llm.ToolCall{call}},
+		llm.ToolResultMessage(call.ID, call.Function.Name, "recovered"),
+		{Role: "user", Content: "continue"},
+	}
+
+	r.restoreActiveToolCallMessage([]llm.ToolCall{call})
+	if len(r.messages) != 3 || r.messages[0].Role != "user" || r.messages[1].Role != "assistant" || r.messages[2].Role != "tool" {
+		t.Fatalf("recovered history order = %#v", r.messages)
+	}
+	if err := llm.ValidateToolProtocol(r.messages); err != nil {
+		t.Fatalf("recovered history rejected: %v", err)
+	}
+}
+
 func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	r := newLifecycleTestRuntime()
 	r.hub = hub
+	r.publisher = hub
 	r.agentID = "agent-1"
 	r.queue = queue.NewMessageQueue()
 	events := hub.SubscribeAgent(0, "session-1")
@@ -212,18 +269,10 @@ func TestRuntimeLifecycleAfterResumePersistsRemainingHITL(t *testing.T) {
 	}
 }
 
-func TestPendingFromLifecycleSnapshotSkipsInternalSideEffectCallback(t *testing.T) {
+func TestPendingFromLifecycleSnapshotRequiresDurablePayload(t *testing.T) {
 	state := turn.CoordinatorSnapshot{StepStatus: turn.StepStatusWaitingInteraction}
-	history := []llm.Message{{
-		Role: "assistant",
-		ToolCalls: []llm.ToolCall{{
-			ID:       "async-job-1",
-			Function: llm.ToolCallFunction{Name: "tool_callback"},
-		}},
-	}}
-
-	if pending := pendingFromLifecycleSnapshot(state, history); pending != nil {
-		t.Fatalf("internal side-effect callback must not become pending HITL: %#v", pending)
+	if pending := pendingFromLifecycleSnapshot(state); pending != nil {
+		t.Fatalf("empty interaction payload must not become pending HITL: %#v", pending)
 	}
 }
 
@@ -311,15 +360,15 @@ func TestColdViewsPreferDurableLifecycleProjection(t *testing.T) {
 	history := []llm.Message{{Role: "assistant", ToolCalls: pending.AllToolCalls()}}
 	r.lifecycleAfterModelStep(turn.StepOutcome{Pending: pending}, history, 0)
 
-	// Deliberately make the deprecated mirror disagree with the event projection.
+	// Deliberately make the persisted message snapshot disagree with the
+	// lifecycle projection; recovery must use the lifecycle authority.
 	if err := st.Save(context.Background(), store.Record{
 		AgentID:  "session-1",
 		NodeID:   "agent-1",
 		Messages: history,
 		RuntimeState: store.RuntimeState{
-			ToolLoopCount: 99,
-			NotifySeq:     8,
-			AckSeq:        3,
+			NotifySeq: 8,
+			AckSeq:    3,
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -636,8 +685,8 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 		hub := stream.NewHub(16, logx.Discard())
 		return newRuntimeWithPublisher(
 			"session-1", "agent-1", hub, hub,
-			&llm.MockClient{}, nil, nil, st, logx.Discard(), nil, nil, nil, 0, nil,
-			false, 0, 0, TurnOptions{FSRoot: t.TempDir(), SkillsEnabled: false}, nil,
+			&llm.MockClient{}, nil, nil, st, logx.Discard(), nil, nil, nil,
+			false, 0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
 		)
 	}
 
@@ -670,6 +719,9 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 	if status, ok := second.turnCoordinator.ToolExecutionStatusForCall("call-restart"); !ok || status != turn.ToolExecutionStatusUnknown {
 		t.Fatalf("restart execution status = %s/%v", status, ok)
 	}
+	if len(second.messages) != 2 || second.messages[0].Role != "assistant" || !llm.IsRecoveryPlaceholderToolResult(second.messages[1]) {
+		t.Fatalf("restart recovery history = %#v", second.messages)
+	}
 
 	if err := second.reconcileToolExecution(context.Background(), recovered.TurnID, recovered.StepID, "call-restart-execution", turn.ToolExecutionStatusSucceeded, "marker already exists"); err != nil {
 		t.Fatal(err)
@@ -681,8 +733,73 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 	if second.queue.CountByRequestType(queue.RequestTypeTurnContinuation) != 1 {
 		t.Fatalf("expected one resumed turn continuation, queue=%d", second.queue.CountByRequestType(queue.RequestTypeTurnContinuation))
 	}
-	if len(second.messages) != 1 || second.messages[0].Role != "tool" || second.messages[0].ToolCallID != "call-restart" {
+	if len(second.messages) != 2 || second.messages[0].Role != "assistant" || len(second.messages[0].ToolCalls) != 1 || second.messages[0].ToolCalls[0].ID != "call-restart" || second.messages[1].Role != "tool" || second.messages[1].ToolCallID != "call-restart" {
 		t.Fatalf("reconciled history = %#v", second.messages)
+	}
+	if llm.IsRecoveryPlaceholderToolResult(second.messages[1]) || second.messages[1].ToolResultMetadata == nil || second.messages[1].ToolResultMetadata.Status != "succeeded" {
+		t.Fatalf("reconciled result metadata = %#v", second.messages[1])
+	}
+}
+
+func TestRuntimeLifecycleRecoveryPreservesLoadedHistoryRevision(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "recovery-revision.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	newRuntime := func(initial []llm.Message, revision uint64) *runtime {
+		hub := stream.NewHub(16, logx.Discard())
+		return newRuntimeWithPublisher(
+			"session-revision", "agent-1", hub, hub,
+			&llm.MockClient{}, nil, nil, st, logx.Discard(), initial, nil, nil,
+			false, 0, 0, TurnOptions{
+				WorkspaceRoot:          t.TempDir(),
+				SkillsEnabled:          false,
+				initialHistoryRevision: revision,
+			}, nil,
+		)
+	}
+
+	first := newRuntime(nil, 0)
+	first.lifecycleBeginHumanTurn()
+	state := first.turnCoordinator.Snapshot()
+	if _, err := first.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandAssistantReceived, SessionID: "session-revision", TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state = first.turnCoordinator.Snapshot()
+	if _, err := first.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandToolCallRecorded, SessionID: "session-revision", TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, ToolCallID: "call-revision",
+		ToolName: "bash", Arguments: []byte(`{"command":"echo hi"}`), At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.Save(context.Background(), store.Record{
+		AgentID: "session-revision", NodeID: "agent-1",
+		Messages:     []llm.Message{{Role: "user", Content: "run"}},
+		RuntimeState: store.RuntimeState{HistoryRevision: 41},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := newRuntime([]llm.Message{{Role: "user", Content: "run"}}, 41)
+	if second.historyRevision != 42 {
+		t.Fatalf("recovered history revision = %d, want 42", second.historyRevision)
+	}
+	record, err := st.Load(context.Background(), "session-revision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record == nil || record.RuntimeState.HistoryRevision != 42 {
+		t.Fatalf("persisted recovered history revision = %#v, want 42", record)
+	}
+	if err := llm.ValidateToolProtocol(record.Messages); err != nil {
+		t.Fatalf("persisted recovered history rejected: %v", err)
 	}
 }
 
@@ -724,8 +841,8 @@ func TestRuntimeLifecycleRecoversCompletedToolResultFromHistory(t *testing.T) {
 	hub := stream.NewHub(16, logx.Discard())
 	recovered := newRuntimeWithPublisher(
 		"session-1", "agent-1", hub, hub,
-		&llm.MockClient{}, nil, nil, st, logx.Discard(), history, nil, nil, 0, nil,
-		false, 0, 0, TurnOptions{FSRoot: t.TempDir(), SkillsEnabled: false}, nil,
+		&llm.MockClient{}, nil, nil, st, logx.Discard(), history, nil, nil,
+		false, 0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
 	)
 	state = recovered.turnCoordinator.Snapshot()
 	if state.RecoveryRequired || state.StepIndex != 2 || state.StepStatus != turn.StepStatusRequesting {

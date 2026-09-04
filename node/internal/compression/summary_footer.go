@@ -22,7 +22,7 @@ func FinalizeCompressionSummary(summary, sessionID string, journalEnabled bool, 
 	location := "<runtime_root>/" + rel
 	note := "该目录不属于 Agent workspace"
 	if len(relativeRoot) > 0 && strings.TrimSpace(relativeRoot[0]) != "" {
-		location = "<workspace_root>/" + filepath.ToSlash(filepath.Join(strings.TrimSpace(relativeRoot[0]), history.JournalRelativePath(sid, at)))
+		location = "<workspace_root>/" + filepath.ToSlash(filepath.Join(strings.TrimSpace(relativeRoot[0]), history.RuntimeJournalRelativePath(sid, at)))
 		note = "该文件属于当前 Agent 的 workspace 私有状态"
 	}
 	return summary + "\n\nNode 已将原始消息记录到 " + location + "（" + note + "）。"

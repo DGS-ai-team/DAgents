@@ -14,10 +14,9 @@ const defaultHistorySize = 256
 const defaultSubscriberBuffer = 256
 const CurrentEventVersion = 1
 
-// Event 为写入 SSE 的标准事件结构。
-// 线协议仅暴露 agent_id（对话/Agent 实例 id）；SessionID 仅供进程内路由（notify/filter）。
+// Event 为写入 SSE 的标准事件结构。线协议使用 agent_id 标识对话/Agent
+// 实例；进程内订阅过滤也使用同一个字段。
 type Event struct {
-	SessionID    string         `json:"-"`
 	AgentID      string         `json:"agent_id"`
 	Type         string         `json:"type"`
 	Seq          int            `json:"seq"`
@@ -109,7 +108,6 @@ func (h *Hub) publish(agentID, eventType string, data map[string]any, replayable
 		agentSeq = h.agentSeq[agentID]
 	}
 	ev := Event{
-		SessionID:    agentID,
 		AgentID:      agentID,
 		Type:         eventType,
 		Seq:          h.seq,
@@ -190,7 +188,7 @@ func deliveryKind(replayable bool) string {
 
 func isCriticalSSEType(eventType string) bool {
 	switch eventType {
-	case "turn_finished", "error", "hitl_required", "turn_state", "resync_required":
+	case "turn_finished", "error", "hitl_required", "turn_state", "notification_changed", "resync_required":
 		return true
 	default:
 		return false

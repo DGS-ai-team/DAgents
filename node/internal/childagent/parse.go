@@ -12,9 +12,6 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 	if err := json.Unmarshal([]byte(argsJSON), &raw); err != nil {
 		return CreateInput{}, fmt.Errorf("invalid json: %w", err)
 	}
-	if _, ok := raw["wait"]; ok {
-		return CreateInput{}, fmt.Errorf("wait is no longer supported; create_temporary_agent is synchronous")
-	}
 	task := strings.TrimSpace(fmt.Sprint(raw["task"]))
 	if task == "" {
 		return CreateInput{}, fmt.Errorf("task is required")

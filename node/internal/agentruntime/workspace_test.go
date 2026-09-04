@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestWorkspace_privateAndLegacy(t *testing.T) {
+func TestWorkspace_privateDefault(t *testing.T) {
 	root := t.TempDir()
 	private, err := EffectiveWorkspaceRoot(root, "agt-1", WorkspaceConfig{Mode: WorkspaceModePrivate})
 	if err != nil {
@@ -16,12 +16,12 @@ func TestWorkspace_privateAndLegacy(t *testing.T) {
 	if private != want {
 		t.Fatalf("private=%q want %q", private, want)
 	}
-	legacy, err := EffectiveWorkspaceRoot(root, "agt-1", WorkspaceConfig{})
+	defaultRoot, err := EffectiveWorkspaceRoot(root, "agt-1", WorkspaceConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if legacy != root {
-		t.Fatalf("legacy=%q want %q", legacy, root)
+	if defaultRoot != private {
+		t.Fatalf("default=%q want %q", defaultRoot, private)
 	}
 }
 

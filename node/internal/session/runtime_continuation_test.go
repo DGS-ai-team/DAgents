@@ -38,6 +38,23 @@ func TestCancelInvalidatesQueuedTurnContinuation(t *testing.T) {
 	}
 }
 
+func TestAcceptEnvelopeRequiresActiveTurnForResume(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+
+	sess, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(sess.ID)
+	if rt.acceptEnvelope(queue.Envelope{RequestType: queue.RequestTypeResume}) {
+		t.Fatal("resume without an active turn must be rejected")
+	}
+	if !rt.acceptEnvelope(queue.Envelope{RequestType: queue.RequestTypeSideEffectContinue}) {
+		t.Fatal("side-effect continuation without an active turn must be accepted")
+	}
+}
+
 func TestExternalEventsSurviveTurnGenerationChange(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()

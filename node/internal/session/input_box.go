@@ -16,16 +16,16 @@ import (
 type InputKind string
 
 const (
-	InputKindUser    InputKind = "user"
-	InputKindTrigger InputKind = "trigger"
-	InputKindA2A     InputKind = "a2a"
+	InputKindUser       InputKind = "user"
+	InputKindTrigger    InputKind = "trigger"
+	InputKindChildAgent InputKind = "child_agent"
 )
 
 const (
 	// InputBoxMaxItems bounds accepted external inputs while a session is
 	// busy. Control-plane resume/cancel commands do not enter this mailbox.
 	InputBoxMaxItems = 256
-	// InputBoxMaxRecordBytes prevents a single trigger/A2A payload from
+	// InputBoxMaxRecordBytes prevents a single trigger/child-agent payload from
 	// exhausting the session runtime before the model can consume it.
 	InputBoxMaxRecordBytes = 1 << 20
 )
@@ -38,7 +38,7 @@ var (
 )
 
 func validateInputRecord(record InputRecord) error {
-	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindA2A {
+	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindChildAgent {
 		return fmt.Errorf("%w: %q", ErrInvalidInputKind, record.Kind)
 	}
 	raw, err := json.Marshal(record)
@@ -52,8 +52,8 @@ func validateInputRecord(record InputRecord) error {
 }
 
 // InputRecord is the FIFO record accepted by a session.  Seq is assigned at
-// append time and is never reused.  The queue.Envelope is retained as a
-// compatibility transport while callers migrate away from MessageQueue.
+// append time and is never reused. queue.Envelope carries the common request
+// payload shape; control requests still use MessageQueue directly.
 type InputRecord struct {
 	Seq       uint64         `json:"seq"`
 	Kind      InputKind      `json:"kind"`

@@ -46,12 +46,6 @@ CREATE INDEX IF NOT EXISTS idx_turn_events_turn_seq
 	if err != nil {
 		return err
 	}
-	// Older development databases may already contain the table without the
-	// newer relation columns. These ALTERs are intentionally best-effort.
-	_, _ = s.db.Exec(`ALTER TABLE turn_events ADD COLUMN tool_execution_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = s.db.Exec(`ALTER TABLE turn_events ADD COLUMN payload_ref TEXT NOT NULL DEFAULT ''`)
-	_, _ = s.db.Exec(`ALTER TABLE turn_events ADD COLUMN tool_batch_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = s.db.Exec(`ALTER TABLE turn_events ADD COLUMN interaction_id TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 

@@ -15,6 +15,7 @@ import (
 func TestPlacementAPI_PeersRouteRemoved(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-owner", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/peers/nodes", nil)
@@ -28,6 +29,7 @@ func TestPlacementAPI_PeersRouteRemoved(t *testing.T) {
 func TestPlacementAPI_InternalRoutesRemoved(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-home", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/internal/placement/agents", bytes.NewReader([]byte(`{}`)))
@@ -49,12 +51,14 @@ func TestPlacementAPI_InternalRoutesRemoved(t *testing.T) {
 func TestPlacementAPI_LocalCreateAttachesHost(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-local", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer agentsDB.Close()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(srv.Close)
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{

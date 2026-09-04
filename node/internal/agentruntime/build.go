@@ -13,8 +13,8 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// DefaultMaxToolLoops 为新建 Agent 未指定时的 defaults.llm.max_tool_loops。
-const DefaultMaxToolLoops = 32
+// DefaultMaxSteps 为新建 Agent 未指定时的 defaults.llm.max_steps。
+const DefaultMaxSteps = 32
 
 // BuildParams 为构造 per-agent Registry / TurnOptions 的输入。
 type BuildParams struct {
@@ -24,6 +24,11 @@ type BuildParams struct {
 	Snapshot    Snapshot
 	BashTimeout int
 	MCP         *mcp.Manager
+	// DisableMemory prevents runtimes that only execute on behalf of another
+	// Agent (for example Workgroup members) from opening that Agent's personal
+	// memory store. The model-facing memory tools remain unavailable because
+	// TurnOptions.MemoryService is nil.
+	DisableMemory bool
 }
 
 // Built 为 per-agent 运行时产物。
@@ -133,22 +138,15 @@ func Build(p BuildParams) (Built, error) {
 	turnOpts.RawMessageHistoryRelativeRoot = historyRelativeRoot
 	turnOpts.ToolResult.WorkspaceRoot = workspaceRoot
 	turnOpts.ToolResult.AgentID = strings.TrimSpace(p.AgentID)
-	// Automatic recall and model-facing memory tools are separate capabilities.
-	// long_term_enabled controls the former; the memory tool group controls the
-	// latter. The service must exist when either capability is enabled.
-	memoryToolsOn := toolGroupSelected(groups, "memory")
-	// New Agent snapshots write this flag explicitly. Keep legacy/incomplete
-	// snapshots opt-in so merely opening an old Agent does not create a SQLite
-	// memory handle or change its model context unexpectedly.
 	memoryAutoRecall := false
-	if promptCtx := PromptContextFromDefaults(p.Snapshot); promptCtx != nil && promptCtx.LongTermEnabled != nil {
-		memoryAutoRecall = *promptCtx.LongTermEnabled
+	if promptCtx := PromptContextFromDefaults(p.Snapshot); promptCtx != nil && promptCtx.MemoryEnabled != nil {
+		memoryAutoRecall = *promptCtx.MemoryEnabled
 	}
-	if memoryAutoRecall || memoryToolsOn {
-		memoryScope := memory.ScopeAgent
-		if LongTermScopeFromDefaults(p.Snapshot) == string(memory.ScopeGlobal) {
-			memoryScope = memory.ScopeGlobal
-		}
+	memoryScope := memory.ScopeAgent
+	if MemoryScopeFromDefaults(p.Snapshot) == string(memory.ScopeGlobal) {
+		memoryScope = memory.ScopeGlobal
+	}
+	if !p.DisableMemory {
 		memoryService, openErr := memory.OpenLocalService(
 			filepath.Join(workspaceStateRoot, "memory", "memory.db"),
 			filepath.Join(p.NodeCFG.RuntimeDir(), "memory", "global.db"),
@@ -158,12 +156,12 @@ func Build(p BuildParams) (Built, error) {
 			return Built{}, fmt.Errorf("open memory store: %w", openErr)
 		}
 		turnOpts.MemoryService = memoryService
-		turnOpts.MemoryAutoExtract = p.NodeCFG.Memory.AutoExtract
-		turnOpts.MemoryCandidateQueueSize = p.NodeCFG.Memory.CandidateQueueSize
-		turnOpts.MemoryCandidateMaxItems = p.NodeCFG.Memory.MaxCandidates
-		turnOpts.MemoryCoreBudgetTokens = p.NodeCFG.Memory.CoreBudgetTokens
-		turnOpts.MemoryAutoRecall = memoryAutoRecall
 	}
+	turnOpts.MemoryAutoExtract = p.NodeCFG.Memory.AutoExtract
+	turnOpts.MemoryCandidateQueueSize = p.NodeCFG.Memory.CandidateQueueSize
+	turnOpts.MemoryCandidateMaxItems = p.NodeCFG.Memory.MaxCandidates
+	turnOpts.MemoryCoreBudgetTokens = p.NodeCFG.Memory.CoreBudgetTokens
+	turnOpts.MemoryAutoRecall = memoryAutoRecall
 	turnOpts.MultimodalEnabled = mm
 	turnOpts.SkillsEnabled = skillsOn
 	if skillsOn {

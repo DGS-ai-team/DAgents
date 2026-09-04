@@ -161,7 +161,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	view.ConfigPath = s.configPath
 	view.ConfigWritable = s.setupWritable()
 	// Browser changes are applied to the live manager and loaded registries in
-	// this request. Other legacy settings retain the existing restart signal.
+	// this request. Other settings retain the existing restart signal.
 	view.RestartRequired = !browserRuntimeChange
 	writeJSON(w, http.StatusOK, view)
 }

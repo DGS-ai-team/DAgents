@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -170,7 +169,7 @@ func TestLinuxChannelStoreGeneratesUniqueIDs(t *testing.T) {
 	}
 }
 
-func TestLinuxChannelStoreEncryptsLiteralSecretsAndReadsLegacyValues(t *testing.T) {
+func TestLinuxChannelStoreEncryptsLiteralSecrets(t *testing.T) {
 	st, err := OpenLinuxChannels(t.TempDir() + "/linux.db")
 	if err != nil {
 		t.Fatal(err)
@@ -193,9 +192,5 @@ func TestLinuxChannelStoreEncryptsLiteralSecretsAndReadsLegacyValues(t *testing.
 	got, err := st.ResolveSecret(ctx, ref)
 	if err != nil || got != plain {
 		t.Fatalf("encrypted secret=%q err=%v", got, err)
-	}
-	legacy := "literal:" + base64.RawStdEncoding.EncodeToString([]byte("legacy-value"))
-	if got, err := st.ResolveSecret(ctx, legacy); err != nil || got != "legacy-value" {
-		t.Fatalf("legacy secret=%q err=%v", got, err)
 	}
 }

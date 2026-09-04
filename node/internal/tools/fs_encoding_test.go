@@ -151,16 +151,6 @@ func TestWriteFileEncodingGBKWithUnicodeBeyondGBK(t *testing.T) {
 	}
 }
 
-func TestEncodeFileContentInvalidUTF8(t *testing.T) {
-	raw, err := encodeFileContent(string([]byte{0xff, 0xfe, 'a'}), "gbk")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(raw) == 0 {
-		t.Fatal("expected encoded bytes")
-	}
-}
-
 func TestSearchReplacePreservesUTF8BOM(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)

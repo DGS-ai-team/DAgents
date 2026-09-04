@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -264,19 +265,14 @@ func TestSchedulerTickIntervalOverdueStillFires(t *testing.T) {
 	}
 }
 
-func TestStoreLoadReconcilesMissingNextFireAt(t *testing.T) {
+func TestStoreLoadRejectsMissingNextFireAt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "triggers.json")
 	raw := `{"triggers":[{"trigger_id":"t1","name":"x","condition":{"interval_seconds":60},"target_agent_id":"local","task_template":"hi","enabled":true,"fire_count":0,"created_at":1,"updated_at":1}],"history":[]}`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store, err := OpenStore(path, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, ok := store.GetTrigger("t1")
-	if !ok || got.NextFireAt == nil {
-		t.Fatalf("expected reconciled next_fire_at, got %+v ok=%v", got, ok)
+	if _, err := OpenStore(path, 20); err == nil || !strings.Contains(err.Error(), "next_fire_at is missing") {
+		t.Fatalf("expected missing next_fire_at error, got %v", err)
 	}
 }

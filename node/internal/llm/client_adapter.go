@@ -35,6 +35,9 @@ func (c *adapterClient) StreamChat(ctx context.Context, req ChatRequest, handler
 	if err != nil {
 		return ChatResult{}, err
 	}
+	if err := ValidateToolProtocol(prepared); err != nil {
+		return ChatResult{}, err
+	}
 	outbound := ChatRequest{
 		SystemPrompt: req.SystemPrompt,
 		Messages:     prepared,

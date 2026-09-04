@@ -9,7 +9,7 @@ import (
 )
 
 func TestRunLLMAfterCallPhase_mutatesAssistantContent(t *testing.T) {
-	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{
 		Duplicate:  hooks.DefaultDuplicateConfig(),
 		ToolResult: hooks.DefaultToolResultConfig("/data/ws"),
 	}, nil)

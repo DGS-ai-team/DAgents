@@ -10,7 +10,6 @@ type MessageSourceKind string
 const (
 	MessageSourceUser        MessageSourceKind = "user"
 	MessageSourceTrigger     MessageSourceKind = "trigger"
-	MessageSourceA2A         MessageSourceKind = "a2a"
 	MessageSourceChildAgent  MessageSourceKind = "child_agent"
 	MessageSourceRuntime     MessageSourceKind = "runtime"
 	MessageSourceMemory      MessageSourceKind = "memory"
@@ -19,7 +18,6 @@ const (
 	MessageSourceCompression MessageSourceKind = "compression"
 	MessageSourceTool        MessageSourceKind = "tool"
 	MessageSourceModel       MessageSourceKind = "model"
-	MessageSourceLegacy      MessageSourceKind = "legacy"
 )
 
 // MessageSourceForm describes what the producer contributed. Keeping this
@@ -41,7 +39,7 @@ const (
 // MessageSource is durable, model-independent provenance about a message.
 // It is persisted in internal history but is intentionally excluded from
 // provider payloads; providers continue to receive the normal role/content
-// contract and the legacy name field where applicable.
+// contract and the optional name projection where applicable.
 type MessageSource struct {
 	Kind MessageSourceKind `json:"kind"`
 	Form MessageSourceForm `json:"form,omitempty"`
@@ -57,15 +55,14 @@ type MessageProvenance struct {
 }
 
 // UserMessageWithSource constructs a user-role message with explicit
-// structured source. legacyName remains an internal compatibility field for
-// old persistence, existing event consumers, and providers that accept name.
-func UserMessageWithSource(content, legacyName string, source MessageSource, provenance *MessageProvenance) Message {
+// structured source and the optional provider name projection.
+func UserMessageWithSource(content, name string, source MessageSource, provenance *MessageProvenance) Message {
 	m := Message{
 		Role:    "user",
 		Content: content,
 		Source:  &source,
 	}
-	if n := strings.TrimSpace(legacyName); n != "" {
+	if n := strings.TrimSpace(name); n != "" {
 		m.Name = n
 	}
 	if provenance != nil {
@@ -75,17 +72,14 @@ func UserMessageWithSource(content, legacyName string, source MessageSource, pro
 	return m
 }
 
-// MessageSourceForUserName maps the legacy name vocabulary to structured
-// source/provenance. This is also the compatibility path for messages loaded
-// from pre-source SQLite snapshots.
+// MessageSourceForUserName maps the user-message name vocabulary to structured
+// source/provenance. Every durable user message should carry this metadata.
 func MessageSourceForUserName(name string) (MessageSource, MessageProvenance) {
 	switch strings.TrimSpace(name) {
 	case "", UserNameHuman:
 		return MessageSource{Kind: MessageSourceUser, Form: MessageFormRequest}, MessageProvenance{Producer: "human"}
 	case UserNameTrigger:
 		return MessageSource{Kind: MessageSourceTrigger, Form: MessageFormRequest}, MessageProvenance{Producer: UserNameTrigger}
-	case UserNameA2AInbox:
-		return MessageSource{Kind: MessageSourceA2A, Form: MessageFormRelay}, MessageProvenance{Producer: UserNameA2AInbox}
 	case UserNameChildTask:
 		return MessageSource{Kind: MessageSourceChildAgent, Form: MessageFormRelay}, MessageProvenance{Producer: UserNameChildTask}
 	case UserNameContext:
@@ -105,14 +99,12 @@ func MessageSourceForUserName(name string) (MessageSource, MessageProvenance) {
 	case UserNameToolVision:
 		return MessageSource{Kind: MessageSourceTool, Form: MessageFormNotice}, MessageProvenance{Producer: UserNameToolVision}
 	default:
-		// Unknown names must not silently become human input. Keeping them as a
-		// legacy source makes old integrations observable and conservative.
-		return MessageSource{Kind: MessageSourceLegacy, Form: MessageFormRequest}, MessageProvenance{Producer: strings.TrimSpace(name)}
+		return MessageSource{Kind: MessageSourceUser, Form: MessageFormRequest}, MessageProvenance{Producer: strings.TrimSpace(name)}
 	}
 }
 
-// EffectiveMessageSource returns the structured source, falling back to the
-// legacy role/name representation for old history and hand-written messages.
+// EffectiveMessageSource returns the structured source, deriving only the
+// role-owned source for assistant/tool messages.
 func EffectiveMessageSource(message Message) MessageSource {
 	if message.Source != nil && strings.TrimSpace(string(message.Source.Kind)) != "" {
 		return *message.Source
@@ -123,12 +115,11 @@ func EffectiveMessageSource(message Message) MessageSource {
 	if strings.TrimSpace(message.Role) == "assistant" {
 		return MessageSource{Kind: MessageSourceModel, Form: MessageFormRequest}
 	}
-	source, _ := MessageSourceForUserName(message.Name)
-	return source
+	return MessageSource{}
 }
 
 // EffectiveMessageProvenance returns explicit provenance or derives the
-// compatibility producer from the legacy name/tool identity.
+// producer for role-owned assistant/tool messages.
 func EffectiveMessageProvenance(message Message) MessageProvenance {
 	if message.Provenance != nil {
 		return *message.Provenance
@@ -139,27 +130,10 @@ func EffectiveMessageProvenance(message Message) MessageProvenance {
 	if strings.TrimSpace(message.Role) == "assistant" {
 		return MessageProvenance{Producer: "model"}
 	}
-	_, provenance := MessageSourceForUserName(message.Name)
-	return provenance
+	return MessageProvenance{}
 }
 
-// NormalizeMessageSource materializes compatibility metadata on a copied
-// message. It is useful at boundaries that merge or reinsert an old message
-// before persisting it again.
-func NormalizeMessageSource(message Message) Message {
-	if message.Source == nil {
-		source := EffectiveMessageSource(message)
-		message.Source = &source
-	}
-	if message.Provenance == nil {
-		provenance := EffectiveMessageProvenance(message)
-		message.Provenance = &provenance
-	}
-	return message
-}
-
-// IsMessageSource matches structured source while remaining compatible with
-// messages written before source/provenance was introduced.
+// IsMessageSource matches structured message provenance.
 func IsMessageSource(message Message, kind MessageSourceKind, form MessageSourceForm, producer string) bool {
 	if strings.TrimSpace(message.Role) != "user" && kind != MessageSourceTool {
 		return false

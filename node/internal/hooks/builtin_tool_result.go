@@ -32,7 +32,7 @@ func (h *ToolResultPackageHook) RunToolAfterEach(_ context.Context, in ToolAfter
 	if out.ForHistory == "" {
 		out.ForHistory = in.RawResult
 	}
-	if !h.cfg.Enabled {
+	if !h.cfg.IsEnabled() {
 		return nil
 	}
 	if toolresult.IsTerminalOutputTool(in.ToolName) {
