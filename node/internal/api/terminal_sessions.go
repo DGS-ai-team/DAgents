@@ -232,7 +232,11 @@ func (s *terminalSession) detach(conn *websocket.Conn) {
 	if s.conn == conn {
 		s.conn = nil
 	}
-	shouldExpire := s.conn == nil && !s.closed && !s.keepAlive
+	// A keep-alive session is retained while its process is running so a
+	// temporary WebSocket disconnect can reconnect. Once the process has
+	// exited, there is no live terminal to preserve; retain only the normal
+	// short replay grace period.
+	shouldExpire := s.conn == nil && !s.closed && (!s.keepAlive || s.exited != nil)
 	s.mu.Unlock()
 	s.writeMu.Unlock()
 	if shouldExpire {
@@ -365,7 +369,7 @@ func (s *terminalSession) scheduleExpiry() {
 		return
 	}
 	s.mu.Lock()
-	if s.closed || s.conn != nil || s.expiry != nil || s.keepAlive {
+	if s.closed || s.conn != nil || s.expiry != nil || (s.keepAlive && s.exited == nil) {
 		s.mu.Unlock()
 		return
 	}
@@ -531,7 +535,7 @@ func (r *terminalSessionRegistry) add(session *terminalSession) error {
 	}
 	count := 0
 	for _, item := range r.sessions {
-		if item != nil && item.agentID == session.agentID {
+		if item != nil && item.agentID == session.agentID && item.isRunning() {
 			count++
 		}
 	}
@@ -633,6 +637,16 @@ func (s *terminalSession) info() tools.TerminalSessionInfo {
 	}
 }
 
+func (s *terminalSession) isRunning() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	running := !s.closed && s.exited == nil
+	s.mu.Unlock()
+	return running
+}
+
 func (r *terminalSessionRegistry) publishChange(session *terminalSession, eventType string) {
 	if r == nil || session == nil {
 		return
@@ -641,7 +655,7 @@ func (r *terminalSessionRegistry) publishChange(session *terminalSession, eventT
 	publisher := r.onChange
 	count := 0
 	for _, item := range r.sessions {
-		if item == nil || item.agentID != session.agentID {
+		if item == nil || item.agentID != session.agentID || !item.isRunning() {
 			continue
 		}
 		count++
@@ -669,7 +683,9 @@ func (r *terminalSessionRegistry) List(agentID string) []tools.TerminalSessionIn
 		if session == nil || session.agentID != id {
 			continue
 		}
-		items = append(items, session.info())
+		if info := session.info(); info.Status == "running" {
+			items = append(items, info)
+		}
 	}
 	r.mu.Unlock()
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.Before(items[j].CreatedAt) })

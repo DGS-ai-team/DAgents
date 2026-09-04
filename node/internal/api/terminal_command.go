@@ -232,15 +232,39 @@ func buildPOSIXTerminalCommandInput(command, cwd, start, endPrefix string) ([]by
 
 func buildPowerShellTerminalCommandInput(command, cwd, start, endPrefix string) ([]byte, string, string, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Write-Output \"\"\nWrite-Output %s\n& {\n  $__DAGENTS_COMMAND = %s\n  $__DAGENTS_RC = 0\n  $LASTEXITCODE = 0\n", powerShellQuote(start), powerShellQuote(command))
-	if strings.TrimSpace(cwd) != "" {
-		fmt.Fprintf(&b, "  Push-Location -LiteralPath %s\n  if (-not $?) { $__DAGENTS_RC = 1 }\n", powerShellQuote(cwd))
+	// ConPTY feeds this payload into an interactive PowerShell prompt. A bare
+	// LF is treated as line-feed input by the Windows console and leaves the
+	// parser in the continuation prompt (>>); a real Enter is CRLF. Keep every
+	// generated line CRLF, just like the terminal UI's Enter key.
+	const lineEnd = "\r\n"
+	writeLine := func(format string, args ...any) {
+		fmt.Fprintf(&b, format, args...)
+		b.WriteString(lineEnd)
 	}
-	b.WriteString("  if ($__DAGENTS_RC -eq 0) {\n    try {\n      Invoke-Expression $__DAGENTS_COMMAND\n      if ($LASTEXITCODE -ne 0) { $__DAGENTS_RC = [int]$LASTEXITCODE } elseif ($?) { $__DAGENTS_RC = 0 } else { $__DAGENTS_RC = 1 }\n    } catch {\n      Write-Error $_\n      $__DAGENTS_RC = 1\n    }\n  }\n")
+	writeLine("Write-Output \"\"")
+	writeLine("Write-Output %s", powerShellQuote(start))
+	writeLine("& {")
+	writeLine("  $__DAGENTS_COMMAND = %s", powerShellQuote(command))
+	writeLine("  $__DAGENTS_RC = 0")
+	writeLine("  $LASTEXITCODE = 0")
 	if strings.TrimSpace(cwd) != "" {
-		b.WriteString("  Pop-Location\n")
+		writeLine("  Push-Location -LiteralPath %s", powerShellQuote(cwd))
+		writeLine("  if (-not $?) { $__DAGENTS_RC = 1 }")
 	}
-	fmt.Fprintf(&b, "  Write-Output ('%s' + $__DAGENTS_RC + '__')\n}\n", endPrefix)
+	writeLine("  if ($__DAGENTS_RC -eq 0) {")
+	writeLine("    try {")
+	writeLine("      Invoke-Expression $__DAGENTS_COMMAND")
+	writeLine("      if ($LASTEXITCODE -ne 0) { $__DAGENTS_RC = [int]$LASTEXITCODE } elseif ($?) { $__DAGENTS_RC = 0 } else { $__DAGENTS_RC = 1 }")
+	writeLine("    } catch {")
+	writeLine("      Write-Error $_")
+	writeLine("      $__DAGENTS_RC = 1")
+	writeLine("    }")
+	writeLine("  }")
+	if strings.TrimSpace(cwd) != "" {
+		writeLine("  Pop-Location")
+	}
+	writeLine("  Write-Output ('%s' + $__DAGENTS_RC + '__')", endPrefix)
+	writeLine("}")
 	return []byte(b.String()), start, endPrefix, nil
 }
 
@@ -278,7 +302,10 @@ func parseTerminalCommandTranscript(data []byte, startMarker, endPrefix string) 
 		}
 		lineEnd += pos
 		line := strings.TrimSuffix(string(data[pos:lineEnd]), "\r")
-		if strings.TrimSpace(line) == startMarker {
+		// Interactive PowerShell may echo the submitted line with a prompt
+		// prefix (for example ">> ") or terminal control bytes. The marker is
+		// still authoritative because it contains a random per-call token.
+		if strings.Contains(line, startMarker) {
 			startEnd = lineEnd + 1
 			break
 		}
@@ -294,13 +321,15 @@ func parseTerminalCommandTranscript(data []byte, startMarker, endPrefix string) 
 		}
 		lineEnd += pos
 		line := strings.TrimSuffix(string(data[pos:lineEnd]), "\r")
-		if strings.HasPrefix(line, endPrefix) && strings.HasSuffix(line, "__") {
-			rawCode := strings.TrimSuffix(strings.TrimPrefix(line, endPrefix), "__")
-			code, err := strconv.Atoi(rawCode)
-			if err == nil {
-				output := data[startEnd:pos]
-				output = trimOneLineEnding(output)
-				return cleanTerminalCommandOutput(output), code, true, true
+		if markerAt := strings.Index(line, endPrefix); markerAt >= 0 {
+			rawCode := line[markerAt+len(endPrefix):]
+			if suffixAt := strings.Index(rawCode, "__"); suffixAt >= 0 {
+				code, err := strconv.Atoi(strings.TrimSpace(rawCode[:suffixAt]))
+				if err == nil {
+					output := data[startEnd:pos]
+					output = trimOneLineEnding(output)
+					return cleanTerminalCommandOutput(output), code, true, true
+				}
 			}
 		}
 		pos = lineEnd + 1

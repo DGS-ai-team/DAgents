@@ -11,18 +11,18 @@ vi.stubGlobal("window", {
   clearInterval: (...args) => clearInterval(...args),
 });
 
-vi.mock("../api/desktop.js", () => ({
-  reportDesktopUIFocus: vi.fn(() => Promise.resolve()),
+vi.mock("../api/platform.js", () => ({
+  reportPlatformUIFocus: vi.fn(() => Promise.resolve()),
 }));
 
-let reportDesktopUIFocus;
+let reportPlatformUIFocus;
 let startDesktopFocusHeartbeat;
 let stopDesktopFocusHeartbeat;
 
 beforeEach(async () => {
   vi.useFakeTimers();
-  reportDesktopUIFocus = (await import("../api/desktop.js")).reportDesktopUIFocus;
-  vi.mocked(reportDesktopUIFocus).mockClear();
+  reportPlatformUIFocus = (await import("../api/platform.js")).reportPlatformUIFocus;
+  vi.mocked(reportPlatformUIFocus).mockClear();
   const mod = await import("./desktopFocus.js");
   startDesktopFocusHeartbeat = mod.startDesktopFocusHeartbeat;
   stopDesktopFocusHeartbeat = mod.stopDesktopFocusHeartbeat;
@@ -37,13 +37,13 @@ describe("desktopFocus", () => {
   it("reports immediately on start and renews on heartbeat", async () => {
     startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledTimes(1);
+    expect(reportPlatformUIFocus).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(reportDesktopUIFocus).toHaveBeenCalledTimes(2);
+    expect(reportPlatformUIFocus).toHaveBeenCalledTimes(2);
 
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(reportDesktopUIFocus).toHaveBeenCalledTimes(3);
+    expect(reportPlatformUIFocus).toHaveBeenCalledTimes(3);
   });
 
   it("debounces rapid duplicate reports within 1s", async () => {
@@ -51,60 +51,65 @@ describe("desktopFocus", () => {
     await Promise.resolve();
     startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledTimes(1);
+    expect(reportPlatformUIFocus).toHaveBeenCalledTimes(1);
   });
 
   it("pulse forces report on agent switch", async () => {
     startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
-    vi.mocked(reportDesktopUIFocus).mockClear();
+    vi.mocked(reportPlatformUIFocus).mockClear();
 
     startDesktopFocusHeartbeat(() => "agt-b");
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
-      "agt-b",
-      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    expect(reportPlatformUIFocus).toHaveBeenCalledWith(
+      expect.objectContaining({ ttl_seconds: 90, source_id: expect.any(String), agent_id: "agt-b" }),
     );
   });
 
   it("clears focus on stop", async () => {
     startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
-    vi.mocked(reportDesktopUIFocus).mockClear();
+    vi.mocked(reportPlatformUIFocus).mockClear();
 
     stopDesktopFocusHeartbeat();
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
-      "",
-      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    expect(reportPlatformUIFocus).toHaveBeenCalledWith(
+      expect.objectContaining({ ttl_seconds: 90, source_id: expect.any(String), agent_id: "" }),
     );
+  });
+
+  it("ignores the expected browser-only Shell capability error", async () => {
+    vi.mocked(reportPlatformUIFocus).mockRejectedValueOnce(new Error("desktop Shell is unavailable"));
+
+    startDesktopFocusHeartbeat(() => "agt-a");
+    await Promise.resolve();
+
+    expect(reportPlatformUIFocus).toHaveBeenCalledTimes(1);
   });
 
   it("pauses heartbeat and clears focus when document hidden", async () => {
     startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
-    vi.mocked(reportDesktopUIFocus).mockClear();
+    vi.mocked(reportPlatformUIFocus).mockClear();
 
     document.visibilityState = "hidden";
     document.addEventListener.mock.calls
       .find(([event]) => event === "visibilitychange")?.[1]();
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
-      "",
-      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    expect(reportPlatformUIFocus).toHaveBeenCalledWith(
+      expect.objectContaining({ ttl_seconds: 90, source_id: expect.any(String), agent_id: "" }),
     );
 
-    vi.mocked(reportDesktopUIFocus).mockClear();
+    vi.mocked(reportPlatformUIFocus).mockClear();
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(reportDesktopUIFocus).not.toHaveBeenCalled();
+    expect(reportPlatformUIFocus).not.toHaveBeenCalled();
 
     document.visibilityState = "visible";
     document.addEventListener.mock.calls
       .find(([event]) => event === "visibilitychange")?.[1]();
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
-      "agt-a",
-      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    expect(reportPlatformUIFocus).toHaveBeenCalledWith(
+      expect.objectContaining({ ttl_seconds: 90, source_id: expect.any(String), agent_id: "agt-a" }),
     );
     document.visibilityState = "visible";
   });
