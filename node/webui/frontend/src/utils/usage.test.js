@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatInputStripUsage, parseUsageFields, parseUsageRound } from "./usage.js";
+import { formatInputStripUsage, parseUsageFields } from "./usage.js";
 
 describe("usage cache observability", () => {
   it("keeps provider cache metrics unavailable when the response omits them", () => {
@@ -21,15 +21,4 @@ describe("usage cache observability", () => {
     expect(usage.rate).toBe(0);
   });
 
-  it("maps round cache availability without changing the displayed strip", () => {
-    const usage = parseUsageRound({
-      round_prompt_tokens: 50,
-      round_completion_tokens: 8,
-      round_prompt_cache_available: true,
-      round_prompt_cache_hit_tokens: 25,
-      round_prompt_cache_hit_rate: 0.5,
-    });
-    expect(usage.cacheObserved).toBe(true);
-    expect(usage.rate).toBe(0.5);
-  });
 });

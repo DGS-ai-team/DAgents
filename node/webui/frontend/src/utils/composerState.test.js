@@ -3,6 +3,7 @@ import {
   canSubmitComposer,
   hasPendingUserInformation,
   shouldShowCancel,
+  shouldShowInteractionCancel,
 } from "./composerState.js";
 
 describe("composer HITL state", () => {
@@ -17,6 +18,14 @@ describe("composer HITL state", () => {
       sending: true,
       hasUserInformation: true,
     })).toBe(false);
+    expect(shouldShowInteractionCancel({
+      sending: true,
+      hasUserInformation: true,
+    })).toBe(true);
+    expect(shouldShowInteractionCancel({
+      sending: false,
+      hasUserInformation: true,
+    })).toBe(true);
   });
 
   it("keeps the ordinary sending gate for a draft message", () => {
@@ -26,6 +35,7 @@ describe("composer HITL state", () => {
       hasContent: true,
     })).toBe(false);
     expect(shouldShowCancel({ sending: true })).toBe(true);
+    expect(shouldShowInteractionCancel({ sending: true })).toBe(false);
   });
 
   it("does not submit while the HITL request itself is busy", () => {

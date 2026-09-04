@@ -1,7 +1,8 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
+import AgentWorkspacePicker from "./AgentWorkspacePicker.vue";
 import {
   buildCreateAgentPayload,
   BLANK_TEMPLATE_ID,
@@ -13,18 +14,16 @@ import {
 } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
-  open: { type: Boolean, default: false },
   initialTemplateId: { type: String, default: "" },
 });
 
-const emit = defineEmits(["close", "created"]);
+const emit = defineEmits(["cancel", "created"]);
 
-/** @type {import('vue').Ref<'start' | 'details' | 'capabilities'>} */
+/** @type {import('vue').Ref<'start' | 'details' | 'workspace' | 'capabilities'>} */
 const step = ref("details");
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
-/** 字段级校验（替换标签，不进页脚） */
 const fieldErrors = reactive({ name: "", llm: "", workspace: "" });
 const templates = ref([]);
 const llmProfiles = ref([]);
@@ -39,8 +38,6 @@ const selectedTemplate = computed(
 const isBlankDraft = computed(() => draft.templateId === BLANK_TEMPLATE_ID || !draft.templateId);
 const hasTemplates = computed(() => templates.value.length > 0);
 const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(Boolean));
-const selectedToolCount = computed(() => (draft.toolGroups || []).length);
-
 const startPointLabel = computed(() => {
   if (isBlankDraft.value) return "空白开始";
   const tpl = selectedTemplate.value;
@@ -50,33 +47,42 @@ const startPointLabel = computed(() => {
 const stepTitle = computed(() => {
   if (loading.value) return "创建智能体";
   if (step.value === "start") return "想从哪里开始？";
+  if (step.value === "workspace") return "选择工作目录";
   if (step.value === "capabilities") return "它能做什么？";
   return "给它起个名字";
 });
 
 const stepLead = computed(() => {
   if (loading.value) return "稍等，正在准备…";
-  if (step.value === "start") return "选择一个模板？还是你想从空白开始配置。";
-  if (step.value === "capabilities") {
-    return "选择智能体可以使用的工具";
+  if (step.value === "start") return "选择一个模板，或者从空白开始配置。";
+  if (step.value === "workspace") {
+    return "文件、命令行和本机终端会默认在这里运行，创建后不可修改。";
   }
-  if (isBlankDraft.value) return "填好名字和模型就可以创建。想先选它能做什么的话，点「选功能」。";
-  return `以「${startPointLabel.value}」为起点。改个名字、确认模型就好。`;
+  if (step.value === "capabilities") return "选择智能体可以使用的工具。";
+  if (isBlankDraft.value) return "填好名字和模型就可以创建。也可以继续选择它能做什么。";
+  return `以「${startPointLabel.value}」为起点，确认名字和模型即可。`;
 });
 
 const stepTotal = computed(() => {
-  // 含「选起点」时固定 3 步：起点 → 命名 → 功能；否则 2 步：命名 → 功能。
-  // 进度条不因是否进入「选功能」而变长，避免突兀。
-  if (canGoBackToStart.value || step.value === "start") return 3;
-  return 2;
+  // 含「选起点」时固定 4 步：起点 → 命名 → 工作目录 → 功能；否则 3 步。
+  if (canGoBackToStart.value || step.value === "start") return 4;
+  return 3;
 });
 const stepIndex = computed(() => {
   if (step.value === "start") return 1;
-  if (step.value === "details") return stepTotal.value === 3 ? 2 : 1;
+  if (step.value === "details") return stepTotal.value === 4 ? 2 : 1;
+  if (step.value === "workspace") return stepTotal.value === 4 ? 3 : 2;
   return stepTotal.value;
 });
 
 const canContinueStart = computed(() => !loading.value && (!!draft.templateId || isBlankDraft.value));
+const canContinueDetails = computed(
+  () =>
+    !saving.value &&
+    !loading.value &&
+    !!draft.displayName?.trim() &&
+    !!draft.llmProfileId,
+);
 const canSubmit = computed(
   () =>
     !saving.value &&
@@ -84,8 +90,6 @@ const canSubmit = computed(
     !!draft.displayName?.trim() &&
     !!draft.llmProfileId,
 );
-
-const showProgress = computed(() => !loading.value);
 const backLabel = computed(() => {
   if (step.value === "start") return "取消";
   if (step.value === "details") return canGoBackToStart.value ? "上一步" : "取消";
@@ -94,20 +98,29 @@ const backLabel = computed(() => {
 const primaryLabel = computed(() => {
   if (saving.value) return "创建中…";
   if (step.value === "start") return "继续";
+  if (step.value === "details" || step.value === "workspace") return "下一步";
   return "创建";
 });
 const primaryDisabled = computed(() => {
   if (step.value === "start") return !canContinueStart.value;
+  if (step.value === "details") return !canContinueDetails.value;
+  if (step.value === "workspace") {
+    return draft.workspaceMode === "custom" && !String(draft.workspacePath || "").trim();
+  }
   return !canSubmit.value;
 });
 
 function onBack() {
   if (step.value === "start") {
-    emit("close");
+    emit("cancel");
     return;
   }
   if (step.value === "details") {
     goBackFromDetails();
+    return;
+  }
+  if (step.value === "workspace") {
+    goBackFromWorkspace();
     return;
   }
   goBackFromCapabilities();
@@ -116,6 +129,14 @@ function onBack() {
 function onPrimary() {
   if (step.value === "start") {
     goDetails();
+    return;
+  }
+  if (step.value === "details") {
+    goWorkspace();
+    return;
+  }
+  if (step.value === "workspace") {
+    goCapabilities();
     return;
   }
   void submit();
@@ -199,6 +220,7 @@ function clearFieldErrors() {
 function clearFieldError(key) {
   if (key === "name") fieldErrors.name = "";
   if (key === "llm") fieldErrors.llm = "";
+  if (key === "workspace") fieldErrors.workspace = "";
 }
 
 /** @returns {boolean} */
@@ -212,8 +234,14 @@ function validateBasics() {
     fieldErrors.llm = "选一个模型配置吧";
     return false;
   }
+  return true;
+}
+
+/** @returns {boolean} */
+function validateWorkspace() {
+  fieldErrors.workspace = "";
   if (draft.workspaceMode === "custom" && !String(draft.workspacePath || "").trim()) {
-    fieldErrors.workspace = "填写一个本机绝对路径吧";
+    fieldErrors.workspace = "请选择一个本机目录";
     return false;
   }
   return true;
@@ -225,9 +253,19 @@ function goDetails() {
   step.value = "details";
 }
 
-function goCapabilities() {
+function goWorkspace() {
   if (!validateBasics()) {
     step.value = "details";
+    return;
+  }
+  error.value = "";
+  clearFieldErrors();
+  step.value = "workspace";
+}
+
+function goCapabilities() {
+  if (!validateWorkspace()) {
+    step.value = "workspace";
     return;
   }
   error.value = "";
@@ -244,13 +282,19 @@ function goStart() {
 
 function goBackFromDetails() {
   if (canGoBackToStart.value) goStart();
-  else emit("close");
+  else emit("cancel");
+}
+
+function goBackFromWorkspace() {
+  error.value = "";
+  clearFieldErrors();
+  step.value = "details";
 }
 
 function goBackFromCapabilities() {
   error.value = "";
   clearFieldErrors();
-  step.value = "details";
+  step.value = "workspace";
 }
 
 async function submit() {
@@ -258,36 +302,21 @@ async function submit() {
     step.value = "details";
     return;
   }
+  if (!validateWorkspace()) {
+    step.value = "workspace";
+    return;
+  }
   saving.value = true;
   error.value = "";
   try {
     const created = await api.createAgent(buildCreateAgentPayload(draft));
     emit("created", created);
-    emit("close");
   } catch (e) {
     error.value = e.message || "创建失败";
   } finally {
     saving.value = false;
   }
 }
-
-function onBackdropClick(event) {
-  if (event.target === event.currentTarget && !saving.value) emit("close");
-}
-
-watch(
-  () => props.open,
-  (visible) => {
-    if (visible) void loadTemplates();
-    else {
-      error.value = "";
-      clearFieldErrors();
-      step.value = "details";
-      canGoBackToStart.value = false;
-      Object.assign(draft, emptyAgentDraft());
-    }
-  },
-);
 
 watch(
   () => draft.displayName,
@@ -309,61 +338,63 @@ watch(
     if (fieldErrors.workspace) fieldErrors.workspace = "";
   },
 );
+
+onMounted(() => {
+  void loadTemplates();
+});
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="agent-create-overlay" @click="onBackdropClick">
-      <section class="agent-create-modal" role="dialog" aria-modal="true" aria-labelledby="agent-create-title">
-        <header class="agent-create-modal__header">
-          <div>
-            <h2 id="agent-create-title" class="agent-create-modal__title">{{ stepTitle }}</h2>
-            <p class="agent-create-modal__subtitle">{{ stepLead }}</p>
-          </div>
+  <section class="agent-create-page" aria-labelledby="agent-create-page-title">
+    <div class="agent-create-page__shell">
+      <header class="agent-create-page__header">
+        <p class="agent-create-page__eyebrow">新建智能体</p>
+        <h1 id="agent-create-page-title" class="agent-create-page__title">{{ stepTitle }}</h1>
+        <p class="agent-create-page__subtitle">{{ stepLead }}</p>
+      </header>
+
+      <main class="agent-create-page__body">
+        <div v-if="loading" class="agent-create-page__loading">稍等，正在准备…</div>
+
+        <div v-else-if="step === 'start'" class="agent-create-start">
           <button
             type="button"
-            class="agent-create-modal__close"
-            aria-label="关闭"
-            :disabled="saving"
-            @click="emit('close')"
+            class="agent-create-choice"
+            :class="{ 'agent-create-choice--active': isBlankDraft }"
+            @click="pickBlank"
           >
-            ×
+            <span class="agent-create-choice__name">空白开始</span>
+            <span class="agent-create-choice__desc">自己填写设置，不依赖模板</span>
           </button>
-        </header>
+          <button
+            v-for="tpl in templates"
+            :key="tpl.id"
+            type="button"
+            class="agent-create-choice"
+            :class="{ 'agent-create-choice--active': draft.templateId === tpl.id }"
+            @click="pickTemplate(tpl)"
+          >
+            <span class="agent-create-choice__name">{{ tpl.display_name || tpl.id }}</span>
+            <span class="agent-create-choice__desc">{{ tpl.description || "从模板快速创建" }}</span>
+          </button>
+        </div>
 
-        <div class="agent-create-modal__body">
-          <div v-if="loading" class="agent-create-modal__loading">稍等，正在准备…</div>
-
-          <div v-else-if="step === 'start'" class="agent-create-start">
-            <button
-              type="button"
-              class="agent-create-choice"
-              :class="{ 'agent-create-choice--active': isBlankDraft }"
-              @click="pickBlank"
-            >
-              <span class="agent-create-choice__name">空白开始</span>
-              <span class="agent-create-choice__desc">自己填写设置，不依赖模板</span>
-            </button>
-            <button
-              v-for="tpl in templates"
-              :key="tpl.id"
-              type="button"
-              class="agent-create-choice"
-              :class="{ 'agent-create-choice--active': draft.templateId === tpl.id }"
-              @click="pickTemplate(tpl)"
-            >
-              <span class="agent-create-choice__name">{{ tpl.display_name || tpl.id }}</span>
-              <span class="agent-create-choice__desc">{{ tpl.description || "从模板快速创建" }}</span>
-            </button>
-          </div>
-
+        <div v-else class="agent-create-page__form">
           <AgentSettingsForm
-            v-else-if="step === 'details'"
+            v-if="step === 'details'"
             v-model:draft="draft"
             :llm-profiles="llmProfiles"
             :field-errors="fieldErrors"
+            :show-workspace="false"
             mode="create-basics"
             @clear-field-error="clearFieldError"
+          />
+
+          <AgentWorkspacePicker
+            v-else-if="step === 'workspace'"
+            v-model:draft="draft"
+            :field-error="fieldErrors.workspace"
+            @clear-error="clearFieldError('workspace')"
           />
 
           <AgentSettingsForm
@@ -374,237 +405,106 @@ watch(
             mode="create-capabilities"
           />
         </div>
+      </main>
 
-        <footer class="agent-create-modal__footer">
-          <div class="agent-create-modal__footer-left">
-            <button
-              type="button"
-              class="agent-create-modal__back"
-              :disabled="saving"
-              @click="onBack"
-            >
-              {{ backLabel }}
-            </button>
-            <div
-              v-if="showProgress"
-              class="agent-create-modal__dots"
-              :aria-label="`第 ${stepIndex} 步，共 ${stepTotal} 步`"
-            >
-              <span
-                v-for="i in stepTotal"
-                :key="i"
-                class="agent-create-modal__dot"
-                :class="{ 'agent-create-modal__dot--active': i === stepIndex }"
-              />
-            </div>
-            <p v-if="error" class="agent-create-modal__error">{{ error }}</p>
-          </div>
-          <div class="agent-create-modal__footer-right">
-            <button
-              v-if="step === 'details'"
-              type="button"
-              class="agent-create-modal__link"
-              :disabled="saving || loading"
-              @click="goCapabilities"
-            >
-              选功能{{ selectedToolCount ? ` · ${selectedToolCount}` : "" }}
-            </button>
-            <button
-              type="button"
-              class="btn btn--primary"
-              :disabled="primaryDisabled || saving"
-              @click="onPrimary"
-            >
-              {{ primaryLabel }}
-            </button>
-          </div>
-        </footer>
-      </section>
+      <footer v-if="!loading" class="agent-create-page__footer">
+        <div class="agent-create-page__footer-left">
+          <button type="button" class="agent-create-page__back" :disabled="saving" @click="onBack">
+            {{ backLabel }}
+          </button>
+          <p v-if="error" class="agent-create-page__error">{{ error }}</p>
+        </div>
+        <div class="agent-create-page__footer-right">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="primaryDisabled || saving"
+            @click="onPrimary"
+          >
+            {{ primaryLabel }}
+          </button>
+        </div>
+      </footer>
+
+      <div v-if="!loading" class="agent-create-page__progress" aria-hidden="true">
+        <span
+          v-for="i in stepTotal"
+          :key="i"
+          :class="{ 'agent-create-page__progress-segment--active': i <= stepIndex }"
+        />
+      </div>
     </div>
-  </Teleport>
+  </section>
 </template>
 
 <style scoped>
-.agent-create-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
+.agent-create-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: var(--color-overlay);
-  backdrop-filter: blur(2px);
-}
-
-.agent-create-modal {
-  width: min(520px, 96vw);
-  height: min(480px, 84vh);
-  display: flex;
-  flex-direction: column;
-  border-radius: 14px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
-
-.agent-create-modal__header,
-.agent-create-modal__footer {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.agent-create-modal__footer {
-  border-bottom: 0;
-  border-top: 1px solid var(--color-border);
-  align-items: center;
-  padding: 12px 20px;
-  gap: 16px;
-}
-
-.agent-create-modal__footer-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.agent-create-modal__back {
-  flex: 0 0 auto;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  cursor: pointer;
-}
-
-.agent-create-modal__back:hover:not(:disabled) {
+  padding: clamp(28px, 7vh, 72px) 32px 40px;
+  background: var(--app-background);
   color: var(--color-text);
 }
 
-.agent-create-modal__back:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.agent-create-modal__dots {
+.agent-create-page__shell {
+  width: min(620px, 100%);
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 24px;
+  margin: auto;
 }
 
-.agent-create-modal__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-text) 16%, transparent);
-  transition: background 0.15s ease, width 0.15s ease;
+.agent-create-page__header {
+  text-align: center;
 }
 
-.agent-create-modal__dot--active {
-  width: 16px;
-  background: var(--color-text-muted);
-}
-
-.agent-create-modal__error {
-  margin: 0;
+.agent-create-page__eyebrow {
+  margin: 0 0 10px;
+  color: var(--color-text-subtle);
   font-size: 12px;
-  color: var(--color-danger);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
-.agent-create-modal__footer-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
-.agent-create-modal__link {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.agent-create-modal__link:hover:not(:disabled) {
-  color: var(--color-text);
-}
-
-.agent-create-modal__link:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.agent-create-modal__title {
+.agent-create-page__title {
   margin: 0;
-  font-size: 18px;
+  color: var(--color-text);
+  font-size: 24px;
   font-weight: 650;
-  letter-spacing: -0.02em;
-  color: var(--color-text);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
 
-.agent-create-modal__subtitle {
-  margin: 4px 0 0;
-  font-size: 13px;
-  line-height: 1.45;
+.agent-create-page__subtitle {
+  min-height: 2.9em;
+  max-width: 44em;
+  margin: 8px auto 0;
   color: var(--color-text-muted);
-  max-width: 36em;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-.agent-create-modal__close {
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.agent-create-modal__close:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
-  color: var(--color-text);
-}
-
-.agent-create-modal__body {
-  flex: 1 1 auto;
+.agent-create-page__body {
   min-height: 0;
-  overflow: hidden;
-  padding: 14px 20px 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.agent-create-modal__body > :deep(.agent-settings-form) {
-  flex: 1 1 auto;
+.agent-create-page__form {
+  width: 100%;
+}
+
+.agent-create-page__form :deep(.agent-settings-form--create) {
+  height: auto;
   min-height: 0;
 }
 
-.agent-create-modal__loading {
-  flex: 1 1 auto;
+.agent-create-page__loading {
+  min-height: 160px;
   display: grid;
   place-items: center;
   color: var(--color-text-subtle);
@@ -612,27 +512,22 @@ watch(
 }
 
 .agent-create-start {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow: auto;
-  padding-right: 2px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .agent-create-choice {
+  min-height: 96px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 4px;
-  flex: 1 1 0;
-  min-height: 64px;
+  gap: 5px;
   width: 100%;
-  padding: 12px 14px;
-  border-radius: 10px;
+  padding: 16px;
   border: 1px solid var(--color-border);
+  border-radius: 12px;
   background: var(--color-surface);
   color: inherit;
   text-align: left;
@@ -651,18 +546,117 @@ watch(
 }
 
 .agent-create-choice__name {
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 600;
-  color: var(--color-text);
 }
 
 .agent-create-choice__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.45;
-  color: var(--color-text-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.agent-create-page__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.agent-create-page__footer-left,
+.agent-create-page__footer-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 14px;
+}
+
+.agent-create-page__footer-left {
+  flex: 1 1 auto;
+}
+
+.agent-create-page__footer-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.agent-create-page__back,
+.agent-create-page__link {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agent-create-page__back:hover:not(:disabled),
+.agent-create-page__link:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.agent-create-page__back:disabled,
+.agent-create-page__link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-create-page__error {
+  min-width: 0;
+  margin: 0;
   overflow: hidden;
+  color: var(--color-danger);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-create-page__progress {
+  display: flex;
+  gap: 5px;
+  width: 100%;
+  height: 3px;
+}
+
+.agent-create-page__progress span {
+  flex: 1 1 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+.agent-create-page__progress-segment--active {
+  background: var(--color-primary) !important;
+}
+
+@media (max-width: 700px) {
+  .agent-create-page {
+    place-items: start center;
+    padding: 28px 20px 32px;
+  }
+
+  .agent-create-page__shell {
+    margin: 0 auto;
+  }
+
+  .agent-create-start {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-create-page__footer {
+    align-items: flex-end;
+  }
+
+  .agent-create-page__error {
+    display: none;
+  }
 }
 </style>

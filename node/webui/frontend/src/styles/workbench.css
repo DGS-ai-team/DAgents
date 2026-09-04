@@ -4599,19 +4599,6 @@ select.settings-field__input {
   color: #b91c1c;
 }
 
-/* legacy decision class names */
-.policy-decision-btn--active.policy-decision-btn--allow-auto {
-  background: rgba(34, 197, 94, 0.14);
-  border-color: rgba(34, 197, 94, 0.35);
-  color: #15803d;
-}
-
-.policy-decision-btn--active.policy-decision-btn--require-approval {
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(245, 158, 11, 0.35);
-  color: #b45309;
-}
-
 .status-panel,
 .policy-panel,
 .triggers-panel,

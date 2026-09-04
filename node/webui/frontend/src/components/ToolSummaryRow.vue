@@ -13,8 +13,6 @@ import { resolveToolVisual } from "../utils/toolSource.js";
 import {
   bashControlMode,
   cancelBashToolCall,
-  isBashBackgroundActive,
-  parseBashResultStatus,
   toolCallIdFromEntry,
   toolNameFromEntry,
   toolJobsStore,
@@ -48,11 +46,8 @@ const toolLabel = computed(() => toolStepToolLabel(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
 const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
 const stepPending = computed(() => toolStepIsPending(stepArgs.value));
-const backgroundActive = computed(() =>
-  isBashBackgroundActive({ callEntry: props.callEntry, resultEntry: props.resultEntry }),
-);
 const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const inProgress = computed(() => stepInProgress.value || backgroundActive.value || controlMode.value === "background");
+const inProgress = computed(() => stepInProgress.value || controlMode.value === "running");
 const showBashControls = computed(() => controlMode.value != null);
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
@@ -72,11 +67,7 @@ const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] ||
 
 const status = computed(() => {
   void nowTick.value;
-  if (backgroundActive.value || controlMode.value === "background") return "后台执行中";
   if (controlMode.value === "running" || phase.value === "running") return "执行中";
-  const bashStatus = parseBashResultStatus(props.resultEntry?.data?.content);
-  if (bashStatus === "CANCELLED") return "已终止";
-  if (bashStatus === "SUCCEEDED") return "已完成";
   const base = toolStepStatusText(stepArgs.value);
   if (phase.value !== "generating" || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
@@ -169,7 +160,8 @@ async function onCancel(ev) {
           type="button"
           class="tool-summary-row__action"
           :disabled="!!busyAction"
-          :title="actionError || undefined"
+          :title="actionError || '仅终止此工具，Agent 可能继续处理'"
+          :aria-label="busyAction === 'cancel' ? '正在终止此工具' : '仅终止此工具，Agent 可能继续处理'"
           @click="onCancel"
         >
           {{ busyAction === "cancel" ? "终止中…" : "终止" }}

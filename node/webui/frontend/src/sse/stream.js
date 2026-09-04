@@ -2,11 +2,11 @@ import { AGENT_STREAM_EVENT_TYPES } from "./agentEvents.js";
 
 const RECONNECT_MS = 5000;
 
-/** 切 Agent 后旧连接事件应丢弃：双方 id 都非空且不一致时忽略。 */
+/** Agent 流必须带当前 Agent 标识；全局流不做 Agent 过滤。 */
 export function shouldIgnoreSSEForAgent(eventAgentId, currentAgentId) {
   const ev = String(eventAgentId || "").trim();
   const cur = String(currentAgentId || "").trim();
-  return Boolean(ev && cur && ev !== cur);
+  return Boolean(cur && ev !== cur);
 }
 
 /**

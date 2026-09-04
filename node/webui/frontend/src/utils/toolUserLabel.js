@@ -1,8 +1,6 @@
 import { truncateGraphemes } from "./textTruncate.js";
 import { resolveToolArgumentsFromData, toolCallPurpose } from "./toolCalls.js";
 import {
-  isBashBackgroundActive,
-  parseBashResultStatus,
   toolCallIdFromEntry,
   toolJobsStore,
 } from "../stores/toolJobs.js";
@@ -193,7 +191,7 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   if (entry.sideEffectApplied) return "completed";
   const resultStatus = String(resultEntry?.data?.status || "").trim().toLowerCase();
   if (resultEntry) {
-    if (resultStatus === "denied" || resultStatus === "rejected") return "rejected";
+    if (resultStatus === "denied") return "rejected";
     if (resultStatus === "failed" || resultStatus === "error" || resultStatus === "unknown") return "failed";
     if (resultStatus === "cancelled" || resultStatus === "canceled" || resultStatus === "timed_out") return "cancelled";
     if (resultStatus === "queued") return "background";
@@ -201,7 +199,6 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
     if (resultStatus === "awaiting_user") return "pending";
     if (resultStatus === "succeeded") return "completed";
   }
-  if (resultEntry?.data?.rejected || callEntry?.data?.rejected) return "rejected";
   if (
     resultEntry?.data?.interrupted ||
     callEntry?.data?.interrupted ||
@@ -212,15 +209,8 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
     return "interrupted";
   }
 
-  const resultContent = String(resultEntry?.data?.content || "");
-  if (resultContent.includes("流式输出被用户中断")) return "interrupted";
-  const bashStatus = parseBashResultStatus(resultEntry?.data?.content);
-  if (bashStatus === "CANCELLED") return "cancelled";
-
   const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
   if (id && toolJobsStore.runningCallIds.includes(id)) return "running";
-  if (id && toolJobsStore.backgroundCallIds.includes(id)) return "background";
-  if (isBashBackgroundActive({ callEntry, resultEntry })) return "background";
 
   // A partial tool_call means the model is still assembling arguments only
   // until the executor registers the call. Once a real job is visible above,
@@ -232,8 +222,6 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   if (executionHint === "settled") return "completed";
   if (executionHint === "failed") return "failed";
 
-  // 残留 RUNNING 但已不在后台队列 → 视为结束
-  if (bashStatus === "RUNNING" || bashStatus === "SUCCEEDED") return "completed";
   if (resultEntry) return "completed";
 
   if (callEntry && !resultEntry) {

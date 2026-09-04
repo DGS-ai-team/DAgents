@@ -41,7 +41,6 @@ const card = computed(() =>
     entry: props.entry,
   }),
 );
-const rejected = computed(() => !!props.entry.data?.rejected);
 const interrupted = computed(() => !!props.entry.data?.interrupted);
 const visual = computed(() => resolveToolVisual(props.entry));
 const resultDisplay = computed(() =>
@@ -69,12 +68,12 @@ const readFilePath = computed(() => {
   return String(args.path || args.file_path || "").trim();
 });
 const showReadFilePreview = computed(
-  () => isResult.value && !rejected.value && isReadFileTool(toolName.value) && !!resultDetail.value && !props.verbose,
+  () => isResult.value && card.value.statusCode !== "denied" && isReadFileTool(toolName.value) && !!resultDetail.value && !props.verbose,
 );
 const showImagePreview = computed(
   () =>
     isResult.value &&
-    !rejected.value &&
+    card.value.statusCode !== "denied" &&
     !props.verbose &&
     (hasToolMedia(props.entry) || isShowImageTool(toolName.value)),
 );
@@ -136,7 +135,7 @@ const toolPhase = computed(() =>
 const isGenerating = computed(() => toolPhase.value === "generating");
 const isInterrupted = computed(() => interrupted.value || toolPhase.value === "interrupted");
 const isUnsuccessfulResult = computed(() =>
-  ["denied", "rejected", "failed", "error", "cancelled", "canceled", "timed_out", "unknown"].includes(
+  ["denied", "failed", "error", "cancelled", "canceled", "timed_out", "unknown"].includes(
     String(props.entry.data?.status || "").trim().toLowerCase(),
   ),
 );
@@ -153,7 +152,7 @@ const statusText = computed(() => {
     return "执行中";
   }
   const resultStatus = String(props.entry.data?.status || "").trim().toLowerCase();
-  if (resultStatus === "denied" || resultStatus === "rejected") return "已拒绝";
+  if (resultStatus === "denied") return "已拒绝";
   if (resultStatus === "failed" || resultStatus === "error") return "执行失败";
   if (resultStatus === "unknown") return "状态未知";
   if (resultStatus === "timed_out") return "已超时";
@@ -161,11 +160,7 @@ const statusText = computed(() => {
   if (resultStatus === "queued") return "后台执行中";
   if (resultStatus === "running") return "执行中";
   if (resultStatus === "awaiting_user") return "等待输入";
-  if (rejected.value) return "已拒绝";
   if (isInterrupted.value) return "已中断";
-  const bashStatus = String(props.entry.data?.content || "").match(/\[BASH_RESULT\]\s+status=([A-Za-z_]+)/i);
-  if (bashStatus && bashStatus[1].toUpperCase() === "CANCELLED") return "已终止";
-  if (bashStatus && bashStatus[1].toUpperCase() === "RUNNING") return "后台执行中";
   return "已完成";
 });
 const showStatusText = computed(() => statusText.value !== "已完成");
@@ -238,7 +233,7 @@ onBeforeUnmount(clearCopyState);
             <span class="tool-exec-bubble__status" role="status" :aria-label="statusText">
               <span v-if="isGenerating" class="tool-exec-spinner" aria-hidden="true" />
               <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{
-                  rejected || isInterrupted || isUnsuccessfulResult || cardIsUnsuccessful ? "−" : "✓"
+                  isInterrupted || isUnsuccessfulResult || cardIsUnsuccessful ? "−" : "✓"
               }}</span>
               <span v-if="showStatusText">{{ statusText }}</span>
             </span>

@@ -11,8 +11,8 @@ describe("shouldIgnoreSSEForAgent", () => {
     expect(shouldIgnoreSSEForAgent("agent-a", "agent-a")).toBe(false);
   });
 
-  it("keeps events when agent id missing (compat)", () => {
-    expect(shouldIgnoreSSEForAgent("", "agent-b")).toBe(false);
+  it("rejects an event without an agent id on an Agent stream", () => {
+    expect(shouldIgnoreSSEForAgent("", "agent-b")).toBe(true);
     expect(shouldIgnoreSSEForAgent("agent-a", "")).toBe(false);
   });
 });
@@ -110,6 +110,7 @@ describe("agent stream event registration", () => {
         "memory/changed",
         "skills/changed",
         "mcp/catalog-changed",
+        "notification_changed",
       ]),
     );
   });

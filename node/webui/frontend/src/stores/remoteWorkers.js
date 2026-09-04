@@ -22,16 +22,16 @@ function recentToolsFrom(raw, fallback = []) {
   const items = Array.isArray(raw) ? raw : Array.isArray(fallback) ? fallback : [];
   return items
     .map((item) => {
-      const toolName = text(item?.tool_name || item?.toolName);
+      const toolName = text(item?.tool_name);
       if (!toolName) return null;
       return {
-        toolCallId: text(item?.tool_call_id || item?.toolCallId),
+        toolCallId: text(item?.tool_call_id),
         toolName,
         status: text(item?.status || "running") || "running",
-        inputSummary: text(item?.input_summary || item?.inputSummary),
-        outputPreview: text(item?.output_preview || item?.outputPreview),
-        startedAt: text(item?.started_at || item?.startedAt),
-        finishedAt: text(item?.finished_at || item?.finishedAt),
+        inputSummary: text(item?.input_summary),
+        outputPreview: text(item?.output_preview),
+        startedAt: text(item?.started_at),
+        finishedAt: text(item?.finished_at),
       };
     })
     .filter(Boolean);
@@ -42,21 +42,22 @@ function progressFrom(item, fallback = {}) {
   return {
     status: text(raw.status || fallback.status || "active") || "active",
     phase: text(raw.phase || fallback.phase),
-    turnCount: intVal(raw.turn_count ?? raw.turnCount ?? fallback.turn_count ?? fallback.turnCount),
-    maxTurns: intVal(raw.max_turns ?? raw.maxTurns ?? fallback.max_turns ?? fallback.maxTurns),
-    currentTool: text(raw.current_tool || raw.currentTool || fallback.current_tool || fallback.currentTool),
-    currentToolCallId: text(raw.current_tool_call_id || raw.currentToolCallId || fallback.current_tool_call_id || fallback.currentToolCallId),
-    currentToolStatus: text(raw.current_tool_status || raw.currentToolStatus || fallback.current_tool_status || fallback.currentToolStatus),
-    lastOutputPreview: text(raw.last_output_preview || raw.lastOutputPreview || fallback.last_output_preview || fallback.lastOutputPreview),
-    recentTools: recentToolsFrom(
-      raw.recent_tools ?? raw.recentTools,
-      fallback.recent_tools ?? fallback.recentTools,
-    ),
-    pendingApproval: raw.pending_approval === true || raw.pendingApproval === true || fallback.pending_approval === true || fallback.pendingApproval === true,
-    pendingApprovalData: raw.pending_approval_data || raw.pendingApprovalData || fallback.pending_approval_data || fallback.pendingApprovalData || null,
+    turnCount: intVal(raw.turn_count ?? fallback.turnCount),
+    maxTurns: intVal(raw.max_turns ?? fallback.maxTurns),
+    currentTool: text(raw.current_tool || fallback.currentTool),
+    currentToolCallId: text(raw.current_tool_call_id || fallback.currentToolCallId),
+    currentToolStatus: text(raw.current_tool_status || fallback.currentToolStatus),
+    lastOutputPreview: text(raw.last_output_preview || fallback.lastOutputPreview),
+    recentTools: Array.isArray(raw.recent_tools)
+      ? recentToolsFrom(raw.recent_tools)
+      : Array.isArray(fallback.recentTools)
+        ? fallback.recentTools
+        : [],
+    pendingApproval: raw.pending_approval === true || fallback.pendingApproval === true,
+    pendingApprovalData: raw.pending_approval_data || fallback.pendingApprovalData || null,
     summary: text(raw.summary || fallback.summary),
     error: text(raw.error || fallback.error),
-    updatedAt: text(raw.updated_at || raw.updatedAt || fallback.updated_at || fallback.updatedAt),
+    updatedAt: text(raw.updated_at || fallback.updatedAt),
     revision: intVal(raw.revision ?? fallback.revision),
   };
 }

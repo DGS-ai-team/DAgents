@@ -25,4 +25,14 @@ describe("cancelState", () => {
       turn_state: { phase: "tool_waiting", terminal: false },
     })).toBe(false);
   });
+
+  it("accepts a terminal response even when the follow-up hydrate is unavailable", () => {
+    expect(classifyCancelOutcome({ cancelled: true, scope: "turn", terminal: true }, null)).toBe("cancelled");
+  });
+
+  it("rejects a response from the wrong cancellation scope", () => {
+    expect(classifyCancelOutcome({ cancelled: true, scope: "tool_execution" }, {
+      turn_state: { phase: "model_generating", terminal: false },
+    })).toBe("invalid_scope");
+  });
 });

@@ -161,7 +161,7 @@ async function removeTriggerConfirmed(item) {
 }
 
 function targetHint(item) {
-  const mode = String(item.session_target_mode || item.agent_target_mode || "").trim();
+  const mode = String(item.session_target_mode || "").trim();
   const modeLabel =
     {
       latest_active_user: "最近活跃对话",
@@ -170,7 +170,7 @@ function targetHint(item) {
       fixed_agent: "指定智能体",
       fixed_session: "指定会话",
     }[mode] || (mode || "未指定");
-  const bound = item.target_bound_agent_id || item.target_session_id;
+  const bound = item.target_session_id;
   if (bound) return `${modeLabel} · ${shortId(bound, 12)}`;
   return modeLabel;
 }

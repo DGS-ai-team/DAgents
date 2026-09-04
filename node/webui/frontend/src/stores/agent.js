@@ -8,7 +8,6 @@ import {
 } from "./turnState.js";
 
 const AGENT_KEY = "dagents_webui_agent_id";
-const LEGACY_SESSION_KEY = "dagents_webui_session_id";
 
 let pendingAckSeq = 0;
 let lastAckedSeq = 0;
@@ -16,14 +15,7 @@ let ackInFlight = false;
 
 function loadPersistedAgentId() {
   try {
-    const cur = localStorage.getItem(AGENT_KEY);
-    if (cur) return cur;
-    const legacy = localStorage.getItem(LEGACY_SESSION_KEY);
-    if (legacy) {
-      localStorage.setItem(AGENT_KEY, legacy);
-      localStorage.removeItem(LEGACY_SESSION_KEY);
-      return legacy;
-    }
+    return localStorage.getItem(AGENT_KEY) || "";
   } catch {
     /* ignore */
   }
@@ -86,10 +78,8 @@ export function persistAgentId(id) {
   try {
     if (id) {
       localStorage.setItem(AGENT_KEY, id);
-      localStorage.removeItem(LEGACY_SESSION_KEY);
     } else {
       localStorage.removeItem(AGENT_KEY);
-      localStorage.removeItem(LEGACY_SESSION_KEY);
     }
   } catch {
     /* ignore */
@@ -126,7 +116,7 @@ function beginTurnWait() {
   agentStore.error = "";
 }
 
-/** 对齐 Go TurnGate.IsStale：Agent 游标优先，兼容无 Agent 游标的内部事件。 */
+/** 对齐 Go TurnGate.IsStale：优先使用 Agent 级连续游标。 */
 export function isStaleEvent(seq, agentSeq = 0, epoch = "") {
   if (epoch && transcriptStore.streamEpoch && epoch !== transcriptStore.streamEpoch) return false;
   const cursor = Number(agentSeq) > 0 ? Number(agentSeq) : Number(seq);

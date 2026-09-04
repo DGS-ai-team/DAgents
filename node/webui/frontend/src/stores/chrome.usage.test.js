@@ -30,10 +30,4 @@ describe("chrome usage strip", () => {
 		expect(chromeStore.usageStrip).toMatchObject({ prompt: 150, completion: 30 });
 	});
 
-	it("keeps legacy round-only events additive", () => {
-		setUsageFromSSE({ round_prompt_tokens: 40, round_completion_tokens: 8 });
-		setUsageFromSSE({ round_prompt_tokens: 10, round_completion_tokens: 2 });
-
-		expect(chromeStore.usageStrip).toMatchObject({ prompt: 50, completion: 10 });
-	});
 });

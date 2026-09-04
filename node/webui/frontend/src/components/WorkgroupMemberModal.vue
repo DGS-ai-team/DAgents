@@ -1,52 +1,22 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
-
-// catalog 失败时的离线兜底：与 shared catalog groups（fs 默认开、bash 默认关）对齐。
-const FALLBACK_GROUPS = [
-  {
-    id: "fs",
-    label: "文件系统",
-    hint: "读/写/搜索等工作区文件工具",
-    defaultOn: true,
-    toolIds: [
-      "read_file",
-      "show_image",
-      "read_image",
-      "write_file",
-      "glob_files",
-      "grep_file",
-      "grep_files",
-      "search_replace",
-    ],
-  },
-  {
-    id: "bash",
-    label: "Shell",
-    hint: "bash_run 等（无额外沙箱，默认不勾选）",
-    defaultOn: false,
-    toolIds: ["bash_run"],
-  },
-];
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   mode: { type: String, default: "create" }, // create | edit
   workgroupId: { type: String, default: "" },
   memberId: { type: String, default: "" },
+  member: { type: Object, default: null },
   defaultHomeNodeId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["close", "saved"]);
 
-const groupOptions = ref(FALLBACK_GROUPS.map((g) => ({ ...g, toolIds: [...g.toolIds] })));
 const agentOptions = ref([]);
 const draft = reactive(emptyDraft());
 const busy = ref(false);
-const loadingSpec = ref(false);
-const catalogError = ref("");
 const error = ref("");
-const advancedOpen = ref(false);
 const nameInput = ref(null);
 
 const title = computed(() => (props.mode === "create" ? "添加成员" : "配置成员"));
@@ -60,108 +30,23 @@ const primaryLabel = computed(() => {
   return props.mode === "create" ? "添加" : "保存";
 });
 const canSubmit = computed(() => {
-  if (busy.value || loadingSpec.value) return false;
+  if (busy.value) return false;
   return String(draft.displayName || "").trim().length > 0 &&
     (props.mode === "edit" || String(draft.agentId || "").trim().length > 0);
 });
-
-function defaultGroupIds(groups = groupOptions.value) {
-  return (groups || []).filter((g) => g.defaultOn).map((g) => g.id);
-}
-
-function expandGroupsToTools(groupIds, groups = groupOptions.value) {
-  const want = new Set((groupIds || []).map(String));
-  const out = [];
-  const seen = new Set();
-  for (const g of groups || []) {
-    if (!want.has(g.id)) continue;
-    for (const id of g.toolIds || []) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push(id);
-    }
-  }
-  return out;
-}
-
-function groupsFromAllowNames(allowNames, groups = groupOptions.value) {
-  const allow = new Set((allowNames || []).map(String));
-  return (groups || [])
-    .filter((g) => (g.toolIds || []).some((id) => allow.has(id)))
-    .map((g) => g.id);
-}
 
 function emptyDraft() {
   return {
     displayName: "",
     homeNodeId: "",
     agentId: "",
-    groups: defaultGroupIds(),
-    soulMd: "",
-    customMd: "",
-    llmProfileId: "",
+    description: "",
   };
-}
-
-function toggleGroup(id) {
-  const set = new Set(draft.groups);
-  if (set.has(id)) set.delete(id);
-  else set.add(id);
-  draft.groups = [...set];
 }
 
 function onBackdropClick(event) {
   if (busy.value) return;
   if (event.target === event.currentTarget) emit("close");
-}
-
-async function loadToolCatalog() {
-  catalogError.value = "";
-  try {
-    // 始终从本 Node 拉取成员可用工具组（嵌入 catalog，不经 Manage）。
-    const catalog = await api.getMemberToolCatalog();
-    const tools = Array.isArray(catalog?.tools) ? catalog.tools : [];
-    const groups = Array.isArray(catalog?.groups) ? catalog.groups : [];
-    const byGroup = new Map();
-    for (const t of tools) {
-      const gid = String(t.group || "").trim() || "other";
-      if (!byGroup.has(gid)) {
-        byGroup.set(gid, {
-          id: gid,
-          label: String(t.group_label || gid).trim() || gid,
-          hint: "",
-          defaultOn: false,
-          toolIds: [],
-        });
-      }
-      const entry = byGroup.get(gid);
-      const tid = String(t.id || "").trim();
-      if (tid) entry.toolIds.push(tid);
-      if (t.default) entry.defaultOn = true;
-      if (!entry.hint && t.hint) entry.hint = String(t.hint);
-    }
-    const ordered = [];
-    const seen = new Set();
-    for (const g of groups) {
-      const id = String(g.id || "").trim();
-      if (!id || !byGroup.has(id)) continue;
-      const entry = byGroup.get(id);
-      if (g.label) entry.label = String(g.label);
-      ordered.push(entry);
-      seen.add(id);
-    }
-    for (const [id, entry] of byGroup) {
-      if (!seen.has(id)) ordered.push(entry);
-    }
-    if (ordered.length) {
-      groupOptions.value = ordered;
-      if (props.mode === "create" && !props.open) {
-        draft.groups = defaultGroupIds(ordered);
-      }
-    }
-  } catch (e) {
-    catalogError.value = e?.message || "加载 Node 工具组失败，已用离线兜底";
-  }
 }
 
 async function loadAgentCatalog() {
@@ -191,7 +76,6 @@ async function loadAgentCatalog() {
 async function resetFromProps() {
   error.value = "";
   busy.value = false;
-  advancedOpen.value = false;
   Object.assign(draft, emptyDraft());
   draft.homeNodeId = String(props.defaultHomeNodeId || "").trim();
 
@@ -201,29 +85,13 @@ async function resetFromProps() {
     return;
   }
 
-  loadingSpec.value = true;
-  try {
-    const spec = await api.getWorkgroupMemberSpec(props.workgroupId, props.memberId);
-    draft.displayName = String(spec?.display_name || "").trim();
-    draft.agentId = String(spec?.agent_id || "").trim();
-    draft.homeNodeId = String(spec?.home_node_id || props.defaultHomeNodeId || "").trim();
-    const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
-    draft.groups = allow.length
-      ? groupsFromAllowNames(allow.map(String))
-      : defaultGroupIds();
-    draft.soulMd = String(spec?.prompt?.soul_md || "");
-    draft.customMd = String(spec?.prompt?.custom_md || "");
-    draft.llmProfileId = String(spec?.llm_profile_id || "").trim();
-    if (draft.soulMd.trim() || draft.customMd.trim() || draft.llmProfileId) {
-      advancedOpen.value = true;
-    }
-  } catch (e) {
-    error.value = e?.message || "加载成员配置失败";
-  } finally {
-    loadingSpec.value = false;
-    await nextTick();
-    nameInput.value?.focus?.();
-  }
+  const member = props.member || {};
+  draft.displayName = String(member.display_name || "").trim();
+  draft.agentId = String(member.agent_id || "").trim();
+  draft.homeNodeId = String(member.home_node_id || props.defaultHomeNodeId || "").trim();
+  draft.description = String(member.description || "").trim();
+  await nextTick();
+  nameInput.value?.focus?.();
 }
 
 async function submit() {
@@ -232,15 +100,8 @@ async function submit() {
   if (!name || !props.workgroupId || busy.value) return;
   const body = {
     display_name: name,
+    description: String(draft.description || "").trim(),
   };
-  if (props.mode !== "create") {
-    const selected = draft.groups.length ? [...draft.groups] : defaultGroupIds();
-    body.allow_tool_names = expandGroupsToTools(selected);
-    body.prompt = {
-      soul_md: draft.soulMd,
-      custom_md: draft.customMd,
-    };
-  }
   if (props.mode === "create") {
     const agentId = String(draft.agentId || "").trim();
     if (!agentId) {
@@ -251,12 +112,6 @@ async function submit() {
     const target = agentOptions.value.find((item) => item.id === agentId);
     if (target?.nodeId) body.home_node_id = target.nodeId;
   }
-  const llm = String(draft.llmProfileId || "").trim();
-  if (llm) {
-    body.llm_profile_id = llm;
-    body.llm_profile_revision = "1";
-  }
-
   busy.value = true;
   try {
     if (props.mode === "create") {
@@ -283,17 +138,12 @@ watch(
   (visible) => {
     if (visible) {
       void (async () => {
-        await loadToolCatalog();
         await loadAgentCatalog();
         await resetFromProps();
       })();
     }
   },
 );
-
-onMounted(() => {
-  void loadToolCatalog();
-});
 </script>
 
 <template>
@@ -330,8 +180,6 @@ onMounted(() => {
         </header>
 
         <div class="wg-member-modal__body">
-          <p v-if="loadingSpec" class="wg-member-modal__hint">加载配置…</p>
-          <template v-else>
             <label class="wg-member-modal__field">
               <span class="wg-member-modal__label">显示名</span>
               <input
@@ -375,132 +223,22 @@ onMounted(() => {
               工具、提示词和 LLM 配置由所选 Agent 自己管理；工作组只建立独立会话。
             </p>
 
-            <fieldset v-if="props.mode !== 'create'" class="wg-member-modal__tools">
-              <legend class="wg-member-modal__label">工具组</legend>
-              <p class="wg-member-modal__hint-text">
-                由本 Node 提供；默认文件系统，Shell 需显式开启。
-              </p>
-              <p v-if="catalogError" class="wg-member-modal__hint-text wg-member-modal__hint-text--warn">
-                {{ catalogError }}
-              </p>
-              <div class="wg-member-modal__tool-list">
-                <button
-                  v-for="opt in groupOptions"
-                  :key="opt.id"
-                  type="button"
-                  class="wg-member-modal__tool"
-                  :class="{ 'wg-member-modal__tool--on': draft.groups.includes(opt.id) }"
-                  :disabled="busy"
-                  :title="opt.hint || opt.id"
-                  :aria-pressed="draft.groups.includes(opt.id)"
-                  @click="toggleGroup(opt.id)"
-                >
-                  <span class="wg-member-modal__tool-check" aria-hidden="true">
-                    <svg v-if="draft.groups.includes(opt.id)" viewBox="0 0 12 12" width="11" height="11">
-                      <path
-                        d="M2.5 6.2L4.8 8.5 9.5 3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span class="wg-member-modal__tool-text">
-                    <span class="wg-member-modal__tool-name">{{ opt.label }}</span>
-                    <span v-if="opt.hint" class="wg-member-modal__tool-hint">{{ opt.hint }}</span>
-                  </span>
-                </button>
-              </div>
-            </fieldset>
+            <label class="wg-member-modal__field">
+              <span class="wg-member-modal__label">成员说明</span>
+              <textarea
+                v-model="draft.description"
+                class="wg-member-modal__input wg-member-modal__textarea"
+                rows="3"
+                placeholder="描述这个成员适合处理的任务（可选）"
+                :disabled="busy"
+              />
+            </label>
 
-            <button
-              v-if="props.mode !== 'create'"
-              type="button"
-              class="wg-member-modal__advanced-toggle"
-              :aria-expanded="advancedOpen"
-              :disabled="busy"
-              @click="advancedOpen = !advancedOpen"
-            >
-              <span>{{ advancedOpen ? "收起高级选项" : "高级选项" }}</span>
-              <svg
-                class="wg-member-modal__advanced-chevron"
-                :class="{ 'wg-member-modal__advanced-chevron--open': advancedOpen }"
-                viewBox="0 0 12 12"
-                width="12"
-                height="12"
-                aria-hidden="true"
-              >
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-
-            <div v-if="advancedOpen" class="wg-member-modal__advanced">
-              <label v-if="mode === 'create'" class="wg-member-modal__field">
-                <span class="wg-member-modal__label">Home Node</span>
-                <input
-                  v-model="draft.homeNodeId"
-                  class="wg-member-modal__input"
-                  type="text"
-                  placeholder="默认本机"
-                  autocomplete="off"
-                  :disabled="busy"
-                />
-                <span class="wg-member-modal__hint-text">成员工具在该 Node 上执行</span>
-              </label>
-              <label v-else class="wg-member-modal__field">
-                <span class="wg-member-modal__label">Home Node</span>
-                <input
-                  class="wg-member-modal__input"
-                  type="text"
-                  :value="draft.homeNodeId"
-                  disabled
-                />
-              </label>
-
-              <label class="wg-member-modal__field">
-                <span class="wg-member-modal__label">LLM 档案 id</span>
-                <input
-                  v-model="draft.llmProfileId"
-                  class="wg-member-modal__input"
-                  type="text"
-                  placeholder="留空则跟随工作组"
-                  autocomplete="off"
-                  :disabled="busy"
-                />
-              </label>
-
-              <label class="wg-member-modal__field">
-                <span class="wg-member-modal__label">Soul</span>
-                <textarea
-                  v-model="draft.soulMd"
-                  class="wg-member-modal__input wg-member-modal__textarea"
-                  rows="3"
-                  placeholder="角色与行为准则（可选）"
-                  :disabled="busy"
-                />
-              </label>
-
-              <label class="wg-member-modal__field">
-                <span class="wg-member-modal__label">Custom</span>
-                <textarea
-                  v-model="draft.customMd"
-                  class="wg-member-modal__input wg-member-modal__textarea"
-                  rows="2"
-                  placeholder="额外说明（可选）"
-                  :disabled="busy"
-                />
-              </label>
-            </div>
-          </template>
+            <label v-if="props.mode !== 'create'" class="wg-member-modal__field">
+              <span class="wg-member-modal__label">绑定 Agent</span>
+              <input class="wg-member-modal__input" type="text" :value="draft.agentId" disabled />
+              <span class="wg-member-modal__hint-text">创建后不可更换绑定的 Agent 或 Home Node。</span>
+            </label>
         </div>
 
         <footer class="wg-member-modal__footer">

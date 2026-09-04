@@ -8,24 +8,8 @@ export const POLICY_MODES = [
 
 export const PROTECTED_POLICY_TOOL = "ask_user_information";
 
-/** 兼容旧 decision 字段；require_approval 无法区分 always/rule，默认 always。 */
-export function decisionToMode(decision) {
-  switch (String(decision || "").trim()) {
-    case "allow_auto":
-      return "never";
-    case "deny":
-      return "deny";
-    case "require_approval":
-      return "always";
-    default:
-      return "rule";
-  }
-}
-
 export function entryMode(row) {
-  const mode = String(row?.mode || "").trim();
-  if (mode) return mode;
-  return decisionToMode(row?.decision);
+  return String(row?.mode || "rule").trim() || "rule";
 }
 
 export function canSetPolicyMode(toolName, mode) {
@@ -72,7 +56,7 @@ export function applyLocalToolUpdate(snapshot, name, mode) {
   if (!snapshot || typeof snapshot !== "object") return;
   const tools = Array.isArray(snapshot.tools) ? snapshot.tools : [];
   const idx = tools.findIndex((item) => item?.name === name);
-  const row = { name, mode, decision: modeToLegacyDecision(mode), configured: true };
+  const row = { name, mode, configured: true };
   if (idx >= 0) {
     tools[idx] = { ...tools[idx], ...row };
   } else {
@@ -88,7 +72,7 @@ export function applyLocalShellUpdate(snapshot, shellType, command, mode) {
   if (!cmd) return;
   const items = Array.isArray(shell[shellType]) ? shell[shellType] : [];
   const idx = items.findIndex((item) => normalizeShellCommand(item?.command) === cmd);
-  const row = { command: cmd, mode, decision: modeToLegacyDecision(mode), configured: true };
+  const row = { command: cmd, mode, configured: true };
   if (idx >= 0) {
     items[idx] = { ...items[idx], ...row };
   } else {
@@ -105,17 +89,4 @@ export function removeLocalShellEntry(snapshot, shellType, command) {
   const items = Array.isArray(shell[shellType]) ? shell[shellType] : [];
   shell[shellType] = items.filter((item) => normalizeShellCommand(item?.command) !== cmd);
   snapshot.shell = shell;
-}
-
-function modeToLegacyDecision(mode) {
-  switch (mode) {
-    case "never":
-      return "allow_auto";
-    case "deny":
-      return "deny";
-    case "always":
-      return "require_approval";
-    default:
-      return "require_approval";
-  }
 }
