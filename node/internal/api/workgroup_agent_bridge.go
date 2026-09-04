@@ -167,6 +167,10 @@ func (b *workgroupAgentBridge) buildAgentSessionRuntime(
 	if err != nil {
 		return session.TurnOptions{}, nil, nil, nil, err
 	}
+	// Workgroup assignments use a synthetic legacy scope and must not recall or
+	// mutate the assigned Agent's personal workspace memory.
+	_ = built.Close()
+	built.TurnOptions.MemoryService = nil
 	b.server.attachNodeRuntimeDeps(built.Registry, req.AgentID)
 	if b.server.cfg != nil {
 		built.TurnOptions.PreferredName = b.server.cfg.PreferredName()

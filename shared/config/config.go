@@ -44,6 +44,7 @@ type Config struct {
 	Manage            ManageConfig            `yaml:"manage"`
 	Skills            SkillsConfig            `yaml:"skills"`
 	Compression       CompressionConfig       `yaml:"compression"`
+	Memory            MemoryConfig            `yaml:"memory"`
 	Triggers          TriggersConfig          `yaml:"triggers"`
 	RawMessageHistory RawMessageHistoryConfig `yaml:"raw_message_history"`
 	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
@@ -218,6 +219,16 @@ type CompressionConfig struct {
 	IdleAutoCompressSeconds     int `yaml:"idle_auto_compress_seconds"`
 	IdleAutoCompressPollSeconds int `yaml:"idle_auto_compress_poll_seconds"`
 	IdleAutoCompressMinTokens   int `yaml:"idle_auto_compress_min_tokens"`
+}
+
+// MemoryConfig controls optional background extraction from compression
+// slices. AutoExtract deliberately defaults to false because it adds an LLM
+// call and model-inferred candidates still need consolidation/approval rules.
+type MemoryConfig struct {
+	AutoExtract        bool `yaml:"auto_extract"`
+	CandidateQueueSize int  `yaml:"candidate_queue_size"`
+	MaxCandidates      int  `yaml:"max_candidates"`
+	CoreBudgetTokens   int  `yaml:"core_budget_tokens"`
 }
 
 // HooksConfig 控制 Node turn Hook 行为。
@@ -547,6 +558,15 @@ func (c *Config) ApplyDefaults() {
 	if c.Compression.IdleAutoCompressPollSeconds <= 0 {
 		c.Compression.IdleAutoCompressPollSeconds = 60
 	}
+	if c.Memory.CandidateQueueSize <= 0 {
+		c.Memory.CandidateQueueSize = 16
+	}
+	if c.Memory.MaxCandidates <= 0 {
+		c.Memory.MaxCandidates = 8
+	}
+	if c.Memory.CoreBudgetTokens <= 0 {
+		c.Memory.CoreBudgetTokens = 2000
+	}
 	c.applyBrowserDefaults()
 	c.applyWeComDefaults()
 }
@@ -564,7 +584,7 @@ func (c *Config) IdleAutoCompressPollInterval() time.Duration {
 	return time.Duration(c.Compression.IdleAutoCompressPollSeconds) * time.Second
 }
 
-// RuntimeDir 返回运行时根目录（固定 DefaultRuntimeRoot；子目录路径均相对此根硬编码）。
+// RuntimeDir 返回 Node 控制面运行时根目录（固定 DefaultRuntimeRoot；子目录路径均相对此根硬编码）。
 func (c *Config) RuntimeDir() string {
 	root := strings.TrimRight(strings.TrimSpace(c.RuntimeRoot), "/")
 	if root == "" {
@@ -573,7 +593,8 @@ func (c *Config) RuntimeDir() string {
 	return root
 }
 
-// DataDir 返回 Node 运行目录下的共享临时目录（`<runtime_root>/data`）。
+// DataDir 返回旧版 Node 运行目录临时目录（`<runtime_root>/data`）。
+// 该路径仅为兼容已有安装保留，不会由新的 Agent workspace 初始化流程主动创建。
 func (c *Config) DataDir() string {
 	return filepath.Join(c.RuntimeDir(), "data")
 }
@@ -706,13 +727,14 @@ func (c *Config) ListenAddr() string {
 	return fmt.Sprintf("%s:%d", c.Listen.Host, c.Listen.Port)
 }
 
-// MemoryDir 返回持久化记忆目录（`<runtime>/memory`）。
+// MemoryDir 返回 Node 控制面持久化目录（`<runtime>/memory`）。Agent 私有 workspace 状态不使用此路径。
 func (c *Config) MemoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "memory")
 }
 
 // SessionDBPath 返回对话运行时 SQLite 路径（`<runtime>/memory/sessions.db`；表为 agent_runtimes）。
-// Phase 2 起对话历史迁入 agents；过渡期消息路径仍可能使用本库。
+// 该数据库属于 Node 控制面，记录通过 agent_id 隔离的会话快照；workspace 内的
+// .dagents/<agent_id>/history 是原始消息审计侧车，两者职责不同。
 func (c *Config) SessionDBPath() string {
 	return filepath.Join(c.MemoryDir(), "sessions.db")
 }
@@ -737,11 +759,6 @@ func (c *Config) BackgroundJobsDBPath() string {
 	return filepath.Join(c.RuntimeDir(), "background_jobs.db")
 }
 
-// AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。
-func (c *Config) AgentsDir() string {
-	return filepath.Join(c.RuntimeDir(), "agents")
-}
-
 // AgentTemplatesDir 返回用户自定义模板目录（`<runtime>/agent-templates`）。
 func (c *Config) AgentTemplatesDir() string {
 	return filepath.Join(c.RuntimeDir(), "agent-templates")
@@ -758,7 +775,8 @@ func (c *Config) RawMessageHistoryEnabled() bool {
 	return true
 }
 
-// RawMessageHistoryDir 返回 JSONL 根目录（`<runtime>/history`）。
+// RawMessageHistoryDir 返回未绑定 Agent 时的 JSONL 兼容根目录（`<runtime>/history`）。
+// 正常 Agent runtime 会在 workspace 内按 agent_id 覆盖此路径。
 func (c *Config) RawMessageHistoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "history")
 }

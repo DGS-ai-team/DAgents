@@ -77,7 +77,7 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 	wsPath := filepath.Join(wsRoot, req.WorkgroupID, req.MemberID)
 	created := false
 	if _, err := os.Stat(wsPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Join(wsPath, "data"), 0o755); err != nil {
+		if err := os.MkdirAll(wsPath, 0o755); err != nil {
 			return nil, err
 		}
 		created = true

@@ -24,6 +24,9 @@ const (
 	// UserNameContext marks a request-only runtime context injection. These
 	// messages are never persisted into the session transcript.
 	UserNameContext = "context"
+	// UserNameMemoryContext marks a request-only Turn-scoped memory context.
+	// It is kept separate from runtime environment context and never persisted.
+	UserNameMemoryContext = "memory_context"
 )
 
 // UserMessage constructs a plain-text role=user message. The legacy name is

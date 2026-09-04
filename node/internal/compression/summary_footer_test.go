@@ -30,3 +30,14 @@ func TestFinalizeCompressionSummary_skipsEmptySession(t *testing.T) {
 		t.Fatalf("got = %q", got)
 	}
 }
+
+func TestFinalizeCompressionSummary_usesWorkspaceScopedJournalPath(t *testing.T) {
+	at := time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC)
+	got := FinalizeCompressionSummary("summary body", "sess-a", true, at, ".dagents/agt-a")
+	if !strings.Contains(got, "<workspace_root>/.dagents/agt-a/history/20260621/sess-a.jsonl") {
+		t.Fatalf("got = %q", got)
+	}
+	if !strings.Contains(got, "workspace 私有状态") {
+		t.Fatalf("got = %q", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAgentPolicyAndPromptContextSQLite(t *testing.T) {
@@ -60,5 +61,32 @@ func TestAgentPolicyAndPromptContextSQLite(t *testing.T) {
 	}
 	if got, _ := st.GetAgentPromptContext(ctx, "agt-1"); got != nil {
 		t.Fatal("prompt context should be deleted on soft delete")
+	}
+}
+
+func TestSaveAgentPromptContextMetadataDoesNotWriteLegacyLongTerm(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents.db")
+	st, err := OpenAgents(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.SaveAgentPromptContext(ctx, AgentPromptContextRecord{
+		AgentID: "agt-metadata", LongTermMD: "legacy memory", UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveAgentPromptContextMetadata(ctx, AgentPromptContextRecord{
+		AgentID: "agt-metadata", SoulMD: "updated soul", LongTermMD: "must not persist", UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetAgentPromptContext(ctx, "agt-metadata")
+	if err != nil || got == nil {
+		t.Fatalf("context = %+v err=%v", got, err)
+	}
+	if got.SoulMD != "updated soul" || got.LongTermMD != "legacy memory" {
+		t.Fatalf("metadata save changed legacy field: %+v", got)
 	}
 }

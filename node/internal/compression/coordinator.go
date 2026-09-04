@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
@@ -86,17 +87,47 @@ func (t *compressionTask) forceResult(status string) ForceResult {
 
 // Coordinator 协调 silent 异步与 blocking 同步摘要压缩。
 type Coordinator struct {
-	client                   llm.Client
-	silentTriggerTokens      int
-	blockingTriggerTokens    int
-	rawMessageHistoryEnabled bool
+	client                        llm.Client
+	silentTriggerTokens           int
+	blockingTriggerTokens         int
+	rawMessageHistoryEnabled      bool
+	rawMessageHistoryRelativeRoot string
 
-	mu                sync.Mutex
-	sessionTasks      map[string]*compressionTask
-	readyCompressions map[string]readyCompression
-	lastCompressions  map[string]LastCompressionSnapshot
-	silentCooldown    map[string]silentCooldownState
-	logger            *slog.Logger
+	mu                 sync.Mutex
+	sessionTasks       map[string]*compressionTask
+	readyCompressions  map[string]readyCompression
+	lastCompressions   map[string]LastCompressionSnapshot
+	silentCooldown     map[string]silentCooldownState
+	candidateSubmitter memory.CandidateSubmitter
+	candidateScope     memory.Scope
+	logger             *slog.Logger
+}
+
+// SetCandidateSubmitter binds the optional compression-to-memory extension.
+// The submitter owns its bounded background queue; compression only hands it
+// a frozen slice and never waits for extraction or consolidation.
+func (c *Coordinator) SetCandidateSubmitter(submitter memory.CandidateSubmitter) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.candidateSubmitter = submitter
+	c.mu.Unlock()
+}
+
+// SetCandidateScope stamps the Agent's already-authorized memory scope on
+// background extraction input. Model output cannot use this hook to widen
+// the scope.
+func (c *Coordinator) SetCandidateScope(scope memory.Scope) {
+	if c == nil {
+		return
+	}
+	if scope != memory.ScopeGlobal {
+		scope = memory.ScopeAgent
+	}
+	c.mu.Lock()
+	c.candidateScope = scope
+	c.mu.Unlock()
 }
 
 // NewCoordinator 构造压缩协调器；silent/blocking 阈值 <=0 表示关闭对应档位。
@@ -353,6 +384,7 @@ func (c *Coordinator) runCompressionFlow(
 	if !hasCompressibleContent(picked) {
 		return false
 	}
+	c.submitCandidateExtraction(sessionID, agentID, picked, compressionSourceFingerprint(input.Messages, plan))
 	compressStart := leadingSystemSkip(input.Messages)
 	input.End = plan.End
 	input.SidecarAppend = plan.SidecarAppend
@@ -374,7 +406,7 @@ func (c *Coordinator) runCompressionFlow(
 		})
 		return false
 	}
-	summary = FinalizeCompressionSummary(summary, sessionID, c.rawMessageHistoryEnabled, time.Now())
+	summary = FinalizeCompressionSummary(summary, sessionID, c.rawMessageHistoryEnabled, time.Now(), c.rawMessageHistoryRelativeRoot)
 	c.mu.Lock()
 	c.readyCompressions[sessionID] = readyCompression{
 		End:                    plan.End,
@@ -387,6 +419,37 @@ func (c *Coordinator) runCompressionFlow(
 	}
 	c.mu.Unlock()
 	return true
+}
+
+func (c *Coordinator) submitCandidateExtraction(sessionID, agentID string, picked []llm.Message, fingerprint string) {
+	if c == nil || len(picked) == 0 {
+		return
+	}
+	c.mu.Lock()
+	submitter := c.candidateSubmitter
+	scope := c.candidateScope
+	c.mu.Unlock()
+	if submitter == nil {
+		return
+	}
+	messages := make([]memory.ExtractionMessage, 0, len(picked))
+	for _, message := range picked {
+		converted := memory.ExtractionMessage{
+			Role: message.Role, Name: message.Name, Content: message.Content,
+			ToolCallID: message.ToolCallID,
+		}
+		for _, call := range message.ToolCalls {
+			converted.ToolCalls = append(converted.ToolCalls, memory.ExtractionToolCall{
+				ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments,
+			})
+		}
+		messages = append(messages, converted)
+	}
+	// Submit is intentionally non-blocking. A full optional queue drops this
+	// extraction batch; the compression summary and active Turn continue.
+	submitter.Submit(memory.ExtractionInput{
+		AgentID: agentID, SessionID: sessionID, Scope: scope, SourceFingerprint: fingerprint, Messages: messages,
+	})
 }
 
 func (c *Coordinator) applyReadyCompression(sessionID, agentID string, hub *stream.Hub, messages *[]llm.Message) applyOutcome {

@@ -45,6 +45,30 @@ export function getAgentUpdate() {
   return apiFetch("/v1/agent/update");
 }
 
+/** 当前 Node 可用的宿主/桌面能力；UI 不直接探测 Shell 端口。 */
+export function getPlatformCapabilities() {
+  return apiFetch("/v1/platform/capabilities");
+}
+
+export function pickPlatformDirectory() {
+  return apiFetch("/v1/platform/directory-picker", { method: "POST", body: {} });
+}
+
+export function getPlatformClipboardFiles() {
+  return apiFetch("/v1/platform/clipboard/files");
+}
+
+export function reportPlatformUIFocus(payload = {}) {
+  return apiFetch("/v1/platform/ui-focus", { method: "POST", body: payload });
+}
+
+export function applyAgentUpdate({ force = false } = {}) {
+  return apiFetch("/v1/agent/update/apply", {
+    method: "POST",
+    body: { force },
+  });
+}
+
 export function getLLMSettings() {
   return apiFetch("/v1/llm/settings");
 }

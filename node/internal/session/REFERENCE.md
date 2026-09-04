@@ -4,7 +4,7 @@
 
 | 符号 | 说明 |
 |------|------|
-| `TurnOptions` | turn 编排配置（workspace root、MaxToolLoops、skills、压缩、journal） |
+| `TurnOptions` | turn 编排配置（workspace root、MaxToolLoops、skills、压缩、journal、memory v2） |
 | `Manager` | 会话表；每 session 独立 runtime + InputBox + 控制队列 |
 | `NewManager` | 绑定 agent、Hub、LLM、Registry、policy、store、TurnOptions |
 | `SetChildAgentManager` | 注入 `childagent.Manager` 并 `BindHost` |
@@ -52,6 +52,7 @@
 | `lifecycleAfterModelStep` / `lifecycleAfterResume` | 将单步结果映射为 Coordinator 生命周期状态，并同步当前 Step 的 messages |
 | `persist` / `clearMessages` | SQLite 持久化 |
 | `enqueue` | 仅传输 resume、异步事实和恢复控制项；外部输入不再经过优先级队列 |
+| `candidatePipeline` | 可选的有界后台记忆候选管线；只接收压缩快照，不向 Turn/MessageQueue 注入消息 |
 | `cancelTurn` / `stop` | 取消或停止 consumer |
 | `contextView` | 组装 `ContextView` |
 | `runTurnStepAtEpoch` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在生命周期收尾后触发子 Agent 结算 |

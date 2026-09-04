@@ -329,7 +329,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			RuntimeDir:    cfg.RuntimeDir(),
 			SkillsRoot:    cfg.SkillsRoot(),
 		},
-		MultimodalEnabled: cfg.MultimodalEnabled(),
+		MultimodalEnabled:        cfg.MultimodalEnabled(),
+		MemoryAutoExtract:        cfg.Memory.AutoExtract,
+		MemoryCandidateQueueSize: cfg.Memory.CandidateQueueSize,
+		MemoryCandidateMaxItems:  cfg.Memory.MaxCandidates,
+		MemoryCoreBudgetTokens:   cfg.Memory.CoreBudgetTokens,
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:            true,

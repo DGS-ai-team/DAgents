@@ -171,6 +171,32 @@ func TestTerminalSessionRunCommandUsesExistingPTYAndConsumesTranscript(t *testin
 	session.shutdown()
 }
 
+func TestBuildPowerShellTerminalCommandInputUsesConsoleEnterLineEndings(t *testing.T) {
+	input, start, endPrefix, err := buildTerminalCommandInput(
+		"powershell",
+		"echo terminal-command-ok",
+		`C:\workspace`,
+		"test-token",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start != "__DAGENTS_COMMAND_START_test-token__" || endPrefix != "__DAGENTS_COMMAND_END_test-token_" {
+		t.Fatalf("unexpected markers: start=%q end=%q", start, endPrefix)
+	}
+	text := string(input)
+	if !strings.Contains(text, "\r\n") {
+		t.Fatalf("PowerShell wrapper must use CRLF line endings: %q", text)
+	}
+	if strings.Contains(strings.ReplaceAll(text, "\r\n", ""), "\n") {
+		t.Fatalf("PowerShell wrapper contains a bare LF: %q", text)
+	}
+	if !strings.Contains(text, "Write-Output "+powerShellQuote(start)+"\r\n") ||
+		!strings.Contains(text, "Write-Output ('"+endPrefix+"' + $__DAGENTS_RC + '__')\r\n") {
+		t.Fatalf("PowerShell wrapper markers are incomplete: %q", text)
+	}
+}
+
 func TestParseTerminalCommandTranscriptDropsPTYPromptNoise(t *testing.T) {
 	output, code, done, started := parseTerminalCommandTranscript([]byte(
 		"__DAGENTS_COMMAND_START_token__\n"+
@@ -180,6 +206,17 @@ func TestParseTerminalCommandTranscriptDropsPTYPromptNoise(t *testing.T) {
 			"__DAGENTS_COMMAND_END_token_0__\n",
 	), "__DAGENTS_COMMAND_START_token__", "__DAGENTS_COMMAND_END_token_")
 	if !done || !started || code != 0 || !bytes.Contains(output, []byte("12:00:00 up 1 day")) || bytes.Contains(output, []byte("2004")) {
+		t.Fatalf("unexpected parsed output=%q code=%d done=%v started=%v", output, code, done, started)
+	}
+}
+
+func TestParseTerminalCommandTranscriptAcceptsInteractivePromptBeforeMarkers(t *testing.T) {
+	output, code, done, started := parseTerminalCommandTranscript([]byte(
+		">> __DAGENTS_COMMAND_START_token__\r\n"+
+			">> command-output\r\n"+
+			">> __DAGENTS_COMMAND_END_token_0__\r\n",
+	), "__DAGENTS_COMMAND_START_token__", "__DAGENTS_COMMAND_END_token_")
+	if !done || !started || code != 0 || string(output) != ">> command-output" {
 		t.Fatalf("unexpected parsed output=%q code=%d done=%v started=%v", output, code, done, started)
 	}
 }

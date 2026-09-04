@@ -18,6 +18,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -74,6 +75,9 @@ type runtime struct {
 	skillRevision     string
 	// 上下文压缩逻辑
 	compression *compression.Coordinator
+	// Optional background memory extraction; it is stopped before the memory
+	// service so late compression callbacks cannot use a closed database.
+	candidatePipeline *memory.CandidatePipeline
 
 	started bool
 	done    chan struct{}
@@ -104,6 +108,7 @@ type runtime struct {
 	pendingLongTermScope  string               // scope changes wait for the next human Turn
 	workspaceRoot         string               // Agent 工作区根路径
 	media                 *media.Registry      // session 媒体索引（F-M1）
+	memoryService         memory.Service       // v2 workspace memory authority
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
@@ -183,6 +188,22 @@ func newRuntimeWithPublisher(
 		turnCatalog = catalog
 	}
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
+	var candidatePipeline *memory.CandidatePipeline
+	if turnOpts.MemoryAutoExtract && llmClient != nil && turnOpts.MemoryService != nil {
+		if consolidator, ok := turnOpts.MemoryService.(memory.Consolidator); ok {
+			candidatePipeline = memory.NewCandidatePipeline(
+				memory.NewLLMCandidateExtractor(llmClient, turnOpts.MemoryCandidateMaxItems, 24000),
+				consolidator,
+				turnOpts.MemoryCandidateQueueSize,
+				func(err error) {
+					if logger != nil {
+						logger.Warn("background memory candidate pipeline failed", "session_id", id, "error", err)
+					}
+				},
+			)
+			candidatePipeline.SetCoreBudget(turnOpts.MemoryCoreBudgetTokens)
+		}
+	}
 	rt := &runtime{
 		session:         Session{ID: id, AgentID: agentID},
 		inputBox:        NewInputBox(),
@@ -203,8 +224,14 @@ func newRuntimeWithPublisher(
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)
 			coord.SetRawMessageHistoryEnabled(turnOpts.RawMessageHistoryEnabled)
+			coord.SetRawMessageHistoryRelativeRoot(turnOpts.RawMessageHistoryRelativeRoot)
+			coord.SetCandidateSubmitter(candidatePipeline)
+			if scoped, ok := turnOpts.MemoryService.(interface{ Scope() memory.Scope }); ok {
+				coord.SetCandidateScope(scoped.Scope())
+			}
 			return coord
 		}(),
+		candidatePipeline:        candidatePipeline,
 		messages:                 append([]llm.Message(nil), initial...),
 		loadedSkills:             append([]skills.LoadedSkill(nil), loaded...),
 		skillRevision:            turnCatalog.Revision(),
@@ -218,6 +245,25 @@ func newRuntimeWithPublisher(
 		runtimeDigest:            strings.TrimSpace(turnOpts.RuntimeDigest),
 		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
 		turnBudget:               turnOpts.Budget,
+		memoryService:            turnOpts.MemoryService,
+	}
+	if candidatePipeline != nil {
+		candidatePipeline.SetOnChange(func(report memory.ConsolidationReport) {
+			if rt.publisher == nil {
+				return
+			}
+			rt.publisher.Publish(rt.agentID, "memory/changed", map[string]any{
+				"agent_id":           rt.agentID,
+				"change_kind":        "consolidated",
+				"candidate_count":    report.CandidateCount,
+				"added":              report.Added,
+				"duplicates":         report.Duplicates,
+				"pending_conflicts":  report.PendingConflicts,
+				"superseded":         report.Superseded,
+				"store_revision":     report.StoreRevision,
+				"effective_boundary": "next_turn",
+			})
+		})
 	}
 	if reg, err := media.NewRegistry(id, workspaceRoot); err == nil {
 		rt.media = reg
@@ -229,10 +275,17 @@ func newRuntimeWithPublisher(
 		promptReader.SetContent(*turnOpts.PromptContent)
 	}
 	promptReader.SetPreferredName(turnOpts.PreferredName)
+	longTermEnabled := turnOpts.PromptContext.LongTermEnabled
+	if turnOpts.MemoryService != nil {
+		// v2 recall is request-only and follows the current root user message;
+		// the legacy sidecar must not duplicate it in the system/context reader.
+		off := false
+		longTermEnabled = &off
+	}
 	promptReader.SetFilter(promptcontext.Filter{
 		SoulEnabled:     turnOpts.PromptContext.SoulEnabled,
 		CustomEnabled:   turnOpts.PromptContext.CustomEnabled,
-		LongTermEnabled: turnOpts.PromptContext.LongTermEnabled,
+		LongTermEnabled: longTermEnabled,
 	})
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
@@ -259,6 +312,7 @@ func newRuntimeWithPublisher(
 				SpillThresholdTokens: turnOpts.ToolResult.SpillThresholdTokens,
 				Tools:                turnOpts.ToolResult.Tools,
 				WorkspaceRoot:        workspaceRoot,
+				AgentID:              turnOpts.AgentID,
 			}),
 			InjectTodayDate: hooks.InjectTodayDateConfigOrDefault(turnOpts.InjectTodayDate),
 			Plugins:         turnOpts.PluginHooks,
@@ -360,6 +414,11 @@ func newRuntimeWithPublisher(
 	}
 	if turnOpts.LongTermStore != nil {
 		rt.orch.SetLongTermStore(turnOpts.LongTermStore)
+	}
+	if turnOpts.MemoryService != nil {
+		rt.orch.SetMemoryService(turnOpts.MemoryService)
+		rt.orch.SetMemoryAutoRecall(turnOpts.MemoryAutoRecall)
+		rt.orch.SetMemoryCoreBudgetTokens(turnOpts.MemoryCoreBudgetTokens)
 	}
 	rt.orch.SyncLoadedSkillHooks(loaded)
 	rt.restoreLifecycleEvents()
@@ -1274,6 +1333,18 @@ func (r *runtime) waitStopped() {
 	r.mu.Unlock()
 	if started {
 		<-done
+	}
+	r.mu.Lock()
+	pipeline := r.candidatePipeline
+	r.candidatePipeline = nil
+	service := r.memoryService
+	r.memoryService = nil
+	r.mu.Unlock()
+	if pipeline != nil {
+		_ = pipeline.Close()
+	}
+	if closer, ok := service.(interface{ Close() error }); ok {
+		_ = closer.Close()
 	}
 }
 

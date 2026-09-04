@@ -436,6 +436,9 @@ func (r *Registry) Definitions() []ToolDef {
 		computerUseToolDef(),
 		askUserInformationToolDef(),
 		rememberToolDef(),
+		memorySearchToolDef(),
+		memoryGetToolDef(),
+		memoryForgetToolDef(),
 		loadSkillsToolDef(),
 		unloadSkillsToolDef(),
 		clearSkillsToolDef(),
@@ -538,6 +541,12 @@ func (r *Registry) registerBuiltins() {
 	}
 	r.handlers["remember"] = func(context.Context, json.RawMessage) (string, error) {
 		return "", fmt.Errorf("remember must be handled by orchestrator")
+	}
+	for _, name := range []string{"memory_search", "memory_get", "memory_forget"} {
+		n := name
+		r.handlers[n] = func(context.Context, json.RawMessage) (string, error) {
+			return "", fmt.Errorf("%s must be handled by orchestrator", n)
+		}
 	}
 	for _, name := range []string{"load_skills", "unload_skills", "clear_skills"} {
 		n := name

@@ -1,11 +1,14 @@
 package hooks
 
 import (
+	"sync"
+
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 )
 
 // Registry 按 priority 顺序执行 tool.before_each / tool.after_each 与通用 RunPhase Hook 链。
 type Registry struct {
+	phaseMu         sync.RWMutex
 	policyHook      *PolicyToolHook
 	agentOwnedHook  *AgentOwnedFileHook
 	agentOwnedAfter *AgentOwnedFileAfterHook

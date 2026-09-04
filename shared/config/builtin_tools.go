@@ -33,6 +33,9 @@ var knownBuiltinTools = map[string]struct{}{
 	"linux_file_download":    {},
 	"ask_user_information":   {},
 	"remember":               {},
+	"memory_search":          {},
+	"memory_get":             {},
+	"memory_forget":          {},
 	"load_skills":            {},
 	"unload_skills":          {},
 	"clear_skills":           {},
@@ -85,6 +88,9 @@ var builtinToolGroups = map[string][]string{
 	},
 	"memory": {
 		"remember",
+		"memory_search",
+		"memory_get",
+		"memory_forget",
 	},
 	"skills": {
 		"load_skills",

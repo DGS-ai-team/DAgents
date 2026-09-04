@@ -46,7 +46,7 @@ tools:
 
 func TestExpandBuiltinToolGroups(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{" hitl ", "hitl", "bash", "memory"})
-	want := []string{"ask_user_information", "bash_run", "remember"}
+	want := []string{"ask_user_information", "bash_run", "memory_forget", "memory_get", "memory_search", "remember"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}

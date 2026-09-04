@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -150,7 +151,15 @@ func localTerminalConfig() TerminalConfigInfo {
 		Remark:      "Node 所在主机",
 		TargetKind:  executionTargetLocal,
 		TargetID:    executionTargetLocal,
+		Shell:       defaultLocalTerminalShell(),
 	}
+}
+
+func defaultLocalTerminalShell() string {
+	if runtime.GOOS == "windows" {
+		return "powershell"
+	}
+	return "bash"
 }
 
 func localTerminalConfigs() []TerminalConfigInfo {

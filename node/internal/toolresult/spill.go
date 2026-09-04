@@ -17,6 +17,9 @@ func spillPaths(cfg Config, sessionID, toolCallID string) (relPath, absPath stri
 		toolCallID = "unknown-call"
 	}
 	subdir := spillSubdir
+	if agentID := sanitizePathSegment(cfg.AgentID); agentID != "" {
+		subdir = filepath.Join(subdir, agentID)
+	}
 	relPath = filepath.ToSlash(filepath.Join(subdir, sessionID, toolCallID+".txt"))
 	absPath = filepath.Join(cfg.WorkspaceRoot, filepath.FromSlash(relPath))
 	return relPath, absPath, nil

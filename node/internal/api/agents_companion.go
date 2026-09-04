@@ -110,9 +110,6 @@ func (s *Server) syncBrowserCompanion(ctx context.Context, parent store.AgentRec
 	if err := s.agents.Save(ctx, rec); err != nil {
 		return err
 	}
-	if err := s.ensureAgentWorkspace(companionID); err != nil && s.logger != nil {
-		s.logger.Warn("browser companion workspace failed", "agent_id", companionID, "error", err)
-	}
 	return nil
 }
 

@@ -1,4 +1,4 @@
-import { reportDesktopUIFocus } from "../api/desktop.js";
+import { reportPlatformUIFocus } from "../api/platform.js";
 
 /** Shell focus TTL 90s; heartbeat 30s. */
 export const DESKTOP_FOCUS_HEARTBEAT_MS = 30_000;
@@ -44,10 +44,20 @@ async function sendFocus(agentId, { force = false } = {}) {
   }
   lastSentAgentId = id;
   lastSentAt = now;
-  await reportDesktopUIFocus(id, {
-    ttlSeconds: FOCUS_TTL_SECONDS,
-    sourceId: FOCUS_SOURCE_ID,
-  });
+  try {
+    await reportPlatformUIFocus({
+      agent_id: id,
+      ttl_seconds: FOCUS_TTL_SECONDS,
+      source_id: FOCUS_SOURCE_ID,
+    });
+  } catch (error) {
+    // The same Web UI also runs in a browser-only Node process. In that
+    // mode the desktop Shell endpoint intentionally returns this capability
+    // error; it must not become an unhandled rejection in the page.
+    const message = String(error?.message || error || "");
+    if (message.includes("desktop Shell is unavailable")) return;
+    throw error;
+  }
 }
 
 function onVisibilityChange() {

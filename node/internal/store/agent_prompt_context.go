@@ -89,6 +89,34 @@ ON CONFLICT(agent_id) DO UPDATE SET
 	return err
 }
 
+// SaveAgentPromptContextMetadata updates only the non-memory sidecar fields.
+// When Memory v2 is active, long_term_md is a read-only compatibility
+// projection and must not be written back to agents.db.
+func (s *AgentStore) SaveAgentPromptContextMetadata(ctx context.Context, rec AgentPromptContextRecord) error {
+	if s == nil {
+		return fmt.Errorf("agent store unavailable")
+	}
+	id := strings.TrimSpace(rec.AgentID)
+	if id == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	now := time.Now().UTC()
+	if !rec.UpdatedAt.IsZero() {
+		now = rec.UpdatedAt.UTC()
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO agent_prompt_context (
+  agent_id, soul_md, user_md, custom_md, long_term_md, updated_at
+) VALUES (?, ?, ?, ?, '', ?)
+ON CONFLICT(agent_id) DO UPDATE SET
+  soul_md=excluded.soul_md,
+  user_md=excluded.user_md,
+  custom_md=excluded.custom_md,
+  updated_at=excluded.updated_at
+`, id, rec.SoulMD, rec.UserMD, rec.CustomMD, now.Format(time.RFC3339Nano))
+	return err
+}
+
 // UpdateAgentLongTermCAS 在 updated_at 与 expectedUpdatedAt 一致时更新 long_term_md。
 // 返回 updated=true 表示写入成功；版本不匹配时返回 (false, nil)。
 func (s *AgentStore) UpdateAgentLongTermCAS(ctx context.Context, agentID, longTerm string, expectedUpdatedAt time.Time) (bool, error) {

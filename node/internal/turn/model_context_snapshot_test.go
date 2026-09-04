@@ -9,6 +9,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -110,6 +111,100 @@ func TestTurnKeepsModelContextSnapshotAcrossToolSteps(t *testing.T) {
 	}
 	if orch.ModelContextSnapshot("session-1") != nil {
 		t.Fatal("completed Turn must release its model context snapshot")
+	}
+}
+
+func TestTurnFreezesRequestOnlyMemoryContextAcrossToolSteps(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	service, err := memory.OpenLocalService(t.TempDir()+"/agent.db", t.TempDir()+"/global.db", memory.ScopeAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if _, err := service.Remember(context.Background(), memory.RememberRequest{
+		Information: "用户偏好中文回复", Tier: memory.TierRecall, Kind: memory.KindPreference,
+		SemanticKey: "user.language", Cardinality: "single",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &snapshotLLM{}
+	pol, _ := policy.LoadFile("")
+	orch := NewOrchestrator("a1", t.TempDir(), hub, client, testRegistry(t), pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	orch.SetMemoryService(service)
+
+	var history []llm.Message
+	if _, _, err := runMessageTurnInline(t, orch, context.Background(), "session-memory", &history, "读取我的语言偏好", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("expected two model steps, got %d", len(client.requests))
+	}
+	var firstMemory, secondMemory string
+	for index, request := range client.requests {
+		memoryIndex := -1
+		userIndex := -1
+		for i, message := range request.Messages {
+			if message.Name == llm.UserNameMemoryContext {
+				if memoryIndex >= 0 {
+					t.Fatalf("request %d contains duplicate memory context: %+v", index, request.Messages)
+				}
+				memoryIndex = i
+			}
+			if message.Content == "读取我的语言偏好" && message.Role == "user" {
+				userIndex = i
+			}
+		}
+		if memoryIndex < 0 || userIndex < 0 || memoryIndex != userIndex+1 {
+			t.Fatalf("request %d memory context must follow current user: %+v", index, request.Messages)
+		}
+		if index == 0 {
+			firstMemory = request.Messages[memoryIndex].Content
+		} else {
+			secondMemory = request.Messages[memoryIndex].Content
+		}
+	}
+	if firstMemory == "" || firstMemory != secondMemory {
+		t.Fatalf("memory context changed within one Turn: first=%q second=%q", firstMemory, secondMemory)
+	}
+	for _, message := range history {
+		if message.Name == llm.UserNameMemoryContext {
+			t.Fatalf("request-only memory context leaked into durable history: %+v", history)
+		}
+	}
+}
+
+func TestTurnCanDisableAutomaticMemoryRecallWithoutRemovingService(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	service, err := memory.OpenLocalService(t.TempDir()+"/agent.db", t.TempDir()+"/global.db", memory.ScopeAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if _, err := service.Remember(context.Background(), memory.RememberRequest{
+		Information: "自动召回不应出现", Tier: memory.TierRecall, Kind: memory.KindFact,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &snapshotLLM{}
+	pol, _ := policy.LoadFile("")
+	orch := NewOrchestrator("a1", t.TempDir(), hub, client, testRegistry(t), pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	orch.SetMemoryService(service)
+	orch.SetMemoryAutoRecall(false)
+
+	var history []llm.Message
+	if _, _, err := runMessageTurnInline(t, orch, context.Background(), "session-memory-disabled", &history, "继续执行", nil); err != nil {
+		t.Fatal(err)
+	}
+	for requestIndex, request := range client.requests {
+		for _, message := range request.Messages {
+			if message.Name == llm.UserNameMemoryContext {
+				t.Fatalf("request %d unexpectedly contained automatic memory context: %+v", requestIndex, request.Messages)
+			}
+		}
 	}
 }
 

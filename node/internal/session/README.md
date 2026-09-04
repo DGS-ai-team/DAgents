@@ -88,6 +88,8 @@ flowchart TB
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
 | `IdleAutoCompressSeconds` / `IdleAutoCompressPollSeconds` / `IdleAutoCompressMinTokens` | idle 维护：无动作自动压缩 + **卸内存**（见 `idle_auto_compress.go`、`release.go`） |
 | `RawMessageHistoryEnabled` / `RawMessageHistoryDir` | 原始 message journal |
+| `MemoryService` | workspace memory v2 权威服务；仅在上下文边界召回，结果以 request-only user context 注入，不写入 system prompt |
+| `MemoryAutoExtract` / `MemoryCandidateQueueSize` / `MemoryCandidateMaxItems` / `MemoryCoreBudgetTokens` | 压缩后的可选后台候选提取与确定性维护；默认关闭，不影响当前 Turn |
 
 ---
 
@@ -120,6 +122,9 @@ flowchart TB
   持久化快照；生命周期事件用于恢复时重建 Turn 投影，两者不能互相冒充。
 - **ModelContextSnapshot**：冻结一次模型请求可见的 prompt/tool/skills 输入；
   step 更新通过 SSE/生命周期事件发送，只有上下文边界才重建快照。
+- **Memory candidate pipeline**：压缩完成后从冻结区间提交有界后台任务；候选先经过
+  确定性去重/冲突判断，冲突进入现有 HITL，成功结果通过 `memory/changed` 元数据事件
+  通知，下一 Turn 再召回，不插入 human message 或 MessageQueue。
 
 ---
 

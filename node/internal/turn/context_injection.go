@@ -12,10 +12,13 @@ import (
 // ModelContextSnapshot and applied to a request copy at the current Turn's
 // root user message, rather than appended as a volatile tail.
 type ContextInjection struct {
-	Name     string `json:"name"`
-	Source   string `json:"source"`
-	Content  string `json:"content"`
-	Position string `json:"position"`
+	Name        string                `json:"name"`
+	Source      string                `json:"source"`
+	Content     string                `json:"content"`
+	Position    string                `json:"position"`
+	MessageKind llm.MessageSourceKind `json:"message_kind,omitempty"`
+	MessageForm llm.MessageSourceForm `json:"message_form,omitempty"`
+	LegacyName  string                `json:"legacy_name,omitempty"`
 }
 
 const (
@@ -28,9 +31,27 @@ const (
 // used by the model request. The message is request-only and must not be
 // appended to the session history.
 func (c ContextInjection) Message() llm.Message {
-	source := llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormSnapshot}
+	kind := c.MessageKind
+	if kind == "" {
+		kind = llm.MessageSourceRuntime
+		if strings.EqualFold(strings.TrimSpace(c.Source), "memory") || strings.EqualFold(strings.TrimSpace(c.Name), llm.UserNameMemoryContext) {
+			kind = llm.MessageSourceMemory
+		}
+	}
+	form := c.MessageForm
+	if form == "" {
+		form = llm.MessageFormSnapshot
+	}
+	legacyName := strings.TrimSpace(c.LegacyName)
+	if legacyName == "" {
+		legacyName = llm.UserNameContext
+		if kind == llm.MessageSourceMemory {
+			legacyName = llm.UserNameMemoryContext
+		}
+	}
+	source := llm.MessageSource{Kind: kind, Form: form}
 	provenance := &llm.MessageProvenance{Producer: c.Source, Operation: c.Name}
-	return llm.UserMessageWithSource(c.Content, llm.UserNameContext, source, provenance)
+	return llm.UserMessageWithSource(c.Content, legacyName, source, provenance)
 }
 
 func cloneContextInjections(in []ContextInjection) []ContextInjection {
@@ -71,10 +92,13 @@ func BuildContextInjections(in SystemPromptInput) []ContextInjection {
 		return nil
 	}
 	return []ContextInjection{{
-		Name:     contextInjectionName,
-		Source:   contextInjectionSource,
-		Content:  content,
-		Position: contextInjectionPosition,
+		Name:        contextInjectionName,
+		Source:      contextInjectionSource,
+		Content:     content,
+		Position:    contextInjectionPosition,
+		MessageKind: llm.MessageSourceRuntime,
+		MessageForm: llm.MessageFormSnapshot,
+		LegacyName:  llm.UserNameContext,
 	}}
 }
 
@@ -98,10 +122,13 @@ func BuildChildContextInjections(in ChildSystemPromptInput) []ContextInjection {
 		Snapshot:  hostsnapshot.Get(),
 	})
 	return []ContextInjection{{
-		Name:     contextInjectionName,
-		Source:   contextInjectionSource,
-		Content:  strings.TrimSpace(b.String()),
-		Position: contextInjectionPosition,
+		Name:        contextInjectionName,
+		Source:      contextInjectionSource,
+		Content:     strings.TrimSpace(b.String()),
+		Position:    contextInjectionPosition,
+		MessageKind: llm.MessageSourceRuntime,
+		MessageForm: llm.MessageFormSnapshot,
+		LegacyName:  llm.UserNameContext,
 	}}
 }
 
@@ -112,7 +139,7 @@ func BuildChildContextInjections(in ChildSystemPromptInput) []ContextInjection {
 func ApplyContextInjections(history []llm.Message, injections []ContextInjection) []llm.Message {
 	filtered := make([]llm.Message, 0, len(history)+len(injections))
 	for _, message := range history {
-		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") {
+		if isRequestOnlyContextMessage(message) {
 			continue
 		}
 		filtered = append(filtered, message)
@@ -121,25 +148,45 @@ func ApplyContextInjections(history []llm.Message, injections []ContextInjection
 		return filtered
 	}
 
-	insertAt := leadingSystemMessages(filtered)
+	rootIndex := -1
 	for i, message := range filtered {
 		if isContextRootUser(message) {
-			insertAt = i
+			rootIndex = i
 		}
 	}
-	if insertAt < 0 || insertAt > len(filtered) {
-		insertAt = len(filtered)
-	}
-
-	out := make([]llm.Message, 0, len(filtered)+len(injections))
-	out = append(out, filtered[:insertAt]...)
+	before := make([]ContextInjection, 0, len(injections))
+	after := make([]ContextInjection, 0, len(injections))
 	for _, injection := range injections {
 		if strings.TrimSpace(injection.Content) == "" {
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(injection.Position), "after_current_user") {
+			after = append(after, injection)
+		} else {
+			// Empty position preserves the original runtime-context behavior.
+			before = append(before, injection)
+		}
+	}
+
+	out := make([]llm.Message, 0, len(filtered)+len(before)+len(after))
+	if rootIndex < 0 {
+		insertAt := leadingSystemMessages(filtered)
+		out = append(out, filtered[:insertAt]...)
+		for _, injection := range before {
+			out = append(out, injection.Message())
+		}
+		out = append(out, filtered[insertAt:]...)
+		return out
+	}
+	out = append(out, filtered[:rootIndex]...)
+	for _, injection := range before {
 		out = append(out, injection.Message())
 	}
-	out = append(out, filtered[insertAt:]...)
+	out = append(out, filtered[rootIndex])
+	for _, injection := range after {
+		out = append(out, injection.Message())
+	}
+	out = append(out, filtered[rootIndex+1:]...)
 	return out
 }
 
@@ -170,12 +217,17 @@ func StripContextInjections(history []llm.Message) []llm.Message {
 	}
 	out := make([]llm.Message, 0, len(history))
 	for _, message := range history {
-		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") {
+		if isRequestOnlyContextMessage(message) {
 			continue
 		}
 		out = append(out, message)
 	}
 	return out
+}
+
+func isRequestOnlyContextMessage(message llm.Message) bool {
+	return llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") ||
+		llm.IsMessageSource(message, llm.MessageSourceMemory, llm.MessageFormSnapshot, "")
 }
 
 func leadingSystemMessages(history []llm.Message) int {

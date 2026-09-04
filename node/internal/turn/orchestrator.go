@@ -17,6 +17,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -70,8 +71,14 @@ type Orchestrator struct {
 	toolRetryLimit  int
 	promptCtx       *promptcontext.Reader
 	longTermStore   LongTermStore
-	journal         *historypkg.Journal
-	logger          *slog.Logger
+	memoryService   memory.Service
+	// memoryAutoRecall is separate from the memory tool group: an Agent may
+	// receive automatic context while the model-facing memory tools remain
+	// disabled, or expose tools without automatic recall.
+	memoryAutoRecall       bool
+	memoryCoreBudgetTokens int
+	journal                *historypkg.Journal
+	logger                 *slog.Logger
 
 	childMgr       *childagent.Manager
 	isChildSession bool
@@ -160,6 +167,26 @@ func (o *Orchestrator) SetRuntimeIdentity(revision int64, digest string) {
 	}
 	o.runtimeRevision = revision
 	o.runtimeDigest = strings.TrimSpace(digest)
+}
+
+// SetMemoryService binds the v2 memory service. The legacy LongTermStore is
+// kept separately during migration so existing callers and stored records can
+// continue to be read without changing Turn lifecycle semantics.
+func (o *Orchestrator) SetMemoryService(service memory.Service) {
+	if o == nil {
+		return
+	}
+	o.memoryService = service
+}
+
+// SetMemoryAutoRecall controls whether a fresh model-context boundary performs
+// automatic memory recall. It does not affect the availability of memory
+// tools, which is controlled by the Agent tool group.
+func (o *Orchestrator) SetMemoryAutoRecall(enabled bool) {
+	if o == nil {
+		return
+	}
+	o.memoryAutoRecall = enabled
 }
 
 // SetModelRetryLimit controls bounded retries for transient provider failures.
@@ -493,6 +520,7 @@ func NewOrchestrator(
 		maxToolLoops:     maxToolLoops,
 		modelRetryLimit:  2,
 		toolRetryLimit:   1,
+		memoryAutoRecall: true,
 		promptCtx:        promptCtx,
 		journal:          journal,
 		logger:           logx.OrDefault(logger),
@@ -586,6 +614,7 @@ func (o *Orchestrator) runOneStep(
 	var msgs []llm.Message
 	var requestHistory []llm.Message
 	var hookErr error
+	var recalledMemory *memory.Snapshot
 	contextMutationReason := o.consumeModelContextRefresh(sessionID)
 	contextReplaced := false
 	snapshot := o.ModelContextSnapshot(sessionID)
@@ -616,6 +645,11 @@ func (o *Orchestrator) runOneStep(
 		promptInput := o.systemPromptInput(sessionID)
 		systemPrompt = o.buildSystemPromptWithInput(sessionID, promptInput)
 		injections := o.buildContextInjectionsWithInput(promptInput)
+		var memoryInjection *ContextInjection
+		recalledMemory, memoryInjection = o.buildMemoryInjection(ctx, sessionID, *history)
+		if memoryInjection != nil {
+			injections = append(injections, *memoryInjection)
+		}
 		hookHistory := ApplyContextInjections(append([]llm.Message(nil), (*history)...), injections)
 		msgs, systemPrompt, hookErr = o.runLLMBeforeCallPhase(ctx, sessionID, &hookHistory, systemPrompt)
 		if hookErr != nil {
@@ -628,6 +662,14 @@ func (o *Orchestrator) runOneStep(
 		msgs = StripContextInjections(msgs)
 		snapshot = NewModelContextSnapshotWithInjections(systemPrompt, toolDefs, injections, o.runtimeRevision, o.runtimeDigest)
 		o.attachSkillsSnapshotMetadata(snapshot)
+		if recalledMemory != nil {
+			snapshot.MemorySnapshotID = recalledMemory.ID
+			snapshot.MemoryStoreRevision = recalledMemory.StoreRevision
+			snapshot.MemoryDigest = recalledMemory.Digest
+			snapshot.MemoryCoreCount = len(recalledMemory.Core)
+			snapshot.MemoryRecallCount = len(recalledMemory.Recalled)
+			snapshot.MemoryEstimatedTokens = recalledMemory.TokenEstimate
+		}
 		o.setModelContextSnapshot(sessionID, snapshot)
 		requestHistory = append([]llm.Message(nil), msgs...)
 	}
@@ -1040,6 +1082,12 @@ func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
 // ReloadLongTermMemory 从持久化存储重新加载长期记忆并注入 prompt（清空上下文 / 首条交互 / 压缩完成后调用）。
 func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
 	if o == nil {
+		return
+	}
+	// v2 memory is recalled per new model-context boundary and follows the
+	// current root user message. It must never be copied into the stable
+	// prompt-sidecar reader or refreshed in place during compression/resume.
+	if o.memoryService != nil {
 		return
 	}
 	if o.longTermStore == nil {

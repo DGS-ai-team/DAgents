@@ -476,6 +476,12 @@ func TestTurnCoordinatorReplaysModelContextChange(t *testing.T) {
 	second.SkillsCatalogRevision = "catalog-v2"
 	second.LoadedSkillsDigest = "loaded-v2"
 	second.LoadedSkillsContentDigest = "body-v2"
+	second.MemorySnapshotID = "memsnap-1"
+	second.MemoryStoreRevision = 17
+	second.MemoryDigest = "memory-digest-v1"
+	second.MemoryCoreCount = 2
+	second.MemoryRecallCount = 3
+	second.MemoryEstimatedTokens = 480
 	payload := func(generation uint64, snapshot *ModelContextSnapshot) []byte {
 		raw, err := json.Marshal(map[string]any{
 			"generation":       generation,
@@ -504,6 +510,14 @@ func TestTurnCoordinatorReplaysModelContextChange(t *testing.T) {
 		state.ContextSnapshot.LoadedSkillsDigest != "loaded-v2" ||
 		state.ContextSnapshot.LoadedSkillsContentDigest != "body-v2" {
 		t.Fatalf("replayed skill snapshot diagnostics = %#v", state.ContextSnapshot)
+	}
+	if state.ContextSnapshot.MemorySnapshotID != "memsnap-1" ||
+		state.ContextSnapshot.MemoryStoreRevision != 17 ||
+		state.ContextSnapshot.MemoryDigest != "memory-digest-v1" ||
+		state.ContextSnapshot.MemoryCoreCount != 2 ||
+		state.ContextSnapshot.MemoryRecallCount != 3 ||
+		state.ContextSnapshot.MemoryEstimatedTokens != 480 {
+		t.Fatalf("replayed memory snapshot diagnostics = %#v", state.ContextSnapshot)
 	}
 }
 

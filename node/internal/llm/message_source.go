@@ -13,6 +13,7 @@ const (
 	MessageSourceA2A         MessageSourceKind = "a2a"
 	MessageSourceChildAgent  MessageSourceKind = "child_agent"
 	MessageSourceRuntime     MessageSourceKind = "runtime"
+	MessageSourceMemory      MessageSourceKind = "memory"
 	MessageSourcePlugin      MessageSourceKind = "plugin"
 	MessageSourceAsyncTool   MessageSourceKind = "async_tool"
 	MessageSourceCompression MessageSourceKind = "compression"
@@ -89,6 +90,8 @@ func MessageSourceForUserName(name string) (MessageSource, MessageProvenance) {
 		return MessageSource{Kind: MessageSourceChildAgent, Form: MessageFormRelay}, MessageProvenance{Producer: UserNameChildTask}
 	case UserNameContext:
 		return MessageSource{Kind: MessageSourceRuntime, Form: MessageFormSnapshot}, MessageProvenance{Producer: "runtime_context"}
+	case UserNameMemoryContext:
+		return MessageSource{Kind: MessageSourceMemory, Form: MessageFormSnapshot}, MessageProvenance{Producer: "memory"}
 	case UserNameSkill:
 		return MessageSource{Kind: MessageSourcePlugin, Form: MessageFormInstructions}, MessageProvenance{Producer: "skills"}
 	case UserNameDate:
@@ -187,6 +190,8 @@ func IsHiddenInjectedUserMessage(message Message) bool {
 		return source.Form == MessageFormInstructions
 	case MessageSourceRuntime:
 		return strings.EqualFold(provenance.Producer, UserNameDate)
+	case MessageSourceMemory:
+		return true
 	case MessageSourceAsyncTool, MessageSourceCompression:
 		return true
 	case MessageSourceTool:

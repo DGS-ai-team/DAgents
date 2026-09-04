@@ -13,6 +13,7 @@ type ToolResultConfig struct {
 	SpillThresholdTokens int
 	Tools                []string
 	WorkspaceRoot        string
+	AgentID              string
 }
 
 // DefaultToolResultConfig 返回默认配置（bash + fs 组，12k spill 阈值）。
@@ -30,6 +31,7 @@ func toolResultConfigUnset(c ToolResultConfig) bool {
 	return c.SpillThresholdTokens == 0 &&
 		len(c.Tools) == 0 &&
 		strings.TrimSpace(c.WorkspaceRoot) == "" &&
+		strings.TrimSpace(c.AgentID) == "" &&
 		!c.Enabled
 }
 
@@ -41,6 +43,9 @@ func ToolResultConfigOrDefault(c ToolResultConfig) ToolResultConfig {
 	out := DefaultToolResultConfig(c.WorkspaceRoot)
 	if c.WorkspaceRoot != "" {
 		out.WorkspaceRoot = strings.TrimSpace(c.WorkspaceRoot)
+	}
+	if c.AgentID != "" {
+		out.AgentID = strings.TrimSpace(c.AgentID)
 	}
 	out.Enabled = c.Enabled
 	if c.SpillThresholdTokens > 0 {
@@ -58,6 +63,7 @@ func (c ToolResultConfig) toToolresultConfig() toolresult.Config {
 		SpillThresholdTokens: c.SpillThresholdTokens,
 		Tools:                append([]string(nil), c.Tools...),
 		WorkspaceRoot:        c.WorkspaceRoot,
+		AgentID:              c.AgentID,
 	}.Normalized()
 }
 

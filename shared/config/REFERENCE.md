@@ -12,6 +12,7 @@
 | `LLMConfig` | `struct` | LLM 配置；`mock=true` 时用 MockClient；工具轮次上限见 Agent snapshot `max_tool_loops` |
 | `SkillsConfig` | `struct` | skills 开关、`max_in_prompt` |
 | `CompressionConfig` | `struct` | `silent_trigger_tokens`、`blocking_trigger_tokens`（`<=0` 关闭对应档位）；`idle_auto_compress_seconds` / `idle_auto_compress_poll_seconds` / `idle_auto_compress_min_tokens`（无动作自动压缩） |
+| `MemoryConfig` | `struct` | `auto_extract`（默认 false）；`candidate_queue_size`（默认 16）；`max_candidates`（默认 8）；`core_budget_tokens`（默认 2000）；仅控制压缩后的可选后台候选整理 |
 | `TriggersConfig` | `struct` | `enabled`、`poll_seconds` |
 | `RawMessageHistoryConfig` | `struct` | 原始消息 JSONL 开关（`enabled` 指针，缺省 true） |
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |
@@ -35,16 +36,16 @@
 | `(c *Config) ManageRegistryBaseURL` | `method` | 上报 Manage 的 base_url（优先 registration.base_url） |
 | `(c *Config) ManageRegistryBaseURLIsLoopback` | `method` | 上报地址是否为 loopback |
 | `(c *Config) ListenAddr` | `method` | 返回 `host:port` |
-| `(c *Config) RuntimeDir` | `method` | 返回 Node 运行目录（默认 `./.runtime`） |
-| `(c *Config) DataDir` | `method` | 默认 `{runtime_root}/data` Node 临时目录 |
+| `(c *Config) RuntimeDir` | `method` | 返回 Node 控制面运行目录（默认 `./.runtime`） |
+| `(c *Config) DataDir` | `method` | 兼容路径 `{runtime_root}/data`；新 Agent 初始化不会主动创建 |
 | `(c *Config) SkillsRoot` | `method` | 默认 `{runtime_root}/skills`，不属于 Agent workspace |
 | `(c *Config) PolicyDir` | `method` | 默认 `{runtime_root}/policy` |
 | `(c *Config) ToolPolicyPath` | `method` | 默认 `.runtime/policy/tool.approval.txt` |
 | `(c *Config) ShellPolicyDir` | `method` | 默认 `.runtime/policy/shell` |
-| `(c *Config) MemoryDir` | `method` | 默认 `.runtime/memory` |
-| `(c *Config) SessionDBPath` | `method` | 默认 `{runtime}/memory/sessions.db` |
+| `(c *Config) MemoryDir` | `method` | 默认 `.runtime/memory`，Node 控制面目录，不是 Agent workspace 状态 |
+| `(c *Config) SessionDBPath` | `method` | 默认 `{runtime}/memory/sessions.db`，按 `agent_id` 隔离的控制面快照 |
 | `(c *Config) RawMessageHistoryEnabled` | `method` | 是否写 JSONL；env 优先，默认 true |
-| `(c *Config) RawMessageHistoryDir` | `method` | 默认 `.runtime/history` |
+| `(c *Config) RawMessageHistoryDir` | `method` | 未绑定 Agent 时默认 `.runtime/history`；正常 Agent runtime 改用 workspace 下 `.dagents/<agent_id>/history/` |
 | `(c *Config) TriggersStorePath` | `method` | 默认 `{runtime_root}/triggers/triggers.json` |
 | `(c *Config) Capabilities` | `method` | 能力列表（含可选 triggers） |
 

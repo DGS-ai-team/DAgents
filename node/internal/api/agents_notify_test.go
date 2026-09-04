@@ -34,6 +34,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{

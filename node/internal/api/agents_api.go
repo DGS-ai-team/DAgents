@@ -6,14 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -305,9 +304,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.agents.Save(r.Context(), rec); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
-	}
-	if err := s.ensureAgentWorkspace(agentID); err != nil {
-		s.logger.Warn("agent workspace create failed", "agent_id", agentID, "error", err)
 	}
 	if _, err := s.agents.EnsureAgentPolicy(r.Context(), agentID, s.runtimeDir()); err != nil {
 		s.logger.Warn("agent policy seed failed", "agent_id", agentID, "error", err)
@@ -611,19 +607,6 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
 
-func (s *Server) ensureAgentWorkspace(agentID string) error {
-	if s.cfg == nil {
-		return nil
-	}
-	root := filepath.Join(s.cfg.AgentsDir(), agentID)
-	for _, sub := range []string{"data", "history", "memory"} {
-		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func generateAgentInstanceID() (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -730,9 +713,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err := s.applyAgentLLMProfile(rec); err != nil {
 		s.logger.Warn("apply agent-bound llm failed", "agent_id", id, "error", err)
 	}
-	if err := s.ensureAgentWorkspace(id); err != nil {
-		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
-	}
 	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), id, snapParsed.Workspace); err != nil {
 		return fmt.Errorf("ensure agent workspace: %w", err)
 	}
@@ -779,6 +759,11 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 			}
 		}
 	}
+	if service, ok := built.TurnOptions.MemoryService.(*memory.LocalService); ok && s.agents != nil {
+		if err := migrateLegacyMemory(ctx, s.agents, s.runtimeDir(), id, service); err != nil {
+			s.logger.Warn("legacy memory migration failed", "agent_id", id, "error", err)
+		}
+	}
 	// Runtime digest is an identity of the built model-visible inputs. The
 	// per-Turn snapshot also records the exact prompt/tool digests, so a live
 	// memory refresh can be distinguished from a runtime rebuild.
@@ -797,6 +782,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	// failed load/start therefore leaves the previous good runtime serving
 	// requests instead of creating a release-then-create gap.
 	if _, _, err := s.sessions.ReplaceWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
+		_ = built.Close()
 		return err
 	}
 	s.clearRuntimeReloadPending(id)

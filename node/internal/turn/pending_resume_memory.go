@@ -9,6 +9,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 )
 
 func (o *Orchestrator) continueAfterMemoryConflictResume(
@@ -78,6 +79,44 @@ func (o *Orchestrator) continueAfterMemoryConflictResume(
 func (o *Orchestrator) applyMemoryConflictDecision(ctx context.Context, decision hitl.MemoryConflictDecision, meta *MemoryConflictMeta) (string, error) {
 	if meta == nil {
 		return "", fmt.Errorf("missing memory conflict metadata")
+	}
+	if meta.ConflictID != "" && o.memoryService != nil {
+		mapped := memory.ConflictCancel
+		switch decision {
+		case hitl.MemoryConflictKeepOld:
+			mapped = memory.ConflictKeepOld
+		case hitl.MemoryConflictUseNew:
+			mapped = memory.ConflictUseNew
+		case hitl.MemoryConflictKeepBoth:
+			mapped = memory.ConflictKeepBoth
+		case hitl.MemoryConflictCancelled:
+			mapped = memory.ConflictCancel
+		default:
+			return "", fmt.Errorf("unsupported memory conflict decision")
+		}
+		result, err := o.memoryService.ResolveConflict(ctx, memory.Scope(meta.Scope), meta.ConflictID, mapped)
+		if err != nil {
+			return "", err
+		}
+		if o.hub != nil {
+			// Resolving the conflict mutates durable memory, but the active Turn
+			// must keep its frozen MemorySnapshot. Consumers apply this event on
+			// the next Turn boundary; it is never routed through InputBox.
+			o.hub.Publish(o.agentID, "memory/changed", map[string]any{
+				"agent_id": o.agentID, "store_revision": result.StoreRevision,
+				"outcome": string(result.Outcome), "turn_boundary": "next_turn",
+			})
+		}
+		switch decision {
+		case hitl.MemoryConflictCancelled:
+			return "[MEMORY_CONFLICT_CANCELLED] 用户取消了长期记忆更新。", nil
+		case hitl.MemoryConflictKeepOld:
+			return "已保留原有长期记忆，未写入新信息。", nil
+		case hitl.MemoryConflictUseNew:
+			return fmt.Sprintf("已用新信息替换长期记忆（%d 条）。", len(result.Superseded)), nil
+		case hitl.MemoryConflictKeepBoth:
+			return "已保留冲突双方，标记为待确认记忆。", nil
+		}
 	}
 	switch decision {
 	case hitl.MemoryConflictCancelled:

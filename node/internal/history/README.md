@@ -2,7 +2,9 @@
 
 原始 OpenAI 消息 **JSONL 审计侧车**（对齐原 Python `raw_message_journal`）。
 
-**落盘路径**：`<runtime_root>/history/YYYYMMDD/<session_id>.jsonl`（按自然日分子目录；文件名经 sanitize；不属于 Agent workspace）。
+**落盘路径**：`<workspace_root>/.dagents/<agent_id>/history/YYYYMMDD/<session_id>.jsonl`（按自然日分子目录；文件名经 sanitize；每个 Agent 在共享 workspace 中独立命名空间）。
+
+Node 的 `memory/sessions.db` 仍是会话快照与恢复的控制面存储；本目录只保存原始消息审计侧车，不替代 SQLite。
 
 | 文件 | 说明 |
 |------|------|
