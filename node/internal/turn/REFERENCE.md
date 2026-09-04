@@ -7,10 +7,10 @@
 | `State` | turn 生命周期：`idle` / `model_streaming` / `awaiting_tool` |
 | `SkillAccess` | orchestrator 读写 session `loaded_skills`（Catalog + Get/Set） |
 | `Orchestrator` | LLM + 工具循环 + SSE |
-| `NewOrchestrator` | 构造；`policy` 默认加载、`maxToolLoops` 默认 16 |
+| `NewOrchestrator` | 构造；`policy` 默认加载，Turn 步数上限由 `TurnBudget.MaxSteps` 提供 |
 | `SetChildAgentManager` | 父 session 注入临时 Agent 管理器 |
 | `SetChildSession` | 子 session 标记；禁止管理类工具与 `ask_user` |
-| `RunHumanMessageTurn` | 追加 user（含结构化 `source/provenance`，保留 `name` 兼容字段）+ 单步 |
+| `RunHumanMessageTurn` | 追加 user（含结构化 `source/provenance`）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `CancelPendingToolCalls` | 显式 `CancelTurn` 时闭合 pending tool calls；普通输入不调用 |
@@ -36,7 +36,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 |------|------|
 | `publishAssistant` / `publishReasoning` | 流式 delta |
 | `publishError` | `error` SSE |
-| `publishHITLRequired` | 本地 turn 统一 HITL SSE（A2A 中继在 session/a2a 层发 `approval_required` / `user_information_required`） |
+| `publishHITLRequired` | 本地 turn 统一 HITL SSE（子 Agent relay 在 session/child-agent 层发 `approval_required` / `user_information_required`） |
 | `publishToolCall` / `publishToolResult` | 工具 SSE |
 | `PublishSideEffectCallback` | 异步工具 Produce SSE |
 | `PublishSideEffectApplied` / `PublishSideEffectsCleared` | Apply / ClearContext UX SSE |
@@ -56,7 +56,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 
 | 符号 | 说明 |
 |------|------|
-| `persistCancelledStream` | cancel 时保留部分 assistant |
+| `appendMissingToolResponses` / `CancelPendingToolCalls` | 仅为已确认的完整 tool call 补写协议闭合结果；取消流式 draft 不落盘 |
 | `appendMissingToolResponses` | 未响应 tool_call 补位 |
 | `assistantMessageFromResult` | `ChatResult` → history assistant |
 
@@ -72,19 +72,17 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 |------|------|
 | `staticSystemPrompt` | 固定 system 前缀（未导出常量） |
 | `SystemPromptInput` | `BuildSystemPrompt` 入参 |
-| `DefaultMaxToolLoops` | 工具循环默认上限（16） |
+| `DefaultMaxSteps` | Agent 每个 Turn 的工具步数默认上限（32） |
 | `BuildSystemPrompt` | 拼接完整 system prompt |
 | `formatWorkspaceSubdirsSection` | 工作区与 Node runtime 路径作用域约定；`includeHistoryJournal` 为 true 时含 `.dagents/<agent_id>/history/YYYYMMDD/` JSONL 说明 |
-| `RunTurnPhase` | `State` → Python 兼容 phase 名 |
 
 ## pending.go
 
 | 符号 | 说明 |
 |------|------|
 | `ToolUserInterruptedMessage` | 用户打断工具时的 tool 结果文案 |
-| `ToolLoopLimitExceededMessage` | 单轮工具次数用尽时的 soft tool 结果文案 |
 | `PendingHITLItem` | 单条待 HITL tool call（含可选 `DuplicateMeta`） |
-| `PendingHITL` | 暂停时的待处理批次（`Items[]`）；JSON 兼容旧 `kind`/`tool_calls` |
+| `PendingHITL` | 暂停时的待处理批次（`Items[]`） |
 | `PendingHITL.AllToolCalls` | 用于显式取消时闭合 pending tool calls |
 
 ## step.go

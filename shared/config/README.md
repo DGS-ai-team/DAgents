@@ -7,7 +7,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | 文件 | 说明 |
 |------|------|
 | `config.go` | `Config` 结构体、`LoadFile`、`Validate`、`ApplyDefaults` |
-| `node_id.go` | `ResolveNodeID`、`NodeIDFilePath`：`.runtime/node/node_id` 持久化；旧 `.runtime/agent/agent_id` 仅用于升级迁移 |
+| `node_id.go` | `ResolveNodeID`、`NodeIDFilePath`：`.runtime/node/node_id` 持久化 |
 | `resolve.go` | `ResolveConfigPath`：`-config` / `DAGENTS_CONFIG` / 默认候选路径 |
 | `config_test.go` | 默认值、必填项、环境变量展开单测 |
 
@@ -18,7 +18,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | 块 | 说明 |
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
-| `llm` | 模型连接（迁移种子）；工具轮次上限见 Agent snapshot |
+| `llm` | 模型连接快照；工具步数上限见 Agent snapshot |
 | `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `memory/`、`skills/`、`policy/` 等控制面目录相对此根；Agent workspace 另由创建时绑定 |
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{runtime_root}/skills`；不属于 Agent workspace） |
 | `compression` | 上下文压缩 token 阈值 |

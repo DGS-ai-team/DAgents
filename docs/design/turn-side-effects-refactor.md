@@ -1,5 +1,7 @@
-# Turn 旁路侧效应重构：场景规格
+# Turn 旁路侧效应重构：场景规格（历史记录）
 
+> **文档性质**：历史设计与验收记录，不是当前运行时契约。本文保留旧场景的推导过程；当前 InputBox、Turn cancel、同步工具和异步浏览器任务语义以架构文档及代码为准。
+>
 > **状态**：**缓冲门控已实现**（`sideEffectStore` + `side_effect_continue` + Client SSE）  
 > **关联**：[Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32)（async + open batch）  
 > **代码基准**：`dev` 合并 PR #33 之后
@@ -92,7 +94,7 @@
 | **4** | auto + approval 拆批 + pending | open batch；Q 不因 pending 暂停 | ✅ §6 |
 | **5** | resume 后继续 | `resume` → 写 tool → `ScheduleToolResult` 续跑 | ✅ §7 |
 | **6** | bash background + async 回灌 | Produce → Apply → `side_effect_continue` | ✅ §8 |
-| **7** | trigger message | `PriorityOther`；可 `InterruptPending` | ✅ §9 |
+| **7** | trigger message | `InputBox FIFO`；可 `InterruptPending` | ✅ §9 |
 | **8** | 新 human 打断 pending | 步前 `InterruptPending` 改 H | ✅ §10 |
 
 场景 **4、6** 为 Issue #32 与 defer 重构的主要靶点（**已实现**，见文首测试矩阵）。
@@ -571,7 +573,7 @@ H:  H₀ → H₁(ACK) → H₂(+A₂) → H₃(+callback+终稿)
 ### 9.1 前提
 
 - Scheduler / 工具 `trigger_fire` → `EnqueueTriggerMessage`（`request_type=trigger_message`）。
-- 入队：`PriorityOther(10)`，`UserName=trigger`，`TriggerID` 非空。
+- 写入 `InputBox FIFO`，`UserName=trigger`，`TriggerID` 非空；trigger 与普通用户输入共用数据面顺序，不占用控制队列优先级。
 - 分 **7a 空闲投递** 与 **7b pending 时投递**。
 
 ### 9.2 子场景 7a：无 pending（同场景二 + trigger 元数据）
@@ -650,7 +652,7 @@ sequenceDiagram
 | S1 | 入队 human | `H₁` | `[message]` | pending 仍在 |
 | S2 | Dequeue | `H₁` | `[]` | — |
 | S3 | 步前：取 `pending` → **`InterruptPending`** | **`r.messages` 已写 interrupt tool** | `[]` | pending=**nil**（步前清空） |
-| S4 | `RepairUnrespondedToolCalls`（若需要） | 可能再修补 | `[]` | — |
+| S4 | — | 当前无通用 orphan repair；取消/恢复只依据生命周期事实显式闭合 | `[]` | — |
 | S5 | `toolLoopCount=0`；`runTurnStep` 新 turn | 步内 `+U_new+…` | `[]` | — |
 | S6 | commit | **`H₂`** | 视 LLM | idle 或新 pending |
 

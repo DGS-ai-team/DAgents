@@ -1,36 +1,30 @@
-# WorkgroupWorker（D2 + D3 工具执行）
+# Workgroup AgentRef Worker
 
-Node 侧工作组成员执行器。权威契约见：
+Node 侧工作组成员执行器。成员不是 Node 的第二套 Agent，也不会在 Manage
+侧复制 Agent 的工具、提示词或权限配置；Manage 只保存 AgentRef，并通过
+持久 WebSocket outbox 驱动一个隔离的工作组 Session。
 
-- `docs/design/workgroup-and-node-gateway.md` §11 / §13 D2–D3
-- `docs/design/workgroup-d05-contracts.md`
+## 当前职责
 
-## 范围
+| 能力 | 实现 |
+| --- | --- |
+| session open/close | `dispatch.go` |
+| turn start/cancel/resume | `dispatch.go` |
+| Agent session 与 turn 事件上报 | `worker.go`、`ws_client.go` |
+| 断线重连与 outbox resume | `dialer.go`、`session.go` |
+| 连接世代 fencing | `session.go` |
+| 工具取消 | `agent.tool.cancel` |
 
-| 能力 | 状态 |
-|------|------|
-| WorkerBinding 持久化（DirBindingStore；非 local agents） | ✅ |
-| 幂等 `member.provision` | ✅ |
-| Command journal（accept 先落盘再 ack） | ✅ |
-| Fencing（lease_epoch / generation / digest / catalog） | ✅ |
-| Tool manifest ∩ allowlist | ✅ |
-| 会话 `connection_generation` / resume cursor | ✅ 内存骨架 |
-| `read_file` 工作区执行 | ✅ |
-| `glob_files` / `write_file` 工作区执行 | ✅ |
-| Manage Member LLM loop（assign 内） | ✅ |
-| accepted 重启恢复（不双执行） | ✅ D3 |
-| Manage WS hub + Node envelope dispatch | ✅（`ws_hub` / `DispatchEnvelope`） |
-| Node WebSocket Dialer（hello/resume/分发） | ✅（`dialer.go`，`coder/websocket`） |
-| Node 进程默认自动拨号 | ✅ D4：`manage.workgroup.enabled`（默认随 manage） |
+成员 Agent 的真实工具注册、LLM、审批和本地策略全部复用 Node 现有
+AgentRuntime；Workgroup 只接收脱敏的 Timeline/Realtime 事件，并把
+AgentRef 的最终结果返回给 Manage。
 
-## 协作聊天室事件
+## 事件边界
 
-- `timeline.event`：Manage 写入公开 Timeline 后进入 outbox，按订阅 Node 可靠投递，支持 resume。
-- `workgroup.realtime`：思考状态、工具状态和文本增量的临时广播，不写入 RunHistory；断线后由 Timeline 快照对账。
-- Node 将两类事件汇入工作组本地 SSE：`GET /v1/workgroups/{workgroup_id}/events`。
+- `timeline.event` 是 Manage 写入并可靠投递的公共事实。
+- `workgroup.realtime` 是临时进度广播，断线后以 Timeline/hydrate 为准。
+- `agent.*` 是 Manage 与 Node 之间的 session/turn 控制和结果事件。
 
-## 明确不做
-
-- 不进入 `GET /v1/agents`
-- 不装本地 PromptContext / soul
-- ACL 不替代 ExecutionGrant
+不在这里维护成员工具目录、成员 prompt、成员工作区绑定或独立成员 LLM
+循环。需要查看当前协议时，直接阅读 `types.go`、`dispatch.go` 和
+`ws_client.go`，避免以历史 D0.5 文档推断生产行为。

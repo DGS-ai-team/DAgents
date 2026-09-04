@@ -7,21 +7,21 @@ N3 在 Node 进程内本地执行；面向模型的普通 tool schema **均为�
 - **省略 `timeout_seconds`**：最长等待硬上限（默认 600 秒），超时同样**终止并报错**。
 - **UI 控制**（仅 bash）：执行中可「终止」；不支持把 bash_run 转为后台。需要长期运行状态时使用 `terminal_open`。
 
-`StartBackground` / `job_registry` 只保留历史后台任务兼容实现；当前 bash_run 不接受后台入口，browser_run_task 也不经过该通用 job 层。
+`bash_run` 只走同步执行路径；`browser_run_task(wait=false)` 是独立的显式异步任务接口，使用自己的 task_id 和状态查询，不属于通用后台任务协议。
 
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
 ## 工具结果契约
 
-工具 handler 为兼容已有模型上下文，继续返回原有正文格式；统一状态在
+工具 handler 保持各自正文格式；统一状态在
 `result_contract.go` 中分类，并由 turn 层附加到 `tool_result` SSE：
 
 | 字段 | 语义 |
 |------|------|
 | `status` | `succeeded`、`failed`、`denied`、`running`、`queued`、`cancelled`、`timed_out`、`awaiting_user`、`unknown` |
 | `error` | 失败状态的 `{code, message, retryable}`，策略拒绝使用 `policy_denied` |
-| `rejected` | 兼容字段，仅表示策略拒绝；执行失败不再误报为“已拒绝” |
+| `rejected` | 仅表示策略拒绝；执行失败不再误报为“已拒绝” |
 
 状态优先于正文是否为空、`ERROR:` 前缀或本地化文案。正文中的既有字段（例如
 `exit_code`、`stdout_bytes`、`output_empty`、`job_id`）继续作为工具证据保留。
@@ -45,7 +45,7 @@ tools/
 │   registry_path.go          # resolveWorkspaceRoot、resolvePath（Agent workspace）
 │   registry_enabled.go       # SetBuiltinEnabled、filterToolDefs
 │   executor.go               # Executor 接口
-│   execution_mode.go         # call_purpose、StartBackground（内部）
+│   execution_mode.go         # call_purpose 清洗与上下文标记
 │   tools_test.go             # registry 集成 smoke
 ├── 文件 fs_*
 │   fs_read.go / fs_write.go / fs_search_replace.go
@@ -60,10 +60,8 @@ tools/
 │   bash_compress.go          # 配置 + 清洗 + 截断 + SSE 统计（原 6 文件合并）
 │   shell_output_encoding.go / shell_platform_*.go
 │   bash_*_test.go
-├── 后台 job_*
-│   job_registry.go           # backgroundJobRegistry
-│   tool_job.go               # legacy background-job direct-call handlers
-│   job_registry_test.go
+├── Shell 执行状态
+│   shell_execution.go        # 单次同步 bash 的取消/终态状态
 ├── 领域 tool_*
 │   tool_skills.go / tool_hitl.go / tool_triggers.go
 │   tool_childagent.go
@@ -77,7 +75,7 @@ tools/
 
 | 在 Registry 执行 | 在 turn 编排器执行 |
 |------------------|-------------------|
-| fs、bash、trigger CRUD；旧后台 job 兼容处理 | `load_skills` / `unload_skills` / `clear_skills` |
+| fs、bash、trigger CRUD | `load_skills` / `unload_skills` / `clear_skills` |
 | | `ask_user_information` |
 | | 子 Agent 管理类（registry 为 stub） |
 
@@ -95,6 +93,5 @@ tools/
 - **`bash_run`**：始终同步调用；到达显式 timeout 或默认硬上限后杀进程并返回 `TIMED_OUT`，不登记后台 job，也不产生异步回灌。
 - **`terminal_open`**：用于需要保持目录、环境或进程状态的长期交互任务。
 - **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../../docs/design/ux-agent-owned-file-approval.md)）。
-- **内部 `StartBackground`**：历史兼容实现，当前没有普通模型工具使用；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段，但 bash_run 不接受该语义。
 
 触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md).

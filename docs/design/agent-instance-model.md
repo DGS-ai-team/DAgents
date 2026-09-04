@@ -1,6 +1,6 @@
 # Agent 实例模型
 
-> **状态**：现行设计说明（v0.10.4）。本文只描述当前 Node/Agent/Session 边界；旧的 Session 中心、Placement 和沙箱设计见 [`docs/archive/`](../archive/README.md)。
+> **状态**：现行设计说明。本文只描述当前 Node/Agent/Session 边界；旧的 Session 中心、Placement 和沙箱设计见 [`docs/archive/`](../archive/README.md)。
 
 ## 1. 三个身份
 
@@ -98,5 +98,4 @@ Manage 保存引用、ACL、Timeline 和 Assign；Node 保留 Agent 的 prompt�
 ## 7. 迁移说明
 
 - 旧 `session_id` 出现在 API 或数据库中时，按当前 1:1 Agent/Session 兼容映射处理；新文档优先使用 Agent/Session 的实际语义。
-- 旧 `member.provision` / `WorkerBinding` 是迁移期兼容协议；新 UI 和新接口应使用 AgentRef + `agent.session.open`。
 - 旧 A2A inbox、远程 Placement 和产品沙箱不再作为实现目标。

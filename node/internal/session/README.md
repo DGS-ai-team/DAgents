@@ -57,12 +57,12 @@ flowchart TB
 
 ## 队列与 turn 调度
 
-每个 `runtime` 启动 `consumeLoop`。外部 user/trigger/A2A 输入进入 InputBox FIFO；resume、异步工具事实和恢复 continuation 走控制队列：
+每个 `runtime` 启动 `consumeLoop`。外部 user/trigger/child-agent 输入进入 InputBox FIFO；resume、异步工具事实和恢复 continuation 走控制队列：
 
 | RequestType | 处理函数 | 说明 |
 |-------------|----------|------|
-| InputBox `user` / `trigger` / `a2a` | `handleInputMessage` | 仅在 runtime idle 时取出并启动新 Turn；活动 Turn（含 pending HITL）期间只排队 |
-| `async_tool_result` | `handleSideEffectProduceAsync` | 浏览器异步任务 **Produce**（SSE + 缓冲，不 inline 改 history）；旧后台 job 仅兼容 |
+| InputBox `user` / `trigger` / `child_agent` | `handleInputMessage` | 仅在 runtime idle 时取出并启动新 Turn；活动 Turn（含 pending HITL）期间只排队 |
+| `async_tool_result` | `handleSideEffectProduceAsync` | 浏览器异步任务 **Produce**（SSE + 缓冲，不 inline 改 history） |
 | `turn_continuation` | `handleTurnContinuation` | 恢复/重启后补偿性续跑 |
 | `side_effect_continue` | `handleSideEffectContinue` | 步首 Apply 缓冲 + `ContinueAfterSideEffects` |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
@@ -70,6 +70,13 @@ flowchart TB
 异步旁路缓冲见 `side_effects.go` / `runtime_side_effects.go`：`ApplyReady` 在 `runTurnStepWithSideEffects` 步首；`ReconcileAfterStep` 在步末于 `TaskComplete` 时 schedule continue。Trigger delivery 在 InputBox 输入被消费后清除。
 
 生产路径下，orchestrator 工具步结束后由 runtime 在同一 Turn 链内 inline 续跑下一个 Step，不再把 `tool_result` 作为新的 MessageQueue 请求；resume 仍通过控制队列恢复原 Turn。
+
+Composer 的 Turn 取消与工具卡片的单工具终止是两个不同边界：前者先由
+`TurnCoordinator.CommandCancelTurn` 原子封口，再释放锁取消模型 context 和工具进程，随后拒绝
+旧 generation 的 continuation；后者只更新目标 ToolExecution 并保留当前 Turn 的后续模型请求。
+活动 Step 回收时只能提交取消栅栏之前已经获胜的终态结果，不能让迟到结果覆盖 cancelled
+projection。等待审批/询问时没有运行中的 Step goroutine，取消路径负责补齐完整 tool call 的
+cancelled result；普通 human 输入仍只进入 InputBox 排队，不会打断当前 Turn。
 
 `handleInputMessage` / `handleTurnContinuation` 在步前对**非子** session 调用 `compression.MaybeHandle`；步末 `persist`（子 session 的 `store` 为 nil 时 no-op）。
 
@@ -82,7 +89,7 @@ flowchart TB
 | 字段 | 作用 |
 |------|------|
 | `WorkspaceRoot` | Agent 工具工作区根目录（相对路径参数的基准；不在 system prompt 中暴露绝对路径） |
-| `MaxToolLoops` | 单条 human message 内工具循环上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
+| `MaxSteps` | 单条 human message 内模型/工具步数上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与同时启用数量上限 |
 | `RuntimeDir` | Node runtime root，供 `promptcontext.Reader` 使用 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
@@ -112,14 +119,16 @@ flowchart TB
 
 ### 状态事实源
 
-- **InputBox**：外部 user/trigger/A2A 输入的有界 FIFO，只负责接收、序号和
+- **InputBox**：外部 user/trigger/child-agent 输入的有界 FIFO，只负责接收、序号和
   崩溃恢复，不负责执行 turn 或改写 history。
 - **MessageQueue**：resume、cancel、重启续跑和异步 side-effect 等控制事件；
   它不是普通用户输入的第二个排序队列。
 - **TurnCoordinator**：Turn/Step 生命周期、审批等待和终态的唯一事实源；
-  `runtime` 中的 legacy pending/tool-loop 字段只做兼容投影。
-- **SQLite runtime snapshot**：transcript、InputBox checkpoint 和兼容字段的
-  持久化快照；生命周期事件用于恢复时重建 Turn 投影，两者不能互相冒充。
+  `runtime` 不保存生命周期副本；恢复时从事件投影 pending/tool 状态。
+- **取消栅栏**：Turn 取消同时封口 Step、工具执行、batch 和 interaction；context cancel
+  只负责尽快停止阻塞操作，是否还能提交结果由 Coordinator 的 execution fence 决定。
+- **SQLite runtime snapshot**：transcript、InputBox checkpoint 和通知游标的
+  持久化快照；生命周期事件用于恢复时重建 Turn 投影，两者职责不同。
 - **ModelContextSnapshot**：冻结一次模型请求可见的 prompt/tool/skills 输入；
   step 更新通过 SSE/生命周期事件发送，只有上下文边界才重建快照。
 - **Memory candidate pipeline**：压缩完成后从冻结区间提交有界后台任务；候选先经过

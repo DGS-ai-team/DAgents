@@ -67,17 +67,17 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 ```bash
 pip install -r requirements.lock -r requirements-dev.txt
 python -m unittest discover -s tests -p "test_*.py" -v
-go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
 ```
 
 单文件示例：
 
 ```bash
-python -m unittest tests.test_smoke -v
-python -m unittest tests.test_manage_m0_m1 -v
+python3 -m unittest tests.test_smoke -v
+python3 -m unittest tests.test_manage_m0_m1 -v
 go test ./node/internal/childagent/... -v
 # 可选联网 LLM 冒烟（模块名非 test_*，不在 discover 中）
-python -m unittest tests.integration.live_llm_smoke -v
+python3 -m unittest tests.integration.live_llm_smoke -v
 ```
 
 ---

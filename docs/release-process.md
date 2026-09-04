@@ -15,9 +15,11 @@
 3. 创建 `dev -> main` 的发布 Pull Request；针对 `main` 的 PR 会额外运行 Release metadata 预检，等待必需 CI 和审查通过后合并。
 4. 在合并后的 `main` 最新提交上创建并推送 `vX.Y.Z` 标签。
 5. `build-and-release.yml` 校验标签、`VERSION` 和所有包元数据，并构建 GitHub Release、Linux Node 本地助手包、Windows x64/x86 Inno 安装器和 Manage 离线包；Windows 不再发布免安装归档，发布中同时生成 `SHA256SUMS` 和 `release-manifest.json`。
-6. 发布成功后工作流自动创建 `main -> dev` 同步 PR（不自动合并），避免发布提交（版本号、CHANGELOG 或 hotfix）在开发线上丢失。
+6. 发布成功后由维护者手动创建 `main -> dev` 同步 PR，避免发布提交（版本号、CHANGELOG 或 hotfix）在开发线上丢失；发布工作流不自动创建或合并 PR。
 
-因此，发版时应该把经过验证的 `dev` 合入 `main`，但不应该让每次开发提交自动同步到 `main`，也不应该让发布工作流自动替用户完成分支合并。发布 PR 是版本冻结、审查和回滚边界。
+因此，发版时应该把经过验证的 `dev` 合入 `main`，但不应该让每次开发提交自动同步到 `main`，也不应该让发布工作流自动替用户创建或完成分支合并。发布 PR 是版本冻结、审查和回滚边界。
+
+发布前还应按 [运维与发布](user/operations.md) 的“升级与兼容性”清单做一次旧安装升级演练，至少覆盖 Agent 历史恢复、workspace 路径、Agent/全局记忆、工具结果落盘，以及新安装不创建 `data/`。
 
 ## 版本来源
 

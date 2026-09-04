@@ -8,7 +8,7 @@
 
 ```text
 Orchestrator 暂停 → SSE hitl_required（本地 turn）
-                 或 approval_required / user_information_required（A2A 中继）
+                 或 approval_required / user_information_required（子 Agent relay）
 Client POST resume → session.handleResume → hitl.Parse* → tool 结果写回 history
 ```
 

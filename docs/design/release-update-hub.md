@@ -1,6 +1,6 @@
 # Release Hub 与更新链路
 
-> **状态**：当前实现说明（v0.10.5）。发布事实以 [`CHANGELOG.md`](../../CHANGELOG.md) 与 CI 为准；桌面 Shell 的旧方案已归档。
+> **状态**：当前实现说明（v0.10.7）。发布事实以 [`CHANGELOG.md`](../../CHANGELOG.md) 与 CI 为准；旧免安装自更新方案已归档，Tauri 与 Go Shell 双轨仍是当前实现。
 
 ## 1. 组件职责
 
@@ -9,7 +9,7 @@
 | Manage Release Hub | 保存安装包元数据和文件，支持 draft → published → latest |
 | Node UpdateChecker | 在启用 Manage 时查询版本，缓存结果并提供 Node API |
 | Web UI / Client | 展示可用版本，经过用户确认后执行更新命令 |
-| 安装脚本/打包器 | 校验并替换本地发布包，负责停止/启动和失败回滚策略 |
+| 安装器/桌面 Shell | Windows Inno 负责替换与回滚；Tauri 与 Go Shell 负责就绪检查、停止 Node、启动安装器 |
 
 Node 和 Web UI 的运行时 API 仍然只连本机 Node；Manage 不反向访问 Node。
 
@@ -26,7 +26,7 @@ Node 和 Web UI 的运行时 API 仍然只连本机 Node；Manage 不反向访�
 
 包文件存放在 `MANAGE_RELEASES_DIR`；Docker/离线 bundle 可在镜像中预置 release seed。
 
-当前发布格式为 Linux `.tar.gz` 与 Windows Inno `.exe` 安装包；历史 Windows `.zip` 仍可被旧升级流程读取。Windows Shell 检测到 `.exe` 资产后，会先停止 Node，再静默启动 Inno 安装器，由安装器完成文件替换并重新启动 Shell；因此新版本不再需要 Windows 免安装归档。
+当前发布格式为 Linux `.tar.gz` 与 Windows Inno `.exe` 安装包。Windows Go Shell 与 Tauri Shell 都只接受匹配当前架构的 `.exe` 资产：先停止 Node，再静默启动 Inno 安装器，由安装器完成文件替换并重新启动 Shell；Windows 不再生成或读取免安装归档。
 
 ## 3. Node 检查路径
 

@@ -189,7 +189,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 
 ```bash
 npm test --prefix node/webui/frontend -- --run
-go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 

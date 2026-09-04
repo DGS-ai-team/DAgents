@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+本轮运行时边界与旧逻辑清理，重点是让新安装、升级安装和共享工作区的行为可预期。
+
+### 运行时与兼容性
+
+- Agent 的工作区现在由创建时的 `workspace` 配置决定：未指定时使用 `.runtime/agents/<agent_id>/workspace`，指定本机目录时使用保存的规范化绝对路径；创建后不可修改。
+- 工作区内的 Agent 私有状态统一位于 `.dagents/<agent_id>/`：原始消息审计在 `history/`，Agent 级记忆在 `memory/memory.db`；多个 Agent 共享同一个工作区时仍通过 `agent_id` 隔离。
+- 会话恢复快照和 Agent 元数据仍由 Node 运行目录管理：分别是 `.runtime/memory/sessions.db` 与 `.runtime/agents.db`；全局记忆仍位于 `.runtime/memory/global.db`。这些文件不应移动到项目工作区。
+- 新安装包不再创建 `.runtime/data/`，代码也不再把它作为工作区；已有安装中的 `data/` 目录仅作为兼容遗留保留，不会自动删除、迁移或重新写入。
+- 旧 Agent 快照中缺少 `workspace` 配置时，升级后按新的私有工作区规则解析，不再继续把 Node 运行目录当作共享工作区。升级前请备份 `.runtime/`，并按需将旧项目文件复制到对应的 Agent 工作区；现有审计 JSONL、旧长期记忆文件不会被静默覆盖。
+- 旧的 `FSRoot`、`legacy_shared`、长期记忆兼容适配和已退役的后台 Bash job 入口不再是当前契约。集成方应使用 `workspace_root` 表示 Agent 文件/命令工作区，使用 `runtime_root` 表示 Node 管理目录；两者不能混用。
+
+### 发布验证
+
+- 发布前除常规 Go、Python、Web UI 测试外，应验证升级后的 Agent 历史、记忆和工具结果分别落在上述路径，并验证全新安装包不包含 `data/` 占位目录。
+
 
 
 

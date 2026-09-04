@@ -19,12 +19,11 @@
 |---|---|
 | [manage-architecture.md](manage-architecture.md) | Manage/Registry/Workgroup 现网架构，历史 A2A 仅作背景 |
 | [release-update-hub.md](release-update-hub.md) | Release Hub 与客户端更新链路 |
-| [shell-execution-plan.md](shell-execution-plan.md) | Shell、本地/SSH PTY 与 Terminal 执行边界 |
 | [node-mcp-client-implementation.md](node-mcp-client-implementation.md) | Node MCP 客户端现行实现 |
-| [turn-side-effects-refactor.md](turn-side-effects-refactor.md) | Produce / Apply / Continue 旁路副作用模型 |
 | [context-compression-cache-analysis.md](context-compression-cache-analysis.md) | 压缩与 Prompt Cache 的实现约束 |
 | [agent-quality.md](agent-quality.md) | Agent 效果目标、上下文边界、工具质量和验收矩阵 |
-| [tool-before-hook-duplicate-approval.md](tool-before-hook-duplicate-approval.md) | 重复工具调用的审批策略 |
+| [memory-v2-architecture-and-refactor-guide.md](memory-v2-architecture-and-refactor-guide.md) | Memory 分层、Turn 级召回、冲突判定与 Workspace 存储 |
+| [turn-cancellation-message-integrity-plan.md](turn-cancellation-message-integrity-plan.md) | Turn/工具取消、流式草稿与 Canonical LLM History 边界 |
 | [ux-agent-owned-file-approval.md](ux-agent-owned-file-approval.md) | Agent 自有文件写入的审批信任链 |
 | [ui-e2e-regression-checklist.md](ui-e2e-regression-checklist.md) | 当前 Node Web UI 回归清单 |
 | [ui-product-grade-redesign.md](ui-product-grade-redesign.md) | Node Web UI 产品级评审、已落地的核心改造与持续精修基线 |
@@ -33,9 +32,19 @@
 
 | 文档 | 说明 |
 |---|---|
-| [memory-v2-architecture-and-refactor-guide.md](memory-v2-architecture-and-refactor-guide.md) | 长期记忆分层、Turn 级召回、冲突判定、Workspace 存储与分阶段重构指引；Phase 0–5 核心已落地，Phase 6 处于兼容迁移窗口 |
-| [linux-channel-plan.md](linux-channel-plan.md) | Linux/SSH 通道产品方案；实现状态以代码为准 |
+| [workgroup-multi-agent-collaboration-refactor-plan.md](workgroup-multi-agent-collaboration-refactor-plan.md) | 多智能体委派、子 Agent Turn、工具审批、Ask User、取消恢复与前端投影重构方案 |
 | [workgroup-agent-membership-ui.md](workgroup-agent-membership-ui.md) | Workgroup 成员 UI 的后续增强 |
+
+## 历史专题（不作为现行契约）
+
+以下文档保留设计背景和已完成方案，但其中的旧工具名、旧后台任务模型或迁移阶段描述不能作为当前实现依据：
+
+| 文档 | 说明 |
+|---|---|
+| [shell-execution-plan.md](shell-execution-plan.md) | 历史 Shell/Terminal 方案；当前工具契约以 `terminal_*` 和内置工具参考为准 |
+| [linux-channel-plan.md](linux-channel-plan.md) | 历史 Linux/SSH 方案；当前工具契约以 `terminal_*` 和 Linux channel API 为准 |
+| [turn-side-effects-refactor.md](turn-side-effects-refactor.md) | 历史旁路副作用方案；当前取消与 InputBox 语义以架构文档为准 |
+| [tool-before-hook-duplicate-approval.md](tool-before-hook-duplicate-approval.md) | 历史重复调用审批方案；当前工具目录不包含 `background_job_*` |
 
 后续能力的旧规划见 [`archive/reports/manage-phase2-capabilities.md`](../archive/reports/manage-phase2-capabilities.md)，不构成当前 API 承诺。旧版本验收入口 [`v0.9.1-smoke-checklist.md`](v0.9.1-smoke-checklist.md) 仅是兼容指针，正文位于 `docs/archive/releases/`。媒体展示、桌面 Shell 和旧 OS 矩阵等历史方案位于 `docs/archive/design/` 或 `docs/archive/`。
 

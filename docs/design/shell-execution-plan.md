@@ -1,8 +1,10 @@
-# Bash 与 Shell 执行层设计方案
+# Bash 与 Shell 执行层设计方案（历史记录）
 
-> 状态：Phase A-D 已实现；`terminal_*` 是当前终端主路径，`linux_exec` 仅作为旧 Agent 快照的兼容入口保留。HTTP/WebSocket transport 与断线恢复仍待实现。
+> **文档性质**：历史设计记录，不是当前 API 契约。当前实现以 `terminal_*` 工具、`node/internal/tools/terminal_*` 和内置工具参考为准；本文中的 `linux_exec`、后台 job 及迁移兼容描述不得作为新代码实现依据。
 >
-> 目标：在保留现有 `bash_run` 行为兼容性的前提下，抽象统一的本地/远程 Shell 执行层，为 Linux channel、PTY、容器和后续 Exec Server 提供共同基础。
+> 状态：Phase A-D 已实现；后续演进以现行 Terminal/Linux channel 代码为准。
+>
+> 目标：抽象统一的本地/远程 Shell 执行层，为 Linux channel、PTY、容器和后续 Exec Server 提供共同基础。
 
 ## 1. 结论先行
 

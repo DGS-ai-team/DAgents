@@ -104,7 +104,7 @@ paths:
           description: OK
   /v1/agents/{agent_id}/prompt-context:
     get:
-      summary: 读取 Agent prompt context（soul/custom/long_term；user_md 仅兼容迁移字段，SQLite）
+      summary: 读取 Agent prompt context（soul/custom/memory，SQLite）
       parameters:
         - $ref: "#/components/parameters/AgentID"
       responses:
@@ -313,6 +313,54 @@ paths:
 
   /v1/agent/update:
     get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agent/update/apply:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/capabilities:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/directory-picker:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/clipboard/files:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/ui-focus:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/update/apply:
+    post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
@@ -635,14 +683,6 @@ paths:
         "200":
           description: OK
 
-  /v1/workgroups/meta/member-tools:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/workgroups/{workgroupId}:
     get:
       x-contract-status: surface-only
@@ -711,14 +751,6 @@ paths:
         "200":
           description: OK
     post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/workgroups/{workgroupId}/members/{memberId}/spec:
-    get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
@@ -822,14 +854,6 @@ paths:
           description: OK
 
   /v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/desktop/ui/focus:
     post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
