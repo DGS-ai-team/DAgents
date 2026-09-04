@@ -37,9 +37,32 @@ jobs:
         run: |
           npm ci --prefix node/webui/frontend
           npm ci --prefix desktop/tray-tauri
-          npm audit --audit-level=high --prefix node/webui/frontend
-          npm audit --audit-level=high --prefix manage/console/frontend
-          npm audit --audit-level=high --prefix desktop/tray-tauri
+          audit_frontend() {
+            local package_dir="$1"
+            local attempt output status
+            for attempt in 1 2 3; do
+              set +e
+              output=$(npm audit --audit-level=high --prefix "$package_dir" 2>&1)
+              status=$?
+              set -e
+              printf '%s\n' "$output"
+              if [ "$status" -eq 0 ]; then
+                return 0
+              fi
+              if ! printf '%s\n' "$output" | grep -Eiq \
+                '(503|504|service unavailable|EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENETUNREACH|socket hang up|fetch failed)'; then
+                return "$status"
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "Transient npm audit failure for $package_dir; retrying ($((attempt + 1))/3)..."
+                sleep $((attempt * 10))
+              fi
+            done
+            return "$status"
+          }
+          audit_frontend node/webui/frontend
+          audit_frontend manage/console/frontend
+          audit_frontend desktop/tray-tauri
 
       - name: Check third-party license policy
         run: python scripts/ci/check_npm_license_policy.py
