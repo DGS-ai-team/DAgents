@@ -7,18 +7,13 @@ import (
 )
 
 // AgentURL 构造带 Agent 深链的 Web UI 地址（F-U3）。
-// agentID 为 Agent 实例 UUID（与历史 session_id 同源）。
+// agentID 为 Agent 实例 UUID。
 func AgentURL(endpoint, agentID string) string {
 	base := strings.TrimRight(strings.TrimSpace(endpoint), "/") + "/ui/"
 	if aid := strings.TrimSpace(agentID); aid != "" {
 		return base + "agents/" + url.PathEscape(aid)
 	}
 	return base
-}
-
-// SessionURL 为 AgentURL 的历史别名（托盘 pending 键仍称 session_id）。
-func SessionURL(endpoint, sessionID string) string {
-	return AgentURL(endpoint, sessionID)
 }
 
 // ConsoleURL 返回控制台首页 URL。

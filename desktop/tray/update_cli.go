@@ -9,8 +9,8 @@ import (
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/desktopapi"
 )
 
-func runUpdateCommand(args []string) int {
+func runUpdateCommand(args []string, token string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	return desktopapi.RunUpdateCommand(ctx, args)
+	return desktopapi.RunUpdateCommand(ctx, args, token)
 }

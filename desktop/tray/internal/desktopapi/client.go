@@ -43,17 +43,17 @@ func Health(ctx context.Context, client *http.Client) error {
 }
 
 // RunUpdateCommand 通过运行中 Shell 的 localhost API 执行 update（F-I12）。
-func RunUpdateCommand(ctx context.Context, args []string) int {
+func RunUpdateCommand(ctx context.Context, args []string, token string) int {
 	checkOnly, force := parseUpdateArgs(args)
 	if err := Health(ctx, nil); err != nil {
 		return exitShellUnavailable
 	}
 	if checkOnly {
-		status, code := getUpdateStatus(ctx)
+		status, code := getUpdateStatus(ctx, token)
 		printUpdateStatus(os.Stdout, status)
 		return code
 	}
-	return postUpdateApply(ctx, force)
+	return postUpdateApply(ctx, force, token)
 }
 
 type applyRequest struct {
@@ -67,12 +67,15 @@ type applyResponse struct {
 	Status  sharedupdate.Status `json:"status,omitempty"`
 }
 
-func getUpdateStatus(ctx context.Context) (sharedupdate.Status, int) {
+func getUpdateStatus(ctx context.Context, token string) (sharedupdate.Status, int) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, BaseURL()+"/v1/desktop/update", nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "update check: %v\n", err)
 		return sharedupdate.Status{}, 1
+	}
+	if strings.TrimSpace(token) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -94,7 +97,7 @@ func getUpdateStatus(ctx context.Context) (sharedupdate.Status, int) {
 	return status, 0
 }
 
-func postUpdateApply(ctx context.Context, force bool) int {
+func postUpdateApply(ctx context.Context, force bool, token string) int {
 	body, _ := json.Marshal(applyRequest{Force: force})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, BaseURL()+"/v1/desktop/update/apply", bytes.NewReader(body))
 	if err != nil {
@@ -102,6 +105,9 @@ func postUpdateApply(ctx context.Context, force bool) int {
 		return 1
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(token) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
+	}
 	client := &http.Client{Timeout: 20 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {

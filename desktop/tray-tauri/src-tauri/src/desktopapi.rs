@@ -2,12 +2,15 @@
 
 use crate::clipboard;
 use crate::config::ShellConfig;
+use crate::directory;
 use crate::layout::Layout;
 use crate::nodeclient::Client;
 use crate::uifocus::{Store as UIFocusStore, DEFAULT_TTL};
 use crate::update::{self, Applier, ApplyOptions, Checker, Status, EXIT_UP_TO_DATE};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fs;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -15,19 +18,28 @@ use std::time::Duration;
 use tiny_http::{Header, Method, Request, Response, Server as TinyServer, StatusCode};
 
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:18767";
+pub const BRIDGE_TOKEN_ENV: &str = "DAGENTS_DESKTOP_BRIDGE_TOKEN";
+pub const BRIDGE_URL_ENV: &str = "DAGENTS_DESKTOP_API_URL";
 
 pub struct Server {
     updates: Arc<Checker>,
     applier: Arc<Applier>,
     ui_focus: Arc<UIFocusStore>,
+    token: String,
 }
 
 impl Server {
-    pub fn new(updates: Arc<Checker>, applier: Arc<Applier>, ui_focus: Arc<UIFocusStore>) -> Self {
+    pub fn new(
+        updates: Arc<Checker>,
+        applier: Arc<Applier>,
+        ui_focus: Arc<UIFocusStore>,
+        token: String,
+    ) -> Self {
         Self {
             updates,
             applier,
             ui_focus,
+            token,
         }
     }
 
@@ -59,6 +71,17 @@ impl Server {
         }
         let path = req.url().split('?').next().unwrap_or(req.url()).to_string();
         let method = req.method().clone();
+        if !self.token.trim().is_empty() && path != "/health" && !authorized(&req, &self.token) {
+            let response = with_cors(
+                &req,
+                json_response(
+                    StatusCode(401),
+                    &json!({ "message": "desktop bridge authorization required" }),
+                ),
+            );
+            let _ = req.respond(response);
+            return;
+        }
         let response = match (method, path.as_str()) {
             (Method::Get, "/health") => json_response(StatusCode(200), &json!({ "ok": true })),
             (Method::Get, "/v1/desktop/update") => {
@@ -70,6 +93,20 @@ impl Server {
                 Err(err) => json_response(
                     StatusCode(500),
                     &json!({ "paths": Vec::<String>::new(), "message": err }),
+                ),
+            },
+            (Method::Post, "/v1/desktop/dialog/directory") => match directory::pick_directory() {
+                Ok(Some(path)) => json_response(
+                    StatusCode(200),
+                    &json!({ "ok": true, "cancelled": false, "path": path }),
+                ),
+                Ok(None) => json_response(
+                    StatusCode(200),
+                    &json!({ "ok": true, "cancelled": true, "path": null }),
+                ),
+                Err(err) => json_response(
+                    StatusCode(500),
+                    &json!({ "ok": false, "cancelled": false, "path": null, "message": err }),
                 ),
             },
             (Method::Post, "/v1/desktop/ui/focus") => self.handle_ui_focus(&mut req),
@@ -130,6 +167,12 @@ impl Server {
                 }
             }
         };
+        if parsed.source_id.trim().is_empty() {
+            return json_response(
+                StatusCode(400),
+                &json!({ "ok": false, "message": "source_id is required" }),
+            );
+        }
         let ttl = if parsed.ttl_seconds > 0 {
             Duration::from_secs(parsed.ttl_seconds as u64)
         } else {
@@ -152,15 +195,20 @@ pub fn base_url() -> String {
     format!("http://{DEFAULT_LISTEN_ADDR}")
 }
 
-pub fn run_update_command(args: &[String], layout: Layout, cfg: Arc<ShellConfig>) -> i32 {
+pub fn run_update_command(
+    args: &[String],
+    layout: Layout,
+    cfg: Arc<ShellConfig>,
+    token: String,
+) -> i32 {
     let (check_only, force) = parse_update_args(args);
     if desktop_api_health().is_ok() {
         if check_only {
-            let (status, code) = get_update_status();
+            let (status, code) = get_update_status(&token);
             update::print_status(&status);
             return code;
         }
-        return post_update_apply(force);
+        return post_update_apply(force, &token);
     }
     let client = Arc::new(Client::new(&cfg.endpoint));
     let checker = Arc::new(Checker::new(
@@ -192,11 +240,13 @@ fn desktop_api_health() -> Result<(), String> {
     }
 }
 
-fn get_update_status() -> (Status, i32) {
-    let resp = match ureq::get(&format!("{}/v1/desktop/update", base_url()))
-        .timeout(Duration::from_secs(30))
-        .call()
-    {
+fn get_update_status(token: &str) -> (Status, i32) {
+    let mut req =
+        ureq::get(&format!("{}/v1/desktop/update", base_url())).timeout(Duration::from_secs(30));
+    if !token.trim().is_empty() {
+        req = req.set("Authorization", &format!("Bearer {}", token.trim()));
+    }
+    let resp = match req.call() {
         Ok(resp) => resp,
         Err(e) => {
             eprintln!("update check: {e}");
@@ -219,12 +269,14 @@ fn get_update_status() -> (Status, i32) {
     }
 }
 
-fn post_update_apply(force: bool) -> i32 {
-    let resp = match ureq::post(&format!("{}/v1/desktop/update/apply", base_url()))
+fn post_update_apply(force: bool, token: &str) -> i32 {
+    let mut req = ureq::post(&format!("{}/v1/desktop/update/apply", base_url()))
         .set("Content-Type", "application/json")
-        .timeout(Duration::from_secs(20 * 60))
-        .send_json(json!({ "force": force }))
-    {
+        .timeout(Duration::from_secs(20 * 60));
+    if !token.trim().is_empty() {
+        req = req.set("Authorization", &format!("Bearer {}", token.trim()));
+    }
+    let resp = match req.send_json(json!({ "force": force })) {
         Ok(resp) => resp,
         Err(e) => {
             eprintln!("update apply: {e}");
@@ -334,6 +386,46 @@ fn is_localhost_origin(origin: &str) -> bool {
     lower.starts_with("http://127.0.0.1:")
         || lower.starts_with("http://localhost:")
         || lower.starts_with("http://[::1]:")
+}
+
+fn authorized(req: &Request, token: &str) -> bool {
+    req.headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"))
+        .map(|h| h.value.as_str().trim() == format!("Bearer {}", token.trim()))
+        .unwrap_or(false)
+}
+
+/// Creates a new secret for each Tauri Shell process and exports it to the
+/// child Node. The file is only for the standalone update command.
+pub fn ensure_bridge_token(path: &Path) -> Result<String, String> {
+    if let Ok(token) = std::env::var(BRIDGE_TOKEN_ENV) {
+        if !token.trim().is_empty() {
+            return Ok(token.trim().to_string());
+        }
+    }
+    let mut raw = [0u8; 32];
+    getrandom::fill(&mut raw).map_err(|e| format!("生成 desktop bridge token 失败: {e}"))?;
+    let token = hex::encode(raw);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("创建 desktop bridge token 目录失败: {e}"))?;
+    }
+    fs::write(path, format!("{token}\n"))
+        .map_err(|e| format!("写入 desktop bridge token 失败: {e}"))?;
+    std::env::set_var(BRIDGE_TOKEN_ENV, &token);
+    Ok(token)
+}
+
+pub fn read_bridge_token(path: &Path) -> String {
+    if let Ok(token) = std::env::var(BRIDGE_TOKEN_ENV) {
+        if !token.trim().is_empty() {
+            return token.trim().to_string();
+        }
+    }
+    fs::read_to_string(path)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Deserialize, Default)]

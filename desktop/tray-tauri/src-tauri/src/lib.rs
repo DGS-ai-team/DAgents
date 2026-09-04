@@ -11,6 +11,7 @@
 mod clipboard;
 mod config;
 mod desktopapi;
+mod directory;
 mod events;
 mod layout;
 mod nodeclient;
@@ -100,9 +101,19 @@ pub fn run() {
     let cfg = Arc::new(cfg);
 
     if let Some(update_args) = update_args_from_args() {
-        let code = desktopapi::run_update_command(&update_args, layout, Arc::clone(&cfg));
+        let token = desktopapi::read_bridge_token(&layout.desktop_bridge_token_file);
+        let code = desktopapi::run_update_command(&update_args, layout, Arc::clone(&cfg), token);
         std::process::exit(code);
     }
+
+    let bridge_token = match desktopapi::ensure_bridge_token(&layout.desktop_bridge_token_file) {
+        Ok(token) => token,
+        Err(e) => {
+            eprintln!("dagents-shell: desktop bridge: {e}");
+            std::process::exit(1);
+        }
+    };
+    std::env::set_var(desktopapi::BRIDGE_URL_ENV, desktopapi::base_url());
 
     let guard = match acquire(&layout) {
         Ok(g) => g,
@@ -348,6 +359,7 @@ pub fn run() {
                     Arc::clone(&shared.update_checker),
                     Arc::clone(&shared.update_applier),
                     Arc::clone(&shared.ui_focus),
+                    bridge_token.clone(),
                 ));
                 api.start(Arc::clone(&bg_stop));
 

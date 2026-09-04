@@ -75,11 +75,11 @@ func TestIsWindowsInstallerAsset(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "legacy archive",
+			name: "non-installer asset",
 			status: sharedupdate.Status{
-				Platform: "windows-386",
+				Platform: "windows-amd64",
 				Asset: map[string]any{
-					"filename": "dagents-local-assistant-windows-386-0.10.4.zip",
+					"filename": "dagents-local-assistant-windows-amd64-0.10.4.tar.gz",
 				},
 			},
 			want: false,

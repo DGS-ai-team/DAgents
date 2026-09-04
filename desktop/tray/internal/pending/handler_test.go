@@ -52,18 +52,31 @@ func TestSyncFromAgents(t *testing.T) {
 	}
 }
 
-func TestShouldSyncOnEvent(t *testing.T) {
-	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "turn_finished", SessionID: "s1"}) {
-		t.Fatal("turn_finished should trigger sync")
+func TestApplyNotificationChanged(t *testing.T) {
+	store := NewStore()
+	ev := nodeclient.StreamEvent{
+		Type:    "notification_changed",
+		AgentID: "a1",
+		Data: map[string]any{
+			"has_pending_hitl":   true,
+			"pending_hitl_items": float64(2),
+			"has_unread":         true,
+		},
 	}
-	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "turn_finished", AgentID: "agt-1"}) {
-		t.Fatal("turn_finished with agent_id should trigger sync")
+	if !ApplyNotificationChanged(store, ev) {
+		t.Fatal("notification_changed should update the store")
 	}
-	if ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "assistant", SessionID: "s1"}) {
-		t.Fatal("assistant should not trigger sync")
+	if got := store.Summary(); got.ItemCount != 3 {
+		t.Fatalf("summary = %+v", got)
 	}
-	if !EventHasAgent(nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
-		t.Fatal("tool_result with agent should have agent")
+	ev.Data["has_pending_hitl"] = false
+	ev.Data["pending_hitl_items"] = float64(0)
+	ev.Data["has_unread"] = false
+	if !ApplyNotificationChanged(store, ev) {
+		t.Fatal("clearing notification should update the store")
+	}
+	if got := store.Summary(); got.AgentCount != 0 {
+		t.Fatalf("summary after clear = %+v", got)
 	}
 }
 
@@ -87,11 +100,11 @@ func TestHasPendingHITL(t *testing.T) {
 }
 
 func TestEntrySummaryLabel(t *testing.T) {
-	e := Entry{AgentID: "abcd1234efgh", SessionID: "abcd1234efgh", HITLItems: 1, HasUnread: true}
+	e := Entry{AgentID: "abcd1234efgh", HITLItems: 1, HasUnread: true}
 	if e.SummaryLabel() == "" {
 		t.Fatal("expected label")
 	}
-	e2 := Entry{AgentID: "agt-x", SessionID: "agt-x", DisplayName: "运维", HasUnread: true}
+	e2 := Entry{AgentID: "agt-x", DisplayName: "运维", HasUnread: true}
 	if got := e2.SummaryLabel(); got != "运维 · 新回复" {
 		t.Fatalf("label = %q", got)
 	}

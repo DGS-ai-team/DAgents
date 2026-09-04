@@ -15,7 +15,6 @@ import (
 // StreamEvent 为一条 SSE 业务事件。
 type StreamEvent struct {
 	Type         string
-	SessionID    string
 	AgentID      string
 	Seq          int
 	AgentSeq     int
@@ -137,7 +136,6 @@ func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error)
 	aid := strings.TrimSpace(envelope.AgentID)
 	return StreamEvent{
 		Type:         typ,
-		SessionID:    aid, // 与 AgentID 同源（待办键历史字段）
 		AgentID:      aid,
 		Seq:          seq,
 		AgentSeq:     envelope.AgentSeq,

@@ -14,6 +14,7 @@ pub struct Layout {
     pub pid_file: PathBuf,
     pub log_out: PathBuf,
     pub log_err: PathBuf,
+    pub desktop_bridge_token_file: PathBuf,
 }
 
 impl Layout {
@@ -46,6 +47,7 @@ impl Layout {
             pid_file: runtime.join("node.pid"),
             log_out: log_dir.join(format!("node-{day}.log")),
             log_err: log_dir.join(format!("node-{day}.err.log")),
+            desktop_bridge_token_file: runtime.join("desktop-bridge.token"),
             home,
             config_path: cfg,
         })
