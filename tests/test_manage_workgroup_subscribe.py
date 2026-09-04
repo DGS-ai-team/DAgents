@@ -59,12 +59,12 @@ class WorkgroupSubscribeTests(unittest.TestCase):
             store.patch_acl(wid, ACLPatchRequest(collaborators=["node-b"], expected_revision=1))
             from manage.workgroup.models import MemberCreateRequest
 
-            member, _ = store.create_member(
+            member = store.create_member(
                 wid,
                 MemberCreateRequest(
+                    agent_id="agent-b",
                     home_node_id="node-b",
                     display_name="reader",
-                    allow_tool_names=["read_file"],
                 ),
             )
             self.assertEqual(member.status, "provisioning")

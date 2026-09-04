@@ -5,12 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable
 
 from manage.platform.metrics import record_workgroup_timeline_event
 from manage.storage.sqlite import SQLiteDatabase
-from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup import ids
 from manage.workgroup.d3_models import (
@@ -32,18 +30,12 @@ from manage.workgroup.models import (
     ACLPatchRequest,
     MemberCreateRequest,
     MemberPatchRequest,
-    MemberPrompt,
-    MemberSpec,
-    MemberTools,
-    MemberWorkspace,
     WorkGroup,
     WorkGroupACL,
     WorkGroupCreateRequest,
     WorkGroupMember,
     WorkGroupPatchRequest,
-    WorkgroupWorkspace,
 )
-from manage.workgroup.workspace import materialize_workgroup_workspace
 
 
 def _now() -> str:
@@ -58,16 +50,13 @@ class WorkGroupStore:
     def __init__(
         self,
         db: SQLiteDatabase | None = None,
-        *,
-        workspaces_dir: Path | None = None,
     ) -> None:
         self._db = db if (db and db.enabled) else None
-        self._workspaces_dir = workspaces_dir
+        self._loaded = False
         self._lock = threading.RLock()
         self._groups: dict[str, WorkGroup] = {}
         self._acls: dict[str, WorkGroupACL] = {}
         self._members: dict[str, WorkGroupMember] = {}
-        self._specs: dict[str, MemberSpec] = {}
         self._assigns: dict[str, Assign] = {}
         self._runs: dict[str, ActorRun] = {}
         self._run_histories: dict[str, ActorRunHistory] = {}
@@ -79,18 +68,20 @@ class WorkGroupStore:
         self._hitl_waiting: set[str] = set()
         self._human_queue: dict[str, list[QueuedHumanRecord]] = {}
         self._turn_checkpoints: dict[str, TurnCheckpoint] = {}
-        # member_id → {workspace_path, tool_catalog_revision, provision_id}
-        self._member_runtime: dict[str, dict[str, str]] = {}
-        # workgroup_id → {workspace_path} 组共享工作区（与 WorkGroup.workspace.path 同步）
-        self._workgroup_runtime: dict[str, dict[str, str]] = {}
         # workgroup_id → {node_id: Subscription}
         self._subscriptions: dict[str, dict[str, Subscription]] = {}
         self._timeline_listener: Callable[[TimelineEvent], None] | None = None
+        self._hitl_listener: Callable[[HITLRequest], None] | None = None
 
     def set_timeline_listener(self, listener: Callable[[TimelineEvent], None] | None) -> None:
         """Register a best-effort listener after Timeline + outbox commit."""
         with self._lock:
             self._timeline_listener = listener
+
+    def set_hitl_listener(self, listener: Callable[[HITLRequest], None] | None) -> None:
+        """Register a best-effort listener after an HITL row is committed."""
+        with self._lock:
+            self._hitl_listener = listener
 
     # --- low-level persistence ---
 
@@ -144,20 +135,15 @@ class WorkGroupStore:
         return [model.model_validate_json(r["payload_json"]) for r in rows]
 
     def _ensure_loaded(self) -> None:
-        if self._db is None or self._groups:
+        if self._db is None or self._loaded:
             return
         # Lazy hydrate once from SQLite into memory maps (process-local cache).
         for g in self._load_all("workgroups", WorkGroup):
             self._groups[g.workgroup_id] = g
-            path = (g.workspace.path or "").strip()
-            if path:
-                self._workgroup_runtime[g.workgroup_id] = {"workspace_path": path}
         for a in self._load_all("workgroup_acls", WorkGroupACL):
             self._acls[a.workgroup_id] = a
         for m in self._load_all("workgroup_members", WorkGroupMember):
             self._members[m.member_id] = m
-        for s in self._load_all("member_specs", MemberSpec):
-            self._specs[s.member_id] = s
         for a in self._load_all("workgroup_assigns", Assign):
             self._assigns[a.assign_id] = a
         for r in self._load_all("actor_runs", ActorRun):
@@ -188,6 +174,7 @@ class WorkGroupStore:
             self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
         for sub in self._load_all("workgroup_subscriptions", Subscription):
             self._subscriptions.setdefault(sub.workgroup_id, {})[sub.node_id] = sub
+        self._loaded = True
 
     # --- WorkGroup ---
 
@@ -196,10 +183,6 @@ class WorkGroupStore:
             self._ensure_loaded()
             wid = ids.workgroup_id()
             now = _now()
-            workspace = WorkgroupWorkspace()
-            if self._workspaces_dir is not None:
-                ws_path = materialize_workgroup_workspace(self._workspaces_dir, wid)
-                workspace = WorkgroupWorkspace(path=str(ws_path))
             group = WorkGroup(
                 workgroup_id=wid,
                 display_name=req.display_name.strip(),
@@ -207,7 +190,6 @@ class WorkGroupStore:
                 created_by_node_id=req.created_by_node_id.strip(),
                 llm_profile_id=req.llm_profile_id.strip(),
                 llm_profile_revision=req.llm_profile_revision.strip(),
-                workspace=workspace,
                 created_at=now,
             )
             acl = WorkGroupACL(
@@ -219,8 +201,6 @@ class WorkGroupStore:
             )
             self._groups[wid] = group
             self._acls[wid] = acl
-            if workspace.path:
-                self._workgroup_runtime[wid] = {"workspace_path": workspace.path}
             sub = Subscription(
                 workgroup_id=wid,
                 node_id=group.created_by_node_id,
@@ -408,7 +388,7 @@ class WorkGroupStore:
             )
             self._acls[workgroup_id] = updated
             self._put("workgroup_acls", workgroup_id, updated.model_dump_json(), workgroup_id=workgroup_id)
-            # 新进 ACL 的节点自动订阅，便于后续作为 Home 收 provision / Dialer resume
+            # 新进 ACL 的节点自动订阅，便于作为 Home 接收 session outbox / resume
             for nid in owners + collaborators:
                 self._subscribe_unlocked(workgroup_id, nid)
             return updated
@@ -421,88 +401,50 @@ class WorkGroupStore:
             raise WorkgroupError("not_authorized", "node not in workgroup ACL", http_status=403)
         return acl
 
-    # --- Member + MemberSpec ---
+    # --- Members ---
 
-    def create_member(self, workgroup_id: str, req: MemberCreateRequest) -> tuple[WorkGroupMember, MemberSpec]:
+    def create_member(self, workgroup_id: str, req: MemberCreateRequest) -> WorkGroupMember:
         with self._lock:
-            group = self.require_mutable(workgroup_id)
+            self.require_mutable(workgroup_id)
             home = req.home_node_id.strip()
-            agent_id = (req.agent_id or "").strip() or None
-            if agent_id and not home:
+            agent_id = req.agent_id.strip()
+            if not home:
                 raise WorkgroupError(
                     "schema_mismatch",
-                    "home_node_id is required until registry lookup is enabled",
+                    "home_node_id is required",
                     http_status=400,
                 )
-            execution_mode = "agent_ref" if agent_id else "legacy_member"
             # home 必须在 ACL 内才可挂载成员
             self.assert_acl_member(workgroup_id, home)
             mid = ids.member_id()
             now = _now()
-            # AgentRef members execute inside the selected Node Agent. Their
-            # prompt, tools, skills and model are authoritative on that Agent;
-            # storing a Manage-side copy would create a stale shadow config.
-            tools = MemberTools(
-                allow_names=[] if agent_id else list(req.allow_tool_names),
-                side_effect_classes=[] if agent_id else list(req.side_effect_classes),
-            )
-            draft = {
-                "member_id": mid,
-                "workgroup_id": workgroup_id,
-                "agent_id": agent_id,
-                "home_node_id": home,
-                "display_name": req.display_name.strip(),
-                "description": (req.description or "").strip(),
-                "member_generation": 1,
-                "llm_profile_id": (group.llm_profile_id if agent_id else (req.llm_profile_id or group.llm_profile_id)).strip(),
-                "llm_profile_revision": (group.llm_profile_revision if agent_id else (req.llm_profile_revision or group.llm_profile_revision)).strip(),
-                "max_tool_loops": req.max_tool_loops,
-                "prompt": MemberPrompt().model_dump() if agent_id else req.prompt.model_dump(),
-                "memory": req.memory.model_dump(),
-                "tools": tools.model_dump(),
-                "policy_ceiling": dict(req.policy_ceiling),
-                "workspace": MemberWorkspace().model_dump(),
-                "skills": "disabled",
-                "hooks": "disabled",
-            }
-            digest = sha256_digest(draft)
-            spec = MemberSpec.model_validate({**draft, "digest": digest})
             member = WorkGroupMember(
                 member_id=mid,
                 workgroup_id=workgroup_id,
                 agent_id=agent_id,
-                session_id=(f"wg:{workgroup_id}:member:{mid}" if agent_id else None),
-                execution_mode=execution_mode,
                 home_node_id=home,
-                display_name=spec.display_name,
+                display_name=req.display_name.strip(),
+                description=(req.description or "").strip(),
+                session_id=(f"wg:{workgroup_id}:member:{mid}" if agent_id else None),
                 status="provisioning",
-                member_generation=1,
-                member_spec_digest=digest,
                 created_at=now,
             )
-            self._specs[mid] = spec
             self._members[mid] = member
-            self._member_runtime[mid] = {
-                "lease_id": ids.lease_id(),
-                "lease_epoch": "1",
-            }
             if self._db is None:
-                self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id)
                 self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id)
                 self._subscribe_unlocked(workgroup_id, home)
-                return member, spec
+                return member
             with self._db.connect() as tx:
-                self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id, conn=tx)
                 self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id, conn=tx)
                 tx.commit()
-            # Home Node 自动订阅：Dialer resume 才能拉到 pending member.provision
+            # Home Node 自动订阅：Dialer resume 拉取待发送的 Agent session frame。
             self._subscribe_unlocked(workgroup_id, home)
-            return member, spec
+            return member
 
     def update_member(
         self, workgroup_id: str, member_id: str, req: MemberPatchRequest
-    ) -> tuple[WorkGroupMember, MemberSpec]:
-        """更新 MemberSpec：bump generation、重算 digest，状态回到 provisioning。"""
+    ) -> WorkGroupMember:
+        """更新成员展示元数据，并重新打开其 Node Agent session。"""
         with self._lock:
             self.require_mutable(workgroup_id)
             member = self._members.get(member_id)
@@ -510,84 +452,24 @@ class WorkGroupStore:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
             if member.status == "archived":
                 raise WorkgroupError("conflict", "member is archived", http_status=409)
-            spec = self._specs.get(member_id)
-            if spec is None:
-                raise WorkgroupError("not_found", "member spec not found", http_status=404)
-
             display_name = (
-                req.display_name.strip() if req.display_name is not None else spec.display_name
+                req.display_name.strip() if req.display_name is not None else member.display_name
             )
             description = (
-                req.description.strip() if req.description is not None else spec.description
+                req.description.strip() if req.description is not None else member.description
             )
-            group = self._groups[workgroup_id]
-            llm_profile_id = (
-                group.llm_profile_id
-                if member.execution_mode == "agent_ref"
-                else (req.llm_profile_id.strip() if req.llm_profile_id is not None else spec.llm_profile_id)
-            )
-            llm_profile_revision = (
-                group.llm_profile_revision
-                if member.execution_mode == "agent_ref"
-                else (req.llm_profile_revision.strip() if req.llm_profile_revision is not None else spec.llm_profile_revision)
-            )
-            max_tool_loops = (
-                int(req.max_tool_loops) if req.max_tool_loops is not None else spec.max_tool_loops
-            )
-            prompt = MemberPrompt() if member.execution_mode == "agent_ref" else (req.prompt if req.prompt is not None else spec.prompt)
-            allow_names = (
-                [] if member.execution_mode == "agent_ref" else list(req.allow_tool_names)
-                if req.allow_tool_names is not None
-                else list(spec.tools.allow_names)
-            )
-            side_effect_classes = (
-                [] if member.execution_mode == "agent_ref" else list(req.side_effect_classes)
-                if req.side_effect_classes is not None
-                else list(spec.tools.side_effect_classes)
-            )
-            policy_ceiling = (
-                dict(req.policy_ceiling)
-                if req.policy_ceiling is not None
-                else dict(spec.policy_ceiling)
-            )
-            new_gen = int(member.member_generation) + 1
-            tools = MemberTools(allow_names=allow_names, side_effect_classes=side_effect_classes)
-            draft = {
-                "member_id": member_id,
-                "workgroup_id": workgroup_id,
-				"agent_id": member.agent_id,
-                "home_node_id": member.home_node_id,
-                "display_name": display_name,
-                "description": description,
-                "member_generation": new_gen,
-                "llm_profile_id": llm_profile_id,
-                "llm_profile_revision": llm_profile_revision,
-                "max_tool_loops": max_tool_loops,
-                "prompt": prompt.model_dump(),
-                "memory": spec.memory.model_dump(),
-                "tools": tools.model_dump(),
-                "policy_ceiling": policy_ceiling,
-                "workspace": MemberWorkspace().model_dump(),
-                "skills": "disabled",
-                "hooks": "disabled",
-            }
-            digest = sha256_digest(draft)
-            new_spec = MemberSpec.model_validate({**draft, "digest": digest})
             updated = member.model_copy(
                 update={
                     "display_name": display_name,
-                    "member_generation": new_gen,
-                    "member_spec_digest": digest,
+                    "description": description,
                     "status": "provisioning",
                 }
             )
-            self._specs[member_id] = new_spec
             self._members[member_id] = updated
-            self._put("member_specs", member_id, new_spec.model_dump_json(), workgroup_id=workgroup_id)
             self._put(
                 "workgroup_members", member_id, updated.model_dump_json(), workgroup_id=workgroup_id
             )
-            return updated, new_spec
+            return updated
 
     def _subscribe_unlocked(self, workgroup_id: str, node_id: str) -> Subscription | None:
         """调用方须已持有 self._lock；node 须已在 ACL 内。"""
@@ -643,11 +525,6 @@ class WorkGroupStore:
         with self._lock:
             self._ensure_loaded()
             return self._members.get(member_id)
-
-    def get_spec(self, member_id: str) -> MemberSpec | None:
-        with self._lock:
-            self._ensure_loaded()
-            return self._specs.get(member_id)
 
     def list_members(self, workgroup_id: str, *, include_archived: bool = False) -> list[WorkGroupMember]:
         with self._lock:
@@ -733,7 +610,14 @@ class WorkGroupStore:
                 workgroup_id=workgroup_id,
                 member_id=member.member_id,
                 leader_run_id=leader_run_id,
-                leader_tool_call_id=req.leader_tool_call_id.strip(),
+                leader_tool_call_id=(req.leader_tool_call_id or "").strip() or None,
+                source=req.source,
+                parent_turn_id=(req.parent_turn_id or ids.turn_id()).strip(),
+                child_turn_id=ids.turn_id(),
+                attempt_id=ids.attempt_id(),
+                last_event_seq=0,
+                event_stream_epoch="",
+                updated_at=_now(),
                 status="queued",
                 instruction=req.instruction,
                 created_at=_now(),
@@ -788,37 +672,6 @@ class WorkGroupStore:
             aid = str(actor_id or "").strip()
             if aid:
                 rows = [r for r in rows if r.actor_id == aid]
-            if aid == "leader" and rows:
-                # Supervisor is one persistent session. Legacy duplicate rows
-                # remain addressable by run id, but are not listed as sessions.
-                canonical = self._canonical_actor_run_unlocked(
-                    workgroup_id,
-                    actor_id="leader",
-                )
-                if canonical is not None:
-                    self._consolidate_actor_session_history_unlocked(
-                        workgroup_id,
-                        actor_id="leader",
-                        target=canonical,
-                    )
-                    canonical = self._runs.get(canonical.run_id) or canonical
-                rows = [canonical] if canonical is not None else []
-            elif not aid:
-                leader_rows = [row for row in rows if row.actor_id == "leader"]
-                if leader_rows:
-                    canonical = self._canonical_actor_run_unlocked(
-                        workgroup_id,
-                        actor_id="leader",
-                    )
-                    if canonical is not None:
-                        self._consolidate_actor_session_history_unlocked(
-                            workgroup_id,
-                            actor_id="leader",
-                            target=canonical,
-                        )
-                        canonical = self._runs.get(canonical.run_id) or canonical
-                        rows = [row for row in rows if row.actor_id != "leader"]
-                        rows.append(canonical)
             rows.sort(key=lambda r: r.created_at, reverse=True)
             lim = max(1, min(int(limit or 20), 100))
             return rows[:lim]
@@ -836,18 +689,8 @@ class WorkGroupStore:
         ]
         if not rows:
             return None
-        rows.sort(key=lambda r: (r.created_at, r.run_id))
-        if actor_id != "leader":
-            return rows[-1]
-        # Pre-fix direct mentions could create an empty leader placeholder.
-        # Prefer the oldest row that has real history, otherwise the oldest row.
-        with_history = [
-            r
-            for r in rows
-            if self._run_histories.get(r.run_id) is not None
-            and bool(self._run_histories[r.run_id].messages)
-        ]
-        return (with_history or rows)[0]
+        rows.sort(key=lambda r: (r.created_at, r.run_id), reverse=True)
+        return rows[0]
 
     def find_latest_actor_run(self, workgroup_id: str, *, actor_id: str) -> ActorRun | None:
         """Return the persistent session for an actor, if one exists.
@@ -881,11 +724,6 @@ class WorkGroupStore:
             self._ensure_loaded()
             existing = self._canonical_actor_run_unlocked(workgroup_id, actor_id=actor_id)
             if existing is not None:
-                self._consolidate_actor_session_history_unlocked(
-                    workgroup_id,
-                    actor_id=actor_id,
-                    target=existing,
-                )
                 return existing
             return self.create_actor_run(
                 workgroup_id,
@@ -894,143 +732,6 @@ class WorkGroupStore:
                     llm_profile_revision=llm_profile_revision,
                 ),
             )
-
-    def _consolidate_actor_session_history_unlocked(
-        self,
-        workgroup_id: str,
-        *,
-        actor_id: str,
-        target: ActorRun,
-    ) -> None:
-        """Lazily merge pre-session ActorRuns into the persistent session.
-
-        Older builds created one ActorRun per turn.  Keeping those records is
-        useful for audit, but the next persistent session must see their full
-        message sequence.  This migration is idempotent because the merged
-        sequence is written to the target history as one snapshot.
-        """
-        rows = [
-            r
-            for r in self._runs.values()
-            if r.workgroup_id == workgroup_id and r.actor_id == str(actor_id or "").strip()
-        ]
-        rows.sort(key=lambda r: (r.created_at, r.run_id))
-        current = self._run_histories.get(target.run_id)
-        merged: list[RunHistoryMessage] = []
-        max_watermark = 0
-        fingerprints: set[str] = set()
-
-        def add_message(message: RunHistoryMessage) -> None:
-            if message.timeline_event_seq is not None and any(
-                existing.timeline_event_seq == message.timeline_event_seq
-                for existing in merged
-            ):
-                return
-            if message.assign_id and any(
-                existing.assign_id == message.assign_id and existing.role == message.role
-                for existing in merged
-            ):
-                return
-            fingerprint = message.model_dump_json()
-            if fingerprint in fingerprints:
-                return
-            fingerprints.add(fingerprint)
-            merged.append(message)
-
-        for row in rows:
-            history = self._run_histories.get(row.run_id)
-            if history is not None:
-                for message in history.messages:
-                    add_message(message)
-                max_watermark = max(max_watermark, int(history.timeline_watermark_seq or 0))
-            max_watermark = max(max_watermark, int(row.timeline_watermark_seq or 0))
-
-        if actor_id == "leader":
-            timeline = sorted(
-                self._timeline.get(workgroup_id, []),
-                key=lambda event: event.seq,
-            )
-            from manage.workgroup.history import extract_assign_ids_from_tool_results
-
-            covered_assigns = {
-                message.assign_id
-                for message in merged
-                if message.assign_id
-            }
-            covered_assigns.update(extract_assign_ids_from_tool_results(merged))
-            for event in timeline:
-                if event.type == "human_message":
-                    if any(
-                        existing.timeline_event_seq == event.seq
-                        or (
-                            existing.timeline_event_seq is None
-                            and existing.role == "user"
-                            and existing.name == event.protocol_name
-                            and existing.content == event.text
-                        )
-                        for existing in merged
-                    ):
-                        continue
-                    add_message(
-                        RunHistoryMessage(
-                            role="user",
-                            name=event.protocol_name,
-                            content=event.text,
-                            timeline_event_seq=event.seq,
-                        )
-                    )
-                    continue
-                # Direct @member turns bypass Supervisor's tool call. Their
-                # member result must still be visible to future Supervisor
-                # turns; regular assignments already have a tool result.
-                if (
-                    event.type == "actor_final_text"
-                    and event.actor_id != "leader"
-                    and event.assign_id
-                    and event.assign_id not in covered_assigns
-                ):
-                    add_message(
-                        RunHistoryMessage(
-                            role="user",
-                            name=event.protocol_name,
-                            content=event.text,
-                            timeline_event_seq=event.seq,
-                            assign_id=event.assign_id,
-                        )
-                    )
-                    covered_assigns.add(event.assign_id)
-            max_watermark = max(max_watermark, max((event.seq for event in timeline), default=0))
-
-        updated_history = ActorRunHistory(
-            run_id=target.run_id,
-            workgroup_id=workgroup_id,
-            actor_id=target.actor_id,
-            messages=merged,
-            timeline_watermark_seq=max_watermark,
-            legacy_runs_consolidated=True,
-        )
-        if current is not None and current.model_dump() == updated_history.model_dump():
-            return
-        self._run_histories[target.run_id] = updated_history
-        self._put(
-            "actor_run_histories",
-            target.run_id,
-            updated_history.model_dump_json(),
-            workgroup_id=workgroup_id,
-        )
-        updated_run = target.model_copy(
-            update={
-                "timeline_watermark_seq": max_watermark,
-                "checkpoint_ordinal": max(target.checkpoint_ordinal, len(merged)),
-            }
-        )
-        self._runs[target.run_id] = updated_run
-        self._put(
-            "actor_runs",
-            target.run_id,
-            updated_run.model_dump_json(),
-            workgroup_id=workgroup_id,
-        )
 
     def prepare_actor_session(
         self,
@@ -1163,7 +864,6 @@ class WorkGroupStore:
                 update={
                     "messages": new_msgs,
                     "timeline_watermark_seq": wm,
-                    "legacy_runs_consolidated": True,
                 }
             )
             self._run_histories[run_id] = updated
@@ -1184,34 +884,17 @@ class WorkGroupStore:
                 self._put("actor_runs", run_id, run2.model_dump_json(), workgroup_id=run2.workgroup_id)
             return updated
 
-    def member_execution_context(self, member_id: str) -> dict[str, Any]:
-        """派活/provision 用的成员执行上下文（替代 ExecutionGrant）。"""
+    def member_execution_context(self, member_id: str) -> dict[str, str]:
+        """Return the stable Node session identity for a workgroup member."""
         with self._lock:
             self._ensure_loaded()
             member = self._members.get(member_id)
             if member is None:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
-            spec = self._specs.get(member_id)
-            runtime = dict(self._member_runtime.get(member_id) or {})
-            lease_id = str(runtime.get("lease_id") or "").strip() or ids.lease_id()
-            try:
-                lease_epoch = int(runtime.get("lease_epoch") or 1)
-            except (TypeError, ValueError):
-                lease_epoch = 1
-            if "lease_id" not in runtime or "lease_epoch" not in runtime:
-                runtime["lease_id"] = lease_id
-                runtime["lease_epoch"] = str(lease_epoch)
-                self._member_runtime[member_id] = runtime
             return {
-				"agent_id": member.agent_id or "",
-				"session_id": member.session_id or "",
-				"execution_mode": member.execution_mode,
+                "agent_id": member.agent_id,
+                "session_id": member.session_id,
                 "home_node_id": member.home_node_id,
-                "member_spec_digest": member.member_spec_digest,
-                "member_generation": member.member_generation,
-                "lease_id": lease_id,
-                "lease_epoch": lease_epoch,
-                "tool_allow_names": [] if member.execution_mode == "agent_ref" else (list(spec.tools.allow_names) if spec is not None else []),
             }
 
     def mark_member_status(
@@ -1220,9 +903,6 @@ class WorkGroupStore:
         status: str,
         *,
         workgroup_id: str | None = None,
-        workspace_path: str = "",
-        tool_catalog_revision: str = "",
-        provision_id: str = "",
         error_code: str | None = None,
         error_message: str | None = None,
     ) -> WorkGroupMember:
@@ -1233,10 +913,8 @@ class WorkGroupStore:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
             if workgroup_id and member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
-            # A provision result may arrive after the member was archived,
-            # especially when the Home Node replays an unacked provision
-            # frame during WS resume.  Archive is terminal; a late result
-            # must never resurrect the member.
+            # Archive is terminal; a late session result must never resurrect
+            # the member.
             if member.status == "archived" and status != "archived":
                 return member
             update: dict[str, Any] = {"status": status}
@@ -1254,29 +932,7 @@ class WorkGroupStore:
                 updated.model_dump_json(),
                 workgroup_id=updated.workgroup_id,
             )
-            runtime = dict(self._member_runtime.get(member_id) or {})
-            if workspace_path:
-                runtime["workspace_path"] = workspace_path
-            if tool_catalog_revision:
-                runtime["tool_catalog_revision"] = tool_catalog_revision
-            if provision_id:
-                runtime["provision_id"] = provision_id
-            if runtime:
-                self._member_runtime[member_id] = runtime
             return updated
-
-    def workgroup_runtime(self, workgroup_id: str) -> dict[str, str]:
-        with self._lock:
-            self._ensure_loaded()
-            group = self._groups.get(workgroup_id)
-            if group is not None and (group.workspace.path or "").strip():
-                return {"workspace_path": group.workspace.path.strip()}
-            return dict(self._workgroup_runtime.get(workgroup_id) or {})
-
-    def member_runtime(self, member_id: str) -> dict[str, str]:
-        with self._lock:
-            self._ensure_loaded()
-            return dict(self._member_runtime.get(member_id) or {})
 
     def set_assign_status(
         self,
@@ -1296,6 +952,7 @@ class WorkGroupStore:
                 update["result_summary"] = result_summary
             if error_code is not None or status in {"succeeded", "failed", "indeterminate", "canceled"}:
                 update["error_code"] = error_code
+            update["updated_at"] = _now()
             updated = assign.model_copy(update=update)
             self._assigns[assign_id] = updated
             self._put(
@@ -1319,6 +976,49 @@ class WorkGroupStore:
                         workgroup_id=member.workgroup_id,
                     )
             return updated
+
+    def advance_assign_event_cursor(
+        self, assign_id: str, event_seq: int, stream_epoch: str = ""
+    ) -> bool:
+        """Persist a monotonic Node event cursor and reject duplicate events."""
+        seq = max(0, int(event_seq or 0))
+        if seq <= 0:
+            return True
+        with self._lock:
+            self._ensure_loaded()
+            assign = self._assigns.get(assign_id)
+            if assign is None:
+                raise WorkgroupError("not_found", "assign not found", http_status=404)
+            epoch = str(stream_epoch or "").strip()
+            if epoch and epoch != assign.event_stream_epoch:
+                updated = assign.model_copy(
+                    update={
+                        "last_event_seq": seq,
+                        "event_stream_epoch": epoch,
+                        "updated_at": _now(),
+                    }
+                )
+                self._assigns[assign_id] = updated
+                self._put(
+                    "workgroup_assigns",
+                    assign_id,
+                    updated.model_dump_json(),
+                    workgroup_id=updated.workgroup_id,
+                )
+                return True
+            if seq <= assign.last_event_seq:
+                return False
+            updated = assign.model_copy(
+                update={"last_event_seq": seq, "event_stream_epoch": epoch or assign.event_stream_epoch, "updated_at": _now()}
+            )
+            self._assigns[assign_id] = updated
+            self._put(
+                "workgroup_assigns",
+                assign_id,
+                updated.model_dump_json(),
+                workgroup_id=updated.workgroup_id,
+            )
+            return True
 
     # --- Turn recovery / human queue persistence ---
 
@@ -1396,7 +1096,7 @@ class WorkGroupStore:
 
         ActorRun/Assign records are durable, but their worker threads and
         command waiters are not.  Never leave those records looking active:
-        mark them indeterminate and release the member lease.  Pending HITL
+        mark them indeterminate and release member occupancy. Pending HITL
         rows are intentionally preserved for an explicit user decision.
         """
         with self._lock:
@@ -1504,57 +1204,7 @@ class WorkGroupStore:
                 "checkpoint_workgroup_ids": checkpoint_ids,
             }
 
-    def fail_active_assigns(
-        self,
-        workgroup_id: str,
-        *,
-        reason: str = "assign interrupted",
-        error_code: str = "canceled",
-        leader_tool_call_ids: set[str] | None = None,
-        exclude_assign_ids: set[str] | None = None,
-    ) -> list[str]:
-        """将组内仍 active 的 Assign 置为 failed；可按 leader_tool_call_id 过滤。"""
-        with self._lock:
-            self._ensure_loaded()
-            failed: list[str] = []
-            for assign in list(self._assigns.values()):
-                if assign.workgroup_id != workgroup_id:
-                    continue
-                if assign.status not in {"queued", "running", "awaiting_hitl"}:
-                    continue
-                if exclude_assign_ids and assign.assign_id in exclude_assign_ids:
-                    continue
-                if leader_tool_call_ids is not None:
-                    if (assign.leader_tool_call_id or "") not in leader_tool_call_ids:
-                        continue
-                updated = assign.model_copy(
-                    update={
-                        "status": "failed",
-                        "result_summary": reason,
-                        "error_code": error_code,
-                    }
-                )
-                self._assigns[assign.assign_id] = updated
-                self._put(
-                    "workgroup_assigns",
-                    assign.assign_id,
-                    updated.model_dump_json(),
-                    workgroup_id=workgroup_id,
-                )
-                member = self._members.get(assign.member_id)
-                if member is not None and member.active_assign_id == assign.assign_id:
-                    mem = member.model_copy(update={"active_assign_id": None, "status": "ready"})
-                    self._members[member.member_id] = mem
-                    self._put(
-                        "workgroup_members",
-                        member.member_id,
-                        mem.model_dump_json(),
-                        workgroup_id=workgroup_id,
-                    )
-                failed.append(assign.assign_id)
-            return failed
-
-    # --- Timeline / Outbox / HITL (D3) ---
+    # --- Timeline / Outbox / HITL ---
 
     def append_timeline(
         self,
@@ -1679,57 +1329,6 @@ class WorkGroupStore:
                     return frame
             return None
 
-    def reconcile_timeline_outbox(self, workgroup_id: str | None = None) -> int:
-        """Backfill Timeline outbox rows created before atomic Timeline/outbox writes."""
-        with self._lock:
-            self._ensure_loaded()
-            workgroups = [str(workgroup_id or "").strip()] if workgroup_id else list(self._timeline)
-            missing: list[TimelineEvent] = []
-            for wid in workgroups:
-                if not wid:
-                    continue
-                existing = {
-                    str(frame.payload.get("event_id") or "")
-                    for frame in self._outbox.get(wid) or []
-                    if frame.type == "timeline.event"
-                }
-                missing.extend(
-                    event
-                    for event in self._timeline.get(wid) or []
-                    if event.event_id not in existing
-                )
-            if not missing:
-                return 0
-
-            frames = [self._new_timeline_outbox_frame_unlocked(event) for event in missing]
-            try:
-                if self._db is None:
-                    for frame in frames:
-                        self._put(
-                            "workgroup_outbox",
-                            f"{frame.workgroup_id}:{frame.delivery_seq}",
-                            frame.model_dump_json(),
-                            workgroup_id=frame.workgroup_id,
-                        )
-                else:
-                    with self._db.connect() as tx:
-                        for frame in frames:
-                            self._put(
-                                "workgroup_outbox",
-                                f"{frame.workgroup_id}:{frame.delivery_seq}",
-                                frame.model_dump_json(),
-                                workgroup_id=frame.workgroup_id,
-                                conn=tx,
-                            )
-                        tx.commit()
-            except Exception:
-                for frame in reversed(frames):
-                    stored = self._outbox.get(frame.workgroup_id) or []
-                    if stored and stored[-1] is frame:
-                        stored.pop()
-                raise
-            return len(frames)
-
     def list_timeline(self, workgroup_id: str) -> list[TimelineEvent]:
         with self._lock:
             self._ensure_loaded()
@@ -1803,11 +1402,13 @@ class WorkGroupStore:
         workgroup_id: str,
         *,
         prompt: str,
+        kind: str = "user_question",
         run_id: str | None = None,
         tool_call_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         reserve_waiter: bool = False,
     ) -> HITLRequest:
+        listener: Callable[[HITLRequest], None] | None = None
         with self._lock:
             self._ensure_loaded()
             if self.get_workgroup(workgroup_id) is None:
@@ -1815,7 +1416,7 @@ class WorkGroupStore:
             hitl = HITLRequest(
                 hitl_id=ids.hitl_id(),
                 workgroup_id=workgroup_id,
-                kind="information",
+                kind=kind,
                 prompt=prompt,
                 status="pending",
                 created_at=_now(),
@@ -1835,7 +1436,16 @@ class WorkGroupStore:
                 # Reserve the in-process path before the request can resolve.
                 # This closes the create -> wait race used by the native tool.
                 self._hitl_waiting.add(hitl.hitl_id)
-            return hitl
+            listener = self._hitl_listener
+        if listener is not None:
+            try:
+                listener(hitl)
+            except Exception:  # noqa: BLE001 - HITL persistence must not fail on fan-out
+                logging.getLogger(__name__).exception(
+                    "workgroup HITL listener failed",
+                    extra={"workgroup_id": hitl.workgroup_id, "hitl_id": hitl.hitl_id},
+                )
+        return hitl
 
     def get_hitl(self, hitl_id: str) -> HITLRequest | None:
         with self._lock:
@@ -1926,6 +1536,7 @@ class WorkGroupStore:
         *,
         resolution: dict[str, Any],
     ) -> HITLRequest:
+        listener: Callable[[HITLRequest], None] | None = None
         with self._lock:
             self._ensure_loaded()
             hitl = self._hitl.get(hitl_id)
@@ -1954,7 +1565,16 @@ class WorkGroupStore:
             waiter = self._hitl_waiters.pop(hitl_id, None)
             if waiter is not None:
                 waiter.set()
-            return updated
+            listener = self._hitl_listener
+        if listener is not None:
+            try:
+                listener(updated)
+            except Exception:  # noqa: BLE001 - HITL persistence must not fail on fan-out
+                logging.getLogger(__name__).exception(
+                    "workgroup HITL listener failed",
+                    extra={"workgroup_id": updated.workgroup_id, "hitl_id": updated.hitl_id},
+                )
+        return updated
 
     def cancel_pending_hitls(self, workgroup_id: str) -> list[str]:
         """取消组内 pending HITL（turn cancel 时唤醒 ask_workgroup_user 等待）。"""
@@ -2034,25 +1654,3 @@ class WorkGroupStore:
         with self._lock:
             self._ensure_loaded()
             return node_id.strip() in (self._subscriptions.get(workgroup_id) or {})
-
-    def bump_lease_epochs(self, workgroup_id: str) -> int:
-        """归档时抬升组内成员 lease_epoch；返回抬升后的最大 epoch。"""
-        with self._lock:
-            self._ensure_loaded()
-            max_epoch = 1
-            for mid, member in list(self._members.items()):
-                if member.workgroup_id != workgroup_id:
-                    continue
-                runtime = dict(self._member_runtime.get(mid) or {})
-                try:
-                    cur = int(runtime.get("lease_epoch") or 1)
-                except (TypeError, ValueError):
-                    cur = 1
-                new_epoch = cur + 1
-                runtime["lease_epoch"] = str(new_epoch)
-                if not runtime.get("lease_id"):
-                    runtime["lease_id"] = ids.lease_id()
-                self._member_runtime[mid] = runtime
-                if new_epoch > max_epoch:
-                    max_epoch = new_epoch
-            return max_epoch

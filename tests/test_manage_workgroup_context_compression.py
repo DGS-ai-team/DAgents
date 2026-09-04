@@ -200,10 +200,11 @@ class ContextCompressionTests(unittest.TestCase):
             member = store.create_member(
                 group.workgroup_id,
                 MemberCreateRequest(
+                    agent_id="agent-a",
                     home_node_id="node-a",
                     display_name="worker",
                 ),
-            )[0]
+            )
             store.mark_member_status(member.member_id, "ready", workgroup_id=group.workgroup_id)
             store.create_assign(
                 group.workgroup_id,

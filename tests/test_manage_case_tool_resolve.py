@@ -22,64 +22,8 @@ class ToolResolveTest(unittest.TestCase):
             {"role": "tool", "tool_call_id": "call-1", "content": "file body"},
         ]
         m = build_tool_call_map(raws)
-        name = resolve_tool_name(raws[1], raws[:1], m)
+        name = resolve_tool_name(raws[1], m)
         self.assertEqual(name, "read_file")
-
-    def test_async_job_from_tool_name_line(self):
-        raws = [
-            {
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": "async-job-job-1",
-                        "function": {"name": "tool_callback", "arguments": "{}"},
-                    }
-                ],
-            },
-            {
-                "role": "tool",
-                "tool_call_id": "async-job-job-1",
-                "content": (
-                    "[ASYNC_TOOL_RESULT]\n"
-                    "tool_name=bash_run\n"
-                    "job_id=job-1\n"
-                    "source_tool_call_id=call-bg-1\n"
-                    "done"
-                ),
-            },
-        ]
-        m = build_tool_call_map(raws)
-        name = resolve_tool_name(raws[1], raws[:1], m)
-        self.assertEqual(name, "bash_run")
-
-    def test_async_job_via_background_tool_chain(self):
-        raws = [
-            {
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": "call-bg-1",
-                        "function": {
-                            "name": "bash_run",
-                            "arguments": '{"command":"echo hi"}',
-                        },
-                    }
-                ],
-            },
-            {
-                "role": "tool",
-                "tool_call_id": "call-bg-1",
-                "content": "[BASH_RESULT] status=RUNNING job_id=job-1",
-            },
-            {
-                "role": "tool",
-                "tool_call_id": "async-job-job-1",
-                "content": "[ASYNC_TOOL_RESULT]\njob_id=job-1\nresult ok",
-            },
-        ]
-        m = build_tool_call_map(raws)
-        name = resolve_tool_name(raws[2], raws[:2], m)
-        self.assertEqual(name, "bash_run")
 
     def test_filter_drops_orphan_tool(self):
         messages = [

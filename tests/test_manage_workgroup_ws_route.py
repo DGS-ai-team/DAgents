@@ -58,8 +58,8 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                 OutboxFrame(
                     delivery_seq=1,
                     workgroup_id=wid,
-                    type="tool.command",
-                    payload={"command_id": "cmd_a"},
+                    type="agent.turn.start",
+                    payload={"assign_id": "as_01h00000000000000000000001"},
                     created_at="2026-07-31T00:00:00Z",
                 )
             ]
@@ -93,23 +93,25 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                         }
                     )
                     env = ws.receive_json()
-                    self.assertEqual(env["type"], "tool.command")
+                    self.assertEqual(env["type"], "agent.turn.start")
                     self.assertEqual(env["delivery_seq"], 1)
                     complete = ws.receive_json()
                     self.assertEqual(complete["type"], "resume.complete")
 
                     # live push：enqueue 后经 hub 推送
                     frame = store.enqueue_outbox(
-                        wid, type="workgroup.tombstone", payload={"workgroup_id": wid}
+                        wid,
+                        type="agent.session.close",
+                        payload={"workgroup_id": wid, "home_node_id": "node_b"},
                     )
                     hub.deliver_outbox_frame(frame, home_node_id="node_b")
                     live = ws.receive_json()
-                    self.assertEqual(live["type"], "workgroup.tombstone")
+                    self.assertEqual(live["type"], "agent.session.close")
                     self.assertEqual(live["delivery_seq"], frame.delivery_seq)
 
                     ws.send_json(
                         {
-                            "type": "workgroup.tombstone_ack",
+                            "type": "delivery.ack",
                             "payload": {
                                 "delivery_seq": frame.delivery_seq,
                                 "connection_generation": gen,
@@ -133,7 +135,6 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                             "node_id": "node_a",
                             "protocol_version": "1",
                             "schema_version": "0.5.0",
-                            "agent_catalog_revision": "rev_test",
                             "capabilities": ["resume", "timeline"],
                             "client_time": "2026-08-26T00:00:00Z",
                         },
@@ -143,7 +144,6 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                 payload = welcome["payload"]
                 self.assertEqual(payload["protocol_version"], "1")
                 self.assertEqual(payload["schema_version"], "0.5.0")
-                self.assertEqual(payload["agent_catalog_revision"], "rev_test")
                 self.assertIn("resume", payload["capabilities"])
                 self.assertIn("server_time", payload)
 

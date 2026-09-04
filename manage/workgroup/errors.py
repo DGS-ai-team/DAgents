@@ -1,4 +1,4 @@
-"""稳定错误码（对齐 D0.5 §7.4）。"""
+"""工作组 API 与 AgentRef 事件使用的稳定错误码。"""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Workgroup 内置 Hook 行为（对齐 Node Agent：日期注入 + 工具结果压缩）。
 
-不引入完整 Hook Registry / 插件；MemberSpec.hooks 仍为 disabled。
+只保留工作组 Leader/Timeline 所需的日期与结果压缩 Hook。
 """
 
 from __future__ import annotations

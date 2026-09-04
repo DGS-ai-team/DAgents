@@ -1,30 +1,10 @@
-"""案例库 tool 消息工具名解析与 orphan 过滤（对齐 Node async-job 语义）。"""
+"""案例库 tool 消息工具名解析与 orphan 过滤。"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from manage.cases.models import CaseMessage
-
-ASYNC_JOB_PREFIX = "async-job-"
-
-
-def _content_to_str(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    return str(content)
-
-
-def _parse_kv_line(content: str, key: str) -> str:
-    prefix = key + "="
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            return stripped[len(prefix) :].strip()
-    return ""
-
 
 def build_tool_call_map(messages: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
     """从 assistant.tool_calls 构建 tool_call_id → {name, arguments}。"""
@@ -55,7 +35,6 @@ def build_tool_call_map(messages: list[dict[str, Any]]) -> dict[str, dict[str, s
 
 def resolve_tool_name(
     raw: dict[str, Any],
-    prior: list[dict[str, Any]],
     tool_call_map: dict[str, dict[str, str]],
 ) -> str | None:
     """解析 tool 消息工具名；无法解析时返回 None。"""
@@ -64,32 +43,6 @@ def resolve_tool_name(
         return name
 
     call_id = str(raw.get("tool_call_id") or "").strip()
-    content = _content_to_str(raw.get("content"))
-
-    if call_id.startswith(ASYNC_JOB_PREFIX):
-        async_name = _parse_kv_line(content, "tool_name")
-        if async_name:
-            return async_name
-        src_id = _parse_kv_line(content, "source_tool_call_id")
-        if src_id:
-            matched = tool_call_map.get(src_id)
-            if matched and matched.get("name"):
-                return matched["name"]
-        job_id = call_id[len(ASYNC_JOB_PREFIX) :].strip()
-        if job_id:
-            for prev in reversed(prior):
-                if str(prev.get("role") or "") != "tool":
-                    continue
-                prev_content = _content_to_str(prev.get("content"))
-                if job_id not in prev_content:
-                    continue
-                prev_call = str(prev.get("tool_call_id") or "").strip()
-                if not prev_call:
-                    continue
-                matched = tool_call_map.get(prev_call)
-                if matched and matched.get("name"):
-                    return matched["name"]
-
     if call_id:
         matched = tool_call_map.get(call_id)
         if matched and matched.get("name"):
@@ -103,10 +56,10 @@ def filter_unlinked_tool_messages(messages: list[CaseMessage]) -> list[CaseMessa
     raws = [m.raw or {} for m in messages]
     tool_call_map = build_tool_call_map(raws)
     out: list[CaseMessage] = []
-    for i, msg in enumerate(messages):
+    for msg in messages:
         if msg.role != "tool":
             out.append(msg)
             continue
-        if resolve_tool_name(msg.raw or {}, raws[:i], tool_call_map):
+        if resolve_tool_name(msg.raw or {}, tool_call_map):
             out.append(msg)
     return out

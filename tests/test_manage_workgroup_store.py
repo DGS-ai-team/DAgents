@@ -12,7 +12,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
-from manage.workgroup.digest import sha256_digest  # noqa: E402
 from manage.workgroup.errors import WorkgroupError  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     AssignCreateRequest,
@@ -26,43 +25,11 @@ from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.turn_kernel import TurnKernel  # noqa: E402
 
 
-class WorkgroupDigestTests(unittest.TestCase):
-    def test_digest_excludes_self_and_is_stable(self) -> None:
-        payload = {
-            "b": 2,
-            "a": {"z": 1, "y": [3, 2]},
-            "digest": "sha256:deadbeef",
-        }
-        d1 = sha256_digest(payload)
-        d2 = sha256_digest({**payload, "digest": "sha256:other"})
-        self.assertEqual(d1, d2)
-        self.assertTrue(d1.startswith("sha256:"))
-        self.assertEqual(len(d1), len("sha256:") + 64)
-
-
 class WorkgroupStoreTests(unittest.TestCase):
     def _store(self, tmp: str) -> WorkGroupStore:
         root = Path(tmp)
         db = SQLiteDatabase(root / "manage.db")
-        return WorkGroupStore(db=db, workspaces_dir=root / "workgroup-workspaces")
-
-    def test_create_group_materializes_workspace(self) -> None:
-        with TemporaryDirectory() as tmp:
-            store = self._store(tmp)
-            group, _ = store.create_workgroup(
-                WorkGroupCreateRequest(
-                    display_name="WS",
-                    created_by_node_id="node-a",
-                )
-            )
-            self.assertEqual(group.workspace.root_kind, "workgroup_workspace")
-            self.assertTrue(group.workspace.path)
-            ws = Path(group.workspace.path)
-            self.assertTrue(ws.is_dir())
-            self.assertTrue((ws / "data").is_dir())
-            self.assertTrue((ws / "README.md").is_file())
-            runtime = store.workgroup_runtime(group.workgroup_id)
-            self.assertEqual(runtime.get("workspace_path"), group.workspace.path)
+        return WorkGroupStore(db=db)
 
     def test_create_group_acl_member_assign(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -87,23 +54,17 @@ class WorkgroupStoreTests(unittest.TestCase):
             self.assertEqual(acl.revision, 2)
             self.assertIn("node-b", acl.collaborators)
 
-            member, spec = store.create_member(
+            member = store.create_member(
                 group.workgroup_id,
                 MemberCreateRequest(
+                    agent_id="agent-b",
                     home_node_id="node-b",
                     display_name="worker",
-                    allow_tool_names=["read_file", "bash"],
                 ),
             )
             self.assertEqual(member.status, "provisioning")
-            self.assertEqual(spec.digest, member.member_spec_digest)
-            self.assertEqual(spec.skills, "disabled")
-            self.assertFalse(spec.memory.remember_enabled)
             ctx = store.member_execution_context(member.member_id)
             self.assertEqual(ctx["home_node_id"], "node-b")
-            self.assertEqual(ctx["tool_allow_names"], ["read_file", "bash"])
-            self.assertTrue(ctx["lease_id"])
-            self.assertEqual(ctx["lease_epoch"], 1)
 
             # 未发布不可派发
             with self.assertRaises(WorkgroupError) as ctx_err:
@@ -133,7 +94,7 @@ class WorkgroupStoreTests(unittest.TestCase):
                 group.workgroup_id,
                 ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
             )
-            member, spec = store.create_member(
+            member = store.create_member(
                 group.workgroup_id,
                 MemberCreateRequest(
                     agent_id="agent-b",
@@ -141,12 +102,9 @@ class WorkgroupStoreTests(unittest.TestCase):
                     display_name="Existing Agent",
                 ),
             )
-            self.assertEqual(member.execution_mode, "agent_ref")
             self.assertEqual(member.agent_id, "agent-b")
             self.assertTrue(member.session_id)
-            self.assertEqual(spec.agent_id, "agent-b")
             ctx = store.member_execution_context(member.member_id)
-            self.assertEqual(ctx["execution_mode"], "agent_ref")
             self.assertEqual(ctx["agent_id"], "agent-b")
             self.assertEqual(ctx["session_id"], member.session_id)
 
@@ -167,31 +125,22 @@ class WorkgroupStoreTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / "manage.db"
-            ws_dir = root / "workgroup-workspaces"
-            store = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            store = WorkGroupStore(db=SQLiteDatabase(path))
             group, _ = store.create_workgroup(
                 WorkGroupCreateRequest(display_name="Persist", created_by_node_id="node-a")
             )
             wid = group.workgroup_id
-            ws_path = group.workspace.path
-            self.assertTrue(ws_path)
-            store2 = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            store2 = WorkGroupStore(db=SQLiteDatabase(path))
             loaded = store2.get_workgroup(wid)
             self.assertIsNotNone(loaded)
             assert loaded is not None
             self.assertEqual(loaded.display_name, "Persist")
-            self.assertEqual(loaded.workspace.path, ws_path)
-            self.assertEqual(
-                store2.workgroup_runtime(wid).get("workspace_path"),
-                ws_path,
-            )
 
     def test_bound_pending_hitl_survives_restart_and_marks_run_awaiting(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)
             path = root / "manage.db"
-            ws_dir = root / "workgroup-workspaces"
-            store = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            store = WorkGroupStore(db=SQLiteDatabase(path))
             group, _ = store.create_workgroup(
                 WorkGroupCreateRequest(display_name="HITL restart", created_by_node_id="node-a")
             )
@@ -207,7 +156,7 @@ class WorkgroupStoreTests(unittest.TestCase):
                 tool_call_id="call_hitl_restart",
             )
 
-            restarted = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            restarted = WorkGroupStore(db=SQLiteDatabase(path))
             loaded = restarted.get_hitl(hitl.hitl_id)
             self.assertIsNotNone(loaded)
             assert loaded is not None
@@ -225,7 +174,7 @@ class WorkgroupStoreTests(unittest.TestCase):
                 resolution={"answer": "yes"},
             )
             self.assertEqual(resolved.status, "resolved")
-            restarted_again = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            restarted_again = WorkGroupStore(db=SQLiteDatabase(path))
             restarted_again.reconcile_inflight_runs()
             crash_window_run = restarted_again.get_actor_run(run.run_id)
             self.assertIsNotNone(crash_window_run)
@@ -244,7 +193,7 @@ class WorkgroupStoreTests(unittest.TestCase):
             self.assertEqual(proj["actor_id"], "leader")
             self.assertIn("messages", proj)
 
-    def test_update_member_bumps_generation(self) -> None:
+    def test_update_member_updates_display_fields(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = self._store(tmp)
             group, _ = store.create_workgroup(
@@ -254,28 +203,23 @@ class WorkgroupStoreTests(unittest.TestCase):
                 group.workgroup_id,
                 ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
             )
-            member, spec = store.create_member(
+            member = store.create_member(
                 group.workgroup_id,
                 MemberCreateRequest(
+                    agent_id="agent-b",
                     home_node_id="node-b",
                     display_name="reader",
-                    allow_tool_names=["read_file"],
                 ),
             )
-            self.assertEqual(member.member_generation, 1)
-            updated, new_spec = store.update_member(
+            updated = store.update_member(
                 group.workgroup_id,
                 member.member_id,
                 MemberPatchRequest(
                     display_name="writer",
-                    allow_tool_names=["read_file", "write_file"],
                 ),
             )
             self.assertEqual(updated.display_name, "writer")
-            self.assertEqual(updated.member_generation, 2)
             self.assertEqual(updated.status, "provisioning")
-            self.assertNotEqual(new_spec.digest, spec.digest)
-            self.assertEqual(new_spec.tools.allow_names, ["read_file", "write_file"])
 
 
 if __name__ == "__main__":
