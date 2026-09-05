@@ -716,6 +716,8 @@ def build_workgroup_router(
                         continue
                     if message is None:
                         break
+                    if not isinstance(message, dict):
+                        continue
                     event_type = str(message.get("type") or "message")
                     payload = message.get("payload")
                     event_id = None

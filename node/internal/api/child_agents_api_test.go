@@ -28,7 +28,7 @@ func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	cfg := &config.Config{
-		NodeID: "ops-linux-01",
+		NodeID:      "ops-linux-01",
 		RuntimeRoot: filepath.Join(root, "runtime"),
 		Compression: config.CompressionConfig{
 			SilentTriggerTokens:   80000,

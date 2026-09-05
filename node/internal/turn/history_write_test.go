@@ -8,7 +8,7 @@ import (
 )
 
 func TestHistoryWriteReplacesRecoveryPlaceholder(t *testing.T) {
-	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{},  nil, nil, hooks.RuntimeConfig{}, nil)
+	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
 	call := llm.ToolCall{
 		ID: "call-recovery", Type: "function",
 		Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo hi"}`},
@@ -28,7 +28,7 @@ func TestHistoryWriteReplacesRecoveryPlaceholder(t *testing.T) {
 }
 
 func TestHistoryInsertReplacesRecoveryPlaceholderWithoutDuplicate(t *testing.T) {
-	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{},  nil, nil, hooks.RuntimeConfig{}, nil)
+	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
 	call := llm.ToolCall{
 		ID: "call-recovery", Type: "function",
 		Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo hi"}`},
