@@ -14,6 +14,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -39,7 +40,7 @@ type Server struct {
 	llmRuntime      *llm.RuntimeSettings
 	logger          *slog.Logger
 	mux             *http.ServeMux
-	sessions        *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
+	sessions        *session.Manager // per-session queue and turn consumer
 	agents          *store.AgentStore
 	mcpServers      *store.MCPServerStore
 	mcpManager      *mcp.Manager
@@ -59,7 +60,6 @@ type Server struct {
 	control         *manage.ControlClient
 	tools           *tools.Registry
 	transfers       *tools.LinuxTransferManager
-	backgroundJobs  *tools.BackgroundJobStore
 	browserMu       sync.RWMutex
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
@@ -67,6 +67,7 @@ type Server struct {
 	workgroupDialer *workgroup.Dialer
 	workgroupAgents *workgroupAgentBridge
 	terminals       *terminalSessionRegistry
+	desktopBridge   *desktopbridge.Client
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex
@@ -181,18 +182,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		o.tools = reg
 	}
-	var backgroundJobs *tools.BackgroundJobStore
-	if !o.skipStore {
-		opened, err := tools.OpenBackgroundJobStore(cfg.BackgroundJobsDBPath())
-		if err != nil {
-			logger.Error("background job store init failed", "error", err, "path", cfg.BackgroundJobsDBPath())
-		} else {
-			backgroundJobs = opened
-			if err := o.tools.WithBackgroundJobStore(backgroundJobs); err != nil {
-				logger.Error("default tools background job store bind failed", "error", err)
-			}
-		}
-	}
 	if o.policyEngine == nil {
 		o.policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
 		logger.Info("policy default engine seeded (per-agent policy stored in agents.db)")
@@ -218,17 +207,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			logger.Error("agents store init failed", "error", err, "path", cfg.AgentsDBPath())
 		} else {
 			agentsStore = opened
-			if n, err := policy.MergeMissingSeedIntoRuntimePolicy(cfg.RuntimeDir()); err != nil {
-				logger.Error("runtime policy seed merge failed", "error", err, "runtime", cfg.RuntimeDir())
-			} else if n > 0 {
-				logger.Info("runtime policy seed merge applied", "tools_added", n, "runtime", cfg.RuntimeDir())
-			}
-			if result, err := agentsStore.MigrateAgentPoliciesMergeSeed(context.Background()); err != nil {
-				logger.Error("agent policy seed merge failed", "error", err)
-			} else if result.AgentsTouched > 0 {
-				logger.Info("agent policy seed merge applied",
-					"agents", result.AgentsTouched, "tools_added", result.ToolsAdded)
-			}
 		}
 		openedMCP, err := store.OpenMCPServers(filepath.Join(cfg.RuntimeDir(), "mcp_servers.db"), cfg.RuntimeDir())
 		if err != nil {
@@ -249,8 +227,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			logger.Error("llm configs store init failed", "error", err, "path", cfg.LLMConfigsDBPath())
 		} else {
 			llmConfigStore = opened
-			if err := store.MigrateLLMConfigsFromConfig(context.Background(), llmConfigStore, cfg); err != nil {
-				logger.Error("llm configs migrate failed", "error", err)
+			if err := store.EnsureDefaultLLMConfig(context.Background(), llmConfigStore, cfg); err != nil {
+				logger.Error("llm default config initialization failed", "error", err)
 			} else if records, err := llmConfigStore.List(context.Background()); err != nil {
 				logger.Error("llm configs list failed", "error", err)
 			} else if len(records) > 0 {
@@ -284,7 +262,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	transferHub := stream.NewHub(256, logger)
 	var transferManager *tools.LinuxTransferManager
 	if linuxProvider != nil {
-		transferManager = tools.NewLinuxTransferManager(linuxProvider, cfg.RuntimeDir(), tools.DefaultLinuxTransferConcurrency,
+		transferManager = tools.NewLinuxTransferManager(linuxProvider, tools.DefaultLinuxTransferConcurrency,
 			func(agentID, eventType string, data map[string]any, replayable bool) {
 				if replayable {
 					transferHub.Publish(agentID, eventType, data)
@@ -295,11 +273,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	workgroupStream := stream.NewHub(1024, logger)
 	hostsnapshot.CaptureAtStartup()
+	duplicateToolCallEnabled := cfg.DuplicateToolCallHookEnabled()
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
+	toolResultEnabled := cfg.ToolResultHookEnabled()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		WorkspaceRoot: cfg.RuntimeDir(),
-		// MaxToolLoops 由各 Agent config_snapshot（defaults.llm.max_tool_loops）在装入 runtime 时写入。
+		// MaxSteps 由各 Agent config_snapshot（defaults.llm.max_steps）在装入 runtime 时写入。
 		SkillsRoot:                  cfg.SkillsRoot(),
 		SkillsEnabled:               cfg.Skills.Enabled,
 		SkillsMaxInPrompt:           cfg.Skills.MaxInPrompt,
@@ -312,11 +292,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		RawMessageHistoryEnabled:    cfg.RawMessageHistoryEnabled(),
 		RawMessageHistoryDir:        cfg.RawMessageHistoryDir(),
 		DuplicateToolCall: hooks.DuplicateConfig{
-			Enabled:       cfg.DuplicateToolCallHookEnabled(),
+			Enabled:       &duplicateToolCallEnabled,
 			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
 		},
 		ToolResult: hooks.ToolResultConfig{
-			Enabled:              cfg.ToolResultHookEnabled(),
+			Enabled:              &toolResultEnabled,
 			SpillThresholdTokens: cfg.ToolResultSpillThresholdTokens(),
 			Tools:                cfg.ToolResultHookTools(),
 			WorkspaceRoot:        cfg.RuntimeDir(),
@@ -442,7 +422,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		wgWorker = workgroup.NewWorker(workgroup.Config{
 			NodeID:        cfg.NodeID,
 			AgentSessions: wgAgentBridge,
-			DataDir:       filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
 		})
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,
@@ -506,13 +485,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		control:              control,
 		tools:                o.tools,
 		transfers:            transferManager,
-		backgroundJobs:       backgroundJobs,
 		browserMgr:           browserMgr,
 		mediaRegister:        mediaRegister,
 		workgroupWorker:      wgWorker,
 		workgroupDialer:      wgDialer,
 		workgroupAgents:      wgAgentBridge,
 		terminals:            newTerminalSessionRegistry(),
+		desktopBridge:        desktopbridge.NewFromEnv(),
 		pendingRuntimeReload: make(map[string]string),
 	}
 	if s.workgroupAgents != nil {

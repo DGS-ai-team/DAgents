@@ -102,7 +102,6 @@ const streamInputKey = computed(() => {
   }
   parts.push(
     toolJobsStore.runningCallIds.join(","),
-    toolJobsStore.backgroundCallIds.join(","),
   );
   return parts.join("\0");
 });
@@ -111,7 +110,7 @@ function rebuildStream() {
   streamBuildHandle = null;
   const items = measureSync(
     "stream.build",
-    () => buildStream(props.entries, props.hitlQueue, toolJobsStore),
+    () => buildStream(props.entries, props.hitlQueue),
     { entries: props.entries.length },
   );
   updateRuntimeMetrics({ entries: props.entries.length, streamItems: items.length });

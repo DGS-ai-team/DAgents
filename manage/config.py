@@ -38,7 +38,6 @@ class ManageSettings:
     release_max_bytes: int | None
     seed_bundled_releases: bool
     bundled_releases_dir: Path | None
-    workgroup_workspaces_dir: Path | None
     offline_grace_seconds: int
     audit_max_entries: int
 
@@ -49,7 +48,6 @@ class ManageSettings:
         db_raw = os.environ.get("MANAGE_DB_PATH", "").strip()
         blob_raw = os.environ.get("MANAGE_BLOB_DIR", "").strip()
         releases_raw = os.environ.get("MANAGE_RELEASES_DIR", "").strip()
-        workspaces_raw = os.environ.get("MANAGE_WORKGROUP_WORKSPACES_DIR", "").strip()
         bundled_raw = os.environ.get("MANAGE_BUNDLED_RELEASES_DIR", "").strip()
         seed = os.environ.get("MANAGE_SEED_BUNDLED_RELEASES", "1").strip().lower() not in {"0", "false", "no"}
         db_path = Path(db_raw) if db_raw else None
@@ -60,13 +58,6 @@ class ManageSettings:
             releases_dir = db_path.parent / "releases"
         else:
             releases_dir = None
-        workgroup_workspaces_dir: Path | None
-        if workspaces_raw:
-            workgroup_workspaces_dir = Path(workspaces_raw)
-        elif db_path is not None:
-            workgroup_workspaces_dir = db_path.parent / "workgroup-workspaces"
-        else:
-            workgroup_workspaces_dir = None
         return cls(
             host=host,
             port=port,
@@ -77,7 +68,6 @@ class ManageSettings:
             release_max_bytes=_env_optional_int("MANAGE_RELEASE_MAX_BYTES") or 536_870_912,
             seed_bundled_releases=seed,
             bundled_releases_dir=Path(bundled_raw) if bundled_raw else Path("/app/bundled/releases"),
-            workgroup_workspaces_dir=workgroup_workspaces_dir,
             offline_grace_seconds=_env_int("MANAGE_OFFLINE_GRACE_SECONDS", 86400),
             audit_max_entries=_env_int("MANAGE_AUDIT_MAX_ENTRIES", 500),
         )
@@ -95,12 +85,9 @@ class ManageSettings:
         release_max_bytes: int | None = 536_870_912,
         seed_bundled_releases: bool = False,
         bundled_releases_dir: Path | None = Path("/app/bundled/releases"),
-        workgroup_workspaces_dir: Path | None = None,
         offline_grace_seconds: int = 86400,
         audit_max_entries: int = 100,
     ) -> "ManageSettings":
-        if workgroup_workspaces_dir is None and db_path is not None:
-            workgroup_workspaces_dir = db_path.parent / "workgroup-workspaces"
         return cls(
             host=host,
             port=port,
@@ -111,7 +98,6 @@ class ManageSettings:
             release_max_bytes=release_max_bytes,
             seed_bundled_releases=seed_bundled_releases,
             bundled_releases_dir=bundled_releases_dir,
-            workgroup_workspaces_dir=workgroup_workspaces_dir,
             offline_grace_seconds=offline_grace_seconds,
             audit_max_entries=audit_max_entries,
         )

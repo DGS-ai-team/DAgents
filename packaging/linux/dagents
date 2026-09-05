@@ -639,7 +639,6 @@ cmd_update() {
     case "$1" in
       --force|-f) force=1 ;;
       --check) check=1 ;;
-      --from-client) ;;
       *)
         die "unknown option: $1"
         ;;

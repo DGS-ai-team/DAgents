@@ -263,10 +263,9 @@ func (s *Store) load() error {
 		return fmt.Errorf("parse triggers store: %w", err)
 	}
 	s.triggers = make(map[string]Definition, len(payload.Triggers))
-	now := time.Now()
 	for _, item := range payload.Triggers {
 		if item.Enabled && item.NextFireAt == nil {
-			item = item.WithNextFire(now)
+			return fmt.Errorf("trigger %q is enabled but next_fire_at is missing", item.TriggerID)
 		}
 		s.triggers[item.TriggerID] = item
 	}

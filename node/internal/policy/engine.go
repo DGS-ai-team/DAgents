@@ -1,13 +1,7 @@
 // Package policy 加载 `.runtime/policy` 下的 txt 策略并判定工具/shell 执行策略。
 package policy
 
-import (
-	"fmt"
-	"os"
-	"strings"
-
-	"gopkg.in/yaml.v3"
-)
+import "strings"
 
 // Action 为编排器使用的工具执行策略结果。
 type Action string
@@ -23,45 +17,6 @@ type Engine struct {
 	toolModes  map[string]ApprovalMode
 	shellModes map[ShellType]map[string]ApprovalMode
 	policyDir  string
-}
-
-type yamlFileConfig struct {
-	Default string            `yaml:"default"`
-	Tools   map[string]string `yaml:"tools"`
-}
-
-// LoadFile 从 legacy YAML 加载策略（单测或显式 policy_file 覆盖时使用）。
-func LoadFile(path string) (*Engine, error) {
-	if strings.TrimSpace(path) == "" {
-		return defaultEngine(), nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return defaultEngine(), nil
-		}
-		return nil, fmt.Errorf("read policy: %w", err)
-	}
-	var cfg yamlFileConfig
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("parse policy: %w", err)
-	}
-	toolModes := make(map[string]ApprovalMode)
-	for name, mode := range cfg.Tools {
-		toolModes[strings.ToLower(strings.TrimSpace(name))] = yamlActionToMode(mode)
-	}
-	return &Engine{toolModes: toolModes, shellModes: map[ShellType]map[string]ApprovalMode{}}, nil
-}
-
-func yamlActionToMode(raw string) ApprovalMode {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "auto", "never":
-		return ModeNever
-	case "deny":
-		return ModeDeny
-	default:
-		return ModeRule
-	}
 }
 
 // Decide 仅按工具名决策（无 bash 参数时保守处理 bash_run）。
@@ -99,9 +54,6 @@ func (e *Engine) decideToolRuleFallback(toolName string, toolArgs map[string]any
 	}
 	if name == "trigger_create" || name == "trigger_update" || name == "trigger_delete" {
 		return ActionRequireApproval
-	}
-	if name == "background_job_status" {
-		return ActionAuto
 	}
 	// tool-context-cost WS3/WS6：只读类 rule 工具首 call auto，短窗口重复由 DuplicateToolCallHook 拦截。
 	if isRuleAutoReadTool(name) {
@@ -193,41 +145,6 @@ func (e *Engine) PolicyDir() string {
 	return e.policyDir
 }
 
-// EffectiveToolDecision 返回工具在 catalog 中展示的有效三档策略。
-func (e *Engine) EffectiveToolDecision(toolName string) Decision {
-	if e == nil {
-		return DecisionRequireApproval
-	}
-	action := e.DecideTool(toolName, nil)
-	if toolName == "bash_run" && action == ActionRequireApproval {
-		return DecisionRequireApproval
-	}
-	return actionToDecision(action)
-}
-
-// EffectiveShellDecision 返回 shell 命令的有效三档策略（未配置条目默认需审批）。
-func (e *Engine) EffectiveShellDecision(shellType ShellType, command string) Decision {
-	if e == nil {
-		return DecisionRequireApproval
-	}
-	root := strings.ToLower(strings.TrimSpace(command))
-	if root == "" {
-		return DecisionRequireApproval
-	}
-	return ModeToDecision(e.shellCommandMode(shellType, root))
-}
-
-func actionToDecision(action Action) Decision {
-	switch action {
-	case ActionAuto:
-		return DecisionAllowAuto
-	case ActionDeny:
-		return DecisionDeny
-	default:
-		return DecisionRequireApproval
-	}
-}
-
 // ToolConfigured 是否在 tool.approval.txt 中有显式条目。
 func (e *Engine) ToolConfigured(toolName string) bool {
 	if e == nil {
@@ -248,36 +165,4 @@ func (e *Engine) ShellConfigured(shellType ShellType, command string) bool {
 	}
 	_, ok := mapping[strings.ToLower(strings.TrimSpace(command))]
 	return ok
-}
-
-func defaultEngine() *Engine {
-	return &Engine{
-		toolModes: map[string]ApprovalMode{
-			"read_file":             ModeRule,
-			"glob_files":            ModeRule,
-			"grep_file":             ModeRule,
-			"grep_files":            ModeRule,
-			"search_file":           ModeNever,
-			"ask_user_information":  ModeNever,
-			"write_file":            ModeRule,
-			"search_replace":        ModeRule,
-			"bash_run":              ModeRule,
-			"screen_capture":        ModeRule,
-			"computer_use":          ModeAlways,
-			"terminal_command":      ModeAlways,
-			"terminal_upload":       ModeAlways,
-			"terminal_download":     ModeAlways,
-			"linux_exec":            ModeAlways,
-			"linux_file_upload":     ModeAlways,
-			"linux_file_download":   ModeAlways,
-			"background_job_status": ModeRule,
-			"background_job_cancel": ModeAlways,
-			"trigger_list":          ModeNever,
-			"trigger_get":           ModeNever,
-			"trigger_create":        ModeAlways,
-			"trigger_update":        ModeAlways,
-			"trigger_delete":        ModeAlways,
-		},
-		shellModes: map[ShellType]map[string]ApprovalMode{},
-	}
 }

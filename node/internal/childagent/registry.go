@@ -52,14 +52,6 @@ func (r *RestrictedRegistry) Execute(ctx context.Context, name, arguments string
 	return r.inner.Execute(tools.WithEnabledBypass(ctx), name, arguments)
 }
 
-// StartBackground 委托底层 registry 的后台执行。
-func (r *RestrictedRegistry) StartBackground(ctx context.Context, sessionID, toolName, toolCallID, cleanedArgs string) (string, error) {
-	if err := r.check(toolName); err != nil {
-		return "", err
-	}
-	return r.inner.StartBackground(tools.WithEnabledBypass(ctx), sessionID, toolName, toolCallID, cleanedArgs)
-}
-
 // TakeBashCompressStatsForCall 委托底层 registry 取出 bash 压缩 SSE 字段。
 func (r *RestrictedRegistry) TakeBashCompressStatsForCall(toolCallID string) map[string]any {
 	if r.inner == nil {

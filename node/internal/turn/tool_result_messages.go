@@ -63,7 +63,7 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Me
 	if status == "" {
 		status = "succeeded"
 	}
-	src := lookupAsyncSourceFromHistory(history, toolName, jobID, payload.ToolCallID)
+	src := lookupAsyncSourceFromHistory(history, jobID, payload.ToolCallID)
 	toolCallID := asyncCallbackToolCallID(jobID)
 	resultBody := strings.TrimSpace(payload.ResultText)
 	if status != "succeeded" {

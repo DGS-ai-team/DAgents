@@ -1,6 +1,6 @@
 # DAgents 架构
 
-**基线**：v0.10.4（2026-08-25）。本文描述当前实现，不是历史方案或未来承诺；发生冲突时以代码、Schema 和 `CHANGELOG.md` 为准。
+本文描述当前实现，不是历史方案或未来承诺；发生冲突时以代码、Schema 和 `CHANGELOG.md` 为准。版本以根目录 `VERSION` 为准。
 
 ## 1. 系统边界
 
@@ -48,14 +48,14 @@ POST /v1/messages
   → consumeLoop
   → turn.Orchestrator.runOneStep
   → LLM 流式响应
-  → tool policy：auto / HITL / deny / background
+  → tool policy：auto / HITL / deny / async task
   → auto 结果在同一 Turn 链内 inline 续跑；HITL 等待 resume
   → persist + SSE
 ```
 
 同一 runtime 同时只有一个 consumer。一次 human message 可以跨多个模型 Step；auto 工具结果由 runtime 在同一 Turn 链内 inline 续跑，不通过 MessageQueue 重新排队，也不在 HTTP handler 中递归调用下一轮模型。
 
-外部 `message`/trigger/A2A 输入进入每个 session 的 `InputBox` FIFO；`resume`、异步工具事实和恢复 continuation 由 `MessageQueue` 承载。活动 Turn（包括等待 HITL）期间，普通用户消息只排队，不会打断；只有显式 turn cancel 才会终止当前 Turn。工具结果在同一 Turn 链内 inline 续跑。
+外部 `message`/trigger/child-agent 输入进入每个 session 的 `InputBox` FIFO；`resume`、异步工具事实和恢复 continuation 由 `MessageQueue` 承载。活动 Turn（包括等待 HITL）期间，普通用户消息只排队，不会打断；只有显式 turn cancel 才会终止当前 Turn。工具结果在同一 Turn 链内 inline 续跑。
 
 ## 3. Session、Turn、Step
 
@@ -77,7 +77,21 @@ tool schema → tool router → policy / hook → executor → result contract �
 
 工具结果通过结构化状态区分成功、失败、拒绝、运行中、取消、超时和未知；正文保留工具自身证据。文件工具使用工作区相对路径，Shell/终端是否可用由工具组、policy 和运行态共同决定。HITL 的审批事实由 Node 或 Manage 持久化，UI 只能依据权威事件和快照更新卡片。
 
-## 5. Workgroup
+## 5. Node、Web UI 与 Desktop Shell
+
+三者采用“Node 业务核心 + Web UI 同源客户端 + Shell 宿主适配器”的边界：
+
+| 组件 | 负责 | 不负责 |
+|---|---|---|
+| Node | Agent/Session/Turn、工具、历史、HITL、SSE、配置和更新状态 | 直接调用操作系统目录选择器、剪贴板或窗口 API |
+| Web UI | 通过当前 Node 的同源 `/v1` API 展示状态、提交用户操作 | 探测 `:18767`、读取桌面配置、直连 Shell |
+| Desktop Shell | Node 启停监护、通知、窗口/目录/剪贴板等原生能力、安装态更新 | 复制 Node 的业务状态机和配置存储 |
+
+Web UI 的桌面能力统一走 Node `/v1/platform/*`。桌面启动时，Shell 通过环境变量把一个带 Bearer token 的私有 bridge 暴露给 Node；Node 做能力探测和请求转发。纯浏览器启动 Node 时能力明确返回不可用，页面只能给出可理解的降级提示。`:18767` 只属于 Shell↔Node 的内部 bridge，不是 Web UI 公共 API。
+
+Shell 的两条实现轨（Tauri 推荐轨、Go 兼容轨）共享这组 HTTP/SSE 语义和 token 约束，只在窗口、通知、目录选择器和安装器等宿主实现上不同。Node 是状态真相源：Shell 待办表启动/重连时通过 `/v1/agents` hydrate，运行中由 Node 的 `notification_changed` 事件增量更新；不再以 60 秒轮询或工具事件名称推断 HITL/未读状态。
+
+## 6. Workgroup
 
 工作组由 Manage 维护，成员引用 Node 上已经注册的 `agent_id`，不再创建一个与本地 Agent 脱节的受限副本。Node 是连接发起方：
 
@@ -92,7 +106,7 @@ Manage Leader 负责工作组编排；成员 Agent 在自己的 Node 上执行�
 
 工作组成员会话按 `workgroup_id + member_id + agent_id` 隔离，成员只能使用其本地 Agent 的有效能力与 Node 侧收紧后的策略。完整协议和 JSON fixtures 见 [Workgroup 契约](design/workgroup-d05-contracts.md)。
 
-## 6. 持久化与恢复
+## 7. 持久化与恢复
 
 | 数据 | 位置/所有者 | 恢复方式 |
 |---|---|---|
@@ -104,7 +118,7 @@ Manage Leader 负责工作组编排；成员 Agent 在自己的 Node 上执行�
 
 重启、断线、迟到结果和重复控制帧必须经过 epoch/generation/cursor 等 fencing；不能用 UI 刷新或“最后一次请求返回”代替状态一致性。
 
-## 7. 源码导航
+## 8. 源码导航
 
 | 主题 | 入口 |
 |---|---|
@@ -117,6 +131,6 @@ Manage Leader 负责工作组编排；成员 Agent 在自己的 Node 上执行�
 | Node↔Manage / Workgroup | `node/internal/manage/`、`node/internal/workgroup/`、`manage/workgroup/` |
 | Node Web UI | `node/webui/frontend/` |
 | Manage Console | `manage/console/frontend/` |
-| 共用契约 | `shared/config/`、`shared/workgroup/`、`docs/design/fixtures/` |
+| 共用契约 | `shared/config/`、`docs/design/fixtures/` |
 
 接口、配置、工具和事件的入口见 [reference/README.md](reference/README.md)；贡献与验证见 [development.md](development.md)。

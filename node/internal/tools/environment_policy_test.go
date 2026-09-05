@@ -22,7 +22,10 @@ func TestShouldScrubShellEnvironmentName(t *testing.T) {
 func TestScrubbedShellEnvironmentRemovesInheritedSecretsAndAllowsExplicitSet(t *testing.T) {
 	t.Setenv("DAgents_TEST_SECRET", "inherited")
 	t.Setenv("DA_TEST_PATH", "safe")
-	env := scrubbedShellEnvironment(map[string]string{"DAgents_TEST_SECRET": "explicit"})
+	env, err := buildShellEnvironment(map[string]string{"DAgents_TEST_SECRET": "explicit"}, EnvironmentPolicy{Mode: EnvironmentPolicyScrub})
+	if err != nil {
+		t.Fatal(err)
+	}
 	joined := strings.Join(env, "\n")
 	if strings.Contains(joined, "DAgents_TEST_SECRET=inherited") {
 		t.Fatal("inherited secret leaked into shell environment")

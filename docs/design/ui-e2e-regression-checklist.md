@@ -221,7 +221,7 @@ $timeline = Invoke-RestMethod "http://127.0.0.1:18765/v1/agents/$($agent.agent_i
 | `has_active_turn` | `false` | `false` |
 | `turn_status` | `completed` | `cancelled` |
 | `step_status` | `completed` | `cancelled` |
-| `run_turn_phase` | `idle` | `idle` |
+| `turn_state` | `idle` | `idle` |
 | `pending_tool_calls_count` | `0` | `0` |
 | 后台 job running 数 | `0` | `0` |
 

@@ -11,7 +11,8 @@ import { workerStripText } from "../stores/remoteWorkers.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { statusStore, hasStatus, formatStatusText } from "../stores/statusLines.js";
-import { getDesktopClipboardFiles } from "../api/desktop.js";
+import { turnStateStore } from "../stores/turnState.js";
+import { getPlatformClipboardFiles } from "../api/platform.js";
 import {
   fileReferenceKey,
   normalizeFileReferences,
@@ -24,6 +25,7 @@ import {
   canSubmitComposer,
   hasPendingUserInformation,
   shouldShowCancel,
+  shouldShowInteractionCancel,
 } from "../utils/composerState.js";
 import * as api from "../api/node.js";
 
@@ -57,9 +59,6 @@ const thinkingEnabled = computed(() => {
 const thinkingEffort = computed(() =>
   String(props.llmSettings?.reasoning_effort || "high").toLowerCase(),
 );
-const reasoningEffortSupported = computed(
-  () => props.llmSettings?.reasoning_effort_supported !== false,
-);
 const thinkingControl = computed(() => getThinkingControl(props.llmSettings));
 const thinkingFixed = computed(() => thinkingControl.value === "fixed");
 const thinkingLabel = computed(() => {
@@ -71,7 +70,7 @@ const thinkingSecondaryLabel = computed(() => {
   return label || (thinkingControl.value === "budget" ? "思考预算" : "推理强度");
 });
 const thinkingSecondarySupported = computed(
-  () => hasThinkingSecondaryControl(props.llmSettings) && reasoningEffortSupported.value,
+  () => hasThinkingSecondaryControl(props.llmSettings),
 );
 
 const input = ref("");
@@ -130,7 +129,6 @@ function openTerminal(item) {
 }
 
 const runningJobCount = computed(() => toolJobsStore.running);
-const backgroundJobCount = computed(() => toolJobsStore.background);
 const pendingApprovals = computed(() =>
   props.hitlQueue
     .filter((item) => item.kind === "approval")
@@ -142,7 +140,6 @@ const runtimeStatusText = computed(() => {
   if (props.cancelling) parts.push("正在取消");
   if (pendingApprovals.value > 0) parts.push(`待审批 ${pendingApprovals.value}`);
   if (runningJobCount.value > 0) parts.push(`工具执行中 ${runningJobCount.value}`);
-  if (backgroundJobCount.value > 0) parts.push(`后台任务 ${backgroundJobCount.value}`);
   const phase = [
     "thinking",
     "assistant_generating",
@@ -158,6 +155,11 @@ const runtimeStatusText = computed(() => {
   }
   const workers = workerStripText();
   if (workers) parts.push(workers);
+  // Hydrate 后没有 SSE 草稿可恢复，但权威 Turn 终态仍应对用户可见。
+  // 取消请求的即时响应已经由 ChatView 写入系统消息，避免这里重复展示。
+  if (!parts.length && turnStateStore.phase === "cancelled" && turnStateStore.cancelState !== "confirmed") {
+    parts.push("本轮已取消");
+  }
   return parts.join(" · ");
 });
 const composerPlaceholder = computed(() =>
@@ -165,6 +167,13 @@ const composerPlaceholder = computed(() =>
 );
 const showCancel = computed(() =>
   shouldShowCancel({
+    sending: props.sending,
+    hitlBusy: props.hitlBusy,
+    hasUserInformation: userInfoPending.value,
+  }),
+);
+const showInteractionCancel = computed(() =>
+  shouldShowInteractionCancel({
     sending: props.sending,
     hitlBusy: props.hitlBusy,
     hasUserInformation: userInfoPending.value,
@@ -305,7 +314,7 @@ function submit() {
 }
 
 function onCancel() {
-  if (!showCancel.value || props.cancelling) return;
+  if ((!showCancel.value && !showInteractionCancel.value) || props.cancelling) return;
   emit("cancel");
 }
 
@@ -322,7 +331,7 @@ async function resolveFilePaths({ text, files, uriList }) {
   if (!paths.length && uriList) paths = pathsFromUriList(uriList);
   if (!paths.length && shouldResolvePathsViaShell({ text, files })) {
     try {
-      const data = await getDesktopClipboardFiles();
+      const data = await getPlatformClipboardFiles();
       paths = data?.paths || [];
     } catch {
       /* Shell 不可用 */
@@ -551,6 +560,19 @@ defineExpose({
           :disabled="disabled || cancelling"
           @switch-profile="(id) => emit('switch-profile', id)"
         />
+        <button
+          v-if="showInteractionCancel"
+          type="button"
+          class="chat__composer-send chat__composer-send--cancel"
+          title="取消本轮（不会提交回答）"
+          aria-label="取消本轮（不会提交回答）"
+          :disabled="cancelling"
+          @click="onCancel"
+        >
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
         <button
           v-if="showCancel"
           type="button"

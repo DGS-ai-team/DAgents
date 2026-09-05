@@ -300,7 +300,6 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	hostIPs := hostsnapshot.LocalHostIPs()
 	return registerPayload{
 		NodeID:           r.cfg.NodeID,
-		AgentID:          r.cfg.NodeID, // 兼容：值同 node_id；Manage 主键仍为 node 级
 		BaseURL:          strings.TrimRight(strings.TrimSpace(r.cfg.Local.Endpoint), "/"),
 		HostIPs:          hostIPs,
 		Capabilities:     caps,
@@ -408,7 +407,7 @@ func (r *Registrar) collectTools() []string {
 
 type registerPayload struct {
 	NodeID           string         `json:"node_id"`
-	AgentID          string         `json:"agent_id,omitempty"` // deprecated: 兼容旧 Manage，值同 node_id
+	AgentID          string         `json:"agent_id,omitempty"`
 	BaseURL          string         `json:"base_url"`
 	HostIPs          string         `json:"host_ips,omitempty"`
 	CapabilitiesHint []string       `json:"capabilities_hint,omitempty"`

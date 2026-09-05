@@ -34,7 +34,6 @@ const cancelling = ref(false);
 const humanQueueItems = ref([]);
 const editingQueueId = ref("");
 const editQueueDraft = ref("");
-let queuePollTimer = null;
 const error = ref("");
 const workgroupAccessError = ref("");
 const notice = ref("");
@@ -42,8 +41,6 @@ const mentionOpen = ref(false);
 const mentionQuery = ref("");
 /** @type {import('vue').Ref<null | { member_id: string, display_name: string }>} */
 const directMember = ref(null);
-const pollTimer = ref(null);
-const workPollTimer = ref(null);
 const workgroupMeta = ref(null);
 const selfNodeId = ref("");
 const selfNodeName = ref("");
@@ -68,6 +65,11 @@ const memberModalOpen = ref(false);
 const memberModalMode = ref("create");
 const memberModalWgId = ref("");
 const memberModalMemberId = ref("");
+const memberModalMember = computed(() =>
+  (members.value || []).find(
+    (member) => String(member?.member_id || "").trim() === memberModalMemberId.value,
+  ) || null,
+);
 
 /** 流式：乐观用户气泡 / Supervisor 打字机 / 相位 */
 const liveUser = ref(null);
@@ -116,7 +118,6 @@ function setWorkgroupError(source, fallback = "操作失败") {
 }
 
 let timelineReqSeq = 0;
-let pollInFlight = false;
 let workgroupEventSource = null;
 let workgroupEventSeq = 0;
 const cancelledRealtimeMessageIds = new Set();
@@ -126,10 +127,9 @@ const memberApprovalByAssign = computed(() => {
   const out = {};
   for (const hitl of pendingHitl.value || []) {
     const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
-    const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
+    if (String(metadata.source || "").trim() !== "agent_ref") continue;
+    const assignId = String(metadata.assign_id || "").trim();
     const items = workgroupApprovalItemsFromMetadata(metadata);
-    // 新记录带 source=agent_ref；兼容早期 Manage 记录时，以 assign_id
-    // 和 execute_tool items 作为成员审批的稳定判据。
     if (!assignId || items.length === 0) continue;
     // A reconnect or a slow resolve can briefly expose more than one pending
     // projection for the same assignment.  The newest request is the only
@@ -185,7 +185,7 @@ async function submitHitlAnswer() {
   hitlBusy.value = true;
   error.value = "";
   try {
-    await api.resolveWorkgroupHITL(workgroupId.value, hitl.hitl_id, answer);
+    await api.resolveWorkgroupHITL(workgroupId.value, hitl.hitl_id, { answer });
     hitlDraft.value = "";
     await loadPendingHitl();
     await loadTimeline();
@@ -209,8 +209,7 @@ async function resolveMemberInformation(request, resolution) {
     await api.resolveWorkgroupHITL(
       workgroupId.value,
       hitlId,
-      String(resolution?.answer || ""),
-      resolution,
+      { type: "user_information", tool_call_id: request.callId, ...resolution },
     );
     await loadPendingHitl();
     await loadTimeline();
@@ -252,7 +251,6 @@ async function resolveMemberApproval(approval, callId, approve) {
     await api.resolveWorkgroupHITL(
       workgroupId.value,
       hitlId,
-      approve ? "approve" : "reject",
       { type: "selection", approved, rejected },
     );
     await loadPendingHitl();
@@ -513,7 +511,7 @@ function handleWorkgroupEventMessage(raw) {
       applyRemoteRealtime(payload);
     }
   } catch {
-    /* reconnect/resync polling handles malformed or partial frames */
+    /* The next reconnect replays durable events; malformed frames are ignored. */
   }
 }
 
@@ -596,18 +594,7 @@ async function loadWorkgroupMeta() {
   try {
     workgroupMeta.value = await api.getWorkgroup(workgroupId.value);
   } catch {
-    // 回退列表查找（旧 Manage / 权限边界）
-    try {
-      const [sub, aclList] = await Promise.all([
-        api.listWorkgroups({ scope: "subscribed" }),
-        api.listWorkgroups({ scope: "acl" }),
-      ]);
-      const all = [...(sub.workgroups || []), ...(aclList.workgroups || [])];
-      workgroupMeta.value =
-        all.find((w) => String(w.workgroup_id || "").trim() === workgroupId.value) || null;
-    } catch {
-      workgroupMeta.value = null;
-    }
+    workgroupMeta.value = null;
   }
   try {
     const res = await api.listWorkgroupLLMConfigs(workgroupId.value);
@@ -694,43 +681,6 @@ function onModelMenuKeydown(event) {
   }
 }
 
-function startPoll() {
-  stopPoll();
-  pollTimer.value = window.setInterval(async () => {
-    if (pollInFlight) return;
-    pollInFlight = true;
-    try {
-      await loadTimeline();
-      await loadPendingHitl();
-    } finally {
-      pollInFlight = false;
-    }
-  }, 3000);
-}
-
-function stopPoll() {
-  if (pollTimer.value) {
-    clearInterval(pollTimer.value);
-    pollTimer.value = null;
-  }
-  pollInFlight = false;
-}
-
-function stopWorkPoll() {
-  if (workPollTimer.value) {
-    clearInterval(workPollTimer.value);
-    workPollTimer.value = null;
-  }
-}
-
-function startWorkPoll() {
-  stopWorkPoll();
-  workPollTimer.value = window.setInterval(() => {
-    if (!sending.value && !remoteSending.value) return;
-    void loadPendingHitl();
-  }, 1500);
-}
-
 async function refreshHumanQueue() {
   if (!workgroupId.value) {
     humanQueueItems.value = [];
@@ -755,22 +705,6 @@ function applyQueuePayload(data) {
     humanQueueItems.value = [...rest, data].sort(
       (a, b) => Number(a.position || 0) - Number(b.position || 0),
     );
-  }
-}
-
-function startQueuePoll() {
-  stopQueuePoll();
-  queuePollTimer = setInterval(() => {
-    if (!workgroupId.value) return;
-    if (!sending.value && !(humanQueueItems.value || []).length) return;
-    void refreshHumanQueue();
-  }, 1500);
-}
-
-function stopQueuePoll() {
-  if (queuePollTimer) {
-    clearInterval(queuePollTimer);
-    queuePollTimer = null;
   }
 }
 
@@ -830,8 +764,8 @@ async function loadWorkgroupAccess() {
       error.value = workgroupAccessError.value;
     }
   } catch {
-    // ACL reads can be unavailable for older Manage deployments; sending will
-    // still surface the normalized authorization error from the POST path.
+    // Keep the composer usable when an ACL read is temporarily unavailable;
+    // the POST path remains authoritative and returns a normalized error.
   }
 }
 
@@ -841,7 +775,6 @@ async function sendQueuedNow(item) {
   try {
     await api.sendWorkgroupHumanQueueItemNow(workgroupId.value, qid);
     await refreshHumanQueue();
-    startQueuePoll();
   } catch (e) {
     setWorkgroupError(e, "立即发送失败");
   }
@@ -885,7 +818,6 @@ async function send() {
         },
       );
       await refreshHumanQueue();
-      startQueuePoll();
     } catch (e) {
       setWorkgroupError(e, "入队失败");
       draft.value = stripLeadingMention(text, sentDirect?.display_name);
@@ -910,11 +842,8 @@ async function send() {
   streamActorId.value = directId || "leader";
   streamAbort = new AbortController();
   scrollTimelineTail();
-  startWorkPoll();
-  startQueuePoll();
 
   try {
-    let becameQueued = false;
     await api.postWorkgroupMessageStream(
       workgroupId.value,
       {
@@ -927,7 +856,6 @@ async function send() {
         onEvent: async (eventName, data) => {
           if (cancelledRealtimeMessageIds.has(clientMessageId)) return;
           if (eventName === "queued") {
-            becameQueued = true;
             applyQueuePayload(data);
             clearLive();
             return;
@@ -974,7 +902,6 @@ async function send() {
     await loadPendingHitl();
     await refreshHumanQueue();
     scrollTimelineTail();
-    if (becameQueued) startQueuePoll();
   } catch (e) {
     const aborted = e?.name === "AbortError" || /abort/i.test(String(e?.message || ""));
     clearLive();
@@ -987,7 +914,6 @@ async function send() {
     await loadPendingHitl();
   } finally {
     streamAbort = null;
-    stopWorkPoll();
     sending.value = false;
     cancelling.value = false;
     statusWatermarkSeq.value = 0;
@@ -1326,8 +1252,6 @@ watch(
     workgroupEventSeq = 0;
     renderWindowStart.value = 0;
     previousEventGroupCount = 0;
-    stopPoll();
-    stopWorkPoll();
     scrollTail.setFollow(true);
     // 切换工作组时复位输入/直连/发送态，避免底部状态条残留
     draft.value = "";
@@ -1366,7 +1290,6 @@ watch(
     await loadWorkgroupAccess();
     scrollTimelineTail();
     if (id) {
-      startPoll();
       startWorkgroupEventStream();
     }
   },
@@ -1405,9 +1328,6 @@ watch(timelineEl, (el) => {
 });
 onUnmounted(() => {
   stopWorkgroupEventStream();
-  stopPoll();
-  stopWorkPoll();
-  stopQueuePoll();
   timelineResizeObserver?.disconnect();
   timelineResizeObserver = null;
   document.removeEventListener("pointerdown", onModelMenuPointerDown, true);
@@ -1826,6 +1746,7 @@ onUnmounted(() => {
       :mode="memberModalMode"
       :workgroup-id="memberModalWgId"
       :member-id="memberModalMemberId"
+      :member="memberModalMember"
       :default-home-node-id="selfNodeId"
       @close="closeMemberModal"
       @saved="onMemberSaved"

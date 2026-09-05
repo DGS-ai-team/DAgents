@@ -14,14 +14,15 @@ const EnvHome = "DAGENTS_HOME"
 
 // Layout 描述安装根目录下的关键路径。
 type Layout struct {
-	Home        string
-	ConfigPath  string
-	NodeExe     string
-	PidFile     string
-	LogOut      string
-	LogErr      string
-	ShellLog    string
-	ShellLogErr string
+	Home                   string
+	ConfigPath             string
+	NodeExe                string
+	PidFile                string
+	LogOut                 string
+	LogErr                 string
+	ShellLog               string
+	ShellLogErr            string
+	DesktopBridgeTokenFile string
 }
 
 // ResolveLayout 解析安装根与 Node 相关路径。
@@ -48,14 +49,15 @@ func ResolveLayout(configPath string) (*Layout, error) {
 	logDir := filepath.Join(runtimeDir, "logs")
 	now := time.Now()
 	return &Layout{
-		Home:        home,
-		ConfigPath:  cfg,
-		NodeExe:     nodeExe,
-		PidFile:     filepath.Join(runtimeDir, "node.pid"),
-		LogOut:      logfiles.JoinDated(logDir, "node", false, now),
-		LogErr:      logfiles.JoinDated(logDir, "node", true, now),
-		ShellLog:    logfiles.JoinDated(logDir, "shell", false, now),
-		ShellLogErr: logfiles.JoinDated(logDir, "shell", true, now),
+		Home:                   home,
+		ConfigPath:             cfg,
+		NodeExe:                nodeExe,
+		PidFile:                filepath.Join(runtimeDir, "node.pid"),
+		LogOut:                 logfiles.JoinDated(logDir, "node", false, now),
+		LogErr:                 logfiles.JoinDated(logDir, "node", true, now),
+		ShellLog:               logfiles.JoinDated(logDir, "shell", false, now),
+		ShellLogErr:            logfiles.JoinDated(logDir, "shell", true, now),
+		DesktopBridgeTokenFile: filepath.Join(runtimeDir, "desktop-bridge.token"),
 	}, nil
 }
 

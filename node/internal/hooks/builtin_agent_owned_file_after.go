@@ -57,7 +57,7 @@ func (h *AgentOwnedFileAfterHook) RunToolAfterEach(_ context.Context, in ToolAft
 	}
 	args := in.ToolArgs
 	if len(args) == 0 && strings.TrimSpace(in.RawArguments) != "" {
-		_, cleaned := tools.ParseToolCallArguments(in.RawArguments)
+		cleaned := tools.ParseToolCallArguments(in.RawArguments)
 		_ = json.Unmarshal([]byte(cleaned), &args)
 	}
 	pathKey := WriteToolRelPath(toolName, args)

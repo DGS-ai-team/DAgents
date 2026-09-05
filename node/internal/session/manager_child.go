@@ -40,7 +40,7 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		return err
 	}
 	childOpts := m.turn
-	childOpts.MaxToolLoops = spec.MaxTurns
+	childOpts.Budget.MaxSteps = spec.MaxTurns
 	rt := newChildRuntime(
 		spec.ChildAgentID,
 		spec.ParentAgentID,
@@ -110,7 +110,7 @@ func (m *Manager) EnqueueChildTask(childSessionID, content string) error {
 	if rt == nil || !rt.isChildSession() {
 		return fmt.Errorf("child session not found")
 	}
-	_, err := rt.appendInput(InputKindA2A, queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask})
+	_, err := rt.appendInput(InputKindChildAgent, queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask})
 	return err
 }
 

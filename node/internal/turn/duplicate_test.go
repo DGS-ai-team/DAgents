@@ -43,18 +43,18 @@ func TestDuplicateToolCallTriggersStandardApproval(t *testing.T) {
 	}
 	hub := stream.NewHub(8, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
-	raw := `{"job_id":"j1","call_purpose":"poll"}`
-	fp := hooks.ToolArgsFingerprint("background_job_status", raw)
-	orch.toolExecLog.RecordSuccess("background_job_status", fp, "call-prev", "status=RUNNING")
+	raw := `{"path":"a.txt","content":"x","call_purpose":"write"}`
+	fp := hooks.ToolArgsFingerprint("write_file", raw)
+	orch.toolExecLog.RecordSuccess("write_file", fp, "call-prev", "ok")
 
 	var history []llm.Message
 	pending, state, err := orch.processToolCalls(context.Background(), "sess-1", &history, []llm.ToolCall{{
 		ID:   "call-dup",
 		Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "background_job_status",
+			Name:      "write_file",
 			Arguments: raw,
 		},
 	}})
@@ -88,18 +88,18 @@ func TestDuplicateToolCallResumeUsesStandardApproval(t *testing.T) {
 	}
 	hub := stream.NewHub(8, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
-	raw := `{"job_id":"j1"}`
-	fp := hooks.ToolArgsFingerprint("background_job_status", raw)
-	orch.toolExecLog.RecordSuccess("background_job_status", fp, "call-prev", "ok")
+	raw := `{"path":"a.txt","content":"x"}`
+	fp := hooks.ToolArgsFingerprint("write_file", raw)
+	orch.toolExecLog.RecordSuccess("write_file", fp, "call-prev", "ok")
 
 	var history []llm.Message
 	pending, _, err := orch.processToolCalls(context.Background(), "sess-1", &history, []llm.ToolCall{{
 		ID:   "call-dup",
 		Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "background_job_status",
+			Name:      "write_file",
 			Arguments: raw,
 		},
 	}})

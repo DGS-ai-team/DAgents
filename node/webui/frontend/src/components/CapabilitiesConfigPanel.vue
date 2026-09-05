@@ -19,7 +19,6 @@ async function saveCapabilities() {
   await save({
     features: {
       ...form.features,
-      ui_enabled: true,
       skills_enabled: true,
       triggers_enabled: true,
       child_agents_enabled: true,

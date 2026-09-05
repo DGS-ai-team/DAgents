@@ -1,13 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -19,43 +15,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
-
-const desktopFocusRelayURL = "http://127.0.0.1:18767/v1/desktop/ui/focus"
-
-// handleDesktopUIFocus 将远端浏览器的桌面焦点请求转发给本机 Shell。
-func (s *Server) handleDesktopUIFocus(w http.ResponseWriter, r *http.Request) {
-	var body io.Reader = http.NoBody
-	if r.Body != nil {
-		body = io.LimitReader(r.Body, 16<<10)
-	}
-	payload, err := io.ReadAll(body)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_focus_request", err.Error(), nil)
-		return
-	}
-	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, desktopFocusRelayURL, bytes.NewReader(payload))
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "desktop_relay_failed", err.Error(), nil)
-		return
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "desktop_unavailable", "Shell desktop API is unavailable", nil)
-		return
-	}
-	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 32<<10))
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "desktop_relay_failed", err.Error(), nil)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(response.StatusCode)
-	_, _ = w.Write(responseBody)
-}
 
 // attachNodeRuntimeDeps 将 Node 级运行时依赖挂到工具 Registry（默认表与 per-agent 共用）。
 func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string) {
@@ -76,20 +35,8 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	if s.linuxChannels != nil {
 		reg.SetTerminalConfigResolver(s.linuxChannels)
 	}
-	if s.backgroundJobs != nil {
-		bindErr := error(nil)
-		if reg == s.tools {
-			bindErr = reg.WithBackgroundJobStore(s.backgroundJobs)
-		} else {
-			bindErr = reg.WithBackgroundJobStoreForSession(s.backgroundJobs, targetAgentID)
-		}
-		if bindErr != nil && s.logger != nil {
-			s.logger.Warn("agent tools background job store bind failed", "error", bindErr)
-		}
-	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
-	attachBackgroundJobNotifier(reg, s.sessions, s.logger)
 	attachBrowserTaskNotifier(reg, s.sessions, s.logger)
 	attachProcessEventSink(reg, s.stream, s.store, s.logger)
 	reg.SetTerminalSessionBroker(s.terminals)
@@ -97,6 +44,9 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 		reg.SetMediaRegister(s.mediaRegister)
 	}
 	reg.SetBrowserManager(s.browserManager())
+	reg.SetBrowserLLMResolver(func(ctx context.Context) (*browser.LLMSettings, error) {
+		return s.browserLLMForAgent(ctx, targetAgentID)
+	})
 	if s.agents != nil {
 		agents := s.agents
 		reg.SetBrowserCompanionExists(func(ctx context.Context, companionAgentID string) (bool, error) {
@@ -185,28 +135,6 @@ func attachWeComRuntime(reg *tools.Registry, cfg *config.Config) {
 		return
 	}
 	reg.SetWeComClient(wecom.NewClientFromConfig(cfg))
-}
-
-// attachBackgroundJobNotifier 将后台 bash 完成回调挂到 Registry（默认工具表与 per-agent Registry 均需挂载）。
-func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logger *slog.Logger) {
-	if reg == nil || mgr == nil {
-		return
-	}
-	reg.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
-		if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-			JobID:                  done.JobID,
-			ToolName:               done.ToolName,
-			ToolCallID:             done.ToolCallID,
-			Status:                 done.Status,
-			ResultText:             done.ResultText,
-			ErrorText:              done.ErrorText,
-			OutputCompressSavedPct: done.OutputCompressSavedPct,
-			OutputCompressRawRunes: done.OutputCompressRawRunes,
-			OutputCompressOutRunes: done.OutputCompressOutRunes,
-		}); err != nil && logger != nil {
-			logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
-		}
-	})
 }
 
 // attachProcessEventSink 将执行生命周期事件接入 Node stream。

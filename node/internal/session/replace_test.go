@@ -23,7 +23,7 @@ func TestReplaceWithOptionsFailureKeepsPreviousRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, err := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,10 +56,7 @@ func TestReplaceWithOptionsSwapsRuntimeAndKeepsInMemoryState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, err := policy.LoadFile("")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 
@@ -72,14 +69,14 @@ func TestReplaceWithOptionsSwapsRuntimeAndKeepsInMemoryState(t *testing.T) {
 	old.messages = []llm.Message{{Role: "user", Content: "preserve me"}}
 	old.mu.Unlock()
 	newRoot := t.TempDir()
-	if _, _, err := mgr.ReplaceWithOptions(sess.ID, TurnOptions{FSRoot: newRoot, SkillsEnabled: false}, reg, pol); err != nil {
+	if _, _, err := mgr.ReplaceWithOptions(sess.ID, TurnOptions{WorkspaceRoot: newRoot, SkillsEnabled: false}, reg, pol); err != nil {
 		t.Fatal(err)
 	}
 	current := mgr.getRuntime(sess.ID)
 	if current == nil || current == old {
 		t.Fatalf("runtime was not swapped: current=%p old=%p", current, old)
 	}
-	if got, ok := mgr.SessionFSRoot(sess.ID); !ok || got != newRoot {
+	if got, ok := mgr.SessionWorkspaceRoot(sess.ID); !ok || got != newRoot {
 		t.Fatalf("new runtime fs root = %q, ok=%v", got, ok)
 	}
 	if got := current.messageCount(); got != 1 {

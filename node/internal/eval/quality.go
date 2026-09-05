@@ -313,13 +313,15 @@ func DefaultScenarios() []Scenario {
 			},
 		},
 		{
-			ID: "linux-exec-sequence", Name: "远程 Linux 命令", Category: "remote-execution",
+			ID: "terminal-command-sequence", Name: "远程 Linux 命令", Category: "remote-execution",
 			UserInput: "在已绑定的 Linux 通道执行命令，并报告退出码和 stdout/stderr。",
 			Criteria: []Criterion{
 				{ID: "list-config", Kind: CheckToolCalled, Value: "terminal_config_list", Description: "先获取 Agent 可用配置"},
-				{ID: "linux-call", Kind: CheckToolCalled, Value: "linux_exec", Description: "使用 Linux 远程执行工具"},
-				{ID: "config-before-exec", Kind: CheckToolCallOrder, Value: "terminal_config_list>linux_exec", Description: "禁止猜测目标配置"},
-				{ID: "linux-result", Kind: CheckResultContains, Value: "[LINUX_RESULT]", Description: "使用结构化远程结果"},
+				{ID: "open-terminal", Kind: CheckToolCalled, Value: "terminal_open", Description: "先打开绑定的 Linux 终端"},
+				{ID: "terminal-call", Kind: CheckToolCalled, Value: "terminal_command", Description: "使用统一终端命令工具"},
+				{ID: "config-before-open", Kind: CheckToolCallOrder, Value: "terminal_config_list>terminal_open", Description: "禁止猜测目标配置"},
+				{ID: "command-after-open", Kind: CheckToolCallOrder, Value: "terminal_open>terminal_command", Description: "命令必须绑定已打开终端"},
+				{ID: "terminal-result", Kind: CheckResultContains, Value: "SUCCEEDED", Description: "使用结构化终端结果"},
 			},
 		},
 		{

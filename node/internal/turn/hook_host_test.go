@@ -27,7 +27,7 @@ func (c *countingCompleteLLM) NormalizeAssistant(existing []llm.Message, msg llm
 
 func TestResetHookHostLLMQuotaPerHumanTurn(t *testing.T) {
 	llmClient := &countingCompleteLLM{}
-	orch := NewOrchestrator("agent-1", "/tmp", nil, llmClient, nil, nil, SkillAccess{}, 16, nil, nil, hooks.RuntimeConfig{}, nil)
+	orch := NewOrchestrator("agent-1", "/tmp", nil, llmClient, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
 	orch.SetHookHostConfig(HookHostConfig{MaxLLMCalls: 2})
 
 	var history []llm.Message

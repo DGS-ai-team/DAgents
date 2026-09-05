@@ -22,7 +22,7 @@ describe("agentTemplateForm", () => {
         display_name: "运维执行助手",
         description: "运维助手",
         defaults: {
-          llm: { active: "deepseek", max_tool_loops: 24 },
+          llm: { active: "deepseek", max_steps: 24 },
           tools: { enabled_groups: ["fs", "bash"] },
           skills: { enabled: false },
           prompt_context: {
@@ -78,7 +78,7 @@ describe("agentTemplateForm", () => {
       description: "日常助手",
       role: "assistant",
       llmProfileId: "qwen-plus",
-      maxToolLoops: 16,
+      maxSteps: 16,
       toolGroups: ["fs", "skills"],
       visibleSkills: ["write-skill", "write-hook"],
       promptSoulMd: "你是助手",
@@ -88,49 +88,49 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的助手");
     expect(payload.workspace).toEqual({ mode: "private" });
     expect(payload.sandbox).toBeUndefined();
-    expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_loops: 16 });
+    expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_steps: 16 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
     expect(payload.defaults.skills).toEqual({
       visible: ["write-skill", "write-hook"],
     });
     expect(payload.defaults.prompt_context.soul_enabled).toBe(true);
     expect(payload.defaults.prompt_context.custom_enabled).toBe(false);
-    expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.memory_enabled).toBe(false);
     expect(payload.defaults.prompt_context.user_enabled).toBeUndefined();
     expect(payload.defaults.prompt_context.soul_md).toBe("你是助手");
     expect(payload.defaults.prompt_context.custom_md).toBeUndefined();
   });
 
-  it("enables long-term memory when memory tool group is selected", () => {
+  it("enables automatic memory recall when memory tool group is selected", () => {
     const payload = buildCreateAgentPayload({
       displayName: "有记忆",
       llmProfileId: "default",
-      maxToolLoops: 8,
+      maxSteps: 8,
       toolGroups: ["memory", "fs"],
-      promptLongTermScope: "global",
+      promptMemoryScope: "global",
       role: "assistant",
       description: "",
     });
-    expect(payload.defaults.prompt_context.long_term_enabled).toBe(true);
-    expect(payload.defaults.prompt_context.long_term_scope).toBe("global");
+    expect(payload.defaults.prompt_context.memory_enabled).toBe(true);
+    expect(payload.defaults.prompt_context.memory_scope).toBe("global");
   });
 
-  it("does not include placement fields", () => {
+  it("defaults an agent to a private workspace", () => {
     const payload = buildCreateAgentPayload({
       templateId: "general",
       displayName: "远端",
       llmProfileId: "qwen-plus",
-      maxToolLoops: 16,
+      maxSteps: 16,
       toolGroups: ["fs"],
     });
-    expect(payload.placement).toBeUndefined();
+    expect(payload.workspace).toEqual({ mode: "private" });
   });
 
   it("includes an immutable custom workspace only in create payload", () => {
     const draft = {
       displayName: "项目助手",
       llmProfileId: "default",
-      maxToolLoops: 32,
+      maxSteps: 32,
       toolGroups: ["fs"],
       workspaceMode: "custom",
       workspacePath: "D:\\workspace\\project",
@@ -147,7 +147,7 @@ describe("agentTemplateForm", () => {
       templateId: "general",
       displayName: "改名",
       llmProfileId: "a",
-      maxToolLoops: 8,
+      maxSteps: 8,
       toolGroups: ["fs"],
       promptSoulMd: "角色",
       promptCustomMd: "临时",
@@ -161,7 +161,7 @@ describe("agentTemplateForm", () => {
     expect(patch.defaults.skills).toEqual({});
     expect(patch.defaults.prompt_context.soul_enabled).toBe(true);
     expect(patch.defaults.prompt_context.custom_enabled).toBe(true);
-    expect(patch.defaults.prompt_context.long_term_enabled).toBe(false);
+    expect(patch.defaults.prompt_context.memory_enabled).toBe(false);
   });
 
   it("reads draft from agent view", () => {
@@ -171,10 +171,10 @@ describe("agentTemplateForm", () => {
         template_id: "general",
         config_snapshot: {
           defaults: {
-            llm: { active: "deepseek", max_tool_loops: 10 },
+          llm: { active: "deepseek", max_steps: 10 },
             tools: { enabled_groups: ["bash"] },
             skills: { enabled: true, visible: ["write-skill"] },
-            prompt_context: { long_term_enabled: false },
+            prompt_context: { memory_enabled: false },
           },
         },
       },
@@ -184,21 +184,14 @@ describe("agentTemplateForm", () => {
     expect(draft.toolGroups).toEqual(["bash"]);
     expect(draft.visibleSkills).toEqual(["write-skill"]);
     expect(draft.llmProfileId).toBe("deepseek");
-    expect(draft.workspaceMode).toBe("legacy_shared");
-  });
-
-  it("migrates a saved Linux group when opening agent settings", () => {
-    const draft = draftFromAgentView({
-      config_snapshot: { defaults: { tools: { enabled_groups: ["linux", "terminal"] } } },
-    });
-    expect(draft.toolGroups).toEqual(["terminal"]);
+    expect(draft.workspaceMode).toBe("private");
   });
 
   it("omits skills.visible when unrestricted", () => {
     const payload = buildCreateAgentPayload({
       displayName: "全技能",
       llmProfileId: "default",
-      maxToolLoops: 32,
+      maxSteps: 32,
       toolGroups: ["skills"],
       visibleSkills: null,
       role: "assistant",
@@ -207,7 +200,7 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.skills).toEqual({});
     expect(payload.defaults.prompt_context.soul_enabled).toBe(false);
     expect(payload.defaults.prompt_context.custom_enabled).toBe(false);
-    expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.memory_enabled).toBe(false);
   });
 
   it("builds create payload without template_id for blank draft", () => {
@@ -215,7 +208,7 @@ describe("agentTemplateForm", () => {
       templateId: BLANK_TEMPLATE_ID,
       displayName: "空白",
       llmProfileId: "default",
-      maxToolLoops: 32,
+      maxSteps: 32,
       toolGroups: [],
       role: "assistant",
       description: "",
@@ -223,7 +216,7 @@ describe("agentTemplateForm", () => {
     expect(payload.template_id).toBeUndefined();
     expect(payload.display_name).toBe("空白");
     expect(payload.defaults.skills).toEqual({});
-    expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.memory_enabled).toBe(false);
   });
 
   it("draftFromBlank picks first llm profile", () => {
@@ -240,7 +233,7 @@ describe("agentTemplateForm", () => {
         description: "desc",
         role: "assistant",
         llmProfileId: "default",
-        maxToolLoops: 20,
+      maxSteps: 20,
         toolGroups: ["fs", "memory"],
         promptSoulMd: "  ",
         promptCustomMd: "补充",
@@ -248,14 +241,14 @@ describe("agentTemplateForm", () => {
     );
     expect(payload.id).toBe("my-bot");
     expect(payload.display_name).toBe("我的 Bot");
-    expect(payload.defaults.llm).toEqual({ active: "default", max_tool_loops: 20 });
+    expect(payload.defaults.llm).toEqual({ active: "default", max_steps: 20 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "memory"]);
     expect(payload.defaults.child_agents).toBeUndefined();
     expect(payload.defaults.skills).toEqual({});
     expect(payload.sandbox).toBeUndefined();
     expect(payload.defaults.prompt_context.soul_enabled).toBe(false);
     expect(payload.defaults.prompt_context.custom_enabled).toBe(true);
-    expect(payload.defaults.prompt_context.long_term_enabled).toBe(true);
+    expect(payload.defaults.prompt_context.memory_enabled).toBe(true);
     expect(payload.defaults.prompt_context.custom_md).toBe("补充");
     expect(payload.defaults.prompt_context.soul_md).toBeUndefined();
   });
@@ -276,19 +269,11 @@ describe("agentTemplateForm", () => {
     expect(groups.map((g) => g.name)).toEqual(["bash", "browser", "fs", "terminal"]);
   });
 
-  it("maps the legacy Linux group into terminal", () => {
-    const groups = toolGroupsFromSetup({ available_tool_groups: ["fs", "linux"] });
-    expect(groups.map((g) => g.name)).toEqual(["fs", "terminal"]);
-  });
-
-  it("falls back to features when available_tool_groups missing", () => {
+  it("fails closed when the current Node capability list is missing", () => {
     const groups = toolGroupsFromSetup({
       features: { browser_enabled: false, wecom_enabled: true },
     });
-    const names = groups.map((g) => g.name);
-    expect(names).toContain("wecom");
-    expect(names).not.toContain("browser");
-    expect(names).toContain("fs");
+    expect(groups).toEqual([]);
   });
 
   it("prunes draft tool groups to available list", () => {

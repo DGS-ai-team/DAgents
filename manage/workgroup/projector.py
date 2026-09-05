@@ -1,6 +1,7 @@
 """ContextProjector：Timeline + ActorRunHistory → 合法 LLM messages。
 
-规则冻结于 docs/design/workgroup-d05-contracts.md §5.2。
+规则由当前 Workgroup timeline/run-history 模型和
+docs/design/workgroup-and-node-gateway.md 共同定义。
 """
 
 from __future__ import annotations

@@ -83,10 +83,6 @@ export const VIEW_META = {
     title: "对话",
     subtitle: "与工作组 Supervisor 对话",
   },
-  templates: {
-    title: "Agent 模板",
-    subtitle: "可复用的 Agent 蓝图；工作组新增成员时可快速选用",
-  },
   marketplace: {
     title: "能力市场",
     subtitle: "浏览、上传与发布 Node 扩展能力包",

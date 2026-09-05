@@ -25,7 +25,7 @@ func TestSkillControlPlaneReportsDiagnosticsAndIdleBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{
 		SkillsRoot:        root,
 		SkillsEnabled:     true,

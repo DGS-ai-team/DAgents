@@ -3,107 +3,24 @@ package policy
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
-
-func TestStoreApplyToolUpdatesRoundtrip(t *testing.T) {
-	dir := t.TempDir()
-	policyDir := filepath.Join(dir, "policy")
-	if err := EnsureRuntimePolicy(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyToolUpdates(policyDir, []ToolUpdate{
-		{Name: "read_file", Decision: DecisionAllowAuto},
-		{Name: "write_file", Decision: DecisionDeny},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(policyDir, "tool.approval.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(raw)
-	if !strings.Contains(body, "read_file=never") || !strings.Contains(body, "write_file=deny") {
-		t.Fatalf("unexpected tool file: %q", body)
-	}
-	e, err := loadFromDir(policyDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.Decide("write_file") != ActionDeny {
-		t.Fatal("write_file should deny after reload")
-	}
-}
-
-func TestStoreProtectAskUserInformationDeny(t *testing.T) {
-	dir := t.TempDir()
-	policyDir := filepath.Join(dir, "policy")
-	if err := EnsureRuntimePolicy(dir); err != nil {
-		t.Fatal(err)
-	}
-	err := ApplyToolUpdates(policyDir, []ToolUpdate{
-		{Name: "ask_user_information", Decision: DecisionDeny},
-	})
-	if err == nil {
-		t.Fatal("expected protection error")
-	}
-}
-
-func TestStoreApplyShellUpdatesRoundtrip(t *testing.T) {
-	dir := t.TempDir()
-	policyDir := filepath.Join(dir, "policy")
-	if err := EnsureRuntimePolicy(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyShellUpdates(policyDir, ShellBash, []ShellUpdate{
-		{Command: "ls", Decision: DecisionAllowAuto},
-		{Command: "rm", Decision: DecisionDeny},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	e, err := loadFromDir(policyDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.DecideTool("bash_run", map[string]any{"command": "rm x", "shell_type": "bash"}) != ActionDeny {
-		t.Fatal("rm should deny")
-	}
-	if e.DecideTool("bash_run", map[string]any{"command": "ls", "shell_type": "bash"}) != ActionAuto {
-		t.Fatal("ls should auto")
-	}
-}
-
-func TestStoreApplyShellPolicyChangesDelete(t *testing.T) {
-	dir := t.TempDir()
-	policyDir := filepath.Join(dir, "policy")
-	if err := EnsureRuntimePolicy(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyShellUpdates(policyDir, ShellBash, []ShellUpdate{
-		{Command: "ls", Decision: DecisionAllowAuto},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyShellPolicyChanges(policyDir, ShellBash, nil, []string{"ls"}); err != nil {
-		t.Fatal(err)
-	}
-	e, err := loadFromDir(policyDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.DecideTool("bash_run", map[string]any{"command": "ls", "shell_type": "bash"}) != ActionRequireApproval {
-		t.Fatal("deleted ls should fall back to require approval")
-	}
-}
 
 func TestLoadSnapshotIncludesRegistryTools(t *testing.T) {
 	dir := t.TempDir()
 	policyDir := filepath.Join(dir, "policy")
-	if err := EnsureRuntimePolicy(dir); err != nil {
+	if err := os.MkdirAll(filepath.Join(policyDir, "shell"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	e, err := loadFromDir(policyDir)
+	if err := os.WriteFile(filepath.Join(policyDir, "tool.approval.txt"), []byte("read_file=never\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"bash.approval.txt", "cmd.approval.txt", "powershell.approval.txt"} {
+		if err := os.WriteFile(filepath.Join(policyDir, "shell", name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e, err := LoadFromDir(policyDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,8 +40,8 @@ function normalizeEntries(entries) {
 }
 
 function applyContext(context) {
-  agentEntries.value = normalizeEntries(context?.long_term_entries);
-  globalEntries.value = normalizeEntries(context?.global_long_term_entries);
+  agentEntries.value = normalizeEntries(context?.memory_entries);
+  globalEntries.value = normalizeEntries(context?.global_memory_entries);
 }
 
 function formatDate(value) {

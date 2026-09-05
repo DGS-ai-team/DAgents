@@ -44,7 +44,7 @@
 | `node/internal/skills` | `skills_test.go` | skills 加载 | ✅ |
 | `node/internal/store` | `sqlite_test.go` | SQLite store | ✅ |
 | `node/internal/stream` | `hub_test.go` | SSE hub | ✅ |
-| `node/internal/tools` | `tools_test.go`, `bash_policy_test.go`, `background_jobs_test.go`, `fs_read_search_test.go` | 工具执行、**bash 策略**、后台任务、FS | ✅ |
+| `node/internal/tools` | `tools_test.go`, `bash_policy_test.go`, `bash_run_tool_test.go`, `fs_read_grep_test.go`, `terminal_tools_test.go` | 工具执行、**bash 策略**、终端、FS | ✅ |
 | `node/internal/triggers` | `triggers_test.go`, `schedule_test.go` | trigger 与调度 | ✅ |
 | `node/internal/turn` | `orchestrator_test.go`, `tool_result_messages_test.go`, `prompt_test.go` | turn 编排、tool 消息、prompt | ✅ |
 | `client/internal/api` | `client_test.go` | Node HTTP 客户端 | ✅ |

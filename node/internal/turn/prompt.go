@@ -10,8 +10,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-const defaultMaxToolLoops = 16
-
 // taskExecutionContract 是稳定的通用执行约束。它不包含当前 Turn 的计划、
 // 工具结果或实时状态，因此不会形成动态尾部，也不会让活动 Turn 的 system
 // prompt 随执行进度变化。
@@ -70,10 +68,7 @@ type SystemPromptInput struct {
 	// externaltools. It is a separate path scope and is never the base for
 	// relative Agent tool paths.
 	RuntimeRoot string
-	// FSRoot is the pre-workspace compatibility alias for WorkspaceRoot.
-	// Deprecated: use WorkspaceRoot.
-	FSRoot    string
-	SessionID string
+	SessionID   string
 	// TodayDateEnabled controls whether the current date is included in the
 	// request-only runtime context. The date is deliberately not part of the
 	// durable history or the stable system prompt.
@@ -108,11 +103,6 @@ type SystemPromptBuilder func(in SystemPromptInput) string
 // ContextInjectionBuilder 构造当前模型 Step 的动态上下文。注入内容只
 // 存在于请求副本，不写入 session history。
 type ContextInjectionBuilder func(in SystemPromptInput) []ContextInjection
-
-// DefaultMaxToolLoops 返回工具循环默认上限（与 Python LLM_MAX_TOOL_LOOPS 默认 16 一致）。
-func DefaultMaxToolLoops() int {
-	return defaultMaxToolLoops
-}
 
 // BuildSystemPrompt 构造稳定的单次 LLM 请求 system prompt。
 //
@@ -219,10 +209,7 @@ func ChildContextInjectionBuilder(_ string) ContextInjectionBuilder {
 }
 
 func workspaceRootFromPromptInput(in SystemPromptInput) string {
-	if root := strings.TrimSpace(in.WorkspaceRoot); root != "" {
-		return root
-	}
-	return strings.TrimSpace(in.FSRoot)
+	return strings.TrimSpace(in.WorkspaceRoot)
 }
 
 func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
@@ -247,16 +234,4 @@ func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
 		)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// RunTurnPhase 将 Node turn 状态映射为 Python Backend 兼容的 run_turn_phase 名。
-func RunTurnPhase(state State) string {
-	switch state {
-	case StateModelStreaming:
-		return "model_streaming"
-	case StateAwaitingTool:
-		return "awaiting_tool_execution"
-	default:
-		return "idle"
-	}
 }

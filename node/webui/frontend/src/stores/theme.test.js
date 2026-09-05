@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cycleTheme, initTheme, setTheme, themeStore, toggleTheme } from "./theme.js";
+import { cycleTheme, initTheme, setTheme, themeStore } from "./theme.js";
 
 const mockGetItem = vi.fn(() => "");
 const mockSetItem = vi.fn();
@@ -63,13 +63,6 @@ describe("theme store", () => {
     expect(themeStore.mode).toBe("system");
     expect(themeStore.resolved).toBe("dark");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-  });
-
-  it("toggles and persists binary preference", () => {
-    setTheme("dark");
-    toggleTheme();
-    expect(themeStore.mode).toBe("light");
-    expect(mockSetItem).toHaveBeenCalledWith("dagents_webui_theme", "light");
   });
 
   it("cycles system → light → dark → system", () => {

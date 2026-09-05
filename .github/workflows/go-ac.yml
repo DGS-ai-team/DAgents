@@ -40,7 +40,6 @@ jobs:
             shared/config/go.sum
             shared/logfiles/go.sum
             shared/update/go.sum
-            shared/workgroup/go.sum
             desktop/tray/go.sum
 
       - name: Check Go formatting
@@ -55,7 +54,6 @@ jobs:
           go mod download -C shared/config
           go mod download -C shared/logfiles
           go mod download -C shared/update
-          go mod download -C shared/workgroup
           go mod download -C node
           go mod download -C client
           go mod download -C desktop/tray
@@ -65,10 +63,10 @@ jobs:
 
       - name: Test
         run: |
-          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+          go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
 
       - name: Vet
-        run: go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...
+        run: go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
 
       - name: Staticcheck
         run: bash scripts/ci/run_staticcheck.sh

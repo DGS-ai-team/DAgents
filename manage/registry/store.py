@@ -37,54 +37,12 @@ def stored_to_public(record: AgentStoredRecord, *, now_unix: int | None = None) 
 
 
 def record_kind(record: AgentStoredRecord | AgentRecord) -> Literal["node", "agent"]:
-    raw = str(getattr(record, "kind", "") or "").strip().lower()
-    if raw in {"node", "agent"}:
-        return raw  # type: ignore[return-value]
-    return "node" if record_node_id(record) == str(getattr(record, "agent_id", "")).strip() else "agent"
-
-
-def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
-    migrated = dict(data)
-    registered = int(migrated.get("registered_at_unix") or 0)
-    if "updated_at_unix" not in migrated:
-        migrated["updated_at_unix"] = registered
-    if "last_seen_unix" not in migrated:
-        migrated["last_seen_unix"] = registered
-    agent_id = str(migrated.get("agent_id") or "")
-    node_id = str(migrated.get("node_id") or "").strip()
-    if not node_id:
-        node_id = agent_id
-    migrated["node_id"] = node_id
-    kind = str(migrated.get("kind") or "").strip().lower()
-    migrated["kind"] = kind if kind in {"node", "agent"} else ("node" if agent_id == node_id else "agent")
-    if not migrated.get("name"):
-        migrated["name"] = agent_id or node_id
-    for key in ("description", "owner", "team", "version"):
-        migrated.setdefault(key, "")
-    for key in ("capabilities_hint", "capabilities", "tools", "skills", "allowed_scopes"):
-        if key not in migrated or migrated[key] is None:
-            migrated[key] = []
-    if "metadata" not in migrated or not isinstance(migrated.get("metadata"), dict):
-        migrated["metadata"] = {}
-    meta = migrated["metadata"]
-    if isinstance(meta, dict):
-        meta.setdefault("node_id", node_id)
-    if "card" not in migrated or not isinstance(migrated.get("card"), dict):
-        migrated["card"] = {}
-    migrated.setdefault("auth_method", "shared_token")
-    migrated.setdefault("risk_level", "medium")
-    migrated.pop("expose_to_peers", None)
-    migrated.setdefault("last_error_summary", None)
-    migrated.setdefault("recent_task_summary", None)
-    return migrated
+    return record.kind
 
 
 def record_node_id(record: AgentStoredRecord | AgentRecord) -> str:
-    """解析记录的 node 身份（缺省回退 agent_id）。"""
-    node = str(getattr(record, "node_id", "") or "").strip()
-    if node:
-        return node
-    return str(getattr(record, "agent_id", "") or "").strip()
+    """Return the transport Node identity recorded for an Agent."""
+    return record.node_id
 
 
 class AgentRegistryStore:
@@ -235,9 +193,6 @@ class AgentRegistryStore:
                 data["last_error_summary"] = payload.last_error_summary
             if payload.recent_task_summary is not None:
                 data["recent_task_summary"] = payload.recent_task_summary
-            data.pop("expose_to_peers", None)
-            if not data.get("node_id"):
-                data["node_id"] = agent_id
             stored = AgentStoredRecord.model_validate(data)
             self._records[agent_id] = stored
             self._persist_locked()
@@ -356,14 +311,12 @@ class AgentRegistryStore:
                 catalog_rows = []
         loaded: dict[str, AgentStoredRecord] = {}
         for row in rows:
-            try:
-                raw = json.loads(str(row["payload_json"]))
-            except json.JSONDecodeError:
-                continue
+            raw = json.loads(str(row["payload_json"]))
             if not isinstance(raw, dict):
-                continue
-            migrated = _migrate_stored_dict(raw)
-            record = AgentStoredRecord.model_validate(migrated)
+                raise ValueError(f"registry record {row['agent_id']} is not an object")
+            record = AgentStoredRecord.model_validate(raw)
+            if record.agent_id != str(row["agent_id"]):
+                raise ValueError(f"registry record key mismatch for {row['agent_id']}")
             loaded[record.agent_id] = record
         catalog = {str(row["name"]).strip() for row in catalog_rows if str(row["name"]).strip()}
         with self._lock:
@@ -392,7 +345,6 @@ class AgentRegistryStore:
                     (name, now_unix),
                 )
             conn.commit()
-
     def _persist_locked(self) -> None:
         if self._db is None or not self._db.enabled:
             return
@@ -404,19 +356,3 @@ class AgentRegistryStore:
                     (item.agent_id, json.dumps(item.model_dump(mode="json"), ensure_ascii=False)),
                 )
             conn.commit()
-
-    @classmethod
-    def import_rc_json(cls, db: SQLiteDatabase, raw_json: dict[str, object]) -> int:
-        store = cls(db=db)
-        agents = raw_json.get("agents", []) if isinstance(raw_json, dict) else []
-        count = 0
-        for item in agents:
-            if not isinstance(item, dict):
-                continue
-            migrated = _migrate_stored_dict(item)
-            record = AgentStoredRecord.model_validate(migrated)
-            store._records[record.agent_id] = record
-            count += 1
-        with store._lock:
-            store._persist_locked()
-        return count

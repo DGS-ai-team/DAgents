@@ -264,13 +264,13 @@ func scanEntry(row rowScanner) (Entry, error) {
 	e.SupersedesID, e.ConflictGroup = supersedes.String, conflictGroup.String
 	_ = json.Unmarshal([]byte(valueRaw), &e.Value)
 	_ = json.Unmarshal([]byte(qualifiersRaw), &e.Qualifiers)
-	if t, err := parseTime(valueFromString(validFrom)); err == nil && !t.IsZero() {
+	if t, err := parseTime(validFrom); err == nil && !t.IsZero() {
 		e.ValidFrom = &t
 	}
-	if t, err := parseTime(valueFromString(validTo)); err == nil && !t.IsZero() {
+	if t, err := parseTime(validTo); err == nil && !t.IsZero() {
 		e.ValidTo = &t
 	}
-	if t, err := parseTime(valueFromString(expiresAt)); err == nil && !t.IsZero() {
+	if t, err := parseTime(expiresAt); err == nil && !t.IsZero() {
 		e.ExpiresAt = &t
 	}
 	if t, err := parseTime(lastAccessedNull.String); err == nil && !t.IsZero() {
@@ -280,8 +280,6 @@ func scanEntry(row rowScanner) (Entry, error) {
 	e.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
 	return e, nil
 }
-
-func valueFromString(v string) string { return v }
 
 func parseTime(raw string) (time.Time, error) {
 	if strings.TrimSpace(raw) == "" {

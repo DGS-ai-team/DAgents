@@ -92,7 +92,7 @@ Content-Type: application/json
 
 {
   "display_name": "助手",
-  "defaults": { "llm": { "active": "deepseek", "max_tool_loops": 32 } }
+  "defaults": { "llm": { "active": "deepseek", "max_steps": 32 } }
 }
 ```
 
@@ -126,13 +126,13 @@ Content-Type: application/json
 
 {
   "soul_md": "...",
-  "user_md": "...",
-  "custom_md": "...",
-  "long_term_md": "..."
+  "custom_md": "..."
 }
 ```
 
-注入开关仍通过 Agent 快照 `defaults.prompt_context.*_enabled`（设置页「侧车与长期记忆」）。
+侧车开关通过 Agent 快照 `defaults.prompt_context.soul_enabled` 与
+`defaults.prompt_context.custom_enabled` 控制；Memory 的自动召回与 scope
+由同一 Agent 快照中的记忆配置控制，但具体记忆条目只由 workspace memory service 管理。
 
 ### 2.5 消息与 resume
 
@@ -201,7 +201,7 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 - 历史被截断时发送 `resync_required`，Client 必须 hydrate 后继续，不得静默跳过缺失事件。
 - 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`turn_state`、`hitl_required`、`turn_finished`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`turn_state`、`hitl_required`、`turn_finished`、`notification_changed`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。
 
 **本地 turn** 统一使用 `hitl_required`。子 Agent 相关路径仍可能出现 `approval_required` / `user_information_required`，UI 按同类 HITL 处理即可。
 
@@ -234,6 +234,7 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 **与其它事件分工**
 
 - **`hitl_required`**：本地 turn 统一 HITL 事件；`items[]` 每项含 `hitl_type`：`user_information`（`ask_user_information`）或 `execute_tool`（需审批工具）。UI 按 item 类型展示并分别 `POST resume`；同批可混合 ask + approval，Node 侧为单一 `PendingHITL.Items`。
+- **`notification_changed`**：Node 生成的完整通知投影，包含 `notify_seq`、`ack_seq`、`has_unread`、`has_pending_hitl`、`pending_hitl_items`。Desktop Shell 直接据此更新托盘待办；启动和 SSE 重连才通过 `/v1/agents` 做一次快照对账。
 - **`approval_required` / `user_information_required`**：子 Agent 等路径仍可能使用；UI 按同类 HITL 处理。
 - `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
 - 子 Agent 内部 `turn_finished`：**不**转发为父 Agent 终态（`node/internal/childagent/relay_hub.go`）。

@@ -1,4 +1,4 @@
-"""Manage 侧工作组 WS 会话与 outbox 投递（D3）。
+"""Manage 侧工作组 WS 会话与 outbox 投递。
 
 不依赖真实网络时可在单测中直接调用 Hub；HTTP 升级见 ws_routes。
 """
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from queue import Empty as QueueEmpty, Full, Queue
 from typing import Any, Callable
 
 from manage.platform.metrics import record_workgroup_ws_event
@@ -24,6 +25,60 @@ from manage.workgroup.protocol import (
 from manage.workgroup.store import WorkGroupStore, _now
 
 SendFn = Callable[[dict[str, Any]], None]
+
+
+@dataclass
+class BrowserConnection:
+    """单个浏览器工作组事件流。
+
+    浏览器不是 Node WS 的对端，不参与 delivery ack；它以 Timeline seq
+    作为恢复游标。队列有界，消费端失速时主动断开，让客户端带游标重连并
+    从持久化 Timeline 补齐，而不是无限堆积内存。
+    """
+
+    connection_id: str
+    workgroup_id: str
+    queue: Queue[dict[str, Any] | None] = field(
+        default_factory=lambda: Queue(maxsize=256), repr=False
+    )
+    closed: bool = False
+
+    def enqueue(self, message: dict[str, Any]) -> bool:
+        if self.closed:
+            return False
+        try:
+            self.queue.put_nowait(message)
+            return True
+        except Full:
+            # A reconnect will replay durable Timeline events. Closing is the
+            # only safe response when a browser cannot keep up with the stream.
+            self.closed = True
+            while True:
+                try:
+                    self.queue.get_nowait()
+                except QueueEmpty:
+                    break
+            try:
+                self.queue.put_nowait(
+                    {
+                        "type": "workgroup.resync_required",
+                        "payload": {
+                            "workgroup_id": self.workgroup_id,
+                            "reason": "browser_event_queue_full",
+                        },
+                    }
+                )
+            except Full:
+                pass
+            return False
+
+    def close(self) -> None:
+        self.closed = True
+        try:
+            self.queue.put_nowait(None)
+        except Full:
+            # The consumer will observe the resync marker or disconnect.
+            pass
 
 
 @dataclass
@@ -52,6 +107,8 @@ class WorkgroupWSHub:
     # node_id → 曾用过的最大 generation（含已 fenced）
     _max_generation: dict[str, int] = field(default_factory=dict)
     _live_seq: dict[str, int] = field(default_factory=dict)
+    # workgroup_id → browser connection id → BrowserConnection
+    _browser_conns: dict[str, dict[str, BrowserConnection]] = field(default_factory=dict)
 
     def hello(
         self,
@@ -61,7 +118,6 @@ class WorkgroupWSHub:
         send: SendFn | None = None,
         protocol_version: str = PROTOCOL_VERSION,
         schema_version: str = SCHEMA_VERSION,
-        agent_catalog_revision: str = "",
         capabilities: list[str] | None = None,
         client_time: str = "",
     ) -> dict[str, Any]:
@@ -97,7 +153,6 @@ class WorkgroupWSHub:
                     "connection_generation": gen,
                     "protocol_version": protocol_version,
                     "schema_version": schema_version,
-                    "agent_catalog_revision": str(agent_catalog_revision or "").strip(),
                     "capabilities": list(MANAGE_CAPABILITIES),
                     "server_time": _now(),
                 },
@@ -181,7 +236,7 @@ class WorkgroupWSHub:
         )
 
     def _frame_belongs_to_node(self, frame: OutboxFrame, node_id: str) -> bool:
-        """Only replay frames addressed to this node; legacy control frames remain broadcast."""
+        """Only replay frames addressed to this node; unscoped frames broadcast."""
         home_node_id = str(frame.payload.get("home_node_id") or "").strip()
         if not home_node_id:
             member_id = str(frame.payload.get("member_id") or "").strip()
@@ -335,15 +390,41 @@ class WorkgroupWSHub:
         payload = _jsonable(event.model_dump(mode="json") if hasattr(event, "model_dump") else event)
         frame = self.store.get_timeline_outbox(workgroup_id, str(payload.get("event_id") or ""))
         if frame is None:
-            # Compatibility for Timeline rows created by older Store instances.
-            frame = self.store.enqueue_outbox(
-                workgroup_id,
-                type="timeline.event",
-                payload=payload,
-            )
+            raise WorkgroupError("schema_mismatch", "timeline outbox missing")
+        browser_event = self._timeline_event_for_browser(event)
+        browser_message = {
+            "type": "timeline.event",
+            "payload": _jsonable(
+                browser_event.model_dump(mode="json")
+                if hasattr(browser_event, "model_dump")
+                else browser_event
+            ),
+        }
+        # The listener is called after the Timeline + outbox transaction has
+        # committed. Fan out the same canonical event to Nodes and browsers.
+        with self._lock:
+            browser_conns = list((self._browser_conns.get(workgroup_id) or {}).values())
+            for conn in browser_conns:
+                conn.enqueue(browser_message)
         for sub in self.store.list_subscribers(workgroup_id):
             self.push_to_node(sub.node_id, frame)
         return frame
+
+    def _timeline_event_for_browser(self, event: Any) -> Any:
+        """Keep the live browser projection aligned with GET /timeline."""
+        if (
+            getattr(event, "type", None) != "assign_started"
+            or not getattr(event, "assign_id", None)
+            or str(getattr(event, "actor_id", "") or "").strip() != "leader"
+        ):
+            return event
+        assign = self.store.get_assign(str(event.assign_id))
+        instruction = str(getattr(assign, "instruction", "") or "").strip()
+        if assign is None or not instruction:
+            return event
+        member = self.store.get_member(assign.member_id)
+        display = (str(getattr(member, "display_name", "") or "") or assign.member_id).strip()
+        return event.model_copy(update={"text": f"@{display}\n{instruction}"})
 
     def publish_realtime_event(
         self,
@@ -370,9 +451,72 @@ class WorkgroupWSHub:
             "sent_at": _now(),
         }
         message = {"type": "workgroup.realtime", "payload": payload}
+        # The request-scoped POST SSE owns token/delta/status rendering. Only
+        # the durable queue projection belongs on the browser event stream;
+        # forwarding every model delta here would duplicate a high-volume
+        # short-lived stream after a page reload.
+        if str(event_type or "") == "queue":
+            with self._lock:
+                browser_conns = list((self._browser_conns.get(wid) or {}).values())
+                for conn in browser_conns:
+                    conn.enqueue(message)
         for sub in self.store.list_subscribers(wid):
             self.push_json_to_node(sub.node_id, message)
         return payload
+
+    def publish_hitl_change(self, hitl: Any) -> None:
+        """Push the current HITL projection to browsers after its commit."""
+        wid = str(getattr(hitl, "workgroup_id", "") or "").strip()
+        if not wid:
+            return
+        pending = self.store.list_hitl(wid, pending_only=True)
+        message = {
+            "type": "hitl.changed",
+            "payload": {
+                "workgroup_id": wid,
+                "hitl": _jsonable(hitl),
+                "pending": [_jsonable(item) for item in pending],
+                "sent_at": _now(),
+            },
+        }
+        with self._lock:
+            for conn in list((self._browser_conns.get(wid) or {}).values()):
+                conn.enqueue(message)
+
+    def subscribe_browser(
+        self,
+        workgroup_id: str,
+        *,
+        after_seq: int = 0,
+    ) -> tuple[BrowserConnection, list[Any], list[Any]]:
+        """Register a browser and atomically capture its replay snapshot.
+
+        Registration and snapshot selection share the Hub lock. Therefore an
+        event cannot land between the replay cut and the live queue: it is
+        either included in ``replay`` or queued for the live consumer.
+        """
+        wid = str(workgroup_id or "").strip()
+        if not wid:
+            raise WorkgroupError("schema_mismatch", "workgroup_id required")
+        cursor = max(0, int(after_seq))
+        conn = BrowserConnection(connection_id=ids.new_id("bc"), workgroup_id=wid)
+        with self._lock:
+            replay = [
+                self._timeline_event_for_browser(event)
+                for event in self.store.list_timeline(wid)
+                if int(getattr(event, "seq", 0) or 0) > cursor
+            ]
+            self._browser_conns.setdefault(wid, {})[conn.connection_id] = conn
+            pending = self.store.list_hitl(wid, pending_only=True)
+        return conn, replay, pending
+
+    def unsubscribe_browser(self, connection: BrowserConnection) -> None:
+        with self._lock:
+            bucket = self._browser_conns.get(connection.workgroup_id) or {}
+            bucket.pop(connection.connection_id, None)
+            if not bucket:
+                self._browser_conns.pop(connection.workgroup_id, None)
+        connection.close()
 
     def deliver_outbox_frame(
         self,

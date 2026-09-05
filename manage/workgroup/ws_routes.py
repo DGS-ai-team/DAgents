@@ -15,7 +15,7 @@ from manage.workgroup.d3_models import SessionHello
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.ws_hub import WorkgroupWSHub
 
-# 可选：Node 回传 tool.result / provision_result 时的业务回调
+# Node 回传 Agent session/turn 事件时的业务回调。
 InboundHandler = Callable[[str, str, dict[str, Any]], None]
 
 
@@ -101,7 +101,7 @@ def build_workgroup_ws_router(
                     payload = {}
 
                 try:
-                    if mtype == "session.hello" or (not mtype and "node_id" in payload):
+                    if mtype == "session.hello":
                         try:
                             hello = SessionHello.model_validate(payload)
                         except ValidationError as exc:
@@ -124,7 +124,6 @@ def build_workgroup_ws_router(
                             send=sync_send,
                             protocol_version=hello.protocol_version,
                             schema_version=hello.schema_version,
-                            agent_catalog_revision=hello.agent_catalog_revision,
                             capabilities=hello.capabilities,
                             client_time=hello.client_time or "",
                         )
@@ -138,16 +137,13 @@ def build_workgroup_ws_router(
                             raise WorkgroupError("schema_mismatch", "workgroup_id required")
                         hub.resume_offer(node_id, workgroup_id=wid, last_ack_delivery_seq=last_ack)
                     elif mtype in {
-                        "tool.ack",
                         "delivery.ack",
-                        "tool.result",
-                        "member.provision_result",
-                        "workgroup.tombstone_ack",
                         "agent.session.ready",
                         "agent.session.error",
                         "agent.session.closed",
                         "agent.turn.accepted",
                         "agent.turn.cancelled",
+                        "agent.tool.cancelled",
                         "agent.turn.resumed",
                         "agent.turn.event",
                         "agent.turn.result",
@@ -165,8 +161,6 @@ def build_workgroup_ws_router(
                         wid = payload.get("workgroup_id") or msg.get("workgroup_id")
                         # 业务回调前先做世代 fencing；旧连接的迟到结果不能改变任务状态。
                         if on_inbound is not None and mtype in {
-                            "tool.result",
-                            "member.provision_result",
                             "agent.session.ready",
                             "agent.session.error",
                             "agent.session.closed",

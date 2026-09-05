@@ -273,8 +273,7 @@ type SearchResult struct {
 	Score float64 `json:"score,omitempty"`
 }
 
-// Service 是 Turn/API 依赖的最小能力集合。具体实现可以是 Workspace
-// SQLite，也可以是迁移期间的 legacy adapter。
+// Service 是 Turn/API 依赖的最小能力集合，由 Workspace SQLite 实现。
 type Service interface {
 	Recall(ctx context.Context, req RecallRequest) (Snapshot, error)
 	Search(ctx context.Context, req SearchRequest) ([]SearchResult, error)

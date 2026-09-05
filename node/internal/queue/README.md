@@ -15,18 +15,16 @@ Per-session 进程内优先级消息队列（对齐 Python `MessageQueue` 语义
 与 `queue.go` → `priorityValue` 一致（数值越小越先出队；同档 FIFO）：
 
 ```text
-continuation(-1) > human(0) > resume(1) > async_completion(2) > other(10)
+continuation(-1) > resume(1) > async_completion(2)
 ```
 
 | 标签 | 典型 request_type | 说明 |
 |------|-------------------|------|
 | `continuation` | `turn_continuation` / `side_effect_continue` | 恢复或旁路 Apply 后续跑 LLM |
-| `human` | `message` | 用户/子任务 human 抢占 |
 | `resume` | `resume` | HITL 提交 |
-| `async_completion` | `async_tool_result` | 浏览器任务 Produce（缓冲 + SSE，不 inline Apply）；旧后台 job 仅兼容 |
-| `other` | — | 预留 |
+| `async_completion` | `async_tool_result` | 浏览器任务 Produce（缓冲 + SSE，不 inline Apply） |
 
-**边界**：队列不含 consumer；`session.runtime.consumeLoop` 负责 `Dequeue` 并分发 handler。trigger/A2A/user 进入 InputBox FIFO；async 工具完成先 Produce 入缓冲，再在 `runTurnStep` 步首 Apply。pending HITL 不会被普通输入打断，只有显式 cancel 才结束当前 Turn。
+**边界**：队列不含 consumer；`session.runtime.consumeLoop` 负责 `Dequeue` 并分发 handler。trigger/child-agent/user 进入 InputBox FIFO；async 工具完成先 Produce 入缓冲，再在 `runTurnStep` 步首 Apply。pending HITL 不会被普通输入打断，只有显式 cancel 才结束当前 Turn。
 
 ## 相关文档
 

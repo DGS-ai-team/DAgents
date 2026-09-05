@@ -20,6 +20,7 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
 	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +101,7 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 		t.Fatalf("snap meta = %+v", snap)
 	}
 
-	putBody := []byte(`{"updates":[{"name":"write_file","decision":"deny"}]}`)
+	putBody := []byte(`{"updates":[{"name":"write_file","mode":"deny"}]}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/policy/tools", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -122,8 +123,8 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 	defer resp2.Body.Close()
 	var snap2 struct {
 		Tools []struct {
-			Name     string `json:"name"`
-			Decision string `json:"decision"`
+			Name string `json:"name"`
+			Mode string `json:"mode"`
 		} `json:"tools"`
 	}
 	if err := json.NewDecoder(resp2.Body).Decode(&snap2); err != nil {
@@ -131,7 +132,7 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 	}
 	found := false
 	for _, item := range snap2.Tools {
-		if item.Name == "write_file" && item.Decision == "deny" {
+		if item.Name == "write_file" && item.Mode == "deny" {
 			found = true
 		}
 	}
@@ -143,7 +144,7 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 func TestHandlePutAgentShellPolicy(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 
-	putBody := []byte(`{"updates":[{"command":"rm","decision":"deny"}]}`)
+	putBody := []byte(`{"updates":[{"command":"rm","mode":"deny"}]}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/policy/shell/bash", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +178,7 @@ func TestHandlePutAgentShellPolicy(t *testing.T) {
 func TestHandlePutAgentPolicyProtectAskUserInformation(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 
-	putBody := []byte(`{"updates":[{"name":"ask_user_information","decision":"deny"}]}`)
+	putBody := []byte(`{"updates":[{"name":"ask_user_information","mode":"deny"}]}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/policy/tools", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +201,7 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	putBody := []byte(`{"soul_md":"我是助手","user_md":"用户偏好简洁","custom_md":"临时指令","long_term_md":"记得开会","long_term_scope":"global"}`)
+	putBody := []byte(`{"soul_md":"我是助手","custom_md":"临时指令","memory_entries":[{"content":"记得开会"}],"memory_scope":"global"}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/prompt-context", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -230,8 +231,8 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if view.SoulMD != "我是助手" || view.Source != "workspace_memory" {
 		t.Fatalf("view = %+v", view)
 	}
-	if len(view.GlobalLongTermEntries) != 1 || view.GlobalLongTermEntries[0].Content != "记得开会" {
-		t.Fatalf("global long_term entries = %+v md=%q", view.GlobalLongTermEntries, view.LongTermMD)
+	if len(view.GlobalMemoryEntries) != 1 || view.GlobalMemoryEntries[0].Content != "记得开会" {
+		t.Fatalf("global memory entries = %+v", view.GlobalMemoryEntries)
 	}
 	contextView, err := srv.sessions.GetContextView(agentID)
 	if err != nil {
@@ -248,22 +249,15 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := agentruntime.LongTermScopeFromDefaults(snap); got != "global" {
-		t.Fatalf("long_term_scope was not persisted to agent snapshot: %q", got)
-	}
-	pc, err := srv.agents.GetAgentPromptContext(t.Context(), agentID)
-	if err != nil || pc == nil {
-		t.Fatalf("load prompt context after v2 write: pc=%v err=%v", pc, err)
-	}
-	if pc.LongTermMD != "" {
-		t.Fatalf("v2 prompt context must keep legacy long_term_md read-only, got %q", pc.LongTermMD)
+	if got := agentruntime.MemoryScopeFromDefaults(snap); got != "global" {
+		t.Fatalf("memory_scope was not persisted to agent snapshot: %q", got)
 	}
 }
 
 func TestHandleAgentMemoryEntryMutation(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 	base := ts.URL + "/v1/agents/" + agentID + "/prompt-context"
-	putBody := []byte(`{"long_term_entries":[{"id":"lt-edit","content":"旧内容"},{"id":"lt-delete","content":"待删除"}]}`)
+	putBody := []byte(`{"memory_entries":[{"id":"lt-edit","content":"旧内容"},{"id":"lt-delete","content":"待删除"}]}`)
 	putReq, err := http.NewRequest(http.MethodPut, base, bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +309,7 @@ func TestHandleAgentMemoryEntryMutation(t *testing.T) {
 	if err := json.NewDecoder(getResp.Body).Decode(&view); err != nil {
 		t.Fatal(err)
 	}
-	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].ID != "lt-edit" || view.LongTermEntries[0].Content != "已编辑" {
-		t.Fatalf("mutated memory entries = %+v", view.LongTermEntries)
+	if len(view.MemoryEntries) != 1 || view.MemoryEntries[0].ID != "lt-edit" || view.MemoryEntries[0].Content != "已编辑" {
+		t.Fatalf("mutated memory entries = %+v", view.MemoryEntries)
 	}
 }

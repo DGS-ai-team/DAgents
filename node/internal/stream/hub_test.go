@@ -142,12 +142,11 @@ func TestHubSubscribeLiveSkipsHistory(t *testing.T) {
 
 func TestEventFormatSSE(t *testing.T) {
 	ev := Event{
-		SessionID: "sess-x",
-		AgentID:   "agt-x",
-		Type:      "assistant",
-		Seq:       3,
-		TS:        "2026-05-27T00:00:00Z",
-		Data:      map[string]any{"content": "ok"},
+		AgentID: "agt-x",
+		Type:    "assistant",
+		Seq:     3,
+		TS:      "2026-05-27T00:00:00Z",
+		Data:    map[string]any{"content": "ok"},
 	}
 	s := ev.FormatSSE()
 	if !strings.Contains(s, "event: assistant") || !strings.Contains(s, "id: 3") {

@@ -116,7 +116,6 @@ export function createAgent(payload = {}) {
     const name = String(payload.display_name ?? payload.displayName ?? "").trim();
     if (name) body.display_name = name;
   }
-  if (payload.origin) body.origin = payload.origin;
   if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
   if (payload.workspace && typeof payload.workspace === "object") body.workspace = payload.workspace;
   return apiFetch("/v1/agents", { method: "POST", body });
@@ -134,9 +133,6 @@ export function patchAgent(agentId, patch = {}) {
   const body = {};
   if (patch.display_name != null || patch.displayName != null) {
     body.display_name = patch.display_name ?? patch.displayName;
-  }
-  if (patch.llm_active != null || patch.llmActive != null) {
-    body.llm_active = patch.llm_active ?? patch.llmActive;
   }
   if (patch.defaults && typeof patch.defaults === "object") body.defaults = patch.defaults;
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body });
@@ -461,11 +457,6 @@ export function listWorkgroups({ scope = "subscribed" } = {}) {
   return apiFetch("/v1/workgroups", { params: { scope } });
 }
 
-/** 成员可勾选工具目录（Node 本地嵌入 shared catalog；不依赖 Manage） */
-export function getMemberToolCatalog() {
-  return apiFetch("/v1/workgroups/meta/member-tools");
-}
-
 export function listWorkgroupAgents() {
   return apiFetch("/v1/workgroups/meta/agents");
 }
@@ -699,12 +690,6 @@ export function patchWorkgroupMember(workgroupId, memberId, body) {
   );
 }
 
-export function getWorkgroupMemberSpec(workgroupId, memberId) {
-  return apiFetch(
-    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
-  );
-}
-
 export function archiveWorkgroupMember(workgroupId, memberId) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/archive`,
@@ -725,12 +710,12 @@ export function createWorkgroupHITL(workgroupId, prompt) {
   });
 }
 
-export function resolveWorkgroupHITL(workgroupId, hitlId, answer, resolution = null) {
+export function resolveWorkgroupHITL(workgroupId, hitlId, resolution) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
     {
       method: "POST",
-      body: { answer, resolution: resolution || { answer } },
+      body: { resolution: resolution || {} },
     },
   );
 }

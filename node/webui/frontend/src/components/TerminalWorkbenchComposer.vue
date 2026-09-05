@@ -6,6 +6,7 @@ import McpStatusIndicator from "./McpStatusIndicator.vue";
 import SkillsStatusIndicator from "./SkillsStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
 import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
+import { turnStateStore } from "../stores/turnState.js";
 
 const props = defineProps({
   agentId: { type: String, default: "" },
@@ -40,6 +41,13 @@ const placeholder = computed(() =>
     ? `${recipientLabel.value} 正在执行，可先编辑下一条消息…`
     : "输入消息…",
 );
+const runtimeStatusText = computed(() => {
+  if (props.agentSending) return "本轮执行中";
+  if (turnStateStore.phase === "cancelled" && turnStateStore.cancelState !== "confirmed") {
+    return "本轮已取消";
+  }
+  return "";
+});
 const canSubmit = computed(() => Boolean(
   String(text.value || "").trim() &&
   props.agentCanSend &&
@@ -51,7 +59,7 @@ const thinkingEnabled = computed(() => !["disabled", "off"].includes(String(prop
 const thinkingFixed = computed(() => thinkingControl.value === "fixed");
 const thinkingLabel = computed(() => String(props.llmSettings?.thinking_label || "思考"));
 const thinkingSecondarySupported = computed(
-  () => hasThinkingSecondaryControl(props.llmSettings) && props.llmSettings?.reasoning_effort_supported !== false,
+  () => hasThinkingSecondaryControl(props.llmSettings),
 );
 const thinkingSecondaryLabel = computed(() => String(props.llmSettings?.thinking_secondary_label || (thinkingControl.value === "budget" ? "思考预算" : "推理强度")));
 const thinkingEffort = computed(() => String(props.llmSettings?.reasoning_effort || "high").toLowerCase());
@@ -81,12 +89,12 @@ defineExpose({ focusInput, submit });
   <section class="chat__composer terminal-workbench-composer" aria-label="Agent 输入">
     <div
       class="chat__composer-runtime-rail"
-      :class="{ 'chat__composer-runtime-rail--idle': !props.agentSending }"
+      :class="{ 'chat__composer-runtime-rail--idle': !runtimeStatusText }"
       role="status"
       aria-live="polite"
-      :aria-hidden="!props.agentSending"
+      :aria-hidden="!runtimeStatusText"
     >
-      {{ props.agentSending ? "本轮执行中" : "空闲" }}
+      {{ runtimeStatusText || "空闲" }}
     </div>
 
     <div class="chat__composer-pill">

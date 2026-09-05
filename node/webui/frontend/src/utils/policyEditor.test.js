@@ -3,7 +3,6 @@ import {
   PROTECTED_POLICY_TOOL,
   buildBulkToolUpdates,
   canSetPolicyMode,
-  decisionToMode,
   entryMode,
   filterPolicyShellEntries,
   filterPolicyTools,
@@ -50,9 +49,9 @@ describe("policyEditor", () => {
     expect(filterPolicyShellEntries(rows, "")).toHaveLength(2);
   });
 
-  it("prefers mode over legacy decision", () => {
-    expect(entryMode({ mode: "rule", decision: "require_approval" })).toBe("rule");
-    expect(decisionToMode("allow_auto")).toBe("never");
+  it("uses the canonical mode field", () => {
+    expect(entryMode({ mode: "rule" })).toBe("rule");
+    expect(entryMode({})).toBe("rule");
   });
 });
 

@@ -16,10 +16,10 @@ func TestRegistryRegisterAndOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	art, err := reg.RegisterFromRelPath(RegisterOpts{
-		RelPath: "shot.png",
-		Source:  "browser_snapshot",
-		Label:   "browser_snapshot",
+	art, err := reg.RegisterFromPath(RegisterOpts{
+		Path:   "shot.png",
+		Source: "browser_snapshot",
+		Label:  "browser_snapshot",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestRegistryRejectsTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.RegisterFromRelPath(RegisterOpts{RelPath: "../etc/passwd"}); err == nil {
+	if _, err := reg.RegisterFromPath(RegisterOpts{Path: "../etc/passwd"}); err == nil {
 		t.Fatal("expected error for traversal")
 	}
 }
@@ -92,7 +92,7 @@ func TestRegistryRejectsNonImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.RegisterFromRelPath(RegisterOpts{RelPath: "a.txt"}); err != ErrInvalidImage {
+	if _, err := reg.RegisterFromPath(RegisterOpts{Path: "a.txt"}); err != ErrInvalidImage {
 		t.Fatalf("err = %v", err)
 	}
 }

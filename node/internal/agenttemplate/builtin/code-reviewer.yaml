@@ -8,7 +8,7 @@ defaults:
     role: reviewer
     description: 专注代码质量、安全与可维护性审查
   llm:
-    max_tool_loops: 16
+    max_steps: 16
   tools:
     enabled_groups: [fs, skills, memory]
   skills:

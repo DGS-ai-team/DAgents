@@ -36,15 +36,15 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg + sync"},
+		{Role: "user", Content: "async task + approval"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
 			{
-				ID: "call-bg-1", Type: "function",
-				Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"sleep 9","run_in_background":true}`},
+				ID: "call-async-1", Type: "function",
+				Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 			},
 			approvalCall,
 		}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1 status=accepted"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	pending := &turn.PendingHITL{
 		Items: []turn.PendingHITLItem{{ToolCall: approvalCall}},
@@ -53,7 +53,7 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 	setTestPendingHITL(t, rt, pending)
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-job-1",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-job-1",
 		Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)

@@ -43,7 +43,7 @@ class AgentRegisterRequest(BaseModel):
     """Node 注册或心跳 upsert（discovery_group 由 Manage 分配，Node 不传）。
 
     `node_id` 标识承载连接的 Node，`agent_id` 标识 Node 上可被工作组
-    选择的 Agent。旧客户端省略 agent_id 时仍自动注册一个同名 Node Agent。
+    选择的 Agent。Node-only 注册会创建一个同名 Node Agent。
     """
 
     agent_id: str = Field(default="", max_length=256)

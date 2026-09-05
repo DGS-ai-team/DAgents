@@ -13,6 +13,10 @@ const companionBrowserSuffix = "-browser"
 // BrowserCompanionExistsFunc 校验伴生 Agent 记录是否存在（由 API 层注入）。
 type BrowserCompanionExistsFunc func(ctx context.Context, companionAgentID string) (bool, error)
 
+// BrowserLLMResolver 返回当前 Agent 运行 browser-use 所需的模型配置。
+// Resolver 由 API 层绑定，避免 browser sidecar 自己读取另一份配置。
+type BrowserLLMResolver func(ctx context.Context) (*browser.LLMSettings, error)
+
 func companionBrowserAgentID(parentAgentID string) string {
 	parentAgentID = strings.TrimSpace(parentAgentID)
 	if parentAgentID == "" {
@@ -119,6 +123,14 @@ func (r *Registry) SetBrowserCompanionExists(fn BrowserCompanionExistsFunc) {
 	r.browserCompanionExists = fn
 }
 
+// SetBrowserLLMResolver 注入按 Agent 解析浏览器模型的函数。
+func (r *Registry) SetBrowserLLMResolver(fn BrowserLLMResolver) {
+	if r == nil {
+		return
+	}
+	r.browserLLMResolver = fn
+}
+
 // browserCompanionSessionKey 将主 Agent session 映射为伴生 Chrome session_key。
 func (r *Registry) browserCompanionSessionKey(ctx context.Context) (string, string) {
 	sid, errText := r.browserSession(ctx)
@@ -173,10 +185,19 @@ func (r *Registry) execBrowserRunTask(ctx context.Context, raw json.RawMessage) 
 	if args.Wait != nil {
 		wait = *args.Wait
 	}
+	var browserLLM *browser.LLMSettings
+	var err error
+	if r.browserLLMResolver != nil {
+		browserLLM, err = r.browserLLMResolver(ctx)
+		if err != nil {
+			return "", err
+		}
+	}
 	out, err := r.browser.RunTaskWithOpts(ctx, sid, args.Task, browser.RunTaskOpts{
 		MaxSteps:       args.MaxSteps,
 		Wait:           wait,
 		WaitTimeoutSec: args.WaitTimeoutSeconds,
+		LLM:            browserLLM,
 	})
 	if err != nil {
 		return "", err

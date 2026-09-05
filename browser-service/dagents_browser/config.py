@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 import yaml
 
-from dagents_browser.llm import LLMSettings, create_extraction_llm, llm_settings_from_config
-
 DEFAULT_LISTEN_PORT = 18766
 DEFAULT_SERVICE_URL = f"http://127.0.0.1:{DEFAULT_LISTEN_PORT}"
 
@@ -25,7 +23,6 @@ class BrowserServiceSettings:
     output_dir: str = "browser"
     max_sessions: int = 8
     allowed_url_schemes: list[str] | None = None
-    llm: LLMSettings | None = None
 
 
 def load_settings(config_path: str | None) -> BrowserServiceSettings:
@@ -34,9 +31,9 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
         raise ValueError("config path required (-config or DAGENTS_CONFIG)")
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     browser = raw.get("browser") or {}
-    # runtime_root is canonical. Read legacy fs_root during migration so an
-    # existing companion configuration keeps working after the rename.
-    runtime_root = str(raw.get("runtime_root") or raw.get("fs_root") or "./.runtime").strip()
+    # Browser sidecar state belongs under the Node runtime root. The bootstrap
+    # config no longer has a second filesystem-root contract.
+    runtime_root = str(raw.get("runtime_root") or "./.runtime").strip()
     headed = browser.get("headed")
     if headed is None:
         headed = True
@@ -54,7 +51,6 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
             str(s).strip() for s in (browser.get("allowed_url_schemes") or ["https", "http"])
             if str(s).strip()
         ] or ["https", "http"],
-        llm=llm_settings_from_config(raw),
     )
 
 

@@ -8,8 +8,8 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// BootstrapNodeSettings 打开 node_settings.db：空库时从胖 YAML 迁移或写入产品默认，再 overlay 到 cfg。
-// 成功且 YAML 可写时，可将引导文件瘦身为 listen/local。
+// BootstrapNodeSettings 打开 node_settings.db：空库时写入产品默认，再 overlay 到 cfg。
+// YAML 只负责 listen/local 引导；运行时设置的唯一持久化来源是 node_settings.db。
 func BootstrapNodeSettings(ctx context.Context, cfg *config.Config, configPath string, logger *slog.Logger) (*NodeSettingsStore, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config")
@@ -27,15 +27,10 @@ func BootstrapNodeSettings(ctx context.Context, cfg *config.Config, configPath s
 		return nil, err
 	}
 	if empty {
-		seed := cfg
-		if config.FileHasMigratableSettings(configPath) {
-			logger.Info("migrating node settings from YAML to SQLite", "path", cfg.NodeSettingsDBPath())
-		} else {
-			seed = ProductNodeSettingsSeed()
-			// 保留引导层已解析的 node_id；runtime_root 写死为 DefaultRuntimeRoot
-			seed.NodeID = cfg.NodeID
-			logger.Info("seeding product node settings", "path", cfg.NodeSettingsDBPath())
-		}
+		seed := ProductNodeSettingsSeed()
+		// 保留引导层已解析的 node_id；runtime_root 写死为 DefaultRuntimeRoot。
+		seed.NodeID = cfg.NodeID
+		logger.Info("seeding product node settings", "path", cfg.NodeSettingsDBPath())
 		if err := s.Save(ctx, seed); err != nil {
 			_ = s.Close()
 			return nil, err

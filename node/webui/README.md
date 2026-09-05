@@ -88,8 +88,9 @@ ui:
 - **双栏工作台**：主聊天 + Runtime（会话、审批、工具执行气泡）。
 - **远程工作者条**：输入框上方显示工作中子 Agent / 对端 Agent 数量（SSE + `listChildAgents`）。
 - **`read_file` 预览**：按扩展名渲染 Markdown、HTML、JSON、CSV、代码高亮或纯文本。
-- **HITL**：内联工具审批与用户询问；订阅 **`hitl_required`**（`expandHitlRequired` 展开入队），兼容 A2A 的 `approval_required` / `user_information_required`。
+- **HITL**：内联工具审批与用户询问；订阅 **`hitl_required`**（`expandHitlRequired` 展开入队），子 Agent 审批通过 relay 事件回传父 Agent。
 
 ## API
 
-复用 Node 现有 `/v1` HTTP/SSE，封装见 `frontend/src/api/node.js`。
+复用 Node 现有 `/v1` HTTP/SSE，封装见 `frontend/src/api/node.js`。目录选择、剪贴板文件路径、窗口焦点和更新安装等桌面能力统一使用
+`/v1/platform/*` 或 `/v1/agent/update*`；Web UI 不直接访问 Desktop Shell 的 `:18767` bridge。

@@ -94,3 +94,19 @@ func TestLifecycleConstructorsValidateIdentity(t *testing.T) {
 		t.Fatal("expected invalid context epoch error")
 	}
 }
+
+func TestNextStepStatusAllowsTurnCancellationFromEveryNonTerminalPhase(t *testing.T) {
+	for _, status := range []StepStatus{
+		StepStatusCreated,
+		StepStatusRequesting,
+		StepStatusAssistantReceived,
+		StepStatusExecutingTools,
+		StepStatusWaitingInteraction,
+		StepStatusReadyForNext,
+	} {
+		next, ok := NextStepStatus(status, EventStepCancelled)
+		if !ok || next != StepStatusCancelled {
+			t.Fatalf("cancel transition from %q = (%q, %v), want (%q, true)", status, next, ok, StepStatusCancelled)
+		}
+	}
+}

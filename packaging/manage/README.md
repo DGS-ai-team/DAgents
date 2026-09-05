@@ -2,7 +2,7 @@
 
 将 **Manage 统一控制面**（Registry + 工作组 + **Vue Console**）打包为可发布镜像，供生产部署。镜像构建含 **Console 前端 `npm run build`** 多阶段步骤。
 
-构建上下文为**仓库根**；除 `manage/` 外须带上 `shared/workgroup/member_tool_catalog.json`（工作组成员工具权威目录，与 Node 同源）。
+构建上下文为**仓库根**；Manage 镜像只包含 `manage/` 和构建后的 Console 静态资源。成员工具目录与工具 schema 不由 Manage 镜像复制，由绑定的 Node Agent 自己提供。
 
 ## 快速开始（联网环境）
 

@@ -15,7 +15,6 @@ $goPackages = @(
     "./shared/config/...",
     "./shared/logfiles/...",
     "./shared/update/...",
-    "./shared/workgroup/...",
     "./node/...",
     "./client/...",
     "./desktop/tray/..."
@@ -61,7 +60,7 @@ function Invoke-Staticcheck {
     } else {
         $staticcheckPath = $staticcheckCommand.Source
     }
-    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "shared/workgroup", "node", "client", "desktop/tray")) {
+    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "node", "client", "desktop/tray")) {
         Invoke-Step "Staticcheck $module" {
             Push-Location $module
             try {

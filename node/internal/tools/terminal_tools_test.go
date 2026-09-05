@@ -20,62 +20,6 @@ type fakeTerminalBroker struct {
 	terminated    bool
 }
 
-type fakeTerminalConfigResolver struct {
-	config TerminalConfigInfo
-	err    error
-}
-
-func (r fakeTerminalConfigResolver) ListTerminalConfigs(context.Context, string) ([]TerminalConfigInfo, error) {
-	if r.err != nil {
-		return nil, r.err
-	}
-	return []TerminalConfigInfo{r.config}, nil
-}
-
-func (r fakeTerminalConfigResolver) ResolveTerminalConfig(context.Context, string, string) (TerminalConfigInfo, error) {
-	if r.err != nil {
-		return TerminalConfigInfo{}, r.err
-	}
-	return r.config, nil
-}
-
-func TestResolveLinuxChannelIDUsesTerminalConfigBinding(t *testing.T) {
-	reg, err := NewRegistry(t.TempDir(), 30)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg.SetAgentID("agent-config-test")
-	reg.SetTerminalConfigResolver(fakeTerminalConfigResolver{config: TerminalConfigInfo{
-		ConfigID:   TerminalConfigLinuxPrefix + "channel-prod",
-		TargetKind: executionTargetLinuxChannel,
-		TargetID:   "channel-prod",
-	}})
-
-	got, err := reg.resolveLinuxChannelID(context.Background(), TerminalConfigLinuxPrefix+"channel-prod")
-	if err != nil || got != "channel-prod" {
-		t.Fatalf("resolved channel=%q err=%v", got, err)
-	}
-	legacy, err := reg.resolveLinuxChannelID(context.Background(), "channel-legacy")
-	if err != nil || legacy != "channel-legacy" {
-		t.Fatalf("legacy channel=%q err=%v", legacy, err)
-	}
-}
-
-func TestResolveLinuxChannelIDRejectsNonLinuxConfig(t *testing.T) {
-	reg, err := NewRegistry(t.TempDir(), 30)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg.SetTerminalConfigResolver(fakeTerminalConfigResolver{config: TerminalConfigInfo{
-		ConfigID:   TerminalConfigLinuxPrefix + "wrong-target",
-		TargetKind: executionTargetLocal,
-		TargetID:   executionTargetLocal,
-	}})
-	if _, err := reg.resolveLinuxChannelID(context.Background(), TerminalConfigLinuxPrefix+"wrong-target"); err == nil || !strings.Contains(err.Error(), "not a Linux channel") {
-		t.Fatalf("expected non-Linux config rejection, got %v", err)
-	}
-}
-
 func (b *fakeTerminalBroker) Open(_ context.Context, agentID string, request TerminalRequest) (TerminalSessionInfo, error) {
 	b.opened++
 	b.request = request
@@ -258,18 +202,5 @@ func TestTerminalCommandRequiresExistingSessionAndReturnsStructuredResult(t *tes
 	}
 	if broker.command.TerminalID != "terminal-command-1" || broker.command.Command != "echo terminal-command-ok" || broker.command.Timeout != 5*time.Second {
 		t.Fatalf("command was not delegated to the shared session: %+v", broker.command)
-	}
-}
-
-func TestNewRegistryDoesNotExposeDeprecatedLinuxTools(t *testing.T) {
-	reg, err := NewRegistry(t.TempDir(), 30)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, def := range reg.Definitions() {
-		switch def.Function.Name {
-		case "linux_exec", "linux_file_upload", "linux_file_download":
-			t.Fatalf("deprecated tool %q exposed without an old snapshot allowlist", def.Function.Name)
-		}
 	}
 }

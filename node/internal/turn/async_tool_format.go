@@ -22,7 +22,7 @@ func isGeneratedAsyncCallbackToolCallID(id string) bool {
 	return strings.HasPrefix(strings.TrimSpace(id), "async-job-")
 }
 
-func lookupAsyncSourceFromHistory(messages []llm.Message, toolName, jobID, payloadToolCallID string) asyncSourceContext {
+func lookupAsyncSourceFromHistory(messages []llm.Message, jobID, payloadToolCallID string) asyncSourceContext {
 	if id := strings.TrimSpace(payloadToolCallID); id != "" && !isGeneratedAsyncCallbackToolCallID(id) {
 		if ctx := asyncSourceFromToolCallID(messages, id); ctx.OriginalToolCallID != "" {
 			return ctx
@@ -41,7 +41,6 @@ func lookupAsyncSourceFromHistory(messages []llm.Message, toolName, jobID, paylo
 			return ctx
 		}
 	}
-	_ = toolName
 	return asyncSourceContext{}
 }
 
@@ -109,8 +108,6 @@ func summarizeAsyncToolParams(toolName string, args map[string]any) (purpose, su
 		} else if pat := strings.TrimSpace(fmt.Sprint(args["pattern"])); pat != "" {
 			summary = strings.TrimSpace(summary + " pattern=" + clipAsyncParam(pat, 80))
 		}
-	case "background_job_status", "background_job_cancel":
-		summary = strings.TrimSpace(fmt.Sprint(args["job_id"]))
 	default:
 		summary = clipAsyncParam(firstNonEmpty(args, "command", "path", "content", "question", "task"), 120)
 	}

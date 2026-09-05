@@ -8,25 +8,14 @@ import {
   fetchAgents,
   fetchAuthMe,
   fetchLLMConfigs,
-  fetchMemberToolCatalog,
   fetchWorkgroupACL,
   fetchWorkgroupLLMConfigs,
-  fetchWorkgroupMemberSpec,
   fetchWorkgroupMembers,
   fetchWorkgroups,
   patchWorkgroup,
   patchWorkgroupACL,
-  patchWorkgroupMember,
   publishWorkgroup,
 } from "../api.js";
-import {
-  FALLBACK_MEMBER_TOOL_GROUPS,
-  defaultMemberGroupIds,
-  expandMemberGroupsToTools,
-  formatMemberGroupLabels,
-  memberGroupsFromAllowNames,
-  memberToolGroupsFromCatalog,
-} from "../utils/memberToolGroups.js";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -41,7 +30,6 @@ const publishingId = ref("");
 const bindingLlmKey = ref("");
 const addingCollaborator = ref(false);
 const creatingMember = ref(false);
-const savingToolsId = ref("");
 const refreshingMemberId = ref("");
 const deletingMemberId = ref("");
 const memberFormOpen = ref(false);
@@ -51,8 +39,6 @@ const workgroups = ref([]);
 const selectedId = ref("");
 const llmConfigs = ref([]);
 const members = ref([]);
-/** @type {import('vue').Ref<Record<string, any>>} */
-const memberSpecs = ref({});
 const acl = ref(null);
 const nodeOptions = ref([]);
 const agentOptions = ref([]);
@@ -63,13 +49,6 @@ const authKind = ref(""); // admin | node | ""
 const authGroups = ref([]);
 const collabDraft = ref("");
 
-/** @type {import('vue').Ref<import('../utils/memberToolGroups.js').MemberToolGroup[]>} */
-const memberGroupOptions = ref(
-  FALLBACK_MEMBER_TOOL_GROUPS.map((g) => ({ ...g, toolIds: [...g.toolIds] })),
-);
-/** member_id → 选中的工具组 id[]（编辑草稿） */
-const memberToolDrafts = ref(/** @type {Record<string, string[]>} */ ({}));
-
 const createForm = reactive({
   displayName: "",
 });
@@ -79,9 +58,6 @@ const memberForm = reactive({
   description: "",
   agentId: "",
   homeNodeId: "",
-  soulMd: "",
-  customMd: "",
-  groups: defaultMemberGroupIds(),
 });
 
 const isNodeSession = computed(() => authKind.value === "node");
@@ -110,25 +86,12 @@ const configMembers = computed(() => {
       member_id: "leader",
       status: wg.status === "active" ? "ready" : wg.status === "configuring" ? "provisioning" : wg.status,
       home_node_id: "manage",
-      member_generation: null,
       llm_profile_id: wg.llm_profile_id,
       llm_profile_revision: wg.llm_profile_revision,
-      max_tool_loops: null,
-      allow_tool_names: ["assign_workgroup_task"],
-      tool_group_ids: [],
-      tool_group_labels: "编排工具",
       hint: "工作组编排者；对话与分派由 Manage 侧 leader 执行",
     });
   }
   for (const m of sortedMembers.value) {
-    const spec = memberSpecs.value[m.member_id] || null;
-    const currentAgent = agentOptions.value.find((item) => item.id === m.agent_id);
-    const allow = m.execution_mode === "agent_ref"
-      ? (Array.isArray(currentAgent?.tools) ? currentAgent.tools : [])
-      : (Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : []);
-    const groupIds = allow.length
-      ? memberGroupsFromAllowNames(allow, memberGroupOptions.value)
-      : defaultMemberGroupIds(memberGroupOptions.value);
     rows.push({
       kind: "member",
       key: m.member_id,
@@ -138,17 +101,7 @@ const configMembers = computed(() => {
       error_summary: [m.error_code, m.error_message].filter(Boolean).join(": "),
       home_node_id: m.home_node_id,
       agent_id: m.agent_id || "",
-      execution_mode: m.execution_mode || "legacy_member",
-      member_generation: m.member_generation,
-      llm_profile_id: spec?.llm_profile_id || "",
-      llm_profile_revision: spec?.llm_profile_revision || "",
-      max_tool_loops: spec?.max_tool_loops ?? null,
-      allow_tool_names: allow,
-      tool_group_ids: groupIds,
-      tool_group_labels: m.execution_mode === "agent_ref"
-        ? (allow.length ? `Agent 当前工具 ${allow.length} 项${groupIds.length ? ` · ${formatMemberGroupLabels(groupIds, memberGroupOptions.value)}` : ""}` : "以 Agent 当前配置为准")
-        : formatMemberGroupLabels(groupIds, memberGroupOptions.value),
-      hint: String(spec?.description || "").trim(),
+      hint: String(m.description || "").trim(),
     });
   }
   return rows;
@@ -224,7 +177,6 @@ async function resolveCreatorDefault() {
 
 function memberStatusLabel(status) {
   const map = {
-    requested: "已请求",
     provisioning: "配置中",
     ready: "就绪",
     busy: "忙碌",
@@ -247,100 +199,6 @@ function resetMemberForm() {
   memberForm.description = "";
   memberForm.agentId = "";
   memberForm.homeNodeId = "";
-  memberForm.groups = defaultMemberGroupIds(memberGroupOptions.value);
-}
-
-async function loadMemberToolCatalog() {
-  try {
-    const catalog = await fetchMemberToolCatalog();
-    const ordered = memberToolGroupsFromCatalog(catalog);
-    memberGroupOptions.value = ordered;
-    if (!memberFormOpen.value) {
-      memberForm.groups = defaultMemberGroupIds(ordered);
-    }
-    syncMemberToolDrafts();
-  } catch {
-    if (!memberGroupOptions.value.length) {
-      memberGroupOptions.value = FALLBACK_MEMBER_TOOL_GROUPS.map((g) => ({
-        ...g,
-        toolIds: [...g.toolIds],
-      }));
-    }
-  }
-}
-
-function syncMemberToolDrafts() {
-  /** @type {Record<string, string[]>} */
-  const next = {};
-  for (const m of members.value || []) {
-    const mid = String(m.member_id || "").trim();
-    if (!mid) continue;
-    const spec = memberSpecs.value[mid];
-    const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
-    next[mid] = allow.length
-      ? memberGroupsFromAllowNames(allow, memberGroupOptions.value)
-      : defaultMemberGroupIds(memberGroupOptions.value);
-  }
-  memberToolDrafts.value = next;
-}
-
-function memberDraftGroups(memberId) {
-  const mid = String(memberId || "").trim();
-  return Array.isArray(memberToolDrafts.value[mid]) ? memberToolDrafts.value[mid] : [];
-}
-
-function toggleMemberDraftGroup(memberId, groupId) {
-  const mid = String(memberId || "").trim();
-  const gid = String(groupId || "").trim();
-  if (!mid || !gid) return;
-  const set = new Set(memberDraftGroups(mid));
-  if (set.has(gid)) set.delete(gid);
-  else set.add(gid);
-  memberToolDrafts.value = { ...memberToolDrafts.value, [mid]: [...set] };
-}
-
-function isMemberToolsDirty(member) {
-  if (!member || member.kind !== "member") return false;
-  const mid = String(member.member_id || "").trim();
-  const draft = [...memberDraftGroups(mid)].sort();
-  const current = [...(member.tool_group_ids || [])].sort();
-  if (draft.length !== current.length) return true;
-  return draft.some((id, i) => id !== current[i]);
-}
-
-async function saveMemberTools(member) {
-  const wg = selectedWorkgroup.value;
-  const mid = String(member?.member_id || "").trim();
-  if (!wg?.workgroup_id || !mid || member?.kind !== "member" || savingToolsId.value) return;
-  if (!isMemberToolsDirty(member)) return;
-  const selected = memberDraftGroups(mid);
-  const groups = selected.length
-    ? selected
-    : defaultMemberGroupIds(memberGroupOptions.value);
-  const tools = expandMemberGroupsToTools(groups, memberGroupOptions.value);
-  savingToolsId.value = mid;
-  try {
-    const out = await patchWorkgroupMember(wg.workgroup_id, mid, {
-      allow_tool_names: tools,
-    });
-    if (out?.spec) {
-      memberSpecs.value = { ...memberSpecs.value, [mid]: out.spec };
-    }
-    if (out?.member) {
-      members.value = (members.value || []).map((item) =>
-        item.member_id === out.member.member_id ? out.member : item,
-      );
-    }
-    syncMemberToolDrafts();
-    emit("toast", {
-      message: `${member.display_name || mid} 工具组已更新`,
-      type: "success",
-    });
-  } catch (err) {
-    emit("toast", { message: err.message || "更新工具组失败", type: "error" });
-  } finally {
-    savingToolsId.value = "";
-  }
 }
 
 async function refreshMember(member) {
@@ -349,18 +207,11 @@ async function refreshMember(member) {
   if (!wg?.workgroup_id || !mid || member?.kind !== "member" || refreshingMemberId.value) return;
   refreshingMemberId.value = mid;
   try {
-    const [memberList, spec] = await Promise.all([
-      fetchWorkgroupMembers(wg.workgroup_id),
-      fetchWorkgroupMemberSpec(wg.workgroup_id, mid).catch(() => null),
-    ]);
+    const memberList = await fetchWorkgroupMembers(wg.workgroup_id);
     members.value = Array.isArray(memberList) ? memberList : [];
-    if (spec) {
-      memberSpecs.value = { ...memberSpecs.value, [mid]: spec };
-    }
-    syncMemberToolDrafts();
-    emit("toast", { message: `${member.display_name || mid} 配置已刷新`, type: "success" });
+    emit("toast", { message: `${member.display_name || mid} 状态已刷新`, type: "success" });
   } catch (err) {
-    emit("toast", { message: err.message || "刷新成员配置失败", type: "error" });
+    emit("toast", { message: err.message || "刷新成员状态失败", type: "error" });
   } finally {
     refreshingMemberId.value = "";
   }
@@ -376,10 +227,6 @@ async function deleteMember(member) {
   try {
     await archiveWorkgroupMember(wg.workgroup_id, mid);
     members.value = (members.value || []).filter((item) => item.member_id !== mid);
-    const nextSpecs = { ...memberSpecs.value };
-    delete nextSpecs[mid];
-    memberSpecs.value = nextSpecs;
-    syncMemberToolDrafts();
     emit("toast", { message: `成员「${label}」已删除`, type: "success" });
   } catch (err) {
     emit("toast", { message: err.message || "删除成员失败", type: "error" });
@@ -596,47 +443,8 @@ async function bindSupervisorLlm(cfg) {
   }
 }
 
-async function bindMemberLlm(member, cfg) {
-  const wg = selectedWorkgroup.value;
-  const mid = String(member?.member_id || "").trim();
-  if (!wg?.workgroup_id || !mid || !cfg?.id || bindingLlmKey.value) return;
-  if (member?.kind === "supervisor") {
-    await bindSupervisorLlm(cfg);
-    return;
-  }
-  if (isLlmActive(member.llm_profile_id, cfg)) return;
-  bindingLlmKey.value = `${mid}:${cfg.id}`;
-  try {
-    const out = await patchWorkgroupMember(wg.workgroup_id, mid, {
-      llm_profile_id: cfg.id,
-      llm_profile_revision: "1",
-    });
-    if (out?.spec) {
-      memberSpecs.value = { ...memberSpecs.value, [mid]: out.spec };
-    }
-    if (out?.member) {
-      members.value = (members.value || []).map((item) =>
-        item.member_id === out.member.member_id ? out.member : item,
-      );
-    }
-    emit("toast", {
-      message: `${member.display_name || mid} 已绑定 ${cfg.name}`,
-      type: "success",
-    });
-  } catch (err) {
-    emit("toast", { message: err.message || "绑定成员 LLM 失败", type: "error" });
-  } finally {
-    bindingLlmKey.value = "";
-  }
-}
-
 function onLlmItemClick(member, cfg) {
-  if (!member || !cfg) return;
-  if (member.kind === "supervisor") {
-    void bindSupervisorLlm(cfg);
-    return;
-  }
-  void bindMemberLlm(member, cfg);
+  if (member?.kind === "supervisor" && cfg) void bindSupervisorLlm(cfg);
 }
 
 async function loadWorkgroups() {
@@ -648,7 +456,6 @@ async function loadWorkgroups() {
       selectedId.value = "";
       llmConfigs.value = [];
       members.value = [];
-      memberSpecs.value = {};
       acl.value = null;
     }
   } catch (err) {
@@ -663,7 +470,6 @@ async function loadSettings() {
   if (!selectedId.value) {
     llmConfigs.value = [];
     members.value = [];
-    memberSpecs.value = {};
     acl.value = null;
     return;
   }
@@ -678,18 +484,6 @@ async function loadSettings() {
     members.value = Array.isArray(memberList) ? memberList : [];
     acl.value = aclData;
     loadNodeOptions();
-    const specs = {};
-    await Promise.all(
-      members.value.map(async (m) => {
-        try {
-          specs[m.member_id] = await fetchWorkgroupMemberSpec(selectedId.value, m.member_id);
-        } catch {
-          specs[m.member_id] = null;
-        }
-      }),
-    );
-    memberSpecs.value = specs;
-    syncMemberToolDrafts();
   } catch (err) {
     emit("toast", { message: err.message || "加载配置失败", type: "error" });
   } finally {
@@ -735,7 +529,6 @@ function backToGrid() {
   selectedId.value = "";
   llmConfigs.value = [];
   members.value = [];
-  memberSpecs.value = {};
   acl.value = null;
   nodeOptions.value = [];
   agentOptions.value = [];
@@ -815,9 +608,7 @@ watch(
   () => props.active,
   (active) => {
     if (active) {
-      resolveCreatorDefault().then(() =>
-        Promise.all([loadWorkgroups(), loadMemberToolCatalog()]),
-      );
+      resolveCreatorDefault().then(() => loadWorkgroups());
       syncPageMeta();
     } else {
       emit("page-meta", null);
@@ -832,7 +623,7 @@ watch(showSettings, () => {
 onMounted(async () => {
   if (props.active) {
     await resolveCreatorDefault();
-    await Promise.all([loadWorkgroups(), loadMemberToolCatalog()]);
+    await loadWorkgroups();
     syncPageMeta();
   }
 });
@@ -1221,58 +1012,17 @@ onMounted(async () => {
                   <dt>会话隔离</dt>
                   <dd>工作组独立会话</dd>
                 </div>
-                <div>
-                  <dt>Generation</dt>
-                  <dd>{{ m.member_generation ?? "—" }}</dd>
-                </div>
-                <div class="wg-settings-kv__wide">
+                <div v-if="m.kind === 'supervisor'" class="wg-settings-kv__wide">
                   <dt>LLM 配置</dt>
                   <dd>{{ resolveLlmLabel(m.llm_profile_id, m.llm_profile_revision) }}</dd>
                 </div>
-                <div>
-                  <dt>Max tool loops</dt>
-                  <dd>{{ m.max_tool_loops ?? "—" }}</dd>
-                </div>
-                <div>
-                  <dt>工具组</dt>
-                  <dd>{{ m.tool_group_labels || "—" }}</dd>
+                <div v-if="m.kind === 'member' && m.hint" class="wg-settings-kv__wide">
+                  <dt>成员说明</dt>
+                  <dd>{{ m.hint }}</dd>
                 </div>
               </dl>
 
-              <div v-if="m.kind === 'member' && m.execution_mode !== 'agent_ref'" class="wg-member-config__tools">
-                <h5 class="wg-member-config__subtitle">工具组</h5>
-                <div class="wg-member-tool-row">
-                  <button
-                    v-for="opt in memberGroupOptions"
-                    :key="`${m.key}-${opt.id}`"
-                    type="button"
-                    class="wg-member-tool-chip"
-                    :class="{
-                      'wg-member-tool-chip--on': memberDraftGroups(m.member_id).includes(opt.id),
-                    }"
-                    :disabled="savingToolsId === m.member_id"
-                    :title="opt.hint || opt.id"
-                    @click="toggleMemberDraftGroup(m.member_id, opt.id)"
-                  >
-                    {{ opt.label }}
-                  </button>
-                </div>
-                <div class="wg-member-config__tools-actions">
-                  <button
-                    type="button"
-                    class="btn btn-primary btn-sm"
-                    :disabled="savingToolsId === m.member_id || !isMemberToolsDirty(m)"
-                    @click="saveMemberTools(m)"
-                  >
-                    {{ savingToolsId === m.member_id ? "保存中…" : "保存工具组" }}
-                  </button>
-                  <span class="muted" style="font-size: 12px">
-                    变更后会 bump generation 并重新下发配置。
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="m.execution_mode !== 'agent_ref'" class="wg-member-config__llm">
+              <div v-if="m.kind === 'supervisor'" class="wg-member-config__llm">
                 <h5 class="wg-member-config__subtitle">可选 LLM</h5>
                 <ul v-if="llmConfigs.length" class="wg-llm-list">
                   <li
@@ -1299,11 +1049,7 @@ onMounted(async () => {
                 </ul>
                 <p v-else class="muted">暂无可见 LLM 配置，请先在「管理 › 配置 › LLM」中创建。</p>
                 <p class="muted wg-member-config__hint">
-                  {{
-                    m.kind === "supervisor"
-                      ? "点击上方条目可为 Supervisor 绑定 LLM；未绑定真实配置时对话会回退到 mock 回声。"
-                      : "点击上方条目可为该成员绑定 LLM；变更后会 bump generation 并重新下发配置。"
-                  }}
+                  点击上方条目可为 Supervisor 绑定 LLM；成员使用所绑定 Agent 自身的配置。
                 </p>
               </div>
             </article>

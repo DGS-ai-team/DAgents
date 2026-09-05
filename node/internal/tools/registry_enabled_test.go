@@ -42,11 +42,6 @@ func TestSetBuiltinEnabledFiltersDefinitions(t *testing.T) {
 			t.Fatal("write_file handler should still exist")
 		}
 	}
-	if _, err := reg.StartBackground(context.Background(), "sess", "write_file", "call-1", `{"path":"a","content":"b"}`); err == nil {
-		t.Fatal("expected StartBackground soft reject when disabled")
-	} else if !strings.Contains(err.Error(), "is not enabled") {
-		t.Fatalf("want not-enabled error, got %v", err)
-	}
 }
 
 func TestSetBuiltinEnabledEmptyMeansAll(t *testing.T) {
@@ -60,18 +55,6 @@ func TestSetBuiltinEnabledEmptyMeansAll(t *testing.T) {
 	}
 	if len(reg.Definitions()) != all {
 		t.Fatalf("want all tools")
-	}
-}
-
-func TestLegacyBackgroundJobToolsAreNotModelVisible(t *testing.T) {
-	reg, err := NewRegistry(t.TempDir(), 30)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, def := range reg.Definitions() {
-		if def.Function.Name == "background_job_status" || def.Function.Name == "background_job_cancel" {
-			t.Fatalf("legacy background tool %q must not be model-visible", def.Function.Name)
-		}
 	}
 }
 

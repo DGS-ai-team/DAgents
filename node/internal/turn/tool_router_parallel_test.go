@@ -35,10 +35,6 @@ func (s *cancelParallelExecutor) Execute(_ context.Context, name, _ string) (str
 	return "ok:" + name, nil
 }
 
-func (s *cancelParallelExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
-	return "", nil
-}
-
 func (s *cancelParallelExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
 func (s *cancelParallelExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
 func (s *cancelParallelExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
@@ -53,10 +49,6 @@ func (s *parallelDelayExecutor) Execute(_ context.Context, name, _ string) (stri
 		time.Sleep(d)
 	}
 	return "ok:" + name, nil
-}
-
-func (s *parallelDelayExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
-	return "", nil
 }
 
 func (s *parallelDelayExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
@@ -78,7 +70,7 @@ func TestExecuteAutoBatch_publishesResultAsEachToolCompletes(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		exec,
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{},
 		logx.Discard(),
 	)
@@ -153,7 +145,7 @@ func TestExecuteAutoBatch_persistsCompletedResultsBeforeCancellation(t *testing.
 	orch := NewOrchestrator(
 		"a1", root, stream.NewHub(32, logx.Discard()), &llm.MockClient{},
 		exec,
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{},
 		logx.Discard(),
 	)

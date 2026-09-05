@@ -8,7 +8,7 @@ func TestMergeDefaults_nestedTools(t *testing.T) {
 			"enabled_groups": []any{"fs", "skills"},
 		},
 		"llm": map[string]any{
-			"max_tool_loops": float64(32),
+			"max_steps": float64(32),
 		},
 	}
 	override := map[string]any{
@@ -26,7 +26,7 @@ func TestMergeDefaults_nestedTools(t *testing.T) {
 		t.Fatalf("enabled_groups = %#v", tools["enabled_groups"])
 	}
 	llm, ok := out["llm"].(map[string]any)
-	if !ok || llm["max_tool_loops"] != float64(32) {
+	if !ok || llm["max_steps"] != float64(32) {
 		t.Fatalf("llm = %#v", out["llm"])
 	}
 }

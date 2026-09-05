@@ -1,6 +1,6 @@
 # Agent 质量与效果基线
 
-> **状态**：当前质量方向（v0.10.4）。这是原则和验收入口，不是某一次实验的结果；带日期的分析、A/B 记录和回归报告见 [`docs/archive/reports/`](../archive/reports/)。
+> **状态**：当前质量方向。这是原则和验收入口，不是某一次实验的结果；带日期的分析、A/B 记录和回归报告见 [`docs/archive/reports/`](../archive/reports/)。
 
 ## 1. 目标
 

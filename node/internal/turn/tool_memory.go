@@ -16,7 +16,7 @@ func (o *Orchestrator) executeMemoryTool(ctx context.Context, sessionID string, 
 		return o.commitMemoryToolError(sessionID, history, tc, "memory service unavailable")
 	}
 	var payload map[string]any
-	_, cleaned := tools.ParseToolCallArguments(tc.Function.Arguments)
+	cleaned := tools.ParseToolCallArguments(tc.Function.Arguments)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return o.commitMemoryToolError(sessionID, history, tc, "invalid memory arguments: "+err.Error())
 	}
@@ -39,7 +39,7 @@ func (o *Orchestrator) executeMemoryTool(ctx context.Context, sessionID string, 
 		results, searchErr := o.memoryService.Search(ctx, memory.SearchRequest{Scope: scope, Query: query, Limit: limit})
 		err = searchErr
 		if err == nil {
-			output, err = buildMemorySearchOutput(query, effectiveMemoryScope(scope, o.memoryService), results)
+			output, err = buildMemorySearchOutput(query, effectiveMemoryScope(scope), results)
 		}
 	case tools.IsMemoryGet(tc.Function.Name):
 		id := strings.TrimSpace(fmt.Sprint(payload["id"]))
@@ -145,7 +145,7 @@ func intField(payload map[string]any, key string, fallback int) int {
 	return fallback
 }
 
-func effectiveMemoryScope(scope memory.Scope, service memory.Service) string {
+func effectiveMemoryScope(scope memory.Scope) string {
 	if scope == memory.ScopeGlobal {
 		return string(scope)
 	}

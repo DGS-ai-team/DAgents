@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -34,22 +35,50 @@ func TestHandleSessionHydrate(t *testing.T) {
 			{Role: "user", Content: "ping"},
 			{Role: "assistant", Content: "pong"},
 		},
-		RuntimeState: store.RuntimeState{
-			HistoryRevision: 7,
-			Pending: &turn.PendingHITL{Items: []turn.PendingHITLItem{{
-				ToolCall: llm.ToolCall{
-					ID:   "call-1",
-					Type: "function",
-					Function: llm.ToolCallFunction{
-						Name:      "bash_run",
-						Arguments: `{"command":"echo x"}`,
-					},
-				},
-			}}},
-		},
+		RuntimeState: store.RuntimeState{HistoryRevision: 7},
 	}); err != nil {
 		t.Fatal(err)
 	}
+	pending := turn.PendingHITL{Items: []turn.PendingHITLItem{{
+		ToolCall: llm.ToolCall{
+			ID:   "call-1",
+			Type: "function",
+			Function: llm.ToolCallFunction{
+				Name:      "bash_run",
+				Arguments: `{"command":"echo x"}`,
+			},
+		},
+	}}}
+	payload, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendEvent := func(eventType turn.EventType, seq int, meta map[string]any) {
+		t.Helper()
+		event := turn.NewTurnEventEnvelope(sessionID, eventType, time.Now().UTC().Add(time.Duration(seq)*time.Millisecond))
+		event.AgentID = sessionID
+		event.TurnID = "turn-hydrate-test"
+		event.StepID = "step-hydrate-test"
+		event.InteractionID = "interaction-hydrate-test"
+		event.SessionSeq = uint64(seq)
+		event.TurnSeq = uint64(seq)
+		event.Payload, err = json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.AppendTurnEvent(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendEvent(turn.EventTurnStarted, 1, map[string]any{"generation": 1})
+	appendEvent(turn.EventStepStarted, 2, map[string]any{"generation": 1})
+	appendEvent(turn.EventAssistantMessageRecorded, 3, map[string]any{"generation": 1, "has_tools": true})
+	appendEvent(turn.EventToolBatchCreated, 4, map[string]any{"generation": 1, "tool_batch_id": "batch-hydrate-test"})
+	appendEvent(turn.EventInteractionRequested, 5, map[string]any{
+		"interaction_kind":     "approval",
+		"interaction_revision": 1,
+		"interaction_payload":  json.RawMessage(payload),
+	})
 
 	resp, err := http.Get(ts.URL + "/v1/agents/" + sessionID + "/hydrate")
 	if err != nil {
@@ -67,8 +96,8 @@ func TestHandleSessionHydrate(t *testing.T) {
 	if got.AgentID != sessionID {
 		t.Fatalf("agent_id = %q", got.AgentID)
 	}
-	if got.RunTurnPhase != "awaiting_hitl" {
-		t.Fatalf("run_turn_phase = %q", got.RunTurnPhase)
+	if got.TurnState.Phase != "tool_waiting" {
+		t.Fatalf("turn_state.phase = %q", got.TurnState.Phase)
 	}
 	if len(got.Transcript) != 2 {
 		t.Fatalf("transcript len = %d", len(got.Transcript))

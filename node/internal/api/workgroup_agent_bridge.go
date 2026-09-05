@@ -41,8 +41,10 @@ type workgroupAgentBinding struct {
 }
 
 type workgroupAgentTurn struct {
-	binding workgroupAgentBinding
-	cancel  func()
+	binding     workgroupAgentBinding
+	childTurnID string
+	attemptID   string
+	cancel      func()
 }
 
 func newWorkgroupAgentBridge(server *Server) *workgroupAgentBridge {
@@ -163,33 +165,24 @@ func (b *workgroupAgentBridge) buildAgentSessionRuntime(
 		AgentID:  req.AgentID,
 		Snapshot: snap,
 		MCP:      b.server.mcpManager,
+		// A Workgroup member is an isolated execution runtime, not the Agent's
+		// personal conversation. Do not open or mutate its memory store.
+		DisableMemory: true,
 	})
 	if err != nil {
 		return session.TurnOptions{}, nil, nil, nil, err
 	}
-	// Workgroup assignments use a synthetic legacy scope and must not recall or
-	// mutate the assigned Agent's personal workspace memory.
-	_ = built.Close()
-	built.TurnOptions.MemoryService = nil
 	b.server.attachNodeRuntimeDeps(built.Registry, req.AgentID)
 	if b.server.cfg != nil {
 		built.TurnOptions.PreferredName = b.server.cfg.PreferredName()
 	}
 	if b.server.agents != nil {
-		pc, pcErr := b.server.agents.EnsureAgentPromptContext(ctx, req.AgentID, b.server.runtimeDir())
+		pc, pcErr := b.server.agents.EnsureAgentPromptContext(ctx, req.AgentID)
 		if pcErr != nil {
 			return session.TurnOptions{}, nil, nil, nil, pcErr
 		}
 		built.TurnOptions.PromptContent = promptContentFromRecord(pc)
-		// Long-term memory is keyed by a synthetic scoped agent id, so a
-		// workgroup assignment cannot write into the Agent's personal memory.
-		built.TurnOptions.LongTermStore = &agentLongTermStore{
-			agents:     b.server.agents,
-			agentID:    req.AgentID + "::workgroup::" + req.WorkgroupID,
-			runtimeDir: b.server.runtimeDir(),
-			scope:      store.LongTermScopeAgent,
-		}
-		engine, policyErr := b.server.agents.LoadAgentPolicyEngine(ctx, req.AgentID, b.server.runtimeDir())
+		engine, policyErr := b.server.agents.LoadAgentPolicyEngine(ctx, req.AgentID)
 		if policyErr != nil {
 			return session.TurnOptions{}, nil, nil, nil, policyErr
 		}
@@ -207,12 +200,12 @@ func (b *workgroupAgentBridge) buildAgentSessionRuntime(
 	)
 	if rec.RuntimeRevision > 0 {
 		built.TurnOptions.RuntimeRevision = rec.RuntimeRevision
-		built.TurnOptions.ConfigRevision = rec.RuntimeRevision
 	}
-	client, err := b.server.llmClientForAgent(ctx, rec, req.AgentID)
+	client, llmProfileDigest, err := b.server.llmClientForAgent(ctx, rec, req.AgentID)
 	if err != nil {
 		return session.TurnOptions{}, nil, nil, nil, err
 	}
+	built.TurnOptions.LLMProfileDigest = llmProfileDigest
 	return built.TurnOptions, built.Registry, policyEngine, client, nil
 }
 
@@ -249,14 +242,25 @@ func (b *workgroupAgentBridge) StartAgentTurn(_ context.Context, req workgroup.A
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	b.turns[req.AssignID] = workgroupAgentTurn{binding: binding, cancel: cancel}
+	_, active, _, err := b.server.sessions.RuntimeInfo(req.SessionID)
+	if err != nil {
+		cancel()
+		b.mu.Unlock()
+		return fmt.Errorf("inspect agent turn state: %w", err)
+	}
+	b.turns[req.AssignID] = workgroupAgentTurn{
+		binding:     binding,
+		childTurnID: req.ChildTurnID,
+		attemptID:   req.AttemptID,
+		cancel:      cancel,
+	}
 	b.mu.Unlock()
 
 	// Register the filtered subscription before enqueueing the turn. The live
 	// cursor is captured under the Hub lock, so the first turn_state cannot be
 	// lost in the enqueue/subscribe gap.
 	ch := b.server.stream.SubscribeAgentLive(req.SessionID).Events
-	go b.runAgentTurn(ctx, req, ch)
+	go b.runAgentTurn(ctx, req, ch, !active)
 	return nil
 }
 
@@ -264,6 +268,7 @@ func (b *workgroupAgentBridge) runAgentTurn(
 	ctx context.Context,
 	req workgroup.AgentTurnStartRequest,
 	ch chan stream.Event,
+	enqueue bool,
 ) {
 	defer b.server.stream.Unsubscribe(ch)
 	defer func() {
@@ -271,12 +276,14 @@ func (b *workgroupAgentBridge) runAgentTurn(
 		delete(b.turns, req.AssignID)
 		b.mu.Unlock()
 	}()
-	_, err := b.server.sessions.EnqueueMessage(
-		ctx, req.SessionID, "message", req.UserMessage, nil, nil, "human",
-	)
-	if err != nil {
-		b.publishTurnResult(req, b.turnResultPayload(req, "failed", "", err.Error(), "enqueue_failed"))
-		return
+	if enqueue {
+		_, err := b.server.sessions.EnqueueMessage(
+			ctx, req.SessionID, "message", req.UserMessage, nil, nil, "human",
+		)
+		if err != nil {
+			b.publishTurnResult(req, b.turnResultPayload(req, "failed", "", err.Error(), "enqueue_failed"))
+			return
+		}
 	}
 
 	var assistantText strings.Builder
@@ -302,8 +309,14 @@ func (b *workgroupAgentBridge) runAgentTurn(
 					"agent_id":              req.AgentID,
 					"session_id":            req.SessionID,
 					"assign_id":             req.AssignID,
+					"source":                req.Source,
+					"parent_turn_id":        req.ParentTurnID,
+					"child_turn_id":         req.ChildTurnID,
+					"attempt_id":            req.AttemptID,
 					"event_type":            ev.Type,
 					"event_seq":             ev.Seq,
+					"event_id":              agentEventID(ev),
+					"stream_epoch":          ev.StreamEpoch,
 					"data":                  data,
 					"connection_generation": 0,
 				},
@@ -355,7 +368,7 @@ func (b *workgroupAgentBridge) CancelAgentTurn(_ context.Context, req workgroup.
 	if !ok {
 		return nil
 	}
-	if turnState.binding.sessionID != req.SessionID {
+	if turnState.binding.sessionID != req.SessionID || turnState.childTurnID != req.ChildTurnID || turnState.attemptID != req.AttemptID {
 		return fmt.Errorf("assign session mismatch")
 	}
 	turnState.cancel()
@@ -400,6 +413,9 @@ func (b *workgroupAgentBridge) ResumeAgentTurn(_ context.Context, req workgroup.
 	}
 	if !running {
 		return fmt.Errorf("agent assign is not running")
+	}
+	if turnState, ok := b.turns[req.AssignID]; !ok || turnState.childTurnID != req.ChildTurnID || turnState.attemptID != req.AttemptID {
+		return fmt.Errorf("agent turn identity mismatch")
 	}
 	if _, err := b.server.sessions.EnqueueMessage(
 		context.Background(), req.SessionID, "resume", "", nil, req.ResumeValue, "human",
@@ -456,16 +472,24 @@ func (b *workgroupAgentBridge) turnResultPayload(
 	status, text, message, finishReason string,
 ) map[string]any {
 	return map[string]any{
-		"workgroup_id":  req.WorkgroupID,
-		"member_id":     req.MemberID,
-		"agent_id":      req.AgentID,
-		"session_id":    req.SessionID,
-		"assign_id":     req.AssignID,
-		"status":        status,
-		"final_text":    text,
-		"message":       message,
-		"finish_reason": finishReason,
+		"workgroup_id":   req.WorkgroupID,
+		"member_id":      req.MemberID,
+		"agent_id":       req.AgentID,
+		"session_id":     req.SessionID,
+		"assign_id":      req.AssignID,
+		"source":         req.Source,
+		"parent_turn_id": req.ParentTurnID,
+		"child_turn_id":  req.ChildTurnID,
+		"attempt_id":     req.AttemptID,
+		"status":         status,
+		"final_text":     text,
+		"message":        message,
+		"finish_reason":  finishReason,
 	}
+}
+
+func agentEventID(ev stream.Event) string {
+	return fmt.Sprintf("node:%s:%d", strings.TrimSpace(ev.StreamEpoch), ev.Seq)
 }
 
 func cloneMap(src map[string]any) map[string]any {

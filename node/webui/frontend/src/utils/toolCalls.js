@@ -30,7 +30,7 @@ export function formatTemporaryAgentToolTitle(name, args = {}) {
 
 function formatGenericToolTitle(name, args = {}) {
   const keys = Object.keys(args || {})
-    .filter((key) => key !== "call_purpose" && key !== "run_in_background")
+    .filter((key) => key !== "call_purpose")
     .sort();
   if (!keys.length) return `${name}()`;
   const parts = keys.map((key) => `${key}=${formatToolArgValue(args[key])}`);
@@ -174,9 +174,6 @@ export function approvalItemDisplayName(item) {
 
 const APPROVAL_TOOL_LABELS = {
   bash_run: "bash",
-  linux_exec: "Linux 命令",
-  linux_file_upload: "上传 Linux 文件",
-  linux_file_download: "下载 Linux 文件",
   terminal_command: "终端命令",
   terminal_input: "终端输入",
   terminal_open: "打开终端",
@@ -194,7 +191,6 @@ const APPROVAL_TOOL_LABELS = {
   trigger_create: "创建定时任务",
   trigger_update: "更新定时任务",
   trigger_delete: "删除定时任务",
-  background_job_cancel: "取消后台任务",
   screen_capture: "截取屏幕",
   computer_use: "操作桌面",
 };

@@ -48,8 +48,8 @@ func TestTurnKeepsModelContextSnapshotAcrossToolSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &snapshotLLM{}
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	var promptCalls int
 	orch.SetSystemPromptBuilder(func(SystemPromptInput) string {
@@ -129,8 +129,8 @@ func TestTurnFreezesRequestOnlyMemoryContextAcrossToolSteps(t *testing.T) {
 	}
 
 	client := &snapshotLLM{}
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("a1", t.TempDir(), hub, client, testRegistry(t), pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("a1", t.TempDir(), hub, client, testRegistry(t), pol, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	orch.SetMemoryService(service)
 
@@ -189,8 +189,8 @@ func TestTurnCanDisableAutomaticMemoryRecallWithoutRemovingService(t *testing.T)
 	}
 
 	client := &snapshotLLM{}
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("a1", t.TempDir(), hub, client, testRegistry(t), pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("a1", t.TempDir(), hub, client, testRegistry(t), pol, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	orch.SetMemoryService(service)
 	orch.SetMemoryAutoRecall(false)

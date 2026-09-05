@@ -24,7 +24,7 @@ func TestLoadSkillsResultDescribesStateAndContextBoundaries(t *testing.T) {
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
 		Set:     func(items []skills.LoadedSkill) { loaded = append([]skills.LoadedSkill(nil), items...) },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	history := []llm.Message{}
 	call := llm.ToolCall{ID: "skill-call", Function: llm.ToolCallFunction{
@@ -74,7 +74,7 @@ func TestListAvailableSkillsIsMetadataOnlyAndDoesNotMutateContext(t *testing.T) 
 	catalog := skills.NewCatalog(root, true, 2)
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: catalog,
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	history := []llm.Message{}
 	if err := o.executeSkillTool("session-1", &history, llm.ToolCall{ID: "list-call", Function: llm.ToolCallFunction{
@@ -118,7 +118,7 @@ func TestListAvailableSkillsIsAvailableWhenSkillsAreEnabled(t *testing.T) {
 	writeLifecycleSkill(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nBody\n")
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: skills.NewCatalog(root, true, 2),
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	history := []llm.Message{}
 	if err := o.executeSkillTool("session-1", &history, llm.ToolCall{ID: "list-call", Function: llm.ToolCallFunction{
 		Name:      "list_available_skills",
@@ -140,7 +140,7 @@ func TestListAvailableSkillsUsesLiveCatalogWithoutRewritingPromptMetadata(t *tes
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog:     frozen,
 		LiveCatalog: live,
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	}, nil, nil, hooks.RuntimeConfig{}, nil)
 	initialPrompt := o.buildSystemPrompt("session-1")
 	if !strings.Contains(initialPrompt, "writer: v1") {
 		t.Fatalf("initial prompt missing frozen metadata: %q", initialPrompt)
@@ -173,7 +173,7 @@ func TestListAvailableSkillsLiveCatalogCannotWidenVisibility(t *testing.T) {
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog:     policyCatalog,
 		LiveCatalog: liveCatalog,
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	history := []llm.Message{}
 	if err := o.executeSkillTool("session-1", &history, llm.ToolCall{ID: "list-call", Function: llm.ToolCallFunction{
@@ -200,7 +200,7 @@ func TestLoadSkillsBodyBecomesVisibleOnNextModelStep(t *testing.T) {
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
 		Set:     func(items []skills.LoadedSkill) { loaded = append([]skills.LoadedSkill(nil), items...) },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	history := []llm.Message{}
 	if _, _, err := runMessageTurnInline(t, o, context.Background(), "session-1", &history, "使用写作 skill", nil); err != nil {
@@ -245,7 +245,7 @@ func TestSkillSnapshotRecordsLoadedBodyDigestSeparately(t *testing.T) {
 	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	snapshot := NewModelContextSnapshot("prompt", nil, 1, "runtime")
 	o.attachSkillsSnapshotMetadata(snapshot)
@@ -276,7 +276,7 @@ func TestSkillToolReportsHookSyncFailures(t *testing.T) {
 				Failed: []SkillHookSyncFailure{{SkillName: "writer", Error: "plugin load failed"}},
 			}
 		},
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 
 	history := []llm.Message{}
 	if err := o.executeSkillTool("session-1", &history, llm.ToolCall{ID: "skill-call", Function: llm.ToolCallFunction{
@@ -323,7 +323,7 @@ func (c *skillBoundaryClient) NormalizeAssistant(existing []llm.Message, msg llm
 }
 
 func TestContextRefreshKeepsDistinctMutationReasons(t *testing.T) {
-	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	o := NewOrchestrator("agent-1", t.TempDir(), stream.NewHub(8, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	o.RequestModelContextRefresh("session-1", "skills_load")
 	o.RequestModelContextRefresh("session-1", "context_compression")
 	o.RequestModelContextRefresh("session-1", "skills_load")

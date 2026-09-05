@@ -25,7 +25,6 @@ func NewStore() *Store {
 }
 
 // Report sets or clears a focus claim owned by one Web UI source.
-// An empty source_id is kept as a legacy claim for older Web UI clients.
 func (s *Store) Report(sourceID, agentID string, ttl time.Duration) {
 	if s == nil {
 		return
@@ -35,14 +34,14 @@ func (s *Store) Report(sourceID, agentID string, ttl time.Duration) {
 	}
 	sourceID = strings.TrimSpace(sourceID)
 	agentID = strings.TrimSpace(agentID)
+	if sourceID == "" {
+		return
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureClaimsLocked()
 	s.pruneExpiredLocked()
-	if sourceID == "" {
-		sourceID = "legacy"
-	}
 	if agentID == "" {
 		delete(s.claims, sourceID)
 		return

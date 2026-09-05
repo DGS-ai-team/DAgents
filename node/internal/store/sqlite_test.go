@@ -2,14 +2,12 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func TestSaveLoadRoundTrip(t *testing.T) {
@@ -69,29 +67,19 @@ func TestSaveLoadRuntimeState(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	pending := &turn.PendingHITL{
-		Items: []turn.PendingHITLItem{{
-			ToolCall: llm.ToolCall{ID: "c1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run"}},
-		}},
-	}
 	if err := s.Save(ctx, Record{
 		AgentID:  "sess-pending",
 		NodeID:   "a1",
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 		RuntimeState: RuntimeState{
-			Pending:       pending,
-			ToolLoopCount: 2,
 			InputBoxState: json.RawMessage(`{"seq":2,"items":[]}`),
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := s.Load(ctx, "sess-pending")
-	if err != nil || rec == nil || rec.RuntimeState.Pending == nil {
-		t.Fatalf("load pending = %+v err=%v", rec, err)
-	}
-	if rec.RuntimeState.ToolLoopCount != 2 {
-		t.Fatalf("loop count = %d", rec.RuntimeState.ToolLoopCount)
+	if err != nil || rec == nil {
+		t.Fatalf("load runtime state = %+v err=%v", rec, err)
 	}
 	if string(rec.RuntimeState.InputBoxState) != `{"seq":2,"items":[]}` {
 		t.Fatalf("input box state = %s", rec.RuntimeState.InputBoxState)
@@ -160,112 +148,5 @@ func TestExecutionEventsPersistAndList(t *testing.T) {
 	}
 	if events[0].CommandDigest != "digest-1" || events[0].OutputBytes != 7 {
 		t.Fatalf("audit fields=%+v", events[0])
-	}
-}
-
-func TestExecutionEventsMigrateAuditColumns(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sessions.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Exec(`
-CREATE TABLE execution_events (
-  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id TEXT NOT NULL DEFAULT '',
-  session_id TEXT NOT NULL,
-  process_id TEXT NOT NULL,
-  process_seq INTEGER NOT NULL,
-  event_type TEXT NOT NULL,
-  stream TEXT NOT NULL DEFAULT '',
-  turn_id TEXT NOT NULL DEFAULT '',
-  tool_call_id TEXT NOT NULL DEFAULT '',
-  target_kind TEXT NOT NULL DEFAULT '',
-  target_id TEXT NOT NULL DEFAULT '',
-  policy_decision TEXT NOT NULL DEFAULT '',
-  approval_id TEXT NOT NULL DEFAULT '',
-  risk_level TEXT NOT NULL DEFAULT '',
-  exit_code INTEGER,
-  exit_error TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
-);
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = db.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	if err := s.AppendExecutionEvent(context.Background(), ExecutionEventRecord{
-		AgentID:       "agent-migrated",
-		SessionID:     "session-migrated",
-		ProcessID:     "process-migrated",
-		ProcessSeq:    1,
-		EventType:     "process_exited",
-		CommandDigest: "digest-migrated",
-		OutputBytes:   42,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	events, err := s.ListExecutionEvents(context.Background(), "session-migrated", 10)
-	if err != nil || len(events) != 1 {
-		t.Fatalf("events=%+v err=%v", events, err)
-	}
-	if events[0].CommandDigest != "digest-migrated" || events[0].OutputBytes != 42 {
-		t.Fatalf("migrated audit fields=%+v", events[0])
-	}
-}
-
-func TestMigrateLegacySessionsTable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sessions.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Exec(`
-CREATE TABLE sessions (
-  session_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
-  messages_json TEXT NOT NULL DEFAULT '[]',
-  first_user_message TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  loaded_skills_json TEXT NOT NULL DEFAULT '[]',
-  runtime_state_json TEXT NOT NULL DEFAULT '{}'
-);
-INSERT INTO sessions(session_id, agent_id, messages_json, first_user_message, created_at, updated_at)
-VALUES ('agt-legacy', 'node-1', '[{"role":"user","content":"hi"}]', 'hi', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = db.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-
-	rec, err := s.Load(context.Background(), "agt-legacy")
-	if err != nil || rec == nil {
-		t.Fatalf("load migrated = %+v err=%v", rec, err)
-	}
-	if rec.AgentID != "agt-legacy" || rec.NodeID != "node-1" {
-		t.Fatalf("ids = agent=%q node=%q", rec.AgentID, rec.NodeID)
-	}
-	if len(rec.Messages) != 1 || rec.FirstUserMessage != "hi" {
-		t.Fatalf("payload = %+v", rec)
-	}
-	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='sessions'`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Fatal("legacy sessions table should be dropped")
 	}
 }

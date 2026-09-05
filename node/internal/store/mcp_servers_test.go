@@ -47,26 +47,3 @@ func TestMCPServerStoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestMCPServerStoreMigratesLegacyPlaintextValues(t *testing.T) {
-	st, err := OpenMCPServers(t.TempDir() + "/mcp.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	legacy := `{"id":"legacy","command":"demo","env_values":{"TOKEN":"legacy-token"},"enabled":true}`
-	if _, err := st.db.Exec(`INSERT INTO mcp_servers(server_id, config_json, created_at, updated_at) VALUES (?, ?, ?, ?)`, "legacy", legacy, "now", "now"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := st.Get(context.Background(), "legacy")
-	if err != nil || got == nil || got.EnvValues["TOKEN"] != "legacy-token" {
-		t.Fatalf("legacy config=%#v err=%v", got, err)
-	}
-	var raw string
-	if err := st.db.QueryRow(`SELECT config_json FROM mcp_servers WHERE server_id = ?`, "legacy").Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(raw, "legacy-token") || !strings.Contains(raw, "env_value_ciphertexts") {
-		t.Fatalf("legacy MCP config was not migrated: %s", raw)
-	}
-}

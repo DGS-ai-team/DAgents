@@ -6,7 +6,7 @@ import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
 import { getAgentStreamEventPolicy } from "../sse/agentEvents.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
-import AgentCreateModal from "../components/AgentCreateModal.vue";
+import AgentCreatePage from "../components/AgentCreatePage.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
 import {
@@ -62,11 +62,6 @@ import {
   stopDesktopFocusHeartbeat,
   pulseDesktopFocus,
 } from "../stores/desktopFocus.js";
-import {
-  refreshToolJobs,
-  startToolJobsPolling,
-  stopToolJobsPolling,
-} from "../stores/toolJobs.js";
 import { classifyCancelOutcome } from "../stores/cancelState.js";
 import { createTurnWatchdog } from "../stores/turnWatchdog.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
@@ -113,8 +108,8 @@ const hitlSelected = ref([]);
 const cancelling = ref(false);
 const streamHandle = ref(null);
 const agentPanelRef = ref(null);
-const showAgentCreateModal = ref(false);
-const createModalTemplateId = ref("");
+const showAgentCreatePage = ref(false);
+const createPageTemplateId = ref("");
 const agentListCount = ref(null);
 const agentList = ref([]);
 const currentAgentDisplayName = ref("");
@@ -229,7 +224,6 @@ async function resyncAfterSSEGap(reason) {
     if (data === null) return;
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     turnWatchdog.noteActivity();
-    await refreshToolJobs(agentStore.agentId);
     // A Node restart can complete while the NavRail is still serving its
     // cached agent list. Reconcile it after the stream has reconnected so a
     // newly created/registered Agent becomes selectable without waiting for
@@ -312,15 +306,7 @@ async function refreshMeta() {
     chromeStore.llmSettings = boot.llm || null;
     syncReasoningDisplay(chromeStore.llmSettings);
   } catch (e) {
-    // 回退到旧的并行请求（兼容旧 Node）
-    try {
-      const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
-      chromeStore.agentInfo = { ...health, ...info };
-      chromeStore.llmSettings = llm;
-      syncReasoningDisplay(llm);
-    } catch (e2) {
-      agentStore.error = e2.message || e.message;
-    }
+    agentStore.error = e.message || "无法加载 Node 状态";
   }
 }
 
@@ -408,11 +394,9 @@ function handleEvent(ev) {
         syncTurnStatus(turnStateStore);
       }
       upsertToolCallFromSSE(ev.data);
-      refreshToolJobs(agentStore.agentId);
       break;
     case "tool_result":
       applyToolResult(ev.data);
-      refreshToolJobs(agentStore.agentId);
       break;
     case "usage":
       setUsageFromSSE(ev.data);
@@ -463,7 +447,6 @@ function handleEvent(ev) {
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
-      refreshToolJobs(agentStore.agentId);
       refreshContextTokens();
       break;
     case "resync_required":
@@ -734,7 +717,6 @@ async function handleCommand(cmd) {
     const data = await hydrateAgent();
     if (data === null) return;
     restartStream();
-    await refreshToolJobs(agentStore.agentId);
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
     return;
   }
@@ -787,8 +769,8 @@ async function handleUploadCommand(spec) {
 }
 
 async function openCreateWizard(templateId = "") {
-  createModalTemplateId.value = String(templateId || "").trim();
-  showAgentCreateModal.value = true;
+  createPageTemplateId.value = String(templateId || "").trim();
+  showAgentCreatePage.value = true;
 }
 
 function onAgentsUpdated(list) {
@@ -797,14 +779,16 @@ function onAgentsUpdated(list) {
   void syncCurrentAgentDisplayName();
 }
 
-function onCreateModalClose() {
-  showAgentCreateModal.value = false;
-  createModalTemplateId.value = "";
+function onCreatePageCancel() {
+  showAgentCreatePage.value = false;
+  createPageTemplateId.value = "";
 }
 
 async function onAgentCreated(created) {
   const id = agentRecordId(created);
   if (!id) return;
+  showAgentCreatePage.value = false;
+  createPageTemplateId.value = "";
   const createdName = String(created?.display_name || created?.DisplayName || "").trim();
   if (createdName) currentAgentDisplayName.value = createdName;
   persistAgentId(id);
@@ -1005,7 +989,7 @@ async function switchLLMProfile(id) {
   agentStore.error = "";
   try {
     // 绑定到当前 Agent；ensure/reload 时会应用到进程 LLM（含多模态）。
-    await api.patchAgent(agentStore.agentId, { llm_active: profileId });
+    await api.patchAgent(agentStore.agentId, { defaults: { llm: { active: profileId } } });
     await refreshLLMSettings();
     try {
       chromeStore.agentInfo = await api.getAgentInfo();
@@ -1070,7 +1054,11 @@ async function bootstrapAgentFromRoute() {
 }
 
 async function cancelTurn() {
-  if (!agentStore.agentId || cancelling.value || !isTurnProcessing()) return;
+  // A user-information request owns the active Turn even if hydrate/SSE has
+  // not propagated its interaction phase into turnState yet. The pending HITL
+  // item is therefore also a valid cancellation signal; it must never be
+  // mistaken for an answer submission.
+  if (!agentStore.agentId || cancelling.value || (!isTurnProcessing() && !hasUserInfoHitl.value)) return;
   cancelling.value = true;
   beginTurnCancellation();
   agentStore.error = "";
@@ -1079,13 +1067,12 @@ async function cancelTurn() {
     let hydrate = null;
     try {
       hydrate = await hydrateAgent();
-      await refreshToolJobs(agentStore.agentId);
     } catch {
       // The cancellation acknowledgement remains usable if reconciliation
       // briefly fails; the next SSE/hydrate cycle will repair the view.
     }
     const outcome = classifyCancelOutcome(response, hydrate);
-    if (outcome === "not_cancelled") {
+    if (outcome === "not_cancelled" || outcome === "invalid_scope") {
       markTurnCancellationFailed();
       agentStore.error = hydrate
         ? "turn 仍在执行，取消未生效，请稍后重试"
@@ -1129,7 +1116,6 @@ onMounted(async () => {
   refreshContextTokens();
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);
-  startToolJobsPolling(() => agentStore.agentId);
   turnWatchdog.start();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
@@ -1236,7 +1222,6 @@ watch(
 
 onActivated(() => {
   turnWatchdog.start();
-  startToolJobsPolling(() => agentStore.agentId);
   if (agentStore.agentId) {
     void activateAgentStream();
   }
@@ -1250,7 +1235,6 @@ onDeactivated(() => {
   sseResyncToken += 1;
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
-  stopToolJobsPolling();
   streamHandle.value?.close();
   streamHandle.value = null;
   chromeStore.sseStatus = "idle";
@@ -1312,7 +1296,6 @@ onUnmounted(() => {
   sseResyncToken += 1;
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
-  stopToolJobsPolling();
   streamHandle.value?.close();
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("pageshow", onPageShow);
@@ -1348,18 +1331,27 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
-      <div v-if="routeNotice" class="chat-notice-banner" role="status">{{ routeNotice }}</div>
-      <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
-      <AgentEmptyState
-        v-if="showNoAgentWelcome"
-        @create="openCreateWizard()"
-        @pick-template="openCreateWizard"
-      />
-      <div v-else-if="!agentStore.agentId" class="chat-empty-agent">
-        <p>选择左侧 Agent，或点击 + 从模板新建。</p>
-      </div>
+      <Transition name="chat-surface" mode="out-in">
+        <AgentCreatePage
+          v-if="showAgentCreatePage"
+          :initial-template-id="createPageTemplateId"
+          @cancel="onCreatePageCancel"
+          @created="onAgentCreated"
+        />
 
-      <div v-else class="chat-workspace">
+        <div v-else class="chat-surface">
+          <div v-if="routeNotice" class="chat-notice-banner" role="status">{{ routeNotice }}</div>
+          <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
+          <AgentEmptyState
+            v-if="showNoAgentWelcome"
+            @create="openCreateWizard()"
+            @pick-template="openCreateWizard"
+          />
+          <div v-else-if="!agentStore.agentId" class="chat-empty-agent">
+            <p>选择左侧 Agent，或点击 + 从模板新建。</p>
+          </div>
+
+          <div v-else class="chat-workspace">
         <MainChatPanel
           v-show="!terminalOpen"
           ref="chatPanelRef"
@@ -1429,21 +1421,45 @@ onUnmounted(() => {
           @user-info-selected="onHitlUserInfoSelected"
           @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
           @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
-        />
-      </div>
+          />
+          </div>
+        </div>
+      </Transition>
 
     </div>
-
-    <AgentCreateModal
-      :open="showAgentCreateModal"
-      :initial-template-id="createModalTemplateId"
-      @close="onCreateModalClose"
-      @created="onAgentCreated"
-    />
   </div>
 </template>
 
 <style scoped>
+.chat-surface {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.chat-surface-enter-active,
+.chat-surface-leave-active {
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+
+.chat-surface-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.chat-surface-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-surface-enter-active,
+  .chat-surface-leave-active {
+    transition: none;
+  }
+}
+
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
 </style>

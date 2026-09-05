@@ -1,29 +1,21 @@
-"""D3 纵向闭环：human → provision → assign → read_file → timeline + HITL/archive。"""
+"""AgentRef 纵向编排测试：session / turn / HITL / tool cancel。"""
 
 from __future__ import annotations
 
-import json
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
-from manage.workgroup.d3_models import (  # noqa: E402
-	HITLCreateRequest,
-	HITLResolveRequest,
-	HumanPostRequest,
-	MemberFinalRequest,
-	ProvisionCompleteRequest,
-)
-from manage.workgroup.errors import WorkgroupError  # noqa: E402
+from manage.workgroup.d3_models import HITLResolveRequest, HumanPostRequest  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
+    AssignCreateRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -31,225 +23,207 @@ from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.vertical import VerticalLoop  # noqa: E402
 
 
-class FakeNodeBridge:
-    """模拟 Node Worker：provision + read_file + tombstone fencing。"""
-
-    def __init__(self, root: Path, node_id: str = "node-b") -> None:
-        self.root = root
-        self.node_id = node_id
-        self.bindings: dict[str, dict[str, Any]] = {}
-        self.tombstones: dict[str, dict[str, Any]] = {}
-        self.executions: dict[str, int] = {}
-        self.journal: dict[str, dict[str, Any]] = {}
-
-    def provision(self, payload: dict[str, Any]) -> dict[str, Any]:
-        mid = payload["member_id"]
-        ws = self.root / payload["workgroup_id"] / mid
-        ws.mkdir(parents=True, exist_ok=True)
-        (ws / "README").write_text("# Demo\n标题是 Demo\n", encoding="utf-8")
-        catalog = "rev_fake_read_file"
-        self.bindings[mid] = {
-            "workspace_path": str(ws),
-            "tool_catalog_revision": catalog,
-            "lease_epoch": int(payload["lease_epoch"]),
-            "member_spec_digest": payload["member_spec_digest"],
-            "tool_allow_names": list(payload.get("tool_allow_names") or []),
-            "status": "ready",
-        }
-        return {
-            "ok": True,
-            "workspace_path": str(ws),
-            "tool_catalog_revision": catalog,
-        }
-
-    def execute_command(self, payload: dict[str, Any]) -> dict[str, Any]:
-        cmd_id = payload["command_id"]
-        wg = payload["workgroup_id"]
-        if wg in self.tombstones:
-            tomb = self.tombstones[wg]
-            if int(payload.get("lease_epoch") or 0) < int(tomb["lease_epoch_at_archive"]):
-                return {
-                    "status": "rejected",
-                    "error_code": "fencing_rejected",
-                    "result_text": "",
-                }
-        existing = self.journal.get(cmd_id)
-        if existing is not None:
-            return {
-                "status": existing["status"],
-                "result_text": existing.get("result_text", ""),
-                "error_code": existing.get("error_code"),
-                "reexec": False,
-            }
-        mid = payload["member_id"]
-        binding = self.bindings.get(mid)
-        if binding is None:
-            return {"status": "failed", "error_code": "not_found", "result_text": ""}
-        allow = {str(n) for n in (binding.get("tool_allow_names") or [])}
-        tool_name = str(payload.get("tool_name") or "")
-        if allow and tool_name not in allow:
-            return {"status": "failed", "error_code": "not_authorized", "result_text": ""}
-        args = json.loads(payload["arguments_json"])
-        ws = Path(binding["workspace_path"])
-        self.executions[cmd_id] = self.executions.get(cmd_id, 0) + 1
-        try:
-            if tool_name == "read_file":
-                path = ws / str(args["path"])
-                text = path.read_text(encoding="utf-8")
-                result = {"status": "succeeded", "result_text": text, "error_code": None}
-            elif tool_name == "write_file":
-                path = ws / str(args["path"])
-                path.parent.mkdir(parents=True, exist_ok=True)
-                content = str(args.get("content") or "")
-                path.write_text(content, encoding="utf-8")
-                result = {
-                    "status": "succeeded",
-                    "result_text": f"wrote {len(content.encode('utf-8'))} bytes to {args['path']}",
-                    "error_code": None,
-                }
-            elif tool_name == "glob_files":
-                directory = str(args.get("directory") or ".")
-                pattern = str(args.get("glob_pattern") or "*")
-                base = ws if directory in {".", "./"} else ws / directory
-                matches = sorted(str(p.relative_to(ws)).replace("\\", "/") for p in base.glob(pattern) if p.is_file())
-                result = {
-                    "status": "succeeded",
-                    "result_text": json.dumps({"paths": matches}, ensure_ascii=False),
-                    "error_code": None,
-                }
-            else:
-                result = {"status": "failed", "error_code": "conflict", "result_text": f"unsupported {tool_name}"}
-        except FileNotFoundError:
-            result = {"status": "failed", "error_code": "not_found", "result_text": ""}
-        except OSError as exc:
-            result = {"status": "failed", "error_code": "conflict", "result_text": str(exc)}
-        self.journal[cmd_id] = result
-        return result
-
-    def apply_tombstone(self, payload: dict[str, Any]) -> None:
-        self.tombstones[payload["workgroup_id"]] = payload
-        for b in self.bindings.values():
-            b["status"] = "archived"
-            b["lease_epoch"] = int(payload["lease_epoch_at_archive"])
-
-    def local_agent_ids(self) -> list[str]:
-        return []
-
-
 class WorkgroupVerticalTests(unittest.TestCase):
-    def _setup(self, tmp: str) -> tuple[VerticalLoop, FakeNodeBridge, str, str]:
+    def _setup(self, tmp: str) -> tuple[WorkGroupStore, VerticalLoop, str, str]:
         store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
-        bridge = FakeNodeBridge(Path(tmp) / "node-ws", node_id="node-b")
-        loop = VerticalLoop(store, bridge=bridge)
         group, _ = store.create_workgroup(
-            WorkGroupCreateRequest(
-                display_name="Demo",
-                created_by_node_id="node-a",
-                llm_profile_id="default",
-                llm_profile_revision="1",
-            )
+            WorkGroupCreateRequest(display_name="Demo", created_by_node_id="node-a")
         )
         store.patch_acl(
             group.workgroup_id,
             ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
         )
-        member, spec = store.create_member(
+        member = store.create_member(
             group.workgroup_id,
             MemberCreateRequest(
+                agent_id="agent-b",
                 home_node_id="node-b",
                 display_name="reader",
-                allow_tool_names=["read_file"],
-                prompt={"soul_md": "reader"},
+                description="读取资料",
             ),
         )
-        _ = spec
-        loop.enqueue_provision(group.workgroup_id, member.member_id)
         store.publish_workgroup(group.workgroup_id)
-        return loop, bridge, group.workgroup_id, member.member_id
+        store.mark_member_status(member.member_id, "ready", workgroup_id=group.workgroup_id)
+        return store, VerticalLoop(store), group.workgroup_id, member.member_id
 
-    def test_two_node_read_file_happy_path(self) -> None:
+    def test_session_open_and_turn_start_use_agent_ref_identity(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            loop, bridge, wid, mid = self._setup(tmp)
-            self.assertNotIn(mid, bridge.local_agent_ids())
+            store, loop, wid, mid = self._setup(tmp)
+            opened = loop.enqueue_agent_session_open(wid, mid)
+            self.assertEqual(opened.type, "agent.session.open")
+            self.assertEqual(opened.payload["agent_id"], "agent-b")
+            self.assertEqual(opened.payload["session_id"], f"wg:{wid}:member:{mid}")
 
-            human = loop.post_human(
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="读 README"),
+            )
+            started = loop.enqueue_agent_turn_start(wid, assign.assign_id)
+            self.assertEqual(started.type, "agent.turn.start")
+            self.assertEqual(started.payload["assign_id"], assign.assign_id)
+            self.assertEqual(started.payload["user_message"], "读 README")
+
+    def test_human_message_is_deduplicated_and_agent_result_is_persisted(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, wid, mid = self._setup(tmp)
+            first = loop.post_human(
                 wid,
                 HumanPostRequest(
-                    text="读 README",
-                    client_message_id="01h0000000000000000000000d",
+                    text="请读取 README",
+                    client_message_id="cm_01",
                     from_node_id="node-a",
                 ),
             )
-            # client_message_id 去重
-            human2 = loop.post_human(
+            second = loop.post_human(
                 wid,
                 HumanPostRequest(
-                    text="读 README again",
-                    client_message_id="01h0000000000000000000000d",
+                    text="重复发送",
+                    client_message_id="cm_01",
                     from_node_id="node-a",
                 ),
             )
-            self.assertEqual(human.event_id, human2.event_id)
+            self.assertEqual(first.event_id, second.event_id)
 
-            dispatched = loop.assign_and_dispatch_read_file(
-                wid, member_id=mid, instruction="读 README", path="README"
-            )
-            self.assertEqual(dispatched["tool_result"]["status"], "succeeded")
-            self.assertIn("Demo", dispatched["tool_result"]["result_text"])
-            self.assertTrue(dispatched.get("tool_result") is not None)
-
-            final = loop.member_final(
+            assign = store.create_assign(
                 wid,
-                MemberFinalRequest(
-                    assign_id=dispatched["assign"].assign_id,
+                AssignCreateRequest(member_id=mid, instruction="读取 README"),
+            )
+            loop.handle_inbound(
+                "node-b",
+                "agent.turn.result",
+                {
+                    "workgroup_id": wid,
+                    "member_id": mid,
+                    "agent_id": "agent-b",
+                    "session_id": f"wg:{wid}:member:{mid}",
+                    "assign_id": assign.assign_id,
+                    "status": "succeeded",
+                    "final_text": "README 已读取",
+                },
+            )
+            events = store.list_timeline(wid)
+            finals = [event for event in events if event.type == "actor_final_text"]
+            self.assertEqual(len(finals), 1)
+            self.assertEqual(finals[0].text, "README 已读取")
+
+    def test_agent_tool_cancel_requires_a_running_tool_event(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, wid, mid = self._setup(tmp)
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="执行命令"),
+            )
+            store.set_assign_status(assign.assign_id, "running")
+            store.append_timeline(
+                wid,
+                type="tool_started",
+                actor_id=mid,
+                assign_id=assign.assign_id,
+                tool_call_id="call-1",
+                tool_name="bash",
+                status="running",
+            )
+            frame = loop.enqueue_agent_tool_cancel(wid, assign.assign_id, "call-1")
+            self.assertEqual(frame.type, "agent.tool.cancel")
+            self.assertEqual(frame.payload["tool_name"], "bash")
+            self.assertEqual(frame.payload["tool_call_id"], "call-1")
+
+    def test_assign_identity_separates_direct_parent_and_child_turns(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, wid, mid = self._setup(tmp)
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(
                     member_id=mid,
-                    text="标题是 Demo",
+                    source="direct_member",
+                    parent_turn_id="tr_parent",
+                    instruction="直接执行任务",
                 ),
             )
-            self.assertEqual(final["assign"].status, "succeeded")
-            self.assertIsNone(final["assign"].error_code)
-            self.assertEqual(final["assign"].result_summary, "标题是 Demo")
+            self.assertIsNone(assign.leader_tool_call_id)
+            self.assertEqual(assign.source, "direct_member")
+            self.assertEqual(assign.parent_turn_id, "tr_parent")
+            self.assertNotEqual(assign.child_turn_id, assign.assign_id)
+            self.assertTrue(assign.attempt_id)
+            frame = loop.enqueue_agent_turn_start(wid, assign.assign_id)
+            self.assertEqual(frame.payload["child_turn_id"], assign.child_turn_id)
+            self.assertEqual(frame.payload["attempt_id"], assign.attempt_id)
+            self.assertNotIn("turn_id", frame.payload)
 
-            timeline = loop.store.list_timeline(wid)
-            types = [e.type for e in timeline]
-            self.assertEqual(
-                types,
-                ["human_message", "tool_started", "tool_finished", "actor_final_text"],
-            )
-            for ev in timeline:
-                dumped = ev.model_dump()
-                for forbidden in ("tool_arguments", "tool_result", "raw_tool_payload"):
-                    self.assertNotIn(forbidden, dumped)
-            # tool 执行现在以结构化事件出现，但原始工具载荷仍不进 Timeline。
-            self.assertEqual(bridge.executions[dispatched["command"]["command_id"]], 1)
-
-    def test_info_hitl_cas_once(self) -> None:
+    def test_member_events_are_durable_without_hub_and_duplicate_free(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            loop, _, wid, _ = self._setup(tmp)
-            hitl = loop.create_info_hitl(wid, HITLCreateRequest(prompt="确认继续？"))
-            ok = loop.resolve_info_hitl(
-                wid, hitl.hitl_id, HITLResolveRequest(resolution={"answer": "yes"})
-            )
-            self.assertEqual(ok.status, "resolved")
-            with self.assertRaises(WorkgroupError) as ctx:
-                loop.resolve_info_hitl(
-                    wid, hitl.hitl_id, HITLResolveRequest(resolution={"answer": "no"})
-                )
-            self.assertEqual(ctx.exception.code, "already_resolved")
-
-    def test_agent_ref_user_information_answer_uses_node_resume_protocol(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            loop, _, wid, mid = self._setup(tmp)
-            hitl = loop.store.create_hitl(
+            store, loop, wid, mid = self._setup(tmp)
+            assign = store.create_assign(
                 wid,
-                prompt="成员需要部署环境",
+                AssignCreateRequest(member_id=mid, instruction="执行工具"),
+            )
+            payload = {
+                "workgroup_id": wid,
+                "member_id": mid,
+                "agent_id": "agent-b",
+                "session_id": f"wg:{wid}:member:{mid}",
+                "assign_id": assign.assign_id,
+                "child_turn_id": assign.child_turn_id,
+                "attempt_id": assign.attempt_id,
+                "event_type": "tool_call",
+                "event_seq": 7,
+                "data": {
+                    "tool_calls": [
+                        {"id": "call-1", "function": {"name": "bash_run"}},
+                    ]
+                },
+            }
+            loop.handle_inbound("node-b", "agent.turn.event", payload)
+            loop.handle_inbound("node-b", "agent.turn.event", payload)
+            starts = [event for event in store.list_timeline(wid) if event.type == "tool_started"]
+            self.assertEqual(len(starts), 1)
+            self.assertEqual(store.get_assign(assign.assign_id).last_event_seq, 7)
+
+    def test_member_approval_is_distinct_from_user_question(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, wid, mid = self._setup(tmp)
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="需要审批的任务"),
+            )
+            payload = {
+                "workgroup_id": wid,
+                "member_id": mid,
+                "agent_id": "agent-b",
+                "session_id": f"wg:{wid}:member:{mid}",
+                "assign_id": assign.assign_id,
+                "child_turn_id": assign.child_turn_id,
+                "attempt_id": assign.attempt_id,
+                "event_type": "hitl_required",
+                "event_seq": 9,
+                "data": {
+                    "hitl_id": "node-hitl-1",
+                    "message": "确认执行命令",
+                    "items": [{"id": "call-1", "name": "bash_run"}],
+                },
+            }
+            loop.handle_inbound("node-b", "agent.turn.event", payload)
+            hitl = store.list_hitl(wid, pending_only=True)[0]
+            self.assertEqual(hitl.kind, "tool_approval")
+            self.assertEqual(store.get_assign(assign.assign_id).status, "awaiting_hitl")
+
+    def test_agent_ref_hitl_resolution_emits_resume_frame(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, wid, mid = self._setup(tmp)
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="成员审批任务"),
+            )
+            hitl = store.create_hitl(
+                wid,
+                prompt="成员请求确认",
                 metadata={
                     "source": "agent_ref",
                     "node_hitl_id": "node-hitl-1",
                     "member_id": mid,
-                    "agent_id": "agent-1",
-                    "session_id": "session-1",
-                    "assign_id": "assign-1",
+                    "agent_id": "agent-b",
+                    "session_id": f"wg:{wid}:member:{mid}",
+                    "assign_id": assign.assign_id,
                     "home_node_id": "node-b",
                     "items": [
                         {
@@ -261,89 +235,30 @@ class WorkgroupVerticalTests(unittest.TestCase):
                     ],
                 },
             )
-
             loop.resolve_info_hitl(
                 wid,
                 hitl.hitl_id,
-                HITLResolveRequest(resolution={"answer": "production"}),
-            )
-
-            frame = [
-                item for item in loop.store.list_outbox(wid) if item.type == "agent.turn.resume"
-            ][-1]
-            self.assertEqual(
-                frame.payload["resume_value"],
-                {
-                    "type": "user_information",
-                    "tool_call_id": "call-question",
-                    "answer": "production",
-                },
-            )
-
-    def test_archive_fencing_and_indeterminate_reconcile(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            loop, bridge, wid, mid = self._setup(tmp)
-            dispatched = loop.assign_and_dispatch_read_file(
-                wid, member_id=mid, instruction="读 README", path="README"
-            )
-            archived = loop.archive_with_tombstone(wid)
-            self.assertEqual(archived["workgroup"].status, "archived")
-            # 旧 lease 命令被拒
-            stale = dict(dispatched["command"])
-            stale["command_id"] = "cmd_" + "0" * 26
-            stale["lease_epoch"] = 1
-            rejected = bridge.execute_command(stale)
-            self.assertEqual(rejected["status"], "rejected")
-
-            # journal 丢失 + 副作用已开始 → indeterminate，不自动重执行
-            recon = loop.reconcile_missing_journal(
-                wid,
-                assign_id=dispatched["assign"].assign_id,
-                command_id=dispatched["command"]["command_id"],
-                member_id=mid,
-                side_effect_started=True,
-            )
-            self.assertEqual(recon["status"], "indeterminate")
-            self.assertFalse(recon["auto_reexec"])
-
-    def test_archived_member_ignores_late_provision_result(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
-            loop = VerticalLoop(store)
-            group, _ = store.create_workgroup(
-                WorkGroupCreateRequest(
-                    display_name="Archive replay",
-                    created_by_node_id="node-a",
-                    llm_profile_id="default",
-                    llm_profile_revision="1",
-                )
-            )
-            first, _ = store.create_member(
-                group.workgroup_id,
-                MemberCreateRequest(home_node_id="node-a", display_name="first"),
-            )
-            second, _ = store.create_member(
-                group.workgroup_id,
-                MemberCreateRequest(home_node_id="node-a", display_name="second"),
-            )
-            provision = loop.enqueue_provision(group.workgroup_id, first.member_id)
-
-            archived = store.archive_member(group.workgroup_id, first.member_id)
-            tombstone = loop.enqueue_member_tombstone(group.workgroup_id, first.member_id)
-            self.assertEqual(archived.status, "archived")
-            self.assertEqual(tombstone.payload["member_id"], first.member_id)
-
-            late = loop.complete_provision(
-                group.workgroup_id,
-                ProvisionCompleteRequest(
-                    member_id=first.member_id,
-                    provision_id=provision.payload["provision_id"],
-                    status="ready",
+                HITLResolveRequest(
+                    resolution={
+                        "type": "user_information",
+                        "tool_call_id": "call-question",
+                        "answer": "production",
+                    }
                 ),
             )
-            self.assertEqual(late["member"].status, "archived")
-            self.assertEqual(store.get_member(first.member_id).status, "archived")
-            self.assertEqual([m.member_id for m in store.list_members(group.workgroup_id)], [second.member_id])
+            frames = [item for item in store.list_outbox(wid) if item.type == "agent.turn.resume"]
+            self.assertEqual(len(frames), 1)
+            self.assertEqual(frames[0].payload["resume_value"]["type"], "user_information")
+            self.assertEqual(frames[0].payload["resume_value"]["answer"], "production")
+
+    def test_archive_closes_agent_session(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, wid, mid = self._setup(tmp)
+            archived = store.archive_member(wid, mid)
+            self.assertEqual(archived.status, "archived")
+            frame = loop.enqueue_agent_session_close(wid, mid)
+            self.assertEqual(frame.type, "agent.session.close")
+            self.assertEqual(frame.payload["agent_id"], "agent-b")
 
 
 if __name__ == "__main__":

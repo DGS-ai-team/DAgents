@@ -62,7 +62,6 @@ func (o *Orchestrator) buildMemoryInjection(ctx context.Context, sessionID strin
 		Position:    "after_current_user",
 		MessageKind: llm.MessageSourceMemory,
 		MessageForm: llm.MessageFormSnapshot,
-		LegacyName:  llm.UserNameMemoryContext,
 	}
 	return &snapshot, injection
 }

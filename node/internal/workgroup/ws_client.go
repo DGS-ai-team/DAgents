@@ -5,8 +5,7 @@ import (
 	"time"
 )
 
-// ClientSession 将本地 Session 与 Manage 侧 hello/resume 载荷对齐（无真实拨号）。
-// 真实 net.Conn/WebSocket 拨号可在后续挂到 Dialer；D3 先固化帧处理契约。
+// ClientSession 将本地 Session 与 Manage 侧 hello/resume 载荷对齐。
 type ClientSession struct {
 	Worker     *Worker
 	OnRealtime func(map[string]any)
@@ -19,14 +18,13 @@ func (c *ClientSession) BuildHello() map[string]any {
 	return map[string]any{
 		"type": "session.hello",
 		"payload": map[string]any{
-			"node_id":                c.Worker.NodeID,
-			"protocol_version":       ProtocolVersion,
-			"schema_version":         SchemaVersion,
-			"last_ack_delivery_seq":  cur.LastAckDeliverySeq,
-			"connection_generation":  gen,
-			"agent_catalog_revision": c.Worker.CatalogRevision,
-			"capabilities":           append([]string(nil), c.Worker.Capabilities...),
-			"client_time":            time.Now().UTC().Format(time.RFC3339Nano),
+			"node_id":               c.Worker.NodeID,
+			"protocol_version":      ProtocolVersion,
+			"schema_version":        SchemaVersion,
+			"last_ack_delivery_seq": cur.LastAckDeliverySeq,
+			"connection_generation": gen,
+			"capabilities":          append([]string(nil), c.Worker.Capabilities...),
+			"client_time":           time.Now().UTC().Format(time.RFC3339Nano),
 		},
 	}
 }
@@ -38,9 +36,6 @@ func (c *ClientSession) ApplyWelcome(payload map[string]any) {
 		c.Worker.Session.ConnectionGeneration = g
 		c.Worker.Session.Active = true
 		c.Worker.Session.mu.Unlock()
-		c.Worker.mu.Lock()
-		c.Worker.Commands.ConnectionGeneration = g
-		c.Worker.mu.Unlock()
 	}
 }
 
@@ -48,33 +43,25 @@ func (c *ClientSession) ApplyWelcome(payload map[string]any) {
 func (c *ClientSession) HandleIncomingJSON(raw []byte) (*DispatchResult, error) {
 	var loose map[string]any
 	if err := json.Unmarshal(raw, &loose); err == nil {
-		if t, _ := loose["type"].(string); t == "workgroup.realtime" {
+		switch t, _ := loose["type"].(string); t {
+		case "workgroup.realtime":
 			if c.OnRealtime != nil {
 				if payload, ok := loose["payload"].(map[string]any); ok {
 					c.OnRealtime(payload)
 				}
 			}
 			return &DispatchResult{Handled: true}, nil
-		}
-	}
-	var env WSEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		// 控制面消息（welcome/resume）不是完整 WSEnvelope
-		loose = nil
-		if err2 := json.Unmarshal(raw, &loose); err2 != nil {
-			return nil, errf(CodeSchemaMismatch, "invalid json: %v", err)
-		}
-		t, _ := loose["type"].(string)
-		switch t {
 		case "session.welcome":
 			payload, _ := loose["payload"].(map[string]any)
 			c.ApplyWelcome(payload)
 			return &DispatchResult{Handled: true}, nil
 		case "resume.complete", "resume.error", "resume.batch", "delivery.acked", "session.error":
 			return &DispatchResult{Handled: true}, nil
-		default:
-			return nil, errf(CodeSchemaMismatch, "not a WSEnvelope: %v", err)
 		}
+	}
+	var env WSEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, errf(CodeSchemaMismatch, "invalid json: %v", err)
 	}
 	return c.Worker.DispatchEnvelope(env)
 }

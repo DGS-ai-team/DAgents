@@ -24,7 +24,7 @@ func testManager(t *testing.T) *Manager {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	return NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false, CompressionBlocking: 0, MultimodalEnabled: true}, logx.Discard())
 }
 
@@ -51,7 +51,7 @@ func TestCreateAndList(t *testing.T) {
 func TestEnqueueMessageTurn(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg, _ := tools.NewRegistry(t.TempDir(), 30)
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{}, logx.Discard())
 	defer mgr.Stop()
 
@@ -119,7 +119,7 @@ func TestEnqueueMessageMultimodalDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{MultimodalEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 	s, _, _ := mgr.Create("")
@@ -137,7 +137,7 @@ func TestEnqueueMessageMultimodalDisabled(t *testing.T) {
 func TestCancelTurn(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg, _ := tools.NewRegistry(t.TempDir(), 30)
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &slowMockLLM{delay: 500 * time.Millisecond}, reg, pol, nil, TurnOptions{}, logx.Discard())
 	defer mgr.Stop()
 
@@ -153,7 +153,7 @@ func TestCancelTurn(t *testing.T) {
 func TestClearContextDoesNotRestoreStaleTurnBeforeFirstNewHumanMessage(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg, _ := tools.NewRegistry(t.TempDir(), 30)
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &slowMockLLM{delay: 2 * time.Second}, reg, pol, nil, TurnOptions{}, logx.Discard())
 	defer mgr.Stop()
 
@@ -199,26 +199,6 @@ func TestClearContextDoesNotRestoreStaleTurnBeforeFirstNewHumanMessage(t *testin
 	}
 }
 
-func TestCancelTurnDoesNotCreateDetachedBashJobs(t *testing.T) {
-	mgr := testManager(t)
-	defer mgr.Stop()
-
-	s, _, err := mgr.Create("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := mgr.SessionTools(s.ID)
-	if reg == nil {
-		t.Fatal("session tool registry is nil")
-	}
-	if _, err := reg.StartBackground(tools.WithSession(context.Background(), s.ID), s.ID, "bash_run", "call-detached", `{"command":"sleep 30"}`); err == nil {
-		t.Fatal("bash_run must not create a detached background job")
-	}
-	if mgr.CancelTurn(s.ID) {
-		t.Fatal("idle cancel should not report a detached bash job")
-	}
-}
-
 type slowMockLLM struct {
 	delay time.Duration
 }
@@ -252,7 +232,7 @@ func TestPersistAfterTurn(t *testing.T) {
 
 	hub := stream.NewHub(32, logx.Discard())
 	reg, _ := tools.NewRegistry(t.TempDir(), 30)
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, st, TurnOptions{}, logx.Discard())
 	defer mgr.Stop()
 
@@ -310,7 +290,7 @@ func TestPersistTurnLifecycleBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, st, TurnOptions{SkillsEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 	s, _, err := mgr.Create("")
@@ -350,6 +330,23 @@ func TestPersistTurnLifecycleBoundaries(t *testing.T) {
 			t.Fatalf("missing lifecycle event %s in %#v", eventType, events)
 		}
 	}
+	lastSequence := events[len(events)-1].SessionSeq
+	mgr.Stop()
+	reloaded := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, st, TurnOptions{SkillsEnabled: false}, logx.Discard())
+	defer reloaded.Stop()
+	if _, created, err := reloaded.Create(s.ID); err != nil || created {
+		t.Fatalf("restore lifecycle runtime: created=%v err=%v", created, err)
+	}
+	rt := reloaded.getRuntime(s.ID)
+	if rt == nil {
+		t.Fatal("restored lifecycle runtime is nil")
+	}
+	if rt.lifecycleEventSequence() != lastSequence {
+		t.Fatalf("restored lifecycle sequence=%v want=%v", rt.lifecycleEventSequence(), lastSequence)
+	}
+	if snapshot := rt.turnCoordinator.Snapshot(); snapshot.TurnStatus != turn.TurnStatusCompleted || snapshot.StepStatus != turn.StepStatusCompleted {
+		t.Fatalf("restored terminal lifecycle projection=%+v", snapshot)
+	}
 }
 
 func TestPersistTurnLifecycleToolBatchBoundaries(t *testing.T) {
@@ -363,7 +360,7 @@ func TestPersistTurnLifecycleToolBatchBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{EnableTools: true}, reg, pol, st, TurnOptions{SkillsEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 	s, _, err := mgr.Create("")
@@ -427,7 +424,7 @@ func TestRestoreSessionFromStore(t *testing.T) {
 	st2, _ := store.Open(path)
 	defer st2.Close()
 	reg, _ := tools.NewRegistry(t.TempDir(), 30)
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", stream.NewHub(8, logx.Discard()), &llm.MockClient{}, reg, pol, st2, TurnOptions{}, logx.Discard())
 	defer mgr.Stop()
 
@@ -440,6 +437,34 @@ func TestRestoreSessionFromStore(t *testing.T) {
 		t.Fatalf("count=%d msgs=%d err=%v", count, len(messages), err)
 	}
 	_ = s
+}
+
+func TestLoadSessionDataReportsEmptyRecordWithoutSecondLookup(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "empty-session.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.Save(context.Background(), store.Record{AgentID: "sess-empty", NodeID: "agent-1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Manager{store: st, logger: logx.Discard()}
+	existing, err := m.loadSessionData("sess-empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !existing.Found {
+		t.Fatal("empty persisted session was reported as missing")
+	}
+
+	missing, err := m.loadSessionData("sess-missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing.Found {
+		t.Fatal("missing session was reported as found")
+	}
 }
 
 type captureMultimodalLLM struct {
@@ -483,10 +508,10 @@ func TestHumanMessageImageExpandedForLLM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	capture := &captureMultimodalLLM{ready: make(chan struct{})}
 	mgr := NewManager("agent-1", hub, capture, reg, pol, nil, TurnOptions{
-		FSRoot:            fsRoot,
+		WorkspaceRoot:     fsRoot,
 		SkillsEnabled:     false,
 		MultimodalEnabled: true,
 	}, logx.Discard())

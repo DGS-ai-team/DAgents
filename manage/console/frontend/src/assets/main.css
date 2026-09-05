@@ -569,88 +569,6 @@ code {
   color: var(--success);
 }
 
-/* legacy stats-row / stat-card（其它页若仍引用） */
-.stats-row {
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.stat-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  box-shadow: var(--shadow-sm);
-  transition: border-color var(--transition), background var(--transition);
-}
-
-.stat-card:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-surface);
-}
-
-.stat-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-
-.stat-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.stat-online .stat-icon {
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.stat-offline .stat-icon {
-  background: var(--warning-bg);
-  color: var(--warning);
-}
-
-.stat-total .stat-icon {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-
-.stat-peers .stat-icon {
-  background: var(--info-bg);
-  color: var(--info);
-}
-
-.stat-body {
-  min-width: 0;
-}
-
-.stat-label {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
-}
-
-.stat-card strong {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  color: var(--text);
-}
-
 /* ── Panels ── */
 .panel {
   background: var(--bg-surface);
@@ -2686,10 +2604,6 @@ code {
 
 /* ── Responsive ── */
 @media (max-width: 1100px) {
-  .stats-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .filters-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -2748,10 +2662,6 @@ code {
   .page-content--home {
     padding-left: 16px;
     padding-right: 16px;
-  }
-
-  .stats-row {
-    grid-template-columns: 1fr;
   }
 
   .nodes-status-meta {
@@ -5261,10 +5171,6 @@ code {
 
 .home-module-card[data-tone="workgroup"] {
   --module-accent: #3f6212;
-}
-
-.home-module-card[data-tone="templates"] {
-  --module-accent: var(--primary);
 }
 
 .home-module-card[data-tone="marketplace"] {

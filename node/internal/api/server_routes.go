@@ -6,10 +6,10 @@ import "github.com/DGS-ai-team/DAgents/node/internal/webui"
 // 各领域路由仍由对应文件实现，Server 只负责统一挂载顺序。
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.mux.HandleFunc("POST /v1/desktop/ui/focus", s.handleDesktopUIFocus)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /v1/desktop/runtime-config", s.handleDesktopRuntimeConfig)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
+	s.mux.HandleFunc("POST /v1/agent/update/apply", s.handlePlatformUpdateApply)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
 	s.registerMCPRoutes()
@@ -20,6 +20,7 @@ func (s *Server) registerRoutes() {
 	s.registerToolCallControlRoutes()
 	s.registerLinuxTransferRoutes()
 	s.registerUIAggregateRoutes()
+	s.registerPlatformRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()

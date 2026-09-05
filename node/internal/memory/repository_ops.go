@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -32,7 +31,7 @@ func (s *Store) get(ctx context.Context, id string, includeInactive bool) (Entry
 	return entries[0], nil
 }
 
-// List is used by the settings/API compatibility projection. Model recall
+// List is used by the settings API. Model recall
 // must use Recall/Search so it never accidentally injects inactive entries.
 func (s *Store) List(ctx context.Context, includeInactive bool) ([]Entry, error) {
 	where := `scope = ?`
@@ -387,77 +386,4 @@ func formatTimeValue(value time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
-}
-
-// ImportLegacy imports old entries exactly once. Existing IDs are preserved;
-// imported entries remain active and are assigned Core/Recall by the caller.
-func (s *Store) ImportLegacy(ctx context.Context, entries []Entry, digest string) (bool, error) {
-	var existing string
-	if err := s.db.QueryRowContext(ctx, `SELECT value FROM memory_meta WHERE key='legacy_import_digest'`).Scan(&existing); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if strings.TrimSpace(existing) != "" {
-		// The first successful import establishes the migration cut-over. The
-		// legacy projection is intentionally no longer a write source, so later
-		// edits to it (for example by an older binary) must not overwrite the
-		// Workspace database or make every settings read fail noisily.
-		return false, nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	for _, entry := range entries {
-		entry.Scope = s.scope
-		if entry.ID == "" {
-			entry.ID = newID("mem")
-		}
-		if strings.TrimSpace(entry.Content) == "" {
-			continue
-		}
-		if entry.Tier != TierCore && entry.Tier != TierRecall {
-			entry.Tier = TierRecall
-		}
-		if entry.Kind == "" {
-			entry.Kind = KindFact
-		}
-		if entry.Status == "" {
-			entry.Status = StatusActive
-		}
-		if entry.ContentHash == "" {
-			entry.ContentHash = hashText(entry.Content)
-		}
-		if entry.NormalizedText == "" {
-			entry.NormalizedText = normalizeText(entry.Content)
-		}
-		if entry.Revision <= 0 {
-			entry.Revision = 1
-		}
-		if entry.CreatedAt.IsZero() {
-			entry.CreatedAt = time.Now().UTC()
-		}
-		if entry.UpdatedAt.IsZero() {
-			entry.UpdatedAt = entry.CreatedAt
-		}
-		if err := insertEntryTx(ctx, tx, entry, s.ftsAvailable()); err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "unique constraint") {
-				continue
-			}
-			return false, err
-		}
-		if err := insertRevisionTx(ctx, tx, entry, "legacy_import"); err != nil {
-			return false, err
-		}
-		if _, err := s.nextRevision(ctx, tx); err != nil {
-			return false, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO memory_meta(key, value) VALUES ('legacy_import_digest', ?)`, strings.TrimSpace(digest)); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
 }

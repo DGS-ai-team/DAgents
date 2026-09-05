@@ -28,10 +28,7 @@ func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	cfg := &config.Config{
-		NodeID: "ops-linux-01",
-		Agent: config.AgentConfig{
-			Role: "compliance",
-		},
+		NodeID:      "ops-linux-01",
 		RuntimeRoot: filepath.Join(root, "runtime"),
 		Compression: config.CompressionConfig{
 			SilentTriggerTokens:   80000,
@@ -39,6 +36,7 @@ func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 		},
 	}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	cfg.ChildAgents.Enabled = true
 	return cfg
 }

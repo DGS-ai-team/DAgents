@@ -21,7 +21,7 @@ type Dialer struct {
 	ManageURL      string // http(s)://host:port
 	NodeID         string
 	Worker         *Worker
-	WorkgroupID    string   // 兼容：单组；hello 后对该组 resume.offer
+	WorkgroupID    string   // 可选：单组 resume.offer
 	WorkgroupIDs   []string // 静态多组订阅
 	ListWorkgroups func(ctx context.Context) ([]string, error)
 	OnRealtime     func(map[string]any)
@@ -51,7 +51,7 @@ func WSURL(manageURL string) (string, error) {
 }
 
 // Run 在 ctx 有效期内反复 ConnectAndServe：Manage 晚于 Node 启动、重启或短暂断线时
-// 能自动重连并 resume outbox，避免成员永久停在 provisioning（UI「配置中」）。
+// 能自动重连并 resume outbox，避免成员永久等待 Node 会话建立。
 // onDisconnect 在每次会话结束后、退避等待前调用（可为 nil）。
 func (d *Dialer) Run(ctx context.Context, onDisconnect func(err error, backoff time.Duration)) error {
 	backoff := time.Second

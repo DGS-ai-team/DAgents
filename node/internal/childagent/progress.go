@@ -326,7 +326,7 @@ func toolActivityInputSummaryFromArgs(toolName string, args map[string]any) stri
 	name := strings.ToLower(strings.TrimSpace(toolName))
 	keys := []string{}
 	switch name {
-	case "bash_run", "linux_exec", "terminal_command":
+	case "bash_run", "terminal_command":
 		keys = []string{"command", "cmd", "data"}
 	case "terminal_input":
 		keys = []string{"data", "command", "terminal_id"}
@@ -346,7 +346,7 @@ func toolActivityInputSummaryFromArgs(toolName string, args map[string]any) stri
 	}
 	allKeys := make([]string, 0, len(args))
 	for key := range args {
-		if key == "call_purpose" || key == "purpose" || key == "run_in_background" {
+		if key == "call_purpose" || key == "purpose" {
 			continue
 		}
 		allKeys = append(allKeys, key)

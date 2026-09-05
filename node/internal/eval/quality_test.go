@@ -25,7 +25,7 @@ func TestDefaultScenariosAreStableAndCoverBaseline(t *testing.T) {
 		}
 		previous = scenario.ID
 	}
-	for _, want := range []string{"bash-empty-output", "linux-exec-sequence", "async-callback", "cancel-fencing", "mutation-verification", "skill-catalog-boundary", "skill-load-ambiguous", "skill-load-boundary", "skill-load-diagnostics", "skill-unload-boundary"} {
+	for _, want := range []string{"bash-empty-output", "terminal-command-sequence", "async-callback", "cancel-fencing", "mutation-verification", "skill-catalog-boundary", "skill-load-ambiguous", "skill-load-boundary", "skill-load-diagnostics", "skill-unload-boundary"} {
 		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing baseline scenario %q", want)
 		}
@@ -37,14 +37,14 @@ func TestEvaluateScenarioChecksToolOrderAndEmptyOutput(t *testing.T) {
 	scenario := Scenario{
 		ID: "test",
 		Criteria: []Criterion{
-			{ID: "order", Kind: CheckToolCallOrder, Value: "terminal_config_list>linux_exec"},
+			{ID: "order", Kind: CheckToolCallOrder, Value: "terminal_config_list>terminal_command"},
 			{ID: "empty", Kind: CheckExplicitEmptyOutput},
 		},
 	}
 	result := EvaluateScenario(scenario, Trace{
 		ScenarioID:  "test",
-		ToolCalls:   []ToolCall{{Name: "terminal_config_list"}, {Name: "linux_exec"}},
-		ToolResults: []ToolResult{{Name: "linux_exec", Text: "[LINUX_RESULT] exit=0\nstdout_bytes=0", ExitCode: &exit}},
+		ToolCalls:   []ToolCall{{Name: "terminal_config_list"}, {Name: "terminal_command"}},
+		ToolResults: []ToolResult{{Name: "terminal_command", Text: `{"status":"succeeded","exit_code":0,"stdout":"","stdout_bytes":0}`, ExitCode: &exit}},
 	})
 	if !result.Passed {
 		t.Fatalf("result=%+v", result)

@@ -94,6 +94,8 @@
 
 ## 4. 重要的架构优化项
 
+> 本报告是 2026-08-17 的研究快照，不是当前 API 契约。文件名和实现已随清理变更；现行行为以 `node/internal/tools/`、工具 schema 和测试为准。
+
 ### 4.1 默认使用非 login shell
 
 DAgents 本地 Bash 使用 `bash -lc`，Harness 默认是 `bash -c`，Codex 也把 login shell 作为受配置控制的选项。login profile 会引入用户自定义 PATH、alias、函数、网络初始化、输出和副作用，降低 Agent 执行的可重复性，也会放大环境泄露问题。
@@ -149,6 +151,6 @@ DAgents 已有后台任务 SQLite 状态，这是优点，但当前应补充每 
 
 ## 6. 代码索引
 
-- DAgents：[bash_run_tool.go](../../node/internal/tools/bash_run_tool.go)、[bash_runner.go](../../node/internal/tools/bash_runner.go)、[bash_compress.go](../../node/internal/tools/bash_compress.go)、[execution.go](../../node/internal/tools/execution.go)、[bash_shell.go](../../node/internal/tools/bash_shell.go)、[linux_shell_provider.go](../../node/internal/tools/linux_shell_provider.go)、[linux_exec_tool.go](../../node/internal/tools/linux_exec_tool.go)。
+- DAgents：[bash_run_tool.go](../../node/internal/tools/bash_run_tool.go)、[bash_runner.go](../../node/internal/tools/bash_runner.go)、[bash_compress.go](../../node/internal/tools/bash_compress.go)、[execution.go](../../node/internal/tools/execution.go)、[shell_execution.go](../../node/internal/tools/shell_execution.go)、[linux_shell_provider.go](../../node/internal/tools/linux_shell_provider.go)。
 - Harness：[tool-bash](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/shell/tool-bash/src/index.ts)、[bash-local](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/shell/bash-local/src/index.ts)、[subprocess types](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/subprocess/subprocess/src/types.ts)、[terminal-bash](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/terminal/terminal-bash/src/session.ts)。
 - Codex：[shell handler](https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/tools/handlers/shell.rs)、[unified exec process](https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/unified_exec/process.rs)、[exec-server protocol](https://raw.githubusercontent.com/openai/codex/main/codex-rs/exec-server/README.md)、[environment policy](https://raw.githubusercontent.com/openai/codex/main/codex-rs/config/src/shell_environment_policy.rs)。

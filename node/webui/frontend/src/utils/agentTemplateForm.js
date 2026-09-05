@@ -13,18 +13,11 @@ function promptFieldEnabled(text) {
 
 export const BLANK_TEMPLATE_ID = "__blank__";
 
-const LEGACY_TOOL_GROUP_ALIASES = Object.freeze({ linux: "terminal" });
-
-export function canonicalToolGroupName(value) {
-  const name = String(value || "").trim();
-  return LEGACY_TOOL_GROUP_ALIASES[name] || name;
-}
-
 export function normalizeToolGroupNames(groups) {
   const seen = new Set();
   const out = [];
   for (const value of Array.isArray(groups) ? groups : []) {
-    const name = canonicalToolGroupName(value);
+    const name = String(value || "").trim();
     if (!name || seen.has(name)) continue;
     seen.add(name);
     out.push(name);
@@ -48,22 +41,12 @@ export const TOOL_GROUPS = [
 
 /**
  * 按 Node 能力过滤可展示的工具组。
- * 优先使用 setup.available_tool_groups；否则按 features.browser_enabled / wecom_enabled 回退。
+ * available_tool_groups 是当前 Node 的唯一能力清单；空数组也表示确实没有可用工具组。
  */
 export function toolGroupsFromSetup(setup, all = TOOL_GROUPS) {
-  const names = Array.isArray(setup?.available_tool_groups)
-    ? normalizeToolGroupNames(setup.available_tool_groups)
-    : null;
-  if (names && names.length) {
-    const allow = new Set(names);
-    return all.filter((g) => allow.has(g.name));
-  }
-  const features = setup?.features && typeof setup.features === "object" ? setup.features : {};
-  return all.filter((g) => {
-    if (g.name === "browser") return !!features.browser_enabled;
-    if (g.name === "wecom") return !!features.wecom_enabled;
-    return true;
-  });
+  const names = normalizeToolGroupNames(setup?.available_tool_groups);
+  const allow = new Set(names);
+  return all.filter((g) => allow.has(g.name));
 }
 
 /** 将 draft.toolGroups 限制在 available 清单内（就地修改）。 */
@@ -79,7 +62,7 @@ export function pruneDraftToolGroups(draft, availableGroups) {
   draft.toolGroups = normalizeToolGroupNames(cur).filter((n) => allow.has(n));
 }
 
-export const LONG_TERM_SCOPES = [
+export const MEMORY_SCOPES = [
   { value: "agent", label: "仅本智能体" },
   { value: "global", label: "本机所有智能体共享" },
 ];
@@ -92,17 +75,16 @@ export function emptyAgentDraft() {
     description: "",
     role: "assistant",
     llmProfileId: "",
-    maxToolLoops: 32,
+    maxSteps: 32,
     toolGroups: [],
     // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
     visibleSkills: null,
     promptSoulEnabled: true,
     promptCustomEnabled: true,
-    promptLongTermEnabled: true,
-    promptLongTermScope: "agent",
+    promptMemoryScope: "agent",
     promptSoulMd: "",
     promptCustomMd: "",
-    // 工作目录是创建时的 placement，创建后不可修改。
+    // 工作目录在创建时确定，创建后不可修改。
     workspaceMode: "private",
     workspacePath: "",
   };
@@ -143,7 +125,7 @@ export function skillsEnabledFromToolGroups(toolGroups) {
   return groups.some((g) => String(g || "").trim() === "skills");
 }
 
-/** 启用「记忆」工具组即视为开启长期记忆注入。 */
+/** 启用「记忆」工具组即视为开启自动记忆召回。 */
 export function memoryEnabledFromToolGroups(toolGroups) {
   const groups = Array.isArray(toolGroups) ? toolGroups : [];
   return groups.some((g) => String(g || "").trim() === "memory");
@@ -202,13 +184,12 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.displayName = String(template?.display_name || template?.id || "").trim();
   draft.description = String(template?.description || agent.description || "").trim();
   draft.role = String(agent.role || "assistant").trim() || "assistant";
-  draft.maxToolLoops = numberOr(llm.max_tool_loops, 32);
+  draft.maxSteps = numberOr(llm.max_steps, 32);
   draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
-  draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
-  draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
+  draft.promptMemoryScope = String(prompt.memory_scope || "agent").trim() === "global" ? "global" : "agent";
   draft.promptSoulMd = String(prompt.soul_md || "").trim();
   draft.promptCustomMd = String(prompt.custom_md || "").trim();
 
@@ -237,15 +218,14 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.displayName = String(agent?.display_name || "").trim();
   draft.description = String(agentMeta.description || "").trim();
   draft.role = String(agentMeta.role || "assistant").trim() || "assistant";
-  draft.maxToolLoops = numberOr(llm.max_tool_loops, 32);
+  draft.maxSteps = numberOr(llm.max_steps, 32);
   draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
-  draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
-  draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
+  draft.promptMemoryScope = String(prompt.memory_scope || "agent").trim() === "global" ? "global" : "agent";
   const workspace = asObject(agent?.workspace || snap.workspace);
-  draft.workspaceMode = String(workspace.mode || "legacy_shared").trim() || "legacy_shared";
+  draft.workspaceMode = String(workspace.mode || "private").trim() || "private";
   draft.workspacePath = String(workspace.path || "").trim();
 
   const fromSnap = String(llm.active || "").trim();
@@ -282,7 +262,7 @@ export function buildCreateAgentPayload(draft) {
       },
       llm: {
         ...(llmActive ? { active: llmActive } : {}),
-        max_tool_loops: numberOr(draft.maxToolLoops, 32),
+        max_steps: numberOr(draft.maxSteps, 32),
       },
       tools: {
         enabled_groups: normalizeToolGroupNames(draft.toolGroups),
@@ -291,8 +271,8 @@ export function buildCreateAgentPayload(draft) {
       prompt_context: {
         soul_enabled: promptFieldEnabled(draft.promptSoulMd),
         custom_enabled: promptFieldEnabled(draft.promptCustomMd),
-        long_term_enabled: memoryEnabledFromToolGroups(draft.toolGroups),
-        long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
+        memory_enabled: memoryEnabledFromToolGroups(draft.toolGroups),
+        memory_scope: draft.promptMemoryScope === "global" ? "global" : "agent",
         ...(String(draft.promptSoulMd || "").trim()
           ? { soul_md: String(draft.promptSoulMd).trim() }
           : {}),
@@ -337,7 +317,7 @@ export function buildCreateTemplatePayload(meta, draft) {
       },
       llm: {
         ...(llmActive ? { active: llmActive } : {}),
-        max_tool_loops: numberOr(draft?.maxToolLoops, 32),
+        max_steps: numberOr(draft?.maxSteps, 32),
       },
       tools: {
         enabled_groups: normalizeToolGroupNames(draft?.toolGroups),
@@ -346,7 +326,8 @@ export function buildCreateTemplatePayload(meta, draft) {
       prompt_context: {
         soul_enabled: promptFieldEnabled(draft?.promptSoulMd),
         custom_enabled: promptFieldEnabled(draft?.promptCustomMd),
-        long_term_enabled: memoryEnabledFromToolGroups(draft?.toolGroups),
+        memory_enabled: memoryEnabledFromToolGroups(draft?.toolGroups),
+        memory_scope: draft?.promptMemoryScope === "global" ? "global" : "agent",
         ...(String(draft?.promptSoulMd || "").trim()
           ? { soul_md: String(draft.promptSoulMd).trim() }
           : {}),

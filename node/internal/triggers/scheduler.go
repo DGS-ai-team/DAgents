@@ -238,7 +238,7 @@ func (s *Scheduler) bindNewSession(def Definition, sessionID string, effectiveMo
 }
 
 func (s *Scheduler) resolveFireSession(ctx context.Context, def Definition, opts *FireOptions) (requestedSession string, effectiveMode SessionTargetMode, bindAfterFire bool, err error) {
-	mode := def.EffectiveSessionTargetMode()
+	mode := def.SessionTargetMode
 	fixedID := ""
 	if def.TargetSessionID != nil {
 		fixedID = strings.TrimSpace(*def.TargetSessionID)

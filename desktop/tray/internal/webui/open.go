@@ -19,9 +19,9 @@ func EnsureNodeAndOpen(
 	ctx context.Context,
 	layout *nodectl.Layout,
 	cfg *config.Config,
-	sessionID string,
+	agentID string,
 ) error {
-	return EnsureNodeAndOpenURL(ctx, layout, cfg, SessionURL(cfg.Local.Endpoint, sessionID))
+	return EnsureNodeAndOpenURL(ctx, layout, cfg, AgentURL(cfg.Local.Endpoint, agentID))
 }
 
 // EnsureNodeAndOpenURL 先 ensure Node 再打开指定 URL。
@@ -51,7 +51,7 @@ func OpenConsole(ctx context.Context, layout *nodectl.Layout, cfg *config.Config
 
 type bootstrapOnboarding struct {
 	Onboarding struct {
-		NodeProfileCompleted *bool `json:"node_profile_completed"`
+		NodeProfileCompleted bool `json:"node_profile_completed"`
 	} `json:"onboarding"`
 }
 
@@ -77,5 +77,5 @@ func nodeProfileIncomplete(ctx context.Context, endpoint string) bool {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return false
 	}
-	return body.Onboarding.NodeProfileCompleted != nil && !*body.Onboarding.NodeProfileCompleted
+	return !body.Onboarding.NodeProfileCompleted
 }

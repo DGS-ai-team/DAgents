@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -219,9 +218,9 @@ func (s *LocalService) List(ctx context.Context, scope Scope, includeInactive bo
 	return st.List(ctx, includeInactive)
 }
 
-// ReplaceAll is the control-plane write used by the compatibility settings
-// API. It deliberately bypasses semantic conflict detection because an
-// explicit settings save is an authoritative replacement of the projection.
+// ReplaceAll is the control-plane write used by the settings API. It
+// deliberately bypasses semantic conflict detection because an explicit
+// settings save is an authoritative replacement of the projection.
 func (s *LocalService) ReplaceAll(ctx context.Context, scope Scope, entries []Entry) error {
 	if scope != ScopeGlobal && scope != ScopeAgent {
 		scope = s.currentScope()
@@ -231,20 +230,6 @@ func (s *LocalService) ReplaceAll(ctx context.Context, scope Scope, entries []En
 		return err
 	}
 	return st.replaceAll(ctx, entries)
-}
-
-// ImportLegacy imports a legacy LongTermStore projection once. The digest is
-// persisted in the target database, making restarts and repeated runtime
-// construction idempotent.
-func (s *LocalService) ImportLegacy(ctx context.Context, scope Scope, entries []Entry, digest string) (bool, error) {
-	if scope != ScopeGlobal && scope != ScopeAgent {
-		scope = s.currentScope()
-	}
-	st, err := s.storeFor(scope)
-	if err != nil {
-		return false, err
-	}
-	return st.ImportLegacy(ctx, entries, digest)
 }
 
 func (s *LocalService) Search(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
@@ -633,27 +618,6 @@ func digest(snapshot Snapshot) string {
 		Recalled      []Reference `json:"recalled"`
 		Content       string      `json:"content"`
 	}{snapshot.Scope, snapshot.StoreRevision, snapshot.RootMessageID, snapshot.Core, snapshot.Recalled, snapshot.RenderedContent})
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-
-// DigestEntries returns a stable migration digest for a legacy projection.
-// Callers should calculate it from the complete scope-specific list before
-// invoking ImportLegacy.
-func DigestEntries(entries []Entry) string {
-	copyEntries := append([]Entry(nil), entries...)
-	// JSON map keys are deterministic, while the input ordering from legacy
-	// stores is not guaranteed to be stable across adapters.
-	sort.SliceStable(copyEntries, func(i, j int) bool {
-		if copyEntries[i].ID != copyEntries[j].ID {
-			return copyEntries[i].ID < copyEntries[j].ID
-		}
-		return copyEntries[i].Content < copyEntries[j].Content
-	})
-	raw, err := json.Marshal(copyEntries)
 	if err != nil {
 		return ""
 	}

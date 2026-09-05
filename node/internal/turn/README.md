@@ -10,7 +10,8 @@ Go Node **单 session turn 编排**：一次模型请求 + 工具批处理 + 分
 
 | 本包负责 | 本包不负责 |
 |----------|------------|
-| `Orchestrator`：LLM 流式、tool schema、工具执行、HITL 暂停 | 消息队列消费（`session.consumeLoop`） |
+| `Orchestrator`：LLM 流式、tool schema、工具执行、HITL 暂停，以及 provider-ready history 的边界校验 | 消息队列消费（`session.consumeLoop`） |
+| 取消栅栏：在 provider、assistant commit、工具和 continuation 边界阻止过期副作用 | 取消请求的接收、context cancel 和持久化调度 |
 | `BuildSystemPrompt`：每步 system prompt 拼接 | SQLite / 压缩触发时机（runtime 在步前调用 compression） |
 | 临时 Agent 工具转交 `childagent.Manager` | 子 runtime spawn（`session.SpawnChild`） |
 | 异步工具回灌 message 形态（`tool_result_messages.go`） | skills 目录配置（由 runtime 注入 `SkillAccess`） |
@@ -34,7 +35,7 @@ sequenceDiagram
     alt 有 tool_calls
         O->>O: processToolCalls (policy 分流)
         alt auto
-            O->>T: Execute（旧后台 wire 仅作兼容）
+            O->>T: Execute（同步工具调用）
             O-->>H: tool_call / tool_result SSE
             O-->>RT: ScheduleToolResult=true
         else HITL
@@ -45,13 +46,13 @@ sequenceDiagram
     end
 ```
 
-**构造**：`NewOrchestrator(agentID, workspaceRoot, hub, client, toolExec, policy, skillAccess, maxToolLoops, promptCtx, journal, logger)`
+**构造**：`NewOrchestrator(agentID, workspaceRoot, hub, client, toolExec, policy, skillAccess, promptCtx, journal, logger)`
 **事后注入**（由 `session.newRuntimeWithPublisher` 完成）：
 
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
 - `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
-`policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。超过上限时对后续 tool_calls 写入 soft `tool` 结果（见 `ToolLoopLimitExceededMessage`），不硬失败。
+`policy == nil` 时加载默认策略；Turn 步数上限由 Agent snapshot 的 `defaults.llm.max_steps` 装入 `TurnBudget.MaxSteps`，达到上限后由生命周期预算终止。
 
 ---
 
@@ -67,6 +68,20 @@ sequenceDiagram
 旁路 side-effect（Produce/Apply/Continue）见 [`side_effect_messages.go`](./side_effect_messages.go)、[`task_complete.go`](./task_complete.go)；session 侧 [`../session/side_effects.go`](../session/side_effects.go)。规格：[`../../../docs/design/turn-side-effects-refactor.md`](../../../docs/design/turn-side-effects-refactor.md)。
 
 每步返回 `StepOutcome`：`Pending`、`StepIndex`、`ScheduleToolResult`、`Err`。生产调用不再传递或维护独立的 tool-loop 计数。
+
+### 取消与消息完整性
+
+`runtime` 的 `TurnCoordinator` 是取消的唯一权威。`CommandCancelTurn` 在同一个持久化
+投影中收束非终态 Step、ToolExecution、ToolBatch 和 Pending Interaction；已经进入终态的
+工具执行保留其先提交的结果。编排器通过 `execution_fence.go` 在模型请求前、provider 返回后、
+assistant/tool-call 提交前、每个工具开始/返回后以及 continuation 前检查同一个
+`TurnExecutionContext`，因此迟到的 provider 或进程结果不会重新打开已取消的 Turn。
+
+取消中的 assistant/reasoning/tool-call 增量只是页面 Live Draft，不进入 `runtime.messages`。
+只有完整且通过 `llm.ValidateToolProtocol` 的 assistant batch 才能进入 canonical history；
+已提交的完整 tool call 在 Turn 取消时补一条 cancelled result，工具单独取消则允许当前
+Turn 继续请求模型。`MessageQueue` 只承载 resume、恢复和控制事件，不承载普通 tool result
+续跑。
 
 ---
 
@@ -101,11 +116,11 @@ sequenceDiagram
 
 ### 工具结果状态
 
-所有 `tool_result` SSE 都经过 `tools.ClassifyToolResult`，统一包含 `status`；失败时包含
+所有 `tool_result` SSE 都经过 `tools.ClassifyResult`，统一包含 `status`；失败时包含
 `error.code`、`error.message`、`error.retryable`。`rejected` 仅代表策略拒绝，不能再用于
 泛化判断执行失败。原始 `content` 不做全量 JSON 重包，以避免大输出额外消耗 token 并保持
-历史正文兼容；终端、浏览器、MCP、Linux SSH 等工具的专有证据仍在 `content`；旧后台 job 仅作为历史正文兼容
-中。模型继续请求时，tool history 的请求副本会在正文前增加 `[TOOL_RESULT_METADATA]`，因此模型
+历史正文保持原始格式；终端、浏览器、MCP、Linux SSH 等工具的专有证据仍在 `content`。模型
+继续请求时，tool history 的请求副本会在正文前增加 `[TOOL_RESULT_METADATA]`，因此模型
 也能读取统一状态；hydrate/UI 仍只展示原始正文。异步 side-effect 若客户端内容已被清洗，则使用
 `async_status` 覆盖事件状态。
 
@@ -116,7 +131,7 @@ sequenceDiagram
 
 **分步 resume**：Client 按 item 类型提交 `resume`（`type=user_information` 或 `type=approval|selection`）；Node `ContinueAfterResume` 部分消 pending，全部 resolved 后 `ScheduleToolResult`。
 
-**中继事件路径**：A2A caller 中继（`approval_required` / `user_information_required`）、子 Agent 审批 relay（`approval_required` + `child_agent_id`）。
+**中继事件路径**：子 Agent 审批 relay（`approval_required` + `child_agent_id`）。
 
 临时 Agent 四类工具在父 session 转 `childagent.Manager.HandleParentTool`；子 session 调用管理类工具会被拒绝。
 
@@ -126,13 +141,13 @@ sequenceDiagram
 
 ## Turn 状态
 
-| `State` | 含义 | Python `run_turn_phase` |
-|---------|------|---------------------------|
-| `idle` | 无活跃模型/工具步 | `idle` |
-| `model_streaming` | 正在流式请求 LLM | `model_streaming` |
-| `awaiting_tool` | 等待工具执行 | `awaiting_tool_execution` |
+| `State` | 含义 |
+|---------|------|
+| `idle` | 无活跃模型/工具步 |
+| `model_streaming` | 正在流式请求 LLM |
+| `awaiting_tool` | 等待工具执行 |
 
-映射函数：`RunTurnPhase`。
+对外状态统一使用 `turn_state`；不要再维护第二套 phase 名称映射。
 
 ---
 
@@ -143,9 +158,10 @@ sequenceDiagram
 | `orchestrator.go` | `Orchestrator`、单步 LLM 循环、usage |
 | `sse_publish.go` | 全部 SSE `publish*` 入口 |
 | `tool_router.go` | 工具分流（policy/childagent/skills/HITL）、并行执行 |
-| `cancel_partial.go` | 流式 cancel 部分 assistant 落库与 tool 补位 |
+| `cancel_partial.go` | 取消时完整 tool call 的协议闭合；不落盘流式 partial |
+| `execution_fence.go` | 运行时取消栅栏与工具完成/取消竞态判定 |
 | `history_write.go` | `appendHistory` / `insertHistory` |
-| `prompt.go` | `BuildSystemPrompt`、`staticSystemPrompt`、`DefaultMaxToolLoops` |
+| `prompt.go` | `BuildSystemPrompt`、`staticSystemPrompt` |
 | `pending.go` | `PendingHITL`、`PendingHITLItem`、`ToolUserInterruptedMessage` |
 | `hitl_payload.go` | `hitl_required` SSE 载荷 |
 | `pending_resume.go` | `ContinueAfterResume` 分步消 pending |

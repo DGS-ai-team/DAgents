@@ -26,7 +26,6 @@ const themeLabel = computed(() =>
 
 const primaryModules = [
   { id: "workgroup", label: "工作组" },
-  { id: "templates", label: "Agent 模板" },
   { id: "marketplace", label: "能力市场" },
 ];
 

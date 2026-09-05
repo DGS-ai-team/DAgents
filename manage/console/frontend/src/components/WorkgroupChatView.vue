@@ -7,6 +7,7 @@ import {
   fetchWorkgroupACL,
   fetchWorkgroupMembers,
   fetchWorkgroupTimeline,
+  streamWorkgroupEvents,
   fetchWorkgroupHumanQueue,
   patchWorkgroupHumanQueueItem,
   cancelWorkgroupHumanQueueItem,
@@ -44,7 +45,6 @@ const cancellingTool = ref("");
 const humanQueueItems = ref([]);
 const editingQueueId = ref("");
 const editQueueDraft = ref("");
-let queuePollTimer = null;
 const timeline = ref([]);
 const members = ref([]);
 const nodeDirectory = ref([]);
@@ -100,18 +100,30 @@ const title = computed(() => {
 
 const canChat = computed(() => String(workgroupStatus.value || "") === "active");
 const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
-const hitlMode = computed(() => Boolean(activeHitl.value));
+const activeHitlMetadata = computed(() =>
+  activeHitl.value?.metadata && typeof activeHitl.value.metadata === "object"
+    ? activeHitl.value.metadata
+    : {},
+);
+const activeHitlSource = computed(() =>
+  String(activeHitlMetadata.value.source || activeHitl.value?.source || "").trim(),
+);
+const activeHitlApprovalItems = computed(() =>
+  workgroupApprovalItemsFromMetadata(activeHitlMetadata.value),
+);
+const activeHitlIsApproval = computed(() => {
+  const kind = String(activeHitl.value?.kind || "").trim();
+  return kind === "tool_approval" || activeHitlApprovalItems.value.length > 0;
+});
 const memberApprovalByAssign = computed(() => {
   const out = {};
   for (const hitl of pendingHitl.value || []) {
     const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
     const source = String(metadata.source || hitl?.source || "").trim();
     const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
+    if (source !== "agent_ref") continue;
     const items = workgroupApprovalItemsFromMetadata(metadata);
-    // AgentRef approvals are authoritative when source is present.  For data
-    // written by an older Manage version, assign_id + execute_tool items are
-    // enough to distinguish them from Supervisor's ask_workgroup_user HITL.
-    if (!assignId || (source !== "agent_ref" && items.length === 0)) continue;
+    if (!assignId || items.length === 0) continue;
     const current = out[assignId];
     const currentAt = String(current?.created_at || "");
     const nextAt = String(hitl?.created_at || "");
@@ -123,11 +135,22 @@ const memberApprovalByAssign = computed(() => {
 });
 const supervisorHitl = computed(() => {
   const hitl = activeHitl.value;
-  const metadata = hitl?.metadata && typeof hitl.metadata === "object" ? hitl.metadata : {};
-  const source = String(metadata.source || hitl?.source || "").trim();
-  const assignId = String(metadata.assign_id || hitl?.assign_id || "").trim();
-  const hasMemberApprovalItems = workgroupApprovalItemsFromMetadata(metadata).length > 0;
-  return hitl && source !== "agent_ref" && !(assignId && hasMemberApprovalItems) ? hitl : null;
+  return hitl && activeHitlSource.value !== "agent_ref" && !activeHitlIsApproval.value ? hitl : null;
+});
+const memberQuestionHitl = computed(() => {
+  const hitl = activeHitl.value;
+  return hitl && activeHitlSource.value === "agent_ref" && !activeHitlIsApproval.value ? hitl : null;
+});
+// HITL has two different user experiences: questions are answered in the
+// composer, while tool approvals are resolved on the task card itself.
+const hitlMode = computed(() => Boolean(supervisorHitl.value || memberQuestionHitl.value));
+const approvalMode = computed(() => Boolean(activeHitl.value && activeHitlIsApproval.value));
+const hitlQuestion = computed(() => supervisorHitl.value || memberQuestionHitl.value);
+const hitlQuestionActor = computed(() => {
+  if (supervisorHitl.value) return "Supervisor";
+  const memberId = String(activeHitlMetadata.value.member_id || "").trim();
+  const member = (members.value || []).find((item) => String(item?.member_id || "") === memberId);
+  return String(member?.display_name || "成员").trim() || "成员";
 });
 const debugLlmBadge = computed(() => {
   const mode = String(debugLlm.value?.mode || "").trim();
@@ -143,6 +166,7 @@ const canSubmit = computed(() => {
   if (hitlMode.value) {
     return canChat.value && Boolean(hitlDraft.value.trim()) && !hitlBusy.value;
   }
+  if (approvalMode.value) return false;
   // 忙碌时仍可发送：进入 Manage human 队列（Cursor 风）
   return canChat.value && Boolean(input.value.trim()) && Boolean(fromNodeId.value.trim());
 });
@@ -167,7 +191,8 @@ const nodeNameById = computed(() => {
 
 const statusLabel = computed(() => {
   if (!sending.value) {
-    if (hitlMode.value) return "Supervisor 正在询问…";
+    if (supervisorHitl.value) return "Supervisor 正在询问…";
+    if (memberQuestionHitl.value) return `${hitlQuestionActor.value} 正在询问…`;
     return "";
   }
   const watermark = statusWatermarkSeq.value || 0;
@@ -264,10 +289,7 @@ function isDirectAssignEvent(ev) {
   // member-owned assign_finished events when it is cancelled, and those
   // events must remain attached to the normal task card.
   if (String(ev?.direct_member_id || "").trim()) return true;
-  // Compatibility for timelines written before direct_member_id was added.
-  // The direct assign_started text was never used by Supervisor assignments.
-  const text = String(ev?.text || "").trim();
-  return String(ev?.type || "") === "assign_started" && text.startsWith("直达");
+  return false;
 }
 
 /** 只有结构化直达事件才高亮 @成员；普通文本中的 @ 保持原样。 */
@@ -304,7 +326,7 @@ function previewMemberReport(text) {
   return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw;
 }
 
-/** 解析编排态 assign_started：新格式 `@名\\n任务`；兼容旧 `→ 名 · 摘要` */
+/** 解析编排态 assign_started：`@名\\n任务`。 */
 function parseAssignStartedText(text) {
   const raw = String(text || "").trim();
   if (!raw) return { mention: "", taskText: "分派任务" };
@@ -315,18 +337,6 @@ function parseAssignStartedText(text) {
       mention: String(atMatch[1] || "").trim(),
       taskText: String(atMatch[2] || "").trim() || "分派任务",
     };
-  }
-
-  const arrow = raw.match(/^→\s*(.+?)\s*·\s*([\s\S]*)$/);
-  if (arrow) {
-    return {
-      mention: String(arrow[1] || "").trim(),
-      taskText: String(arrow[2] || "").trim() || "分派任务",
-    };
-  }
-
-  if (raw.startsWith("@")) {
-    return { mention: raw.slice(1).trim(), taskText: "分派任务" };
   }
 
   return { mention: "", taskText: raw };
@@ -405,8 +415,6 @@ function parseNoticeTool(text, fallbackToolName = "") {
     grep_files: "搜索内容",
     search_replace: "替换内容",
     bash_run: "执行命令",
-    background_job_status: "查看后台任务",
-    background_job_cancel: "取消后台任务",
   };
   const knownToolNames = new Set(Object.keys(purposeByTool));
   const purpose =
@@ -464,15 +472,12 @@ function workgroupApprovalItems(hitl) {
     });
 }
 
-function approvalForTool(assignId, toolCallId, toolName = "", allowNameFallback = false) {
+function approvalForTool(assignId, toolCallId) {
   const hitl = memberApprovalByAssign.value[String(assignId || "").trim()] || null;
   if (!hitl) return null;
   const callId = String(toolCallId || "").trim();
-  const name = String(toolName || "").trim();
   const items = workgroupApprovalItems(hitl);
-  const item =
-    items.find((entry) => callId && entry.callId === callId) ||
-    (allowNameFallback ? items.find((entry) => name && entry.name === name) : null);
+  const item = items.find((entry) => callId && entry.callId === callId);
   if (!item) return null;
   return {
     hitlId: String(hitl.hitl_id || hitl.id || ""),
@@ -570,29 +575,11 @@ function makeAssignRow(
       canCancel: !done && Boolean(assignId && toolCallId && (commandId || toolName === "bash_run")),
     };
   });
-  const legacySteps = noticeList.map((ev, idx) => {
-    const p = parseNoticeTool(ev?.text);
-    const isLast = idx === noticeList.length - 1;
-    const done = Boolean(finished) || !isLast;
-    return {
-      key: ev.event_id || `step-${ev.seq || idx}`,
-      toolName: p.toolName,
-      toolKind: toolKindLabel(p.toolName),
-      summary: p.summary,
-      statusText: !done ? "执行中" : failed && isLast ? "已中断" : "已完成",
-      done,
-      failed: Boolean(failed && done && isLast),
-      inProgress: !done,
-      canCancel: false,
-    };
-  });
-  const steps = structuredStarts.length ? structuredSteps : legacySteps;
+  const steps = structuredSteps;
   const contentList = Array.isArray(assistantContents) ? assistantContents : [];
   const activity = [
     ...contentList.map((ev) => ({ kind: "content", ev })),
-    ...(structuredStarts.length
-      ? structuredStarts.map((ev) => ({ kind: "tool", ev }))
-      : noticeList.map((ev) => ({ kind: "tool", ev }))),
+    ...structuredStarts.map((ev) => ({ kind: "tool", ev })),
   ].sort((a, b) => Number(a.ev?.seq || 0) - Number(b.ev?.seq || 0));
   const stepByKey = new Map(steps.map((step) => [step.key, step]));
   const renderedSteps = activity.flatMap((entry, index) => {
@@ -630,16 +617,6 @@ function makeAssignRow(
       assignedApprovalByStep.set(step.key, item);
       matchedApprovalIds.add(item.callId);
     }
-  }
-  for (let i = renderedSteps.length - 1; i >= 0; i -= 1) {
-    const step = renderedSteps[i];
-    if (step.kind !== "tool" || step.toolCallId || assignedApprovalByStep.has(step.key)) continue;
-    const item = approvalItems.find(
-      (entry) => !matchedApprovalIds.has(entry.callId) && entry.name === step.toolName,
-    );
-    if (!item) continue;
-    assignedApprovalByStep.set(step.key, item);
-    matchedApprovalIds.add(item.callId);
   }
   let stepsWithApprovals;
   if (approvalItems.length > 1 && approvalHitl) {
@@ -778,7 +755,6 @@ function makeDirectToolRow(ev, { assignFinished, isLast, failed, toolFinished = 
   ].includes(finishStatus);
   const assignId = String(ev?.assign_id || "").trim();
   const toolCallId = String(ev?.tool_call_id || "").trim();
-  const toolName = String(ev?.tool_name || parsed.toolName || "").trim();
   return {
     key: ev.event_id || `tool-${ev.seq}`,
     kind: "tool",
@@ -795,7 +771,7 @@ function makeDirectToolRow(ev, { assignFinished, isLast, failed, toolFinished = 
     progress: false,
     assignId,
     toolCallId,
-    approval: approvalForTool(assignId, toolCallId, toolName, isLast),
+    approval: approvalForTool(assignId, toolCallId),
   };
 }
 
@@ -950,7 +926,11 @@ const displayGroups = computed(() => {
       }
     }
 
-    if (t === "assistant_content" && aid && !directAssignIds.has(aid)) {
+    // Direct-member assistant_content is a streaming preview of the same
+    // response that arrives canonically as actor_final_text.  Rendering both
+    // creates a duplicate answer after the assignment completes; tool
+    // progress still comes from structured tool events above.
+    if (t === "assistant_content" && aid) {
       continue;
     }
 
@@ -1078,7 +1058,7 @@ const mentionCandidates = computed(() => {
 });
 
 function onDraftInput(e) {
-  if (hitlMode.value) {
+  if (hitlMode.value || approvalMode.value) {
     resizeTextarea();
     return;
   }
@@ -1128,7 +1108,7 @@ function stripLeadingMention(text, displayName) {
 }
 
 function onComposerBackspace(e) {
-  if (hitlMode.value || !directMember.value) return;
+  if (hitlMode.value || approvalMode.value || !directMember.value) return;
   const el = e?.target;
   const start = el?.selectionStart ?? 0;
   const end = el?.selectionEnd ?? 0;
@@ -1182,7 +1162,6 @@ const aclPeople = computed(() => {
 
 function memberStatusLabel(status) {
   const map = {
-    requested: "已请求",
     provisioning: "配置中",
     ready: "就绪",
     busy: "忙碌",
@@ -1251,55 +1230,129 @@ async function loadNodeDirectory() {
   }
 }
 
-let workPollTimer = null;
-let workPollInFlight = null;
-let workPollQueued = false;
+let workgroupEventAbort = null;
+let workgroupEventRetryTimer = null;
+let workgroupEventGeneration = 0;
+let workgroupEventRetryAttempt = 0;
+let timelineCursor = 0;
+const seenTimelineEventIds = new Set();
 
-function stopWorkPoll() {
-  if (workPollTimer) {
-    clearInterval(workPollTimer);
-    workPollTimer = null;
-  }
-  workPollQueued = false;
+function resetTimelineCursor() {
+  timelineCursor = 0;
+  seenTimelineEventIds.clear();
 }
 
-function startWorkPoll() {
-  stopWorkPoll();
-  workPollTimer = window.setInterval(() => {
-    refreshTimelineQuiet();
-  }, 900);
+function updateTimelineCursor(events) {
+  for (const event of events || []) {
+    const eventId = String(event?.event_id || "").trim();
+    if (eventId) seenTimelineEventIds.add(eventId);
+    timelineCursor = Math.max(timelineCursor, Number(event?.seq || 0));
+  }
 }
 
-function refreshTimelineQuiet() {
-  if (!props.workgroupId) return Promise.resolve();
-  if (workPollInFlight) {
-    workPollQueued = true;
-    return workPollInFlight;
-  }
+function applyTimelineEvent(event) {
+  if (!event || String(event.workgroup_id || "") !== String(props.workgroupId || "")) return;
+  const eventId = String(event.event_id || "").trim();
+  if (eventId && seenTimelineEventIds.has(eventId)) return;
+  const seq = Number(event.seq || 0);
+  if (!eventId || seq <= 0) return;
 
-  const pollWorkgroupId = props.workgroupId;
-  const run = (async () => {
-    do {
-      workPollQueued = false;
-      try {
-        const reqSeq = ++timelineReqSeq;
-        const nextTimeline = await fetchWorkgroupTimeline(pollWorkgroupId);
-        if (reqSeq !== timelineReqSeq || pollWorkgroupId !== props.workgroupId) return;
-        await loadPendingHitl();
-        if (reqSeq !== timelineReqSeq || pollWorkgroupId !== props.workgroupId) return;
-        timeline.value = nextTimeline;
-        await nextTick();
-        scrollToBottom();
-      } catch {
-        /* ignore during live poll */
-      }
-    } while (workPollQueued && pollWorkgroupId === props.workgroupId);
-  })();
-  workPollInFlight = run;
-  run.finally(() => {
-    if (workPollInFlight === run) workPollInFlight = null;
+  // A gap means the browser missed an event while reconnecting. The durable
+  // snapshot repairs the complete projection; the current event is still
+  // merged immediately so the UI does not wait for the repair request.
+  if (timelineCursor > 0 && seq > timelineCursor + 1) {
+    void loadTimeline().catch(() => {});
+  }
+  const index = (timeline.value || []).findIndex(
+    (item) => String(item?.event_id || "") === eventId,
+  );
+  if (index >= 0) {
+    const next = [...timeline.value];
+    next[index] = event;
+    timeline.value = next;
+  } else {
+    timeline.value = [...(timeline.value || []), event].sort(
+      (a, b) => Number(a?.seq || 0) - Number(b?.seq || 0),
+    );
+  }
+  seenTimelineEventIds.add(eventId);
+  timelineCursor = Math.max(timelineCursor, seq);
+  if (event.type === "assign_started" || event.type === "assign_finished") {
+    void loadMembers().catch(() => {});
+  }
+  void nextTick().then(() => scrollToBottom());
+}
+
+function applyPendingHitlSnapshot(items) {
+  if (Array.isArray(items)) pendingHitl.value = items;
+}
+
+function onWorkgroupEvent(eventName, data) {
+  if (eventName === "ready") {
+    applyPendingHitlSnapshot(data?.pending_hitl);
+    workgroupEventRetryAttempt = 0;
+    return;
+  }
+  if (eventName === "timeline.event") {
+    applyTimelineEvent(data);
+    return;
+  }
+  if (eventName === "hitl.changed") {
+    applyPendingHitlSnapshot(data?.pending);
+    return;
+  }
+  if (eventName === "workgroup.realtime") {
+    const eventType = String(data?.event_type || "");
+    if (eventType === "queue") applyQueuePayload(data?.data || {});
+    return;
+  }
+  if (eventName === "workgroup.resync_required") {
+    void Promise.all([loadTimeline(), loadPendingHitl(), refreshHumanQueue()]);
+  }
+}
+
+function stopWorkgroupEventStream() {
+  workgroupEventGeneration += 1;
+  if (workgroupEventRetryTimer) {
+    clearTimeout(workgroupEventRetryTimer);
+    workgroupEventRetryTimer = null;
+  }
+  if (workgroupEventAbort) {
+    try {
+      workgroupEventAbort.abort();
+    } catch {
+      /* ignore */
+    }
+    workgroupEventAbort = null;
+  }
+}
+
+function scheduleWorkgroupEventStream() {
+  if (!props.active || !props.workgroupId || workgroupEventRetryTimer) return;
+  const delay = Math.min(10000, 500 * 2 ** Math.min(workgroupEventRetryAttempt, 4));
+  workgroupEventRetryAttempt += 1;
+  workgroupEventRetryTimer = window.setTimeout(() => {
+    workgroupEventRetryTimer = null;
+    startWorkgroupEventStream();
+  }, delay);
+}
+
+function startWorkgroupEventStream() {
+  if (!props.active || !props.workgroupId || workgroupEventAbort) return;
+  const controller = new AbortController();
+  const generation = ++workgroupEventGeneration;
+  workgroupEventAbort = controller;
+  streamWorkgroupEvents(props.workgroupId, {
+    afterSeq: timelineCursor,
+    onEvent: onWorkgroupEvent,
+    signal: controller.signal,
+  }).catch(() => {
+    /* reconnect below; initial snapshots remain authoritative */
+  }).finally(() => {
+    if (generation !== workgroupEventGeneration) return;
+    workgroupEventAbort = null;
+    scheduleWorkgroupEventStream();
   });
-  return run;
 }
 
 async function loadPendingHitl() {
@@ -1316,7 +1369,7 @@ async function submitHitlAnswer() {
   if (!hitl || !props.workgroupId || !answer || hitlBusy.value) return;
   hitlBusy.value = true;
   try {
-    await resolveWorkgroupHITL(props.workgroupId, hitl.hitl_id, answer);
+    await resolveWorkgroupHITL(props.workgroupId, hitl.hitl_id, { answer });
     hitlDraft.value = "";
     await loadPendingHitl();
     await loadTimeline();
@@ -1357,7 +1410,6 @@ async function resolveMemberApproval(approval, callId, approve) {
     await resolveWorkgroupHITL(
       props.workgroupId,
       hitlId,
-      approve ? "approve" : "reject",
       { type: "selection", approved, rejected },
     );
     await loadPendingHitl();
@@ -1454,6 +1506,7 @@ async function loadTimeline() {
     const nextTimeline = await fetchWorkgroupTimeline(requestedWorkgroupId);
     if (reqSeq !== timelineReqSeq || requestedWorkgroupId !== props.workgroupId) return;
     timeline.value = nextTimeline;
+    updateTimelineCursor(nextTimeline);
     await nextTick();
     scrollToBottom(true);
   } catch (err) {
@@ -1494,7 +1547,8 @@ async function loadAll() {
     loadPendingHitl(),
     refreshHumanQueue(),
   ]);
-  startQueuePoll();
+  // The durable event stream now owns live Timeline/HITL/queue updates.
+  startWorkgroupEventStream();
 }
 
 function resizeTextarea() {
@@ -1541,7 +1595,7 @@ function rememberCancelledMessageId(id) {
 async function cancelTurn() {
   // A pending HITL can be restored after a reload, when `sending` is false
   // while the workgroup turn is still awaiting a decision.
-  if (!props.workgroupId || (!sending.value && !hitlMode.value) || cancelling.value) return;
+  if (!props.workgroupId || (!sending.value && !hitlMode.value && !approvalMode.value) || cancelling.value) return;
   cancelling.value = true;
   try {
     rememberCancelledMessageId(activeClientMessageId);
@@ -1623,24 +1677,6 @@ function applyQueuePayload(data) {
   }
 }
 
-function startQueuePoll() {
-  stopQueuePoll();
-  queuePollTimer = setInterval(() => {
-    if (!props.active || !props.workgroupId) return;
-    void refreshHumanQueue();
-    if (sending.value || (humanQueueItems.value || []).length) {
-      void loadTimeline().catch(() => {});
-    }
-  }, 1500);
-}
-
-function stopQueuePoll() {
-  if (queuePollTimer) {
-    clearInterval(queuePollTimer);
-    queuePollTimer = null;
-  }
-}
-
 function beginEditQueued(item) {
   editingQueueId.value = String(item?.queue_id || "");
   editQueueDraft.value = String(item?.text || "");
@@ -1683,7 +1719,6 @@ async function sendQueuedNow(item) {
   try {
     await sendWorkgroupHumanQueueItemNow(props.workgroupId, qid);
     await refreshHumanQueue();
-    startQueuePoll();
   } catch (err) {
     emit("toast", { message: err.message || "send now failed", type: "error" });
   }
@@ -1694,6 +1729,7 @@ async function sendMessage() {
     await submitHitlAnswer();
     return;
   }
+  if (approvalMode.value) return;
   let text = input.value.trim();
   const sender = fromNodeId.value.trim();
   if (!props.workgroupId || !text || !sender || !canChat.value) return;
@@ -1735,7 +1771,6 @@ async function sendMessage() {
         },
       );
       await refreshHumanQueue();
-      startQueuePoll();
     } catch (err) {
       emit("toast", { message: err.message || "入队失败", type: "error" });
       input.value = stripLeadingMention(text, sentDirect?.display_name);
@@ -1760,13 +1795,10 @@ async function sendMessage() {
   streamMode.value = directId ? "direct" : "leader";
   streamActorId.value = directId || "leader";
   streamAbort = new AbortController();
-  startWorkPoll();
-  startQueuePoll();
   await nextTick();
   scrollToBottom(true);
 
   try {
-    let becameQueued = false;
     await postWorkgroupMessageStream(
       props.workgroupId,
       {
@@ -1780,7 +1812,6 @@ async function sendMessage() {
         onEvent: async (eventName, data) => {
           if (cancelledTurnMessageIds.has(clientMessageId)) return;
           if (eventName === "queued") {
-            becameQueued = true;
             applyQueuePayload(data);
             clearLive();
             return;
@@ -1830,9 +1861,9 @@ async function sendMessage() {
     clearLive();
     await loadTimeline();
     await loadPendingHitl();
+    await refreshMembersAfterAssignment();
     await refreshHumanQueue();
     if (debugOpen.value) await loadDebugRuns();
-    if (becameQueued) startQueuePoll();
   } catch (err) {
     const aborted = err?.name === "AbortError" || /abort/i.test(String(err?.message || ""));
     clearLive();
@@ -1845,11 +1876,11 @@ async function sendMessage() {
     }
     await loadTimeline().catch(() => {});
     await loadPendingHitl().catch(() => {});
+    await refreshMembersAfterAssignment();
     if (debugOpen.value) await loadDebugRuns().catch(() => {});
   } finally {
     if (activeClientMessageId === clientMessageId) activeClientMessageId = "";
     streamAbort = null;
-    stopWorkPoll();
     sending.value = false;
     cancelling.value = false;
     streamPhase.value = "";
@@ -1872,6 +1903,10 @@ function onKeydown(event) {
       submitHitlAnswer();
       return;
     }
+    if (approvalMode.value) {
+      event.preventDefault();
+      return;
+    }
     if (mentionOpen.value && mentionCandidates.value.length) {
       event.preventDefault();
       pickMention(mentionCandidates.value[0]);
@@ -1886,7 +1921,8 @@ watch(
   () => [props.active, props.workgroupId],
   ([active, id]) => {
     if (active && id) {
-      stopWorkPoll();
+      stopWorkgroupEventStream();
+      resetTimelineCursor();
       pendingHitlRefresh.reset();
       clearLive();
       expandedMemberReports.value = {};
@@ -1914,8 +1950,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  stopWorkPoll();
-  stopQueuePoll();
+  stopWorkgroupEventStream();
 });
 </script>
 
@@ -2481,17 +2516,17 @@ onUnmounted(() => {
             </div>
           </article>
         </template>
-        <article v-if="supervisorHitl" class="msg msg--assistant">
+        <article v-if="hitlQuestion" class="msg msg--assistant">
           <div class="msg__body msg__body--grouped">
             <div class="msg__hint">
               <span class="wg-chat__message-mark" aria-hidden="true">
                 <img :src="brandIcon" alt="" />
               </span>
-              Supervisor
+              {{ hitlQuestionActor }}
             </div>
             <div class="wg-hitl-bubble">
               <div class="wg-hitl-bubble__badge">询问</div>
-              <p class="wg-hitl-bubble__prompt">{{ supervisorHitl.prompt }}</p>
+              <p class="wg-hitl-bubble__prompt">{{ hitlQuestion.prompt }}</p>
               <p class="wg-hitl-bubble__hint">在下方输入框回答后 Enter 提交</p>
             </div>
           </div>
@@ -2607,7 +2642,7 @@ onUnmounted(() => {
         </div>
         <div class="chat__composer-pill" style="position: relative">
           <div
-            v-if="mentionOpen && mentionCandidates.length && canChat && !hitlMode"
+            v-if="mentionOpen && mentionCandidates.length && canChat && !hitlMode && !approvalMode"
             class="wg-mention-menu"
             role="listbox"
           >
@@ -2624,7 +2659,7 @@ onUnmounted(() => {
           </div>
           <div class="chat__composer-pill-center wg-composer-field">
             <button
-              v-if="directMember && !hitlMode"
+              v-if="directMember && !hitlMode && !approvalMode"
               type="button"
               class="wg-task__at wg-composer-at"
               :title="`取消 @${directMember.display_name}`"
@@ -2640,14 +2675,16 @@ onUnmounted(() => {
               rows="1"
               :placeholder="
                 hitlMode
-                  ? '回答 Supervisor 的问题…'
+                  ? `回答${hitlQuestionActor}的问题…`
+                  : approvalMode
+                    ? '请在上方审批卡片中处理…'
                   : !canChat
                     ? '发布后可输入消息…'
                     : directMember
                       ? '输入直达成员的任务…'
                       : '输入消息，@ 直达成员…'
               "
-              :disabled="hitlMode ? hitlBusy || !canChat : !canChat"
+              :disabled="hitlMode ? hitlBusy || !canChat : approvalMode ? true : !canChat"
               @keydown="onKeydown"
               @keydown.backspace="onComposerBackspace"
               @input="onDraftInput"
@@ -2655,7 +2692,7 @@ onUnmounted(() => {
           </div>
           <div class="chat__composer-pill-right">
             <button
-              v-if="sending || hitlMode"
+              v-if="sending || hitlMode || approvalMode"
               type="button"
               class="chat__composer-send chat__composer-send--cancel"
               :title="cancelling ? '正在取消…' : '取消本轮'"
@@ -2685,7 +2722,7 @@ onUnmounted(() => {
               </svg>
             </button>
             <button
-              v-if="!sending && !hitlMode"
+              v-if="!sending && !hitlMode && !approvalMode"
               type="button"
               class="chat__composer-send"
               title="发送"
@@ -2712,6 +2749,8 @@ onUnmounted(() => {
                 ? hitlBusy
                   ? "提交回答中…"
                   : "回答询问 · Enter 提交"
+                : approvalMode
+                  ? "工具审批 · 请在卡片中处理"
                 : directMember
                   ? "直达成员 · Enter 发送 · 点击 @ 取消"
                   : "Enter 发送 · @ 直达成员 · Shift+Enter 换行"

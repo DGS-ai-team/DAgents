@@ -30,18 +30,24 @@
 
 多个用户消息会进入工作组队列；同一成员的运行仍遵守单飞和状态 fencing。任务卡片展示成员、工具清单、运行状态和最终结果。
 
+每个任务卡片对应一个稳定的 `assign_id`。执行链同时显示父 Turn、成员 child Turn
+和当前 attempt 的生命周期；`assign_id` 不是 Turn ID。直接 `@成员` 与 Supervisor
+分派使用同一 Assign 状态模型，只是来源分别为 `direct_member` 与 `leader_tool`。
+
 ## 4. 审批与取消
 
-- 成员或 Supervisor 需要用户确认时，审批项进入工作组 HITL 列表；卡片必须关联到具体任务/工具，而不是只显示泛化的“需要审批”。
+- 成员或 Supervisor 需要用户确认时，交互进入工作组 HITL 列表；工具授权使用 `tool_approval`，成员提问使用 `user_question`。卡片必须关联到具体任务/工具，而不是只显示泛化的“需要审批”。
+- 同一 Assign 的批量工具授权只渲染一个审批卡片，卡片内部列出全部工具；刷新或重连不会再复制出多张审批卡片。
 - 多个工具审批可以逐项处理，也可以在协议允许时批量批准/拒绝；重复提交按 HITL id 幂等处理。
 - 取消工作组 turn 会停止编排和成员运行；迟到结果必须被 fencing 丢弃，不能复活已取消任务。
+- Node 重连会恢复同一个成员 child Turn 的事件订阅；不会把原始成员消息再次入队，也不会创建新的 Assign。
 - Timeline 是可恢复事实；`workgroup.realtime` 只用于思考、流式文本和工具运行等临时状态。刷新页面后应从 Timeline/HITL 快照恢复，而不是依赖浏览器内存。
 
 ## 5. 成员工具
 
-成员工具以 Node 实际能力和 Workgroup 工具策略的交集为准。默认优先使用文件工具，Shell 需要显式开启并遵守 Node policy。路径使用成员工作区相对路径，不允许通过 `..` 或主机绝对路径越界。
+成员工具、提示词和审批策略由绑定的 Node Agent 自己决定。Manage 只负责把工作组成员绑定到已有 Agent session，并转发 turn、取消、恢复和进度事件；路径约束以成员 Agent 的工作区规则为准。
 
-权威工具目录：[shared/workgroup/member_tool_catalog.json](../../shared/workgroup/member_tool_catalog.json)。详细字段和协议见 [Workgroup 契约](../design/workgroup-d05-contracts.md)。
+工作组协议只传递 Agent session 标识和 assignment 上下文，不在 Manage 侧复制成员工具目录或工具 schema。详细事件字段见 [Workgroup 契约](../design/workgroup-d05-contracts.md)。
 
 ## 6. 断线与排障
 

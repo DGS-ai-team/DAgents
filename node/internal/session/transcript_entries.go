@@ -226,6 +226,17 @@ func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall) Transcr
 		"id":           callID,
 		"content":      msg.Content,
 	}
+	if metadata := msg.ToolResultMetadata; metadata != nil {
+		data["status"] = metadata.Status
+		if metadata.Error != nil {
+			data["error"] = map[string]any{
+				"code":      metadata.Error.Code,
+				"message":   metadata.Error.Message,
+				"retryable": metadata.Error.Retryable,
+			}
+			data["retryable"] = metadata.Error.Retryable
+		}
+	}
 	if toolName != "" {
 		data["tool_name"] = toolName
 		data["name"] = toolName

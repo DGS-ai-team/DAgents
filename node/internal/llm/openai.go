@@ -84,6 +84,8 @@ type chatStreamChunk struct {
 }
 
 // StreamChat 调用 POST /chat/completions 并解析 SSE（含 tool_calls 增量合并）。
+// On context cancellation it may return an incomplete ChatResult. That result
+// is a live draft for the caller and must never be persisted as model history.
 func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {
 	if strings.TrimSpace(c.cfg.Model) == "" {
 		return ChatResult{}, fmt.Errorf("llm model is not configured")
@@ -95,6 +97,9 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	var body []byte
 	var err error
 	if len(req.APIMessages) > 0 {
+		if err := validateAPIMessages(req.APIMessages); err != nil {
+			return ChatResult{}, err
+		}
 		body, err = marshalChatRequestMap(map[string]any{
 			"model":          c.cfg.Model,
 			"messages":       req.APIMessages,
@@ -143,6 +148,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	var fullReasoning strings.Builder
 	toolAcc := newToolCallAccumulator()
 	var finishReason string
+	streamComplete := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -152,7 +158,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 			return ChatResult{
 				Content:          full.String(),
 				ReasoningContent: fullReasoning.String(),
-				ToolCalls:        toolAcc.finalize(),
+				ToolCalls:        toolAcc.aggregate(),
 			}, ctx.Err()
 		default:
 		}
@@ -165,6 +171,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "[DONE]" {
+			streamComplete = true
 			break
 		}
 		var chunk chatStreamChunk
@@ -216,10 +223,21 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return ChatResult{Content: full.String(), ToolCalls: toolAcc.finalize()}, err
+		return ChatResult{
+			Content:          full.String(),
+			ReasoningContent: fullReasoning.String(),
+			ToolCalls:        toolAcc.aggregate(),
+		}, err
+	}
+	if !streamComplete && strings.TrimSpace(finishReason) == "" {
+		return ChatResult{
+			Content:          full.String(),
+			ReasoningContent: fullReasoning.String(),
+			ToolCalls:        toolAcc.aggregate(),
+		}, fmt.Errorf("llm stream ended before completion: %w", io.ErrUnexpectedEOF)
 	}
 
-	tcs := toolAcc.finalize()
+	tcs := toolAcc.aggregate()
 	if finishReason == "" {
 		if len(tcs) > 0 {
 			finishReason = "tool_calls"
@@ -227,12 +245,63 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 			finishReason = "stop"
 		}
 	}
-	return ChatResult{
+	result := ChatResult{
 		Content:          full.String(),
 		ReasoningContent: fullReasoning.String(),
 		ToolCalls:        tcs,
 		FinishReason:     finishReason,
-	}, nil
+	}
+	if err := ValidateAssistantMessage(Message{
+		Role:             "assistant",
+		Content:          result.Content,
+		ReasoningContent: result.ReasoningContent,
+		ToolCalls:        result.ToolCalls,
+	}); err != nil {
+		// The provider stream ended normally, so preserve the typed protocol
+		// error for diagnostics but never let the caller treat this response as
+		// an executable assistant message.
+		return result, fmt.Errorf("invalid provider tool call: %w", err)
+	}
+	return result, nil
+}
+
+// validateAPIMessages closes the validation gap for adapters that already
+// serialized messages into the final provider shape. Content is deliberately
+// ignored here (it may be a string or multimodal array); tool protocol fields
+// are decoded into the shared internal representation and validated once.
+func validateAPIMessages(payloads []map[string]any) error {
+	if len(payloads) == 0 {
+		return nil
+	}
+	type apiMessage struct {
+		Role       string     `json:"role"`
+		ToolCalls  []ToolCall `json:"tool_calls"`
+		ToolCallID string     `json:"tool_call_id"`
+	}
+	messages := make([]Message, len(payloads))
+	for index, payload := range payloads {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return &HistoryValidationError{Violations: []HistoryViolation{{
+				Code:         "api_message_invalid",
+				MessageIndex: index,
+			}}}
+		}
+		var parsed apiMessage
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return &HistoryValidationError{Violations: []HistoryViolation{{
+				Code:         "api_message_invalid",
+				MessageIndex: index,
+				Detail:       "provider message fields are malformed",
+			}}}
+		}
+		messages[index] = Message{
+			Role:       parsed.Role,
+			ToolCalls:  parsed.ToolCalls,
+			ToolCallID: parsed.ToolCallID,
+		}
+	}
+	return ValidateToolProtocol(messages)
 }
 
 func appendReasoningDetail(full *strings.Builder, detail string) string {
@@ -352,7 +421,10 @@ func (a *toolCallAccumulator) snapshot() []ToolCall {
 	return out
 }
 
-func (a *toolCallAccumulator) finalize() []ToolCall {
+// aggregate returns the accumulated tool-call snapshot after the stream has
+// ended. It does not validate JSON arguments; the caller must decide whether
+// the stream ended successfully and then run ValidateAssistantMessage.
+func (a *toolCallAccumulator) aggregate() []ToolCall {
 	if len(a.order) == 0 {
 		return nil
 	}

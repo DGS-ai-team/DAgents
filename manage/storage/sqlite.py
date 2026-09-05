@@ -45,6 +45,9 @@ class SQLiteDatabase:
 
     def _init_schema(self) -> None:
         with self._lock, self.connect() as conn:
+            has_existing_tables = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1"
+            ).fetchone() is not None
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -91,7 +94,7 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (plugin_id, version)
                 );
-                -- Workgroup D1：组 / ACL / 成员 / Spec / Assign / Run
+                -- Workgroup：组 / ACL / 成员 / Assign / Run
                 CREATE TABLE IF NOT EXISTS workgroups (
                     id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
@@ -102,11 +105,6 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS workgroup_members (
-                    id TEXT PRIMARY KEY,
-                    workgroup_id TEXT NOT NULL,
-                    payload_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS member_specs (
                     id TEXT PRIMARY KEY,
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
@@ -175,15 +173,18 @@ class SQLiteDatabase:
                 "SELECT value FROM schema_meta WHERE key=?",
                 (SCHEMA_VERSION_KEY,),
             ).fetchone()
-            if row is not None:
+            if row is None:
+                if has_existing_tables:
+                    raise RuntimeError("Manage SQLite schema version is missing")
+            else:
                 try:
                     stored_version = int(row[0])
                 except (TypeError, ValueError) as exc:
                     raise RuntimeError("invalid Manage SQLite schema version") from exc
-                if stored_version > SCHEMA_VERSION:
+                if stored_version != SCHEMA_VERSION:
                     raise RuntimeError(
-                        f"Manage SQLite schema version {stored_version} is newer than "
-                        f"supported version {SCHEMA_VERSION}"
+                        f"Manage SQLite schema version {stored_version} is not supported; "
+                        f"expected {SCHEMA_VERSION}"
                     )
             conn.execute(
                 "INSERT INTO schema_meta(key,value) VALUES(?,?) "

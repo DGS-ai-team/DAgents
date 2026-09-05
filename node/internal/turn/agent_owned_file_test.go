@@ -42,9 +42,10 @@ func newAgentOwnedOrchestrator(t *testing.T, root string) *Orchestrator {
 		t.Fatal(err)
 	}
 	reg := testRegistryAt(t, root)
+	disabled := false
 	hub := stream.NewHub(8, logx.Discard())
-	return NewOrchestrator("a1", root, hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
-		Duplicate:      hooks.DuplicateConfig{Enabled: false},
+	return NewOrchestrator("a1", root, hub, &llm.MockClient{}, reg, engine, SkillAccess{}, nil, nil, hooks.RuntimeConfig{
+		Duplicate:      hooks.DuplicateConfig{Enabled: &disabled},
 		ToolResult:     hooks.DefaultToolResultConfig(root),
 		AgentOwnedFile: hooks.DefaultAgentOwnedFileConfig(),
 	}, logx.Discard())
@@ -57,14 +58,16 @@ func TestAgentOwnedFileTrustChain_autoAfterCreate(t *testing.T) {
 	sessionID := "sess-trust"
 
 	var history []llm.Message
-	pending, state, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{{
+	createCall := llm.ToolCall{
 		ID:   "call-create",
 		Type: "function",
 		Function: llm.ToolCallFunction{
 			Name:      "write_file",
 			Arguments: `{"path":"draft.txt","content":"v1","call_purpose":"create"}`,
 		},
-	}})
+	}
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{createCall}})
+	pending, state, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{createCall})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,14 +80,16 @@ func TestAgentOwnedFileTrustChain_autoAfterCreate(t *testing.T) {
 		t.Fatal("expected tool history after approve")
 	}
 
-	pending2, state2, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{{
+	editCall := llm.ToolCall{
 		ID:   "call-edit",
 		Type: "function",
 		Function: llm.ToolCallFunction{
 			Name:      "search_replace",
 			Arguments: `{"path":"draft.txt","old_string":"v1","new_string":"v2","call_purpose":"edit"}`,
 		},
-	}})
+	}
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{editCall}})
+	pending2, state2, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{editCall})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,19 +111,23 @@ func TestAgentOwnedFileTrustChain_existingFileAlwaysApproves(t *testing.T) {
 	ctx := context.Background()
 
 	var history []llm.Message
-	pending, state, err := orch.processToolCalls(ctx, "sess-1", &history, []llm.ToolCall{{
+	createCall := llm.ToolCall{
 		ID: "c1", Type: "function",
 		Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"readme.txt","content":"v2","call_purpose":"t"}`},
-	}})
+	}
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{createCall}})
+	pending, state, err := orch.processToolCalls(ctx, "sess-1", &history, []llm.ToolCall{createCall})
 	if err != nil || state != "awaiting_hitl" {
 		t.Fatalf("overwrite existing: state=%q err=%v", state, err)
 	}
 	continueResumeAndDrain(t, orch, ctx, "sess-1", &history, map[string]any{"type": "approve"}, pending, 0)
 
-	pending2, state2, err := orch.processToolCalls(ctx, "sess-1", &history, []llm.ToolCall{{
+	editCall := llm.ToolCall{
 		ID: "c2", Type: "function",
 		Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"readme.txt","content":"v3","call_purpose":"t"}`},
-	}})
+	}
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{editCall}})
+	pending2, state2, err := orch.processToolCalls(ctx, "sess-1", &history, []llm.ToolCall{editCall})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,10 +143,12 @@ func TestAgentOwnedFileTrustChain_externalMtimeChange(t *testing.T) {
 	sessionID := "sess-mtime"
 
 	var history []llm.Message
-	pending, _, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{{
+	createCall := llm.ToolCall{
 		ID: "c1", Type: "function",
 		Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"note.txt","content":"a","call_purpose":"t"}`},
-	}})
+	}
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{createCall}})
+	pending, _, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{createCall})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,10 +159,12 @@ func TestAgentOwnedFileTrustChain_externalMtimeChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pending2, state2, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{{
+	editCall := llm.ToolCall{
 		ID: "c2", Type: "function",
 		Function: llm.ToolCallFunction{Name: "search_replace", Arguments: `{"path":"note.txt","old_string":"a","new_string":"b","call_purpose":"t"}`},
-	}})
+	}
+	history = append(history, llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{editCall}})
+	pending2, state2, err := orch.processToolCalls(ctx, sessionID, &history, []llm.ToolCall{editCall})
 	if err != nil {
 		t.Fatal(err)
 	}

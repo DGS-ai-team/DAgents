@@ -16,6 +16,7 @@ type RunTaskOpts struct {
 	MaxSteps       int
 	Wait           bool // true：轮询至终态再返回
 	WaitTimeoutSec int  // Wait 时超时秒数；<=0 用默认 300s
+	LLM            *LLMSettings
 }
 
 // RunTask 向伴生 session 派发任务级浏览器自动化（sidecar browser_use.Agent）。
@@ -54,6 +55,7 @@ func (m *Manager) RunTaskWithOpts(ctx context.Context, sessionKey, task string, 
 		SessionKey: sessionKey,
 		Task:       task,
 		MaxSteps:   opts.MaxSteps,
+		LLM:        opts.LLM,
 	})
 	if err != nil || !out.OK || !opts.Wait {
 		return out, err

@@ -2,6 +2,20 @@ package browser
 
 import "encoding/json"
 
+// LLMSettings 为 Node 解析后的单次浏览器任务模型配置。
+// 它只在 Node 到本机 sidecar 的瞬时请求中传输，不作为 sidecar 配置落盘。
+type LLMSettings struct {
+	Provider          string `json:"provider"`
+	BaseURL           string `json:"base_url,omitempty"`
+	Model             string `json:"model"`
+	APIKeyEnv         string `json:"api_key_env,omitempty"`
+	APIKey            string `json:"api_key,omitempty"`
+	Mock              bool   `json:"mock,omitempty"`
+	MultimodalEnabled bool   `json:"multimodal_enabled,omitempty"`
+	Thinking          string `json:"thinking,omitempty"`
+	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
+}
+
 // Request 为 BrowserManager → dagents-browser 的内部请求（任务级 + session 生命周期）。
 type Request struct {
 	Op         string `json:"op"`
@@ -11,9 +25,10 @@ type Request struct {
 	ViewportH  int    `json:"viewport_height,omitempty"`
 	TimeoutMS  int    `json:"timeout_ms,omitempty"`
 	// 任务级伴生派发（op=run_task / task_status / task_cancel）
-	Task     string `json:"task,omitempty"`
-	TaskID   string `json:"task_id,omitempty"`
-	MaxSteps int    `json:"max_steps,omitempty"`
+	Task     string       `json:"task,omitempty"`
+	TaskID   string       `json:"task_id,omitempty"`
+	MaxSteps int          `json:"max_steps,omitempty"`
+	LLM      *LLMSettings `json:"llm,omitempty"`
 }
 
 // Response 为 dagents-browser → BrowserManager 的内部响应。

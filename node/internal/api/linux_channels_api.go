@@ -494,7 +494,7 @@ func linuxSecretSource(ref string) string {
 	case strings.HasPrefix(ref, "literal:"):
 		return "direct"
 	case ref != "":
-		return "legacy"
+		return "unknown"
 	default:
 		return "none"
 	}

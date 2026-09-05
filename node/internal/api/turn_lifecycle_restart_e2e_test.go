@@ -55,15 +55,12 @@ func seedLifecycleEvent(
 	}
 }
 
-func seedRestartRecord(t *testing.T, st *store.SQLiteStore, sessionID string, messages []llm.Message, pending *turn.PendingHITL) {
+func seedRestartRecord(t *testing.T, st *store.SQLiteStore, sessionID string, messages []llm.Message) {
 	t.Helper()
 	if err := st.Save(context.Background(), store.Record{
 		AgentID:  sessionID,
 		NodeID:   "restart-test-node",
 		Messages: messages,
-		RuntimeState: store.RuntimeState{
-			Pending: pending,
-		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +149,7 @@ func TestRestartRecoveryReconcileThroughHTTP(t *testing.T) {
 	seedRestartRecord(t, st, sessionID, []llm.Message{
 		{Role: "user", Content: "继续执行重启前的工具"},
 		assistant,
-	}, nil)
+	})
 	seedLifecycleEvent(t, st, sessionID, turnID, "", 1, turn.EventTurnStarted, "", "", "", map[string]any{
 		"generation": 1,
 	})
@@ -259,11 +256,10 @@ func TestRestartRecoveryResumeHITLThroughHTTP(t *testing.T) {
 		Function: llm.ToolCallFunction{Name: "ask_user_information", Arguments: `{"question":"部署环境是什么？"}`},
 	}
 	assistant := llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{call}}
-	pending := &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}}
 	seedRestartRecord(t, st, sessionID, []llm.Message{
 		{Role: "user", Content: "请确认部署环境"},
 		assistant,
-	}, pending)
+	})
 	seedLifecycleEvent(t, st, sessionID, turnID, "", 1, turn.EventTurnStarted, "", "", "", map[string]any{
 		"generation": 3,
 	})
@@ -278,6 +274,7 @@ func TestRestartRecoveryResumeHITLThroughHTTP(t *testing.T) {
 		"generation":           3,
 		"interaction_kind":     "user_information",
 		"interaction_revision": 1,
+		"interaction_payload":  turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}},
 	})
 
 	if err := st.Close(); err != nil {

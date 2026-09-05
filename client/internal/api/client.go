@@ -92,10 +92,8 @@ type AgentInfo struct {
 // AgentSummary 为 GET /v1/agents 列表项。
 type AgentSummary struct {
 	AgentID       string `json:"agent_id"`
-	SessionID     string `json:"session_id,omitempty"` // 兼容旧字段；等于 AgentID
 	Active        bool   `json:"active"`
 	HasActiveTurn bool   `json:"has_active_turn"`
-	RunTurnPhase  string `json:"run_turn_phase"`
 	UpdatedAt     string `json:"updated_at"`
 	MessageCount  int    `json:"message_count,omitempty"`
 	QueuePending  int    `json:"queue_pending,omitempty"`
@@ -108,7 +106,6 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 			AgentID       string `json:"agent_id"`
 			Active        bool   `json:"active"`
 			HasActiveTurn bool   `json:"has_active_turn"`
-			RunTurnPhase  string `json:"run_turn_phase"`
 			UpdatedAt     string `json:"updated_at"`
 		} `json:"agents"`
 	}
@@ -120,10 +117,8 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 		id := strings.TrimSpace(a.AgentID)
 		out = append(out, AgentSummary{
 			AgentID:       id,
-			SessionID:     id,
 			Active:        a.Active,
 			HasActiveTurn: a.HasActiveTurn,
-			RunTurnPhase:  a.RunTurnPhase,
 			UpdatedAt:     a.UpdatedAt,
 		})
 	}
@@ -140,7 +135,6 @@ type AgentContext struct {
 	QueuePending                        int                     `json:"queue_pending"`
 	HasActiveTurn                       bool                    `json:"has_active_turn"`
 	TurnState                           string                  `json:"turn_state"`
-	RunTurnPhase                        string                  `json:"run_turn_phase"`
 	SystemPrompt                        string                  `json:"system_prompt"`
 	SystemPromptEstimatedTokens         int                     `json:"system_prompt_estimated_tokens"`
 	SkillsCatalogEstimatedTokens        int                     `json:"skills_catalog_estimated_tokens"`
@@ -205,9 +199,6 @@ type AgentUpdateStatus struct {
 	Message          string         `json:"message,omitempty"`
 	ApplyCommand     string         `json:"apply_command"`
 	Asset            map[string]any `json:"asset,omitempty"`
-	Deprecated       bool           `json:"deprecated,omitempty"`
-	Delegate         string         `json:"delegate,omitempty"`
-	DesktopAPI       string         `json:"desktop_api,omitempty"`
 }
 
 // GetAgentUpdate 调用 GET /v1/agent/update。
@@ -253,7 +244,6 @@ type TranscriptEntry map[string]any
 // AgentHydrate 为 GET /v1/agents/{id}/hydrate 响应。
 type AgentHydrate struct {
 	AgentID       string            `json:"agent_id"`
-	RunTurnPhase  string            `json:"run_turn_phase"`
 	HasActiveTurn bool              `json:"has_active_turn"`
 	QueuePending  int               `json:"queue_pending"`
 	Transcript    []TranscriptEntry `json:"transcript"`

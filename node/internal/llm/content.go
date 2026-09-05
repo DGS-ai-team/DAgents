@@ -112,8 +112,8 @@ func NormalizeUserInputWithFileReferences(text string, parts []ContentPart, refs
 	return summary, out, normalizedRefs, nil
 }
 
-// BuildUserMessage 构造 role=user 消息；name 仅作为兼容字段，结构化来源
-// 由 MessageSourceForUserName 自动生成，空串仍不写入 wire name。
+// BuildUserMessage 构造 role=user 消息；name 作为可选的 provider 名称投影，
+// 结构化来源由 MessageSourceForUserName 自动生成，空串仍不写入 wire name。
 func BuildUserMessage(text string, parts []ContentPart, name string) (Message, error) {
 	summary, normalized, err := NormalizeUserInput(text, parts)
 	if err != nil {

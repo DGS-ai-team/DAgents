@@ -30,7 +30,7 @@ const policyRefreshKey = ref(0);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
 const agentMeta = ref(null);
-const savedLongTermScope = ref("agent");
+const savedMemoryScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
@@ -90,11 +90,11 @@ async function load() {
     if (promptCtx) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
       draft.promptCustomMd = String(promptCtx.custom_md || "");
-      savedLongTermScope.value =
-        String(promptCtx.long_term_scope || draft.promptLongTermScope || "agent").trim() === "global"
+      savedMemoryScope.value =
+        String(promptCtx.memory_scope || draft.promptMemoryScope || "agent").trim() === "global"
           ? "global"
           : "agent";
-      draft.promptLongTermScope = savedLongTermScope.value;
+      draft.promptMemoryScope = savedMemoryScope.value;
     }
   } catch (e) {
     error.value = e.message || "加载失败";
@@ -118,13 +118,13 @@ async function save() {
   try {
     const updated = await api.patchAgent(agentId.value, buildPatchAgentPayload(draft));
     agentMeta.value = updated;
-    const nextLongTermScope = draft.promptLongTermScope === "global" ? "global" : "agent";
+    const nextMemoryScope = draft.promptMemoryScope === "global" ? "global" : "agent";
     await api.putAgentPromptContext(agentId.value, {
       soul_md: draft.promptSoulMd || "",
       custom_md: draft.promptCustomMd || "",
-      long_term_scope: nextLongTermScope,
+      memory_scope: nextMemoryScope,
     });
-    savedLongTermScope.value = nextLongTermScope;
+    savedMemoryScope.value = nextMemoryScope;
     await api.reloadAgentRuntime(agentId.value);
     policyRefreshKey.value += 1;
     notifyConfigurationChanged("tools");
@@ -257,7 +257,7 @@ onUnmounted(() => stopConfigurationEvents());
       </section>
 
       <section v-else-if="activeSection === 'memory'" class="agent-detail__section agent-detail__section--first">
-        <MemoryPanel :agent-id="agentId" :scope="savedLongTermScope" />
+        <MemoryPanel :agent-id="agentId" :scope="savedMemoryScope" />
       </section>
 
       <section v-else-if="activeSection === 'resources'" class="agent-detail__section agent-detail__section--first">

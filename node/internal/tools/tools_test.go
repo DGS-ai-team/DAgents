@@ -33,10 +33,7 @@ func TestAllToolDefinitionsRequireCallPurpose(t *testing.T) {
 }
 
 func TestParseToolCallArgumentsStripsCallPurpose(t *testing.T) {
-	bg, cleaned := ParseToolCallArguments(`{"call_purpose":"probe port","command":"echo ok","run_in_background":true}`)
-	if !bg {
-		t.Fatal("expected background")
-	}
+	cleaned := ParseToolCallArguments(`{"call_purpose":"probe port","command":"echo ok"}`)
 	if strings.Contains(cleaned, "call_purpose") {
 		t.Fatalf("cleaned should omit call_purpose: %q", cleaned)
 	}

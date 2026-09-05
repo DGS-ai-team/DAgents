@@ -1,19 +1,12 @@
 package agentruntime
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
-
-func TestEffectiveFSRoot_alwaysNodeRoot(t *testing.T) {
-	snap := Snapshot{}
-	got := EffectiveFSRoot("/rt", "agt-1", snap)
-	if got != "/rt" {
-		t.Fatalf("got %q want /rt", got)
-	}
-}
 
 func TestEnabledToolGroups(t *testing.T) {
 	snap := Snapshot{Defaults: map[string]any{
@@ -66,8 +59,10 @@ func TestParseSnapshot_ignoresLegacySandbox(t *testing.T) {
 	if snap.TemplateID != "x" {
 		t.Fatalf("template_id=%q", snap.TemplateID)
 	}
-	if EffectiveFSRoot("/rt", "agt-1", snap) != "/rt" {
-		t.Fatal("legacy sandbox must not change FS root")
+	root, err := EffectiveWorkspaceRoot("/rt", "agt-1", snap.Workspace)
+	wantRoot, wantErr := filepath.Abs(filepath.Join("/rt", "agents", "agt-1", "workspace"))
+	if err != nil || wantErr != nil || root != wantRoot {
+		t.Fatalf("legacy sandbox must not change workspace placement: got %q want %q (err=%v)", root, wantRoot, err)
 	}
 	groups := EnabledToolGroups(snap)
 	if len(groups) != 1 || groups[0] != "fs" {
@@ -123,18 +118,18 @@ func TestEffectiveMultimodalEnabled_usesSnapshotCheckboxRegardlessOfModel(t *tes
 	}
 }
 
-func TestApplyDefaultsToTurnOptions_maxToolLoopsFromSnapshot(t *testing.T) {
+func TestApplyDefaultsToTurnOptions_maxStepsFromSnapshot(t *testing.T) {
 	var turn session.TurnOptions
 	ApplyDefaultsToTurnOptions(&turn, Snapshot{Defaults: map[string]any{
-		"llm": map[string]any{"max_tool_loops": float64(8)},
+		"llm": map[string]any{"max_steps": float64(8)},
 	}})
-	if turn.MaxToolLoops != 8 {
-		t.Fatalf("got %d want 8", turn.MaxToolLoops)
+	if turn.Budget.MaxSteps != 8 {
+		t.Fatalf("got %d want 8", turn.Budget.MaxSteps)
 	}
 	var empty session.TurnOptions
-	empty.MaxToolLoops = 99 // BaseTurn 值不得覆盖 Agent 缺省
+	empty.Budget.MaxSteps = 99 // BaseTurn 值不得覆盖 Agent 缺省
 	ApplyDefaultsToTurnOptions(&empty, Snapshot{})
-	if empty.MaxToolLoops != DefaultMaxToolLoops {
-		t.Fatalf("got %d want creation default %d", empty.MaxToolLoops, DefaultMaxToolLoops)
+	if empty.Budget.MaxSteps != DefaultMaxSteps {
+		t.Fatalf("got %d want creation default %d", empty.Budget.MaxSteps, DefaultMaxSteps)
 	}
 }

@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,7 +19,7 @@ type RuntimeSettings struct {
 	profileIDs        []string
 	Provider          string
 	BaseURL           string
-	APIKeyEnv         string // 兼容旧逻辑：无明文 key 时回退环境变量
+	APIKeyEnv         string // 未存储明文 key 时使用的环境变量
 	APIKey            string // 当前配置的明文 key（内存中，来自 SQLite 解密）
 	Model             string
 	Mock              bool
@@ -28,19 +30,18 @@ type RuntimeSettings struct {
 
 // LLMSettingsView 为 GET /v1/llm/settings 与 agent/info 嵌套字段。
 type LLMSettingsView struct {
-	ActiveProfile            string   `json:"active_profile,omitempty"`
-	Profiles                 []string `json:"profiles,omitempty"`
-	Provider                 string   `json:"provider"`
-	Model                    string   `json:"model"`
-	Mock                     bool     `json:"mock"`
-	MultimodalEnabled        bool     `json:"multimodal_enabled"`
-	ThinkingSupported        bool     `json:"thinking_supported"`
-	ReasoningEffortSupported bool     `json:"reasoning_effort_supported"`
-	ThinkingControl          string   `json:"thinking_control,omitempty"`
-	ThinkingLabel            string   `json:"thinking_label,omitempty"`
-	ThinkingSecondaryLabel   string   `json:"thinking_secondary_label,omitempty"`
-	Thinking                 string   `json:"thinking,omitempty"`
-	ReasoningEffort          string   `json:"reasoning_effort,omitempty"`
+	ActiveProfile          string   `json:"active_profile,omitempty"`
+	Profiles               []string `json:"profiles,omitempty"`
+	Provider               string   `json:"provider"`
+	Model                  string   `json:"model"`
+	Mock                   bool     `json:"mock"`
+	MultimodalEnabled      bool     `json:"multimodal_enabled"`
+	ThinkingSupported      bool     `json:"thinking_supported"`
+	ThinkingControl        string   `json:"thinking_control,omitempty"`
+	ThinkingLabel          string   `json:"thinking_label,omitempty"`
+	ThinkingSecondaryLabel string   `json:"thinking_secondary_label,omitempty"`
+	Thinking               string   `json:"thinking,omitempty"`
+	ReasoningEffort        string   `json:"reasoning_effort,omitempty"`
 }
 
 // LLMSettingsPatch 为 PATCH /v1/llm/settings 请求体（字段均可选）。
@@ -88,14 +89,13 @@ func (s *RuntimeSettings) Snapshot() LLMSettingsView {
 
 func (s *RuntimeSettings) snapshotLocked() LLMSettingsView {
 	view := LLMSettingsView{
-		ActiveProfile:            s.ActiveProfile,
-		Profiles:                 append([]string(nil), s.profileIDs...),
-		Provider:                 s.Provider,
-		Model:                    s.Model,
-		Mock:                     s.Mock,
-		MultimodalEnabled:        s.MultimodalEnabled,
-		ThinkingSupported:        ThinkingSupported(s.Provider),
-		ReasoningEffortSupported: ReasoningEffortSupported(s.Provider),
+		ActiveProfile:     s.ActiveProfile,
+		Profiles:          append([]string(nil), s.profileIDs...),
+		Provider:          s.Provider,
+		Model:             s.Model,
+		Mock:              s.Mock,
+		MultimodalEnabled: s.MultimodalEnabled,
+		ThinkingSupported: ThinkingSupported(s.Provider),
 	}
 	view.ThinkingControl, view.ThinkingLabel, view.ThinkingSecondaryLabel = ThinkingControlMetadata(s.Provider, s.Model)
 	if view.ThinkingSupported {
@@ -104,7 +104,7 @@ func (s *RuntimeSettings) snapshotLocked() LLMSettingsView {
 		} else {
 			view.Thinking = s.Thinking
 		}
-		if s.Thinking == "enabled" && view.ReasoningEffortSupported {
+		if s.Thinking == "enabled" && ReasoningEffortSupported(s.Provider) {
 			view.ReasoningEffort = s.ReasoningEffort
 		}
 	}
@@ -133,6 +133,30 @@ func (s *RuntimeSettings) APIKeyValue() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return strings.TrimSpace(s.APIKey)
+}
+
+// Fingerprint identifies the effective connection settings without exposing
+// the API key. It lets an Agent runtime detect a changed bound profile
+// without consulting process-global active-profile state.
+func (s *RuntimeSettings) Fingerprint() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%t\x00%t\x00%s\x00%s\x00%s",
+		strings.TrimSpace(s.Provider),
+		strings.TrimSpace(s.BaseURL),
+		strings.TrimSpace(s.APIKeyEnv),
+		strings.TrimSpace(s.Model),
+		s.Mock,
+		s.MultimodalEnabled,
+		strings.TrimSpace(s.Thinking),
+		strings.TrimSpace(s.ReasoningEffort),
+		strings.TrimSpace(s.APIKey),
+	)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // SetAPIKey 更新内存中的 API Key（切换配置 / 保存后调用）。

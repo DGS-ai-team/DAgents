@@ -1,22 +1,11 @@
 package pending
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
 )
-
-// ShouldSyncOnEvent SSE 事件是否应触发从 Node 同步待办表（F-E13）。
-func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
-	if !EventHasAgent(ev) {
-		return false
-	}
-	switch ev.Type {
-	case "hitl_required", "turn_finished":
-		return true
-	}
-	return false
-}
 
 // EventHasAgent 判断 SSE 是否带有可关联的 Agent/session。
 func EventHasAgent(ev nodeclient.StreamEvent) bool {
@@ -24,10 +13,27 @@ func EventHasAgent(ev nodeclient.StreamEvent) bool {
 }
 
 func eventAgentID(ev nodeclient.StreamEvent) string {
-	if id := trim(ev.AgentID); id != "" {
-		return id
+	return trim(ev.AgentID)
+}
+
+// ApplyNotificationChanged applies Node's complete notification projection.
+// Unlike the old event classifier, this does not infer unread/HITL state from
+// turn/tool event names and therefore cannot become stale when new event types
+// are added. A full agent snapshot remains the reconnect/initial hydrate path.
+func ApplyNotificationChanged(store *Store, ev nodeclient.StreamEvent) bool {
+	if store == nil || ev.Type != "notification_changed" || !EventHasAgent(ev) {
+		return false
 	}
-	return trim(ev.SessionID)
+	var payload struct {
+		HasUnread        bool `json:"has_unread"`
+		HasPendingHITL   bool `json:"has_pending_hitl"`
+		PendingHITLItems int  `json:"pending_hitl_items"`
+	}
+	raw, err := json.Marshal(ev.Data)
+	if err != nil || json.Unmarshal(raw, &payload) != nil {
+		return false
+	}
+	return store.ApplyNotification(eventAgentID(ev), payload.HasPendingHITL, payload.PendingHITLItems, payload.HasUnread)
 }
 
 // SyncFromAgents 用 GET /v1/agents 的 Node 真相源重建待办表（F-E10/E13）。
@@ -55,7 +61,6 @@ func SyncFromAgents(store *Store, agents []nodeclient.AgentSummary) bool {
 		}
 		incoming[id] = Entry{
 			AgentID:     id,
-			SessionID:   id,
 			DisplayName: trim(ag.DisplayName),
 			HITLItems:   items,
 			HasUnread:   ag.HasUnread,

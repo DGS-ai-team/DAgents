@@ -31,15 +31,13 @@ impl Store {
         let ttl = if ttl.is_zero() { DEFAULT_TTL } else { ttl };
         let source_id = source_id.trim();
         let agent_id = agent_id.trim();
+        if source_id.is_empty() {
+            return;
+        }
         let Ok(mut state) = self.inner.lock() else {
             return;
         };
         prune_expired(&mut state.claims);
-        let source_id = if source_id.is_empty() {
-            "legacy"
-        } else {
-            source_id
-        };
         if agent_id.is_empty() {
             state.claims.remove(source_id);
             return;

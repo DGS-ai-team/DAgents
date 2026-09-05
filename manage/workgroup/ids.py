@@ -1,4 +1,4 @@
-"""D0.5 前缀 ID 生成（26 位小写 hex，满足 [0-9a-z]{26}）。"""
+"""工作组实体 ID 生成（26 位小写 hex）。"""
 
 from __future__ import annotations
 
@@ -22,16 +22,20 @@ def member_id() -> str:
     return new_id("mb")
 
 
-def lease_id() -> str:
-    return new_id("ls")
-
-
 def assign_id() -> str:
     return new_id("as")
 
 
 def run_id() -> str:
     return new_id("rn")
+
+
+def turn_id() -> str:
+    return new_id("tr")
+
+
+def attempt_id() -> str:
+    return new_id("at")
 
 
 def event_id() -> str:

@@ -19,7 +19,7 @@ type TurnSource string
 const (
 	TurnSourceHuman      TurnSource = "human"
 	TurnSourceTrigger    TurnSource = "trigger"
-	TurnSourceA2A        TurnSource = "a2a"
+	TurnSourceChildAgent TurnSource = "child_agent"
 	TurnSourceSideEffect TurnSource = "side_effect"
 )
 
@@ -118,7 +118,7 @@ const (
 	InteractionStatusCancelled InteractionStatus = "cancelled"
 )
 
-// TurnBudget separates logical Turn limits from the legacy tool-loop counter.
+// TurnBudget contains the sole hard execution limits for one logical Turn.
 type TurnBudget struct {
 	MaxSteps            int           `json:"max_steps"`
 	MaxToolCalls        int           `json:"max_tool_calls"`
@@ -248,7 +248,7 @@ type ToolExecution struct {
 
 // PendingInteraction is the durable form of an external decision required
 // before a ToolExecution can continue. PendingHITL remains the wire/history
-// compatibility projection during migration.
+// wire/history projection used by the runtime and API.
 type PendingInteraction struct {
 	ID              string
 	TurnID          string
@@ -435,6 +435,9 @@ func NextStepStatus(current StepStatus, event EventType) (StepStatus, bool) {
 		if event == EventModelContextChanged {
 			return StepStatusCreated, true
 		}
+		if event == EventStepCancelled {
+			return StepStatusCancelled, true
+		}
 	case StepStatusRequesting:
 		switch event {
 		case EventModelRequestStarted:
@@ -460,6 +463,8 @@ func NextStepStatus(current StepStatus, event EventType) (StepStatus, bool) {
 			return StepStatusCompleted, true
 		case EventStepFailed:
 			return StepStatusFailed, true
+		case EventStepCancelled:
+			return StepStatusCancelled, true
 		}
 	case StepStatusExecutingTools:
 		switch event {
@@ -490,8 +495,11 @@ func NextStepStatus(current StepStatus, event EventType) (StepStatus, bool) {
 			return StepStatusCancelled, true
 		}
 	case StepStatusReadyForNext:
-		if event == EventStepCompleted {
+		switch event {
+		case EventStepCompleted:
 			return StepStatusCompleted, true
+		case EventStepCancelled:
+			return StepStatusCancelled, true
 		}
 	}
 	return current, false

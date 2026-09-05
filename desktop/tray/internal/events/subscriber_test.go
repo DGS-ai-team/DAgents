@@ -13,7 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
 )
 
-func TestPollLoopSyncsWithoutSSE(t *testing.T) {
+func TestSubscriberInitialSnapshotSyncsWithoutSSE(t *testing.T) {
 	var listCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -45,27 +45,10 @@ func TestPollLoopSyncsWithoutSSE(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	sub.Stop()
 
-	if listCalls.Load() < 1 {
-		t.Fatalf("list calls = %d, want >= 1", listCalls.Load())
+	if got := listCalls.Load(); got != 1 {
+		t.Fatalf("list calls = %d, want exactly one initial snapshot", got)
 	}
 	if store.Summary().AgentCount != 1 {
 		t.Fatalf("summary = %+v", store.Summary())
-	}
-}
-
-func TestShouldSyncWhileHITLPending(t *testing.T) {
-	store := pending.NewStore()
-	_ = pending.SyncFromAgents(store, []nodeclient.AgentSummary{
-		{AgentID: "agt-1", HasPendingHITL: true, PendingHITLItems: 1},
-	})
-	if !shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
-		t.Fatal("tool_result should sync while HITL pending")
-	}
-	if shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "assistant", AgentID: "agt-1"}) {
-		t.Fatal("assistant should not sync merely due to HITL pending")
-	}
-	_ = pending.SyncFromAgents(store, nil)
-	if shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
-		t.Fatal("no HITL pending should not sync on tool_result")
 	}
 }

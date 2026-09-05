@@ -46,7 +46,7 @@ func TestGlobFiles(t *testing.T) {
 	}
 }
 
-func TestGrepFileAndSearchFileAlias(t *testing.T) {
+func TestGrepFile(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)
 	if err != nil {
@@ -59,14 +59,12 @@ func TestGrepFileAndSearchFileAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, tool := range []string{"grep_file", "search_file"} {
-		out, err := reg.Execute(ctx, tool, `{"path":"s.txt","pattern":"foo","literal":true,"count_limit":2,"context_lines":0}`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out, "全文件命中数: 1") || !strings.Contains(out, "beta foo") {
-			t.Fatalf("%s: %q", tool, out)
-		}
+	out, err := reg.Execute(ctx, "grep_file", `{"path":"s.txt","pattern":"foo","literal":true,"count_limit":2,"context_lines":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "全文件命中数: 1") || !strings.Contains(out, "beta foo") {
+		t.Fatalf("grep_file: %q", out)
 	}
 }
 

@@ -27,6 +27,7 @@ from manage.workgroup.context_compression import (
     snapshot_is_current,
 )
 from manage.workgroup.d3_models import HITLRequest, TurnCheckpoint
+from manage.workgroup.assignment_service import AssignmentService
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.human_queue import QueuedHuman
 from manage.workgroup import ids as wg_ids
@@ -38,13 +39,7 @@ from manage.workgroup.history import (
     open_tool_call_ids,
 )
 from manage.workgroup.llm_chat import ChatResult, ChatToolCall, LLMChatClient, resolve_chat_client
-from manage.workgroup.member_tools import (
-    build_member_system_prompt,
-    call_purpose_from_arguments,
-    host_env_from_registry,
-    member_openai_tools,
-    purpose_for_tool,
-)
+from manage.workgroup.member_tools import call_purpose_from_arguments
 from manage.workgroup.mentions import resolve_direct_member
 from manage.workgroup.models import (
     ActorRun,
@@ -63,7 +58,7 @@ from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
 
 
-_DEFAULT_MAX_TOOL_LOOPS = 16
+_DEFAULT_MAX_STEPS = 16
 _MAX_PARALLEL_MEMBER_ASSIGNMENTS = 8
 
 _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE = (
@@ -122,16 +117,12 @@ def build_leader_system_prompt(*, workgroup: WorkGroup) -> str:
         ]
     )
 
-# (workgroup_id, assign_id, member_id, tool_name, tool_call_id, arguments_json) -> tool result content
-MemberToolRunner = Callable[[str, str, str, str, str, str], str]
-
-
 class TurnKernel:
     """Manage 侧 turn 编排。
 
-    Leader LLM loop（Manage-native 工具）+ Member LLM loop（Node-executable 经 tool.command）。
-    Assign 默认同步 scripted completer；生产路径由 VerticalLoop.make_assign_completer
-    创建 Member ActorRun 并跑 run_member_until_idle。
+    Leader LLM loop（Manage-native 工具）+ AgentRef assignment。
+    Member Agent 的上下文与工具循环由 Node 自己负责，Manage 只负责
+    assignment 状态、可靠 outbox、取消和结果投影。
     """
 
     def __init__(
@@ -140,10 +131,9 @@ class TurnKernel:
         *,
         llm_store: LLMConfigStore | None = None,
         chat_client: LLMChatClient | None = None,
-        member_chat_client: LLMChatClient | None = None,
         assign_completer: AssignCompleter | None = None,
         registry_store: Any | None = None,
-        max_tool_loops: int = _DEFAULT_MAX_TOOL_LOOPS,
+        max_steps: int = _DEFAULT_MAX_STEPS,
         mock_llm: bool = False,
         context_silent_trigger_tokens: int = DEFAULT_CONTEXT_COMPRESSION_TRIGGER_TOKENS,
         context_blocking_trigger_tokens: int = DEFAULT_CONTEXT_COMPRESSION_BLOCKING_TRIGGER_TOKENS,
@@ -152,10 +142,10 @@ class TurnKernel:
         self._store = store
         self._llm_store = llm_store
         self._chat_client = chat_client
-        self._member_chat_client = member_chat_client
         self._assign_completer = assign_completer
+        self._assignments = AssignmentService(store)
         self._registry_store = registry_store
-        self._max_tool_loops = max(1, max_tool_loops)
+        self._max_steps = max(1, max_steps)
         self._mock_llm = mock_llm
         self._context_silent_trigger_tokens = max(0, int(context_silent_trigger_tokens))
         self._context_blocking_trigger_tokens = max(0, int(context_blocking_trigger_tokens))
@@ -178,7 +168,7 @@ class TurnKernel:
             for workgroup_id in self._store.list_human_queue_workgroups()
             for records in [self._store.list_human_queue_records(workgroup_id)]
         }
-        self._command_cancel_hook: Callable[[str], None] | None = None
+        self._turn_cancel_hook: Callable[[str], None] | None = None
         self._assign_cancel_hook: Callable[[str, str], None] | None = None
         self._realtime_event_listener: Callable[
             [str, str, dict[str, Any], str | None], None
@@ -192,12 +182,12 @@ class TurnKernel:
     def set_assign_completer(self, completer: AssignCompleter | None) -> None:
         self._assign_completer = completer
 
-    def set_command_cancel_hook(self, hook: Callable[[str], None] | None) -> None:
-        """cancel_turn 时唤醒 Node command/AgentRef waiters。"""
-        self._command_cancel_hook = hook
+    def set_turn_cancel_hook(self, hook: Callable[[str], None] | None) -> None:
+        """cancel_turn 时通知 Node AgentRef turn waiters。"""
+        self._turn_cancel_hook = hook
 
     def set_assign_cancel_hook(self, hook: Callable[[str, str], None] | None) -> None:
-        """取消单个 Assign 时仅通知其 Node command/AgentRef waiter。"""
+        """取消单个 Assign 时仅通知其 Node AgentRef waiter。"""
         self._assign_cancel_hook = hook
 
     def set_realtime_event_listener(
@@ -721,11 +711,17 @@ class TurnKernel:
                 self._assign_cancel_hook(workgroup_id, assign_id)
             except Exception:  # noqa: BLE001 - durable cancellation still wins
                 pass
-        updated = self._store.set_assign_status(
+        updated = self._assignments.finish(
+            workgroup_id,
             assign_id,
-            "canceled",
-            result_summary="cancelled by user",
+            status="canceled",
+            summary="cancelled by user",
             error_code="canceled",
+            actor_id=assign.member_id,
+            text="已中断",
+            direct_member_id=(
+                assign.member_id if assign.source == "direct_member" else None
+            ),
         )
         for run in self._store.list_actor_runs(workgroup_id, actor_id=assign.member_id, limit=100):
             if run.assign_id != assign_id:
@@ -740,18 +736,10 @@ class TurnKernel:
             self._store.cancel_pending_hitls_for_assign(workgroup_id, assign_id)
         except Exception:  # noqa: BLE001
             pass
-        self._store.append_timeline(
-            workgroup_id,
-            type="assign_finished",
-            actor_id=assign.member_id,
-            text="已中断",
-            protocol_name=protocol_name_for_actor(assign.member_id),
-            assign_id=assign_id,
-        )
         return {"cancelled": True, "assign": updated, "assign_id": assign_id}
 
     def cancel_turn(self, workgroup_id: str) -> dict[str, Any]:
-        """取消当前工作组活跃 turn：置位 cancel flag + fail active assigns + heal open tools。"""
+        """取消当前工作组活跃 turn：置位 cancel flag + cancel active assigns。"""
         if self._store.get_workgroup(workgroup_id) is None:
             raise WorkgroupError("not_found", "workgroup not found", http_status=404)
         with self._turn_lock:
@@ -761,16 +749,13 @@ class TurnKernel:
             # Manage 重启后，进程内的 active-turn 索引会丢失，但持久化的
             # ActorRun/HITL/Assign 仍可能处于 awaiting_hitl。取消必须以持久化
             # 状态为准，否则 UI 虽然能收起 HITL，Supervisor run 会继续悬挂。
-            if self._command_cancel_hook is not None:
+            if self._turn_cancel_hook is not None:
                 try:
-                    self._command_cancel_hook(workgroup_id)
+                    self._turn_cancel_hook(workgroup_id)
                 except Exception:  # noqa: BLE001
                     pass
-            failed_ids = self._store.fail_active_assigns(
-                workgroup_id,
-                reason="cancelled by user",
-                error_code="canceled",
-            )
+            cancelled = self._assignments.cancel_active(workgroup_id)
+            canceled_ids = [assign.assign_id for assign in cancelled]
             try:
                 self._store.cancel_pending_hitls(workgroup_id)
             except Exception:  # noqa: BLE001
@@ -788,50 +773,26 @@ class TurnKernel:
                     run_ids.append(run.run_id)
                 except Exception:  # noqa: BLE001
                     pass
-            finished_assign_ids = {
-                str(event.assign_id or "").strip()
-                for event in self._store.list_timeline(workgroup_id)
-                if event.type == "assign_finished" and event.assign_id
-            }
-            for assign_id in failed_ids:
-                if assign_id in finished_assign_ids:
-                    continue
-                try:
-                    assign = self._store.get_assign(assign_id)
-                    actor = (assign.member_id if assign else None) or "leader"
-                    self._store.append_timeline(
-                        workgroup_id,
-                        type="assign_finished",
-                        actor_id=actor,
-                        text="已中断",
-                        protocol_name=protocol_name_for_actor(actor),
-                        assign_id=assign_id,
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
             return {
-                "cancelled": bool(failed_ids or run_ids),
-                "mode": "idle" if not failed_ids else "orphan_assign",
-                "failed_assign_ids": list(failed_ids),
+                "cancelled": bool(canceled_ids or run_ids),
+                "mode": "idle" if not canceled_ids else "orphan_assign",
+                "canceled_assign_ids": canceled_ids,
                 "leader_run_id": None,
                 "member_run_id": None,
                 "run_ids": run_ids,
             }
 
         self._cancel_event(workgroup_id).set()
-        if self._command_cancel_hook is not None:
+        if self._turn_cancel_hook is not None:
             try:
                 # The hook must see active assigns before the durable store
                 # releases them below, so it can send AgentRef cancellation
                 # frames with the correct session identity.
-                self._command_cancel_hook(workgroup_id)
+                self._turn_cancel_hook(workgroup_id)
             except Exception:  # noqa: BLE001
                 pass
-        failed_ids = self._store.fail_active_assigns(
-            workgroup_id,
-            reason="cancelled by user",
-            error_code="canceled",
-        )
+        cancelled = self._assignments.cancel_active(workgroup_id)
+        canceled_ids = [assign.assign_id for assign in cancelled]
         try:
             self._store.cancel_pending_hitls(workgroup_id)
         except Exception:  # noqa: BLE001
@@ -856,24 +817,10 @@ class TurnKernel:
                     self._store.update_actor_run(rid, status="canceled")
             except Exception:  # noqa: BLE001
                 pass
-        for assign_id in failed_ids:
-            try:
-                assign = self._store.get_assign(assign_id)
-                actor = (assign.member_id if assign else None) or "leader"
-                self._store.append_timeline(
-                    workgroup_id,
-                    type="assign_finished",
-                    actor_id=actor,
-                    text="已中断",
-                    protocol_name=protocol_name_for_actor(actor),
-                    assign_id=assign_id,
-                )
-            except Exception:  # noqa: BLE001
-                pass
         return {
             "cancelled": True,
             "mode": mode,
-            "failed_assign_ids": list(failed_ids),
+            "canceled_assign_ids": canceled_ids,
             "leader_run_id": leader_run_id,
             "member_run_id": member_run_id,
             "member_run_ids": member_run_ids,
@@ -888,6 +835,7 @@ class TurnKernel:
         )
 
     def assign_member(self, workgroup_id: str, req: AssignCreateRequest) -> Assign:
+        """Create a queue-only control-plane assignment resource."""
         return self._store.create_assign(workgroup_id, req)
 
     def project(self, *, actor_id: str, run_id: str | None = None, member_id: str | None = None) -> dict[str, Any]:
@@ -1165,15 +1113,6 @@ class TurnKernel:
         """真正执行一轮 human：写 Timeline + Leader / 直连；结束后泵队列。"""
         workgroup_id = item.workgroup_id
         try:
-            try:
-                self._store.fail_active_assigns(
-                    workgroup_id,
-                    reason="previous assign superseded by new human message",
-                    error_code="canceled",
-                )
-            except Exception:  # noqa: BLE001
-                pass
-
             member, instruction = resolve_direct_member(
                 self._store,
                 workgroup_id,
@@ -1310,17 +1249,19 @@ class TurnKernel:
             workgroup_id,
             actor_id="leader",
         )
-        tool_call_id = "call_direct_1"
-        assign = self._store.create_assign(
+        assign = self._assignments.create(
             workgroup_id,
             AssignCreateRequest(
                 member_id=mid,
                 leader_run_id=leader_run.run_id,
+                source="direct_member",
+                parent_turn_id=turn_token,
                 instruction=instruction,
-                leader_tool_call_id=tool_call_id,
             ),
+            actor_id=mid,
+            started_text=f"直达 · {brief}",
+            direct_member_id=mid,
         )
-        self._store.set_assign_status(assign.assign_id, "running")
         leader_run = self._store.prepare_actor_session(
             leader_run.run_id,
             assign_id=assign.assign_id,
@@ -1332,17 +1273,6 @@ class TurnKernel:
             timeline_event_seq=human_event.seq,
         )
         self._update_turn(workgroup_id, assign_id=assign.assign_id, leader_run_id=assign.leader_run_id)
-
-        # Timeline 挂在成员下，不经 Supervisor 展示
-        self._store.append_timeline(
-            workgroup_id,
-            type="assign_started",
-            actor_id=mid,
-            text=f"直达 · {brief}",
-            protocol_name=protocol_name_for_actor(mid),
-            assign_id=assign.assign_id,
-            direct_member_id=mid,
-        )
 
         completer = self._assign_completer
         if completer is None:
@@ -1358,65 +1288,44 @@ class TurnKernel:
                 assign.assign_id,
                 mid,
                 instruction,
-                tool_call_id,
+                "",
             )
             self._raise_if_cancelled(workgroup_id)
-            assign = self._store.set_assign_status(
-                assign.assign_id, "succeeded", result_summary=final_text, error_code=None
-            )
-            self._store.append_timeline(
+            assign = self._assignments.finish(
                 workgroup_id,
-                type="assign_finished",
+                assign.assign_id,
+                status="succeeded",
+                summary=final_text,
                 actor_id=mid,
                 text="已完成",
-                protocol_name=protocol_name_for_actor(mid),
-                assign_id=assign.assign_id,
                 direct_member_id=mid,
             )
         except WorkgroupError as exc:
             status = "canceled" if exc.code == "canceled" else "failed"
             msg = exc.message
-            cur = self._store.get_assign(assign.assign_id)
-            already_closed = cur is not None and cur.status not in {
-                "queued",
-                "pending",
-                "running",
-                "awaiting_hitl",
-            }
-            if not already_closed:
-                assign = self._store.set_assign_status(
-                    assign.assign_id,
-                    "failed",
-                    result_summary=msg,
-                    error_code=exc.code,
-                )
-                self._store.append_timeline(
-                    workgroup_id,
-                    type="assign_finished",
-                    actor_id=mid,
-                    text="已中断" if status == "canceled" else f"失败：{msg}",
-                    protocol_name=protocol_name_for_actor(mid),
-                    assign_id=assign.assign_id,
-                    direct_member_id=mid,
-                )
+            assign = self._assignments.finish(
+                workgroup_id,
+                assign.assign_id,
+                status=status,
+                summary=msg,
+                error_code=exc.code,
+                actor_id=mid,
+                text="已中断" if status == "canceled" else f"失败：{msg}",
+                direct_member_id=mid,
+            )
             final_text = msg
             if exc.code != "canceled":
                 raise
         except Exception as exc:  # noqa: BLE001
             msg = str(exc) or exc.__class__.__name__
-            self._store.set_assign_status(
-                assign.assign_id,
-                "failed",
-                result_summary=msg,
-                error_code="conflict",
-            )
-            self._store.append_timeline(
+            self._assignments.finish(
                 workgroup_id,
-                type="assign_finished",
+                assign.assign_id,
+                status="failed",
+                summary=msg,
+                error_code="conflict",
                 actor_id=mid,
                 text=f"失败：{msg}",
-                protocol_name=protocol_name_for_actor(mid),
-                assign_id=assign.assign_id,
                 direct_member_id=mid,
             )
             raise WorkgroupError("conflict", msg, http_status=500) from exc
@@ -1542,6 +1451,7 @@ class TurnKernel:
             self._store,
             leader_run_id=run_id,
             assign_completer=self._assign_completer,
+            assignment_service=self._assignments,
             registry_store=self._registry_store,
             on_hitl_created=self._on_hitl_created,
             on_hitl_resolved=self._on_hitl_resolved,
@@ -1587,7 +1497,7 @@ class TurnKernel:
             messages = self._apply_today_date_hook(run_id, messages)
             yield {"event": "status", "data": {"phase": "thinking"}}
             # 超额后禁用 tools，迫使给出结论；若模型仍发起 tool_calls 则写入 soft tool_result。
-            over_budget = tool_loops >= self._max_tool_loops
+            over_budget = tool_loops >= self._max_steps
             step_tools: list[dict[str, Any]] = [] if (disable_tools or over_budget) else list(tools)
             result = None
             stream = getattr(client, "stream_chat", None)
@@ -1655,7 +1565,7 @@ class TurnKernel:
                 protocol_name="leader",
             )
 
-            if tool_loops > self._max_tool_loops:
+            if tool_loops > self._max_steps:
                 soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
                 tool_msgs = [
                     RunHistoryMessage(
@@ -1670,7 +1580,7 @@ class TurnKernel:
                 self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
                 run = self._store.get_actor_run(run_id) or run
                 # 超额一步后仍反复 tool_calls 则收束，避免 soft-reject 死循环。
-                if tool_loops > self._max_tool_loops + 1:
+                if tool_loops > self._max_steps + 1:
                     final_text = (result.content or "").strip() or soft
                     final_event = self._store.append_timeline(
                         workgroup_id,
@@ -1830,275 +1740,6 @@ class TurnKernel:
             return messages
         return [*messages, {"role": "user", "name": name, "content": content}]
 
-    def run_member_until_idle(
-        self,
-        workgroup_id: str,
-        run_id: str,
-        *,
-        tool_runner: MemberToolRunner,
-    ) -> dict[str, Any]:
-        """跑 Member ActorRun 至无 tool_calls；工具经 tool_runner → Node tool.command。"""
-        run = self._store.get_actor_run(run_id)
-        if run is None or run.workgroup_id != workgroup_id:
-            raise WorkgroupError("not_found", "actor run not found", http_status=404)
-        member_id = (run.actor_id or "").strip()
-        if not member_id or member_id == "leader":
-            raise WorkgroupError("invalid_request", "run is not a member run")
-        if not run.assign_id:
-            raise WorkgroupError("invalid_request", "member run requires assign_id")
-        if run.status not in {"running", "awaiting_hitl"}:
-            return {"run": run, "steps": 0, "status": run.status, "final_text": ""}
-
-        self._update_turn(workgroup_id, member_run_id=run_id)
-
-        member = self._store.get_member(member_id)
-        if member is None or member.workgroup_id != workgroup_id:
-            raise WorkgroupError("not_found", "member not found", http_status=404)
-        spec = self._store.get_spec(member_id)
-        if spec is None:
-            raise WorkgroupError("not_found", "member spec not found", http_status=404)
-
-        client = self._member_chat_client or resolve_chat_client(
-            self._llm_store,
-            profile_id=spec.llm_profile_id,
-            mock=self._mock_llm,
-        )
-        tools = member_openai_tools(list(spec.tools.allow_names or []))
-        allow = {str(n).strip() for n in (spec.tools.allow_names or []) if str(n).strip()}
-        group = self._store.get_workgroup(workgroup_id)
-        runtime = self._store.member_runtime(member_id)
-        host_env = host_env_from_registry(self._registry_store, member.home_node_id)
-        system = build_member_system_prompt(
-            soul_md=spec.prompt.soul_md,
-            custom_md=spec.prompt.custom_md,
-            host_env=host_env,
-            member_id=member_id,
-            display_name=member.display_name,
-            workgroup_id=workgroup_id,
-            workgroup_name=(group.display_name if group is not None else ""),
-            created_by_node_id=(group.created_by_node_id if group is not None else ""),
-            workspace_path=str(runtime.get("workspace_path") or ""),
-        )
-        max_loops = max(1, int(spec.max_tool_loops or self._max_tool_loops))
-        steps = 0
-        tool_loops = 0
-
-        while True:
-            self._raise_if_cancelled(workgroup_id)
-            hist = self._store.ensure_run_history(run)
-            healed = self._heal_open_tool_calls(
-                run_id,
-                reason="previous member tool turn interrupted; synthetic error result",
-            )
-            if healed:
-                hist = self._store.ensure_run_history(run)
-
-            context_snapshot = self._context_snapshot_for_request(
-                run=run,
-                history=hist.messages,
-                client=client,
-                actor_label=member.display_name or member_id,
-            )
-
-            projected = project_actor_context(
-                actor_id=member_id,
-                run=run,
-                member=member,
-                timeline_events=self._store.list_timeline(workgroup_id),
-                own_run_history=hist.messages,
-                context_snapshot=context_snapshot,
-            )
-            messages = [{"role": "system", "content": system}] + list(projected["messages"])
-            messages = self._apply_today_date_hook(run_id, messages)
-            over_budget = tool_loops >= max_loops
-            step_tools: list[dict[str, Any]] = [] if over_budget else list(tools)
-            client_message_id = self._active_client_message_id(workgroup_id)
-            self._publish_realtime(
-                workgroup_id,
-                "status",
-                {"phase": "thinking", "mode": "member", "member_id": member_id},
-                client_message_id=client_message_id,
-            )
-            result = None
-            stream = getattr(client, "stream_chat", None)
-            if callable(stream):
-                for piece in stream(messages, tools=step_tools or None):
-                    if piece.delta:
-                        self._publish_realtime(
-                            workgroup_id,
-                            "delta",
-                            {
-                                "text": piece.delta,
-                                "mode": "member",
-                                "member_id": member_id,
-                            },
-                            client_message_id=client_message_id,
-                        )
-                    if piece.result is not None:
-                        result = piece.result
-            else:
-                result = client.chat(messages, tools=step_tools or None)
-            if result is None:
-                raise WorkgroupError("conflict", "member llm stream produced no result", http_status=502)
-            steps += 1
-            tool_loops += 1
-
-            assistant = self._assistant_message(result, name=member_id)
-            wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=0)
-            self._store.append_run_history(run_id, [assistant], timeline_watermark_seq=wm)
-            run = self._store.get_actor_run(run_id) or run
-
-            if not result.tool_calls:
-                final_text = (result.content or "").strip() or "(empty)"
-                self._store.append_timeline(
-                    workgroup_id,
-                    type="actor_final_text",
-                    actor_id=member_id,
-                    text=final_text,
-                    protocol_name=protocol_name_for_actor(member_id),
-                    assign_id=run.assign_id,
-                )
-                run = self._store.update_actor_run(run_id, status="succeeded", timeline_watermark_seq=wm)
-                return {
-                    "run": run,
-                    "steps": steps,
-                    "status": "succeeded",
-                    "final_text": final_text,
-                }
-
-            if not tools:
-                raise WorkgroupError(
-                    "invalid_request",
-                    "member has no tools but model returned tool_calls",
-                    http_status=409,
-                )
-
-            # Keep member pre-tool text in the public timeline as well as in
-            # RunHistory.  For direct mentions this event is rendered directly
-            # before the member's tool bubble; for assigned work it is attached
-            # to the assign and rendered before its tool steps.
-            self._append_assistant_content_timeline(
-                workgroup_id,
-                actor_id=member_id,
-                content=result.content,
-                protocol_name=protocol_name_for_actor(member_id),
-                assign_id=run.assign_id,
-            )
-
-            if tool_loops > max_loops:
-                soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
-                tool_msgs = [
-                    RunHistoryMessage(
-                        role="tool",
-                        tool_call_id=tc.id,
-                        name=tc.name,
-                        content=soft,
-                    )
-                    for tc in result.tool_calls
-                ]
-                wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
-                self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
-                run = self._store.get_actor_run(run_id) or run
-                if tool_loops > max_loops + 1:
-                    final_text = (result.content or "").strip() or soft
-                    self._store.append_timeline(
-                        workgroup_id,
-                        type="actor_final_text",
-                        actor_id=member_id,
-                        text=final_text,
-                        protocol_name=protocol_name_for_actor(member_id),
-                        assign_id=run.assign_id,
-                    )
-                    run = self._store.update_actor_run(
-                        run_id, status="succeeded", timeline_watermark_seq=wm
-                    )
-                    return {
-                        "run": run,
-                        "steps": steps,
-                        "status": "succeeded",
-                        "final_text": final_text,
-                        "tool_loop_limit_exceeded": True,
-                    }
-                continue
-
-            tool_msgs: list[RunHistoryMessage] = []
-            for tc in result.tool_calls:
-                name = (tc.name or "").strip()
-                self._publish_realtime(
-                    workgroup_id,
-                    "status",
-                    {
-                        "phase": "tool",
-                        "purpose": call_purpose_from_arguments(
-                            tc.arguments,
-                            purpose_for_tool(name),
-                        ),
-                        "mode": "member",
-                        "member_id": member_id,
-                    },
-                    client_message_id=client_message_id,
-                )
-                # 轻量进度：公开 Timeline 只写脱敏 purpose，不含工具名、参数或结果。
-                try:
-                    self._store.append_timeline(
-                        workgroup_id,
-                        type="system_notice",
-                        actor_id=member_id,
-                        text=call_purpose_from_arguments(
-                            tc.arguments,
-                            purpose_for_tool(name),
-                        ),
-                        protocol_name=protocol_name_for_actor(member_id),
-                        assign_id=run.assign_id,
-                    )
-                except Exception:  # noqa: BLE001 — 进度事件失败不阻断执行
-                    pass
-                try:
-                    if name not in allow:
-                        content = f"ERROR: tool {name!r} is not in member allowlist"
-                    else:
-                        content = tool_runner(
-                            workgroup_id,
-                            run.assign_id or "",
-                            member_id,
-                            name,
-                            tc.id,
-                            tc.arguments or "{}",
-                        )
-                except WorkgroupError as exc:
-                    if self._is_assign_cancelled(run.assign_id or ""):
-                        raise
-                    content = f"ERROR ({exc.code}): {exc.message}"
-                except Exception as exc:  # noqa: BLE001
-                    content = f"ERROR: {exc or exc.__class__.__name__}"
-                content = self._package_tool_content(
-                    content,
-                    tool_name=name,
-                    run_id=run_id,
-                    tool_call_id=tc.id,
-                )
-                tool_msgs.append(
-                    RunHistoryMessage(
-                        role="tool",
-                        tool_call_id=tc.id,
-                        name=name,
-                        content=content,
-                    )
-                )
-            ok, wait = can_invoke_llm_after_tools(
-                [{"id": tc.id, "name": tc.name} for tc in result.tool_calls],
-                [{"tool_call_id": m.tool_call_id} for m in tool_msgs],
-            )
-            if not ok:
-                raise WorkgroupError(
-                    "conflict",
-                    "parallel tool_calls incompletely paired",
-                    details={"wait_for": wait},
-                )
-            wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
-            self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
-            run = self._store.get_actor_run(run_id) or run
-
     def _apply_today_date_hook(
         self, run_id: str, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
@@ -2223,12 +1864,14 @@ class TurnKernel:
                 continue
             for tc in m.tool_calls:
                 names[tc.id] = (tc.function.name if tc.function else "") or "unknown"
-        # 中断的 Leader 工具轮常伴随卡住的 active assign；一并释放以免永久 conflict
+        # 中断的工具轮常伴随卡住的 active assign；只释放当前 run 关联的 assignment。
         try:
-            self._store.fail_active_assigns(
+            self._assignments.cancel_active(
                 run.workgroup_id,
                 reason=reason,
                 error_code="canceled",
+                assign_ids={run.assign_id} if run.assign_id else None,
+                leader_run_id=run.run_id if not run.assign_id else None,
                 exclude_assign_ids={preserve_assign_id} if preserve_assign_id else None,
             )
         except Exception:  # noqa: BLE001
@@ -2324,36 +1967,6 @@ def mock_leader_script_assign_then_answer(
                 ChatToolCall(
                     id="call_as1",
                     name="assign_workgroup_task",
-                    arguments=args,
-                )
-            ],
-            finish_reason="tool_calls",
-        ),
-        ChatResult(content=final_text, finish_reason="stop"),
-    ]
-
-
-def mock_member_script_read_file_then_answer(
-    *,
-    path: str = "README",
-    call_purpose: str = "",
-    first_content: str = "",
-    final_text: str = "已读完",
-) -> list[ChatResult]:
-    """测试用：Member 先 read_file，再终态文本。"""
-    import json
-
-    payload = {"path": path}
-    if call_purpose:
-        payload["call_purpose"] = call_purpose
-    args = json.dumps(payload, ensure_ascii=False)
-    return [
-        ChatResult(
-            content=first_content,
-            tool_calls=[
-                ChatToolCall(
-                    id="call_rf1",
-                    name="read_file",
                     arguments=args,
                 )
             ],

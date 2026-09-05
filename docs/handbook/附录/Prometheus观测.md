@@ -30,7 +30,7 @@ Prometheus **主动拉取（pull）** 目标的 `GET /metrics` 端点，将时�
 | 指标 | 说明 |
 |------|------|
 | `dagents_manage_registry_operations_total{operation,status}` | Registry 注册 / 心跳等操作计数 |
-| Workgroup 指标 | 当前版本尚未提供稳定的 Workgroup 专用指标；不要用旧 A2A 指标推断工作组状态 |
+| Workgroup 指标 | 当前版本尚未提供稳定的 Workgroup 专用指标；不要用历史跨机协作指标推断工作组状态 |
 
 新增 Manage 指标：在 `metrics.py` 定义 Counter/Gauge，在对应 `routes.py` / `store.py` 调用 `record_*`，前缀统一 `dagents_manage_`。
 

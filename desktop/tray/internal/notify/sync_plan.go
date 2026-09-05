@@ -50,8 +50,5 @@ func PlanSync(last map[string]pending.Entry, toastEntries []pending.Entry, retai
 }
 
 func entryKey(e pending.Entry) string {
-	if id := strings.TrimSpace(e.SessionID); id != "" {
-		return id
-	}
 	return strings.TrimSpace(e.AgentID)
 }

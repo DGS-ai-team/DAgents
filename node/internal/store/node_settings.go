@@ -134,7 +134,6 @@ func SnapshotNodeSettings(cfg *config.Config) config.Config {
 	out.Listen = config.ListenConfig{}
 	out.Local = config.LocalConfig{}
 	out.RuntimeRoot = ""
-	out.FSRoot = ""
 	// LLM 档案权威在 llm_configs.db；快照不保留 profiles/key。
 	out.LLM = config.LLMConfig{
 		Active:          cfg.LLM.Active,
@@ -163,24 +162,20 @@ func OverlayNodeSettings(dst *config.Config, snap *config.Config) {
 	if strings.TrimSpace(dst.RuntimeRoot) == "" {
 		dst.RuntimeRoot = config.DefaultRuntimeRoot
 	}
-	dst.FSRoot = dst.RuntimeRoot
 }
 
 // ProductNodeSettingsSeed 空库且无 YAML 种子时的开箱默认。
 func ProductNodeSettingsSeed() *config.Config {
-	ui := true
 	bashCompress := true
 	dup := true
 	toolResult := true
-	profileDone := false
 	cfg := &config.Config{
 		Agent: config.AgentConfig{
 			Name:        "local-assistant",
 			Description: "本机智能助手",
-			Role:        "ops",
 		},
 		Onboarding: config.OnboardingConfig{
-			NodeProfileCompleted: &profileDone,
+			NodeProfileCompleted: false,
 		},
 		RuntimeRoot: config.DefaultRuntimeRoot,
 		LLM: config.LLMConfig{
@@ -196,7 +191,6 @@ func ProductNodeSettingsSeed() *config.Config {
 		Triggers:    config.TriggersConfig{Enabled: true, PollSeconds: 5},
 		ChildAgents: config.ChildAgentsConfig{Enabled: true},
 		Log:         config.LogConfig{Level: "info"},
-		UI:          config.UIConfig{Enabled: &ui},
 		Tools: config.ToolsConfig{
 			BashOutputEncoding: "utf-8",
 			BashCompress: config.BashCompressConfig{

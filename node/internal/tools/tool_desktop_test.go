@@ -90,12 +90,11 @@ func TestComputerUseRejectsMismatchedFrameID(t *testing.T) {
 		},
 	}}
 	ctx := WithSession(context.Background(), "desktop-session")
-	_, err := reg.resolveComputerAction(ctx, computerUseArgs{
-		Action:  computeruse.ActionClick,
-		X:       &x,
-		Y:       &y,
-		FrameID: "frame-old",
-	})
+	_, err := reg.resolveComputerActionValues(ctx, computerUseActionArgs{
+		Action: computeruse.ActionClick,
+		X:      &x,
+		Y:      &y,
+	}, "frame-old")
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("err = %v, want frame mismatch", err)
 	}

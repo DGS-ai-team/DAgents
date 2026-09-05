@@ -294,10 +294,6 @@ func (r *Registry) execComputerUse(ctx context.Context, raw json.RawMessage) (st
 	return desktopSuccess("computer_use", actionName, frame, path, extra), nil
 }
 
-func (r *Registry) resolveComputerAction(ctx context.Context, args computerUseArgs) (computeruse.Action, error) {
-	return r.resolveComputerActionValues(ctx, args.singleAction(), args.FrameID)
-}
-
 func (args computerUseArgs) singleAction() computerUseActionArgs {
 	return computerUseActionArgs{
 		Action:    args.Action,

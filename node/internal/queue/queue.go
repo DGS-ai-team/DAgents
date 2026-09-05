@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -20,7 +19,6 @@ const (
 	PriorityHuman           Priority = "human"
 	PriorityResume          Priority = "resume"
 	PriorityAsyncCompletion Priority = "async_completion"
-	PriorityOther           Priority = "other"
 )
 
 // Envelope 为单条入队载荷。
@@ -183,17 +181,6 @@ func priorityValue(p Priority) int {
 		return 2
 	default:
 		return 10
-	}
-}
-
-// ParsePriority 解析显式 priority 字段；空串或未知值返回 false。
-func ParsePriority(raw string) (Priority, bool) {
-	p := Priority(strings.TrimSpace(raw))
-	switch p {
-	case PriorityContinuation, PriorityHuman, PriorityResume, PriorityAsyncCompletion, PriorityOther:
-		return p, true
-	default:
-		return "", false
 	}
 }
 

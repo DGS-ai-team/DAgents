@@ -13,33 +13,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Agent 来源（预留）：本地本机实例 / 远端对等节点。
-const (
-	AgentOriginLocal  = "local"
-	AgentOriginRemote = "remote"
-)
-
-// NormalizeAgentOrigin 规范化 origin；空值默认 local。
-func NormalizeAgentOrigin(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case AgentOriginRemote:
-		return AgentOriginRemote
-	default:
-		return AgentOriginLocal
-	}
-}
-
 // AgentRecord 为 Agent 实例元数据。
 type AgentRecord struct {
 	AgentID        string
 	DisplayName    string
 	TemplateID     string
-	Origin         string // local | remote
-	SandboxEnabled bool
-	SandboxBackend string
 	ConfigSnapshot json.RawMessage
-	PlacementJSON  json.RawMessage // owner_ref / home placement
-	HostJSON       json.RawMessage // OS / display 快照（远端引用）
+	HostJSON       json.RawMessage // OS / display 快照
 	Archived       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -90,11 +70,7 @@ CREATE TABLE IF NOT EXISTS agents (
   agent_id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   template_id TEXT NOT NULL,
-  origin TEXT NOT NULL DEFAULT 'local',
-  sandbox_enabled INTEGER NOT NULL DEFAULT 0,
-  sandbox_backend TEXT NOT NULL DEFAULT 'process',
   config_snapshot_json TEXT NOT NULL DEFAULT '{}',
-  placement_json TEXT NOT NULL DEFAULT '{}',
   host_json TEXT NOT NULL DEFAULT '{}',
   archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -105,118 +81,10 @@ CREATE TABLE IF NOT EXISTS agents (
 	if err != nil {
 		return err
 	}
-	if err := s.ensureOriginColumn(); err != nil {
-		return err
-	}
-	if err := s.ensurePlacementColumns(); err != nil {
-		return err
-	}
-	if err := s.ensureRuntimeRevisionColumn(); err != nil {
-		return err
-	}
 	if err := s.ensurePolicySchema(); err != nil {
 		return err
 	}
-	if err := s.ensurePromptContextSchema(); err != nil {
-		return err
-	}
-	return s.ensureLongTermStoreSchema()
-}
-
-// ensureRuntimeRevisionColumn 兼容旧库：补 runtime_revision 列。
-func (s *AgentStore) ensureRuntimeRevisionColumn() error {
-	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "runtime_revision" {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`ALTER TABLE agents ADD COLUMN runtime_revision INTEGER NOT NULL DEFAULT 1`)
-	return err
-}
-
-// ensureOriginColumn 兼容旧库：补 origin 列。
-func (s *AgentStore) ensureOriginColumn() error {
-	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	hasOrigin := false
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "origin" {
-			hasOrigin = true
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if hasOrigin {
-		return nil
-	}
-	_, err = s.db.Exec(`ALTER TABLE agents ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'`)
-	return err
-}
-
-// ensurePlacementColumns 兼容旧库：补 placement_json / host_json。
-func (s *AgentStore) ensurePlacementColumns() error {
-	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	hasPlacement, hasHost := false, false
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		switch name {
-		case "placement_json":
-			hasPlacement = true
-		case "host_json":
-			hasHost = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if !hasPlacement {
-		if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN placement_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
-			return err
-		}
-	}
-	if !hasHost {
-		if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN host_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.ensurePromptContextSchema()
 }
 
 // Save 写入或更新 Agent 元数据。
@@ -234,18 +102,9 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	}
 	tpl := strings.TrimSpace(rec.TemplateID)
 	// template_id 可选；空表示无模板溯源。
-	origin := NormalizeAgentOrigin(rec.Origin)
-	backend := strings.TrimSpace(rec.SandboxBackend)
-	if backend == "" {
-		backend = "process"
-	}
 	snap := rec.ConfigSnapshot
 	if len(snap) == 0 {
 		snap = json.RawMessage(`{}`)
-	}
-	placement := rec.PlacementJSON
-	if len(placement) == 0 {
-		placement = json.RawMessage(`{}`)
 	}
 	host := rec.HostJSON
 	if len(host) == 0 {
@@ -259,10 +118,6 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	updated := rec.UpdatedAt
 	if updated.IsZero() {
 		updated = now
-	}
-	sandbox := 0
-	if rec.SandboxEnabled {
-		sandbox = 1
 	}
 	archived := 0
 	if rec.Archived {
@@ -285,23 +140,18 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO agents (
-  agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-  config_snapshot_json, placement_json, host_json, archived, created_at, updated_at,
-  runtime_revision
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  agent_id, display_name, template_id, config_snapshot_json, host_json,
+  archived, created_at, updated_at, runtime_revision
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(agent_id) DO UPDATE SET
   display_name=excluded.display_name,
   template_id=excluded.template_id,
-  origin=excluded.origin,
-  sandbox_enabled=excluded.sandbox_enabled,
-  sandbox_backend=excluded.sandbox_backend,
   config_snapshot_json=excluded.config_snapshot_json,
-  placement_json=excluded.placement_json,
   host_json=excluded.host_json,
   archived=excluded.archived,
   updated_at=excluded.updated_at,
   runtime_revision=excluded.runtime_revision
-`, id, name, tpl, origin, sandbox, backend, string(snap), string(placement), string(host), archived,
+	`, id, name, tpl, string(snap), string(host), archived,
 		created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano), runtimeRevision)
 	return err
 }
@@ -313,8 +163,8 @@ func (s *AgentStore) Get(ctx context.Context, agentID string) (*AgentRecord, err
 	}
 	agentID = strings.TrimSpace(agentID)
 	row := s.db.QueryRowContext(ctx, `
-SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at,
+SELECT agent_id, display_name, template_id, config_snapshot_json, host_json,
+       archived, created_at, updated_at,
        runtime_revision
 FROM agents WHERE agent_id = ?`, agentID)
 	return scanAgent(row)
@@ -326,8 +176,8 @@ func (s *AgentStore) List(ctx context.Context) ([]AgentRecord, error) {
 		return nil, fmt.Errorf("agent store unavailable")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at,
+SELECT agent_id, display_name, template_id, config_snapshot_json, host_json,
+       archived, created_at, updated_at,
        runtime_revision
 FROM agents WHERE archived = 0
 ORDER BY updated_at DESC`)
@@ -385,10 +235,10 @@ type scannable interface {
 
 func scanAgent(row scannable) (*AgentRecord, error) {
 	var (
-		id, name, tpl, origin, backend, snap, placement, host, created, updated string
-		sandbox, archived, runtimeRevision                                      int64
+		id, name, tpl, snap, host, created, updated string
+		archived, runtimeRevision                   int64
 	)
-	if err := row.Scan(&id, &name, &tpl, &origin, &sandbox, &backend, &snap, &placement, &host, &archived, &created, &updated, &runtimeRevision); err != nil {
+	if err := row.Scan(&id, &name, &tpl, &snap, &host, &archived, &created, &updated, &runtimeRevision); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -396,9 +246,6 @@ func scanAgent(row scannable) (*AgentRecord, error) {
 	}
 	ct, _ := time.Parse(time.RFC3339Nano, created)
 	ut, _ := time.Parse(time.RFC3339Nano, updated)
-	if strings.TrimSpace(placement) == "" {
-		placement = "{}"
-	}
 	if strings.TrimSpace(host) == "" {
 		host = "{}"
 	}
@@ -406,11 +253,7 @@ func scanAgent(row scannable) (*AgentRecord, error) {
 		AgentID:         id,
 		DisplayName:     name,
 		TemplateID:      tpl,
-		Origin:          NormalizeAgentOrigin(origin),
-		SandboxEnabled:  sandbox != 0,
-		SandboxBackend:  backend,
 		ConfigSnapshot:  json.RawMessage(snap),
-		PlacementJSON:   json.RawMessage(placement),
 		HostJSON:        json.RawMessage(host),
 		Archived:        archived != 0,
 		CreatedAt:       ct,

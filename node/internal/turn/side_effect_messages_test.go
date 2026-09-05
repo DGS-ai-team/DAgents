@@ -14,15 +14,15 @@ func TestBuildMergedCallbackBatch_twoAsync(t *testing.T) {
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
 
 	history := []llm.Message{
-		{Role: "user", Content: "run bg"},
+		{Role: "user", Content: "run async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
 			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`},
+			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 		}}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
-	async1 := queue.AsyncToolResultPayload{JobID: "job-1", ToolName: "bash_run", Status: "succeeded", ResultText: "done"}
-	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "bash_run", Status: "failed", ErrorText: "exit 1"}
+	async1 := queue.AsyncToolResultPayload{JobID: "job-1", ToolName: "browser_run_task", Status: "succeeded", ResultText: "done"}
+	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "browser_run_task", Status: "failed", ErrorText: "exit 1"}
 	e1 := SideEffectBatchEntry{
 		Built: orch.BuildAsyncSideEffectMessages("s", history, async1),
 		Async: async1,

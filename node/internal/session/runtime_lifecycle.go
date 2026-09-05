@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -78,29 +79,43 @@ func (r *runtime) lifecycleNextCommandID() string {
 	return fmt.Sprintf("%s-lifecycle-%d", r.session.ID, seq)
 }
 
-// restoreLifecycleEvents rebuilds the in-memory Turn/Step projection before
-// the runtime starts consuming new queue commands. Legacy message snapshots
-// are used only to reconcile unproven tool results or bootstrap old pending
-// interactions; lifecycle events remain authoritative for execution position.
+// restoreLifecycleEvents rebuilds the in-memory Turn/Step projection from the
+// durable event log. It is the fallback for runtimes constructed directly by
+// embedded callers or focused tests; Manager-created runtimes pass the events
+// already loaded during session restoration through restoreLifecycleEventsFrom.
 func (r *runtime) restoreLifecycleEvents() {
+	r.restoreLifecycleEventsFrom(nil, false)
+}
+
+// restoreLifecycleEventsFrom rebuilds the in-memory Turn/Step projection
+// before the runtime starts consuming new queue commands. A loaded=true
+// snapshot, including an empty event list, is authoritative for this restore
+// and avoids a second database scan. The durable transcript is used only to
+// reconcile an execution whose result was committed before its lifecycle fact;
+// lifecycle events remain authoritative for execution position.
+func (r *runtime) restoreLifecycleEventsFrom(initial []turn.TurnEventEnvelope, loaded bool) {
 	if r == nil || r.store == nil || r.turnCoordinator == nil {
 		return
 	}
 	var events []turn.TurnEventEnvelope
-	var afterSeq uint64
-	for {
-		page, err := r.store.ListTurnEvents(context.Background(), r.session.ID, afterSeq, 1000)
-		if err != nil {
-			if r.logger != nil {
-				r.logger.Warn("load turn lifecycle events failed", "session_id", r.session.ID, "error", err)
+	if loaded {
+		events = append(events, initial...)
+	} else {
+		var afterSeq uint64
+		for {
+			page, err := r.store.ListTurnEvents(context.Background(), r.session.ID, afterSeq, 1000)
+			if err != nil {
+				if r.logger != nil {
+					r.logger.Warn("load turn lifecycle events failed", "session_id", r.session.ID, "error", err)
+				}
+				return
 			}
-			return
+			events = append(events, page...)
+			if len(page) < 1000 {
+				break
+			}
+			afterSeq = page[len(page)-1].SessionSeq
 		}
-		events = append(events, page...)
-		if len(page) < 1000 {
-			break
-		}
-		afterSeq = page[len(page)-1].SessionSeq
 	}
 	if len(events) == 0 {
 		return
@@ -130,6 +145,15 @@ func (r *runtime) restoreLifecycleEvents() {
 	r.mu.Unlock()
 	if snapshot.ContextSnapshot != nil && r.orch != nil {
 		r.orch.RestoreModelContextSnapshot(r.session.ID, snapshot.ContextSnapshot)
+	}
+	// Lifecycle facts are committed before a tool side effect starts, while the
+	// durable transcript snapshot is persisted after the step returns. A
+	// process can therefore restart with the assistant message missing even
+	// though its ToolCallRecorded facts are durable. Rebuild the provider-facing
+	// assistant envelope from that authoritative projection before any result is
+	// appended; otherwise recovery would create an orphan tool message.
+	if calls := r.activeToolCallsFromLifecycle(); len(calls) > 0 {
+		r.restoreActiveToolCallMessage(calls)
 	}
 	if snapshot.StepStatus == turn.StepStatusExecutingTools {
 		// A process restart cannot prove whether an in-flight side effect
@@ -218,247 +242,6 @@ func (r *runtime) restoreLifecycleEvents() {
 			r.logger.Warn("turn recovery requires external tool execution decision", "session_id", r.session.ID, "turn_id", snapshot.TurnID, "step_id", snapshot.StepID)
 		}
 	}
-}
-
-// restoreLegacyPending upgrades the old RuntimeState.Pending representation
-// into the durable Coordinator interaction projection. It is intentionally a
-// one-time compatibility bridge: all subsequent reads come from the
-// Coordinator snapshot and the legacy runtime field no longer exists.
-func (r *runtime) restoreLegacyPending(initial *turn.PendingHITL, legacyStepCounts ...int) {
-	if r == nil || r.turnCoordinator == nil {
-		return
-	}
-	snapshot := r.turnCoordinator.Snapshot()
-	pending := initial
-	if pending == nil && !r.lifecycleEventsLoaded && snapshot.StepStatus == turn.StepStatusWaitingInteraction && len(snapshot.InteractionPayload) == 0 {
-		pending = r.lifecycleRecoverPendingFromProjection()
-	}
-	if pending == nil || len(pending.Items) == 0 {
-		return
-	}
-
-	r.lifecycleMu.Lock()
-	defer r.lifecycleMu.Unlock()
-	snapshot = r.turnCoordinator.Snapshot()
-	if snapshot.HasActiveTurn {
-		if snapshot.StepStatus == turn.StepStatusWaitingInteraction && len(snapshot.InteractionPayload) > 0 {
-			return
-		}
-		if snapshot.StepStatus == turn.StepStatusWaitingInteraction {
-			payload, err := json.Marshal(pending)
-			if err != nil {
-				return
-			}
-			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-				Type: turn.CommandInteractionRequested, SessionID: r.session.ID,
-				TurnID: snapshot.TurnID, StepID: snapshot.StepID, Generation: snapshot.Generation,
-				InteractionID: snapshot.InteractionID, InteractionKind: legacyPendingInteractionKind(pending),
-				Payload: payload, At: time.Now().UTC(), Reason: "legacy_pending_projection_recovered",
-			}); err != nil && r.logger != nil {
-				r.logger.Warn("restore legacy pending payload failed", "session_id", r.session.ID, "error", err)
-			}
-			return
-		}
-		if snapshot.StepStatus == turn.StepStatusRequesting {
-			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-				Type: turn.CommandAssistantReceived, SessionID: r.session.ID,
-				TurnID: snapshot.TurnID, StepID: snapshot.StepID, Generation: snapshot.Generation,
-				HasTools: true, At: time.Now().UTC(), Reason: "legacy_pending_projection_recovered",
-			}); err != nil {
-				if r.logger != nil {
-					r.logger.Warn("restore legacy pending assistant failed", "session_id", r.session.ID, "error", err)
-				}
-				return
-			}
-			snapshot = r.turnCoordinator.Snapshot()
-		}
-		if snapshot.StepStatus == turn.StepStatusAssistantReceived && snapshot.ToolBatchID == "" {
-			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-				Type: turn.CommandToolBatchCreated, SessionID: r.session.ID,
-				TurnID: snapshot.TurnID, StepID: snapshot.StepID, Generation: snapshot.Generation,
-				At: time.Now().UTC(), Reason: "legacy_pending_projection_recovered",
-			}); err != nil {
-				if r.logger != nil {
-					r.logger.Warn("restore legacy pending tool batch failed", "session_id", r.session.ID, "error", err)
-				}
-				return
-			}
-			snapshot = r.turnCoordinator.Snapshot()
-		}
-		if snapshot.StepStatus != turn.StepStatusExecutingTools && snapshot.StepStatus != turn.StepStatusWaitingInteraction {
-			return
-		}
-		for _, item := range pending.Items {
-			if strings.TrimSpace(item.ToolCall.ID) == "" || r.turnCoordinator.HasToolCall(item.ToolCall.ID) {
-				continue
-			}
-			if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-				Type: turn.CommandToolCallRecorded, SessionID: r.session.ID,
-				TurnID: snapshot.TurnID, StepID: snapshot.StepID, Generation: snapshot.Generation,
-				ToolCallID: item.ToolCall.ID, ToolName: item.ToolCall.Function.Name,
-				Arguments: []byte(item.ToolCall.Function.Arguments), At: time.Now().UTC(),
-				Reason: "legacy_pending_projection_recovered",
-			}); err != nil {
-				if r.logger != nil {
-					r.logger.Warn("restore legacy pending tool call failed", "session_id", r.session.ID, "tool_call_id", item.ToolCall.ID, "error", err)
-				}
-				return
-			}
-			snapshot = r.turnCoordinator.Snapshot()
-		}
-		payload, err := json.Marshal(pending)
-		if err != nil {
-			return
-		}
-		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-			Type:            turn.CommandInteractionRequested,
-			SessionID:       r.session.ID,
-			TurnID:          snapshot.TurnID,
-			StepID:          snapshot.StepID,
-			Generation:      snapshot.Generation,
-			InteractionID:   snapshot.InteractionID,
-			InteractionKind: legacyPendingInteractionKind(pending),
-			Payload:         payload,
-			At:              time.Now().UTC(),
-			Reason:          "legacy_pending_projection_recovered",
-		}); err != nil && r.logger != nil {
-			r.logger.Warn("restore legacy pending interaction failed", "session_id", r.session.ID, "error", err)
-		}
-		return
-	}
-
-	now := time.Now().UTC()
-	turnID := newContinuationID()
-	legacyStepCount := 1
-	if len(legacyStepCounts) > 0 && legacyStepCounts[0] > 0 {
-		legacyStepCount = legacyStepCounts[0]
-	}
-	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-		Type:      turn.CommandStartTurn,
-		SessionID: r.session.ID,
-		TurnID:    turnID,
-		Source:    turn.TurnSourceHuman,
-		Budget:    r.turnBudget,
-		At:        now,
-		Reason:    "legacy_pending_projection_recovered",
-	}); err != nil {
-		if r.logger != nil {
-			r.logger.Warn("start legacy pending turn failed", "session_id", r.session.ID, "error", err)
-		}
-		return
-	}
-	snapshot = r.turnCoordinator.Snapshot()
-	turnID, generation := snapshot.TurnID, snapshot.Generation
-	// A legacy RuntimeState carried only the number of completed model steps.
-	// Materialize those steps as explicit migration facts so the new
-	// Coordinator preserves the old soft tool-loop boundary without keeping a
-	// second in-memory counter. These synthetic steps contain no model/tool
-	// facts because the old snapshot cannot prove them.
-	for index := 1; index < legacyStepCount; index++ {
-		stepID := lifecycleStepID(turnID, index)
-		for _, command := range []turn.TurnCommand{
-			{Type: turn.CommandStartStep, SessionID: r.session.ID, TurnID: turnID, StepID: stepID, Generation: generation, At: now, Reason: "legacy_step_count_migrated"},
-			{Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: turnID, StepID: stepID, Generation: generation, At: now, Reason: "legacy_step_count_migrated"},
-			{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: turnID, StepID: stepID, Generation: generation, At: now, Reason: "legacy_step_count_migrated"},
-		} {
-			if _, err := r.lifecycleDispatchLockedErr(command); err != nil {
-				if r.logger != nil {
-					r.logger.Warn("migrate legacy step count failed", "session_id", r.session.ID, "step_index", index, "error", err)
-				}
-				return
-			}
-		}
-	}
-	stepID := lifecycleStepID(turnID, legacyStepCount)
-	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-		Type:       turn.CommandStartStep,
-		SessionID:  r.session.ID,
-		TurnID:     turnID,
-		StepID:     stepID,
-		Generation: generation,
-		At:         now,
-		Reason:     "legacy_pending_projection_recovered",
-	}); err != nil {
-		if r.logger != nil {
-			r.logger.Warn("start legacy pending step failed", "session_id", r.session.ID, "error", err)
-		}
-		return
-	}
-	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-		Type:       turn.CommandAssistantReceived,
-		SessionID:  r.session.ID,
-		TurnID:     turnID,
-		StepID:     stepID,
-		Generation: generation,
-		HasTools:   true,
-		At:         now,
-		Reason:     "legacy_pending_projection_recovered",
-	}); err != nil {
-		if r.logger != nil {
-			r.logger.Warn("record legacy pending assistant failed", "session_id", r.session.ID, "error", err)
-		}
-		return
-	}
-	for _, item := range pending.Items {
-		if strings.TrimSpace(item.ToolCall.ID) == "" {
-			continue
-		}
-		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-			Type:       turn.CommandToolCallRecorded,
-			SessionID:  r.session.ID,
-			TurnID:     turnID,
-			StepID:     stepID,
-			Generation: generation,
-			ToolCallID: item.ToolCall.ID,
-			ToolName:   item.ToolCall.Function.Name,
-			Arguments:  []byte(item.ToolCall.Function.Arguments),
-			At:         now,
-			Reason:     "legacy_pending_projection_recovered",
-		}); err != nil {
-			if r.logger != nil {
-				r.logger.Warn("record legacy pending tool call failed", "session_id", r.session.ID, "tool_call_id", item.ToolCall.ID, "error", err)
-			}
-			return
-		}
-	}
-	payload, err := json.Marshal(pending)
-	if err != nil {
-		return
-	}
-	toolExecutionID := ""
-	if len(pending.Items) == 1 {
-		toolExecutionID = r.turnCoordinator.ToolExecutionID(pending.Items[0].ToolCall.ID)
-	}
-	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
-		Type:            turn.CommandInteractionRequested,
-		SessionID:       r.session.ID,
-		TurnID:          turnID,
-		StepID:          stepID,
-		Generation:      generation,
-		InteractionID:   stepID + "-interaction",
-		InteractionKind: legacyPendingInteractionKind(pending),
-		ToolExecutionID: toolExecutionID,
-		Payload:         payload,
-		At:              now,
-		Reason:          "legacy_pending_projection_recovered",
-	}); err != nil && r.logger != nil {
-		r.logger.Warn("record legacy pending interaction failed", "session_id", r.session.ID, "error", err)
-	}
-}
-
-func legacyPendingInteractionKind(pending *turn.PendingHITL) string {
-	if pending == nil {
-		return "approval"
-	}
-	for _, item := range pending.Items {
-		if item.MemoryConflict != nil {
-			return "memory_conflict"
-		}
-		if tools.IsAskUserInformation(item.ToolCall.Function.Name) {
-			return "user_information"
-		}
-	}
-	return "approval"
 }
 
 func lifecycleCommandSequence(commandID string) uint64 {
@@ -724,19 +507,17 @@ func (r *runtime) lifecycleHistorySnapshot() []llm.Message {
 	return append([]llm.Message(nil), r.messages...)
 }
 
-// pendingSnapshot is the compatibility wire projection of the Coordinator's
-// durable Interaction payload. The runtime no longer owns a second pending
-// HITL lifecycle state. Legacy history reconstruction is kept in
-// lifecycleRecoverPendingFromProjection and is only used during migration.
+// pendingSnapshot is the API projection of the Coordinator's durable
+// Interaction payload.
 func (r *runtime) pendingSnapshot() *turn.PendingHITL {
 	if r == nil || r.turnCoordinator == nil {
 		return nil
 	}
 	state := r.turnCoordinator.Snapshot()
-	return pendingFromLifecycleSnapshot(state, nil)
+	return pendingFromLifecycleSnapshot(state)
 }
 
-func pendingFromLifecycleSnapshot(state turn.CoordinatorSnapshot, history []llm.Message) *turn.PendingHITL {
+func pendingFromLifecycleSnapshot(state turn.CoordinatorSnapshot) *turn.PendingHITL {
 	if state.StepStatus != turn.StepStatusWaitingInteraction {
 		return nil
 	}
@@ -746,38 +527,22 @@ func pendingFromLifecycleSnapshot(state turn.CoordinatorSnapshot, history []llm.
 			return &pending
 		}
 	}
-	// History reconstruction is intentionally limited to the legacy migration
-	// caller. Normal runtime and cold projections pass nil here so an arbitrary
-	// assistant callback can never recreate an active interaction.
-	if len(history) == 0 {
-		return nil
-	}
-	assistant, ok := lastAssistantMessage(history, 0)
-	if !ok || len(assistant.ToolCalls) == 0 {
-		return nil
-	}
-	pending := &turn.PendingHITL{Items: make([]turn.PendingHITLItem, 0, len(assistant.ToolCalls))}
-	for _, toolCall := range assistant.ToolCalls {
-		if strings.TrimSpace(toolCall.ID) != "" && !isInternalSideEffectCallback(toolCall) {
-			pending.Items = append(pending.Items, turn.PendingHITLItem{ToolCall: toolCall})
-		}
-	}
-	if len(pending.Items) == 0 {
-		return nil
-	}
-	return pending
+	return nil
 }
 
-func (r *runtime) lifecycleRecoverPendingFromProjection() *turn.PendingHITL {
-	if pending := r.pendingSnapshot(); pending != nil {
-		return pending
+func pendingInteractionKind(pending *turn.PendingHITL) string {
+	if pending == nil {
+		return "approval"
 	}
-	if r == nil || r.turnCoordinator == nil {
-		return nil
+	for _, item := range pending.Items {
+		if item.MemoryConflict != nil {
+			return "memory_conflict"
+		}
+		if tools.IsAskUserInformation(item.ToolCall.Function.Name) {
+			return "user_information"
+		}
 	}
-	state := r.turnCoordinator.Snapshot()
-	history := r.lifecycleHistorySnapshot()
-	return pendingFromLifecycleSnapshot(state, history)
+	return "approval"
 }
 
 func lifecycleToolResultsPresent(history []llm.Message, calls []llm.ToolCall) bool {
@@ -786,7 +551,7 @@ func lifecycleToolResultsPresent(history []llm.Message, calls []llm.ToolCall) bo
 	}
 	results := make(map[string]struct{}, len(calls))
 	for _, message := range history {
-		if message.Role == "tool" && strings.TrimSpace(message.ToolCallID) != "" {
+		if message.Role == "tool" && strings.TrimSpace(message.ToolCallID) != "" && !llm.IsRecoveryPlaceholderToolResult(message) {
 			results[message.ToolCallID] = struct{}{}
 		}
 	}
@@ -807,7 +572,7 @@ func lifecycleToolResultForCall(history []llm.Message, toolCallID string) (llm.M
 		return llm.Message{}, false
 	}
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "tool" && strings.TrimSpace(history[i].ToolCallID) == toolCallID {
+		if history[i].Role == "tool" && strings.TrimSpace(history[i].ToolCallID) == toolCallID && !llm.IsRecoveryPlaceholderToolResult(history[i]) {
 			return history[i], true
 		}
 	}
@@ -873,8 +638,9 @@ func (r *runtime) lifecycleBeginInputTurnLocked(source turn.TurnSource) error {
 }
 
 // lifecycleBeginContinuationStep starts the next model Step for tool-result
-// and passive side-effect continuations. A missing coordinator state is
-// treated as a recovered legacy Turn until durable Turn metadata is added.
+// and passive side-effect continuations. Only a side-effect callback may open
+// a new Turn when the previous Turn is already terminal; model/tool
+// continuations must always remain inside an active Turn.
 func (r *runtime) lifecycleBeginContinuationStep(source turn.TurnSource) (bool, error) {
 	if r == nil || r.turnCoordinator == nil {
 		return false, fmt.Errorf("turn coordinator is unavailable")
@@ -891,6 +657,9 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 	identity, generation := r.lifecycleIdentity()
 	state := r.turnCoordinator.Snapshot()
 	if !state.HasActiveTurn {
+		if source != turn.TurnSourceSideEffect {
+			return false, fmt.Errorf("cannot continue without an active turn")
+		}
 		identity, generation = r.lifecycleEnsureIdentity()
 		now := time.Now().UTC()
 		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
@@ -901,7 +670,7 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 			Source:     source,
 			Budget:     r.turnBudget,
 			At:         now,
-			Reason:     "recovered_legacy_runtime_turn",
+			Reason:     "side_effect_continuation",
 		}); err != nil {
 			return false, fmt.Errorf("recover turn lifecycle: %w", err)
 		}
@@ -994,9 +763,9 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 	return true, nil
 }
 
-// lifecyclePrepareResume reconstructs the minimum lifecycle state needed for
-// a legacy persisted PendingHITL, then moves the active Step back into tool
-// execution before the existing resume implementation writes tool results.
+// lifecyclePrepareResume moves the active Step back into tool execution before
+// the resume implementation writes tool results. Pending HITL is durable
+// lifecycle state, so a resume without an active Turn is invalid.
 func (r *runtime) lifecyclePrepareResume(resumeValue map[string]any) error {
 	if r == nil || r.turnCoordinator == nil {
 		return fmt.Errorf("turn coordinator is unavailable")
@@ -1004,55 +773,7 @@ func (r *runtime) lifecyclePrepareResume(resumeValue map[string]any) error {
 	state := r.turnCoordinator.Snapshot()
 	resolution, _ := json.Marshal(resumeValue)
 	if !state.HasActiveTurn {
-		identity, generation := r.lifecycleEnsureIdentity()
-		now := time.Now().UTC()
-		if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
-			Type:       turn.CommandStartTurn,
-			SessionID:  r.session.ID,
-			TurnID:     identity,
-			Generation: generation,
-			Source:     turn.TurnSourceHuman,
-			Budget:     r.turnBudget,
-			At:         now,
-			Reason:     "recovered_pending_interaction",
-		}); err != nil {
-			return fmt.Errorf("recover pending turn lifecycle: %w", err)
-		}
-		state = r.turnCoordinator.Snapshot()
-		identity, generation = state.TurnID, state.Generation
-		if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
-			Type:       turn.CommandStartStep,
-			SessionID:  r.session.ID,
-			TurnID:     identity,
-			StepID:     lifecycleStepID(identity, 1),
-			Generation: generation,
-			At:         now,
-		}); err != nil {
-			return fmt.Errorf("recover pending step lifecycle: %w", err)
-		}
-		if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
-			Type:       turn.CommandAssistantReceived,
-			SessionID:  r.session.ID,
-			TurnID:     identity,
-			StepID:     lifecycleStepID(identity, 1),
-			Generation: generation,
-			HasTools:   true,
-			At:         now,
-		}); err != nil {
-			return fmt.Errorf("recover pending assistant lifecycle: %w", err)
-		}
-		if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
-			Type:       turn.CommandInteractionRequested,
-			SessionID:  r.session.ID,
-			TurnID:     identity,
-			StepID:     lifecycleStepID(identity, 1),
-			Generation: generation,
-			At:         now,
-			Reason:     "recovered_pending_interaction",
-		}); err != nil {
-			return fmt.Errorf("recover pending interaction lifecycle: %w", err)
-		}
-		state = r.turnCoordinator.Snapshot()
+		return fmt.Errorf("cannot resume without an active turn")
 	}
 	if state.StepStatus == turn.StepStatusWaitingInteraction {
 		history := r.lifecycleHistorySnapshot()
@@ -1094,6 +815,185 @@ func lastAssistantMessage(history []llm.Message, start int) (llm.Message, bool) 
 	return llm.Message{}, false
 }
 
+func assistantCoversToolCalls(message llm.Message, calls []llm.ToolCall) bool {
+	if message.Role != "assistant" || len(calls) == 0 || len(message.ToolCalls) != len(calls) {
+		return false
+	}
+	if err := llm.ValidateAssistantMessage(message); err != nil {
+		return false
+	}
+	known := make(map[string]llm.ToolCall, len(message.ToolCalls))
+	for _, call := range message.ToolCalls {
+		known[strings.TrimSpace(call.ID)] = call
+	}
+	for _, call := range calls {
+		knownCall, ok := known[strings.TrimSpace(call.ID)]
+		if !ok || knownCall.Function.Name != call.Function.Name || !sameJSON(knownCall.Function.Arguments, call.Function.Arguments) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameJSON(left, right string) bool {
+	var leftCompact, rightCompact bytes.Buffer
+	if err := json.Compact(&leftCompact, []byte(left)); err != nil {
+		return false
+	}
+	if err := json.Compact(&rightCompact, []byte(right)); err != nil {
+		return false
+	}
+	return leftCompact.String() == rightCompact.String()
+}
+
+// restoreActiveToolCallMessage places the active lifecycle batch immediately
+// after the latest user message. Older snapshots could contain the assistant
+// envelope before a recovered in-flight user input, which is still invalid
+// even if the call and result IDs match.
+func (r *runtime) restoreActiveToolCallMessage(calls []llm.ToolCall) {
+	if r == nil || len(calls) == 0 {
+		return
+	}
+	history := r.lifecycleHistorySnapshot()
+	assistantIndex := -1
+	callIDs := make(map[string]struct{}, len(calls))
+	for _, call := range calls {
+		callIDs[strings.TrimSpace(call.ID)] = struct{}{}
+	}
+	activeAssistantIndices := make(map[int]struct{})
+	activeResultIndices := make(map[int]struct{})
+	resultByCallID := make(map[string]llm.Message, len(calls))
+	for index, message := range history {
+		if assistantCoversToolCalls(message, calls) {
+			if assistantIndex < 0 {
+				assistantIndex = index
+			}
+		}
+		if message.Role == "assistant" {
+			for _, call := range message.ToolCalls {
+				if _, ok := callIDs[strings.TrimSpace(call.ID)]; ok {
+					activeAssistantIndices[index] = struct{}{}
+					break
+				}
+			}
+		}
+		if message.Role == "tool" {
+			if _, ok := callIDs[strings.TrimSpace(message.ToolCallID)]; ok {
+				activeResultIndices[index] = struct{}{}
+				resultByCallID[strings.TrimSpace(message.ToolCallID)] = message
+			}
+		}
+	}
+	lastUserIndex := -1
+	for index, message := range history {
+		if message.Role == "user" {
+			lastUserIndex = index
+		}
+	}
+	needsMove := assistantIndex < 0 || assistantIndex <= lastUserIndex
+	if !needsMove {
+		for index := range activeResultIndices {
+			if index < assistantIndex {
+				needsMove = true
+				break
+			}
+		}
+	}
+	for _, call := range calls {
+		if _, ok := resultByCallID[strings.TrimSpace(call.ID)]; !ok {
+			needsMove = true
+			break
+		}
+	}
+	if !needsMove {
+		return
+	}
+	assistant := llm.Message{Role: "assistant", ToolCalls: calls}
+	if assistantIndex >= 0 {
+		assistant = history[assistantIndex]
+	} else {
+		for index := range activeAssistantIndices {
+			assistant = history[index]
+			break
+		}
+	}
+	// Lifecycle facts are authoritative for the call envelope. Keep any
+	// existing assistant text/reasoning, but replace a stale or partial tool
+	// list with the durable calls so the reconstructed message validates.
+	assistant.ToolCalls = append([]llm.ToolCall(nil), calls...)
+	results := make([]llm.Message, 0, len(calls))
+	for _, call := range calls {
+		id := strings.TrimSpace(call.ID)
+		if result, ok := resultByCallID[id]; ok {
+			results = append(results, result)
+			continue
+		}
+		results = append(results, llm.RecoveryPlaceholderToolResult(call))
+	}
+	kept := make([]llm.Message, 0, len(history))
+	for index, message := range history {
+		if _, ok := activeAssistantIndices[index]; ok {
+			continue
+		}
+		if _, ok := activeResultIndices[index]; ok {
+			continue
+		}
+		kept = append(kept, message)
+	}
+	history = kept
+	lastUserIndex = -1
+	for index, message := range history {
+		if message.Role == "user" {
+			lastUserIndex = index
+		}
+	}
+	insertAt := lastUserIndex + 1
+	if insertAt < 0 {
+		insertAt = 0
+	}
+	if insertAt > len(history) {
+		insertAt = len(history)
+	}
+	reordered := make([]llm.Message, 0, len(history)+1)
+	reordered = append(reordered, history[:insertAt]...)
+	reordered = append(reordered, assistant)
+	reordered = append(reordered, results...)
+	reordered = append(reordered, history[insertAt:]...)
+	if err := llm.ValidateToolProtocol(reordered); err != nil {
+		if r.logger != nil {
+			r.logger.Warn("reconstructed active tool history is invalid", "session_id", r.session.ID, "error", err)
+		}
+		return
+	}
+	r.mu.Lock()
+	r.messages = reordered
+	r.historyRevision++
+	r.mu.Unlock()
+	r.persist(context.Background())
+}
+
+func (r *runtime) activeToolCallsFromLifecycle() []llm.ToolCall {
+	if r == nil || r.turnCoordinator == nil {
+		return nil
+	}
+	projections := r.turnCoordinator.ActiveToolCalls()
+	if len(projections) == 0 {
+		return nil
+	}
+	calls := make([]llm.ToolCall, 0, len(projections))
+	for _, projection := range projections {
+		calls = append(calls, llm.ToolCall{
+			ID:   projection.ID,
+			Type: "function",
+			Function: llm.ToolCallFunction{
+				Name:      projection.ToolName,
+				Arguments: string(projection.Arguments),
+			},
+		})
+	}
+	return calls
+}
+
 func (r *runtime) lifecycleRecordToolFacts(history []llm.Message, historyStart int, calls []llm.ToolCall) error {
 	return r.lifecycleRecordToolFactsMode(history, historyStart, calls, false)
 }
@@ -1116,7 +1016,7 @@ func (r *runtime) lifecycleRecordToolFactsMode(history []llm.Message, historySta
 	}
 	for i := historyStart; i < len(history); i++ {
 		message := history[i]
-		if message.Role == "tool" && strings.TrimSpace(message.ToolCallID) != "" {
+		if message.Role == "tool" && strings.TrimSpace(message.ToolCallID) != "" && !llm.IsRecoveryPlaceholderToolResult(message) {
 			results[message.ToolCallID] = message
 		}
 	}
@@ -1217,11 +1117,6 @@ func (r *runtime) lifecycleRecordToolFactsMode(history []llm.Message, historySta
 		}
 	}
 	return nil
-}
-
-func isInternalSideEffectCallback(call llm.ToolCall) bool {
-	name := strings.ToLower(strings.TrimSpace(call.Function.Name))
-	return name == "tool_callback" || name == "get_callback"
 }
 
 // withCommittedHistoryLocked makes the message snapshot and the lifecycle
@@ -1441,9 +1336,9 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 		}
 		state = r.turnCoordinator.Snapshot()
 	}
-	// A recovered legacy HITL state is still waiting in the coordinator. The
-	// current runtime has already consumed the resume command, so normalize it
-	// before applying the same post-resume settlement path as a live state.
+	// The resume command has consumed the waiting interaction. Normalize the
+	// coordinator before applying the same post-resume settlement path as a
+	// live state.
 	if state.StepStatus == turn.StepStatusWaitingInteraction {
 		if err := dispatch(turn.TurnCommand{Type: turn.CommandInteractionResolved, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, InteractionID: state.InteractionID, InteractionRevision: 1, At: now}); err != nil {
 			return fmt.Errorf("resolve resumed interaction lifecycle: %w", err)
@@ -1503,7 +1398,7 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 				StepID:          state.StepID,
 				Generation:      generation,
 				InteractionID:   state.InteractionID,
-				InteractionKind: legacyPendingInteractionKind(outcome.Pending),
+				InteractionKind: pendingInteractionKind(outcome.Pending),
 				ToolExecutionID: toolExecutionID,
 				Payload:         pendingPayload,
 				At:              now,
@@ -1558,11 +1453,11 @@ func (r *runtime) lifecycleCancelLocked() error {
 		return nil
 	}
 	now := time.Now().UTC()
-	if state.StepID != "" && !state.StepStatus.Terminal() {
-		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCancelStep, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, At: now, Reason: "cancelled_by_user"}); err != nil {
-			return fmt.Errorf("cancel lifecycle step: %w", err)
-		}
-	}
+	// CommandCancelTurn is the cancellation fence. The coordinator closes the
+	// active Step, executions, interaction and batch in the same durable
+	// projection before publishing one terminal turn_state event; emitting a
+	// separate Step cancellation first would expose an impossible intermediate
+	// state to SSE clients and to a concurrent restore.
 	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCancelTurn, SessionID: r.session.ID, TurnID: state.TurnID, Generation: state.Generation, At: now, Reason: "cancelled_by_user"}); err != nil {
 		return fmt.Errorf("cancel lifecycle turn: %w", err)
 	}
@@ -1649,16 +1544,30 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 	if err != nil {
 		return err
 	}
-	r.mu.Lock()
-	resultExists := false
-	for _, message := range r.messages {
-		if message.Role == "tool" && message.ToolCallID == toolCallID {
-			resultExists = true
-			break
+	reconciledMetadata := tools.ResultMetadata{Status: tools.ResultStatus(status)}
+	if status != turn.ToolExecutionStatusSucceeded {
+		reconciledMetadata.Error = &tools.ResultError{
+			Code:      "reconciled_" + string(status),
+			Message:   "tool execution was reconciled after restart",
+			Retryable: false,
 		}
 	}
+	reconciledMessage := llm.ToolResultMessageWithMetadata(toolCallID, toolName, content, reconciledMetadata)
+	r.mu.Lock()
+	resultExists := false
+	for index, message := range r.messages {
+		if message.Role != "tool" || message.ToolCallID != toolCallID {
+			continue
+		}
+		resultExists = true
+		if llm.IsRecoveryPlaceholderToolResult(message) {
+			r.messages[index] = reconciledMessage
+			r.historyRevision++
+		}
+		break
+	}
 	if !resultExists {
-		r.messages = append(r.messages, llm.ToolResultMessage(toolCallID, toolName, content))
+		r.messages = append(r.messages, reconciledMessage)
 		r.historyRevision++
 	}
 	r.mu.Unlock()

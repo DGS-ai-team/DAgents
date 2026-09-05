@@ -5,7 +5,6 @@ go 1.25.0
 require (
 	github.com/DGS-ai-team/DAgents/shared/config v0.0.0
 	github.com/DGS-ai-team/DAgents/shared/update v0.0.0
-	github.com/DGS-ai-team/DAgents/shared/workgroup v0.0.0
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/coder/websocket v1.8.13
@@ -38,5 +37,3 @@ require (
 replace github.com/DGS-ai-team/DAgents/shared/config => ../shared/config
 
 replace github.com/DGS-ai-team/DAgents/shared/update => ../shared/update
-
-replace github.com/DGS-ai-team/DAgents/shared/workgroup => ../shared/workgroup

@@ -19,7 +19,7 @@ func TestHumanMessageWithCompressionAndHooksDoesNotDeadlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	hub := stream.NewHub(32, logx.Discard())
 	mgr := NewManager("agent-1", hub, &slowMockLLM{delay: 50 * time.Millisecond}, reg, pol, nil, TurnOptions{
 		SkillsEnabled:       false,

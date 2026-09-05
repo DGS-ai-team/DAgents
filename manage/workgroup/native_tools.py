@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from manage.workgroup.errors import WorkgroupError
+from manage.workgroup.assignment_service import AssignmentService
 from manage.workgroup.d3_models import HITLRequest
 from manage.workgroup.history import build_assign_tool_result_content
 from manage.workgroup.member_tools import CALL_PURPOSE_KEY
@@ -85,18 +86,6 @@ AssignCompleter = Callable[..., str]
 """(workgroup_id, assign_id, member_id, instruction, tool_call_id='') -> summary text."""
 
 
-def scripted_assign_completer(
-    workgroup_id: str,
-    assign_id: str,
-    member_id: str,
-    instruction: str,
-    tool_call_id: str = "",
-) -> str:
-    """无真实 Node 工具时的同步占位：立刻成功并写 Timeline。"""
-    _ = (workgroup_id, assign_id, member_id, tool_call_id)
-    return f"[scripted] {instruction.strip()[:500]}"
-
-
 def format_hitl_resolution(resolved: HITLRequest) -> str:
     """Encode a resolved HITL exactly as the native tool would return it."""
     resolution = dict(resolved.resolution or {})
@@ -129,13 +118,15 @@ class NativeToolDispatcher:
         *,
         leader_run_id: str,
         assign_completer: AssignCompleter | None = None,
+        assignment_service: AssignmentService | None = None,
         registry_store: Any | None = None,
         on_hitl_created: Callable[[HITLRequest], None] | None = None,
         on_hitl_resolved: Callable[[HITLRequest], None] | None = None,
     ) -> None:
         self.store = store
         self.leader_run_id = leader_run_id
-        self.assign_completer = assign_completer or scripted_assign_completer
+        self.assign_completer = assign_completer
+        self.assignments = assignment_service or AssignmentService(store)
         self.registry_store = registry_store
         self.on_hitl_created = on_hitl_created
         self.on_hitl_resolved = on_hitl_resolved
@@ -158,13 +149,11 @@ class NativeToolDispatcher:
             members = self.store.list_members(workgroup_id)
             payload = []
             for m in members:
-                spec = self.store.get_spec(m.member_id)
-                description = (spec.description if spec is not None else "") or ""
                 payload.append(
                     {
                         "member_id": m.member_id,
                         "display_name": m.display_name,
-                        "description": description.strip(),
+                        "description": m.description.strip(),
                         "status": m.status,
                         "home_node_id": m.home_node_id,
                         "host_ips": self._host_ips_for_node(m.home_node_id),
@@ -190,6 +179,7 @@ class NativeToolDispatcher:
         hitl = self.store.create_hitl(
             workgroup_id,
             prompt=prompt,
+            kind="user_question",
             run_id=self.leader_run_id,
             tool_call_id=tool_call_id,
             reserve_waiter=True,
@@ -210,28 +200,26 @@ class NativeToolDispatcher:
         instruction = str(args.get("instruction") or "").strip()
         if not member_id or not instruction:
             raise WorkgroupError("invalid_request", "member_id and instruction required")
+        if self.assign_completer is None:
+            raise WorkgroupError(
+                "conflict",
+                "assign completer not configured",
+                http_status=500,
+            )
 
-        assign = self.store.create_assign(
+        member = self.store.get_member(member_id)
+        display = (member.display_name if member else "") or member_id
+        assign = self.assignments.create(
             workgroup_id,
             AssignCreateRequest(
                 member_id=member_id,
                 leader_run_id=self.leader_run_id,
                 leader_tool_call_id=tool_call_id,
+                source="leader_tool",
                 instruction=instruction,
             ),
-        )
-        self.store.set_assign_status(assign.assign_id, "running")
-        member = self.store.get_member(member_id)
-        display = (member.display_name if member else "") or member_id
-        instruction_text = instruction.strip()
-        # Supervisor 聊天态：@成员 + 完整任务正文（前端解析为提及行 + 任务卡片）
-        self.store.append_timeline(
-            workgroup_id,
-            type="assign_started",
             actor_id="leader",
-            text=f"@{display}\n{instruction_text}",
-            protocol_name="leader",
-            assign_id=assign.assign_id,
+            started_text=f"@{display}\n{instruction.strip()}",
         )
         terminal = False
         try:
@@ -243,24 +231,21 @@ class NativeToolDispatcher:
                 tool_call_id,
             )
             current = self.store.get_assign(assign.assign_id)
-            if current is not None and current.status in {"failed", "canceled", "indeterminate"}:
+            if current is not None and current.status in {"succeeded", "failed", "canceled", "indeterminate"}:
                 terminal = True
                 return build_assign_tool_result_content(
                     assign_id=assign.assign_id,
-                    status="canceled" if current.status == "canceled" else current.status,
-                    summary=current.result_summary or "cancelled by user",
-                    error_code=current.error_code or "canceled",
+                    status=current.status,
+                    summary=current.result_summary or ("cancelled by user" if current.status == "canceled" else "assign finished"),
+                    error_code=current.error_code,
                 )
-            assign = self.store.set_assign_status(
-                assign.assign_id, "succeeded", result_summary=summary, error_code=None
-            )
-            self.store.append_timeline(
+            assign = self.assignments.finish(
                 workgroup_id,
-                type="assign_finished",
+                assign.assign_id,
+                status="succeeded",
+                summary=summary,
                 actor_id="leader",
                 text="已完成",
-                protocol_name="leader",
-                assign_id=assign.assign_id,
             )
             # Member LLM loop 已写 Timeline final；scripted completer 未写时在此补一条
             already = any(
@@ -286,27 +271,22 @@ class NativeToolDispatcher:
             )
         except WorkgroupError as exc:
             current = self.store.get_assign(assign.assign_id)
-            if current is not None and current.status in {"canceled", "indeterminate"}:
+            if current is not None and current.status in {"succeeded", "failed", "canceled", "indeterminate"}:
                 terminal = True
                 return build_assign_tool_result_content(
                     assign_id=assign.assign_id,
                     status=current.status,
                     summary=current.result_summary or exc.message,
-                    error_code=current.error_code or exc.code,
+                    error_code=current.error_code or (exc.code if current.status != "succeeded" else None),
                 )
-            assign = self.store.set_assign_status(
-                assign.assign_id,
-                "failed",
-                result_summary=exc.message,
-                error_code=exc.code,
-            )
-            self.store.append_timeline(
+            assign = self.assignments.finish(
                 workgroup_id,
-                type="assign_finished",
+                assign.assign_id,
+                status="failed",
+                summary=exc.message,
+                error_code=exc.code,
                 actor_id="leader",
                 text=f"失败：{exc.message}",
-                protocol_name="leader",
-                assign_id=assign.assign_id,
             )
             terminal = True
             return build_assign_tool_result_content(
@@ -318,27 +298,22 @@ class NativeToolDispatcher:
         except Exception as exc:  # noqa: BLE001 — 必须释放 active assign
             msg = str(exc) or exc.__class__.__name__
             current = self.store.get_assign(assign.assign_id)
-            if current is not None and current.status in {"canceled", "indeterminate"}:
+            if current is not None and current.status in {"succeeded", "failed", "canceled", "indeterminate"}:
                 terminal = True
                 return build_assign_tool_result_content(
                     assign_id=assign.assign_id,
                     status=current.status,
                     summary=current.result_summary or msg,
-                    error_code=current.error_code or "conflict",
+                    error_code=current.error_code or ("conflict" if current.status != "succeeded" else None),
                 )
-            assign = self.store.set_assign_status(
-                assign.assign_id,
-                "failed",
-                result_summary=msg,
-                error_code="conflict",
-            )
-            self.store.append_timeline(
+            assign = self.assignments.finish(
                 workgroup_id,
-                type="assign_finished",
+                assign.assign_id,
+                status="failed",
+                summary=msg,
+                error_code="conflict",
                 actor_id="leader",
                 text=f"失败：{msg}",
-                protocol_name="leader",
-                assign_id=assign.assign_id,
             )
             terminal = True
             return build_assign_tool_result_content(
@@ -350,19 +325,14 @@ class NativeToolDispatcher:
         finally:
             if not terminal:
                 try:
-                    self.store.set_assign_status(
-                        assign.assign_id,
-                        "failed",
-                        result_summary="assign interrupted before completion",
-                        error_code="canceled",
-                    )
-                    self.store.append_timeline(
+                    self.assignments.finish(
                         workgroup_id,
-                        type="assign_finished",
+                        assign.assign_id,
+                        status="failed",
+                        summary="assign interrupted before completion",
+                        error_code="canceled",
                         actor_id="leader",
                         text="已中断",
-                        protocol_name="leader",
-                        assign_id=assign.assign_id,
                     )
                 except Exception:  # noqa: BLE001
                     pass

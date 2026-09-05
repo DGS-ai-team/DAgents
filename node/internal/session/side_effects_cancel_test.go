@@ -33,17 +33,17 @@ func TestCancelRecoverySchedulesContinueWhenBufferReady(t *testing.T) {
 	rt := mgr.getRuntime(sess.ID)
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg"},
+		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
-			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`},
+			ID: "call-async-1", Type: "function",
+			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 		}}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1 status=accepted"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,16 +88,16 @@ func TestCancelWithPendingAndBufferDoesNotScheduleContinue(t *testing.T) {
 	rt.messages = []llm.Message{
 		{Role: "user", Content: "bg + sync"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
-			{ID: "call-bg-1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`}},
+			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`}},
 			approvalCall,
 		}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestClearContextDropsSideEffectBuffer(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -186,18 +186,18 @@ func TestHumanMessageDuringPendingHITLWaitsForExplicitCancel(t *testing.T) {
 	}
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg"},
+		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
-			{ID: "call-bg-1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`}},
+			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`}},
 			approvalCall,
 		}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestCancelRecoveryPublishesSideEffectTurnStartSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 
@@ -269,17 +269,17 @@ func TestCancelRecoveryPublishesSideEffectTurnStartSSE(t *testing.T) {
 
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg"},
+		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
-			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`},
+			ID: "call-async-1", Type: "function",
+			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 		}}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1 status=accepted"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestCancelRecoveryPublishesSideEffectTurnStartSSE(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timeout waiting for side_effect_turn_start SSE")
 		case ev := <-sub:
-			if ev.SessionID != sess.ID {
+			if ev.AgentID != sess.ID {
 				continue
 			}
 			if ev.Type == "side_effect_turn_start" {
@@ -319,7 +319,7 @@ func TestSideEffectApplyPublishesAppliedSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 
@@ -333,17 +333,17 @@ func TestSideEffectApplyPublishesAppliedSSE(t *testing.T) {
 
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg"},
+		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
-			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`},
+			ID: "call-async-1", Type: "function",
+			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 		}}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1 status=accepted"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestSideEffectApplyPublishesAppliedSSE(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timeout waiting for side_effect_applied SSE")
 		case ev := <-sub:
-			if ev.SessionID != sess.ID || ev.Type != "side_effect_applied" {
+			if ev.AgentID != sess.ID || ev.Type != "side_effect_applied" {
 				continue
 			}
 			raw, _ := ev.Data["seqs"].([]any)
@@ -377,7 +377,7 @@ func TestClearContextPublishesSideEffectsClearedSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false}, logx.Discard())
 	defer mgr.Stop()
 
@@ -402,7 +402,7 @@ func TestClearContextPublishesSideEffectsClearedSSE(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestClearContextPublishesSideEffectsClearedSSE(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timeout waiting for side_effects_cleared SSE")
 		case ev := <-sub:
-			if ev.SessionID != sess.ID || ev.Type != "side_effects_cleared" {
+			if ev.AgentID != sess.ID || ev.Type != "side_effects_cleared" {
 				continue
 			}
 			dropped, _ := ev.Data["dropped"].(int)

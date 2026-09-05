@@ -12,12 +12,12 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-func TestTurnContextMetrics_statusPollAndDoneSSE(t *testing.T) {
+func TestTurnContextMetrics_toolCallAndDoneSSE(t *testing.T) {
 	hub := stream.NewHub(16, logx.Discard())
 	orch := NewOrchestrator(
 		"a1", t.TempDir(), hub, &llm.MockClient{},
 		stubStatusPollExecutor{},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(t.TempDir()),
@@ -26,10 +26,10 @@ func TestTurnContextMetrics_statusPollAndDoneSSE(t *testing.T) {
 	)
 	orch.resetContextMetrics("sess-m")
 	tcStatus := llm.ToolCall{
-		ID: "call-status", Type: "function",
+		ID: "call-read", Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "background_job_status",
-			Arguments: `{"call_purpose":"poll","job_id":"job-1"}`,
+			Name:      "read_file",
+			Arguments: `{"call_purpose":"read","path":"a.txt"}`,
 		},
 	}
 	history := []llm.Message{
@@ -42,7 +42,7 @@ func TestTurnContextMetrics_statusPollAndDoneSSE(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := orch.contextMetrics("sess-m")
-	if m == nil || m.StatusPollCount != 1 || m.ToolCalls != 1 {
+	if m == nil || m.ToolCalls != 1 {
 		t.Fatalf("metrics after executeTool = %+v", m)
 	}
 	orch.publishTurnFinished("sess-m", "stop")
@@ -61,15 +61,15 @@ func TestTurnContextMetrics_statusPollAndDoneSSE(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing tool_context_metrics: %+v", finishedPayload)
 	}
-	if n, ok := raw["status_poll_count"].(int); !ok || n != 1 {
-		if f, ok := raw["status_poll_count"].(float64); !ok || int(f) != 1 {
-			t.Fatalf("status_poll_count = %v (%T)", raw["status_poll_count"], raw["status_poll_count"])
+	if n, ok := raw["tool_calls"].(int); !ok || n != 1 {
+		if f, ok := raw["tool_calls"].(float64); !ok || int(f) != 1 {
+			t.Fatalf("tool_calls = %v (%T)", raw["tool_calls"], raw["tool_calls"])
 		}
 	}
 }
 
 func TestTurnContextMetrics_readFileEncodingAndRepeat(t *testing.T) {
-	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(4, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, 10, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig()}, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(4, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig()}, logx.Discard())
 	orch.resetContextMetrics("sess-r")
 	content := strings.Join([]string{
 		"文件编码: gbk",
@@ -93,7 +93,7 @@ func TestTurnContextMetrics_readFileEncodingAndRepeat(t *testing.T) {
 }
 
 func TestTurnContextMetrics_snapshotToolLoops(t *testing.T) {
-	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(4, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, 10, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig()}, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(4, logx.Discard()), &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig()}, logx.Discard())
 	orch.resetContextMetrics("s")
 	orch.recordToolLoop("s", 3)
 	snap := orch.contextMetrics("s").snapshot()
@@ -107,13 +107,9 @@ type stubStatusPollExecutor struct{}
 func (stubStatusPollExecutor) Definitions() []tools.ToolDef { return nil }
 
 func (stubStatusPollExecutor) Execute(_ context.Context, name, _ string) (string, error) {
-	if name == "background_job_status" {
-		return "status=running", nil
+	if name == "read_file" {
+		return "ok", nil
 	}
-	return "", nil
-}
-
-func (stubStatusPollExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
 	return "", nil
 }
 

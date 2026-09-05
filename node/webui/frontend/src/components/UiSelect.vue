@@ -8,6 +8,12 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   /** settings = 设置/首配输入框外观；compact = 稍紧凑 */
   size: { type: String, default: "settings" },
+  /** auto = 根据视口空间；above/below = 在表单中固定展开方向 */
+  menuPlacement: {
+    type: String,
+    default: "auto",
+    validator: (v) => ["auto", "above", "below"].includes(v),
+  },
 });
 
 const emit = defineEmits(["update:modelValue", "change"]);
@@ -54,7 +60,9 @@ function placeMenu() {
   const maxH = 240;
   const spaceBelow = window.innerHeight - r.bottom - gap;
   const spaceAbove = r.top - gap;
-  const openUp = spaceBelow < Math.min(maxH, 120) && spaceAbove > spaceBelow;
+  const openUp =
+    props.menuPlacement === "above" ||
+    (props.menuPlacement !== "below" && spaceBelow < Math.min(maxH, 120) && spaceAbove > spaceBelow);
   const height = Math.min(maxH, openUp ? spaceAbove : spaceBelow);
   menuStyle.value = {
     position: "fixed",

@@ -327,31 +327,3 @@ func (r *Registry) TakeBashCompressStatsForCall(toolCallID string) map[string]an
 	}
 	return stats.SSEFields()
 }
-
-func outputCompressStatsFromSSEFields(fields map[string]any) *OutputCompressStats {
-	if fields == nil {
-		return nil
-	}
-	pct := intFromAny(fields["output_compress_saved_pct"])
-	if pct <= 0 {
-		return nil
-	}
-	return &OutputCompressStats{
-		RawRunes: intFromAny(fields["output_compress_raw_runes"]),
-		OutRunes: intFromAny(fields["output_compress_out_runes"]),
-		SavedPct: pct,
-	}
-}
-
-func intFromAny(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	default:
-		return 0
-	}
-}

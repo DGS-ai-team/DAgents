@@ -34,6 +34,16 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
+	// initialHistoryRevision is supplied by Manager while restoring a runtime.
+	// Lifecycle recovery may persist a repaired provider history during
+	// construction, so the constructor must start from the revision loaded from
+	// SQLite instead of the zero value.
+	initialHistoryRevision uint64
+	// initialLifecycleEvents are supplied by Manager when it already loaded the
+	// session projection. Keeping the load marker separate from the slice lets
+	// an empty, successfully-read event log avoid a second database scan.
+	initialLifecycleEvents       []turn.TurnEventEnvelope
+	initialLifecycleEventsLoaded bool
 	// WorkspaceRoot is the Agent-facing root for files, bash, local terminals,
 	// media and user-visible tool artifacts.
 	WorkspaceRoot string
@@ -45,12 +55,6 @@ type TurnOptions struct {
 	// for sidecars such as raw message history. It is derived at runtime and is
 	// not a model-facing path base.
 	WorkspaceStateRoot string
-	// FSRoot is the pre-workspace compatibility alias. New callers must use
-	// WorkspaceRoot so Node runtime storage cannot be confused with an Agent
-	// workspace.
-	// Deprecated: use WorkspaceRoot.
-	FSRoot       string
-	MaxToolLoops int
 	// MaxModelRetries retries only transient provider failures within one Step;
 	// zero uses the default (2), -1 disables retries. Partial streamed output is
 	// never retried by the orchestrator.
@@ -83,23 +87,21 @@ type TurnOptions struct {
 	PluginHooks                   hooks.PluginsConfig
 	HookHost                      turn.HookHostConfig
 	MultimodalEnabled             bool
-	// ConfigRevision 保留兼容旧调用方；新代码使用 RuntimeRevision。
-	ConfigRevision int64
 	// RuntimeRevision 是独立于 agents.updated_at 的 Agent runtime 版本。
 	RuntimeRevision int64
 	// RuntimeDigest 标识该 runtime 的模型可见输入（prompt + tools）。
 	RuntimeDigest string
-	// PromptContext 控制 soul/custom/long_term 侧车是否注入（缺省全开）。
+	// LLMProfileDigest identifies the effective Agent-bound LLM connection.
+	LLMProfileDigest string
+	// PromptContext 控制 soul/custom 侧车是否注入（缺省全开）；记忆召回
+	// 由 MemoryService 与 MemoryAutoRecall 独立控制。
 	PromptContext PromptContextOptions
 	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
 	PromptContent *promptcontext.Content
 	// PreferredName 为本机使用者称呼（Node 首配）；通过 prompt context
-	// 注入模型请求，替代 user.md。
+	// 注入模型请求。
 	PreferredName string
-	// LongTermStore 是迁移期间保留的 legacy 长期记忆 adapter；新 runtime
-	// 优先使用下方的 MemoryService。
-	LongTermStore turn.LongTermStore
-	// MemoryService is the v2 workspace memory authority. It is recalled at
+	// MemoryService is the workspace memory authority. It is recalled at
 	// each fresh model-context boundary and never injected into system prompt.
 	MemoryService memory.Service
 	// MemoryAutoRecall controls the automatic per-turn memory projection. It is
@@ -115,18 +117,26 @@ type TurnOptions struct {
 }
 
 func effectiveWorkspaceRoot(opts TurnOptions) string {
-	if root := strings.TrimSpace(opts.WorkspaceRoot); root != "" {
-		return root
-	}
-	return strings.TrimSpace(opts.FSRoot)
+	return strings.TrimSpace(opts.WorkspaceRoot)
+}
+
+func withInitialHistoryRevision(opts TurnOptions, revision uint64) TurnOptions {
+	opts.initialHistoryRevision = revision
+	return opts
+}
+
+func withInitialLifecycleEvents(opts TurnOptions, events []turn.TurnEventEnvelope, loaded bool) TurnOptions {
+	opts.initialLifecycleEvents = append([]turn.TurnEventEnvelope(nil), events...)
+	opts.initialLifecycleEventsLoaded = loaded
+	return opts
 }
 
 // PromptContextOptions 为侧车 / 长期记忆注入开关。
 type PromptContextOptions struct {
-	SoulEnabled     *bool
-	CustomEnabled   *bool
-	LongTermEnabled *bool
-	LongTermScope   *string // global | agent
+	SoulEnabled   *bool
+	CustomEnabled *bool
+	MemoryEnabled *bool
+	MemoryScope   *string // global | agent
 }
 
 // Manager 维护 session 表；每个 session 独立 InputBox、控制队列与 consumer goroutine。
@@ -169,9 +179,6 @@ func NewManager(
 	logger *slog.Logger,
 ) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	if turnOpts.MaxToolLoops <= 0 {
-		turnOpts.MaxToolLoops = turn.DefaultMaxToolLoops()
-	}
 	if turnOpts.MaxModelRetries == 0 {
 		turnOpts.MaxModelRetries = 2
 	}
@@ -361,16 +368,16 @@ func (m *Manager) createWithOptions(
 		m.logger.Info("session reuse", "session_id", id)
 		return &existing.session, false, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(id)
+	restore, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
 		return nil, false, err
 	}
-	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	created := len(restore.Messages) == 0 && !restore.Found
+	turnOpts = withInitialLifecycleEvents(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
-	rt.restoreInputBoxState(inputBoxState)
-	rt.historyRevision = historyRevision
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
@@ -380,7 +387,7 @@ func (m *Manager) createWithOptions(
 		rt.persist(context.Background())
 		m.logger.Info("session created", "session_id", id, "restored", false, "workspace_root", effectiveWorkspaceRoot(turnOpts))
 	} else {
-		m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
+		m.logger.Info("session restored", "session_id", id, "messages", len(restore.Messages))
 	}
 	return &rt.session, created, nil
 }
@@ -439,42 +446,44 @@ func (m *Manager) replaceWithOptions(
 		m.mu.Unlock()
 		return nil, false, fmt.Errorf("cannot replace child session")
 	}
-	var msgs []llm.Message
-	var loaded []skills.LoadedSkill
-	var pending *turn.PendingHITL
-	var loopCount int
-	var hookStore map[string]json.RawMessage
-	var idleMarked bool
-	var notifySeq, ackSeq int
-	var historyRevision uint64
-	var inputBoxState json.RawMessage
+	var restore sessionRestoreData
 	if old != nil {
 		// Persist for cold-start recovery, but hydrate from the old runtime's
 		// in-memory snapshot. This avoids losing a last-minute state change when
 		// the store write fails or when the manager is embedded without a store.
 		old.persist(context.Background())
 		if m.store != nil {
-			if _, _, _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+			var err error
+			restore, err = m.loadSessionData(id)
+			if err != nil {
 				m.mu.Unlock()
 				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
 				return nil, false, err
 			}
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState = old.replacementData()
+		replacement := old.replacementData()
+		restore.Messages = replacement.Messages
+		restore.LoadedSkills = replacement.LoadedSkills
+		restore.HookStore = replacement.HookStore
+		restore.IdleAutoCompress = replacement.IdleAutoCompress
+		restore.NotifySeq = replacement.NotifySeq
+		restore.AckSeq = replacement.AckSeq
+		restore.HistoryRevision = replacement.HistoryRevision
+		restore.InputBoxState = replacement.InputBoxState
 	} else {
 		var err error
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err = m.loadSessionData(id)
+		restore, err = m.loadSessionData(id)
 		if err != nil {
 			m.mu.Unlock()
 			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 	}
-	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	created := len(restore.Messages) == 0 && !restore.Found
+	turnOpts = withInitialLifecycleEvents(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
-	rt.restoreInputBoxState(inputBoxState)
-	rt.historyRevision = historyRevision
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -502,15 +511,16 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(id)
+		restore, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
-		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
-		rt.restoreInputBoxState(inputBoxState)
-		rt.historyRevision = historyRevision
+		created := len(restore.Messages) == 0 && !restore.Found
+		turnOpts := withInitialLifecycleEvents(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
+			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+		rt.restoreInputBoxState(restore.InputBoxState)
 		rt.reconcileRestoredInputBox()
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
@@ -522,7 +532,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 		if created {
 			m.logger.Info("session created", "session_id", id, "restored", false)
 		} else {
-			m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
+			m.logger.Info("session restored", "session_id", id, "messages", len(restore.Messages))
 		}
 		return &rt.session, created, nil
 	}
@@ -533,7 +543,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, nil, false, 0, 0, m.turn, m.triggerDelivery)
+	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, false, 0, 0, m.turn, m.triggerDelivery)
 	m.sessions[newID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -543,30 +553,48 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, json.RawMessage, error) {
+type sessionRestoreData struct {
+	Found                 bool
+	Messages              []llm.Message
+	LoadedSkills          []skills.LoadedSkill
+	HookStore             map[string]json.RawMessage
+	IdleAutoCompress      bool
+	NotifySeq             int
+	AckSeq                int
+	HistoryRevision       uint64
+	InputBoxState         json.RawMessage
+	LifecycleEvents       []turn.TurnEventEnvelope
+	LifecycleEventsLoaded bool
+}
+
+func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, nil
+		return sessionRestoreData{}, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, err
+		return sessionRestoreData{}, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, nil
+		return sessionRestoreData{}, nil
 	}
-	var pending *turn.PendingHITL
-	if rec.RuntimeState.Pending != nil {
-		pending = rec.RuntimeState.Pending
+	lifecycle, lifecycleErr := m.loadLifecycleProjectionData(context.Background(), sessionID, rec.NodeID)
+	if lifecycleErr != nil {
+		lifecycle.events = nil
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, rec.RuntimeState.HistoryRevision, rec.RuntimeState.InputBoxState, nil
-}
-
-func (m *Manager) sessionExistsInStore(sessionID string) bool {
-	if m.store == nil {
-		return false
-	}
-	rec, err := m.store.Load(context.Background(), sessionID)
-	return err == nil && rec != nil
+	return sessionRestoreData{
+		Found:                 true,
+		Messages:              rec.Messages,
+		LoadedSkills:          rec.LoadedSkills,
+		HookStore:             rec.RuntimeState.HookStore,
+		IdleAutoCompress:      rec.RuntimeState.IdleAutoCompressApplied,
+		NotifySeq:             rec.RuntimeState.NotifySeq,
+		AckSeq:                rec.RuntimeState.AckSeq,
+		HistoryRevision:       rec.RuntimeState.HistoryRevision,
+		InputBoxState:         rec.RuntimeState.InputBoxState,
+		LifecycleEvents:       lifecycle.events,
+		LifecycleEventsLoaded: lifecycleErr == nil,
+	}, nil
 }
 
 // Get 按 ID 查找 session；不存在返回 nil。
@@ -605,6 +633,19 @@ func (m *Manager) RuntimeMultimodalEnabled(sessionID string) (enabled, ok bool) 
 		return false, false
 	}
 	return rt.runtimeMultimodalEnabled, true
+}
+
+// RuntimeLLMProfileDigest 返回 runtime 装载时的 Agent 绑定 LLM 配置摘要。
+func (m *Manager) RuntimeLLMProfileDigest(sessionID string) string {
+	if m == nil {
+		return ""
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rt, ok := m.sessions[strings.TrimSpace(sessionID)]; ok && rt != nil {
+		return rt.llmProfileDigest
+	}
+	return ""
 }
 
 // RuntimeDigest 返回内存 runtime 的模型上下文输入摘要。
@@ -723,15 +764,15 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	if rec == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
-	pending := rec.RuntimeState.Pending
-	stepCount := rec.RuntimeState.ToolLoopCount
 	lifecycle, hasLifecycleProjection, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
-	} else if hasLifecycleProjection {
-		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
-		stepCount = lifecycle.Usage.Steps
 	}
+	if !hasLifecycleProjection {
+		lifecycle = turn.CoordinatorSnapshot{}
+	}
+	pending := pendingFromLifecycleSnapshot(lifecycle)
+	stepCount := lifecycle.Usage.Steps
 	view := &ContextView{
 		SessionID:             sessionID,
 		MessagesCount:         len(rec.Messages),
@@ -900,8 +941,8 @@ func (m *Manager) EnqueueMessage(
 }
 
 // EnqueueMessageWithFileReferences accepts structured local file metadata
-// alongside the visible user text. The legacy method above remains for
-// internal callers that do not attach files.
+// alongside the visible user text. EnqueueMessage remains the convenience
+// path for internal callers that do not attach files.
 func (m *Manager) EnqueueMessageWithFileReferences(
 	_ context.Context,
 	sessionID, requestType, content string,
@@ -1032,11 +1073,22 @@ func (m *Manager) ReconcileToolExecution(ctx context.Context, sessionID, turnID,
 	return rt.reconcileToolExecution(ctx, turnID, stepID, executionID, status, content)
 }
 
-// CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。
-func (m *Manager) CancelTurn(sessionID string) bool {
+// CancelTurnResult is the authoritative result of a Turn-scope cancellation.
+// The identifiers are retained after the coordinator reaches its terminal
+// state so clients can correlate the cancellation with the SSE turn_state.
+type CancelTurnResult struct {
+	Cancelled  bool
+	TurnID     string
+	Generation uint64
+	Terminal   bool
+}
+
+// CancelTurnWithResult cancels the current Turn and returns its terminal
+// identity. Tool-only cancellation must use the tool execution API instead.
+func (m *Manager) CancelTurnWithResult(sessionID string) CancelTurnResult {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return false
+		return CancelTurnResult{}
 	}
 	// Canceling the composer turn also cancels any synchronous bash process
 	// currently registered for UI cancellation. bash_run never detaches on
@@ -1046,7 +1098,21 @@ func (m *Manager) CancelTurn(sessionID string) bool {
 	if reg := m.SessionTools(sessionID); reg != nil {
 		jobsCancelled = reg.CancelAllSessionJobs(sessionID) > 0
 	}
-	return turnCancelled || jobsCancelled
+	state := turn.CoordinatorSnapshot{}
+	if rt.turnCoordinator != nil {
+		state = rt.turnCoordinator.Snapshot()
+	}
+	return CancelTurnResult{
+		Cancelled:  turnCancelled || jobsCancelled,
+		TurnID:     state.TurnID,
+		Generation: state.Generation,
+		Terminal:   state.TurnStatus.Terminal(),
+	}
+}
+
+// CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。
+func (m *Manager) CancelTurn(sessionID string) bool {
+	return m.CancelTurnWithResult(sessionID).Cancelled
 }
 
 // ListSessionSkills 返回 session 已加载与可用 skills。
@@ -1182,12 +1248,6 @@ func (m *Manager) SessionWorkspaceRoot(sessionID string) (string, bool) {
 		return "", false
 	}
 	return rt.workspaceRoot, true
-}
-
-// SessionFSRoot 保留旧调用方兼容；新代码应使用 SessionWorkspaceRoot。
-// Deprecated: use SessionWorkspaceRoot.
-func (m *Manager) SessionFSRoot(sessionID string) (string, bool) {
-	return m.SessionWorkspaceRoot(sessionID)
 }
 
 func (m *Manager) getRuntime(sessionID string) *runtime {

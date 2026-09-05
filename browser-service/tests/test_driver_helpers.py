@@ -36,14 +36,6 @@ def test_load_settings_uses_runtime_root(tmp_path):
     assert settings.runtime_root == os.path.abspath(str(runtime_root))
 
 
-def test_load_settings_reads_legacy_fs_root(tmp_path):
-    legacy_root = tmp_path / "legacy-runtime"
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(f"fs_root: {legacy_root.as_posix()}\n", encoding="utf-8")
-    settings = load_settings(str(config_path))
-    assert settings.runtime_root == os.path.abspath(str(legacy_root))
-
-
 def test_extend_system_message_contains_dagents_rules():
     msg = build_extend_system_message(
         workspace_root="/tmp/workspace",

@@ -2,7 +2,7 @@
 
 本文描述 **Go Agent Node** 在 turn 全链路中引入 **统一 Hook 框架** 的目标边界、阶段锚点、核心接口、配置形态与落地顺序。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
 
-**状态（v0.10.4）**：**Hook 统一 in-process 插件栈已落地** — 内置 Hook、全局 `hooks.plugins`、skill `hooks/*.so` 共用 `Hook.Run(ctx, *Context, Host)`；`tool.before_each` / `tool.after_each` / `prompt.build` / `llm.before_call` / `llm.after_call` / `turn.done` 及多数 phase 已接线。已**废弃** command/http YAML 外部 Hook。
+**状态**：**Hook 统一 in-process 插件栈已落地** — 内置 Hook、全局 `hooks.plugins`、skill `hooks/*.so` 共用 `Hook.Run(ctx, *Context, Host)`；`tool.before_each` / `tool.after_each` / `prompt.build` / `llm.before_call` / `llm.after_call` / `turn.done` 及多数 phase 已接线。已**废弃** command/http YAML 外部 Hook。
 
 **首版落地候选**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)（`tool.before_each` + policy 三档收敛；**duplicate 仅 `rule`+auto** + 三选项审批）。
 
@@ -260,7 +260,7 @@ func Register(reg *hooks.PluginRegistrar) error
 | 合规拦截 bash | 内置 `policy` + `tool.before_each`（priority 最高之一） |
 | session 跨 turn 状态 | `Host.SessionStoreSet` → SQLite `hook_store` |
 | Hook 内二次 LLM | `Host.LLMComplete`（`reuse_system_prompt`） |
-| 跨系统编排 | A2A / triggers（已有）；不在 Hook 内做 HTTP 代理 |
+| 跨系统编排 | Workgroup / triggers（已有）；不在 Hook 内做 HTTP 代理 |
 
 ---
 

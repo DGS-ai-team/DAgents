@@ -10,7 +10,7 @@ import (
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 )
 
-func TestResolveAgentUpdateDelegatesToShell(t *testing.T) {
+func TestGetUpdateStatusUsesShell(t *testing.T) {
 	shell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"current_version":   "0.7.0",
@@ -29,18 +29,7 @@ func TestResolveAgentUpdateDelegatesToShell(t *testing.T) {
 	desktopAPIBaseURL = shell.URL
 	defer func() { desktopAPIBaseURL = oldBase }()
 
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(nodeapi.AgentUpdateStatus{
-			CurrentVersion: "0.7.0",
-			Deprecated:     true,
-			Delegate:       "shell",
-			Message:        "use shell",
-		})
-	}))
-	defer node.Close()
-
-	client := nodeapi.New(node.URL, &http.Client{})
-	status, err := ResolveAgentUpdate(context.Background(), client, &http.Client{})
+	status, err := GetUpdateStatus(context.Background(), &http.Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +53,7 @@ func TestResolveAgentUpdateUsesNodeOnLinuxPath(t *testing.T) {
 	defer node.Close()
 
 	client := nodeapi.New(node.URL, &http.Client{})
-	status, err := ResolveAgentUpdate(context.Background(), client, &http.Client{})
+	status, err := ResolveAgentUpdate(context.Background(), client)
 	if err != nil {
 		t.Fatal(err)
 	}

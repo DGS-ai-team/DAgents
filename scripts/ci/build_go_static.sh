@@ -67,7 +67,7 @@ DAgents Agent Node + Client (Go static build, Windows)
 4. bin\dagents-client.exe -config config.yaml probe
    bin\dagents-client.exe -config config.yaml update --check
 
-See docs/architecture/go-node-compatibility.md
+See docs/development.md
 EOF
   else
     cat > "${OUT_DIR}/README.txt" <<'EOF'
@@ -79,7 +79,7 @@ DAgents Agent Node + Client (Go static build)
 4. ./bin/dagents-client -config config.yaml probe
    ./bin/dagents-client -config config.yaml update --check
 
-文档: docs/architecture/go-node-compatibility.md
+文档: docs/development.md
 EOF
   fi
 else

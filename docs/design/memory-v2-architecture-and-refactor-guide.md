@@ -1,9 +1,9 @@
 # DAgents Memory v2：技术设计与重构指引
 
-> **状态**：Phase 0–5 核心实现已落地，Phase 6 处于兼容迁移窗口  
+> **状态**：核心实现已落地；本文记录当前 Memory 架构约束，迁移前方案仅保留在明确标注的历史章节中。
 > **设计日期**：2026-09-01  
 > **适用范围**：Agent Node 的长期记忆、Turn 级召回、记忆工具、冲突审批、上下文压缩与恢复  
-> **实现边界**：本文仍区分“迁移前基线”“当前已落地能力”和“后续目标”；发布说明与用户文档只能引用已经通过验收的部分。
+> **实现边界**：§1、§5.5、§12 和 §14 保留迁移前方案及决策过程；当前行为以 `node/internal/memory`、`node/internal/api/memory_service.go` 和现行测试为准。新代码不得据此恢复已删除的 legacy adapter、旧存储双写或旧 API 别名。
 
 ## 0. 决策摘要
 
@@ -38,11 +38,11 @@ DAgents 的长期记忆采用以下三级模型：
 
 ---
 
-## 1. 当前实现基线
+## 1. 重构前实现基线（历史记录）
 
 本节保留重构前的代码事实，作为迁移审计记录；现行实现状态见 §14 的阶段标记。修改实现时不要把历史基线误当成当前行为。
 
-### 1.1 当前代码入口
+### 1.1 重构前代码入口
 
 | 职责 | 当前入口 | 当前行为 |
 |---|---|---|
@@ -58,7 +58,7 @@ DAgents 的长期记忆采用以下三级模型：
 | 压缩边界 | `node/internal/session/runtime_turn.go` | 压缩成功后重新加载长期记忆并重建模型上下文 |
 | Agent 私有状态目录 | `node/internal/agentruntime/workspace.go` | 已创建 `<workspace>/.dagents/<agent_id>/memory/`，尚未成为长期记忆正文的权威存储 |
 
-### 1.2 当前数据流
+### 1.2 重构前数据流
 
 ```mermaid
 flowchart LR
@@ -114,7 +114,7 @@ flowchart LR
 - 写入、冲突、审批和恢复均可审计，并能抵抗并发更新；
 - Agent 记忆随 Workspace 迁移，多个 Agent 共用 Workspace 时仍以 `agent_id` 隔离；
 - 第一版使用本地 SQLite 检索，不引入外部向量数据库；
-- 保留当前 API/UI 的兼容读取窗口，迁移过程不丢历史记忆。
+- 旧 API/UI 兼容窗口仅属于历史迁移方案；当前版本不再新增兼容字段或双写路径。
 
 ### 2.2 非目标
 
@@ -1069,10 +1069,10 @@ Consolidator 按 Agent 串行执行，允许合并不同 Agent 的并发：
 
 ### 11.1 Agent / Global Scope
 
-第一阶段保持现有兼容语义：
+当前契约定义如下：
 
-- `long_term_scope=agent`：只使用当前 Agent Repository；
-- `long_term_scope=global`：只使用 Node Global Repository；
+- `memory_scope=agent`：只使用当前 Agent Repository；
+- `memory_scope=global`：只使用 Node Global Repository；
 - 不隐式合并 agent + global；
 - 是否增加 `both` 需另行产品决策和权限设计。
 
@@ -1102,9 +1102,9 @@ Workgroup 成员引用正常 AgentRef，因此：
 
 ## 12. API、设置页与兼容性
 
-### 12.1 兼容字段
+### 12.1 历史字段（非当前写入协议）
 
-当前 Agent prompt context API 的字段暂时保留：
+旧版 Agent prompt context API 曾使用以下字段：
 
 ```text
 long_term_md
@@ -1113,7 +1113,7 @@ global_long_term_entries
 long_term_scope
 ```
 
-目标行为：
+它们只用于解释历史迁移方案；当前版本的实际读写由 workspace memory service 完成：
 
 - `long_term_md`：由 active entries 生成的只读兼容视图；
 - `long_term_entries`：映射新 Entry，新增字段以可选方式返回；
@@ -1121,10 +1121,9 @@ long_term_scope
 - API 不再整体 overwrite 所有条目；
 - 前端保存时不得发送旧快照覆盖并发 `remember`。
 
-当 Agent 选择 `memory` 工具组后，设置 API 的 `long_term_md` / `long_term_entries`
-仍保留为兼容输入，但会转成 `memory.db` 的控制面操作；`agents.db` 的
-`long_term_md` 只作为旧安装迁移来源，不再被更新。未选择 `memory` 的旧 Agent
-在迁移窗口内继续走 legacy adapter，避免升级时丢失历史数据。
+设置页和 Agent 配置统一使用 `memory_*` 命名；这些字段不代表独立存储，
+记忆正文由 workspace memory service 管理，不回写 `agents.db` 或旧
+`longterm_store`。
 
 ### 12.2 建议新增 API
 
@@ -1225,13 +1224,13 @@ memory_fts_capability
 
 ### Phase 1：抽出 Memory 领域，不迁移存储
 
-**状态：已完成核心领域抽取；legacy 类型仍作为兼容 adapter 保留。**
+**状态：已完成；旧 legacy adapter 已删除。**
 
 目标：先清晰分层，保持用户数据位置不变。
 
 工作项：
 
-- 新建 `node/internal/memory` 的类型、Service 和 legacy Repository adapter；
+- 新建 `node/internal/memory` 的类型、Service 和 Workspace SQLite Repository；
 - `remember` 的解析/HITL 留在 Turn，冲突与写入移到 Service；
 - 删除 `turn.LongTermEntry/Store` 的重复领域定义或收敛为 adapter；
 - `memory/changed` 由 API/runtime 上层统一发布；
@@ -1260,7 +1259,7 @@ memory_fts_capability
 
 ### Phase 3：Workspace SQLite 与迁移
 
-**状态：已完成核心链路；兼容 API 仍保留，旧存储清理属于 Phase 6。**
+**状态：已完成；旧存储和旧双写入口已删除。**
 
 目标：建立条目级 schema、FTS 和 Workspace 权威存储。
 
@@ -1269,9 +1268,8 @@ memory_fts_capability
 - 在 `EnsureWorkspaceState` 已创建的 memory 目录中打开 `memory.db`；
 - 实现 schema、revision、FTS capability test；
 - 实现 agent/global Repository；
-- 实现幂等 legacy import；
-- 新写入切换到目标库，旧库停止双写；
-- API 兼容视图改读新库；
+- 当前版本只读写 workspace memory SQLite；历史迁移方案中的 legacy import 不再是运行时路径；
+- Prompt-context 设置接口直接读写 workspace memory service；
 - 多 Agent 共用 Workspace、Windows 文件锁和 Node release 关闭连接测试。
 
 完成条件：迁移前后条目 ID/正文/时间一致；重复启动不重复导入；旧数据仍可恢复。
@@ -1312,15 +1310,13 @@ memory_fts_capability
 
 ### Phase 6：清理兼容代码
 
-**状态：兼容收口已完成，破坏性删除等待迁移窗口结束。**
+**状态：已完成；不再保留迁移窗口。**
 
-满足至少一个稳定版本迁移窗口后：
-
-- v2 Agent 不再写旧 `entries_json`；legacy Agent 在迁移窗口内保留旧路径；
-- v2 Agent 的 `long_term_md` 更新入口已转为 `memory.db`，agents.db 只保留必要读取迁移；
-- 删除 `promptcontext.Content.LongTerm` 和相关 reload；
+- 不再写入旧 `entries_json`、`longterm_store` 或 `agents.db` 记忆正文；
+- 当前设置接口直接由 workspace memory service 提供，记忆正文不再进入 prompt sidecar；
+- `promptcontext.Content.LongTerm` 和相关 reload 已删除；
 - 更新 handbook、API schema、设置页文案和 release notes；
-- 将本文状态从“目标设计”更新为“现行契约”，并把迁移过程报告归档。
+- 将本文作为历史设计归档；当前契约以源码、Schema 和测试为准。
 
 ---
 

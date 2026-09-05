@@ -10,9 +10,9 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-// ToolArgsFingerprint 对 tool 名 + 规范化参数（剥离 call_purpose / run_in_background）计算指纹。
+// ToolArgsFingerprint 对 tool 名 + 规范化参数（剥离 call_purpose）计算指纹。
 func ToolArgsFingerprint(toolName, argumentsJSON string) string {
-	_, cleaned := tools.ParseToolCallArguments(argumentsJSON)
+	cleaned := tools.ParseToolCallArguments(argumentsJSON)
 	canonical := canonicalJSONString(cleaned)
 	name := strings.ToLower(strings.TrimSpace(toolName))
 	sum := sha256.Sum256([]byte(name + "\x00" + canonical))

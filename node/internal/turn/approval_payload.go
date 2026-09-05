@@ -75,30 +75,6 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 			return "将执行 Shell 命令（参数未提供 command）", risk
 		}
 		return "将执行 Shell 命令: " + truncateRunes(cmd, 160), risk
-	case "linux_exec":
-		risk = "high"
-		channel := firstNonEmpty(args, "channel_id")
-		cmd := strings.TrimSpace(fmt.Sprint(args["command"]))
-		if channel == "" {
-			return "执行 Linux SSH 命令（channel_id 未提供）", risk
-		}
-		if cmd == "" {
-			return "在 Linux SSH channel " + channel + " 上执行命令（command 未提供）", risk
-		}
-		return "在 Linux SSH channel " + channel + " 上执行命令: " + truncateRunes(cmd, 160), risk
-	case "linux_file_upload", "linux_file_download":
-		risk = "high"
-		channel := firstNonEmpty(args, "channel_id")
-		local := firstNonEmpty(args, "local_path")
-		remote := firstNonEmpty(args, "remote_path")
-		direction := "上传"
-		if name == "linux_file_download" {
-			direction = "下载"
-		}
-		if channel == "" {
-			return direction + " Linux 文件（channel_id 未提供）", risk
-		}
-		return direction + " Linux 文件: " + channel + " · " + truncateRunes(local+" → "+remote, 200), risk
 	case "terminal_command":
 		risk = "high"
 		terminal := firstNonEmpty(args, "terminal_id")
@@ -145,9 +121,6 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 			return "将删除定时触发器", risk
 		}
 		return "将删除定时触发器: " + label, risk
-	case "background_job_cancel":
-		risk = "medium"
-		return "将取消后台任务", risk
 	default:
 		risk = "medium"
 		return "该工具被策略标记为需用户确认后执行", risk

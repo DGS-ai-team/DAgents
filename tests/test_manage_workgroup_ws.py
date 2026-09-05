@@ -28,6 +28,96 @@ from manage.workgroup.ws_routes import build_workgroup_ws_router  # noqa: E402
 
 
 class WorkgroupWSHubTests(unittest.TestCase):
+    def test_browser_subscription_replays_and_fanouts_timeline_events(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="browser", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        first = store.append_timeline(
+            wid,
+            type="human_message",
+            actor_id="node_a",
+            text="before subscribe",
+        )
+        hub.publish_timeline_event(first)
+
+        connection, replay, pending = hub.subscribe_browser(wid, after_seq=0)
+        self.assertEqual([event.seq for event in replay], [first.seq])
+        self.assertEqual(pending, [])
+
+        second = store.append_timeline(
+            wid,
+            type="tool_finished",
+            actor_id="member",
+            text="after subscribe",
+            tool_name="bash_run",
+            status="succeeded",
+        )
+        hub.publish_timeline_event(second)
+        message = connection.queue.get(timeout=1)
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertEqual(message["type"], "timeline.event")
+        self.assertEqual(message["payload"]["seq"], second.seq)
+        hub.unsubscribe_browser(connection)
+
+    def test_browser_subscription_cursor_only_replays_missing_events(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="browser", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        events = [
+            store.append_timeline(wid, type="system_notice", actor_id="leader", text=str(i))
+            for i in range(3)
+        ]
+        for event in events:
+            hub.publish_timeline_event(event)
+
+        connection, replay, _ = hub.subscribe_browser(wid, after_seq=events[0].seq)
+        self.assertEqual([event.seq for event in replay], [events[1].seq, events[2].seq])
+        hub.unsubscribe_browser(connection)
+
+    def test_browser_receives_hitl_and_realtime_projection_changes(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        store.set_hitl_listener(hub.publish_hitl_change)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="browser", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        connection, _, _ = hub.subscribe_browser(wid)
+
+        hitl = store.create_hitl(wid, prompt="continue?", kind="user_question")
+        hitl_message = connection.queue.get(timeout=1)
+        self.assertIsNotNone(hitl_message)
+        assert hitl_message is not None
+        self.assertEqual(hitl_message["type"], "hitl.changed")
+        self.assertEqual(hitl_message["payload"]["hitl"]["hitl_id"], hitl.hitl_id)
+
+        resolved = store.resolve_hitl_cas(wid, hitl.hitl_id, resolution={"answer": "yes"})
+        resolved_message = connection.queue.get(timeout=1)
+        self.assertEqual(resolved.status, "resolved")
+        self.assertIsNotNone(resolved_message)
+        assert resolved_message is not None
+        self.assertEqual(resolved_message["type"], "hitl.changed")
+        self.assertEqual(resolved_message["payload"]["pending"], [])
+
+        hub.publish_realtime_event(wid, "status", {"phase": "thinking"})
+        self.assertTrue(connection.queue.empty())
+
+        live = hub.publish_realtime_event(wid, "queue", {"queue": {"items": []}})
+        queue_message = connection.queue.get(timeout=1)
+        self.assertEqual(live["event_type"], "queue")
+        self.assertIsNotNone(queue_message)
+        assert queue_message is not None
+        self.assertEqual(queue_message["type"], "workgroup.realtime")
+        self.assertEqual(queue_message["payload"]["event_type"], "queue")
+        hub.unsubscribe_browser(connection)
+
     def test_timeline_and_realtime_fanout_to_subscribers(self) -> None:
         store = WorkGroupStore()
         hub = WorkgroupWSHub(store=store)
@@ -162,10 +252,11 @@ class WorkgroupWSHubTests(unittest.TestCase):
                     current.receive_json()
                     stale.send_json(
                         {
-                            "type": "tool.result",
+                            "type": "agent.turn.result",
                             "payload": {
                                 "workgroup_id": "wg_01h00000000000000000000001",
-                                "command_id": "cmd_stale",
+                                "member_id": "mb_01h00000000000000000000001",
+                                "assign_id": "as_01h00000000000000000000001",
                                 "connection_generation": first_generation,
                             },
                         }
@@ -212,15 +303,15 @@ class WorkgroupWSHubTests(unittest.TestCase):
                 OutboxFrame(
                     delivery_seq=41,
                     workgroup_id=wid,
-                    type="tool.command",
-                    payload={"command_id": "cmd_a"},
+                    type="agent.turn.start",
+                    payload={"assign_id": "as_01h00000000000000000000001"},
                     created_at="2026-07-31T00:00:00Z",
                 ),
                 OutboxFrame(
                     delivery_seq=42,
                     workgroup_id=wid,
-                    type="tool.command",
-                    payload={"command_id": "cmd_b"},
+                    type="agent.turn.start",
+                    payload={"assign_id": "as_01h00000000000000000000002"},
                     created_at="2026-07-31T00:00:01Z",
                 ),
             ]
@@ -265,34 +356,34 @@ class WorkgroupWSHubTests(unittest.TestCase):
         )
         wid = group.workgroup_id
         store.patch_acl(wid, ACLPatchRequest(collaborators=["node_b"], expected_revision=1))
-        member_b, _ = store.create_member(
+        member_b = store.create_member(
             wid,
             MemberCreateRequest(
+                agent_id="agent-b",
                 home_node_id="node_b",
                 display_name="member_b",
-                allow_tool_names=["read_file"],
             ),
         )
         store._outbox[wid] = [  # noqa: SLF001
             OutboxFrame(
                 delivery_seq=1,
                 workgroup_id=wid,
-                type="member.provision",
+                type="agent.session.open",
                 payload={"home_node_id": "node_a", "member_id": "member_a"},
                 created_at="2026-07-31T00:00:00Z",
             ),
             OutboxFrame(
                 delivery_seq=2,
                 workgroup_id=wid,
-                type="tool.command",
-                payload={"member_id": member_b.member_id, "command_id": "command_b"},
+                type="agent.turn.start",
+                payload={"home_node_id": "node_b", "member_id": member_b.member_id},
                 created_at="2026-07-31T00:00:01Z",
             ),
             OutboxFrame(
                 delivery_seq=3,
                 workgroup_id=wid,
-                type="workgroup.tombstone",
-                payload={"workgroup_id": wid},
+                type="agent.session.close",
+                payload={"home_node_id": "node_a", "workgroup_id": wid},
                 created_at="2026-07-31T00:00:02Z",
             ),
         ]
@@ -308,7 +399,7 @@ class WorkgroupWSHubTests(unittest.TestCase):
 
         hub.hello("node_b")
         result_b = hub.resume_offer("node_b", workgroup_id=wid, last_ack_delivery_seq=0)
-        self.assertEqual(result_b["complete"]["payload"]["replayed"], [2, 3])
+        self.assertEqual(result_b["complete"]["payload"]["replayed"], [2])
 
     def test_manage_restart_pending_assign(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -319,15 +410,14 @@ class WorkgroupWSHubTests(unittest.TestCase):
             )
             wid = group.workgroup_id
             store.patch_acl(wid, ACLPatchRequest(collaborators=["node_b"], expected_revision=1))
-            member, spec = store.create_member(
+            member = store.create_member(
                 wid,
                 MemberCreateRequest(
+                    agent_id="agent-b",
                     home_node_id="node_b",
                     display_name="reader",
-                    allow_tool_names=["read_file"],
                 ),
             )
-            _ = spec
             store.mark_member_status(member.member_id, "ready", workgroup_id=wid)
             store.publish_workgroup(wid)
             assign = store.create_assign(
@@ -336,8 +426,8 @@ class WorkgroupWSHubTests(unittest.TestCase):
             store.set_assign_status(assign.assign_id, "running")
             frame = store.enqueue_outbox(
                 wid,
-                type="tool.command",
-                payload={"command_id": "cmd_01h00000000000000000000008"},
+                type="agent.turn.start",
+                payload={"assign_id": assign.assign_id, "home_node_id": "node_b"},
             )
             self.assertFalse(frame.acked)
 
@@ -349,7 +439,7 @@ class WorkgroupWSHubTests(unittest.TestCase):
             self.assertEqual(reloaded.status, "running")
             unacked = hub2.reconcile_unacked(wid)
             self.assertEqual(len(unacked), 1)
-            self.assertEqual(unacked[0].payload["command_id"], "cmd_01h00000000000000000000008")
+            self.assertEqual(unacked[0].payload["assign_id"], assign.assign_id)
             assigns = [a for a in store2._assigns.values() if a.workgroup_id == wid]  # noqa: SLF001
             self.assertEqual(len(assigns), 1)
 

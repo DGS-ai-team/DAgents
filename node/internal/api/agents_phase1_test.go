@@ -18,6 +18,7 @@ import (
 func TestCreateAgent_createsWorkspace(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +74,7 @@ defaults:
 func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -87,10 +89,10 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 		"display_name": "完整助手",
 		"template_id":  "general", // 仅溯源
 		"defaults": map[string]any{
-			"llm":   map[string]any{"active": "default", "max_tool_loops": 8},
+			"llm":   map[string]any{"active": "default", "max_steps": 8},
 			"tools": map[string]any{"enabled_groups": []any{"fs"}},
 			"prompt_context": map[string]any{
-				"long_term_enabled": false,
+				"memory_enabled": false,
 			},
 		},
 	})
@@ -118,7 +120,7 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 		t.Fatalf("tools = %#v", tools)
 	}
 	pc, _ := defaults["prompt_context"].(map[string]any)
-	if pc["long_term_enabled"] != false {
+	if pc["memory_enabled"] != false {
 		t.Fatalf("prompt_context = %#v", pc)
 	}
 	if _, hasSandbox := snap["sandbox"]; hasSandbox {

@@ -89,8 +89,36 @@ function backToChat() {
         </div>
       </nav>
       <main class="settings-layout__main">
-        <router-view />
+        <router-view v-slot="{ Component, route: viewRoute }">
+          <Transition name="settings-page-transition" mode="out-in">
+            <component :is="Component" :key="viewRoute.fullPath" />
+          </Transition>
+        </router-view>
       </main>
     </div>
   </div>
 </template>
+
+<style>
+.settings-page-transition-enter-active,
+.settings-page-transition-leave-active {
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+
+.settings-page-transition-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.settings-page-transition-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page-transition-enter-active,
+  .settings-page-transition-leave-active {
+    transition: none;
+  }
+}
+</style>

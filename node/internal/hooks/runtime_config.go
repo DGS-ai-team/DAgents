@@ -9,18 +9,20 @@ import (
 
 // ToolResultConfig 控制 tool.after_each 结果摘要与落盘（WS3）。
 type ToolResultConfig struct {
-	Enabled              bool
+	// Enabled 为 nil 时表示未配置，使用默认值 true；非 nil 时尊重显式开关。
+	Enabled              *bool
 	SpillThresholdTokens int
 	Tools                []string
 	WorkspaceRoot        string
 	AgentID              string
 }
 
-// DefaultToolResultConfig 返回默认配置（bash + fs 组，12k spill 阈值）。
+// DefaultToolResultConfig 返回默认配置（bash + terminal + fs 组，12k spill 阈值）。
 func DefaultToolResultConfig(workspaceRoot string) ToolResultConfig {
 	c := toolresult.DefaultConfig(workspaceRoot)
+	enabled := c.Enabled
 	return ToolResultConfig{
-		Enabled:              c.Enabled,
+		Enabled:              &enabled,
 		SpillThresholdTokens: c.SpillThresholdTokens,
 		Tools:                append([]string(nil), c.Tools...),
 		WorkspaceRoot:        c.WorkspaceRoot,
@@ -32,7 +34,7 @@ func toolResultConfigUnset(c ToolResultConfig) bool {
 		len(c.Tools) == 0 &&
 		strings.TrimSpace(c.WorkspaceRoot) == "" &&
 		strings.TrimSpace(c.AgentID) == "" &&
-		!c.Enabled
+		c.Enabled == nil
 }
 
 // ToolResultConfigOrDefault 合并默认值。
@@ -47,7 +49,10 @@ func ToolResultConfigOrDefault(c ToolResultConfig) ToolResultConfig {
 	if c.AgentID != "" {
 		out.AgentID = strings.TrimSpace(c.AgentID)
 	}
-	out.Enabled = c.Enabled
+	if c.Enabled != nil {
+		enabled := *c.Enabled
+		out.Enabled = &enabled
+	}
 	if c.SpillThresholdTokens > 0 {
 		out.SpillThresholdTokens = c.SpillThresholdTokens
 	}
@@ -57,9 +62,14 @@ func ToolResultConfigOrDefault(c ToolResultConfig) ToolResultConfig {
 	return out
 }
 
+// IsEnabled 返回是否启用。nil 仅在调用方传入未归一化配置时出现，此时采用默认值。
+func (c ToolResultConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
 func (c ToolResultConfig) toToolresultConfig() toolresult.Config {
 	return toolresult.Config{
-		Enabled:              c.Enabled,
+		Enabled:              c.IsEnabled(),
 		SpillThresholdTokens: c.SpillThresholdTokens,
 		Tools:                append([]string(nil), c.Tools...),
 		WorkspaceRoot:        c.WorkspaceRoot,

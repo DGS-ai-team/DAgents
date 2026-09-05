@@ -31,11 +31,15 @@ func TestBuild_usesAgentWorkspaceAndToolGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = built.Close() })
-	if built.TurnOptions.MaxToolLoops != DefaultMaxToolLoops {
-		t.Fatalf("MaxToolLoops=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.MaxToolLoops, DefaultMaxToolLoops)
+	if built.TurnOptions.Budget.MaxSteps != DefaultMaxSteps {
+		t.Fatalf("MaxSteps=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.Budget.MaxSteps, DefaultMaxSteps)
 	}
-	if built.WorkspaceRoot != root || built.TurnOptions.WorkspaceRoot != root {
-		t.Fatalf("workspaceRoot=%q turn=%q want %q", built.WorkspaceRoot, built.TurnOptions.WorkspaceRoot, root)
+	wantWorkspace, err := filepath.Abs(filepath.Join(root, "agents", "agt-abc", "workspace"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.WorkspaceRoot != wantWorkspace || built.TurnOptions.WorkspaceRoot != wantWorkspace {
+		t.Fatalf("workspaceRoot=%q turn=%q want %q", built.WorkspaceRoot, built.TurnOptions.WorkspaceRoot, wantWorkspace)
 	}
 	if len(built.ToolGroups) != 2 || built.ToolGroups[0] != "fs" || built.ToolGroups[1] != "skills" {
 		t.Fatalf("tool groups=%v", built.ToolGroups)
@@ -201,7 +205,7 @@ func TestBuildSeparatesAutomaticMemoryRecallFromMemoryTools(t *testing.T) {
 	tests := []struct {
 		name           string
 		groups         []any
-		longTerm       any
+		memoryEnabled  any
 		wantService    bool
 		wantAutoRecall bool
 		wantMemoryTool bool
@@ -209,7 +213,7 @@ func TestBuildSeparatesAutomaticMemoryRecallFromMemoryTools(t *testing.T) {
 		{
 			name:           "automatic recall without memory tools",
 			groups:         []any{"fs"},
-			longTerm:       true,
+			memoryEnabled:  true,
 			wantService:    true,
 			wantAutoRecall: true,
 			wantMemoryTool: false,
@@ -217,16 +221,16 @@ func TestBuildSeparatesAutomaticMemoryRecallFromMemoryTools(t *testing.T) {
 		{
 			name:           "memory tools without automatic recall",
 			groups:         []any{"memory"},
-			longTerm:       false,
+			memoryEnabled:  false,
 			wantService:    true,
 			wantAutoRecall: false,
 			wantMemoryTool: true,
 		},
 		{
-			name:           "neither capability",
+			name:           "service is present without active capability",
 			groups:         []any{"fs"},
-			longTerm:       false,
-			wantService:    false,
+			memoryEnabled:  false,
+			wantService:    true,
 			wantMemoryTool: false,
 		},
 	}
@@ -238,7 +242,7 @@ func TestBuildSeparatesAutomaticMemoryRecallFromMemoryTools(t *testing.T) {
 				AgentID:  "agt-memory-capability",
 				Snapshot: Snapshot{Defaults: map[string]any{
 					"tools":          map[string]any{"enabled_groups": tc.groups},
-					"prompt_context": map[string]any{"long_term_enabled": tc.longTerm},
+					"prompt_context": map[string]any{"memory_enabled": tc.memoryEnabled},
 				}},
 			})
 			if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -382,9 +381,8 @@ func (s *LinuxChannelStore) EncryptLiteralSecret(value string) (string, error) {
 	return "literal:" + ciphertext, nil
 }
 
-// ResolveSecret resolves both the current encrypted literal format and the
-// legacy base64 literal format written by older Node versions. Environment
-// references are intentionally resolved at connection time for compatibility.
+// ResolveSecret resolves encrypted literal references and environment
+// references at connection time.
 func (s *LinuxChannelStore) ResolveSecret(ctx context.Context, ref string) (string, error) {
 	_ = ctx
 	ref = strings.TrimSpace(ref)
@@ -393,16 +391,10 @@ func (s *LinuxChannelStore) ResolveSecret(ctx context.Context, ref string) (stri
 		if encoded == "" {
 			return "", fmt.Errorf("linux literal secret is empty")
 		}
-		if s != nil && s.box != nil {
-			if value, err := s.box.Decrypt(encoded); err == nil {
-				if value == "" {
-					return "", fmt.Errorf("linux literal secret is empty")
-				}
-				return value, nil
-			}
+		if s == nil || s.box == nil {
+			return "", fmt.Errorf("linux channel secret box unavailable")
 		}
-		// Backward compatibility for records created before encrypted storage.
-		value, err := base64.RawStdEncoding.DecodeString(encoded)
+		value, err := s.box.Decrypt(encoded)
 		if err != nil {
 			return "", fmt.Errorf("linux literal secret is invalid: %w", err)
 		}

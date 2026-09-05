@@ -32,17 +32,9 @@ describe("consumeStartupURL", () => {
     expect(agentStore.agentId).toBe("agt-1");
   });
 
-  it("accepts legacy ?session= as agent id", () => {
+  it("reads the current agent deep link", () => {
     vi.stubGlobal("window", {
-      location: { search: "?session=sess-legacy" },
-    });
-    consumeStartupURL();
-    expect(agentStore.agentId).toBe("sess-legacy");
-  });
-
-  it("prefers ?agent= over ?session=", () => {
-    vi.stubGlobal("window", {
-      location: { search: "?agent=agt-new&session=sess-old" },
+      location: { search: "?agent=agt-new" },
     });
     consumeStartupURL();
     expect(agentStore.agentId).toBe("agt-new");

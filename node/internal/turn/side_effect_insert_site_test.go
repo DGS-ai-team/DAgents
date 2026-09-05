@@ -55,14 +55,14 @@ func TestResolveSideEffectInsertSite_table(t *testing.T) {
 			wantCont: false,
 		},
 		{
-			name: "open_batch_after_bg_ack",
+			name: "open_batch_after_async_ack",
 			messages: []llm.Message{
 				{Role: "user", Content: "run"},
 				{Role: "assistant", ToolCalls: []llm.ToolCall{
-					{ID: "bg", Function: llm.ToolCallFunction{Name: "bash_run"}},
+					{ID: "async", Function: llm.ToolCallFunction{Name: "browser_run_task"}},
 					{ID: "sync", Function: llm.ToolCallFunction{Name: "read_file"}},
 				}},
-				{Role: "tool", ToolCallID: "bg", Content: "[TOOL_BACKGROUND] job_id=j1"},
+				{Role: "tool", ToolCallID: "async", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 			},
 			wantMode: "append_callback",
 			wantAt:   3,
@@ -91,10 +91,7 @@ func TestResolveSideEffectInsertSite_table(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			site := ResolveSideEffectInsertSite(tc.messages, built)
-			if !site.Ready {
-				t.Fatalf("site not ready: %+v", site)
-			}
+			site := ResolveSideEffectInsertSite(tc.messages)
 			if site.Mode != tc.wantMode {
 				t.Fatalf("mode = %q, want %q", site.Mode, tc.wantMode)
 			}

@@ -11,7 +11,7 @@
 | `(j *Journal) AppendMessage` | `method` | append 已规范化 history → JSONL |
 | `(j *Journal) InsertMessage` | `method` | insert 已规范化 history → JSONL |
 | `journalFilePath` | `func(baseDir, sessionID string) string` | `<baseDir>/YYYYMMDD/<session>.jsonl` |
-| `RuntimeJournalRelativePath` | `func(sessionID string, at time.Time) string` | 未绑定 Agent 的兼容路径 `history/YYYYMMDD/<session>.jsonl`；正常 Agent 使用 workspace 下 `.dagents/<agent_id>/history/` 前缀 |
+| `RuntimeJournalRelativePath` | `func(sessionID string, at time.Time) string` | 未绑定 Agent 时使用的运行时相对路径 `history/YYYYMMDD/<session>.jsonl`；已绑定 Agent 的会话使用 workspace 下 `.dagents/<agent_id>/history/` 前缀 |
 
 ## 相关
 
