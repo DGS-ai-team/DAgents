@@ -71,6 +71,16 @@ func (s *Store) ObserveTurn(sessionID string, snapshot TurnSnapshot, now time.Ti
 	priorGoalStatus := g.Status
 	priorGoalReason := g.StatusReason
 	oldGoal, oldRun := g, r
+	oldUsage := s.data.Usage[g.AgentID]
+	oldReceipt, hadReceipt := s.data.UsageReceipts[r.ID]
+	restoreUsage := func() {
+		s.data.Usage[g.AgentID] = oldUsage
+		if hadReceipt {
+			s.data.UsageReceipts[r.ID] = oldReceipt
+		} else {
+			delete(s.data.UsageReceipts, r.ID)
+		}
+	}
 	if r.TurnID == "" {
 		r.TurnID = snapshot.TurnID
 		s.data.Runs[goalID][idx] = r
@@ -83,6 +93,7 @@ func (s *Store) ObserveTurn(sessionID string, snapshot TurnSnapshot, now time.Ti
 		g.Status = StatusWaiting
 		g.StatusReason = "approval_required"
 		g.UpdatedAt = now.UTC()
+		g.Revision++
 		s.data.Goals[goalID] = g
 		if err := s.saveLocked(); err != nil {
 			s.data.Goals[goalID] = oldGoal
@@ -111,10 +122,18 @@ func (s *Store) ObserveTurn(sessionID string, snapshot TurnSnapshot, now time.Ti
 			g.Status, g.StatusReason = StatusPaused, "usage_unknown"
 		}
 		g.UpdatedAt = finished
+		g.Revision++
 		s.data.Goals[goalID] = g
+		u := oldUsage
+		u.AgentID = g.AgentID
+		u.Unknown = true
+		u.UnknownReason = "usage reconciliation required"
+		u.UpdatedAt = finished
+		s.data.Usage[g.AgentID] = u
 		if err := s.saveLocked(); err != nil {
 			s.data.Goals[goalID] = oldGoal
 			s.data.Runs[goalID][idx] = oldRun
+			restoreUsage()
 			return fmt.Errorf("save observed lifecycle: %w", err)
 		}
 		return nil
@@ -137,6 +156,10 @@ func (s *Store) ObserveTurn(sessionID string, snapshot TurnSnapshot, now time.Ti
 	finished := now.UTC()
 	r.FinishedAt = &finished
 	s.data.Runs[goalID][idx] = r
+	if _, _, err := s.recordRunUsageLocked(g.AgentID, r.ID, r.TokensUsed, 0, 0, finished); err != nil {
+		s.data.Runs[goalID][idx] = oldRun
+		return err
+	}
 	g.TokensUsed += r.TokensUsed
 	if r.Checkpoint != nil {
 		g.LastCheckpoint = r.Checkpoint
@@ -174,10 +197,12 @@ func (s *Store) ObserveTurn(sessionID string, snapshot TurnSnapshot, now time.Ti
 		g.Status, g.StatusReason = StatusPaused, "budget_exhausted"
 	}
 	g.UpdatedAt = finished
+	g.Revision++
 	s.data.Goals[goalID] = g
 	if err := s.saveLocked(); err != nil {
 		s.data.Goals[goalID] = oldGoal
 		s.data.Runs[goalID][idx] = oldRun
+		restoreUsage()
 		return fmt.Errorf("save observed lifecycle: %w", err)
 	}
 	return nil

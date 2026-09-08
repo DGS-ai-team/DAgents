@@ -35,6 +35,56 @@ type Goal struct {
 	LastCheckpoint         *Checkpoint `json:"last_checkpoint,omitempty"`
 	CreatedAt              time.Time   `json:"created_at"`
 	UpdatedAt              time.Time   `json:"updated_at"`
+	// Cycle metadata is zero-valued for legacy non-managed goals.
+	CycleSequence    int    `json:"cycle_sequence,omitempty"`
+	ProfileRevision  int64  `json:"profile_revision,omitempty"`
+	Revision         int64  `json:"revision,omitempty"`
+	IdempotencyKey   string `json:"idempotency_key,omitempty"`
+	CycleFingerprint string `json:"cycle_fingerprint,omitempty"`
+	ProvisionStatus  string `json:"provision_status,omitempty"`
+	EnableIntent     bool   `json:"enable_intent,omitempty"`
+}
+
+// AutoProfile is the durable Agent-owned identity for autonomous work.
+// CurrentGoalID is the only binding to a live business cycle.
+type AutoProfile struct {
+	AgentID                string    `json:"agent_id"`
+	Revision               int64     `json:"revision"`
+	Enabled                bool      `json:"enabled"`
+	RoleObjective          string    `json:"role_objective"`
+	RoleBoundaries         string    `json:"role_boundaries"`
+	PlanMode               string    `json:"plan_mode"`
+	Timezone               string    `json:"timezone"`
+	WorkSchedule           string    `json:"work_schedule"`
+	CurrentGoalID          string    `json:"current_goal_id,omitempty"`
+	AuthorizationRef       string    `json:"authorization_ref,omitempty"`
+	BusinessTokenBudget    int64     `json:"business_token_budget,omitempty"`
+	MaintenanceTokenBudget int64     `json:"maintenance_token_budget,omitempty"`
+	TotalTokenBudget       int64     `json:"total_token_budget,omitempty"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// AgentUsage is Agent-scoped; a new cycle cannot reset accumulated usage.
+type AgentUsage struct {
+	AgentID           string    `json:"agent_id"`
+	BusinessTokens    int64     `json:"business_tokens"`
+	MaintenanceTokens int64     `json:"maintenance_tokens"`
+	UnknownTokens     int64     `json:"unknown_tokens"`
+	Unknown           bool      `json:"unknown"`
+	UnknownReason     string    `json:"unknown_reason,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type UsageReceipt struct {
+	AgentID     string `json:"agent_id"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+type MigrationIssue struct {
+	AgentID   string    `json:"agent_id"`
+	Reason    string    `json:"reason"`
+	GoalIDs   []string  `json:"goal_ids,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Checkpoint struct {
@@ -74,4 +124,5 @@ type CreateInput struct {
 	TurnTokenBudget        int        `json:"turn_token_budget"`
 	ExpiresAt              *time.Time `json:"expires_at"`
 	MinWakeIntervalSeconds int        `json:"min_wake_interval_seconds"`
+	EnabledIntent          bool       `json:"-"`
 }
