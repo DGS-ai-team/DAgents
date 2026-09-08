@@ -692,6 +692,79 @@
   max-width: 100%;
 }
 
+/* Keep scalar settings easy to scan: one value per row with the label and
+   supporting copy on the left and the control aligned to a shared column. */
+.settings-embedded-panel .setup-config-panel__field-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field:last-child {
+  border-bottom: 0;
+}
+
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field__input {
+  justify-self: stretch;
+  max-width: 100%;
+}
+
+/* Standalone switches and fields use the same setting-row treatment as grid
+   fields. This also covers Manage, Security and Context scalar controls. */
+.settings-embedded-panel .settings-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .settings-toggle input {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.settings-embedded-panel .settings-field--stack,
+.settings-embedded-panel .settings-section > .settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .settings-field--stack .settings-field__input,
+.settings-embedded-panel .settings-section > .settings-field .settings-field__input {
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .settings-embedded-panel .setup-config-panel__field-grid .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .settings-embedded-panel .settings-field--stack,
+  .settings-embedded-panel .settings-section > .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 .settings-page__hint {
   font-size: 13px;
   color: var(--color-text-muted);
@@ -978,9 +1051,19 @@ select.settings-field__input {
 }
 
 @media (max-width: 720px) {
+  .llm-config-card {
+    flex-wrap: wrap;
+  }
+
   .llm-config-card__hit {
     flex-wrap: wrap;
     gap: 6px 12px;
+  }
+
+  .llm-config-card__actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding: 0 10px 8px;
   }
 
   .llm-config-card__meta {
@@ -1013,7 +1096,8 @@ select.settings-field__input {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 420px;
+  width: 100%;
+  max-width: none;
 }
 
 .setup-manage-stack .settings-field--stack {
@@ -1042,6 +1126,14 @@ select.settings-field__input {
 
 .settings-section--debug .settings-section__desc {
   margin-bottom: 12px;
+}
+
+.settings-field__hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .context-settings__details {
@@ -4154,6 +4246,14 @@ select.settings-field__input {
   font-weight: 600;
 }
 
+.command-section__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .command-section__head .command-section__title {
   margin-bottom: 0;
 }
@@ -4249,6 +4349,48 @@ select.settings-field__input {
 
 .trigger-form {
   margin-top: 4px;
+}
+
+/* Embedded settings editors follow the same label/control rhythm as the
+   surrounding settings pages. Long task text remains a full-width field. */
+.settings-embedded-panel .trigger-form .settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.7fr);
+  align-items: center;
+  gap: 24px;
+  margin-top: 0;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .trigger-form .settings-field__input {
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.settings-embedded-panel .trigger-form .settings-field__hint {
+  grid-column: 2;
+  margin-top: -4px;
+}
+
+.settings-embedded-panel .trigger-form .trigger-form__textarea,
+.settings-embedded-panel .trigger-form .trigger-form__task,
+.settings-embedded-panel .trigger-form .trigger-form__enabled,
+.settings-embedded-panel .trigger-form .trigger-form__row,
+.settings-embedded-panel .trigger-form .trigger-form__legacy-warning {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .settings-embedded-panel .trigger-form .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .settings-embedded-panel .trigger-form .settings-field__hint {
+    grid-column: auto;
+    margin-top: 0;
+  }
 }
 
 .trigger-form__heading {
@@ -4667,13 +4809,19 @@ select.settings-field__input {
 }
 
 .help-panel--embedded .help-panel__body {
+  display: flex;
+  flex-direction: column;
   padding-top: 4px;
+}
+
+.help-panel--embedded .help-section {
+  width: 100%;
 }
 
 .help-shortcut-item,
 .help-cmd-item {
   display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 12px;
   align-items: baseline;
 }
@@ -4691,6 +4839,9 @@ select.settings-field__input {
 
 .help-cmd-item__cmd {
   justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   padding: 3px 8px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
@@ -4720,6 +4871,14 @@ select.settings-field__input {
   border-top: 1px solid var(--color-border);
   font-size: 12px;
   color: var(--color-text-subtle);
+}
+
+@media (max-width: 640px) {
+  .help-shortcut-item,
+  .help-cmd-item {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
 
 /* ---------- chat responsive layout ---------- */

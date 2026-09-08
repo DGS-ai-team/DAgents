@@ -25,8 +25,7 @@ function toggle(id) {
 
 function optionLabel(item) {
   const ver = item.version ? `@${item.version}` : "";
-  const name = item.name ? ` — ${item.name}` : "";
-  return `${item.id}${ver}${name}`;
+  return `${item.id}${ver}`;
 }
 </script>
 
@@ -46,8 +45,10 @@ function optionLabel(item) {
           :checked="selected.has(item.id)"
           @change="toggle(item.id)"
         />
-        <span class="tag-pill" :class="pillClass">{{ item.id }}</span>
-        <span class="resource-picker__meta muted">{{ optionLabel(item) }}</span>
+        <span class="resource-picker__copy">
+          <strong>{{ item.name || item.id }}</strong>
+          <span class="resource-picker__meta muted">{{ optionLabel(item) }}</span>
+        </span>
       </label>
     </div>
   </div>
@@ -75,12 +76,28 @@ function optionLabel(item) {
   border-radius: var(--radius-sm);
 }
 .resource-picker__item {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   cursor: pointer;
   padding: 4px 6px;
   border-radius: var(--radius-sm);
+}
+.resource-picker__item input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+}
+.resource-picker__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.resource-picker__copy strong,
+.resource-picker__meta {
+  overflow-wrap: anywhere;
 }
 .resource-picker__item.is-selected {
   background: var(--primary-soft);

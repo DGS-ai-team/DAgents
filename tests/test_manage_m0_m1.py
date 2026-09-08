@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +11,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 _ROOT = Path(__file__).resolve().parents[1]
+_AUTH_PATCH = patch.dict("os.environ", {"MANAGE_SHARED_TOKEN": "test-admin-token"})
+def setUpModule(): _AUTH_PATCH.start()
+def tearDownModule(): _AUTH_PATCH.stop()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -22,7 +25,7 @@ from manage.registry.status import derive_status  # noqa: E402
 class ManageM0Tests(unittest.TestCase):
     def test_health_and_blob_status(self) -> None:
         app = create_app(ManageSettings.from_env())
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             health = client.get("/health")
             metrics = client.get("/metrics")
         self.assertEqual(health.status_code, 200)
@@ -34,7 +37,7 @@ class ManageM0Tests(unittest.TestCase):
 
     def test_console_served(self) -> None:
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             root = client.get("/", follow_redirects=False)
             page = client.get("/console/")
         self.assertEqual(root.status_code, 307)
@@ -54,7 +57,7 @@ class ManageRegistryTests(unittest.TestCase):
                 "base_url": "http://ops.local",
                 "name": "运维助手",
             }
-            with TestClient(app) as client:
+            with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 reg = client.post("/v1/registry/agents", json=payload)
                 groups = client.patch(
                     "/v1/registry/agents/ops-01/groups",
@@ -64,7 +67,7 @@ class ManageRegistryTests(unittest.TestCase):
                 listed = client.get("/v1/registry/agents", params={"discovery_group": "ops", "status": "all"})
 
             app2 = create_app(settings)
-            with TestClient(app2) as client:
+            with TestClient(app2, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 reloaded = client.get("/v1/registry/agents", params={"discovery_group": "ops", "status": "all"})
 
         self.assertEqual(reg.status_code, 200)
@@ -79,7 +82,7 @@ class ManageRegistryTests(unittest.TestCase):
 
     def test_heartbeat_and_deregister(self) -> None:
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             client.post(
                 "/v1/registry/agents",
                 json={"agent_id": "a1", "base_url": "http://a.local"},
@@ -98,7 +101,7 @@ class ManageRegistryTests(unittest.TestCase):
 
     def test_list_all_nodes_without_auth(self) -> None:
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             client.post(
                 "/v1/registry/agents",
                 json={"agent_id": "n1", "base_url": "http://n1.local"},
@@ -112,7 +115,7 @@ class ManageRegistryTests(unittest.TestCase):
 
     def test_register_preserves_manage_assigned_groups(self) -> None:
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             client.post("/v1/registry/agents", json={"agent_id": "n2", "base_url": "http://n2.local"})
             client.patch("/v1/registry/agents/n2/groups", json={"discovery_group": ["ops", "lab"]})
             again = client.post("/v1/registry/agents", json={"agent_id": "n2", "base_url": "http://n2.local"})
@@ -123,7 +126,7 @@ class ManageRegistryTests(unittest.TestCase):
         tokens = json.dumps([{"id": "ops", "token": "member-secret", "role": "member", "discovery_groups": ["ops"]}])
         with patch.dict(os.environ, {"MANAGE_TOKENS": tokens, "MANAGE_SHARED_TOKEN": ""}):
             app = create_app()
-            with TestClient(app) as client:
+            with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 headers = {"x-dagents-a2a-token": "member-secret"}
                 missing = client.get("/v1/registry/agents", headers=headers)
                 ok = client.get("/v1/registry/agents", headers=headers, params={"discovery_group": "ops"})
@@ -132,7 +135,7 @@ class ManageRegistryTests(unittest.TestCase):
 
     def test_discover_without_group_matches_caller_groups(self) -> None:
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             client.post(
                 "/v1/registry/agents",
                 json={"agent_id": "caller", "base_url": "http://caller.local"},

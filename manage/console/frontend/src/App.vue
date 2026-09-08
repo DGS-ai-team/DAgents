@@ -16,6 +16,7 @@ import HomeDashboard from "./components/HomeDashboard.vue";
 import MarketplaceView from "./components/MarketplaceView.vue";
 import PermissionsView from "./components/PermissionsView.vue";
 import SettingsView from "./components/SettingsView.vue";
+import FeedbackView from "./components/FeedbackView.vue";
 import WorkgroupView from "./components/WorkgroupView.vue";
 import WorkgroupChatView from "./components/WorkgroupChatView.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -171,7 +172,7 @@ async function enterAppAfterAuth() {
     view.value = "chat";
   } else {
     chatSession.value = null;
-    view.value = "home";
+    view.value = readFeedbackIdFromUrl() ? "feedback" : "home";
   }
   lastRefreshed.value = touchLastRefreshedLabel();
   applyDocumentTitle();
@@ -225,6 +226,28 @@ async function onLoginSubmit({ username, password }) {
   }
 }
 
+function readFeedbackIdFromUrl() {
+  try {
+    return String(new URLSearchParams(window.location.search).get("feedback_id") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function onNodeLoginSubmit({ nodeId, token }) {
+  loginBusy.value = true;
+  loginError.value = "";
+  try {
+    const me = await loginNode(nodeId, token);
+    applyAuth(me);
+    await enterAppAfterAuth();
+  } catch (err) {
+    loginError.value = err.message || "Node 登录失败";
+  } finally {
+    loginBusy.value = false;
+  }
+}
+
 async function onLogout() {
   try {
     await logoutAuth();
@@ -243,7 +266,9 @@ async function refreshHealth() {
   try {
     const data = await fetchHealth();
     healthOnline.value = true;
-    healthLabel.value = `${data.agents} nodes`;
+    // /health counts every registry record (Nodes and Agents). Calling the
+    // value "nodes" is misleading when an Agent snapshot is also registered.
+    healthLabel.value = `${data.agents} 个注册实体`;
   } catch {
     healthOnline.value = false;
     healthLabel.value = "Manage 不可达";
@@ -265,6 +290,13 @@ async function loadStatsSnapshot(group) {
 async function loadAgents() {
   registry.loading = true;
   registry.error = "";
+  if (authKind.value === "node" && authGroups.value.length === 0) {
+    registry.agents = [];
+    registry.total = 0;
+    registry.error = "当前 Node 尚未分配 discovery_group，暂无可查看的 Agent";
+    registry.loading = false;
+    return;
+  }
   registry.pageSize = registry.filters.pageSize || 50;
   const group = registry.filters.group.trim();
   const params = {
@@ -404,6 +436,7 @@ onMounted(() => {
     :error="loginError"
     :hint="loginHint"
     @submit="onLoginSubmit"
+    @node-submit="onNodeLoginSubmit"
   />
 
   <template v-else>
@@ -439,6 +472,8 @@ onMounted(() => {
             v-if="view === 'home'"
             ref="homeRef"
             :active="view === 'home'"
+            :node-no-groups="authKind === 'node' && authGroups.length === 0"
+            :node-discovery-group="authKind === 'node' ? (authGroups[0] || '') : ''"
             @navigate="navigate"
             @toast="showToast($event.message, $event.type)"
             @refreshed="lastRefreshed = $event"
@@ -496,6 +531,13 @@ onMounted(() => {
           <SettingsView
             v-if="view === 'settings'"
             :active="view === 'settings'"
+            @toast="showToast($event.message, $event.type)"
+          />
+
+          <FeedbackView
+            v-if="view === 'feedback'"
+            :active="view === 'feedback'"
+            :admin="authKind === 'admin'"
             @toast="showToast($event.message, $event.type)"
           />
         </main>

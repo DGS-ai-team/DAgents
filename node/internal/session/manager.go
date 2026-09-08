@@ -34,6 +34,12 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
+	// BudgetResolver refreshes dynamic per-turn limits before a new Turn.
+	// It is used by managed goals whose cumulative budget changes between wakes.
+	BudgetResolver func() (turn.TurnBudget, error)
+	// OnLifecycle observes a durable Turn projection after its event is stored.
+	// It is intentionally optional so ordinary sessions keep the existing path.
+	OnLifecycle func(sessionID string, snapshot turn.CoordinatorSnapshot) error
 	// initialHistoryRevision is supplied by Manager while restoring a runtime.
 	// Lifecycle recovery may persist a repaired provider history during
 	// construction, so the constructor must start from the revision loaded from
@@ -167,6 +173,23 @@ type Manager struct {
 	OnReleased func(sessionID string)
 }
 
+// SetLifecycleObserver installs the optional observer for default and already
+// loaded runtimes. Goal projection uses this hook; it must not call back into
+// runtime cancellation while a lifecycle transition is in progress.
+func (m *Manager) SetLifecycleObserver(observer func(string, turn.CoordinatorSnapshot) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.turn.OnLifecycle = observer
+	for _, rt := range m.sessions {
+		if rt != nil {
+			rt.onLifecycle = observer
+		}
+	}
+}
+
 // NewManager 绑定 agent、SSE Hub、LLM、工具、策略与持久化 store。
 func NewManager(
 	agentID string,
@@ -296,6 +319,14 @@ func (m *Manager) DefaultTurnOptions() TurnOptions {
 		return TurnOptions{}
 	}
 	return m.turn
+}
+
+// AgentID returns the owning Node/Agent identity used by default runtimes.
+func (m *Manager) AgentID() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.agentID)
 }
 
 // DefaultTools 返回 Manager 共享的默认 Registry。

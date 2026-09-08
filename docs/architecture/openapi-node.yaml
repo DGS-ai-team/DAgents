@@ -641,6 +641,12 @@ paths:
     post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerCreateRequest'
       responses:
         "200":
           description: OK
@@ -652,6 +658,30 @@ paths:
       responses:
         "200":
           description: OK
+
+  /v1/triggers/{trigger_id}/recover:
+    post:
+      summary: 丢弃指定的待投递记录并完成恢复
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerRecoveryRequest'
+      responses:
+        "200":
+          description: 已恢复；触发器保持 disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerDefinition'
+        "409":
+          description: recovery_required、delivery_id 不匹配或无需恢复
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema: {type: string}
 
   /v1/ui/bootstrap:
     get:
@@ -996,7 +1026,191 @@ paths:
       responses:
         "200":
           description: OK
+  /v1/feedback/target:
+    get:
+      summary: 当前反馈 Manage 目标
+      responses:
+        '200': {description: target}
+  /v1/feedback:
+    get:
+      summary: 本地反馈列表
+      responses:
+        '200': {description: feedback list}
+    post:
+      summary: 创建本地反馈并异步投递
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {$ref: '#/components/schemas/FeedbackCreateRequest'}}
+      responses:
+        '201': {description: saved}
+  /v1/feedback/{client_feedback_id}:
+    get:
+      parameters: [{name: client_feedback_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: feedback}}
+  /v1/feedback/{client_feedback_id}/sync:
+    post:
+      parameters: [{name: client_feedback_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: synchronized}}
+
+  /v1/goals:
+    get:
+      summary: Node 上的长期任务列表
+      responses: {'200': {description: goals, content: {application/json: {schema: {type: object, properties: {goals: {type: array, items: {$ref: '#/components/schemas/Goal'}}}}}}}}
+    post:
+      summary: 创建长期任务并建立专用会话
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/GoalCreateRequest'}}}
+      responses: {'409': {description: configure through the Agent autonomy endpoint}}
+  /v1/goals/{goal_id}:
+    get:
+      parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: goal, content: {application/json: {schema: {$ref: '#/components/schemas/Goal'}}}}}
+  /v1/goals/{goal_id}/runs:
+    get:
+      parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: runs}}
+  /v1/goals/{goal_id}/pause:
+    post:
+      parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: paused}}
+  /v1/goals/{goal_id}/resume:
+    post:
+      parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: resumed}}
+  /v1/goals/{goal_id}/stop:
+    post:
+      parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: stopped}}
+  /v1/goals/{goal_id}/wake:
+    post:
+      parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}]
+      responses: {'202': {description: queued, content: {application/json: {schema: {type: object, properties: {run: {$ref: '#/components/schemas/GoalRun'}, delivery_id: {type: string}}}}}}}
+
+  /v1/agents/{agent_id}/autonomy:
+    get:
+      parameters: [{name: agent_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: autonomy configuration}}
+    put:
+      parameters: [{name: agent_id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AutonomyRequest'}}}
+      responses: {'200': {description: autonomy updated}}
+
 components:
+  schemas:
+    GoalCreateRequest:
+      type: object
+      required: [title, objective, acceptance, agent_id]
+      properties:
+        title: {type: string, maxLength: 160}
+        objective: {type: string}
+        acceptance: {type: string}
+        agent_id: {type: string}
+        max_runs: {type: integer, default: 12, minimum: 1, maximum: 1000}
+        token_budget: {type: integer, format: int64, default: 100000}
+        turn_token_budget: {type: integer, default: 10000}
+        min_wake_interval_seconds: {type: integer, default: 300, minimum: 60}
+        expires_at: {type: string, format: date-time}
+    AutonomyRequest:
+      type: object
+      required: [objective, acceptance]
+      properties:
+        title: {type: string, maxLength: 160}
+        objective: {type: string}
+        acceptance: {type: string}
+        max_runs: {type: integer, minimum: 1, maximum: 1000}
+        token_budget: {type: integer, format: int64}
+        turn_token_budget: {type: integer}
+        min_wake_interval_seconds: {type: integer, minimum: 60}
+        expires_at: {type: string, format: date-time}
+        enabled: {type: boolean}
+    Goal:
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        objective: {type: string}
+        acceptance: {type: string}
+        agent_id: {type: string}
+        session_id: {type: string, description: 专用会话，不由客户端创建}
+        status: {type: string, enum: [active, paused, stopped, completed, waiting, failed]}
+        status_reason: {type: string}
+        max_runs: {type: integer}
+        runs: {type: integer}
+        token_budget: {type: integer, format: int64}
+        tokens_used: {type: integer, format: int64}
+        turn_token_budget: {type: integer}
+        min_wake_interval_seconds: {type: integer}
+        next_wake_at: {type: string, format: date-time}
+        last_checkpoint: {$ref: '#/components/schemas/GoalCheckpoint'}
+    GoalCheckpoint:
+      type: object
+      properties:
+        summary: {type: string}
+        evidence: {type: array, items: {type: string}}
+        artifacts: {type: array, items: {type: string}}
+        done: {type: boolean}
+    GoalRun:
+      type: object
+      properties:
+        id: {type: string}
+        goal_id: {type: string}
+        session_id: {type: string}
+        turn_id: {type: string}
+        status: {type: string}
+        reason: {type: string}
+        tokens_used: {type: integer, format: int64}
+    FeedbackCreateRequest:
+      type: object
+      required: [category, title, body]
+      properties:
+        client_feedback_id: {type: string}
+        category: {type: string, enum: [bug, suggestion, other]}
+        title: {type: string, maxLength: 256}
+        body: {type: string, maxLength: 100000}
+        expected_destination: {type: string}
+    TriggerRecoveryRequest:
+      type: object
+      required: [delivery_id]
+      properties:
+        delivery_id:
+          type: string
+          description: 必须与触发器当前 pending_delivery_id 完全匹配
+    TriggerDefinition:
+      type: object
+      required: [trigger_id, name, condition, enabled]
+      properties:
+        trigger_id: {type: string}
+        name: {type: string}
+        condition: {type: object, additionalProperties: true}
+        enabled: {type: boolean}
+        pending_delivery_id: {type: string, nullable: true}
+        pending_session_id: {type: string, nullable: true}
+        recovery_required: {type: boolean}
+        recovery_reason: {type: string}
+    TriggerCreateRequest:
+      type: object
+      required: [name, condition, task_template]
+      properties:
+        name: {type: string}
+        condition: {type: object, additionalProperties: true}
+        target_agent_id: {type: string}
+        target_session_id: {type: string, nullable: true}
+        task_template: {type: string}
+        enabled:
+          type: boolean
+          default: true
+    FireRecord:
+      type: object
+      properties:
+        trigger_id: {type: string}
+        delivery_id:
+          type: string
+          description: 投递身份，用于恢复期间的 fencing
+        status: {type: string}
   parameters:
     AgentID:
       name: agent_id

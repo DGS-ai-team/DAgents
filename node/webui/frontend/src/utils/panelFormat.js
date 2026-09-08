@@ -77,6 +77,14 @@ export function formatTriggerCondition(condition) {
   return "手动";
 }
 
+export function triggerFireStatusMessage(record, name = "任务") {
+  const state = String(record?.status || "").toLowerCase();
+  if (state === "queued") return `已投递「${name}」，当前状态为“已排队”；请在触发历史中核对结果。`;
+  if (state === "skipped") return `本次未投递（已跳过）：${record?.message || record?.reason || "请查看触发历史"}`;
+  if (state === "error") return `投递失败：${record?.message || "请查看触发历史后再决定是否重试"}`;
+  return "收到未知投递状态，请查看触发历史核对结果。";
+}
+
 export function formatUnixTime(ts) {
   const n = floatFromAny(ts);
   if (n <= 0) return "—";

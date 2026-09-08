@@ -4,8 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
+	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -22,6 +24,7 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 		return
 	}
 	reg.SetAgentID(targetAgentID)
+	reg.SetAutonomyCallbacks(s.autonomyToolGet, s.autonomyToolUpdate)
 	if s.linuxProvider != nil {
 		if err := reg.WithLinuxShellProvider(s.linuxProvider); err != nil && s.logger != nil {
 			s.logger.Warn("agent linux provider bind failed", "agent_id", targetAgentID, "error", err)
@@ -36,6 +39,22 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 		reg.SetTerminalConfigResolver(s.linuxChannels)
 	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
+	if s.goalStore != nil {
+		reg.SetGoalCheckpoint(func(_ context.Context, goalID, runID string, cp tools.GoalCheckpoint) error {
+			_, err := s.goalStore.Checkpoint(goalID, runID, goals.Checkpoint{Summary: cp.Summary, Completed: cp.Completed, NextSteps: cp.NextSteps, Evidence: cp.Evidence, Artifacts: cp.Artifacts, ExternalCondition: cp.ExternalCondition, NextWakeAt: cp.NextWakeAt, Done: cp.Done}, time.Now())
+			if err == nil && s.triggerStore != nil {
+				if g, ok := s.goalStore.Get(goalID); ok && g.TriggerID != "" && g.NextWakeAt != nil {
+					if _, ok := s.triggerStore.GetTrigger(g.TriggerID); ok {
+						v := float64(g.NextWakeAt.UnixNano()) / 1e9
+						if e := s.triggerStore.UpdateNextFireAt(g.TriggerID, &v); e != nil {
+							return e
+						}
+					}
+				}
+			}
+			return err
+		})
+	}
 	attachWeComRuntime(reg, s.cfg)
 	attachBrowserTaskNotifier(reg, s.sessions, s.logger)
 	attachProcessEventSink(reg, s.stream, s.store, s.logger)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.manageStarted = false
 	s.manageMu.Unlock()
 	s.maybeStartManageSidecars()
+	s.startFeedbackLoop(regCtx)
 	s.startMCPHealthMonitor(regCtx)
 	if s.updateChecker != nil {
 		s.updateChecker.Start(regCtx)
@@ -79,6 +81,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.store != nil {
 			_ = s.store.Close()
 		}
+		if s.feedbackStore != nil {
+			_ = s.feedbackStore.Close()
+		}
 		if s.agents != nil {
 			_ = s.agents.Close()
 		}
@@ -106,6 +111,36 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
 		return nil
+	}
+}
+
+func (s *Server) startFeedbackLoop(ctx context.Context) {
+	if s == nil || s.feedbackStore == nil {
+		return
+	}
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.deliverPendingFeedback(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Server) deliverPendingFeedback(ctx context.Context) {
+	items, err := s.feedbackStore.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, f := range items {
+		if f.Destination != "" && f.Destination == strings.TrimRight(strings.TrimSpace(s.cfg.Manage.URL), "/") {
+			s.tryDeliverFeedback(ctx, f)
+		}
 	}
 }
 
@@ -207,6 +242,9 @@ func (s *Server) Close() {
 	}
 	if s.store != nil {
 		_ = s.store.Close()
+	}
+	if s.feedbackStore != nil {
+		_ = s.feedbackStore.Close()
 	}
 	if s.agents != nil {
 		_ = s.agents.Close()

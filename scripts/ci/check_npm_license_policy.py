@@ -20,6 +20,7 @@ ALLOWED_LICENSES = {
     "BSD-3-Clause",
     "BlueOak-1.0.0",
     "ISC",
+    "MIT-0",
     "MIT",
     "Apache-2.0 OR MIT",
     "MIT OR Apache-2.0",
@@ -44,6 +45,8 @@ def license_value(package_json: Path) -> str | None:
     value = metadata.get("license")
     if isinstance(value, str):
         return value
+    if isinstance(value, dict) and isinstance(value.get("type"), str):
+        return value["type"]
     licenses = metadata.get("licenses")
     if isinstance(licenses, list):
         values: list[str] = []

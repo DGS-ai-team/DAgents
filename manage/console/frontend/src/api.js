@@ -42,8 +42,8 @@ export async function loginAdmin({ username, password }) {
   return apiFetch("/v1/auth/login", {}, { method: "POST", body: { username, password } });
 }
 
-export async function loginNode(nodeId) {
-  return apiFetch("/v1/auth/login/node", {}, { method: "POST", body: { node_id: nodeId } });
+export async function loginNode(nodeId, token = "") {
+  return apiFetch("/v1/auth/login/node", {}, { method: "POST", body: { node_id: nodeId, token } });
 }
 
 export async function logoutAuth() {
@@ -88,6 +88,18 @@ export async function fetchHealth() {
 
 export async function fetchAgents(params) {
   return apiFetch(REGISTRY_API, params);
+}
+
+export async function fetchFeedback(params = {}) {
+  return apiFetch("/v1/feedback", params);
+}
+
+export async function fetchFeedbackItem(feedbackId, nodeId = "") {
+  return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}`, nodeId ? { node_id: nodeId } : {});
+}
+
+export async function updateFeedback(feedbackId, body, nodeId = "") {
+  return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}`, nodeId ? { node_id: nodeId } : {}, { method: "PATCH", body });
 }
 
 // --- LLM ?? ---

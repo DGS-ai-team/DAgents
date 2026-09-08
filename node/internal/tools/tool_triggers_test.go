@@ -19,7 +19,7 @@ func TestTriggerToolDefsExposeStructuredConditionSchema(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s condition properties = %#v", def.Function.Name, condition["properties"])
 		}
-		for _, name := range []string{"interval_seconds", "fire_at", "schedule", "cmd"} {
+		for _, name := range []string{"interval_seconds", "fire_at", "schedule"} {
 			if _, ok := conditionProps[name]; !ok {
 				t.Fatalf("%s condition missing %q: %#v", def.Function.Name, name, conditionProps)
 			}
@@ -33,7 +33,7 @@ func TestTriggerConditionSchemaIsStructured(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties=%#v", schema["properties"])
 	}
-	for _, name := range []string{"interval_seconds", "fire_at", "schedule", "cmd"} {
+	for _, name := range []string{"interval_seconds", "fire_at", "schedule"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("missing condition property %q", name)
 		}

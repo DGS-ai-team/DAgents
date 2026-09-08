@@ -126,6 +126,7 @@ type TurnBudget struct {
 	MaxWallTime         time.Duration `json:"max_wall_time_ns"`
 	MaxInputTokens      int           `json:"max_input_tokens"`
 	MaxOutputTokens     int           `json:"max_output_tokens"`
+	MaxTotalTokens      int           `json:"max_total_tokens"`
 	MaxCost             float64       `json:"max_cost"`
 	ReserveFinalSummary bool          `json:"reserve_final_summary"`
 }

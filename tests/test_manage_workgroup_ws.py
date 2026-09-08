@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -25,6 +26,10 @@ from manage.workgroup.models import (  # noqa: E402
 from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.ws_hub import WorkgroupWSHub  # noqa: E402
 from manage.workgroup.ws_routes import build_workgroup_ws_router  # noqa: E402
+
+_AUTH_PATCH = patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_a","token":"test-node-a"}]'})
+def setUpModule(): _AUTH_PATCH.start()
+def tearDownModule(): _AUTH_PATCH.stop()
 
 
 class WorkgroupWSHubTests(unittest.TestCase):
@@ -221,6 +226,7 @@ class WorkgroupWSHubTests(unittest.TestCase):
         assert replay is not None
         self.assertEqual(replay["complete"]["payload"]["replayed"], [1])
 
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_a","token":"test-node-a"}]'})
     def test_stale_ws_result_is_fenced_before_callback(self) -> None:
         app = FastAPI()
         store = WorkGroupStore()
@@ -235,16 +241,16 @@ class WorkgroupWSHubTests(unittest.TestCase):
             )
         )
 
-        with TestClient(app) as client:
+        with TestClient(app, headers={"x-dagents-a2a-token": "test-node-a"}) as client:
             with client.websocket_connect(
-                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "test-node-a"}
             ) as stale:
                 stale.send_json({"type": "session.hello", "payload": {"node_id": "node_a"}})
                 first_welcome = stale.receive_json()
                 first_generation = first_welcome["payload"]["connection_generation"]
 
                 with client.websocket_connect(
-                    "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                    "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "test-node-a"}
                 ) as current:
                     current.send_json(
                         {"type": "session.hello", "payload": {"node_id": "node_a"}}

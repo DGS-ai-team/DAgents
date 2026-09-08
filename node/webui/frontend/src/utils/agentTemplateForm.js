@@ -87,6 +87,7 @@ export function emptyAgentDraft() {
     // 工作目录在创建时确定，创建后不可修改。
     workspaceMode: "private",
     workspacePath: "",
+    agentType: "normal",
   };
 }
 
@@ -285,6 +286,7 @@ export function buildCreateAgentPayload(draft) {
       ? { mode: "custom", path: String(draft.workspacePath || "").trim() }
       : { mode: "private" },
   };
+  payload.agent_type = draft.agentType === "auto" ? "auto" : "normal";
   const tpl = String(draft.templateId || "").trim();
   if (tpl && tpl !== BLANK_TEMPLATE_ID) payload.template_id = tpl;
   return payload;
@@ -296,6 +298,7 @@ export function buildPatchAgentPayload(draft) {
   return {
     display_name: created.display_name,
     defaults: created.defaults,
+    agent_type: draft.agentType === "auto" ? "auto" : "normal",
   };
 }
 

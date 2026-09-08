@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,6 +15,17 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
+
+func TestLifecycleObserverFailureStopsTransitionCaller(t *testing.T) {
+	r := newLifecycleTestRuntime()
+	r.onLifecycle = func(string, turn.CoordinatorSnapshot) error { return errors.New("goal persistence unavailable") }
+	if err := r.lifecycleBeginHumanTurn(); err == nil {
+		t.Fatal("expected observer failure to stop lifecycle caller")
+	}
+	if !r.turnCoordinator.Snapshot().HasActiveTurn {
+		t.Fatal("durable coordinator transition should remain inspectable for reconciliation")
+	}
+}
 
 func newLifecycleTestRuntime() *runtime {
 	return &runtime{

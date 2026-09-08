@@ -23,6 +23,7 @@ import { markWorkgroupRead, noteWorkgroupTimeline } from "../stores/unread.js";
 
 const route = useRoute();
 const router = useRouter();
+const mobileNavOpen = ref(false);
 const panelRef = ref(null);
 
 const workgroupId = computed(() => String(route.params.workgroupId || "").trim());
@@ -1337,7 +1338,10 @@ onUnmounted(() => {
 
 <template>
   <div class="app__body app__body--chat-v61">
-    <aside class="app__col app__col--agents">
+    <button type="button" class="mobile-agent-nav-toggle" :aria-expanded="mobileNavOpen ? 'true' : 'false'" @click="mobileNavOpen = !mobileNavOpen">
+      {{ mobileNavOpen ? "收起导航" : "选择 Agent / 工作组" }}
+    </button>
+    <aside class="app__col app__col--agents" :class="{ 'app__col--agents-mobile-open': mobileNavOpen }">
       <NavRail
         ref="panelRef"
         :realtime-status="workgroupRealtimeStatus"

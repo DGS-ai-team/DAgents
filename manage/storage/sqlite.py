@@ -94,6 +94,12 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (plugin_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS feedback (
+                    node_id TEXT NOT NULL,
+                    client_feedback_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (node_id, client_feedback_id)
+                );
                 -- Workgroup：组 / ACL / 成员 / Assign / Run
                 CREATE TABLE IF NOT EXISTS workgroups (
                     id TEXT PRIMARY KEY,

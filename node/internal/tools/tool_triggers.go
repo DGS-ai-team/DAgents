@@ -23,7 +23,7 @@ func (r *Registry) SetTriggerRuntime(store *triggers.Store, sched *triggers.Sche
 func triggerConditionSchema() map[string]any {
 	return map[string]any{
 		"type":        "object",
-		"description": "调度条件必须且只能选择 interval_seconds、fire_at 或 schedule 之一；cmd 仅用于 schedule 门控。",
+		"description": "调度条件必须且只能选择 interval_seconds、fire_at 或 schedule 之一。",
 		"properties": map[string]any{
 			"interval_seconds": map[string]any{
 				"type":        "integer",
@@ -70,10 +70,6 @@ func triggerConditionSchema() map[string]any {
 				},
 				"required":             []string{"kind", "hour", "minute"},
 				"additionalProperties": false,
-			},
-			"cmd": map[string]any{
-				"type":        "string",
-				"description": "可选的 bash 门控命令；仅 schedule 自动触发前执行，退出码为 0 才投递任务。",
 			},
 		},
 		"additionalProperties": false,
@@ -140,6 +136,10 @@ func triggerCreateToolDef() ToolDef {
 						"description": "触发时投递的任务正文模板（必填）；须自带必要上下文，避免触发后再次向用户追问",
 					},
 					"condition": triggerConditionSchema(),
+					"session_target_mode": map[string]any{
+						"type": "string", "enum": []string{"fixed", "new_session", "latest_active"},
+						"description": "P0 推荐 fixed；new_session/latest_active 仅在目标 Agent 路由明确支持时使用。",
+					},
 				},
 				"required":             []string{"name", "task_template", "condition"},
 				"additionalProperties": false,
@@ -221,6 +221,13 @@ func (r *Registry) execTriggerList(_ context.Context, raw json.RawMessage) (stri
 		includeDisabled = *args.IncludeDisabled
 	}
 	items := store.ListTriggers()
+	owned := make([]triggers.Definition, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.TargetAgentID) == r.agentID {
+			owned = append(owned, item)
+		}
+	}
+	items = owned
 	if !includeDisabled {
 		filtered := make([]triggers.Definition, 0, len(items))
 		for _, item := range items {
@@ -249,6 +256,9 @@ func (r *Registry) execTriggerGet(_ context.Context, raw json.RawMessage) (strin
 	if !ok {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger not found", "trigger_id": args.TriggerID}), nil
 	}
+	if strings.TrimSpace(def.TargetAgentID) != r.agentID {
+		return triggerJSON(map[string]any{"ok": false, "error": "trigger does not belong to this agent", "trigger_id": args.TriggerID}), nil
+	}
 	return triggerJSON(map[string]any{"ok": true, "trigger": def}), nil
 }
 
@@ -259,12 +269,17 @@ func (r *Registry) execTriggerCreate(ctx context.Context, raw json.RawMessage) (
 	}
 	cleaned := ParseToolCallArguments(string(raw))
 	var args struct {
-		Name         string         `json:"name"`
-		TaskTemplate string         `json:"task_template"`
-		Condition    map[string]any `json:"condition"`
+		Name              string         `json:"name"`
+		TaskTemplate      string         `json:"task_template"`
+		Condition         map[string]any `json:"condition"`
+		SessionTargetMode string         `json:"session_target_mode"`
+		Enabled           *bool          `json:"enabled"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if triggers.ConditionCmd(args.Condition) != "" {
+		return triggerJSON(map[string]any{"ok": false, "error": "condition.cmd is no longer supported"}), nil
 	}
 	approvalTarget := TriggerSessionTargetFromContext(ctx)
 	if approvalTarget == "" {
@@ -280,6 +295,7 @@ func (r *Registry) execTriggerCreate(ctx context.Context, raw json.RawMessage) (
 		TargetAgentID:     r.agentID,
 		TargetSessionID:   targetSession,
 		SessionTargetMode: mode,
+		Enabled:           args.Enabled,
 	}, r.agentID, now)
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
@@ -307,6 +323,13 @@ func (r *Registry) execTriggerUpdate(_ context.Context, raw json.RawMessage) (st
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	patch := triggers.UpdatePatch{}
+	current, ok := store.GetTrigger(strings.TrimSpace(args.TriggerID))
+	if !ok || strings.TrimSpace(current.TargetAgentID) != r.agentID {
+		return triggerJSON(map[string]any{"ok": false, "error": "trigger does not belong to this agent", "trigger_id": args.TriggerID}), nil
+	}
+	if current.ManagedGoalID != "" {
+		return triggerJSON(map[string]any{"ok": false, "error": "managed goal trigger is controlled by goal runtime"}), nil
+	}
 	if args.Name != nil {
 		patch.Name = args.Name
 	}
@@ -337,6 +360,13 @@ func (r *Registry) execTriggerDelete(_ context.Context, raw json.RawMessage) (st
 	}
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	current, ok := store.GetTrigger(strings.TrimSpace(args.TriggerID))
+	if !ok || strings.TrimSpace(current.TargetAgentID) != r.agentID {
+		return triggerJSON(map[string]any{"ok": false, "error": "trigger does not belong to this agent", "trigger_id": args.TriggerID}), nil
+	}
+	if current.ManagedGoalID != "" {
+		return triggerJSON(map[string]any{"ok": false, "error": "managed goal trigger is controlled by goal runtime"}), nil
 	}
 	deleted := store.DeleteTrigger(strings.TrimSpace(args.TriggerID))
 	return triggerJSON(map[string]any{"ok": true, "trigger_id": args.TriggerID, "deleted": deleted}), nil

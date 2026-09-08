@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildConditionFromForm,
   buildCreatePayload,
+  buildUpdatePayload,
+  buildTriggerPatch,
   datetimeLocalToUnix,
   parseConditionToForm,
   triggerToForm,
@@ -16,7 +18,7 @@ describe("triggerForm", () => {
     });
   });
 
-  it("builds weekly schedule with optional cmd", () => {
+  it("does not emit legacy shell checks", () => {
     const condition = buildConditionFromForm({
       scheduleKind: "weekly",
       hour: 9,
@@ -26,7 +28,6 @@ describe("triggerForm", () => {
     });
     expect(condition).toEqual({
       schedule: { kind: "weekly", hour: 9, minute: 30, weekday: 3 },
-      cmd: "test -f /tmp/ok",
     });
   });
 
@@ -43,6 +44,8 @@ describe("triggerForm", () => {
     const payload = buildCreatePayload({
       name: "日报",
       taskTemplate: "汇总今日工作",
+      targetAgentId: "agent-1",
+      sessionTargetMode: "fixed",
       scheduleKind: "daily",
       hour: 8,
       minute: 0,
@@ -50,6 +53,9 @@ describe("triggerForm", () => {
     expect(payload).toEqual({
       name: "日报",
       task_template: "汇总今日工作",
+      target_agent_id: "agent-1",
+      session_target_mode: "fixed",
+      enabled: true,
       condition: { schedule: { kind: "daily", hour: 8, minute: 0 } },
     });
   });
@@ -66,6 +72,25 @@ describe("triggerForm", () => {
     expect(form.taskTemplate).toBe("ping");
     expect(form.scheduleKind).toBe("interval");
     expect(form.intervalSeconds).toBe(300);
+  });
+
+  it("keeps schedule changes in the update payload", () => {
+    const previous = { name: "日报", taskTemplate: "汇总", targetAgentId: "a", sessionTargetMode: "fixed", scheduleKind: "daily", hour: 8, minute: 0 };
+    const next = { ...previous, scheduleKind: "interval", intervalSeconds: 900 };
+    expect(buildUpdatePayload(next).condition).toEqual({ interval_seconds: 900 });
+    expect(buildUpdatePayload(next).condition).not.toEqual(buildUpdatePayload(previous).condition);
+  });
+
+  it("builds minimal trigger patches and clears an old session binding", () => {
+    const previous = { name: "日报", taskTemplate: "汇总", targetAgentId: "a", sessionTargetMode: "fixed", scheduleKind: "daily", hour: 8, minute: 0, enabled: true };
+    expect(buildTriggerPatch(previous, { ...previous, name: "日报2" })).toEqual({ name: "日报2" });
+    expect(buildTriggerPatch(previous, { ...previous, scheduleKind: "interval", intervalSeconds: 900 })).toMatchObject({ condition: { interval_seconds: 900 } });
+    expect(buildTriggerPatch(previous, { ...previous, targetAgentId: "b" })).toMatchObject({ target_agent_id: "b", target_session_id: "" });
+    expect(buildTriggerPatch(previous, { ...previous })).toEqual({});
+  });
+
+  it("sends disabled state atomically when creating", () => {
+    expect(buildCreatePayload({ name: "x", taskTemplate: "y", targetAgentId: "a", enabled: false, scheduleKind: "interval", intervalSeconds: 60 }).enabled).toBe(false);
   });
 
   it("converts datetime-local to unix seconds", () => {

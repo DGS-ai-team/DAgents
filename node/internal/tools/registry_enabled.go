@@ -74,6 +74,18 @@ func (r *Registry) SetBuiltinEnabledNone() {
 	r.enabledOnly = map[string]struct{}{}
 }
 
+// EnableManagedGoalCheckpoint exposes the checkpoint tool only on a dedicated
+// goal registry. The tool remains guarded by GoalID context at Execute time.
+func (r *Registry) EnableManagedGoalCheckpoint() {
+	if r == nil {
+		return
+	}
+	if r.enabledOnly == nil {
+		r.enabledOnly = map[string]struct{}{}
+	}
+	r.enabledOnly["goal_checkpoint"] = struct{}{}
+}
+
 // IsKnownBuiltinTool 判断是否为可配置的内置工具名。
 func IsKnownBuiltinTool(name string) bool {
 	_, ok := knownBuiltinTools[name]
@@ -82,6 +94,9 @@ func IsKnownBuiltinTool(name string) bool {
 
 func (r *Registry) toolEnabled(name string) bool {
 	if r == nil || r.enabledOnly == nil {
+		return true
+	}
+	if r.autonomyEnabled && (name == "autonomy_get" || name == "autonomy_update") {
 		return true
 	}
 	if _, ok := r.mcpTools[name]; ok {

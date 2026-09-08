@@ -103,6 +103,10 @@ export const VIEW_META = {
     title: "配置",
     subtitle: "管理台共享的 LLM、版本发布与案例库",
   },
+  feedback: {
+    title: "用户反馈",
+    subtitle: "查看、处理并回复 Node 用户反馈",
+  },
   cases: {
     title: "案例库",
     subtitle: "演示会话 JSONL、关联 Skills / Plugins / External Tools",

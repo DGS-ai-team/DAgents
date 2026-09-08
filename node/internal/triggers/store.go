@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/google/uuid"
 )
 
 var errTriggerNotFound = errors.New("trigger not found")
@@ -47,6 +49,23 @@ func OpenStore(path string, historyLimit int) (*Store, error) {
 	if err := s.load(); err != nil {
 		return nil, err
 	}
+	// A durable pending delivery cannot be proven to have reached the runtime
+	// after restart. Fail closed: pause it and require explicit recovery.
+	s.mu.Lock()
+	dirty := false
+	for id, d := range s.triggers {
+		if d.PendingDeliveryID != nil && *d.PendingDeliveryID != "" && !d.RecoveryRequired {
+			d.Enabled = false
+			d.RecoveryRequired = true
+			d.RecoveryReason = "pending delivery requires recovery after restart"
+			s.triggers[id] = d
+			dirty = true
+		}
+	}
+	if dirty {
+		_ = s.saveLocked()
+	}
+	s.mu.Unlock()
 	return s, nil
 }
 
@@ -116,6 +135,9 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 		if _, err := EnsureScheduleCondition(patch.Condition); err != nil {
 			return Definition{}, err
 		}
+		if ConditionCmd(patch.Condition) != "" {
+			return Definition{}, fmt.Errorf("condition.cmd is not supported")
+		}
 		current.Condition = cloneMap(patch.Condition)
 	}
 	if patch.TargetAgentID != nil {
@@ -128,7 +150,16 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 		current.ClientID = copyStringPtr(patch.ClientID)
 	}
 	if patch.Enabled != nil {
+		if *patch.Enabled && current.RecoveryRequired {
+			return Definition{}, fmt.Errorf("trigger requires recovery before enabling")
+		}
 		current.Enabled = *patch.Enabled
+	}
+	if patch.SessionTargetMode != nil {
+		if !ValidSessionTargetMode(*patch.SessionTargetMode) {
+			return Definition{}, fmt.Errorf("invalid session_target_mode: %s", *patch.SessionTargetMode)
+		}
+		current.SessionTargetMode = *patch.SessionTargetMode
 	}
 	updated := current.WithNextFire(now)
 	s.triggers[id] = updated
@@ -137,6 +168,41 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 	}
 	s.logUpdated(updated)
 	return updated, nil
+}
+
+// UpdateManagedConfig changes only scheduler fields owned by a managed Goal.
+// It preserves delivery/claim state and the Goal's exact next wake time.
+func (s *Store) UpdateManagedConfig(id string, interval int, enabled bool, task string, nextFireAt *float64, now time.Time) (Definition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[id]
+	if !ok {
+		return Definition{}, errTriggerNotFound
+	}
+	if interval < 60 {
+		return Definition{}, fmt.Errorf("managed interval must be >= 60 seconds")
+	}
+	if enabled && cur.RecoveryRequired {
+		return Definition{}, fmt.Errorf("trigger requires recovery before enabling")
+	}
+	old := cur
+	cur.Condition = map[string]any{"interval_seconds": interval}
+	cur.Enabled = enabled
+	cur.TaskTemplate = task
+	if nextFireAt == nil {
+		cur.NextFireAt = nil
+	} else {
+		v := *nextFireAt
+		cur.NextFireAt = &v
+	}
+	cur.UpdatedAt = timeToUnixFloat(now)
+	s.triggers[id] = cur
+	if err := s.saveLocked(); err != nil {
+		s.triggers[id] = old
+		return Definition{}, err
+	}
+	s.logUpdated(cur)
+	return cur, nil
 }
 
 func (s *Store) DeleteTrigger(id string) bool {
@@ -173,6 +239,31 @@ func (s *Store) ReplaceTrigger(def Definition) error {
 	}
 	s.triggers[def.TriggerID] = def
 	return s.saveLocked()
+}
+
+// UpdateNextFireAt changes only scheduler time, preserving delivery/claim
+// fields that may have changed concurrently.
+func (s *Store) UpdateNextFireAt(id string, at *float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[id]
+	if !ok {
+		return errTriggerNotFound
+	}
+	old := d
+	if at == nil {
+		d.NextFireAt = nil
+	} else {
+		v := *at
+		d.NextFireAt = &v
+	}
+	d.UpdatedAt = float64(time.Now().UnixNano()) / 1e9
+	s.triggers[id] = d
+	if err := s.saveLocked(); err != nil {
+		s.triggers[id] = old
+		return err
+	}
+	return nil
 }
 
 func (s *Store) MarkFired(id string, firedAt time.Time) (Definition, error) {
@@ -212,10 +303,142 @@ func (s *Store) MarkPendingDelivery(triggerID string) {
 	}
 }
 
+// ClaimDelivery durably claims one delivery before it is placed in InputBox.
+func (s *Store) ClaimDelivery(triggerID, deliveryID, sessionID string) error {
+	return s.claimDelivery(triggerID, deliveryID, sessionID, nil)
+}
+
+func (s *Store) ClaimDeliveryForOccurrence(triggerID, deliveryID, sessionID string, occurrence *float64) error {
+	return s.claimDelivery(triggerID, deliveryID, sessionID, occurrence)
+}
+
+func (s *Store) claimDelivery(triggerID, deliveryID, sessionID string, occurrence *float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(filepath.Dir(s.path)); err != nil {
+		return fmt.Errorf("delivery store unavailable: %w", err)
+	}
+	d, ok := s.triggers[triggerID]
+	if !ok {
+		return errTriggerNotFound
+	}
+	if d.PendingDeliveryID != nil && *d.PendingDeliveryID != "" {
+		return fmt.Errorf("delivery already pending")
+	}
+	if occurrence != nil && (d.NextFireAt == nil || *d.NextFireAt != *occurrence) {
+		return fmt.Errorf("stale trigger occurrence")
+	}
+	deliveryID, sessionID = strings.TrimSpace(deliveryID), strings.TrimSpace(sessionID)
+	if deliveryID == "" || sessionID == "" {
+		return fmt.Errorf("delivery identity and session are required")
+	}
+	old := d
+	if occurrence != nil {
+		// Reserve the scheduled occurrence in the same durable claim. An old
+		// scheduler snapshot can no longer claim it after a fast acknowledgement.
+		d = d.WithNextFire(time.Now())
+	}
+	d.PendingDeliveryID = &deliveryID
+	d.PendingSessionID = &sessionID
+	s.triggers[triggerID] = d
+	if err := s.saveLocked(); err != nil {
+		s.triggers[triggerID] = old
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ClearPendingDeliveryIfMatch(triggerID, deliveryID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[triggerID]
+	if !ok || d.PendingDeliveryID == nil || *d.PendingDeliveryID != strings.TrimSpace(deliveryID) {
+		return
+	}
+	old := d
+	d.PendingDeliveryID = nil
+	d.PendingSessionID = nil
+	s.triggers[triggerID] = d
+	if err := s.saveLocked(); err != nil {
+		s.triggers[triggerID] = old
+		return
+	}
+	if s.pending != nil {
+		s.pending.ClearPendingDelivery(triggerID)
+	}
+}
+
+func (s *Store) IsRecoveryRequired(triggerID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, ok := s.triggers[triggerID]
+	return ok && d.RecoveryRequired
+}
+
+// IsPendingDelivery reports whether this exact delivery is still the durable
+// owner of the trigger. It fences envelopes that were restored after an
+// explicit recovery action cleared the old delivery.
+func (s *Store) IsPendingDelivery(triggerID, deliveryID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, ok := s.triggers[triggerID]
+	return ok && !d.RecoveryRequired && d.PendingDeliveryID != nil && strings.TrimSpace(*d.PendingDeliveryID) == strings.TrimSpace(deliveryID)
+}
+
+// RecoverPendingDelivery discards the old delivery after fencing by identity.
+// It deliberately leaves the trigger disabled; enabling is a separate action.
+func (s *Store) RecoverPendingDelivery(triggerID, deliveryID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[triggerID]
+	if !ok {
+		return errTriggerNotFound
+	}
+	if !d.RecoveryRequired || d.PendingDeliveryID == nil || *d.PendingDeliveryID != strings.TrimSpace(deliveryID) {
+		return fmt.Errorf("recovery delivery identity mismatch")
+	}
+	old := d
+	oldHistory := append([]FireRecord(nil), s.history...)
+	sessionID := d.PendingSessionID
+	d.PendingDeliveryID = nil
+	d.PendingSessionID = nil
+	d.RecoveryRequired = false
+	d.RecoveryReason = ""
+	d.Enabled = false
+	s.triggers[triggerID] = d
+	s.history = append(s.history, FireRecord{FireID: uuid.NewString(), TriggerID: triggerID, DeliveryID: strings.TrimSpace(deliveryID), Status: FireStatusSkipped, Reason: "recovery", SessionID: sessionID, Message: "pending delivery discarded during recovery", FiredAt: float64(time.Now().UnixNano()) / 1e9})
+	if len(s.history) > s.historyLimit {
+		s.history = s.history[len(s.history)-s.historyLimit:]
+	}
+	if err := s.saveLocked(); err != nil {
+		s.triggers[triggerID] = old
+		s.history = oldHistory
+		return err
+	}
+	if s.pending != nil {
+		s.pending.ClearPendingDelivery(triggerID)
+	}
+	return nil
+}
+
 // ClearPendingDelivery 在 side-effect Apply 成功或 ClearSession 丢弃缓冲时清除待消费标记。
 func (s *Store) ClearPendingDelivery(triggerID string) {
-	if s != nil && s.pending != nil {
-		s.pending.ClearPendingDelivery(triggerID)
+	if s != nil {
+		s.mu.Lock()
+		if d, ok := s.triggers[triggerID]; ok && d.PendingDeliveryID != nil {
+			previous := d
+			d.PendingDeliveryID = nil
+			d.PendingSessionID = nil
+			s.triggers[triggerID] = d
+			if err := s.saveLocked(); err != nil {
+				s.triggers[triggerID] = previous
+			} else if s.pending != nil {
+				s.pending.ClearPendingDelivery(triggerID)
+			}
+		} else if s.pending != nil {
+			s.pending.ClearPendingDelivery(triggerID)
+		}
+		s.mu.Unlock()
 	}
 }
 

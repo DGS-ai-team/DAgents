@@ -30,15 +30,19 @@ const navGroups = [
       { to: "/settings/triggers", label: "定时任务" },
     ],
   },
-  {
-    label: "系统",
+    {
+      label: "系统",
     items: [
       { to: "/settings/security", label: "输出防护" },
       { to: "/settings/context", label: "上下文" },
       { to: "/settings/about", label: "关于" },
-    ],
-  },
-];
+      ],
+    },
+    {
+      label: "支持",
+      items: [{ to: "/settings/feedback", label: "帮助与反馈" }],
+    },
+  ];
 
 function isActive(item) {
   if (item.match) return route.path === item.match || route.path.startsWith(`${item.match}/`);

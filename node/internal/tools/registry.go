@@ -55,6 +55,32 @@ type Registry struct {
 	desktopMu              sync.Mutex
 	desktopFrames          map[string]screenGeometry
 	mcpTools               map[string]MCPTool
+	goalCheckpoint         func(context.Context, string, string, GoalCheckpoint) error
+	autonomyEnabled        bool
+	autonomyGet            AutonomyGetFunc
+	autonomyUpdate         AutonomyUpdateFunc
+}
+
+func (r *Registry) SetGoalCheckpoint(fn func(context.Context, string, string, GoalCheckpoint) error) {
+	r.goalCheckpoint = fn
+}
+
+// SetAutonomyRuntime exposes self-management only on an explicitly selected
+// Auto main runtime. The callbacks receive the Registry-bound Agent ID.
+func (r *Registry) SetAutonomyRuntime(enabled bool, get AutonomyGetFunc, update AutonomyUpdateFunc) {
+	if r == nil {
+		return
+	}
+	r.autonomyEnabled, r.autonomyGet, r.autonomyUpdate = enabled, get, update
+}
+
+// SetAutonomyCallbacks binds server-owned persistence while preserving the
+// enablement chosen when the runtime was built.
+func (r *Registry) SetAutonomyCallbacks(get AutonomyGetFunc, update AutonomyUpdateFunc) {
+	if r == nil {
+		return
+	}
+	r.autonomyGet, r.autonomyUpdate = get, update
 }
 
 // WorkspaceRoot returns the effective Agent workspace used by file, bash and
@@ -330,6 +356,7 @@ func (r *Registry) Definitions() []ToolDef {
 		loadSkillsToolDef(),
 		unloadSkillsToolDef(),
 		clearSkillsToolDef(),
+		goalCheckpointToolDef(),
 		triggerListToolDef(),
 		triggerGetToolDef(),
 		triggerCreateToolDef(),
@@ -348,6 +375,9 @@ func (r *Registry) Definitions() []ToolDef {
 	}
 	base = append(base, r.mcpToolDefs()...)
 	defs := r.filterToolDefs(base)
+	if r.autonomyEnabled && r.autonomyGet != nil && r.autonomyUpdate != nil {
+		defs = append(defs, autonomyGetToolDef(), autonomyUpdateToolDef())
+	}
 	for i := range defs {
 		defs[i].Function.Description = strings.TrimSpace(defs[i].Function.Description) + ResultDescriptionSuffixForTool(defs[i].Function.Name)
 	}
@@ -369,6 +399,12 @@ func (r *Registry) Definitions() []ToolDef {
 // 子 Agent RestrictedRegistry 在通过自身 allowlist 后应使用 WithEnabledBypass，
 // 以免父 Agent 的 enabledOnly 误拦子会话允许的工具。
 func (r *Registry) Execute(ctx context.Context, name, arguments string) (string, error) {
+	if strings.TrimSpace(name) == "goal_checkpoint" && GoalIDFromContext(ctx) == "" {
+		return "", fmt.Errorf("goal_checkpoint is only available during a managed goal run")
+	}
+	if GoalIDFromContext(ctx) != "" && (strings.HasPrefix(strings.TrimSpace(name), "trigger_") || strings.HasSuffix(strings.TrimSpace(name), "_temporary_agent")) {
+		return "", fmt.Errorf("%s is unavailable during a managed goal run", name)
+	}
 	if err := r.rejectIfDisabled(ctx, name); err != nil {
 		return "", err
 	}
@@ -437,5 +473,8 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
+	r.handlers["goal_checkpoint"] = r.execGoalCheckpoint
+	r.handlers["autonomy_get"] = r.execAutonomyGet
+	r.handlers["autonomy_update"] = r.execAutonomyUpdate
 	r.RegisterChildAgentToolStubs()
 }

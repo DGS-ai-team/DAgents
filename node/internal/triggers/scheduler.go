@@ -18,6 +18,18 @@ type MessageSubmitter interface {
 	SubmitTriggerMessage(sessionID, triggerID, content string) error
 }
 
+// TargetedMessageSubmitter is implemented by Node adapters that can resolve
+// an already registered Agent runtime. The legacy interface remains supported
+// for embedded callers and tests.
+type TargetedMessageSubmitter interface {
+	MessageSubmitter
+	EnsureSessionForAgent(targetAgentID, requestedID string) (string, error)
+}
+
+type DeliveryMessageSubmitter interface {
+	SubmitTriggerMessageWithDelivery(sessionID, triggerID, deliveryID, content string) error
+}
+
 // SessionResolver 解析 latest_active 投递目标。
 type SessionResolver interface {
 	ResolveLatestActiveUserSessionID(ctx context.Context) (string, error)
@@ -28,13 +40,19 @@ type Scheduler struct {
 	store           *Store
 	submitter       MessageSubmitter
 	sessionResolver SessionResolver
-	cmdGate         CmdGate
 	pollInterval    time.Duration
 	logger          *slog.Logger
+	managedFire     func(context.Context, Definition, time.Time) FireRecord
 
 	mu     sync.Mutex
 	stopCh chan struct{}
 	doneCh chan struct{}
+}
+
+// SetManagedFire routes managed Goal triggers through Goal-owned Run/claim
+// logic. Ordinary triggers retain the existing fire path unchanged.
+func (s *Scheduler) SetManagedFire(fn func(context.Context, Definition, time.Time) FireRecord) {
+	s.managedFire = fn
 }
 
 // NewScheduler 构造调度器；pollSeconds 至少 1 秒。
@@ -45,7 +63,6 @@ func NewScheduler(store *Store, submitter MessageSubmitter, pollSeconds int) *Sc
 	return &Scheduler{
 		store:        store,
 		submitter:    submitter,
-		cmdGate:      NewShellCmdGate(),
 		pollInterval: time.Duration(pollSeconds) * time.Second,
 		logger:       logx.Discard(),
 	}
@@ -57,13 +74,6 @@ func (s *Scheduler) SetLogger(logger *slog.Logger) {
 		return
 	}
 	s.logger = discardLogger(logger)
-}
-
-// SetCmdGate 注入 cmd 门控执行器（测试用）。
-func (s *Scheduler) SetCmdGate(gate CmdGate) {
-	if gate != nil {
-		s.cmdGate = gate
-	}
 }
 
 // SetSessionResolver 注入 latest_active 会话解析器。
@@ -142,6 +152,12 @@ func (s *Scheduler) tickDue(now time.Time) {
 				"next_fire_at", updated.NextFireAt,
 			)
 		case DueFire:
+			if def.ManagedGoalID != "" {
+				if s.managedFire != nil {
+					s.managedFire(context.Background(), def, now)
+				}
+				break
+			}
 			s.fire(context.Background(), def, "schedule", map[string]any{}, false, nil)
 		default:
 		}
@@ -157,7 +173,12 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 		s.logFireRecord(record)
 		return record
 	}
-	if s.store.HasPendingDelivery(def.TriggerID) {
+	// Shell gates are legacy persisted data. They are retained for audit/history
+	// but are never executed by schedule, manual, or forced fire paths.
+	if ConditionCmd(def.Condition) != "" {
+		return s.record(def, FireStatusSkipped, reason, payload, "condition.cmd is no longer supported", nil, nil, "")
+	}
+	if s.store.HasPendingDelivery(def.TriggerID) || (def.PendingDeliveryID != nil && strings.TrimSpace(*def.PendingDeliveryID) != "") {
 		record := FireRecord{
 			TriggerID: def.TriggerID,
 			Status:    FireStatusSkipped,
@@ -172,29 +193,22 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 		s.logFireRecord(record)
 		return record
 	}
-	if reason == "schedule" {
-		if cmd := ConditionCmd(def.Condition); cmd != "" {
-			ok, detail, err := s.runCmdGate(cmd)
-			if err != nil {
-				return s.rescheduleAfterCmdSkip(def, reason, payload, "cmd gate error: "+err.Error())
-			}
-			if !ok {
-				msg := "cmd gate rejected"
-				if detail != "" {
-					msg = msg + ": " + detail
-				}
-				return s.rescheduleAfterCmdSkip(def, reason, payload, msg)
-			}
-			payload["cmd_gate"] = detail
-		}
-	}
 	requestedSession, effectiveMode, bindAfterFire, err := s.resolveFireSession(ctx, def, opts)
 	if err != nil {
 		record := s.record(def, FireStatusError, reason, payload, err.Error(), nil, nil, "")
 		s.logFireRecord(record)
 		return record
 	}
-	sessionID, err := s.submitter.EnsureSession(requestedSession)
+	if _, targeted := s.submitter.(TargetedMessageSubmitter); targeted && effectiveMode != SessionTargetFixed {
+		record := s.record(def, FireStatusError, reason, payload, "session_target_mode is unsupported for routed triggers; use fixed", nil, nil, "")
+		return record
+	}
+	var sessionID string
+	if targeted, ok := s.submitter.(TargetedMessageSubmitter); ok && effectiveMode == SessionTargetFixed {
+		sessionID, err = targeted.EnsureSessionForAgent(strings.TrimSpace(def.TargetAgentID), requestedSession)
+	} else {
+		sessionID, err = s.submitter.EnsureSession(requestedSession)
+	}
 	if err != nil {
 		record := s.record(def, FireStatusError, reason, payload, err.Error(), nil, nil, "")
 		s.logFireRecord(record)
@@ -205,16 +219,49 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 		clientID = *def.ClientID
 	}
 	content := RenderTaskTemplate(def.TaskTemplate, def, reason, payload)
-	if err := s.submitter.SubmitTriggerMessage(sessionID, def.TriggerID, content); err != nil {
+	deliveryID := uuid.NewString()
+	var occurrence *float64
+	if reason == "schedule" {
+		occurrence = def.NextFireAt
+	}
+	if err := s.store.ClaimDeliveryForOccurrence(def.TriggerID, deliveryID, sessionID, occurrence); err != nil {
+		record := s.record(def, FireStatusError, reason, payload, "delivery claim failed: "+err.Error(), &sessionID, &clientID, content)
+		return record
+	}
+	// Mirror the durable claim before handing the envelope to the runtime. The
+	// consumer may acknowledge synchronously, so marking after Submit races
+	// with the identity clear and can resurrect a stale in-memory guard.
+	s.store.MarkPendingDelivery(def.TriggerID)
+	def.PendingDeliveryID = &deliveryID
+	def.PendingSessionID = &sessionID
+	// Advance the scheduled occurrence while the durable delivery claim is
+	// held. A synchronous consumer may clear the claim before Submit returns;
+	// leaving MarkFired until after Submit would let a stale tick claim the same
+	// occurrence again.
+	if reason == "schedule" {
+		if _, err := s.store.MarkFired(def.TriggerID, time.Now()); err != nil {
+			record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
+			s.logFireRecord(record)
+			return record
+		}
+	}
+	var submitErr error
+	if targeted, ok := s.submitter.(DeliveryMessageSubmitter); ok {
+		submitErr = targeted.SubmitTriggerMessageWithDelivery(sessionID, def.TriggerID, deliveryID, content)
+	} else {
+		submitErr = s.submitter.SubmitTriggerMessage(sessionID, def.TriggerID, content)
+	}
+	if err := submitErr; err != nil {
 		record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
 		s.logFireRecord(record)
 		return record
 	}
-	s.store.MarkPendingDelivery(def.TriggerID)
-	if _, err := s.store.MarkFired(def.TriggerID, time.Now()); err != nil {
-		record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
-		s.logFireRecord(record)
-		return record
+	if reason != "schedule" {
+		if _, err := s.store.MarkFired(def.TriggerID, time.Now()); err != nil {
+			record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
+			s.logFireRecord(record)
+			return record
+		}
 	}
 	if bindAfterFire {
 		s.bindNewSession(def, sessionID, effectiveMode)
@@ -270,32 +317,6 @@ func (s *Scheduler) resolveFireSession(ctx context.Context, def Definition, opts
 	}
 }
 
-func (s *Scheduler) runCmdGate(cmd string) (bool, string, error) {
-	if s.cmdGate == nil {
-		s.cmdGate = NewShellCmdGate()
-	}
-	return s.cmdGate.Run(cmd)
-}
-
-func (s *Scheduler) rescheduleAfterCmdSkip(def Definition, reason string, payload map[string]any, message string) FireRecord {
-	updated := def.RescheduleNextFire(time.Now())
-	_ = s.store.ReplaceTrigger(updated)
-	record := FireRecord{
-		FireID:    uuid.NewString(),
-		TriggerID: def.TriggerID,
-		Status:    FireStatusSkipped,
-		Reason:    reason,
-		Message:   message,
-		Payload:   payload,
-		FiredAt:   timeToUnixFloat(time.Now()),
-	}
-	if reason != "schedule" {
-		record = s.store.AddHistory(record)
-	}
-	s.logFireRecord(record)
-	return record
-}
-
 func (s *Scheduler) record(
 	def Definition,
 	status FireStatus,
@@ -308,6 +329,12 @@ func (s *Scheduler) record(
 	record := FireRecord{
 		FireID:    uuid.NewString(),
 		TriggerID: def.TriggerID,
+		DeliveryID: strings.TrimSpace(func() string {
+			if def.PendingDeliveryID != nil {
+				return *def.PendingDeliveryID
+			}
+			return ""
+		}()),
 		Status:    status,
 		Reason:    reason,
 		SessionID: sessionID,

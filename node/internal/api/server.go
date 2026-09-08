@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
+	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -38,6 +40,8 @@ type Server struct {
 	cfg             *config.Config
 	configPath      string
 	llmRuntime      *llm.RuntimeSettings
+	defaultLLM      llm.Client
+	llmInjected     bool
 	logger          *slog.Logger
 	mux             *http.ServeMux
 	sessions        *session.Manager // per-session queue and turn consumer
@@ -54,10 +58,16 @@ type Server struct {
 	store           *store.SQLiteStore
 	triggerStore    *triggers.Store
 	triggerSched    *triggers.Scheduler
+	goalStore       *goals.Store
+	goalWake        goals.WakeFunc
+	goalWakeMu      sync.Mutex
 	registrar       *manage.Registrar
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
+	feedbackStore   *store.FeedbackStore
+	feedbackRateMu  sync.Mutex
+	feedbackRate    map[string][]time.Time
 	tools           *tools.Registry
 	transfers       *tools.LinuxTransferManager
 	browserMu       sync.RWMutex
@@ -87,6 +97,7 @@ type Option func(*serverOptions)
 
 type serverOptions struct {
 	llmClient    llm.Client
+	llmInjected  bool
 	tools        *tools.Registry
 	policyEngine *policy.Engine
 	sqliteStore  *store.SQLiteStore
@@ -113,6 +124,7 @@ func WithNodeSettings(ns *store.NodeSettingsStore) Option {
 func WithLLM(client llm.Client) Option {
 	return func(o *serverOptions) {
 		o.llmClient = client
+		o.llmInjected = true
 	}
 }
 
@@ -330,18 +342,23 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
+	var goalStore *goals.Store
+	if opened, err := goals.OpenStore(filepath.Join(cfg.RuntimeDir(), "goals.json")); err != nil {
+		logger.Warn("goal store init failed", "error", err)
+	} else {
+		goalStore = opened
+	}
+	var triggerSubmitter *session.TriggerSubmitter
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {
 		logger.Warn("trigger store init failed", "error", err, "path", cfg.TriggersStorePath())
 	} else {
 		triggerStore = opened
 		triggerStore.SetLogger(logger)
-		triggerSched = triggers.NewScheduler(triggerStore, &session.TriggerSubmitter{Mgr: mgr}, cfg.Triggers.PollSeconds)
+		triggerSubmitter = &session.TriggerSubmitter{Mgr: mgr}
+		triggerSched = triggers.NewScheduler(triggerStore, triggerSubmitter, cfg.Triggers.PollSeconds)
 		triggerSched.SetLogger(logger)
 		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
-		if triggerSched != nil {
-			triggerSched.Start()
-		}
 	}
 	mediaRegister := tools.MediaRegisterFunc(func(ctx context.Context, toolCallID, relPath, source, label, caption string) (*tools.MediaArtifactRef, error) {
 		sid := tools.SessionIDFromContext(ctx)
@@ -414,6 +431,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		packageUploader = manage.NewPackageUploader(cfg, logger)
 	}
 	control := manage.NewControlClient(cfg)
+	var feedbackStore *store.FeedbackStore
+	if !o.skipStore {
+		opened, feedbackErr := store.OpenFeedback(store.FeedbackDBPath(cfg.RuntimeDir()))
+		if feedbackErr != nil {
+			logger.Error("feedback store init failed", "error", feedbackErr)
+		} else {
+			feedbackStore = opened
+		}
+	}
 	var wgWorker *workgroup.Worker
 	var wgDialer *workgroup.Dialer
 	var wgAgentBridge *workgroupAgentBridge
@@ -463,6 +489,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		cfg:                  cfg,
 		configPath:           o.configPath,
 		llmRuntime:           llmRuntime,
+		defaultLLM:           o.llmClient,
+		llmInjected:          o.llmInjected,
 		logger:               logger,
 		mux:                  http.NewServeMux(),
 		stream:               hub,
@@ -479,10 +507,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		sessions:             mgr,
 		triggerStore:         triggerStore,
 		triggerSched:         triggerSched,
+		goalStore:            goalStore,
 		registrar:            registrar,
 		updateChecker:        updateChecker,
 		packageUploader:      packageUploader,
 		control:              control,
+		feedbackStore:        feedbackStore,
+		feedbackRate:         make(map[string][]time.Time),
 		tools:                o.tools,
 		transfers:            transferManager,
 		browserMgr:           browserMgr,
@@ -556,6 +587,93 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
 	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)
+	if triggerSubmitter != nil && s.goalStore != nil {
+		s.goalWake = func(ctx context.Context, g goals.Goal, run goals.Run) (string, error) {
+			if s.goalAgentBusy(g) {
+				return "", fmt.Errorf("agent busy")
+			}
+			_ = ctx
+			sessionID := g.SessionID
+			if sessionID == "" {
+				return "", fmt.Errorf("goal has no dedicated session")
+			}
+			if existing := s.sessions.Get(sessionID); existing != nil {
+				if existing.AgentID != g.AgentID {
+					return "", fmt.Errorf("goal session belongs to a different agent")
+				}
+			} else if s.agents == nil {
+				return "", fmt.Errorf("agent store unavailable; cannot restore goal runtime")
+			} else {
+				if rec, err := s.agents.Get(ctx, g.AgentID); err != nil || rec == nil || rec.Archived {
+					return "", fmt.Errorf("goal agent unavailable after restart")
+				} else if err := s.ensureGoalRuntime(ctx, *rec, sessionID); err != nil {
+					return "", err
+				}
+			}
+			content := "长期目标：" + g.Objective + "\n验收条件：" + g.Acceptance
+			if g.LastCheckpoint != nil {
+				content += "\n上次进度摘要：" + g.LastCheckpoint.Summary
+			}
+			deliveryID := "goal-" + run.ID
+			if s.triggerStore == nil {
+				return "", fmt.Errorf("managed goal trigger store unavailable")
+			}
+			if err := s.triggerStore.ClaimDelivery(g.TriggerID, deliveryID, sessionID); err != nil {
+				return "", err
+			}
+			// Advance the occurrence while the durable claim is held, before any
+			// InputBox consumer can finish synchronously.
+			if _, err := s.triggerStore.MarkFired(g.TriggerID, run.StartedAt); err != nil {
+				return "", err
+			}
+			if err := triggerSubmitter.SubmitGoalTriggerMessage(sessionID, g.TriggerID, g.ID, run.ID, content, deliveryID); err != nil {
+				return "", err
+			}
+			return deliveryID, nil
+		}
+		if triggerSched != nil {
+			triggerSched.SetManagedFire(func(ctx context.Context, def triggers.Definition, now time.Time) triggers.FireRecord {
+				s.goalWakeMu.Lock()
+				defer s.goalWakeMu.Unlock()
+				g, ok := s.goalStore.Get(def.ManagedGoalID)
+				if !ok {
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusError, Reason: "schedule", Message: "goal not found"}
+				}
+				if !s.managedGoalAuto(ctx, g) {
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "agent is not auto"}
+				}
+				if g.NextWakeAt != nil && now.Before(*g.NextWakeAt) {
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "next wake not due"}
+				}
+				if s.goalAgentBusy(g) {
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "agent busy"}
+				}
+				if s.sessions != nil {
+					if pending, active, _, e := s.sessions.RuntimeInfo(g.SessionID); e == nil && (active || pending > 0) {
+						return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "goal session busy"}
+					}
+				}
+				run, err := s.goalStore.StartRun(g.ID, "schedule", now)
+				if err != nil {
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: err.Error()}
+				}
+				d, err := s.goalWake(ctx, g, run)
+				if err != nil {
+					run.Status = "failed"
+					run.Reason = err.Error()
+					_, _ = s.goalStore.FinishRun(g.ID, run, now)
+					_, _ = s.goalStore.SetStatus(g.ID, goals.StatusPaused, now)
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusError, Reason: "schedule", Message: err.Error()}
+				}
+				return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusQueued, Reason: "schedule", DeliveryID: d}
+			})
+		}
+	}
+	if triggerSubmitter != nil {
+		triggerSubmitter.EnsureAgentRuntime = func(agentID string) error {
+			return s.ensureAgentRuntime(context.Background(), agentID)
+		}
+	}
 	if client := wecom.NewClientFromConfig(cfg); client != nil {
 		logger.Info("wecom webhook tools enabled")
 	}
@@ -563,5 +681,39 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mgr.OnStreamEvent(ev)
 	})
 	s.registerRoutes()
+	if triggerSched != nil {
+		triggerSched.Start()
+	}
 	return s
+}
+
+func (s *Server) goalAgentBusy(g goals.Goal) bool {
+	if s.sessions == nil {
+		return false
+	}
+	// A just-started Goal may not have reached its session consumer yet. Use
+	// the durable Run record as part of the gate so two Goals cannot both pass
+	// the check-then-enqueue window merely because RuntimeInfo is still idle.
+	if s.goalStore != nil {
+		for _, other := range s.goalStore.List() {
+			if other.ID == g.ID || other.AgentID != g.AgentID {
+				continue
+			}
+			for _, run := range s.goalStore.Runs(other.ID) {
+				if run.FinishedAt == nil && (run.Status == "running" || run.Status == "waiting") {
+					return true
+				}
+			}
+		}
+	}
+	for _, sess := range s.sessions.ListActive() {
+		if sess == nil || sess.ID == g.SessionID || sess.AgentID != g.AgentID {
+			continue
+		}
+		q, a, _, err := s.sessions.RuntimeInfo(sess.ID)
+		if err == nil && (a || q > 0) {
+			return true
+		}
+	}
+	return false
 }

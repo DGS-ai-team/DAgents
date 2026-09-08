@@ -61,6 +61,9 @@ func TestInputBoxFIFOSequenceAndRestore(t *testing.T) {
 	if !ok || got.Seq != first || got.Kind != InputKindUser || got.Env.Content != "first" {
 		t.Fatalf("first restored input = %+v, ok=%v", got, ok)
 	}
+	if !restored.Ack(got.Seq) {
+		t.Fatal("ack first restored input")
+	}
 	got, ok = restored.Pop()
 	if !ok || got.Seq != second || got.Kind != InputKindTrigger || got.Env.Content != "second" {
 		t.Fatalf("second restored input = %+v, ok=%v", got, ok)

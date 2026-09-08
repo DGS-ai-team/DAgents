@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 
 _ROOT = Path(__file__).resolve().parents[1]
+_AUTH_PATCH = patch.dict("os.environ", {"MANAGE_SHARED_TOKEN": "test-admin-token"})
+def setUpModule(): _AUTH_PATCH.start()
+def tearDownModule(): _AUTH_PATCH.stop()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -36,7 +40,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             app = self._app(tmp)
             self._register(app, "agent-b", "node-b")
-            with TestClient(app) as client:
+            with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 headers = {"x-dagents-agent-id": "node-a"}
                 created = client.post(
                     "/v1/workgroups",
@@ -90,7 +94,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             app = self._app(tmp)
             self._register(app, "agent-a", "node-a")
-            with TestClient(app) as client:
+            with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 created = client.post(
                     "/v1/workgroups",
                     json={"display_name": "Archive API", "created_by_node_id": "node-a"},
@@ -116,7 +120,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(outbox[-1]["type"], "agent.session.close")
 
     def test_removed_member_catalog_and_spec_endpoints(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp, TestClient(self._app(tmp)) as client:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp, TestClient(self._app(tmp), headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             self.assertEqual(client.get("/v1/workgroups/meta/member-tools").status_code, 404)
             self.assertEqual(
                 client.get(

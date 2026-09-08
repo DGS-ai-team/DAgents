@@ -7,6 +7,7 @@ import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
 import LinuxAgentPanel from "../../components/LinuxAgentPanel.vue";
 import MemoryPanel from "../../components/MemoryPanel.vue";
+import AgentAutonomyPanel from "../../components/AgentAutonomyPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -36,6 +37,7 @@ const draft = reactive(emptyAgentDraft());
 const agentId = computed(() => String(route.params.agentId || "").trim());
 const detailSections = [
   { id: "behavior", label: "基本设置" },
+  { id: "autonomy", label: "自主任务" },
   { id: "memory", label: "记忆" },
   { id: "resources", label: "连接与资源" },
   { id: "policy", label: "工具审批" },
@@ -86,6 +88,7 @@ async function load() {
         llmProfiles.value.map((p) => p.id),
       ),
     );
+    draft.agentType = agent?.agent_type === "auto" ? "auto" : "normal";
     pruneDraftToolGroups(draft, availableToolGroups.value);
     if (promptCtx) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
@@ -201,22 +204,28 @@ onUnmounted(() => stopConfigurationEvents());
     <p v-if="loading" class="agent-detail__status">加载中…</p>
     <template v-else>
       <nav class="agent-detail__subnav" aria-label="智能体配置区段">
-        <button
-          v-for="item in detailSections"
-          :key="item.id"
-          type="button"
-          class="agent-detail__subnav-item"
-          :class="{ 'agent-detail__subnav-item--active': activeSection === item.id }"
-          :aria-current="activeSection === item.id ? 'page' : undefined"
-          @click="setActiveSection(item.id)"
-        >
-          {{ item.label }}
-        </button>
+        <template v-for="item in detailSections" :key="item.id">
+          <button
+            v-if="item.id !== 'autonomy' || agentMeta?.agent_type === 'auto'"
+            type="button"
+            class="agent-detail__subnav-item"
+            :class="{ 'agent-detail__subnav-item--active': activeSection === item.id }"
+            :aria-current="activeSection === item.id ? 'page' : undefined"
+            @click="setActiveSection(item.id)"
+          >
+            {{ item.label }}
+          </button>
+        </template>
       </nav>
 
       <p v-if="error && !agentMeta" class="agent-detail__error" role="alert">{{ error }}</p>
 
-      <section v-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
+      <section v-if="activeSection === 'autonomy' && agentMeta?.agent_type === 'auto'" class="agent-detail__section agent-detail__section--first">
+        <div class="agent-detail__section-heading"><div><span class="agent-detail__section-kicker">自主运行</span><h2>自主任务</h2></div><span>按计划推进目标并保留运行记录</span></div>
+        <AgentAutonomyPanel :agent-id="agentId" />
+      </section>
+
+      <section v-else-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
         <div class="agent-detail__section-heading">
           <div>
             <span class="agent-detail__section-kicker">核心配置</span>

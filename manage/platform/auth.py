@@ -103,8 +103,8 @@ def extract_agent_id(request: Request) -> str:
 
 
 def is_open_mode() -> bool:
-    """未配置 MANAGE_TOKENS / MANAGE_SHARED_TOKEN 时为开放模式（暂不做角色鉴权）。"""
-    return not _load_token_entries() and not _shared_token()
+    """保留兼容调用点；Manage 永远不以匿名身份运行。"""
+    return False
 
 
 def default_admin_username() -> str:
@@ -112,7 +112,7 @@ def default_admin_username() -> str:
 
 
 def default_admin_password() -> str:
-    return os.environ.get("MANAGE_ADMIN_PASSWORD", "admin").strip() or "admin"
+    return os.environ.get("MANAGE_ADMIN_PASSWORD", "").strip()
 
 
 def verify_admin_password(username: str, password: str) -> bool:
@@ -142,7 +142,7 @@ def auth_from_session(rec: SessionRecord) -> AuthContext:
             agent_id=None,
             session_kind="admin",
         )
-    groups = list(rec.discovery_groups) if rec.discovery_groups else ["*"]
+    groups = list(rec.discovery_groups)
     return AuthContext(
         token_id=f"session:node:{rec.subject}",
         role="member",
@@ -160,7 +160,7 @@ def authenticate(request: Request) -> AuthContext:
     entries = _load_token_entries()
     shared = _shared_token()
     if not entries and not shared:
-        return AuthContext(token_id="anonymous", role="admin", discovery_groups=["*"])
+        raise HTTPException(status_code=401, detail="Manage 未配置鉴权凭据，请设置 MANAGE_ADMIN_PASSWORD 或 MANAGE_TOKENS/MANAGE_SHARED_TOKEN")
 
     actual = extract_request_token(request)
     if not actual:
@@ -200,10 +200,26 @@ def ensure_node_identity(request: Request, agent_id: str, auth: AuthContext) -> 
         raise HTTPException(status_code=403, detail="x-dagents-agent-id 与 agent_id 不一致")
     if auth.is_admin:
         return
-    if auth.is_node and auth.agent_id and auth.agent_id != agent_id:
-        raise HTTPException(status_code=403, detail="node token 只能操作自身 agent_id")
-    if auth.session_kind == "node" and auth.agent_id and auth.agent_id != agent_id:
-        raise HTTPException(status_code=403, detail="node 会话只能操作自身 node_id")
+    if auth.is_node and auth.agent_id == agent_id:
+        return
+    if auth.session_kind == "node" and auth.agent_id == agent_id:
+        return
+    raise HTTPException(status_code=403, detail="凭据未绑定该 node_id")
+
+
+def verify_node_token(node_id: str, token: str) -> bool:
+    """Only a node token explicitly bound to this node may create a node session."""
+    want = (node_id or "").strip()
+    actual = (token or "").strip()
+    if not want or not actual:
+        return False
+    for entry in _load_token_entries():
+        role = str(entry.get("role") or "member").strip().lower()
+        bound = str(entry.get("agent_id") or "").strip()
+        value = str(entry.get("token") or entry.get("secret") or "").strip()
+        if role == "node" and bound == want and value and hmac.compare_digest(actual, value):
+            return True
+    return False
 
 
 def audit_actor(request: Request, auth: AuthContext, *, fallback_agent_id: str | None = None) -> str:
@@ -227,7 +243,7 @@ def lookup_node_token(node_id: str) -> str:
 
     - MANAGE_TOKENS 中 role=node 且 agent_id 匹配 → 用该 token
     - 否则若配置了 MANAGE_SHARED_TOKEN → 用共享 token
-    - 开放模式 → 空字符串（home Node 侧 NodeToken 为空时放行）
+    - 未配置匹配凭据 → 空字符串（调用方应拒绝未认证连接）
     """
     want = (node_id or "").strip()
     for entry in _load_token_entries():

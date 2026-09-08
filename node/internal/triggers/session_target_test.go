@@ -12,6 +12,19 @@ type seqSubmitter struct {
 	lastEnv  capturedSubmit
 }
 
+type routedSubmitter struct {
+	seqSubmitter
+	routed bool
+}
+
+func (s *routedSubmitter) EnsureSessionForAgent(target, requested string) (string, error) {
+	s.routed = true
+	if requested == "" {
+		requested = target
+	}
+	return s.EnsureSession(requested)
+}
+
 type capturedSubmit struct {
 	RequestType string
 	Content     string
@@ -127,5 +140,27 @@ func TestLatestActiveFireUsesResolver(t *testing.T) {
 	}
 	if sub.lastEnv.RequestType != "message" {
 		t.Fatalf("request_type = %q", sub.lastEnv.RequestType)
+	}
+}
+
+func TestRoutedAdapterRejectsUnsupportedNonFixedMode(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "t.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := NewDefinitionFromCreate(CreateInput{Name: "job", TaskTemplate: "run", TargetAgentID: "agent-b", Condition: map[string]any{"interval_seconds": 60}, SessionTargetMode: SessionTargetNewSession}, "agent-a", time.Unix(200, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	sub := &routedSubmitter{}
+	record, err := NewScheduler(store, sub, 5).FireTrigger(def.TriggerID, "manual", nil, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != FireStatusError || sub.routed {
+		t.Fatalf("record=%+v routed=%v", record, sub.routed)
 	}
 }

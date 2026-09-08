@@ -1368,6 +1368,11 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		decision.Reason = "max_output_tokens"
 		return decision
 	}
+	if c.turn.Budget.MaxTotalTokens > 0 && c.turn.Usage.TotalTokens >= c.turn.Budget.MaxTotalTokens {
+		decision.Allowed = false
+		decision.Reason = "max_total_tokens"
+		return decision
+	}
 	if c.turn.Budget.MaxCost > 0 && c.turn.Usage.Cost >= c.turn.Budget.MaxCost {
 		decision.Allowed = false
 		decision.Reason = "max_cost"

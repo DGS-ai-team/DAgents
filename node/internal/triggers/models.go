@@ -52,6 +52,11 @@ type Definition struct {
 	NextFireAt        *float64          `json:"next_fire_at"`
 	CreatedAt         float64           `json:"created_at"`
 	UpdatedAt         float64           `json:"updated_at"`
+	PendingDeliveryID *string           `json:"pending_delivery_id,omitempty"`
+	PendingSessionID  *string           `json:"pending_session_id,omitempty"`
+	RecoveryRequired  bool              `json:"recovery_required,omitempty"`
+	RecoveryReason    string            `json:"recovery_reason,omitempty"`
+	ManagedGoalID     string            `json:"managed_goal_id,omitempty"`
 }
 
 // CreateInput 创建触发器入参（工具 / HTTP）。
@@ -63,31 +68,42 @@ type CreateInput struct {
 	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"`
 	ClientID          *string           `json:"client_id"`
 	TaskTemplate      string            `json:"task_template"`
+	Enabled           *bool             `json:"enabled,omitempty"`
 }
 
 // UpdatePatch 部分更新；nil 字段表示不修改。
 type UpdatePatch struct {
-	Name            *string        `json:"name,omitempty"`
-	Condition       map[string]any `json:"condition,omitempty"`
-	TargetAgentID   *string        `json:"target_agent_id,omitempty"`
-	TargetSessionID *string        `json:"target_session_id,omitempty"`
-	ClientID        *string        `json:"client_id,omitempty"`
-	TaskTemplate    *string        `json:"task_template,omitempty"`
-	Enabled         *bool          `json:"enabled,omitempty"`
+	Name              *string            `json:"name,omitempty"`
+	Condition         map[string]any     `json:"condition,omitempty"`
+	TargetAgentID     *string            `json:"target_agent_id,omitempty"`
+	TargetSessionID   *string            `json:"target_session_id,omitempty"`
+	ClientID          *string            `json:"client_id,omitempty"`
+	TaskTemplate      *string            `json:"task_template,omitempty"`
+	Enabled           *bool              `json:"enabled,omitempty"`
+	SessionTargetMode *SessionTargetMode `json:"session_target_mode,omitempty"`
+}
+
+func ValidSessionTargetMode(mode SessionTargetMode) bool {
+	switch mode {
+	case "", SessionTargetFixed, SessionTargetNewSession, SessionTargetLatestActive:
+		return true
+	}
+	return false
 }
 
 // FireRecord 单次触发历史。
 type FireRecord struct {
-	FireID    string         `json:"fire_id"`
-	TriggerID string         `json:"trigger_id"`
-	Status    FireStatus     `json:"status"`
-	Reason    string         `json:"reason"`
-	SessionID *string        `json:"session_id"`
-	ClientID  *string        `json:"client_id"`
-	Content   string         `json:"content"`
-	Message   string         `json:"message"`
-	Payload   map[string]any `json:"payload"`
-	FiredAt   float64        `json:"fired_at"`
+	FireID     string         `json:"fire_id"`
+	TriggerID  string         `json:"trigger_id"`
+	DeliveryID string         `json:"delivery_id,omitempty"`
+	Status     FireStatus     `json:"status"`
+	Reason     string         `json:"reason"`
+	SessionID  *string        `json:"session_id"`
+	ClientID   *string        `json:"client_id"`
+	Content    string         `json:"content"`
+	Message    string         `json:"message"`
+	Payload    map[string]any `json:"payload"`
+	FiredAt    float64        `json:"fired_at"`
 }
 
 // InferScheduleKind 根据 condition 推断调度类型。
@@ -168,6 +184,13 @@ func NewDefinitionFromCreate(in CreateInput, agentID string, now time.Time) (Def
 	if mode == "" {
 		mode = SessionTargetFixed
 	}
+	if !ValidSessionTargetMode(mode) {
+		return Definition{}, fmt.Errorf("invalid session_target_mode: %s", mode)
+	}
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
 	def := Definition{
 		TriggerID:         uuid.NewString(),
 		Name:              in.Name,
@@ -177,7 +200,7 @@ func NewDefinitionFromCreate(in CreateInput, agentID string, now time.Time) (Def
 		SessionTargetMode: mode,
 		ClientID:          copyStringPtr(in.ClientID),
 		TaskTemplate:      in.TaskTemplate,
-		Enabled:           true,
+		Enabled:           enabled,
 		CreatedAt:         current,
 		UpdatedAt:         current,
 	}

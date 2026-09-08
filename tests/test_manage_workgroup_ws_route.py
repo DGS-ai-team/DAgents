@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,7 @@ from manage.workgroup.models import WorkGroupCreateRequest  # noqa: E402
 
 
 class WorkgroupWSRouteTests(unittest.TestCase):
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_a","token":"secret-a"}]'})
     def test_hello_rejects_node_id_mismatch(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
@@ -28,7 +30,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
             with TestClient(app) as client:
                 with client.websocket_connect(
                     "/v1/workgroups/ws",
-                    headers={"x-dagents-agent-id": "node_a"},
+                    headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "secret-a"},
                 ) as ws:
                     ws.send_json(
                         {
@@ -44,6 +46,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                     self.assertEqual(error["type"], "session.error")
                     self.assertEqual(error["payload"]["code"], "not_authorized")
 
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_b","token":"secret-b"}]'})
     def test_hello_resume_and_live_push(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
@@ -67,7 +70,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
             with TestClient(app) as client:
                 with client.websocket_connect(
                     "/v1/workgroups/ws",
-                    headers={"x-dagents-agent-id": "node_b"},
+                    headers={"x-dagents-agent-id": "node_b", "x-dagents-a2a-token": "secret-b"},
                 ) as ws:
                     ws.send_json(
                         {
@@ -122,11 +125,12 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                     acked = ws.receive_json()
                     self.assertEqual(acked["type"], "delivery.acked")
 
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_a","token":"secret-a"}]'})
     def test_hello_exposes_protocol_contract_and_rejects_unknown_version(self) -> None:
         app = create_app()
         with TestClient(app) as client:
             with client.websocket_connect(
-                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "secret-a"}
             ) as ws:
                 ws.send_json(
                     {
@@ -149,7 +153,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
 
         with TestClient(app) as client:
             with client.websocket_connect(
-                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "secret-a"}
             ) as ws:
                 ws.send_json(
                     {

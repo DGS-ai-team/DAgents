@@ -95,6 +95,9 @@ type runtime struct {
 	// turnFenceActive distinguishes production model steps from direct lifecycle
 	// transitions that intentionally do not install a provider fence.
 	turnFenceActive bool
+	goalID          string
+	runID           string
+	onLifecycle     func(string, turn.CoordinatorSnapshot) error
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
 	// second lifecycle projection.
@@ -129,6 +132,7 @@ type runtime struct {
 	// even when the persisted Agent revision did not change.
 	runtimeMultimodalEnabled bool
 	turnBudget               turn.TurnBudget
+	budgetResolver           func() (turn.TurnBudget, error)
 }
 
 // newRuntime 创建新的 session runtime
@@ -244,6 +248,8 @@ func newRuntimeWithPublisher(
 		llmProfileDigest:         strings.TrimSpace(turnOpts.LLMProfileDigest),
 		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
 		turnBudget:               turnOpts.Budget,
+		budgetResolver:           turnOpts.BudgetResolver,
+		onLifecycle:              turnOpts.OnLifecycle,
 		memoryService:            turnOpts.MemoryService,
 	}
 	if candidatePipeline != nil {
@@ -571,16 +577,34 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 			// process stops during a tool call, startup can recover this input
 			// alongside the lifecycle projection instead of replaying it after
 			// the recovered continuation.
-			r.persist(context.Background())
+			if err := r.persist(context.Background()); err != nil {
+				// Ownership must be durable before any trigger side effect starts.
+				// Put the record back and fail closed; retrying in a hot loop can
+				// spin forever while the persistence backend is unavailable.
+				r.inputBox.RequeueInFlight()
+				return
+			}
 			consumed := true
 			if r.acceptEnvelope(record.Env) {
 				consumed = r.dispatchInput(ctx, record)
 			}
 			if consumed && r.inputBox != nil {
 				r.inputBox.MarkCompleted(record.Seq)
-				r.persist(context.Background())
-				r.inputBox.Ack(record.Seq)
-				r.persist(context.Background())
+				if err := r.persist(context.Background()); err == nil {
+					r.inputBox.Ack(record.Seq)
+					if err := r.persist(context.Background()); err == nil {
+						r.clearTriggerDelivery(record.Env)
+					} else {
+						// The durable snapshot still contains the completed in-flight
+						// record. Stop before consuming another input; otherwise a
+						// later turn could overwrite that recovery boundary.
+						r.inputBox.RestoreCompletedInFlight(record)
+						return
+					}
+				} else {
+					// Keep the completed in-flight guard and fail closed.
+					return
+				}
 			}
 			r.signalInputBox()
 			continue
@@ -622,6 +646,21 @@ func (r *runtime) popInputIfIdle() (InputRecord, bool) {
 
 func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	env := record.Env
+	if record.Kind == InputKindTrigger && record.RecoveredLegacy {
+		// Legacy restored trigger envelopes have no durable delivery identity;
+		// fail closed rather than replaying an unknown side effect.
+		return true
+	}
+	if blocked, ok := r.triggerDelivery.(triggers.RecoveryDeliveryTracker); ok && record.Kind == InputKindTrigger && blocked.IsRecoveryRequired(strings.TrimSpace(env.TriggerID)) {
+		// Discard the recovered mailbox item without executing it or clearing the
+		// durable recovery fence. An explicit recovery action must clear that fence.
+		return true
+	}
+	if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && record.Kind == InputKindTrigger && strings.TrimSpace(env.DeliveryID) != "" && !identity.IsPendingDelivery(strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)) {
+		// The delivery was explicitly recovered (or superseded); consume the
+		// mailbox record without replaying its task.
+		return true
+	}
 	// InputBox records are data-plane inputs. They all enter the normal human
 	// turn path; the UserName/source fields preserve whether the producer was
 	// an actual user or a trigger.
@@ -634,10 +673,21 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 		source = turn.TurnSourceChildAgent
 	}
 	consumed := r.handleInputMessage(ctx, env, source)
-	if consumed && record.Kind == InputKindTrigger && strings.TrimSpace(env.TriggerID) != "" && r.triggerDelivery != nil {
+	return consumed
+}
+
+func (r *runtime) clearTriggerDelivery(env queue.Envelope) {
+	if r == nil || r.triggerDelivery == nil || strings.TrimSpace(env.TriggerID) == "" {
+		return
+	}
+	if blocked, ok := r.triggerDelivery.(triggers.RecoveryDeliveryTracker); ok && blocked.IsRecoveryRequired(strings.TrimSpace(env.TriggerID)) {
+		return
+	}
+	if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && strings.TrimSpace(env.DeliveryID) != "" {
+		identity.ClearPendingDeliveryIfMatch(strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID))
+	} else {
 		r.triggerDelivery.ClearPendingDelivery(strings.TrimSpace(env.TriggerID))
 	}
-	return consumed
 }
 
 // dispatchTurnRequest is the single runtime entry point for control and
@@ -724,13 +774,17 @@ func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 		}
 	}
 	if !validEpoch {
-		r.logger.Info("stale session event dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_epoch", env.SessionEpoch, "session_epoch", epoch)
+		if r.logger != nil {
+			r.logger.Info("stale session event dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_epoch", env.SessionEpoch, "session_epoch", epoch)
+		}
 		return false
 	}
 	switch env.RequestType {
 	case queue.RequestTypeTurnContinuation, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
 		if !validTurn {
-			r.logger.Info("stale turn continuation dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_turn_id", env.TurnID, "turn_id", turnID, "event_generation", env.Generation, "generation", generation)
+			if r.logger != nil {
+				r.logger.Info("stale turn continuation dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_turn_id", env.TurnID, "turn_id", turnID, "event_generation", env.Generation, "generation", generation)
+			}
 			return false
 		}
 	}
@@ -738,6 +792,18 @@ func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 }
 
 func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope, source turn.TurnSource) bool {
+	if env.GoalID != "" && env.RunID != "" {
+		r.mu.Lock()
+		r.goalID, r.runID = env.GoalID, env.RunID
+		r.mu.Unlock()
+	} else if source == turn.TurnSourceHuman {
+		r.mu.Lock()
+		r.goalID, r.runID = "", ""
+		r.mu.Unlock()
+	}
+	if env.GoalID != "" && env.RunID != "" {
+		parent = tools.WithGoalRun(parent, env.GoalID, env.RunID)
+	}
 	if !r.sessionEpochCurrent(env.SessionEpoch) {
 		r.logger.Info("stale human message dropped after session clear", "session_id", r.session.ID)
 		return true

@@ -981,6 +981,9 @@ defineExpose({
         <span class="nav-rail__dot" :class="statusClass" :aria-label="`实时事件：${statusLabel}`" />
       </div>
       <div class="nav-rail__footer-actions">
+        <router-link :to="{ name: 'settings-agents' }" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="自主任务设置" aria-label="自主任务设置">
+          <span aria-hidden="true">◷</span>
+        </router-link>
         <button
           type="button"
           class="nav-rail__icon-btn nav-rail__icon-btn--sm"

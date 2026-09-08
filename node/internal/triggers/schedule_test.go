@@ -126,20 +126,6 @@ func TestNewDefinitionFromCreateCalendar(t *testing.T) {
 	}
 }
 
-type stubCmdGate struct {
-	ok     bool
-	detail string
-	err    error
-	called int
-	last   string
-}
-
-func (s *stubCmdGate) Run(cmd string) (bool, string, error) {
-	s.called++
-	s.last = cmd
-	return s.ok, s.detail, s.err
-}
-
 func TestSchedulerCmdGateBlocksFire(t *testing.T) {
 	dir := t.TempDir()
 	store, err := OpenStore(filepath.Join(dir, "t.json"), 20)
@@ -166,18 +152,13 @@ func TestSchedulerCmdGateBlocksFire(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	gate := &stubCmdGate{ok: false, detail: "exit_code=1"}
-	sched.SetCmdGate(gate)
 	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
-	if gate.called != 1 || gate.last != "false" {
-		t.Fatalf("gate called=%d last=%q", gate.called, gate.last)
-	}
 	if len(sub.messages) != 0 {
 		t.Fatalf("expected no message, got %v", sub.messages)
 	}
 	got, _ := store.GetTrigger(def.TriggerID)
-	if got.NextFireAt == nil || *got.NextFireAt <= v {
-		t.Fatalf("next_fire_at should advance: %v", got.NextFireAt)
+	if got.NextFireAt == nil || *got.NextFireAt != v {
+		t.Fatalf("legacy cmd task must not advance: %v", got.NextFireAt)
 	}
 }
 
@@ -207,11 +188,9 @@ func TestSchedulerCmdGateAllowsFire(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	gate := &stubCmdGate{ok: true, detail: "exit 0"}
-	sched.SetCmdGate(gate)
 	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
-	if len(sub.messages) != 1 {
-		t.Fatalf("messages = %v", sub.messages)
+	if len(sub.messages) != 0 {
+		t.Fatalf("legacy cmd task must not dispatch: %v", sub.messages)
 	}
 }
 
@@ -238,17 +217,15 @@ func TestManualFireSkipsCmdGate(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	gate := &stubCmdGate{ok: false}
-	sched.SetCmdGate(gate)
 	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Status != FireStatusQueued {
+	if record.Status != FireStatusSkipped {
 		t.Fatalf("status = %s", record.Status)
 	}
-	if gate.called != 0 {
-		t.Fatalf("manual fire should skip cmd gate, called=%d", gate.called)
+	if len(sub.messages) != 0 {
+		t.Fatalf("manual fire with legacy cmd must not execute or dispatch, messages=%v", sub.messages)
 	}
 }
 

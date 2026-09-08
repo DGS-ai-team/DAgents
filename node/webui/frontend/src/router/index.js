@@ -5,11 +5,13 @@ import * as api from "../api/node.js";
 
 const SettingsLayout = () => import("../layouts/SettingsLayout.vue");
 const WorkgroupView = () => import("../views/WorkgroupView.vue");
+const GoalsView = () => import("../views/GoalsView.vue");
 const GeneralSettings = () => import("../views/settings/GeneralSettings.vue");
 const SkillsSettings = () => import("../views/settings/SkillsSettings.vue");
 const TriggersSettings = () => import("../views/settings/TriggersSettings.vue");
 const SecuritySettings = () => import("../views/settings/SecuritySettings.vue");
 const AboutSettings = () => import("../views/settings/AboutSettings.vue");
+const FeedbackSettings = () => import("../views/settings/FeedbackSettings.vue");
 const ContextSettings = () => import("../views/settings/ContextSettings.vue");
 const ConnectionSettings = () => import("../views/settings/ConnectionSettings.vue");
 const McpSettings = () => import("../views/settings/McpSettings.vue");
@@ -49,6 +51,7 @@ const router = createRouter({
       beforeEnter: requireWorkgroupEnabled,
       children: [{ path: "", name: "workgroups", component: WorkgroupView }],
     },
+    { path: "/goals", component: ChatLayout, children: [{ path: "", name: "goals", component: GoalsView }] },
     {
       path: "/settings",
       component: SettingsLayout,
@@ -67,6 +70,7 @@ const router = createRouter({
         { path: "security", name: "settings-security", component: SecuritySettings },
         { path: "help", redirect: "/settings/about" },
         { path: "about", name: "settings-about", component: AboutSettings },
+        { path: "feedback", name: "settings-feedback", component: FeedbackSettings },
       ],
     },
   ],

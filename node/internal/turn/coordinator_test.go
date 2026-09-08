@@ -746,6 +746,28 @@ func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorRejectsThirdRequestAndToolAfterTotalBudget(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-total", "agent-1")
+	budget := TurnBudget{MaxTotalTokens: 10, MaxSteps: 3, MaxToolCalls: 3}
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-total", TurnID: "turn-total", Generation: 1, Source: TurnSourceHuman, Budget: budget, At: now},
+		{Type: CommandStartStep, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, Usage: StepUsage{TotalTokens: 10}, At: now},
+	} {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := c.BudgetDecisionFor(CommandModelRequestStarted); d.Allowed || d.Reason != "max_total_tokens" {
+		t.Fatalf("third request decision=%+v", d)
+	}
+	if d := c.BudgetDecisionFor(CommandToolCallRecorded); d.Allowed || d.Reason != "max_total_tokens" {
+		t.Fatalf("tool decision=%+v", d)
+	}
+}
+
 func TestTurnCoordinatorDurableDispatchRollsBackWhenPersistenceFails(t *testing.T) {
 	c := NewTurnCoordinator("session-1", "agent-1")
 	_, err := c.DispatchDurable(TurnCommand{

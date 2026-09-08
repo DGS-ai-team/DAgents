@@ -1,6 +1,8 @@
 """Tests for Platform Blob API (Task 4) and Skills Store (Task 5)."""
 
 import hashlib
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,13 +13,16 @@ from fastapi.testclient import TestClient
 from manage.platform.blob import BlobStore, BlobStoreConfig
 from manage.platform.blob_routes import build_blob_router
 
+TEST_ADMIN_TOKEN = "test-manage-admin-token"
+os.environ.setdefault("MANAGE_TOKENS", json.dumps([{"id": "test-admin", "token": TEST_ADMIN_TOKEN, "role": "admin"}]))
+
 
 def _blob_client():
     d = tempfile.mkdtemp()
     blob = BlobStore(BlobStoreConfig(root=Path(d), max_bytes=None))
     app = FastAPI()
     app.include_router(build_blob_router(blob))
-    return TestClient(app)
+    return TestClient(app, headers={"x-dagents-a2a-token": TEST_ADMIN_TOKEN})
 
 
 class BlobTest(unittest.TestCase):
@@ -63,7 +68,7 @@ class BlobTest(unittest.TestCase):
         blob = BlobStore(BlobStoreConfig(root=Path(d), max_bytes=10))
         app = FastAPI()
         app.include_router(build_blob_router(blob))
-        c = TestClient(app)
+        c = TestClient(app, headers={"x-dagents-a2a-token": TEST_ADMIN_TOKEN})
         data = b"x" * 11
         r = c.post("/v1/blobs", files={"file": ("big.zip", data, "application/zip")})
         self.assertEqual(r.status_code, 413)
@@ -143,7 +148,7 @@ def _skills_client():
     blob = BlobStore(BlobStoreConfig(root=Path(d) / "blobs", max_bytes=None))
     app = FastAPI()
     app.include_router(build_skills_router(SkillPackageStore(db), blob, AuditLog(max_entries=50)))
-    return TestClient(app)
+    return TestClient(app, headers={"x-dagents-a2a-token": TEST_ADMIN_TOKEN})
 
 
 class SkillRouterTest(unittest.TestCase):

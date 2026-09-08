@@ -56,6 +56,17 @@ func (r *runtime) lifecycleDispatchLockedErr(command turn.TurnCommand) (turn.Coo
 		}
 		return snapshot, err
 	}
+	if r.onLifecycle != nil {
+		if err := r.onLifecycle(r.session.ID, snapshot); err != nil {
+			if r.logger != nil {
+				r.logger.Warn("turn lifecycle observer failed", "session_id", r.session.ID, "turn_id", snapshot.TurnID, "error", err)
+			}
+			// The observer is the Goal runtime's durable Run binding and
+			// settlement boundary. Continuing execution after it fails can
+			// spend model/tool budget without a persisted Run projection.
+			return snapshot, fmt.Errorf("turn lifecycle observer failed: %w", err)
+		}
+	}
 	if command.Type == turn.CommandAssistantReceived && command.HasTools && snapshot.ToolBatchID != "" {
 		// AssistantReceived creates the batch atomically in the projection;
 		// persist the explicit batch fact as a separate replay/audit marker.
@@ -610,6 +621,13 @@ func (r *runtime) lifecycleBeginInputTurnLocked(source turn.TurnSource) error {
 	}
 
 	turnID := newContinuationID()
+	if r.budgetResolver != nil {
+		budget, err := r.budgetResolver()
+		if err != nil {
+			return fmt.Errorf("refresh turn budget: %w", err)
+		}
+		r.turnBudget = budget
+	}
 
 	now := time.Now().UTC()
 	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
@@ -661,6 +679,13 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 			return false, fmt.Errorf("cannot continue without an active turn")
 		}
 		identity, generation = r.lifecycleEnsureIdentity()
+		if r.budgetResolver != nil {
+			budget, err := r.budgetResolver()
+			if err != nil {
+				return false, fmt.Errorf("refresh turn budget: %w", err)
+			}
+			r.turnBudget = budget
+		}
 		now := time.Now().UTC()
 		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
 			Type:       turn.CommandStartTurn,

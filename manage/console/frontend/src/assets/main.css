@@ -240,6 +240,7 @@ code {
   flex: 1;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .topnav-admin {
@@ -3006,6 +3007,17 @@ code {
   gap: 8px;
 }
 
+@media (max-width: 720px) {
+  .wg-detail-header__row {
+    flex-direction: column;
+  }
+
+  .wg-detail-header__actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
 .wg-detail-header__hint {
   margin: 0;
   font-size: 0.875rem;
@@ -4053,6 +4065,38 @@ code {
   color: var(--primary, #0078d4);
 }
 
+/* Keep RunHistory usable on phones: the stream gets a full-width row and
+   the inspector moves below it instead of forcing a 240px side column. */
+@media (max-width: 720px) {
+  .wg-chat-shell,
+  .wg-chat-shell > .wg-chat-page {
+    min-width: 0;
+  }
+
+  .wg-chat-body--debug {
+    flex-direction: column;
+  }
+
+  .wg-chat-body--debug .chat__stream {
+    flex: 1 1 auto;
+    min-height: 220px;
+  }
+
+  .wg-chat-body--debug .wg-debug {
+    flex: 0 1 38vh;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    min-height: 150px;
+    border-left: 0;
+    border-top: 1px solid var(--border, #e5e7eb);
+  }
+
+  .wg-chat-body--debug .wg-debug__runs {
+    max-height: 34%;
+  }
+}
+
 .wg-composer-field {
   flex-direction: row !important;
   align-items: center;
@@ -5013,6 +5057,12 @@ code {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-direction: row;
+}
+
+.field-checkbox input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
 }
 
 .subsection {
@@ -5126,8 +5176,8 @@ code {
 
 .home-modules {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
 }
 
 .home-module-card {
@@ -5137,8 +5187,9 @@ code {
   align-items: flex-start;
   gap: 14px;
   min-height: 320px;
-  aspect-ratio: 3 / 4;
-  max-height: 420px;
+  width: 100%;
+  aspect-ratio: auto;
+  max-height: none;
   padding: 28px 24px 24px;
   margin: 0;
   border: 1px solid var(--border-subtle);

@@ -40,6 +40,8 @@ from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.vertical import VerticalLoop
 from manage.workgroup.ws_hub import WorkgroupWSHub
 from manage.workgroup.ws_routes import build_workgroup_ws_router
+from manage.feedback.routes import build_feedback_router
+from manage.feedback.store import FeedbackStore
 
 _CONSOLE_DIR = Path(__file__).resolve().parent / "console" / "static"
 
@@ -53,6 +55,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
     releases_store = ReleasePackageStore(db=db if db.enabled else None)
     session_store = SessionStore()
+    feedback_store = FeedbackStore(db=db if db.enabled else None)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -98,6 +101,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     workgroup_loop = VerticalLoop(workgroup_store, hub=workgroup_ws_hub)
 
     app.include_router(build_auth_router(session_store, store))
+    app.include_router(build_feedback_router(feedback_store))
     app.include_router(build_registry_router(store, audit))
     app.include_router(
         build_workgroup_router(
@@ -159,6 +163,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.workgroup_store = workgroup_store
     app.state.workgroup_ws_hub = workgroup_ws_hub
     app.state.workgroup_loop = workgroup_loop
+    app.state.feedback_store = feedback_store
     return app
 
 

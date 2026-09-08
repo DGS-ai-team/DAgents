@@ -59,6 +59,9 @@ type InputRecord struct {
 	Kind      InputKind      `json:"kind"`
 	Env       queue.Envelope `json:"env"`
 	Completed bool           `json:"completed,omitempty"`
+	// RecoveredLegacy fences pre-delivery-identity trigger records restored
+	// after restart. It is process-local and deliberately never persisted.
+	RecoveredLegacy bool `json:"-"`
 }
 
 type inputBoxState struct {
@@ -142,7 +145,7 @@ func (b *InputBox) Pop() (InputRecord, bool) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.items) == 0 {
+	if len(b.items) == 0 || b.inFlight != nil {
 		return InputRecord{}, false
 	}
 	record := b.items[0]
@@ -194,6 +197,23 @@ func (b *InputBox) Ack(seq uint64) bool {
 		return false
 	}
 	b.inFlight = nil
+	return true
+}
+
+// RestoreCompletedInFlight reinstates the ownership guard when the
+// post-ack snapshot cannot be persisted. The consumer must stop so a later
+// input cannot overwrite this unresolved recovery boundary.
+func (b *InputBox) RestoreCompletedInFlight(record InputRecord) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inFlight != nil {
+		return false
+	}
+	record.Completed = true
+	b.inFlight = &record
 	return true
 }
 
@@ -265,6 +285,14 @@ func (b *InputBox) Restore(raw []byte) error {
 	var state inputBoxState
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return fmt.Errorf("decode input box state: %w", err)
+	}
+	for i := range state.Items {
+		if state.Items[i].Kind == InputKindTrigger && state.Items[i].Env.DeliveryID == "" {
+			state.Items[i].RecoveredLegacy = true
+		}
+	}
+	if state.InFlight != nil && state.InFlight.Kind == InputKindTrigger && state.InFlight.Env.DeliveryID == "" {
+		state.InFlight.RecoveredLegacy = true
 	}
 	if len(state.Items) > InputBoxMaxItems {
 		return fmt.Errorf("input box state exceeds %d items", InputBoxMaxItems)

@@ -1,6 +1,8 @@
 """Tests for Manage Release Hub."""
 
 import hashlib
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +16,9 @@ from manage.releases.seed import seed_bundled_releases
 from manage.releases.semver import compare_versions, upgrade_available
 from manage.releases.store import ReleasePackageStore
 from manage.storage.sqlite import SQLiteDatabase
+
+TEST_ADMIN_TOKEN = "test-manage-admin-token"
+os.environ.setdefault("MANAGE_TOKENS", json.dumps([{"id": "test-admin", "token": TEST_ADMIN_TOKEN, "role": "admin"}]))
 
 
 def _release_client(tmp: Path | None = None):
@@ -31,7 +36,7 @@ def _release_client(tmp: Path | None = None):
             release_max_bytes=1024 * 1024,
         )
     )
-    return TestClient(app), store, releases_dir
+    return TestClient(app, headers={"x-dagents-a2a-token": TEST_ADMIN_TOKEN}), store, releases_dir
 
 
 class SemverTest(unittest.TestCase):

@@ -118,6 +118,7 @@ onMounted(load);
               <span class="agents-settings__name">{{ a.display_name || a.agent_id }}</span>
               <span class="agents-settings__meta">
                 {{ hostLabel(a) }}
+                · {{ a.agent_type === "auto" ? "Auto · 自主任务" : "普通 Agent" }}
                 <template v-if="a.template_id"> · 模板 {{ a.template_id }}</template>
               </span>
             </div>

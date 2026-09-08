@@ -49,6 +49,12 @@ func (o *Orchestrator) processToolCalls(
 		o.recordToolCall(sessionID, tc.Function.Name)
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
+			if tools.GoalIDFromContext(ctx) != "" {
+				msg := "rejected: child agents are unavailable during a managed goal run"
+				o.publishToolResult(sessionID, tc, msg, true, nil)
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+				continue
+			}
 			if o.isChildSession {
 				msg := "rejected: child_forbidden"
 				o.publishToolResult(sessionID, tc, msg, true, nil)

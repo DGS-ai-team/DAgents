@@ -23,7 +23,10 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
   const data = await readJSON(resp);
   if (!resp.ok) {
     const msg = data?.error?.message || data?.message || `HTTP ${resp.status}`;
-    throw new Error(msg);
+    const error = new Error(msg);
+    error.status = resp.status;
+    error.response = { status: resp.status };
+    throw error;
   }
   return data;
 }
@@ -35,6 +38,36 @@ export function getHealth() {
 export function getAgentInfo() {
   return apiFetch("/v1/agent/info");
 }
+
+// 用户反馈由 Node 权威保存并负责向当前 Manage 投递；浏览器只保存未提交草稿。
+export function listFeedback(params = {}) {
+  return apiFetch("/v1/feedback", { params });
+}
+
+export function getFeedbackTarget() {
+  return apiFetch("/v1/feedback/target");
+}
+
+export function getFeedback(feedbackId) {
+  return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}`);
+}
+
+export function createFeedback(payload = {}) {
+  return apiFetch("/v1/feedback", { method: "POST", body: payload });
+}
+
+export function syncFeedback(feedbackId) {
+  return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}/sync`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function listGoals() { return apiFetch("/v1/goals"); }
+export function createGoal(payload) { return apiFetch("/v1/goals", { method: "POST", body: payload }); }
+export function getGoal(goalId) { return apiFetch(`/v1/goals/${encodeURIComponent(goalId)}`); }
+export function getGoalRuns(goalId) { return apiFetch(`/v1/goals/${encodeURIComponent(goalId)}/runs`); }
+export function goalAction(goalId, action) { return apiFetch(`/v1/goals/${encodeURIComponent(goalId)}/${action}`, { method: "POST", body: {} }); }
 
 /** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
 export function getUIBootstrap() {
@@ -118,6 +151,7 @@ export function createAgent(payload = {}) {
   }
   if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
   if (payload.workspace && typeof payload.workspace === "object") body.workspace = payload.workspace;
+  if (payload.agent_type === "auto" || payload.agent_type === "normal") body.agent_type = payload.agent_type;
   return apiFetch("/v1/agents", { method: "POST", body });
 }
 
@@ -129,12 +163,21 @@ export function getAgent(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
+export function getAgentAutonomy(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`);
+}
+
+export function putAgentAutonomy(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`, { method: "PUT", body: payload });
+}
+
 export function patchAgent(agentId, patch = {}) {
   const body = {};
   if (patch.display_name != null || patch.displayName != null) {
     body.display_name = patch.display_name ?? patch.displayName;
   }
   if (patch.defaults && typeof patch.defaults === "object") body.defaults = patch.defaults;
+  if (patch.agent_type === "auto" || patch.agent_type === "normal") body.agent_type = patch.agent_type;
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body });
 }
 
@@ -429,6 +472,18 @@ export function updateTrigger(triggerId, patch) {
 
 export function deleteTrigger(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
+}
+
+export function fireTrigger(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/fire`, { method: "POST", body: {} });
+}
+
+export function getTriggerHistory(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/history`);
+}
+
+export function recoverTrigger(triggerId, deliveryId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/recover`, { method: "POST", body: { delivery_id: deliveryId } });
 }
 
 export function uploadSkillToManage({ path, skillId, version, name, publish = false }) {

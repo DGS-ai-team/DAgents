@@ -36,6 +36,9 @@ type Envelope struct {
 	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
 	ResumeValue              map[string]any
 	TriggerID                string // 非空表示 trigger fire 投递；输入被消费后清除 pending 标记
+	DeliveryID               string // 稳定的 trigger delivery identity
+	GoalID                   string // 非空表示长期目标运行归属
+	RunID                    string // Goal 单次运行身份
 	AsyncToolResult          *AsyncToolResultPayload
 	SideEffectContinueSource string // side_effect_continue 来源（task_complete_produce / cancel_recovery 等）
 }

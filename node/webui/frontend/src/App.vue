@@ -11,6 +11,9 @@ defineOptions({ name: "AppRoot" });
 const bootReady = ref(false);
 const needProfile = ref(false);
 const bootError = ref("");
+const bootRetrying = ref(false);
+const bootDetailsOpen = ref(false);
+const bootCopyStatus = ref("");
 let refreshSeq = 0;
 let mountedAt = 0;
 
@@ -29,14 +32,13 @@ async function refreshOnboarding({ soft = false } = {}) {
     if (soft) {
       if (incomplete) {
         needProfile.value = true;
-      } else if (needProfile.value) {
-        // 已在首配页时允许退出（例如在其它窗口/标签页完成首配）。
-        needProfile.value = false;
       }
     } else {
       needProfile.value = incomplete;
     }
     bootError.value = "";
+    bootDetailsOpen.value = false;
+    bootCopyStatus.value = "";
   } catch (e) {
     if (seq !== refreshSeq) return;
     // 启动竞态或短暂断连：不要把失败当成「已完成」而放行主界面。
@@ -48,6 +50,29 @@ async function refreshOnboarding({ soft = false } = {}) {
     if (seq === refreshSeq) {
       bootReady.value = true;
     }
+  }
+}
+
+async function retryBootstrap() {
+  if (bootRetrying.value) return;
+  bootRetrying.value = true;
+  bootError.value = "";
+  bootDetailsOpen.value = false;
+  bootReady.value = false;
+  try {
+    await refreshOnboarding();
+  } finally {
+    bootRetrying.value = false;
+  }
+}
+
+async function copyBootError() {
+  const text = String(bootError.value || "无法完成启动").slice(0, 1000);
+  try {
+    await navigator.clipboard.writeText(text);
+    bootCopyStatus.value = "已复制";
+  } catch {
+    bootCopyStatus.value = "复制失败，请手动选择错误详情";
   }
 }
 
@@ -92,7 +117,34 @@ onUnmounted(() => {
       key="onboarding"
       @completed="onProfileCompleted"
     />
-    <div v-else-if="bootError" key="error" class="app-boot app-boot--error">{{ bootError }}</div>
+    <section v-else-if="bootError" key="error" class="app-boot app-boot--error" aria-labelledby="boot-error-title">
+      <div class="app-boot__error-card">
+        <p class="app-boot__eyebrow">DAgents Node</p>
+        <h1 id="boot-error-title">无法完成启动</h1>
+        <p class="app-boot__lead">暂时无法连接到当前 Node。请检查 Node 是否正在运行，然后重试。</p>
+        <div class="app-boot__actions">
+          <button type="button" class="btn btn--primary" :disabled="bootRetrying" @click="retryBootstrap">
+            {{ bootRetrying ? "正在重试…" : "重试" }}
+          </button>
+          <button type="button" class="btn btn--ghost" :aria-expanded="bootDetailsOpen" @click="bootDetailsOpen = !bootDetailsOpen">
+            {{ bootDetailsOpen ? "收起错误详情" : "查看错误详情" }}
+          </button>
+        </div>
+        <div v-if="bootDetailsOpen" class="app-boot__details">
+          <code>{{ bootError }}</code>
+          <button type="button" class="btn btn--ghost btn--sm" @click="copyBootError">复制</button>
+          <span v-if="bootCopyStatus" class="app-boot__copy-status" role="status">{{ bootCopyStatus }}</span>
+        </div>
+        <div class="app-boot__help" aria-label="连接自查">
+          <strong>可以先自查</strong>
+          <ol>
+            <li>确认 dagents-node 进程仍在运行。</li>
+            <li>确认本机地址和端口没有被防火墙拦截。</li>
+            <li>修复后点击“重试”；首配未完成时仍会回到首配页面。</li>
+          </ol>
+        </div>
+      </div>
+    </section>
     <div v-else key="app">
       <RouterView v-slot="{ Component }">
         <KeepAlive include="ChatLayout">
@@ -114,10 +166,20 @@ onUnmounted(() => {
   background: var(--app-background);
 }
 .app-boot--error {
-  color: var(--color-danger);
+  color: var(--color-text);
   padding: var(--space-6);
   text-align: center;
 }
+.app-boot__error-card { width: min(520px, 100%); padding: 32px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); box-shadow: var(--shadow-elevated, 0 12px 36px rgb(0 0 0 / 8%)); }
+.app-boot__eyebrow { margin: 0 0 8px; color: var(--color-text-subtle); font-size: 12px; }
+.app-boot__error-card h1 { margin: 0; font-size: 22px; }
+.app-boot__lead, .app-boot__help { color: var(--color-text-subtle); line-height: 1.55; }
+.app-boot__actions { display: flex; justify-content: center; gap: 10px; margin-top: 24px; }
+.app-boot__details { display: flex; align-items: flex-start; gap: 8px; margin-top: 20px; padding: 12px; text-align: left; border-radius: 6px; background: var(--color-surface-alt); }
+.app-boot__details code { flex: 1; overflow-wrap: anywhere; color: var(--color-text-subtle); font-size: 12px; }
+.app-boot__copy-status { color: var(--color-success); font-size: 12px; }
+.app-boot__help { margin: 20px 0 0; font-size: 12px; text-align: left; }
+.app-boot__help ol { margin: 8px 0 0; padding-left: 20px; }
 
 .app-shell-enter-active,
 .app-shell-leave-active {

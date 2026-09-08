@@ -3,11 +3,13 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
 // persist writes the durable runtime snapshot. The lifecycle event log
@@ -81,6 +83,30 @@ func (r *runtime) reconcileRestoredInputBox() {
 	record, ok := r.inputBox.InFlight()
 	if !ok {
 		return
+	}
+	if record.Kind == InputKindTrigger && (record.RecoveredLegacy || strings.TrimSpace(record.Env.DeliveryID) != "") {
+		if record.RecoveredLegacy {
+			if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
+				_ = r.lifecycleCancel()
+			}
+			r.inputBox.MarkCompleted(record.Seq)
+			_ = r.persist(context.Background())
+			r.inputBox.Ack(record.Seq)
+			_ = r.persist(context.Background())
+			return
+		}
+		if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && !identity.IsPendingDelivery(strings.TrimSpace(record.Env.TriggerID), strings.TrimSpace(record.Env.DeliveryID)) {
+			// An explicit recovery or a superseding claim fenced this mailbox
+			// item. Do not restore its user message or continue its old Turn.
+			if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
+				_ = r.lifecycleCancel()
+			}
+			r.inputBox.MarkCompleted(record.Seq)
+			_ = r.persist(context.Background())
+			r.inputBox.Ack(record.Seq)
+			_ = r.persist(context.Background())
+			return
+		}
 	}
 	state := r.turnCoordinator.Snapshot()
 	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
