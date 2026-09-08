@@ -107,6 +107,10 @@ export const VIEW_META = {
     title: "用户反馈",
     subtitle: "查看、处理并回复 Node 用户反馈",
   },
+  auto: {
+    title: "Auto 员工",
+    subtitle: "跨 Node 的只读岗位状态与最近成果摘要",
+  },
   cases: {
     title: "案例库",
     subtitle: "演示会话 JSONL、关联 Skills / Plugins / External Tools",

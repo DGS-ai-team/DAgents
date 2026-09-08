@@ -94,6 +94,10 @@ export async function fetchFeedback(params = {}) {
   return apiFetch("/v1/feedback", params);
 }
 
+export async function fetchAutoOverview(params = {}) {
+  return apiFetch("/v1/auto/overview", params);
+}
+
 export async function fetchFeedbackItem(feedbackId, nodeId = "") {
   return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}`, nodeId ? { node_id: nodeId } : {});
 }

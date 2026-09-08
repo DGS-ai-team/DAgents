@@ -17,6 +17,7 @@ import MarketplaceView from "./components/MarketplaceView.vue";
 import PermissionsView from "./components/PermissionsView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import FeedbackView from "./components/FeedbackView.vue";
+import AutoEmployeesView from "./components/AutoEmployeesView.vue";
 import WorkgroupView from "./components/WorkgroupView.vue";
 import WorkgroupChatView from "./components/WorkgroupChatView.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -540,6 +541,8 @@ onMounted(() => {
             :admin="authKind === 'admin'"
             @toast="showToast($event.message, $event.type)"
           />
+
+          <AutoEmployeesView v-if="view === 'auto'" :active="view === 'auto'" @toast="showToast($event.message, $event.type)" />
         </main>
       </div>
     </div>

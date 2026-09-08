@@ -1,0 +1,86 @@
+openapi: 3.1.0
+info:
+  title: DAgents Manage API
+  version: 0.1.0
+paths:
+  /v1/registry/nodes/{node_id}/auto-summary:
+    put:
+      summary: Submit the latest read-only Auto employee summary
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AutoSummary'}
+      responses:
+        '200':
+          description: Stored summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutoSummaryRecord'}
+        '401': {description: Authentication required}
+        '403': {description: Node identity mismatch}
+        '409': {description: Snapshot timestamp or content conflict}
+  /v1/auto/overview:
+    get:
+      summary: List read-only Auto employee summaries
+      parameters:
+        - {name: node_id, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: Paginated summaries
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutoSummaryList'}
+        '403': {description: Administrator authentication required}
+components:
+  schemas:
+    AutoSummary:
+      type: object
+      required: [agent_id, state, as_of]
+      additionalProperties: false
+      properties:
+        agent_id: {type: string, maxLength: 256}
+        display_name: {type: string, maxLength: 256}
+        role: {type: string, maxLength: 2048}
+        state: {type: string, maxLength: 64}
+        reason: {type: string, maxLength: 2048}
+        last_result: {type: string, maxLength: 4096}
+        next_at: {type: string, format: date-time, nullable: true}
+        usage: {type: object, maxProperties: 16}
+        as_of: {type: string, format: date-time}
+    AutoSummaryRecord:
+      type: object
+      required: [agent_id, state, as_of, node_id, received_at, stale, age_seconds]
+      additionalProperties: false
+      properties:
+        agent_id: {type: string, maxLength: 256}
+        display_name: {type: string, maxLength: 256}
+        role: {type: string, maxLength: 2048}
+        state: {type: string, maxLength: 64}
+        reason: {type: string, maxLength: 2048}
+        last_result: {type: string, maxLength: 4096}
+        next_at: {type: string, format: date-time, nullable: true}
+        usage: {type: object, maxProperties: 16}
+        as_of: {type: string, format: date-time}
+        node_id: {type: string, maxLength: 256}
+        received_at: {type: string, format: date-time}
+        stale: {type: boolean}
+        age_seconds: {type: integer, minimum: 0}
+    AutoSummaryList:
+      type: object
+      required: [items, total, page, page_size, server_time]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AutoSummaryRecord'}}
+        total: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 200}
+        as_of: {type: string, format: date-time, nullable: true}
+        server_time: {type: string, format: date-time}
