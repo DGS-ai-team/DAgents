@@ -38,6 +38,7 @@ type Goal struct {
 	// Cycle metadata is zero-valued for legacy non-managed goals.
 	CycleSequence    int    `json:"cycle_sequence,omitempty"`
 	ProfileRevision  int64  `json:"profile_revision,omitempty"`
+	ConfigRevision   int64  `json:"config_revision,omitempty"`
 	Revision         int64  `json:"revision,omitempty"`
 	IdempotencyKey   string `json:"idempotency_key,omitempty"`
 	CycleFingerprint string `json:"cycle_fingerprint,omitempty"`
@@ -88,28 +89,33 @@ type MigrationIssue struct {
 }
 
 type Checkpoint struct {
-	Summary           string     `json:"summary"`
-	Completed         []string   `json:"completed,omitempty"`
-	NextSteps         []string   `json:"next_steps,omitempty"`
-	Evidence          []string   `json:"evidence,omitempty"`
-	Artifacts         []string   `json:"artifacts,omitempty"`
-	ExternalCondition string     `json:"external_condition,omitempty"`
-	Done              bool       `json:"done"`
-	NextWakeAt        *time.Time `json:"next_wake_at,omitempty"`
-	At                time.Time  `json:"at"`
+	Summary           string         `json:"summary"`
+	Completed         []string       `json:"completed,omitempty"`
+	NextSteps         []string       `json:"next_steps,omitempty"`
+	Evidence          []string       `json:"evidence,omitempty"`
+	Artifacts         []string       `json:"artifacts,omitempty"`
+	ExternalCondition string         `json:"external_condition,omitempty"`
+	Done              bool           `json:"done"`
+	NextWakeAt        *time.Time     `json:"next_wake_at,omitempty"`
+	At                time.Time      `json:"at"`
+	Decision          *FinalDecision `json:"decision,omitempty"`
 }
 
 type Run struct {
-	ID         string      `json:"id"`
-	GoalID     string      `json:"goal_id"`
-	SessionID  string      `json:"session_id"`
-	TurnID     string      `json:"turn_id,omitempty"`
-	Status     string      `json:"status"`
-	Reason     string      `json:"reason,omitempty"`
-	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
-	TokensUsed int64       `json:"tokens_used"`
-	StartedAt  time.Time   `json:"started_at"`
-	FinishedAt *time.Time  `json:"finished_at,omitempty"`
+	ID              string      `json:"id"`
+	GoalID          string      `json:"goal_id"`
+	SessionID       string      `json:"session_id"`
+	TurnID          string      `json:"turn_id,omitempty"`
+	Status          string      `json:"status"`
+	Reason          string      `json:"reason,omitempty"`
+	Checkpoint      *Checkpoint `json:"checkpoint,omitempty"`
+	TokensUsed      int64       `json:"tokens_used"`
+	StartedAt       time.Time   `json:"started_at"`
+	FinishedAt      *time.Time  `json:"finished_at,omitempty"`
+	GoalRevision    int64       `json:"goal_revision,omitempty"`
+	ProfileRevision int64       `json:"profile_revision,omitempty"`
+	ConfigRevision  int64       `json:"config_revision,omitempty"`
+	Generation      int64       `json:"generation,omitempty"`
 }
 
 type CreateInput struct {

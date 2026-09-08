@@ -49,6 +49,10 @@ func cloneCheckpoint(cp *Checkpoint) *Checkpoint {
 	out.NextSteps = append([]string(nil), cp.NextSteps...)
 	out.Evidence = append([]string(nil), cp.Evidence...)
 	out.Artifacts = append([]string(nil), cp.Artifacts...)
+	if cp.Decision != nil {
+		d := cp.Decision.Clone()
+		out.Decision = &d
+	}
 	if cp.NextWakeAt != nil {
 		t := *cp.NextWakeAt
 		out.NextWakeAt = &t
@@ -515,6 +519,9 @@ func (s *Store) RestoreConfiguration(id string, old Goal, now time.Time) error {
 	g.MinWakeIntervalSeconds, g.Status, g.StatusReason = old.MinWakeIntervalSeconds, old.Status, old.StatusReason
 	g.UpdatedAt = now.UTC()
 	g.Revision++
+	if g.Managed {
+		g.ConfigRevision++
+	}
 	s.data.Goals[id] = g
 	if err := s.saveLocked(); err != nil {
 		s.data.Goals[id] = previous
@@ -585,6 +592,9 @@ func (s *Store) UpdateConfigurationAndStatus(id string, in CreateInput, status *
 	}
 	g.UpdatedAt = now.UTC()
 	g.Revision++
+	if g.Managed {
+		g.ConfigRevision++
+	}
 	s.data.Goals[id] = g
 	if err := s.saveLocked(); err != nil {
 		s.data.Goals[id] = old
@@ -702,7 +712,10 @@ func (s *Store) UpdateProfileAndCycle(agentID, cycleID string, profile AutoProfi
 			g.StatusReason = ""
 		}
 	}
+	// Configuration fencing is independent of the runtime revision, so a
+	// callback from an already running turn cannot apply a newly edited plan.
 	g.UpdatedAt, g.Revision = now.UTC(), oldG.Revision+1
+	g.ConfigRevision = oldG.ConfigRevision + 1
 	s.data.Profiles[agentID], s.data.Goals[cycleID] = profile, g
 	if err := s.saveLocked(); err != nil {
 		s.data.Profiles[agentID], s.data.Goals[cycleID] = oldP, oldG
@@ -711,9 +724,110 @@ func (s *Store) UpdateProfileAndCycle(agentID, cycleID string, profile AutoProfi
 	return profile, cloneGoal(g), nil
 }
 
+// ApplyAutoAction atomically applies lifecycle intent. Pause/disable are
+// allowed while a run is active and never revive terminal cycles; enable does
+// not resume a manually paused cycle.
+func (s *Store) ApplyAutoAction(agentID, cycleID, action string, expectedProfileRevision, expectedGoalRevision int64, now time.Time) (AutoProfile, Goal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	agentID, cycleID = strings.TrimSpace(agentID), strings.TrimSpace(cycleID)
+	p, ok := s.data.Profiles[agentID]
+	if !ok || p.Revision != expectedProfileRevision {
+		return AutoProfile{}, Goal{}, ErrConflict
+	}
+	var g Goal
+	hasGoal := cycleID != ""
+	if hasGoal {
+		var exists bool
+		g, exists = s.data.Goals[cycleID]
+		if !exists || !g.Managed || g.AgentID != agentID || p.CurrentGoalID != cycleID || g.Revision != expectedGoalRevision {
+			return AutoProfile{}, Goal{}, ErrConflict
+		}
+	}
+	if action != "pause_goal" && action != "resume_goal" && action != "disable_auto" && action != "enable_auto" {
+		return AutoProfile{}, Goal{}, fmt.Errorf("invalid action")
+	}
+	if action == "resume_goal" || action == "enable_auto" {
+		if !p.Enabled && action == "resume_goal" {
+			return AutoProfile{}, Goal{}, fmt.Errorf("profile disabled")
+		}
+		if hasGoal {
+			if action == "resume_goal" && (g.Status == StatusCompleted || g.Status == StatusStopped) {
+				return AutoProfile{}, Goal{}, ErrNotRunnable
+			}
+			if action == "resume_goal" {
+				if g.ExpiresAt != nil && !now.Before(*g.ExpiresAt) {
+					return AutoProfile{}, Goal{}, fmt.Errorf("goal expired")
+				}
+				u := s.data.Usage[agentID]
+				if u.Unknown || u.UnknownTokens > 0 {
+					return AutoProfile{}, Goal{}, ErrUsageUnknown
+				}
+				for _, run := range s.data.Runs[g.ID] {
+					if run.FinishedAt == nil || run.Status == "unknown" {
+						return AutoProfile{}, Goal{}, fmt.Errorf("goal busy or usage unknown")
+					}
+				}
+				if (g.MaxRuns > 0 && g.Runs >= g.MaxRuns) || g.TokensUsed >= g.TokenBudget {
+					return AutoProfile{}, Goal{}, fmt.Errorf("goal budget exhausted")
+				}
+				if p.BusinessTokenBudget > 0 && u.BusinessTokens >= p.BusinessTokenBudget {
+					return AutoProfile{}, Goal{}, fmt.Errorf("agent business token budget exhausted")
+				}
+				if p.TotalTokenBudget > 0 && (u.BusinessTokens >= p.TotalTokenBudget || u.MaintenanceTokens >= p.TotalTokenBudget-u.BusinessTokens) {
+					return AutoProfile{}, Goal{}, fmt.Errorf("agent total token budget exhausted")
+				}
+			}
+		}
+	}
+	oldP, oldG := p, g
+	oldIntents := map[string]ScheduleIntent{}
+	for k, i := range s.data.ScheduleIntents {
+		if i.AgentID == agentID && (action == "disable_auto" || (action == "pause_goal" && i.GoalID == cycleID)) {
+			oldIntents[k] = i
+			i.State = IntentRevoked
+			i.UpdatedAt = now.UTC()
+			s.data.ScheduleIntents[k] = i
+		}
+	}
+	if action == "disable_auto" {
+		p.Enabled = false
+	}
+	if action == "enable_auto" {
+		p.Enabled = true
+	}
+	if hasGoal && (action == "pause_goal" || action == "disable_auto") && g.Status != StatusCompleted && g.Status != StatusStopped {
+		g.Status, g.StatusReason = StatusPaused, "user_paused"
+	}
+	if hasGoal && action == "resume_goal" {
+		g.Status, g.StatusReason = StatusActive, ""
+	}
+	p.Revision++
+	p.UpdatedAt = now.UTC()
+	if hasGoal {
+		g.Revision++
+		g.UpdatedAt = now.UTC()
+	}
+	s.data.Profiles[agentID] = p
+	if hasGoal {
+		s.data.Goals[cycleID] = g
+	}
+	if err := s.saveLocked(); err != nil {
+		s.data.Profiles[agentID] = oldP
+		if hasGoal {
+			s.data.Goals[cycleID] = oldG
+		}
+		for k, i := range oldIntents {
+			s.data.ScheduleIntents[k] = i
+		}
+		return AutoProfile{}, Goal{}, err
+	}
+	return p, cloneGoal(g), nil
+}
+
 // UpdateAutonomyIntent atomically updates the user intent for an existing
 // autonomy Goal. Budget, run counters and scheduling limits are immutable here.
-func (s *Store) UpdateAutonomyIntent(id, objective, acceptance string, nextWakeAt *time.Time, now time.Time) (Goal, error) {
+func (s *Store) UpdateAutonomyIntent(id string, objective string, acceptance string, nextWakeAt *time.Time, now time.Time) (Goal, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, ok := s.data.Goals[id]
@@ -742,6 +856,7 @@ func (s *Store) UpdateAutonomyIntent(id, objective, acceptance string, nextWakeA
 	}
 	g.UpdatedAt = now.UTC()
 	g.Revision++
+	g.ConfigRevision++
 	s.data.Goals[id] = g
 	if err := s.saveLocked(); err != nil {
 		s.data.Goals[id] = old
@@ -925,7 +1040,7 @@ func (s *Store) CreateManagedCycle(in CreateInput, idempotencyKey string, expect
 	if enabled && profile.Enabled {
 		status = StatusActive
 	}
-	g := Goal{ID: uuid.NewString(), Title: in.Title, Objective: in.Objective, Acceptance: in.Acceptance, AgentID: in.AgentID, Managed: true, Status: status, ProvisionStatus: "pending", EnableIntent: enabled, MaxRuns: in.MaxRuns, TokenBudget: in.TokenBudget, TurnTokenBudget: in.TurnTokenBudget, ExpiresAt: in.ExpiresAt, MinWakeIntervalSeconds: in.MinWakeIntervalSeconds, CycleSequence: seq, ProfileRevision: profile.Revision, Revision: 1, IdempotencyKey: idempotencyKey, CycleFingerprint: fingerprint, CreatedAt: now, UpdatedAt: now}
+	g := Goal{ID: uuid.NewString(), Title: in.Title, Objective: in.Objective, Acceptance: in.Acceptance, AgentID: in.AgentID, Managed: true, Status: status, ProvisionStatus: "pending", EnableIntent: enabled, MaxRuns: in.MaxRuns, TokenBudget: in.TokenBudget, TurnTokenBudget: in.TurnTokenBudget, ExpiresAt: in.ExpiresAt, MinWakeIntervalSeconds: in.MinWakeIntervalSeconds, CycleSequence: seq, ProfileRevision: profile.Revision, ConfigRevision: 1, Revision: 1, IdempotencyKey: idempotencyKey, CycleFingerprint: fingerprint, CreatedAt: now, UpdatedAt: now}
 	next := now.Add(time.Duration(in.MinWakeIntervalSeconds) * time.Second)
 	g.NextWakeAt = &next
 	oldProfile := profile
@@ -1033,6 +1148,9 @@ func (s *Store) SetStatus(id string, status Status, now time.Time) (Goal, error)
 	}
 	g.UpdatedAt = now.UTC()
 	g.Revision++
+	if g.Managed {
+		g.ConfigRevision++
+	}
 	s.data.Goals[id] = g
 	if err := s.saveLocked(); err != nil {
 		s.data.Goals[id] = old
@@ -1120,7 +1238,23 @@ func (s *Store) StartRun(id, reason string, now time.Time) (Run, error) {
 	}
 	old := g
 	oldRuns := cloneRuns(s.data.Runs[id])
-	run := Run{ID: uuid.NewString(), GoalID: id, SessionID: g.SessionID, Status: "running", Reason: reason, StartedAt: now.UTC()}
+	if g.Managed && g.ConfigRevision == 0 {
+		// Upgrade legacy managed cycles before capturing the run snapshot. This
+		// keeps subsequent checkpoint revisions from invalidating the run fence.
+		g.ConfigRevision = 1
+	}
+	// Generation belongs to each run, not merely to the cycle.  This keeps a
+	// later run from colliding with an intent produced by an earlier run.
+	generation := int64(g.CycleSequence)
+	for _, priorRun := range s.data.Runs[id] {
+		if priorRun.Generation >= generation {
+			generation = priorRun.Generation + 1
+		}
+	}
+	if prior, ok := s.data.ScheduleIntents[intentKey(id, "goal")]; ok && prior.Generation >= generation {
+		generation = prior.Generation + 1
+	}
+	run := Run{ID: uuid.NewString(), GoalID: id, SessionID: g.SessionID, Status: "running", Reason: reason, StartedAt: now.UTC(), GoalRevision: g.Revision, ProfileRevision: profile.Revision, ConfigRevision: g.ConfigRevision, Generation: generation}
 	s.data.Runs[id] = append(s.data.Runs[id], run)
 	g.Runs++
 	next := now.Add(time.Duration(g.MinWakeIntervalSeconds) * time.Second)
@@ -1187,7 +1321,7 @@ func (s *Store) FinishRun(id string, run Run, now time.Time) (Run, error) {
 	}
 	g.TokensUsed += run.TokensUsed
 	if run.Checkpoint != nil {
-		g.LastCheckpoint = run.Checkpoint
+		g.LastCheckpoint = cloneCheckpoint(run.Checkpoint)
 		if run.Status == "completed" && checkpointProvesCompletion(run.Checkpoint) {
 			g.Status = StatusCompleted
 		} else if g.Status == StatusActive {
@@ -1252,8 +1386,9 @@ func (s *Store) Checkpoint(goalID, runID string, cp Checkpoint, now time.Time) (
 		}
 		g.NextWakeAt = cp.NextWakeAt
 	}
-	found.Checkpoint = &cp
-	g.LastCheckpoint = &cp
+	storedCheckpoint := cloneCheckpoint(&cp)
+	found.Checkpoint = storedCheckpoint
+	g.LastCheckpoint = cloneCheckpoint(storedCheckpoint)
 	g.UpdatedAt = now.UTC()
 	g.Revision++
 	s.data.Goals[goalID] = g

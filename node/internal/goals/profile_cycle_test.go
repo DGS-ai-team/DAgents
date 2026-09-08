@@ -206,6 +206,35 @@ func TestProvisionStatusDistinguishesFailedProvisionFromUserPause(t *testing.T) 
 	}
 }
 
+func TestApplyAutoActionPausesBusyAndRevokesCurrentIntent(t *testing.T) {
+	s, _ := OpenStore("")
+	now := time.Now().UTC()
+	testProfile(t, s, "auto-action", now)
+	g, err := s.CreateManagedCycle(cycleInput("auto-action", "x"), "action", 1, now, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := ScheduleIntent{ID: "intent", AgentID: "auto-action", GoalID: g.ID, Purpose: "goal", Generation: 1, Decision: FinalDecision{Outcome: OutcomeProgress, NextAction: NextAt, NextWakeAt: func() *time.Time { v := now.Add(time.Hour); return &v }()}, State: IntentPending, ProfileRevision: 2, UpdatedAt: now}
+	if _, err = s.UpsertScheduleIntent(intent); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.data.Runs[g.ID] = []Run{{ID: "busy", GoalID: g.ID, Status: "running", StartedAt: now}}
+	s.mu.Unlock()
+	p, _ := s.GetProfile("auto-action")
+	updated, out, err := s.ApplyAutoAction("auto-action", g.ID, "pause_goal", p.Revision, g.Revision, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Enabled != p.Enabled || out.Status != StatusPaused {
+		t.Fatalf("action profile=%+v goal=%+v", updated, out)
+	}
+	got, err := s.GetScheduleIntent(g.ID, "goal")
+	if err != nil || got.State != IntentRevoked {
+		t.Fatalf("intent=%+v err=%v", got, err)
+	}
+}
+
 func TestManagedCycleIdempotentRetrySurvivesExpiryAndProfileDisable(t *testing.T) {
 	s, _ := OpenStore("")
 	now := time.Now().UTC()

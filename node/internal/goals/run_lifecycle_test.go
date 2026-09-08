@@ -157,6 +157,132 @@ func TestObserveTurnNoProgressPausesAfterTwoRuns(t *testing.T) {
 	}
 }
 
+func TestObserveTurnFinalDecisionCreatesBoundPendingIntent(t *testing.T) {
+	s, g, r, now := intentFixture(t)
+	r.SessionID = "goal-session"
+	r.Generation = 1
+	r.ProfileRevision = 3
+	d := validDecision(now)
+	r.Checkpoint = &Checkpoint{Summary: "progress", Decision: &d, At: now}
+	s.mu.Lock()
+	g.SessionID = "goal-session"
+	s.data.Goals[g.ID] = g
+	s.data.Runs[g.ID][0] = r
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	if err := s.ObserveTurn("goal-session", TurnSnapshot{TurnID: "turn-final", TurnStatus: "completed", StepStatus: "completed", TotalTokens: 4}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	i, err := s.GetScheduleIntent(g.ID, "goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.State != IntentPending || i.Generation != 1 || i.AgentID != g.AgentID || i.ProfileRevision != 3 {
+		t.Fatalf("unexpected intent: %+v", i)
+	}
+	if i.ID != r.ID+":goal" || i.DueAt == nil {
+		t.Fatalf("intent lost run binding/due time: %+v", i)
+	}
+}
+
+func TestObserveTurnMissingDecisionDoesNotSchedule(t *testing.T) {
+	s, g, r, now := intentFixture(t)
+	r.SessionID = "goal-session"
+	r.Generation = 1
+	r.Checkpoint = &Checkpoint{Summary: "progress", At: now}
+	s.mu.Lock()
+	g.SessionID = "goal-session"
+	s.data.Goals[g.ID] = g
+	s.data.Runs[g.ID][0] = r
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	if err := s.ObserveTurn("goal-session", TurnSnapshot{TurnID: "turn-no-decision", TurnStatus: "completed", StepStatus: "completed", TotalTokens: 4}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetScheduleIntent(g.ID, "goal"); err == nil {
+		t.Fatal("missing decision created a schedule intent")
+	}
+}
+
+func TestObserveTurnDecisionCompletedNoneWinsState(t *testing.T) {
+	s, g, r, now := intentFixture(t)
+	r.SessionID, r.Generation, r.ProfileRevision = "goal-session", 1, 3
+	d := validDecision(now)
+	d.Outcome, d.NextAction, d.NextWakeAt = OutcomeCompleted, NextNone, nil
+	r.Checkpoint = &Checkpoint{Summary: "finished", Decision: &d, At: now}
+	s.mu.Lock()
+	g.SessionID = r.SessionID
+	s.data.Goals[g.ID], s.data.Runs[g.ID][0] = g, r
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	if err := s.ObserveTurn(r.SessionID, TurnSnapshot{TurnID: "turn-done", TurnStatus: "completed", StepStatus: "completed", TotalTokens: 4}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(g.ID)
+	if got.Status != StatusCompleted {
+		t.Fatalf("status=%s reason=%s", got.Status, got.StatusReason)
+	}
+}
+
+func TestObserveTurnNoCheckpointPausesForMissingDecision(t *testing.T) {
+	s, g, r, now := intentFixture(t)
+	r.SessionID, r.Generation, r.ProfileRevision = "goal-session", 1, 3
+	s.mu.Lock()
+	g.SessionID = r.SessionID
+	s.data.Goals[g.ID], s.data.Runs[g.ID][0] = g, r
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	if err := s.ObserveTurn(r.SessionID, TurnSnapshot{TurnID: "turn-empty", TurnStatus: "completed", StepStatus: "completed", TotalTokens: 4}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(g.ID)
+	if got.Status != StatusPaused || got.StatusReason != "decision_missing" {
+		t.Fatalf("goal=%+v", got)
+	}
+}
+
+func TestObserveTurnStoppedDoesNotReplaceIntent(t *testing.T) {
+	s, g, r, now := intentFixture(t)
+	r.SessionID, r.Generation, r.ProfileRevision = "goal-session", 1, 3
+	d := validDecision(now)
+	r.Checkpoint = &Checkpoint{Summary: "late", Decision: &d, At: now}
+	intent := ScheduleIntent{ID: "existing", AgentID: g.AgentID, GoalID: g.ID, Purpose: "goal", Generation: 2, Decision: d, State: IntentPending, ProfileRevision: 3, UpdatedAt: now}
+	intent.Fingerprint = intentFingerprint(intent)
+	s.mu.Lock()
+	g.SessionID = r.SessionID
+	g.Status = StatusStopped
+	s.data.Goals[g.ID], s.data.Runs[g.ID][0] = g, r
+	s.data.ScheduleIntents[intentKey(g.ID, "goal")] = intent
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	if err := s.ObserveTurn(r.SessionID, TurnSnapshot{TurnID: "turn-stopped", TurnStatus: "completed", StepStatus: "completed", TotalTokens: 4}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetScheduleIntent(g.ID, "goal")
+	if err != nil || got.ID != intent.ID || got.State != IntentPending {
+		t.Fatalf("intent=%+v err=%v", got, err)
+	}
+	goal, _ := s.Get(g.ID)
+	if goal.Status != StatusStopped {
+		t.Fatalf("status=%s", goal.Status)
+	}
+}
+
 func TestObserveTurnDifferentCheckpointContinues(t *testing.T) {
 	s, _ := OpenStore("")
 	now := time.Now().UTC()

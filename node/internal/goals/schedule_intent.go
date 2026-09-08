@@ -42,6 +42,11 @@ type FinalizeInput struct {
 	Generation              int64
 	RegisteredSource        map[string]bool
 	Now                     time.Time
+	// The lifecycle observer supplies these fields. They are intentionally
+	// optional so the original explicit FinalizeRun API remains compatible.
+	TerminalStatus         string
+	TerminalReason         string
+	ExpectedConfigRevision int64
 }
 
 func intentKey(g, p string) string { return strings.TrimSpace(g) + "\x00" + strings.TrimSpace(p) }
@@ -81,9 +86,11 @@ func (s *Store) UpsertScheduleIntent(i ScheduleIntent) (ScheduleIntent, error) {
 	if err := validateIntent(i); err != nil {
 		return ScheduleIntent{}, err
 	}
-	if i.Fingerprint == "" {
-		i.Fingerprint = intentFingerprint(i)
+	computed := intentFingerprint(i)
+	if i.Fingerprint != "" && i.Fingerprint != computed {
+		return ScheduleIntent{}, ErrConflict
 	}
+	i.Fingerprint = computed
 	k := intentKey(i.GoalID, i.Purpose)
 	old, ok := s.data.ScheduleIntents[k]
 	if ok && i.Generation <= old.Generation {
@@ -118,11 +125,37 @@ func (s *Store) RevokeScheduleIntent(g, p string, gen int64) error {
 	if i.State == IntentRevoked {
 		return nil
 	}
+	oldIntent := i
 	i.State = IntentRevoked
 	s.data.ScheduleIntents[k] = i
 	if err := s.saveLocked(); err != nil {
-		i.State = IntentPending
-		s.data.ScheduleIntents[k] = i
+		s.data.ScheduleIntents[k] = oldIntent
+		return err
+	}
+	return nil
+}
+
+// ConfirmProjected fences the trigger projection to the exact pending intent.
+func (s *Store) ConfirmProjected(g, p string, gen int64, fingerprint string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := intentKey(g, p)
+	i, ok := s.data.ScheduleIntents[k]
+	if !ok {
+		return ErrNotFound
+	}
+	profile, ok := s.data.Profiles[i.AgentID]
+	if !ok || !profile.Enabled || profile.CurrentGoalID != i.GoalID || profile.Revision != i.ProfileRevision {
+		return ErrNotRunnable
+	}
+	if i.State != IntentPending || i.Generation != gen || i.Fingerprint != fingerprint {
+		return ErrConflict
+	}
+	old := i
+	i.State = IntentProjected
+	s.data.ScheduleIntents[k] = i
+	if err := s.saveLocked(); err != nil {
+		s.data.ScheduleIntents[k] = old
 		return err
 	}
 	return nil
@@ -134,7 +167,18 @@ func (s *Store) RevokeScheduleIntent(g, p string, gen int64) error {
 func (s *Store) FinalizeRun(in FinalizeInput) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if in.RunID == "" || in.ExpectedGoalRevision <= 0 || in.ExpectedProfileRevision <= 0 || in.Now.IsZero() || in.ActualTokens < 0 || in.ActualTokens > math.MaxInt64 {
+	return s.finalizeRunLocked(in)
+}
+
+// finalizeRunLocked is the single durable commit path for terminal turns.
+// Caller holds Store.mu. Every in-memory mutation is covered by one snapshot
+// save and one complete rollback on failure.
+func (s *Store) finalizeRunLocked(in FinalizeInput) error {
+	observedTerminal := in.TerminalStatus != ""
+	if in.TerminalStatus == "" {
+		in.TerminalStatus = "completed"
+	}
+	if in.RunID == "" || in.Now.IsZero() || in.ActualTokens < 0 || in.ActualTokens > math.MaxInt64 {
 		return errors.New("invalid_finalize_input")
 	}
 	var gid string
@@ -168,24 +212,28 @@ func (s *Store) FinalizeRun(in FinalizeInput) error {
 	if !ok {
 		return ErrConflict
 	}
-	p, ok := s.data.Profiles[g.AgentID]
-	if !ok {
-		return ErrConflict
-	}
-	if p.CurrentGoalID != g.ID {
-		return ErrConflict
-	}
+	p, hasProfile := s.data.Profiles[g.AgentID]
 	decisionErr := ValidateFinalDecision(in.Decision, DecisionValidationContext{Now: in.Now, MinInterval: time.Duration(g.MinWakeIntervalSeconds) * time.Second, ExpiresAt: g.ExpiresAt, RegisteredSource: in.RegisteredSource})
 	decisionValid := decisionErr == nil
-	canIntent := p.Enabled && p.Revision == in.ExpectedProfileRevision && g.Revision == in.ExpectedGoalRevision && g.Status != StatusPaused && g.Status != StatusStopped && g.Status != StatusCompleted
+	managed := g.Managed || hasProfile
+	configMatch := !g.Managed || (in.ExpectedConfigRevision > 0 && g.ConfigRevision == in.ExpectedConfigRevision) || (in.ExpectedConfigRevision == 0 && ((in.ExpectedGoalRevision > 0 && g.Revision == in.ExpectedGoalRevision) || (in.ExpectedGoalRevision == 0 && g.ConfigRevision == 0)))
+	// The run's own Goal remains the accounting owner even after a new cycle is
+	// bound to the profile. Configuration/profile revisions only fence business
+	// state and intent application; they never erase old-cycle usage.
+	accountGoal := true
+	goalMatch := !managed || (hasProfile && p.CurrentGoalID == g.ID)
+	fenceMatch := goalMatch && (!managed || configMatch && (in.ExpectedProfileRevision == 0 || p.Revision == in.ExpectedProfileRevision) && (in.ExpectedGoalRevision == 0 || g.Revision >= in.ExpectedGoalRevision))
+	canApply := fenceMatch && (!managed || p.Enabled)
+	canIntent := canApply && g.Status != StatusPaused && g.Status != StatusStopped && g.Status != StatusCompleted
 	if canIntent && in.Purpose != "" {
 		if old, exists := s.data.ScheduleIntents[intentKey(g.ID, in.Purpose)]; exists && old.Generation > in.Generation {
 			// A late callback cannot replace or revoke a newer controller intent.
 			canIntent = false
+			canApply = false
 		}
 	}
 	var next *ScheduleIntent
-	if canIntent && decisionValid && (in.Decision.NextAction == NextAt || in.Decision.NextAction == NextEvent) {
+	if canIntent && in.TerminalStatus == "completed" && in.ActualTokens > 0 && decisionValid && (in.Decision.NextAction == NextAt || in.Decision.NextAction == NextEvent) {
 		if in.Purpose == "" || in.Generation <= 0 {
 			return errors.New("invalid_schedule_intent")
 		}
@@ -214,35 +262,104 @@ func (s *Store) FinalizeRun(in FinalizeInput) error {
 		s.data = old
 		return errors.New("usage_overflow")
 	}
-	if !alreadyCharged {
+	if !alreadyCharged && accountGoal {
 		g.TokensUsed += in.ActualTokens
 	}
-	if canIntent && decisionValid && g.Status != StatusStopped && g.Status != StatusPaused {
+	if canIntent && decisionValid && in.TerminalStatus == "completed" && g.Status != StatusStopped && g.Status != StatusPaused {
 		switch in.Decision.Outcome {
 		case OutcomeCompleted:
-			g.Status = StatusCompleted
-		case OutcomeBlocked, OutcomeNoChange:
-			g.Status = StatusWaiting
+			g.Status, g.StatusReason = StatusCompleted, ""
+		case OutcomeProgress, OutcomeBlocked, OutcomeNoChange:
+			if observedTerminal {
+				g.Status, g.StatusReason = StatusWaiting, ""
+			}
+		}
+		if in.Decision.NextAction == NextNeedsInput {
+			g.Status, g.StatusReason = StatusPaused, "needs_input"
+		} else if in.Decision.NextAction == NextNone && g.Status != StatusCompleted {
+			g.Status, g.StatusReason = StatusWaiting, "no_wake_requested"
 		}
 	}
-	if !decisionValid && canIntent && g.Status == StatusActive {
+	if !decisionValid && in.TerminalStatus == "completed" && managed && canApply && g.Status != StatusStopped && g.Status != StatusCompleted {
 		g.Status = StatusPaused
 		g.StatusReason = decisionErr.Error()
 	}
-	g.Revision++
-	g.UpdatedAt = in.Now.UTC()
-	r.TokensUsed = in.ActualTokens
-	r.Status = "completed"
-	if decisionErr != nil {
-		r.Reason = decisionErr.Error()
+	if in.TerminalStatus == "completed" && decisionErr != nil && canIntent {
+		if oldIntent, exists := s.data.ScheduleIntents[intentKey(g.ID, in.Purpose)]; exists {
+			oldIntent.State = IntentRevoked
+			s.data.ScheduleIntents[intentKey(g.ID, in.Purpose)] = oldIntent
+		}
 	}
+	if in.TerminalStatus != "completed" && canApply && g.Status != StatusStopped && g.Status != StatusPaused && g.Status != StatusCompleted {
+		g.Status = StatusFailed
+		if strings.TrimSpace(in.TerminalReason) != "" {
+			g.StatusReason = in.TerminalReason
+		}
+	}
+	if in.ActualTokens == 0 {
+		if canApply && g.Status != StatusStopped {
+			g.Status = StatusPaused
+			g.StatusReason = "usage_unknown"
+		}
+		if in.TerminalStatus == "completed" {
+			r.Status = "unknown"
+		}
+	}
+	// Legacy non-managed goals have no profile and keep their historical
+	// evidence/checkpoint projection semantics.
+	if !g.Managed && !hasProfile && in.TerminalStatus == "completed" && (g.Status == StatusActive || g.Status == StatusWaiting) {
+		if checkpointProvesCompletion(r.Checkpoint) {
+			g.Status, g.StatusReason = StatusCompleted, ""
+		} else {
+			g.Status, g.StatusReason = StatusWaiting, ""
+		}
+	}
+	if !g.Managed && !hasProfile && in.TerminalStatus == "completed" && g.Status == StatusWaiting {
+		progress := checkpointProgress(r.Checkpoint)
+		streak := 1
+		for i := len(s.data.Runs[gid]) - 2; i >= 0 && streak < 2; i-- {
+			prior := s.data.Runs[gid][i]
+			if prior.Status != "completed" {
+				continue
+			}
+			if checkpointProgress(prior.Checkpoint) == progress {
+				streak++
+			} else {
+				break
+			}
+		}
+		if streak >= 2 {
+			g.Status, g.StatusReason = StatusPaused, "no_progress"
+		}
+	}
+	if accountGoal {
+		g.Revision++
+		g.UpdatedAt = in.Now.UTC()
+	}
+	r.TokensUsed = in.ActualTokens
+	r.Status = in.TerminalStatus
+	if r.Status == "" {
+		r.Status = "completed"
+	}
+	if in.ActualTokens == 0 {
+		r.Status = "unknown"
+	}
+	r.Reason = in.TerminalReason
 	t := in.Now.UTC()
 	r.FinishedAt = &t
-	s.data.Goals[gid] = g
+	if accountGoal {
+		s.data.Goals[gid] = g
+	}
 	s.data.Runs[gid][idx] = r
-	if _, _, err := s.recordRunUsageLocked(g.AgentID, r.ID, in.ActualTokens, 0, 0, in.Now); err != nil {
-		s.data = old
-		return err
+	if in.ActualTokens > 0 {
+		if _, _, err := s.recordRunUsageLocked(g.AgentID, r.ID, in.ActualTokens, 0, 0, in.Now); err != nil {
+			s.data = old
+			return err
+		}
+	} else {
+		u := s.data.Usage[g.AgentID]
+		u.AgentID, u.Unknown, u.UnknownReason, u.UpdatedAt = g.AgentID, true, "usage reconciliation required", in.Now.UTC()
+		s.data.Usage[g.AgentID] = u
 	}
 	if next != nil {
 		s.data.ScheduleIntents[intentKey(g.ID, in.Purpose)] = *next
@@ -271,7 +388,7 @@ func validateIntent(i ScheduleIntent) error {
 	return nil
 }
 func sameIntent(a, b ScheduleIntent) bool {
-	return a.Fingerprint != "" && a.Fingerprint == b.Fingerprint
+	return a.Fingerprint != "" && a.Fingerprint == b.Fingerprint && a.State == b.State
 }
 func intentFingerprint(i ScheduleIntent) string {
 	b, _ := json.Marshal(struct {
@@ -284,6 +401,7 @@ func intentFingerprint(i ScheduleIntent) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
+
 func finalizeFingerprint(i FinalizeInput) string {
 	b, _ := json.Marshal(struct {
 		Run      string
