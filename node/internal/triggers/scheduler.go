@@ -43,6 +43,7 @@ type Scheduler struct {
 	pollInterval    time.Duration
 	logger          *slog.Logger
 	managedFire     func(context.Context, Definition, time.Time) FireRecord
+	reconcile       func(context.Context, time.Time) error
 
 	mu     sync.Mutex
 	stopCh chan struct{}
@@ -53,6 +54,15 @@ type Scheduler struct {
 // logic. Ordinary triggers retain the existing fire path unchanged.
 func (s *Scheduler) SetManagedFire(fn func(context.Context, Definition, time.Time) FireRecord) {
 	s.managedFire = fn
+}
+
+// SetReconciler installs a pre-tick callback for durable managed scheduling
+// intents. It runs outside the scheduler's fire path so a failed projection
+// remains pending and can be retried on the next tick.
+func (s *Scheduler) SetReconciler(fn func(context.Context, time.Time) error) {
+	if s != nil {
+		s.reconcile = fn
+	}
 }
 
 // NewScheduler 构造调度器；pollSeconds 至少 1 秒。
@@ -167,6 +177,11 @@ func (s *Scheduler) runLoop(stopCh, doneCh chan struct{}) {
 }
 
 func (s *Scheduler) tickDue(now time.Time) {
+	if s.reconcile != nil {
+		if err := s.reconcile(context.Background(), now); err != nil {
+			s.logger.Warn("managed intent reconciliation failed", "error", err)
+		}
+	}
 	for _, def := range s.store.ListEnabledTriggers() {
 		decision, updated := EvaluateDue(def, now)
 		switch decision {

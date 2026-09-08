@@ -571,6 +571,9 @@ func (s *Store) DisableManagedProjection(expected Definition) (Definition, error
 	if !ok || cur.ManagedGoalID != expected.ManagedGoalID || cur.OwnerAgentID != expected.OwnerAgentID || cur.TargetAgentID != expected.TargetAgentID || !sameStringPtr(cur.TargetSessionID, expected.TargetSessionID) || cur.Controller != "goal" || cur.ControllerID != expected.ControllerID || cur.ManagedIntentID != expected.ManagedIntentID || cur.ManagedGeneration != expected.ManagedGeneration || cur.ManagedFingerprint != expected.ManagedFingerprint {
 		return Definition{}, ErrRevisionConflict
 	}
+	if !cur.Enabled && cur.NextFireAt == nil {
+		return cloneDefinition(cur), nil
+	}
 	old := cur
 	cur.Enabled = false
 	cur.NextFireAt = nil
