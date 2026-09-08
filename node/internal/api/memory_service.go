@@ -35,5 +35,6 @@ func (s *Server) openAgentMemoryService(id string, rec *store.AgentRecord) (*mem
 		filepath.Join(stateRoot, "memory", "memory.db"),
 		filepath.Join(s.runtimeDir(), "memory", "global.db"),
 		scope,
+		id,
 	)
 }

@@ -159,6 +159,7 @@ func Build(p BuildParams) (Built, error) {
 			filepath.Join(workspaceStateRoot, "memory", "memory.db"),
 			filepath.Join(p.NodeCFG.RuntimeDir(), "memory", "global.db"),
 			memoryScope,
+			p.AgentID,
 		)
 		if openErr != nil {
 			return Built{}, fmt.Errorf("open memory store: %w", openErr)

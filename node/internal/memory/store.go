@@ -153,11 +153,33 @@ CREATE TABLE IF NOT EXISTS memory_conflicts (
   created_at TEXT NOT NULL,
   resolved_at TEXT
 );
+CREATE TABLE IF NOT EXISTS maintenance_operations (
+  operation_id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL,
+  candidate_fingerprint TEXT NOT NULL DEFAULT '',
+  expected_cursor INTEGER NOT NULL,
+  next_cursor INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS maintenance_cursors (
+  agent_id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  source_fingerprint TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+DROP INDEX IF EXISTS idx_maintenance_one_prepared_agent;
 INSERT OR IGNORE INTO memory_meta(key, value) VALUES ('schema_version', '1');
 INSERT OR IGNORE INTO memory_meta(key, value) VALUES ('store_revision', '0');
 `); err != nil {
 		return fmt.Errorf("create memory schema: %w", err)
 	}
+	_, _ = s.db.Exec(`ALTER TABLE maintenance_operations ADD COLUMN candidate_fingerprint TEXT NOT NULL DEFAULT ''`)
 	_, err := s.db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
   memory_id UNINDEXED,
   semantic_key,
