@@ -19,6 +19,7 @@ const LinuxChannelsSettings = () => import("../views/settings/LinuxChannelsSetti
 const CapabilitiesSettings = () => import("../views/settings/CapabilitiesSettings.vue");
 const AgentsSettings = () => import("../views/settings/AgentsSettings.vue");
 const AgentDetailSettings = () => import("../views/settings/AgentDetailSettings.vue");
+const AutoOverviewView = () => import("../views/AutoOverviewView.vue");
 
 async function requireWorkgroupEnabled() {
   try {
@@ -52,6 +53,7 @@ const router = createRouter({
       children: [{ path: "", name: "workgroups", component: WorkgroupView }],
     },
     { path: "/goals", component: ChatLayout, children: [{ path: "", name: "goals", component: GoalsView }] },
+    { path: "/auto", component: ChatLayout, children: [{ path: "", name: "auto-overview", component: AutoOverviewView }] },
     {
       path: "/settings",
       component: SettingsLayout,

@@ -167,6 +167,10 @@ export function getAgentAutonomy(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`);
 }
 
+export function getAutoOverview(params = {}) {
+  return apiFetch("/v1/auto/overview", { params });
+}
+
 export function putAgentAutonomy(agentId, payload = {}) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`, { method: "PUT", body: payload });
 }
