@@ -19,6 +19,8 @@ type RecurringCycleInput struct {
 	PreviousGoalID          string
 	CompletedRunID          string
 	Occurrence              time.Time
+	DispatchAt              time.Time
+	Coalesced               bool
 	CycleDuration           time.Duration
 	SessionID               string
 	AuthorizationRef        string
@@ -36,6 +38,10 @@ func (s *Store) CreateNextRecurringCycle(in RecurringCycleInput) (Goal, error) {
 	}
 	now := in.Now.UTC()
 	occurrence := in.Occurrence.UTC()
+	dispatch := in.DispatchAt.UTC()
+	if in.DispatchAt.IsZero() {
+		dispatch = occurrence
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.data.Profiles[in.AgentID]
@@ -53,7 +59,7 @@ func (s *Store) CreateNextRecurringCycle(in RecurringCycleInput) (Goal, error) {
 			return cloneGoal(existing), nil
 		}
 	}
-	if !occurrence.After(now) {
+	if !occurrence.After(now) && !in.Coalesced {
 		return Goal{}, fmt.Errorf("recurring occurrence must be in the future")
 	}
 	if !p.Enabled || p.PlanMode != "recurring" || p.CurrentGoalID != in.PreviousGoalID || p.Revision != in.ExpectedProfileRevision {
@@ -76,6 +82,17 @@ func (s *Store) CreateNextRecurringCycle(in RecurringCycleInput) (Goal, error) {
 	}
 	if !found || completed.FinishedAt == nil || completed.Status != "completed" || completed.TokensUsed <= 0 {
 		return Goal{}, fmt.Errorf("completed run is not eligible")
+	}
+	if in.Coalesced && (!occurrence.After(completed.FinishedAt.UTC()) || occurrence.After(now)) {
+		return Goal{}, fmt.Errorf("invalid coalesced occurrence")
+	}
+	minimumDispatch := now.Add(time.Duration(prev.MinWakeIntervalSeconds) * time.Second)
+	if in.Coalesced {
+		if dispatch.Before(minimumDispatch) {
+			return Goal{}, fmt.Errorf("invalid coalesced dispatch")
+		}
+	} else if !dispatch.Equal(occurrence) {
+		return Goal{}, fmt.Errorf("invalid recurring dispatch")
 	}
 	if strings.TrimSpace(in.SessionID) != "" && strings.TrimSpace(in.SessionID) != prev.SessionID {
 		return Goal{}, fmt.Errorf("session does not belong to previous cycle")
@@ -128,16 +145,16 @@ func (s *Store) CreateNextRecurringCycle(in RecurringCycleInput) (Goal, error) {
 			seq = g.CycleSequence + 1
 		}
 	}
-	expires := occurrence.Add(in.CycleDuration)
+	expires := dispatch.Add(in.CycleDuration)
 	session := in.SessionID
 	if session == "" {
 		session = prev.SessionID
 	}
 	nextProfileRevision := p.Revision + 1
 	fingerprint := recurringFingerprint(in)
-	g := Goal{ID: uuid.NewString(), Title: prev.Title, Objective: prev.Objective, Acceptance: prev.Acceptance, AgentID: in.AgentID, Managed: true, SessionID: session, Status: StatusWaiting, MaxRuns: prev.MaxRuns, TokenBudget: prev.TokenBudget, TurnTokenBudget: prev.TurnTokenBudget, ExpiresAt: &expires, NextWakeAt: &occurrence, MinWakeIntervalSeconds: prev.MinWakeIntervalSeconds, CycleSequence: seq, ProfileRevision: nextProfileRevision, ConfigRevision: 1, Revision: 1, PreviousGoalID: prev.ID, Origin: "recurring", IdempotencyKey: key, CycleFingerprint: fingerprint, CreatedAt: now, UpdatedAt: now, EnableIntent: true}
-	d := FinalDecision{Outcome: OutcomeProgress, Summary: "recurring cycle scheduled", Reason: "authorized recurring schedule", ExpectedProgress: g.Acceptance, NextAction: NextAt, NextWakeAt: &occurrence}
-	intent := ScheduleIntent{ID: g.ID + ":goal", AgentID: in.AgentID, GoalID: g.ID, Purpose: "goal", Generation: int64(seq), Decision: d, DueAt: &occurrence, State: IntentPending, ProfileRevision: nextProfileRevision, UpdatedAt: now}
+	g := Goal{ID: uuid.NewString(), Title: prev.Title, Objective: prev.Objective, Acceptance: prev.Acceptance, AgentID: in.AgentID, Managed: true, SessionID: session, Status: StatusWaiting, MaxRuns: prev.MaxRuns, TokenBudget: prev.TokenBudget, TurnTokenBudget: prev.TurnTokenBudget, ExpiresAt: &expires, NextWakeAt: &dispatch, ScheduleOccurrence: &occurrence, DispatchAt: &dispatch, Coalesced: in.Coalesced, MinWakeIntervalSeconds: prev.MinWakeIntervalSeconds, CycleSequence: seq, ProfileRevision: nextProfileRevision, ConfigRevision: 1, Revision: 1, PreviousGoalID: prev.ID, Origin: "recurring", IdempotencyKey: key, CycleFingerprint: fingerprint, CreatedAt: now, UpdatedAt: now, EnableIntent: true}
+	d := FinalDecision{Outcome: OutcomeProgress, Summary: "recurring cycle scheduled", Reason: "authorized recurring schedule", ExpectedProgress: g.Acceptance, NextAction: NextAt, NextWakeAt: &dispatch}
+	intent := ScheduleIntent{ID: g.ID + ":goal", AgentID: in.AgentID, GoalID: g.ID, Purpose: "goal", Generation: int64(seq), Decision: d, DueAt: &dispatch, State: IntentPending, ProfileRevision: nextProfileRevision, UpdatedAt: now}
 	intent.Fingerprint = intentFingerprint(intent)
 	p.CurrentGoalID, p.Revision, p.UpdatedAt = g.ID, nextProfileRevision, now
 	s.data.Goals[g.ID], s.data.Profiles[in.AgentID] = g, p

@@ -70,6 +70,14 @@ func cloneGoal(g Goal) Goal {
 		t := *g.NextWakeAt
 		g.NextWakeAt = &t
 	}
+	if g.ScheduleOccurrence != nil {
+		t := *g.ScheduleOccurrence
+		g.ScheduleOccurrence = &t
+	}
+	if g.DispatchAt != nil {
+		t := *g.DispatchAt
+		g.DispatchAt = &t
+	}
 	g.LastCheckpoint = cloneCheckpoint(g.LastCheckpoint)
 	return g
 }

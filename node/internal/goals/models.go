@@ -31,6 +31,9 @@ type Goal struct {
 	TurnTokenBudget        int         `json:"turn_token_budget"`
 	ExpiresAt              *time.Time  `json:"expires_at,omitempty"`
 	NextWakeAt             *time.Time  `json:"next_wake_at,omitempty"`
+	ScheduleOccurrence     *time.Time  `json:"schedule_occurrence,omitempty"`
+	DispatchAt             *time.Time  `json:"dispatch_at,omitempty"`
+	Coalesced              bool        `json:"coalesced,omitempty"`
 	MinWakeIntervalSeconds int         `json:"min_wake_interval_seconds"`
 	LastCheckpoint         *Checkpoint `json:"last_checkpoint,omitempty"`
 	CreatedAt              time.Time   `json:"created_at"`
@@ -59,6 +62,7 @@ type AutoProfile struct {
 	PlanMode               string    `json:"plan_mode"`
 	Timezone               string    `json:"timezone"`
 	WorkSchedule           string    `json:"work_schedule"`
+	CycleDurationSeconds   int64     `json:"cycle_duration_seconds,omitempty"`
 	CurrentGoalID          string    `json:"current_goal_id,omitempty"`
 	AuthorizationRef       string    `json:"authorization_ref,omitempty"`
 	AuthorizationRevision  int64     `json:"authorization_revision,omitempty"`
