@@ -4,7 +4,17 @@
 
 ## 分阶段状态
 
-### 编码暂停接续点（2026-09-09）
+### 2026-09-09 恢复实施与当前验收
+
+额度恢复后，三个 Luna 编码任务已继续运行，未切换编码模型或使用重置额度。以下新证据取代下方暂停时的待办描述：
+
+- 设置页已提交 `1bc65287`：每天/每周与周期时长结构化输入、周几独立行、非法日程识别、岗位与周期草稿隔离、切换 Agent 重置。主 Agent 独立复跑 16 项交互测试通过；通过开发服务连接隔离 Node，完成 639px 窄屏周几与间距视觉检查，未保存运行配置。全页桌面/移动验收仍未完成。
+- 记忆原子维护已提交 `3e3d47d0`：候选写入、版本、operation 和 cursor 同一 SQLite 事务；生产构造传入 Agent 身份。旧分离 Prepare/Commit 入口已删除。主 Agent 独立 memory race 通过（8.488s）；实际 SQLite cursor 故障注入确认记忆/版本/operation/cursor 整体回滚，并覆盖重开重试、同 operation 并发及 stale cursor 无副作用。
+- 每日维护尚未交付：稳定输入需来自持久化 lifecycle 与 transcript checkpoint，不能依赖可选 raw JSONL。真实 usage 接口、增量 reader、runner、预算结算恢复和生产调度正在实现。
+- 事件基础测试已补充多 source 隔离、可取消等待、配置 revision 持久化与失败传播。生产接入仍在实现，必须让事件投递成功后才确认游标，并在 projection/finalize/resume/fire 各边界核对 source owner 与当前 generation。
+- Manage 实际联调与最终全范围验收仍未通过；不得将上述基础包提交当作 A–G 整体完成。
+
+### 编码暂停接续点（2026-09-09，历史记录）
 
 三个 Luna 子任务均返回额度用尽错误，未完成本轮修复；主 Agent 未切换编码模型、未购买或消耗重置额度。当前未提交文件保留，不作为已验收提交。
 
