@@ -49,7 +49,8 @@ async function load() {
 function changeFilter() { appliedSearch.value = search.value; appliedStatus.value = status.value; appliedWorkspace.value = workspace.value; page.value = 1; void load(); }
 function nextPage() { if (hasNext.value) { page.value += 1; void load(); } }
 function prevPage() { if (hasPrev.value) { page.value -= 1; void load(); } }
-function openChat(item) { router.push({ name: "auto-work", params: { agentId: item.agent_id } }); }
+function openWork(item) { router.push({ name: "auto-work", params: { agentId: item.agent_id } }); }
+function openChat(item) { router.push({ name: "agents", params: { agentId: item.agent_id } }); }
 function openSettings(item) { router.push({ name: "settings-agent-detail", params: { agentId: item.agent_id } }); }
 onMounted(() => { appliedSearch.value = search.value; appliedStatus.value = status.value; appliedWorkspace.value = workspace.value; void load(); refreshTimer = window.setInterval(() => void load(), 30000); });
 onUnmounted(() => { disposed = true; requestSeq += 1; if (refreshTimer) window.clearInterval(refreshTimer); });
@@ -87,7 +88,7 @@ onUnmounted(() => { disposed = true; requestSeq += 1; if (refreshTimer) window.c
             <div data-label="自主任务"><strong>{{ item.goal_title || (item.state === 'unconfigured' ? '尚未配置' : '暂无当前任务') }}</strong><small v-if="item.last_summary">{{ item.last_summary }}</small><small v-if="item.role_objective">职责：{{ item.role_objective }}</small></div>
             <div data-label="下次安排">{{ formatDate(item.next_at) }}</div>
             <div data-label="累计用量">{{ tokenLabel(item) }}<small v-if="item.unknown_usage">用量待确认</small></div>
-            <div data-label="操作" class="auto-overview__actions"><button type="button" @click="openChat(item)">打开聊天</button><button type="button" @click="openSettings(item)">设置</button></div>
+            <div data-label="操作" class="auto-overview__actions"><button type="button" @click="openWork(item)">打开工作页</button><button type="button" @click="openChat(item)">打开聊天</button><button type="button" @click="openSettings(item)">设置</button></div>
           </article>
         </div>
       </section>
