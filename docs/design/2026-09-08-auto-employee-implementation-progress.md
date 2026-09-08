@@ -4,15 +4,40 @@
 
 ## 分阶段状态
 
+### 2026-09-09 相对唤醒两轮真实验收
+
+隔离 Node 18766、Agent `agt-9ea36189d2221ea1` 使用已配置真实模型，周期 `6b1b1365-5f2b-4160-8b42-b526b9ac43f8` 已完成。Run `d8ae1c75-7ae1-4ade-b7de-b040de7d910d` 记录 901，消耗 6285 tokens；Run `6a99f3c7-b805-490b-a504-35bb6c5e324c` 记录 767，消耗 8638 tokens。合计 14923 tokens。两次 checkpoint 均经现有显式审批，未修改工具权限。
+
+第一轮相对 90 秒决策保存为 2026-09-08T17:35:31.3358508Z，第二轮实际于 17:35:34.4738902Z 开始，符合 5 秒轮询。完成后实际 trigger `auto-intent-b0a14dbe596029b1ce063781` 为 enabled=false、next_fire_at=null，Auto 摘要 state=standby、next_at=null。
+
+中途读到旧 Goal.next_wake_at 时曾怀疑排程丢失；后续真实 Run 记录证实调度成功，未经证明的生命周期兜底已撤销。剩余呈现缺口：仅 decision.summary 有内容时 last_summary 为空，终态 Goal 保留旧 next_wake_at；不能据此声称所有 UI 状态已验收。
+
+### 2026-09-09 补充独立验收（未通过项）
+
+- 隔离 Node 18766 的周期 `df6464d7-bcde-440c-8ebe-933798ffb13b` 经实际 API 读回为 `paused/user_paused`，Runs=1，消耗 2609 tokens，summary.next_at=null。两轮真实验收尚未成功，不把暂停或定向单测计为完成。
+- 常驻配置 UI 仍需修复：旧自由文本压过结构化选择、周几清空回退旧值、周期时长静默截断、保存周期覆盖未保存的结构化岗位草稿。新增控件尚未验收通过。
+- 工作区 Terminal 租约需由实际进程退出驱动；取消失败、启动与关闭竞争、启动前 Wait 均需明确测试。原使用已取消 context 的竞争测试不能证明写互斥。
+- 相对唤醒协议需补真实 callback 测试：同一可信 now、绝对/相对互斥、间隔与过期边界、非法决策报错。既有 Decision/Wake/Recurring 定向 Go 测试通过，仅证明既有覆盖范围。
+- 每日维护准备文档须修正跨存储事务假设，并覆盖未触发压缩的新增已完成对话；异步候选入队不等于维护完成。
+
 | 阶段 | 状态 | 当前证据/下一门槛 |
 | --- | --- | --- |
-| A 触发器归属与权限 | 编码中 | Luna 负责 owner/controller/revision、原子授权、迁移及回归；主 Agent 审查管理 HTTP 与模型身份边界 |
-| B 员工与业务周期 | 现状梳理中 | 已确认 autonomy API/tool 按首个 managed Goal 查找，需替换为显式 current_goal_id；等待契约冻结 |
-| C 收尾与调度意图 | 未开始 | 依赖 B；Goal 与 Trigger 当前不同文件，需单事实来源和可恢复投影 |
-| D UI | 独立子包编码中 | 先做 Auto 标识与列表分组；总览、详情和新设置依赖 B/C API |
-| E 工作区与事件 | 未开始 | 同目录展示不作为并发控制；写租约上线前不开放新并发承诺 |
-| F 授权与维护 | 未开始 | 沿用既有 policy；后续扩展岗位授权、版本验证与回滚 |
-| G Manage 汇总 | 未开始 | 依赖 Node 汇总契约；先只读且明确数据新鲜度 |
+| A 触发器归属与权限 | 基础与 API 已提交，待最终审计 | 7b93043a、2c5bf738；owner/controller 原子授权、迁移与 HTTP 集成已有测试；最终全入口权限审计仍保留 |
+| B 员工与业务周期 | 已集成 | 显式 current_goal_id、多周期、历史与累计用量；2c5bf738 API 全包独立通过；不能据此代替最终产品验收 |
+| C 收尾与调度意图 | 定时路径已通过真实两轮验收 | 488ce69a、2c5bf738；相对唤醒、投影、离线 coalesce 与重启去重已有证据；跨两个常驻业务周期持续运行仍待验收 |
+| D UI | 部分完成 | 类型标识、分组、总览/详情已实现；设置页结构化控件收尾中；12ec4f7c 修复 decision-only 摘要，最终全页与窄屏回归仍待完成 |
+| E 工作区与事件 | 写锁已提交，事件探针验收中 | 5bc3d1f、3eda83db；工具包及定向 race 通过；events 包尚未接注册配置、ScheduleIntent/projector、UI 健康状态 |
+| F 授权与维护 | 预算底座已提交，维护事务验收中 | 4d8a39f7；每日维护调度、稳定日志输入、真实提取、版本验证/回滚、受限岗位授权及风险影子评估尚未完成 |
+| G Manage 汇总 | 前后端已实现，实际联调未通过 | 9f37fd13、c13d83b5、2c5bf738；实际 Node UUID 与测试凭据需一致；配置保存不等于注册/上报成功 |
+
+本表为当前状态；下方按时间保留的初轮问题和“未开始”叙述属于历史记录，不能覆盖本表及具体最新证据。
+
+### 下一步集成交付门槛
+
+1. 事件唤醒：管理员配置私有 source → 注册/归属校验 → 模型 next_action=event → 持久意图投影 → 文件变化只触发一次 Run → 完成后撤销订阅。扫描失败可见且退避，无变化不调用模型。
+2. 每日维护：启用/时间/额度设置 → 已完成日志增量 → 无新增跳过 → 同 Agent 执行槽与预算预留 → 真实候选提取 → 记忆/游标一致提交 → 消耗对账 → 历史、差异、验证与回滚。空候选批次也应推进成功处理游标。
+3. 审批连续性：明确岗位授权作用域、失效与撤销；LLM 风险识别仅影子建议，不能覆盖显式拒绝。两轮 checkpoint 经人工确认通过，不证明无需审批的自主性体验已经交付。
+4. 真实验收继续覆盖对话改计划读回、跨常驻周期与一次每日维护、重启/故障恢复、Node→Manage 实际上报、完整 Node/Manage 视觉检查。所有测试数据保持隔离，最终清理验收排程并打开最新界面。
 
 ## 初始核对
 
@@ -129,3 +154,33 @@ API 两轮唤醒、投影和启动恢复专项通过（0.882 秒）；随后 API
 Manage 新摘要接口和只读页面处于审查阶段，发现重复快照刷新 received_at、同时间内容冲突及时间校验边界，已交 Luna 修正；尚未与 Node 上报形成端到端闭环。常驻岗位下一周期、事件探针、每日维护及全量产品验收继续保留在范围内。
 
 Manage 独立扩展回归：摘要、Node 注册身份、反馈、Console 登录与基础鉴权共 21 项测试通过（6.816 秒）。页面审查发现固定 200 条截断、原始英文状态及移动端宽表格，已退回补分页/Node 筛选/状态映射/窄屏布局。服务端快照新鲜度与 Node reporter 接缝继续开发，当前不宣称 G 完成。
+
+独立复验：TestGoalScheduledWakeRunsTwoTurns 连续 10 次通过（4.140 秒）。仍要求实际调度以 durable intent DueAt 为唯一到期事实，避免仅通过测试取 Goal/Trigger 较晚时间掩盖双时间源差异；resume 生成新意图继续开发。
+
+Manage 浏览器验收：隔离 8021 服务使用新静态页面但旧后端，Auto 页面显示明确错误区域（接口404），不能视为数据验收。390 像素 document clientWidth/scrollWidth 均390；筛选input/select样式仍未统一，错误缺中文上下文，已退回。恢复浏览器视口。
+
+日历纯函数尚未接受：发现 weekly 前缀可省略、夏令时归一化依赖 Go Date 的偏移选择、缺回拨及半小时转换测试，已交 Luna 修正；不将模块编译通过视为 recurring 控制器完成。
+
+最新独立回归：API 全包通过（28.340 秒）；goals 与 triggers 全包 race 分别通过（1.866 / 1.570 秒）。恢复动作的过去 due_at、用途限制和代次溢出仍在补专项，不据此提交未审查边界。日历 DST 修正版已读代码，待补 Windows tzdata 与跨周断言后接收。
+
+Node reporter 当前仅独立HTTP客户端，尚未接 registrar 生命周期或全Agent provider；审查要求真实body白名单断言、多员工上报与总耗时约束。准备另起8022隔离Manage测试实例供数据页面验收，8020/8021服务保持运行。
+
+Manage 提交前复查：明确 Python313 路径运行 21 项回归通过（6.363秒），Console lint通过；当前 shell 的 python 默认解析到无FastAPI的Anaconda，首次导入失败属运行环境，已使用已配置Python313重跑。OpenAPI尚缺409/server_time/stale/age_seconds，Record allOf与closed base冲突，已交Luna同步契约；提交暂缓直到修正。
+
+8022 数据视觉验收已完成分页交互：24条合成摘要，第2页4条，移动4卡，clientWidth/scrollWidth均382（390视口含滚动条），已恢复视口；仍不作为真实Node reporter集成证据。recurring初版发现ProfileRevision/幂等次序/expiry与Run fencing不足，继续修正并新增专项。
+
+`d4ed426e` 提交Trigger pre-tick reconcile与幂等撤销，独立Trigger race通过1.809秒。`16ee7282` 提交recurring Store原子创建及测试，独立Recurring race通过1.432秒：新Goal/intent/profile同快照、重试/并发/重启、授权版本/预算/未知Run检查、写失败回滚。该提交尚未接实际授权配置和scheduler controller，不等于常驻员工可用；已继续交Luna接真实API/controller。
+
+恢复动作专项独立race通过1.545秒，但审查发现event测试错误map键及忽略GetScheduleIntent错误，已退回改为真实记录与完整快照断言。尚未通过验收的event恢复/API错误映射与空session投影继续修正。
+
+`9f37fd13` 提交Manage独立摘要存储、Node身份限定提交、管理员分页总览、服务端120秒新鲜度及Console页面；主Agent独立23项Manage相关回归通过8.704秒，含真实HTTP121秒快照过期；此前分页与窄屏浏览器证据保留。Node真实provider尚未完成，本提交不是G端到端完成。
+
+`33c28110` 提交resume单次预检查/新代次/事件未支持明确错误/溢出拒绝/写失败完整回滚；主Agent恢复专项race通过1.479秒。周期controller及真实provider继续集成；E工作区并发实现接缝交Luna梳理，需覆盖后台进程租约，不得仅工具函数返回就释放写入权。
+
+新版隔离运行验收：构建最新Node前端和dagents-node-20260909.exe，备份隔离.runtime后启动PID26852监听18766。浏览器使用既有agt-9ea36189d2221ea1/mimo-v2.5-pro配置发送无工具算术对话，真实返回“新版对话验收：893”，UI显示本轮2707tokens（输入2628/输出79），Auto保持未启用。此证据仅证明新版对话与真实LLM配置，自动唤醒和recurring仍待独立链路验收。
+
+workspacecoord初版独立race通过2.513秒，审查补已取消ctx不得grant与symlink/..归一化边界；工具write/search_replace接入后仍需Node共享实例及真实双Registry并发验证，bash/terminal后台租约尚未完成。
+
+真实两轮自主验收尚未通过：Goal df6464d7-bcde-440c-8ebe-933798ffb13b / Run ad785345-9d58-4b83-9bfa-b8ed6fa2ca56 / Turn turn-04902d6819e0c5b5 在goal_checkpoint等待策略审批。hydrate证实模型decision.next_wake_at为2026-09-09T12:02Z，实际当前约2026-09-08T17:07Z，且缺expected_progress；没有人工代写checkpoint或宣称自动成功。root通过pause_goal取消等待，保留历史，安排修工具schema与可信时间/运行上下文。既有审批策略未静默修改。
+
+E定向独立race `Workspace|BashProcessRetainsWorkspaceLeaseUntilExit|CancelAllSessionJobs` 通过4.556秒；此前全tools race在Windows截图库checkptr崩溃，单列宿主/依赖限制，不把定向结果扩大为全包通过。
