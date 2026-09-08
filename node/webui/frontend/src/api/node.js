@@ -166,6 +166,7 @@ export function getAgent(agentId) {
 export function getAgentAutonomy(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`);
 }
+export function getAgentAutonomyCycles(agentId, params = {}) { return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/cycles`, { params }); }
 
 export function getAutoOverview(params = {}) {
   return apiFetch("/v1/auto/overview", { params });

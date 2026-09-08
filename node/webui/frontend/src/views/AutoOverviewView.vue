@@ -49,7 +49,7 @@ async function load() {
 function changeFilter() { appliedSearch.value = search.value; appliedStatus.value = status.value; appliedWorkspace.value = workspace.value; page.value = 1; void load(); }
 function nextPage() { if (hasNext.value) { page.value += 1; void load(); } }
 function prevPage() { if (hasPrev.value) { page.value -= 1; void load(); } }
-function openChat(item) { router.push({ name: "agents", params: { agentId: item.agent_id } }); }
+function openChat(item) { router.push({ name: "auto-work", params: { agentId: item.agent_id } }); }
 function openSettings(item) { router.push({ name: "settings-agent-detail", params: { agentId: item.agent_id } }); }
 onMounted(() => { appliedSearch.value = search.value; appliedStatus.value = status.value; appliedWorkspace.value = workspace.value; void load(); refreshTimer = window.setInterval(() => void load(), 30000); });
 onUnmounted(() => { disposed = true; requestSeq += 1; if (refreshTimer) window.clearInterval(refreshTimer); });

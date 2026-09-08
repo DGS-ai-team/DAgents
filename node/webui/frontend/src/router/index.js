@@ -20,6 +20,7 @@ const CapabilitiesSettings = () => import("../views/settings/CapabilitiesSetting
 const AgentsSettings = () => import("../views/settings/AgentsSettings.vue");
 const AgentDetailSettings = () => import("../views/settings/AgentDetailSettings.vue");
 const AutoOverviewView = () => import("../views/AutoOverviewView.vue");
+const AutoWorkView = () => import("../views/AutoWorkView.vue");
 
 async function requireWorkgroupEnabled() {
   try {
@@ -54,6 +55,7 @@ const router = createRouter({
     },
     { path: "/goals", component: ChatLayout, children: [{ path: "", name: "goals", component: GoalsView }] },
     { path: "/auto", component: ChatLayout, children: [{ path: "", name: "auto-overview", component: AutoOverviewView }] },
+    { path: "/auto/:agentId", component: ChatLayout, children: [{ path: "", name: "auto-work", component: AutoWorkView }] },
     {
       path: "/settings",
       component: SettingsLayout,
