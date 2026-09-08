@@ -109,6 +109,18 @@ Agent 类型、岗位开关、Goal 状态和当前运行分别保存，不把所
 
 投影幂等键为 controller + controller_id + purpose；generation 单调递增。Trigger 投递必须回查当前意图版本及状态，已撤销、旧版本或旧 Run 回调不能执行。此设计保证本地调度去重，不承诺外部副作用 exactly-once；外部写操作另用幂等键或结果对账，结果未知时暂停处理。
 
+### 4.2.1 recurring 周期控制器契约（实施接缝）
+
+`one_shot` 与 `recurring` 是 Profile 的计划模式，不能通过把 `next_wake_at` 设成固定间隔来互相模拟。`one_shot` 周期在合法 `completed + none` 收尾后保持终态，不产生下一周期；`recurring` 也先将本周期永久收尾，再由周期控制器创建新的 Goal，旧 Goal 的证据、Run、用量和状态永不覆写。下一周期的验收目标、限制和授权快照在创建时冻结，默认沿用 Profile 当前已授权模板；本轮运行中暂存的配置只影响下一周期，不能反向改变已完成周期。
+
+周期控制器只在以下条件全部成立时创建下一周期：Profile 仍启用且 `plan_mode=recurring`；当前 Goal 已完成并且没有活动或未知 Run；Agent 用量没有 `Unknown`、业务/维护/总预算仍有余量；Goal 没有人工暂停或停止标记；授权引用和模板版本仍有效。条件不满足时只保留已完成历史并撤销当前业务意图，状态投影显示原因（例如 `budget_exhausted`、`recovery_required`、`user_paused` 或 `authorization_expired`），不得把旧 Goal 重新置为 active。用户随后可以显式创建周期，必须重新提交目标限制和幂等键。
+
+Store 增加一个持锁的“完成后创建周期”接缝，输入至少包括 `agent_id`、`previous_goal_id`、完成 Run ID、Profile revision、模板/授权 revision、用户幂等键和当前 UTC 时间；它在同一 Goal 快照事务中校验旧周期终态、Profile 当前绑定和预算，再写入新 Goal 并更新 `AutoProfile.current_goal_id`。幂等键按 `agent_id + purpose=cycle + user_idempotency_key` 唯一；重试返回同一新 Goal，幂等键 payload 不同返回冲突。并发请求只能有一个新周期，活动周期存在时返回 `agent_busy`。控制器只在收尾提交成功后调用该接缝，投影器仍只消费新 pending 意图，不能自行创建周期。
+
+周期计算使用 Profile 的 IANA `timezone` 和 `work_schedule`，持久化的 `DueAt` 始终为 UTC，并额外保存计算所用的时区与 schedule revision。夏令时回拨产生的重复本地时刻只生成一次；春季跳过的本地时刻顺延到当日第一个有效时刻。Node 离线恢复时以最后成功处理的日历游标计算，多个已错过时刻合并为一次检查并推进游标，不补跑多个周期；控制器为该次合并生成新的幂等键，避免恢复风暴。没有有效 `work_schedule`、没有下一次已授权安排或 Profile 未启用时，周期不创建意图，UI 显示“未安排”并给出原因，不从上次 Run 时间推算倒计时。
+
+周期创建与调度的最小可测试接缝是：完成 one-shot 后无新 Goal；完成 recurring 后恰好一个新 Goal 且旧证据不变；重复请求返回同一周期；预算不足、未知用量、人工暂停、授权版本变化和活动 Run 均不创建；DST 重复/不存在时刻各只触发一次；离线错过多个安排只产生一次合并检查。上述规则由 Store 的 CAS/事务测试和控制器的日历测试共同固定，不能只用间隔秒数测试。
+
 ### 4.3 边界规则
 
 - 无有效收尾：标记 needs_input/decision_missing；可在本轮余量内补一次结构化收尾，禁止无限补问。只有用户配置的固定岗位周期可按既定规则有限兜底。
