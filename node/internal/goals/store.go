@@ -25,15 +25,16 @@ var ErrEventSchedulingUnsupported = errors.New("event scheduling is not supporte
 const CurrentSchemaVersion = 2
 
 type disk struct {
-	SchemaVersion            int                       `json:"schema_version,omitempty"`
-	Goals                    map[string]Goal           `json:"goals"`
-	Runs                     map[string][]Run          `json:"runs"`
-	Profiles                 map[string]AutoProfile    `json:"profiles,omitempty"`
-	Usage                    map[string]AgentUsage     `json:"usage,omitempty"`
-	UsageReceipts            map[string]UsageReceipt   `json:"usage_receipts,omitempty"`
-	MigrationIssues          map[string]MigrationIssue `json:"migration_issues,omitempty"`
-	ScheduleIntents          map[string]ScheduleIntent `json:"schedule_intents,omitempty"`
-	FinalizationFingerprints map[string]string         `json:"finalization_fingerprints,omitempty"`
+	SchemaVersion            int                           `json:"schema_version,omitempty"`
+	Goals                    map[string]Goal               `json:"goals"`
+	Runs                     map[string][]Run              `json:"runs"`
+	Profiles                 map[string]AutoProfile        `json:"profiles,omitempty"`
+	Usage                    map[string]AgentUsage         `json:"usage,omitempty"`
+	UsageReceipts            map[string]UsageReceipt       `json:"usage_receipts,omitempty"`
+	MigrationIssues          map[string]MigrationIssue     `json:"migration_issues,omitempty"`
+	ScheduleIntents          map[string]ScheduleIntent     `json:"schedule_intents,omitempty"`
+	FinalizationFingerprints map[string]string             `json:"finalization_fingerprints,omitempty"`
+	MaintenanceReceipts      map[string]MaintenanceReceipt `json:"maintenance_receipts,omitempty"`
 }
 type Store struct {
 	mu   sync.RWMutex
@@ -93,7 +94,7 @@ func cloneRuns(in []Run) []Run {
 type WakeFunc func(context.Context, Goal, Run) (string, error)
 
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, data: disk{SchemaVersion: CurrentSchemaVersion, Goals: map[string]Goal{}, Runs: map[string][]Run{}, Profiles: map[string]AutoProfile{}, Usage: map[string]AgentUsage{}, UsageReceipts: map[string]UsageReceipt{}, MigrationIssues: map[string]MigrationIssue{}, ScheduleIntents: map[string]ScheduleIntent{}, FinalizationFingerprints: map[string]string{}}}
+	s := &Store{path: path, data: disk{SchemaVersion: CurrentSchemaVersion, Goals: map[string]Goal{}, Runs: map[string][]Run{}, Profiles: map[string]AutoProfile{}, Usage: map[string]AgentUsage{}, UsageReceipts: map[string]UsageReceipt{}, MaintenanceReceipts: map[string]MaintenanceReceipt{}, MigrationIssues: map[string]MigrationIssue{}, ScheduleIntents: map[string]ScheduleIntent{}, FinalizationFingerprints: map[string]string{}}}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -132,6 +133,9 @@ func OpenStore(path string) (*Store, error) {
 	}
 	if s.data.UsageReceipts == nil {
 		s.data.UsageReceipts = map[string]UsageReceipt{}
+	}
+	if s.data.MaintenanceReceipts == nil {
+		s.data.MaintenanceReceipts = map[string]MaintenanceReceipt{}
 	}
 	if s.data.MigrationIssues == nil {
 		s.data.MigrationIssues = map[string]MigrationIssue{}
@@ -1226,6 +1230,11 @@ func (s *Store) StartRun(id, reason string, now time.Time) (Run, error) {
 		}
 		if usage.Unknown || usage.UnknownTokens > 0 {
 			return Run{}, ErrUsageUnknown
+		}
+		for _, receipt := range s.data.MaintenanceReceipts {
+			if receipt.AgentID == g.AgentID && receipt.Status == "pending" {
+				return Run{}, fmt.Errorf("%w: maintenance reservation pending", ErrNotRunnable)
+			}
 		}
 	}
 	if profile.BusinessTokenBudget > 0 && usage.BusinessTokens >= profile.BusinessTokenBudget {
