@@ -12,6 +12,9 @@ import {
 } from "../utils/format.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
+import AutoBadge from "./AutoBadge.vue";
+import { filterAgents, groupAgents, searchAgents } from "../utils/agentGrouping.js";
+import { readNodePreference, writeNodePreference } from "../utils/nodePreference.js";
 
 const RAIL_CACHE_TTL_MS = 30_000;
 const UNREAD_REFRESH_INTERVAL_MS = 15_000;
@@ -62,6 +65,34 @@ const manualRefreshingAgents = ref(false);
 const deletingId = ref("");
 const renamingId = ref("");
 const renameDraft = ref("");
+const agentFilter = ref("all");
+const agentGroupMode = ref("type");
+const agentSearch = ref("");
+const collapsedAgentGroups = ref(new Set());
+const preferenceNodeId = ref("");
+watch([agentFilter, agentGroupMode, collapsedAgentGroups], () => {
+  if (preferenceNodeId.value) writeNodePreference(preferenceNodeId.value, "agent-view", { filter: agentFilter.value, group: agentGroupMode.value, collapsed: [...collapsedAgentGroups.value] });
+}, { deep: true });
+let preferenceRequest = 0;
+async function loadNodePreferences() {
+  const request = ++preferenceRequest;
+  try {
+    const boot = await api.getUIBootstrap();
+    const id = String(boot?.info?.node_id || boot?.health?.node_id || boot?.info?.NodeID || "").trim();
+    if (request !== preferenceRequest || !id) return;
+    preferenceNodeId.value = id;
+    agentFilter.value = "all";
+    agentGroupMode.value = "type";
+    agentSearch.value = "";
+    collapsedAgentGroups.value = new Set();
+    const saved = readNodePreference(id, "agent-view", null);
+    if (saved) {
+      if (["all", "auto", "normal"].includes(saved.filter)) agentFilter.value = saved.filter;
+      if (["type", "workspace"].includes(saved.group)) agentGroupMode.value = saved.group;
+      if (Array.isArray(saved.collapsed)) collapsedAgentGroups.value = new Set(saved.collapsed);
+    }
+  } catch { /* unknown Node: keep in-memory defaults */ }
+}
 
 /** 分区展开：智能体 / 工作组 */
 const sectionOpen = ref({
@@ -134,8 +165,15 @@ function agentSortTime(agent) {
 }
 
 const sortedAgents = computed(() => {
-  return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a));
+  return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a) || agentRecordId(a).localeCompare(agentRecordId(b)));
 });
+const visibleAgents = computed(() => searchAgents(filterAgents(sortedAgents.value, agentFilter.value), agentSearch.value));
+const agentGroups = computed(() => groupAgents(visibleAgents.value, agentGroupMode.value));
+function toggleAgentGroup(key) {
+  const next = new Set(collapsedAgentGroups.value);
+  if (next.has(key)) next.delete(key); else next.add(key);
+  collapsedAgentGroups.value = next;
+}
 
 async function refreshAgents({ force = false, manual = false } = {}) {
   if (manual) manualRefreshingAgents.value = true;
@@ -477,6 +515,7 @@ function onVisibilityChange() {
 }
 
 onMounted(() => {
+  void loadNodePreferences();
   void refresh({ force: false });
   refreshTimer = window.setInterval(() => {
     void refresh({ force: true });
@@ -586,13 +625,32 @@ defineExpose({
         </button>
       </header>
 
+      <div v-if="sectionOpen.agents && agentsLoaded && sortedAgents.length" class="nav-rail__agent-filters">
+        <input v-model="agentSearch" class="nav-rail__agent-filter" type="search" placeholder="搜索智能体…" aria-label="搜索智能体" />
+        <select v-model="agentFilter" aria-label="智能体类型筛选" class="nav-rail__agent-filter">
+          <option value="all">全部智能体</option>
+          <option value="auto">Auto</option>
+          <option value="normal">普通</option>
+        </select>
+        <select v-model="agentGroupMode" aria-label="智能体分组方式" class="nav-rail__agent-filter">
+          <option value="type">按类型分组</option>
+          <option value="workspace">按工作目录分组</option>
+        </select>
+      </div>
+
       <div v-if="sectionOpen.agents">
       <ul class="nav-rail__list" :aria-busy="loadingAgents">
+        <template v-for="group in agentGroups" :key="group.key">
+        <li class="nav-rail__agent-group">
+          <button type="button" class="nav-rail__agent-group-toggle" :aria-expanded="!collapsedAgentGroups.has(group.key)" @click="toggleAgentGroup(group.key)">
+            <span>{{ group.label }}</span><span class="nav-rail__agent-group-count">{{ group.agents.length }}</span><span aria-hidden="true">{{ collapsedAgentGroups.has(group.key) ? "›" : "⌄" }}</span>
+          </button>
+        </li>
         <li
-          v-for="a in sortedAgents"
+          v-for="a in (collapsedAgentGroups.has(group.key) ? [] : group.agents)"
           :key="agentRecordId(a)"
           class="nav-rail__item nav-rail__agent-item"
-          :class="{ 'nav-rail__item--active': agentRecordId(a) === activeAgentId }"
+          :class="{ 'nav-rail__item--active': agentRecordId(a) === agentStore.agentId }"
           @click="selectAgent(agentRecordId(a))"
         >
           <div class="nav-rail__item-main">
@@ -612,6 +670,7 @@ defineExpose({
                 :title="agentDisplayTitle(a)"
                 @dblclick.stop="startRename(a)"
               >{{ agentDisplayTitle(a) }}</span>
+              <AutoBadge :agent="a" />
               <span
                 v-if="a.has_unread"
                 class="nav-rail__unread-dot"
@@ -681,8 +740,9 @@ defineExpose({
             </button>
           </div>
         </li>
-        <li v-if="!sortedAgents.length && !agentsLoaded && loadingAgents && !agentsLoadError" class="nav-rail__hint">加载中…</li>
-        <li v-else-if="!sortedAgents.length && agentsLoadError" class="nav-rail__hint nav-rail__hint--error">
+        </template>
+        <li v-if="!visibleAgents.length && !agentsLoaded && loadingAgents && !agentsLoadError" class="nav-rail__hint">加载中…</li>
+        <li v-else-if="!visibleAgents.length && agentsLoadError" class="nav-rail__hint nav-rail__hint--error">
           <span>暂时无法加载智能体</span>
           <button
             type="button"
@@ -692,7 +752,7 @@ defineExpose({
             @click="refreshAgents({ force: true, manual: true })"
           >重试</button>
         </li>
-        <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
+        <li v-else-if="!visibleAgents.length" class="nav-rail__empty">暂无符合条件的智能体</li>
       </ul>
       </div>
     </section>
@@ -1029,3 +1089,41 @@ defineExpose({
     </footer>
   </nav>
 </template>
+
+<style scoped>
+.nav-rail__agent-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 6px 10px 4px;
+}
+.nav-rail__agent-filter:first-child { grid-column: 1 / -1; }
+.nav-rail__agent-filter {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 4px 5px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 11px;
+}
+.nav-rail__agent-group { list-style: none; padding: 5px 10px 2px; }
+.nav-rail__agent-group-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 3px 2px;
+  background: transparent;
+  color: var(--text-secondary, var(--color-text-muted));
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+.nav-rail__agent-group-count { margin-left: auto; }
+.nav-rail__item-title-row { min-width: 0; }
+@media (max-width: 720px) {
+  .nav-rail__agent-filters { grid-template-columns: 1fr; }
+}
+</style>

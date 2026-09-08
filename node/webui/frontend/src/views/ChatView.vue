@@ -8,6 +8,7 @@ import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
 import AgentCreatePage from "../components/AgentCreatePage.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
+import AutoBadge from "../components/AutoBadge.vue";
 const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
 const mobileNavOpen = ref(false);
 import {
@@ -1417,7 +1418,7 @@ onUnmounted(() => {
           <div v-else class="chat-workspace">
           <div v-if="goalSessionId" class="chat-goal-session-badge" role="status">专用 Goal 会话 · {{ goalSessionId }}</div>
           <div v-if="goalSessionId" class="chat-goal-session-help">此会话用于查看进度和处理审批；新消息请返回主聊天。</div>
-          <div v-if="currentAgentIsAuto && !goalSessionId" class="chat-auto-banner" role="status">Auto Agent · 自主任务 · {{ autoAutonomyError ? '状态不可用' : autoStatusLabel(autoAutonomy?.status) }} <router-link :to="{ name: 'settings-agent-detail', params: { agentId: agentStore.agentId }, query: { section: 'autonomy' } }">自主任务设置</router-link></div>
+          <div v-if="currentAgentIsAuto && !goalSessionId" class="chat-auto-banner" role="status"><AutoBadge :agent="{ agent_type: 'auto' }" /> <span>自主任务 · {{ autoAutonomyError ? '状态不可用' : autoStatusLabel(autoAutonomy?.status) }}</span> <router-link :to="{ name: 'settings-agent-detail', params: { agentId: agentStore.agentId }, query: { section: 'autonomy' } }">自主任务设置</router-link></div>
         <MainChatPanel
           v-show="!terminalOpen"
           ref="chatPanelRef"
