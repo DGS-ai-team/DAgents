@@ -28,14 +28,15 @@ const (
 // FinalDecision is the model's structured, terminal decision for one turn.
 // It is data only: validation never schedules or wakes a goal.
 type FinalDecision struct {
-	Outcome          Outcome    `json:"outcome"`
-	Summary          string     `json:"summary,omitempty"`
-	Evidence         []string   `json:"evidence,omitempty"`
-	NextAction       NextAction `json:"next_action"`
-	NextWakeAt       *time.Time `json:"next_wake_at,omitempty"`
-	Event            *EventSpec `json:"event,omitempty"`
-	Reason           string     `json:"reason"`
-	ExpectedProgress string     `json:"expected_progress,omitempty"`
+	Outcome              Outcome    `json:"outcome"`
+	Summary              string     `json:"summary,omitempty"`
+	Evidence             []string   `json:"evidence,omitempty"`
+	NextAction           NextAction `json:"next_action"`
+	NextWakeAt           *time.Time `json:"next_wake_at,omitempty"`
+	NextWakeAfterSeconds *int64     `json:"next_wake_after_seconds,omitempty"`
+	Event                *EventSpec `json:"event,omitempty"`
+	Reason               string     `json:"reason"`
+	ExpectedProgress     string     `json:"expected_progress,omitempty"`
 }
 
 // EventSpec refers to a registered event source and a deliberately limited

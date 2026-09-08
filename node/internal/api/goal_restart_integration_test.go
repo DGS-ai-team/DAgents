@@ -13,15 +13,22 @@ import (
 func TestGoalColdRestartKeepsDedicatedRuntime(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Onboarding.NodeProfileCompleted = true
+	now := time.Now()
+	seed, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := store.AgentRecord{AgentID: "restart-agent", DisplayName: "restart agent", ConfigSnapshot: []byte(`{"agent_type":"auto","workspace":{"mode":"private"}}`), RuntimeRevision: 1, CreatedAt: now, UpdatedAt: now}
+	if err := seed.Save(context.Background(), rec); err != nil {
+		seed.Close()
+		t.Fatal(err)
+	}
+	seed.Close()
 	first := NewServer(cfg, nil)
 	defer first.Close()
 	as := first.agents
 	if as == nil {
 		t.Fatal("agent store unavailable")
-	}
-	rec := store.AgentRecord{AgentID: "restart-agent", DisplayName: "restart agent", ConfigSnapshot: []byte(`{"agent_type":"auto","workspace":{"mode":"private"}}`), RuntimeRevision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	if err := as.Save(context.Background(), rec); err != nil {
-		t.Fatal(err)
 	}
 	setup := doGoalRequest(first, http.MethodPatch, "/v1/setup/config", []byte(`{"agent":{"name":"restart-agent","description":"restart"},"user":{"preferred_name":"QA"},"onboarding":{"node_profile_completed":true}}`))
 	if setup.Code != http.StatusOK {
@@ -46,15 +53,8 @@ func TestGoalColdRestartKeepsDedicatedRuntime(t *testing.T) {
 	first.Close()
 
 	fake := &goalWakeLLM{called: make(chan struct{}, 1), release: make(chan struct{})}
-	second := NewServer(cfg, nil, WithLLM(fake), WithSkipStore())
+	second := NewServer(cfg, nil, WithLLM(fake))
 	defer second.Close()
-	if second.agents == nil {
-		var openErr error
-		second.agents, openErr = store.OpenAgents(cfg.AgentsDBPath())
-		if openErr != nil {
-			t.Fatal(openErr)
-		}
-	}
 	wake := doGoalRequest(second, http.MethodPost, "/v1/goals/"+created.ID+"/wake", nil)
 	if wake.Code != http.StatusAccepted {
 		t.Fatalf("wake=%d %s", wake.Code, wake.Body.String())

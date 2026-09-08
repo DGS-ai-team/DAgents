@@ -26,7 +26,7 @@ func TestP0TriggerCreateDisabledIsAtomic(t *testing.T) {
 	srv, ts := newTriggersTestServer(t)
 	defer ts.Close()
 	sessionID := createTestRuntime(t, srv)
-	body := []byte(`{"name":"disabled","task_template":"hello","condition":{"interval_seconds":60},"target_session_id":"` + sessionID + `","enabled":false}`)
+	body := []byte(`{"name":"disabled","task_template":"hello","condition":{"interval_seconds":60},"target_agent_id":"ops-linux-01","target_session_id":"` + sessionID + `","session_target_mode":"fixed","enabled":false}`)
 	resp, err := http.Post(ts.URL+"/v1/triggers", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestP0RecoveryHTTPFencesDeliveryAndEnable(t *testing.T) {
 	srv, ts := newTriggersTestServer(t)
 	defer ts.Close()
 	sessionID := createTestRuntime(t, srv)
-	body := []byte(`{"name":"recover-api","task_template":"hello","condition":{"interval_seconds":60},"target_session_id":"` + sessionID + `","enabled":false}`)
+	body := []byte(`{"name":"recover-api","task_template":"hello","condition":{"interval_seconds":60},"target_agent_id":"ops-linux-01","target_session_id":"` + sessionID + `","session_target_mode":"fixed","enabled":false}`)
 	resp, err := http.Post(ts.URL+"/v1/triggers", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"net/http"
@@ -25,7 +27,51 @@ func (s *Server) syncManagedTrigger(g goals.Goal) error {
 
 type autonomyInput struct {
 	goals.CreateInput
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled              *bool              `json:"enabled,omitempty"`
+	Profile              *goals.AutoProfile `json:"profile,omitempty"`
+	ExpectedRevision     *int64             `json:"expected_revision,omitempty"`
+	ExpectedGoalRevision *int64             `json:"expected_goal_revision,omitempty"`
+}
+
+// currentAutoGoal is the single binding point for the Auto profile. Legacy
+// managed data is migrated only after the caller has authenticated the Agent
+// as Auto; a migration issue is surfaced instead of guessing a Goal.
+func (s *Server) currentAutoGoal(agentID string, now time.Time) (goals.AutoProfile, *goals.Goal, error) {
+	if s.goalStore == nil {
+		return goals.AutoProfile{}, nil, fmt.Errorf("goals unavailable")
+	}
+	p, ok := s.goalStore.GetProfile(agentID)
+	if !ok {
+		valid := map[string]bool{agentID: true}
+		if _, err := s.goalStore.MigrateAutoProfiles(valid, now); err != nil {
+			return goals.AutoProfile{}, nil, err
+		}
+		p, ok = s.goalStore.GetProfile(agentID)
+	}
+	if !ok {
+		for _, issue := range s.goalStore.MigrationIssues() {
+			if issue.AgentID == agentID {
+				return goals.AutoProfile{}, nil, fmt.Errorf("recovery_required: %s", issue.Reason)
+			}
+		}
+		return goals.AutoProfile{}, nil, nil
+	}
+	if p.CurrentGoalID == "" {
+		return p, nil, nil
+	}
+	g, exists := s.goalStore.Get(p.CurrentGoalID)
+	if !exists || !g.Managed || g.AgentID != agentID {
+		return goals.AutoProfile{}, nil, fmt.Errorf("recovery_required: profile current cycle is missing")
+	}
+	return p, &g, nil
+}
+
+func (s *Server) autonomyPayload(p goals.AutoProfile, g *goals.Goal, usage goals.AgentUsage) map[string]any {
+	summary := s.projectAutoSummary(p.AgentID, p, g)
+	if g == nil {
+		return map[string]any{"goal_id": "", "status": "disabled", "limits": nil, "progress": nil, "schema_version": 2, "profile": p, "current_cycle": nil, "usage": usage, "summary": summary}
+	}
+	return map[string]any{"goal_id": g.ID, "status": g.Status, "limits": g, "progress": g.LastCheckpoint, "schema_version": 2, "profile": p, "current_cycle": g, "usage": usage, "summary": summary}
 }
 
 func (s *Server) autoAgent(id string, r *http.Request, w http.ResponseWriter) bool {
@@ -67,13 +113,13 @@ func (s *Server) handleGetAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, 503, "goals_unavailable", "goal store unavailable", nil)
 		return
 	}
-	for _, g := range s.goalStore.List() {
-		if g.AgentID == id && g.Managed {
-			writeJSON(w, 200, map[string]any{"goal_id": g.ID, "status": g.Status, "limits": g, "progress": g.LastCheckpoint})
-			return
-		}
+	p, g, err := s.currentAutoGoal(id, time.Now().UTC())
+	if err != nil {
+		writeAPIError(w, 409, "recovery_required", err.Error(), nil)
+		return
 	}
-	writeJSON(w, 200, map[string]any{"goal_id": "", "status": "disabled", "limits": nil, "progress": nil})
+	u, _ := s.goalStore.GetUsage(id)
+	writeJSON(w, 200, s.autonomyPayload(p, g, u))
 }
 
 func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) {
@@ -93,23 +139,108 @@ func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	in.AgentID = id
-	var existing *goals.Goal
-	for _, g := range s.goalStore.List() {
-		if g.AgentID == id && g.Managed {
-			c := g
-			existing = &c
-			break
-		}
+	p, existing, err := s.currentAutoGoal(id, time.Now().UTC())
+	if err != nil {
+		writeAPIError(w, 409, "recovery_required", err.Error(), nil)
+		return
 	}
 	if existing == nil {
-		enabled := in.Enabled != nil && *in.Enabled
-		g, err := s.createManagedGoal(r.Context(), in.CreateInput, enabled)
-		if err != nil {
-			writeAPIError(w, 400, "autonomy_create_failed", err.Error(), nil)
+		if p.AgentID == "" {
+			p = goals.AutoProfile{AgentID: id, PlanMode: "one_shot", Enabled: false}
+		}
+		if in.Profile != nil {
+			q := *in.Profile
+			q.AgentID = id
+			p = q
+			if p.PlanMode == "" {
+				p.PlanMode = "one_shot"
+			}
+		}
+		expected := int64(0)
+		if in.ExpectedRevision != nil {
+			expected = *in.ExpectedRevision
+		}
+		if in.ExpectedRevision == nil && p.Revision != 0 {
+			expected = p.Revision
+		}
+		if err := s.bindRecurringAuthorization(r.Context(), id, &p); err != nil {
+			writeAPIError(w, 409, "configuration_required", err.Error(), nil)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"goal_id": g.ID, "status": g.Status, "limits": g, "progress": g.LastCheckpoint})
+		p, err = s.goalStore.SaveProfile(p, expected, time.Now().UTC())
+		if err != nil {
+			writeAPIError(w, 409, "profile_conflict", err.Error(), nil)
+			return
+		}
+		// A profile-only PUT is a durable draft; it does not create or
+		// implicitly enable a business cycle.
+		if in.Profile != nil && strings.TrimSpace(in.Objective) == "" && strings.TrimSpace(in.Acceptance) == "" {
+			u, _ := s.goalStore.GetUsage(id)
+			writeJSON(w, 200, s.autonomyPayload(p, nil, u))
+			return
+		}
+		enabled := in.Enabled != nil && *in.Enabled
+		in.CreateInput.AgentID = id
+		in.CreateInput.Managed = true
+		in.CreateInput.EnabledIntent = enabled
+		key := "put-" + id
+		g, e := s.goalStore.CreateManagedCycle(in.CreateInput, key, p.Revision, time.Now().UTC(), false)
+		if e != nil {
+			writeAPIError(w, 409, "autonomy_create_failed", e.Error(), nil)
+			return
+		}
+		g, e = s.provisionManagedCycle(r.Context(), g, enabled)
+		if e != nil {
+			_, _ = s.goalStore.SetProvisionStatus(g.ID, "failed", time.Now().UTC())
+			writeAPIError(w, 409, "provisioning_failed", e.Error(), nil)
+			return
+		}
+		p, _ = s.goalStore.GetProfile(id)
+		if enabled && !p.Enabled {
+			p.Enabled = true
+			var saveErr error
+			p, saveErr = s.goalStore.SaveProfile(p, p.Revision, time.Now().UTC())
+			if saveErr != nil {
+				writeAPIError(w, 409, "profile_conflict", saveErr.Error(), nil)
+				return
+			}
+		}
+		u, _ := s.goalStore.GetUsage(id)
+		writeJSON(w, 200, s.autonomyPayload(p, gPtr(g), u))
 		return
+	}
+	var requestedProfile *goals.AutoProfile
+	expectedProfileRevision := p.Revision
+	if in.ExpectedRevision != nil {
+		expectedProfileRevision = *in.ExpectedRevision
+	}
+	// Validate run state before any profile mutation so a rejected update is
+	// observationally side-effect free.
+	for _, run := range s.goalStore.Runs(existing.ID) {
+		if run.FinishedAt == nil || run.Status == "unknown" {
+			writeAPIError(w, 409, "autonomy_state_conflict", "goal has an unresolved run", nil)
+			return
+		}
+	}
+	if in.Profile != nil {
+		q := *in.Profile
+		q.AgentID = id
+		q.CurrentGoalID = ""
+		requestedProfile = &q
+		if err := s.bindRecurringAuthorization(r.Context(), id, requestedProfile); err != nil {
+			writeAPIError(w, 409, "configuration_required", err.Error(), nil)
+			return
+		}
+		if strings.TrimSpace(in.Objective) == "" && strings.TrimSpace(in.Acceptance) == "" && in.Enabled == nil {
+			p, err = s.goalStore.SaveProfile(q, expectedProfileRevision, time.Now().UTC())
+			if err != nil {
+				writeAPIError(w, 409, "profile_conflict", err.Error(), nil)
+				return
+			}
+			u, _ := s.goalStore.GetUsage(id)
+			writeJSON(w, 200, s.autonomyPayload(p, existing, u))
+			return
+		}
 	}
 	for _, run := range s.goalStore.Runs(existing.ID) {
 		if run.FinishedAt == nil || run.Status == "unknown" {
@@ -125,15 +256,32 @@ func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 		}
 		status = &v
 	}
-	g, err := s.goalStore.UpdateConfigurationAndStatus(existing.ID, in.CreateInput, status, time.Now().UTC())
+	if requestedProfile == nil {
+		requestedProfile = &p
+	}
+	if in.Enabled != nil && in.Profile == nil {
+		requestedProfile.Enabled = *in.Enabled
+	}
+	var g goals.Goal
+	expectedGoalRevision := existing.Revision
+	if in.ExpectedGoalRevision != nil {
+		expectedGoalRevision = *in.ExpectedGoalRevision
+	}
+	p, g, err = s.goalStore.UpdateProfileAndCycle(id, existing.ID, *requestedProfile, expectedProfileRevision, expectedGoalRevision, in.CreateInput, status, time.Now().UTC())
 	if err != nil {
-		writeAPIError(w, 400, "invalid_autonomy", err.Error(), nil)
+		if errors.Is(err, goals.ErrConflict) {
+			writeAPIError(w, 409, "autonomy_revision_conflict", "autonomy configuration is stale", nil)
+		} else {
+			writeAPIError(w, 400, "invalid_autonomy", err.Error(), nil)
+		}
 		return
 	}
 	if err := s.syncManagedTrigger(g); err != nil {
-		_ = s.goalStore.RestoreConfiguration(existing.ID, *existing, time.Now().UTC())
 		writeAPIError(w, 409, "autonomy_state_conflict", err.Error(), nil)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"goal_id": g.ID, "status": g.Status, "limits": g, "progress": g.LastCheckpoint})
+	u, _ := s.goalStore.GetUsage(id)
+	writeJSON(w, 200, s.autonomyPayload(p, gPtr(g), u))
 }
+
+func gPtr(g goals.Goal) *goals.Goal { return &g }

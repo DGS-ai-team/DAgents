@@ -227,11 +227,23 @@ paths:
 
   /v1/triggers/{trigger_id}:
     delete:
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: revision
+          in: query
+          required: false
+          schema: {type: integer, format: int64, minimum: 1}
+          description: Expected revision for compare-and-swap deletion.
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
         "200":
           description: OK
+        "400": {description: Invalid revision}
+        "409": {description: Revision conflict or managed trigger}
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -239,11 +251,23 @@ paths:
         "200":
           description: OK
     patch:
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema: {type: string}
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TriggerUpdateRequest'}
       responses:
         "200":
           description: OK
+        "400": {description: Invalid patch or revision}
+        "409": {description: Revision conflict or managed trigger}
 
   /v1/workgroups/{workgroupId}/human-queue/{queueId}:
     delete:
@@ -1091,13 +1115,96 @@ paths:
   /v1/agents/{agent_id}/autonomy:
     get:
       parameters: [{name: agent_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: autonomy configuration}}
+      responses:
+        '200':
+          description: Current Auto profile, limits, cycle and usage.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AutonomyResponse'}}}
+        '409': {description: Agent is not Auto or recovery is required}
     put:
       parameters: [{name: agent_id, in: path, required: true, schema: {type: string}}]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/AutonomyRequest'}}}
-      responses: {'200': {description: autonomy updated}}
+      responses:
+        '200':
+          description: Updated Auto profile, limits, cycle and usage.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AutonomyResponse'}}}
+        '400': {description: Invalid autonomy configuration}
+        '409': {description: Profile or active-cycle conflict}
+
+  /v1/auto/overview:
+    get:
+      parameters:
+        - name: search
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [unconfigured, disabled, paused, running, needs_attention, standby, completed, stopped, failed]}
+        - name: workspace
+          in: query
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Snapshot of configured Auto Agents and their current work state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AutoOverviewResponse'}}}
+        '503': {description: Overview stores unavailable}
+
+  /v1/agents/{agent_id}/autonomy/cycles:
+    get:
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated autonomous task cycles.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutonomyCycleList'}
+        '409': {description: Agent is not Auto}
+    post:
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AutonomyCycleRequest'}
+      responses:
+        '201':
+          description: Autonomous task cycle created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Goal'}
+        '400': {description: Invalid cycle request}
+        '409': {description: Profile or cycle conflict}
+
+  /v1/agents/{agent_id}/autonomy/actions:
+    post:
+      parameters: [{name: agent_id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/AutonomyActionRequest'}}}
+      responses:
+        '200': {description: Updated autonomy state, content: {application/json: {schema: {$ref: '#/components/schemas/AutonomyResponse'}}}}
+        '409': {description: Stale revision, terminal cycle, budget or projection conflict}
 
 components:
   schemas:
@@ -1116,7 +1223,6 @@ components:
         expires_at: {type: string, format: date-time}
     AutonomyRequest:
       type: object
-      required: [objective, acceptance]
       properties:
         title: {type: string, maxLength: 160}
         objective: {type: string}
@@ -1127,6 +1233,67 @@ components:
         min_wake_interval_seconds: {type: integer, minimum: 60}
         expires_at: {type: string, format: date-time}
         enabled: {type: boolean}
+        expected_revision: {type: integer, format: int64, minimum: 0}
+        expected_goal_revision: {type: integer, format: int64, minimum: 0}
+        profile: {$ref: '#/components/schemas/AutoProfile'}
+    AutonomyActionRequest:
+      type: object
+      required: [action, expected_profile_revision]
+      properties:
+        action: {type: string, enum: [pause_goal, resume_goal, disable_auto, enable_auto]}
+        expected_profile_revision: {type: integer, format: int64, minimum: 0}
+        expected_goal_revision: {type: integer, format: int64, minimum: 0}
+    AutoProfile:
+      type: object
+      properties:
+        agent_id: {type: string}
+        revision: {type: integer, format: int64}
+        enabled: {type: boolean}
+        role_objective: {type: string}
+        role_boundaries: {type: string}
+        plan_mode: {type: string}
+        timezone: {type: string}
+        work_schedule: {type: string}
+        cycle_duration_seconds: {type: integer, format: int64, minimum: 1, maximum: 2678400, description: "Recurring cycle duration selected by the user; required for recurring plan_mode."}
+        current_goal_id: {type: string}
+        authorization_ref: {type: string}
+        business_token_budget: {type: integer, format: int64}
+        maintenance_token_budget: {type: integer, format: int64}
+        total_token_budget: {type: integer, format: int64}
+        updated_at: {type: string, format: date-time}
+    AgentUsage:
+      type: object
+      properties:
+        agent_id: {type: string}
+        business_tokens: {type: integer, format: int64}
+        maintenance_tokens: {type: integer, format: int64}
+        unknown_tokens: {type: integer, format: int64}
+        unknown: {type: boolean}
+        unknown_reason: {type: string}
+        updated_at: {type: string, format: date-time}
+    AutonomyResponse:
+      type: object
+      required: [status, schema_version, profile, usage]
+      properties:
+        goal_id: {type: string}
+        status: {type: string}
+        schema_version: {type: integer}
+        profile: {$ref: '#/components/schemas/AutoProfile'}
+        limits: {$ref: '#/components/schemas/Goal'}
+        progress: {$ref: '#/components/schemas/GoalCheckpoint'}
+        current_cycle: {$ref: '#/components/schemas/Goal'}
+        usage: {$ref: '#/components/schemas/AgentUsage'}
+        summary: {$ref: '#/components/schemas/AutoSummary'}
+    AutoSummary:
+      type: object
+      required: [state, role, usage]
+      properties:
+        state: {type: string}
+        state_reason: {type: string}
+        next_at: {type: string, format: date-time}
+        role: {type: string}
+        last_summary: {type: string}
+        usage: {$ref: '#/components/schemas/AgentUsage'}
     Goal:
       type: object
       properties:
@@ -1153,6 +1320,17 @@ components:
         evidence: {type: array, items: {type: string}}
         artifacts: {type: array, items: {type: string}}
         done: {type: boolean}
+        decision:
+          type: object
+          required: [outcome, next_action, reason, summary]
+          properties:
+            outcome: {type: string, enum: [progress, no_change, completed, blocked]}
+            summary: {type: string}
+            next_action: {type: string, enum: [at, event, none, needs_input]}
+            reason: {type: string}
+            expected_progress: {type: string, description: Required when next_action is at or event.}
+            next_wake_at: {type: string, format: date-time}
+            next_wake_after_seconds: {type: integer, minimum: 1, maximum: 2678400, description: Mutually exclusive with next_wake_at; resolved by the server clock.}
     GoalRun:
       type: object
       properties:
@@ -1163,6 +1341,67 @@ components:
         status: {type: string}
         reason: {type: string}
         tokens_used: {type: integer, format: int64}
+    AutonomyCycleRequest:
+      type: object
+      required: [idempotency_key, expected_profile_revision, objective, acceptance]
+      properties:
+        idempotency_key: {type: string}
+        expected_profile_revision: {type: integer, format: int64, minimum: 0}
+        title: {type: string, maxLength: 160}
+        objective: {type: string}
+        acceptance: {type: string}
+        max_runs: {type: integer, minimum: 1, maximum: 1000}
+        token_budget: {type: integer, format: int64, minimum: 1}
+        turn_token_budget: {type: integer, minimum: 1}
+        min_wake_interval_seconds: {type: integer, minimum: 60}
+        expires_at: {type: string, format: date-time}
+        enabled: {type: boolean}
+    AutonomyCycleList:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Goal'}}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+    AutoOverviewResponse:
+      type: object
+      required: [items, total, page, page_size, counts, as_of, revision]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AutoOverviewItem'}}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        counts: {type: object, additionalProperties: {type: integer}}
+        as_of: {type: string, format: date-time}
+        revision: {type: string, description: Opaque snapshot token, not an entity revision}
+    AutoOverviewItem:
+      type: object
+      required: [agent_id, display_name, agent_type, workspace, state]
+      properties:
+        agent_id: {type: string}
+        display_name: {type: string}
+        agent_type: {type: string, enum: [auto]}
+        workspace: {$ref: '#/components/schemas/WorkspaceConfig'}
+        state: {type: string}
+        state_reason: {type: string}
+        role_objective: {type: string}
+        goal_id: {type: string}
+        goal_title: {type: string}
+        goal_status: {type: string}
+        last_summary: {type: string}
+        tokens_used: {type: integer, format: int64}
+        token_budget: {type: integer, format: int64}
+        unknown_usage: {type: boolean}
+        next_at: {type: string, format: date-time}
+        profile_revision: {type: integer, format: int64}
+        runtime_revision: {type: integer, format: int64}
+        summary: {$ref: '#/components/schemas/AutoSummary'}
+    WorkspaceConfig:
+      type: object
+      properties:
+        mode: {type: string, enum: [private, custom]}
+        path: {type: string}
     FeedbackCreateRequest:
       type: object
       required: [category, title, body]
@@ -1186,23 +1425,46 @@ components:
         trigger_id: {type: string}
         name: {type: string}
         condition: {type: object, additionalProperties: true}
+        target_agent_id: {type: string}
+        target_session_id: {type: string, nullable: true}
+        session_target_mode: {type: string, enum: [fixed]}
+        client_id: {type: string, nullable: true}
+        task_template: {type: string}
         enabled: {type: boolean}
         pending_delivery_id: {type: string, nullable: true}
         pending_session_id: {type: string, nullable: true}
         recovery_required: {type: boolean}
         recovery_reason: {type: string}
+        owner_agent_id: {type: string}
+        controller: {type: string, enum: [user, goal, maintenance]}
+        controller_id: {type: string}
+        revision: {type: integer, format: int64}
+        created_by: {type: string}
     TriggerCreateRequest:
       type: object
-      required: [name, condition, task_template]
+      required: [name, condition, task_template, target_agent_id]
       properties:
         name: {type: string}
         condition: {type: object, additionalProperties: true}
         target_agent_id: {type: string}
         target_session_id: {type: string, nullable: true}
+        session_target_mode: {type: string, enum: [fixed]}
         task_template: {type: string}
         enabled:
           type: boolean
           default: true
+    TriggerUpdateRequest:
+      type: object
+      properties:
+        revision: {type: integer, format: int64, minimum: 1}
+        name: {type: string}
+        condition: {type: object, additionalProperties: true}
+        target_agent_id: {type: string}
+        target_session_id: {type: string, nullable: true}
+        client_id: {type: string, nullable: true}
+        task_template: {type: string}
+        enabled: {type: boolean}
+        session_target_mode: {type: string, enum: [fixed]}
     FireRecord:
       type: object
       properties:

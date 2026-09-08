@@ -3,17 +3,21 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type goalWakeLLM struct {
-	called  chan struct{}
-	release chan struct{}
+	called     chan struct{}
+	release    chan struct{}
+	checkpoint bool
+	calls      atomic.Int32
 }
 
 func (f *goalWakeLLM) NormalizeAssistant(existing []llm.Message, m llm.Message) llm.Message {
@@ -23,7 +27,17 @@ func (f *goalWakeLLM) CompleteText(context.Context, llm.CompleteRequest) (string
 	return "", nil
 }
 func (f *goalWakeLLM) StreamChat(ctx context.Context, req llm.ChatRequest, h llm.StreamHandler) (llm.ChatResult, error) {
-	f.called <- struct{}{}
+	call := f.calls.Add(1)
+	if !f.checkpoint || call%2 == 1 {
+		f.called <- struct{}{}
+	}
+	if f.checkpoint && call%2 == 1 {
+		at := time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339Nano)
+		return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "call-goal-checkpoint", Type: "function", Function: llm.ToolCallFunction{
+			Name:      "goal_checkpoint",
+			Arguments: fmt.Sprintf(`{"summary":"progress","decision":{"outcome":"progress","summary":"progress","next_action":"at","next_wake_at":%q,"reason":"continue","expected_progress":"next step"}}`, at),
+		}}}, FinishReason: "tool_calls"}, nil
+	}
 	select {
 	case <-f.release:
 	case <-ctx.Done():

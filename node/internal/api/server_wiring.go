@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -41,17 +43,28 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	if s.goalStore != nil {
 		reg.SetGoalCheckpoint(func(_ context.Context, goalID, runID string, cp tools.GoalCheckpoint) error {
-			_, err := s.goalStore.Checkpoint(goalID, runID, goals.Checkpoint{Summary: cp.Summary, Completed: cp.Completed, NextSteps: cp.NextSteps, Evidence: cp.Evidence, Artifacts: cp.Artifacts, ExternalCondition: cp.ExternalCondition, NextWakeAt: cp.NextWakeAt, Done: cp.Done}, time.Now())
-			if err == nil && s.triggerStore != nil {
-				if g, ok := s.goalStore.Get(goalID); ok && g.TriggerID != "" && g.NextWakeAt != nil {
-					if _, ok := s.triggerStore.GetTrigger(g.TriggerID); ok {
-						v := float64(g.NextWakeAt.UnixNano()) / 1e9
-						if e := s.triggerStore.UpdateNextFireAt(g.TriggerID, &v); e != nil {
-							return e
-						}
+			now := time.Now().UTC()
+			var decision *goals.FinalDecision
+			if cp.Decision != nil {
+				raw, _ := json.Marshal(cp.Decision)
+				var d goals.FinalDecision
+				if err := json.Unmarshal(raw, &d); err != nil {
+					return fmt.Errorf("invalid goal decision: %w", err)
+				} else {
+					if d.NextWakeAt != nil && d.NextWakeAfterSeconds != nil {
+						return fmt.Errorf("next_wake_at and next_wake_after_seconds are mutually exclusive")
 					}
+					if d.NextWakeAfterSeconds != nil {
+						if *d.NextWakeAfterSeconds <= 0 || *d.NextWakeAfterSeconds > 2678400 {
+							return fmt.Errorf("invalid next_wake_after_seconds")
+						}
+						t := now.Add(time.Duration(*d.NextWakeAfterSeconds) * time.Second)
+						d.NextWakeAt, d.NextWakeAfterSeconds = &t, nil
+					}
+					decision = &d
 				}
 			}
+			_, err := s.goalStore.Checkpoint(goalID, runID, goals.Checkpoint{Summary: cp.Summary, Completed: cp.Completed, NextSteps: cp.NextSteps, Evidence: cp.Evidence, Artifacts: cp.Artifacts, ExternalCondition: cp.ExternalCondition, NextWakeAt: cp.NextWakeAt, Done: cp.Done, Decision: decision}, now)
 			return err
 		})
 	}

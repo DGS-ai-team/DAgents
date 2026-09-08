@@ -27,12 +27,14 @@ func (s *Server) autonomyToolGet(ctx context.Context, agentID string) (any, erro
 	if s == nil || s.goalStore == nil {
 		return nil, fmt.Errorf("goals unavailable")
 	}
-	for _, g := range s.goalStore.List() {
-		if g.Managed && strings.TrimSpace(g.AgentID) == strings.TrimSpace(agentID) {
-			return autonomyView(g), nil
-		}
+	_, g, err := s.currentAutoGoal(agentID, time.Now().UTC())
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"goal_id": "", "status": "disabled", "objective": "", "acceptance": "", "next_wake_at": nil, "limits": nil, "usage": nil}, nil
+	if g == nil {
+		return map[string]any{"goal_id": "", "status": "disabled", "objective": "", "acceptance": "", "next_wake_at": nil, "limits": nil, "usage": nil}, nil
+	}
+	return autonomyView(*g), nil
 }
 
 func (s *Server) autonomyToolUpdate(ctx context.Context, agentID string, in tools.AutonomyUpdate) (any, error) {
@@ -44,17 +46,14 @@ func (s *Server) autonomyToolUpdate(ctx context.Context, agentID string, in tool
 	}
 	s.goalWakeMu.Lock()
 	defer s.goalWakeMu.Unlock()
-	var goal goals.Goal
-	found := false
-	for _, g := range s.goalStore.List() {
-		if g.Managed && strings.TrimSpace(g.AgentID) == strings.TrimSpace(agentID) {
-			goal, found = g, true
-			break
-		}
+	_, gp, err := s.currentAutoGoal(agentID, time.Now().UTC())
+	if err != nil {
+		return nil, err
 	}
-	if !found {
+	if gp == nil {
 		return nil, fmt.Errorf("autonomy is not configured; configure it in Agent settings first")
 	}
+	goal := *gp
 	if goal.Status == goals.StatusCompleted || goal.Status == goals.StatusStopped || goal.Runs >= goal.MaxRuns || goal.TokensUsed >= goal.TokenBudget {
 		return nil, fmt.Errorf("goal is not adjustable in its current state")
 	}
@@ -93,7 +92,7 @@ func (s *Server) autonomyToolUpdate(ctx context.Context, agentID string, in tool
 	}
 	// All intent changes, including a text-only change, use the same atomic
 	// store operation so limits and counters cannot be overwritten.
-	goal, err := s.goalStore.UpdateAutonomyIntent(goal.ID, objective, acceptance, in.NextWakeAt, now)
+	goal, err = s.goalStore.UpdateAutonomyIntent(goal.ID, objective, acceptance, in.NextWakeAt, now)
 	if err != nil {
 		return nil, err
 	}

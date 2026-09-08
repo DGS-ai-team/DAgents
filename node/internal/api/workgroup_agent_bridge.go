@@ -160,11 +160,12 @@ func (b *workgroupAgentBridge) buildAgentSessionRuntime(
 		return session.TurnOptions{}, nil, nil, nil, err
 	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
-		NodeCFG:  b.server.cfg,
-		BaseTurn: b.server.sessions.DefaultTurnOptions(),
-		AgentID:  req.AgentID,
-		Snapshot: snap,
-		MCP:      b.server.mcpManager,
+		NodeCFG:              b.server.cfg,
+		BaseTurn:             b.server.sessions.DefaultTurnOptions(),
+		AgentID:              req.AgentID,
+		Snapshot:             snap,
+		MCP:                  b.server.mcpManager,
+		WorkspaceCoordinator: b.server.workspaceCoord,
 		// A Workgroup member is an isolated execution runtime, not the Agent's
 		// personal conversation. Do not open or mutate its memory store.
 		DisableMemory: true,

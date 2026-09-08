@@ -18,6 +18,97 @@ func (s *Server) createManagedGoal(ctx context.Context, in goals.CreateInput, en
 	return s.createGoal(ctx, in, enabled, true)
 }
 
+// provisionManagedCycle attaches the runtime, dedicated session and trigger
+// to a cycle that was durably created by the goals store. It is retry-safe:
+// existing bindings are reused and no second trigger is created.
+func (s *Server) provisionManagedCycle(ctx context.Context, g goals.Goal, enabled bool) (goals.Goal, error) {
+	if s.goalStore == nil || s.agents == nil || s.triggerStore == nil {
+		return g, fmt.Errorf("managed goal dependencies unavailable")
+	}
+	if g.ProvisionStatus == "ready" && g.SessionID != "" && g.TriggerID != "" {
+		return g, nil
+	}
+	rec, err := s.agents.Get(ctx, g.AgentID)
+	if err != nil || rec == nil || rec.Archived {
+		return g, fmt.Errorf("target agent unavailable")
+	}
+	sid := g.SessionID
+	if sid == "" {
+		sid = "goal-session-" + g.ID
+	}
+	if err := s.ensureGoalRuntime(ctx, *rec, sid); err != nil {
+		return g, err
+	}
+	now := time.Now().UTC()
+	if g.SessionID == "" {
+		before := g
+		updated, bindErr := s.goalStore.BindSession(g.ID, sid, now)
+		if bindErr != nil {
+			return before, bindErr
+		}
+		g = updated
+	}
+	if g.TriggerID != "" {
+		tr, ok := s.triggerStore.GetTrigger(g.TriggerID)
+		if !ok || tr.ManagedGoalID != g.ID || tr.OwnerAgentID != g.AgentID || tr.Controller != "goal" || tr.ControllerID != g.ID || tr.TargetAgentID != g.AgentID || tr.TargetSessionID == nil || *tr.TargetSessionID != sid {
+			return g, fmt.Errorf("managed trigger identity conflict")
+		}
+	}
+	if g.TriggerID == "" {
+		interval := g.MinWakeIntervalSeconds
+		if interval < 60 {
+			interval = 300
+		}
+		vEnabled := false // enable only after both durable bindings exist
+		def, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{
+			Name:          "managed-goal-" + g.ID,
+			Condition:     map[string]any{"interval_seconds": interval},
+			TargetAgentID: g.AgentID, TargetSessionID: &sid,
+			TaskTemplate: g.Objective, Enabled: &vEnabled,
+		}, s.cfg.NodeID, now)
+		if err != nil {
+			return g, err
+		}
+		def.ManagedGoalID, def.OwnerAgentID, def.Controller, def.ControllerID, def.CreatedBy = g.ID, g.AgentID, "goal", g.ID, "autonomy"
+		if g.NextWakeAt != nil {
+			v := float64(g.NextWakeAt.UnixNano()) / 1e9
+			def.NextFireAt = &v
+		}
+		def.TriggerID = "managed-trigger-" + g.ID
+		if existing, ok := s.triggerStore.GetTrigger(def.TriggerID); ok {
+			if existing.ManagedGoalID != g.ID || existing.OwnerAgentID != g.AgentID || existing.Controller != "goal" || existing.ControllerID != g.ID || existing.TargetAgentID != g.AgentID || existing.TargetSessionID == nil || *existing.TargetSessionID != sid {
+				return g, fmt.Errorf("managed trigger identity conflict")
+			}
+		} else if _, err = s.triggerStore.CreateTrigger(def); err != nil {
+			return g, err
+		}
+		beforeBind := g
+		g, err = s.goalStore.BindTrigger(g.ID, def.TriggerID, now)
+		if err != nil {
+			return beforeBind, err
+		}
+	}
+	if enabled && g.Status == goals.StatusPaused && (g.ProvisionStatus == "pending" || g.StatusReason == "provisioning_failed") {
+		before := g
+		updated, setErr := s.goalStore.SetStatus(g.ID, goals.StatusActive, now)
+		if setErr != nil {
+			return before, setErr
+		}
+		g = updated
+	}
+	if err := s.syncManagedTrigger(g); err != nil {
+		return g, err
+	}
+	if g.ProvisionStatus != "ready" {
+		if ready, e := s.goalStore.SetProvisionStatus(g.ID, "ready", now); e == nil {
+			g = ready
+		} else {
+			return g, e
+		}
+	}
+	return g, nil
+}
+
 func (s *Server) createGoal(ctx context.Context, in goals.CreateInput, enabled, managed bool) (goals.Goal, error) {
 	if s.goalStore == nil || s.agents == nil || s.triggerStore == nil {
 		return goals.Goal{}, fmt.Errorf("managed goal dependencies unavailable")
@@ -68,6 +159,9 @@ func (s *Server) createGoal(ctx context.Context, in goals.CreateInput, enabled, 
 		return goals.Goal{}, err
 	}
 	def.ManagedGoalID = g.ID
+	def.Controller = "goal"
+	def.ControllerID = g.ID
+	def.CreatedBy = "autonomy"
 	if g.NextWakeAt != nil {
 		v := float64(g.NextWakeAt.UnixNano()) / 1e9
 		def.NextFireAt = &v

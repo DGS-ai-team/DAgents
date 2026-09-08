@@ -1,7 +1,9 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,17 +28,14 @@ func (s *Server) handleRecoverTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		DeliveryID string `json:"delivery_id"`
+		Revision   int64  `json:"revision"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("trigger_id"))
-	if d, ok := store.GetTrigger(id); ok && d.ManagedGoalID != "" {
-		writeAPIError(w, http.StatusConflict, "managed_goal_trigger", "managed goal triggers are controlled by the goal", nil)
-		return
-	}
-	if err := store.RecoverPendingDelivery(id, body.DeliveryID); err != nil {
+	if err := store.RecoverAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id, body.Revision, body.DeliveryID); err != nil {
 		writeAPIError(w, http.StatusConflict, "recovery_required", err.Error(), map[string]any{"trigger_id": id})
 		return
 	}
@@ -77,12 +76,7 @@ func (s *Server) handleCreateTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "unsupported_session_target_mode", "P0 supports only fixed session targets", nil)
 		return
 	}
-	def, err := triggers.NewDefinitionFromCreate(body, s.cfg.NodeID, time.Now())
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_trigger", err.Error(), nil)
-		return
-	}
-	created, err := store.CreateTrigger(def)
+	created, err := store.CreateAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, body, time.Now())
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "create_failed", err.Error(), nil)
 		return
@@ -95,7 +89,7 @@ func (s *Server) handleListTriggers(w http.ResponseWriter, _ *http.Request) {
 	if store == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"triggers": store.ListTriggers()})
+	writeJSON(w, http.StatusOK, map[string]any{"triggers": store.ListAuthorized(triggers.Principal{Kind: "admin", ID: "local"})})
 }
 
 func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
@@ -104,8 +98,8 @@ func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("trigger_id"))
-	def, ok := store.GetTrigger(id)
-	if !ok {
+	def, err := store.GetAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id)
+	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", map[string]any{"trigger_id": id})
 		return
 	}
@@ -118,13 +112,22 @@ func (s *Server) handleUpdateTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("trigger_id"))
-	if d, ok := store.GetTrigger(id); ok && d.ManagedGoalID != "" {
+	current, authErr := store.GetAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id)
+	if authErr != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", nil)
+		return
+	}
+	if current.Controller != "user" || current.ManagedGoalID != "" {
 		writeAPIError(w, 409, "managed_goal_trigger", "managed goal triggers are controlled by the goal", nil)
 		return
 	}
 	var patch triggers.UpdatePatch
 	if err := decodeJSON(r, &patch); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if patch.Revision != nil && *patch.Revision <= 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_revision", "revision must be positive", nil)
 		return
 	}
 	if triggers.ConditionCmd(patch.Condition) != "" {
@@ -143,9 +146,18 @@ func (s *Server) handleUpdateTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "unsupported_session_target_mode", "P0 supports only fixed session targets", nil)
 		return
 	}
-	updated, err := store.UpdateTrigger(id, patch, time.Now())
+	expected := current.Revision
+	if patch.Revision != nil {
+		expected = *patch.Revision
+	}
+	patch.Revision = nil
+	updated, err := store.UpdateAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id, expected, patch, time.Now())
 	if triggers.IsNotFound(err) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", map[string]any{"trigger_id": id})
+		return
+	}
+	if errors.Is(err, triggers.ErrRevisionConflict) {
+		writeAPIError(w, http.StatusConflict, "revision_conflict", err.Error(), nil)
 		return
 	}
 	if err != nil {
@@ -161,20 +173,51 @@ func (s *Server) handleDeleteTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("trigger_id"))
-	if d, ok := store.GetTrigger(id); ok && d.ManagedGoalID != "" {
+	current, authErr := store.GetAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id)
+	if authErr != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", nil)
+		return
+	}
+	if current.Controller != "user" || current.ManagedGoalID != "" {
 		writeAPIError(w, 409, "managed_goal_trigger", "managed goal triggers are controlled by the goal", nil)
+		return
+	}
+	expected := current.Revision
+	if raw := r.URL.Query().Get("revision"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_revision", "revision must be positive", nil)
+			return
+		}
+		expected = parsed
+	}
+	if raw := r.Header.Get("If-Match"); raw != "" {
+		parsed, err := strconv.ParseInt(strings.Trim(raw, "\""), 10, 64)
+		if err != nil || parsed <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_revision", "revision must be positive", nil)
+			return
+		}
+		expected = parsed
+	}
+	if err := store.DeleteAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id, expected); err != nil {
+		stable := "delete_failed"
+		if errors.Is(err, triggers.ErrRevisionConflict) {
+			stable = "revision_conflict"
+		}
+		writeAPIError(w, http.StatusConflict, stable, err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"trigger_id": id,
-		"deleted":    store.DeleteTrigger(id),
+		"deleted":    true,
 	})
 }
 
 type triggerFireRequest struct {
-	Reason  string         `json:"reason"`
-	Payload map[string]any `json:"payload"`
-	Force   bool           `json:"force"`
+	Reason   string         `json:"reason"`
+	Payload  map[string]any `json:"payload"`
+	Force    bool           `json:"force"`
+	Revision int64          `json:"revision"`
 }
 
 func (s *Server) handleFireTrigger(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +241,7 @@ func (s *Server) handleFireTrigger(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "manual"
 	}
-	record, err := s.triggerSched.FireTrigger(id, reason, body.Payload, body.Force, nil)
+	record, err := s.triggerSched.FireAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id, body.Revision, reason, body.Payload, body.Force, nil)
 	if triggers.IsNotFound(err) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", map[string]any{"trigger_id": id})
 		return
@@ -216,9 +259,10 @@ func (s *Server) handleTriggerHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("trigger_id"))
-	if _, ok := store.GetTrigger(id); !ok {
+	records, err := store.HistoryAuthorized(triggers.Principal{Kind: "admin", ID: "local"}, id)
+	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", map[string]any{"trigger_id": id})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"records": store.ListHistory(id)})
+	writeJSON(w, http.StatusOK, map[string]any{"records": records})
 }

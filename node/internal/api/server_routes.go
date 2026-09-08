@@ -12,6 +12,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/agent/update/apply", s.handlePlatformUpdateApply)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.mux.HandleFunc("GET /v1/auto/overview", s.handleAutoOverview)
 	s.registerMCPRoutes()
 	s.registerLinuxChannelRoutes()
 	s.registerTerminalRoutes()

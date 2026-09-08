@@ -31,6 +31,9 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/autonomy", s.handleGetAgentAutonomy)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/autonomy", s.handlePutAgentAutonomy)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/autonomy/cycles", s.handleGetAutonomyCycles)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/cycles", s.handlePostAutonomyCycle)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/actions", s.handleAutonomyAction)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
 	// Phase 2–4：agent 路径别名（内部仍走 session 实现，id 相同）。
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
@@ -656,11 +659,12 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("resolve agent llm: %w", err)
 	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
-		NodeCFG:  s.cfg,
-		BaseTurn: s.sessions.DefaultTurnOptions(),
-		AgentID:  id,
-		Snapshot: snapParsed,
-		MCP:      s.mcpManager,
+		NodeCFG:              s.cfg,
+		BaseTurn:             s.sessions.DefaultTurnOptions(),
+		AgentID:              id,
+		Snapshot:             snapParsed,
+		MCP:                  s.mcpManager,
+		WorkspaceCoordinator: s.workspaceCoord,
 	})
 	if err != nil {
 		return fmt.Errorf("build agent runtime: %w", err)

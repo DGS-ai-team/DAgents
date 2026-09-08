@@ -39,7 +39,7 @@ func (s *Server) ensureGoalRuntime(ctx context.Context, rec store.AgentRecord, s
 			return fmt.Errorf("resolve goal agent LLM: %w", err)
 		}
 	}
-	built, err := agentruntime.Build(agentruntime.BuildParams{NodeCFG: s.cfg, BaseTurn: s.sessions.DefaultTurnOptions(), AgentID: rec.AgentID, Snapshot: snap, MCP: s.mcpManager})
+	built, err := agentruntime.Build(agentruntime.BuildParams{NodeCFG: s.cfg, BaseTurn: s.sessions.DefaultTurnOptions(), AgentID: rec.AgentID, Snapshot: snap, MCP: s.mcpManager, WorkspaceCoordinator: s.workspaceCoord})
 	if err != nil {
 		return err
 	}

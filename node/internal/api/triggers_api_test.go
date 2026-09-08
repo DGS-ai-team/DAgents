@@ -39,10 +39,12 @@ func TestTriggersAPICreateFireHistory(t *testing.T) {
 	sessionID := createTestRuntime(t, srv)
 
 	createBody := map[string]any{
-		"name":              "smoke",
-		"task_template":     "hello {reason}",
-		"condition":         map[string]any{"interval_seconds": 3600},
-		"target_session_id": sessionID,
+		"name":                "smoke",
+		"task_template":       "hello {reason}",
+		"condition":           map[string]any{"interval_seconds": 3600},
+		"target_session_id":   sessionID,
+		"target_agent_id":     "ops-linux-01",
+		"session_target_mode": "fixed",
 	}
 	raw, _ := json.Marshal(createBody)
 	createResp, err := http.Post(ts.URL+"/v1/triggers", "application/json", bytes.NewReader(raw))

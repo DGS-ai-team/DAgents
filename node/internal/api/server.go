@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
@@ -32,6 +33,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -58,6 +60,7 @@ type Server struct {
 	store           *store.SQLiteStore
 	triggerStore    *triggers.Store
 	triggerSched    *triggers.Scheduler
+	startupErr      error
 	goalStore       *goals.Store
 	goalWake        goals.WakeFunc
 	goalWakeMu      sync.Mutex
@@ -69,6 +72,7 @@ type Server struct {
 	feedbackRateMu  sync.Mutex
 	feedbackRate    map[string][]time.Time
 	tools           *tools.Registry
+	workspaceCoord  *workspacecoord.Coordinator
 	transfers       *tools.LinuxTransferManager
 	browserMu       sync.RWMutex
 	browserMgr      *browser.Manager
@@ -171,6 +175,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	llmRuntime := llm.NewRuntimeSettings(cfg)
 	o := serverOptions{llmClient: llm.NewFromConfig(cfg, llmRuntime)}
+	sharedWorkspaceCoord := workspacecoord.New()
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -194,6 +199,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		o.tools = reg
 	}
+	o.tools.SetWorkspaceCoordinator(sharedWorkspaceCoord)
 	if o.policyEngine == nil {
 		o.policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
 		logger.Info("policy default engine seeded (per-agent policy stored in agents.db)")
@@ -342,15 +348,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
+	var startupErr error
 	var goalStore *goals.Store
 	if opened, err := goals.OpenStore(filepath.Join(cfg.RuntimeDir(), "goals.json")); err != nil {
 		logger.Warn("goal store init failed", "error", err)
+		startupErr = err
 	} else {
 		goalStore = opened
 	}
 	var triggerSubmitter *session.TriggerSubmitter
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {
 		logger.Warn("trigger store init failed", "error", err, "path", cfg.TriggersStorePath())
+		startupErr = err
 	} else {
 		triggerStore = opened
 		triggerStore.SetLogger(logger)
@@ -507,6 +516,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		sessions:             mgr,
 		triggerStore:         triggerStore,
 		triggerSched:         triggerSched,
+		startupErr:           startupErr,
 		goalStore:            goalStore,
 		registrar:            registrar,
 		updateChecker:        updateChecker,
@@ -515,6 +525,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		feedbackStore:        feedbackStore,
 		feedbackRate:         make(map[string][]time.Time),
 		tools:                o.tools,
+		workspaceCoord:       sharedWorkspaceCoord,
 		transfers:            transferManager,
 		browserMgr:           browserMgr,
 		mediaRegister:        mediaRegister,
@@ -527,6 +538,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	if s.workgroupAgents != nil {
 		s.workgroupAgents.server = s
+	}
+	if registrar != nil {
+		registrar.SetAutoSummaryProvider(s.autoSummaryProvider())
 	}
 	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
 		registry, err := s.terminalToolsRegistry(agentID)
@@ -610,7 +624,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 					return "", err
 				}
 			}
+			nowUTC := time.Now().UTC()
 			content := "长期目标：" + g.Objective + "\n验收条件：" + g.Acceptance
+			content += fmt.Sprintf("\n可信当前UTC：%s\n本Run generation：%d", nowUTC.Format(time.RFC3339), run.Generation)
+			content += "\ngoal_checkpoint 的 decision.summary 与 reason 必填；next_action=at/event 时 expected_progress 必填。"
+			if g.MinWakeIntervalSeconds > 0 {
+				content += fmt.Sprintf("\n最早唤醒时间：%s", nowUTC.Add(time.Duration(g.MinWakeIntervalSeconds)*time.Second).Format(time.RFC3339))
+			}
+			if g.ExpiresAt != nil {
+				content += fmt.Sprintf("\n最迟唤醒时间：%s", g.ExpiresAt.UTC().Format(time.RFC3339))
+			}
 			if g.LastCheckpoint != nil {
 				content += "\n上次进度摘要：" + g.LastCheckpoint.Summary
 			}
@@ -632,6 +655,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			return deliveryID, nil
 		}
 		if triggerSched != nil {
+			triggerSched.SetReconciler(func(ctx context.Context, now time.Time) error {
+				return s.reconcileAutoIntents(ctx, now)
+			})
 			triggerSched.SetManagedFire(func(ctx context.Context, def triggers.Definition, now time.Time) triggers.FireRecord {
 				s.goalWakeMu.Lock()
 				defer s.goalWakeMu.Unlock()
@@ -642,7 +668,22 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 				if !s.managedGoalAuto(ctx, g) {
 					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "agent is not auto"}
 				}
-				if g.NextWakeAt != nil && now.Before(*g.NextWakeAt) {
+				if def.ManagedGeneration > 0 {
+					intent, ie := s.goalStore.GetScheduleIntent(g.ID, "goal")
+					profile, pok := s.goalStore.GetProfile(g.AgentID)
+					if ie != nil || !pok || !profile.Enabled || profile.Revision != intent.ProfileRevision || intent.Generation != def.ManagedGeneration || intent.Fingerprint != def.ManagedFingerprint || intent.State != goals.IntentProjected || def.ManagedIntentID == "" || def.ManagedIntentID != intent.ID || g.TriggerID != def.TriggerID || def.LastFiredAt != nil {
+						return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "stale or consumed intent"}
+					}
+				} else if _, err := s.goalStore.GetScheduleIntent(g.ID, "goal"); err == nil {
+					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "intent projection required"}
+				}
+				dueAt := g.NextWakeAt
+				if def.ManagedGeneration > 0 {
+					if intent, err := s.goalStore.GetScheduleIntent(g.ID, "goal"); err == nil && intent.DueAt != nil {
+						dueAt = intent.DueAt
+					}
+				}
+				if dueAt != nil && now.Before(*dueAt) {
 					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "next wake not due"}
 				}
 				if s.goalAgentBusy(g) {
@@ -682,7 +723,63 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	})
 	s.registerRoutes()
 	if triggerSched != nil {
-		triggerSched.Start()
+		valid := map[string]bool{}
+		validAuto := map[string]bool{}
+		if s.agents != nil {
+			if records, err := s.agents.List(context.Background()); err == nil {
+				for _, rec := range records {
+					if !rec.Archived {
+						snap, parseErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+						valid[rec.AgentID] = true
+						if parseErr == nil && snap.AgentType == "auto" {
+							validAuto[rec.AgentID] = true
+						}
+					}
+				}
+			} else if s.startupErr == nil {
+				s.startupErr = err
+			}
+		}
+		if s.startupErr == nil {
+			if s.goalStore != nil {
+				if _, err := s.goalStore.MigrateAutoProfiles(validAuto, time.Now().UTC()); err != nil {
+					s.startupErr = err
+				}
+			}
+		}
+		if s.startupErr == nil && s.goalStore != nil && s.triggerStore != nil {
+			projector := &AutoIntentProjector{Goals: s.goalStore, Triggers: s.triggerStore}
+			for _, intent := range s.goalStore.ListScheduleIntents("") {
+				if _, err := projector.Project(intent.GoalID, intent.Purpose); err != nil {
+					// A paused/disabled profile or unsupported event source is an
+					// isolated intent; malformed persistence remains fail-closed.
+					if strings.Contains(err.Error(), "intent_projection_fenced") || strings.Contains(err.Error(), "event_projection_unsupported") {
+						continue
+					}
+					s.startupErr = fmt.Errorf("restore schedule intent %s: %w", intent.ID, err)
+					break
+				}
+			}
+		}
+		if s.startupErr == nil {
+			goalRefs := map[string]triggers.GoalRef{}
+			if s.goalStore != nil {
+				for _, g := range s.goalStore.List() {
+					goalRefs[g.ID] = triggers.GoalRef{AgentID: g.AgentID, TriggerID: g.TriggerID, Managed: g.Managed}
+				}
+			}
+			if err := s.triggerStore.ValidateOwnersWithGoals(valid, goalRefs); err != nil {
+				logger.Error("trigger owner validation failed", "error", err)
+				triggerSched = nil
+				s.triggerSched = nil
+				s.startupErr = err
+			} else {
+				triggerSched.Start()
+			}
+		} else {
+			triggerSched = nil
+			s.triggerSched = nil
+		}
 	}
 	return s
 }
