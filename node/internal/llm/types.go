@@ -94,3 +94,11 @@ type Client interface {
 	// NormalizeAssistant 写入 session history 前规范化 assistant 消息（含 reasoning_content 策略）。
 	NormalizeAssistant(existing []Message, msg Message) Message
 }
+
+// CompletionWithUsageClient is an optional extension implemented by clients
+// that can expose usage from a non-streaming completion. A nil Usage means
+// the provider omitted usage; callers must not interpret that as zero usage.
+// Keeping this separate preserves compatibility with existing Client mocks.
+type CompletionWithUsageClient interface {
+	CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error)
+}
