@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -61,6 +62,7 @@ func TestRenderTaskTemplate(t *testing.T) {
 }
 
 type fakeSubmitter struct {
+	mu       sync.Mutex
 	sessions []string
 	messages []string
 }
@@ -70,12 +72,16 @@ func (f *fakeSubmitter) EnsureSession(requestedID string) (string, error) {
 	if id == "" {
 		id = "sess-generated"
 	}
+	f.mu.Lock()
 	f.sessions = append(f.sessions, id)
+	f.mu.Unlock()
 	return id, nil
 }
 
 func (f *fakeSubmitter) SubmitTriggerMessage(sessionID, triggerID, content string) error {
+	f.mu.Lock()
 	f.messages = append(f.messages, sessionID+":"+triggerID+":"+content)
+	f.mu.Unlock()
 	return nil
 }
 

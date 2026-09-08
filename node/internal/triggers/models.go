@@ -57,6 +57,11 @@ type Definition struct {
 	RecoveryRequired  bool              `json:"recovery_required,omitempty"`
 	RecoveryReason    string            `json:"recovery_reason,omitempty"`
 	ManagedGoalID     string            `json:"managed_goal_id,omitempty"`
+	OwnerAgentID      string            `json:"owner_agent_id,omitempty"`
+	Controller        string            `json:"controller,omitempty"`
+	ControllerID      string            `json:"controller_id,omitempty"`
+	Revision          int64             `json:"revision,omitempty"`
+	CreatedBy         string            `json:"created_by,omitempty"`
 }
 
 // CreateInput 创建触发器入参（工具 / HTTP）。
@@ -73,6 +78,7 @@ type CreateInput struct {
 
 // UpdatePatch 部分更新；nil 字段表示不修改。
 type UpdatePatch struct {
+	Revision          *int64             `json:"revision,omitempty"`
 	Name              *string            `json:"name,omitempty"`
 	Condition         map[string]any     `json:"condition,omitempty"`
 	TargetAgentID     *string            `json:"target_agent_id,omitempty"`
@@ -203,6 +209,7 @@ func NewDefinitionFromCreate(in CreateInput, agentID string, now time.Time) (Def
 		Enabled:           enabled,
 		CreatedAt:         current,
 		UpdatedAt:         current,
+		OwnerAgentID:      targetAgent, Controller: "user", ControllerID: targetAgent, Revision: 1, CreatedBy: "user",
 	}
 	return def.WithNextFire(now), nil
 }

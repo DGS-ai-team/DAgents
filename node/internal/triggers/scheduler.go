@@ -123,6 +123,32 @@ func (s *Scheduler) FireTrigger(triggerID, reason string, payload map[string]any
 	return s.fire(context.Background(), *def, reason, payload, force, opts), nil
 }
 
+func (s *Scheduler) FireAuthorized(p Principal, triggerID string, expected int64, reason string, payload map[string]any, force bool, opts *FireOptions) (FireRecord, error) {
+	def, ok := s.store.GetTrigger(triggerID)
+	if !ok || !p.canOwn(*def) {
+		return FireRecord{}, errTriggerNotFound
+	}
+	if def.ManagedGoalID != "" {
+		return FireRecord{}, fmt.Errorf("managed goal trigger is controlled by goal")
+	}
+	if def.Controller != "user" {
+		return FireRecord{}, fmt.Errorf("trigger controller does not permit manual fire")
+	}
+	if expected > 0 && def.Revision != expected {
+		return FireRecord{}, fmt.Errorf("revision conflict")
+	}
+	if expected == 0 {
+		expected = def.Revision
+	}
+	if opts == nil {
+		opts = &FireOptions{}
+	}
+	copy := *opts
+	copy.Principal = &p
+	copy.ExpectedRevision = expected
+	return s.fire(context.Background(), *def, reason, payload, force, &copy), nil
+}
+
 func (s *Scheduler) runLoop(stopCh, doneCh chan struct{}) {
 	// Stop clears the fields to allow a later restart. Keep these per-run channel
 	// references so clearing the fields cannot make the stop case nil.
@@ -224,7 +250,13 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 	if reason == "schedule" {
 		occurrence = def.NextFireAt
 	}
-	if err := s.store.ClaimDeliveryForOccurrence(def.TriggerID, deliveryID, sessionID, occurrence); err != nil {
+	var claimErr error
+	if opts != nil && opts.Principal != nil {
+		claimErr = s.store.ClaimAuthorized(*opts.Principal, def.TriggerID, opts.ExpectedRevision, deliveryID, sessionID, occurrence)
+	} else {
+		claimErr = s.store.ClaimDeliveryForOccurrence(def.TriggerID, deliveryID, sessionID, occurrence)
+	}
+	if err := claimErr; err != nil {
 		record := s.record(def, FireStatusError, reason, payload, "delivery claim failed: "+err.Error(), &sessionID, &clientID, content)
 		return record
 	}

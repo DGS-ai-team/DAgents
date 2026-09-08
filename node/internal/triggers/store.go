@@ -17,6 +17,38 @@ import (
 )
 
 var errTriggerNotFound = errors.New("trigger not found")
+var ErrRevisionConflict = errors.New("revision conflict")
+
+func (s *Store) CreateAuthorized(p Principal, in CreateInput, now time.Time) (Definition, error) {
+	if p.Kind != "admin" && p.Kind != "agent" {
+		return Definition{}, errTriggerNotFound
+	}
+	if p.Kind == "agent" {
+		if strings.TrimSpace(in.TargetAgentID) == "" {
+			in.TargetAgentID = p.AgentID
+		}
+		if strings.TrimSpace(in.TargetAgentID) != strings.TrimSpace(p.AgentID) {
+			return Definition{}, errTriggerNotFound
+		}
+	}
+	def, err := NewDefinitionFromCreate(in, in.TargetAgentID, now)
+	if err != nil {
+		return Definition{}, err
+	}
+	def.OwnerAgentID = strings.TrimSpace(in.TargetAgentID)
+	def.Controller, def.ControllerID = "user", def.OwnerAgentID
+	def.CreatedBy = strings.TrimSpace(p.ID)
+	if def.CreatedBy == "" {
+		def.CreatedBy = strings.TrimSpace(p.AgentID)
+	}
+	created, err := s.CreateTrigger(def)
+	if err != nil {
+		s.logAuthorization(p, def, "create", "denied", err.Error())
+		return Definition{}, err
+	}
+	s.logAuthorization(p, created, "create", "allowed", "")
+	return created, nil
+}
 
 // Store 触发器 JSON 持久化（内存索引 + 原子写盘）。
 type Store struct {
@@ -27,6 +59,276 @@ type Store struct {
 	history      []FireRecord
 	pending      *pendingDelivery
 	logger       *slog.Logger
+}
+
+func cloneDefinition(in Definition) Definition {
+	out := in
+	out.Condition = cloneMap(in.Condition)
+	cloneFloat := func(v *float64) *float64 {
+		if v == nil {
+			return nil
+		}
+		x := *v
+		return &x
+	}
+	out.NextFireAt = cloneFloat(in.NextFireAt)
+	out.LastFiredAt = cloneFloat(in.LastFiredAt)
+	if in.TargetSessionID != nil {
+		v := *in.TargetSessionID
+		out.TargetSessionID = &v
+	}
+	if in.ClientID != nil {
+		v := *in.ClientID
+		out.ClientID = &v
+	}
+	if in.PendingDeliveryID != nil {
+		v := *in.PendingDeliveryID
+		out.PendingDeliveryID = &v
+	}
+	if in.PendingSessionID != nil {
+		v := *in.PendingSessionID
+		out.PendingSessionID = &v
+	}
+	return out
+}
+
+func cloneFireRecord(in FireRecord) FireRecord {
+	out := in
+	if in.SessionID != nil {
+		v := *in.SessionID
+		out.SessionID = &v
+	}
+	if in.ClientID != nil {
+		v := *in.ClientID
+		out.ClientID = &v
+	}
+	if in.Payload != nil {
+		out.Payload = cloneAny(in.Payload).(map[string]any)
+	}
+	return out
+}
+
+func cloneAny(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		m := make(map[string]any, len(x))
+		for k, v := range x {
+			m[k] = cloneAny(v)
+		}
+		return m
+	case []any:
+		a := make([]any, len(x))
+		for i, v := range x {
+			a[i] = cloneAny(v)
+		}
+		return a
+	default:
+		return v
+	}
+}
+
+type Principal struct{ Kind, ID, AgentID string }
+type GoalRef struct {
+	AgentID, TriggerID string
+	Managed            bool
+}
+
+func (s *Store) ListAuthorized(p Principal) []Definition {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Definition, 0, len(s.triggers))
+	for _, d := range s.triggers {
+		if p.Kind == "admin" || p.canOwn(d) {
+			out = append(out, cloneDefinition(d))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt < out[j].CreatedAt
+		}
+		return out[i].TriggerID < out[j].TriggerID
+	})
+	return out
+}
+
+// ValidateOwners disables triggers whose owner/controller cannot be proven.
+func (s *Store) ValidateOwners(validAgents map[string]bool) error {
+	return s.ValidateOwnersWithGoals(validAgents, nil)
+}
+
+func (s *Store) ValidateOwnersWithGoals(validAgents map[string]bool, goals map[string]GoalRef) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := make(map[string]Definition, len(s.triggers))
+	for id, d := range s.triggers {
+		old[id] = d
+	}
+	dirty := false
+	for id, d := range s.triggers {
+		reason := ""
+		if strings.TrimSpace(d.OwnerAgentID) == "" || !validAgents[strings.TrimSpace(d.OwnerAgentID)] {
+			reason = "trigger owner is unavailable"
+		}
+		if reason == "" && (strings.TrimSpace(d.TargetAgentID) == "" || !validAgents[strings.TrimSpace(d.TargetAgentID)]) {
+			reason = "trigger target agent is unavailable"
+		}
+		if reason == "" && d.Controller == "goal" && strings.TrimSpace(d.OwnerAgentID) != strings.TrimSpace(d.TargetAgentID) {
+			reason = "trigger owner and target differ"
+		}
+		if d.Controller != "user" && d.Controller != "goal" && d.Controller != "maintenance" {
+			reason = "trigger controller is invalid"
+		}
+		if d.Controller == "goal" && (d.ManagedGoalID == "" || d.ControllerID != d.ManagedGoalID) {
+			reason = "goal controller association is invalid"
+		}
+		if reason == "" && d.Controller == "goal" {
+			ref, ok := goals[d.ManagedGoalID]
+			if !ok || !ref.Managed || ref.AgentID != d.OwnerAgentID || ref.TriggerID != d.TriggerID {
+				reason = "goal controller association is invalid"
+			}
+		}
+		if reason == "" && d.Controller == "maintenance" {
+			reason = "maintenance controller is unavailable"
+		}
+		if reason != "" {
+			d.Enabled = false
+			d.RecoveryRequired = true
+			d.RecoveryReason = reason
+			s.triggers[id] = d
+			dirty = true
+		}
+	}
+	if dirty {
+		if err := s.saveLocked(); err != nil {
+			s.triggers = old
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) GetAuthorized(p Principal, id string) (Definition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, ok := s.triggers[id]
+	if !ok || (p.Kind != "admin" && !p.canOwn(d)) {
+		return Definition{}, errTriggerNotFound
+	}
+	return cloneDefinition(d), nil
+}
+
+func (p Principal) canOwn(d Definition) bool {
+	if p.Kind == "admin" {
+		return true
+	}
+	return p.Kind == "agent" && strings.TrimSpace(p.AgentID) != "" && strings.TrimSpace(d.OwnerAgentID) == strings.TrimSpace(p.AgentID)
+}
+
+// UpdateAuthorized performs ownership/controller/revision checks while holding
+// the store lock. Agent principals can only modify their own agent-controlled
+// triggers; managed controllers are reserved for the owning Goal.
+func (s *Store) UpdateAuthorized(p Principal, id string, expected int64, patch UpdatePatch, now time.Time) (Definition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[id]
+	if !ok {
+		s.logAuthorization(p, Definition{TriggerID: id}, "update", "denied", "not_found")
+		return Definition{}, errTriggerNotFound
+	}
+	deny := func(err error, reason string) (Definition, error) {
+		s.logAuthorization(p, cur, "update", "denied", reason)
+		return Definition{}, err
+	}
+	if !p.canOwn(cur) || cur.Controller != "user" {
+		return deny(errTriggerNotFound, "not_owner_or_controller")
+	}
+	if expected > 0 && cur.Revision != expected {
+		return deny(ErrRevisionConflict, "revision_conflict")
+	}
+	if p.Kind == "agent" && patch.TargetAgentID != nil && strings.TrimSpace(*patch.TargetAgentID) != strings.TrimSpace(cur.TargetAgentID) {
+		return deny(errTriggerNotFound, "target_mismatch")
+	}
+	if p.Kind == "agent" && strings.TrimSpace(cur.TargetAgentID) != strings.TrimSpace(cur.OwnerAgentID) {
+		return deny(errTriggerNotFound, "owner_target_mismatch")
+	}
+	old := cur
+	if err := applyUpdatePatch(&cur, patch); err != nil {
+		return deny(err, "invalid_patch")
+	}
+	cur.Revision++
+	cur = cur.WithNextFire(now)
+	s.triggers[id] = cur
+	if err := s.saveLocked(); err != nil {
+		s.triggers[id] = old
+		return deny(err, "persist_failed")
+	}
+	s.logAuthorization(p, cur, "update", "allowed", "")
+	return cloneDefinition(cur), nil
+}
+
+func applyUpdatePatch(current *Definition, patch UpdatePatch) error {
+	if patch.Name != nil {
+		current.Name = *patch.Name
+	}
+	if patch.TaskTemplate != nil {
+		current.TaskTemplate = *patch.TaskTemplate
+	}
+	if patch.Condition != nil {
+		if ConditionCmd(patch.Condition) != "" {
+			return fmt.Errorf("condition.cmd is no longer supported")
+		}
+		if _, err := EnsureScheduleCondition(patch.Condition); err != nil {
+			return err
+		}
+		current.Condition = cloneMap(patch.Condition)
+	}
+	if patch.TargetAgentID != nil {
+		current.TargetAgentID = strings.TrimSpace(*patch.TargetAgentID)
+	}
+	if patch.TargetSessionID != nil {
+		current.TargetSessionID = copyStringPtr(patch.TargetSessionID)
+	}
+	if patch.ClientID != nil {
+		current.ClientID = copyStringPtr(patch.ClientID)
+	}
+	if patch.Enabled != nil {
+		if *patch.Enabled && current.RecoveryRequired {
+			return fmt.Errorf("trigger requires recovery before enabling")
+		}
+		current.Enabled = *patch.Enabled
+	}
+	if patch.SessionTargetMode != nil {
+		if !ValidSessionTargetMode(*patch.SessionTargetMode) {
+			return fmt.Errorf("invalid session_target_mode: %s", *patch.SessionTargetMode)
+		}
+		current.SessionTargetMode = *patch.SessionTargetMode
+	}
+	return nil
+}
+
+func (s *Store) DeleteAuthorized(p Principal, id string, expected int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[id]
+	if !ok || !p.canOwn(d) || d.Controller != "user" {
+		s.logAuthorization(p, d, "delete", "denied", "not_owner_or_controller")
+		return errTriggerNotFound
+	}
+	if p.Kind == "agent" && strings.TrimSpace(d.TargetAgentID) != strings.TrimSpace(d.OwnerAgentID) {
+		s.logAuthorization(p, d, "delete", "denied", "owner_target_mismatch")
+		return errTriggerNotFound
+	}
+	if expected > 0 && d.Revision != expected {
+		s.logAuthorization(p, d, "delete", "denied", "revision_conflict")
+		return ErrRevisionConflict
+	}
+	delete(s.triggers, id)
+	if err := s.saveLocked(); err != nil {
+		s.triggers[id] = d
+		return err
+	}
+	s.logAuthorization(p, d, "delete", "allowed", "")
+	return nil
 }
 
 // OpenStore 加载或初始化 triggers.json。
@@ -63,7 +365,10 @@ func OpenStore(path string, historyLimit int) (*Store, error) {
 		}
 	}
 	if dirty {
-		_ = s.saveLocked()
+		if err := s.saveLocked(); err != nil {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("persist recovery state: %w", err)
+		}
 	}
 	s.mu.Unlock()
 	return s, nil
@@ -82,7 +387,7 @@ func (s *Store) ListTriggers() []Definition {
 	defer s.mu.RUnlock()
 	out := make([]Definition, 0, len(s.triggers))
 	for _, item := range s.triggers {
-		out = append(out, item)
+		out = append(out, cloneDefinition(item))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt != out[j].CreatedAt {
@@ -100,13 +405,14 @@ func (s *Store) GetTrigger(id string) (*Definition, bool) {
 	if !ok {
 		return nil, false
 	}
-	copy := item
+	copy := cloneDefinition(item)
 	return &copy, true
 }
 
 func (s *Store) CreateTrigger(def Definition) (Definition, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	def = cloneDefinition(def)
 	if _, exists := s.triggers[def.TriggerID]; exists {
 		return Definition{}, fmt.Errorf("trigger already exists: %s", def.TriggerID)
 	}
@@ -161,6 +467,10 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 		}
 		current.SessionTargetMode = *patch.SessionTargetMode
 	}
+	if current.Revision < 1 {
+		current.Revision = 1
+	}
+	current.Revision++
 	updated := current.WithNextFire(now)
 	s.triggers[id] = updated
 	if err := s.saveLocked(); err != nil {
@@ -312,9 +622,37 @@ func (s *Store) ClaimDeliveryForOccurrence(triggerID, deliveryID, sessionID stri
 	return s.claimDelivery(triggerID, deliveryID, sessionID, occurrence)
 }
 
+func (s *Store) ClaimAuthorized(p Principal, triggerID string, expected int64, deliveryID, sessionID string, occurrence *float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[triggerID]
+	if !ok || !p.canOwn(d) || d.Controller != "user" {
+		s.logAuthorization(p, d, "claim", "denied", "not_owner_or_controller")
+		return errTriggerNotFound
+	}
+	if p.Kind == "agent" && strings.TrimSpace(d.TargetAgentID) != strings.TrimSpace(d.OwnerAgentID) {
+		s.logAuthorization(p, d, "claim", "denied", "owner_target_mismatch")
+		return errTriggerNotFound
+	}
+	if expected > 0 && d.Revision != expected {
+		s.logAuthorization(p, d, "claim", "denied", "revision_conflict")
+		return fmt.Errorf("revision conflict")
+	}
+	if err := s.claimDeliveryLocked(triggerID, deliveryID, sessionID, occurrence); err != nil {
+		s.logAuthorization(p, d, "claim", "denied", "delivery_failed")
+		return err
+	}
+	s.logAuthorization(p, d, "claim", "allowed", "")
+	return nil
+}
+
 func (s *Store) claimDelivery(triggerID, deliveryID, sessionID string, occurrence *float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.claimDeliveryLocked(triggerID, deliveryID, sessionID, occurrence)
+}
+
+func (s *Store) claimDeliveryLocked(triggerID, deliveryID, sessionID string, occurrence *float64) error {
 	if _, err := os.Stat(filepath.Dir(s.path)); err != nil {
 		return fmt.Errorf("delivery store unavailable: %w", err)
 	}
@@ -390,6 +728,13 @@ func (s *Store) IsPendingDelivery(triggerID, deliveryID string) bool {
 func (s *Store) RecoverPendingDelivery(triggerID, deliveryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.recoverPendingDeliveryLocked(triggerID, deliveryID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) recoverPendingDeliveryLocked(triggerID, deliveryID string) error {
 	d, ok := s.triggers[triggerID]
 	if !ok {
 		return errTriggerNotFound
@@ -421,6 +766,30 @@ func (s *Store) RecoverPendingDelivery(triggerID, deliveryID string) error {
 	return nil
 }
 
+func (s *Store) RecoverAuthorized(p Principal, triggerID string, expected int64, deliveryID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[triggerID]
+	if !ok || !p.canOwn(d) || (p.Kind == "agent" && d.Controller != "user") {
+		s.logAuthorization(p, d, "recover", "denied", "not_owner_or_controller")
+		return errTriggerNotFound
+	}
+	if expected > 0 && d.Revision != expected {
+		s.logAuthorization(p, d, "recover", "denied", "revision_conflict")
+		return fmt.Errorf("revision conflict")
+	}
+	if d.ManagedGoalID != "" {
+		s.logAuthorization(p, d, "recover", "denied", "managed_controller")
+		return fmt.Errorf("managed goal trigger is controlled by goal")
+	}
+	if err := s.recoverPendingDeliveryLocked(triggerID, deliveryID); err != nil {
+		s.logAuthorization(p, d, "recover", "denied", "recovery_failed")
+		return err
+	}
+	s.logAuthorization(p, d, "recover", "allowed", "")
+	return nil
+}
+
 // ClearPendingDelivery 在 side-effect Apply 成功或 ClearSession 丢弃缓冲时清除待消费标记。
 func (s *Store) ClearPendingDelivery(triggerID string) {
 	if s != nil {
@@ -445,6 +814,7 @@ func (s *Store) ClearPendingDelivery(triggerID string) {
 func (s *Store) AddHistory(record FireRecord) FireRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	record = cloneFireRecord(record)
 	s.history = append(s.history, record)
 	if len(s.history) > s.historyLimit {
 		s.history = s.history[len(s.history)-s.historyLimit:]
@@ -459,13 +829,32 @@ func (s *Store) ListHistory(triggerID string) []FireRecord {
 	out := make([]FireRecord, 0)
 	for _, record := range s.history {
 		if triggerID == "" || record.TriggerID == triggerID {
-			out = append(out, record)
+			out = append(out, cloneFireRecord(record))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].FiredAt > out[j].FiredAt
 	})
 	return out
+}
+
+func (s *Store) HistoryAuthorized(p Principal, triggerID string) ([]FireRecord, error) {
+	s.mu.RLock()
+	d, ok := s.triggers[triggerID]
+	if !ok || !p.canOwn(d) {
+		s.mu.RUnlock()
+		return nil, errTriggerNotFound
+	}
+	out := make([]FireRecord, 0)
+	for _, record := range s.history {
+		if record.TriggerID == triggerID {
+			out = append(out, cloneFireRecord(record))
+		}
+	}
+	s.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].FiredAt > out[j].FiredAt })
+	s.logAuthorization(p, d, "history", "allowed", "")
+	return out, nil
 }
 
 func (s *Store) load() error {
@@ -479,14 +868,47 @@ func (s *Store) load() error {
 		return fmt.Errorf("read triggers store: %w", err)
 	}
 	var payload struct {
-		Triggers []Definition `json:"triggers"`
-		History  []FireRecord `json:"history"`
+		SchemaVersion int          `json:"schema_version"`
+		Triggers      []Definition `json:"triggers"`
+		History       []FireRecord `json:"history"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return fmt.Errorf("parse triggers store: %w", err)
 	}
+	if payload.SchemaVersion > 2 {
+		return fmt.Errorf("unsupported triggers schema_version %d", payload.SchemaVersion)
+	}
+	migrated := payload.SchemaVersion < 2
+	if migrated && s.path != "" {
+		bak := s.path + ".v1.bak"
+		if _, e := os.Stat(bak); errors.Is(e, os.ErrNotExist) {
+			if e := os.WriteFile(bak, raw, 0o600); e != nil {
+				return fmt.Errorf("backup triggers store: %w", e)
+			}
+		} else if e != nil {
+			return fmt.Errorf("check triggers backup: %w", e)
+		}
+	}
 	s.triggers = make(map[string]Definition, len(payload.Triggers))
 	for _, item := range payload.Triggers {
+		if migrated && item.OwnerAgentID == "" {
+			item.OwnerAgentID = item.TargetAgentID
+		}
+		if migrated && item.ManagedGoalID != "" {
+			item.Controller = "goal"
+			item.ControllerID = item.ManagedGoalID
+		} else if migrated && item.Controller == "" {
+			item.Controller = "user"
+		}
+		if migrated && item.ControllerID == "" {
+			item.ControllerID = item.OwnerAgentID
+		}
+		if item.Revision < 1 {
+			item.Revision = 1
+		}
+		if item.CreatedBy == "" {
+			item.CreatedBy = item.OwnerAgentID
+		}
 		if item.Enabled && item.NextFireAt == nil {
 			return fmt.Errorf("trigger %q is enabled but next_fire_at is missing", item.TriggerID)
 		}
@@ -495,6 +917,11 @@ func (s *Store) load() error {
 	s.history = payload.History
 	if s.history == nil {
 		s.history = []FireRecord{}
+	}
+	if migrated {
+		if err := s.saveLocked(); err != nil {
+			return fmt.Errorf("persist migrated triggers store: %w", err)
+		}
 	}
 	return nil
 }
@@ -511,8 +938,9 @@ func (s *Store) saveLocked() error {
 		return triggers[i].TriggerID < triggers[j].TriggerID
 	})
 	payload := map[string]any{
-		"history":  s.history,
-		"triggers": triggers,
+		"schema_version": 2,
+		"history":        s.history,
+		"triggers":       triggers,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

@@ -30,6 +30,8 @@ func SessionConfigFromApprovalTarget(approvalTarget, currentSessionID string) (S
 type FireOptions struct {
 	SessionTargetMode SessionTargetMode
 	FixedSessionID    string
+	Principal         *Principal
+	ExpectedRevision  int64
 }
 
 // FireOptionsFromApprovalTarget 构造审批通过后的 fire override（如 trigger_create 会话目标）。
