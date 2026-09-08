@@ -44,13 +44,15 @@ type AgentCatalogProvider func() []AgentCatalogEntry
 
 // Registrar 周期性向 Manage 注册并发送心跳。
 type Registrar struct {
-	cfg          *config.Config
-	logger       *slog.Logger
-	client       *http.Client
-	toolNames    ToolNamesProvider
-	agentCatalog AgentCatalogProvider
-	interval     time.Duration
-	ttlSeconds   int
+	cfg                 *config.Config
+	logger              *slog.Logger
+	client              *http.Client
+	toolNames           ToolNamesProvider
+	agentCatalog        AgentCatalogProvider
+	autoSummaryProvider AutoSummaryProvider
+	autoSummaryReporter *AutoSummaryReporter
+	interval            time.Duration
+	ttlSeconds          int
 
 	mu         sync.RWMutex
 	registered bool
@@ -77,6 +79,34 @@ func (r *Registrar) SetToolNamesProvider(provider ToolNamesProvider) {
 
 func (r *Registrar) SetAgentCatalogProvider(provider AgentCatalogProvider) {
 	r.agentCatalog = provider
+}
+
+// SetAutoSummaryProvider injects the local Auto projection. Reporting is
+// best-effort and bounded; it never changes register/heartbeat success.
+func (r *Registrar) SetAutoSummaryProvider(provider AutoSummaryProvider) {
+	r.mu.Lock()
+	r.autoSummaryProvider = provider
+	r.autoSummaryReporter = nil
+	if provider != nil && r.cfg != nil && r.cfg.Manage.Enabled {
+		if reporter, err := NewAutoSummaryReporter(r.cfg.Manage.URL, r.cfg.NodeID, r.cfg.Manage.NodeToken, provider); err == nil {
+			r.autoSummaryReporter = reporter
+		}
+	}
+	r.mu.Unlock()
+}
+
+func (r *Registrar) reportAutoSummaries(parent context.Context) {
+	r.mu.RLock()
+	reporter := r.autoSummaryReporter
+	r.mu.RUnlock()
+	if reporter == nil || r.cfg == nil || !r.cfg.Manage.Enabled {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	if err := reporter.Report(ctx); err != nil {
+		r.logger.Warn("manage auto summary report failed", "error", err)
+	}
 }
 
 // Registered 表示最近一次 register/heartbeat 是否成功。
@@ -184,6 +214,7 @@ func (r *Registrar) register(ctx context.Context) time.Duration {
 
 	r.setRegistered(true)
 	r.registerAgentCatalog(ctx)
+	r.reportAutoSummaries(ctx)
 	r.logger.Info("manage registered", "agent_id", r.cfg.NodeID, "status", out.Agent.Status)
 	if out.HeartbeatIntervalSeconds > 0 {
 		return time.Duration(out.HeartbeatIntervalSeconds) * time.Second
@@ -221,6 +252,7 @@ func (r *Registrar) heartbeat(ctx context.Context) error {
 	}
 	r.setRegistered(true)
 	r.registerAgentCatalog(ctx)
+	r.reportAutoSummaries(ctx)
 	return nil
 }
 
