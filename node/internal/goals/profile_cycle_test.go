@@ -2,6 +2,7 @@ package goals
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -232,6 +233,95 @@ func TestApplyAutoActionPausesBusyAndRevokesCurrentIntent(t *testing.T) {
 	got, err := s.GetScheduleIntent(g.ID, "goal")
 	if err != nil || got.State != IntentRevoked {
 		t.Fatalf("intent=%+v err=%v", got, err)
+	}
+}
+
+func TestApplyAutoActionResumeRejectsUnsupportedEventAndGenerationOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		intent ScheduleIntent
+		want   error
+	}{
+		{name: "event", intent: ScheduleIntent{Decision: FinalDecision{Outcome: OutcomeProgress, Summary: "continue", Reason: "wait", ExpectedProgress: "event", NextAction: NextEvent, Event: &EventSpec{SourceID: "source"}}}, want: ErrEventSchedulingUnsupported},
+		{name: "generation overflow", intent: ScheduleIntent{Generation: math.MaxInt64, DueAt: func() *time.Time { v := time.Now().UTC().Add(time.Hour); return &v }(), Decision: FinalDecision{Outcome: OutcomeProgress, Summary: "continue", Reason: "wait", ExpectedProgress: "later", NextAction: NextAt}}, want: ErrConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := OpenStore("")
+			now := time.Now().UTC()
+			testProfile(t, s, "resume-guards", now)
+			in := cycleInput("resume-guards", "x")
+			in.MinWakeIntervalSeconds = 60
+			g, err := s.CreateManagedCycle(in, "guard", 1, now, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			i := tc.intent
+			i.ID, i.AgentID, i.GoalID, i.Purpose, i.State, i.ProfileRevision, i.UpdatedAt = tc.name, g.AgentID, g.ID, "goal", IntentPending, 2, now
+			if tc.name == "event" {
+				s.mu.Lock()
+				s.data.ScheduleIntents[g.ID+"\x00goal"] = i
+				s.mu.Unlock()
+			} else if _, err = s.UpsertScheduleIntent(i); err != nil {
+				t.Fatal(err)
+			}
+			p, _ := s.GetProfile(g.AgentID)
+			if _, _, err = s.ApplyAutoAction(g.AgentID, g.ID, "pause_goal", p.Revision, g.Revision, now); err != nil {
+				t.Fatal(err)
+			}
+			beforeP, _ := s.GetProfile(g.AgentID)
+			beforeG, _ := s.Get(g.ID)
+			beforeI, err := s.GetScheduleIntent(g.ID, "goal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = s.ApplyAutoAction(g.AgentID, g.ID, "resume_goal", beforeP.Revision, beforeG.Revision, now); err != tc.want {
+				t.Fatalf("err=%v want=%v", err, tc.want)
+			}
+			afterP, _ := s.GetProfile(g.AgentID)
+			afterG, _ := s.Get(g.ID)
+			afterI, err := s.GetScheduleIntent(g.ID, "goal")
+			if err != nil || !reflect.DeepEqual(afterP, beforeP) || !reflect.DeepEqual(afterG, beforeG) || !reflect.DeepEqual(afterI, beforeI) {
+				t.Fatalf("state changed on rejected resume: p=%+v g=%+v i=%+v", afterP, afterG, afterI)
+			}
+		})
+	}
+}
+
+func TestApplyAutoActionResumeRollsBackIntentOnSaveFailure(t *testing.T) {
+	s, _ := OpenStore("")
+	now := time.Now().UTC()
+	testProfile(t, s, "resume-rollback", now)
+	in := cycleInput("resume-rollback", "x")
+	in.MinWakeIntervalSeconds = 60
+	g, err := s.CreateManagedCycle(in, "rollback", 1, now, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := now.Add(-time.Minute)
+	if _, err = s.UpsertScheduleIntent(ScheduleIntent{ID: "rollback:goal", AgentID: g.AgentID, GoalID: g.ID, Purpose: "goal", Generation: 1, Decision: FinalDecision{Outcome: OutcomeProgress, Summary: "continue", Reason: "wait", ExpectedProgress: "later", NextAction: NextAt, NextWakeAt: &due}, DueAt: &due, State: IntentPending, ProfileRevision: 2, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.GetProfile(g.AgentID)
+	g, _ = s.Get(g.ID)
+	_, _, err = s.ApplyAutoAction(g.AgentID, g.ID, "pause_goal", p.Revision, g.Revision, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ = s.GetProfile(g.AgentID)
+	g, _ = s.Get(g.ID)
+	beforeI, err := s.GetScheduleIntent(g.ID, "goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.path = t.TempDir()
+	if _, _, err = s.ApplyAutoAction(g.AgentID, g.ID, "resume_goal", p.Revision, g.Revision, now); err == nil {
+		t.Fatal("expected save failure")
+	}
+	afterP, _ := s.GetProfile(g.AgentID)
+	afterG, _ := s.Get(g.ID)
+	afterI, err := s.GetScheduleIntent(g.ID, "goal")
+	if err != nil || !reflect.DeepEqual(afterP, p) || !reflect.DeepEqual(afterG, g) || !reflect.DeepEqual(afterI, beforeI) {
+		t.Fatalf("rollback incomplete: p=%+v g=%+v i=%+v", afterP, afterG, afterI)
 	}
 }
 

@@ -20,6 +20,7 @@ var ErrNotFound = errors.New("goal not found")
 var ErrNotRunnable = errors.New("goal is not runnable")
 var ErrConflict = errors.New("goal state conflict")
 var ErrUsageUnknown = errors.New("agent usage is unknown")
+var ErrEventSchedulingUnsupported = errors.New("event scheduling is not supported")
 
 const CurrentSchemaVersion = 2
 
@@ -780,10 +781,37 @@ func (s *Store) ApplyAutoAction(agentID, cycleID, action string, expectedProfile
 			}
 		}
 	}
+	var resumeKeys []string
+	resumeSet := map[string]bool{}
+	if hasGoal && action == "resume_goal" {
+		for k, i := range s.data.ScheduleIntents {
+			if i.AgentID != agentID || i.GoalID != cycleID || i.Purpose != "goal" || i.State != IntentRevoked || i.Decision.Outcome == OutcomeCompleted {
+				continue
+			}
+			if i.Decision.NextAction == NextEvent {
+				return AutoProfile{}, Goal{}, ErrEventSchedulingUnsupported
+			}
+			if i.Decision.NextAction != NextAt || i.DueAt == nil {
+				continue
+			}
+			if i.Generation == math.MaxInt64 {
+				return AutoProfile{}, Goal{}, ErrConflict
+			}
+			candidate := i.Decision.Clone()
+			if !i.DueAt.After(now) {
+				due := now.Add(time.Duration(g.MinWakeIntervalSeconds) * time.Second)
+				candidate.NextWakeAt = &due
+			}
+			if err := ValidateFinalDecision(candidate, DecisionValidationContext{Now: now, MinInterval: time.Duration(g.MinWakeIntervalSeconds) * time.Second, ExpiresAt: g.ExpiresAt}); err == nil {
+				resumeKeys = append(resumeKeys, k)
+				resumeSet[k] = true
+			}
+		}
+	}
 	oldP, oldG := p, g
 	oldIntents := map[string]ScheduleIntent{}
 	for k, i := range s.data.ScheduleIntents {
-		if i.AgentID == agentID && (action == "disable_auto" || (action == "pause_goal" && i.GoalID == cycleID)) {
+		if i.AgentID == agentID && (action == "disable_auto" || (action == "pause_goal" && i.GoalID == cycleID) || (action == "resume_goal" && resumeSet[k])) {
 			oldIntents[k] = i
 			i.State = IntentRevoked
 			i.UpdatedAt = now.UTC()
@@ -804,6 +832,25 @@ func (s *Store) ApplyAutoAction(agentID, cycleID, action string, expectedProfile
 	}
 	p.Revision++
 	p.UpdatedAt = now.UTC()
+	if hasGoal && action == "resume_goal" {
+		// Resuming an explicitly revoked schedule starts a fresh intent
+		// generation. It never re-enables the consumed/revoked trigger in place.
+		for _, k := range resumeKeys {
+			i := s.data.ScheduleIntents[k]
+			if i.DueAt != nil && !i.DueAt.After(now) {
+				due := now.Add(time.Duration(g.MinWakeIntervalSeconds) * time.Second)
+				i.DueAt = &due
+				i.Decision.NextWakeAt = &due
+			}
+			i.Generation++
+			i.ID = uuid.NewString() + ":" + i.Purpose
+			i.State = IntentPending
+			i.ProfileRevision = p.Revision
+			i.UpdatedAt = now.UTC()
+			i.Fingerprint = intentFingerprint(i)
+			s.data.ScheduleIntents[k] = i
+		}
+	}
 	if hasGoal {
 		g.Revision++
 		g.UpdatedAt = now.UTC()
