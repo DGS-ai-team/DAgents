@@ -38,30 +38,33 @@ const (
 
 // Definition 触发器完整定义（持久化主体）。
 type Definition struct {
-	TriggerID         string            `json:"trigger_id"`
-	Name              string            `json:"name"`
-	Condition         map[string]any    `json:"condition"`
-	TargetAgentID     string            `json:"target_agent_id"`
-	TargetSessionID   *string           `json:"target_session_id"`             // 绑定的对话 id
-	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"` // 会话目标解析策略
-	ClientID          *string           `json:"client_id"`
-	TaskTemplate      string            `json:"task_template"`
-	Enabled           bool              `json:"enabled"`
-	FireCount         int               `json:"fire_count"`
-	LastFiredAt       *float64          `json:"last_fired_at"`
-	NextFireAt        *float64          `json:"next_fire_at"`
-	CreatedAt         float64           `json:"created_at"`
-	UpdatedAt         float64           `json:"updated_at"`
-	PendingDeliveryID *string           `json:"pending_delivery_id,omitempty"`
-	PendingSessionID  *string           `json:"pending_session_id,omitempty"`
-	RecoveryRequired  bool              `json:"recovery_required,omitempty"`
-	RecoveryReason    string            `json:"recovery_reason,omitempty"`
-	ManagedGoalID     string            `json:"managed_goal_id,omitempty"`
-	OwnerAgentID      string            `json:"owner_agent_id,omitempty"`
-	Controller        string            `json:"controller,omitempty"`
-	ControllerID      string            `json:"controller_id,omitempty"`
-	Revision          int64             `json:"revision,omitempty"`
-	CreatedBy         string            `json:"created_by,omitempty"`
+	TriggerID          string            `json:"trigger_id"`
+	Name               string            `json:"name"`
+	Condition          map[string]any    `json:"condition"`
+	TargetAgentID      string            `json:"target_agent_id"`
+	TargetSessionID    *string           `json:"target_session_id"`             // 绑定的对话 id
+	SessionTargetMode  SessionTargetMode `json:"session_target_mode,omitempty"` // 会话目标解析策略
+	ClientID           *string           `json:"client_id"`
+	TaskTemplate       string            `json:"task_template"`
+	Enabled            bool              `json:"enabled"`
+	FireCount          int               `json:"fire_count"`
+	LastFiredAt        *float64          `json:"last_fired_at"`
+	NextFireAt         *float64          `json:"next_fire_at"`
+	CreatedAt          float64           `json:"created_at"`
+	UpdatedAt          float64           `json:"updated_at"`
+	PendingDeliveryID  *string           `json:"pending_delivery_id,omitempty"`
+	PendingSessionID   *string           `json:"pending_session_id,omitempty"`
+	RecoveryRequired   bool              `json:"recovery_required,omitempty"`
+	RecoveryReason     string            `json:"recovery_reason,omitempty"`
+	ManagedGoalID      string            `json:"managed_goal_id,omitempty"`
+	OwnerAgentID       string            `json:"owner_agent_id,omitempty"`
+	Controller         string            `json:"controller,omitempty"`
+	ControllerID       string            `json:"controller_id,omitempty"`
+	Revision           int64             `json:"revision,omitempty"`
+	CreatedBy          string            `json:"created_by,omitempty"`
+	ManagedIntentID    string            `json:"managed_intent_id,omitempty"`
+	ManagedGeneration  int64             `json:"managed_generation,omitempty"`
+	ManagedFingerprint string            `json:"managed_fingerprint,omitempty"`
 }
 
 // CreateInput 创建触发器入参（工具 / HTTP）。

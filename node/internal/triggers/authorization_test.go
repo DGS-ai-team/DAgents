@@ -180,3 +180,37 @@ func TestAuthorizedFireStaleRevisionNoDelivery(t *testing.T) {
 		t.Fatal("maintenance controller fired")
 	}
 }
+
+func TestDisableManagedProjectionCASMetadata(t *testing.T) {
+	st, _ := OpenStore(t.TempDir()+"/t.json", 20)
+	d := authTrigger(t, st, "a", "goal")
+	d.ManagedGoalID, d.Controller, d.ControllerID = "g", "goal", "g"
+	d.ManagedIntentID, d.ManagedGeneration, d.ManagedFingerprint, d.TargetSessionID = "i1", 1, "fp1", func() *string { x := "s1"; return &x }()
+	if err := st.ReplaceTrigger(d); err != nil {
+		t.Fatal(err)
+	}
+	bad := d
+	bad.ManagedIntentID = "i2"
+	if _, err := st.DisableManagedProjection(bad); err == nil {
+		t.Fatal("intent mismatch accepted")
+	}
+	bad = d
+	bad.TargetSessionID = func() *string { x := "s2"; return &x }()
+	if _, err := st.DisableManagedProjection(bad); err == nil {
+		t.Fatal("session mismatch accepted")
+	}
+	newer := d
+	newer.ManagedGeneration = 2
+	newer.ManagedFingerprint = "fp2"
+	newer.Enabled = true
+	if _, err := st.UpsertManagedProjection(newer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DisableManagedProjection(d); err == nil {
+		t.Fatal("old generation disable accepted")
+	}
+	got, _ := st.GetTrigger(d.TriggerID)
+	if !got.Enabled || got.ManagedGeneration != 2 {
+		t.Fatalf("new generation changed: %+v", got)
+	}
+}

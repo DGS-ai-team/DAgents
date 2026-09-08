@@ -515,6 +515,81 @@ func (s *Store) UpdateManagedConfig(id string, interval int, enabled bool, task 
 	return cur, nil
 }
 
+// UpsertManagedProjection atomically updates only the projection-owned fields,
+// preserving delivery counters and fencing older intent generations.
+func (s *Store) UpsertManagedProjection(def Definition) (Definition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[def.TriggerID]
+	if ok {
+		if cur.ManagedGoalID != def.ManagedGoalID || cur.OwnerAgentID != def.OwnerAgentID || cur.Controller != "goal" || cur.ControllerID != def.ControllerID {
+			return Definition{}, errTriggerNotFound
+		}
+		if cur.ManagedGeneration > def.ManagedGeneration {
+			return Definition{}, ErrRevisionConflict
+		}
+		if cur.ManagedGeneration == def.ManagedGeneration && cur.ManagedFingerprint != "" && cur.ManagedFingerprint != def.ManagedFingerprint {
+			return Definition{}, ErrRevisionConflict
+		}
+		if cur.ManagedGeneration == def.ManagedGeneration && cur.ManagedFingerprint == def.ManagedFingerprint {
+			return cloneDefinition(cur), nil
+		}
+		def.FireCount, def.LastFiredAt, def.PendingDeliveryID, def.PendingSessionID, def.RecoveryRequired, def.RecoveryReason = cur.FireCount, cur.LastFiredAt, cur.PendingDeliveryID, cur.PendingSessionID, cur.RecoveryRequired, cur.RecoveryReason
+		if cur.ManagedGeneration < def.ManagedGeneration {
+			if cur.PendingDeliveryID != nil && strings.TrimSpace(*cur.PendingDeliveryID) != "" {
+				return Definition{}, fmt.Errorf("pending delivery requires recovery")
+			}
+			def.LastFiredAt = nil
+			def.PendingDeliveryID = nil
+			def.PendingSessionID = nil
+		}
+	}
+	if ok {
+		def.Revision = cur.Revision + 1
+	} else if def.Revision < 1 {
+		def.Revision = 1
+	}
+	s.triggers[def.TriggerID] = cloneDefinition(def)
+	if err := s.saveLocked(); err != nil {
+		if ok {
+			s.triggers[def.TriggerID] = cur
+		} else {
+			delete(s.triggers, def.TriggerID)
+		}
+		return Definition{}, err
+	}
+	return cloneDefinition(def), nil
+}
+
+// DisableManagedProjection disables a managed projection only when all
+// identity and generation metadata still matches the supplied snapshot.
+// The compare, mutation, and durable save happen under one store lock.
+func (s *Store) DisableManagedProjection(expected Definition) (Definition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[expected.TriggerID]
+	if !ok || cur.ManagedGoalID != expected.ManagedGoalID || cur.OwnerAgentID != expected.OwnerAgentID || cur.TargetAgentID != expected.TargetAgentID || !sameStringPtr(cur.TargetSessionID, expected.TargetSessionID) || cur.Controller != "goal" || cur.ControllerID != expected.ControllerID || cur.ManagedIntentID != expected.ManagedIntentID || cur.ManagedGeneration != expected.ManagedGeneration || cur.ManagedFingerprint != expected.ManagedFingerprint {
+		return Definition{}, ErrRevisionConflict
+	}
+	old := cur
+	cur.Enabled = false
+	cur.NextFireAt = nil
+	cur.Revision++
+	s.triggers[cur.TriggerID] = cur
+	if err := s.saveLocked(); err != nil {
+		s.triggers[cur.TriggerID] = old
+		return Definition{}, err
+	}
+	return cloneDefinition(cur), nil
+}
+
+func sameStringPtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 func (s *Store) DeleteTrigger(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
