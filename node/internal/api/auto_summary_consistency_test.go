@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,4 +61,45 @@ func TestAutoSummaryConsistentAcrossEndpoints(t *testing.T) {
 	}
 	// Profile remains disabled, so the public summary remains disabled and has no next_at.
 	check("terminal-disabled", "disabled")
+}
+
+func TestAutoSummaryUsesDecisionSummaryWhenTopLevelEmpty(t *testing.T) {
+	srv, _ := autonomyRegressionServer(t)
+	if w := putAutonomy(t, srv, map[string]any{"objective": "work", "acceptance": "proof", "enabled": true}); w.Code != 200 {
+		t.Fatalf("put=%d", w.Code)
+	}
+	p, _ := srv.goalStore.GetProfile("auto-reg")
+	g, _ := srv.goalStore.Get(p.CurrentGoalID)
+	r, err := srv.goalStore.StartRun(g.ID, "test", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := &goals.FinalDecision{Outcome: goals.OutcomeProgress, Summary: "decision-only summary", Reason: "waiting", ExpectedProgress: "next", NextAction: goals.NextNone}
+	if _, err = srv.goalStore.Checkpoint(g.ID, r.ID, goals.Checkpoint{Decision: decision}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	detail := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/v1/agents/auto-reg/autonomy", nil))
+	var d struct {
+		Summary map[string]any `json:"summary"`
+	}
+	if err := json.Unmarshal(detail.Body.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Summary["last_summary"] != "decision-only summary" {
+		t.Fatalf("detail summary=%v", d.Summary)
+	}
+	o := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(o, httptest.NewRequest(http.MethodGet, "/v1/auto/overview", nil))
+	var ov struct {
+		Items []struct {
+			Summary map[string]any `json:"summary"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(o.Body.Bytes(), &ov); err != nil {
+		t.Fatal(err)
+	}
+	if len(ov.Items) != 1 || ov.Items[0].Summary["last_summary"] != "decision-only summary" {
+		t.Fatalf("overview=%v", ov)
+	}
 }

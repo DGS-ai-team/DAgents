@@ -66,7 +66,11 @@ func (s *Server) projectAutoSummary(agentID string, p goals.AutoProfile, g *goal
 	}
 	if g != nil {
 		if g.LastCheckpoint != nil {
-			last = g.LastCheckpoint.Summary
+			if g.LastCheckpoint.Decision != nil && strings.TrimSpace(g.LastCheckpoint.Decision.Summary) != "" {
+				last = g.LastCheckpoint.Decision.Summary
+			} else {
+				last = g.LastCheckpoint.Summary
+			}
 		}
 		if s.triggerStore != nil {
 			if d, ok := s.triggerStore.GetTrigger(g.TriggerID); ok {
