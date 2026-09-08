@@ -222,7 +222,7 @@ onUnmounted(() => stopConfigurationEvents());
 
       <section v-if="activeSection === 'autonomy' && agentMeta?.agent_type === 'auto'" class="agent-detail__section agent-detail__section--first">
         <div class="agent-detail__section-heading"><div><span class="agent-detail__section-kicker">自主运行</span><h2>自主任务</h2></div><span>按计划推进目标并保留运行记录</span></div>
-        <AgentAutonomyPanel :agent-id="agentId" />
+        <AgentAutonomyPanel :key="agentId" :agent-id="agentId" />
       </section>
 
       <section v-else-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">

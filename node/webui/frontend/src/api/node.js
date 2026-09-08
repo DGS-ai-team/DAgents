@@ -167,6 +167,13 @@ export function getAgentAutonomy(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`);
 }
 export function getAgentAutonomyCycles(agentId, params = {}) { return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/cycles`, { params }); }
+export function createAgentAutonomyCycle(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/cycles`, { method: "POST", body: payload });
+}
+
+export function agentAutonomyAction(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/actions`, { method: "POST", body: payload });
+}
 
 export function getAutoOverview(params = {}) {
   return apiFetch("/v1/auto/overview", { params });
