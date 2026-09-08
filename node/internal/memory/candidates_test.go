@@ -187,6 +187,26 @@ func TestLLMCandidateExtractorParsesBoundedJSON(t *testing.T) {
 	}
 }
 
+func TestLLMCandidateExtractorReturnsProviderUsageWhenAvailable(t *testing.T) {
+	extractor := NewLLMCandidateExtractor(&candidateExtractionLLM{
+		response: `[{"information":"稳定偏好"}]`, usage: &llm.Usage{PromptTokens: 20, CompletionTokens: 4, TotalTokens: 24},
+	}, 8, 1000)
+	candidates, usage, err := extractor.ExtractWithUsage(context.Background(), ExtractionInput{Messages: []ExtractionMessage{{Role: "user", Content: "记住偏好"}}})
+	if err != nil || len(candidates) != 1 || usage == nil || usage.TotalTokens != 24 {
+		t.Fatalf("candidates=%+v usage=%+v err=%v", candidates, usage, err)
+	}
+}
+
+func TestLLMCandidateExtractorRetainsUsageOnParseError(t *testing.T) {
+	extractor := NewLLMCandidateExtractor(&candidateExtractionLLM{
+		response: "not json", usage: &llm.Usage{TotalTokens: 7},
+	}, 8, 1000)
+	_, usage, err := extractor.ExtractWithUsage(context.Background(), ExtractionInput{Messages: []ExtractionMessage{{Role: "user", Content: "内容"}}})
+	if err == nil || usage == nil || usage.TotalTokens != 7 {
+		t.Fatalf("usage=%+v err=%v; usage must survive extraction parse error", usage, err)
+	}
+}
+
 type testCandidateExtractor struct {
 	mu    sync.Mutex
 	input ExtractionInput
@@ -212,6 +232,11 @@ func (e *testCandidateExtractor) Input() ExtractionInput {
 
 type candidateExtractionLLM struct {
 	response string
+	usage    *llm.Usage
+}
+
+func (c *candidateExtractionLLM) CompleteTextWithUsage(context.Context, llm.CompleteRequest) (string, *llm.Usage, error) {
+	return c.response, c.usage, nil
 }
 
 func (c *candidateExtractionLLM) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
