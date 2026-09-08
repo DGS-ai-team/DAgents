@@ -121,10 +121,33 @@ func (r *Registry) startShellProcess(ctx context.Context, params shellRunParams)
 // runShellSync waits for one bash_run process. Timeout and cancellation both
 // terminate this process; neither path creates a background job.
 func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
+	sessionID := sessionIDFromContext(ctx)
+	toolCallID := toolCallIDFromContext(ctx)
+	gate := newSyncShellGate()
+	registered := r.syncShells != nil && strings.TrimSpace(toolCallID) != ""
+	if registered {
+		r.syncShells.put(&syncShellEntry{sessionID: sessionID, toolCallID: toolCallID, gate: gate})
+		defer r.syncShells.remove(toolCallID)
+	}
+	leaseCtx, stopLeaseWait := context.WithCancel(ctx)
+	defer stopLeaseWait()
+	go func() {
+		select {
+		case <-gate.cancelCh:
+			stopLeaseWait()
+		case <-leaseCtx.Done():
+		}
+	}()
+	lease, err := r.acquireWorkspaceWrite(leaseCtx, params.cwd)
+	if err != nil {
+		return "", nil, fmt.Errorf("workspace_busy: %w", err)
+	}
 	process, err := r.startShellProcess(ctx, params)
 	if err != nil {
+		lease.Release()
 		return fmt.Sprintf("ERROR: %v", err), nil, nil
 	}
+	defer lease.Release()
 	stdoutPipe, err := process.StdoutPipe()
 	if err != nil {
 		return "", nil, fmt.Errorf("bash_run 失败: %w", err)
@@ -137,8 +160,6 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 		return fmt.Sprintf("ERROR: bash_run 失败: %v", err), nil, nil
 	}
 
-	sessionID := sessionIDFromContext(ctx)
-	toolCallID := toolCallIDFromContext(ctx)
 	execution := &shellExecution{
 		status:             shellStatusRunning,
 		done:               make(chan struct{}),
@@ -148,16 +169,6 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 		bashShellType:      string(params.shellType),
 		bashOutputEncoding: params.outputEncoding,
 	}
-	gate := newSyncShellGate()
-	if r.syncShells != nil && strings.TrimSpace(toolCallID) != "" {
-		r.syncShells.put(&syncShellEntry{
-			sessionID:  sessionID,
-			toolCallID: toolCallID,
-			gate:       gate,
-		})
-		defer r.syncShells.remove(toolCallID)
-	}
-
 	collectDone := r.startShellOutputCollector(execution, params, stdoutPipe, stderrPipe)
 
 	timer := time.NewTimer(time.Duration(params.timeoutSec) * time.Second)

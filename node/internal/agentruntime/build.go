@@ -10,6 +10,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -28,7 +29,8 @@ type BuildParams struct {
 	// Agent (for example Workgroup members) from opening that Agent's personal
 	// memory store. The model-facing memory tools remain unavailable because
 	// TurnOptions.MemoryService is nil.
-	DisableMemory bool
+	DisableMemory        bool
+	WorkspaceCoordinator *workspacecoord.Coordinator
 }
 
 // Built 为 per-agent 运行时产物。
@@ -76,6 +78,9 @@ func Build(p BuildParams) (Built, error) {
 	reg, err := tools.NewRegistry(workspaceRoot, timeout, p.NodeCFG.Tools.BashOutputEncoding, p.NodeCFG.Tools.FileEncoding)
 	if err != nil {
 		return Built{}, err
+	}
+	if p.WorkspaceCoordinator != nil {
+		reg.SetWorkspaceCoordinator(p.WorkspaceCoordinator)
 	}
 	if len(groups) == 0 {
 		reg.SetBuiltinEnabledNone()

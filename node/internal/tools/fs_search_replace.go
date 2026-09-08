@@ -52,7 +52,7 @@ func searchReplaceToolDef() ToolDef {
 	}
 }
 
-func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (string, error) {
+func (r *Registry) execSearchReplace(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args searchReplaceArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -71,6 +71,11 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	if info.IsDir() {
 		return formatSearchReplaceFail(args.Path, fmt.Sprintf("目标是目录，无法编辑：%q", args.Path)), nil
 	}
+	lease, err := r.acquireWorkspaceWrite(ctx, path)
+	if err != nil {
+		return formatSearchReplaceFail(args.Path, fmt.Sprintf("workspace_busy: %v", err)), nil
+	}
+	defer lease.Release()
 	if args.OldString == "" {
 		return formatSearchReplaceFail(args.Path, "old_string 不能为空。"), nil
 	}

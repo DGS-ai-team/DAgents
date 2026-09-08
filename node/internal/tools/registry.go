@@ -12,6 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 )
 
 // Registry 注册内置工具并在 Agent workspace 内执行。
@@ -59,6 +60,7 @@ type Registry struct {
 	autonomyEnabled        bool
 	autonomyGet            AutonomyGetFunc
 	autonomyUpdate         AutonomyUpdateFunc
+	workspaceCoordinator   *workspacecoord.Coordinator
 }
 
 func (r *Registry) SetGoalCheckpoint(fn func(context.Context, string, string, GoalCheckpoint) error) {
@@ -91,6 +93,13 @@ func (r *Registry) WorkspaceRoot() string {
 		return ""
 	}
 	return r.workspaceRoot
+}
+
+// SetWorkspaceCoordinator injects the Node-shared local write coordinator.
+func (r *Registry) SetWorkspaceCoordinator(c *workspacecoord.Coordinator) {
+	if r != nil && c != nil {
+		r.workspaceCoordinator = c
+	}
 }
 
 // ResolveLocalTerminalCWD applies the same workspace-relative path policy as
@@ -190,7 +199,22 @@ func (r *Registry) OpenTerminal(ctx context.Context, req TerminalRequest) (Termi
 		if r.localTerminalProvider == nil {
 			return nil, fmt.Errorf("local terminal provider is unavailable")
 		}
-		return r.localTerminalProvider.OpenTerminal(ctx, req)
+		cwd := strings.TrimSpace(req.CWD)
+		if cwd == "" {
+			cwd = r.workspaceRoot
+		} else if resolved, resolveErr := r.resolveRunCWD(cwd); resolveErr == nil {
+			cwd = resolved
+		}
+		lease, err := r.acquireWorkspaceWrite(ctx, cwd)
+		if err != nil {
+			return nil, fmt.Errorf("workspace_busy: %w", err)
+		}
+		terminal, err := r.localTerminalProvider.OpenTerminal(ctx, req)
+		if err != nil {
+			lease.Release()
+			return nil, err
+		}
+		return &coordinatedTerminal{Terminal: terminal, lease: lease}, nil
 	case executionTargetLinuxChannel:
 		if r.linuxProvider == nil {
 			return nil, fmt.Errorf("linux terminal provider is unavailable")
@@ -313,6 +337,7 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 		fileEncoding:          fileEnc,
 		bashCompress:          DefaultBashCompressConfig(),
 		syncShells:            newSyncShellTracker(),
+		workspaceCoordinator:  workspacecoord.New(),
 		shellProvider:         localProvider,
 		localTerminalProvider: localProvider,
 		handlers:              make(map[string]handler),

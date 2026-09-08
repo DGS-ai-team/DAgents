@@ -40,7 +40,7 @@ func writeFileToolDef() ToolDef {
 	}
 }
 
-func (r *Registry) execWriteFile(_ context.Context, raw json.RawMessage) (string, error) {
+func (r *Registry) execWriteFile(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args writeFileArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -49,6 +49,11 @@ func (r *Registry) execWriteFile(_ context.Context, raw json.RawMessage) (string
 	if err != nil {
 		return "", err
 	}
+	lease, err := r.acquireWorkspaceWrite(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("workspace_busy: %w", err)
+	}
+	defer lease.Release()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
