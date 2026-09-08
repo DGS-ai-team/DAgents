@@ -44,6 +44,8 @@ type Goal struct {
 	CycleFingerprint string `json:"cycle_fingerprint,omitempty"`
 	ProvisionStatus  string `json:"provision_status,omitempty"`
 	EnableIntent     bool   `json:"enable_intent,omitempty"`
+	PreviousGoalID   string `json:"previous_goal_id,omitempty"`
+	Origin           string `json:"origin,omitempty"`
 }
 
 // AutoProfile is the durable Agent-owned identity for autonomous work.
@@ -59,6 +61,7 @@ type AutoProfile struct {
 	WorkSchedule           string    `json:"work_schedule"`
 	CurrentGoalID          string    `json:"current_goal_id,omitempty"`
 	AuthorizationRef       string    `json:"authorization_ref,omitempty"`
+	AuthorizationRevision  int64     `json:"authorization_revision,omitempty"`
 	BusinessTokenBudget    int64     `json:"business_token_budget,omitempty"`
 	MaintenanceTokenBudget int64     `json:"maintenance_token_budget,omitempty"`
 	TotalTokenBudget       int64     `json:"total_token_budget,omitempty"`
