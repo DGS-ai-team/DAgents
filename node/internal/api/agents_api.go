@@ -34,6 +34,8 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/maintenance", s.handleGetAgentMaintenance)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}/maintenance", s.handlePatchAgentMaintenance)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/maintenance/run", s.handleRunAgentMaintenance)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/maintenance/recovery", s.handleGetMaintenanceRecovery)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/maintenance/recovery", s.handlePostMaintenanceRecovery)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/autonomy/cycles", s.handleGetAutonomyCycles)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/cycles", s.handlePostAutonomyCycle)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/actions", s.handleAutonomyAction)

@@ -199,6 +199,74 @@ paths:
         "404": { description: Agent 不存在或不是 Auto Agent }
         "409": { description: 维护未启用、Agent 忙、需要 usage recovery 或维护失败 }
         "503": { description: goal store、LLM 或维护持久化不可用 }
+  /v1/agents/{agent_id}/maintenance/recovery:
+    get:
+      summary: 查看每日维护恢复摘要
+      description: |
+        返回指定日期和日程版本的执行摘要与恢复校验 token，不返回记忆候选或原始输入正文。
+        两个查询参数均省略时读取最近一次每日维护；token 用于检测读取后发生的状态变化。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - in: query
+          name: local_date
+          schema: {type: string, format: date}
+        - in: query
+          name: schedule_revision
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: 恢复摘要；读取成功不代表可以恢复
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [local_date, schedule_revision, stage, known, token, receipts]
+                properties:
+                  local_date: {type: string, format: date}
+                  schedule_revision: {type: integer, format: int64}
+                  stage: {type: string}
+                  known: {type: boolean, description: 当前 Agent 用量是否已知}
+                  used_tokens: {type: integer, format: int64, description: Agent 累计维护用量，不是本次恢复的消耗}
+                  blocked_reason: {type: string, description: 上次维护记录的错误或待核对原因；不代表本次核对已经通过}
+                  token: {type: string, description: 当前恢复状态的校验值}
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        stage: {type: string}
+                        status: {type: string}
+                        known: {type: boolean}
+                        session_id: {type: string}
+        "400": {description: 查询参数无效}
+        "404": {description: Agent 或维护记录不存在}
+        "503": {description: 维护存储不可用}
+    post:
+      summary: 核对结果后继续原每日维护
+      description: |
+        与聊天和维护共用执行槽。核对该批次全部记忆操作的提交状态、来源、候选摘要及游标，
+        并校验当前配置、执行阶段和 token 后，将原 occurrence 恢复为待处理。
+        不重建执行身份、不重置预算；running、未知用量或缺失证据不能通过此接口直接重跑。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [local_date, schedule_revision, token]
+              properties:
+                local_date: {type: string, format: date}
+                schedule_revision: {type: integer, format: int64, minimum: 1}
+                token: {type: string, minLength: 1}
+      responses:
+        "202": {description: 已接受继续原批次，尚未完成}
+        "400": {description: 请求参数无效}
+        "404": {description: Agent 或维护记录不存在}
+        "409": {description: Agent 忙、状态已变化、配置不允许恢复或持久化证据未通过核对}
+        "503": {description: 维护存储不可用}
   /v1/agents/{agent_id}/event-sources:
     get:
       summary: 列出该 Auto Agent 的事件源及健康状态
