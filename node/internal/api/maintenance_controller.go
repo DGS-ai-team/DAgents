@@ -30,11 +30,13 @@ func selectHandbookParents(store *goals.Store, agentID string, limit int) []goal
 	if limit > 8 {
 		limit = 8
 	}
-	all := store.ListHandbookParents(agentID, limit)
+	// Filter manual scope before applying the limit; otherwise daily entries
+	// can occupy the first page and hide an eligible manual parent.
+	all := store.ListMaintenanceReceiptEntries(agentID)
 	parents := make([]goals.MaintenanceReceiptEntry, 0, limit)
 	for _, entry := range all {
 		receipt := entry.Receipt
-		if receipt.ParentReceiptID != "" || receipt.Status != "settled" || len(receipt.EvidenceJSON) == 0 {
+		if receipt.ParentReceiptID != "" || receipt.Status != "settled" || len(receipt.EvidenceJSON) == 0 || receipt.OccurrenceLocalDate != "" || receipt.OccurrenceScheduleRevision != 0 {
 			continue
 		}
 		if receipt.HandbookReceiptID != "" {
@@ -63,6 +65,47 @@ func selectHandbookParents(store *goals.Store, agentID string, limit int) []goal
 
 func hasPendingHandbookParents(store *goals.Store, agentID string) bool {
 	return len(selectHandbookParents(store, agentID, 1)) > 0
+}
+
+func selectOccurrenceHandbookParents(store *goals.Store, agentID, localDate string, revision int64, limit int) []goals.MaintenanceReceiptEntry {
+	if store == nil || limit <= 0 {
+		return nil
+	}
+	if limit > 8 {
+		limit = 8
+	}
+	entries := store.ListMaintenanceOccurrenceReceipts(agentID, localDate, revision)
+	parents := make([]goals.MaintenanceReceiptEntry, 0, limit)
+	for _, entry := range entries {
+		r := entry.Receipt
+		if r.ParentReceiptID != "" || r.Status != "settled" || len(r.EvidenceJSON) == 0 {
+			continue
+		}
+		if r.HandbookReceiptID != "" {
+			if child, ok := store.GetMaintenanceReceipt(r.HandbookReceiptID); ok && child.PhaseState == goals.MaintenancePhaseComplete {
+				continue
+			}
+		}
+		parents = append(parents, entry)
+	}
+	sort.Slice(parents, func(i, j int) bool {
+		a, b := parents[i].Receipt, parents[j].Receipt
+		if a.NextCursor != b.NextCursor {
+			return a.NextCursor < b.NextCursor
+		}
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.Before(b.CreatedAt)
+		}
+		return parents[i].ReceiptID < parents[j].ReceiptID
+	})
+	if len(parents) > limit {
+		parents = parents[:limit]
+	}
+	return parents
+}
+
+func hasPendingOccurrenceHandbookParents(store *goals.Store, agentID, localDate string, revision int64) bool {
+	return len(selectOccurrenceHandbookParents(store, agentID, localDate, revision, 1)) > 0
 }
 
 func maintenanceEvidencePrompt(prompt string, evidence memory.MaintenanceEvidence) string {

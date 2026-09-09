@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -10,6 +12,80 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
+
+// occurrenceMaintenanceUsage scopes every runner receipt operation to the
+// occurrence currently claimed by the scheduler. Embedding preserves the
+// Goals store's evidence and reconciliation methods, while these overrides
+// prevent a runner from settling a manual or different-day receipt.
+type occurrenceMaintenanceUsage struct {
+	*goals.Store
+	agentID, localDate string
+	revision           int64
+}
+
+func (u occurrenceMaintenanceUsage) inScope(receiptID string) bool {
+	r, ok := u.Store.GetMaintenanceReceipt(receiptID)
+	return ok && r.AgentID == u.agentID && r.OccurrenceLocalDate == u.localDate && r.OccurrenceScheduleRevision == u.revision
+}
+
+func (u occurrenceMaintenanceUsage) BeginMaintenance(agentID, receiptID, fingerprint string, estimated int64, now time.Time) (goals.MaintenanceReservation, error) {
+	if agentID != u.agentID {
+		return goals.MaintenanceReservation{}, fmt.Errorf("maintenance agent is outside occurrence scope")
+	}
+	if u.localDate == "" && u.revision == 0 {
+		return u.Store.BeginMaintenance(agentID, receiptID, fingerprint, estimated, now)
+	}
+	return u.Store.BeginMaintenanceForOccurrence(u.agentID, u.localDate, u.revision, receiptID, fingerprint, estimated, now)
+}
+
+func (u occurrenceMaintenanceUsage) SaveMaintenanceResult(agentID, receiptID string, candidates json.RawMessage, nextCursor, used int64, unknown bool) error {
+	if agentID != u.agentID || !u.inScope(receiptID) {
+		return fmt.Errorf("maintenance receipt is outside occurrence scope")
+	}
+	return u.Store.SaveMaintenanceResult(agentID, receiptID, candidates, nextCursor, used, unknown)
+}
+
+func (u occurrenceMaintenanceUsage) SaveMaintenanceResultWithEvidence(agentID, receiptID string, candidates, evidence json.RawMessage, nextCursor, used int64, unknown bool) error {
+	if agentID != u.agentID || !u.inScope(receiptID) {
+		return fmt.Errorf("maintenance receipt is outside occurrence scope")
+	}
+	return u.Store.SaveMaintenanceResultWithEvidence(agentID, receiptID, candidates, evidence, nextCursor, used, unknown)
+}
+
+func (u occurrenceMaintenanceUsage) SettleMaintenance(agentID, receiptID string, used int64, unknown bool, now time.Time) (goals.AgentUsage, error) {
+	if agentID != u.agentID || !u.inScope(receiptID) {
+		return goals.AgentUsage{}, fmt.Errorf("maintenance receipt is outside occurrence scope")
+	}
+	return u.Store.SettleMaintenance(agentID, receiptID, used, unknown, now)
+}
+
+func (u occurrenceMaintenanceUsage) GetMaintenanceReceipt(receiptID string) (goals.MaintenanceReceipt, bool) {
+	if !u.inScope(receiptID) {
+		return goals.MaintenanceReceipt{}, false
+	}
+	return u.Store.GetMaintenanceReceipt(receiptID)
+}
+
+func (u occurrenceMaintenanceUsage) ListMaintenanceReceipts(agentID string) []goals.MaintenanceReceipt {
+	if agentID != u.agentID {
+		return nil
+	}
+	if u.localDate == "" && u.revision == 0 {
+		result := make([]goals.MaintenanceReceipt, 0)
+		for _, receipt := range u.Store.ListMaintenanceReceipts(agentID) {
+			if receipt.OccurrenceLocalDate == "" && receipt.OccurrenceScheduleRevision == 0 {
+				result = append(result, receipt)
+			}
+		}
+		return result
+	}
+	entries := u.Store.ListMaintenanceOccurrenceReceipts(u.agentID, u.localDate, u.revision)
+	result := make([]goals.MaintenanceReceipt, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, entry.Receipt)
+	}
+	return result
+}
 
 func containsMaintenanceFS(groups []string) bool {
 	for _, g := range groups {
@@ -218,7 +294,7 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 	// occurrence. Their reservation may consume the allowance, and extracting
 	// first would leave a prepared child permanently stranded.
 	if containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) {
-		for _, parent := range selectHandbookParents(s.goalStore, agentID, 8) {
+		for _, parent := range selectOccurrenceHandbookParents(s.goalStore, agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, 8) {
 			child, exists := s.goalStore.GetMaintenanceReceipt(parent.Receipt.HandbookReceiptID)
 			if !exists || child.PhaseState == goals.MaintenancePhaseComplete {
 				continue
@@ -252,7 +328,8 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 		_, _ = s.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceFailed, "", err.Error(), now)
 		return err
 	}
-	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store, goals: s.goalStore}, Extractor: extractor, Memory: ms, Usage: s.goalStore}
+	occurrenceUsage := occurrenceMaintenanceUsage{Store: s.goalStore, agentID: agentID, localDate: claim.Occurrence.LocalDate, revision: claim.Occurrence.ScheduleRevision}
+	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store, goals: s.goalStore}, Extractor: extractor, Memory: ms, Usage: occurrenceUsage}
 	var runErr error
 	deadline := time.Now().Add(30 * time.Second)
 	attempts := 0
@@ -274,7 +351,7 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 		// Handbook writes are an explicit fs capability in the Agent snapshot.
 		// Legacy memory-only profiles keep their existing scheduler behavior.
 		if snap, parseErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot); parseErr == nil && containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) {
-			parents := selectHandbookParents(s.goalStore, agentID, 8)
+			parents := selectOccurrenceHandbookParents(s.goalStore, agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, 8)
 			for _, parent := range parents {
 				var handbookCleanup func()
 				if _, handbookCleanup, handbookErr = s.runHandbookMaintenance(leaseCtx, leaseCtx, *rec, "Review recent durable experience and update the handbook only when evidence supports it. Read existing entries first; preserve structure; use read_file digests for CAS edits.", parent.ReceiptID, parent.Receipt, turn.TurnBudget{MaxSteps: 8, MaxTotalTokens: 30000, MaxWallTime: 30 * time.Second}); handbookErr != nil {
@@ -288,7 +365,7 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 			}
 		}
 	}
-	if runErr == nil && containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) && hasPendingHandbookParents(s.goalStore, agentID) {
+	if runErr == nil && containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) && hasPendingOccurrenceHandbookParents(s.goalStore, agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision) {
 		// Keep the occurrence pending so the next bounded tick resumes the
 		// remaining durable parents instead of reporting a false completion.
 		return nil

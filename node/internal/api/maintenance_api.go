@@ -208,7 +208,8 @@ func (s *Server) handleRunAgentMaintenance(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, 500, "maintenance_unavailable", err.Error(), nil)
 		return
 	}
-	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store, goals: s.goalStore}, Extractor: extractor, Memory: ms, Usage: s.goalStore}
+	manualUsage := occurrenceMaintenanceUsage{Store: s.goalStore, agentID: id}
+	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store, goals: s.goalStore}, Extractor: extractor, Memory: ms, Usage: manualUsage}
 	next, _, err := runner.RunOnceWithEvidence(leaseCtx, id, cursor)
 	if err != nil {
 		writeAPIError(w, 409, "maintenance_failed", err.Error(), map[string]any{"sequence": next})

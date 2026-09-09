@@ -211,6 +211,151 @@ func TestHandbookParentBacklogBeyondBatchRemainsPending(t *testing.T) {
 	}
 }
 
+func TestManualHTTPDoesNotResumeDailyPreparedHandbook(t *testing.T) {
+	cfg := testConfig(t)
+	settings, _ := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	_ = settings.Save(context.Background(), cfg)
+	settings.Close()
+	client := &maintenanceScriptedClient{}
+	srv := NewServer(cfg, nil, WithLLM(client), WithMaintenanceExtractor(&apiMaintenanceExtractor{}))
+	defer srv.Close()
+	const agentID = "manual-daily-isolation"
+	now := time.Now().UTC()
+	snap := json.RawMessage(`{"agent_type":"auto","defaults":{"tools":{"enabled_groups":["fs"]}}}`)
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: agentID, ConfigSnapshot: snap, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.agents.MutateAgentPolicy(context.Background(), agentID, func(p *store.AgentPolicyRecord) error { p.Tools["write_file"] = "never"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: agentID, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC", MaintenanceTokenBudget: 5, TotalTokenBudget: 5}, 0, now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := srv.goalStore.ClaimMaintenance(agentID, now)
+	if err != nil || claim.Occurrence == nil {
+		t.Fatalf("claim occurrence: %+v err=%v", claim, err)
+	}
+	parentID := "daily-prepared-parent"
+	if _, err := srv.goalStore.BeginMaintenanceForOccurrence(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, parentID, "daily-source", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, parentID, json.RawMessage(`[]`), json.RawMessage(`{"messages":[{"role":"user","content":"daily prepared evidence"}]}`), 2, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SettleMaintenance(agentID, parentID, 0, false, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.PrepareHandbook(parentID, agentID, 5, now); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := srv.goalStore.GetMaintenanceReceipt("handbook:" + parentID)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+agentID+"/maintenance/run", nil))
+	if w.Code != http.StatusOK || client.calls != 0 {
+		t.Fatalf("manual resumed daily handbook: status=%d calls=%d body=%s", w.Code, client.calls, w.Body.String())
+	}
+	after, _ := srv.goalStore.GetMaintenanceReceipt("handbook:" + parentID)
+	if after.PhaseState != before.PhaseState || after.Status != before.Status || after.UsedTokens != before.UsedTokens {
+		t.Fatalf("daily prepared child changed by manual run: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestManualHTTPDoesNotApplyDailyPendingMemoryReceipt(t *testing.T) {
+	cfg := testConfig(t)
+	settings, _ := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	_ = settings.Save(context.Background(), cfg)
+	settings.Close()
+	client := &maintenanceScriptedClient{}
+	srv := NewServer(cfg, nil, WithLLM(client), WithMaintenanceExtractor(&apiMaintenanceExtractor{}))
+	defer srv.Close()
+	const agentID = "manual-daily-pending"
+	now := time.Now().UTC()
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: agentID, ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: agentID, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC"}, 0, now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := srv.goalStore.ClaimMaintenance(agentID, now)
+	if err != nil || claim.Occurrence == nil {
+		t.Fatalf("claim occurrence: %+v err=%v", claim, err)
+	}
+	parentID := "daily-pending-parent"
+	if _, err := srv.goalStore.BeginMaintenanceForOccurrence(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, parentID, "daily-pending", 1, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, parentID, json.RawMessage(`[{"information":"pending daily candidate"}]`), json.RawMessage(`{"messages":[{"role":"user","content":"pending daily evidence"}]}`), 4, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := srv.goalStore.GetMaintenanceReceipt(parentID)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+agentID+"/maintenance/run", nil))
+	if w.Code != http.StatusOK || client.calls != 0 {
+		t.Fatalf("manual touched daily pending receipt: status=%d calls=%d body=%s", w.Code, client.calls, w.Body.String())
+	}
+	after, _ := srv.goalStore.GetMaintenanceReceipt(parentID)
+	if after.Status != before.Status || after.NextCursor != before.NextCursor || after.UsedTokens != before.UsedTokens || len(after.CandidateJSON) != len(before.CandidateJSON) {
+		t.Fatalf("daily pending receipt changed by manual run: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestManualHTTPFiltersDailyParentsBeforeBatchLimit(t *testing.T) {
+	cfg := testConfig(t)
+	settings, _ := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	_ = settings.Save(context.Background(), cfg)
+	settings.Close()
+	client := &maintenanceScriptedClient{}
+	srv := NewServer(cfg, nil, WithLLM(client), WithMaintenanceExtractor(&apiMaintenanceExtractor{}))
+	defer srv.Close()
+	const agentID = "manual-daily-pagination"
+	now := time.Now().UTC()
+	snap := json.RawMessage(`{"agent_type":"auto","defaults":{"tools":{"enabled_groups":["fs"]}}}`)
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: agentID, ConfigSnapshot: snap, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.agents.MutateAgentPolicy(context.Background(), agentID, func(p *store.AgentPolicyRecord) error { p.Tools["write_file"] = "never"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: agentID, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC"}, 0, now.Add(-9*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 8; i++ {
+		claim, err := srv.goalStore.ClaimMaintenance(agentID, now.Add(-time.Duration(i)*24*time.Hour))
+		if err != nil || claim.Occurrence == nil {
+			t.Fatalf("daily claim %d: %+v err=%v", i, claim, err)
+		}
+		id := fmt.Sprintf("daily-pagination-%d", i)
+		if _, err := srv.goalStore.BeginMaintenanceForOccurrence(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, id, id, 0, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, id, json.RawMessage(`[]`), json.RawMessage(`{"messages":[{"role":"user","content":"daily pagination"}]}`), int64(i), 0, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.goalStore.SettleMaintenance(agentID, id, 0, false, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := srv.goalStore.BeginMaintenance(agentID, "manual-tail", "manual-tail", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, "manual-tail", json.RawMessage(`[]`), json.RawMessage(`{"messages":[{"role":"user","content":"manual tail evidence"}]}`), 99, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SettleMaintenance(agentID, "manual-tail", 0, false, now); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+agentID+"/maintenance/run", nil))
+	if w.Code != http.StatusOK || client.calls == 0 {
+		t.Fatalf("manual tail was hidden by daily page: status=%d calls=%d body=%s", w.Code, client.calls, w.Body.String())
+	}
+	for _, entry := range srv.goalStore.ListMaintenanceReceiptEntries(agentID) {
+		if strings.HasPrefix(entry.Receipt.Fingerprint, "daily-pagination-") && entry.Receipt.HandbookReceiptID != "" {
+			t.Fatalf("manual run touched daily parent: %+v", entry.Receipt)
+		}
+	}
+}
+
 func mustReceipt(t *testing.T, s *goals.Store, id string) goals.MaintenanceReceipt {
 	t.Helper()
 	r, ok := s.GetMaintenanceReceipt(id)
@@ -300,6 +445,11 @@ func TestMaintenanceHTTPWritesHandbookAndKeepsAudit(t *testing.T) {
 	if w.Code != http.StatusOK || client.calls != firstCalls {
 		t.Fatalf("unchanged run status=%d calls=%d want=%d", w.Code, client.calls, firstCalls)
 	}
+	for _, receipt := range srv.goalStore.ListMaintenanceReceipts(id) {
+		if receipt.OccurrenceLocalDate != "" || receipt.OccurrenceScheduleRevision != 0 {
+			t.Fatalf("manual receipt unexpectedly has occurrence scope: %+v", receipt)
+		}
+	}
 }
 
 func TestMaintenanceHTTPBudgetZeroSkipsHandbookLLM(t *testing.T) {
@@ -355,7 +505,8 @@ func TestMaintenanceSchedulerWritesConfiguredHandbookAndDeduplicates(t *testing.
 	if _, err := srv.agents.MutateAgentPolicy(context.Background(), id, func(p *store.AgentPolicyRecord) error { p.Tools["write_file"] = "never"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: id, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC", MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, now.Add(-24*time.Hour)); err != nil {
+	profile, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: id, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC", MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, now.Add(-24*time.Hour))
+	if err != nil {
 		t.Fatal(err)
 	}
 	e := turn.NewTurnEventEnvelope("scheduler-source", turn.EventTurnCompleted, now)
@@ -382,6 +533,23 @@ func TestMaintenanceSchedulerWritesConfiguredHandbookAndDeduplicates(t *testing.
 	srv.maintenanceSched.RunOnceForTest(context.Background(), now)
 	if client.calls != first {
 		t.Fatalf("duplicate occurrence called model: %d -> %d", first, client.calls)
+	}
+	status, err := srv.goalStore.MaintenanceScheduleStatus(id, now)
+	if err != nil || status.Last == nil {
+		t.Fatalf("missing occurrence status: %+v err=%v", status, err)
+	}
+	entries := srv.goalStore.ListMaintenanceOccurrenceReceipts(id, status.Last.LocalDate, profile.MaintenanceRevision)
+	var parent, child bool
+	for _, entry := range entries {
+		if entry.Receipt.ParentReceiptID == "" && entry.Receipt.HandbookReceiptID != "" {
+			parent = true
+		}
+		if entry.Receipt.ParentReceiptID != "" {
+			child = true
+		}
+	}
+	if !parent || !child {
+		t.Fatalf("occurrence receipts missing parent/child: %+v", entries)
 	}
 }
 func (*maintenanceScriptedClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
