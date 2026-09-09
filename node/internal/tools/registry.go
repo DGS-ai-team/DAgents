@@ -64,7 +64,6 @@ type Registry struct {
 	desktopMu              sync.Mutex
 	desktopFrames          map[string]screenGeometry
 	mcpTools               map[string]MCPTool
-	goalCheckpoint         func(context.Context, string, string, GoalCheckpoint) error
 	autonomyEnabled        bool
 	autonomyTodoStore      *autonomy.Store
 	workspaceCoordinator   *workspacecoord.Coordinator
@@ -115,10 +114,6 @@ func (r *Registry) HandbookRoot() string {
 		return ""
 	}
 	return r.handbookRoot
-}
-
-func (r *Registry) SetGoalCheckpoint(fn func(context.Context, string, string, GoalCheckpoint) error) {
-	r.goalCheckpoint = fn
 }
 
 // SetAutonomyEnabled exposes Auto-only todo tools on an explicitly selected
@@ -426,7 +421,6 @@ func (r *Registry) Definitions() []ToolDef {
 		loadSkillsToolDef(),
 		unloadSkillsToolDef(),
 		clearSkillsToolDef(),
-		goalCheckpointToolDef(),
 		triggerListToolDef(),
 		triggerGetToolDef(),
 		triggerCreateToolDef(),
@@ -486,9 +480,6 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 		if !isHandbookPath(pathArg) {
 			return "", fmt.Errorf("handbook maintenance is limited to handbook/ paths")
 		}
-	}
-	if strings.TrimSpace(name) == "goal_checkpoint" && GoalIDFromContext(ctx) == "" {
-		return "", fmt.Errorf("goal_checkpoint is only available during a managed goal run")
 	}
 	if GoalIDFromContext(ctx) != "" && (strings.HasPrefix(strings.TrimSpace(name), "trigger_") || strings.HasSuffix(strings.TrimSpace(name), "_temporary_agent")) {
 		return "", fmt.Errorf("%s is unavailable during a managed goal run", name)
@@ -561,7 +552,6 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
-	r.handlers["goal_checkpoint"] = r.execGoalCheckpoint
 	r.handlers["todo_list"] = r.execTodoList
 	r.handlers["todo_create"] = r.execTodoCreate
 	r.handlers["todo_update"] = r.execTodoUpdate
