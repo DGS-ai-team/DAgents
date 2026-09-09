@@ -190,6 +190,89 @@ func TestAutonomyV2TriggerRoundProviderRequiresExactDefaultDelivery(t *testing.T
 	}
 }
 
+func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
+	s, _ := autonomyV2TestServer(t)
+	if w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":0,"max_tool_rounds":7,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`); w.Code != http.StatusOK {
+		t.Fatalf("profile put=%d %s", w.Code, w.Body)
+	}
+	targetSession := "auto-v2"
+	def, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{Name: "owned", Condition: map[string]any{"interval_seconds": 17}, TargetAgentID: "auto-v2", TargetSessionID: &targetSession, SessionTargetMode: triggers.SessionTargetFixed}, "auto-v2", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.triggerStore.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	setPending := func(delivery string) {
+		current, ok := s.triggerStore.GetTrigger(def.TriggerID)
+		if !ok {
+			t.Fatal("owned trigger missing")
+		}
+		current.PendingDeliveryID = &delivery
+		current.PendingSessionID = &targetSession
+		if err := s.triggerStore.ReplaceTrigger(*current); err != nil {
+			t.Fatal(err)
+		}
+		s.triggerStore.MarkPendingDelivery(def.TriggerID)
+	}
+	setPending("owned-delivery")
+	if limit, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err != nil || !trusted || limit != 7 {
+		t.Fatalf("owned user trigger=(%d,%v,%v)", limit, trusted, err)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "stale"); err == nil || trusted {
+		t.Fatalf("stale delivery accepted: trusted=%v err=%v", trusted, err)
+	}
+	current, _ := s.triggerStore.GetTrigger(def.TriggerID)
+	current.RecoveryRequired = true
+	if err := s.triggerStore.ReplaceTrigger(*current); err != nil {
+		t.Fatal(err)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err == nil || trusted {
+		t.Fatalf("recovery delivery accepted: trusted=%v err=%v", trusted, err)
+	}
+	current.RecoveryRequired = false
+	nonMain := "other-session"
+	current.TargetSessionID = &nonMain
+	if err := s.triggerStore.ReplaceTrigger(*current); err != nil {
+		t.Fatal(err)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err == nil || trusted {
+		t.Fatalf("non-main session accepted: trusted=%v err=%v", trusted, err)
+	}
+	cross, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{Name: "cross", Condition: map[string]any{"interval_seconds": 17}, TargetAgentID: "other-auto", TargetSessionID: &targetSession, SessionTargetMode: triggers.SessionTargetFixed}, "other-auto", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.triggerStore.CreateTrigger(cross); err != nil {
+		t.Fatal(err)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", cross.TriggerID, "cross-delivery"); err == nil || trusted {
+		t.Fatalf("cross-agent trigger accepted: trusted=%v err=%v", trusted, err)
+	}
+	if err := s.agents.Save(context.Background(), store.AgentRecord{AgentID: "normal-1", ConfigSnapshot: []byte(`{"agent_type":"normal","defaults":{}}`), RuntimeRevision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	normalSession := "normal-1"
+	normal, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{Name: "normal", Condition: map[string]any{"interval_seconds": 17}, TargetAgentID: "normal-1", TargetSessionID: &normalSession, SessionTargetMode: triggers.SessionTargetFixed}, "normal-1", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.triggerStore.CreateTrigger(normal); err != nil {
+		t.Fatal(err)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "normal-1", normal.TriggerID, "normal-delivery"); err != nil || trusted {
+		t.Fatalf("normal Agent trigger changed behavior: trusted=%v err=%v", trusted, err)
+	}
+	normalOtherSession := "normal-other"
+	normal.TargetSessionID = &normalOtherSession
+	if err := s.triggerStore.ReplaceTrigger(normal); err != nil {
+		t.Fatal(err)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "normal-1", normal.TriggerID, "normal-delivery"); err != nil || trusted {
+		t.Fatalf("normal non-main trigger changed behavior: trusted=%v err=%v", trusted, err)
+	}
+}
+
 func TestNewServerStartupRebuildsOnlyAutoDefaults(t *testing.T) {
 	cfg := testConfig(t)
 	agents, err := store.OpenAgents(cfg.AgentsDBPath())
