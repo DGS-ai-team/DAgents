@@ -148,3 +148,17 @@ ConditionRunner 统一使用带 trigger/delivery/session/Agent/revision/occurren
 Auto 设置独立读取默认 trigger，按真实 recovery_required 显示新页面管理入口，当前草稿不因导航丢失；刷新状态与配置草稿分离。缺失 trigger 可同步重建，已恢复但禁用、频率不符以及关闭保存部分失败均保留同步入口。恢复面板发送准确 delivery_id 与 revision。dreaming recovery_pending 不触发此入口。
 
 主 Agent 前端全量 64 文件、356 项测试通过，面板14项覆盖真实路由解析、状态隔离、404同步、503部分保存、关闭分支与草稿保留。浏览器视觉验收仍未进行。
+
+### 自有自定义触发器与条件审批复核
+
+自定义 user trigger 固定指向自身 Auto 主会话时应用配置的最大工具轮次，即使默认频率关闭也独立有效。普通 Agent 的主会话与其他会话 trigger 保持原行为。主 Agent 专项 race（provider 与条件 HTTP 链路）3.420 秒通过，轮次修复提交为 51d27bd8。
+
+条件 HTTP 测试经过真实 Handler、注册 Agent 与 SQLite 会话存储，验证审批前无模型调用、错误批准参数保留待审批、批准执行一次并投递任务、拒绝不执行不投递。主 Agent Session/Turn 全包 race 分别54.677/12.241秒通过，Triggers 全包 race1.980秒通过，Tools 普通全包13.656秒通过。同期 API 全包失败明确指向自定义 trigger 校验影响普通 trigger 的用例；该项修正后专项通过，尚未完成修正后的全包重跑。
+
+审核还发现恢复 runtime 缺少 completion 回调绑定，以及名为 submit failure 的测试实际只直接调用恢复存储函数，要求补足真实链路验证，不能用命名替代证据。Dreaming ASK 恢复缺少经验收尾关联，已进入修复；这些项目不得计为最终验收完成。
+
+随后修正 Create/Replace 回调绑定，主 Agent 对 Manager 重建与 validator 专项 race2.967秒通过；修正后的 API 全包29.913秒通过。下游失败链路测试仍需补足。
+
+### 外置手册搜索路径
+
+修复 handbook 根目录在工作区外时 glob/grep 输出工作区相对路径的问题。结果统一使用可回读的 handbook/...，链接根目录使用 canonical root 计算路径，未绑定手册时保持普通工作区路径语义。主 Agent Handbook/Glob/Grep 专项0.398秒通过，修复提交为 ffc7ab44。相对配置目录仍锚定 Agent state root，绝对配置目录保持绝对路径。
