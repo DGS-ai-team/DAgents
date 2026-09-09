@@ -10,23 +10,25 @@ import (
 )
 
 type MaintenanceReceipt struct {
-	AgentID           string          `json:"agent_id"`
-	Fingerprint       string          `json:"fingerprint"`
-	ProfileRevision   int64           `json:"profile_revision"`
-	EstimatedTokens   int64           `json:"estimated_tokens"`
-	UsedTokens        int64           `json:"used_tokens"`
-	Unknown           bool            `json:"unknown"`
-	Status            string          `json:"status"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	CandidateJSON     json.RawMessage `json:"candidate_json,omitempty"`
-	NextCursor        int64           `json:"next_cursor,omitempty"`
-	SessionID         string          `json:"session_id,omitempty"`
-	EvidenceJSON      json.RawMessage `json:"evidence_json,omitempty"`
-	ParentReceiptID   string          `json:"parent_receipt_id,omitempty"`
-	HandbookReceiptID string          `json:"handbook_receipt_id,omitempty"`
-	PhaseState        string          `json:"phase_state,omitempty"`
-	ResultJSON        json.RawMessage `json:"result_json,omitempty"`
+	AgentID                    string          `json:"agent_id"`
+	Fingerprint                string          `json:"fingerprint"`
+	ProfileRevision            int64           `json:"profile_revision"`
+	EstimatedTokens            int64           `json:"estimated_tokens"`
+	UsedTokens                 int64           `json:"used_tokens"`
+	Unknown                    bool            `json:"unknown"`
+	Status                     string          `json:"status"`
+	CreatedAt                  time.Time       `json:"created_at"`
+	UpdatedAt                  time.Time       `json:"updated_at"`
+	CandidateJSON              json.RawMessage `json:"candidate_json,omitempty"`
+	NextCursor                 int64           `json:"next_cursor,omitempty"`
+	SessionID                  string          `json:"session_id,omitempty"`
+	EvidenceJSON               json.RawMessage `json:"evidence_json,omitempty"`
+	ParentReceiptID            string          `json:"parent_receipt_id,omitempty"`
+	HandbookReceiptID          string          `json:"handbook_receipt_id,omitempty"`
+	OccurrenceLocalDate        string          `json:"occurrence_local_date,omitempty"`
+	OccurrenceScheduleRevision int64           `json:"occurrence_schedule_revision,omitempty"`
+	PhaseState                 string          `json:"phase_state,omitempty"`
+	ResultJSON                 json.RawMessage `json:"result_json,omitempty"`
 }
 
 const maxMaintenanceEvidenceBytes = 64 * 1024
@@ -327,6 +329,7 @@ func (s *Store) ListMaintenanceReceipts(agentID string) []MaintenanceReceipt {
 }
 
 func cloneMaintenanceReceipt(r MaintenanceReceipt) MaintenanceReceipt {
+	r.CandidateJSON = append([]byte(nil), r.CandidateJSON...)
 	r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
 	r.ResultJSON = append([]byte(nil), r.ResultJSON...)
 	return r

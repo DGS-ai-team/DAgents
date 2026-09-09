@@ -103,6 +103,8 @@ func (s *Store) PrepareHandbook(parentID, agentID string, estimated int64, now t
 		child = reservation.Receipt
 	}
 	child.ParentReceiptID = parentID
+	child.OccurrenceLocalDate = parent.OccurrenceLocalDate
+	child.OccurrenceScheduleRevision = parent.OccurrenceScheduleRevision
 	child.PhaseState = MaintenancePhasePrepared
 	s.data.MaintenanceReceipts[childID] = child
 	parent.HandbookReceiptID = childID
