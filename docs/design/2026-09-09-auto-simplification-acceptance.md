@@ -118,3 +118,7 @@ Manage重新登录后，1787像素桌面截图检查首页和有数据的Auto总
 忙碌专项测试强化为必须实际存在一条排队投递后，root 执行 `go test -race ./node/internal/api -run TestSchedulerBusyAutoWakeupsCoalesceAndDisableDoesNotRunQueued -count=3` 三次均失败（queue=0、active=true）。检查证明测试漏接 `SetTriggerDeliveryTracker`，`NewScheduler` 本身不会完成该连接。因此撤回原测试可证明关闭排队取消的判断，需补生产同构连接后重验；这不是生产调度缺陷的证明。
 
 UI 审查也发现当前 Auto 默认 trigger 仍被通用编辑入口当作用户 trigger。计划要求频率配置为唯一编辑入口，因此必须区分当前 Auto（托管、跳转设置）、用户 trigger（可编辑）和退役/未知控制器（只读不可执行），不能以“当前 Auto 可编辑”的测试断言作为验收标准。
+
+### 忙碌队列验收补充
+
+最终专项测试已改为真实用户聊天进入 ASK waiting，再由 Scheduler 多次投递默认 Auto trigger；不手工清除 pending。Manager 在 runtime 创建前绑定真实 trigger store。断言实际只存在一条排队唤醒、等待期间模型调用一次；关闭默认频率并恢复原 ASK 后，总模型调用两次（原回合的前后两次请求），队列清空且 runtime 空闲。root 独立执行上述专项 race `-count=3` 通过。这证明用户回合忙碌期间的唤醒合并及关闭丢弃，不单独证明 Auto 起源等待审批、重启恢复或 provider 配置校验。
