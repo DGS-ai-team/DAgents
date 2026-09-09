@@ -8,6 +8,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"net/http"
@@ -95,6 +96,15 @@ func TestHandbookPreparedReopenUsesExistingReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	parentID := testMaintenanceParentID(agentID, "prepared-parent", 3)
+	ms, err := srv.openAgentMemoryService(agentID, &store.AgentRecord{AgentID: agentID, ConfigSnapshot: snap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.ApplyMaintenanceOperation(context.Background(), memory.MaintenanceOperation{OperationID: parentID, AgentID: agentID, Scope: memory.ScopeAgent, SourceFingerprint: "prepared-parent", ExpectedCursor: 0, NextCursor: 3}, nil, memory.MaintenanceCursor{AgentID: agentID, Scope: memory.ScopeAgent, Sequence: 3, SourceFingerprint: "prepared-parent"}); err != nil {
+		ms.Close()
+		t.Fatal(err)
+	}
+	ms.Close()
 	if _, err := srv.goalStore.BeginMaintenance(agentID, parentID, "prepared-parent", 0, now); err != nil {
 		t.Fatal(err)
 	}
@@ -110,25 +120,94 @@ func TestHandbookPreparedReopenUsesExistingReservation(t *testing.T) {
 	// Reopen the persisted stores before attempting the prepared child.
 	srv.Close()
 	srv = NewServer(cfg, nil, WithLLM(client))
-	leaseCtx, release, acquired, err := srv.sessions.TryAcquireMaintenanceContext(context.Background(), agentID)
-	if err != nil || !acquired {
-		t.Fatalf("maintenance gate: acquired=%v err=%v", acquired, err)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+agentID+"/maintenance/run", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("reopen maintenance status=%d body=%s", w.Code, w.Body.String())
 	}
-	parent := mustReceipt(t, srv.goalStore, parentID)
-	result, cleanup, err := srv.runHandbookMaintenance(leaseCtx, leaseCtx, store.AgentRecord{AgentID: agentID, ConfigSnapshot: snap}, "resume", parentID, parent, turn.TurnBudget{MaxTotalTokens: 5})
-	release()
-	if cleanup != nil {
-		cleanup()
+	if client.calls != 2 {
+		t.Fatalf("prepared child did not run exactly once: calls=%d", client.calls)
 	}
+	foundEvidence := false
+	for _, prompt := range client.prompts {
+		if strings.Contains(prompt, "prepared durable evidence") {
+			foundEvidence = true
+		}
+	}
+	if !foundEvidence {
+		t.Fatalf("prepared evidence missing from handbook prompt: %+v", client.prompts)
+	}
+	handbook, err := agentruntime.HandbookRoot(cfg.RuntimeDir(), agentID, agentruntime.WorkspaceConfig{}, agentruntime.HandbookConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.calls != 2 || !result.UsageKnown {
-		t.Fatalf("prepared child did not run: calls=%d result=%+v", client.calls, result)
+	if raw, err := os.ReadFile(filepath.Join(handbook, "maintenance.md")); err != nil || string(raw) != "evidence" {
+		t.Fatalf("recovered handbook file=%q err=%v", raw, err)
 	}
 	child, _ := srv.goalStore.GetMaintenanceReceipt("handbook:" + parentID)
 	if child.PhaseState != goals.MaintenancePhaseComplete || child.UsedTokens != 4 {
 		t.Fatalf("prepared child result=%+v", child)
+	}
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+agentID+"/maintenance/run", nil))
+	if w.Code != http.StatusOK || client.calls != 2 {
+		t.Fatalf("repeat reopen status=%d calls=%d body=%s", w.Code, client.calls, w.Body.String())
+	}
+}
+
+func TestHandbookParentBacklogBeyondBatchRemainsPending(t *testing.T) {
+	cfg := testConfig(t)
+	settings, _ := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	_ = settings.Save(context.Background(), cfg)
+	settings.Close()
+	client := &maintenanceScriptedClient{}
+	srv := NewServer(cfg, nil, WithLLM(client))
+	defer srv.Close()
+	const agentID = "handbook-parent-backlog"
+	now := time.Now().UTC()
+	snap := json.RawMessage(`{"agent_type":"auto","defaults":{"tools":{"enabled_groups":["fs"]}}}`)
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: agentID, ConfigSnapshot: snap, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.agents.MutateAgentPolicy(context.Background(), agentID, func(p *store.AgentPolicyRecord) error { p.Tools["write_file"] = "never"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: agentID, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 09:00", Timezone: "UTC"}, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	for cursor := int64(1); cursor <= 9; cursor++ {
+		id := testMaintenanceParentID(agentID, fmt.Sprintf("backlog-%d", cursor), cursor)
+		if _, err := srv.goalStore.BeginMaintenance(agentID, id, fmt.Sprintf("backlog-%d", cursor), 0, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, id, json.RawMessage(`[]`), json.RawMessage(`{"messages":[{"role":"user","content":"durable backlog"}]}`), cursor, 0, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.goalStore.SettleMaintenance(agentID, id, 0, false, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(selectHandbookParents(srv.goalStore, agentID, 8)); got != 8 {
+		t.Fatalf("selected parents=%d want 8", got)
+	}
+	if !hasPendingHandbookParents(srv.goalStore, agentID) {
+		t.Fatal("ninth handbook parent was reported complete")
+	}
+	post := func() (int, string) {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+agentID+"/maintenance/run", nil))
+		return w.Code, w.Body.String()
+	}
+	if code, body := post(); code != http.StatusOK || !strings.Contains(body, `"status":"pending"`) || client.calls == 0 {
+		t.Fatalf("first backlog batch code=%d calls=%d body=%s", code, client.calls, body)
+	}
+	firstCalls := client.calls
+	if code, body := post(); code != http.StatusOK || !strings.Contains(body, `"status":"completed"`) || client.calls <= firstCalls {
+		t.Fatalf("second backlog batch code=%d calls=%d body=%s", code, client.calls, body)
+	}
+	secondCalls := client.calls
+	if code, body := post(); code != http.StatusOK || client.calls != secondCalls {
+		t.Fatalf("duplicate backlog batch code=%d calls=%d body=%s", code, client.calls, body)
 	}
 }
 
