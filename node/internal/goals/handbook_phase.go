@@ -38,8 +38,7 @@ func (s *Store) ListHandbookParents(agentID string, limit int) []MaintenanceRece
 		if receipt.AgentID != agentID || receipt.ParentReceiptID != "" || receipt.Status != "settled" || len(receipt.EvidenceJSON) == 0 {
 			continue
 		}
-		receipt.EvidenceJSON = append([]byte(nil), receipt.EvidenceJSON...)
-		receipt.ResultJSON = append([]byte(nil), receipt.ResultJSON...)
+		receipt = cloneMaintenanceReceipt(receipt)
 		entries = append(entries, MaintenanceReceiptEntry{ReceiptID: id, Receipt: receipt})
 	}
 	sort.Slice(entries, func(i, j int) bool {

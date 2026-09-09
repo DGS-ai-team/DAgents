@@ -77,6 +77,32 @@ func TestPrepareHandbookStableParentChildAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestListHandbookParentsDeepCopiesReceiptPayloads(t *testing.T) {
+	s, parentID, _ := prepareHandbookParent(t)
+	s.mu.Lock()
+	r := s.data.MaintenanceReceipts[parentID]
+	r.CandidateJSON = []byte(`[{"information":"candidate"}]`)
+	r.EvidenceJSON = []byte(`{"evidence":"source"}`)
+	r.ResultJSON = []byte(`{"result":"ok"}`)
+	s.data.MaintenanceReceipts[parentID] = r
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	entries := s.ListHandbookParents("auto-maint", 10)
+	if len(entries) != 1 {
+		t.Fatalf("entries=%d", len(entries))
+	}
+	entries[0].Receipt.CandidateJSON[0] = 'X'
+	entries[0].Receipt.EvidenceJSON[0] = 'X'
+	entries[0].Receipt.ResultJSON[0] = 'X'
+	got, _ := s.GetMaintenanceReceipt(parentID)
+	if string(got.CandidateJSON) != `[{"information":"candidate"}]` || string(got.EvidenceJSON) != `{"evidence":"source"}` || string(got.ResultJSON) != `{"result":"ok"}` {
+		t.Fatalf("store payload mutated: %+v", got)
+	}
+}
+
 func TestPrepareHandbookSaveFailureRollsBackParentAndChild(t *testing.T) {
 	s, parentID, _ := prepareHandbookParent(t)
 	path := s.path
