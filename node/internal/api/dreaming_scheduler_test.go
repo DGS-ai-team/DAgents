@@ -110,6 +110,9 @@ func TestDreamingSchedulerWaitingAttemptDoesNotStartAnotherTurn(t *testing.T) {
 	if status := d.Status("auto-wait"); status.State != "waiting" {
 		t.Fatalf("waiting attempt changed visible state: %+v", status)
 	}
+	if status := d.CurrentStatus("auto-wait", base.Add(6*time.Minute)); status.State != "waiting" || !status.NextAt.IsZero() {
+		t.Fatalf("approval waiting status exposed stale schedule: %+v", status)
+	}
 }
 
 type schedulerResumeLLM struct{ calls int }

@@ -122,6 +122,21 @@ func (d *DreamingScheduler) Status(agentID string) DreamingStatus {
 
 func (d *DreamingScheduler) CurrentStatus(agentID string, now time.Time) DreamingStatus {
 	agentID = strings.TrimSpace(agentID)
+	if d.sessions != nil {
+		if attempt, found, err := d.sessions.GetDreamingAttempt(agentID); err == nil && found {
+			switch attempt.State {
+			case session.DreamingAttemptWaiting:
+				// Waiting for an approval is distinct from waiting for today's
+				// scheduled time: omit NextAt so clients do not display a stale
+				// schedule while a live turn is paused.
+				return DreamingStatus{State: "waiting"}
+			case session.DreamingAttemptRunning, session.DreamingAttemptCompleted:
+				// A completed attempt still needs the durable commit/reset
+				// handoff; report it as active until that handoff is acknowledged.
+				return DreamingStatus{State: "running"}
+			}
+		}
+	}
 	d.mu.Lock()
 	status, exists := d.status[agentID]
 	d.mu.Unlock()
