@@ -134,3 +134,15 @@ root 独立验证 `go test -race ./node/internal/triggers -count=1` 通过；Tri
 新增 Auto 起源专项使用 NewServer 的真实 triggerToolRoundProvider、autonomy profile 与 trigger store；仅模型执行器注入测试客户端，避免外部网络依赖，测试不覆盖生产 LLM 工厂。实际默认触发进入 ASK 后验证合法 delivery 的轮次配置与错误 delivery 拒绝，多次投递期间模型请求数保持1，关闭后恢复原 ASK，最终严格为2次请求、无活动回合且队列清空。root 将该测试、用户起源忙碌测试及既有 trigger 审批收尾测试一起运行 race `-count=3`，API 与 Session 均通过。
 
 同时移除 session 的未引用 SubmitGoalTriggerMessage/EnqueueGoalTriggerMessage 及共享入队函数中的旧 Goal/Run 参数；普通 trigger 与 Auto 入队接口保留。现存历史字段不因此删除。静默结束仍处于独立开发审查中，本批不将其视为通过。
+
+### 默认触发器跳转实测与 dreaming 历史显示缺口
+
+5173 开发前端 1280×720 浅色截图确认当前两条默认唤醒卡片仅提供 Auto 设置和历史入口；实际点击第一条“打开 Auto 设置”正确进入 agt-9ea36189d2221ea1 的 autonomy 分区，未改动配置。卡片与设置页未出现重叠。
+
+同一设置页显示已有长期经验正文，但每日 dreaming 关闭后“上次成功”仍为“暂无”。关闭调度不应隐藏成功历史，此项已交由 Luna 核查修复，尚未验收。该观察与静默结束实现分别跟踪。
+
+### Dreaming 历史成功时间修复验证
+
+CurrentStatus 统一附带最近一次 ResetApplied 成功记录，保持当前的 waiting/running/failed/recovery/disabled 状态与调度时间语义。新增查询只读取该 Agent 的完成记录；未提交完成的 dreaming 不算历史成功。root 执行 API/autonomy 的 Dreaming 专项 race 通过，测试验证次日等待、关闭、失败、运行中与重新打开持久存储后的准确成功时间。
+
+Manage Auto 副标题同步改为当前状态、待办与最近上报的准确描述，Manage 前端构建通过。上述 Node 状态修复尚待新版进程的实际页面复验；无工作静默机制的整体回归与通知历史验证另行进行。

@@ -120,8 +120,18 @@ func (d *DreamingScheduler) Status(agentID string) DreamingStatus {
 	return d.status[strings.TrimSpace(agentID)]
 }
 
-func (d *DreamingScheduler) CurrentStatus(agentID string, now time.Time) DreamingStatus {
+func (d *DreamingScheduler) CurrentStatus(agentID string, now time.Time) (result DreamingStatus) {
 	agentID = strings.TrimSpace(agentID)
+	// LastSuccess is durable history, independent of today's scheduling state.
+	// Attach it to every return below so waiting, failure, recovery, and disabled
+	// projections cannot accidentally erase a prior successful run.
+	defer func() {
+		if result.LastSuccess.IsZero() {
+			if latest, ok := d.autonomy.LatestDreamingCommit(agentID); ok {
+				result.LastSuccess = latest.UpdatedAt
+			}
+		}
+	}()
 	if d.sessions != nil {
 		if attempt, found, err := d.sessions.GetDreamingAttempt(agentID); err == nil && found {
 			switch attempt.State {
@@ -148,6 +158,8 @@ func (d *DreamingScheduler) CurrentStatus(agentID string, now time.Time) Dreamin
 		return DreamingStatus{State: "recovery_pending"}
 	}
 	if !configured || !profile.DreamingEnabled {
+		// Disabling dreaming stops future work but does not erase the durable
+		// history of the last successful run.
 		return DreamingStatus{State: "disabled"}
 	}
 	if exists && status.State == "failed" {

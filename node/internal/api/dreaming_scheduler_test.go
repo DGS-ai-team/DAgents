@@ -241,11 +241,36 @@ func TestDreamingStatusIsIndependentOfWakeFrequencyAndPersists(t *testing.T) {
 	if status.NextAt.Hour() != 3 || status.NextAt.Day() != 10 {
 		t.Fatalf("next dreaming time=%v, want 2026-09-10 03:00 UTC", status.NextAt)
 	}
+	wantSuccess := d.CurrentStatus("auto-1", now).LastSuccess
+	nextDay := now.Add(24 * time.Hour)
+	if next := d.CurrentStatus("auto-1", nextDay); next.State != "waiting" || !next.LastSuccess.Equal(wantSuccess) {
+		t.Fatalf("next-day status lost prior success: %+v", next)
+	}
 	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, MaxToolRounds: 2, DreamingEnabled: false, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
 		t.Fatal(err)
 	}
-	if status := d.CurrentStatus("auto-1", now); status.State != "disabled" {
+	if status := d.CurrentStatus("auto-1", now); status.State != "disabled" || status.LastSuccess.IsZero() {
 		t.Fatalf("disabled dreaming status=%+v", status)
+	}
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	d3 := NewDreamingScheduler(a, nil, nil, nil)
+	d3.setStatus("auto-1", DreamingStatus{State: "failed", LastError: "temporary"})
+	if failed := d3.CurrentStatus("auto-1", nextDay); failed.State != "failed" || !failed.LastSuccess.Equal(wantSuccess) {
+		t.Fatalf("failed status lost prior success: %+v", failed)
+	}
+	d3.setStatus("auto-1", DreamingStatus{State: "running"})
+	if running := d3.CurrentStatus("auto-1", nextDay); running.State != "running" || !running.LastSuccess.Equal(wantSuccess) {
+		t.Fatalf("running status lost prior success: %+v", running)
+	}
+	reopened, err := autonomy.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2 := NewDreamingScheduler(reopened, nil, nil, nil)
+	if status := d2.CurrentStatus("auto-1", nextDay); !status.LastSuccess.Equal(wantSuccess) {
+		t.Fatalf("reopened status lost prior success: %+v", status)
 	}
 }
 

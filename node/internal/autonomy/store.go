@@ -207,6 +207,25 @@ func (s *Store) GetDreamingCommit(agentID, localDate string) (DreamingCommit, bo
 	return c, ok
 }
 
+// LatestDreamingCommit returns the most recently updated durable dreaming
+// record, including records from dates on which dreaming is now disabled.
+func (s *Store) LatestDreamingCommit(agentID string) (DreamingCommit, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	agentID = strings.TrimSpace(agentID)
+	var latest DreamingCommit
+	found := false
+	for _, c := range s.data.Dreaming {
+		if c.AgentID != agentID || !c.ResetApplied {
+			continue
+		}
+		if !found || c.UpdatedAt.After(latest.UpdatedAt) || (c.UpdatedAt.Equal(latest.UpdatedAt) && c.LocalDate > latest.LocalDate) {
+			latest, found = c, true
+		}
+	}
+	return latest, found
+}
+
 func (s *Store) ListPendingDreamingCommits(agentID string) []DreamingCommit {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -109,7 +109,7 @@ export const VIEW_META = {
   },
   auto: {
     title: "Auto 员工",
-    subtitle: "跨 Node 的只读岗位状态与最近成果摘要",
+    subtitle: "跨 Node 查看 Auto 岗位状态、待办与最近上报",
   },
   cases: {
     title: "案例库",
