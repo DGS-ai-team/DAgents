@@ -99,6 +99,32 @@ func TestRegistrySetPolicyEngine(t *testing.T) {
 	}
 }
 
+func TestPolicyToolHookConcurrentReload(t *testing.T) {
+	hook := NewPolicyToolHook(policy.NewDefaultEngine())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 500; i++ {
+			hook.SetEngine(policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{
+				"write_file": policy.ModeAlways,
+			}}))
+		}
+	}()
+	for i := 0; i < 500; i++ {
+		var out ToolBeforeEachResult
+		if err := hook.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
+			ToolName: "write_file",
+			ToolArgs: map[string]any{"path": "file.txt"},
+		}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Action != policy.ActionAuto && out.Action != policy.ActionRequireApproval {
+			t.Fatalf("unexpected action during reload: %q", out.Action)
+		}
+	}
+	<-done
+}
+
 func TestRunPhase_nilRegistryToolBeforeEach(t *testing.T) {
 	var reg *Registry
 	out := registryToolBeforeEach(reg, ToolBeforeEachInput{ToolName: "read_file"})

@@ -1,7 +1,10 @@
 // Package policy 加载 `.runtime/policy` 下的 txt 策略并判定工具/shell 执行策略。
 package policy
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Action 为编排器使用的工具执行策略结果。
 type Action string
@@ -16,6 +19,7 @@ const (
 type Engine struct {
 	toolModes  map[string]ApprovalMode
 	shellModes map[ShellType]map[string]ApprovalMode
+	grants     []Grant
 	policyDir  string
 }
 
@@ -31,6 +35,14 @@ func (e *Engine) DecideTool(toolName string, toolArgs map[string]any) Action {
 	}
 	name := strings.ToLower(strings.TrimSpace(toolName))
 	toolMode := e.toolMode(name)
+	if toolMode == ModeDeny {
+		return ActionDeny
+	}
+	for _, grant := range e.grants {
+		if grant.Allows(name, toolArgs, time.Now()) {
+			return ActionAuto
+		}
+	}
 
 	switch toolMode {
 	case ModeAlways:

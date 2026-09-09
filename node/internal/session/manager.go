@@ -731,6 +731,22 @@ func (m *Manager) SetSessionPolicy(sessionID string, engine *policy.Engine) {
 	}
 }
 
+// SetAgentPolicy updates every loaded session owned by an Agent, including
+// the primary and Auto goal sessions.
+func (m *Manager) SetAgentPolicy(agentID string, engine *policy.Engine) {
+	if m == nil || engine == nil {
+		return
+	}
+	agentID = strings.TrimSpace(agentID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, rt := range m.sessions {
+		if rt != nil && strings.TrimSpace(rt.session.AgentID) == agentID {
+			rt.setPolicy(engine)
+		}
+	}
+}
+
 // ToolNames 返回 registry 已知工具名。
 func (m *Manager) ToolNames() []string {
 	if m.tools == nil {

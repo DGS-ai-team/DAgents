@@ -169,12 +169,15 @@ func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID strin
 }
 
 func (o *Orchestrator) evaluateToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+	o.policyMu.RLock()
+	currentPolicy := o.policy
+	o.policyMu.RUnlock()
 	var decision hooks.ToolBeforeEachResult
 	if o.toolHooks == nil {
-		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
+		action := currentPolicy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
 		mode := policy.ModeRule
-		if o.policy != nil {
-			mode = o.policy.ToolApprovalMode(tc.Function.Name)
+		if currentPolicy != nil {
+			mode = currentPolicy.ToolApprovalMode(tc.Function.Name)
 		}
 		decision = hooks.ToolBeforeEachResult{Action: action, ToolMode: mode}
 	} else {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -31,7 +32,8 @@ type AgentRecord struct {
 
 // AgentStore 持久化 Agent 实例元数据（agents.db）。
 type AgentStore struct {
-	db *sql.DB
+	db       *sql.DB
+	policyMu sync.Mutex
 }
 
 // OpenAgents 打开或创建 agents.db。

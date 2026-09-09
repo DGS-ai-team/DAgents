@@ -60,6 +60,7 @@ type Orchestrator struct {
 	runtimeRoot     string
 	tools           tools.Executor
 	policy          *policy.Engine
+	policyMu        sync.RWMutex
 	toolHooks       *hooks.Registry
 	toolExecLog     *hooks.ToolExecutionLog
 	skillAccess     SkillAccess
@@ -378,7 +379,9 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	if engine == nil {
 		engine = policy.NewDefaultEngine()
 	}
+	o.policyMu.Lock()
 	o.policy = engine
+	o.policyMu.Unlock()
 	if o.toolHooks != nil {
 		o.toolHooks.SetPolicyEngine(engine)
 	}

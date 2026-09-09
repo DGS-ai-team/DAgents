@@ -486,6 +486,18 @@ export function deleteTrigger(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
 }
 
+export function listAgentPolicyGrants(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants`);
+}
+
+export function createAgentPolicyGrant(agentId, body) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants`, { method: "POST", body });
+}
+
+export function revokeAgentPolicyGrant(agentId, grantId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" });
+}
+
 export function fireTrigger(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/fire`, { method: "POST", body: {} });
 }

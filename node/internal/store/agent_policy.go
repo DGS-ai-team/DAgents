@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"strings"
 	"time"
 )
@@ -15,11 +16,37 @@ type AgentPolicyRecord struct {
 	Tools     map[string]string            // tool_name → always|never|rule|deny
 	Shell     map[string]map[string]string // shell_type → command → mode
 	UpdatedAt time.Time
+	Grants    []policy.Grant
 }
 
 type agentPolicyJSON struct {
-	Tools map[string]string            `json:"tools"`
-	Shell map[string]map[string]string `json:"shell"`
+	Tools  map[string]string            `json:"tools"`
+	Shell  map[string]map[string]string `json:"shell"`
+	Grants []policy.Grant               `json:"grants,omitempty"`
+}
+
+// MutateAgentPolicy serializes a read-modify-write policy update, preventing
+// concurrent grant creation/revocation from resurrecting stale grants.
+func (s *AgentStore) MutateAgentPolicy(ctx context.Context, agentID string, mutate func(*AgentPolicyRecord) error) (*AgentPolicyRecord, error) {
+	if s == nil {
+		return nil, fmt.Errorf("agent store unavailable")
+	}
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+	rec, err := s.GetAgentPolicy(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		rec = &AgentPolicyRecord{AgentID: strings.TrimSpace(agentID), Tools: map[string]string{}, Shell: map[string]map[string]string{}}
+	}
+	if err := mutate(rec); err != nil {
+		return nil, err
+	}
+	if err := s.saveAgentPolicy(ctx, *rec); err != nil {
+		return nil, err
+	}
+	return rec, nil
 }
 
 func (s *AgentStore) ensurePolicySchema() error {
@@ -68,12 +95,22 @@ SELECT agent_id, policy_json, updated_at FROM agent_policy WHERE agent_id = ?`, 
 		AgentID:   id,
 		Tools:     parsed.Tools,
 		Shell:     parsed.Shell,
+		Grants:    parsed.Grants,
 		UpdatedAt: ut,
 	}, nil
 }
 
 // SaveAgentPolicy 写入或覆盖 Agent 策略。
 func (s *AgentStore) SaveAgentPolicy(ctx context.Context, rec AgentPolicyRecord) error {
+	if s == nil {
+		return fmt.Errorf("agent store unavailable")
+	}
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+	return s.saveAgentPolicy(ctx, rec)
+}
+
+func (s *AgentStore) saveAgentPolicy(ctx context.Context, rec AgentPolicyRecord) error {
 	if s == nil {
 		return fmt.Errorf("agent store unavailable")
 	}
@@ -89,7 +126,7 @@ func (s *AgentStore) SaveAgentPolicy(ctx context.Context, rec AgentPolicyRecord)
 	if shell == nil {
 		shell = map[string]map[string]string{}
 	}
-	payload, err := json.Marshal(agentPolicyJSON{Tools: tools, Shell: shell})
+	payload, err := json.Marshal(agentPolicyJSON{Tools: tools, Shell: shell, Grants: rec.Grants})
 	if err != nil {
 		return err
 	}
