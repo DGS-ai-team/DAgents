@@ -66,6 +66,17 @@ describe("SimplifiedAutoPanel", () => {
     expect(api.putAutoConfig).not.toHaveBeenCalled();
   });
 
+  it("keeps the long read-only experience compact and top-aligned", async () => {
+    api.getAutoConfig.mockResolvedValue({ revision: 4, responsibility: "整理资料", wake_interval_seconds: 0, max_tool_rounds: 3, dreaming_enabled: false, timezone: "Asia/Shanghai" });
+    api.getAutoExperience.mockResolvedValue({ experience: { content: "第一条\n第二条\n第三条" } });
+    const wrapper = mount(SimplifiedAutoPanel, { props: { agentId: "auto-1" } });
+    await flushPromises();
+    const experience = wrapper.get(".simplified-auto-panel__experience");
+    expect(experience.text()).toContain("第一条");
+    expect(experience.classes()).toContain("simplified-auto-panel__experience");
+    expect(wrapper.find(".simplified-auto-panel__row").classes()).toContain("simplified-auto-panel__row");
+  });
+
   it("reads the default trigger recovery state and links to the mounted triggers route", async () => {
     api.getTrigger.mockResolvedValueOnce({ trigger_id: "auto-default:auto-1", recovery_required: true, pending_delivery_id: "delivery-1", revision: 7 });
     const wrapper = mount(SimplifiedAutoPanel, { props: { agentId: "auto-1" } });
