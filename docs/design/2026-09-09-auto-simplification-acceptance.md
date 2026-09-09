@@ -128,3 +128,9 @@ UI 审查也发现当前 Auto 默认 trigger 仍被通用编辑入口当作用�
 本批删除 Scheduler 的旧 Goal managed-fire、独立 event poller 和 reconciler 接口，Store 不再保留 GoalRef/ValidateOwnersWithGoals，启动校验统一为当前 user/auto controller。公共 fire 内部入口拒绝退役/未知 controller 及旧 managed 关联，即使 force=true 也不得投递；原条件脚本 runner 保留。默认 Auto trigger 的通用编辑、启停、删除和手动执行入口移除，改为跳转所属 Agent 自主设置；用户 trigger 保留原操作，退役项仅查看历史。
 
 root 独立验证 `go test -race ./node/internal/triggers -count=1` 通过；TriggersPanel/UpdatePanel 专项 Vitest 共4项通过，覆盖卡片操作区别、实际设置路由及嵌入/弹窗头。该批尚未部署到18766。session 内未引用的旧 Goal 输入函数仍需另行移除，不能据本批认定全部旧字段清理完成。
+
+### Auto 起源忙碌与旧输入入口收尾
+
+新增 Auto 起源专项使用 NewServer 的真实 triggerToolRoundProvider、autonomy profile 与 trigger store；仅模型执行器注入测试客户端，避免外部网络依赖，测试不覆盖生产 LLM 工厂。实际默认触发进入 ASK 后验证合法 delivery 的轮次配置与错误 delivery 拒绝，多次投递期间模型请求数保持1，关闭后恢复原 ASK，最终严格为2次请求、无活动回合且队列清空。root 将该测试、用户起源忙碌测试及既有 trigger 审批收尾测试一起运行 race `-count=3`，API 与 Session 均通过。
+
+同时移除 session 的未引用 SubmitGoalTriggerMessage/EnqueueGoalTriggerMessage 及共享入队函数中的旧 Goal/Run 参数；普通 trigger 与 Auto 入队接口保留。现存历史字段不因此删除。静默结束仍处于独立开发审查中，本批不将其视为通过。

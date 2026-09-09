@@ -15,12 +15,6 @@ type TriggerSubmitter struct {
 	EnsureAgentRuntime func(agentID string) error
 }
 
-// SubmitGoalTriggerMessage uses the same durable trigger delivery path while
-// carrying Goal/Run identity into the InputBox.
-func (t *TriggerSubmitter) SubmitGoalTriggerMessage(sessionID, triggerID, goalID, runID, content, deliveryID string) error {
-	return t.Mgr.EnqueueGoalTriggerMessage(sessionID, triggerID, goalID, runID, content, deliveryID)
-}
-
 // EnsureSession 创建或复用 session 并返回 ID。
 func (t *TriggerSubmitter) EnsureSession(requestedID string) (string, error) {
 	requestedID = strings.TrimSpace(requestedID)
@@ -90,25 +84,19 @@ func (t *TriggerSubmitter) SubmitAutoTriggerMessage(sessionID, triggerID, delive
 // 2. EnsureSession（空 ID 则新建）；
 // 3. 按 session input_seq FIFO，Envelope.TriggerID 供消费后清除 pending。
 func (m *Manager) EnqueueTriggerMessage(sessionID, triggerID, content string, deliveryID ...string) error {
-	return m.enqueueTriggerMessage(sessionID, triggerID, content, "", "", deliveryID...)
+	return m.enqueueTriggerMessage(sessionID, triggerID, content, deliveryID...)
 }
 
 // EnqueueAutoTriggerMessage marks a system-owned Auto wakeup at ingress.
 func (m *Manager) EnqueueAutoTriggerMessage(sessionID, triggerID, content string, deliveryID ...string) error {
-	return m.enqueueTriggerMessageKind(InputKindSystemAuto, sessionID, triggerID, content, "", "", deliveryID...)
+	return m.enqueueTriggerMessageKind(InputKindSystemAuto, sessionID, triggerID, content, deliveryID...)
 }
 
-// EnqueueGoalTriggerMessage carries durable goal/run identity through the
-// existing InputBox so lifecycle observers can reconcile the real Turn.
-func (m *Manager) EnqueueGoalTriggerMessage(sessionID, triggerID, goalID, runID, content string, deliveryID ...string) error {
-	return m.enqueueTriggerMessage(sessionID, triggerID, content, goalID, runID, deliveryID...)
+func (m *Manager) enqueueTriggerMessage(sessionID, triggerID, content string, deliveryID ...string) error {
+	return m.enqueueTriggerMessageKind(InputKindTrigger, sessionID, triggerID, content, deliveryID...)
 }
 
-func (m *Manager) enqueueTriggerMessage(sessionID, triggerID, content, goalID, runID string, deliveryID ...string) error {
-	return m.enqueueTriggerMessageKind(InputKindTrigger, sessionID, triggerID, content, goalID, runID, deliveryID...)
-}
-
-func (m *Manager) enqueueTriggerMessageKind(kind InputKind, sessionID, triggerID, content, goalID, runID string, deliveryID ...string) error {
+func (m *Manager) enqueueTriggerMessageKind(kind InputKind, sessionID, triggerID, content string, deliveryID ...string) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return fmt.Errorf("empty trigger content")
@@ -125,7 +113,7 @@ func (m *Manager) enqueueTriggerMessageKind(kind InputKind, sessionID, triggerID
 	if len(deliveryID) > 0 {
 		id = strings.TrimSpace(deliveryID[0])
 	}
-	env := queue.Envelope{RequestType: queue.RequestTypeMessage, Content: content, TriggerID: strings.TrimSpace(triggerID), DeliveryID: id, GoalID: strings.TrimSpace(goalID), RunID: strings.TrimSpace(runID), UserName: llm.UserNameTrigger}
+	env := queue.Envelope{RequestType: queue.RequestTypeMessage, Content: content, TriggerID: strings.TrimSpace(triggerID), DeliveryID: id, UserName: llm.UserNameTrigger}
 	_, err = rt.appendInput(kind, env)
 	return err
 }
