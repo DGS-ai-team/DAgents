@@ -1,5 +1,7 @@
 # Auto 数字员工实施进度与验收台账
 
+> 2026-09-09 用户已恢复开发并替换目标：当前以[Auto 简化方案](2026-09-09-auto-simplification-plan.md)为准。下文暂停及旧路线进度均为历史记录，不再指导新增实现。
+
 依据：[开发方案](2026-09-08-auto-employee-implementation-plan.md)。开始日期：2026-09-08。状态：按用户要求收尾后暂停开发，完整目标尚未完成。最新状态以[2026-09-09 暂停交接](2026-09-09-auto-pause-handoff.md)和[维护实施记录](2026-09-09-auto-maintenance-implementation.md)为准；本页下方保留历史进展。
 
 ## 分阶段状态

@@ -1,5 +1,7 @@
 # Auto 数字员工：技术设计与分阶段开发方案
 
+> 已被用户于 2026-09-09 确认的[Auto 简化方案](2026-09-09-auto-simplification-plan.md)取代。本文仅保留历史决策，不再作为当前开发或验收目标；不继续实现旧 Goal/Cycle/事件源/预算结算路径。
+
 日期：2026-09-08。状态：待开发的设计基线，不代表已实现。负责人：主 Agent 负责产品取舍、接口评审和验收；Luna 负责具体编码。本文承接 [产品方向评估](../comparative-analysis/2026-09-08-normal-and-auto-product-assessment.md)，在后续阶段替代 [初版 Auto 模型](2026-09-08-auto-agent-product-model.md) 中“一个 Agent 只能使用一个终态不可复用任务”的限制；历史验收记录仍按当时实现解释。
 
 ## 1. 决策与范围

@@ -1043,9 +1043,6 @@ defineExpose({
         <router-link :to="{ name: 'auto-overview' }" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="Auto 总览" aria-label="Auto 总览">
           <span aria-hidden="true">✦</span>
         </router-link>
-        <router-link :to="{ name: 'settings-agents' }" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="自主任务设置" aria-label="自主任务设置">
-          <span aria-hidden="true">◷</span>
-        </router-link>
         <button
           type="button"
           class="nav-rail__icon-btn nav-rail__icon-btn--sm"
