@@ -1,6 +1,7 @@
 package goals
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -8,18 +9,46 @@ import (
 )
 
 type MaintenanceReceipt struct {
-	AgentID         string    `json:"agent_id"`
-	Fingerprint     string    `json:"fingerprint"`
-	ProfileRevision int64     `json:"profile_revision"`
-	EstimatedTokens int64     `json:"estimated_tokens"`
-	UsedTokens      int64     `json:"used_tokens"`
-	Unknown         bool      `json:"unknown"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	AgentID         string          `json:"agent_id"`
+	Fingerprint     string          `json:"fingerprint"`
+	ProfileRevision int64           `json:"profile_revision"`
+	EstimatedTokens int64           `json:"estimated_tokens"`
+	UsedTokens      int64           `json:"used_tokens"`
+	Unknown         bool            `json:"unknown"`
+	Status          string          `json:"status"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	CandidateJSON   json.RawMessage `json:"candidate_json,omitempty"`
+	NextCursor      int64           `json:"next_cursor,omitempty"`
 }
 
-type MaintenanceReservation struct{ Receipt MaintenanceReceipt }
+type MaintenanceReservation struct {
+	Receipt MaintenanceReceipt
+	// Claimed is true only for the caller that created a new pending receipt.
+	// It is deliberately transient and is not persisted in the receipt.
+	Claimed bool
+}
+
+func (s *Store) SaveMaintenanceResult(agentID, receiptID string, candidates json.RawMessage, nextCursor, used int64, unknown bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.data.MaintenanceReceipts[receiptID]
+	if !ok || r.AgentID != strings.TrimSpace(agentID) {
+		return ErrNotFound
+	}
+	old := r
+	r.CandidateJSON = append([]byte(nil), candidates...)
+	r.NextCursor = nextCursor
+	r.UsedTokens = used
+	r.Unknown = unknown
+	r.UpdatedAt = time.Now().UTC()
+	s.data.MaintenanceReceipts[receiptID] = r
+	if err := s.saveLocked(); err != nil {
+		s.data.MaintenanceReceipts[receiptID] = old
+		return err
+	}
+	return nil
+}
 
 func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimated int64, now time.Time) (MaintenanceReservation, error) {
 	s.mu.Lock()
@@ -32,7 +61,7 @@ func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimat
 		if old.AgentID != agentID || old.Fingerprint != fingerprint || old.EstimatedTokens != estimated {
 			return MaintenanceReservation{}, fmt.Errorf("%w: maintenance receipt differs", ErrConflict)
 		}
-		return MaintenanceReservation{Receipt: old}, nil
+		return MaintenanceReservation{Receipt: old, Claimed: false}, nil
 	}
 	p, ok := s.data.Profiles[agentID]
 	if !ok || !p.Enabled {
@@ -76,7 +105,7 @@ func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimat
 		delete(s.data.MaintenanceReceipts, receiptID)
 		return MaintenanceReservation{}, err
 	}
-	return MaintenanceReservation{Receipt: r}, nil
+	return MaintenanceReservation{Receipt: r, Claimed: true}, nil
 }
 
 func (s *Store) SettleMaintenance(agentID, receiptID string, used int64, unknown bool, now time.Time) (AgentUsage, error) {
@@ -128,4 +157,17 @@ func (s *Store) GetMaintenanceReceipt(receiptID string) (MaintenanceReceipt, boo
 	defer s.mu.RUnlock()
 	r, ok := s.data.MaintenanceReceipts[strings.TrimSpace(receiptID)]
 	return r, ok
+}
+
+func (s *Store) ListMaintenanceReceipts(agentID string) []MaintenanceReceipt {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	agentID = strings.TrimSpace(agentID)
+	out := make([]MaintenanceReceipt, 0)
+	for _, r := range s.data.MaintenanceReceipts {
+		if r.AgentID == agentID {
+			out = append(out, r)
+		}
+	}
+	return out
 }

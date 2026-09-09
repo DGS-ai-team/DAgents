@@ -1,0 +1,242 @@
+package memory
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/goals"
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+)
+
+type runnerSource struct {
+	input    ExtractionInput
+	seq      uint64
+	complete bool
+}
+
+type noNewMaintenanceSource struct{}
+
+func (noNewMaintenanceSource) LoadMaintenanceMessages(context.Context, string, uint64, int) (DurableMessageBatch, error) {
+	return DurableMessageBatch{Complete: false}, nil
+}
+
+func (s runnerSource) LoadMaintenanceMessages(context.Context, string, uint64, int) (DurableMessageBatch, error) {
+	return DurableMessageBatch{SessionID: s.input.SessionID, Sequence: s.seq, Messages: []llm.Message{{Role: "user", Content: "remember runner"}}, Complete: s.complete}, nil
+}
+
+type runnerExtractor struct{ calls int }
+
+type gatedRunnerExtractor struct {
+	calls   atomic.Int32
+	started chan struct{}
+	release chan struct{}
+}
+
+func (e *gatedRunnerExtractor) ExtractWithUsage(context.Context, ExtractionInput) ([]Candidate, *llm.Usage, error) {
+	e.calls.Add(1)
+	close(e.started)
+	<-e.release
+	return []Candidate{{Request: RememberRequest{Information: "gated runner fact"}}}, &llm.Usage{TotalTokens: 3}, nil
+}
+
+type failOnceUsage struct {
+	*goals.Store
+	failed bool
+}
+
+func (f *failOnceUsage) SettleMaintenance(agentID, receiptID string, used int64, unknown bool, now time.Time) (goals.AgentUsage, error) {
+	if !f.failed {
+		f.failed = true
+		return goals.AgentUsage{}, fmt.Errorf("injected settle failure")
+	}
+	return f.Store.SettleMaintenance(agentID, receiptID, used, unknown, now)
+}
+
+func (e *runnerExtractor) ExtractWithUsage(context.Context, ExtractionInput) ([]Candidate, *llm.Usage, error) {
+	e.calls++
+	return []Candidate{{Request: RememberRequest{Information: "runner fact"}}}, &llm.Usage{TotalTokens: 3}, nil
+}
+
+func TestMaintenanceRunnerPersistsResultAndDoesNotReextractSettled(t *testing.T) {
+	root := t.TempDir()
+	gs, err := goals.OpenStore(filepath.Join(root, "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SaveProfile(goals.AutoProfile{AgentID: "agent-1", Enabled: true, MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	ext := &runnerExtractor{}
+	runner := &MaintenanceRunner{Source: runnerSource{input: ExtractionInput{AgentID: "agent-1", SessionID: "session-1"}, seq: 7, complete: true}, Extractor: ext, Memory: ms, Usage: gs}
+	if seq, err := runner.RunOnce(context.Background(), "agent-1", MaintenanceCursor{}); err != nil || seq != 7 {
+		t.Fatalf("run seq=%d err=%v", seq, err)
+	}
+	if ext.calls != 1 {
+		t.Fatalf("extract calls=%d", ext.calls)
+	}
+	if _, err := runner.RunOnce(context.Background(), "agent-1", MaintenanceCursor{}); err != nil {
+		t.Fatalf("settled recovery: %v", err)
+	}
+	if ext.calls != 1 {
+		t.Fatalf("reextract calls=%d", ext.calls)
+	}
+}
+
+func TestMaintenanceRunnerConcurrentRunnersClaimReceiptOnce(t *testing.T) {
+	root := t.TempDir()
+	gs, err := goals.OpenStore(filepath.Join(root, "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SaveProfile(goals.AutoProfile{AgentID: "agent-1", Enabled: true, MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	ext := &gatedRunnerExtractor{started: make(chan struct{}), release: make(chan struct{})}
+	source := runnerSource{input: ExtractionInput{AgentID: "agent-1", SessionID: "session-1"}, seq: 7, complete: true}
+	runnerA := &MaintenanceRunner{Source: source, Extractor: ext, Memory: ms, Usage: gs}
+	runnerB := &MaintenanceRunner{Source: source, Extractor: ext, Memory: ms, Usage: gs}
+	var wg sync.WaitGroup
+	var seqA int64
+	var errA error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		seq, runErr := runnerA.RunOnce(context.Background(), "agent-1", MaintenanceCursor{})
+		seqA, errA = int64(seq), runErr
+	}()
+	<-ext.started
+	seqB, runErrB := runnerB.RunOnce(context.Background(), "agent-1", MaintenanceCursor{})
+	if seqB != 0 || runErrB == nil || !strings.Contains(runErrB.Error(), "recovery_required") {
+		t.Fatalf("concurrent pending run seq=%d err=%v", seqB, runErrB)
+	}
+	close(ext.release)
+	wg.Wait()
+	if seqA != 7 || errA != nil {
+		t.Fatalf("claiming run seq=%d err=%v", seqA, errA)
+	}
+	if calls := ext.calls.Load(); calls != 1 {
+		t.Fatalf("extract calls=%d want 1", calls)
+	}
+}
+
+func TestMaintenanceRunnerSQLiteFailureReopenRecoversPersistedCandidates(t *testing.T) {
+	root := t.TempDir()
+	goalsPath := filepath.Join(root, "goals.json")
+	memoryPath := filepath.Join(root, "memory.db")
+	gs, err := goals.OpenStore(goalsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SaveProfile(goals.AutoProfile{AgentID: "agent-1", Enabled: true, MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(memoryPath, filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.agent.db.Exec(`CREATE TRIGGER fail_runner_cursor BEFORE INSERT ON maintenance_cursors BEGIN SELECT RAISE(ABORT, 'runner failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	ext := &runnerExtractor{}
+	runner := &MaintenanceRunner{Source: runnerSource{input: ExtractionInput{AgentID: "agent-1", SessionID: "session-1"}, seq: 7, complete: true}, Extractor: ext, Memory: ms, Usage: gs}
+	if seq, err := runner.RunOnce(context.Background(), "agent-1", MaintenanceCursor{}); err == nil || seq != 0 {
+		t.Fatalf("failed run seq=%d err=%v", seq, err)
+	}
+	if ext.calls != 1 {
+		t.Fatalf("extract calls=%d", ext.calls)
+	}
+	if _, err := ms.agent.db.Exec(`DROP TRIGGER fail_runner_cursor`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gs2, err := goals.OpenStore(goalsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Usage = gs2
+	ms2, err := OpenLocalService(memoryPath, filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms2.Close()
+	runner.Memory = ms2
+	if seq, err := runner.RunOnce(context.Background(), "agent-1", MaintenanceCursor{}); err != nil || seq != 7 {
+		t.Fatalf("recovery seq=%d err=%v", seq, err)
+	}
+	if ext.calls != 1 {
+		t.Fatalf("recovery re-extracted calls=%d", ext.calls)
+	}
+	entries, err := ms2.List(context.Background(), ScopeAgent, true)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%d err=%v", len(entries), err)
+	}
+	usage, ok := gs.GetUsage("agent-1")
+	if !ok || usage.MaintenanceTokens != 3 {
+		t.Fatalf("usage=%+v ok=%v", usage, ok)
+	}
+	cursor, err := ms2.agent.GetMaintenanceCursor(context.Background(), "agent-1")
+	if err != nil || cursor.Sequence != 7 {
+		t.Fatalf("cursor=%+v err=%v", cursor, err)
+	}
+}
+
+func TestMaintenanceRunnerSettleFailureReopenUsesPersistedUsage(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "goals.json")
+	gs, err := goals.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SaveProfile(goals.AutoProfile{AgentID: "agent-1", Enabled: true, MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	ext := &runnerExtractor{}
+	usage := &failOnceUsage{Store: gs}
+	runner := &MaintenanceRunner{Source: runnerSource{input: ExtractionInput{AgentID: "agent-1", SessionID: "s"}, seq: 7, complete: true}, Extractor: ext, Memory: ms, Usage: usage}
+	if _, err := runner.RunOnce(context.Background(), "agent-1", MaintenanceCursor{}); err == nil {
+		t.Fatal("expected settlement failure")
+	}
+	gs2, err := goals.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Usage = gs2
+	runner.Source = noNewMaintenanceSource{}
+	current, err := ms.agent.GetMaintenanceCursor(context.Background(), "agent-1")
+	if err != nil || current.Sequence != 7 {
+		t.Fatalf("persisted cursor=%+v err=%v", current, err)
+	}
+	if seq, err := runner.RunOnce(context.Background(), "agent-1", current); err != nil || seq != 7 {
+		t.Fatalf("recovery seq=%d err=%v", seq, err)
+	}
+	if ext.calls != 1 {
+		t.Fatalf("extract calls=%d", ext.calls)
+	}
+	u, ok := gs2.GetUsage("agent-1")
+	if !ok || u.MaintenanceTokens != 3 {
+		t.Fatalf("usage=%+v ok=%v", u, ok)
+	}
+}
