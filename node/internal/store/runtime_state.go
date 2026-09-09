@@ -19,6 +19,7 @@ type RuntimeState struct {
 	// LastContextResetID makes a dreaming/context-boundary commit idempotent;
 	// retries must not hide messages appended after the original reset.
 	LastContextResetID      string                     `json:"last_context_reset_id,omitempty"`
+	DreamingAttempt         json.RawMessage            `json:"dreaming_attempt,omitempty"`
 	HookStore               map[string]json.RawMessage `json:"hook_store,omitempty"`
 	IdleAutoCompressApplied bool                       `json:"idle_auto_compress_applied,omitempty"`
 	// NotifySeq 为最后需要 Client 关注的 SSE seq（F-E13 IM cursor）。

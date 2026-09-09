@@ -146,8 +146,11 @@ type runtime struct {
 	turnBudget               turn.TurnBudget
 	triggerMaxToolRounds     int
 	triggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
+	conditionValidator       func(context.Context, turn.ConditionApprovalMetadata) error
 	autoAgent                bool
 	budgetResolver           func() (turn.TurnBudget, error)
+	conditionCompletion      func(triggers.ConditionRequest, triggers.ConditionResult) error
+	dreamingAttempt          *DreamingAttempt
 }
 
 // newRuntime 创建新的 session runtime
@@ -270,11 +273,19 @@ func newRuntimeWithPublisher(
 		// trigger envelopes.
 		triggerMaxToolRounds:     0,
 		triggerToolRoundProvider: turnOpts.TriggerToolRoundProvider,
+		conditionValidator:       turnOpts.ConditionValidator,
+		conditionCompletion:      turnOpts.ConditionCompletion,
 		autoAgent:                turnOpts.AutoAgent,
 		budgetResolver:           turnOpts.BudgetResolver,
 		onLifecycle:              turnOpts.OnLifecycle,
 		riskSubmitter:            turnOpts.RiskSubmitter,
 		memoryService:            turnOpts.MemoryService,
+	}
+	if len(turnOpts.initialDreamingAttempt) > 0 {
+		var attempt DreamingAttempt
+		if err := json.Unmarshal(turnOpts.initialDreamingAttempt, &attempt); err == nil && attempt.Validate() == nil {
+			rt.dreamingAttempt = &attempt
+		}
 	}
 	if candidatePipeline != nil {
 		candidatePipeline.SetOnChange(func(report memory.ConsolidationReport) {
@@ -1027,6 +1038,16 @@ func (r *runtime) applyPendingMemoryScope() {
 }
 
 func (r *runtime) handleTurnContinuation(parent context.Context) {
+	dreamingContinuation := false
+	r.mu.Lock()
+	if r.dreamingAttempt != nil && (r.dreamingAttempt.State == DreamingAttemptRunning || r.dreamingAttempt.State == DreamingAttemptWaiting) {
+		dreamingContinuation = r.turnCoordinator.Snapshot().TurnID == r.dreamingAttempt.TurnID
+	}
+	r.mu.Unlock()
+	continuationCtx := parent
+	if dreamingContinuation {
+		continuationCtx = tools.WithHandbookMaintenance(parent)
+	}
 	started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman)
 	if err != nil {
 		r.logger.Warn("start turn continuation lifecycle failed", "session_id", r.session.ID, "error", err)
@@ -1040,7 +1061,7 @@ func (r *runtime) handleTurnContinuation(parent context.Context) {
 		return
 	}
 	historyStart := r.lifecycleHistoryLength()
-	outcome, history := r.runTurnStepWithSideEffects(parent, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(continuationCtx, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history)
 	})
 	if err := r.lifecycleAfterModelStep(outcome, history, historyStart); err != nil {
@@ -1050,8 +1071,13 @@ func (r *runtime) handleTurnContinuation(parent context.Context) {
 		}
 	}
 	r.commitHistoryFallback(history)
-	outcome = r.runInlineToolContinuationChain(parent, 0, outcome)
+	outcome = r.runInlineToolContinuationChain(continuationCtx, 0, outcome)
 	r.finishTurnIdle(outcome)
+	if dreamingContinuation {
+		if err := r.completeDreamingResume(history, outcome); err != nil && r.logger != nil {
+			r.logger.Warn("complete dreaming resume failed", "session_id", r.session.ID, "error", err)
+		}
+	}
 	r.persist(context.Background())
 }
 
@@ -1063,6 +1089,12 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 			"resume_value", resumeValue,
 		)
 		return
+	}
+	for _, item := range pending.Items {
+		if item.ConditionApproval != nil {
+			r.handleConditionResume(parent, resumeValue, pending)
+			return
+		}
 	}
 	pendingKind, pendingToolCallID := pendingHITLLogFields(pending)
 
@@ -1085,13 +1117,23 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		"resume_value_kind", resumeKind,
 		"resume_value", resumeValue,
 	)
+	dreamingResume := false
+	r.mu.Lock()
+	if r.dreamingAttempt != nil && r.dreamingAttempt.State == DreamingAttemptWaiting {
+		dreamingResume = r.turnCoordinator.Snapshot().TurnID == r.dreamingAttempt.TurnID
+	}
+	r.mu.Unlock()
+	resumeCtx := parent
+	if dreamingResume {
+		resumeCtx = tools.WithHandbookMaintenance(parent)
+	}
 	if err := r.lifecyclePrepareResume(resumeValue); err != nil {
 		r.logger.Warn("prepare resume lifecycle failed", "session_id", r.session.ID, "error", err)
 		r.persist(context.Background())
 		return
 	}
 
-	outcome, history := r.runTurnStepWithSideEffects(parent, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(resumeCtx, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending)
 	})
 	if err := r.lifecycleAfterResume(outcome, history); err != nil {
@@ -1101,9 +1143,72 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		}
 	}
 	r.commitHistoryFallback(history)
-	outcome = r.runInlineToolContinuationChain(parent, 0, outcome)
+	outcome = r.runInlineToolContinuationChain(resumeCtx, 0, outcome)
+	r.finishTurnIdle(outcome)
+	if dreamingResume {
+		if err := r.completeDreamingResume(history, outcome); err != nil && r.logger != nil {
+			r.logger.Warn("complete dreaming resume failed", "session_id", r.session.ID, "error", err)
+		}
+	}
+	r.persist(context.Background())
+}
+
+func (r *runtime) handleConditionResume(parent context.Context, resumeValue map[string]any, pending *turn.PendingHITL) (turn.StepOutcome, error) {
+	if pending == nil || len(pending.Items) != 1 || pending.Items[0].ConditionApproval == nil {
+		return turn.StepOutcome{}, fmt.Errorf("condition approval is missing")
+	}
+	// Validate the resume payload before resolving the durable interaction. A
+	// malformed payload must leave the approval pending so the user can retry.
+	if _, err := clihitl.ParseApprovalResume(resumeValue, []string{pending.Items[0].ToolCall.ID}); err != nil {
+		r.logger.Warn("invalid condition approval resume", "session_id", r.session.ID, "error", err)
+		return turn.StepOutcome{}, err
+	}
+	item := pending.Items[0]
+	if r.conditionValidator != nil {
+		if err := r.conditionValidator(parent, *item.ConditionApproval); err != nil {
+			return turn.StepOutcome{}, err
+		}
+	}
+	if err := r.lifecyclePrepareResume(resumeValue); err != nil {
+		r.logger.Warn("prepare condition approval resume failed", "session_id", r.session.ID, "error", err)
+		return turn.StepOutcome{}, err
+	}
+	// Fence the external side effect before opening the command.  A restart
+	// after this fact must reconcile the execution rather than replay bash.
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{Type: turn.CommandToolExecutionStarted,
+		SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID,
+		Generation: state.Generation, ToolCallID: item.ToolCall.ID,
+		ToolExecutionID: item.ToolCall.ID + "-execution", At: time.Now().UTC()}); err != nil {
+		r.logger.Warn("start condition execution lifecycle failed", "session_id", r.session.ID, "error", err)
+		return turn.StepOutcome{}, err
+	}
+	outcome, history := r.runTurnStepWithSideEffects(parent, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+		result, err := r.orch.ExecuteConditionApproval(ctx, r.session.ID, pending, resumeValue)
+		return turn.StepOutcome{ConditionHandled: true, ConditionMatched: result.Matched,
+			ConditionToolCallID: item.ToolCall.ID, ConditionExecutionID: item.ToolCall.ID + "-execution",
+			ConditionResult: result.ResultContent, StepIndex: turn.StepIndexFromContext(ctx), Err: err}
+	})
+	if err := r.lifecycleAfterResume(outcome, history); err != nil {
+		r.logger.Warn("finish condition approval lifecycle failed", "session_id", r.session.ID, "error", err)
+		return outcome, err
+	}
 	r.finishTurnIdle(outcome)
 	r.persist(context.Background())
+	if r.conditionCompletion != nil && pending.Items[0].ConditionApproval != nil {
+		meta := pending.Items[0].ConditionApproval
+		status := triggers.ConditionNotMatched
+		if execution, ok := r.turnCoordinator.ToolExecutionStatusForCall(item.ToolCall.ID); ok && execution == turn.ToolExecutionStatusSucceeded {
+			status = triggers.ConditionMatched
+		}
+		if err := r.conditionCompletion(triggers.ConditionRequest{TriggerID: meta.TriggerID, DeliveryID: meta.DeliveryID, SessionID: r.session.ID, AgentID: meta.AgentID, Revision: meta.TriggerRevision, Occurrence: meta.Occurrence}, triggers.ConditionResult{Status: status}); err != nil {
+			if r.logger != nil {
+				r.logger.Error("condition completion callback failed", "session_id", r.session.ID, "trigger_id", meta.TriggerID, "delivery_id", meta.DeliveryID, "error", err)
+			}
+			return outcome, fmt.Errorf("condition completion callback: %w", err)
+		}
+	}
+	return outcome, nil
 }
 
 func (r *runtime) commitHistoryFallback(history []llm.Message) {
@@ -1448,6 +1553,11 @@ func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[str
 	pending := r.pendingSnapshot()
 	if err := r.lifecycleCancel(); err != nil && r.logger != nil {
 		r.logger.Warn("cancel lifecycle failed", "session_id", r.session.ID, "error", err)
+	}
+	if lifecycleWasActive {
+		if err := r.markDreamingCancelled(r.turnCoordinator.Snapshot().TurnID); err != nil && r.logger != nil {
+			r.logger.Warn("persist dreaming cancellation failed", "session_id", r.session.ID, "error", err)
+		}
 	}
 	r.mu.Lock()
 	cancel := r.turnCancel

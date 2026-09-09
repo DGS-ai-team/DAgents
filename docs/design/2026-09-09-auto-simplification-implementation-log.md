@@ -168,3 +168,13 @@ Auto 设置独立读取默认 trigger，按真实 recovery_required 显示新页
 生产 condition completion 回调提取为共用函数，真实失败 submitter 测试验证错误返回、原 pending/approved 保留、禁用与恢复标志持久化，并在重开 scheduler 后执行到期检查证明未再次提交。主 Agent 此测试与原 HTTP 条件审批专项 race4.218秒通过。
 
 发现并删除此前残留的 goal_checkpoint 模型定义、handler、专用 enable 方法和实现，负向契约验证模型不可见、Execute unknown tool、allowlist拒绝。主 Agent Tools 全包普通测试18.504秒通过，提交f8679a68。Dreaming 审批恢复仍在生产接线，不因这些测试通过而计为整体完成。
+
+### Dreaming 审批生产接线及全包复核
+
+Session 持久记录明确的 dreaming turn 身份，普通 resume 继续原审批与手册工具范围。多次 ASK 仍等待，最终完成后固定结束边界；拒绝/取消不提交经验，未 Ack 的完成记录不可被新 dreaming 覆盖。调度使用原日期与经验 revision，统一通过 Store.CommitDreaming 的幂等校验，再 reset、标记提交完成、Ack。同日下一次 Tick 不调用模型。主 Agent 完整 DreamingScheduler race4.215秒、真实 resume/attempt 专项race6.985秒通过；后续 waiting 状态一致性修正由专项测试覆盖。
+
+Node 与 Manage 前端构建通过；Manage 构建保留第三方 eval 与大 chunk 警告。Node 全包批量测试中 Tools 的进程退出等待超时，其他包通过（API58.314秒、Session53.043秒）；并行 runtime race 中 post-clear 聊天等待超时，Turn39.963秒与Triggers14.701秒通过。保存了完整日志，不将这些失败改写成全绿。两项隔离复验分别2.736/5.351秒通过，随后 Tools 全包17.711秒与 Session 全包 race68.362秒通过。没有依据宣称首次超时原因已定位，未为过测试放宽生产约束。
+
+用户通过 Escape 停止 Computer Use，视觉验收未完成且尚未恢复浏览器操作。新版运行环境、真实 LLM 和审批等待期间重启仍列为最终验收工作。
+
+最终恢复专项 race6.685秒通过，覆盖 SQLite 重开后继续审批、孤立 attempt 标记失败、取消及排队用户消息实际进入模型。DreamingScheduler 最终全组 race3.357秒通过。此前记录中的审批等待期间重启自动化缺口已闭环，真实 LLM 与视觉验收仍未完成。

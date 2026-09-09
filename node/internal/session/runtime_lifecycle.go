@@ -629,6 +629,73 @@ func (r *runtime) lifecycleBeginHumanTurn() error {
 	return r.lifecycleBeginInputTurn(turn.TurnSourceHuman)
 }
 
+// ConditionApprovalRequest describes a durable, no-model condition approval.
+// The trigger owns delivery/revision validation; the runtime owns the normal
+// HITL lifecycle and Agent-bound tool execution.
+type ConditionApprovalRequest struct {
+	Metadata turn.ConditionApprovalMetadata
+	Command  string
+}
+
+func (r *runtime) requestConditionApproval(req ConditionApprovalRequest) error {
+	if r == nil || r.orch == nil {
+		return fmt.Errorf("condition approval runtime unavailable")
+	}
+	if req.Metadata.AgentID != "" && req.Metadata.AgentID != r.agentID {
+		return fmt.Errorf("condition approval agent mismatch")
+	}
+	if req.Metadata.SessionID != "" && req.Metadata.SessionID != r.session.ID {
+		return fmt.Errorf("condition approval session mismatch")
+	}
+	pending := turn.BuildConditionApprovalPending(req.Metadata, req.Command)
+	payload, err := json.Marshal(pending)
+	if err != nil {
+		return fmt.Errorf("marshal condition approval: %w", err)
+	}
+	r.lifecycleMu.Lock()
+	if err := r.lifecycleBeginInputTurnLocked(turn.TurnSourceSideEffect); err != nil {
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	state := r.turnCoordinator.Snapshot()
+	item := pending.Items[0]
+	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+		Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, HasTools: true,
+		ToolBatchID: state.StepID + "-condition-batch", AssistantMessageID: item.ToolCall.ID + "-assistant",
+		At: time.Now().UTC(), Reason: "condition_approval",
+	}); err != nil {
+		r.lifecycleCancelLocked()
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	state = r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+		Type: turn.CommandToolCallRecorded, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, ToolCallID: item.ToolCall.ID,
+		ToolExecutionID: item.ToolCall.ID + "-execution", ToolName: item.ToolCall.Function.Name,
+		Arguments: json.RawMessage(item.ToolCall.Function.Arguments), At: time.Now().UTC(),
+	}); err != nil {
+		r.lifecycleCancelLocked()
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	state = r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+		Type: turn.CommandInteractionRequested, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, InteractionID: state.InteractionID,
+		InteractionKind: "approval", ToolExecutionID: item.ToolCall.ID + "-execution", Payload: payload,
+		At: time.Now().UTC(), Reason: "condition_approval",
+	}); err != nil {
+		r.lifecycleCancelLocked()
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	r.lifecycleMu.Unlock()
+	r.orch.PublishPendingHITL(r.session.ID, pending)
+	return nil
+}
+
 func (r *runtime) lifecycleBeginInputTurn(source turn.TurnSource) error {
 	if r == nil || r.turnCoordinator == nil {
 		return fmt.Errorf("turn coordinator is unavailable")
@@ -1397,6 +1464,9 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 		return err
 	}
 	now := time.Now().UTC()
+	if outcome.ConditionHandled {
+		return r.lifecycleAfterCondition(outcome, history, now)
+	}
 	assistant, hasAssistant := lastAssistantMessage(history, 0)
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		if err := r.lifecycleRecordToolFacts(history, 0, assistant.ToolCalls); err != nil {
@@ -1500,6 +1570,40 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 			return fmt.Errorf("complete resumed turn lifecycle: %w", err)
 		}
 		return nil
+	})
+}
+
+func (r *runtime) lifecycleAfterCondition(outcome turn.StepOutcome, history []llm.Message, now time.Time) error {
+	return r.withCommittedHistoryLocked(history, func() error {
+		state := r.turnCoordinator.Snapshot()
+		status := turn.ToolExecutionStatusSucceeded
+		errorKind := ""
+		if !outcome.ConditionMatched || outcome.Err != nil {
+			status = turn.ToolExecutionStatusFailed
+			if outcome.Err != nil {
+				errorKind = "condition_execution_failed"
+			} else {
+				errorKind = "condition_rejected_or_false"
+			}
+		}
+		commandType := turn.CommandToolExecutionCompleted
+		if status != turn.ToolExecutionStatusSucceeded {
+			commandType = turn.CommandToolExecutionFailed
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: commandType, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, ToolCallID: outcome.ConditionToolCallID, ToolExecutionID: outcome.ConditionExecutionID, ExecutionStatus: status, ErrorKind: errorKind, ResultContent: outcome.ConditionResult, At: now}); err != nil {
+			return err
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolResultRecorded, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, ToolCallID: outcome.ConditionToolCallID, ToolExecutionID: outcome.ConditionExecutionID, ResultContent: outcome.ConditionResult, At: now}); err != nil {
+			return err
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolBatchSettled, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, At: now}); err != nil {
+			return err
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, At: now, Reason: "condition_completed"}); err != nil {
+			return err
+		}
+		_, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteTurn, SessionID: r.session.ID, TurnID: state.TurnID, Generation: state.Generation, At: now, Reason: "condition_completed"})
+		return err
 	})
 }
 

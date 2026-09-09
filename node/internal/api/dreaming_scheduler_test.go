@@ -37,6 +37,174 @@ func (*schedulerTestLLM) NormalizeAssistant(e []llm.Message, m llm.Message) llm.
 	return llm.StubNormalizeAssistant(e, m)
 }
 
+type schedulerWaitingLLM struct{ calls int }
+
+func (c *schedulerWaitingLLM) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "wait", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"handbook/wait.md","content":"blocked","call_purpose":"maintain"}`}}}, FinishReason: "tool_calls"}, nil
+}
+func (*schedulerWaitingLLM) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*schedulerWaitingLLM) NormalizeAssistant(e []llm.Message, m llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(e, m)
+}
+
+func TestDreamingSchedulerWaitingAttemptDoesNotStartAnotherTurn(t *testing.T) {
+	root := t.TempDir()
+	a, err := autonomy.Open(filepath.Join(root, "autonomy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-wait", MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agents.Close()
+	now := time.Now().UTC()
+	if err := agents.Save(context.Background(), store.AgentRecord{AgentID: "auto-wait", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.NewRegistry(filepath.Join(root, "workspace"), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"filesystem"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(filepath.Join(root, "handbook")); err != nil {
+		t.Fatal(err)
+	}
+	client := &schedulerWaitingLLM{}
+	eng := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeAlways}})
+	mgr := session.NewManager("auto-wait", stream.NewHub(8, logx.Discard()), client, reg, eng, nil, session.TurnOptions{AutoAgent: true}, logx.Discard())
+	defer mgr.Stop()
+	ensure := func(ctx context.Context, id string) error {
+		_, _, e := mgr.CreateWithOptionsAndLLM(id, session.TurnOptions{AutoAgent: true}, reg, nil, client, id)
+		return e
+	}
+	d := NewDreamingScheduler(a, agents, mgr, ensure)
+	base := time.Date(2026, 9, 9, 4, 0, 0, 0, time.UTC)
+	d.now = func() time.Time { return base }
+	if err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("initial waiting tick=%v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("initial calls=%d, want 1", client.calls)
+	}
+	d.now = func() time.Time { return base.Add(6 * time.Minute) }
+	if err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("waiting retry tick=%v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("waiting attempt started another turn: calls=%d", client.calls)
+	}
+	if status := d.Status("auto-wait"); status.State != "waiting" {
+		t.Fatalf("waiting attempt changed visible state: %+v", status)
+	}
+}
+
+type schedulerResumeLLM struct{ calls int }
+
+func (c *schedulerResumeLLM) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if c.calls == 1 {
+		return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "dream-approve", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"handbook/dream.md","content":"ok","call_purpose":"maintain"}`}}}, FinishReason: "tool_calls"}, nil
+	}
+	return llm.ChatResult{Content: "scheduled experience", FinishReason: "stop"}, nil
+}
+func (*schedulerResumeLLM) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*schedulerResumeLLM) NormalizeAssistant(e []llm.Message, m llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(e, m)
+}
+
+func TestDreamingSchedulerASKResumeFinalizesAndAcksAttempt(t *testing.T) {
+	root := t.TempDir()
+	a, err := autonomy.Open(filepath.Join(root, "autonomy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-resume", MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agents.Close()
+	now := time.Now().UTC()
+	if err := agents.Save(context.Background(), store.AgentRecord{AgentID: "auto-resume", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.NewRegistry(filepath.Join(root, "workspace"), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"filesystem"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(filepath.Join(root, "handbook")); err != nil {
+		t.Fatal(err)
+	}
+	client := &schedulerResumeLLM{}
+	eng := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeAlways}})
+	mgr := session.NewManager("auto-resume", stream.NewHub(16, logx.Discard()), client, reg, eng, nil, session.TurnOptions{AutoAgent: true}, logx.Discard())
+	defer mgr.Stop()
+	ensure := func(ctx context.Context, id string) error {
+		_, _, e := mgr.CreateWithOptionsAndLLM(id, session.TurnOptions{AutoAgent: true}, reg, nil, client, id)
+		return e
+	}
+	d := NewDreamingScheduler(a, agents, mgr, ensure)
+	base := time.Date(2026, 9, 9, 4, 0, 0, 0, time.UTC)
+	d.now = func() time.Time { return base }
+	if err := d.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	attempt, found, err := mgr.GetDreamingAttempt("auto-resume")
+	if err != nil || !found || attempt.State != session.DreamingAttemptWaiting {
+		t.Fatalf("waiting attempt=%+v found=%v err=%v", attempt, found, err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), "auto-resume", "resume", "", nil, map[string]any{"type": "selection", "approved": []string{"dream-approve"}, "rejected": []string{}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		attempt, found, err = mgr.GetDreamingAttempt("auto-resume")
+		if err == nil && found && attempt.State == session.DreamingAttemptCompleted {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !found || attempt.State != session.DreamingAttemptCompleted {
+		t.Fatalf("resume did not complete attempt=%+v found=%v calls=%d", attempt, found, client.calls)
+	}
+	if err := d.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if exp, ok := a.GetExperience("auto-resume"); !ok || exp.Revision != 1 {
+		t.Fatalf("experience=%+v ok=%v", exp, ok)
+	}
+	commit, ok := a.GetDreamingCommit("auto-resume", "2026-09-09")
+	if !ok || !commit.ResetApplied {
+		t.Fatalf("commit=%+v ok=%v", commit, ok)
+	}
+	if _, found, err := mgr.GetDreamingAttempt("auto-resume"); err != nil || found {
+		t.Fatalf("attempt was not acked: found=%v err=%v", found, err)
+	}
+	calls := client.calls
+	if err := d.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != calls {
+		t.Fatalf("second tick started another model turn: before=%d after=%d", calls, client.calls)
+	}
+}
+
 func TestDreamingStatusIsIndependentOfWakeFrequencyAndPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "autonomy.json")
 	a, err := autonomy.Open(path)
@@ -209,6 +377,17 @@ func TestDreamingSchedulerRecoversBusyPendingEvenWhenDisabled(t *testing.T) {
 	commit, ok := a2.GetDreamingCommit("auto-pending", "2026-09-09")
 	if !ok || !commit.ResetApplied || client2.calls != 0 {
 		t.Fatalf("reopened pending recovery=%+v calls=%d", commit, client2.calls)
+	}
+	exp, ok := a2.GetExperience("auto-pending")
+	if !ok {
+		t.Fatal("recovered commit lost its experience")
+	}
+	if err := d2.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expAgain, ok := a2.GetExperience("auto-pending")
+	if !ok || expAgain.Revision != exp.Revision {
+		t.Fatalf("replayed commit changed experience revision: before=%+v after=%+v", exp, expAgain)
 	}
 }
 

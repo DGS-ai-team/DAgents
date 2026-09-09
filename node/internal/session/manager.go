@@ -40,6 +40,8 @@ type TurnOptions struct {
 	// TriggerToolRoundProvider authorizes and supplies the per-activation cap.
 	// It must validate the durable trigger/controller/owner/delivery identity.
 	TriggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
+	ConditionValidator       func(context.Context, turn.ConditionApprovalMetadata) error
+	ConditionCompletion      func(triggers.ConditionRequest, triggers.ConditionResult) error
 	// AgentPromptProvider loads the current Agent-owned responsibilities,
 	// experience and todo snapshot at each new Turn boundary. It is never
 	// inherited by temporary child runtimes.
@@ -60,6 +62,7 @@ type TurnOptions struct {
 	initialHistoryRevision    uint64
 	initialActiveContextStart int
 	initialLastContextResetID string
+	initialDreamingAttempt    json.RawMessage
 	// initialLifecycleEvents are supplied by Manager when it already loaded the
 	// session projection. Keeping the load marker separate from the slice lets
 	// an empty, successfully-read event log avoid a second database scan.
@@ -159,6 +162,11 @@ func withInitialLastContextResetID(opts TurnOptions, id string) TurnOptions {
 	return opts
 }
 
+func withInitialDreamingAttempt(opts TurnOptions, raw json.RawMessage) TurnOptions {
+	opts.initialDreamingAttempt = append(json.RawMessage(nil), raw...)
+	return opts
+}
+
 func withInitialLifecycleEvents(opts TurnOptions, events []turn.TurnEventEnvelope, loaded bool) TurnOptions {
 	opts.initialLifecycleEvents = append([]turn.TurnEventEnvelope(nil), events...)
 	opts.initialLifecycleEventsLoaded = loaded
@@ -194,12 +202,28 @@ type Manager struct {
 	mediaOnlyMu sync.Mutex
 	mediaOnly   map[string]*media.Registry
 
-	triggerDelivery triggers.DeliveryTracker
+	triggerDelivery     triggers.DeliveryTracker
+	conditionCompletion func(triggers.ConditionRequest, triggers.ConditionResult) error
+	conditionValidator  func(context.Context, turn.ConditionApprovalMetadata) error
 
 	children *childagent.Manager
 
 	// OnReleased 在 session 成功卸出内存后回调（用于回收 docker 沙箱等）。
 	OnReleased func(sessionID string)
+}
+
+// SetConditionCompletionCallback connects the durable resume path to the
+// trigger store. It must be configured before scheduler work starts.
+func (m *Manager) SetConditionCompletionCallback(cb func(triggers.ConditionRequest, triggers.ConditionResult) error) {
+	if m != nil {
+		m.conditionCompletion = cb
+	}
+}
+
+func (m *Manager) SetConditionValidator(v func(context.Context, turn.ConditionApprovalMetadata) error) {
+	if m != nil {
+		m.conditionValidator = v
+	}
 }
 
 // SetLifecycleObserver installs the optional observer for default and already
@@ -320,6 +344,30 @@ func (m *Manager) TryAcquireMaintenanceContext(ctx context.Context, agentID stri
 	}
 	var once sync.Once
 	return leaseCtx, func() { once.Do(func() { stop(); cancel(); actualRelease() }) }, acquired, err
+}
+
+// RequestConditionApproval opens an Agent-bound condition approval through the
+// normal session HITL lifecycle. The execution gate is held only while the
+// durable pending interaction is created; it is released while the user
+// decides, so an approval cannot monopolize the Agent runtime.
+func (m *Manager) RequestConditionApproval(ctx context.Context, req ConditionApprovalRequest, sessionID string) error {
+	if m == nil || strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("condition session is required")
+	}
+	leaseCtx, release, acquired, err := m.TryAcquireMaintenanceContext(ctx, req.Metadata.AgentID)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return fmt.Errorf("agent is busy")
+	}
+	defer release()
+	_ = leaseCtx
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.agentID != req.Metadata.AgentID {
+		return fmt.Errorf("condition session is unavailable")
+	}
+	return rt.requestConditionApproval(req)
 }
 
 // SetMultimodalEnabled 仅更新 Manager 默认 TurnOptions 与默认 Registry。
@@ -507,11 +555,20 @@ func (m *Manager) createWithOptions(
 		return nil, false, err
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	if turnOpts.ConditionValidator == nil {
+		turnOpts.ConditionValidator = m.conditionValidator
+	}
+	if turnOpts.ConditionCompletion == nil {
+		turnOpts.ConditionCompletion = m.conditionCompletion
+	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
+		return nil, false, err
+	}
 	m.bindMaintenanceGate(rt)
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
@@ -616,11 +673,21 @@ func (m *Manager) replaceWithOptions(
 		}
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	if turnOpts.ConditionValidator == nil {
+		turnOpts.ConditionValidator = m.conditionValidator
+	}
+	if turnOpts.ConditionCompletion == nil {
+		turnOpts.ConditionCompletion = m.conditionCompletion
+	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
+		m.mu.Unlock()
+		return nil, false, err
+	}
 	m.bindMaintenanceGate(rt)
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -670,11 +737,20 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			return nil, false, err
 		}
 		created := len(restore.Messages) == 0 && !restore.Found
-		turnOpts := withInitialLifecycleEvents(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		turnOpts := withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		if turnOpts.ConditionValidator == nil {
+			turnOpts.ConditionValidator = m.conditionValidator
+		}
+		if turnOpts.ConditionCompletion == nil {
+			turnOpts.ConditionCompletion = m.conditionCompletion
+		}
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
 			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 		rt.restoreInputBoxState(restore.InputBoxState)
 		rt.reconcileRestoredInputBox()
+		if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
+			return nil, false, err
+		}
 		m.bindMaintenanceGate(rt)
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
@@ -720,6 +796,7 @@ type sessionRestoreData struct {
 	ActiveContextStart    int
 	LastContextResetID    string
 	InputBoxState         json.RawMessage
+	DreamingAttempt       json.RawMessage
 	LifecycleEvents       []turn.TurnEventEnvelope
 	LifecycleEventsLoaded bool
 }
@@ -751,6 +828,7 @@ func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) 
 		ActiveContextStart:    rec.RuntimeState.ActiveContextStart,
 		LastContextResetID:    rec.RuntimeState.LastContextResetID,
 		InputBoxState:         rec.RuntimeState.InputBoxState,
+		DreamingAttempt:       append(json.RawMessage(nil), rec.RuntimeState.DreamingAttempt...),
 		LifecycleEvents:       lifecycle.events,
 		LifecycleEventsLoaded: lifecycleErr == nil,
 	}, nil

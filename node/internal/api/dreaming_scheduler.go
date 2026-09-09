@@ -198,6 +198,31 @@ func (d *DreamingScheduler) tickAgent(ctx context.Context, agentID string, now t
 	if until := d.retryAt(agentID); !until.IsZero() && now.Before(until) {
 		return nil
 	}
+	// Recover the session-owned attempt before looking at today's schedule.
+	// An attempt is authoritative for its own date/revision and must never be
+	// replaced by a fresh round while it is still waiting or running.
+	if err := d.ensure(ctx, agentID); err != nil {
+		return d.failed(agentID, now, err)
+	}
+	attempt, hasAttempt, err := d.sessions.GetDreamingAttempt(agentID)
+	if err != nil {
+		return d.failed(agentID, now, err)
+	}
+	if hasAttempt {
+		switch attempt.State {
+		case session.DreamingAttemptWaiting:
+			d.setStatus(agentID, DreamingStatus{State: "waiting"})
+			return nil
+		case session.DreamingAttemptRunning:
+			d.setStatus(agentID, DreamingStatus{State: "recovery_pending"})
+			return nil
+		case session.DreamingAttemptCompleted:
+			return d.finalizeAttempt(ctx, agentID, attempt, now)
+		case session.DreamingAttemptFailed, session.DreamingAttemptCancelled:
+			// A failed/cancelled attempt is terminal. Preserve it for audit, but
+			// allow a later scheduled round to create a new attempt.
+		}
+	}
 	profile, configured := d.autonomy.GetProfile(agentID)
 	pending := d.autonomy.ListPendingDreamingCommits(agentID)
 	if len(pending) > 0 {
@@ -241,9 +266,6 @@ func (d *DreamingScheduler) tickAgent(ctx context.Context, agentID string, now t
 		d.setStatus(agentID, DreamingStatus{State: "waiting", NextAt: due})
 		return nil
 	}
-	if err := d.ensure(ctx, agentID); err != nil {
-		return d.failed(agentID, now, err)
-	}
 	leaseCtx, release, acquired, err := d.sessions.TryAcquireMaintenanceContext(ctx, agentID)
 	if err != nil {
 		return d.failed(agentID, now, err)
@@ -254,30 +276,65 @@ func (d *DreamingScheduler) tickAgent(ctx context.Context, agentID string, now t
 	}
 	defer release()
 	d.setStatus(agentID, DreamingStatus{State: "running"})
-	result, err := d.sessions.RunDreaming(leaseCtx, agentID, dreamingPrompt, profile.MaxToolRounds)
-	if err != nil {
-		return d.failed(agentID, now, err)
-	}
-	boundary, err := d.sessions.CaptureActiveContextBoundary(leaseCtx, agentID)
-	if err != nil {
-		return d.failed(agentID, now, err)
-	}
 	experience, _ := d.autonomy.GetExperience(agentID)
-	commitID := fmt.Sprintf("dreaming:%s:%s", agentID, date)
-	commit, err := d.autonomy.CommitDreaming(autonomy.DreamingCommitInput{AgentID: agentID, LocalDate: date, CommitID: commitID, SessionID: agentID, Boundary: boundary, ExpectedRevision: experience.Revision, Content: result.Content, Now: now})
+	_, err = d.sessions.RunDreaming(leaseCtx, agentID, dreamingPrompt, profile.MaxToolRounds, session.DreamingMetadata{
+		LocalDate: date, ExperienceRevision: experience.Revision,
+	})
 	if err != nil {
+		if attempt, ok, getErr := d.sessions.GetDreamingAttempt(agentID); getErr == nil && ok && attempt.State == session.DreamingAttemptWaiting {
+			d.setStatus(agentID, DreamingStatus{State: "waiting"})
+			return nil
+		}
 		return d.failed(agentID, now, err)
 	}
-	if _, err := d.sessions.ResetActiveContext(leaseCtx, agentID, commit.Boundary, commit.CommitID); err != nil {
+	attempt, ok, err := d.sessions.GetDreamingAttempt(agentID)
+	if err != nil || !ok || attempt.State != session.DreamingAttemptCompleted {
+		if err == nil {
+			err = fmt.Errorf("dreaming attempt did not complete")
+		}
 		return d.failed(agentID, now, err)
 	}
-	if _, err := d.autonomy.MarkDreamingResetApplied(agentID, date, commit.CommitID); err != nil {
-		return d.failed(agentID, now, err)
+	if err := d.finalizeAttemptWithLease(leaseCtx, agentID, attempt, now); err != nil {
+		return err
 	}
 	d.mu.Lock()
 	d.status[agentID] = DreamingStatus{State: "succeeded", LastSuccess: now, NextAt: dueForNextDay(localNow, location, profile.DreamingTime)}
 	delete(d.nextTry, agentID)
 	d.mu.Unlock()
+	return nil
+}
+
+func (d *DreamingScheduler) finalizeAttempt(ctx context.Context, agentID string, attempt session.DreamingAttempt, now time.Time) error {
+	leaseCtx, release, acquired, err := d.sessions.TryAcquireMaintenanceContext(ctx, agentID)
+	if err != nil {
+		return d.failed(agentID, now, err)
+	}
+	if !acquired {
+		d.setStatus(agentID, DreamingStatus{State: "waiting"})
+		return nil
+	}
+	defer release()
+	return d.finalizeAttemptWithLease(leaseCtx, agentID, attempt, now)
+}
+
+func (d *DreamingScheduler) finalizeAttemptWithLease(ctx context.Context, agentID string, attempt session.DreamingAttempt, now time.Time) error {
+	if attempt.AgentID != agentID || attempt.SessionID == "" || attempt.TurnID == "" || attempt.LocalDate == "" {
+		return d.failed(agentID, now, fmt.Errorf("invalid dreaming attempt identity"))
+	}
+	resetID := fmt.Sprintf("dreaming:%s:%s", agentID, attempt.LocalDate)
+	if _, err := d.autonomy.CommitDreaming(autonomy.DreamingCommitInput{AgentID: agentID, LocalDate: attempt.LocalDate, CommitID: resetID, SessionID: attempt.SessionID, Boundary: attempt.Boundary, ExpectedRevision: attempt.ExperienceRevision, Content: attempt.FinalMessage, Now: now}); err != nil {
+		return d.failed(agentID, now, err)
+	}
+	if _, err := d.sessions.ResetActiveContext(ctx, attempt.SessionID, attempt.Boundary, resetID); err != nil {
+		return d.failed(agentID, now, err)
+	}
+	if _, err := d.autonomy.MarkDreamingResetApplied(agentID, attempt.LocalDate, resetID); err != nil {
+		return d.failed(agentID, now, err)
+	}
+	if err := d.sessions.AckDreamingAttempt(ctx, attempt.SessionID, attempt.TurnID); err != nil {
+		return d.failed(agentID, now, err)
+	}
+	d.setStatus(agentID, DreamingStatus{State: "succeeded", LastSuccess: now})
 	return nil
 }
 

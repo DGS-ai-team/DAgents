@@ -270,9 +270,6 @@ func (r *Registry) execTriggerCreate(ctx context.Context, raw json.RawMessage) (
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if triggers.ConditionCmd(args.Condition) != "" {
-		return triggerJSON(map[string]any{"ok": false, "error": "condition.cmd is no longer supported"}), nil
-	}
 	approvalTarget := TriggerSessionTargetFromContext(ctx)
 	if approvalTarget == "" {
 		approvalTarget = "same_session"

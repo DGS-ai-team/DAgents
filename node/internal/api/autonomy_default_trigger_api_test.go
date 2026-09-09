@@ -273,6 +273,69 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	}
 }
 
+type conditionCompletionFailSubmitter struct {
+	calls int
+}
+
+func (s *conditionCompletionFailSubmitter) EnsureSession(string) (string, error) {
+	s.calls++
+	return "", fmt.Errorf("submitter unavailable")
+}
+
+func (s *conditionCompletionFailSubmitter) SubmitTriggerMessage(string, string, string) error {
+	s.calls++
+	return fmt.Errorf("submitter unavailable")
+}
+
+func TestConditionCompletionCallbackFailureMarksRecoveryAndReopenFreezes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "triggers.json")
+	triggerStore, err := triggers.OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{Name: "condition", Condition: map[string]any{"interval_seconds": 60}, TargetAgentID: "agent-a", TaskTemplate: "run"}, "agent-a", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, sessionID := "condition-delivery", "session-a"
+	def.PendingDeliveryID = &delivery
+	def.PendingSessionID = &sessionID
+	def.PendingConditionReason = "condition matched"
+	def.PendingConditionContent = "run"
+	if _, err := triggerStore.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	// ReplaceTrigger is the production persistence path for an already claimed
+	// delivery in this failure fixture.
+	if err := triggerStore.ReplaceTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	submitter := &conditionCompletionFailSubmitter{}
+	scheduler := triggers.NewScheduler(triggerStore, submitter, 1)
+	callback := conditionCompletionCallback(scheduler, triggerStore)
+	err = callback(triggers.ConditionRequest{TriggerID: def.TriggerID, DeliveryID: delivery, SessionID: sessionID, AgentID: "agent-a", Revision: def.Revision}, triggers.ConditionResult{Status: triggers.ConditionMatched})
+	if err == nil {
+		t.Fatal("completion callback unexpectedly succeeded")
+	}
+	got, ok := triggerStore.GetTrigger(def.TriggerID)
+	if !ok || !got.RecoveryRequired || got.Enabled || got.PendingDeliveryID == nil || *got.PendingDeliveryID != delivery || !got.PendingConditionApproved {
+		t.Fatalf("failed completion lost recovery state: ok=%v trigger=%+v", ok, got)
+	}
+	reopened, err := triggers.OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, ok := reopened.GetTrigger(def.TriggerID)
+	if !ok || !recovered.RecoveryRequired || recovered.Enabled || recovered.PendingDeliveryID == nil || *recovered.PendingDeliveryID != delivery {
+		t.Fatalf("reopened recovery state changed: ok=%v trigger=%+v", ok, recovered)
+	}
+	reopenedScheduler := triggers.NewScheduler(reopened, submitter, 1)
+	reopenedScheduler.RunOnceForTest(context.Background(), time.Now().UTC().Add(time.Hour))
+	if submitter.calls != 1 {
+		t.Fatalf("reopened recovery replayed pending condition: submitter calls=%d", submitter.calls)
+	}
+}
+
 func TestNewServerStartupRebuildsOnlyAutoDefaults(t *testing.T) {
 	cfg := testConfig(t)
 	agents, err := store.OpenAgents(cfg.AgentsDBPath())

@@ -35,6 +35,10 @@ func (r *runtime) persist(ctx context.Context) error {
 	historyRevision := r.historyRevision
 	activeContextStart := r.activeContextStart
 	lastContextResetID := r.lastContextResetID
+	var dreamingAttempt json.RawMessage
+	if r.dreamingAttempt != nil {
+		dreamingAttempt, _ = json.Marshal(*r.dreamingAttempt)
+	}
 	r.mu.Unlock()
 	var inputBoxState json.RawMessage
 	if r.inputBox != nil {
@@ -54,6 +58,7 @@ func (r *runtime) persist(ctx context.Context) error {
 			HistoryRevision:         historyRevision,
 			ActiveContextStart:      activeContextStart,
 			LastContextResetID:      lastContextResetID,
+			DreamingAttempt:         dreamingAttempt,
 			HookStore:               hookStore,
 			IdleAutoCompressApplied: idleMarked,
 			NotifySeq:               notifySeq,
@@ -183,6 +188,7 @@ type runtimeReplacementData struct {
 	HistoryRevision    uint64
 	ActiveContextStart int
 	LastContextResetID string
+	DreamingAttempt    json.RawMessage
 	InputBoxState      json.RawMessage
 }
 
@@ -199,6 +205,10 @@ func (r *runtime) replacementData() runtimeReplacementData {
 	historyRevision := r.historyRevision
 	activeContextStart := r.activeContextStart
 	lastContextResetID := r.lastContextResetID
+	var dreamingAttempt json.RawMessage
+	if r.dreamingAttempt != nil {
+		dreamingAttempt, _ = json.Marshal(*r.dreamingAttempt)
+	}
 	r.mu.Unlock()
 	var hookStore map[string]json.RawMessage
 	if r.orch != nil {
@@ -211,6 +221,6 @@ func (r *runtime) replacementData() runtimeReplacementData {
 	return runtimeReplacementData{
 		Messages: msgs, LoadedSkills: loaded, HookStore: hookStore,
 		IdleAutoCompress: idleMarked, NotifySeq: notifySeq, AckSeq: ackSeq,
-		HistoryRevision: historyRevision, ActiveContextStart: activeContextStart, LastContextResetID: lastContextResetID, InputBoxState: inputBoxState,
+		HistoryRevision: historyRevision, ActiveContextStart: activeContextStart, LastContextResetID: lastContextResetID, InputBoxState: inputBoxState, DreamingAttempt: dreamingAttempt,
 	}
 }

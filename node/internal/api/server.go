@@ -37,6 +37,18 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
+func conditionCompletionCallback(scheduler *triggers.Scheduler, triggerStore *triggers.Store) func(triggers.ConditionRequest, triggers.ConditionResult) error {
+	return func(req triggers.ConditionRequest, result triggers.ConditionResult) error {
+		_, err := scheduler.CompleteCondition(context.Background(), triggers.ConditionCompletion{TriggerID: req.TriggerID, DeliveryID: req.DeliveryID, SessionID: req.SessionID, AgentID: req.AgentID, Revision: req.Revision, Occurrence: req.Occurrence, Matched: result.Status == triggers.ConditionMatched})
+		if err != nil {
+			if recoveryErr := triggerStore.MarkConditionRecovery(req.TriggerID, req.DeliveryID, err.Error()); recoveryErr != nil {
+				return fmt.Errorf("complete condition: %w; mark recovery: %v", err, recoveryErr)
+			}
+		}
+		return err
+	}
+}
+
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
 	cfg             *config.Config
@@ -387,10 +399,20 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	} else {
 		triggerStore = opened
 		triggerStore.SetLogger(logger)
+		mgr.SetConditionValidator(func(ctx context.Context, meta turn.ConditionApprovalMetadata) error {
+			_ = ctx
+			def, ok := triggerStore.GetTrigger(meta.TriggerID)
+			if !ok {
+				return fmt.Errorf("condition trigger not found")
+			}
+			return triggers.ValidateConditionIdentity(*def, meta.AgentID, meta.SessionID, meta.DeliveryID, meta.TriggerRevision, meta.Occurrence)
+		})
 		triggerSubmitter = &session.TriggerSubmitter{Mgr: mgr}
 		triggerSched = triggers.NewScheduler(triggerStore, triggerSubmitter, cfg.Triggers.PollSeconds)
 		triggerSched.SetLogger(logger)
 		triggerSched.SetSessionResolver(mgr)
+		triggerSched.SetConditionRunner(mgr.ExecuteCondition)
+		mgr.SetConditionCompletionCallback(conditionCompletionCallback(triggerSched, triggerStore))
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 	}
 	mediaRegister := tools.MediaRegisterFunc(func(ctx context.Context, toolCallID, relPath, source, label, caption string) (*tools.MediaArtifactRef, error) {

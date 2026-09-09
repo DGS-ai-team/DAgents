@@ -9,4 +9,12 @@ type StepOutcome struct {
 	StepIndex          int
 	ScheduleToolResult bool
 	Err                error
+	// ConditionHandled marks a synthetic approval step that executed a
+	// condition without making a model request. Runtime lifecycle code settles
+	// its tool execution directly and must not schedule an LLM continuation.
+	ConditionHandled     bool
+	ConditionMatched     bool
+	ConditionToolCallID  string
+	ConditionExecutionID string
+	ConditionResult      string
 }

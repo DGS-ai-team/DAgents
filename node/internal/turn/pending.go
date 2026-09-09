@@ -22,6 +22,20 @@ type PendingHITLItem struct {
 	ToolCall       llm.ToolCall         `json:"tool_call"`
 	DuplicateMeta  *hooks.DuplicateMeta `json:"duplicate_meta,omitempty"`
 	MemoryConflict *MemoryConflictMeta  `json:"memory_conflict,omitempty"`
+	// ConditionApproval is internal metadata for a trigger condition that uses
+	// the ordinary execute_tool approval presentation. It is intentionally not
+	// used to create a separate UI approval kind.
+	ConditionApproval *ConditionApprovalMetadata `json:"condition_approval,omitempty"`
+}
+
+type ConditionApprovalMetadata struct {
+	TriggerID       string   `json:"trigger_id"`
+	DeliveryID      string   `json:"delivery_id"`
+	AgentID         string   `json:"agent_id"`
+	SessionID       string   `json:"session_id"`
+	TriggerRevision int64    `json:"trigger_revision"`
+	Occurrence      *float64 `json:"occurrence,omitempty"`
+	ArgsDigest      string   `json:"args_digest"`
 }
 
 // PendingHITL 保存 HITL 暂停时的待处理 tool call 批次。

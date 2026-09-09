@@ -63,6 +63,27 @@ func TestRunDreamingReadOnlyReturnsContentWithoutChange(t *testing.T) {
 	}
 }
 
+func TestRunDreamingDoesNotOverwriteUnackedCompletedAttempt(t *testing.T) {
+	client := &handbookRoundClient{}
+	mgr, _, sessionID, cleanup := dreamingFixture(t, client)
+	defer cleanup()
+	ctx, release, ok, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
+	if err != nil || !ok {
+		t.Fatalf("lease: ok=%v err=%v", ok, err)
+	}
+	if _, err := mgr.RunDreaming(ctx, sessionID, "一次整理", 2); err != nil {
+		t.Fatal(err)
+	}
+	calls := client.calls
+	if _, err := mgr.RunDreaming(ctx, sessionID, "重复整理", 2); err == nil {
+		t.Fatal("unacked completed attempt was overwritten")
+	}
+	release()
+	if client.calls != calls {
+		t.Fatalf("duplicate dreaming invoked model: before=%d after=%d", calls, client.calls)
+	}
+}
+
 func TestRunDreamingUsesHandbookToolsAndReturnsFinalExperience(t *testing.T) {
 	mgr, reg, sessionID, cleanup := dreamingFixture(t, &handbookEditClient{})
 	defer cleanup()

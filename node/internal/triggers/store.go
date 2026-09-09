@@ -899,6 +899,27 @@ func (s *Store) IsRecoveryRequired(triggerID string) bool {
 	return ok && d.RecoveryRequired
 }
 
+// MarkConditionRecovery preserves the claimed delivery while fencing future
+// execution after a downstream completion/settlement failure.
+func (s *Store) MarkConditionRecovery(triggerID, deliveryID, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[triggerID]
+	if !ok || d.PendingDeliveryID == nil || *d.PendingDeliveryID != strings.TrimSpace(deliveryID) {
+		return fmt.Errorf("condition delivery is stale")
+	}
+	old := s.triggers[triggerID]
+	d.RecoveryRequired = true
+	d.Enabled = false
+	d.RecoveryReason = strings.TrimSpace(reason)
+	s.triggers[triggerID] = d
+	if err := s.saveLocked(); err != nil {
+		s.triggers[triggerID] = old
+		return err
+	}
+	return nil
+}
+
 // IsPendingDelivery reports whether this exact delivery is still the durable
 // owner of the trigger. It fences envelopes that were restored after an
 // explicit recovery action cleared the old delivery.

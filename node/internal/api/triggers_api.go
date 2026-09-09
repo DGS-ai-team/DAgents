@@ -61,10 +61,6 @@ func (s *Server) handleCreateTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if triggers.ConditionCmd(body.Condition) != "" {
-		writeAPIError(w, http.StatusBadRequest, "unsupported_trigger_cmd", "condition.cmd is no longer supported", nil)
-		return
-	}
 	if id := strings.TrimSpace(body.TargetAgentID); id != "" && s.agents != nil {
 		rec, err := s.agents.Get(r.Context(), id)
 		if err != nil || rec == nil || rec.Archived {
@@ -128,10 +124,6 @@ func (s *Server) handleUpdateTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Revision != nil && *patch.Revision <= 0 {
 		writeAPIError(w, http.StatusBadRequest, "invalid_revision", "revision must be positive", nil)
-		return
-	}
-	if triggers.ConditionCmd(patch.Condition) != "" {
-		writeAPIError(w, http.StatusBadRequest, "unsupported_trigger_cmd", "condition.cmd is no longer supported", nil)
 		return
 	}
 	if patch.TargetAgentID != nil && s.agents != nil {

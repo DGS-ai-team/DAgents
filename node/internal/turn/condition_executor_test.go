@@ -99,6 +99,49 @@ func TestExecuteConditionHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestConditionApprovalUsesOrdinaryToolHITLShapeAndStableIdentity(t *testing.T) {
+	occurrence := 123.5
+	pending := BuildConditionApprovalPending(ConditionApprovalMetadata{
+		TriggerID: "trigger-a", DeliveryID: "delivery-a", AgentID: "agent-a",
+		TriggerRevision: 4, Occurrence: &occurrence, ArgsDigest: "sha256:x",
+	}, "test -f ready")
+	if pending == nil || len(pending.Items) != 1 {
+		t.Fatalf("pending=%+v", pending)
+	}
+	item := pending.Items[0]
+	if item.ToolCall.Function.Name != "bash_run" || item.ToolCall.ID != "condition-delivery-a" {
+		t.Fatalf("tool item=%+v", item.ToolCall)
+	}
+	if item.ConditionApproval == nil || item.ConditionApproval.TriggerID != "trigger-a" || item.ConditionApproval.TriggerRevision != 4 {
+		t.Fatalf("condition metadata=%+v", item.ConditionApproval)
+	}
+	ui := BuildApprovalToolItem(item.ToolCall, nil)
+	if _, ok := ui["condition_approval"]; ok {
+		t.Fatal("internal condition metadata leaked into ordinary HITL UI item")
+	}
+}
+
+func TestExecuteConditionApprovalRunsOnlyApprovedPlan(t *testing.T) {
+	o := newConditionTestOrchestrator(t, policy.ModeAlways)
+	pending := BuildConditionApprovalPending(ConditionApprovalMetadata{
+		TriggerID: "trigger-a", DeliveryID: "delivery-a", AgentID: "agent-a",
+	}, "exit 0")
+	rejected, err := o.ExecuteConditionApproval(conditionTestContext("session-a"), "session-a", pending, map[string]any{"type": "reject"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Matched || rejected.ApprovalReason != "user rejected condition" {
+		t.Fatalf("rejected=%+v", rejected)
+	}
+	approved, err := o.ExecuteConditionApproval(conditionTestContext("session-a"), "session-a", pending, map[string]any{"type": "approve"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !approved.Matched {
+		t.Fatalf("approved=%+v", approved)
+	}
+}
+
 func conditionTestContext(sessionID string) context.Context {
 	return WithExecutionContext(context.Background(), TurnExecutionContext{SessionID: sessionID, TurnID: "turn-1", StepID: "step-1", Generation: 1, StepIndex: 1})
 }

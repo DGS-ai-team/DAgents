@@ -95,6 +95,13 @@ func TestDreamingActiveContextResetHydratesAndKeepsChatUsable(t *testing.T) {
 		if err != nil || !changed {
 			t.Fatalf("reset: changed=%v err=%v", changed, err)
 		}
+		attempt, found, err := mgr.GetDreamingAttempt(rt.ID)
+		if err != nil || !found {
+			t.Fatalf("completed dreaming attempt missing before ack: found=%v err=%v", found, err)
+		}
+		if err := mgr.AckDreamingAttempt(ctx, rt.ID, attempt.TurnID); err != nil {
+			t.Fatalf("ack dreaming attempt: %v", err)
+		}
 	}
 	run := func(prompt string) {
 		ctx, release, ok, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
@@ -136,6 +143,9 @@ func TestDreamingActiveContextResetHydratesAndKeepsChatUsable(t *testing.T) {
 	defer mgr2.Stop()
 	if _, _, err := mgr2.CreateWithOptionsAndLLM(rt.ID, TurnOptions{AutoAgent: true}, reg2, nil, client, "agent-1"); err != nil {
 		t.Fatal(err)
+	}
+	if _, found, err := mgr2.GetDreamingAttempt(rt.ID); err != nil || found {
+		t.Fatalf("acked dreaming attempt still present: found=%v err=%v", found, err)
 	}
 	ctx, release, ok, err := mgr2.TryAcquireMaintenanceContext(context.Background(), "agent-1")
 	if err != nil || !ok {
