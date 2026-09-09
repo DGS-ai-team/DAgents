@@ -14,7 +14,7 @@ import (
 )
 
 func reporterSummary() AutoEmployeeSummary {
-	return AutoEmployeeSummary{AgentID: "auto/1", DisplayName: "摘要员工", Role: "整理资料", State: "waiting", Reason: "等待", LastResult: "已完成", AsOf: time.Now().UTC(), Usage: map[string]any{"tokens": 7}}
+	return AutoEmployeeSummary{AgentID: "auto/1", DisplayName: "摘要员工", Role: "Auto employee", State: "standby", Reason: "", AsOf: time.Now().UTC()}
 }
 
 func TestAutoSummaryReporterSendsBoundIdentityAndWhitelist(t *testing.T) {
@@ -31,7 +31,7 @@ func TestAutoSummaryReporterSendsBoundIdentityAndWhitelist(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		for _, forbidden := range []string{"role_objective", "prompt", "transcript", "workspace", "path", "artifact_body"} {
+		for _, forbidden := range []string{"responsibility", "todo_summary", "role_objective", "prompt", "transcript", "workspace", "path", "artifact_body", "usage", "business_tokens", "maintenance_tokens"} {
 			if _, ok := body[forbidden]; ok {
 				t.Errorf("privacy field %q sent", forbidden)
 			}

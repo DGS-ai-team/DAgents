@@ -19,7 +19,7 @@ func TestAutonomyTodoToolsAreBoundAndCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.SetAgentID("auto-a")
-	r.SetAutonomyRuntime(true, nil, nil)
+	r.SetAutonomyEnabled(true)
 	r.SetAutonomyTodoStore(store)
 	if _, err := r.Execute(context.Background(), "todo_create", `{"call_purpose":"plan","text":"ship"}`); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestAutonomyTodoToolsAreBoundAndCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherAuto.SetAgentID("auto-b")
-	otherAuto.SetAutonomyRuntime(true, nil, nil)
+	otherAuto.SetAutonomyEnabled(true)
 	otherAuto.SetAutonomyTodoStore(store)
 	for _, op := range []string{"todo_update", "todo_delete"} {
 		args := `{"call_purpose":"cross","id":"` + second.ID + `","expected_revision":1,"status":"completed"}`
@@ -118,7 +118,7 @@ func TestAutonomyTodoToolsAreBoundAndCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	other.SetAgentID("normal")
-	other.SetAutonomyRuntime(false, nil, nil)
+	other.SetAutonomyEnabled(false)
 	other.SetAutonomyTodoStore(store)
 	for _, d := range other.Definitions() {
 		if strings.HasPrefix(d.Function.Name, "todo_") {

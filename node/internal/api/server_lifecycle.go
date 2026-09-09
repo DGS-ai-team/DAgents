@@ -244,9 +244,6 @@ func (s *Server) Close() {
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
 	}
-	if s.maintenanceSched != nil {
-		s.maintenanceSched.Stop()
-	}
 	if s.terminals != nil {
 		s.terminals.closeAll()
 	}

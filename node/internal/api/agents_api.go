@@ -12,7 +12,6 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
-	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -29,17 +28,6 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/autonomy", s.handleGetAgentAutonomy)
-	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/autonomy", s.handlePutAgentAutonomy)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/maintenance", s.handleGetAgentMaintenance)
-	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}/maintenance", s.handlePatchAgentMaintenance)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/maintenance/run", s.handleRunAgentMaintenance)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/maintenance/recovery", s.handleGetMaintenanceRecovery)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/maintenance/recovery", s.handlePostMaintenanceRecovery)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/maintenance/reconcile", s.handlePostMaintenanceReconcile)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/autonomy/cycles", s.handleGetAutonomyCycles)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/cycles", s.handlePostAutonomyCycle)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/actions", s.handleAutonomyAction)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook", s.handleGetAgentHandbook)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook/history", s.handleGetAgentHandbookHistory)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/handbook/restore", s.handleRestoreAgentHandbook)
@@ -418,7 +406,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	typeChangedToNormal := false
 	if req.Workspace != nil {
 		writeAPIError(w, http.StatusBadRequest, "workspace_immutable", "workspace cannot be changed after Agent creation", nil)
 		return
@@ -446,32 +433,11 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		newType := normalizeAgentType(*req.AgentType)
 		if oldType != newType {
-			typeChangedToNormal = oldType == "auto" && newType == "normal"
-			s.goalWakeMu.Lock()
-			defer s.goalWakeMu.Unlock()
 			if s.sessions != nil {
 				pending, active, _, runtimeErr := s.sessions.RuntimeInfo(id)
 				if runtimeErr == nil && (pending > 0 || active) {
 					writeAPIError(w, http.StatusConflict, "agent_busy", "cannot change Agent type while the main chat is active or queued", nil)
 					return
-				}
-			}
-			if s.goalStore == nil { /* type change remains serialized through persistence */
-			} else {
-				for _, g := range s.goalStore.List() {
-					if g.AgentID != id || !g.Managed {
-						continue
-					}
-					for _, run := range s.goalStore.Runs(g.ID) {
-						if run.FinishedAt == nil || run.Status == "unknown" {
-							writeAPIError(w, http.StatusConflict, "agent_busy", "cannot change Agent type while a Goal run is active", nil)
-							return
-						}
-					}
-					if oldType == "auto" && newType == "normal" && (g.Status == goals.StatusActive || g.Status == goals.StatusWaiting) {
-						writeAPIError(w, http.StatusConflict, "goal_active", "pause the Auto Agent Goal before changing type", nil)
-						return
-					}
 				}
 			}
 		}
@@ -524,9 +490,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.agents.Save(r.Context(), *rec); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
-	}
-	if typeChangedToNormal && s.maintenanceSched != nil {
-		s.maintenanceSched.Cancel(id)
 	}
 	// Save assigns the next independent runtime_revision. Reload and response
 	// handling must use the persisted value rather than the pre-save record.
@@ -701,7 +664,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("build agent runtime: %w", err)
 	}
 	s.attachNodeRuntimeDeps(built.Registry, id)
-	s.attachRiskObserver(&built.TurnOptions, client, rec, snapParsed)
 	rev := rec.RuntimeRevision
 	built.TurnOptions.RuntimeRevision = rev
 	built.TurnOptions.LLMProfileDigest = llmProfileDigest
@@ -789,32 +751,8 @@ func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 			writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 			return
 		}
-		// A loaded managed-goal session already carries its dedicated Agent
-		// runtime. Do not rebuild it for read/ack/context endpoints while a turn
-		// or HITL interaction is in progress.
-		if s.sessions != nil && s.sessions.Get(id) != nil {
-			if _, found := s.lookupGoalSession(id); found {
-				next(w, r)
-				return
-			}
-		}
 		if s.agents != nil {
 			err := s.ensureAgentRuntime(r.Context(), id)
-			// Managed Goals address their dedicated session, whose id is not an
-			// Agent id. Restore that runtime from the owning Agent snapshot rather
-			// than falling back to the Node default runtime.
-			if err != nil && err.Error() == "agent_not_found" {
-				if goal, found := s.lookupGoalSession(id); found && s.agents != nil {
-					rec, recErr := s.agents.Get(r.Context(), goal.AgentID)
-					if recErr != nil {
-						err = recErr
-					} else if rec == nil || rec.Archived {
-						err = fmt.Errorf("agent_not_found")
-					} else {
-						err = s.ensureGoalRuntime(r.Context(), *rec, id)
-					}
-				}
-			}
 			if err != nil {
 				if err.Error() == "agent_not_found" {
 					s.writeAgentNotFound(w, id)

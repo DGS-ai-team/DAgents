@@ -19,7 +19,12 @@ function formatTime(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", { hour12: false });
 }
-function stateLabel(value) { return ({ active: "执行中", running: "执行中", waiting: "等待", paused: "已暂停", disabled: "已停用", standby: "待命", expired: "状态过期" }[value] || value || "未知状态"); }
+function stateLabel(value) { return ({ working: "工作中", standby: "待命", activation_off: "自主激活关闭", needs_attention: "需处理" }[value] || "未知状态"); }
+function todoText(item) {
+  const counts = item.todo_counts && typeof item.todo_counts === "object" ? item.todo_counts : {};
+  const total = Number(counts.total ?? (Number(counts.pending || 0) + Number(counts.in_progress || 0) + Number(counts.completed || 0)));
+  return total ? `${total} 项待办` : "暂无待办";
+}
 
 async function load() {
   const current = ++requestId;
@@ -50,17 +55,17 @@ function nextPage() { if (page.value * pageSize < total.value) { page.value += 1
   <section class="auto-employees-view">
     <div class="panel-toolbar">
       <label class="field-inline"><span>Node</span><input v-model.trim="nodeFilter" placeholder="筛选 Node" /></label>
-      <label class="field-inline"><span>状态</span><select v-model="filter"><option value="">全部</option><option value="active">执行中</option><option value="waiting">等待</option><option value="paused">已暂停</option><option value="disabled">已停用</option></select></label>
+    <label class="field-inline"><span>状态</span><select v-model="filter"><option value="">全部</option><option value="working">工作中</option><option value="standby">待命</option><option value="activation_off">自主激活关闭</option><option value="needs_attention">需处理</option></select></label>
       <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">刷新</button>
     </div>
     <p v-if="error" class="state-error" role="alert">{{ error }}</p>
     <div v-else-if="loading" class="empty-state">加载摘要中…</div>
-    <div v-else-if="!items.length" class="empty-state"><strong>暂无 Auto 员工摘要</strong><span>Node 上报后，岗位状态和最近成果会显示在这里。</span></div>
+    <div v-else-if="!items.length" class="empty-state"><strong>暂无 Auto 员工摘要</strong><span>Node 上报后，状态与待办计数会显示在这里。</span></div>
     <div v-else class="auto-employees-table-wrap">
-      <table class="data-table auto-employees-table"><thead><tr><th>员工</th><th>Node</th><th>岗位</th><th>状态</th><th>最近成果</th><th>下次唤醒</th><th>用量</th><th>上报时间</th></tr></thead>
-        <tbody><tr v-for="item in items" :key="`${item.node_id}:${item.agent_id}`"><td><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }}</small></td><td>{{ item.node_id }}</td><td>{{ item.role || "—" }}</td><td><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}<small v-if="item.reason">{{ item.reason }}</small></span></td><td>{{ item.last_result || "—" }}</td><td>{{ formatTime(item.next_at) }}</td><td>{{ item.usage?.tokens ?? "—" }}</td><td>{{ formatTime(item.received_at) }}<small v-if="item.stale">已 {{ item.age_seconds }} 秒未更新</small></td></tr></tbody>
+      <table class="data-table auto-employees-table"><thead><tr><th>员工</th><th>Node</th><th>状态</th><th>下次自动检查</th><th>待办</th><th>上报时间</th></tr></thead>
+        <tbody><tr v-for="item in items" :key="`${item.node_id}:${item.agent_id}`"><td><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }}</small></td><td>{{ item.node_id }}</td><td><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}<small v-if="item.reason">{{ item.reason }}</small></span></td><td>{{ formatTime(item.next_at) }}</td><td>{{ todoText(item) }}</td><td>{{ formatTime(item.received_at) }}<small v-if="item.stale">已 {{ item.age_seconds }} 秒未更新</small></td></tr></tbody>
       </table>
-      <div class="auto-employees-cards"><article v-for="item in items" :key="`${item.node_id}:${item.agent_id}:card`" class="auto-employee-card"><div><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }} · {{ item.node_id }}</small></div><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}</span><p>{{ item.last_result || item.reason || "暂无最近成果" }}</p><small>下次唤醒：{{ formatTime(item.next_at) }} · 用量：{{ item.usage?.tokens ?? "—" }}</small></article></div>
+      <div class="auto-employees-cards"><article v-for="item in items" :key="`${item.node_id}:${item.agent_id}:card`" class="auto-employee-card"><div><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }} · {{ item.node_id }}</small></div><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}</span><p>下次自动检查：{{ formatTime(item.next_at) }}</p><small>{{ todoText(item) }} · 上报：{{ formatTime(item.received_at) }}<template v-if="item.stale"> · 已 {{ item.age_seconds }} 秒未更新</template></small></article></div>
     </div>
     <div v-if="total > pageSize" class="pagination"><button type="button" class="btn btn-ghost" :disabled="page <= 1 || loading" @click="previousPage">上一页</button><span>第 {{ page }} 页 · 共 {{ total }} 条</span><button type="button" class="btn btn-ghost" :disabled="page * pageSize >= total || loading" @click="nextPage">下一页</button></div>
   </section>

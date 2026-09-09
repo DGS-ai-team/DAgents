@@ -18,8 +18,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
-	"github.com/DGS-ai-team/DAgents/node/internal/events"
-	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -64,13 +62,8 @@ type Server struct {
 	store                *store.SQLiteStore
 	triggerStore         *triggers.Store
 	triggerSched         *triggers.Scheduler
-	maintenanceSched     *maintenanceScheduler
 	startupErr           error
-	goalStore            *goals.Store
 	autonomyStore        *autonomy.Store
-	eventStore           *events.Store
-	goalWake             goals.WakeFunc
-	goalWakeMu           sync.Mutex
 	autoConfigMu         sync.Mutex
 	registrar            *manage.Registrar
 	updateChecker        *manage.UpdateChecker
@@ -395,20 +388,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
 	startupErr := autonomyInitErr
-	var goalStore *goals.Store
-	var eventStore *events.Store
-	if opened, err := goals.OpenStore(filepath.Join(cfg.RuntimeDir(), "goals.json")); err != nil {
-		logger.Warn("goal store init failed", "error", err)
-		startupErr = err
-	} else {
-		goalStore = opened
-	}
-	if opened, err := events.OpenStore(filepath.Join(cfg.RuntimeDir(), "events.json")); err != nil {
-		logger.Warn("event store init failed", "error", err)
-		startupErr = err
-	} else {
-		eventStore = opened
-	}
 	var triggerSubmitter *session.TriggerSubmitter
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {
 		logger.Warn("trigger store init failed", "error", err, "path", cfg.TriggersStorePath())
@@ -571,9 +550,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerStore:         triggerStore,
 		triggerSched:         triggerSched,
 		startupErr:           startupErr,
-		goalStore:            goalStore,
 		autonomyStore:        autonomyStore,
-		eventStore:           eventStore,
 		registrar:            registrar,
 		updateChecker:        updateChecker,
 		packageUploader:      packageUploader,
@@ -658,141 +635,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
 	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)
-	if triggerSubmitter != nil && s.goalStore != nil {
-		s.goalWake = func(ctx context.Context, g goals.Goal, run goals.Run) (string, error) {
-			if s.goalAgentBusy(g) {
-				return "", fmt.Errorf("agent busy")
-			}
-			_ = ctx
-			sessionID := g.SessionID
-			if sessionID == "" {
-				return "", fmt.Errorf("goal has no dedicated session")
-			}
-			if existing := s.sessions.Get(sessionID); existing != nil {
-				if existing.AgentID != g.AgentID {
-					return "", fmt.Errorf("goal session belongs to a different agent")
-				}
-			} else if s.agents == nil {
-				return "", fmt.Errorf("agent store unavailable; cannot restore goal runtime")
-			} else {
-				if rec, err := s.agents.Get(ctx, g.AgentID); err != nil || rec == nil || rec.Archived {
-					return "", fmt.Errorf("goal agent unavailable after restart")
-				} else if err := s.ensureGoalRuntime(ctx, *rec, sessionID); err != nil {
-					return "", err
-				}
-			}
-			nowUTC := time.Now().UTC()
-			content := "长期目标：" + g.Objective + "\n验收条件：" + g.Acceptance
-			content += fmt.Sprintf("\n可信当前UTC：%s\n本Run generation：%d", nowUTC.Format(time.RFC3339), run.Generation)
-			content += "\ngoal_checkpoint 的 decision.summary 与 reason 必填；next_action=at/event 时 expected_progress 必填。"
-			if g.MinWakeIntervalSeconds > 0 {
-				content += fmt.Sprintf("\n最早唤醒时间：%s", nowUTC.Add(time.Duration(g.MinWakeIntervalSeconds)*time.Second).Format(time.RFC3339))
-			}
-			if g.ExpiresAt != nil {
-				content += fmt.Sprintf("\n最迟唤醒时间：%s", g.ExpiresAt.UTC().Format(time.RFC3339))
-			}
-			if g.LastCheckpoint != nil {
-				content += "\n上次进度摘要：" + g.LastCheckpoint.Summary
-			}
-			deliveryID := "goal-" + run.ID
-			if s.triggerStore == nil {
-				return "", fmt.Errorf("managed goal trigger store unavailable")
-			}
-			if err := s.triggerStore.ClaimDelivery(g.TriggerID, deliveryID, sessionID); err != nil {
-				return "", err
-			}
-			// Advance the occurrence while the durable claim is held, before any
-			// InputBox consumer can finish synchronously.
-			if _, err := s.triggerStore.MarkFired(g.TriggerID, run.StartedAt); err != nil {
-				return "", err
-			}
-			if err := triggerSubmitter.SubmitGoalTriggerMessage(sessionID, g.TriggerID, g.ID, run.ID, content, deliveryID); err != nil {
-				return "", err
-			}
-			return deliveryID, nil
-		}
-		if triggerSched != nil {
-			triggerSched.SetReconciler(func(ctx context.Context, now time.Time) error {
-				return s.reconcileAutoIntents(ctx, now)
-			})
-			triggerSched.SetManagedFire(func(ctx context.Context, def triggers.Definition, now time.Time) triggers.FireRecord {
-				s.goalWakeMu.Lock()
-				defer s.goalWakeMu.Unlock()
-				g, ok := s.goalStore.Get(def.ManagedGoalID)
-				if !ok {
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusError, Reason: "schedule", Message: "goal not found"}
-				}
-				if !s.managedGoalAuto(ctx, g) {
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "agent is not auto"}
-				}
-				if def.ManagedGeneration > 0 {
-					intent, ie := s.goalStore.GetScheduleIntent(g.ID, "goal")
-					profile, pok := s.goalStore.GetProfile(g.AgentID)
-					if ie != nil || !pok || !profile.Enabled || profile.Revision != intent.ProfileRevision || intent.Generation != def.ManagedGeneration || intent.Fingerprint != def.ManagedFingerprint || intent.State != goals.IntentProjected || def.ManagedIntentID == "" || def.ManagedIntentID != intent.ID || g.TriggerID != def.TriggerID || def.LastFiredAt != nil {
-						return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "stale or consumed intent"}
-					}
-				} else if _, err := s.goalStore.GetScheduleIntent(g.ID, "goal"); err == nil {
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "intent projection required"}
-				}
-				dueAt := g.NextWakeAt
-				if def.ManagedGeneration > 0 {
-					if intent, err := s.goalStore.GetScheduleIntent(g.ID, "goal"); err == nil && intent.DueAt != nil {
-						dueAt = intent.DueAt
-					}
-				}
-				_, eventTrigger := def.Condition["event_source_id"]
-				if !eventTrigger && dueAt != nil && now.Before(*dueAt) {
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "next wake not due"}
-				}
-				if s.goalAgentBusy(g) {
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "agent busy"}
-				}
-				if s.sessions != nil {
-					if pending, active, _, e := s.sessions.RuntimeInfo(g.SessionID); e == nil && (active || pending > 0) {
-						return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "goal session busy"}
-					}
-				}
-				run, err := s.goalStore.StartRun(g.ID, "schedule", now)
-				if err != nil {
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: err.Error()}
-				}
-				d, err := s.goalWake(ctx, g, run)
-				if err != nil {
-					run.Status = "failed"
-					run.Reason = err.Error()
-					_, _ = s.goalStore.FinishRun(g.ID, run, now)
-					_, _ = s.goalStore.SetStatus(g.ID, goals.StatusPaused, now)
-					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusError, Reason: "schedule", Message: err.Error()}
-				}
-				return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusQueued, Reason: "schedule", DeliveryID: d}
-			})
-			triggerSched.SetEventPoller(func(ctx context.Context, def triggers.Definition, now time.Time) error {
-				if s.eventStore == nil {
-					return fmt.Errorf("event store unavailable")
-				}
-				source, _ := def.Condition["event_source_id"].(string)
-				reg, ok := s.eventStore.GetRegistration(source)
-				if !ok || !reg.Enabled || reg.OwnerAgentID != def.OwnerAgentID {
-					return fmt.Errorf("event source owner mismatch")
-				}
-				probe := events.New(s.eventStore, events.DeliveryFunc(func(deliveryCtx context.Context, event events.Event) error {
-					if event.SourceID != source || event.IntentID != def.ManagedIntentID || event.Generation != def.ManagedGeneration {
-						return fmt.Errorf("stale event intent")
-					}
-					// The probe applies the bounded equals-only filter before
-					// allocating pending state; delivery only fences identity.
-					record := triggerSched.FireManaged(deliveryCtx, def, now)
-					if record.Status != triggers.FireStatusQueued {
-						return fmt.Errorf("managed event fire: %s", record.Message)
-					}
-					return nil
-				}))
-				filter, _ := def.Condition["event_filter"].(map[string]any)
-				_, err := probe.Poll(ctx, events.Config{SourceID: reg.SourceID, OwnerAgentID: reg.OwnerAgentID, Revision: reg.Revision, IntentID: def.ManagedIntentID, Generation: def.ManagedGeneration, EventFilter: filter, Root: reg.Root, MaxFiles: reg.MaxFiles, MaxBytes: reg.MaxBytes, HashContent: reg.HashContent, Timeout: reg.Timeout}, now)
-				return err
-			})
-		}
-	}
 	if triggerSubmitter != nil {
 		triggerSubmitter.EnsureAgentRuntime = func(agentID string) error {
 			return s.ensureAgentRuntime(context.Background(), agentID)
@@ -829,34 +671,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 		if s.startupErr == nil {
-			if s.goalStore != nil {
-				if _, err := s.goalStore.MigrateAutoProfiles(validAuto, time.Now().UTC()); err != nil {
-					s.startupErr = err
-				}
-			}
-		}
-		if s.startupErr == nil && s.goalStore != nil && s.triggerStore != nil {
-			projector := &AutoIntentProjector{Goals: s.goalStore, Triggers: s.triggerStore, SourceRegistry: s.eventStore}
-			for _, intent := range s.goalStore.ListScheduleIntents("") {
-				if _, err := projector.Project(intent.GoalID, intent.Purpose); err != nil {
-					// A paused/disabled profile or unsupported event source is an
-					// isolated intent; malformed persistence remains fail-closed.
-					if strings.Contains(err.Error(), "intent_projection_fenced") || strings.Contains(err.Error(), "event_projection_unsupported") || strings.Contains(err.Error(), "event_source_not_registered") {
-						continue
-					}
-					s.startupErr = fmt.Errorf("restore schedule intent %s: %w", intent.ID, err)
-					break
-				}
-			}
-		}
-		if s.startupErr == nil {
-			goalRefs := map[string]triggers.GoalRef{}
-			if s.goalStore != nil {
-				for _, g := range s.goalStore.List() {
-					goalRefs[g.ID] = triggers.GoalRef{AgentID: g.AgentID, TriggerID: g.TriggerID, Managed: g.Managed}
-				}
-			}
-			if err := s.triggerStore.ValidateOwnersWithGoals(valid, goalRefs); err != nil {
+			if err := s.triggerStore.ValidateOwnersWithGoals(valid, nil); err != nil {
 				logger.Error("trigger owner validation failed", "error", err)
 				triggerSched = nil
 				s.triggerSched = nil
@@ -869,40 +684,5 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			s.triggerSched = nil
 		}
 	}
-	if s.goalStore != nil && s.agents != nil && s.store != nil {
-		s.maintenanceSched = newMaintenanceScheduler(s)
-		s.maintenanceSched.Start()
-	}
 	return s
-}
-
-func (s *Server) goalAgentBusy(g goals.Goal) bool {
-	if s.sessions == nil {
-		return false
-	}
-	// A just-started Goal may not have reached its session consumer yet. Use
-	// the durable Run record as part of the gate so two Goals cannot both pass
-	// the check-then-enqueue window merely because RuntimeInfo is still idle.
-	if s.goalStore != nil {
-		for _, other := range s.goalStore.List() {
-			if other.ID == g.ID || other.AgentID != g.AgentID {
-				continue
-			}
-			for _, run := range s.goalStore.Runs(other.ID) {
-				if run.FinishedAt == nil && (run.Status == "running" || run.Status == "waiting") {
-					return true
-				}
-			}
-		}
-	}
-	for _, sess := range s.sessions.ListActive() {
-		if sess == nil || sess.ID == g.SessionID || sess.AgentID != g.AgentID {
-			continue
-		}
-		q, a, _, err := s.sessions.RuntimeInfo(sess.ID)
-		if err == nil && (a || q > 0) {
-			return true
-		}
-	}
-	return false
 }

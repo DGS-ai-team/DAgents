@@ -6,7 +6,7 @@
 
 Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注入 system prompt；Todo 承载待办；现有 trigger 驱动激活；可选每日 dreaming 整理经验和手册。复用原有审批。
 
-删除旧 Auto 的岗位边界独立字段、计划模式、Goal/完成条件、业务 Cycle、独立自主会话、运行次数上限、累计和单轮 Auto token 预算、调度意图投影、独立事件源和探针体系、Auto 风险影子评估及其专属授权配置、旧维护父子 receipt/未知费用恢复结算产品链路。不仅隐藏 UI，必须撤除路由、工具注册、运行时调度和对应测试依赖。其他产品共用的通用 goals/triggers、LLM 用量统计、原有审批和会话持久化不得误删。
+删除旧 Auto 的岗位边界独立字段、计划模式、Goal/完成条件、业务 Cycle、独立自主会话、运行次数上限、累计和单轮 Auto token 预算、调度意图投影、独立事件源和探针体系、Auto 风险影子评估及其专属授权配置、旧维护父子 receipt/未知费用恢复结算产品链路。不仅隐藏 UI，必须撤除路由、工具注册、运行时调度和对应测试依赖。其他产品共用的 trigger、LLM 用量统计、原有审批和会话持久化不得误删；旧 Goals API 已确认属于旧 Auto，随之退役。
 
 不删除用户历史记录或手册文件；不为其提供旧 Auto 消息语义适配，也不自动迁移旧 Goal 记录为 Todo。旧后台调度入口必须退出生产接线，不能残留唤醒。
 
@@ -132,3 +132,13 @@ Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注
 智能体设置切换为新配置面板；保留自定义激活频率、只读经验、草稿与已保存版本分离、Agent 切换隔离。503 部分保存按真实 `error.details.saved_profile` 更新已保存版本，保留编辑草稿并提供只同步 trigger 的重试。dreaming 尚未执行，界面暂只读并明确开发中，不覆盖已保存值。
 
 主聊天嵌入默认折叠 Todo；移除旧 Goal 专用会话分流、Goals/AutoWork 路由与对应页面，以及旧事件源/维护设置挂载。侧栏仍保留 Auto 总览入口；总览使用新状态、next_at、todo_counts、todo_summary，并保留搜索、筛选与分页。主 Agent 全前端测试通过（69 文件、394 项），Luna 构建通过。此处是代码入口与测试验收，浏览器仍连接旧隔离 Node 18766，尚未完成新版运行环境的真实交互或视觉验收。
+
+### 旧后端退役与 Node / Manage 总览切换
+
+撤除旧 Goal/Cycle/intent/event-source/maintenance 的 HTTP 入口、工具注册与启动调度，不再打开旧 goals/events 存储，也不为旧消息的专用 session 参数提供兼容。保留通用聊天、用户 trigger、审批及手册文件。OpenAPI 同步删除退役接口及专属模型，47 个内部引用可解析。仍有未接线的旧底层类型及前端组件，后续按依赖收尾，不能据此宣称全部旧源码已清空。
+
+Node 与 Manage 共用默认激活状态投影，使用 working / standby / activation_off / needs_attention；无效、禁用或待恢复默认 trigger 明确呈现异常，不伪造下次执行时间。Manage 只接收状态、频率与 Todo 数量，不上报职责、Todo 正文、经验或工作目录；控制台保留上报时间与过期标记。
+
+主 Agent 验证：API / Manage reporter / Agent runtime 全包 race 通过（26.592 / 6.793 / 3.236 秒）；工具包普通测试通过（13.530 秒）。工具包 race 在 Windows 第三方 screenshot 的真实显示器枚举发生 checkptr 崩溃，不能宣称其完整 race 通过。Python Manage 8 项通过，Manage Console lint 通过；Node 前端本批此前 69 文件、394 项通过。
+
+剩余开发：trigger 条件脚本、默认 delivery 重启恢复体验、每日 dreaming 的经验写入与上下文边界、残余旧代码清理、最新运行环境下真实 LLM 与 Node / Manage 视觉验收。dreaming 当前仍是禁用的开发中 UI，整个目标保持进行中。

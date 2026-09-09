@@ -33,14 +33,14 @@ class AutoEmployeeManageTests(unittest.TestCase):
 
     @staticmethod
     def payload(agent="auto-1", as_of="2026-09-08T01:00:00Z"):
-        return {"agent_id": agent, "display_name": "员工", "role": "整理资料", "state": "waiting", "reason": "等待下一次唤醒", "last_result": "已完成摘要", "next_at": "2026-09-09T02:00:00Z", "usage": {"tokens": 12}, "as_of": as_of}
+        return {"agent_id": agent, "display_name": "员工", "role": "Auto employee", "wake_interval_seconds": 60, "todo_counts": {"pending": 2}, "state": "standby", "reason": "", "next_at": "2026-09-09T02:00:00Z", "profile_revision": 1, "runtime_revision": 1, "as_of": as_of}
 
     def test_node_can_only_publish_own_node_and_admin_can_filter(self):
         response = self.client.put("/v1/registry/nodes/node-a/auto-summary", json=self.payload(), headers=self.headers("ta", "node-a"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.put("/v1/registry/nodes/node-b/auto-summary", json=self.payload("auto-2"), headers=self.headers("ta", "node-a")).status_code, 403)
         self.assertEqual(self.client.get("/v1/auto/overview", headers=self.headers("member", "member")).status_code, 403)
-        listing = self.client.get("/v1/auto/overview?node_id=node-a&state=waiting", headers=self.headers("admin", "admin"))
+        listing = self.client.get("/v1/auto/overview?node_id=node-a&state=standby", headers=self.headers("admin", "admin"))
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(listing.json()["total"], 1)
         self.assertEqual(listing.json()["items"][0]["node_id"], "node-a")
@@ -54,7 +54,7 @@ class AutoEmployeeManageTests(unittest.TestCase):
             store.put("node-a", older)
         self.assertEqual(store.put("node-a", newer).as_of, newer.as_of)
         with self.assertRaises(AutoSummaryConflict):
-            store.put("node-a", newer.model_copy(update={"last_result": "different"}))
+            store.put("node-a", newer.model_copy(update={"reason": "different"}))
         reopened = AutoSummaryStore(SQLiteDatabase(self.db))
         self.assertEqual(reopened.get("node-a", "auto-1").as_of, newer.as_of)
 
@@ -65,7 +65,7 @@ class AutoEmployeeManageTests(unittest.TestCase):
         second = self.client.put(path, json=self.payload(), headers=headers)
         self.assertEqual(first.status_code, second.status_code, second.text)
         self.assertEqual(first.json()["received_at"], second.json()["received_at"])
-        self.assertEqual(self.client.put(path, json={**self.payload(), "last_result": "different"}, headers=headers).status_code, 409)
+        self.assertEqual(self.client.put(path, json={**self.payload(), "reason": "different"}, headers=headers).status_code, 409)
         self.assertEqual(self.client.put(path, json=self.payload(as_of="2026-09-07T01:00:00Z"), headers=headers).status_code, 409)
 
     def test_timestamps_and_usage_are_bounded(self):

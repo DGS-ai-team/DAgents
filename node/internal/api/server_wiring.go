@@ -2,15 +2,11 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
-	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -27,8 +23,6 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 		return
 	}
 	reg.SetAgentID(targetAgentID)
-	reg.SetEventSourceStore(s.eventStore)
-	reg.SetAutonomyCallbacks(s.autonomyToolGet, s.autonomyToolUpdate)
 	// Todo tools are available only on a real Auto main runtime. Goal and
 	// ordinary runtimes deliberately receive no independent autonomy store.
 	if s.autonomyStore != nil && s.agents != nil {
@@ -52,33 +46,6 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 		reg.SetTerminalConfigResolver(s.linuxChannels)
 	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
-	if s.goalStore != nil {
-		reg.SetGoalCheckpoint(func(_ context.Context, goalID, runID string, cp tools.GoalCheckpoint) error {
-			now := time.Now().UTC()
-			var decision *goals.FinalDecision
-			if cp.Decision != nil {
-				raw, _ := json.Marshal(cp.Decision)
-				var d goals.FinalDecision
-				if err := json.Unmarshal(raw, &d); err != nil {
-					return fmt.Errorf("invalid goal decision: %w", err)
-				} else {
-					if d.NextWakeAt != nil && d.NextWakeAfterSeconds != nil {
-						return fmt.Errorf("next_wake_at and next_wake_after_seconds are mutually exclusive")
-					}
-					if d.NextWakeAfterSeconds != nil {
-						if *d.NextWakeAfterSeconds <= 0 || *d.NextWakeAfterSeconds > 2678400 {
-							return fmt.Errorf("invalid next_wake_after_seconds")
-						}
-						t := now.Add(time.Duration(*d.NextWakeAfterSeconds) * time.Second)
-						d.NextWakeAt, d.NextWakeAfterSeconds = &t, nil
-					}
-					decision = &d
-				}
-			}
-			_, err := s.goalStore.Checkpoint(goalID, runID, goals.Checkpoint{Summary: cp.Summary, Completed: cp.Completed, NextSteps: cp.NextSteps, Evidence: cp.Evidence, Artifacts: cp.Artifacts, ExternalCondition: cp.ExternalCondition, NextWakeAt: cp.NextWakeAt, Done: cp.Done, Decision: decision}, now)
-			return err
-		})
-	}
 	attachWeComRuntime(reg, s.cfg)
 	attachBrowserTaskNotifier(reg, s.sessions, s.logger)
 	attachProcessEventSink(reg, s.stream, s.store, s.logger)

@@ -30,9 +30,13 @@ func TestStartupValidationFailureBlocksHandlerAndListen(t *testing.T) {
 }
 
 func TestFutureSchemaStartupRejected(t *testing.T) {
-	cases := []struct{ name, file, body string }{
-		{"triggers", "triggers.json", `{"schema_version":99,"triggers":[]}`},
-		{"goals", "goals.json", `{"schema_version":99,"goals":{},"runs":{}}`},
+	cases := []struct {
+		name, file, body string
+		legacyIgnored    bool
+	}{
+		{"triggers", "triggers.json", `{"schema_version":99,"triggers":[]}`, false},
+		{"goals", "goals.json", `{"schema_version":99,"goals":{},"runs":{}}`, true},
+		{"events", "events.json", `{"schema_version":99,"registrations":[]}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,11 +53,20 @@ func TestFutureSchemaStartupRejected(t *testing.T) {
 			}
 			s := NewServer(cfg, nil)
 			t.Cleanup(s.Close)
+			if tc.legacyIgnored {
+				if s.startupErr != nil {
+					t.Fatalf("legacy store blocked startup: %v", s.startupErr)
+				}
+				if s.triggerSched == nil {
+					t.Fatal("scheduler did not start when legacy stores were ignored")
+				}
+				return
+			}
 			if s.startupErr == nil {
-				t.Fatal("future schema did not set startupErr")
+				t.Fatal("future trigger schema did not set startupErr")
 			}
 			if s.triggerSched != nil {
-				t.Fatal("scheduler started after future schema rejection")
+				t.Fatal("scheduler started after future trigger schema rejection")
 			}
 			r := httptest.NewRecorder()
 			s.Handler().ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/v1/triggers/test/fire", nil))

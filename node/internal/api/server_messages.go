@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
@@ -52,40 +51,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if requestType == "" {
 		requestType = "message"
 	}
-	// Goal sessions already carry an isolated runtime. Preserve that runtime
-	// (especially for HITL resume) instead of trying to load it as an Agent ID.
-	// If a dedicated runtime was evicted, only an active Goal may be rebuilt.
-	if goal, isGoal := s.lookupGoalSession(sessionID); isGoal {
-		if requestType != "resume" {
-			writeAPIError(w, http.StatusConflict, "goal_managed_session", "普通消息请从主聊天发送；Goal 会话仅用于审批", nil)
-			return
-		}
-		if s.sessions.Get(sessionID) == nil {
-			if goal.Status != goals.StatusActive {
-				writeAPIError(w, http.StatusConflict, "goal_not_runnable", "goal is not runnable", nil)
-				return
-			}
-			if s.agents == nil {
-				writeAPIError(w, http.StatusServiceUnavailable, "agents_unavailable", "agent store unavailable", nil)
-				return
-			}
-			rec, getErr := s.agents.Get(r.Context(), goal.AgentID)
-			if getErr != nil || rec == nil || rec.Archived {
-				writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", nil)
-				return
-			}
-			if err := s.ensureGoalRuntime(r.Context(), *rec, sessionID); err != nil {
-				writeAPIError(w, http.StatusInternalServerError, "goal_runtime_restore_failed", err.Error(), nil)
-				return
-			}
-		} else if goal.Status != goals.StatusActive {
-			_, active, _, _ := s.sessions.RuntimeInfo(sessionID)
-			if requestType != "resume" || !active {
-				writeAPIError(w, http.StatusConflict, "goal_not_runnable", "goal is not runnable", nil)
-				return
-			}
-		}
-	} else if s.agents != nil {
+	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})

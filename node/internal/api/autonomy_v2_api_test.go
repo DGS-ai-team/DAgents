@@ -21,12 +21,9 @@ import (
 func autonomyV2TestServer(t *testing.T) (*Server, *store.AgentStore) {
 	t.Helper()
 	cfg := testConfig(t)
-	s := NewServer(cfg, nil, WithLLM(&goalWakeLLM{}), WithSkipStore())
+	s := NewServer(cfg, nil, WithLLM(&autonomyV2PromptLLM{}), WithSkipStore())
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
-	}
-	if s.maintenanceSched != nil {
-		s.maintenanceSched.Stop()
 	}
 	as, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -42,9 +39,6 @@ func autonomyV2TestServer(t *testing.T) (*Server, *store.AgentStore) {
 	t.Cleanup(func() {
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
-		}
-		if s.maintenanceSched != nil {
-			s.maintenanceSched.Stop()
 		}
 		if s.sessions != nil {
 			s.sessions.Stop()
@@ -159,7 +153,7 @@ func TestAutonomyV2TodoToolsWiredOnlyForAutoRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	autoReg.SetAutonomyRuntime(true, nil, nil)
+	autoReg.SetAutonomyEnabled(true)
 	s.attachNodeRuntimeDeps(autoReg, "auto-v2")
 	defs := autoReg.Definitions()
 	for _, name := range []string{"todo_list", "todo_create", "todo_update", "todo_delete"} {
@@ -182,7 +176,7 @@ func TestAutonomyV2TodoToolsWiredOnlyForAutoRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalReg.SetAutonomyRuntime(true, nil, nil)
+	normalReg.SetAutonomyEnabled(true)
 	s.attachNodeRuntimeDeps(normalReg, "normal-v2")
 	for _, d := range normalReg.Definitions() {
 		if strings.HasPrefix(d.Function.Name, "todo_") {
@@ -191,6 +185,29 @@ func TestAutonomyV2TodoToolsWiredOnlyForAutoRuntime(t *testing.T) {
 	}
 	if _, err := normalReg.Execute(context.Background(), "todo_list", `{"call_purpose":"test"}`); err == nil {
 		t.Fatal("normal runtime executed todo")
+	}
+}
+
+func TestLegacyAutoRoutesAndToolsAreRetired(t *testing.T) {
+	s, _ := autonomyV2TestServer(t)
+	for _, path := range []string{
+		"/v1/agents/auto-v2/autonomy",
+		"/v1/agents/auto-v2/autonomy/cycles",
+		"/v1/agents/auto-v2/autonomy/actions",
+		"/v1/agents/auto-v2/maintenance/run",
+		"/v1/agents/auto-v2/maintenance/recovery",
+		"/v1/goals",
+		"/v1/event-sources",
+	} {
+		w := autonomyV2Request(s, http.MethodGet, path, "")
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("legacy route %s returned %d", path, w.Code)
+		}
+	}
+	for _, d := range s.tools.Definitions() {
+		if d.Function.Name == "autonomy_get" || d.Function.Name == "autonomy_update" || d.Function.Name == "event_source_list" {
+			t.Fatalf("retired tool still exposed: %s", d.Function.Name)
+		}
 	}
 }
 
@@ -237,9 +254,6 @@ func TestAutonomyV2SavedResponsibilityReachesMainSession(t *testing.T) {
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
 	}
-	if s.maintenanceSched != nil {
-		s.maintenanceSched.Stop()
-	}
 	as, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -255,9 +269,6 @@ func TestAutonomyV2SavedResponsibilityReachesMainSession(t *testing.T) {
 	t.Cleanup(func() {
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
-		}
-		if s.maintenanceSched != nil {
-			s.maintenanceSched.Stop()
 		}
 		s.sessions.Stop()
 		_ = as.Close()
@@ -326,9 +337,6 @@ func TestAutonomyV2TodoToolRunsThroughMainSession(t *testing.T) {
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
 	}
-	if s.maintenanceSched != nil {
-		s.maintenanceSched.Stop()
-	}
 	as, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -344,9 +352,6 @@ func TestAutonomyV2TodoToolRunsThroughMainSession(t *testing.T) {
 	t.Cleanup(func() {
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
-		}
-		if s.maintenanceSched != nil {
-			s.maintenanceSched.Stop()
 		}
 		s.sessions.Stop()
 		_ = as.Close()

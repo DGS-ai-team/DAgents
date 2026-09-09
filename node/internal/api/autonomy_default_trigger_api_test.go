@@ -219,12 +219,9 @@ func TestNewServerStartupRebuildsOnlyAutoDefaults(t *testing.T) {
 	if _, err := triggerStore.CreateTrigger(ordinary); err != nil {
 		t.Fatal(err)
 	}
-	s := NewServer(cfg, nil, WithLLM(&goalWakeLLM{}))
+	s := NewServer(cfg, nil, WithLLM(&autonomyV2PromptLLM{}))
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
-	}
-	if s.maintenanceSched != nil {
-		s.maintenanceSched.Stop()
 	}
 	if s.sessions != nil {
 		s.sessions.Stop()
@@ -282,12 +279,9 @@ func TestNewServerStartupFailsClosedForPendingAutoDefault(t *testing.T) {
 	if err := triggerStore.ReplaceTrigger(d); err != nil {
 		t.Fatal(err)
 	}
-	s := NewServer(cfg, nil, WithLLM(&goalWakeLLM{}))
+	s := NewServer(cfg, nil, WithLLM(&autonomyV2PromptLLM{}))
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
-	}
-	if s.maintenanceSched != nil {
-		s.maintenanceSched.Stop()
 	}
 	if s.sessions != nil {
 		s.sessions.Stop()
