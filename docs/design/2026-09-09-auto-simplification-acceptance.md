@@ -313,3 +313,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - root只读查询隔离sessions.db的turn_events/tool.result.recorded，发现delivery 21034fde（最初exit 1批准）与4eb7a9e6（标记脚本批准）的result_content均为 `ERROR: ERROR: tool "bash_run" is not enabled`。脚本未真正执行。
 - 因此此前“条件false实际运行通过”结论撤回：实际仅证明审批后结束，没有证明退出码false路径。拒绝后的无文件证据也不能单独成立，须在启用工具后以成功对照重测。
 - 已交Luna修复：执行错误必须区别于条件false，拒绝必须区别于false，保持工具开关和既有审批约束；添加禁用bash_run的生产路径回归。该问题未闭环，整体目标保持进行中。
+
+### 2026-09-10 启用工具后的条件脚本有效对照
+
+- 仅通过正式PATCH给隔离Agent启用bash工具组，未改变审批策略。相同标记脚本批准delivery cc227864-1ea4-4bd7-8141-edf9727de816后确实创建文件；SQLite工具结果为[BASH_RESULT]、status=FAILED、exit_code=1、stderr_bytes=0，首次获得实际非零退出码证据。
+- 将该标记移为同目录approved-control-evidence.txt保留正对照，再执行相同trigger并拒绝delivery 5b2e9a6e-589f-48c1-88df-fdf08e1b8172；结束后原标记未重建，正对照存在，transcript空、active/queue/pending_hitl均空。拒绝不执行脚本证据成立。
+- 拒绝/执行错误历史分类修复仍在开发，尚未部署或宣告通过；隔离实例保留供后续复验。
