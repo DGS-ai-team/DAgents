@@ -162,3 +162,9 @@ Auto 设置独立读取默认 trigger，按真实 recovery_required 显示新页
 ### 外置手册搜索路径
 
 修复 handbook 根目录在工作区外时 glob/grep 输出工作区相对路径的问题。结果统一使用可回读的 handbook/...，链接根目录使用 canonical root 计算路径，未绑定手册时保持普通工作区路径语义。主 Agent Handbook/Glob/Grep 专项0.398秒通过，修复提交为 ffc7ab44。相对配置目录仍锚定 Agent state root，绝对配置目录保持绝对路径。
+
+### 条件失败回调与旧工具退役
+
+生产 condition completion 回调提取为共用函数，真实失败 submitter 测试验证错误返回、原 pending/approved 保留、禁用与恢复标志持久化，并在重开 scheduler 后执行到期检查证明未再次提交。主 Agent 此测试与原 HTTP 条件审批专项 race4.218秒通过。
+
+发现并删除此前残留的 goal_checkpoint 模型定义、handler、专用 enable 方法和实现，负向契约验证模型不可见、Execute unknown tool、allowlist拒绝。主 Agent Tools 全包普通测试18.504秒通过，提交f8679a68。Dreaming 审批恢复仍在生产接线，不因这些测试通过而计为整体完成。
