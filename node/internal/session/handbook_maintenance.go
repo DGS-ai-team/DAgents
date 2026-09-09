@@ -50,12 +50,22 @@ func (m *Manager) RunHandbookMaintenance(ctx context.Context, sessionID, prompt 
 	r.turnBudget = budget
 	r.lifecycleMu.Unlock()
 	defer func() { r.lifecycleMu.Lock(); r.turnBudget = previousBudget; r.lifecycleMu.Unlock() }()
-	if err := r.lifecycleBeginInputTurn(turn.TurnSourceSideEffect); err != nil {
-		return HandbookMaintenanceResult{Unknown: true}, err
+	user := llm.UserMessage(prompt, llm.UserNameHuman)
+	// lifecycleBeginInputTurn persists the pending input as the durable turn
+	// start. Handbook turns bypass the normal input queue, so publish the same
+	// pending message explicitly before opening the lifecycle.
+	r.mu.Lock()
+	r.pendingInputMessage = &user
+	r.mu.Unlock()
+	beginErr := r.lifecycleBeginInputTurn(turn.TurnSourceSideEffect)
+	r.mu.Lock()
+	r.pendingInputMessage = nil
+	r.mu.Unlock()
+	if beginErr != nil {
+		return HandbookMaintenanceResult{Unknown: true}, beginErr
 	}
 	historyStart := r.lifecycleHistoryLength()
 	maintCtx := tools.WithHandbookMaintenance(ctx)
-	user := llm.UserMessage(prompt, llm.UserNameHuman)
 	outcome, history := r.runTurnStepWithSideEffects(maintCtx, false, func(stepCtx context.Context, h *[]llm.Message) turn.StepOutcome {
 		return r.orch.RunHumanMessageTurn(stepCtx, r.session.ID, h, user)
 	})
