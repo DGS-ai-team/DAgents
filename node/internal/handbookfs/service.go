@@ -21,23 +21,49 @@ import (
 
 var ErrConflict = errors.New("handbook file changed since receipt")
 
+// Provenance identifies the maintenance operation that produced a handbook
+// history entry. It is optional so existing/manual writes remain compatible.
+type Provenance struct {
+	MaintenanceReceiptID string `json:"maintenance_receipt_id,omitempty"`
+	SessionID            string `json:"session_id,omitempty"`
+	TurnID               string `json:"turn_id,omitempty"`
+}
+
+type provenanceContextKey struct{}
+
+// WithProvenance attaches a value copy of p to filesystem operations.
+func WithProvenance(ctx context.Context, p Provenance) context.Context {
+	return context.WithValue(ctx, provenanceContextKey{}, p)
+}
+
+// ProvenanceFromContext returns the value copy attached to ctx.
+func ProvenanceFromContext(ctx context.Context) (Provenance, bool) {
+	if ctx == nil {
+		return Provenance{}, false
+	}
+	p, ok := ctx.Value(provenanceContextKey{}).(Provenance)
+	return p, ok
+}
+
 type Entry struct {
-	Revision     int64     `json:"revision"`
-	Path         string    `json:"path"`
-	BeforeDigest string    `json:"before_digest,omitempty"`
-	AfterDigest  string    `json:"after_digest"`
-	BeforeExists bool      `json:"before_exists"`
-	AfterExists  bool      `json:"after_exists"`
-	CreatedAt    time.Time `json:"created_at"`
+	Revision     int64       `json:"revision"`
+	Path         string      `json:"path"`
+	BeforeDigest string      `json:"before_digest,omitempty"`
+	AfterDigest  string      `json:"after_digest"`
+	BeforeExists bool        `json:"before_exists"`
+	AfterExists  bool        `json:"after_exists"`
+	CreatedAt    time.Time   `json:"created_at"`
+	Provenance   *Provenance `json:"provenance,omitempty"`
 }
 
 type pendingTxn struct {
-	Revision     int64  `json:"revision"`
-	Path         string `json:"path"`
-	Before       []byte `json:"before"`
-	BeforeExists bool   `json:"before_exists"`
-	AfterDigest  string `json:"after_digest"`
-	AfterExists  bool   `json:"after_exists"`
+	Revision     int64       `json:"revision"`
+	Path         string      `json:"path"`
+	Before       []byte      `json:"before"`
+	BeforeExists bool        `json:"before_exists"`
+	AfterDigest  string      `json:"after_digest"`
+	AfterExists  bool        `json:"after_exists"`
+	Provenance   *Provenance `json:"provenance,omitempty"`
 }
 
 type Service struct {
@@ -134,11 +160,15 @@ func (s *Service) Write(ctx context.Context, path, expectedDigest string, after 
 	if err != nil {
 		return Entry{}, err
 	}
+	prov, hasProv := ProvenanceFromContext(ctx)
+	if hasProv {
+		e.Provenance = provenancePtr(prov)
+	}
 	tmp := path + fmt.Sprintf(".handbook-tmp-%d", time.Now().UnixNano())
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return Entry{}, err
 	}
-	if err := s.writePending(pendingTxn{Revision: e.Revision, Path: path, Before: current, BeforeExists: current != nil, AfterDigest: Digest(after), AfterExists: true}); err != nil {
+	if err := s.writePending(pendingTxn{Revision: e.Revision, Path: path, Before: current, BeforeExists: current != nil, AfterDigest: Digest(after), AfterExists: true, Provenance: cloneProvenance(e.Provenance)}); err != nil {
 		return Entry{}, err
 	}
 	if err := os.WriteFile(tmp, after, 0644); err != nil {
@@ -244,7 +274,10 @@ func (s *Service) Restore(ctx context.Context, path, expectedDigest string, revi
 	if err != nil {
 		return Entry{}, err
 	}
-	if err := s.writePending(pendingTxn{Revision: e.Revision, Path: path, Before: old, BeforeExists: currentExists, AfterDigest: Digest(after), AfterExists: after != nil}); err != nil {
+	if prov, ok := ProvenanceFromContext(ctx); ok {
+		e.Provenance = provenancePtr(prov)
+	}
+	if err := s.writePending(pendingTxn{Revision: e.Revision, Path: path, Before: old, BeforeExists: currentExists, AfterDigest: Digest(after), AfterExists: after != nil, Provenance: cloneProvenance(e.Provenance)}); err != nil {
 		return Entry{}, err
 	}
 	if found.BeforeExists {
@@ -296,6 +329,17 @@ func (s *Service) prepareEntryLocked(path string, before, after []byte, entries 
 		return Entry{}, err
 	}
 	return e, nil
+}
+
+func provenancePtr(p Provenance) *Provenance {
+	return &Provenance{MaintenanceReceiptID: p.MaintenanceReceiptID, SessionID: p.SessionID, TurnID: p.TurnID}
+}
+
+func cloneProvenance(p *Provenance) *Provenance {
+	if p == nil {
+		return nil
+	}
+	return provenancePtr(*p)
 }
 
 func (s *Service) relative(path string) (string, error) {
@@ -418,6 +462,9 @@ func (s *Service) recoverPendingLocked() error {
 	}
 	for _, e := range entries {
 		if e.Revision == p.Revision && e.Path == pendingRel && e.AfterDigest == p.AfterDigest && e.AfterExists == p.AfterExists {
+			if !sameProvenance(e.Provenance, p.Provenance) {
+				return fmt.Errorf("pending handbook write provenance conflict")
+			}
 			return os.Remove(s.pendingPath())
 		}
 	}
@@ -457,4 +504,11 @@ func (s *Service) recoverPendingLocked() error {
 		return fmt.Errorf("recover pending handbook write: %w", err)
 	}
 	return os.Remove(s.pendingPath())
+}
+
+func sameProvenance(a, b *Provenance) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }

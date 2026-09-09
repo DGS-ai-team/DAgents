@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -86,6 +87,11 @@ func (m *Manager) RunHandbookMaintenanceWithBinding(ctx context.Context, session
 				bindErr = fmt.Errorf("%w; lifecycle cancel: %v", bindErr, cancelErr)
 			}
 			return HandbookMaintenanceResult{UsageKnown: true}, bindErr
+		}
+		if provenance, ok := handbookfs.ProvenanceFromContext(ctx); ok {
+			provenance.SessionID = r.session.ID
+			provenance.TurnID = turnID
+			ctx = handbookfs.WithProvenance(ctx, provenance)
 		}
 	}
 	historyStart := r.lifecycleHistoryLength()

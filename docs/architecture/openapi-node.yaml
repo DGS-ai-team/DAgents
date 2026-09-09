@@ -118,7 +118,7 @@ paths:
           schema: {type: string}
       responses:
         "200":
-          description: history 列出 revision、path、before_digest、after_digest、before_exists、after_exists 和 created_at；revision 表示一次修改事件
+          description: history 列出 revision、path、before_digest、after_digest、before_exists、after_exists 和 created_at；revision 表示一次修改事件。维护产生的记录还包含可选 provenance（maintenance_receipt_id、session_id、turn_id），由运行时写入；普通或旧记录可省略，不按时间推测归属。
         "400": {description: 路径无效}
         "404": {description: Agent 不存在}
         "503": {description: 历史暂不可用或需要恢复未完成写入}

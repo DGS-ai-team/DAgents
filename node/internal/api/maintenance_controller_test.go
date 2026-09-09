@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -426,6 +427,35 @@ func TestMaintenanceHTTPWritesHandbookAndKeepsAudit(t *testing.T) {
 	if err != nil || string(raw) != "evidence" {
 		t.Fatalf("handbook=%q err=%v", raw, err)
 	}
+	var child goals.MaintenanceReceipt
+	var childID string
+	foundChild := false
+	for _, receiptEntry := range srv.goalStore.ListMaintenanceReceiptEntries(id) {
+		if receiptEntry.Receipt.ParentReceiptID != "" {
+			child, childID, foundChild = receiptEntry.Receipt, receiptEntry.ReceiptID, true
+			break
+		}
+	}
+	if !foundChild {
+		t.Fatal("handbook child receipt missing")
+	}
+	history, err := handbookfs.New(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := history.History(context.Background(), filepath.Join(h, "maintenance.md"))
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("handbook history missing: entries=%d err=%v", len(entries), err)
+	}
+	var matched bool
+	for _, entry := range entries {
+		if entry.Provenance != nil && entry.Provenance.MaintenanceReceiptID == childID && entry.Provenance.SessionID == child.SessionID && entry.Provenance.TurnID == child.TurnID {
+			matched = true
+		}
+	}
+	if !matched {
+		t.Fatalf("handbook history provenance mismatch: child=%+v entries=%+v", child, entries)
+	}
 	u, _ := srv.goalStore.GetUsage(id)
 	if u.MaintenanceTokens == 0 {
 		t.Fatalf("usage=%+v", u)
@@ -438,13 +468,6 @@ func TestMaintenanceHTTPWritesHandbookAndKeepsAudit(t *testing.T) {
 	}
 	if !foundEvidence {
 		t.Fatalf("handbook prompt omitted business evidence: %+v", client.prompts)
-	}
-	var child goals.MaintenanceReceipt
-	for _, candidate := range srv.goalStore.ListMaintenanceReceipts(id) {
-		if candidate.ParentReceiptID != "" {
-			child = candidate
-			break
-		}
 	}
 	if child.SessionID == "" || child.TurnID == "" {
 		t.Fatalf("handbook binding missing: %+v", child)

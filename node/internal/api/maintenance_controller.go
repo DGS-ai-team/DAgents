@@ -14,6 +14,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
@@ -253,7 +254,8 @@ func (s *Server) runHandbookMaintenance(ctx context.Context, leaseCtx context.Co
 	if err := json.Unmarshal(parent.EvidenceJSON, &evidence); err != nil {
 		return session.HandbookMaintenanceResult{UsageKnown: true}, cleanup, err
 	}
-	result, err = s.sessions.RunHandbookMaintenanceWithBinding(leaseCtx, id, maintenanceEvidencePrompt(prompt, evidence), budget, func(sessionID, turnID string) error {
+	runCtx := handbookfs.WithProvenance(leaseCtx, handbookfs.Provenance{MaintenanceReceiptID: receiptID, SessionID: id})
+	result, err = s.sessions.RunHandbookMaintenanceWithBinding(runCtx, id, maintenanceEvidencePrompt(prompt, evidence), budget, func(sessionID, turnID string) error {
 		return s.goalStore.BindHandbookTurn(rec.AgentID, receiptID, sessionID, turnID, time.Now().UTC())
 	})
 	return result, cleanup, err

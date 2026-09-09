@@ -40,7 +40,11 @@ API/UI 的后续实现顺序为：原子关联 → 按 occurrence 查询执行�
 
 running 对账的轮次绑定基础已补齐：child 保存实际 TurnID 与 AttemptedAt，session 在 SQLite 写入 turn.started 后、模型调用前完成 Goals 绑定；绑定失败取消该轮次且不调用模型。绑定只接受同 Agent、同 Session、有效父子关联的 running child，重复同 TurnID 保持原记录，改绑或磁盘失败不改变记录。主 Agent 独立 Goals 全包 race（2.646 秒）、Session 手册专项 race（5.705 秒）及 HTTP/调度/重启 prepared 专项 race（4.797 秒）通过；HTTP 测试验证重开后仍能按绑定查询对应 turn.started。
 
-文件历史仍缺 receipt/turn 来源字段，完整事件及费用核对器也尚未实现。历史 child 没有 TurnID 时不能推测归属。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
+文件历史来源已接入：controller 注入实际 child receipt ID，session 在绑定成功后填入真实 session/turn ID，文件工具将 context 传入 handbookfs。manifest 与 pending 事务记录同一可选 provenance。旧记录与普通操作不推测来源；恢复旧内容使用本次恢复的来源，不继承旧版本归属。已提交 manifest 与残留 pending 的来源冲突会阻止清理，未提交事务继续按既有规则回滚，不能补写虚假的成功历史。
+
+主 Agent 独立来源验收：handbookfs 全包 race 通过（1.815 秒），真实 HTTP 维护入口的注入模型写文件测试通过（2.392 秒），读取文件历史确认实际 receipt/session/turn 三项一致；Session 手册专项与工具手册专项 race 分别通过（5.757 / 2.533 秒）。这些使用测试模型，不计为真实提供商验收。
+
+完整事件及费用核对器仍未实现。下一步复用 Coordinator 的事件回放，增加有界读取、完整性验证及严格终态检查，不另建重复状态机。历史 child 没有 TurnID 时不能推测归属。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
 
 ## 剩余集成门槛
 
