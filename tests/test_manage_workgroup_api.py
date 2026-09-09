@@ -119,6 +119,23 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 outbox = client.get(f"/v1/workgroups/{wid}/outbox").json()
                 self.assertEqual(outbox[-1]["type"], "agent.session.close")
 
+    def test_configuring_workgroup_archive_is_single_call_and_idempotent(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp, TestClient(self._app(tmp), headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
+            created = client.post(
+                "/v1/workgroups",
+                json={"display_name": "Draft archive", "created_by_node_id": "node-a"},
+                headers={"x-dagents-agent-id": "node-a"},
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            wid = created.json()["workgroup"]["workgroup_id"]
+            first = client.post(f"/v1/workgroups/{wid}/archive")
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(first.json()["status"], "archived")
+            second = client.post(f"/v1/workgroups/{wid}/archive")
+            self.assertEqual(second.status_code, 200, second.text)
+            self.assertEqual(second.json()["status"], "archived")
+            self.assertEqual(second.json()["archived_at"], first.json()["archived_at"])
+
     def test_removed_member_catalog_and_spec_endpoints(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp, TestClient(self._app(tmp), headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
             self.assertEqual(client.get("/v1/workgroups/meta/member-tools").status_code, 404)
