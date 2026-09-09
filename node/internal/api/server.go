@@ -684,7 +684,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 		if s.startupErr == nil {
-			if err := s.triggerStore.ValidateOwnersWithGoals(valid, nil); err != nil {
+			if err := s.triggerStore.ValidateOwners(valid); err != nil {
 				logger.Error("trigger owner validation failed", "error", err)
 				triggerSched = nil
 				s.triggerSched = nil

@@ -133,10 +133,6 @@ func cloneAny(v any) any {
 }
 
 type Principal struct{ Kind, ID, AgentID string }
-type GoalRef struct {
-	AgentID, TriggerID string
-	Managed            bool
-}
 
 func (s *Store) ListAuthorized(p Principal) []Definition {
 	s.mu.RLock()
@@ -158,10 +154,6 @@ func (s *Store) ListAuthorized(p Principal) []Definition {
 
 // ValidateOwners disables triggers whose owner/controller cannot be proven.
 func (s *Store) ValidateOwners(validAgents map[string]bool) error {
-	return s.ValidateOwnersWithGoals(validAgents, nil)
-}
-
-func (s *Store) ValidateOwnersWithGoals(validAgents map[string]bool, goals map[string]GoalRef) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old := make(map[string]Definition, len(s.triggers))
@@ -177,26 +169,11 @@ func (s *Store) ValidateOwnersWithGoals(validAgents map[string]bool, goals map[s
 		if reason == "" && (strings.TrimSpace(d.TargetAgentID) == "" || !validAgents[strings.TrimSpace(d.TargetAgentID)]) {
 			reason = "trigger target agent is unavailable"
 		}
-		if reason == "" && d.Controller == "goal" && strings.TrimSpace(d.OwnerAgentID) != strings.TrimSpace(d.TargetAgentID) {
-			reason = "trigger owner and target differ"
-		}
-		if d.Controller != "user" && d.Controller != "goal" && d.Controller != "maintenance" && d.Controller != "auto" {
+		if d.Controller != "user" && d.Controller != "auto" {
 			reason = "trigger controller is invalid"
 		}
 		if reason == "" && d.Controller == "auto" && (strings.TrimSpace(d.ControllerID) == "" || d.ControllerID != d.OwnerAgentID || d.TargetAgentID != d.OwnerAgentID || d.TargetSessionID == nil || *d.TargetSessionID != d.OwnerAgentID || d.SessionTargetMode != SessionTargetFixed) {
 			reason = "auto controller association is invalid"
-		}
-		if d.Controller == "goal" && (d.ManagedGoalID == "" || d.ControllerID != d.ManagedGoalID) {
-			reason = "goal controller association is invalid"
-		}
-		if reason == "" && d.Controller == "goal" {
-			ref, ok := goals[d.ManagedGoalID]
-			if !ok || !ref.Managed || ref.AgentID != d.OwnerAgentID || ref.TriggerID != d.TriggerID {
-				reason = "goal controller association is invalid"
-			}
-		}
-		if reason == "" && d.Controller == "maintenance" {
-			reason = "maintenance controller is unavailable"
 		}
 		if reason != "" {
 			d.Enabled = false

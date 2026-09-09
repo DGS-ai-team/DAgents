@@ -6,28 +6,60 @@ import (
 	"time"
 )
 
-type managedSubmitter struct{ fired int }
+type retiredTestSubmitter struct{ calls int }
 
-func (m *managedSubmitter) EnsureSession(string) (string, error)              { return "s", nil }
-func (m *managedSubmitter) SubmitTriggerMessage(string, string, string) error { m.fired++; return nil }
+func (s *retiredTestSubmitter) EnsureSession(string) (string, error) { return "session", nil }
+func (s *retiredTestSubmitter) SubmitTriggerMessage(string, string, string) error {
+	s.calls++
+	return nil
+}
 
-func TestManagedSchedulerRunOnceUsesHookAndSkipsUntilNextWake(t *testing.T) {
-	st, _ := OpenStore(t.TempDir()+"/triggers.json", 20)
-	now := time.Now()
-	next := now.Add(-time.Second)
-	d := Definition{TriggerID: "managed", Name: "g", Condition: map[string]any{"interval_seconds": 60}, TargetAgentID: "a", TaskTemplate: "x", Enabled: true, ManagedGoalID: "goal", NextFireAt: func() *float64 { v := float64(next.UnixNano()) / 1e9; return &v }()}
-	if _, e := st.CreateTrigger(d); e != nil {
-		t.Fatal(e)
+func TestRetiredControllerIsDisabledAndCannotBeScheduled(t *testing.T) {
+	st, err := OpenStore(t.TempDir()+"/triggers.json", 20)
+	if err != nil {
+		t.Fatal(err)
 	}
-	sub := &managedSubmitter{}
-	sch := NewScheduler(st, sub, 60)
-	calls := 0
-	sch.SetManagedFire(func(_ context.Context, _ Definition, _ time.Time) FireRecord {
-		calls++
-		return FireRecord{Status: FireStatusQueued}
+	_, err = st.CreateTrigger(Definition{
+		TriggerID: "legacy-managed", OwnerAgentID: "a", TargetAgentID: "a",
+		Controller: "goal", ControllerID: "legacy-goal", ManagedGoalID: "legacy-goal",
+		Enabled: true,
 	})
-	sch.RunOnceForTest(context.Background(), now)
-	if calls != 1 {
-		t.Fatalf("calls=%d", calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ValidateOwners(map[string]bool{"a": true}); err != nil {
+		t.Fatal(err)
+	}
+	d, ok := st.GetTrigger("legacy-managed")
+	if !ok {
+		t.Fatal("legacy trigger disappeared")
+	}
+	if d.Enabled || !d.RecoveryRequired {
+		t.Fatalf("legacy controller remained executable: %+v", d)
+	}
+}
+
+func TestRetiredControllerCannotFireBeforeOwnerValidation(t *testing.T) {
+	st, err := OpenStore(t.TempDir()+"/triggers.json", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := float64(time.Now().Add(-time.Second).UnixNano()) / 1e9
+	_, err = st.CreateTrigger(Definition{
+		TriggerID: "legacy-fire", OwnerAgentID: "a", TargetAgentID: "a",
+		Controller: "goal", ControllerID: "g", ManagedGoalID: "g", Enabled: true,
+		Condition: map[string]any{"interval_seconds": 60}, NextFireAt: &next,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := &retiredTestSubmitter{}
+	sch := NewScheduler(st, sub, 60)
+	if _, err := sch.FireTrigger("legacy-fire", "manual", nil, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	sch.RunOnceForTest(context.Background(), time.Now())
+	if sub.calls != 0 {
+		t.Fatalf("retired controller was delivered: calls=%d", sub.calls)
 	}
 }

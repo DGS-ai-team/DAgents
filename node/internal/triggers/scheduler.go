@@ -70,16 +70,11 @@ type Scheduler struct {
 	sessionResolver SessionResolver
 	pollInterval    time.Duration
 	logger          *slog.Logger
-	managedFire     func(context.Context, Definition, time.Time) FireRecord
-	eventPoll       func(context.Context, Definition, time.Time) error
-	reconcile       func(context.Context, time.Time) error
 	conditionRunner ConditionRunner
 
-	mu         sync.Mutex
-	stopCh     chan struct{}
-	doneCh     chan struct{}
-	stopCancel context.CancelFunc
-	runCtx     context.Context
+	mu     sync.Mutex
+	stopCh chan struct{}
+	doneCh chan struct{}
 }
 
 type ConditionCompletion struct {
@@ -130,35 +125,6 @@ func (s *Scheduler) SetConditionRunner(runner ConditionRunner) {
 	s.mu.Unlock()
 }
 
-// SetManagedFire routes managed Goal triggers through Goal-owned Run/claim
-// logic. Ordinary triggers retain the existing fire path unchanged.
-func (s *Scheduler) SetManagedFire(fn func(context.Context, Definition, time.Time) FireRecord) {
-	s.managedFire = fn
-}
-func (s *Scheduler) FireManaged(ctx context.Context, def Definition, now time.Time) FireRecord {
-	if s == nil || s.managedFire == nil {
-		return FireRecord{TriggerID: def.TriggerID, Status: FireStatusError, Message: "managed fire unavailable"}
-	}
-	return s.managedFire(ctx, def, now)
-}
-
-// SetEventPoller installs the bounded provider bridge. The callback owns the
-// managedFire acknowledgement and must return only after delivery succeeds.
-func (s *Scheduler) SetEventPoller(fn func(context.Context, Definition, time.Time) error) {
-	if s != nil {
-		s.eventPoll = fn
-	}
-}
-
-// SetReconciler installs a pre-tick callback for durable managed scheduling
-// intents. It runs outside the scheduler's fire path so a failed projection
-// remains pending and can be retried on the next tick.
-func (s *Scheduler) SetReconciler(fn func(context.Context, time.Time) error) {
-	if s != nil {
-		s.reconcile = fn
-	}
-}
-
 // NewScheduler 构造调度器；pollSeconds 至少 1 秒。
 func NewScheduler(store *Store, submitter MessageSubmitter, pollSeconds int) *Scheduler {
 	if pollSeconds < 1 {
@@ -194,11 +160,8 @@ func (s *Scheduler) Start() {
 	}
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
 	s.stopCh = stopCh
 	s.doneCh = doneCh
-	s.stopCancel = cancel
-	s.runCtx = ctx
 	s.logger.Info("trigger scheduler started", "poll_seconds", int(s.pollInterval.Seconds()))
 	go s.runLoop(stopCh, doneCh)
 }
@@ -212,15 +175,9 @@ func (s *Scheduler) Stop() {
 	}
 	stopCh := s.stopCh
 	doneCh := s.doneCh
-	cancel := s.stopCancel
 	close(stopCh)
-	if cancel != nil {
-		cancel()
-	}
 	s.stopCh = nil
 	s.doneCh = nil
-	s.stopCancel = nil
-	s.runCtx = nil
 	s.mu.Unlock()
 	<-doneCh
 }
@@ -280,24 +237,9 @@ func (s *Scheduler) runLoop(stopCh, doneCh chan struct{}) {
 }
 
 func (s *Scheduler) tickDue(now time.Time) {
-	ctx := context.Background()
-	s.mu.Lock()
-	if s.runCtx != nil {
-		ctx = s.runCtx
-	}
-	s.mu.Unlock()
-	if s.reconcile != nil {
-		if err := s.reconcile(ctx, now); err != nil {
-			s.logger.Warn("managed intent reconciliation failed", "error", err)
-		}
-	}
 	for _, def := range s.store.ListEnabledTriggers() {
 		if kind, _ := InferScheduleKind(def.Condition); kind == ScheduleEvent {
-			if s.eventPoll != nil {
-				if err := s.eventPoll(ctx, def, now); err != nil {
-					s.logger.Warn("event probe poll failed", "trigger_id", def.TriggerID, "error", err)
-				}
-			}
+			// Event sources are retired; historical definitions remain readable.
 			continue
 		}
 		decision, updated := EvaluateDue(def, now)
@@ -310,12 +252,6 @@ func (s *Scheduler) tickDue(now time.Time) {
 				"next_fire_at", updated.NextFireAt,
 			)
 		case DueFire:
-			if def.ManagedGoalID != "" {
-				if s.managedFire != nil {
-					s.managedFire(context.Background(), def, now)
-				}
-				break
-			}
 			s.fire(context.Background(), def, "schedule", map[string]any{}, false, nil)
 		default:
 		}
@@ -325,6 +261,16 @@ func (s *Scheduler) tickDue(now time.Time) {
 func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, payload map[string]any, force bool, opts *FireOptions) FireRecord {
 	if payload == nil {
 		payload = map[string]any{}
+	}
+	if def.Controller != "user" && def.Controller != "auto" {
+		record := s.record(def, FireStatusError, reason, payload, "trigger controller is retired or invalid", nil, nil, "")
+		s.logFireRecord(record)
+		return record
+	}
+	if def.ManagedGoalID != "" {
+		record := s.record(def, FireStatusError, reason, payload, "managed goal trigger is retired", nil, nil, "")
+		s.logFireRecord(record)
+		return record
 	}
 	if !def.Enabled && !force {
 		record := s.record(def, FireStatusSkipped, reason, payload, "trigger is disabled", nil, nil, "")

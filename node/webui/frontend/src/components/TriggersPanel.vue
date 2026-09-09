@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import TriggerEditor from "./settings/TriggerEditor.vue";
 import { formatTriggerCondition, formatUnixTime, shortId, truncateText, triggerFireStatusMessage } from "../utils/panelFormat.js";
@@ -16,6 +17,7 @@ defineProps({
 });
 
 const emit = defineEmits(["close"]);
+const router = useRouter();
 
 const loading = ref(false);
 const busyKey = ref("");
@@ -44,8 +46,22 @@ function isManagedGoal(item) {
   return Boolean(String(item?.managed_goal_id || "").trim());
 }
 
+function isAutoManaged(item) {
+  return String(item?.controller || "").trim().toLowerCase() === "auto";
+}
+
+function isRetired(item) {
+  const controller = String(item?.controller || "").trim().toLowerCase();
+  return isManagedGoal(item) || isAutoManaged(item) || (controller !== "" && controller !== "user");
+}
+
 function displayName(item) {
-  return isManagedGoal(item) ? "自主任务调度" : (item?.name || "(未命名)");
+  return item?.name || (isRetired(item) ? "已退役触发器" : "(未命名)");
+}
+
+function openAutoSettings(item) {
+  const agentId = String(item?.target_agent_id || item?.owner_agent_id || "").trim();
+  if (agentId) router.push({ name: "settings-agent-detail", params: { agentId }, query: { section: "autonomy" } });
 }
 
 function resetForm() {
@@ -262,15 +278,15 @@ onMounted(load);
 
 <template>
   <section class="panel panel-overlay__card command-panel triggers-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header class="panel__header command-panel__header">
+    <header v-if="!embedded" class="panel__header command-panel__header">
       <div>
-        <div v-if="!embedded" class="panel__title">定时任务</div>
+        <div class="panel__title">定时任务</div>
       </div>
       <div class="command-panel__header-actions">
-        <button v-if="!embedded" type="button" class="btn btn--primary btn--sm" :disabled="loading || editingId === 'new'" @click="startCreate">
+        <button type="button" class="btn btn--primary btn--sm" :disabled="loading || editingId === 'new'" @click="startCreate">
           新建
         </button>
-        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 
@@ -329,10 +345,10 @@ onMounted(load);
                     >
                       {{ item.enabled ? "已启用" : "已禁用" }}
                     </span>
-                    <span v-if="isManagedGoal(item)" class="command-card__badge command-card__badge--muted">自主任务托管</span>
+                    <span v-if="isRetired(item)" class="command-card__badge command-card__badge--muted">{{ isAutoManaged(item) ? "由 Auto 设置管理" : "已退役" }}</span>
                     <span v-if="item.recovery_required" class="command-card__badge command-card__badge--muted">需要核对</span>
                   </div>
-                  <div class="command-card__meta command-card__meta--mono">{{ isManagedGoal(item) ? "由自主任务管理" : shortId(item.trigger_id, 12) }}</div>
+                  <div class="command-card__meta command-card__meta--mono">{{ isRetired(item) ? "配置入口受限 · 仅查看" : shortId(item.trigger_id, 12) }}</div>
                   <dl class="command-kv-list command-kv-list--compact">
                     <div class="command-kv">
                       <dt>调度</dt>
@@ -354,14 +370,15 @@ onMounted(load);
                   <div v-if="item.task_template" class="command-card__preview">
                     任务: {{ truncateText(item.task_template, 120) }}
                   </div>
-                  <p v-if="isManagedGoal(item)" class="command-panel__hint">此触发器由 Auto 运行时管理，请在 Auto 设置中查看配置。</p>
-                  <div v-if="item.recovery_required" class="command-panel__error">
+                  <p v-if="isRetired(item)" class="command-panel__hint">{{ isAutoManaged(item) ? "请在 Auto 设置中调整默认唤醒。" : "这是已退役的历史触发器，仅供查看。" }}</p>
+                  <div v-if="item.recovery_required && !isRetired(item)" class="command-panel__error">
                     {{ item.recovery_reason || "上次投递结果未知，请核对后恢复。" }}
                     <button type="button" class="btn btn--danger btn--sm" :disabled="rowBusy(`recover:${item.trigger_id}`)" @click="recoverPending(item)">确认并丢弃旧投递</button>
                   </div>
-                  <div v-if="isManagedGoal(item)" class="command-card__actions">
+                  <div v-if="isRetired(item)" class="command-card__actions">
+                    <button v-if="isAutoManaged(item)" type="button" class="btn btn--primary btn--sm" @click="openAutoSettings(item)">打开 Auto 设置</button>
                     <button type="button" class="btn btn--ghost btn--sm" :disabled="!!editingId" @click="loadHistory(item)">
-                      {{ historyOpenId === item.trigger_id ? "刷新历史" : "触发历史" }}
+                      {{ historyOpenId === item.trigger_id ? "刷新历史" : "查看历史" }}
                     </button>
                   </div>
                   <div v-else class="command-card__actions">

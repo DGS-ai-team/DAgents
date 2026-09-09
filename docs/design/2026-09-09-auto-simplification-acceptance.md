@@ -122,3 +122,9 @@ UI 审查也发现当前 Auto 默认 trigger 仍被通用编辑入口当作用�
 ### 忙碌队列验收补充
 
 最终专项测试已改为真实用户聊天进入 ASK waiting，再由 Scheduler 多次投递默认 Auto trigger；不手工清除 pending。Manager 在 runtime 创建前绑定真实 trigger store。断言实际只存在一条排队唤醒、等待期间模型调用一次；关闭默认频率并恢复原 ASK 后，总模型调用两次（原回合的前后两次请求），队列清空且 runtime 空闲。root 独立执行上述专项 race `-count=3` 通过。这证明用户回合忙碌期间的唤醒合并及关闭丢弃，不单独证明 Auto 起源等待审批、重启恢复或 provider 配置校验。
+
+### 旧调度入口与默认 trigger UI 收口
+
+本批删除 Scheduler 的旧 Goal managed-fire、独立 event poller 和 reconciler 接口，Store 不再保留 GoalRef/ValidateOwnersWithGoals，启动校验统一为当前 user/auto controller。公共 fire 内部入口拒绝退役/未知 controller 及旧 managed 关联，即使 force=true 也不得投递；原条件脚本 runner 保留。默认 Auto trigger 的通用编辑、启停、删除和手动执行入口移除，改为跳转所属 Agent 自主设置；用户 trigger 保留原操作，退役项仅查看历史。
+
+root 独立验证 `go test -race ./node/internal/triggers -count=1` 通过；TriggersPanel/UpdatePanel 专项 Vitest 共4项通过，覆盖卡片操作区别、实际设置路由及嵌入/弹窗头。该批尚未部署到18766。session 内未引用的旧 Goal 输入函数仍需另行移除，不能据本批认定全部旧字段清理完成。
