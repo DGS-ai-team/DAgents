@@ -88,7 +88,6 @@ export function emptyAgentDraft() {
     workspaceMode: "private",
     workspacePath: "",
     agentType: "normal",
-    riskObservationEnabled: false,
     hooks: {},
   };
 }
@@ -165,6 +164,12 @@ function skillsPayload(draft) {
   return { visible };
 }
 
+function hooksPayload(draft) {
+  const hooks = asObject(draft?.hooks);
+  const { risk_observation_enabled: _retiredRiskObservation, ...remaining } = hooks;
+  return remaining;
+}
+
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
 /** 空白 Agent 草稿（不依赖模板）。 */
 export function draftFromBlank(llmProfileIds = []) {
@@ -182,7 +187,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   const skills = asObject(defaults.skills);
   const prompt = asObject(defaults.prompt_context);
   const draft = emptyAgentDraft();
-  draft.riskObservationEnabled = boolOr(asObject(defaults.hooks).risk_observation_enabled, false);
   draft.hooks = clone(asObject(defaults.hooks));
   draft.templateId = String(template?.id || "").trim();
   draft.displayName = String(template?.display_name || template?.id || "").trim();
@@ -217,7 +221,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   const skills = asObject(defaults.skills);
   const prompt = asObject(defaults.prompt_context);
   const draft = emptyAgentDraft();
-  draft.riskObservationEnabled = boolOr(asObject(defaults.hooks).risk_observation_enabled, false);
   draft.hooks = clone(asObject(defaults.hooks));
   draft.templateId = String(agent?.template_id || snap.template_id || "").trim();
   draft.displayName = String(agent?.display_name || "").trim();
@@ -286,8 +289,7 @@ export function buildCreateAgentPayload(draft) {
           : {}),
       },
       hooks: {
-        ...asObject(draft.hooks),
-        risk_observation_enabled: Boolean(draft.riskObservationEnabled),
+        ...hooksPayload(draft),
       },
     },
     workspace: String(draft.workspaceMode || "private").trim() === "custom"
@@ -308,13 +310,6 @@ export function buildPatchAgentPayload(draft) {
     defaults: created.defaults,
     agent_type: draft.agentType === "auto" ? "auto" : "normal",
   };
-}
-
-/** 风险观察开关的窄 PATCH：保留快照中已有 hooks，避免提交其它未保存草稿。 */
-export function buildRiskObservationPatch(agent, enabled) {
-  const snapshot = parseSnapshot(agent?.config_snapshot);
-  const hooks = asObject(snapshot?.defaults?.hooks);
-  return { defaults: { hooks: { ...hooks, risk_observation_enabled: Boolean(enabled) } } };
 }
 
 /** 从 Agent 草稿构建创建模板 API 入参。 */
@@ -354,8 +349,7 @@ export function buildCreateTemplatePayload(meta, draft) {
           : {}),
       },
       hooks: {
-        ...asObject(draft.hooks),
-        risk_observation_enabled: Boolean(draft.riskObservationEnabled),
+        ...hooksPayload(draft),
       },
     },
   };

@@ -4,7 +4,6 @@ import {
   buildCreateAgentPayload,
   buildCreateTemplatePayload,
   buildPatchAgentPayload,
-  buildRiskObservationPatch,
   draftFromAgentView,
   draftFromBlank,
   draftFromTemplate,
@@ -16,20 +15,14 @@ import {
 } from "./agentTemplateForm.js";
 
 describe("agentTemplateForm", () => {
-  it("preserves existing hooks while patching risk observation", () => {
+  it("preserves unrelated hooks without submitting retired risk observation", () => {
     const draft = draftFromAgentView({
       display_name: "Auto",
       agent_type: "auto",
       config_snapshot: { defaults: { agent: {}, llm: { active: "p" }, hooks: { other_hook: true, risk_observation_enabled: false } } },
     }, ["p"]);
-    draft.riskObservationEnabled = true;
     const payload = buildPatchAgentPayload(draft);
-    expect(payload.defaults.hooks).toEqual({ other_hook: true, risk_observation_enabled: true });
-  });
-
-  it("builds a hooks-only risk patch", () => {
-    expect(buildRiskObservationPatch({ config_snapshot: { defaults: { agent: { draft: "keep" }, hooks: { audit: true } } } }, true))
-      .toEqual({ defaults: { hooks: { audit: true, risk_observation_enabled: true } } });
+    expect(payload.defaults.hooks).toEqual({ other_hook: true });
   });
 
   it("expands full draft from template", () => {
