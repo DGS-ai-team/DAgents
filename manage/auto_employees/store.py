@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import threading
+import logging
 from datetime import datetime, timezone
+
+from pydantic import ValidationError
 
 from manage.storage.sqlite import SQLiteDatabase
 
 from .models import AutoSummary, AutoSummaryRecord
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AutoSummaryConflict(Exception):
@@ -20,6 +26,17 @@ class AutoSummaryStore:
         self._lock = threading.RLock()
         self._mem: dict[tuple[str, str], AutoSummaryRecord] = {}
 
+    @staticmethod
+    def _decode_record(node_id: str, stored_agent_id: str, payload: str, received_at: object) -> AutoSummaryRecord | None:
+        try:
+            summary = AutoSummary.model_validate_json(payload)
+            if summary.agent_id != stored_agent_id:
+                raise ValueError("payload agent identity mismatch")
+            return AutoSummaryRecord(**summary.model_dump(), node_id=node_id, received_at=received_at)
+        except (ValidationError, ValueError, TypeError):
+            _LOGGER.warning("ignoring invalid auto summary cache node=%s agent=%s", node_id, stored_agent_id)
+            return None
+
     def _read(self, node_id: str, agent_id: str) -> AutoSummaryRecord | None:
         if self._db is None:
             return self._mem.get((node_id, agent_id))
@@ -27,8 +44,10 @@ class AutoSummaryStore:
             row = conn.execute("SELECT payload_json, received_at FROM auto_employee_summaries WHERE node_id=? AND agent_id=?", (node_id, agent_id)).fetchone()
         if row is None:
             return None
-        summary = AutoSummary.model_validate_json(row[0])
-        return self._freshness(AutoSummaryRecord(**summary.model_dump(), node_id=node_id, received_at=row[1]))
+        record = self._decode_record(node_id, agent_id, row[0], row[1])
+        if record is None:
+            return None
+        return self._freshness(record)
 
     @staticmethod
     def _freshness(record: AutoSummaryRecord, *, now: datetime | None = None, stale_after_seconds: int = 120) -> AutoSummaryRecord:
@@ -72,16 +91,21 @@ class AutoSummaryStore:
                 if node_id is not None:
                     clauses.append("node_id=?")
                     args.append(node_id)
-                if state is not None:
-                    clauses.append("json_extract(payload_json, '$.state')=?")
-                    args.append(state)
                 where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-                offset = (page - 1) * page_size
                 with self._db.connect() as conn:
-                    total = int(conn.execute("SELECT COUNT(*) FROM auto_employee_summaries" + where, args).fetchone()[0])
-                    rows = conn.execute("SELECT node_id, payload_json, received_at FROM auto_employee_summaries" + where + " ORDER BY json_extract(payload_json, '$.as_of') DESC, node_id DESC, agent_id DESC LIMIT ? OFFSET ?", [*args, page_size, offset]).fetchall()
-                records = [self._freshness(AutoSummaryRecord(**AutoSummary.model_validate_json(row[1]).model_dump(), node_id=row[0], received_at=row[2]), now=now, stale_after_seconds=stale_after_seconds) for row in rows]
-                return records, total
+                    rows = conn.execute("SELECT node_id, agent_id, payload_json, received_at FROM auto_employee_summaries" + where, args).fetchall()
+                records = []
+                for row in rows:
+                    record = self._decode_record(row[0], row[1], row[2], row[3])
+                    if record is None:
+                        continue
+                    if state is not None and record.state != state:
+                        continue
+                    records.append(self._freshness(record, now=now, stale_after_seconds=stale_after_seconds))
+                records.sort(key=lambda x: (x.as_of, x.node_id, x.agent_id), reverse=True)
+                total = len(records)
+                offset = (page - 1) * page_size
+                return records[offset : offset + page_size], total
             records = [x for x in records if (node_id is None or x.node_id == node_id) and (state is None or x.state == state)]
             records.sort(key=lambda x: (x.as_of, x.node_id, x.agent_id), reverse=True)
             total = len(records)

@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone, timedelta
@@ -57,6 +58,26 @@ class AutoEmployeeManageTests(unittest.TestCase):
             store.put("node-a", newer.model_copy(update={"reason": "different"}))
         reopened = AutoSummaryStore(SQLiteDatabase(self.db))
         self.assertEqual(reopened.get("node-a", "auto-1").as_of, newer.as_of)
+
+    def test_invalid_persisted_summary_isolated_from_listing_and_total(self):
+        db = SQLiteDatabase(self.db)
+        store = AutoSummaryStore(db)
+        valid = AutoSummary.model_validate(self.payload())
+        store.put("node-a", valid)
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO auto_employee_summaries(node_id,agent_id,payload_json,received_at) VALUES(?,?,?,?)",
+                ("node-a", "legacy", '{"agent_id":"legacy","state":"standby","as_of":"2026-09-08T01:00:00Z","last_result":"old","usage":{"tokens":4}}', datetime.now(timezone.utc).isoformat()),
+            )
+            conn.execute(
+                "INSERT INTO auto_employee_summaries(node_id,agent_id,payload_json,received_at) VALUES(?,?,?,?)",
+                ("node-a", "spoofed", json.dumps({**self.payload("payload-agent"), "as_of": "2026-09-08T00:00:00Z"}), datetime.now(timezone.utc).isoformat()),
+            )
+            conn.commit()
+        items, total = AutoSummaryStore(SQLiteDatabase(self.db)).list(node_id="node-a")
+        self.assertEqual(total, 1)
+        self.assertEqual([item.agent_id for item in items], ["auto-1"])
+        self.assertIsNone(AutoSummaryStore(SQLiteDatabase(self.db)).get("node-a", "legacy"))
 
     def test_http_repeated_snapshot_is_idempotent_and_conflicts_are_409(self):
         path = "/v1/registry/nodes/node-a/auto-summary"
