@@ -152,3 +152,5 @@ Dreaming 使用固定的上下文边界 token：在持有同 Agent 执行租约�
 条件脚本以当前 Agent 的工具执行环境与原有 policy 为准，不在 scheduler 直接调用不受约束的宿主 shell。执行脚本之前必须完成归属、revision 与当次执行资格校验。重复调度/手动并发不能重复执行同一次脚本；false 或失败记录结果并按规则推进检查时间，持久化失败不能被忽略。条件满足才投递主会话。缺少执行器时明确失败，不能把跳过条件当作满足。
 
 Dreaming 原子提交存储首批已验收：经验正文与含内容 hash 的提交标识同次保存，按 Agent/日期去重，上一条未确认重置时拒绝下一条，提供 pending 查询与幂等确认。测试覆盖并发同日只成功一次、失败回滚、确认失败仍可恢复、跨 Agent、重开读取和非法持久化数据。主 Agent autonomy 全包 race 通过（1.475 秒）。这只证明持久化底座，session 边界与每日执行器尚待验收。
+
+条件脚本调度底座已验收：runner 调用前持久化 claim，校验定义 revision 和 occurrence；false/error/未配置执行器不投递，推进定时检查并释放 claim，释放保存失败明确报错且保留 pending。专项覆盖并发调用、旧 revision、跨 Agent、旧 occurrence、false/error/nil 及清理失败；主 Agent Triggers 全包 race 通过（1.737 秒）。生产尚未注入经过 Agent 工具与审批的 runner，API/模型参数入口仍待同步，不能将此底座表述为脚本唤醒功能已上线。

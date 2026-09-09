@@ -152,13 +152,14 @@ func TestSchedulerCmdGateBlocksFire(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
+	sched.SetConditionRunner(func(context.Context, string, string) (bool, error) { return false, nil })
 	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
 	if len(sub.messages) != 0 {
 		t.Fatalf("expected no message, got %v", sub.messages)
 	}
 	got, _ := store.GetTrigger(def.TriggerID)
-	if got.NextFireAt == nil || *got.NextFireAt != v {
-		t.Fatalf("legacy cmd task must not advance: %v", got.NextFireAt)
+	if got.NextFireAt == nil || *got.NextFireAt == v {
+		t.Fatalf("false condition must advance to next check: %v", got.NextFireAt)
 	}
 }
 
@@ -188,9 +189,10 @@ func TestSchedulerCmdGateAllowsFire(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
+	sched.SetConditionRunner(func(context.Context, string, string) (bool, error) { return true, nil })
 	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
-	if len(sub.messages) != 0 {
-		t.Fatalf("legacy cmd task must not dispatch: %v", sub.messages)
+	if len(sub.messages) != 1 {
+		t.Fatalf("true condition should dispatch: %v", sub.messages)
 	}
 }
 
@@ -217,6 +219,7 @@ func TestManualFireSkipsCmdGate(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
+	sched.SetConditionRunner(func(context.Context, string, string) (bool, error) { return false, nil })
 	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)

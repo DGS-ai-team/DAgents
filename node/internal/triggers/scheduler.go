@@ -30,6 +30,10 @@ type DeliveryMessageSubmitter interface {
 	SubmitTriggerMessageWithDelivery(sessionID, triggerID, deliveryID, content string) error
 }
 
+// ConditionRunner is an injected, Agent-bound policy/tool execution seam.
+// The triggers package never invokes a shell directly.
+type ConditionRunner func(context.Context, string, string) (bool, error)
+
 type AutoMessageSubmitter interface {
 	SubmitAutoTriggerMessage(sessionID, triggerID, deliveryID, content string) error
 }
@@ -49,12 +53,19 @@ type Scheduler struct {
 	managedFire     func(context.Context, Definition, time.Time) FireRecord
 	eventPoll       func(context.Context, Definition, time.Time) error
 	reconcile       func(context.Context, time.Time) error
+	conditionRunner ConditionRunner
 
 	mu         sync.Mutex
 	stopCh     chan struct{}
 	doneCh     chan struct{}
 	stopCancel context.CancelFunc
 	runCtx     context.Context
+}
+
+func (s *Scheduler) SetConditionRunner(runner ConditionRunner) {
+	s.mu.Lock()
+	s.conditionRunner = runner
+	s.mu.Unlock()
 }
 
 // SetManagedFire routes managed Goal triggers through Goal-owned Run/claim
@@ -258,11 +269,6 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 		s.logFireRecord(record)
 		return record
 	}
-	// Shell gates are legacy persisted data. They are retained for audit/history
-	// but are never executed by schedule, manual, or forced fire paths.
-	if ConditionCmd(def.Condition) != "" {
-		return s.record(def, FireStatusSkipped, reason, payload, "condition.cmd is no longer supported", nil, nil, "")
-	}
 	if s.store.HasPendingDelivery(def.TriggerID) || (def.PendingDeliveryID != nil && strings.TrimSpace(*def.PendingDeliveryID) != "") {
 		record := FireRecord{
 			TriggerID: def.TriggerID,
@@ -312,6 +318,8 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 	var claimErr error
 	if opts != nil && opts.Principal != nil {
 		claimErr = s.store.ClaimAuthorized(*opts.Principal, def.TriggerID, opts.ExpectedRevision, deliveryID, sessionID, occurrence)
+	} else if reason == "schedule" {
+		claimErr = s.store.ClaimDeliveryForOccurrenceRevision(def.TriggerID, def.Revision, deliveryID, sessionID, occurrence)
 	} else {
 		claimErr = s.store.ClaimDeliveryForOccurrence(def.TriggerID, deliveryID, sessionID, occurrence)
 	}
@@ -334,6 +342,28 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 			record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
 			s.logFireRecord(record)
 			return record
+		}
+	}
+	if command := ConditionCmd(def.Condition); command != "" {
+		s.mu.Lock()
+		runner := s.conditionRunner
+		s.mu.Unlock()
+		if runner == nil {
+			if err := s.store.clearPendingDeliveryIfMatch(def.TriggerID, deliveryID); err != nil {
+				return s.record(def, FireStatusError, reason, payload, "condition cleanup failed: "+err.Error(), &sessionID, &clientID, content)
+			}
+			return s.record(def, FireStatusError, reason, payload, "condition runner unavailable", &sessionID, &clientID, content)
+		}
+		ok, conditionErr := runner(ctx, def.TargetAgentID, command)
+		if conditionErr != nil || !ok {
+			if cleanupErr := s.store.clearPendingDeliveryIfMatch(def.TriggerID, deliveryID); cleanupErr != nil {
+				return s.record(def, FireStatusError, reason, payload, "condition cleanup failed: "+cleanupErr.Error(), &sessionID, &clientID, content)
+			}
+			message, status := "condition not satisfied", FireStatusSkipped
+			if conditionErr != nil {
+				status, message = FireStatusError, "condition failed: "+conditionErr.Error()
+			}
+			return s.record(def, status, reason, payload, message, &sessionID, &clientID, content)
 		}
 	}
 	var submitErr error

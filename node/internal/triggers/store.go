@@ -277,9 +277,6 @@ func applyUpdatePatch(current *Definition, patch UpdatePatch) error {
 		current.TaskTemplate = *patch.TaskTemplate
 	}
 	if patch.Condition != nil {
-		if ConditionCmd(patch.Condition) != "" {
-			return fmt.Errorf("condition.cmd is no longer supported")
-		}
 		if _, err := EnsureScheduleCondition(patch.Condition); err != nil {
 			return err
 		}
@@ -446,9 +443,6 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 	if patch.Condition != nil {
 		if _, err := EnsureScheduleCondition(patch.Condition); err != nil {
 			return Definition{}, err
-		}
-		if ConditionCmd(patch.Condition) != "" {
-			return Definition{}, fmt.Errorf("condition.cmd is not supported")
 		}
 		current.Condition = cloneMap(patch.Condition)
 	}
@@ -707,6 +701,21 @@ func (s *Store) ClaimDeliveryForOccurrence(triggerID, deliveryID, sessionID stri
 	return s.claimDelivery(triggerID, deliveryID, sessionID, occurrence)
 }
 
+// ClaimDeliveryForOccurrenceRevision fences a scheduler snapshot against a
+// definition edit made after the snapshot was read.
+func (s *Store) ClaimDeliveryForOccurrenceRevision(triggerID string, revision int64, deliveryID, sessionID string, occurrence *float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.triggers[triggerID]
+	if !ok {
+		return errTriggerNotFound
+	}
+	if d.Revision != revision {
+		return fmt.Errorf("revision conflict")
+	}
+	return s.claimDeliveryLocked(triggerID, deliveryID, sessionID, occurrence)
+}
+
 func (s *Store) ClaimAuthorized(p Principal, triggerID string, expected int64, deliveryID, sessionID string, occurrence *float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -771,12 +780,12 @@ func (s *Store) claimDeliveryLocked(triggerID, deliveryID, sessionID string, occ
 	return nil
 }
 
-func (s *Store) ClearPendingDeliveryIfMatch(triggerID, deliveryID string) {
+func (s *Store) clearPendingDeliveryIfMatch(triggerID, deliveryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.triggers[triggerID]
 	if !ok || d.PendingDeliveryID == nil || *d.PendingDeliveryID != strings.TrimSpace(deliveryID) {
-		return
+		return nil
 	}
 	old := d
 	d.PendingDeliveryID = nil
@@ -784,13 +793,20 @@ func (s *Store) ClearPendingDeliveryIfMatch(triggerID, deliveryID string) {
 	s.triggers[triggerID] = d
 	if err := s.saveLocked(); err != nil {
 		s.triggers[triggerID] = old
-		return
+		return err
 	}
 	if s.pending != nil {
 		s.pending.ClearPendingDelivery(triggerID)
 	}
+	return nil
 }
 
+// ClearPendingDeliveryIfMatch preserves the delivery tracker interface. The
+// scheduler uses the internal error-returning variant when cleanup is part of
+// a condition decision and must report persistence failures.
+func (s *Store) ClearPendingDeliveryIfMatch(triggerID, deliveryID string) {
+	_ = s.clearPendingDeliveryIfMatch(triggerID, deliveryID)
+}
 func (s *Store) IsRecoveryRequired(triggerID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
