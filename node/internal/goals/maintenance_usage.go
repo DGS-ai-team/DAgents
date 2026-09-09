@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -326,6 +327,26 @@ func (s *Store) ListMaintenanceReceipts(agentID string) []MaintenanceReceipt {
 		}
 	}
 	return out
+}
+
+// ListMaintenanceReceiptEntries preserves the durable receipt map identity so
+// callers can resume a specific operation without reconstructing IDs.
+func (s *Store) ListMaintenanceReceiptEntries(agentID string) []MaintenanceReceiptEntry {
+	agentID = strings.TrimSpace(agentID)
+	if s == nil || agentID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entries := make([]MaintenanceReceiptEntry, 0)
+	for id, receipt := range s.data.MaintenanceReceipts {
+		if receipt.AgentID != agentID {
+			continue
+		}
+		entries = append(entries, MaintenanceReceiptEntry{ReceiptID: id, Receipt: cloneMaintenanceReceipt(receipt)})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ReceiptID < entries[j].ReceiptID })
+	return entries
 }
 
 func cloneMaintenanceReceipt(r MaintenanceReceipt) MaintenanceReceipt {
