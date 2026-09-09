@@ -56,6 +56,10 @@ function statusLabel(status) {
   return statusLabels[status] || "未知状态";
 }
 
+function resultStatusLabel(status) {
+  return status ? statusLabel(status) : "状态未知";
+}
+
 function usage(value) {
   const raw = typeof value === "number" ? value : value?.maintenance_tokens;
   const tokens = typeof raw === "number" ? raw : Number(raw);
@@ -253,7 +257,7 @@ watch(
         </button>
       </div>
       <p v-if="result && !result.error" class="maintenance-result">
-        本次维护已完成。 {{ usage(result.usage) }}
+        本次维护状态：{{ resultStatusLabel(result.status) }}。 {{ usage(result.usage) }}
       </p>
     </template>
   </section>

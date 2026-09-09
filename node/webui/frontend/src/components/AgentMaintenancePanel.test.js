@@ -25,6 +25,7 @@ describe("AgentMaintenancePanel", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
+          status: "completed",
           sequence: 12,
           usage: { business_tokens: 4, maintenance_tokens: 9, unknown: false },
         }),
@@ -46,6 +47,31 @@ describe("AgentMaintenancePanel", () => {
     await flush();
     await nextTick();
     expect(w.text()).toContain("累计维护用量：9 tokens");
+    expect(w.text()).toContain("本次维护状态：已完成");
+  });
+
+  it.each([
+    ["pending", "等待维护"],
+    ["recovery_required", "需要恢复"],
+    ["unexpected_status", "未知状态"],
+    [undefined, "状态未知"],
+  ])("renders maintenance result status %s without claiming completion", async (status, label) => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => cfg() })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ status, usage: { maintenance_tokens: 6, unknown: false } }),
+      });
+    vi.stubGlobal("fetch", fetch);
+    const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } });
+    await flush();
+    await w.findAll("button")[1].trigger("click");
+    await flush();
+    await nextTick();
+    expect(w.text()).toContain(`本次维护状态：${label}`);
+    if (label !== "已完成") expect(w.text()).not.toContain("本次维护状态：已完成");
+    expect(w.text()).toContain("累计维护用量：6 tokens");
   });
   it("prevents duplicate run and ignores a late result after agent switch", async () => {
     let resolveRun;
