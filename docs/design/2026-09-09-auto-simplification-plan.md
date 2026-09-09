@@ -69,3 +69,19 @@ Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注
 实现审查提醒：`session.Manager.ClearContext` 当前调用 `clearMessages`/`Store.ClearMessages`，不得直接作为 dreaming 的“保留历史、重置活跃上下文”实现。需区分历史展示与模型输入起点，并验证重启后的读取。
 
 首批基础完成：`node/internal/autonomy` 独立保存配置、逐项 CAS Todo（含删除）与单个当前经验字段（dreaming 专用 CAS 提交方法）；主 Agent 全包 race 复验通过（1.420 秒）。此包尚未接入生产运行时，经验写入权限仍需运行时落实。侧栏底部重复自主设置按钮已移除，三组和总览保留，主 Agent NavRail 2 项测试通过。尚未完成默认 trigger、主会话/system prompt、dreaming、新 UI/Manage 和旧路径删除；不得将基础包通过视为完整改造完成。
+
+### 替换依赖核对
+
+- 旧 Auto API 集中在 `autonomy_api/actions/cycles`、`auto_cycle_controller`、`auto_intent_projector`；旧 `goal_runtime` 创建专属 Session。新激活不得调用这些路径。普通 goals API 与其生命周期共享代码需独立保留测试。
+- 独立事件源涉及 `node/internal/events`、`event_sources_api`、工具 `event_source_list`、scheduler event poller；须连同生产注入点一起移除。
+- 现有 `triggers.Store` 更新和 `Scheduler` fire 都明确拒绝 `condition.cmd`，因此脚本条件需要恢复并验证，不能直接宣称现有执行可复用。使用 Agent 归属的执行环境，明确超时、失败及条件不满足时的下一次检查；不可绕过原有授权规则。
+- `TurnBudget.MaxToolCalls` 计数单个工具，不能直接映射“工具轮次”。需核对 `MaxSteps` 和最终收尾的语义，实测一批多工具只消耗一轮、达到上限后无新增工具执行。
+- 下一批 API 使用新配置入口，开发期间不得在旧 UI 上伪装频率已生效。默认 trigger、同主会话及工具上限接通后才切换正式设置入口，最终删除旧入口而不是保留兼容层。
+
+### 职责与配置接线批次（基础验收通过）
+
+新增 `/auto-config`、`/todos`、只读 `/experience` API；职责和经验通过 Agent 归属 provider 进入实际模型请求的 system prompt，每个 Turn 冻结，下一轮（包括 trigger 输入）更新。provider 读取失败不调用模型。独立 `SimplifiedAutoPanel` 按新接口构建，保存与加载按 Agent 隔离、经验只读；尚未挂到正式设置入口。
+
+仍需注意：无活跃模型快照时，`SystemPromptForSession` 的上下文预览与压缩前缀暂未纳入新 provider；不能将模型请求已注入等同于全部诊断界面已对齐。Todo 暂只有持久化/HTTP 操作，模型工具及激活前读取尚未接入。当前新接口的激活频率与 dreaming 为配置存储，未驱动执行。旧 Auto 生产链仍待下一批替换移除，不是兼容承诺。
+
+主 Agent 独立验收：Session 全包 race 29.127 秒、Turn 全包 race 10.521 秒；API race 排除已有 Windows 截屏项和当时未完成的新主会话接缝项后通过（73.547 秒），随后新 Auto API 三项含该接缝 race 通过（1.700 秒）。接缝经真实 HTTP PUT→注册 Agent 主会话 `/v1/messages`→本地 httptest 模型服务，捕获请求 system 内容验证首次职责与下一轮修改，未调用真实提供商。新面板/侧栏共 6 项测试通过；OpenAPI YAML 解析及 86 个内部引用解析通过。完整路由合同仍有既有 policy grants 三个缺失路径，未将其宣称通过。未进行新版浏览器视觉验收。

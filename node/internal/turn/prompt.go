@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"context"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/externaltools"
@@ -83,7 +84,21 @@ type SystemPromptInput struct {
 	PromptCtx *promptcontext.Reader
 	// IncludeHistoryJournal 为 true 时在工作区说明中提示 Node 管理的审计目录不属于工作区。
 	IncludeHistoryJournal bool
+	// AgentPrompt is the frozen Agent-owned role/experience view for this Turn.
+	// It is loaded once before the model context snapshot is built.
+	AgentPrompt AgentPromptSnapshot
 }
+
+// AgentPromptSnapshot contains only trusted, Agent-scoped prompt material.
+// Providers must return a bounded snapshot and must not read another Agent's data.
+type AgentPromptSnapshot struct {
+	Responsibilities string
+	Experience       string
+}
+
+// AgentPromptProvider loads the latest Agent-owned prompt material at a Turn
+// boundary. The returned value is frozen for that Turn.
+type AgentPromptProvider func(context.Context, string) (AgentPromptSnapshot, error)
 
 // ChildSystemPromptInput 为 BuildChildSystemPrompt 所需上下文。
 type ChildSystemPromptInput struct {
@@ -115,6 +130,14 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 	runtimeRoot := strings.TrimSpace(in.RuntimeRoot)
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(staticSystemPrompt))
+	if role := strings.TrimSpace(in.AgentPrompt.Responsibilities); role != "" {
+		b.WriteString("\n\n## Agent 职责\n\n")
+		b.WriteString(role)
+	}
+	if experience := strings.TrimSpace(in.AgentPrompt.Experience); experience != "" {
+		b.WriteString("\n\n## Agent 经验\n\n")
+		b.WriteString(experience)
+	}
 
 	b.WriteString("\n\n## 工作区目录\n\n")
 	b.WriteString(formatWorkspaceSubdirsSection(in.IncludeHistoryJournal))

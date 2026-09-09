@@ -327,6 +327,7 @@ func newRuntimeWithPublisher(
 	rt.orch.SetRiskSubmitter(turnOpts.RiskSubmitter)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
 	rt.orch.SetHandbookReader(turnOpts.HandbookReader)
+	rt.orch.SetAgentPromptProvider(turnOpts.AgentPromptProvider)
 	modelRetries := turnOpts.MaxModelRetries
 	if modelRetries == 0 {
 		modelRetries = 2

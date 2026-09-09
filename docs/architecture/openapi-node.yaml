@@ -91,6 +91,48 @@ paths:
       responses:
         "200":
           description: 已归档
+  /v1/agents/{agent_id}/auto-config:
+    get:
+      summary: 获取简化 Auto 配置
+      description: 频率与 dreaming 当前仅保存配置，尚未驱动默认 trigger 或 dreaming 执行链路。
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: Auto 配置, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Profile"}}}}
+    put:
+      summary: 保存简化 Auto 配置
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ProfileUpdate"}}}}
+      responses:
+        "200": {description: 已保存, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Profile"}}}}
+        "409": {description: revision 冲突}
+  /v1/agents/{agent_id}/experience:
+    get:
+      summary: 获取 Auto 经验
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: 经验；不存在时返回 experience null, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ExperienceResponse"}}}}
+  /v1/agents/{agent_id}/todos:
+    get:
+      summary: 列出 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: Todo 列表, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoList"}}}}
+    post:
+      summary: 创建 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoCreate"}}}}
+      responses: {"201": {description: 已创建, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Todo"}}}}}
+  /v1/agents/{agent_id}/todos/{todo_id}:
+    patch:
+      summary: CAS 更新 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }, {name: todo_id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoUpdate"}}}}
+      responses: {"200": {description: 已更新, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Todo"}}}}, "409": {description: revision 冲突}}
+    delete:
+      summary: CAS 删除 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }, {name: todo_id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoDelete"}}}}
+      responses: {"200": {description: 已删除, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoDeleteResponse"}}}}, "409": {description: revision 冲突}}
   /v1/agents/{agent_id}/handbook:
     get:
       summary: 浏览 Agent 文件手册目录或读取文件
@@ -1587,6 +1629,77 @@ components:
         action: {type: string, enum: [pause_goal, resume_goal, disable_auto, enable_auto]}
         expected_profile_revision: {type: integer, format: int64, minimum: 0}
         expected_goal_revision: {type: integer, format: int64, minimum: 0}
+    AutonomyV2Profile:
+      type: object
+      required: [agent_id, revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]
+      properties:
+        agent_id: {type: string}
+        revision: {type: integer, format: int64}
+        responsibility: {type: string}
+        wake_interval_seconds: {type: integer, format: int64, minimum: 0}
+        max_tool_rounds: {type: integer, minimum: 1}
+        dreaming_enabled: {type: boolean}
+        dreaming_time: {type: string, description: 本地时间 HH:MM}
+        timezone: {type: string}
+    AutonomyV2ProfileUpdate:
+      type: object
+      required: [expected_revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 0}
+        responsibility: {type: string}
+        wake_interval_seconds: {type: integer, format: int64, minimum: 0}
+        max_tool_rounds: {type: integer, minimum: 1}
+        dreaming_enabled: {type: boolean}
+        dreaming_time: {type: string}
+        timezone: {type: string}
+    AutonomyV2Experience:
+      type: object
+      required: [agent_id, revision, content, updated_at]
+      properties:
+        agent_id: {type: string}
+        revision: {type: integer, format: int64}
+        content: {type: string}
+        updated_at: {type: string, format: date-time}
+    AutonomyV2ExperienceResponse:
+      oneOf:
+        - {$ref: '#/components/schemas/AutonomyV2Experience'}
+        - type: object
+          required: [experience]
+          properties:
+            experience: {allOf: [{$ref: '#/components/schemas/AutonomyV2Experience'}], nullable: true}
+    AutonomyV2Todo:
+      type: object
+      required: [id, agent_id, text, status, revision]
+      properties:
+        id: {type: string}
+        agent_id: {type: string}
+        text: {type: string}
+        status: {type: string, enum: [pending, in_progress, completed]}
+        revision: {type: integer, format: int64}
+    AutonomyV2TodoList:
+      type: object
+      required: [todos]
+      properties:
+        todos: {type: array, items: {$ref: '#/components/schemas/AutonomyV2Todo'}}
+    AutonomyV2TodoCreate:
+      type: object
+      required: [text]
+      properties: {text: {type: string}}
+    AutonomyV2TodoUpdate:
+      type: object
+      required: [expected_revision, text, status]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+        text: {type: string}
+        status: {type: string, enum: [pending, in_progress, completed]}
+    AutonomyV2TodoDelete:
+      type: object
+      required: [expected_revision]
+      properties: {expected_revision: {type: integer, format: int64, minimum: 1}}
+    AutonomyV2TodoDeleteResponse:
+      type: object
+      required: [deleted]
+      properties: {deleted: {type: boolean, const: true}}
     AutoProfile:
       type: object
       properties:

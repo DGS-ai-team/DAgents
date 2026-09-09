@@ -109,6 +109,9 @@ type Orchestrator struct {
 	executionGuard    ExecutionGuard
 
 	systemPromptBuilder     SystemPromptBuilder
+	agentPromptProvider     AgentPromptProvider
+	agentPromptMu           sync.Mutex
+	agentPromptBySession    map[string]AgentPromptSnapshot
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
 	riskSubmitter           RiskSubmitter
@@ -156,6 +159,24 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetAgentPromptProvider binds the Agent-owned role/experience loader. It is
+// consulted only when a new model context snapshot is built; child runtimes do
+// not inherit its data.
+func (o *Orchestrator) SetAgentPromptProvider(provider AgentPromptProvider) {
+	if o != nil {
+		o.agentPromptProvider = provider
+	}
+}
+
+func (o *Orchestrator) resetAgentPrompt(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.agentPromptMu.Lock()
+	delete(o.agentPromptBySession, sessionID)
+	o.agentPromptMu.Unlock()
 }
 
 // SetContextInjectionBuilder 注入动态上下文构造器；nil 时使用默认
@@ -430,6 +451,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	history *[]llm.Message,
 	userMsg llm.Message,
 ) StepOutcome {
+	o.resetAgentPrompt(sessionID)
 	if userMsg.Role == "" {
 		userMsg.Role = "user"
 	}
@@ -673,6 +695,25 @@ func (o *Orchestrator) runOneStep(
 		// date must not be read twice around midnight and produce a system
 		// prompt/context mismatch.
 		promptInput := o.systemPromptInput(sessionID)
+		if o.agentPromptProvider != nil && !o.isChildSession {
+			o.agentPromptMu.Lock()
+			agentPrompt, cached := o.agentPromptBySession[sessionID]
+			o.agentPromptMu.Unlock()
+			if !cached {
+				var promptErr error
+				agentPrompt, promptErr = o.agentPromptProvider(ctx, o.agentID)
+				if promptErr != nil {
+					return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("load agent prompt: %w", promptErr)}
+				}
+				o.agentPromptMu.Lock()
+				if o.agentPromptBySession == nil {
+					o.agentPromptBySession = make(map[string]AgentPromptSnapshot)
+				}
+				o.agentPromptBySession[sessionID] = agentPrompt
+				o.agentPromptMu.Unlock()
+			}
+			promptInput.AgentPrompt = agentPrompt
+		}
 		systemPrompt = o.buildSystemPromptWithInput(sessionID, promptInput)
 		injections := o.buildContextInjectionsWithInput(promptInput)
 		if o.handbookReader != nil && !o.isChildSession {

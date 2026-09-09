@@ -34,6 +34,10 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
+	// AgentPromptProvider loads the current Agent-owned responsibilities,
+	// experience and todo snapshot at each new Turn boundary. It is never
+	// inherited by temporary child runtimes.
+	AgentPromptProvider turn.AgentPromptProvider
 	// AutoAgent is trusted runtime metadata populated from the Agent snapshot;
 	// model-facing requests cannot set it.
 	AutoAgent bool

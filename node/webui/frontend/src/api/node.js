@@ -188,6 +188,36 @@ export function agentAutonomyAction(agentId, payload = {}) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/actions`, { method: "POST", body: payload });
 }
 
+// Simplified Auto configuration API. These endpoints intentionally do not
+// depend on the retired Goal/Cycle autonomy resources.
+export function getAutoConfig(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`);
+}
+
+export function putAutoConfig(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`, {}, { method: "PUT", body: payload });
+}
+
+export function listAgentTodos(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos`);
+}
+
+export function createAgentTodo(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos`, {}, { method: "POST", body: payload });
+}
+
+export function updateAgentTodo(agentId, todoId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, {}, { method: "PATCH", body: payload });
+}
+
+export function getAutoExperience(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/experience`);
+}
+
+export function deleteAgentTodo(agentId, todoId, revision) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, {}, { method: "DELETE", body: { revision } });
+}
+
 export function getAutoOverview(params = {}) {
   return apiFetch("/v1/auto/overview", { params });
 }

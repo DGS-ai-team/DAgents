@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
+	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
@@ -66,6 +67,7 @@ type Server struct {
 	maintenanceSched     *maintenanceScheduler
 	startupErr           error
 	goalStore            *goals.Store
+	autonomyStore        *autonomy.Store
 	eventStore           *events.Store
 	goalWake             goals.WakeFunc
 	goalWakeMu           sync.Mutex
@@ -306,6 +308,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	duplicateToolCallEnabled := cfg.DuplicateToolCallHookEnabled()
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	toolResultEnabled := cfg.ToolResultHookEnabled()
+	var autonomyStore *autonomy.Store
+	var autonomyInitErr error
+	if opened, err := autonomy.Open(filepath.Join(cfg.RuntimeDir(), "autonomy.json")); err != nil {
+		logger.Warn("autonomy store init failed", "error", err)
+		autonomyInitErr = err
+	} else {
+		autonomyStore = opened
+	}
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		WorkspaceRoot: cfg.RuntimeDir(),
@@ -344,6 +354,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		MemoryCandidateQueueSize: cfg.Memory.CandidateQueueSize,
 		MemoryCandidateMaxItems:  cfg.Memory.MaxCandidates,
 		MemoryCoreBudgetTokens:   cfg.Memory.CoreBudgetTokens,
+		AgentPromptProvider: func(_ context.Context, agentID string) (turn.AgentPromptSnapshot, error) {
+			if autonomyStore == nil {
+				return turn.AgentPromptSnapshot{}, nil
+			}
+			p, _ := autonomyStore.GetProfile(agentID)
+			e, _ := autonomyStore.GetExperience(agentID)
+			return turn.AgentPromptSnapshot{Responsibilities: p.Responsibility, Experience: e.Content}, nil
+		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:            true,
@@ -360,7 +378,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
-	var startupErr error
+	startupErr := autonomyInitErr
 	var goalStore *goals.Store
 	var eventStore *events.Store
 	if opened, err := goals.OpenStore(filepath.Join(cfg.RuntimeDir(), "goals.json")); err != nil {
@@ -538,6 +556,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched:         triggerSched,
 		startupErr:           startupErr,
 		goalStore:            goalStore,
+		autonomyStore:        autonomyStore,
 		eventStore:           eventStore,
 		registrar:            registrar,
 		updateChecker:        updateChecker,
