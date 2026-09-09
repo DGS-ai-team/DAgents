@@ -25,22 +25,24 @@ var ErrEventSchedulingUnsupported = errors.New("event scheduling is not supporte
 const CurrentSchemaVersion = 2
 
 type disk struct {
-	SchemaVersion            int                           `json:"schema_version,omitempty"`
-	Goals                    map[string]Goal               `json:"goals"`
-	Runs                     map[string][]Run              `json:"runs"`
-	Profiles                 map[string]AutoProfile        `json:"profiles,omitempty"`
-	Usage                    map[string]AgentUsage         `json:"usage,omitempty"`
-	UsageReceipts            map[string]UsageReceipt       `json:"usage_receipts,omitempty"`
-	MigrationIssues          map[string]MigrationIssue     `json:"migration_issues,omitempty"`
-	ScheduleIntents          map[string]ScheduleIntent     `json:"schedule_intents,omitempty"`
-	FinalizationFingerprints map[string]string             `json:"finalization_fingerprints,omitempty"`
-	MaintenanceReceipts      map[string]MaintenanceReceipt `json:"maintenance_receipts,omitempty"`
+	SchemaVersion            int                              `json:"schema_version,omitempty"`
+	Goals                    map[string]Goal                  `json:"goals"`
+	Runs                     map[string][]Run                 `json:"runs"`
+	Profiles                 map[string]AutoProfile           `json:"profiles,omitempty"`
+	Usage                    map[string]AgentUsage            `json:"usage,omitempty"`
+	UsageReceipts            map[string]UsageReceipt          `json:"usage_receipts,omitempty"`
+	MigrationIssues          map[string]MigrationIssue        `json:"migration_issues,omitempty"`
+	ScheduleIntents          map[string]ScheduleIntent        `json:"schedule_intents,omitempty"`
+	FinalizationFingerprints map[string]string                `json:"finalization_fingerprints,omitempty"`
+	MaintenanceReceipts      map[string]MaintenanceReceipt    `json:"maintenance_receipts,omitempty"`
+	MaintenanceOccurrences   map[string]MaintenanceOccurrence `json:"maintenance_occurrences,omitempty"`
 }
 type Store struct {
-	mu                sync.RWMutex
-	path              string
-	data              disk
-	registeredSources map[string]map[string]bool
+	mu                  sync.RWMutex
+	path                string
+	data                disk
+	registeredSources   map[string]map[string]bool
+	recoveryOccurrences map[string]bool
 }
 
 // SetRegisteredSources supplies the current owner-independent source names
@@ -117,7 +119,7 @@ func cloneRuns(in []Run) []Run {
 type WakeFunc func(context.Context, Goal, Run) (string, error)
 
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, data: disk{SchemaVersion: CurrentSchemaVersion, Goals: map[string]Goal{}, Runs: map[string][]Run{}, Profiles: map[string]AutoProfile{}, Usage: map[string]AgentUsage{}, UsageReceipts: map[string]UsageReceipt{}, MaintenanceReceipts: map[string]MaintenanceReceipt{}, MigrationIssues: map[string]MigrationIssue{}, ScheduleIntents: map[string]ScheduleIntent{}, FinalizationFingerprints: map[string]string{}}}
+	s := &Store{path: path, data: disk{SchemaVersion: CurrentSchemaVersion, Goals: map[string]Goal{}, Runs: map[string][]Run{}, Profiles: map[string]AutoProfile{}, Usage: map[string]AgentUsage{}, UsageReceipts: map[string]UsageReceipt{}, MaintenanceReceipts: map[string]MaintenanceReceipt{}, MaintenanceOccurrences: map[string]MaintenanceOccurrence{}, MigrationIssues: map[string]MigrationIssue{}, ScheduleIntents: map[string]ScheduleIntent{}, FinalizationFingerprints: map[string]string{}}}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -141,6 +143,7 @@ func OpenStore(path string) (*Store, error) {
 		}
 	}
 	s.data = loaded
+	s.recoveryOccurrences = map[string]bool{}
 	s.data.SchemaVersion = CurrentSchemaVersion
 	if s.data.Goals == nil {
 		s.data.Goals = map[string]Goal{}
@@ -159,6 +162,14 @@ func OpenStore(path string) (*Store, error) {
 	}
 	if s.data.MaintenanceReceipts == nil {
 		s.data.MaintenanceReceipts = map[string]MaintenanceReceipt{}
+	}
+	if s.data.MaintenanceOccurrences == nil {
+		s.data.MaintenanceOccurrences = map[string]MaintenanceOccurrence{}
+	}
+	for key, occurrence := range s.data.MaintenanceOccurrences {
+		if occurrence.Status == MaintenanceOccurrencePending {
+			s.recoveryOccurrences[key] = true
+		}
 	}
 	if s.data.MigrationIssues == nil {
 		s.data.MigrationIssues = map[string]MigrationIssue{}
@@ -248,6 +259,12 @@ func (s *Store) SaveProfile(profile AutoProfile, expectedRevision int64, now tim
 			return AutoProfile{}, fmt.Errorf("invalid timezone: %w", err)
 		}
 	}
+	if err := ValidateMaintenanceSchedule(profile.MaintenanceSchedule); err != nil {
+		return AutoProfile{}, err
+	}
+	if profile.MaintenanceEnabled && strings.TrimSpace(profile.MaintenanceSchedule) == "" {
+		return AutoProfile{}, fmt.Errorf("maintenance schedule is required when maintenance is enabled")
+	}
 	if profile.BusinessTokenBudget < 0 || profile.MaintenanceTokenBudget < 0 || profile.TotalTokenBudget < 0 {
 		return AutoProfile{}, fmt.Errorf("profile budgets cannot be negative")
 	}
@@ -263,6 +280,14 @@ func (s *Store) SaveProfile(profile AutoProfile, expectedRevision int64, now tim
 	profile.AgentID = agentID
 	profile.Revision = old.Revision + 1
 	profile.UpdatedAt = now.UTC()
+	maintenanceChanged := !exists || old.Enabled != profile.Enabled || old.MaintenanceEnabled != profile.MaintenanceEnabled || old.MaintenanceSchedule != profile.MaintenanceSchedule || old.Timezone != profile.Timezone
+	if maintenanceChanged && profile.MaintenanceEnabled {
+		profile.MaintenanceRevision = old.MaintenanceRevision + 1
+		profile.MaintenanceEpochAt = now.UTC()
+	} else {
+		profile.MaintenanceRevision = old.MaintenanceRevision
+		profile.MaintenanceEpochAt = old.MaintenanceEpochAt
+	}
 	if exists && profile.CurrentGoalID == "" {
 		profile.CurrentGoalID = old.CurrentGoalID
 	}
@@ -854,6 +879,10 @@ func (s *Store) ApplyAutoAction(agentID, cycleID, action string, expectedProfile
 		p.Enabled = false
 	}
 	if action == "enable_auto" {
+		if !p.Enabled {
+			p.MaintenanceRevision++
+			p.MaintenanceEpochAt = now.UTC()
+		}
 		p.Enabled = true
 	}
 	if hasGoal && (action == "pause_goal" || action == "disable_auto") && g.Status != StatusCompleted && g.Status != StatusStopped {

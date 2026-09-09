@@ -1,6 +1,10 @@
 package goals
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 type Status string
 
@@ -62,6 +66,10 @@ type AutoProfile struct {
 	PlanMode               string    `json:"plan_mode"`
 	Timezone               string    `json:"timezone"`
 	WorkSchedule           string    `json:"work_schedule"`
+	MaintenanceEnabled     bool      `json:"maintenance_enabled"`
+	MaintenanceSchedule    string    `json:"maintenance_schedule"`
+	MaintenanceRevision    int64     `json:"maintenance_revision,omitempty"`
+	MaintenanceEpochAt     time.Time `json:"maintenance_epoch_at,omitempty"`
 	CycleDurationSeconds   int64     `json:"cycle_duration_seconds,omitempty"`
 	CurrentGoalID          string    `json:"current_goal_id,omitempty"`
 	AuthorizationRef       string    `json:"authorization_ref,omitempty"`
@@ -70,6 +78,20 @@ type AutoProfile struct {
 	MaintenanceTokenBudget int64     `json:"maintenance_token_budget,omitempty"`
 	TotalTokenBudget       int64     `json:"total_token_budget,omitempty"`
 	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// ValidateMaintenanceSchedule accepts the first supported maintenance
+// schedule form: "daily HH:MM" in the profile timezone.
+func ValidateMaintenanceSchedule(schedule string) error {
+	schedule = strings.TrimSpace(schedule)
+	if schedule == "" {
+		return nil
+	}
+	parsed, err := ParseWorkSchedule(schedule)
+	if err != nil || parsed == nil || parsed.Kind != "daily" {
+		return fmt.Errorf("maintenance schedule must use daily HH:MM")
+	}
+	return nil
 }
 
 // AgentUsage is Agent-scoped; a new cycle cannot reset accumulated usage.

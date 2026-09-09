@@ -1,0 +1,37 @@
+# Auto 每日维护技术接缝（阶段 F）
+
+日期：2026-09-09。依据：[实施方案 §5.3](2026-09-08-auto-employee-implementation-plan.md)。当前分层实施，生产每日调度尚未验收完成。
+
+## 输入、记忆与用量
+
+维护输入来自 SQLite 已完成 Turn 快照，覆盖未发生压缩的对话。完成事件和快照同一事务提交；读取失败不跳过 cursor，无新增输入不调用模型。MaintenanceRunner.RunOnce 处理最早一段未处理快照。
+
+候选通过 Agent 私有 LocalService 写入，记忆、operation 和 cursor 同一 SQLite 事务。Goal Store receipt 保存预留、候选输出及实际用量。两种存储通过 operation ID 恢复，不声称跨存储原子事务；恢复先处理待结算结果，再读取新增输入。未知用量阻断新预留，不当作零消耗。维护累计计入 Agent 总额度，换日期和业务周期不清零。
+
+## 每日日程与 occurrence
+
+AutoProfile 增加 maintenance_enabled、maintenance_schedule、maintenance_revision、maintenance_epoch_at。日程使用严格 daily HH:MM 与 IANA 时区。
+
+- 维护版本由存储层维护，普通岗位描述或预算修改不改变它；维护配置变化及重新启用更新生效起点。
+- 不补跑启用前时刻；离线错过多个日期最多考虑最近一次，不形成补跑队列。
+- DST 缺失时刻顺延，重复当地时刻按日期与维护版本去重。
+- ClaimMaintenance 原子保存 occurrence；重复 tick 不重新领取，也不把正在运行的 pending 当作崩溃。
+- OpenStore 记录当时已有 pending 的 key，新 claim 不受启动恢复标记影响。
+- 同 Agent 的 pending 或 recovery_required 均阻止新的日期领取，不能用新日期绕过未确认结果。
+- FinishMaintenance 更新既有 occurrence 并保留历史。停用后仍可读历史，最近记录采用确定性排序。
+
+occurrence 负责每日运行协调，receipt 负责模型调用及用量结算；controller 必须关联两者，不能将 occurrence 完成直接等同于候选已经提交。
+
+## 剩余集成门槛
+
+1. 共享执行槽正在接入 session consumer 和维护 API。聊天/业务优先；取消维护不等于实际退出，函数返回后才释放槽。
+2. 每日 controller 尚待接入日程存储。每天应在时间、预算界限内处理增量，不能每天只处理一个快照而持续积压。
+3. API/UI 需提供可信历史、下一安排和恢复原因。显示累计维护用量，未知用量显示待对账，不把累计值标成单次消耗。
+4. 手册版本化底座还需接入候选提取、固定验证、运行时快照、差异和回滚入口。结构校验与提交的验证记录不等于已验证模型建议安全。
+5. 发布前验证旧版本拒绝读取不兼容新状态、重启和故障恢复、真实配置 LLM、至少一次每日维护与两个岗位周期，以及 Node/Manage 联调和视觉验收。
+
+## 独立证据
+
+完成快照 d0c7f416、记忆事务 3e3d47d0、receipt 恢复 22cde74e。日程存储全 Goals race 独立通过（2.191s），覆盖生效起点、重复领取、恢复、跨日阻断、重新启用、普通 profile 修改及 DST。
+
+手动 API 两段快照测试已独立通过：提取两次，第三次无新增跳过，cursor 1/2/2，累计维护用量 6；使用注入提取器，不计作真实 LLM 验收。后续结果以[实施台账](2026-09-08-auto-employee-implementation-progress.md)为准。
