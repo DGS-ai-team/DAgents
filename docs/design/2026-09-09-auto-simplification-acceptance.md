@@ -191,3 +191,11 @@ Manage日志显示该进程本地端口49972的WS被接受；随后出现每15�
 移除queue.Envelope的旧GoalID/RunID投递字段、session持有/传播、工具Goal上下文及旧child-tool特判；移除RiskSubmitter从Agent构造、TurnOptions、runtime到orchestrator的注入、关闭和提交链。对应旧功能专属测试删除，普通policy/ASK、usage、child-agent通用检查及真实历史消息结构保留，旧trigger拒绝栅栏未移除。
 
 root完整Session/Turn/Policy race通过（65.615/10.880/1.272秒），Tools/agentruntime普通全包通过（13.496/1.826秒）。随后queue字段删除的最终版本通过Queue race（1.576秒）及API编译检查；API本轮仅编译，不声明完整API回归。尚未清理goals/events/maintenance等无生产调用的底层包，本批不作为旧架构全部删除的证明。运行服务仍为已提交WS修复版，不包含本批清理。
+
+### 旧独立事件源删除及本轮未决项
+
+删除无生产接线的node/internal/events probe实现、专属测试/设计文档及Registry孤立字段；保留现有trigger脚本条件、SSE和历史事件存储。events.json退役文件不阻断启动的回归用例保留，不建立数据迁移。root Startup/Retired专项普通测试通过，Triggers全包race通过（2.037秒）。
+
+Luna运行API全包时报告Auto起源忙碌测试一次PendingDeliveryID为空；root随后精确执行该测试race三次通过（4.369秒），尚不能解释首次失败，继续诊断且不归因于既存问题。
+
+真实18766工作组空页截图发现：提示点击隐藏的+新建，且未选择工作组被表示为实时离线。已安排复用既有创建入口、准确区分未选择与连接错误；本项尚未完成。

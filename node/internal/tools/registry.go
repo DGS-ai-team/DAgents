@@ -13,7 +13,6 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
-	"github.com/DGS-ai-team/DAgents/node/internal/events"
 	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
@@ -45,7 +44,6 @@ type Registry struct {
 	triggerStore           *triggers.Store
 	triggerSched           *triggers.Scheduler
 	agentID                string
-	eventStore             *events.Store
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
 	browser                *browser.Manager
