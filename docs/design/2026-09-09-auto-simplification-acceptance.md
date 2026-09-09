@@ -245,3 +245,10 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 重建 Node 前端和 Go 二进制，切换 18766 到 `dagents-node-latest.exe`；保留原运行目录、环境、配置与会话。切换前两台验收 Agent 均无活动轮次、排队任务和审批；切换后 UI HTTP 200，资源指纹与本次构建一致。
 - 在实际嵌入式 UI、390×844 暗色视口复验 ContextSettings：诊断说明正常换行，“查看”保持单行，箭头不被压缩。局部 scoped 样式修复验收通过。
 - 同一版本模型与连接页上、下区域截图检查：模型卡片、保存按钮、Manage 地址及工作组开关均位于容器内，无重叠与截断。本轮未修改连接配置。
+
+### 2026-09-10 最终回归批次
+
+- root 执行 `npm test --prefix node/webui/frontend -- --run`：66 个测试文件、369 项测试全部通过。Vue 编译器对 const reactive v-model 的自动转换提示仍存在，未造成测试失败。
+- root 执行 `py -3.13 -m unittest discover -s tests -p "test_*.py"`：197 项测试全部通过（43.315 秒）。
+- root 执行 `npm run build --prefix manage/console/frontend`：构建通过；第三方 page-agent eval 与产物体积提示仍存在，不将构建通过等同于这些提示已消除。
+- 同步开发方案中的旧架构删除和工作组 WS 鉴权状态；默认 trigger 恢复实际界面及剩余视觉范围仍未宣告完成。
