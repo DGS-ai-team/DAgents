@@ -115,7 +115,7 @@ async function recoverPending(item) {
   busyKey.value = `recover:${id}`;
   error.value = "";
   try {
-    const updated = await api.recoverTrigger(id, deliveryId);
+    const updated = await api.recoverTrigger(id, deliveryId, item.revision);
     replaceTrigger(updated);
     statusMessage.value = `已丢弃旧投递「${item.name || id}」，任务保持禁用；请核对后手动启用。`;
   } catch (e) {

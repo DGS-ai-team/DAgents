@@ -142,3 +142,9 @@ reconcileAutoDefaults 跳过已标记 RecoveryRequired 的默认 trigger，保�
 ConditionRunner 统一使用带 trigger/delivery/session/Agent/revision/occurrence 的请求及 matched/not_matched/awaiting_approval 结果，不保留未上线的 bool runner 兼容分支。待审批保留 claim 与原任务正文、reason、payload；CompleteCondition 通过持久 CAS 防止重复投递，入队成功后由消费者确认 pending，提交不确定时不自动回滚重放。拒绝释放内存与持久 claim，允许后续检查；重启冻结记录必须先显式恢复，不允许通过 completion 绕过。
 
 主 Agent Triggers 全包 race 1.987 秒通过，测试实际覆盖并发 completion 一次投递、manual nil occurrence、原任务参数保留、重开后拒绝绕过恢复、拒绝后下一次检查、旧 revision/无条件 pending 拒绝。随后补齐显式恢复清除 condition 元数据的回归。Manager 专项 race 3.855 秒通过，仍不等同于现有 HTTP 审批入口和生产 scheduler 已接通，后续接线保持进行中。
+
+### 默认唤醒恢复入口
+
+Auto 设置独立读取默认 trigger，按真实 recovery_required 显示新页面管理入口，当前草稿不因导航丢失；刷新状态与配置草稿分离。缺失 trigger 可同步重建，已恢复但禁用、频率不符以及关闭保存部分失败均保留同步入口。恢复面板发送准确 delivery_id 与 revision。dreaming recovery_pending 不触发此入口。
+
+主 Agent 前端全量 64 文件、356 项测试通过，面板14项覆盖真实路由解析、状态隔离、404同步、503部分保存、关闭分支与草稿保留。浏览器视觉验收仍未进行。

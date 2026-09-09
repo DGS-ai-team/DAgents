@@ -497,6 +497,10 @@ export function listTriggers() {
   return apiFetch("/v1/triggers");
 }
 
+export function getTrigger(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`);
+}
+
 export function createTrigger(body) {
   return apiFetch("/v1/triggers", { method: "POST", body });
 }
@@ -532,8 +536,10 @@ export function getTriggerHistory(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/history`);
 }
 
-export function recoverTrigger(triggerId, deliveryId) {
-  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/recover`, { method: "POST", body: { delivery_id: deliveryId } });
+export function recoverTrigger(triggerId, deliveryId, revision) {
+  const body = { delivery_id: deliveryId };
+  if (revision !== undefined && revision !== null) body.revision = revision;
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/recover`, { method: "POST", body });
 }
 
 export function uploadSkillToManage({ path, skillId, version, name, publish = false }) {

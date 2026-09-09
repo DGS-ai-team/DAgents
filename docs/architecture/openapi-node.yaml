@@ -1368,6 +1368,10 @@ components:
       type: object
       required: [delivery_id]
       properties:
+        revision:
+          type: integer
+          format: int64
+          description: 当前 trigger 的 revision；界面恢复请求应携带读取到的值，防止陈旧确认。
         delivery_id:
           type: string
           description: 必须与触发器当前 pending_delivery_id 完全匹配
