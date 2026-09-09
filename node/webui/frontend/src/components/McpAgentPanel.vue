@@ -173,6 +173,8 @@ onUnmounted(() => stopConfigurationEvents());
 
 <style scoped>
 .mcp-panel__head,.mcp-panel__server-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.mcp-panel__head > div:first-child { min-width: 0; }
+.mcp-panel__head > button { flex: 0 0 auto; white-space: nowrap; }
 .mcp-panel__server-head { justify-content:flex-start; }
 .mcp-panel__server-toggle { display:flex; align-items:center; gap:8px; min-width:150px; font-size:13px; font-weight:600; }
 .mcp-panel__status { font-size:11px; color:var(--color-text-muted); }
