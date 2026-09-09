@@ -6,7 +6,6 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
@@ -93,10 +92,6 @@ func (r *runtime) runTurnStepAtEpoch(
 	}
 	executionEpoch := r.sessionEpoch
 	turnCtx, cancel := context.WithCancel(parent)
-	goalID, runID := r.goalID, r.runID
-	if goalID != "" && runID != "" {
-		turnCtx = tools.WithGoalRun(turnCtx, goalID, runID)
-	}
 	cancelToken := &struct{}{}
 	turnCtx = turn.WithExecutionContext(turnCtx, execution)
 	r.turnCancel = cancel

@@ -59,8 +59,7 @@ type runtime struct {
 	// 控制/恢复队列
 	queue *queue.MessageQueue
 	// 编排器
-	orch          *turn.Orchestrator
-	riskSubmitter turn.RiskSubmitter
+	orch *turn.Orchestrator
 	// New Turn/Step lifecycle coordinator; Orchestrator remains the execution
 	// engine, while lifecycle authority lives entirely in this projection.
 	turnCoordinator *turn.TurnCoordinator
@@ -104,8 +103,6 @@ type runtime struct {
 	// turnFenceActive distinguishes production model steps from direct lifecycle
 	// transitions that intentionally do not install a provider fence.
 	turnFenceActive bool
-	goalID          string
-	runID           string
 	onLifecycle     func(string, turn.CoordinatorSnapshot) error
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
@@ -278,7 +275,6 @@ func newRuntimeWithPublisher(
 		autoAgent:                turnOpts.AutoAgent,
 		budgetResolver:           turnOpts.BudgetResolver,
 		onLifecycle:              turnOpts.OnLifecycle,
-		riskSubmitter:            turnOpts.RiskSubmitter,
 		memoryService:            turnOpts.MemoryService,
 	}
 	if len(turnOpts.initialDreamingAttempt) > 0 {
@@ -353,7 +349,6 @@ func newRuntimeWithPublisher(
 	)
 	rt.orch.SetRuntimeRoot(turnOpts.RuntimeDir)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
-	rt.orch.SetRiskSubmitter(turnOpts.RiskSubmitter)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
 	rt.orch.SetHandbookReader(turnOpts.HandbookReader)
 	rt.orch.SetAgentPromptProvider(turnOpts.AgentPromptProvider)
@@ -909,18 +904,6 @@ func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 }
 
 func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope, source turn.TurnSource) bool {
-	if env.GoalID != "" && env.RunID != "" {
-		r.mu.Lock()
-		r.goalID, r.runID = env.GoalID, env.RunID
-		r.mu.Unlock()
-	} else if source == turn.TurnSourceHuman {
-		r.mu.Lock()
-		r.goalID, r.runID = "", ""
-		r.mu.Unlock()
-	}
-	if env.GoalID != "" && env.RunID != "" {
-		parent = tools.WithGoalRun(parent, env.GoalID, env.RunID)
-	}
 	if !r.sessionEpochCurrent(env.SessionEpoch) {
 		r.logger.Info("stale human message dropped after session clear", "session_id", r.session.ID)
 		return true
@@ -1622,9 +1605,6 @@ func (r *runtime) requestStop() {
 		r.inputBox.Close()
 	}
 	r.queue.Close()
-	if closer, ok := r.riskSubmitter.(interface{ Close() }); ok {
-		closer.Close()
-	}
 }
 
 func (r *runtime) waitStopped() {

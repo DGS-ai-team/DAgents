@@ -484,9 +484,6 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 			return "", fmt.Errorf("handbook maintenance is limited to handbook/ paths")
 		}
 	}
-	if GoalIDFromContext(ctx) != "" && (strings.HasPrefix(strings.TrimSpace(name), "trigger_") || strings.HasSuffix(strings.TrimSpace(name), "_temporary_agent")) {
-		return "", fmt.Errorf("%s is unavailable during a managed goal run", name)
-	}
 	if err := r.rejectIfDisabled(ctx, name); err != nil {
 		return "", err
 	}

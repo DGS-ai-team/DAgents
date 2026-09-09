@@ -29,28 +29,6 @@ type triggerSessionTargetContextKey struct{}
 type enabledBypassContextKey struct{}
 
 type approvalIDContextKey struct{}
-type goalContextKey struct{}
-type runContextKey struct{}
-
-func WithGoalRun(ctx context.Context, goalID, runID string) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx = context.WithValue(ctx, goalContextKey{}, strings.TrimSpace(goalID))
-	return context.WithValue(ctx, runContextKey{}, strings.TrimSpace(runID))
-}
-func GoalIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(goalContextKey{}).(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
-func RunIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(runContextKey{}).(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
 
 // WithEnabledBypass 跳过 Registry.enabledOnly 检查（子 Agent 在自身 allowlist 校验后使用）。
 func WithEnabledBypass(ctx context.Context) context.Context {

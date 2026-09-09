@@ -51,12 +51,6 @@ type SkillAccess struct {
 // the session-owned lifecycle projection cannot accept the fact.
 type LifecycleCommandSink func(sessionID string, command TurnCommand) error
 
-// RiskSubmitter receives a copy of the final tool policy decision for
-// asynchronous shadow analysis. It cannot alter execution or the decision.
-type RiskSubmitter interface {
-	Submit(hooks.RiskObservationInput) bool
-}
-
 // Orchestrator 驱动 LLM + 工具循环并通过 Hub 推送 SSE。
 type Orchestrator struct {
 	llm             llm.Client
@@ -116,7 +110,6 @@ type Orchestrator struct {
 	agentPromptBySession    map[string]AgentPromptSnapshot
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
-	riskSubmitter           RiskSubmitter
 	lifecycleCommand        LifecycleCommandSink
 	toolBudgetCheck         func(sessionID string) (bool, string)
 	toolRetryCheck          func(sessionID string) (bool, string)
@@ -137,14 +130,6 @@ func appendReservedFinalSummaryInstruction(systemPrompt string) string {
 		return reservedFinalSummaryInstruction
 	}
 	return systemPrompt + "\n\n" + reservedFinalSummaryInstruction
-}
-
-// SetRiskSubmitter enables an explicitly configured shadow observer. Nil
-// leaves the normal tool path unchanged.
-func (o *Orchestrator) SetRiskSubmitter(submitter RiskSubmitter) {
-	if o != nil {
-		o.riskSubmitter = submitter
-	}
 }
 
 // SetRuntimeRoot separates Node-managed runtime assets from the Agent

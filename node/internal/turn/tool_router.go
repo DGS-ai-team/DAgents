@@ -69,12 +69,6 @@ func (o *Orchestrator) processToolCalls(
 		}
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
-			if tools.GoalIDFromContext(ctx) != "" {
-				msg := "rejected: child agents are unavailable during a managed goal run"
-				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
-				continue
-			}
 			if o.isChildSession {
 				msg := "rejected: child_forbidden"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
@@ -88,7 +82,6 @@ func (o *Orchestrator) processToolCalls(
 				continue
 			}
 			decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
-			o.submitRiskObservation(sessionID, tc, decision)
 			switch decision.Action {
 			case policy.ActionDeny:
 				msg := hooks.ToolDenyMessage(decision)
@@ -138,7 +131,6 @@ func (o *Orchestrator) processToolCalls(
 			continue
 		}
 		decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
-		o.submitRiskObservation(sessionID, tc, decision)
 		switch decision.Action {
 		case policy.ActionDeny:
 			o.markAutoIdleIneligible(sessionID)
@@ -211,26 +203,6 @@ func autoIdleReadOnlyTool(name string) bool {
 	default:
 		return false
 	}
-}
-
-func (o *Orchestrator) submitRiskObservation(sessionID string, tc llm.ToolCall, decision hooks.ToolBeforeEachResult) {
-	if o == nil || o.riskSubmitter == nil {
-		return
-	}
-	turnID, stepID := "", ""
-	if o.lifecycleMetadata != nil {
-		if metadata := o.lifecycleMetadata(sessionID); metadata != nil {
-			turnID, _ = metadata["turn_id"].(string)
-			stepID, _ = metadata["step_id"].(string)
-		}
-	}
-	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(turnID) == "" || strings.TrimSpace(stepID) == "" || strings.TrimSpace(tc.ID) == "" {
-		return
-	}
-	requestID := strings.TrimSpace(sessionID) + ":" + strings.TrimSpace(turnID) + ":" + strings.TrimSpace(stepID) + ":" + strings.TrimSpace(tc.ID)
-	in := hooks.RiskObservationInput{AgentID: o.agentID, RequestID: requestID, ToolName: tc.Function.Name, ArgsJSON: []byte(tc.Function.Arguments), PolicyAction: string(decision.Action)}
-	defer func() { _ = recover() }()
-	_ = o.riskSubmitter.Submit(in)
 }
 
 func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {

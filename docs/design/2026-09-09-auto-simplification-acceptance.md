@@ -185,3 +185,9 @@ root 复验 SimplifiedAutoPanel 15项前端测试通过，并在5173浅色1280×
 为避免把旧代码清理中间态带入服务，root从0aae75cf执行git archive到独立临时目录，复制已构建的当前前端静态资产，成功构建ws-auth-committed二进制。确认两名验收Agent空闲、无排队/审批后，02:01:05启动Node PID30348，沿用原数据目录和进程配置，health正常。
 
 Manage日志显示该进程本地端口49972的WS被接受；随后出现每15秒的subscribed_by/acl_member工作组列表查询。源码确认sendResumeOffers及15秒刷新只在收到session.welcome后执行；再次检查49972→8022连接仍Established。重启后的日志未再出现4401。这证明真实凭据握手及订阅刷新闭环，不代替非空工作组任务投递验收。长经验布局资产已一并部署，用户Node页已刷新。
+
+### 旧Goal执行上下文与风险影子接线清理
+
+移除queue.Envelope的旧GoalID/RunID投递字段、session持有/传播、工具Goal上下文及旧child-tool特判；移除RiskSubmitter从Agent构造、TurnOptions、runtime到orchestrator的注入、关闭和提交链。对应旧功能专属测试删除，普通policy/ASK、usage、child-agent通用检查及真实历史消息结构保留，旧trigger拒绝栅栏未移除。
+
+root完整Session/Turn/Policy race通过（65.615/10.880/1.272秒），Tools/agentruntime普通全包通过（13.496/1.826秒）。随后queue字段删除的最终版本通过Queue race（1.576秒）及API编译检查；API本轮仅编译，不声明完整API回归。尚未清理goals/events/maintenance等无生产调用的底层包，本批不作为旧架构全部删除的证明。运行服务仍为已提交WS修复版，不包含本批清理。
