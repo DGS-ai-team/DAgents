@@ -50,10 +50,10 @@ paths:
           description: 已归档
   /v1/agents/{agent_id}/maintenance:
     get:
-      summary: 获取 Agent 手动维护配置与累计用量
+      summary: 获取 Agent 维护日程、最近记录与累计用量
       description: |
         未配置岗位时返回 configured=false；usage 是该 Agent 的累计维护用量，不是单次请求用量。
-        手动维护已实现，日程自动 controller 尚未接入本接口契约。
+        next_at 是下一日历维护时刻；last 返回最近维护记录，待恢复状态不会自动重试模型调用。
       parameters:
         - $ref: "#/components/parameters/AgentID"
       responses:
