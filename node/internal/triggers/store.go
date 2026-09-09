@@ -967,6 +967,10 @@ func (s *Store) RecoverAuthorized(p Principal, triggerID string, expected int64,
 		s.logAuthorization(p, d, "recover", "denied", "revision_conflict")
 		return fmt.Errorf("revision conflict")
 	}
+	if d.Controller != "user" && d.Controller != "auto" {
+		s.logAuthorization(p, d, "recover", "denied", "retired_controller")
+		return fmt.Errorf("trigger controller is retired or invalid")
+	}
 	if d.ManagedGoalID != "" {
 		s.logAuthorization(p, d, "recover", "denied", "managed_controller")
 		return fmt.Errorf("managed goal trigger is controlled by goal")

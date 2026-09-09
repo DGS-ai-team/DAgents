@@ -127,13 +127,18 @@ async function recoverPending(item) {
   const id = item?.trigger_id;
   const deliveryId = String(item?.pending_delivery_id || "").trim();
   if (!id || !deliveryId || rowBusy(`recover:${id}`)) return;
-  if (!window.confirm("确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后任务会保持禁用，需要你手动启用。")) return;
+  const confirmation = isAutoManaged(item)
+    ? "确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后默认唤醒保持禁用，请返回 Auto 设置同步唤醒。"
+    : "确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后任务会保持禁用，需要你手动启用。";
+  if (!window.confirm(confirmation)) return;
   busyKey.value = `recover:${id}`;
   error.value = "";
   try {
     const updated = await api.recoverTrigger(id, deliveryId, item.revision);
     replaceTrigger(updated);
-    statusMessage.value = `已丢弃旧投递「${item.name || id}」，任务保持禁用；请核对后手动启用。`;
+    statusMessage.value = isAutoManaged(item)
+      ? `已丢弃旧投递「${item.name || id}」；请返回 Auto 设置同步唤醒。`
+      : `已丢弃旧投递「${item.name || id}」，任务保持禁用；请核对后手动启用。`;
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -371,7 +376,7 @@ onMounted(load);
                     任务: {{ truncateText(item.task_template, 120) }}
                   </div>
                   <p v-if="isRetired(item)" class="command-panel__hint">{{ isAutoManaged(item) ? "请在 Auto 设置中调整默认唤醒。" : "这是已退役的历史触发器，仅供查看。" }}</p>
-                  <div v-if="item.recovery_required && !isRetired(item)" class="command-panel__error">
+                  <div v-if="item.recovery_required && (!isRetired(item) || isAutoManaged(item))" class="command-panel__error">
                     {{ item.recovery_reason || "上次投递结果未知，请核对后恢复。" }}
                     <button type="button" class="btn btn--danger btn--sm" :disabled="rowBusy(`recover:${item.trigger_id}`)" @click="recoverPending(item)">确认并丢弃旧投递</button>
                   </div>

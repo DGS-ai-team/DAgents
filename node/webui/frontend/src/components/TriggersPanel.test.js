@@ -65,4 +65,25 @@ describe("TriggersPanel retired legacy records", () => {
     await flushPromises();
     expect(wrapper.find("header").exists()).toBe(true);
   });
+
+  it("allows Auto recovery with its CAS identity while keeping legacy records read-only", async () => {
+    routerMock.push.mockReset();
+    api.listAgents.mockResolvedValue({ agents: [] });
+    api.listTriggers.mockResolvedValue({ triggers: [
+      { trigger_id: "auto-recovery", name: "Auto 唤醒", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", enabled: false, recovery_required: true, revision: 7, pending_delivery_id: "delivery-7", condition: { interval_seconds: 60 } },
+      { trigger_id: "legacy-maintenance", name: "旧维护", controller: "maintenance", enabled: false, recovery_required: true, pending_delivery_id: "legacy-delivery" },
+    ] });
+    api.recoverTrigger.mockResolvedValue({ trigger_id: "auto-recovery", name: "Auto 唤醒", controller: "auto", owner_agent_id: "agent-auto", enabled: false, revision: 8 });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const wrapper = mount(TriggersPanel, { props: { embedded: true } });
+    await flushPromises();
+    const cards = wrapper.findAll(".command-card");
+    const auto = cards.find((card) => card.text().includes("Auto 唤醒"));
+    const legacy = cards.find((card) => card.text().includes("旧维护"));
+    expect(auto.text()).toContain("确认并丢弃旧投递");
+    await auto.find("button").trigger("click");
+    expect(api.recoverTrigger).toHaveBeenCalledWith("auto-recovery", "delivery-7", 7);
+    expect(legacy.text()).not.toContain("确认并丢弃旧投递");
+    confirm.mockRestore();
+  });
 });

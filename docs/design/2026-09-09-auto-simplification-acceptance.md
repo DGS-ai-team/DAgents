@@ -146,3 +146,13 @@ root 独立验证 `go test -race ./node/internal/triggers -count=1` 通过；Tri
 CurrentStatus 统一附带最近一次 ResetApplied 成功记录，保持当前的 waiting/running/failed/recovery/disabled 状态与调度时间语义。新增查询只读取该 Agent 的完成记录；未提交完成的 dreaming 不算历史成功。root 执行 API/autonomy 的 Dreaming 专项 race 通过，测试验证次日等待、关闭、失败、运行中与重新打开持久存储后的准确成功时间。
 
 Manage Auto 副标题同步改为当前状态、待办与最近上报的准确描述，Manage 前端构建通过。上述 Node 状态修复尚待新版进程的实际页面复验；无工作静默机制的整体回归与通知历史验证另行进行。
+
+### 静默结束的回归与未通过项
+
+root 已运行 Session、Turn、Policy 全包 race，通过；Tools 与 shared/config 全包普通测试通过。静默结束正向工具可见性、只读继续执行和反向伪造/写入/审批测试已有初步证据，但不能据此认定持久化闭环。
+
+强化“本次 idle 工具结果必须保存”断言后，`TestTrustedAutoIdleSuppressesNotifyButPersistsHistory` 在 root 定向 race 中失败：激活输入与工具调用存在，对应工具结果未被验收读到。普通聊天历史存在并不能替代该证据。当前正在区分生命周期提交时机与真实漏存，静默结束仍不得提交为已完成或部署。
+
+另已补回默认 Auto trigger 的旧投递恢复入口，仍保留配置从 Auto 设置修改的限制；恢复携带 revision 和 delivery ID，旧/未知 controller 不可恢复。root Recovery/Recover/RetiredController 专项 race 通过，前端最终确认文案待复验。
+
+默认唤醒恢复的最终确认提示已区分 Auto 与普通触发器，root TriggersPanel 三项测试通过；Auto 使用原 CAS 恢复 API，恢复后引导回自主设置同步。此修复不开放默认触发器的通用编辑或手动启用。
