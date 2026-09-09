@@ -61,7 +61,8 @@ func TestMaintenanceAPIProcessesSequentialSnapshotsAndSkipsUnchanged(t *testing.
 		t.Fatal(err)
 	}
 	settings.Close()
-	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}))
+	ext := &apiMaintenanceExtractor{}
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithMaintenanceExtractor(ext))
 	defer srv.Close()
 	now := time.Now().UTC()
 	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: "maint-api", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -71,8 +72,6 @@ func TestMaintenanceAPIProcessesSequentialSnapshotsAndSkipsUnchanged(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	ext := &apiMaintenanceExtractor{}
-	srv.maintenanceExtractor = ext
 	appendSnapshot := func(seq string) {
 		e := turn.NewTurnEventEnvelope("maint-session", turn.EventTurnCompleted, now)
 		e.AgentID, e.TurnID, e.CommandID = "maint-api", "turn-"+seq, "complete-"+seq
@@ -155,7 +154,8 @@ func TestMaintenanceAPIHoldsGateUntilExtractorReturns(t *testing.T) {
 	}
 	settings.Close()
 	chatLLM := &apiCountingLLM{Client: &llm.MockClient{}}
-	srv := NewServer(cfg, nil, WithLLM(chatLLM))
+	ext := &blockingMaintenanceExtractor{started: make(chan struct{}), proceed: make(chan struct{})}
+	srv := NewServer(cfg, nil, WithLLM(chatLLM), WithMaintenanceExtractor(ext))
 	defer srv.Close()
 	now := time.Now().UTC()
 	id := "maint-gated"
@@ -168,8 +168,6 @@ func TestMaintenanceAPIHoldsGateUntilExtractorReturns(t *testing.T) {
 	if _, _, err := srv.sessions.CreateWithOptionsAndLLM(id+"-chat", srv.sessions.DefaultTurnOptions(), srv.sessions.DefaultTools(), nil, chatLLM, id); err != nil {
 		t.Fatal(err)
 	}
-	e := &blockingMaintenanceExtractor{started: make(chan struct{}), proceed: make(chan struct{})}
-	srv.maintenanceExtractor = e
 	env := turn.NewTurnEventEnvelope(id+"-snapshot", turn.EventTurnCompleted, now)
 	env.AgentID = id
 	env.TurnID = "t1"
@@ -184,7 +182,7 @@ func TestMaintenanceAPIHoldsGateUntilExtractorReturns(t *testing.T) {
 		done <- w.Code
 	}()
 	select {
-	case <-e.started:
+	case <-ext.started:
 	case <-time.After(time.Second):
 		t.Fatal("extractor did not start")
 	}
@@ -195,7 +193,7 @@ func TestMaintenanceAPIHoldsGateUntilExtractorReturns(t *testing.T) {
 	if got := chatLLM.calls.Load(); got != 0 {
 		t.Fatalf("chat LLM called before extractor release: %d", got)
 	}
-	close(e.proceed)
+	close(ext.proceed)
 	select {
 	case code := <-done:
 		if code != http.StatusOK && code != http.StatusConflict {

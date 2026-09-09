@@ -60,6 +60,9 @@ func (s *Server) handleAutonomyAction(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, 409, "profile_conflict", err.Error(), nil)
 			return
 		}
+		if action == "disable_auto" && s.maintenanceSched != nil {
+			s.maintenanceSched.Cancel(id)
+		}
 		u, _ := s.goalStore.GetUsage(id)
 		writeJSON(w, 200, s.autonomyPayload(q, nil, u))
 		return
@@ -76,6 +79,11 @@ func (s *Server) handleAutonomyAction(w http.ResponseWriter, r *http.Request) {
 		}
 		writeAPIError(w, 409, "action_conflict", err.Error(), nil)
 		return
+	}
+	if action == "disable_auto" {
+		if s.maintenanceSched != nil {
+			s.maintenanceSched.Cancel(id)
+		}
 	}
 	if (action == "disable_auto" || action == "pause_goal") && s.sessions != nil && updated.SessionID != "" {
 		_ = s.sessions.CancelTurn(updated.SessionID)

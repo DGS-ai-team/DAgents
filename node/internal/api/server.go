@@ -63,6 +63,7 @@ type Server struct {
 	store                *store.SQLiteStore
 	triggerStore         *triggers.Store
 	triggerSched         *triggers.Scheduler
+	maintenanceSched     *maintenanceScheduler
 	startupErr           error
 	goalStore            *goals.Store
 	eventStore           *events.Store
@@ -104,14 +105,21 @@ type Server struct {
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	llmClient    llm.Client
-	llmInjected  bool
-	tools        *tools.Registry
-	policyEngine *policy.Engine
-	sqliteStore  *store.SQLiteStore
-	nodeSettings *store.NodeSettingsStore
-	skipStore    bool
-	configPath   string
+	llmClient            llm.Client
+	llmInjected          bool
+	tools                *tools.Registry
+	policyEngine         *policy.Engine
+	sqliteStore          *store.SQLiteStore
+	nodeSettings         *store.NodeSettingsStore
+	skipStore            bool
+	configPath           string
+	maintenanceExtractor memory.MaintenanceUsageExtractor
+}
+
+// WithMaintenanceExtractor injects the bounded maintenance extractor before
+// background scheduling starts (primarily for deterministic integration tests).
+func WithMaintenanceExtractor(extractor memory.MaintenanceUsageExtractor) Option {
+	return func(o *serverOptions) { o.maintenanceExtractor = extractor }
 }
 
 // WithConfigPath 记录 Node 启动时加载的 config.yaml 路径（供 Web UI 保存设置）。
@@ -510,6 +518,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		configPath:           o.configPath,
 		llmRuntime:           llmRuntime,
 		defaultLLM:           o.llmClient,
+		maintenanceExtractor: o.maintenanceExtractor,
 		llmInjected:          o.llmInjected,
 		logger:               logger,
 		mux:                  http.NewServeMux(),
@@ -818,6 +827,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			triggerSched = nil
 			s.triggerSched = nil
 		}
+	}
+	if s.goalStore != nil && s.agents != nil && s.store != nil {
+		s.maintenanceSched = newMaintenanceScheduler(s)
+		s.maintenanceSched.Start()
 	}
 	return s
 }

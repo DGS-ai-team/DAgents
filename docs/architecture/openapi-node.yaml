@@ -1410,6 +1410,25 @@ components:
         maintenance_schedule: {type: string, description: "维护计划字符串，例如 daily 09:00"}
         timezone: {type: string}
         usage: {$ref: '#/components/schemas/AgentUsage'}
+        next_at: {type: string, format: date-time, nullable: true, description: 下一日历维护时刻；存在待恢复记录时不代表届时可执行}
+        last:
+          allOf:
+            - {$ref: '#/components/schemas/MaintenanceOccurrence'}
+          nullable: true
+    MaintenanceOccurrence:
+      type: object
+      required: [agent_id, local_date, schedule_revision, scheduled_at, status, claimed_at, updated_at]
+      properties:
+        agent_id: {type: string}
+        local_date: {type: string, format: date}
+        schedule_revision: {type: integer, format: int64}
+        scheduled_at: {type: string, format: date-time}
+        status: {type: string, enum: [pending, completed, failed, recovery_required]}
+        claimed_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        result: {type: string}
+        error: {type: string}
+        updated_at: {type: string, format: date-time}
     AgentMaintenancePatch:
       type: object
       required: [expected_revision]

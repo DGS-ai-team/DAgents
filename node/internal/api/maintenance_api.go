@@ -25,7 +25,11 @@ func (s *Server) maintenancePayload(agentID string) (map[string]any, error) {
 		return map[string]any{"configured": false, "maintenance_enabled": false, "maintenance_schedule": "", "timezone": ""}, nil
 	}
 	u, _ := s.goalStore.GetUsage(agentID)
-	return map[string]any{"configured": true, "profile_revision": p.Revision, "maintenance_enabled": p.MaintenanceEnabled, "maintenance_schedule": p.MaintenanceSchedule, "timezone": p.Timezone, "usage": u}, nil
+	status, statusErr := s.goalStore.MaintenanceScheduleStatus(agentID, time.Now().UTC())
+	if statusErr != nil {
+		return nil, statusErr
+	}
+	return map[string]any{"configured": true, "profile_revision": p.Revision, "maintenance_enabled": p.MaintenanceEnabled, "maintenance_schedule": p.MaintenanceSchedule, "timezone": p.Timezone, "next_at": status.NextAt, "last": status.Last, "usage": u}, nil
 }
 
 func (s *Server) handleGetAgentMaintenance(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +93,9 @@ func (s *Server) handlePatchAgentMaintenance(w http.ResponseWriter, r *http.Requ
 		}
 		writeAPIError(w, 409, "profile_conflict", err.Error(), nil)
 		return
+	}
+	if s.maintenanceSched != nil {
+		s.maintenanceSched.Cancel(id)
 	}
 	writeJSON(w, 200, map[string]any{"profile_revision": saved.Revision, "maintenance_enabled": saved.MaintenanceEnabled, "maintenance_schedule": saved.MaintenanceSchedule, "timezone": saved.Timezone})
 }
