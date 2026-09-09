@@ -12,6 +12,6 @@ const isAuto = computed(() => String(props.agent?.agent_type || props.agent?.Age
 </script>
 
 <style scoped>
-.auto-badge { display: inline-flex; align-items: center; gap: 4px; color: var(--color-accent); font-size: 11px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
-.auto-badge__icon { display: inline-grid; place-items: center; width: 15px; height: 15px; border: 1px solid currentColor; border-radius: 50%; font-size: 9px; line-height: 1; }
+.auto-badge { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-subtle); font-size: 11px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; }
+.auto-badge__icon { display: inline-grid; place-items: center; font-size: 10px; line-height: 1; }
 </style>

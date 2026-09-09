@@ -2553,13 +2553,17 @@ select.settings-field__input {
   min-height: 0;
 }
 
+.nav-rail__section--autonomous { order: 3; }
+.nav-rail__section:has(.nav-rail__folder-row) { order: 2; }
+.nav-rail__section:not(.nav-rail__section--autonomous):not(:has(.nav-rail__folder-row)) { order: 1; }
+
 .nav-rail__section-head {
   position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 28px;
-  padding: 2px 8px 8px 8px;
+  min-height: 32px;
+  padding: 2px 8px 6px 8px;
 }
 
 .nav-rail__section-actions {
@@ -2568,7 +2572,7 @@ select.settings-field__input {
   justify-content: flex-end;
   gap: 2px;
   flex: 0 0 auto;
-  min-width: 50px;
+  min-width: 0;
   pointer-events: none;
 }
 
@@ -2661,8 +2665,10 @@ select.settings-field__input {
 }
 
 .nav-rail__section-chevron {
-  display: none;
-  margin-left: auto;
+  display: inline-block;
+  position: absolute;
+  right: 12px;
+  margin-left: 0;
   color: var(--color-text-subtle);
   font-size: 15px;
   line-height: 1;
@@ -2816,7 +2822,7 @@ select.settings-field__input {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
+  min-height: 36px;
   padding: 6px 10px;
   border-radius: var(--radius-sidebar-item);
   cursor: pointer;
@@ -2833,6 +2839,11 @@ select.settings-field__input {
 
 .nav-rail__item--active:hover {
   background: var(--color-sidebar-active);
+}
+
+.nav-rail__item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .nav-rail__item-main {

@@ -14,7 +14,7 @@ vi.mock("../stores/chrome.js", () => ({ chromeStore: { sseStatus: "connected" } 
 vi.mock("../stores/theme.js", () => ({ themeStore: { mode: "dark", resolved: "dark" }, cycleTheme: vi.fn() }));
 vi.mock("../stores/unread.js", () => ({ hasWorkgroupUnread: () => false, noteWorkgroupTimeline: vi.fn() }));
 
-describe("NavRail agent grouping controls", () => {
+describe("NavRail sections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -26,37 +26,42 @@ describe("NavRail agent grouping controls", () => {
     api.listWorkgroups.mockResolvedValue({ workgroups: [] });
   });
 
-  it("filters, collapses a group, and selects the original Agent ID", async () => {
+  it("shows normal and autonomous agents as separate peer sections", async () => {
     const wrapper = mount(NavRail, { global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } } });
     await flushPromises();
     expect(wrapper.text()).toContain("自主智能体");
-    await wrapper.get('select[aria-label="智能体类型筛选"]').setValue("auto");
+    expect(wrapper.text()).toContain("聊天");
     expect(wrapper.text()).toContain("巡检");
-    expect(wrapper.text()).not.toContain("聊天");
-    await wrapper.get(".nav-rail__agent-group-toggle").trigger("click");
-    expect(wrapper.text()).not.toContain("巡检");
-    await wrapper.get('select[aria-label="智能体类型筛选"]').setValue("all");
-    await wrapper.get(".nav-rail__agent-group-toggle").trigger("click");
-    await wrapper.findAll(".nav-rail__agent-item")[0].trigger("click");
+    expect(wrapper.findAll('input[type="search"]')).toHaveLength(0);
+    expect(wrapper.findAll("select")).toHaveLength(0);
+    const sections = wrapper.findAll(".nav-rail__section-title").map((node) => node.text());
+    expect(sections.slice(0, 3)).toEqual(["智能体", "工作组", "自主智能体"]);
+    const sectionNodes = wrapper.findAll(".nav-rail__section");
+    expect(sectionNodes[0].find(".nav-rail__section-count").text()).toBe("1");
+    expect(sectionNodes[2].find(".nav-rail__section-count").text()).toBe("1");
+    expect(wrapper.findAll(".auto-badge")).toHaveLength(0);
+    const autoRow = wrapper.findAll(".nav-rail__agent-item").at(-1);
+    expect(autoRow.find('[title="重命名"]').exists()).toBe(true);
+    expect(autoRow.find('[title="删除 Agent"]').exists()).toBe(true);
+    await autoRow.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("switch").at(-1)).toEqual(["auto-1"]);
+    const switches = wrapper.emitted("switch").length;
+    await autoRow.find('[title="智能体配置"]').trigger("click");
+    expect(wrapper.emitted("switch")).toHaveLength(switches);
+    await wrapper.findAll(".nav-rail__agent-item").at(-1).trigger("click");
     expect(wrapper.emitted("switch").at(-1)).toEqual(["auto-1"]);
     wrapper.unmount();
   });
 
-  it("does not carry Node A preferences into Node B and restores A on remount", async () => {
-    api.getUIBootstrap.mockResolvedValueOnce({ info: { node_id: "node-a" } });
-    const first = mount(NavRail, { global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } } });
+  it("collapses each peer section with one accessible toggle", async () => {
+    const wrapper = mount(NavRail, { global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } } });
     await flushPromises();
-    await first.get('select[aria-label="智能体类型筛选"]').setValue("auto");
-    first.unmount();
-    api.getUIBootstrap.mockResolvedValueOnce({ info: { node_id: "node-b" } });
-    const second = mount(NavRail, { global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } } });
-    await flushPromises();
-    expect(second.get('select[aria-label="智能体类型筛选"]').element.value).toBe("all");
-    second.unmount();
-    api.getUIBootstrap.mockResolvedValueOnce({ info: { node_id: "node-a" } });
-    const restored = mount(NavRail, { global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } } });
-    await flushPromises();
-    expect(restored.get('select[aria-label="智能体类型筛选"]').element.value).toBe("auto");
-    restored.unmount();
+    const toggles = wrapper.findAll(".nav-rail__section-toggle");
+    expect(toggles.length).toBeGreaterThanOrEqual(3);
+    expect(wrapper.findAll(".nav-rail__section-collapse")).toHaveLength(0);
+    await toggles[2].trigger("click");
+    expect(toggles[2].attributes("aria-expanded")).toBe("false");
+    expect(wrapper.text()).not.toContain("巡检");
+    wrapper.unmount();
   });
 });
