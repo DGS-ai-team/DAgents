@@ -179,9 +179,6 @@ INSERT OR IGNORE INTO memory_meta(key, value) VALUES ('store_revision', '0');
 `); err != nil {
 		return fmt.Errorf("create memory schema: %w", err)
 	}
-	if err := s.initHandbookSchema(); err != nil {
-		return fmt.Errorf("create handbook schema: %w", err)
-	}
 	_, _ = s.db.Exec(`ALTER TABLE maintenance_operations ADD COLUMN candidate_fingerprint TEXT NOT NULL DEFAULT ''`)
 	_, err := s.db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
   memory_id UNINDEXED,
