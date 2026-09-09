@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +53,12 @@ type failOnceUsage struct {
 	failed bool
 }
 
+type failEvidenceUsage struct{ *goals.Store }
+
+func (f failEvidenceUsage) SaveMaintenanceResultWithEvidence(string, string, json.RawMessage, json.RawMessage, int64, int64, bool) error {
+	return fmt.Errorf("injected evidence save failure")
+}
+
 func (f *failOnceUsage) SettleMaintenance(agentID, receiptID string, used int64, unknown bool, now time.Time) (goals.AgentUsage, error) {
 	if !f.failed {
 		f.failed = true
@@ -80,7 +88,7 @@ func TestMaintenanceRunnerPersistsResultAndDoesNotReextractSettled(t *testing.T)
 	defer ms.Close()
 	ext := &runnerExtractor{}
 	runner := &MaintenanceRunner{Source: runnerSource{input: ExtractionInput{AgentID: "agent-1", SessionID: "session-1"}, seq: 7, complete: true}, Extractor: ext, Memory: ms, Usage: gs}
-	if seq, err := runner.RunOnce(context.Background(), "agent-1", MaintenanceCursor{}); err != nil || seq != 7 {
+	if seq, evidence, err := runner.RunOnceWithEvidence(context.Background(), "agent-1", MaintenanceCursor{}); err != nil || seq != 7 || !evidence.HasIncrement {
 		t.Fatalf("run seq=%d err=%v", seq, err)
 	}
 	if ext.calls != 1 {
@@ -91,6 +99,62 @@ func TestMaintenanceRunnerPersistsResultAndDoesNotReextractSettled(t *testing.T)
 	}
 	if ext.calls != 1 {
 		t.Fatalf("reextract calls=%d", ext.calls)
+	}
+	receipts := gs.ListMaintenanceReceipts("agent-1")
+	if len(receipts) != 1 || len(receipts[0].EvidenceJSON) == 0 || !json.Valid(receipts[0].EvidenceJSON) {
+		t.Fatalf("evidence receipt=%+v", receipts)
+	}
+	reopened, err := goals.OpenStore(filepath.Join(root, "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := reopened.ListMaintenanceReceipts("agent-1")
+	if len(reloaded) != 1 {
+		t.Fatalf("reopened evidence receipt missing: %+v", reloaded)
+	}
+	var before, after any
+	if err := json.Unmarshal(receipts[0].EvidenceJSON, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(reloaded[0].EvidenceJSON, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("reopened evidence missing: %+v", reloaded)
+	}
+}
+
+func TestMaintenanceRunnerEvidenceSaveFailureDoesNotAdvanceCursor(t *testing.T) {
+	root := t.TempDir()
+	gs, err := goals.OpenStore(filepath.Join(root, "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SaveProfile(goals.AutoProfile{AgentID: "agent-fail", Enabled: true, MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "agent-fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	ext := &runnerExtractor{}
+	runner := &MaintenanceRunner{Source: runnerSource{input: ExtractionInput{AgentID: "agent-fail", SessionID: "source-session"}, seq: 7, complete: true}, Extractor: ext, Memory: ms, Usage: failEvidenceUsage{Store: gs}}
+	if seq, err := runner.RunOnce(context.Background(), "agent-fail", MaintenanceCursor{}); err == nil || seq != 0 {
+		t.Fatalf("seq=%d err=%v", seq, err)
+	}
+	cursor, err := ms.GetMaintenanceCursor(context.Background())
+	if err != nil || cursor.Sequence != 0 {
+		t.Fatalf("cursor=%+v err=%v", cursor, err)
+	}
+	if entries, err := ms.List(context.Background(), ScopeAgent, true); err != nil || len(entries) != 0 {
+		t.Fatalf("memory entries=%d err=%v", len(entries), err)
+	}
+	if receipts := gs.ListMaintenanceReceipts("agent-fail"); len(receipts) != 1 || receipts[0].Status != "settled" || receipts[0].Unknown || receipts[0].UsedTokens != 3 {
+		t.Fatalf("receipts=%+v", receipts)
+	}
+	if seq, err := runner.RunOnce(context.Background(), "agent-fail", MaintenanceCursor{}); err == nil || seq != 0 || ext.calls != 1 {
+		t.Fatalf("unrecoverable repeat seq=%d err=%v extractor_calls=%d", seq, err, ext.calls)
 	}
 }
 

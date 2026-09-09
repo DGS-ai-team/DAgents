@@ -21,6 +21,10 @@ type MaintenanceUsageStore interface {
 	SaveMaintenanceResult(string, string, json.RawMessage, int64, int64, bool) error
 }
 
+type maintenanceEvidenceSaver interface {
+	SaveMaintenanceResultWithEvidence(string, string, json.RawMessage, json.RawMessage, int64, int64, bool) error
+}
+
 type maintenanceReceiptReader interface {
 	GetMaintenanceReceipt(string) (goals.MaintenanceReceipt, bool)
 }
@@ -155,12 +159,10 @@ func (r *MaintenanceRunner) runOnce(ctx context.Context, agentID string, cursor 
 		return cursor.Sequence, err
 	}
 	input, seq, changed, err := ReadDurableMaintenanceInput(ctx, r.Source, agentID, cursor)
+	selectedEvidence := MaintenanceEvidence{AgentID: agentID, CursorBefore: cursor.Sequence, CursorAfter: seq, SessionID: input.SessionID, SourceFingerprint: input.SourceFingerprint, HasIncrement: changed && len(input.Messages) > 0}
+	selectedEvidence.Messages, selectedEvidence.Truncated = boundEvidenceMessages(input.Messages)
 	if evidence != nil {
-		evidence.CursorAfter = seq
-		evidence.SessionID = input.SessionID
-		evidence.SourceFingerprint = input.SourceFingerprint
-		evidence.HasIncrement = changed && len(input.Messages) > 0
-		evidence.Messages, evidence.Truncated = boundEvidenceMessages(input.Messages)
+		*evidence = selectedEvidence
 	}
 	if err != nil || !changed {
 		if err != nil {
@@ -235,7 +237,20 @@ func (r *MaintenanceRunner) runOnce(ctx context.Context, agentID string, cursor 
 	if marshalErr != nil {
 		return cursor.Sequence, marshalErr
 	}
-	if saveErr := r.Usage.SaveMaintenanceResult(agentID, receiptID, raw, seq, used, unknown); saveErr != nil {
+	evidenceRaw, marshalErr := json.Marshal(selectedEvidence)
+	if marshalErr != nil {
+		return cursor.Sequence, marshalErr
+	}
+	var saveErr error
+	if saver, ok := r.Usage.(maintenanceEvidenceSaver); ok {
+		saveErr = saver.SaveMaintenanceResultWithEvidence(agentID, receiptID, raw, evidenceRaw, seq, used, unknown)
+	} else {
+		saveErr = r.Usage.SaveMaintenanceResult(agentID, receiptID, raw, seq, used, unknown)
+	}
+	if saveErr != nil {
+		// The extractor usage is still known even though the result could not be
+		// written. Keep the real charge; the unrecoverable receipt blocks a
+		// duplicate extraction until reconciliation repairs the result.
 		return cursor.Sequence, saveErr
 	}
 	op := MaintenanceOperation{OperationID: receiptID, AgentID: agentID, Scope: ScopeAgent, SourceFingerprint: input.SourceFingerprint, ExpectedCursor: cursor.Sequence, NextCursor: seq}
