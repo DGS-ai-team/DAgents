@@ -504,10 +504,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			NodeID:        cfg.NodeID,
 			AgentSessions: wgAgentBridge,
 		})
+		manageNodeToken := cfg.Manage.NodeToken
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,
-			NodeID:    cfg.NodeID,
-			Worker:    wgWorker,
+			// Setup changes require a Node restart; capture the startup token so
+			// a concurrent settings PATCH cannot race the reconnect loop.
+			ManageTokenProvider: func() string { return manageNodeToken },
+			NodeID:              cfg.NodeID,
+			Worker:              wgWorker,
 			ListWorkgroups: func(ctx context.Context) ([]string, error) {
 				seen := map[string]struct{}{}
 				ids := make([]string, 0)

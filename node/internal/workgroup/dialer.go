@@ -18,13 +18,17 @@ const (
 
 // Dialer 连接 Manage `/v1/workgroups/ws`，hello/resume 后分发业务帧。
 type Dialer struct {
-	ManageURL      string // http(s)://host:port
-	NodeID         string
-	Worker         *Worker
-	WorkgroupID    string   // 可选：单组 resume.offer
-	WorkgroupIDs   []string // 静态多组订阅
-	ListWorkgroups func(ctx context.Context) ([]string, error)
-	OnRealtime     func(map[string]any)
+	ManageURL string // http(s)://host:port
+	// ManageTokenProvider reads the same NodeToken used by Manage HTTP clients
+	// for each dial. The provider is required for authenticated connections so
+	// there is only one credential source.
+	ManageTokenProvider func() string
+	NodeID              string
+	Worker              *Worker
+	WorkgroupID         string   // 可选：单组 resume.offer
+	WorkgroupIDs        []string // 静态多组订阅
+	ListWorkgroups      func(ctx context.Context) ([]string, error)
+	OnRealtime          func(map[string]any)
 
 	mu     sync.Mutex
 	conn   *websocket.Conn
@@ -95,6 +99,13 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 	}
 	hdr := http.Header{}
 	hdr.Set(agentIDHeader, d.NodeID)
+	var token string
+	if d.ManageTokenProvider != nil {
+		token = d.ManageTokenProvider()
+	}
+	if token = strings.TrimSpace(token); token != "" {
+		hdr.Set("x-dagents-a2a-token", token)
+	}
 	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: hdr})
 	if err != nil {
 		return fmt.Errorf("workgroup ws dial: %w", err)
