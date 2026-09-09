@@ -21,6 +21,8 @@ type MaintenanceOccurrence struct {
 	Result           string     `json:"result,omitempty"`
 	Error            string     `json:"error,omitempty"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	RecoveryCount    int        `json:"recovery_count,omitempty"`
+	LastRecoveryAt   *time.Time `json:"last_recovery_at,omitempty"`
 }
 
 const (
