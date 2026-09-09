@@ -213,3 +213,9 @@ root在5173设置390×844视口实际验收：工作组空页主按钮完整可�
 ### 旧维护执行器删除验收
 
 删除无生产调用的memory maintenance reader/runner及session RunHandbookMaintenance旧执行器和专属测试。dreaming_test依赖的三个测试客户端移至独立辅助文件，保留原dreaming断言；初次编译缺失辅助的失败已修正。root Memory/Session/API 的Dreaming|Maintenance|Handbook|Context专项race通过（7.509/27.418/6.475秒），删除入口名称不再有生产/测试引用。新版execution gate、dreaming调度、上下文重置、手册文件工具与历史存储保留。此批仍未移除goals包的旧存储模型，也未部署到运行Node。
+
+### 旧Goals底层闭包删除
+
+删除node/internal/goals及hooks旧risk worker/observation/Goals适配和专属测试；非测试入向检索无剩余goals依赖，不新增旧数据decoder或迁移。磁盘历史文件不删除。root Hooks/Autonomy/Triggers全包race通过（2.000/1.311/1.878秒）；Node全部包编译检查通过，命令使用-run ^$，不作为全量执行测试证据。删除前当前API全包普通回归通过（27.881秒）。
+
+Manage深色桌面非空工作组卡片、通用配置和Supervisor配置已实际检查。创建仅用于验收的草稿wg_27f7e34c3e333be286ec5ebd78，未发布或发起任务；浏览器归档确认框无法由当前浏览器工具操作，随后使用同一管理员登录及既有archive API清理，当前状态archiving，未确认最终archived。浏览器确认框和归档完成仍需收尾；窄屏重载回首页，未将其误记为工作组配置窄屏通过。
