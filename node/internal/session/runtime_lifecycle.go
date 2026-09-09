@@ -362,6 +362,7 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 		"interaction_revision":   command.InteractionRevision,
 		"request_digest":         command.RequestDigest,
 		"assistant_message_id":   command.AssistantMessageID,
+		"assistant_message":      command.AssistantMessage,
 		"arguments_json":         lifecycleArgumentsJSON(command.Arguments),
 		"runtime_revision":       command.RuntimeRevision,
 		"runtime_digest":         command.RuntimeDigest,
@@ -385,6 +386,7 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 		"step_index":             snapshot.StepIndex,
 		"context_epoch":          snapshot.ContextEpoch,
 		"recovery_required":      snapshot.RecoveryRequired,
+		"input_message":          r.lifecycleInputMessage(eventType),
 	})
 	if err != nil {
 		return err
@@ -407,7 +409,18 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 	event.CommandID = command.CommandID
 	event.Payload = payload
 	event.PayloadRef = command.PayloadRef
-	stored, err := r.store.AppendTurnEvent(context.Background(), event)
+	var stored turn.TurnEventEnvelope
+	if eventType == turn.EventTurnCompleted {
+		if rebuilt, rebuildErr := r.store.RebuildTurnMessages(context.Background(), event.SessionID, event.TurnID); rebuildErr == nil && len(rebuilt) > 0 {
+			stored, err = r.store.AppendTurnEventWithSnapshot(context.Background(), event, rebuilt)
+		} else {
+			// Preserve the business completion event when maintenance input is
+			// unavailable; no readable snapshot/cursor is created.
+			stored, err = r.store.AppendTurnEventWithSnapshot(context.Background(), event, nil)
+		}
+	} else {
+		stored, err = r.store.AppendTurnEvent(context.Background(), event)
+	}
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Warn("persist turn lifecycle event failed", "session_id", r.session.ID, "event_type", eventType, "command_id", command.CommandID, "error", err)
@@ -416,6 +429,18 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 	}
 	r.setLifecycleEventSequence(stored.SessionSeq)
 	return nil
+}
+
+func (r *runtime) lifecycleInputMessage(eventType turn.EventType) any {
+	if eventType != turn.EventTurnStarted || r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pendingInputMessage == nil {
+		return nil
+	}
+	return r.pendingInputMessage
 }
 
 // recordSideEffectFact is the lifecycle boundary for async tool results that

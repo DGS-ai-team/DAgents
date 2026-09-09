@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
 // CommandType is the internal command vocabulary used by the TurnCoordinator.
@@ -76,6 +78,7 @@ type TurnCommand struct {
 	InteractionRevision  int64
 	RequestDigest        string
 	AssistantMessageID   string
+	AssistantMessage     *llm.Message
 	RuntimeRevision      int64
 	RuntimeDigest        string
 	PromptDigest         string

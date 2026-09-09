@@ -105,7 +105,8 @@ type runtime struct {
 	lifecycleCommandSeq   uint64
 	lifecycleEventSeq     uint64
 	lifecycleEventsLoaded bool
-	messages              []llm.Message        // 交互消息列表
+	messages              []llm.Message // 交互消息列表
+	pendingInputMessage   *llm.Message
 	historyRevision       uint64               // committed message snapshot revision
 	loadedSkills          []skills.LoadedSkill // 加载的技能列表
 	pendingMemoryScope    string               // scope changes wait for the next human Turn
@@ -825,6 +826,9 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 	}
 	r.applyPendingMemoryScope()
 	r.observeSkillCatalogChange()
+	r.mu.Lock()
+	r.pendingInputMessage = &userMsg
+	r.mu.Unlock()
 	if err := r.lifecycleBeginInputTurn(source); err != nil {
 		r.mu.Lock()
 		r.messages = append(r.messages, userMsg)
@@ -833,6 +837,9 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", err)
 		return true
 	}
+	r.mu.Lock()
+	r.pendingInputMessage = nil
+	r.mu.Unlock()
 	// Clear-context may have won the race while lifecycleBeginHumanTurn was
 	// opening the new turn. Do not let an already accepted queue envelope from
 	// before the clear become the first message of the new context.

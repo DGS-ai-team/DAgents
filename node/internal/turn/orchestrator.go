@@ -828,6 +828,7 @@ func (o *Orchestrator) runOneStep(
 		At:                 time.Now().UTC(),
 		HasTools:           len(result.ToolCalls) > 0,
 		AssistantMessageID: Digest(assistant),
+		AssistantMessage:   &assistant,
 		Reason:             "assistant_message_recorded",
 	}); err != nil {
 		if !o.executionBoundaryOpen(ctx) {
