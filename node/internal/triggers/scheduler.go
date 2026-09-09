@@ -30,9 +30,29 @@ type DeliveryMessageSubmitter interface {
 	SubmitTriggerMessageWithDelivery(sessionID, triggerID, deliveryID, content string) error
 }
 
+type ConditionRequest struct {
+	TriggerID  string
+	DeliveryID string
+	SessionID  string
+	AgentID    string
+	Revision   int64
+	Occurrence *float64
+	Command    string
+}
+
+type ConditionResultStatus string
+
+const (
+	ConditionMatched          ConditionResultStatus = "matched"
+	ConditionNotMatched       ConditionResultStatus = "not_matched"
+	ConditionAwaitingApproval ConditionResultStatus = "awaiting_approval"
+)
+
+type ConditionResult struct{ Status ConditionResultStatus }
+
 // ConditionRunner is an injected, Agent-bound policy/tool execution seam.
 // The triggers package never invokes a shell directly.
-type ConditionRunner func(context.Context, string, string) (bool, error)
+type ConditionRunner func(context.Context, ConditionRequest) (ConditionResult, error)
 
 type AutoMessageSubmitter interface {
 	SubmitAutoTriggerMessage(sessionID, triggerID, deliveryID, content string) error
@@ -60,6 +80,48 @@ type Scheduler struct {
 	doneCh     chan struct{}
 	stopCancel context.CancelFunc
 	runCtx     context.Context
+}
+
+type ConditionCompletion struct {
+	TriggerID  string
+	DeliveryID string
+	SessionID  string
+	AgentID    string
+	Revision   int64
+	Occurrence *float64
+	Matched    bool
+}
+
+// CompleteCondition finishes a persisted condition claim after approval. A
+// rejected approval releases the exact claim without submitting the task.
+func (s *Scheduler) CompleteCondition(ctx context.Context, completion ConditionCompletion) (FireRecord, error) {
+	_ = ctx
+	if s == nil || s.store == nil {
+		return FireRecord{}, fmt.Errorf("condition scheduler unavailable")
+	}
+	def, claimed, err := s.store.BeginConditionCompletion(completion)
+	if err != nil {
+		return FireRecord{}, err
+	}
+	if !claimed {
+		return FireRecord{}, fmt.Errorf("condition completion already claimed")
+	}
+	if !completion.Matched {
+		return s.record(def, FireStatusSkipped, def.PendingConditionReason, def.PendingConditionPayload, "condition not satisfied", def.PendingSessionID, def.ClientID, def.PendingConditionContent), nil
+	}
+	content := def.PendingConditionContent
+	var submitErr error
+	if auto, ok := s.submitter.(AutoMessageSubmitter); ok && def.Controller == "auto" {
+		submitErr = auto.SubmitAutoTriggerMessage(completion.SessionID, def.TriggerID, completion.DeliveryID, content)
+	} else if targeted, ok := s.submitter.(DeliveryMessageSubmitter); ok {
+		submitErr = targeted.SubmitTriggerMessageWithDelivery(completion.SessionID, def.TriggerID, completion.DeliveryID, content)
+	} else {
+		submitErr = s.submitter.SubmitTriggerMessage(completion.SessionID, def.TriggerID, content)
+	}
+	if submitErr != nil {
+		return FireRecord{}, submitErr
+	}
+	return s.record(def, FireStatusQueued, def.PendingConditionReason, def.PendingConditionPayload, "queued", def.PendingSessionID, def.ClientID, content), nil
 }
 
 func (s *Scheduler) SetConditionRunner(runner ConditionRunner) {
@@ -327,6 +389,12 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 		record := s.record(def, FireStatusError, reason, payload, "delivery claim failed: "+err.Error(), &sessionID, &clientID, content)
 		return record
 	}
+	def.PendingOccurrence = cloneFloatPtr(occurrence)
+	if ConditionCmd(def.Condition) != "" {
+		if err := s.store.SetPendingCondition(def.TriggerID, deliveryID, reason, content, payload); err != nil {
+			return s.record(def, FireStatusError, reason, payload, "condition claim metadata failed: "+err.Error(), &sessionID, &clientID, content)
+		}
+	}
 	// Mirror the durable claim before handing the envelope to the runtime. The
 	// consumer may acknowledge synchronously, so marking after Submit races
 	// with the identity clear and can resurrect a stale in-memory guard.
@@ -354,7 +422,15 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 			}
 			return s.record(def, FireStatusError, reason, payload, "condition runner unavailable", &sessionID, &clientID, content)
 		}
-		ok, conditionErr := runner(ctx, def.TargetAgentID, command)
+		var ok bool
+		var conditionErr error
+		var conditionResult ConditionResult
+		conditionResult, conditionErr = runner(ctx, ConditionRequest{TriggerID: def.TriggerID, DeliveryID: deliveryID, SessionID: sessionID, AgentID: def.TargetAgentID, Revision: def.Revision, Occurrence: cloneFloatPtr(def.PendingOccurrence), Command: command})
+		ok = conditionResult.Status == ConditionMatched
+		if conditionResult.Status == ConditionAwaitingApproval && conditionErr == nil {
+			record := s.record(def, FireStatusAwaitingApproval, reason, payload, "condition awaiting approval", &sessionID, &clientID, content)
+			return record
+		}
 		if conditionErr != nil || !ok {
 			if cleanupErr := s.store.clearPendingDeliveryIfMatch(def.TriggerID, deliveryID); cleanupErr != nil {
 				return s.record(def, FireStatusError, reason, payload, "condition cleanup failed: "+cleanupErr.Error(), &sessionID, &clientID, content)

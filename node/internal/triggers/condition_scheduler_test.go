@@ -42,8 +42,12 @@ func TestConditionRunnerOutcomesClearClaimAndAdvance(t *testing.T) {
 		runner     ConditionRunner
 		wantStatus FireStatus
 	}{
-		{"false", func(context.Context, string, string) (bool, error) { return false, nil }, FireStatusSkipped},
-		{"error", func(context.Context, string, string) (bool, error) { return false, errors.New("condition unavailable") }, FireStatusError},
+		{"false", func(context.Context, ConditionRequest) (ConditionResult, error) {
+			return ConditionResult{Status: ConditionNotMatched}, nil
+		}, FireStatusSkipped},
+		{"error", func(context.Context, ConditionRequest) (ConditionResult, error) {
+			return ConditionResult{}, errors.New("condition unavailable")
+		}, FireStatusError},
 		{"nil", nil, FireStatusError},
 	}
 	for _, tc := range cases {
@@ -71,10 +75,239 @@ func TestConditionRunnerOutcomesClearClaimAndAdvance(t *testing.T) {
 	}
 }
 
+func TestTypedConditionApprovalPersistsClaimAndCompletesOnce(t *testing.T) {
+	store, scheduler, sub, def, _ := newConditionScheduleFixture(t)
+	scheduler.SetConditionRunner(func(_ context.Context, req ConditionRequest) (ConditionResult, error) {
+		if req.TriggerID != def.TriggerID || req.AgentID != def.TargetAgentID || req.DeliveryID == "" || req.SessionID != "session-a" || req.Command != "check" || req.Occurrence == nil {
+			t.Fatalf("bad typed request: %+v", req)
+		}
+		return ConditionResult{Status: ConditionAwaitingApproval}, nil
+	})
+	first, err := scheduler.FireTrigger(def.TriggerID, "schedule", nil, false, nil)
+	if err != nil || first.Status != FireStatusAwaitingApproval {
+		t.Fatalf("awaiting result=%+v err=%v", first, err)
+	}
+	pending, ok := store.GetTrigger(def.TriggerID)
+	if !ok || pending.PendingDeliveryID == nil || pending.PendingOccurrence == nil {
+		t.Fatalf("approval claim was not persisted: %+v", pending)
+	}
+	req := ConditionCompletion{TriggerID: def.TriggerID, DeliveryID: *pending.PendingDeliveryID, SessionID: *pending.PendingSessionID, AgentID: def.TargetAgentID, Revision: pending.Revision, Occurrence: pending.PendingOccurrence, Matched: true}
+	if _, err := scheduler.CompleteCondition(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if len(sub.messages) != 1 {
+		t.Fatalf("submitted messages=%d want 1", len(sub.messages))
+	}
+	if _, err := scheduler.CompleteCondition(context.Background(), req); err == nil {
+		t.Fatal("duplicate completion succeeded")
+	}
+	after, _ := store.GetTrigger(def.TriggerID)
+	if after.PendingDeliveryID == nil || !after.PendingConditionApproved {
+		t.Fatalf("completion did not retain delivery claim: %+v", after)
+	}
+}
+
+func awaitingCondition(t *testing.T, reason string, payload map[string]any) (*Store, *Scheduler, *fakeSubmitter, Definition, *ConditionCompletion, FireRecord) {
+	t.Helper()
+	store, scheduler, sub, def, _ := newConditionScheduleFixture(t)
+	scheduler.SetConditionRunner(func(_ context.Context, req ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionAwaitingApproval}, nil
+	})
+	record, err := scheduler.FireTrigger(def.TriggerID, reason, payload, false, nil)
+	if err != nil || record.Status != FireStatusAwaitingApproval {
+		t.Fatalf("awaiting fire=%+v err=%v", record, err)
+	}
+	pending, ok := store.GetTrigger(def.TriggerID)
+	if !ok || pending.PendingDeliveryID == nil || pending.PendingSessionID == nil {
+		t.Fatalf("missing pending condition: %+v", pending)
+	}
+	return store, scheduler, sub, def, &ConditionCompletion{TriggerID: def.TriggerID, DeliveryID: *pending.PendingDeliveryID, SessionID: *pending.PendingSessionID, AgentID: def.TargetAgentID, Revision: pending.Revision, Occurrence: pending.PendingOccurrence, Matched: true}, record
+}
+
+func TestConditionCompletionConcurrentSubmitsOnce(t *testing.T) {
+	store, scheduler, sub, _, req, _ := awaitingCondition(t, "manual", map[string]any{"value": "original"})
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := scheduler.CompleteCondition(context.Background(), *req)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 || len(sub.messages) != 1 {
+		t.Fatalf("successes=%d submitted=%d", successes, len(sub.messages))
+	}
+	if got, _ := store.GetTrigger(req.TriggerID); got.PendingDeliveryID == nil {
+		t.Fatal("completion cleared pending claim before consumer acknowledgement")
+	}
+}
+
+func TestManualConditionCompletionAllowsNilOccurrenceAndRetainsPayloadContent(t *testing.T) {
+	store, scheduler, sub, _, req, awaiting := awaitingCondition(t, "manual", map[string]any{"value": "original"})
+	if req.Occurrence != nil {
+		t.Fatalf("manual occurrence=%v want nil", req.Occurrence)
+	}
+	completed, err := scheduler.CompleteCondition(context.Background(), *req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Content != awaiting.Content || len(sub.messages) != 1 {
+		t.Fatalf("content=%q awaiting=%q messages=%d", completed.Content, awaiting.Content, len(sub.messages))
+	}
+	got, _ := store.GetTrigger(req.TriggerID)
+	if got.PendingConditionPayload["value"] != "original" {
+		t.Fatalf("payload not persisted: %+v", got.PendingConditionPayload)
+	}
+}
+
+func TestConditionCompletionAfterReopenRequiresRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "triggers.json")
+	store, err := OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := NewDefinitionFromCreate(CreateInput{Name: "condition", TaskTemplate: "run", TargetAgentID: "agent-a", TargetSessionID: conditionStringPtr("session-a"), Condition: map[string]any{"interval_seconds": 60, "cmd": "check"}}, "agent-a", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, &fakeSubmitter{}, 5)
+	scheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionAwaitingApproval}, nil
+	})
+	awaiting, err := scheduler.FireTrigger(def.TriggerID, "manual", map[string]any{"x": "y"}, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := store.GetTrigger(def.TriggerID)
+	req := ConditionCompletion{TriggerID: def.TriggerID, DeliveryID: *pending.PendingDeliveryID, SessionID: *pending.PendingSessionID, AgentID: def.TargetAgentID, Revision: pending.Revision, Occurrence: pending.PendingOccurrence, Matched: true}
+	reopened, err := OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedScheduler := NewScheduler(reopened, &fakeSubmitter{}, 5)
+	if _, err := reopenedScheduler.CompleteCondition(context.Background(), req); err == nil || !strings.Contains(err.Error(), "identity conflict") {
+		t.Fatalf("reopen completion err=%v awaiting=%+v", err, awaiting)
+	}
+	if got, _ := reopened.GetTrigger(def.TriggerID); got.PendingConditionContent == "" || got.PendingDeliveryID == nil {
+		t.Fatalf("reopened content/claim lost: %+v", got)
+	}
+}
+
+func TestRecoveryClearsConditionApprovalBeforeNextDelivery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "triggers.json")
+	store, err := OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := NewDefinitionFromCreate(CreateInput{Name: "condition", TaskTemplate: "run", TargetAgentID: "agent-a", TargetSessionID: conditionStringPtr("session-a"), Condition: map[string]any{"interval_seconds": 60, "cmd": "check"}}, "agent-a", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	firstScheduler := NewScheduler(store, &fakeSubmitter{}, 5)
+	firstScheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionAwaitingApproval}, nil
+	})
+	if _, err = firstScheduler.FireTrigger(def.TriggerID, "manual", map[string]any{"old": true}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := store.GetTrigger(def.TriggerID)
+	reopened, err := OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.RecoverPendingDelivery(def.TriggerID, *first.PendingDeliveryID); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	recovered, _ := reopened.GetTrigger(def.TriggerID)
+	if _, err = reopened.UpdateTrigger(def.TriggerID, UpdatePatch{Enabled: &enabled}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	nextScheduler := NewScheduler(reopened, &fakeSubmitter{}, 5)
+	nextScheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionAwaitingApproval}, nil
+	})
+	if _, err = nextScheduler.FireTrigger(def.TriggerID, "manual", nil, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := reopened.GetTrigger(def.TriggerID)
+	if next.PendingConditionApproved || len(next.PendingConditionPayload) != 0 || next.PendingConditionContent == "" || recovered.PendingConditionApproved {
+		t.Fatalf("old approval metadata leaked: recovered=%+v next=%+v", recovered, next)
+	}
+}
+
+func TestFalseConditionCompletionReleasesClaimForNextFire(t *testing.T) {
+	store, scheduler, _, def, req, _ := awaitingCondition(t, "manual", nil)
+	if req.Matched {
+		req.Matched = false
+	}
+	if _, err := scheduler.CompleteCondition(context.Background(), *req); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.GetTrigger(def.TriggerID); got.PendingDeliveryID != nil || store.HasPendingDelivery(def.TriggerID) {
+		t.Fatal("false completion retained claim")
+	}
+	calls := 0
+	scheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		calls++
+		return ConditionResult{Status: ConditionNotMatched}, nil
+	})
+	if _, err := scheduler.FireTrigger(def.TriggerID, "manual", nil, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("next fire did not execute condition runner: %d", calls)
+	}
+}
+
+func TestConditionCompletionRejectsStaleRevisionAndOrdinaryPending(t *testing.T) {
+	store, scheduler, _, def, req, _ := awaitingCondition(t, "manual", nil)
+	updated, err := store.UpdateTrigger(def.TriggerID, UpdatePatch{Name: conditionStringPtr("updated")}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Revision = updated.Revision - 1
+	if _, err := scheduler.CompleteCondition(context.Background(), *req); err == nil {
+		t.Fatal("stale revision completion succeeded")
+	}
+	plain, err := NewDefinitionFromCreate(CreateInput{Name: "plain", TaskTemplate: "run", TargetAgentID: "agent-a", Condition: map[string]any{"interval_seconds": 60}}, "agent-a", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.CreateTrigger(plain); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ClaimDelivery(plain.TriggerID, "delivery", "session-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler.CompleteCondition(context.Background(), ConditionCompletion{TriggerID: plain.TriggerID, DeliveryID: "delivery", SessionID: "session-a", AgentID: "agent-a", Revision: plain.Revision, Matched: true}); err == nil {
+		t.Fatal("ordinary pending accepted as condition")
+	}
+}
+
 func TestConditionRunnerIsFencedByRevisionAndOwner(t *testing.T) {
 	store, scheduler, _, def, now := newConditionScheduleFixture(t)
 	called := 0
-	scheduler.SetConditionRunner(func(context.Context, string, string) (bool, error) { called++; return true, nil })
+	scheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		called++
+		return ConditionResult{Status: ConditionMatched}, nil
+	})
 	// Updating the condition changes the durable revision and occurrence. A
 	// previously captured definition must fail the durable claim before runner.
 	updated, err := store.UpdateTrigger(def.TriggerID, UpdatePatch{TaskTemplate: conditionStringPtr("new")}, now)
@@ -99,7 +332,10 @@ func TestConditionRunnerIsFencedByRevisionAndOwner(t *testing.T) {
 func TestConditionRunnerDoesNotRunExpiredOccurrence(t *testing.T) {
 	store, scheduler, _, def, now := newConditionScheduleFixture(t)
 	called := 0
-	scheduler.SetConditionRunner(func(context.Context, string, string) (bool, error) { called++; return true, nil })
+	scheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		called++
+		return ConditionResult{Status: ConditionMatched}, nil
+	})
 	// Fire with a stale scheduled occurrence directly; ClaimDeliveryForOccurrence
 	// must fence it before any condition command executes.
 	stale := def
@@ -116,10 +352,10 @@ func TestConditionRunnerDoesNotRunExpiredOccurrence(t *testing.T) {
 
 func TestConditionCleanupPersistenceFailureIsReturned(t *testing.T) {
 	store, scheduler, _, def, _ := newConditionScheduleFixture(t)
-	scheduler.SetConditionRunner(func(context.Context, string, string) (bool, error) {
+	scheduler.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
 		// The durable claim has already succeeded. Make only cleanup fail.
 		store.path = t.TempDir()
-		return false, nil
+		return ConditionResult{Status: ConditionNotMatched}, nil
 	})
 	record, err := scheduler.FireTrigger(def.TriggerID, "schedule", nil, false, nil)
 	if err != nil {
@@ -151,7 +387,7 @@ func TestConditionGateClaimsOccurrenceBeforeConcurrentFire(t *testing.T) {
 	calls := 0
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	s.SetConditionRunner(func(context.Context, string, string) (bool, error) {
+	s.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
 		mu.Lock()
 		calls++
 		n := calls
@@ -160,7 +396,7 @@ func TestConditionGateClaimsOccurrenceBeforeConcurrentFire(t *testing.T) {
 			close(entered)
 			<-release
 		}
-		return true, nil
+		return ConditionResult{Status: ConditionMatched}, nil
 	})
 	done := make(chan FireRecord, 1)
 	go func() { r, _ := s.FireTrigger(def.TriggerID, "manual", nil, false, nil); done <- r }()

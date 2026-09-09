@@ -152,7 +152,9 @@ func TestSchedulerCmdGateBlocksFire(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	sched.SetConditionRunner(func(context.Context, string, string) (bool, error) { return false, nil })
+	sched.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionNotMatched}, nil
+	})
 	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
 	if len(sub.messages) != 0 {
 		t.Fatalf("expected no message, got %v", sub.messages)
@@ -189,7 +191,9 @@ func TestSchedulerCmdGateAllowsFire(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	sched.SetConditionRunner(func(context.Context, string, string) (bool, error) { return true, nil })
+	sched.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionMatched}, nil
+	})
 	sched.RunOnceForTest(context.Background(), past.Add(time.Minute))
 	if len(sub.messages) != 1 {
 		t.Fatalf("true condition should dispatch: %v", sub.messages)
@@ -219,7 +223,9 @@ func TestManualFireSkipsCmdGate(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	sched.SetConditionRunner(func(context.Context, string, string) (bool, error) { return false, nil })
+	sched.SetConditionRunner(func(context.Context, ConditionRequest) (ConditionResult, error) {
+		return ConditionResult{Status: ConditionNotMatched}, nil
+	})
 	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)

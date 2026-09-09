@@ -89,6 +89,11 @@ func cloneDefinition(in Definition) Definition {
 		v := *in.PendingSessionID
 		out.PendingSessionID = &v
 	}
+	out.PendingOccurrence = cloneFloat(in.PendingOccurrence)
+	out.PendingConditionReason = in.PendingConditionReason
+	out.PendingConditionContent = in.PendingConditionContent
+	out.PendingConditionApproved = in.PendingConditionApproved
+	out.PendingConditionPayload = cloneMap(in.PendingConditionPayload)
 	return out
 }
 
@@ -409,6 +414,81 @@ func (s *Store) GetTrigger(id string) (*Definition, bool) {
 	return &copy, true
 }
 
+func samePendingOccurrence(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// BeginConditionCompletion atomically fences an approval completion. The
+// pending delivery remains durable until the session acknowledges it.
+func (s *Store) BeginConditionCompletion(req ConditionCompletion) (Definition, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[strings.TrimSpace(req.TriggerID)]
+	if !ok || cur.RecoveryRequired || !cur.Enabled || strings.TrimSpace(cur.PendingConditionReason) == "" || cur.PendingDeliveryID == nil || strings.TrimSpace(*cur.PendingDeliveryID) != strings.TrimSpace(req.DeliveryID) || cur.PendingSessionID == nil || strings.TrimSpace(*cur.PendingSessionID) != strings.TrimSpace(req.SessionID) || strings.TrimSpace(cur.TargetAgentID) != strings.TrimSpace(req.AgentID) || cur.Revision != req.Revision || !samePendingOccurrence(cur.PendingOccurrence, req.Occurrence) {
+		return Definition{}, false, fmt.Errorf("condition completion identity conflict")
+	}
+	if cur.PendingConditionApproved {
+		return cloneDefinition(cur), false, nil
+	}
+	old := cur
+	result := cloneDefinition(cur)
+	if !req.Matched {
+		cur.PendingDeliveryID, cur.PendingSessionID, cur.PendingOccurrence = nil, nil, nil
+		cur.PendingConditionReason, cur.PendingConditionContent, cur.PendingConditionPayload = "", "", nil
+	} else {
+		cur.PendingConditionApproved = true
+	}
+	s.triggers[cur.TriggerID] = cur
+	if err := s.saveLocked(); err != nil {
+		s.triggers[cur.TriggerID] = old
+		return Definition{}, false, err
+	}
+	if !req.Matched && s.pending != nil {
+		s.pending.ClearPendingDelivery(cur.TriggerID)
+	}
+	if !req.Matched {
+		return result, true, nil
+	}
+	return cloneDefinition(cur), true, nil
+}
+
+func (s *Store) ResetConditionCompletion(triggerID, deliveryID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[triggerID]
+	if !ok || cur.PendingDeliveryID == nil || *cur.PendingDeliveryID != strings.TrimSpace(deliveryID) {
+		return fmt.Errorf("condition completion identity conflict")
+	}
+	old := cur
+	cur.PendingConditionApproved = false
+	s.triggers[triggerID] = cur
+	if err := s.saveLocked(); err != nil {
+		s.triggers[triggerID] = old
+		return err
+	}
+	return nil
+}
+
+func (s *Store) SetPendingCondition(triggerID, deliveryID, reason, content string, payload map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.triggers[triggerID]
+	if !ok || cur.PendingDeliveryID == nil || strings.TrimSpace(*cur.PendingDeliveryID) != strings.TrimSpace(deliveryID) {
+		return fmt.Errorf("condition completion identity conflict")
+	}
+	old := cur
+	cur.PendingConditionReason, cur.PendingConditionContent, cur.PendingConditionPayload = reason, content, cloneMap(payload)
+	s.triggers[triggerID] = cur
+	if err := s.saveLocked(); err != nil {
+		s.triggers[triggerID] = old
+		return err
+	}
+	return nil
+}
+
 func (s *Store) CreateTrigger(def Definition) (Definition, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -542,6 +622,7 @@ func (s *Store) UpsertManagedProjection(def Definition) (Definition, error) {
 			def.LastFiredAt = nil
 			def.PendingDeliveryID = nil
 			def.PendingSessionID = nil
+			def.PendingOccurrence = nil
 		}
 	}
 	if ok {
@@ -772,6 +853,7 @@ func (s *Store) claimDeliveryLocked(triggerID, deliveryID, sessionID string, occ
 	}
 	d.PendingDeliveryID = &deliveryID
 	d.PendingSessionID = &sessionID
+	d.PendingOccurrence = cloneFloatPtr(occurrence)
 	s.triggers[triggerID] = d
 	if err := s.saveLocked(); err != nil {
 		s.triggers[triggerID] = old
@@ -790,6 +872,9 @@ func (s *Store) clearPendingDeliveryIfMatch(triggerID, deliveryID string) error 
 	old := d
 	d.PendingDeliveryID = nil
 	d.PendingSessionID = nil
+	d.PendingOccurrence = nil
+	d.PendingConditionReason, d.PendingConditionContent, d.PendingConditionPayload = "", "", nil
+	d.PendingConditionApproved = false
 	s.triggers[triggerID] = d
 	if err := s.saveLocked(); err != nil {
 		s.triggers[triggerID] = old
@@ -848,6 +933,11 @@ func (s *Store) recoverPendingDeliveryLocked(triggerID, deliveryID string) error
 	sessionID := d.PendingSessionID
 	d.PendingDeliveryID = nil
 	d.PendingSessionID = nil
+	d.PendingOccurrence = nil
+	d.PendingConditionReason = ""
+	d.PendingConditionContent = ""
+	d.PendingConditionPayload = nil
+	d.PendingConditionApproved = false
 	d.RecoveryRequired = false
 	d.RecoveryReason = ""
 	d.Enabled = false
@@ -899,6 +989,9 @@ func (s *Store) ClearPendingDelivery(triggerID string) {
 			previous := d
 			d.PendingDeliveryID = nil
 			d.PendingSessionID = nil
+			d.PendingOccurrence = nil
+			d.PendingConditionReason, d.PendingConditionContent, d.PendingConditionPayload = "", "", nil
+			d.PendingConditionApproved = false
 			s.triggers[triggerID] = d
 			if err := s.saveLocked(); err != nil {
 				s.triggers[triggerID] = previous

@@ -136,3 +136,9 @@ Dreaming 原子提交存储首批已验收：经验正文与含内容 hash 的�
 reconcileAutoDefaults 跳过已标记 RecoveryRequired 的默认 trigger，保留原 pending delivery，不再因为单个待恢复 Agent 使整个 Node 启动失败。频率关闭也不在启动时丢弃该记录，其他 Auto 仍正常校正。恢复沿用已有显式 recover 请求，恢复后保持禁用；再按当前 Profile reconcile 恢复调度，不自动重放旧投递。
 
 主 Agent API 专项 race 1.887 秒通过。真实重开存储/启动测试验证第二个 Agent 正常、off 的 pending 保留；调用 HTTP handler 验证错误 delivery 冲突、正确 revision/delivery 恢复、保持禁用及后续配置同步启用。测试未经过完整 onboarding 路由中间件，界面恢复入口尚待最终浏览器验收。
+
+### 条件审批的调度持久化
+
+ConditionRunner 统一使用带 trigger/delivery/session/Agent/revision/occurrence 的请求及 matched/not_matched/awaiting_approval 结果，不保留未上线的 bool runner 兼容分支。待审批保留 claim 与原任务正文、reason、payload；CompleteCondition 通过持久 CAS 防止重复投递，入队成功后由消费者确认 pending，提交不确定时不自动回滚重放。拒绝释放内存与持久 claim，允许后续检查；重启冻结记录必须先显式恢复，不允许通过 completion 绕过。
+
+主 Agent Triggers 全包 race 1.987 秒通过，测试实际覆盖并发 completion 一次投递、manual nil occurrence、原任务参数保留、重开后拒绝绕过恢复、拒绝后下一次检查、旧 revision/无条件 pending 拒绝。随后补齐显式恢复清除 condition 元数据的回归。Manager 专项 race 3.855 秒通过，仍不等同于现有 HTTP 审批入口和生产 scheduler 已接通，后续接线保持进行中。
