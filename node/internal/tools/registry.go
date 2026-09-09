@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/events"
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
@@ -19,6 +22,7 @@ import (
 // Registry 注册内置工具并在 Agent workspace 内执行。
 type Registry struct {
 	workspaceRoot          string
+	handbookRoot           string
 	bashTimeout            int
 	bashHardLimitSec       int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
 	shellOutputEncoding    string
@@ -63,6 +67,33 @@ type Registry struct {
 	autonomyGet            AutonomyGetFunc
 	autonomyUpdate         AutonomyUpdateFunc
 	workspaceCoordinator   *workspacecoord.Coordinator
+	handbookFS             *handbookfs.Service
+}
+
+// SetHandbookRoot binds the reserved relative "handbook/" path namespace to
+// an Agent-owned directory. Existing file tools then provide the same policy,
+// quota, and write lease chain for handbook edits.
+func (r *Registry) SetHandbookRoot(root string) error {
+	if r == nil {
+		return fmt.Errorf("registry unavailable")
+	}
+	abs, err := filepath.Abs(filepath.Clean(strings.TrimSpace(root)))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(abs, 0700); err != nil {
+		return err
+	}
+	if real, e := filepath.EvalSymlinks(abs); e == nil {
+		abs = real
+	}
+	r.handbookRoot = abs
+	service, err := handbookfs.New(abs)
+	if err != nil {
+		return err
+	}
+	r.handbookFS = service
+	return nil
 }
 
 func (r *Registry) SetGoalCheckpoint(fn func(context.Context, string, string, GoalCheckpoint) error) {

@@ -121,19 +121,24 @@ func readRawFile(absPath string) ([]byte, time.Time, error) {
 
 // readTextLinesAt 按路径编码决策读取文本行，并更新编码缓存。
 func (r *Registry) readTextLinesAt(relPath, absPath string, argEnc *string) ([]string, pathEncodingChoice, error) {
+	lines, choice, _, err := r.readTextLinesAndRawAt(relPath, absPath, argEnc)
+	return lines, choice, err
+}
+
+func (r *Registry) readTextLinesAndRawAt(relPath, absPath string, argEnc *string) ([]string, pathEncodingChoice, []byte, error) {
 	raw, mtime, err := readRawFile(absPath)
 	if err != nil {
-		return nil, pathEncodingChoice{}, err
+		return nil, pathEncodingChoice{}, nil, err
 	}
 	choice := r.choosePathEncoding(relPath, raw, mtime, argEnc)
 	choice.UTF8BOM = shouldWriteUTF8BOM(relPath, choice.Encoding, fileHadUTF8BOM(raw, choice.Encoding))
 	text, err := decodePathFileContent(raw, choice.Encoding)
 	if err != nil {
-		return nil, choice, err
+		return nil, choice, raw, err
 	}
 	choice.GarbledWarning = textLooksGarbled(text)
 	r.rememberPathEncoding(relPath, choice.Encoding, mtime, choice.Source)
-	return normalizeLines(text), choice, nil
+	return normalizeLines(text), choice, raw, nil
 }
 
 func fileHadUTF8BOM(raw []byte, enc string) bool {

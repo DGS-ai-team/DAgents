@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type writeFileArgs struct {
-	Path     string  `json:"path"`
-	Content  string  `json:"content"`
-	Encoding *string `json:"encoding"`
+	Path           string  `json:"path"`
+	Content        string  `json:"content"`
+	Encoding       *string `json:"encoding"`
+	ExpectedDigest string  `json:"expected_digest,omitempty"`
 }
 
 func writeFileToolDef() ToolDef {
@@ -31,7 +33,8 @@ func writeFileToolDef() ToolDef {
 						"type":        "string",
 						"description": "写入全文（必填）；覆盖已有内容",
 					},
-					"encoding": fileEncodingToolProperty(),
+					"encoding":        fileEncodingToolProperty(),
+					"expected_digest": map[string]any{"type": "string", "description": "仅 handbook/ 路径可用：read_file 返回的文件摘要；摘要变化时拒绝覆盖"},
 				},
 				"required":             []string{"path", "content"},
 				"additionalProperties": false,
@@ -49,11 +52,18 @@ func (r *Registry) execWriteFile(ctx context.Context, raw json.RawMessage) (stri
 	if err != nil {
 		return "", err
 	}
+	if strings.TrimSpace(args.ExpectedDigest) != "" && !isHandbookPath(args.Path) {
+		return "", fmt.Errorf("expected_digest is only supported for handbook paths")
+	}
 	lease, err := r.acquireWorkspaceWrite(ctx, path)
 	if err != nil {
 		return "", fmt.Errorf("workspace_busy: %w", err)
 	}
 	defer lease.Release()
+	_, err = r.handbookBeforeWrite(ctx, args.Path, path, args.ExpectedDigest)
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
@@ -64,6 +74,12 @@ func (r *Registry) execWriteFile(ctx context.Context, raw json.RawMessage) (stri
 	payload, err := encodeFileContentWithBOM(args.Content, choice.Encoding, choice.UTF8BOM)
 	if err != nil {
 		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
+	}
+	if r.handbookFS != nil && isHandbookPath(args.Path) {
+		if _, err := r.handbookFS.Write(ctx, path, args.ExpectedDigest, payload); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("wrote %d bytes to %s (encoding=%s)", len(payload), args.Path, choice.Encoding), nil
 	}
 	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return "", err
