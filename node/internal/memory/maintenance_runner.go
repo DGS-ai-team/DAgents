@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -39,10 +40,111 @@ type MaintenanceRunner struct {
 	Usage     MaintenanceUsageStore
 }
 
+const (
+	maintenanceEvidenceMaxBytes        = 16000
+	maintenanceEvidenceMaxMessageBytes = 4000
+)
+
+func truncateEvidenceUTF8(value string, maxBytes int) (string, bool) {
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	if maxBytes >= len(value) && utf8.ValidString(value) {
+		return value, false
+	}
+	if maxBytes == 0 {
+		return "", len(value) != 0
+	}
+	bytes := []byte(value)
+	if maxBytes > len(bytes) {
+		maxBytes = len(bytes)
+	}
+	for maxBytes > 0 && !utf8.Valid(bytes[:maxBytes]) {
+		maxBytes--
+	}
+	return string(bytes[:maxBytes]), maxBytes < len(bytes)
+}
+
+func boundEvidenceMessages(messages []ExtractionMessage) ([]ExtractionMessage, bool) {
+	bounded := make([]ExtractionMessage, 0, minInt(len(messages), maintenanceEvidenceMaxMessages))
+	used := 0
+	truncated := false
+	for i, message := range messages {
+		if i >= maintenanceEvidenceMaxMessages || used >= maintenanceEvidenceMaxBytes {
+			truncated = true
+			break
+		}
+		remaining := maintenanceEvidenceMaxBytes - used
+		content, cut := truncateEvidenceUTF8(message.Content, minInt(maintenanceEvidenceMaxMessageBytes, remaining))
+		// Evidence is a bounded text record. Tool calls and metadata can contain
+		// arbitrarily large provider payloads, so omit them rather than copying
+		// unbounded data or retaining aliases into the source snapshot.
+		metadataOmitted := message.Name != "" || message.ToolCallID != "" || len(message.ToolCalls) != 0
+		role := evidenceRole(message.Role)
+		roleOmitted := role != message.Role
+		message.Name = ""
+		message.ToolCallID = ""
+		message.ToolCalls = nil
+		message.Role = role
+		message.Content = content
+		bounded = append(bounded, message)
+		used += len(content)
+		truncated = truncated || cut || metadataOmitted || roleOmitted
+		if len(content) == 0 && len(message.Content) == 0 && len(messages[i].Content) > 0 {
+			truncated = true
+		}
+	}
+	return bounded, truncated
+}
+
+func evidenceRole(role string) string {
+	switch role {
+	case "system", "user", "assistant", "tool":
+		return role
+	default:
+		return "unknown"
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// MaintenanceEvidence is the bounded durable input selected for one memory
+// maintenance operation. It is suitable for passing to a later handbook phase.
+type MaintenanceEvidence struct {
+	AgentID           string
+	CursorBefore      int64
+	CursorAfter       int64
+	SessionID         string
+	SourceFingerprint string
+	Messages          []ExtractionMessage
+	HasIncrement      bool
+	Truncated         bool
+}
+
+const maintenanceEvidenceMaxMessages = 8
+
+// RunOnceWithEvidence preserves RunOnce compatibility while exposing the
+// exact durable snapshot selected before processing. It does not invoke the
+// extractor a second time.
+func (r *MaintenanceRunner) RunOnceWithEvidence(ctx context.Context, agentID string, cursor MaintenanceCursor) (int64, MaintenanceEvidence, error) {
+	evidence := MaintenanceEvidence{AgentID: agentID, CursorBefore: cursor.Sequence}
+	next, err := r.runOnce(ctx, agentID, cursor, &evidence)
+	return next, evidence, err
+}
+
 // RunOnce processes the earliest completed durable snapshot after cursor.
 // Empty or unreadable input never spends LLM tokens; unreadable input leaves
 // the cursor unchanged so recovery cannot skip a gap.
-func (r *MaintenanceRunner) RunOnce(ctx context.Context, agentID string, cursor MaintenanceCursor) (nextSeq int64, retErr error) {
+func (r *MaintenanceRunner) RunOnce(ctx context.Context, agentID string, cursor MaintenanceCursor) (int64, error) {
+	return r.runOnce(ctx, agentID, cursor, nil)
+}
+
+func (r *MaintenanceRunner) runOnce(ctx context.Context, agentID string, cursor MaintenanceCursor, evidence *MaintenanceEvidence) (nextSeq int64, retErr error) {
 	if r == nil || r.Source == nil || r.Memory == nil || r.Usage == nil {
 		return cursor.Sequence, fmt.Errorf("maintenance runner is incomplete")
 	}
@@ -53,6 +155,13 @@ func (r *MaintenanceRunner) RunOnce(ctx context.Context, agentID string, cursor 
 		return cursor.Sequence, err
 	}
 	input, seq, changed, err := ReadDurableMaintenanceInput(ctx, r.Source, agentID, cursor)
+	if evidence != nil {
+		evidence.CursorAfter = seq
+		evidence.SessionID = input.SessionID
+		evidence.SourceFingerprint = input.SourceFingerprint
+		evidence.HasIncrement = changed && len(input.Messages) > 0
+		evidence.Messages, evidence.Truncated = boundEvidenceMessages(input.Messages)
+	}
 	if err != nil || !changed {
 		if err != nil {
 			return cursor.Sequence, err

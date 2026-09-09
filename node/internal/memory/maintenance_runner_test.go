@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -90,6 +91,89 @@ func TestMaintenanceRunnerPersistsResultAndDoesNotReextractSettled(t *testing.T)
 	}
 	if ext.calls != 1 {
 		t.Fatalf("reextract calls=%d", ext.calls)
+	}
+}
+
+type countingRunnerSource struct {
+	runnerSource
+	calls atomic.Int32
+}
+
+func (s *countingRunnerSource) LoadMaintenanceMessages(ctx context.Context, agentID string, cursor uint64, limit int) (DurableMessageBatch, error) {
+	s.calls.Add(1)
+	return s.runnerSource.LoadMaintenanceMessages(ctx, agentID, cursor, limit)
+}
+
+func TestMaintenanceEvidenceReadsSourceOnceAndMatchesProcessedInput(t *testing.T) {
+	root := t.TempDir()
+	gs, err := goals.OpenStore(filepath.Join(root, "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SaveProfile(goals.AutoProfile{AgentID: "agent-1", Enabled: true, MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	source := &countingRunnerSource{runnerSource: runnerSource{input: ExtractionInput{AgentID: "agent-1", SessionID: "source-session"}, seq: 7, complete: true}}
+	ext := &runnerExtractor{}
+	runner := &MaintenanceRunner{Source: source, Extractor: ext, Memory: ms, Usage: gs}
+	next, evidence, err := runner.RunOnceWithEvidence(context.Background(), "agent-1", MaintenanceCursor{})
+	if err != nil || next != 7 {
+		t.Fatalf("run seq=%d err=%v", next, err)
+	}
+	if source.calls.Load() != 1 {
+		t.Fatalf("source reads=%d", source.calls.Load())
+	}
+	if ext.calls != 1 || !evidence.HasIncrement || evidence.SessionID != "source-session" || len(evidence.Messages) != 1 || evidence.Messages[0].Content != "remember runner" {
+		t.Fatalf("extractor=%d evidence=%+v", ext.calls, evidence)
+	}
+}
+
+func TestMaintenanceEvidenceTruncatesUTF8Safely(t *testing.T) {
+	messages := []ExtractionMessage{{Role: "user", Content: strings.Repeat("你好", maintenanceEvidenceMaxMessageBytes)}}
+	bounded, truncated := boundEvidenceMessages(messages)
+	if !truncated || len(bounded) != 1 || !utf8.ValidString(bounded[0].Content) {
+		t.Fatalf("bounded=%+v truncated=%v", bounded, truncated)
+	}
+	if len([]byte(bounded[0].Content)) > maintenanceEvidenceMaxMessageBytes {
+		t.Fatalf("bounded bytes=%d", len([]byte(bounded[0].Content)))
+	}
+}
+
+func TestMaintenanceEvidenceDropsUnboundedToolMetadataWithoutMutatingInput(t *testing.T) {
+	original := ExtractionMessage{
+		Role:       "assistant",
+		Name:       strings.Repeat("n", maintenanceEvidenceMaxBytes*2),
+		Content:    "保留这段文字",
+		ToolCallID: "call-1",
+		ToolCalls:  []ExtractionToolCall{{ID: "call-1", Name: "write_file", Arguments: strings.Repeat("x", maintenanceEvidenceMaxBytes*4)}},
+	}
+	input := []ExtractionMessage{original}
+	bounded, truncated := boundEvidenceMessages(input)
+	if !truncated || len(bounded) != 1 {
+		t.Fatalf("bounded=%+v truncated=%v", bounded, truncated)
+	}
+	if bounded[0].Role != original.Role || bounded[0].Content != original.Content || bounded[0].Name != "" || bounded[0].ToolCallID != "" || len(bounded[0].ToolCalls) != 0 {
+		t.Fatalf("unexpected bounded evidence=%+v", bounded[0])
+	}
+	if input[0].Name != original.Name || input[0].ToolCallID != original.ToolCallID || len(input[0].ToolCalls) != 1 || input[0].ToolCalls[0].Arguments != original.ToolCalls[0].Arguments {
+		t.Fatal("source input was mutated")
+	}
+}
+
+func TestMaintenanceEvidenceNormalizesUnboundedRole(t *testing.T) {
+	originalRole := strings.Repeat("role-", maintenanceEvidenceMaxBytes*2)
+	input := []ExtractionMessage{{Role: originalRole, Content: "evidence"}}
+	bounded, truncated := boundEvidenceMessages(input)
+	if len(bounded) != 1 || bounded[0].Role != "unknown" || !truncated {
+		t.Fatalf("bounded=%+v truncated=%v", bounded, truncated)
+	}
+	if input[0].Role != originalRole {
+		t.Fatal("source role was mutated")
 	}
 }
 
