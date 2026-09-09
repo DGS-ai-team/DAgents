@@ -48,6 +48,9 @@ func TestConditionRunnerOutcomesClearClaimAndAdvance(t *testing.T) {
 		{"error", func(context.Context, ConditionRequest) (ConditionResult, error) {
 			return ConditionResult{}, errors.New("condition unavailable")
 		}, FireStatusError},
+		{"failed result", func(context.Context, ConditionRequest) (ConditionResult, error) {
+			return ConditionResult{Failed: true}, nil
+		}, FireStatusError},
 		{"nil", nil, FireStatusError},
 	}
 	for _, tc := range cases {
@@ -104,6 +107,25 @@ func TestTypedConditionApprovalPersistsClaimAndCompletesOnce(t *testing.T) {
 	after, _ := store.GetTrigger(def.TriggerID)
 	if after.PendingDeliveryID == nil || !after.PendingConditionApproved {
 		t.Fatalf("completion did not retain delivery claim: %+v", after)
+	}
+}
+
+func TestRejectedConditionApprovalIsDistinguishedFromFalseCondition(t *testing.T) {
+	store, scheduler, sub, def, completion, _ := awaitingCondition(t, "schedule", nil)
+	completion.Matched = false
+	completion.Rejected = true
+	record, err := scheduler.CompleteCondition(context.Background(), *completion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != FireStatusSkipped || record.Message != "condition approval rejected" {
+		t.Fatalf("rejected condition record=%+v", record)
+	}
+	if len(sub.messages) != 0 {
+		t.Fatalf("rejected condition submitted %d messages", len(sub.messages))
+	}
+	if got, ok := store.GetTrigger(def.TriggerID); !ok || got.PendingDeliveryID != nil {
+		t.Fatalf("rejected condition claim leaked: %+v", got)
 	}
 }
 

@@ -249,4 +249,31 @@ func TestConditionTriggerHTTPApprovalExecutesOnce(t *testing.T) {
 	if client.calls.Load() != 1 {
 		t.Fatalf("reject submitted final task, calls=%d", client.calls.Load())
 	}
+	waitSessionIdle(t, srv, sessionID)
+	historyDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(historyDeadline) {
+		historyResp, err := http.Get(ts.URL + "/v1/triggers/" + rejectID + "/history")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var history struct {
+			Records []struct {
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			} `json:"records"`
+		}
+		decodeErr := json.NewDecoder(historyResp.Body).Decode(&history)
+		historyResp.Body.Close()
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if len(history.Records) > 0 {
+			latest := history.Records[0]
+			if latest.Status == "skipped" && latest.Message == "condition approval rejected" {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("rejected condition history did not record approval rejection")
 }

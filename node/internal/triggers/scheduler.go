@@ -48,7 +48,11 @@ const (
 	ConditionAwaitingApproval ConditionResultStatus = "awaiting_approval"
 )
 
-type ConditionResult struct{ Status ConditionResultStatus }
+type ConditionResult struct {
+	Status   ConditionResultStatus
+	Rejected bool
+	Failed   bool
+}
 
 // ConditionRunner is an injected, Agent-bound policy/tool execution seam.
 // The triggers package never invokes a shell directly.
@@ -85,6 +89,8 @@ type ConditionCompletion struct {
 	Revision   int64
 	Occurrence *float64
 	Matched    bool
+	Rejected   bool
+	Failed     bool
 }
 
 // CompleteCondition finishes a persisted condition claim after approval. A
@@ -101,8 +107,15 @@ func (s *Scheduler) CompleteCondition(ctx context.Context, completion ConditionC
 	if !claimed {
 		return FireRecord{}, fmt.Errorf("condition completion already claimed")
 	}
+	if completion.Failed {
+		return s.record(def, FireStatusError, def.PendingConditionReason, def.PendingConditionPayload, "condition execution failed", def.PendingSessionID, def.ClientID, def.PendingConditionContent), nil
+	}
 	if !completion.Matched {
-		return s.record(def, FireStatusSkipped, def.PendingConditionReason, def.PendingConditionPayload, "condition not satisfied", def.PendingSessionID, def.ClientID, def.PendingConditionContent), nil
+		message := "condition not satisfied"
+		if completion.Rejected {
+			message = "condition approval rejected"
+		}
+		return s.record(def, FireStatusSkipped, def.PendingConditionReason, def.PendingConditionPayload, message, def.PendingSessionID, def.ClientID, def.PendingConditionContent), nil
 	}
 	content := def.PendingConditionContent
 	var submitErr error
@@ -377,13 +390,15 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 			record := s.record(def, FireStatusAwaitingApproval, reason, payload, "condition awaiting approval", &sessionID, &clientID, content)
 			return record
 		}
-		if conditionErr != nil || !ok {
+		if conditionErr != nil || conditionResult.Failed || !ok {
 			if cleanupErr := s.store.clearPendingDeliveryIfMatch(def.TriggerID, deliveryID); cleanupErr != nil {
 				return s.record(def, FireStatusError, reason, payload, "condition cleanup failed: "+cleanupErr.Error(), &sessionID, &clientID, content)
 			}
 			message, status := "condition not satisfied", FireStatusSkipped
 			if conditionErr != nil {
 				status, message = FireStatusError, "condition failed: "+conditionErr.Error()
+			} else if conditionResult.Failed {
+				status, message = FireStatusError, "condition execution failed"
 			}
 			return s.record(def, status, reason, payload, message, &sessionID, &clientID, content)
 		}

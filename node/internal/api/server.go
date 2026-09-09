@@ -39,7 +39,7 @@ import (
 
 func conditionCompletionCallback(scheduler *triggers.Scheduler, triggerStore *triggers.Store) func(triggers.ConditionRequest, triggers.ConditionResult) error {
 	return func(req triggers.ConditionRequest, result triggers.ConditionResult) error {
-		_, err := scheduler.CompleteCondition(context.Background(), triggers.ConditionCompletion{TriggerID: req.TriggerID, DeliveryID: req.DeliveryID, SessionID: req.SessionID, AgentID: req.AgentID, Revision: req.Revision, Occurrence: req.Occurrence, Matched: result.Status == triggers.ConditionMatched})
+		_, err := scheduler.CompleteCondition(context.Background(), triggers.ConditionCompletion{TriggerID: req.TriggerID, DeliveryID: req.DeliveryID, SessionID: req.SessionID, AgentID: req.AgentID, Revision: req.Revision, Occurrence: req.Occurrence, Matched: result.Status == triggers.ConditionMatched, Rejected: result.Rejected, Failed: result.Failed})
 		if err != nil {
 			if recoveryErr := triggerStore.MarkConditionRecovery(req.TriggerID, req.DeliveryID, err.Error()); recoveryErr != nil {
 				return fmt.Errorf("complete condition: %w; mark recovery: %v", err, recoveryErr)

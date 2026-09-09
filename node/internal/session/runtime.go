@@ -1172,8 +1172,10 @@ func (r *runtime) handleConditionResume(parent context.Context, resumeValue map[
 		r.logger.Warn("start condition execution lifecycle failed", "session_id", r.session.ID, "error", err)
 		return turn.StepOutcome{}, err
 	}
+	conditionRejected := false
 	outcome, history := r.runTurnStepWithSideEffects(parent, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		result, err := r.orch.ExecuteConditionApproval(ctx, r.session.ID, pending, resumeValue)
+		conditionRejected = result.Rejected
 		return turn.StepOutcome{ConditionHandled: true, ConditionMatched: result.Matched,
 			ConditionToolCallID: item.ToolCall.ID, ConditionExecutionID: item.ToolCall.ID + "-execution",
 			ConditionResult: result.ResultContent, StepIndex: turn.StepIndexFromContext(ctx), Err: err}
@@ -1190,7 +1192,7 @@ func (r *runtime) handleConditionResume(parent context.Context, resumeValue map[
 		if execution, ok := r.turnCoordinator.ToolExecutionStatusForCall(item.ToolCall.ID); ok && execution == turn.ToolExecutionStatusSucceeded {
 			status = triggers.ConditionMatched
 		}
-		if err := r.conditionCompletion(triggers.ConditionRequest{TriggerID: meta.TriggerID, DeliveryID: meta.DeliveryID, SessionID: r.session.ID, AgentID: meta.AgentID, Revision: meta.TriggerRevision, Occurrence: meta.Occurrence}, triggers.ConditionResult{Status: status}); err != nil {
+		if err := r.conditionCompletion(triggers.ConditionRequest{TriggerID: meta.TriggerID, DeliveryID: meta.DeliveryID, SessionID: r.session.ID, AgentID: meta.AgentID, Revision: meta.TriggerRevision, Occurrence: meta.Occurrence}, triggers.ConditionResult{Status: status, Rejected: conditionRejected, Failed: outcome.Err != nil}); err != nil {
 			if r.logger != nil {
 				r.logger.Error("condition completion callback failed", "session_id", r.session.ID, "trigger_id", meta.TriggerID, "delivery_id", meta.DeliveryID, "error", err)
 			}

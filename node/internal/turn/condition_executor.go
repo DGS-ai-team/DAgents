@@ -22,6 +22,7 @@ type ConditionResult struct {
 	Action         policy.Action
 	ApprovalReason string
 	ResultContent  string
+	Rejected       bool
 }
 
 // PrepareCondition performs the normal tool policy/hooks decision without
@@ -141,7 +142,7 @@ func (o *Orchestrator) ExecuteConditionApproval(ctx context.Context, sessionID s
 		return ConditionResult{Action: policy.ActionRequireApproval, ApprovalReason: err.Error()}, nil
 	}
 	if _, approved := plan.Approved[item.ToolCall.ID]; !approved {
-		return ConditionResult{Action: policy.ActionRequireApproval, ApprovalReason: "user rejected condition"}, nil
+		return ConditionResult{Action: policy.ActionRequireApproval, ApprovalReason: "user rejected condition", Rejected: true}, nil
 	}
 	history := make([]llm.Message, 0, 1)
 	decision := o.decideToolBeforeEach(ctx, sessionID, &history, item.ToolCall)

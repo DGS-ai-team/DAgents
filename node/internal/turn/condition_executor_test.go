@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -33,6 +34,22 @@ func TestExecuteConditionUsesAgentPolicyAndShell(t *testing.T) {
 	}
 	if !got.Matched || got.Action != policy.ActionAuto {
 		t.Fatalf("result=%+v", got)
+	}
+}
+
+func TestExecuteConditionDisabledToolIsExecutionError(t *testing.T) {
+	o := newConditionTestOrchestrator(t, policy.ModeNever)
+	reg, ok := o.tools.(*tools.Registry)
+	if !ok {
+		t.Fatalf("test orchestrator registry type=%T", o.tools)
+	}
+	reg.SetBuiltinEnabledNone()
+	got, err := o.ExecuteCondition(conditionTestContext("session-a"), "session-a", "trigger-a", "exit 0")
+	if err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("err=%v result=%+v", err, got)
+	}
+	if got.Matched {
+		t.Fatalf("disabled tool was treated as matched: %+v", got)
 	}
 }
 
