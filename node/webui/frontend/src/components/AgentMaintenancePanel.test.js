@@ -189,4 +189,22 @@ describe("AgentMaintenancePanel", () => {
     await flush();
     expect(w.find('input[type="text"]').element.value).toBe("Asia/Shanghai");
   });
+
+  it("explains when the Node version lacks maintenance", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: async () => "404 page not found",
+      });
+    vi.stubGlobal("fetch", fetch);
+    const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } });
+    await flush();
+    expect(w.text()).toContain(
+      "当前 Node 版本尚不支持此功能，请更新 Node 后重试",
+    );
+    expect(w.text()).not.toContain("404 page not found");
+    expect(w.text()).toContain("重新加载");
+  });
 });

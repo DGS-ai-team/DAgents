@@ -128,4 +128,18 @@ describe("AgentHandbookPanel", () => {
     expect(wrapper.text()).toContain("文件已被修改");
     expect(wrapper.text()).toContain("手册正文");
   });
+
+  it("explains when the Node version lacks the handbook", async () => {
+    api.getAgentHandbook.mockRejectedValue(
+      Object.assign(new Error("404 page not found"), { status: 404 }),
+    );
+    const wrapper = mount(AgentHandbookPanel, { props: { agentId: "a" } });
+    await tick();
+    expect(wrapper.text()).toContain(
+      "当前 Node 版本尚不支持此功能，请更新 Node 后重试",
+    );
+    expect(wrapper.text()).not.toContain("404 page not found");
+    await wrapper.find("button").trigger("click");
+    expect(api.getAgentHandbook).toHaveBeenCalledTimes(2);
+  });
 });

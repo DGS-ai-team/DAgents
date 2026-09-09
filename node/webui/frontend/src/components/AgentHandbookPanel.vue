@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
 const props = defineProps({ agentId: { type: String, required: true } });
+const unsupportedMessage = "当前 Node 版本尚不支持此功能，请更新 Node 后重试";
 const page = ref(null),
   selectedPath = ref(""),
   directoryDraft = ref(""),
@@ -65,7 +66,11 @@ async function load(path = "", { preserveError = false } = {}) {
     }
     return true;
   } catch (cause) {
-    if (current(token, agentId)) error.value = cause?.message || "手册读取失败";
+    if (current(token, agentId))
+      error.value =
+        cause?.status === 404
+          ? unsupportedMessage
+          : cause?.message || "手册读取失败";
     return false;
   } finally {
     if (current(token, agentId)) loading.value = false;

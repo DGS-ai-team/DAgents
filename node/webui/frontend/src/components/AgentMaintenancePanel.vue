@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 const props = defineProps({ agentId: { type: String, required: true } });
+const unsupportedMessage = "当前 Node 版本尚不支持此功能，请更新 Node 后重试";
 const defaultConfig = () => ({
   maintenance_enabled: false,
   maintenance_schedule: "daily 09:00",
@@ -82,6 +83,7 @@ async function responseJSON(response, fallback) {
   if (response.ok) return response.json();
   const cause = new Error(message(await response.text(), fallback));
   cause.status = response.status;
+  if (response.status === 404) cause.message = unsupportedMessage;
   throw cause;
 }
 
