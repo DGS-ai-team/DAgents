@@ -326,3 +326,8 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 替换前通过 18766 hydrate 核对 `agt-9ea36189d2221ea1` 与 `agt-86cd2b08565d2c10`：均无 active turn、排队消息或 pending HITL。未清理数据库、配置或夹具。
 - 18766 已切换至新二进制，进程 PID 25660，健康检查与 `/ui/` 均返回 200，trigger 列表可只读访问。运行时仍使用原隔离 Auto UI runtime 目录；监听使用临时 bootstrap 副本恢复原 18766 端口，原 `config.yaml` 未改动。
 - 条件脚本结论保持保守：未把此前未启用 `bash_run` 的结果写成真实 false 路径；隔离库中该情况是执行错误。启用工具后的非零退出码与拒绝对照已记录，但本次只部署分类修复，未触发生产 Auto。
+
+### 2026-09-10 默认 trigger 重启边界复核
+
+- 在隔离临时目录上的 `TestNewServerStartupRebuildsOnlyAutoDefaults` 与 `TestNewServerStartupKeepsPendingAutoDefaultFrozen` 以 `go test -race` 重跑通过，覆盖重开后的默认 trigger 校正、待恢复投递冻结及普通 trigger 隔离；未触发 18766 的 Auto。
+- 当前 18766 只读 `GET /v1/triggers` 返回 6 条 trigger，其中两个 Agent 默认 trigger 均为 `enabled=false`、无 `pending_delivery_id`，未因本次检查改变配置。该结果只证明当前部署状态，不扩展为真实到期后模型激活证明。
