@@ -94,7 +94,7 @@ paths:
   /v1/agents/{agent_id}/auto-config:
     get:
       summary: 获取简化 Auto 配置
-      description: 频率与 dreaming 当前仅保存配置，尚未驱动默认 trigger 或 dreaming 执行链路。
+      description: 自主激活频率驱动所属 Agent 的默认 trigger；每日 dreaming 独立于激活频率调度。
       parameters: [{ $ref: "#/components/parameters/AgentID" }]
       responses:
         "200": {description: Auto 配置, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Profile"}}}}
@@ -120,6 +120,16 @@ paths:
       parameters: [{ $ref: "#/components/parameters/AgentID" }]
       responses:
         "200": {description: 经验；不存在时返回 experience null, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ExperienceResponse"}}}}
+  /v1/agents/{agent_id}/dreaming:
+    get:
+      summary: 获取每日经验整理状态
+      description: 只读状态；零值时间省略。未完成经验提交的上下文重置可在关闭 dreaming 后继续恢复。
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: 当前状态, content: {application/json: {schema: {$ref: "#/components/schemas/DreamingStatus"}}}}
+        "404": {description: Agent 不存在或已归档}
+        "409": {description: Agent 不是自主智能体}
+        "503": {description: 调度器不可用}
   /v1/agents/{agent_id}/todos:
     get:
       summary: 列出 Auto Todo
@@ -1280,6 +1290,14 @@ components:
       properties:
         profile: {$ref: '#/components/schemas/AutonomyV2Profile'}
         trigger: {$ref: '#/components/schemas/TriggerDefinition'}
+    DreamingStatus:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [disabled, waiting, running, succeeded, failed, recovery_pending]}
+        next_at: {type: string, format: date-time}
+        last_success: {type: string, format: date-time}
+        last_error: {type: string}
     AutonomyV2Experience:
       type: object
       required: [agent_id, revision, content, updated_at]

@@ -62,6 +62,7 @@ type Server struct {
 	store                *store.SQLiteStore
 	triggerStore         *triggers.Store
 	triggerSched         *triggers.Scheduler
+	dreamingSched        *DreamingScheduler
 	startupErr           error
 	autonomyStore        *autonomy.Store
 	autoConfigMu         sync.Mutex
@@ -683,6 +684,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			triggerSched = nil
 			s.triggerSched = nil
 		}
+	}
+	if s.startupErr == nil && s.autonomyStore != nil && s.agents != nil {
+		s.dreamingSched = NewDreamingScheduler(s.autonomyStore, s.agents, s.sessions, s.ensureAgentRuntime)
+		s.dreamingSched.Start(context.Background())
 	}
 	return s
 }

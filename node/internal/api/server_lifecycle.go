@@ -84,6 +84,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
 		}
+		if s.dreamingSched != nil {
+			s.dreamingSched.Stop()
+		}
 		if s.terminals != nil {
 			s.terminals.closeAll()
 		}
@@ -243,6 +246,9 @@ func (s *Server) Close() {
 	}
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
+	}
+	if s.dreamingSched != nil {
+		s.dreamingSched.Stop()
 	}
 	if s.terminals != nil {
 		s.terminals.closeAll()

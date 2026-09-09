@@ -197,6 +197,10 @@ export function getAutoExperience(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/experience`);
 }
 
+export function getAgentDreamingStatus(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/dreaming`);
+}
+
 export function deleteAgentTodo(agentId, todoId, revision) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, { method: "DELETE", body: { expected_revision: revision } });
 }
