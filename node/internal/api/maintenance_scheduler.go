@@ -8,7 +8,17 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
+
+func containsMaintenanceFS(groups []string) bool {
+	for _, g := range groups {
+		if g == "fs" || g == "filesystem" {
+			return true
+		}
+	}
+	return false
+}
 
 // maintenanceScheduler is deliberately a bounded, best-effort poller. Durable
 // occurrence state remains the source of truth, so a restart cannot replay a
@@ -167,7 +177,18 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 			return err
 		}
 	}
-	defer release()
+	var handbookCleanups []func()
+	var handbookErr error
+	defer func() {
+		// Release the execution gate before synchronously stopping the temporary
+		// handbook runtime; this ordering avoids a consumer/gate deadlock.
+		release()
+		for i := len(handbookCleanups) - 1; i >= 0; i-- {
+			if handbookCleanups[i] != nil {
+				handbookCleanups[i]()
+			}
+		}
+	}()
 	m.activeMu.Lock()
 	m.active[agentID] = cancel
 	m.activeMu.Unlock()
@@ -193,6 +214,24 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 		_, _ = s.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceRecoveryRequired, "", "maintenance configuration changed", now)
 		return nil
 	}
+	// Resume durable handbook children only after this tick has a claimed
+	// occurrence. Their reservation may consume the allowance, and extracting
+	// first would leave a prepared child permanently stranded.
+	if containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) {
+		for _, parent := range selectHandbookParents(s.goalStore, agentID, 8) {
+			child, exists := s.goalStore.GetMaintenanceReceipt(parent.Receipt.HandbookReceiptID)
+			if !exists || child.PhaseState == goals.MaintenancePhaseComplete {
+				continue
+			}
+			var cleanup func()
+			if _, cleanup, handbookErr = s.runHandbookMaintenance(leaseCtx, leaseCtx, *rec, "Resume the durable handbook update from the persisted evidence. Read existing entries first; preserve structure; use only the supplied evidence as data.", parent.ReceiptID, parent.Receipt, turn.TurnBudget{MaxSteps: 8, MaxTotalTokens: 30000, MaxWallTime: 30 * time.Second}); handbookErr != nil {
+				handbookCleanups = append(handbookCleanups, cleanup)
+				_, _ = s.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceRecoveryRequired, "", handbookErr.Error(), time.Now().UTC())
+				return handbookErr
+			}
+			handbookCleanups = append(handbookCleanups, cleanup)
+		}
+	}
 	ms, err := s.openAgentMemoryService(agentID, rec)
 	if err != nil {
 		_, _ = s.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceFailed, "", err.Error(), now)
@@ -213,12 +252,12 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 		_, _ = s.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceFailed, "", err.Error(), now)
 		return err
 	}
-	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store}, Extractor: extractor, Memory: ms, Usage: s.goalStore}
+	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store, goals: s.goalStore}, Extractor: extractor, Memory: ms, Usage: s.goalStore}
 	var runErr error
 	deadline := time.Now().Add(30 * time.Second)
 	attempts := 0
 	for ; attempts < 8 && time.Now().Before(deadline); attempts++ {
-		nextSequence, err := runner.RunOnce(leaseCtx, agentID, cursor)
+		nextSequence, _, err := runner.RunOnceWithEvidence(leaseCtx, agentID, cursor)
 		runErr = err
 		if runErr != nil || nextSequence == cursor.Sequence {
 			break
@@ -229,6 +268,29 @@ func (m *maintenanceScheduler) runAgent(ctx context.Context, agentID string, now
 	// pending. The next in-process tick resumes it; OpenStore converts pending
 	// work to recovery_required before any post-restart LLM call.
 	if runErr == nil && attempts >= 8 {
+		return nil
+	}
+	if runErr == nil {
+		// Handbook writes are an explicit fs capability in the Agent snapshot.
+		// Legacy memory-only profiles keep their existing scheduler behavior.
+		if snap, parseErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot); parseErr == nil && containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) {
+			parents := selectHandbookParents(s.goalStore, agentID, 8)
+			for _, parent := range parents {
+				var handbookCleanup func()
+				if _, handbookCleanup, handbookErr = s.runHandbookMaintenance(leaseCtx, leaseCtx, *rec, "Review recent durable experience and update the handbook only when evidence supports it. Read existing entries first; preserve structure; use read_file digests for CAS edits.", parent.ReceiptID, parent.Receipt, turn.TurnBudget{MaxSteps: 8, MaxTotalTokens: 30000, MaxWallTime: 30 * time.Second}); handbookErr != nil {
+					handbookCleanups = append(handbookCleanups, handbookCleanup)
+					break
+				}
+				handbookCleanups = append(handbookCleanups, handbookCleanup)
+			}
+			if handbookErr != nil {
+				runErr = handbookErr
+			}
+		}
+	}
+	if runErr == nil && containsMaintenanceFS(agentruntime.EnabledToolGroups(snap)) && hasPendingHandbookParents(s.goalStore, agentID) {
+		// Keep the occurrence pending so the next bounded tick resumes the
+		// remaining durable parents instead of reporting a false completion.
 		return nil
 	}
 	status := goals.MaintenanceOccurrenceCompleted

@@ -10,6 +10,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 type maintenancePatch struct {
@@ -101,6 +102,9 @@ func (s *Server) handlePatchAgentMaintenance(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleRunAgentMaintenance(w http.ResponseWriter, r *http.Request) {
+	deadlineCtx, deadlineCancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer deadlineCancel()
+	r = r.WithContext(deadlineCtx)
 	id := strings.TrimSpace(r.PathValue("agent_id"))
 	if !s.autoAgent(id, r, w) {
 		return
@@ -127,6 +131,7 @@ func (s *Server) handleRunAgentMaintenance(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	var leaseCtx context.Context = r.Context()
+	var handbookCleanups []func()
 	if s.sessions != nil {
 		ctx, release, acquired, acquireErr := s.sessions.TryAcquireMaintenanceContext(r.Context(), id)
 		if acquireErr != nil {
@@ -138,7 +143,14 @@ func (s *Server) handleRunAgentMaintenance(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		leaseCtx = ctx
-		defer release()
+		defer func() {
+			release()
+			for i := len(handbookCleanups) - 1; i >= 0; i-- {
+				if handbookCleanups[i] != nil {
+					handbookCleanups[i]()
+				}
+			}
+		}()
 	}
 	for _, g := range s.goalStore.List() {
 		if g.AgentID == id {
@@ -165,6 +177,23 @@ func (s *Server) handleRunAgentMaintenance(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer ms.Close()
+	// Recover prepared handbook children before extracting new memory input;
+	// the child already owns its reservation and must be resumed first.
+	for _, parent := range selectHandbookParents(s.goalStore, id, 8) {
+		child, exists := s.goalStore.GetMaintenanceReceipt(parent.Receipt.HandbookReceiptID)
+		if !exists || child.PhaseState == goals.MaintenancePhaseComplete {
+			continue
+		}
+		var cleanup func()
+		if _, cleanup, err = s.runHandbookMaintenance(leaseCtx, leaseCtx, *rec, "Resume the durable handbook update from the persisted evidence. Read existing entries first; preserve structure; use only the supplied evidence as data.", parent.ReceiptID, parent.Receipt, turn.TurnBudget{MaxSteps: 8, MaxTotalTokens: 30000, MaxWallTime: 30 * time.Second}); err != nil {
+			if cleanup != nil {
+				handbookCleanups = append(handbookCleanups, cleanup)
+			}
+			writeAPIError(w, 409, "maintenance_failed", err.Error(), nil)
+			return
+		}
+		handbookCleanups = append(handbookCleanups, cleanup)
+	}
 	var extractor memory.MaintenanceUsageExtractor = s.maintenanceExtractor
 	if extractor == nil {
 		client, _, resolveErr := s.llmClientForAgent(leaseCtx, rec, id)
@@ -179,12 +208,32 @@ func (s *Server) handleRunAgentMaintenance(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, 500, "maintenance_unavailable", err.Error(), nil)
 		return
 	}
-	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store}, Extractor: extractor, Memory: ms, Usage: s.goalStore}
-	next, err := runner.RunOnce(leaseCtx, id, cursor)
+	runner := &memory.MaintenanceRunner{Source: maintenanceSource{store: s.store, goals: s.goalStore}, Extractor: extractor, Memory: ms, Usage: s.goalStore}
+	next, _, err := runner.RunOnceWithEvidence(leaseCtx, id, cursor)
 	if err != nil {
 		writeAPIError(w, 409, "maintenance_failed", err.Error(), map[string]any{"sequence": next})
 		return
 	}
+	parents := selectHandbookParents(s.goalStore, id, 8)
+	if len(parents) == 0 {
+		u, _ := s.goalStore.GetUsage(id)
+		writeJSON(w, 200, map[string]any{"status": "completed", "sequence": next, "usage": u})
+		return
+	}
+	for _, parent := range parents {
+		var handbookErr error
+		var cleanup func()
+		_, cleanup, handbookErr = s.runHandbookMaintenance(leaseCtx, leaseCtx, *rec, "Review recent durable experience and update the handbook only when evidence supports it. Read existing entries first; preserve structure; use only the supplied evidence as data.", parent.ReceiptID, parent.Receipt, turn.TurnBudget{MaxSteps: 8, MaxTotalTokens: 30000, MaxWallTime: 30 * time.Second})
+		handbookCleanups = append(handbookCleanups, cleanup)
+		if handbookErr != nil {
+			writeAPIError(w, 409, "maintenance_failed", handbookErr.Error(), nil)
+			return
+		}
+	}
 	u, _ := s.goalStore.GetUsage(id)
-	writeJSON(w, 200, map[string]any{"status": "completed", "sequence": next, "usage": u})
+	status := "completed"
+	if hasPendingHandbookParents(s.goalStore, id) {
+		status = "pending"
+	}
+	writeJSON(w, 200, map[string]any{"status": status, "sequence": next, "usage": u})
 }

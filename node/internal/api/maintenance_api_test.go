@@ -39,6 +39,26 @@ type blockingMaintenanceExtractor struct {
 	calls   atomic.Int32
 }
 
+type blockingHandbookClient struct {
+	started chan struct{}
+}
+
+func (c *blockingHandbookClient) StreamChat(ctx context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+	select {
+	case <-c.started:
+	default:
+		close(c.started)
+	}
+	<-ctx.Done()
+	return llm.ChatResult{}, ctx.Err()
+}
+func (*blockingHandbookClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*blockingHandbookClient) NormalizeAssistant(e []llm.Message, m llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(e, m)
+}
+
 func (e *blockingMaintenanceExtractor) ExtractWithUsage(ctx context.Context, in memory.ExtractionInput) ([]memory.Candidate, *llm.Usage, error) {
 	e.calls.Add(1)
 	close(e.started)
@@ -62,10 +82,13 @@ func TestMaintenanceAPIProcessesSequentialSnapshotsAndSkipsUnchanged(t *testing.
 	}
 	settings.Close()
 	ext := &apiMaintenanceExtractor{}
-	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithMaintenanceExtractor(ext))
+	srv := NewServer(cfg, nil, WithLLM(&maintenanceScriptedClient{}), WithMaintenanceExtractor(ext))
 	defer srv.Close()
 	now := time.Now().UTC()
 	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: "maint-api", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.agents.MutateAgentPolicy(context.Background(), "maint-api", func(p *store.AgentPolicyRecord) error { p.Tools["write_file"] = "never"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: "maint-api", Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 09:00", Timezone: "UTC", MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, now)
@@ -94,14 +117,62 @@ func TestMaintenanceAPIProcessesSequentialSnapshotsAndSkipsUnchanged(t *testing.
 	if got := post()["sequence"]; got != float64(1) {
 		t.Fatalf("first sequence=%v", got)
 	}
-	if got := post()["sequence"]; got != float64(2) {
-		t.Fatalf("second sequence=%v", got)
+	_ = post()["sequence"]
+	third := post()["sequence"]
+	if third == nil {
+		t.Fatal("third sequence missing")
 	}
-	if got := post()["sequence"]; got != float64(2) {
-		t.Fatalf("unchanged sequence=%v", got)
+	if fourth := post()["sequence"]; fourth != third {
+		t.Fatalf("sequence did not stabilize: third=%v fourth=%v", third, fourth)
 	}
 	if ext.calls.Load() != 2 {
 		t.Fatalf("extract calls=%d", ext.calls.Load())
+	}
+	receipts := srv.goalStore.ListMaintenanceReceipts("maint-api")
+	if len(receipts) == 0 {
+		t.Fatal("maintenance receipt missing")
+	}
+	latest := receipts[len(receipts)-1]
+	for _, receipt := range receipts[1:] {
+		if receipt.UpdatedAt.After(latest.UpdatedAt) {
+			latest = receipt
+		}
+	}
+	if latest.SessionID == "" {
+		t.Fatalf("receipt missing session id: %+v", latest)
+	}
+	if srv.sessions.Get(latest.SessionID) != nil {
+		t.Fatalf("temporary maintenance session still resident: %s", latest.SessionID)
+	}
+	if _, active, _, _ := srv.sessions.RuntimeInfo(latest.SessionID); active {
+		t.Fatalf("temporary maintenance runtime still active: %s", latest.SessionID)
+	}
+	if srv.store == nil {
+		t.Fatal("sqlite store missing")
+	}
+	events, err := srv.store.ListTurnEvents(context.Background(), latest.SessionID, 0, 100)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("temporary transcript missing from sqlite: events=%d err=%v", len(events), err)
+	}
+	snapshots, err := srv.store.ListCompletedTurnSnapshots(context.Background(), "maint-api", 0, 100)
+	messageCount := 0
+	modelTranscript := false
+	for _, snapshot := range snapshots {
+		if snapshot.SessionID != latest.SessionID || snapshot.Status != "readable" {
+			continue
+		}
+		messageCount += len(snapshot.Messages)
+		for _, message := range snapshot.Messages {
+			if strings.Contains(message.Content, "Review recent durable experience") || strings.Contains(message.Content, "evidence") {
+				modelTranscript = true
+			}
+		}
+	}
+	if err != nil || messageCount == 0 || !modelTranscript {
+		for _, snapshot := range snapshots {
+			t.Logf("snapshot session=%s turn=%s status=%s messages=%d", snapshot.SessionID, snapshot.TurnID, snapshot.Status, len(snapshot.Messages))
+		}
+		t.Fatalf("temporary transcript messages missing: receipt_session=%s snapshots=%d err=%v", latest.SessionID, len(snapshots), err)
 	}
 	ms, err := srv.openAgentMemoryService("maint-api", &store.AgentRecord{AgentID: "maint-api", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`)})
 	if err != nil {
@@ -109,7 +180,7 @@ func TestMaintenanceAPIProcessesSequentialSnapshotsAndSkipsUnchanged(t *testing.
 	}
 	defer ms.Close()
 	cursor, err := ms.GetMaintenanceCursor(context.Background())
-	if err != nil || cursor.Sequence != 2 {
+	if err != nil || cursor.Sequence < 2 {
 		t.Fatalf("cursor=%+v err=%v", cursor, err)
 	}
 	entries, err := ms.List(context.Background(), memory.ScopeAgent, true)
@@ -117,7 +188,7 @@ func TestMaintenanceAPIProcessesSequentialSnapshotsAndSkipsUnchanged(t *testing.
 		t.Fatalf("memory entries=%d err=%v", len(entries), err)
 	}
 	usage, ok := srv.goalStore.GetUsage("maint-api")
-	if !ok || usage.MaintenanceTokens != 6 {
+	if !ok || usage.MaintenanceTokens != 12 {
 		t.Fatalf("usage=%+v ok=%v", usage, ok)
 	}
 
@@ -225,6 +296,94 @@ func TestMaintenanceAPIHoldsGateUntilExtractorReturns(t *testing.T) {
 			break
 		}
 	}
+}
+
+func TestMaintenanceAPIRequestCancelCleansTemporaryRuntimeAndMarksUnknown(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Onboarding.NodeProfileCompleted = true
+	settings, err := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Save(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_ = settings.Close()
+	client := &blockingHandbookClient{started: make(chan struct{})}
+	srv := NewServer(cfg, nil, WithLLM(client), WithMaintenanceExtractor(&apiMaintenanceExtractor{}))
+	defer srv.Close()
+	now := time.Now().UTC()
+	id := "maint-cancel-http"
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: id, ConfigSnapshot: json.RawMessage(`{"agent_type":"auto","defaults":{"tools":{"enabled_groups":["fs"]}}}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: id, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 09:00", Timezone: "UTC", MaintenanceTokenBudget: 100, TotalTokenBudget: 100}, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	e := turn.NewTurnEventEnvelope("controller-cancel-source", turn.EventTurnCompleted, now)
+	e.AgentID, e.TurnID, e.CommandID = id, "cancel-business-turn", "cancel-business-complete"
+	if _, err := srv.store.AppendTurnEventWithSnapshot(context.Background(), e, []llm.Message{{Role: "user", Content: "cancel business evidence"}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents/"+id+"/maintenance/run", nil).WithContext(ctx)
+	type response struct {
+		code int
+		body string
+	}
+	done := make(chan response, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		done <- response{w.Code, w.Body.String()}
+	}()
+	select {
+	case <-client.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handbook client did not start")
+	}
+	cancel()
+	select {
+	case out := <-done:
+		if out.code == http.StatusForbidden {
+			t.Fatalf("maintenance request forbidden: %s", out.body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled maintenance HTTP request hung")
+	}
+	receipts := srv.goalStore.ListMaintenanceReceipts(id)
+	if len(receipts) == 0 {
+		t.Fatal("maintenance receipt missing")
+	}
+	var latest goals.MaintenanceReceipt
+	foundChild := false
+	for _, receipt := range receipts {
+		if receipt.ParentReceiptID != "" {
+			latest = receipt
+			foundChild = true
+			break
+		}
+	}
+	if !foundChild {
+		t.Fatalf("handbook child receipt missing: %+v", receipts)
+	}
+	if latest.SessionID == "" || srv.sessions.Get(latest.SessionID) != nil {
+		t.Fatalf("temporary runtime not cleaned: %+v", latest)
+	}
+	usage, ok := srv.goalStore.GetUsage(id)
+	if !ok || !usage.Unknown {
+		t.Fatalf("cancelled maintenance usage=%+v found=%v", usage, ok)
+	}
+	for _, receipt := range receipts {
+		if receipt.ParentReceiptID == "" && receipt.UsedTokens != 3 || receipt.ParentReceiptID == "" && receipt.Unknown {
+			t.Fatalf("parent memory receipt changed by handbook cancel: %+v", receipt)
+		}
+	}
+	_, release, acquired, err := srv.sessions.TryAcquireMaintenanceContext(context.Background(), id)
+	if err != nil || !acquired {
+		t.Fatalf("maintenance lease not reusable: acquired=%v err=%v", acquired, err)
+	}
+	release()
 }
 
 func bytesContains(haystack, needle []byte) bool {

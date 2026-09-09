@@ -186,12 +186,13 @@ paths:
       summary: 手动运行一次维护
       description: |
         运行一次已启用的手动维护并返回累计用量。运行中的维护、聊天或业务运行会被拒绝。
-        日程自动触发尚未接入；此操作不会创建或返回 next_at。
+        优先处理已准备的手册执行，再处理增量记忆与手册文件。达到单次处理上限且仍有待处理手册时返回 pending。
+        此操作不创建每日 occurrence；自动日程和最近 occurrence 通过维护配置接口读取。
       parameters:
         - $ref: "#/components/parameters/AgentID"
       responses:
         "200":
-          description: 维护完成
+          description: 本批维护已处理，status 表明已完成或仍待继续
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AgentMaintenanceRunResponse" }
@@ -1546,7 +1547,7 @@ components:
       type: object
       required: [status, sequence, usage]
       properties:
-        status: {type: string, enum: [completed]}
+        status: {type: string, enum: [completed, pending]}
         sequence: {type: integer, format: int64, description: 本次处理进度序号}
         usage: {$ref: '#/components/schemas/AgentUsage', description: Agent 累计用量}
     AutonomyResponse:

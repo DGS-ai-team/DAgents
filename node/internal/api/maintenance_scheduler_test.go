@@ -96,7 +96,7 @@ func TestMaintenanceSchedulerRunOnceProcessesSnapshotsAndDeduplicates(t *testing
 	for i := 1; i <= 2; i++ {
 		e := turn.NewTurnEventEnvelope("maintenance-scheduler", turn.EventTurnCompleted, now)
 		e.AgentID, e.TurnID, e.CommandID = id, "turn-"+string(rune('0'+i)), "complete-"+string(rune('0'+i))
-		if _, err := srv.store.AppendTurnEventWithSnapshot(context.Background(), e, []llm.Message{{Role: "user", Content: "snapshot"}}); err != nil {
+		if _, err := srv.store.AppendTurnEventWithSnapshot(context.Background(), e, []llm.Message{{Role: "user", Content: "scheduler unique evidence"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
