@@ -6,7 +6,7 @@ async function readJSON(response) {
   }
 }
 
-async function apiFetch(path, { method = "GET", body, params } = {}) {
+async function apiFetch(path, { method = "GET", body, params, signal } = {}) {
   const url = new URL(path, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -15,6 +15,7 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
   }
   const headers = { Accept: "application/json" };
   const init = { method, headers };
+  if (signal) init.signal = signal;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
@@ -165,6 +166,9 @@ export function getAgent(agentId) {
 
 export function getAgentAutonomy(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`);
+}
+export function getAgentRiskObservations(agentId, { signal } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/risk-observations`, { signal });
 }
 export function getAgentHandbook(agentId, path = "") {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook`, { params: { path } });

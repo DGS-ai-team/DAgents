@@ -88,6 +88,8 @@ export function emptyAgentDraft() {
     workspaceMode: "private",
     workspacePath: "",
     agentType: "normal",
+    riskObservationEnabled: false,
+    hooks: {},
   };
 }
 
@@ -179,8 +181,9 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   const tools = asObject(defaults.tools);
   const skills = asObject(defaults.skills);
   const prompt = asObject(defaults.prompt_context);
-
   const draft = emptyAgentDraft();
+  draft.riskObservationEnabled = boolOr(asObject(defaults.hooks).risk_observation_enabled, false);
+  draft.hooks = clone(asObject(defaults.hooks));
   draft.templateId = String(template?.id || "").trim();
   draft.displayName = String(template?.display_name || template?.id || "").trim();
   draft.description = String(template?.description || agent.description || "").trim();
@@ -213,8 +216,9 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   const tools = asObject(defaults.tools);
   const skills = asObject(defaults.skills);
   const prompt = asObject(defaults.prompt_context);
-
   const draft = emptyAgentDraft();
+  draft.riskObservationEnabled = boolOr(asObject(defaults.hooks).risk_observation_enabled, false);
+  draft.hooks = clone(asObject(defaults.hooks));
   draft.templateId = String(agent?.template_id || snap.template_id || "").trim();
   draft.displayName = String(agent?.display_name || "").trim();
   draft.description = String(agentMeta.description || "").trim();
@@ -281,6 +285,10 @@ export function buildCreateAgentPayload(draft) {
           ? { custom_md: String(draft.promptCustomMd).trim() }
           : {}),
       },
+      hooks: {
+        ...asObject(draft.hooks),
+        risk_observation_enabled: Boolean(draft.riskObservationEnabled),
+      },
     },
     workspace: String(draft.workspaceMode || "private").trim() === "custom"
       ? { mode: "custom", path: String(draft.workspacePath || "").trim() }
@@ -300,6 +308,13 @@ export function buildPatchAgentPayload(draft) {
     defaults: created.defaults,
     agent_type: draft.agentType === "auto" ? "auto" : "normal",
   };
+}
+
+/** 风险观察开关的窄 PATCH：保留快照中已有 hooks，避免提交其它未保存草稿。 */
+export function buildRiskObservationPatch(agent, enabled) {
+  const snapshot = parseSnapshot(agent?.config_snapshot);
+  const hooks = asObject(snapshot?.defaults?.hooks);
+  return { defaults: { hooks: { ...hooks, risk_observation_enabled: Boolean(enabled) } } };
 }
 
 /** 从 Agent 草稿构建创建模板 API 入参。 */
@@ -337,6 +352,10 @@ export function buildCreateTemplatePayload(meta, draft) {
         ...(String(draft?.promptCustomMd || "").trim()
           ? { custom_md: String(draft.promptCustomMd).trim() }
           : {}),
+      },
+      hooks: {
+        ...asObject(draft.hooks),
+        risk_observation_enabled: Boolean(draft.riskObservationEnabled),
       },
     },
   };

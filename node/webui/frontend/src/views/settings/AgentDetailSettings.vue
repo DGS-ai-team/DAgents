@@ -11,6 +11,7 @@ import AgentAutonomyPanel from "../../components/AgentAutonomyPanel.vue";
 import AgentEventSourcesPanel from "../../components/AgentEventSourcesPanel.vue";
 import AgentMaintenancePanel from "../../components/AgentMaintenancePanel.vue";
 import AgentHandbookPanel from "../../components/AgentHandbookPanel.vue";
+import AgentRiskObservationPanel from "../../components/AgentRiskObservationPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -19,6 +20,7 @@ import {
   toolGroupsFromSetup,
 } from "../../utils/agentTemplateForm.js";
 import { notifyConfigurationChanged, onConfigurationChanged } from "../../utils/configurationEvents.js";
+import { useRiskObservationSetting } from "../../composables/useRiskObservationSetting.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -36,8 +38,10 @@ const availableToolGroups = ref([]);
 const agentMeta = ref(null);
 const savedMemoryScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
+const riskObservationUnsupported = ref(false);
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
+const riskSetting = useRiskObservationSetting({ agentId, agentMeta, draft });
 const detailSections = [
   { id: "behavior", label: "基本设置" },
   { id: "autonomy", label: "自主任务" },
@@ -165,9 +169,7 @@ function refreshPolicy() {
   policyRefreshKey.value += 1;
 }
 
-watch(agentId, () => {
-  void load();
-});
+watch(agentId, () => { void load(); });
 
 watch(
   () => route.query.section,
@@ -229,6 +231,17 @@ onUnmounted(() => stopConfigurationEvents());
         <AgentEventSourcesPanel :key="`events-${agentId}`" :agent-id="agentId" />
         <AgentMaintenancePanel :key="`maintenance-${agentId}`" :agent-id="agentId" />
         <AgentHandbookPanel :key="`handbook-${agentId}`" :agent-id="agentId" />
+        <AgentRiskObservationPanel
+          :key="`risk-observation-${agentId}`"
+          :agent-id="agentId"
+          :enabled="draft.riskObservationEnabled"
+          :saving="riskSetting.saving.value"
+          :unsupported="riskObservationUnsupported"
+          :confirmed="riskSetting.confirmed.value"
+          :save-error="riskSetting.error.value"
+          @update:enabled="riskSetting.save"
+          @unsupported="riskObservationUnsupported = $event"
+        />
       </section>
 
       <section v-else-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
