@@ -253,6 +253,8 @@ func (s *Server) runHandbookMaintenance(ctx context.Context, leaseCtx context.Co
 	if err := json.Unmarshal(parent.EvidenceJSON, &evidence); err != nil {
 		return session.HandbookMaintenanceResult{UsageKnown: true}, cleanup, err
 	}
-	result, err = s.sessions.RunHandbookMaintenance(leaseCtx, id, maintenanceEvidencePrompt(prompt, evidence), budget)
+	result, err = s.sessions.RunHandbookMaintenanceWithBinding(leaseCtx, id, maintenanceEvidencePrompt(prompt, evidence), budget, func(sessionID, turnID string) error {
+		return s.goalStore.BindHandbookTurn(rec.AgentID, receiptID, sessionID, turnID, time.Now().UTC())
+	})
 	return result, cleanup, err
 }

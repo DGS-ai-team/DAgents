@@ -38,7 +38,9 @@ API/UI 的后续实现顺序为：原子关联 → 按 occurrence 查询执行�
 
 主 Agent 本次独立回归：前端 70 文件 / 401 项通过；API 全包 race 通过（65.951 秒，明确排除已有 Windows 截图库 `TestScreenAPI_`）；handbookfs 全包通过。浏览器确认设置页仍连接旧 Node，维护、手册、事件接口返回不支持提示，因此不能将此次浏览器检查当作新版链路验收。
 
-running 对账仍缺可信关联：现有 child 的 SessionID 无法单独指定实际维护 Turn，文件历史也没有 receipt/turn 来源字段。下一步先在模型调用前持久化实际 TurnID，再增加与文件事务关联的来源及有界事件核对。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
+running 对账的轮次绑定基础已补齐：child 保存实际 TurnID 与 AttemptedAt，session 在 SQLite 写入 turn.started 后、模型调用前完成 Goals 绑定；绑定失败取消该轮次且不调用模型。绑定只接受同 Agent、同 Session、有效父子关联的 running child，重复同 TurnID 保持原记录，改绑或磁盘失败不改变记录。主 Agent 独立 Goals 全包 race（2.646 秒）、Session 手册专项 race（5.705 秒）及 HTTP/调度/重启 prepared 专项 race（4.797 秒）通过；HTTP 测试验证重开后仍能按绑定查询对应 turn.started。
+
+文件历史仍缺 receipt/turn 来源字段，完整事件及费用核对器也尚未实现。历史 child 没有 TurnID 时不能推测归属。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
 
 ## 剩余集成门槛
 

@@ -16,9 +16,17 @@ type HandbookMaintenanceResult struct {
 	UsageKnown bool
 }
 
+// HandbookTurnBinding is invoked after the durable lifecycle has assigned the
+// real turn ID and before any model request is made.
+type HandbookTurnBinding func(sessionID, turnID string) error
+
 // RunHandbookMaintenance executes one real Agent turn while the caller holds
 // the maintenance gate. It deliberately does not acquire a gate itself.
 func (m *Manager) RunHandbookMaintenance(ctx context.Context, sessionID, prompt string, budget turn.TurnBudget) (HandbookMaintenanceResult, error) {
+	return m.RunHandbookMaintenanceWithBinding(ctx, sessionID, prompt, budget, nil)
+}
+
+func (m *Manager) RunHandbookMaintenanceWithBinding(ctx context.Context, sessionID, prompt string, budget turn.TurnBudget, bind HandbookTurnBinding) (HandbookMaintenanceResult, error) {
 	if m == nil || ctx == nil {
 		return HandbookMaintenanceResult{Unknown: true}, fmt.Errorf("maintenance executor unavailable")
 	}
@@ -63,6 +71,22 @@ func (m *Manager) RunHandbookMaintenance(ctx context.Context, sessionID, prompt 
 	r.mu.Unlock()
 	if beginErr != nil {
 		return HandbookMaintenanceResult{Unknown: true}, beginErr
+	}
+	if bind != nil {
+		turnID := r.turnCoordinator.Snapshot().TurnID
+		if turnID == "" {
+			bindErr := fmt.Errorf("handbook turn ID unavailable")
+			if cancelErr := r.lifecycleCancel(); cancelErr != nil {
+				bindErr = fmt.Errorf("%w; lifecycle cancel: %v", bindErr, cancelErr)
+			}
+			return HandbookMaintenanceResult{UsageKnown: true}, bindErr
+		}
+		if bindErr := bind(r.session.ID, turnID); bindErr != nil {
+			if cancelErr := r.lifecycleCancel(); cancelErr != nil {
+				bindErr = fmt.Errorf("%w; lifecycle cancel: %v", bindErr, cancelErr)
+			}
+			return HandbookMaintenanceResult{UsageKnown: true}, bindErr
+		}
 	}
 	historyStart := r.lifecycleHistoryLength()
 	maintCtx := tools.WithHandbookMaintenance(ctx)

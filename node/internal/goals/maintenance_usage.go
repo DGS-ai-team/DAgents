@@ -23,6 +23,8 @@ type MaintenanceReceipt struct {
 	CandidateJSON              json.RawMessage `json:"candidate_json,omitempty"`
 	NextCursor                 int64           `json:"next_cursor,omitempty"`
 	SessionID                  string          `json:"session_id,omitempty"`
+	TurnID                     string          `json:"turn_id,omitempty"`
+	AttemptedAt                time.Time       `json:"attempted_at,omitempty"`
 	EvidenceJSON               json.RawMessage `json:"evidence_json,omitempty"`
 	ParentReceiptID            string          `json:"parent_receipt_id,omitempty"`
 	HandbookReceiptID          string          `json:"handbook_receipt_id,omitempty"`

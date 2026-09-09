@@ -3,6 +3,7 @@ package goals
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -185,6 +186,101 @@ func TestMarkAndSettleHandbookClaimsOnceAndIsIdempotent(t *testing.T) {
 	usage, _ := reopened.GetUsage("auto-maint")
 	if parent.UsedTokens != 1 || usage.MaintenanceTokens != 4 {
 		t.Fatalf("parent=%+v usage=%+v", parent, usage)
+	}
+}
+
+func TestBindHandbookTurnPersistsIsIdempotentAndRollsBack(t *testing.T) {
+	s, parentID, now := prepareHandbookParent(t)
+	childID := "handbook:" + parentID
+	if _, err := s.PrepareHandbook(parentID, "auto-maint", 5, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkHandbookRunning("auto-maint", childID, "maintenance-session"); err != nil {
+		t.Fatal(err)
+	}
+	attempted := now.Add(time.Minute)
+	if err := s.BindHandbookTurn("auto-maint", childID, "maintenance-session", "turn-1", attempted); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BindHandbookTurn("auto-maint", childID, "maintenance-session", "turn-1", attempted.Add(time.Minute)); err != nil {
+		t.Fatalf("same turn should be idempotent: %v", err)
+	}
+	got, ok := s.GetMaintenanceReceipt(childID)
+	if !ok || got.TurnID != "turn-1" || !got.AttemptedAt.Equal(attempted) {
+		t.Fatalf("bound receipt=%+v ok=%v", got, ok)
+	}
+	if err := s.BindHandbookTurn("auto-maint", childID, "maintenance-session", "turn-2", attempted); err == nil {
+		t.Fatal("different turn accepted")
+	}
+	if err := s.BindHandbookTurn("auto-maint", childID, "other-session", "turn-1", attempted); err == nil {
+		t.Fatal("different session accepted")
+	}
+	reopened, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok = reopened.GetMaintenanceReceipt(childID)
+	if !ok || got.TurnID != "turn-1" || !got.AttemptedAt.Equal(attempted) {
+		t.Fatalf("reopened bound receipt=%+v ok=%v", got, ok)
+	}
+	if _, err := s.SettleHandbook("auto-maint", childID, 1, false, json.RawMessage(`{}`), MaintenancePhaseComplete, now.Add(90*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second running child exercises the persistence rollback path.
+	parent2 := "memory-parent-2"
+	if _, err := s.BeginMaintenance("auto-maint", parent2, "memory-fp-2", 1, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", parent2, json.RawMessage(`[]`), json.RawMessage(`{"messages":[]}`), 1, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SettleMaintenance("auto-maint", parent2, 1, false, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PrepareHandbook(parent2, "auto-maint", 5, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	child2 := "handbook:" + parent2
+	if _, err := s.MarkHandbookRunning("auto-maint", child2, "session-2"); err != nil {
+		t.Fatal(err)
+	}
+	// A running receipt with a missing/reversed parent must not be bindable.
+	s.mu.Lock()
+	child2Receipt := s.data.MaintenanceReceipts[child2]
+	child2Receipt.ParentReceiptID = ""
+	s.data.MaintenanceReceipts[child2] = child2Receipt
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	if err := s.BindHandbookTurn("auto-maint", child2, "session-2", "turn-orphan", now.Add(3*time.Minute)); err == nil {
+		t.Fatal("orphan child accepted")
+	}
+	gotChild2, ok := s.GetMaintenanceReceipt(child2)
+	if !ok || gotChild2.TurnID != "" {
+		t.Fatalf("orphan bind modified child=%+v ok=%v", gotChild2, ok)
+	}
+	s.mu.Lock()
+	child2Receipt.ParentReceiptID = parent2
+	s.data.MaintenanceReceipts[child2] = child2Receipt
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	block := filepath.Join(t.TempDir(), "block")
+	if err := os.WriteFile(block, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.path = filepath.Join(block, "goals.json")
+	if err := s.BindHandbookTurn("auto-maint", child2, "session-2", "turn-2", now.Add(3*time.Minute)); err == nil {
+		t.Fatal("persistence failure accepted")
+	}
+	rolledBack, ok := s.GetMaintenanceReceipt(child2)
+	if !ok || rolledBack.TurnID != "" || !rolledBack.AttemptedAt.IsZero() {
+		t.Fatalf("failed bind changed receipt=%+v ok=%v", rolledBack, ok)
 	}
 }
 

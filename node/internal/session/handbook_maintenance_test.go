@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -105,8 +107,13 @@ func TestHandbookMaintenanceReadOnlyRoundReportsNoChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &handbookRoundClient{}
+	turnStore, err := store.Open(filepath.Join(workspace, "turn-events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turnStore.Close()
 	allow := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"read_file": policy.ModeNever, "write_file": policy.ModeNever, "search_replace": policy.ModeNever, "glob_files": policy.ModeNever, "grep_file": policy.ModeNever, "grep_files": policy.ModeNever}})
-	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, allow, nil, TurnOptions{AutoAgent: true}, logx.Discard())
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, allow, turnStore, TurnOptions{AutoAgent: true}, logx.Discard())
 	defer mgr.Stop()
 	rt, _, err := mgr.CreateWithOptionsAndLLM("maintenance", TurnOptions{AutoAgent: true}, reg, nil, client, "agent-1")
 	if err != nil {
@@ -117,7 +124,19 @@ func TestHandbookMaintenanceReadOnlyRoundReportsNoChange(t *testing.T) {
 		t.Fatalf("gate: %v %v", ok, err)
 	}
 	defer release()
-	result, err := mgr.RunHandbookMaintenance(leaseCtx, rt.ID, "整理经验手册", turn.TurnBudget{MaxSteps: 2, MaxTotalTokens: 100})
+	var boundSession, boundTurn string
+	result, err := mgr.RunHandbookMaintenanceWithBinding(leaseCtx, rt.ID, "整理经验手册", turn.TurnBudget{MaxSteps: 2, MaxTotalTokens: 100}, func(sessionID, turnID string) error {
+		boundSession, boundTurn = sessionID, turnID
+		events, eventErr := turnStore.ListTurnEventsForTurn(context.Background(), sessionID, turnID)
+		started := false
+		for _, event := range events {
+			started = started || event.EventType == turn.EventTurnStarted
+		}
+		if eventErr != nil || !started {
+			return fmt.Errorf("turn.started was not durable: events=%+v err=%v", events, eventErr)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +145,17 @@ func TestHandbookMaintenanceReadOnlyRoundReportsNoChange(t *testing.T) {
 	}
 	if result.Usage.ToolCalls != 1 {
 		t.Fatalf("tool calls=%d", result.Usage.ToolCalls)
+	}
+	if boundSession != rt.ID || boundTurn == "" {
+		t.Fatalf("binding=%q/%q", boundSession, boundTurn)
+	}
+	beforeCalls := client.calls
+	failed, err := mgr.RunHandbookMaintenanceWithBinding(leaseCtx, rt.ID, "绑定失败", turn.TurnBudget{MaxSteps: 1, MaxTotalTokens: 20}, func(string, string) error { return fmt.Errorf("bind rejected") })
+	if err == nil || failed.Unknown || !failed.UsageKnown || client.calls != beforeCalls {
+		t.Fatalf("binding failure result=%+v err=%v calls=%d", failed, err, client.calls)
+	}
+	if _, active, state, stateErr := mgr.RuntimeInfo(rt.ID); stateErr != nil || active {
+		t.Fatalf("binding failure left active turn: active=%v state=%+v err=%v", active, state, stateErr)
 	}
 }
 

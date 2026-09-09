@@ -439,6 +439,20 @@ func TestMaintenanceHTTPWritesHandbookAndKeepsAudit(t *testing.T) {
 	if !foundEvidence {
 		t.Fatalf("handbook prompt omitted business evidence: %+v", client.prompts)
 	}
+	var child goals.MaintenanceReceipt
+	for _, candidate := range srv.goalStore.ListMaintenanceReceipts(id) {
+		if candidate.ParentReceiptID != "" {
+			child = candidate
+			break
+		}
+	}
+	if child.SessionID == "" || child.TurnID == "" {
+		t.Fatalf("handbook binding missing: %+v", child)
+	}
+	turnEvents, err := srv.store.ListTurnEventsForTurn(context.Background(), child.SessionID, child.TurnID)
+	if err != nil || len(turnEvents) == 0 || turnEvents[0].EventType != turn.EventTurnStarted {
+		t.Fatalf("bound lifecycle events=%+v err=%v", turnEvents, err)
+	}
 	firstCalls := client.calls
 	w = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+id+"/maintenance/run", nil))
@@ -449,6 +463,20 @@ func TestMaintenanceHTTPWritesHandbookAndKeepsAudit(t *testing.T) {
 		if receipt.OccurrenceLocalDate != "" || receipt.OccurrenceScheduleRevision != 0 {
 			t.Fatalf("manual receipt unexpectedly has occurrence scope: %+v", receipt)
 		}
+	}
+	reopenedGoals, err := goals.OpenStore(filepath.Join(cfg.RuntimeDir(), "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reopenedChild goals.MaintenanceReceipt
+	for _, candidate := range reopenedGoals.ListMaintenanceReceipts(id) {
+		if candidate.ParentReceiptID != "" {
+			reopenedChild = candidate
+			break
+		}
+	}
+	if reopenedChild.TurnID != child.TurnID || reopenedChild.SessionID != child.SessionID {
+		t.Fatalf("reopened child=%+v", reopenedChild)
 	}
 }
 

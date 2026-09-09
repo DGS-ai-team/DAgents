@@ -21,6 +21,53 @@ type MaintenanceReceiptEntry struct {
 	Receipt   MaintenanceReceipt
 }
 
+// BindHandbookTurn durably associates a running handbook child with the
+// concrete turn created by the session lifecycle.  The association is
+// immutable once established so recovery cannot accidentally attribute a
+// later turn to the same receipt.
+func (s *Store) BindHandbookTurn(agentID, childID, sessionID, turnID string, attemptedAt time.Time) error {
+	agentID, childID = strings.TrimSpace(agentID), strings.TrimSpace(childID)
+	sessionID, turnID = strings.TrimSpace(sessionID), strings.TrimSpace(turnID)
+	if agentID == "" || childID == "" || sessionID == "" || turnID == "" || attemptedAt.IsZero() {
+		return fmt.Errorf("invalid handbook turn binding")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	child, ok := s.data.MaintenanceReceipts[childID]
+	if !ok || child.AgentID != agentID {
+		return ErrNotFound
+	}
+	if child.Status != "pending" || child.PhaseState != MaintenancePhaseRunning {
+		return fmt.Errorf("handbook receipt is not running")
+	}
+	if child.ParentReceiptID == "" {
+		return fmt.Errorf("handbook parent is missing")
+	}
+	parent, ok := s.data.MaintenanceReceipts[child.ParentReceiptID]
+	if !ok || parent.AgentID != agentID || parent.HandbookReceiptID != childID {
+		return fmt.Errorf("handbook parent is not valid")
+	}
+	if child.SessionID != sessionID {
+		return fmt.Errorf("handbook session differs")
+	}
+	if child.TurnID != "" {
+		if child.TurnID == turnID {
+			return nil
+		}
+		return fmt.Errorf("handbook turn already bound")
+	}
+	old := child
+	child.TurnID = turnID
+	child.AttemptedAt = attemptedAt.UTC()
+	child.UpdatedAt = attemptedAt.UTC()
+	s.data.MaintenanceReceipts[childID] = child
+	if err := s.saveLocked(); err != nil {
+		s.data.MaintenanceReceipts[childID] = old
+		return err
+	}
+	return nil
+}
+
 // ListHandbookParents returns durable parent receipts with their map identity
 // so callers can resume or block a handbook phase without guessing IDs.
 func (s *Store) ListHandbookParents(agentID string, limit int) []MaintenanceReceiptEntry {
