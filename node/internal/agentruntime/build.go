@@ -204,7 +204,6 @@ func Build(p BuildParams) (Built, error) {
 	}
 	// Never inherit a per-Agent risk worker from shared BaseTurn options.
 	turnOpts.RiskSubmitter = nil
-	turnOpts.RiskObservationEnabled = false
 	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
 
 	if skillsCfg.VisibleRestrict {

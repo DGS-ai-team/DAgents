@@ -108,9 +108,8 @@ type TurnOptions struct {
 	PluginHooks                   hooks.PluginsConfig
 	HookHost                      turn.HookHostConfig
 	// RiskSubmitter is an explicitly injected per-runtime shadow observer.
-	RiskSubmitter          turn.RiskSubmitter
-	RiskObservationEnabled bool
-	MultimodalEnabled      bool
+	RiskSubmitter     turn.RiskSubmitter
+	MultimodalEnabled bool
 	// RuntimeRevision 是独立于 agents.updated_at 的 Agent runtime 版本。
 	RuntimeRevision int64
 	// RuntimeDigest 标识该 runtime 的模型可见输入（prompt + tools）。

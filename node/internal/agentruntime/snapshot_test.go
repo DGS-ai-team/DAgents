@@ -32,19 +32,6 @@ func TestEnabledToolGroups(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsToTurnOptionsRiskObservationIsOptIn(t *testing.T) {
-	var opts session.TurnOptions
-	ApplyDefaultsToTurnOptions(&opts, Snapshot{Defaults: map[string]any{"hooks": map[string]any{"risk_observation_enabled": true}}})
-	if !opts.RiskObservationEnabled {
-		t.Fatal("explicit risk observation setting was not applied")
-	}
-	opts.RiskObservationEnabled = true
-	ApplyDefaultsToTurnOptions(&opts, Snapshot{})
-	if !opts.RiskObservationEnabled {
-		t.Fatal("missing setting should not silently disable an existing caller value")
-	}
-}
-
 func TestToolsetShrinks(t *testing.T) {
 	if !ToolsetShrinks([]string{"fs", "bash"}, []string{"fs"}) {
 		t.Fatal("removing bash should shrink")

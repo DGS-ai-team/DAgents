@@ -184,3 +184,9 @@ Dreaming 原子提交存储首批已验收：经验正文与含内容 hash 的�
 主 Agent 复验：Node 前端 64 文件、351 项测试通过，Manage lint 通过；API / Manage 总览专项 race 1.375 / 1.077 秒通过；Python Manage 全模块 9 项通过，包括实际 HTTP 写入/读取、SQLite 重开后 dreaming 保留和私有字段拒绝。Luna 完成两端构建。OpenAPI 修正已退役风险观察接口和旧 Manage 字段，Node/Manage 内部引用分别 50/6 个有效。
 
 浏览器现场确认 Vite 5173 仍连接旧后端 18766，页面提示 Auto 配置不可用；本批尚无新版视觉或真实模型验收结论。脚本条件的审批恢复正在审查，重点是执行前持久化 started、非法回复不消费审批、恢复不重放以及不清空既有历史。当前尚无 session 条件端到端测试证据，不能把工具层单测当作会话接线完成。
+
+### 退役后端配置清理与重复回归
+
+删除无人调用的 WithMaintenanceExtractor、对应 Server/options 字段，以及 RiskObservationEnabled 配置读取和专属测试；普通 hooks/policy、用量统计及新 dreaming 执行器保留。主 Agent Agent runtime 全包普通测试通过（1.830 秒）。API 全包连续运行三次通过（合计75.783秒），未复现此前单次失败；首次失败原因仍未知，不宣称已定位修复。
+
+条件审批与调度还在开发。本轮审查明确：审批完成必须通过持久化 CAS 防重复投递，不能在入队后提前清除消费者依赖的 pending delivery；需保留原消息正文及触发参数，不能恢复时用空 payload 重建任务。旧条件 runner 未上线，不保留旧/typed 双接口兼容分支。
