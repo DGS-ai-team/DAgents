@@ -1,6 +1,8 @@
 package goals
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -216,6 +218,30 @@ func TestMaintenanceScheduleStatusLastIsDeterministicAcrossRevisions(t *testing.
 	view, err := s.MaintenanceScheduleStatus("last-agent", now.Add(3*time.Hour))
 	if err != nil || view.Last == nil || view.Last.ScheduleRevision != updated.MaintenanceRevision {
 		t.Fatalf("view=%+v err=%v", view, err)
+	}
+}
+
+func TestGoalsStoreV2MigrationBacksUpAndInitializesOccurrences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "goals.json")
+	b, err := json.Marshal(disk{SchemaVersion: 2, Goals: map[string]Goal{}, Runs: map[string][]Run{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.data.SchemaVersion != CurrentSchemaVersion {
+		t.Fatalf("schema=%d", s.data.SchemaVersion)
+	}
+	if _, err := os.Stat(path + ".v2.bak"); err != nil {
+		t.Fatalf("v2 backup: %v", err)
+	}
+	if s.data.MaintenanceOccurrences == nil {
+		t.Fatal("occurrence map not initialized")
 	}
 }
 

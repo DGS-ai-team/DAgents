@@ -22,7 +22,7 @@ var ErrConflict = errors.New("goal state conflict")
 var ErrUsageUnknown = errors.New("agent usage is unknown")
 var ErrEventSchedulingUnsupported = errors.New("event scheduling is not supported")
 
-const CurrentSchemaVersion = 2
+const CurrentSchemaVersion = 3
 
 type disk struct {
 	SchemaVersion            int                              `json:"schema_version,omitempty"`
@@ -134,12 +134,19 @@ func OpenStore(path string) (*Store, error) {
 	if loaded.SchemaVersion > CurrentSchemaVersion {
 		return nil, fmt.Errorf("unsupported goals schema version %d", loaded.SchemaVersion)
 	}
-	if loaded.SchemaVersion == 0 && path != "" {
+	if loaded.SchemaVersion < CurrentSchemaVersion && path != "" {
 		backup := path + ".v1.bak"
-		if _, statErr := os.Stat(backup); os.IsNotExist(statErr) {
+		if loaded.SchemaVersion > 0 {
+			backup = path + fmt.Sprintf(".v%d.bak", loaded.SchemaVersion)
+		}
+		if _, statErr := os.Stat(backup); statErr == nil {
+			// Preserve the first pre-migration snapshot.
+		} else if os.IsNotExist(statErr) {
 			if backupErr := os.WriteFile(backup, b, 0600); backupErr != nil {
 				return nil, fmt.Errorf("backup legacy goals store: %w", backupErr)
 			}
+		} else {
+			return nil, fmt.Errorf("inspect legacy goals backup: %w", statErr)
 		}
 	}
 	s.data = loaded
