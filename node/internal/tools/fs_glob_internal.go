@@ -40,6 +40,28 @@ func shouldSkipWalkDir(name string) bool {
 	return ok
 }
 
+func (r *Registry) displayWalkPath(walkPath string, handbook bool) (string, error) {
+	base := r.workspaceRoot
+	prefix := ""
+	if handbook {
+		base = r.handbookRoot
+		prefix = "handbook/"
+		canonical, err := filepath.EvalSymlinks(base)
+		if err != nil {
+			return "", fmt.Errorf("resolve handbook root: %w", err)
+		}
+		base, err = filepath.Abs(canonical)
+		if err != nil {
+			return "", err
+		}
+	}
+	rel, err := filepath.Rel(base, walkPath)
+	if err != nil {
+		return "", err
+	}
+	return prefix + filepath.ToSlash(rel), nil
+}
+
 // collectGlobMatches 在 dirAbs 下按 glob（相对 directory 根，支持 **）收集路径，返回相对 workspace root 的路径。
 func (r *Registry) collectGlobMatches(dirRel, globPattern string, opt globCollectOptions) ([]string, int, error) {
 	dirRel = strings.TrimSpace(dirRel)
@@ -76,6 +98,7 @@ func (r *Registry) collectGlobMatches(dirRel, globPattern string, opt globCollec
 	}
 
 	var all []string
+	handbook := r != nil && r.handbookRoot != "" && isHandbookPath(dirRel)
 	err = filepath.Walk(dirAbs, func(walkPath string, ent os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -108,11 +131,11 @@ func (r *Registry) collectGlobMatches(dirRel, globPattern string, opt globCollec
 			return nil
 		}
 
-		relFromRoot, err := filepath.Rel(r.workspaceRoot, walkPath)
+		displayPath, err := r.displayWalkPath(walkPath, handbook)
 		if err != nil {
 			return err
 		}
-		all = append(all, filepath.ToSlash(relFromRoot))
+		all = append(all, displayPath)
 		return nil
 	})
 	if err != nil {
@@ -161,6 +184,7 @@ func (r *Registry) collectGlobFilePaths(dirRel, globPattern string, maxFiles int
 	}
 
 	var files []string
+	handbook := r != nil && r.handbookRoot != "" && isHandbookPath(dirRel)
 	scanned := 0
 	err = filepath.Walk(dirAbs, func(walkPath string, ent os.FileInfo, walkErr error) error {
 		if walkErr != nil {
@@ -190,11 +214,11 @@ func (r *Registry) collectGlobFilePaths(dirRel, globPattern string, maxFiles int
 			return nil
 		}
 
-		relFromRoot, err := filepath.Rel(r.workspaceRoot, walkPath)
+		displayPath, err := r.displayWalkPath(walkPath, handbook)
 		if err != nil {
 			return err
 		}
-		files = append(files, filepath.ToSlash(relFromRoot))
+		files = append(files, displayPath)
 		if len(files) >= maxFiles {
 			return errGlobFileCapReached
 		}
