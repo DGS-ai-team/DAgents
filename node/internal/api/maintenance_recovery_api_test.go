@@ -16,7 +16,37 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
+
+func appendMaintenanceJournal(t *testing.T, db *store.SQLiteStore, agentID, sessionID, turnID string, withUsage bool) {
+	t.Helper()
+	now := time.Now().UTC()
+	types := []turn.EventType{turn.EventTurnStarted, turn.EventStepStarted, turn.EventModelRequestStarted, turn.EventModelRequestCompleted}
+	if withUsage {
+		types = append(types, turn.EventModelUsageRecorded)
+	}
+	types = append(types, turn.EventAssistantMessageRecorded, turn.EventStepCompleted, turn.EventTurnCompleted)
+	for i, eventType := range types {
+		event := turn.NewTurnEventEnvelope(sessionID, eventType, now.Add(time.Duration(i)*time.Millisecond))
+		event.AgentID, event.TurnID = agentID, turnID
+		event.Source = string(turn.TurnSourceSideEffect)
+		if eventType != turn.EventTurnStarted {
+			event.StepID = "step-1"
+		}
+		event.CommandID = "maintenance-journal-" + turnID + "-" + strconv.Itoa(i)
+		event.Payload = json.RawMessage(`{"generation":1}`)
+		if eventType == turn.EventModelRequestStarted {
+			event.Payload = json.RawMessage(`{"generation":1,"request_digest":"maintenance"}`)
+		}
+		if eventType == turn.EventModelUsageRecorded {
+			event.Payload, _ = json.Marshal(map[string]any{"generation": 1, "usage": turn.StepUsage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3}})
+		}
+		if _, err := db.AppendTurnEvent(context.Background(), event); err != nil {
+			t.Fatalf("append %s: %v", eventType, err)
+		}
+	}
+}
 
 func TestMaintenanceRecoveryHTTPSuccessThenScheduler(t *testing.T) {
 	cfg := testConfig(t)
@@ -179,17 +209,46 @@ func TestMaintenanceRecoveryHTTPRejectsMissingMemoryOperation(t *testing.T) {
 	if _, err := srv.goalStore.PrepareHandbook(parentID, agentID, 5, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := srv.goalStore.MarkHandbookRunning(agentID, "handbook:"+parentID, "missing-session"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := srv.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceRecoveryRequired, "", "missing operation", now); err != nil {
+		t.Fatal(err)
+	}
+	before, err := srv.goalStore.GetMaintenanceRecoverySnapshot(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision)
+	if err != nil {
 		t.Fatal(err)
 	}
 	query := "?local_date=" + claim.Occurrence.LocalDate + "&schedule_revision=" + strconv.FormatInt(claim.Occurrence.ScheduleRevision, 10)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/agents/"+agentID+"/maintenance/recovery"+query, nil))
 	var view struct {
-		Token string `json:"token"`
+		Token    string `json:"token"`
+		Receipts []struct {
+			Stage          string `json:"stage"`
+			Reconciliation *struct {
+				Reason string `json:"reason"`
+			} `json:"reconciliation"`
+		} `json:"receipts"`
 	}
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.Token == "" {
 		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
+	}
+	var foundReconciliation bool
+	for _, receipt := range view.Receipts {
+		if receipt.Stage == goals.MaintenancePhaseRunning && receipt.Reconciliation != nil {
+			foundReconciliation = true
+			if receipt.Reconciliation.Reason == "" {
+				t.Fatalf("GET reconciliation omitted diagnostic reason: %s", w.Body.String())
+			}
+		}
+	}
+	if !foundReconciliation {
+		t.Fatalf("GET omitted running handbook reconciliation: %s", w.Body.String())
+	}
+	after, err := srv.goalStore.GetMaintenanceRecoverySnapshot(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision)
+	if err != nil || after.Token != before.Token || after.Usage != before.Usage || after.Occurrence.Status != before.Occurrence.Status || len(after.Receipts) != len(before.Receipts) {
+		t.Fatalf("read-only reconciliation changed recovery snapshot: before=%+v after=%+v err=%v", before.Occurrence, after.Occurrence, err)
 	}
 	body := `{"local_date":"` + claim.Occurrence.LocalDate + `","schedule_revision":` + strconv.FormatInt(claim.Occurrence.ScheduleRevision, 10) + `,"token":"` + view.Token + `"}`
 	w = httptest.NewRecorder()
@@ -201,6 +260,186 @@ func TestMaintenanceRecoveryHTTPRejectsMissingMemoryOperation(t *testing.T) {
 	if snapshot.Occurrence.RecoveryCount != 0 || snapshot.Occurrence.Status != goals.MaintenanceOccurrenceRecoveryRequired {
 		t.Fatalf("recovery state changed: %+v", snapshot.Occurrence)
 	}
+}
+
+func TestMaintenanceRecoveryGETReconcilesBoundTurnsReadOnly(t *testing.T) {
+	cfg := testConfig(t)
+	settings, _ := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	_ = settings.Save(context.Background(), cfg)
+	settings.Close()
+	srv := NewServer(cfg, nil)
+	defer srv.Close()
+	const agentID = "recovery-reconcile-agent"
+	now := time.Now().UTC()
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: agentID, ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: agentID, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC", MaintenanceTokenBudget: 20, TotalTokenBudget: 20}, 0, now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := srv.goalStore.ClaimMaintenance(agentID, now)
+	if err != nil || claim.Occurrence == nil {
+		t.Fatalf("claim=%+v err=%v", claim, err)
+	}
+	for _, tc := range []struct {
+		parent, session, turn string
+		withUsage             bool
+	}{
+		{"reconcile-known-parent", "reconcile-session-known", "reconcile-turn-known", true},
+	} {
+		if _, err := srv.goalStore.BeginMaintenanceForOccurrence(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, tc.parent, "source-"+tc.parent, 0, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, tc.parent, json.RawMessage(`[]`), json.RawMessage(`{"messages":[{"role":"user","content":"reconciliation evidence"}]}`), 0, 0, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.goalStore.SettleMaintenance(agentID, tc.parent, 0, false, now); err != nil {
+			t.Fatal(err)
+		}
+		childID := "handbook:" + tc.parent
+		if _, err := srv.goalStore.PrepareHandbook(tc.parent, agentID, 5, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.goalStore.MarkHandbookRunning(agentID, childID, tc.session); err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.goalStore.BindHandbookTurn(agentID, childID, tc.session, tc.turn, now); err != nil {
+			t.Fatal(err)
+		}
+		appendMaintenanceJournal(t, srv.store, agentID, tc.session, tc.turn, tc.withUsage)
+	}
+	if _, err := srv.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceRecoveryRequired, "", "reconcile", now); err != nil {
+		t.Fatal(err)
+	}
+	before, err := srv.goalStore.GetMaintenanceRecoverySnapshot(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := "?local_date=" + claim.Occurrence.LocalDate + "&schedule_revision=" + strconv.FormatInt(claim.Occurrence.ScheduleRevision, 10)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/agents/"+agentID+"/maintenance/recovery"+query, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
+	}
+	var view struct {
+		Token    string `json:"token"`
+		Receipts []struct {
+			ID             string `json:"id"`
+			Reconciliation *struct {
+				Completed  bool           `json:"completed"`
+				UsageKnown bool           `json:"usage_known"`
+				Usage      turn.TurnUsage `json:"usage"`
+				Reason     string         `json:"reason"`
+			} `json:"reconciliation"`
+		} `json:"receipts"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Token != before.Token {
+		t.Fatalf("GET changed recovery token: got=%q want=%q", view.Token, before.Token)
+	}
+	var known bool
+	for _, receipt := range view.Receipts {
+		if receipt.Reconciliation == nil {
+			continue
+		}
+		switch receipt.ID {
+		case "handbook:reconcile-known-parent":
+			known = true
+			if !receipt.Reconciliation.Completed || !receipt.Reconciliation.UsageKnown || receipt.Reconciliation.Usage.TotalTokens != 3 {
+				t.Fatalf("known reconciliation=%+v", receipt.Reconciliation)
+			}
+		}
+	}
+	if !known {
+		t.Fatalf("GET omitted bound reconciliation summaries: %+v", view.Receipts)
+	}
+	after, err := srv.goalStore.GetMaintenanceRecoverySnapshot(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision)
+	if err != nil || after.Token != before.Token || after.Usage != before.Usage || after.Occurrence.RecoveryCount != before.Occurrence.RecoveryCount {
+		t.Fatalf("GET mutated recovery state: before=%+v after=%+v err=%v", before.Occurrence, after.Occurrence, err)
+	}
+}
+
+func TestMaintenanceRecoveryGETBoundTurnMissingUsageIsUnconfirmed(t *testing.T) {
+	cfg := testConfig(t)
+	settings, _ := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	_ = settings.Save(context.Background(), cfg)
+	settings.Close()
+	srv := NewServer(cfg, nil)
+	defer srv.Close()
+	const agentID = "recovery-reconcile-missing-usage"
+	now := time.Now().UTC()
+	if err := srv.agents.Save(context.Background(), store.AgentRecord{AgentID: agentID, ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SaveProfile(goals.AutoProfile{AgentID: agentID, Enabled: true, MaintenanceEnabled: true, MaintenanceSchedule: "daily 00:00", Timezone: "UTC", MaintenanceTokenBudget: 20, TotalTokenBudget: 20}, 0, now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := srv.goalStore.ClaimMaintenance(agentID, now)
+	if err != nil || claim.Occurrence == nil {
+		t.Fatalf("claim=%+v err=%v", claim, err)
+	}
+	parentID, sessionID, turnID := "missing-usage-parent", "missing-usage-session", "missing-usage-turn"
+	if _, err := srv.goalStore.BeginMaintenanceForOccurrence(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, parentID, "missing-usage-source", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.goalStore.SaveMaintenanceResultWithEvidence(agentID, parentID, json.RawMessage(`[]`), json.RawMessage(`{"messages":[{"role":"user","content":"missing usage"}]}`), 0, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.SettleMaintenance(agentID, parentID, 0, false, now); err != nil {
+		t.Fatal(err)
+	}
+	childID := "handbook:" + parentID
+	if _, err := srv.goalStore.PrepareHandbook(parentID, agentID, 5, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.goalStore.MarkHandbookRunning(agentID, childID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.goalStore.BindHandbookTurn(agentID, childID, sessionID, turnID, now); err != nil {
+		t.Fatal(err)
+	}
+	appendMaintenanceJournal(t, srv.store, agentID, sessionID, turnID, false)
+	if _, err := srv.goalStore.FinishMaintenance(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision, goals.MaintenanceOccurrenceRecoveryRequired, "", "missing usage", now); err != nil {
+		t.Fatal(err)
+	}
+	before, err := srv.goalStore.GetMaintenanceRecoverySnapshot(agentID, claim.Occurrence.LocalDate, claim.Occurrence.ScheduleRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := "?local_date=" + claim.Occurrence.LocalDate + "&schedule_revision=" + strconv.FormatInt(claim.Occurrence.ScheduleRevision, 10)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/agents/"+agentID+"/maintenance/recovery"+query, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
+	}
+	var view struct {
+		Token    string `json:"token"`
+		Receipts []struct {
+			ID             string `json:"id"`
+			Reconciliation *struct {
+				Completed  bool   `json:"completed"`
+				UsageKnown bool   `json:"usage_known"`
+				Reason     string `json:"reason"`
+			} `json:"reconciliation"`
+		} `json:"receipts"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	for _, receipt := range view.Receipts {
+		if receipt.ID == childID {
+			if receipt.Reconciliation == nil || receipt.Reconciliation.Completed || receipt.Reconciliation.UsageKnown || receipt.Reconciliation.Reason == "" {
+				t.Fatalf("missing usage was confirmed: %+v", receipt.Reconciliation)
+			}
+			if view.Token != before.Token {
+				t.Fatalf("GET changed token")
+			}
+			return
+		}
+	}
+	t.Fatalf("GET omitted child reconciliation: %s", w.Body.String())
 }
 
 func TestMaintenanceRecoveryHTTPBusyDoesNotResume(t *testing.T) {

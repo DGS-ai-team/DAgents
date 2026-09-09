@@ -13,6 +13,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 type maintenanceRecoveryRequest struct {
@@ -71,16 +72,61 @@ func (s *Server) handleGetMaintenanceRecovery(w http.ResponseWriter, r *http.Req
 		writeAPIError(w, http.StatusNotFound, "recovery_not_found", err.Error(), nil)
 		return
 	}
-	type receiptSummary struct {
-		ID      string `json:"id"`
-		Stage   string `json:"stage"`
-		Status  string `json:"status"`
-		Known   bool   `json:"known"`
-		Session string `json:"session_id,omitempty"`
+	type reconciliationSummary struct {
+		Completed  bool            `json:"completed"`
+		UsageKnown bool            `json:"usage_known"`
+		Usage      turn.TurnUsage  `json:"usage"`
+		TurnStatus turn.TurnStatus `json:"turn_status"`
+		Reason     string          `json:"reason,omitempty"`
 	}
+	type receiptSummary struct {
+		ID             string                 `json:"id"`
+		Stage          string                 `json:"stage"`
+		Status         string                 `json:"status"`
+		Known          bool                   `json:"known"`
+		Session        string                 `json:"session_id,omitempty"`
+		Reconciliation *reconciliationSummary `json:"reconciliation,omitempty"`
+	}
+	reconcileCtx, cancelReconcile := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancelReconcile()
+	const maxReconciledChildren = 8
+	reconciledChildren := 0
 	receipts := make([]receiptSummary, 0, len(snapshot.Receipts))
 	for _, entry := range snapshot.Receipts {
-		receipts = append(receipts, receiptSummary{ID: entry.ReceiptID, Stage: entry.Receipt.PhaseState, Status: entry.Receipt.Status, Known: !entry.Receipt.Unknown, Session: entry.Receipt.SessionID})
+		summary := receiptSummary{ID: entry.ReceiptID, Stage: entry.Receipt.PhaseState, Status: entry.Receipt.Status, Known: !entry.Receipt.Unknown, Session: entry.Receipt.SessionID}
+		child := entry.Receipt.ParentReceiptID != ""
+		if child && (entry.Receipt.PhaseState == goals.MaintenancePhaseRunning || entry.Receipt.PhaseState == goals.MaintenancePhaseRecovery) {
+			reconciliation := &reconciliationSummary{}
+			summary.Reconciliation = reconciliation
+			switch {
+			case entry.Receipt.SessionID == "" || entry.Receipt.TurnID == "":
+				reconciliation.Reason = "maintenance turn binding is missing"
+			case reconciledChildren >= maxReconciledChildren:
+				reconciliation.Reason = "reconciliation child limit reached"
+			case reconcileCtx.Err() != nil:
+				reconciliation.Reason = "reconciliation timed out"
+			case s.store == nil:
+				reconciliation.Reason = "turn event store unavailable"
+			default:
+				reconciledChildren++
+				events, eventErr := s.store.ListTurnEventsForTurnBounded(reconcileCtx, entry.Receipt.SessionID, entry.Receipt.TurnID, 4096, 4*1024*1024)
+				if eventErr != nil {
+					reconciliation.Reason = "turn events unavailable: " + eventErr.Error()
+				} else {
+					result, reconcileErr := turn.ReconcileMaintenanceTurn(events, id, entry.Receipt.SessionID, entry.Receipt.TurnID)
+					if reconcileErr != nil {
+						reconciliation.Reason = "turn reconciliation failed: " + reconcileErr.Error()
+					} else {
+						reconciliation.Completed = result.Completed
+						reconciliation.UsageKnown = result.UsageKnown
+						reconciliation.Usage = result.Usage
+						reconciliation.TurnStatus = result.TurnStatus
+						reconciliation.Reason = result.Reason
+					}
+				}
+			}
+		}
+		receipts = append(receipts, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"local_date": date, "schedule_revision": revision, "stage": snapshot.Occurrence.Status, "known": !snapshot.Usage.Unknown && snapshot.Usage.UnknownTokens == 0, "used_tokens": snapshot.Usage.MaintenanceTokens, "blocked_reason": snapshot.Occurrence.Error, "token": snapshot.Token, "receipts": receipts})
 }

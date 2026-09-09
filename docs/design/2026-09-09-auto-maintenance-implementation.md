@@ -44,7 +44,11 @@ running 对账的轮次绑定基础已补齐：child 保存实际 TurnID 与 Att
 
 主 Agent 独立来源验收：handbookfs 全包 race 通过（1.815 秒），真实 HTTP 维护入口的注入模型写文件测试通过（2.392 秒），读取文件历史确认实际 receipt/session/turn 三项一致；Session 手册专项与工具手册专项 race 分别通过（5.757 / 2.533 秒）。这些使用测试模型，不计为真实提供商验收。
 
-完整事件及费用核对器仍未实现。下一步复用 Coordinator 的事件回放，增加有界读取、完整性验证及严格终态检查，不另建重复状态机。历史 child 没有 TurnID 时不能推测归属。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
+事件证据的只读核对已实现：读取限定事件数和 UTF-8 payload 字节数，超限返回错误而不是部分成功；使用现有 Coordinator 回放，先校验身份、起点、连续序列、版本、JSON 和终态之后的非法事件。只有成功终态、完整模型用量及无未解决工具或交互时，轮次证据才标为 completed。失败/取消终态即使用量已知也不算成功。
+
+恢复 GET 对 running/recovery child 返回可选 reconciliation 摘要，最多读取 8 个 child，每个 4096 条事件、4 MiB payload，共享 30 秒期限。GET 不更改 receipt、费用或 occurrence；摘要 completed 仅表示轮次事件证据，不代表文件修改已核对或可直接恢复。主 Agent 独立 Store/Turn 全包 race 分别通过（5.394 / 9.590 秒），API 全部 MaintenanceRecovery 专项通过（6.381 秒），含真实 SQLite 完整 journal 与缺用量的 GET 分支；这些仍是合成事件测试，不算真实 LLM 验收。
+
+显式结算动作仍需将事件证据、文件历史及当前 receipt 快照一起核验并原子记录。历史 child 没有 TurnID 时不能推测归属。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
 
 ## 剩余集成门槛
 

@@ -239,6 +239,15 @@ paths:
                         status: {type: string}
                         known: {type: boolean}
                         session_id: {type: string}
+                        reconciliation:
+                          type: object
+                          description: running/recovery 子执行的只读轮次证据核对；最多核对 8 个子执行，每个最多 4096 事件与 4 MiB payload，共享 30 秒期限。此结果不结算费用、不验证全部文件历史、不授权恢复。
+                          properties:
+                            completed: {type: boolean, description: 事件回放证明该轮次成功结束且模型用量完整，不代表维护批次已恢复或已完成}
+                            usage_known: {type: boolean}
+                            usage: {type: object, description: 事件回放所得该轮次用量，不改变 Agent 已记账用量}
+                            turn_status: {type: string}
+                            reason: {type: string, description: 缺绑定、超限或证据不足时的诊断原因}
         "400": {description: 查询参数无效}
         "404": {description: Agent 或维护记录不存在}
         "503": {description: 维护存储不可用}

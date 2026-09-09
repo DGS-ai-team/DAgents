@@ -215,6 +215,50 @@ func (s *SQLiteStore) ListTurnEventsForTurn(ctx context.Context, sessionID, turn
 	return out, rows.Err()
 }
 
+// ListTurnEventsForTurnBounded reads a complete, bounded lifecycle transcript.
+// It returns no partial result when the event or payload budget is exceeded.
+func (s *SQLiteStore) ListTurnEventsForTurnBounded(ctx context.Context, sessionID, turnID string, maxEvents, maxBytes int) ([]turn.TurnEventEnvelope, error) {
+	if s == nil || s.db == nil || maxEvents <= 0 || maxEvents > 100000 || maxBytes <= 0 || maxBytes > 64*1024*1024 {
+		return nil, fmt.Errorf("invalid bounded turn event limits")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT event_id,agent_id,session_id,turn_id,step_id,tool_batch_id,tool_call_id,tool_execution_id,interaction_id,session_seq,turn_seq,event_type,event_version,source,command_id,CASE WHEN length(CAST(payload_json AS BLOB))<=? THEN payload_json ELSE '' END,length(CAST(payload_json AS BLOB)),payload_ref,created_at FROM turn_events WHERE session_id=? AND turn_id=? ORDER BY event_id LIMIT ?`, maxBytes, sessionID, turnID, maxEvents+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]turn.TurnEventEnvelope, 0, minIntStore(maxEvents, 16))
+	total := 0
+	for rows.Next() {
+		if len(out) >= maxEvents {
+			return nil, fmt.Errorf("turn event count exceeds limit")
+		}
+		var e turn.TurnEventEnvelope
+		var payload, created string
+		var payloadLen int
+		if err := rows.Scan(&e.ID, &e.AgentID, &e.SessionID, &e.TurnID, &e.StepID, &e.ToolBatchID, &e.ToolCallID, &e.ToolExecutionID, &e.InteractionID, &e.SessionSeq, &e.TurnSeq, &e.EventType, &e.EventVersion, &e.Source, &e.CommandID, &payload, &payloadLen, &e.PayloadRef, &created); err != nil {
+			return nil, err
+		}
+		if payloadLen < 0 || payloadLen > maxBytes || total > maxBytes-payloadLen {
+			return nil, fmt.Errorf("turn event payload bytes exceed limit")
+		}
+		total += payloadLen
+		e.Payload = json.RawMessage(payload)
+		e.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func minIntStore(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // AppendTurnEvent appends one lifecycle fact and allocates the two monotonic
 // sequence numbers in the same SQLite transaction. Reusing command_id is
 // idempotent and returns the originally stored event.
