@@ -14,6 +14,59 @@ const cfg = (revision = 3) => ({
 
 describe("AgentMaintenancePanel", () => {
   afterEach(() => vi.restoreAllMocks());
+  it("shows recovery and accepts continuation without claiming completion", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...cfg(), last: { status: "recovery_required", local_date: "2026-09-09", schedule_revision: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "2026-09-09", schedule_revision: 2, stage: "recovery_required", known: true, used_tokens: 4, token: "secret" }) })
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ status: "accepted", stage: "pending" }) });
+    vi.stubGlobal("fetch", fetch); const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } }); await flush();
+    expect(w.text()).toContain("请先核对结果，再继续原维护批次"); await w.findAll("button").find((b) => b.text().includes("核对并继续")).trigger("click"); await flush();
+    expect(fetch.mock.calls[2][1].method).toBe("POST"); expect(w.text()).toContain("已接受，等待继续"); expect(w.text()).not.toContain("已完成");
+  });
+  it("disables other actions and prevents duplicate recovery submits while pending", async () => {
+    let resolvePost;
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...cfg(), last: { status: "recovery_required", local_date: "2026-09-09", schedule_revision: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "2026-09-09", schedule_revision: 2, stage: "recovery_required", known: true, token: "secret" }) })
+      .mockReturnValueOnce(new Promise((resolve) => { resolvePost = resolve; }));
+    vi.stubGlobal("fetch", fetch); const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } }); await flush();
+    const recoverButton = w.findAll("button").find((b) => b.text().includes("核对并继续")); await recoverButton.trigger("click"); await nextTick();
+    expect(w.findAll("button").find((b) => b.text().includes("保存维护设置")).element.disabled).toBe(true);
+    expect(w.findAll("button").find((b) => b.text().includes("立即运行维护")).element.disabled).toBe(true);
+    await recoverButton.trigger("click"); expect(fetch).toHaveBeenCalledTimes(3);
+    resolvePost({ ok: true, status: 202, json: async () => ({ status: "accepted", stage: "pending" }) }); await flush();
+  });
+
+  it("ignores a late recovery response after switching Agent", async () => {
+    let resolvePost;
+    const fetch = vi.fn().mockImplementation((url, options) => {
+      if (options?.method === "POST") return new Promise((resolve) => { resolvePost = resolve; });
+      return Promise.resolve({ ok: true, json: async () => url.includes("recovery") ? ({ local_date: "d", schedule_revision: 2, stage: "recovery_required", known: true, token: "t" }) : ({ ...cfg(), last: { status: "recovery_required", local_date: "d", schedule_revision: 2 } }) });
+    });
+    vi.stubGlobal("fetch", fetch); const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } }); await flush();
+    await w.findAll("button").find((b) => b.text().includes("核对并继续")).trigger("click"); await w.setProps({ agentId: "auto-b" }); await flush();
+    resolvePost({ ok: true, status: 202, json: async () => ({ status: "accepted", stage: "pending" }) }); await flush();
+    expect(w.text()).not.toContain("恢复请求已接受");
+  });
+  it("refreshes to completed after 202 while keeping an edited settings draft", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...cfg(), last: { status: "recovery_required", local_date: "d", schedule_revision: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "d", schedule_revision: 2, stage: "recovery_required", known: true, token: "t" }) })
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ status: "accepted", stage: "pending" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "d", schedule_revision: 2, stage: "completed", known: true, used_tokens: 3 }) });
+    vi.stubGlobal("fetch", fetch); const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } }); await flush();
+    await w.find('input[type="text"]').setValue("Europe/Paris"); await w.findAll("button").find((b) => b.text().includes("核对并继续")).trigger("click"); await flush();
+    expect(w.text()).toContain("维护已完成"); expect(w.find('input[type="text"]').element.value).toBe("Europe/Paris");
+    expect(w.text()).not.toContain("上次维护中断"); expect(w.text()).not.toContain("请先核对结果，再继续原维护批次");
+  });
+
+  it("shows a friendly unsupported message for legacy recovery Nodes", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...cfg(), last: { status: "recovery_required", local_date: "d", schedule_revision: 2 } }) })
+      .mockResolvedValueOnce({ ok: false, status: 404, text: async () => "not found" });
+    vi.stubGlobal("fetch", fetch); const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } }); await flush();
+    expect(w.text()).toContain("当前 Node 版本尚不支持此功能");
+  });
   it("loads, saves with expected revision, and shows run result", async () => {
     const fetch = vi
       .fn()

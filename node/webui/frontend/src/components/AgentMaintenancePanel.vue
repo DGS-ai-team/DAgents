@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps({ agentId: { type: String, required: true } });
 const unsupportedMessage = "当前 Node 版本尚不支持此功能，请更新 Node 后重试";
@@ -17,6 +17,11 @@ const error = ref("");
 const conflict = ref(false);
 const loadError = ref("");
 const result = ref(null);
+const recovery = ref(null);
+const recoveryLoading = ref(false);
+const recoveryError = ref("");
+const recoverySubmitting = ref(false);
+const recoveryAccepted = ref(false);
 let loadEpoch = 0;
 let mutationEpoch = 0;
 
@@ -37,6 +42,7 @@ const canOperate = computed(
     !loading.value &&
     !saving.value &&
     !running.value &&
+    !recoverySubmitting.value &&
     Number(config.value.profile_revision) > 0,
 );
 
@@ -110,6 +116,44 @@ function reset() {
   conflict.value = false;
   loadError.value = "";
   result.value = null;
+  recovery.value = null; recoveryLoading.value = false; recoveryError.value = ""; recoverySubmitting.value = false; recoveryAccepted.value = false;
+}
+
+async function loadRecovery(id, token, data, preserveAccepted = false) {
+  if (!isCurrentLoad(id, token)) return;
+  const last = data?.last;
+  if (!last || !["pending", "recovery_required"].includes(last.status)) return;
+  recoveryLoading.value = true; recoveryError.value = ""; if (!preserveAccepted) recoveryAccepted.value = false;
+  const params = new URLSearchParams({ local_date: last.local_date || "", schedule_revision: String(last.schedule_revision || "") });
+  try {
+    const response = await fetch(`/v1/agents/${encodeURIComponent(id)}/maintenance/recovery?${params}`);
+    const value = await responseJSON(response, "恢复状态加载失败");
+    if (isCurrentLoad(id, token)) { recovery.value = value; if (value.stage === "completed") recoveryAccepted.value = false; }
+  } catch (cause) {
+    if (isCurrentLoad(id, token)) recoveryError.value = cause.status === 404 ? unsupportedMessage : (cause.message || "恢复状态加载失败");
+  } finally { if (isCurrentLoad(id, token)) recoveryLoading.value = false; }
+}
+
+async function recover() {
+  if (!canOperate.value || !recovery.value || recoverySubmitting.value || recovery.value.stage !== "recovery_required" || !recovery.value.known) return;
+  const id = props.agentId, token = ++mutationEpoch;
+  recoverySubmitting.value = true; recoveryError.value = "";
+  try {
+    const response = await fetch(`/v1/agents/${encodeURIComponent(id)}/maintenance/recovery`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ local_date: recovery.value.local_date, schedule_revision: recovery.value.schedule_revision, token: recovery.value.token }) });
+    const accepted = await responseJSON(response, "恢复请求失败");
+    if (isCurrentMutation(id, token)) {
+      recovery.value = { ...recovery.value, ...accepted, stage: "pending" }; recoveryAccepted.value = true;
+      await loadRecovery(id, ++loadEpoch, config.value, true);
+    }
+  } catch (cause) {
+    if (isCurrentMutation(id, token)) recoveryError.value = cause.message || "恢复请求失败";
+  } finally { if (isCurrentMutation(id, token)) recoverySubmitting.value = false; }
+}
+
+async function refreshRecovery() {
+  const id = props.agentId;
+  const token = ++loadEpoch;
+  await loadRecovery(id, token, config.value);
 }
 
 async function load() {
@@ -124,6 +168,7 @@ async function load() {
     const data = await responseJSON(response, "维护配置加载失败");
     if (isCurrentLoad(id, token))
       config.value = { ...defaultConfig(), ...data };
+    await loadRecovery(id, token, data);
   } catch (cause) {
     if (isCurrentLoad(id, token))
       loadError.value = cause.message || "维护配置加载失败";
@@ -187,6 +232,7 @@ async function run() {
 }
 
 onMounted(load);
+onBeforeUnmount(() => { loadEpoch += 1; mutationEpoch += 1; });
 watch(
   () => props.agentId,
   () => {
@@ -221,8 +267,18 @@ watch(
         <p>最近结果：{{ statusLabel(config.last?.status) }}</p>
         <p>{{ usage(config.usage) }}</p>
       </div>
+      <div v-if="recoveryLoading" class="maintenance-recovery"><p class="hint">正在核对上次维护…</p></div>
+      <div v-else-if="recovery" class="maintenance-recovery">
+        <p><strong>{{ recoveryAccepted ? "恢复请求已接受" : recovery.stage === 'completed' ? "维护已完成" : recovery.stage === 'pending' ? "等待继续" : "上次维护需要核对" }}</strong>（{{ recovery.local_date }}）</p>
+        <p v-if="recovery.blocked_reason" class="hint">原因：{{ recovery.blocked_reason }}</p>
+        <p>{{ recovery.known ? `累计维护用量：${recovery.used_tokens || 0} tokens` : "累计维护用量：待对账" }}</p>
+        <p v-if="!recoveryAccepted && recovery.stage === 'recovery_required'" class="hint">请先核对结果，再继续原维护批次。</p>
+        <button v-if="!recoveryAccepted && recovery.stage === 'recovery_required' && recovery.known" class="btn btn--ghost" :disabled="!canOperate" @click="recover">{{ recoverySubmitting ? "提交中…" : "核对并继续" }}</button>
+        <p v-else-if="recoveryAccepted" class="hint">已接受，等待继续。</p>
+      </div>
+      <div v-if="recoveryError" class="maintenance-error"><p class="error" role="alert">{{ recoveryError }}</p><button class="maintenance-reload btn btn--ghost btn--sm" :disabled="recoveryLoading || saving || running" @click="refreshRecovery">重新核对</button></div>
       <p
-        v-if="config.last?.status === 'recovery_required'"
+        v-if="(recovery?.stage || config.last?.status) === 'recovery_required' && !recoveryAccepted"
         class="maintenance-explanation"
       >
         上次维护中断，需要核对执行结果和用量；重新运行不会自动解除待恢复状态。
