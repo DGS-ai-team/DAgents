@@ -141,11 +141,13 @@ const showWorkgroups = computed(() => workgroupsEnabled.value || !!activeWorkgro
 const effectiveRealtimeStatus = computed(() => props.realtimeStatus || chromeStore.sseStatus);
 const online = computed(() => effectiveRealtimeStatus.value === "connected");
 const statusClass = computed(() => {
+  if (effectiveRealtimeStatus.value === "unselected") return "nav-rail__dot--unselected";
   if (online.value) return "nav-rail__dot--online";
   if (effectiveRealtimeStatus.value === "connecting") return "nav-rail__dot--connecting";
   return "nav-rail__dot--offline";
 });
 const statusLabel = computed(() => {
+  if (effectiveRealtimeStatus.value === "unselected") return "未选择工作组";
   if (online.value) return "在线";
   if (effectiveRealtimeStatus.value === "connecting") return "连接中";
   return "离线";
@@ -557,6 +559,7 @@ defineExpose({
   loadMembers,
   expandSection,
   toggleSection,
+  openCreateWg,
 });
 </script>
 

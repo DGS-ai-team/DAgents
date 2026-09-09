@@ -67,4 +67,15 @@ describe("NavRail sections", () => {
     expect(wrapper.text()).not.toContain("巡检");
     wrapper.unmount();
   });
+
+  it("labels an unselected workgroup stream without calling it offline", async () => {
+    const wrapper = mount(NavRail, {
+      props: { realtimeStatus: "unselected" },
+      global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } },
+    });
+    await flushPromises();
+    expect(wrapper.find(".nav-rail__dot").attributes("aria-label")).toBe("实时事件：未选择工作组");
+    expect(wrapper.find(".nav-rail__dot").classes()).toContain("nav-rail__dot--unselected");
+    wrapper.unmount();
+  });
 });

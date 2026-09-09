@@ -2534,6 +2534,11 @@ select.settings-field__input {
   background: var(--color-text-subtle);
 }
 
+.nav-rail__dot--unselected {
+  background: var(--color-text-subtle);
+  opacity: 0.55;
+}
+
 .nav-rail__footer-actions {
   display: inline-flex;
   align-items: center;
