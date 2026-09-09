@@ -132,4 +132,14 @@ onMounted(load);
   color: var(--color-text-muted);
   font-size: 12px;
 }
+
+@media (max-width: 640px) {
+  .status-panel .command-panel__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-panel .command-stat {
+    min-width: 0;
+  }
+}
 </style>
