@@ -13,6 +13,7 @@ import (
 func controllerFixture(t *testing.T, now time.Time) (*Server, *store.AgentStore, goals.Goal, string) {
 	t.Helper()
 	srv := NewServer(testConfig(t), nil, WithSkipStore())
+	srv.triggerSched.Stop()
 	if srv.triggerSched != nil {
 		srv.triggerSched.Stop()
 	}

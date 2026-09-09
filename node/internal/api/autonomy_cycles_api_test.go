@@ -158,6 +158,7 @@ func TestAutonomyCyclesHTTPProvisionDiskFailureRetryKeepsResources(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	srv.triggerSched.Stop()
 	srv.goalStore = st
 	now := time.Now().UTC()
 	p, err := st.SaveProfile(goals.AutoProfile{AgentID: "auto-reg", PlanMode: "one_shot", Enabled: true}, 0, now)

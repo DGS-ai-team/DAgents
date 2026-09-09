@@ -35,6 +35,7 @@ func TestP0EnsureTriggerTargetLoadsBoundAgentRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agents
 	t.Cleanup(func() { srv.sessions.Stop(); _ = agents.Close() })
 	create := func(name, profile string) string {

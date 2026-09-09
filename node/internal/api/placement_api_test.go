@@ -58,6 +58,7 @@ func TestPlacementAPI_LocalCreateAttachesHost(t *testing.T) {
 	}
 	defer agentsDB.Close()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	t.Cleanup(srv.Close)
 	srv.agents = agentsDB
 

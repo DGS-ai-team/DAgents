@@ -69,7 +69,9 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 
 	parentID := createTestRuntime(t, srv)
 
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+parentID, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	streamReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/streams?agent_id="+parentID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,12 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	defer streamResp.Body.Close()
 
 	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"请委派子 Agent 检查 README"}`
-	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
+	msgReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/v1/messages", strings.NewReader(msgBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgResp, err := http.DefaultClient.Do(msgReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +97,6 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 		t.Fatalf("message status=%d body=%s", msgResp.StatusCode, body)
 	}
 
-	deadline := time.After(10 * time.Second)
 	reader := bufio.NewReader(streamResp.Body)
 	var gotCreated, gotCompleted, gotDone bool
 	var approved bool
@@ -98,14 +104,12 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	var assistant strings.Builder
 
 	for !(gotCreated && gotCompleted && gotDone) {
-		select {
-		case <-deadline:
-			t.Fatalf("timeout created=%v completed=%v done=%v child=%q assistant=%q",
-				gotCreated, gotCompleted, gotDone, childID, assistant.String())
-		default:
-		}
 		line, err := reader.ReadString('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("timeout created=%v completed=%v done=%v child=%q assistant=%q: %v",
+					gotCreated, gotCompleted, gotDone, childID, assistant.String(), ctx.Err())
+			}
 			if gotDone {
 				break
 			}
@@ -129,7 +133,12 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 			if !approved {
 				approved = true
 				resume := `{"agent_id":"` + parentID + `","request_type":"resume","resume_value":{"type":"selection","approved":["call-create-child-1"],"rejected":[]}}`
-				resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(resume))
+				resumeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/v1/messages", strings.NewReader(resume))
+				if err != nil {
+					t.Fatal(err)
+				}
+				resumeReq.Header.Set("Content-Type", "application/json")
+				resp, err := http.DefaultClient.Do(resumeReq)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -24,6 +24,9 @@ func TestGoalBusyAgentDefersScheduledWake(t *testing.T) {
 	fake := &goalWakeLLM{called: make(chan struct{}, 4), release: make(chan struct{})}
 	srv := NewServer(cfg, nil, WithLLM(fake), WithSkipStore())
 	defer srv.sessions.Stop()
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	defer func() {
 		if srv.feedbackStore != nil {
 			_ = srv.feedbackStore.Close()

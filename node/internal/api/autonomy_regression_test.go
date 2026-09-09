@@ -24,6 +24,9 @@ func autonomyRegressionServer(t *testing.T) (*Server, *store.AgentStore) {
 		t.Fatal(err)
 	}
 	srv := NewServer(cfg, nil, WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	t.Cleanup(func() { _ = as.Close(); srv.Close() })
 	now := time.Now().UTC()

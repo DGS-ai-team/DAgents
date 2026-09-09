@@ -23,6 +23,9 @@ func TestAgentAutonomyTypeAndLifecycle(t *testing.T) {
 	fake := &goalWakeLLM{called: make(chan struct{}, 2), release: make(chan struct{})}
 	srv := NewServer(cfg, nil, WithLLM(fake), WithSkipStore())
 	defer srv.sessions.Stop()
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	defer func() {
 		if srv.feedbackStore != nil {

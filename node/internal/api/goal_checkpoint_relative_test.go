@@ -27,6 +27,7 @@ func relativeCheckpointFixture(t *testing.T) (*goals.Store, *tools.Registry, str
 		t.Fatal(err)
 	}
 	srv := NewServer(testConfig(t), nil, WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.goalStore = gs
 	reg, err := tools.NewRegistry(t.TempDir(), 10)
 	if err != nil {

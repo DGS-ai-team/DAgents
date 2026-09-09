@@ -45,6 +45,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -156,6 +157,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -246,6 +248,7 @@ func TestEnsureAgentRuntimeUsesBoundLLMWithoutGlobalProfileSwitch(t *testing.T) 
 		t.Fatal(err)
 	}
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {

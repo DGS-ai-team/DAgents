@@ -35,6 +35,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 

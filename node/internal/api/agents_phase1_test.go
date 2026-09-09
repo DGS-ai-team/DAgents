@@ -36,6 +36,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
@@ -82,6 +83,7 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 

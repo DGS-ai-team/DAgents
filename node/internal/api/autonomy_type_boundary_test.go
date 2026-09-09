@@ -22,6 +22,9 @@ func TestAutonomyTypeBoundaryRejectsNormalAndEmptyPUT(t *testing.T) {
 	defer as.Close()
 	srv := NewServer(cfg, nil, WithLLM(&goalWakeLLM{}), WithSkipStore())
 	defer srv.sessions.Stop()
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	for id, raw := range map[string]string{"normal": `{"agent_type":"normal"}`, "empty": `{}`} {
 		if err := as.Save(context.Background(), store.AgentRecord{AgentID: id, ConfigSnapshot: json.RawMessage(raw)}); err != nil {
@@ -46,6 +49,9 @@ func TestAutonomyTypeConversionBlocksResumeWakeWithoutMutation(t *testing.T) {
 	fake := &goalWakeLLM{called: make(chan struct{}, 1)}
 	srv := NewServer(cfg, nil, WithLLM(fake), WithSkipStore())
 	defer srv.sessions.Stop()
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	now := time.Now().UTC()
 	if err := as.Save(context.Background(), store.AgentRecord{AgentID: "convert-auto", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), CreatedAt: now, UpdatedAt: now}); err != nil {

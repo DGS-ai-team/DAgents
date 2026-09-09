@@ -20,6 +20,9 @@ func TestGoalCreateRejectsUnknownAgentWithoutOrphan(t *testing.T) {
 	}
 	defer as.Close()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	defer srv.sessions.Stop()
 	b, _ := json.Marshal(map[string]any{"objective": "x", "acceptance": "y", "agent_id": "missing"})
@@ -42,6 +45,9 @@ func TestGoalCreateRejectsArchivedAgentWithoutOrphan(t *testing.T) {
 	}
 	defer as.Close()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	defer srv.sessions.Stop()
 	srv.agents = as
 	_ = as.Save(t.Context(), store.AgentRecord{AgentID: "archived", Archived: true, ConfigSnapshot: json.RawMessage(`{}`)})
@@ -64,6 +70,9 @@ func TestGoalCreateRejectsNormalAgent(t *testing.T) {
 	}
 	defer as.Close()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	defer srv.sessions.Stop()
 	_ = as.Save(t.Context(), store.AgentRecord{AgentID: "normal", ConfigSnapshot: json.RawMessage(`{"agent_type":"normal"}`)})
@@ -83,6 +92,9 @@ func TestGoalPostAlwaysRequiresAutonomyEndpoint(t *testing.T) {
 	}
 	defer as.Close()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = as
 	defer srv.sessions.Stop()
 	now := time.Now()
