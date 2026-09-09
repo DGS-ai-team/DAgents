@@ -15,7 +15,11 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 )
 
-const dreamingPrompt = "请结合已有经验、近期上下文和 Todo 整理本次工作经验：可复用内容保留在经验中，冗长细节必要时写入手册目录并只在经验中保留相对路径索引；不要把临时错误当作长期结论。最后给出简短、可复用的经验摘要。"
+const dreamingPrompt = "请整理本次工作经验。你的最终摘要会被系统持久化为长期经验，请只写已由当前上下文或当前工具结果证实的内容，不要写假设。当前工具名称、当前职责和系统传入的手册根目录是唯一有效依据；历史消息中的工具名称、路径和规则可能已经退役，必须用当前工具重新验证，未验证的路径不得记忆。淘汰过时规则，必要的细节才写入当前手册，并在经验中使用已验证的相对路径索引。最后输出简短、可复用的经验摘要。"
+
+func buildDreamingPrompt(base string, promptContext session.DreamingPromptContext) string {
+	return fmt.Sprintf("%s\n\n当前职责以本次请求的 system prompt 为准，不在此处重复或改写。当前手册根目录（系统绑定）：%s\n当前可用工具名称（以运行时实际提供为准）：%s", base, promptContext.HandbookRoot, strings.Join(promptContext.Tools, ", "))
+}
 
 type DreamingStatus struct {
 	State       string    `json:"state"`
@@ -277,7 +281,12 @@ func (d *DreamingScheduler) tickAgent(ctx context.Context, agentID string, now t
 	defer release()
 	d.setStatus(agentID, DreamingStatus{State: "running"})
 	experience, _ := d.autonomy.GetExperience(agentID)
-	_, err = d.sessions.RunDreaming(leaseCtx, agentID, dreamingPrompt, profile.MaxToolRounds, session.DreamingMetadata{
+	promptContext, contextErr := d.sessions.GetDreamingPromptContext(agentID)
+	if contextErr != nil {
+		return d.failed(agentID, now, contextErr)
+	}
+	prompt := buildDreamingPrompt(dreamingPrompt, promptContext)
+	_, err = d.sessions.RunDreaming(leaseCtx, agentID, prompt, profile.MaxToolRounds, session.DreamingMetadata{
 		LocalDate: date, ExperienceRevision: experience.Revision,
 	})
 	if err != nil {

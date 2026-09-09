@@ -34,6 +34,30 @@ type DreamingMetadata struct {
 	ExperienceRevision int64
 }
 
+type DreamingPromptContext struct {
+	HandbookRoot string
+	Tools        []string
+}
+
+// GetDreamingPromptContext reports the live handbook root and model-visible
+// tool definitions for a trusted session.
+func (m *Manager) GetDreamingPromptContext(sessionID string) (DreamingPromptContext, error) {
+	r := m.getRuntime(strings.TrimSpace(sessionID))
+	if r == nil || r.orch == nil || !r.autoAgent {
+		return DreamingPromptContext{}, fmt.Errorf("dreaming session unavailable")
+	}
+	reg := r.orch.ToolRegistry()
+	if reg == nil || strings.TrimSpace(reg.HandbookRoot()) == "" {
+		return DreamingPromptContext{}, fmt.Errorf("handbook unavailable")
+	}
+	defs := reg.Definitions()
+	tools := make([]string, 0, len(defs))
+	for _, def := range defs {
+		tools = append(tools, def.Function.Name)
+	}
+	return DreamingPromptContext{HandbookRoot: reg.HandbookRoot(), Tools: tools}, nil
+}
+
 // GetDreamingAttempt returns the persisted attempt projection. It is a
 // read-only copy so schedulers cannot manufacture completion for a session.
 func (m *Manager) GetDreamingAttempt(sessionID string) (DreamingAttempt, bool, error) {

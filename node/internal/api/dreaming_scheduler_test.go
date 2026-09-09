@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,10 +22,14 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-type schedulerTestLLM struct{ calls int }
+type schedulerTestLLM struct {
+	calls    int
+	requests []llm.ChatRequest
+}
 
-func (c *schedulerTestLLM) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
+func (c *schedulerTestLLM) StreamChat(_ context.Context, request llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
 	c.calls++
+	c.requests = append(c.requests, request)
 	if c.calls == 1 {
 		return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "w", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"handbook/dream.md","content":"dreamed","call_purpose":"maintain"}`}}}, FinishReason: "tool_calls"}, nil
 	}
@@ -294,6 +299,18 @@ func TestDreamingSchedulerRunsRealSessionWhenWakeIsOff(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(handbook, "dream.md")); err != nil || string(raw) != "dreamed" {
 		t.Fatalf("handbook=%q err=%v", raw, err)
+	}
+	if len(client.requests) == 0 {
+		t.Fatal("scheduler made no model request")
+	}
+	var prompt string
+	for _, message := range client.requests[0].Messages {
+		prompt += message.Role + "\n" + message.Content + "\n"
+	}
+	for _, want := range []string{"当前工具名称", "当前职责以本次请求的 system prompt 为准", "当前手册根目录", "会被系统持久化", "历史消息中的工具名称、路径和规则可能已经退役"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("dreaming prompt missing %q: %s", want, prompt)
+		}
 	}
 }
 
