@@ -3,12 +3,34 @@ package hooks
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
+
+func TestRiskDispatcherOverflowSkipsAdmissionAndHost(t *testing.T) {
+	store := &riskWorkerStore{}
+	called := make(chan string, 1)
+	d := NewRiskDispatcher(RiskDispatcherConfig{Host: riskHost{text: `{"level":"low"}`, called: called}, Store: store, AgentID: "agent-a", EstimatedTokens: math.MaxInt64})
+	defer d.Close()
+	if !d.Submit(RiskObservationInput{RequestID: "overflow", ToolName: "read_file", ArgsJSON: []byte(`{}`)}) {
+		t.Fatal("overflow request was rejected before queue")
+	}
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-called:
+		t.Fatal("overflow request called host")
+	default:
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.beginCalls != 0 {
+		t.Fatalf("overflow request reached store: %d", store.beginCalls)
+	}
+}
 
 type riskWorkerStore struct {
 	mu                      sync.Mutex

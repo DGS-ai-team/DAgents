@@ -13,6 +13,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
 	s.mux.HandleFunc("GET /v1/auto/overview", s.handleAutoOverview)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/risk-observations", s.handleListRiskObservations)
 	s.registerEventSourceRoutes()
 	s.registerMCPRoutes()
 	s.registerLinuxChannelRoutes()

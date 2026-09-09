@@ -47,6 +47,9 @@ type Built struct {
 // runtime; callers that only inspect a Built value (including tests) should
 // call Close themselves.
 func (b Built) Close() error {
+	if closer, ok := b.TurnOptions.RiskSubmitter.(interface{ Close() }); ok {
+		closer.Close()
+	}
 	if closer, ok := b.TurnOptions.MemoryService.(interface{ Close() error }); ok {
 		return closer.Close()
 	}
@@ -199,6 +202,9 @@ func Build(p BuildParams) (Built, error) {
 		turnOpts.SkillsRoot = p.NodeCFG.SkillsRoot()
 		turnOpts.SkillsMaxInPrompt = p.NodeCFG.Skills.MaxInPrompt
 	}
+	// Never inherit a per-Agent risk worker from shared BaseTurn options.
+	turnOpts.RiskSubmitter = nil
+	turnOpts.RiskObservationEnabled = false
 	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
 
 	if skillsCfg.VisibleRestrict {

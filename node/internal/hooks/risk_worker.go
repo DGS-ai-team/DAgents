@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -125,7 +126,16 @@ func (d *RiskDispatcher) process(parent context.Context, in RiskObservationInput
 	}
 	operationID := "risk:" + d.cfg.AgentID + ":" + in.RequestID
 	fingerprint := riskArgsDigest(in.ArgsJSON) + ":" + in.PolicyAction + ":" + in.ToolName
-	reservation, err := d.cfg.Store.BeginRiskReview(d.cfg.AgentID, operationID, in.RequestID, fingerprint, d.cfg.EstimatedTokens, time.Now().UTC())
+	// Reserve against this observation's actual input size. The fixed allowance
+	// covers the risk system prompt and framing; EstimatedTokens is the output
+	// allowance. This keeps small calls usable while conservatively charging
+	// larger envelopes before the host is invoked.
+	inputBytes := int64(len(in.ArgsJSON)) + int64(len(in.ToolName)) + int64(len(in.PolicyAction)) + int64(len(in.RequestID))
+	if inputBytes > math.MaxInt64-128 || d.cfg.EstimatedTokens > math.MaxInt64-inputBytes-128 {
+		return
+	}
+	estimated := d.cfg.EstimatedTokens + inputBytes + 128
+	reservation, err := d.cfg.Store.BeginRiskReview(d.cfg.AgentID, operationID, in.RequestID, fingerprint, estimated, time.Now().UTC())
 	if err != nil || !reservation.Claimed {
 		return
 	}

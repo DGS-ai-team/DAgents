@@ -269,6 +269,9 @@ func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 	if v, ok := boolPtrFromAny(m["duplicate_tool_call_enabled"]); ok {
 		turn.DuplicateToolCall.Enabled = v
 	}
+	if v, ok := boolPtrFromAny(m["risk_observation_enabled"]); ok {
+		turn.RiskObservationEnabled = v != nil && *v
+	}
 	if v, ok := intFromAny(m["duplicate_tool_call_window_seconds"]); ok && v > 0 {
 		turn.DuplicateToolCall.WindowSeconds = v
 	}

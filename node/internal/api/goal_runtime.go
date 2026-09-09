@@ -47,6 +47,10 @@ func (s *Server) ensureGoalRuntime(ctx context.Context, rec store.AgentRecord, s
 	// the parent Auto Agent's long-lived task configuration.
 	built.Registry.SetAutonomyRuntime(false, nil, nil)
 	s.attachNodeRuntimeDeps(built.Registry, rec.AgentID)
+	// Goal runtimes are the real autonomous execution path. Attach the
+	// Agent-bound shadow observer here; maintenance runtimes are built through
+	// their separate controller path and intentionally do not inherit it.
+	s.attachRiskObserver(&built.TurnOptions, client, rec, snap)
 	built.Registry.EnableManagedGoalCheckpoint()
 	if goal, ok := s.lookupGoalSession(sessionID); ok {
 		built.TurnOptions.OnLifecycle = s.observeGoalLifecycle

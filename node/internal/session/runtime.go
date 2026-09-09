@@ -52,7 +52,8 @@ type runtime struct {
 	// 控制/恢复队列
 	queue *queue.MessageQueue
 	// 编排器
-	orch *turn.Orchestrator
+	orch          *turn.Orchestrator
+	riskSubmitter turn.RiskSubmitter
 	// New Turn/Step lifecycle coordinator; Orchestrator remains the execution
 	// engine, while lifecycle authority lives entirely in this projection.
 	turnCoordinator *turn.TurnCoordinator
@@ -254,6 +255,7 @@ func newRuntimeWithPublisher(
 		autoAgent:                turnOpts.AutoAgent,
 		budgetResolver:           turnOpts.BudgetResolver,
 		onLifecycle:              turnOpts.OnLifecycle,
+		riskSubmitter:            turnOpts.RiskSubmitter,
 		memoryService:            turnOpts.MemoryService,
 	}
 	if candidatePipeline != nil {
@@ -322,6 +324,7 @@ func newRuntimeWithPublisher(
 	)
 	rt.orch.SetRuntimeRoot(turnOpts.RuntimeDir)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
+	rt.orch.SetRiskSubmitter(turnOpts.RiskSubmitter)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
 	rt.orch.SetHandbookReader(turnOpts.HandbookReader)
 	modelRetries := turnOpts.MaxModelRetries
@@ -1450,6 +1453,9 @@ func (r *runtime) requestStop() {
 		r.inputBox.Close()
 	}
 	r.queue.Close()
+	if closer, ok := r.riskSubmitter.(interface{ Close() }); ok {
+		closer.Close()
+	}
 }
 
 func (r *runtime) waitStopped() {

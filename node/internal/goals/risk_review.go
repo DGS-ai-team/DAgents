@@ -44,9 +44,9 @@ func (s *Store) ListRiskObservations(agentID string, limit int) []RiskObservatio
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].OperationID < out[j].OperationID
+			return out[i].OperationID > out[j].OperationID
 		}
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
+		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	if len(out) > limit {
 		out = out[:limit]

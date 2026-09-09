@@ -138,7 +138,9 @@ func TestGoalsRiskAdapterSettleFailureKeepsPendingReceipt(t *testing.T) {
 		t.Fatal("host not called")
 	}
 	d.Close()
-	r, err := s.BeginRiskReview("agent-a", "risk:agent-a:failure", "failure", riskArgsDigest([]byte(`{}`))+"::", 256, now)
+	// The dispatcher reserves output allowance plus the encoded input and
+	// fixed prompt/framing allowance for this exact request.
+	r, err := s.BeginRiskReview("agent-a", "risk:agent-a:failure", "failure", riskArgsDigest([]byte(`{}`))+"::", 393, now)
 	if err != nil || r.Claimed {
 		t.Fatalf("failed settlement did not retain pending receipt: %+v err=%v", r, err)
 	}

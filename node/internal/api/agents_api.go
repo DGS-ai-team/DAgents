@@ -698,6 +698,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("build agent runtime: %w", err)
 	}
 	s.attachNodeRuntimeDeps(built.Registry, id)
+	s.attachRiskObserver(&built.TurnOptions, client, rec, snapParsed)
 	rev := rec.RuntimeRevision
 	built.TurnOptions.RuntimeRevision = rev
 	built.TurnOptions.LLMProfileDigest = llmProfileDigest

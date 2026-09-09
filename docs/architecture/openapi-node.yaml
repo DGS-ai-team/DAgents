@@ -9,6 +9,49 @@ servers:
   - url: http://127.0.0.1:18789
     description: 默认本机 Node
 paths:
+  /v1/agents/{agent_id}/risk-observations:
+    get:
+      summary: 查询 Auto Agent 的工具风险影子观察记录
+      description: |
+        最近记录优先。默认关闭风险观察；通过 Agent defaults.hooks.risk_observation_enabled 显式启用。
+        观察只提供建议，不改变工具的原有审批结果。返回参数摘要，不返回原始工具参数。
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+      responses:
+        "200":
+          description: 当前 Agent 的观察记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id: {type: string}
+                  observations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agent_id: {type: string}
+                        request_id: {type: string}
+                        tool_name: {type: string}
+                        args_digest: {type: string}
+                        policy_action: {type: string}
+                        level: {type: string}
+                        reason: {type: string}
+                        recommendation: {type: string}
+                        risk_unknown: {type: boolean}
+                        usage_unknown: {type: boolean}
+                        created_at: {type: string, format: date-time}
+        "400": {description: limit 参数无效}
+        "403": {description: 非 Auto Agent}
+        "404": {description: Agent 不存在或已归档}
+        "503": {description: 风险观察存储不可用}
   /health:
     get:
       summary: 探活
