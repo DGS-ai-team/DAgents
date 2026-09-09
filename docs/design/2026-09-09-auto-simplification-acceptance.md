@@ -179,3 +179,9 @@ root 复验 SimplifiedAutoPanel 15项前端测试通过，并在5173浅色1280×
 91a70c4c 将工作组WS接入已有Node Manage token；拨号读取单一provider。生产provider捕获启动时凭据，setup修改要求重启，不宣称热轮换。root在最终单一provider代码上运行Workgroup全包race，通过（3.793秒）。真实Manage连接尚未复验，当前运行服务仍为idle-completion构建。共享工作区正在清理旧Risk注入链，中间态存在编译错误，须待清理完成后构建，不能误报最新修复已部署。
 
 另实际检查Manage深色桌面的版本发布表单及案例库空态，未见重叠；未上传安装包、未发布版本、未创建案例。窄屏及非空详情继续保留为待验收。
+
+### 已提交版本隔离部署与真实WS复验
+
+为避免把旧代码清理中间态带入服务，root从0aae75cf执行git archive到独立临时目录，复制已构建的当前前端静态资产，成功构建ws-auth-committed二进制。确认两名验收Agent空闲、无排队/审批后，02:01:05启动Node PID30348，沿用原数据目录和进程配置，health正常。
+
+Manage日志显示该进程本地端口49972的WS被接受；随后出现每15秒的subscribed_by/acl_member工作组列表查询。源码确认sendResumeOffers及15秒刷新只在收到session.welcome后执行；再次检查49972→8022连接仍Established。重启后的日志未再出现4401。这证明真实凭据握手及订阅刷新闭环，不代替非空工作组任务投递验收。长经验布局资产已一并部署，用户Node页已刷新。
