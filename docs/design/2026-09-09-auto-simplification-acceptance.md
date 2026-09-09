@@ -332,6 +332,11 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `go test ./node/cmd/dagents-node -run '^TestProcessRestartRecovery$' -count=1 -timeout=180s` 与对应 `-race` 均通过。测试启动真实 Node 二进制两次，使用临时端口、临时 SQLite/runtime 和 HTTP fake LLM，验证未知工具执行重开恢复及 HITL 重开恢复，模型调用次数与终态事件均有断言。
 - 该进程级 fixture 未配置 Auto profile/default trigger 投影，因此不能据此宣称“默认 trigger 真实到期后只执行一次”。默认 trigger 的启动校正和冻结仍由隔离 API race 覆盖；真实到期黑盒留作后续专门验收，不连接 18766。
 
+### 2026-09-10 默认 trigger 进程级到期黑盒
+
+- 扩展 `node/cmd/dagents-node/process_restart_e2e_test.go` 的隔离 fixture：真实 Node 进程启用 triggers，正式创建 `agent_type=auto`，通过 `/v1/agents/{id}/auto-config` 设置合法 1 秒间隔，等待 `auto-default:{id}` 到期并观察 `fire_count=1`、一次 fake LLM 请求、`turn.completed` 及 hydrate 无 active/queue/pending HITL。
+- 随后通过正式 auto-config 关闭频率，停止并重启同一临时 runtime；重开后再次读取 trigger 与 hydrate，断言 `fire_count` 和 fake LLM 调用数仍为 1。普通与 race 进程黑盒均通过；未触发 18766。
+
 ### 2026-09-10 默认 trigger 重启边界复核
 
 - 在隔离临时目录上的 `TestNewServerStartupRebuildsOnlyAutoDefaults` 与 `TestNewServerStartupKeepsPendingAutoDefaultFrozen` 以 `go test -race` 重跑通过，覆盖重开后的默认 trigger 校正、待恢复投递冻结及普通 trigger 隔离；未触发 18766 的 Auto。
