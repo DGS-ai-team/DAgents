@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -248,8 +250,9 @@ func TestNewServerStartupRebuildsOnlyAutoDefaults(t *testing.T) {
 	}
 }
 
-func TestNewServerStartupFailsClosedForPendingAutoDefault(t *testing.T) {
+func TestNewServerStartupKeepsPendingAutoDefaultFrozen(t *testing.T) {
 	cfg := testConfig(t)
+	cfg.Onboarding.NodeProfileCompleted = true
 	agents, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -258,12 +261,18 @@ func TestNewServerStartupFailsClosedForPendingAutoDefault(t *testing.T) {
 	if err := agents.Save(context.Background(), store.AgentRecord{AgentID: "pending-auto", ConfigSnapshot: []byte(`{"agent_type":"auto","defaults":{}}`), RuntimeRevision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	if err := agents.Save(context.Background(), store.AgentRecord{AgentID: "healthy-auto", ConfigSnapshot: []byte(`{"agent_type":"auto","defaults":{}}`), RuntimeRevision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
 	_ = agents.Close()
 	autonomyStore, err := autonomy.Open(filepath.Join(cfg.RuntimeDir(), "autonomy.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 0, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "healthy-auto", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	triggerStore, err := triggers.OpenStore(cfg.TriggersStorePath(), 20)
@@ -286,14 +295,52 @@ func TestNewServerStartupFailsClosedForPendingAutoDefault(t *testing.T) {
 	if s.sessions != nil {
 		s.sessions.Stop()
 	}
-	s.Close()
-	if s.startupErr == nil || s.triggerSched != nil {
-		t.Fatalf("pending startup should fail closed: err=%v scheduler=%v", s.startupErr, s.triggerSched)
+	if s.startupErr != nil || s.triggerSched == nil {
+		t.Fatalf("pending startup should keep node running while freezing trigger: err=%v scheduler=%v", s.startupErr, s.triggerSched)
 	}
 	got, ok := s.triggerStore.GetTrigger(d.TriggerID)
 	if !ok || got.PendingDeliveryID == nil || *got.PendingDeliveryID != delivery || !got.RecoveryRequired {
 		t.Fatalf("pending trigger was not preserved for recovery: %+v ok=%v", got, ok)
 	}
+	healthy, ok := s.triggerStore.GetTrigger(triggers.AutoDefaultTriggerID("healthy-auto"))
+	if !ok || !healthy.Enabled || healthy.RecoveryRequired || healthy.PendingDeliveryID != nil {
+		t.Fatalf("healthy auto trigger was not reconciled: %+v ok=%v", healthy, ok)
+	}
+	triggerRequest := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/triggers/"+d.TriggerID+"/recover", bytes.NewBufferString(body))
+		req.SetPathValue("trigger_id", d.TriggerID)
+		rec := httptest.NewRecorder()
+		s.handleRecoverTrigger(rec, req)
+		return rec
+	}
+	wrong := triggerRequest(`{"revision":` + fmt.Sprint(d.Revision) + `,"delivery_id":"wrong"}`)
+	if wrong.Code != http.StatusConflict {
+		t.Fatalf("wrong recovery status=%d body=%s", wrong.Code, wrong.Body)
+	}
+	recovered := triggerRequest(`{"revision":` + fmt.Sprint(d.Revision) + `,"delivery_id":"` + delivery + `"}`)
+	if recovered.Code != http.StatusOK {
+		t.Fatalf("recovery status=%d body=%s", recovered.Code, recovered.Body)
+	}
+	got, _ = s.triggerStore.GetTrigger(d.TriggerID)
+	if got.Enabled || got.PendingDeliveryID != nil || got.RecoveryRequired {
+		t.Fatalf("recovered auto trigger should remain disabled: %+v", got)
+	}
+	if err := s.autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents/pending-auto/auto-config/reconcile", bytes.NewBufferString(`{}`))
+	req.SetPathValue("agent_id", "pending-auto")
+	rec := httptest.NewRecorder()
+	s.handleAutonomyV2ConfigReconcile(rec, req)
+	reconciled := rec
+	if reconciled.Code != http.StatusOK {
+		t.Fatalf("reconcile after recovery status=%d body=%s", reconciled.Code, reconciled.Body)
+	}
+	got, _ = s.triggerStore.GetTrigger(d.TriggerID)
+	if !got.Enabled || got.RecoveryRequired || got.PendingDeliveryID != nil {
+		t.Fatalf("reconciled auto trigger=%+v", got)
+	}
+	s.Close()
 	if s.agents != nil {
 		_ = s.agents.Close()
 	}

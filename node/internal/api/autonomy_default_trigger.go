@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
 // reconcileAutoDefaults rebuilds only the deterministic system trigger
@@ -14,6 +16,12 @@ func (s *Server) reconcileAutoDefaults(validAuto map[string]bool) error {
 	s.autoConfigMu.Lock()
 	defer s.autoConfigMu.Unlock()
 	for agentID := range validAuto {
+		// A pending delivery is a durable recovery fence. Startup must keep the
+		// trigger frozen and preserve its delivery identity; reconciling it (in
+		// particular with interval 0) would discard evidence or re-arm it.
+		if s.triggerStore.IsRecoveryRequired(triggers.AutoDefaultTriggerID(agentID)) {
+			continue
+		}
 		profile, exists := s.autonomyStore.GetProfile(agentID)
 		if !exists {
 			profile.WakeIntervalSeconds = 0
