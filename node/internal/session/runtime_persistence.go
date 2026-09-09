@@ -33,6 +33,8 @@ func (r *runtime) persist(ctx context.Context) error {
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
+	activeContextStart := r.activeContextStart
+	lastContextResetID := r.lastContextResetID
 	r.mu.Unlock()
 	var inputBoxState json.RawMessage
 	if r.inputBox != nil {
@@ -50,6 +52,8 @@ func (r *runtime) persist(ctx context.Context) error {
 		RuntimeState: store.RuntimeState{
 			InputBoxState:           inputBoxState,
 			HistoryRevision:         historyRevision,
+			ActiveContextStart:      activeContextStart,
+			LastContextResetID:      lastContextResetID,
 			HookStore:               hookStore,
 			IdleAutoCompressApplied: idleMarked,
 			NotifySeq:               notifySeq,
@@ -150,7 +154,11 @@ func (r *runtime) reconcileRestoredInputBox() {
 }
 
 func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
-	for index := len(r.messages) - 1; index >= 0; index-- {
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+	}
+	for index := len(r.messages) - 1; index >= start; index-- {
 		message := r.messages[index]
 		if message.Role != "user" {
 			continue
@@ -166,14 +174,16 @@ func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
 // this state from SQLite after persist; keeping this fallback prevents tests
 // and embedded callers from losing history during a swap.
 type runtimeReplacementData struct {
-	Messages         []llm.Message
-	LoadedSkills     []skills.LoadedSkill
-	HookStore        map[string]json.RawMessage
-	IdleAutoCompress bool
-	NotifySeq        int
-	AckSeq           int
-	HistoryRevision  uint64
-	InputBoxState    json.RawMessage
+	Messages           []llm.Message
+	LoadedSkills       []skills.LoadedSkill
+	HookStore          map[string]json.RawMessage
+	IdleAutoCompress   bool
+	NotifySeq          int
+	AckSeq             int
+	HistoryRevision    uint64
+	ActiveContextStart int
+	LastContextResetID string
+	InputBoxState      json.RawMessage
 }
 
 func (r *runtime) replacementData() runtimeReplacementData {
@@ -187,6 +197,8 @@ func (r *runtime) replacementData() runtimeReplacementData {
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
+	activeContextStart := r.activeContextStart
+	lastContextResetID := r.lastContextResetID
 	r.mu.Unlock()
 	var hookStore map[string]json.RawMessage
 	if r.orch != nil {
@@ -199,6 +211,6 @@ func (r *runtime) replacementData() runtimeReplacementData {
 	return runtimeReplacementData{
 		Messages: msgs, LoadedSkills: loaded, HookStore: hookStore,
 		IdleAutoCompress: idleMarked, NotifySeq: notifySeq, AckSeq: ackSeq,
-		HistoryRevision: historyRevision, InputBoxState: inputBoxState,
+		HistoryRevision: historyRevision, ActiveContextStart: activeContextStart, LastContextResetID: lastContextResetID, InputBoxState: inputBoxState,
 	}
 }

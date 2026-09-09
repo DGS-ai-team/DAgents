@@ -154,3 +154,15 @@ Dreaming 使用固定的上下文边界 token：在持有同 Agent 执行租约�
 Dreaming 原子提交存储首批已验收：经验正文与含内容 hash 的提交标识同次保存，按 Agent/日期去重，上一条未确认重置时拒绝下一条，提供 pending 查询与幂等确认。测试覆盖并发同日只成功一次、失败回滚、确认失败仍可恢复、跨 Agent、重开读取和非法持久化数据。主 Agent autonomy 全包 race 通过（1.475 秒）。这只证明持久化底座，session 边界与每日执行器尚待验收。
 
 条件脚本调度底座已验收：runner 调用前持久化 claim，校验定义 revision 和 occurrence；false/error/未配置执行器不投递，推进定时检查并释放 claim，释放保存失败明确报错且保留 pending。专项覆盖并发调用、旧 revision、跨 Agent、旧 occurrence、false/error/nil 及清理失败；主 Agent Triggers 全包 race 通过（1.737 秒）。生产尚未注入经过 Agent 工具与审批的 runner，API/模型参数入口仍待同步，不能将此底座表述为脚本唤醒功能已上线。
+
+脚本生产接线审计：真实工具为 bash_run（tools/bash_run_tool.go、bash_runner.go），空 cwd 使用 Agent workspace。Registry.Execute 只分发工具，不代表已审批；应在所属 Agent 的 session/turn 中复用 tool_router 的 hooks/policy/preflight，并处理现有 HITL。当前 ConditionRunner(bool,error) 对任何 error 都释放 pending，不能直接承载待审批的持久化恢复；接线时必须显式区分待审批与执行失败，审批前不得执行脚本，审批恢复须重新验证身份与配置。该执行入口、超时取消和 API/模型 cmd 参数尚未完成。
+
+### 活跃上下文边界与 Dreaming 执行器（底层接缝验收通过）
+
+新增 CaptureActiveContextBoundary / ResetActiveContext，要求当前 Agent 执行租约；token 固定 session、revision、索引和前缀摘要。重置只移动活跃起点，不删除完整历史，拒绝边界回退或正文变化；持久化失败回滚。生命周期工具恢复、模型请求、上下文预览和压缩均处理活跃尾段，写回时保留归档前缀。显式清空聊天仍清除历史，并同步清理边界状态。
+
+新增 RunDreaming，在同一 session 和执行租约中运行模型及手册文件工具，沿用原审批。使用 SideEffect 来源和独立工具轮次上限，允许一次无工具收尾，不复用 trigger 字段或 token 预算；结束后恢复聊天预算。仅正常完成、无待审批/错误且存在最终无工具文本时返回可提交经验；未知 token 用量不阻断。不在该方法内写经验或重置上下文，供每日执行器按已设计提交顺序调用。
+
+新增接缝测试通过真实 Manager、SQLite 和文件工具执行三轮，其中包含两次重置和一次 Stop/重开。捕获本地测试模型请求验证无旧正文、工具协议有效；实际 GetHydrateView 输出验证各轮历史不重不漏；ContextView / ContextSummary 只显示活跃部分；显式清空后聊天继续。另验证工具上限为 1 的无工具收尾、审批阻断文件写入、取消、未知用量及原预算恢复。
+
+主 Agent 最终复验：Session / Store 全包 race 通过（43.338 / 6.200 秒），API / Agent runtime 全包普通测试通过（26.626 / 2.485 秒）。本地测试模型不等于真实提供商验收。每日调度、经验提交与上下文重置的上层串联、启动 pending 恢复、前端 dreaming 启用与状态、脚本生产审批执行器、残余清理及真实 UI / LLM 验收仍未完成，目标继续进行。

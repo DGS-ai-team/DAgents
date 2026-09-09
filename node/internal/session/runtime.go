@@ -44,6 +44,13 @@ type Session struct {
 	AgentID string
 }
 
+func nonNegative(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
 type runtime struct {
 	session Session
 	// InputBox is the FIFO ingress for user/trigger/child-agent inputs. MessageQueue is
@@ -110,6 +117,8 @@ type runtime struct {
 	messages              []llm.Message // 交互消息列表
 	pendingInputMessage   *llm.Message
 	historyRevision       uint64               // committed message snapshot revision
+	activeContextStart    int                  // durable transcript index visible to new model requests
+	lastContextResetID    string               // idempotency fence for the last logical reset
 	loadedSkills          []skills.LoadedSkill // 加载的技能列表
 	pendingMemoryScope    string               // scope changes wait for the next human Turn
 	workspaceRoot         string               // Agent 工作区根路径
@@ -241,6 +250,8 @@ func newRuntimeWithPublisher(
 		candidatePipeline:        candidatePipeline,
 		messages:                 append([]llm.Message(nil), initial...),
 		historyRevision:          turnOpts.initialHistoryRevision,
+		activeContextStart:       nonNegative(turnOpts.initialActiveContextStart),
+		lastContextResetID:       strings.TrimSpace(turnOpts.initialLastContextResetID),
 		loadedSkills:             append([]skills.LoadedSkill(nil), loaded...),
 		skillRevision:            turnCatalog.Revision(),
 		workspaceRoot:            workspaceRoot,
@@ -828,10 +839,14 @@ func (r *runtime) commitStepHistory(history *[]llm.Message) bool {
 	if history == nil {
 		return false
 	}
-	if turn.Digest(r.messages) == turn.Digest(*history) {
+	merged := *history
+	if r.activeContextStart > 0 && r.activeContextStart <= len(r.messages) {
+		merged = append(append([]llm.Message(nil), r.messages[:r.activeContextStart]...), (*history)...)
+	}
+	if turn.Digest(r.messages) == turn.Digest(merged) {
 		return false
 	}
-	r.messages = append([]llm.Message(nil), (*history)...)
+	r.messages = append([]llm.Message(nil), merged...)
 	r.historyRevision++
 	return true
 }
@@ -1135,6 +1150,8 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	r.sessionEpoch++
 	newEpoch := r.sessionEpoch
 	r.messages = nil
+	r.activeContextStart = 0
+	r.lastContextResetID = ""
 	r.historyRevision++
 	r.loadedSkills = nil
 	r.mu.Unlock()
@@ -1234,11 +1251,20 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
 	prefix := r.sidecarPrefix()
 	r.mu.Lock()
-	beforeDigest := turn.Digest(r.messages)
-	beforeCount := len(r.messages)
-	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
-	afterDigest := turn.Digest(r.messages)
-	afterCount := len(r.messages)
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+		r.activeContextStart = start
+	}
+	active := append([]llm.Message(nil), r.messages[start:]...)
+	beforeDigest := turn.Digest(active)
+	beforeCount := len(active)
+	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &active, prefix)
+	afterDigest := turn.Digest(active)
+	afterCount := len(active)
+	if result.Status == "applied" {
+		r.messages = append(append([]llm.Message(nil), r.messages[:start]...), active...)
+	}
 	r.mu.Unlock()
 	if result.Status == "applied" {
 		// Manual compression has the same semantics as pre-step compression:

@@ -531,16 +531,18 @@ func (r *runtime) lifecycleHistoryLength() int {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.messages)
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+	}
+	return len(r.messages) - start
 }
 
 func (r *runtime) lifecycleHistorySnapshot() []llm.Message {
 	if r == nil {
 		return nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]llm.Message(nil), r.messages...)
+	return r.activeMessagesSnapshot()
 }
 
 // pendingSnapshot is the API projection of the Coordinator's durable
@@ -1028,7 +1030,11 @@ func (r *runtime) restoreActiveToolCallMessage(calls []llm.ToolCall) {
 		return
 	}
 	r.mu.Lock()
-	r.messages = reordered
+	currentStart := r.activeContextStart
+	if currentStart < 0 || currentStart > len(r.messages) {
+		currentStart = len(r.messages)
+	}
+	r.messages = append(append([]llm.Message(nil), r.messages[:currentStart]...), reordered...)
 	r.historyRevision++
 	r.mu.Unlock()
 	r.persist(context.Background())

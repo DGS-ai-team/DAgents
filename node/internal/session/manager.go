@@ -57,7 +57,9 @@ type TurnOptions struct {
 	// Lifecycle recovery may persist a repaired provider history during
 	// construction, so the constructor must start from the revision loaded from
 	// SQLite instead of the zero value.
-	initialHistoryRevision uint64
+	initialHistoryRevision    uint64
+	initialActiveContextStart int
+	initialLastContextResetID string
 	// initialLifecycleEvents are supplied by Manager when it already loaded the
 	// session projection. Keeping the load marker separate from the slice lets
 	// an empty, successfully-read event log avoid a second database scan.
@@ -145,6 +147,16 @@ func effectiveWorkspaceRoot(opts TurnOptions) string {
 
 func withInitialHistoryRevision(opts TurnOptions, revision uint64) TurnOptions {
 	opts.initialHistoryRevision = revision
+	return opts
+}
+
+func withInitialActiveContextStart(opts TurnOptions, start int) TurnOptions {
+	opts.initialActiveContextStart = start
+	return opts
+}
+
+func withInitialLastContextResetID(opts TurnOptions, id string) TurnOptions {
+	opts.initialLastContextResetID = id
 	return opts
 }
 
@@ -496,7 +508,7 @@ func (m *Manager) createWithOptions(
 		return nil, false, err
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialLifecycleEvents(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
@@ -592,6 +604,8 @@ func (m *Manager) replaceWithOptions(
 		restore.NotifySeq = replacement.NotifySeq
 		restore.AckSeq = replacement.AckSeq
 		restore.HistoryRevision = replacement.HistoryRevision
+		restore.ActiveContextStart = replacement.ActiveContextStart
+		restore.LastContextResetID = replacement.LastContextResetID
 		restore.InputBoxState = replacement.InputBoxState
 	} else {
 		var err error
@@ -603,7 +617,7 @@ func (m *Manager) replaceWithOptions(
 		}
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialLifecycleEvents(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
@@ -657,7 +671,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			return nil, false, err
 		}
 		created := len(restore.Messages) == 0 && !restore.Found
-		turnOpts := withInitialLifecycleEvents(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		turnOpts := withInitialLifecycleEvents(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
 			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 		rt.restoreInputBoxState(restore.InputBoxState)
@@ -704,6 +718,8 @@ type sessionRestoreData struct {
 	NotifySeq             int
 	AckSeq                int
 	HistoryRevision       uint64
+	ActiveContextStart    int
+	LastContextResetID    string
 	InputBoxState         json.RawMessage
 	LifecycleEvents       []turn.TurnEventEnvelope
 	LifecycleEventsLoaded bool
@@ -733,6 +749,8 @@ func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) 
 		NotifySeq:             rec.RuntimeState.NotifySeq,
 		AckSeq:                rec.RuntimeState.AckSeq,
 		HistoryRevision:       rec.RuntimeState.HistoryRevision,
+		ActiveContextStart:    rec.RuntimeState.ActiveContextStart,
+		LastContextResetID:    rec.RuntimeState.LastContextResetID,
 		InputBoxState:         rec.RuntimeState.InputBoxState,
 		LifecycleEvents:       lifecycle.events,
 		LifecycleEventsLoaded: lifecycleErr == nil,
@@ -922,6 +940,11 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	if rec == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
+	start := rec.RuntimeState.ActiveContextStart
+	if start < 0 || start > len(rec.Messages) {
+		start = len(rec.Messages)
+	}
+	activeMessages := append([]llm.Message(nil), rec.Messages[start:]...)
 	lifecycle, hasLifecycleProjection, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
@@ -933,13 +956,13 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	stepCount := lifecycle.Usage.Steps
 	view := &ContextView{
 		SessionID:             sessionID,
-		MessagesCount:         len(rec.Messages),
-		MessagesTotalTokens:   estimateMessageTokens(rec.Messages),
+		MessagesCount:         len(activeMessages),
+		MessagesTotalTokens:   estimateMessageTokens(activeMessages),
 		PendingToolCallsCount: pendingToolCallsCount(pending),
 		ToolLoopCount:         stepCount,
 		LoadedSkills:          rec.LoadedSkills,
 		QueuePending:          inputBoxPendingCount(rec.RuntimeState.InputBoxState),
-		Messages:              rec.Messages,
+		Messages:              activeMessages,
 		HasActiveTurn:         lifecycle.HasActiveTurn,
 		TurnID:                lifecycle.TurnID,
 		StepID:                lifecycle.StepID,
@@ -984,7 +1007,8 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 func (m *Manager) ContextSummary(sessionID string) (messageCount int, messages []llm.Message, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt != nil {
-		return rt.messageCount(), rt.messagesSnapshot(), nil
+		messages := rt.activeMessagesSnapshot()
+		return len(messages), messages, nil
 	}
 	if m.store == nil {
 		return 0, nil, fmt.Errorf("agent_not_found")
@@ -996,7 +1020,12 @@ func (m *Manager) ContextSummary(sessionID string) (messageCount int, messages [
 	if rec == nil {
 		return 0, nil, fmt.Errorf("agent_not_found")
 	}
-	return len(rec.Messages), rec.Messages, nil
+	start := rec.RuntimeState.ActiveContextStart
+	if start < 0 || start > len(rec.Messages) {
+		start = len(rec.Messages)
+	}
+	activeMessages := append([]llm.Message(nil), rec.Messages[start:]...)
+	return len(activeMessages), activeMessages, nil
 }
 
 // LoadedSkills 返回 session 已加载 skills（内存活跃 session 或 DB 持久化）。

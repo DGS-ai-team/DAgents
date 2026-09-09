@@ -25,7 +25,25 @@ func (r *runtime) runTurnStepAtEpoch(
 		// sidecarPrefix / RunTurnBeforeCompressPhase → composeSystemPrompt → getLoadedSkills 会抢 r.mu，须在持锁前执行。
 		sidecarPrefix = r.sidecarPrefix()
 		if r.orch != nil {
-			skip := r.orch.RunTurnBeforeCompressPhase(parent, r.session.ID, &r.messages, false)
+			r.mu.Lock()
+			start := r.activeContextStart
+			if start < 0 || start > len(r.messages) {
+				start = len(r.messages)
+			}
+			active := append([]llm.Message(nil), r.messages[start:]...)
+			r.mu.Unlock()
+			beforeHookDigest := turn.Digest(active)
+			skip := r.orch.RunTurnBeforeCompressPhase(parent, r.session.ID, &active, false)
+			if turn.Digest(active) != beforeHookDigest {
+				r.mu.Lock()
+				currentStart := r.activeContextStart
+				if currentStart < 0 || currentStart > len(r.messages) {
+					currentStart = len(r.messages)
+				}
+				r.messages = append(append([]llm.Message(nil), r.messages[:currentStart]...), active...)
+				r.historyRevision++
+				r.mu.Unlock()
+			}
 			if skip {
 				compressBeforeStep = false
 			}
@@ -38,24 +56,40 @@ func (r *runtime) runTurnStepAtEpoch(
 	contextAfterCount := 0
 	r.mu.Lock()
 	if expectedEpoch != 0 && expectedEpoch != r.sessionEpoch {
-		history := append([]llm.Message(nil), r.messages...)
+		start := r.activeContextStart
+		if start < 0 || start > len(r.messages) {
+			start = len(r.messages)
+		}
+		history := append([]llm.Message(nil), r.messages[start:]...)
 		r.mu.Unlock()
 		return turn.StepOutcome{Err: context.Canceled}, history
 	}
 	if compressBeforeStep {
-		contextBeforeDigest = turn.Digest(r.messages)
-		contextBeforeCount = len(r.messages)
-		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) {
+		start := r.activeContextStart
+		if start < 0 || start > len(r.messages) {
+			start = len(r.messages)
+			r.activeContextStart = start
+		}
+		active := append([]llm.Message(nil), r.messages[start:]...)
+		contextBeforeDigest = turn.Digest(active)
+		contextBeforeCount = len(active)
+		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &active, sidecarPrefix) {
 			contextCompacted = true
+			r.messages = append(append([]llm.Message(nil), r.messages[:start]...), active...)
 			r.historyRevision++
-			contextAfterDigest = turn.Digest(r.messages)
-			contextAfterCount = len(r.messages)
+			contextAfterDigest = turn.Digest(active)
+			contextAfterCount = len(active)
 		}
 	}
 	execution := r.turnCoordinator.ExecutionContext()
 	if !execution.Valid() {
+		start := r.activeContextStart
+		if start < 0 || start > len(r.messages) {
+			start = len(r.messages)
+		}
+		history := append([]llm.Message(nil), r.messages[start:]...)
 		r.mu.Unlock()
-		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, r.messages
+		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, history
 	}
 	executionEpoch := r.sessionEpoch
 	turnCtx, cancel := context.WithCancel(parent)
@@ -69,7 +103,12 @@ func (r *runtime) runTurnStepAtEpoch(
 	r.turnCancelToken = cancelToken
 	r.turnEpoch = executionEpoch
 	r.turnFenceActive = true
-	history := r.messages
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+		r.activeContextStart = start
+	}
+	history := append([]llm.Message(nil), r.messages[start:]...)
 	r.mu.Unlock()
 
 	defer func() {
