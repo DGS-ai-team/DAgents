@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -25,6 +26,32 @@ type RiskObservationRecord struct {
 	RiskUnknown, UsageUnknown                                                                          bool
 	Error                                                                                              string
 	CreatedAt                                                                                          time.Time
+}
+
+// ListRiskObservations returns digest-only observations for one Agent.
+func (s *Store) ListRiskObservations(agentID string, limit int) []RiskObservationRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	agentID = strings.TrimSpace(agentID)
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	out := make([]RiskObservationRecord, 0, limit)
+	for _, r := range s.data.RiskObservations {
+		if r.AgentID == agentID {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].OperationID < out[j].OperationID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func (s *Store) riskReservedLocked(agentID string) (int64, bool) {
