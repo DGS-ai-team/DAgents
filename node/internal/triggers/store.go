@@ -175,8 +175,11 @@ func (s *Store) ValidateOwnersWithGoals(validAgents map[string]bool, goals map[s
 		if reason == "" && d.Controller == "goal" && strings.TrimSpace(d.OwnerAgentID) != strings.TrimSpace(d.TargetAgentID) {
 			reason = "trigger owner and target differ"
 		}
-		if d.Controller != "user" && d.Controller != "goal" && d.Controller != "maintenance" {
+		if d.Controller != "user" && d.Controller != "goal" && d.Controller != "maintenance" && d.Controller != "auto" {
 			reason = "trigger controller is invalid"
+		}
+		if reason == "" && d.Controller == "auto" && (strings.TrimSpace(d.ControllerID) == "" || d.ControllerID != d.OwnerAgentID || d.TargetAgentID != d.OwnerAgentID || d.TargetSessionID == nil || *d.TargetSessionID != d.OwnerAgentID || d.SessionTargetMode != SessionTargetFixed) {
+			reason = "auto controller association is invalid"
 		}
 		if d.Controller == "goal" && (d.ManagedGoalID == "" || d.ControllerID != d.ManagedGoalID) {
 			reason = "goal controller association is invalid"
@@ -431,6 +434,9 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 	if !ok {
 		return Definition{}, errTriggerNotFound
 	}
+	if current.Controller == "auto" {
+		return Definition{}, fmt.Errorf("auto default trigger is system managed")
+	}
 	if patch.Name != nil {
 		current.Name = *patch.Name
 	}
@@ -596,7 +602,8 @@ func sameStringPtr(a, b *string) bool {
 func (s *Store) DeleteTrigger(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.triggers[id]; !ok {
+	d, ok := s.triggers[id]
+	if !ok || d.Controller == "auto" {
 		return false
 	}
 	delete(s.triggers, id)
