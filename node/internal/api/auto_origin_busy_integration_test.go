@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,11 +20,22 @@ import (
 )
 
 type autoOriginBusyLLM struct {
-	calls atomic.Int32
+	calls       atomic.Int32
+	entered     chan struct{}
+	release     chan struct{}
+	releaseOnce sync.Once
 }
 
-func (c *autoOriginBusyLLM) StreamChat(_ context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+func (c *autoOriginBusyLLM) releaseProvider() { c.releaseOnce.Do(func() { close(c.release) }) }
+
+func (c *autoOriginBusyLLM) StreamChat(ctx context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
 	if c.calls.Add(1) == 1 {
+		close(c.entered)
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return llm.ChatResult{}, ctx.Err()
+		}
 		return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "auto-ask", Type: "function", Function: llm.ToolCallFunction{Name: "ask_user_information", Arguments: `{"question":"确认"}`}}}, FinishReason: "tool_calls"}, nil
 	}
 	return llm.ChatResult{Content: "已完成", FinishReason: "stop"}, nil
@@ -48,9 +60,12 @@ func TestAutoOriginBusyWakeupsUseProductionProviderAndDoNotReplayAfterDisable(t 
 	if err := reg.SetHandbookRoot(filepath.Join(cfg.RuntimeDir(), "handbook")); err != nil {
 		t.Fatal(err)
 	}
-	client := &autoOriginBusyLLM{}
+	client := &autoOriginBusyLLM{entered: make(chan struct{}), release: make(chan struct{})}
 	s := NewServer(cfg, nil, WithLLM(client), WithTools(reg), WithPolicy(policy.NewDefaultEngine()), WithSkipStore())
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		client.releaseProvider()
+		s.Close()
+	})
 	if s.triggerSched == nil || s.triggerStore == nil || s.autonomyStore == nil {
 		t.Fatal("production trigger/autonomy stores were not initialized")
 	}
@@ -91,13 +106,23 @@ func TestAutoOriginBusyWakeupsUseProductionProviderAndDoNotReplayAfterDisable(t 
 	if err != nil || first.Status != triggers.FireStatusQueued {
 		t.Fatalf("first auto fire=%+v err=%v", first, err)
 	}
+	select {
+	case <-client.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("auto activation did not enter provider")
+	}
+	claimed, ok := s.triggerStore.GetTrigger(def.TriggerID)
+	if !ok || claimed.PendingDeliveryID == nil {
+		t.Fatalf("auto delivery was not durably claimed while provider was blocked: %+v", claimed)
+	}
+	if limit, trusted, providerErr := s.triggerToolRoundProvider(context.Background(), "auto-origin", def.TriggerID, *claimed.PendingDeliveryID); providerErr != nil || !trusted || limit != 4 {
+		t.Fatalf("production provider valid delivery=(%d,%v,%v)", limit, trusted, providerErr)
+	}
+	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-origin", def.TriggerID, "wrong"); err == nil && trusted {
+		t.Fatal("production provider accepted wrong delivery")
+	}
+	client.releaseProvider()
 	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && client.calls.Load() < 1 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if client.calls.Load() != 1 {
-		t.Fatalf("auto activation calls=%d", client.calls.Load())
-	}
 	var view struct {
 		PendingHITL  map[string]any `json:"pending_hitl"`
 		QueuePending int            `json:"queue_pending"`
@@ -115,13 +140,6 @@ func TestAutoOriginBusyWakeupsUseProductionProviderAndDoNotReplayAfterDisable(t 
 	}
 	if view.PendingHITL == nil {
 		t.Fatalf("auto ASK did not persist: %+v", view)
-	}
-	claimed, ok := s.triggerStore.GetTrigger(def.TriggerID)
-	if !ok || claimed.PendingDeliveryID == nil {
-		t.Fatalf("auto delivery was not durably claimed: %+v", claimed)
-	}
-	if limit, trusted, providerErr := s.triggerToolRoundProvider(context.Background(), "auto-origin", def.TriggerID, *claimed.PendingDeliveryID); providerErr != nil || !trusted || limit != 4 {
-		t.Fatalf("production provider valid delivery=(%d,%v,%v)", limit, trusted, providerErr)
 	}
 	for i := 0; i < 5; i++ {
 		if _, err := sched.FireTrigger(def.TriggerID, "schedule", nil, false, nil); err != nil {
@@ -141,9 +159,6 @@ func TestAutoOriginBusyWakeupsUseProductionProviderAndDoNotReplayAfterDisable(t 
 	}
 	if client.calls.Load() != 1 {
 		t.Fatalf("repeated busy fires started another model turn: calls=%d", client.calls.Load())
-	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-origin", def.TriggerID, "wrong"); err == nil && trusted {
-		t.Fatal("production provider accepted wrong delivery")
 	}
 
 	if _, err := s.triggerStore.EnsureAutoDefault("auto-origin", 0, now.Add(time.Second)); err != nil {
