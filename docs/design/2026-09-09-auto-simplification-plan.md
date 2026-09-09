@@ -126,3 +126,9 @@ Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注
 系统默认唤醒通过 scheduler 专用入队路径设置内部 `system_auto` 类型，要求 trigger/delivery 身份。空闲取数时，用户可越过队首连续默认唤醒；普通 trigger 和 child 输入作为屏障，保持原相对顺序。不会打断正在执行的模型轮次或另开循环。恢复路径及关闭后的 delivery 失效检查覆盖新输入类型。
 
 真实 session 测试阻塞首轮模型，在忙碌期间依次入队 Auto 与用户，解除后捕获实际请求证明用户先执行；失效的 Auto delivery 不调用模型。主 Agent Session/Triggers 全包 race 通过（33.661 / 1.838 秒）。
+
+### 正式前端入口切换
+
+智能体设置切换为新配置面板；保留自定义激活频率、只读经验、草稿与已保存版本分离、Agent 切换隔离。503 部分保存按真实 `error.details.saved_profile` 更新已保存版本，保留编辑草稿并提供只同步 trigger 的重试。dreaming 尚未执行，界面暂只读并明确开发中，不覆盖已保存值。
+
+主聊天嵌入默认折叠 Todo；移除旧 Goal 专用会话分流、Goals/AutoWork 路由与对应页面，以及旧事件源/维护设置挂载。侧栏仍保留 Auto 总览入口；总览使用新状态、next_at、todo_counts、todo_summary，并保留搜索、筛选与分页。主 Agent 全前端测试通过（69 文件、394 项），Luna 构建通过。此处是代码入口与测试验收，浏览器仍连接旧隔离 Node 18766，尚未完成新版运行环境的真实交互或视觉验收。

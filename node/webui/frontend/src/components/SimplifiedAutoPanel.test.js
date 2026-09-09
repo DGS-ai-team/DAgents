@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SimplifiedAutoPanel from "./SimplifiedAutoPanel.vue";
 import * as api from "../api/node.js";
 
-vi.mock("../api/node.js", () => ({ getAutoConfig: vi.fn(), getAutoExperience: vi.fn(), putAutoConfig: vi.fn() }));
+vi.mock("../api/node.js", () => ({ getAutoConfig: vi.fn(), getAutoExperience: vi.fn(), putAutoConfig: vi.fn(), reconcileAutoConfig: vi.fn() }));
 
 describe("SimplifiedAutoPanel", () => {
   beforeEach(() => {
@@ -12,6 +12,7 @@ describe("SimplifiedAutoPanel", () => {
     api.getAutoConfig.mockResolvedValue({ revision: 4, responsibility: "整理资料", wake_interval_seconds: 1800, max_tool_rounds: 3, dreaming_enabled: false, timezone: "Asia/Shanghai", experience: { content: "只读经验" } });
     api.getAutoExperience.mockResolvedValue({ experience: { content: "只读经验" } });
     api.putAutoConfig.mockResolvedValue({ revision: 5, responsibility: "整理资料", wake_interval_seconds: 3600, max_tool_rounds: 4, dreaming_enabled: true, dreaming_time: "03:00", timezone: "UTC", experience: { content: "新经验" } });
+    api.reconcileAutoConfig.mockResolvedValue({ profile: { revision: 6, responsibility: "整理资料", wake_interval_seconds: 3600, max_tool_rounds: 4, dreaming_enabled: false, dreaming_time: "03:00", timezone: "UTC" } });
   });
 
   it("loads and saves the simplified Auto fields with CAS", async () => {
@@ -60,5 +61,30 @@ describe("SimplifiedAutoPanel", () => {
     expect(wrapper.find(".btn").attributes("disabled")).toBeDefined();
     await wrapper.get(".btn").trigger("click");
     expect(api.putAutoConfig).not.toHaveBeenCalled();
+  });
+
+  it("recognizes the real 503 saved_profile details and reconciles the trigger", async () => {
+    api.putAutoConfig.mockRejectedValueOnce(Object.assign(new Error("trigger sync failed"), { status: 503, data: { error: { code: "trigger_sync_failed", details: { saved_profile: { revision: 5, responsibility: "已保存职责", wake_interval_seconds: 1800, max_tool_rounds: 3, dreaming_enabled: false, dreaming_time: "03:00", timezone: "UTC" }, trigger_sync: "pending" } } } }));
+    const wrapper = mount(SimplifiedAutoPanel, { props: { agentId: "auto-1" } });
+    await flushPromises();
+    await wrapper.get('[aria-label="职责"]').setValue("用户继续编辑的职责");
+    await wrapper.get(".btn--primary").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("配置已保存、唤醒未同步");
+    expect(wrapper.get('[aria-label="职责"]').element.value).toBe("用户继续编辑的职责");
+    await wrapper.get(".btn--ghost").trigger("click");
+    await flushPromises();
+    expect(api.reconcileAutoConfig).toHaveBeenCalledWith("auto-1");
+    expect(wrapper.get('[aria-label="职责"]').element.value).toBe("用户继续编辑的职责");
+  });
+
+  it("shows a configured dreaming value read-only while the feature is in development", async () => {
+    api.getAutoConfig.mockResolvedValueOnce({ revision: 7, responsibility: "整理", wake_interval_seconds: 1800, max_tool_rounds: 4, dreaming_enabled: true, dreaming_time: "02:30", timezone: "Asia/Shanghai" });
+    const wrapper = mount(SimplifiedAutoPanel, { props: { agentId: "auto-1" } });
+    await flushPromises();
+    const dreaming = wrapper.get('[aria-label="启用每日 dreaming"]');
+    expect(dreaming.element.checked).toBe(true);
+    expect(dreaming.element.disabled).toBe(true);
+    expect(wrapper.text()).toContain("经验整理尚在开发中");
   });
 });

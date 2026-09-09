@@ -5,7 +5,6 @@ import * as api from "../api/node.js";
 
 const SettingsLayout = () => import("../layouts/SettingsLayout.vue");
 const WorkgroupView = () => import("../views/WorkgroupView.vue");
-const GoalsView = () => import("../views/GoalsView.vue");
 const GeneralSettings = () => import("../views/settings/GeneralSettings.vue");
 const SkillsSettings = () => import("../views/settings/SkillsSettings.vue");
 const TriggersSettings = () => import("../views/settings/TriggersSettings.vue");
@@ -20,7 +19,6 @@ const CapabilitiesSettings = () => import("../views/settings/CapabilitiesSetting
 const AgentsSettings = () => import("../views/settings/AgentsSettings.vue");
 const AgentDetailSettings = () => import("../views/settings/AgentDetailSettings.vue");
 const AutoOverviewView = () => import("../views/AutoOverviewView.vue");
-const AutoWorkView = () => import("../views/AutoWorkView.vue");
 
 async function requireWorkgroupEnabled() {
   try {
@@ -53,9 +51,7 @@ const router = createRouter({
       beforeEnter: requireWorkgroupEnabled,
       children: [{ path: "", name: "workgroups", component: WorkgroupView }],
     },
-    { path: "/goals", component: ChatLayout, children: [{ path: "", name: "goals", component: GoalsView }] },
     { path: "/auto", component: ChatLayout, children: [{ path: "", name: "auto-overview", component: AutoOverviewView }] },
-    { path: "/auto/:agentId", component: ChatLayout, children: [{ path: "", name: "auto-work", component: AutoWorkView }] },
     {
       path: "/settings",
       component: SettingsLayout,

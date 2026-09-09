@@ -19,6 +19,7 @@ beforeEach(() => {
 describe("AutoTodoPanel", () => {
   it("loads and edits text/status while preserving the other field", async () => {
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "a1" } });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
     await flushPromises();
     await wrapper.get('input[aria-label="待办文本"]').setValue("更新");
     await wrapper.get('select[aria-label="待办状态"]').setValue("completed");
@@ -31,6 +32,7 @@ describe("AutoTodoPanel", () => {
   it("shows CAS conflict and keeps the draft", async () => {
     api.updateAgentTodo.mockRejectedValueOnce(Object.assign(new Error("conflict"), { status: 409 }));
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "a1" } });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
     await flushPromises();
     await wrapper.get('input[aria-label="待办文本"]').setValue("我的草稿");
     await wrapper.get(".auto-todo-list .btn").trigger("click");
@@ -50,6 +52,7 @@ describe("AutoTodoPanel", () => {
     api.listAgentTodos.mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
       .mockResolvedValueOnce({ todos: [{ id: "new", text: "新 Agent", status: "pending", revision: 1 }] });
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "old" } });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
     await wrapper.setProps({ agentId: "new" });
     await flushPromises();
     resolveOld({ todos: [{ id: "old", text: "旧 Agent", status: "pending", revision: 1 }] });
@@ -63,6 +66,7 @@ describe("AutoTodoPanel", () => {
     api.updateAgentTodo.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
     api.listAgentTodos.mockResolvedValue({ todos: [{ id: "t1", text: "旧", status: "pending", revision: 1 }] });
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "old" } });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
     await flushPromises();
     await wrapper.get('input[aria-label="待办文本"]').setValue("旧草稿");
     await wrapper.get(".auto-todo-list .btn").trigger("click");
@@ -76,6 +80,7 @@ describe("AutoTodoPanel", () => {
   it("offers retry after load failure and blocks create while loading", async () => {
     api.listAgentTodos.mockRejectedValueOnce(new Error("offline"));
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "a1" } });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
     expect(wrapper.get('button[type="submit"]').element.disabled).toBe(true);
     await flushPromises();
     await flushPromises();
@@ -90,6 +95,7 @@ describe("AutoTodoPanel", () => {
   it("keeps writes disabled after a failed load and exposes a deleted conflict draft for recovery", async () => {
     api.listAgentTodos.mockRejectedValueOnce(new Error("offline"));
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "a1" } });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
     await flushPromises();
     await wrapper.get('input[aria-label="新待办"]').setValue("待恢复草稿");
     expect(wrapper.get('button[type="submit"]').element.disabled).toBe(true);

@@ -19,20 +19,17 @@ describe("AutoOverviewView", () => {
     vi.clearAllMocks();
     routerMock.push.mockClear();
     api.getAutoOverview.mockResolvedValue({
-      items: [{ agent_id: "auto-1", display_name: "研究员", agent_type: "auto", state: "needs_attention", state_reason: "approval_required", role_objective: "研究资料", last_summary: "已找到证据", tokens_used: 12, token_budget: 100 }],
-      counts: { total: 1, running: 0, needs_attention: 1 }, total: 1, page: 1, page_size: 20,
+      items: [{ agent_id: "auto-1", display_name: "研究员", agent_type: "auto", state: "needs_attention", state_reason: "需要处理", next_at: "2026-09-09T12:00:00Z", todo_summary: ["核对资料", "更新手册"] }], counts: { total: 1, working: 0, needs_attention: 1 }, total: 1, page: 1, page_size: 20,
     });
   });
 
-  it("loads the aggregate endpoint and renders status, role, progress and usage", async () => {
+  it("loads the overview endpoint and renders status, next check and todos", async () => {
     const wrapper = mount(AutoOverviewView);
     wrappers.push(wrapper);
     await flushPromises();
     expect(api.getAutoOverview).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 20 }));
     expect(wrapper.text()).toContain("需处理");
-    expect(wrapper.text()).toContain("研究资料");
-    expect(wrapper.text()).toContain("已找到证据");
-    expect(wrapper.text()).toContain("12 / 100 tokens");
+    expect(wrapper.text()).toContain("核对资料；更新手册");
   });
 
   it("preserves the page and offers retry after a failed load", async () => {
@@ -44,39 +41,47 @@ describe("AutoOverviewView", () => {
     api.getAutoOverview.mockResolvedValueOnce({ items: [], counts: {}, total: 0, page: 1, page_size: 20 });
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("暂无符合条件");
+    expect(wrapper.text()).toContain("暂无 Auto Agent");
   });
 
-  it("applies a status filter when a count is clicked", async () => {
-    const wrapper = mount(AutoOverviewView);
-    wrappers.push(wrapper);
-    await flushPromises();
-    await wrapper.findAll(".auto-overview__count")[1].trigger("click");
-    await flushPromises();
-    expect(api.getAutoOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: "running" }));
-    expect(wrapper.findAll(".auto-overview__count")[0].text()).toContain("1");
-  });
-
-  it("separates the work page action from the normal chat action", async () => {
+  it("opens the normal chat or settings", async () => {
     const wrapper = mount(AutoOverviewView);
     wrappers.push(wrapper);
     await flushPromises();
     const actions = wrapper.findAll(".auto-overview__actions button");
 
     await actions[0].trigger("click");
-    expect(routerMock.push).toHaveBeenLastCalledWith({ name: "auto-work", params: { agentId: "auto-1" } });
-    await actions[1].trigger("click");
     expect(routerMock.push).toHaveBeenLastCalledWith({ name: "agents", params: { agentId: "auto-1" } });
+    await actions[1].trigger("click");
+    expect(routerMock.push).toHaveBeenLastCalledWith({ name: "settings-agent-detail", params: { agentId: "auto-1" }, query: { section: "autonomy" } });
+  });
+
+  it("keeps search, status filters and pagination", async () => {
+    api.getAutoOverview.mockResolvedValueOnce({ items: [{ agent_id: "a1", state: "working" }], counts: { total: 21, working: 21 }, total: 21, page: 1, page_size: 20 });
+    const wrapper = mount(AutoOverviewView);
+    wrappers.push(wrapper);
+    await flushPromises();
+    api.getAutoOverview.mockResolvedValueOnce({ items: [{ agent_id: "a1", state: "working" }], counts: { total: 21, working: 21 }, total: 21, page: 1, page_size: 20 });
+    api.getAutoOverview.mockResolvedValueOnce({ items: [{ agent_id: "a1", state: "working" }], counts: { total: 21, working: 21 }, total: 21, page: 1, page_size: 20 });
+    await wrapper.get('[aria-label="搜索 Auto Agent"]').setValue("研究");
+    await wrapper.get('[aria-label="状态筛选"]').setValue("working");
+    await wrapper.get(".auto-overview__filter-button").trigger("click");
+    await flushPromises();
+    expect(api.getAutoOverview).toHaveBeenLastCalledWith(expect.objectContaining({ search: "研究", status: "working", page: 1 }));
+    api.getAutoOverview.mockResolvedValueOnce({ items: [{ agent_id: "a2", state: "standby" }], total: 21, page: 2, page_size: 20 });
+    await wrapper.get(".auto-overview__pagination button:last-child").trigger("click");
+    await flushPromises();
+    expect(api.getAutoOverview).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, page_size: 20 }));
   });
 
   it("ignores a stale failed request after a newer request succeeds", async () => {
     let rejectOld;
     const old = new Promise((_, reject) => { rejectOld = reject; });
     api.getAutoOverview.mockReset();
-    api.getAutoOverview.mockReturnValueOnce(old).mockResolvedValueOnce({ items: [{ agent_id: "new", display_name: "最新", agent_type: "auto", state: "standby" }], counts: {}, total: 1, page: 1, page_size: 20 });
+    api.getAutoOverview.mockReturnValueOnce(old).mockResolvedValueOnce({ items: [{ agent_id: "new", display_name: "最新", agent_type: "auto", state: "standby" }] });
     const wrapper = mount(AutoOverviewView);
     wrappers.push(wrapper);
-    await wrapper.find(".auto-overview__filter-button").trigger("click");
+    await wrapper.get(".auto-overview__refresh").trigger("click");
     await flushPromises();
     rejectOld(new Error("stale"));
     await flushPromises();

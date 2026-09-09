@@ -9,6 +9,7 @@ import NavRail from "../components/NavRail.vue";
 import AgentCreatePage from "../components/AgentCreatePage.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import AutoBadge from "../components/AutoBadge.vue";
+import AutoTodoPanel from "../components/AutoTodoPanel.vue";
 const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
 const mobileNavOpen = ref(false);
 import {
@@ -139,15 +140,14 @@ const turnWatchdog = createTurnWatchdog({
 });
 
 const entries = computed(() => transcriptStore.entries);
-const goalSessionId = computed(() => String(route.query.session_id || "").trim());
-const conversationId = computed(() => conversationTarget(agentStore.agentId, goalSessionId.value));
-async function ensureConversation() { return goalSessionId.value || await ensureAgent(); }
+const conversationId = computed(() => conversationTarget(agentStore.agentId, ""));
+async function ensureConversation() { return await ensureAgent(); }
 const hitlKind = computed(() => peekHitl()?.kind || "");
 const hasUserInfoHitl = computed(() => hitlKind.value === "user_information");
 const canSend = computed(() => {
   if (hitlStore.busy) return false;
   if (hasUserInfoHitl.value) return true;
-  if (goalSessionId.value) return false;
+
   if (hitlKind.value) return false;
   return !isTurnProcessing();
 });
@@ -234,7 +234,7 @@ async function resyncAfterSSEGap(reason) {
   const agentId = agentStore.agentId;
   turnWatchdog.noteActivity();
   try {
-    const data = await hydrateAgent(goalSessionId.value);
+    const data = await hydrateAgent();
     if (data === null) return;
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     turnWatchdog.noteActivity();
@@ -264,12 +264,12 @@ async function activateAgentStream() {
     return;
   }
   const prev = conversationId.value;
-  const data = await hydrateAgent(goalSessionId.value);
+  const data = await hydrateAgent();
   if (data === null) return;
   if (conversationId.value !== prev || !streamHandle.value) {
     restartStream();
   }
-  if (!goalSessionId.value) await syncChildAgentsFromApi();
+  await syncChildAgentsFromApi();
   terminalRevision.value += 1;
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
@@ -545,7 +545,7 @@ async function reconcilePendingHitl(turnState) {
   if (turnId && hitlReconciledTurnId === turnId) return;
   hitlReconcileInFlight = true;
   try {
-    const data = await hydrateAgent(goalSessionId.value);
+    const data = await hydrateAgent();
     if (data !== null && turnId) hitlReconciledTurnId = turnId;
   } catch {
     // SSE 仍是主通道；hydrate 失败时交给重连/看门狗再次对账。
@@ -728,7 +728,7 @@ async function handleCommand(cmd) {
     resetUsageStrip();
     resetRemoteWorkers();
     chromeStore.contextTokens = 0;
-    const data = await hydrateAgent(goalSessionId.value);
+    const data = await hydrateAgent();
     if (data === null) return;
     restartStream();
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
@@ -820,7 +820,7 @@ async function onAgentCreated(created) {
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
   try {
-    const data = await hydrateAgent(goalSessionId.value);
+    const data = await hydrateAgent();
     if (data === null) return;
     await refreshLLMSettings();
   } catch (e) {
@@ -860,7 +860,7 @@ async function switchAgent(id) {
   void syncCurrentAgentDisplayName();
   turnWatchdog.noteActivity();
   try {
-    const data = await hydrateAgent(goalSessionId.value);
+    const data = await hydrateAgent();
     if (data === null || token !== agentSwitchToken || agentStore.agentId !== targetID) return;
     await refreshLLMSettings();
     if (token !== agentSwitchToken || agentStore.agentId !== targetID) return;
@@ -1080,7 +1080,7 @@ async function cancelTurn() {
     const response = await api.cancelAgentTurn(conversationId.value);
     let hydrate = null;
     try {
-      hydrate = await hydrateAgent(goalSessionId.value);
+      hydrate = await hydrateAgent();
     } catch {
       // The cancellation acknowledgement remains usable if reconciliation
       // briefly fails; the next SSE/hydrate cycle will repair the view.
@@ -1208,29 +1208,28 @@ const currentAgentIsAuto = computed(() => {
   const row = agentList.value.find((a) => agentRecordId(a) === agentStore.agentId);
   return row?.agent_type === "auto";
 });
-const autoAutonomy = ref(null);
-const autoAutonomyError = ref(false);
-let autoAutonomyRequest = 0;
-const autoStatusLabel = (status) => ({ disabled: "未启用", active: "已启用", waiting: "等待下次唤醒", paused: "已暂停", stopped: "已停止", completed: "已完成", failed: "失败" }[status] || status || "状态未知");
+const autoConfig = ref(null);
+const autoConfigError = ref(false);
+let autoConfigRequest = 0;
 watch(
   () => [agentStore.agentId, agentList.value],
   async ([id]) => {
-    const request = ++autoAutonomyRequest;
-    autoAutonomy.value = null;
-    autoAutonomyError.value = false;
+    const request = ++autoConfigRequest;
+    autoConfig.value = null;
+    autoConfigError.value = false;
     const row = agentList.value.find((a) => agentRecordId(a) === id);
     if (row?.agent_type !== "auto" || !id) return;
     try {
-      const data = await api.getAgentAutonomy(id);
-      if (request === autoAutonomyRequest && agentStore.agentId === id) autoAutonomy.value = data;
+      const data = await api.getAutoConfig(id);
+      if (request === autoConfigRequest && agentStore.agentId === id) autoConfig.value = data;
     } catch {
-      if (request === autoAutonomyRequest && agentStore.agentId === id) autoAutonomyError.value = true;
+      if (request === autoConfigRequest && agentStore.agentId === id) autoConfigError.value = true;
     }
   },
   { immediate: true },
 );
 const currentConversationTitle = computed(() =>
-  goalSessionId.value ? `${currentAgentTitle.value || "Agent"} · 专用会话` : currentAgentTitle.value,
+  currentAgentTitle.value,
 );
 
 function switchWorkspace(view) {
@@ -1300,8 +1299,8 @@ watch(
 );
 
 watch(
-  () => [route.params.agentId, route.query.session_id],
-  async ([id, sessionId], previous) => {
+  () => route.params.agentId,
+  async (id) => {
     const aid = String(id || "").trim();
     if (!aid) {
       if (agentStore.agentId) {
@@ -1314,26 +1313,7 @@ watch(
     // KeepAlive/router transitions. The switch token suppresses the duplicate
     // watcher triggered by syncRouteAgent(), while this guard only skips an
     // already-active Agent.
-    const nextSession = String(sessionId || "").trim();
-    const previousSession = String(previous?.[1] || "").trim();
-    if (aid === agentStore.agentId && nextSession === previousSession) return;
-    if (aid === agentStore.agentId && nextSession !== previousSession) {
-      // Same Agent, different conversation identity (for example entering or
-      // leaving a dedicated Goal session). Drop the old projection before
-      // hydrating so its transcript/HITL/SSE cannot bleed into the new one.
-      invalidateHydration();
-      streamHandle.value?.close();
-      streamHandle.value = null;
-      clearTranscript();
-      clearHitl();
-      resetTurnState();
-      resetUsageStrip();
-      resetStatusLines();
-      resetToolStream();
-      resetRemoteWorkers();
-      await activateAgentStream();
-      return;
-    }
+    if (aid === agentStore.agentId) return;
     await switchAgent(aid);
   },
 );
@@ -1416,9 +1396,8 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="chat-workspace">
-          <div v-if="goalSessionId" class="chat-goal-session-badge" role="status">专用 Goal 会话 · {{ goalSessionId }}</div>
-          <div v-if="goalSessionId" class="chat-goal-session-help">此会话用于查看进度和处理审批；新消息请返回主聊天。</div>
-          <div v-if="currentAgentIsAuto && !goalSessionId" class="chat-auto-banner" role="status"><AutoBadge :agent="{ agent_type: 'auto' }" /> <span>自主任务 · {{ autoAutonomyError ? '状态不可用' : autoStatusLabel(autoAutonomy?.status) }}</span> <router-link :to="{ name: 'settings-agent-detail', params: { agentId: agentStore.agentId }, query: { section: 'autonomy' } }">自主任务设置</router-link></div>
+          <div v-if="currentAgentIsAuto" class="chat-auto-banner" role="status"><AutoBadge :agent="{ agent_type: 'auto' }" /> <span>{{ autoConfigError ? 'Auto 配置不可用' : (!autoConfig ? '加载中…' : (autoConfig.wake_interval_seconds > 0 ? `每 ${Math.max(1, Math.round(autoConfig.wake_interval_seconds / 60))} 分钟自动检查` : '自主激活关闭')) }}</span> <router-link :to="{ name: 'settings-agent-detail', params: { agentId: agentStore.agentId }, query: { section: 'autonomy' } }">Auto 设置</router-link></div>
+          <AutoTodoPanel v-if="currentAgentIsAuto" :agent-id="agentStore.agentId" />
         <MainChatPanel
           v-show="!terminalOpen"
           ref="chatPanelRef"
@@ -1530,3 +1509,6 @@ onUnmounted(() => {
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
 </style>
+
+
+

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
 const props = defineProps({ agentId: { type: String, required: true } });
-const open = ref(true);
+const open = ref(false);
 const loading = ref(false);
 const loaded = ref(false);
 const saving = ref(false);

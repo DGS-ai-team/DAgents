@@ -354,13 +354,12 @@ onMounted(load);
                   <div v-if="item.task_template" class="command-card__preview">
                     任务: {{ truncateText(item.task_template, 120) }}
                   </div>
-                  <p v-if="isManagedGoal(item)" class="command-panel__hint">此任务由自主任务统一管理，请在长期任务记录中查看进度和调整运行策略。</p>
+                  <p v-if="isManagedGoal(item)" class="command-panel__hint">此触发器由 Auto 运行时管理，请在 Auto 设置中查看配置。</p>
                   <div v-if="item.recovery_required" class="command-panel__error">
                     {{ item.recovery_reason || "上次投递结果未知，请核对后恢复。" }}
                     <button type="button" class="btn btn--danger btn--sm" :disabled="rowBusy(`recover:${item.trigger_id}`)" @click="recoverPending(item)">确认并丢弃旧投递</button>
                   </div>
                   <div v-if="isManagedGoal(item)" class="command-card__actions">
-                    <router-link class="btn btn--ghost btn--sm" :to="{ name: 'goals', query: { goal_id: item.managed_goal_id } }">查看长期任务记录</router-link>
                     <button type="button" class="btn btn--ghost btn--sm" :disabled="!!editingId" @click="loadHistory(item)">
                       {{ historyOpenId === item.trigger_id ? "刷新历史" : "触发历史" }}
                     </button>

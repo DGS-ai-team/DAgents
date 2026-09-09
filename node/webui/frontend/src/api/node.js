@@ -26,6 +26,7 @@ async function apiFetch(path, { method = "GET", body, params, signal } = {}) {
     const msg = data?.error?.message || data?.message || `HTTP ${resp.status}`;
     const error = new Error(msg);
     error.status = resp.status;
+    error.data = data;
     error.response = { status: resp.status };
     throw error;
   }
@@ -63,12 +64,6 @@ export function syncFeedback(feedbackId) {
     body: {},
   });
 }
-
-export function listGoals() { return apiFetch("/v1/goals"); }
-export function createGoal(payload) { return apiFetch("/v1/goals", { method: "POST", body: payload }); }
-export function getGoal(goalId) { return apiFetch(`/v1/goals/${encodeURIComponent(goalId)}`); }
-export function getGoalRuns(goalId) { return apiFetch(`/v1/goals/${encodeURIComponent(goalId)}/runs`); }
-export function goalAction(goalId, action) { return apiFetch(`/v1/goals/${encodeURIComponent(goalId)}/${action}`, { method: "POST", body: {} }); }
 
 /** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
 export function getUIBootstrap() {
@@ -164,9 +159,6 @@ export function getAgent(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
-export function getAgentAutonomy(agentId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`);
-}
 export function getAgentRiskObservations(agentId, { signal } = {}) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/risk-observations`, { signal });
 }
@@ -179,15 +171,6 @@ export function getAgentHandbookHistory(agentId, path) {
 export function restoreAgentHandbook(agentId, payload = {}) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook/restore`, { method: "POST", body: payload });
 }
-export function getAgentAutonomyCycles(agentId, params = {}) { return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/cycles`, { params }); }
-export function createAgentAutonomyCycle(agentId, payload = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/cycles`, { method: "POST", body: payload });
-}
-
-export function agentAutonomyAction(agentId, payload = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy/actions`, { method: "POST", body: payload });
-}
-
 // Simplified Auto configuration API. These endpoints intentionally do not
 // depend on the retired Goal/Cycle autonomy resources.
 export function getAutoConfig(agentId) {
@@ -196,6 +179,9 @@ export function getAutoConfig(agentId) {
 
 export function putAutoConfig(agentId, payload = {}) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`, { method: "PUT", body: payload });
+}
+export function reconcileAutoConfig(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config/reconcile`, { method: "POST", body: {} });
 }
 
 export function listAgentTodos(agentId) {
@@ -220,10 +206,6 @@ export function deleteAgentTodo(agentId, todoId, revision) {
 
 export function getAutoOverview(params = {}) {
   return apiFetch("/v1/auto/overview", { params });
-}
-
-export function putAgentAutonomy(agentId, payload = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/autonomy`, { method: "PUT", body: payload });
 }
 
 export function patchAgent(agentId, patch = {}) {
