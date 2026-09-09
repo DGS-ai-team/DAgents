@@ -10,19 +10,23 @@ import (
 )
 
 type MaintenanceReceipt struct {
-	AgentID         string          `json:"agent_id"`
-	Fingerprint     string          `json:"fingerprint"`
-	ProfileRevision int64           `json:"profile_revision"`
-	EstimatedTokens int64           `json:"estimated_tokens"`
-	UsedTokens      int64           `json:"used_tokens"`
-	Unknown         bool            `json:"unknown"`
-	Status          string          `json:"status"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	CandidateJSON   json.RawMessage `json:"candidate_json,omitempty"`
-	NextCursor      int64           `json:"next_cursor,omitempty"`
-	SessionID       string          `json:"session_id,omitempty"`
-	EvidenceJSON    json.RawMessage `json:"evidence_json,omitempty"`
+	AgentID           string          `json:"agent_id"`
+	Fingerprint       string          `json:"fingerprint"`
+	ProfileRevision   int64           `json:"profile_revision"`
+	EstimatedTokens   int64           `json:"estimated_tokens"`
+	UsedTokens        int64           `json:"used_tokens"`
+	Unknown           bool            `json:"unknown"`
+	Status            string          `json:"status"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	CandidateJSON     json.RawMessage `json:"candidate_json,omitempty"`
+	NextCursor        int64           `json:"next_cursor,omitempty"`
+	SessionID         string          `json:"session_id,omitempty"`
+	EvidenceJSON      json.RawMessage `json:"evidence_json,omitempty"`
+	ParentReceiptID   string          `json:"parent_receipt_id,omitempty"`
+	HandbookReceiptID string          `json:"handbook_receipt_id,omitempty"`
+	PhaseState        string          `json:"phase_state,omitempty"`
+	ResultJSON        json.RawMessage `json:"result_json,omitempty"`
 }
 
 const maxMaintenanceEvidenceBytes = 64 * 1024
@@ -190,6 +194,10 @@ func (s *Store) saveMaintenanceResultLocked(agentID, receiptID string, candidate
 func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimated int64, now time.Time) (MaintenanceReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.beginMaintenanceLocked(agentID, receiptID, fingerprint, estimated, now, true)
+}
+
+func (s *Store) beginMaintenanceLocked(agentID, receiptID, fingerprint string, estimated int64, now time.Time, persist bool) (MaintenanceReservation, error) {
 	agentID, receiptID, fingerprint = strings.TrimSpace(agentID), strings.TrimSpace(receiptID), strings.TrimSpace(fingerprint)
 	if agentID == "" || receiptID == "" || fingerprint == "" || estimated < 0 || now.IsZero() {
 		return MaintenanceReservation{}, fmt.Errorf("invalid maintenance reservation")
@@ -237,9 +245,11 @@ func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimat
 	now = now.UTC()
 	r := MaintenanceReceipt{AgentID: agentID, Fingerprint: fingerprint, ProfileRevision: p.Revision, EstimatedTokens: estimated, Status: "pending", CreatedAt: now, UpdatedAt: now}
 	s.data.MaintenanceReceipts[receiptID] = r
-	if err := s.saveLocked(); err != nil {
-		delete(s.data.MaintenanceReceipts, receiptID)
-		return MaintenanceReservation{}, err
+	if persist {
+		if err := s.saveLocked(); err != nil {
+			delete(s.data.MaintenanceReceipts, receiptID)
+			return MaintenanceReservation{}, err
+		}
 	}
 	return MaintenanceReservation{Receipt: r, Claimed: true}, nil
 }
@@ -247,6 +257,10 @@ func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimat
 func (s *Store) SettleMaintenance(agentID, receiptID string, used int64, unknown bool, now time.Time) (AgentUsage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.settleMaintenanceLocked(agentID, receiptID, used, unknown, now, true)
+}
+
+func (s *Store) settleMaintenanceLocked(agentID, receiptID string, used int64, unknown bool, now time.Time, persist bool) (AgentUsage, error) {
 	agentID, receiptID = strings.TrimSpace(agentID), strings.TrimSpace(receiptID)
 	if agentID == "" || receiptID == "" || used < 0 {
 		return AgentUsage{}, fmt.Errorf("invalid maintenance settlement")
@@ -276,14 +290,16 @@ func (s *Store) SettleMaintenance(agentID, receiptID string, used int64, unknown
 	u.UpdatedAt = now.UTC()
 	r.Status, r.UsedTokens, r.Unknown, r.UpdatedAt = "settled", used, unknown, now.UTC()
 	s.data.Usage[agentID], s.data.MaintenanceReceipts[receiptID] = u, r
-	if err := s.saveLocked(); err != nil {
-		if oldUsageExists {
-			s.data.Usage[agentID] = old
-		} else {
-			delete(s.data.Usage, agentID)
+	if persist {
+		if err := s.saveLocked(); err != nil {
+			if oldUsageExists {
+				s.data.Usage[agentID] = old
+			} else {
+				delete(s.data.Usage, agentID)
+			}
+			s.data.MaintenanceReceipts[receiptID] = oldReceipt
+			return AgentUsage{}, err
 		}
-		s.data.MaintenanceReceipts[receiptID] = oldReceipt
-		return AgentUsage{}, err
 	}
 	return u, nil
 }
@@ -292,7 +308,7 @@ func (s *Store) GetMaintenanceReceipt(receiptID string) (MaintenanceReceipt, boo
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.data.MaintenanceReceipts[strings.TrimSpace(receiptID)]
-	r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
+	r = cloneMaintenanceReceipt(r)
 	return r, ok
 }
 
@@ -303,9 +319,15 @@ func (s *Store) ListMaintenanceReceipts(agentID string) []MaintenanceReceipt {
 	out := make([]MaintenanceReceipt, 0)
 	for _, r := range s.data.MaintenanceReceipts {
 		if r.AgentID == agentID {
-			r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
+			r = cloneMaintenanceReceipt(r)
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+func cloneMaintenanceReceipt(r MaintenanceReceipt) MaintenanceReceipt {
+	r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
+	r.ResultJSON = append([]byte(nil), r.ResultJSON...)
+	return r
 }
