@@ -142,3 +142,13 @@ Node 与 Manage 共用默认激活状态投影，使用 working / standby / acti
 主 Agent 验证：API / Manage reporter / Agent runtime 全包 race 通过（26.592 / 6.793 / 3.236 秒）；工具包普通测试通过（13.530 秒）。工具包 race 在 Windows 第三方 screenshot 的真实显示器枚举发生 checkptr 崩溃，不能宣称其完整 race 通过。Python Manage 8 项通过，Manage Console lint 通过；Node 前端本批此前 69 文件、394 项通过。
 
 剩余开发：trigger 条件脚本、默认 delivery 重启恢复体验、每日 dreaming 的经验写入与上下文边界、残余旧代码清理、最新运行环境下真实 LLM 与 Node / Manage 视觉验收。dreaming 当前仍是禁用的开发中 UI，整个目标保持进行中。
+
+### Dreaming 与条件脚本的实施约束（进行中）
+
+Dreaming 使用固定的上下文边界 token：在持有同 Agent 执行租约且 dreaming 已完成时采集，重试不得重新采集。经验提交与恢复标识在 autonomy 存储中原子写入；随后 session 持久化历史归档与活跃上下文重置，再确认 reset_applied。上一笔提交尚未完成重置时，不得提交次日经验。普通会话历史查询合并归档与活跃消息，模型请求、上下文预览和压缩只使用活跃部分。提交记录只需经验摘要 hash，不按天复制整篇经验。
+
+验收必须覆盖：经验保存失败保持旧状态；经验保存后重启能找到未完成重置；重置后确认失败可以幂等重试；重试不清除后续用户消息；模型下一轮及重启后均不再携带旧正文，历史界面仍能查看。底层接口不等同于每日调度和真实 dreaming 已完成。
+
+条件脚本以当前 Agent 的工具执行环境与原有 policy 为准，不在 scheduler 直接调用不受约束的宿主 shell。执行脚本之前必须完成归属、revision 与当次执行资格校验。重复调度/手动并发不能重复执行同一次脚本；false 或失败记录结果并按规则推进检查时间，持久化失败不能被忽略。条件满足才投递主会话。缺少执行器时明确失败，不能把跳过条件当作满足。
+
+Dreaming 原子提交存储首批已验收：经验正文与含内容 hash 的提交标识同次保存，按 Agent/日期去重，上一条未确认重置时拒绝下一条，提供 pending 查询与幂等确认。测试覆盖并发同日只成功一次、失败回滚、确认失败仍可恢复、跨 Agent、重开读取和非法持久化数据。主 Agent autonomy 全包 race 通过（1.475 秒）。这只证明持久化底座，session 边界与每日执行器尚待验收。

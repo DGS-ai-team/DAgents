@@ -4,6 +4,7 @@ package autonomy
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,31 @@ type Experience struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// DreamingCommit records the once-per-agent/day durable handoff between a
+// dreaming write and the session's context reset.
+type DreamingCommit struct {
+	AgentID            string    `json:"agent_id"`
+	LocalDate          string    `json:"local_date"`
+	CommitID           string    `json:"commit_id"`
+	SessionID          string    `json:"session_id"`
+	Boundary           string    `json:"boundary"`
+	ExperienceRevision int64     `json:"experience_revision"`
+	ContentDigest      string    `json:"content_digest"`
+	ResetApplied       bool      `json:"reset_applied"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type DreamingCommitInput struct {
+	AgentID          string
+	LocalDate        string
+	CommitID         string
+	SessionID        string
+	Boundary         string
+	ExpectedRevision int64
+	Content          string
+	Now              time.Time
+}
+
 type Todo struct {
 	ID       string `json:"id"`
 	AgentID  string `json:"agent_id"`
@@ -46,9 +72,10 @@ type Todo struct {
 }
 
 type disk struct {
-	Profiles    map[string]Profile    `json:"profiles"`
-	Experiences map[string]Experience `json:"experiences"`
-	Todos       map[string]Todo       `json:"todos"`
+	Profiles    map[string]Profile        `json:"profiles"`
+	Experiences map[string]Experience     `json:"experiences"`
+	Dreaming    map[string]DreamingCommit `json:"dreaming_commits"`
+	Todos       map[string]Todo           `json:"todos"`
 }
 
 type Store struct {
@@ -62,7 +89,7 @@ func Open(path string) (*Store, error) {
 	if path == "" || path == "." {
 		return nil, fmt.Errorf("autonomy store path required")
 	}
-	s := &Store{path: path, data: disk{Profiles: map[string]Profile{}, Experiences: map[string]Experience{}, Todos: map[string]Todo{}}}
+	s := &Store{path: path, data: disk{Profiles: map[string]Profile{}, Experiences: map[string]Experience{}, Dreaming: map[string]DreamingCommit{}, Todos: map[string]Todo{}}}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -92,6 +119,17 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("todo %s: %w", id, err)
 		}
 	}
+	for id, c := range s.data.Dreaming {
+		if id != dreamingKey(c.AgentID, c.LocalDate) || c.CommitID == "" || len(c.ContentDigest) != 64 || c.SessionID == "" || c.Boundary == "" || c.UpdatedAt.IsZero() {
+			return nil, fmt.Errorf("dreaming commit identity invalid")
+		}
+		if _, err := hex.DecodeString(c.ContentDigest); err != nil {
+			return nil, fmt.Errorf("dreaming commit digest invalid")
+		}
+		if _, err := time.Parse("2006-01-02", c.LocalDate); err != nil || c.ExperienceRevision <= 0 {
+			return nil, fmt.Errorf("dreaming commit metadata invalid")
+		}
+	}
 	return s, nil
 }
 
@@ -105,6 +143,104 @@ func (s *Store) initMaps() {
 	if s.data.Todos == nil {
 		s.data.Todos = map[string]Todo{}
 	}
+	if s.data.Dreaming == nil {
+		s.data.Dreaming = map[string]DreamingCommit{}
+	}
+}
+
+func dreamingKey(agentID, localDate string) string {
+	return strings.TrimSpace(agentID) + "\x00" + strings.TrimSpace(localDate)
+}
+func dreamingDigest(content string) string {
+	h := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(h[:])
+}
+
+func validateDreamingInput(in DreamingCommitInput) error {
+	if strings.TrimSpace(in.AgentID) == "" || strings.TrimSpace(in.LocalDate) == "" || strings.TrimSpace(in.CommitID) == "" || strings.TrimSpace(in.SessionID) == "" || strings.TrimSpace(in.Boundary) == "" || in.ExpectedRevision < 0 || in.Now.IsZero() {
+		return fmt.Errorf("invalid dreaming commit")
+	}
+	if _, err := time.Parse("2006-01-02", strings.TrimSpace(in.LocalDate)); err != nil {
+		return fmt.Errorf("invalid local date")
+	}
+	return nil
+}
+
+// CommitDreaming atomically stores the new experience and its reset handoff.
+// Repeating the exact commit is idempotent; a different payload for the same
+// agent/day is a conflict.
+func (s *Store) CommitDreaming(in DreamingCommitInput) (DreamingCommit, error) {
+	in.AgentID, in.LocalDate, in.CommitID, in.SessionID, in.Boundary, in.Content = strings.TrimSpace(in.AgentID), strings.TrimSpace(in.LocalDate), strings.TrimSpace(in.CommitID), strings.TrimSpace(in.SessionID), strings.TrimSpace(in.Boundary), strings.TrimSpace(in.Content)
+	if err := validateDreamingInput(in); err != nil {
+		return DreamingCommit{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := dreamingKey(in.AgentID, in.LocalDate)
+	if old, ok := s.data.Dreaming[key]; ok {
+		if old.CommitID == in.CommitID && old.SessionID == in.SessionID && old.Boundary == in.Boundary && old.ContentDigest == dreamingDigest(in.Content) {
+			return old, nil
+		}
+		return DreamingCommit{}, ErrConflict
+	}
+	for _, pending := range s.data.Dreaming {
+		if pending.AgentID == in.AgentID && !pending.ResetApplied {
+			return DreamingCommit{}, ErrConflict
+		}
+	}
+	oldExp := s.data.Experiences[in.AgentID]
+	if oldExp.Revision != in.ExpectedRevision {
+		return DreamingCommit{}, ErrConflict
+	}
+	exp := Experience{AgentID: in.AgentID, Revision: oldExp.Revision + 1, Content: in.Content, UpdatedAt: in.Now.UTC()}
+	c := DreamingCommit{AgentID: in.AgentID, LocalDate: in.LocalDate, CommitID: in.CommitID, SessionID: in.SessionID, Boundary: in.Boundary, ExperienceRevision: exp.Revision, ContentDigest: dreamingDigest(in.Content), UpdatedAt: in.Now.UTC()}
+	if err := s.persistLocked(func() { s.data.Experiences[in.AgentID] = exp; s.data.Dreaming[key] = c }); err != nil {
+		return DreamingCommit{}, err
+	}
+	return c, nil
+}
+
+func (s *Store) GetDreamingCommit(agentID, localDate string) (DreamingCommit, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	c, ok := s.data.Dreaming[dreamingKey(agentID, localDate)]
+	return c, ok
+}
+
+func (s *Store) ListPendingDreamingCommits(agentID string) []DreamingCommit {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []DreamingCommit
+	for _, c := range s.data.Dreaming {
+		if c.AgentID == strings.TrimSpace(agentID) && !c.ResetApplied {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LocalDate < out[j].LocalDate })
+	return out
+}
+
+// MarkDreamingResetApplied confirms the session consumed the opaque boundary.
+func (s *Store) MarkDreamingResetApplied(agentID, localDate, commitID string) (DreamingCommit, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := dreamingKey(agentID, localDate)
+	c, ok := s.data.Dreaming[key]
+	if !ok {
+		return DreamingCommit{}, ErrNotFound
+	}
+	if c.CommitID != strings.TrimSpace(commitID) {
+		return DreamingCommit{}, ErrConflict
+	}
+	if c.ResetApplied {
+		return c, nil
+	}
+	c.ResetApplied = true
+	c.UpdatedAt = time.Now().UTC()
+	if err := s.persistLocked(func() { s.data.Dreaming[key] = c }); err != nil {
+		return DreamingCommit{}, err
+	}
+	return c, nil
 }
 
 func (s *Store) PutProfile(p Profile, expectedRevision int64) error {

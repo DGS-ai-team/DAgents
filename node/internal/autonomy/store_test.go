@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -131,5 +132,136 @@ func TestExperienceCASAndTodoDelete(t *testing.T) {
 	}
 	if _, ok := s.GetTodo("agent-a", todo.ID); ok {
 		t.Fatal("todo remains")
+	}
+}
+
+func TestDreamingCommitIsPerDayIdempotentAndConflicting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 9, 3, 0, 0, 0, time.UTC)
+	in := DreamingCommitInput{AgentID: "agent-a", LocalDate: "2026-09-09", CommitID: "commit-1", SessionID: "agent-a", Boundary: "opaque-1", ExpectedRevision: 0, Content: "learned", Now: now}
+	c, err := s.CommitDreaming(in)
+	if err != nil || c.ExperienceRevision != 1 || c.ResetApplied {
+		t.Fatalf("commit=%+v err=%v", c, err)
+	}
+	retry, err := s.CommitDreaming(in)
+	if err != nil || retry != c {
+		t.Fatalf("retry=%+v err=%v want=%+v", retry, err, c)
+	}
+	in.Content = "changed"
+	if _, err := s.CommitDreaming(in); err != ErrConflict {
+		t.Fatalf("changed content err=%v", err)
+	}
+	if _, err := s.MarkDreamingResetApplied("agent-a", "2026-09-09", "commit-1"); err != nil {
+		t.Fatal(err)
+	}
+	in.Content, in.LocalDate, in.CommitID, in.ExpectedRevision = "learned", "2026-09-10", "commit-2", 1
+	if _, err := s.CommitDreaming(in); err != nil {
+		t.Fatal(err)
+	}
+	in.AgentID, in.LocalDate, in.CommitID, in.Boundary, in.ExpectedRevision = "agent-b", "2026-09-09", "commit-b", "opaque-b", 0
+	if _, err := s.CommitDreaming(in); err != nil {
+		t.Fatal(err)
+	}
+	c, ok := s.GetDreamingCommit("agent-a", "2026-09-09")
+	if !ok || !c.ResetApplied {
+		t.Fatalf("reset state=%+v ok=%v", c, ok)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := reopened.GetDreamingCommit("agent-a", "2026-09-09"); !ok || got.CommitID != "commit-1" || !got.ResetApplied {
+		t.Fatalf("reopened=%+v ok=%v", got, ok)
+	}
+}
+
+func TestDreamingCommitFailureRollsBackAndPendingIsDiscoverable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autonomy.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 9, 3, 0, 0, 0, time.UTC)
+	s.path = filepath.Dir(path)
+	_, err = s.CommitDreaming(DreamingCommitInput{AgentID: "a", LocalDate: "2026-09-09", CommitID: "c", SessionID: "a", Boundary: "b", Content: "x", Now: now})
+	if err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if _, ok := s.GetExperience("a"); ok {
+		t.Fatal("experience changed after failed commit")
+	}
+	if _, ok := s.GetDreamingCommit("a", "2026-09-09"); ok {
+		t.Fatal("commit changed after failed commit")
+	}
+	s.path = path
+	if _, err := s.CommitDreaming(DreamingCommitInput{AgentID: "a", LocalDate: "2026-09-09", CommitID: "c", SessionID: "a", Boundary: "b", Content: "x", Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	if pending := s.ListPendingDreamingCommits("a"); len(pending) != 1 {
+		t.Fatalf("pending=%+v", pending)
+	}
+}
+
+func TestDreamingPendingAndConfirmationBoundaries(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "autonomy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 9, 3, 0, 0, 0, time.UTC)
+	if _, err := s.CommitDreaming(DreamingCommitInput{AgentID: "a", LocalDate: "2026-09-09", CommitID: "c", SessionID: "a", Boundary: "b", Content: "x", Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CommitDreaming(DreamingCommitInput{AgentID: "a", LocalDate: "2026-09-10", CommitID: "c2", SessionID: "a", Boundary: "b2", Content: "y", ExpectedRevision: 1, Now: now}); err != ErrConflict {
+		t.Fatalf("pending next day err=%v", err)
+	}
+	if _, err := s.MarkDreamingResetApplied("a", "2026-09-09", "wrong"); err != ErrConflict {
+		t.Fatalf("wrong confirmation err=%v", err)
+	}
+	oldPath := s.path
+	s.path = filepath.Dir(oldPath)
+	if _, err := s.MarkDreamingResetApplied("a", "2026-09-09", "c"); err == nil {
+		t.Fatal("expected confirmation persistence failure")
+	}
+	if pending := s.ListPendingDreamingCommits("a"); len(pending) != 1 || pending[0].ResetApplied {
+		t.Fatalf("pending after failure=%+v", pending)
+	}
+	s.path = oldPath
+	if _, err := s.MarkDreamingResetApplied("a", "2026-09-09", "c"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkDreamingResetApplied("a", "2026-09-09", "c"); err != nil {
+		t.Fatal("repeat confirmation: ", err)
+	}
+}
+
+func TestDreamingCommitConcurrentSameDateOnlyOneWins(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "autonomy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	results := make(chan error, 2)
+	for i := 1; i <= 2; i++ {
+		go func(i int) {
+			_, e := s.CommitDreaming(DreamingCommitInput{AgentID: "a", LocalDate: "2026-09-09", CommitID: fmt.Sprintf("c%d", i), SessionID: "a", Boundary: fmt.Sprintf("b%d", i), Content: fmt.Sprintf("x%d", i), Now: now})
+			results <- e
+		}(i)
+	}
+	var success, conflicts int
+	for i := 0; i < 2; i++ {
+		if e := <-results; e == nil {
+			success++
+		} else if e == ErrConflict {
+			conflicts++
+		} else {
+			t.Fatal(e)
+		}
+	}
+	if success != 1 || conflicts != 1 {
+		t.Fatalf("success=%d conflicts=%d", success, conflicts)
 	}
 }
