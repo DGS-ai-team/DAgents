@@ -1,6 +1,7 @@
 package goals
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -21,7 +22,10 @@ type MaintenanceReceipt struct {
 	CandidateJSON   json.RawMessage `json:"candidate_json,omitempty"`
 	NextCursor      int64           `json:"next_cursor,omitempty"`
 	SessionID       string          `json:"session_id,omitempty"`
+	EvidenceJSON    json.RawMessage `json:"evidence_json,omitempty"`
 }
+
+const maxMaintenanceEvidenceBytes = 64 * 1024
 
 func (s *Store) SetMaintenanceSessionID(agentID, receiptID, sessionID string) error {
 	agentID, receiptID, sessionID = strings.TrimSpace(agentID), strings.TrimSpace(receiptID), strings.TrimSpace(sessionID)
@@ -110,15 +114,70 @@ func (s *Store) MaintenanceAvailableTokens(agentID string) (int64, bool) {
 func (s *Store) SaveMaintenanceResult(agentID, receiptID string, candidates json.RawMessage, nextCursor, used int64, unknown bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveMaintenanceResultLocked(agentID, receiptID, candidates, nextCursor, used, unknown, nil, false)
+}
+
+// SaveMaintenanceResultWithEvidence durably records the memory result and the
+// bounded source evidence in one transaction. Evidence is written before the
+// memory cursor is advanced, allowing a later handbook phase to recover the
+// exact input after a process restart.
+func (s *Store) SaveMaintenanceResultWithEvidence(agentID, receiptID string, candidates, evidence json.RawMessage, nextCursor, used int64, unknown bool) error {
+	if nextCursor < 0 || used < 0 {
+		return fmt.Errorf("invalid maintenance evidence")
+	}
+	normalizedEvidence, err := normalizeMaintenanceEvidence(evidence)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveMaintenanceResultLocked(agentID, receiptID, candidates, nextCursor, used, unknown, normalizedEvidence, true)
+}
+
+func normalizeMaintenanceEvidence(evidence json.RawMessage) ([]byte, error) {
+	if len(evidence) == 0 || len(evidence) > maxMaintenanceEvidenceBytes || !json.Valid(evidence) {
+		return nil, fmt.Errorf("invalid maintenance evidence")
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(evidence, &object) != nil {
+		return nil, fmt.Errorf("invalid maintenance evidence")
+	}
+	if object == nil {
+		return nil, fmt.Errorf("invalid maintenance evidence")
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, evidence); err != nil {
+		return nil, fmt.Errorf("invalid maintenance evidence: %w", err)
+	}
+	return compact.Bytes(), nil
+}
+
+func (s *Store) saveMaintenanceResultLocked(agentID, receiptID string, candidates json.RawMessage, nextCursor, used int64, unknown bool, evidence json.RawMessage, setEvidence bool) error {
+	agentID, receiptID = strings.TrimSpace(agentID), strings.TrimSpace(receiptID)
+	if agentID == "" || receiptID == "" || nextCursor < 0 || used < 0 {
+		return fmt.Errorf("invalid maintenance result")
+	}
 	r, ok := s.data.MaintenanceReceipts[receiptID]
-	if !ok || r.AgentID != strings.TrimSpace(agentID) {
+	if !ok || r.AgentID != agentID {
 		return ErrNotFound
+	}
+	if setEvidence && r.Status != "pending" {
+		return fmt.Errorf("maintenance receipt is not pending")
+	}
+	if setEvidence && len(r.EvidenceJSON) > 0 {
+		oldEvidence, err := normalizeMaintenanceEvidence(r.EvidenceJSON)
+		if err != nil || !bytes.Equal(oldEvidence, evidence) {
+			return fmt.Errorf("maintenance evidence differs")
+		}
 	}
 	old := r
 	r.CandidateJSON = append([]byte(nil), candidates...)
 	r.NextCursor = nextCursor
 	r.UsedTokens = used
 	r.Unknown = unknown
+	if setEvidence {
+		r.EvidenceJSON = append([]byte(nil), evidence...)
+	}
 	r.UpdatedAt = time.Now().UTC()
 	s.data.MaintenanceReceipts[receiptID] = r
 	if err := s.saveLocked(); err != nil {
@@ -233,6 +292,7 @@ func (s *Store) GetMaintenanceReceipt(receiptID string) (MaintenanceReceipt, boo
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.data.MaintenanceReceipts[strings.TrimSpace(receiptID)]
+	r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
 	return r, ok
 }
 
@@ -243,6 +303,7 @@ func (s *Store) ListMaintenanceReceipts(agentID string) []MaintenanceReceipt {
 	out := make([]MaintenanceReceipt, 0)
 	for _, r := range s.data.MaintenanceReceipts {
 		if r.AgentID == agentID {
+			r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
 			out = append(out, r)
 		}
 	}

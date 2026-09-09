@@ -1,9 +1,12 @@
 package goals
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -86,6 +89,136 @@ func TestMaintenanceReceiptPersistsAndSettlesIdempotently(t *testing.T) {
 	r, ok := reopened.GetMaintenanceReceipt("m-1")
 	if !ok || r.Status != "settled" || r.UsedTokens != 12 {
 		t.Fatalf("receipt=%+v ok=%v", r, ok)
+	}
+}
+
+func TestMaintenanceResultWithEvidencePersistsAtomicallyAndOldSavePreservesIt(t *testing.T) {
+	s, now := maintenanceStore(t)
+	if _, err := s.BeginMaintenance("auto-maint", "m-evidence", "journal-evidence", 10, now); err != nil {
+		t.Fatal(err)
+	}
+	evidence := json.RawMessage(`{"cursor_after":7,"messages":[{"role":"user","content":"事实"}]}`)
+	candidates := json.RawMessage(`[{"request":{"information":"事实"}}]`)
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-evidence", candidates, evidence, 7, 4, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMaintenanceResult("auto-maint", "m-evidence", candidates, 7, 4, false); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := s.GetMaintenanceReceipt("m-evidence")
+	normalizedEvidence, err := normalizeMaintenanceEvidence(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || string(r.EvidenceJSON) != string(normalizedEvidence) || string(r.CandidateJSON) != string(candidates) || r.NextCursor != 7 {
+		t.Fatalf("receipt=%+v ok=%v", r, ok)
+	}
+	r.EvidenceJSON[0] = 'x'
+	r2, ok := s.GetMaintenanceReceipt("m-evidence")
+	if !ok || string(r2.EvidenceJSON) != string(normalizedEvidence) {
+		t.Fatal("receipt evidence was returned by alias")
+	}
+	listed := s.ListMaintenanceReceipts(" auto-maint ")
+	if len(listed) != 1 {
+		t.Fatalf("listed receipts=%d", len(listed))
+	}
+	listed[0].EvidenceJSON[0] = 'x'
+	r2, _ = s.GetMaintenanceReceipt("m-evidence")
+	if string(r2.EvidenceJSON) != string(normalizedEvidence) {
+		t.Fatal("listed evidence was returned by alias")
+	}
+	reopened, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok = reopened.GetMaintenanceReceipt("m-evidence")
+	if !ok {
+		t.Fatalf("reopened receipt missing: %+v", r)
+	}
+	var gotEvidence, wantEvidence any
+	if err := json.Unmarshal(r.EvidenceJSON, &gotEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(evidence, &wantEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotEvidence, wantEvidence) {
+		t.Fatalf("reopened receipt=%+v ok=%v", r, ok)
+	}
+	if err := reopened.SaveMaintenanceResultWithEvidence("auto-maint", "m-evidence", candidates, evidence, 7, 4, false); err != nil {
+		t.Fatalf("equivalent evidence after reopen rejected: %v", err)
+	}
+}
+
+func TestMaintenanceResultWithEvidenceValidatesOwnerPendingAndSize(t *testing.T) {
+	s, now := maintenanceStore(t)
+	if _, err := s.BeginMaintenance("auto-maint", "m-validation", "journal-validation", 10, now); err != nil {
+		t.Fatal(err)
+	}
+	valid := json.RawMessage(`{"messages":[]}`)
+	if err := s.SaveMaintenanceResultWithEvidence("other-agent", "m-validation", nil, valid, 1, 0, false); err == nil {
+		t.Fatal("cross-agent evidence save accepted")
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, json.RawMessage(`not-json`), 1, 0, false); err == nil {
+		t.Fatal("invalid evidence accepted")
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, json.RawMessage(`[]`), 1, 0, false); err == nil {
+		t.Fatal("array evidence accepted")
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, json.RawMessage(`null`), 1, 0, false); err == nil {
+		t.Fatal("null evidence accepted")
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, valid, -1, 0, false); err == nil {
+		t.Fatal("negative cursor accepted")
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, valid, 1, -1, false); err == nil {
+		t.Fatal("negative usage accepted")
+	}
+	tooLarge, err := json.Marshal(strings.Repeat("x", maxMaintenanceEvidenceBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, tooLarge, 1, 0, false); err == nil {
+		t.Fatal("oversized evidence accepted")
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, valid, 1, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMaintenanceResultWithEvidence(" auto-maint ", "m-validation", nil, valid, 1, 0, false); err != nil {
+		t.Fatal("same evidence was not idempotent: " + err.Error())
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, json.RawMessage(`{"messages":[1]}`), 1, 0, false); err == nil {
+		t.Fatal("different evidence accepted")
+	}
+	if _, err := s.SettleMaintenance("auto-maint", "m-validation", 0, false, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-validation", nil, valid, 1, 0, false); err == nil {
+		t.Fatal("settled receipt accepted evidence rewrite")
+	}
+}
+
+func TestMaintenanceResultWithEvidenceWriteFailureRollsBack(t *testing.T) {
+	s, now := maintenanceStore(t)
+	if _, err := s.BeginMaintenance("auto-maint", "m-evidence-fail", "journal-evidence-fail", 10, now); err != nil {
+		t.Fatal(err)
+	}
+	path := s.path
+	backup := path + ".bak"
+	if err := os.Rename(path, backup); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(path); _ = os.Rename(backup, path) }()
+	evidence := json.RawMessage(`{"messages":[{"role":"user","content":"rollback"}]}`)
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", "m-evidence-fail", json.RawMessage(`[]`), evidence, 9, 2, false); err == nil {
+		t.Fatal("write failure accepted")
+	}
+	r, ok := s.GetMaintenanceReceipt("m-evidence-fail")
+	if !ok || len(r.EvidenceJSON) != 0 || len(r.CandidateJSON) != 0 || r.NextCursor != 0 || r.UsedTokens != 0 {
+		t.Fatalf("receipt not rolled back=%+v ok=%v", r, ok)
 	}
 }
 
