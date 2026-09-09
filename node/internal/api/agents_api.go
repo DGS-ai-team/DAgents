@@ -37,6 +37,9 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/autonomy/cycles", s.handleGetAutonomyCycles)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/cycles", s.handlePostAutonomyCycle)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/autonomy/actions", s.handleAutonomyAction)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook", s.handleGetAgentHandbook)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook/history", s.handleGetAgentHandbookHistory)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/handbook/restore", s.handleRestoreAgentHandbook)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
 	// Phase 2–4：agent 路径别名（内部仍走 session 实现，id 相同）。
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
@@ -389,6 +392,7 @@ type patchAgentRequest struct {
 	Defaults    map[string]any                `json:"defaults"` // 深合并进快照
 	Workspace   *agentruntime.WorkspaceConfig `json:"workspace"`
 	AgentType   *string                       `json:"agent_type"`
+	Handbook    *agentruntime.HandbookConfig  `json:"handbook"`
 }
 
 func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
@@ -411,12 +415,12 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
+	typeChangedToNormal := false
 	if req.Workspace != nil {
 		writeAPIError(w, http.StatusBadRequest, "workspace_immutable", "workspace cannot be changed after Agent creation", nil)
-	typeChangedToNormal := false
 		return
 	}
-	if req.DisplayName == nil && req.Defaults == nil && req.AgentType == nil {
+	if req.DisplayName == nil && req.Defaults == nil && req.AgentType == nil && req.Handbook == nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "no patch fields", nil)
 		return
 	}
@@ -439,9 +443,9 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		newType := normalizeAgentType(*req.AgentType)
 		if oldType != newType {
+			typeChangedToNormal = oldType == "auto" && newType == "normal"
 			s.goalWakeMu.Lock()
 			defer s.goalWakeMu.Unlock()
-			typeChangedToNormal = oldType == "auto" && newType == "normal"
 			if s.sessions != nil {
 				pending, active, _, runtimeErr := s.sessions.RuntimeInfo(id)
 				if runtimeErr == nil && (pending > 0 || active) {
@@ -469,7 +473,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
 	snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
@@ -480,6 +483,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	oldToolGroups := agentruntime.EnabledToolGroups(snap)
 	runtimeDirty := false
+	if req.Handbook != nil {
+		snap.Handbook = *req.Handbook
+		runtimeDirty = true
+	}
 
 	if req.Defaults != nil {
 		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
@@ -495,12 +502,28 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 			return
 		}
+		var encoded map[string]any
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			writeAPIError(w, 500, "agent_snapshot_encode_failed", err.Error(), nil)
+			return
+		}
+		if strings.TrimSpace(snap.Handbook.Directory) != "" {
+			encoded["handbook"] = snap.Handbook
+		}
+		raw, err = json.Marshal(encoded)
+		if err != nil {
+			writeAPIError(w, 500, "agent_snapshot_encode_failed", err.Error(), nil)
+			return
+		}
 		rec.ConfigSnapshot = raw
 	}
 	rec.UpdatedAt = time.Now().UTC()
 	if err := s.agents.Save(r.Context(), *rec); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
+	}
+	if typeChangedToNormal && s.maintenanceSched != nil {
+		s.maintenanceSched.Cancel(id)
 	}
 	// Save assigns the next independent runtime_revision. Reload and response
 	// handling must use the persisted value rather than the pre-save record.
@@ -520,9 +543,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 				"agent_id", id,
 				"runtime_revision", rec.RuntimeRevision,
 				"turn_state", state,
-	if typeChangedToNormal && s.maintenanceSched != nil {
-		s.maintenanceSched.Cancel(id)
-	}
 			)
 		} else if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
 			runtimeApplied = false

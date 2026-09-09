@@ -48,6 +48,60 @@ paths:
       responses:
         "200":
           description: 已归档
+  /v1/agents/{agent_id}/handbook:
+    get:
+      summary: 浏览 Agent 文件手册目录或读取文件
+      description: 手册根目录由 Agent snapshot 的 handbook.directory 配置；空配置使用 Agent 私有默认目录。path 只能引用该目录内的相对路径。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - in: query
+          name: path
+          schema: {type: string, default: ""}
+          description: 空路径浏览根目录；文件返回 content 和 SHA-256 digest
+      responses:
+        "200":
+          description: 目录包含 items（path、is_dir、size、modified_at）；文件包含 content、digest、size；根目录另含解析后的 directory
+        "400": {description: 路径越界、内部历史路径或不可读取文件}
+        "404": {description: Agent 或文件不存在}
+        "503": {description: 手册根目录不可用}
+  /v1/agents/{agent_id}/handbook/history:
+    get:
+      summary: 获取文件的修改历史
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - in: query
+          name: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: history 列出 revision、path、before_digest、after_digest、before_exists、after_exists 和 created_at；revision 表示一次修改事件
+        "400": {description: 路径无效}
+        "404": {description: Agent 不存在}
+        "503": {description: 历史暂不可用或需要恢复未完成写入}
+  /v1/agents/{agent_id}/handbook/restore:
+    post:
+      summary: 恢复文件至指定修改发生前的状态
+      description: 恢复生成新历史记录。撤销首次新建会删除该文件；不会调用模型。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, revision, expected_digest]
+              properties:
+                path: {type: string}
+                revision: {type: integer, format: int64, minimum: 1}
+                expected_digest: {type: string, description: 最近读取的当前文件 SHA-256 摘要}
+      responses:
+        "200": {description: 新增的恢复记录 entry}
+        "400": {description: 路径、版本或恢复请求无效}
+        "404": {description: Agent 不存在}
+        "409": {description: 文件已被修改，需重新读取}
+        "503": {description: 历史暂不可用或需要恢复未完成写入}
   /v1/agents/{agent_id}/maintenance:
     get:
       summary: 获取 Agent 维护日程、最近记录与累计用量
