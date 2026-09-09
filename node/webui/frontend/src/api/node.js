@@ -195,7 +195,7 @@ export function getAutoConfig(agentId) {
 }
 
 export function putAutoConfig(agentId, payload = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`, {}, { method: "PUT", body: payload });
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`, { method: "PUT", body: payload });
 }
 
 export function listAgentTodos(agentId) {
@@ -203,11 +203,11 @@ export function listAgentTodos(agentId) {
 }
 
 export function createAgentTodo(agentId, payload = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos`, {}, { method: "POST", body: payload });
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos`, { method: "POST", body: payload });
 }
 
 export function updateAgentTodo(agentId, todoId, payload = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, {}, { method: "PATCH", body: payload });
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, { method: "PATCH", body: payload });
 }
 
 export function getAutoExperience(agentId) {
@@ -215,7 +215,7 @@ export function getAutoExperience(agentId) {
 }
 
 export function deleteAgentTodo(agentId, todoId, revision) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, {}, { method: "DELETE", body: { revision } });
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, { method: "DELETE", body: { expected_revision: revision } });
 }
 
 export function getAutoOverview(params = {}) {
