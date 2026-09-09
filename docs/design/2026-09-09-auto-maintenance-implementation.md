@@ -60,6 +60,16 @@ running 对账的轮次绑定基础已补齐：child 保存实际 TurnID 与 Att
 
 主 Agent 独立 Goals 全包 race 通过（3.049 秒），包含并发单次计费、过期快照、unknown 拒绝、保存失败完整快照回滚、Resume 后重试以及大 JSON 缩进后重开的幂等验证；handbookfs 全包 race 通过（2.389 秒）。HTTP 显式结算、界面及真实运行验收仍待继续。
 
+### HTTP 显式结算接入
+
+新增 POST `/v1/agents/{agent_id}/maintenance/reconcile`，请求只带 occurrence 坐标、快照 token 与子执行 ID。服务端在共享执行槽内核对实际 memory operation/游标、完整轮次事件和手册来源历史，自行计算用量与证据，再调用上述原子方法。成功只结算 child，occurrence 仍待恢复；精确重试读取已保存结论，不再计费。跨 Agent 真实 receipt、过期 token、执行槽繁忙、缺用量、缺目录及 pending 文件均拒绝。
+
+执行前通过 `BindHandbookTurnWithRoot` 保存 Registry 实际绑定且已解析的绝对手册根目录。以后配置改目录不改变旧执行归属；旧 child 缺 root 时不能使用当前目录代替。证据读取使用 `OpenReadOnly`，不会创建目录或自动回滚 pending 事务。设置页对轮次记录完整的 child 提供逐项“核对并结算”，展示该轮用量，成功刷新摘要且保留未保存草稿；继续整个批次仍是独立动作。
+
+主 Agent 独立复验：Goals 全包 race 3.180 秒；handbookfs 全包 race 2.444 秒；API Reconcile/Recovery 专项 race 10.860 秒，涵盖真实 SQLite journal、memory Apply、文件来源、幂等、跨 Agent 及拒绝时不变；面板 23 项测试及前端构建通过。上述是集成测试与构建证据，浏览器所连旧 Node 尚未更新，不能据此宣称新版视觉或真实 LLM 验收完成。
+
+仍需补齐：journal 含写工具却没有来源历史时暂时保守拒绝，这也涵盖部分无实际修改的 no-op 写入，后续需结构化工具结果区分；未知费用来源追踪与处置未完成。全计划的真实循环、每日维护、故障注入和 Node/Manage 最终验收继续保留。
+
 ## 剩余集成门槛
 
 1. 共享执行槽与手动维护 API 已提交（dc483f17）。聊天/业务优先；取消维护不等于实际退出，函数返回后才释放槽。每日 controller 仍需证明服务关闭时也遵循这一规则。

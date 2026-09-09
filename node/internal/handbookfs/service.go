@@ -89,17 +89,7 @@ func New(root string) (*Service, error) {
 	if real, e := filepath.EvalSymlinks(root); e == nil {
 		root = real
 	}
-	lockRoot := root
-	if runtime.GOOS == "windows" {
-		lockRoot = strings.ToLower(lockRoot)
-	}
-	rootsMu.Lock()
-	mu := roots[lockRoot]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		roots[lockRoot] = mu
-	}
-	rootsMu.Unlock()
+	mu := sharedRootLock(root)
 	s := &Service{root: root, mu: mu}
 	s.mu.Lock()
 	err = s.recoverPendingLocked()
@@ -108,6 +98,47 @@ func New(root string) (*Service, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenReadOnly opens an existing handbook root without creating anything or
+// recovering a pending transaction. It is intended for explicit evidence
+// reconciliation; callers must use read-only methods on the returned service.
+func OpenReadOnly(root string) (*Service, error) {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return nil, errors.New("handbook root required")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("handbook root is not a directory")
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve handbook root: %w", err)
+	}
+	return &Service{root: root, mu: sharedRootLock(root)}, nil
+}
+
+func sharedRootLock(root string) *sync.Mutex {
+	lockRoot := root
+	if runtime.GOOS == "windows" {
+		lockRoot = strings.ToLower(lockRoot)
+	}
+	rootsMu.Lock()
+	defer rootsMu.Unlock()
+	mu := roots[lockRoot]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		roots[lockRoot] = mu
+	}
+	return mu
 }
 
 func Digest(data []byte) string {

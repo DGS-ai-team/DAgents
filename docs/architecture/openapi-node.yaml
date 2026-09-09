@@ -199,6 +199,46 @@ paths:
         "404": { description: Agent 不存在或不是 Auto Agent }
         "409": { description: 维护未启用、Agent 忙、需要 usage recovery 或维护失败 }
         "503": { description: goal store、LLM 或维护持久化不可用 }
+  /v1/agents/{agent_id}/maintenance/reconcile:
+    post:
+      summary: 核对并结算一项已完成的手册维护执行
+      description: |
+        在当前 Agent 的共享执行槽内核对持久化轮次、执行时手册目录的来源历史和记忆提交操作。
+        用量由服务端回放所得，不接收客户端上报费用或完成结论。不调用模型，不自动继续整个维护批次。
+        未知用量、缺执行目录绑定、缺文件证据、未完成文件事务或过期快照会被拒绝。
+        精确重复请求使用持久化 token 幂等返回，不重复计费。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [local_date, schedule_revision, token, receipt_id]
+              properties:
+                local_date: {type: string}
+                schedule_revision: {type: integer, format: int64, minimum: 1}
+                token: {type: string, description: recovery GET 返回的快照校验值}
+                receipt_id: {type: string, description: 同一批次中的手册子执行 ID}
+      responses:
+        "200":
+          description: 子执行已结算，occurrence 状态保持不变；整批继续使用 recovery POST
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [reconciled]}
+                  stage: {type: string, enum: [completed]}
+                  local_date: {type: string}
+                  schedule_revision: {type: integer, format: int64}
+                  receipt_id: {type: string}
+                  used_tokens: {type: integer, format: int64, description: 该子执行实际用量，不是 Agent 累计用量}
+        "400": {description: 请求参数无效}
+        "404": {description: Agent 或维护批次不存在}
+        "409": {description: 执行槽繁忙、证据不足、关联不符或快照已改变}
+        "503": {description: 必要存储或会话服务不可用}
   /v1/agents/{agent_id}/maintenance/recovery:
     get:
       summary: 查看每日维护恢复摘要

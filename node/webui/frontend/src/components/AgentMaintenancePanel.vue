@@ -22,6 +22,7 @@ const recoveryLoading = ref(false);
 const recoveryError = ref("");
 const recoverySubmitting = ref(false);
 const recoveryAccepted = ref(false);
+const reconcilingReceiptId = ref("");
 let loadEpoch = 0;
 let mutationEpoch = 0;
 
@@ -43,6 +44,7 @@ const canOperate = computed(
     !saving.value &&
     !running.value &&
     !recoverySubmitting.value &&
+    !reconcilingReceiptId.value &&
     Number(config.value.profile_revision) > 0,
 );
 
@@ -116,7 +118,7 @@ function reset() {
   conflict.value = false;
   loadError.value = "";
   result.value = null;
-  recovery.value = null; recoveryLoading.value = false; recoveryError.value = ""; recoverySubmitting.value = false; recoveryAccepted.value = false;
+  recovery.value = null; recoveryLoading.value = false; recoveryError.value = ""; recoverySubmitting.value = false; recoveryAccepted.value = false; reconcilingReceiptId.value = "";
 }
 
 async function loadRecovery(id, token, data, preserveAccepted = false) {
@@ -154,6 +156,53 @@ async function refreshRecovery() {
   const id = props.agentId;
   const token = ++loadEpoch;
   await loadRecovery(id, token, config.value);
+}
+
+function canReconcile(receipt) {
+  return Boolean(
+    receipt &&
+      ["running", "recovery_required"].includes(receipt.stage) &&
+      receipt.known &&
+      receipt.reconciliation?.completed &&
+      receipt.reconciliation?.usage_known,
+  );
+}
+
+const reconcilableReceipts = computed(() =>
+  (recovery.value?.receipts || []).filter(canReconcile),
+);
+
+function reconciliationTokens(receipt) {
+  const tokens = Number(receipt?.reconciliation?.usage?.total_tokens);
+  return Number.isFinite(tokens) && tokens >= 0 ? tokens : "待对账";
+}
+
+async function reconcileReceipt(receipt) {
+  if (!canOperate.value || !recovery.value || !canReconcile(receipt)) return;
+  const id = props.agentId;
+  const token = ++mutationEpoch;
+  reconcilingReceiptId.value = receipt.id;
+  recoveryError.value = "";
+  try {
+    const response = await fetch(`/v1/agents/${encodeURIComponent(id)}/maintenance/reconcile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        local_date: recovery.value.local_date,
+        schedule_revision: recovery.value.schedule_revision,
+        token: recovery.value.token,
+        receipt_id: receipt.id,
+      }),
+    });
+    await responseJSON(response, "结算核对结果失败");
+    if (isCurrentMutation(id, token)) {
+      await loadRecovery(id, ++loadEpoch, config.value);
+    }
+  } catch (cause) {
+    if (isCurrentMutation(id, token)) recoveryError.value = cause.message || "结算核对结果失败";
+  } finally {
+    if (isCurrentMutation(id, token)) reconcilingReceiptId.value = "";
+  }
 }
 
 async function load() {
@@ -272,6 +321,17 @@ watch(
         <p><strong>{{ recoveryAccepted ? "恢复请求已接受" : recovery.stage === 'completed' ? "维护已完成" : recovery.stage === 'pending' ? "等待继续" : "上次维护需要核对" }}</strong>（{{ recovery.local_date }}）</p>
         <p v-if="recovery.blocked_reason" class="hint">原因：{{ recovery.blocked_reason }}</p>
         <p>{{ recovery.known ? `累计维护用量：${recovery.used_tokens || 0} tokens` : "累计维护用量：待对账" }}</p>
+        <div v-if="reconcilableReceipts.length" class="maintenance-reconciliation-list">
+          <div v-for="(receipt, index) in reconcilableReceipts" :key="receipt.id" class="maintenance-reconciliation">
+            <div>
+              <strong>维护执行 {{ index + 1 }}/{{ reconcilableReceipts.length }}</strong>
+              <span class="hint">运行记录完整，待核对并结算 · {{ reconciliationTokens(receipt) }} tokens</span>
+            </div>
+            <button class="btn btn--ghost btn--sm" :disabled="!canOperate" @click="reconcileReceipt(receipt)">
+              {{ reconcilingReceiptId === receipt.id ? "结算中…" : "核对并结算" }}
+            </button>
+          </div>
+        </div>
         <p v-if="!recoveryAccepted && recovery.stage === 'recovery_required'" class="hint">请先核对结果，再继续原维护批次。</p>
         <button v-if="!recoveryAccepted && recovery.stage === 'recovery_required' && recovery.known" class="btn btn--ghost" :disabled="!canOperate" @click="recover">{{ recoverySubmitting ? "提交中…" : "核对并继续" }}</button>
         <p v-else-if="recoveryAccepted" class="hint">已接受，等待继续。</p>
@@ -351,6 +411,31 @@ watch(
   color: var(--text-secondary);
   font-size: 13px;
 }
+.maintenance-reconciliation-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.maintenance-reconciliation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-subtle, transparent);
+}
+.maintenance-reconciliation > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.maintenance-reconciliation .hint {
+  margin: 0;
+}
 .settings-field {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
@@ -398,6 +483,13 @@ watch(
   .maintenance-error {
     align-items: stretch;
     flex-direction: column;
+  }
+  .maintenance-reconciliation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .maintenance-reconciliation .btn {
+    align-self: flex-start;
   }
 }
 </style>

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -210,6 +211,21 @@ func (s *Server) runHandbookMaintenance(ctx context.Context, leaseCtx context.Co
 		return session.HandbookMaintenanceResult{UsageKnown: true}, cleanup, err
 	}
 	built.TurnOptions.LLMProfileDigest = digest
+	handbookRoot := built.Registry.HandbookRoot()
+	if handbookRoot == "" {
+		_ = built.Close()
+		return session.HandbookMaintenanceResult{UsageKnown: true}, cleanup, fmt.Errorf("handbook root is unavailable")
+	}
+	handbookRoot, err = filepath.EvalSymlinks(handbookRoot)
+	if err != nil {
+		_ = built.Close()
+		return session.HandbookMaintenanceResult{UsageKnown: true}, cleanup, fmt.Errorf("canonicalize handbook root: %w", err)
+	}
+	handbookRoot, err = filepath.Abs(filepath.Clean(handbookRoot))
+	if err != nil {
+		_ = built.Close()
+		return session.HandbookMaintenanceResult{UsageKnown: true}, cleanup, fmt.Errorf("canonicalize handbook root: %w", err)
+	}
 	// This is a fresh, private runtime. Its only authorization is the snapshot
 	// and policy engine already bound to the Agent; no filesystem capability is
 	// added here.
@@ -256,7 +272,7 @@ func (s *Server) runHandbookMaintenance(ctx context.Context, leaseCtx context.Co
 	}
 	runCtx := handbookfs.WithProvenance(leaseCtx, handbookfs.Provenance{MaintenanceReceiptID: receiptID, SessionID: id})
 	result, err = s.sessions.RunHandbookMaintenanceWithBinding(runCtx, id, maintenanceEvidencePrompt(prompt, evidence), budget, func(sessionID, turnID string) error {
-		return s.goalStore.BindHandbookTurn(rec.AgentID, receiptID, sessionID, turnID, time.Now().UTC())
+		return s.goalStore.BindHandbookTurnWithRoot(rec.AgentID, receiptID, sessionID, turnID, handbookRoot, time.Now().UTC())
 	})
 	return result, cleanup, err
 }

@@ -25,6 +25,7 @@ type MaintenanceReceipt struct {
 	SessionID                  string          `json:"session_id,omitempty"`
 	TurnID                     string          `json:"turn_id,omitempty"`
 	AttemptedAt                time.Time       `json:"attempted_at,omitempty"`
+	HandbookRoot               string          `json:"handbook_root,omitempty"`
 	EvidenceJSON               json.RawMessage `json:"evidence_json,omitempty"`
 	ParentReceiptID            string          `json:"parent_receipt_id,omitempty"`
 	HandbookReceiptID          string          `json:"handbook_receipt_id,omitempty"`

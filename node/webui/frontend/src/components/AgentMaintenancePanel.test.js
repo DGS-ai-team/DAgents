@@ -67,6 +67,59 @@ describe("AgentMaintenancePanel", () => {
     vi.stubGlobal("fetch", fetch); const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } }); await flush();
     expect(w.text()).toContain("当前 Node 版本尚不支持此功能");
   });
+
+  it("reconciles a verified child, refreshes summary, and keeps the draft", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...cfg(), last: { status: "recovery_required", local_date: "d", schedule_revision: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "d", schedule_revision: 2, stage: "recovery_required", known: true, token: "secret", receipts: [{ id: "handbook:p", stage: "running", known: true, reconciliation: { completed: true, usage_known: true, usage: { total_tokens: 3 } } }] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ status: "reconciled", stage: "completed", used_tokens: 3 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "d", schedule_revision: 2, stage: "recovery_required", known: true, token: "secret", receipts: [] }) });
+    vi.stubGlobal("fetch", fetch);
+    const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } });
+    await flush();
+    await w.find('input[type="text"]').setValue("Europe/Paris");
+    await w.findAll("button").find((b) => b.text().includes("核对并结算")).trigger("click");
+    await flush();
+    expect(fetch.mock.calls[2][0]).toContain("/maintenance/reconcile");
+    expect(JSON.parse(fetch.mock.calls[2][1].body).receipt_id).toBe("handbook:p");
+    expect(w.find('input[type="text"]').element.value).toBe("Europe/Paris");
+    expect(w.text()).not.toContain("结算中");
+  });
+
+  it("makes reconciliation mutually exclusive and ignores a late response after switching Agent", async () => {
+    let resolveReconcile;
+    const fetch = vi.fn().mockImplementation((url, options) => {
+      if (options?.method === "POST") return new Promise((resolve) => { resolveReconcile = resolve; });
+      return Promise.resolve({ ok: true, json: async () => url.includes("recovery") ? ({ local_date: "d", schedule_revision: 2, stage: "recovery_required", known: true, token: "t", receipts: [{ id: "child", stage: "running", known: true, reconciliation: { completed: true, usage_known: true } }] }) : ({ ...cfg(), last: { status: "recovery_required", local_date: "d", schedule_revision: 2 } }) });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } });
+    await flush();
+    const button = w.findAll("button").find((b) => b.text().includes("核对并结算"));
+    await button.trigger("click");
+    await nextTick();
+    expect(w.findAll("button").find((b) => b.text().includes("保存维护设置")).element.disabled).toBe(true);
+    await button.trigger("click");
+    expect(fetch.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    await w.setProps({ agentId: "auto-b" });
+    resolveReconcile({ ok: true, status: 200, json: async () => ({ status: "reconciled", stage: "completed" }) });
+    await flush();
+    expect(w.text()).not.toContain("结算中");
+  });
+
+  it("keeps the child uncompleted and shows the server error when reconciliation fails", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...cfg(), last: { status: "recovery_required", local_date: "d", schedule_revision: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ local_date: "d", schedule_revision: 2, stage: "recovery_required", known: true, token: "t", receipts: [{ id: "child", stage: "recovery_required", known: true, reconciliation: { completed: true, usage_known: true } }] }) })
+      .mockResolvedValueOnce({ ok: false, status: 409, text: async () => JSON.stringify({ message: "receipt already reconciled" }) });
+    vi.stubGlobal("fetch", fetch);
+    const w = mount(AgentMaintenancePanel, { props: { agentId: "auto-a" } });
+    await flush();
+    await w.findAll("button").find((b) => b.text().includes("核对并结算")).trigger("click");
+    await flush();
+    expect(w.text()).toContain("receipt already reconciled");
+    expect(w.text()).not.toContain("维护已完成");
+  });
   it("loads, saves with expected revision, and shows run result", async () => {
     const fetch = vi
       .fn()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -26,10 +27,21 @@ type MaintenanceReceiptEntry struct {
 // immutable once established so recovery cannot accidentally attribute a
 // later turn to the same receipt.
 func (s *Store) BindHandbookTurn(agentID, childID, sessionID, turnID string, attemptedAt time.Time) error {
+	return s.BindHandbookTurnWithRoot(agentID, childID, sessionID, turnID, "", attemptedAt)
+}
+
+// BindHandbookTurnWithRoot binds the concrete turn and canonical handbook
+// root. An empty root is accepted only for compatibility with older callers.
+func (s *Store) BindHandbookTurnWithRoot(agentID, childID, sessionID, turnID, handbookRoot string, attemptedAt time.Time) error {
 	agentID, childID = strings.TrimSpace(agentID), strings.TrimSpace(childID)
-	sessionID, turnID = strings.TrimSpace(sessionID), strings.TrimSpace(turnID)
+	sessionID, turnID, handbookRoot = strings.TrimSpace(sessionID), strings.TrimSpace(turnID), strings.TrimSpace(handbookRoot)
 	if agentID == "" || childID == "" || sessionID == "" || turnID == "" || attemptedAt.IsZero() {
 		return fmt.Errorf("invalid handbook turn binding")
+	}
+	if handbookRoot != "" {
+		if !filepath.IsAbs(handbookRoot) || filepath.Clean(handbookRoot) != handbookRoot {
+			return fmt.Errorf("handbook root must be an absolute canonical path")
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -52,6 +64,9 @@ func (s *Store) BindHandbookTurn(agentID, childID, sessionID, turnID string, att
 	}
 	if child.TurnID != "" {
 		if child.TurnID == turnID {
+			if handbookRoot != "" && child.HandbookRoot != handbookRoot {
+				return fmt.Errorf("handbook root already bound")
+			}
 			return nil
 		}
 		return fmt.Errorf("handbook turn already bound")
@@ -59,6 +74,9 @@ func (s *Store) BindHandbookTurn(agentID, childID, sessionID, turnID string, att
 	old := child
 	child.TurnID = turnID
 	child.AttemptedAt = attemptedAt.UTC()
+	if handbookRoot != "" {
+		child.HandbookRoot = handbookRoot
+	}
 	child.UpdatedAt = attemptedAt.UTC()
 	s.data.MaintenanceReceipts[childID] = child
 	if err := s.saveLocked(); err != nil {

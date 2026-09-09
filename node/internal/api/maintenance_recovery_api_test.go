@@ -42,6 +42,9 @@ func appendMaintenanceJournal(t *testing.T, db *store.SQLiteStore, agentID, sess
 		if eventType == turn.EventModelUsageRecorded {
 			event.Payload, _ = json.Marshal(map[string]any{"generation": 1, "usage": turn.StepUsage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3}})
 		}
+		if turnID == "failure-turn" && eventType == turn.EventAssistantMessageRecorded {
+			event.Payload = json.RawMessage(`{"generation":1,"tool_name":"write_file"}`)
+		}
 		if _, err := db.AppendTurnEvent(context.Background(), event); err != nil {
 			t.Fatalf("append %s: %v", eventType, err)
 		}
@@ -121,6 +124,25 @@ func TestMaintenanceRecoveryHTTPSuccessThenScheduler(t *testing.T) {
 	child, _ := srv.goalStore.GetMaintenanceReceipt("handbook:" + parentID)
 	if child.PhaseState != goals.MaintenancePhaseComplete {
 		t.Fatalf("scheduler did not complete handbook child: %+v", child)
+	}
+	expectedRoot, err := agentruntime.HandbookRoot(cfg.RuntimeDir(), agentID, agentruntime.WorkspaceConfig{}, agentruntime.HandbookConfig{})
+	if err == nil {
+		expectedRoot, err = filepath.EvalSymlinks(expectedRoot)
+	}
+	if err != nil || child.HandbookRoot != expectedRoot {
+		t.Fatalf("handbook root binding=%q want=%q err=%v", child.HandbookRoot, expectedRoot, err)
+	}
+	record, err := srv.agents.Get(context.Background(), agentID)
+	if err != nil || record == nil {
+		t.Fatalf("load agent for directory change: %v", err)
+	}
+	record.ConfigSnapshot = json.RawMessage(`{"agent_type":"auto","handbook":{"directory":"changed-after-run"}}`)
+	if err := srv.agents.Save(context.Background(), *record); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, _ := srv.goalStore.GetMaintenanceReceipt("handbook:" + parentID)
+	if unchanged.HandbookRoot != expectedRoot {
+		t.Fatalf("handbook root changed after agent directory edit: got=%q want=%q", unchanged.HandbookRoot, expectedRoot)
 	}
 	handbook, err := agentruntime.HandbookRoot(cfg.RuntimeDir(), agentID, agentruntime.WorkspaceConfig{}, agentruntime.HandbookConfig{})
 	if err != nil {

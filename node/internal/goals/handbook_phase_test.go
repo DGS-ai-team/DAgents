@@ -284,6 +284,76 @@ func TestBindHandbookTurnPersistsIsIdempotentAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestBindHandbookTurnWithRootPersistsAndRejectsRebind(t *testing.T) {
+	s, parentID, now := prepareHandbookParent(t)
+	if _, err := s.PrepareHandbook(parentID, "auto-maint", 5, now); err != nil {
+		t.Fatal(err)
+	}
+	childID := "handbook:" + parentID
+	if _, err := s.MarkHandbookRunning("auto-maint", childID, "root-session"); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "handbook")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BindHandbookTurnWithRoot("auto-maint", childID, "root-session", "root-turn", root, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BindHandbookTurn("auto-maint", childID, "root-session", "root-turn", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BindHandbookTurnWithRoot("auto-maint", childID, "root-session", "root-turn", filepath.Join(root, "other"), now); err == nil {
+		t.Fatal("root rebind accepted")
+	}
+	reopened, err := OpenStore(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := reopened.GetMaintenanceReceipt(childID)
+	if !ok || got.HandbookRoot != root {
+		t.Fatalf("root=%q ok=%v", got.HandbookRoot, ok)
+	}
+	if err := s.BindHandbookTurnWithRoot("auto-maint", childID, "root-session", "another-turn", root, now); err == nil {
+		t.Fatal("turn rebind accepted")
+	}
+	if err := s.BindHandbookTurnWithRoot("auto-maint", childID, "root-session", "third-turn", filepath.Clean(root+string(filepath.Separator)+".."), now); err == nil {
+		t.Fatal("noncanonical root accepted")
+	}
+	if _, err := s.SettleHandbook("auto-maint", childID, 1, false, json.RawMessage(`{}`), MaintenancePhaseComplete, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	parent2 := "memory-root-failure"
+	if _, err := s.BeginMaintenance("auto-maint", parent2, "root-fp", 1, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMaintenanceResultWithEvidence("auto-maint", parent2, json.RawMessage(`[]`), json.RawMessage(`{"messages":[]}`), 1, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SettleMaintenance("auto-maint", parent2, 1, false, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PrepareHandbook(parent2, "auto-maint", 5, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	child2 := "handbook:" + parent2
+	if _, err := s.MarkHandbookRunning("auto-maint", child2, "root-failure-session"); err != nil {
+		t.Fatal(err)
+	}
+	block := filepath.Join(t.TempDir(), "block")
+	if err := os.WriteFile(block, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.path = filepath.Join(block, "goals.json")
+	if err := s.BindHandbookTurnWithRoot("auto-maint", child2, "root-failure-session", "root-failure-turn", root, now); err == nil {
+		t.Fatal("root persistence failure accepted")
+	}
+	rolledBack, ok := s.GetMaintenanceReceipt(child2)
+	if !ok || rolledBack.TurnID != "" || rolledBack.HandbookRoot != "" {
+		t.Fatalf("root failure changed receipt=%+v", rolledBack)
+	}
+}
+
 func TestMarkHandbookRunningAfterReopenDoesNotReclaim(t *testing.T) {
 	s, parentID, now := prepareHandbookParent(t)
 	if _, err := s.PrepareHandbook(parentID, "auto-maint", 5, now); err != nil {

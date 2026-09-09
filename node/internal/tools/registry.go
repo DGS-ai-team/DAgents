@@ -107,6 +107,16 @@ func (r *Registry) SetHandbookRoot(root string) error {
 	return nil
 }
 
+// HandbookRoot returns the canonical root bound to the registry. The value is
+// immutable for the lifetime of a built Agent runtime and is safe for callers
+// that need to persist the execution-time handbook identity.
+func (r *Registry) HandbookRoot() string {
+	if r == nil {
+		return ""
+	}
+	return r.handbookRoot
+}
+
 func (r *Registry) SetGoalCheckpoint(fn func(context.Context, string, string, GoalCheckpoint) error) {
 	r.goalCheckpoint = fn
 }
