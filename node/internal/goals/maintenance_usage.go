@@ -32,6 +32,9 @@ type MaintenanceReceipt struct {
 	OccurrenceScheduleRevision int64           `json:"occurrence_schedule_revision,omitempty"`
 	PhaseState                 string          `json:"phase_state,omitempty"`
 	ResultJSON                 json.RawMessage `json:"result_json,omitempty"`
+	ReconciliationEvidence     json.RawMessage `json:"reconciliation_evidence,omitempty"`
+	ReconciledAt               time.Time       `json:"reconciled_at,omitempty"`
+	ReconciliationToken        string          `json:"reconciliation_token,omitempty"`
 }
 
 const maxMaintenanceEvidenceBytes = 64 * 1024
@@ -355,5 +358,6 @@ func cloneMaintenanceReceipt(r MaintenanceReceipt) MaintenanceReceipt {
 	r.CandidateJSON = append([]byte(nil), r.CandidateJSON...)
 	r.EvidenceJSON = append([]byte(nil), r.EvidenceJSON...)
 	r.ResultJSON = append([]byte(nil), r.ResultJSON...)
+	r.ReconciliationEvidence = append([]byte(nil), r.ReconciliationEvidence...)
 	return r
 }

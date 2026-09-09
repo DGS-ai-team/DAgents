@@ -50,6 +50,16 @@ running 对账的轮次绑定基础已补齐：child 保存实际 TurnID 与 Att
 
 显式结算动作仍需将事件证据、文件历史及当前 receipt 快照一起核验并原子记录。历史 child 没有 TurnID 时不能推测归属。仅有 assistant 文本、文件改动或进程退出均不能认定完成；缺 terminal 或完整用量证据时继续保留待处理及未知费用。此项完成前，阶段 F 和发布验收仍未完成。
 
+### 显式结算的存储基础
+
+新增 `ReadSourceSnapshot`，按完整 receipt/session/turn 来源读取已提交文件历史并生成稳定摘要。共享根目录锁下检查 pending，存在未完成事务时只读拒绝，不执行回滚；扫描最多 10000 条、8 MiB 历史，校验路径、递增 revision、摘要及时间，空来源结果统一编码为 `[]`。它只证明已提交历史归属，不证明模型轮次成功，也不保证文件仍等于某个历史版本。
+
+新增 `ReconcileHandbookCompletion` 存储方法，使用 occurrence 全快照 token 做 CAS，原子保存 child、parent 和维护费用。首次写入仅允许待恢复 occurrence 下已绑定的 running/pending child，或费用一致的 settled/known/recovery child；新证据保存在 `ReconciliationEvidence`，原 `ResultJSON` 保留。同请求凭保存的 token 和规范化证据幂等，允许随后 Resume 或重开后重试；失败完整回滚。此方法不读取事件或文件，其调用方必须先核对两类证据，不能直接接受客户端上报的完成结论或用量。当前尚未接入 HTTP 写操作。
+
+本轮发现旧维护 unknown 仅写全局标记，没有可归属的未知贡献；因此上述方法拒绝 unknown child，并保留所有全局 unknown 状态，不能用一个 child 的对账清除其他业务或历史未知费用。来源追踪与旧未知状态的明确处置仍是未完成项，不以本次存储基础替代完整恢复。
+
+主 Agent 独立 Goals 全包 race 通过（3.049 秒），包含并发单次计费、过期快照、unknown 拒绝、保存失败完整快照回滚、Resume 后重试以及大 JSON 缩进后重开的幂等验证；handbookfs 全包 race 通过（2.389 秒）。HTTP 显式结算、界面及真实运行验收仍待继续。
+
 ## 剩余集成门槛
 
 1. 共享执行槽与手动维护 API 已提交（dc483f17）。聊天/业务优先；取消维护不等于实际退出，函数返回后才释放槽。每日 controller 仍需证明服务关闭时也遵循这一规则。
