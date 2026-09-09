@@ -245,10 +245,15 @@ func (h *sessionHookHost) LLMComplete(ctx context.Context, req hooks.LLMComplete
 	}
 	h.state.mu.Unlock()
 
-	text, err := h.o.llm.CompleteText(ctx, llm.CompleteRequest{
+	request := llm.CompleteRequest{
 		SystemPrompt: systemPrompt,
 		UserPrompt:   req.UserPrompt,
-	})
+	}
+	if usageClient, ok := h.o.llm.(llm.CompletionWithUsageClient); ok {
+		text, usage, err := usageClient.CompleteTextWithUsage(ctx, request)
+		return hooks.LLMCompleteResponse{Text: text, Usage: usage}, err
+	}
+	text, err := h.o.llm.CompleteText(ctx, request)
 	if err != nil {
 		return hooks.LLMCompleteResponse{}, err
 	}

@@ -21,6 +21,11 @@ func (c *countingCompleteLLM) CompleteText(context.Context, llm.CompleteRequest)
 	return "ok", nil
 }
 
+func (c *countingCompleteLLM) CompleteTextWithUsage(context.Context, llm.CompleteRequest) (string, *llm.Usage, error) {
+	c.calls++
+	return "ok", &llm.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}, nil
+}
+
 func (c *countingCompleteLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
 	return llm.StubNormalizeAssistant(existing, msg)
 }
@@ -45,5 +50,15 @@ func TestResetHookHostLLMQuotaPerHumanTurn(t *testing.T) {
 	host = orch.newSessionHookHost("sess-1", history, "")
 	if _, err := host.LLMComplete(context.Background(), hooks.LLMCompleteRequest{UserPrompt: "x"}); err != nil {
 		t.Fatalf("expected quota reset for next turn, got %v", err)
+	}
+}
+
+func TestHookHostUsesCompletionUsageExtension(t *testing.T) {
+	client := &countingCompleteLLM{}
+	orch := NewOrchestrator("agent-1", ".", nil, client, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
+	host := orch.newSessionHookHost("sess-1", nil, "")
+	resp, err := host.LLMComplete(context.Background(), hooks.LLMCompleteRequest{UserPrompt: "risk"})
+	if err != nil || resp.Usage == nil || resp.Usage.TotalTokens != 5 {
+		t.Fatalf("response=%+v err=%v", resp, err)
 	}
 }
