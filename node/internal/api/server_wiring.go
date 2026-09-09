@@ -26,6 +26,7 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 		return
 	}
 	reg.SetAgentID(targetAgentID)
+	reg.SetEventSourceStore(s.eventStore)
 	reg.SetAutonomyCallbacks(s.autonomyToolGet, s.autonomyToolUpdate)
 	if s.linuxProvider != nil {
 		if err := reg.WithLinuxShellProvider(s.linuxProvider); err != nil && s.logger != nil {

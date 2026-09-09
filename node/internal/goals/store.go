@@ -816,20 +816,25 @@ func (s *Store) ApplyAutoAction(agentID, cycleID, action string, expectedProfile
 				continue
 			}
 			if i.Decision.NextAction == NextEvent {
-				return AutoProfile{}, Goal{}, ErrEventSchedulingUnsupported
+				if !p.Enabled {
+					continue
+				}
+				if i.Decision.Event == nil || !s.registeredSources[agentID][i.Decision.Event.SourceID] {
+					return AutoProfile{}, Goal{}, ErrEventSchedulingUnsupported
+				}
 			}
-			if i.Decision.NextAction != NextAt || i.DueAt == nil {
+			if i.Decision.NextAction == NextAt && i.DueAt == nil {
 				continue
 			}
 			if i.Generation == math.MaxInt64 {
 				return AutoProfile{}, Goal{}, ErrConflict
 			}
 			candidate := i.Decision.Clone()
-			if !i.DueAt.After(now) {
+			if i.DueAt != nil && !i.DueAt.After(now) {
 				due := now.Add(time.Duration(g.MinWakeIntervalSeconds) * time.Second)
 				candidate.NextWakeAt = &due
 			}
-			if err := ValidateFinalDecision(candidate, DecisionValidationContext{Now: now, MinInterval: time.Duration(g.MinWakeIntervalSeconds) * time.Second, ExpiresAt: g.ExpiresAt}); err == nil {
+			if err := ValidateFinalDecision(candidate, DecisionValidationContext{Now: now, MinInterval: time.Duration(g.MinWakeIntervalSeconds) * time.Second, ExpiresAt: g.ExpiresAt, RegisteredSource: s.registeredSources[agentID]}); err == nil {
 				resumeKeys = append(resumeKeys, k)
 				resumeSet[k] = true
 			}

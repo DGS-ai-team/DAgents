@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
+	"github.com/DGS-ai-team/DAgents/node/internal/events"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
@@ -38,6 +39,7 @@ type Registry struct {
 	triggerStore           *triggers.Store
 	triggerSched           *triggers.Scheduler
 	agentID                string
+	eventStore             *events.Store
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
 	browser                *browser.Manager
@@ -383,6 +385,7 @@ func (r *Registry) Definitions() []ToolDef {
 		clearSkillsToolDef(),
 		goalCheckpointToolDef(),
 		triggerListToolDef(),
+		eventSourceListToolDef(),
 		triggerGetToolDef(),
 		triggerCreateToolDef(),
 		triggerUpdateToolDef(),
@@ -494,6 +497,7 @@ func (r *Registry) registerBuiltins() {
 		}
 	}
 	r.handlers["trigger_list"] = r.execTriggerList
+	r.handlers["event_source_list"] = r.execEventSourceList
 	r.handlers["trigger_get"] = r.execTriggerGet
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate

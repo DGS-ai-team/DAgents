@@ -41,6 +41,7 @@ var knownBuiltinTools = map[string]struct{}{
 	"trigger_create":         {},
 	"trigger_update":         {},
 	"trigger_delete":         {},
+	"event_source_list":      {},
 	"create_temporary_agent": {},
 	"cancel_temporary_agent": {},
 	"browser_run_task":       {},
@@ -100,6 +101,7 @@ var builtinToolGroups = map[string][]string{
 		"trigger_create",
 		"trigger_update",
 		"trigger_delete",
+		"event_source_list",
 	},
 	"child_agents": {
 		"create_temporary_agent",

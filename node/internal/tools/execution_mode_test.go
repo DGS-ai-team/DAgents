@@ -43,6 +43,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"clear_skills":           {CallPurposeKey},
 		"goal_checkpoint":        {CallPurposeKey, "summary"},
 		"trigger_list":           {CallPurposeKey},
+		"event_source_list":      {CallPurposeKey},
 		"trigger_get":            {CallPurposeKey, "trigger_id"},
 		"trigger_create":         {CallPurposeKey, "name", "task_template", "condition"},
 		"trigger_update":         {CallPurposeKey, "trigger_id"},
