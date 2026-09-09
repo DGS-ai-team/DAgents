@@ -20,7 +20,10 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-type handbookRoundClient struct{ calls int }
+type handbookRoundClient struct {
+	calls    int
+	requests []llm.ChatRequest
+}
 
 type handbookAskClient struct{}
 
@@ -72,8 +75,9 @@ func (*handbookBlockingClient) NormalizeAssistant(e []llm.Message, m llm.Message
 	return llm.StubNormalizeAssistant(e, m)
 }
 
-func (c *handbookRoundClient) StreamChat(ctx context.Context, _ llm.ChatRequest, h llm.StreamHandler) (llm.ChatResult, error) {
+func (c *handbookRoundClient) StreamChat(ctx context.Context, request llm.ChatRequest, h llm.StreamHandler) (llm.ChatResult, error) {
 	c.calls++
+	c.requests = append(c.requests, request)
 	if h.OnUsage != nil {
 		h.OnUsage(llm.Usage{PromptTokens: 2, CompletionTokens: 2, TotalTokens: 4})
 	}

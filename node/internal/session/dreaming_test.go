@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,6 +121,23 @@ func TestRunDreamingMaxToolRoundsLeavesFinalRequestToolFree(t *testing.T) {
 	}
 	if result.Content == "" || client.calls != 2 {
 		t.Fatalf("max tool rounds did not reserve a tool-free final request: result=%+v calls=%d", result, client.calls)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("captured requests=%d, want 2", len(client.requests))
+	}
+	final := client.requests[1]
+	if len(final.Tools) != 0 {
+		t.Fatalf("final summary exposed tools: %d", len(final.Tools))
+	}
+	for _, phrase := range []string{
+		"工具轮次已达到上限",
+		"不要发起或请求任何工具调用",
+		"不要输出模拟的 <tool_call>",
+		"如实说明已经完成的工作、未完成的工作",
+	} {
+		if !strings.Contains(final.SystemPrompt, phrase) {
+			t.Fatalf("final summary prompt missing %q: %q", phrase, final.SystemPrompt)
+		}
 	}
 }
 

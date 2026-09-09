@@ -114,9 +114,23 @@ onBeforeUnmount(() => window.removeEventListener("dagents:agent-turn-finished", 
 .auto-todo-panel__heading strong { display: inline; font-size: 15px; }
 .auto-todo-panel__body { display: grid; gap: 10px; }
 .auto-todo-list { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
-.auto-todo-list__item, .auto-todo-panel__create { display: flex; gap: 8px; align-items: center; }
-.auto-todo-list__item input, .auto-todo-panel__create input { min-width: 0; flex: 1; }
-.auto-todo-list__item select { width: 90px; }
+.auto-todo-list__item, .auto-todo-panel__create { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.auto-todo-list__item input, .auto-todo-list__item select, .auto-todo-panel__create input { box-sizing: border-box; min-width: 0; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-input, var(--color-surface-muted, var(--color-surface))); color: var(--color-text); font: inherit; }
+.auto-todo-list__item input, .auto-todo-panel__create input { flex: 1; min-height: 36px; padding: 8px 10px; }
+.auto-todo-list__item input::placeholder, .auto-todo-panel__create input::placeholder { color: var(--color-text-subtle); }
+.auto-todo-list__item select { width: 100px; min-height: 36px; padding: 8px 7px; }
+.auto-todo-list__item input:focus-visible, .auto-todo-list__item select:focus-visible, .auto-todo-panel__create input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.auto-todo-panel__create { align-items: stretch; }
+.auto-todo-panel__create .btn { flex: 0 0 auto; }
 .hint { color: var(--color-text-subtle); font-size: 12px; }
 .error { color: var(--color-danger); font-size: 12px; }
+@media (max-width: 560px) {
+  .auto-todo-panel__body { max-height: min(42vh, 360px); overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+  .auto-todo-list__item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: stretch; }
+  .auto-todo-list__item input { grid-column: 1 / -1; width: 100%; }
+  .auto-todo-list__item select { width: auto; min-width: 92px; }
+  .auto-todo-list__item .btn { min-width: 0; }
+  .auto-todo-panel__create { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .auto-todo-panel__create input { width: 100%; }
+}
 </style>

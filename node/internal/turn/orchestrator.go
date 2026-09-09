@@ -126,6 +126,15 @@ type Orchestrator struct {
 	mediaReg          *media.Registry
 }
 
+const reservedFinalSummaryInstruction = `本轮工具轮次已达到上限。现在只允许进行一次无工具的最终收尾：不要发起或请求任何工具调用，不要输出模拟的 <tool_call>、function 标签或工具 JSON。请用自然语言如实说明已经完成的工作、未完成的工作以及本轮限制；不要声称尚未执行的操作已经完成。`
+
+func appendReservedFinalSummaryInstruction(systemPrompt string) string {
+	if strings.TrimSpace(systemPrompt) == "" {
+		return reservedFinalSummaryInstruction
+	}
+	return systemPrompt + "\n\n" + reservedFinalSummaryInstruction
+}
+
 // SetRiskSubmitter enables an explicitly configured shadow observer. Nil
 // leaves the normal tool path unchanged.
 func (o *Orchestrator) SetRiskSubmitter(submitter RiskSubmitter) {
@@ -789,6 +798,9 @@ func (o *Orchestrator) runOneStep(
 		}
 		o.setModelContextSnapshot(sessionID, snapshot)
 		requestHistory = append([]llm.Message(nil), msgs...)
+	}
+	if finalSummary {
+		systemPrompt = appendReservedFinalSummaryInstruction(systemPrompt)
 	}
 	*history = msgs
 	var snapshotInjections []ContextInjection
