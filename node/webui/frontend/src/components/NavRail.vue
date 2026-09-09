@@ -1010,6 +1010,12 @@ defineExpose({
         </button>
       </header>
       <ul v-if="sectionOpen.autonomous" class="nav-rail__list" :aria-busy="loadingAgents">
+        <li class="nav-rail__overview-item">
+          <router-link :to="{ name: 'auto-overview' }" class="nav-rail__overview-link" title="Auto 总览">
+            <span aria-hidden="true">✦</span>
+            <span>Auto 总览</span>
+          </router-link>
+        </li>
         <li v-for="a in autonomousAgents" :key="agentRecordId(a)" class="nav-rail__item nav-rail__agent-item" :class="{ 'nav-rail__item--active': agentRecordId(a) === agentStore.agentId }" tabindex="0" @keydown="onAgentKeydown($event, agentRecordId(a))" @click="selectAgent(agentRecordId(a))">
           <div class="nav-rail__item-main">
             <div class="nav-rail__item-title-row">
@@ -1040,9 +1046,6 @@ defineExpose({
         <span class="nav-rail__dot" :class="statusClass" :aria-label="`实时事件：${statusLabel}`" />
       </div>
       <div class="nav-rail__footer-actions">
-        <router-link :to="{ name: 'auto-overview' }" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="Auto 总览" aria-label="Auto 总览">
-          <span aria-hidden="true">✦</span>
-        </router-link>
         <button
           type="button"
           class="nav-rail__icon-btn nav-rail__icon-btn--sm"
@@ -1106,6 +1109,9 @@ defineExpose({
   color: var(--color-text);
   font-size: 11px;
 }
+.nav-rail__overview-item { padding: 4px 10px 6px; }
+.nav-rail__overview-link { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 6px 10px; border-radius: 6px; color: var(--text-secondary); font-size: 12px; text-decoration: none; }
+.nav-rail__overview-link:hover, .nav-rail__overview-link:focus-visible { color: var(--color-text); background: var(--color-surface-elevated); }
 .nav-rail__agent-group { list-style: none; padding: 5px 10px 2px; }
 .nav-rail__agent-group-toggle {
   display: flex;

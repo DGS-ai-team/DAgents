@@ -95,7 +95,9 @@ onBeforeUnmount(() => { epoch += 1; });
 <style scoped>
 .auto-todo-panel { display: grid; gap: 10px; padding-top: 20px; border-top: 1px solid var(--color-border); }
 .auto-todo-panel__heading { display: flex; justify-content: space-between; align-items: center; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; padding: 0; }
-.auto-todo-panel__heading strong { display: block; font-size: 15px; }
+.auto-todo-panel__heading > span { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.auto-todo-panel__heading .settings-kicker { display: inline; color: var(--color-text-subtle); font-size: 11px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+.auto-todo-panel__heading strong { display: inline; font-size: 15px; }
 .auto-todo-panel__body { display: grid; gap: 10px; }
 .auto-todo-list { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
 .auto-todo-list__item, .auto-todo-panel__create { display: flex; gap: 8px; align-items: center; }

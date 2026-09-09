@@ -35,6 +35,8 @@ describe("NavRail sections", () => {
     expect(wrapper.findAll('input[type="search"]')).toHaveLength(0);
     expect(wrapper.findAll("select")).toHaveLength(0);
     expect(wrapper.find('[title="自主任务设置"]').exists()).toBe(false);
+    expect(wrapper.find('.nav-rail__overview-link[title="Auto 总览"]').exists()).toBe(true);
+    expect(wrapper.find('.nav-rail__footer [title="Auto 总览"]').exists()).toBe(false);
     const sections = wrapper.findAll(".nav-rail__section-title").map((node) => node.text());
     expect(sections.slice(0, 3)).toEqual(["智能体", "工作组", "自主智能体"]);
     const sectionNodes = wrapper.findAll(".nav-rail__section");
