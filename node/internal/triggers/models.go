@@ -16,6 +16,7 @@ const (
 	ScheduleInterval ScheduleKind = "interval"
 	ScheduleOnce     ScheduleKind = "once"
 	ScheduleCalendar ScheduleKind = "calendar"
+	ScheduleEvent    ScheduleKind = "event"
 )
 
 // FireStatus 单次 fire 落库状态。
@@ -122,6 +123,8 @@ func InferScheduleKind(condition map[string]any) (ScheduleKind, error) {
 	interval := intFromAny(condition["interval_seconds"])
 	fireAt := floatFromAny(condition["fire_at"])
 	hasSchedule := hasScheduleObject(condition)
+	eventSource, _ := condition["event_source_id"].(string)
+	eventSource = strings.TrimSpace(eventSource)
 	setCount := 0
 	if interval > 0 {
 		setCount++
@@ -130,6 +133,9 @@ func InferScheduleKind(condition map[string]any) (ScheduleKind, error) {
 		setCount++
 	}
 	if hasSchedule {
+		setCount++
+	}
+	if eventSource != "" {
 		setCount++
 	}
 	if setCount > 1 {
@@ -143,6 +149,9 @@ func InferScheduleKind(condition map[string]any) (ScheduleKind, error) {
 	}
 	if hasSchedule {
 		return ScheduleCalendar, nil
+	}
+	if eventSource != "" {
+		return ScheduleEvent, nil
 	}
 	return ScheduleManual, nil
 }

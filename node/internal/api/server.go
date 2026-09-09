@@ -17,6 +17,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
+	"github.com/DGS-ai-team/DAgents/node/internal/events"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
@@ -62,6 +63,7 @@ type Server struct {
 	triggerSched    *triggers.Scheduler
 	startupErr      error
 	goalStore       *goals.Store
+	eventStore      *events.Store
 	goalWake        goals.WakeFunc
 	goalWakeMu      sync.Mutex
 	registrar       *manage.Registrar
@@ -350,11 +352,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var triggerSched *triggers.Scheduler
 	var startupErr error
 	var goalStore *goals.Store
+	var eventStore *events.Store
 	if opened, err := goals.OpenStore(filepath.Join(cfg.RuntimeDir(), "goals.json")); err != nil {
 		logger.Warn("goal store init failed", "error", err)
 		startupErr = err
 	} else {
 		goalStore = opened
+	}
+	if opened, err := events.OpenStore(filepath.Join(cfg.RuntimeDir(), "events.json")); err != nil {
+		logger.Warn("event store init failed", "error", err)
+		startupErr = err
+	} else {
+		eventStore = opened
 	}
 	var triggerSubmitter *session.TriggerSubmitter
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {
@@ -518,6 +527,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched:         triggerSched,
 		startupErr:           startupErr,
 		goalStore:            goalStore,
+		eventStore:           eventStore,
 		registrar:            registrar,
 		updateChecker:        updateChecker,
 		packageUploader:      packageUploader,
@@ -683,7 +693,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 						dueAt = intent.DueAt
 					}
 				}
-				if dueAt != nil && now.Before(*dueAt) {
+				_, eventTrigger := def.Condition["event_source_id"]
+				if !eventTrigger && dueAt != nil && now.Before(*dueAt) {
 					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusSkipped, Reason: "schedule", Message: "next wake not due"}
 				}
 				if s.goalAgentBusy(g) {
@@ -707,6 +718,31 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 					return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusError, Reason: "schedule", Message: err.Error()}
 				}
 				return triggers.FireRecord{TriggerID: def.TriggerID, Status: triggers.FireStatusQueued, Reason: "schedule", DeliveryID: d}
+			})
+			triggerSched.SetEventPoller(func(ctx context.Context, def triggers.Definition, now time.Time) error {
+				if s.eventStore == nil {
+					return fmt.Errorf("event store unavailable")
+				}
+				source, _ := def.Condition["event_source_id"].(string)
+				reg, ok := s.eventStore.GetRegistration(source)
+				if !ok || !reg.Enabled || reg.OwnerAgentID != def.OwnerAgentID {
+					return fmt.Errorf("event source owner mismatch")
+				}
+				probe := events.New(s.eventStore, events.DeliveryFunc(func(deliveryCtx context.Context, event events.Event) error {
+					if event.SourceID != source || event.IntentID != def.ManagedIntentID || event.Generation != def.ManagedGeneration {
+						return fmt.Errorf("stale event intent")
+					}
+					// The probe applies the bounded equals-only filter before
+					// allocating pending state; delivery only fences identity.
+					record := triggerSched.FireManaged(deliveryCtx, def, now)
+					if record.Status != triggers.FireStatusQueued {
+						return fmt.Errorf("managed event fire: %s", record.Message)
+					}
+					return nil
+				}))
+				filter, _ := def.Condition["event_filter"].(map[string]any)
+				_, err := probe.Poll(ctx, events.Config{SourceID: reg.SourceID, OwnerAgentID: reg.OwnerAgentID, Revision: reg.Revision, IntentID: def.ManagedIntentID, Generation: def.ManagedGeneration, EventFilter: filter, Root: reg.Root, MaxFiles: reg.MaxFiles, MaxBytes: reg.MaxBytes, HashContent: reg.HashContent, Timeout: reg.Timeout}, now)
+				return err
 			})
 		}
 	}
@@ -748,12 +784,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 		if s.startupErr == nil && s.goalStore != nil && s.triggerStore != nil {
-			projector := &AutoIntentProjector{Goals: s.goalStore, Triggers: s.triggerStore}
+			projector := &AutoIntentProjector{Goals: s.goalStore, Triggers: s.triggerStore, SourceRegistry: s.eventStore}
 			for _, intent := range s.goalStore.ListScheduleIntents("") {
 				if _, err := projector.Project(intent.GoalID, intent.Purpose); err != nil {
 					// A paused/disabled profile or unsupported event source is an
 					// isolated intent; malformed persistence remains fail-closed.
-					if strings.Contains(err.Error(), "intent_projection_fenced") || strings.Contains(err.Error(), "event_projection_unsupported") {
+					if strings.Contains(err.Error(), "intent_projection_fenced") || strings.Contains(err.Error(), "event_projection_unsupported") || strings.Contains(err.Error(), "event_source_not_registered") {
 						continue
 					}
 					s.startupErr = fmt.Errorf("restore schedule intent %s: %w", intent.ID, err)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/events"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
@@ -14,8 +15,11 @@ import (
 // AutoIntentProjector is a one-way, idempotent projection from the durable
 // Goal intent to a Trigger. It never fires a trigger or starts a new loop.
 type AutoIntentProjector struct {
-	Goals    *goals.Store
-	Triggers *triggers.Store
+	Goals          *goals.Store
+	Triggers       *triggers.Store
+	SourceRegistry interface {
+		GetRegistration(string) (events.SourceRegistration, bool)
+	}
 }
 
 func (p *AutoIntentProjector) Project(goalID, purpose string) (triggers.Definition, error) {
@@ -61,18 +65,35 @@ func (p *AutoIntentProjector) Project(goalID, purpose string) (triggers.Definiti
 	if !g.Managed || g.Status == goals.StatusPaused || g.Status == goals.StatusStopped || g.Status == goals.StatusCompleted {
 		return triggers.Definition{}, fmt.Errorf("intent_projection_fenced")
 	}
-	if i.Decision.NextAction == goals.NextEvent {
-		return triggers.Definition{}, fmt.Errorf("event_projection_unsupported")
+	isEvent := i.Decision.NextAction == goals.NextEvent
+	if isEvent {
+		source := ""
+		if i.Decision.Event != nil {
+			source = strings.TrimSpace(i.Decision.Event.SourceID)
+		}
+		reg, ok := events.SourceRegistration{}, false
+		if p.SourceRegistry != nil {
+			reg, ok = p.SourceRegistry.GetRegistration(source)
+		}
+		if source == "" || !ok || !reg.Enabled || reg.OwnerAgentID != g.AgentID {
+			return triggers.Definition{}, fmt.Errorf("event_source_not_registered")
+		}
 	}
 	next := (*float64)(nil)
 	if i.DueAt != nil {
 		v := float64(i.DueAt.UnixNano()) / 1e9
 		next = &v
 	}
-	if next == nil {
+	if next == nil && !isEvent {
 		return triggers.Definition{}, fmt.Errorf("intent_projection_missing_due_at")
 	}
-	condition := map[string]any{"fire_at": *next}
+	condition := map[string]any{}
+	if isEvent {
+		condition["event_source_id"] = strings.TrimSpace(i.Decision.Event.SourceID)
+		condition["event_filter"] = i.Decision.Event.Filter
+	} else {
+		condition["fire_at"] = *next
+	}
 	session := strings.TrimSpace(g.SessionID)
 	def := triggers.Definition{TriggerID: id, Name: g.Title, Condition: condition, TargetAgentID: g.AgentID, TargetSessionID: &session, SessionTargetMode: triggers.SessionTargetFixed, TaskTemplate: g.Objective, Enabled: true, NextFireAt: next, ManagedGoalID: g.ID, OwnerAgentID: g.AgentID, Controller: "goal", ControllerID: g.ID, Revision: 1, CreatedBy: "autonomy", ManagedIntentID: i.ID, ManagedGeneration: i.Generation, ManagedFingerprint: i.Fingerprint}
 	if existing, exists := p.Triggers.GetTrigger(id); exists {

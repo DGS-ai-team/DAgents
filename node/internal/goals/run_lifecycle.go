@@ -102,7 +102,11 @@ func (s *Store) ObserveTurn(sessionID string, snapshot TurnSnapshot, now time.Ti
 	if strings.TrimSpace(reason) == "" {
 		reason = snapshot.StepEndReason
 	}
-	in := FinalizeInput{RunID: r.ID, ExpectedGoalRevision: r.GoalRevision, ExpectedProfileRevision: r.ProfileRevision, ExpectedConfigRevision: r.ConfigRevision, Decision: decision, ActualTokens: int64(snapshot.TotalTokens), Purpose: "goal", Generation: r.Generation, TerminalStatus: snapshot.TurnStatus, TerminalReason: reason, Now: now.UTC()}
+	registered := make(map[string]bool)
+	for source, enabled := range s.registeredSources[g.AgentID] {
+		registered[source] = enabled
+	}
+	in := FinalizeInput{RunID: r.ID, ExpectedGoalRevision: r.GoalRevision, ExpectedProfileRevision: r.ProfileRevision, ExpectedConfigRevision: r.ConfigRevision, Decision: decision, ActualTokens: int64(snapshot.TotalTokens), Purpose: "goal", Generation: r.Generation, RegisteredSource: registered, TerminalStatus: snapshot.TurnStatus, TerminalReason: reason, Now: now.UTC()}
 	if err := s.finalizeRunLocked(in); err != nil {
 		// The turn binding is part of the same logical observation; do not leave
 		// it behind when the terminal transaction cannot be persisted.

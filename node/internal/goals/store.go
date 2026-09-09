@@ -37,9 +37,24 @@ type disk struct {
 	MaintenanceReceipts      map[string]MaintenanceReceipt `json:"maintenance_receipts,omitempty"`
 }
 type Store struct {
-	mu   sync.RWMutex
-	path string
-	data disk
+	mu                sync.RWMutex
+	path              string
+	data              disk
+	registeredSources map[string]map[string]bool
+}
+
+// SetRegisteredSources supplies the current owner-independent source names
+// used when validating event decisions at lifecycle finalization.
+func (s *Store) SetRegisteredSources(sources map[string]map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registeredSources = make(map[string]map[string]bool, len(sources))
+	for agent, list := range sources {
+		s.registeredSources[agent] = make(map[string]bool, len(list))
+		for source, enabled := range list {
+			s.registeredSources[agent][source] = enabled
+		}
+	}
 }
 
 func cloneCheckpoint(cp *Checkpoint) *Checkpoint {

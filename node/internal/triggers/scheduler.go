@@ -43,17 +43,34 @@ type Scheduler struct {
 	pollInterval    time.Duration
 	logger          *slog.Logger
 	managedFire     func(context.Context, Definition, time.Time) FireRecord
+	eventPoll       func(context.Context, Definition, time.Time) error
 	reconcile       func(context.Context, time.Time) error
 
-	mu     sync.Mutex
-	stopCh chan struct{}
-	doneCh chan struct{}
+	mu         sync.Mutex
+	stopCh     chan struct{}
+	doneCh     chan struct{}
+	stopCancel context.CancelFunc
+	runCtx     context.Context
 }
 
 // SetManagedFire routes managed Goal triggers through Goal-owned Run/claim
 // logic. Ordinary triggers retain the existing fire path unchanged.
 func (s *Scheduler) SetManagedFire(fn func(context.Context, Definition, time.Time) FireRecord) {
 	s.managedFire = fn
+}
+func (s *Scheduler) FireManaged(ctx context.Context, def Definition, now time.Time) FireRecord {
+	if s == nil || s.managedFire == nil {
+		return FireRecord{TriggerID: def.TriggerID, Status: FireStatusError, Message: "managed fire unavailable"}
+	}
+	return s.managedFire(ctx, def, now)
+}
+
+// SetEventPoller installs the bounded provider bridge. The callback owns the
+// managedFire acknowledgement and must return only after delivery succeeds.
+func (s *Scheduler) SetEventPoller(fn func(context.Context, Definition, time.Time) error) {
+	if s != nil {
+		s.eventPoll = fn
+	}
 }
 
 // SetReconciler installs a pre-tick callback for durable managed scheduling
@@ -100,8 +117,11 @@ func (s *Scheduler) Start() {
 	}
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 	s.stopCh = stopCh
 	s.doneCh = doneCh
+	s.stopCancel = cancel
+	s.runCtx = ctx
 	s.logger.Info("trigger scheduler started", "poll_seconds", int(s.pollInterval.Seconds()))
 	go s.runLoop(stopCh, doneCh)
 }
@@ -115,9 +135,15 @@ func (s *Scheduler) Stop() {
 	}
 	stopCh := s.stopCh
 	doneCh := s.doneCh
+	cancel := s.stopCancel
 	close(stopCh)
+	if cancel != nil {
+		cancel()
+	}
 	s.stopCh = nil
 	s.doneCh = nil
+	s.stopCancel = nil
+	s.runCtx = nil
 	s.mu.Unlock()
 	<-doneCh
 }
@@ -177,12 +203,26 @@ func (s *Scheduler) runLoop(stopCh, doneCh chan struct{}) {
 }
 
 func (s *Scheduler) tickDue(now time.Time) {
+	ctx := context.Background()
+	s.mu.Lock()
+	if s.runCtx != nil {
+		ctx = s.runCtx
+	}
+	s.mu.Unlock()
 	if s.reconcile != nil {
-		if err := s.reconcile(context.Background(), now); err != nil {
+		if err := s.reconcile(ctx, now); err != nil {
 			s.logger.Warn("managed intent reconciliation failed", "error", err)
 		}
 	}
 	for _, def := range s.store.ListEnabledTriggers() {
+		if kind, _ := InferScheduleKind(def.Condition); kind == ScheduleEvent {
+			if s.eventPoll != nil {
+				if err := s.eventPoll(ctx, def, now); err != nil {
+					s.logger.Warn("event probe poll failed", "trigger_id", def.TriggerID, "error", err)
+				}
+			}
+			continue
+		}
 		decision, updated := EvaluateDue(def, now)
 		switch decision {
 		case DueAdvanceOnly:
