@@ -219,3 +219,7 @@ root在5173设置390×844视口实际验收：工作组空页主按钮完整可�
 删除node/internal/goals及hooks旧risk worker/observation/Goals适配和专属测试；非测试入向检索无剩余goals依赖，不新增旧数据decoder或迁移。磁盘历史文件不删除。root Hooks/Autonomy/Triggers全包race通过（2.000/1.311/1.878秒）；Node全部包编译检查通过，命令使用-run ^$，不作为全量执行测试证据。删除前当前API全包普通回归通过（27.881秒）。
 
 Manage深色桌面非空工作组卡片、通用配置和Supervisor配置已实际检查。创建仅用于验收的草稿wg_27f7e34c3e333be286ec5ebd78，未发布或发起任务；浏览器归档确认框无法由当前浏览器工具操作，随后使用同一管理员登录及既有archive API清理，当前状态archiving，未确认最终archived。浏览器确认框和归档完成仍需收尾；窄屏重载回首页，未将其误记为工作组配置窄屏通过。
+
+### 临时工作组归档完成
+
+核查WorkgroupStore.begin_archive发现首次调用仅转archiving，第二次才转archived，当前没有自动完成接线。root确认目标仍是本次临时草稿后完成第二阶段，GET核验status=archived；新开管理台页面显示工作组0/0。已安排修复配置中草稿的单次归档幂等行为，不将当前两次调用当作产品闭环。旧标签页原生confirm仍被浏览器工具阻塞，新管理台标签24已打开且可正常操作。
