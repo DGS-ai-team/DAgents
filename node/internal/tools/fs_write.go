@@ -79,6 +79,9 @@ func (r *Registry) execWriteFile(ctx context.Context, raw json.RawMessage) (stri
 		// A byte-identical write is a successful no-op. Do not create a history
 		// entry or report a handbook mutation for it.
 		if current, readErr := os.ReadFile(path); readErr == nil && string(current) == string(payload) {
+			if err := recordHandbookNoop(ctx, "write_file", args.Path, current); err != nil {
+				return "", err
+			}
 			return fmt.Sprintf("no changes needed for %s", args.Path), nil
 		} else if readErr != nil && !os.IsNotExist(readErr) {
 			return "", readErr

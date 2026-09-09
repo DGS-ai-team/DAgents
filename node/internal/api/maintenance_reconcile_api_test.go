@@ -16,8 +16,16 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/node/internal/stream"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
+	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func TestMaintenanceReconcileHTTPSuccessAndExactRetry(t *testing.T) {
@@ -343,7 +351,117 @@ func TestMaintenanceReconcileRejectsMissingMutationHistory(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	f.srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/agents/"+f.id+"/maintenance/reconcile", strings.NewReader(f.body)))
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "missing mutation evidence") {
+	if w.Code != http.StatusConflict {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestValidateNoopMutationEvidence(t *testing.T) {
+	if got, ok := normalizeHandbookEvidencePath("handbook/a/../guide.md"); !ok || got != "guide.md" {
+		t.Fatalf("normalized handbook path=%q valid=%v", got, ok)
+	}
+	for _, value := range []string{"../outside", "/outside", `C:\outside`} {
+		if _, ok := normalizeHandbookEvidencePath(value); ok {
+			t.Fatalf("unsafe path accepted: %q", value)
+		}
+	}
+	makeEvents := func(fact bool, mutate func(*map[string]any)) []turn.TurnEventEnvelope {
+		callPayload := map[string]any{"tool_name": "write_file", "arguments_json": `{"path":"handbook/guide.md"}`}
+		call := turn.TurnEventEnvelope{EventType: turn.EventToolCallRecorded, AgentID: "agent", SessionID: "session", TurnID: "turn", ToolCallID: "call", Payload: mustJSONReconcile(callPayload)}
+		events := []turn.TurnEventEnvelope{call}
+		if fact {
+			content := map[string]any{"version": 1, "receipt_id": "receipt", "session_id": "session", "turn_id": "turn", "tool_call_id": "call", "tool_name": "write_file", "path": "guide.md", "digest": strings.Repeat("a", 64)}
+			outer := map[string]any{"external_fact_kind": "handbook.noop", "result_content": string(mustJSON(content))}
+			events = append(events, turn.TurnEventEnvelope{EventType: turn.EventExternalFactRecorded, AgentID: "agent", SessionID: "session", TurnID: "turn", ToolCallID: "call", Payload: mustJSONReconcile(outer)})
+		}
+		if mutate != nil {
+			var p map[string]any
+			_ = json.Unmarshal(events[1].Payload, &p)
+			mutate(&p)
+			events[1].Payload = mustJSONReconcile(p)
+		}
+		return events
+	}
+	if err := validateNoopMutationEvidence(makeEvents(true, nil), "agent", "session", "turn", "receipt"); err != nil {
+		t.Fatalf("valid no-op rejected: %v", err)
+	}
+	for name, events := range map[string][]turn.TurnEventEnvelope{
+		"missing": makeEvents(false, nil),
+		"wrong source": makeEvents(true, func(p *map[string]any) {
+			(*p)["result_content"] = strings.Replace((*p)["result_content"].(string), "receipt", "other", 1)
+		}),
+		"bad digest": makeEvents(true, func(p *map[string]any) {
+			(*p)["result_content"] = strings.Replace((*p)["result_content"].(string), strings.Repeat("a", 64), "bad", 1)
+		}),
+	} {
+		if err := validateNoopMutationEvidence(events, "agent", "session", "turn", "receipt"); err == nil {
+			t.Fatalf("%s evidence accepted", name)
+		}
+	}
+}
+
+func mustJSONReconcile(value any) []byte { b, _ := json.Marshal(value); return b }
+
+type apiNoopClient struct{ calls int }
+
+func (c *apiNoopClient) StreamChat(_ context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if c.calls == 1 {
+		return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "noop-write", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"handbook/guide.md","content":"stable","call_purpose":"maintain"}`}}}, FinishReason: "tool_calls"}, nil
+	}
+	return llm.ChatResult{Content: "done", FinishReason: "stop"}, nil
+}
+func (*apiNoopClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*apiNoopClient) NormalizeAssistant(e []llm.Message, m llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(e, m)
+}
+
+func TestValidateNoopMutationEvidenceFromRealSessionSQLiteEvents(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, err := tools.NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"filesystem"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(handbook, "guide.md"), []byte("stable"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	turnStore, err := store.Open(filepath.Join(workspace, "turn-events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turnStore.Close()
+	client := &apiNoopClient{}
+	allow := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeNever}})
+	mgr := session.NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, allow, turnStore, session.TurnOptions{AutoAgent: true}, logx.Discard())
+	defer mgr.Stop()
+	rt, _, err := mgr.CreateWithOptionsAndLLM("maintenance-noop-api", session.TurnOptions{AutoAgent: true}, reg, nil, client, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, release, acquired, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
+	if err != nil || !acquired {
+		t.Fatalf("gate: %v %v", acquired, err)
+	}
+	defer release()
+	lease = handbookfs.WithProvenance(lease, handbookfs.Provenance{MaintenanceReceiptID: "receipt-noop", SessionID: rt.ID})
+	var sid, tid string
+	result, err := mgr.RunHandbookMaintenanceWithBinding(lease, rt.ID, "整理手册", turn.TurnBudget{MaxSteps: 2, MaxTotalTokens: 100}, func(sessionID, turnID string) error { sid, tid = sessionID, turnID; return nil })
+	if err != nil || result.Changed || sid == "" || tid == "" {
+		t.Fatalf("result=%+v sid=%q tid=%q err=%v", result, sid, tid, err)
+	}
+	events, err := turnStore.ListTurnEventsForTurn(context.Background(), sid, tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNoopMutationEvidence(events, "agent-1", sid, tid, "receipt-noop"); err != nil {
+		t.Fatalf("real session no-op evidence rejected: %v", err)
 	}
 }

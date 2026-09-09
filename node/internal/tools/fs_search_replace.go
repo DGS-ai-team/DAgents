@@ -113,6 +113,13 @@ func (r *Registry) execSearchReplace(ctx context.Context, raw json.RawMessage) (
 		replaced = 1
 	}
 	if newText == rawText {
+		currentBytes, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return formatSearchReplaceFail(args.Path, readErr.Error()), nil
+		}
+		if err := recordHandbookNoop(ctx, "search_replace", args.Path, currentBytes); err != nil {
+			return "", err
+		}
 		return formatSearchReplaceSuccess(0, args.OldString, args.NewString, lineHint), nil
 	}
 	enc := choice.Encoding

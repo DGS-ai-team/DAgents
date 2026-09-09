@@ -1,6 +1,6 @@
 # Auto 数字员工实施进度与验收台账
 
-依据：[开发方案](2026-09-08-auto-employee-implementation-plan.md)。开始日期：2026-09-08。状态：实施中，完整目标尚未完成。
+依据：[开发方案](2026-09-08-auto-employee-implementation-plan.md)。开始日期：2026-09-08。状态：按用户要求收尾后暂停开发，完整目标尚未完成。最新状态以[2026-09-09 暂停交接](2026-09-09-auto-pause-handoff.md)和[维护实施记录](2026-09-09-auto-maintenance-implementation.md)为准；本页下方保留历史进展。
 
 ## 分阶段状态
 

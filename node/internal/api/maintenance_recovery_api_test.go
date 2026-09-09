@@ -27,6 +27,9 @@ func appendMaintenanceJournal(t *testing.T, db *store.SQLiteStore, agentID, sess
 		types = append(types, turn.EventModelUsageRecorded)
 	}
 	types = append(types, turn.EventAssistantMessageRecorded, turn.EventStepCompleted, turn.EventTurnCompleted)
+	if turnID == "failure-turn" {
+		types = append(types[:len(types)-2], append([]turn.EventType{turn.EventToolBatchCreated, turn.EventToolCallRecorded, turn.EventToolExecutionStarted, turn.EventToolExecutionCompleted, turn.EventToolResultRecorded, turn.EventToolBatchSettled}, types[len(types)-2:]...)...)
+	}
 	for i, eventType := range types {
 		event := turn.NewTurnEventEnvelope(sessionID, eventType, now.Add(time.Duration(i)*time.Millisecond))
 		event.AgentID, event.TurnID = agentID, turnID
@@ -42,8 +45,20 @@ func appendMaintenanceJournal(t *testing.T, db *store.SQLiteStore, agentID, sess
 		if eventType == turn.EventModelUsageRecorded {
 			event.Payload, _ = json.Marshal(map[string]any{"generation": 1, "usage": turn.StepUsage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3}})
 		}
-		if turnID == "failure-turn" && eventType == turn.EventAssistantMessageRecorded {
-			event.Payload = json.RawMessage(`{"generation":1,"tool_name":"write_file"}`)
+		if turnID == "failure-turn" && eventType == turn.EventToolCallRecorded {
+			event.ToolCallID = "failure-call"
+			event.Payload = json.RawMessage(`{"generation":1,"tool_name":"write_file","arguments_json":"{\"path\":\"handbook/guide.md\",\"content\":\"guide\"}"}`)
+		}
+		if turnID == "failure-turn" && (eventType == turn.EventToolBatchCreated || eventType == turn.EventToolBatchSettled) {
+			event.Payload = json.RawMessage(`{"generation":1,"tool_batch_id":"failure-batch"}`)
+		}
+		if turnID == "failure-turn" && (eventType == turn.EventToolExecutionStarted || eventType == turn.EventToolExecutionCompleted) {
+			event.ToolCallID, event.ToolExecutionID = "failure-call", "failure-exec"
+			event.Payload = json.RawMessage(`{"generation":1,"tool_name":"write_file","execution_status":"succeeded"}`)
+		}
+		if turnID == "failure-turn" && eventType == turn.EventToolResultRecorded {
+			event.ToolCallID, event.ToolExecutionID = "failure-call", "failure-exec"
+			event.Payload = json.RawMessage(`{"generation":1,"tool_name":"write_file","result_content":"ok"}`)
 		}
 		if _, err := db.AppendTurnEvent(context.Background(), event); err != nil {
 			t.Fatalf("append %s: %v", eventType, err)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -106,9 +107,11 @@ func (s *Server) handlePostMaintenanceReconcile(w http.ResponseWriter, r *http.R
 		writeAPIError(w, http.StatusConflict, "turn_not_reconcilable", err.Error(), nil)
 		return
 	}
-	if len(entries) == 0 && maintenanceTurnContainsHandbookMutation(events) {
-		writeAPIError(w, http.StatusConflict, "handbook_evidence_invalid", "missing mutation evidence in handbook history", nil)
-		return
+	if len(entries) == 0 {
+		if err := validateNoopMutationEvidence(events, id, child.SessionID, child.TurnID, in.ReceiptID); err != nil {
+			writeAPIError(w, http.StatusConflict, "handbook_evidence_invalid", err.Error(), nil)
+			return
+		}
 	}
 	ms, err := s.openAgentMemoryService(id, rec)
 	if err != nil || ms == nil {
@@ -135,21 +138,109 @@ func (s *Server) handlePostMaintenanceReconcile(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{"status": "reconciled", "stage": goals.MaintenancePhaseComplete, "local_date": in.LocalDate, "schedule_revision": in.ScheduleRevision, "receipt_id": in.ReceiptID, "used_tokens": result.UsedTokens})
 }
 
-func maintenanceTurnContainsHandbookMutation(events []turn.TurnEventEnvelope) bool {
+func validateNoopMutationEvidence(events []turn.TurnEventEnvelope, agentID, sessionID, turnID, receiptID string) error {
+	type call struct {
+		id, name, path string
+	}
+	var calls []call
 	for _, event := range events {
 		var payload map[string]json.RawMessage
-		if json.Unmarshal(event.Payload, &payload) != nil {
+		if event.EventType != turn.EventToolCallRecorded || json.Unmarshal(event.Payload, &payload) != nil {
 			continue
 		}
 		var toolName string
-		if json.Unmarshal(payload["tool_name"], &toolName) != nil {
+		if json.Unmarshal(payload["tool_name"], &toolName) != nil || (toolName != "write_file" && toolName != "search_replace") {
 			continue
 		}
-		if toolName == "write_file" || toolName == "search_replace" {
-			return true
+		var args string
+		if json.Unmarshal(payload["arguments_json"], &args) != nil {
+			return fmt.Errorf("mutation call arguments are missing")
 		}
+		var arguments map[string]json.RawMessage
+		if json.Unmarshal([]byte(args), &arguments) != nil {
+			return fmt.Errorf("mutation call arguments are invalid")
+		}
+		var rawPath string
+		if json.Unmarshal(arguments["path"], &rawPath) != nil {
+			return fmt.Errorf("mutation call path is missing")
+		}
+		normalizedPath, validPath := normalizeHandbookEvidencePath(rawPath)
+		if !validPath {
+			return fmt.Errorf("mutation call path is outside handbook namespace")
+		}
+		calls = append(calls, call{event.ToolCallID, toolName, normalizedPath})
 	}
-	return false
+	if len(calls) == 0 {
+		return nil
+	}
+	used := make(map[string]bool)
+	for _, c := range calls {
+		matches := 0
+		for _, event := range events {
+			if event.EventType != turn.EventExternalFactRecorded || event.AgentID != agentID || event.SessionID != sessionID || event.TurnID != turnID || event.ToolCallID != c.id {
+				continue
+			}
+			var outer struct {
+				Kind    string          `json:"external_fact_kind"`
+				Content json.RawMessage `json:"result_content"`
+			}
+			if json.Unmarshal(event.Payload, &outer) != nil || outer.Kind != "handbook.noop" {
+				continue
+			}
+			content := outer.Content
+			var contentString string
+			if json.Unmarshal(outer.Content, &contentString) == nil {
+				content = []byte(contentString)
+			}
+			var fact struct {
+				Version    int    `json:"version"`
+				ReceiptID  string `json:"receipt_id"`
+				SessionID  string `json:"session_id"`
+				TurnID     string `json:"turn_id"`
+				ToolCallID string `json:"tool_call_id"`
+				ToolName   string `json:"tool_name"`
+				Path       string `json:"path"`
+				Digest     string `json:"digest"`
+			}
+			if json.Unmarshal(content, &fact) != nil {
+				continue
+			}
+			factPath, validFactPath := normalizeHandbookEvidencePath(fact.Path)
+			if !validFactPath || fact.Version != 1 || fact.ReceiptID != receiptID || fact.SessionID != sessionID || fact.TurnID != turnID || fact.ToolCallID != c.id || fact.ToolName != c.name || factPath != c.path || !validHandbookEvidenceDigest(fact.Digest) {
+				continue
+			}
+			matches++
+		}
+		if matches != 1 || used[c.id] {
+			return fmt.Errorf("mutation call %q lacks exactly one matching no-op evidence", c.id)
+		}
+		used[c.id] = true
+	}
+	return nil
+}
+
+func normalizeHandbookEvidencePath(value string) (string, bool) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.TrimPrefix(value, "./")
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, ":") {
+		return "", false
+	}
+	if strings.HasPrefix(value, "handbook/") {
+		value = strings.TrimPrefix(value, "handbook/")
+	}
+	clean := path.Clean(value)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", false
+	}
+	return clean, true
+}
+
+func validHandbookEvidenceDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func maintenanceChildForReconcile(snapshot goals.MaintenanceRecoverySnapshot, id, receiptID string) (goals.MaintenanceReceipt, goals.MaintenanceReceipt, string, bool) {

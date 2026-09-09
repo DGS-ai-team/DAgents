@@ -2,12 +2,14 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
@@ -33,6 +35,30 @@ func (*handbookAskClient) NormalizeAssistant(e []llm.Message, m llm.Message) llm
 }
 
 type handbookBlockingClient struct{ started chan struct{} }
+
+type handbookNoopClient struct {
+	store      *store.SQLiteStore
+	closeStore bool
+	calls      int
+}
+
+func (c *handbookNoopClient) StreamChat(_ context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if c.closeStore && c.store != nil {
+		_ = c.store.Close()
+		c.store = nil
+	}
+	if c.calls == 1 {
+		return llm.ChatResult{ToolCalls: []llm.ToolCall{{ID: "noop-write", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"handbook/guide.md","content":"stable","call_purpose":"maintain"}`}}}, FinishReason: "tool_calls"}, nil
+	}
+	return llm.ChatResult{Content: "done", FinishReason: "stop"}, nil
+}
+func (*handbookNoopClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*handbookNoopClient) NormalizeAssistant(e []llm.Message, m llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(e, m)
+}
 
 func (c *handbookBlockingClient) StreamChat(ctx context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
 	close(c.started)
@@ -94,6 +120,110 @@ func (*handbookEditClient) CompleteText(context.Context, llm.CompleteRequest) (s
 }
 func (*handbookEditClient) NormalizeAssistant(e []llm.Message, m llm.Message) llm.Message {
 	return llm.StubNormalizeAssistant(e, m)
+}
+
+func TestHandbookMaintenanceNoopPersistsExternalFact(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, _ := tools.NewRegistry(workspace, 30)
+	_ = reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"filesystem"}))
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(handbook, "guide.md"), []byte("stable"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	turnStore, err := store.Open(filepath.Join(workspace, "turn-events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turnStore.Close()
+	client := &handbookNoopClient{}
+	allow := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeNever}})
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, allow, turnStore, TurnOptions{AutoAgent: true}, logx.Discard())
+	defer mgr.Stop()
+	rt, _, err := mgr.CreateWithOptionsAndLLM("maintenance-noop", TurnOptions{AutoAgent: true}, reg, nil, client, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseCtx, release, acquired, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
+	if err != nil || !acquired {
+		t.Fatalf("gate: %v %v", acquired, err)
+	}
+	defer release()
+	var boundSession, boundTurn string
+	leaseCtx = handbookfs.WithProvenance(leaseCtx, handbookfs.Provenance{MaintenanceReceiptID: "receipt-noop", SessionID: rt.ID})
+	result, err := mgr.RunHandbookMaintenanceWithBinding(leaseCtx, rt.ID, "整理手册", turn.TurnBudget{MaxSteps: 2, MaxTotalTokens: 100}, func(sessionID, turnID string) error { boundSession, boundTurn = sessionID, turnID; return nil })
+	if err != nil || result.Changed {
+		t.Fatalf("noop result=%+v err=%v", result, err)
+	}
+	events, err := turnStore.ListTurnEventsForTurn(context.Background(), boundSession, boundTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	factCount := 0
+	for _, event := range events {
+		if event.EventType != turn.EventExternalFactRecorded {
+			continue
+		}
+		var envelope struct {
+			ExternalFactKind string `json:"external_fact_kind"`
+			ResultContent    string `json:"result_content"`
+		}
+		if err := json.Unmarshal(event.Payload, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.ExternalFactKind != "handbook.noop" {
+			continue
+		}
+		factCount++
+		if event.ToolCallID != "noop-write" || event.CommandID != "handbook-noop:"+boundTurn+":noop-write" {
+			t.Fatalf("unexpected noop event identity: tool_call_id=%q command_id=%q", event.ToolCallID, event.CommandID)
+		}
+		var fact handbookNoopFact
+		if err := json.Unmarshal([]byte(envelope.ResultContent), &fact); err != nil {
+			t.Fatal(err)
+		}
+		if fact.Version != 1 || fact.ReceiptID != "receipt-noop" || fact.SessionID != boundSession || fact.TurnID != boundTurn || fact.ToolCallID != "noop-write" || fact.ToolName != "write_file" || fact.Path != "guide.md" || fact.Digest != handbookfs.Digest([]byte("stable")) {
+			t.Fatalf("noop fact=%+v", fact)
+		}
+		found = true
+	}
+	if !found || factCount != 1 || client.calls != 2 {
+		t.Fatalf("noop fact=%v count=%d model calls=%d", found, factCount, client.calls)
+	}
+}
+
+func TestHandbookMaintenanceNoopAuditFailureCannotSucceed(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, _ := tools.NewRegistry(workspace, 30)
+	_ = reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"filesystem"}))
+	_ = reg.SetHandbookRoot(handbook)
+	if err := os.WriteFile(filepath.Join(handbook, "guide.md"), []byte("stable"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	turnStore, err := store.Open(filepath.Join(workspace, "turn-events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &handbookNoopClient{store: turnStore, closeStore: true}
+	allow := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeNever}})
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, allow, turnStore, TurnOptions{AutoAgent: true}, logx.Discard())
+	defer mgr.Stop()
+	rt, _, err := mgr.CreateWithOptionsAndLLM("maintenance-noop-failure", TurnOptions{AutoAgent: true}, reg, nil, client, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseCtx, release, acquired, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
+	if err != nil || !acquired {
+		t.Fatalf("gate: %v %v", acquired, err)
+	}
+	defer release()
+	leaseCtx = handbookfs.WithProvenance(leaseCtx, handbookfs.Provenance{MaintenanceReceiptID: "receipt-noop-failure", SessionID: rt.ID})
+	result, err := mgr.RunHandbookMaintenanceWithBinding(leaseCtx, rt.ID, "整理手册", turn.TurnBudget{MaxSteps: 2, MaxTotalTokens: 100}, func(_, _ string) error { return nil })
+	if err == nil || result.Changed || client.calls != 1 {
+		t.Fatalf("audit failure result=%+v err=%v calls=%d", result, err, client.calls)
+	}
 }
 
 func TestHandbookMaintenanceReadOnlyRoundReportsNoChange(t *testing.T) {

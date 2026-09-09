@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -20,6 +22,47 @@ type HandbookMaintenanceResult struct {
 // HandbookTurnBinding is invoked after the durable lifecycle has assigned the
 // real turn ID and before any model request is made.
 type HandbookTurnBinding func(sessionID, turnID string) error
+
+type handbookNoopFact struct {
+	Version    int    `json:"version"`
+	ReceiptID  string `json:"receipt_id"`
+	SessionID  string `json:"session_id"`
+	TurnID     string `json:"turn_id"`
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+	Path       string `json:"path"`
+	Digest     string `json:"digest"`
+}
+
+func (r *runtime) recordHandbookNoop(ctx context.Context, noop tools.HandbookNoop) error {
+	if r == nil || r.store == nil {
+		return fmt.Errorf("handbook no-op audit store unavailable")
+	}
+	provenance, ok := handbookfs.ProvenanceFromContext(ctx)
+	if !ok || provenance.MaintenanceReceiptID == "" || provenance.SessionID != r.session.ID || provenance.TurnID == "" {
+		return fmt.Errorf("handbook no-op provenance is missing or mismatched")
+	}
+	if noop.ToolCallID == "" || noop.ToolName == "" || noop.Path == "" || noop.Digest == "" {
+		return fmt.Errorf("handbook no-op identity is incomplete")
+	}
+	state := r.turnCoordinator.Snapshot()
+	if !state.HasActiveTurn || state.TurnID != provenance.TurnID || state.StepID == "" {
+		return fmt.Errorf("handbook no-op requires an active turn step")
+	}
+	fact := handbookNoopFact{Version: 1, ReceiptID: provenance.MaintenanceReceiptID, SessionID: r.session.ID, TurnID: state.TurnID, ToolCallID: noop.ToolCallID, ToolName: noop.ToolName, Path: noop.Path, Digest: noop.Digest}
+	payload, err := json.Marshal(fact)
+	if err != nil {
+		return fmt.Errorf("marshal handbook no-op audit: %w", err)
+	}
+	_, err = r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandExternalFactRecorded, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID,
+		Generation: state.Generation, CommandID: "handbook-noop:" + state.TurnID + ":" + noop.ToolCallID,
+		ExternalFactID:   "handbook-noop:" + noop.ToolCallID,
+		ExternalFactKind: "handbook.noop", ToolCallID: noop.ToolCallID, ToolName: noop.ToolName,
+		ResultContent: string(payload), Payload: payload, At: time.Now().UTC(), Reason: "handbook_noop_recorded",
+	})
+	return err
+}
 
 // RunHandbookMaintenance executes one real Agent turn while the caller holds
 // the maintenance gate. It deliberately does not acquire a gate itself.
@@ -96,6 +139,9 @@ func (m *Manager) RunHandbookMaintenanceWithBinding(ctx context.Context, session
 	}
 	historyStart := r.lifecycleHistoryLength()
 	maintCtx := tools.WithHandbookMaintenance(ctx)
+	maintCtx = tools.WithHandbookNoopRecorder(maintCtx, func(noopCtx context.Context, noop tools.HandbookNoop) error {
+		return r.recordHandbookNoop(noopCtx, noop)
+	})
 	outcome, history := r.runTurnStepWithSideEffects(maintCtx, false, func(stepCtx context.Context, h *[]llm.Message) turn.StepOutcome {
 		return r.orch.RunHumanMessageTurn(stepCtx, r.session.ID, h, user)
 	})
