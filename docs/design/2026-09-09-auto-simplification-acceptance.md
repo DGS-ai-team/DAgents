@@ -319,3 +319,10 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 仅通过正式PATCH给隔离Agent启用bash工具组，未改变审批策略。相同标记脚本批准delivery cc227864-1ea4-4bd7-8141-edf9727de816后确实创建文件；SQLite工具结果为[BASH_RESULT]、status=FAILED、exit_code=1、stderr_bytes=0，首次获得实际非零退出码证据。
 - 将该标记移为同目录approved-control-evidence.txt保留正对照，再执行相同trigger并拒绝delivery 5b2e9a6e-589f-48c1-88df-fdf08e1b8172；结束后原标记未重建，正对照存在，transcript空、active/queue/pending_hitl均空。拒绝不执行脚本证据成立。
 - 拒绝/执行错误历史分类修复仍在开发，尚未部署或宣告通过；隔离实例保留供后续复验。
+
+### 2026-09-10 条件分类修复与最新Node部署
+
+- `55f2103f` 已构建为 `dagents-node-55f2103f.exe`。定向 Go race 覆盖拒绝/条件 false 区分、禁用 `bash_run` 执行错误、调度错误分类及真实 HTTP 拒绝历史，三个相关包通过。
+- 替换前通过 18766 hydrate 核对 `agt-9ea36189d2221ea1` 与 `agt-86cd2b08565d2c10`：均无 active turn、排队消息或 pending HITL。未清理数据库、配置或夹具。
+- 18766 已切换至新二进制，进程 PID 25660，健康检查与 `/ui/` 均返回 200，trigger 列表可只读访问。运行时仍使用原隔离 Auto UI runtime 目录；监听使用临时 bootstrap 副本恢复原 18766 端口，原 `config.yaml` 未改动。
+- 条件脚本结论保持保守：未把此前未启用 `bash_run` 的结果写成真实 false 路径；隔离库中该情况是执行错误。启用工具后的非零退出码与拒绝对照已记录，但本次只部署分类修复，未触发生产 Auto。
