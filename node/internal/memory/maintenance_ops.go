@@ -166,6 +166,14 @@ func (s *LocalService) ApplyMaintenanceOperation(ctx context.Context, op Mainten
 	return results, nil
 }
 
+// GetMaintenanceCursor returns the durable cursor for this service's scope.
+func (s *LocalService) GetMaintenanceCursor(ctx context.Context) (MaintenanceCursor, error) {
+	if s == nil || s.agent == nil {
+		return MaintenanceCursor{}, fmt.Errorf("memory service unavailable")
+	}
+	return s.agent.GetMaintenanceCursor(ctx, s.agentID)
+}
+
 func (s *Store) consolidateCandidateTx(ctx context.Context, tx *sql.Tx, req RememberRequest) (WriteResult, error) {
 	req.Scope = ScopeAgent
 	req.Tier = TierRecall

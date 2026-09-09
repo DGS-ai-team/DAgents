@@ -48,6 +48,26 @@ func TestCreateAndList(t *testing.T) {
 	}
 }
 
+func TestMaintenanceLeaseBlocksChatAndReleases(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+	s, _, err := mgr.Create("goal-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, acquired, err := mgr.TryAcquireMaintenance(context.Background(), "agent-1")
+	if err != nil || !acquired || release == nil {
+		t.Fatalf("lease acquired=%v err=%v", acquired, err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "must wait", nil, nil, ""); err != nil {
+		t.Fatalf("chat enqueue during maintenance err=%v", err)
+	}
+	release()
+	if _, acquired, err := mgr.TryAcquireMaintenance(context.Background(), "agent-1"); err != nil || acquired {
+		t.Fatalf("lease reacquired while queued chat acquired=%v err=%v", acquired, err)
+	}
+}
+
 func TestEnqueueMessageTurn(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg, _ := tools.NewRegistry(t.TempDir(), 30)

@@ -249,6 +249,15 @@ func (b *InputBox) Len() int {
 	return len(b.items)
 }
 
+func (b *InputBox) HasInFlight() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.inFlight != nil
+}
+
 // Snapshot returns the durable FIFO tail.  The monotonic sequence is stored
 // even when Items is empty, so a restart can never reuse an input sequence.
 func (b *InputBox) Snapshot() json.RawMessage {

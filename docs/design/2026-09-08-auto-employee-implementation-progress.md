@@ -8,6 +8,7 @@
 
 - 每日日程与 occurrence 已提交 `b2a933e8`：维护专属 revision/epoch、重复 tick 去重、仅恢复重开时既存 pending、跨日未决阻断、真实 enable_auto 生效起点和 DST。独立 Goals 全包 race 通过（2.191s）。尚未接入生产每日 controller，不将日程存储当作已完成定时维护。
 - 手册版本化底座独立 Memory 全包 race 通过（13.923s）：Agent scope SQLite、绑定身份的服务、不可变返回快照、expected revision CAS、历史与回滚生成新版本、失败验证保留 current。SQLite INSERT 故障注入证明清除 current 与新版本写入整体回滚。尚未接入真实提取、来源语义验证、运行时提示词或 UI，不能称为已完成自我改进。
+- 共享执行槽和手动维护 API 已完成独立验收：按可信 Agent ID 跨 runtime 共享 gate，consumer 领取输入/控制记录与维护领取原子协调；新输入取消维护但等待真实退出才释放，其他 Agent 不受阻塞。空闲压缩沿用同一 gate，卸载 runtime 清理登记。全 Session race 通过（22.466s），排除 Windows 截屏项的全 API race 通过（49.270s）；维护 API 定向 race 通过（3.320s），真实 counting LLM 验证取消后未退出期间聊天调用为零、退出后继续。聊天先进入 gated LLM 时拒绝维护的反向 race 通过（1.491s）。OpenAPI 解析与 58 个内部引用检查通过。此处仍是注入模型集成测试，生产每日 controller 与真实配置 LLM 维护验收继续保留。
 - 完成快照已提交 `d0c7f416`：完成事件与维护输入同一事务，普通与快照写入共用完整命令/序列校验，重放返回原事件且不覆盖快照。独立 Store/Session 全包 race 通过（5.204s / 20.025s），包含实际会话写入、重开、SQLite 故障整体回滚、命令冲突与序列缺口验证。
 - 维护 runner 已提交 `22cde74e`：持久化候选与实际用量，先恢复待结算记录再读取新增日志；同 receipt 只有领取者调用模型。独立 Memory 全包 race 通过（8.943s），包含写记忆失败后重开、记忆 cursor 已推进而用量结算失败后重开，以及双实例并发仅提取一次。生产每日调度与聊天共享执行槽仍待完成。
 - 事件源设置与健康接口已提交 `eaeeeb30`：独立 API DTO 保持旧磁盘模型，旧客户端字段兼容；旧注册存档重开保留 owner。主 Agent 独立全部 Event API race 通过（4.435s）、最终 HTTP 契约 race 通过（1.886s）、事件源前端 10 项测试通过；OpenAPI YAML 解析及 49 个内部引用检查通过。实际桌面事件源输入、按钮及分隔线复验协调；旧验收 Node 接口仍为 404，只证明布局/错误态，不宣称前后端真实联调通过。

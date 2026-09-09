@@ -64,7 +64,8 @@ type runtime struct {
 	// 子 runtime 则可能是 RelayHub；生命周期状态必须沿同一出口发布。
 	publisher stream.Publisher
 	// 代理 ID
-	agentID string
+	agentID       string
+	executionGate *agentExecutionGate
 	// 日志
 	logger *slog.Logger
 
@@ -562,7 +563,16 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		// Control/continuation records are drained before a new external input.
 		// A human or trigger arriving while HITL is pending therefore stays in
 		// InputBox and cannot preempt the active Turn.
-		if r.queue.Len() > 0 {
+		if r.executionGate != nil {
+			if env, ok := r.executionGate.claimControl(ctx, r); ok {
+				if r.acceptEnvelope(env) {
+					r.dispatchTurnRequest(ctx, env)
+				}
+				r.executionGate.finishDispatch()
+				r.signalInputBox()
+				continue
+			}
+		} else if r.queue.Len() > 0 {
 			env, err := r.queue.Dequeue(ctx)
 			if err != nil {
 				return
@@ -573,7 +583,28 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 			r.signalInputBox()
 			continue
 		}
-		if record, ok := r.popInputIfIdle(); ok {
+		if r.executionGate != nil {
+			blocked, gateWake := r.executionGate.waitSnapshot()
+			if !blocked {
+				goto claimInput
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.inputBox.Wake():
+			case <-gateWake:
+			}
+			continue
+		}
+	claimInput:
+		var record InputRecord
+		var ok bool
+		if r.executionGate != nil {
+			record, ok = r.executionGate.claimInput(r)
+		} else {
+			record, ok = r.popInputIfIdle()
+		}
+		if ok {
 			// Persist the ownership transfer before executing the Turn. If the
 			// process stops during a tool call, startup can recover this input
 			// alongside the lifecycle projection instead of replaying it after
@@ -583,6 +614,9 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 				// Put the record back and fail closed; retrying in a hot loop can
 				// spin forever while the persistence backend is unavailable.
 				r.inputBox.RequeueInFlight()
+				if r.executionGate != nil {
+					r.executionGate.finishDispatch()
+				}
 				return
 			}
 			consumed := true
@@ -600,12 +634,21 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 						// record. Stop before consuming another input; otherwise a
 						// later turn could overwrite that recovery boundary.
 						r.inputBox.RestoreCompletedInFlight(record)
+						if r.executionGate != nil {
+							r.executionGate.finishDispatch()
+						}
 						return
 					}
 				} else {
 					// Keep the completed in-flight guard and fail closed.
+					if r.executionGate != nil {
+						r.executionGate.finishDispatch()
+					}
 					return
 				}
+			}
+			if r.executionGate != nil {
+				r.executionGate.finishDispatch()
 			}
 			r.signalInputBox()
 			continue
@@ -621,6 +664,7 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 			if r.inputBox.Closed() {
 				return
 			}
+		case <-r.executionWake():
 		}
 	}
 }
@@ -629,6 +673,13 @@ func (r *runtime) signalInputBox() {
 	if r != nil && r.inputBox != nil {
 		r.inputBox.Signal()
 	}
+}
+
+func (r *runtime) executionWake() <-chan struct{} {
+	if r == nil || r.executionGate == nil {
+		return nil
+	}
+	return r.executionGate.Wake()
 }
 
 func (r *runtime) popInputIfIdle() (InputRecord, bool) {
@@ -1250,6 +1301,9 @@ func (r *runtime) appendInput(kind InputKind, env queue.Envelope) (uint64, error
 	}
 	seq, err := r.inputBox.Append(kind, env)
 	if err == nil {
+		if r.executionGate != nil {
+			r.executionGate.notifyInput()
+		}
 		// Persist the accepted tail before the consumer starts processing it.
 		// This preserves inputs accepted while a Turn is waiting for approval.
 		r.persist(context.Background())

@@ -48,6 +48,59 @@ paths:
       responses:
         "200":
           description: 已归档
+  /v1/agents/{agent_id}/maintenance:
+    get:
+      summary: 获取 Agent 手动维护配置与累计用量
+      description: |
+        未配置岗位时返回 configured=false；usage 是该 Agent 的累计维护用量，不是单次请求用量。
+        手动维护已实现，日程自动 controller 尚未接入本接口契约。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 维护配置
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentMaintenance" }
+        "404": { description: Agent 不存在或不是 Auto Agent }
+        "503": { description: goal store 不可用 }
+    patch:
+      summary: 更新 Agent 手动维护配置
+      description: 使用岗位 profile revision 做 CAS 更新；必须提供 expected_revision。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentMaintenancePatch" }
+      responses:
+        "200":
+          description: 已更新，返回递增后的 profile revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentMaintenancePatchResponse" }
+        "400": { description: JSON、expected_revision 缺失或维护配置无效 }
+        "404": { description: Agent 不存在、不是 Auto Agent 或岗位未配置 }
+        "409": { description: expected_revision 冲突 }
+        "503": { description: goal store 不可用 }
+  /v1/agents/{agent_id}/maintenance/run:
+    post:
+      summary: 手动运行一次维护
+      description: |
+        运行一次已启用的手动维护并返回累计用量。运行中的维护、聊天或业务运行会被拒绝。
+        日程自动触发尚未接入；此操作不会创建或返回 next_at。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 维护完成
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentMaintenanceRunResponse" }
+        "404": { description: Agent 不存在或不是 Auto Agent }
+        "409": { description: 维护未启用、Agent 忙、需要 usage recovery 或维护失败 }
+        "503": { description: goal store、LLM 或维护持久化不可用 }
   /v1/agents/{agent_id}/event-sources:
     get:
       summary: 列出该 Auto Agent 的事件源及健康状态
@@ -1347,6 +1400,39 @@ components:
         unknown: {type: boolean}
         unknown_reason: {type: string}
         updated_at: {type: string, format: date-time}
+    AgentMaintenance:
+      type: object
+      required: [configured, maintenance_enabled, maintenance_schedule, timezone]
+      properties:
+        configured: {type: boolean}
+        profile_revision: {type: integer, format: int64, description: 岗位 profile 的当前 revision；未配置时省略}
+        maintenance_enabled: {type: boolean}
+        maintenance_schedule: {type: string, description: "维护计划字符串，例如 daily 09:00"}
+        timezone: {type: string}
+        usage: {$ref: '#/components/schemas/AgentUsage'}
+    AgentMaintenancePatch:
+      type: object
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 0}
+        maintenance_enabled: {type: boolean}
+        maintenance_schedule: {type: string}
+        timezone: {type: string}
+    AgentMaintenancePatchResponse:
+      type: object
+      required: [profile_revision, maintenance_enabled, maintenance_schedule, timezone]
+      properties:
+        profile_revision: {type: integer, format: int64}
+        maintenance_enabled: {type: boolean}
+        maintenance_schedule: {type: string}
+        timezone: {type: string}
+    AgentMaintenanceRunResponse:
+      type: object
+      required: [status, sequence, usage]
+      properties:
+        status: {type: string, enum: [completed]}
+        sequence: {type: integer, format: int64, description: 本次处理进度序号}
+        usage: {$ref: '#/components/schemas/AgentUsage', description: Agent 累计用量}
     AutonomyResponse:
       type: object
       required: [status, schema_version, profile, usage]

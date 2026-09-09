@@ -25,6 +25,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -40,50 +41,51 @@ import (
 
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
-	cfg             *config.Config
-	configPath      string
-	llmRuntime      *llm.RuntimeSettings
-	defaultLLM      llm.Client
-	llmInjected     bool
-	logger          *slog.Logger
-	mux             *http.ServeMux
-	sessions        *session.Manager // per-session queue and turn consumer
-	agents          *store.AgentStore
-	mcpServers      *store.MCPServerStore
-	mcpManager      *mcp.Manager
-	linuxChannels   *store.LinuxChannelStore
-	linuxProvider   *tools.LinuxShellProvider
-	llmConfigs      *store.LLMConfigStore
-	nodeSettings    *store.NodeSettingsStore
-	stream          *stream.Hub // 进程内 SSE 事件总线
-	transferStream  *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）
-	workgroupStream *stream.Hub // Manage 工作组 Timeline + 实时协作事件
-	store           *store.SQLiteStore
-	triggerStore    *triggers.Store
-	triggerSched    *triggers.Scheduler
-	startupErr      error
-	goalStore       *goals.Store
-	eventStore      *events.Store
-	goalWake        goals.WakeFunc
-	goalWakeMu      sync.Mutex
-	registrar       *manage.Registrar
-	updateChecker   *manage.UpdateChecker
-	packageUploader *manage.PackageUploader
-	control         *manage.ControlClient
-	feedbackStore   *store.FeedbackStore
-	feedbackRateMu  sync.Mutex
-	feedbackRate    map[string][]time.Time
-	tools           *tools.Registry
-	workspaceCoord  *workspacecoord.Coordinator
-	transfers       *tools.LinuxTransferManager
-	browserMu       sync.RWMutex
-	browserMgr      *browser.Manager
-	mediaRegister   tools.MediaRegisterFunc
-	workgroupWorker *workgroup.Worker
-	workgroupDialer *workgroup.Dialer
-	workgroupAgents *workgroupAgentBridge
-	terminals       *terminalSessionRegistry
-	desktopBridge   *desktopbridge.Client
+	cfg                  *config.Config
+	configPath           string
+	llmRuntime           *llm.RuntimeSettings
+	defaultLLM           llm.Client
+	maintenanceExtractor memory.MaintenanceUsageExtractor
+	llmInjected          bool
+	logger               *slog.Logger
+	mux                  *http.ServeMux
+	sessions             *session.Manager // per-session queue and turn consumer
+	agents               *store.AgentStore
+	mcpServers           *store.MCPServerStore
+	mcpManager           *mcp.Manager
+	linuxChannels        *store.LinuxChannelStore
+	linuxProvider        *tools.LinuxShellProvider
+	llmConfigs           *store.LLMConfigStore
+	nodeSettings         *store.NodeSettingsStore
+	stream               *stream.Hub // 进程内 SSE 事件总线
+	transferStream       *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）
+	workgroupStream      *stream.Hub // Manage 工作组 Timeline + 实时协作事件
+	store                *store.SQLiteStore
+	triggerStore         *triggers.Store
+	triggerSched         *triggers.Scheduler
+	startupErr           error
+	goalStore            *goals.Store
+	eventStore           *events.Store
+	goalWake             goals.WakeFunc
+	goalWakeMu           sync.Mutex
+	registrar            *manage.Registrar
+	updateChecker        *manage.UpdateChecker
+	packageUploader      *manage.PackageUploader
+	control              *manage.ControlClient
+	feedbackStore        *store.FeedbackStore
+	feedbackRateMu       sync.Mutex
+	feedbackRate         map[string][]time.Time
+	tools                *tools.Registry
+	workspaceCoord       *workspacecoord.Coordinator
+	transfers            *tools.LinuxTransferManager
+	browserMu            sync.RWMutex
+	browserMgr           *browser.Manager
+	mediaRegister        tools.MediaRegisterFunc
+	workgroupWorker      *workgroup.Worker
+	workgroupDialer      *workgroup.Dialer
+	workgroupAgents      *workgroupAgentBridge
+	terminals            *terminalSessionRegistry
+	desktopBridge        *desktopbridge.Client
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex

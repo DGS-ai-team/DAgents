@@ -56,6 +56,7 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		loadedSkills,
 		m.children,
 	)
+	m.bindMaintenanceGate(rt)
 	m.sessions[spec.ChildAgentID] = rt
 	rt.start(m.ctx)
 	return nil

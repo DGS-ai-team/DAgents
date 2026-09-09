@@ -158,9 +158,10 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu       sync.RWMutex
-	sessions map[string]*runtime
-	logger   *slog.Logger
+	mu               sync.RWMutex
+	sessions         map[string]*runtime
+	maintenanceGates map[string]*agentExecutionGate
+	logger           *slog.Logger
 
 	mediaOnlyMu sync.Mutex
 	mediaOnly   map[string]*media.Registry
@@ -206,18 +207,91 @@ func NewManager(
 		turnOpts.MaxModelRetries = 2
 	}
 	return &Manager{
-		agentID:  agentID,
-		hub:      hub,
-		llm:      llmClient,
-		tools:    registry,
-		policy:   policyEngine,
-		store:    st,
-		turn:     turnOpts,
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: make(map[string]*runtime),
-		logger:   logx.OrDefault(logger),
+		agentID:          agentID,
+		hub:              hub,
+		llm:              llmClient,
+		tools:            registry,
+		policy:           policyEngine,
+		store:            st,
+		turn:             turnOpts,
+		ctx:              ctx,
+		cancel:           cancel,
+		sessions:         make(map[string]*runtime),
+		maintenanceGates: make(map[string]*agentExecutionGate),
+		logger:           logx.OrDefault(logger),
 	}
+}
+
+// TryAcquireMaintenance atomically reserves an Agent's execution slot when
+// its chat runtime is idle. Callers must invoke release; cancellation before
+// acquisition is reported without changing state.
+func (m *Manager) TryAcquireMaintenance(ctx context.Context, agentID string) (release func(), acquired bool, err error) {
+	if m == nil || strings.TrimSpace(agentID) == "" {
+		return nil, false, fmt.Errorf("agent id is required")
+	}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		default:
+		}
+	}
+	id := strings.TrimSpace(agentID)
+	m.mu.Lock()
+	g := m.maintenanceGates[id]
+	if g == nil {
+		g = newAgentExecutionGate()
+		m.maintenanceGates[id] = g
+	}
+	m.mu.Unlock()
+	base, cancel := context.WithCancel(m.ctx)
+	stop := func() {}
+	if ctx != nil {
+		after := context.AfterFunc(ctx, cancel)
+		stop = func() { after() }
+	}
+	actualRelease, acquired, err := g.acquireMaintenance(base)
+	if !acquired || err != nil {
+		stop()
+		cancel()
+		return nil, acquired, err
+	}
+	var once sync.Once
+	return func() { once.Do(func() { stop(); cancel(); actualRelease() }) }, acquired, err
+}
+
+func (m *Manager) TryAcquireMaintenanceContext(ctx context.Context, agentID string) (context.Context, func(), bool, error) {
+	if m == nil || strings.TrimSpace(agentID) == "" {
+		return nil, nil, false, fmt.Errorf("agent id is required")
+	}
+	id := strings.TrimSpace(agentID)
+	m.mu.Lock()
+	g := m.maintenanceGates[id]
+	if g == nil {
+		g = newAgentExecutionGate()
+		m.maintenanceGates[id] = g
+	}
+	m.mu.Unlock()
+	base, cancel := context.WithCancel(m.ctx)
+	stop := func() {}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			cancel()
+			return nil, nil, false, ctx.Err()
+		default:
+		}
+		after := context.AfterFunc(ctx, cancel)
+		stop = func() { after() }
+	}
+	leaseCtx, actualRelease, acquired, err := g.acquireMaintenanceContext(base)
+	if !acquired || err != nil {
+		stop()
+		cancel()
+		return nil, nil, acquired, err
+	}
+	var once sync.Once
+	return leaseCtx, func() { once.Do(func() { stop(); cancel(); actualRelease() }) }, acquired, err
 }
 
 // SetMultimodalEnabled 仅更新 Manager 默认 TurnOptions 与默认 Registry。
@@ -410,6 +484,7 @@ func (m *Manager) createWithOptions(
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	m.bindMaintenanceGate(rt)
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -516,6 +591,7 @@ func (m *Manager) replaceWithOptions(
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	m.bindMaintenanceGate(rt)
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
@@ -523,6 +599,9 @@ func (m *Manager) replaceWithOptions(
 	m.mu.Unlock()
 
 	if old != nil {
+		if old.executionGate != nil {
+			old.executionGate.unregister(old)
+		}
 		old.stop()
 	}
 	if created {
@@ -530,6 +609,19 @@ func (m *Manager) replaceWithOptions(
 	}
 	m.logger.Info("session replaced", "session_id", id, "had_previous_runtime", old != nil)
 	return &rt.session, created, nil
+}
+
+func (m *Manager) bindMaintenanceGate(rt *runtime) {
+	if rt == nil {
+		return
+	}
+	g := m.maintenanceGates[rt.agentID]
+	if g == nil {
+		g = newAgentExecutionGate()
+		m.maintenanceGates[rt.agentID] = g
+	}
+	rt.executionGate = g
+	g.register(rt)
 }
 
 // Create 创建或复用 session；若 DB 中已有则加载历史并启动 consumer。
@@ -553,6 +645,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 		rt.restoreInputBoxState(restore.InputBoxState)
 		rt.reconcileRestoredInputBox()
+		m.bindMaintenanceGate(rt)
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
@@ -575,6 +668,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, false, 0, 0, m.turn, m.triggerDelivery)
+	m.bindMaintenanceGate(rt)
 	m.sessions[newID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -958,6 +1052,9 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 	}
 	m.mu.Unlock()
 	if ok {
+		if rt.executionGate != nil {
+			rt.executionGate.unregister(rt)
+		}
 		rt.stop()
 	}
 	m.logger.Info("session deleted from memory", "session_id", sid, "was_active", wasActive)
@@ -1008,11 +1105,14 @@ func (m *Manager) enqueueMessage(
 	resumeValue map[string]any,
 	userMessageName string,
 ) (priority string, err error) {
-	rt := m.getRuntime(sessionID)
+	m.mu.RLock()
+	rt := m.sessions[strings.TrimSpace(sessionID)]
 	if rt == nil {
+		m.mu.RUnlock()
 		m.logger.Warn("enqueue message session not found", "session_id", sessionID)
 		return "", fmt.Errorf("agent_not_found")
 	}
+	m.mu.RUnlock()
 	m.logger.Debug("enqueue message",
 		"session_id", sessionID,
 		"request_type", requestType,
