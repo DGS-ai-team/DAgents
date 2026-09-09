@@ -462,6 +462,9 @@ function handleEvent(ev) {
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
       refreshContextTokens();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("dagents:agent-turn-finished", { detail: { agentId: conversationId.value } }));
+      }
       break;
     case "resync_required":
       void resyncAfterSSEGap("server-resync");

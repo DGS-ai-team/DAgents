@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
 const props = defineProps({ agentId: { type: String, required: true } });
@@ -62,14 +62,28 @@ function remove(todo) {
     .finally(() => { if (current(id, token)) saving.value = false; });
 }
 function reload() { if (!saving.value) load(); }
+function onAgentTurnFinished(event) {
+  if (!open.value || !loaded.value || saving.value) return;
+  if (String(event?.detail?.agentId || "").trim() !== String(props.agentId || "").trim()) return;
+  load();
+}
 function recoverDraft(item) { draft.value = item.text; }
+function toggleOpen() {
+  open.value = !open.value;
+  // Todo tools can update the server while this panel stays mounted and
+  // collapsed. Reconcile when the user opens it again without touching local
+  // drafts or issuing a request during the initial load.
+  if (open.value && loaded.value && !saving.value) load();
+}
 watch(() => props.agentId, () => load({ switching: true }), { immediate: true });
+onMounted(() => window.addEventListener("dagents:agent-turn-finished", onAgentTurnFinished));
 onBeforeUnmount(() => { epoch += 1; });
+onBeforeUnmount(() => window.removeEventListener("dagents:agent-turn-finished", onAgentTurnFinished));
 </script>
 
 <template>
   <section class="auto-todo-panel">
-    <button class="auto-todo-panel__heading" type="button" :aria-expanded="open" @click="open = !open"><span><span class="settings-kicker">Auto 专属</span><strong>待办事项</strong></span><span aria-hidden="true">{{ open ? "⌃" : "⌄" }}</span></button>
+    <button class="auto-todo-panel__heading" type="button" :aria-expanded="open" @click="toggleOpen"><span><span class="settings-kicker">Auto 专属</span><strong>待办事项</strong></span><span aria-hidden="true">{{ open ? "⌃" : "⌄" }}</span></button>
     <div v-if="open" class="auto-todo-panel__body">
       <p v-if="error" class="error" role="alert">{{ error }} <button type="button" class="btn btn--ghost" :disabled="saving || loading" @click="reload">重试</button></p>
       <p v-if="conflict" class="error" role="alert">{{ conflict }} <button type="button" class="btn btn--ghost" :disabled="saving" @click="reload">重新加载</button></p>

@@ -29,6 +29,30 @@ describe("AutoTodoPanel", () => {
     expect(wrapper.get('input[aria-label="待办文本"]').element.value).toBe("更新");
   });
 
+  it("refreshes server todos when reopening after a model update", async () => {
+    const wrapper = mount(AutoTodoPanel, { props: { agentId: "a1" } });
+    await flushPromises();
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
+    await flushPromises();
+    expect(api.listAgentTodos).toHaveBeenCalledTimes(2);
+    api.listAgentTodos.mockResolvedValueOnce({ todos: [{ id: "t2", text: "模型新增", status: "completed", revision: 2 }] });
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
+    await flushPromises();
+    expect(wrapper.get('input[aria-label="待办文本"]').element.value).toBe("模型新增");
+  });
+
+  it("refreshes an open panel after the current Agent turn finishes", async () => {
+    const wrapper = mount(AutoTodoPanel, { props: { agentId: "event-a1" } });
+    await flushPromises();
+    await wrapper.get(".auto-todo-panel__heading").trigger("click");
+    await flushPromises();
+    api.listAgentTodos.mockResolvedValueOnce({ todos: [{ id: "t3", text: "工具刚更新", status: "completed", revision: 2 }] });
+    window.dispatchEvent(new CustomEvent("dagents:agent-turn-finished", { detail: { agentId: "event-a1" } }));
+    await flushPromises();
+    expect(wrapper.get('input[aria-label="待办文本"]').element.value).toBe("工具刚更新");
+  });
+
   it("shows CAS conflict and keeps the draft", async () => {
     api.updateAgentTodo.mockRejectedValueOnce(Object.assign(new Error("conflict"), { status: 409 }));
     const wrapper = mount(AutoTodoPanel, { props: { agentId: "a1" } });
