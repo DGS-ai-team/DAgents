@@ -159,9 +159,6 @@ export function getAgent(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
-export function getAgentRiskObservations(agentId, { signal } = {}) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/risk-observations`, { signal });
-}
 export function getAgentHandbook(agentId, path = "") {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook`, { params: { path } });
 }
