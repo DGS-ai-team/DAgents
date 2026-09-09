@@ -246,8 +246,9 @@ func (h *sessionHookHost) LLMComplete(ctx context.Context, req hooks.LLMComplete
 	h.state.mu.Unlock()
 
 	request := llm.CompleteRequest{
-		SystemPrompt: systemPrompt,
-		UserPrompt:   req.UserPrompt,
+		SystemPrompt:    systemPrompt,
+		UserPrompt:      req.UserPrompt,
+		MaxOutputTokens: req.MaxOutputTokens,
 	}
 	if usageClient, ok := h.o.llm.(llm.CompletionWithUsageClient); ok {
 		text, usage, err := usageClient.CompleteTextWithUsage(ctx, request)

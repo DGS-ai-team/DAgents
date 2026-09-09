@@ -83,8 +83,9 @@ type StreamHandler struct {
 
 // CompleteRequest 为非流式补全请求（摘要压缩等）。
 type CompleteRequest struct {
-	SystemPrompt string
-	UserPrompt   string
+	SystemPrompt    string
+	UserPrompt      string
+	MaxOutputTokens int // 0 preserves provider default; negative values are invalid.
 }
 
 // Client 为可替换的 LLM 客户端（生产 OpenAI / DeepSeek / 测试 Mock）。

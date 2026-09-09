@@ -323,8 +323,9 @@ func appendReasoningDetail(full *strings.Builder, detail string) string {
 }
 
 type completeRequestBody struct {
-	Model    string           `json:"model"`
-	Messages []map[string]any `json:"messages"`
+	Model           string           `json:"model"`
+	Messages        []map[string]any `json:"messages"`
+	MaxOutputTokens int              `json:"max_tokens,omitempty"`
 }
 
 type completeResponseBody struct {
@@ -344,6 +345,9 @@ func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (s
 // usage when present. Providers are allowed to omit usage, represented by a
 // nil pointer rather than a fabricated zero-valued Usage.
 func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error) {
+	if req.MaxOutputTokens < 0 {
+		return "", nil, fmt.Errorf("max output tokens cannot be negative")
+	}
 	if strings.TrimSpace(c.cfg.Model) == "" {
 		return "", nil, fmt.Errorf("llm model is not configured")
 	}
@@ -355,9 +359,15 @@ func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRe
 	if err != nil {
 		return "", nil, err
 	}
-	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads}, c.cfg.RequestExtra)
+	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads, MaxOutputTokens: req.MaxOutputTokens}, c.cfg.RequestExtra)
 	if err != nil {
 		return "", nil, err
+	}
+	if req.MaxOutputTokens > 0 {
+		body, err = clampCompletionTokenLimit(body, req.MaxOutputTokens)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -482,6 +492,26 @@ func marshalChatRequest(body any, extra map[string]any) ([]byte, error) {
 		return nil, err
 	}
 	return mergeRequestExtra(raw, extra)
+}
+
+func clampCompletionTokenLimit(body []byte, limit int) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	if v, ok := payload["max_completion_tokens"].(float64); ok && v >= 0 && int(v) < limit {
+		limit = int(v)
+	}
+	if v, ok := payload["max_tokens"].(float64); ok && v >= 0 && int(v) < limit {
+		limit = int(v)
+	}
+	if _, hasCompletion := payload["max_completion_tokens"]; hasCompletion {
+		payload["max_completion_tokens"] = limit
+		delete(payload, "max_tokens")
+	} else {
+		payload["max_tokens"] = limit
+	}
+	return json.Marshal(payload)
 }
 
 func marshalChatRequestMap(body map[string]any, extra map[string]any) ([]byte, error) {
