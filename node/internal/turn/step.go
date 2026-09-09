@@ -17,4 +17,7 @@ type StepOutcome struct {
 	ConditionToolCallID  string
 	ConditionExecutionID string
 	ConditionResult      string
+	// NoWork marks the trusted auto_idle control tool; it is never inferred
+	// from assistant text or from an ordinary successful turn.
+	NoWork bool
 }

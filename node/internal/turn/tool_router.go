@@ -24,6 +24,22 @@ func (o *Orchestrator) processToolCalls(
 	history *[]llm.Message,
 	calls []llm.ToolCall,
 ) (*PendingHITL, string, error) {
+	for _, tc := range calls {
+		if strings.TrimSpace(tc.Function.Name) == "auto_idle" {
+			if len(calls) != 1 {
+				return nil, "", fmt.Errorf("auto_idle must be the only tool call in a batch")
+			}
+			if !tools.TrustedAutoIdleAvailable(ctx) || tools.TrustedAutoIdleAgentID(ctx) != o.agentID {
+				return nil, "", fmt.Errorf("auto_idle is unavailable outside a trusted system auto activation")
+			}
+			if !o.autoIdleEligible(sessionID) {
+				return nil, "", fmt.Errorf("auto_idle is unavailable after a side effect or failed tool")
+			}
+			if err := tools.ValidateAutoIdleArguments([]byte(tc.Function.Arguments)); err != nil {
+				return nil, "", err
+			}
+		}
+	}
 	if o.toolBudgetCheck != nil {
 		allowed, reason := o.toolBudgetCheck(sessionID)
 		if !allowed {
@@ -37,6 +53,7 @@ func (o *Orchestrator) processToolCalls(
 		}
 	}
 	var autoCalls []llm.ToolCall
+	autoIdleCall := false
 	var approvalCalls []pendingApprovalCall
 	var userInfo *llm.ToolCall
 	var memoryConflicts []PendingHITLItem
@@ -47,6 +64,9 @@ func (o *Orchestrator) processToolCalls(
 		}
 		o.publishToolCall(sessionID, tc, false, i)
 		o.recordToolCall(sessionID, tc.Function.Name)
+		if strings.TrimSpace(tc.Function.Name) != "auto_idle" && !autoIdleReadOnlyTool(tc.Function.Name) {
+			o.markAutoIdleIneligible(sessionID)
+		}
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
 			if tools.GoalIDFromContext(ctx) != "" {
@@ -121,10 +141,12 @@ func (o *Orchestrator) processToolCalls(
 		o.submitRiskObservation(sessionID, tc, decision)
 		switch decision.Action {
 		case policy.ActionDeny:
+			o.markAutoIdleIneligible(sessionID)
 			msg := hooks.ToolDenyMessage(decision)
 			o.publishToolResult(sessionID, tc, msg, true, nil)
 			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		case policy.ActionRequireApproval:
+			o.markAutoIdleIneligible(sessionID)
 			item := pendingApprovalCall{tc: tc}
 			if decision.ApprovalSubtype == hooks.ApprovalSubtypeDuplicateToolCall && decision.DuplicateMeta != nil {
 				meta := *decision.DuplicateMeta
@@ -133,11 +155,29 @@ func (o *Orchestrator) processToolCalls(
 			approvalCalls = append(approvalCalls, item)
 		default:
 			autoCalls = append(autoCalls, tc)
+			if strings.TrimSpace(tc.Function.Name) == "auto_idle" {
+				autoIdleCall = true
+			}
 		}
 	}
 
 	if err := o.executeAutoBatch(ctx, sessionID, history, autoCalls, nil); err != nil {
 		return nil, "", err
+	}
+	if autoIdleCall {
+		succeeded := false
+		if len(*history) > 0 {
+			last := (*history)[len(*history)-1]
+			meta := tools.ClassifyResult("auto_idle", last.Content, false)
+			var payload struct {
+				NoWork bool `json:"no_work"`
+			}
+			succeeded = last.Role == "tool" && last.ToolCallID == autoCalls[0].ID && meta.Succeeded() && json.Unmarshal([]byte(last.Content), &payload) == nil && payload.NoWork
+		}
+		if succeeded {
+			return nil, "no_work", nil
+		}
+		o.markAutoIdleIneligible(sessionID)
 	}
 
 	var pendingItems []PendingHITLItem
@@ -156,11 +196,21 @@ func (o *Orchestrator) processToolCalls(
 	if len(pendingItems) == 0 {
 		return nil, "", nil
 	}
+	o.markAutoIdleIneligible(sessionID)
 	// Complete the pause hook before publishing the resumable event. Clients
 	// receive the event only after runtime lifecycle has committed the pending
 	// interaction; this keeps the resume route race-free.
 	o.runHITLBeforePausePhase(ctx, sessionID, history, "awaiting_hitl")
 	return pendingFromItems(pendingItems), "awaiting_hitl", nil
+}
+
+func autoIdleReadOnlyTool(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "read_file", "glob_files", "grep_file", "grep_files", "todo_list":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *Orchestrator) submitRiskObservation(sessionID string, tc llm.ToolCall, decision hooks.ToolBeforeEachResult) {
@@ -532,6 +582,9 @@ func (o *Orchestrator) executeAutoBatch(
 					lifecycleErr = nil
 				}
 				resultMeta := tools.ClassifyResult(tc.Function.Name, content, rejected)
+				if !resultMeta.Succeeded() {
+					o.markAutoIdleIneligible(sessionID)
+				}
 				finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
 				if lifecycleErr == nil && !o.toolCancellationWon(ctx, sessionID, tc.ID) {
 					lifecycleErr = finishErr
@@ -744,6 +797,9 @@ func (o *Orchestrator) executeTool(
 		lifecycleErr = nil
 	}
 	resultMeta := tools.ClassifyResult(tc.Function.Name, content, rejected)
+	if !resultMeta.Succeeded() {
+		o.markAutoIdleIneligible(sessionID)
+	}
 	finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
 	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
 	if lifecycleErr != nil {

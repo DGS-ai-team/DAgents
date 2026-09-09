@@ -61,7 +61,7 @@ func (e *Engine) decideToolRuleFallback(toolName string, toolArgs map[string]any
 	if name == "bash_run" {
 		return e.bashDecideAction(toolArgs)
 	}
-	if name == "trigger_list" || name == "trigger_get" || name == "ask_user_information" {
+	if name == "trigger_list" || name == "trigger_get" || name == "ask_user_information" || name == "auto_idle" {
 		return ActionAuto
 	}
 	if name == "trigger_create" || name == "trigger_update" || name == "trigger_delete" {

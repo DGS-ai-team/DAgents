@@ -123,11 +123,14 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 
 // publishTurnFinished 推送 turn_finished SSE。它只表示一个 turn 已进入
 // 终态；HITL 暂停不发送该事件，暂停事实由 hitl_required + turn_state 表达。
-func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
+func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string, noWork ...bool) {
 	o.runTurnDonePhase(sessionID, finishReason)
 	payload := map[string]any{
 		"finish_reason": finishReason,
 		"turn_complete": true,
+	}
+	if len(noWork) > 0 && noWork[0] {
+		payload["no_work"] = true
 	}
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()
@@ -137,6 +140,12 @@ func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
 	}
 	o.logTurnContextMetrics(sessionID, finishReason)
 	o.hub.Publish(sessionID, "turn_finished", o.withLifecycleMetadata(sessionID, payload))
+}
+
+// PublishNoWorkFinished emits the trusted no-work terminal only after the
+// session runtime has committed the tool result and lifecycle transition.
+func (o *Orchestrator) PublishNoWorkFinished(sessionID string) {
+	o.publishTurnFinished(sessionID, "stop", true)
 }
 
 // publishUsage 推送 usage SSE。

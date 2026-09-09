@@ -52,6 +52,7 @@ var knownBuiltinTools = map[string]struct{}{
 	"todo_create":            {},
 	"todo_update":            {},
 	"todo_delete":            {},
+	"auto_idle":              {},
 }
 
 // builtinToolGroups 为 Agent defaults.tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
@@ -125,6 +126,7 @@ var builtinToolGroups = map[string][]string{
 		"todo_create",
 		"todo_update",
 		"todo_delete",
+		"auto_idle",
 	},
 }
 

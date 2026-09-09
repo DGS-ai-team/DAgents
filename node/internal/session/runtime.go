@@ -770,6 +770,12 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 			}
 			return true
 		} else if trusted && limit > 0 {
+			if record.Kind == InputKindSystemAuto {
+				ctx = tools.WithTrustedAutoIdleActivation(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID))
+				if r.orch != nil {
+					r.orch.BeginTrustedAutoIdleActivation(r.session.ID)
+				}
+			}
 			r.triggerMaxToolRounds = limit
 			// A capped trigger is still allowed one no-tool final summary after
 			// its last tool batch. Keep this activation-only flag out of the

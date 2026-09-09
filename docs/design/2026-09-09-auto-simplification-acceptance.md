@@ -156,3 +156,14 @@ root 已运行 Session、Turn、Policy 全包 race，通过；Tools 与 shared/c
 另已补回默认 Auto trigger 的旧投递恢复入口，仍保留配置从 Auto 设置修改的限制；恢复携带 revision 和 delivery ID，旧/未知 controller 不可恢复。root Recovery/Recover/RetiredController 专项 race 通过，前端最终确认文案待复验。
 
 默认唤醒恢复的最终确认提示已区分 Auto 与普通触发器，root TriggersPanel 三项测试通过；Auto 使用原 CAS 恢复 API，恢复后引导回自主设置同步。此修复不开放默认触发器的通用编辑或手动启用。
+
+
+### 2026-09-10 静默结束持久化修复与真实模型验收
+
+此前严格测试失败的根因是生命周期工具事实未填写 ResultContent，运行时消息虽有结果，事件持久化记录却缺少正文。现已为工具完成及结果记录补齐正文；静默完成事件只在生命周期成功提交且回合 completed 后发布。root 完整 Session/Turn/Policy race 通过（61.497/11.391/1.270秒），随后精确运行 TestTrustedAutoIdleSuppressesNotifyButPersistsHistory race 再次通过（2.271秒），覆盖实际通知序号、输入、调用、结果及重新打开持久存储后的历史。
+
+01:48 将18766切换至最新 idle-completion 构建，PID17228，健康检查通过。01:50:21 原验收 Agent 的默认 trigger 实际投递，真实 mimo-v2.5-pro 于01:50:25调用 auto_idle（call_ff27fa426a59446f920f2669），无审批、无写入；完成前后 notify_seq 均为485。只读 SQLite 核对末尾记录包含激活输入、对应 assistant 工具调用及成功的 {"no_work":true} 工具结果。随后关闭验收频率（revision8），active=false、queue_pending=0、pending_hitl=null。此证据证明真实默认激活的无工作结束和通知抑制，不扩大到所有错误恢复场景。
+
+新版 dreaming API 在 disabled 状态仍返回 last_success=2026-09-09T16:04:18.0963628Z。实际 Node 深色桌面截图显示连接在线，三组侧边栏和聊天输入布局正常；全部 Node/Manage 页面的视觉验收仍未完成。另观察到工作组连接持续返回4401，需进一步核查，不能宣称所有 Manage 通道正常。
+
+补充：root 将 SQLite 关闭故障注入测试与正常持久化测试共同运行 race，通过（7.448秒）；该故障发生于模型返回工具调用时，证明这一持久化失败路径不发布成功 no_work，未覆盖每个提交阶段。新版自主设置实际截图确认关闭状态下仍显示上次成功 2026/9/10 00:04:18；同时发现长经验撑高整行且标签垂直居中，另行交由 Luna 调整。验收监视脚本已正常退出并再次确认频率关闭、无活动/排队/审批、notify_seq=485。

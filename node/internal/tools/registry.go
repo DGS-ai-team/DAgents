@@ -463,6 +463,9 @@ func (r *Registry) Definitions() []ToolDef {
 // 子 Agent RestrictedRegistry 在通过自身 allowlist 后应使用 WithEnabledBypass，
 // 以免父 Agent 的 enabledOnly 误拦子会话允许的工具。
 func (r *Registry) Execute(ctx context.Context, name, arguments string) (string, error) {
+	if strings.TrimSpace(name) == "auto_idle" {
+		return r.executeAutoIdle(ctx, json.RawMessage(arguments))
+	}
 	if handbookMaintenance(ctx) {
 		switch strings.TrimSpace(name) {
 		case "read_file", "write_file", "search_replace", "glob_files", "grep_file", "grep_files":

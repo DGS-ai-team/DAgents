@@ -38,6 +38,14 @@ func TestShouldBumpNotifySeq(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "trusted no work",
+			ev: stream.Event{
+				AgentID: "s1", Type: "turn_finished",
+				Data: map[string]any{"finish_reason": "stop", "turn_complete": true, "no_work": true},
+			},
+			want: false,
+		},
+		{
 			name: "assistant chunk",
 			ev:   stream.Event{AgentID: "s1", Type: "assistant"},
 			want: false,

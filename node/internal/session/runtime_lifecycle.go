@@ -1233,6 +1233,7 @@ func (r *runtime) lifecycleRecordToolFactsMode(history []llm.Message, historySta
 				ToolExecutionID: executionID,
 				ExecutionStatus: status,
 				ErrorKind:       errorKind,
+				ResultContent:   result.Content,
 				At:              now,
 			}); err != nil {
 				return fmt.Errorf("record tool execution result fact: %w", err)
@@ -1246,6 +1247,7 @@ func (r *runtime) lifecycleRecordToolFactsMode(history []llm.Message, historySta
 			Generation:      r.turnCoordinator.Snapshot().Generation,
 			ToolCallID:      call.ID,
 			ToolExecutionID: executionID,
+			ResultContent:   result.Content,
 			At:              now,
 		}); err != nil {
 			return fmt.Errorf("record tool result fact: %w", err)
@@ -1417,6 +1419,28 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 		}
 		r.orch.PublishPendingHITL(r.session.ID, outcome.Pending)
 		return nil
+	}
+	if outcome.NoWork {
+		return r.withCommittedHistoryLocked(history, func() error {
+			state := r.turnCoordinator.Snapshot()
+			if state.StepStatus == turn.StepStatusExecutingTools {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolBatchSettled, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: "auto_idle"}); err != nil {
+					return fmt.Errorf("settle auto_idle tool batch: %w", err)
+				}
+			}
+			state = r.turnCoordinator.Snapshot()
+			if !state.StepStatus.Terminal() {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: "auto_idle"}); err != nil {
+					return fmt.Errorf("complete auto_idle step: %w", err)
+				}
+			}
+			if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteTurn, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: "auto_idle"}); err != nil {
+					return fmt.Errorf("complete auto_idle turn: %w", err)
+				}
+			}
+			return nil
+		})
 	}
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		// Tool calls have only been proposed/accepted at this point. The Step

@@ -95,9 +95,11 @@ type Orchestrator struct {
 	turnUsage   map[string]llm.Usage
 	// turnUsageLast stores the last provider snapshot for each model step.
 	// Providers may emit cumulative usage more than once during a stream.
-	turnUsageLast map[string]map[int]llm.Usage
-	summaryMu     sync.Mutex
-	summaryNext   map[string]bool
+	turnUsageLast  map[string]map[int]llm.Usage
+	summaryMu      sync.Mutex
+	summaryNext    map[string]bool
+	noWorkMu       sync.Mutex
+	noWorkEligible map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
@@ -628,10 +630,45 @@ func NewOrchestrator(
 		contextMutations: make(map[string][]string),
 		handbookByTurn:   make(map[string]HandbookSnapshot),
 		summaryNext:      make(map[string]bool),
+		noWorkEligible:   make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
 	return orch
+}
+
+// BeginTrustedAutoIdleActivation resets the side-effect fence for one
+// provider-validated system-auto activation.
+func (o *Orchestrator) BeginTrustedAutoIdleActivation(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.noWorkMu.Lock()
+	o.noWorkEligible[sessionID] = true
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) markAutoIdleIneligible(sessionID string) {
+	o.noWorkMu.Lock()
+	if _, exists := o.noWorkEligible[sessionID]; exists {
+		o.noWorkEligible[sessionID] = false
+	}
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) EndAutoIdleActivation(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.noWorkMu.Lock()
+	delete(o.noWorkEligible, sessionID)
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) autoIdleEligible(sessionID string) bool {
+	o.noWorkMu.Lock()
+	defer o.noWorkMu.Unlock()
+	return o.noWorkEligible[sessionID]
 }
 
 // SetNextStepFinalSummary marks the next model request as the reserved
@@ -722,13 +759,30 @@ func (o *Orchestrator) runOneStep(
 		// step may start; the orchestrator only applies the resulting snapshot.
 		systemPrompt = snapshot.SystemPrompt
 		toolDefs = append([]tools.ToolDef(nil), snapshot.ToolDefinitions...)
+		if reg, ok := o.tools.(*tools.Registry); ok {
+			contextual := reg.DefinitionsForContext(ctx)
+			for _, def := range contextual {
+				if def.Function.Name == "auto_idle" {
+					found := false
+					for _, existing := range toolDefs {
+						if existing.Function.Name == "auto_idle" {
+							found = true
+							break
+						}
+					}
+					if !found {
+						toolDefs = append(toolDefs, def)
+					}
+				}
+			}
+		}
 		if finalSummary {
 			toolDefs = nil
 		}
 		msgs = append([]llm.Message(nil), (*history)...)
 		requestHistory = append([]llm.Message(nil), msgs...)
 	} else {
-		toolDefs = o.ToolDefinitions()
+		toolDefs = o.ToolDefinitionsForContext(ctx)
 		if finalSummary {
 			toolDefs = nil
 		}
@@ -1056,6 +1110,10 @@ func (o *Orchestrator) runOneStep(
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
 		return StepOutcome{Pending: pending, StepIndex: stepIndex}
 	}
+	if pauseReason == "no_work" {
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, NoWork: true}
+	}
 	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }
 
@@ -1220,6 +1278,28 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	listDef := tools.ListAvailableSkillsToolDef()
 	listDef.Function.Description = strings.TrimSpace(listDef.Function.Description) + tools.ResultDescriptionSuffixForTool(listDef.Function.Name)
 	defs = append(defs, listDef)
+	return defs
+}
+
+// ToolDefinitionsForContext adds activation-scoped control tools only when
+// the concrete Registry has received a trusted context marker.
+func (o *Orchestrator) ToolDefinitionsForContext(ctx context.Context) []tools.ToolDef {
+	defs := o.ToolDefinitions()
+	reg, ok := o.tools.(*tools.Registry)
+	if !ok || !tools.TrustedAutoIdleAvailable(ctx) {
+		return defs
+	}
+	for _, def := range reg.DefinitionsForContext(ctx) {
+		if def.Function.Name != "auto_idle" {
+			continue
+		}
+		for _, existing := range defs {
+			if existing.Function.Name == "auto_idle" {
+				return defs
+			}
+		}
+		return append(defs, def)
+	}
 	return defs
 }
 

@@ -149,8 +149,18 @@ func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
 	// Keep the current turn identity alive until that continuation is consumed;
 	// otherwise the queue consumer would discard the freshly enqueued result as
 	// stale.
-	if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
+	state := r.turnCoordinator.Snapshot()
+	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
 		return
+	}
+	// No-work is a successful terminal fact only after lifecycle persistence has
+	// completed without error. A failed/cancelled turn must follow the ordinary
+	// error path and must never emit a successful no_work notification.
+	if outcome.Err == nil && outcome.NoWork && state.TurnStatus == turn.TurnStatusCompleted && r.orch != nil {
+		r.orch.PublishNoWorkFinished(r.session.ID)
+	}
+	if r.orch != nil {
+		r.orch.EndAutoIdleActivation(r.session.ID)
 	}
 	r.tryCompleteChildIfIdle()
 }
