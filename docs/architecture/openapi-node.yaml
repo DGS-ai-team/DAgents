@@ -48,6 +48,50 @@ paths:
       responses:
         "200":
           description: 已归档
+  /v1/agents/{agent_id}/event-sources:
+    get:
+      summary: 列出该 Auto Agent 的事件源及健康状态
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 事件源列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EventSourceView" }
+        "404": { description: Agent 不存在或不是 Auto Agent }
+    post:
+      summary: 注册或更新事件源
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventSourceRegistration" }
+      responses:
+        "201": { description: 已注册 }
+        "400": { description: 配置无效或 revision 冲突 }
+        "403": { description: owner 不匹配 }
+  /v1/agents/{agent_id}/event-sources/{source_id}:
+    delete:
+      summary: 按 revision 删除事件源
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: source_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: revision
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "204": { description: 已删除 }
+        "404": { description: Agent 不存在或不是 Auto Agent }
+        "500": { description: CAS 失败或存储错误 }
   /v1/agents/{agent_id}/ensure:
     post:
       summary: 按快照装入运行时
@@ -1208,6 +1252,38 @@ paths:
 
 components:
   schemas:
+    EventSourceRegistration:
+      type: object
+      required: [source_id, revision, root]
+      properties:
+        source_id: { type: string }
+        owner_agent_id: { type: string, readOnly: true }
+        revision: { type: integer, format: int64, minimum: 1 }
+        root: { type: string, description: Absolute read-only directory path }
+        max_files: { type: integer, minimum: 1 }
+        max_bytes: { type: integer, format: int64, minimum: 1 }
+        hash_content: { type: boolean }
+        timeout: { type: integer, format: int64 }
+        enabled: { type: boolean }
+    EventSourceHealth:
+      type: object
+      properties:
+        source_id: { type: string }
+        owner_agent_id: { type: string }
+        revision: { type: integer, format: int64 }
+        digest: { type: string }
+        cursor: { type: string }
+        failure_count: { type: integer }
+        next_retry_at: { type: string, format: date-time }
+        baseline: { type: boolean }
+        updated_at: { type: string, format: date-time }
+        last_error: { type: string }
+    EventSourceView:
+      allOf:
+        - $ref: '#/components/schemas/EventSourceRegistration'
+        - type: object
+          properties:
+            state: { $ref: '#/components/schemas/EventSourceHealth' }
     GoalCreateRequest:
       type: object
       required: [title, objective, acceptance, agent_id]

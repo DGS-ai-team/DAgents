@@ -95,6 +95,22 @@ func TestProbeReopenPersistsCursorAndFailureBackoff(t *testing.T) {
 	}
 }
 
+func TestStoreReopenPreservesLegacyRegistrationIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.json")
+	legacy := []byte(`{"registrations":{"legacy":{"SourceID":"legacy","OwnerAgentID":"agent-old","Revision":2,"Root":"C:\\workspace","Enabled":true}}}`)
+	if err := os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := s.ListRegistrationsForOwner("agent-old")
+	if len(rows) != 1 || rows[0].SourceID != "legacy" || rows[0].OwnerAgentID != "agent-old" {
+		t.Fatalf("legacy registrations=%+v", rows)
+	}
+}
+
 func TestProbeOwnerCASAndBounds(t *testing.T) {
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "a"), []byte("a"), 0600)

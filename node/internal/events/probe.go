@@ -105,7 +105,7 @@ func OpenStore(path string) (*Store, error) {
 		if e = json.Unmarshal(b, &envelope); e != nil {
 			return nil, e
 		}
-		if envelope.States == nil { // compatibility with the original state-only format
+		if envelope.States == nil && envelope.Registrations == nil { // compatibility with the original state-only format
 			if e = json.Unmarshal(b, &s.states); e != nil {
 				return nil, e
 			}
