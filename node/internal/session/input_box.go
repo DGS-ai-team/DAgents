@@ -16,8 +16,10 @@ import (
 type InputKind string
 
 const (
-	InputKindUser       InputKind = "user"
-	InputKindTrigger    InputKind = "trigger"
+	InputKindUser    InputKind = "user"
+	InputKindTrigger InputKind = "trigger"
+	// InputKindSystemAuto is set by the trusted trigger submitter.
+	InputKindSystemAuto InputKind = "system_auto"
 	InputKindChildAgent InputKind = "child_agent"
 )
 
@@ -38,8 +40,11 @@ var (
 )
 
 func validateInputRecord(record InputRecord) error {
-	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindChildAgent {
+	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindSystemAuto && record.Kind != InputKindChildAgent {
 		return fmt.Errorf("%w: %q", ErrInvalidInputKind, record.Kind)
+	}
+	if record.Kind == InputKindSystemAuto && (record.Env.TriggerID == "" || record.Env.DeliveryID == "") {
+		return fmt.Errorf("%w: system auto requires trigger and delivery identity", ErrInvalidInputKind)
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
@@ -150,6 +155,35 @@ func (b *InputBox) Pop() (InputRecord, bool) {
 	}
 	record := b.items[0]
 	b.items = b.items[1:]
+	b.inFlight = &record
+	return record, true
+}
+
+// PopForIdle gives a queued user message precedence over an earlier system
+// Auto wakeup. Other records retain their FIFO order.
+func (b *InputBox) PopForIdle() (InputRecord, bool) {
+	if b == nil {
+		return InputRecord{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.items) == 0 || b.inFlight != nil {
+		return InputRecord{}, false
+	}
+	index := 0
+	if b.items[0].Kind == InputKindSystemAuto {
+		for i := 1; i < len(b.items); i++ {
+			if b.items[i].Kind == InputKindUser {
+				index = i
+				break
+			}
+			if b.items[i].Kind != InputKindSystemAuto {
+				break
+			}
+		}
+	}
+	record := b.items[index]
+	b.items = append(b.items[:index], b.items[index+1:]...)
 	b.inFlight = &record
 	return record, true
 }

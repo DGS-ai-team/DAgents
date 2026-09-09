@@ -116,3 +116,13 @@ Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注
 主会话每次默认激活校验 Agent 类型/归属、稳定 trigger ID、固定目标会话和 pending delivery，读取当前频率与工具轮次。配置关闭、触发器未同步、归属错误或 provider 失败时不调用模型。可信激活采用仅工具轮次和一次无工具收尾的预算，普通聊天/普通 trigger 保持原有预算。职责、经验及 Todo 沿用前批同一主会话注入链路。
 
 主 Agent 复验 API 新配置/启动专项 race 3.196 秒，Session/Turn 全包 race 32.708 / 11.077 秒，Triggers 全包 race 1.851 秒。测试模型为本地桩；真实提供商与视觉验收尚未进行。旧 cycle/intent/event-source/maintenance 生产入口仍待删除，不能把新默认激活已接通表述为全部架构切换完成。后续依次处理旧入口删除、用户输入优先、脚本条件、dreaming、正式 UI/Manage 及真实验收，不新增旧消息兼容层。
+
+### 旧 Goal 保留范围的证据修正
+
+清理时重新核查 `goals_api.go:createGoal`：无论 managed 参数取值，均要求 Agent 类型为 auto，并创建 `goal-session-*` 专用会话及 `CreatedBy=autonomy` 的 Goal trigger。因此此前“保留普通 Goals API”的判断不成立，这套 API 也是旧 Auto 产品入口，应与旧 Auto cycles 一并退役，不能为了保持旧测试绿色而继续提供独立自主会话。底层存储类型若仍被通用代码引用，按实际依赖继续拆除；通用聊天、用户 trigger、审批与文件手册不受此结论影响。
+
+### 用户输入优先验收
+
+系统默认唤醒通过 scheduler 专用入队路径设置内部 `system_auto` 类型，要求 trigger/delivery 身份。空闲取数时，用户可越过队首连续默认唤醒；普通 trigger 和 child 输入作为屏障，保持原相对顺序。不会打断正在执行的模型轮次或另开循环。恢复路径及关闭后的 delivery 失效检查覆盖新输入类型。
+
+真实 session 测试阻塞首轮模型，在忙碌期间依次入队 Auto 与用户，解除后捕获实际请求证明用户先执行；失效的 Auto delivery 不调用模型。主 Agent Session/Triggers 全包 race 通过（33.661 / 1.838 秒）。

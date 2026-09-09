@@ -79,6 +79,10 @@ func (t *TriggerSubmitter) SubmitTriggerMessageWithDelivery(sessionID, triggerID
 	return t.Mgr.EnqueueTriggerMessage(sessionID, triggerID, content, deliveryID)
 }
 
+func (t *TriggerSubmitter) SubmitAutoTriggerMessage(sessionID, triggerID, deliveryID, content string) error {
+	return t.Mgr.EnqueueAutoTriggerMessage(sessionID, triggerID, content, deliveryID)
+}
+
 // EnqueueTriggerMessage 将 trigger 任务写入 session InputBox；session 不存在时会先 Create。
 
 // 逻辑：
@@ -89,6 +93,11 @@ func (m *Manager) EnqueueTriggerMessage(sessionID, triggerID, content string, de
 	return m.enqueueTriggerMessage(sessionID, triggerID, content, "", "", deliveryID...)
 }
 
+// EnqueueAutoTriggerMessage marks a system-owned Auto wakeup at ingress.
+func (m *Manager) EnqueueAutoTriggerMessage(sessionID, triggerID, content string, deliveryID ...string) error {
+	return m.enqueueTriggerMessageKind(InputKindSystemAuto, sessionID, triggerID, content, "", "", deliveryID...)
+}
+
 // EnqueueGoalTriggerMessage carries durable goal/run identity through the
 // existing InputBox so lifecycle observers can reconcile the real Turn.
 func (m *Manager) EnqueueGoalTriggerMessage(sessionID, triggerID, goalID, runID, content string, deliveryID ...string) error {
@@ -96,6 +105,10 @@ func (m *Manager) EnqueueGoalTriggerMessage(sessionID, triggerID, goalID, runID,
 }
 
 func (m *Manager) enqueueTriggerMessage(sessionID, triggerID, content, goalID, runID string, deliveryID ...string) error {
+	return m.enqueueTriggerMessageKind(InputKindTrigger, sessionID, triggerID, content, goalID, runID, deliveryID...)
+}
+
+func (m *Manager) enqueueTriggerMessageKind(kind InputKind, sessionID, triggerID, content, goalID, runID string, deliveryID ...string) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return fmt.Errorf("empty trigger content")
@@ -113,6 +126,6 @@ func (m *Manager) enqueueTriggerMessage(sessionID, triggerID, content, goalID, r
 		id = strings.TrimSpace(deliveryID[0])
 	}
 	env := queue.Envelope{RequestType: queue.RequestTypeMessage, Content: content, TriggerID: strings.TrimSpace(triggerID), DeliveryID: id, GoalID: strings.TrimSpace(goalID), RunID: strings.TrimSpace(runID), UserName: llm.UserNameTrigger}
-	_, err = rt.appendInput(InputKindTrigger, env)
+	_, err = rt.appendInput(kind, env)
 	return err
 }

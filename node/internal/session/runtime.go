@@ -712,17 +712,18 @@ func (r *runtime) popInputIfIdle() (InputRecord, bool) {
 
 func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	env := record.Env
-	if record.Kind == InputKindTrigger && record.RecoveredLegacy {
+	isTrigger := record.Kind == InputKindTrigger || record.Kind == InputKindSystemAuto
+	if isTrigger && record.RecoveredLegacy {
 		// Legacy restored trigger envelopes have no durable delivery identity;
 		// fail closed rather than replaying an unknown side effect.
 		return true
 	}
-	if blocked, ok := r.triggerDelivery.(triggers.RecoveryDeliveryTracker); ok && record.Kind == InputKindTrigger && blocked.IsRecoveryRequired(strings.TrimSpace(env.TriggerID)) {
+	if blocked, ok := r.triggerDelivery.(triggers.RecoveryDeliveryTracker); ok && isTrigger && blocked.IsRecoveryRequired(strings.TrimSpace(env.TriggerID)) {
 		// Discard the recovered mailbox item without executing it or clearing the
 		// durable recovery fence. An explicit recovery action must clear that fence.
 		return true
 	}
-	if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && record.Kind == InputKindTrigger && strings.TrimSpace(env.DeliveryID) != "" && !identity.IsPendingDelivery(strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)) {
+	if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && isTrigger && strings.TrimSpace(env.DeliveryID) != "" && !identity.IsPendingDelivery(strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)) {
 		// The delivery was explicitly recovered (or superseded); consume the
 		// mailbox record without replaying its task.
 		return true
@@ -733,14 +734,14 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	env.RequestType = queue.RequestTypeMessage
 	r.clearIdleAutoCompressMark()
 	source := turn.TurnSourceHuman
-	if record.Kind == InputKindTrigger {
+	if isTrigger {
 		source = turn.TurnSourceTrigger
 	} else if record.Kind == InputKindChildAgent {
 		source = turn.TurnSourceChildAgent
 	}
 	baseBudget := r.turnBudget
 	r.triggerMaxToolRounds = 0
-	if record.Kind == InputKindTrigger && r.triggerToolRoundProvider != nil {
+	if isTrigger && r.triggerToolRoundProvider != nil {
 		if limit, trusted, err := r.triggerToolRoundProvider(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)); err != nil {
 			if r.logger != nil {
 				r.logger.Warn("trusted trigger tool-round profile unavailable; activation dropped", "session_id", r.session.ID, "trigger_id", env.TriggerID, "error", err)

@@ -84,7 +84,7 @@ func (r *runtime) reconcileRestoredInputBox() {
 	if !ok {
 		return
 	}
-	if record.Kind == InputKindTrigger && (record.RecoveredLegacy || strings.TrimSpace(record.Env.DeliveryID) != "") {
+	if (record.Kind == InputKindTrigger || record.Kind == InputKindSystemAuto) && (record.RecoveredLegacy || strings.TrimSpace(record.Env.DeliveryID) != "") {
 		if record.RecoveredLegacy {
 			if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
 				_ = r.lifecycleCancel()

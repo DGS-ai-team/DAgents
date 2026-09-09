@@ -77,6 +77,68 @@ func TestInputBoxFIFOSequenceAndRestore(t *testing.T) {
 	}
 }
 
+func TestInputBoxPopForIdlePrioritizesUserOverSystemAuto(t *testing.T) {
+	box := NewInputBox()
+	if _, err := box.Append(InputKindSystemAuto, queue.Envelope{Content: "auto", TriggerID: "auto-default:a", DeliveryID: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := box.Append(InputKindUser, queue.Envelope{Content: "user-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := box.Append(InputKindUser, queue.Envelope{Content: "user-2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := box.PopForIdle()
+	if !ok || got.Kind != InputKindUser || got.Env.Content != "user-1" {
+		t.Fatalf("first idle input=%+v, want user-1", got)
+	}
+	box.Ack(got.Seq)
+	got, ok = box.PopForIdle()
+	if !ok || got.Env.Content != "user-2" {
+		t.Fatalf("second idle input=%+v, want user-2", got)
+	}
+	box.Ack(got.Seq)
+	got, ok = box.PopForIdle()
+	if !ok || got.Kind != InputKindSystemAuto {
+		t.Fatalf("third idle input=%+v, want system auto", got)
+	}
+}
+
+func TestInputBoxIdlePriorityKeepsOrdinaryTriggerFIFOBarrier(t *testing.T) {
+	box := NewInputBox()
+	_, _ = box.Append(InputKindSystemAuto, queue.Envelope{Content: "auto", TriggerID: "auto-default:a", DeliveryID: "d1"})
+	_, _ = box.Append(InputKindTrigger, queue.Envelope{Content: "ordinary", TriggerID: "user-trigger"})
+	_, _ = box.Append(InputKindUser, queue.Envelope{Content: "user"})
+	got, ok := box.PopForIdle()
+	if !ok || got.Kind != InputKindSystemAuto {
+		t.Fatalf("first input=%+v, want auto before ordinary trigger barrier", got)
+	}
+	box.Ack(got.Seq)
+	got, ok = box.PopForIdle()
+	if !ok || got.Kind != InputKindTrigger || got.Env.Content != "ordinary" {
+		t.Fatalf("second input=%+v, want ordinary trigger FIFO", got)
+	}
+}
+
+func TestInputBoxSystemAutoInFlightSurvivesRestore(t *testing.T) {
+	box := NewInputBox()
+	seq, err := box.Append(InputKindSystemAuto, queue.Envelope{Content: "auto", TriggerID: "auto-default:a", DeliveryID: "d1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := box.PopForIdle(); !ok {
+		t.Fatal("system auto was not claimed")
+	}
+	restored := NewInputBox()
+	if err := restored.Restore(box.Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := restored.InFlight()
+	if !ok || got.Seq != seq || got.Kind != InputKindSystemAuto || got.Env.DeliveryID != "d1" {
+		t.Fatalf("restored in-flight=%+v, want system auto delivery", got)
+	}
+}
+
 func TestInputBoxDropStalePreservesSequence(t *testing.T) {
 	box := NewInputBox()
 	_, _ = box.Append(InputKindUser, queue.Envelope{Content: "old", SessionEpoch: 1})

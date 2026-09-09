@@ -35,6 +35,125 @@ type triggerRoundCaptureClient struct {
 	toolAt   map[int]bool
 }
 
+type inputPriorityCaptureClient struct {
+	mu       sync.Mutex
+	requests []llm.ChatRequest
+	started  chan struct{}
+	release  chan struct{}
+}
+
+type invalidAutoDeliveryTracker struct{}
+
+func (invalidAutoDeliveryTracker) HasPendingDelivery(string) bool             { return false }
+func (invalidAutoDeliveryTracker) MarkPendingDelivery(string)                 {}
+func (invalidAutoDeliveryTracker) ClearPendingDelivery(string)                {}
+func (invalidAutoDeliveryTracker) ClearPendingDeliveryIfMatch(string, string) {}
+func (invalidAutoDeliveryTracker) IsPendingDelivery(string, string) bool      { return false }
+
+func (c *inputPriorityCaptureClient) StreamChat(_ context.Context, req llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+	c.mu.Lock()
+	call := len(c.requests)
+	c.requests = append(c.requests, req)
+	c.mu.Unlock()
+	if call == 0 {
+		close(c.started)
+		<-c.release
+	}
+	return llm.ChatResult{Content: "done", FinishReason: "stop"}, nil
+}
+func (*inputPriorityCaptureClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*inputPriorityCaptureClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func requestContains(req llm.ChatRequest, text string) bool {
+	for _, message := range req.Messages {
+		if strings.Contains(message.Content, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRuntimeIdleUserInputPrecedesQueuedSystemAuto(t *testing.T) {
+	root := t.TempDir()
+	reg, err := tools.NewRegistry(root, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &inputPriorityCaptureClient{started: make(chan struct{}), release: make(chan struct{})}
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, policy.NewDefaultEngine(), nil, TurnOptions{
+		WorkspaceRoot: root,
+		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
+			return 1, agentID == "agent-1" && triggerID == "auto-default:agent-1" && deliveryID == "auto-delivery", nil
+		},
+	}, logx.Discard())
+	defer mgr.Stop()
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "首个用户", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-client.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first user model call did not start")
+	}
+	if err := mgr.EnqueueAutoTriggerMessage(s.ID, "auto-default:agent-1", "系统自动", "auto-delivery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "第二个用户", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	close(client.release)
+	deadline := time.After(3 * time.Second)
+	for {
+		client.mu.Lock()
+		count := len(client.requests)
+		requests := append([]llm.ChatRequest(nil), client.requests...)
+		client.mu.Unlock()
+		if count >= 3 {
+			if !requestContains(requests[1], "第二个用户") || !requestContains(requests[2], "系统自动") {
+				t.Fatalf("idle order was not user before system auto: requests=%d", count)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued inputs, calls=%d", count)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestSystemAutoWithInvalidDeliveryIsDroppedBeforeModel(t *testing.T) {
+	root := t.TempDir()
+	reg, err := tools.NewRegistry(root, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &inputPriorityCaptureClient{started: make(chan struct{}), release: make(chan struct{})}
+	mgr := NewManager("agent-1", stream.NewHub(8, logx.Discard()), client, reg, policy.NewDefaultEngine(), nil, TurnOptions{WorkspaceRoot: root}, logx.Discard())
+	defer mgr.Stop()
+	mgr.SetTriggerDeliveryTracker(invalidAutoDeliveryTracker{})
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.EnqueueAutoTriggerMessage(s.ID, "auto-default:agent-1", "系统自动", "stale-delivery"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-client.started:
+		t.Fatal("invalid system auto delivery reached model")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 func (c *triggerRoundCaptureClient) StreamChat(_ context.Context, req llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
 	c.mu.Lock()
 	c.calls++

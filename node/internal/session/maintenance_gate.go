@@ -150,7 +150,7 @@ func (g *agentExecutionGate) claimInput(r *runtime) (InputRecord, bool) {
 	if g.maintenance || r.turnState() != "idle" || r.queue.Len() > 0 {
 		return InputRecord{}, false
 	}
-	rec, ok := r.inputBox.Pop()
+	rec, ok := r.inputBox.PopForIdle()
 	if ok {
 		g.dispatches++
 	}

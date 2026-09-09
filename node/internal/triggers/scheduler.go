@@ -30,6 +30,10 @@ type DeliveryMessageSubmitter interface {
 	SubmitTriggerMessageWithDelivery(sessionID, triggerID, deliveryID, content string) error
 }
 
+type AutoMessageSubmitter interface {
+	SubmitAutoTriggerMessage(sessionID, triggerID, deliveryID, content string) error
+}
+
 // SessionResolver 解析 latest_active 投递目标。
 type SessionResolver interface {
 	ResolveLatestActiveUserSessionID(ctx context.Context) (string, error)
@@ -333,7 +337,15 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 		}
 	}
 	var submitErr error
-	if targeted, ok := s.submitter.(DeliveryMessageSubmitter); ok {
+	if def.Controller == "auto" {
+		if auto, ok := s.submitter.(AutoMessageSubmitter); ok {
+			submitErr = auto.SubmitAutoTriggerMessage(sessionID, def.TriggerID, deliveryID, content)
+		} else if targeted, ok := s.submitter.(DeliveryMessageSubmitter); ok {
+			submitErr = targeted.SubmitTriggerMessageWithDelivery(sessionID, def.TriggerID, deliveryID, content)
+		} else {
+			submitErr = s.submitter.SubmitTriggerMessage(sessionID, def.TriggerID, content)
+		}
+	} else if targeted, ok := s.submitter.(DeliveryMessageSubmitter); ok {
 		submitErr = targeted.SubmitTriggerMessageWithDelivery(sessionID, def.TriggerID, deliveryID, content)
 	} else {
 		submitErr = s.submitter.SubmitTriggerMessage(sessionID, def.TriggerID, content)
