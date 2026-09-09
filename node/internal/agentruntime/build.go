@@ -140,6 +140,7 @@ func Build(p BuildParams) (Built, error) {
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
 
 	turnOpts := p.BaseTurn
+	turnOpts.AutoAgent = strings.EqualFold(strings.TrimSpace(p.Snapshot.AgentType), "auto")
 	turnOpts.WorkspaceRoot = workspaceRoot
 	turnOpts.AgentID = strings.TrimSpace(p.AgentID)
 	turnOpts.WorkspaceStateRoot = workspaceStateRoot

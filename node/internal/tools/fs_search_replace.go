@@ -125,6 +125,7 @@ func (r *Registry) execSearchReplace(ctx context.Context, raw json.RawMessage) (
 		if _, err := r.handbookFS.Write(ctx, path, args.ExpectedDigest, payload); err != nil {
 			return formatSearchReplaceFail(args.Path, err.Error()), nil
 		}
+		r.handbookMutations.Add(1)
 		out := formatSearchReplaceSuccess(replaced, args.OldString, args.NewString, lineHint)
 		out, _ = applyMaxTokensToOutput(out, defaultSearchReplaceMaxTokens)
 		return out, nil

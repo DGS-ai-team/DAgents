@@ -7,6 +7,16 @@ import (
 	"strings"
 )
 
+type handbookMaintenanceKey struct{}
+
+func WithHandbookMaintenance(ctx context.Context) context.Context {
+	return context.WithValue(ctx, handbookMaintenanceKey{}, true)
+}
+func handbookMaintenance(ctx context.Context) bool {
+	v, _ := ctx.Value(handbookMaintenanceKey{}).(bool)
+	return v
+}
+
 const (
 	// CallPurposeKey 为各工具通用必填参数：简短说明调用目的（Client 首行展示）。
 	CallPurposeKey = "call_purpose"

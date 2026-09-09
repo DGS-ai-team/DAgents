@@ -76,9 +76,17 @@ func (r *Registry) execWriteFile(ctx context.Context, raw json.RawMessage) (stri
 		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
 	}
 	if r.handbookFS != nil && isHandbookPath(args.Path) {
+		// A byte-identical write is a successful no-op. Do not create a history
+		// entry or report a handbook mutation for it.
+		if current, readErr := os.ReadFile(path); readErr == nil && string(current) == string(payload) {
+			return fmt.Sprintf("no changes needed for %s", args.Path), nil
+		} else if readErr != nil && !os.IsNotExist(readErr) {
+			return "", readErr
+		}
 		if _, err := r.handbookFS.Write(ctx, path, args.ExpectedDigest, payload); err != nil {
 			return "", err
 		}
+		r.handbookMutations.Add(1)
 		return fmt.Sprintf("wrote %d bytes to %s (encoding=%s)", len(payload), args.Path, choice.Encoding), nil
 	}
 	if err := os.WriteFile(path, payload, 0o644); err != nil {

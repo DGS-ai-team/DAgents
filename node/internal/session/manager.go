@@ -34,6 +34,9 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
+	// AutoAgent is trusted runtime metadata populated from the Agent snapshot;
+	// model-facing requests cannot set it.
+	AutoAgent bool
 	// BudgetResolver refreshes dynamic per-turn limits before a new Turn.
 	// It is used by managed goals whose cumulative budget changes between wakes.
 	BudgetResolver func() (turn.TurnBudget, error)

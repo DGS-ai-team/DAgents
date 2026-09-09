@@ -181,10 +181,12 @@ type Turn struct {
 	// ContextEpoch identifies the model-visible context segment. It advances
 	// when a new ModelContextSnapshot is accepted, not when compaction merely
 	// rewrites durable history before that segment is rebuilt.
-	ContextEpoch    int
-	ContextSnapshot *ModelContextSnapshot
-	Budget          TurnBudget
-	Usage           TurnUsage
+	ContextEpoch      int
+	ContextSnapshot   *ModelContextSnapshot
+	Budget            TurnBudget
+	Usage             TurnUsage
+	ModelUsageMissing bool
+	ModelUsagePending bool
 
 	StartedAt  time.Time
 	FinishedAt *time.Time
@@ -267,11 +269,13 @@ type PendingInteraction struct {
 type ModelAttempt struct {
 	ID            string
 	StepID        string
+	TurnID        string
 	Attempt       int
 	RequestDigest string
 	Status        ModelAttemptStatus
 	ErrorKind     string
 	Usage         StepUsage
+	UsageRecorded bool
 	StartedAt     time.Time
 	FinishedAt    *time.Time
 }

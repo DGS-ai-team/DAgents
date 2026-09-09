@@ -118,6 +118,7 @@ type CoordinatorSnapshot struct {
 	InteractionKind    string
 	InteractionPayload json.RawMessage
 	ModelAttempt       int
+	ModelUsageKnown    bool
 	RuntimeRevision    int64
 	RuntimeDigest      string
 	PromptDigest       string
@@ -770,6 +771,9 @@ func (c *TurnCoordinator) startStepLocked(command TurnCommand) error {
 	c.executions = make(map[string]*ToolExecution)
 	c.toolResults = make(map[string]bool)
 	c.interaction = nil
+	if c.turn.ModelUsagePending {
+		c.turn.ModelUsageMissing = true
+	}
 	c.attempts = nil
 	return c.step.Advance(EventStepStarted, command.At, command.Reason)
 }
@@ -880,13 +884,19 @@ func (c *TurnCoordinator) startModelAttemptLocked(command TurnCommand) error {
 		}
 	}
 	attemptNumber := len(c.attempts) + 1
+	if c.turn.ModelUsagePending {
+		c.turn.ModelUsageMissing = true
+	}
 	attemptBase := strings.TrimSpace(command.RequestDigest)
 	if attemptBase == "" {
 		attemptBase = c.step.ID
 	}
 	attemptID := fmt.Sprintf("%s-attempt-%d", attemptBase, attemptNumber)
-	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
+	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, TurnID: c.turn.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
 	c.attempts = append(c.attempts, attempt)
+	c.turn.ModelUsagePending = true
+	// A provider callback records the attempt; a completed attempt without a
+	// callback is finalized below when the next step starts or the turn ends.
 	c.step.RequestAttempt = attemptNumber
 	c.step.ModelRequestID = attemptID
 	return c.step.Advance(EventModelRequestStarted, command.At, command.Reason)
@@ -912,6 +922,8 @@ func (c *TurnCoordinator) recordModelUsageLocked(command TurnCommand) error {
 		return fmt.Errorf("model usage requires a model attempt")
 	}
 	last := &c.attempts[len(c.attempts)-1]
+	last.UsageRecorded = true
+	c.turn.ModelUsagePending = false
 	delta := usageDelta(command.Usage, last.Usage)
 	last.Usage = command.Usage
 	c.step.Usage.InputTokens += delta.InputTokens
@@ -1318,6 +1330,7 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 	}
 	if len(c.attempts) > 0 {
 		result.ModelAttempt = c.attempts[len(c.attempts)-1].Attempt
+		result.ModelUsageKnown = !c.turn.ModelUsageMissing && !c.turn.ModelUsagePending
 	}
 	if c.step != nil && c.step.Status == StepStatusExecutingTools {
 		if c.recoveryRequired {

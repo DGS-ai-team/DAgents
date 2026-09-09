@@ -134,6 +134,7 @@ type runtime struct {
 	// even when the persisted Agent revision did not change.
 	runtimeMultimodalEnabled bool
 	turnBudget               turn.TurnBudget
+	autoAgent                bool
 	budgetResolver           func() (turn.TurnBudget, error)
 }
 
@@ -250,6 +251,7 @@ func newRuntimeWithPublisher(
 		llmProfileDigest:         strings.TrimSpace(turnOpts.LLMProfileDigest),
 		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
 		turnBudget:               turnOpts.Budget,
+		autoAgent:                turnOpts.AutoAgent,
 		budgetResolver:           turnOpts.BudgetResolver,
 		onLifecycle:              turnOpts.OnLifecycle,
 		memoryService:            turnOpts.MemoryService,

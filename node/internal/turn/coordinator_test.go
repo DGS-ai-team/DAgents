@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestTurnCoordinatorRetryMissingUsageRemainsUnknown(t *testing.T) {
+	coordinator := NewTurnCoordinator("s", "a")
+	now := time.Now().UTC()
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "s", TurnID: "t", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestRetrying, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, Usage: StepUsage{TotalTokens: 4}, At: now},
+	}
+	for _, command := range commands {
+		if _, err := coordinator.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.ModelUsageKnown {
+		t.Fatalf("missing first attempt incorrectly known: %#v", snapshot)
+	}
+}
+
 func TestTurnCoordinatorDispatchesOneTurnAcrossMultipleSteps(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	coordinator := NewTurnCoordinator("session-1", "agent-1")

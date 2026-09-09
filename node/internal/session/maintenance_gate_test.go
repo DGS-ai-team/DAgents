@@ -20,6 +20,44 @@ type gateCountingLLM struct {
 	started chan struct{}
 }
 
+func TestMaintenanceLeaseCannotBeReusedAcrossAcquisitions(t *testing.T) {
+	g := newAgentExecutionGate()
+	ctx1, release1, ok, err := g.acquireMaintenanceContext(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("first acquire: %v %v", ok, err)
+	}
+	release1()
+	ctx2, release2, ok, err := g.acquireMaintenanceContext(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("second acquire: %v %v", ok, err)
+	}
+	defer release2()
+	if g.owns(ctx1) {
+		t.Fatal("old lease owns new acquisition")
+	}
+	if !g.owns(ctx2) {
+		t.Fatal("current lease not recognized")
+	}
+}
+
+func TestMaintenanceLeasesAreAgentScoped(t *testing.T) {
+	a := newAgentExecutionGate()
+	b := newAgentExecutionGate()
+	ctxA, releaseA, ok, err := a.acquireMaintenanceContext(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("agent A acquire: %v %v", ok, err)
+	}
+	defer releaseA()
+	ctxB, releaseB, ok, err := b.acquireMaintenanceContext(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("agent B acquire: %v %v", ok, err)
+	}
+	defer releaseB()
+	if b.owns(ctxA) || a.owns(ctxB) {
+		t.Fatal("lease crossed agent gate boundary")
+	}
+}
+
 type blockingGateLLM struct {
 	llm.Client
 	started chan struct{}

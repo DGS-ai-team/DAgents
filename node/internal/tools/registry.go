@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/events"
@@ -68,6 +69,16 @@ type Registry struct {
 	autonomyUpdate         AutonomyUpdateFunc
 	workspaceCoordinator   *workspacecoord.Coordinator
 	handbookFS             *handbookfs.Service
+	handbookMutations      atomic.Uint64
+}
+
+// HandbookMutationCount reports successful filesystem history commits for the
+// bound handbook, allowing maintenance to distinguish read-only turns.
+func (r *Registry) HandbookMutationCount() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.handbookMutations.Load()
 }
 
 // SetHandbookRoot binds the reserved relative "handbook/" path namespace to
@@ -458,6 +469,24 @@ func (r *Registry) Definitions() []ToolDef {
 // 子 Agent RestrictedRegistry 在通过自身 allowlist 后应使用 WithEnabledBypass，
 // 以免父 Agent 的 enabledOnly 误拦子会话允许的工具。
 func (r *Registry) Execute(ctx context.Context, name, arguments string) (string, error) {
+	if handbookMaintenance(ctx) {
+		switch strings.TrimSpace(name) {
+		case "read_file", "write_file", "search_replace", "glob_files", "grep_file", "grep_files":
+		default:
+			return "", fmt.Errorf("tool %s is unavailable during handbook maintenance", name)
+		}
+		var fields map[string]any
+		if json.Unmarshal([]byte(arguments), &fields) != nil {
+			return "", fmt.Errorf("invalid handbook tool arguments")
+		}
+		pathArg := toolArgString(fields, "path")
+		if pathArg == "" {
+			pathArg = toolArgString(fields, "directory")
+		}
+		if !isHandbookPath(pathArg) {
+			return "", fmt.Errorf("handbook maintenance is limited to handbook/ paths")
+		}
+	}
 	if strings.TrimSpace(name) == "goal_checkpoint" && GoalIDFromContext(ctx) == "" {
 		return "", fmt.Errorf("goal_checkpoint is only available during a managed goal run")
 	}
