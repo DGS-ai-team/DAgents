@@ -173,3 +173,9 @@ root 已运行 Session、Turn、Policy 全包 race，通过；Tools 与 shared/c
 root 复验 SimplifiedAutoPanel 15项前端测试通过，并在5173浅色1280×720实际查看上下半页：经验标题顶端对齐、正文限高内部滚动，下方保存按钮与手册目录可发现。修复提交2f9748dc；新版内嵌资产待随下一次Node重启部署。Manage深色1787×1216实际检查能力市场空态、上传Skill弹窗、配置LLM空态，未见重叠或裁切；未上传或发布任何内容。这不覆盖有数据详情及窄屏。
 
 工作组WS未带Node token的缺口已定位，修复的Workgroup全包race通过，仍待真实Manage连接复验。旧Goal/Risk注入链默认未启用但存在残留可执行分支，继续清理；旧trigger拒绝栅栏须保留以防历史记录重新执行。
+
+### 工作组鉴权代码验收与发布状态
+
+91a70c4c 将工作组WS接入已有Node Manage token；拨号读取单一provider。生产provider捕获启动时凭据，setup修改要求重启，不宣称热轮换。root在最终单一provider代码上运行Workgroup全包race，通过（3.793秒）。真实Manage连接尚未复验，当前运行服务仍为idle-completion构建。共享工作区正在清理旧Risk注入链，中间态存在编译错误，须待清理完成后构建，不能误报最新修复已部署。
+
+另实际检查Manage深色桌面的版本发布表单及案例库空态，未见重叠；未上传安装包、未发布版本、未创建案例。窄屏及非空详情继续保留为待验收。
