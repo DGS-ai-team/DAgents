@@ -327,6 +327,11 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 18766 已切换至新二进制，进程 PID 25660，健康检查与 `/ui/` 均返回 200，trigger 列表可只读访问。运行时仍使用原隔离 Auto UI runtime 目录；监听使用临时 bootstrap 副本恢复原 18766 端口，原 `config.yaml` 未改动。
 - 条件脚本结论保持保守：未把此前未启用 `bash_run` 的结果写成真实 false 路径；隔离库中该情况是执行错误。启用工具后的非零退出码与拒绝对照已记录，但本次只部署分类修复，未触发生产 Auto。
 
+### 2026-09-10 隔离Node进程重启黑盒复核
+
+- `go test ./node/cmd/dagents-node -run '^TestProcessRestartRecovery$' -count=1 -timeout=180s` 与对应 `-race` 均通过。测试启动真实 Node 二进制两次，使用临时端口、临时 SQLite/runtime 和 HTTP fake LLM，验证未知工具执行重开恢复及 HITL 重开恢复，模型调用次数与终态事件均有断言。
+- 该进程级 fixture 未配置 Auto profile/default trigger 投影，因此不能据此宣称“默认 trigger 真实到期后只执行一次”。默认 trigger 的启动校正和冻结仍由隔离 API race 覆盖；真实到期黑盒留作后续专门验收，不连接 18766。
+
 ### 2026-09-10 默认 trigger 重启边界复核
 
 - 在隔离临时目录上的 `TestNewServerStartupRebuildsOnlyAutoDefaults` 与 `TestNewServerStartupKeepsPendingAutoDefaultFrozen` 以 `go test -race` 重跑通过，覆盖重开后的默认 trigger 校正、待恢复投递冻结及普通 trigger 隔离；未触发 18766 的 Auto。
