@@ -110,3 +110,11 @@ Manage重新登录后，1787像素桌面截图检查首页和有数据的Auto总
 - 定时任务页及关于页的嵌入面板均有整宽空灰色栏。对应面板在 embedded 模式隐藏了标题内容，但仍渲染 header；已交由 Luna 修复并保留非嵌入弹窗头。
 - 忙碌时允许当前回合加一条合并唤醒；不能仅凭 fire_count 增长判定重复执行。生产 Manager/Scheduler 的多次到期、关闭后取消排队专项测试正在补充。
 - 无工作通知需要可信结束信号，不能通过自然语言猜测。已安排受验证 Auto 激活专用的最小控制信号实现，普通聊天、写入、错误及审批不得借此静默；尚未完成，不能作为已验收能力。
+
+### 补充审查结果（同日）
+
+开发前端 5173 的 1280×720 浅色实际截图确认：关于页与定时任务页的空 header 灰条已消失。此证据针对工作区前端，18766 内嵌资产尚未重新部署此批修改。
+
+忙碌专项测试强化为必须实际存在一条排队投递后，root 执行 `go test -race ./node/internal/api -run TestSchedulerBusyAutoWakeupsCoalesceAndDisableDoesNotRunQueued -count=3` 三次均失败（queue=0、active=true）。检查证明测试漏接 `SetTriggerDeliveryTracker`，`NewScheduler` 本身不会完成该连接。因此撤回原测试可证明关闭排队取消的判断，需补生产同构连接后重验；这不是生产调度缺陷的证明。
+
+UI 审查也发现当前 Auto 默认 trigger 仍被通用编辑入口当作用户 trigger。计划要求频率配置为唯一编辑入口，因此必须区分当前 Auto（托管、跳转设置）、用户 trigger（可编辑）和退役/未知控制器（只读不可执行），不能以“当前 Auto 可编辑”的测试断言作为验收标准。
