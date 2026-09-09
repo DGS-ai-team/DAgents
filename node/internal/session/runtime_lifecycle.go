@@ -653,6 +653,18 @@ func (r *runtime) lifecycleBeginInputTurnLocked(source turn.TurnSource) error {
 		}
 		r.turnBudget = budget
 	}
+	// Only a provider-validated activation receives the Agent-owned tool-round
+	// budget. It deliberately replaces the legacy Auto step/call/token limits;
+	// those limits must not leak into the new activation. Untrusted triggers
+	// and human turns retain the resolver's ordinary budget.
+	if source == turn.TurnSourceTrigger && r.triggerMaxToolRounds > 0 {
+		r.turnBudget = turn.TurnBudget{
+			MaxToolRounds:       r.triggerMaxToolRounds,
+			ReserveFinalSummary: true,
+		}
+	} else if source == turn.TurnSourceTrigger {
+		r.turnBudget.MaxToolRounds = 0
+	}
 
 	now := time.Now().UTC()
 	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
@@ -772,7 +784,7 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 	}
 	decision := r.turnCoordinator.BudgetDecisionFor(turn.CommandStartStep)
 	if !decision.Allowed {
-		if decision.Reason == "max_steps" || decision.Reason == "max_tool_calls" {
+		if decision.Reason == "max_steps" || decision.Reason == "max_tool_calls" || decision.Reason == "max_tool_rounds" {
 			summaryCommand := turn.TurnCommand{
 				Type: turn.CommandStartStep, SessionID: r.session.ID, TurnID: identity,
 				StepID: lifecycleStepID(identity, state.StepIndex+1), Generation: generation,

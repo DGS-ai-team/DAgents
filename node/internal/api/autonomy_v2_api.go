@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 )
@@ -14,6 +15,7 @@ import (
 func (s *Server) registerAutonomyV2Routes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/auto-config", s.handleAutonomyV2ConfigGet)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/auto-config", s.handleAutonomyV2ConfigPut)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/auto-config/reconcile", s.handleAutonomyV2ConfigReconcile)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/todos", s.handleAutonomyV2TodosGet)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/todos", s.handleAutonomyV2TodoPost)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}/todos/{todo_id}", s.handleAutonomyV2TodoPatch)
@@ -87,13 +89,52 @@ func (s *Server) handleAutonomyV2ConfigPut(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, 400, "invalid_config", err.Error(), nil)
 		return
 	}
+	if s.triggerStore == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "trigger_sync_unavailable", "trigger store unavailable; profile was not saved", nil)
+		return
+	}
+	s.autoConfigMu.Lock()
+	defer s.autoConfigMu.Unlock()
 	p := autonomy.Profile{AgentID: id, Responsibility: in.Responsibility, WakeIntervalSeconds: in.WakeIntervalSeconds, MaxToolRounds: in.MaxToolRounds, DreamingEnabled: in.DreamingEnabled, DreamingTime: in.DreamingTime, Timezone: in.Timezone}
 	if err := s.autonomyStore.PutProfile(p, in.ExpectedRevision); err != nil {
 		writeAPIError(w, statusForAutonomyError(err), "config_update_failed", err.Error(), nil)
 		return
 	}
 	updated, _ := s.autonomyStore.GetProfile(id)
+	_, syncErr := s.triggerStore.EnsureAutoDefault(id, updated.WakeIntervalSeconds, time.Now().UTC())
+	if syncErr != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "trigger_sync_failed", syncErr.Error(), map[string]any{
+			"saved_profile": updated,
+			"trigger_sync":  "pending",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleAutonomyV2ConfigReconcile repairs the trigger projection from the
+// current persisted profile without changing the profile revision.
+func (s *Server) handleAutonomyV2ConfigReconcile(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.autonomyV2Agent(w, r)
+	if !ok {
+		return
+	}
+	if s.triggerStore == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "trigger_sync_unavailable", "trigger store unavailable", nil)
+		return
+	}
+	s.autoConfigMu.Lock()
+	defer s.autoConfigMu.Unlock()
+	profile, exists := s.autonomyStore.GetProfile(id)
+	if !exists {
+		profile = autonomy.Profile{AgentID: id, MaxToolRounds: 32, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
+	}
+	trigger, err := s.triggerStore.EnsureAutoDefault(id, profile.WakeIntervalSeconds, time.Now().UTC())
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "trigger_sync_failed", err.Error(), map[string]any{"profile": profile, "trigger_sync": "pending"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile": profile, "trigger": trigger})
 }
 
 func (s *Server) handleAutonomyV2TodosGet(w http.ResponseWriter, r *http.Request) {

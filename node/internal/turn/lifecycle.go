@@ -121,6 +121,7 @@ const (
 // TurnBudget contains the sole hard execution limits for one logical Turn.
 type TurnBudget struct {
 	MaxSteps            int           `json:"max_steps"`
+	MaxToolRounds       int           `json:"max_tool_rounds"`
 	MaxToolCalls        int           `json:"max_tool_calls"`
 	MaxToolRetries      int           `json:"max_tool_retries"`
 	MaxWallTime         time.Duration `json:"max_wall_time_ns"`
@@ -150,6 +151,7 @@ type StepUsage struct {
 // provider events.
 type TurnUsage struct {
 	Steps                      int     `json:"steps"`
+	ToolRounds                 int     `json:"tool_rounds"`
 	ToolCalls                  int     `json:"tool_calls"`
 	ToolRetries                int     `json:"tool_retries"`
 	InputTokens                int     `json:"input_tokens"`

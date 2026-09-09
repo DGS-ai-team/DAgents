@@ -135,6 +135,8 @@ type runtime struct {
 	// even when the persisted Agent revision did not change.
 	runtimeMultimodalEnabled bool
 	turnBudget               turn.TurnBudget
+	triggerMaxToolRounds     int
+	triggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
 	autoAgent                bool
 	budgetResolver           func() (turn.TurnBudget, error)
 }
@@ -252,6 +254,11 @@ func newRuntimeWithPublisher(
 		llmProfileDigest:         strings.TrimSpace(turnOpts.LLMProfileDigest),
 		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
 		turnBudget:               turnOpts.Budget,
+		// A trigger cap is activation-scoped and can only be granted by the
+		// trusted provider below. Never carry a static option into arbitrary
+		// trigger envelopes.
+		triggerMaxToolRounds:     0,
+		triggerToolRoundProvider: turnOpts.TriggerToolRoundProvider,
 		autoAgent:                turnOpts.AutoAgent,
 		budgetResolver:           turnOpts.BudgetResolver,
 		onLifecycle:              turnOpts.OnLifecycle,
@@ -731,7 +738,25 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	} else if record.Kind == InputKindChildAgent {
 		source = turn.TurnSourceChildAgent
 	}
+	baseBudget := r.turnBudget
+	r.triggerMaxToolRounds = 0
+	if record.Kind == InputKindTrigger && r.triggerToolRoundProvider != nil {
+		if limit, trusted, err := r.triggerToolRoundProvider(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)); err != nil {
+			if r.logger != nil {
+				r.logger.Warn("trusted trigger tool-round profile unavailable; activation dropped", "session_id", r.session.ID, "trigger_id", env.TriggerID, "error", err)
+			}
+			return true
+		} else if trusted && limit > 0 {
+			r.triggerMaxToolRounds = limit
+			// A capped trigger is still allowed one no-tool final summary after
+			// its last tool batch. Keep this activation-only flag out of the
+			// runtime's base budget; dispatch restores the snapshot below.
+			r.turnBudget.ReserveFinalSummary = true
+		}
+	}
 	consumed := r.handleInputMessage(ctx, env, source)
+	r.turnBudget = baseBudget
+	r.triggerMaxToolRounds = 0
 	return consumed
 }
 

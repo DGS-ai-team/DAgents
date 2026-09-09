@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,79 @@ type promptProviderCaptureClient struct {
 	seen      chan struct{}
 	toolBatch bool
 	release   chan struct{}
+}
+
+type triggerRoundCaptureClient struct {
+	mu       sync.Mutex
+	calls    int
+	requests []llm.ChatRequest
+	seen     chan int
+	toolAt   map[int]bool
+}
+
+func (c *triggerRoundCaptureClient) StreamChat(_ context.Context, req llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
+	c.mu.Lock()
+	c.calls++
+	n := c.calls
+	c.requests = append(c.requests, req)
+	c.mu.Unlock()
+	c.seen <- n
+	if (c.toolAt == nil && (n == 1 || n == 3)) || c.toolAt[n] {
+		return llm.ChatResult{ToolCalls: []llm.ToolCall{
+			{ID: fmt.Sprintf("round-%d-a", n), Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"probe.txt"}`}},
+			{ID: fmt.Sprintf("round-%d-b", n), Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"probe.txt"}`}},
+		}, FinishReason: "tool_calls"}, nil
+	}
+	return llm.ChatResult{Content: "done", FinishReason: "stop"}, nil
+}
+
+func TestTrustedTriggerRoundBudgetReplacesLegacyAutoLimits(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "probe.txt"), []byte("probe"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.NewRegistry(root, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &triggerRoundCaptureClient{seen: make(chan int, 4), toolAt: map[int]bool{1: true, 2: true}}
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg,
+		policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"read_file": policy.ModeNever}}), nil, TurnOptions{
+			WorkspaceRoot: root,
+			Budget:        turn.TurnBudget{MaxSteps: 1, MaxToolCalls: 1, MaxTotalTokens: 1},
+			TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
+				return 2, agentID == "agent-1" && triggerID == "trusted-default" && deliveryID == "delivery-old-limits", nil
+			},
+		}, logx.Discard())
+	defer mgr.Stop()
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.EnqueueTriggerMessage(s.ID, "trusted-default", "激活", "delivery-old-limits"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		select {
+		case <-client.seen:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for capped trigger completion")
+		}
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.requests) != 3 {
+		t.Fatalf("trusted trigger stopped under legacy budget: %d model requests", len(client.requests))
+	}
+	if len(client.requests[2].Tools) != 0 {
+		t.Fatal("final summary unexpectedly exposed tools")
+	}
+}
+func (*triggerRoundCaptureClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*triggerRoundCaptureClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
 }
 
 func TestAgentPromptProviderFailureSkipsModel(t *testing.T) {
@@ -60,6 +134,143 @@ func TestAgentPromptProviderFailureSkipsModel(t *testing.T) {
 	select {
 	case <-client.seen:
 		t.Fatal("model was called after prompt provider failure")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+func TestTrustedTriggerToolRoundLimitLeavesSummaryAndDoesNotAffectChat(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "probe.txt"), []byte("probe"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.NewRegistry(root, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"read_file": policy.ModeNever}})
+	client := &triggerRoundCaptureClient{seen: make(chan int, 8)}
+	var providerMu sync.Mutex
+	triggerLimit := 1
+	providerLimits := make([]int, 0, 2)
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, pol, nil, TurnOptions{
+		WorkspaceRoot: root,
+		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
+			if agentID == "agent-1" && triggerID == "trusted-default" && deliveryID == "delivery-1" {
+				providerMu.Lock()
+				defer providerMu.Unlock()
+				providerLimits = append(providerLimits, triggerLimit)
+				return triggerLimit, true, nil
+			}
+			if agentID == "agent-1" && triggerID == "trusted-default-2" && deliveryID == "delivery-2" {
+				providerMu.Lock()
+				defer providerMu.Unlock()
+				providerLimits = append(providerLimits, triggerLimit)
+				return triggerLimit, true, nil
+			}
+			return 0, false, nil
+		},
+	}, logx.Discard())
+	defer mgr.Stop()
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.EnqueueTriggerMessage(s.ID, "trusted-default", "激活", "delivery-1"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-client.seen:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for trusted trigger request")
+		}
+	}
+	client.mu.Lock()
+	if len(client.requests) < 2 || len(client.requests[1].Tools) != 0 {
+		got := 0
+		if len(client.requests) >= 2 {
+			got = len(client.requests[1].Tools)
+		}
+		client.mu.Unlock()
+		t.Fatalf("reserved summary still exposed tools: %d", got)
+	}
+	toolResults := 0
+	for _, message := range client.requests[1].Messages {
+		if message.Role == "tool" {
+			toolResults++
+		}
+	}
+	if toolResults != 2 {
+		client.mu.Unlock()
+		t.Fatalf("first tool batch results=%d, want 2", toolResults)
+	}
+	client.mu.Unlock()
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "普通聊天", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-client.seen:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for ordinary chat request")
+		}
+	}
+	client.mu.Lock()
+	chatTools := len(client.requests[2].Tools)
+	client.mu.Unlock()
+	if chatTools == 0 {
+		t.Fatal("ordinary chat unexpectedly inherited trigger round cap")
+	}
+	providerMu.Lock()
+	triggerLimit = 2
+	providerMu.Unlock()
+	if err := mgr.EnqueueTriggerMessage(s.ID, "trusted-default-2", "再次激活", "delivery-2"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-client.seen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for second trusted trigger request")
+	}
+	providerMu.Lock()
+	gotLimits := append([]int(nil), providerLimits...)
+	providerMu.Unlock()
+	if len(gotLimits) != 2 || gotLimits[0] != 1 || gotLimits[1] != 2 {
+		t.Fatalf("trigger profile was not refreshed per activation: %v", gotLimits)
+	}
+}
+
+func TestTrustedTriggerToolRoundProviderErrorSkipsModel(t *testing.T) {
+	root := t.TempDir()
+	reg, err := tools.NewRegistry(root, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &triggerRoundCaptureClient{seen: make(chan int, 1)}
+	providerCalled := make(chan struct{}, 1)
+	mgr := NewManager("agent-1", stream.NewHub(8, logx.Discard()), client, reg, policy.NewDefaultEngine(), nil, TurnOptions{
+		WorkspaceRoot: root,
+		TriggerToolRoundProvider: func(context.Context, string, string, string) (int, bool, error) {
+			providerCalled <- struct{}{}
+			return 0, false, errors.New("profile unavailable")
+		},
+	}, logx.Discard())
+	defer mgr.Stop()
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.EnqueueTriggerMessage(s.ID, "trusted-default", "激活", "delivery-error"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-providerCalled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("trigger round provider was not called")
+	}
+	select {
+	case n := <-client.seen:
+		t.Fatalf("model call %d occurred after trigger budget provider failure", n)
 	case <-time.After(500 * time.Millisecond):
 	}
 }

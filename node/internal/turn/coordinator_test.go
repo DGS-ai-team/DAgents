@@ -681,6 +681,35 @@ func TestTurnCoordinatorTracksAndPreflightsTurnBudget(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorPreflightsToolRoundsSeparatelyFromToolCalls(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-rounds", "agent-1")
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-rounds", TurnID: "turn-rounds", Generation: 1, Source: TurnSourceTrigger, Budget: TurnBudget{MaxToolRounds: 1, MaxSteps: 4, ReserveFinalSummary: true}, At: now},
+		{Type: CommandStartStep, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, At: now},
+	} {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
+		t.Fatalf("tool rounds=%d, want 1", got)
+	}
+	if _, err := c.Dispatch(TurnCommand{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, ToolBatchID: "step-1-batch", At: now}); err != nil {
+		t.Fatalf("duplicate assistant event should be idempotent: %v", err)
+	}
+	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
+		t.Fatalf("duplicate assistant changed tool rounds=%d, want 1", got)
+	}
+	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_tool_rounds" {
+		t.Fatalf("next tool round should be rejected: %+v", decision)
+	}
+	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); !decision.Allowed {
+		t.Fatalf("final summary should remain allowed: %+v", decision)
+	}
+}
+
 func TestTurnCoordinatorAccumulatesModelUsageAcrossAttempts(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")

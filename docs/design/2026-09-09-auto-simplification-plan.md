@@ -106,3 +106,13 @@ Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注
 新增可折叠 `AutoTodoPanel`，支持文本和状态编辑、创建与版本校验删除；切换 Agent 清理草稿和保存锁，旧请求不能影响新 Agent。加载失败禁止写入并提供重试；同 Agent 冲突重载保留草稿，服务器已删除条目时可恢复到新增输入框。
 
 修复新配置和 Todo 的前端请求封装：原实现把 method/body 放到未被读取的第三个参数，删除版本字段亦不匹配；现按实际 fetch 封装传入方法及 expected_revision。组件 mock 测试不足以发现此类问题，增加请求层断言。主 Agent 复验 Todo 面板、新配置面板及请求测试共 12 项通过。面板尚未挂入正式聊天入口，也未完成新版视觉验收。
+
+### 默认激活接线与轮次限制
+
+配置 PUT 现同步默认 trigger；相同频率不重排，关闭禁用。Profile 为配置事实，trigger 为确定性派生：两份文件不宣称原子事务。触发器写入失败返回 503 和已保存 Profile（含新版本），可调用 `POST /auto-config/reconcile` 只修复派生记录，不再次递增 Profile；配置保存与修复串行。正式 UI 接入时需呈现这一部分成功状态并提供重试。
+
+启动按未归档 Auto Agent 的新配置重建默认 trigger，缺配置默认关闭，普通 Agent/trigger 保持原行为。未决 delivery 重启后仍按既有 recovery 机制保留并阻止调度启动，不自动重放；这项恢复体验尚需在最终切换前收尾。
+
+主会话每次默认激活校验 Agent 类型/归属、稳定 trigger ID、固定目标会话和 pending delivery，读取当前频率与工具轮次。配置关闭、触发器未同步、归属错误或 provider 失败时不调用模型。可信激活采用仅工具轮次和一次无工具收尾的预算，普通聊天/普通 trigger 保持原有预算。职责、经验及 Todo 沿用前批同一主会话注入链路。
+
+主 Agent 复验 API 新配置/启动专项 race 3.196 秒，Session/Turn 全包 race 32.708 / 11.077 秒，Triggers 全包 race 1.851 秒。测试模型为本地桩；真实提供商与视觉验收尚未进行。旧 cycle/intent/event-source/maintenance 生产入口仍待删除，不能把新默认激活已接通表述为全部架构切换完成。后续依次处理旧入口删除、用户输入优先、脚本条件、dreaming、正式 UI/Manage 及真实验收，不新增旧消息兼容层。

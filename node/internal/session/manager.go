@@ -34,6 +34,12 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
+	// TriggerMaxToolRounds applies only to trusted trigger-origin Turns. User
+	// messages retain the ordinary unlimited round behavior.
+	TriggerMaxToolRounds int
+	// TriggerToolRoundProvider authorizes and supplies the per-activation cap.
+	// It must validate the durable trigger/controller/owner/delivery identity.
+	TriggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
 	// AgentPromptProvider loads the current Agent-owned responsibilities,
 	// experience and todo snapshot at each new Turn boundary. It is never
 	// inherited by temporary child runtimes.

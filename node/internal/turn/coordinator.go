@@ -855,6 +855,19 @@ func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
 	if c.step == nil {
 		return fmt.Errorf("assistant response requires an active step")
 	}
+	if command.HasTools && c.batch != nil {
+		batchID := strings.TrimSpace(command.ToolBatchID)
+		if batchID == "" {
+			batchID = c.step.ID + "-batch"
+		}
+		// Replayed assistant events arrive after the step has already entered
+		// tool execution, so they must be handled before advancing the state
+		// machine a second time.
+		if c.batch.ID != batchID {
+			return fmt.Errorf("tool batch already exists for step %s", c.step.ID)
+		}
+		return nil
+	}
 	if err := c.step.Advance(EventAssistantMessageRecorded, command.At, command.Reason); err != nil {
 		return err
 	}
@@ -866,6 +879,7 @@ func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
 		if batchID == "" {
 			batchID = c.step.ID + "-batch"
 		}
+		c.turn.Usage.ToolRounds++
 		c.batch = &ToolBatch{ID: batchID, StepID: c.step.ID, Status: "created"}
 		c.step.ToolBatchID = batchID
 		return c.step.Advance(EventToolBatchCreated, command.At, command.Reason)
@@ -1407,6 +1421,9 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		} else if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls >= c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
+		} else if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds >= c.turn.Budget.MaxToolRounds && !command.FinalSummary {
+			decision.Allowed = false
+			decision.Reason = "max_tool_rounds"
 		}
 	case CommandToolCallRecorded:
 		// ToolCall facts are emitted before this preflight reaches the actual
@@ -1414,6 +1431,10 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls > c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
+		}
+		if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds > c.turn.Budget.MaxToolRounds {
+			decision.Allowed = false
+			decision.Reason = "max_tool_rounds"
 		}
 	case CommandToolExecutionRetrying:
 		if c.turn.Budget.MaxToolRetries > 0 && c.turn.Usage.ToolRetries >= c.turn.Budget.MaxToolRetries {

@@ -71,6 +71,7 @@ type Server struct {
 	eventStore           *events.Store
 	goalWake             goals.WakeFunc
 	goalWakeMu           sync.Mutex
+	autoConfigMu         sync.Mutex
 	registrar            *manage.Registrar
 	updateChecker        *manage.UpdateChecker
 	packageUploader      *manage.PackageUploader
@@ -317,7 +318,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		autonomyStore = opened
 	}
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
+	var triggerRoundProvider func(context.Context, string, string, string) (int, bool, error)
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
+		TriggerToolRoundProvider: func(ctx context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
+			if triggerRoundProvider == nil {
+				return 0, false, nil
+			}
+			return triggerRoundProvider(ctx, agentID, triggerID, deliveryID)
+		},
 		WorkspaceRoot: cfg.RuntimeDir(),
 		// MaxSteps 由各 Agent config_snapshot（defaults.llm.max_steps）在装入 runtime 时写入。
 		SkillsRoot:                  cfg.SkillsRoot(),
@@ -584,6 +592,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		desktopBridge:        desktopbridge.NewFromEnv(),
 		pendingRuntimeReload: make(map[string]string),
 	}
+	triggerRoundProvider = s.triggerToolRoundProvider
 	if s.workgroupAgents != nil {
 		s.workgroupAgents.server = s
 	}
@@ -811,6 +820,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 					}
 				}
 			} else if s.startupErr == nil {
+				s.startupErr = err
+			}
+		}
+		if s.startupErr == nil && s.autonomyStore != nil && s.triggerStore != nil {
+			if err := s.reconcileAutoDefaults(validAuto); err != nil {
 				s.startupErr = err
 			}
 		}

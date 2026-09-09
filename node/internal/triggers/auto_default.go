@@ -16,6 +16,13 @@ func AutoDefaultTriggerID(agentID string) string {
 	return "auto-default:" + strings.TrimSpace(agentID)
 }
 
+// ConfiguredIntervalSeconds extracts a validated positive interval from a
+// trigger condition.
+func ConfiguredIntervalSeconds(condition map[string]any) (int64, bool) {
+	seconds := intFromAny(condition["interval_seconds"])
+	return int64(seconds), seconds > 0
+}
+
 // EnsureAutoDefault creates or reconciles the one system-owned Auto trigger
 // for agentID. A zero interval disables it without deleting the durable
 // definition, and clears any in-process delivery identity so an already

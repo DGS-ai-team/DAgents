@@ -105,6 +105,15 @@ paths:
       responses:
         "200": {description: 已保存, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Profile"}}}}
         "409": {description: revision 冲突}
+  /v1/agents/{agent_id}/auto-config/reconcile:
+    post:
+      summary: 重建 Auto 默认唤醒
+      description: 根据当前已保存配置幂等重建系统默认 trigger，不修改配置 revision。
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        "200": {description: 已同步, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ConfigReconcileResponse"}}}}
+        "503": {description: 同步失败}
   /v1/agents/{agent_id}/experience:
     get:
       summary: 获取 Auto 经验
@@ -1652,6 +1661,12 @@ components:
         dreaming_enabled: {type: boolean}
         dreaming_time: {type: string}
         timezone: {type: string}
+    AutonomyV2ConfigReconcileResponse:
+      type: object
+      required: [profile, trigger]
+      properties:
+        profile: {$ref: '#/components/schemas/AutonomyV2Profile'}
+        trigger: {$ref: '#/components/schemas/TriggerDefinition'}
     AutonomyV2Experience:
       type: object
       required: [agent_id, revision, content, updated_at]
