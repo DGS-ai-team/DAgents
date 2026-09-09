@@ -20,6 +20,46 @@ type MaintenanceReceipt struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 	CandidateJSON   json.RawMessage `json:"candidate_json,omitempty"`
 	NextCursor      int64           `json:"next_cursor,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+}
+
+func (s *Store) SetMaintenanceSessionID(agentID, receiptID, sessionID string) error {
+	agentID, receiptID, sessionID = strings.TrimSpace(agentID), strings.TrimSpace(receiptID), strings.TrimSpace(sessionID)
+	if agentID == "" || receiptID == "" || sessionID == "" {
+		return fmt.Errorf("maintenance session identity is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.data.MaintenanceReceipts[receiptID]
+	if !ok || r.AgentID != strings.TrimSpace(agentID) {
+		return ErrNotFound
+	}
+	if r.SessionID != "" && r.SessionID != sessionID {
+		return fmt.Errorf("maintenance receipt session already bound")
+	}
+	old := r
+	r.SessionID = strings.TrimSpace(sessionID)
+	s.data.MaintenanceReceipts[receiptID] = r
+	if err := s.saveLocked(); err != nil {
+		s.data.MaintenanceReceipts[receiptID] = old
+		return err
+	}
+	return nil
+}
+
+func (s *Store) IsMaintenanceSession(agentID, sessionID string) bool {
+	agentID, sessionID = strings.TrimSpace(agentID), strings.TrimSpace(sessionID)
+	if agentID == "" || sessionID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, r := range s.data.MaintenanceReceipts {
+		if r.AgentID == agentID && r.SessionID == sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 type MaintenanceReservation struct {
@@ -27,6 +67,44 @@ type MaintenanceReservation struct {
 	// Claimed is true only for the caller that created a new pending receipt.
 	// It is deliberately transient and is not persisted in the receipt.
 	Claimed bool
+}
+
+// MaintenanceAvailableTokens returns the remaining maintenance allowance after
+// all settled usage and pending risk/maintenance reservations. A zero cap means
+// unlimited maintenance; disabled/unknown profiles return zero with false.
+func (s *Store) MaintenanceAvailableTokens(agentID string) (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	agentID = strings.TrimSpace(agentID)
+	p, ok := s.data.Profiles[agentID]
+	if !ok || !p.Enabled {
+		return 0, false
+	}
+	u := s.data.Usage[agentID]
+	if u.Unknown || u.UnknownTokens > 0 {
+		return 0, false
+	}
+	available := int64(math.MaxInt64)
+	if p.MaintenanceTokenBudget > 0 {
+		available = p.MaintenanceTokenBudget - u.MaintenanceTokens
+		if available < 0 {
+			available = 0
+		}
+	}
+	if p.TotalTokenBudget > 0 {
+		total, good := s.totalUsageLocked(agentID, u)
+		if !good {
+			return 0, false
+		}
+		rem := p.TotalTokenBudget - total
+		if rem < available {
+			available = rem
+		}
+		if available < 0 {
+			available = 0
+		}
+	}
+	return available, true
 }
 
 func (s *Store) SaveMaintenanceResult(agentID, receiptID string, candidates json.RawMessage, nextCursor, used int64, unknown bool) error {

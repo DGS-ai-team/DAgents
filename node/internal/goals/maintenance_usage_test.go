@@ -22,6 +22,39 @@ func maintenanceStore(t *testing.T) (*Store, time.Time) {
 	return s, now
 }
 
+func TestMaintenanceAvailableTokensTable(t *testing.T) {
+	s, now := maintenanceStore(t)
+	if got, ok := s.MaintenanceAvailableTokens(" auto-maint "); !ok || got != 100 {
+		t.Fatalf("initial=%d ok=%v", got, ok)
+	}
+	if _, err := s.SettleMaintenance("auto-maint", "seed", 100, false, now); err == nil { /* no seed receipt */
+	}
+	if _, err := s.BeginMaintenance("auto-maint", "m-risk", "fp", 10, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.MaintenanceAvailableTokens("auto-maint"); got != 100 {
+		t.Fatalf("pending maintenance=%d", got)
+	}
+	if _, err := s.SaveProfile(AutoProfile{AgentID: "unlimited", Enabled: true}, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.MaintenanceAvailableTokens("unlimited"); got != math.MaxInt64 {
+		t.Fatalf("unlimited=%d", got)
+	}
+	if _, err := s.SaveProfile(AutoProfile{AgentID: "exhausted", Enabled: true, MaintenanceTokenBudget: 1}, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginMaintenance("exhausted", "e", "fp", 1, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SettleMaintenance("exhausted", "e", 1, false, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.MaintenanceAvailableTokens("exhausted"); got != 0 {
+		t.Fatalf("exhausted=%d", got)
+	}
+}
+
 func TestMaintenanceReceiptPersistsAndSettlesIdempotently(t *testing.T) {
 	s, now := maintenanceStore(t)
 	reservation, err := s.BeginMaintenance("auto-maint", "m-1", "journal-1", 10, now)
