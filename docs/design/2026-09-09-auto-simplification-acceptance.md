@@ -235,3 +235,7 @@ root执行go test ./node/... -count=1 -timeout=180s，Node所有包测试通过�
 按当前代码重新核对：AgentPromptProvider→session→turn将职责/经验放入实际ChatRequest.SystemPrompt，并冻结本轮、下一轮刷新；Todo请求级最新读取及用户/工具CAS共享由agent_prompt_provider与autonomy_v2专项覆盖。默认trigger保存/关闭/重建/冻结有autonomy_default_trigger_api专项。dreaming在CommitDreaming后才ResetActiveContext并标记/确认，保留失败、审批恢复、孤立attempt和队列恢复测试；不再引用删除的旧maintenance实现作为证据。真实进程重启后默认trigger再次到期的黑盒证明仍可补强，不能将组件重建测试说成该场景实测。
 
 root实际18766深色390×844检查通用设置上下半页、MCP空态、Linux通道空态。后两页未见裁切或重叠；通用页运行状态两卡过窄造成标签与状态换行，已安排最小布局修复。验收后恢复默认视口并关闭临时标签页。本批没有更改任何配置值。
+
+### 追加Node窄屏视觉验收
+
+root在当前18766深色390×844依次查看能力上下半页、技能空态、输出防护上下半页、上下文上下半页。前三项字段、长说明、操作按钮无裁切或重叠；上下文页“当前对话诊断”的“查看”操作被压成两行，已交Luna局部修复。未改配置值，结束后恢复默认视口并关闭临时页。此前6feca467状态卡片修复在5173浅色390×844已实际确认两列均分宽度、服务状态单行；内嵌服务尚未部署该单独CSS提交。
