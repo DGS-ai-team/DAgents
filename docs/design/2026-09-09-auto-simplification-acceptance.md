@@ -307,3 +307,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - delivery 21034fde-2e15-4449-bc34-e0d2b65b2f61批准后历史为skipped/condition not satisfied；主会话transcript空、无active/queue/pending_hitl。
 - 再次触发delivery 5d285ad8-39db-4b29-a700-40dd6acca5fa并拒绝，同样终止且会话空。当前历史将拒绝也展示为condition not satisfied，不能据此独立证明未执行脚本；该区分及具有可观察副作用的拒绝证据仍需补查。本轮不声明true投递已实测。
 - 已验证工作目录后停止隔离PID21920，保留夹具数据；未改18766配置。
+
+### 2026-09-10 条件false实测结论更正：工具未启用被误分类
+
+- root只读查询隔离sessions.db的turn_events/tool.result.recorded，发现delivery 21034fde（最初exit 1批准）与4eb7a9e6（标记脚本批准）的result_content均为 `ERROR: ERROR: tool "bash_run" is not enabled`。脚本未真正执行。
+- 因此此前“条件false实际运行通过”结论撤回：实际仅证明审批后结束，没有证明退出码false路径。拒绝后的无文件证据也不能单独成立，须在启用工具后以成功对照重测。
+- 已交Luna修复：执行错误必须区别于条件false，拒绝必须区别于false，保持工具开关和既有审批约束；添加禁用bash_run的生产路径回归。该问题未闭环，整体目标保持进行中。
