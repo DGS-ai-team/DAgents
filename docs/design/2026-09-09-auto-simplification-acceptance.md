@@ -300,3 +300,10 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 
 - root确认两台Agent空闲后，将6d1d880b构建切入18766（dagents-node-resource-ui.exe，PID6928），保留原环境与运行目录。
 - 当前嵌入式UI、390×844暗色实际截图确认MCP保存/Linux刷新单行，以及授权目录/有效期输入框正常高度；未修改配置、未创建授权。视口恢复，临时标签已关闭。
+
+### 2026-09-10 条件脚本实际进程验收（false与reject）
+
+- 隔离18768使用当前Node二进制及专用Agent，创建用户trigger ce8ce185-f243-431d-b348-1b335fc575a3，条件exit 1、86400秒间隔。首次禁用时手动触发被跳过；启用后手动触发进入原bash_run审批。
+- delivery 21034fde-2e15-4449-bc34-e0d2b65b2f61批准后历史为skipped/condition not satisfied；主会话transcript空、无active/queue/pending_hitl。
+- 再次触发delivery 5d285ad8-39db-4b29-a700-40dd6acca5fa并拒绝，同样终止且会话空。当前历史将拒绝也展示为condition not satisfied，不能据此独立证明未执行脚本；该区分及具有可观察副作用的拒绝证据仍需补查。本轮不声明true投递已实测。
+- 已验证工作目录后停止隔离PID21920，保留夹具数据；未改18766配置。
