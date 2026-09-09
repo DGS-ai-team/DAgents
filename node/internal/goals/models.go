@@ -99,6 +99,8 @@ type AgentUsage struct {
 	AgentID           string    `json:"agent_id"`
 	BusinessTokens    int64     `json:"business_tokens"`
 	MaintenanceTokens int64     `json:"maintenance_tokens"`
+	RiskReviewTokens  int64     `json:"risk_review_tokens"`
+	RiskReviewUnknown bool      `json:"risk_review_unknown"`
 	UnknownTokens     int64     `json:"unknown_tokens"`
 	Unknown           bool      `json:"unknown"`
 	UnknownReason     string    `json:"unknown_reason,omitempty"`

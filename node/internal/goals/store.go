@@ -22,7 +22,7 @@ var ErrConflict = errors.New("goal state conflict")
 var ErrUsageUnknown = errors.New("agent usage is unknown")
 var ErrEventSchedulingUnsupported = errors.New("event scheduling is not supported")
 
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 
 type disk struct {
 	SchemaVersion            int                              `json:"schema_version,omitempty"`
@@ -36,6 +36,8 @@ type disk struct {
 	FinalizationFingerprints map[string]string                `json:"finalization_fingerprints,omitempty"`
 	MaintenanceReceipts      map[string]MaintenanceReceipt    `json:"maintenance_receipts,omitempty"`
 	MaintenanceOccurrences   map[string]MaintenanceOccurrence `json:"maintenance_occurrences,omitempty"`
+	RiskReviewReceipts       map[string]RiskReviewReceipt     `json:"risk_review_receipts,omitempty"`
+	RiskObservations         map[string]RiskObservationRecord `json:"risk_observations,omitempty"`
 }
 type Store struct {
 	mu                  sync.RWMutex
@@ -119,7 +121,7 @@ func cloneRuns(in []Run) []Run {
 type WakeFunc func(context.Context, Goal, Run) (string, error)
 
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, data: disk{SchemaVersion: CurrentSchemaVersion, Goals: map[string]Goal{}, Runs: map[string][]Run{}, Profiles: map[string]AutoProfile{}, Usage: map[string]AgentUsage{}, UsageReceipts: map[string]UsageReceipt{}, MaintenanceReceipts: map[string]MaintenanceReceipt{}, MaintenanceOccurrences: map[string]MaintenanceOccurrence{}, MigrationIssues: map[string]MigrationIssue{}, ScheduleIntents: map[string]ScheduleIntent{}, FinalizationFingerprints: map[string]string{}}}
+	s := &Store{path: path, data: disk{SchemaVersion: CurrentSchemaVersion, Goals: map[string]Goal{}, Runs: map[string][]Run{}, Profiles: map[string]AutoProfile{}, Usage: map[string]AgentUsage{}, UsageReceipts: map[string]UsageReceipt{}, MaintenanceReceipts: map[string]MaintenanceReceipt{}, MaintenanceOccurrences: map[string]MaintenanceOccurrence{}, RiskReviewReceipts: map[string]RiskReviewReceipt{}, RiskObservations: map[string]RiskObservationRecord{}, MigrationIssues: map[string]MigrationIssue{}, ScheduleIntents: map[string]ScheduleIntent{}, FinalizationFingerprints: map[string]string{}}}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -172,6 +174,12 @@ func OpenStore(path string) (*Store, error) {
 	}
 	if s.data.MaintenanceOccurrences == nil {
 		s.data.MaintenanceOccurrences = map[string]MaintenanceOccurrence{}
+	}
+	if s.data.RiskReviewReceipts == nil {
+		s.data.RiskReviewReceipts = map[string]RiskReviewReceipt{}
+	}
+	if s.data.RiskObservations == nil {
+		s.data.RiskObservations = map[string]RiskObservationRecord{}
 	}
 	for key, occurrence := range s.data.MaintenanceOccurrences {
 		if occurrence.Status == MaintenanceOccurrencePending {
@@ -834,7 +842,7 @@ func (s *Store) ApplyAutoAction(agentID, cycleID, action string, expectedProfile
 				if p.BusinessTokenBudget > 0 && u.BusinessTokens >= p.BusinessTokenBudget {
 					return AutoProfile{}, Goal{}, fmt.Errorf("agent business token budget exhausted")
 				}
-				if p.TotalTokenBudget > 0 && (u.BusinessTokens >= p.TotalTokenBudget || u.MaintenanceTokens >= p.TotalTokenBudget-u.BusinessTokens) {
+				if total, ok := s.totalUsageLocked(agentID, u); p.TotalTokenBudget > 0 && (!ok || total >= p.TotalTokenBudget) {
 					return AutoProfile{}, Goal{}, fmt.Errorf("agent total token budget exhausted")
 				}
 			}
@@ -1139,7 +1147,7 @@ func (s *Store) CreateManagedCycle(in CreateInput, idempotencyKey string, expect
 	if profile.MaintenanceTokenBudget > 0 && usage.MaintenanceTokens >= profile.MaintenanceTokenBudget {
 		return Goal{}, fmt.Errorf("agent maintenance token budget exhausted")
 	}
-	if profile.TotalTokenBudget > 0 && (usage.BusinessTokens >= profile.TotalTokenBudget || usage.MaintenanceTokens >= profile.TotalTokenBudget-usage.BusinessTokens) {
+	if total, ok := s.totalUsageLocked(profile.AgentID, usage); profile.TotalTokenBudget > 0 && (!ok || total >= profile.TotalTokenBudget) {
 		return Goal{}, fmt.Errorf("agent total token budget exhausted")
 	}
 	seq := 0
@@ -1312,7 +1320,7 @@ func (s *Store) StartRun(id, reason string, now time.Time) (Run, error) {
 		}
 		return Run{}, fmt.Errorf("agent business token budget exhausted")
 	}
-	if profile.TotalTokenBudget > 0 && (usage.BusinessTokens >= profile.TotalTokenBudget || usage.MaintenanceTokens >= profile.TotalTokenBudget-usage.BusinessTokens) {
+	if total, ok := s.totalUsageLocked(profile.AgentID, usage); profile.TotalTokenBudget > 0 && (!ok || total >= profile.TotalTokenBudget) {
 		old := g
 		g.Status, g.StatusReason = StatusPaused, "agent_total_budget_exhausted"
 		g.Revision++

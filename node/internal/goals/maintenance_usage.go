@@ -89,11 +89,10 @@ func (s *Store) BeginMaintenance(agentID, receiptID, fingerprint string, estimat
 		return MaintenanceReservation{}, fmt.Errorf("maintenance budget exhausted")
 	}
 	if p.TotalTokenBudget > 0 {
-		used := u.BusinessTokens
-		if u.MaintenanceTokens > math.MaxInt64-used {
-			return MaintenanceReservation{}, fmt.Errorf("usage overflow")
+		used, ok := s.totalUsageLocked(agentID, u)
+		if !ok {
+			return MaintenanceReservation{}, fmt.Errorf("total token budget exhausted")
 		}
-		used += u.MaintenanceTokens
 		if used > p.TotalTokenBudget || estimated > p.TotalTokenBudget-used {
 			return MaintenanceReservation{}, fmt.Errorf("total token budget exhausted")
 		}
