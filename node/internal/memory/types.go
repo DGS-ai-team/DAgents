@@ -179,6 +179,8 @@ type ExtractionInput struct {
 	Scope             Scope               `json:"scope,omitempty"`
 	SourceFingerprint string              `json:"source_fingerprint"`
 	Messages          []ExtractionMessage `json:"messages"`
+	SkipOnly          bool                `json:"skip_only,omitempty"`
+	SkippedThrough    int64               `json:"skipped_through,omitempty"`
 }
 
 // Candidate is model-inferred information awaiting serial consolidation. A

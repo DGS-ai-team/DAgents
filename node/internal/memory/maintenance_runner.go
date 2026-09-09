@@ -170,6 +170,13 @@ func (r *MaintenanceRunner) runOnce(ctx context.Context, agentID string, cursor 
 		}
 		return cursor.Sequence, nil
 	}
+	if input.SkipOnly {
+		op := MaintenanceOperation{OperationID: fmt.Sprintf("maintenance-skip-%s-%d", agentID, seq), AgentID: agentID, Scope: ScopeAgent, SourceFingerprint: fmt.Sprintf("skip:%s:%d", agentID, seq), ExpectedCursor: cursor.Sequence, NextCursor: seq}
+		if _, applyErr := r.Memory.ApplyMaintenanceOperation(ctx, op, nil, MaintenanceCursor{AgentID: agentID, Scope: ScopeAgent, Sequence: seq, SourceFingerprint: op.SourceFingerprint}); applyErr != nil {
+			return cursor.Sequence, applyErr
+		}
+		return seq, nil
+	}
 	if len(input.Messages) == 0 {
 		return cursor.Sequence, nil
 	}

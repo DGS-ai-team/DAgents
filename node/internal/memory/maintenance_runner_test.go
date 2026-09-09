@@ -24,6 +24,14 @@ type runnerSource struct {
 }
 
 type noNewMaintenanceSource struct{}
+type skipMaintenanceSource struct{ seq uint64 }
+
+func (s skipMaintenanceSource) LoadMaintenanceMessages(_ context.Context, _ string, after uint64, _ int) (DurableMessageBatch, error) {
+	if after >= s.seq {
+		return DurableMessageBatch{}, nil
+	}
+	return DurableMessageBatch{Complete: true, SkipOnly: true, Sequence: s.seq, SkippedThrough: s.seq}, nil
+}
 
 func (noNewMaintenanceSource) LoadMaintenanceMessages(context.Context, string, uint64, int) (DurableMessageBatch, error) {
 	return DurableMessageBatch{Complete: false}, nil
@@ -31,6 +39,48 @@ func (noNewMaintenanceSource) LoadMaintenanceMessages(context.Context, string, u
 
 func (s runnerSource) LoadMaintenanceMessages(context.Context, string, uint64, int) (DurableMessageBatch, error) {
 	return DurableMessageBatch{SessionID: s.input.SessionID, Sequence: s.seq, Messages: []llm.Message{{Role: "user", Content: "remember runner"}}, Complete: s.complete}, nil
+}
+
+func TestMaintenanceRunnerPersistsSkipOnlyWithoutExtractor(t *testing.T) {
+	root := t.TempDir()
+	gs, err := goals.OpenStore(filepath.Join(root, "goals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = gs.SaveProfile(goals.AutoProfile{AgentID: "skip", Enabled: true, MaintenanceTokenBudget: 100}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "skip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ext := &runnerExtractor{}
+	runner := &MaintenanceRunner{Source: skipMaintenanceSource{seq: 4000}, Extractor: ext, Memory: ms, Usage: gs}
+	if seq, err := runner.RunOnce(context.Background(), "skip", MaintenanceCursor{}); err != nil || seq != 4000 {
+		t.Fatalf("seq=%d err=%v", seq, err)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("extractor called %d times", ext.calls)
+	}
+	if len(gs.ListMaintenanceReceipts("skip")) != 0 {
+		t.Fatal("skip-only created usage receipt")
+	}
+	if err := ms.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ms, err = OpenLocalService(filepath.Join(root, "memory.db"), filepath.Join(root, "global.db"), ScopeAgent, "skip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	cur, err := ms.agent.GetMaintenanceCursor(context.Background(), "skip")
+	if err != nil || cur.Sequence != 4000 {
+		t.Fatalf("cursor=%+v err=%v", cur, err)
+	}
+	_, evidence, err := (&MaintenanceRunner{Source: skipMaintenanceSource{seq: 4000}, Extractor: ext, Memory: ms, Usage: gs}).RunOnceWithEvidence(context.Background(), "skip", cur)
+	if err != nil || evidence.HasIncrement {
+		t.Fatalf("evidence=%+v err=%v", evidence, err)
+	}
 }
 
 type runnerExtractor struct{ calls int }

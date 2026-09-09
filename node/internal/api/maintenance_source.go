@@ -20,17 +20,25 @@ func (s maintenanceSource) LoadMaintenanceMessages(ctx context.Context, agentID 
 		limit = 200
 	}
 	cursor := after
+	skipped := false
 	for page := 0; page < 16; page++ {
 		if err := ctx.Err(); err != nil {
 			return memory.DurableMessageBatch{}, err
 		}
 		items, err := s.store.ListCompletedTurnSnapshots(ctx, agentID, int64(cursor), limit)
-		if err != nil || len(items) == 0 {
+		if err != nil {
 			return memory.DurableMessageBatch{}, err
+		}
+		if len(items) == 0 {
+			if skipped {
+				return memory.DurableMessageBatch{Sequence: cursor, Complete: true, SkipOnly: true, SkippedThrough: cursor}, nil
+			}
+			return memory.DurableMessageBatch{}, nil
 		}
 		for _, item := range items {
 			if s.goals != nil && s.goals.IsMaintenanceSession(agentID, item.SessionID) {
 				cursor = uint64(item.EventID)
+				skipped = true
 				continue
 			}
 			if item.Status != "readable" {
@@ -38,6 +46,9 @@ func (s maintenanceSource) LoadMaintenanceMessages(ctx context.Context, agentID 
 			}
 			return memory.DurableMessageBatch{SessionID: item.SessionID, Sequence: uint64(item.EventID), Messages: item.Messages, Complete: true}, nil
 		}
+	}
+	if skipped {
+		return memory.DurableMessageBatch{Sequence: cursor, Complete: true, SkipOnly: true, SkippedThrough: cursor}, nil
 	}
 	return memory.DurableMessageBatch{}, fmt.Errorf("maintenance source exceeded bounded skip pages")
 }

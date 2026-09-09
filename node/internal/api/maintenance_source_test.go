@@ -52,8 +52,16 @@ func TestMaintenanceSourceSkipsLinkedMaintenanceWithinPage(t *testing.T) {
 	}
 	appendSourceSnapshot(t, st, "a", "maintenance-session", "receipt")
 	appendSourceSnapshot(t, st, "a", "maintenance-session", "receipt-2")
+	for i := 0; i < 15; i++ {
+		appendSourceSnapshot(t, st, "a", "maintenance-session", fmt.Sprintf("receipt-%d", i+3))
+	}
 	id := appendSourceSnapshot(t, st, "a", "business-session", "business")
-	got, err := (maintenanceSource{store: st, goals: g}).LoadMaintenanceMessages(context.Background(), "a", 0, 1)
+	source := maintenanceSource{store: st, goals: g}
+	first, err := source.LoadMaintenanceMessages(context.Background(), "a", 0, 1)
+	if err != nil || !first.SkipOnly || first.SkippedThrough == 0 {
+		t.Fatalf("first batch=%+v err=%v", first, err)
+	}
+	got, err := source.LoadMaintenanceMessages(context.Background(), "a", first.SkippedThrough, 1)
 	if err != nil || got.Sequence != id || got.SessionID != "business-session" || !got.Complete {
 		t.Fatalf("batch=%+v err=%v", got, err)
 	}

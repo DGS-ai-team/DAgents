@@ -20,10 +20,12 @@ type DurableMaintenanceSource interface {
 }
 
 type DurableMessageBatch struct {
-	SessionID string
-	Sequence  uint64
-	Messages  []llm.Message
-	Complete  bool
+	SessionID      string
+	Sequence       uint64
+	Messages       []llm.Message
+	Complete       bool
+	SkipOnly       bool
+	SkippedThrough uint64
 }
 
 // ReadDurableMaintenanceInput reads the SQLite transcript snapshot used by
@@ -43,6 +45,12 @@ func ReadDurableMaintenanceInput(ctx context.Context, source DurableMaintenanceS
 	messages, revision := batch.Messages, batch.Sequence
 	if revision > math.MaxInt64 {
 		return ExtractionInput{}, cursor.Sequence, false, fmt.Errorf("maintenance input sequence overflows int64: %d", revision)
+	}
+	if batch.SkipOnly {
+		if !batch.Complete || batch.SessionID != "" || len(batch.Messages) != 0 || batch.Sequence != batch.SkippedThrough || batch.SkippedThrough <= uint64(cursor.Sequence) || batch.SkippedThrough > math.MaxInt64 {
+			return ExtractionInput{}, cursor.Sequence, false, fmt.Errorf("invalid maintenance skip cursor")
+		}
+		return ExtractionInput{AgentID: strings.TrimSpace(agentID), SkipOnly: true, SkippedThrough: int64(batch.SkippedThrough)}, int64(batch.SkippedThrough), true, nil
 	}
 	if !batch.Complete {
 		if revision == 0 {
