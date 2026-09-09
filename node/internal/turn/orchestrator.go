@@ -128,6 +128,8 @@ type Orchestrator struct {
 
 const reservedFinalSummaryInstruction = `本轮工具轮次已达到上限。现在只允许进行一次无工具的最终收尾：不要发起或请求任何工具调用，不要输出模拟的 <tool_call>、function 标签或工具 JSON。请用自然语言如实说明已经完成的工作、未完成的工作以及本轮限制；不要声称尚未执行的操作已经完成。`
 
+const reservedFinalSummaryTailInstruction = `工具已在本轮收尾请求中禁用。只用自然语言列出已完成和未完成的工作，并说明本轮工具轮次上限；不要模拟或输出任何工具标签、函数调用或工具 JSON。`
+
 func appendReservedFinalSummaryInstruction(systemPrompt string) string {
 	if strings.TrimSpace(systemPrompt) == "" {
 		return reservedFinalSummaryInstruction
@@ -809,6 +811,11 @@ func (o *Orchestrator) runOneStep(
 	}
 	requestHistory = ApplyContextInjections(requestHistory, snapshotInjections)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
+	// This is request-only guidance for the reserved no-tools summary. Keep it
+	// out of durable history so it cannot leak into the next ordinary turn.
+	if finalSummary {
+		requestHistory = append(requestHistory, llm.Message{Role: "user", Content: reservedFinalSummaryTailInstruction})
+	}
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
 	if !o.multimodalEnabled {
 		// The history may have been created while multimodal was enabled.
