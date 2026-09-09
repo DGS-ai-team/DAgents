@@ -33,6 +33,18 @@ describe("AutoOverviewView", () => {
     expect(wrapper.text()).toContain("最近成功");
   });
 
+  it("shows todo status counts instead of calling completed items pending", async () => {
+    api.getAutoOverview.mockResolvedValueOnce({
+      items: [{ agent_id: "auto-1", display_name: "研究员", state: "standby", todo_counts: { total: 2, completed: 2 }, todo_summary: ["复核资料"] }],
+      counts: { total: 1 }, total: 1, page: 1, page_size: 20,
+    });
+    const wrapper = mount(AutoOverviewView);
+    wrappers.push(wrapper);
+    await flushPromises();
+    expect(wrapper.text()).toContain("未完成 0 · 已完成 2 · 复核资料");
+    expect(wrapper.text()).not.toContain("暂无待办摘要");
+  });
+
   it("preserves the page and offers retry after a failed load", async () => {
     api.getAutoOverview.mockRejectedValueOnce(new Error("offline"));
     const wrapper = mount(AutoOverviewView);

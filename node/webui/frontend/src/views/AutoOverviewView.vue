@@ -24,7 +24,18 @@ const formatDate = (value) => { if (!value) return "暂未安排"; const date = 
 const formatDreamingDate = (value) => { if (!value) return "未获取"; const date = new Date(value); return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1 ? "未获取" : date.toLocaleString(); };
 const dreamingStateLabels = { disabled: "已关闭", waiting: "等待执行", running: "整理中", succeeded: "最近成功", failed: "上次失败", recovery_pending: "等待恢复" };
 const dreamingSummary = (item) => { const value = item?.dreaming; if (!value || typeof value !== "object") return "未获取"; const state = dreamingStateLabels[value.state] || "未知状态"; const next = value.next_at ? ` · 下次 ${formatDreamingDate(value.next_at)}` : ""; const last = value.last_success ? ` · 上次成功 ${formatDreamingDate(value.last_success)}` : ""; return `${state}${next}${last}`; };
-const todoSummary = (item) => Array.isArray(item.todo_summary) ? (item.todo_summary.length ? item.todo_summary.join("；") : "暂无待办摘要") : (item.todo_summary || "暂无待办摘要");
+const todoSummary = (item) => {
+  const counts = item?.todo_counts;
+  if (counts && typeof counts === "object" && Object.keys(counts).length) {
+    const counted = Object.entries(counts).reduce((sum, [status, value]) => status === "total" ? sum : sum + (Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0), 0);
+    const totalValue = Number(counts.total);
+    const total = Number.isFinite(totalValue) && totalValue >= 0 ? totalValue : counted;
+    const completed = Number.isFinite(Number(counts.completed)) && Number(counts.completed) >= 0 ? Number(counts.completed) : 0;
+    const summary = Array.isArray(item?.todo_summary) ? item.todo_summary.filter(Boolean).join("；") : String(item?.todo_summary || "").trim();
+    return summary ? `未完成 ${Math.max(0, total - completed)} · 已完成 ${completed} · ${summary}` : `未完成 ${Math.max(0, total - completed)} · 已完成 ${completed}`;
+  }
+  return Array.isArray(item?.todo_summary) ? (item.todo_summary.length ? item.todo_summary.join("；") : "暂无待办摘要") : (item?.todo_summary || "暂无待办摘要");
+};
 
 async function load() {
   const seq = ++requestSeq;

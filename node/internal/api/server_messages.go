@@ -190,7 +190,13 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Keep the comment heartbeat for generic SSE clients, and add a
+			// named heartbeat so browser clients can detect half-open streams
+			// after a Node restart instead of waiting forever on EventSource.
 			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "event: stream_heartbeat\ndata: {\"stream_epoch\":\"%s\"}\n\n", subscription.StreamEpoch); err != nil {
 				return
 			}
 			flusher.Flush()

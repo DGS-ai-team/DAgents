@@ -31,8 +31,10 @@ function dreamingText(item) {
 }
 function todoText(item) {
   const counts = item.todo_counts && typeof item.todo_counts === "object" ? item.todo_counts : {};
-  const total = Number(counts.total ?? (Number(counts.pending || 0) + Number(counts.in_progress || 0) + Number(counts.completed || 0)));
-  return total ? `${total} 项待办` : "暂无待办";
+  const completed = Math.max(0, Number(counts.completed || 0) || 0);
+  const counted = Object.entries(counts).reduce((sum, [status, value]) => status === "total" ? sum : sum + (Math.max(0, Number(value) || 0)), 0);
+  const total = Math.max(0, Number(counts.total ?? counted) || 0);
+  return total ? `未完成 ${Math.max(0, total - completed)} · 已完成 ${completed}` : "暂无待办";
 }
 
 async function load() {
