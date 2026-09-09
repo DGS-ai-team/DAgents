@@ -47,6 +47,23 @@ func (s *Store) GetMaintenanceOperation(ctx context.Context, id string) (Mainten
 	return op, err
 }
 
+// GetMaintenanceOperation reads an operation only through the service's
+// private Agent store. It is intentionally independent of the mutable model
+// scope, so a global scope selection cannot widen recovery access.
+func (s *LocalService) GetMaintenanceOperation(ctx context.Context, id string) (MaintenanceOperation, error) {
+	if s == nil || s.agent == nil || strings.TrimSpace(s.agentID) == "" || strings.TrimSpace(id) == "" {
+		return MaintenanceOperation{}, ErrNotFound
+	}
+	op, err := s.agent.GetMaintenanceOperation(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return MaintenanceOperation{}, err
+	}
+	if op.Scope != ScopeAgent || op.AgentID != s.agentID {
+		return MaintenanceOperation{}, ErrNotFound
+	}
+	return op, nil
+}
+
 func scanMaintenanceOperation(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, id string) (MaintenanceOperation, error) {

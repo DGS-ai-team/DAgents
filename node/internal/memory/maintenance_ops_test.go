@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -181,5 +182,66 @@ func TestMaintenanceOperationConflictAndScopeIsolation(t *testing.T) {
 	}
 	if _, err := s.ApplyMaintenanceOperation(context.Background(), MaintenanceOperation{OperationID: "global", AgentID: "agent-1", Scope: ScopeGlobal, SourceFingerprint: "j", CandidateFingerprint: "cand", NextCursor: 1}, nil, MaintenanceCursor{}); err == nil {
 		t.Fatal("global scope accepted by agent store")
+	}
+}
+
+func TestLocalServiceGetMaintenanceOperationBindsAgentAndReopens(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "agent.db")
+	s1, err := OpenLocalService(path, filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := MaintenanceOperation{OperationID: "bound-op", AgentID: "agent-1", Scope: ScopeAgent, SourceFingerprint: "source", ExpectedCursor: 0, NextCursor: 1}
+	if _, err := s1.ApplyMaintenanceOperation(context.Background(), op, nil, MaintenanceCursor{AgentID: "agent-1", Scope: ScopeAgent, Sequence: 1, SourceFingerprint: "source"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s1.GetMaintenanceOperation(context.Background(), "bound-op")
+	if err != nil || got.AgentID != "agent-1" || got.Scope != ScopeAgent {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	if _, err := s1.GetMaintenanceOperation(context.Background(), "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing err=%v", err)
+	}
+	if err := s1.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenLocalService(path, filepath.Join(root, "global-2.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = reopened.GetMaintenanceOperation(context.Background(), "bound-op")
+	if err != nil || got.Status != "applied" {
+		t.Fatalf("reopened=%+v err=%v", got, err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.GetMaintenanceOperation(context.Background(), "bound-op"); err == nil {
+		t.Fatal("closed service unexpectedly readable")
+	}
+}
+
+func TestLocalServiceGetMaintenanceOperationSharedDBAgentIsolation(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "agent.db")
+	s1, err := OpenLocalService(path, filepath.Join(root, "global.db"), ScopeAgent, "agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Close()
+	if _, err := s1.ApplyMaintenanceOperation(context.Background(), MaintenanceOperation{OperationID: "shared-op", AgentID: "agent-1", Scope: ScopeAgent, SourceFingerprint: "s", ExpectedCursor: 0, NextCursor: 1}, nil, MaintenanceCursor{AgentID: "agent-1", Scope: ScopeAgent, Sequence: 1, SourceFingerprint: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := OpenLocalService(path, filepath.Join(root, "global-2.db"), ScopeAgent, "agent-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if _, err := s2.GetMaintenanceOperation(context.Background(), "shared-op"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-agent operation exposed: %v", err)
+	}
+	if _, err := s2.GetMaintenanceOperation(context.Background(), ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty id err=%v", err)
 	}
 }
