@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -62,15 +63,22 @@ func New(root string) (*Service, error) {
 	if real, e := filepath.EvalSymlinks(root); e == nil {
 		root = real
 	}
+	lockRoot := root
+	if runtime.GOOS == "windows" {
+		lockRoot = strings.ToLower(lockRoot)
+	}
 	rootsMu.Lock()
-	mu := roots[root]
+	mu := roots[lockRoot]
 	if mu == nil {
 		mu = &sync.Mutex{}
-		roots[root] = mu
+		roots[lockRoot] = mu
 	}
 	rootsMu.Unlock()
 	s := &Service{root: root, mu: mu}
-	if err := s.recoverPending(); err != nil {
+	s.mu.Lock()
+	err = s.recoverPendingLocked()
+	s.mu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -95,44 +103,6 @@ func (s *Service) DigestFile(ctx context.Context, path string) (string, error) {
 	return Digest(data), nil
 }
 
-/* legacy Record implementation removed; history writes use Write. */
-/*
-func (s *Service) Record(ctx context.Context, path string, before, after []byte) (Entry, error) {
-	if err := ctx.Err(); err != nil {
-		return Entry{}, err
-	}
-	rel, err := s.relative(path)
-	if err != nil {
-		return Entry{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entries, err := s.readEntriesLocked()
-	if err != nil {
-		return Entry{}, err
-	}
-	var rev int64
-	for _, e := range entries {
-		if e.Revision > rev {
-			rev = e.Revision
-		}
-	}
-	rev++
-	e := Entry{Revision: rev, Path: rel, BeforeDigest: Digest(before), AfterDigest: Digest(after), BeforeExists: before != nil, AfterExists: true, CreatedAt: time.Now().UTC()}
-	snap := filepath.Join(s.root, ".history", "snapshots", fmt.Sprintf("%020d.before", rev))
-	if before == nil {
-		before = []byte{}
-	}
-	if err := os.WriteFile(snap, before, 0600); err != nil {
-		return Entry{}, err
-	}
-	if err := s.appendEntryLocked(e); err != nil {
-		return Entry{}, err
-	}
-	return e, nil
-}
-*/
-
 // Write performs digest validation, snapshots the old bytes, atomically
 // replaces the file, and commits the manifest under one shared root lock.
 func (s *Service) Write(ctx context.Context, path, expectedDigest string, after []byte) (Entry, error) {
@@ -144,6 +114,9 @@ func (s *Service) Write(ctx context.Context, path, expectedDigest string, after 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(); err != nil {
+		return Entry{}, err
+	}
 	current, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		current = nil
@@ -197,6 +170,9 @@ func (s *Service) History(ctx context.Context, path string) ([]Entry, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(); err != nil {
+		return nil, err
+	}
 	entries, err := s.readEntriesLocked()
 	if err != nil {
 		return nil, err
@@ -222,6 +198,9 @@ func (s *Service) Restore(ctx context.Context, path, expectedDigest string, revi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(); err != nil {
+		return Entry{}, err
+	}
 	entries, err := s.readEntriesLocked()
 	if err != nil {
 		return Entry{}, err
@@ -237,13 +216,17 @@ func (s *Service) Restore(ctx context.Context, path, expectedDigest string, revi
 		return Entry{}, os.ErrNotExist
 	}
 	current, err := os.ReadFile(path)
+	currentExists := err == nil
 	if err != nil && !os.IsNotExist(err) {
 		return Entry{}, err
 	}
 	if err != nil {
 		current = nil
 	}
-	old := append([]byte(nil), current...)
+	old := append([]byte{}, current...)
+	if !currentExists {
+		old = nil
+	}
 	if strings.TrimSpace(expectedDigest) != "" && Digest(old) != strings.TrimSpace(expectedDigest) {
 		return Entry{}, ErrConflict
 	}
@@ -261,7 +244,7 @@ func (s *Service) Restore(ctx context.Context, path, expectedDigest string, revi
 	if err != nil {
 		return Entry{}, err
 	}
-	if err := s.writePending(pendingTxn{Revision: e.Revision, Path: path, Before: old, BeforeExists: old != nil, AfterDigest: Digest(after), AfterExists: after != nil}); err != nil {
+	if err := s.writePending(pendingTxn{Revision: e.Revision, Path: path, Before: old, BeforeExists: currentExists, AfterDigest: Digest(after), AfterExists: after != nil}); err != nil {
 		return Entry{}, err
 	}
 	if found.BeforeExists {
@@ -410,7 +393,7 @@ func (s *Service) writePending(p pendingTxn) error {
 	b, _ := json.Marshal(p)
 	return os.WriteFile(s.pendingPath(), b, 0600)
 }
-func (s *Service) recoverPending() error {
+func (s *Service) recoverPendingLocked() error {
 	b, err := os.ReadFile(s.pendingPath())
 	if os.IsNotExist(err) {
 		return nil
