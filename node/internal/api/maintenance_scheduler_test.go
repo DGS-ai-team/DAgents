@@ -222,6 +222,79 @@ func TestMaintenanceSchedulerRestartPendingDoesNotCallExtractor(t *testing.T) {
 	}
 }
 
+func TestMaintenanceSchedulerAutonomyProfileHTTPChangeCancelsExtractor(t *testing.T) {
+	ext := &schedulerBlockingExtractor{started: make(chan struct{}), exited: make(chan struct{})}
+	srv := newSchedulerFixture(t, "autonomy-cancel", ext, time.Now().UTC().Add(-24*time.Hour))
+	defer srv.Close()
+	go srv.maintenanceSched.RunOnceForTest(context.Background(), time.Now().UTC())
+	select {
+	case <-ext.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("extractor did not start")
+	}
+	p, _ := srv.goalStore.GetProfile("autonomy-cancel")
+	body := `{"expected_revision":` + strconv.FormatInt(p.Revision, 10) + `,"profile":{"agent_id":"autonomy-cancel","enabled":true,"maintenance_enabled":true,"maintenance_schedule":"daily 10:00","timezone":"UTC"}}`
+	req := httptest.NewRequest(http.MethodPut, "/v1/agents/autonomy-cancel/autonomy", strings.NewReader(body))
+	resp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("autonomy status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	select {
+	case <-ext.exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("extractor not cancelled")
+	}
+}
+
+func TestMaintenanceSchedulerAutonomyDisableHTTPCancelsExtractor(t *testing.T) {
+	ext := &schedulerBlockingExtractor{started: make(chan struct{}), exited: make(chan struct{})}
+	srv := newSchedulerFixture(t, "autonomy-disable", ext, time.Now().UTC().Add(-24*time.Hour))
+	defer srv.Close()
+	go srv.maintenanceSched.RunOnceForTest(context.Background(), time.Now().UTC())
+	select {
+	case <-ext.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("extractor did not start")
+	}
+	p, _ := srv.goalStore.GetProfile("autonomy-disable")
+	body := `{"expected_revision":` + strconv.FormatInt(p.Revision, 10) + `,"profile":{"agent_id":"autonomy-disable","enabled":true,"maintenance_enabled":false,"maintenance_schedule":"daily 09:00","timezone":"UTC"}}`
+	req := httptest.NewRequest(http.MethodPut, "/v1/agents/autonomy-disable/autonomy", strings.NewReader(body))
+	resp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("autonomy disable status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	select {
+	case <-ext.exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("extractor not cancelled")
+	}
+}
+
+func TestMaintenanceSchedulerAgentTypeChangeHTTPCancelsExtractor(t *testing.T) {
+	ext := &schedulerBlockingExtractor{started: make(chan struct{}), exited: make(chan struct{})}
+	srv := newSchedulerFixture(t, "type-cancel", ext, time.Now().UTC().Add(-24*time.Hour))
+	defer srv.Close()
+	go srv.maintenanceSched.RunOnceForTest(context.Background(), time.Now().UTC())
+	select {
+	case <-ext.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("extractor did not start")
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/v1/agents/type-cancel", strings.NewReader(`{"agent_type":"normal"}`))
+	resp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("type status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	select {
+	case <-ext.exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("extractor not cancelled")
+	}
+}
+
 func TestMaintenanceSchedulerContinuesBoundedSnapshotBacklog(t *testing.T) {
 	ext := &apiMaintenanceExtractor{}
 	now := time.Now().UTC()

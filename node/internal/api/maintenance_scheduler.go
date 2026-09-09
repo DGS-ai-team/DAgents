@@ -30,6 +30,10 @@ type maintenanceScheduler struct {
 	stopped   bool
 }
 
+func maintenanceProfileChanged(a, b goals.AutoProfile) bool {
+	return a.Enabled != b.Enabled || a.MaintenanceEnabled != b.MaintenanceEnabled || a.MaintenanceSchedule != b.MaintenanceSchedule || a.Timezone != b.Timezone || a.MaintenanceRevision != b.MaintenanceRevision
+}
+
 func newMaintenanceScheduler(server *Server) *maintenanceScheduler {
 	return &maintenanceScheduler{server: server, stop: make(chan struct{}), done: make(chan struct{}), stopDone: make(chan struct{}), active: make(map[string]context.CancelFunc)}
 }

@@ -413,6 +413,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Workspace != nil {
 		writeAPIError(w, http.StatusBadRequest, "workspace_immutable", "workspace cannot be changed after Agent creation", nil)
+	typeChangedToNormal := false
 		return
 	}
 	if req.DisplayName == nil && req.Defaults == nil && req.AgentType == nil {
@@ -440,6 +441,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		if oldType != newType {
 			s.goalWakeMu.Lock()
 			defer s.goalWakeMu.Unlock()
+			typeChangedToNormal = oldType == "auto" && newType == "normal"
 			if s.sessions != nil {
 				pending, active, _, runtimeErr := s.sessions.RuntimeInfo(id)
 				if runtimeErr == nil && (pending > 0 || active) {
@@ -518,6 +520,9 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 				"agent_id", id,
 				"runtime_revision", rec.RuntimeRevision,
 				"turn_state", state,
+	if typeChangedToNormal && s.maintenanceSched != nil {
+		s.maintenanceSched.Cancel(id)
+	}
 			)
 		} else if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
 			runtimeApplied = false

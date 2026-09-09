@@ -144,6 +144,7 @@ func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, 409, "recovery_required", err.Error(), nil)
 		return
 	}
+	beforeProfile := p
 	if existing == nil {
 		if p.AgentID == "" {
 			p = goals.AutoProfile{AgentID: id, PlanMode: "one_shot", Enabled: false}
@@ -171,6 +172,9 @@ func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			writeAPIError(w, 409, "profile_conflict", err.Error(), nil)
 			return
+		}
+		if s.maintenanceSched != nil && maintenanceProfileChanged(beforeProfile, p) {
+			s.maintenanceSched.Cancel(id)
 		}
 		// A profile-only PUT is a durable draft; it does not create or
 		// implicitly enable a business cycle.
@@ -237,6 +241,9 @@ func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 				writeAPIError(w, 409, "profile_conflict", err.Error(), nil)
 				return
 			}
+			if s.maintenanceSched != nil && maintenanceProfileChanged(beforeProfile, p) {
+				s.maintenanceSched.Cancel(id)
+			}
 			u, _ := s.goalStore.GetUsage(id)
 			writeJSON(w, 200, s.autonomyPayload(p, existing, u))
 			return
@@ -275,6 +282,9 @@ func (s *Server) handlePutAgentAutonomy(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, 400, "invalid_autonomy", err.Error(), nil)
 		}
 		return
+	}
+	if s.maintenanceSched != nil && maintenanceProfileChanged(beforeProfile, p) {
+		s.maintenanceSched.Cancel(id)
 	}
 	if err := s.syncManagedTrigger(g); err != nil {
 		writeAPIError(w, 409, "autonomy_state_conflict", err.Error(), nil)
