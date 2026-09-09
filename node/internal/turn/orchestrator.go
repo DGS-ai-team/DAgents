@@ -179,6 +179,36 @@ func (o *Orchestrator) resetAgentPrompt(sessionID string) {
 	o.agentPromptMu.Unlock()
 }
 
+func (o *Orchestrator) agentPrompt(ctx context.Context, sessionID string) (AgentPromptSnapshot, error) {
+	if o == nil || o.agentPromptProvider == nil || o.isChildSession {
+		return AgentPromptSnapshot{}, nil
+	}
+	o.agentPromptMu.Lock()
+	prompt, ok := o.agentPromptBySession[sessionID]
+	o.agentPromptMu.Unlock()
+	if ok {
+		return prompt, nil
+	}
+	prompt, err := o.agentPromptProvider(ctx, o.agentID)
+	if err != nil {
+		return AgentPromptSnapshot{}, err
+	}
+	o.agentPromptMu.Lock()
+	if o.agentPromptBySession == nil {
+		o.agentPromptBySession = make(map[string]AgentPromptSnapshot)
+	}
+	o.agentPromptBySession[sessionID] = prompt
+	o.agentPromptMu.Unlock()
+	return prompt, nil
+}
+
+func (o *Orchestrator) freshAgentPrompt(ctx context.Context) (AgentPromptSnapshot, error) {
+	if o == nil || o.agentPromptProvider == nil || o.isChildSession {
+		return AgentPromptSnapshot{}, nil
+	}
+	return o.agentPromptProvider(ctx, o.agentID)
+}
+
 // SetContextInjectionBuilder 注入动态上下文构造器；nil 时使用默认
 // BuildContextInjections。子 Agent 使用它来限制注入范围。
 func (o *Orchestrator) SetContextInjectionBuilder(fn ContextInjectionBuilder) {
@@ -696,21 +726,9 @@ func (o *Orchestrator) runOneStep(
 		// prompt/context mismatch.
 		promptInput := o.systemPromptInput(sessionID)
 		if o.agentPromptProvider != nil && !o.isChildSession {
-			o.agentPromptMu.Lock()
-			agentPrompt, cached := o.agentPromptBySession[sessionID]
-			o.agentPromptMu.Unlock()
-			if !cached {
-				var promptErr error
-				agentPrompt, promptErr = o.agentPromptProvider(ctx, o.agentID)
-				if promptErr != nil {
-					return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("load agent prompt: %w", promptErr)}
-				}
-				o.agentPromptMu.Lock()
-				if o.agentPromptBySession == nil {
-					o.agentPromptBySession = make(map[string]AgentPromptSnapshot)
-				}
-				o.agentPromptBySession[sessionID] = agentPrompt
-				o.agentPromptMu.Unlock()
+			agentPrompt, promptErr := o.agentPrompt(ctx, sessionID)
+			if promptErr != nil {
+				return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("load agent prompt: %w", promptErr)}
 			}
 			promptInput.AgentPrompt = agentPrompt
 		}
@@ -1136,7 +1154,7 @@ func (o *Orchestrator) SystemPromptForSession(sessionID string) string {
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		return snapshot.SystemPrompt
 	}
-	return o.buildSystemPrompt(sessionID)
+	return o.buildSystemPromptWithContext(context.Background(), sessionID)
 }
 
 // ContextInjectionsForSession returns the active Turn's frozen injections, or
@@ -1149,7 +1167,13 @@ func (o *Orchestrator) ContextInjectionsForSession(sessionID string) []ContextIn
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		return cloneContextInjections(snapshot.ContextInjections)
 	}
-	return cloneContextInjections(o.buildContextInjections(sessionID))
+	in := o.systemPromptInput(sessionID)
+	if prompt, err := o.freshAgentPrompt(context.Background()); err == nil {
+		in.AgentPrompt = prompt
+	} else {
+		in.AgentPrompt.Todo = "[Agent prompt unavailable: " + err.Error() + "]"
+	}
+	return cloneContextInjections(o.buildContextInjectionsWithInput(in))
 }
 
 // ToolDefinitions 返回与 runOneStep 相同的 tools 列表（侧车压缩前缀对齐用）。
@@ -1203,10 +1227,20 @@ func (o *Orchestrator) ToolRegistry() *tools.Registry {
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
+	return o.buildSystemPromptWithContext(context.Background(), sessionID)
+}
+
+func (o *Orchestrator) buildSystemPromptWithContext(ctx context.Context, sessionID string) string {
 	if o == nil {
 		return ""
 	}
-	return o.buildSystemPromptWithInput(sessionID, o.systemPromptInput(sessionID))
+	in := o.systemPromptInput(sessionID)
+	if prompt, err := o.freshAgentPrompt(ctx); err == nil {
+		in.AgentPrompt = prompt
+	} else {
+		in.AgentPrompt.Responsibilities = "[Agent prompt unavailable: " + err.Error() + "]"
+	}
+	return o.buildSystemPromptWithInput(sessionID, in)
 }
 
 func (o *Orchestrator) buildSystemPromptWithInput(sessionID string, in SystemPromptInput) string {

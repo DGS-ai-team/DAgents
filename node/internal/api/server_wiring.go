@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/goals"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -28,6 +29,15 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	reg.SetAgentID(targetAgentID)
 	reg.SetEventSourceStore(s.eventStore)
 	reg.SetAutonomyCallbacks(s.autonomyToolGet, s.autonomyToolUpdate)
+	// Todo tools are available only on a real Auto main runtime. Goal and
+	// ordinary runtimes deliberately receive no independent autonomy store.
+	if s.autonomyStore != nil && s.agents != nil {
+		if rec, err := s.agents.Get(context.Background(), targetAgentID); err == nil && rec != nil {
+			if snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err == nil && strings.EqualFold(strings.TrimSpace(snap.AgentType), "auto") {
+				reg.SetAutonomyTodoStore(s.autonomyStore)
+			}
+		}
+	}
 	if s.linuxProvider != nil {
 		if err := reg.WithLinuxShellProvider(s.linuxProvider); err != nil && s.logger != nil {
 			s.logger.Warn("agent linux provider bind failed", "agent_id", targetAgentID, "error", err)

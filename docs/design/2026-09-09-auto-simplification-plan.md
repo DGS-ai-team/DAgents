@@ -92,3 +92,11 @@ Auto 是能够在同一主会话中定期自主工作的 Agent。职责直接注
 新增 `triggers.Store.EnsureAutoDefault`，每 Agent 稳定 `auto-default:<agentID>`，绑定 `controller=auto` 与同 Agent 主 Session；使用方案固定唤醒语句。相同配置不重排，修改间隔更新下次时间；关闭保留合法禁用定义，在保存成功后失效 pending delivery。拒绝身份碰撞、普通及授权路径的编辑删除。保存失败保留内存与磁盘状态，不重置触发历史。
 
 主 Agent Triggers 全包 race 通过（2.040 秒）；Session/Turn 当前共享树全包 race 通过（28.551 / 10.731 秒）。默认唤醒底座尚未接入配置同步或启动校正，因此未实际启用。重启 pending 沿用现有 recovery 语义，接线时仍需完成恢复；用户优先、单次工具轮次、脚本条件和旧链路删除仍未完成。
+
+### Todo 模型工具与请求上下文
+
+模型工具 `todo_list/create/update/delete` 绑定可信 Agent 身份与 HTTP 同一存储，逐项版本校验，不能通过参数指定其他 Agent；普通 runtime 不提供这些工具，旧 Goal runtime 的禁用标记继续有效。工具复用原有审批，未新增自动放行规则。字段解析区分省略和错误类型，更新状态不得覆盖正文。
+
+每个新 Turn 将最新 Todo（含 ID、状态、revision，空列表亦明确说明）注入请求级上下文，不写入 system prompt 或会话历史。职责与经验仍在 system prompt；空闲预览读取最新 provider，活动 Turn 保持冻结。较早记录的 idle 预览缺口已在本批处理。
+
+主 Agent 真实 HTTP 主会话→本地测试模型→Todo 工具→共享存储→后续模型请求接缝通过；临时测试策略明确允许该工具，未改生产审批。Auto API / Todo 工具专项 race 通过（2.186 / 2.132 秒），shared/config 通过（0.578 秒）。执行编码的一个 Luna 子任务曾遇额度中断，另一 Luna 已接手补齐接缝测试。默认定时激活、单次轮次限制、用户优先及 dreaming 仍未接通，不将主会话工具成功当作整个自主循环完成。

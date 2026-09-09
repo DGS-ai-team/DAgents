@@ -99,6 +99,9 @@ func (r *Registry) toolEnabled(name string) bool {
 	if r.autonomyEnabled && (name == "autonomy_get" || name == "autonomy_update") {
 		return true
 	}
+	if r.autonomyEnabled && r.autonomyTodoStore != nil && strings.HasPrefix(name, "todo_") {
+		return true
+	}
 	if _, ok := r.mcpTools[name]; ok {
 		return true
 	}

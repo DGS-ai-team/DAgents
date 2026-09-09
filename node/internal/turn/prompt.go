@@ -94,6 +94,9 @@ type SystemPromptInput struct {
 type AgentPromptSnapshot struct {
 	Responsibilities string
 	Experience       string
+	// Todo is request-only context and is deliberately excluded from the
+	// durable history and stable system prompt.
+	Todo string
 }
 
 // AgentPromptProvider loads the latest Agent-owned prompt material at a Turn

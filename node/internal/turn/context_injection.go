@@ -82,6 +82,11 @@ func BuildContextInjections(in SystemPromptInput) []ContextInjection {
 		b.WriteString(in.PromptCtx.BuildStableContextSections())
 		b.WriteString(in.PromptCtx.BuildCustomSection())
 	}
+	if todo := strings.TrimSpace(in.AgentPrompt.Todo); todo != "" {
+		b.WriteString("\n\n## 当前待办\n\n")
+		b.WriteString(todo)
+		b.WriteByte('\n')
+	}
 
 	content := strings.TrimSpace(b.String())
 	if content == "" {

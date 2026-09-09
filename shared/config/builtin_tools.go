@@ -49,6 +49,10 @@ var knownBuiltinTools = map[string]struct{}{
 	"browser_task_cancel":    {},
 	"wecom_send_markdown":    {},
 	"wecom_send_file":        {},
+	"todo_list":              {},
+	"todo_create":            {},
+	"todo_update":            {},
+	"todo_delete":            {},
 }
 
 // builtinToolGroups 为 Agent defaults.tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
@@ -117,6 +121,12 @@ var builtinToolGroups = map[string][]string{
 	"wecom": {
 		"wecom_send_markdown",
 		"wecom_send_file",
+	},
+	"autonomy": {
+		"todo_list",
+		"todo_create",
+		"todo_update",
+		"todo_delete",
 	},
 }
 

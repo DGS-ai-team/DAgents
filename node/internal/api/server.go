@@ -360,7 +360,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 			p, _ := autonomyStore.GetProfile(agentID)
 			e, _ := autonomyStore.GetExperience(agentID)
-			return turn.AgentPromptSnapshot{Responsibilities: p.Responsibility, Experience: e.Content}, nil
+			todos := autonomyStore.ListTodos(agentID)
+			var todoText strings.Builder
+			for _, todo := range todos {
+				fmt.Fprintf(&todoText, "- [%s] %s (id: %s, revision: %d)\n", todo.Status, todo.Text, todo.ID, todo.Revision)
+			}
+			if len(todos) == 0 {
+				todoText.WriteString("暂无待办（当前列表为空）")
+			}
+			return turn.AgentPromptSnapshot{Responsibilities: p.Responsibility, Experience: e.Content, Todo: todoText.String()}, nil
 		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/events"
 	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
@@ -67,6 +68,7 @@ type Registry struct {
 	autonomyEnabled        bool
 	autonomyGet            AutonomyGetFunc
 	autonomyUpdate         AutonomyUpdateFunc
+	autonomyTodoStore      *autonomy.Store
 	workspaceCoordinator   *workspacecoord.Coordinator
 	handbookFS             *handbookfs.Service
 	handbookMutations      atomic.Uint64
@@ -458,6 +460,9 @@ func (r *Registry) Definitions() []ToolDef {
 	if r.autonomyEnabled && r.autonomyGet != nil && r.autonomyUpdate != nil {
 		defs = append(defs, autonomyGetToolDef(), autonomyUpdateToolDef())
 	}
+	if r.autonomyEnabled && r.autonomyTodoStore != nil {
+		defs = append(defs, autonomyTodoToolDefs()...)
+	}
 	for i := range defs {
 		defs[i].Function.Description = strings.TrimSpace(defs[i].Function.Description) + ResultDescriptionSuffixForTool(defs[i].Function.Name)
 	}
@@ -575,5 +580,9 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["goal_checkpoint"] = r.execGoalCheckpoint
 	r.handlers["autonomy_get"] = r.execAutonomyGet
 	r.handlers["autonomy_update"] = r.execAutonomyUpdate
+	r.handlers["todo_list"] = r.execTodoList
+	r.handlers["todo_create"] = r.execTodoCreate
+	r.handlers["todo_update"] = r.execTodoUpdate
+	r.handlers["todo_delete"] = r.execTodoDelete
 	r.RegisterChildAgentToolStubs()
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -152,6 +153,47 @@ func TestAutonomyV2TodoAgentIsolationCASDeleteAndExperienceReadOnly(t *testing.T
 	}
 }
 
+func TestAutonomyV2TodoToolsWiredOnlyForAutoRuntime(t *testing.T) {
+	s, _ := autonomyV2TestServer(t)
+	autoReg, err := tools.NewRegistry(t.TempDir(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	autoReg.SetAutonomyRuntime(true, nil, nil)
+	s.attachNodeRuntimeDeps(autoReg, "auto-v2")
+	defs := autoReg.Definitions()
+	for _, name := range []string{"todo_list", "todo_create", "todo_update", "todo_delete"} {
+		found := false
+		for _, d := range defs {
+			if d.Function.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("auto runtime omitted %s", name)
+		}
+	}
+	if _, err := autoReg.Execute(context.Background(), "todo_create", `{"call_purpose":"test","text":"wired"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	normalReg, err := tools.NewRegistry(t.TempDir(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalReg.SetAutonomyRuntime(true, nil, nil)
+	s.attachNodeRuntimeDeps(normalReg, "normal-v2")
+	for _, d := range normalReg.Definitions() {
+		if strings.HasPrefix(d.Function.Name, "todo_") {
+			t.Fatalf("normal runtime exposed %s", d.Function.Name)
+		}
+	}
+	if _, err := normalReg.Execute(context.Background(), "todo_list", `{"call_purpose":"test"}`); err == nil {
+		t.Fatal("normal runtime executed todo")
+	}
+}
+
 func TestAutonomyV2SavedResponsibilityReachesMainSession(t *testing.T) {
 	requests := make(chan string, 4)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,4 +294,95 @@ func TestAutonomyV2SavedResponsibilityReachesMainSession(t *testing.T) {
 	if !strings.Contains(second, "second saved responsibility") || strings.Contains(second, "first saved responsibility") {
 		t.Fatalf("second turn did not refresh saved responsibility: %q", second)
 	}
+}
+
+func TestAutonomyV2TodoToolRunsThroughMainSession(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	callSeen := make(chan int, 4)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		callSeen <- n
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n == 1 {
+			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"todo-1\",\"type\":\"function\",\"function\":{\"name\":\"todo_create\",\"arguments\":\"{\\\"call_purpose\\\":\\\"maintain todo\\\",\\\"text\\\":\\\"from session\\\"}\"}}]}}]}\n\n")
+			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		} else {
+			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n")
+			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		}
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer provider.Close()
+	cfg := testConfig(t)
+	cfg.LLM.Profiles["default"] = config.LLMProfileConfig{Provider: "openai", BaseURL: provider.URL, Model: "test-model", APIKeyEnv: "DAGENTS_AUTONOMY_TEST_KEY"}
+	cfg.LLM.Active, cfg.LLM.Provider, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.APIKeyEnv = "default", "openai", provider.URL, "test-model", "DAGENTS_AUTONOMY_TEST_KEY"
+	t.Setenv("DAGENTS_AUTONOMY_TEST_KEY", "test-key")
+	s := NewServer(cfg, nil, WithSkipStore())
+	if s.triggerSched != nil {
+		s.triggerSched.Stop()
+	}
+	if s.maintenanceSched != nil {
+		s.maintenanceSched.Stop()
+	}
+	as, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.agents = as
+	now := time.Now().UTC()
+	if err := s.agents.Save(context.Background(), store.AgentRecord{AgentID: "auto-v2-tools", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), RuntimeRevision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.agents.SaveAgentPolicy(context.Background(), store.AgentPolicyRecord{AgentID: "auto-v2-tools", Tools: map[string]string{"todo_create": "never"}, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if s.triggerSched != nil {
+			s.triggerSched.Stop()
+		}
+		if s.maintenanceSched != nil {
+			s.maintenanceSched.Stop()
+		}
+		s.sessions.Stop()
+		_ = as.Close()
+	})
+	w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2-tools/auto-config", `{"expected_revision":0,"responsibility":"session todo owner","wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put=%d %s", w.Code, w.Body)
+	}
+	w = autonomyV2Request(s, http.MethodPost, "/v1/messages", `{"agent_id":"auto-v2-tools","content":"create a todo"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enqueue=%d %s", w.Code, w.Body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(s.autonomyStore.ListTodos("auto-v2-tools")) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	todos := s.autonomyStore.ListTodos("auto-v2-tools")
+	if len(todos) != 1 || todos[0].Text != "from session" {
+		t.Fatalf("session tool did not persist todo: %+v", todos)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case n := <-callSeen:
+			if n >= 2 {
+				return
+			}
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	mu.Lock()
+	gotCalls := calls
+	mu.Unlock()
+	t.Fatalf("expected tool continuation model call, got %d", gotCalls)
 }
