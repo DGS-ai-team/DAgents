@@ -22,6 +22,16 @@ AutoProfile 增加 maintenance_enabled、maintenance_schedule、maintenance_revi
 
 occurrence 负责每日运行协调，receipt 负责模型调用及用量结算；controller 必须关联两者，不能将 occurrence 完成直接等同于候选已经提交。
 
+### 待落地的显式恢复契约
+
+一个 occurrence 可处理多段业务输入，因此关联不能是单个 parent ID。每个每日 memory receipt 保存 `occurrence_local_date` 与 `occurrence_schedule_revision`，Agent ID 沿用 receipt 的已有归属；手册 child 继承 parent 的关联。通过这一组合查询该日全部执行，手动执行没有每日归属，不能在恢复时按时间推测或补绑。
+
+每日专用预留方法在 Goals 的同一个锁与文件保存中验证 occurrence 为 pending、没有启动恢复标记、当前维护仍启用且配置版本一致，然后创建带关联的 reservation。API 使用绑定 occurrence 的 Usage 适配器调用该方法，记忆 runner 仍使用同一套提取与提交逻辑。归属与预留不能分两次保存，避免崩溃产生无法归属的执行；重复调用只接受原身份，拒绝将旧手动执行或另一日期执行改绑。
+
+恢复入口读取该 occurrence 的全部执行状态，不能只检查最后一个 child。prepared 可以复用原预留；running 或未知用量必须先对账，不能把状态直接重置为 prepared。对账需记录依据、实际用量及文件历史；缺乏证据时保持待处理。用户可终止后续整理，但已发生的费用与文件修改保留，未知费用不以零代替。重复恢复请求须返回同一结果，并与调度器共用 Agent 执行槽。
+
+API/UI 的后续实现顺序为：原子关联 → 按 occurrence 查询执行摘要 → 对账与恢复操作 → 设置页处理入口。没有可靠归属的旧 occurrence 显示“历史记录缺少关联，需核对”，不自动归并或重跑。页面显示可读日期、执行阶段和原因，revision/receipt ID 作为请求校验与诊断字段，不作为主要操作文案。
+
 ## 剩余集成门槛
 
 1. 共享执行槽与手动维护 API 已提交（dc483f17）。聊天/业务优先；取消维护不等于实际退出，函数返回后才释放槽。每日 controller 仍需证明服务关闭时也遵循这一规则。
