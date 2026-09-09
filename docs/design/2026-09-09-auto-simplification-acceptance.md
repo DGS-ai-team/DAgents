@@ -209,3 +209,7 @@ root NavRail三项测试通过；5173浅色1280×720实际截图显示直接新�
 root在5173设置390×844视口实际验收：工作组空页主按钮完整可见，点击后移动导航自动展开，原有名称输入、取消/创建表单可见，无横向溢出。未创建数据；验收后恢复默认视口并关闭临时标签页。这补齐699270a0的窄屏交互证据，仍非整个产品全页窄屏证明。
 
 9f0974f6将Auto起源测试的合法/错误delivery检查放在受控provider阻塞窗口，释放后继续ASK/合并/关闭不重放断言，取消与cleanup可安全解锁。root最终精确race count10通过（12.013秒）。首次失败由测试在claim清理后检查造成，不修改生产投递语义。
+
+### 旧维护执行器删除验收
+
+删除无生产调用的memory maintenance reader/runner及session RunHandbookMaintenance旧执行器和专属测试。dreaming_test依赖的三个测试客户端移至独立辅助文件，保留原dreaming断言；初次编译缺失辅助的失败已修正。root Memory/Session/API 的Dreaming|Maintenance|Handbook|Context专项race通过（7.509/27.418/6.475秒），删除入口名称不再有生产/测试引用。新版execution gate、dreaming调度、上下文重置、手册文件工具与历史存储保留。此批仍未移除goals包的旧存储模型，也未部署到运行Node。
