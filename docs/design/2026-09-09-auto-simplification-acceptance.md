@@ -223,3 +223,9 @@ Manage深色桌面非空工作组卡片、通用配置和Supervisor配置已实�
 ### 临时工作组归档完成
 
 核查WorkgroupStore.begin_archive发现首次调用仅转archiving，第二次才转archived，当前没有自动完成接线。root确认目标仍是本次临时草稿后完成第二阶段，GET核验status=archived；新开管理台页面显示工作组0/0。已安排修复配置中草稿的单次归档幂等行为，不将当前两次调用当作产品闭环。旧标签页原生confirm仍被浏览器工具阻塞，新管理台标签24已打开且可正常操作。
+
+### 清理后整体测试及服务更新
+
+root执行go test ./node/... -count=1 -timeout=180s，Node所有包测试通过（含API35.440秒、Session34.102秒、Tools16.639秒），不等同Windows全工具race。随后构建clean-auto版本并确认两名Agent空闲后更新Node PID23532；health正常。
+
+720617b3修复配置中工作组单次归档并保持archived幂等，活跃组原流程未改。root Store/API共12项测试通过，重启Manage PID27932后Node自动重建WS且订阅刷新/心跳/摘要上报均200。通过真实API创建草稿wg_91ff916b44be3a1c55f8df1bc8，首次archive即返回archived，GET读回同状态。两条临时验收草稿均已归档，无验收任务运行。活跃工作组完整归档流程不据本批声明通过。
