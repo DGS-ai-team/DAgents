@@ -229,3 +229,9 @@ Manage深色桌面非空工作组卡片、通用配置和Supervisor配置已实�
 root执行go test ./node/... -count=1 -timeout=180s，Node所有包测试通过（含API35.440秒、Session34.102秒、Tools16.639秒），不等同Windows全工具race。随后构建clean-auto版本并确认两名Agent空闲后更新Node PID23532；health正常。
 
 720617b3修复配置中工作组单次归档并保持archived幂等，活跃组原流程未改。root Store/API共12项测试通过，重启Manage PID27932后Node自动重建WS且订阅刷新/心跳/摘要上报均200。通过真实API创建草稿wg_91ff916b44be3a1c55f8df1bc8，首次archive即返回archived，GET读回同状态。两条临时验收草稿均已归档，无验收任务运行。活跃工作组完整归档流程不据本批声明通过。
+
+### 当前核心逻辑审计与新增窄屏覆盖
+
+按当前代码重新核对：AgentPromptProvider→session→turn将职责/经验放入实际ChatRequest.SystemPrompt，并冻结本轮、下一轮刷新；Todo请求级最新读取及用户/工具CAS共享由agent_prompt_provider与autonomy_v2专项覆盖。默认trigger保存/关闭/重建/冻结有autonomy_default_trigger_api专项。dreaming在CommitDreaming后才ResetActiveContext并标记/确认，保留失败、审批恢复、孤立attempt和队列恢复测试；不再引用删除的旧maintenance实现作为证据。真实进程重启后默认trigger再次到期的黑盒证明仍可补强，不能将组件重建测试说成该场景实测。
+
+root实际18766深色390×844检查通用设置上下半页、MCP空态、Linux通道空态。后两页未见裁切或重叠；通用页运行状态两卡过窄造成标签与状态换行，已安排最小布局修复。验收后恢复默认视口并关闭临时标签页。本批没有更改任何配置值。
