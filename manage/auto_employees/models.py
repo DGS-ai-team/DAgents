@@ -15,6 +15,24 @@ def _text(value: Any) -> str:
     return value.strip()
 
 
+class DreamingSummary(BaseModel):
+    model_config = {"extra": "forbid"}
+    state: str = Field(default="unknown", min_length=1, max_length=64)
+    next_at: datetime | None = None
+    last_success: datetime | None = None
+
+    _trim_state = field_validator("state", mode="before")(_text)
+
+    @field_validator("next_at", "last_success")
+    @classmethod
+    def validate_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamp must include a timezone offset")
+        return value.astimezone(timezone.utc)
+
+
 class AutoSummary(BaseModel):
     model_config = {"extra": "forbid"}
     agent_id: str = Field(min_length=1, max_length=256)
@@ -28,6 +46,7 @@ class AutoSummary(BaseModel):
     profile_revision: int = Field(default=0, ge=0)
     runtime_revision: int = Field(default=0, ge=0)
     as_of: datetime
+    dreaming: DreamingSummary = Field(default_factory=DreamingSummary)
 
     _trim_text = field_validator("agent_id", "display_name", "role", "state", "reason", mode="before")(_text)
 

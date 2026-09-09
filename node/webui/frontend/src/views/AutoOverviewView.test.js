@@ -19,7 +19,7 @@ describe("AutoOverviewView", () => {
     vi.clearAllMocks();
     routerMock.push.mockClear();
     api.getAutoOverview.mockResolvedValue({
-      items: [{ agent_id: "auto-1", display_name: "研究员", agent_type: "auto", state: "needs_attention", state_reason: "需要处理", next_at: "2026-09-09T12:00:00Z", todo_summary: ["核对资料", "更新手册"] }], counts: { total: 1, working: 0, needs_attention: 1 }, total: 1, page: 1, page_size: 20,
+    items: [{ agent_id: "auto-1", display_name: "研究员", agent_type: "auto", state: "needs_attention", state_reason: "需要处理", next_at: "2026-09-09T12:00:00Z", todo_summary: ["核对资料", "更新手册"], dreaming: { state: "succeeded", next_at: "2026-09-10T03:00:00Z", last_success: "2026-09-09T03:00:00Z" } }], counts: { total: 1, working: 0, needs_attention: 1 }, total: 1, page: 1, page_size: 20,
     });
   });
 
@@ -30,6 +30,7 @@ describe("AutoOverviewView", () => {
     expect(api.getAutoOverview).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 20 }));
     expect(wrapper.text()).toContain("需处理");
     expect(wrapper.text()).toContain("核对资料；更新手册");
+    expect(wrapper.text()).toContain("最近成功");
   });
 
   it("preserves the page and offers retry after a failed load", async () => {
@@ -42,6 +43,20 @@ describe("AutoOverviewView", () => {
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("暂无 Auto Agent");
+  });
+
+  it("renders missing and invalid dreaming dates without claiming a schedule", async () => {
+    api.getAutoOverview.mockResolvedValueOnce({ items: [
+      { agent_id: "closed", state: "activation_off", dreaming: { state: "disabled" } },
+      { agent_id: "broken", state: "standby", dreaming: { state: "failed", next_at: "0001-01-01T00:00:00Z", last_success: "not-a-date" } },
+    ], total: 2, page: 1, page_size: 20 });
+    const wrapper = mount(AutoOverviewView);
+    wrappers.push(wrapper);
+    await flushPromises();
+    expect(wrapper.text()).toContain("已关闭");
+    expect(wrapper.text()).toContain("上次失败");
+    expect(wrapper.text()).toContain("未获取");
+    expect(wrapper.text()).not.toContain("0001");
   });
 
   it("opens the normal chat or settings", async () => {

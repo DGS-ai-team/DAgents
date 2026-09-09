@@ -20,7 +20,10 @@ let refreshTimer;
 const statusLabels = { working: "工作中", activation_off: "自主激活关闭", standby: "待命", needs_attention: "需处理" };
 const stateLabel = (value) => statusLabels[value] || value || "未知";
 const nextCheck = (item) => item.next_at;
-const formatDate = (value) => value ? new Date(value).toLocaleString() : "暂未安排";
+const formatDate = (value) => { if (!value) return "暂未安排"; const date = new Date(value); return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1 ? "暂未安排" : date.toLocaleString(); };
+const formatDreamingDate = (value) => { if (!value) return "未获取"; const date = new Date(value); return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1 ? "未获取" : date.toLocaleString(); };
+const dreamingStateLabels = { disabled: "已关闭", waiting: "等待执行", running: "整理中", succeeded: "最近成功", failed: "上次失败", recovery_pending: "等待恢复" };
+const dreamingSummary = (item) => { const value = item?.dreaming; if (!value || typeof value !== "object") return "未获取"; const state = dreamingStateLabels[value.state] || "未知状态"; const next = value.next_at ? ` · 下次 ${formatDreamingDate(value.next_at)}` : ""; const last = value.last_success ? ` · 上次成功 ${formatDreamingDate(value.last_success)}` : ""; return `${state}${next}${last}`; };
 const todoSummary = (item) => Array.isArray(item.todo_summary) ? (item.todo_summary.length ? item.todo_summary.join("；") : "暂无待办摘要") : (item.todo_summary || "暂无待办摘要");
 
 async function load() {
@@ -66,7 +69,7 @@ onUnmounted(() => { disposed = true; requestSeq += 1; if (refreshTimer) window.c
           <div class="auto-overview__row auto-overview__row--head" role="row"><span>智能体</span><span>状态</span><span>下次自动检查</span><span>待办</span><span>操作</span></div>
           <article v-for="item in items" :key="item.agent_id" class="auto-overview__row" role="row">
             <div data-label="智能体" class="auto-overview__agent" :title="item.agent_id"><strong>{{ item.display_name || item.agent_id }}</strong><AutoBadge :agent="item" /></div>
-            <div data-label="状态"><span class="auto-overview__state" :class="`auto-overview__state--${item.state}`">{{ stateLabel(item.state) }}</span><small v-if="item.state_reason">{{ item.state_reason }}</small></div>
+            <div data-label="状态"><span class="auto-overview__state" :class="`auto-overview__state--${item.state}`">{{ stateLabel(item.state) }}</span><small v-if="item.state_reason">{{ item.state_reason }}</small><small>dreaming：{{ dreamingSummary(item) }}</small></div>
             <div data-label="下次自动检查">{{ formatDate(nextCheck(item)) }}</div>
             <div data-label="待办">{{ todoSummary(item) }}</div>
             <div data-label="操作" class="auto-overview__actions"><button type="button" @click="openChat(item)">打开聊天</button><button type="button" @click="openSettings(item)">设置</button></div>

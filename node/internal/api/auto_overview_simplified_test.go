@@ -35,6 +35,12 @@ func TestAutoOverviewSimplifiedProjectionUsesAutonomyStateAndFilters(t *testing.
 	if err := s.autonomyStore.PutProfile(simplifiedProfile("auto-v2", 60), 0); err != nil {
 		t.Fatal(err)
 	}
+	p, _ := s.autonomyStore.GetProfile("auto-v2")
+	p.DreamingEnabled, p.DreamingTime = true, "03:00"
+	if err := s.autonomyStore.PutProfile(p, p.Revision); err != nil {
+		t.Fatal(err)
+	}
+	s.dreamingSched = NewDreamingScheduler(s.autonomyStore, s.agents, s.sessions, func(context.Context, string) error { return nil })
 	if _, err := s.autonomyStore.CreateTodo("other-v2", "todo"); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +57,9 @@ func TestAutoOverviewSimplifiedProjectionUsesAutonomyStateAndFilters(t *testing.
 	}
 	if manageItems[0].State != out.Items[0].State || manageItems[0].TodoCounts["pending"] != out.Items[0].TodoCounts["pending"] || (manageItems[0].NextAt == nil) != (out.Items[0].NextAt == nil) {
 		t.Fatalf("node/manage projection drift: node=%+v manage=%+v", out.Items[0], manageItems[0])
+	}
+	if out.Items[0].Dreaming.State == "" || manageItems[0].Dreaming.State != out.Items[0].Dreaming.State {
+		t.Fatalf("dreaming projection drift: node=%+v manage=%+v", out.Items[0].Dreaming, manageItems[0].Dreaming)
 	}
 	if got := simplifiedOverview(t, s, "?search=other-v2"); len(got.Items) != 1 || got.Items[0].TodoCounts["pending"] != 1 {
 		t.Fatalf("todo projection=%+v", got)

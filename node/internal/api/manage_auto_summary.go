@@ -32,6 +32,16 @@ func (s *Server) autoSummaryProvider() manage.AutoSummaryProvider {
 			}
 			profile, configured := s.autonomyStore.GetProfile(rec.AgentID)
 			state, reason, next := s.projectAutoActivation(rec.AgentID, profile, configured, time.Now().UTC())
+			dreaming := s.projectAutoDreaming(rec.AgentID, time.Now().UTC())
+			var dreamingNext, dreamingSuccess *time.Time
+			if dreaming.NextAt != nil {
+				v := *dreaming.NextAt
+				dreamingNext = &v
+			}
+			if dreaming.LastSuccess != nil {
+				v := *dreaming.LastSuccess
+				dreamingSuccess = &v
+			}
 			name := []rune(rec.DisplayName)
 			if len(name) > 256 {
 				name = name[:256]
@@ -44,7 +54,7 @@ func (s *Server) autoSummaryProvider() manage.AutoSummaryProvider {
 				}
 				counts[status]++
 			}
-			out = append(out, manage.AutoEmployeeSummary{AgentID: rec.AgentID, DisplayName: string(name), Role: "Auto employee", WakeIntervalSeconds: profile.WakeIntervalSeconds, TodoCounts: counts, State: state, Reason: reason, NextAt: next, ProfileRevision: profile.Revision, RuntimeRevision: rec.RuntimeRevision, AsOf: time.Now().UTC()})
+			out = append(out, manage.AutoEmployeeSummary{AgentID: rec.AgentID, DisplayName: string(name), Role: "Auto employee", WakeIntervalSeconds: profile.WakeIntervalSeconds, TodoCounts: counts, State: state, Reason: reason, NextAt: next, Dreaming: manage.DreamingSummary{State: dreaming.State, NextAt: dreamingNext, LastSuccess: dreamingSuccess}, ProfileRevision: profile.Revision, RuntimeRevision: rec.RuntimeRevision, AsOf: time.Now().UTC()})
 		}
 		return out, nil
 	}

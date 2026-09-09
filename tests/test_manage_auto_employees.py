@@ -68,6 +68,18 @@ class AutoEmployeeManageTests(unittest.TestCase):
         self.assertEqual(self.client.put(path, json={**self.payload(), "reason": "different"}, headers=headers).status_code, 409)
         self.assertEqual(self.client.put(path, json=self.payload(as_of="2026-09-07T01:00:00Z"), headers=headers).status_code, 409)
 
+    def test_dreaming_status_round_trips_without_private_fields(self):
+        payload = {**self.payload(), "dreaming": {"state": "succeeded", "next_at": "2026-09-10T03:00:00Z", "last_success": "2026-09-09T03:01:00Z"}}
+        response = self.client.put("/v1/registry/nodes/node-a/auto-summary", json=payload, headers=self.headers("ta", "node-a"))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["dreaming"]["state"], "succeeded")
+        listing = self.client.get("/v1/auto/overview", headers=self.headers("admin", "admin"))
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()["items"][0]["dreaming"]["last_success"], "2026-09-09T03:01:00Z")
+        self.assertEqual(AutoSummaryStore(SQLiteDatabase(self.db)).get("node-a", "auto-1").dreaming.state, "succeeded")
+        for private in ("experience", "last_error"):
+            self.assertEqual(self.client.put("/v1/registry/nodes/node-a/auto-summary", json={**payload, private: "secret"}, headers=self.headers("ta", "node-a")).status_code, 422)
+
     def test_timestamps_and_usage_are_bounded(self):
         path = "/v1/registry/nodes/node-a/auto-summary"
         headers = self.headers("ta", "node-a")

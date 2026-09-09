@@ -17,21 +17,30 @@ import (
 // AutoEmployeeSummary is the deliberately small, privacy-preserving payload
 // sent to Manage. It contains no prompt, transcript, path, or artifact body.
 type AutoEmployeeSummary struct {
-	AgentID             string         `json:"agent_id"`
-	DisplayName         string         `json:"display_name,omitempty"`
-	Role                string         `json:"role,omitempty"`
-	WakeIntervalSeconds int64          `json:"wake_interval_seconds,omitempty"`
-	TodoCounts          map[string]int `json:"todo_counts,omitempty"`
-	State               string         `json:"state"`
-	Reason              string         `json:"reason,omitempty"`
-	NextAt              *time.Time     `json:"next_at,omitempty"`
-	ProfileRevision     int64          `json:"profile_revision,omitempty"`
-	RuntimeRevision     int64          `json:"runtime_revision,omitempty"`
-	AsOf                time.Time      `json:"as_of"`
+	AgentID             string          `json:"agent_id"`
+	DisplayName         string          `json:"display_name,omitempty"`
+	Role                string          `json:"role,omitempty"`
+	WakeIntervalSeconds int64           `json:"wake_interval_seconds,omitempty"`
+	TodoCounts          map[string]int  `json:"todo_counts,omitempty"`
+	State               string          `json:"state"`
+	Reason              string          `json:"reason,omitempty"`
+	NextAt              *time.Time      `json:"next_at,omitempty"`
+	ProfileRevision     int64           `json:"profile_revision,omitempty"`
+	RuntimeRevision     int64           `json:"runtime_revision,omitempty"`
+	AsOf                time.Time       `json:"as_of"`
+	Dreaming            DreamingSummary `json:"dreaming"`
 	// Deprecated in the wire contract; retained only for in-process callers
 	// while old reporters are phased out.
 	LastResult string         `json:"-"`
 	Usage      map[string]any `json:"-"`
+}
+
+// DreamingSummary is a safe status-only projection for Manage. It carries no
+// experience, handbook, Todo text, or failure detail.
+type DreamingSummary struct {
+	State       string     `json:"state"`
+	NextAt      *time.Time `json:"next_at,omitempty"`
+	LastSuccess *time.Time `json:"last_success,omitempty"`
 }
 
 type AutoSummaryProvider func(context.Context) ([]AutoEmployeeSummary, error)

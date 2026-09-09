@@ -28,6 +28,30 @@ type autoOverviewItem struct {
 	NextAt              *time.Time                   `json:"next_at,omitempty"`
 	ProfileRevision     int64                        `json:"profile_revision,omitempty"`
 	RuntimeRevision     int64                        `json:"runtime_revision,omitempty"`
+	Dreaming            dreamingOverview             `json:"dreaming"`
+}
+
+type dreamingOverview struct {
+	State       string     `json:"state"`
+	NextAt      *time.Time `json:"next_at,omitempty"`
+	LastSuccess *time.Time `json:"last_success,omitempty"`
+}
+
+func (s *Server) projectAutoDreaming(agentID string, now time.Time) dreamingOverview {
+	if s.dreamingSched == nil {
+		return dreamingOverview{State: "unknown"}
+	}
+	status := s.dreamingSched.CurrentStatus(agentID, now)
+	view := dreamingOverview{State: status.State}
+	if !status.NextAt.IsZero() {
+		next := status.NextAt
+		view.NextAt = &next
+	}
+	if !status.LastSuccess.IsZero() {
+		success := status.LastSuccess
+		view.LastSuccess = &success
+	}
+	return view
 }
 
 type autoOverviewResponse struct {
@@ -105,6 +129,7 @@ func (s *Server) handleAutoOverview(w http.ResponseWriter, r *http.Request) {
 			item.ProfileRevision, item.Responsibility, item.WakeIntervalSeconds = profile.Revision, profile.Responsibility, profile.WakeIntervalSeconds
 		}
 		item.State, item.StateReason, item.NextAt = s.projectAutoActivation(rec.AgentID, profile, configured, time.Now().UTC())
+		item.Dreaming = s.projectAutoDreaming(rec.AgentID, time.Now().UTC())
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {

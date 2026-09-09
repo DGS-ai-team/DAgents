@@ -17,9 +17,18 @@ let requestId = 0;
 function formatTime(value) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", { hour12: false });
+  return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1 ? "—" : date.toLocaleString("zh-CN", { hour12: false });
 }
 function stateLabel(value) { return ({ working: "工作中", standby: "待命", activation_off: "自主激活关闭", needs_attention: "需处理" }[value] || "未知状态"); }
+function dreamingStateLabel(value) { return ({ disabled: "已关闭", waiting: "等待执行", running: "整理中", succeeded: "最近成功", failed: "上次失败", recovery_pending: "等待恢复" }[value] || "未知状态"); }
+function dreamingText(item) {
+  const dreaming = item?.dreaming;
+  if (!dreaming || typeof dreaming !== "object") return "未获取";
+  const parts = [dreamingStateLabel(dreaming.state)];
+  if (dreaming.next_at) parts.push(`下次 ${formatTime(dreaming.next_at)}`);
+  if (dreaming.last_success) parts.push(`上次成功 ${formatTime(dreaming.last_success)}`);
+  return parts.join(" · ");
+}
 function todoText(item) {
   const counts = item.todo_counts && typeof item.todo_counts === "object" ? item.todo_counts : {};
   const total = Number(counts.total ?? (Number(counts.pending || 0) + Number(counts.in_progress || 0) + Number(counts.completed || 0)));
@@ -63,9 +72,9 @@ function nextPage() { if (page.value * pageSize < total.value) { page.value += 1
     <div v-else-if="!items.length" class="empty-state"><strong>暂无 Auto 员工摘要</strong><span>Node 上报后，状态与待办计数会显示在这里。</span></div>
     <div v-else class="auto-employees-table-wrap">
       <table class="data-table auto-employees-table"><thead><tr><th>员工</th><th>Node</th><th>状态</th><th>下次自动检查</th><th>待办</th><th>上报时间</th></tr></thead>
-        <tbody><tr v-for="item in items" :key="`${item.node_id}:${item.agent_id}`"><td><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }}</small></td><td>{{ item.node_id }}</td><td><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}<small v-if="item.reason">{{ item.reason }}</small></span></td><td>{{ formatTime(item.next_at) }}</td><td>{{ todoText(item) }}</td><td>{{ formatTime(item.received_at) }}<small v-if="item.stale">已 {{ item.age_seconds }} 秒未更新</small></td></tr></tbody>
+        <tbody><tr v-for="item in items" :key="`${item.node_id}:${item.agent_id}`"><td><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }}</small></td><td>{{ item.node_id }}</td><td><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}<small v-if="item.reason">{{ item.reason }}</small></span><small>dreaming：{{ dreamingText(item) }}</small></td><td>{{ formatTime(item.next_at) }}</td><td>{{ todoText(item) }}</td><td>{{ formatTime(item.received_at) }}<small v-if="item.stale">已 {{ item.age_seconds }} 秒未更新</small></td></tr></tbody>
       </table>
-      <div class="auto-employees-cards"><article v-for="item in items" :key="`${item.node_id}:${item.agent_id}:card`" class="auto-employee-card"><div><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }} · {{ item.node_id }}</small></div><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}</span><p>下次自动检查：{{ formatTime(item.next_at) }}</p><small>{{ todoText(item) }} · 上报：{{ formatTime(item.received_at) }}<template v-if="item.stale"> · 已 {{ item.age_seconds }} 秒未更新</template></small></article></div>
+      <div class="auto-employees-cards"><article v-for="item in items" :key="`${item.node_id}:${item.agent_id}:card`" class="auto-employee-card"><div><strong>{{ item.display_name || item.agent_id }}</strong><small>{{ item.agent_id }} · {{ item.node_id }}</small></div><span class="status-pill" :class="{ 'is-stale': item.stale }">{{ item.stale ? "摘要过期" : stateLabel(item.state) }}</span><small>dreaming：{{ dreamingText(item) }}</small><p>下次自动检查：{{ formatTime(item.next_at) }}</p><small>{{ todoText(item) }} · 上报：{{ formatTime(item.received_at) }}<template v-if="item.stale"> · 已 {{ item.age_seconds }} 秒未更新</template></small></article></div>
     </div>
     <div v-if="total > pageSize" class="pagination"><button type="button" class="btn btn-ghost" :disabled="page <= 1 || loading" @click="previousPage">上一页</button><span>第 {{ page }} 页 · 共 {{ total }} 条</span><button type="button" class="btn btn-ghost" :disabled="page * pageSize >= total || loading" @click="nextPage">下一页</button></div>
   </section>

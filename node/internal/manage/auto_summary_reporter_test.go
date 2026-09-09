@@ -17,6 +17,18 @@ func reporterSummary() AutoEmployeeSummary {
 	return AutoEmployeeSummary{AgentID: "auto/1", DisplayName: "摘要员工", Role: "Auto employee", State: "standby", Reason: "", AsOf: time.Now().UTC()}
 }
 
+func TestAutoEmployeeSummaryDreamingProjectionIsStatusOnly(t *testing.T) {
+	now := time.Now().UTC()
+	body, err := json.Marshal(AutoEmployeeSummary{AgentID: "auto/1", State: "standby", AsOf: now, Dreaming: DreamingSummary{State: "succeeded", NextAt: &now, LastSuccess: &now}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"dreaming":{"state":"succeeded"`) || strings.Contains(text, "experience") || strings.Contains(text, "handbook") || strings.Contains(text, "last_error") {
+		t.Fatalf("unexpected dreaming summary payload: %s", text)
+	}
+}
+
 func TestAutoSummaryReporterSendsBoundIdentityAndWhitelist(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
