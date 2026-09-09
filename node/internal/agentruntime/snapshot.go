@@ -17,6 +17,11 @@ type Snapshot struct {
 	TemplateID string          `json:"template_id"`
 	Defaults   map[string]any  `json:"defaults"`
 	Workspace  WorkspaceConfig `json:"workspace,omitempty"`
+	Handbook   HandbookConfig  `json:"handbook,omitempty"`
+}
+
+type HandbookConfig struct {
+	Directory string `json:"directory,omitempty"`
 }
 
 // ParseSnapshot 解析 config_snapshot JSON。

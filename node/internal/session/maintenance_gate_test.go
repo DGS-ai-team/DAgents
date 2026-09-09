@@ -16,7 +16,7 @@ import (
 
 type gateCountingLLM struct {
 	llm.Client
-	calls   atomic.Int32
+	calls   *atomic.Int32
 	started chan struct{}
 }
 
@@ -141,14 +141,18 @@ func TestManagerMaintenanceGateTwoRuntimesAndOtherAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	counter := &gateCountingLLM{Client: &llm.MockClient{}}
+	total := &atomic.Int32{}
+	counter := &gateCountingLLM{Client: &llm.MockClient{}, calls: total}
 	m := NewManager("owner", stream.NewHub(64, logx.Discard()), counter, reg, policy.NewDefaultEngine(), nil, TurnOptions{}, logx.Discard())
 	defer m.Stop()
-	a, _, err := m.CreateWithOptionsAndLLM("a", TurnOptions{}, reg, nil, counter, "agent-a")
+	aLLM := &gateCountingLLM{Client: &llm.MockClient{}, calls: total}
+	bLLM := &gateCountingLLM{Client: &llm.MockClient{}, calls: total}
+	otherLLM := &gateCountingLLM{Client: &llm.MockClient{}, calls: total}
+	a, _, err := m.CreateWithOptionsAndLLM("a", TurnOptions{}, reg, nil, aLLM, "agent-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, err := m.CreateWithOptionsAndLLM("b", TurnOptions{}, reg, nil, counter, "agent-a")
+	b, _, err := m.CreateWithOptionsAndLLM("b", TurnOptions{}, reg, nil, bLLM, "agent-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +160,7 @@ func TestManagerMaintenanceGateTwoRuntimesAndOtherAgent(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("maintenance acquire: %v %v", ok, err)
 	}
-	c, _, err := m.CreateWithOptionsAndLLM("c", TurnOptions{}, reg, nil, counter, "agent-b")
+	c, _, err := m.CreateWithOptionsAndLLM("c", TurnOptions{}, reg, nil, otherLLM, "agent-b")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +187,7 @@ func TestManagerMaintenanceGateTwoRuntimesAndOtherAgent(t *testing.T) {
 		t.Fatal("lease context not cancelled")
 	}
 	callDeadline := time.After(time.Second)
-	for counter.calls.Load() < 1 {
+	for total.Load() < 1 {
 		select {
 		case <-callDeadline:
 			t.Fatal("independent agent did not reach LLM")
@@ -191,7 +195,7 @@ func TestManagerMaintenanceGateTwoRuntimesAndOtherAgent(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	if got := counter.calls.Load(); got != 1 {
+	if got := total.Load(); got != 1 {
 		t.Fatalf("maintenance leaked into LLM, calls=%d", got)
 	}
 	select {
@@ -201,10 +205,10 @@ func TestManagerMaintenanceGateTwoRuntimesAndOtherAgent(t *testing.T) {
 	}
 	release()
 	deadline := time.After(2 * time.Second)
-	for counter.calls.Load() < 3 {
+	for total.Load() < 3 {
 		select {
 		case <-deadline:
-			t.Fatalf("expected independent + 2 released calls, got %d", counter.calls.Load())
+			t.Fatalf("expected independent + 2 released calls, got %d", total.Load())
 		default:
 			time.Sleep(time.Millisecond)
 		}

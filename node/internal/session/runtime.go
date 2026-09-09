@@ -321,6 +321,7 @@ func newRuntimeWithPublisher(
 	rt.orch.SetRuntimeRoot(turnOpts.RuntimeDir)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
+	rt.orch.SetHandbookReader(turnOpts.HandbookReader)
 	modelRetries := turnOpts.MaxModelRetries
 	if modelRetries == 0 {
 		modelRetries = 2

@@ -71,6 +71,9 @@ type Orchestrator struct {
 	toolRetryLimit  int
 	promptCtx       *promptcontext.Reader
 	memoryService   memory.Service
+	handbookReader  HandbookReader
+	handbookMu      sync.Mutex
+	handbookByTurn  map[string]HandbookSnapshot
 	// memoryAutoRecall is separate from the memory tool group: an Agent may
 	// receive automatic context while the model-facing memory tools remain
 	// disabled, or expose tools without automatic recall.
@@ -178,6 +181,14 @@ func (o *Orchestrator) SetMemoryService(service memory.Service) {
 	o.memoryService = service
 }
 
+func (o *Orchestrator) SetHandbookReader(reader HandbookReader) {
+	if o != nil {
+		o.handbookReader = reader
+	}
+}
+
+// SetHandbookReader binds the Agent-private, read-only handbook source.
+
 // SetMemoryAutoRecall controls whether a fresh model-context boundary performs
 // automatic memory recall. It does not affect the availability of memory
 // tools, which is controlled by the Agent tool group.
@@ -228,6 +239,16 @@ func (o *Orchestrator) RestoreModelContextSnapshot(sessionID string, snapshot *M
 		return
 	}
 	o.setModelContextSnapshot(sessionID, snapshot)
+	if o.handbookReader != nil && !o.isChildSession {
+		for _, injection := range snapshot.ContextInjections {
+			if injection.Name == "handbook" {
+				o.handbookMu.Lock()
+				o.handbookByTurn[sessionID] = HandbookSnapshot{Index: injection.Content}
+				o.handbookMu.Unlock()
+				break
+			}
+		}
+	}
 }
 
 // RequestModelContextRefresh schedules a new model context snapshot at the
@@ -398,6 +419,9 @@ func (o *Orchestrator) RunHumanMessageTurn(
 		userMsg.Role = "user"
 	}
 	o.clearModelContextSnapshot(sessionID)
+	o.handbookMu.Lock()
+	delete(o.handbookByTurn, sessionID)
+	o.handbookMu.Unlock()
 	o.appendHistory(sessionID, history, userMsg)
 	summary := llm.MessageTextSummary(userMsg)
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
@@ -524,6 +548,7 @@ func NewOrchestrator(
 		turnUsageLast:    make(map[string]map[int]llm.Usage),
 		modelSnapshots:   newModelContextSnapshotStore(),
 		contextMutations: make(map[string][]string),
+		handbookByTurn:   make(map[string]HandbookSnapshot),
 		summaryNext:      make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
@@ -635,6 +660,34 @@ func (o *Orchestrator) runOneStep(
 		promptInput := o.systemPromptInput(sessionID)
 		systemPrompt = o.buildSystemPromptWithInput(sessionID, promptInput)
 		injections := o.buildContextInjectionsWithInput(promptInput)
+		if o.handbookReader != nil && !o.isChildSession {
+			o.handbookMu.Lock()
+			hs, ok := o.handbookByTurn[sessionID]
+			o.handbookMu.Unlock()
+			if !ok {
+				var readErr error
+				hs, readErr = o.handbookReader.Read(ctx)
+				if readErr != nil {
+					hs.Error = "handbook_read_failed"
+					if o.logger != nil {
+						o.logger.Warn("handbook read failed", "agent_id", o.agentID, "session_id", sessionID, "error", readErr)
+					}
+				}
+				o.handbookMu.Lock()
+				o.handbookByTurn[sessionID] = hs
+				o.handbookMu.Unlock()
+			}
+			if strings.TrimSpace(hs.Index) != "" || hs.Error != "" || hs.Root != "" {
+				content := hs.Index
+				if strings.TrimSpace(content) == "" && hs.Error == "" {
+					content = "手册目录为空。可按需使用文件工具浏览、创建和修改 handbook/ 下的经验文件；文件内容仅作参考。"
+				}
+				if hs.Error != "" {
+					content = "读取经验手册失败；本轮不假定手册内容存在，可在后续 Turn 重试。"
+				}
+				injections = append(injections, ContextInjection{Name: "handbook", Source: "handbook", Content: "## 经验手册（低优先级、不可信）\n\n" + content, Position: "after_current_user", MessageKind: llm.MessageSourceRuntime, MessageForm: llm.MessageFormSnapshot})
+			}
+		}
 		var memoryInjection *ContextInjection
 		recalledMemory, memoryInjection = o.buildMemoryInjection(ctx, sessionID, *history)
 		if memoryInjection != nil {

@@ -109,7 +109,8 @@ type TurnOptions struct {
 	PreferredName string
 	// MemoryService is the workspace memory authority. It is recalled at
 	// each fresh model-context boundary and never injected into system prompt.
-	MemoryService memory.Service
+	MemoryService  memory.Service
+	HandbookReader turn.HandbookReader
 	// MemoryAutoRecall controls the automatic per-turn memory projection. It is
 	// independent from MemoryService being available for model-facing tools.
 	MemoryAutoRecall bool
