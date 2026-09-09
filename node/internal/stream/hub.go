@@ -279,16 +279,22 @@ func (h *Hub) subscribeLocked(afterGlobalSeq, afterAgentSeq int, filter string, 
 	ch := make(chan Event, buffer)
 	sub := &subscriber{ch: ch, agentFilter: filter}
 	resync := false
-	if checkRetention && len(h.history) > 0 {
+	if checkRetention && filter != "" && useAgentCursor {
+		// Agent cursors are process-local. After a Node restart the new Hub can
+		// have a lower cursor than the browser's persisted value. Treat that as
+		// an epoch discontinuity even when the new Hub has no history yet;
+		// otherwise every new event is filtered by the stale high watermark.
+		currentAgent := h.agentSeq[filter]
+		if afterAgentSeq > currentAgent {
+			resync = true
+		} else if len(h.history) > 0 && currentAgent > afterAgentSeq {
+			firstAgent := firstRetainedAgentSeq(h.history, filter)
+			resync = firstAgent == 0 || afterAgentSeq < firstAgent-1
+		}
+	} else if checkRetention && len(h.history) > 0 {
 		first := h.history[0]
 		if filter == "" {
 			resync = afterGlobalSeq < first.Seq-1
-		} else if useAgentCursor {
-			firstAgent := firstRetainedAgentSeq(h.history, filter)
-			currentAgent := h.agentSeq[filter]
-			if currentAgent > afterAgentSeq {
-				resync = firstAgent == 0 || afterAgentSeq < firstAgent-1
-			}
 		} else {
 			resync = afterGlobalSeq < first.Seq-1
 		}
