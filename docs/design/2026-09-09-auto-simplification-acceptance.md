@@ -432,3 +432,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `TestDreamingWaitingApprovalSurvivesRuntimeRestart` 已真实关闭并重开 SQLite/Manager，继续原审批链，完成 handbook 写入并验证 Dreaming attempt completed；`TestDreamingOrphanedAttemptIsFailedOnRestore` 覆盖孤立记录恢复失败，`dreaming_scheduler_test.go` 另覆盖可控 `now`、pending recovery、关闭 dreaming 不丢恢复和不重复模型调用。
 - 这些测试对存储、runtime hydration、审批继续、经验/手册提交和上下文恢复提供稳定等价证据；`process_restart_e2e_test.go` 则覆盖真实 Node 进程的默认 trigger/HITL/未知工具重启。当前没有把两者合并为进程级 Dreaming 结论。
 - 真实进程 Dreaming 组合仍需独立夹具：通过公开配置安排当日 scheduler、在审批或工具执行中停止二进制、重开后恢复原 attempt，并使用 fake LLM 断言不重复执行。该项不依赖真实 provider，但需要新增进程 fixture/可控调度窗口，当前仍保留为未独立实测边界。
+
+### 2026-09-10 18766 真实 provider 条件 true 验收
+
+- root 在 18766 使用临时 Auto Agent 与 `mimo-v2.5-pro`，配置 `max_tool_rounds=2` 及 `fs+bash` 工具组；条件脚本 `echo condition-true-ok` 经既有审批批准后以 exit=0 完成。
+- 条件命中只产生一条 queued delivery，随后观察到真实 provider 的 `model.request.started`、usage 与 completed 事件；Auto 主会话收到脚本输出 `condition-true-ok` 并完成，pending delivery、排队消息和 active turn 均清空。
+- 临时 Agent/Trigger 已清理，未保留业务数据。该证据完成真实 provider true 条件触发验收；真实进程 Dreaming 故障重启组合仍是唯一未独立实测边界。
