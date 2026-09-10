@@ -74,7 +74,7 @@ Dreaming 的 `recovery_pending` 表示运行记录尚待确认，或经验提交
 | 默认激活 | 已同步稳定 trigger、应用工具轮次上限及用户输入优先；重启仅冻结待恢复 trigger，双 Agent 隔离、关闭频率保留投递及恢复后重新同步通过 API 专项测试；默认 trigger 恢复入口已完成隔离实例的桌面与 390px 实页复核，覆盖恢复提示、触发器卡片、原生确认、CAS 恢复及恢复后重新同步 |
 | Dreaming | 同一 turn 的持久关联、连续 ASK、审批批准/拒绝/取消、经验原子提交、结束边界重置及 Ack 已接入；调度端到端和 Session 全包 race 通过；审批等待中重启、孤立记录与排队消息保留专项 race 已通过，真实 mimo dreaming 提交、上下文重置与独立 Agent 手册写入已验收（见验收记录） |
 | 设置与总览 | Node 设置、Todo、Node/Manage dreaming 总览已接入；前端、Manage 接收/持久化及隔离测试通过；Node 主要设置、Auto 总览、帮助、反馈、智能体列表、触发器页和 Manage 首页、Auto 总览、反馈页已有桌面复核且无横向溢出，部分 Node/Manage 页面已有 390px 复核；仍未完成全部页面的 390px 逐页复核 |
-| 脚本条件 | 持久审批、Manager 创建/替换回调绑定及生产接线已实现；原 HTTP 审批和真实下游投递失败冻结/重开测试通过，最终运行环境验收未完成 |
+| 脚本条件 | 持久审批、Manager 创建/替换回调绑定及生产接线已实现；`fa159b41` 记录 18766 真实 `bash_run` 审批批准后的 `exit 1` false 对照，历史为 `skipped / condition not satisfied`，无额外模型回合且临时 trigger 已清理；真实 true 条件触发模型本轮未重做 |
 | 旧架构清理 | 旧 Goal/Cycle/event/maintenance 生产路由与调度入口已退役，专属前端及配置已清理；旧 Goals、独立 events/probe、旧 maintenance runner 及风险闭环专属包已删除，Node 全包普通测试通过；保留共用存储原语，不建立旧消息兼容层 |
 | 最终验收 | 新版 Node/Manage 已启动，真实配置 LLM 聊天、默认激活、dreaming 提交及重置已有证据；少量标签页重连、真实手册写入和工具轮次触顶已验收；工作组 WS 鉴权已修复并通过真实连接复验，旧专属包已删除；默认 trigger 恢复入口的实际界面验收已完成，完整视觉（尤其全部页面的 390px 逐页覆盖）仍需闭环，整体目标保持进行中 |
 
