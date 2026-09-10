@@ -5459,6 +5459,25 @@ code {
   letter-spacing: 0.04em;
 }
 
+
+@media (max-width: 640px) {
+  .login-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .login-aside {
+    min-height: 30vh;
+    padding: 28px 20px;
+  }
+
+  .login-panel {
+    min-width: 0;
+    padding: 28px 20px;
+    border-left: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
 .login-panel {
   display: grid;
   place-items: center;
