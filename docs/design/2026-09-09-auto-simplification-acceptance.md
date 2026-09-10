@@ -360,3 +360,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 18766 的 4 条 `controller=goal` 记录（`auto-intent-b0a14dbe596029b1ce063781`、`7305325b-7730-4232-8621-ed741096442b`、`managed-trigger-df6464d7-bcde-440c-8ebe-933798ffb13b`、`managed-trigger-6b1b1365-5f2b-4160-8b42-b526b9ac43f8`）均由本轮临时验收日志中的旧 Goal/cycle 夹具创建，目标为 `goal-session-*`，当前均 `enabled=false`、`recovery_required=true` 且无 pending delivery。新代码已将其隔离并禁用。
 - 现有 DELETE API 只允许 `user` controller；对这些退役 `goal` 记录没有授权删除入口。为避免直接改 SQLite 或误伤 Auto 主会话、Todo、经验、手册及普通用户 trigger，本轮未删除实际数据，保留记录并准确记录其隔离状态。
 - 本次仍不宣称全页面 390px 窄屏矩阵完成；该覆盖边界保持不变。
+
+### 2026-09-10 18766 条件脚本 false 实际对照
+
+- 在当前 18766 隔离验收 runtime 中，使用临时用户 trigger `4e0c3165-1f7f-4008-bc5d-05b9bfd504f3`，经既有 `bash_run` 审批批准后执行 `exit 1`。历史最终记录为 `skipped / condition not satisfied`，证明脚本返回 false 时不会投递后续 Agent 任务。
+- 对照结束后，Agent hydrate 为 `active=null`、`queue=0`、`pending_hitl=null`；临时 trigger 已通过现有 API 删除。未触发额外模型回合，未改变业务数据。
+- 本次将 Auto Agent `agt-86cd2b08565d2c10` 的工具组恢复为 `fs`，未修改其 Auto 配置、Todo、经验或手册内容。
