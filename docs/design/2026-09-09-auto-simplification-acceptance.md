@@ -402,3 +402,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `TestConditionTriggerHTTPApprovalExecutesOnce` 通过真实 HTTP Handler、SQLite trigger history、审批恢复和 fake LLM 验证条件命令成功后的单次 Agent 回合；新增断言确认 matched delivery 只有一条 `queued` 记录，delivery/session 身份完整，最终 pending delivery 已清除，fake LLM calls 仍为 1。
 - `TestSchedulerCmdGateAllowsFire` 及条件 scheduler 的 owner、revision、并发 claim、过期 occurrence 和审批约束专项 race 通过；拒绝路径仍确认不执行标记脚本且不增加模型调用。
 - 本轮只补 fake/本地执行证据，未重新调用真实 provider 的 true 条件或真实 LLM；未修改运行配置或业务数据。
+
+### 2026-09-10 最终 requirements audit
+
+- 现有测试与实测已覆盖职责注入 system prompt、普通聊天与 Auto 共用主会话、Todo CAS/Agent 隔离、默认 trigger 修改/关闭/忙时合并/重启冻结及进程级单次到期、Dreaming 经验与手册写入恢复、owner/revision/审批约束，以及结构化 `auto_idle` 静默通知的正负向路径。
+- 本轮未发现无需真实 LLM 即可安全补齐的确定性生产缺口；未修改代码、配置或业务数据。
+- 保留边界：完整 Node/Manage 390px 逐页视觉矩阵未完成；真实 provider true 条件触发未重测；真实进程故障重启组合未独立实测。
