@@ -366,3 +366,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 在当前 18766 隔离验收 runtime 中，使用临时用户 trigger `4e0c3165-1f7f-4008-bc5d-05b9bfd504f3`，经既有 `bash_run` 审批批准后执行 `exit 1`。历史最终记录为 `skipped / condition not satisfied`，证明脚本返回 false 时不会投递后续 Agent 任务。
 - 对照结束后，Agent hydrate 为 `active=null`、`queue=0`、`pending_hitl=null`；临时 trigger 已通过现有 API 删除。未触发额外模型回合，未改变业务数据。
 - 本次将 Auto Agent `agt-86cd2b08565d2c10` 的工具组恢复为 `fs`，未修改其 Auto 配置、Todo、经验或手册内容。
+
+### 2026-09-10 退役 Auto 影子与旧维护闭环清理
+
+- `c44f2085` 删除仅被测试引用的 `RiskLLMHost` 独立风险影子 LLM，以及旧 `MaintenanceReconciliation` 闭环实现与专属测试，切断已退役 Auto 风险/维护产品路径。
+- 保留 session lifecycle 的通用 reconciliation、dreaming gate、maintenance gate 与 memory consolidation；`turn`、`api`、`session`、`triggers` 相关 Go 包测试通过。
+- 清理后工作区保持干净。
