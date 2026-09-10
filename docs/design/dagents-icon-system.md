@@ -1,6 +1,6 @@
 # DAgents 专有图标系统
 
-`dagents-icon-system.svg` 是 Node、Manage 共用的 SVG 设计画板。它只新增设计资产，不改变现有业务 UI。画板按产品结构分成五组，共 60 个视觉卡片；`expand` 与 `collapse` 在同一卡片中作为两个状态 key 展示，主线遵循 24×24 逻辑网格、1.6px、`round cap / join`，颜色通过 `currentColor` 继承。
+`dagents-icon-system.svg` 是 Node、Manage 共用的 SVG 设计画板。它只新增设计资产，不改变现有业务 UI。画板按产品结构分成五组，共 60 个视觉卡片；`expand` 与 `collapse` 在同一卡片中作为两个状态 key 展示，主线遵循 24×24 逻辑网格、2px、`round cap / join`，颜色通过 `currentColor` 继承。
 
 ## 盘点基线
 
@@ -19,7 +19,7 @@
 
 ### 品牌对齐与变体
 
-`brand-snowflake` 严格取自 `shared/branding/brand-icon.png` 的真实外边界：保留六臂、宽圆角和每个臂上的分叉 / 凹口，只保留一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。画板同时提供 `i-brand-snowflake`（24px 正式版）与 `i-brand-snowflake-16`（16px 简化版），两者均为单一外轮廓；独立资产位于 `docs/design/dagents-icons/brand-snowflake.svg` 与 `brand-snowflake-16.svg`，使用 `currentColor`。品牌轮廓的描边是识别特例，功能图标仍使用 1.6px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
+`brand-snowflake` 严格取自 `shared/branding/brand-icon.png` 的真实外边界：保留六臂、宽圆角和每个臂上的分叉 / 凹口，只保留一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。画板同时提供 `i-brand-snowflake`（24px 正式版）与 `i-brand-snowflake-16`（16px 简化版），两者均为单一外轮廓；独立资产位于 `docs/design/dagents-icons/brand-snowflake.svg` 与 `brand-snowflake-16.svg`，使用 `currentColor`；两者均为 `fill="none"`、`stroke="currentColor"` 的透明外轮廓描边。品牌轮廓的描边是识别特例，功能图标使用 2px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
 
 下表中的 alias/variant 共享同一几何，不会因为导航位置而引入第二套图标：
 

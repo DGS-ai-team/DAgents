@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
-  <title id="title">clipboard · 剪贴板</title><desc id="desc">DAgents 剪贴板 icon; currentColor, 1.6px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.fill{fill:currentColor;stroke:none}.brand{fill:currentColor;stroke:currentColor;stroke-width:1.15;stroke-linejoin:round}</style>
+  <title id="title">clipboard · 剪贴板</title><desc id="desc">DAgents 剪贴板 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
   <rect class="icon" x="6" y="5.5" width="12" height="15" rx="2"/><path class="icon" d="M9 5.5V4h6v1.5M9 11h6M9 14h4"/>
 </svg>

@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
-  <title id="title">sync · 双向同步</title><desc id="desc">DAgents 双向同步 icon; currentColor, 1.6px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.fill{fill:currentColor;stroke:none}.brand{fill:currentColor;stroke:currentColor;stroke-width:1.15;stroke-linejoin:round}</style>
+  <title id="title">sync · 双向同步</title><desc id="desc">DAgents 双向同步 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
   <path class="icon" d="M5 8h13l-3-3M19 16H6l3 3"/><path class="icon" d="M18 8a7 7 0 0 0-12-1.5M6 16a7 7 0 0 0 12 1.5"/>
 </svg>

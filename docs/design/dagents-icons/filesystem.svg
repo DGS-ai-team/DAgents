@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
-  <title id="title">filesystem · 文件系统</title><desc id="desc">DAgents 文件系统 icon; currentColor, 1.6px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.fill{fill:currentColor;stroke:none}.brand{fill:currentColor;stroke:currentColor;stroke-width:1.15;stroke-linejoin:round}</style>
-  <path class="icon" d="M5 5.5h5l2 2h7v11H5Z"/><path class="icon" d="M5 9h14M8 11v6M8 13h8M11 13v4M14 13v4"/><circle class="fill" cx="8" cy="11" r="1"/><circle class="fill" cx="11" cy="17" r="1"/><circle class="fill" cx="14" cy="17" r="1"/>
+  <title id="title">filesystem · 文件系统</title><desc id="desc">DAgents 文件系统 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
+  <path class="icon" d="M5 5.5h5l2 2h7v11H5Z"/><path class="icon" d="M5 9h14M8 11v6M8 13h8M11 13v4M14 13v4"/><circle class="icon" cx="8" cy="11" r="1"/><circle class="icon" cx="11" cy="17" r="1"/><circle class="icon" cx="14" cy="17" r="1"/>
 </svg>

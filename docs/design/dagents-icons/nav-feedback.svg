@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
-  <title id="title">nav-feedback · 帮助与反馈</title><desc id="desc">DAgents 帮助与反馈 icon; currentColor, 1.6px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.fill{fill:currentColor;stroke:none}.brand{fill:currentColor;stroke:currentColor;stroke-width:1.15;stroke-linejoin:round}</style>
+  <title id="title">nav-feedback · 帮助与反馈</title><desc id="desc">DAgents 帮助与反馈 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
   <path class="icon" d="M4.5 6.8c0-1.3 1-2.3 2.3-2.3h10.4c1.3 0 2.3 1 2.3 2.3v6.7c0 1.3-1 2.3-2.3 2.3h-6.4l-4.2 3v-3.2H6.8c-1.3 0-2.3-1-2.3-2.3Z"/><path class="icon" d="M8.5 9.5h7M8.5 12.5h4.5"/>
 </svg>

@@ -5,8 +5,8 @@
 ## 资产规则
 
 - 每个文件都是独立的 `24×24` SVG，带自己的 `viewBox="0 0 24 24"`、标题和描述。
-- 功能图标只使用 `currentColor`，线宽为 `1.6px`，统一 round cap / round join；文件内没有主题色、外部字体、网络资源、`defs` 或 `use` 依赖。
-- `brand-snowflake.svg` 严格描摹现有 `shared/branding/brand-icon.png` 的六臂、宽圆角和分叉 / 凹口外边界，只有一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。品牌轮廓提供 `brand-snowflake-16.svg` 小尺寸变体，两个文件都使用 `currentColor`。
+- 功能图标只使用 `currentColor`，线宽为 `2px`，统一 round cap / round join；文件内没有主题色、外部字体、网络资源、`defs` 或 `use` 依赖。
+- `brand-snowflake.svg` 严格描摹现有 `shared/branding/brand-icon.png` 的六臂、宽圆角和分叉 / 凹口外边界，只有一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。品牌轮廓提供 `brand-snowflake-16.svg` 小尺寸变体，两个文件都是透明填充、`stroke="currentColor"` 的外轮廓描边，内部完全透明。
 - 页面或组件可以直接使用 `<img>`，也可以用 CSS `mask-image` 让 `currentColor` 继承组件语义色。离线 HTML 画板采用后者展示 Node dark 与 Manage light 两套表面。
 
 ```html
