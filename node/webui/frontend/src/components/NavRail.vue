@@ -13,7 +13,6 @@ import {
 import brandIcon from "@dagents-brand/brand-icon.png";
 import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
 import AutoBadge from "./AutoBadge.vue";
-import { filterAgents, groupAgents, searchAgents } from "../utils/agentGrouping.js";
 import { readNodePreference, writeNodePreference } from "../utils/nodePreference.js";
 
 const RAIL_CACHE_TTL_MS = 30_000;
@@ -137,7 +136,6 @@ const manualRefreshingWgs = ref(false);
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
-const showWorkgroups = computed(() => workgroupsEnabled.value || !!activeWorkgroupId.value);
 const effectiveRealtimeStatus = computed(() => props.realtimeStatus || chromeStore.sseStatus);
 const online = computed(() => effectiveRealtimeStatus.value === "connected");
 const statusClass = computed(() => {
@@ -170,15 +168,8 @@ function agentSortTime(agent) {
 const sortedAgents = computed(() => {
   return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a) || agentRecordId(a).localeCompare(agentRecordId(b)));
 });
-const visibleAgents = computed(() => searchAgents(filterAgents(sortedAgents.value, agentFilter.value), agentSearch.value));
-const agentGroups = computed(() => groupAgents(visibleAgents.value, agentGroupMode.value));
 const normalAgents = computed(() => sortedAgents.value.filter((agent) => String(agent?.agent_type || agent?.AgentType || "").toLowerCase() !== "auto"));
 const autonomousAgents = computed(() => sortedAgents.value.filter((agent) => String(agent?.agent_type || agent?.AgentType || "").toLowerCase() === "auto"));
-function toggleAgentGroup(key) {
-  const next = new Set(collapsedAgentGroups.value);
-  if (next.has(key)) next.delete(key); else next.add(key);
-  collapsedAgentGroups.value = next;
-}
 
 async function refreshAgents({ force = false, manual = false } = {}) {
   if (manual) manualRefreshingAgents.value = true;
