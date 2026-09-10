@@ -241,7 +241,7 @@ function validateBasics() {
 function validateWorkspace() {
   fieldErrors.workspace = "";
   if (draft.workspaceMode === "custom" && !String(draft.workspacePath || "").trim()) {
-    fieldErrors.workspace = "请选择一个本机目录";
+    fieldErrors.workspace = "输入一个本机目录路径";
     return false;
   }
   return true;
