@@ -11,7 +11,6 @@ import { agentStore, persistAgentId } from "./agent.js";
 import { clearHitl, hitlStore } from "./hitl.js";
 import { hasStatus, resetStatusLines, startStatus, statusStore } from "./statusLines.js";
 import { applyTurnState, resetTurnState, turnStateStore } from "./turnState.js";
-import { chromeStore, setUsageFromSSE, resetUsageStrip } from "./chrome.js";
 
 vi.mock("../api/node.js", () => ({
   ensureAgentRuntime: vi.fn(() => Promise.resolve({ ok: true })),
@@ -89,7 +88,6 @@ describe("hydrateAgent lifecycle", () => {
     transcriptStore.streamEpoch = "";
     transcriptStore.historyRevision = 0;
     transcriptStore.historyDirty = false;
-    transcriptStore.projectionSessionId = "";
     resetTurnState();
     vi.mocked(api.getAgentHydrate).mockReset();
     vi.mocked(api.postAgentAck).mockClear();
@@ -169,27 +167,6 @@ describe("hydrateAgent lifecycle", () => {
     expect(transcriptStore.historyDirty).toBe(true);
   });
 
-  it("replaces the main projection when switching to a lower-revision Goal session", async () => {
-    transcriptStore.projectionSessionId = "agent-main";
-    transcriptStore.historyRevision = 100;
-    transcriptStore.historyDirty = true;
-    transcriptStore.entries = [{ kind: "assistant", text: "old main history" }];
-    vi.mocked(api.getAgentHydrate).mockResolvedValueOnce({
-      transcript: [{ kind: "user", text: "goal prompt" }],
-      history_revision: 2,
-      pending_hitl: { hitl_id: "goal-hitl", items: [{ hitl_type: "execute_tool", id: "goal-call", tool_name: "write_file" }] },
-      turn_state: { phase: "tool_waiting", terminal: false },
-    });
-
-    await hydrateAgent("goal-session-1");
-
-    expect(transcriptStore.projectionSessionId).toBe("goal-session-1");
-    expect(transcriptStore.historyRevision).toBe(2);
-    expect(transcriptStore.entries).toHaveLength(1);
-    expect(transcriptStore.entries[0].text).toBe("goal prompt");
-    expect(hitlStore.queue).toHaveLength(1);
-    expect(hitlStore.queue[0].data.approval_args.tool_calls[0]).toMatchObject({ id: "goal-call" });
-  });
 });
 
 function enqueueStaleApprovalForHydrateTest() {
@@ -230,31 +207,4 @@ describe("loadTranscriptFromHydrate", () => {
     expect(transcriptStore.entries[0].blockId).toBe("call-1");
     expect(transcriptStore.entries[0].partial).toBe(false);
   });
-});
-
-describe("goal session hydration", () => {
-	beforeEach(() => {
-		resetUsageStrip();
-		transcriptStore.projectionSessionId = "";
-	});
-
-  it("uses the dedicated session id without changing Agent identity", async () => {
-    persistAgentId("agent-owner");
-    vi.mocked(api.getAgentHydrate).mockResolvedValue({ transcript: [], pending_hitl: null, tool_jobs: {}, child_agents: [], turn_state: { terminal: true }, history_revision: 0 });
-    await hydrateAgent("goal-session-1");
-    expect(api.getAgentHydrate).toHaveBeenCalledWith("goal-session-1");
-		 expect(agentStore.agentId).toBe("agent-owner");
-	});
-
-	it("clears main chat usage when switching to a dedicated Goal projection", async () => {
-		persistAgentId("agent-owner");
-		loadTranscriptFromHydrate([{ kind: "user", text: "main" }], { historyRevision: 100, sessionId: "agent-owner" });
-		setUsageFromSSE({ prompt_tokens: 6629, completion_tokens: 0 });
-		expect(chromeStore.usageStrip.prompt).toBe(6629);
-		vi.mocked(api.getAgentHydrate).mockResolvedValue({ transcript: [{ kind: "assistant", text: "goal" }], pending_hitl: { items: [] }, tool_jobs: {}, child_agents: [], turn_state: { terminal: false }, history_revision: 2 });
-		await hydrateAgent("goal-session-1");
-		expect(chromeStore.usageStrip).toBeNull();
-		expect(transcriptStore.projectionSessionId).toBe("goal-session-1");
-		expect(transcriptStore.entries[0].text).toBe("goal");
-	});
 });

@@ -47,7 +47,6 @@ export const transcriptStore = reactive({
   streamEpoch: "",
   historyRevision: 0,
   historyDirty: false,
-  projectionSessionId: "",
   assistantBuffer: "",
   reasoningBuffer: "",
   showReasoning: readShowReasoningPref(),
@@ -363,12 +362,11 @@ export function clearTranscript() {
   transcriptStore.streamEpoch = "";
   transcriptStore.historyRevision = 0;
   transcriptStore.historyDirty = false;
-  transcriptStore.projectionSessionId = "";
   abortStreaming();
 }
 
 /** 从 hydrate API 快照灌入 transcript（F-H7）；替换当前 entries。 */
-export function loadTranscriptFromHydrate(entries, { historyRevision, sessionId } = {}) {
+export function loadTranscriptFromHydrate(entries, { historyRevision } = {}) {
   abortStreaming();
   transcriptStore.entries = [];
   const revision = Number(historyRevision) || 0;
@@ -376,7 +374,6 @@ export function loadTranscriptFromHydrate(entries, { historyRevision, sessionId 
     transcriptStore.historyRevision = revision;
   }
   transcriptStore.historyDirty = false;
-  if (sessionId !== undefined) transcriptStore.projectionSessionId = String(sessionId || "").trim();
   if (!Array.isArray(entries)) return;
   for (const raw of entries) {
     if (!raw || typeof raw !== "object") continue;

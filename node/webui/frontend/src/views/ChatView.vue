@@ -101,7 +101,6 @@ import {
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
-import { conversationTarget } from "../utils/conversationSession.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -140,7 +139,7 @@ const turnWatchdog = createTurnWatchdog({
 });
 
 const entries = computed(() => transcriptStore.entries);
-const conversationId = computed(() => conversationTarget(agentStore.agentId, ""));
+const conversationId = computed(() => agentStore.agentId);
 async function ensureConversation() { return await ensureAgent(); }
 const hitlKind = computed(() => peekHitl()?.kind || "");
 const hasUserInfoHitl = computed(() => hitlKind.value === "user_information");
@@ -204,9 +203,8 @@ function restartStream() {
     streamHandle.value = null;
     return;
   }
-  // Keep the stream bound to the conversation that created it. Main and Goal
-  // sessions share one Agent id, so an agent-only stale-event check cannot
-  // stop an old KeepAlive stream from repainting the new Goal projection.
+  // Keep the stream bound to the Agent conversation that created it so an
+  // obsolete KeepAlive stream cannot repaint a newly selected Agent.
   const streamConversationId = conversationId.value;
   streamHandle.value = connectStream({
     getAgentId: () => streamConversationId,

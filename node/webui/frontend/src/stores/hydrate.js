@@ -12,7 +12,6 @@ import { loadTranscriptFromHydrate, transcriptStore } from "./transcript.js";
 import { applyToolJobsSnapshot } from "./toolJobs.js";
 import { resetStatusLines, syncTurnStatus } from "./statusLines.js";
 import { turnStateStore } from "./turnState.js";
-import { resetUsageStrip } from "./chrome.js";
 
 // ChatView is KeepAlive-ed. A hydrate request can outlive the view that
 // started it (for example while navigating to Agent settings). Do not let a
@@ -54,27 +53,14 @@ function shouldApplyHydrateTranscript(data) {
 }
 
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
-export async function hydrateAgent(sessionOverride = "") {
+export async function hydrateAgent() {
   const generation = ++hydrationGeneration;
-  const agentId = String(sessionOverride || "").trim() || await ensureAgent();
+  const agentId = await ensureAgent();
   const data = await api.getAgentHydrate(agentId);
   if (generation !== hydrationGeneration) return null;
-  const targetProjection = agentId;
-  const projectionChanged = Boolean(transcriptStore.projectionSessionId) && transcriptStore.projectionSessionId !== targetProjection;
-  if (projectionChanged) {
-    // Token usage is a per-conversation turn snapshot. A secondary session must
-    // never inherit the main chat's usage strip while its hydrate is loading.
-    resetUsageStrip();
-    // history_revision is scoped to a conversation. Never let a high revision
-    // from the main chat veto a lower revision from a secondary session.
+  if (shouldApplyHydrateTranscript(data)) {
     loadTranscriptFromHydrate(data?.transcript, {
       historyRevision: data?.history_revision,
-      sessionId: targetProjection,
-    });
-  } else if (shouldApplyHydrateTranscript(data)) {
-    loadTranscriptFromHydrate(data?.transcript, {
-      historyRevision: data?.history_revision,
-      sessionId: targetProjection,
     });
   }
   applyToolJobsSnapshot(data?.tool_jobs);
