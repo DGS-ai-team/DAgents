@@ -39,7 +39,7 @@
 | 无工作静默 | 真实默认激活调用auto_idle，执行记录完整，notify_seq不变 |
 | 脚本条件 | 真实 Handler/SQLite/原审批测试覆盖批准、拒绝及失败冻结；`fa159b41` 记录 18766 真实 `exit 1` false 对照；随后 18766 真实 `mimo-v2.5-pro` 已完成 exit=0 true 条件、唯一 queued delivery、usage/completed 与主会话输出验收 |
 | 旧架构退役 | Goals、events/probe、maintenance runner、风险闭环专属包删除，旧入口不可调用；全Node普通测试通过，保留共享存储原语和历史文件 |
-| Node/Manage视觉 | 已完成多批桌面/窄屏截图及发现问题的修复；详情剩余区段、Manage剩余模块窄屏仍需按页补齐，不能声明全页完成 |
+| Node/Manage视觉 | Node/Manage 主要页面及 Auto Agent detail 已完成桌面与 390×844 实际截图复核；document/body 无超出视口，未见重叠、裁切或主控件不可达，表格局部横向滚动属预期行为 |
 | 构建与回归 | Node前端369项、Python197项通过；两端构建通过。历史超时及第三方Windows race限制保留 |
 | 部署与交付 | `75d0b31a` 最新 HEAD 构建已切入 18766；Node UI、`/v1/agents`、Manage Console 与 5173 返回 200，Auto 主会话 hydrate 空闲；Node/Manage 390×844 逐页截图复核已完成 |
 
