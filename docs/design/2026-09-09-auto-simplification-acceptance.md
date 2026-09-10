@@ -408,3 +408,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 现有测试与实测已覆盖职责注入 system prompt、普通聊天与 Auto 共用主会话、Todo CAS/Agent 隔离、默认 trigger 修改/关闭/忙时合并/重启冻结及进程级单次到期、Dreaming 经验与手册写入恢复、owner/revision/审批约束，以及结构化 `auto_idle` 静默通知的正负向路径。
 - 本轮未发现无需真实 LLM 即可安全补齐的确定性生产缺口；未修改代码、配置或业务数据。
 - 保留边界：完整 Node/Manage 390px 逐页视觉矩阵未完成；真实 provider true 条件触发未重测；真实进程故障重启组合未独立实测。
+
+### 2026-09-10 Node 桌面路由逐页复核
+
+- root 使用内置浏览器在 1871×1216 视口逐页打开 Node 16 个主要路由：agents、workgroups、auto，以及 settings 下 general、connection、mcp、linux-channels、agents、detail、capabilities、context、skills、triggers、security、about、feedback。
+- 各页 `document.scrollWidth` 均等于 `innerWidth`，未见文档级横向溢出。
+- 本证据仅覆盖桌面宽度，不扩大为 390px 逐页视觉通过；完整窄屏矩阵仍保留原边界。
