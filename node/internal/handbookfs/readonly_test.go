@@ -30,8 +30,8 @@ func TestOpenReadOnlyDoesNotRecoverPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ro.ReadSourceSnapshot(context.Background(), snapshotSource()); err == nil {
-		t.Fatal("pending snapshot was accepted")
+	if _, err := ro.History(context.Background(), "guide.md"); err == nil {
+		t.Fatal("pending history was accepted")
 	}
 	if _, err := os.Stat(s.pendingPath()); err != nil {
 		t.Fatalf("read-only open removed pending: %v", err)
@@ -53,22 +53,21 @@ func TestOpenReadOnlySharesCanonicalRootLock(t *testing.T) {
 	}
 }
 
-func TestOpenReadOnlyReadsSourceSnapshot(t *testing.T) {
+func TestOpenReadOnlyReadsHistory(t *testing.T) {
 	root := t.TempDir()
 	created, err := New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := WithProvenance(context.Background(), snapshotSource())
-	if _, err := created.Write(ctx, filepath.Join(root, "guide.md"), "", []byte("guide")); err != nil {
+	if _, err := created.Write(context.Background(), filepath.Join(root, "guide.md"), "", []byte("guide")); err != nil {
 		t.Fatal(err)
 	}
 	opened, err := OpenReadOnly(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries, digest, err := opened.ReadSourceSnapshot(context.Background(), snapshotSource())
-	if err != nil || len(entries) != 1 || digest == "" {
-		t.Fatalf("entries=%v digest=%q err=%v", entries, digest, err)
+	entries, err := opened.History(context.Background(), filepath.Join(root, "guide.md"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
 	}
 }
