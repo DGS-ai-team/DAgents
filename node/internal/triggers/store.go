@@ -537,120 +537,6 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 	return updated, nil
 }
 
-// UpdateManagedConfig changes only scheduler fields owned by a managed Goal.
-// It preserves delivery/claim state and the Goal's exact next wake time.
-func (s *Store) UpdateManagedConfig(id string, interval int, enabled bool, task string, nextFireAt *float64, now time.Time) (Definition, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cur, ok := s.triggers[id]
-	if !ok {
-		return Definition{}, errTriggerNotFound
-	}
-	if interval < 60 {
-		return Definition{}, fmt.Errorf("managed interval must be >= 60 seconds")
-	}
-	if enabled && cur.RecoveryRequired {
-		return Definition{}, fmt.Errorf("trigger requires recovery before enabling")
-	}
-	old := cur
-	cur.Condition = map[string]any{"interval_seconds": interval}
-	cur.Enabled = enabled
-	cur.TaskTemplate = task
-	if nextFireAt == nil {
-		cur.NextFireAt = nil
-	} else {
-		v := *nextFireAt
-		cur.NextFireAt = &v
-	}
-	cur.UpdatedAt = timeToUnixFloat(now)
-	s.triggers[id] = cur
-	if err := s.saveLocked(); err != nil {
-		s.triggers[id] = old
-		return Definition{}, err
-	}
-	s.logUpdated(cur)
-	return cur, nil
-}
-
-// UpsertManagedProjection atomically updates only the projection-owned fields,
-// preserving delivery counters and fencing older intent generations.
-func (s *Store) UpsertManagedProjection(def Definition) (Definition, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cur, ok := s.triggers[def.TriggerID]
-	if ok {
-		if cur.ManagedGoalID != def.ManagedGoalID || cur.OwnerAgentID != def.OwnerAgentID || cur.Controller != "goal" || cur.ControllerID != def.ControllerID {
-			return Definition{}, errTriggerNotFound
-		}
-		if cur.ManagedGeneration > def.ManagedGeneration {
-			return Definition{}, ErrRevisionConflict
-		}
-		if cur.ManagedGeneration == def.ManagedGeneration && cur.ManagedFingerprint != "" && cur.ManagedFingerprint != def.ManagedFingerprint {
-			return Definition{}, ErrRevisionConflict
-		}
-		if cur.ManagedGeneration == def.ManagedGeneration && cur.ManagedFingerprint == def.ManagedFingerprint {
-			return cloneDefinition(cur), nil
-		}
-		def.FireCount, def.LastFiredAt, def.PendingDeliveryID, def.PendingSessionID, def.RecoveryRequired, def.RecoveryReason = cur.FireCount, cur.LastFiredAt, cur.PendingDeliveryID, cur.PendingSessionID, cur.RecoveryRequired, cur.RecoveryReason
-		if cur.ManagedGeneration < def.ManagedGeneration {
-			if cur.PendingDeliveryID != nil && strings.TrimSpace(*cur.PendingDeliveryID) != "" {
-				return Definition{}, fmt.Errorf("pending delivery requires recovery")
-			}
-			def.LastFiredAt = nil
-			def.PendingDeliveryID = nil
-			def.PendingSessionID = nil
-			def.PendingOccurrence = nil
-		}
-	}
-	if ok {
-		def.Revision = cur.Revision + 1
-	} else if def.Revision < 1 {
-		def.Revision = 1
-	}
-	s.triggers[def.TriggerID] = cloneDefinition(def)
-	if err := s.saveLocked(); err != nil {
-		if ok {
-			s.triggers[def.TriggerID] = cur
-		} else {
-			delete(s.triggers, def.TriggerID)
-		}
-		return Definition{}, err
-	}
-	return cloneDefinition(def), nil
-}
-
-// DisableManagedProjection disables a managed projection only when all
-// identity and generation metadata still matches the supplied snapshot.
-// The compare, mutation, and durable save happen under one store lock.
-func (s *Store) DisableManagedProjection(expected Definition) (Definition, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cur, ok := s.triggers[expected.TriggerID]
-	if !ok || cur.ManagedGoalID != expected.ManagedGoalID || cur.OwnerAgentID != expected.OwnerAgentID || cur.TargetAgentID != expected.TargetAgentID || !sameStringPtr(cur.TargetSessionID, expected.TargetSessionID) || cur.Controller != "goal" || cur.ControllerID != expected.ControllerID || cur.ManagedIntentID != expected.ManagedIntentID || cur.ManagedGeneration != expected.ManagedGeneration || cur.ManagedFingerprint != expected.ManagedFingerprint {
-		return Definition{}, ErrRevisionConflict
-	}
-	if !cur.Enabled && cur.NextFireAt == nil {
-		return cloneDefinition(cur), nil
-	}
-	old := cur
-	cur.Enabled = false
-	cur.NextFireAt = nil
-	cur.Revision++
-	s.triggers[cur.TriggerID] = cur
-	if err := s.saveLocked(); err != nil {
-		s.triggers[cur.TriggerID] = old
-		return Definition{}, err
-	}
-	return cloneDefinition(cur), nil
-}
-
-func sameStringPtr(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
 func (s *Store) DeleteTrigger(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -971,10 +857,6 @@ func (s *Store) RecoverAuthorized(p Principal, triggerID string, expected int64,
 		s.logAuthorization(p, d, "recover", "denied", "retired_controller")
 		return fmt.Errorf("trigger controller is retired or invalid")
 	}
-	if d.ManagedGoalID != "" {
-		s.logAuthorization(p, d, "recover", "denied", "managed_controller")
-		return fmt.Errorf("managed goal trigger is controlled by goal")
-	}
 	if err := s.recoverPendingDeliveryLocked(triggerID, deliveryID); err != nil {
 		s.logAuthorization(p, d, "recover", "denied", "recovery_failed")
 		return err
@@ -1090,10 +972,7 @@ func (s *Store) load() error {
 		if migrated && item.OwnerAgentID == "" {
 			item.OwnerAgentID = item.TargetAgentID
 		}
-		if migrated && item.ManagedGoalID != "" {
-			item.Controller = "goal"
-			item.ControllerID = item.ManagedGoalID
-		} else if migrated && item.Controller == "" {
+		if migrated && item.Controller == "" {
 			item.Controller = "user"
 		}
 		if migrated && item.ControllerID == "" {

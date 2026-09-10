@@ -48,7 +48,7 @@ func TestFutureSchemaRejected(t *testing.T) {
 
 func TestValidateOwnersDisablesInvalidAndDoesNotGuessV2(t *testing.T) {
 	st, _ := OpenStore(filepath.Join(t.TempDir(), "triggers.json"), 20)
-	d := Definition{TriggerID: "bad", OwnerAgentID: "", TargetAgentID: "a", Controller: "goal", ControllerID: "wrong", ManagedGoalID: "goal"}
+	d := Definition{TriggerID: "bad", OwnerAgentID: "", TargetAgentID: "a", Controller: "retired", ControllerID: "wrong"}
 	if _, err := st.CreateTrigger(d); err != nil {
 		t.Fatal(err)
 	}

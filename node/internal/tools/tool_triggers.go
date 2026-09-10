@@ -314,8 +314,8 @@ func (r *Registry) execTriggerUpdate(_ context.Context, raw json.RawMessage) (st
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger not found", "trigger_id": args.TriggerID}), nil
 	}
-	if current.ManagedGoalID != "" || (current.Controller != "" && current.Controller != "user") {
-		return triggerJSON(map[string]any{"ok": false, "error": "managed goal trigger is controlled by goal runtime"}), nil
+	if current.Controller != "" && current.Controller != "user" {
+		return triggerJSON(map[string]any{"ok": false, "error": "system-managed trigger cannot be edited by the Agent"}), nil
 	}
 	if strings.TrimSpace(current.TargetAgentID) != r.agentID {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger target is not this agent"}), nil
@@ -365,8 +365,8 @@ func (r *Registry) execTriggerDelete(_ context.Context, raw json.RawMessage) (st
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger not found", "trigger_id": args.TriggerID}), nil
 	}
-	if current.ManagedGoalID != "" || (current.Controller != "" && current.Controller != "user") {
-		return triggerJSON(map[string]any{"ok": false, "error": "managed goal trigger is controlled by goal runtime"}), nil
+	if current.Controller != "" && current.Controller != "user" {
+		return triggerJSON(map[string]any{"ok": false, "error": "system-managed trigger cannot be edited by the Agent"}), nil
 	}
 	if strings.TrimSpace(current.TargetAgentID) != r.agentID {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger target is not this agent"}), nil

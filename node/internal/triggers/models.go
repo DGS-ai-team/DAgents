@@ -71,7 +71,6 @@ type Definition struct {
 	PendingConditionApproved bool              `json:"pending_condition_approved,omitempty"`
 	RecoveryRequired         bool              `json:"recovery_required,omitempty"`
 	RecoveryReason           string            `json:"recovery_reason,omitempty"`
-	ManagedGoalID            string            `json:"managed_goal_id,omitempty"`
 	OwnerAgentID             string            `json:"owner_agent_id,omitempty"`
 	Controller               string            `json:"controller,omitempty"`
 	ControllerID             string            `json:"controller_id,omitempty"`

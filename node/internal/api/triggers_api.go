@@ -113,8 +113,8 @@ func (s *Server) handleUpdateTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", nil)
 		return
 	}
-	if current.Controller != "user" || current.ManagedGoalID != "" {
-		writeAPIError(w, 409, "managed_goal_trigger", "managed goal triggers are controlled by the goal", nil)
+	if current.Controller != "user" {
+		writeAPIError(w, 409, "system_managed_trigger", "system-managed triggers cannot be edited here", nil)
 		return
 	}
 	var patch triggers.UpdatePatch
@@ -170,8 +170,8 @@ func (s *Server) handleDeleteTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", nil)
 		return
 	}
-	if current.Controller != "user" || current.ManagedGoalID != "" {
-		writeAPIError(w, 409, "managed_goal_trigger", "managed goal triggers are controlled by the goal", nil)
+	if current.Controller != "user" {
+		writeAPIError(w, 409, "system_managed_trigger", "system-managed triggers cannot be edited here", nil)
 		return
 	}
 	expected := current.Revision
@@ -218,10 +218,6 @@ func (s *Server) handleFireTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("trigger_id"))
-	if d, ok := s.triggerStore.GetTrigger(id); ok && d.ManagedGoalID != "" {
-		writeAPIError(w, 409, "managed_goal_trigger", "managed goal triggers are controlled by the goal", nil)
-		return
-	}
 	var body triggerFireRequest
 	if r.ContentLength > 0 {
 		if err := decodeJSON(r, &body); err != nil {

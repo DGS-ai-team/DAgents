@@ -50,7 +50,7 @@ type TurnOptions struct {
 	// model-facing requests cannot set it.
 	AutoAgent bool
 	// BudgetResolver refreshes dynamic per-turn limits before a new Turn.
-	// It is used by managed goals whose cumulative budget changes between wakes.
+	// It is used by runtime-owned activations whose cumulative budget changes between wakes.
 	BudgetResolver func() (turn.TurnBudget, error)
 	// OnLifecycle observes a durable Turn projection after its event is stored.
 	// It is intentionally optional so ordinary sessions keep the existing path.

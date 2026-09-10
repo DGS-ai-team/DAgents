@@ -211,9 +211,6 @@ func (s *Scheduler) FireAuthorized(p Principal, triggerID string, expected int64
 	if !ok || !p.canOwn(*def) {
 		return FireRecord{}, errTriggerNotFound
 	}
-	if def.ManagedGoalID != "" {
-		return FireRecord{}, fmt.Errorf("managed goal trigger is controlled by goal")
-	}
 	if def.Controller != "user" {
 		return FireRecord{}, fmt.Errorf("trigger controller does not permit manual fire")
 	}
@@ -277,11 +274,6 @@ func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, pay
 	}
 	if def.Controller != "user" && def.Controller != "auto" {
 		record := s.record(def, FireStatusError, reason, payload, "trigger controller is retired or invalid", nil, nil, "")
-		s.logFireRecord(record)
-		return record
-	}
-	if def.ManagedGoalID != "" {
-		record := s.record(def, FireStatusError, reason, payload, "managed goal trigger is retired", nil, nil, "")
 		s.logFireRecord(record)
 		return record
 	}

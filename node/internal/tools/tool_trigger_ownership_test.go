@@ -84,7 +84,7 @@ func TestTriggerToolsOwnerTargetAndControllerBoundaries(t *testing.T) {
 		} else {
 			out, _ = reg.execTriggerDelete(t.Context(), json.RawMessage(raw))
 		}
-		if !strings.Contains(out, "managed goal trigger") {
+		if !strings.Contains(out, "system-managed trigger") {
 			t.Fatalf("maintenance %s=%s", name, out)
 		}
 	}
