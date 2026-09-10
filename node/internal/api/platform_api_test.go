@@ -62,8 +62,6 @@ func TestPlatformGatewayUsesNodeNativePickerAndForwardsShellRequests(t *testing.
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/v1/desktop/dialog/directory":
-			_, _ = w.Write([]byte(`{"ok":true,"cancelled":false,"path":"C:\\workspace"}`))
 		case "/v1/desktop/clipboard/files":
 			_, _ = w.Write([]byte(`{"paths":["C:\\workspace\\a.txt"]}`))
 		case "/v1/desktop/ui/focus":
