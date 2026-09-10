@@ -352,3 +352,11 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - root 使用内置浏览器只读复核了 Node 智能体设置（Auto）、Auto 总览、帮助、反馈、智能体列表和触发器页面，以及 Manage 首页、Auto 员工总览和用户反馈页面；页面均可加载，布局、分组、表单和按钮未见明显断裂。
 - Node 与 Manage 页面均核对 `document.scrollWidth === document.clientWidth`，未发现横向溢出。
 - 本批证据仅覆盖桌面视口；390px 窄屏的逐页完整复核仍未完成，因此不宣称所有 UI 已通过。复核未修改配置、创建数据或触发 Auto。
+
+### 2026-09-10 18766 收尾部署与旧 Goal 夹具核对
+
+- 本轮已确认并保留以下已完成清理提交的范围：`27fe9238` 清理 Goal trigger 专用生产路径，`ba920839` 清理 Goal 元数据，`84927666` 清理旧术语，`fcc20944` 移除前端独立 Goal 会话投影，`0d3796ae` 清理 NavRail 死逻辑。
+- 18766 已更新为 `fcc20944` 构建的 Node 二进制。只读检查确认 health、`/ui/`、`/v1/triggers`、Auto 配置接口及两个 Auto 主会话 hydrate 均返回 200；两个 Auto 主会话均无 active turn、排队消息或 pending HITL。本轮未触发模型，未修改配置或业务数据。
+- 18766 的 4 条 `controller=goal` 记录（`auto-intent-b0a14dbe596029b1ce063781`、`7305325b-7730-4232-8621-ed741096442b`、`managed-trigger-df6464d7-bcde-440c-8ebe-933798ffb13b`、`managed-trigger-6b1b1365-5f2b-4160-8b42-b526b9ac43f8`）均由本轮临时验收日志中的旧 Goal/cycle 夹具创建，目标为 `goal-session-*`，当前均 `enabled=false`、`recovery_required=true` 且无 pending delivery。新代码已将其隔离并禁用。
+- 现有 DELETE API 只允许 `user` controller；对这些退役 `goal` 记录没有授权删除入口。为避免直接改 SQLite 或误伤 Auto 主会话、Todo、经验、手册及普通用户 trigger，本轮未删除实际数据，保留记录并准确记录其隔离状态。
+- 本次仍不宣称全页面 390px 窄屏矩阵完成；该覆盖边界保持不变。
