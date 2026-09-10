@@ -19,7 +19,7 @@
 
 ### 品牌对齐与变体
 
-`brand-snowflake` 对齐 `shared/branding/brand-icon.png` 的六臂宽圆角 silhouette，但只保留外轮廓：不包含眼睛、笑脸、中心圆或其他内部装饰。画板同时提供 `i-brand-snowflake`（24px 正式版）与 `i-brand-snowflake-16`（16px 简化版），两者均为单一平滑 contour；独立资产位于 `docs/design/dagents-icons/brand-snowflake.svg` 与 `brand-snowflake-16.svg`，使用 `currentColor`。品牌轮廓的描边是识别特例，功能图标仍使用 1.6px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
+`brand-snowflake` 严格取自 `shared/branding/brand-icon.png` 的真实外边界：保留六臂、宽圆角和每个臂上的分叉 / 凹口，只保留一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。画板同时提供 `i-brand-snowflake`（24px 正式版）与 `i-brand-snowflake-16`（16px 简化版），两者均为单一外轮廓；独立资产位于 `docs/design/dagents-icons/brand-snowflake.svg` 与 `brand-snowflake-16.svg`，使用 `currentColor`。品牌轮廓的描边是识别特例，功能图标仍使用 1.6px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
 
 下表中的 alias/variant 共享同一几何，不会因为导航位置而引入第二套图标：
 
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | `nav-agents` → `agent` | nav variant | 导航可加列表容器，Agent 对象保持单人头像 |
 | `nav-workgroups` → `workgroup` | nav variant | 导航可加容器，工作组对象保持三节点拓扑 |
-| `nav-auto` → `auto` | nav variant | 导航可加脉冲/分组提示，Auto 对象保持单轨道 |
+| `nav-auto` → `auto` | nav variant | 导航可加脉冲/分组提示，Auto 对象保持轨道 + Agent 节点 |
 | `tool-skills` → `skills` | alias | 使用同一星形能力图标，工具来源由文案或外层徽标说明 |
 | `tool-memory` → `memory` | alias | 使用同一书签记忆图标，工具来源由文案或外层徽标说明 |
 | `expand-collapse` → `expand` + `collapse` | legacy alias | 旧调用映射到两个状态 key，画板已拆分为上下两个操作语义 |
@@ -58,7 +58,7 @@
 | key | 语义 | 使用位置 | 替换现有 |
 | --- | --- | --- | --- |
 | `agent` | 普通智能体 | Agent 列表、空状态、设置页 | 是 |
-| `auto` | 自主智能体 | `AutoBadge.vue`、Agent 类型标识 | 是，替换 `✦` |
+| `auto` | 自主智能体 | `AutoBadge.vue`、Agent 类型标识 | 是，使用轨道 + 中央 Agent 节点 + 唤醒脉冲 |
 | `auto-overview` | Auto 总览 / 多 Agent 仪表盘 | Node Auto 总览页、侧栏 section action | 是，使用多节点面板 |
 | `wake-trigger` | 自主激活频率与 Trigger | Agent autonomy 设置、Trigger 设置 | 是，使用时钟 + 唤醒箭头 |
 | `dreaming` | 每日经验整理 | dreaming 设置、运行状态 | 是 |
@@ -74,7 +74,7 @@
 
 | key | 语义 | 使用位置 | 替换现有 |
 | --- | --- | --- | --- |
-| `workgroup` | 工作组协作空间 | Node/Manage 工作组列表和详情 | 是 |
+| `workgroup` | 工作组协作空间 | Node/Manage 工作组列表和详情 | 是，使用三个同等节点 |
 | `workgroup-members` | 工作组成员与 AgentRef | 成员弹窗、成员列表 | 是 |
 | `manage-dashboard` | Manage 首页总览 | `HomeDashboard.vue` | 是 |
 | `admin-access` | 管理员与访问控制 | 登录、管理员设置、权限面板 | 是 |
@@ -97,7 +97,7 @@
 | `terminal` | 终端会话 | `TerminalWorkbench.vue`、终端工具 | 是，统一 `ToolGroupIcon.vue` 的 terminal |
 | `browser` | 浏览器工具和页面 | 浏览器面板、工具组 | 是，通用浏览器轮廓；浏览器供应商标识保留 |
 | `mcp` | MCP 插头 / 端口与外部工具 | MCP 设置、工具来源 | 是，使用端口连接形态 |
-| `child-agent` | 子智能体和委派任务 | Child Agent 进度面板 | 是，使用明确父子箭头 |
+| `child-agent` | 子智能体和委派任务 | Child Agent 进度面板 | 是，父节点更大、两个子节点更小并带清楚箭头 |
 | `shell` | Shell 命令和本地通道 | bash/shell 工具结果、审批面板 | 是 |
 | `clipboard` | 剪贴板与复制内容 | Desktop Shell 能力、复制操作 | 是 |
 | `upload` | 上传与导入资源 | 包上传、文件输入 | 是 |
@@ -112,7 +112,7 @@
 | `warning` | 警告、需要关注 | 状态面板、配置校验 | 是 |
 | `error` | 失败、错误 | 错误提示、失败工具结果 | 是，替换 `×` |
 | `info` | 提示和帮助说明 | 设置说明、状态提示 | 是 |
-| `pending` | 排队、连接中、处理中 | SSE、任务和更新状态 | 是，使用加载环 + 三点 |
+| `pending` | 排队、连接中、处理中 | SSE、任务和更新状态 | 是，使用进度弧 + 三点，去掉强刷新箭头 |
 | `run` | 运行、激活、播放 | Auto 激活、工具重试 | 是 |
 | `stop` | 停止、取消 | 流式响应、终端和 Auto 控制 | 是，替换 `−` 或文本按钮图标 |
 | `refresh` | 刷新、重试、同步 | Node/Manage 列表与状态 | 是 |
@@ -147,6 +147,6 @@
 ## 视觉规则
 
 - 品牌雪花采用现有 PNG 的六臂宽圆角外轮廓，设计资产不包含脸部或中心装饰；功能图标再使用 60° 晶体节点作为局部 DNA，避免把完整雪花机械贴到每个 key。
-- Auto 使用轨道、脉冲和多节点仪表盘表达“持续检查—唤醒—总览”；`wake-trigger` 保留时钟与唤醒箭头，`pending` 使用加载环与三点，Dreaming 使用月牙和晶体星点，工作组使用三节点拓扑，子 Agent 使用父子箭头，MCP 使用插头/端口。
+- Auto 使用轨道、中央 Agent 节点和唤醒脉冲表达“持续检查—唤醒”，不使用眼睛 / 行星式中心；`wake-trigger` 保留时钟与唤醒箭头，`pending` 使用进度弧与三点并弱化方向标记，Dreaming 使用月牙和晶体星点，工作组使用三个同等节点，子 Agent 使用大父节点、小子节点和父子箭头，模型使用芯片与层级引脚，MCP 使用插头/端口。
 - 图标只描述一个动作或对象，冷蓝用于导航、工具与 Manage，靛紫只用于 Auto 自主性，绿色用于可执行/成功，暖色用于警告/Dreaming，蓝灰用于 pending，红色用于错误/破坏性动作。
 - 组件通过 `currentColor` 控制状态和主题色；不要在图标内部写死产品主题色。点击目标由外层按钮提供，SVG 保持 `aria-hidden="true"`，可访问名称由按钮的 `aria-label` 提供。

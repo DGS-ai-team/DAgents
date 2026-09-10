@@ -6,7 +6,7 @@
 
 - 每个文件都是独立的 `24×24` SVG，带自己的 `viewBox="0 0 24 24"`、标题和描述。
 - 功能图标只使用 `currentColor`，线宽为 `1.6px`，统一 round cap / round join；文件内没有主题色、外部字体、网络资源、`defs` 或 `use` 依赖。
-- `brand-snowflake.svg` 是现有 `shared/branding/brand-icon.png` 的六臂宽圆角外轮廓，只有一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。品牌轮廓提供 `brand-snowflake-16.svg` 小尺寸变体，两个文件都使用 `currentColor`。
+- `brand-snowflake.svg` 严格描摹现有 `shared/branding/brand-icon.png` 的六臂、宽圆角和分叉 / 凹口外边界，只有一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。品牌轮廓提供 `brand-snowflake-16.svg` 小尺寸变体，两个文件都使用 `currentColor`。
 - 页面或组件可以直接使用 `<img>`，也可以用 CSS `mask-image` 让 `currentColor` 继承组件语义色。离线 HTML 画板采用后者展示 Node dark 与 Manage light 两套表面。
 
 ```html
@@ -27,7 +27,7 @@
 
 ## key 清单
 
-上一版画板按视觉卡片统计为 60 个，但 `expand` 与 `collapse` 现在是两个独立 key，所以可交付目录包含 61 个语义文件，另提供一个 16px 品牌变体。
+上一版画板按视觉卡片统计为 60 个，但 `expand` 与 `collapse` 现在是两个独立 key，所以可交付目录包含 61 个语义文件，另提供一个 16px 品牌变体。画板每张卡同时显示 24px 主图和 16px smoke test，重点检查 `file`、`audit-log`、`release-update`、`mcp`、`pending`、`dreaming` 等细节密集图标在小尺寸下的可辨识度。
 
 ### 品牌与导航
 
@@ -55,10 +55,12 @@
 | --- | --- | --- | --- |
 | `nav-agents.svg` | `agent` | nav variant | 智能体分组导航使用相同人形轮廓 |
 | `nav-workgroups.svg` | `workgroup` | nav variant | 工作组分组导航使用三节点轮廓 |
-| `nav-auto.svg` | `auto` | nav variant | 自主智能体分组导航使用轨道 / 脉冲轮廓 |
+| `nav-auto.svg` | `auto` | nav variant | 自主智能体分组导航使用轨道 + Agent 节点 + 唤醒脉冲 |
 | `tool-skills.svg` | `skills` | alias | 工具能力面板中的技能入口 |
 | `tool-memory.svg` | `memory` | alias | 工具能力面板中的记忆入口 |
 | `brand-snowflake-16.svg` | `brand-snowflake` | size variant | 16px 独立轮廓，适合 favicon 与紧凑品牌锚点 |
+
+Auto 图标以轨道 + 中央 Agent 节点 + 唤醒脉冲表达持续检查，不使用眼睛或行星式中心。`workgroup` 使用三个同等节点；`child-agent` 使用更大的父节点、两个更小的子节点和方向箭头；`model` 使用芯片和层级引脚；`pending` 使用进度弧与三点，避免像 `refresh` 一样出现成对循环箭头。
 
 `expand` 与 `collapse` 是相反方向的操作 key，不再合并成一个含糊的 `expand-collapse` 文件。旧画板中可能出现的 `dashboard`、`check`、`close` 等是画板内部辅助符号或历史候选，不属于本轮 61 个交付 key；产品中如要使用，应继续复用现有组件语义。
 
