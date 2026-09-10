@@ -41,7 +41,7 @@
 | 旧架构退役 | Goals、events/probe、maintenance runner、风险闭环专属包删除，旧入口不可调用；全Node普通测试通过，保留共享存储原语和历史文件 |
 | Node/Manage视觉 | 已完成多批桌面/窄屏截图及发现问题的修复；详情剩余区段、Manage剩余模块窄屏仍需按页补齐，不能声明全页完成 |
 | 构建与回归 | Node前端369项、Python197项通过；两端构建通过。历史超时及第三方Windows race限制保留 |
-| 部署与交付 | e1c18cb0链接修复已切入18766，HTTP200；最终交付时仍须打开Node/Manage并确认工作区干净 |
+| 部署与交付 | `75d0b31a` 最新 HEAD 构建已切入 18766；Node UI、`/v1/agents`、Manage Console 与 5173 返回 200，Auto 主会话 hydrate 空闲；未触发真实 LLM，完整 390px 视觉矩阵仍未完成 |
 
 ## 2026-09-09 真实运行验收补充
 
