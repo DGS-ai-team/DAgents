@@ -17,8 +17,8 @@ describe("TriggersPanel retired legacy records", () => {
   it("keeps current auto triggers actionable and marks legacy goal records retired", async () => {
     api.listAgents.mockResolvedValue({ agents: [] });
     api.listTriggers.mockResolvedValue({ triggers: [
-      { trigger_id: "auto-default-agent", name: "Auto 默认触发", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", managed_goal_id: "", enabled: true, condition: { interval_seconds: 60 } },
-      { trigger_id: "legacy-goal", name: "旧任务", controller: "goal", managed_goal_id: "goal-1", enabled: false, recovery_required: true, condition: { interval_seconds: 60 } },
+      { trigger_id: "auto-default-agent", name: "Auto 默认触发", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", enabled: true, condition: { interval_seconds: 60 } },
+      { trigger_id: "legacy-controller", name: "旧任务", controller: "retired", enabled: false, recovery_required: true, condition: { interval_seconds: 60 } },
       { trigger_id: "unknown-maintenance", name: "未知维护", controller: "maintenance", enabled: true, condition: { interval_seconds: 60 } },
       { trigger_id: "user-trigger", name: "用户任务", controller: "user", enabled: true, condition: { interval_seconds: 60 } },
     ] });
@@ -71,7 +71,7 @@ describe("TriggersPanel retired legacy records", () => {
     api.listAgents.mockResolvedValue({ agents: [] });
     api.listTriggers.mockResolvedValue({ triggers: [
       { trigger_id: "auto-recovery", name: "Auto 唤醒", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", enabled: false, recovery_required: true, revision: 7, pending_delivery_id: "delivery-7", condition: { interval_seconds: 60 } },
-      { trigger_id: "legacy-maintenance", name: "旧维护", controller: "maintenance", enabled: false, recovery_required: true, pending_delivery_id: "legacy-delivery" },
+      { trigger_id: "legacy-controller", name: "旧维护", controller: "retired", enabled: false, recovery_required: true, pending_delivery_id: "legacy-delivery" },
     ] });
     api.recoverTrigger.mockResolvedValue({ trigger_id: "auto-recovery", name: "Auto 唤醒", controller: "auto", owner_agent_id: "agent-auto", enabled: false, revision: 8 });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);

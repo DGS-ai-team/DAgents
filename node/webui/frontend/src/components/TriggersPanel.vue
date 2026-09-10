@@ -42,17 +42,13 @@ function rowBusy(key) {
   return busyKey.value === key;
 }
 
-function isManagedGoal(item) {
-  return Boolean(String(item?.managed_goal_id || "").trim());
-}
-
 function isAutoManaged(item) {
   return String(item?.controller || "").trim().toLowerCase() === "auto";
 }
 
 function isRetired(item) {
   const controller = String(item?.controller || "").trim().toLowerCase();
-  return isManagedGoal(item) || isAutoManaged(item) || (controller !== "" && controller !== "user");
+  return isAutoManaged(item) || (controller !== "" && controller !== "user");
 }
 
 function displayName(item) {

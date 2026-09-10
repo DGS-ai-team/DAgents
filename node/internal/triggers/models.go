@@ -76,9 +76,6 @@ type Definition struct {
 	ControllerID             string            `json:"controller_id,omitempty"`
 	Revision                 int64             `json:"revision,omitempty"`
 	CreatedBy                string            `json:"created_by,omitempty"`
-	ManagedIntentID          string            `json:"managed_intent_id,omitempty"`
-	ManagedGeneration        int64             `json:"managed_generation,omitempty"`
-	ManagedFingerprint       string            `json:"managed_fingerprint,omitempty"`
 }
 
 // CreateInput 创建触发器入参（工具 / HTTP）。
