@@ -396,3 +396,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `e3076edd` 修复 Manage 登录页在 390px 下固定双列导致的布局风险；`2400a586` 整理级联关系，由 `max-width:900px` 负责单列，`max-width:640px` 覆盖窄屏 padding、面板最小宽度与侧栏高度。
 - Manage lint/build 均通过。root 从 8022 实际静态 CSS 资产确认新规则已提供，Manage 页面返回 200。
 - 本轮不宣称全页面 390px 视觉矩阵完成，也未重新执行真实 true 条件或真实 LLM；未修改运行配置或业务数据。
+
+### 2026-09-10 条件脚本 matched fake 集成补充
+
+- `TestConditionTriggerHTTPApprovalExecutesOnce` 通过真实 HTTP Handler、SQLite trigger history、审批恢复和 fake LLM 验证条件命令成功后的单次 Agent 回合；新增断言确认 matched delivery 只有一条 `queued` 记录，delivery/session 身份完整，最终 pending delivery 已清除，fake LLM calls 仍为 1。
+- `TestSchedulerCmdGateAllowsFire` 及条件 scheduler 的 owner、revision、并发 claim、过期 occurrence 和审批约束专项 race 通过；拒绝路径仍确认不执行标记脚本且不增加模型调用。
+- 本轮只补 fake/本地执行证据，未重新调用真实 provider 的 true 条件或真实 LLM；未修改运行配置或业务数据。

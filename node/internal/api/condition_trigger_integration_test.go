@@ -221,6 +221,41 @@ func TestConditionTriggerHTTPApprovalExecutesOnce(t *testing.T) {
 		t.Fatalf("final task model calls=%d want 1", client.calls.Load())
 	}
 	waitSessionIdle(t, srv, sessionID)
+	// The matched condition must produce exactly one durable queued delivery.
+	// This checks the HTTP condition/approval path through SQLite rather than
+	// inferring delivery from the fake model call alone.
+	historyResp, err := http.Get(ts.URL + "/v1/triggers/" + id + "/history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var history struct {
+		Records []struct {
+			DeliveryID string  `json:"delivery_id"`
+			Status     string  `json:"status"`
+			SessionID  *string `json:"session_id"`
+		} `json:"records"`
+	}
+	if err := json.NewDecoder(historyResp.Body).Decode(&history); err != nil {
+		historyResp.Body.Close()
+		t.Fatal(err)
+	}
+	historyResp.Body.Close()
+	queued := 0
+	for _, record := range history.Records {
+		if record.Status != "queued" {
+			continue
+		}
+		queued++
+		if record.DeliveryID == "" || record.SessionID == nil || *record.SessionID != sessionID {
+			t.Fatalf("matched delivery lost identity: %+v", record)
+		}
+	}
+	if queued != 1 {
+		t.Fatalf("matched condition queued deliveries=%d, want exactly 1; history=%+v", queued, history.Records)
+	}
+	if pending := hydrate(); len(pending) != 0 {
+		t.Fatalf("matched delivery remained pending after completion: %+v", pending)
+	}
 	// The final trigger turn can report idle just before its delivery callback
 	// releases the Agent gate.  Probe the real gate so the next condition fire
 	// is not accidentally testing a transient busy result.
