@@ -39,6 +39,7 @@ describe("NavRail sections", () => {
     expect(wrapper.find('.nav-rail__footer [title="Auto 总览"]').exists()).toBe(false);
     const sections = wrapper.findAll(".nav-rail__section-title").map((node) => node.text());
     expect(sections.slice(0, 3)).toEqual(["智能体", "工作组", "自主智能体"]);
+    expect(wrapper.findAll(".nav-rail__section-chevron")).toHaveLength(0);
     const sectionNodes = wrapper.findAll(".nav-rail__section");
     expect(sectionNodes[0].find(".nav-rail__section-count").text()).toBe("1");
     expect(sectionNodes[2].find(".nav-rail__section-count").text()).toBe("1");

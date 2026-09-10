@@ -582,7 +582,6 @@ defineExpose({
             class="nav-rail__section-state nav-rail__section-state--error"
             title="智能体列表刷新失败，当前显示上次成功结果"
           >!</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.agents ? "⌄" : "›" }}</span>
         </button>
         <div class="nav-rail__section-actions">
         <button
@@ -757,7 +756,6 @@ defineExpose({
             class="nav-rail__section-state nav-rail__section-state--error"
             title="工作组列表刷新失败，当前显示上次成功结果"
           >!</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.workgroups ? "⌄" : "›" }}</span>
         </button>
         <div class="nav-rail__section-actions">
         <button
@@ -1000,7 +998,6 @@ defineExpose({
           <span class="nav-rail__section-icon" aria-hidden="true">✦</span>
           <span class="nav-rail__section-title">自主智能体</span>
           <span v-if="autonomousAgents.length" class="nav-rail__section-count">{{ autonomousAgents.length }}</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.autonomous ? "⌄" : "›" }}</span>
         </button>
       </header>
       <ul v-if="sectionOpen.autonomous" class="nav-rail__list" :aria-busy="loadingAgents">
