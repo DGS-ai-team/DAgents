@@ -390,3 +390,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `598f07e1` 已将可信 `auto_idle` 接入生产 turn 生命周期：仅系统 Auto 激活、无副作用工具链且成功的结构化 `no_work=true` 终态可抑制 `notify_seq`；普通聊天、自然语言“没有工作”、写工具、错误及审批路径仍推进通知或保持等待/失败语义。
 - 现有 `ShouldBumpNotifySeq`、`PublishNoWorkFinished` 及 runtime/tool-router 接线由 `node/internal/session`、`node/internal/turn` 和 `node/internal/tools` 的正负向测试覆盖；持久化失败测试也确认不会发布成功静默结果。此前第 2 节关于该能力“尚未完成”的记录保留为历史状态，不代表当前状态表。
 - 当前证据覆盖结构化 idle 判定与持久化/通知边界；未以自然语言匹配替代协议，也未触发真实 LLM。本轮未改变配置或业务数据。
+
+### 2026-09-10 Manage 登录页窄屏修复复核
+
+- `e3076edd` 修复 Manage 登录页在 390px 下固定双列导致的布局风险；`2400a586` 整理级联关系，由 `max-width:900px` 负责单列，`max-width:640px` 覆盖窄屏 padding、面板最小宽度与侧栏高度。
+- Manage lint/build 均通过。root 从 8022 实际静态 CSS 资产确认新规则已提供，Manage 页面返回 200。
+- 本轮不宣称全页面 390px 视觉矩阵完成，也未重新执行真实 true 条件或真实 LLM；未修改运行配置或业务数据。
