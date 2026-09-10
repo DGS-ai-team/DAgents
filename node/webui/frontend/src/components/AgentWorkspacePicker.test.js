@@ -2,6 +2,9 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import AgentWorkspacePicker from "./AgentWorkspacePicker.vue";
+import * as platformApi from "../api/platform.js";
+
+vi.mock("../api/platform.js", () => ({ pickPlatformDirectory: vi.fn() }));
 
 function mountPicker(draft, fieldError = "") {
   return mount(AgentWorkspacePicker, {
@@ -16,7 +19,12 @@ describe("AgentWorkspacePicker", () => {
     const pathInput = wrapper.get("#agent-workspace-path");
 
     expect(pathInput.attributes("placeholder")).toContain("C:\\Projects");
-    expect(wrapper.find('button').exists()).toBe(false);
+    expect(wrapper.get('button')).toBeTruthy();
+
+    platformApi.pickPlatformDirectory.mockResolvedValue({ ok: true, cancelled: false, path: "C:\\native-project" });
+    await wrapper.get('button').trigger("click");
+    expect(platformApi.pickPlatformDirectory).toHaveBeenCalledTimes(1);
+    expect(draft.workspacePath).toBe("C:\\native-project");
 
     await pathInput.setValue("D:\\workspace\\project");
     expect(draft.workspacePath).toBe("D:\\workspace\\project");

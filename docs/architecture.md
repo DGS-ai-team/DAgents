@@ -83,13 +83,13 @@ tool schema → tool router → policy / hook → executor → result contract �
 
 | 组件 | 负责 | 不负责 |
 |---|---|---|
-| Node | Agent/Session/Turn、工具、历史、HITL、SSE、配置和更新状态 | 直接调用操作系统目录选择器、剪贴板或窗口 API |
+| Node | Agent/Session/Turn、工具、历史、HITL、SSE、配置和更新状态；直接调用操作系统目录选择器 | 剪贴板、窗口焦点和安装态更新编排 |
 | Web UI | 通过当前 Node 的同源 `/v1` API 展示状态、提交用户操作 | 探测 `:18767`、读取桌面配置、直连 Shell |
-| Desktop Shell | Node 启停监护、通知、窗口/目录/剪贴板等原生能力、安装态更新 | 复制 Node 的业务状态机和配置存储 |
+| Desktop Shell | Node 启停监护、通知、剪贴板/窗口焦点等原生能力、安装态更新编排 | 复制 Node 的业务状态机和配置存储；目录选择不再是前置能力 |
 
-Web UI 的桌面能力统一走 Node `/v1/platform/*`。桌面启动时，Shell 通过环境变量把一个带 Bearer token 的私有 bridge 暴露给 Node；Node 做能力探测和请求转发。纯浏览器启动 Node 时能力明确返回不可用，页面只能给出可理解的降级提示。`:18767` 只属于 Shell↔Node 的内部 bridge，不是 Web UI 公共 API。
+Web UI 的宿主能力统一走 Node `/v1/platform/*`。目录选择由 Node 直接调用宿主系统：Windows 使用 PowerShell STA `FolderBrowserDialog`，macOS 使用 `osascript`，Linux 使用可用的 `zenity`、`kdialog` 或 `yad`；用户取消返回成功响应并标记 `cancelled=true`。剪贴板文件路径、窗口焦点和安装态更新仍可由 Node 通过环境变量配置的带 Bearer token 私有 bridge 请求 Desktop Shell。纯浏览器启动 Node 时，目录选择能力与 Shell 能力分别探测，目录选择不以 Desktop Shell 为前置条件。`:18767` 只属于 Shell↔Node 的内部 bridge，不是 Web UI 公共 API。
 
-Shell 的两条实现轨（Tauri 推荐轨、Go 兼容轨）共享这组 HTTP/SSE 语义和 token 约束，只在窗口、通知、目录选择器和安装器等宿主实现上不同。Node 是状态真相源：Shell 待办表启动/重连时通过 `/v1/agents` hydrate，运行中由 Node 的 `notification_changed` 事件增量更新；不再以 60 秒轮询或工具事件名称推断 HITL/未读状态。
+Shell 的两条实现轨（Tauri 推荐轨、Go 兼容轨）共享这组 HTTP/SSE 语义和 token 约束，只在窗口、通知、剪贴板和安装器等宿主实现上不同。Node 是状态真相源：Shell 待办表启动/重连时通过 `/v1/agents` hydrate，运行中由 Node 的 `notification_changed` 事件增量更新；不再以 60 秒轮询或工具事件名称推断 HITL/未读状态。
 
 ## 6. Workgroup
 

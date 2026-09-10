@@ -1,4 +1,7 @@
 <script setup>
+import { ref } from "vue";
+import { pickPlatformDirectory } from "../api/platform.js";
+
 const draft = defineModel("draft", { type: Object, required: true });
 
 const props = defineProps({
@@ -6,11 +9,34 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["clear-error"]);
+const selecting = ref(false);
+const pickerError = ref("");
 
 function setMode(mode) {
   draft.value.workspaceMode = mode;
   if (mode === "private") draft.value.workspacePath = "";
+  pickerError.value = "";
   emit("clear-error");
+}
+
+async function chooseDirectory() {
+  selecting.value = true;
+  pickerError.value = "";
+  emit("clear-error");
+  try {
+    const result = await pickPlatformDirectory();
+    const path = String(result?.path || "").trim();
+    if (path) {
+      draft.value.workspacePath = path;
+      return;
+    }
+    if (!result?.cancelled) pickerError.value = "没有获取到所选目录，请重试或直接输入路径。";
+  } catch (error) {
+    const message = String(error?.message || "").trim();
+    pickerError.value = message || "Node 暂时无法打开系统目录选择器，请直接输入绝对路径。";
+  } finally {
+    selecting.value = false;
+  }
 }
 </script>
 
@@ -54,19 +80,29 @@ function setMode(mode) {
         />
         <span>
           <strong>指定本机目录</strong>
-          <small>输入已有项目目录的绝对路径，支持 Windows 与 Linux。</small>
+          <small>点击选择目录打开系统选择器，也可以直接输入绝对路径。</small>
         </span>
       </label>
     </div>
 
     <div v-if="draft.workspaceMode === 'custom'" class="workspace-picker__selection">
-      <label
-        for="agent-workspace-path"
-        class="workspace-picker__label"
-        :class="{ 'workspace-picker__label--error': props.fieldError }"
-      >
-        {{ props.fieldError || "工作目录路径" }}
-      </label>
+      <div class="workspace-picker__selection-head">
+        <label
+          for="agent-workspace-path"
+          class="workspace-picker__label"
+          :class="{ 'workspace-picker__label--error': props.fieldError }"
+        >
+          {{ props.fieldError || "工作目录路径" }}
+        </label>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm"
+          :disabled="selecting"
+          @click="chooseDirectory"
+        >
+          {{ selecting ? "打开中…" : "选择目录" }}
+        </button>
+      </div>
       <input
         id="agent-workspace-path"
         v-model="draft.workspacePath"
@@ -76,8 +112,9 @@ function setMode(mode) {
         autocomplete="off"
         placeholder="例如 C:\Projects\my-agent 或 /home/user/project"
         :aria-invalid="Boolean(props.fieldError)"
-        @input="emit('clear-error')"
+        @input="pickerError = ''; emit('clear-error')"
       />
+      <p v-if="pickerError" class="workspace-picker__error">{{ pickerError }}</p>
       <p class="workspace-picker__hint">输入 Windows 或 Linux 的绝对路径，创建后不可修改。</p>
     </div>
   </section>
@@ -91,7 +128,8 @@ function setMode(mode) {
   width: 100%;
 }
 
-.workspace-picker__heading {
+.workspace-picker__heading,
+.workspace-picker__selection-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -195,6 +233,13 @@ function setMode(mode) {
   color: var(--color-danger);
 }
 
+.workspace-picker__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .workspace-picker__path-input {
   width: 100%;
   box-sizing: border-box;
@@ -231,7 +276,8 @@ function setMode(mode) {
     grid-template-columns: 1fr;
   }
 
-  .workspace-picker__heading {
+  .workspace-picker__heading,
+  .workspace-picker__selection-head {
     align-items: flex-start;
     flex-direction: column;
     gap: 9px;

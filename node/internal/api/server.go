@@ -24,6 +24,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/platform"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -94,6 +95,7 @@ type Server struct {
 	workgroupAgents *workgroupAgentBridge
 	terminals       *terminalSessionRegistry
 	desktopBridge   *desktopbridge.Client
+	directoryPicker platform.DirectoryPicker
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex
@@ -112,14 +114,15 @@ type Server struct {
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	llmClient    llm.Client
-	llmInjected  bool
-	tools        *tools.Registry
-	policyEngine *policy.Engine
-	sqliteStore  *store.SQLiteStore
-	nodeSettings *store.NodeSettingsStore
-	skipStore    bool
-	configPath   string
+	llmClient       llm.Client
+	llmInjected     bool
+	tools           *tools.Registry
+	policyEngine    *policy.Engine
+	sqliteStore     *store.SQLiteStore
+	nodeSettings    *store.NodeSettingsStore
+	skipStore       bool
+	configPath      string
+	directoryPicker platform.DirectoryPicker
 }
 
 // WithConfigPath 记录 Node 启动时加载的 config.yaml 路径（供 Web UI 保存设置）。
@@ -158,6 +161,14 @@ func WithPolicy(engine *policy.Engine) Option {
 	}
 }
 
+// WithDirectoryPicker injects the Node-native picker implementation (tests
+// use this to avoid opening a real system dialog).
+func WithDirectoryPicker(picker platform.DirectoryPicker) Option {
+	return func(o *serverOptions) {
+		o.directoryPicker = picker
+	}
+}
+
 // WithStore 注入 SQLite store（单测用）；传 nil 且 WithSkipStore 时禁用持久化。
 func WithStore(st *store.SQLiteStore) Option {
 	return func(o *serverOptions) {
@@ -190,6 +201,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	sharedWorkspaceCoord := workspacecoord.New()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.directoryPicker == nil {
+		o.directoryPicker = platform.NewDirectoryPicker()
 	}
 	if o.nodeSettings == nil && !o.skipStore && cfg != nil {
 		ns, err := store.BootstrapNodeSettings(context.Background(), cfg, o.configPath, logger)
@@ -584,6 +598,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		workgroupAgents:      wgAgentBridge,
 		terminals:            newTerminalSessionRegistry(),
 		desktopBridge:        desktopbridge.NewFromEnv(),
+		directoryPicker:      o.directoryPicker,
 		pendingRuntimeReload: make(map[string]string),
 	}
 	triggerRoundProvider = s.triggerToolRoundProvider

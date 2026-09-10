@@ -94,3 +94,7 @@ ui:
 
 复用 Node 现有 `/v1` HTTP/SSE，封装见 `frontend/src/api/node.js`。目录选择、剪贴板文件路径、窗口焦点和更新安装等桌面能力统一使用
 `/v1/platform/*` 或 `/v1/agent/update*`；Web UI 不直接访问 Desktop Shell 的 `:18767` bridge。
+
+目录选择由 Node 进程直接调用宿主系统能力：Windows 使用 PowerShell STA
+`FolderBrowserDialog`，macOS 使用 `osascript`，Linux 按顺序尝试 `zenity`、`kdialog`、`yad`。
+因此目录选择不依赖 Desktop Shell；取消选择会返回 `200` 和 `{"cancelled":true}`，选择器不可用时返回错误，Web UI 仍允许直接输入绝对路径作为兜底。

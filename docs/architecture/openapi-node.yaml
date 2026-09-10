@@ -469,7 +469,8 @@ paths:
   /v1/platform/capabilities:
     get:
       x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
+      summary: Report Node-native and Desktop Shell platform capabilities
+      description: native_directory_picker is owned by Node and does not require the optional Desktop Shell.
       responses:
         "200":
           description: OK
@@ -477,7 +478,8 @@ paths:
   /v1/platform/directory-picker:
     post:
       x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
+      summary: Open the Node-native directory picker
+      description: The Node process opens the host chooser directly. User cancellation is a successful response with cancelled=true.
       responses:
         "200":
           description: OK
