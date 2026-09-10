@@ -337,6 +337,11 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 扩展 `node/cmd/dagents-node/process_restart_e2e_test.go` 的隔离 fixture：真实 Node 进程启用 triggers，正式创建 `agent_type=auto`，通过 `/v1/agents/{id}/auto-config` 设置合法 1 秒间隔，等待 `auto-default:{id}` 到期并观察 `fire_count=1`、一次 fake LLM 请求、`turn.completed` 及 hydrate 无 active/queue/pending HITL。
 - 首次回合完成且 delivery 已结算后，通过正式 auto-config 将隔离 profile 调整为合法 60 秒间隔，保持默认 trigger enabled 并使 `next_fire_at` 位于未来；随后停止并重启同一临时 runtime。重开后读取 trigger 与 hydrate，断言 controller/owner 身份正确、enabled、无 recovery/pending、`fire_count` 和 fake LLM 调用数仍为 1。普通与 race 进程黑盒均通过；未触发 18766。
 
+### 2026-09-10 页面可达性复核
+
+- 只读 HTTP 检查通过：18766 的主 UI、触发器设置、反馈、通用设置、帮助页，以及 8022 的 Manage 根页和 Console 均返回 200。
+- 本轮 CUA 内置浏览器返回 `No browser is available`，未取得桌面或 390px 视觉证据；因此不把上述 HTTP 200 记录为布局通过，Node/Manage 逐页视觉矩阵仍待可用浏览器后复验。未修改配置、创建数据或触发 Auto。
+
 ### 2026-09-10 默认 trigger 重启边界复核
 
 - 在隔离临时目录上的 `TestNewServerStartupRebuildsOnlyAutoDefaults` 与 `TestNewServerStartupKeepsPendingAutoDefaultFrozen` 以 `go test -race` 重跑通过，覆盖重开后的默认 trigger 校正、待恢复投递冻结及普通 trigger 隔离；未触发 18766 的 Auto。
