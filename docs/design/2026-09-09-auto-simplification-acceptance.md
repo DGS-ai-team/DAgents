@@ -34,7 +34,7 @@
 | --- | --- |
 | 单主会话、职责/经验 system prompt、最新 Todo、CAS 隔离 | API/Session请求捕获和隔离测试通过；真实mimo普通聊天及默认激活更新Todo通过 |
 | 工具轮次上限及既有审批 | 真实激活一次工具调用后无工具收尾、诚实报告未完成Todo；原ASK实际批准、dreaming拒绝/取消专项通过 |
-| 默认trigger稳定身份、关闭、忙时合并、恢复 | 生产provider专项、关闭清队列及重启冻结测试通过；隔离实际页面、CAS冲突、原生确认、同步唤醒均通过；完整进程重启后实际到期一次的黑盒证据仍待补强 |
+| 默认trigger稳定身份、关闭、忙时合并、恢复 | 生产provider专项、关闭清队列及重启冻结测试通过；隔离实际页面、CAS冲突、原生确认、同步唤醒均通过；`process_restart_e2e_test.go` 已以隔离真实 Node、Auto profile、默认 trigger、fake LLM 和重启前后 fire_count/hydrate 证实到期仅执行一次 |
 | Dreaming与文件系统手册 | 真实mimo经验提交、上下文重置、历史保留和独立Agent手册读写通过；失败/重启组件测试通过；真实进程故障重启组合未独立实测 |
 | 无工作静默 | 真实默认激活调用auto_idle，执行记录完整，notify_seq不变 |
 | 脚本条件 | 真实Handler/SQLite/原审批测试覆盖批准、拒绝及失败冻结；`fa159b41` 已记录 18766 真实 `exit 1` false 对照（批准、skipped、无额外模型回合、临时 trigger 清理）；真实 true 条件触发模型本轮未重做 |
