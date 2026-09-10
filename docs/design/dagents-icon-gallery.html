@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DAgents 独立 SVG 图标画板</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --brand-500: #67dcf1;
+      --brand-600: #25b9d5;
+      --auto-500: #9b8cf3;
+      --success: #46c98d;
+      --warning: #e3aa45;
+      --danger: #ed727c;
+      --info: #55a9dc;
+      --pending: #7f9db7;
+      --text: #edf6ff;
+      --text-muted: #9db1c6;
+      --surface-0: #08111d;
+      --surface-1: #0e1a2a;
+      --surface-2: #14253a;
+      --line: rgba(133, 179, 216, .22);
+      --line-strong: rgba(133, 179, 216, .42);
+      --shadow: 0 18px 50px rgba(0, 0, 0, .25);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 92% 0%, rgba(76, 173, 213, .16), transparent 35rem),
+        radial-gradient(circle at 8% 18%, rgba(91, 93, 183, .12), transparent 28rem),
+        var(--surface-0);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.45;
+    }
+
+    .page { width: min(1500px, calc(100% - 56px)); margin: 0 auto; padding: 48px 0 68px; }
+    .eyebrow { color: var(--brand-500); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 10px 0 8px; font-size: clamp(28px, 3vw, 46px); letter-spacing: -.035em; line-height: 1.05; }
+    .lede { max-width: 880px; margin: 0; color: var(--text-muted); font-size: 15px; }
+    .head-row { display: flex; align-items: end; justify-content: space-between; gap: 30px; }
+    .ratio { display: grid; grid-template-columns: 80fr 15fr 5fr; width: min(340px, 100%); gap: 2px; margin-top: 20px; height: 7px; }
+    .ratio span:nth-child(1) { background: #68798d; border-radius: 5px 0 0 5px; }
+    .ratio span:nth-child(2) { background: var(--brand-500); }
+    .ratio span:nth-child(3) { background: var(--auto-500); border-radius: 0 5px 5px 0; }
+    .ratio-label { display: flex; justify-content: space-between; width: min(340px, 100%); color: var(--text-muted); font-size: 10px; margin-top: 5px; }
+
+    .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 52px 0 16px; }
+    .section-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.015em; }
+    .section-heading p { margin: 0; color: var(--text-muted); font-size: 12px; }
+
+    .surfaces { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .surface {
+      min-height: 254px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface-1);
+      box-shadow: var(--shadow);
+    }
+    .surface.light {
+      --surface-0: #f5f8fb;
+      --surface-1: #ffffff;
+      --surface-2: #edf3f8;
+      --text: #1b2a3d;
+      --text-muted: #64778b;
+      --line: rgba(43, 83, 119, .16);
+      --line-strong: rgba(43, 83, 119, .36);
+      color: var(--text);
+      background: var(--surface-0);
+    }
+    .surface-kicker { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .surface h3 { margin: 0; font-size: 16px; }
+    .surface small { color: var(--text-muted); }
+    .surface-stack { display: flex; gap: 8px; margin: 20px 0 16px; }
+    .surface-stack span { height: 22px; flex: 1; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); }
+    .surface-stack span:first-child { background: var(--surface-0); }
+    .surface-stack span:last-child { background: var(--surface-1); }
+    .token-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .token { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent); }
+    .token.brand { color: var(--brand-500); }
+    .token.auto { color: var(--auto-500); }
+    .token.status { color: var(--success); }
+    .states { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .state { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--brand-500); background: var(--surface-2); }
+    .state code { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+    .state.hover:hover { color: var(--brand-500); border-color: var(--brand-500); background: color-mix(in srgb, var(--brand-500) 12%, var(--surface-2)); }
+    .state.active { color: var(--brand-500); border-color: var(--brand-500); box-shadow: inset 0 -2px 0 var(--brand-500); }
+    .state.disabled { color: var(--text-muted); opacity: .42; }
+
+    .groups { display: grid; gap: 18px; }
+    .group { padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: rgba(14, 26, 42, .72); }
+    .group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .group-head h2 { margin: 0; font-size: 16px; }
+    .group-head p { margin: 0; color: var(--text-muted); font-size: 12px; }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .card { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 72px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-1); transition: border-color .16s ease, transform .16s ease, background .16s ease; }
+    .card:hover { border-color: var(--line-strong); background: var(--surface-2); transform: translateY(-1px); }
+    .card-copy { min-width: 0; }
+    .card code { display: block; overflow: hidden; color: var(--text); font: 600 11px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .meaning { display: block; overflow: hidden; margin-top: 3px; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { display: inline-block; margin-top: 5px; padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-muted); font-size: 9px; line-height: 1.4; }
+    .icon-mask { position: relative; display: inline-block; width: 26px; height: 26px; flex: 0 0 26px; }
+    .external-mask { position: absolute; inset: 0; background: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
+    .inline-icon { position: absolute; inset: 0; width: 26px; height: 26px; overflow: visible; }
+    .inline-icon .icon { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .inline-icon .fill { fill: currentColor; stroke: none; }
+    .inline-icon .brand { fill: currentColor; stroke: currentColor; stroke-width: 1.15; stroke-linejoin: round; }
+    .tone-brand { color: var(--brand-500); }
+    .tone-auto { color: var(--auto-500); }
+    .tone-neutral { color: var(--text-muted); }
+    .tone-success { color: var(--success); }
+    .tone-warning { color: var(--warning); }
+    .tone-danger { color: var(--danger); }
+    .tone-info { color: var(--info); }
+    .tone-pending { color: var(--pending); }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 18px; color: var(--text-muted); font-size: 11px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+    .legend .brand { color: var(--brand-500); }
+    .legend .auto { color: var(--auto-500); }
+    .legend .neutral { color: var(--text-muted); }
+    .legend .status { color: var(--success); }
+    footer { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--text-muted); font-size: 11px; }
+    footer code { color: var(--brand-500); }
+
+    @media (max-width: 1120px) { .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 820px) {
+      .page { width: min(100% - 32px, 680px); padding-top: 30px; }
+      .head-row, .section-heading, .group-head { align-items: flex-start; flex-direction: column; }
+      .surfaces { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 480px) { .page { width: calc(100% - 24px); } .surface, .group { padding: 16px; } .cards { grid-template-columns: 1fr; } .states { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="head-row">
+        <div>
+          <div class="eyebrow">DAGENTS / ICON SYSTEM</div>
+          <h1>独立 SVG 图标画板</h1>
+          <p class="lede">所有资产按 24×24 logical grid 设计，功能图标继承 <code>currentColor</code>。这张离线画板同时检查 Node dark、Manage light、状态色和交互状态；不依赖外部库或网络。</p>
+        </div>
+        <div aria-label="颜色比例">
+          <div class="ratio"><span></span><span></span><span></span></div>
+          <div class="ratio-label"><span>80% neutral</span><span>15% brand</span><span>5% semantic</span></div>
+        </div>
+      </div>
+    </header>
+
+    <section aria-labelledby="surface-title">
+      <div class="section-heading"><h2 id="surface-title">表面与状态预览</h2><p>同一套 token 在 Node 与 Manage 中保持一致</p></div>
+      <div class="surfaces">
+        <article class="surface dark">
+          <div class="surface-kicker"><h3>Node / dark</h3><small>#08111d · deep workspace</small></div>
+          <div class="surface-stack" aria-label="Node surface tokens"><span title="surface-0"></span><span title="surface-2"></span><span title="surface-1"></span></div>
+          <div class="token-row"><span class="token brand"><i class="swatch"></i>brand-500</span><span class="token auto"><i class="swatch"></i>auto-500</span><span class="token status"><i class="swatch"></i>status</span></div>
+          <div class="states" style="margin-top:16px"><div class="state"><span class="icon-mask" data-icon="agent"></span><code>normal</code></div><div class="state hover"><span class="icon-mask" data-icon="agent"></span><code>hover</code></div><div class="state active"><span class="icon-mask" data-icon="agent"></span><code>active</code></div><div class="state disabled"><span class="icon-mask" data-icon="agent"></span><code>disabled</code></div></div>
+        </article>
+        <article class="surface light">
+          <div class="surface-kicker"><h3>Manage / light</h3><small>#f5f8fb · console surface</small></div>
+          <div class="surface-stack" aria-label="Manage surface tokens"><span title="surface-0"></span><span title="surface-2"></span><span title="surface-1"></span></div>
+          <div class="token-row"><span class="token brand"><i class="swatch"></i>brand-600</span><span class="token auto"><i class="swatch"></i>auto-500</span><span class="token status"><i class="swatch"></i>status</span></div>
+          <div class="states" style="margin-top:16px"><div class="state"><span class="icon-mask" data-icon="manage-dashboard"></span><code>normal</code></div><div class="state hover"><span class="icon-mask" data-icon="manage-dashboard"></span><code>hover</code></div><div class="state active"><span class="icon-mask" data-icon="manage-dashboard"></span><code>active</code></div><div class="state disabled"><span class="icon-mask" data-icon="manage-dashboard"></span><code>disabled</code></div></div>
+        </article>
+      </div>
+      <div class="legend" aria-label="语义色图例"><span class="brand"><i></i>品牌冰蓝</span><span class="auto"><i></i>Auto 靛紫</span><span class="neutral"><i></i>中性文字</span><span class="status"><i></i>success / warning / danger / info / pending 使用统一语义映射</span></div>
+    </section>
+
+    <section aria-labelledby="gallery-title">
+      <div class="section-heading"><h2 id="gallery-title">全部独立资产</h2><p>每张卡片通过 CSS mask 加载同名 SVG 文件，并显示 key、语义和 alias / variant</p></div>
+      <div id="groups" class="groups"></div>
+    </section>
+
+    <footer>源文件目录：<code>docs/design/dagents-icons/</code> · 品牌雪花只保留现有 PNG 的六臂宽圆角外轮廓；功能图标不写死主题色。直接以 <code>file://</code> 打开即可预览。</footer>
+  </main>
+  <script>
+    const fallbackBodies = {"brand-snowflake":"<path class=\"brand\" d=\"M 11.21 1.99 Q 12.00 0.96 12.79 1.99 Q 13.58 3.02 14.06 4.01 Q 14.54 5.01 14.89 5.70 Q 15.24 6.39 16.01 6.34 Q 16.78 6.30 17.88 6.22 Q 18.99 6.14 20.27 6.31 Q 21.56 6.48 21.07 7.68 Q 20.57 8.88 19.95 9.79 Q 19.33 10.71 18.90 11.35 Q 18.48 12.00 18.90 12.65 Q 19.33 13.29 19.95 14.21 Q 20.57 15.12 21.07 16.32 Q 21.56 17.52 20.27 17.69 Q 18.99 17.86 17.88 17.78 Q 16.78 17.70 16.01 17.66 Q 15.24 17.61 14.89 18.30 Q 14.54 18.99 14.06 19.99 Q 13.58 20.98 12.79 22.01 Q 12.00 23.04 11.21 22.01 Q 10.42 20.98 9.94 19.99 Q 9.46 18.99 9.11 18.30 Q 8.76 17.61 7.99 17.66 Q 7.22 17.70 6.12 17.78 Q 5.01 17.86 3.73 17.69 Q 2.44 17.52 2.93 16.32 Q 3.43 15.12 4.05 14.21 Q 4.67 13.29 5.10 12.65 Q 5.52 12.00 5.10 11.35 Q 4.67 10.71 4.05 9.79 Q 3.43 8.88 2.93 7.68 Q 2.44 6.48 3.73 6.31 Q 5.01 6.14 6.12 6.22 Q 7.22 6.30 7.99 6.34 Q 8.76 6.39 9.11 5.70 Q 9.46 5.01 9.94 4.01 Q 10.42 3.02 11.21 1.99 Z\"/>","nav-agents":"<circle class=\"icon\" cx=\"12\" cy=\"8\" r=\"3.2\"/><path class=\"icon\" d=\"M5.5 20c.4-3.8 2.6-6 6.5-6s6.1 2.2 6.5 6\"/>","nav-workgroups":"<circle class=\"icon\" cx=\"12\" cy=\"6\" r=\"2.4\"/><circle class=\"icon\" cx=\"6\" cy=\"17\" r=\"2.4\"/><circle class=\"icon\" cx=\"18\" cy=\"17\" r=\"2.4\"/><path class=\"icon\" d=\"M12 8.5v3M10.4 12.7 7.7 15M13.6 12.7l2.7 2.3\"/>","nav-auto":"<ellipse class=\"icon\" cx=\"12\" cy=\"12\" rx=\"8.2\" ry=\"4.2\" transform=\"rotate(-28 12 12)\"/><circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"2.1\"/><path class=\"icon\" d=\"m18.2 5.5.6 2.2 2.1.7-2.1.7-.6 2.2-.7-2.2-2.1-.7 2.1-.7Z\"/>","nav-node":"<path class=\"icon\" d=\"m12 3.8 7 4v8.4l-7 4-7-4V7.8Z\"/><path class=\"icon\" d=\"m5 7.8 7 4 7-4M12 11.8v8.4\"/>","nav-manage":"<rect class=\"icon\" x=\"4.5\" y=\"5\" width=\"15\" height=\"14\" rx=\"2\"/><path class=\"icon\" d=\"M8 9h8M8 12h5M8 15h7M16.5 12.5h.01\"/>","nav-settings":"<circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"2.5\"/><path class=\"icon\" d=\"M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4\"/><circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"7.4\"/>","nav-feedback":"<path class=\"icon\" d=\"M4.5 6.8c0-1.3 1-2.3 2.3-2.3h10.4c1.3 0 2.3 1 2.3 2.3v6.7c0 1.3-1 2.3-2.3 2.3h-6.4l-4.2 3v-3.2H6.8c-1.3 0-2.3-1-2.3-2.3Z\"/><path class=\"icon\" d=\"M8.5 9.5h7M8.5 12.5h4.5\"/>","create":"<circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"8\"/><path class=\"icon\" d=\"M12 8v8M8 12h8\"/>","search":"<circle class=\"icon\" cx=\"10.5\" cy=\"10.5\" r=\"5.7\"/><path class=\"icon\" d=\"m15 15 4.5 4.5\"/>","menu":"<path class=\"icon\" d=\"M5 7h14M5 12h14M5 17h14\"/>","more":"<circle class=\"fill\" cx=\"6\" cy=\"12\" r=\"1.4\"/><circle class=\"fill\" cx=\"12\" cy=\"12\" r=\"1.4\"/><circle class=\"fill\" cx=\"18\" cy=\"12\" r=\"1.4\"/>","agent":"<circle class=\"icon\" cx=\"12\" cy=\"8\" r=\"3.2\"/><path class=\"icon\" d=\"M5.5 20c.4-3.8 2.6-6 6.5-6s6.1 2.2 6.5 6\"/>","auto":"<ellipse class=\"icon\" cx=\"12\" cy=\"12\" rx=\"8.2\" ry=\"4.2\" transform=\"rotate(-28 12 12)\"/><circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"2.1\"/><path class=\"icon\" d=\"m18.2 5.5.6 2.2 2.1.7-2.1.7-.6 2.2-.7-2.2-2.1-.7 2.1-.7Z\"/>","auto-overview":"<rect class=\"icon\" x=\"4.5\" y=\"4.5\" width=\"15\" height=\"15\" rx=\"2\"/><path class=\"icon\" d=\"M7.5 9h3M13.5 9h3M7.5 14h3M13.5 14h3\"/><circle class=\"icon\" cx=\"8.5\" cy=\"9\" r=\"1.1\"/><circle class=\"icon\" cx=\"15.5\" cy=\"14\" r=\"1.1\"/><path class=\"icon\" d=\"m10 9 3.5 5\"/>","wake-trigger":"<circle class=\"icon\" cx=\"11\" cy=\"13\" r=\"6.5\"/><path class=\"icon\" d=\"M11 9.5V13l2.5 1.5M8 4.7h6M17.2 5.3a7.5 7.5 0 0 1 3 5.7M17.2 5.3h3v3\"/>","dreaming":"<path class=\"icon\" d=\"M16.8 5.2a7.5 7.5 0 1 0 2 13.1A8 8 0 0 1 16.8 5.2Z\"/><path class=\"icon\" d=\"m6 4.2 1.8 2.4L6 8.9 4.2 6.6Z\"/><path class=\"icon\" d=\"m18.5 15.5.35 1.05 1.05.35-1.05.35-.35 1.05-.35-1.05-1.05-.35 1.05-.35Z\"/>","experience-handbook":"<path class=\"icon\" d=\"M4.5 5.5c2.4-.9 5.1-.4 7.5 1.2v12c-2.4-1.6-5.1-2.1-7.5-1.2ZM19.5 5.5c-2.4-.9-5.1-.4-7.5 1.2v12c2.4-1.6 5.1-2.1-7.5-1.2Z\"/><path class=\"icon\" d=\"M12 6.7v12M7 9h2M15 9h2\"/>","todo-list":"<rect class=\"icon\" x=\"5\" y=\"4.5\" width=\"14\" height=\"16\" rx=\"2\"/><path class=\"icon\" d=\"m8 9 1.3 1.3L11.5 8M13.5 9H16M8 14l1.3 1.3 2.2-2.3M13.5 14H16\"/>","autonomy":"<path class=\"icon\" d=\"M5 7h14M5 12h14M5 17h14\"/><circle class=\"icon\" cx=\"9\" cy=\"7\" r=\"1.8\"/><circle class=\"icon\" cx=\"15\" cy=\"12\" r=\"1.8\"/><circle class=\"icon\" cx=\"11\" cy=\"17\" r=\"1.8\"/>","model":"<path class=\"icon\" d=\"M7 9.2C7 6.5 9.2 4.5 12 4.5s5 2 5 4.7c1.4.4 2.4 1.7 2.4 3.2 0 1.9-1.5 3.4-3.4 3.4H8c-1.9 0-3.4-1.5-3.4-3.4 0-1.5 1-2.8 2.4-3.2Z\"/><path class=\"icon\" d=\"M9 19.5h6M12 16v3.5\"/>","skills":"<path class=\"icon\" d=\"m12 4.3 1.9 5.4 5.6.2-4.3 3.5 1.6 5.4-4.8-3-4.8 3 1.6-5.4-4.3-3.5 5.6-.2Z\"/>","tools":"<path class=\"icon\" d=\"M15.3 5a4.6 4.6 0 0 0-5.2 5.2l-5.6 5.6a2 2 0 1 0 2.8 2.8l5.6-5.6A4.6 4.6 0 0 0 18 7.8l-2.6 2.5-2.2-.6-.6-2.2Z\"/>","memory":"<path class=\"icon\" d=\"M7.5 4.5h8A1.5 1.5 0 0 1 17 6v14l-5-2.7L7 20V6a1.5 1.5 0 0 1 1.5-1.5Z\"/><path class=\"icon\" d=\"M10 9h4M10 12h4\"/>","workgroup":"<circle class=\"icon\" cx=\"12\" cy=\"6\" r=\"2.4\"/><circle class=\"icon\" cx=\"6\" cy=\"17\" r=\"2.4\"/><circle class=\"icon\" cx=\"18\" cy=\"17\" r=\"2.4\"/><path class=\"icon\" d=\"M12 8.5v3M10.4 12.7 7.7 15M13.6 12.7l2.7 2.3\"/>","workgroup-members":"<circle class=\"icon\" cx=\"9\" cy=\"8\" r=\"2.5\"/><path class=\"icon\" d=\"M4.5 19c.3-3 1.8-4.8 4.5-4.8s4.2 1.8 4.5 4.8M16.5 10.5a2.2 2.2 0 1 0 0-4.4M15.3 14.5c2.3.1 3.6 1.7 4 4.5\"/>","manage-dashboard":"<rect class=\"icon\" x=\"4.5\" y=\"4.5\" width=\"6\" height=\"6\" rx=\"1\"/><rect class=\"icon\" x=\"13.5\" y=\"4.5\" width=\"6\" height=\"6\" rx=\"1\"/><rect class=\"icon\" x=\"4.5\" y=\"13.5\" width=\"6\" height=\"6\" rx=\"1\"/><rect class=\"icon\" x=\"13.5\" y=\"13.5\" width=\"6\" height=\"6\" rx=\"1\"/>","admin-access":"<path class=\"icon\" d=\"m12 3.8 6.5 2.5v5.2c0 3.8-2.2 6.5-6.5 8.2-4.3-1.7-6.5-4.4-6.5-8.2V6.3Z\"/><rect class=\"icon\" x=\"9\" y=\"10.5\" width=\"6\" height=\"5\" rx=\"1\"/><path class=\"icon\" d=\"M10.5 10.5V9a1.5 1.5 0 0 1 3 0v1.5\"/>","publish":"<path class=\"icon\" d=\"M4.5 10h4l7-3v10l-7-3h-4Z\"/><path class=\"icon\" d=\"M8.5 14v4M18 8a4.5 4.5 0 0 1 0 8M20 6a7 7 0 0 1 0 12\"/>","sync":"<path class=\"icon\" d=\"M5 8h13l-3-3M19 16H6l3 3\"/><path class=\"icon\" d=\"M18 8a7 7 0 0 0-12-1.5M6 16a7 7 0 0 0 12 1.5\"/>","feedback-inbox":"<path class=\"icon\" d=\"M4.5 6.5h15v12h-15Z\"/><path class=\"icon\" d=\"M4.5 14h4l1.5 2h4l1.5-2h4M8 9h8\"/>","release-update":"<path class=\"icon\" d=\"M7 4.5h8l3 3V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V6a1.5 1.5 0 0 1 1-1.5Z\"/><path class=\"icon\" d=\"M15 4.5V8h3M9 12h5M9 15h4M17 11v5M15 13l2-2 2 2\"/>","agent-registry":"<rect class=\"icon\" x=\"4.5\" y=\"4.5\" width=\"15\" height=\"15\" rx=\"2\"/><circle class=\"icon\" cx=\"9\" cy=\"10\" r=\"1.8\"/><path class=\"icon\" d=\"M6.5 16c.3-2 1.1-3 2.5-3s2.2 1 2.5 3M14 9h3M14 12h3M14 15h3\"/>","audit-log":"<path class=\"icon\" d=\"M7 4.5h8l3 3V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V6a1.5 1.5 0 0 1 1.5-1.5Z\"/><path class=\"icon\" d=\"M15 4.5V8h3M9 11h6M9 14h6M9 17h4\"/>","invite":"<circle class=\"icon\" cx=\"9\" cy=\"8\" r=\"2.5\"/><path class=\"icon\" d=\"M4.5 19c.3-3 1.8-4.8 4.5-4.8s4.2 1.8 4.5 4.8M17 12v6M14 15h6\"/>","permissions":"<circle class=\"icon\" cx=\"8\" cy=\"12\" r=\"3\"/><path class=\"icon\" d=\"M11 12h8M16 12v2M18.5 12v2\"/>","filesystem":"<path class=\"icon\" d=\"M5 5.5h5l2 2h7v11H5Z\"/><path class=\"icon\" d=\"M5 9h14M8 11v6M8 13h8M11 13v4M14 13v4\"/><circle class=\"fill\" cx=\"8\" cy=\"11\" r=\"1\"/><circle class=\"fill\" cx=\"11\" cy=\"17\" r=\"1\"/><circle class=\"fill\" cx=\"14\" cy=\"17\" r=\"1\"/>","folder-open":"<path class=\"icon\" d=\"M4.5 7h5l1.8 2h8.2v9.5H4.5Z\"/><path class=\"icon\" d=\"M4.5 11h15\"/>","file":"<path class=\"icon\" d=\"M7.5 4.5h7l3 3V19a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 6.5 19V6a1.5 1.5 0 0 1 1-1.5Z\"/><path class=\"icon\" d=\"M14.5 4.5V8h3.2M9.5 12h5M9.5 15h5\"/>","terminal":"<rect class=\"icon\" x=\"4\" y=\"5\" width=\"16\" height=\"14\" rx=\"2\"/><path class=\"icon\" d=\"m8 9 3 3-3 3M13.5 15H17M8 20h8\"/>","browser":"<rect class=\"icon\" x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"2\"/><path class=\"icon\" d=\"M3.5 8.5h17\"/><circle class=\"fill\" cx=\"6.5\" cy=\"6.5\" r=\".8\"/><circle class=\"fill\" cx=\"9.3\" cy=\"6.5\" r=\".8\"/><circle class=\"fill\" cx=\"12.1\" cy=\"6.5\" r=\".8\"/>","mcp":"<path class=\"icon\" d=\"M7 5v4M10 5v4M5.5 9h6v3.2a3 3 0 0 1-3 3H8M8.5 15.2V19M11 12h5\"/><rect class=\"icon\" x=\"16\" y=\"9\" width=\"4\" height=\"6\" rx=\"1\"/><path class=\"icon\" d=\"M18 7v2M18 15v2\"/>","child-agent":"<circle class=\"icon\" cx=\"12\" cy=\"6.5\" r=\"2.3\"/><circle class=\"icon\" cx=\"6.5\" cy=\"17\" r=\"2.3\"/><circle class=\"icon\" cx=\"17.5\" cy=\"17\" r=\"2.3\"/><path class=\"icon\" d=\"M12 8.8v3.1M12 11.9 7.8 15M12 11.9l4.2 3.1M7.8 15l-.2-1.9M7.8 15l1.8-.1M16.2 15l.2-1.9M16.2 15l-1.8-.1\"/>","shell":"<rect class=\"icon\" x=\"3.5\" y=\"5\" width=\"17\" height=\"14\" rx=\"2\"/><path class=\"icon\" d=\"M8 8.5v7M10 9.3c-.4-.6-1.3-.8-1.9-.5-.9.4-.8 1.5.1 1.8l1.3.5c.9.3 1 1.4.1 1.8-.7.3-1.6 0-2-.5M12.5 14.5h4\"/>","clipboard":"<rect class=\"icon\" x=\"6\" y=\"5.5\" width=\"12\" height=\"15\" rx=\"2\"/><path class=\"icon\" d=\"M9 5.5V4h6v1.5M9 11h6M9 14h4\"/>","upload":"<path class=\"icon\" d=\"M5 16.5v3h14v-3M12 16V5M8.5 8.5 12 5l3.5 3.5\"/>","tool-skills":"<path class=\"icon\" d=\"m12 4.3 1.9 5.4 5.6.2-4.3 3.5 1.6 5.4-4.8-3-4.8 3 1.6-5.4-4.3-3.5 5.6-.2Z\"/>","tool-memory":"<path class=\"icon\" d=\"M7.5 4.5h8A1.5 1.5 0 0 1 17 6v14l-5-2.7L7 20V6a1.5 1.5 0 0 1 1.5-1.5Z\"/><path class=\"icon\" d=\"M10 9h4M10 12h4\"/>","success":"<circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"8\"/><path class=\"icon\" d=\"m8 12 2.6 2.6L16.5 9\"/>","warning":"<path class=\"icon\" d=\"m12 4 8 15H4Z\"/><path class=\"icon\" d=\"M12 9v4M12 16.5h.01\"/>","error":"<circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"8\"/><path class=\"icon\" d=\"m9 9 6 6M15 9l-6 6\"/>","info":"<circle class=\"icon\" cx=\"12\" cy=\"12\" r=\"8\"/><path class=\"icon\" d=\"M12 10.5v5M12 7.5h.01\"/>","pending":"<path class=\"icon\" d=\"M18.3 8a7 7 0 1 0 1.2 5.3\"/><path class=\"icon\" d=\"M18.3 4.8v3.8h-3.8\"/><circle class=\"fill\" cx=\"8\" cy=\"12\" r=\"1\"/><circle class=\"fill\" cx=\"12\" cy=\"12\" r=\"1\"/><circle class=\"fill\" cx=\"16\" cy=\"12\" r=\"1\"/>","run":"<path class=\"icon\" d=\"m8 5 10 7-10 7Z\"/>","stop":"<rect class=\"icon\" x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"/>","refresh":"<path class=\"icon\" d=\"M19 8a7.5 7.5 0 0 0-13.3-1.5L4 8.5M5 16a7.5 7.5 0 0 0 13.3 1.5L20 15.5\"/><path class=\"icon\" d=\"M4 5v3.5h3.5M20 19v-3.5h-3.5\"/>","save":"<path class=\"icon\" d=\"M5 4.5h12l2 2V20H5Z\"/><path class=\"icon\" d=\"M8 4.5v5h7v-5M8 20v-6h8v6\"/>","edit":"<path class=\"icon\" d=\"m5 17.8-.8 3 3-.8L18 9.2l-2.2-2.2Z\"/><path class=\"icon\" d=\"m14.5 7.5 2.2 2.2M5 20.5h3\"/>","delete":"<path class=\"icon\" d=\"M5.5 7.5h13M9 7.5V5h6v2.5M7.5 7.5l.8 12h7.4l.8-12M10 11v5M14 11v5\"/>","expand":"<path class=\"icon\" d=\"m6 9 6 6 6-6\"/>","collapse":"<path class=\"icon\" d=\"m6 15 6-6 6 6\"/>"};
+
+    const groups = [
+      { title: '01 · 品牌与导航', note: 'Node / Manage 共用的产品骨架与入口', keys: ['brand-snowflake','nav-agents','nav-workgroups','nav-auto','nav-node','nav-manage','nav-settings','nav-feedback','create','search','menu','more'] },
+      { title: '02 · 智能体与 Auto', note: '普通 Agent 与持续运行能力的形态区分', keys: ['agent','auto','auto-overview','wake-trigger','dreaming','experience-handbook','todo-list','autonomy','model','skills','tools','memory'] },
+      { title: '03 · 工作组与管理', note: '协作、权限、反馈和运营管理', keys: ['workgroup','workgroup-members','manage-dashboard','admin-access','publish','sync','feedback-inbox','release-update','agent-registry','audit-log','invite','permissions'] },
+      { title: '04 · 工具与工作区', note: '文件系统、执行环境和能力来源', keys: ['filesystem','folder-open','file','terminal','browser','mcp','child-agent','shell','clipboard','upload','tool-skills','tool-memory'] },
+      { title: '05 · 状态与操作', note: '统一的结果、运行状态和常用操作', keys: ['success','warning','error','info','pending','run','stop','refresh','save','edit','delete','expand','collapse'] }
+    ];
+
+    const labels = {
+      'brand-snowflake':'品牌雪花外轮廓','nav-agents':'智能体分组','nav-workgroups':'工作组分组','nav-auto':'自主智能体分组','nav-node':'Node 节点','nav-manage':'Manage 控制台','nav-settings':'设置','nav-feedback':'帮助与反馈','create':'新建','search':'搜索','menu':'菜单','more':'更多操作',
+      'agent':'普通智能体','auto':'自主智能体','auto-overview':'Auto 总览','wake-trigger':'唤醒触发器','dreaming':'Dreaming 经验整理','experience-handbook':'经验 / 手册','todo-list':'任务清单','autonomy':'自主设置','model':'模型','skills':'技能','tools':'工具能力','memory':'记忆',
+      'workgroup':'工作组','workgroup-members':'工作组成员','manage-dashboard':'管理总览','admin-access':'管理员权限','publish':'发布','sync':'双向同步','feedback-inbox':'反馈收件箱','release-update':'版本更新','agent-registry':'Agent 注册表','audit-log':'审计记录','invite':'邀请成员','permissions':'权限策略',
+      'filesystem':'文件系统','folder-open':'打开目录','file':'文件','terminal':'终端会话','browser':'浏览器','mcp':'MCP 连接','child-agent':'子智能体','shell':'Shell 命令','clipboard':'剪贴板','upload':'上传','tool-skills':'技能工具','tool-memory':'记忆工具',
+      'success':'成功','warning':'警告','error':'错误','info':'提示','pending':'处理中','run':'运行','stop':'停止','refresh':'刷新','save':'保存','edit':'编辑','delete':'删除','expand':'展开','collapse':'收起'
+    };
+    const meta = {
+      'nav-agents':['agent','nav variant'],'nav-workgroups':['workgroup','nav variant'],'nav-auto':['auto','nav variant'],'tool-skills':['skills','alias'],'tool-memory':['memory','alias'],'brand-snowflake':['brand-snowflake','brand contour']
+    };
+    const autoKeys = new Set(['nav-auto','auto','auto-overview','wake-trigger','dreaming','experience-handbook','autonomy']);
+    const statusTone = { success:'success', warning:'warning', error:'danger', info:'info', pending:'pending' };
+
+    function tone(key) {
+      if (autoKeys.has(key)) return 'auto';
+      if (statusTone[key]) return statusTone[key];
+      if (key === 'brand-snowflake') return 'brand';
+      if (['menu','more','search','expand','collapse'].includes(key)) return 'neutral';
+      return 'brand';
+    }
+    function makeIcon(key) {
+      const span = document.createElement('span');
+      span.className = `icon-mask tone-${tone(key)}`;
+      span.dataset.icon = key;
+      span.setAttribute('aria-hidden', 'true');
+      const external = document.createElement('span');
+      external.className = 'external-mask';
+      external.style.setProperty('--icon-url', `url("dagents-icons/${key}.svg")`);
+      span.append(external);
+      const inline = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      inline.classList.add('inline-icon');
+      inline.setAttribute('viewBox', '0 0 24 24');
+      inline.setAttribute('focusable', 'false');
+      inline.innerHTML = fallbackBodies[key] || '';
+      span.append(inline);
+      return span;
+    }
+    function makeCard(key) {
+      const card = document.createElement('article');
+      card.className = 'card';
+      card.append(makeIcon(key));
+      const copy = document.createElement('div');
+      copy.className = 'card-copy';
+      const code = document.createElement('code');
+      code.textContent = key;
+      const meaning = document.createElement('span');
+      meaning.className = 'meaning';
+      meaning.textContent = labels[key];
+      copy.append(code, meaning);
+      if (meta[key]) {
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = `${meta[key][1]} · ${meta[key][0]}`;
+        copy.append(badge);
+      }
+      card.append(copy);
+      return card;
+    }
+    const container = document.getElementById('groups');
+    groups.forEach(group => {
+      const section = document.createElement('section');
+      section.className = 'group';
+      const head = document.createElement('div');
+      head.className = 'group-head';
+      const title = document.createElement('h3');
+      title.textContent = group.title;
+      const note = document.createElement('p');
+      note.textContent = group.note;
+      head.append(title, note);
+      const cards = document.createElement('div');
+      cards.className = 'cards';
+      group.keys.forEach(key => cards.append(makeCard(key)));
+      section.append(head, cards);
+      container.append(section);
+    });
+    document.querySelectorAll('[data-icon]').forEach(el => {
+      if (!el.style.getPropertyValue('--icon-url')) el.style.setProperty('--icon-url', `url("dagents-icons/${el.dataset.icon}.svg")`);
+    });
+  </script>
+</body>
+</html>

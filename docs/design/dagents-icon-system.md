@@ -11,7 +11,7 @@
 | Node、Manage、desktop inline SVG | 82 个 `<svg>` 标签，分布在 31 个源码文件 | 映射到本画板的语义 key；后续按组件迁移 |
 | Unicode / 字符图标与 CSS 伪元素 | 49 个包含候选字符的源码文件 | 将功能性字符替换为 SVG；纯文本符号、数学/日志内容继续保留 |
 | 工具来源图标 | `ToolGroupIcon.vue` 的 bash、terminal、browser、child、computer、mcp、linux、fs、hitl、memory、skills、triggers、wecom、wrench | 通用工具使用本系统；企业微信等第三方品牌保留 |
-| 品牌图片 | `@dagents-brand/brand-icon.png`（源文件：`shared/branding/brand-icon.png`）在 Node、Manage 的品牌、空状态、活动状态中复用 | SVG `brand-snowflake` 对齐现有白色笑脸六臂雪花；正式迁移前继续保留 PNG |
+| 品牌图片 | `@dagents-brand/brand-icon.png`（源文件：`shared/branding/brand-icon.png`）在 Node、Manage 的品牌、空状态、活动状态中复用 | SVG `brand-snowflake` 对齐现有白色六臂外轮廓；正式迁移前继续保留 PNG |
 
 ### 迁移边界
 
@@ -19,7 +19,7 @@
 
 ### 品牌对齐与变体
 
-`brand-snowflake` 不再使用抽象晶体雪花作为业务图标，而是对齐 `shared/branding/brand-icon.png`：白色六臂宽轮廓、深蓝描边、轻微内阴影、中心两眼与弧形笑脸。画板同时提供 `i-brand-snowflake`（24px 正式版，使用宽圆角臂、六臂分支和笑脸）与 `i-brand-snowflake-16`（16px 简化版，保留六臂、两眼和笑脸）。品牌轮廓的描边是识别特例，功能图标仍使用 1.6px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
+`brand-snowflake` 对齐 `shared/branding/brand-icon.png` 的六臂宽圆角 silhouette，但只保留外轮廓：不包含眼睛、笑脸、中心圆或其他内部装饰。画板同时提供 `i-brand-snowflake`（24px 正式版）与 `i-brand-snowflake-16`（16px 简化版），两者均为单一平滑 contour；独立资产位于 `docs/design/dagents-icons/brand-snowflake.svg` 与 `brand-snowflake-16.svg`，使用 `currentColor`。品牌轮廓的描边是识别特例，功能图标仍使用 1.6px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
 
 下表中的 alias/variant 共享同一几何，不会因为导航位置而引入第二套图标：
 
@@ -40,7 +40,7 @@
 
 | key | 语义 | 使用位置 | 替换现有 |
 | --- | --- | --- | --- |
-| `brand-snowflake` | 现有 PNG 对齐的白色笑脸六臂雪花 | Node / Manage 品牌、启动页、favicon | 设计稿；保留当前 PNG 直到 SVG 资源迁移 |
+| `brand-snowflake` | 现有 PNG 对齐的白色六臂外轮廓 | Node / Manage 品牌、启动页、favicon | `docs/design/dagents-icons/brand-snowflake.svg`；保留当前 PNG 直到 SVG 资源迁移 |
 | `nav-agents` | 智能体分组（`agent` 的 nav variant） | Node `NavRail.vue` | 是，替换字符/通用轮廓 |
 | `nav-workgroups` | 工作组分组（`workgroup` 的 nav variant） | Node `NavRail.vue`、Manage 工作组页 | 是 |
 | `nav-auto` | 自主智能体分组（`auto` 的 nav variant） | Node `NavRail.vue`、Auto 入口 | 是，使用轨道/脉冲，不使用完整雪花 |
@@ -146,7 +146,7 @@
 
 ## 视觉规则
 
-- 品牌雪花采用现有 PNG 的六臂宽圆角白色轮廓、深蓝描边和笑脸；功能图标再使用 60° 晶体节点作为局部 DNA，避免把完整雪花机械贴到每个 key。
+- 品牌雪花采用现有 PNG 的六臂宽圆角外轮廓，设计资产不包含脸部或中心装饰；功能图标再使用 60° 晶体节点作为局部 DNA，避免把完整雪花机械贴到每个 key。
 - Auto 使用轨道、脉冲和多节点仪表盘表达“持续检查—唤醒—总览”；`wake-trigger` 保留时钟与唤醒箭头，`pending` 使用加载环与三点，Dreaming 使用月牙和晶体星点，工作组使用三节点拓扑，子 Agent 使用父子箭头，MCP 使用插头/端口。
 - 图标只描述一个动作或对象，冷蓝用于导航、工具与 Manage，靛紫只用于 Auto 自主性，绿色用于可执行/成功，暖色用于警告/Dreaming，蓝灰用于 pending，红色用于错误/破坏性动作。
 - 组件通过 `currentColor` 控制状态和主题色；不要在图标内部写死产品主题色。点击目标由外层按钮提供，SVG 保持 `aria-hidden="true"`，可访问名称由按钮的 `aria-label` 提供。

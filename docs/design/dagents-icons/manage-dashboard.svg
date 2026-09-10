@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">manage-dashboard · 管理总览</title><desc id="desc">DAgents 管理总览 icon; currentColor, 1.6px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.fill{fill:currentColor;stroke:none}.brand{fill:currentColor;stroke:currentColor;stroke-width:1.15;stroke-linejoin:round}</style>
+  <rect class="icon" x="4.5" y="4.5" width="6" height="6" rx="1"/><rect class="icon" x="13.5" y="4.5" width="6" height="6" rx="1"/><rect class="icon" x="4.5" y="13.5" width="6" height="6" rx="1"/><rect class="icon" x="13.5" y="13.5" width="6" height="6" rx="1"/>
+</svg>
