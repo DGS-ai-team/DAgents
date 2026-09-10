@@ -993,20 +993,45 @@ defineExpose({
     </section>
 
     <section class="nav-rail__section nav-rail__section--autonomous">
-      <header class="nav-rail__section-head">
+      <header
+        class="nav-rail__section-head"
+        :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'autonomous' }"
+      >
         <button type="button" class="nav-rail__section-toggle" :aria-expanded="sectionOpen.autonomous" @click="toggleSection('autonomous')">
           <span class="nav-rail__section-icon" aria-hidden="true">✦</span>
           <span class="nav-rail__section-title">自主智能体</span>
           <span v-if="autonomousAgents.length" class="nav-rail__section-count">{{ autonomousAgents.length }}</span>
         </button>
+        <div class="nav-rail__section-actions">
+          <router-link
+            :to="{ name: 'auto-overview' }"
+            class="nav-rail__icon-btn nav-rail__section-action"
+            title="Auto 总览"
+            aria-label="Auto 总览"
+            @click.stop="mobileActionOpen = ''"
+          >
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <path
+                d="m8 1.6 1.7 4.7L14.4 8l-4.7 1.7L8 14.4l-1.7-4.7L1.6 8l4.7-1.7L8 1.6Z"
+                fill="currentColor"
+              />
+            </svg>
+          </router-link>
+        </div>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-more"
+          title="更多操作"
+          aria-label="更多操作"
+          :aria-expanded="mobileActionOpen === 'autonomous'"
+          @click.stop="toggleSectionActions('autonomous')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="4" cy="8" r="1" fill="currentColor" /><circle cx="8" cy="8" r="1" fill="currentColor" /><circle cx="12" cy="8" r="1" fill="currentColor" />
+          </svg>
+        </button>
       </header>
       <ul v-if="sectionOpen.autonomous" class="nav-rail__list" :aria-busy="loadingAgents">
-        <li class="nav-rail__overview-item">
-          <router-link :to="{ name: 'auto-overview' }" class="nav-rail__overview-link" title="Auto 总览">
-            <span aria-hidden="true">✦</span>
-            <span>Auto 总览</span>
-          </router-link>
-        </li>
         <li v-for="a in autonomousAgents" :key="agentRecordId(a)" class="nav-rail__item nav-rail__agent-item" :class="{ 'nav-rail__item--active': agentRecordId(a) === agentStore.agentId }" tabindex="0" @keydown="onAgentKeydown($event, agentRecordId(a))" @click="selectAgent(agentRecordId(a))">
           <div class="nav-rail__item-main">
             <div class="nav-rail__item-title-row">
@@ -1100,9 +1125,6 @@ defineExpose({
   color: var(--color-text);
   font-size: 11px;
 }
-.nav-rail__overview-item { padding: 4px 10px 6px; }
-.nav-rail__overview-link { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 6px 10px; border-radius: 6px; color: var(--text-secondary); font-size: 12px; text-decoration: none; }
-.nav-rail__overview-link:hover, .nav-rail__overview-link:focus-visible { color: var(--color-text); background: var(--color-surface-elevated); }
 .nav-rail__agent-group { list-style: none; padding: 5px 10px 2px; }
 .nav-rail__agent-group-toggle {
   display: flex;

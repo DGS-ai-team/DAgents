@@ -35,7 +35,12 @@ describe("NavRail sections", () => {
     expect(wrapper.findAll('input[type="search"]')).toHaveLength(0);
     expect(wrapper.findAll("select")).toHaveLength(0);
     expect(wrapper.find('[title="自主任务设置"]').exists()).toBe(false);
-    expect(wrapper.find('.nav-rail__overview-link[title="Auto 总览"]').exists()).toBe(true);
+    const autonomousSection = wrapper.findAll(".nav-rail__section")[2];
+    const autoOverviewAction = autonomousSection.find('[title="Auto 总览"]');
+    expect(autoOverviewAction.exists()).toBe(true);
+    expect(autoOverviewAction.classes()).toContain("nav-rail__section-action");
+    expect(autoOverviewAction.attributes("aria-label")).toBe("Auto 总览");
+    expect(autonomousSection.find(".nav-rail__overview-link").exists()).toBe(false);
     expect(wrapper.find('.nav-rail__footer [title="Auto 总览"]').exists()).toBe(false);
     const sections = wrapper.findAll(".nav-rail__section-title").map((node) => node.text());
     expect(sections.slice(0, 3)).toEqual(["智能体", "工作组", "自主智能体"]);
@@ -66,6 +71,19 @@ describe("NavRail sections", () => {
     await toggles[2].trigger("click");
     expect(toggles[2].attributes("aria-expanded")).toBe("false");
     expect(wrapper.text()).not.toContain("巡检");
+    wrapper.unmount();
+  });
+
+  it("keeps Auto overview reachable from the mobile section actions", async () => {
+    const wrapper = mount(NavRail, { global: { stubs: { RouterLink: { template: "<a v-bind=\"$attrs\"><slot /></a>" } } } });
+    await flushPromises();
+    const autonomousSection = wrapper.findAll(".nav-rail__section")[2];
+    const more = autonomousSection.find('.nav-rail__section-more[aria-label="更多操作"]');
+    expect(more.exists()).toBe(true);
+    expect(more.attributes("aria-expanded")).toBe("false");
+    await more.trigger("click");
+    expect(more.attributes("aria-expanded")).toBe("true");
+    expect(autonomousSection.find('[title="Auto 总览"]').exists()).toBe(true);
     wrapper.unmount();
   });
 
