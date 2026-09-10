@@ -124,16 +124,22 @@ func TestProcessRestartRecovery(t *testing.T) {
 		if hydrate.Active || hydrate.QueuePending != 0 || hydrate.PendingHITL != nil {
 			t.Fatalf("auto hydrate after completion=%+v", hydrate)
 		}
-		// Disable through the public Auto config API before restarting, so a
-		// later legitimate schedule cannot be confused with a duplicate.
+		waitProcessTriggerSettled(t, baseURL, triggerID, 15*time.Second)
+		// Move the enabled schedule into the future through the public Auto
+		// config API before restarting, so the restart checks persistence rather
+		// than the disabled path.
 		postProcessJSON(t, http.MethodPut, baseURL+"/v1/agents/"+agentID+"/auto-config", map[string]any{
-			"expected_revision": 1, "responsibility": "process test", "wake_interval_seconds": 0,
+			"expected_revision": 1, "responsibility": "process test", "wake_interval_seconds": 60,
 			"max_tool_rounds": 2, "dreaming_enabled": false, "dreaming_time": "03:00", "timezone": "UTC",
 		})
 		first.Kill(t)
 		second := newNodeProcess(t, binary, root)
 		waitNodeHealthy(t, second, baseURL)
 		waitProcessTriggerFireCount(t, baseURL, triggerID, 1, 5*time.Second)
+		trigger := getProcessTrigger(t, baseURL, triggerID)
+		if trigger.Controller != "auto" || trigger.OwnerAgentID != agentID || !trigger.Enabled || trigger.FireCount != 1 || trigger.NextFireAt <= float64(time.Now().Unix()) || trigger.PendingDeliveryID != "" || trigger.RecoveryRequired {
+			t.Fatalf("reopened default trigger=%+v", trigger)
+		}
 		if got := llmServer.Calls(); got != 1 {
 			t.Fatalf("reopened auto trigger model calls=%d want 1", got)
 		}
@@ -505,6 +511,52 @@ func waitProcessTriggerFireCount(t *testing.T, baseURL, triggerID string, want i
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("trigger %s did not reach fire_count=%d", triggerID, want)
+}
+
+type processTrigger struct {
+	TriggerID         string  `json:"trigger_id"`
+	Controller        string  `json:"controller"`
+	OwnerAgentID      string  `json:"owner_agent_id"`
+	Enabled           bool    `json:"enabled"`
+	FireCount         int     `json:"fire_count"`
+	NextFireAt        float64 `json:"next_fire_at"`
+	PendingDeliveryID string  `json:"pending_delivery_id"`
+	RecoveryRequired  bool    `json:"recovery_required"`
+}
+
+func waitProcessTriggerSettled(t *testing.T, baseURL, triggerID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		trigger := getProcessTrigger(t, baseURL, triggerID)
+		if trigger.FireCount == 1 && trigger.Enabled && trigger.PendingDeliveryID == "" && !trigger.RecoveryRequired {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("trigger %s did not settle after first delivery", triggerID)
+}
+
+func getProcessTrigger(t *testing.T, baseURL, triggerID string) processTrigger {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/triggers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Triggers []processTrigger `json:"triggers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, trigger := range body.Triggers {
+		if trigger.TriggerID == triggerID {
+			return trigger
+		}
+	}
+	t.Fatalf("trigger %s missing after reopen", triggerID)
+	return processTrigger{}
 }
 
 func postProcessJSON(t *testing.T, method, url string, body map[string]any) []byte {
