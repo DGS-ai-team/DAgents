@@ -346,3 +346,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 
 - 在隔离临时目录上的 `TestNewServerStartupRebuildsOnlyAutoDefaults` 与 `TestNewServerStartupKeepsPendingAutoDefaultFrozen` 以 `go test -race` 重跑通过，覆盖重开后的默认 trigger 校正、待恢复投递冻结及普通 trigger 隔离；未触发 18766 的 Auto。
 - 当前 18766 只读 `GET /v1/triggers` 返回 6 条 trigger，其中两个 Agent 默认 trigger 均为 `enabled=false`、无 `pending_delivery_id`，未因本次检查改变配置。该结果只证明当前部署状态，不扩展为真实到期后模型激活证明。
+
+### 2026-09-10 桌面页面复核补充
+
+- root 使用内置浏览器只读复核了 Node 智能体设置（Auto）、Auto 总览、帮助、反馈、智能体列表和触发器页面，以及 Manage 首页、Auto 员工总览和用户反馈页面；页面均可加载，布局、分组、表单和按钮未见明显断裂。
+- Node 与 Manage 页面均核对 `document.scrollWidth === document.clientWidth`，未发现横向溢出。
+- 本批证据仅覆盖桌面视口；390px 窄屏的逐页完整复核仍未完成，因此不宣称所有 UI 已通过。复核未修改配置、创建数据或触发 Auto。
