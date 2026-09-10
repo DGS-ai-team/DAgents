@@ -378,3 +378,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `57b7c468` 删除 handbookfs 中仅由自身测试使用的旧 maintenance provenance 与 source snapshot 实现及专属测试；`145fb1e4` 移除 Service 的 provenance 挂钩并改用普通历史读取测试。
 - 普通文件读写、历史快照、CAS 校验、pending 事务恢复与共享 root 锁均保留；未删除或迁移任何数据库、manifest、pending 或用户手册文件。通用 memory maintenance、session lifecycle gate、dreaming 与文件系统历史能力未受影响。
 - `go test ./node/internal/handbookfs ./node/internal/api ./node/internal/tools ./node/internal/turn` 通过，`git diff --check` 通过，提交后工作区干净。全仓不再有 `MaintenanceReceiptID`、`ReadSourceSnapshot` 或 `WithProvenance` 的 Go 引用。
+
+### 2026-09-10 最新 HEAD 部署复核
+
+- root 先确认两个 Auto Agent 均无 active turn、排队消息或 pending HITL，随后以最新 HEAD 构建 `dagents-node-75d0b31a.exe` 并切换 18766，恢复原临时 Auto runtime。
+- Node UI、`/v1/agents`、Manage Console 与 5173 均返回 200；两个 Auto 主会话 hydrate 均为空闲。内置浏览器已打开 Node/Manage 页面供复核。
+- 本轮未触发真实 LLM，未修改配置或业务数据；完整 390px 页面矩阵仍未完成，不将本次可达性与空闲状态扩大为全 UI 或全产品验收。
