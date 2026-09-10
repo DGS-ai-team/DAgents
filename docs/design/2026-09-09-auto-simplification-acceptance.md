@@ -372,3 +372,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - `c44f2085` 删除仅被测试引用的 `RiskLLMHost` 独立风险影子 LLM，以及旧 `MaintenanceReconciliation` 闭环实现与专属测试，切断已退役 Auto 风险/维护产品路径。
 - 保留 session lifecycle 的通用 reconciliation、dreaming gate、maintenance gate 与 memory consolidation；`turn`、`api`、`session`、`triggers` 相关 Go 包测试通过。
 - 清理后工作区保持干净。
+
+### 2026-09-10 handbookfs 旧维护回执链清理
+
+- `57b7c468` 删除 handbookfs 中仅由自身测试使用的旧 maintenance provenance 与 source snapshot 实现及专属测试；`145fb1e4` 移除 Service 的 provenance 挂钩并改用普通历史读取测试。
+- 普通文件读写、历史快照、CAS 校验、pending 事务恢复与共享 root 锁均保留；未删除或迁移任何数据库、manifest、pending 或用户手册文件。通用 memory maintenance、session lifecycle gate、dreaming 与文件系统历史能力未受影响。
+- `go test ./node/internal/handbookfs ./node/internal/api ./node/internal/tools ./node/internal/turn` 通过，`git diff --check` 通过，提交后工作区干净。全仓不再有 `MaintenanceReceiptID`、`ReadSourceSnapshot` 或 `WithProvenance` 的 Go 引用。
