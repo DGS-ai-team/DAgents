@@ -426,3 +426,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 只读检查确认仓库 bootstrap 配置仅包含 `listen`，真实 provider 凭据来自运行时环境/数据库，当前没有可安全复制到隔离实例的 provider 配置；为避免触碰 18766 业务数据，本轮未发起真实条件 true 或 LLM 请求。
 - 现有 `process_restart_e2e_test.go` 已覆盖真实 Node 进程的默认 trigger 到期、重启后身份/计数/hydrate 及 fake LLM 单次调用；`session/dreaming_reopen_test.go` 与 DreamingScheduler 专项已覆盖 SQLite 重开、审批继续、经验/手册提交、上下文重置和不重复执行，但不是进程级 Dreaming 故障测试。
 - Dreaming 当前通过按本地日期/时区运行的 scheduler 触发，没有直接启动 API；稳定的进程级组合测试需要隔离 fake Node、可控时钟或安排未来 dreaming 时间，并模拟审批中断后重开，避免依赖真实 provider 和生产运行时。该边界仍保留，后续可在独立夹具中补测。
+
+### 2026-09-10 Dreaming 重启组合边界再核对
+
+- `TestDreamingWaitingApprovalSurvivesRuntimeRestart` 已真实关闭并重开 SQLite/Manager，继续原审批链，完成 handbook 写入并验证 Dreaming attempt completed；`TestDreamingOrphanedAttemptIsFailedOnRestore` 覆盖孤立记录恢复失败，`dreaming_scheduler_test.go` 另覆盖可控 `now`、pending recovery、关闭 dreaming 不丢恢复和不重复模型调用。
+- 这些测试对存储、runtime hydration、审批继续、经验/手册提交和上下文恢复提供稳定等价证据；`process_restart_e2e_test.go` 则覆盖真实 Node 进程的默认 trigger/HITL/未知工具重启。当前没有把两者合并为进程级 Dreaming 结论。
+- 真实进程 Dreaming 组合仍需独立夹具：通过公开配置安排当日 scheduler、在审批或工具执行中停止二进制、重开后恢复原 attempt，并使用 fake LLM 断言不重复执行。该项不依赖真实 provider，但需要新增进程 fixture/可控调度窗口，当前仍保留为未独立实测边界。
