@@ -420,3 +420,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - root 通过 viewport capability 实际截图复核 Node 16 个主要路由，以及 Auto Agent detail 的 behavior、autonomy、resources、memory、policy 区段；同时复核 Manage 首页、Node/Agent 列表、工作组、能力市场、配置 LLM、版本发布、案例库、发现组、用户反馈和 Auto 员工页面。
 - 覆盖页面的 `document`/`body` scrollWidth 均不超过视口宽度，未见重叠、裁切或主控件不可达。表格内部横向滚动仅发生在局部容器内，属于预期行为。
 - 本轮仍不宣称真实 provider true 条件触发或真实进程故障重启组合已完成；两项边界继续保留。
+
+### 2026-09-10 真实 provider 与 Dreaming 进程级边界审计
+
+- 只读检查确认仓库 bootstrap 配置仅包含 `listen`，真实 provider 凭据来自运行时环境/数据库，当前没有可安全复制到隔离实例的 provider 配置；为避免触碰 18766 业务数据，本轮未发起真实条件 true 或 LLM 请求。
+- 现有 `process_restart_e2e_test.go` 已覆盖真实 Node 进程的默认 trigger 到期、重启后身份/计数/hydrate 及 fake LLM 单次调用；`session/dreaming_reopen_test.go` 与 DreamingScheduler 专项已覆盖 SQLite 重开、审批继续、经验/手册提交、上下文重置和不重复执行，但不是进程级 Dreaming 故障测试。
+- Dreaming 当前通过按本地日期/时区运行的 scheduler 触发，没有直接启动 API；稳定的进程级组合测试需要隔离 fake Node、可控时钟或安排未来 dreaming 时间，并模拟审批中断后重开，避免依赖真实 provider 和生产运行时。该边界仍保留，后续可在独立夹具中补测。
