@@ -26,7 +26,6 @@ func resolveWindowsDirectoryPicker() (string, []string, error) {
 		"-NoLogo",
 		"-NoProfile",
 		"-NonInteractive",
-		"-ExecutionPolicy", "Bypass",
 		"-STA",
 		"-EncodedCommand", encodeUTF16LE(windowsDirectoryPickerScript),
 	}, nil
