@@ -18,10 +18,10 @@
 | `surface-2` | `#16263B` | `#FFFFFF` | 卡片、输入框、浮层 |
 | `border-subtle` | `#334962` | `#D4DEE9` | 分隔线、边框、非激活轮廓 |
 | `text-primary` | `#F6FAFF` | `#172337` | 标题和正文 |
-| `text-muted` | `#A7BAD0` | `#617289` | 辅助说明、元数据 |
-| `brand-300` | `#A7F3FF` | `#1496B3` | 深色图标 / 浅色文本或按钮 |
+| `text-muted` | `#A7BAD0` | `#5F7084` | 辅助说明、元数据 |
+| `brand-300` | `#A7F3FF` | `#0D7B99` | 深色图标 / 浅色文本或按钮 |
 | `brand-500` | `#55D9EE` | `#2BBFD9` | 主按钮、hover、活动提示 |
-| `brand-600` | `#2BBFD9` | `#1496B3` | active、focus ring、已选中 |
+| `brand-600` | `#2BBFD9` | `#0D7B99` | active、focus ring、已选中 |
 | `auto-500` | `#8A83F5` | `#5D59C4` | Auto 持续运行和自主性辅助色 |
 | `success` | `#35B77A` | `#16824F` | 成功、已完成 |
 | `warning` | `#D99B2B` | `#9B6700` | 警告、需要关注 |
