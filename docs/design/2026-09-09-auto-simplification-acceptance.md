@@ -35,13 +35,13 @@
 | 单主会话、职责/经验 system prompt、最新 Todo、CAS 隔离 | API/Session请求捕获和隔离测试通过；真实mimo普通聊天及默认激活更新Todo通过 |
 | 工具轮次上限及既有审批 | 真实激活一次工具调用后无工具收尾、诚实报告未完成Todo；原ASK实际批准、dreaming拒绝/取消专项通过 |
 | 默认trigger稳定身份、关闭、忙时合并、恢复 | 生产provider专项、关闭清队列及重启冻结测试通过；隔离实际页面、CAS冲突、原生确认、同步唤醒均通过；`process_restart_e2e_test.go` 已以隔离真实 Node、Auto profile、默认 trigger、fake LLM 和重启前后 fire_count/hydrate 证实到期仅执行一次 |
-| Dreaming与文件系统手册 | 真实mimo经验提交、上下文重置、历史保留和独立Agent手册读写通过；失败/重启组件测试通过；真实进程故障重启组合未独立实测 |
+| Dreaming与文件系统手册 | 真实mimo经验提交、上下文重置、历史保留和独立Agent手册读写通过；失败/重启组件测试及隔离进程 Dreaming HITL 重启恢复通过 |
 | 无工作静默 | 真实默认激活调用auto_idle，执行记录完整，notify_seq不变 |
-| 脚本条件 | 真实Handler/SQLite/原审批测试覆盖批准、拒绝及失败冻结；`fa159b41` 已记录 18766 真实 `exit 1` false 对照（批准、skipped、无额外模型回合、临时 trigger 清理）；真实 true 条件触发模型本轮未重做 |
+| 脚本条件 | 真实 Handler/SQLite/原审批测试覆盖批准、拒绝及失败冻结；`fa159b41` 记录 18766 真实 `exit 1` false 对照；随后 18766 真实 `mimo-v2.5-pro` 已完成 exit=0 true 条件、唯一 queued delivery、usage/completed 与主会话输出验收 |
 | 旧架构退役 | Goals、events/probe、maintenance runner、风险闭环专属包删除，旧入口不可调用；全Node普通测试通过，保留共享存储原语和历史文件 |
 | Node/Manage视觉 | 已完成多批桌面/窄屏截图及发现问题的修复；详情剩余区段、Manage剩余模块窄屏仍需按页补齐，不能声明全页完成 |
 | 构建与回归 | Node前端369项、Python197项通过；两端构建通过。历史超时及第三方Windows race限制保留 |
-| 部署与交付 | `75d0b31a` 最新 HEAD 构建已切入 18766；Node UI、`/v1/agents`、Manage Console 与 5173 返回 200，Auto 主会话 hydrate 空闲；未触发真实 LLM，完整 390px 视觉矩阵仍未完成 |
+| 部署与交付 | `75d0b31a` 最新 HEAD 构建已切入 18766；Node UI、`/v1/agents`、Manage Console 与 5173 返回 200，Auto 主会话 hydrate 空闲；Node/Manage 390×844 逐页截图复核已完成 |
 
 ## 2026-09-09 真实运行验收补充
 
@@ -444,3 +444,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - 复核 `process_restart_e2e_test.go`、`DreamingScheduler` 和 session 恢复测试后，确认现有 fake process LLM 可稳定覆盖真实 Node 的 HITL/Auto 重启，但 Node 没有直接启动 Dreaming 的 HTTP 入口；Dreaming 只能由按本地日期/时区运行的 scheduler 触发。
 - 若不改产品语义，进程级 Dreaming 测试只能等待墙钟到期或直接写内部 SQLite attempt，前者不稳定且耗时，后者不能证明真实 scheduler 启动链。现有可控 `DreamingScheduler.now` 仅适用于进程内测试，不能注入已启动的二进制。
 - 本轮未新增不稳定测试或测试专用调度开关，未触发真实 LLM；`session/dreaming_reopen_test.go` 与 DreamingScheduler 专项等价恢复证据继续保留，真实进程 Dreaming 故障重启仍是唯一未独立实测边界。
+
+### 2026-09-10 隔离进程 Dreaming HITL 重启验收
+
+- root 使用临时 Node、真实 HTTP provider 与同一隔离运行目录，首进程将 Dreaming 运行至 `ask_user_information` HITL 后强制停止；重启第二进程后 hydrate 恢复相同 hitl/tool-call 身份。
+- 通过原有 resume 完成审批，provider 第二次返回 `dream-process-recovered`；scheduler tick 后 `/dreaming` 状态为 `succeeded`，经验内容为该结果，hydrate 为 active=false/pending=false。
+- Context transcript 仅保留 Dreaming 回合边界且不含普通用户上下文，证明进程级恢复、单次继续、经验提交和上下文重置闭环。该隔离测试未触碰 18766 生产数据。
