@@ -93,8 +93,8 @@ func Build(p BuildParams) (Built, error) {
 			return Built{}, err
 		}
 	}
-	// Auto snapshots get the capability by default; dedicated Goal callers
-	// explicitly disable it after Build before attaching goal-only handlers.
+	// Auto snapshots get the capability by default; dedicated runtime callers
+	// can explicitly disable it after Build before attaching their own handlers.
 	reg.SetAutonomyEnabled(strings.EqualFold(p.Snapshot.AgentType, "auto") && !p.DisableMemory)
 	if p.MCP != nil {
 		effective, err := p.MCP.EffectiveTools(context.Background(), mcp.BindingsFromDefaults(p.Snapshot.Defaults))

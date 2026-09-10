@@ -56,7 +56,7 @@ func (s *Server) triggerToolRoundProvider(ctx context.Context, agentID, triggerI
 	if !isDefault {
 		// User-owned triggers targeting an Auto Agent's canonical main session
 		// are still Auto activations and use the Agent-owned round cap. Other
-		// user/Goal triggers retain their existing behavior.
+		// other user-owned triggers retain their existing behavior.
 		if d.Controller != "user" || d.TargetSessionID == nil {
 			return 0, false, nil
 		}

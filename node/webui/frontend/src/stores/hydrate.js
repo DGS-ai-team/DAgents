@@ -62,11 +62,11 @@ export async function hydrateAgent(sessionOverride = "") {
   const targetProjection = agentId;
   const projectionChanged = Boolean(transcriptStore.projectionSessionId) && transcriptStore.projectionSessionId !== targetProjection;
   if (projectionChanged) {
-    // Token usage is a per-conversation turn snapshot. A Goal session must
+    // Token usage is a per-conversation turn snapshot. A secondary session must
     // never inherit the main chat's usage strip while its hydrate is loading.
     resetUsageStrip();
     // history_revision is scoped to a conversation. Never let a high revision
-    // from the main chat veto a lower revision from a Goal session.
+    // from the main chat veto a lower revision from a secondary session.
     loadTranscriptFromHydrate(data?.transcript, {
       historyRevision: data?.history_revision,
       sessionId: targetProjection,

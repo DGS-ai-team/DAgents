@@ -225,7 +225,7 @@ func (m *Manager) SetConditionValidator(v func(context.Context, turn.ConditionAp
 }
 
 // SetLifecycleObserver installs the optional observer for default and already
-// loaded runtimes. Goal projection uses this hook; it must not call back into
+// loaded runtimes. Runtime projections may use this hook; it must not call back into
 // runtime cancellation while a lifecycle transition is in progress.
 func (m *Manager) SetLifecycleObserver(observer func(string, turn.CoordinatorSnapshot) error) {
 	if m == nil {
@@ -936,7 +936,7 @@ func (m *Manager) SetSessionPolicy(sessionID string, engine *policy.Engine) {
 }
 
 // SetAgentPolicy updates every loaded session owned by an Agent, including
-// the primary and Auto goal sessions.
+// the primary and Auto activation sessions.
 func (m *Manager) SetAgentPolicy(agentID string, engine *policy.Engine) {
 	if m == nil || engine == nil {
 		return

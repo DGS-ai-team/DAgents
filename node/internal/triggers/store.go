@@ -211,7 +211,7 @@ func (p Principal) canOwn(d Definition) bool {
 
 // UpdateAuthorized performs ownership/controller/revision checks while holding
 // the store lock. Agent principals can only modify their own agent-controlled
-// triggers; managed controllers are reserved for the owning Goal.
+// triggers; system-managed controllers are reserved for their owning runtime.
 func (s *Store) UpdateAuthorized(p Principal, id string, expected int64, patch UpdatePatch, now time.Time) (Definition, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

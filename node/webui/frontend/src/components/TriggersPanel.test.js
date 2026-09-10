@@ -14,7 +14,7 @@ vi.mock("../api/node.js", () => ({
 vi.mock("./settings/TriggerEditor.vue", () => ({ default: { template: "<div />" } }));
 
 describe("TriggersPanel retired legacy records", () => {
-  it("keeps current auto triggers actionable and marks legacy goal records retired", async () => {
+  it("keeps current auto triggers actionable and marks legacy controllers retired", async () => {
     api.listAgents.mockResolvedValue({ agents: [] });
     api.listTriggers.mockResolvedValue({ triggers: [
       { trigger_id: "auto-default-agent", name: "Auto 默认触发", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", enabled: true, condition: { interval_seconds: 60 } },
