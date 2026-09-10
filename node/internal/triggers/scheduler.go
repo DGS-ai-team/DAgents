@@ -248,10 +248,6 @@ func (s *Scheduler) runLoop(stopCh, doneCh chan struct{}) {
 
 func (s *Scheduler) tickDue(now time.Time) {
 	for _, def := range s.store.ListEnabledTriggers() {
-		if kind, _ := InferScheduleKind(def.Condition); kind == ScheduleEvent {
-			// Event sources are retired; historical definitions remain readable.
-			continue
-		}
 		decision, updated := EvaluateDue(def, now)
 		switch decision {
 		case DueAdvanceOnly:

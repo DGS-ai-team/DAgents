@@ -16,6 +16,13 @@ func TestEnsureScheduleConditionRejectsEmpty(t *testing.T) {
 	}
 }
 
+func TestEnsureScheduleConditionRejectsRetiredEventSource(t *testing.T) {
+	_, err := EnsureScheduleCondition(map[string]any{"event_source_id": "events-1"})
+	if err == nil || !strings.Contains(err.Error(), "event_source_id") {
+		t.Fatalf("expected retired event source rejection, got %v", err)
+	}
+}
+
 func TestStoreCreateUpdatePersist(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "triggers.json")
