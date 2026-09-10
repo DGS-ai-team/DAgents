@@ -438,3 +438,9 @@ root在当前18766深色390×844依次查看能力上下半页、技能空态、
 - root 在 18766 使用临时 Auto Agent 与 `mimo-v2.5-pro`，配置 `max_tool_rounds=2` 及 `fs+bash` 工具组；条件脚本 `echo condition-true-ok` 经既有审批批准后以 exit=0 完成。
 - 条件命中只产生一条 queued delivery，随后观察到真实 provider 的 `model.request.started`、usage 与 completed 事件；Auto 主会话收到脚本输出 `condition-true-ok` 并完成，pending delivery、排队消息和 active turn 均清空。
 - 临时 Agent/Trigger 已清理，未保留业务数据。该证据完成真实 provider true 条件触发验收；真实进程 Dreaming 故障重启组合仍是唯一未独立实测边界。
+
+### 2026-09-10 真实进程 Dreaming 重启组合评估
+
+- 复核 `process_restart_e2e_test.go`、`DreamingScheduler` 和 session 恢复测试后，确认现有 fake process LLM 可稳定覆盖真实 Node 的 HITL/Auto 重启，但 Node 没有直接启动 Dreaming 的 HTTP 入口；Dreaming 只能由按本地日期/时区运行的 scheduler 触发。
+- 若不改产品语义，进程级 Dreaming 测试只能等待墙钟到期或直接写内部 SQLite attempt，前者不稳定且耗时，后者不能证明真实 scheduler 启动链。现有可控 `DreamingScheduler.now` 仅适用于进程内测试，不能注入已启动的二进制。
+- 本轮未新增不稳定测试或测试专用调度开关，未触发真实 LLM；`session/dreaming_reopen_test.go` 与 DreamingScheduler 专项等价恢复证据继续保留，真实进程 Dreaming 故障重启仍是唯一未独立实测边界。
