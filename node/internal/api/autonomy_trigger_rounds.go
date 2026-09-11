@@ -61,7 +61,7 @@ func (s *Server) triggerToolRoundProvider(ctx context.Context, agentID, triggerI
 			return 0, false, nil
 		}
 		if d.OwnerAgentID != agentID || d.TargetAgentID != agentID || *d.TargetSessionID != agentID || d.SessionTargetMode != triggers.SessionTargetFixed {
-		return 0, false, fmt.Errorf("user trigger is not owned by auto main session")
+			return 0, false, fmt.Errorf("user trigger is not owned by auto main session")
 		}
 	}
 	if !d.Enabled || d.RecoveryRequired || d.PendingDeliveryID == nil || *d.PendingDeliveryID != deliveryID || !s.triggerStore.IsPendingDelivery(triggerID, deliveryID) {
@@ -73,7 +73,7 @@ func (s *Server) triggerToolRoundProvider(ctx context.Context, agentID, triggerI
 	p, ok := s.autonomyStore.GetProfile(agentID)
 	if !isDefault {
 		if !ok || p.MaxToolRounds <= 0 {
-		return 0, false, fmt.Errorf("auto trigger configuration is unavailable")
+			return 0, false, fmt.Errorf("auto trigger configuration is unavailable")
 		}
 		return p.MaxToolRounds, true, nil
 	}
