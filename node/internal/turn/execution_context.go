@@ -53,7 +53,7 @@ func ExecutionContextFromContext(ctx context.Context) (TurnExecutionContext, boo
 
 // StepIndexFromContext returns the logical Step number carried by the active
 // execution context. Direct Orchestrator unit callers that do not install a
-// runtime context use Step 1 as a safe compatibility default; production
+// runtime context use Step 1 as a safe direct-call default; production
 // session execution always supplies the Coordinator-owned index.
 func StepIndexFromContext(ctx context.Context) int {
 	if execution, ok := ExecutionContextFromContext(ctx); ok && execution.StepIndex > 0 {
@@ -91,6 +91,6 @@ func (c *TurnCoordinator) IsCurrentExecution(ctx TurnExecutionContext) bool {
 		return false
 	}
 	state := c.Snapshot()
-	return state.HasActiveTurn && state.StepStatus != StepStatusCreated &&
+	return state.HasActiveTurn && !state.StepStatus.Terminal() &&
 		state.ExecutionContext().SameStep(ctx)
 }

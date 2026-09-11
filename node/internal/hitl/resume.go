@@ -12,7 +12,7 @@ type ApprovalPlan struct {
 	TriggerSessionTargets map[string]string // call_id -> same_session | new_session | latest_active_session
 }
 
-// ParseApprovalResume 解析审批 resume_value（兼容 approve/reject/selection）。
+// ParseApprovalResume 解析审批 resume_value。
 func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPlan, error) {
 	if value == nil {
 		return ApprovalPlan{}, fmt.Errorf("empty resume_value")
@@ -24,7 +24,7 @@ func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPla
 	}
 
 	switch typ {
-	case "approve", "approved":
+	case "approve":
 		plan := ApprovalPlan{Approved: make(map[string]struct{}), Rejected: make(map[string]struct{})}
 		for id := range pending {
 			plan.Approved[id] = struct{}{}
@@ -35,7 +35,7 @@ func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPla
 		}
 		plan.TriggerSessionTargets = targets
 		return plan, nil
-	case "reject", "rejected":
+	case "reject":
 		plan := ApprovalPlan{Approved: make(map[string]struct{}), Rejected: make(map[string]struct{})}
 		for id := range pending {
 			plan.Rejected[id] = struct{}{}
@@ -75,37 +75,24 @@ func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPla
 		plan.TriggerSessionTargets = targets
 		return plan, nil
 	default:
-		// 兼容 kind/decision 写法
-		if strings.EqualFold(fmt.Sprint(value["decision"]), "approved") {
-			return ParseApprovalResume(map[string]any{"type": "approve"}, pendingIDs)
-		}
-		if strings.EqualFold(fmt.Sprint(value["decision"]), "denied") {
-			return ParseApprovalResume(map[string]any{"type": "reject"}, pendingIDs)
-		}
 		return ApprovalPlan{}, fmt.Errorf("unsupported approval resume type: %q", typ)
 	}
 }
 
-// ResumeValueKind 推断 resume_value 的高层类型，仅供日志与诊断（非严格校验）。
+// ResumeValueKind 推断 resume_value 的高层类型，仅供日志与诊断。
 func ResumeValueKind(value map[string]any) string {
 	if value == nil {
 		return "nil"
 	}
 	typ := strings.ToLower(strings.TrimSpace(fmt.Sprint(value["type"])))
 	switch typ {
-	case "selection", "approve", "approved", "reject", "rejected":
+	case "selection", "approve", "reject":
 		return "approval"
 	case "user_information":
 		return "user_information"
 	case "memory_conflict":
 		return "memory_conflict"
 	case "":
-		if _, ok := value["approved"]; ok {
-			return "approval"
-		}
-		if _, ok := value["rejected"]; ok {
-			return "approval"
-		}
 		if _, ok := value["answer"]; ok {
 			return "user_information"
 		}

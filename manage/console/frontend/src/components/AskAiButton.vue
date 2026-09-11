@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from "vue";
 import { fetchLLMConfigs, resolveLLMConfig } from "../api.js";
+import UiIcon from "./UiIcon.vue";
 
 const emit = defineEmits(["toast"]);
 const loading = ref(false);
@@ -54,9 +55,7 @@ async function openConsole() {
     title="AskAI · 用自然语言操作控制台（PageAgent）"
     @click="openConsole"
   >
-    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" class="askai-icon">
-      <path d="M10 1.5l1.6 4.3L16 7.4l-3.6 2.7L13 14.5 10 12l-3 2.5.6-4.4L4 7.4l4.4-1.6L10 1.5z" />
-    </svg>
+    <UiIcon class="askai-icon" name="sparkles" :size="17" />
     <span>{{ loading ? "启动中…" : "AskAI" }}</span>
   </button>
 </template>

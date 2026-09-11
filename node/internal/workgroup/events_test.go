@@ -74,8 +74,35 @@ func TestClientSessionHandlesRealtimeFrame(t *testing.T) {
 	}
 }
 
+func TestClientSessionHandlesControlFramesBeforeEnvelopeDispatch(t *testing.T) {
+	w := NewWorker(Config{NodeID: "node_a"})
+	cs := &ClientSession{Worker: w}
+
+	welcome, err := json.Marshal(map[string]any{
+		"type": "session.welcome",
+		"payload": map[string]any{
+			"connection_generation": int64(7),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := cs.HandleIncomingJSON(welcome)
+	if err != nil || res == nil || !res.Handled {
+		t.Fatalf("welcome result=%+v err=%v", res, err)
+	}
+	if got := w.Session.Generation(); got != 7 {
+		t.Fatalf("welcome generation=%d", got)
+	}
+
+	res, err = cs.HandleIncomingJSON([]byte(`{"type":"resume.complete","payload":{}}`))
+	if err != nil || res == nil || !res.Handled {
+		t.Fatalf("resume result=%+v err=%v", res, err)
+	}
+}
+
 func TestClientSessionBuildHelloIncludesProtocolContract(t *testing.T) {
-	w := NewWorker(Config{NodeID: "node_a", NodeToolNames: []string{"read_file"}})
+	w := NewWorker(Config{NodeID: "node_a"})
 	cs := &ClientSession{Worker: w}
 	hello := cs.BuildHello()
 	payload, ok := hello["payload"].(map[string]any)
@@ -85,8 +112,8 @@ func TestClientSessionBuildHelloIncludesProtocolContract(t *testing.T) {
 	if payload["protocol_version"] != ProtocolVersion || payload["schema_version"] != SchemaVersion {
 		t.Fatalf("hello versions=%+v", payload)
 	}
-	if payload["node_id"] != "node_a" || payload["agent_catalog_revision"] == "" {
-		t.Fatalf("hello identity/catalog=%+v", payload)
+	if payload["node_id"] != "node_a" {
+		t.Fatalf("hello identity=%+v", payload)
 	}
 	capabilities, ok := payload["capabilities"].([]string)
 	if !ok || len(capabilities) == 0 {

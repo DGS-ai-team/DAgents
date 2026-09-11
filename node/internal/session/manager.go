@@ -20,6 +20,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -33,8 +34,51 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot       string
-	MaxToolLoops int
+	// TriggerMaxToolRounds applies only to trusted trigger-origin Turns. User
+	// messages retain the ordinary unlimited round behavior.
+	TriggerMaxToolRounds int
+	// TriggerToolRoundProvider authorizes and supplies the per-activation cap.
+	// It must validate the durable trigger/controller/owner/delivery identity.
+	TriggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
+	ConditionValidator       func(context.Context, turn.ConditionApprovalMetadata) error
+	ConditionCompletion      func(triggers.ConditionRequest, triggers.ConditionResult) error
+	// AgentPromptProvider loads the current Agent-owned responsibilities,
+	// experience and todo snapshot at each new Turn boundary. It is never
+	// inherited by temporary child runtimes.
+	AgentPromptProvider turn.AgentPromptProvider
+	// AutoAgent is trusted runtime metadata populated from the Agent snapshot;
+	// model-facing requests cannot set it.
+	AutoAgent bool
+	// BudgetResolver refreshes dynamic per-turn limits before a new Turn.
+	// It is used by runtime-owned activations whose cumulative budget changes between wakes.
+	BudgetResolver func() (turn.TurnBudget, error)
+	// OnLifecycle observes a durable Turn projection after its event is stored.
+	// It is intentionally optional so ordinary sessions keep the existing path.
+	OnLifecycle func(sessionID string, snapshot turn.CoordinatorSnapshot) error
+	// initialHistoryRevision is supplied by Manager while restoring a runtime.
+	// Lifecycle recovery may persist a repaired provider history during
+	// construction, so the constructor must start from the revision loaded from
+	// SQLite instead of the zero value.
+	initialHistoryRevision    uint64
+	initialActiveContextStart int
+	initialLastContextResetID string
+	initialDreamingAttempt    json.RawMessage
+	// initialLifecycleEvents are supplied by Manager when it already loaded the
+	// session projection. Keeping the load marker separate from the slice lets
+	// an empty, successfully-read event log avoid a second database scan.
+	initialLifecycleEvents       []turn.TurnEventEnvelope
+	initialLifecycleEventsLoaded bool
+	// WorkspaceRoot is the Agent-facing root for files, bash, local terminals,
+	// media and user-visible tool artifacts.
+	WorkspaceRoot string
+	// AgentID identifies the owner of workspace-scoped private state. It is
+	// separate from the Node identity because multiple Agents may share one
+	// WorkspaceRoot.
+	AgentID string
+	// WorkspaceStateRoot is the hidden per-Agent namespace under WorkspaceRoot
+	// for sidecars such as raw message history. It is derived at runtime and is
+	// not a model-facing path base.
+	WorkspaceStateRoot string
 	// MaxModelRetries retries only transient provider failures within one Step;
 	// zero uses the default (2), -1 disables retries. Partial streamed output is
 	// never retried by the orchestrator.
@@ -58,35 +102,81 @@ type TurnOptions struct {
 	IdleAutoCompressMinTokens   int
 	RawMessageHistoryEnabled    bool
 	RawMessageHistoryDir        string
-	DuplicateToolCall           hooks.DuplicateConfig
-	ToolResult                  hooks.ToolResultConfig
-	InjectTodayDate             hooks.InjectTodayDateConfig
-	PluginHooks                 hooks.PluginsConfig
-	HookHost                    turn.HookHostConfig
-	MultimodalEnabled           bool
-	// ConfigRevision 保留兼容旧调用方；新代码使用 RuntimeRevision。
-	ConfigRevision int64
+	// RawMessageHistoryRelativeRoot is the workspace-relative path shown in
+	// compression hints; the actual write root is RawMessageHistoryDir.
+	RawMessageHistoryRelativeRoot string
+	DuplicateToolCall             hooks.DuplicateConfig
+	ToolResult                    hooks.ToolResultConfig
+	InjectTodayDate               hooks.InjectTodayDateConfig
+	PluginHooks                   hooks.PluginsConfig
+	HookHost                      turn.HookHostConfig
+	MultimodalEnabled             bool
 	// RuntimeRevision 是独立于 agents.updated_at 的 Agent runtime 版本。
 	RuntimeRevision int64
 	// RuntimeDigest 标识该 runtime 的模型可见输入（prompt + tools）。
 	RuntimeDigest string
-	// PromptContext 控制 soul/custom/long_term 侧车是否注入（缺省全开）。
+	// LLMProfileDigest identifies the effective Agent-bound LLM connection.
+	LLMProfileDigest string
+	// PromptContext 控制 soul/custom 侧车是否注入（缺省全开）；记忆召回
+	// 由 MemoryService 与 MemoryAutoRecall 独立控制。
 	PromptContext PromptContextOptions
 	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
 	PromptContent *promptcontext.Content
 	// PreferredName 为本机使用者称呼（Node 首配）；通过 prompt context
-	// 注入模型请求，替代 user.md。
+	// 注入模型请求。
 	PreferredName string
-	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
-	LongTermStore turn.LongTermStore
+	// MemoryService is the workspace memory authority. It is recalled at
+	// each fresh model-context boundary and never injected into system prompt.
+	MemoryService  memory.Service
+	HandbookReader turn.HandbookReader
+	// MemoryAutoRecall controls the automatic per-turn memory projection. It is
+	// independent from MemoryService being available for model-facing tools.
+	MemoryAutoRecall bool
+	// MemoryAutoExtract enables the optional compression candidate pipeline.
+	// It is intentionally false by default because each compression can add an
+	// LLM call; extracted candidates remain pending until consolidation.
+	MemoryAutoExtract        bool
+	MemoryCandidateQueueSize int
+	MemoryCandidateMaxItems  int
+	MemoryCoreBudgetTokens   int
+}
+
+func effectiveWorkspaceRoot(opts TurnOptions) string {
+	return strings.TrimSpace(opts.WorkspaceRoot)
+}
+
+func withInitialHistoryRevision(opts TurnOptions, revision uint64) TurnOptions {
+	opts.initialHistoryRevision = revision
+	return opts
+}
+
+func withInitialActiveContextStart(opts TurnOptions, start int) TurnOptions {
+	opts.initialActiveContextStart = start
+	return opts
+}
+
+func withInitialLastContextResetID(opts TurnOptions, id string) TurnOptions {
+	opts.initialLastContextResetID = id
+	return opts
+}
+
+func withInitialDreamingAttempt(opts TurnOptions, raw json.RawMessage) TurnOptions {
+	opts.initialDreamingAttempt = append(json.RawMessage(nil), raw...)
+	return opts
+}
+
+func withInitialLifecycleEvents(opts TurnOptions, events []turn.TurnEventEnvelope, loaded bool) TurnOptions {
+	opts.initialLifecycleEvents = append([]turn.TurnEventEnvelope(nil), events...)
+	opts.initialLifecycleEventsLoaded = loaded
+	return opts
 }
 
 // PromptContextOptions 为侧车 / 长期记忆注入开关。
 type PromptContextOptions struct {
-	SoulEnabled     *bool
-	CustomEnabled   *bool
-	LongTermEnabled *bool
-	LongTermScope   *string // global | agent
+	SoulEnabled   *bool
+	CustomEnabled *bool
+	MemoryEnabled *bool
+	MemoryScope   *string // global | agent
 }
 
 // Manager 维护 session 表；每个 session 独立 InputBox、控制队列与 consumer goroutine。
@@ -102,19 +192,53 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu       sync.RWMutex
-	sessions map[string]*runtime
-	logger   *slog.Logger
+	mu               sync.RWMutex
+	sessions         map[string]*runtime
+	maintenanceGates map[string]*agentExecutionGate
+	logger           *slog.Logger
 
 	mediaOnlyMu sync.Mutex
 	mediaOnly   map[string]*media.Registry
 
-	triggerDelivery triggers.DeliveryTracker
+	triggerDelivery     triggers.DeliveryTracker
+	conditionCompletion func(triggers.ConditionRequest, triggers.ConditionResult) error
+	conditionValidator  func(context.Context, turn.ConditionApprovalMetadata) error
 
 	children *childagent.Manager
 
 	// OnReleased 在 session 成功卸出内存后回调（用于回收 docker 沙箱等）。
 	OnReleased func(sessionID string)
+}
+
+// SetConditionCompletionCallback connects the durable resume path to the
+// trigger store. It must be configured before scheduler work starts.
+func (m *Manager) SetConditionCompletionCallback(cb func(triggers.ConditionRequest, triggers.ConditionResult) error) {
+	if m != nil {
+		m.conditionCompletion = cb
+	}
+}
+
+func (m *Manager) SetConditionValidator(v func(context.Context, turn.ConditionApprovalMetadata) error) {
+	if m != nil {
+		m.conditionValidator = v
+	}
+}
+
+// SetLifecycleObserver installs the optional observer for default and already
+// loaded runtimes. Runtime projections may use this hook; it must not call back into
+// runtime cancellation while a lifecycle transition is in progress.
+func (m *Manager) SetLifecycleObserver(observer func(string, turn.CoordinatorSnapshot) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.turn.OnLifecycle = observer
+	for _, rt := range m.sessions {
+		if rt != nil {
+			rt.onLifecycle = observer
+		}
+	}
 }
 
 // NewManager 绑定 agent、SSE Hub、LLM、工具、策略与持久化 store。
@@ -129,25 +253,119 @@ func NewManager(
 	logger *slog.Logger,
 ) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	if turnOpts.MaxToolLoops <= 0 {
-		turnOpts.MaxToolLoops = turn.DefaultMaxToolLoops()
-	}
 	if turnOpts.MaxModelRetries == 0 {
 		turnOpts.MaxModelRetries = 2
 	}
 	return &Manager{
-		agentID:  agentID,
-		hub:      hub,
-		llm:      llmClient,
-		tools:    registry,
-		policy:   policyEngine,
-		store:    st,
-		turn:     turnOpts,
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: make(map[string]*runtime),
-		logger:   logx.OrDefault(logger),
+		agentID:          agentID,
+		hub:              hub,
+		llm:              llmClient,
+		tools:            registry,
+		policy:           policyEngine,
+		store:            st,
+		turn:             turnOpts,
+		ctx:              ctx,
+		cancel:           cancel,
+		sessions:         make(map[string]*runtime),
+		maintenanceGates: make(map[string]*agentExecutionGate),
+		logger:           logx.OrDefault(logger),
 	}
+}
+
+// TryAcquireMaintenance atomically reserves an Agent's execution slot when
+// its chat runtime is idle. Callers must invoke release; cancellation before
+// acquisition is reported without changing state.
+func (m *Manager) TryAcquireMaintenance(ctx context.Context, agentID string) (release func(), acquired bool, err error) {
+	if m == nil || strings.TrimSpace(agentID) == "" {
+		return nil, false, fmt.Errorf("agent id is required")
+	}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		default:
+		}
+	}
+	id := strings.TrimSpace(agentID)
+	m.mu.Lock()
+	g := m.maintenanceGates[id]
+	if g == nil {
+		g = newAgentExecutionGate()
+		m.maintenanceGates[id] = g
+	}
+	m.mu.Unlock()
+	base, cancel := context.WithCancel(m.ctx)
+	stop := func() {}
+	if ctx != nil {
+		after := context.AfterFunc(ctx, cancel)
+		stop = func() { after() }
+	}
+	actualRelease, acquired, err := g.acquireMaintenance(base)
+	if !acquired || err != nil {
+		stop()
+		cancel()
+		return nil, acquired, err
+	}
+	var once sync.Once
+	return func() { once.Do(func() { stop(); cancel(); actualRelease() }) }, acquired, err
+}
+
+func (m *Manager) TryAcquireMaintenanceContext(ctx context.Context, agentID string) (context.Context, func(), bool, error) {
+	if m == nil || strings.TrimSpace(agentID) == "" {
+		return nil, nil, false, fmt.Errorf("agent id is required")
+	}
+	id := strings.TrimSpace(agentID)
+	m.mu.Lock()
+	g := m.maintenanceGates[id]
+	if g == nil {
+		g = newAgentExecutionGate()
+		m.maintenanceGates[id] = g
+	}
+	m.mu.Unlock()
+	base, cancel := context.WithCancel(m.ctx)
+	stop := func() {}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			cancel()
+			return nil, nil, false, ctx.Err()
+		default:
+		}
+		after := context.AfterFunc(ctx, cancel)
+		stop = func() { after() }
+	}
+	leaseCtx, actualRelease, acquired, err := g.acquireMaintenanceContext(base)
+	if !acquired || err != nil {
+		stop()
+		cancel()
+		return nil, nil, acquired, err
+	}
+	var once sync.Once
+	return leaseCtx, func() { once.Do(func() { stop(); cancel(); actualRelease() }) }, acquired, err
+}
+
+// RequestConditionApproval opens an Agent-bound condition approval through the
+// normal session HITL lifecycle. The execution gate is held only while the
+// durable pending interaction is created; it is released while the user
+// decides, so an approval cannot monopolize the Agent runtime.
+func (m *Manager) RequestConditionApproval(ctx context.Context, req ConditionApprovalRequest, sessionID string) error {
+	if m == nil || strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("condition session is required")
+	}
+	leaseCtx, release, acquired, err := m.TryAcquireMaintenanceContext(ctx, req.Metadata.AgentID)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return fmt.Errorf("agent is busy")
+	}
+	defer release()
+	_ = leaseCtx
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.agentID != req.Metadata.AgentID {
+		return fmt.Errorf("condition session is unavailable")
+	}
+	return rt.requestConditionApproval(req)
 }
 
 // SetMultimodalEnabled 仅更新 Manager 默认 TurnOptions 与默认 Registry。
@@ -251,6 +469,14 @@ func (m *Manager) DefaultTurnOptions() TurnOptions {
 	return m.turn
 }
 
+// AgentID returns the owning Node/Agent identity used by default runtimes.
+func (m *Manager) AgentID() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.agentID)
+}
+
 // DefaultTools 返回 Manager 共享的默认 Registry。
 func (m *Manager) DefaultTools() *tools.Registry {
 	if m == nil {
@@ -321,26 +547,36 @@ func (m *Manager) createWithOptions(
 		m.logger.Info("session reuse", "session_id", id)
 		return &existing.session, false, nil
 	}
-	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(id)
+	restore, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
 		return nil, false, err
 	}
-	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	created := len(restore.Messages) == 0 && !restore.Found
+	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	if turnOpts.ConditionValidator == nil {
+		turnOpts.ConditionValidator = m.conditionValidator
+	}
+	if turnOpts.ConditionCompletion == nil {
+		turnOpts.ConditionCompletion = m.conditionCompletion
+	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
-	rt.restoreInputBoxState(inputBoxState)
-	rt.historyRevision = historyRevision
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
+		return nil, false, err
+	}
+	m.bindMaintenanceGate(rt)
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
 	if created {
 		rt.persist(context.Background())
-		m.logger.Info("session created", "session_id", id, "restored", false, "fs_root", turnOpts.FSRoot)
+		m.logger.Info("session created", "session_id", id, "restored", false, "workspace_root", effectiveWorkspaceRoot(turnOpts))
 	} else {
-		m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
+		m.logger.Info("session restored", "session_id", id, "messages", len(restore.Messages))
 	}
 	return &rt.session, created, nil
 }
@@ -399,43 +635,58 @@ func (m *Manager) replaceWithOptions(
 		m.mu.Unlock()
 		return nil, false, fmt.Errorf("cannot replace child session")
 	}
-	var msgs []llm.Message
-	var loaded []skills.LoadedSkill
-	var pending *turn.PendingHITL
-	var loopCount int
-	var hookStore map[string]json.RawMessage
-	var idleMarked bool
-	var notifySeq, ackSeq int
-	var historyRevision uint64
-	var inputBoxState json.RawMessage
+	var restore sessionRestoreData
 	if old != nil {
 		// Persist for cold-start recovery, but hydrate from the old runtime's
 		// in-memory snapshot. This avoids losing a last-minute state change when
 		// the store write fails or when the manager is embedded without a store.
 		old.persist(context.Background())
 		if m.store != nil {
-			if _, _, _, _, _, _, _, _, _, _, err := m.loadSessionData(id); err != nil {
+			var err error
+			restore, err = m.loadSessionData(id)
+			if err != nil {
 				m.mu.Unlock()
 				m.logger.Error("session replacement store check failed; old runtime retained", "session_id", id, "error", err)
 				return nil, false, err
 			}
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState = old.replacementData()
+		replacement := old.replacementData()
+		restore.Messages = replacement.Messages
+		restore.LoadedSkills = replacement.LoadedSkills
+		restore.HookStore = replacement.HookStore
+		restore.IdleAutoCompress = replacement.IdleAutoCompress
+		restore.NotifySeq = replacement.NotifySeq
+		restore.AckSeq = replacement.AckSeq
+		restore.HistoryRevision = replacement.HistoryRevision
+		restore.ActiveContextStart = replacement.ActiveContextStart
+		restore.LastContextResetID = replacement.LastContextResetID
+		restore.InputBoxState = replacement.InputBoxState
 	} else {
 		var err error
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err = m.loadSessionData(id)
+		restore, err = m.loadSessionData(id)
 		if err != nil {
 			m.mu.Unlock()
 			m.logger.Error("session replacement load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 	}
-	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	created := len(restore.Messages) == 0 && !restore.Found
+	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	if turnOpts.ConditionValidator == nil {
+		turnOpts.ConditionValidator = m.conditionValidator
+	}
+	if turnOpts.ConditionCompletion == nil {
+		turnOpts.ConditionCompletion = m.conditionCompletion
+	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
-	rt.restoreInputBoxState(inputBoxState)
-	rt.historyRevision = historyRevision
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
+		m.mu.Unlock()
+		return nil, false, err
+	}
+	m.bindMaintenanceGate(rt)
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
@@ -443,6 +694,9 @@ func (m *Manager) replaceWithOptions(
 	m.mu.Unlock()
 
 	if old != nil {
+		if old.executionGate != nil {
+			old.executionGate.unregister(old)
+		}
 		old.stop()
 	}
 	if created {
@@ -450,6 +704,19 @@ func (m *Manager) replaceWithOptions(
 	}
 	m.logger.Info("session replaced", "session_id", id, "had_previous_runtime", old != nil)
 	return &rt.session, created, nil
+}
+
+func (m *Manager) bindMaintenanceGate(rt *runtime) {
+	if rt == nil {
+		return
+	}
+	g := m.maintenanceGates[rt.agentID]
+	if g == nil {
+		g = newAgentExecutionGate()
+		m.maintenanceGates[rt.agentID] = g
+	}
+	rt.executionGate = g
+	g.register(rt)
 }
 
 // Create 创建或复用 session；若 DB 中已有则加载历史并启动 consumer。
@@ -462,16 +729,27 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState, err := m.loadSessionData(id)
+		restore, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
-		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, m.turn, m.triggerDelivery)
-		rt.restoreInputBoxState(inputBoxState)
-		rt.historyRevision = historyRevision
+		created := len(restore.Messages) == 0 && !restore.Found
+		turnOpts := withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		if turnOpts.ConditionValidator == nil {
+			turnOpts.ConditionValidator = m.conditionValidator
+		}
+		if turnOpts.ConditionCompletion == nil {
+			turnOpts.ConditionCompletion = m.conditionCompletion
+		}
+		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
+			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+		rt.restoreInputBoxState(restore.InputBoxState)
 		rt.reconcileRestoredInputBox()
+		if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
+			return nil, false, err
+		}
+		m.bindMaintenanceGate(rt)
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
@@ -482,7 +760,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 		if created {
 			m.logger.Info("session created", "session_id", id, "restored", false)
 		} else {
-			m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
+			m.logger.Info("session restored", "session_id", id, "messages", len(restore.Messages))
 		}
 		return &rt.session, created, nil
 	}
@@ -493,7 +771,8 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, nil, false, 0, 0, m.turn, m.triggerDelivery)
+	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, false, 0, 0, m.turn, m.triggerDelivery)
+	m.bindMaintenanceGate(rt)
 	m.sessions[newID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -503,30 +782,54 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, json.RawMessage, error) {
+type sessionRestoreData struct {
+	Found                 bool
+	Messages              []llm.Message
+	LoadedSkills          []skills.LoadedSkill
+	HookStore             map[string]json.RawMessage
+	IdleAutoCompress      bool
+	NotifySeq             int
+	AckSeq                int
+	HistoryRevision       uint64
+	ActiveContextStart    int
+	LastContextResetID    string
+	InputBoxState         json.RawMessage
+	DreamingAttempt       json.RawMessage
+	LifecycleEvents       []turn.TurnEventEnvelope
+	LifecycleEventsLoaded bool
+}
+
+func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, nil
+		return sessionRestoreData{}, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, err
+		return sessionRestoreData{}, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil, nil
+		return sessionRestoreData{}, nil
 	}
-	var pending *turn.PendingHITL
-	if rec.RuntimeState.Pending != nil {
-		pending = rec.RuntimeState.Pending
+	lifecycle, lifecycleErr := m.loadLifecycleProjectionData(context.Background(), sessionID, rec.NodeID)
+	if lifecycleErr != nil {
+		lifecycle.events = nil
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq, rec.RuntimeState.HistoryRevision, rec.RuntimeState.InputBoxState, nil
-}
-
-func (m *Manager) sessionExistsInStore(sessionID string) bool {
-	if m.store == nil {
-		return false
-	}
-	rec, err := m.store.Load(context.Background(), sessionID)
-	return err == nil && rec != nil
+	return sessionRestoreData{
+		Found:                 true,
+		Messages:              rec.Messages,
+		LoadedSkills:          rec.LoadedSkills,
+		HookStore:             rec.RuntimeState.HookStore,
+		IdleAutoCompress:      rec.RuntimeState.IdleAutoCompressApplied,
+		NotifySeq:             rec.RuntimeState.NotifySeq,
+		AckSeq:                rec.RuntimeState.AckSeq,
+		HistoryRevision:       rec.RuntimeState.HistoryRevision,
+		ActiveContextStart:    rec.RuntimeState.ActiveContextStart,
+		LastContextResetID:    rec.RuntimeState.LastContextResetID,
+		InputBoxState:         rec.RuntimeState.InputBoxState,
+		DreamingAttempt:       append(json.RawMessage(nil), rec.RuntimeState.DreamingAttempt...),
+		LifecycleEvents:       lifecycle.events,
+		LifecycleEventsLoaded: lifecycleErr == nil,
+	}, nil
 }
 
 // Get 按 ID 查找 session；不存在返回 nil。
@@ -550,6 +853,34 @@ func (m *Manager) RuntimeRevision(sessionID string) int64 {
 		return rt.runtimeRevision
 	}
 	return 0
+}
+
+// RuntimeMultimodalEnabled 返回内存 runtime 装载时的多模态设置快照。
+// ok=false 表示 Agent runtime 尚未装入内存。
+func (m *Manager) RuntimeMultimodalEnabled(sessionID string) (enabled, ok bool) {
+	if m == nil {
+		return false, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rt, ok := m.sessions[strings.TrimSpace(sessionID)]
+	if !ok || rt == nil {
+		return false, false
+	}
+	return rt.runtimeMultimodalEnabled, true
+}
+
+// RuntimeLLMProfileDigest 返回 runtime 装载时的 Agent 绑定 LLM 配置摘要。
+func (m *Manager) RuntimeLLMProfileDigest(sessionID string) string {
+	if m == nil {
+		return ""
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rt, ok := m.sessions[strings.TrimSpace(sessionID)]; ok && rt != nil {
+		return rt.llmProfileDigest
+	}
+	return ""
 }
 
 // RuntimeDigest 返回内存 runtime 的模型上下文输入摘要。
@@ -601,6 +932,22 @@ func (m *Manager) SetSessionPolicy(sessionID string, engine *policy.Engine) {
 	defer m.mu.Unlock()
 	if rt, ok := m.sessions[sessionID]; ok && rt != nil {
 		rt.setPolicy(engine)
+	}
+}
+
+// SetAgentPolicy updates every loaded session owned by an Agent, including
+// the primary and Auto activation sessions.
+func (m *Manager) SetAgentPolicy(agentID string, engine *policy.Engine) {
+	if m == nil || engine == nil {
+		return
+	}
+	agentID = strings.TrimSpace(agentID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, rt := range m.sessions {
+		if rt != nil && strings.TrimSpace(rt.session.AgentID) == agentID {
+			rt.setPolicy(engine)
+		}
 	}
 }
 
@@ -668,24 +1015,29 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	if rec == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
-	pending := rec.RuntimeState.Pending
-	stepCount := rec.RuntimeState.ToolLoopCount
+	start := rec.RuntimeState.ActiveContextStart
+	if start < 0 || start > len(rec.Messages) {
+		start = len(rec.Messages)
+	}
+	activeMessages := append([]llm.Message(nil), rec.Messages[start:]...)
 	lifecycle, hasLifecycleProjection, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
-	} else if hasLifecycleProjection {
-		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
-		stepCount = lifecycle.Usage.Steps
 	}
+	if !hasLifecycleProjection {
+		lifecycle = turn.CoordinatorSnapshot{}
+	}
+	pending := pendingFromLifecycleSnapshot(lifecycle)
+	stepCount := lifecycle.Usage.Steps
 	view := &ContextView{
 		SessionID:             sessionID,
-		MessagesCount:         len(rec.Messages),
-		MessagesTotalTokens:   estimateMessageTokens(rec.Messages),
+		MessagesCount:         len(activeMessages),
+		MessagesTotalTokens:   estimateMessageTokens(activeMessages),
 		PendingToolCallsCount: pendingToolCallsCount(pending),
 		ToolLoopCount:         stepCount,
 		LoadedSkills:          rec.LoadedSkills,
 		QueuePending:          inputBoxPendingCount(rec.RuntimeState.InputBoxState),
-		Messages:              rec.Messages,
+		Messages:              activeMessages,
 		HasActiveTurn:         lifecycle.HasActiveTurn,
 		TurnID:                lifecycle.TurnID,
 		StepID:                lifecycle.StepID,
@@ -730,7 +1082,8 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 func (m *Manager) ContextSummary(sessionID string) (messageCount int, messages []llm.Message, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt != nil {
-		return rt.messageCount(), rt.messagesSnapshot(), nil
+		messages := rt.activeMessagesSnapshot()
+		return len(messages), messages, nil
 	}
 	if m.store == nil {
 		return 0, nil, fmt.Errorf("agent_not_found")
@@ -742,7 +1095,12 @@ func (m *Manager) ContextSummary(sessionID string) (messageCount int, messages [
 	if rec == nil {
 		return 0, nil, fmt.Errorf("agent_not_found")
 	}
-	return len(rec.Messages), rec.Messages, nil
+	start := rec.RuntimeState.ActiveContextStart
+	if start < 0 || start > len(rec.Messages) {
+		start = len(rec.Messages)
+	}
+	activeMessages := append([]llm.Message(nil), rec.Messages[start:]...)
+	return len(activeMessages), activeMessages, nil
 }
 
 // LoadedSkills 返回 session 已加载 skills（内存活跃 session 或 DB 持久化）。
@@ -815,6 +1173,9 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 	}
 	m.mu.Unlock()
 	if ok {
+		if rt.executionGate != nil {
+			rt.executionGate.unregister(rt)
+		}
 		rt.stop()
 	}
 	m.logger.Info("session deleted from memory", "session_id", sid, "was_active", wasActive)
@@ -845,8 +1206,8 @@ func (m *Manager) EnqueueMessage(
 }
 
 // EnqueueMessageWithFileReferences accepts structured local file metadata
-// alongside the visible user text. The legacy method above remains for
-// internal callers that do not attach files.
+// alongside the visible user text. EnqueueMessage remains the convenience
+// path for internal callers that do not attach files.
 func (m *Manager) EnqueueMessageWithFileReferences(
 	_ context.Context,
 	sessionID, requestType, content string,
@@ -865,11 +1226,14 @@ func (m *Manager) enqueueMessage(
 	resumeValue map[string]any,
 	userMessageName string,
 ) (priority string, err error) {
-	rt := m.getRuntime(sessionID)
+	m.mu.RLock()
+	rt := m.sessions[strings.TrimSpace(sessionID)]
 	if rt == nil {
+		m.mu.RUnlock()
 		m.logger.Warn("enqueue message session not found", "session_id", sessionID)
 		return "", fmt.Errorf("agent_not_found")
 	}
+	m.mu.RUnlock()
 	m.logger.Debug("enqueue message",
 		"session_id", sessionID,
 		"request_type", requestType,
@@ -977,11 +1341,22 @@ func (m *Manager) ReconcileToolExecution(ctx context.Context, sessionID, turnID,
 	return rt.reconcileToolExecution(ctx, turnID, stepID, executionID, status, content)
 }
 
-// CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。
-func (m *Manager) CancelTurn(sessionID string) bool {
+// CancelTurnResult is the authoritative result of a Turn-scope cancellation.
+// The identifiers are retained after the coordinator reaches its terminal
+// state so clients can correlate the cancellation with the SSE turn_state.
+type CancelTurnResult struct {
+	Cancelled  bool
+	TurnID     string
+	Generation uint64
+	Terminal   bool
+}
+
+// CancelTurnWithResult cancels the current Turn and returns its terminal
+// identity. Tool-only cancellation must use the tool execution API instead.
+func (m *Manager) CancelTurnWithResult(sessionID string) CancelTurnResult {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return false
+		return CancelTurnResult{}
 	}
 	// Canceling the composer turn also cancels any synchronous bash process
 	// currently registered for UI cancellation. bash_run never detaches on
@@ -991,7 +1366,21 @@ func (m *Manager) CancelTurn(sessionID string) bool {
 	if reg := m.SessionTools(sessionID); reg != nil {
 		jobsCancelled = reg.CancelAllSessionJobs(sessionID) > 0
 	}
-	return turnCancelled || jobsCancelled
+	state := turn.CoordinatorSnapshot{}
+	if rt.turnCoordinator != nil {
+		state = rt.turnCoordinator.Snapshot()
+	}
+	return CancelTurnResult{
+		Cancelled:  turnCancelled || jobsCancelled,
+		TurnID:     state.TurnID,
+		Generation: state.Generation,
+		Terminal:   state.TurnStatus.Terminal(),
+	}
+}
+
+// CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。
+func (m *Manager) CancelTurn(sessionID string) bool {
+	return m.CancelTurnWithResult(sessionID).Cancelled
 }
 
 // ListSessionSkills 返回 session 已加载与可用 skills。
@@ -1120,13 +1509,13 @@ func (m *Manager) UnloadSessionSkill(sessionID, skillName string) ([]skills.Load
 	return out.Loaded, err
 }
 
-// SessionFSRoot 返回指定 session/agent 的有效 FSRoot（测试与调试用）。
-func (m *Manager) SessionFSRoot(sessionID string) (string, bool) {
+// SessionWorkspaceRoot 返回指定 session/agent 的有效 Agent workspace（测试与调试用）。
+func (m *Manager) SessionWorkspaceRoot(sessionID string) (string, bool) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
 		return "", false
 	}
-	return rt.fsRoot, true
+	return rt.workspaceRoot, true
 }
 
 func (m *Manager) getRuntime(sessionID string) *runtime {

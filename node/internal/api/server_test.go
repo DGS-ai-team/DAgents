@@ -25,16 +25,17 @@ import (
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		NodeID: "ops-linux-01",
-		Agent:  config.AgentConfig{Name: "ops-linux"},
-		Manage: config.ManageConfig{},
-		FSRoot: t.TempDir(),
+		NodeID:      "ops-linux-01",
+		Agent:       config.AgentConfig{Name: "ops-linux"},
+		Manage:      config.ManageConfig{},
+		RuntimeRoot: t.TempDir(),
 		Compression: config.CompressionConfig{
 			SilentTriggerTokens:   80000,
 			BlockingTriggerTokens: 100000,
 		},
 	}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	return cfg
 }
 
@@ -54,7 +55,7 @@ func createTestRuntime(t *testing.T, srv *Server) string {
 	return sess.ID
 }
 
-// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 FSRoot。
+// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 runtime root。
 func waitSessionIdle(t *testing.T, srv *Server, sessionID string) {
 	t.Helper()
 	waitSessionIdleDeadline(t, srv, sessionID, 3*time.Second)
@@ -127,6 +128,28 @@ func TestHandleAgentInfo(t *testing.T) {
 	}
 }
 
+func TestHandleAgentCancelExposesTurnScope(t *testing.T) {
+	srv, ts := newTestServer(t)
+	defer ts.Close()
+
+	sessionID := createTestRuntime(t, srv)
+	resp, err := http.Post(ts.URL+"/v1/agents/"+sessionID+"/cancel", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var got cancelTurnResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != sessionID || got.Scope != "turn" || got.Cancelled || got.Terminal {
+		t.Fatalf("idle cancel response = %+v", got)
+	}
+}
+
 func TestHandleDesktopRuntimeConfig(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Manage.Enabled = true
@@ -174,7 +197,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	srv := NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
-	// 须在 testConfig 的 t.TempDir 清理之前关闭 Server，否则 FSRoot 仍被后台写入。
+	// 须在 testConfig 的 t.TempDir 清理之前关闭 Server，否则 runtime root 仍被后台写入。
 	t.Cleanup(func() {
 		ts.Close()
 		time.Sleep(50 * time.Millisecond)
@@ -454,9 +477,6 @@ func TestCreateRuntimeActiveFields(t *testing.T) {
 	}
 	if state != turn.StateIdle {
 		t.Fatalf("state = %q", state)
-	}
-	if turn.RunTurnPhase(state) == "" {
-		t.Fatal("run_turn_phase should be set for active session")
 	}
 }
 

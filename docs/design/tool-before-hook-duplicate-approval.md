@@ -1,5 +1,7 @@
-# Tool Before Hook 与重复调用审批方案
+# Tool Before Hook 与重复调用审批方案（历史记录）
 
+> **文档性质**：历史设计记录，不是当前 API 契约。本文保留重复调用审批的决策背景；当前工具目录不包含 `background_job_*`，新实现不得依据本文恢复旧后台任务路径。
+>
 > 状态：**已落地**（WS6，`feat/tool-context-cost-optimization`）  
 > 配置：`hooks.duplicate_tool_call`（`enabled`、`window_seconds`，默认 60）  
 > 前置：[agent-hooks.md](./agent-hooks.md) · [tool-context-cost-analysis.md](../archive/experiments/tool-context-cost-analysis.md)  

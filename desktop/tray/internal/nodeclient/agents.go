@@ -12,7 +12,6 @@ type AgentSummary struct {
 	AgentID          string `json:"agent_id"`
 	DisplayName      string `json:"display_name,omitempty"`
 	Active           bool   `json:"active,omitempty"`
-	RunTurnPhase     string `json:"run_turn_phase,omitempty"`
 	HasActiveTurn    bool   `json:"has_active_turn,omitempty"`
 	NotifySeq        int    `json:"notify_seq,omitempty"`
 	AckSeq           int    `json:"ack_seq,omitempty"`

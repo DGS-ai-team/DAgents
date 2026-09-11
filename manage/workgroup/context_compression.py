@@ -7,6 +7,7 @@ by the uncompressed tail.  A stale snapshot is rejected by its source hash.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,7 +16,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from manage.workgroup.builtin_hooks import estimate_tokens
-from manage.workgroup.digest import sha256_digest
 from manage.workgroup.history import (
     RunHistoryMessage,
     open_tool_call_ids,
@@ -61,7 +61,13 @@ def estimate_provider_messages(messages: list[dict[str, Any]]) -> int:
 
 def history_source_hash(messages: list[RunHistoryMessage], end: int) -> str:
     """Hash the exact raw prefix, including tool metadata, for stale checking."""
-    return sha256_digest([message.model_dump(mode="json") for message in messages[:end]])
+    raw = json.dumps(
+        [message.model_dump(mode="json") for message in messages[:end]],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 def snapshot_is_current(

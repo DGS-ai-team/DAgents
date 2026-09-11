@@ -56,8 +56,8 @@ func TestRegistrar_registerAndHeartbeat(t *testing.T) {
 			if err := json.Unmarshal(body, &payload); err != nil {
 				t.Fatalf("register body: %v", err)
 			}
-			if payload.AgentID != "ops-01" {
-				t.Fatalf("unexpected register payload: %+v", payload)
+			if payload.NodeID != "ops-01" || payload.AgentID != "" {
+				t.Fatalf("unexpected node register payload: %+v", payload)
 			}
 			if payload.BaseURL != "http://127.0.0.1:18765" {
 				t.Fatalf("base_url = %q (want local.endpoint)", payload.BaseURL)

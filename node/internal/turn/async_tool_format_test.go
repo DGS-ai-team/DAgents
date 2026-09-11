@@ -35,7 +35,7 @@ func TestLookupAsyncSourceFromHistory_bySourceToolCall(t *testing.T) {
 		}}},
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[BASH_RESULT] status=RUNNING job_id=job-1"},
 	}
-	src := lookupAsyncSourceFromHistory(history, "bash_run", "job-1", "call-bg-1")
+	src := lookupAsyncSourceFromHistory(history, "job-1", "call-bg-1")
 	if src.OriginalToolCallID != "call-bg-1" {
 		t.Fatalf("source call id = %q", src.OriginalToolCallID)
 	}

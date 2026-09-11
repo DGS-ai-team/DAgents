@@ -1,5 +1,6 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
+import UiIcon from "./UiIcon.vue";
 
 const KIND = {
   skill: {
@@ -114,7 +115,7 @@ function submit() {
             :disabled="uploading"
             @click="emit('close')"
           >
-            ×
+            <UiIcon name="close" :size="16" />
           </button>
         </header>
 

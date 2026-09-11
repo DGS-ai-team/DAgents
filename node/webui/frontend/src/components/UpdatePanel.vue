@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import * as desktopApi from "../api/desktop.js";
+import * as platformApi from "../api/platform.js";
 
 defineProps({
   embedded: { type: Boolean, default: false },
@@ -12,23 +12,19 @@ const loading = ref(false);
 const applying = ref(false);
 const error = ref("");
 const data = ref(null);
-const source = ref("node");
 
 const applyCommand = computed(() => {
   const cmd = String(data.value?.apply_command || "dagents update").trim();
   return cmd || "dagents update";
 });
 
-const shellManaged = computed(() => source.value === "shell");
-const canApplyInUI = computed(() => shellManaged.value && !!data.value?.upgrade_available);
+const canApplyInUI = computed(() => data.value?.apply_available === true && !!data.value?.upgrade_available);
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await desktopApi.getUpdateStatus();
-    source.value = result.source;
-    data.value = result.data;
+    data.value = await platformApi.getUpdateStatus();
   } catch (e) {
     error.value = e.message;
     data.value = null;
@@ -53,7 +49,7 @@ async function applyUpgrade() {
   applying.value = true;
   error.value = "";
   try {
-    const result = await desktopApi.applyDesktopUpdate({ force: false });
+    const result = await platformApi.applyAgentUpdate({ force: false });
     if (result?.message) {
       window.alert(result.message);
     }
@@ -70,10 +66,10 @@ onMounted(load);
 
 <template>
   <section class="panel panel-overlay__card command-panel status-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header class="panel__header command-panel__header">
+    <header v-if="!embedded" class="panel__header command-panel__header">
       <div>
-        <div v-if="!embedded" class="panel__title">版本与更新</div>
-        <div v-if="!embedded" class="command-panel__subtitle">检查可用更新</div>
+        <div class="panel__title">版本与更新</div>
+        <div class="command-panel__subtitle">检查可用更新</div>
       </div>
       <div v-if="!embedded" class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
@@ -135,5 +131,15 @@ onMounted(load);
 .command-panel__source {
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .status-panel .command-panel__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-panel .command-stat {
+    min-width: 0;
+  }
 }
 </style>

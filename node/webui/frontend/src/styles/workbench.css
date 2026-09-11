@@ -692,6 +692,79 @@
   max-width: 100%;
 }
 
+/* Keep scalar settings easy to scan: one value per row with the label and
+   supporting copy on the left and the control aligned to a shared column. */
+.settings-embedded-panel .setup-config-panel__field-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field:last-child {
+  border-bottom: 0;
+}
+
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field__input {
+  justify-self: stretch;
+  max-width: 100%;
+}
+
+/* Standalone switches and fields use the same setting-row treatment as grid
+   fields. This also covers Manage, Security and Context scalar controls. */
+.settings-embedded-panel .settings-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .settings-toggle input {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.settings-embedded-panel .settings-field--stack,
+.settings-embedded-panel .settings-section > .settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .settings-field--stack .settings-field__input,
+.settings-embedded-panel .settings-section > .settings-field .settings-field__input {
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .settings-embedded-panel .setup-config-panel__field-grid .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .settings-embedded-panel .settings-field--stack,
+  .settings-embedded-panel .settings-section > .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 .settings-page__hint {
   font-size: 13px;
   color: var(--color-text-muted);
@@ -775,6 +848,69 @@
   width: 16px;
   height: 16px;
   accent-color: var(--color-primary);
+}
+
+/* Configuration booleans use a compact switch so every settings surface has
+   the same affordance. Selection lists keep their native checkbox semantics. */
+.settings-toggle input[type="checkbox"],
+.settings-switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.settings-toggle input[type="checkbox"]::after,
+.settings-switch-input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
+  transition: transform 0.16s ease, background-color 0.16s ease;
+}
+
+.settings-toggle input[type="checkbox"]:checked,
+.settings-switch-input:checked {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.settings-toggle input[type="checkbox"]:checked::after,
+.settings-switch-input:checked::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.settings-toggle input[type="checkbox"]:hover:not(:disabled),
+.settings-switch-input:hover:not(:disabled) {
+  border-color: var(--color-primary-strong);
+}
+
+.settings-toggle input[type="checkbox"]:focus-visible,
+.settings-switch-input:focus-visible {
+  outline: 2px solid var(--color-primary-soft);
+  outline-offset: 2px;
+}
+
+.settings-toggle input[type="checkbox"]:disabled,
+.settings-switch-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .settings-field {
@@ -978,9 +1114,19 @@ select.settings-field__input {
 }
 
 @media (max-width: 720px) {
+  .llm-config-card {
+    flex-wrap: wrap;
+  }
+
   .llm-config-card__hit {
     flex-wrap: wrap;
     gap: 6px 12px;
+  }
+
+  .llm-config-card__actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding: 0 10px 8px;
   }
 
   .llm-config-card__meta {
@@ -1013,7 +1159,8 @@ select.settings-field__input {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 420px;
+  width: 100%;
+  max-width: none;
 }
 
 .setup-manage-stack .settings-field--stack {
@@ -1042,6 +1189,14 @@ select.settings-field__input {
 
 .settings-section--debug .settings-section__desc {
   margin-bottom: 12px;
+}
+
+.settings-field__hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .context-settings__details {
@@ -1151,17 +1306,17 @@ select.settings-field__input {
 }
 
 .tool-exec-bubble--child {
-  border-left-color: #c586c0;
+  border-left-color: var(--color-auto);
   background: var(--color-surface-muted);
 }
 
 .tool-exec-bubble--shell {
-  border-left-color: #e2a053;
+  border-left-color: var(--color-warning);
   background: var(--color-surface-muted);
 }
 
 .tool-exec-bubble--terminal {
-  border-left-color: #569cd6;
+  border-left-color: var(--color-info);
   background: var(--color-surface-muted);
 }
 
@@ -1192,19 +1347,25 @@ select.settings-field__input {
   opacity: 0.85;
 }
 
+.tool-source-badge__svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.9;
+}
+
 .tool-source-badge--child {
-  background: rgba(197, 134, 192, 0.14);
-  color: #c586c0;
+  background: var(--color-auto-soft);
+  color: var(--color-auto);
 }
 
 .tool-source-badge--shell {
-  background: rgba(226, 160, 83, 0.14);
-  color: #e2a053;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 .tool-source-badge--terminal {
-  background: rgba(86, 156, 214, 0.14);
-  color: #569cd6;
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 .tool-source-badge--fs {
@@ -1223,18 +1384,18 @@ select.settings-field__input {
 }
 
 .tool-source-badge--browser {
-  background: rgba(86, 156, 214, 0.14);
-  color: #569cd6;
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 .tool-source-badge--triggers {
-  background: rgba(220, 220, 170, 0.14);
-  color: #dcdcaa;
+  background: var(--color-auto-soft);
+  color: var(--color-auto);
 }
 
 .tool-source-badge--skills {
-  background: rgba(181, 206, 168, 0.14);
-  color: #b5cea8;
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 .tool-source-badge--tool {
@@ -1522,15 +1683,20 @@ select.settings-field__input {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: #e2e8f0;
-  color: #334155;
+  background: var(--color-pending-soft);
+  color: var(--color-pending);
   font-size: 10px;
   line-height: 1;
 }
 
 .tool-exec-status-icon--success {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.tool-exec-status-icon--failure {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 @keyframes tool-spin {
@@ -2442,6 +2608,11 @@ select.settings-field__input {
   background: var(--color-text-subtle);
 }
 
+.nav-rail__dot--unselected {
+  background: var(--color-text-subtle);
+  opacity: 0.55;
+}
+
 .nav-rail__footer-actions {
   display: inline-flex;
   align-items: center;
@@ -2461,13 +2632,17 @@ select.settings-field__input {
   min-height: 0;
 }
 
+.nav-rail__section--autonomous { order: 3; }
+.nav-rail__section:has(.nav-rail__folder-row) { order: 2; }
+.nav-rail__section:not(.nav-rail__section--autonomous):not(:has(.nav-rail__folder-row)) { order: 1; }
+
 .nav-rail__section-head {
   position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 28px;
-  padding: 2px 8px 8px 8px;
+  min-height: 32px;
+  padding: 2px 8px 6px 8px;
 }
 
 .nav-rail__section-actions {
@@ -2476,7 +2651,7 @@ select.settings-field__input {
   justify-content: flex-end;
   gap: 2px;
   flex: 0 0 auto;
-  min-width: 50px;
+  min-width: 0;
   pointer-events: none;
 }
 
@@ -2569,8 +2744,10 @@ select.settings-field__input {
 }
 
 .nav-rail__section-chevron {
-  display: none;
-  margin-left: auto;
+  display: inline-block;
+  position: absolute;
+  right: 12px;
+  margin-left: 0;
   color: var(--color-text-subtle);
   font-size: 15px;
   line-height: 1;
@@ -2724,7 +2901,7 @@ select.settings-field__input {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
+  min-height: 36px;
   padding: 6px 10px;
   border-radius: var(--radius-sidebar-item);
   cursor: pointer;
@@ -2741,6 +2918,11 @@ select.settings-field__input {
 
 .nav-rail__item--active:hover {
   background: var(--color-sidebar-active);
+}
+
+.nav-rail__item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .nav-rail__item-main {
@@ -3318,15 +3500,15 @@ select.settings-field__input {
 }
 
 .approval-action-btn--approve:hover:not(:disabled) {
-  border-color: #4ade80;
-  color: #14532d;
-  background: #dcfce7;
+  border-color: var(--color-success);
+  color: var(--color-success);
+  background: var(--color-success-soft);
 }
 
 .approval-action-btn--reject:hover:not(:disabled) {
-  border-color: #f87171;
-  color: #7f1d1d;
-  background: #fee2e2;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 
 /* ---------- composer toolbar ---------- */
@@ -4154,6 +4336,14 @@ select.settings-field__input {
   font-weight: 600;
 }
 
+.command-section__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .command-section__head .command-section__title {
   margin-bottom: 0;
 }
@@ -4249,6 +4439,48 @@ select.settings-field__input {
 
 .trigger-form {
   margin-top: 4px;
+}
+
+/* Embedded settings editors follow the same label/control rhythm as the
+   surrounding settings pages. Long task text remains a full-width field. */
+.settings-embedded-panel .trigger-form .settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.7fr);
+  align-items: center;
+  gap: 24px;
+  margin-top: 0;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-embedded-panel .trigger-form .settings-field__input {
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.settings-embedded-panel .trigger-form .settings-field__hint {
+  grid-column: 2;
+  margin-top: -4px;
+}
+
+.settings-embedded-panel .trigger-form .trigger-form__textarea,
+.settings-embedded-panel .trigger-form .trigger-form__task,
+.settings-embedded-panel .trigger-form .trigger-form__enabled,
+.settings-embedded-panel .trigger-form .trigger-form__row,
+.settings-embedded-panel .trigger-form .trigger-form__legacy-warning {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .settings-embedded-panel .trigger-form .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .settings-embedded-panel .trigger-form .settings-field__hint {
+    grid-column: auto;
+    margin-top: 0;
+  }
 }
 
 .trigger-form__heading {
@@ -4434,40 +4666,40 @@ select.settings-field__input {
 }
 
 .decision-pill--allow {
-  background: rgba(34, 197, 94, 0.14);
-  color: #15803d;
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 .decision-pill--approval {
-  background: rgba(245, 158, 11, 0.16);
-  color: #b45309;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 .decision-pill--deny {
-  background: rgba(239, 68, 68, 0.14);
-  color: #b91c1c;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .decision-pill--rule {
-  background: rgba(0, 120, 212, 0.12);
-  color: #005a9e;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
 }
 
 :root:not([data-theme="light"]) .decision-pill--rule {
-  background: rgba(96, 205, 255, 0.16);
-  color: #99ebff;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
 }
 
 :root:not([data-theme="light"]) .decision-pill--allow {
-  color: #6ccb5f;
+  color: var(--color-success);
 }
 
 :root:not([data-theme="light"]) .decision-pill--approval {
-  color: #fce100;
+  color: var(--color-warning);
 }
 
 :root:not([data-theme="light"]) .decision-pill--deny {
-  color: #ff99a4;
+  color: var(--color-danger);
 }
 
 .policy-panel__toolbar {
@@ -4490,6 +4722,15 @@ select.settings-field__input {
   border: 1px solid var(--color-border);
   font-size: 13px;
   background: var(--color-surface);
+}
+
+/* Grant fields are vertical settings fields; the toolbar flex basis must not
+   become an input height when the same filter class is reused here. */
+.policy-panel__grant-form .policy-panel__filter {
+  flex: 0 1 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .policy-panel__hint {
@@ -4538,7 +4779,7 @@ select.settings-field__input {
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: rgba(34, 197, 94, 0.1);
-  color: #15803d;
+  color: var(--color-success);
   font-size: 13px;
 }
 
@@ -4582,9 +4823,9 @@ select.settings-field__input {
 }
 
 .policy-decision-btn--active.policy-decision-btn--always {
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(245, 158, 11, 0.35);
-  color: #b45309;
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
 }
 
 .policy-decision-btn--active.policy-decision-btn--rule {
@@ -4594,22 +4835,9 @@ select.settings-field__input {
 }
 
 .policy-decision-btn--active.policy-decision-btn--deny {
-  background: rgba(239, 68, 68, 0.14);
-  border-color: rgba(239, 68, 68, 0.35);
-  color: #b91c1c;
-}
-
-/* legacy decision class names */
-.policy-decision-btn--active.policy-decision-btn--allow-auto {
-  background: rgba(34, 197, 94, 0.14);
-  border-color: rgba(34, 197, 94, 0.35);
-  color: #15803d;
-}
-
-.policy-decision-btn--active.policy-decision-btn--require-approval {
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(245, 158, 11, 0.35);
-  color: #b45309;
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .status-panel,
@@ -4680,13 +4908,19 @@ select.settings-field__input {
 }
 
 .help-panel--embedded .help-panel__body {
+  display: flex;
+  flex-direction: column;
   padding-top: 4px;
+}
+
+.help-panel--embedded .help-section {
+  width: 100%;
 }
 
 .help-shortcut-item,
 .help-cmd-item {
   display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 12px;
   align-items: baseline;
 }
@@ -4704,6 +4938,9 @@ select.settings-field__input {
 
 .help-cmd-item__cmd {
   justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   padding: 3px 8px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
@@ -4733,6 +4970,23 @@ select.settings-field__input {
   border-top: 1px solid var(--color-border);
   font-size: 12px;
   color: var(--color-text-subtle);
+}
+
+.nav-rail__section-icon--auto,
+.nav-rail__section--autonomous .nav-rail__section-action {
+  color: var(--color-auto, var(--color-primary));
+}
+
+.nav-rail__section--autonomous .nav-rail__section-action:hover {
+  color: var(--color-auto, var(--color-primary));
+}
+
+@media (max-width: 640px) {
+  .help-shortcut-item,
+  .help-cmd-item {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
 
 /* ---------- chat responsive layout ---------- */
@@ -4899,4 +5153,3 @@ select.settings-field__input {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-

@@ -10,6 +10,7 @@ const SkillsSettings = () => import("../views/settings/SkillsSettings.vue");
 const TriggersSettings = () => import("../views/settings/TriggersSettings.vue");
 const SecuritySettings = () => import("../views/settings/SecuritySettings.vue");
 const AboutSettings = () => import("../views/settings/AboutSettings.vue");
+const FeedbackSettings = () => import("../views/settings/FeedbackSettings.vue");
 const ContextSettings = () => import("../views/settings/ContextSettings.vue");
 const ConnectionSettings = () => import("../views/settings/ConnectionSettings.vue");
 const McpSettings = () => import("../views/settings/McpSettings.vue");
@@ -17,6 +18,7 @@ const LinuxChannelsSettings = () => import("../views/settings/LinuxChannelsSetti
 const CapabilitiesSettings = () => import("../views/settings/CapabilitiesSettings.vue");
 const AgentsSettings = () => import("../views/settings/AgentsSettings.vue");
 const AgentDetailSettings = () => import("../views/settings/AgentDetailSettings.vue");
+const AutoOverviewView = () => import("../views/AutoOverviewView.vue");
 
 async function requireWorkgroupEnabled() {
   try {
@@ -49,6 +51,7 @@ const router = createRouter({
       beforeEnter: requireWorkgroupEnabled,
       children: [{ path: "", name: "workgroups", component: WorkgroupView }],
     },
+    { path: "/auto", component: ChatLayout, children: [{ path: "", name: "auto-overview", component: AutoOverviewView }] },
     {
       path: "/settings",
       component: SettingsLayout,
@@ -67,6 +70,7 @@ const router = createRouter({
         { path: "security", name: "settings-security", component: SecuritySettings },
         { path: "help", redirect: "/settings/about" },
         { path: "about", name: "settings-about", component: AboutSettings },
+        { path: "feedback", name: "settings-feedback", component: FeedbackSettings },
       ],
     },
   ],

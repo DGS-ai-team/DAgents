@@ -30,7 +30,27 @@ func (m *Manager) OnStreamEvent(ev stream.Event) {
 		// production Hub always supplies AgentSeq for replayable Agent events.
 		seq = ev.Seq
 	}
-	m.bumpNotifySeq(ev.SessionID, seq)
+	m.bumpNotifySeq(ev.AgentID, seq)
+	m.publishNotificationChanged(ev.AgentID)
+}
+
+// publishNotificationChanged publishes the complete notification projection
+// after the durable cursor/pending projection has changed. Shells consume this
+// event directly; they only use GET /v1/agents for initial/reconnect hydrate.
+// It is intentionally a separate event from the user-facing turn event so the
+// tray does not need to infer unread/HITL state from tool semantics.
+func (m *Manager) publishNotificationChanged(sessionID string) {
+	if m == nil || m.hub == nil || trimSessionID(sessionID) == "" {
+		return
+	}
+	state := m.NotificationState(sessionID)
+	m.hub.Publish(sessionID, "notification_changed", map[string]any{
+		"notify_seq":         state.NotifySeq,
+		"ack_seq":            state.AckSeq,
+		"has_unread":         state.HasUnread,
+		"has_pending_hitl":   state.HasPendingHITL,
+		"pending_hitl_items": state.PendingHITLItems,
+	})
 }
 
 func (m *Manager) bumpNotifySeq(sessionID string, seq int) {
@@ -56,7 +76,11 @@ func (m *Manager) AckSession(ctx context.Context, sessionID string, agentSeq int
 		return nil, fmt.Errorf("agent_seq must be positive")
 	}
 	if rt := m.getRuntime(sessionID); rt != nil {
-		return rt.ackSession(ctx, agentSeq)
+		state, err := rt.ackSession(ctx, agentSeq)
+		if err == nil {
+			m.publishNotificationChanged(sessionID)
+		}
+		return state, err
 	}
 	if m.store == nil {
 		return nil, fmt.Errorf("agent_not_found")
@@ -68,7 +92,15 @@ func (m *Manager) AckSession(ctx context.Context, sessionID string, agentSeq int
 	if state == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
-	return notificationFromRuntimeState(state.Pending, state.NotifySeq, state.AckSeq), nil
+	var pending *turn.PendingHITL
+	if lifecycle, projected, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, ""); projectionErr != nil {
+		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
+	} else if projected {
+		pending = pendingFromLifecycleSnapshot(lifecycle)
+	}
+	out := notificationFromRuntimeState(pending, state.NotifySeq, state.AckSeq)
+	m.publishNotificationChanged(sessionID)
+	return out, nil
 }
 
 // NotificationState 返回 session 通知态（内存 runtime 或 DB）。
@@ -83,11 +115,11 @@ func (m *Manager) NotificationState(sessionID string) NotificationState {
 	if err != nil || rec == nil {
 		return NotificationState{}
 	}
-	pending := rec.RuntimeState.Pending
+	var pending *turn.PendingHITL
 	if lifecycle, projected, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID); projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
 	} else if projected {
-		pending = pendingFromLifecycleSnapshot(lifecycle, nil)
+		pending = pendingFromLifecycleSnapshot(lifecycle)
 	}
 	st := notificationFromRuntimeState(pending, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
 	if st == nil {

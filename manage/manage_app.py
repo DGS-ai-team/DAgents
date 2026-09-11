@@ -40,6 +40,10 @@ from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.vertical import VerticalLoop
 from manage.workgroup.ws_hub import WorkgroupWSHub
 from manage.workgroup.ws_routes import build_workgroup_ws_router
+from manage.feedback.routes import build_feedback_router
+from manage.feedback.store import FeedbackStore
+from manage.auto_employees.routes import build_auto_employee_router
+from manage.auto_employees.store import AutoSummaryStore
 
 _CONSOLE_DIR = Path(__file__).resolve().parent / "console" / "static"
 
@@ -53,6 +57,8 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
     releases_store = ReleasePackageStore(db=db if db.enabled else None)
     session_store = SessionStore()
+    feedback_store = FeedbackStore(db=db if db.enabled else None)
+    auto_summary_store = AutoSummaryStore(db=db if db.enabled else None)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -93,14 +99,13 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     externaltools_store = ExternalToolPackageStore(db=db if db.enabled else None)
     plugins_store = PluginPackageStore(db=db if db.enabled else None)
     cases_store = CaseExampleStore(db=db if db.enabled else None)
-    workgroup_store = WorkGroupStore(
-        db=db if db.enabled else None,
-        workspaces_dir=cfg.workgroup_workspaces_dir,
-    )
+    workgroup_store = WorkGroupStore(db=db if db.enabled else None)
     workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
     workgroup_loop = VerticalLoop(workgroup_store, hub=workgroup_ws_hub)
 
     app.include_router(build_auth_router(session_store, store))
+    app.include_router(build_feedback_router(feedback_store))
+    app.include_router(build_auto_employee_router(auto_summary_store))
     app.include_router(build_registry_router(store, audit))
     app.include_router(
         build_workgroup_router(
@@ -162,6 +167,8 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.workgroup_store = workgroup_store
     app.state.workgroup_ws_hub = workgroup_ws_hub
     app.state.workgroup_loop = workgroup_loop
+    app.state.feedback_store = feedback_store
+    app.state.auto_summary_store = auto_summary_store
     return app
 
 

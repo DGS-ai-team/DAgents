@@ -64,11 +64,6 @@ CREATE INDEX IF NOT EXISTS idx_execution_events_process
 	if err != nil {
 		return err
 	}
-	// Older runtime databases predate the audit fields. SQLite returns a
-	// duplicate-column error for already migrated databases; it is safe to
-	// ignore that error just like the existing store migrations do.
-	_, _ = s.db.Exec(`ALTER TABLE execution_events ADD COLUMN command_digest TEXT NOT NULL DEFAULT ''`)
-	_, _ = s.db.Exec(`ALTER TABLE execution_events ADD COLUMN output_bytes INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 

@@ -25,8 +25,9 @@ func TestPatchAgent_toolDisableSoftRejectAndNotice(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	cfg.LLM.Mock = true
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -45,6 +46,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -127,11 +129,6 @@ defaults:
 	if !strings.Contains(err.Error(), "is not enabled") {
 		t.Fatalf("want not-enabled error, got %v", err)
 	}
-	_, err = reg.StartBackground(context.Background(), created.AgentID, "bash_run", "call-x", `{"command":"echo no"}`)
-	if err == nil || !strings.Contains(err.Error(), "is not enabled") {
-		t.Fatalf("want StartBackground reject, got %v", err)
-	}
-
 	if _, err := reg.Execute(context.Background(), "write_file", `{"path":"a.txt","content":"x"}`); err != nil {
 		t.Fatalf("write_file should remain enabled: %v", err)
 	}

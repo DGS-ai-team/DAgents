@@ -2,33 +2,29 @@ package turn
 
 import "strings"
 
-// ContextMutation is one reason a model-visible context segment must be
-// rebuilt. Keeping pending causes as a typed slice avoids making the internal
-// state machine depend on a comma-delimited wire string.
-type ContextMutation struct {
-	Reason string `json:"reason"`
-}
-
-func appendContextMutation(previous []ContextMutation, reason string) []ContextMutation {
+// appendContextMutation records a distinct reason for rebuilding the next
+// model context snapshot. Reasons are internal strings because lifecycle
+// events already expose one compact diagnostic reason.
+func appendContextMutation(previous []string, reason string) []string {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return previous
 	}
 	for _, mutation := range previous {
-		if mutation.Reason == reason {
+		if mutation == reason {
 			return previous
 		}
 	}
-	return append(previous, ContextMutation{Reason: reason})
+	return append(previous, reason)
 }
 
-func contextMutationReasons(mutations []ContextMutation) string {
+func contextMutationReasons(mutations []string) string {
 	if len(mutations) == 0 {
 		return ""
 	}
 	reasons := make([]string, 0, len(mutations))
 	for _, mutation := range mutations {
-		if reason := strings.TrimSpace(mutation.Reason); reason != "" {
+		if reason := strings.TrimSpace(mutation); reason != "" {
 			reasons = append(reasons, reason)
 		}
 	}

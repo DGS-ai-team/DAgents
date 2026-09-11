@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { statusStore, hasStatus } from "../stores/statusLines.js";
 import { hasStreamingTextContent } from "../stores/transcript.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   llmSettings: { type: Object, default: null },
@@ -103,23 +104,7 @@ onBeforeUnmount(() => {
         @click="toggleMenu"
       >
         <span class="composer-toolbar__trigger-label">{{ activeLabel }}</span>
-        <svg
-          v-if="canSwitch"
-          class="composer-toolbar__chevron"
-          viewBox="0 0 12 12"
-          width="12"
-          height="12"
-          aria-hidden="true"
-        >
-          <path
-            d="M3 4.5L6 7.5L9 4.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.4"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+        <UiIcon v-if="canSwitch" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
       </button>
 
       <div
@@ -140,7 +125,7 @@ onBeforeUnmount(() => {
           @click="pickProfile(id)"
         >
           <span class="composer-toolbar__option-label">{{ id }}</span>
-          <span v-if="id === activeProfile" class="composer-toolbar__option-check" aria-hidden="true">✓</span>
+          <UiIcon v-if="id === activeProfile" class="composer-toolbar__option-check" name="check" :size="14" />
         </button>
       </div>
     </div>

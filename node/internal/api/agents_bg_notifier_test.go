@@ -26,8 +26,9 @@ func TestPerAgentBashTimeoutDoesNotCreateAsyncCallback(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	cfg.LLM.Mock = true
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -45,6 +46,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -85,7 +87,7 @@ defaults:
 		t.Fatalf("expected synchronous timeout without job, got %q", out)
 	}
 	counts := reg.SessionToolJobCounts(created.AgentID)
-	if counts.Running != 0 || counts.Background != 0 {
+	if counts.Running != 0 {
 		t.Fatalf("timed out bash left jobs behind: %+v", counts)
 	}
 }

@@ -4,29 +4,39 @@ import "time"
 
 // DuplicateConfig 控制重复 tool call 检测（仅 rule+auto 路径）。
 type DuplicateConfig struct {
-	Enabled       bool
+	// Enabled 为 nil 时表示未配置，使用默认值 true；非 nil 时尊重显式开关。
+	Enabled       *bool
 	WindowSeconds int
 }
 
 // DefaultDuplicateConfig 返回默认配置（60 秒窗口，启用）。
 func DefaultDuplicateConfig() DuplicateConfig {
+	enabled := true
 	return DuplicateConfig{
-		Enabled:       true,
+		Enabled:       &enabled,
 		WindowSeconds: 60,
 	}
 }
 
 // DuplicateConfigOrDefault 将 TurnOptions 传入的配置与默认值合并（零值 struct 视为未配置）。
 func DuplicateConfigOrDefault(c DuplicateConfig) DuplicateConfig {
-	if c == (DuplicateConfig{}) {
+	if c.Enabled == nil && c.WindowSeconds == 0 {
 		return DefaultDuplicateConfig()
 	}
 	out := DefaultDuplicateConfig()
-	out.Enabled = c.Enabled
+	if c.Enabled != nil {
+		enabled := *c.Enabled
+		out.Enabled = &enabled
+	}
 	if c.WindowSeconds > 0 {
 		out.WindowSeconds = c.WindowSeconds
 	}
 	return out
+}
+
+// IsEnabled 返回是否启用。nil 仅在调用方传入未归一化配置时出现，此时采用默认值。
+func (c DuplicateConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 func (c DuplicateConfig) windowDuration() time.Duration {

@@ -92,6 +92,58 @@ impl Store {
         true
     }
 
+    /// Apply Node's complete notification projection. Display metadata remains
+    /// from the initial/reconnect agent snapshot.
+    pub fn apply_notification(
+        &self,
+        agent_id: &str,
+        has_pending_hitl: bool,
+        pending_hitl_items: i32,
+        has_unread: bool,
+    ) -> bool {
+        let id = agent_id.trim();
+        if id.is_empty() {
+            return false;
+        }
+        let Ok(mut guard) = self.by_agent.write() else {
+            return false;
+        };
+        if !has_pending_hitl && !has_unread {
+            return guard.remove(id).is_some();
+        }
+        let mut items = pending_hitl_items;
+        if items <= 0 && has_pending_hitl {
+            items = 1;
+        }
+        let event_type = if has_pending_hitl {
+            "hitl_required"
+        } else {
+            ""
+        };
+        if let Some(entry) = guard.get(id) {
+            if entry.hitl_items == items
+                && entry.has_unread == has_unread
+                && entry.event_type == event_type
+            {
+                return false;
+            }
+        }
+        let entry = guard.entry(id.to_string()).or_insert_with(|| Entry {
+            agent_id: id.to_string(),
+            display_name: String::new(),
+            hitl_items: 0,
+            has_unread: false,
+            event_type: String::new(),
+            updated_at: SystemTime::now(),
+            session_id: id.to_string(),
+        });
+        entry.hitl_items = items;
+        entry.has_unread = has_unread;
+        entry.event_type = event_type.into();
+        entry.updated_at = SystemTime::now();
+        true
+    }
+
     pub fn entries(&self) -> Vec<Entry> {
         let Ok(guard) = self.by_agent.read() else {
             return Vec::new();
@@ -125,20 +177,34 @@ impl Store {
             label,
         }
     }
-
-    pub fn has_pending_hitl(&self) -> bool {
-        let Ok(guard) = self.by_agent.read() else {
-            return false;
-        };
-        guard.values().any(|e| e.hitl_items > 0)
-    }
 }
 
-pub fn should_sync_on_event(ev: &StreamEvent) -> bool {
-    if !event_has_agent(ev) {
+/// Apply one authoritative notification_changed SSE event.
+pub fn apply_notification_changed(store: &Store, ev: &StreamEvent) -> bool {
+    if ev.event_type != "notification_changed" || !event_has_agent(ev) {
         return false;
     }
-    matches!(ev.event_type.as_str(), "hitl_required" | "turn_finished")
+    let has_unread = ev
+        .data
+        .get("has_unread")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let has_pending_hitl = ev
+        .data
+        .get("has_pending_hitl")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let pending_hitl_items = ev
+        .data
+        .get("pending_hitl_items")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+    store.apply_notification(
+        &event_agent_id(ev),
+        has_pending_hitl,
+        pending_hitl_items,
+        has_unread,
+    )
 }
 
 pub fn event_has_agent(ev: &StreamEvent) -> bool {
@@ -224,6 +290,7 @@ fn short_agent_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     fn agent(id: &str, name: &str, unread: bool, hitl: bool, items: i32) -> AgentSummary {
         AgentSummary {
@@ -233,7 +300,6 @@ mod tests {
             has_pending_hitl: hitl,
             pending_hitl_items: items,
             active: false,
-            run_turn_phase: String::new(),
             has_active_turn: false,
             notify_seq: 0,
             ack_seq: 0,
@@ -254,26 +320,42 @@ mod tests {
         assert_eq!(sum.agent_count, 2);
         assert_eq!(sum.item_count, 4);
         assert_eq!(sum.label, "2 个 Agent · 4 项待处理");
-        assert!(store.has_pending_hitl());
     }
 
     #[test]
-    fn filters_sync_events() {
+    fn applies_notification_events_without_polling() {
+        let store = Store::new();
+        let mut incoming = HashMap::new();
+        incoming.insert(
+            "a1".into(),
+            Entry {
+                agent_id: "a1".into(),
+                session_id: "a1".into(),
+                display_name: String::new(),
+                hitl_items: 1,
+                has_unread: false,
+                event_type: "hitl_required".into(),
+                updated_at: SystemTime::now(),
+            },
+        );
+        store.replace_from_node(incoming);
         let mut ev = StreamEvent {
-            event_type: "hitl_required".into(),
+            event_type: "notification_changed".into(),
             session_id: "a1".into(),
-            agent_id: String::new(),
+            agent_id: "a1".into(),
             seq: 0,
             agent_seq: 0,
             event_version: 1,
             stream_epoch: "test".into(),
             delivery: "replayable".into(),
-            data: HashMap::new(),
+            data: HashMap::from([
+                ("has_pending_hitl".into(), Value::Bool(false)),
+                ("pending_hitl_items".into(), Value::from(0)),
+                ("has_unread".into(), Value::Bool(false)),
+            ]),
         };
-        assert!(should_sync_on_event(&ev));
+        assert!(apply_notification_changed(&store, &ev));
         ev.event_type = "tool_call".into();
-        assert!(!should_sync_on_event(&ev));
-        ev.session_id.clear();
-        assert!(!event_has_agent(&ev));
+        assert!(!apply_notification_changed(&store, &ev));
     }
 }

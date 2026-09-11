@@ -10,12 +10,11 @@ import (
 func testBaseConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		NodeID: "setup-test",
-		FSRoot: t.TempDir(),
+		NodeID:      "setup-test",
+		RuntimeRoot: t.TempDir(),
+		LLM:         config.LLMConfig{Provider: "deepseek", Model: "deepseek-chat"},
 	}
 	cfg.ApplyDefaults()
-	cfg.LLM.Provider = "deepseek"
-	cfg.LLM.Model = "deepseek-chat"
 	return cfg
 }
 
@@ -27,7 +26,7 @@ func TestViewFromConfig(t *testing.T) {
 	cfg.Skills.Enabled = false
 
 	view := ViewFromConfig(cfg)
-	if view.LLM.Provider != "deepseek" || view.Manage.Enabled != true || view.Features.SkillsEnabled != false {
+	if len(view.LLM.Profiles) == 0 || view.LLM.Profiles[0].Provider != "deepseek" || view.Manage.Enabled != true || view.Features.SkillsEnabled != false {
 		t.Fatalf("view = %+v", view)
 	}
 }
@@ -72,10 +71,7 @@ func TestApplyPatch_llmAndFeatures(t *testing.T) {
 	cfg := testBaseConfig(t)
 	updated, err := ApplyPatch(cfg, SettingsPatch{
 		LLM: &LLMSettings{
-			Provider:  "mock",
-			Model:     "mock",
-			APIKeyEnv: "TEST_KEY",
-			Mock:      true,
+			Profiles: []LLMProfileSettings{{ID: "default", Provider: "mock", Model: "mock", APIKeyEnv: "TEST_KEY", Mock: true}},
 		},
 		Features: &FeatureSettings{
 			SkillsEnabled:     false,
@@ -107,7 +103,7 @@ func TestApplyPatch_manageRequiresURL(t *testing.T) {
 func TestApplyPatch_invalidProvider(t *testing.T) {
 	cfg := testBaseConfig(t)
 	_, err := ApplyPatch(cfg, SettingsPatch{
-		LLM: &LLMSettings{Provider: "unknown", Model: "x"},
+		LLM: &LLMSettings{Profiles: []LLMProfileSettings{{ID: "default", Provider: "unknown", Model: "x"}}},
 	})
 	if err == nil {
 		t.Fatal("expected unsupported provider error")
@@ -153,6 +149,26 @@ func TestApplyPatch_compressionBlockingLessThanSilent(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected blocking < silent error")
+	}
+}
+
+func TestApplyPatch_memoryCandidatePipeline(t *testing.T) {
+	cfg := testBaseConfig(t)
+	updated, err := ApplyPatch(cfg, SettingsPatch{Memory: &MemorySettings{
+		AutoExtract:        true,
+		CandidateQueueSize: 4,
+		MaxCandidates:      3,
+		CoreBudgetTokens:   900,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Memory.AutoExtract || updated.Memory.CandidateQueueSize != 4 || updated.Memory.MaxCandidates != 3 || updated.Memory.CoreBudgetTokens != 900 {
+		t.Fatalf("memory config = %+v", updated.Memory)
+	}
+	view := ViewFromConfig(updated)
+	if view.Memory != (MemorySettings{AutoExtract: true, CandidateQueueSize: 4, MaxCandidates: 3, CoreBudgetTokens: 900}) {
+		t.Fatalf("memory view = %+v", view.Memory)
 	}
 }
 
@@ -224,8 +240,7 @@ func TestApplyPatch_wecomWebhook(t *testing.T) {
 
 func TestApplyPatch_completeNodeProfile(t *testing.T) {
 	cfg := testBaseConfig(t)
-	done := false
-	cfg.Onboarding.NodeProfileCompleted = &done
+	cfg.Onboarding.NodeProfileCompleted = false
 	cfg.Agent.Name = ""
 
 	_, err := ApplyPatch(cfg, SettingsPatch{

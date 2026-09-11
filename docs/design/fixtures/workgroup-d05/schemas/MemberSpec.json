@@ -11,7 +11,7 @@
     "member_generation",
     "llm_profile_id",
     "llm_profile_revision",
-    "max_tool_loops",
+    "max_steps",
     "prompt",
     "memory",
     "tools",
@@ -57,7 +57,7 @@
       "type": "string",
       "minLength": 1
     },
-    "max_tool_loops": {
+    "max_steps": {
       "type": "integer",
       "minimum": 1,
       "maximum": 256

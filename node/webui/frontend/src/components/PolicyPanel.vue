@@ -37,6 +37,11 @@ const filterText = ref("");
 const newShellCommand = ref("");
 const newShellMode = ref("never");
 const bulkToolMode = ref("never");
+const grants = ref([]);
+const grantTools = ref([]);
+const grantToolOptions = ["read_file", "write_file", "search_replace"];
+const grantWorkspace = ref("");
+const grantExpiresAt = ref("");
 
 const resolvedAgentId = computed(() => String(props.agentId || "").trim());
 
@@ -76,6 +81,8 @@ async function load() {
       throw new Error("缺少 agent_id：策略已按 Agent 存储");
     }
     data.value = await api.getPolicy(resolvedAgentId.value);
+    const grantData = await api.listAgentPolicyGrants(resolvedAgentId.value);
+    grants.value = Array.isArray(grantData?.grants) ? grantData.grants : [];
     const def = data.value?.platform?.default_shell || "bash";
     shellTab.value = shellTypes.value.includes(def) ? def : shellTypes.value[0] || "bash";
   } catch (e) {
@@ -106,6 +113,25 @@ async function updateToolMode(name, mode) {
   } finally {
     busyKey.value = "";
   }
+}
+
+async function createGrant() {
+  if (busyKey.value || !grantTools.value.length || !grantWorkspace.value.trim() || !grantExpiresAt.value) return;
+  busyKey.value = "grant-create"; error.value = ""; statusMessage.value = "";
+  try {
+    const expires = new Date(grantExpiresAt.value).toISOString();
+    const created = await api.createAgentPolicyGrant(resolvedAgentId.value, { tools: grantTools.value, workspace: grantWorkspace.value.trim(), expires_at: expires });
+    grants.value = [...grants.value, created]; grantTools.value = []; statusMessage.value = "已创建临时岗位授权";
+  } catch (e) { error.value = e.message; } finally { busyKey.value = ""; }
+}
+
+function grantStatus(grant) { if (grant.revoked_at) return "已撤销"; return new Date(grant.expires_at).getTime() <= Date.now() ? "已过期" : "有效"; }
+function grantTime(grant) { const date = new Date(grant.expires_at); return Number.isNaN(date.getTime()) ? grant.expires_at : date.toLocaleString(); }
+
+async function revokeGrant(grant) {
+  if (!grant?.id || busyKey.value) return;
+  busyKey.value = `grant:${grant.id}`; error.value = "";
+  try { const result = await api.revokeAgentPolicyGrant(resolvedAgentId.value, grant.id); grants.value = grants.value.map((item) => item.id === grant.id ? { ...item, revoked_at: result.revoked_at } : item); statusMessage.value = "已撤销临时岗位授权"; } catch (e) { error.value = e.message; } finally { busyKey.value = ""; }
 }
 
 async function applyBulkToolMode() {
@@ -404,6 +430,23 @@ onMounted(load);
             </table>
           </div>
           <p v-else class="command-panel__empty">暂无显式 shell 规则，可在上方添加</p>
+        </section>
+
+        <section class="command-section policy-panel__grant-section">
+          <div class="command-section__head"><h3 class="command-section__title">临时岗位授权</h3></div>
+          <p class="policy-panel__hint">仅对指定文件工具和规范化工作目录生效；Shell 与无路径工具不会被授权，显式禁止永远优先。模型不能创建或扩大授权。</p>
+          <form class="policy-panel__grant-form" @submit.prevent="createGrant">
+            <div class="settings-field"><span class="settings-field__label">工具白名单</span><div><label v-for="tool in grantToolOptions" :key="tool"><input v-model="grantTools" type="checkbox" :value="tool" :aria-label="`授权 ${tool}`" /> {{ tool }}</label></div></div>
+            <label class="settings-field"><span class="settings-field__label">工作目录</span><input v-model="grantWorkspace" class="policy-panel__filter" placeholder="绝对工作目录" aria-label="授权工作目录" /></label>
+            <label class="settings-field"><span class="settings-field__label">有效期</span><input v-model="grantExpiresAt" class="policy-panel__filter" type="datetime-local" aria-label="授权有效期" /></label>
+            <button type="submit" class="btn btn--primary btn--sm" :disabled="busyKey === 'grant-create'">创建授权</button>
+          </form>
+          <div v-if="grants.length" class="command-table-wrap">
+            <table class="command-table"><thead><tr><th>工具</th><th>工作目录</th><th>有效期</th><th>状态</th><th /></tr></thead><tbody>
+              <tr v-for="grant in grants" :key="grant.id"><td class="command-table__mono">{{ grant.tools.join(", ") }}</td><td class="command-table__mono">{{ grant.workspace }}</td><td>{{ grantTime(grant) }}</td><td>{{ grantStatus(grant) }}</td><td><button v-if="!grant.revoked_at && grantStatus(grant) !== '已过期'" type="button" class="btn btn--ghost btn--sm btn--danger" :disabled="busyKey === `grant:${grant.id}`" @click="revokeGrant(grant)">撤销</button></td></tr>
+            </tbody></table>
+          </div>
+          <p v-else class="command-panel__empty">暂无临时岗位授权</p>
         </section>
 
         <p class="command-panel__foot">

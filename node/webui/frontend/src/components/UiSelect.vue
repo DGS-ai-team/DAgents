@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: "" },
@@ -8,6 +9,12 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   /** settings = 设置/首配输入框外观；compact = 稍紧凑 */
   size: { type: String, default: "settings" },
+  /** auto = 根据视口空间；above/below = 在表单中固定展开方向 */
+  menuPlacement: {
+    type: String,
+    default: "auto",
+    validator: (v) => ["auto", "above", "below"].includes(v),
+  },
 });
 
 const emit = defineEmits(["update:modelValue", "change"]);
@@ -54,7 +61,9 @@ function placeMenu() {
   const maxH = 240;
   const spaceBelow = window.innerHeight - r.bottom - gap;
   const spaceAbove = r.top - gap;
-  const openUp = spaceBelow < Math.min(maxH, 120) && spaceAbove > spaceBelow;
+  const openUp =
+    props.menuPlacement === "above" ||
+    (props.menuPlacement !== "below" && spaceBelow < Math.min(maxH, 120) && spaceAbove > spaceBelow);
   const height = Math.min(maxH, openUp ? spaceAbove : spaceBelow);
   menuStyle.value = {
     position: "fixed",
@@ -149,16 +158,7 @@ onBeforeUnmount(() => {
       <span class="ui-select__value" :class="{ 'ui-select__value--placeholder': showPlaceholder }">
         {{ displayLabel }}
       </span>
-      <svg class="ui-select__chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <path
-          d="M4.5 6.5 8 10l3.5-3.5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
+      <UiIcon class="ui-select__chevron" name="chevron-down" :size="15" />
     </button>
 
     <Teleport to="body">
@@ -186,7 +186,7 @@ onBeforeUnmount(() => {
             v-if="opt.value === String(modelValue ?? '')"
             class="ui-select__option-check"
             aria-hidden="true"
-          >✓</span>
+          ><UiIcon name="check" :size="14" /></span>
         </button>
       </div>
     </Teleport>

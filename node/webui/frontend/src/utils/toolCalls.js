@@ -4,8 +4,6 @@ export const USER_INFORMATION_TOOL = "ask_user_information";
 
 const TEMPORARY_AGENT_TOOLS = new Set([
   "create_temporary_agent",
-  "wait_temporary_agents",
-  "temporary_agent_status",
   "cancel_temporary_agent",
 ]);
 
@@ -15,34 +13,13 @@ function shortChildId(id) {
   return s.length <= 16 ? s : truncateGraphemes(s, 16);
 }
 
-function stringList(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map((v) => String(v || "").trim()).filter(Boolean);
-}
-
-function intVal(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-}
-
 /** 对齐 Python format_temporary_agent_tool_title / Go FormatTemporaryAgentToolTitle。 */
 export function formatTemporaryAgentToolTitle(name, args = {}) {
   const n = String(name || "").trim();
   if (!TEMPORARY_AGENT_TOOLS.has(n)) return null;
   if (n === "create_temporary_agent") {
     const purpose = String(args.purpose || "—").trim() || "—";
-    return args.wait ? `创建临时 Agent · ${purpose} (wait)` : `创建临时 Agent · ${purpose}`;
-  }
-  if (n === "wait_temporary_agents") {
-    const ids = stringList(args.child_agent_ids);
-    let title = ids.length ? `等待 ${ids.length} 个临时 Agent` : "等待临时 Agent";
-    const timeout = intVal(args.timeout_seconds);
-    if (timeout > 0) title += ` · ${timeout}s`;
-    return title;
-  }
-  if (n === "temporary_agent_status") {
-    const ids = stringList(args.child_agent_ids);
-    return ids.length ? `查询 ${ids.length} 个临时 Agent 状态` : "查询临时 Agent 状态";
+    return `创建临时 Agent · ${purpose}`;
   }
   if (n === "cancel_temporary_agent") {
     const short = shortChildId(args.child_agent_id);
@@ -53,7 +30,7 @@ export function formatTemporaryAgentToolTitle(name, args = {}) {
 
 function formatGenericToolTitle(name, args = {}) {
   const keys = Object.keys(args || {})
-    .filter((key) => key !== "call_purpose" && key !== "run_in_background")
+    .filter((key) => key !== "call_purpose")
     .sort();
   if (!keys.length) return `${name}()`;
   const parts = keys.map((key) => `${key}=${formatToolArgValue(args[key])}`);
@@ -197,9 +174,6 @@ export function approvalItemDisplayName(item) {
 
 const APPROVAL_TOOL_LABELS = {
   bash_run: "bash",
-  linux_exec: "Linux 命令",
-  linux_file_upload: "上传 Linux 文件",
-  linux_file_download: "下载 Linux 文件",
   terminal_command: "终端命令",
   terminal_input: "终端输入",
   terminal_open: "打开终端",
@@ -217,7 +191,6 @@ const APPROVAL_TOOL_LABELS = {
   trigger_create: "创建定时任务",
   trigger_update: "更新定时任务",
   trigger_delete: "删除定时任务",
-  background_job_cancel: "取消后台任务",
   screen_capture: "截取屏幕",
   computer_use: "操作桌面",
 };

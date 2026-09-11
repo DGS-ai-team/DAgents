@@ -6,6 +6,7 @@ import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import BrowserCitationBlock from "./BrowserCitationBlock.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   entry: { type: Object, required: true },
@@ -86,10 +87,7 @@ function userImageThumb(src) {
         <div class="msg__file-refs-list">
           <div v-for="file in userFileRefs" :key="file.path" class="msg__file-ref" :title="file.path">
             <span class="msg__file-ref-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none">
-                <path d="M5.25 2.75h6.1L15.5 6.9v10.35H5.25z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
-                <path d="M11.25 2.75V7h4.25" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
+              <UiIcon name="file" :size="16" />
             </span>
             <span class="msg__file-ref-info">
               <strong>{{ file.name || file.path }}</strong>

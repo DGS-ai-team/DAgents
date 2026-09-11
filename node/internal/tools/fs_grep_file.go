@@ -95,8 +95,3 @@ func (r *Registry) execGrepFile(_ context.Context, raw json.RawMessage) (string,
 	opt.fileEncoding = args.Encoding
 	return r.grepSingleFile(args.Path, re, opt)
 }
-
-// execSearchFile 保留旧工具名 handler，与 grep_file 行为一致。
-func (r *Registry) execSearchFile(ctx context.Context, raw json.RawMessage) (string, error) {
-	return r.execGrepFile(ctx, raw)
-}

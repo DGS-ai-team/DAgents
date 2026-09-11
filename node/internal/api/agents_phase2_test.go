@@ -24,8 +24,9 @@ func TestPhase2_agentMessageByAgentID(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	cfg.LLM.Mock = true
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -44,6 +45,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -67,12 +69,13 @@ defaults:
 		t.Fatal(err)
 	}
 
-	fsRoot, ok := srv.sessions.SessionFSRoot(created.AgentID)
+	workspaceRoot, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID)
 	if !ok {
 		t.Fatal("runtime missing")
 	}
-	if fsRoot != cfg.FSRoot {
-		t.Fatalf("fsRoot=%q want shared node fs_root %q", fsRoot, cfg.FSRoot)
+	wantWorkspaceRoot := filepath.Join(cfg.RuntimeDir(), "agents", created.AgentID, "workspace")
+	if workspaceRoot != wantWorkspaceRoot {
+		t.Fatalf("workspaceRoot=%q want Agent workspace %q", workspaceRoot, wantWorkspaceRoot)
 	}
 
 	msgBody, _ := json.Marshal(map[string]any{
@@ -93,9 +96,13 @@ defaults:
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
+	sawTurn := false
 	for {
 		_, hasTurn, _, err := srv.sessions.RuntimeInfo(created.AgentID)
-		if err == nil && !hasTurn {
+		if err == nil && hasTurn {
+			sawTurn = true
+		}
+		if err == nil && sawTurn && !hasTurn {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -113,6 +120,13 @@ defaults:
 	if !strings.Contains(rr.Body.String(), "agent_id") && !strings.Contains(rr.Body.String(), created.AgentID) {
 		t.Fatalf("hydrate body unexpected: %s", rr.Body.String())
 	}
+	historyFiles, err := filepath.Glob(filepath.Join(workspaceRoot, ".dagents", created.AgentID, "history", "*", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(historyFiles) == 0 {
+		t.Fatalf("workspace-scoped raw history was not written under %q", filepath.Join(workspaceRoot, ".dagents", created.AgentID, "history"))
+	}
 }
 
 func TestPhase3_ensureAgentRuntimeAfterRelease(t *testing.T) {
@@ -122,8 +136,9 @@ func TestPhase3_ensureAgentRuntimeAfterRelease(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	cfg.LLM.Mock = true
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -142,6 +157,7 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -164,15 +180,15 @@ defaults:
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	wantFS := cfg.FSRoot
-	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
-		t.Fatalf("initial fsRoot=%q ok=%v want %q", fs, ok, wantFS)
+	wantWorkspace := filepath.Join(cfg.RuntimeDir(), "agents", created.AgentID, "workspace")
+	if workspace, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID); !ok || workspace != wantWorkspace {
+		t.Fatalf("initial workspaceRoot=%q ok=%v want %q", workspace, ok, wantWorkspace)
 	}
 
 	if _, err := srv.sessions.Release(created.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := srv.sessions.SessionFSRoot(created.AgentID); ok {
+	if _, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID); ok {
 		t.Fatal("expected runtime released")
 	}
 
@@ -182,12 +198,12 @@ defaults:
 	if rr.Code != http.StatusOK {
 		t.Fatalf("ensure status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	fsRoot, ok := srv.sessions.SessionFSRoot(created.AgentID)
+	workspaceRoot, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID)
 	if !ok {
 		t.Fatal("runtime missing after ensure")
 	}
-	if fsRoot != wantFS {
-		t.Fatalf("fsRoot after ensure=%q want %q", fsRoot, wantFS)
+	if workspaceRoot != wantWorkspace {
+		t.Fatalf("workspaceRoot after ensure=%q want %q", workspaceRoot, wantWorkspace)
 	}
 
 	// hydrate 也应隐式 ensure
@@ -200,26 +216,29 @@ defaults:
 	if rr.Code != http.StatusOK {
 		t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
-		t.Fatalf("hydrate ensure fsRoot=%q ok=%v", fs, ok)
+	if workspace, ok := srv.sessions.SessionWorkspaceRoot(created.AgentID); !ok || workspace != wantWorkspace {
+		t.Fatalf("hydrate ensure workspaceRoot=%q ok=%v", workspace, ok)
 	}
 }
 
-func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *testing.T) {
+func TestEnsureAgentRuntimeUsesBoundLLMWithoutGlobalProfileSwitch(t *testing.T) {
 	root, err := os.MkdirTemp("", "dagents-agent-llm-focus-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: filepath.Join(root, "runtime")}
+	on := true
+	off := false
 	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
-		"profile-a": {Provider: "mock", Model: "model-a", Mock: true},
-		"profile-b": {Provider: "mock", Model: "model-b", Mock: true},
+		"profile-a": {Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &on},
+		"profile-b": {Provider: "mock", Model: "model-b", Mock: true, MultimodalEnabled: &off},
 	}
 	cfg.LLM.ProfileOrder = []string{"profile-a", "profile-b"}
 	cfg.LLM.Active = "profile-a"
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	if err := cfg.SetActiveLLMProfile("profile-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +248,7 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 		t.Fatal(err)
 	}
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 	t.Cleanup(func() {
 		if srv.sessions != nil {
@@ -260,18 +280,24 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 
 	agentA := create("Agent A", "profile-a")
 	agentB := create("Agent B", "profile-b")
-	if got := cfg.LLM.ActiveProfileID(); got != "profile-b" {
-		t.Fatalf("after creating B active profile=%q", got)
+	if got := cfg.LLM.ActiveProfileID(); got != "profile-a" {
+		t.Fatalf("creating an Agent must not switch global active profile=%q", got)
+	}
+	// Simulate a profile multimodal setting change without changing the Agent
+	// snapshot revision. ensure must rebuild the already-loaded runtime.
+	cfg.LLM.Profiles["profile-a"] = config.LLMProfileConfig{
+		Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &off,
 	}
 
-	// Both runtimes are already loaded and their revisions are unchanged. This
-	// is the path that used to return early and leave profile-b active for A.
+	oldDigest := srv.sessions.RuntimeLLMProfileDigest(agentA)
+	// Both runtimes are already loaded and their revisions are unchanged. The
+	// bound profile change must rebuild only the affected runtime.
 	for _, tc := range []struct {
-		id   string
-		want string
+		id             string
+		wantMultimodal bool
 	}{
-		{agentA, "profile-a"},
-		{agentB, "profile-b"},
+		{agentA, false},
+		{agentB, false},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/v1/agents/"+tc.id+"/ensure", nil)
 		rr := httptest.NewRecorder()
@@ -279,9 +305,15 @@ func TestEnsureAgentRuntimeReappliesBoundLLMProfileWhenRevisionIsUnchanged(t *te
 		if rr.Code != http.StatusOK {
 			t.Fatalf("ensure %s status=%d body=%s", tc.id, rr.Code, rr.Body.String())
 		}
-		if got := cfg.LLM.ActiveProfileID(); got != tc.want {
-			t.Fatalf("ensure %s active profile=%q want %q", tc.id, got, tc.want)
+		if got, ok := srv.sessions.RuntimeMultimodalEnabled(tc.id); !ok || got != tc.wantMultimodal {
+			t.Fatalf("ensure %s runtime multimodal=%v ok=%v want %v", tc.id, got, ok, tc.wantMultimodal)
 		}
+	}
+	if got := cfg.LLM.ActiveProfileID(); got != "profile-a" {
+		t.Fatalf("ensure must not switch global active profile=%q", got)
+	}
+	if got := srv.sessions.RuntimeLLMProfileDigest(agentA); got == oldDigest || got == "" {
+		t.Fatalf("agent A LLM digest=%q, want a refreshed digest", got)
 	}
 }
 

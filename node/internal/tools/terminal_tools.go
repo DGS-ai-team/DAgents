@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -150,7 +151,15 @@ func localTerminalConfig() TerminalConfigInfo {
 		Remark:      "Node 所在主机",
 		TargetKind:  executionTargetLocal,
 		TargetID:    executionTargetLocal,
+		Shell:       defaultLocalTerminalShell(),
 	}
+}
+
+func defaultLocalTerminalShell() string {
+	if runtime.GOOS == "windows" {
+		return "powershell"
+	}
+	return "bash"
 }
 
 func localTerminalConfigs() []TerminalConfigInfo {
@@ -239,11 +248,18 @@ func (r *Registry) execTerminalOpen(ctx context.Context, raw json.RawMessage) (s
 	if shell == "" {
 		shell = strings.TrimSpace(config.Shell)
 	}
+	cwd := strings.TrimSpace(args.CWD)
+	if config.TargetKind == executionTargetLocal {
+		cwd, err = r.resolveRunCWD(cwd)
+		if err != nil {
+			return "", err
+		}
+	}
 	info, err := broker.Open(ctx, r.agentID, TerminalRequest{
 		Target:   ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID},
 		ConfigID: config.ConfigID,
 		Context:  ExecutionContext{AgentID: r.agentID, SessionID: SessionIDFromContext(ctx), ApprovalID: ApprovalIDFromContext(ctx), Target: ExecutionTarget{Kind: config.TargetKind, ID: config.TargetID}},
-		CWD:      strings.TrimSpace(args.CWD),
+		CWD:      cwd,
 		Shell:    shell,
 		Rows:     args.Rows,
 		Cols:     args.Cols,

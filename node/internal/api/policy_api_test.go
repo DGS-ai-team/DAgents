@@ -3,14 +3,18 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -18,8 +22,9 @@ import (
 
 func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +35,7 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	_ = os.MkdirAll(userDir, 0o755)
 	_ = os.WriteFile(filepath.Join(userDir, "general.yaml"), []byte("id: general\ndisplay_name: G\n"), 0o644)
 
-	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
+	reg, err := tools.NewRegistry(cfg.RuntimeDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +44,25 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 		WithTools(reg),
 		WithSkipStore(),
 	)
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	srv.agents = agentsDB
+	t.Cleanup(func() {
+		if srv.triggerSched != nil {
+			srv.triggerSched.Stop()
+		}
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"template_id":  "general",
 		"display_name": "策略测试",
 		"defaults": map[string]any{
 			"llm":   map[string]any{"active": "mock"},
-			"tools": map[string]any{"enabled_groups": []string{"fs", "bash"}},
+			"tools": map[string]any{"enabled_groups": []string{"fs", "bash", "memory"}},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
@@ -62,6 +78,74 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return srv, ts, created.AgentID
+}
+
+func TestAgentPolicyGrantRevokeConcurrentWithToolPutDoesNotResurrect(t *testing.T) {
+	_, ts, agentID := testAgentPolicyServer(t)
+	workspace := t.TempDir()
+	create := doPolicyJSON(t, ts, http.MethodPost, "/v1/agents/"+agentID+"/policy/grants", map[string]any{"tools": []string{"write_file"}, "workspace": workspace, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
+	var grant map[string]any
+	if err := json.Unmarshal(create, &grant); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := grant["id"].(string)
+	var wg sync.WaitGroup
+	statuses := make(chan int, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, status := doPolicyJSONResult(ts, http.MethodDelete, "/v1/agents/"+agentID+"/policy/grants/"+id, nil)
+		statuses <- status
+	}()
+	go func() {
+		defer wg.Done()
+		_, status := doPolicyJSONResult(ts, http.MethodPut, "/v1/agents/"+agentID+"/policy/tools", map[string]any{"updates": []map[string]string{{"name": "write_file", "mode": "rule"}}})
+		statuses <- status
+	}()
+	wg.Wait()
+	close(statuses)
+	for status := range statuses {
+		if status < 200 || status >= 300 {
+			t.Fatalf("concurrent policy request status=%d", status)
+		}
+	}
+	grants := doPolicyJSON(t, ts, http.MethodGet, "/v1/agents/"+agentID+"/policy/grants", nil)
+	var result struct {
+		Grants []policy.Grant `json:"grants"`
+	}
+	if err := json.Unmarshal(grants, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Grants) != 1 || result.Grants[0].RevokedAt == nil {
+		t.Fatalf("grant resurrected: %+v", result.Grants)
+	}
+}
+
+func doPolicyJSON(t *testing.T, ts *httptest.Server, method, path string, body any) []byte {
+	raw, status := doPolicyJSONResult(ts, method, path, body)
+	if status >= 300 {
+		t.Fatalf("%s %s status=%d body=%s", method, path, status, raw)
+	}
+	return []byte(raw)
+}
+
+func doPolicyJSONResult(ts *httptest.Server, method, path string, body any) (string, int) {
+	var reader *bytes.Reader
+	if body == nil {
+		reader = bytes.NewReader(nil)
+	} else {
+		encoded, _ := json.Marshal(body)
+		reader = bytes.NewReader(encoded)
+	}
+	req, _ := http.NewRequest(method, ts.URL+path, reader)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err.Error(), 599
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return string(raw), resp.StatusCode
 }
 
 func TestGlobalPolicyRouteRemoved(t *testing.T) {
@@ -95,7 +179,7 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 		t.Fatalf("snap meta = %+v", snap)
 	}
 
-	putBody := []byte(`{"updates":[{"name":"write_file","decision":"deny"}]}`)
+	putBody := []byte(`{"updates":[{"name":"write_file","mode":"deny"}]}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/policy/tools", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -117,8 +201,8 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 	defer resp2.Body.Close()
 	var snap2 struct {
 		Tools []struct {
-			Name     string `json:"name"`
-			Decision string `json:"decision"`
+			Name string `json:"name"`
+			Mode string `json:"mode"`
 		} `json:"tools"`
 	}
 	if err := json.NewDecoder(resp2.Body).Decode(&snap2); err != nil {
@@ -126,7 +210,7 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 	}
 	found := false
 	for _, item := range snap2.Tools {
-		if item.Name == "write_file" && item.Decision == "deny" {
+		if item.Name == "write_file" && item.Mode == "deny" {
 			found = true
 		}
 	}
@@ -138,7 +222,7 @@ func TestHandleGetPutAgentPolicy(t *testing.T) {
 func TestHandlePutAgentShellPolicy(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 
-	putBody := []byte(`{"updates":[{"command":"rm","decision":"deny"}]}`)
+	putBody := []byte(`{"updates":[{"command":"rm","mode":"deny"}]}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/policy/shell/bash", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +256,7 @@ func TestHandlePutAgentShellPolicy(t *testing.T) {
 func TestHandlePutAgentPolicyProtectAskUserInformation(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 
-	putBody := []byte(`{"updates":[{"name":"ask_user_information","decision":"deny"}]}`)
+	putBody := []byte(`{"updates":[{"name":"ask_user_information","mode":"deny"}]}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/policy/tools", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +279,7 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	putBody := []byte(`{"soul_md":"我是助手","user_md":"用户偏好简洁","custom_md":"临时指令","long_term_md":"记得开会","long_term_scope":"global"}`)
+	putBody := []byte(`{"soul_md":"我是助手","custom_md":"临时指令","memory_entries":[{"content":"记得开会"}],"memory_scope":"global"}`)
 	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/prompt-context", bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -222,11 +306,11 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
 		t.Fatal(err)
 	}
-	if view.SoulMD != "我是助手" || view.Source != "sqlite" {
+	if view.SoulMD != "我是助手" || view.Source != "workspace_memory" {
 		t.Fatalf("view = %+v", view)
 	}
-	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].Content != "记得开会" {
-		t.Fatalf("long_term entries = %+v md=%q", view.LongTermEntries, view.LongTermMD)
+	if len(view.GlobalMemoryEntries) != 1 || view.GlobalMemoryEntries[0].Content != "记得开会" {
+		t.Fatalf("global memory entries = %+v", view.GlobalMemoryEntries)
 	}
 	contextView, err := srv.sessions.GetContextView(agentID)
 	if err != nil {
@@ -243,15 +327,15 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := agentruntime.LongTermScopeFromDefaults(snap); got != "global" {
-		t.Fatalf("long_term_scope was not persisted to agent snapshot: %q", got)
+	if got := agentruntime.MemoryScopeFromDefaults(snap); got != "global" {
+		t.Fatalf("memory_scope was not persisted to agent snapshot: %q", got)
 	}
 }
 
 func TestHandleAgentMemoryEntryMutation(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 	base := ts.URL + "/v1/agents/" + agentID + "/prompt-context"
-	putBody := []byte(`{"long_term_entries":[{"id":"lt-edit","content":"旧内容"},{"id":"lt-delete","content":"待删除"}]}`)
+	putBody := []byte(`{"memory_entries":[{"id":"lt-edit","content":"旧内容"},{"id":"lt-delete","content":"待删除"}]}`)
 	putReq, err := http.NewRequest(http.MethodPut, base, bytes.NewReader(putBody))
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +387,7 @@ func TestHandleAgentMemoryEntryMutation(t *testing.T) {
 	if err := json.NewDecoder(getResp.Body).Decode(&view); err != nil {
 		t.Fatal(err)
 	}
-	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].ID != "lt-edit" || view.LongTermEntries[0].Content != "已编辑" {
-		t.Fatalf("mutated memory entries = %+v", view.LongTermEntries)
+	if len(view.MemoryEntries) != 1 || view.MemoryEntries[0].ID != "lt-edit" || view.MemoryEntries[0].Content != "已编辑" {
+		t.Fatalf("mutated memory entries = %+v", view.MemoryEntries)
 	}
 }

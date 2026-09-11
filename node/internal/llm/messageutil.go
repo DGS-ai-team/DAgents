@@ -140,6 +140,9 @@ func MessageToDeepSeekAPIPayload(m Message) (map[string]any, error) {
 // MessagesToAPIPayload serializes a complete message list without exposing
 // internal source/provenance fields. The list may include a system message.
 func MessagesToAPIPayload(messages []Message) ([]map[string]any, error) {
+	if err := ValidateToolProtocol(messages); err != nil {
+		return nil, err
+	}
 	out := make([]map[string]any, len(messages))
 	for i, message := range messages {
 		payload, err := MessageToDeepSeekAPIPayload(message)

@@ -13,7 +13,7 @@ from browser_use import BrowserProfile, BrowserSession
 
 from dagents_browser.config import BrowserServiceSettings
 from dagents_browser.agent_prompt import build_extend_system_message
-from dagents_browser.llm import create_extraction_llm
+from dagents_browser.llm import create_extraction_llm, llm_settings_from_request
 from dagents_browser.ports import allocate_debug_port
 from dagents_browser.task_archive import (
     archive_task,
@@ -58,7 +58,7 @@ class BrowserUseDriver:
         self._session_latest_task: dict[str, str] = {}
 
     def _task_fs(self, session_key: str) -> Path:
-        return Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+        return Path(self.settings.runtime_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
 
     def _load_archived_task(self, session_key: str, task_id: str) -> dict[str, Any] | None:
         """恢复 sidecar 重启前已归档的终态任务，供 task_status 只读查询。"""
@@ -184,7 +184,7 @@ class BrowserUseDriver:
         if req.get("headed") is not None:
             headed = bool(req["headed"])
         profile_dir = (
-            Path(self.settings.fs_root) / "browser" / "profiles" / sanitize_segment(session_key)
+            Path(self.settings.runtime_root) / "browser" / "profiles" / sanitize_segment(session_key)
         )
         profile_dir.mkdir(parents=True, exist_ok=True)
         args = [
@@ -247,7 +247,8 @@ class BrowserUseDriver:
             started = await self._start({"session_key": session_key, "headed": req.get("headed")})
             if not started.get("ok"):
                 return started
-        if self.settings.llm is None:
+        llm_settings = llm_settings_from_request(req)
+        if llm_settings is None or llm_settings.mock:
             return {
                 "ok": False,
                 "error": (
@@ -256,7 +257,7 @@ class BrowserUseDriver:
                 ),
             }
         try:
-            llm = create_extraction_llm(self.settings.llm)
+            llm = create_extraction_llm(llm_settings)
         except Exception as exc:
             return {"ok": False, "error": f"browser llm init failed: {exc}"}
 
@@ -302,7 +303,7 @@ class BrowserUseDriver:
                     from browser_use import Agent
 
                     task_fs = str(
-                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                        Path(self.settings.runtime_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
                     )
                     Path(task_fs).mkdir(parents=True, exist_ok=True)
                     recent = load_recent_tasks(task_fs)
@@ -317,12 +318,13 @@ class BrowserUseDriver:
                         # MiMo text profiles must keep screenshots disabled, but
                         # the explicitly multimodal profile can consume them.
                         use_vision=(
-                            self.settings.llm.provider != "mimo"
-                            or self.settings.llm.multimodal_enabled
+                            llm_settings.provider != "mimo"
+                            or llm_settings.multimodal_enabled
                         ),
-                        use_thinking=self.settings.llm.provider != "mimo",
+                        use_thinking=llm_settings.provider != "mimo",
                         extend_system_message=build_extend_system_message(
-                            fs_root=self.settings.fs_root,
+                            workspace_root=task_fs,
+                            runtime_root=self.settings.runtime_root,
                             allowed_url_schemes=self.settings.allowed_url_schemes,
                             recent_tasks_block=format_recent_tasks_for_prompt(recent),
                         ),
@@ -372,7 +374,7 @@ class BrowserUseDriver:
                 entry["error"] = str(exc)
                 try:
                     task_fs = str(
-                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                        Path(self.settings.runtime_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
                     )
                     archived = archive_task(
                         agent_fs=task_fs,
@@ -410,7 +412,7 @@ class BrowserUseDriver:
         }
 
     def _task_public(self, entry: dict[str, Any]) -> dict[str, Any]:
-        # 兼容取消等仍返回扁平 detail 的调用方
+        # Keep the public status projection flat for the task-status response.
         return task_status_response(entry).get("detail") or {}
 
     async def _task_status(self, req: dict[str, Any]) -> dict[str, Any]:

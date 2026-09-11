@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import LlmProfileModal from "./LlmProfileModal.vue";
+import UiIcon from "./UiIcon.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const DEEPSEEK_DEFAULT = {
@@ -210,7 +211,9 @@ onMounted(async () => {
             </div>
           </button>
           <div class="llm-config-card__actions">
-            <button type="button" class="btn btn--ghost btn--compact" :disabled="index === 0" title="上移" @click="moveProfile(p.id, -1)">↑</button>
+            <button type="button" class="btn btn--ghost btn--compact" :disabled="index === 0" title="上移" aria-label="上移" @click="moveProfile(p.id, -1)">
+              <UiIcon name="arrow-up" :size="14" />
+            </button>
             <button
               type="button"
               class="btn btn--ghost btn--compact"
@@ -218,7 +221,7 @@ onMounted(async () => {
               title="下移"
               @click="moveProfile(p.id, 1)"
             >
-              ↓
+              <UiIcon name="arrow-down" :size="14" />
             </button>
             <button
               v-if="profiles.length > 1"

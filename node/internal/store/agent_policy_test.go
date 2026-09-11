@@ -23,7 +23,7 @@ func TestAgentPolicyAndPromptContextSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pol, err := st.EnsureAgentPolicy(ctx, "agt-1", "")
+	pol, err := st.EnsureAgentPolicy(ctx, "agt-1")
 	if err != nil || pol == nil {
 		t.Fatalf("ensure policy = %+v err=%v", pol, err)
 	}
@@ -39,7 +39,7 @@ func TestAgentPolicyAndPromptContextSQLite(t *testing.T) {
 		t.Fatalf("got policy = %+v err=%v", got, err)
 	}
 
-	pc, err := st.EnsureAgentPromptContext(ctx, "agt-1", "")
+	pc, err := st.EnsureAgentPromptContext(ctx, "agt-1")
 	if err != nil || pc == nil {
 		t.Fatalf("ensure prompt = %+v err=%v", pc, err)
 	}

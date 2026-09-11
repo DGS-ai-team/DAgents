@@ -47,17 +47,17 @@ func TestTaskComplete_pendingHITL(t *testing.T) {
 	}
 }
 
-func TestTaskComplete_openBatch(t *testing.T) {
+func TestTaskComplete_openAsyncBatch(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: "user", Content: "run"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{
-			{ID: "bg", Function: llm.ToolCallFunction{Name: "bash_run"}},
+			{ID: "async", Function: llm.ToolCallFunction{Name: "browser_run_task"}},
 			{ID: "sync", Function: llm.ToolCallFunction{Name: "read_file"}},
 		}},
-		{Role: "tool", ToolCallID: "bg", Content: "[TOOL_BACKGROUND] job_id=j1"},
+		{Role: "tool", ToolCallID: "async", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	if TaskComplete(msgs, nil) {
-		t.Fatal("open batch should be incomplete")
+		t.Fatal("open async batch should be incomplete")
 	}
 	if TaskPhaseOf(msgs, nil) != TaskPhaseOpenBatch {
 		t.Fatalf("phase = %q", TaskPhaseOf(msgs, nil))

@@ -33,6 +33,7 @@ export const AGENT_STREAM_EVENT_POLICIES = Object.freeze({
   "mcp/catalog-changed": "runtime-mcp",
   // Node-scoped MCP health; delivered on the unfiltered global stream.
   "mcp/status-changed": "runtime-mcp",
+  notification_changed: "notification",
   system_notice: "notice",
   "terminal.opened": "terminal",
   "terminal.updated": "terminal",

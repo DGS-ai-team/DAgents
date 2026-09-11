@@ -14,10 +14,9 @@ const defaultHistorySize = 256
 const defaultSubscriberBuffer = 256
 const CurrentEventVersion = 1
 
-// Event 为写入 SSE 的标准事件结构。
-// 线协议仅暴露 agent_id（对话/Agent 实例 id）；SessionID 仅供进程内路由（notify/filter）。
+// Event 为写入 SSE 的标准事件结构。线协议使用 agent_id 标识对话/Agent
+// 实例；进程内订阅过滤也使用同一个字段。
 type Event struct {
-	SessionID    string         `json:"-"`
 	AgentID      string         `json:"agent_id"`
 	Type         string         `json:"type"`
 	Seq          int            `json:"seq"`
@@ -109,7 +108,6 @@ func (h *Hub) publish(agentID, eventType string, data map[string]any, replayable
 		agentSeq = h.agentSeq[agentID]
 	}
 	ev := Event{
-		SessionID:    agentID,
 		AgentID:      agentID,
 		Type:         eventType,
 		Seq:          h.seq,
@@ -190,7 +188,7 @@ func deliveryKind(replayable bool) string {
 
 func isCriticalSSEType(eventType string) bool {
 	switch eventType {
-	case "turn_finished", "error", "hitl_required", "turn_state", "resync_required":
+	case "turn_finished", "error", "hitl_required", "turn_state", "notification_changed", "resync_required":
 		return true
 	default:
 		return false
@@ -281,16 +279,22 @@ func (h *Hub) subscribeLocked(afterGlobalSeq, afterAgentSeq int, filter string, 
 	ch := make(chan Event, buffer)
 	sub := &subscriber{ch: ch, agentFilter: filter}
 	resync := false
-	if checkRetention && len(h.history) > 0 {
+	if checkRetention && filter != "" && useAgentCursor {
+		// Agent cursors are process-local. After a Node restart the new Hub can
+		// have a lower cursor than the browser's persisted value. Treat that as
+		// an epoch discontinuity even when the new Hub has no history yet;
+		// otherwise every new event is filtered by the stale high watermark.
+		currentAgent := h.agentSeq[filter]
+		if afterAgentSeq > currentAgent {
+			resync = true
+		} else if len(h.history) > 0 && currentAgent > afterAgentSeq {
+			firstAgent := firstRetainedAgentSeq(h.history, filter)
+			resync = firstAgent == 0 || afterAgentSeq < firstAgent-1
+		}
+	} else if checkRetention && len(h.history) > 0 {
 		first := h.history[0]
 		if filter == "" {
 			resync = afterGlobalSeq < first.Seq-1
-		} else if useAgentCursor {
-			firstAgent := firstRetainedAgentSeq(h.history, filter)
-			currentAgent := h.agentSeq[filter]
-			if currentAgent > afterAgentSeq {
-				resync = firstAgent == 0 || afterAgentSeq < firstAgent-1
-			}
 		} else {
 			resync = afterGlobalSeq < first.Seq-1
 		}

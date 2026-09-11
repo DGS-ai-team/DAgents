@@ -32,15 +32,16 @@ const (
 type LinuxTransferEventSink func(agentID, eventType string, data map[string]any, replayable bool)
 
 type LinuxTransferRequest struct {
-	AgentID    string
-	ToolCallID string
-	ApprovalID string
-	TerminalID string
-	ChannelID  string
-	Direction  string
-	LocalPath  string
-	RemotePath string
-	Overwrite  bool
+	AgentID       string
+	ToolCallID    string
+	ApprovalID    string
+	TerminalID    string
+	ChannelID     string
+	Direction     string
+	LocalPath     string
+	RemotePath    string
+	WorkspaceRoot string // Agent workspace root.
+	Overwrite     bool
 }
 
 type LinuxTransferSnapshot struct {
@@ -87,7 +88,6 @@ type linuxTransferJob struct {
 // one file regardless of its direction; queued work waits FIFO for a slot.
 type LinuxTransferManager struct {
 	provider *LinuxShellProvider
-	fsRoot   string
 	max      int
 	queueMax int
 	sink     LinuxTransferEventSink
@@ -100,20 +100,15 @@ type LinuxTransferManager struct {
 
 var linuxTransferSequence uint64
 
-func NewLinuxTransferManager(provider *LinuxShellProvider, fsRoot string, maxConcurrent int, sink LinuxTransferEventSink) *LinuxTransferManager {
+func NewLinuxTransferManager(provider *LinuxShellProvider, maxConcurrent int, sink LinuxTransferEventSink) *LinuxTransferManager {
 	if maxConcurrent <= 0 {
 		maxConcurrent = DefaultLinuxTransferConcurrency
 	}
 	if maxConcurrent > 8 {
 		maxConcurrent = 8
 	}
-	root, err := filepath.Abs(strings.TrimSpace(fsRoot))
-	if err != nil || root == "" {
-		root = "."
-	}
 	return &LinuxTransferManager{
 		provider: provider,
-		fsRoot:   root,
 		max:      maxConcurrent,
 		queueMax: DefaultLinuxTransferQueueLimit,
 		sink:     sink,
@@ -348,7 +343,7 @@ func (m *LinuxTransferManager) execute(job *linuxTransferJob) (string, error) {
 }
 
 func (m *LinuxTransferManager) upload(ctx context.Context, client *sftp.Client, job *linuxTransferJob) (string, error) {
-	local, err := strictTransferPath(m.fsRoot, job.request.LocalPath, true)
+	local, err := strictTransferPath(m.transferWorkspaceRoot(job), job.request.LocalPath, true)
 	if err != nil {
 		return "", err
 	}
@@ -410,7 +405,7 @@ func (m *LinuxTransferManager) upload(ctx context.Context, client *sftp.Client, 
 }
 
 func (m *LinuxTransferManager) download(ctx context.Context, client *sftp.Client, job *linuxTransferJob) (string, error) {
-	local, err := strictTransferPath(m.fsRoot, job.request.LocalPath, false)
+	local, err := strictTransferPath(m.transferWorkspaceRoot(job), job.request.LocalPath, false)
 	if err != nil {
 		return "", err
 	}
@@ -471,6 +466,13 @@ func (m *LinuxTransferManager) download(ctx context.Context, client *sftp.Client
 		return "", fmt.Errorf("commit local file: %w", err)
 	}
 	return transferResult(job, stat.Size(), hex.EncodeToString(hash.Sum(nil))), nil
+}
+
+func (m *LinuxTransferManager) transferWorkspaceRoot(job *linuxTransferJob) string {
+	if job == nil || strings.TrimSpace(job.request.WorkspaceRoot) == "" {
+		return ""
+	}
+	return strings.TrimSpace(job.request.WorkspaceRoot)
 }
 
 type transferProgressReader struct {
@@ -599,6 +601,9 @@ func validateLinuxTransferRequest(req LinuxTransferRequest) error {
 	if strings.TrimSpace(req.ChannelID) == "" {
 		return fmt.Errorf("channel_id is required")
 	}
+	if strings.TrimSpace(req.WorkspaceRoot) == "" {
+		return fmt.Errorf("workspace_root is required")
+	}
 	if req.Direction != "upload" && req.Direction != "download" {
 		return fmt.Errorf("direction must be upload or download")
 	}
@@ -612,6 +617,9 @@ func validateLinuxTransferRequest(req LinuxTransferRequest) error {
 }
 
 func strictTransferPath(root, raw string, mustExist bool) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("workspace root is required")
+	}
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return "", fmt.Errorf("local_path is required")

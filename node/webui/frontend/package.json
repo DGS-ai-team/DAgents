@@ -1,7 +1,7 @@
 {
   "name": "dagents-node-webui",
   "private": true,
-  "version": "0.10.7",
+  "version": "0.11.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,9 +22,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.5.0",
     "eslint": "^10.9.1",
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.11.0",
+    "jsdom": "^26.1.0",
     "vite": "^6.0.3",
     "vitest": "^3.0.5"
   }

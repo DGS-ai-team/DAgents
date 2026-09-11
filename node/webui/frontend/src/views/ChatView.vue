@@ -6,10 +6,12 @@ import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
 import { getAgentStreamEventPolicy } from "../sse/agentEvents.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
-import AgentCreateModal from "../components/AgentCreateModal.vue";
+import AgentCreatePage from "../components/AgentCreatePage.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
-import ChildrenPanel from "../components/ChildrenPanel.vue";
+import AutoBadge from "../components/AutoBadge.vue";
+import AutoTodoPanel from "../components/AutoTodoPanel.vue";
 const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
+const mobileNavOpen = ref(false);
 import {
   agentStore,
   persistAgentId,
@@ -63,17 +65,9 @@ import {
   stopDesktopFocusHeartbeat,
   pulseDesktopFocus,
 } from "../stores/desktopFocus.js";
-import {
-  refreshToolJobs,
-  startToolJobsPolling,
-  stopToolJobsPolling,
-} from "../stores/toolJobs.js";
 import { classifyCancelOutcome } from "../stores/cancelState.js";
 import { createTurnWatchdog } from "../stores/turnWatchdog.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
-import {
-  formatChildLifecycle,
-} from "../utils/activityFormat.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "../stores/chrome.js";
 import {
   startStatus,
@@ -107,6 +101,7 @@ import {
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
+import { agentActiveProfile } from "../utils/agentLLM.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -117,8 +112,8 @@ const hitlSelected = ref([]);
 const cancelling = ref(false);
 const streamHandle = ref(null);
 const agentPanelRef = ref(null);
-const showAgentCreateModal = ref(false);
-const createModalTemplateId = ref("");
+const showAgentCreatePage = ref(false);
+const createPageTemplateId = ref("");
 const agentListCount = ref(null);
 const agentList = ref([]);
 const currentAgentDisplayName = ref("");
@@ -145,11 +140,14 @@ const turnWatchdog = createTurnWatchdog({
 });
 
 const entries = computed(() => transcriptStore.entries);
+const conversationId = computed(() => agentStore.agentId);
+async function ensureConversation() { return await ensureAgent(); }
 const hitlKind = computed(() => peekHitl()?.kind || "");
 const hasUserInfoHitl = computed(() => hitlKind.value === "user_information");
 const canSend = computed(() => {
   if (hitlStore.busy) return false;
   if (hasUserInfoHitl.value) return true;
+
   if (hitlKind.value) return false;
   return !isTurnProcessing();
 });
@@ -202,18 +200,24 @@ function syncReasoningDisplay(_llm) {
 
 function restartStream() {
   streamHandle.value?.close();
-  if (!agentStore.agentId) {
+  if (!conversationId.value) {
     streamHandle.value = null;
     return;
   }
+  // Keep the stream bound to the Agent conversation that created it so an
+  // obsolete KeepAlive stream cannot repaint a newly selected Agent.
+  const streamConversationId = conversationId.value;
   streamHandle.value = connectStream({
-    getAgentId: () => agentStore.agentId,
+    getAgentId: () => streamConversationId,
     getAfterSeq: () => transcriptStore.lastSeq,
     getAfterAgentSeq: () => transcriptStore.lastAgentSeq,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
-    onEvent: handleEvent,
+    onEvent: (ev) => {
+      if (conversationId.value !== streamConversationId) return;
+      handleEvent(ev);
+    },
     onReconnect: () => {
       terminalRevision.value += 1;
       void resyncAfterSSEGap("reconnect");
@@ -233,7 +237,6 @@ async function resyncAfterSSEGap(reason) {
     if (data === null) return;
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     turnWatchdog.noteActivity();
-    await refreshToolJobs(agentStore.agentId);
     // A Node restart can complete while the NavRail is still serving its
     // cached agent list. Reconcile it after the stream has reconnected so a
     // newly created/registered Agent becomes selectable without waiting for
@@ -250,7 +253,7 @@ async function resyncAfterSSEGap(reason) {
 }
 
 async function activateAgentStream() {
-  if (!agentStore.agentId) {
+  if (!conversationId.value) {
     clearTranscript();
     clearHitl();
     resetTurnState();
@@ -259,10 +262,10 @@ async function activateAgentStream() {
     chromeStore.sseStatus = "idle";
     return;
   }
-  const prev = agentStore.agentId;
+  const prev = conversationId.value;
   const data = await hydrateAgent();
   if (data === null) return;
-  if (agentStore.agentId !== prev || !streamHandle.value) {
+  if (conversationId.value !== prev || !streamHandle.value) {
     restartStream();
   }
   await syncChildAgentsFromApi();
@@ -316,22 +319,14 @@ async function refreshMeta() {
     chromeStore.llmSettings = boot.llm || null;
     syncReasoningDisplay(chromeStore.llmSettings);
   } catch (e) {
-    // 回退到旧的并行请求（兼容旧 Node）
-    try {
-      const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
-      chromeStore.agentInfo = { ...health, ...info };
-      chromeStore.llmSettings = llm;
-      syncReasoningDisplay(llm);
-    } catch (e2) {
-      agentStore.error = e2.message || e.message;
-    }
+    agentStore.error = e.message || "无法加载 Node 状态";
   }
 }
 
 async function refreshContextTokens() {
   if (!agentStore.agentId) return;
   try {
-    const ctx = await api.getAgentContext(agentStore.agentId);
+    const ctx = await api.getAgentContext(conversationId.value);
     chromeStore.contextTokens = Number(ctx.messages_total_tokens ?? -1);
   } catch {
     /* keep last */
@@ -412,11 +407,9 @@ function handleEvent(ev) {
         syncTurnStatus(turnStateStore);
       }
       upsertToolCallFromSSE(ev.data);
-      refreshToolJobs(agentStore.agentId);
       break;
     case "tool_result":
       applyToolResult(ev.data);
-      refreshToolJobs(agentStore.agentId);
       break;
     case "usage":
       setUsageFromSSE(ev.data);
@@ -467,8 +460,10 @@ function handleEvent(ev) {
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
-      refreshToolJobs(agentStore.agentId);
       refreshContextTokens();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("dagents:agent-turn-finished", { detail: { agentId: conversationId.value } }));
+      }
       break;
     case "resync_required":
       void resyncAfterSSEGap("server-resync");
@@ -483,15 +478,13 @@ function handleEvent(ev) {
       break;
     case "temporary_agent_created":
       onChildCreated(ev.data);
-      addSystem(formatChildLifecycle(ev.type, ev.data));
       break;
     case "temporary_agent_progress":
       onChildProgress(ev.data);
       break;
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":
-      onChildFinished(ev.data?.child_agent_id);
-      addSystem(formatChildLifecycle(ev.type, ev.data));
+      onChildFinished(ev.data);
       break;
     case "context_compression_blocking":
     case "context_compression_silent":
@@ -578,7 +571,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
   hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalResume(item.data, { approveAll });
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
@@ -602,7 +595,7 @@ async function submitHitlOne(payload, approve) {
   hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalOneResume(item.data, callId, approve);
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
@@ -624,7 +617,7 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
   hitlStore.busyIndex = hitlIndex;
   const resume = buildMemoryConflictResume(item.data, decision, { cancelled });
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
@@ -658,7 +651,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
   hitlStore.busy = true;
   hitlStore.busyIndex = hitlIndex;
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
@@ -707,7 +700,7 @@ async function onSendMessage(payload) {
   beginSubmit();
   turnWatchdog.noteActivity();
   try {
-    await api.submitMessage(agentStore.agentId, text, contentParts, fileRefs);
+    await api.submitMessage(conversationId.value, text, contentParts, fileRefs);
     markSubmissionAccepted();
   } catch (e) {
     failTurnSubmission();
@@ -724,7 +717,7 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.action === "clear") {
-    await api.clearContext(await ensureAgent());
+    await api.clearContext(await ensureConversation());
     // clearContext is a durable boundary. Remove the old local projection
     // before hydrate so the dirty-history guard cannot preserve pre-clear
     // messages when the response races with the clear acknowledgement.
@@ -740,14 +733,13 @@ async function handleCommand(cmd) {
     const data = await hydrateAgent();
     if (data === null) return;
     restartStream();
-    await refreshToolJobs(agentStore.agentId);
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
     return;
   }
   if (res.action === "compress") {
     startStatus("compression");
     try {
-      const out = await api.compressContext(await ensureAgent());
+      const out = await api.compressContext(await ensureConversation());
       if (out.status && out.status !== "applied" && out.status !== "done") {
         addSystem(`压缩: ${out.status}`);
       }
@@ -793,8 +785,8 @@ async function handleUploadCommand(spec) {
 }
 
 async function openCreateWizard(templateId = "") {
-  createModalTemplateId.value = String(templateId || "").trim();
-  showAgentCreateModal.value = true;
+  createPageTemplateId.value = String(templateId || "").trim();
+  showAgentCreatePage.value = true;
 }
 
 function onAgentsUpdated(list) {
@@ -803,14 +795,16 @@ function onAgentsUpdated(list) {
   void syncCurrentAgentDisplayName();
 }
 
-function onCreateModalClose() {
-  showAgentCreateModal.value = false;
-  createModalTemplateId.value = "";
+function onCreatePageCancel() {
+  showAgentCreatePage.value = false;
+  createPageTemplateId.value = "";
 }
 
 async function onAgentCreated(created) {
   const id = agentRecordId(created);
   if (!id) return;
+  showAgentCreatePage.value = false;
+  createPageTemplateId.value = "";
   const createdName = String(created?.display_name || created?.DisplayName || "").trim();
   if (createdName) currentAgentDisplayName.value = createdName;
   persistAgentId(id);
@@ -991,9 +985,32 @@ async function cycleThinkingEffort() {
   }
 }
 
-async function refreshLLMSettings() {
+async function resolveAgentActiveProfile(agentId) {
+  const id = String(agentId || "").trim();
+  if (!id) return "";
+  // The rail keeps a short-lived cache, so prefer the authoritative Agent
+  // record after a profile switch instead of trusting a stale list snapshot.
   try {
-    chromeStore.llmSettings = await api.getLLMSettings();
+    const profile = agentActiveProfile(await api.getAgent(id));
+    if (profile) return profile;
+  } catch {
+    /* fall back to the latest rail snapshot below */
+  }
+  const fromList = agentList.value.find((agent) => agentRecordId(agent) === id);
+  return agentActiveProfile(fromList);
+}
+
+let llmSettingsRequest = 0;
+
+async function refreshLLMSettings(agentId = agentStore.agentId) {
+  const request = ++llmSettingsRequest;
+  try {
+    const settings = await api.getLLMSettings();
+    const activeProfile = await resolveAgentActiveProfile(agentId);
+    if (request !== llmSettingsRequest) return;
+    chromeStore.llmSettings = activeProfile
+      ? { ...settings, active_profile: activeProfile }
+      : settings;
     syncReasoningDisplay(chromeStore.llmSettings);
   } catch {
     /* best-effort */
@@ -1007,11 +1024,24 @@ async function switchLLMProfile(id) {
     agentStore.error = "请先选择 Agent";
     return;
   }
-  if (profileId === chromeStore.llmSettings?.active_profile) return;
   agentStore.error = "";
   try {
+    const currentProfile = await resolveAgentActiveProfile(agentStore.agentId);
+    if (profileId === currentProfile) {
+      // The Agent may already be bound to the selected profile while the
+      // Node-wide settings endpoint still reports another Agent's profile.
+      // Re-resolve through the guarded path so a concurrent refresh cannot
+      // put the global profile back into the composer.
+      await refreshLLMSettings(agentStore.agentId);
+      return;
+    }
     // 绑定到当前 Agent；ensure/reload 时会应用到进程 LLM（含多模态）。
-    await api.patchAgent(agentStore.agentId, { llm_active: profileId });
+    const updatedAgent = await api.patchAgent(agentStore.agentId, { defaults: { llm: { active: profileId } } });
+    if (updatedAgent && agentList.value.length) {
+      agentList.value = agentList.value.map((agent) =>
+        agentRecordId(agent) === agentStore.agentId ? updatedAgent : agent,
+      );
+    }
     await refreshLLMSettings();
     try {
       chromeStore.agentInfo = await api.getAgentInfo();
@@ -1076,22 +1106,25 @@ async function bootstrapAgentFromRoute() {
 }
 
 async function cancelTurn() {
-  if (!agentStore.agentId || cancelling.value || !isTurnProcessing()) return;
+  // A user-information request owns the active Turn even if hydrate/SSE has
+  // not propagated its interaction phase into turnState yet. The pending HITL
+  // item is therefore also a valid cancellation signal; it must never be
+  // mistaken for an answer submission.
+  if (!conversationId.value || cancelling.value || (!isTurnProcessing() && !hasUserInfoHitl.value)) return;
   cancelling.value = true;
   beginTurnCancellation();
   agentStore.error = "";
   try {
-    const response = await api.cancelAgentTurn(agentStore.agentId);
+    const response = await api.cancelAgentTurn(conversationId.value);
     let hydrate = null;
     try {
       hydrate = await hydrateAgent();
-      await refreshToolJobs(agentStore.agentId);
     } catch {
       // The cancellation acknowledgement remains usable if reconciliation
       // briefly fails; the next SSE/hydrate cycle will repair the view.
     }
     const outcome = classifyCancelOutcome(response, hydrate);
-    if (outcome === "not_cancelled") {
+    if (outcome === "not_cancelled" || outcome === "invalid_scope") {
       markTurnCancellationFailed();
       agentStore.error = hydrate
         ? "turn 仍在执行，取消未生效，请稍后重试"
@@ -1135,7 +1168,6 @@ onMounted(async () => {
   refreshContextTokens();
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);
-  startToolJobsPolling(() => agentStore.agentId);
   turnWatchdog.start();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
@@ -1210,6 +1242,33 @@ function clearTerminalSelection() {
 const workspaceView = computed(() => {
   return terminalOpen.value ? "terminal" : "messages";
 });
+const currentAgentIsAuto = computed(() => {
+  const row = agentList.value.find((a) => agentRecordId(a) === agentStore.agentId);
+  return row?.agent_type === "auto";
+});
+const autoConfig = ref(null);
+const autoConfigError = ref(false);
+let autoConfigRequest = 0;
+watch(
+  () => [agentStore.agentId, agentList.value],
+  async ([id]) => {
+    const request = ++autoConfigRequest;
+    autoConfig.value = null;
+    autoConfigError.value = false;
+    const row = agentList.value.find((a) => agentRecordId(a) === id);
+    if (row?.agent_type !== "auto" || !id) return;
+    try {
+      const data = await api.getAutoConfig(id);
+      if (request === autoConfigRequest && agentStore.agentId === id) autoConfig.value = data;
+    } catch {
+      if (request === autoConfigRequest && agentStore.agentId === id) autoConfigError.value = true;
+    }
+  },
+  { immediate: true },
+);
+const currentConversationTitle = computed(() =>
+  currentAgentTitle.value,
+);
 
 function switchWorkspace(view) {
   const next = String(view || "messages");
@@ -1242,7 +1301,6 @@ watch(
 
 onActivated(() => {
   turnWatchdog.start();
-  startToolJobsPolling(() => agentStore.agentId);
   if (agentStore.agentId) {
     void activateAgentStream();
   }
@@ -1256,7 +1314,6 @@ onDeactivated(() => {
   sseResyncToken += 1;
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
-  stopToolJobsPolling();
   streamHandle.value?.close();
   streamHandle.value = null;
   chromeStore.sseStatus = "idle";
@@ -1318,7 +1375,6 @@ onUnmounted(() => {
   sseResyncToken += 1;
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
-  stopToolJobsPolling();
   streamHandle.value?.close();
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("pageshow", onPageShow);
@@ -1327,10 +1383,13 @@ onUnmounted(() => {
 
 <template>
   <div class="app__body app__body--chat-v61">
-    <aside class="app__col app__col--agents">
+    <button type="button" class="mobile-agent-nav-toggle" :aria-expanded="mobileNavOpen ? 'true' : 'false'" @click="mobileNavOpen = !mobileNavOpen">
+      {{ mobileNavOpen ? "收起 Agent 列表" : "选择 Agent" }}
+    </button>
+    <aside class="app__col app__col--agents" :class="{ 'app__col--agents-mobile-open': mobileNavOpen }">
       <NavRail
         ref="agentPanelRef"
-        @switch="switchAgent"
+        @switch="(id) => { mobileNavOpen = false; switchAgent(id); }"
         @create="openCreateWizard()"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
@@ -1354,18 +1413,29 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
-      <div v-if="routeNotice" class="chat-notice-banner" role="status">{{ routeNotice }}</div>
-      <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
-      <AgentEmptyState
-        v-if="showNoAgentWelcome"
-        @create="openCreateWizard()"
-        @pick-template="openCreateWizard"
-      />
-      <div v-else-if="!agentStore.agentId" class="chat-empty-agent">
-        <p>选择左侧 Agent，或点击 + 从模板新建。</p>
-      </div>
+      <Transition name="chat-surface" mode="out-in">
+        <AgentCreatePage
+          v-if="showAgentCreatePage"
+          :initial-template-id="createPageTemplateId"
+          @cancel="onCreatePageCancel"
+          @created="onAgentCreated"
+        />
 
-      <div v-else class="chat-workspace">
+        <div v-else class="chat-surface">
+          <div v-if="routeNotice" class="chat-notice-banner" role="status">{{ routeNotice }}</div>
+          <div v-if="agentStore.error && !agentStore.agentId" class="chat-error-banner">{{ agentStore.error }}</div>
+          <AgentEmptyState
+            v-if="showNoAgentWelcome"
+            @create="openCreateWizard()"
+            @pick-template="openCreateWizard"
+          />
+          <div v-else-if="!agentStore.agentId" class="chat-empty-agent">
+            <p>选择左侧 Agent，或点击 + 从模板新建。</p>
+          </div>
+
+          <div v-else class="chat-workspace">
+          <div v-if="currentAgentIsAuto" class="chat-auto-banner" role="status"><AutoBadge :agent="{ agent_type: 'auto' }" /> <span>{{ autoConfigError ? 'Auto 配置不可用' : (!autoConfig ? '加载中…' : (autoConfig.wake_interval_seconds > 0 ? `每 ${Math.max(1, Math.round(autoConfig.wake_interval_seconds / 60))} 分钟自动检查` : '自主激活关闭')) }}</span> <router-link :to="{ name: 'settings-agent-detail', params: { agentId: agentStore.agentId }, query: { section: 'autonomy' } }">Auto 设置</router-link></div>
+          <AutoTodoPanel v-if="currentAgentIsAuto" :agent-id="agentStore.agentId" />
         <MainChatPanel
           v-show="!terminalOpen"
           ref="chatPanelRef"
@@ -1380,7 +1450,7 @@ onUnmounted(() => {
           :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"
           :llm-settings="chromeStore.llmSettings"
-          :agent-title="currentAgentTitle"
+          :agent-title="currentConversationTitle"
           :agent-id="agentStore.agentId"
           :terminal-refresh-key="terminalRevision"
           :workspace-view="workspaceView"
@@ -1409,7 +1479,7 @@ onUnmounted(() => {
           :hitl-queue="hitlStore.queue"
           :tool-verbose="transcriptStore.toolFoldVerbose"
           :agent-disabled="!canSend && !sending"
-          :agent-input-disabled="!agentStore.agentId || hitlStore.busy || cancelling"
+          :agent-input-disabled="!conversationId || hitlStore.busy || cancelling"
           :sending="sending"
           :cancelling="cancelling"
           :error="agentStore.error"
@@ -1417,7 +1487,7 @@ onUnmounted(() => {
           :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"
           :llm-settings="chromeStore.llmSettings"
-          :agent-title="currentAgentTitle"
+          :agent-title="currentConversationTitle"
           @close="closeTerminal"
           @terminal-selected="selectTerminal"
           @terminal-cleared="clearTerminalSelection"
@@ -1435,24 +1505,47 @@ onUnmounted(() => {
           @user-info-selected="onHitlUserInfoSelected"
           @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
           @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
-        />
-      </div>
+          />
+          </div>
+        </div>
+      </Transition>
 
-      <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
-        <ChildrenPanel @close="closePanel" />
-      </div>
     </div>
-
-    <AgentCreateModal
-      :open="showAgentCreateModal"
-      :initial-template-id="createModalTemplateId"
-      @close="onCreateModalClose"
-      @created="onAgentCreated"
-    />
   </div>
 </template>
 
 <style scoped>
+.chat-surface {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.chat-surface-enter-active,
+.chat-surface-leave-active {
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+
+.chat-surface-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.chat-surface-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-surface-enter-active,
+  .chat-surface-leave-active {
+    transition: none;
+  }
+}
+
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
 </style>
+
+

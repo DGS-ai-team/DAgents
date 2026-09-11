@@ -21,12 +21,19 @@ from manage.workgroup.models import (  # noqa: E402
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
-from manage.workgroup.history import RunHistoryMessage  # noqa: E402
-from manage.workgroup import ids  # noqa: E402
 from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
-from manage.workgroup.native_tools import scripted_assign_completer  # noqa: E402
 from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.turn_kernel import TurnKernel  # noqa: E402
+
+
+def scripted_assign_completer(
+    _workgroup_id: str,
+    _assign_id: str,
+    _member_id: str,
+    instruction: str,
+    _tool_call_id: str = "",
+) -> str:
+    return f"[scripted] {instruction.strip()[:500]}"
 
 
 class MentionStripTests(unittest.TestCase):
@@ -58,21 +65,18 @@ class DirectMemberRouteTests(unittest.TestCase):
             group.workgroup_id,
             ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
         )
-        member, _ = store.create_member(
+        member = store.create_member(
             group.workgroup_id,
             MemberCreateRequest(
+                agent_id="agent-b",
                 display_name="Alice",
                 home_node_id="node-b",
-                llm_profile_id="mock",
-                llm_profile_revision="1",
             ),
         )
         store.mark_member_status(
             member.member_id,
             "ready",
             workgroup_id=group.workgroup_id,
-            workspace_path=str(Path(tmp) / "ws"),
-            tool_catalog_revision="rev_test",
         )
         store.publish_workgroup(group.workgroup_id)
         return store, group.workgroup_id, member
@@ -84,8 +88,6 @@ class DirectMemberRouteTests(unittest.TestCase):
                 member.member_id,
                 "error",
                 workgroup_id=wid,
-                workspace_path="",
-                tool_catalog_revision="",
             )
             with self.assertRaises(WorkgroupError):
                 resolve_direct_member(
@@ -173,56 +175,6 @@ class DirectMemberRouteTests(unittest.TestCase):
                 "[scripted] 检查 README",
                 [m.get("content") for m in client.calls[0]["messages"]],
             )
-
-    def test_legacy_duplicate_supervisor_runs_are_consolidated(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            store, wid, _member = self._ready_group(tmp)
-            first = store.create_actor_run(
-                wid,
-                ActorRunCreateRequest(actor_id="leader"),
-            )
-            second = store.create_actor_run(
-                wid,
-                ActorRunCreateRequest(actor_id="leader"),
-            )
-            store.append_run_history(
-                first.run_id,
-                [RunHistoryMessage(role="assistant", content="first session")],
-                timeline_watermark_seq=1,
-            )
-            store.append_run_history(
-                second.run_id,
-                [RunHistoryMessage(role="assistant", content="second session")],
-                timeline_watermark_seq=3,
-            )
-            store.append_timeline(
-                wid,
-                type="human_message",
-                actor_id="node-a",
-                text="@Alice legacy request",
-                protocol_name="human_node-a",
-            )
-            assign_id = ids.assign_id()
-            store.append_timeline(
-                wid,
-                type="actor_final_text",
-                actor_id="legacy-member",
-                text="legacy member result",
-                protocol_name="member_legacy-member",
-                assign_id=assign_id,
-            )
-
-            listed = store.list_actor_runs(wid, actor_id="leader")
-            self.assertEqual(len(listed), 1)
-            merged = store.get_run_history(listed[0].run_id)
-            assert merged is not None
-            contents = [m.content for m in merged.messages]
-            self.assertIn("first session", contents)
-            self.assertIn("second session", contents)
-            self.assertIn("@Alice legacy request", contents)
-            self.assertIn("legacy member result", contents)
-            all_listed = store.list_actor_runs(wid)
-            self.assertEqual(sum(run.actor_id == "leader" for run in all_listed), 1)
 
     def test_manual_leading_mention_stays_with_leader(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

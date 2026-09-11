@@ -24,7 +24,7 @@
 - [~] 已完成本地 Shell、Terminal 的默认敏感环境变量 scrub，并接入统一 `EnvironmentPolicy` 的 inherit/scrub/allow/set 模式；MCP stdio 已默认 scrub 且保留显式 env/env_refs，跨包策略复用和日志/Prompt/SSE 脱敏仍可继续统一。
 - [~] 统一 `OutputBudget`：已抽取可复用的 stdout/stderr 字节预算对象，支持 UTF-8 安全截断及可选 head/tail；bash 的 YAML/设置项已接入，Linux/其他 provider 的统一策略仍待补齐。
 - [~] 增加 `EnvironmentPolicy`，区分 inherit、scrub、allow 和 explicit set；本地 Shell 与 Terminal 已接入，MCP stdio 已有等价的默认 scrub，跨包共享类型及审计脱敏仍待统一。
-- [~] `fs_root` 有应用层路径检查，但不是 OS sandbox。
+- [~] Agent `workspace_root` 有应用层路径检查，但不是 OS sandbox；Node 管理目录使用独立 `runtime_root`。
 - [ ] 补齐 symlink、junction、UNC 和 TOCTOU 测试，并在 UI/文档中明确“无 OS sandbox”状态。
 - [ ] 增加 Linux bwrap/Landlock、Windows restricted token 等可选 sandbox provider。
 - [ ] 默认使用非 login shell，并提供显式 login shell 选项。
@@ -85,5 +85,5 @@
 
 - 不重写 `bash_run` 的模型参数接口。
 - 不引入通用 `mcp_call` dispatcher 来规避缓存失效。
-- 不把 `fs_root` 的词法路径检查宣传为安全 sandbox。
+- 不把 `workspace_root` 的词法路径检查宣传为安全 sandbox。
 - 不在尚未稳定 policy、HITL、ExecutionContext 之前引入独立 Guardian 服务。

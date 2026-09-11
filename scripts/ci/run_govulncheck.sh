@@ -19,7 +19,6 @@ MODULES=(
   shared/config
   shared/logfiles
   shared/update
-  shared/workgroup
   node
   client
   desktop/tray

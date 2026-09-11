@@ -2,6 +2,8 @@ const INACTIVE_PHASES = new Set(["idle", "completed", "failed", "cancelled", "in
 
 /** Classify a cancel response without relying on an optimistic UI update. */
 export function classifyCancelOutcome(response, hydrate) {
+  if (response?.scope && response.scope !== "turn") return "invalid_scope";
+  if (response?.terminal === true) return "cancelled";
   if (isHydrateIdle(hydrate)) return response?.cancelled === true ? "cancelled" : "already_idle";
   if (response?.cancelled === true) return "cancel_requested";
   return "not_cancelled";

@@ -114,7 +114,7 @@ watch(agentId, load);
           </div>
           <div class="context-stat">
             <span class="context-stat__label">回合状态</span>
-            <span class="context-stat__value">{{ ctx.run_turn_phase || ctx.turn_state || "空闲" }}</span>
+            <span class="context-stat__value">{{ ctx.turn_state || "空闲" }}</span>
           </div>
         </div>
 

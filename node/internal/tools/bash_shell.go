@@ -42,13 +42,13 @@ func resolveShellType(raw *string) (shellType, error) {
 	return shellBash, nil
 }
 
-// resolveRunCWD 解析执行目录；空则 fs_root，相对路径在 fs_root 下展开。
+// resolveRunCWD 解析执行目录；空则 workspace root，相对路径在 workspace 下展开。
 
-// 关键分支：路径必须落在 fs_root 内且为已存在目录。
+// 关键分支：路径必须落在 workspace root 内且为已存在目录。
 func (r *Registry) resolveRunCWD(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return r.fsRoot, nil
+		return r.workspaceRoot, nil
 	}
 	if strings.HasPrefix(raw, "~") {
 		home, err := os.UserHomeDir()
@@ -65,15 +65,15 @@ func (r *Registry) resolveRunCWD(raw string) (string, error) {
 	if filepath.IsAbs(raw) {
 		target = filepath.Clean(raw)
 	} else {
-		target = filepath.Join(r.fsRoot, filepath.Clean(raw))
+		target = filepath.Join(r.workspaceRoot, filepath.Clean(raw))
 	}
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
 	}
-	root := r.fsRoot
+	root := r.workspaceRoot
 	if !strings.HasPrefix(abs, root+string(os.PathSeparator)) && abs != root {
-		return "", fmt.Errorf("cwd  escapes fs_root: %s", raw)
+		return "", fmt.Errorf("cwd escapes workspace root: %s", raw)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {

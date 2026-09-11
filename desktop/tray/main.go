@@ -55,7 +55,17 @@ func run(args []string) int {
 	}
 	rest := fs.Args()
 	if len(rest) > 0 && rest[0] == "update" {
-		return runUpdateCommand(rest[1:])
+		cfgPath, err := config.ResolveConfigPath(*configFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dagents-shell: %v\n", err)
+			return 1
+		}
+		layout, err := nodectl.ResolveLayout(cfgPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dagents-shell: %v\n", err)
+			return 1
+		}
+		return runUpdateCommand(rest[1:], desktopapi.ReadBridgeToken(layout.DesktopBridgeTokenFile))
 	}
 
 	cfgPath, err := config.ResolveConfigPath(*configFlag)
@@ -84,6 +94,12 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "dagents-shell: %v\n", err)
 		return 1
 	}
+	bridgeToken, err := desktopapi.EnsureBridgeToken(layout.DesktopBridgeTokenFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dagents-shell: desktop bridge: %v\n", err)
+		return 1
+	}
+	_ = os.Setenv(desktopapi.BridgeURLEnv, "http://"+desktopapi.DefaultListenAddr)
 	if closer, err := shelllog.Setup(layout.Home); err != nil {
 		fmt.Fprintf(os.Stderr, "dagents-shell: shell log: %v\n", err)
 	} else if closer != nil {
@@ -91,19 +107,21 @@ func run(args []string) int {
 	}
 
 	app := &trayApp{
-		cfg:          cfg,
-		layout:       layout,
-		nodeClient:   nodeclient.New(cfg.Local.Endpoint),
-		pendingStore: pending.NewStore(),
-		notifier:     notify.New(cfg.Local.Endpoint, iconData),
+		cfg:                cfg,
+		layout:             layout,
+		desktopBridgeToken: bridgeToken,
+		nodeClient:         nodeclient.New(cfg.Local.Endpoint),
+		pendingStore:       pending.NewStore(),
+		notifier:           notify.New(cfg.Local.Endpoint, iconData),
 	}
 	systray.Run(app.onReady, app.onExit)
 	return 0
 }
 
 type trayApp struct {
-	cfg    *config.Config
-	layout *nodectl.Layout
+	cfg                *config.Config
+	layout             *nodectl.Layout
+	desktopBridgeToken string
 
 	mu          sync.Mutex
 	lastHealth  *nodectl.Health
@@ -124,7 +142,7 @@ type trayApp struct {
 	sseSub        *events.Subscriber
 	sseCancel     context.CancelFunc
 
-	pendingSessionIDs [maxPendingMenuSlots]string
+	pendingAgentIDs [maxPendingMenuSlots]string
 
 	mStatus          *systray.MenuItem
 	mPending         *systray.MenuItem
@@ -197,7 +215,7 @@ func (a *trayApp) startBackgroundServices() {
 	})
 	a.updateApplier = update.NewApplier(a.cfg, a.layout, a.updateChecker, a.nodeClient)
 	a.uiFocus = uifocus.NewStore()
-	a.desktopAPI = desktopapi.New(a.updateChecker, a.updateApplier, a.uiFocus)
+	a.desktopAPI = desktopapi.New(a.updateChecker, a.updateApplier, a.uiFocus, a.desktopBridgeToken)
 	go a.updateChecker.Start(bgCtx)
 	go a.desktopAPI.Start(bgCtx)
 }
@@ -292,21 +310,21 @@ func (a *trayApp) pendingClickLoop() {
 		case <-a.mPending.ClickedCh:
 			a.openFirstPendingSession()
 		case <-a.mPendingSessions[0].ClickedCh:
-			a.openPendingSession(0)
+			a.openPendingAgent(0)
 		case <-a.mPendingSessions[1].ClickedCh:
-			a.openPendingSession(1)
+			a.openPendingAgent(1)
 		case <-a.mPendingSessions[2].ClickedCh:
-			a.openPendingSession(2)
+			a.openPendingAgent(2)
 		case <-a.mPendingSessions[3].ClickedCh:
-			a.openPendingSession(3)
+			a.openPendingAgent(3)
 		case <-a.mPendingSessions[4].ClickedCh:
-			a.openPendingSession(4)
+			a.openPendingAgent(4)
 		case <-a.mPendingSessions[5].ClickedCh:
-			a.openPendingSession(5)
+			a.openPendingAgent(5)
 		case <-a.mPendingSessions[6].ClickedCh:
-			a.openPendingSession(6)
+			a.openPendingAgent(6)
 		case <-a.mPendingSessions[7].ClickedCh:
-			a.openPendingSession(7)
+			a.openPendingAgent(7)
 		}
 	}
 }
@@ -391,28 +409,28 @@ func (a *trayApp) openFirstPendingSession() {
 		a.openConsole()
 		return
 	}
-	a.openSession(entries[0].SessionID)
+	a.openAgent(entries[0].AgentID)
 }
 
-func (a *trayApp) openPendingSession(slot int) {
+func (a *trayApp) openPendingAgent(slot int) {
 	if slot < 0 || slot >= maxPendingMenuSlots {
 		return
 	}
-	sessionID := a.pendingSessionIDs[slot]
-	if sessionID == "" {
+	agentID := a.pendingAgentIDs[slot]
+	if agentID == "" {
 		return
 	}
-	a.openSession(sessionID)
+	a.openAgent(agentID)
 }
 
-func (a *trayApp) openSession(sessionID string) {
+func (a *trayApp) openAgent(agentID string) {
 	a.openWebUI(func(ctx context.Context) error {
-		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, sessionID); err != nil {
+		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, agentID); err != nil {
 			return err
 		}
 		a.refreshPendingUI()
 		return nil
-	}, fmt.Sprintf("open agent %s", sessionID))
+	}, fmt.Sprintf("open agent %s", agentID))
 }
 
 func (a *trayApp) openWebUI(fn func(context.Context) error, label string) {
@@ -599,7 +617,7 @@ func (a *trayApp) refreshPendingUI() {
 	entries := a.pendingStore.Entries()
 	sum := a.pendingStore.Summary()
 
-	if sum.SessionCount == 0 {
+	if sum.AgentCount == 0 {
 		a.mPending.SetTitle("待办：无")
 		a.mPending.Disable()
 		a.stopIconBlink()
@@ -613,7 +631,7 @@ func (a *trayApp) refreshPendingUI() {
 	for i := range a.mPendingSessions {
 		a.mPendingSessions[i].Hide()
 		a.mPendingSessions[i].Disable()
-		a.pendingSessionIDs[i] = ""
+		a.pendingAgentIDs[i] = ""
 	}
 	limit := len(entries)
 	if limit > maxPendingMenuSlots {
@@ -621,7 +639,7 @@ func (a *trayApp) refreshPendingUI() {
 	}
 	for i := 0; i < limit; i++ {
 		e := entries[i]
-		a.pendingSessionIDs[i] = e.SessionID
+		a.pendingAgentIDs[i] = e.AgentID
 		a.mPendingSessions[i].SetTitle("打开 · " + e.SummaryLabel())
 		a.mPendingSessions[i].Enable()
 		a.mPendingSessions[i].Show()
@@ -631,8 +649,8 @@ func (a *trayApp) refreshPendingUI() {
 		retainIDs := map[string]struct{}{}
 		toastEntries := make([]pending.Entry, 0, len(entries))
 		for _, e := range entries {
-			if a.uiFocus != nil && a.uiFocus.IsFocused(e.SessionID) {
-				retainIDs[e.SessionID] = struct{}{}
+			if a.uiFocus != nil && a.uiFocus.IsFocused(e.AgentID) {
+				retainIDs[e.AgentID] = struct{}{}
 				continue
 			}
 			toastEntries = append(toastEntries, e)
@@ -647,7 +665,7 @@ func (a *trayApp) refreshTooltip(showRunning bool) {
 
 	base := fmt.Sprintf("DAgents Shell @ %s", a.layout.Home)
 	if a.pendingStore != nil {
-		if sum := a.pendingStore.Summary(); sum.SessionCount > 0 {
+		if sum := a.pendingStore.Summary(); sum.AgentCount > 0 {
 			base += "\n" + sum.Label
 		}
 	}

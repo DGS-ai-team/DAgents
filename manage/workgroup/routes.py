@@ -1,12 +1,13 @@
-"""Workgroup HTTP API（D1 基座 + D3 Timeline/HITL/outbox）。"""
+"""Workgroup HTTP API（Timeline、AgentRef turn、HITL 与 outbox）。"""
 
 from __future__ import annotations
 
+import asyncio
+from queue import Empty as QueueEmpty
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
 import json
 
 from manage.llm.models import LLMConfigMasked
@@ -17,14 +18,11 @@ from manage.workgroup.d3_models import (
     HITLRequest,
     HITLResolveRequest,
     HumanPostRequest,
-    MemberFinalRequest,
     OutboxFrame,
-    ProvisionCompleteRequest,
     QueuedHumanPatchRequest,
     SubscribeRequest,
     Subscription,
     TimelineEvent,
-    ToolResultApplyRequest,
     TurnCancelRequest,
     TurnCancelResponse,
 )
@@ -37,7 +35,6 @@ from manage.workgroup.models import (
     ACLPatchRequest,
     MemberCreateRequest,
     MemberPatchRequest,
-    MemberSpec,
     WorkGroup,
     WorkGroupACL,
     WorkGroupCreateRequest,
@@ -51,13 +48,6 @@ from manage.workgroup.vertical import VerticalLoop
 from manage.workgroup.ws_hub import WorkgroupWSHub
 
 
-class ReconcileMissingJournalRequest(BaseModel):
-    assign_id: str
-    command_id: str
-    member_id: str
-    side_effect_started: bool = True
-
-
 def _http_error(exc: WorkgroupError) -> HTTPException:
     return HTTPException(status_code=exc.http_status, detail=exc.as_body())
 
@@ -66,8 +56,9 @@ def _sse_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str)
 
 
-def _sse_pack(event: str, data: Any) -> str:
-    return f"event: {event}\ndata: {_sse_json(data)}\n\n"
+def _sse_pack(event: str, data: Any, *, event_id: str | None = None) -> str:
+    prefix = f"id: {event_id}\n" if event_id else ""
+    return f"{prefix}event: {event}\ndata: {_sse_json(data)}\n\n"
 
 
 def build_workgroup_router(
@@ -94,8 +85,8 @@ def build_workgroup_router(
     store.reconcile_inflight_runs()
     loop.set_turn_kernel(kernel)
     if hub is not None:
-        store.reconcile_timeline_outbox()
         store.set_timeline_listener(hub.publish_timeline_event)
+        store.set_hitl_listener(hub.publish_hitl_change)
         kernel.set_realtime_event_listener(
             lambda workgroup_id, event_type, data, client_message_id=None: hub.publish_realtime_event(
                 workgroup_id,
@@ -105,8 +96,12 @@ def build_workgroup_router(
             )
         )
     kernel.set_assign_completer(loop.make_assign_completer(kernel))
-    kernel.set_command_cancel_hook(loop.cancel_pending_commands)
-    kernel.set_assign_cancel_hook(loop.cancel_assign_runtime)
+    kernel.set_turn_cancel_hook(loop.cancel_pending_agent_turns)
+    kernel.set_assign_cancel_hook(
+        lambda workgroup_id, assign_id: loop.cancel_pending_agent_turns(
+            workgroup_id, assign_id=assign_id
+        )
+    )
     kernel.resume_persisted_queues()
     kernel.resume_persisted_hitls()
 
@@ -138,14 +133,6 @@ def build_workgroup_router(
             acl_member=acl_member,
             include_archived=include_archived,
         )
-
-    @router.get("/meta/member-tools", response_model=dict)
-    def get_member_tool_catalog(request: Request) -> dict:
-        """Member 可勾选/可执行工具目录（与 shared/workgroup/member_tool_catalog.json 同源）。"""
-        authenticate(request)
-        from manage.workgroup.member_tools import member_tool_catalog
-
-        return member_tool_catalog()
 
     @router.get("/{workgroup_id}", response_model=WorkGroup)
     def get_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
@@ -250,15 +237,8 @@ def build_workgroup_router(
                     )
 
         try:
-            if not req.agent_id and not req.allow_tool_names:
-                from manage.workgroup.member_tools import default_allow_tool_names
-
-                req = req.model_copy(update={"allow_tool_names": default_allow_tool_names()})
-            member, spec = store.create_member(workgroup_id, req)
-            if member.execution_mode == "agent_ref":
-                loop.enqueue_agent_session_open(workgroup_id, member.member_id)
-            else:
-                loop.enqueue_provision(workgroup_id, member.member_id)
+            member = store.create_member(workgroup_id, req)
+            loop.enqueue_agent_session_open(workgroup_id, member.member_id)
             member = store.get_member(member.member_id) or member
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
@@ -269,7 +249,7 @@ def build_workgroup_router(
             target_agent_id=member.member_id,
             detail={"home_node_id": member.home_node_id},
         )
-        return {"member": member, "spec": spec}
+        return {"member": member}
 
     @router.patch("/{workgroup_id}/members/{member_id}", response_model=dict)
     def patch_member(
@@ -277,11 +257,8 @@ def build_workgroup_router(
     ) -> dict:
         auth = authenticate(request)
         try:
-            member, spec = store.update_member(workgroup_id, member_id, req)
-            if member.execution_mode == "agent_ref":
-                loop.enqueue_agent_session_open(workgroup_id, member.member_id)
-            else:
-                loop.enqueue_provision(workgroup_id, member.member_id)
+            member = store.update_member(workgroup_id, member_id, req)
+            loop.enqueue_agent_session_open(workgroup_id, member.member_id)
             member = store.get_member(member.member_id) or member
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
@@ -290,7 +267,7 @@ def build_workgroup_router(
             action="workgroup.member.patch",
             target_agent_id=member.member_id,
         )
-        return {"member": member, "spec": spec}
+        return {"member": member}
 
     @router.get("/{workgroup_id}/members", response_model=list[WorkGroupMember])
     def list_members(workgroup_id: str, request: Request) -> list[WorkGroupMember]:
@@ -313,7 +290,7 @@ def build_workgroup_router(
             was_archived = existing is not None and existing.status == "archived"
             member = store.archive_member(workgroup_id, member_id)
             if not was_archived:
-                loop.enqueue_member_tombstone(workgroup_id, member_id)
+                loop.enqueue_agent_session_close(workgroup_id, member_id)
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
         audit.record(
@@ -323,19 +300,9 @@ def build_workgroup_router(
         )
         return member
 
-    @router.get("/{workgroup_id}/members/{member_id}/spec", response_model=MemberSpec)
-    def get_member_spec(workgroup_id: str, member_id: str, request: Request) -> MemberSpec:
-        authenticate(request)
-        member = store.get_member(member_id)
-        if member is None or member.workgroup_id != workgroup_id:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "member not found"})
-        spec = store.get_spec(member_id)
-        if spec is None:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "spec not found"})
-        return spec
-
     @router.post("/{workgroup_id}/assigns", response_model=Assign)
     def create_assign(workgroup_id: str, req: AssignCreateRequest, request: Request) -> Assign:
+        """Persist an explicit queued assignment for control-plane clients."""
         auth = authenticate(request)
         try:
             assign = kernel.assign_member(workgroup_id, req)
@@ -347,27 +314,6 @@ def build_workgroup_router(
             target_agent_id=assign.assign_id,
         )
         return assign
-
-    @router.post("/{workgroup_id}/assigns/fail-active")
-    def fail_active_assigns(workgroup_id: str, request: Request) -> dict:
-        """运维/自愈：释放组内卡住的 active assign。"""
-        auth = authenticate(request)
-        if store.get_workgroup(workgroup_id) is None:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
-        try:
-            failed = store.fail_active_assigns(
-                workgroup_id,
-                reason="manual fail-active",
-                error_code="canceled",
-            )
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.assign.fail_active",
-            target_agent_id=workgroup_id,
-        )
-        return {"failed_assign_ids": failed, "count": len(failed)}
 
     @router.post("/{workgroup_id}/runs", response_model=ActorRun)
     def create_run(workgroup_id: str, req: ActorRunCreateRequest, request: Request) -> ActorRun:
@@ -381,13 +327,7 @@ def build_workgroup_router(
 
     def _profile_id_for_actor(workgroup_id: str, actor_id: str) -> str:
         group = store.get_workgroup(workgroup_id)
-        profile_id = str(group.llm_profile_id if group else "default") or "default"
-        aid = str(actor_id or "").strip()
-        if aid and aid != "leader":
-            spec = store.get_spec(aid)
-            if spec is not None and str(getattr(spec, "llm_profile_id", "") or "").strip():
-                profile_id = str(spec.llm_profile_id).strip()
-        return profile_id
+        return str(group.llm_profile_id if group else "default") or "default"
 
     def _llm_meta(workgroup_id: str, actor_id: str = "leader") -> dict:
         return describe_llm_resolution(
@@ -489,7 +429,7 @@ def build_workgroup_router(
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
         return store.list_subscribers(workgroup_id)
 
-    # --- D3: Timeline / Outbox / HITL / provision complete ---
+    # --- Timeline / Outbox / HITL / AgentRef events ---
 
     @router.post("/{workgroup_id}/messages")
     def post_human_message(
@@ -630,23 +570,15 @@ def build_workgroup_router(
         if assign is None or assign.workgroup_id != workgroup_id:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "assign not found"})
         try:
-            command_ids = loop.cancel_tool_runtime(workgroup_id, assign_id, tool_call_id)
+            frame = loop.enqueue_agent_tool_cancel(workgroup_id, assign_id, tool_call_id)
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
-        if not command_ids:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "tool_not_cancellable",
-                    "message": "tool execution is not a pending Manage command",
-                },
-            )
         audit.record(
             actor=audit_actor(request, auth),
             action="workgroup.tool.cancel",
             target_agent_id=tool_call_id,
         )
-        return {"cancelled": True, "assign_id": assign_id, "tool_call_id": tool_call_id, "command_ids": command_ids}
+        return {"cancelled": True, "assign_id": assign_id, "tool_call_id": tool_call_id, "outbox_seq": frame.delivery_seq}
 
     @router.post("/{workgroup_id}/messages/stream")
     def post_human_message_stream(
@@ -715,6 +647,98 @@ def build_workgroup_router(
             events = events[-limit:]
         return events
 
+    @router.get("/{workgroup_id}/events")
+    def workgroup_events(
+        workgroup_id: str,
+        request: Request,
+        after_seq: int = 0,
+    ) -> StreamingResponse:
+        """浏览器工作组事件流。
+
+        Node 与 Manage 继续使用独立的强身份 WebSocket；浏览器只订阅
+        Manage 已鉴权、已持久化的 Timeline/HITL/队列投影。``after_seq``
+        是 Timeline seq，断线重连时由客户端补发，浏览器不参与 Node outbox ack。
+        """
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "workgroup not found"},
+            )
+        if after_seq < 0:
+            raise HTTPException(status_code=422, detail="after_seq must be >= 0")
+        if hub is None:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "unavailable", "message": "workgroup event hub unavailable"},
+            )
+
+        connection, replay, pending = hub.subscribe_browser(
+            workgroup_id,
+            after_seq=after_seq,
+        )
+
+        async def event_gen():
+            try:
+                for event in replay:
+                    yield _sse_pack(
+                        "timeline.event",
+                        event.model_dump(mode="json"),
+                        event_id=str(event.seq),
+                    )
+                yield _sse_pack(
+                    "ready",
+                    {
+                        "workgroup_id": workgroup_id,
+                        "after_seq": after_seq,
+                        "timeline_seq": max(
+                            [int(getattr(event, "seq", 0) or 0) for event in replay]
+                            + [after_seq]
+                        ),
+                        "pending_hitl": [
+                            item.model_dump(mode="json") for item in pending
+                        ],
+                    },
+                )
+                while True:
+                    if await request.is_disconnected():
+                        break
+
+                    def take_message():
+                        try:
+                            return connection.queue.get(timeout=15)
+                        except QueueEmpty:
+                            return "__heartbeat__"
+
+                    message = await asyncio.to_thread(take_message)
+                    if message == "__heartbeat__":
+                        yield ": heartbeat\n\n"
+                        continue
+                    if message is None:
+                        break
+                    if not isinstance(message, dict):
+                        continue
+                    event_type = str(message.get("type") or "message")
+                    payload = message.get("payload")
+                    event_id = None
+                    if event_type == "timeline.event" and isinstance(payload, dict):
+                        event_id = str(payload.get("seq") or "") or None
+                    yield _sse_pack(event_type, payload or {}, event_id=event_id)
+                    if event_type == "workgroup.resync_required":
+                        break
+            finally:
+                hub.unsubscribe_browser(connection)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @router.get("/{workgroup_id}/timeline/export.jsonl")
     def export_timeline(workgroup_id: str, request: Request, limit: int = 5000) -> Response:
         """Export the durable Timeline as bounded, line-delimited JSON."""
@@ -760,52 +784,6 @@ def build_workgroup_router(
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
 
-    @router.post("/{workgroup_id}/provision-complete")
-    def provision_complete(
-        workgroup_id: str, req: ProvisionCompleteRequest, request: Request
-    ) -> dict:
-        auth = authenticate(request)
-        try:
-            result = loop.complete_provision(workgroup_id, req)
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.provision.complete",
-            target_agent_id=req.member_id,
-        )
-        return result
-
-    @router.post("/{workgroup_id}/tool-results")
-    def apply_tool_result(
-        workgroup_id: str, req: ToolResultApplyRequest, request: Request
-    ) -> dict:
-        auth = authenticate(request)
-        try:
-            result = loop.apply_tool_result(workgroup_id, req)
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.tool_result.apply",
-            target_agent_id=req.assign_id,
-        )
-        return result
-
-    @router.post("/{workgroup_id}/member-final")
-    def member_final(workgroup_id: str, req: MemberFinalRequest, request: Request) -> dict:
-        auth = authenticate(request)
-        try:
-            result = loop.member_final(workgroup_id, req)
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.member.final",
-            target_agent_id=req.member_id,
-        )
-        return result
-
     @router.get("/{workgroup_id}/hitl", response_model=list[HITLRequest])
     def list_hitl(
         workgroup_id: str, request: Request, pending_only: bool = True
@@ -845,47 +823,11 @@ def build_workgroup_router(
         )
         return hitl
 
-    @router.post("/{workgroup_id}/archive-tombstone")
-    def archive_tombstone(workgroup_id: str, request: Request) -> dict:
-        auth = authenticate(request)
-        try:
-            result = loop.archive_with_tombstone(workgroup_id)
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.archive_tombstone",
-            target_agent_id=workgroup_id,
-        )
-        return result
-
-    @router.post("/{workgroup_id}/reconcile-missing-journal")
-    def reconcile_missing_journal(
-        workgroup_id: str, req: ReconcileMissingJournalRequest, request: Request
-    ) -> dict:
-        auth = authenticate(request)
-        try:
-            result = loop.reconcile_missing_journal(
-                workgroup_id,
-                assign_id=req.assign_id,
-                command_id=req.command_id,
-                member_id=req.member_id,
-                side_effect_started=req.side_effect_started,
-            )
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.reconcile_missing_journal",
-            target_agent_id=req.command_id,
-        )
-        return result
-
     return router
 
 
 def _timeline_for_ui(store: Any, events: list[TimelineEvent]) -> list[TimelineEvent]:
-    """编排态 assign_started：用 Assign.instruction 展开完整任务正文（兼容历史截断摘要）。"""
+    """编排态 assign_started：用 Assign.instruction 展开完整任务正文。"""
     out: list[TimelineEvent] = []
     for ev in events:
         if (

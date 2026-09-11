@@ -9,7 +9,12 @@ const SkillHookNamePrefix = "skill/"
 
 // RemovePhaseHooksByPrefix 移除 Hook.Name() 以 prefix 开头的 phase hook（用于 skill 卸载同步）。
 func (r *Registry) RemovePhaseHooksByPrefix(prefix string) {
-	if r == nil || prefix == "" || len(r.phaseHooks) == 0 {
+	if r == nil || prefix == "" {
+		return
+	}
+	r.phaseMu.Lock()
+	defer r.phaseMu.Unlock()
+	if len(r.phaseHooks) == 0 {
 		return
 	}
 	out := r.phaseHooks[:0]

@@ -7,9 +7,8 @@ const { loading, saving, error, statusMessage, configPath, configWritable, form,
   useSetupConfig();
 
 async function saveGeneral() {
-  const { fs_root: _ignored, ...runtime } = form.runtime;
   await save({
-    runtime,
+    runtime: { log_level: form.runtime.log_level },
     agent: {
       name: form.agent.name || "",
       description: form.agent.description || "",
@@ -54,7 +53,7 @@ onMounted(load);
       <p class="settings-section__desc">用于界面和协作场景中的识别，不影响具体智能体的名称。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
-          <span class="settings-field__label">怎么称呼你</span>
+          <span><span class="settings-field__label">怎么称呼你</span><small class="settings-field__hint">用于回复和协作场景</small></span>
           <input
             v-model="form.user.preferred_name"
             class="settings-field__input"
@@ -64,11 +63,11 @@ onMounted(load);
           />
         </label>
         <label class="settings-field">
-          <span class="settings-field__label">节点名称</span>
+          <span><span class="settings-field__label">节点名称</span><small class="settings-field__hint">帮助区分不同运行节点</small></span>
           <input v-model="form.agent.name" class="settings-field__input" type="text" placeholder="例如：开发机" autocomplete="off" />
         </label>
         <label class="settings-field">
-          <span class="settings-field__label">简介</span>
+          <span><span class="settings-field__label">简介</span><small class="settings-field__hint">展示在节点信息中</small></span>
           <input v-model="form.agent.description" class="settings-field__input" type="text" autocomplete="off" />
         </label>
       </div>

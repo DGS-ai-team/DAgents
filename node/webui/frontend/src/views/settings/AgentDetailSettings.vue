@@ -2,11 +2,14 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
+import UiIcon from "../../components/UiIcon.vue";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
 import LinuxAgentPanel from "../../components/LinuxAgentPanel.vue";
 import MemoryPanel from "../../components/MemoryPanel.vue";
+import SimplifiedAutoPanel from "../../components/SimplifiedAutoPanel.vue";
+import AgentHandbookPanel from "../../components/AgentHandbookPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -30,12 +33,13 @@ const policyRefreshKey = ref(0);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
 const agentMeta = ref(null);
-const savedLongTermScope = ref("agent");
+const savedMemoryScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
 const detailSections = [
   { id: "behavior", label: "基本设置" },
+  { id: "autonomy", label: "Auto 设置" },
   { id: "memory", label: "记忆" },
   { id: "resources", label: "连接与资源" },
   { id: "policy", label: "工具审批" },
@@ -86,15 +90,16 @@ async function load() {
         llmProfiles.value.map((p) => p.id),
       ),
     );
+    draft.agentType = agent?.agent_type === "auto" ? "auto" : "normal";
     pruneDraftToolGroups(draft, availableToolGroups.value);
     if (promptCtx) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
       draft.promptCustomMd = String(promptCtx.custom_md || "");
-      savedLongTermScope.value =
-        String(promptCtx.long_term_scope || draft.promptLongTermScope || "agent").trim() === "global"
+      savedMemoryScope.value =
+        String(promptCtx.memory_scope || draft.promptMemoryScope || "agent").trim() === "global"
           ? "global"
           : "agent";
-      draft.promptLongTermScope = savedLongTermScope.value;
+      draft.promptMemoryScope = savedMemoryScope.value;
     }
   } catch (e) {
     error.value = e.message || "加载失败";
@@ -118,13 +123,13 @@ async function save() {
   try {
     const updated = await api.patchAgent(agentId.value, buildPatchAgentPayload(draft));
     agentMeta.value = updated;
-    const nextLongTermScope = draft.promptLongTermScope === "global" ? "global" : "agent";
+    const nextMemoryScope = draft.promptMemoryScope === "global" ? "global" : "agent";
     await api.putAgentPromptContext(agentId.value, {
       soul_md: draft.promptSoulMd || "",
       custom_md: draft.promptCustomMd || "",
-      long_term_scope: nextLongTermScope,
+      memory_scope: nextMemoryScope,
     });
-    savedLongTermScope.value = nextLongTermScope;
+    savedMemoryScope.value = nextMemoryScope;
     await api.reloadAgentRuntime(agentId.value);
     policyRefreshKey.value += 1;
     notifyConfigurationChanged("tools");
@@ -159,9 +164,7 @@ function refreshPolicy() {
   policyRefreshKey.value += 1;
 }
 
-watch(agentId, () => {
-  void load();
-});
+watch(agentId, () => { void load(); });
 
 watch(
   () => route.query.section,
@@ -194,29 +197,39 @@ onUnmounted(() => stopConfigurationEvents());
         <p class="agent-detail__intro">管理这个智能体的行为、工具权限和运行连接。</p>
       </div>
       <div class="settings-page__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="backToList">← 返回列表</button>
+        <button type="button" class="btn btn--ghost btn--sm" @click="backToList">
+          <UiIcon name="arrow-left" :size="15" />
+          返回列表
+        </button>
       </div>
     </header>
 
     <p v-if="loading" class="agent-detail__status">加载中…</p>
     <template v-else>
       <nav class="agent-detail__subnav" aria-label="智能体配置区段">
-        <button
-          v-for="item in detailSections"
-          :key="item.id"
-          type="button"
-          class="agent-detail__subnav-item"
-          :class="{ 'agent-detail__subnav-item--active': activeSection === item.id }"
-          :aria-current="activeSection === item.id ? 'page' : undefined"
-          @click="setActiveSection(item.id)"
-        >
-          {{ item.label }}
-        </button>
+        <template v-for="item in detailSections" :key="item.id">
+          <button
+            v-if="item.id !== 'autonomy' || agentMeta?.agent_type === 'auto'"
+            type="button"
+            class="agent-detail__subnav-item"
+            :class="{ 'agent-detail__subnav-item--active': activeSection === item.id }"
+            :aria-current="activeSection === item.id ? 'page' : undefined"
+            @click="setActiveSection(item.id)"
+          >
+            {{ item.label }}
+          </button>
+        </template>
       </nav>
 
       <p v-if="error && !agentMeta" class="agent-detail__error" role="alert">{{ error }}</p>
 
-      <section v-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
+      <section v-if="activeSection === 'autonomy' && agentMeta?.agent_type === 'auto'" class="agent-detail__section agent-detail__section--first">
+        <div class="agent-detail__section-heading"><div><span class="agent-detail__section-kicker">Auto</span><h2>自动检查与手册</h2></div><span>管理职责、检查频率和可编辑手册</span></div>
+        <SimplifiedAutoPanel :key="agentId" :agent-id="agentId" />
+        <AgentHandbookPanel :key="`handbook-${agentId}`" :agent-id="agentId" />
+      </section>
+
+      <section v-else-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
         <div class="agent-detail__section-heading">
           <div>
             <span class="agent-detail__section-kicker">核心配置</span>
@@ -257,7 +270,7 @@ onUnmounted(() => stopConfigurationEvents());
       </section>
 
       <section v-else-if="activeSection === 'memory'" class="agent-detail__section agent-detail__section--first">
-        <MemoryPanel :agent-id="agentId" :scope="savedLongTermScope" />
+        <MemoryPanel :agent-id="agentId" :scope="savedMemoryScope" />
       </section>
 
       <section v-else-if="activeSection === 'resources'" class="agent-detail__section agent-detail__section--first">

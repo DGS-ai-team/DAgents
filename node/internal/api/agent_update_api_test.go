@@ -7,13 +7,11 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"testing"
-
-	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 )
 
-func TestHandleAgentUpdateWindowsDelegate(t *testing.T) {
+func TestHandleAgentUpdateWindowsReturnsCurrentStatus(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("Windows-only delegate behavior")
+		t.Skip("Windows-only Node update response")
 	}
 	srv := NewServer(testConfig(t), nil, WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
@@ -25,15 +23,15 @@ func TestHandleAgentUpdateWindowsDelegate(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	var got manage.UpdateStatus
+	var got map[string]any
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Delegate != "shell" {
-		t.Fatalf("delegate = %q", got.Delegate)
+	if _, ok := got["delegate"]; ok {
+		t.Fatalf("deprecated delegate field must be absent: %#v", got)
 	}
-	if !got.Deprecated {
-		t.Fatal("expected deprecated")
+	if _, ok := got["deprecated"]; ok {
+		t.Fatalf("deprecated field must be absent: %#v", got)
 	}
 }
 

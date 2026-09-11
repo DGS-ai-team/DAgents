@@ -9,8 +9,43 @@ import (
 
 const toolResultMetadataMarker = "[TOOL_RESULT_METADATA]"
 
+const recoveryPlaceholderErrorCode = "node_restart_unknown"
+
+// RecoveryPlaceholderToolResult creates a provider-valid tool result for a
+// call whose side effect could not be proven after a process restart. The
+// placeholder closes the assistant/tool protocol pair, but its explicit
+// unknown status prevents recovery from treating it as a completed result.
+func RecoveryPlaceholderToolResult(call ToolCall) Message {
+	return ToolResultMessageWithMetadata(
+		call.ID,
+		call.Function.Name,
+		"工具执行状态在 Node 重启后无法核实，等待恢复确认。",
+		tools.ResultMetadata{
+			Status: tools.ResultStatusUnknown,
+			Error: &tools.ResultError{
+				Code:      recoveryPlaceholderErrorCode,
+				Message:   "tool execution state is unknown after node restart",
+				Retryable: false,
+			},
+		},
+	)
+}
+
+// IsRecoveryPlaceholderToolResult reports whether a tool message is the
+// internal protocol-closing placeholder written during restart recovery.
+// Checking both status and error code avoids mistaking a provider's ordinary
+// unknown result for this recovery marker.
+func IsRecoveryPlaceholderToolResult(message Message) bool {
+	if message.Role != "tool" || message.ToolResultMetadata == nil {
+		return false
+	}
+	return strings.TrimSpace(message.ToolResultMetadata.Status) == string(tools.ResultStatusUnknown) &&
+		message.ToolResultMetadata.Error != nil &&
+		strings.TrimSpace(message.ToolResultMetadata.Error.Code) == recoveryPlaceholderErrorCode
+}
+
 // ToolResultMessage constructs a history tool message and derives a stable
-// status projection from its legacy-compatible body.  Callers that already
+// status projection from its raw body. Callers that already
 // have the authoritative runtime classification should prefer
 // ToolResultMessageWithMetadata.
 func ToolResultMessage(toolCallID, name, content string) Message {
@@ -37,7 +72,7 @@ func ToolResultMessageWithMetadata(toolCallID, name, content string, metadata to
 }
 
 func classifyToolResultMetadata(name, content string, rejected bool) tools.ResultMetadata {
-	return tools.ClassifyToolResult(name, content, rejected)
+	return tools.ClassifyResult(name, content, rejected)
 }
 
 func toolResultMetadataFromResult(metadata tools.ResultMetadata) *ToolResultMetadata {
@@ -59,7 +94,7 @@ func toolResultMetadataFromResult(metadata tools.ResultMetadata) *ToolResultMeta
 // PrepareToolResultMessagesForModel creates a defensive model-facing copy of
 // messages.  Runtime/UI history keeps the original tool body; only the copy
 // sent to the LLM receives the compact metadata header. This keeps tool JSON,
-// terminal output and transcript rendering backwards compatible.
+// terminal output and transcript rendering independent from the model copy.
 func PrepareToolResultMessagesForModel(messages []Message) []Message {
 	if len(messages) == 0 {
 		return nil

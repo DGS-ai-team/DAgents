@@ -6,13 +6,18 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// loadLifecycleProjection restores the durable Turn/Step projection for a
-// cold session. Runtime instances use the same restore path during startup;
-// read-only APIs must also consult it so they do not expose the deprecated
-// RuntimeState.Pending/ToolLoopCount mirror as if it were authoritative.
-func (m *Manager) loadLifecycleProjection(ctx context.Context, sessionID, agentID string) (turn.CoordinatorSnapshot, bool, uint64, error) {
+type lifecycleProjectionData struct {
+	snapshot turn.CoordinatorSnapshot
+	sequence uint64
+	events   []turn.TurnEventEnvelope
+}
+
+// loadLifecycleProjectionData loads and replays a session's lifecycle once.
+// Callers that construct a runtime can pass the returned events through so
+// runtime restoration does not issue a second identical database scan.
+func (m *Manager) loadLifecycleProjectionData(ctx context.Context, sessionID, agentID string) (lifecycleProjectionData, error) {
 	if m == nil || m.store == nil {
-		return turn.CoordinatorSnapshot{}, false, 0, nil
+		return lifecycleProjectionData{}, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -22,7 +27,7 @@ func (m *Manager) loadLifecycleProjection(ctx context.Context, sessionID, agentI
 	for {
 		page, err := m.store.ListTurnEvents(ctx, sessionID, afterSeq, 1000)
 		if err != nil {
-			return turn.CoordinatorSnapshot{}, false, 0, err
+			return lifecycleProjectionData{}, err
 		}
 		events = append(events, page...)
 		if len(page) < 1000 {
@@ -31,13 +36,26 @@ func (m *Manager) loadLifecycleProjection(ctx context.Context, sessionID, agentI
 		afterSeq = page[len(page)-1].SessionSeq
 	}
 	if len(events) == 0 {
-		return turn.CoordinatorSnapshot{}, false, 0, nil
+		return lifecycleProjectionData{}, nil
 	}
 	coordinator := turn.NewTurnCoordinator(sessionID, agentID)
 	if err := coordinator.Restore(events); err != nil {
-		return turn.CoordinatorSnapshot{}, true, 0, err
+		return lifecycleProjectionData{events: events}, err
 	}
-	return coordinator.Snapshot(), true, events[len(events)-1].SessionSeq, nil
+	return lifecycleProjectionData{
+		snapshot: coordinator.Snapshot(),
+		sequence: events[len(events)-1].SessionSeq,
+		events:   events,
+	}, nil
+}
+
+// loadLifecycleProjection restores the durable Turn/Step projection for a
+// cold session. Runtime instances use the same restore path during startup;
+// read-only APIs consult the same projection so every lifecycle view has one
+// authority.
+func (m *Manager) loadLifecycleProjection(ctx context.Context, sessionID, agentID string) (turn.CoordinatorSnapshot, bool, uint64, error) {
+	data, err := m.loadLifecycleProjectionData(ctx, sessionID, agentID)
+	return data.snapshot, len(data.events) > 0, data.sequence, err
 }
 
 func turnStateFromCoordinatorSnapshot(snapshot turn.CoordinatorSnapshot) turn.State {

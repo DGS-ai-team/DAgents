@@ -9,7 +9,6 @@ import (
 func TestPlanSync_retainPreventsRefocusRepush(t *testing.T) {
 	entry := pending.Entry{
 		AgentID:   "agt-1",
-		SessionID: "agt-1",
 		HITLItems: 1,
 	}
 	last := map[string]pending.Entry{"agt-1": entry}
@@ -31,7 +30,7 @@ func TestPlanSync_retainPreventsRefocusRepush(t *testing.T) {
 }
 
 func TestPlanSync_unfocusWithoutPriorToastStillPushes(t *testing.T) {
-	entry := pending.Entry{AgentID: "agt-2", SessionID: "agt-2", HITLItems: 1}
+	entry := pending.Entry{AgentID: "agt-2", HITLItems: 1}
 	// Arrived while focused: never pushed, last empty, only retain.
 	plan := PlanSync(nil, nil, map[string]struct{}{"agt-2": {}})
 	if len(plan.NextLast) != 0 {
@@ -45,7 +44,7 @@ func TestPlanSync_unfocusWithoutPriorToastStillPushes(t *testing.T) {
 
 func TestPlanSync_clearedPendingDropsLast(t *testing.T) {
 	last := map[string]pending.Entry{
-		"agt-1": {AgentID: "agt-1", SessionID: "agt-1", HITLItems: 1},
+		"agt-1": {AgentID: "agt-1", HITLItems: 1},
 	}
 	plan := PlanSync(last, nil, nil)
 	if len(plan.NextLast) != 0 {

@@ -26,10 +26,6 @@ func (s stubBashExecutor) Execute(_ context.Context, name, _ string) (string, er
 	return s.output, nil
 }
 
-func (s stubBashExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
-	return "", nil
-}
-
 func (s stubBashExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
 func (s stubBashExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
 func (s stubBashExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
@@ -43,7 +39,7 @@ func TestExecuteTool_bashHistorySpillsButSSEFull(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		stubBashExecutor{output: long},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),
@@ -91,7 +87,7 @@ func TestExecuteTool_readFileNotSpilled(t *testing.T) {
 	}
 	hub := stream.NewHub(8, logx.Discard())
 	orch := NewOrchestrator(
-		"a1", root, hub, &llm.MockClient{}, reg, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		"a1", root, hub, &llm.MockClient{}, reg, nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),

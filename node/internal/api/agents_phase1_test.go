@@ -9,14 +9,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func TestCreateAgent_createsWorkspace(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +36,8 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{
@@ -53,15 +57,25 @@ defaults:
 	if created.AgentID == "" || created.DisplayName != "审查A" {
 		t.Fatalf("created = %+v", created)
 	}
-	ws := filepath.Join(cfg.AgentsDir(), created.AgentID, "data")
-	if st, err := os.Stat(ws); err != nil || !st.IsDir() {
-		t.Fatalf("workspace missing: %v", err)
+	workspaceRoot, err := agentruntime.EffectiveWorkspaceRoot(cfg.RuntimeDir(), created.AgentID, agentruntime.WorkspaceConfig{Mode: agentruntime.WorkspaceModePrivate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateRoot, err := agentruntime.WorkspaceStateRoot(workspaceRoot, created.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subdir := range []string{"history", "memory"} {
+		if st, err := os.Stat(filepath.Join(stateRoot, subdir)); err != nil || !st.IsDir() {
+			t.Fatalf("workspace state %q missing: %v", subdir, err)
+		}
 	}
 }
 
 func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -69,16 +83,18 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{
 		"display_name": "完整助手",
 		"template_id":  "general", // 仅溯源
 		"defaults": map[string]any{
-			"llm":   map[string]any{"active": "default", "max_tool_loops": 8},
+			"llm":   map[string]any{"active": "default", "max_steps": 8},
 			"tools": map[string]any{"enabled_groups": []any{"fs"}},
 			"prompt_context": map[string]any{
-				"long_term_enabled": false,
+				"memory_enabled": false,
 			},
 		},
 	})
@@ -106,7 +122,7 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 		t.Fatalf("tools = %#v", tools)
 	}
 	pc, _ := defaults["prompt_context"].(map[string]any)
-	if pc["long_term_enabled"] != false {
+	if pc["memory_enabled"] != false {
 		t.Fatalf("prompt_context = %#v", pc)
 	}
 	if _, hasSandbox := snap["sandbox"]; hasSandbox {

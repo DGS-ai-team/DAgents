@@ -64,18 +64,10 @@ func TestBashDenyPriority(t *testing.T) {
 	}
 }
 
-func TestYAMLDenyMapsToModeDeny(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "policy.yaml")
-	if err := os.WriteFile(path, []byte("tools:\n  write_file: deny\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	e, err := LoadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestMappedDeny(t *testing.T) {
+	e := NewEngineFromMaps(Maps{Tools: map[string]ApprovalMode{"write_file": ModeDeny}})
 	if e.Decide("write_file") != ActionDeny {
-		t.Fatal("yaml deny should map to ModeDeny")
+		t.Fatal("mapped deny should remain ModeDeny")
 	}
 }
 

@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// ResolveFSRoot 解析并确保 fs_root 目录存在（与 tools.resolveFSRoot 语义一致）。
-func ResolveFSRoot(fsRoot string) (string, error) {
-	root := strings.TrimSpace(fsRoot)
+// ResolveWorkspaceRoot 解析并确保 Agent workspace 目录存在。
+func ResolveWorkspaceRoot(workspaceRoot string) (string, error) {
+	root := strings.TrimSpace(workspaceRoot)
 	if root == "" {
 		wd, err := os.Getwd()
 		if err != nil {
-			return "", fmt.Errorf("fs_root empty and getwd failed: %w", err)
+			return "", fmt.Errorf("workspace root empty and getwd failed: %w", err)
 		}
 		root = wd
 	}
@@ -22,13 +22,13 @@ func ResolveFSRoot(fsRoot string) (string, error) {
 		return "", err
 	}
 	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return "", fmt.Errorf("create fs_root: %w", err)
+		return "", fmt.Errorf("create workspace root: %w", err)
 	}
 	return abs, nil
 }
 
-// ResolveUnderRoot 将相对路径解析为 fs_root 内的绝对路径。
-func ResolveUnderRoot(fsRoot, raw string) (string, error) {
+// ResolveUnderRoot 将相对路径解析为 workspace root 内的绝对路径。
+func ResolveUnderRoot(workspaceRoot, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("path is required")
@@ -38,29 +38,29 @@ func ResolveUnderRoot(fsRoot, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		root := fsRoot
+		root := workspaceRoot
 		if !strings.HasPrefix(abs, root+string(os.PathSeparator)) && abs != root {
-			return "", fmt.Errorf("path escapes fs_root: %s", raw)
+			return "", fmt.Errorf("path escapes workspace root: %s", raw)
 		}
 		return abs, nil
 	}
 	clean := filepath.Clean(raw)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path escapes fs_root: %s", raw)
+		return "", fmt.Errorf("path escapes workspace root: %s", raw)
 	}
-	full := filepath.Join(fsRoot, clean)
+	full := filepath.Join(workspaceRoot, clean)
 	abs, err := filepath.Abs(full)
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(abs, fsRoot+string(os.PathSeparator)) && abs != fsRoot {
-		return "", fmt.Errorf("path escapes fs_root: %s", raw)
+	if !strings.HasPrefix(abs, workspaceRoot+string(os.PathSeparator)) && abs != workspaceRoot {
+		return "", fmt.Errorf("path escapes workspace root: %s", raw)
 	}
 	return abs, nil
 }
 
-// ResolveImagePath 解析图片路径；相对路径在 fs_root 内，绝对路径可直接引用（可位于 fs_root 外）。
-func ResolveImagePath(fsRoot, raw string) (abs string, external bool, err error) {
+// ResolveImagePath 解析图片路径；相对路径在 workspace 内，绝对路径可直接引用（可位于 workspace 外）。
+func ResolveImagePath(workspaceRoot, raw string) (abs string, external bool, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", false, fmt.Errorf("path is required")
@@ -70,13 +70,13 @@ func ResolveImagePath(fsRoot, raw string) (abs string, external bool, err error)
 		if err != nil {
 			return "", false, err
 		}
-		root, err := ResolveFSRoot(fsRoot)
+		root, err := ResolveWorkspaceRoot(workspaceRoot)
 		if err != nil {
 			return "", false, err
 		}
 		return abs, !pathUnderRoot(abs, root), nil
 	}
-	abs, err = ResolveUnderRoot(fsRoot, raw)
+	abs, err = ResolveUnderRoot(workspaceRoot, raw)
 	if err != nil {
 		return "", false, err
 	}

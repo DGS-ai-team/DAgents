@@ -12,8 +12,7 @@ import (
 func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.LLM.Mock = true
-	done := false
-	cfg.Onboarding.NodeProfileCompleted = &done
+	cfg.Onboarding.NodeProfileCompleted = false
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 
 	// 放行：bootstrap / setup / health / probe-models
@@ -61,7 +60,7 @@ func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 func TestOnboardingGate_allowsAfterComplete(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.LLM.Mock = true
-	// nil onboarding → legacy completed
+	cfg.Onboarding.NodeProfileCompleted = true
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
 	rr := httptest.NewRecorder()

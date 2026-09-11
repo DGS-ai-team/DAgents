@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { probeLLMModels } from "../api.js";
+import UiIcon from "./UiIcon.vue";
 
 const PROVIDER_PRESETS = {
   deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-chat" },
@@ -212,7 +213,7 @@ watch(
             <h2>{{ title }}</h2>
           </div>
           <button type="button" class="btn btn-ghost" aria-label="关闭" @click="emit('close')">
-            ×
+            <UiIcon name="close" :size="16" />
           </button>
         </header>
 

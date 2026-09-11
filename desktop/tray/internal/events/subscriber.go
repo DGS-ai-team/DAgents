@@ -13,7 +13,6 @@ import (
 
 const (
 	reconnectDelay = 5 * time.Second
-	syncInterval   = 60 * time.Second
 )
 
 // Subscriber 在 Node 可用时维持全局 SSE，并维护 Agent 待办表。
@@ -35,7 +34,7 @@ func NewSubscriber(client *nodeclient.Client, store *pending.Store, onChange fun
 	}
 }
 
-// Start 启动后台 SSE 循环与 60s agents 轮询兜底（F-E5）。
+// Start 启动后台 SSE 循环；连接建立/重连时用一次 agents 快照对账。
 func (s *Subscriber) Start(parent context.Context) {
 	if s == nil || s.client == nil || s.store == nil {
 		return
@@ -49,11 +48,10 @@ func (s *Subscriber) Start(parent context.Context) {
 	s.cancel = cancel
 	s.mu.Unlock()
 
-	go s.pollLoop(ctx)
 	go s.loop(ctx)
 }
 
-// Stop 停止 SSE 订阅与轮询。
+// Stop 停止 SSE 订阅。
 func (s *Subscriber) Stop() {
 	if s == nil {
 		return
@@ -83,45 +81,17 @@ func (s *Subscriber) loop(ctx context.Context) {
 	}
 }
 
-func (s *Subscriber) pollLoop(ctx context.Context) {
-	s.syncAgents(ctx)
-	ticker := time.NewTicker(syncInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.syncAgents(ctx)
-		}
-	}
-}
-
 func (s *Subscriber) connectOnce(ctx context.Context) error {
 	s.syncAgents(ctx)
 	return s.client.StreamEvents(ctx, func(ev nodeclient.StreamEvent) bool {
 		if ctx.Err() != nil {
 			return false
 		}
-		if pending.ShouldSyncOnEvent(ev) || shouldSyncWhileHITLPending(s.store, ev) {
-			s.syncAgents(ctx)
+		if pending.ApplyNotificationChanged(s.store, ev) {
+			s.notifyChange()
 		}
 		return true
 	})
-}
-
-// shouldSyncWhileHITLPending：本地仍记着 HITL 时，审批后的 tool_result/tool_call 也立即向 Node 对账，
-// 避免等 done/60s 轮询期间因焦点变化重复弹「待处理」Toast。
-func shouldSyncWhileHITLPending(store *pending.Store, ev nodeclient.StreamEvent) bool {
-	if store == nil || !store.HasPendingHITL() {
-		return false
-	}
-	switch ev.Type {
-	case "tool_result", "tool_call":
-		return pending.EventHasAgent(ev)
-	default:
-		return false
-	}
 }
 
 func (s *Subscriber) syncAgents(ctx context.Context) {

@@ -1,8 +1,10 @@
-# Bash 与 Shell 执行层设计方案
+# Bash 与 Shell 执行层设计方案（历史记录）
 
-> 状态：Phase A-D 已实现；`terminal_*` 是当前终端主路径，`linux_exec` 仅作为旧 Agent 快照的兼容入口保留。HTTP/WebSocket transport 与断线恢复仍待实现。
+> **文档性质**：历史设计记录，不是当前 API 契约。当前实现以 `terminal_*` 工具、`node/internal/tools/terminal_*` 和内置工具参考为准；本文中的 `linux_exec`、后台 job 及迁移兼容描述不得作为新代码实现依据。
 >
-> 目标：在保留现有 `bash_run` 行为兼容性的前提下，抽象统一的本地/远程 Shell 执行层，为 Linux channel、PTY、容器和后续 Exec Server 提供共同基础。
+> 状态：Phase A-D 已实现；后续演进以现行 Terminal/Linux channel 代码为准。
+>
+> 目标：抽象统一的本地/远程 Shell 执行层，为 Linux channel、PTY、容器和后续 Exec Server 提供共同基础。
 
 ## 1. 结论先行
 
@@ -40,7 +42,7 @@ Executor Provider
 
 - Linux 下通过 `bash -lc` 执行；
 - Windows 下支持 `cmd`/PowerShell；
-- `cwd` 受 `fs_root` 限制；
+- `cwd` 受 Agent `workspace_root` 限制；
 - 有超时、取消和进程树终止；旧后台任务仅由兼容层保留；
 - 有 stdout/stderr 捕获和输出压缩；
 - 通过 Agent policy 和 shell policy 进行审批；
@@ -220,7 +222,7 @@ SandboxProvider.Prepare(request)
 ExecutorProvider.Start(request)
 ```
 
-本地执行可以使用 fs_root、进程限制和后续 Landlock/bwrap；远程执行使用 channel 的远程 cwd、用户权限和 command policy；容器执行使用容器挂载和网络策略。
+本地执行可以使用 Agent `workspace_root`、进程限制和后续 Landlock/bwrap；远程执行使用 channel 的远程 cwd、用户权限和 command policy；容器执行使用容器挂载和网络策略。Node 管理文件使用独立的 `runtime_root`，不作为 Agent 工具相对路径基准。
 
 ## 5. DAgents 推荐内部接口
 
@@ -276,7 +278,7 @@ type ExecutionContext struct {
 
 - 默认本地执行；
 - `shell_type` 继续支持 bash/cmd/powershell；
-- `cwd` 继续受本地 `fs_root` 限制；
+- `cwd` 继续受本地 Agent `workspace_root` 限制；
 - 保留 timeout、background、cancel、output compression；
 - 继续使用当前 `bash_run` policy 和 shell policy；
 - 不新增 `channel_id` 参数。

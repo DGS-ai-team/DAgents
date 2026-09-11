@@ -6,7 +6,7 @@
 
 ## 启动
 
-与 `dagents-node` 共用 `config.yaml`（须 `browser.enabled: true`、`fs_root` 一致）：
+与 `dagents-node` 共用 `config.yaml`（须 `browser.enabled: true`；浏览器服务使用固定的 `runtime_root`，默认 `./.runtime`）：
 
 **开发（源码）：**
 

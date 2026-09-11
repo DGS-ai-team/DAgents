@@ -29,3 +29,15 @@ import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
     </section>
   </div>
 </template>
+
+<style scoped>
+.context-settings__summary > span:first-child {
+  min-width: 0;
+}
+
+.context-settings__summary-action,
+.context-settings__summary::after {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+</style>

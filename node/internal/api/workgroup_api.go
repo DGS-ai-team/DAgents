@@ -10,13 +10,11 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
-	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
 )
 
 func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups", s.handleListWorkgroups)
 	s.mux.HandleFunc("POST /v1/workgroups", s.handleCreateWorkgroup)
-	s.mux.HandleFunc("GET /v1/workgroups/meta/member-tools", s.handleGetMemberToolCatalog)
 	s.mux.HandleFunc("GET /v1/workgroups/meta/agents", s.handleListRegisteredAgents)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}", s.handleGetWorkgroup)
 	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}", s.handlePatchWorkgroup)
@@ -27,7 +25,6 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members", s.handleListWorkgroupMembers)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/members", s.handleCreateWorkgroupMember)
 	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}/members/{memberId}", s.handlePatchWorkgroupMember)
-	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members/{memberId}/spec", s.handleGetWorkgroupMemberSpec)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/members/{memberId}/archive", s.handleArchiveWorkgroupMember)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/hitl", s.handleListWorkgroupHITL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/hitl", s.handleCreateWorkgroupHITL)
@@ -67,17 +64,9 @@ func (s *Server) handleListWorkgroups(w http.ResponseWriter, r *http.Request) {
 	switch strings.TrimSpace(r.URL.Query().Get("scope")) {
 	case "all":
 		mode = manage.WorkgroupListAll
-	case "acl", "available":
+	case "acl":
 		mode = manage.WorkgroupListACL
 	case "subscribed", "":
-		if r.URL.Query().Get("subscribed") == "0" {
-			mode = manage.WorkgroupListAll
-		} else {
-			mode = manage.WorkgroupListSubscribed
-		}
-	}
-	// 兼容旧 query
-	if r.URL.Query().Get("subscribed") == "1" || r.URL.Query().Get("subscribed_by") != "" {
 		mode = manage.WorkgroupListSubscribed
 	}
 	items, err := s.control.ListWorkgroups(r.Context(), mode)
@@ -170,12 +159,6 @@ func (s *Server) handleListWorkgroupLLMConfigs(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"configs": items})
 }
 
-func (s *Server) handleGetMemberToolCatalog(w http.ResponseWriter, r *http.Request) {
-	// 目录来自仓库嵌入 JSON；Node 单机不连 Manage 也可读。不经 Manage HTTP。
-	_ = r
-	writeJSON(w, http.StatusOK, workgroup.MemberToolCatalogAPI())
-}
-
 func (s *Server) handleListRegisteredAgents(w http.ResponseWriter, r *http.Request) {
 	if !s.workgroupProxyReady(w) {
 		return
@@ -251,9 +234,6 @@ func (s *Server) handleCreateWorkgroupMember(w http.ResponseWriter, r *http.Requ
 	if strings.TrimSpace(strAny(body["home_node_id"])) == "" {
 		body["home_node_id"] = s.cfg.NodeID
 	}
-	if tools, ok := body["allow_tool_names"].([]any); !ok || len(tools) == 0 {
-		body["allow_tool_names"] = workgroup.WorkspaceDefaultAllowToolNames()
-	}
 	home := strings.TrimSpace(strAny(body["home_node_id"]))
 	if home != "" {
 		if _, err := s.control.AddWorkgroupCollaborator(r.Context(), wid, home); err != nil {
@@ -281,20 +261,6 @@ func (s *Server) handlePatchWorkgroupMember(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	out, err := s.control.PatchWorkgroupMember(r.Context(), wid, mid, body)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleGetWorkgroupMemberSpec(w http.ResponseWriter, r *http.Request) {
-	if !s.workgroupProxyReady(w) {
-		return
-	}
-	wid := strings.TrimSpace(r.PathValue("workgroupId"))
-	mid := strings.TrimSpace(r.PathValue("memberId"))
-	out, err := s.control.GetWorkgroupMemberSpec(r.Context(), wid, mid)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return

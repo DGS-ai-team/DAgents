@@ -41,6 +41,4 @@ func StripPromptBodiesFromDefaults(defaults map[string]any) {
 	}
 	delete(m, "soul_md")
 	delete(m, "custom_md")
-	delete(m, "user_md")
-	delete(m, "long_term_md")
 }

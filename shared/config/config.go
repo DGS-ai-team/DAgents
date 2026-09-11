@@ -17,34 +17,32 @@ import (
 const (
 	DefaultListenHost = "127.0.0.1"
 	DefaultListenPort = 18765
-	// DefaultFSRoot 为 Node 运行时根目录，写死不可配置（YAML / Web UI / setup PATCH 均忽略）。
-	DefaultFSRoot = "./.runtime"
+	// DefaultRuntimeRoot 为 Node 运行时根目录，写死不可配置（YAML / Web UI / setup PATCH 均忽略）。
+	DefaultRuntimeRoot = "./.runtime"
 )
 
 // Config 为 Node 与 Client 共享的配置根结构；Client 仅使用 local 等子集。
 type Config struct {
-	NodeID string `yaml:"node_id"`
-	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
-	LegacyAgentID string           `yaml:"agent_id,omitempty"`
-	Agent         AgentConfig      `yaml:"agent"`
-	User          UserConfig       `yaml:"user"`
-	Onboarding    OnboardingConfig `yaml:"onboarding"`
-	Listen        ListenConfig     `yaml:"listen"`
-	Local         LocalConfig      `yaml:"local"`
-	Groups        []string         `yaml:"groups"`
-	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
-	FSRoot            string                  `yaml:"-"`
+	NodeID     string           `yaml:"node_id"`
+	Agent      AgentConfig      `yaml:"agent"`
+	User       UserConfig       `yaml:"user"`
+	Onboarding OnboardingConfig `yaml:"onboarding"`
+	Listen     ListenConfig     `yaml:"listen"`
+	Local      LocalConfig      `yaml:"local"`
+	Groups     []string         `yaml:"groups"`
+	// RuntimeRoot 固定为 DefaultRuntimeRoot，不从 YAML 读取；测试可在内存中直接赋值。
+	RuntimeRoot       string                  `yaml:"-"`
 	LLM               LLMConfig               `yaml:"llm"`
 	Manage            ManageConfig            `yaml:"manage"`
 	Skills            SkillsConfig            `yaml:"skills"`
 	Compression       CompressionConfig       `yaml:"compression"`
+	Memory            MemoryConfig            `yaml:"memory"`
 	Triggers          TriggersConfig          `yaml:"triggers"`
 	RawMessageHistory RawMessageHistoryConfig `yaml:"raw_message_history"`
 	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
 	Log               LogConfig               `yaml:"log"`
 	Tools             ToolsConfig             `yaml:"tools"`
 	Hooks             HooksConfig             `yaml:"hooks"`
-	UI                UIConfig                `yaml:"ui"`
 	Multimodal        MultimodalConfig        `yaml:"multimodal"`
 	Browser           BrowserConfig           `yaml:"browser"`
 	WeCom             WeComConfig             `yaml:"wecom"`
@@ -58,9 +56,9 @@ type UserConfig struct {
 
 // OnboardingConfig 控制首次进入 Web UI 的门闩状态。
 type OnboardingConfig struct {
-	// NodeProfileCompleted 为 nil 时视为已完成（兼容升级前已有 node_settings 的安装）；
-	// 产品种子显式写 false，未完成前不启动 Manage Registrar / Workgroup Dialer。
-	NodeProfileCompleted *bool `yaml:"node_profile_completed"`
+	// NodeProfileCompleted 为 false 时，未完成前不启动 Manage Registrar /
+	// Workgroup Dialer。
+	NodeProfileCompleted bool `yaml:"node_profile_completed"`
 }
 
 // MultimodalConfig 控制 user 多模态输入（content_parts 图片）与 read_image vision 注入。
@@ -75,17 +73,6 @@ func (c *Config) MultimodalEnabled() bool {
 		return false
 	}
 	return *c.Multimodal.Enabled
-}
-
-// UIConfig 控制 Node 内嵌 Web UI（/ui/）是否挂载。
-type UIConfig struct {
-	// Enabled 为 nil 时默认 true。
-	Enabled *bool `yaml:"enabled"`
-}
-
-// UIEnabled 是否挂载 Web UI。Web UI 为固定挂载：始终返回 true（忽略 yaml 中的 ui.enabled）。
-func (c *Config) UIEnabled() bool {
-	return true
 }
 
 // AvailableAgentToolGroups 返回本 Node 进程当前可供 Agent 勾选的工具组。
@@ -148,8 +135,6 @@ func (c *Config) FilterAgentToolGroups(groups []string) []string {
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
 // 工具组允许列表由各 Agent 快照 defaults.tools.enabled_groups 决定，不再使用 Node 级配置。
 type ToolsConfig struct {
-	// Enabled 已废弃；出现时 Validate 失败。
-	Enabled []string `yaml:"enabled,omitempty"`
 	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
 	// 留空时默认 utf-8；单次 bash_run 可用 output_encoding 覆盖。
 	BashOutputEncoding string `yaml:"bash_output_encoding"`
@@ -180,13 +165,12 @@ type RawMessageHistoryConfig struct {
 
 // ChildAgentsConfig 控制临时子 Agent（见 docs/architecture/child-agent-tools.md）。
 type ChildAgentsConfig struct {
-	Enabled                   bool `yaml:"enabled"`
-	DefaultTTLSeconds         int  `yaml:"default_ttl_seconds"`
-	MaxTTLSeconds             int  `yaml:"max_ttl_seconds"`
-	DefaultMaxTurns           int  `yaml:"default_max_turns"`
-	MaxMaxTurns               int  `yaml:"max_max_turns"`
-	MaxActivePerParent        int  `yaml:"max_active_per_parent"`
-	DefaultWaitTimeoutSeconds int  `yaml:"default_wait_timeout_seconds"`
+	Enabled            bool `yaml:"enabled"`
+	DefaultTTLSeconds  int  `yaml:"default_ttl_seconds"`
+	MaxTTLSeconds      int  `yaml:"max_ttl_seconds"`
+	DefaultMaxTurns    int  `yaml:"default_max_turns"`
+	MaxMaxTurns        int  `yaml:"max_max_turns"`
+	MaxActivePerParent int  `yaml:"max_active_per_parent"`
 }
 
 // LogConfig 控制 Node 进程日志级别（完整日志→stdout / *.log，错误→stderr / *.err.log）。
@@ -213,6 +197,16 @@ type CompressionConfig struct {
 	IdleAutoCompressSeconds     int `yaml:"idle_auto_compress_seconds"`
 	IdleAutoCompressPollSeconds int `yaml:"idle_auto_compress_poll_seconds"`
 	IdleAutoCompressMinTokens   int `yaml:"idle_auto_compress_min_tokens"`
+}
+
+// MemoryConfig controls optional background extraction from compression
+// slices. AutoExtract deliberately defaults to false because it adds an LLM
+// call and model-inferred candidates still need consolidation/approval rules.
+type MemoryConfig struct {
+	AutoExtract        bool `yaml:"auto_extract"`
+	CandidateQueueSize int  `yaml:"candidate_queue_size"`
+	MaxCandidates      int  `yaml:"max_candidates"`
+	CoreBudgetTokens   int  `yaml:"core_budget_tokens"`
 }
 
 // HooksConfig 控制 Node turn Hook 行为。
@@ -246,11 +240,7 @@ type ToolResultHookConfig struct {
 	// SpillThresholdTokens 单条 tool 结果超过该估算 token 数时落盘并对 history 头尾摘要；省略时 12000。
 	// 作用于下方 tools 列表中的每个工具，非 bash_run 专用，也非整段 session history 上限。
 	SpillThresholdTokens int `yaml:"spill_threshold_tokens"`
-	// MaxHistoryTokens 已废弃，请改用 spill_threshold_tokens。
-	MaxHistoryTokens int `yaml:"max_history_tokens,omitempty"`
-	// MaxHistoryRunes 已废弃。
-	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
-	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs（见 defaultToolResultHookTools）。
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + terminal + fs（见 defaultToolResultHookTools）。
 	Tools []string `yaml:"tools"`
 }
 
@@ -328,17 +318,12 @@ func (c *Config) ToolResultSpillThresholdTokens() int {
 	if c.Hooks.ToolResult.SpillThresholdTokens > 0 {
 		return c.Hooks.ToolResult.SpillThresholdTokens
 	}
-	if c.Hooks.ToolResult.MaxHistoryTokens > 0 {
-		return c.Hooks.ToolResult.MaxHistoryTokens
-	}
-	if c.Hooks.ToolResult.MaxHistoryRunes > 0 {
-		return int(float64(c.Hooks.ToolResult.MaxHistoryRunes) * 0.6)
-	}
 	return defaultToolResultSpillThresholdTokens
 }
 
-// defaultToolResultHookTools 与 node/internal/toolresult.DefaultToolResultTools 保持一致。
-func defaultToolResultHookTools() []string {
+// DefaultToolResultHookTools 返回默认启用结果摘要的工具名（副本）。
+// 运行时和配置层共用这份名单，避免新增工具时发生配置漂移。
+func DefaultToolResultHookTools() []string {
 	return []string{
 		"bash_run", "terminal_command", "read_file", "grep_file", "grep_files",
 		"search_replace", "glob_files",
@@ -348,7 +333,7 @@ func defaultToolResultHookTools() []string {
 // ToolResultHookTools 返回启用摘要的工具列表。
 func (c *Config) ToolResultHookTools() []string {
 	if c == nil || len(c.Hooks.ToolResult.Tools) == 0 {
-		return defaultToolResultHookTools()
+		return DefaultToolResultHookTools()
 	}
 	return append([]string(nil), c.Hooks.ToolResult.Tools...)
 }
@@ -363,13 +348,11 @@ type ListenConfig struct {
 type LocalConfig struct {
 	Endpoint string `yaml:"endpoint"`
 	NodeID   string `yaml:"node_id"`
-	// AgentID 为旧字段；加载时若 NodeID 为空则合并。
-	AgentID string `yaml:"agent_id,omitempty"`
 }
 
 // LLMConfig 为 turn loop 使用的模型配置。
 //
-// 兼容单配置：顶层 provider/base_url/model 等为「当前生效」快照。
+// 顶层 provider/base_url/model 等为当前生效快照。
 // 多配置：profiles 存命名配置，ProfileOrder 决定顺序（第一条为默认）；
 // active 为运行时当前选用（可热切换），缺省时取第一条。
 type LLMConfig struct {
@@ -383,10 +366,10 @@ type LLMConfig struct {
 	Mock            bool                        `yaml:"mock"`
 	Thinking        string                      `yaml:"thinking"`         // provider thinking：enabled | disabled
 	ReasoningEffort string                      `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
-	// max_tool_loops 已迁至 Agent config_snapshot（defaults.llm.max_tool_loops），勿再写入 Node YAML。
+	// max_steps 属于 Agent config_snapshot（defaults.llm.max_steps），不写入 Node YAML。
 }
 
-// LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
+// LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_steps）。
 type LLMProfileConfig struct {
 	Provider        string `yaml:"provider"`
 	BaseURL         string `yaml:"base_url"`
@@ -423,7 +406,7 @@ type ManageUpdateConfig struct {
 }
 
 // ManageRegistrationConfig 控制周期性 upsert/心跳参数。
-// Agent 身份（name/description/role/capabilities）在 config.yaml 的 agent 块配置。
+// Node 注册身份（name/description/capabilities/metadata）在 config.yaml 的 agent 块配置。
 type ManageRegistrationConfig struct {
 	BaseURL         string `yaml:"base_url"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
@@ -436,8 +419,7 @@ type ManageRegistrationConfig struct {
 // 逻辑：
 // 1. 读文件并 os.ExpandEnv；
 // 2. yaml.Unmarshal 到 Config；
-// 3. ApplyDefaults（合并遗留 agent_id → node_id）；
-// 4. ResolveNodeID（`.runtime/node/node_id` 持久化）；
+// 3. ResolveNodeID（`.runtime/node/node_id` 持久化）；
 // 5. Validate 后返回。
 //
 // 异常：文件不存在、YAML 语法错误、校验失败均向上返回 error。
@@ -452,7 +434,7 @@ func LoadFile(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
-	cfg.FSRoot = DefaultFSRoot
+	cfg.RuntimeRoot = DefaultRuntimeRoot
 	cfg.ApplyDefaults()
 	if err := cfg.ResolveNodeID(); err != nil {
 		return nil, err
@@ -467,14 +449,6 @@ func LoadFile(path string) (*Config, error) {
 //
 // 副作用：修改接收者字段。
 func (c *Config) ApplyDefaults() {
-	if strings.TrimSpace(c.NodeID) == "" {
-		c.NodeID = strings.TrimSpace(c.LegacyAgentID)
-	}
-	c.LegacyAgentID = ""
-	if strings.TrimSpace(c.Local.NodeID) == "" {
-		c.Local.NodeID = strings.TrimSpace(c.Local.AgentID)
-	}
-	c.Local.AgentID = ""
 	if strings.TrimSpace(c.Listen.Host) == "" {
 		c.Listen.Host = DefaultListenHost
 	}
@@ -484,8 +458,8 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Local.Endpoint) == "" {
 		c.Local.Endpoint = fmt.Sprintf("http://%s", c.ListenAddr())
 	}
-	if strings.TrimSpace(c.FSRoot) == "" {
-		c.FSRoot = DefaultFSRoot
+	if strings.TrimSpace(c.RuntimeRoot) == "" {
+		c.RuntimeRoot = DefaultRuntimeRoot
 	}
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
@@ -521,9 +495,6 @@ func (c *Config) ApplyDefaults() {
 	if c.ChildAgents.MaxActivePerParent <= 0 {
 		c.ChildAgents.MaxActivePerParent = 8
 	}
-	if c.ChildAgents.DefaultWaitTimeoutSeconds <= 0 {
-		c.ChildAgents.DefaultWaitTimeoutSeconds = 300
-	}
 	if c.Manage.Registration.IntervalSeconds <= 0 {
 		c.Manage.Registration.IntervalSeconds = 30
 	}
@@ -538,6 +509,15 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Compression.IdleAutoCompressPollSeconds <= 0 {
 		c.Compression.IdleAutoCompressPollSeconds = 60
+	}
+	if c.Memory.CandidateQueueSize <= 0 {
+		c.Memory.CandidateQueueSize = 16
+	}
+	if c.Memory.MaxCandidates <= 0 {
+		c.Memory.MaxCandidates = 8
+	}
+	if c.Memory.CoreBudgetTokens <= 0 {
+		c.Memory.CoreBudgetTokens = 2000
 	}
 	c.applyBrowserDefaults()
 	c.applyWeComDefaults()
@@ -556,21 +536,16 @@ func (c *Config) IdleAutoCompressPollInterval() time.Duration {
 	return time.Duration(c.Compression.IdleAutoCompressPollSeconds) * time.Second
 }
 
-// RuntimeDir 返回运行时根目录（固定 DefaultFSRoot；子目录路径均相对此根硬编码）。
+// RuntimeDir 返回 Node 控制面运行时根目录（固定 DefaultRuntimeRoot；子目录路径均相对此根硬编码）。
 func (c *Config) RuntimeDir() string {
-	root := strings.TrimRight(strings.TrimSpace(c.FSRoot), "/")
+	root := strings.TrimRight(strings.TrimSpace(c.RuntimeRoot), "/")
 	if root == "" {
-		return DefaultFSRoot
+		return DefaultRuntimeRoot
 	}
 	return root
 }
 
-// DataDir 返回临时工作区目录（`<fs_root>/data`）。
-func (c *Config) DataDir() string {
-	return filepath.Join(c.RuntimeDir(), "data")
-}
-
-// SkillsRoot 返回 skills 目录（`<fs_root>/skills`）。
+// SkillsRoot 返回 Node 管理的 skills 目录（`<runtime_root>/skills`）。
 func (c *Config) SkillsRoot() string {
 	return filepath.Join(c.RuntimeDir(), "skills")
 }
@@ -595,9 +570,6 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("manage.registration.base_url invalid: %w", err)
 			}
 		}
-	}
-	if err := validateToolsEnabledConfig(&c.Tools); err != nil {
-		return err
 	}
 	if err := validateBrowserConfig(c); err != nil {
 		return err
@@ -698,13 +670,14 @@ func (c *Config) ListenAddr() string {
 	return fmt.Sprintf("%s:%d", c.Listen.Host, c.Listen.Port)
 }
 
-// MemoryDir 返回持久化记忆目录（`<runtime>/memory`）。
+// MemoryDir 返回 Node 控制面持久化目录（`<runtime>/memory`）。Agent 私有 workspace 状态不使用此路径。
 func (c *Config) MemoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "memory")
 }
 
 // SessionDBPath 返回对话运行时 SQLite 路径（`<runtime>/memory/sessions.db`；表为 agent_runtimes）。
-// Phase 2 起对话历史迁入 agents；过渡期消息路径仍可能使用本库。
+// 该数据库属于 Node 控制面，记录通过 agent_id 隔离的会话快照；workspace 内的
+// .dagents/<agent_id>/history 是原始消息审计侧车，两者职责不同。
 func (c *Config) SessionDBPath() string {
 	return filepath.Join(c.MemoryDir(), "sessions.db")
 }
@@ -724,16 +697,6 @@ func (c *Config) NodeSettingsDBPath() string {
 	return filepath.Join(c.RuntimeDir(), "node_settings.db")
 }
 
-// BackgroundJobsDBPath returns the persistent shell/background job database.
-func (c *Config) BackgroundJobsDBPath() string {
-	return filepath.Join(c.RuntimeDir(), "background_jobs.db")
-}
-
-// AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。
-func (c *Config) AgentsDir() string {
-	return filepath.Join(c.RuntimeDir(), "agents")
-}
-
 // AgentTemplatesDir 返回用户自定义模板目录（`<runtime>/agent-templates`）。
 func (c *Config) AgentTemplatesDir() string {
 	return filepath.Join(c.RuntimeDir(), "agent-templates")
@@ -750,7 +713,8 @@ func (c *Config) RawMessageHistoryEnabled() bool {
 	return true
 }
 
-// RawMessageHistoryDir 返回 JSONL 根目录（`<runtime>/history`）。
+// RawMessageHistoryDir 返回未绑定 Agent 时的 JSONL 根目录（`<runtime>/history`）。
+// 正常 Agent runtime 会在 workspace 内按 agent_id 覆盖此路径。
 func (c *Config) RawMessageHistoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "history")
 }
@@ -766,7 +730,7 @@ func parseEnvBool(value string, defaultVal bool) bool {
 	}
 }
 
-// TriggersStorePath 返回 triggers.json 路径（`<fs_root>/triggers/triggers.json`）。
+// TriggersStorePath 返回 triggers.json 路径（`<runtime_root>/triggers/triggers.json`）。
 func (c *Config) TriggersStorePath() string {
 	return filepath.Join(c.RuntimeDir(), "triggers", "triggers.json")
 }
@@ -786,7 +750,7 @@ func (c *Config) ShellPolicyDir() string {
 	return filepath.Join(c.PolicyDir(), "shell")
 }
 
-// ExternalToolsDir 返回外置 CLI/工具目录（`<fs_root>/externaltools`）。
+// ExternalToolsDir 返回 Node 管理的外置 CLI/工具目录（`<runtime_root>/externaltools`）。
 func (c *Config) ExternalToolsDir() string {
 	return filepath.Join(c.RuntimeDir(), "externaltools")
 }

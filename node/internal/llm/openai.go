@@ -84,6 +84,8 @@ type chatStreamChunk struct {
 }
 
 // StreamChat 调用 POST /chat/completions 并解析 SSE（含 tool_calls 增量合并）。
+// On context cancellation it may return an incomplete ChatResult. That result
+// is a live draft for the caller and must never be persisted as model history.
 func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {
 	if strings.TrimSpace(c.cfg.Model) == "" {
 		return ChatResult{}, fmt.Errorf("llm model is not configured")
@@ -95,6 +97,9 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	var body []byte
 	var err error
 	if len(req.APIMessages) > 0 {
+		if err := validateAPIMessages(req.APIMessages); err != nil {
+			return ChatResult{}, err
+		}
 		body, err = marshalChatRequestMap(map[string]any{
 			"model":          c.cfg.Model,
 			"messages":       req.APIMessages,
@@ -143,6 +148,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	var fullReasoning strings.Builder
 	toolAcc := newToolCallAccumulator()
 	var finishReason string
+	streamComplete := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -152,7 +158,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 			return ChatResult{
 				Content:          full.String(),
 				ReasoningContent: fullReasoning.String(),
-				ToolCalls:        toolAcc.finalize(),
+				ToolCalls:        toolAcc.aggregate(),
 			}, ctx.Err()
 		default:
 		}
@@ -165,6 +171,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "[DONE]" {
+			streamComplete = true
 			break
 		}
 		var chunk chatStreamChunk
@@ -216,10 +223,21 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return ChatResult{Content: full.String(), ToolCalls: toolAcc.finalize()}, err
+		return ChatResult{
+			Content:          full.String(),
+			ReasoningContent: fullReasoning.String(),
+			ToolCalls:        toolAcc.aggregate(),
+		}, err
+	}
+	if !streamComplete && strings.TrimSpace(finishReason) == "" {
+		return ChatResult{
+			Content:          full.String(),
+			ReasoningContent: fullReasoning.String(),
+			ToolCalls:        toolAcc.aggregate(),
+		}, fmt.Errorf("llm stream ended before completion: %w", io.ErrUnexpectedEOF)
 	}
 
-	tcs := toolAcc.finalize()
+	tcs := toolAcc.aggregate()
 	if finishReason == "" {
 		if len(tcs) > 0 {
 			finishReason = "tool_calls"
@@ -227,12 +245,63 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 			finishReason = "stop"
 		}
 	}
-	return ChatResult{
+	result := ChatResult{
 		Content:          full.String(),
 		ReasoningContent: fullReasoning.String(),
 		ToolCalls:        tcs,
 		FinishReason:     finishReason,
-	}, nil
+	}
+	if err := ValidateAssistantMessage(Message{
+		Role:             "assistant",
+		Content:          result.Content,
+		ReasoningContent: result.ReasoningContent,
+		ToolCalls:        result.ToolCalls,
+	}); err != nil {
+		// The provider stream ended normally, so preserve the typed protocol
+		// error for diagnostics but never let the caller treat this response as
+		// an executable assistant message.
+		return result, fmt.Errorf("invalid provider tool call: %w", err)
+	}
+	return result, nil
+}
+
+// validateAPIMessages closes the validation gap for adapters that already
+// serialized messages into the final provider shape. Content is deliberately
+// ignored here (it may be a string or multimodal array); tool protocol fields
+// are decoded into the shared internal representation and validated once.
+func validateAPIMessages(payloads []map[string]any) error {
+	if len(payloads) == 0 {
+		return nil
+	}
+	type apiMessage struct {
+		Role       string     `json:"role"`
+		ToolCalls  []ToolCall `json:"tool_calls"`
+		ToolCallID string     `json:"tool_call_id"`
+	}
+	messages := make([]Message, len(payloads))
+	for index, payload := range payloads {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return &HistoryValidationError{Violations: []HistoryViolation{{
+				Code:         "api_message_invalid",
+				MessageIndex: index,
+			}}}
+		}
+		var parsed apiMessage
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return &HistoryValidationError{Violations: []HistoryViolation{{
+				Code:         "api_message_invalid",
+				MessageIndex: index,
+				Detail:       "provider message fields are malformed",
+			}}}
+		}
+		messages[index] = Message{
+			Role:       parsed.Role,
+			ToolCalls:  parsed.ToolCalls,
+			ToolCallID: parsed.ToolCallID,
+		}
+	}
+	return ValidateToolProtocol(messages)
 }
 
 func appendReasoningDetail(full *strings.Builder, detail string) string {
@@ -254,57 +323,106 @@ func appendReasoningDetail(full *strings.Builder, detail string) string {
 }
 
 type completeRequestBody struct {
-	Model    string           `json:"model"`
-	Messages []map[string]any `json:"messages"`
+	Model           string           `json:"model"`
+	Messages        []map[string]any `json:"messages"`
+	MaxOutputTokens int              `json:"max_tokens,omitempty"`
 }
 
 type completeResponseBody struct {
 	Choices []struct {
 		Message Message `json:"message"`
 	} `json:"choices"`
+	Usage json.RawMessage `json:"usage"`
 }
 
 // CompleteText 调用非流式 chat/completions（摘要压缩等）。
 func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (string, error) {
+	text, _, err := c.CompleteTextWithUsage(ctx, req)
+	return text, err
+}
+
+// CompleteTextWithUsage calls the non-streaming endpoint and returns provider
+// usage when present. Providers are allowed to omit usage, represented by a
+// nil pointer rather than a fabricated zero-valued Usage.
+func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error) {
+	if req.MaxOutputTokens < 0 {
+		return "", nil, fmt.Errorf("max output tokens cannot be negative")
+	}
 	if strings.TrimSpace(c.cfg.Model) == "" {
-		return "", fmt.Errorf("llm model is not configured")
+		return "", nil, fmt.Errorf("llm model is not configured")
 	}
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return "", fmt.Errorf("llm api key is not configured")
+		return "", nil, fmt.Errorf("llm api key is not configured")
 	}
 	msgs := MessagesWithSystem(req.SystemPrompt, []Message{{Role: "user", Content: req.UserPrompt}})
 	payloads, err := MessagesToAPIPayload(msgs)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads}, c.cfg.RequestExtra)
+	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads, MaxOutputTokens: req.MaxOutputTokens}, c.cfg.RequestExtra)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+	if req.MaxOutputTokens > 0 {
+		body, err = clampCompletionTokenLimit(body, req.MaxOutputTokens)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
+		return "", nil, fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
 	}
 	var parsed completeResponseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", err
+		return "", nil, err
+	}
+	var usage *Usage
+	if usageHasTokenCounts(parsed.Usage) {
+		var decoded Usage
+		if err := json.Unmarshal(parsed.Usage, &decoded); err != nil {
+			return "", nil, err
+		}
+		usage = &decoded
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("empty completion choices")
+		return "", usage, fmt.Errorf("empty completion choices")
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	return strings.TrimSpace(parsed.Choices[0].Message.Content), usage, nil
+}
+
+func usageHasTokenCounts(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil {
+		return false
+	}
+	if validUsageCount(fields["total_tokens"]) {
+		return true
+	}
+	return validUsageCount(fields["prompt_tokens"]) && validUsageCount(fields["completion_tokens"])
+}
+
+func validUsageCount(raw json.RawMessage) bool {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return false
+	}
+	var value int
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	return value >= 0
 }
 
 type toolCallAccumulator struct {
@@ -352,7 +470,10 @@ func (a *toolCallAccumulator) snapshot() []ToolCall {
 	return out
 }
 
-func (a *toolCallAccumulator) finalize() []ToolCall {
+// aggregate returns the accumulated tool-call snapshot after the stream has
+// ended. It does not validate JSON arguments; the caller must decide whether
+// the stream ended successfully and then run ValidateAssistantMessage.
+func (a *toolCallAccumulator) aggregate() []ToolCall {
 	if len(a.order) == 0 {
 		return nil
 	}
@@ -371,6 +492,26 @@ func marshalChatRequest(body any, extra map[string]any) ([]byte, error) {
 		return nil, err
 	}
 	return mergeRequestExtra(raw, extra)
+}
+
+func clampCompletionTokenLimit(body []byte, limit int) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	if v, ok := payload["max_completion_tokens"].(float64); ok && v >= 0 && int(v) < limit {
+		limit = int(v)
+	}
+	if v, ok := payload["max_tokens"].(float64); ok && v >= 0 && int(v) < limit {
+		limit = int(v)
+	}
+	if _, hasCompletion := payload["max_completion_tokens"]; hasCompletion {
+		payload["max_completion_tokens"] = limit
+		delete(payload, "max_tokens")
+	} else {
+		payload["max_tokens"] = limit
+	}
+	return json.Marshal(payload)
 }
 
 func marshalChatRequestMap(body map[string]any, extra map[string]any) ([]byte, error) {

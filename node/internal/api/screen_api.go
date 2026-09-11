@@ -33,9 +33,6 @@ func (s *Server) handleAgentScreenStatus(w http.ResponseWriter, r *http.Request)
 			s.writeAgentNotFound(w, id)
 			return
 		}
-		if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
-			return
-		}
 	}
 	st := screen.Default().Status()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -58,9 +55,6 @@ func (s *Server) handleAgentScreenStream(w http.ResponseWriter, r *http.Request)
 		}
 		if rec == nil || rec.Archived {
 			s.writeAgentNotFound(w, id)
-			return
-		}
-		if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 			return
 		}
 	}

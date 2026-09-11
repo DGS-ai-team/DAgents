@@ -13,7 +13,7 @@ import (
 
 func TestHandleAgentExecutionEvents(t *testing.T) {
 	cfg := testConfig(t)
-	st, err := store.Open(filepath.Join(cfg.FSRoot, "sessions.db"))
+	st, err := store.Open(filepath.Join(cfg.RuntimeDir(), "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

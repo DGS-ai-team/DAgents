@@ -25,8 +25,8 @@ func TestRuntimeSkillCatalogViewBlocksMidTurnBodyChangeUntilNextHumanTurn(t *tes
 	hub := stream.NewHub(32, logx.Discard())
 	rt := newRuntimeWithPublisher(
 		"session-skills", "agent-1", hub, hub, client, nil, nil, nil, logx.Discard(),
-		nil, nil, nil, 0, nil, false, 0, 0,
-		TurnOptions{FSRoot: fsRoot, SkillsRoot: skillsRoot, SkillsEnabled: true, SkillsMaxInPrompt: 2}, nil,
+		nil, nil, nil, false, 0, 0,
+		TurnOptions{WorkspaceRoot: fsRoot, SkillsRoot: skillsRoot, SkillsEnabled: true, SkillsMaxInPrompt: 2}, nil,
 	)
 	// This test drives the runtime's model-facing catalog path directly; the
 	// lifecycle projection is covered by the existing runtime lifecycle suite.
@@ -89,8 +89,8 @@ func TestRuntimeCompressionRefreshesSkillMetadataPromptBoundary(t *testing.T) {
 			llm.UserMessage("第一轮", llm.UserNameHuman),
 			{Role: "assistant", Content: "第一轮完成"},
 			llm.UserMessage("第二轮", llm.UserNameHuman),
-		}, nil, nil, 0, nil, false, 0, 0,
-		TurnOptions{FSRoot: fsRoot, SkillsRoot: skillsRoot, SkillsEnabled: true, SkillsMaxInPrompt: 2, CompressionBlocking: 1}, nil,
+		}, nil, nil, false, 0, 0,
+		TurnOptions{WorkspaceRoot: fsRoot, SkillsRoot: skillsRoot, SkillsEnabled: true, SkillsMaxInPrompt: 2, CompressionBlocking: 1}, nil,
 	)
 	initialPrompt := rt.orch.SystemPromptForSession(rt.session.ID)
 	if !strings.Contains(initialPrompt, "writer: v1") {
@@ -118,8 +118,8 @@ func TestRuntimeCompressionInvalidatesActiveModelContext(t *testing.T) {
 	client := &activeCompressionSkillClient{}
 	rt := newRuntimeWithPublisher(
 		"session-active-compress", "agent-1", stream.NewHub(32, logx.Discard()), nil, client, nil, nil, nil, logx.Discard(),
-		nil, nil, nil, 0, nil, false, 0, 0,
-		TurnOptions{FSRoot: fsRoot, SkillsRoot: skillsRoot, SkillsEnabled: true, SkillsMaxInPrompt: 2, CompressionBlocking: 1}, nil,
+		nil, nil, nil, false, 0, 0,
+		TurnOptions{WorkspaceRoot: fsRoot, SkillsRoot: skillsRoot, SkillsEnabled: true, SkillsMaxInPrompt: 2, CompressionBlocking: 1}, nil,
 	)
 	rt.orch.SetLifecycleCommandSink(nil)
 

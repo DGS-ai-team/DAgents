@@ -109,7 +109,7 @@ onMounted(() => void load());
     <p v-else-if="!channels.length" class="linux-agent-panel__muted">尚未配置 Linux 通道，请先到“设置 › Linux 通道”添加。</p>
     <div v-else class="linux-agent-panel__list">
       <div v-for="channel in channels" :key="channel.channel_id" class="linux-agent-panel__row">
-        <input type="checkbox" :checked="selected.has(channel.channel_id)" :disabled="saving || channel.enabled === false" @change="toggle(channel.channel_id)" />
+        <input class="settings-switch-input" type="checkbox" :checked="selected.has(channel.channel_id)" :disabled="saving || channel.enabled === false" @change="toggle(channel.channel_id)" />
         <div class="linux-agent-panel__main"><strong>{{ channel.display_name || channel.channel_id }}</strong><small>{{ channel.username }}@{{ channel.host }}:{{ channel.port }} · 通道上限 {{ channelLimit(channel) }}</small></div>
         <label v-if="selected.has(channel.channel_id)" class="linux-agent-panel__limit"><span>智能体并发</span><input type="number" min="1" :max="channelLimit(channel)" :value="bindingFor(channel.channel_id).max_concurrency" :disabled="saving" @input="setConcurrency(channel.channel_id, $event.target.value)" /></label>
       </div>
@@ -121,4 +121,6 @@ onMounted(() => void load());
 
 <style scoped>
 .linux-agent-panel{margin-top:20px;padding-top:16px;border-top:1px solid color-mix(in srgb,var(--color-border) 80%,transparent)}.linux-agent-panel__head,.linux-agent-panel__actions{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.linux-agent-panel__title{margin:0;font-size:15px}.linux-agent-panel__desc,.linux-agent-panel__muted,.linux-agent-panel__error,.linux-agent-panel__ok{margin:6px 0 0;font-size:12px;color:var(--color-text-subtle)}.linux-agent-panel__error{color:var(--color-danger)}.linux-agent-panel__ok{color:var(--color-success,#3d9a5f)}.linux-agent-panel__list{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px;margin-top:12px}.linux-agent-panel__row{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--color-border);border-radius:8px}.linux-agent-panel__main{min-width:0;flex:1}.linux-agent-panel__row small{display:block;margin-top:4px;color:var(--color-text-subtle);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.linux-agent-panel__limit{display:flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--color-text-subtle);font-size:11px}.linux-agent-panel__limit input{width:58px;padding:5px 6px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface,#fff);color:var(--color-text);font:inherit}.linux-agent-panel__actions{align-items:center;margin-top:12px}
+.linux-agent-panel__head > div:first-child { min-width: 0; }
+.linux-agent-panel__head > button { flex: 0 0 auto; white-space: nowrap; }
 </style>

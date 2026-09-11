@@ -30,6 +30,12 @@ type ModelContextSnapshot struct {
 	// bodies from the loaded-name set. It is diagnostic metadata only; the
 	// durable skill context messages in history remain the model-facing source.
 	LoadedSkillsContentDigest string
+	MemorySnapshotID          string
+	MemoryStoreRevision       int64
+	MemoryDigest              string
+	MemoryCoreCount           int
+	MemoryRecallCount         int
+	MemoryEstimatedTokens     int
 }
 
 func (s *ModelContextSnapshot) observability() map[string]any {
@@ -38,8 +44,6 @@ func (s *ModelContextSnapshot) observability() map[string]any {
 	}
 	return map[string]any{
 		"runtime_revision":             s.RuntimeRevision,
-		"runtime_generation":           s.RuntimeRevision,
-		"context_revision":             s.RuntimeRevision,
 		"runtime_digest":               s.RuntimeDigest,
 		"prompt_digest":                s.PromptDigest,
 		"tool_digest":                  s.ToolDigest,
@@ -48,6 +52,12 @@ func (s *ModelContextSnapshot) observability() map[string]any {
 		"skills_catalog_revision":      s.SkillsCatalogRevision,
 		"loaded_skills_digest":         s.LoadedSkillsDigest,
 		"loaded_skills_content_digest": s.LoadedSkillsContentDigest,
+		"memory_snapshot_id":           s.MemorySnapshotID,
+		"memory_store_revision":        s.MemoryStoreRevision,
+		"memory_digest":                s.MemoryDigest,
+		"memory_core_count":            s.MemoryCoreCount,
+		"memory_recall_count":          s.MemoryRecallCount,
+		"memory_estimated_tokens":      s.MemoryEstimatedTokens,
 	}
 }
 

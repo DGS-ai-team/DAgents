@@ -1,24 +1,20 @@
 # REFERENCE — `node/internal/policy`
 
-## `engine.go`
+## `engine.go` / `maps.go`
 
 | 符号 | 类型 | 说明 |
 |------|------|------|
 | `Action` | `type` | `auto` / `require_approval` / `deny` |
 | `Engine` | `struct` | 工具与 shell 策略查表 |
-| `LoadFile` | `func` | legacy YAML 加载（单测） |
-| `LoadRuntime` | `func` | 从 `<runtime>/policy` 加载 txt 策略 |
+| `NewDefaultEngine` | `func` | 从当前版本策略种子构造默认引擎 |
 | `(e *Engine) Decide` | `method` | 仅工具名（bash 无参数时保守） |
 | `(e *Engine) DecideTool` | `method` | 工具名 + 参数（含 bash shell 子策略） |
 
-## `bootstrap.go`
+## `file_loader.go`
 
 | 符号 | 说明 |
 |------|------|
-| `EnsureRuntimePolicy` | 创建目录、从种子复制缺失文件，并合并种子缺项到已有 `tool.approval.txt` |
-| `MergeMissingSeedIntoRuntimePolicy` | 同上并返回新增工具条目数 |
-| `MergeMissingToolModes` / `MergeMissingSeedToolsIntoFile` | 仅追加缺失工具模式（不覆盖） |
-| `loadFromDir` | 读取 tool + shell txt 文件 |
+| `LoadFromDir` | 读取指定目录下的 tool/shell txt 策略，供测试和本地检查使用 |
 
 ## `entry_file.go`
 

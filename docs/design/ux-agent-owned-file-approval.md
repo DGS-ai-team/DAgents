@@ -62,7 +62,7 @@
 | `hooks.AgentOwnedFileHook`（新） | `tool.before_each`：在 `PolicyToolHook` 之后，可将 `always` 降为 `auto` |
 | session 级 `AgentFileTrust` | `map[pathKey]agentFileTrustEntry`，绑定 Orchestrator（同 `ToolExecutionLog`） |
 | `tool.after_each` 或执行成功回调 | 写成功后更新 `Owned` / `lastAgentWriteMtime` |
-| `Registry.StatRelPath`（可选） | 供 hook 在 `FSRoot` 沙箱内 `Stat` |
+| `Registry.StatRelPath`（可选） | 供 hook 在 Agent `workspace_root` 内 `Stat` |
 
 Hook 链顺序：
 

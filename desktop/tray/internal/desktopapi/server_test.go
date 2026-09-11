@@ -95,6 +95,16 @@ func TestUIFocusEndpoint(t *testing.T) {
 	}
 }
 
+func TestUIFocusEndpointRequiresSource(t *testing.T) {
+	srv := New(nil, nil, uifocus.NewStore())
+	req := httptest.NewRequest(http.MethodPost, "/v1/desktop/ui/focus", strings.NewReader(`{"agent_id":"sess-1"}`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUIFocusEndpointInvalidJSON(t *testing.T) {
 	srv := New(nil, nil, uifocus.NewStore())
 	req := httptest.NewRequest(http.MethodPost, "/v1/desktop/ui/focus", strings.NewReader(`{bad`))

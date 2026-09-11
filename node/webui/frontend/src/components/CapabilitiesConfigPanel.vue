@@ -19,7 +19,6 @@ async function saveCapabilities() {
   await save({
     features: {
       ...form.features,
-      ui_enabled: true,
       skills_enabled: true,
       triggers_enabled: true,
       child_agents_enabled: true,
@@ -266,15 +265,6 @@ onMounted(load);
           <span class="settings-field__label">每会话并发上限</span>
           <input
             v-model.number="form.child_agents.max_active_per_parent"
-            class="settings-field__input"
-            type="number"
-            min="1"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">默认等待超时（秒）</span>
-          <input
-            v-model.number="form.child_agents.default_wait_timeout_seconds"
             class="settings-field__input"
             type="number"
             min="1"

@@ -2,17 +2,6 @@ package config
 
 import "testing"
 
-func TestUIEnabledAlwaysTrue(t *testing.T) {
-	off := false
-	cfg := &Config{UI: UIConfig{Enabled: &off}}
-	if !cfg.UIEnabled() {
-		t.Fatal("UIEnabled must always be true")
-	}
-	if !(*Config)(nil).UIEnabled() {
-		t.Fatal("nil config UIEnabled must be true")
-	}
-}
-
 func TestAvailableAgentToolGroupsGatesBrowserWeCom(t *testing.T) {
 	cfg := &Config{}
 	groups := cfg.AvailableAgentToolGroups()

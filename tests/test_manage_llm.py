@@ -2,7 +2,11 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
+_AUTH_PATCH = patch.dict("os.environ", {"MANAGE_SHARED_TOKEN": "test-admin-token"})
+def setUpModule(): _AUTH_PATCH.start()
+def tearDownModule(): _AUTH_PATCH.stop()
 from manage.storage.sqlite import SQLiteDatabase
 from manage.llm.store import LLMConfigStore
 from manage.llm.models import LLMConfigCreate
@@ -56,7 +60,7 @@ from manage.platform.audit import AuditLog
 def _client():
     app = FastAPI()
     app.include_router(build_llm_router(_store(), AuditLog(max_entries=50)))
-    return TestClient(app)
+    return TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"})
 
 class LLMRouterTest(unittest.TestCase):
     def test_crud_mask_resolve(self):

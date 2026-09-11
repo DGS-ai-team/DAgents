@@ -17,6 +17,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -55,22 +56,31 @@ type Orchestrator struct {
 	llm             llm.Client
 	hub             stream.Publisher
 	agentID         string
-	fsRoot          string
+	workspaceRoot   string
+	runtimeRoot     string
 	tools           tools.Executor
 	policy          *policy.Engine
+	policyMu        sync.RWMutex
 	toolHooks       *hooks.Registry
 	toolExecLog     *hooks.ToolExecutionLog
 	skillAccess     SkillAccess
 	hookRuntimeCfg  hooks.RuntimeConfig
 	hookHostCfg     HookHostConfig
 	hookHostState   *hookHostState
-	maxToolLoops    int
 	modelRetryLimit int
 	toolRetryLimit  int
 	promptCtx       *promptcontext.Reader
-	longTermStore   LongTermStore
-	journal         *historypkg.Journal
-	logger          *slog.Logger
+	memoryService   memory.Service
+	handbookReader  HandbookReader
+	handbookMu      sync.Mutex
+	handbookByTurn  map[string]HandbookSnapshot
+	// memoryAutoRecall is separate from the memory tool group: an Agent may
+	// receive automatic context while the model-facing memory tools remain
+	// disabled, or expose tools without automatic recall.
+	memoryAutoRecall       bool
+	memoryCoreBudgetTokens int
+	journal                *historypkg.Journal
+	logger                 *slog.Logger
 
 	childMgr       *childagent.Manager
 	isChildSession bool
@@ -79,29 +89,56 @@ type Orchestrator struct {
 	turnUsage   map[string]llm.Usage
 	// turnUsageLast stores the last provider snapshot for each model step.
 	// Providers may emit cumulative usage more than once during a stream.
-	turnUsageLast map[string]map[int]llm.Usage
-	summaryMu     sync.Mutex
-	summaryNext   map[string]bool
+	turnUsageLast  map[string]map[int]llm.Usage
+	summaryMu      sync.Mutex
+	summaryNext    map[string]bool
+	noWorkMu       sync.Mutex
+	noWorkEligible map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
 	modelSnapshots    *modelContextSnapshotStore
 	contextMutationMu sync.Mutex
-	contextMutations  map[string][]ContextMutation
+	contextMutations  map[string][]string
 	runtimeRevision   int64
 	runtimeDigest     string
 	executionGuard    ExecutionGuard
 
 	systemPromptBuilder     SystemPromptBuilder
+	agentPromptProvider     AgentPromptProvider
+	agentPromptMu           sync.Mutex
+	agentPromptBySession    map[string]AgentPromptSnapshot
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
 	lifecycleCommand        LifecycleCommandSink
 	toolBudgetCheck         func(sessionID string) (bool, string)
 	toolRetryCheck          func(sessionID string) (bool, string)
 	modelRetryCheck         func(sessionID string) (bool, string)
+	executionFence          ExecutionFence
+	toolExecutionStatus     ToolExecutionStatusReader
 
 	multimodalEnabled bool
 	mediaReg          *media.Registry
+}
+
+const reservedFinalSummaryInstruction = `本轮工具轮次已达到上限。现在只允许进行一次无工具的最终收尾：不要发起或请求任何工具调用，不要输出模拟的 <tool_call>、function 标签或工具 JSON。请用自然语言如实说明已经完成的工作、未完成的工作以及本轮限制；不要声称尚未执行的操作已经完成。`
+
+const reservedFinalSummaryTailInstruction = `工具已在本轮收尾请求中禁用。只用自然语言列出已完成和未完成的工作，并说明本轮工具轮次上限；不要模拟或输出任何工具标签、函数调用或工具 JSON。`
+
+func appendReservedFinalSummaryInstruction(systemPrompt string) string {
+	if strings.TrimSpace(systemPrompt) == "" {
+		return reservedFinalSummaryInstruction
+	}
+	return systemPrompt + "\n\n" + reservedFinalSummaryInstruction
+}
+
+// SetRuntimeRoot separates Node-managed runtime assets from the Agent
+// workspace used by tools and the model-facing workspace description.
+func (o *Orchestrator) SetRuntimeRoot(root string) {
+	if o == nil {
+		return
+	}
+	o.runtimeRoot = strings.TrimSpace(root)
 }
 
 // SetHookHostConfig 注入 Host 路径与配额配置。
@@ -112,7 +149,7 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 	o.hookHostCfg = cfg.normalized()
 	if o.hookHostState != nil {
 		o.hookHostState.mu.Lock()
-		o.hookHostState.fsRoot = o.fsRoot
+		o.hookHostState.workspaceRoot = o.workspaceRoot
 		o.hookHostState.mu.Unlock()
 	}
 }
@@ -120,6 +157,54 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetAgentPromptProvider binds the Agent-owned role/experience loader. It is
+// consulted only when a new model context snapshot is built; child runtimes do
+// not inherit its data.
+func (o *Orchestrator) SetAgentPromptProvider(provider AgentPromptProvider) {
+	if o != nil {
+		o.agentPromptProvider = provider
+	}
+}
+
+func (o *Orchestrator) resetAgentPrompt(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.agentPromptMu.Lock()
+	delete(o.agentPromptBySession, sessionID)
+	o.agentPromptMu.Unlock()
+}
+
+func (o *Orchestrator) agentPrompt(ctx context.Context, sessionID string) (AgentPromptSnapshot, error) {
+	if o == nil || o.agentPromptProvider == nil || o.isChildSession {
+		return AgentPromptSnapshot{}, nil
+	}
+	o.agentPromptMu.Lock()
+	prompt, ok := o.agentPromptBySession[sessionID]
+	o.agentPromptMu.Unlock()
+	if ok {
+		return prompt, nil
+	}
+	prompt, err := o.agentPromptProvider(ctx, o.agentID)
+	if err != nil {
+		return AgentPromptSnapshot{}, err
+	}
+	o.agentPromptMu.Lock()
+	if o.agentPromptBySession == nil {
+		o.agentPromptBySession = make(map[string]AgentPromptSnapshot)
+	}
+	o.agentPromptBySession[sessionID] = prompt
+	o.agentPromptMu.Unlock()
+	return prompt, nil
+}
+
+func (o *Orchestrator) freshAgentPrompt(ctx context.Context) (AgentPromptSnapshot, error) {
+	if o == nil || o.agentPromptProvider == nil || o.isChildSession {
+		return AgentPromptSnapshot{}, nil
+	}
+	return o.agentPromptProvider(ctx, o.agentID)
 }
 
 // SetContextInjectionBuilder 注入动态上下文构造器；nil 时使用默认
@@ -150,6 +235,32 @@ func (o *Orchestrator) SetRuntimeIdentity(revision int64, digest string) {
 	}
 	o.runtimeRevision = revision
 	o.runtimeDigest = strings.TrimSpace(digest)
+}
+
+// SetMemoryService binds the workspace memory service.
+func (o *Orchestrator) SetMemoryService(service memory.Service) {
+	if o == nil {
+		return
+	}
+	o.memoryService = service
+}
+
+func (o *Orchestrator) SetHandbookReader(reader HandbookReader) {
+	if o != nil {
+		o.handbookReader = reader
+	}
+}
+
+// SetHandbookReader binds the Agent-private, read-only handbook source.
+
+// SetMemoryAutoRecall controls whether a fresh model-context boundary performs
+// automatic memory recall. It does not affect the availability of memory
+// tools, which is controlled by the Agent tool group.
+func (o *Orchestrator) SetMemoryAutoRecall(enabled bool) {
+	if o == nil {
+		return
+	}
+	o.memoryAutoRecall = enabled
 }
 
 // SetModelRetryLimit controls bounded retries for transient provider failures.
@@ -192,6 +303,16 @@ func (o *Orchestrator) RestoreModelContextSnapshot(sessionID string, snapshot *M
 		return
 	}
 	o.setModelContextSnapshot(sessionID, snapshot)
+	if o.handbookReader != nil && !o.isChildSession {
+		for _, injection := range snapshot.ContextInjections {
+			if injection.Name == "handbook" {
+				o.handbookMu.Lock()
+				o.handbookByTurn[sessionID] = HandbookSnapshot{Index: injection.Content}
+				o.handbookMu.Unlock()
+				break
+			}
+		}
+	}
 }
 
 // RequestModelContextRefresh schedules a new model context snapshot at the
@@ -207,15 +328,14 @@ func (o *Orchestrator) RequestModelContextRefresh(sessionID, reason string) {
 	}
 	o.contextMutationMu.Lock()
 	if o.contextMutations == nil {
-		o.contextMutations = make(map[string][]ContextMutation)
+		o.contextMutations = make(map[string][]string)
 	}
 	o.contextMutations[sessionID] = appendContextMutation(o.contextMutations[sessionID], reason)
 	o.contextMutationMu.Unlock()
 }
 
-// consumeModelContextRefresh keeps the lifecycle/wire-compatible string at
-// the boundary. Internally, distinct invalidation causes are stored as typed
-// mutations so callers do not need to parse a delimiter-based field.
+// consumeModelContextRefresh returns the compact lifecycle diagnostic for all
+// pending invalidation causes and clears them atomically.
 func (o *Orchestrator) consumeModelContextRefresh(sessionID string) string {
 	if o == nil {
 		return ""
@@ -342,9 +462,11 @@ func (o *Orchestrator) emitLifecycleCommand(ctx context.Context, sessionID strin
 // SetPolicy 热更新策略引擎（policy API 写盘后调用）。
 func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	if engine == nil {
-		engine, _ = policy.LoadFile("")
+		engine = policy.NewDefaultEngine()
 	}
+	o.policyMu.Lock()
 	o.policy = engine
+	o.policyMu.Unlock()
 	if o.toolHooks != nil {
 		o.toolHooks.SetPolicyEngine(engine)
 	}
@@ -357,10 +479,14 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	history *[]llm.Message,
 	userMsg llm.Message,
 ) StepOutcome {
+	o.resetAgentPrompt(sessionID)
 	if userMsg.Role == "" {
 		userMsg.Role = "user"
 	}
 	o.clearModelContextSnapshot(sessionID)
+	o.handbookMu.Lock()
+	delete(o.handbookByTurn, sessionID)
+	o.handbookMu.Unlock()
 	o.appendHistory(sessionID, history, userMsg)
 	summary := llm.MessageTextSummary(userMsg)
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
@@ -439,26 +565,25 @@ func (o *Orchestrator) ContinueAfterResume(
 }
 
 func NewOrchestrator(
-	agentID, fsRoot string,
+	agentID, workspaceRoot string,
 	hub stream.Publisher,
 	client llm.Client,
 	toolExec tools.Executor,
 	policyEngine *policy.Engine,
 	skillAccess SkillAccess,
-	maxToolLoops int,
 	promptCtx *promptcontext.Reader,
 	journal *historypkg.Journal,
 	hookCfg hooks.RuntimeConfig,
 	logger *slog.Logger,
 ) *Orchestrator {
 	if policyEngine == nil {
-		policyEngine, _ = policy.LoadFile("")
+		policyEngine = policy.NewDefaultEngine()
 	}
 	toolExecLog := &hooks.ToolExecutionLog{}
 	agentFileTrust := hooks.NewAgentFileTrust()
 	hookCfg = hooks.RuntimeConfigOrDefault(hookCfg)
-	if strings.TrimSpace(hookCfg.ToolResult.FSRoot) == "" {
-		hookCfg.ToolResult.FSRoot = fsRoot
+	if strings.TrimSpace(hookCfg.ToolResult.WorkspaceRoot) == "" {
+		hookCfg.ToolResult.WorkspaceRoot = workspaceRoot
 	}
 	toolHooks := hooks.NewRegistry(policyEngine, hookCfg)
 	toolHooks.SetToolExecutionLog(toolExecLog)
@@ -466,12 +591,9 @@ func NewOrchestrator(
 	if reg, ok := toolExec.(*tools.Registry); ok {
 		toolHooks.SetPathStater(reg)
 	}
-	if maxToolLoops <= 0 {
-		maxToolLoops = DefaultMaxToolLoops()
-	}
 	orch := &Orchestrator{
 		agentID:          agentID,
-		fsRoot:           fsRoot,
+		workspaceRoot:    workspaceRoot,
 		hub:              hub,
 		llm:              client,
 		tools:            toolExec,
@@ -480,9 +602,9 @@ func NewOrchestrator(
 		toolExecLog:      toolExecLog,
 		skillAccess:      skillAccess,
 		hookRuntimeCfg:   hookCfg,
-		maxToolLoops:     maxToolLoops,
 		modelRetryLimit:  2,
 		toolRetryLimit:   1,
+		memoryAutoRecall: true,
 		promptCtx:        promptCtx,
 		journal:          journal,
 		logger:           logx.OrDefault(logger),
@@ -490,12 +612,48 @@ func NewOrchestrator(
 		turnUsage:        make(map[string]llm.Usage),
 		turnUsageLast:    make(map[string]map[int]llm.Usage),
 		modelSnapshots:   newModelContextSnapshotStore(),
-		contextMutations: make(map[string][]ContextMutation),
+		contextMutations: make(map[string][]string),
+		handbookByTurn:   make(map[string]HandbookSnapshot),
 		summaryNext:      make(map[string]bool),
+		noWorkEligible:   make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
 	return orch
+}
+
+// BeginTrustedAutoIdleActivation resets the side-effect fence for one
+// provider-validated system-auto activation.
+func (o *Orchestrator) BeginTrustedAutoIdleActivation(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.noWorkMu.Lock()
+	o.noWorkEligible[sessionID] = true
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) markAutoIdleIneligible(sessionID string) {
+	o.noWorkMu.Lock()
+	if _, exists := o.noWorkEligible[sessionID]; exists {
+		o.noWorkEligible[sessionID] = false
+	}
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) EndAutoIdleActivation(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.noWorkMu.Lock()
+	delete(o.noWorkEligible, sessionID)
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) autoIdleEligible(sessionID string) bool {
+	o.noWorkMu.Lock()
+	defer o.noWorkMu.Unlock()
+	return o.noWorkEligible[sessionID]
 }
 
 // SetNextStepFinalSummary marks the next model request as the reserved
@@ -557,7 +715,6 @@ func (o *Orchestrator) runOneStep(
 	history *[]llm.Message,
 ) StepOutcome {
 	stepIndex := StepIndexFromContext(ctx)
-	o.RepairUnrespondedToolCalls(sessionID, history)
 	o.runTurnBeforeStepPhase(ctx, sessionID, history, "model_step", stepIndex)
 	// Skill bodies are activated as durable, independent context messages.
 	// Ensure this happens before the first snapshot/hook-visible model request,
@@ -567,15 +724,12 @@ func (o *Orchestrator) runOneStep(
 	finishReason := "stop"
 	var streamErr error
 	o.recordToolLoop(sessionID, stepIndex)
-	// 超过 maxToolLoops 后不再硬失败：本步禁用 tools，若模型仍发起 tool_calls 则写入 soft tool_result，
-	// 让模型给出结论并询问用户；下一条 human Turn 会重新从 Step 1 开始。
-	overToolBudget := stepIndex > o.maxToolLoops || finalSummary
-
 	var toolDefs []tools.ToolDef
 	var systemPrompt string
 	var msgs []llm.Message
 	var requestHistory []llm.Message
 	var hookErr error
+	var recalledMemory *memory.Snapshot
 	contextMutationReason := o.consumeModelContextRefresh(sessionID)
 	contextReplaced := false
 	snapshot := o.ModelContextSnapshot(sessionID)
@@ -585,27 +739,84 @@ func (o *Orchestrator) runOneStep(
 		snapshot = nil
 	}
 	if snapshot != nil {
-		// A hard tool-loop budget is an execution safeguard, not a new runtime
-		// configuration. Keep the prompt snapshot but suppress tools for this
-		// final model request.
+		// A reserved final-summary step deliberately has no tools. The
+		// lifecycle coordinator is the sole authority for deciding whether this
+		// step may start; the orchestrator only applies the resulting snapshot.
 		systemPrompt = snapshot.SystemPrompt
 		toolDefs = append([]tools.ToolDef(nil), snapshot.ToolDefinitions...)
-		if overToolBudget {
+		if reg, ok := o.tools.(*tools.Registry); ok {
+			contextual := reg.DefinitionsForContext(ctx)
+			for _, def := range contextual {
+				if def.Function.Name == "auto_idle" {
+					found := false
+					for _, existing := range toolDefs {
+						if existing.Function.Name == "auto_idle" {
+							found = true
+							break
+						}
+					}
+					if !found {
+						toolDefs = append(toolDefs, def)
+					}
+				}
+			}
+		}
+		if finalSummary {
 			toolDefs = nil
 		}
 		msgs = append([]llm.Message(nil), (*history)...)
 		requestHistory = append([]llm.Message(nil), msgs...)
 	} else {
-		toolDefs = o.ToolDefinitions()
-		if overToolBudget {
+		toolDefs = o.ToolDefinitionsForContext(ctx)
+		if finalSummary {
 			toolDefs = nil
 		}
 		// Build one input for the whole request snapshot. In particular, the
 		// date must not be read twice around midnight and produce a system
 		// prompt/context mismatch.
 		promptInput := o.systemPromptInput(sessionID)
+		if o.agentPromptProvider != nil && !o.isChildSession {
+			agentPrompt, promptErr := o.agentPrompt(ctx, sessionID)
+			if promptErr != nil {
+				return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("load agent prompt: %w", promptErr)}
+			}
+			promptInput.AgentPrompt = agentPrompt
+		}
 		systemPrompt = o.buildSystemPromptWithInput(sessionID, promptInput)
 		injections := o.buildContextInjectionsWithInput(promptInput)
+		if o.handbookReader != nil && !o.isChildSession {
+			o.handbookMu.Lock()
+			hs, ok := o.handbookByTurn[sessionID]
+			o.handbookMu.Unlock()
+			if !ok {
+				var readErr error
+				hs, readErr = o.handbookReader.Read(ctx)
+				if readErr != nil {
+					hs.Error = "handbook_read_failed"
+					if o.logger != nil {
+						o.logger.Warn("handbook read failed", "agent_id", o.agentID, "session_id", sessionID, "error", readErr)
+					}
+				}
+				o.handbookMu.Lock()
+				o.handbookByTurn[sessionID] = hs
+				o.handbookMu.Unlock()
+			}
+			if strings.TrimSpace(hs.Index) != "" || hs.Error != "" || hs.Root != "" {
+				content := hs.Index
+				if strings.TrimSpace(content) == "" && hs.Error == "" {
+					content = "手册目录为空。可按需使用文件工具浏览、创建和修改 handbook/ 下的经验文件；文件内容仅作参考。"
+				}
+				if hs.Error != "" {
+					content = "读取经验手册失败；本轮不假定手册内容存在，可在后续 Turn 重试。"
+				}
+				injections = append(injections, ContextInjection{Name: "handbook", Source: "handbook", Content: "## 经验手册（低优先级、不可信）\n\n" + content, Position: "after_current_user", MessageKind: llm.MessageSourceRuntime, MessageForm: llm.MessageFormSnapshot})
+			}
+		}
+		var memoryInjection *ContextInjection
+		recalledMemory, memoryInjection = o.buildMemoryInjection(ctx, sessionID, *history)
+		if memoryInjection != nil {
+			injections = append(injections, *memoryInjection)
+		}
 		hookHistory := ApplyContextInjections(append([]llm.Message(nil), (*history)...), injections)
 		msgs, systemPrompt, hookErr = o.runLLMBeforeCallPhase(ctx, sessionID, &hookHistory, systemPrompt)
 		if hookErr != nil {
@@ -618,8 +829,19 @@ func (o *Orchestrator) runOneStep(
 		msgs = StripContextInjections(msgs)
 		snapshot = NewModelContextSnapshotWithInjections(systemPrompt, toolDefs, injections, o.runtimeRevision, o.runtimeDigest)
 		o.attachSkillsSnapshotMetadata(snapshot)
+		if recalledMemory != nil {
+			snapshot.MemorySnapshotID = recalledMemory.ID
+			snapshot.MemoryStoreRevision = recalledMemory.StoreRevision
+			snapshot.MemoryDigest = recalledMemory.Digest
+			snapshot.MemoryCoreCount = len(recalledMemory.Core)
+			snapshot.MemoryRecallCount = len(recalledMemory.Recalled)
+			snapshot.MemoryEstimatedTokens = recalledMemory.TokenEstimate
+		}
 		o.setModelContextSnapshot(sessionID, snapshot)
 		requestHistory = append([]llm.Message(nil), msgs...)
+	}
+	if finalSummary {
+		systemPrompt = appendReservedFinalSummaryInstruction(systemPrompt)
 	}
 	*history = msgs
 	var snapshotInjections []ContextInjection
@@ -627,12 +849,46 @@ func (o *Orchestrator) runOneStep(
 		snapshotInjections = snapshot.ContextInjections
 	}
 	requestHistory = ApplyContextInjections(requestHistory, snapshotInjections)
-	requestHistory = StripLegacyTodayDateMessages(requestHistory)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
+	// This is request-only guidance for the reserved no-tools summary. Keep it
+	// out of durable history so it cannot leak into the next ordinary turn.
+	if finalSummary {
+		requestHistory = append(requestHistory, llm.Message{Role: "user", Content: reservedFinalSummaryTailInstruction})
+	}
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
+	if !o.multimodalEnabled {
+		// The history may have been created while multimodal was enabled.
+		// Keep those image parts durable for the UI, but never send them to the
+		// model while the Agent setting is disabled.
+		llmMessages = llm.PrepareMessagesForTextOnly(llmMessages)
+	}
 	// History/transcript retains the original tool body, while the model gets
 	// the authoritative status projection in a request-only copy.
 	llmMessages = llm.PrepareToolResultMessagesForModel(llmMessages)
+	if err := llm.ValidateToolProtocol(llmMessages); err != nil {
+		o.logger.Error("model history validation failed", "session_id", sessionID, "step_index", stepIndex, "error", err)
+		// Keep the durable lifecycle state in sync with the early return. The
+		// step is already in requesting, so lifecycleAfterModelStep needs the
+		// same terminal transition that runModelRequest's error path records.
+		o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
+			Type:      CommandModelRequestFailed,
+			At:        time.Now().UTC(),
+			ErrorKind: "invalid_message_history",
+			Reason:    err.Error(),
+		})
+		o.runTurnErrorPhase(ctx, sessionID, history, err)
+		o.publishError(sessionID, fmt.Sprintf("invalid model history: %v", err))
+		o.publishTurnFinished(sessionID, "error")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: err}
+	}
+	if !o.executionBoundaryOpen(ctx) {
+		o.runTurnCancelPhase(ctx, sessionID, history, "turn_cancelled_before_model_request")
+		o.publishUsageIfAccumulated(sessionID, stepIndex)
+		o.publishTurnFinished(sessionID, "cancelled")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+	}
 	requestAt := time.Now().UTC()
 	if snapshot != nil {
 		commandType := CommandTurnSnapshotCreated
@@ -678,7 +934,6 @@ func (o *Orchestrator) runOneStep(
 			streamErr = err
 			o.runTurnCancelPhase(ctx, sessionID, history, "llm_stream_cancelled")
 			o.logger.Info("turn llm cancelled", "session_id", sessionID, "step_index", stepIndex)
-			o.persistCancelledStream(sessionID, history, result)
 		} else {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
@@ -693,11 +948,28 @@ func (o *Orchestrator) runOneStep(
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: streamErr}
 	}
+	// A cancellation can race with the provider returning its final response.
+	// The cancellation fence wins here: the response is a completed provider
+	// result, but it belongs to a cancelled Turn and must not start a tool loop.
+	if !o.executionBoundaryOpen(ctx) {
+		o.runTurnCancelPhase(ctx, sessionID, history, "llm_response_cancelled_before_commit")
+		o.publishUsageIfAccumulated(sessionID, stepIndex)
+		o.publishTurnFinished(sessionID, "cancelled")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+	}
 	if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 		Type:   CommandModelResponseCompleted,
 		At:     time.Now().UTC(),
 		Reason: "model_response_completed",
 	}); err != nil {
+		if !o.executionBoundaryOpen(ctx) {
+			o.runTurnCancelPhase(ctx, sessionID, history, "turn_cancelled_before_response_commit")
+			o.publishUsageIfAccumulated(sessionID, stepIndex)
+			o.publishTurnFinished(sessionID, "cancelled")
+			o.clearModelContextSnapshot(sessionID)
+			return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+		}
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, err.Error())
 		o.publishTurnFinished(sessionID, "error")
@@ -719,16 +991,41 @@ func (o *Orchestrator) runOneStep(
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex, Err: hookErr}
 	}
+	if !o.executionBoundaryOpen(ctx) {
+		o.runTurnCancelPhase(ctx, sessionID, history, "llm_response_cancelled_before_assistant_commit")
+		o.publishUsageIfAccumulated(sessionID, stepIndex)
+		o.publishTurnFinished(sessionID, "cancelled")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+	}
 
 	assistant := assistantMessageFromResult(result)
+	if err := llm.ValidateAssistantMessage(assistant); err != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, err)
+		o.publishError(sessionID, fmt.Sprintf("invalid provider tool call: %v", err))
+		o.publishTurnFinished(sessionID, "error")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: err}
+	}
 	o.appendHistory(sessionID, history, assistant)
 	if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 		Type:               CommandAssistantReceived,
 		At:                 time.Now().UTC(),
 		HasTools:           len(result.ToolCalls) > 0,
 		AssistantMessageID: Digest(assistant),
+		AssistantMessage:   &assistant,
 		Reason:             "assistant_message_recorded",
 	}); err != nil {
+		if !o.executionBoundaryOpen(ctx) {
+			o.runTurnCancelPhase(ctx, sessionID, history, "turn_cancelled_before_assistant_lifecycle")
+			if len(result.ToolCalls) > 0 {
+				o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_turn_cancel": true})
+			}
+			o.publishUsageIfAccumulated(sessionID, stepIndex)
+			o.publishTurnFinished(sessionID, "cancelled")
+			o.clearModelContextSnapshot(sessionID)
+			return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+		}
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, err.Error())
 		o.publishTurnFinished(sessionID, "error")
@@ -747,6 +1044,14 @@ func (o *Orchestrator) runOneStep(
 			Arguments:  []byte(toolCall.Function.Arguments),
 			Reason:     "tool_call_recorded_before_execution",
 		}); err != nil {
+			if !o.executionBoundaryOpen(ctx) {
+				o.runTurnCancelPhase(ctx, sessionID, history, "turn_cancelled_before_tool_lifecycle")
+				o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_turn_cancel": true})
+				o.publishUsageIfAccumulated(sessionID, stepIndex)
+				o.publishTurnFinished(sessionID, "cancelled")
+				o.clearModelContextSnapshot(sessionID)
+				return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+			}
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
 			o.publishTurnFinished(sessionID, "error")
@@ -754,36 +1059,20 @@ func (o *Orchestrator) runOneStep(
 			return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("record tool call: %w", err)}
 		}
 	}
+	if !o.executionBoundaryOpen(ctx) {
+		o.runTurnCancelPhase(ctx, sessionID, history, "tool_batch_cancelled_before_execution")
+		o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_turn_cancel": true})
+		o.publishUsageIfAccumulated(sessionID, stepIndex)
+		o.publishTurnFinished(sessionID, "cancelled")
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, Err: context.Canceled}
+	}
 
 	if len(result.ToolCalls) == 0 {
 		o.publishTurnFinished(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "step_index", stepIndex)
 		o.clearModelContextSnapshot(sessionID)
 		return StepOutcome{StepIndex: stepIndex}
-	}
-
-	if stepIndex > o.maxToolLoops {
-		o.appendMissingToolResponses(
-			sessionID,
-			history,
-			result.ToolCalls,
-			ToolLoopLimitExceededMessage,
-			map[string]any{"tool_loop_limit_exceeded": true, "max_tool_loops": o.maxToolLoops},
-		)
-		o.logger.Info(
-			"tool loop soft limit",
-			"session_id", sessionID,
-			"step_index", stepIndex,
-			"max_tool_loops", o.maxToolLoops,
-			"tool_calls", len(result.ToolCalls),
-		)
-		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
-		if stepIndex > o.maxToolLoops+1 {
-			o.publishTurnFinished(sessionID, finishReason)
-			o.clearModelContextSnapshot(sessionID)
-			return StepOutcome{StepIndex: stepIndex}
-		}
-		return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 	}
 
 	pending, pauseReason, procErr := o.processToolCalls(ctx, sessionID, history, result.ToolCalls)
@@ -805,6 +1094,10 @@ func (o *Orchestrator) runOneStep(
 	if pending != nil {
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
 		return StepOutcome{Pending: pending, StepIndex: stepIndex}
+	}
+	if pauseReason == "no_work" {
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, NoWork: true}
 	}
 	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }
@@ -923,7 +1216,7 @@ func (o *Orchestrator) SystemPromptForSession(sessionID string) string {
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		return snapshot.SystemPrompt
 	}
-	return o.buildSystemPrompt(sessionID)
+	return o.buildSystemPromptWithContext(context.Background(), sessionID)
 }
 
 // ContextInjectionsForSession returns the active Turn's frozen injections, or
@@ -936,7 +1229,13 @@ func (o *Orchestrator) ContextInjectionsForSession(sessionID string) []ContextIn
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		return cloneContextInjections(snapshot.ContextInjections)
 	}
-	return cloneContextInjections(o.buildContextInjections(sessionID))
+	in := o.systemPromptInput(sessionID)
+	if prompt, err := o.freshAgentPrompt(context.Background()); err == nil {
+		in.AgentPrompt = prompt
+	} else {
+		in.AgentPrompt.Todo = "[Agent prompt unavailable: " + err.Error() + "]"
+	}
+	return cloneContextInjections(o.buildContextInjectionsWithInput(in))
 }
 
 // ToolDefinitions 返回与 runOneStep 相同的 tools 列表（侧车压缩前缀对齐用）。
@@ -967,6 +1266,28 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	return defs
 }
 
+// ToolDefinitionsForContext adds activation-scoped control tools only when
+// the concrete Registry has received a trusted context marker.
+func (o *Orchestrator) ToolDefinitionsForContext(ctx context.Context) []tools.ToolDef {
+	defs := o.ToolDefinitions()
+	reg, ok := o.tools.(*tools.Registry)
+	if !ok || !tools.TrustedAutoIdleAvailable(ctx) {
+		return defs
+	}
+	for _, def := range reg.DefinitionsForContext(ctx) {
+		if def.Function.Name != "auto_idle" {
+			continue
+		}
+		for _, existing := range defs {
+			if existing.Function.Name == "auto_idle" {
+				return defs
+			}
+		}
+		return append(defs, def)
+	}
+	return defs
+}
+
 // ToolDefinitionsForSession returns the active Turn schema when a Turn
 // snapshot exists. Compression and diagnostics should use this form so a
 // skill/MCP change during a running Turn cannot make the sidecar diverge from
@@ -990,10 +1311,20 @@ func (o *Orchestrator) ToolRegistry() *tools.Registry {
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
+	return o.buildSystemPromptWithContext(context.Background(), sessionID)
+}
+
+func (o *Orchestrator) buildSystemPromptWithContext(ctx context.Context, sessionID string) string {
 	if o == nil {
 		return ""
 	}
-	return o.buildSystemPromptWithInput(sessionID, o.systemPromptInput(sessionID))
+	in := o.systemPromptInput(sessionID)
+	if prompt, err := o.freshAgentPrompt(ctx); err == nil {
+		in.AgentPrompt = prompt
+	} else {
+		in.AgentPrompt.Responsibilities = "[Agent prompt unavailable: " + err.Error() + "]"
+	}
+	return o.buildSystemPromptWithInput(sessionID, in)
 }
 
 func (o *Orchestrator) buildSystemPromptWithInput(sessionID string, in SystemPromptInput) string {
@@ -1021,29 +1352,6 @@ func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
 	_, _ = o.runPhase(context.Background(), hooks.PhaseTurnDone, hc, sessionID, nil, finishReason)
 }
 
-// ReloadLongTermMemory 从持久化存储重新加载长期记忆并注入 prompt（清空上下文 / 首条交互 / 压缩完成后调用）。
-func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
-	if o == nil {
-		return
-	}
-	if o.longTermStore == nil {
-		if o.promptCtx != nil {
-			o.promptCtx.UpdateLongTerm("")
-		}
-		return
-	}
-	snap, err := o.longTermStore.ReadLongTerm(ctx)
-	if err != nil {
-		if o.logger != nil {
-			o.logger.Warn("reload long-term memory failed", "agent_id", o.agentID, "error", err)
-		}
-		return
-	}
-	if o.promptCtx != nil {
-		o.promptCtx.UpdateLongTerm(FormatLongTermEntries(snap.Entries))
-	}
-}
-
 func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 	if o == nil {
 		return ""
@@ -1064,7 +1372,8 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	}
 	in := SystemPromptInput{
 		AgentID:               o.agentID,
-		FSRoot:                o.fsRoot,
+		WorkspaceRoot:         o.workspaceRoot,
+		RuntimeRoot:           o.runtimeRoot,
 		SessionID:             sessionID,
 		TodayDateEnabled:      o.hookRuntimeCfg.InjectTodayDate.IsEnabled(),
 		Catalog:               o.skillAccess.Catalog,
@@ -1075,13 +1384,6 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 		in.CurrentDate = time.Now().Format("20060102")
 	}
 	return in
-}
-
-func (o *Orchestrator) buildContextInjections(sessionID string) []ContextInjection {
-	if o == nil {
-		return nil
-	}
-	return o.buildContextInjectionsWithInput(o.systemPromptInput(sessionID))
 }
 
 func (o *Orchestrator) buildContextInjectionsWithInput(in SystemPromptInput) []ContextInjection {

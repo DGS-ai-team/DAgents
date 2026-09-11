@@ -25,8 +25,6 @@ pub struct AgentSummary {
     #[serde(default)]
     pub active: bool,
     #[serde(default)]
-    pub run_turn_phase: String,
-    #[serde(default)]
     pub has_active_turn: bool,
     #[serde(default)]
     pub notify_seq: i32,

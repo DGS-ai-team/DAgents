@@ -62,14 +62,13 @@ Console 功能：Node 列表、discovery 分组、工作组、案例库、Node �
 
 | 模块 | 符号 |
 |------|------|
-| `store.py` | `WorkGroupStore`（组/ACL/Grant/Assign/Timeline/ActorRunHistory；建组时 Manage 侧物化组工作区） |
-| `workspace.py` | `materialize_workgroup_workspace`（`workgroup-workspaces/{id}/`） |
+| `store.py` | `WorkGroupStore`（组/ACL/Grant/Assign/Timeline/ActorRunHistory） |
 | `turn_kernel.py` | `TurnKernel`（Leader LLM loop、`handle_human_message`） |
 | `projector.py` | `project_actor_context`（Timeline + RunHistory 投影） |
 | `history.py` | `ActorRunHistory` / `RunHistoryMessage` |
 | `llm_chat.py` | `MockLLMClient` / `OpenAICompatibleChatClient` |
 | `native_tools.py` | `assign_workgroup_task` / `list_workgroup_members` |
-| `vertical.py` | `VerticalLoop`（脚本化 read_file 纵向路径） |
+| `vertical.py` | `VerticalLoop`（AgentRef session/turn 事件编排） |
 | `ws_hub.py` / `ws_routes.py` | Node Worker WS outbox |
 | `protocol.py` | Workgroup WS `protocol_version` / `schema_version` / capability constants and validation |
 

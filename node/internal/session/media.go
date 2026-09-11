@@ -20,7 +20,7 @@ func (m *Manager) mediaRegistry(sessionID string) *media.Registry {
 	if reg, ok := m.mediaOnly[sessionID]; ok {
 		return reg
 	}
-	reg, err := media.NewRegistry(sessionID, m.turn.FSRoot)
+	reg, err := media.NewRegistry(sessionID, effectiveWorkspaceRoot(m.turn))
 	if err != nil {
 		return nil
 	}

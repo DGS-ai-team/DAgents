@@ -17,6 +17,13 @@ Go Node 侧上下文摘要压缩：silent 异步 + blocking 同步；M2 侧车 `
 
 `SidecarPrefix` 由 `runtime` 注入（`SystemPromptForSession` + `ToolDefinitions`），compression 包不 import `turn`。
 
+可选的记忆候选提取挂在压缩完成边界：`runCompressionFlow` 先把本次压缩区间冻结为
+`memory.ExtractionInput`，通过 `SetCandidateSubmitter` 非阻塞地提交到 Agent runtime
+的有界单 worker 管线。压缩流程不等待提取、不会向消息队列追加 human/tool 消息，也不会
+绕过记忆审批；默认 `memory.auto_extract=false`，只有显式开启后才会调用 LLM 提取候选。
+候选的 `SourceFingerprint` 用于追溯来源，runtime 只发送 `memory/changed` 元数据事件，
+前端或下一轮由正常的记忆快照边界读取结果。
+
 ## 配置
 
 `shared/config.Config.Compression`：

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 )
 
 type readFileArgs struct {
@@ -21,8 +23,8 @@ func readFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "read_file",
-			Description: "侧车 soul/custom 与长期记忆已作为当前请求的运行时上下文提供（存于数据库），用户称呼由 Node PreferredName 注入；旧 user.md 仅用于迁移，通常无需 read_file 读取。" +
-				" history/ 下 JSONL 为原始对话审计（`history/YYYYMMDD/<session_id>.jsonl`），需复盘历史 utterance 时可分页读取。" +
+			Description: "soul/custom 已作为当前请求的运行时上下文提供（存于数据库），用户称呼由 Node PreferredName 注入，通常无需 read_file 读取这些运行时资料；记忆由 Memory service 按当前任务自动召回或通过 memory 工具查询。" +
+				" Node 将原始对话审计写入当前 workspace 的 `.dagents/<agent_id>/history/YYYYMMDD/<session_id>.jsonl`；该文件不是用户项目文件。" +
 				" 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
@@ -82,12 +84,16 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 		limit = *args.LineLimit
 	}
 
-	lines, choice, err := r.readTextLinesAt(args.Path, path, args.Encoding)
+	lines, choice, rawBytes, err := r.readTextLinesAndRawAt(args.Path, path, args.Encoding)
 	if err != nil {
 		if _, ok := err.(*encodingDecodeError); ok {
 			return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
 		}
 		return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
+	}
+	digest := ""
+	if r.handbookFS != nil && isHandbookPath(args.Path) && info.Mode().IsRegular() && int64(len(rawBytes)) <= 16*1024*1024 {
+		digest = handbookfs.Digest(rawBytes)
 	}
 	total := len(lines)
 	start, end := windowFromTotal(total, offset, limit)
@@ -117,8 +123,9 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 	if total == 0 {
 		pageStart, pageEnd = 0, 0
 	}
-	header := []string{
-		fmt.Sprintf("文件修改时间: %s", fileMtimeText(path)),
+	header := []string{fmt.Sprintf("文件修改时间: %s", fileMtimeText(path))}
+	if digest != "" {
+		header = append(header, fmt.Sprintf("文件摘要: %s", digest))
 	}
 	header = append(header, formatEncodingHeaderLines(choice, choice.GarbledWarning)...)
 	header = append(header,

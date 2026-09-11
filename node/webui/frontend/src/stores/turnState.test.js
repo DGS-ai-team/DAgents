@@ -71,7 +71,7 @@ describe("turnState", () => {
       interaction_kind: "approval",
       tool_executions: [{ tool_call_id: "call-1", status: "pending" }],
     });
-    expect(isTurnProcessing()).toBe(false);
+    expect(isTurnProcessing()).toBe(true);
     expect(isTurnInteractionWaiting()).toBe(true);
   });
 

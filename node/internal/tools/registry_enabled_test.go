@@ -42,11 +42,6 @@ func TestSetBuiltinEnabledFiltersDefinitions(t *testing.T) {
 			t.Fatal("write_file handler should still exist")
 		}
 	}
-	if _, err := reg.StartBackground(context.Background(), "sess", "write_file", "call-1", `{"path":"a","content":"b"}`); err == nil {
-		t.Fatal("expected StartBackground soft reject when disabled")
-	} else if !strings.Contains(err.Error(), "is not enabled") {
-		t.Fatalf("want not-enabled error, got %v", err)
-	}
 }
 
 func TestSetBuiltinEnabledEmptyMeansAll(t *testing.T) {
@@ -63,15 +58,21 @@ func TestSetBuiltinEnabledEmptyMeansAll(t *testing.T) {
 	}
 }
 
-func TestLegacyBackgroundJobToolsAreNotModelVisible(t *testing.T) {
+func TestRetiredGoalCheckpointIsNotRegisteredOrCallable(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, def := range reg.Definitions() {
-		if def.Function.Name == "background_job_status" || def.Function.Name == "background_job_cancel" {
-			t.Fatalf("legacy background tool %q must not be model-visible", def.Function.Name)
+		if def.Function.Name == "goal_checkpoint" {
+			t.Fatal("retired goal_checkpoint must not be exposed to the model")
 		}
+	}
+	if _, err := reg.Execute(context.Background(), "goal_checkpoint", `{}`); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("retired goal_checkpoint unexpectedly callable: %v", err)
+	}
+	if err := reg.SetBuiltinEnabled([]string{"goal_checkpoint"}); err == nil || !strings.Contains(err.Error(), "unknown builtin tool") {
+		t.Fatalf("retired goal_checkpoint unexpectedly accepted by allowlist: %v", err)
 	}
 }
 

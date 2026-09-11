@@ -33,6 +33,6 @@
 - Workgroup schemas/fixtures：[`../design/fixtures/workgroup-d05/`](../design/fixtures/workgroup-d05/)
 - Node UI：`node/webui/frontend/src/`
 - Manage Console：`manage/console/frontend/src/`
-- 公共配置/目录：`shared/config/`、`shared/workgroup/`
+- 公共配置：`shared/config/`
 
 代码包中的 README 是实现导航，`REFERENCE.md` 是符号参考；行为变更同时更新 [reference](../reference/README.md) 中的契约入口。

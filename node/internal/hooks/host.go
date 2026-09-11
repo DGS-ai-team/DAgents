@@ -28,11 +28,11 @@ type RuntimeSummary struct {
 	PendingHITL   bool   `json:"pending_hitl,omitempty"`
 }
 
-// FSPaths 为 Hook 可见的文件系统路径（不含密钥）。
+// FSPaths 为 Hook 可见的路径作用域（不含密钥）。
 type FSPaths struct {
-	FSRoot     string `json:"fs_root,omitempty"`
-	RuntimeDir string `json:"runtime_dir,omitempty"`
-	SkillsRoot string `json:"skills_root,omitempty"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	RuntimeRoot   string `json:"runtime_root,omitempty"`
+	SkillsRoot    string `json:"skills_root,omitempty"`
 }
 
 // HostSnapshot 为 Host 只读快照。
@@ -54,7 +54,8 @@ type LLMCompleteRequest struct {
 
 // LLMCompleteResponse 为 Hook 内 LLM 补全结果。
 type LLMCompleteResponse struct {
-	Text string
+	Text  string
+	Usage *llm.Usage
 }
 
 // Host 为 in-process Hook 可调用的显式能力面（禁止反射）。

@@ -41,11 +41,13 @@ func (r *Registry) RegisterPhaseHook(h Hook, opts RegisterOpts) {
 	if timeout <= 0 {
 		timeout = DefaultInlineHookTimeout
 	}
+	r.phaseMu.Lock()
 	r.phaseHooks = append(r.phaseHooks, registeredPhaseHook{
 		hook:       h,
 		opts:       opts,
 		timeoutDur: timeout,
 	})
+	r.phaseMu.Unlock()
 }
 
 // SetExecutionJournal 注入幂等 journal；nil 时使用 NoopExecutionJournal。
@@ -138,7 +140,12 @@ func (r *Registry) RunPhase(ctx context.Context, phase Phase, hc *Context, host 
 }
 
 func (r *Registry) phaseHooksFor(phase Phase) []registeredPhaseHook {
-	if r == nil || len(r.phaseHooks) == 0 {
+	if r == nil {
+		return nil
+	}
+	r.phaseMu.RLock()
+	defer r.phaseMu.RUnlock()
+	if len(r.phaseHooks) == 0 {
 		return nil
 	}
 	var matched []registeredPhaseHook

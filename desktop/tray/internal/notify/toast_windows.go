@@ -59,11 +59,7 @@ func (n *Notifier) Sync(entries []pending.Entry, retainIDs map[string]struct{}) 
 func (n *Notifier) push(e pending.Entry) error {
 	title := "DAgents 待处理"
 	message := e.SummaryLabel()
-	id := e.AgentID
-	if id == "" {
-		id = e.SessionID
-	}
-	target := webui.AgentURL(n.endpoint, id)
+	target := webui.AgentURL(n.endpoint, e.AgentID)
 
 	notification := toast.Notification{
 		AppID:               toastAppID,

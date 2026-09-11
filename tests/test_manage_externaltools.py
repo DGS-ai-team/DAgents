@@ -1,6 +1,8 @@
 """Tests for External Tools store and API routes."""
 
 import tempfile
+import json
+import os
 import unittest
 from pathlib import Path
 
@@ -13,6 +15,9 @@ from manage.externaltools.store import ExternalToolPackageStore
 from manage.platform.audit import AuditLog
 from manage.platform.blob import BlobStore, BlobStoreConfig
 from manage.storage.sqlite import SQLiteDatabase
+
+TEST_ADMIN_TOKEN = "test-manage-admin-token"
+os.environ.setdefault("MANAGE_TOKENS", json.dumps([{"id": "test-admin", "token": TEST_ADMIN_TOKEN, "role": "admin"}]))
 
 
 def _externaltools_store():
@@ -64,7 +69,7 @@ def _externaltools_client():
             AuditLog(max_entries=50),
         )
     )
-    return TestClient(app)
+    return TestClient(app, headers={"x-dagents-a2a-token": TEST_ADMIN_TOKEN})
 
 
 class ExternalToolRouterTest(unittest.TestCase):

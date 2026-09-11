@@ -11,9 +11,9 @@ import (
 func TestDuplicateToolCallHookRuleAutoHit(t *testing.T) {
 	log := &ToolExecutionLog{}
 	now := time.Unix(1_700_000_000, 0)
-	raw := `{"job_id":"j1","call_purpose":"poll"}`
-	fp := ToolArgsFingerprint("background_job_status", raw)
-	log.RecordSuccess("background_job_status", fp, "call-prev", "status=running")
+	raw := `{"path":"a.txt","call_purpose":"read"}`
+	fp := ToolArgsFingerprint("read_file", raw)
+	log.RecordSuccess("read_file", fp, "call-prev", "ok")
 	log.last.ExecutedAt = now.Add(-12 * time.Second)
 
 	hook := NewDuplicateToolCallHook(DefaultDuplicateConfig())
@@ -24,7 +24,7 @@ func TestDuplicateToolCallHookRuleAutoHit(t *testing.T) {
 	out.ToolMode = policy.ModeRule
 	out.Action = policy.ActionAuto
 	_ = hook.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
-		ToolName:     "background_job_status",
+		ToolName:     "read_file",
 		RawArguments: raw,
 	}, &out)
 	if out.ApprovalSubtype != ApprovalSubtypeDuplicateToolCall {
@@ -59,8 +59,8 @@ func TestDuplicateToolCallHookSkipsNever(t *testing.T) {
 func TestDuplicateToolCallHookSkipsOutsideWindow(t *testing.T) {
 	log := &ToolExecutionLog{}
 	now := time.Unix(1_700_000_000, 0)
-	fp := ToolArgsFingerprint("background_job_status", `{"job_id":"j1"}`)
-	log.RecordSuccess("background_job_status", fp, "call-prev", "ok")
+	fp := ToolArgsFingerprint("read_file", `{"path":"a.txt"}`)
+	log.RecordSuccess("read_file", fp, "call-prev", "ok")
 	log.last.ExecutedAt = now.Add(-90 * time.Second)
 
 	hook := NewDuplicateToolCallHook(DefaultDuplicateConfig())
@@ -71,8 +71,8 @@ func TestDuplicateToolCallHookSkipsOutsideWindow(t *testing.T) {
 	out.ToolMode = policy.ModeRule
 	out.Action = policy.ActionAuto
 	_ = hook.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
-		ToolName:     "background_job_status",
-		RawArguments: `{"job_id":"j1"}`,
+		ToolName:     "read_file",
+		RawArguments: `{"path":"a.txt"}`,
 	}, &out)
 	if out.ApprovalSubtype != "" {
 		t.Fatalf("outside window should not hit duplicate: %+v", out)
@@ -82,8 +82,8 @@ func TestDuplicateToolCallHookSkipsOutsideWindow(t *testing.T) {
 func TestDuplicateToolCallHookIgnoresCallPurpose(t *testing.T) {
 	log := &ToolExecutionLog{}
 	now := time.Now()
-	fp := ToolArgsFingerprint("background_job_status", `{"job_id":"j1","call_purpose":"first"}`)
-	log.RecordSuccess("background_job_status", fp, "call-prev", "ok")
+	fp := ToolArgsFingerprint("read_file", `{"path":"a.txt","call_purpose":"first"}`)
+	log.RecordSuccess("read_file", fp, "call-prev", "ok")
 
 	hook := NewDuplicateToolCallHook(DefaultDuplicateConfig())
 	hook.SetLog(log)
@@ -93,8 +93,8 @@ func TestDuplicateToolCallHookIgnoresCallPurpose(t *testing.T) {
 	out.ToolMode = policy.ModeRule
 	out.Action = policy.ActionAuto
 	_ = hook.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
-		ToolName:     "background_job_status",
-		RawArguments: `{"job_id":"j1","call_purpose":"second"}`,
+		ToolName:     "read_file",
+		RawArguments: `{"path":"a.txt","call_purpose":"second"}`,
 	}, &out)
 	if out.ApprovalSubtype != ApprovalSubtypeDuplicateToolCall {
 		t.Fatalf("same args different purpose should hit duplicate: %+v", out)

@@ -25,7 +25,7 @@ type terminalCommandArgs struct {
 func terminalCommandToolDef() ToolDef {
 	return ToolDef{Type: "function", Function: FunctionDef{
 		Name:        "terminal_command",
-		Description: "在已通过 terminal_open 打开的终端目标上执行一次非交互命令。必须传入 terminal_id；命令会复用该终端的现有 PTY/SSH 会话，不会新建第二个连接。目标、Agent 权限和 Linux 通道由已打开的会话绑定，不能自行传 config_id 或 channel_id。结果返回结构化 status、exit_code、stdout、stderr、字节数和截断标记；需要保持交互状态时改用 terminal_input 与 terminal_read。",
+		Description: "在已通过 terminal_open 打开的终端目标上执行一次非交互命令。必须传入 terminal_id；命令会复用该终端的现有 PTY/SSH 会话，不会新建第二个连接。目标、Agent 权限和 Linux 通道由已打开的会话绑定，不能自行传 config_id 或 channel_id。结果返回结构化 status、exit_code、stdout、stderr、stdout_bytes、stderr_bytes 和截断标记；需要保持交互状态时改用 terminal_input 与 terminal_read。",
 		Parameters: injectCallPurposeParam(objectParams(map[string]any{
 			"terminal_id":      map[string]any{"type": "string", "description": "terminal_open 返回的终端 ID"},
 			"command":          map[string]any{"type": "string", "description": "在已打开目标的现有 shell 会话上执行的命令"},

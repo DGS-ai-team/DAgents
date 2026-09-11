@@ -1,8 +1,8 @@
-"""Workgroup pydantic 模型（对齐 D0.5 schemas）。"""
+"""Workgroup Pydantic models for the current AgentRef protocol."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,19 +15,6 @@ _RN = r"^rn_[0-9a-z]{26}$"
 _SHA = r"^sha256:[0-9a-f]{64}$"
 
 
-class WorkgroupWorkspace(BaseModel):
-    """工作组共享工作区（Supervisor / 组级资产预留）。
-
-    由 Manage 在 create_workgroup 时落盘到
-    `{MANAGE_WORKGROUP_WORKSPACES_DIR}/{workgroup_id}/`
-    （默认与 Manage DB 同级的 `workgroup-workspaces/`）。
-    当前不挂 Supervisor FS 工具；成员工作区仍在 Home Node。
-    """
-
-    root_kind: Literal["workgroup_workspace"] = "workgroup_workspace"
-    path: str = ""
-
-
 class WorkGroup(BaseModel):
     workgroup_id: str = Field(pattern=_WG)
     schema_version: Literal["0.5.0"] = SCHEMA_VERSION
@@ -36,7 +23,6 @@ class WorkGroup(BaseModel):
     created_by_node_id: str = Field(min_length=1, max_length=128)
     llm_profile_id: str = Field(min_length=1)
     llm_profile_revision: str = Field(min_length=1)
-    workspace: WorkgroupWorkspace = Field(default_factory=WorkgroupWorkspace)
     created_at: str
     archived_at: str | None = None
 
@@ -62,76 +48,15 @@ class WorkGroupACL(BaseModel):
         return out
 
 
-class MemberPrompt(BaseModel):
-    soul_md: str = ""
-    user_md: str = ""
-    custom_md: str = ""
-
-
-class MemoryEntry(BaseModel):
-    key: str
-    value: str
-
-
-class MemberMemory(BaseModel):
-    remember_enabled: Literal[False] = False
-    initial_entries: list[MemoryEntry] = Field(default_factory=list, max_length=32)
-
-
-class MemberTools(BaseModel):
-    allow_names: list[str] = Field(default_factory=list)
-    side_effect_classes: list[str] = Field(default_factory=list)
-
-    @field_validator("allow_names")
-    @classmethod
-    def _tool_names(cls, values: list[str]) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for raw in values:
-            name = str(raw or "").strip()
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
-        return out
-
-
-class MemberWorkspace(BaseModel):
-    root_kind: Literal["member_workspace"] = "member_workspace"
-
-
-class MemberSpec(BaseModel):
-    member_id: str = Field(pattern=_MB)
-    workgroup_id: str = Field(pattern=_WG)
-    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
-    home_node_id: str = Field(min_length=1, max_length=128)
-    display_name: str = Field(min_length=1, max_length=64)
-    description: str = Field(default="", max_length=256)
-    member_generation: int = Field(ge=1)
-    llm_profile_id: str = Field(min_length=1)
-    llm_profile_revision: str = Field(min_length=1)
-    max_tool_loops: int = Field(ge=1, le=256, default=32)
-    prompt: MemberPrompt = Field(default_factory=MemberPrompt)
-    memory: MemberMemory = Field(default_factory=MemberMemory)
-    tools: MemberTools = Field(default_factory=MemberTools)
-    policy_ceiling: dict[str, Any] = Field(default_factory=dict)
-    workspace: MemberWorkspace = Field(default_factory=MemberWorkspace)
-    skills: Literal["disabled"] = "disabled"
-    hooks: Literal["disabled"] = "disabled"
-    digest: str = Field(pattern=_SHA)
-
-
 class WorkGroupMember(BaseModel):
     member_id: str = Field(pattern=_MB)
     workgroup_id: str = Field(pattern=_WG)
-    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
-    session_id: str | None = Field(default=None, min_length=1, max_length=512)
-    execution_mode: Literal["agent_ref", "legacy_member"] = "legacy_member"
+    agent_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=512)
     home_node_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1)
-    status: Literal["requested", "provisioning", "ready", "busy", "archived", "error"]
-    member_generation: int = Field(ge=1)
-    member_spec_digest: str = Field(pattern=_SHA)
+    description: str = Field(default="", max_length=256)
+    status: Literal["provisioning", "ready", "busy", "archived", "error"]
     active_assign_id: str | None = Field(default=None, pattern=_AS)
     error_code: str | None = None
     error_message: str | None = None
@@ -156,7 +81,15 @@ class Assign(BaseModel):
     workgroup_id: str = Field(pattern=_WG)
     member_id: str = Field(pattern=_MB)
     leader_run_id: str = Field(pattern=_RN)
-    leader_tool_call_id: str = Field(min_length=1)
+    # Optional because a direct @member assignment has no parent tool call.
+    leader_tool_call_id: str | None = Field(default=None, min_length=1)
+    source: Literal["leader_tool", "direct_member"] = "leader_tool"
+    parent_turn_id: str = Field(min_length=1, max_length=128)
+    child_turn_id: str = Field(min_length=1, max_length=128)
+    attempt_id: str = Field(min_length=1, max_length=128)
+    last_event_seq: int = Field(ge=0, default=0)
+    event_stream_epoch: str = ""
+    updated_at: str
     status: Literal["queued", "running", "awaiting_hitl", "succeeded", "failed", "canceled", "indeterminate"]
     instruction: str
     result_summary: str | None = None
@@ -187,41 +120,27 @@ class ACLPatchRequest(BaseModel):
 
 
 class MemberCreateRequest(BaseModel):
-    # agent_id selects a pre-existing Agent registered by a Node. home_node_id
-    # remains accepted for compatibility and is derived by the route when the
-    # registry record is available.
-    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    """Bind an existing registered Agent to the workgroup."""
+
+    agent_id: str = Field(min_length=1, max_length=256)
     home_node_id: str = Field(default="", max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     description: str = Field(default="", max_length=256)
-    llm_profile_id: str | None = None
-    llm_profile_revision: str | None = None
-    max_tool_loops: int = Field(ge=1, le=256, default=32)
-    prompt: MemberPrompt = Field(default_factory=MemberPrompt)
-    memory: MemberMemory = Field(default_factory=MemberMemory)
-    allow_tool_names: list[str] = Field(default_factory=list)
-    side_effect_classes: list[str] = Field(default_factory=list)
-    policy_ceiling: dict[str, Any] = Field(default_factory=dict)
 
 
 class MemberPatchRequest(BaseModel):
-    """更新成员展示名 / Spec（会 bump generation 并触发 re-provision）。"""
+    """Update member presentation metadata only."""
 
     display_name: str | None = Field(default=None, min_length=1, max_length=64)
     description: str | None = Field(default=None, max_length=256)
-    llm_profile_id: str | None = Field(default=None, min_length=1)
-    llm_profile_revision: str | None = Field(default=None, min_length=1)
-    max_tool_loops: int | None = Field(default=None, ge=1, le=256)
-    prompt: MemberPrompt | None = None
-    allow_tool_names: list[str] | None = None
-    side_effect_classes: list[str] | None = None
-    policy_ceiling: dict[str, Any] | None = None
 
 
 class AssignCreateRequest(BaseModel):
     member_id: str = Field(pattern=_MB)
     leader_run_id: str | None = Field(default=None, pattern=_RN)
-    leader_tool_call_id: str = Field(min_length=1, default="call_assign_1")
+    leader_tool_call_id: str | None = Field(default=None, min_length=1)
+    source: Literal["leader_tool", "direct_member"] = "leader_tool"
+    parent_turn_id: str | None = Field(default=None, min_length=1, max_length=128)
     instruction: str = Field(min_length=1)
 
 

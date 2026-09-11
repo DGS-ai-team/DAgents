@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildStreamURL, connectStream, shouldIgnoreSSEForAgent } from "./stream.js";
 import { AGENT_STREAM_EVENT_TYPES } from "./agentEvents.js";
+import { vi } from "vitest";
 
 describe("shouldIgnoreSSEForAgent", () => {
   it("ignores events from a different agent after switch", () => {
@@ -11,8 +12,8 @@ describe("shouldIgnoreSSEForAgent", () => {
     expect(shouldIgnoreSSEForAgent("agent-a", "agent-a")).toBe(false);
   });
 
-  it("keeps events when agent id missing (compat)", () => {
-    expect(shouldIgnoreSSEForAgent("", "agent-b")).toBe(false);
+  it("rejects an event without an agent id on an Agent stream", () => {
+    expect(shouldIgnoreSSEForAgent("", "agent-b")).toBe(true);
     expect(shouldIgnoreSSEForAgent("agent-a", "")).toBe(false);
   });
 });
@@ -67,8 +68,85 @@ describe("agent stream event registration", () => {
 
     const handle = connectStream({ getAgentId: () => "agt-1" });
     expect(instances[0].url).toBe("/v1/streams?agent_id=agt-1&live=1");
-    expect([...instances[0].listeners.keys()]).toEqual(AGENT_STREAM_EVENT_TYPES);
+    expect([...instances[0].listeners.keys()]).toEqual(["stream_heartbeat", ...AGENT_STREAM_EVENT_TYPES]);
     handle.close();
+  });
+
+  it("reconnects once when the stream stops receiving heartbeats", () => {
+    vi.useFakeTimers();
+    try {
+      const instances = [];
+      class FakeEventSource {
+        constructor(url) { this.url = url; this.listeners = new Map(); instances.push(this); }
+        addEventListener(type, handler) { this.listeners.set(type, handler); }
+        close() { this.closed = true; }
+      }
+      globalThis.EventSource = FakeEventSource;
+      const statuses = [];
+      const handle = connectStream({ getAgentId: () => "agt-1", onStatus: (status) => statuses.push(status) });
+      instances[0].onopen();
+      vi.advanceTimersByTime(45000);
+      expect(instances).toHaveLength(1);
+      expect(statuses).toContain("disconnected");
+      vi.advanceTimersByTime(5000);
+      expect(instances).toHaveLength(2);
+      expect(instances[0].closed).toBe(true);
+      vi.advanceTimersByTime(4000);
+      expect(instances).toHaveLength(2);
+      handle.close();
+      vi.advanceTimersByTime(10000);
+      expect(instances).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores callbacks from an obsolete EventSource after reconnect", () => {
+    vi.useFakeTimers();
+    try {
+      const instances = [];
+      class FakeEventSource {
+        constructor(url) { this.url = url; this.listeners = new Map(); instances.push(this); }
+        addEventListener(type, handler) { this.listeners.set(type, handler); }
+        close() { this.closed = true; }
+      }
+      globalThis.EventSource = FakeEventSource;
+      const handle = connectStream({ getAgentId: () => "agt-1" });
+      instances[0].onerror();
+      vi.advanceTimersByTime(5000);
+      expect(instances).toHaveLength(2);
+      instances[0].onerror();
+      expect(instances[1].closed).toBeFalsy();
+      vi.advanceTimersByTime(5000);
+      expect(instances).toHaveLength(2);
+      handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a healthy stream alive on named heartbeats and clears timers on close", () => {
+    vi.useFakeTimers();
+    try {
+      const instances = [];
+      class FakeEventSource {
+        constructor(url) { this.url = url; this.listeners = new Map(); instances.push(this); }
+        addEventListener(type, handler) { this.listeners.set(type, handler); }
+        close() { this.closed = true; }
+      }
+      globalThis.EventSource = FakeEventSource;
+      const handle = connectStream({ getAgentId: () => "agt-1" });
+      instances[0].onopen();
+      vi.advanceTimersByTime(30000);
+      instances[0].listeners.get("stream_heartbeat")({ data: "{}" });
+      vi.advanceTimersByTime(30000);
+      expect(instances).toHaveLength(1);
+      handle.close();
+      vi.advanceTimersByTime(60000);
+      expect(instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts a filtered stream from the hydrate cursor, including zero", () => {
@@ -110,6 +188,7 @@ describe("agent stream event registration", () => {
         "memory/changed",
         "skills/changed",
         "mcp/catalog-changed",
+        "notification_changed",
       ]),
     );
   });

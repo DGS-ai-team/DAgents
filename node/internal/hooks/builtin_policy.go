@@ -2,12 +2,14 @@ package hooks
 
 import (
 	"context"
+	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 )
 
 // PolicyToolHook 将 policy.Engine 三档策略接入 tool.before_each。
 type PolicyToolHook struct {
+	mu     sync.RWMutex
 	engine *policy.Engine
 }
 
@@ -19,9 +21,11 @@ func NewPolicyToolHook(engine *policy.Engine) *PolicyToolHook {
 // SetEngine 热更新策略引擎（与 turn.Orchestrator.SetPolicy 同步）。
 func (h *PolicyToolHook) SetEngine(engine *policy.Engine) {
 	if engine == nil {
-		engine, _ = policy.LoadFile("")
+		engine = policy.NewDefaultEngine()
 	}
+	h.mu.Lock()
 	h.engine = engine
+	h.mu.Unlock()
 }
 
 // Name 返回 Hook 标识。
@@ -37,7 +41,9 @@ func (h *PolicyToolHook) Run(ctx context.Context, hc *Context, host Host) (Resul
 
 // RunToolBeforeEach 解析 toolMode 与 ResolvedAction。
 func (h *PolicyToolHook) RunToolBeforeEach(_ context.Context, in ToolBeforeEachInput, out *ToolBeforeEachResult) error {
+	h.mu.RLock()
 	engine := h.engine
+	h.mu.RUnlock()
 	if engine == nil {
 		out.ToolMode = policy.ModeRule
 		out.Action = policy.ActionRequireApproval

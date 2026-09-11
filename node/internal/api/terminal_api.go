@@ -167,6 +167,19 @@ func (s *Server) handleAgentTerminalWS(w http.ResponseWriter, r *http.Request) {
 			Rows:  open.Rows,
 			Cols:  open.Cols,
 		}
+		if target.Kind == "local" {
+			registry, registryErr := s.terminalToolsRegistry(agentID)
+			if registryErr != nil {
+				_ = writeTerminalWSEvent(ctx, conn, &sync.Mutex{}, terminalWSEvent{Type: "error", Error: registryErr.Error()})
+				return
+			}
+			cwd, cwdErr := registry.ResolveLocalTerminalCWD(open.CWD)
+			if cwdErr != nil {
+				_ = writeTerminalWSEvent(ctx, conn, &sync.Mutex{}, terminalWSEvent{Type: "error", Error: cwdErr.Error()})
+				return
+			}
+			request.CWD = cwd
+		}
 		// UI-created sessions must use the same broker path as terminal_open.
 		// Besides keeping the session registry authoritative for both callers,
 		// this gives a detached UI session the same keep-alive semantics as an

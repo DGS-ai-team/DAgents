@@ -6,7 +6,7 @@ async function readJSON(response) {
   }
 }
 
-async function apiFetch(path, { method = "GET", body, params } = {}) {
+async function apiFetch(path, { method = "GET", body, params, signal } = {}) {
   const url = new URL(path, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -15,6 +15,7 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
   }
   const headers = { Accept: "application/json" };
   const init = { method, headers };
+  if (signal) init.signal = signal;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
@@ -23,7 +24,11 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
   const data = await readJSON(resp);
   if (!resp.ok) {
     const msg = data?.error?.message || data?.message || `HTTP ${resp.status}`;
-    throw new Error(msg);
+    const error = new Error(msg);
+    error.status = resp.status;
+    error.data = data;
+    error.response = { status: resp.status };
+    throw error;
   }
   return data;
 }
@@ -36,6 +41,30 @@ export function getAgentInfo() {
   return apiFetch("/v1/agent/info");
 }
 
+// 用户反馈由 Node 权威保存并负责向当前 Manage 投递；浏览器只保存未提交草稿。
+export function listFeedback(params = {}) {
+  return apiFetch("/v1/feedback", { params });
+}
+
+export function getFeedbackTarget() {
+  return apiFetch("/v1/feedback/target");
+}
+
+export function getFeedback(feedbackId) {
+  return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}`);
+}
+
+export function createFeedback(payload = {}) {
+  return apiFetch("/v1/feedback", { method: "POST", body: payload });
+}
+
+export function syncFeedback(feedbackId) {
+  return apiFetch(`/v1/feedback/${encodeURIComponent(feedbackId)}/sync`, {
+    method: "POST",
+    body: {},
+  });
+}
+
 /** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
 export function getUIBootstrap() {
   return apiFetch("/v1/ui/bootstrap");
@@ -43,6 +72,30 @@ export function getUIBootstrap() {
 
 export function getAgentUpdate() {
   return apiFetch("/v1/agent/update");
+}
+
+/** 当前 Node 可用的宿主/桌面能力；UI 不直接探测 Shell 端口。 */
+export function getPlatformCapabilities() {
+  return apiFetch("/v1/platform/capabilities");
+}
+
+export function pickPlatformDirectory() {
+  return apiFetch("/v1/platform/directory-picker", { method: "POST", body: {} });
+}
+
+export function getPlatformClipboardFiles() {
+  return apiFetch("/v1/platform/clipboard/files");
+}
+
+export function reportPlatformUIFocus(payload = {}) {
+  return apiFetch("/v1/platform/ui-focus", { method: "POST", body: payload });
+}
+
+export function applyAgentUpdate({ force = false } = {}) {
+  return apiFetch("/v1/agent/update/apply", {
+    method: "POST",
+    body: { force },
+  });
 }
 
 export function getLLMSettings() {
@@ -92,8 +145,9 @@ export function createAgent(payload = {}) {
     const name = String(payload.display_name ?? payload.displayName ?? "").trim();
     if (name) body.display_name = name;
   }
-  if (payload.origin) body.origin = payload.origin;
   if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
+  if (payload.workspace && typeof payload.workspace === "object") body.workspace = payload.workspace;
+  if (payload.agent_type === "auto" || payload.agent_type === "normal") body.agent_type = payload.agent_type;
   return apiFetch("/v1/agents", { method: "POST", body });
 }
 
@@ -105,15 +159,63 @@ export function getAgent(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
+export function getAgentHandbook(agentId, path = "") {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook`, { params: { path } });
+}
+export function getAgentHandbookHistory(agentId, path) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook/history`, { params: { path } });
+}
+export function restoreAgentHandbook(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook/restore`, { method: "POST", body: payload });
+}
+// Simplified Auto configuration API. These endpoints intentionally do not
+// depend on the retired Goal/Cycle autonomy resources.
+export function getAutoConfig(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`);
+}
+
+export function putAutoConfig(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`, { method: "PUT", body: payload });
+}
+export function reconcileAutoConfig(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config/reconcile`, { method: "POST", body: {} });
+}
+
+export function listAgentTodos(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos`);
+}
+
+export function createAgentTodo(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos`, { method: "POST", body: payload });
+}
+
+export function updateAgentTodo(agentId, todoId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, { method: "PATCH", body: payload });
+}
+
+export function getAutoExperience(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/experience`);
+}
+
+export function getAgentDreamingStatus(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/dreaming`);
+}
+
+export function deleteAgentTodo(agentId, todoId, revision) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/todos/${encodeURIComponent(todoId)}`, { method: "DELETE", body: { expected_revision: revision } });
+}
+
+export function getAutoOverview(params = {}) {
+  return apiFetch("/v1/auto/overview", { params });
+}
+
 export function patchAgent(agentId, patch = {}) {
   const body = {};
   if (patch.display_name != null || patch.displayName != null) {
     body.display_name = patch.display_name ?? patch.displayName;
   }
-  if (patch.llm_active != null || patch.llmActive != null) {
-    body.llm_active = patch.llm_active ?? patch.llmActive;
-  }
   if (patch.defaults && typeof patch.defaults === "object") body.defaults = patch.defaults;
+  if (patch.agent_type === "auto" || patch.agent_type === "normal") body.agent_type = patch.agent_type;
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body });
 }
 
@@ -395,6 +497,10 @@ export function listTriggers() {
   return apiFetch("/v1/triggers");
 }
 
+export function getTrigger(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`);
+}
+
 export function createTrigger(body) {
   return apiFetch("/v1/triggers", { method: "POST", body });
 }
@@ -408,6 +514,32 @@ export function updateTrigger(triggerId, patch) {
 
 export function deleteTrigger(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
+}
+
+export function listAgentPolicyGrants(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants`);
+}
+
+export function createAgentPolicyGrant(agentId, body) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants`, { method: "POST", body });
+}
+
+export function revokeAgentPolicyGrant(agentId, grantId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" });
+}
+
+export function fireTrigger(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/fire`, { method: "POST", body: {} });
+}
+
+export function getTriggerHistory(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/history`);
+}
+
+export function recoverTrigger(triggerId, deliveryId, revision) {
+  const body = { delivery_id: deliveryId };
+  if (revision !== undefined && revision !== null) body.revision = revision;
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/recover`, { method: "POST", body });
 }
 
 export function uploadSkillToManage({ path, skillId, version, name, publish = false }) {
@@ -434,11 +566,6 @@ export function uploadPluginToManage({ path, pluginId, version, name, platform =
 /** 工作组列表：scope=subscribed|acl|all */
 export function listWorkgroups({ scope = "subscribed" } = {}) {
   return apiFetch("/v1/workgroups", { params: { scope } });
-}
-
-/** 成员可勾选工具目录（Node 本地嵌入 shared catalog；不依赖 Manage） */
-export function getMemberToolCatalog() {
-  return apiFetch("/v1/workgroups/meta/member-tools");
 }
 
 export function listWorkgroupAgents() {
@@ -674,12 +801,6 @@ export function patchWorkgroupMember(workgroupId, memberId, body) {
   );
 }
 
-export function getWorkgroupMemberSpec(workgroupId, memberId) {
-  return apiFetch(
-    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
-  );
-}
-
 export function archiveWorkgroupMember(workgroupId, memberId) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/archive`,
@@ -700,12 +821,12 @@ export function createWorkgroupHITL(workgroupId, prompt) {
   });
 }
 
-export function resolveWorkgroupHITL(workgroupId, hitlId, answer, resolution = null) {
+export function resolveWorkgroupHITL(workgroupId, hitlId, resolution) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
     {
       method: "POST",
-      body: { answer, resolution: resolution || { answer } },
+      body: { resolution: resolution || {} },
     },
   );
 }

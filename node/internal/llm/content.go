@@ -112,8 +112,8 @@ func NormalizeUserInputWithFileReferences(text string, parts []ContentPart, refs
 	return summary, out, normalizedRefs, nil
 }
 
-// BuildUserMessage 构造 role=user 消息；name 仅作为兼容字段，结构化来源
-// 由 MessageSourceForUserName 自动生成，空串仍不写入 wire name。
+// BuildUserMessage 构造 role=user 消息；name 作为可选的 provider 名称投影，
+// 结构化来源由 MessageSourceForUserName 自动生成，空串仍不写入 wire name。
 func BuildUserMessage(text string, parts []ContentPart, name string) (Message, error) {
 	summary, normalized, err := NormalizeUserInput(text, parts)
 	if err != nil {
@@ -178,6 +178,37 @@ func MessageHasImages(m Message) bool {
 		}
 	}
 	return false
+}
+
+const textOnlyImageOmissionNotice = "[图片内容未发送：当前模型未启用图片输入支持。]"
+
+// PrepareMessagesForTextOnly creates the model-facing copy used when the
+// active Agent/profile does not support image input. Persisted history keeps
+// its original image parts for the UI and for a later vision-capable profile;
+// only the outbound request copy is reduced to text so stale image history
+// cannot make an otherwise valid text request fail at the provider.
+func PrepareMessagesForTextOnly(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]Message, len(messages))
+	for i, message := range messages {
+		if !MessageHasImages(message) {
+			out[i] = message
+			continue
+		}
+		out[i] = CloneMessage(message)
+		text := strings.TrimSpace(out[i].Content)
+		if partsText := strings.TrimSpace(MessageTextFromParts(out[i].ContentParts)); partsText != "" {
+			text = partsText
+		}
+		if text == "" {
+			text = textOnlyImageOmissionNotice
+		}
+		out[i].Content = text
+		out[i].ContentParts = nil
+	}
+	return out
 }
 
 // EstimateMessageContentTokens 粗算单条 message 的 content token（含图片固定开销）。

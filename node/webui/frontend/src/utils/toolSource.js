@@ -3,8 +3,6 @@ const MCP_TOOL_PREFIX = "mcp__";
 
 const CHILD_AGENT_TOOLS = new Set([
   "create_temporary_agent",
-  "wait_temporary_agents",
-  "temporary_agent_status",
   "cancel_temporary_agent",
 ]);
 
@@ -21,8 +19,6 @@ const FS_TOOLS = new Set([
 
 const SHELL_TOOLS = new Set(["bash_run", "bash"]);
 const COMPUTER_TOOLS = new Set(["screen_capture", "computer_use"]);
-
-const LINUX_TOOLS = new Set(["linux_exec", "linux_file_upload", "linux_file_download"]);
 
 const SKILLS_TOOLS = new Set(["load_skills", "unload_skills", "clear_skills"]);
 
@@ -53,8 +49,7 @@ export function inferToolKind(name, data = {}) {
   if (n.startsWith("trigger_")) return "triggers";
   if (n.startsWith("terminal_")) return "terminal";
   if (SKILLS_TOOLS.has(n)) return "skills";
-  if (LINUX_TOOLS.has(n) || n.startsWith("linux_")) return "terminal";
-  if (SHELL_TOOLS.has(n) || n.startsWith("background_job_")) return "shell";
+  if (SHELL_TOOLS.has(n)) return "shell";
   if (FS_TOOLS.has(n)) return "fs";
   if (n === USER_INFORMATION_TOOL) return "hitl";
   if (n === "remember") return "memory";

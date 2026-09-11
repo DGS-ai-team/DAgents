@@ -1,6 +1,6 @@
-//! Background SSE subscriber and periodic pending sync.
+//! Background SSE subscriber and event-driven pending projection.
 
-use crate::nodeclient::{Client, StreamEvent};
+use crate::nodeclient::Client;
 use crate::pending::{self, Store};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -8,7 +8,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
-const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Subscriber {
     client: Arc<Client>,
@@ -44,8 +43,6 @@ impl Subscriber {
         self.stop.store(false, Ordering::SeqCst);
         drop(started);
 
-        let poll = self.clone_parts();
-        thread::spawn(move || poll_loop(poll));
         let stream = self.clone_parts();
         thread::spawn(move || stream_loop(stream));
     }
@@ -85,25 +82,12 @@ fn stream_loop(parts: Parts) {
     }
 }
 
-fn poll_loop(parts: Parts) {
-    sync_agents(&parts);
-    let mut next = Instant::now() + SYNC_INTERVAL;
-    while !parts.stop.load(Ordering::SeqCst) {
-        let now = Instant::now();
-        if now >= next {
-            sync_agents(&parts);
-            next = now + SYNC_INTERVAL;
-        }
-        sleep_until_stopped(&parts.stop, Duration::from_millis(250));
-    }
-}
-
 fn connect_once(parts: &Parts) -> Result<(), String> {
     sync_agents(parts);
     let stop = Arc::clone(&parts.stop);
     parts.client.stream_events(&stop, |ev| {
-        if should_sync_while_hitl_pending(&parts.store, &ev) || pending::should_sync_on_event(&ev) {
-            sync_agents(parts);
+        if pending::apply_notification_changed(&parts.store, &ev) {
+            (parts.on_change)();
         }
         !parts.stop.load(Ordering::SeqCst)
     })
@@ -123,12 +107,6 @@ fn sync_agents(parts: &Parts) {
     }
 }
 
-fn should_sync_while_hitl_pending(store: &Store, ev: &StreamEvent) -> bool {
-    store.has_pending_hitl()
-        && matches!(ev.event_type.as_str(), "tool_result" | "tool_call")
-        && pending::event_has_agent(ev)
-}
-
 fn sleep_until_stopped(stop: &AtomicBool, duration: Duration) {
     let deadline = Instant::now() + duration;
     while !stop.load(Ordering::SeqCst) && Instant::now() < deadline {
@@ -139,11 +117,12 @@ fn sleep_until_stopped(stop: &AtomicBool, duration: Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nodeclient::StreamEvent;
     use serde_json::Value;
     use std::collections::HashMap;
 
     #[test]
-    fn syncs_tool_events_while_hitl_pending() {
+    fn applies_notification_events_without_polling() {
         let store = Store::new();
         let mut incoming = HashMap::new();
         incoming.insert(
@@ -159,8 +138,12 @@ mod tests {
             },
         );
         store.replace_from_node(incoming);
+        let mut data = HashMap::<String, Value>::new();
+        data.insert("has_pending_hitl".into(), Value::Bool(false));
+        data.insert("pending_hitl_items".into(), Value::from(0));
+        data.insert("has_unread".into(), Value::Bool(false));
         let ev = StreamEvent {
-            event_type: "tool_result".into(),
+            event_type: "notification_changed".into(),
             agent_id: "a1".into(),
             session_id: "a1".into(),
             seq: 1,
@@ -168,8 +151,8 @@ mod tests {
             event_version: 1,
             stream_epoch: "test".into(),
             delivery: "replayable".into(),
-            data: HashMap::<String, Value>::new(),
+            data,
         };
-        assert!(should_sync_while_hitl_pending(&store, &ev));
+        assert!(pending::apply_notification_changed(&store, &ev));
     }
 }

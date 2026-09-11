@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import { formatInputStripUsage, parseUsageFields, parseUsageRound } from "../utils/usage.js";
+import { formatInputStripUsage, parseUsageFields } from "../utils/usage.js";
 
 export const chromeStore = reactive({
   sseStatus: "disconnected",
@@ -16,23 +16,6 @@ export function setUsageFromSSE(data) {
 	const cumulative = parseUsageFields(data);
 	if (cumulative) {
 		chromeStore.usageStrip = { ...cumulative };
-		return;
-	}
-	// 兼容旧服务端仅发送 round_* 的事件；旧格式确实是增量，只在没有
-	// 顶层累计字段时累加。
-	const round = parseUsageRound(data);
-	if (!round) return;
-	if (!chromeStore.usageStrip) {
-		chromeStore.usageStrip = { ...round };
-		return;
-	}
-	chromeStore.usageStrip.prompt += round.prompt;
-	chromeStore.usageStrip.completion += round.completion;
-	chromeStore.usageStrip.hit += round.hit;
-	chromeStore.usageStrip.reasoning += round.reasoning;
-	chromeStore.usageStrip.cacheObserved = chromeStore.usageStrip.cacheObserved || round.cacheObserved;
-	if (chromeStore.usageStrip.prompt > 0 && chromeStore.usageStrip.hit > 0) {
-		chromeStore.usageStrip.rate = Math.min(1, chromeStore.usageStrip.hit / chromeStore.usageStrip.prompt);
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-// ChildAgentFlowMock 驱动父 Agent 调用 create_temporary_agent(wait=true) 与子 Agent echo 的联调场景。
+// ChildAgentFlowMock 驱动父 Agent 调用同步 create_temporary_agent 与子 Agent echo 的联调场景。
 //
 // 父 session（tools 含 create_temporary_agent）：
 // 1) 无 tool 结果时返回 create_temporary_agent tool call；
@@ -20,7 +20,7 @@ type ChildAgentFlowMock struct {
 	CreateArgsJSON string
 }
 
-const defaultChildAgentCreateArgs = `{"task":"检查 README 是否存在","purpose":"integration test","wait":true}`
+const defaultChildAgentCreateArgs = `{"task":"检查 README 是否存在","purpose":"integration test"}`
 
 // StreamChat 按父/子 session 分流模拟 LLM 行为。
 func (m *ChildAgentFlowMock) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {

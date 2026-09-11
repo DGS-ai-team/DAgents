@@ -66,6 +66,27 @@ describe("buildToolCardModel", () => {
     expect(model.resultBlocks.some((item) => item.content.includes("BASH_RESULT"))).toBe(false);
   });
 
+  it("gives temporary agent tasks a full-width input layout", () => {
+    const model = buildToolCardModel({
+      callEntry: entry("tool_call", {
+        tool_name: "create_temporary_agent",
+        arguments: {
+          task: "请先读取 README 的前三行，再执行一条只读命令并总结。",
+          purpose: "回归验证",
+          allowed_tools: ["read_file", "bash_run"],
+        },
+      }),
+    });
+
+    expect(model.inputLayout).toBe("child-agent");
+    expect(model.inputFields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "任务", kind: "multiline" }),
+        expect.objectContaining({ label: "可用工具", value: "read_file · bash_run" }),
+      ]),
+    );
+  });
+
   it("formats trigger frequency, gate command, task template and next fire time", () => {
     const model = buildToolCardModel({
       callEntry: entry("tool_call", {

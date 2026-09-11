@@ -32,7 +32,6 @@ class SchemaTest(unittest.TestCase):
                     "workgroups",
                     "workgroup_acls",
                     "workgroup_members",
-                    "member_specs",
                     "workgroup_assigns",
                     "actor_runs",
                     "actor_run_histories",
@@ -51,7 +50,7 @@ class SchemaTest(unittest.TestCase):
             self.assertNotIn("blobs", rows)
             self.assertEqual(db.schema_version, SCHEMA_VERSION)
 
-    def test_schema_initialization_is_idempotent_and_rejects_newer_databases(self):
+    def test_schema_initialization_is_idempotent_and_rejects_version_mismatch(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
             path = Path(d) / "m.db"
             db = SQLiteDatabase(path)
@@ -62,13 +61,14 @@ class SchemaTest(unittest.TestCase):
                 )
                 conn.commit()
 
-            self.assertEqual(SQLiteDatabase(path).schema_version, SCHEMA_VERSION)
+            with self.assertRaisesRegex(RuntimeError, "not supported"):
+                SQLiteDatabase(path)
 
-            with SQLiteDatabase(path).connect() as conn:
+            with db.connect() as conn:
                 conn.execute(
                     "UPDATE schema_meta SET value=? WHERE key='schema_version'",
                     (str(SCHEMA_VERSION + 1),),
                 )
                 conn.commit()
-            with self.assertRaisesRegex(RuntimeError, "newer than supported"):
+            with self.assertRaisesRegex(RuntimeError, "not supported"):
                 SQLiteDatabase(path)

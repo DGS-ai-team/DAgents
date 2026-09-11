@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -20,7 +19,6 @@ const (
 	PriorityHuman           Priority = "human"
 	PriorityResume          Priority = "resume"
 	PriorityAsyncCompletion Priority = "async_completion"
-	PriorityOther           Priority = "other"
 )
 
 // Envelope 为单条入队载荷。
@@ -38,6 +36,7 @@ type Envelope struct {
 	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
 	ResumeValue              map[string]any
 	TriggerID                string // 非空表示 trigger fire 投递；输入被消费后清除 pending 标记
+	DeliveryID               string // 稳定的 trigger delivery identity
 	AsyncToolResult          *AsyncToolResultPayload
 	SideEffectContinueSource string // side_effect_continue 来源（task_complete_produce / cancel_recovery 等）
 }
@@ -183,17 +182,6 @@ func priorityValue(p Priority) int {
 		return 2
 	default:
 		return 10
-	}
-}
-
-// ParsePriority 解析显式 priority 字段；空串或未知值返回 false。
-func ParsePriority(raw string) (Priority, bool) {
-	p := Priority(strings.TrimSpace(raw))
-	switch p {
-	case PriorityContinuation, PriorityHuman, PriorityResume, PriorityAsyncCompletion, PriorityOther:
-		return p, true
-	default:
-		return "", false
 	}
 }
 

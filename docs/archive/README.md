@@ -28,3 +28,5 @@
 | 旧兼容性矩阵 | [../user/operations.md](../user/operations.md) 和发布包说明 |
 
 带日期的报告、实验和版本清单分别按 `reports/`、`experiments/`、`releases/` 归档；归档文件内部链接只用于追溯，不作为当前实现入口。
+
+本轮本地交付检查见 [2026-09-08 未提交工作收口](reports/2026-09-08-uncommitted-work-closeout.md)，记录提交前检查、修复和未覆盖范围。

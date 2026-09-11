@@ -190,7 +190,7 @@
   "member_generation": 1,
   "llm_profile_id": "…",
   "llm_profile_revision": "…",
-  "max_tool_loops": 32,
+  "max_steps": 32,
   "prompt": {
     "soul_md": "",
     "user_md": "",

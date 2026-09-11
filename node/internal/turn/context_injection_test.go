@@ -58,6 +58,36 @@ func TestApplyContextInjectionsRemovesRequestOnlyDuplicates(t *testing.T) {
 	}
 }
 
+func TestApplyContextInjectionsPlacesMemoryAfterCurrentRootUser(t *testing.T) {
+	history := []llm.Message{
+		llm.UserMessage("旧任务", llm.UserNameHuman),
+		{Role: "assistant", Content: "旧结论"},
+		llm.UserMessage("当前任务", llm.UserNameHuman),
+		{Role: "assistant", Content: "处理中"},
+	}
+	injections := []ContextInjection{
+		{Name: llm.UserNameContext, Source: "runtime_context", Content: "运行事实", Position: "before_current_user"},
+		{Name: llm.UserNameMemoryContext, Source: "memory", Content: "历史偏好", Position: "after_current_user", MessageKind: llm.MessageSourceMemory, MessageForm: llm.MessageFormSnapshot},
+	}
+
+	request := ApplyContextInjections(history, injections)
+	if len(request) != len(history)+2 {
+		t.Fatalf("request len = %d: %+v", len(request), request)
+	}
+	if request[2].Name != llm.UserNameContext || request[2].Content != "运行事实" {
+		t.Fatalf("runtime context placement = %+v", request)
+	}
+	if request[3].Content != "当前任务" || request[4].Name != llm.UserNameMemoryContext || request[4].Content != "历史偏好" {
+		t.Fatalf("memory context must follow current user: %+v", request)
+	}
+	if request[5].Content != "处理中" {
+		t.Fatalf("tool continuation moved around memory context: %+v", request)
+	}
+	if durable := StripContextInjections(request); len(durable) != len(history) {
+		t.Fatalf("request-only memory/runtime context leaked to durable history: %+v", durable)
+	}
+}
+
 func TestModelContextSnapshotClonesContextInjections(t *testing.T) {
 	injections := []ContextInjection{{Name: "runtime_context", Source: "runtime", Content: "cwd=/workspace"}}
 	snapshot := NewModelContextSnapshotWithInjections("stable", nil, injections, 7, "runtime")

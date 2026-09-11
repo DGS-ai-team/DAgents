@@ -42,6 +42,17 @@ func (o *Orchestrator) publishHITLRequired(sessionID, hitlID, message string, it
 	}))
 }
 
+// PublishPendingHITL 在生命周期投影已提交后发布可恢复的 HITL 卡片。
+// 先提交 pending、再发事件，避免客户端看到卡片后立即 resume 却命中
+// no_pending_hitl 的竞态。
+func (o *Orchestrator) PublishPendingHITL(sessionID string, pending *PendingHITL) {
+	if o == nil || pending == nil || len(pending.Items) == 0 {
+		return
+	}
+	message, items := buildHITLRequiredPayload(pending.Items)
+	o.publishHITLRequired(sessionID, StableHITLID(pending), message, items)
+}
+
 // publishToolCallPayload 推送 tool call payload SSE。
 func (o *Orchestrator) publishToolCallPayload(sessionID string, payload map[string]any) {
 	o.hub.Publish(sessionID, "tool_call", o.withLifecycleMetadata(sessionID, payload))
@@ -80,11 +91,11 @@ func (o *Orchestrator) publishToolCall(sessionID string, tc llm.ToolCall, partia
 }
 
 // publishToolResult 推送 tool result SSE。
-func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, rejected bool, extra map[string]any) {
-	resultFields := tools.ResultEventFields(tc.Function.Name, content, rejected)
+func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, failureHint bool, extra map[string]any) {
+	resultFields := tools.ResultEventFields(tc.Function.Name, content, failureHint)
 	if rawStatus, ok := extra["async_status"].(string); ok {
 		if status := tools.NormalizeResultStatus(rawStatus); status != "" {
-			resultFields = tools.ResultEventFieldsWithStatus(tc.Function.Name, content, rejected, status)
+			resultFields = tools.ResultEventFieldsWithStatus(tc.Function.Name, content, failureHint, status)
 		}
 	}
 	payload := map[string]any{
@@ -112,11 +123,14 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 
 // publishTurnFinished 推送 turn_finished SSE。它只表示一个 turn 已进入
 // 终态；HITL 暂停不发送该事件，暂停事实由 hitl_required + turn_state 表达。
-func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
+func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string, noWork ...bool) {
 	o.runTurnDonePhase(sessionID, finishReason)
 	payload := map[string]any{
 		"finish_reason": finishReason,
 		"turn_complete": true,
+	}
+	if len(noWork) > 0 && noWork[0] {
+		payload["no_work"] = true
 	}
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()
@@ -126,6 +140,12 @@ func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string) {
 	}
 	o.logTurnContextMetrics(sessionID, finishReason)
 	o.hub.Publish(sessionID, "turn_finished", o.withLifecycleMetadata(sessionID, payload))
+}
+
+// PublishNoWorkFinished emits the trusted no-work terminal only after the
+// session runtime has committed the tool result and lifecycle transition.
+func (o *Orchestrator) PublishNoWorkFinished(sessionID string) {
+	o.publishTurnFinished(sessionID, "stop", true)
 }
 
 // publishUsage 推送 usage SSE。

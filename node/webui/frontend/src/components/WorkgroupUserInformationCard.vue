@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { buildUserInfoSubmitResume } from "../stores/hitl.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   request: { type: Object, required: true },
@@ -87,7 +88,7 @@ function submitOnEnter(event) {
         @click="toggleOption(option.id)"
       >
         <span class="wg-member-question__choice" aria-hidden="true">
-          {{ selectedSet.has(option.id) ? "✓" : "" }}
+          <UiIcon v-if="selectedSet.has(option.id)" name="check" :size="14" />
         </span>
         <span>{{ option.label }}</span>
       </button>

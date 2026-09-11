@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/computeruse"
 	"github.com/DGS-ai-team/DAgents/node/internal/screen"
 )
 
@@ -26,17 +27,76 @@ func TestDesktopToolDefinitions(t *testing.T) {
 	}
 }
 
-func TestComputerUseRequiresMultimodalModel(t *testing.T) {
+func TestComputerUseRequiresMultimodalEnabled(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := reg.execComputerUse(context.Background(), []byte(`{"action":"key","key":"escape"}`))
-	if err == nil || !strings.Contains(err.Error(), "requires a multimodal model") {
+	if err == nil || !strings.Contains(err.Error(), "requires multimodal to be enabled") {
 		t.Fatalf("err = %v, want multimodal requirement", err)
 	}
 	if !strings.Contains(result, `"status":"failed"`) {
 		t.Fatalf("result = %s, want structured failure", result)
+	}
+}
+
+func TestComputerUseDefinitionSupportsBoundedBatches(t *testing.T) {
+	params := computerUseToolDef().Function.Parameters
+	properties, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %#v", params["properties"])
+	}
+	batch, ok := properties["actions"].(map[string]any)
+	if !ok {
+		t.Fatalf("actions schema = %#v", properties["actions"])
+	}
+	if got := batch["maxItems"]; got != maxComputerUseBatchActions {
+		t.Fatalf("actions maxItems = %#v, want %d", got, maxComputerUseBatchActions)
+	}
+	if _, ok := properties["frame_id"]; !ok {
+		t.Fatal("frame_id is missing from computer_use schema")
+	}
+	if _, ok := params["anyOf"]; ok {
+		t.Fatal("computer_use schema should keep the action/actions choice provider-neutral")
+	}
+}
+
+func TestValidateComputerUseBatchAllowsSafeFollowUpKeysOnly(t *testing.T) {
+	if err := validateComputerUseBatch([]computeruse.Action{
+		{Name: computeruse.ActionClick, HasPoint: true},
+		{Name: computeruse.ActionTypeText, Text: "hello"},
+		{Name: computeruse.ActionKey, Key: "enter"},
+	}); err != nil {
+		t.Fatalf("safe batch rejected: %v", err)
+	}
+	if err := validateComputerUseBatch([]computeruse.Action{
+		{Name: computeruse.ActionClick, HasPoint: true},
+		{Name: computeruse.ActionScroll, ScrollY: 2},
+	}); err == nil {
+		t.Fatal("expected two coordinate-dependent actions to be rejected")
+	}
+}
+
+func TestComputerUseRejectsMismatchedFrameID(t *testing.T) {
+	x, y := 10, 10
+	reg := &Registry{desktopFrames: map[string]screenGeometry{
+		"desktop-session": {
+			Width:      100,
+			Height:     100,
+			Bounds:     screen.Bounds{Width: 100, Height: 100},
+			CapturedAt: time.Now(),
+			FrameID:    "frame-current",
+		},
+	}}
+	ctx := WithSession(context.Background(), "desktop-session")
+	_, err := reg.resolveComputerActionValues(ctx, computerUseActionArgs{
+		Action: computeruse.ActionClick,
+		X:      &x,
+		Y:      &y,
+	}, "frame-old")
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("err = %v, want frame mismatch", err)
 	}
 }
 
@@ -62,6 +122,9 @@ func TestExecScreenCaptureUsesRealDisplay(t *testing.T) {
 	}
 	if !payload.OK || payload.Screenshot == "" {
 		t.Fatalf("unexpected result: %s", result)
+	}
+	if !strings.Contains(filepath.ToSlash(payload.Screenshot), "/.dagents/desktop-test/screenshots/") {
+		t.Fatalf("screenshot is not workspace-scoped: %q", payload.Screenshot)
 	}
 	t.Cleanup(func() { _ = os.Remove(payload.Screenshot) })
 	info, err := os.Stat(payload.Screenshot)

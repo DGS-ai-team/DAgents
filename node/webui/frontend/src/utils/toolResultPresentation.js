@@ -9,7 +9,6 @@ const RESULT_STATUS_LABELS = {
   failed: ["执行失败", "danger"],
   error: ["执行失败", "danger"],
   denied: ["已拒绝", "danger"],
-  rejected: ["已拒绝", "danger"],
   cancelled: ["已终止", "warning"],
   canceled: ["已终止", "warning"],
   interrupted: ["已中断", "warning"],
@@ -125,8 +124,7 @@ function resolveContent(resultEntry, fallbackEntry) {
   return stringValue(data.content ?? data.output);
 }
 
-function statusFromContent(name, content, resultData) {
-  if (resultData?.rejected) return "rejected";
+function statusFromData(resultData) {
   if (
     resultData?.interrupted ||
     resultData?.interrupted_by_stream_cancel ||
@@ -136,21 +134,7 @@ function statusFromContent(name, content, resultData) {
     return "interrupted";
   }
   const explicit = stringValue(resultData?.status).toLowerCase();
-  if (explicit) return explicit;
-
-  const shellStatus = content.match(/\bstatus=([A-Za-z_]+)/i);
-  if (shellStatus) return shellStatus[1].toLowerCase();
-
-  const payload = parseJSONObject(content);
-  if (payload) {
-    const detail = payload.detail && typeof payload.detail === "object" ? payload.detail : payload;
-    const nested = stringValue(detail.status).toLowerCase();
-    if (nested) return nested;
-    if (payload.ok === false) return "failed";
-    if (payload.ok === true) return "succeeded";
-  }
-  if (name === "bash_run" && /\bCANCELLED\b/i.test(content)) return "cancelled";
-  return resultData ? "succeeded" : "";
+  return explicit || (resultData ? "succeeded" : "");
 }
 
 function statusPresentation(status) {
@@ -161,7 +145,7 @@ function statusPresentation(status) {
 
 function baseModel(name, args, resultEntry, content) {
   const resultData = dataFor(resultEntry);
-  const status = statusPresentation(statusFromContent(name, content, resultEntry ? resultData : null));
+  const status = statusPresentation(statusFromData(resultEntry ? resultData : null));
   return {
     toolName: name,
     args,
@@ -172,6 +156,7 @@ function baseModel(name, args, resultEntry, content) {
     inputFields: [],
     resultFields: [],
     resultBlocks: [],
+    inputLayout: "compact",
     hasResult: !!resultEntry,
   };
 }
@@ -228,12 +213,6 @@ function addShellResult(model, content) {
   addBlock(model.resultBlocks, "详情", parsed.other, "text");
   if (!model.resultBlocks.length && content && !/^\s*\[[A-Z_]+_RESULT\]/i.test(content)) {
     addBlock(model.resultBlocks, "结果", content, "text");
-  }
-  if (meta.status) {
-    const status = statusPresentation(meta.status);
-    model.statusCode = status.code;
-    model.statusLabel = status.label;
-    model.statusTone = status.tone;
   }
 }
 
@@ -295,8 +274,8 @@ function addTriggerInput(model, args, name) {
 }
 
 function triggerTargetText(item) {
-  const mode = stringValue(item.session_target_mode || item.agent_target_mode);
-  const id = item.target_bound_agent_id || item.target_session_id;
+  const mode = stringValue(item.session_target_mode);
+  const id = item.target_session_id;
   return id ? `${mode || "绑定目标"} · ${shortId(id, 18)}` : mode;
 }
 
@@ -451,12 +430,28 @@ function addSearchResult(model, content, name) {
 }
 
 function addGenericInput(model, args) {
-  const keys = Object.keys(args).filter((key) => !["call_purpose", "purpose", "run_in_background"].includes(key)).sort();
+  const keys = Object.keys(args).filter((key) => !["call_purpose", "purpose"].includes(key)).sort();
   for (const key of keys.slice(0, 8)) {
     const value = displayValue(args[key], { max: 120 });
     if (value) addField(model.inputFields, key, value, typeof args[key] === "string" && String(args[key]).length > 80 ? "multiline" : "text");
   }
   if (keys.length > 8) addField(model.inputFields, "其他参数", `${keys.length - 8} 项`);
+}
+
+function addChildAgentInput(model, args) {
+  model.inputLayout = "child-agent";
+  addField(model.inputFields, "任务", args.task, "multiline");
+  const allowedTools = Array.isArray(args.allowed_tools)
+    ? args.allowed_tools.filter(Boolean).join(" · ")
+    : args.allowed_tools;
+  addField(model.inputFields, "可用工具", allowedTools || "默认工具");
+  const skillNames = Array.isArray(args.skill_names)
+    ? args.skill_names.filter(Boolean).join(" · ")
+    : args.skill_names;
+  if (skillNames) addField(model.inputFields, "预加载技能", skillNames);
+  if (finiteNumber(args.ttl_seconds) > 0) {
+    addField(model.inputFields, "生命周期", `${finiteNumber(args.ttl_seconds)} 秒`);
+  }
 }
 
 function addGenericResult(model, content) {
@@ -554,12 +549,7 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
       if (resultEntry) addDesktopResult(model, content);
       break;
     case "bash_run":
-    case "linux_exec":
-      if (name === "bash_run") addBashInput(model, args);
-      else {
-        addTerminalInput(model, args);
-        addField(model.inputFields, "远程配置", args.config_id);
-      }
+      addBashInput(model, args);
       if (resultEntry) addShellResult(model, content);
       break;
     case "terminal_command":
@@ -591,6 +581,10 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
     case "browser_task_cancel":
       addBrowserInput(model, args);
       if (resultEntry) addBrowserResult(model, content, name);
+      break;
+    case "create_temporary_agent":
+      addChildAgentInput(model, args);
+      if (resultEntry) addGenericResult(model, content);
       break;
     case "read_file":
     case "write_file":

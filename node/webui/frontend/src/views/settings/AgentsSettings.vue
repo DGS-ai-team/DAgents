@@ -1,10 +1,14 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import AgentTemplateCreateModal from "../../components/AgentTemplateCreateModal.vue";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { agentHostLabel } from "../../utils/agentTemplateForm.js";
+import AutoBadge from "../../components/AutoBadge.vue";
+import UiIcon from "../../components/UiIcon.vue";
+import { filterAgents, groupAgents, searchAgents } from "../../utils/agentGrouping.js";
+import { readNodePreference, writeNodePreference } from "../../utils/nodePreference.js";
 
 const router = useRouter();
 const loading = ref(true);
@@ -15,6 +19,13 @@ const agents = ref([]);
 const templates = ref([]);
 const showTemplateCreateModal = ref(false);
 const deletingTemplateId = ref("");
+const agentFilter = ref("all");
+const agentSearch = ref("");
+const preferenceNodeId = ref("");
+const agentGroups = computed(() => groupAgents(searchAgents(filterAgents(agents.value, agentFilter.value), agentSearch.value), "type"));
+watch([agentFilter, agentSearch], () => {
+  if (preferenceNodeId.value) writeNodePreference(preferenceNodeId.value, "settings-agent-view", { filter: agentFilter.value, search: agentSearch.value });
+}, { deep: true });
 
 async function loadAgents() {
   loading.value = true;
@@ -46,6 +57,17 @@ async function loadTemplates() {
 
 async function load() {
   await Promise.all([loadAgents(), loadTemplates()]);
+  try {
+    const boot = await api.getUIBootstrap();
+    const nodeId = String(boot?.info?.node_id || boot?.health?.node_id || boot?.info?.NodeID || "").trim();
+    if (!nodeId) return;
+    preferenceNodeId.value = nodeId;
+    agentFilter.value = "all";
+    agentSearch.value = "";
+    const saved = readNodePreference(nodeId, "settings-agent-view", null);
+    if (saved?.filter === "auto" || saved?.filter === "normal") agentFilter.value = saved.filter;
+    if (typeof saved?.search === "string") agentSearch.value = saved.search;
+  } catch { /* keep in-memory defaults when Node identity is unavailable */ }
 }
 
 function openAgent(agent) {
@@ -111,23 +133,35 @@ onMounted(load);
         还没有智能体，请先回到对话页创建。
       </p>
 
-      <ul v-else class="agents-settings__list">
-        <li v-for="a in agents" :key="a.agent_id">
+      <div v-else class="agents-settings__filters">
+        <input v-model="agentSearch" type="search" placeholder="搜索名称、ID或工作目录…" aria-label="搜索智能体" />
+        <select v-model="agentFilter" aria-label="智能体类型筛选"><option value="all">全部</option><option value="auto">Auto</option><option value="normal">普通</option></select>
+      </div>
+
+      <div v-if="!loading && !error && agents.length" class="agents-settings__group-list">
+      <section v-for="group in agentGroups" :key="group.key" class="agents-settings__group">
+        <h3>{{ group.label }} <span>{{ group.agents.length }}</span></h3>
+        <ul class="agents-settings__list">
+        <li v-for="a in group.agents" :key="a.agent_id">
           <button type="button" class="agents-settings__card" @click="openAgent(a)">
             <div class="agents-settings__card-main">
-              <span class="agents-settings__name">{{ a.display_name || a.agent_id }}</span>
+              <span class="agents-settings__name">{{ a.display_name || a.agent_id }} <AutoBadge :agent="a" /></span>
               <span class="agents-settings__meta">
                 {{ hostLabel(a) }}
+                · {{ a.agent_type === "auto" ? "Auto · 自主任务" : "普通 Agent" }}
                 <template v-if="a.template_id"> · 模板 {{ a.template_id }}</template>
               </span>
             </div>
             <span class="agents-settings__card-action">
               <span>配置</span>
-              <span class="agents-settings__chevron" aria-hidden="true">›</span>
+              <UiIcon class="agents-settings__chevron" name="chevron-right" :size="14" />
             </span>
           </button>
         </li>
-      </ul>
+        </ul>
+      </section>
+      <p v-if="!agentGroups.length" class="agents-settings__status">暂无符合条件的智能体</p>
+      </div>
     </section>
 
     <section class="agents-settings__section">
@@ -197,6 +231,13 @@ onMounted(load);
   font-size: 15px;
   font-weight: 600;
 }
+.agents-settings__filters { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 8px; margin: 0 0 12px; }
+.agents-settings__filters input, .agents-settings__filters select { min-width: 0; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 10px; background: var(--color-surface); color: var(--color-text); }
+.agents-settings__group { margin-top: 14px; }
+.agents-settings__group h3 { display: flex; gap: 7px; align-items: baseline; margin: 0 0 7px; color: var(--text-secondary); font-size: 12px; }
+.agents-settings__group h3 span { font-size: 11px; }
+.agents-settings__name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 720px) { .agents-settings__filters { grid-template-columns: 1fr; } }
 
 .agents-settings__section-title-row {
   display: flex;

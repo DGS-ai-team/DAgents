@@ -1,6 +1,6 @@
 # 02 · Agent Node 核心
 
-> **当前实现说明（2026-08）**：本章早期示例中的 `setState`、`toolLoopCount` 和 runtime `pending` 是历史写法。当前实现由 `turn.TurnCoordinator` 维护 Turn/Step 生命周期，`TurnExecutionContext` 向 Orchestrator 提供 StepIndex；旧字段仅保留为持久化迁移和 API 兼容镜像。迁移过程记录见 [`turn-step-runtime-implementation-status.md`](../archive/reports/turn-step-runtime-implementation-status.md)。
+> **当前实现说明（2026-09）**：本章早期示例中的 `setState`、`toolLoopCount` 和 runtime `pending` 已不再是实现入口。当前实现由 `turn.TurnCoordinator` 维护 Turn/Step 生命周期，`TurnExecutionContext` 向 Orchestrator 提供 StepIndex；旧实现说明已归档。
 
 ## 本章回答什么问题
 
@@ -52,7 +52,6 @@ Node 里 **一步（one step）** = **一次** `llm.StreamChat` 请求 + 将其�
 ```text
 runOneStep(ctx, sessionID, history)
   │
-  ├─ RepairUnrespondedToolCalls          // 修复 orphan tool_calls
   ├─ 从 TurnExecutionContext 读取 StepIndex
   ├─ Coordinator 检查 Step / budget / generation
   │
@@ -64,7 +63,7 @@ runOneStep(ctx, sessionID, history)
   │     OnToolCallDelta    → SSE tool_call（流式参数）
   │     OnUsage            → SSE usage（累计）
   │
-  ├─ 错误 / cancel → persistCancelledStream、turn_finished、return Err
+  ├─ 错误 / cancel → 丢弃流式草稿、turn_finished、return Err
   │
   ├─ appendHistory(assistant)            // 整段 assistant 落库
   │
@@ -91,7 +90,7 @@ runOneStep(ctx, sessionID, history)
 2. 工作区目录约定与外部工具目录
 3. context boundary 固定的 Skills 元数据（若当前 Agent 启用了 skills）
 
-主机快照、`agent_id` / `session_id`、请求级 prompt context（soul / custom / long_term，用户称呼由 Node 的 `PreferredName` 提供）和已加载 skill 正文，都通过 request-only context 注入，不写入会话历史；旧 `user.md` 仅用于迁移。
+主机快照、`agent_id` / `session_id`、请求级 prompt context（soul / custom，用户称呼由 Node 的 `PreferredName` 提供）、按 Turn 召回的 Memory Context 和已加载 skill 正文，都通过 request-only context 注入，不写入会话历史。
 
 **History**：`[]llm.Message`，由 **runtime** 持有；`runOneStep` 通过指针读写，步末由 runtime `applyStepOutcome` 写回。
 
@@ -200,7 +199,7 @@ handleInputMessage
 
 - `StepIndex`：当前 Turn 内的 Step 序号，由 Coordinator 分配并通过 `TurnExecutionContext` 传递。
 - 新 `handleHumanMessage` 时创建新的 Turn；不再由 runtime 归零和递增独立计数器。
-- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `turn_finished` 结束；下一条 user 消息会重置计数。
+- 达到 `max_steps`（默认 32）→ 由 TurnBudget 结束当前 Turn，并在 `turn_finished` 中报告预算耗尽；下一条 user 消息会创建新的 Turn。
 
 ### 2.7 源码索引（§2）
 
@@ -229,7 +228,7 @@ handleInputMessage
 | **异步工具** | `browser_run_task(wait=false)` 完成 → `async_tool_result` |
 | **Trigger** | 调度器 fire → InputBox FIFO（`TriggerID` + `UserName=trigger`） |
 
-外部输入需要稳定的 FIFO，并且在 pending HITL 时不能抢占当前 Turn；因此采用 **每 session 一个 `InputBox` + 一个控制 `MessageQueue` + 单 goroutine `consumeLoop`**。InputBox 只负责 user/trigger/A2A 的顺序与缓存，resume 和异步事实仍由控制队列驱动。
+外部输入需要稳定的 FIFO，并且在 pending HITL 时不能抢占当前 Turn；因此采用 **每 session 一个 `InputBox` + 一个控制 `MessageQueue` + 单 goroutine `consumeLoop`**。InputBox 只负责 user/trigger/child-agent 的顺序与缓存，resume 和异步事实仍由控制队列驱动。
 
 ### 3.2 队列模型
 
@@ -250,7 +249,7 @@ MessageQueue.Enqueue(control) ──► priority ──► Dequeue(ctx) ──�
 
 | `RequestType` | 常量 | 典型来源 | consume 处理 |
 |---------------|------|----------|--------------|
-| `message` | `RequestTypeMessage` | Client user（兼容 envelope） | InputBox → `handleInputMessage` |
+| `message` | `RequestTypeMessage` | Client user | InputBox → `handleInputMessage` |
 | `resume` | `RequestTypeResume` | Client HITL 提交 | `handleResume` |
 | `async_tool_result` | `RequestTypeAsyncToolResult` | 浏览器异步任务完成 | `handleSideEffectProduceAsync`（Produce） |
 | `turn_continuation` | `RequestTypeTurnContinuation` | 恢复/重启补偿 | `handleTurnContinuation` |
@@ -263,24 +262,22 @@ MessageQueue.Enqueue(control) ──► priority ──► Dequeue(ctx) ──�
 出队顺序（数值越小越优先；同档 FIFO 按 `seq`）：
 
 ```text
-turn_continuation / side_effect_continue > resume > async_completion > other
+turn_continuation / side_effect_continue > resume > async_completion
 ```
 
 | 档位 | 整数值 | 典型 `request_type` |
 |------|--------|---------------------|
 | `continuation` | -1 | `turn_continuation` / `side_effect_continue` |
-| InputBox | — | user / trigger / A2A，按 session seq FIFO |
+| InputBox | — | user / trigger / child-agent，按 session seq FIFO |
 | `resume` | 1 | `resume` |
 | `async_completion` | 2 | `async_tool_result` |
-| `other` | 10 | 预留 |
 
 **设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
 
 1. **`continuation` 最高**：恢复或旁路 Apply 后尽快续跑；同步工具结果已经在当前 Turn 链内 inline 处理。
 2. **InputBox 与控制队列分离**：新 user message 不参与 resume 的优先级竞争；pending HITL 时只留在 InputBox，显式 `CancelTurn` 或有效 `resume` 结束当前链后再消费。
-3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌。
+3. **`resume` 高于 `async_completion`**：HITL 提交优先于后台 job 回灌。
 4. **InputBox 不参与控制队列优先级**：普通输入在活动 Turn（包括 pending HITL）期间只缓存，显式 cancel 或有效 resume 后按 FIFO 消费。
-5. **`other` 最低**：仅作预留。
 
 ### 3.5 `consumeLoop` 分流
 

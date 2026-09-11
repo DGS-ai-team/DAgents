@@ -2,7 +2,7 @@ package llm
 
 import "testing"
 
-func TestToolCallAccumulator_snapshotAndFinalize(t *testing.T) {
+func TestToolCallAccumulator_snapshotAndAggregate(t *testing.T) {
 	t.Parallel()
 
 	acc := newToolCallAccumulator()
@@ -19,8 +19,8 @@ func TestToolCallAccumulator_snapshotAndFinalize(t *testing.T) {
 	if len(snap) != 1 || snap[0].Function.Name != "bash_run" || snap[0].Function.Arguments != `{"command":"ls"}` {
 		t.Fatalf("snapshot = %+v", snap)
 	}
-	final := acc.finalize()
+	final := acc.aggregate()
 	if len(final) != 1 || final[0].ID != "call-1" {
-		t.Fatalf("finalize = %+v", final)
+		t.Fatalf("aggregate = %+v", final)
 	}
 }

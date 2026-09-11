@@ -2,12 +2,11 @@ package workgroup
 
 import "sync"
 
-// Session 跟踪强身份 WS 连接世代与投递游标（按 workgroup 分离 delivery_seq）。
+// Session 跟踪强身份 WS 连接世代与按工作组分离的投递游标。
 type Session struct {
 	mu                   sync.Mutex
 	NodeID               string
 	ConnectionGeneration int64
-	LastAckDeliverySeq   int64 // 兼容：最近一次 ack（任意组）
 	LastAckByWG          map[string]int64
 	Active               bool
 }
@@ -29,7 +28,7 @@ func (s *Session) Hello(nodeID string) int64 {
 func (s *Session) OfferResume() ResumeCursor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	max := s.LastAckDeliverySeq
+	var max int64
 	for _, seq := range s.LastAckByWG {
 		if seq > max {
 			max = seq
@@ -60,7 +59,6 @@ func (s *Session) AckDelivery(workgroupID string, seq int64) error {
 		return errf(CodeConflict, "delivery_seq regress %d < %d for %s", seq, prev, workgroupID)
 	}
 	s.LastAckByWG[workgroupID] = seq
-	s.LastAckDeliverySeq = seq
 	return nil
 }
 

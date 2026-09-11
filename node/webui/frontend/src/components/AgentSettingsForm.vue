@@ -6,7 +6,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import {
-  LONG_TERM_SCOPES,
+  MEMORY_SCOPES,
   TOOL_GROUPS,
   memoryEnabledFromToolGroups,
   skillsEnabledFromToolGroups,
@@ -20,6 +20,8 @@ const props = defineProps({
   llmProfiles: { type: Array, default: () => [] },
   showAdvanced: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  /** 模板编辑没有固定工作目录；Agent 设置页显示已绑定的工作目录。 */
+  showWorkspace: { type: Boolean, default: true },
   /**
    * full：设置页完整表单
    * create-basics：创建弹窗身份步
@@ -33,7 +35,7 @@ const props = defineProps({
   /** 创建校验：替换对应字段标签文案 */
   fieldErrors: {
     type: Object,
-    default: () => ({ name: "", llm: "" }),
+    default: () => ({ name: "", llm: "", workspace: "" }),
   },
   /** Node 当前可勾选工具组（已按 browser/wecom 进程开关过滤）；缺省用全量 TOOL_GROUPS */
   availableToolGroups: {
@@ -166,8 +168,8 @@ const llmProfileOptions = computed(() =>
   })),
 );
 
-const longTermScopeOptions = computed(() =>
-  LONG_TERM_SCOPES.map((opt) => ({ value: opt.value, label: opt.label })),
+const memoryScopeOptions = computed(() =>
+  MEMORY_SCOPES.map((opt) => ({ value: opt.value, label: opt.label })),
 );
 </script>
 
@@ -189,6 +191,13 @@ const longTermScopeOptions = computed(() =>
     >
       <h3 v-if="isFull" class="agent-settings-section__title">基础信息</h3>
       <div :class="{ 'agent-settings-section__body': isFull }">
+        <label class="agent-settings-field agent-settings-field--type">
+          <span class="agent-settings-field__label">智能体类型</span>
+          <select v-model="draft.agentType" class="agent-settings-input">
+            <option value="normal">普通 Agent</option>
+            <option value="auto">Auto Agent（自主任务）</option>
+          </select>
+        </label>
         <label class="agent-settings-field">
           <span
             :class="{
@@ -232,6 +241,7 @@ const longTermScopeOptions = computed(() =>
             :options="llmProfileOptions"
             placeholder="请选择"
             :disabled="!llmProfileOptions.length"
+            :menu-placement="isCreateBasics ? 'above' : 'auto'"
             @update:model-value="onLlmChange"
           />
         </label>
@@ -245,6 +255,18 @@ const longTermScopeOptions = computed(() =>
         <p v-if="isCreateBasics" class="agent-settings-hint agent-settings-hint--later">
           角色设定、技能白名单等，创建后可在智能体设置里慢慢调。
         </p>
+      </div>
+    </section>
+
+    <section v-if="isFull && showWorkspace" class="agent-settings-section agent-settings-section--flat agent-settings-workspace-readonly">
+      <div class="agent-settings-workspace-readonly__row">
+        <div>
+          <h3 class="agent-settings-section__title agent-settings-section__title--inline">工作目录</h3>
+          <p class="agent-settings-hint">创建时绑定，不能在设置页修改。</p>
+        </div>
+        <code v-if="draft.workspaceMode === 'custom' && draft.workspacePath">{{ draft.workspacePath }}</code>
+        <span v-else-if="draft.workspaceMode === 'private'">Agent 私有目录</span>
+        <span v-else>未设置工作目录</span>
       </div>
     </section>
 
@@ -378,7 +400,7 @@ const longTermScopeOptions = computed(() =>
             </label>
             <label v-if="memoryToolEnabled" class="agent-settings-field">
               <span class="agent-settings-field__label">记忆范围</span>
-              <UiSelect v-model="draft.promptLongTermScope" :options="longTermScopeOptions" />
+              <UiSelect v-model="draft.promptMemoryScope" :options="memoryScopeOptions" />
             </label>
           </div>
           </div>
@@ -544,6 +566,39 @@ const longTermScopeOptions = computed(() =>
   border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-section__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle, var(--color-border));
+}
+
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-input {
+  max-width: 100%;
+}
+
+/* Detail settings are intentionally one field per row; the create wizard
+   keeps its compact conversational layout above. */
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-section__body {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 640px) {
+  .agent-settings-form--full .agent-settings-section--flat .agent-settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 .agent-settings-form--create {
   gap: 14px;
   flex: 1 1 auto;
@@ -567,6 +622,11 @@ const longTermScopeOptions = computed(() =>
   gap: 12px;
 }
 
+/* 基础创建表单保持自然高度，页面容器负责滚动。 */
+.agent-settings-form--create-basics .agent-settings-section {
+  flex: 0 0 auto;
+}
+
 .agent-settings-form--create-basics .agent-settings-field {
   gap: 6px;
   margin-bottom: 0;
@@ -576,16 +636,15 @@ const longTermScopeOptions = computed(() =>
 }
 
 .agent-settings-form--create-basics .agent-settings-field--grow {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
 }
 
 .agent-settings-form--create-basics .agent-settings-field--grow .agent-settings-input--area {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 96px;
-  height: 100%;
+  height: 96px;
   resize: none;
 }
 
@@ -598,6 +657,33 @@ const longTermScopeOptions = computed(() =>
   margin-top: auto;
   margin-bottom: 0;
   padding-top: 4px;
+}
+
+.agent-settings-workspace-readonly__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-settings-workspace-readonly {
+  padding-top: 20px;
+}
+
+.agent-settings-workspace-readonly__row > :last-child {
+  max-width: 65%;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 12px;
+  text-align: right;
+}
+
+.agent-settings-workspace-readonly__row code {
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
 }
 
 .agent-settings-toggles--fill {
@@ -819,6 +905,25 @@ const longTermScopeOptions = computed(() =>
   margin-top: 14px;
 }
 
+/* The capability areas are intentionally full-width: their tile and skill
+   collections need room to scan, while the scalar role fields below keep the
+   shared label/control alignment. */
+.agent-settings-form--full .agent-settings-advanced__block {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.agent-settings-form--full .agent-settings-advanced__block:first-child,
+.agent-settings-form--full .agent-settings-advanced__block:nth-child(2) {
+  padding-bottom: 2px;
+}
+
+.agent-settings-form--full .agent-settings-advanced__block .agent-settings-toggles--tiles,
+.agent-settings-form--full .agent-settings-advanced__block .agent-settings-skill-list {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .agent-settings-form--full .agent-settings-toggles--tiles {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -838,6 +943,10 @@ const longTermScopeOptions = computed(() =>
   .agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
     grid-column: auto;
     grid-row: auto;
+  }
+
+  .agent-settings-form--full .agent-settings-advanced__block {
+    grid-column: auto;
   }
 }
 </style>

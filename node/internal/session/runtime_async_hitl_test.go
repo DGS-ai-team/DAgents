@@ -28,19 +28,19 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 		ID:   "call-approve-1",
 		Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "bash_run",
+			Name:      "browser_run_task",
 			Arguments: `{"command":"echo hi","call_purpose":"test"}`,
 		},
 	}
 
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "run background then approve"},
+		{Role: "user", Content: "run async task then approve"},
 		{Role: "assistant", Content: "ok", ToolCalls: []llm.ToolCall{{
-			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"sleep 1","run_in_background":true}`},
+			ID: "call-async-1", Type: "function",
+			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 		}}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: `{"job_id":"job-old","status":"accepted"}`},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 		{Role: "user", Content: "now run sync"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
 	}
@@ -52,7 +52,7 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID:      "job-old",
-		ToolName:   "bash_run",
+		ToolName:   "browser_run_task",
 		ToolCallID: "async-job-old",
 		Status:     "failed",
 		ErrorText:  "exit 1",

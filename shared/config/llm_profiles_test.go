@@ -91,28 +91,28 @@ func TestLLMProfile_multimodalFollowsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !cfg.MultimodalEnabled() {
-		t.Fatal("vision profile should enable multimodal")
+		t.Fatal("enabled profile should enable multimodal")
 	}
 	p, ok := cfg.LLM.GetProfile("vision")
 	if !ok || !ProfileMultimodalEnabled(p) {
-		t.Fatalf("vision profile = %+v", p)
+		t.Fatalf("enabled profile = %+v", p)
 	}
 }
 
-func TestMigrateMultimodalIntoProfiles(t *testing.T) {
+func TestLLMProfileMultimodalFollowsCheckboxRegardlessOfModel(t *testing.T) {
 	on := true
-	cfg := &Config{}
-	cfg.Multimodal.Enabled = &on
-	cfg.LLM.Profiles = map[string]LLMProfileConfig{
-		"default": {Provider: "openai", Model: "gpt-4o", APIKeyEnv: "OPENAI_API_KEY"},
+	off := false
+	pro := LLMProfileConfig{Provider: "mimo", Model: "mimo-v2.5-pro", MultimodalEnabled: &on}
+	if !ProfileMultimodalEnabled(pro) {
+		t.Fatal("enabled checkbox should enable multimodal regardless of model")
 	}
-	cfg.LLM.Active = "default"
-	cfg.ApplyDefaults()
-	p, ok := cfg.LLM.GetProfile("default")
-	if !ok || !ProfileMultimodalEnabled(p) {
-		t.Fatalf("expected legacy multimodal.enabled migrated onto profile, got %+v", p)
+	normalized := normalizeLLMProfile(pro)
+	if normalized.MultimodalEnabled == nil || !*normalized.MultimodalEnabled {
+		t.Fatalf("normalized profile = %+v, want multimodal enabled", normalized)
 	}
-	if !cfg.MultimodalEnabled() {
-		t.Fatal("expected multimodal still enabled after normalize")
+
+	text := LLMProfileConfig{Provider: "mimo", Model: "mimo-v2.5", MultimodalEnabled: &off}
+	if ProfileMultimodalEnabled(text) {
+		t.Fatal("disabled checkbox should disable multimodal regardless of model")
 	}
 }

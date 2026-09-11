@@ -14,8 +14,8 @@ type LLMProfileSettings struct {
 	Provider          string `json:"provider"`
 	BaseURL           string `json:"base_url"`
 	Model             string `json:"model"`
-	APIKeyEnv         string `json:"api_key_env,omitempty"` // 兼容旧客户端；新流程请用 api_key
-	APIKey            string `json:"api_key,omitempty"`     // 仅 PATCH 写入；GET 不回传明文
+	APIKeyEnv         string `json:"api_key_env,omitempty"`
+	APIKey            string `json:"api_key,omitempty"` // 仅 PATCH 写入；GET 不回传明文
 	HasAPIKey         bool   `json:"has_api_key"`
 	ClearAPIKey       bool   `json:"clear_api_key,omitempty"`
 	Mock              bool   `json:"mock"`
@@ -26,13 +26,8 @@ type LLMProfileSettings struct {
 
 // LLMSettings LLM 连接配置（支持多配置；列表顺序中第一条为默认）。
 type LLMSettings struct {
-	Active    string               `json:"active,omitempty"` // 运行时当前选用；缺省取 profiles[0]
-	Profiles  []LLMProfileSettings `json:"profiles"`
-	Provider  string               `json:"provider"`
-	BaseURL   string               `json:"base_url"`
-	Model     string               `json:"model"`
-	APIKeyEnv string               `json:"api_key_env,omitempty"`
-	Mock      bool                 `json:"mock"`
+	Active   string               `json:"active,omitempty"` // 运行时当前选用；缺省取 profiles[0]
+	Profiles []LLMProfileSettings `json:"profiles"`
 }
 
 // ManageSettings Manage 连接配置（安装向导原批次 2）。
@@ -52,7 +47,6 @@ type FeatureSettings struct {
 	SkillsEnabled            bool `json:"skills_enabled"`
 	TriggersEnabled          bool `json:"triggers_enabled"`
 	ChildAgentsEnabled       bool `json:"child_agents_enabled"`
-	UIEnabled                bool `json:"ui_enabled"` // 只读回显；PATCH 忽略，Web UI 固定挂载
 	BrowserEnabled           bool `json:"browser_enabled"`
 	WeComEnabled             bool `json:"wecom_enabled"`
 	MultimodalEnabled        bool `json:"multimodal_enabled"`
@@ -70,6 +64,16 @@ type CompressionSettings struct {
 	IdleAutoCompressMinTokens   int `json:"idle_auto_compress_min_tokens"`
 }
 
+// MemorySettings controls the optional compression-to-memory background
+// pipeline. Automatic extraction is disabled by default because it costs an
+// LLM call and inferred candidates are kept behind the consolidation boundary.
+type MemorySettings struct {
+	AutoExtract        bool `json:"auto_extract"`
+	CandidateQueueSize int  `json:"candidate_queue_size"`
+	MaxCandidates      int  `json:"max_candidates"`
+	CoreBudgetTokens   int  `json:"core_budget_tokens"`
+}
+
 // NodeEndpointView 只读：Node 监听地址（须改 config.yaml 并重启）。
 type NodeEndpointView struct {
 	ListenHost    string `json:"listen_host"`
@@ -79,16 +83,15 @@ type NodeEndpointView struct {
 
 // RuntimeSettings 运行时路径与日志（不含 listen/local）。
 type RuntimeSettings struct {
-	NodeID   string `json:"node_id"`
-	FSRoot   string `json:"fs_root"`
-	LogLevel string `json:"log_level"`
+	NodeID      string `json:"node_id"`
+	RuntimeRoot string `json:"runtime_root"`
+	LogLevel    string `json:"log_level"`
 }
 
 // AgentSettings Node 展示身份（历史字段名 agent；UI 称 Node 名称）。
 type AgentSettings struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Role        string `json:"role,omitempty"` // deprecated，可选元数据
 }
 
 // UserSettings 本机使用者称呼。
@@ -103,12 +106,11 @@ type OnboardingSettings struct {
 
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
 type ChildAgentsLimits struct {
-	DefaultTTLSeconds         int `json:"default_ttl_seconds"`
-	MaxTTLSeconds             int `json:"max_ttl_seconds"`
-	DefaultMaxTurns           int `json:"default_max_turns"`
-	MaxMaxTurns               int `json:"max_max_turns"`
-	MaxActivePerParent        int `json:"max_active_per_parent"`
-	DefaultWaitTimeoutSeconds int `json:"default_wait_timeout_seconds"`
+	DefaultTTLSeconds  int `json:"default_ttl_seconds"`
+	MaxTTLSeconds      int `json:"max_ttl_seconds"`
+	DefaultMaxTurns    int `json:"default_max_turns"`
+	MaxMaxTurns        int `json:"max_max_turns"`
+	MaxActivePerParent int `json:"max_active_per_parent"`
 }
 
 // BrowserSettings Browser 工具参数（enabled 见 features）。
@@ -167,6 +169,7 @@ type SettingsView struct {
 	Manage          ManageSettings      `json:"manage"`
 	Features        FeatureSettings     `json:"features"`
 	Compression     CompressionSettings `json:"compression"`
+	Memory          MemorySettings      `json:"memory"`
 	Runtime         RuntimeSettings     `json:"runtime"`
 	Agent           AgentSettings       `json:"agent"`
 	User            UserSettings        `json:"user"`
@@ -186,6 +189,7 @@ type SettingsPatch struct {
 	Manage      *ManageSettings      `json:"manage,omitempty"`
 	Features    *FeatureSettings     `json:"features,omitempty"`
 	Compression *CompressionSettings `json:"compression,omitempty"`
+	Memory      *MemorySettings      `json:"memory,omitempty"`
 	Runtime     *RuntimeSettings     `json:"runtime,omitempty"`
 	Agent       *AgentSettings       `json:"agent,omitempty"`
 	User        *UserSettings        `json:"user,omitempty"`
@@ -213,13 +217,8 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			LocalEndpoint: cfg.Local.Endpoint,
 		},
 		LLM: LLMSettings{
-			Active:    cfg.LLM.ActiveProfileID(),
-			Profiles:  llmProfilesFromConfig(cfg),
-			Provider:  cfg.LLM.Provider,
-			BaseURL:   cfg.LLM.BaseURL,
-			Model:     cfg.LLM.Model,
-			APIKeyEnv: cfg.LLM.APIKeyEnv,
-			Mock:      cfg.LLM.Mock,
+			Active:   cfg.LLM.ActiveProfileID(),
+			Profiles: llmProfilesFromConfig(cfg),
 		},
 		Manage: ManageSettings{
 			Enabled:                     cfg.Manage.Enabled,
@@ -235,7 +234,6 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			SkillsEnabled:            cfg.Skills.Enabled,
 			TriggersEnabled:          cfg.Triggers.Enabled,
 			ChildAgentsEnabled:       cfg.ChildAgents.Enabled,
-			UIEnabled:                true, // Web UI 固定挂载
 			BrowserEnabled:           cfg.BrowserEnabled(),
 			WeComEnabled:             cfg.WeComEnabled(),
 			MultimodalEnabled:        cfg.MultimodalEnabled(),
@@ -250,15 +248,20 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
 			IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
 		},
+		Memory: MemorySettings{
+			AutoExtract:        cfg.Memory.AutoExtract,
+			CandidateQueueSize: cfg.Memory.CandidateQueueSize,
+			MaxCandidates:      cfg.Memory.MaxCandidates,
+			CoreBudgetTokens:   cfg.Memory.CoreBudgetTokens,
+		},
 		Runtime: RuntimeSettings{
-			NodeID:   cfg.NodeID,
-			FSRoot:   cfg.FSRoot,
-			LogLevel: cfg.Log.Level,
+			NodeID:      cfg.NodeID,
+			RuntimeRoot: cfg.RuntimeDir(),
+			LogLevel:    cfg.Log.Level,
 		},
 		Agent: AgentSettings{
 			Name:        cfg.Agent.Name,
 			Description: cfg.Agent.Description,
-			Role:        cfg.Agent.Role,
 		},
 		User: UserSettings{
 			PreferredName: cfg.PreferredName(),
@@ -267,12 +270,11 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			NodeProfileCompleted: cfg.NodeProfileCompleted(),
 		},
 		ChildAgents: ChildAgentsLimits{
-			DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
-			MaxTTLSeconds:             cfg.ChildAgents.MaxTTLSeconds,
-			DefaultMaxTurns:           cfg.ChildAgents.DefaultMaxTurns,
-			MaxMaxTurns:               cfg.ChildAgents.MaxMaxTurns,
-			MaxActivePerParent:        cfg.ChildAgents.MaxActivePerParent,
-			DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
+			DefaultTTLSeconds:  cfg.ChildAgents.DefaultTTLSeconds,
+			MaxTTLSeconds:      cfg.ChildAgents.MaxTTLSeconds,
+			DefaultMaxTurns:    cfg.ChildAgents.DefaultMaxTurns,
+			MaxMaxTurns:        cfg.ChildAgents.MaxMaxTurns,
+			MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 		},
 		Browser: BrowserSettings{
 			ServiceURL:        cfg.Browser.ServiceURL,
@@ -324,11 +326,16 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Features != nil {
 		applyFeaturesPatch(&out, *patch.Features)
-		// 功能开关里的 multimodal 写回当前 LLM 档案（兼容旧客户端）。
+		// 功能开关里的 multimodal 写回当前 LLM 档案。
 		out.SyncActiveProfileFromFlat()
 	}
 	if patch.Compression != nil {
 		if err := applyCompressionPatch(&out, *patch.Compression); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Memory != nil {
+		if err := applyMemoryPatch(&out, *patch.Memory); err != nil {
 			return nil, err
 		}
 	}
@@ -430,29 +437,6 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 		}
 		cfg.ApplyDefaults()
 		return nil
-	} else if provider := strings.ToLower(strings.TrimSpace(p.Provider)); provider != "" {
-		// 兼容旧客户端：只提交顶层字段时，更新当前 active 配置。
-		mock := p.Mock || provider == "mock"
-		if provider == "mock" {
-			mock = true
-		}
-		model := strings.TrimSpace(p.Model)
-		if !mock && model == "" {
-			return fmt.Errorf("llm.model is required when mock is false")
-		}
-		switch provider {
-		case "openai", "deepseek", "qwen", "vllm", "glm", "minimax", "mimo", "mock":
-		default:
-			return fmt.Errorf("unsupported llm.provider %q", p.Provider)
-		}
-		cfg.LLM.Provider = provider
-		cfg.LLM.BaseURL = strings.TrimSpace(p.BaseURL)
-		cfg.LLM.Model = model
-		if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
-			cfg.LLM.APIKeyEnv = env
-		}
-		cfg.LLM.Mock = mock
-		cfg.SyncActiveProfileFromFlat()
 	}
 
 	active := strings.TrimSpace(p.Active)
@@ -540,8 +524,6 @@ func applyFeaturesPatch(cfg *config.Config, p FeatureSettings) {
 	cfg.Skills.Enabled = p.SkillsEnabled
 	cfg.Triggers.Enabled = p.TriggersEnabled
 	cfg.ChildAgents.Enabled = p.ChildAgentsEnabled
-	// Web UI 固定挂载：忽略客户端传入的 ui_enabled。
-	cfg.UI.Enabled = boolPtr(true)
 	cfg.Multimodal.Enabled = boolPtr(p.MultimodalEnabled)
 	cfg.Browser.Enabled = boolPtr(p.BrowserEnabled)
 	cfg.WeCom.Enabled = boolPtr(p.WeComEnabled)
@@ -583,11 +565,34 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 	return nil
 }
 
+func applyMemoryPatch(cfg *config.Config, p MemorySettings) error {
+	if p.CandidateQueueSize < 0 {
+		return fmt.Errorf("memory.candidate_queue_size must be >= 0")
+	}
+	if p.MaxCandidates < 0 {
+		return fmt.Errorf("memory.max_candidates must be >= 0")
+	}
+	if p.CoreBudgetTokens < 0 {
+		return fmt.Errorf("memory.core_budget_tokens must be >= 0")
+	}
+	cfg.Memory.AutoExtract = p.AutoExtract
+	if p.CandidateQueueSize > 0 {
+		cfg.Memory.CandidateQueueSize = p.CandidateQueueSize
+	}
+	if p.MaxCandidates > 0 {
+		cfg.Memory.MaxCandidates = p.MaxCandidates
+	}
+	if p.CoreBudgetTokens > 0 {
+		cfg.Memory.CoreBudgetTokens = p.CoreBudgetTokens
+	}
+	return nil
+}
+
 func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
 	if id := strings.TrimSpace(p.NodeID); id != "" {
 		cfg.NodeID = id
 	}
-	// fs_root 写死不可配置，忽略 PATCH 中的值。
+	// runtime_root 写死不可配置，忽略 PATCH 中的值。
 	if level := strings.ToLower(strings.TrimSpace(p.LogLevel)); level != "" {
 		switch level {
 		case "debug", "info", "warn", "error":
@@ -602,8 +607,6 @@ func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
 func applyAgentPatch(cfg *config.Config, p AgentSettings) {
 	cfg.Agent.Name = strings.TrimSpace(p.Name)
 	cfg.Agent.Description = strings.TrimSpace(p.Description)
-	// Role 仅作可选元数据；空 PATCH 字段不强制清空已有值以外——与 name/desc 同策略整段覆盖
-	cfg.Agent.Role = strings.TrimSpace(p.Role)
 }
 
 func applyUserPatch(cfg *config.Config, p UserSettings) error {
@@ -620,13 +623,13 @@ func applyOnboardingPatch(cfg *config.Config, p OnboardingSettings) error {
 			return fmt.Errorf("user.preferred_name is required to complete node profile")
 		}
 	}
-	cfg.Onboarding.NodeProfileCompleted = boolPtr(p.NodeProfileCompleted)
+	cfg.Onboarding.NodeProfileCompleted = p.NodeProfileCompleted
 	return nil
 }
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 	if p.DefaultTTLSeconds < 0 || p.MaxTTLSeconds < 0 || p.DefaultMaxTurns < 0 ||
-		p.MaxMaxTurns < 0 || p.MaxActivePerParent < 0 || p.DefaultWaitTimeoutSeconds < 0 {
+		p.MaxMaxTurns < 0 || p.MaxActivePerParent < 0 {
 		return fmt.Errorf("child_agents limits must be >= 0")
 	}
 	if p.DefaultTTLSeconds > 0 {
@@ -643,9 +646,6 @@ func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 	}
 	if p.MaxActivePerParent > 0 {
 		cfg.ChildAgents.MaxActivePerParent = p.MaxActivePerParent
-	}
-	if p.DefaultWaitTimeoutSeconds > 0 {
-		cfg.ChildAgents.DefaultWaitTimeoutSeconds = p.DefaultWaitTimeoutSeconds
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import { isTemporaryAgentTool, parseTemporaryAgentToolResult } from "./temporary
 describe("isTemporaryAgentTool", () => {
   it("recognizes temporary agent tools", () => {
     expect(isTemporaryAgentTool("create_temporary_agent")).toBe(true);
+    expect(isTemporaryAgentTool("cancel_temporary_agent")).toBe(true);
     expect(isTemporaryAgentTool("bash_run")).toBe(false);
   });
 });
@@ -17,30 +18,16 @@ describe("parseTemporaryAgentToolResult", () => {
     const out = parseTemporaryAgentToolResult(
       "create_temporary_agent",
       JSON.stringify({
+        kind: "result",
         child_agent_id: "child-session-id-1234567890",
-        purpose: "summarize",
-        max_turns: 3,
+        status: "completed",
+        summary: "summarize",
+        turn_count: 3,
       }),
     );
-    expect(out.summary).toContain("已创建临时 Agent");
-    expect(out.summary).toContain("summarize");
-    expect(out.summary).toContain("max_turns=3");
-  });
-
-  it("formats wait_temporary_agents batch result", () => {
-    const out = parseTemporaryAgentToolResult(
-      "wait_temporary_agents",
-      JSON.stringify({
-        results: [
-          { child_agent_id: "a", status: "completed", summary: "done" },
-          { child_agent_id: "b", status: "failed", error: "timeout" },
-        ],
-      }),
-    );
-    expect(out.summary).toContain("wait_temporary_agents");
-    expect(out.summary).toContain("2/2");
-    expect(out.detail).toContain("completed");
-    expect(out.detail).toContain("timeout");
+    expect(out.summary).toContain("临时 Agent 完成");
+    expect(out.detail).toContain("summarize");
+    expect(out.detail).toContain("turn_count=3");
   });
 
   it("passes through ERROR prefix", () => {

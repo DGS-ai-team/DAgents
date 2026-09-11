@@ -27,10 +27,9 @@ function normalizedResultStatus(data) {
   return status || "";
 }
 
-function resultStatusLabel(status, legacyRejected) {
+function resultStatusLabel(status) {
   switch (status) {
     case "denied":
-    case "rejected":
       return "已拒绝";
     case "failed":
     case "error":
@@ -51,7 +50,7 @@ function resultStatusLabel(status, legacyRejected) {
     case "succeeded":
       return "已完成";
     default:
-      return legacyRejected ? "已拒绝" : "已完成";
+      return "已完成";
   }
 }
 
@@ -70,15 +69,14 @@ export function formatToolResultDisplay(entry, { verbose = false } = {}) {
   const terminalResult = isTerminalResultTool(name);
   const displayContent = terminalResult ? normalizeTerminalResultContent(content) : content;
   const status = normalizedResultStatus(data);
-  const rejected = status === "denied" || status === "rejected" || (!status && !!data.rejected);
+  const denied = status === "denied";
   const elapsed = formatToolElapsed(data.duration_seconds);
   const args = parseToolArguments(data.arguments ?? data.raw_arguments);
 
   const parsed = parseTemporaryAgentToolResult(name, content);
   if (parsed) {
     let headline = parsed.summary;
-    if (status && status !== "succeeded") headline = `${resultStatusLabel(status, rejected)} · ${headline}`;
-    else if (rejected) headline = `[已拒绝] ${headline}`;
+    if (status && status !== "succeeded") headline = `${resultStatusLabel(status)} · ${headline}`;
     else if (elapsed) headline += elapsed;
     return {
       headline,
@@ -88,11 +86,11 @@ export function formatToolResultDisplay(entry, { verbose = false } = {}) {
   }
 
   const displayName = entry?.summary || data.summary || toolDisplayName(name, args);
-  const resultLabel = resultStatusLabel(status, rejected);
+  const resultLabel = resultStatusLabel(status);
   let headline = `${displayName} · ${resultLabel}${elapsed}`;
   // A failed/cancelled result is evidence the model may need to recover from;
   // only policy-denied results hide the body for the compact UI.
-  const detail = !rejected && displayContent ? displayContent : "";
+  const detail = !denied && displayContent ? displayContent : "";
   return { headline, detail, raw: verbose ? displayContent : detail };
 }
 

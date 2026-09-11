@@ -27,21 +27,6 @@ export function parseUsageFields(data) {
   }
   return { prompt, completion, hit, rate, reasoning, cacheObserved };
 }
-export function parseUsageRound(data) {
-  if (!data || typeof data !== "object") return null;
-  return parseUsageFields({
-    prompt_tokens: data.round_prompt_tokens,
-    completion_tokens: data.round_completion_tokens,
-    prompt_cache_hit_tokens: data.round_prompt_cache_hit_tokens,
-    prompt_cache_miss_tokens: data.round_prompt_cache_miss_tokens,
-    prompt_cached_tokens: data.round_prompt_cached_tokens,
-    prompt_cache_available: data.round_prompt_cache_available,
-    prompt_cache_hit_rate: data.round_prompt_cache_hit_rate,
-    reasoning_tokens: data.round_reasoning_tokens,
-    completion_tokens_details: data.round_completion_tokens_details,
-  });
-}
-
 function intVal(v) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;

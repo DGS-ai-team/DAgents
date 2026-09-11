@@ -1,12 +1,16 @@
 import { AGENT_STREAM_EVENT_TYPES } from "./agentEvents.js";
 
 const RECONNECT_MS = 5000;
+// The server emits a named heartbeat every 15s. Three missed heartbeats are
+// enough to identify a half-open EventSource without reconnecting on a brief
+// scheduling/network delay.
+const HEARTBEAT_TIMEOUT_MS = 45000;
 
-/** 切 Agent 后旧连接事件应丢弃：双方 id 都非空且不一致时忽略。 */
+/** Agent 流必须带当前 Agent 标识；全局流不做 Agent 过滤。 */
 export function shouldIgnoreSSEForAgent(eventAgentId, currentAgentId) {
   const ev = String(eventAgentId || "").trim();
   const cur = String(currentAgentId || "").trim();
-  return Boolean(ev && cur && ev !== cur);
+  return Boolean(cur && ev !== cur);
 }
 
 /**
@@ -44,8 +48,40 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, getA
   let es = null;
   let stopped = false;
   let reconnectTimer = null;
+  let heartbeatTimer = null;
   let openCount = 0;
   let expectingReconnect = false;
+
+  function clearHeartbeatTimer() {
+    if (heartbeatTimer) {
+      clearTimeout(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  function scheduleReconnect() {
+    if (stopped || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      open();
+    }, RECONNECT_MS);
+  }
+
+  function noteHeartbeat() {
+    clearHeartbeatTimer();
+    if (!stopped) {
+      heartbeatTimer = setTimeout(() => {
+        heartbeatTimer = null;
+        if (stopped) return;
+        expectingReconnect = true;
+        const current = es;
+        current?.close();
+        es = null;
+        onStatus?.("disconnected");
+        scheduleReconnect();
+      }, HEARTBEAT_TIMEOUT_MS);
+    }
+  }
 
   function open() {
     if (stopped) return;
@@ -63,10 +99,13 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, getA
       afterSeq,
       afterAgentSeq,
     });
-    es = new EventSource(url);
+    const source = new EventSource(url);
+    es = source;
     onStatus?.("connecting");
+    noteHeartbeat();
 
-    es.onopen = () => {
+    source.onopen = () => {
+      if (stopped || es !== source) return;
       openCount += 1;
       onStatus?.("connected");
       if (reconnecting) {
@@ -79,18 +118,28 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, getA
       expectingReconnect = false;
     };
 
-    es.onerror = () => {
+    source.onerror = () => {
+      if (stopped || es !== source) return;
       onStatus?.("disconnected");
-      es?.close();
+      clearHeartbeatTimer();
+      source.close();
       es = null;
       expectingReconnect = true;
-      if (!stopped) {
-        reconnectTimer = setTimeout(open, RECONNECT_MS);
-      }
+      scheduleReconnect();
     };
 
+    // SSE comments are invisible to JavaScript. The server sends this named
+    // event alongside the comment heartbeat so the watchdog can detect a
+    // half-open connection.
+    source.addEventListener("stream_heartbeat", () => {
+      if (stopped || es !== source) return;
+      noteHeartbeat();
+    });
+
     AGENT_STREAM_EVENT_TYPES.forEach((type) => {
-      es.addEventListener(type, (ev) => {
+      source.addEventListener(type, (ev) => {
+        if (stopped || es !== source) return;
+        noteHeartbeat();
         const envelope = parseEventEnvelope(ev.data);
         const data = envelope.data && typeof envelope.data === "object" ? envelope.data : envelope;
         const seq = Number(envelope.seq ?? ev.lastEventId ?? 0);
@@ -120,6 +169,7 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, getA
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      clearHeartbeatTimer();
       es?.close();
       es = null;
     },

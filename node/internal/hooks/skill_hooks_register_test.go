@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -20,6 +21,26 @@ func TestRemovePhaseHooksByPrefix(t *testing.T) {
 	if reg.phaseHooksFor(PhaseTurnDone)[0].hook.Name() != "global/x" {
 		t.Fatalf("remaining = %q", reg.phaseHooksFor(PhaseTurnDone)[0].hook.Name())
 	}
+}
+
+func TestPhaseHooksCanBeReadAndRemovedConcurrently(t *testing.T) {
+	reg := NewRegistry(nil, RuntimeConfig{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			reg.RegisterPhaseHook(stubPhaseHook{name: "skill/demo", phases: []Phase{PhaseTurnDone}}, RegisterOpts{})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = reg.PhaseHookNames(PhaseTurnDone)
+			reg.RemovePhaseHooksByPrefix(SkillHookNamePrefix)
+		}
+	}()
+	wg.Wait()
 }
 
 func TestPluginHookEntryFromConfig(t *testing.T) {

@@ -5,6 +5,7 @@ import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import { resolveToolGroupVisual } from "../utils/toolSource.js";
 import { resolveToolStepPhase } from "../utils/toolUserLabel.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   steps: { type: Array, default: () => [] },
@@ -54,14 +55,14 @@ function toggle() {
     >
       <span class="tool-group-row__glyph" aria-hidden="true">
         <BrandActivityIndicator v-if="hasActive" mode="tool" :show-label="false" compact />
-        <span v-else>✓</span>
+        <UiIcon v-else name="check" :size="14" />
       </span>
       <span class="tool-group-row__visual" :title="visual.label">
         <ToolGroupIcon :name="visual.kind" />
       </span>
       <span class="tool-group-row__title">工具执行清单</span>
       <span class="tool-group-row__status">{{ statusText }}</span>
-      <span class="tool-group-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+      <UiIcon class="tool-group-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
     </button>
 
     <div v-if="!expanded && activeSteps.length" class="tool-group-row__active">
@@ -147,13 +148,13 @@ function toggle() {
 
 /* 合并气泡沿用独立工具气泡的工具组色彩，避免同一命令行工具出现两种颜色。 */
 .tool-group-row--shell .tool-group-row__visual {
-  color: #e2a053;
+  color: var(--color-warning);
 }
 
 .tool-group-row--terminal .tool-group-row__visual,
 .tool-group-row--browser .tool-group-row__visual,
 .tool-group-row--linux .tool-group-row__visual {
-  color: #569cd6;
+  color: var(--color-info);
 }
 
 .tool-group-row--fs .tool-group-row__visual,
@@ -162,11 +163,11 @@ function toggle() {
 }
 
 .tool-group-row--mcp .tool-group-row__visual {
-  color: #9b8cff;
+  color: var(--color-auto);
 }
 
 .tool-group-row--child .tool-group-row__visual {
-  color: #c586c0;
+  color: var(--color-auto);
 }
 
 .tool-group-row--wrench .tool-group-row__visual,

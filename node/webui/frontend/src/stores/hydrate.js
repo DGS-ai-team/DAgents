@@ -59,7 +59,9 @@ export async function hydrateAgent() {
   const data = await api.getAgentHydrate(agentId);
   if (generation !== hydrationGeneration) return null;
   if (shouldApplyHydrateTranscript(data)) {
-    loadTranscriptFromHydrate(data?.transcript, { historyRevision: data?.history_revision });
+    loadTranscriptFromHydrate(data?.transcript, {
+      historyRevision: data?.history_revision,
+    });
   }
   applyToolJobsSnapshot(data?.tool_jobs);
   if (Array.isArray(data?.child_agents)) {
@@ -70,6 +72,16 @@ export async function hydrateAgent() {
   if (approval?.child_agent_id) {
     setChildAwaitingApproval(approval.child_agent_id, true);
   }
+  // 子 Agent 的 runtime transcript 不进入父 hydrate，但其待审批请求会
+  // 作为 ChildRun 轻量快照保存；刷新后按同一 HITL 数据结构恢复卡片。
+  for (const child of data?.child_agents || []) {
+    const pending = child?.progress?.pending_approval_data;
+    if (!pending?.items?.length) continue;
+    const { approval: childApproval } = enqueueHitlRequired(pending);
+    if (childApproval?.child_agent_id) {
+      setChildAwaitingApproval(childApproval.child_agent_id, true);
+    }
+  }
   applyHydrateSeqHint(data);
   ackAgentAfterHydrate(data?.notify_seq);
   applyAuthoritativeTurnState(data, { source: "hydrate" });
@@ -77,11 +89,11 @@ export async function hydrateAgent() {
   return data;
 }
 
-/** 解析深链 ?agent=；兼容旧托盘 ?session=（实例 UUID 同源）。 */
+/** 解析深链中的 Agent 标识。 */
 export function consumeStartupURL() {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
-  const agent = params.get("agent")?.trim() || params.get("session")?.trim();
+  const agent = params.get("agent")?.trim();
   if (agent) {
     persistAgentId(agent);
   }

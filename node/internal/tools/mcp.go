@@ -43,7 +43,7 @@ func (r *Registry) SetMCPTools(remoteTools []MCPTool) error {
 		r.mcpTools[name] = remote
 		tool := remote
 		r.handlers[name] = func(ctx context.Context, args json.RawMessage) (string, error) {
-			_, cleaned := ParseToolCallArguments(string(args))
+			cleaned := ParseToolCallArguments(string(args))
 			result, err := tool.Call(ctx, json.RawMessage(cleaned))
 			output := formatMCPResult(result)
 			if err != nil {

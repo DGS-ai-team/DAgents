@@ -1,4 +1,4 @@
-// Package promptcontext 读取侧车 Markdown 与长期记忆正文（权威来源为 SQLite，经 Content 注入）。
+// Package promptcontext 读取 Agent 的提示侧车正文（权威来源为 SQLite，经 Content 注入）。
 package promptcontext
 
 import (
@@ -11,11 +11,10 @@ const (
 	customField = "custom"
 )
 
-// Filter 控制侧车 / 长期记忆是否注入；nil 指针表示默认启用。
+// Filter 控制侧车正文是否注入；nil 指针表示默认启用。
 type Filter struct {
-	SoulEnabled     *bool
-	CustomEnabled   *bool
-	LongTermEnabled *bool
+	SoulEnabled   *bool
+	CustomEnabled *bool
 }
 
 func flagOrDefault(v *bool, def bool) bool {
@@ -25,8 +24,8 @@ func flagOrDefault(v *bool, def bool) bool {
 	return *v
 }
 
-// Reader 从内存 Content 读取侧车与长期记忆（由 agents.db 在 runtime 启动时注入）。
-// 用户称呼来自 Node 配置 PreferredName，不再使用 user.md 侧车正文。
+// Reader 从内存 Content 读取提示侧车正文（由 agents.db 在 runtime 启动时注入）。
+// 用户称呼来自 Node 配置 PreferredName。
 type Reader struct {
 	content       *Content
 	filter        Filter
@@ -91,31 +90,7 @@ func (r *Reader) ReadCustom() string {
 	return r.readContentField(customField)
 }
 
-// ReadLongTermMemory 读取长期记忆（不存在或空白时不注入）。
-func (r *Reader) ReadLongTermMemory() string {
-	r.mu.RLock()
-	enabled := flagOrDefault(r.filter.LongTermEnabled, true)
-	r.mu.RUnlock()
-	if !enabled {
-		return ""
-	}
-	return r.readContentField("long_term")
-}
-
-// UpdateLongTerm 更新内存中的长期记忆正文；调用方应在上下文重建边界使用它。
-func (r *Reader) UpdateLongTerm(text string) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.content == nil {
-		r.content = &Content{}
-	}
-	r.content.LongTerm = strings.TrimSpace(text)
-}
-
-// BuildStableContextSections 拼接 soul / 用户称呼 / long_term 段落（较稳定上下文）。
+// BuildStableContextSections 拼接 soul / 用户称呼段落（较稳定上下文）。
 func (r *Reader) BuildStableContextSections() string {
 	if r == nil {
 		return ""
@@ -130,11 +105,6 @@ func (r *Reader) BuildStableContextSections() string {
 		b.WriteString("\n\n## 以下是用户信息：\n\n")
 		b.WriteString("请称呼用户为：")
 		b.WriteString(name)
-		b.WriteByte('\n')
-	}
-	if mem := r.ReadLongTermMemory(); mem != "" {
-		b.WriteString("\n\n## 以下是长期记忆：\n\n")
-		b.WriteString(mem)
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -165,8 +135,6 @@ func (r *Reader) readContentField(kind string) string {
 		text = c.Soul
 	case customField:
 		text = c.Custom
-	case "long_term":
-		text = c.LongTerm
 	}
 	return strings.TrimSpace(text)
 }

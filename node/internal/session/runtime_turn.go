@@ -24,7 +24,25 @@ func (r *runtime) runTurnStepAtEpoch(
 		// sidecarPrefix / RunTurnBeforeCompressPhase → composeSystemPrompt → getLoadedSkills 会抢 r.mu，须在持锁前执行。
 		sidecarPrefix = r.sidecarPrefix()
 		if r.orch != nil {
-			skip := r.orch.RunTurnBeforeCompressPhase(parent, r.session.ID, &r.messages, false)
+			r.mu.Lock()
+			start := r.activeContextStart
+			if start < 0 || start > len(r.messages) {
+				start = len(r.messages)
+			}
+			active := append([]llm.Message(nil), r.messages[start:]...)
+			r.mu.Unlock()
+			beforeHookDigest := turn.Digest(active)
+			skip := r.orch.RunTurnBeforeCompressPhase(parent, r.session.ID, &active, false)
+			if turn.Digest(active) != beforeHookDigest {
+				r.mu.Lock()
+				currentStart := r.activeContextStart
+				if currentStart < 0 || currentStart > len(r.messages) {
+					currentStart = len(r.messages)
+				}
+				r.messages = append(append([]llm.Message(nil), r.messages[:currentStart]...), active...)
+				r.historyRevision++
+				r.mu.Unlock()
+			}
 			if skip {
 				compressBeforeStep = false
 			}
@@ -37,27 +55,40 @@ func (r *runtime) runTurnStepAtEpoch(
 	contextAfterCount := 0
 	r.mu.Lock()
 	if expectedEpoch != 0 && expectedEpoch != r.sessionEpoch {
-		history := append([]llm.Message(nil), r.messages...)
+		start := r.activeContextStart
+		if start < 0 || start > len(r.messages) {
+			start = len(r.messages)
+		}
+		history := append([]llm.Message(nil), r.messages[start:]...)
 		r.mu.Unlock()
 		return turn.StepOutcome{Err: context.Canceled}, history
 	}
 	if compressBeforeStep {
-		contextBeforeDigest = turn.Digest(r.messages)
-		contextBeforeCount = len(r.messages)
-		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) {
+		start := r.activeContextStart
+		if start < 0 || start > len(r.messages) {
+			start = len(r.messages)
+			r.activeContextStart = start
+		}
+		active := append([]llm.Message(nil), r.messages[start:]...)
+		contextBeforeDigest = turn.Digest(active)
+		contextBeforeCount = len(active)
+		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &active, sidecarPrefix) {
 			contextCompacted = true
+			r.messages = append(append([]llm.Message(nil), r.messages[:start]...), active...)
 			r.historyRevision++
-			contextAfterDigest = turn.Digest(r.messages)
-			contextAfterCount = len(r.messages)
-			if r.orch != nil {
-				r.orch.ReloadLongTermMemory(parent)
-			}
+			contextAfterDigest = turn.Digest(active)
+			contextAfterCount = len(active)
 		}
 	}
 	execution := r.turnCoordinator.ExecutionContext()
 	if !execution.Valid() {
+		start := r.activeContextStart
+		if start < 0 || start > len(r.messages) {
+			start = len(r.messages)
+		}
+		history := append([]llm.Message(nil), r.messages[start:]...)
 		r.mu.Unlock()
-		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, r.messages
+		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, history
 	}
 	executionEpoch := r.sessionEpoch
 	turnCtx, cancel := context.WithCancel(parent)
@@ -67,7 +98,12 @@ func (r *runtime) runTurnStepAtEpoch(
 	r.turnCancelToken = cancelToken
 	r.turnEpoch = executionEpoch
 	r.turnFenceActive = true
-	history := r.messages
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+		r.activeContextStart = start
+	}
+	history := append([]llm.Message(nil), r.messages[start:]...)
 	r.mu.Unlock()
 
 	defer func() {
@@ -96,6 +132,10 @@ func (r *runtime) runTurnStepAtEpoch(
 }
 
 func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
+	if outcome.Err != nil && r.isChildSession() && r.childMeta != nil && r.childMeta.childMgr != nil {
+		r.childMeta.childMgr.OnChildFailed(r.session.ID, outcome.Err.Error(), r.stepIndexSnapshot())
+		return
+	}
 	if outcome.ScheduleToolResult || outcome.Pending != nil {
 		return
 	}
@@ -104,8 +144,18 @@ func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
 	// Keep the current turn identity alive until that continuation is consumed;
 	// otherwise the queue consumer would discard the freshly enqueued result as
 	// stale.
-	if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
+	state := r.turnCoordinator.Snapshot()
+	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
 		return
+	}
+	// No-work is a successful terminal fact only after lifecycle persistence has
+	// completed without error. A failed/cancelled turn must follow the ordinary
+	// error path and must never emit a successful no_work notification.
+	if outcome.Err == nil && outcome.NoWork && state.TurnStatus == turn.TurnStatusCompleted && r.orch != nil {
+		r.orch.PublishNoWorkFinished(r.session.ID)
+	}
+	if r.orch != nil {
+		r.orch.EndAutoIdleActivation(r.session.ID)
 	}
 	r.tryCompleteChildIfIdle()
 }

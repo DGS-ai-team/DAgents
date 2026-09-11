@@ -13,8 +13,6 @@ import { resolveToolVisual } from "../utils/toolSource.js";
 import {
   bashControlMode,
   cancelBashToolCall,
-  isBashBackgroundActive,
-  parseBashResultStatus,
   toolCallIdFromEntry,
   toolNameFromEntry,
   toolJobsStore,
@@ -24,6 +22,7 @@ import { childAgentIdsFromResult, isTemporaryAgentTool } from "../utils/temporar
 import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
+import UiIcon from "./UiIcon.vue";
 import ChildAgentProgressPanel from "./ChildAgentProgressPanel.vue";
 
 const props = defineProps({
@@ -48,11 +47,8 @@ const toolLabel = computed(() => toolStepToolLabel(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
 const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
 const stepPending = computed(() => toolStepIsPending(stepArgs.value));
-const backgroundActive = computed(() =>
-  isBashBackgroundActive({ callEntry: props.callEntry, resultEntry: props.resultEntry }),
-);
 const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const inProgress = computed(() => stepInProgress.value || backgroundActive.value || controlMode.value === "background");
+const inProgress = computed(() => stepInProgress.value || controlMode.value === "running");
 const showBashControls = computed(() => controlMode.value != null);
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
@@ -72,11 +68,7 @@ const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] ||
 
 const status = computed(() => {
   void nowTick.value;
-  if (backgroundActive.value || controlMode.value === "background") return "后台执行中";
   if (controlMode.value === "running" || phase.value === "running") return "执行中";
-  const bashStatus = parseBashResultStatus(props.resultEntry?.data?.content);
-  if (bashStatus === "CANCELLED") return "已终止";
-  if (bashStatus === "SUCCEEDED") return "已完成";
   const base = toolStepStatusText(stepArgs.value);
   if (phase.value !== "generating" || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
@@ -148,8 +140,8 @@ async function onCancel(ev) {
       >
         <span class="tool-summary-row__glyph" aria-hidden="true">
           <span v-if="inProgress" class="tool-exec-spinner" />
-          <span v-else-if="stepPending" class="tool-summary-row__pending">○</span>
-          <span v-else class="tool-summary-row__check">✓</span>
+          <UiIcon v-else-if="stepPending" class="tool-summary-row__pending" name="pending" :size="14" />
+          <UiIcon v-else class="tool-summary-row__check" name="check" :size="14" />
         </span>
         <span class="tool-summary-row__visual" :title="visual.label">
           <ToolGroupIcon :name="visual.kind" />
@@ -169,7 +161,8 @@ async function onCancel(ev) {
           type="button"
           class="tool-summary-row__action"
           :disabled="!!busyAction"
-          :title="actionError || undefined"
+          :title="actionError || '仅终止此工具，Agent 可能继续处理'"
+          :aria-label="busyAction === 'cancel' ? '正在终止此工具' : '仅终止此工具，Agent 可能继续处理'"
           @click="onCancel"
         >
           {{ busyAction === "cancel" ? "终止中…" : "终止" }}
@@ -185,7 +178,7 @@ async function onCancel(ev) {
         :aria-label="expanded ? '收起工具详情' : '展开工具详情'"
         @click="toggle"
       >
-        <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+        <UiIcon class="tool-summary-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
       </button>
     </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
@@ -276,13 +269,13 @@ async function onCancel(ev) {
 }
 
 .tool-summary-row--shell .tool-summary-row__visual {
-  color: #e2a053;
+  color: var(--color-warning);
 }
 
 .tool-summary-row--terminal .tool-summary-row__visual,
 .tool-summary-row--browser .tool-summary-row__visual,
 .tool-summary-row--linux .tool-summary-row__visual {
-  color: #569cd6;
+  color: var(--color-info);
 }
 
 .tool-summary-row--fs .tool-summary-row__visual,
@@ -291,11 +284,11 @@ async function onCancel(ev) {
 }
 
 .tool-summary-row--mcp .tool-summary-row__visual {
-  color: #9b8cff;
+  color: var(--color-auto);
 }
 
 .tool-summary-row--child .tool-summary-row__visual {
-  color: #c586c0;
+  color: var(--color-auto);
 }
 
 .tool-summary-row__text {

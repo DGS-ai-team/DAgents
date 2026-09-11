@@ -25,6 +25,11 @@ func newChildRuntime(
 	initialLoaded []skills.LoadedSkill,
 	childMgr *childagent.Manager,
 ) *runtime {
+	// Child sessions have their own scoped execution transcript and must not
+	// write to or recall the parent Agent's workspace memory automatically.
+	// The parent can still relay the child result as ordinary task context.
+	turnOpts.MemoryService = nil
+	turnOpts.MemoryAutoExtract = false
 	// 创建受限工具注册表
 	restricted := childagent.NewRestrictedRegistry(baseRegistry, allowedTools)
 	// 创建子 Agent 消息中继
@@ -43,7 +48,7 @@ func newChildRuntime(
 	// 创建子 runtime
 	rt := newRuntimeWithPublisher(
 		id, agentID, relay, hub, llmClient, restricted, policyEngine, nil, logger,
-		nil, initialLoaded, nil, 0, nil, false, 0, 0, turnOpts, nil,
+		nil, initialLoaded, nil, false, 0, 0, turnOpts, nil,
 	)
 	// 设置子 runtime 元数据
 	rt.childMeta = &childRuntimeMeta{
@@ -95,6 +100,10 @@ func (r *runtime) tryCompleteChildIfIdle() {
 		return
 	}
 	meta.completing = true
+	if len(last.ToolCalls) > 0 {
+		meta.childMgr.OnChildFailed(r.session.ID, "child agent stopped with unresolved tool calls", loops)
+		return
+	}
 	summary := lastAssistantSummary(msgs)
 	meta.childMgr.OnChildSettled(r.session.ID, summary, loops)
 }

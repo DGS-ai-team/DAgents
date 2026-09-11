@@ -278,7 +278,7 @@ func TestRunPhase_nilContext(t *testing.T) {
 }
 
 func TestRunPhase_builtinToolBeforeEachChain(t *testing.T) {
-	engine, _ := policy.LoadFile("")
+	engine := policy.NewDefaultEngine()
 	reg := NewRegistry(engine, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 	out := registryToolBeforeEach(reg, ToolBeforeEachInput{ToolName: "read_file"})
 	if out.Action != policy.ActionAuto {

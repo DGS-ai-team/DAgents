@@ -26,10 +26,6 @@ func (s stubReadFileExecutor) Execute(_ context.Context, name, _ string) (string
 	return s.output, nil
 }
 
-func (s stubReadFileExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
-	return "", nil
-}
-
 func (s stubReadFileExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
 func (s stubReadFileExecutor) TakeToolResultMediaForCall(string) map[string]any   { return nil }
 func (s stubReadFileExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
@@ -43,7 +39,7 @@ func TestExecuteTool_readFileHistorySpillsButSSEFull(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		stubReadFileExecutor{output: long},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),
@@ -90,7 +86,7 @@ func TestExecuteTool_writeFileNotSpilledByHook(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		stubToolOutputExecutor{toolName: "write_file", output: long},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),
@@ -120,7 +116,7 @@ func TestExecuteTool_searchReplaceHistorySpillsButSSEFull(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		stubToolOutputExecutor{toolName: "search_replace", output: long},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),
@@ -154,7 +150,7 @@ func TestExecuteTool_globFilesHistorySpillsButSSEFull(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		stubToolOutputExecutor{toolName: "glob_files", output: long},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),
@@ -184,7 +180,7 @@ func TestExecuteTool_bashRunHistorySpillsButSSEFull(t *testing.T) {
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
 		stubToolOutputExecutor{toolName: "bash_run", output: long},
-		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		nil, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
 			ToolResult: hooks.DefaultToolResultConfig(root),
@@ -222,10 +218,6 @@ func (s stubToolOutputExecutor) Execute(_ context.Context, name, _ string) (stri
 	if name == s.toolName {
 		return s.output, nil
 	}
-	return "", nil
-}
-
-func (s stubToolOutputExecutor) StartBackground(context.Context, string, string, string, string) (string, error) {
 	return "", nil
 }
 

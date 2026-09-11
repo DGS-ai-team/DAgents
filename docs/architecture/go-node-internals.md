@@ -144,7 +144,7 @@ HTTP / CLI（internal/api）
 |------|-----------|------|
 | **会话表** | `session.Manager` | 创建/恢复/删除 session；对外入队 API；skills 管理；子 Agent `SpawnChild`（`manager_child.go`） |
 | **会话运行时** | `session.runtime` | 每 session 独立 InputBox、控制队列与 consumer；维护 messages/skills 与执行边界；步前压缩；SQLite 持久化 |
-| **输入邮箱** | `session.InputBox` | 外部 user/trigger/A2A 输入的单调 seq FIFO；活动 Turn 期间只缓存，不打断 |
+| **输入邮箱** | `session.InputBox` | 外部 user/trigger/child-agent 输入的单调 seq FIFO；活动 Turn 期间只缓存，不打断 |
 | **消息队列** | `queue.MessageQueue` | resume、异步工具事实和恢复控制项的进程内优先级队列；**无内嵌 consumer** |
 | **Turn 编排** | `turn.Orchestrator` | 单步：system prompt → LLM 流式 → 工具分流/执行 → SSE；连续工具 Step 由 runtime 在同一 Turn 内 inline 续跑 |
 
@@ -160,12 +160,12 @@ HTTP / CLI（internal/api）
 
 | 类型 | 常量 | 典型来源 | consume 处理 |
 |------|------|----------|--------------|
-| 用户消息 / trigger / A2A | InputBox record | HTTP、trigger、child relay | `handleInputMessage`；活动 Turn 期间只排队 |
+| 用户消息 / trigger / child-agent | InputBox record | HTTP、trigger、child relay | `handleInputMessage`；活动 Turn 期间只排队 |
 | HITL 恢复 | `resume` | 审批 / `ask_user_information` 提交 | `handleResume` |
 | 工具续跑 | inline | runtime 在同一 Turn 链内继续调用 | `handleTurnContinuation`（仅恢复入口） |
 | 旁路续跑 | `side_effect_continue` | Produce 后 / Cancel 恢复 | `handleSideEffectContinue` |
-| 异步工具完成 | `async_tool_result` | 浏览器异步任务完成（旧后台 job 仅兼容） | `handleSideEffectProduceAsync`（Produce） |
-| Trigger（新路径） | InputBox record | trigger fire | `handleInputMessage` |
+| 异步工具完成 | `async_tool_result` | 浏览器异步任务完成 | `handleSideEffectProduceAsync`（Produce） |
+| Trigger | InputBox record | trigger fire | `handleInputMessage` |
 
 ### 4.2 优先级（`Priority`）
 
@@ -178,7 +178,7 @@ continuation(-1) > resume(1) > async_completion(2) > other(10)
 | 档位 | 典型 `request_type` | 说明 |
 |------|----------------------|------|
 | `continuation` | `turn_continuation` / `side_effect_continue` | 恢复或旁路 Apply 后续跑 LLM |
-| InputBox | user / trigger / A2A | 新外部输入；活动 Turn 或 pending HITL 期间只缓存 |
+| InputBox | user / trigger / child-agent | 新外部输入；活动 Turn 或 pending HITL 期间只缓存 |
 | `resume` | `resume` | HITL 提交 |
 | `async_completion` | `async_tool_result` | 浏览器任务 **Produce**（缓冲 + SSE） |
 | `other` | — | 预留 |
@@ -212,7 +212,7 @@ InputBox 负责外部输入的 **FIFO 顺序**；控制队列负责 resume、异
 |------|------|
 | `messages` | OpenAI 格式对话历史 |
 | `turnCoordinator` | Turn/Step、HITL、工具执行事实、StepIndex、generation 与恢复栅栏的唯一权威 |
-| `pending` / `toolLoopCount` / `state` | 不再是 runtime 字段；由 Coordinator 投影为兼容 API 视图。旧 SQLite 字段只用于迁移旧数据库 |
+| `pending` / `toolLoopCount` / `state` | 不再是 runtime 字段；由 Coordinator 投影为只读 API 视图 |
 | `loadedSkills` | 已加载 skill 元数据（持久化到 SQLite，子 session 不持久化） |
 
 Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
@@ -239,8 +239,8 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 | `toolExec` | `tools.Executor`（父：完整 Registry；子：白名单 `RestrictedRegistry`） |
 | `policy` | 工具 auto / approval / deny |
 | `skillAccess` | skills 目录与 loaded 读写 |
-| `promptCtx` | `agents.db` 中的 soul/custom/long_term；旧 `.runtime/prompt_context/user.md` 仅作迁移来源 |
-| `maxToolLoops` | 单条 user 消息内工具循环上限 |
+| `promptCtx` | `agents.db` 中的 soul/custom 与 PreferredName；Memory service 独立负责记忆召回 |
+| `maxSteps` | 单个 Turn 的最大 Step 数 |
 
 事后设置：
 

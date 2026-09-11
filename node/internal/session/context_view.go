@@ -68,7 +68,11 @@ func (r *runtime) contextView() *ContextView {
 		lifecycle = r.turnCoordinator.Snapshot()
 	}
 	r.mu.Lock()
-	msgs := append([]llm.Message(nil), r.messages...)
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+	}
+	msgs := append([]llm.Message(nil), r.messages[start:]...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
 	promptCatalog := r.skillsTurnCatalog
 	if promptCatalog == nil {
@@ -81,8 +85,8 @@ func (r *runtime) contextView() *ContextView {
 	state := r.turnState()
 	view := &ContextView{
 		SessionID:           r.session.ID,
-		MessagesCount:       len(r.messages),
-		MessagesTotalTokens: estimateMessageTokens(r.messages),
+		MessagesCount:       len(msgs),
+		MessagesTotalTokens: estimateMessageTokens(msgs),
 		ToolLoopCount:       lifecycle.Usage.Steps,
 		LoadedSkills:        loaded,
 		QueuePending:        queuePending,

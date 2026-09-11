@@ -12,7 +12,7 @@ func TestFinalizeCompressionSummary_appendsJournalHint(t *testing.T) {
 	if !strings.HasPrefix(got, "summary body") {
 		t.Fatalf("got = %q", got)
 	}
-	if !strings.Contains(got, "历史的原始消息请查阅 history/20260621/sess-a.jsonl。") {
+	if !strings.Contains(got, "Node 已将原始消息记录到 <runtime_root>/history/20260621/sess-a.jsonl") {
 		t.Fatalf("got = %q", got)
 	}
 }
@@ -27,6 +27,17 @@ func TestFinalizeCompressionSummary_skipsWhenJournalDisabled(t *testing.T) {
 func TestFinalizeCompressionSummary_skipsEmptySession(t *testing.T) {
 	got := FinalizeCompressionSummary("summary body", "  ", true, time.Now())
 	if got != "summary body" {
+		t.Fatalf("got = %q", got)
+	}
+}
+
+func TestFinalizeCompressionSummary_usesWorkspaceScopedJournalPath(t *testing.T) {
+	at := time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC)
+	got := FinalizeCompressionSummary("summary body", "sess-a", true, at, ".dagents/agt-a")
+	if !strings.Contains(got, "<workspace_root>/.dagents/agt-a/history/20260621/sess-a.jsonl") {
+		t.Fatalf("got = %q", got)
+	}
+	if !strings.Contains(got, "workspace 私有状态") {
 		t.Fatalf("got = %q", got)
 	}
 }

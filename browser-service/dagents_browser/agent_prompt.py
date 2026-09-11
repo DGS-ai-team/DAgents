@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-
 def build_extend_system_message(
     *,
-    fs_root: str = "",
+    workspace_root: str = "",
+    runtime_root: str = "",
     allowed_url_schemes: list[str] | None = None,
     recent_tasks_block: str = "",
 ) -> str:
     """返回传给 Agent(extend_system_message=...) 的附加指令。"""
-    root = (fs_root or "").strip() or "(未指定)"
+    workspace = (workspace_root or "").strip() or "(未指定)"
+    runtime = (runtime_root or "").strip() or "(未指定)"
     schemes = [s.strip().lower() for s in (allowed_url_schemes or []) if str(s).strip()]
     if not schemes:
         schemes = ["https", "http"]
@@ -33,7 +32,8 @@ def build_extend_system_message(
 - done.text 应可被主 Agent 直接引用：先给结论，再给关键事实（URL、标题、字段值），避免冗长过程叙述。
 
 工作区与文件：
-- 可写文件仅限工作区：{root}（及其子目录）。不要写入工作区之外的路径。
+- 当前浏览器任务的工作区是：{workspace}（及其子目录）。可写文件仅限该工作区，不要写入工作区之外的路径。
+- Node 运行目录是：{runtime}，与工作区不同；不要把 runtime_root 下的管理目录当成工作区相对路径。
 - 历史任务详情在相对路径 tasks/<task_id>.md 与 tasks/<task_id>.json；需要上下文时用 read_file 查阅，不要臆造。
 - 短任务（预计 <10 步）不要额外创建 todo.md / results.md；长任务才用文件跟踪进度。
 - 截图与下载文件若产生路径，在 done.text 中写明相对或绝对路径，便于主 Agent 回读。

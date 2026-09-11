@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,36 +39,6 @@ func isTextReadable(path string) bool {
 		return true
 	}
 	return ext == ""
-}
-
-func readAllLines(path, fileEncoding string) ([]string, error) {
-	if !isTextReadable(path) {
-		ext := filepath.Ext(path)
-		if ext == "" {
-			return nil, fmt.Errorf("不支持读取该后缀文件：<no-suffix>")
-		}
-		return nil, fmt.Errorf("不支持读取该后缀文件：%s", ext)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	text, err := decodeFileContent(raw, fileEncoding)
-	if err != nil {
-		return nil, err
-	}
-	if strings.EqualFold(filepath.Ext(path), ".json") {
-		var obj any
-		if err := json.Unmarshal([]byte(text), &obj); err != nil {
-			return normalizeLines(text), nil
-		}
-		pretty, err := json.MarshalIndent(obj, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		return normalizeLines(string(pretty)), nil
-	}
-	return normalizeLines(text), nil
 }
 
 func windowFromTotal(total, lineOffset, lineLimit int) (start, end int) {

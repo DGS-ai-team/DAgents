@@ -2,16 +2,21 @@ package policy
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
 
 // Maps 为内存中的工具/shell 策略映射（可 JSON 序列化）。
 type Maps struct {
-	Tools map[string]ApprovalMode
-	Shell map[ShellType]map[string]ApprovalMode
+	Tools  map[string]ApprovalMode
+	Shell  map[ShellType]map[string]ApprovalMode
+	Grants []Grant
+}
+
+// NewDefaultEngine 构造当前版本使用的默认策略引擎。
+// 策略种子只负责提供初始映射；Agent 级持久化策略由调用方覆盖。
+func NewDefaultEngine() *Engine {
+	return NewEngineFromMaps(LoadSeedMaps())
 }
 
 // NewEngineFromMaps 从映射构造 Engine（无文件依赖）。
@@ -37,7 +42,16 @@ func NewEngineFromMaps(m Maps) *Engine {
 		}
 		shellCopy[st] = inner
 	}
-	return &Engine{toolModes: toolCopy, shellModes: shellCopy}
+	grants := make([]Grant, len(m.Grants))
+	for i, grant := range m.Grants {
+		grants[i] = grant
+		grants[i].Tools = append([]string(nil), grant.Tools...)
+		if grant.RevokedAt != nil {
+			revoked := *grant.RevokedAt
+			grants[i].RevokedAt = &revoked
+		}
+	}
+	return &Engine{toolModes: toolCopy, shellModes: shellCopy, grants: grants}
 }
 
 // ExportMaps 导出 Engine 当前映射副本。
@@ -60,7 +74,16 @@ func (e *Engine) ExportMaps() Maps {
 		}
 		shell[st] = inner
 	}
-	return Maps{Tools: tools, Shell: shell}
+	grants := make([]Grant, len(e.grants))
+	for i, grant := range e.grants {
+		grants[i] = grant
+		grants[i].Tools = append([]string(nil), grant.Tools...)
+		if grant.RevokedAt != nil {
+			revoked := *grant.RevokedAt
+			grants[i].RevokedAt = &revoked
+		}
+	}
+	return Maps{Tools: tools, Shell: shell, Grants: grants}
 }
 
 // MapsToStringMaps 转为可 JSON 存库的 string map。
@@ -124,7 +147,7 @@ func ApplyToolUpdatesToMaps(m Maps, updates []ToolUpdate) (Maps, error) {
 		if name == "" {
 			return m, fmt.Errorf("tool name is required")
 		}
-		mode, err := resolveApprovalMode(upd.Mode, upd.Decision)
+		mode, err := resolveApprovalMode(upd.Mode)
 		if err != nil {
 			return m, err
 		}
@@ -150,7 +173,7 @@ func ApplyShellPolicyChangesToMaps(m Maps, shellType ShellType, updates []ShellU
 		if cmd == "" {
 			return m, fmt.Errorf("command is required")
 		}
-		mode, err := resolveApprovalMode(upd.Mode, upd.Decision)
+		mode, err := resolveApprovalMode(upd.Mode)
 		if err != nil {
 			return m, err
 		}
@@ -195,25 +218,6 @@ func LoadSeedMaps() Maps {
 		}
 	}
 	return e.ExportMaps()
-}
-
-// LoadMapsFromDir 从旧版 policy 目录加载（迁移用）。
-func LoadMapsFromDir(policyDir string) (Maps, error) {
-	policyDir = strings.TrimSpace(policyDir)
-	if policyDir == "" {
-		return Maps{}, fmt.Errorf("policy dir is required")
-	}
-	if _, err := os.Stat(filepath.Join(policyDir, "tool.approval.txt")); err != nil {
-		if os.IsNotExist(err) {
-			return Maps{}, err
-		}
-		return Maps{}, err
-	}
-	e, err := loadFromDir(policyDir)
-	if err != nil {
-		return Maps{}, err
-	}
-	return e.ExportMaps(), nil
 }
 
 // SortedToolNames 返回工具名排序列表（测试辅助）。

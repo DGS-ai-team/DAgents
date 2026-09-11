@@ -1,4 +1,4 @@
-// Package agentruntime 根据 Agent 模板快照构造 per-agent 运行时参数（FSRoot / 工具组等）。
+// Package agentruntime 根据 Agent 模板快照构造 per-agent 运行时参数（workspace / 工具组等）。
 package agentruntime
 
 import (
@@ -12,11 +12,16 @@ import (
 )
 
 // Snapshot 为 agents.config_snapshot_json 的解析视图。
-// 历史字段 sandbox 仍可反序列化，但运行时一律忽略。
 type Snapshot struct {
+	AgentType  string          `json:"agent_type,omitempty"`
 	TemplateID string          `json:"template_id"`
 	Defaults   map[string]any  `json:"defaults"`
-	Sandbox    json.RawMessage `json:"sandbox,omitempty"`
+	Workspace  WorkspaceConfig `json:"workspace,omitempty"`
+	Handbook   HandbookConfig  `json:"handbook,omitempty"`
+}
+
+type HandbookConfig struct {
+	Directory string `json:"directory,omitempty"`
 }
 
 // ParseSnapshot 解析 config_snapshot JSON。
@@ -29,11 +34,6 @@ func ParseSnapshot(raw json.RawMessage) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("parse agent config snapshot: %w", err)
 	}
 	return snap, nil
-}
-
-// EffectiveFSRoot 返回该 Agent 的工具工作区根（始终为 Node 全局 fs_root）。
-func EffectiveFSRoot(nodeFSRoot, _agentID string, _snap Snapshot) string {
-	return strings.TrimSpace(nodeFSRoot)
 }
 
 // EnabledToolGroups 从 defaults.tools.enabled_groups 读取。
@@ -105,8 +105,7 @@ func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 	if active != "" && profiles != nil {
 		if p, ok := profiles[active].(map[string]any); ok {
 			if v, ok := p["multimodal_enabled"].(bool); ok {
-				b := v
-				return &b
+				return &v
 			}
 		}
 	}
@@ -146,8 +145,8 @@ func LLMActiveFromDefaults(snap Snapshot) string {
 	return strings.TrimSpace(active)
 }
 
-// MaxToolLoopsFromDefaults 读取 defaults.llm.max_tool_loops；无则返回 0。
-func MaxToolLoopsFromDefaults(snap Snapshot) int {
+// MaxStepsFromDefaults 读取 defaults.llm.max_steps；无则返回 0。
+func MaxStepsFromDefaults(snap Snapshot) int {
 	llmRaw, ok := snap.Defaults["llm"]
 	if !ok || llmRaw == nil {
 		return 0
@@ -156,7 +155,7 @@ func MaxToolLoopsFromDefaults(snap Snapshot) int {
 	if !ok {
 		return 0
 	}
-	switch v := llmMap["max_tool_loops"].(type) {
+	switch v := llmMap["max_steps"].(type) {
 	case float64:
 		return int(v)
 	case int:
@@ -237,16 +236,16 @@ func stringSliceFromAny(v any) []string {
 }
 
 // ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks / prompt_context 写入 TurnOptions。
-// max_tool_loops 仅来自 Agent snapshot（新建时写入）；缺省时用 DefaultMaxToolLoops。
+// max_steps 仅来自 Agent snapshot（新建时写入）；缺省时用 DefaultMaxSteps。
 func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 	if turn == nil {
 		return
 	}
-	n := MaxToolLoopsFromDefaults(snap)
+	n := MaxStepsFromDefaults(snap)
 	if n <= 0 {
-		n = DefaultMaxToolLoops
+		n = DefaultMaxSteps
 	}
-	turn.MaxToolLoops = n
+	turn.Budget.MaxSteps = n
 	if pc := PromptContextFromDefaults(snap); pc != nil {
 		turn.PromptContext = *pc
 	}
@@ -261,13 +260,13 @@ func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 	if v, ok := boolPtrFromAny(m["inject_today_date_enabled"]); ok {
 		turn.InjectTodayDate.Enabled = v
 	}
-	if v, ok := boolFromAny(m["tool_result_enabled"]); ok {
+	if v, ok := boolPtrFromAny(m["tool_result_enabled"]); ok {
 		turn.ToolResult.Enabled = v
 	}
 	if v, ok := intFromAny(m["tool_result_spill_threshold_tokens"]); ok && v > 0 {
 		turn.ToolResult.SpillThresholdTokens = v
 	}
-	if v, ok := boolFromAny(m["duplicate_tool_call_enabled"]); ok {
+	if v, ok := boolPtrFromAny(m["duplicate_tool_call_enabled"]); ok {
 		turn.DuplicateToolCall.Enabled = v
 	}
 	if v, ok := intFromAny(m["duplicate_tool_call_window_seconds"]); ok && v > 0 {
@@ -293,33 +292,33 @@ func PromptContextFromDefaults(snap Snapshot) *session.PromptContextOptions {
 	if v, ok := boolPtrFromAny(m["custom_enabled"]); ok {
 		out.CustomEnabled = v
 	}
-	if v, ok := boolPtrFromAny(m["long_term_enabled"]); ok {
-		out.LongTermEnabled = v
+	if v, ok := boolPtrFromAny(m["memory_enabled"]); ok {
+		out.MemoryEnabled = v
 	}
-	if v, ok := stringFromAny(m["long_term_scope"]); ok {
+	if v, ok := stringFromAny(m["memory_scope"]); ok {
 		scope := strings.TrimSpace(v)
-		if scope == LongTermScopeGlobal || scope == LongTermScopeAgent {
-			out.LongTermScope = &scope
+		if scope == MemoryScopeGlobal || scope == MemoryScopeAgent {
+			out.MemoryScope = &scope
 		}
 	}
 	return out
 }
 
 const (
-	LongTermScopeGlobal = "global"
-	LongTermScopeAgent  = "agent"
+	MemoryScopeGlobal = "global"
+	MemoryScopeAgent  = "agent"
 )
 
-// LongTermScopeFromDefaults 返回长期记忆作用域，默认 agent（独立）。
-func LongTermScopeFromDefaults(snap Snapshot) string {
+// MemoryScopeFromDefaults 返回记忆作用域，默认 agent（独立）。
+func MemoryScopeFromDefaults(snap Snapshot) string {
 	pc := PromptContextFromDefaults(snap)
-	if pc != nil && pc.LongTermScope != nil {
-		scope := strings.TrimSpace(*pc.LongTermScope)
-		if scope == LongTermScopeGlobal {
-			return LongTermScopeGlobal
+	if pc != nil && pc.MemoryScope != nil {
+		scope := strings.TrimSpace(*pc.MemoryScope)
+		if scope == MemoryScopeGlobal {
+			return MemoryScopeGlobal
 		}
 	}
-	return LongTermScopeAgent
+	return MemoryScopeAgent
 }
 
 func stringFromAny(v any) (string, bool) {
@@ -341,14 +340,6 @@ func boolPtrFromAny(v any) (*bool, bool) {
 	default:
 		return nil, false
 	}
-}
-
-func boolFromAny(v any) (bool, bool) {
-	if v == nil {
-		return false, false
-	}
-	b, ok := v.(bool)
-	return b, ok
 }
 
 func intFromAny(v any) (int, bool) {

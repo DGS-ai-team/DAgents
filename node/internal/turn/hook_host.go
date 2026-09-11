@@ -40,9 +40,9 @@ type hookHostState struct {
 	pendingHITL  bool
 	finishReason string
 
-	loadedSkills []skills.LoadedSkill
-	systemPrompt string
-	fsRoot       string
+	loadedSkills  []skills.LoadedSkill
+	systemPrompt  string
+	workspaceRoot string
 
 	llmCalls int
 }
@@ -60,16 +60,25 @@ func (o *Orchestrator) newSessionHookHost(sessionID string, history []llm.Messag
 		return hooks.NoopHost()
 	}
 	o.ensureHookHostState()
+	// Do not hold hookHostState.mu while reading the runtime-backed skill set
+	// or composing the prompt. The runtime persistence path reads session state
+	// first and then snapshots the hook store; taking the locks in the opposite
+	// order here can deadlock when a reconcile enqueues an immediate
+	// continuation during persistence.
+	var loadedSkills []skills.LoadedSkill
+	if o.skillAccess.Get != nil {
+		loadedSkills = append([]skills.LoadedSkill(nil), o.skillAccess.Get()...)
+	}
+	systemPrompt := o.composeSystemPrompt(sessionID)
+	workspaceRoot := o.workspaceRoot
 	st := o.hookHostState
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.history = append([]llm.Message(nil), history...)
 	st.finishReason = finishReason
-	if o.skillAccess.Get != nil {
-		st.loadedSkills = append([]skills.LoadedSkill(nil), o.skillAccess.Get()...)
-	}
-	st.systemPrompt = o.composeSystemPrompt(sessionID)
-	st.fsRoot = o.fsRoot
+	st.loadedSkills = loadedSkills
+	st.systemPrompt = systemPrompt
+	st.workspaceRoot = workspaceRoot
 	return &sessionHookHost{
 		o:         o,
 		sessionID: sessionID,
@@ -167,9 +176,9 @@ func (h *sessionHookHost) Snapshot() hooks.HostSnapshot {
 		},
 		SessionStore: hooks.CloneSessionStore(h.state.store),
 		FSPaths: hooks.FSPaths{
-			FSRoot:     h.state.fsRoot,
-			RuntimeDir: h.cfg.RuntimeDir,
-			SkillsRoot: h.cfg.SkillsRoot,
+			WorkspaceRoot: h.state.workspaceRoot,
+			RuntimeRoot:   h.cfg.RuntimeDir,
+			SkillsRoot:    h.cfg.SkillsRoot,
 		},
 	}
 }
@@ -236,10 +245,16 @@ func (h *sessionHookHost) LLMComplete(ctx context.Context, req hooks.LLMComplete
 	}
 	h.state.mu.Unlock()
 
-	text, err := h.o.llm.CompleteText(ctx, llm.CompleteRequest{
-		SystemPrompt: systemPrompt,
-		UserPrompt:   req.UserPrompt,
-	})
+	request := llm.CompleteRequest{
+		SystemPrompt:    systemPrompt,
+		UserPrompt:      req.UserPrompt,
+		MaxOutputTokens: req.MaxOutputTokens,
+	}
+	if usageClient, ok := h.o.llm.(llm.CompletionWithUsageClient); ok {
+		text, usage, err := usageClient.CompleteTextWithUsage(ctx, request)
+		return hooks.LLMCompleteResponse{Text: text, Usage: usage}, err
+	}
+	text, err := h.o.llm.CompleteText(ctx, request)
 	if err != nil {
 		return hooks.LLMCompleteResponse{}, err
 	}

@@ -17,9 +17,6 @@ type Entry struct {
 	HasUnread   bool
 	EventType   string
 	UpdatedAt   time.Time
-
-	// SessionID 与 AgentID 同源（历史字段，菜单/焦点键仍可用）。
-	SessionID string
 }
 
 // Active 该 Agent 是否仍有待办。
@@ -39,10 +36,7 @@ func (e Entry) itemCount() int {
 }
 
 func (e Entry) id() string {
-	if id := strings.TrimSpace(e.AgentID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(e.SessionID)
+	return strings.TrimSpace(e.AgentID)
 }
 
 func (e Entry) displayLabel() string {
@@ -74,10 +68,9 @@ func (e Entry) SummaryLabel() string {
 
 // Summary 为托盘展示的待办聚合。
 type Summary struct {
-	AgentCount   int
-	SessionCount int // 与 AgentCount 同值（历史字段）
-	ItemCount    int
-	Label        string
+	AgentCount int
+	ItemCount  int
+	Label      string
 }
 
 // Store 为 agent_id → 待办条目（由 Node GET /v1/agents 同步）。
@@ -107,6 +100,45 @@ func (s *Store) ReplaceFromNode(incoming map[string]Entry) bool {
 		}
 	}
 	s.byAgent = next
+	return true
+}
+
+// ApplyNotification applies one authoritative Node notification projection.
+// Display metadata is retained from the initial agent snapshot.
+func (s *Store) ApplyNotification(agentID string, hasPendingHITL bool, pendingHITLItems int, hasUnread bool) bool {
+	if s == nil {
+		return false
+	}
+	id := trim(agentID)
+	if id == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !hasPendingHITL && !hasUnread {
+		if _, ok := s.byAgent[id]; !ok {
+			return false
+		}
+		delete(s.byAgent, id)
+		return true
+	}
+	if pendingHITLItems <= 0 && hasPendingHITL {
+		pendingHITLItems = 1
+	}
+	eventType := ""
+	if hasPendingHITL {
+		eventType = "hitl_required"
+	}
+	entry, exists := s.byAgent[id]
+	if exists && entry.HITLItems == pendingHITLItems && entry.HasUnread == hasUnread && entry.EventType == eventType {
+		return false
+	}
+	entry.AgentID = id
+	entry.HITLItems = pendingHITLItems
+	entry.HasUnread = hasUnread
+	entry.EventType = eventType
+	entry.UpdatedAt = time.Now()
+	s.byAgent[id] = entry
 	return true
 }
 
@@ -151,10 +183,9 @@ func (s *Store) Summary() Summary {
 		label = fmt.Sprintf("%d 个 Agent · %d 项待处理", n, items)
 	}
 	return Summary{
-		AgentCount:   n,
-		SessionCount: n,
-		ItemCount:    items,
-		Label:        label,
+		AgentCount: n,
+		ItemCount:  items,
+		Label:      label,
 	}
 }
 

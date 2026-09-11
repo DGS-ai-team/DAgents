@@ -54,8 +54,12 @@ def _ensure_node_agent_request(
         raise HTTPException(status_code=403, detail="x-dagents-agent-id 与 node_id/agent_id 不一致")
     if auth.is_admin:
         return
-    if auth.is_node and auth.agent_id and auth.agent_id not in {expected_node, str(agent_id or "").strip()}:
-        raise HTTPException(status_code=403, detail="node token 只能操作自身 node_id")
+    if auth.session_kind == "node" and auth.agent_id == expected_node:
+        return
+    if auth.is_node and auth.agent_id == expected_node:
+        return
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="凭据未绑定该 node_id")
 
 
 def _resolve_discover_caller_groups(
@@ -134,8 +138,20 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     @router.post("/v1/registry/agents", response_model=AgentRegisterResponse)
     def register_agent(payload: AgentRegisterRequest, request: Request) -> AgentRegisterResponse:
         auth = authenticate(request)
+        existing = store.get(payload.agent_id)
+        if existing is not None and not auth.is_admin:
+            claimed = (payload.node_id or payload.agent_id).strip()
+            owner = (existing.node_id or existing.agent_id).strip()
+            if claimed != owner:
+                raise HTTPException(status_code=403, detail="不能修改其他 Node 所属 Agent")
         _ensure_node_agent_request(request, payload.agent_id, auth, node_id=payload.node_id)
-        record = store.register(payload)
+        try:
+            record = store.register(
+                payload,
+                expected_node_id=(auth.agent_id if not auth.is_admin else None),
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="不能修改其他 Node 所属 Agent") from exc
         audit.record(
             actor=audit_actor(request, auth, fallback_agent_id=payload.agent_id),
             action="registry.register",
@@ -154,7 +170,8 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     @router.post("/v1/registry/agents/{agent_id}/heartbeat", response_model=AgentRecord)
     def heartbeat_agent(agent_id: str, payload: AgentHeartbeatRequest, request: Request) -> AgentRecord:
         auth = authenticate(request)
-        _ensure_node_agent_request(request, agent_id, auth)
+        existing = store.get(agent_id)
+        _ensure_node_agent_request(request, agent_id, auth, node_id=(existing.node_id if existing else None))
         record = store.heartbeat(agent_id, payload)
         if record is None:
             record_registry_operation(operation="heartbeat", status="not_found")
@@ -166,7 +183,8 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     @router.post("/v1/registry/agents/{agent_id}/deregister")
     def deregister_agent(agent_id: str, payload: AgentDeregisterRequest, request: Request) -> dict[str, bool]:
         auth = authenticate(request)
-        _ensure_node_agent_request(request, agent_id, auth)
+        existing = store.get(agent_id)
+        _ensure_node_agent_request(request, agent_id, auth, node_id=(existing.node_id if existing else None))
         return _delete_agent_common(
             agent_id=agent_id,
             auth=auth,

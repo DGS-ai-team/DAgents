@@ -26,18 +26,18 @@ func TestSideEffectProduceAsyncDoesNotMutateHistoryDuringHITL(t *testing.T) {
 	}
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg"},
+		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
-			{ID: "call-bg-1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`}},
+			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`}},
 			approvalCall,
 		}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -143,22 +143,22 @@ func TestSideEffectFIFOApplyOrder(t *testing.T) {
 	rt := mgr.getRuntime(sess.ID)
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "bg"},
+		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
-			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"run_in_background":true}`},
+			ID: "call-async-1", Type: "function",
+			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
 		}}},
-		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1"},
+		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-1", Status: "succeeded", ResultText: "first",
+		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "first",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-2", ToolName: "bash_run", ToolCallID: "async-2", Status: "succeeded", ResultText: "second",
+		JobID: "job-2", ToolName: "browser_run_task", ToolCallID: "async-2", Status: "succeeded", ResultText: "second",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -211,21 +211,21 @@ func TestDuplicateAsyncResultIsAppliedOnce(t *testing.T) {
 	rt := mgr.getRuntime(sess.ID)
 	rt.mu.Lock()
 	rt.messages = []llm.Message{
-		{Role: "user", Content: "run in background"},
+		{Role: "user", Content: "run async task"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{
 			ID: "call-background-duplicate",
 			Function: llm.ToolCallFunction{
-				Name:      "bash_run",
-				Arguments: `{"run_in_background":true}`,
+				Name:      "browser_run_task",
+				Arguments: `{}`,
 			},
 		}}},
-		{Role: "tool", ToolCallID: "call-background-duplicate", Content: "[TOOL_BACKGROUND] job_id=job-duplicate"},
+		{Role: "tool", ToolCallID: "call-background-duplicate", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	payload := queue.AsyncToolResultPayload{
 		JobID:      "job-duplicate",
-		ToolName:   "bash_run",
+		ToolName:   "browser_run_task",
 		ToolCallID: "async-job-duplicate",
 		Status:     "succeeded",
 		ResultText: "done",

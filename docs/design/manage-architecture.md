@@ -1,6 +1,6 @@
 # Manage 与 Workgroup 架构
 
-> **状态**：现行架构说明（v0.10.4）
+> **状态**：现行架构说明
 >
 > Manage 是目录、工作组和控制台服务；Node 是 Agent、LLM、工具和本地数据的运行时。旧 A2A Task/Inbox 与 Placement 仅在 [`docs/archive/`](../archive/README.md) 中保留历史，不是当前产品路径。
 

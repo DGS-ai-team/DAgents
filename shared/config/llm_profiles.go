@@ -21,13 +21,14 @@ func (c *Config) normalizeLLMProfiles() {
 		if id == "" {
 			id = defaultLLMProfileID
 		}
-		c.LLM.Profiles[id] = c.snapshotLLMProfile()
+		c.LLM.Profiles[id] = normalizeLLMProfile(c.snapshotLLMProfile())
 		c.LLM.Active = id
 		c.applyLLMProfile(id)
 		return
 	}
-	// 旧配置仅有顶层 multimodal.enabled 时，迁移到尚未声明该字段的档案。
-	c.migrateMultimodalIntoProfiles()
+	for id, profile := range c.LLM.Profiles {
+		c.LLM.Profiles[id] = normalizeLLMProfile(profile)
+	}
 	active := strings.TrimSpace(c.LLM.Active)
 	if active == "" || !c.LLM.hasProfile(active) {
 		if p := c.snapshotLLMProfile(); c.LLM.looksConfigured(p) {
@@ -47,22 +48,6 @@ func (c *Config) normalizeLLMProfiles() {
 		}
 	}
 	c.applyLLMProfile(c.LLM.Active)
-}
-
-// migrateMultimodalIntoProfiles 将遗留的顶层 multimodal.enabled=true
-// 写入尚未设置 multimodal_enabled 的档案（避免升级后丢失开关）。
-func (c *Config) migrateMultimodalIntoProfiles() {
-	if c == nil || !c.MultimodalEnabled() || len(c.LLM.Profiles) == 0 {
-		return
-	}
-	for id, p := range c.LLM.Profiles {
-		if p.MultimodalEnabled != nil {
-			continue
-		}
-		v := true
-		p.MultimodalEnabled = &v
-		c.LLM.Profiles[id] = p
-	}
 }
 
 func (l LLMConfig) hasProfile(id string) bool {
@@ -117,10 +102,7 @@ func (c *Config) applyLLMProfile(id string) {
 	if !ok {
 		return
 	}
-	enabled := false
-	if p.MultimodalEnabled != nil {
-		enabled = *p.MultimodalEnabled
-	}
+	enabled := ProfileMultimodalEnabled(p)
 	c.Multimodal.Enabled = boolPtrCopy(enabled)
 }
 
@@ -319,17 +301,12 @@ func normalizeLLMProfile(p LLMProfileConfig) LLMProfileConfig {
 		Thinking:        strings.TrimSpace(p.Thinking),
 		ReasoningEffort: strings.TrimSpace(p.ReasoningEffort),
 	}
-	if p.MultimodalEnabled != nil {
-		v := *p.MultimodalEnabled
-		out.MultimodalEnabled = &v
-	} else {
-		f := false
-		out.MultimodalEnabled = &f
-	}
+	v := p.MultimodalEnabled != nil && *p.MultimodalEnabled
+	out.MultimodalEnabled = &v
 	return out
 }
 
-// ProfileMultimodalEnabled 返回档案的多模态开关（nil/缺省视为 false）。
+// ProfileMultimodalEnabled 返回档案中由用户设置的多模态开关。
 func ProfileMultimodalEnabled(p LLMProfileConfig) bool {
 	return p.MultimodalEnabled != nil && *p.MultimodalEnabled
 }

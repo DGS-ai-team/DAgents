@@ -12,6 +12,7 @@ import (
 func TestUIBootstrap(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.LLM.Mock = true
+	cfg.Onboarding.NodeProfileCompleted = true
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	req := httptest.NewRequest(http.MethodGet, "/v1/ui/bootstrap", nil)
 	rr := httptest.NewRecorder()
@@ -33,15 +34,14 @@ func TestUIBootstrap(t *testing.T) {
 		t.Fatalf("workgroup_enabled=%v want=%v", out.Info.WorkgroupEnabled, cfg.ManageWorkgroupEnabled())
 	}
 	if !out.Onboarding.NodeProfileCompleted {
-		t.Fatal("legacy/nil onboarding should report completed=true")
+		t.Fatal("completed onboarding should report completed=true")
 	}
 }
 
 func TestUIBootstrap_onboardingIncomplete(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.LLM.Mock = true
-	done := false
-	cfg.Onboarding.NodeProfileCompleted = &done
+	cfg.Onboarding.NodeProfileCompleted = false
 	cfg.User.PreferredName = ""
 	cfg.Agent.Name = "seed-node"
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())

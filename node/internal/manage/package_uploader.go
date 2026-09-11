@@ -154,7 +154,7 @@ func (u *PackageUploader) resolvePath(raw string) (string, error) {
 	if raw == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	root, err := resolveFSRoot(u.cfg.FSRoot)
+	root, err := resolveRuntimeRoot(u.cfg.RuntimeDir())
 	if err != nil {
 		return "", err
 	}
@@ -167,7 +167,7 @@ func (u *PackageUploader) resolvePath(raw string) (string, error) {
 	}
 	clean := filepath.Clean(raw)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path escapes fs_root: %s", raw)
+		return "", fmt.Errorf("path escapes runtime root: %s", raw)
 	}
 	full := filepath.Join(root, clean)
 	abs, err := filepath.Abs(full)
@@ -175,7 +175,7 @@ func (u *PackageUploader) resolvePath(raw string) (string, error) {
 		return "", err
 	}
 	if !strings.HasPrefix(abs, root+string(os.PathSeparator)) && abs != root {
-		return "", fmt.Errorf("path escapes fs_root: %s", raw)
+		return "", fmt.Errorf("path escapes runtime root: %s", raw)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
@@ -187,12 +187,12 @@ func (u *PackageUploader) resolvePath(raw string) (string, error) {
 	return abs, nil
 }
 
-func resolveFSRoot(fsRoot string) (string, error) {
-	root := strings.TrimSpace(fsRoot)
+func resolveRuntimeRoot(runtimeRoot string) (string, error) {
+	root := strings.TrimSpace(runtimeRoot)
 	if root == "" {
 		wd, err := os.Getwd()
 		if err != nil {
-			return "", fmt.Errorf("fs_root empty and getwd failed: %w", err)
+			return "", fmt.Errorf("runtime root empty and getwd failed: %w", err)
 		}
 		root = wd
 	}
@@ -201,7 +201,7 @@ func resolveFSRoot(fsRoot string) (string, error) {
 		return "", err
 	}
 	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return "", fmt.Errorf("create fs_root: %w", err)
+		return "", fmt.Errorf("create runtime root: %w", err)
 	}
 	return abs, nil
 }

@@ -75,10 +75,7 @@ function splitUserMentionParts(text, directMemberId = "") {
 }
 
 function isDirectAssignEvent(ev) {
-  const actor = String(ev?.actor_id || "").trim();
-  const text = String(ev?.text || "").trim();
-  // 新路径：挂在成员下；旧路径：leader +「直达」前缀
-  return (actor && actor !== "leader") || text.startsWith("直达");
+  return Boolean(String(ev?.direct_member_id || "").trim());
 }
 
 function previewMemberReport(text) {
@@ -93,7 +90,7 @@ function previewAssignTask(text) {
   return raw.length > 96 ? `${raw.slice(0, 96)}…` : raw;
 }
 
-/** 解析编排态 assign_started：新格式 `@名\\n任务`；兼容旧 `→ 名 · 摘要` */
+/** 解析编排态 assign_started：`@名\\n任务`。 */
 function parseAssignStartedText(text) {
   const raw = String(text || "").trim();
   if (!raw) return { mention: "", taskText: "分派任务" };
@@ -106,25 +103,11 @@ function parseAssignStartedText(text) {
     };
   }
 
-  const arrow = raw.match(/^→\s*(.+?)\s*·\s*([\s\S]*)$/);
-  if (arrow) {
-    return {
-      mention: String(arrow[1] || "").trim(),
-      taskText: String(arrow[2] || "").trim() || "分派任务",
-    };
-  }
-
-  if (raw.startsWith("@")) {
-    const name = raw.slice(1).trim();
-    return { mention: name, taskText: "分派任务" };
-  }
-
   return { mention: "", taskText: raw };
 }
 
 function buildAssignIndex(list) {
   const directAssignIds = new Set();
-  const noticeByAssign = {};
   const noticesByAssign = {};
   const finishedByAssign = {};
   const startedByAssign = {};
@@ -143,7 +126,6 @@ function buildAssignIndex(list) {
       finishedByAssign[aid] = ev;
       if (isDirectAssignEvent(ev)) directAssignIds.add(aid);
     } else if (t === "system_notice") {
-      noticeByAssign[aid] = ev;
       if (!noticesByAssign[aid]) noticesByAssign[aid] = [];
       if (ev.event_id) noticeIndexByEventId[ev.event_id] = noticesByAssign[aid].length;
       noticesByAssign[aid].push(ev);
@@ -160,7 +142,6 @@ function buildAssignIndex(list) {
   }
   return {
     directAssignIds,
-    noticeByAssign,
     noticesByAssign,
     finishedByAssign,
     startedByAssign,
@@ -217,8 +198,6 @@ function parseNoticeTool(text, fallbackToolName = "") {
     bash_run: "执行命令",
     screen_capture: "截取屏幕",
     computer_use: "操作桌面",
-    background_job_status: "查看后台任务",
-    background_job_cancel: "取消后台任务",
   };
   const knownToolNames = new Set(Object.keys(purposeByTool));
   const purpose =
@@ -255,19 +234,14 @@ function toolKindLabel(toolName) {
   return "tool";
 }
 
-function approvalForTool(assignId, toolCallId, toolName = "", allowNameFallback = false) {
+function approvalForAssign(assignId) {
   const hitl = memberApprovalByAssign.value[String(assignId || "").trim()] || null;
   if (!hitl) return null;
-  const callId = String(toolCallId || "").trim();
-  const name = String(toolName || "").trim();
   const items = workgroupApprovalItems(hitl);
-  const item =
-    items.find((entry) => callId && entry.callId === callId) ||
-    (allowNameFallback ? items.find((entry) => name && entry.name === name) : null);
-  if (!item) return null;
+  if (!items.length) return null;
   return {
     hitlId: String(hitl.hitl_id || hitl.id || ""),
-    items: [item],
+    items,
     allItems: items,
   };
 }
@@ -395,24 +369,6 @@ function makeAssignItem(
       matchedApprovalIds.add(item.callId);
     }
   }
-  // Older timelines may not have tool_call_id on tool_started.  In that case
-  // associate a name match with the newest unmatched step only.  The previous
-  // implementation matched the same approval to every same-named step, which
-  // produced 1, then 2, then 3 approval cards as the turn progressed.
-  for (let i = baseSteps.length - 1; i >= 0; i -= 1) {
-    const step = baseSteps[i];
-    if (
-      step.kind !== "tool" ||
-      step.toolCallId ||
-      assignedApprovalByStep.has(step.key)
-    ) continue;
-    const item = approvalItems.find(
-      (entry) => !matchedApprovalIds.has(entry.callId) && entry.name === step.toolName,
-    );
-    if (!item) continue;
-    assignedApprovalByStep.set(step.key, item);
-    matchedApprovalIds.add(item.callId);
-  }
   let steps;
   if (approvalItems.length > 1 && approvalHitl) {
     // A batch is one approval interaction.  Keep it as one card with all
@@ -514,7 +470,7 @@ function makeAssignItem(
   };
 }
 
-function makeDirectToolItem(ev, { assignFinished, isLast, failed, toolFinished = null }) {
+function makeDirectToolItem(ev, { assignFinished, isLast, failed, toolFinished = null, approval = null }) {
   const parsed = parseNoticeTool(ev?.text, ev?.tool_name);
   const finishStatus = String(toolFinished?.status || "").toLowerCase();
   const terminalToolResult = [
@@ -531,7 +487,6 @@ function makeDirectToolItem(ev, { assignFinished, isLast, failed, toolFinished =
     Boolean(failed) || ["failed", "rejected", "indeterminate", "canceled", "cancelled", "timed_out"].includes(finishStatus);
   const assignId = String(ev?.assign_id || "").trim();
   const toolCallId = String(ev?.tool_call_id || "").trim();
-  const toolName = String(ev?.tool_name || "").trim();
   return {
     key: ev.event_id || `tool-${ev.seq}`,
     kind: "tool",
@@ -544,7 +499,7 @@ function makeDirectToolItem(ev, { assignFinished, isLast, failed, toolFinished =
     inProgress: !done,
     assignId,
     toolCallId,
-    approval: approvalForTool(assignId, toolCallId, toolName, isLast),
+    approval,
   };
 }
 
@@ -721,6 +676,11 @@ const eventGroups = computed(() => {
         const matchingFinish = chain.find(
           (item) => item?.type === "tool_finished" && toolEventMatches(item, renderEvent),
         );
+        const approval = approvalForAssign(aid);
+        const approvalItems = approval?.items || [];
+        const approvalAnchor = approvalItems.length
+          ? starts.find((item) => approvalItems.some((entry) => String(entry?.callId || "").trim() === String(item?.tool_call_id || "").trim())) || starts[0]
+          : null;
         const finished = finishedByAssign[aid] || null;
         const failed = Boolean(
           (finished && /失败|中断/.test(String(finished.text || ""))) ||
@@ -737,6 +697,7 @@ const eventGroups = computed(() => {
             isLast: index < 0 || index === starts.length - 1,
             failed,
             toolFinished: matchingFinish,
+            approval: approval && approvalAnchor?.event_id === renderEvent?.event_id ? approval : null,
           }),
         });
       }
@@ -745,8 +706,11 @@ const eventGroups = computed(() => {
       continue;
     }
 
-    // 编排态成员回报并入分派气泡折叠展示；直连仍走普通消息
-    if (t === "assistant_content" && aid && !directAssignIds.has(aid)) {
+    // assistant_content is a streaming preview.  The durable actor_final_text
+    // is the canonical member response for direct assignments, while
+    // orchestrated assignments place the same preview inside the task card.
+    // Never expose both projections as separate message bubbles.
+    if (t === "assistant_content" && aid) {
       continue;
     }
 
@@ -760,8 +724,6 @@ const eventGroups = computed(() => {
     if (t === "system_notice") {
       // 编排态：notice 只滚进分派气泡
       if (aid && !directAssignIds.has(aid)) continue;
-      // 旧「已直达」提示不展示
-      if (String(ev?.text || "").startsWith("已直达")) continue;
       const actorId = String(ev?.actor_id || "").trim();
       if (aid && directAssignIds.has(aid)) {
         if ((toolEventsByAssign[aid] || []).length) continue;
@@ -770,6 +732,7 @@ const eventGroups = computed(() => {
         const isLast = idx < 0 || idx === chain.length - 1;
         const finished = finishedByAssign[aid] || null;
         const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
+        const approval = approvalForAssign(aid);
         flat.push({
           role: "assistant",
           actorId,
@@ -778,6 +741,7 @@ const eventGroups = computed(() => {
             assignFinished: Boolean(finished),
             isLast,
             failed,
+            approval: approval && idx === 0 ? approval : null,
           }),
         });
         continue;

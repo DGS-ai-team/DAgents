@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -11,6 +13,13 @@ import (
 func TestEnsureScheduleConditionRejectsEmpty(t *testing.T) {
 	if _, err := EnsureScheduleCondition(map[string]any{}); err == nil {
 		t.Fatal("expected error for empty condition")
+	}
+}
+
+func TestEnsureScheduleConditionRejectsRetiredEventSource(t *testing.T) {
+	_, err := EnsureScheduleCondition(map[string]any{"event_source_id": "events-1"})
+	if err == nil || !strings.Contains(err.Error(), "event_source_id") {
+		t.Fatalf("expected retired event source rejection, got %v", err)
 	}
 }
 
@@ -60,6 +69,7 @@ func TestRenderTaskTemplate(t *testing.T) {
 }
 
 type fakeSubmitter struct {
+	mu       sync.Mutex
 	sessions []string
 	messages []string
 }
@@ -69,12 +79,16 @@ func (f *fakeSubmitter) EnsureSession(requestedID string) (string, error) {
 	if id == "" {
 		id = "sess-generated"
 	}
+	f.mu.Lock()
 	f.sessions = append(f.sessions, id)
+	f.mu.Unlock()
 	return id, nil
 }
 
 func (f *fakeSubmitter) SubmitTriggerMessage(sessionID, triggerID, content string) error {
+	f.mu.Lock()
 	f.messages = append(f.messages, sessionID+":"+triggerID+":"+content)
+	f.mu.Unlock()
 	return nil
 }
 
@@ -264,19 +278,14 @@ func TestSchedulerTickIntervalOverdueStillFires(t *testing.T) {
 	}
 }
 
-func TestStoreLoadReconcilesMissingNextFireAt(t *testing.T) {
+func TestStoreLoadRejectsMissingNextFireAt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "triggers.json")
 	raw := `{"triggers":[{"trigger_id":"t1","name":"x","condition":{"interval_seconds":60},"target_agent_id":"local","task_template":"hi","enabled":true,"fire_count":0,"created_at":1,"updated_at":1}],"history":[]}`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store, err := OpenStore(path, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, ok := store.GetTrigger("t1")
-	if !ok || got.NextFireAt == nil {
-		t.Fatalf("expected reconciled next_fire_at, got %+v ok=%v", got, ok)
+	if _, err := OpenStore(path, 20); err == nil || !strings.Contains(err.Error(), "next_fire_at is missing") {
+		t.Fatalf("expected missing next_fire_at error, got %v", err)
 	}
 }

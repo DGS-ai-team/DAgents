@@ -46,12 +46,6 @@ pub struct Status {
     pub apply_command: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub asset: Option<HashMap<String, Value>>,
-    #[serde(default)]
-    pub deprecated: bool,
-    #[serde(skip_serializing_if = "String::is_empty", default)]
-    pub delegate: String,
-    #[serde(skip_serializing_if = "String::is_empty", default)]
-    pub desktop_api: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -284,6 +278,12 @@ impl Applier {
             println!("当前已是最新版本");
             return (result, EXIT_UP_TO_DATE);
         }
+        if !is_windows_installer_asset(&status) {
+            let message = "Windows 更新只支持 Inno Setup .exe 安装包".to_string();
+            eprintln!("{message}");
+            result.message = message;
+            return (result, 1);
+        }
         let Ok(_guard) = self.mu.lock() else {
             return (result, 1);
         };
@@ -311,46 +311,15 @@ impl Applier {
             result.message = format!("stop node failed: {e}");
             return (result, 1);
         }
-        if is_windows_installer_asset(&status) {
-            if let Err(e) = launch_windows_installer(&pkg_path, &self.layout.home) {
-                let _ = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT);
-                eprintln!("{e}");
-                result.message = e;
-                return (result, 1);
-            }
-            result.message = format!("Windows 安装包已启动，将升级到 {}", status.latest_version);
-            println!("{}", result.message);
-            return (result, 0);
-        }
-        let install_result = (|| {
-            let transaction = install_release_package(&self.layout.home, &pkg_path)?;
-            if let Err(start_err) = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT) {
-                let rollback = transaction.rollback();
-                let old_start = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT);
-                return Err(match (rollback, old_start) {
-                    (Ok(()), Ok(())) => {
-                        format!("新版本启动失败: {start_err}（已回滚并恢复旧版本）")
-                    }
-                    (Ok(()), Err(old_err)) => {
-                        format!("新版本启动失败: {start_err}；旧版本恢复启动失败: {old_err}")
-                    }
-                    (Err(rb), _) => format!("新版本启动失败: {start_err}；回滚失败: {rb}"),
-                });
-            }
-            transaction.commit();
-            Ok(())
-        })();
-        let _ = fs::remove_file(&pkg_path);
-        if let Err(e) = install_result {
-            eprintln!("install failed: {e}");
-            let cfg = self.config_snapshot();
+        if let Err(e) = launch_windows_installer(&pkg_path, &self.layout.home) {
             let _ = nodectl::start(&self.layout, &cfg, DEFAULT_NODE_START_WAIT);
-            result.message = format!("install failed: {e}");
+            eprintln!("{e}");
+            result.message = e;
             return (result, 1);
         }
-        result.status = self.checker.check_once();
-        result.message = format!("已升级到 {}", status.latest_version);
-        println!("update complete: {}", status.latest_version);
+        let _ = fs::remove_file(&pkg_path);
+        result.message = format!("Windows 安装包已启动，将升级到 {}", status.latest_version);
+        println!("{}", result.message);
         (result, 0)
     }
 
@@ -402,8 +371,7 @@ impl Applier {
             .to_string();
         let runtime = self.layout.home.join(".runtime");
         fs::create_dir_all(&runtime).map_err(|e| e.to_string())?;
-        let ext = package_extension(&status);
-        let pkg = runtime.join(format!("{}.{}", unix_nanos(), ext));
+        let pkg = runtime.join(format!("{}.exe", unix_nanos()));
         download_package(DownloadRequest {
             url: download_url.to_string(),
             dest_path: pkg.clone(),
@@ -429,30 +397,6 @@ fn is_windows_installer_asset(status: &Status) -> bool {
             .map(|value| value.trim().to_ascii_lowercase().ends_with(".exe"))
             .unwrap_or(false)
     })
-}
-
-fn package_extension(status: &Status) -> &'static str {
-    if is_windows_installer_asset(status) {
-        return "exe";
-    }
-    status
-        .asset
-        .as_ref()
-        .and_then(|asset| asset.get("filename").and_then(Value::as_str))
-        .or_else(|| {
-            status
-                .asset
-                .as_ref()
-                .and_then(|asset| asset.get("download_url").and_then(Value::as_str))
-        })
-        .map(|value| {
-            if value.trim().to_ascii_lowercase().ends_with(".zip") {
-                "zip"
-            } else {
-                "pkg"
-            }
-        })
-        .unwrap_or("pkg")
 }
 
 fn launch_windows_installer(installer_path: &Path, home: &Path) -> Result<(), String> {
@@ -684,209 +628,6 @@ fn normalize_asset_urls(
     out
 }
 
-struct InstallTransaction {
-    backup: PathBuf,
-    home: PathBuf,
-}
-
-impl InstallTransaction {
-    fn commit(self) {
-        let _ = fs::remove_dir_all(&self.backup);
-    }
-
-    fn rollback(self) -> Result<(), String> {
-        restore_install_backup(&self.home, &self.backup)
-    }
-}
-
-fn install_release_package(home: &Path, pkg_path: &Path) -> Result<InstallTransaction, String> {
-    let staging = std::env::temp_dir().join(format!("dagents-update-{}", unix_nanos()));
-    fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let backup = home
-        .join(".runtime")
-        .join(format!("dagents-update-backup-{}", unix_nanos()));
-    fs::create_dir_all(&backup).map_err(|e| e.to_string())?;
-    let install_result = (|| {
-        extract_package(pkg_path, &staging)?;
-        let bundle = find_bundle_root(&staging)?;
-        let bin_src = bundle.join("bin");
-        if !bin_src.is_dir() {
-            return Err(format!(
-                "release bundle missing bin/: {}",
-                bin_src.display()
-            ));
-        }
-        // Move the complete old installation aside before copying. This keeps
-        // a failed/partial replacement recoverable, including Windows files
-        // that may be replaced in a different order.
-        for rel in ["bin", "dagents.cmd", "VERSION"] {
-            move_if_exists(&home.join(rel), &backup.join(rel))?;
-        }
-        copy_tree(&bin_src, &home.join("bin"))?;
-        copy_if_exists(&bundle.join("dagents.cmd"), &home.join("dagents.cmd"))?;
-        copy_if_exists(&bundle.join("VERSION"), &home.join("VERSION"))?;
-        Ok(())
-    })();
-    let result = match install_result {
-        Ok(()) => Ok(InstallTransaction {
-            backup,
-            home: home.to_path_buf(),
-        }),
-        Err(err) => {
-            let rollback = restore_install_backup(home, &backup);
-            let message = match rollback {
-                Ok(()) => format!("{err}（已回滚旧版本）"),
-                Err(rb) => format!("{err}；回滚失败: {rb}"),
-            };
-            Err(message)
-        }
-    };
-    let _ = fs::remove_dir_all(&staging);
-    result
-}
-
-fn move_if_exists(src: &Path, dest: &Path) -> Result<(), String> {
-    if !src.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    fs::rename(src, dest).map_err(|e| format!("移动 {} -> {}: {e}", src.display(), dest.display()))
-}
-
-fn remove_path(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
-    }
-    if path.is_dir() {
-        fs::remove_dir_all(path).map_err(|e| e.to_string())
-    } else {
-        fs::remove_file(path).map_err(|e| e.to_string())
-    }
-}
-
-fn restore_install_backup(home: &Path, backup: &Path) -> Result<(), String> {
-    let mut first_error: Option<String> = None;
-    for rel in ["bin", "dagents.cmd", "VERSION"] {
-        let current = home.join(rel);
-        let old = backup.join(rel);
-        if let Err(err) = remove_path(&current) {
-            if first_error.is_none() {
-                first_error = Some(format!("清理新文件 {}: {err}", current.display()));
-            }
-            continue;
-        }
-        if old.exists() {
-            if let Err(err) = move_if_exists(&old, &current) {
-                if first_error.is_none() {
-                    first_error = Some(format!("恢复 {}: {err}", current.display()));
-                }
-            }
-        }
-    }
-    let _ = fs::remove_dir_all(backup);
-    match first_error {
-        Some(err) => Err(err),
-        None => Ok(()),
-    }
-}
-
-fn extract_package(pkg_path: &Path, dest: &Path) -> Result<(), String> {
-    let lower = pkg_path.to_string_lossy().to_ascii_lowercase();
-    if lower.ends_with(".zip") {
-        unzip_file(pkg_path, dest)
-    } else {
-        let out = Command::new("tar")
-            .arg("-xf")
-            .arg(pkg_path)
-            .arg("-C")
-            .arg(dest)
-            .output()
-            .map_err(|e| format!("tar extract: {e}"))?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "tar extract: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ))
-        }
-    }
-}
-
-fn unzip_file(zip_path: &Path, dest: &Path) -> Result<(), String> {
-    let file = fs::File::open(zip_path).map_err(|e| e.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-    let dest_clean = dest.canonicalize().unwrap_or_else(|_| dest.to_path_buf());
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let Some(enclosed) = file.enclosed_name().map(|p| p.to_path_buf()) else {
-            return Err(format!("zip entry escapes staging dir: {}", file.name()));
-        };
-        let target = dest.join(enclosed);
-        let target_clean = target
-            .parent()
-            .and_then(|p| p.canonicalize().ok())
-            .unwrap_or_else(|| dest_clean.clone());
-        if !target_clean.starts_with(&dest_clean) {
-            return Err(format!("zip entry escapes staging dir: {}", file.name()));
-        }
-        if file.is_dir() {
-            fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut out = fs::File::create(&target).map_err(|e| e.to_string())?;
-            std::io::copy(&mut file, &mut out).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn find_bundle_root(staging: &Path) -> Result<PathBuf, String> {
-    for entry in fs::read_dir(staging).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            return Ok(entry.path());
-        }
-    }
-    if staging.join("bin").is_dir() {
-        Ok(staging.to_path_buf())
-    } else {
-        Err(format!(
-            "release bundle root not found under {}",
-            staging.display()
-        ))
-    }
-}
-
-fn copy_tree(src: &Path, dest: &Path) -> Result<(), String> {
-    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let src_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_tree(&src_path, &dest_path)?;
-        } else {
-            fs::copy(&src_path, &dest_path).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn copy_if_exists(src: &Path, dest: &Path) -> Result<(), String> {
-    if src.is_file() {
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::copy(src, dest).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 fn confirm_upgrade(latest: &str) -> bool {
     print!("升级到 {}？ [y/N] ", latest.trim());
     let _ = std::io::stdout().flush();
@@ -990,16 +731,16 @@ mod tests {
     #[test]
     fn normalizes_relative_asset_url() {
         let mut asset = HashMap::new();
-        asset.insert("download_url".into(), Value::String("files/a.zip".into()));
+        asset.insert("download_url".into(), Value::String("files/a.exe".into()));
         let out = normalize_asset_urls("http://m/base/", asset);
         assert_eq!(
             out.get("download_url").and_then(Value::as_str),
-            Some("http://m/base/files/a.zip")
+            Some("http://m/base/files/a.exe")
         );
     }
 
     #[test]
-    fn recognizes_windows_inno_asset_and_keeps_legacy_archive_mode() {
+    fn accepts_only_windows_inno_asset() {
         let mut installer_asset = HashMap::new();
         installer_asset.insert(
             "filename".into(),
@@ -1011,20 +752,16 @@ mod tests {
             ..Status::default()
         };
         assert!(is_windows_installer_asset(&installer));
-        assert_eq!(package_extension(&installer), "exe");
 
-        let mut archive_asset = HashMap::new();
-        archive_asset.insert(
-            "filename".into(),
-            Value::String("dagents-local-assistant-windows-amd64-0.10.4.zip".into()),
-        );
-        let archive = Status {
+        let non_installer = Status {
             platform: "windows-amd64".into(),
-            asset: Some(archive_asset),
+            asset: Some(HashMap::from([(
+                "filename".into(),
+                Value::String("dagents-local-assistant-windows-amd64-0.10.4.tar.gz".into()),
+            )])),
             ..Status::default()
         };
-        assert!(!is_windows_installer_asset(&archive));
-        assert_eq!(package_extension(&archive), "zip");
+        assert!(!is_windows_installer_asset(&non_installer));
     }
 
     #[test]
@@ -1033,26 +770,5 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         assert_eq!(read_install_version(&dir), "dev");
         let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn restores_install_backup_after_partial_replacement() {
-        let home = std::env::temp_dir().join(format!("dagents-rollback-{}", unix_nanos()));
-        let old_bin = home.join("bin");
-        let backup = home.join(".runtime").join("backup");
-        fs::create_dir_all(&old_bin).unwrap();
-        fs::create_dir_all(&backup).unwrap();
-        fs::write(old_bin.join("node.txt"), "old").unwrap();
-        fs::rename(&old_bin, backup.join("bin")).unwrap();
-        fs::create_dir_all(&old_bin).unwrap();
-        fs::write(old_bin.join("node.txt"), "partial-new").unwrap();
-
-        restore_install_backup(&home, &backup).unwrap();
-
-        assert_eq!(
-            fs::read_to_string(home.join("bin/node.txt")).unwrap(),
-            "old"
-        );
-        let _ = fs::remove_dir_all(&home);
     }
 }

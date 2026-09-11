@@ -35,6 +35,9 @@ func (c *adapterClient) StreamChat(ctx context.Context, req ChatRequest, handler
 	if err != nil {
 		return ChatResult{}, err
 	}
+	if err := ValidateToolProtocol(prepared); err != nil {
+		return ChatResult{}, err
+	}
 	outbound := ChatRequest{
 		SystemPrompt: req.SystemPrompt,
 		Messages:     prepared,
@@ -52,6 +55,10 @@ func (c *adapterClient) StreamChat(ctx context.Context, req ChatRequest, handler
 
 func (c *adapterClient) CompleteText(ctx context.Context, req CompleteRequest) (string, error) {
 	return c.inner.CompleteText(ctx, req)
+}
+
+func (c *adapterClient) CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error) {
+	return c.inner.CompleteTextWithUsage(ctx, req)
 }
 
 // envAdapterClient 延迟从环境变量读取 API Key；连接参数优先取自 RuntimeSettings（可热切换）。
@@ -157,6 +164,19 @@ func (c *envAdapterClient) CompleteText(ctx context.Context, req CompleteRequest
 		return "", err
 	}
 	return c.innerClient(key, baseURL, adapter).CompleteText(ctx, req)
+}
+
+func (c *envAdapterClient) CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error) {
+	_, baseURL, keyEnv, mock, adapter := c.resolveConnection()
+	if mock {
+		text, err := c.mockClient(adapter).CompleteText(ctx, req)
+		return text, nil, err
+	}
+	key, err := c.resolveAPIKey(keyEnv)
+	if err != nil {
+		return "", nil, err
+	}
+	return c.innerClient(key, baseURL, adapter).CompleteTextWithUsage(ctx, req)
 }
 
 func (c *envAdapterClient) resolveAPIKey(keyEnv string) (string, error) {

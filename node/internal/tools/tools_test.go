@@ -33,10 +33,7 @@ func TestAllToolDefinitionsRequireCallPurpose(t *testing.T) {
 }
 
 func TestParseToolCallArgumentsStripsCallPurpose(t *testing.T) {
-	bg, cleaned := ParseToolCallArguments(`{"call_purpose":"probe port","command":"echo ok","run_in_background":true}`)
-	if !bg {
-		t.Fatal("expected background")
-	}
+	cleaned := ParseToolCallArguments(`{"call_purpose":"probe port","command":"echo ok"}`)
 	if strings.Contains(cleaned, "call_purpose") {
 		t.Fatalf("cleaned should omit call_purpose: %q", cleaned)
 	}
@@ -63,6 +60,64 @@ func TestReadWriteFile(t *testing.T) {
 	}
 	if !strings.Contains(out, "文件总行数: 1") || readFileBody(out) != "hello" {
 		t.Fatalf("read = %q err=%v", out, err)
+	}
+}
+
+func TestHandbookWriteIdenticalContentIsNoOp(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, err := NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithHandbookMaintenance(context.Background())
+	if _, err := reg.Execute(ctx, "write_file", `{"path":"handbook/a.md","content":"same"}`); err != nil {
+		t.Fatal(err)
+	}
+	before := reg.HandbookMutationCount()
+	out, err := reg.Execute(ctx, "write_file", `{"path":"handbook/a.md","content":"same"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != reg.HandbookMutationCount() || !strings.Contains(out, "no changes") {
+		t.Fatalf("out=%q mutations=%d/%d", out, reg.HandbookMutationCount(), before)
+	}
+}
+
+func TestHandbookReadDigestCASProtectsExternalEdit(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, err := NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithHandbookMaintenance(context.Background())
+	if _, err := reg.Execute(ctx, "write_file", `{"path":"handbook/cas.md","content":"original"}`); err != nil {
+		t.Fatal(err)
+	}
+	read, err := reg.Execute(ctx, "read_file", `{"path":"handbook/cas.md"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := "文件摘要: "
+	idx := strings.Index(read, marker)
+	if idx < 0 {
+		t.Fatalf("digest missing: %q", read)
+	}
+	digest := strings.TrimSpace(strings.Split(strings.TrimSpace(read[idx+len(marker):]), "\n")[0])
+	if err := os.WriteFile(filepath.Join(handbook, "cas.md"), []byte("external"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(ctx, "write_file", `{"path":"handbook/cas.md","content":"agent","expected_digest":"`+digest+`"}`); err == nil {
+		t.Fatal("expected CAS conflict")
+	}
+	raw, _ := os.ReadFile(filepath.Join(handbook, "cas.md"))
+	if string(raw) != "external" {
+		t.Fatalf("external content overwritten: %q", raw)
 	}
 }
 
@@ -187,14 +242,14 @@ func TestSearchReplace_failKeepsDiagnostics(t *testing.T) {
 	}
 }
 
-func TestResolveFSRootCreatesDir(t *testing.T) {
+func TestResolveWorkspaceRootCreatesDir(t *testing.T) {
 	dir := filepath.Join(os.TempDir(), "dagents-test-root")
 	_ = os.RemoveAll(dir)
 	reg, err := NewRegistry(dir, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reg.fsRoot != dir {
-		t.Fatalf("fsRoot = %q", reg.fsRoot)
+	if reg.workspaceRoot != dir {
+		t.Fatalf("workspaceRoot = %q", reg.workspaceRoot)
 	}
 }

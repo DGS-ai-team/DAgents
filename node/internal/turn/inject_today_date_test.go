@@ -51,25 +51,6 @@ func TestBuildContextInjections_dateDisabled(t *testing.T) {
 	}
 }
 
-func TestStripLegacyTodayDateMessages_keepsDurableHistoryUntouched(t *testing.T) {
-	history := []llm.Message{
-		llm.UserMessageWithSource(
-			"当天日期为：20260719",
-			llm.UserNameDate,
-			llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormNotice},
-			nil,
-		),
-		llm.UserMessage("hello", llm.UserNameHuman),
-	}
-	request := StripLegacyTodayDateMessages(history)
-	if len(history) != 2 {
-		t.Fatalf("durable history was changed: %+v", history)
-	}
-	if len(request) != 1 || request[0].Content != "hello" {
-		t.Fatalf("request = %+v", request)
-	}
-}
-
 func TestBuildChildContextInjections_includesDate(t *testing.T) {
 	injections := BuildChildContextInjections(ChildSystemPromptInput{
 		AgentID:          "child-agent",
@@ -84,7 +65,7 @@ func TestBuildChildContextInjections_includesDate(t *testing.T) {
 
 func TestOrchestratorDateConfigIsRequestOnly(t *testing.T) {
 	enabled := true
-	orch := NewOrchestrator("agent-date", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
+	orch := NewOrchestrator("agent-date", t.TempDir(), nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{
 		InjectTodayDate: hooks.InjectTodayDateConfig{Enabled: &enabled},
 	}, nil)
 	in := orch.systemPromptInput("session-date")

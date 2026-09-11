@@ -42,15 +42,15 @@ func TestDescribeApprovalMetaBashRun(t *testing.T) {
 	}
 }
 
-func TestDescribeApprovalMetaLinuxExec(t *testing.T) {
-	reason, risk := describeApprovalMeta("linux_exec", map[string]any{
-		"channel_id": "prod-app-01",
-		"command":    "systemctl restart api",
+func TestDescribeApprovalMetaTerminalCommand(t *testing.T) {
+	reason, risk := describeApprovalMeta("terminal_command", map[string]any{
+		"terminal_id": "terminal-prod-app-01",
+		"command":     "systemctl restart api",
 	})
 	if risk != "high" {
 		t.Fatalf("risk = %q", risk)
 	}
-	if reason == "" || !strings.Contains(reason, "prod-app-01") {
+	if reason == "" || !strings.Contains(reason, "terminal-prod-app-01") {
 		t.Fatalf("reason = %q", reason)
 	}
 }

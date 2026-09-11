@@ -3,16 +3,20 @@ package agentruntime
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
+	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// DefaultMaxToolLoops 为新建 Agent 未指定时的 defaults.llm.max_tool_loops。
-const DefaultMaxToolLoops = 32
+// DefaultMaxSteps 为新建 Agent 未指定时的 defaults.llm.max_steps。
+const DefaultMaxSteps = 32
 
 // BuildParams 为构造 per-agent Registry / TurnOptions 的输入。
 type BuildParams struct {
@@ -22,31 +26,62 @@ type BuildParams struct {
 	Snapshot    Snapshot
 	BashTimeout int
 	MCP         *mcp.Manager
+	// DisableMemory prevents runtimes that only execute on behalf of another
+	// Agent (for example Workgroup members) from opening that Agent's personal
+	// memory store. The model-facing memory tools remain unavailable because
+	// TurnOptions.MemoryService is nil.
+	DisableMemory        bool
+	WorkspaceCoordinator *workspacecoord.Coordinator
 }
 
 // Built 为 per-agent 运行时产物。
 type Built struct {
-	FSRoot      string
-	TurnOptions session.TurnOptions
-	Registry    *tools.Registry
-	ToolGroups  []string
+	WorkspaceRoot string
+	TurnOptions   session.TurnOptions
+	Registry      *tools.Registry
+	ToolGroups    []string
 }
 
-// Build 根据快照构造 effective FSRoot、工具组与独立 Registry。
+// Close releases resources created while building a runtime. Callers that
+// successfully hand TurnOptions to session.Manager transfer ownership to the
+// runtime; callers that only inspect a Built value (including tests) should
+// call Close themselves.
+func (b Built) Close() error {
+	if closer, ok := b.TurnOptions.MemoryService.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+// Build 根据快照构造 Agent workspace、工具组与独立 Registry。
 func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG == nil {
 		return Built{}, fmt.Errorf("node config required")
 	}
-	fsRoot := EffectiveFSRoot(p.NodeCFG.FSRoot, p.AgentID, p.Snapshot)
+	workspaceRoot, err := EnsureWorkspace(p.NodeCFG.RuntimeDir(), p.AgentID, p.Snapshot.Workspace)
+	if err != nil {
+		return Built{}, err
+	}
+	workspaceStateRoot, err := EnsureWorkspaceState(workspaceRoot, p.AgentID)
+	if err != nil {
+		return Built{}, err
+	}
+	historyRelativeRoot, err := WorkspaceStateRelativeRoot(p.AgentID)
+	if err != nil {
+		return Built{}, err
+	}
 	groups := EnabledToolGroups(p.Snapshot)
 
 	timeout := p.BashTimeout
 	if timeout <= 0 {
 		timeout = 30
 	}
-	reg, err := tools.NewRegistry(fsRoot, timeout, p.NodeCFG.Tools.BashOutputEncoding, p.NodeCFG.Tools.FileEncoding)
+	reg, err := tools.NewRegistry(workspaceRoot, timeout, p.NodeCFG.Tools.BashOutputEncoding, p.NodeCFG.Tools.FileEncoding)
 	if err != nil {
 		return Built{}, err
+	}
+	if p.WorkspaceCoordinator != nil {
+		reg.SetWorkspaceCoordinator(p.WorkspaceCoordinator)
 	}
 	if len(groups) == 0 {
 		reg.SetBuiltinEnabledNone()
@@ -58,6 +93,9 @@ func Build(p BuildParams) (Built, error) {
 			return Built{}, err
 		}
 	}
+	// Auto snapshots get the capability by default; dedicated runtime callers
+	// can explicitly disable it after Build before attaching their own handlers.
+	reg.SetAutonomyEnabled(strings.EqualFold(p.Snapshot.AgentType, "auto") && !p.DisableMemory)
 	if p.MCP != nil {
 		effective, err := p.MCP.EffectiveTools(context.Background(), mcp.BindingsFromDefaults(p.Snapshot.Defaults))
 		if err != nil {
@@ -102,8 +140,59 @@ func Build(p BuildParams) (Built, error) {
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
 
 	turnOpts := p.BaseTurn
-	turnOpts.FSRoot = fsRoot
-	turnOpts.ToolResult.FSRoot = fsRoot
+	turnOpts.AutoAgent = strings.EqualFold(strings.TrimSpace(p.Snapshot.AgentType), "auto")
+	turnOpts.WorkspaceRoot = workspaceRoot
+	turnOpts.AgentID = strings.TrimSpace(p.AgentID)
+	turnOpts.WorkspaceStateRoot = workspaceStateRoot
+	turnOpts.RawMessageHistoryDir = filepath.Join(workspaceStateRoot, "history")
+	turnOpts.RawMessageHistoryRelativeRoot = historyRelativeRoot
+	turnOpts.ToolResult.WorkspaceRoot = workspaceRoot
+	turnOpts.ToolResult.AgentID = strings.TrimSpace(p.AgentID)
+	memoryAutoRecall := false
+	if promptCtx := PromptContextFromDefaults(p.Snapshot); promptCtx != nil && promptCtx.MemoryEnabled != nil {
+		memoryAutoRecall = *promptCtx.MemoryEnabled
+	}
+	memoryScope := memory.ScopeAgent
+	if MemoryScopeFromDefaults(p.Snapshot) == string(memory.ScopeGlobal) {
+		memoryScope = memory.ScopeGlobal
+	}
+	if !p.DisableMemory {
+		memoryService, openErr := memory.OpenLocalService(
+			filepath.Join(workspaceStateRoot, "memory", "memory.db"),
+			filepath.Join(p.NodeCFG.RuntimeDir(), "memory", "global.db"),
+			memoryScope,
+			p.AgentID,
+		)
+		if openErr != nil {
+			return Built{}, fmt.Errorf("open memory store: %w", openErr)
+		}
+		turnOpts.MemoryService = memoryService
+	}
+	var handbookRoot string
+	if strings.EqualFold(p.Snapshot.AgentType, "auto") {
+		var err error
+		handbookRoot, err = HandbookRoot(p.NodeCFG.RuntimeDir(), p.AgentID, p.Snapshot.Workspace, p.Snapshot.Handbook)
+		if err != nil {
+			return Built{}, fmt.Errorf("resolve handbook: %w", err)
+		}
+		reader, openErr := turn.NewFileHandbookReader(handbookRoot)
+		if openErr != nil {
+			return Built{}, fmt.Errorf("open handbook: %w", openErr)
+		}
+		turnOpts.HandbookReader = reader
+	}
+	// The reserved handbook/ tool namespace is an explicit Auto capability.
+	// Regular Agents retain their ordinary workspace/handbook semantics.
+	if strings.EqualFold(strings.TrimSpace(p.Snapshot.AgentType), "auto") {
+		if err := reg.SetHandbookRoot(handbookRoot); err != nil {
+			return Built{}, fmt.Errorf("bind handbook: %w", err)
+		}
+	}
+	turnOpts.MemoryAutoExtract = p.NodeCFG.Memory.AutoExtract
+	turnOpts.MemoryCandidateQueueSize = p.NodeCFG.Memory.CandidateQueueSize
+	turnOpts.MemoryCandidateMaxItems = p.NodeCFG.Memory.MaxCandidates
+	turnOpts.MemoryCoreBudgetTokens = p.NodeCFG.Memory.CoreBudgetTokens
+	turnOpts.MemoryAutoRecall = memoryAutoRecall
 	turnOpts.MultimodalEnabled = mm
 	turnOpts.SkillsEnabled = skillsOn
 	if skillsOn {
@@ -117,10 +206,10 @@ func Build(p BuildParams) (Built, error) {
 		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
 	}
 	return Built{
-		FSRoot:      fsRoot,
-		TurnOptions: turnOpts,
-		Registry:    reg,
-		ToolGroups:  groups,
+		WorkspaceRoot: workspaceRoot,
+		TurnOptions:   turnOpts,
+		Registry:      reg,
+		ToolGroups:    groups,
 	}, nil
 }
 

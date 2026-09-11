@@ -80,13 +80,6 @@ func (r *runtime) publishTurnState(snapshot turn.CoordinatorSnapshot, command tu
 	}
 	publisher := r.publisher
 	if publisher == nil {
-		// Keep compatibility with focused lifecycle fixtures that construct a
-		// runtime literal and only provide the legacy Hub field.
-		if r.hub != nil {
-			publisher = r.hub
-		}
-	}
-	if publisher == nil {
 		return
 	}
 	// runtime.agentID is the owning Node ID in production. SSE subscribers

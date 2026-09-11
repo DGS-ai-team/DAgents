@@ -1,6 +1,6 @@
 # DAgents 文档
 
-**当前基线**：v0.10.4（2026-08-25）。本目录按“用法、架构、开发、参考、设计、研究、历史”分层；每层只回答一种问题。
+**当前基线**：以根目录 `VERSION` 为准（当前发布 v0.10.7）。本目录按“用法、架构、开发、参考、设计、研究、历史”分层；每层只回答一种问题。
 
 ## 从这里开始
 
@@ -12,7 +12,7 @@
 | 查 API、配置、工具、事件、Schema | [参考资料](reference/README.md) |
 | 使用多 Node 工作组 | [工作组指南](user/workgroups.md) |
 | 查看当前设计约束 | [设计文档](design/README.md) |
-| 查看 DAgents 与 Codex / DeepSeek Harness 对比 | [对标分析](comparative-analysis/README.md) |
+| 查看 DAgents 与同类开源 Agent 项目对比 | [对标分析](comparative-analysis/README.md) |
 | 查看未来路线 | [Roadmap](roadmap.md) |
 
 ## 目录职责

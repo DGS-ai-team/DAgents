@@ -83,8 +83,9 @@ type StreamHandler struct {
 
 // CompleteRequest 为非流式补全请求（摘要压缩等）。
 type CompleteRequest struct {
-	SystemPrompt string
-	UserPrompt   string
+	SystemPrompt    string
+	UserPrompt      string
+	MaxOutputTokens int // 0 preserves provider default; negative values are invalid.
 }
 
 // Client 为可替换的 LLM 客户端（生产 OpenAI / DeepSeek / 测试 Mock）。
@@ -93,4 +94,12 @@ type Client interface {
 	CompleteText(ctx context.Context, req CompleteRequest) (string, error)
 	// NormalizeAssistant 写入 session history 前规范化 assistant 消息（含 reasoning_content 策略）。
 	NormalizeAssistant(existing []Message, msg Message) Message
+}
+
+// CompletionWithUsageClient is an optional extension implemented by clients
+// that can expose usage from a non-streaming completion. A nil Usage means
+// the provider omitted usage; callers must not interpret that as zero usage.
+// Keeping this separate preserves compatibility with existing Client mocks.
+type CompletionWithUsageClient interface {
+	CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error)
 }

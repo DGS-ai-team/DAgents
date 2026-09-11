@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 from manage.platform.auth import (
     auth_from_session,
     default_admin_username,
+    default_admin_password,
     resolve_session,
+    verify_node_token,
     verify_admin_password,
 )
 from manage.platform.sessions import SESSION_COOKIE, SessionStore
@@ -24,6 +26,7 @@ class PasswordLoginRequest(BaseModel):
 
 class NodeLoginRequest(BaseModel):
     node_id: str = Field(min_length=1)
+    token: str = Field(default="", min_length=0)
 
 
 class AuthMeResponse(BaseModel):
@@ -75,6 +78,8 @@ def build_auth_router(sessions: SessionStore, registry: AgentRegistryStore) -> A
 
     @router.post("/login", response_model=AuthMeResponse)
     def login_password(body: PasswordLoginRequest, response: Response) -> AuthMeResponse:
+        if not default_admin_password():
+            raise HTTPException(status_code=503, detail="管理员密码未配置，请设置 MANAGE_ADMIN_PASSWORD 后重启 Manage")
         if not verify_admin_password(body.username, body.password):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
         rec = sessions.create(kind="admin", subject=default_admin_username())
@@ -91,13 +96,18 @@ def build_auth_router(sessions: SessionStore, registry: AgentRegistryStore) -> A
         )
 
     @router.post("/login/node", response_model=AuthMeResponse)
-    def login_node(body: NodeLoginRequest, response: Response) -> AuthMeResponse:
+    def login_node(body: NodeLoginRequest, request: Request, response: Response) -> AuthMeResponse:
         node_id = str(body.node_id or "").strip()
         if not node_id:
             raise HTTPException(status_code=400, detail="node_id 不能为空")
         record = registry.get(node_id)
         if record is None:
             raise HTTPException(status_code=401, detail="未知 node_id：请先让 Node 连接并注册到 Manage")
+        existing = resolve_session(request)
+        if existing is not None and existing.kind == "admin":
+            pass
+        elif not verify_node_token(node_id, body.token):
+            raise HTTPException(status_code=401, detail="需要与该 node_id 绑定的 Node token，或先使用管理员会话登录")
         resolved = record_node_id(record) or node_id
         groups = list(getattr(record, "discovery_group", None) or [])
         rec = sessions.create(kind="node", subject=resolved, discovery_groups=groups)

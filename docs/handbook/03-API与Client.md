@@ -56,7 +56,7 @@
 
 ```http
 GET /health
-→ { "status": "ok", "node_id": "...", "version": "0.10.4" }
+→ { "status": "ok", "node_id": "...", "version": "0.10.7" }
 ```
 
 `version` 与根目录 `VERSION` 及发版 tag 一致（全项目唯一语义化版本；Release 构建注入 `node/internal/version.Version`）。
@@ -190,18 +190,18 @@ listen:
   port: 18765
 ```
 
-工具与 SQLite 仍在目标机 `fs_root`。建议防火墙白名单或 SSH 隧道。
+Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`）；Agent 工具文件操作使用各 Agent 自己的 `workspace_root`。建议防火墙白名单或 SSH 隧道。
 
-### 4.3 工作区布局（相对 `fs_root`）
+### 4.3 Node 运行目录与 Agent 工作区
 
 | 子目录 | 用途 |
 |--------|------|
-| `memory/` / `agents.db` | Agent 与消息持久化 |
-| `policy/` | 审批策略（可按 Agent） |
-| `skills/` | skills 目录 |
-| `triggers/` | trigger 持久化 |
-| `prompt_context/` | soul / custom / long_term；`user.md` 仅兼容迁移 |
-| `node/` | `node_id` 等 |
+| `runtime_root/memory/` / `agents.db` | Node 控制面 Agent 元数据与消息快照；记录按 `agent_id` 隔离 |
+| `runtime_root/policy/` | 审批策略（可按 Agent） |
+| `runtime_root/skills/` | Node 管理的 skills 目录 |
+| `runtime_root/triggers/` | trigger 持久化 |
+| `runtime_root/prompt_context/` | soul / custom |
+| `workspace_root/` | 当前 Agent 的文件、bash、终端与工具结果工作区；创建 Agent 时选择，之后不可修改。Agent 私有侧车位于 `.dagents/<agent_id>/`，支持多个 Agent 共享该目录 |
 
 ### 4.4 发布形态
 

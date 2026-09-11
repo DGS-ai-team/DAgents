@@ -2,19 +2,15 @@ package config
 
 import "testing"
 
-func TestNodeProfileCompleted_legacyNil(t *testing.T) {
+func TestNodeProfileCompleted(t *testing.T) {
 	cfg := &Config{}
-	if !cfg.NodeProfileCompleted() {
-		t.Fatal("nil onboarding flag should be completed (legacy)")
-	}
-	done := false
-	cfg.Onboarding.NodeProfileCompleted = &done
+	cfg.Onboarding.NodeProfileCompleted = false
 	if cfg.NodeProfileCompleted() {
-		t.Fatal("explicit false should gate")
+		t.Fatal("false should gate")
 	}
-	done = true
+	cfg.Onboarding.NodeProfileCompleted = true
 	if !cfg.NodeProfileCompleted() {
-		t.Fatal("explicit true should complete")
+		t.Fatal("true should complete")
 	}
 }
 

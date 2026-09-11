@@ -1,6 +1,6 @@
 # 开发与验证
 
-本文是 DAgents 的开发者入口。当前发布基线为 v0.10.5；机器可读版本唯一来源是根目录 `VERSION`，变更说明以 `CHANGELOG.md` 为准。
+本文是 DAgents 的开发者入口。机器可读版本唯一来源是根目录 `VERSION`，变更说明以 `CHANGELOG.md` 为准。
 
 ## 1. 环境
 
@@ -39,8 +39,8 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 | Node Web UI | `npm test --prefix node/webui/frontend -- --run` | Vitest |
 | Node UI 构建 | `npm run build --prefix node/webui/frontend` | 生成 Go embed 静态资源 |
 | Manage Console 构建 | `npm run build --prefix manage/console/frontend` | 生成 Console 静态资源 |
-| Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
-| Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./shared/workgroup/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
+| Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
+| Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
 | Python | `python3 -m unittest discover -s tests -p "test_*.py" -v` | 默认不发现 `tests/integration/` |
 | Python 质量 | `python3 -m ruff check manage scripts tests && python3 -m pyright --project pyrightconfig.json` | 错误与类型门禁 |
 | API/Fixture 契约 | `python3 scripts/ci/check_contracts.py` | OpenAPI 路由与 Workgroup Schema/fixture |

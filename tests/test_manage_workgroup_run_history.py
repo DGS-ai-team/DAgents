@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 _ROOT = Path(__file__).resolve().parents[1]
+_AUTH_PATCH = patch.dict("os.environ", {"MANAGE_SHARED_TOKEN": "test-admin-token"})
+def setUpModule(): _AUTH_PATCH.start()
+def tearDownModule(): _AUTH_PATCH.stop()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -59,7 +63,7 @@ class RunHistoryApiTests(unittest.TestCase):
             self.assertIsNotNone(hist)
             self.assertTrue(any(m.role == "assistant" for m in hist.messages))
 
-            with TestClient(app) as client:
+            with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 # admin login not required if auth optional in test? use node header
                 listed = client.get(
                     f"/v1/workgroups/{wid}/runs",

@@ -1,4 +1,4 @@
-"""Timeline / Outbox / HITL 轻量模型（D3）。"""
+"""Timeline, outbox, HITL, and AgentRef event models."""
 
 from __future__ import annotations
 
@@ -60,14 +60,14 @@ class OutboxFrame(BaseModel):
 class HITLRequest(BaseModel):
     hitl_id: str = Field(pattern=_HT)
     workgroup_id: str = Field(pattern=_WG)
-    kind: Literal["information"] = "information"
+    kind: Literal["tool_approval", "user_question"] = "user_question"
     prompt: str
     status: Literal["pending", "resolved"] = "pending"
     created_at: str
     resolution: dict[str, Any] | None = None
     resolved_at: str | None = None
     # Bind an in-loop HITL to the durable actor history.  Explicit API-created
-    # information requests may leave these fields empty.
+    # user questions may leave these fields empty.
     run_id: str | None = Field(default=None, pattern=_RN)
     tool_call_id: str | None = Field(default=None, min_length=1)
     # Opaque routing metadata for Node AgentRef HITL. It is not exposed as
@@ -118,35 +118,10 @@ class TurnCancelRequest(BaseModel):
 class TurnCancelResponse(BaseModel):
     cancelled: bool
     mode: str = ""  # leader | direct | idle
-    failed_assign_ids: list[str] = Field(default_factory=list)
+    canceled_assign_ids: list[str] = Field(default_factory=list)
     leader_run_id: str | None = None
     member_run_id: str | None = None
     member_run_ids: list[str] = Field(default_factory=list)
-
-
-class ProvisionCompleteRequest(BaseModel):
-    member_id: str
-    provision_id: str
-    workspace_path: str = ""
-    tool_catalog_revision: str = ""
-    status: Literal["ready", "error"] = "ready"
-    error_code: str | None = None
-    message: str | None = None
-
-
-class ToolResultApplyRequest(BaseModel):
-    command_id: str
-    assign_id: str
-    member_id: str
-    status: Literal["succeeded", "failed", "indeterminate", "rejected", "canceled"]
-    result_text: str = ""
-    error_code: str | None = None
-
-
-class MemberFinalRequest(BaseModel):
-    assign_id: str
-    member_id: str
-    text: str = Field(min_length=1)
 
 
 class HITLCreateRequest(BaseModel):
@@ -176,7 +151,6 @@ class SessionHello(BaseModel):
     protocol_version: Literal["1"] = "1"
     schema_version: Literal["0.5.0"] = SCHEMA_VERSION
     last_ack_delivery_seq: int = Field(ge=0, default=0)
-    agent_catalog_revision: str = Field(default="", max_length=256)
     capabilities: list[str] = Field(default_factory=list, max_length=64)
     # Authentication is carried by the WebSocket transport header; this is
     # the client clock used for diagnostics and skew monitoring.

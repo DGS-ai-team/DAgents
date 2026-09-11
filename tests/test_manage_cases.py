@@ -1,6 +1,7 @@
 """Tests for Manage case examples library."""
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,9 @@ from manage.cases.store import CaseExampleStore
 from manage.platform.audit import AuditLog
 from manage.storage.sqlite import SQLiteDatabase
 
+TEST_ADMIN_TOKEN = "test-manage-admin-token"
+os.environ.setdefault("MANAGE_TOKENS", json.dumps([{"id": "test-admin", "token": TEST_ADMIN_TOKEN, "role": "admin"}]))
+
 
 def _cases_client():
     db = SQLiteDatabase(Path(tempfile.mkdtemp()) / "m.db")
@@ -22,7 +26,7 @@ def _cases_client():
     audit = AuditLog(max_entries=50)
     app = FastAPI()
     app.include_router(build_cases_router(store, audit))
-    return TestClient(app), store
+    return TestClient(app, headers={"x-dagents-a2a-token": TEST_ADMIN_TOKEN}), store
 
 
 class JsonlTest(unittest.TestCase):

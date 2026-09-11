@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from "vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   status: { type: String, default: "idle" },
@@ -61,11 +62,7 @@ onBeforeUnmount(clearCloseTimer);
       title="终端操作"
       @click="toggle"
     >
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <circle cx="5" cy="10" r="1.2" fill="currentColor" />
-        <circle cx="10" cy="10" r="1.2" fill="currentColor" />
-        <circle cx="15" cy="10" r="1.2" fill="currentColor" />
-      </svg>
+      <UiIcon name="more-horizontal" :size="16" />
     </button>
 
     <div v-if="open" class="terminal-action-menu__popover" role="menu" aria-label="终端操作">
@@ -78,10 +75,7 @@ onBeforeUnmount(clearCloseTimer);
         title="重连终端"
         @click="run('reconnect')"
       >
-        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <path d="M16 9a6 6 0 1 0 1 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-          <path d="M16 4.5v4h-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <UiIcon name="refresh-cw" :size="16" />
       </button>
       <button
         type="button"
@@ -92,9 +86,7 @@ onBeforeUnmount(clearCloseTimer);
         title="终止终端"
         @click="run('terminate')"
       >
-        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <rect x="5" y="5" width="10" height="10" rx="1.3" fill="currentColor" />
-        </svg>
+        <UiIcon name="square" :size="15" />
       </button>
       <button
         type="button"
@@ -104,9 +96,7 @@ onBeforeUnmount(clearCloseTimer);
         title="清空终端输出"
         @click="run('clear')"
       >
-        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <path d="M4.5 6h11M8 3.5h4l.8 2.5H7.2L8 3.5ZM6 8v6.5a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V8M8.5 9.5v4M11.5 9.5v4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <UiIcon name="trash" :size="15" />
       </button>
     </div>
   </div>

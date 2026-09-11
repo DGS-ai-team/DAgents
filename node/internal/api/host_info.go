@@ -79,10 +79,3 @@ func encodeJSONRaw(v any) json.RawMessage {
 	}
 	return raw
 }
-
-func (s *Server) cfgNodeID() string {
-	if s.cfg == nil {
-		return ""
-	}
-	return s.cfg.NodeID
-}

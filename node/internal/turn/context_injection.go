@@ -12,10 +12,12 @@ import (
 // ModelContextSnapshot and applied to a request copy at the current Turn's
 // root user message, rather than appended as a volatile tail.
 type ContextInjection struct {
-	Name     string `json:"name"`
-	Source   string `json:"source"`
-	Content  string `json:"content"`
-	Position string `json:"position"`
+	Name        string                `json:"name"`
+	Source      string                `json:"source"`
+	Content     string                `json:"content"`
+	Position    string                `json:"position"`
+	MessageKind llm.MessageSourceKind `json:"message_kind,omitempty"`
+	MessageForm llm.MessageSourceForm `json:"message_form,omitempty"`
 }
 
 const (
@@ -28,9 +30,24 @@ const (
 // used by the model request. The message is request-only and must not be
 // appended to the session history.
 func (c ContextInjection) Message() llm.Message {
-	source := llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormSnapshot}
+	kind := c.MessageKind
+	if kind == "" {
+		kind = llm.MessageSourceRuntime
+		if strings.EqualFold(strings.TrimSpace(c.Source), "memory") || strings.EqualFold(strings.TrimSpace(c.Name), llm.UserNameMemoryContext) {
+			kind = llm.MessageSourceMemory
+		}
+	}
+	form := c.MessageForm
+	if form == "" {
+		form = llm.MessageFormSnapshot
+	}
+	name := llm.UserNameContext
+	if kind == llm.MessageSourceMemory {
+		name = llm.UserNameMemoryContext
+	}
+	source := llm.MessageSource{Kind: kind, Form: form}
 	provenance := &llm.MessageProvenance{Producer: c.Source, Operation: c.Name}
-	return llm.UserMessageWithSource(c.Content, llm.UserNameContext, source, provenance)
+	return llm.UserMessageWithSource(c.Content, name, source, provenance)
 }
 
 func cloneContextInjections(in []ContextInjection) []ContextInjection {
@@ -65,16 +82,23 @@ func BuildContextInjections(in SystemPromptInput) []ContextInjection {
 		b.WriteString(in.PromptCtx.BuildStableContextSections())
 		b.WriteString(in.PromptCtx.BuildCustomSection())
 	}
+	if todo := strings.TrimSpace(in.AgentPrompt.Todo); todo != "" {
+		b.WriteString("\n\n## 当前待办\n\n")
+		b.WriteString(todo)
+		b.WriteByte('\n')
+	}
 
 	content := strings.TrimSpace(b.String())
 	if content == "" {
 		return nil
 	}
 	return []ContextInjection{{
-		Name:     contextInjectionName,
-		Source:   contextInjectionSource,
-		Content:  content,
-		Position: contextInjectionPosition,
+		Name:        contextInjectionName,
+		Source:      contextInjectionSource,
+		Content:     content,
+		Position:    contextInjectionPosition,
+		MessageKind: llm.MessageSourceRuntime,
+		MessageForm: llm.MessageFormSnapshot,
 	}}
 }
 
@@ -98,10 +122,12 @@ func BuildChildContextInjections(in ChildSystemPromptInput) []ContextInjection {
 		Snapshot:  hostsnapshot.Get(),
 	})
 	return []ContextInjection{{
-		Name:     contextInjectionName,
-		Source:   contextInjectionSource,
-		Content:  strings.TrimSpace(b.String()),
-		Position: contextInjectionPosition,
+		Name:        contextInjectionName,
+		Source:      contextInjectionSource,
+		Content:     strings.TrimSpace(b.String()),
+		Position:    contextInjectionPosition,
+		MessageKind: llm.MessageSourceRuntime,
+		MessageForm: llm.MessageFormSnapshot,
 	}}
 }
 
@@ -112,7 +138,7 @@ func BuildChildContextInjections(in ChildSystemPromptInput) []ContextInjection {
 func ApplyContextInjections(history []llm.Message, injections []ContextInjection) []llm.Message {
 	filtered := make([]llm.Message, 0, len(history)+len(injections))
 	for _, message := range history {
-		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") {
+		if isRequestOnlyContextMessage(message) {
 			continue
 		}
 		filtered = append(filtered, message)
@@ -121,43 +147,45 @@ func ApplyContextInjections(history []llm.Message, injections []ContextInjection
 		return filtered
 	}
 
-	insertAt := leadingSystemMessages(filtered)
+	rootIndex := -1
 	for i, message := range filtered {
 		if isContextRootUser(message) {
-			insertAt = i
+			rootIndex = i
 		}
 	}
-	if insertAt < 0 || insertAt > len(filtered) {
-		insertAt = len(filtered)
-	}
-
-	out := make([]llm.Message, 0, len(filtered)+len(injections))
-	out = append(out, filtered[:insertAt]...)
+	before := make([]ContextInjection, 0, len(injections))
+	after := make([]ContextInjection, 0, len(injections))
 	for _, injection := range injections {
 		if strings.TrimSpace(injection.Content) == "" {
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(injection.Position), "after_current_user") {
+			after = append(after, injection)
+		} else {
+			// Empty position preserves the original runtime-context behavior.
+			before = append(before, injection)
+		}
+	}
+
+	out := make([]llm.Message, 0, len(filtered)+len(before)+len(after))
+	if rootIndex < 0 {
+		insertAt := leadingSystemMessages(filtered)
+		out = append(out, filtered[:insertAt]...)
+		for _, injection := range before {
+			out = append(out, injection.Message())
+		}
+		out = append(out, filtered[insertAt:]...)
+		return out
+	}
+	out = append(out, filtered[:rootIndex]...)
+	for _, injection := range before {
 		out = append(out, injection.Message())
 	}
-	out = append(out, filtered[insertAt:]...)
-	return out
-}
-
-// StripLegacyTodayDateMessages removes only pre-migration date messages from
-// a request copy. The durable history passed by the caller is left unchanged;
-// this keeps old transcripts auditable while preventing stale dates from
-// consuming model context or entering compression sidecar requests.
-func StripLegacyTodayDateMessages(history []llm.Message) []llm.Message {
-	if len(history) == 0 {
-		return nil
+	out = append(out, filtered[rootIndex])
+	for _, injection := range after {
+		out = append(out, injection.Message())
 	}
-	out := make([]llm.Message, 0, len(history))
-	for _, message := range history {
-		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormNotice, llm.UserNameDate) {
-			continue
-		}
-		out = append(out, message)
-	}
+	out = append(out, filtered[rootIndex+1:]...)
 	return out
 }
 
@@ -170,12 +198,17 @@ func StripContextInjections(history []llm.Message) []llm.Message {
 	}
 	out := make([]llm.Message, 0, len(history))
 	for _, message := range history {
-		if llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") {
+		if isRequestOnlyContextMessage(message) {
 			continue
 		}
 		out = append(out, message)
 	}
 	return out
+}
+
+func isRequestOnlyContextMessage(message llm.Message) bool {
+	return llm.IsMessageSource(message, llm.MessageSourceRuntime, llm.MessageFormSnapshot, "") ||
+		llm.IsMessageSource(message, llm.MessageSourceMemory, llm.MessageFormSnapshot, "")
 }
 
 func leadingSystemMessages(history []llm.Message) int {
@@ -192,7 +225,7 @@ func isContextRootUser(message llm.Message) bool {
 	}
 	source := llm.EffectiveMessageSource(message)
 	switch source.Kind {
-	case llm.MessageSourceUser, llm.MessageSourceTrigger, llm.MessageSourceA2A, llm.MessageSourceChildAgent:
+	case llm.MessageSourceUser, llm.MessageSourceTrigger, llm.MessageSourceChildAgent:
 		return true
 	default:
 		return false

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 
 _ROOT = Path(__file__).resolve().parents[1]
+_AUTH_PATCH = patch.dict("os.environ", {"MANAGE_SHARED_TOKEN": "test-admin-token"})
+def setUpModule(): _AUTH_PATCH.start()
+def tearDownModule(): _AUTH_PATCH.stop()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -35,7 +39,7 @@ class RegistryNodeIDTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
             app = create_app(settings)
-            with TestClient(app) as client:
+            with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
                 reg = client.post(
                     "/v1/registry/agents",
                     json={

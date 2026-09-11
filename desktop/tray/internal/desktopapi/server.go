@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type Server struct {
 	updates UpdateProvider
 	applier *shellupdate.Applier
 	uiFocus *uifocus.Store
+	token   string
 	mux     *http.ServeMux
 	srv     *http.Server
 
@@ -38,7 +40,7 @@ type Server struct {
 }
 
 // New 构造 localhost API 服务；updates 可为 nil（返回空状态）。
-func New(updates UpdateProvider, applier *shellupdate.Applier, uiFocus *uifocus.Store) *Server {
+func New(updates UpdateProvider, applier *shellupdate.Applier, uiFocus *uifocus.Store, token ...string) *Server {
 	if updates == nil {
 		updates = shellupdate.DisabledProvider{}
 	}
@@ -49,6 +51,9 @@ func New(updates UpdateProvider, applier *shellupdate.Applier, uiFocus *uifocus.
 		uiFocus: uiFocus,
 		mux:     http.NewServeMux(),
 	}
+	if len(token) > 0 {
+		s.token = strings.TrimSpace(token[0])
+	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/desktop/update", s.handleDesktopUpdate)
 	s.mux.HandleFunc("POST /v1/desktop/update/apply", s.handleDesktopUpdateApply)
@@ -57,9 +62,10 @@ func New(updates UpdateProvider, applier *shellupdate.Applier, uiFocus *uifocus.
 	return s
 }
 
-// Handler 返回带 CORS 的 HTTP handler（Web UI 跨端口访问）。
+// Handler 返回带来源校验和 bridge 认证的 HTTP handler。浏览器不应直接
+// 调用此服务；Node 通过 Authorization 访问，localhost CORS 仅保留迁移期诊断能力。
 func (s *Server) Handler() http.Handler {
-	return withLocalhostCORS(s.mux)
+	return withBridgeAuth(withLocalhostCORS(s.mux), s.token)
 }
 
 // Start 在后台监听；ctx 取消时优雅关闭。
@@ -129,6 +135,13 @@ func (s *Server) handleUIFocus(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+	if strings.TrimSpace(req.SourceID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":      false,
+			"message": "source_id is required",
+		})
+		return
 	}
 	ttl := uifocus.DefaultTTL
 	if req.TTLSeconds > 0 {

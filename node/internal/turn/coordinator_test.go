@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestTurnCoordinatorRetryMissingUsageRemainsUnknown(t *testing.T) {
+	coordinator := NewTurnCoordinator("s", "a")
+	now := time.Now().UTC()
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "s", TurnID: "t", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestRetrying, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, Usage: StepUsage{TotalTokens: 4}, At: now},
+	}
+	for _, command := range commands {
+		if _, err := coordinator.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.ModelUsageKnown {
+		t.Fatalf("missing first attempt incorrectly known: %#v", snapshot)
+	}
+}
+
 func TestTurnCoordinatorDispatchesOneTurnAcrossMultipleSteps(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	coordinator := NewTurnCoordinator("session-1", "agent-1")
@@ -130,6 +151,56 @@ func TestTurnCoordinatorRejectsStaleCommands(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "generation mismatch") {
 		t.Fatalf("expected stale generation error, got %v", err)
+	}
+}
+
+func TestTurnCoordinatorCancelTurnClosesActiveWorkAtomically(t *testing.T) {
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	c := NewTurnCoordinator("session-1", "agent-1")
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-cancel", Generation: 7, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, HasTools: true, At: now},
+		{Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolCallID: "call-running", ToolName: "bash_run", Arguments: json.RawMessage(`{"command":"sleep 10"}`), At: now},
+		{Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolCallID: "call-complete", ToolName: "read_file", Arguments: json.RawMessage(`{"path":"README.md"}`), At: now},
+		{Type: CommandToolExecutionStarted, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolExecutionID: "call-running-execution", At: now},
+		{Type: CommandToolExecutionStarted, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolExecutionID: "call-complete-execution", At: now},
+		{Type: CommandToolExecutionCompleted, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, ToolExecutionID: "call-complete-execution", ExecutionStatus: ToolExecutionStatusSucceeded, At: now},
+		{Type: CommandInteractionRequested, SessionID: "session-1", TurnID: "turn-cancel", StepID: "step-1", Generation: 7, InteractionID: "approval-1", InteractionKind: "approval", ToolExecutionID: "call-running-execution", At: now},
+	}
+	for _, command := range commands {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+
+	snapshot, err := c.Dispatch(TurnCommand{
+		Type: CommandCancelTurn, SessionID: "session-1", TurnID: "turn-cancel", Generation: 7, At: now.Add(time.Second), Reason: "cancelled_by_user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TurnStatus != TurnStatusCancelled || snapshot.StepStatus != StepStatusCancelled || snapshot.HasActiveTurn {
+		t.Fatalf("cancelled projection = %+v", snapshot)
+	}
+	statuses := map[string]ToolExecutionStatus{}
+	for _, execution := range snapshot.ToolExecutions {
+		statuses[execution.ToolCallID] = execution.Status
+	}
+	if statuses["call-running"] != ToolExecutionStatusCancelled {
+		t.Fatalf("running execution status = %q, want cancelled", statuses["call-running"])
+	}
+	if statuses["call-complete"] != ToolExecutionStatusSucceeded {
+		t.Fatalf("completed execution was overwritten: %q", statuses["call-complete"])
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.batch == nil || c.batch.Status != "cancelled" {
+		t.Fatalf("tool batch status = %#v, want cancelled", c.batch)
+	}
+	if c.interaction == nil || c.interaction.Status != InteractionStatusCancelled {
+		t.Fatalf("interaction status = %#v, want cancelled", c.interaction)
 	}
 }
 
@@ -476,6 +547,12 @@ func TestTurnCoordinatorReplaysModelContextChange(t *testing.T) {
 	second.SkillsCatalogRevision = "catalog-v2"
 	second.LoadedSkillsDigest = "loaded-v2"
 	second.LoadedSkillsContentDigest = "body-v2"
+	second.MemorySnapshotID = "memsnap-1"
+	second.MemoryStoreRevision = 17
+	second.MemoryDigest = "memory-digest-v1"
+	second.MemoryCoreCount = 2
+	second.MemoryRecallCount = 3
+	second.MemoryEstimatedTokens = 480
 	payload := func(generation uint64, snapshot *ModelContextSnapshot) []byte {
 		raw, err := json.Marshal(map[string]any{
 			"generation":       generation,
@@ -504,6 +581,14 @@ func TestTurnCoordinatorReplaysModelContextChange(t *testing.T) {
 		state.ContextSnapshot.LoadedSkillsDigest != "loaded-v2" ||
 		state.ContextSnapshot.LoadedSkillsContentDigest != "body-v2" {
 		t.Fatalf("replayed skill snapshot diagnostics = %#v", state.ContextSnapshot)
+	}
+	if state.ContextSnapshot.MemorySnapshotID != "memsnap-1" ||
+		state.ContextSnapshot.MemoryStoreRevision != 17 ||
+		state.ContextSnapshot.MemoryDigest != "memory-digest-v1" ||
+		state.ContextSnapshot.MemoryCoreCount != 2 ||
+		state.ContextSnapshot.MemoryRecallCount != 3 ||
+		state.ContextSnapshot.MemoryEstimatedTokens != 480 {
+		t.Fatalf("replayed memory snapshot diagnostics = %#v", state.ContextSnapshot)
 	}
 }
 
@@ -596,6 +681,35 @@ func TestTurnCoordinatorTracksAndPreflightsTurnBudget(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorPreflightsToolRoundsSeparatelyFromToolCalls(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-rounds", "agent-1")
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-rounds", TurnID: "turn-rounds", Generation: 1, Source: TurnSourceTrigger, Budget: TurnBudget{MaxToolRounds: 1, MaxSteps: 4, ReserveFinalSummary: true}, At: now},
+		{Type: CommandStartStep, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, At: now},
+	} {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
+		t.Fatalf("tool rounds=%d, want 1", got)
+	}
+	if _, err := c.Dispatch(TurnCommand{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, ToolBatchID: "step-1-batch", At: now}); err != nil {
+		t.Fatalf("duplicate assistant event should be idempotent: %v", err)
+	}
+	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
+		t.Fatalf("duplicate assistant changed tool rounds=%d, want 1", got)
+	}
+	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_tool_rounds" {
+		t.Fatalf("next tool round should be rejected: %+v", decision)
+	}
+	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); !decision.Allowed {
+		t.Fatalf("final summary should remain allowed: %+v", decision)
+	}
+}
+
 func TestTurnCoordinatorAccumulatesModelUsageAcrossAttempts(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
@@ -679,6 +793,28 @@ func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
 	}
 	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_output_tokens" {
 		t.Fatalf("output budget decision = %+v", decision)
+	}
+}
+
+func TestTurnCoordinatorRejectsThirdRequestAndToolAfterTotalBudget(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-total", "agent-1")
+	budget := TurnBudget{MaxTotalTokens: 10, MaxSteps: 3, MaxToolCalls: 3}
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-total", TurnID: "turn-total", Generation: 1, Source: TurnSourceHuman, Budget: budget, At: now},
+		{Type: CommandStartStep, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, Usage: StepUsage{TotalTokens: 10}, At: now},
+	} {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := c.BudgetDecisionFor(CommandModelRequestStarted); d.Allowed || d.Reason != "max_total_tokens" {
+		t.Fatalf("third request decision=%+v", d)
+	}
+	if d := c.BudgetDecisionFor(CommandToolCallRecorded); d.Allowed || d.Reason != "max_total_tokens" {
+		t.Fatalf("tool decision=%+v", d)
 	}
 }
 

@@ -10,14 +10,6 @@ func TestAgentURL(t *testing.T) {
 	}
 }
 
-func TestSessionURL(t *testing.T) {
-	got := SessionURL("http://127.0.0.1:18765", "sess-abc")
-	want := "http://127.0.0.1:18765/ui/agents/sess-abc"
-	if got != want {
-		t.Fatalf("url = %q want %q", got, want)
-	}
-}
-
 func TestConsoleURL(t *testing.T) {
 	got := ConsoleURL("http://127.0.0.1:18765/")
 	if got != "http://127.0.0.1:18765/ui/" {

@@ -40,7 +40,7 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		return err
 	}
 	childOpts := m.turn
-	childOpts.MaxToolLoops = spec.MaxTurns
+	childOpts.Budget.MaxSteps = spec.MaxTurns
 	rt := newChildRuntime(
 		spec.ChildAgentID,
 		spec.ParentAgentID,
@@ -56,6 +56,7 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		loadedSkills,
 		m.children,
 	)
+	m.bindMaintenanceGate(rt)
 	m.sessions[spec.ChildAgentID] = rt
 	rt.start(m.ctx)
 	return nil
@@ -110,7 +111,7 @@ func (m *Manager) EnqueueChildTask(childSessionID, content string) error {
 	if rt == nil || !rt.isChildSession() {
 		return fmt.Errorf("child session not found")
 	}
-	_, err := rt.appendInput(InputKindA2A, queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask})
+	_, err := rt.appendInput(InputKindChildAgent, queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask})
 	return err
 }
 
@@ -178,7 +179,7 @@ func (m *Manager) ListActiveUser() []*Session {
 	return out
 }
 
-// ListChildAgents 返回父 session 下活跃子 Agent 视图。
+// ListChildAgents 返回父 session 下活跃与最近终态子 Agent 快照。
 func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, error) {
 	if m.children == nil {
 		return nil, nil
@@ -186,33 +187,25 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 	if m.Get(parentSessionID) == nil {
 		return nil, fmt.Errorf("agent_not_found")
 	}
-	recs := m.children.ListActive(parentSessionID)
+	recs, err := m.children.ListSnapshots(parentSessionID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ChildAgentView, 0, len(recs))
-	for _, rec := range recs {
-		if rec == nil {
-			continue
-		}
-		snapshot := rec.Snapshot()
-		turnCount := snapshot.TurnCount
-		progress := snapshot.Progress
-		rt := m.getRuntime(snapshot.ChildAgentID)
-		if rt != nil {
-			turnCount = rt.stepIndexSnapshot()
-			if turnCount > progress.TurnCount {
-				progress.TurnCount = turnCount
-			}
-		}
+	for _, snapshot := range recs {
 		out = append(out, ChildAgentView{
 			ChildAgentID: snapshot.ChildAgentID,
 			ToolCallID:   snapshot.ToolCallID,
 			Status:       string(snapshot.Status),
 			Purpose:      snapshot.Purpose,
 			AllowedTools: append([]string(nil), snapshot.AllowedTools...),
+			LoadedSkills: append([]string(nil), snapshot.LoadedSkills...),
 			CreatedAt:    snapshot.CreatedAt,
 			ExpiresAt:    snapshot.ExpiresAt,
-			TurnCount:    turnCount,
+			FinishedAt:   snapshot.FinishedAt,
+			TurnCount:    snapshot.TurnCount,
 			MaxTurns:     snapshot.MaxTurns,
-			Progress:     progress,
+			Progress:     snapshot.Progress,
 		})
 	}
 	return out, nil
@@ -233,8 +226,10 @@ type ChildAgentView struct {
 	Status       string              `json:"status"`
 	Purpose      string              `json:"purpose"`
 	AllowedTools []string            `json:"allowed_tools"`
+	LoadedSkills []string            `json:"loaded_skills"`
 	CreatedAt    time.Time           `json:"created_at"`
 	ExpiresAt    time.Time           `json:"expires_at"`
+	FinishedAt   time.Time           `json:"finished_at,omitempty"`
 	TurnCount    int                 `json:"turn_count"`
 	MaxTurns     int                 `json:"max_turns"`
 	Progress     childagent.Progress `json:"progress"`

@@ -6,6 +6,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
 func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
@@ -185,6 +186,36 @@ func TestMessagesToTranscriptEntries_toolResultBackfillName(t *testing.T) {
 	args, _ := data["arguments"].(map[string]any)
 	if args["call_purpose"] != "test weather" {
 		t.Fatalf("arguments = %#v", data["arguments"])
+	}
+}
+
+func TestMessagesToTranscriptEntries_preservesToolResultMetadata(t *testing.T) {
+	t.Parallel()
+	messages := []llm.Message{
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{
+			ID:       "call-meta",
+			Function: llm.ToolCallFunction{Name: "terminal_command", Arguments: `{"command":"pwd"}`},
+		}}},
+		llm.ToolResultMessageWithMetadata("call-meta", "terminal_command", "命令已超时。", tools.ResultMetadata{
+			Status: tools.ResultStatusTimedOut,
+			Error:  &tools.ResultError{Code: "timeout", Message: "command exceeded timeout", Retryable: true},
+		}),
+	}
+
+	entries := MessagesToTranscriptEntries(messages)
+	if len(entries) != 2 {
+		t.Fatalf("len = %d, want 2", len(entries))
+	}
+	data, _ := entries[1]["data"].(map[string]any)
+	if data["status"] != string(tools.ResultStatusTimedOut) {
+		t.Fatalf("status = %#v", data["status"])
+	}
+	if _, ok := data["rejected"]; ok {
+		t.Fatalf("tool transcript must not expose duplicate rejected field: %#v", data)
+	}
+	errData, _ := data["error"].(map[string]any)
+	if errData["code"] != "timeout" || errData["retryable"] != true {
+		t.Fatalf("error = %#v", data["error"])
 	}
 }
 

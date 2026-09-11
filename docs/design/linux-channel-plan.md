@@ -1,6 +1,8 @@
-# Linux 通道设计方案
+# Linux 通道设计方案（历史记录）
 
-> 状态：主路径已实现；本文保留 `linux_exec` 兼容语义。新 Agent 优先使用 `terminal_*`，旧工具名仅用于迁移旧 Agent 快照。
+> **文档性质**：历史设计记录，不是当前 API 契约。当前实现以 `terminal_*` 工具、Linux channel API 和内置工具参考为准；本文中的 `linux_exec` 是早期方案名，不应重新实现或加入兼容入口。
+>
+> 状态：主路径已实现；Agent 通过 `terminal_*` 使用已绑定的 Linux 通道。
 >
 > 目标：在 Agent Node 侧配置多个 Linux 连接，将一个或多个连接绑定到不同 Agent，并允许 Agent 在审批和策略约束下通过 SSH 打开通道、执行命令和读取结果。
 

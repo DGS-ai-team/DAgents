@@ -34,10 +34,10 @@ type Options struct {
 	Output    string
 }
 
-// Run 查询更新状态（Windows 经 Shell delegate），可选下载安装包到 Output。
+// Run 通过 Node 查询更新状态，可选下载安装包到 Output。
 func Run(ctx context.Context, cfg *config.Config, opt Options) int {
 	client := nodeapi.New(cfg.Local.Endpoint, &http.Client{Timeout: 30 * time.Second})
-	status, err := desktop.ResolveAgentUpdate(ctx, client, nil)
+	status, err := desktop.ResolveAgentUpdate(ctx, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "update check failed: %v\n", err)
 		return 1

@@ -21,7 +21,6 @@ import (
 const (
 	ExitUpToDate         = 3
 	exitNodeBusy         = 4
-	defaultApplyTimeout  = 20 * time.Minute
 	defaultNodeStopWait  = 30 * time.Second
 	defaultNodeStartWait = 45 * time.Second
 )
@@ -41,7 +40,7 @@ type ApplyResult struct {
 	Message string
 }
 
-// Applier 执行 upgrade-readiness → 下载 → stop Node → 覆盖 bin → start Node。
+// Applier 执行 upgrade-readiness → 下载 → stop Node → 启动 Inno 安装器。
 type Applier struct {
 	cfg        *config.Config
 	layout     *nodectl.Layout
@@ -91,6 +90,12 @@ func (a *Applier) Run(ctx context.Context, opt ApplyOptions) (ApplyResult, int) 
 		fmt.Fprintln(optOut(opt), "当前已是最新版本")
 		return result, ExitUpToDate
 	}
+	if !isWindowsInstallerAsset(status) {
+		message := "Windows 更新只支持 Inno Setup .exe 安装包"
+		fmt.Fprintln(optErr(opt), message)
+		result.Message = message
+		return result, 1
+	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -130,45 +135,13 @@ func (a *Applier) Run(ctx context.Context, opt ApplyOptions) (ApplyResult, int) 
 		fmt.Fprintf(optErr(opt), "stop node failed: %v\n", err)
 		return result, 1
 	}
-	if isWindowsInstallerAsset(status) {
-		if err := launchWindowsInstaller(pkgPath, a.layout.Home); err != nil {
-			_ = nodectl.Start(context.Background(), a.layout, cfg, defaultNodeStartWait)
-			fmt.Fprintf(optErr(opt), "start Windows installer failed: %v\n", err)
-			return result, 1
-		}
-		result.Message = fmt.Sprintf("Windows 安装包已启动，将升级到 %s", status.LatestVersion)
-		fmt.Fprintln(optOut(opt), result.Message)
-		return result, 0
-	}
-
-	transaction, err := installReleasePackage(a.layout.Home, pkgPath)
-	if err != nil {
-		fmt.Fprintf(optErr(opt), "install failed: %v\n", err)
+	if err := launchWindowsInstaller(pkgPath, a.layout.Home); err != nil {
 		_ = nodectl.Start(context.Background(), a.layout, cfg, defaultNodeStartWait)
+		fmt.Fprintf(optErr(opt), "start Windows installer failed: %v\n", err)
 		return result, 1
 	}
-
-	startCtx, cancelStart := context.WithTimeout(ctx, defaultNodeStartWait)
-	defer cancelStart()
-	if err := nodectl.Start(startCtx, a.layout, cfg, defaultNodeStartWait); err != nil {
-		rollbackErr := transaction.Rollback()
-		oldStartErr := nodectl.Start(context.Background(), a.layout, cfg, defaultNodeStartWait)
-		switch {
-		case rollbackErr != nil:
-			fmt.Fprintf(optErr(opt), "start node failed: %v; rollback failed: %v\n", err, rollbackErr)
-		case oldStartErr != nil:
-			fmt.Fprintf(optErr(opt), "start node failed: %v; old version restart failed: %v\n", err, oldStartErr)
-		default:
-			fmt.Fprintf(optErr(opt), "start node failed: %v; rolled back to the previous version\n", err)
-		}
-		return result, 1
-	}
-	transaction.Commit()
-
-	a.checker.CheckNow()
-	result.Status = a.checker.Snapshot()
-	result.Message = fmt.Sprintf("已升级到 %s", status.LatestVersion)
-	fmt.Fprintf(optOut(opt), "update complete: %s\n", status.LatestVersion)
+	result.Message = fmt.Sprintf("Windows 安装包已启动，将升级到 %s", status.LatestVersion)
+	fmt.Fprintln(optOut(opt), result.Message)
 	return result, 0
 }
 

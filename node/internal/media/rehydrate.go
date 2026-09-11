@@ -61,7 +61,7 @@ func RehydrateFromMessages(reg *Registry, messages []llm.Message, callIndex map[
 		items := make([]map[string]any, 0, len(specs))
 		for _, spec := range specs {
 			art, err := reg.RegisterFromPath(RegisterOpts{
-				RelPath:    spec.RelPath,
+				Path:       spec.RelPath,
 				Source:     spec.Source,
 				ToolCallID: callID,
 				Label:      spec.Label,

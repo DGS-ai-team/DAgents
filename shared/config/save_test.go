@@ -11,8 +11,8 @@ func TestSaveFile_roundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	cfg := &Config{
-		NodeID: "save-test",
-		FSRoot: dir,
+		NodeID:      "save-test",
+		RuntimeRoot: dir,
 	}
 	cfg.LLM.Provider = "deepseek"
 	cfg.LLM.Model = "deepseek-chat"
@@ -44,34 +44,12 @@ func TestSaveFile_roundTrip(t *testing.T) {
 func TestSaveFile_rejectsInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	cfg := &Config{FSRoot: dir}
+	cfg := &Config{RuntimeRoot: dir}
 	cfg.ApplyDefaults()
 	cfg.LLM.Mock = false
 	cfg.LLM.Model = ""
 
 	if err := SaveFile(path, cfg); err == nil {
 		t.Fatal("expected validation error")
-	}
-}
-
-func TestFileHasMigratableSettings(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	thin := filepath.Join(dir, "thin.yaml")
-	if err := SaveBootstrapFile(thin, &Config{
-		Listen: ListenConfig{Host: "127.0.0.1", Port: 18765},
-		Local:  LocalConfig{Endpoint: "http://127.0.0.1:18765"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if FileHasMigratableSettings(thin) {
-		t.Fatal("bootstrap-only yaml should not be migratable")
-	}
-	fat := filepath.Join(dir, "fat.yaml")
-	if err := os.WriteFile(fat, []byte("listen:\n  port: 1\nskills:\n  enabled: true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !FileHasMigratableSettings(fat) {
-		t.Fatal("fat yaml should be migratable")
 	}
 }

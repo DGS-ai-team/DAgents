@@ -10,7 +10,7 @@
 
 | 包 | 规模 | 职责 | 评估 | 阶段 A 建议 |
 |----|------|------|------|-------------|
-| **`api`** | 10 文件 ~2.2k | HTTP/SSE、`NewServer` 装配 | `server.go` 偏大（~870 行），路由+装配耦合 | 后续拆 `server_routes.go` / `server_wire.go`；测试 `FSRoot` 用 `t.TempDir()` |
+| **`api`** | 10 文件 ~2.2k | HTTP/SSE、`NewServer` 装配 | `server.go` 偏大（~870 行），路由+装配耦合 | 后续拆 `server_routes.go` / `server_wire.go`；测试 workspace root 用 `t.TempDir()` |
 | **`session`** | 15 文件 ~2.8k | Manager、runtime、队列消费、HITL 与 Workgroup Session | 边界清晰；`runtime.go` ~630 行可接受 | 保持 runtime/turn 边界；继续补恢复测试 |
 | **`turn`** | 15 文件 ~2.6k | Orchestrator、tool 路由、HITL、prompt | `orchestrator.go` ~525 行、`tool_router.go` ~369 行 | 暂不动；单测已按 concern 拆分 |
 | **`tools`** | 46 文件 ~5.7k | Registry、fs/bash/job/领域 tool | **已完成阶段 A**（见下） | 阶段 B：子 package + `Register` |

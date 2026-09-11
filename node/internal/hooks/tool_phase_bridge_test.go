@@ -119,9 +119,10 @@ func TestRunToolAfterEachViaRunPhase_registersTwoPhaseHooks(t *testing.T) {
 }
 
 func TestRunToolAfterEachViaRunPhase_passesThroughRawResult(t *testing.T) {
+	disabled := false
 	reg := NewRegistry(nil, RuntimeConfig{
 		Duplicate:  DefaultDuplicateConfig(),
-		ToolResult: ToolResultConfig{Enabled: false},
+		ToolResult: ToolResultConfig{Enabled: &disabled},
 	})
 	in := ToolAfterEachInput{
 		SessionID:  "s1",
@@ -156,9 +157,10 @@ func TestRunToolBeforeEachViaRunPhase_contextCarriesDecision(t *testing.T) {
 }
 
 func TestRunToolAfterEachViaRunPhase_contextCarriesOutput(t *testing.T) {
+	disabled := false
 	reg := NewRegistry(nil, RuntimeConfig{
 		Duplicate:  DefaultDuplicateConfig(),
-		ToolResult: ToolResultConfig{Enabled: false},
+		ToolResult: ToolResultConfig{Enabled: &disabled},
 	})
 	hc := contextFromToolAfterEachInput(ToolAfterEachInput{
 		SessionID:  "s1",
@@ -221,7 +223,8 @@ func TestPolicyToolHookRun_nativeHook(t *testing.T) {
 }
 
 func TestToolResultPackageHookRun_disabled(t *testing.T) {
-	hook := NewToolResultPackageHook(ToolResultConfig{Enabled: false})
+	disabled := false
+	hook := NewToolResultPackageHook(ToolResultConfig{Enabled: &disabled})
 	raw := strings.Repeat("x", 100)
 	hc := contextFromToolAfterEachInput(ToolAfterEachInput{
 		SessionID: "s1", ToolCallID: "tc-1", ToolName: "read_file", RawResult: raw,

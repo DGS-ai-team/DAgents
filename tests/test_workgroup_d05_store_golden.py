@@ -74,22 +74,18 @@ def _ready_store(
     store.patch_acl(wid, ACLPatchRequest(collaborators=collabs, expected_revision=1))
     if with_member and collabs:
         home = collabs[0]
-        member, _ = store.create_member(
+        member = store.create_member(
             wid,
             MemberCreateRequest(
+                agent_id="agent-b",
                 display_name="Worker",
                 home_node_id=home,
-                llm_profile_id="mock",
-                llm_profile_revision="1",
-                allow_tool_names=["read_file"],
             ),
         )
         store.mark_member_status(
             member.member_id,
             "ready",
             workgroup_id=wid,
-            workspace_path=str(Path(tmp) / "ws"),
-            tool_catalog_revision="rev_test",
         )
     store.publish_workgroup(wid)
     return store, wid

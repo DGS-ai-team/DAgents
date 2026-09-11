@@ -15,7 +15,6 @@ $goPackages = @(
     "./shared/config/...",
     "./shared/logfiles/...",
     "./shared/update/...",
-    "./shared/workgroup/...",
     "./node/...",
     "./client/...",
     "./desktop/tray/..."
@@ -25,6 +24,7 @@ Invoke-Step "install Node Web UI dependencies" { npm ci --prefix node/webui/fron
 Invoke-Step "build Node Web UI" { npm run build --prefix node/webui/frontend }
 Invoke-Step "test Node Web UI" { npm test --prefix node/webui/frontend }
 Invoke-Step "lint Node Web UI" { npm run lint --prefix node/webui/frontend }
+Invoke-Step "branding asset contract" { python scripts/ci/check_brand_assets.py }
 Invoke-Step "install Manage Console dependencies" { npm ci --prefix manage/console/frontend }
 Invoke-Step "build Manage Console" { npm run build --prefix manage/console/frontend }
 Invoke-Step "lint Manage Console" { npm run lint --prefix manage/console/frontend }
@@ -61,7 +61,7 @@ function Invoke-Staticcheck {
     } else {
         $staticcheckPath = $staticcheckCommand.Source
     }
-    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "shared/workgroup", "node", "client", "desktop/tray")) {
+    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "node", "client", "desktop/tray")) {
         Invoke-Step "Staticcheck $module" {
             Push-Location $module
             try {

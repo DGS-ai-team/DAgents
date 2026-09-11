@@ -1,10 +1,9 @@
 package promptcontext
 
-// Content 为侧车 Markdown 与长期记忆正文（通常来自 SQLite）。
+// Content 为侧车 Markdown 正文（通常来自 SQLite）。
 type Content struct {
-	Soul     string
-	Custom   string
-	LongTerm string
+	Soul   string
+	Custom string
 }
 
 // NewContentReader 从内存正文构造 Reader。

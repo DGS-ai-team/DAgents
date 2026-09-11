@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { themeStore, toggleTheme } from "../theme.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   view: { type: String, required: true },
@@ -26,7 +27,6 @@ const themeLabel = computed(() =>
 
 const primaryModules = [
   { id: "workgroup", label: "工作组" },
-  { id: "templates", label: "Agent 模板" },
   { id: "marketplace", label: "能力市场" },
 ];
 
@@ -35,6 +35,8 @@ const adminModules = [
   { id: "agents", label: "Agent 列表", hint: "可加入工作组的运行时 Agent" },
   { id: "permissions", label: "发现组", hint: "Node 可见性分组" },
   { id: "settings", label: "配置", hint: "LLM 与发布" },
+  { id: "feedback", label: "用户反馈", hint: "查看、处理与回复" },
+  { id: "auto", label: "Auto 员工", hint: "只读岗位状态与摘要" },
 ];
 
 const adminActive = computed(() =>
@@ -116,23 +118,7 @@ onBeforeUnmount(() => {
         :aria-label="themeLabelComputed"
         @click="toggleTheme"
       >
-        <svg v-if="themeStore.resolved === 'dark'" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.2" />
-          <path
-            d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M3.2 12.8l1.1-1.1M11.7 4.3l1.1-1.1"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-          />
-        </svg>
-        <svg v-else viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path
-            d="M10.9 2.3a5.8 5.8 0 1 0 2.8 10 5.9 5.9 0 0 1-2.8-10Z"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linejoin="round"
-          />
-        </svg>
+        <UiIcon :name="themeStore.resolved === 'dark' ? 'sun' : 'moon'" :size="16" />
       </button>
 
       <div v-if="!hideModules" ref="adminWrap" class="topnav-admin">
@@ -145,9 +131,7 @@ onBeforeUnmount(() => {
           @click.stop="toggleAdmin"
         >
           管理
-          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-          </svg>
+          <UiIcon name="chevron-down" :size="14" />
         </button>
         <div v-if="adminOpen" class="topnav-admin-menu" role="menu">
           <button

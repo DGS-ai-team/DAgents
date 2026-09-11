@@ -165,11 +165,7 @@ func (s *sideEffectStore) applyOneBatch(
 		return applied, appliedSeqs, false
 	}
 
-	head := pending[0]
-	site := turn.ResolveSideEffectInsertSite(*history, head.built)
-	if !site.Ready {
-		return applied, appliedSeqs, false
-	}
+	site := turn.ResolveSideEffectInsertSite(*history)
 
 	var plan turn.SideEffectApplyPlan
 	if len(pending) >= 2 {
@@ -212,10 +208,7 @@ func (s *sideEffectStore) collectBatch(history []llm.Message) []readySideEffect 
 	if turn.SideEffectAlreadyApplied(history, head.async) {
 		return []readySideEffect{head}
 	}
-	site := turn.ResolveSideEffectInsertSite(history, head.built)
-	if !site.Ready {
-		return nil
-	}
+	site := turn.ResolveSideEffectInsertSite(history)
 	targetAt := site.InsertAt
 	sim := append([]llm.Message(nil), history...)
 	var batch []readySideEffect
@@ -225,10 +218,7 @@ func (s *sideEffectStore) collectBatch(history []llm.Message) []readySideEffect 
 			batch = append(batch, e)
 			continue
 		}
-		es := turn.ResolveSideEffectInsertSite(sim, e.built)
-		if !es.Ready {
-			break
-		}
+		es := turn.ResolveSideEffectInsertSite(sim)
 		if len(batch) == 0 {
 			if es.InsertAt != targetAt {
 				break

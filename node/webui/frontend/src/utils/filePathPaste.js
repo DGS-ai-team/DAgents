@@ -72,29 +72,6 @@ export function normalizeFileReferences(fileRefs) {
 }
 
 /**
- * Convert legacy prompt markers into structured UI data. This is only for
- * history written before file_refs existed; new messages never use markers.
- */
-export function extractFileReferencesFromMessage(text) {
-  const source = String(text || "");
-  const paths = [];
-  const marker = /'''引用文件：<file>([\s\S]*?)<\/file>'''/g;
-  const cleanText = source.replace(marker, (_match, path) => {
-    const normalized = normalizeFilePath(path);
-    if (normalized) paths.push(normalized);
-    return "";
-  }).replace(/^\s+|\s+$/g, "");
-  const refs = [];
-  const seen = new Set();
-  for (const path of paths) {
-    const key = fileReferenceKey(path);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    refs.push(createFileReference(path, "legacy"));
-  }
-  return { text: cleanText, fileRefs: refs.filter(Boolean) };
-}
-/**
  * @param {string} uriList text/uri-list 或 plain
  */
 export function pathsFromUriList(uriList) {

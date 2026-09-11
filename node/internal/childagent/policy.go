@@ -12,8 +12,6 @@ const (
 	EventTemporaryAgentCancelled = "temporary_agent_cancelled"
 
 	ToolCreateTemporaryAgent = "create_temporary_agent"
-	ToolWaitTemporaryAgents  = "wait_temporary_agents"
-	ToolTemporaryAgentStatus = "temporary_agent_status"
 	ToolCancelTemporaryAgent = "cancel_temporary_agent"
 
 	ToolLoadSkills   = "load_skills"
@@ -41,7 +39,7 @@ func ParentDelegatableTools() []string {
 // IsParentOnlyTool 为仅父 Agent 可用的工具（含临时 Agent 管理工具、skills）。
 func IsParentOnlyTool(name string) bool {
 	switch strings.TrimSpace(name) {
-	case ToolCreateTemporaryAgent, ToolWaitTemporaryAgents, ToolTemporaryAgentStatus, ToolCancelTemporaryAgent,
+	case ToolCreateTemporaryAgent, ToolCancelTemporaryAgent,
 		ToolLoadSkills, ToolUnloadSkills, ToolClearSkills:
 		return true
 	default:
@@ -52,7 +50,7 @@ func IsParentOnlyTool(name string) bool {
 // IsTemporaryAgentTool 判断是否为临时 Agent 管理工具（由 orchestrator 专用处理）。
 func IsTemporaryAgentTool(name string) bool {
 	switch strings.TrimSpace(name) {
-	case ToolCreateTemporaryAgent, ToolWaitTemporaryAgents, ToolTemporaryAgentStatus, ToolCancelTemporaryAgent:
+	case ToolCreateTemporaryAgent, ToolCancelTemporaryAgent:
 		return true
 	default:
 		return false

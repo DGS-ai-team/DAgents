@@ -1,284 +1,147 @@
 # childagent
 
-Go Node **同进程临时 Agent（temporary agent）** 的控制面：管理创建 → 子 runtime 执行 → 结果交付 → 回收的全生命周期，并与父 session 的 SSE / HITL 打通。
+`childagent` 是 Node 内部的临时子 Agent 控制面。它负责创建、运行跟踪、审批路由、取消、终态交付和快照持久化；子 Agent 的实际消息处理仍由 `session` runtime 完成。
 
-**与外部 A2A 无关**（A2A 经 Manage/inbox；本包只服务父 Agent 工具 `create_temporary_agent` 等）。
+本模块只提供两类模型工具：
 
-实现契约见 [`docs/architecture/child-agent-tools.md`](../../../docs/architecture/child-agent-tools.md)。符号索引见 [`REFERENCE.md`](./REFERENCE.md)。
+- `create_temporary_agent`：创建并同步等待子 Agent 进入终态，然后返回结果。
+- `cancel_temporary_agent`：取消仍在运行的子 Agent。
 
----
+创建工具没有 `wait` 参数，也没有 `wait_temporary_agents` 或 `temporary_agent_status`。需要后台并行执行时，应使用独立的工具级后台能力，而不是把子 Agent 生命周期拆成多个模型工具。
 
 ## 在整体架构中的位置
 
 ```mermaid
 flowchart TB
-    subgraph Parent["父 session runtime"]
-        OrchP["Orchestrator"]
-        OrchP -->|"create_temporary_agent 等"| CM["childagent.Manager"]
-    end
-
-    subgraph Childagent["childagent 包"]
-        CM --> Host["Host 接口"]
-        CM --> Hub["stream.Hub SSE"]
-    end
-
-    subgraph Child["子 session runtime"]
-        Relay["RelayHub"]
-        OrchC["Orchestrator + RestrictedRegistry"]
-        Relay --> Hub
-        OrchC --> Relay
-    end
-
-    Host -->|"SpawnChild / StopChild"| Child
-    Child -->|"OnChildSettled"| CM
+    Parent[父 session runtime] -->|同步 create/cancel| Manager[childagent.Manager]
+    Manager -->|Host: Spawn / Stop / Resume| Sessions[session.Manager]
+    Sessions --> Child[子 session runtime]
+    Child -->|子事件| Relay[RelayHub]
+    Relay -->|父 session SSE| Hub[stream.Hub]
+    Manager -->|进度与终态| Hub
+    Manager -->|ChildRun 快照| Store[(SQLite)]
 ```
 
 | 层 | 职责 |
-|----|------|
-| **`childagent`** | 记录表、TTL、wait/status/cancel、SSE 生命周期事件、resume 路由 |
-| **`session`** | 真正 spawn/stop 子 `runtime`，实现 `Host`（`manager_child.go`、`runtime_child.go`） |
-| **`turn/orchestrator`** | 识别 4 个临时 Agent 工具，转给 `Manager.HandleParentTool` |
-| **`RelayHub`** | 子 turn 的 SSE **全部挂到父 `session_id`** 上 |
+|---|---|
+| `childagent` | 生命周期状态机、同步结果等待、TTL、取消、快照、父子审批路由 |
+| `session` | 创建/停止子 runtime，向子 runtime 投递 task/resume |
+| `turn` | 识别管理工具；创建和取消按普通 ToolCall → ToolResult 接回当前父 Turn |
+| `RelayHub` | 将子 runtime 的进度、工具和审批事件关联到父 session |
+| `store` | 持久化 ChildRun 控制面快照，不保存子 Agent 完整 transcript |
+| Web UI | 消费 SSE 实时进度，并用 hydrate/API 快照恢复卡片 |
 
-工具 schema 定义在 [`node/internal/tools/tool_childagent.go`](../tools/tool_childagent.go)（LLM 可见契约，不在本包内）。
+## 文件阅读顺序
 
----
+1. `policy.go`：工具名、状态事件、权限边界。
+2. `types.go`：状态、输入、结果、进度和持久化接口。
+3. `parse.go`：创建参数与工具白名单校验。
+4. `registry.go`：子 runtime 的受限工具注册表。
+5. `manager.go`：生命周期、同步等待、终态、TTL、快照和事件。
+6. `progress.go`：从子 SSE 事件生成轻量进度快照。
+7. `tools_handler.go`：父工具入口。
+8. `session/manager_child.go`、`runtime_child.go`：宿主和子 runtime 粘合。
+9. `webui/frontend/src/stores/remoteWorkers.js`：前端实时/恢复投影。
 
-## 文件与建议阅读顺序
-
-| 顺序 | 文件 | 内容 |
-|------|------|------|
-| ① | `policy.go` | 协议常量、工具名、权限边界、首条 task 格式化 |
-| ② | `types.go` | 状态机、`ActiveAgent` / `Result` |
-| ③ | `parse.go` | 工具入参解析、`allowed_tools` 校验 |
-| ④ | `registry.go` | 子 runtime 工具白名单（`RestrictedRegistry`） |
-| ⑤ | `manager.go` | **核心**：创建、终态、TTL、SSE、resume 路由 |
-| ⑥ | `tools_handler.go` | `wait` / `status` / `cancel` 实现 |
-| ⑦ | `relay_hub.go` | 子 SSE → 父 SSE + HITL 元数据 |
-| ⑧ | `session/manager_child.go` + `runtime_child.go` | 与 session 层的粘合（包外） |
-
-测试：`manager_test.go`、`wait_delivered_test.go`；集成见 `session/manager_child_test.go`、`api/child_agents_api_test.go`。
-
----
-
-## 协议常量（`policy.go`）
-
-对外命名统一为 **temporary agent**，与 A2A 区分：
-
-| 类别 | 值 |
-|------|-----|
-| 管理工具 | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
-| SSE 生命周期 | `temporary_agent_created` / `_completed` / `_cancelled` |
-| HITL scope | `hitl_scope: "temporary_agent"` |
-
-其他约定：
-
-- **`FormatChildTask`**：给子 Agent 首条 user 消息加固定系统前缀；角色与约束由父 Agent 写在 `task` 中。
-- **`DefaultChildAllowedTools`**：未指定 `allowed_tools` 时默认 `read_file`、`glob_files`、`grep_file`、`bash_run`。
-- **`IsParentOnlyTool`**：管理工具、`load_skills` / `unload_skills` / `clear_skills`、`ask_user_information`、`trigger_*` 永不下放给子 runtime。
-- **`IsTemporaryAgentTool`**：供 orchestrator 识别并专用分发（不走普通 `Registry.Execute`）。
-
----
-
-## 数据模型（`types.go`）
-
-### 状态机
+## 状态模型
 
 ```text
-creating → active → completed | failed | cancelled | expired
+creating → active → completed
+                 ├→ failed
+                 ├→ cancelled
+                 ├→ expired
+                 └→ interrupted（Node 重启时恢复出的运行中记录）
 ```
 
-### 核心结构
+`creating` 和 `active` 是运行态，其余是终态。终态结果和快照不能只存在于活跃内存表中，否则子任务完成后刷新页面会丢卡片或把旧卡片错误显示为 active。
 
-| 类型 | 用途 |
-|------|------|
-| `CreateInput` | `create_temporary_agent` 解析后的入参 |
-| `ActiveAgent` | 活跃临时 Agent 账本；含 `settledCh` 供 `wait=true` 阻塞 |
-| `Result` | 交付给父 Agent 的终态 JSON |
-| `Config` | YAML `child_agents.*`：TTL、并发上限、默认 wait 超时等 |
+## 数据结构与边界
 
-`Manager` 额外维护：
+### `ActiveAgent`
 
-- **`settledResults`**：`unregisterActive` 后仍可供 `wait_temporary_agents` 读取的终态快照
-- **`childToParent`**：`unregisterActive` 后仍保留，供 wait/status 校验父子归属
+Manager 内存中的运行账本，包含：
 
----
+- `ChildAgentID`、`ParentAgentID`、`ToolCallID`、`Purpose`；
+- `AllowedTools`、`LoadedSkills`、TTL 和最大回合数；
+- 当前 `Progress`；
+- `settledCh` 与终态 `Result`，仅用于同步 `create` 调用等待。
 
-## 入参与工具权限（`parse.go`）
+### `Progress`
 
-**`parseCreateInput`**：解析创建工具 JSON。
+面向父 Agent/UI 的轻量投影，不复制子 Agent transcript，包含当前阶段、当前工具、最近输出、回合数、审批数据和终态摘要。`pending_approval_data` 保存恢复审批卡片所需的完整 HITL payload。
 
-- 必填：`task`、`purpose`
-- 可选：`allowed_tools`、`ttl_seconds`、`max_turns`、`wait`
-- TTL / `max_turns` 会 clamp 到 `Config` 上下限
+### `RunRepository`
 
-**`resolveAllowedTools`**：
+`childagent` 只依赖 `RunRepository` 接口，具体 SQLite 适配在 `session/child_run_repository.go`。`store.child_runs` 保存最新快照，使用 `child_agent_id` 幂等更新和 `revision` 做版本顺序。
 
-1. 空列表 → `DefaultChildAllowedTools()`
-2. 每项须在 `ParentDelegatableTools()` 内
-3. 不得包含 `IsParentOnlyTool` 工具
-
----
-
-## 子 runtime 工具白名单（`registry.go`）
-
-`RestrictedRegistry` 包装完整 `tools.Registry`：
-
-- `Definitions()` — 仅返回 `allowed_tools` 中的 OpenAI tool 定义
-- `Execute()` / `StartBackground()` — 越权直接返回 error
-
-子 runtime 在 `session/runtime_child.go` 的 `newChildRuntime` 中构造此表，替代父的完整 Registry。
-
----
-
-## Manager 生命周期（`manager.go`）
-
-### Host 依赖注入
-
-`Manager` 不直接消费消息队列，通过 `Host` 接口操作 session 层（由 `session.Manager` 实现）：
-
-| 方法 | 作用 |
-|------|------|
-| `SpawnChild` | 创建子 `runtime` 并 `start` |
-| `EnqueueChildTask` | 投递首条 user 任务 |
-| `StopChild` | 停止子 consumer |
-| `DeliverChildResume` / `DeliverParentResume` | HITL resume 入队 |
-| `ChildHasPendingHITL` / `ParentHasPendingHITL` | resume 路由前校验 |
-
-`BindHost` 在 `session.Manager.SetChildAgentManager` 时调用。
-
-### 创建 `HandleCreate`
+## 同步创建数据流
 
 ```text
-parseCreateInput → resolveAllowedTools → 生成 child-{12hex} id
-  → 写入 activeByID / activeIDsByParent / childToParent
-  → host.SpawnChild（起子 runtime）
-  → FormatChildTask + EnqueueChildTask
-  → status = active → SSE temporary_agent_created → 启动 TTL timer
-  → wait=true ? waitUntilSettled 阻塞至终态 : 返回 kind=handle JSON
+父模型提出 create ToolCall
+  → turn 记录 assistant tool_call
+  → policy 判定 deny / approval / auto
+  → approval 时提交 pending lifecycle，再发布 hitl_required
+  → 用户 resume 后继续同一个父 Turn
+  → Manager.HandleCreate
+      → 创建 ChildRun(creating)
+      → Host.SpawnChild
+      → Host.EnqueueChildTask
+      → ChildRun(active)，发布 temporary_agent_created
+      → 等待子 runtime 进入终态
+      → 保存终态，发布 progress + completed/cancelled
+      → 返回普通 tool result
+  → 父模型收到 tool result，决定下一步
 ```
 
-### 自然完成 `OnChildSettled`
+这里没有第二个“查询结果”的模型工具。同步等待超时会将运行收敛为 `expired`/`cancelled` 终态并直接返回错误结果，不会留下模型需要记住的后台句柄。
 
-子 runtime 在 turn 空闲、无 pending HITL、最后一条为 `assistant` 时，由 `runtime.tryCompleteChildIfIdle` 调用：
+## 子 runtime 完成与失败
 
-```text
-OnChildSettled → finishWithEvent(completed)
-  → 写 Result、close(settledCh)、写入 settledResults
-  → SSE temporary_agent_completed
-  → host.StopChild → unregisterActive
-```
+子 runtime 在 turn 空闲、没有 pending HITL 且最后一条消息是 assistant 时调用 `OnChildSettled`。LLM、工具链、生命周期或上下文错误通过 `OnChildFailed` 进入同一个 `finishWithEvent` 终态函数；取消和 TTL 也走该函数。这样所有路径都会：
 
-### 取消与 TTL
+1. 更新状态、摘要、错误、回合数和完成时间；
+2. 持久化快照；
+3. 发布父 session 可见事件；
+4. 关闭同步等待通道；
+5. 停止并移除子 runtime。
 
-| 路径 | 触发 |
-|------|------|
-| `Cancel` | 工具 `cancel_temporary_agent`、HTTP cancel、wait 超时、显式 reason |
-| `CancelAllForParent` | 父 session 删除时级联取消所有活跃子 Agent |
-| `runTTLTimer` | TTL 到期 → `StatusExpired` |
+## 审批与取消
 
-### Resume 路由 `RouteResume`
+审批仍属于 Turn 链条，不是 childagent 自己创建另一条消息序列：
 
-父 session 收到 `request_type=resume` 时：
+- 父审批：父 Turn 保存 `PendingHITL`，resume 后执行 create。
+- 子工具审批：子 runtime 产生 HITL，`RelayHub` 附加 `child_agent_id`，父 session 收到的 resume 由 `RouteResume` 投递回子 runtime。
+- 用户新消息不会抢占正在运行的 Turn；需要打断必须调用 Turn cancel。取消会让父/子生命周期进入终态，并使后续旧队列事件因 turn/epoch 校验被丢弃。
 
-1. `resume_value.child_agent_id` 为空 → `DeliverParentResume`（父 HITL）
-2. 非空 → 校验归属 + 子 runtime 是否有 pending HITL → `DeliverChildResume`
+## 刷新与 Node 重启
 
-误投返回 `hitl_target_mismatch` / `no_pending_hitl`。
+### 普通刷新
 
-### SSE 发布
+前端通过 `GET /v1/agents/{id}/child-agents` 读取 `ListSnapshots`。该读取路径合并活跃内存快照、最近终态快照和 SQLite 快照；SSE 只负责低延迟更新。进度 revision 倒退时前端忽略旧事件。
 
-| 事件 | 时机 |
-|------|------|
-| `temporary_agent_created` | 创建成功、即将/开始消费 task |
-| `temporary_agent_completed` | 交付终态（含 `expired` 可走同一事件） |
-| `temporary_agent_cancelled` | 显式取消 |
+### 审批刷新
 
-均发往**父** `session_id` 的 Hub。
+如果快照中的 `progress.pending_approval_data` 存在，hydrate 会重新放入统一 HITL store，并把子卡片标记为等待审批。resume 仍需经过父 session 路由，不能仅凭前端状态放行。
 
----
+### Node 重启
 
-## 另外三个父工具（`tools_handler.go`）
+子 runtime 是进程内对象，不能在重启后假装可继续运行。Manager 注入 repository 时会将旧记录中的 `creating`/`active` 标记为 `interrupted`，前端可以明确展示“因 Node 重启中断”，而不是显示一个永远执行中的卡片。
 
-| 方法 | 工具 | 行为 |
-|------|------|------|
-| `HandleWait` | `wait_temporary_agents` | 轮询（200ms）至全部终态或超时；`timeout_seconds=0` 立即快照 |
-| `HandleStatus` | `temporary_agent_status` | 非阻塞 `GetResult` |
-| `HandleCancelTool` | `cancel_temporary_agent` | 调 `Cancel`，已终态幂等 |
+## 权限边界
 
-`HandleParentTool` 为 orchestrator 统一入口。
+`allowed_tools` 必须是父 Agent 可下放工具的子集；管理工具、skills 变更、询问工具和 trigger 等 parent-only 工具不能下放。子 runtime 使用 `RestrictedRegistry`，所以即使模型返回越权工具名，也会在执行边界被拒绝。
 
----
+## 前端展示约定
 
-## SSE 转发（`relay_hub.go`）
+工具卡片通过 `tool_call_id` 关联子 Agent 进度；创建结果到达后也会通过 `child_agent_id` 兜底关联。卡片保留运行中、等待审批、完成、失败、取消、过期和重启中断状态，不另造一份“活跃子 Agent”列表。这样实时事件和刷新快照使用同一数据源，避免重复卡片与状态回退。
 
-子 runtime 的 `Publisher` 替换为 `RelayHub`：
-
-1. **忽略子 turn 的 `turn_finished`** — 避免 Client 误判父 session 回合结束
-2. **所有事件附加 `child_agent_id`**
-3. **`approval_required` 附加** `hitl_scope=temporary_agent`、`child_purpose`（子 turn 仍走该事件；父 session 本地 turn 为 **`hitl_required`**）
-4. **统一 `Publish` 到父 `session_id`**
-
-Client 只订阅父 SSE；子 turn 的 `assistant` / `tool_result` 等由 Client 按 `child_agent_id` 过滤隐藏，仅展示审批与生命周期行。
-
----
-
-## 与 orchestrator 的衔接
-
-父 turn 遇到 `IsTemporaryAgentTool` 时**不走**普通 `Registry.Execute`：
-
-- 子 runtime（`SetChildSession(true)`）调用同名校验 → `child_forbidden`
-- 父 runtime → `childMgr.HandleParentTool`
-
-子 Agent **不得**再创建临时 Agent，**不得**调用 `ask_user_information`。
-
----
-
-## 两层 HITL
-
-| 层 | 触发 | SSE 特征 |
-|----|------|----------|
-| **创建审批** | 父 turn 调 `create_temporary_agent` | 父 scope，通常无 `child_agent_id` |
-| **子工具审批** | 子 turn 调 `bash_run` 等 | `hitl_scope=temporary_agent` + `child_agent_id` |
-
-用户 resume 始终用**父** `session_id`；带 `child_agent_id` 时由 `RouteResume` 投到子 runtime。
-
-详见契约文档 §13（创建策略）、§14（子工具审批）。
-
----
-
-## 内存索引结构
-
-```text
-Manager
-├── activeByID[childID]           → *ActiveAgent  # 活跃账本
-├── activeIDsByParent[parentID]  → []childID      # 父下的活跃子列表
-├── childToParent[childID]       → parentID      # 移出活跃表后仍保留
-└── settledResults[childID]      → Result        # 终态快照
-```
-
----
-
-## 包外相关入口
-
-| 路径 | 说明 |
-|------|------|
-| [`node/internal/session/README.md`](../session/README.md) | 会话 runtime、队列、父子 Orchestrator 构造 |
-| [`node/internal/turn/README.md`](../turn/README.md) | 单步 turn、system prompt、HITL |
-| `node/internal/tools/child_agent_tools.go` | 四个工具的 OpenAI schema |
-| `node/internal/session/manager_child.go` | `Host` 实现、HTTP `ListChildAgents` |
-| `node/internal/session/runtime_child.go` | `newChildRuntime`、`tryCompleteChildIfIdle` |
-| `node/internal/turn/orchestrator.go` | 临时 Agent 工具专用分支 |
-| `node/internal/api/child_agents_api.go` | `GET/POST .../child-agents` HTTP API |
-| `node/internal/api/server.go` | `NewManager` + `SetChildAgentManager` 装配 |
-
----
-
-## 本地验证
+## 验证
 
 ```bash
-go test ./node/internal/childagent/... ./node/internal/session/... -run ChildAgent
-go test ./node/internal/api/... -run ChildAgent
+go test ./node/internal/childagent -run Child
+go test ./node/internal/session -run ChildAgent
+go test ./node/internal/api -run ChildAgent
+npm test --prefix node/webui/frontend -- --run src/stores/remoteWorkers.test.js
 ```
 
-建议跟读路径：`HandleCreate` → `SpawnChild` → `newChildRuntime` → `tryCompleteChildIfIdle` → `OnChildSettled` → `finishWithEvent`。
+推荐跟读路径：`HandleCreate` → `SpawnChild` → `newChildRuntime` → `tryCompleteChildIfIdle` → `OnChildSettled/OnChildFailed` → `finishWithEvent` → `ListSnapshots`。

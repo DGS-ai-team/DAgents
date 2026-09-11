@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
 // CommandType is the internal command vocabulary used by the TurnCoordinator.
@@ -76,6 +78,7 @@ type TurnCommand struct {
 	InteractionRevision  int64
 	RequestDigest        string
 	AssistantMessageID   string
+	AssistantMessage     *llm.Message
 	RuntimeRevision      int64
 	RuntimeDigest        string
 	PromptDigest         string
@@ -115,6 +118,7 @@ type CoordinatorSnapshot struct {
 	InteractionKind    string
 	InteractionPayload json.RawMessage
 	ModelAttempt       int
+	ModelUsageKnown    bool
 	RuntimeRevision    int64
 	RuntimeDigest      string
 	PromptDigest       string
@@ -137,6 +141,15 @@ type ToolExecutionView struct {
 	ToolName   string              `json:"tool_name"`
 	Status     ToolExecutionStatus `json:"status"`
 	Attempt    int                 `json:"attempt,omitempty"`
+}
+
+// ToolCallProjection is the minimal tool-call identity needed to rebuild a
+// provider-facing assistant envelope during crash recovery. It intentionally
+// avoids coupling the lifecycle package to the LLM message types.
+type ToolCallProjection struct {
+	ID        string
+	ToolName  string
+	Arguments json.RawMessage
 }
 
 // TurnCoordinator owns the logical Turn/Step state machine for one Session.
@@ -181,8 +194,8 @@ func (c *TurnCoordinator) Dispatch(command TurnCommand) (CoordinatorSnapshot, er
 // DispatchDurable applies a command and gives the caller a chance to append
 // the resulting fact before the projection becomes visible. If persistence
 // fails, the coordinator rolls back to its exact pre-command state. This is
-// the migration bridge that keeps the event log authoritative without making
-// the store package depend on the state machine.
+// the persistence bridge that keeps the event log authoritative without
+// making the store package depend on the state machine.
 func (c *TurnCoordinator) DispatchDurable(command TurnCommand, persist func(TurnCommand, CoordinatorSnapshot) error) (CoordinatorSnapshot, error) {
 	if c == nil {
 		return CoordinatorSnapshot{}, fmt.Errorf("turn coordinator is nil")
@@ -426,6 +439,7 @@ func (c *TurnCoordinator) applyCommandLocked(command TurnCommand) error {
 	case CommandInterruptTurn:
 		return c.advanceTurnLocked(EventTurnInterrupted, command)
 	case CommandCancelTurn:
+		c.cancelActiveWorkLocked(command)
 		return c.advanceTurnLocked(EventTurnCancelled, command)
 	case CommandBudgetExhausted:
 		return c.advanceTurnLocked(EventTurnBudgetExhausted, command)
@@ -433,6 +447,43 @@ func (c *TurnCoordinator) applyCommandLocked(command TurnCommand) error {
 		return c.contextCompactedLocked(command)
 	default:
 		return fmt.Errorf("unknown turn command %q", command.Type)
+	}
+}
+
+// cancelActiveWorkLocked closes the work owned by the cancelled Turn before
+// the Turn terminal event is applied.  The lifecycle event is the single
+// cancellation fence: replaying the same CommandCancelTurn reconstructs the
+// same execution/interaction projection without requiring a second event per
+// tool call.  Already terminal executions are deliberately preserved so a
+// result that won the race before the fence cannot be rewritten as cancelled.
+func (c *TurnCoordinator) cancelActiveWorkLocked(command TurnCommand) {
+	finished := command.At
+	if finished.IsZero() {
+		finished = time.Now().UTC()
+	}
+	if c.step != nil && !c.step.Status.Terminal() {
+		// CommandCancelTurn is intentionally self-contained for replay and
+		// direct lifecycle callers. CommandCancelStep remains supported for
+		// older replay/control callers, but is not required for atomic cancel.
+		if next, ok := NextStepStatus(c.step.Status, EventStepCancelled); ok && next == StepStatusCancelled {
+			_ = c.step.Advance(EventStepCancelled, finished, "cancelled_by_user")
+		}
+	}
+	for _, execution := range c.executions {
+		if execution == nil || execution.Status.Terminal() {
+			continue
+		}
+		execution.Status = ToolExecutionStatusCancelled
+		execution.ErrorKind = "cancelled_by_turn"
+		ended := finished
+		execution.FinishedAt = &ended
+	}
+	if c.batch != nil && c.batch.Status != "settled" {
+		c.batch.Status = "cancelled"
+	}
+	if c.interaction != nil && c.interaction.Status == InteractionStatusPending {
+		c.interaction.Status = InteractionStatusCancelled
+		c.interaction.Revision++
 	}
 }
 
@@ -720,6 +771,9 @@ func (c *TurnCoordinator) startStepLocked(command TurnCommand) error {
 	c.executions = make(map[string]*ToolExecution)
 	c.toolResults = make(map[string]bool)
 	c.interaction = nil
+	if c.turn.ModelUsagePending {
+		c.turn.ModelUsageMissing = true
+	}
 	c.attempts = nil
 	return c.step.Advance(EventStepStarted, command.At, command.Reason)
 }
@@ -801,6 +855,19 @@ func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
 	if c.step == nil {
 		return fmt.Errorf("assistant response requires an active step")
 	}
+	if command.HasTools && c.batch != nil {
+		batchID := strings.TrimSpace(command.ToolBatchID)
+		if batchID == "" {
+			batchID = c.step.ID + "-batch"
+		}
+		// Replayed assistant events arrive after the step has already entered
+		// tool execution, so they must be handled before advancing the state
+		// machine a second time.
+		if c.batch.ID != batchID {
+			return fmt.Errorf("tool batch already exists for step %s", c.step.ID)
+		}
+		return nil
+	}
 	if err := c.step.Advance(EventAssistantMessageRecorded, command.At, command.Reason); err != nil {
 		return err
 	}
@@ -812,6 +879,7 @@ func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
 		if batchID == "" {
 			batchID = c.step.ID + "-batch"
 		}
+		c.turn.Usage.ToolRounds++
 		c.batch = &ToolBatch{ID: batchID, StepID: c.step.ID, Status: "created"}
 		c.step.ToolBatchID = batchID
 		return c.step.Advance(EventToolBatchCreated, command.At, command.Reason)
@@ -830,13 +898,19 @@ func (c *TurnCoordinator) startModelAttemptLocked(command TurnCommand) error {
 		}
 	}
 	attemptNumber := len(c.attempts) + 1
+	if c.turn.ModelUsagePending {
+		c.turn.ModelUsageMissing = true
+	}
 	attemptBase := strings.TrimSpace(command.RequestDigest)
 	if attemptBase == "" {
 		attemptBase = c.step.ID
 	}
 	attemptID := fmt.Sprintf("%s-attempt-%d", attemptBase, attemptNumber)
-	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
+	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, TurnID: c.turn.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
 	c.attempts = append(c.attempts, attempt)
+	c.turn.ModelUsagePending = true
+	// A provider callback records the attempt; a completed attempt without a
+	// callback is finalized below when the next step starts or the turn ends.
 	c.step.RequestAttempt = attemptNumber
 	c.step.ModelRequestID = attemptID
 	return c.step.Advance(EventModelRequestStarted, command.At, command.Reason)
@@ -862,6 +936,8 @@ func (c *TurnCoordinator) recordModelUsageLocked(command TurnCommand) error {
 		return fmt.Errorf("model usage requires a model attempt")
 	}
 	last := &c.attempts[len(c.attempts)-1]
+	last.UsageRecorded = true
+	c.turn.ModelUsagePending = false
 	delta := usageDelta(command.Usage, last.Usage)
 	last.Usage = command.Usage
 	c.step.Usage.InputTokens += delta.InputTokens
@@ -1100,10 +1176,9 @@ func (c *TurnCoordinator) interactionRequestedLocked(command TurnCommand) error 
 	if c.turn == nil || c.step == nil {
 		return fmt.Errorf("interaction request requires an active step")
 	}
-	// A legacy event stream may already have moved the Step to waiting before
-	// the serialized PendingHITL payload was introduced. Treat the follow-up
-	// request as an idempotent payload completion instead of attempting an
-	// impossible waiting→waiting state transition.
+	// A repeated interaction request updates the existing waiting payload
+	// idempotently instead of attempting an impossible waiting→waiting
+	// transition.
 	if c.step.Status == StepStatusWaitingInteraction && c.interaction != nil {
 		if command.InteractionID != "" && command.InteractionID != c.interaction.ID {
 			return fmt.Errorf("interaction mismatch: got=%s want=%s", command.InteractionID, c.interaction.ID)
@@ -1269,6 +1344,7 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 	}
 	if len(c.attempts) > 0 {
 		result.ModelAttempt = c.attempts[len(c.attempts)-1].Attempt
+		result.ModelUsageKnown = !c.turn.ModelUsageMissing && !c.turn.ModelUsagePending
 	}
 	if c.step != nil && c.step.Status == StepStatusExecutingTools {
 		if c.recoveryRequired {
@@ -1322,6 +1398,11 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		decision.Reason = "max_output_tokens"
 		return decision
 	}
+	if c.turn.Budget.MaxTotalTokens > 0 && c.turn.Usage.TotalTokens >= c.turn.Budget.MaxTotalTokens {
+		decision.Allowed = false
+		decision.Reason = "max_total_tokens"
+		return decision
+	}
 	if c.turn.Budget.MaxCost > 0 && c.turn.Usage.Cost >= c.turn.Budget.MaxCost {
 		decision.Allowed = false
 		decision.Reason = "max_cost"
@@ -1340,6 +1421,9 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		} else if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls >= c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
+		} else if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds >= c.turn.Budget.MaxToolRounds && !command.FinalSummary {
+			decision.Allowed = false
+			decision.Reason = "max_tool_rounds"
 		}
 	case CommandToolCallRecorded:
 		// ToolCall facts are emitted before this preflight reaches the actual
@@ -1347,6 +1431,10 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls > c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
+		}
+		if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds > c.turn.Budget.MaxToolRounds {
+			decision.Allowed = false
+			decision.Reason = "max_tool_rounds"
 		}
 	case CommandToolExecutionRetrying:
 		if c.turn.Budget.MaxToolRetries > 0 && c.turn.Usage.ToolRetries >= c.turn.Budget.MaxToolRetries {
@@ -1367,8 +1455,8 @@ func (c *TurnCoordinator) Snapshot() CoordinatorSnapshot {
 }
 
 // HasToolCall reports whether the active ToolBatch already contains a call.
-// It lets compatibility adapters remain idempotent when a resume/recovery
-// path observes the same assistant message more than once.
+// It lets resume/recovery remain idempotent when the same assistant message
+// is observed more than once.
 func (c *TurnCoordinator) HasToolCall(toolCallID string) bool {
 	if c == nil {
 		return false
@@ -1388,7 +1476,7 @@ func (c *TurnCoordinator) HasToolCall(toolCallID string) bool {
 
 // ToolExecutionID returns the execution record for a ToolCall in the active
 // batch. It is intentionally read-only and returns an empty string when the
-// call came from a legacy projection without an execution record.
+// call has no projected execution record.
 func (c *TurnCoordinator) ToolExecutionID(toolCallID string) string {
 	if c == nil {
 		return ""
@@ -1404,8 +1492,8 @@ func (c *TurnCoordinator) ToolExecutionID(toolCallID string) string {
 }
 
 // ToolExecutionStatusForCall exposes the projected execution phase to the
-// compatibility adapter so an execution-start fact is not emitted twice when
-// the real tool boundary and the history reconciliation both observe it.
+// reconciliation so an execution-start fact is not emitted twice when the
+// tool boundary and history reconciliation both observe it.
 func (c *TurnCoordinator) ToolExecutionStatusForCall(toolCallID string) (ToolExecutionStatus, bool) {
 	if c == nil {
 		return "", false
@@ -1433,6 +1521,41 @@ func (c *TurnCoordinator) ToolExecutionInfo(executionID string) (toolCallID, too
 		return "", "", false
 	}
 	return execution.ToolCallID, execution.ToolName, true
+}
+
+// ActiveToolCalls returns the ordered tool-call projection for the active
+// batch. It is used by runtime recovery to rebuild the durable assistant
+// message when a process stops after lifecycle facts are committed but before
+// the durable transcript snapshot is persisted.
+func (c *TurnCoordinator) ActiveToolCalls() []ToolCallProjection {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.batch == nil || len(c.batch.ToolCallIDs) == 0 {
+		return nil
+	}
+	byCall := make(map[string]*ToolExecution, len(c.executions))
+	for _, execution := range c.executions {
+		if execution == nil {
+			continue
+		}
+		byCall[execution.ToolCallID] = execution
+	}
+	calls := make([]ToolCallProjection, 0, len(c.batch.ToolCallIDs))
+	for _, callID := range c.batch.ToolCallIDs {
+		execution := byCall[callID]
+		if execution == nil {
+			continue
+		}
+		calls = append(calls, ToolCallProjection{
+			ID:        execution.ToolCallID,
+			ToolName:  execution.ToolName,
+			Arguments: append(json.RawMessage(nil), execution.Arguments...),
+		})
+	}
+	return calls
 }
 
 // HasToolResult reports whether the durable projection already accepted the
@@ -1473,7 +1596,7 @@ func (c *TurnCoordinator) InFlightToolExecutionIDs() []string {
 	if len(result) == 0 {
 		return nil
 	}
-	// A malformed legacy projection may not have a corresponding ToolCall;
+	// A malformed projection may not have a corresponding ToolCall;
 	// keep its IDs visible rather than silently losing recovery information.
 	seen := make(map[string]struct{}, len(result))
 	for _, id := range result {

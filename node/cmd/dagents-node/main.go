@@ -45,7 +45,7 @@ func main() {
 	}
 	defer release()
 
-	// 2) 加载引导 YAML，再 overlay node_settings.db（空库时迁移/种子）。
+	// 2) 加载引导 YAML，再 overlay node_settings.db（空库时写入产品默认）。
 	cfg, err := config.LoadFile(resolved)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)

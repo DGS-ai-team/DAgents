@@ -15,16 +15,19 @@ import (
 
 func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
 	in := SystemPromptInput{
-		AgentID:   "ops-01",
-		FSRoot:    "/data/ws",
-		SessionID: "sess-abc",
+		AgentID:       "ops-01",
+		WorkspaceRoot: "/data/ws",
+		SessionID:     "sess-abc",
 	}
 	prompt := BuildSystemPrompt(in)
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "tool_outputs/", "最高优先级规则", "任务执行契约", "完成条件", "明确证据后才能声称完成", "工具结果处理", "Node tool_result 事件以及模型可见的 [TOOL_RESULT_METADATA] 元数据", "工作区目录", "workspace_root", "runtime_root", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "`data/`") {
+		t.Fatalf("system prompt should not describe the retired data directory, got %q", prompt)
 	}
 	if contains(prompt, "ops-01") || contains(prompt, "sess-abc") || contains(prompt, "运行环境") {
 		t.Fatalf("system prompt should not contain request context, got %q", prompt)
@@ -44,7 +47,7 @@ func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
 		SessionID:             "sess-a",
 		IncludeHistoryJournal: true,
 	})
-	if !containsAll(prompt, "history/", "YYYYMMDD", "read_file") {
+	if !containsAll(prompt, ".dagents/<agent_id>/history/", "Node 写入", "不是 LLM 上下文的一部分") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
@@ -109,11 +112,29 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	}
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildSystemPrompt(SystemPromptInput{
-		AgentID: "ops-01",
-		FSRoot:  root,
+		AgentID:     "ops-01",
+		RuntimeRoot: root,
 	})
 	if !containsAll(prompt, "外置 CLI 与工具", "mycli.cmd", "externaltools_menu.md", "编译好的二进制") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_doesNotTreatWorkspaceAsRuntimeRoot(t *testing.T) {
+	workspace := t.TempDir()
+	cliDir := filepath.Join(workspace, "externaltools")
+	if err := os.MkdirAll(cliDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cliDir, "workspace-only.cmd"), []byte("@echo off\r\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prompt := BuildSystemPrompt(SystemPromptInput{WorkspaceRoot: workspace})
+	if contains(prompt, "workspace-only.cmd") {
+		t.Fatalf("workspace was incorrectly scanned as runtime root: %q", prompt)
+	}
+	if !containsAll(prompt, "workspace_root", "runtime_root", "与 `workspace_root` 不同") {
+		t.Fatalf("path scopes are missing: %q", prompt)
 	}
 }
 
@@ -122,10 +143,10 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	r := promptcontext.NewContentReader(promptcontext.Content{})
 	r.SetPreferredName("小明")
 	in := SystemPromptInput{
-		AgentID:   "ops-01",
-		FSRoot:    "/data/ws",
-		SessionID: "sess-x",
-		PromptCtx: r,
+		AgentID:       "ops-01",
+		WorkspaceRoot: "/data/ws",
+		SessionID:     "sess-x",
+		PromptCtx:     r,
 	}
 	prompt := BuildSystemPrompt(in)
 	if contains(prompt, "以下是用户信息") || contains(prompt, "请称呼用户为：小明") {
@@ -135,7 +156,7 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	if len(injections) != 1 || !containsAll(injections[0].Content, "以下是用户信息", "请称呼用户为：小明") {
 		t.Fatalf("context injection = %+v", injections)
 	}
-	if contains(prompt, "legacy user.md") || contains(prompt, "用户信息与偏好") {
+	if contains(prompt, "user.md") || contains(prompt, "用户信息与偏好") {
 		t.Fatalf("should not inject user.md sidecar, got %q", prompt)
 	}
 }
@@ -143,13 +164,16 @@ func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing.T) {
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildChildSystemPrompt(ChildSystemPromptInput{
-		AgentID:   "ops-01",
-		FSRoot:    "/data/ws",
-		SessionID: "child-abc",
-		Purpose:   "review patch",
+		AgentID:       "ops-01",
+		WorkspaceRoot: "/data/ws",
+		SessionID:     "child-abc",
+		Purpose:       "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "memory/", "工作区目录", "相对路径均基于工作区根目录") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "tool_outputs/", "工作区目录", "所有工具的 path、directory、cwd 等路径参数的相对路径均以它为基准") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "`data/`") {
+		t.Fatalf("child system prompt should not describe the retired data directory, got %q", prompt)
 	}
 	if contains(prompt, "child-abc") || contains(prompt, "运行环境") {
 		t.Fatalf("child system prompt should omit request context, got %q", prompt)
@@ -170,7 +194,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 }
 
 func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
-	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("scan logs"))
 	prompt := orch.buildSystemPrompt("child-xyz")
 	if !containsAll(prompt, "scan logs", "临时子 Agent") || contains(prompt, "child-xyz") {
@@ -186,7 +210,7 @@ func TestChildSystemPromptBuilder_keepsLoadedSkillsOutOfSystemPrompt(t *testing.
 	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
+	}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("review"))
 	prompt := orch.buildSystemPrompt("child-xyz")
 	if contains(prompt, "Write clearly.") || contains(prompt, "已加载 skills") {
@@ -199,7 +223,7 @@ func TestChildSystemPromptBuilder_keepsLoadedSkillsOutOfSystemPrompt(t *testing.
 }
 
 func TestBuildSystemPrompt_runPromptBuildPhase(t *testing.T) {
-	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{
 		Duplicate:  hooks.DefaultDuplicateConfig(),
 		ToolResult: hooks.DefaultToolResultConfig("/data/ws"),
 	}, nil)
@@ -240,12 +264,6 @@ func writeSkillForPromptTest(t *testing.T, root, name, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRunTurnPhase_mapsAwaitingTool(t *testing.T) {
-	if got := RunTurnPhase(StateAwaitingTool); got != "awaiting_tool_execution" {
-		t.Fatalf("RunTurnPhase = %q", got)
 	}
 }
 

@@ -8,7 +8,10 @@ import time
 from dataclasses import dataclass
 from typing import Literal
 
-SESSION_COOKIE = "dagents_manage_session"
+# Versioned cookie deliberately invalidates sessions issued before the P0
+# authentication tightening (the old store was process-local, but browsers may
+# still present a legacy cookie after a restart).
+SESSION_COOKIE = "dagents_manage_session_v2"
 DEFAULT_TTL_SECONDS = 7 * 24 * 3600
 
 

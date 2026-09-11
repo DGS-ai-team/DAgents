@@ -30,7 +30,7 @@ func buildSkillInstructionMessage(content skills.LoadedSkillContent) llm.Message
 		Content   string `json:"content"`
 	}{name, directory, body})
 	text := fmt.Sprintf(
-		"%s\n<name>%s</name>\n<path>skills/%s/SKILL.md</path>\n<content_digest>%s</content_digest>\n<instructions>\n%s\n</instructions>\n%s",
+		"%s\n<name>%s</name>\n<path><runtime_root>/skills/%s/SKILL.md</path>\n<content_digest>%s</content_digest>\n<instructions>\n%s\n</instructions>\n%s",
 		skillInstructionsTag,
 		name,
 		directory,

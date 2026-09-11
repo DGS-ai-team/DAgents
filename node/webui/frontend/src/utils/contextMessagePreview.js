@@ -15,9 +15,6 @@ function tryFormatJsonToolResult(content) {
   if (payload.kind === "result" && payload.child_agent_id) {
     return parseTemporaryAgentToolResult("create_temporary_agent", text);
   }
-  if (Array.isArray(payload.results)) {
-    return parseTemporaryAgentToolResult("wait_temporary_agents", text);
-  }
   if (payload.child_agent_id && payload.purpose) {
     return parseTemporaryAgentToolResult("create_temporary_agent", text);
   }

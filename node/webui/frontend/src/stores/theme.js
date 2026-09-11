@@ -110,12 +110,3 @@ export function cycleTheme() {
   const next = order[(idx + 1) % order.length];
   applyTheme(next);
 }
-
-/** @deprecated Prefer cycleTheme for three-state; keeps binary flip for tests/compat */
-export function toggleTheme() {
-  if (themeStore.mode === "system") {
-    applyTheme(systemPrefersDark() ? "light" : "dark");
-    return;
-  }
-  applyTheme(themeStore.mode === "dark" ? "light" : "dark");
-}

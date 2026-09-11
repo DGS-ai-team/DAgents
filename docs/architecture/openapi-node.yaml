@@ -48,6 +48,121 @@ paths:
       responses:
         "200":
           description: 已归档
+  /v1/agents/{agent_id}/auto-config:
+    get:
+      summary: 获取简化 Auto 配置
+      description: 自主激活频率驱动所属 Agent 的默认 trigger；每日 dreaming 独立于激活频率调度。
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: Auto 配置, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Profile"}}}}
+    put:
+      summary: 保存简化 Auto 配置
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ProfileUpdate"}}}}
+      responses:
+        "200": {description: 已保存, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Profile"}}}}
+        "409": {description: revision 冲突}
+  /v1/agents/{agent_id}/auto-config/reconcile:
+    post:
+      summary: 重建 Auto 默认唤醒
+      description: 根据当前已保存配置幂等重建系统默认 trigger，不修改配置 revision。
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        "200": {description: 已同步, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ConfigReconcileResponse"}}}}
+        "503": {description: 同步失败}
+  /v1/agents/{agent_id}/experience:
+    get:
+      summary: 获取 Auto 经验
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: 经验；不存在时返回 experience null, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2ExperienceResponse"}}}}
+  /v1/agents/{agent_id}/dreaming:
+    get:
+      summary: 获取每日经验整理状态
+      description: 只读状态；零值时间省略。未完成经验提交的上下文重置可在关闭 dreaming 后继续恢复。
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: 当前状态, content: {application/json: {schema: {$ref: "#/components/schemas/DreamingStatus"}}}}
+        "404": {description: Agent 不存在或已归档}
+        "409": {description: Agent 不是自主智能体}
+        "503": {description: 调度器不可用}
+  /v1/agents/{agent_id}/todos:
+    get:
+      summary: 列出 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      responses:
+        "200": {description: Todo 列表, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoList"}}}}
+    post:
+      summary: 创建 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoCreate"}}}}
+      responses: {"201": {description: 已创建, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Todo"}}}}}
+  /v1/agents/{agent_id}/todos/{todo_id}:
+    patch:
+      summary: CAS 更新 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }, {name: todo_id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoUpdate"}}}}
+      responses: {"200": {description: 已更新, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2Todo"}}}}, "409": {description: revision 冲突}}
+    delete:
+      summary: CAS 删除 Auto Todo
+      parameters: [{ $ref: "#/components/parameters/AgentID" }, {name: todo_id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoDelete"}}}}
+      responses: {"200": {description: 已删除, content: {application/json: {schema: {$ref: "#/components/schemas/AutonomyV2TodoDeleteResponse"}}}}, "409": {description: revision 冲突}}
+  /v1/agents/{agent_id}/handbook:
+    get:
+      summary: 浏览 Agent 文件手册目录或读取文件
+      description: 手册根目录由 Agent snapshot 的 handbook.directory 配置；空配置使用 Agent 私有默认目录。path 只能引用该目录内的相对路径。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - in: query
+          name: path
+          schema: {type: string, default: ""}
+          description: 空路径浏览根目录；文件返回 content 和 SHA-256 digest
+      responses:
+        "200":
+          description: 目录包含 items（path、is_dir、size、modified_at）；文件包含 content、digest、size；根目录另含解析后的 directory
+        "400": {description: 路径越界、内部历史路径或不可读取文件}
+        "404": {description: Agent 或文件不存在}
+        "503": {description: 手册根目录不可用}
+  /v1/agents/{agent_id}/handbook/history:
+    get:
+      summary: 获取文件的修改历史
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - in: query
+          name: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: history 列出 revision、path、before_digest、after_digest、before_exists、after_exists 和 created_at；revision 表示一次修改事件。维护产生的记录还包含可选 provenance（maintenance_receipt_id、session_id、turn_id），由运行时写入；普通或旧记录可省略，不按时间推测归属。
+        "400": {description: 路径无效}
+        "404": {description: Agent 不存在}
+        "503": {description: 历史暂不可用或需要恢复未完成写入}
+  /v1/agents/{agent_id}/handbook/restore:
+    post:
+      summary: 恢复文件至指定修改发生前的状态
+      description: 恢复生成新历史记录。撤销首次新建会删除该文件；不会调用模型。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, revision, expected_digest]
+              properties:
+                path: {type: string}
+                revision: {type: integer, format: int64, minimum: 1}
+                expected_digest: {type: string, description: 最近读取的当前文件 SHA-256 摘要}
+      responses:
+        "200": {description: 新增的恢复记录 entry}
+        "400": {description: 路径、版本或恢复请求无效}
+        "404": {description: Agent 不存在}
+        "409": {description: 文件已被修改，需重新读取}
+        "503": {description: 历史暂不可用或需要恢复未完成写入}
   /v1/agents/{agent_id}/ensure:
     post:
       summary: 按快照装入运行时
@@ -102,9 +217,40 @@ paths:
       responses:
         "200":
           description: OK
+  /v1/agents/{agent_id}/policy/grants:
+    get:
+      x-contract-status: surface-only
+      summary: 读取 Agent 的工作区授权
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 授权列表
+    post:
+      x-contract-status: surface-only
+      summary: 创建 Agent 的工作区授权
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "201":
+          description: 授权已创建
+  /v1/agents/{agent_id}/policy/grants/{grant_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: 撤销 Agent 的工作区授权
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: grant_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 授权已撤销
   /v1/agents/{agent_id}/prompt-context:
     get:
-      summary: 读取 Agent prompt context（soul/custom/long_term；user_md 仅兼容迁移字段，SQLite）
+      summary: 读取 Agent prompt context（soul/custom/memory，SQLite）
       parameters:
         - $ref: "#/components/parameters/AgentID"
       responses:
@@ -227,11 +373,23 @@ paths:
 
   /v1/triggers/{trigger_id}:
     delete:
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: revision
+          in: query
+          required: false
+          schema: {type: integer, format: int64, minimum: 1}
+          description: Expected revision for compare-and-swap deletion.
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
         "200":
           description: OK
+        "400": {description: Invalid revision}
+        "409": {description: Revision conflict or managed trigger}
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -239,11 +397,23 @@ paths:
         "200":
           description: OK
     patch:
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema: {type: string}
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TriggerUpdateRequest'}
       responses:
         "200":
           description: OK
+        "400": {description: Invalid patch or revision}
+        "409": {description: Revision conflict or managed trigger}
 
   /v1/workgroups/{workgroupId}/human-queue/{queueId}:
     delete:
@@ -313,6 +483,56 @@ paths:
 
   /v1/agent/update:
     get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agent/update/apply:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/capabilities:
+    get:
+      x-contract-status: surface-only
+      summary: Report Node-native and Desktop Shell platform capabilities
+      description: native_directory_picker is owned by Node and does not require the optional Desktop Shell.
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/directory-picker:
+    post:
+      x-contract-status: surface-only
+      summary: Open the Node-native directory picker
+      description: The Node process opens the host chooser directly. User cancellation is a successful response with cancelled=true.
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/clipboard/files:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/ui-focus:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/platform/update/apply:
+    post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
@@ -593,6 +813,12 @@ paths:
     post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerCreateRequest'
       responses:
         "200":
           description: OK
@@ -604,6 +830,30 @@ paths:
       responses:
         "200":
           description: OK
+
+  /v1/triggers/{trigger_id}/recover:
+    post:
+      summary: 丢弃指定的待投递记录并完成恢复
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerRecoveryRequest'
+      responses:
+        "200":
+          description: 已恢复；触发器保持 disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerDefinition'
+        "409":
+          description: recovery_required、delivery_id 不匹配或无需恢复
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema: {type: string}
 
   /v1/ui/bootstrap:
     get:
@@ -628,14 +878,6 @@ paths:
           description: OK
 
   /v1/workgroups/meta/agents:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/workgroups/meta/member-tools:
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -711,14 +953,6 @@ paths:
         "200":
           description: OK
     post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/workgroups/{workgroupId}/members/{memberId}/spec:
-    get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
@@ -829,14 +1063,6 @@ paths:
         "200":
           description: OK
 
-  /v1/desktop/ui/focus:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/linux/channels/{channel_id}/test:
     post:
       x-contract-status: surface-only
@@ -904,10 +1130,14 @@ paths:
   /v1/triggers/{trigger_id}/fire:
     post:
       x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
+      summary: 手动触发；condition.cmd 可能返回 awaiting_approval
       responses:
         "200":
-          description: OK
+          description: 触发记录；条件脚本满足后才会投递任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FireRecord'
 
   /v1/workgroups/{workgroupId}/collaborators:
     post:
@@ -972,7 +1202,285 @@ paths:
       responses:
         "200":
           description: OK
+  /v1/feedback/target:
+    get:
+      summary: 当前反馈 Manage 目标
+      responses:
+        '200': {description: target}
+  /v1/feedback:
+    get:
+      summary: 本地反馈列表
+      responses:
+        '200': {description: feedback list}
+    post:
+      summary: 创建本地反馈并异步投递
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {$ref: '#/components/schemas/FeedbackCreateRequest'}}
+      responses:
+        '201': {description: saved}
+  /v1/feedback/{client_feedback_id}:
+    get:
+      parameters: [{name: client_feedback_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: feedback}}
+  /v1/feedback/{client_feedback_id}/sync:
+    post:
+      parameters: [{name: client_feedback_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: synchronized}}
+
+  /v1/auto/overview:
+    get:
+      parameters:
+        - name: search
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [unconfigured, disabled, paused, running, needs_attention, standby, completed, stopped, failed]}
+        - name: workspace
+          in: query
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Snapshot of configured Auto Agents and their current work state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AutoOverviewResponse'}}}
+        '503': {description: Overview stores unavailable}
+
 components:
+  schemas:
+    AutonomyV2Profile:
+      type: object
+      required: [agent_id, revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]
+      properties:
+        agent_id: {type: string}
+        revision: {type: integer, format: int64}
+        responsibility: {type: string}
+        wake_interval_seconds: {type: integer, format: int64, minimum: 0}
+        max_tool_rounds: {type: integer, minimum: 1}
+        dreaming_enabled: {type: boolean}
+        dreaming_time: {type: string, description: 本地时间 HH:MM}
+        timezone: {type: string}
+    AutonomyV2ProfileUpdate:
+      type: object
+      required: [expected_revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 0}
+        responsibility: {type: string}
+        wake_interval_seconds: {type: integer, format: int64, minimum: 0}
+        max_tool_rounds: {type: integer, minimum: 1}
+        dreaming_enabled: {type: boolean}
+        dreaming_time: {type: string}
+        timezone: {type: string}
+    AutonomyV2ConfigReconcileResponse:
+      type: object
+      required: [profile, trigger]
+      properties:
+        profile: {$ref: '#/components/schemas/AutonomyV2Profile'}
+        trigger: {$ref: '#/components/schemas/TriggerDefinition'}
+    DreamingStatus:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [disabled, waiting, running, succeeded, failed, recovery_pending]}
+        next_at: {type: string, format: date-time}
+        last_success: {type: string, format: date-time}
+        last_error: {type: string}
+    AutonomyV2Experience:
+      type: object
+      required: [agent_id, revision, content, updated_at]
+      properties:
+        agent_id: {type: string}
+        revision: {type: integer, format: int64}
+        content: {type: string}
+        updated_at: {type: string, format: date-time}
+    AutonomyV2ExperienceResponse:
+      oneOf:
+        - {$ref: '#/components/schemas/AutonomyV2Experience'}
+        - type: object
+          required: [experience]
+          properties:
+            experience: {allOf: [{$ref: '#/components/schemas/AutonomyV2Experience'}], nullable: true}
+    AutonomyV2Todo:
+      type: object
+      required: [id, agent_id, text, status, revision]
+      properties:
+        id: {type: string}
+        agent_id: {type: string}
+        text: {type: string}
+        status: {type: string, enum: [pending, in_progress, completed]}
+        revision: {type: integer, format: int64}
+    AutonomyV2TodoList:
+      type: object
+      required: [todos]
+      properties:
+        todos: {type: array, items: {$ref: '#/components/schemas/AutonomyV2Todo'}}
+    AutonomyV2TodoCreate:
+      type: object
+      required: [text]
+      properties: {text: {type: string}}
+    AutonomyV2TodoUpdate:
+      type: object
+      required: [expected_revision, text, status]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+        text: {type: string}
+        status: {type: string, enum: [pending, in_progress, completed]}
+    AutonomyV2TodoDelete:
+      type: object
+      required: [expected_revision]
+      properties: {expected_revision: {type: integer, format: int64, minimum: 1}}
+    AutonomyV2TodoDeleteResponse:
+      type: object
+      required: [deleted]
+      properties: {deleted: {type: boolean, const: true}}
+    AgentUsage:
+      type: object
+      properties:
+        agent_id: {type: string}
+        business_tokens: {type: integer, format: int64}
+        maintenance_tokens: {type: integer, format: int64}
+        unknown_tokens: {type: integer, format: int64}
+        unknown: {type: boolean}
+        unknown_reason: {type: string}
+        updated_at: {type: string, format: date-time}
+    AutoOverviewResponse:
+      type: object
+      required: [items, total, page, page_size, counts, as_of, revision]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AutoOverviewItem'}}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        counts: {type: object, additionalProperties: {type: integer}}
+        as_of: {type: string, format: date-time}
+        revision: {type: string, description: Opaque snapshot token, not an entity revision}
+    AutoOverviewItem:
+      type: object
+      required: [agent_id, display_name, agent_type, workspace, state, todo_counts, dreaming]
+      properties:
+        agent_id: {type: string}
+        display_name: {type: string}
+        agent_type: {type: string, enum: [auto]}
+        workspace: {$ref: '#/components/schemas/WorkspaceConfig'}
+        state: {type: string, enum: [working, standby, activation_off, needs_attention]}
+        state_reason: {type: string}
+        responsibility: {type: string}
+        wake_interval_seconds: {type: integer, format: int64}
+        todo_counts: {type: object, additionalProperties: {type: integer}}
+        todo_summary: {type: array, items: {type: string}}
+        next_at: {type: string, format: date-time}
+        profile_revision: {type: integer, format: int64}
+        runtime_revision: {type: integer, format: int64}
+        dreaming: {$ref: '#/components/schemas/DreamingOverview'}
+    DreamingOverview:
+      type: object
+      required: [state]
+      additionalProperties: false
+      properties:
+        state: {type: string, enum: [unknown, disabled, waiting, running, succeeded, failed, recovery_pending]}
+        next_at: {type: string, format: date-time}
+        last_success: {type: string, format: date-time}
+    WorkspaceConfig:
+      type: object
+      properties:
+        mode: {type: string, enum: [private, custom]}
+        path: {type: string}
+    FeedbackCreateRequest:
+      type: object
+      required: [category, title, body]
+      properties:
+        client_feedback_id: {type: string}
+        category: {type: string, enum: [bug, suggestion, other]}
+        title: {type: string, maxLength: 256}
+        body: {type: string, maxLength: 100000}
+        expected_destination: {type: string}
+    TriggerRecoveryRequest:
+      type: object
+      required: [delivery_id]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: 当前 trigger 的 revision；界面恢复请求应携带读取到的值，防止陈旧确认。
+        delivery_id:
+          type: string
+          description: 必须与触发器当前 pending_delivery_id 完全匹配
+    TriggerDefinition:
+      type: object
+      required: [trigger_id, name, condition, enabled]
+      properties:
+        trigger_id: {type: string}
+        name: {type: string}
+        condition:
+          type: object
+          additionalProperties: true
+          description: interval_seconds、fire_at、schedule 三选一；可选 cmd 条件脚本由目标 Agent session/turn 经 policy/HITL 执行，退出码 0 才投递。
+        target_agent_id: {type: string}
+        target_session_id: {type: string, nullable: true}
+        session_target_mode: {type: string, enum: [fixed]}
+        client_id: {type: string, nullable: true}
+        task_template: {type: string}
+        enabled: {type: boolean}
+        pending_delivery_id: {type: string, nullable: true}
+        pending_session_id: {type: string, nullable: true}
+        pending_occurrence: {type: number, format: double, nullable: true}
+        pending_condition_reason: {type: string}
+        pending_condition_content: {type: string}
+        pending_condition_payload: {type: object, additionalProperties: true}
+        pending_condition_approved: {type: boolean}
+        recovery_required: {type: boolean}
+        recovery_reason: {type: string}
+        owner_agent_id: {type: string}
+        controller: {type: string, enum: [user, auto]}
+        controller_id: {type: string}
+        revision: {type: integer, format: int64}
+        created_by: {type: string}
+    TriggerCreateRequest:
+      type: object
+      required: [name, condition, task_template, target_agent_id]
+      properties:
+        name: {type: string}
+        condition:
+          type: object
+          additionalProperties: true
+          description: interval_seconds、fire_at、schedule 三选一；可选 cmd 条件脚本由目标 Agent session/turn 经 policy/HITL 执行，退出码 0 才投递。
+        target_agent_id: {type: string}
+        target_session_id: {type: string, nullable: true}
+        session_target_mode: {type: string, enum: [fixed]}
+        task_template: {type: string}
+        enabled:
+          type: boolean
+          default: true
+    TriggerUpdateRequest:
+      type: object
+      properties:
+        revision: {type: integer, format: int64, minimum: 1}
+        name: {type: string}
+        condition:
+          type: object
+          additionalProperties: true
+          description: interval_seconds、fire_at、schedule 三选一；可选 cmd 条件脚本由目标 Agent session/turn 经 policy/HITL 执行，退出码 0 才投递。
+        target_agent_id: {type: string}
+        target_session_id: {type: string, nullable: true}
+        client_id: {type: string, nullable: true}
+        task_template: {type: string}
+        enabled: {type: boolean}
+        session_target_mode: {type: string, enum: [fixed]}
+    FireRecord:
+      type: object
+      properties:
+        trigger_id: {type: string}
+        delivery_id:
+          type: string
+          description: 投递身份，用于恢复期间的 fencing
+        status: {type: string, enum: [queued, skipped, error, awaiting_approval]}
   parameters:
     AgentID:
       name: agent_id

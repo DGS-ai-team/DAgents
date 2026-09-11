@@ -20,20 +20,20 @@ describe("formatToolResultDisplay", () => {
     const display = formatToolResultDisplay({
       data: {
         name: "create_temporary_agent",
-        content: JSON.stringify({ child_agent_id: "x", purpose: "test" }),
+        content: JSON.stringify({ kind: "result", child_agent_id: "x", status: "completed", summary: "test" }),
         duration_seconds: 1.2,
       },
     });
-    expect(display.headline).toContain("已创建临时 Agent");
+    expect(display.headline).toContain("临时 Agent 完成");
     expect(display.headline).toContain("1.2s");
   });
 
-  it("marks rejected tools", () => {
+  it("uses denied status for policy-rejected tools", () => {
     const display = formatToolResultDisplay({
       data: {
         name: "bash_run",
         content: "ok",
-        rejected: true,
+        status: "denied",
         arguments: { command: "ls" },
       },
     });
@@ -56,10 +56,9 @@ describe("formatToolResultDisplay", () => {
   it("uses authoritative result status for failures", () => {
     const display = formatToolResultDisplay({
       data: {
-        name: "linux_exec",
+        name: "terminal_command",
         status: "failed",
         content: "ERROR: connection refused",
-        rejected: false,
       },
     });
     expect(display.headline).toContain("执行失败");

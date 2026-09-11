@@ -2,8 +2,6 @@ package turn
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +24,22 @@ func (o *Orchestrator) processToolCalls(
 	history *[]llm.Message,
 	calls []llm.ToolCall,
 ) (*PendingHITL, string, error) {
+	for _, tc := range calls {
+		if strings.TrimSpace(tc.Function.Name) == "auto_idle" {
+			if len(calls) != 1 {
+				return nil, "", fmt.Errorf("auto_idle must be the only tool call in a batch")
+			}
+			if !tools.TrustedAutoIdleAvailable(ctx) || tools.TrustedAutoIdleAgentID(ctx) != o.agentID {
+				return nil, "", fmt.Errorf("auto_idle is unavailable outside a trusted system auto activation")
+			}
+			if !o.autoIdleEligible(sessionID) {
+				return nil, "", fmt.Errorf("auto_idle is unavailable after a side effect or failed tool")
+			}
+			if err := tools.ValidateAutoIdleArguments([]byte(tc.Function.Arguments)); err != nil {
+				return nil, "", err
+			}
+		}
+	}
 	if o.toolBudgetCheck != nil {
 		allowed, reason := o.toolBudgetCheck(sessionID)
 		if !allowed {
@@ -39,13 +53,20 @@ func (o *Orchestrator) processToolCalls(
 		}
 	}
 	var autoCalls []llm.ToolCall
+	autoIdleCall := false
 	var approvalCalls []pendingApprovalCall
 	var userInfo *llm.ToolCall
 	var memoryConflicts []PendingHITLItem
 
 	for i, tc := range calls {
+		if !o.executionBoundaryOpen(ctx) {
+			return nil, "", context.Canceled
+		}
 		o.publishToolCall(sessionID, tc, false, i)
 		o.recordToolCall(sessionID, tc.Function.Name)
+		if strings.TrimSpace(tc.Function.Name) != "auto_idle" && !autoIdleReadOnlyTool(tc.Function.Name) {
+			o.markAutoIdleIneligible(sessionID)
+		}
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
 			if o.isChildSession {
@@ -60,13 +81,17 @@ func (o *Orchestrator) processToolCalls(
 				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 				continue
 			}
-			_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
-			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
-			if err != nil {
-				return nil, "", err
+			decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
+			switch decision.Action {
+			case policy.ActionDeny:
+				msg := hooks.ToolDenyMessage(decision)
+				o.publishToolResult(sessionID, tc, msg, true, nil)
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+			case policy.ActionRequireApproval:
+				approvalCalls = append(approvalCalls, pendingApprovalCall{tc: tc})
+			default:
+				autoCalls = append(autoCalls, tc)
 			}
-			o.publishToolResult(sessionID, tc, output, strings.HasPrefix(output, "ERROR:"), nil)
-			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 			continue
 		}
 
@@ -93,6 +118,12 @@ func (o *Orchestrator) processToolCalls(
 			}
 			continue
 		}
+		if tools.IsMemoryTool(tc.Function.Name) {
+			if err := o.executeMemoryTool(ctx, sessionID, history, tc); err != nil {
+				return nil, "", err
+			}
+			continue
+		}
 		if tools.IsSkillTool(tc.Function.Name) {
 			if err := o.executeSkillTool(sessionID, history, tc); err != nil {
 				return nil, "", err
@@ -102,10 +133,12 @@ func (o *Orchestrator) processToolCalls(
 		decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
 		switch decision.Action {
 		case policy.ActionDeny:
+			o.markAutoIdleIneligible(sessionID)
 			msg := hooks.ToolDenyMessage(decision)
 			o.publishToolResult(sessionID, tc, msg, true, nil)
 			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		case policy.ActionRequireApproval:
+			o.markAutoIdleIneligible(sessionID)
 			item := pendingApprovalCall{tc: tc}
 			if decision.ApprovalSubtype == hooks.ApprovalSubtypeDuplicateToolCall && decision.DuplicateMeta != nil {
 				meta := *decision.DuplicateMeta
@@ -114,11 +147,29 @@ func (o *Orchestrator) processToolCalls(
 			approvalCalls = append(approvalCalls, item)
 		default:
 			autoCalls = append(autoCalls, tc)
+			if strings.TrimSpace(tc.Function.Name) == "auto_idle" {
+				autoIdleCall = true
+			}
 		}
 	}
 
 	if err := o.executeAutoBatch(ctx, sessionID, history, autoCalls, nil); err != nil {
 		return nil, "", err
+	}
+	if autoIdleCall {
+		succeeded := false
+		if len(*history) > 0 {
+			last := (*history)[len(*history)-1]
+			meta := tools.ClassifyResult("auto_idle", last.Content, false)
+			var payload struct {
+				NoWork bool `json:"no_work"`
+			}
+			succeeded = last.Role == "tool" && last.ToolCallID == autoCalls[0].ID && meta.Succeeded() && json.Unmarshal([]byte(last.Content), &payload) == nil && payload.NoWork
+		}
+		if succeeded {
+			return nil, "no_work", nil
+		}
+		o.markAutoIdleIneligible(sessionID)
 	}
 
 	var pendingItems []PendingHITLItem
@@ -137,14 +188,21 @@ func (o *Orchestrator) processToolCalls(
 	if len(pendingItems) == 0 {
 		return nil, "", nil
 	}
-	message, sseItems := buildHITLRequiredPayload(pendingItems)
+	o.markAutoIdleIneligible(sessionID)
 	// Complete the pause hook before publishing the resumable event. Clients
-	// may resume immediately after observing hitl_required; publishing first
-	// would let the resume path mutate the shared history while this turn is
-	// still applying hook effects to it.
+	// receive the event only after runtime lifecycle has committed the pending
+	// interaction; this keeps the resume route race-free.
 	o.runHITLBeforePausePhase(ctx, sessionID, history, "awaiting_hitl")
-	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
 	return pendingFromItems(pendingItems), "awaiting_hitl", nil
+}
+
+func autoIdleReadOnlyTool(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "read_file", "glob_files", "grep_file", "grep_files", "todo_list":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
@@ -155,12 +213,15 @@ func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID strin
 }
 
 func (o *Orchestrator) evaluateToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+	o.policyMu.RLock()
+	currentPolicy := o.policy
+	o.policyMu.RUnlock()
 	var decision hooks.ToolBeforeEachResult
 	if o.toolHooks == nil {
-		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
+		action := currentPolicy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
 		mode := policy.ModeRule
-		if o.policy != nil {
-			mode = o.policy.ToolApprovalMode(tc.Function.Name)
+		if currentPolicy != nil {
+			mode = currentPolicy.ToolApprovalMode(tc.Function.Name)
 		}
 		decision = hooks.ToolBeforeEachResult{Action: action, ToolMode: mode}
 	} else {
@@ -219,13 +280,15 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 		if discoveryCatalog == nil {
 			discoveryCatalog = catalog
 		}
-		if discoveryCatalog == nil || !discoveryCatalog.Enabled() {
+		// Catalog is the permission authority for the current Agent/Turn;
+		// LiveCatalog may only provide fresher metadata, never more access.
+		if catalog == nil || !catalog.Enabled() || discoveryCatalog == nil || !discoveryCatalog.Enabled() {
 			output := "ERROR: skills 功能已禁用"
 			o.publishToolResult(sessionID, tc, output, true, nil)
 			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 			return nil
 		}
-		return o.executeListAvailableSkillsTool(sessionID, history, tc, discoveryCatalog)
+		return o.executeListAvailableSkillsTool(sessionID, history, tc, discoveryCatalog, catalog)
 	}
 	if catalog == nil || !catalog.Enabled() {
 		output := "ERROR: skills 功能已禁用"
@@ -239,7 +302,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	}
 	beforeLoadedDigest := Digest(loaded)
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	var output string
 	var action string
@@ -285,9 +348,9 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	return nil
 }
 
-func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog *skills.Catalog) error {
+func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, catalog, policyCatalog *skills.Catalog) error {
 	var payload map[string]any
-	_, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	_ = json.Unmarshal([]byte(cleanedArgs), &payload)
 	query := strings.TrimSpace(fmt.Sprint(payload["query"]))
 	if query == "<nil>" {
@@ -306,7 +369,7 @@ func (o *Orchestrator) executeListAvailableSkillsTool(sessionID string, history 
 	if cursor == "<nil>" {
 		cursor = ""
 	}
-	page, err := catalog.ListAvailableSkills(query, limit, cursor)
+	page, err := catalog.ListAvailableSkillsWithVisibility(policyCatalog, query, limit, cursor)
 	var output string
 	rejected := err != nil
 	if err != nil {
@@ -423,7 +486,7 @@ func stringSliceField(payload map[string]any, key string) []string {
 
 // executeAutoBatch 并行执行一批免审批工具（对齐 Python gather）。
 // 每个工具完成后立刻推送 tool_result SSE，便于 UI 反映并行进度；
-// Wait 后按原始 tool_calls 顺序写入 history（不重复推送 SSE）。
+// 所有执行协程结束后，按原始 tool_calls 顺序写入 history（不重复推送 SSE）。
 func (o *Orchestrator) executeAutoBatch(
 	ctx context.Context,
 	sessionID string,
@@ -434,8 +497,21 @@ func (o *Orchestrator) executeAutoBatch(
 	if len(autoCalls) == 0 {
 		return nil
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	if !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
+	}
+	// Child management is synchronous and may wait for an entire child Turn.
+	// Keep a batch containing one of these calls on the ordered path so it
+	// cannot be sent to the generic executor or race another child lifecycle.
+	for _, tc := range autoCalls {
+		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
+			for _, ordered := range autoCalls {
+				if err := o.executeTool(ctx, sessionID, history, ordered, plan); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 	}
 	if len(autoCalls) == 1 {
 		return o.executeTool(ctx, sessionID, history, autoCalls[0], plan)
@@ -462,15 +538,27 @@ func (o *Orchestrator) executeAutoBatch(
 			content := ""
 			rejected := false
 			var extra map[string]any
-			if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
+			if !o.executionBoundaryOpen(ctx) {
+				content = ToolUserInterruptedMessage
+				lifecycleErr = context.Canceled
+			} else if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
 				lifecycleErr = fmt.Errorf("record tool execution start: %w", err)
 				content = "ERROR: " + lifecycleErr.Error()
 				rejected = true
 			} else {
 				content, rejected, extra, lifecycleErr = o.invokeToolWithRetries(ctx, sessionID, tc, plan)
-				resultMeta := tools.ClassifyToolResult(tc.Function.Name, content, rejected)
+				if o.toolCancellationWon(ctx, sessionID, tc.ID) {
+					content = ToolUserInterruptedMessage
+					rejected = false
+					extra = nil
+					lifecycleErr = nil
+				}
+				resultMeta := tools.ClassifyResult(tc.Function.Name, content, rejected)
+				if !resultMeta.Succeeded() {
+					o.markAutoIdleIneligible(sessionID)
+				}
 				finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
-				if lifecycleErr == nil {
+				if lifecycleErr == nil && !o.toolCancellationWon(ctx, sessionID, tc.ID) {
 					lifecycleErr = finishErr
 				}
 			}
@@ -498,13 +586,17 @@ func (o *Orchestrator) executeAutoBatch(
 	// the terminal tool facts have been committed.
 	var lifecycleErr error
 	for _, item := range results {
-		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected)
+		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected, false)
 		if lifecycleErr == nil && item.lifecycleErr != nil {
 			lifecycleErr = item.lifecycleErr
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	// A parallel tool batch gets one synthetic multimodal user message even
+	// when several tools returned images. This keeps the Chat Completions
+	// history compact and preserves the original tool-result ordering.
+	o.appendToolVisionUserMessages(sessionID, history, autoCalls)
+	if !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
 	}
 	if lifecycleErr != nil {
 		return lifecycleErr
@@ -522,7 +614,7 @@ func (o *Orchestrator) commitToolResult(
 ) {
 	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
 	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
-	o.persistToolResult(sessionID, history, tc, forClient, forHistory, spillPath, rejected)
+	o.persistToolResult(sessionID, history, tc, forClient, forHistory, spillPath, rejected, true)
 }
 
 // persistToolResult 将已推送（或即将仅落盘）的工具结果写入 metrics / history。
@@ -532,8 +624,9 @@ func (o *Orchestrator) persistToolResult(
 	tc llm.ToolCall,
 	forClient, forHistory, spillPath string,
 	rejected bool,
+	appendVision bool,
 ) {
-	resultMeta := tools.ClassifyToolResult(tc.Function.Name, forClient, rejected)
+	resultMeta := tools.ClassifyResult(tc.Function.Name, forClient, rejected)
 	// Policy denial is not an execution result and should be excluded from
 	// context-success metrics. Failed/cancelled results, however, are valuable
 	// evidence for the next model step and must remain measurable.
@@ -545,19 +638,13 @@ func (o *Orchestrator) persistToolResult(
 		forHistory,
 		resultMeta,
 	))
-	if resultMeta.Status != tools.ResultStatusDenied {
+	if appendVision && resultMeta.Status != tools.ResultStatusDenied {
 		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)
 	}
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any, execErr error) {
-	runInBackground, cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
-	// bash_run is deliberately synchronous.  Keep parsing the historical
-	// run_in_background field for wire compatibility, but never let it change
-	// execution semantics; long-lived shell sessions use terminal_open.
-	if tc.Function.Name == "bash_run" || tools.IsBackgroundJobTool(tc.Function.Name) {
-		runInBackground = false
-	}
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
 	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)
 	if plan != nil && plan.IsApproved(tc.ID) {
 		toolCtx = tools.WithApprovalID(toolCtx, tc.ID)
@@ -566,19 +653,14 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		toolCtx = tools.WithTriggerSessionTarget(toolCtx, target)
 	}
 
-	var output string
-	if runInBackground {
-		output, execErr = o.tools.StartBackground(toolCtx, sessionID, tc.Function.Name, tc.ID, cleanedArgs)
-	} else {
-		output, execErr = o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
-		extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
-	}
+	output, execErr := o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
+	extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
 	if execErr != nil {
 		// Some providers return useful partial diagnostics together with an
 		// error (MCP, browser, SFTP and SSH are common examples). Never replace
 		// that body with only err.Error(); the result classifier and the model
-		// both need the provider evidence. Keep the legacy ERROR marker so old
-		// consumers still recognize the failure.
+		// both need the provider evidence. Keep the provider-visible ERROR marker
+		// so the result classifier can recognize the failure.
 		errText := strings.TrimSpace(execErr.Error())
 		if strings.TrimSpace(output) == "" {
 			output = "ERROR: " + errText
@@ -660,20 +742,71 @@ func (o *Orchestrator) executeTool(
 	tc llm.ToolCall,
 	plan *clihitl.ApprovalPlan,
 ) error {
+	if childagent.IsTemporaryAgentTool(tc.Function.Name) {
+		return o.executeChildManagementTool(ctx, sessionID, history, tc)
+	}
 	o.recordToolCall(sessionID, tc.Function.Name)
+	if !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
+	}
 	if err := o.emitToolExecutionStarted(ctx, sessionID, tc); err != nil {
 		content := "ERROR: " + err.Error()
+		if o.toolCancellationWon(ctx, sessionID, tc.ID) {
+			content = ToolUserInterruptedMessage
+		}
 		o.commitToolResult(sessionID, history, tc, content, true, nil)
+		if o.toolCancellationWon(ctx, sessionID, tc.ID) {
+			return context.Canceled
+		}
 		return fmt.Errorf("record tool execution start: %w", err)
 	}
 	content, rejected, extra, lifecycleErr := o.invokeToolWithRetries(ctx, sessionID, tc, plan)
-	resultMeta := tools.ClassifyToolResult(tc.Function.Name, content, rejected)
+	cancelledByTurn := o.toolCancellationWon(ctx, sessionID, tc.ID)
+	if cancelledByTurn {
+		content = ToolUserInterruptedMessage
+		rejected = false
+		extra = nil
+		lifecycleErr = nil
+	}
+	resultMeta := tools.ClassifyResult(tc.Function.Name, content, rejected)
+	if !resultMeta.Succeeded() {
+		o.markAutoIdleIneligible(sessionID)
+	}
 	finishErr := o.emitToolExecutionFinished(ctx, sessionID, tc, resultMeta)
 	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
 	if lifecycleErr != nil {
 		return lifecycleErr
 	}
+	if cancelledByTurn || !o.executionBoundaryOpen(ctx) {
+		return context.Canceled
+	}
 	return finishErr
+}
+
+// executeChildManagementTool 执行父 Agent 的同步子 Agent 控制工具。
+// 它仍通过普通 tool_result 进入当前消息序列，因此审批恢复和普通创建
+// 都保持合法的 assistant(tool_call) → tool(tool_result) 配对。
+func (o *Orchestrator) executeChildManagementTool(
+	ctx context.Context,
+	sessionID string,
+	history *[]llm.Message,
+	tc llm.ToolCall,
+) error {
+	if o.childMgr == nil || !o.childMgr.Enabled() {
+		output := "ERROR: child agents disabled"
+		o.publishToolResult(sessionID, tc, output, true, nil)
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+		return nil
+	}
+	cleanedArgs := tools.ParseToolCallArguments(tc.Function.Arguments)
+	output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs, tc.ID)
+	if err != nil {
+		output = "ERROR: " + err.Error()
+	}
+	rejected := strings.HasPrefix(strings.TrimSpace(output), "ERROR:")
+	o.publishToolResult(sessionID, tc, output, rejected, nil)
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+	return nil
 }
 
 func (o *Orchestrator) emitToolExecutionStarted(ctx context.Context, sessionID string, tc llm.ToolCall) error {
@@ -782,12 +915,6 @@ func parseJSONArgs(argsJSON string) map[string]any {
 		return map[string]any{}
 	}
 	return m
-}
-
-func newShortID(prefix string) string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return prefix + hex.EncodeToString(b[:])
 }
 
 func mergeToolResultExtra(parts ...map[string]any) map[string]any {

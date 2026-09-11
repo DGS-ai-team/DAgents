@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,7 @@ from manage.workgroup.models import WorkGroupCreateRequest  # noqa: E402
 
 
 class WorkgroupWSRouteTests(unittest.TestCase):
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_a","token":"secret-a"}]'})
     def test_hello_rejects_node_id_mismatch(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
@@ -28,7 +30,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
             with TestClient(app) as client:
                 with client.websocket_connect(
                     "/v1/workgroups/ws",
-                    headers={"x-dagents-agent-id": "node_a"},
+                    headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "secret-a"},
                 ) as ws:
                     ws.send_json(
                         {
@@ -44,6 +46,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                     self.assertEqual(error["type"], "session.error")
                     self.assertEqual(error["payload"]["code"], "not_authorized")
 
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_b","token":"secret-b"}]'})
     def test_hello_resume_and_live_push(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
@@ -58,8 +61,8 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                 OutboxFrame(
                     delivery_seq=1,
                     workgroup_id=wid,
-                    type="tool.command",
-                    payload={"command_id": "cmd_a"},
+                    type="agent.turn.start",
+                    payload={"assign_id": "as_01h00000000000000000000001"},
                     created_at="2026-07-31T00:00:00Z",
                 )
             ]
@@ -67,7 +70,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
             with TestClient(app) as client:
                 with client.websocket_connect(
                     "/v1/workgroups/ws",
-                    headers={"x-dagents-agent-id": "node_b"},
+                    headers={"x-dagents-agent-id": "node_b", "x-dagents-a2a-token": "secret-b"},
                 ) as ws:
                     ws.send_json(
                         {
@@ -93,23 +96,25 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                         }
                     )
                     env = ws.receive_json()
-                    self.assertEqual(env["type"], "tool.command")
+                    self.assertEqual(env["type"], "agent.turn.start")
                     self.assertEqual(env["delivery_seq"], 1)
                     complete = ws.receive_json()
                     self.assertEqual(complete["type"], "resume.complete")
 
                     # live push：enqueue 后经 hub 推送
                     frame = store.enqueue_outbox(
-                        wid, type="workgroup.tombstone", payload={"workgroup_id": wid}
+                        wid,
+                        type="agent.session.close",
+                        payload={"workgroup_id": wid, "home_node_id": "node_b"},
                     )
                     hub.deliver_outbox_frame(frame, home_node_id="node_b")
                     live = ws.receive_json()
-                    self.assertEqual(live["type"], "workgroup.tombstone")
+                    self.assertEqual(live["type"], "agent.session.close")
                     self.assertEqual(live["delivery_seq"], frame.delivery_seq)
 
                     ws.send_json(
                         {
-                            "type": "workgroup.tombstone_ack",
+                            "type": "delivery.ack",
                             "payload": {
                                 "delivery_seq": frame.delivery_seq,
                                 "connection_generation": gen,
@@ -120,11 +125,12 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                     acked = ws.receive_json()
                     self.assertEqual(acked["type"], "delivery.acked")
 
+    @patch.dict("os.environ", {"MANAGE_TOKENS": '[{"role":"node","agent_id":"node_a","token":"secret-a"}]'})
     def test_hello_exposes_protocol_contract_and_rejects_unknown_version(self) -> None:
         app = create_app()
         with TestClient(app) as client:
             with client.websocket_connect(
-                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "secret-a"}
             ) as ws:
                 ws.send_json(
                     {
@@ -133,7 +139,6 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                             "node_id": "node_a",
                             "protocol_version": "1",
                             "schema_version": "0.5.0",
-                            "agent_catalog_revision": "rev_test",
                             "capabilities": ["resume", "timeline"],
                             "client_time": "2026-08-26T00:00:00Z",
                         },
@@ -143,13 +148,12 @@ class WorkgroupWSRouteTests(unittest.TestCase):
                 payload = welcome["payload"]
                 self.assertEqual(payload["protocol_version"], "1")
                 self.assertEqual(payload["schema_version"], "0.5.0")
-                self.assertEqual(payload["agent_catalog_revision"], "rev_test")
                 self.assertIn("resume", payload["capabilities"])
                 self.assertIn("server_time", payload)
 
         with TestClient(app) as client:
             with client.websocket_connect(
-                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a", "x-dagents-a2a-token": "secret-a"}
             ) as ws:
                 ws.send_json(
                     {

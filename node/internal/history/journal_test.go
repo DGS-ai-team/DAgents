@@ -109,12 +109,12 @@ func TestJournalFilePath_usesDateSubdir(t *testing.T) {
 	}
 }
 
-func TestJournalRelativePath_workspaceRelative(t *testing.T) {
+func TestRuntimeJournalRelativePath_workspaceRelative(t *testing.T) {
 	at := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	got := JournalRelativePath("sess-a", at)
+	got := RuntimeJournalRelativePath("sess-a", at)
 	want := "history/20260621/sess-a.jsonl"
 	if got != want {
-		t.Fatalf("JournalRelativePath = %q, want %q", got, want)
+		t.Fatalf("RuntimeJournalRelativePath = %q, want %q", got, want)
 	}
 }
 

@@ -252,24 +252,6 @@ func TestBuildLinuxRemoteCommandUsesDedicatedProcessGroupWrapper(t *testing.T) {
 	}
 }
 
-func TestBuildLinuxRemoteCommandPersistsTokenForBackgroundRecovery(t *testing.T) {
-	command, _, recovery, err := buildLinuxRemoteCommandWithRecovery(LinuxChannelConfig{ID: "prod", RemoteShell: "bash"}, ExecRequest{
-		Command: "sleep 10",
-		Context: ExecutionContext{BackgroundJobID: "job-a1b2"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recovery.TargetID != "prod" || recovery.JobToken != "job-a1b2" || recovery.PIDFile != remoteJobPIDFile("job-a1b2") {
-		t.Fatalf("recovery=%+v", recovery)
-	}
-	for _, part := range []string{"printf", recovery.JobToken, recovery.PIDFile} {
-		if !strings.Contains(command, part) {
-			t.Fatalf("remote command missing %q: %s", part, command)
-		}
-	}
-}
-
 func TestBuildLinuxRemoteCommandCreatesRecoveryForSynchronousExecution(t *testing.T) {
 	_, _, recovery, err := buildLinuxRemoteCommandWithRecovery(LinuxChannelConfig{ID: "prod", RemoteShell: "bash"}, ExecRequest{
 		Command: "sleep 1",
@@ -282,13 +264,6 @@ func TestBuildLinuxRemoteCommandCreatesRecoveryForSynchronousExecution(t *testin
 	}
 	if recovery.PIDFile != remoteJobPIDFile(recovery.JobToken) {
 		t.Fatalf("recovery pid file=%q", recovery.PIDFile)
-	}
-}
-
-func TestFormatLinuxExecResultReportsUnknownTermination(t *testing.T) {
-	result := formatLinuxExecResult(nil, nil, &ExitStatus{Code: 1}, context.Canceled, false, "unknown")
-	if !strings.Contains(result, "termination_status: unknown") {
-		t.Fatalf("termination status missing: %q", result)
 	}
 }
 

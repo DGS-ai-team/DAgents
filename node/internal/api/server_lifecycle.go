@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
-
-	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 )
 
 const (
@@ -17,7 +16,17 @@ const (
 
 // Handler 返回可用于 http.Server 的根 Handler（含 onboarding gate 与 access log）。
 func (s *Server) Handler() http.Handler {
-	return accessLogMiddleware(s.logger, s.onboardingGateMiddleware(s.mux))
+	base := http.Handler(s.mux)
+	if s.startupErr != nil {
+		return accessLogMiddleware(s.logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" || r.URL.Path == "/v1/health" {
+				s.mux.ServeHTTP(w, r)
+				return
+			}
+			writeAPIError(w, http.StatusServiceUnavailable, "startup_failed", "node startup validation failed", nil)
+		}))
+	}
+	return accessLogMiddleware(s.logger, s.onboardingGateMiddleware(base))
 }
 
 // ListenAndServe 在配置的 listen 地址启动 HTTP 服务；ctx 取消时触发优雅关闭。
@@ -26,6 +35,9 @@ func (s *Server) Handler() http.Handler {
 // 1. 先启动 Manage sidecar 和 HTTP listener；
 // 2. ctx 取消后停止后台运行时、关闭持久化资源，最后关闭 HTTP listener。
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	if s.startupErr != nil {
+		return fmt.Errorf("node startup failed: %w", s.startupErr)
+	}
 	addr := s.cfg.ListenAddr()
 	srv := &http.Server{
 		Addr:              addr,
@@ -42,8 +54,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.manageStarted = false
 	s.manageMu.Unlock()
 	s.maybeStartManageSidecars()
+	s.startFeedbackLoop(regCtx)
 	s.startMCPHealthMonitor(regCtx)
-	if s.updateChecker != nil && !manage.UpdateDelegatedToShell() {
+	if s.updateChecker != nil {
 		s.updateChecker.Start(regCtx)
 	}
 	go func() {
@@ -71,6 +84,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
 		}
+		if s.dreamingSched != nil {
+			s.dreamingSched.Stop()
+		}
 		if s.terminals != nil {
 			s.terminals.closeAll()
 		}
@@ -78,11 +94,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.tools != nil {
 			_ = s.tools.CloseBrowser()
 		}
-		if s.backgroundJobs != nil {
-			_ = s.backgroundJobs.Close()
-		}
 		if s.store != nil {
 			_ = s.store.Close()
+		}
+		if s.feedbackStore != nil {
+			_ = s.feedbackStore.Close()
 		}
 		if s.agents != nil {
 			_ = s.agents.Close()
@@ -111,6 +127,36 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
 		return nil
+	}
+}
+
+func (s *Server) startFeedbackLoop(ctx context.Context) {
+	if s == nil || s.feedbackStore == nil {
+		return
+	}
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.deliverPendingFeedback(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Server) deliverPendingFeedback(ctx context.Context) {
+	items, err := s.feedbackStore.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, f := range items {
+		if f.Destination != "" && f.Destination == strings.TrimRight(strings.TrimSpace(s.cfg.Manage.URL), "/") {
+			s.tryDeliverFeedback(ctx, f)
+		}
 	}
 }
 
@@ -201,6 +247,9 @@ func (s *Server) Close() {
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()
 	}
+	if s.dreamingSched != nil {
+		s.dreamingSched.Stop()
+	}
 	if s.terminals != nil {
 		s.terminals.closeAll()
 	}
@@ -210,11 +259,11 @@ func (s *Server) Close() {
 	if s.tools != nil {
 		_ = s.tools.CloseBrowser()
 	}
-	if s.backgroundJobs != nil {
-		_ = s.backgroundJobs.Close()
-	}
 	if s.store != nil {
 		_ = s.store.Close()
+	}
+	if s.feedbackStore != nil {
+		_ = s.feedbackStore.Close()
 	}
 	if s.agents != nil {
 		_ = s.agents.Close()

@@ -48,6 +48,8 @@ export function defaultTriggerForm() {
     day: 1,
     cmd: "",
     taskTemplate: "",
+    targetAgentId: "",
+    sessionTargetMode: "fixed",
   };
 }
 
@@ -81,6 +83,8 @@ export function triggerToForm(trigger) {
   form.name = String(trigger.name || "");
   form.enabled = trigger.enabled !== false;
   form.taskTemplate = String(trigger.task_template || "");
+  form.targetAgentId = String(trigger.target_agent_id || "");
+  form.sessionTargetMode = String(trigger.session_target_mode || "fixed");
 
   const parsed = parseConditionToForm(trigger.condition);
   return { ...form, ...parsed };
@@ -158,8 +162,6 @@ export function buildConditionFromForm(form) {
       if (kind === "weekly") schedule.weekday = intFromAny(form.weekday);
       if (kind === "monthly") schedule.day = intFromAny(form.day);
       condition.schedule = schedule;
-      const cmd = String(form.cmd || "").trim();
-      if (cmd) condition.cmd = cmd;
       break;
     }
     default:
@@ -211,8 +213,24 @@ export function buildCreatePayload(form) {
   return {
     name: String(form.name || "").trim(),
     task_template: String(form.taskTemplate || "").trim(),
+    target_agent_id: String(form.targetAgentId || "").trim(),
+    session_target_mode: String(form.sessionTargetMode || "fixed"),
+    enabled: form.enabled !== false,
     condition: buildConditionFromForm(form),
   };
+}
+
+export function buildTriggerPatch(previous, next) {
+  const before = buildUpdatePayload(previous || {});
+  const after = buildUpdatePayload(next || {});
+  const patch = {};
+  for (const key of Object.keys(after)) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) patch[key] = after[key];
+  }
+  const oldAgent = String(previous?.targetAgentId || "").trim();
+  const nextAgent = String(next?.targetAgentId || "").trim();
+  if (oldAgent !== nextAgent && nextAgent) patch.target_session_id = "";
+  return patch;
 }
 
 /** 表单 → PATCH /v1/triggers/{id} body。 */
@@ -220,6 +238,8 @@ export function buildUpdatePayload(form) {
   return {
     name: String(form.name || "").trim(),
     task_template: String(form.taskTemplate || "").trim(),
+    target_agent_id: String(form.targetAgentId || "").trim(),
+    session_target_mode: String(form.sessionTargetMode || "fixed"),
     condition: buildConditionFromForm(form),
     enabled: !!form.enabled,
   };

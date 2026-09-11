@@ -9,24 +9,24 @@ from typing import Any, Callable
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from manage.platform.auth import AGENT_ID_HEADER, AuthContext, is_open_mode
+from manage.platform.auth import AGENT_ID_HEADER, AuthContext, authenticate
 from manage.platform.metrics import record_workgroup_ws_event
 from manage.workgroup.d3_models import SessionHello
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.ws_hub import WorkgroupWSHub
 
-# 可选：Node 回传 tool.result / provision_result 时的业务回调
+# Node 回传 Agent session/turn 事件时的业务回调。
 InboundHandler = Callable[[str, str, dict[str, Any]], None]
 
 
 def _auth_ws(websocket: WebSocket) -> AuthContext:
-    """WebSocket 鉴权：开放模式放行；否则校验 token（与 HTTP 同源 header）。"""
-    if is_open_mode():
-        return AuthContext(token_id="anonymous", role="admin", discovery_groups=["*"])
-    from manage.platform.auth import authenticate
+    """校验与 HTTP 同源的 header/cookie 鉴权。"""
     from starlette.requests import Request
 
     scope = dict(websocket.scope)
+    # Starlette's Request asserts an HTTP scope; authentication only needs the
+    # headers/cookies, so use an equivalent transient HTTP scope.
+    scope["type"] = "http"
     receive = websocket._receive  # noqa: SLF001
     req = Request(scope, receive)
     return authenticate(req)
@@ -43,7 +43,7 @@ def build_workgroup_ws_router(
     async def workgroup_ws(websocket: WebSocket) -> None:
         await websocket.accept()
         try:
-            _auth_ws(websocket)
+            auth = _auth_ws(websocket)
         except Exception as exc:  # noqa: BLE001
             await websocket.send_json(
                 {"type": "session.error", "payload": {"code": "not_authorized", "message": str(exc)}}
@@ -64,6 +64,15 @@ def build_workgroup_ws_router(
             )
             await websocket.close(code=4400)
             return
+        # A WS connection represents one concrete Node.  Admin sessions may
+        # operate any registered node; node sessions/tokens must be bound to it.
+        if not auth.is_admin:
+            if not ((auth.is_node or auth.session_kind == "node") and auth.agent_id == node_id):
+                await websocket.send_json(
+                    {"type": "session.error", "payload": {"code": "not_authorized", "message": "凭据未绑定该 node_id"}}
+                )
+                await websocket.close(code=4403)
+                return
 
         loop = asyncio.get_running_loop()
         outbound: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -101,7 +110,7 @@ def build_workgroup_ws_router(
                     payload = {}
 
                 try:
-                    if mtype == "session.hello" or (not mtype and "node_id" in payload):
+                    if mtype == "session.hello":
                         try:
                             hello = SessionHello.model_validate(payload)
                         except ValidationError as exc:
@@ -124,7 +133,6 @@ def build_workgroup_ws_router(
                             send=sync_send,
                             protocol_version=hello.protocol_version,
                             schema_version=hello.schema_version,
-                            agent_catalog_revision=hello.agent_catalog_revision,
                             capabilities=hello.capabilities,
                             client_time=hello.client_time or "",
                         )
@@ -138,16 +146,13 @@ def build_workgroup_ws_router(
                             raise WorkgroupError("schema_mismatch", "workgroup_id required")
                         hub.resume_offer(node_id, workgroup_id=wid, last_ack_delivery_seq=last_ack)
                     elif mtype in {
-                        "tool.ack",
                         "delivery.ack",
-                        "tool.result",
-                        "member.provision_result",
-                        "workgroup.tombstone_ack",
                         "agent.session.ready",
                         "agent.session.error",
                         "agent.session.closed",
                         "agent.turn.accepted",
                         "agent.turn.cancelled",
+                        "agent.tool.cancelled",
                         "agent.turn.resumed",
                         "agent.turn.event",
                         "agent.turn.result",
@@ -165,8 +170,6 @@ def build_workgroup_ws_router(
                         wid = payload.get("workgroup_id") or msg.get("workgroup_id")
                         # 业务回调前先做世代 fencing；旧连接的迟到结果不能改变任务状态。
                         if on_inbound is not None and mtype in {
-                            "tool.result",
-                            "member.provision_result",
                             "agent.session.ready",
                             "agent.session.error",
                             "agent.session.closed",

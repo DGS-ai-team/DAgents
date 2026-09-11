@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { extractMemoryConflict } from "../stores/hitl.js";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
   data: { type: Object, required: true },
@@ -22,7 +23,7 @@ const showMergePreview = computed(
       <div class="approval-bubble approval-bubble--memory">
         <div class="tool-exec-bubble__source">
           <span class="tool-source-badge tool-source-badge--memory" title="长期记忆冲突">
-            <span class="tool-source-badge__icon" aria-hidden="true">M</span>
+            <ToolGroupIcon class="tool-source-badge__svg" name="memory" />
             <span class="tool-source-badge__text">记忆冲突</span>
           </span>
         </div>

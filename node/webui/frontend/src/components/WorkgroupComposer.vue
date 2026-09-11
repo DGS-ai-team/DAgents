@@ -1,5 +1,6 @@
 <script setup>
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
+import UiIcon from "./UiIcon.vue";
 
 defineProps({
   humanQueueItems: { type: Array, default: () => [] },
@@ -74,7 +75,7 @@ const emit = defineEmits([
             title="取消排队"
             @click="emit('remove-queued', item)"
           >
-            ×
+            <UiIcon name="close" :size="14" />
           </button>
         </template>
       </div>
@@ -164,9 +165,7 @@ const emit = defineEmits([
           :disabled="cancelling"
           @click="emit('cancel')"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
+          <UiIcon name="close" :size="16" />
         </button>
         <button
           v-if="hitlMode"
@@ -177,9 +176,7 @@ const emit = defineEmits([
           :disabled="!hitlDraft.trim() || hitlBusy"
           @click="emit('submit-hitl-answer')"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="send" :size="16" />
         </button>
         <button
           v-if="!sending && !hitlMode"
@@ -190,9 +187,7 @@ const emit = defineEmits([
           :disabled="!draft.trim() || !canChat"
           @click="emit('send')"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="send" :size="16" />
         </button>
       </div>
     </div>

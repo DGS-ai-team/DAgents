@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { applyToolExecutions } from "./toolJobs.js";
 
 export const TERMINAL_TURN_PHASES = Object.freeze([
   "completed",
@@ -49,30 +50,30 @@ function trim(value) {
   return String(value || "").trim();
 }
 
-export function normalizeTurnState(raw = {}, { source = "event" } = {}) {
+export function normalizeTurnState(raw = {}) {
   const payload = raw?.turn_state && typeof raw.turn_state === "object" ? raw.turn_state : raw;
   const phase = trim(payload?.phase) || "idle";
   const terminal = Boolean(payload?.terminal) || TERMINAL_SET.has(phase);
   return {
     authority: trim(payload?.authority) || "turn_coordinator",
     phase,
-    turnStatus: trim(payload?.turn_status || payload?.turnStatus),
-    stepStatus: trim(payload?.step_status || payload?.stepStatus),
-    turnId: trim(payload?.turn_id || payload?.turnId),
-    stepId: trim(payload?.step_id || payload?.stepId),
-    stepIndex: Number(payload?.step_index || payload?.stepIndex) || 0,
-    generation: Number(payload?.generation || payload?.turn_generation) || 0,
-    lifecycleSeq: Number(payload?.lifecycle_seq || payload?.lifecycleSeq) || 0,
-    historyRevision: Number(payload?.history_revision || payload?.historyRevision) || 0,
+    turnStatus: trim(payload?.turn_status),
+    stepStatus: trim(payload?.step_status),
+    turnId: trim(payload?.turn_id),
+    stepId: trim(payload?.step_id),
+    stepIndex: Number(payload?.step_index) || 0,
+    generation: Number(payload?.generation) || 0,
+    lifecycleSeq: Number(payload?.lifecycle_seq) || 0,
+    historyRevision: Number(payload?.history_revision) || 0,
     terminal,
-    endReason: trim(payload?.end_reason || payload?.reason || payload?.turn_end_reason),
-    interactionKind: trim(payload?.interaction_kind || payload?.interactionKind),
+    endReason: trim(payload?.end_reason),
+    interactionKind: trim(payload?.interaction_kind),
     recoveryRequired: Boolean(payload?.recovery_required),
     toolExecutions: Array.isArray(payload?.tool_executions)
       ? payload.tool_executions.map((item) => ({
           id: trim(item?.id),
-          toolCallId: trim(item?.tool_call_id || item?.toolCallId),
-          toolName: trim(item?.tool_name || item?.toolName),
+          toolCallId: trim(item?.tool_call_id),
+          toolName: trim(item?.tool_name),
           status: trim(item?.status),
           attempt: Number(item?.attempt) || 0,
         }))
@@ -98,7 +99,7 @@ function canAccept(next, current, source) {
 }
 
 export function applyTurnState(raw, { source = "event" } = {}) {
-  const next = normalizeTurnState(raw, { source });
+  const next = normalizeTurnState(raw);
   if (!canAccept(next, turnStateStore, source)) return false;
 
   const submissionPending = ["posting", "accepted"].includes(turnStateStore.submitState);
@@ -107,6 +108,7 @@ export function applyTurnState(raw, { source = "event" } = {}) {
     next.turnId !== turnStateStore.turnId || next.generation !== turnStateStore.generation;
   const previousHistoryRevision = turnStateStore.historyRevision;
   Object.assign(turnStateStore, next);
+  applyToolExecutions(next.toolExecutions);
   if (next.historyRevision === 0 && previousHistoryRevision > 0) {
     turnStateStore.historyRevision = previousHistoryRevision;
   }
@@ -176,6 +178,7 @@ export function resetTurnState() {
     stepIndex: 0,
     generation: 0,
     lifecycleSeq: 0,
+    historyRevision: 0,
     terminal: false,
     endReason: "",
     interactionKind: "",
@@ -189,7 +192,7 @@ export function resetTurnState() {
 }
 
 export function isTurnProcessing() {
-  return PROCESSING_SET.has(turnStateStore.phase) || turnStateStore.submitState !== "idle";
+  return PROCESSING_SET.has(turnStateStore.phase) || INTERACTION_SET.has(turnStateStore.phase) || turnStateStore.submitState !== "idle";
 }
 
 export function isTurnInteractionWaiting() {

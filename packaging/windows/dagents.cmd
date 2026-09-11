@@ -625,7 +625,6 @@ if /I "%~1"=="--check" (
 goto version
 
 :update_cmd
-if not exist "bin\dagents-client.exe" goto missing_client
 call :probe_shell
 if not errorlevel 1 (
   bin\dagents-shell.exe -config "%CFG%" update %*
@@ -635,6 +634,7 @@ if not errorlevel 1 (
   goto cli_exit
 )
 :update_client_fallback
+if not exist "bin\dagents-client.exe" goto missing_client
 call :ensure_node
 if errorlevel 1 (
   set "EXIT_CODE=1"
@@ -651,10 +651,6 @@ if /I "%~1"=="--force" (
 )
 if /I "%~1"=="--check" (
   set "UPDATE_CHECK=--check"
-  shift
-  goto parse_update_next
-)
-if /I "%~1"=="--from-client" (
   shift
   goto parse_update_next
 )
@@ -686,18 +682,9 @@ if errorlevel 1 (
   goto cli_exit
 )
 powershell -NoProfile -Command ^
-  "$pkg='%TMP_PKG%'; $prefix='%DAGENTS_HOME%';" ^
+  "$pkg='%TMP_PKG%';" ^
   "$magic=$null; try { $magic=[System.IO.File]::ReadAllBytes($pkg) } catch { exit 2 };" ^
-  "if ($magic.Length -ge 2 -and $magic[0] -eq 0x4D -and $magic[1] -eq 0x5A) { $installer=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString() + '.exe'); Copy-Item -LiteralPath $pkg -Destination $installer -Force; Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS'; exit 10 };" ^
-  "$staging=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString());" ^
-  "New-Item -ItemType Directory -Path $staging | Out-Null;" ^
-  "$archive=$null; try { if ($magic.Length -ge 2 -and $magic[0] -eq 0x50 -and $magic[1] -eq 0x4B) { $archive=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString() + '.zip'); Copy-Item -LiteralPath $pkg -Destination $archive -Force; Expand-Archive -Path $archive -DestinationPath $staging -Force } else { tar -xf $pkg -C $staging } } catch { exit 2 } finally { if ($archive -and (Test-Path -LiteralPath $archive)) { Remove-Item -LiteralPath $archive -Force } };" ^
-  "$bundle=Get-ChildItem -Path $staging -Directory | Select-Object -First 1;" ^
-  "if (-not $bundle) { exit 2 };" ^
-  "Copy-Item -Path (Join-Path $bundle.FullName 'bin\*') -Destination (Join-Path $prefix 'bin') -Recurse -Force;" ^
-  "if (Test-Path (Join-Path $bundle.FullName 'dagents.cmd')) { Copy-Item -Path (Join-Path $bundle.FullName 'dagents.cmd') -Destination $prefix -Force };" ^
-  "if (Test-Path (Join-Path $bundle.FullName 'VERSION')) { Copy-Item -Path (Join-Path $bundle.FullName 'VERSION') -Destination $prefix -Force };" ^
-  "Remove-Item -Recurse -Force $staging; exit 0"
+  "if ($magic.Length -ge 2 -and $magic[0] -eq 0x4D -and $magic[1] -eq 0x5A) { $installer=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString() + '.exe'); Copy-Item -LiteralPath $pkg -Destination $installer -Force; Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS'; exit 10 } else { exit 2 }"
 set "INSTALL_RC=!ERRORLEVEL!"
 if exist "!TMP_PKG!" del /f /q "!TMP_PKG!"
 if "!INSTALL_RC!"=="10" (

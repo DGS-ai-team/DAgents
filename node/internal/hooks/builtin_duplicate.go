@@ -48,7 +48,7 @@ func (h *DuplicateToolCallHook) Run(ctx context.Context, hc *Context, host Host)
 
 // RunToolBeforeEach 在 rule+auto 时比对 fingerprint，命中则改为 duplicate 审批。
 func (h *DuplicateToolCallHook) RunToolBeforeEach(_ context.Context, in ToolBeforeEachInput, out *ToolBeforeEachResult) error {
-	if h == nil || !h.cfg.Enabled {
+	if h == nil || !h.cfg.IsEnabled() {
 		return nil
 	}
 	if out.ToolMode != policy.ModeRule || out.Action != policy.ActionAuto {

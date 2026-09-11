@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const DEFAULT_CONFIG = `{
@@ -292,7 +293,9 @@ onMounted(() => {
           :class="{ 'mcp-settings__server-card--active': activeServerId === server.id }"
           @click="selectServer(server)"
         >
-          <span class="mcp-settings__server-icon" aria-hidden="true">⌘</span>
+          <span class="mcp-settings__server-icon" aria-hidden="true">
+            <UiIcon name="network" :size="18" />
+          </span>
           <span class="mcp-settings__server-main">
             <strong>{{ server.display_name || server.id }}</strong>
             <small>{{ server.id }} · {{ server.transport || "stdio" }}</small>
@@ -301,7 +304,9 @@ onMounted(() => {
             <span class="mcp-settings__status" :data-status="server.status">{{ server.status || "offline" }}</span>
             <small>{{ server.enabled_tool_count || 0 }} / {{ server.tool_count || 0 }} 个工具已启用</small>
           </span>
-          <span class="mcp-settings__server-arrow" aria-hidden="true">›</span>
+          <span class="mcp-settings__server-arrow" aria-hidden="true">
+            <UiIcon name="chevron-right" :size="15" />
+          </span>
         </button>
       </div>
     </section>
@@ -329,7 +334,7 @@ onMounted(() => {
       <div v-else-if="!activeTools.length" class="mcp-settings__empty settings-empty-state">没有匹配的工具。</div>
       <div v-else class="mcp-settings__tool-list">
         <label v-for="tool in activeTools" :key="tool.name" class="mcp-settings__tool-row">
-          <input type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
+          <input class="settings-switch-input" type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
           <span>
             <code>{{ tool.name }}</code>
             <small v-if="tool.description">{{ tool.description }}</small>
@@ -405,7 +410,7 @@ onMounted(() => {
 .mcp-settings__error { color: var(--color-danger); }
 .mcp-settings__ok { color: var(--color-success, #3d9a5f); }
 .mcp-settings__count { color: var(--color-text-muted); font-size: 12px; }
-.mcp-settings__server-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 10px; margin-top: 14px; }
+.mcp-settings__server-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 10px; margin-top: 14px; }
 .mcp-settings__server-card {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
@@ -440,10 +445,11 @@ onMounted(() => {
 .mcp-settings__back + .settings-section__title { margin-top: 8px; }
 .mcp-settings__tool-toolbar { margin-top: 14px; color: var(--color-text-muted); font-size: 12px; }
 .mcp-settings__tool-toolbar input { flex: 1; min-width: 180px; }
-.mcp-settings__tool-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 12px; max-height: 480px; margin-top: 14px; overflow: auto; }
-.mcp-settings__tool-row { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; font-size: 12px; }
-.mcp-settings__tool-row code { font-family: var(--font-mono, ui-monospace, monospace); }
-.mcp-settings__tool-row small { display: block; margin-top: 4px; color: var(--color-text-muted); line-height: 1.4; }
+.mcp-settings__tool-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 8px 12px; max-height: 480px; margin-top: 14px; overflow: auto; }
+.mcp-settings__tool-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; box-sizing: border-box; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; font-size: 12px; }
+.mcp-settings__tool-row > span { min-width: 0; flex: 1 1 auto; }
+.mcp-settings__tool-row code { display: block; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; word-break: break-word; }
+.mcp-settings__tool-row small { display: block; min-width: 0; margin-top: 4px; color: var(--color-text-muted); line-height: 1.4; overflow-wrap: anywhere; word-break: break-word; }
 @media (max-width: 760px) {
   .mcp-settings__server-card { grid-template-columns: auto 1fr auto; }
   .mcp-settings__server-meta { grid-column: 2 / -1; text-align: left; }

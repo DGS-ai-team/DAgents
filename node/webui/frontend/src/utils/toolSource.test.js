@@ -14,20 +14,12 @@ describe("inferToolKind", () => {
 
   it("maps shell tools", () => {
     expect(inferToolKind("bash_run")).toBe("shell");
-    expect(inferToolKind("background_job_status")).toBe("shell");
   });
 
   it("maps interactive terminal tools to the terminal source", () => {
     expect(inferToolKind("terminal_open")).toBe("terminal");
     expect(inferToolKind("terminal_read")).toBe("terminal");
     expect(inferToolKind("terminal_terminate")).toBe("terminal");
-  });
-
-	  it("maps Linux channel tools into the terminal source", () => {
-		expect(inferToolKind("linux_exec")).toBe("terminal");
-		expect(inferToolKind("linux_file_upload")).toBe("terminal");
-		expect(inferToolKind("linux_file_download")).toBe("terminal");
-		expect(inferToolKind("linux_future_tool")).toBe("terminal");
   });
 
   it("maps triggers and browser by prefix", () => {
@@ -64,10 +56,6 @@ describe("resolveToolVisual", () => {
       kind: "terminal",
       label: "terminal",
     });
-    expect(resolveToolVisual({ data: { tool_name: "linux_file_upload" } })).toMatchObject({
-		kind: "terminal",
-		label: "terminal",
-    });
   });
 
   it("uses the MCP server name instead of the generic tool label", () => {
@@ -97,11 +85,11 @@ describe("resolveToolVisual", () => {
     ).toMatchObject({ kind: "mcp", label: "tencent-docs" });
   });
 
-  it("keeps terminal and Linux channel steps in one merged visual group", () => {
+  it("keeps terminal steps in one merged visual group", () => {
     expect(
       resolveToolGroupVisual([
         { callEntry: { data: { tool_name: "terminal_read" } } },
-        { callEntry: { data: { tool_name: "linux_exec" } } },
+        { callEntry: { data: { tool_name: "terminal_command" } } },
       ]),
     ).toMatchObject({ kind: "terminal", label: "terminal" });
   });

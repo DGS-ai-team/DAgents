@@ -7,7 +7,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | 文件 | 说明 |
 |------|------|
 | `config.go` | `Config` 结构体、`LoadFile`、`Validate`、`ApplyDefaults` |
-| `node_id.go` | `ResolveNodeID`、`NodeIDFilePath`：`.runtime/node/node_id` 持久化；旧 `.runtime/agent/agent_id` 仅用于升级迁移 |
+| `node_id.go` | `ResolveNodeID`、`NodeIDFilePath`：`.runtime/node/node_id` 持久化 |
 | `resolve.go` | `ResolveConfigPath`：`-config` / `DAGENTS_CONFIG` / 默认候选路径 |
 | `config_test.go` | 默认值、必填项、环境变量展开单测 |
 
@@ -18,10 +18,11 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | 块 | 说明 |
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
-| `llm` | 模型连接（迁移种子）；工具轮次上限见 Agent snapshot |
-| `fs_root` | **不可配置**；固定 `./.runtime`。`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
-| `skills` | 技能开关与 prompt 上限（目录固定为 `{fs_root}/skills`） |
+| `llm` | 模型连接快照；工具步数上限见 Agent snapshot |
+| `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `memory/`、`skills/`、`policy/` 等控制面目录相对此根；Agent workspace 另由创建时绑定 |
+| `skills` | 技能开关与 prompt 上限（目录固定为 `{runtime_root}/skills`；不属于 Agent workspace） |
 | `compression` | 上下文压缩 token 阈值 |
+| `memory` | 压缩后的可选候选提取与后台整理；默认不调用 LLM |
 | `triggers` | 触发器调度（见下表） |
 | `tools` | 内置工具编码与 bash 压缩（工具组见 Agent 快照） |
 | `log` | Node stderr 日志级别 |
@@ -45,10 +46,10 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `bash` | `bash_run` |
 | `terminal` | `terminal_config_list`、`terminal_open`、`terminal_input`、`terminal_read`、`terminal_terminate`、`terminal_list` |
 | `hitl` | `ask_user_information` |
-| `memory` | `remember` |
+| `memory` | `remember`、`memory_search`、`memory_get`、`memory_forget` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
 | `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
-| `child_agents` | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
+| `child_agents` | `create_temporary_agent`、`cancel_temporary_agent` |
 | `browser` | 任务级：`browser_run_task` / `browser_task_status` / `browser_task_cancel`（伴生 Chrome） |
 
 各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
@@ -60,7 +61,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `enabled` | `true` | 是否启动后台调度轮询 |
 | `poll_seconds` | `5` | 到期扫描间隔（秒，至少 1） |
 
-持久化路径固定为 `{fs_root}/triggers/triggers.json`。
+持久化路径固定为 `{runtime_root}/triggers/triggers.json`。
 
 condition 语义（interval / fire_at / schedule / cmd）见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
 

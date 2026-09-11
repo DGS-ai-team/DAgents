@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
@@ -18,10 +19,11 @@ import (
 
 func TestAgentsAPI_CRUD(t *testing.T) {
 	cfg := &config.Config{
-		NodeID: "node-test",
-		FSRoot: t.TempDir(),
+		NodeID:      "node-test",
+		RuntimeRoot: t.TempDir(),
 	}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -30,6 +32,12 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	// NewServer starts the trigger scheduler. This fixture swaps in its own
+	// AgentStore, so stop the scheduler before replacing the field it reads.
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	// 用户模板目录放入 general，避免依赖 cwd 下 packaging 路径。
@@ -130,8 +138,9 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 }
 
 func TestAgentTemplatesAPI_list(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
 	_ = os.WriteFile(filepath.Join(userDir, "demo.yaml"), []byte("id: demo\ndisplay_name: Demo\n"), 0o644)
@@ -155,8 +164,9 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 }
 
 func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
@@ -165,12 +175,18 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
+	customRoot := filepath.Join(t.TempDir(), "project")
 	body, _ := json.Marshal(map[string]any{
 		"display_name": "空白 Agent",
+		"workspace":    map[string]any{"mode": "custom", "path": customRoot},
 		"defaults": map[string]any{
-			"llm": map[string]any{"max_tool_loops": 16},
+			"llm": map[string]any{"max_steps": 16},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
@@ -189,131 +205,28 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	if created.DisplayName != "空白 Agent" {
 		t.Fatalf("created = %+v", created)
 	}
-}
-
-func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
-	cfg.ApplyDefaults()
-
-	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
-	if err != nil {
-		t.Fatal(err)
+	if created.Workspace == nil || created.Workspace.Mode != agentruntime.WorkspaceModeCustom || created.Workspace.Path == "" {
+		t.Fatalf("workspace = %+v", created.Workspace)
 	}
-	defer agentsDB.Close()
+	if _, err := os.Stat(created.Workspace.Path); err != nil {
+		t.Fatalf("custom workspace was not created: %v", err)
+	}
 
-	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
-	srv.agents = agentsDB
-
-	body, _ := json.Marshal(map[string]any{
-		"display_name": "远端入口",
-		"defaults":     map[string]any{},
-		"placement": map[string]any{
-			"home_node_id": "node-other",
-		},
+	patch, _ := json.Marshal(map[string]any{
+		"workspace": map[string]any{"mode": agentruntime.WorkspaceModePrivate},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/v1/agents/"+created.AgentID, bytes.NewReader(patch))
+	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	errObj, _ := out["error"].(map[string]any)
-	if errObj["code"] != "invalid_request" {
-		t.Fatalf("error=%#v", errObj)
-	}
-}
-
-func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
-	cfg.ApplyDefaults()
-	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer agentsDB.Close()
-	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
-	srv.agents = agentsDB
-
-	body, _ := json.Marshal(map[string]any{
-		"display_name": "伪装远端",
-		"origin":       "remote",
-		"defaults":     map[string]any{},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
-	cfg.ApplyDefaults()
-	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer agentsDB.Close()
-	_ = agentsDB.Save(context.Background(), store.AgentRecord{
-		AgentID:        "agt-local",
-		DisplayName:    "本地",
-		Origin:         store.AgentOriginLocal,
-		SandboxBackend: "process",
-		ConfigSnapshot: json.RawMessage(`{}`),
-	})
-	_ = agentsDB.Save(context.Background(), store.AgentRecord{
-		AgentID:        "agt-remote",
-		DisplayName:    "远端",
-		Origin:         store.AgentOriginRemote,
-		SandboxBackend: "process",
-		ConfigSnapshot: json.RawMessage(`{}`),
-		PlacementJSON:  json.RawMessage(`{"role":"owner_ref","home_node_id":"node-home"}`),
-	})
-	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
-	srv.agents = agentsDB
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var out struct {
-		Agents []agentView `json:"agents"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if len(out.Agents) != 1 || out.Agents[0].AgentID != "agt-local" {
-		t.Fatalf("agents=%+v", out.Agents)
-	}
-	got, err := agentsDB.Get(context.Background(), "agt-remote")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || !got.Archived {
-		t.Fatalf("expected remote stub archived, got=%+v", got)
-	}
-	// 再次列表不应再命中已归档 stub
-	list2, err := agentsDB.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, rec := range list2 {
-		if rec.AgentID == "agt-remote" {
-			t.Fatal("archived remote stub still in store List")
-		}
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "workspace_immutable") {
+		t.Fatalf("workspace patch status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
 func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
 
@@ -351,8 +264,9 @@ func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
 
 func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &config.Config{NodeID: "node-triggers", FSRoot: dir}
+	cfg := &config.Config{NodeID: "node-triggers", RuntimeRoot: dir}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	cfg.Triggers.Enabled = true
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
@@ -373,6 +287,7 @@ func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 
 	out, err := built.Registry.Execute(context.Background(), "trigger_list", `{"call_purpose":"test"}`)
 	if err != nil {

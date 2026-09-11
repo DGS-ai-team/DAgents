@@ -27,8 +27,8 @@ func TestExecuteTool_readImageAppendsVisionUserMessage(t *testing.T) {
 	}
 	reg.SetMultimodalEnabled(true)
 	hub := stream.NewHub(8, logx.Discard())
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooksRuntimeConfig(t), logx.Discard())
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, nil, nil, hooksRuntimeConfig(t), logx.Discard())
 	orch.SetMultimodalEnabled(true)
 
 	history := []llm.Message{
@@ -71,8 +71,8 @@ func TestExecuteTool_readImageSkipsVisionWhenMultimodalDisabled(t *testing.T) {
 	}
 	reg.SetMultimodalEnabled(true)
 	hub := stream.NewHub(8, logx.Discard())
-	pol, _ := policy.LoadFile("")
-	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooksRuntimeConfig(t), logx.Discard())
+	pol := policy.NewDefaultEngine()
+	orch := NewOrchestrator("agent-1", dir, hub, &llm.MockClient{}, reg, pol, SkillAccess{}, nil, nil, hooksRuntimeConfig(t), logx.Discard())
 
 	history := []llm.Message{
 		{Role: "user", Content: "describe chart"},
@@ -93,6 +93,39 @@ func TestExecuteTool_readImageSkipsVisionWhenMultimodalDisabled(t *testing.T) {
 	}
 	if history[2].Role != "tool" || !strings.Contains(history[2].Content, "[READ_IMAGE]") {
 		t.Fatalf("tool msg = %+v", history[2])
+	}
+}
+
+func TestBuildToolVisionUserMessageGroupsImages(t *testing.T) {
+	msg, err := buildToolVisionUserMessage([]*tools.ReadImageVisionPayload{
+		{
+			RelPath: "one.png",
+			Detail:  "low",
+			DataURL: "data:image/png;base64,b25l",
+			Prompt:  "inspect first",
+			FrameID: "frame-one",
+		},
+		{
+			RelPath: "two.png",
+			Detail:  "high",
+			DataURL: "data:image/png;base64,dHdv",
+			Prompt:  "inspect second",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Role != "user" || msg.Name != llm.UserNameToolVision {
+		t.Fatalf("message = %+v", msg)
+	}
+	if len(msg.ContentParts) != 4 {
+		t.Fatalf("content parts = %d, want 4", len(msg.ContentParts))
+	}
+	if msg.ContentParts[1].Type != "image_url" || msg.ContentParts[3].Type != "image_url" {
+		t.Fatalf("content parts = %+v", msg.ContentParts)
+	}
+	if !strings.Contains(msg.ContentParts[0].Text, "frame-one") {
+		t.Fatalf("first prompt = %q, want frame id", msg.ContentParts[0].Text)
 	}
 }
 

@@ -15,8 +15,9 @@ import (
 )
 
 func TestListAgents_includesNotifyFields(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +35,8 @@ defaults:
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
+	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
 	body, _ := json.Marshal(map[string]any{

@@ -21,7 +21,7 @@
 | **默认本机绑定** | 默认 `127.0.0.1`；人机为 Web UI `/ui/` |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
 | **跨 Node 协作** | 经 Manage **Workgroup**（Dialer / 反代） |
-| **工具边界** | 工具组 + policy + `fs_root`；无独立沙箱进程 |
+| **工具边界** | 工具组 + policy + Agent `workspace_root`；Node 管理目录使用 `runtime_root`，无独立沙箱进程 |
 | **会话态在 Node** | Agent 对话上下文、队列、持久化由 Node 负责（SQLite） |
 
 ### 1.1 基础路径
@@ -92,7 +92,7 @@ Content-Type: application/json
 
 {
   "display_name": "助手",
-  "defaults": { "llm": { "active": "deepseek", "max_tool_loops": 32 } }
+  "defaults": { "llm": { "active": "deepseek", "max_steps": 32 } }
 }
 ```
 
@@ -126,13 +126,13 @@ Content-Type: application/json
 
 {
   "soul_md": "...",
-  "user_md": "...",
-  "custom_md": "...",
-  "long_term_md": "..."
+  "custom_md": "..."
 }
 ```
 
-注入开关仍通过 Agent 快照 `defaults.prompt_context.*_enabled`（设置页「侧车与长期记忆」）。
+侧车开关通过 Agent 快照 `defaults.prompt_context.soul_enabled` 与
+`defaults.prompt_context.custom_enabled` 控制；Memory 的自动召回与 scope
+由同一 Agent 快照中的记忆配置控制，但具体记忆条目只由 workspace memory service 管理。
 
 ### 2.5 消息与 resume
 
@@ -201,7 +201,7 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 - 历史被截断时发送 `resync_required`，Client 必须 hydrate 后继续，不得静默跳过缺失事件。
 - 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`turn_state`、`hitl_required`、`turn_finished`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`turn_state`、`hitl_required`、`turn_finished`、`notification_changed`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。
 
 **本地 turn** 统一使用 `hitl_required`。子 Agent 相关路径仍可能出现 `approval_required` / `user_information_required`，UI 按同类 HITL 处理即可。
 
@@ -234,6 +234,7 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 **与其它事件分工**
 
 - **`hitl_required`**：本地 turn 统一 HITL 事件；`items[]` 每项含 `hitl_type`：`user_information`（`ask_user_information`）或 `execute_tool`（需审批工具）。UI 按 item 类型展示并分别 `POST resume`；同批可混合 ask + approval，Node 侧为单一 `PendingHITL.Items`。
+- **`notification_changed`**：Node 生成的完整通知投影，包含 `notify_seq`、`ack_seq`、`has_unread`、`has_pending_hitl`、`pending_hitl_items`。Desktop Shell 直接据此更新托盘待办；启动和 SSE 重连才通过 `/v1/agents` 做一次快照对账。
 - **`approval_required` / `user_information_required`**：子 Agent 等路径仍可能使用；UI 按同类 HITL 处理。
 - `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
 - 子 Agent 内部 `turn_finished`：**不**转发为父 Agent 终态（`node/internal/childagent/relay_hub.go`）。
@@ -361,14 +362,14 @@ Web UI：Agents 设置页 Policy 面板。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下**未交付**的活跃子 Agent |
+| GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下的活跃与最近终态子 Agent 快照 |
 | GET | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}` | 查询单个子 Agent 状态 |
 | POST | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
-- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** Agent 的 `GET /v1/streams`。
-- 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。
+- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，创建工具同步等待子 Agent 终态，**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_progress` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** Agent 的 `GET /v1/streams`。
+- 子 Agent 完成、失败、取消、过期或因 Node 重启中断后，都会保留轻量 ChildRun 快照供 UI hydrate；完整 transcript 不复制到父会话。
 
-父 Agent 工具（非 HTTP）：`create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent`。
+父 Agent 工具（非 HTTP）：`create_temporary_agent`、`cancel_temporary_agent`。
 
 ---
 
@@ -386,7 +387,7 @@ Web UI：Agents 设置页 Policy 面板。
 |----|------|
 | **HTTP** | §2.8 list / get / cancel（用户与 Client） |
 | **工具** | `create_temporary_agent` 等（父 Agent turn loop） |
-| **进程内** | `node/internal/childagent/`：`Create` / `Deliver` / `Cancel` / `Wait` |
+| **进程内** | `node/internal/childagent/`：`Create` / `Cancel` / `ListSnapshots` / `RouteResume` |
 
 字段、SSE、生命周期见 **[child-agent-tools.md](./child-agent-tools.md)**。
 
@@ -443,7 +444,7 @@ TurnOrchestrator
 
 ```yaml
 # /etc/dagents/agent.yaml（示意）
-agent_id: ops-win-01
+node_id: ops-win-01
 listen:
   host: 127.0.0.1
   port: 18765
@@ -452,11 +453,12 @@ manage:
   url: https://manage.example.com
   registration:
     base_url: http://192.168.1.10:18765
-fs_root: D:\agent-workspace
 llm:
   provider: openai
   model: gpt-4.1
 ```
+
+Node 的 `runtime_root` 固定为 `./.runtime`；Agent 的 `workspace_root` 不在 Node YAML 中配置，而是在创建 Agent 时选择。
 
 Client 同目录 `client.yaml` 仅引用：
 

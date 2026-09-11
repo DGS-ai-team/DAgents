@@ -128,36 +128,45 @@ describe("toolStepToolLabel", () => {
 
 describe("toolStepStatusText", () => {
   beforeEach(() => {
-    applyToolJobsSnapshot({ running: 0, background: 0, running_call_ids: [], background_call_ids: [] });
+    applyToolJobsSnapshot({ running: 0, running_call_ids: [] });
   });
 
-  it("shows terminated for cancelled bash result", () => {
+  it("uses the structured status for a cancelled bash result", () => {
     expect(
       toolStepStatusText({
         resultEntry: {
           kind: "tool_result",
-          data: { content: "[BASH_RESULT] status=CANCELLED\nshell_type=bash\n命令已被用户终止。" },
+          data: { status: "cancelled", content: "命令已被用户终止。" },
         },
       }),
     ).toBe("已终止");
   });
 
-  it("uses event status before inspecting legacy result text", () => {
+  it("uses event status before inspecting result text", () => {
     const result = {
       kind: "tool_result",
-      data: { tool_name: "linux_exec", status: "failed", content: "" },
+      data: { tool_name: "terminal_command", status: "failed", content: "" },
     };
     expect(resolveToolStepPhase({ resultEntry: result })).toBe("failed");
     expect(toolStepStatusText({ resultEntry: result })).toBe("执行失败");
   });
 
-  it("shows interrupted for a tool result created by stream cancellation", () => {
+  it("shows terminated for a tool result created by stream cancellation", () => {
     const result = {
       kind: "tool_result",
-      data: { tool_name: "bash_run", content: "流式输出被用户中断。" },
+      data: { tool_name: "bash_run", status: "cancelled", content: "流式输出被用户中断。" },
     };
-    expect(resolveToolStepPhase({ resultEntry: result })).toBe("interrupted");
-    expect(toolStepStatusText({ resultEntry: result })).toBe("已中断");
+    expect(resolveToolStepPhase({ resultEntry: result })).toBe("cancelled");
+    expect(toolStepStatusText({ resultEntry: result })).toBe("已终止");
+  });
+
+  it("shows terminated for a tool result created by turn cancellation", () => {
+    const result = {
+      kind: "tool_result",
+      data: { tool_name: "bash_run", status: "cancelled", content: "用户需要补充信息，打断了工具执行。" },
+    };
+    expect(resolveToolStepPhase({ resultEntry: result })).toBe("cancelled");
+    expect(toolStepStatusText({ resultEntry: result })).toBe("已终止");
   });
 
   it("shows running for parallel tool_call without result", () => {
@@ -205,12 +214,11 @@ describe("toolStepStatusText", () => {
     expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("执行中");
   });
 
-  it("shows background for running bash result still tracked", () => {
+  it("shows background for an explicitly queued tool result", () => {
     const result = {
       kind: "tool_result",
-      data: { tool_call_id: "c9", content: "[BASH_RESULT] status=RUNNING job_id=j1" },
+      data: { tool_call_id: "c9", tool_name: "browser_run_task", status: "queued" },
     };
-    applyToolJobsSnapshot({ background: 1, background_call_ids: ["c9"] });
     expect(toolStepStatusText({ resultEntry: result })).toBe("后台执行中");
   });
 
@@ -225,14 +233,4 @@ describe("toolStepStatusText", () => {
     expect(toolStepStatusText({ callEntry: call })).toBe("执行中");
   });
 
-  it("shows background execution for a partial call already detached", () => {
-    const call = {
-      kind: "tool_call",
-      partial: true,
-      data: { tool_name: "bash_run", tool_call_id: "c-partial-background" },
-    };
-    applyToolJobsSnapshot({ background: 1, background_call_ids: ["c-partial-background"] });
-    expect(resolveToolStepPhase({ callEntry: call })).toBe("background");
-    expect(toolStepStatusText({ callEntry: call })).toBe("后台执行中");
-  });
 });

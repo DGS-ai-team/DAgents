@@ -6,12 +6,14 @@ import ContextMeter from "./ContextMeter.vue";
 import McpStatusIndicator from "./McpStatusIndicator.vue";
 import SkillsStatusIndicator from "./SkillsStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
+import UiIcon from "./UiIcon.vue";
 import { chromeStore } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { statusStore, hasStatus, formatStatusText } from "../stores/statusLines.js";
-import { getDesktopClipboardFiles } from "../api/desktop.js";
+import { turnStateStore } from "../stores/turnState.js";
+import { getPlatformClipboardFiles } from "../api/platform.js";
 import {
   fileReferenceKey,
   normalizeFileReferences,
@@ -24,6 +26,7 @@ import {
   canSubmitComposer,
   hasPendingUserInformation,
   shouldShowCancel,
+  shouldShowInteractionCancel,
 } from "../utils/composerState.js";
 import * as api from "../api/node.js";
 
@@ -57,9 +60,6 @@ const thinkingEnabled = computed(() => {
 const thinkingEffort = computed(() =>
   String(props.llmSettings?.reasoning_effort || "high").toLowerCase(),
 );
-const reasoningEffortSupported = computed(
-  () => props.llmSettings?.reasoning_effort_supported !== false,
-);
 const thinkingControl = computed(() => getThinkingControl(props.llmSettings));
 const thinkingFixed = computed(() => thinkingControl.value === "fixed");
 const thinkingLabel = computed(() => {
@@ -71,7 +71,7 @@ const thinkingSecondaryLabel = computed(() => {
   return label || (thinkingControl.value === "budget" ? "思考预算" : "推理强度");
 });
 const thinkingSecondarySupported = computed(
-  () => hasThinkingSecondaryControl(props.llmSettings) && reasoningEffortSupported.value,
+  () => hasThinkingSecondaryControl(props.llmSettings),
 );
 
 const input = ref("");
@@ -130,7 +130,6 @@ function openTerminal(item) {
 }
 
 const runningJobCount = computed(() => toolJobsStore.running);
-const backgroundJobCount = computed(() => toolJobsStore.background);
 const pendingApprovals = computed(() =>
   props.hitlQueue
     .filter((item) => item.kind === "approval")
@@ -142,7 +141,6 @@ const runtimeStatusText = computed(() => {
   if (props.cancelling) parts.push("正在取消");
   if (pendingApprovals.value > 0) parts.push(`待审批 ${pendingApprovals.value}`);
   if (runningJobCount.value > 0) parts.push(`工具执行中 ${runningJobCount.value}`);
-  if (backgroundJobCount.value > 0) parts.push(`后台任务 ${backgroundJobCount.value}`);
   const phase = [
     "thinking",
     "assistant_generating",
@@ -158,6 +156,11 @@ const runtimeStatusText = computed(() => {
   }
   const workers = workerStripText();
   if (workers) parts.push(workers);
+  // Hydrate 后没有 SSE 草稿可恢复，但权威 Turn 终态仍应对用户可见。
+  // 取消请求的即时响应已经由 ChatView 写入系统消息，避免这里重复展示。
+  if (!parts.length && turnStateStore.phase === "cancelled" && turnStateStore.cancelState !== "confirmed") {
+    parts.push("本轮已取消");
+  }
   return parts.join(" · ");
 });
 const composerPlaceholder = computed(() =>
@@ -165,6 +168,13 @@ const composerPlaceholder = computed(() =>
 );
 const showCancel = computed(() =>
   shouldShowCancel({
+    sending: props.sending,
+    hitlBusy: props.hitlBusy,
+    hasUserInformation: userInfoPending.value,
+  }),
+);
+const showInteractionCancel = computed(() =>
+  shouldShowInteractionCancel({
     sending: props.sending,
     hitlBusy: props.hitlBusy,
     hasUserInformation: userInfoPending.value,
@@ -305,7 +315,7 @@ function submit() {
 }
 
 function onCancel() {
-  if (!showCancel.value || props.cancelling) return;
+  if ((!showCancel.value && !showInteractionCancel.value) || props.cancelling) return;
   emit("cancel");
 }
 
@@ -322,7 +332,7 @@ async function resolveFilePaths({ text, files, uriList }) {
   if (!paths.length && uriList) paths = pathsFromUriList(uriList);
   if (!paths.length && shouldResolvePathsViaShell({ text, files })) {
     try {
-      const data = await getDesktopClipboardFiles();
+      const data = await getPlatformClipboardFiles();
       paths = data?.paths || [];
     } catch {
       /* Shell 不可用 */
@@ -387,7 +397,7 @@ defineExpose({
 <template>
   <footer class="chat__composer">
     <div v-if="error" class="chat__composer-alert" role="alert" aria-live="polite">
-      <span class="chat__composer-alert-icon" aria-hidden="true">!</span>
+      <UiIcon class="chat__composer-alert-icon" name="alert" :size="14" />
       <span>{{ error }}</span>
     </div>
     <div
@@ -408,10 +418,7 @@ defineExpose({
             :class="{ 'chat__pending-file--invalid': file.status !== 'ready' }"
           >
             <span class="chat__pending-file-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none">
-                <path d="M5.25 2.75h6.1L15.5 6.9v10.35H5.25z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
-                <path d="M11.25 2.75V7h4.25M7.75 10h5.5M7.75 13h5.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="file" :size="16" />
             </span>
             <span class="chat__pending-file-info" :title="file.path">
               <strong>{{ file.name }}</strong>
@@ -424,9 +431,7 @@ defineExpose({
               :title="`移除 ${file.name}`"
               @click="removePendingFile(idx)"
             >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="close" :size="14" />
             </button>
           </div>
         </div>
@@ -459,9 +464,7 @@ defineExpose({
               title="移除图片"
               @click="removePendingImage(idx)"
             >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="close" :size="14" />
             </button>
           </div>
         </div>
@@ -507,9 +510,7 @@ defineExpose({
           :disabled="attachDisabled"
           @click="openAttachmentPicker"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
+          <UiIcon name="paperclip" :size="16" />
         </button>
         <button
           v-if="multimodalEnabled"
@@ -520,11 +521,7 @@ defineExpose({
           :disabled="imageAttachDisabled"
           @click="openImagePicker"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.25" />
-            <circle cx="5.25" cy="6" r="1.25" fill="currentColor" />
-            <path d="M2 11.5l3.25-3 2.25 2.25L9 8l4.5 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="image" :size="16" />
         </button>
       </div>
 
@@ -552,6 +549,17 @@ defineExpose({
           @switch-profile="(id) => emit('switch-profile', id)"
         />
         <button
+          v-if="showInteractionCancel"
+          type="button"
+          class="chat__composer-send chat__composer-send--cancel"
+          title="取消本轮（不会提交回答）"
+          aria-label="取消本轮（不会提交回答）"
+          :disabled="cancelling"
+          @click="onCancel"
+        >
+          <UiIcon name="close" :size="16" />
+        </button>
+        <button
           v-if="showCancel"
           type="button"
           class="chat__composer-send chat__composer-send--cancel"
@@ -563,9 +571,7 @@ defineExpose({
           @click="onCancel"
         >
           <span v-if="cancelling" class="chat__composer-stop-spinner" aria-hidden="true" />
-          <svg v-else viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
+          <UiIcon v-else name="close" :size="16" />
         </button>
         <button
           v-else
@@ -576,9 +582,7 @@ defineExpose({
           :disabled="!canSubmit"
           @click="submit"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="send" :size="16" />
         </button>
       </div>
     </div>

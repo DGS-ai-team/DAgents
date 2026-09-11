@@ -83,10 +83,6 @@ export const VIEW_META = {
     title: "对话",
     subtitle: "与工作组 Supervisor 对话",
   },
-  templates: {
-    title: "Agent 模板",
-    subtitle: "可复用的 Agent 蓝图；工作组新增成员时可快速选用",
-  },
   marketplace: {
     title: "能力市场",
     subtitle: "浏览、上传与发布 Node 扩展能力包",
@@ -106,6 +102,14 @@ export const VIEW_META = {
   settings: {
     title: "配置",
     subtitle: "管理台共享的 LLM、版本发布与案例库",
+  },
+  feedback: {
+    title: "用户反馈",
+    subtitle: "查看、处理并回复 Node 用户反馈",
+  },
+  auto: {
+    title: "Auto 员工",
+    subtitle: "跨 Node 查看 Auto 岗位状态、待办与最近上报",
   },
   cases: {
     title: "案例库",

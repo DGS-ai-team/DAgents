@@ -7,6 +7,7 @@ type ReadImageVisionPayload struct {
 	RelPath string
 	Detail  string
 	DataURL string
+	FrameID string
 	// Prompt 非空时作为视觉 follow-up 文本；空则使用 read_image 默认文案。
 	Prompt string
 }

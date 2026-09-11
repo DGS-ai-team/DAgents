@@ -2,6 +2,7 @@
 import { reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
+import UiIcon from "./UiIcon.vue";
 import { buildCreateTemplatePayload, draftFromBlank, emptyAgentDraft } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
@@ -112,7 +113,7 @@ watch(
             </p>
           </div>
           <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
-            ×
+            <UiIcon name="close" :size="16" />
           </button>
         </header>
 
@@ -142,6 +143,7 @@ watch(
           <AgentSettingsForm
             v-model:draft="draft"
             :llm-profiles="llmProfiles"
+            :show-workspace="false"
             v-model:show-advanced="showAdvanced"
           />
         </div>

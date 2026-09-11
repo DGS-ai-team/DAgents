@@ -154,9 +154,10 @@ class HumanQueueTests(unittest.TestCase):
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             wid = self._ready(store)
-            member, _ = store.create_member(
+            member = store.create_member(
                 wid,
                 MemberCreateRequest(
+                    agent_id="agent-a",
                     home_node_id="node-a",
                     display_name="member-a",
                     description="worker",
@@ -166,8 +167,6 @@ class HumanQueueTests(unittest.TestCase):
                 member.member_id,
                 "ready",
                 workgroup_id=wid,
-                workspace_path=str(Path(tmp) / "ws"),
-                tool_catalog_revision="rev_test",
             )
             kernel = TurnKernel(
                 store,
@@ -272,9 +271,10 @@ class HumanQueueTests(unittest.TestCase):
             path = Path(tmp) / "m.db"
             store = WorkGroupStore(db=SQLiteDatabase(path))
             wid = self._ready(store)
-            member, _ = store.create_member(
+            member = store.create_member(
                 wid,
                 MemberCreateRequest(
+                    agent_id="agent-a",
                     home_node_id="node-a",
                     display_name="member-a",
                     description="worker",

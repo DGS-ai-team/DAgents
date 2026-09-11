@@ -19,7 +19,7 @@ func TestEnsureLoadedSkillInstructionsInsertsBeforeCurrentRootUser(t *testing.T)
 	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	}, nil, nil, hooks.RuntimeConfig{}, nil)
 	history := []llm.Message{llm.UserMessage("请写一份文档", llm.UserNameHuman)}
 
 	o.ensureLoadedSkillInstructions("session-1", &history)
@@ -44,7 +44,7 @@ func TestEnsureLoadedSkillInstructionsAppendsAfterSkillToolResult(t *testing.T) 
 	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	}, nil, nil, hooks.RuntimeConfig{}, nil)
 	history := []llm.Message{
 		llm.UserMessage("加载写作能力", llm.UserNameHuman),
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "load-1", Function: llm.ToolCallFunction{Name: "load_skills"}}}},
@@ -65,7 +65,7 @@ func TestEnsureLoadedSkillInstructionsRestoresAfterCompression(t *testing.T) {
 	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	}, nil, nil, hooks.RuntimeConfig{}, nil)
 
 	// Compression replaces the old skill message with a summary. The durable
 	// loaded set is the source of truth, so the next model step must restore the
@@ -93,7 +93,7 @@ func TestFilterSkillInstructionMessagesRemovesStaleAndUnloadedBodies(t *testing.
 	o := NewOrchestrator("agent-1", t.TempDir(), nil, &llm.MockClient{}, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{}, nil)
+	}, nil, nil, hooks.RuntimeConfig{}, nil)
 	old := llm.UserMessage("<skill_instructions><name>writer</name><instructions>old body</instructions></skill_instructions>", llm.UserNameSkill)
 	current := buildSkillInstructionMessage(catalog.ReadLoadedSkillContents(loaded)[0])
 	history := []llm.Message{old, current, llm.UserMessage("继续", llm.UserNameHuman)}

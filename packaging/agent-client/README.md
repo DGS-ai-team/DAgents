@@ -17,7 +17,7 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-按需改 `listen` / `local`。LLM、压缩、skills/triggers、hooks 等请在 **Web UI「设置」** 修改（写入 SQLite）。旧版胖 YAML 首次启动会自动迁入 `node_settings.db` 并瘦身引导文件。
+按需改 `listen` / `local`。LLM、压缩、skills/triggers、hooks 等请在 **Web UI「设置」** 修改（写入 SQLite）。
 
 `config.yaml` **不会被 Git 跟踪**。
 

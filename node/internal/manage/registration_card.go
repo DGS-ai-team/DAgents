@@ -25,9 +25,6 @@ func RegistrationCard(cfg *config.Config) map[string]any {
 	for k, v := range cfg.Agent.Metadata {
 		meta[k] = v
 	}
-	if role := cfg.AgentRole(); role != "" {
-		meta["role"] = role
-	}
 	if len(meta) > 0 {
 		out["metadata"] = meta
 	}

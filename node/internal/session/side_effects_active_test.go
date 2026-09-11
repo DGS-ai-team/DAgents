@@ -59,7 +59,7 @@ func TestActiveTurnQueuesAsyncAndTriggerUntilTurnCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, err := policy.LoadFile("")
+	pol := policy.NewDefaultEngine()
 	if err != nil {
 		t.Fatal(err)
 	}

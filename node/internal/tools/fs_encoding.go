@@ -37,31 +37,6 @@ func (r *Registry) resolveFileEncoding(arg *string) string {
 	return defaultFileEncoding()
 }
 
-func decodeFileContent(data []byte, enc string) (string, error) {
-	enc = normalizeOutputEncoding(enc)
-	if enc == "" {
-		enc = defaultFileEncoding()
-	}
-	switch enc {
-	case "utf-8":
-		return decodeShellOutput(data, "utf-8"), nil
-	case "gbk", "gb18030":
-		if text, ok := transcodeShellOutput(data, enc); ok {
-			return text, nil
-		}
-		if text := decodeShellOutput(data, "utf-8"); text != "" {
-			return text, nil
-		}
-		return "", fmt.Errorf("无法用 %s 解码文件内容", enc)
-	default:
-		return string(data), nil
-	}
-}
-
-func encodeFileContent(text, enc string) ([]byte, error) {
-	return encodeFileContentWithBOM(text, enc, false)
-}
-
 // encodeFileContentWithBOM 编码文本；utf8BOM 为 true 且 enc=utf-8 时在字节前写入 EF BB BF。
 func encodeFileContentWithBOM(text, enc string, utf8BOM bool) ([]byte, error) {
 	out, err := encodeFileContentRaw(text, enc)

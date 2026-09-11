@@ -3,15 +3,16 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
+	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
-// persist writes the compatibility runtime snapshot. The lifecycle event log
+// persist writes the durable runtime snapshot. The lifecycle event log
 // remains the turn authority; this snapshot is the durable transcript and
 // mailbox checkpoint used by hydrate and crash recovery.
 //
@@ -32,6 +33,12 @@ func (r *runtime) persist(ctx context.Context) error {
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
+	activeContextStart := r.activeContextStart
+	lastContextResetID := r.lastContextResetID
+	var dreamingAttempt json.RawMessage
+	if r.dreamingAttempt != nil {
+		dreamingAttempt, _ = json.Marshal(*r.dreamingAttempt)
+	}
 	r.mu.Unlock()
 	var inputBoxState json.RawMessage
 	if r.inputBox != nil {
@@ -41,18 +48,17 @@ func (r *runtime) persist(ctx context.Context) error {
 	if r.orch != nil {
 		hookStore = hooks.CloneSessionStore(r.orch.HookStoreSnapshot())
 	}
-	pending := r.pendingSnapshot()
-	stepCount := r.stepIndexSnapshot()
 	err := r.store.Save(ctx, store.Record{
 		AgentID:      r.session.ID,
 		NodeID:       r.session.AgentID,
 		Messages:     msgs,
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{
-			Pending:                 pending,
-			ToolLoopCount:           stepCount,
 			InputBoxState:           inputBoxState,
 			HistoryRevision:         historyRevision,
+			ActiveContextStart:      activeContextStart,
+			LastContextResetID:      lastContextResetID,
+			DreamingAttempt:         dreamingAttempt,
 			HookStore:               hookStore,
 			IdleAutoCompressApplied: idleMarked,
 			NotifySeq:               notifySeq,
@@ -87,6 +93,30 @@ func (r *runtime) reconcileRestoredInputBox() {
 	if !ok {
 		return
 	}
+	if (record.Kind == InputKindTrigger || record.Kind == InputKindSystemAuto) && (record.RecoveredLegacy || strings.TrimSpace(record.Env.DeliveryID) != "") {
+		if record.RecoveredLegacy {
+			if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
+				_ = r.lifecycleCancel()
+			}
+			r.inputBox.MarkCompleted(record.Seq)
+			_ = r.persist(context.Background())
+			r.inputBox.Ack(record.Seq)
+			_ = r.persist(context.Background())
+			return
+		}
+		if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && !identity.IsPendingDelivery(strings.TrimSpace(record.Env.TriggerID), strings.TrimSpace(record.Env.DeliveryID)) {
+			// An explicit recovery or a superseding claim fenced this mailbox
+			// item. Do not restore its user message or continue its old Turn.
+			if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
+				_ = r.lifecycleCancel()
+			}
+			r.inputBox.MarkCompleted(record.Seq)
+			_ = r.persist(context.Background())
+			r.inputBox.Ack(record.Seq)
+			_ = r.persist(context.Background())
+			return
+		}
+	}
 	state := r.turnCoordinator.Snapshot()
 	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
 		if userMsg, err := r.buildInputUserMessage(record.Env); err == nil {
@@ -98,6 +128,12 @@ func (r *runtime) reconcileRestoredInputBox() {
 			r.mu.Unlock()
 		} else if r.logger != nil {
 			r.logger.Warn("restore in-flight input message failed", "session_id", r.session.ID, "seq", record.Seq, "error", err)
+		}
+		// restoreLifecycleEvents runs during construction, before the InputBox
+		// in-flight record is reconciled. Re-run the insertion after restoring the
+		// user message so a recovered assistant batch cannot remain before it.
+		if calls := r.activeToolCallsFromLifecycle(); len(calls) > 0 {
+			r.restoreActiveToolCallMessage(calls)
 		}
 		// The active lifecycle Turn is authoritative. Mark this input complete
 		// before acknowledging it so history and ownership are persisted in the
@@ -123,7 +159,11 @@ func (r *runtime) reconcileRestoredInputBox() {
 }
 
 func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
-	for index := len(r.messages) - 1; index >= 0; index-- {
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+	}
+	for index := len(r.messages) - 1; index >= start; index-- {
 		message := r.messages[index]
 		if message.Role != "user" {
 			continue
@@ -138,9 +178,23 @@ func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
 // a persistence store replaces a runtime. Production managers normally load
 // this state from SQLite after persist; keeping this fallback prevents tests
 // and embedded callers from losing history during a swap.
-func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, int, int, uint64, json.RawMessage) {
+type runtimeReplacementData struct {
+	Messages           []llm.Message
+	LoadedSkills       []skills.LoadedSkill
+	HookStore          map[string]json.RawMessage
+	IdleAutoCompress   bool
+	NotifySeq          int
+	AckSeq             int
+	HistoryRevision    uint64
+	ActiveContextStart int
+	LastContextResetID string
+	DreamingAttempt    json.RawMessage
+	InputBoxState      json.RawMessage
+}
+
+func (r *runtime) replacementData() runtimeReplacementData {
 	if r == nil {
-		return nil, nil, nil, 0, nil, false, 0, 0, 0, nil
+		return runtimeReplacementData{}
 	}
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
@@ -149,9 +203,13 @@ func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
+	activeContextStart := r.activeContextStart
+	lastContextResetID := r.lastContextResetID
+	var dreamingAttempt json.RawMessage
+	if r.dreamingAttempt != nil {
+		dreamingAttempt, _ = json.Marshal(*r.dreamingAttempt)
+	}
 	r.mu.Unlock()
-	pending := r.pendingSnapshot()
-	stepCount := r.stepIndexSnapshot()
 	var hookStore map[string]json.RawMessage
 	if r.orch != nil {
 		hookStore = r.orch.HookStoreSnapshot()
@@ -160,5 +218,9 @@ func (r *runtime) replacementData() ([]llm.Message, []skills.LoadedSkill, *turn.
 	if r.inputBox != nil {
 		inputBoxState = r.inputBox.Snapshot()
 	}
-	return msgs, loaded, pending, stepCount, hookStore, idleMarked, notifySeq, ackSeq, historyRevision, inputBoxState
+	return runtimeReplacementData{
+		Messages: msgs, LoadedSkills: loaded, HookStore: hookStore,
+		IdleAutoCompress: idleMarked, NotifySeq: notifySeq, AckSeq: ackSeq,
+		HistoryRevision: historyRevision, ActiveContextStart: activeContextStart, LastContextResetID: lastContextResetID, InputBoxState: inputBoxState, DreamingAttempt: dreamingAttempt,
+	}
 }

@@ -27,7 +27,7 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string, deta
 	})
 }
 
-// decodeJSON 解析入站 JSON；忽略未知字段以兼容 Python v1 Client 额外键。
+// decodeJSON 解析入站 JSON；请求模型只消费当前 API 需要的字段。
 func decodeJSON(r *http.Request, dst any) error {
 	return json.NewDecoder(r.Body).Decode(dst)
 }
