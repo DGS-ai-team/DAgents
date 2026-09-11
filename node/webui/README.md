@@ -9,6 +9,8 @@
 | `frontend/` | Vue 3 + Vite 源码 |
 | `build.sh` | 构建到 `../internal/webui/static/`（`go:embed`） |
 
+品牌图标唯一来源是 `shared/branding/brand-icon.png`。Node Web UI 通过 `@dagents-brand` alias 打包品牌图标，并在启动时将同一资源设置为 favicon；`frontend/public/` 不再放置重复的 favicon 文件。
+
 ## 构建与测试
 
 ```bash

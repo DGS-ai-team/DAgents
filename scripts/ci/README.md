@@ -17,6 +17,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`build_manage_docker.sh`** | Manage Docker 镜像构建与 tar.gz 导出（本地/CI 中间产物，不单独进 Release） |
 | **`assemble_manage_bundle.sh`** | 组装 **`dagents-manage-bundle-*`** 离线包（镜像 + compose + 导入/重启脚本；Release 附件） |
 | **`build_dagents_shell_tauri.sh`** / **`build_dagents_shell.sh`** | Windows Shell（Tauri 推荐 + Go legacy） |
+| **`check_brand_assets.py`** | 校验 Web UI 不复制 favicon，且桌面生成物仍由 `shared/branding/brand-icon.png` 统一供给 |
 
 **Release 打包**：仓库根 `scripts/package_local_assistant.sh`；CI 见 `.github/workflows/build-and-release.yml`：
 

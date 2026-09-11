@@ -22,6 +22,7 @@ npm ci --prefix node/webui/frontend
 npm run build --prefix node/webui/frontend
 npm test --prefix node/webui/frontend
 npm run lint --prefix node/webui/frontend
+python3 scripts/ci/check_brand_assets.py
 
 echo "[verify] build Manage Console"
 npm ci --prefix manage/console/frontend
