@@ -648,6 +648,13 @@ func (r *runtime) requestConditionApproval(req ConditionApprovalRequest) error {
 		return fmt.Errorf("condition approval session mismatch")
 	}
 	pending := turn.BuildConditionApprovalPending(req.Metadata, req.Command)
+	// Bind the durable approval to the exact tool arguments that were shown to
+	// the user. ExecuteConditionApproval rechecks this digest before invoking
+	// the shell, so a restored or tampered pending item cannot change the
+	// command while retaining the original trigger identity.
+	if len(pending.Items) == 1 && pending.Items[0].ConditionApproval != nil {
+		pending.Items[0].ConditionApproval.ArgsDigest = turn.Digest(pending.Items[0].ToolCall.Function.Arguments)
+	}
 	payload, err := json.Marshal(pending)
 	if err != nil {
 		return fmt.Errorf("marshal condition approval: %w", err)
