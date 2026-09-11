@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import * as api from "../api/node.js";
+import UiIcon from "./UiIcon.vue";
 
 defineProps({
   embedded: { type: Boolean, default: false },
@@ -50,9 +51,7 @@ onMounted(load);
         :aria-label="loading ? '正在刷新运行状态' : '刷新运行状态'"
         @click="load"
       >
-        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <path d="M15.8 7.2A6 6 0 1 0 16 12M15.8 7.2V3.8M15.8 7.2h-3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <UiIcon name="refresh-cw" :size="16" />
       </button>
     </header>
 

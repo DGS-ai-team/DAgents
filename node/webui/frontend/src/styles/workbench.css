@@ -850,6 +850,69 @@
   accent-color: var(--color-primary);
 }
 
+/* Configuration booleans use a compact switch so every settings surface has
+   the same affordance. Selection lists keep their native checkbox semantics. */
+.settings-toggle input[type="checkbox"],
+.settings-switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.settings-toggle input[type="checkbox"]::after,
+.settings-switch-input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
+  transition: transform 0.16s ease, background-color 0.16s ease;
+}
+
+.settings-toggle input[type="checkbox"]:checked,
+.settings-switch-input:checked {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.settings-toggle input[type="checkbox"]:checked::after,
+.settings-switch-input:checked::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.settings-toggle input[type="checkbox"]:hover:not(:disabled),
+.settings-switch-input:hover:not(:disabled) {
+  border-color: var(--color-primary-strong);
+}
+
+.settings-toggle input[type="checkbox"]:focus-visible,
+.settings-switch-input:focus-visible {
+  outline: 2px solid var(--color-primary-soft);
+  outline-offset: 2px;
+}
+
+.settings-toggle input[type="checkbox"]:disabled,
+.settings-switch-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -5090,4 +5153,3 @@ select.settings-field__input {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-

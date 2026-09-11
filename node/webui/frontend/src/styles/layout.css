@@ -283,7 +283,7 @@
   line-height: 1.35;
 }
 
-.settings-layout__link .tool-group-icon {
+.settings-layout__link .settings-layout__link-icon {
   width: 16px;
   height: 16px;
   color: currentColor;
@@ -301,7 +301,7 @@
   font-weight: 650;
 }
 
-.settings-layout__link--active .tool-group-icon {
+.settings-layout__link--active .settings-layout__link-icon {
   opacity: 1;
 }
 

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const DEFAULT_CONFIG = `{
@@ -293,11 +294,7 @@ onMounted(() => {
           @click="selectServer(server)"
         >
           <span class="mcp-settings__server-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-              <path d="M8 12h8M8 8h3M13 16h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
-              <path d="M5 5h14v14H5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
-              <path d="M3 8V6a1 1 0 0 1 1-1M21 16v2a1 1 0 0 1-1 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
-            </svg>
+            <UiIcon name="network" :size="18" />
           </span>
           <span class="mcp-settings__server-main">
             <strong>{{ server.display_name || server.id }}</strong>
@@ -308,9 +305,7 @@ onMounted(() => {
             <small>{{ server.enabled_tool_count || 0 }} / {{ server.tool_count || 0 }} 个工具已启用</small>
           </span>
           <span class="mcp-settings__server-arrow" aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <path d="m6 3 5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
+            <UiIcon name="chevron-right" :size="15" />
           </span>
         </button>
       </div>
@@ -339,7 +334,7 @@ onMounted(() => {
       <div v-else-if="!activeTools.length" class="mcp-settings__empty settings-empty-state">没有匹配的工具。</div>
       <div v-else class="mcp-settings__tool-list">
         <label v-for="tool in activeTools" :key="tool.name" class="mcp-settings__tool-row">
-          <input type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
+          <input class="settings-switch-input" type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
           <span>
             <code>{{ tool.name }}</code>
             <small v-if="tool.description">{{ tool.description }}</small>

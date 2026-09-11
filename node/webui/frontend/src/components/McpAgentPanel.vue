@@ -143,7 +143,7 @@ onUnmounted(() => stopConfigurationEvents());
       <article v-for="server in servers" :key="server.id" class="mcp-panel__server">
         <div class="mcp-panel__server-head">
           <label class="mcp-panel__server-toggle">
-            <input v-model="selected[server.id]" type="checkbox" />
+            <input v-model="selected[server.id]" class="settings-switch-input" type="checkbox" />
             <span>{{ server.display_name || server.id }}</span>
           </label>
           <span class="mcp-panel__status" :data-status="server.status">{{ server.status || "offline" }} · {{ server.enabled_tool_count || 0 }} 个已启用工具</span>

@@ -525,10 +525,7 @@ defineExpose({ load, openNewTerminal });
           :aria-expanded="!agentPanelCollapsed"
           @click="toggleAgentPanel"
         >
-          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
-            <path d="M12.25 3.5v12.75" stroke="currentColor" stroke-width="1.35" />
-          </svg>
+          <UiIcon name="panel-right" :size="16" />
           <span v-if="props.hitlQueue.length" class="terminal-workbench__agent-trigger-badge" aria-hidden="true">{{ props.hitlQueue.length > 9 ? "9+" : props.hitlQueue.length }}</span>
           <span v-else-if="props.error" class="terminal-workbench__agent-trigger-badge terminal-workbench__agent-trigger-badge--error" aria-hidden="true"><UiIcon name="alert" :size="13" /></span>
         </button>
@@ -624,9 +621,7 @@ defineExpose({ load, openNewTerminal });
               aria-label="收起 Agent 消息"
               @click="toggleAgentPanel"
             >
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="close" :size="16" />
             </button>
           </div>
         </div>

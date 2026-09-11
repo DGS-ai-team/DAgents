@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { fetchAgents, fetchHealth, fetchWorkgroups } from "../api.js";
 import { computeStats, touchLastRefreshedLabel } from "../utils.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -130,16 +131,7 @@ defineExpose({ refresh: loadDashboard });
         @click="emit('navigate', item.id)"
       >
         <span class="home-module-icon" aria-hidden="true">
-          <svg v-if="item.tone === 'workgroup'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="9" cy="8" r="3" />
-            <circle cx="16.5" cy="9.5" r="2.5" />
-            <path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5" />
-            <path d="M14 14.2c1.4-.7 3.2-.6 4.8.5 1.1.8 1.8 2 2 3.3" />
-          </svg>
-          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M4 8l8-4 8 4v8l-8 4-8-4V8z" />
-            <path d="M12 12v8M4 8l8 4 8-4" />
-          </svg>
+          <UiIcon :name="item.tone === 'workgroup' ? 'users' : 'package'" :size="22" />
         </span>
         <strong class="home-module-title">{{ item.label }}</strong>
         <span class="home-module-hint">{{ item.hint }}</span>

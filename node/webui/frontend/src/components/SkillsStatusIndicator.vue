@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   agentId: { type: String, default: "" },
@@ -107,9 +108,7 @@ onBeforeUnmount(() => {
       @click="toggle"
     >
       <span class="skills-status-indicator__icon" aria-hidden="true">
-        <svg viewBox="0 0 20 20" fill="none">
-          <path d="m10 2.8 1.75 4.05 4.45.4-3.35 2.95.98 4.35L10 12.3l-3.83 2.25.98-4.35L3.8 7.25l4.45-.4L10 2.8Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
-        </svg>
+        <UiIcon name="sparkles" :size="17" />
       </span>
       <span v-if="skillsEnabled" class="skills-status-indicator__count" aria-hidden="true">{{ countBadge }}</span>
     </button>

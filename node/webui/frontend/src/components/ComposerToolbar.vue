@@ -104,23 +104,7 @@ onBeforeUnmount(() => {
         @click="toggleMenu"
       >
         <span class="composer-toolbar__trigger-label">{{ activeLabel }}</span>
-        <svg
-          v-if="canSwitch"
-          class="composer-toolbar__chevron"
-          viewBox="0 0 12 12"
-          width="12"
-          height="12"
-          aria-hidden="true"
-        >
-          <path
-            d="M3 4.5L6 7.5L9 4.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.4"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+        <UiIcon v-if="canSwitch" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
       </button>
 
       <div

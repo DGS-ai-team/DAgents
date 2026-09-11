@@ -109,7 +109,7 @@ onMounted(() => void load());
     <p v-else-if="!channels.length" class="linux-agent-panel__muted">尚未配置 Linux 通道，请先到“设置 › Linux 通道”添加。</p>
     <div v-else class="linux-agent-panel__list">
       <div v-for="channel in channels" :key="channel.channel_id" class="linux-agent-panel__row">
-        <input type="checkbox" :checked="selected.has(channel.channel_id)" :disabled="saving || channel.enabled === false" @change="toggle(channel.channel_id)" />
+        <input class="settings-switch-input" type="checkbox" :checked="selected.has(channel.channel_id)" :disabled="saving || channel.enabled === false" @change="toggle(channel.channel_id)" />
         <div class="linux-agent-panel__main"><strong>{{ channel.display_name || channel.channel_id }}</strong><small>{{ channel.username }}@{{ channel.host }}:{{ channel.port }} · 通道上限 {{ channelLimit(channel) }}</small></div>
         <label v-if="selected.has(channel.channel_id)" class="linux-agent-panel__limit"><span>智能体并发</span><input type="number" min="1" :max="channelLimit(channel)" :value="bindingFor(channel.channel_id).max_concurrency" :disabled="saving" @input="setConcurrency(channel.channel_id, $event.target.value)" /></label>
       </div>

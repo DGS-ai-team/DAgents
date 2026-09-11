@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from "vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   targets: { type: Array, default: () => [] },
@@ -42,9 +43,7 @@ defineExpose({ open: openMenu, close: () => { open.value = false; } });
       title="新建终端"
       @click="toggle"
     >
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-      </svg>
+      <UiIcon name="plus" :size="16" />
     </button>
 
     <div v-if="open" class="terminal-target-menu__popover" role="dialog" aria-label="可连接的终端配置">

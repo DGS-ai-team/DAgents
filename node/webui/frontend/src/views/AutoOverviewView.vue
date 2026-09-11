@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import NavRail from "../components/NavRail.vue";
 import AutoBadge from "../components/AutoBadge.vue";
+import UiIcon from "../components/UiIcon.vue";
 
 const router = useRouter();
 const mobileNavOpen = ref(false);
@@ -67,7 +68,7 @@ onUnmounted(() => { disposed = true; requestSeq += 1; if (refreshTimer) window.c
     <aside class="app__col app__col--agents" :class="{ 'app__col--agents-mobile-open': mobileNavOpen }"><NavRail @switch="(id) => { mobileNavOpen = false; router.push({ name: 'agents', params: { agentId: id } }); }" @create="router.push({ name: 'agents', query: { createAgent: '1' } })" /></aside>
     <main class="app__main-col auto-overview" aria-labelledby="auto-overview-title">
       <header class="auto-overview__header">
-        <div><p class="auto-overview__eyebrow">Auto</p><h1 id="auto-overview-title"><svg class="auto-overview__title-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 2.5v19l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1v-19l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>Auto 总览</h1><p class="auto-overview__intro">查看智能体状态、下次自动检查和待办摘要。</p></div>
+        <div><p class="auto-overview__eyebrow">Auto</p><h1 id="auto-overview-title"><UiIcon class="auto-overview__title-icon" name="receipt-text" :size="22" />Auto 总览</h1><p class="auto-overview__intro">查看智能体状态、下次自动检查和待办摘要。</p></div>
         <button type="button" class="auto-overview__refresh" :disabled="loading" @click="load">{{ loading ? "刷新中…" : "刷新" }}</button>
       </header>
       <section class="auto-overview__counts" aria-label="状态统计"><button type="button" class="auto-overview__count" @click="status=''; changeFilter"><strong>{{ loaded ? (counts.total ?? total) : '—' }}</strong><span>Auto Agent</span></button><button type="button" class="auto-overview__count" @click="status='working'; changeFilter"><strong>{{ loaded ? (counts.working || 0) : '—' }}</strong><span>工作中</span></button><button type="button" class="auto-overview__count" @click="status='needs_attention'; changeFilter"><strong>{{ loaded ? (counts.needs_attention || 0) : '—' }}</strong><span>需处理</span></button></section>
@@ -98,4 +99,3 @@ onUnmounted(() => { disposed = true; requestSeq += 1; if (refreshTimer) window.c
 @media(max-width:760px){.auto-overview__row:not(.auto-overview__row--head)>div{position:relative;padding-top:18px}.auto-overview__row:not(.auto-overview__row--head)>div::before{content:attr(data-label);position:absolute;top:0;left:0;color:var(--text-secondary);font-size:11px}}
 @media(max-width:760px){.auto-overview{box-sizing:border-box;width:100%;max-width:100%;min-height:0;height:auto;max-height:none;padding:24px 16px;overflow-y:auto}.auto-overview__counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;overflow:visible}.auto-overview__count{min-width:0;padding:12px 8px}.auto-overview__table{min-width:0}.auto-overview__row--head{display:none!important}}
 </style>
-

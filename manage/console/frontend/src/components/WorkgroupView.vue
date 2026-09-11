@@ -665,14 +665,7 @@ onMounted(async () => {
               :disabled="!canChat(item)"
               @click="openChat(item)"
             >
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path
-                  d="M3.5 5.5A2 2 0 015.5 3.5h9A2 2 0 0116.5 5.5v6a2 2 0 01-2 2H9l-3.5 2.5V13.5h-0.5a2 2 0 01-2-2v-6z"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <UiIcon name="message-square" :size="17" />
             </button>
             <button
               type="button"
@@ -681,15 +674,7 @@ onMounted(async () => {
               aria-label="配置"
               @click="openSettings(item.workgroup_id)"
             >
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path
-                  d="M11.6 2.6h-3.2l-.35 1.55a5.5 5.5 0 00-1.2.7L5.4 4.4 3.9 5.9l.45 1.45a5.5 5.5 0 00-.7 1.2L2.1 8.9v3.2l1.55.35c.16.43.4.83.7 1.2L3.9 15.1l1.5 1.5 1.45-.45c.37.3.77.54 1.2.7l.35 1.55h3.2l.35-1.55c.43-.16.83-.4 1.2-.7l1.45.45 1.5-1.5-.45-1.45c.3-.37.54-.77.7-1.2l1.55-.35V8.9l-1.55-.35a5.5 5.5 0 00-.7-1.2L17.1 5.9 15.6 4.4l-1.45.45a5.5 5.5 0 00-1.2-.7L11.6 2.6z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-                <circle cx="10" cy="10" r="2.35" stroke="currentColor" stroke-width="1.3" />
-              </svg>
+              <UiIcon name="settings" :size="17" />
             </button>
             <button
               type="button"
@@ -699,15 +684,7 @@ onMounted(async () => {
               :disabled="deletingId === item.workgroup_id || item.status === 'archived'"
               @click="onDelete(item)"
             >
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path
-                  d="M4.5 6h11M8 6V4.5h4V6M6.5 6l.6 9h6l.6-9"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <UiIcon name="trash" :size="16" />
             </button>
           </div>
         </article>
@@ -970,15 +947,7 @@ onMounted(async () => {
                       :disabled="refreshingMemberId === m.member_id || deletingMemberId === m.member_id"
                       @click="refreshMember(m)"
                     >
-                      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path
-                          d="M16.2 7.7A6.5 6.5 0 105.1 15.4M16.2 7.7V3.6m0 4.1h-4.1"
-                          stroke="currentColor"
-                          stroke-width="1.45"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
+                      <UiIcon name="refresh-cw" :size="16" />
                     </button>
                     <button
                       type="button"
@@ -988,15 +957,7 @@ onMounted(async () => {
                       :disabled="refreshingMemberId === m.member_id || deletingMemberId === m.member_id"
                       @click="deleteMember(m)"
                     >
-                      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path
-                          d="M4.5 6h11M8 6V4.5h4V6M6.5 6l.6 9h6l.6-9"
-                          stroke="currentColor"
-                          stroke-width="1.4"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
+                      <UiIcon name="trash" :size="16" />
                     </button>
                   </div>
                   <p v-if="m.error_summary" class="wg-member-config__error">

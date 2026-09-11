@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import * as api from "../api/node.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
+import UiIcon from "./UiIcon.vue";
 
 const emit = defineEmits(["create", "pick-template"]);
 
@@ -24,6 +25,10 @@ const showTemplates = computed(() => loading.value || templates.value.length > 0
 
 function iconKind(id) {
   return ICON_BY_ID[String(id || "").trim()] || "general";
+}
+
+function iconName(id) {
+  return { general: "message-circle", code: "code-2", ops: "briefcase" }[iconKind(id)] || "message-circle";
 }
 
 async function loadTemplates() {
@@ -54,15 +59,7 @@ onMounted(loadTemplates);
         aria-label="新建智能体"
         @click="emit('create')"
       >
-        <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-          <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5" opacity="0.35" />
-          <path
-            d="M24 16v16M16 24h16"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-          />
-        </svg>
+        <UiIcon name="circle-plus" :size="48" />
       </button>
 
       <div v-if="showTemplates" class="agent-empty__templates">
@@ -78,35 +75,7 @@ onMounted(loadTemplates);
             @click="emit('pick-template', tpl.id)"
           >
             <span class="agent-empty-tile__icon" :data-kind="iconKind(tpl.id)" aria-hidden="true">
-              <!-- general -->
-              <svg v-if="iconKind(tpl.id) === 'general'" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M5 11.5c0-3.6 3-6.5 7-6.5s7 2.9 7 6.5-3 6.5-7 6.5c-.7 0-1.4-.1-2-.2L5.5 19l1.2-2.6A6.4 6.4 0 0 1 5 11.5Z"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <!-- code -->
-              <svg v-else-if="iconKind(tpl.id) === 'code'" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M9 8 5.5 12 9 16M15 8l3.5 4L15 16M13 6l-2 12"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <!-- ops -->
-              <svg v-else viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M4 6h16v12H4V6Z"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linejoin="round"
-                />
-                <path d="M7 10h4M7 13h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <UiIcon :name="iconName(tpl.id)" :size="20" />
             </span>
             <span class="agent-empty-tile__name">{{ tpl.display_name || tpl.id }}</span>
             <span class="agent-empty-tile__desc">{{ tpl.description || "从模板创建" }}</span>

@@ -1,4 +1,6 @@
 <script setup>
+import UiIcon from "./UiIcon.vue";
+
 const props = defineProps({
   active: { type: String, default: "messages" },
   terminalAvailable: { type: Boolean, default: true },
@@ -38,13 +40,7 @@ function select(id) {
       role="tab"
       @click="select(item.id)"
     >
-      <svg v-if="item.id === 'messages'" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M4 4.25h12a1.75 1.75 0 0 1 1.75 1.75v6A1.75 1.75 0 0 1 16 13.75H9l-3.5 2v-2H4A1.75 1.75 0 0 1 2.25 12V6A1.75 1.75 0 0 1 4 4.25Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
-      </svg>
-      <svg v-else-if="item.id === 'terminal'" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
-        <path d="m5.75 7 2.5 2.25-2.5 2.25M10.5 12h3.25" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
+      <UiIcon :name="item.id === 'messages' ? 'message-square' : 'terminal'" :size="15" />
     </button>
   </nav>
 </template>

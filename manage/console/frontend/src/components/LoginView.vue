@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const props = defineProps({
   defaultUsername: { type: String, default: "admin" },
@@ -38,10 +39,7 @@ function onNodeSubmit() {
     <aside class="login-aside" aria-hidden="true">
       <div class="login-aside-brand">
         <span class="brand-logo">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="24" height="24" rx="7" fill="var(--primary)" />
-            <path d="M6 17V7h2.4v7H15V17H6zm8.4-5V7H17v5h-2.6z" fill="#fff" />
-          </svg>
+          <img :src="brandIcon" alt="" />
         </span>
         <strong>DAgents Manage</strong>
       </div>
