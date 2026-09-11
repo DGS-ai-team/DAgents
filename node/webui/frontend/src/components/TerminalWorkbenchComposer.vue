@@ -7,6 +7,7 @@ import SkillsStatusIndicator from "./SkillsStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
 import { getThinkingControl, hasThinkingSecondaryControl } from "../utils/llmControls.js";
 import { turnStateStore } from "../stores/turnState.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   agentId: { type: String, default: "" },
@@ -100,9 +101,7 @@ defineExpose({ focusInput, submit });
     <div class="chat__composer-pill">
       <div class="chat__composer-pill-left">
         <span class="terminal-workbench-composer__recipient" :title="`消息将发送给 ${recipientLabel}`">
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3.25 3.75h9.5v6.5h-5l-2.5 1.75v-1.75h-2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="message-square" :size="15" />
           <span>发给 {{ recipientLabel }}</span>
         </span>
       </div>
@@ -134,9 +133,7 @@ defineExpose({ focusInput, submit });
           :aria-label="props.agentCancelling ? '正在停止本轮' : '停止本轮'"
           @click="emit('cancel-agent')"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
+          <UiIcon name="close" :size="16" />
         </button>
         <button
           v-else
@@ -147,9 +144,7 @@ defineExpose({ focusInput, submit });
           aria-label="发送"
           @click="submit"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="send" :size="16" />
         </button>
       </div>
     </div>

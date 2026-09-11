@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import * as api from "../api/node.js";
+import UiIcon from "./UiIcon.vue";
 
 defineProps({
   embedded: { type: Boolean, default: false },
@@ -69,10 +70,7 @@ onBeforeUnmount(() => {
         :aria-label="loading ? '正在刷新技能目录' : '刷新技能目录'"
         @click="load"
       >
-        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M12.5 5.25A5 5 0 1 0 13 9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
-          <path d="M10.25 3.5h2.5V6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <UiIcon name="refresh-cw" :size="16" />
       </button>
     </div>
 

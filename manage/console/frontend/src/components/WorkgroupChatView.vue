@@ -2699,7 +2699,8 @@ onUnmounted(() => {
               :disabled="cancelling"
               @click="cancelTurn"
             >
-              {{ cancelling ? "…" : "□" }}
+              <UiIcon v-if="!cancelling" name="close" :size="16" />
+              <span v-else aria-hidden="true">…</span>
             </button>
             <button
               v-if="hitlMode"
@@ -2710,15 +2711,7 @@ onUnmounted(() => {
               :disabled="!canSubmit"
               @click="submitHitlAnswer"
             >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <UiIcon name="send" :size="16" />
             </button>
             <button
               v-if="!sending && !hitlMode && !approvalMode"
@@ -2729,15 +2722,7 @@ onUnmounted(() => {
               :disabled="!canSubmit"
               @click="sendMessage"
             >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              <UiIcon name="send" :size="16" />
             </button>
           </div>
         </div>

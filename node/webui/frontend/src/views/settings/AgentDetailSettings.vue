@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
+import UiIcon from "../../components/UiIcon.vue";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
@@ -196,7 +197,10 @@ onUnmounted(() => stopConfigurationEvents());
         <p class="agent-detail__intro">管理这个智能体的行为、工具权限和运行连接。</p>
       </div>
       <div class="settings-page__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="backToList">← 返回列表</button>
+        <button type="button" class="btn btn--ghost btn--sm" @click="backToList">
+          <UiIcon name="arrow-left" :size="15" />
+          返回列表
+        </button>
       </div>
     </header>
 

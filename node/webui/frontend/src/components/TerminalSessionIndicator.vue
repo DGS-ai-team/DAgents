@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { terminalStatusLabel, terminalTargetLabel } from "../utils/terminalWorkbench.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   terminals: { type: Array, default: () => [] },
@@ -48,10 +49,7 @@ onBeforeUnmount(() => {
       :title="`终端列表 · ${summary}`"
       @click="toggle"
     >
-      <svg class="terminal-session-indicator__icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <rect x="2.75" y="3.25" width="14.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.35" />
-        <path d="m5.75 7 2.5 2.25-2.5 2.25M10.5 12h3.25" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
+      <UiIcon class="terminal-session-indicator__icon" name="terminal" :size="17" />
       <span v-if="props.terminals.length" class="terminal-session-indicator__count" aria-hidden="true">{{ countBadge }}</span>
     </button>
 

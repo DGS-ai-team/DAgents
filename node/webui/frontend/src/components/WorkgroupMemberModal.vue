@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -167,15 +168,7 @@ watch(
             :disabled="busy"
             @click="emit('close')"
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path
-                d="M4 4l8 8M12 4l-8 8"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
+            <UiIcon name="close" :size="15" />
           </button>
         </header>
 

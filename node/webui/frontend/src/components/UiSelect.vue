@@ -158,16 +158,7 @@ onBeforeUnmount(() => {
       <span class="ui-select__value" :class="{ 'ui-select__value--placeholder': showPlaceholder }">
         {{ displayLabel }}
       </span>
-      <svg class="ui-select__chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <path
-          d="M4.5 6.5 8 10l3.5-3.5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
+      <UiIcon class="ui-select__chevron" name="chevron-down" :size="15" />
     </button>
 
     <Teleport to="body">

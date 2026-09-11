@@ -418,10 +418,7 @@ defineExpose({
             :class="{ 'chat__pending-file--invalid': file.status !== 'ready' }"
           >
             <span class="chat__pending-file-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none">
-                <path d="M5.25 2.75h6.1L15.5 6.9v10.35H5.25z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
-                <path d="M11.25 2.75V7h4.25M7.75 10h5.5M7.75 13h5.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="file" :size="16" />
             </span>
             <span class="chat__pending-file-info" :title="file.path">
               <strong>{{ file.name }}</strong>
@@ -434,9 +431,7 @@ defineExpose({
               :title="`移除 ${file.name}`"
               @click="removePendingFile(idx)"
             >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="close" :size="14" />
             </button>
           </div>
         </div>
@@ -469,9 +464,7 @@ defineExpose({
               title="移除图片"
               @click="removePendingImage(idx)"
             >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <UiIcon name="close" :size="14" />
             </button>
           </div>
         </div>
@@ -517,9 +510,7 @@ defineExpose({
           :disabled="attachDisabled"
           @click="openAttachmentPicker"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
+          <UiIcon name="paperclip" :size="16" />
         </button>
         <button
           v-if="multimodalEnabled"
@@ -530,11 +521,7 @@ defineExpose({
           :disabled="imageAttachDisabled"
           @click="openImagePicker"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.25" />
-            <circle cx="5.25" cy="6" r="1.25" fill="currentColor" />
-            <path d="M2 11.5l3.25-3 2.25 2.25L9 8l4.5 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="image" :size="16" />
         </button>
       </div>
 
@@ -570,9 +557,7 @@ defineExpose({
           :disabled="cancelling"
           @click="onCancel"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
+          <UiIcon name="close" :size="16" />
         </button>
         <button
           v-if="showCancel"
@@ -586,9 +571,7 @@ defineExpose({
           @click="onCancel"
         >
           <span v-if="cancelling" class="chat__composer-stop-spinner" aria-hidden="true" />
-          <svg v-else viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
+          <UiIcon v-else name="close" :size="16" />
         </button>
         <button
           v-else
@@ -599,9 +582,7 @@ defineExpose({
           :disabled="!canSubmit"
           @click="submit"
         >
-          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <UiIcon name="send" :size="16" />
         </button>
       </div>
     </div>

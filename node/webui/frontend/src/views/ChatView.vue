@@ -793,10 +793,6 @@ function onAgentsUpdated(list) {
   agentList.value = Array.isArray(list) ? list.slice() : [];
   agentListCount.value = agentList.value.length;
   void syncCurrentAgentDisplayName();
-  // The LLM endpoint exposes the Node-wide profile, while each Agent may be
-  // bound to a different profile in its snapshot. Keep the composer label
-  // aligned with the selected Agent after the rail list arrives.
-  void refreshLLMSettings(agentStore.agentId);
 }
 
 function onCreatePageCancel() {
@@ -1551,6 +1547,5 @@ onUnmounted(() => {
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
 </style>
-
 
 

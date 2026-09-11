@@ -1392,22 +1392,7 @@ onUnmounted(() => {
                 @click="toggleModelMenu"
               >
                 <span class="wg-chat__model-trigger-label">{{ selectedSupervisorLabel }}</span>
-                <svg
-                  class="wg-chat__model-chevron"
-                  viewBox="0 0 12 12"
-                  width="12"
-                  height="12"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
+                <UiIcon class="wg-chat__model-chevron" name="chevron-down" :size="14" />
               </button>
               <div
                 v-if="modelMenuOpen"
@@ -1447,11 +1432,7 @@ onUnmounted(() => {
               aria-label="调试"
               @click="toggleDebugPanel"
             >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
-                <path d="M7 4.5h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
-                <path d="M8.5 8h7M8.5 11.5h7M8.5 15h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="m15.8 15.2 1.3 1.3 2.5-2.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+              <UiIcon name="receipt-text" :size="17" />
             </button>
           </div>
         </header>
