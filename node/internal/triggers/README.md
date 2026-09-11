@@ -16,7 +16,7 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 
 ## condition 调度类型
 
-P0 约束：新建或修改时拒绝非空 `condition.cmd`（API 错误码 `unsupported_trigger_cmd`）；旧文件中的 cmd 仅保留审计，fire 时记录 skipped，不再执行宿主 shell。固定目标若未给 session，投递到已注册 Agent 的 canonical runtime；目标 Agent 不存在、已归档或无法加载时拒绝，不隐式创建跨 Agent runtime。每次投递先在 JSON 中 claim 稳定 `pending_delivery_id`，再写入 InputBox；消费确认携带 delivery identity，迟到确认不会清理后续投递。
+条件脚本由目标 Agent 的 session/turn 执行，复用现有 tool router、hooks、policy 和 HITL 边界；触发器调度器本身不直接执行宿主 shell。固定目标若未给 session，投递到已注册 Agent 的 canonical runtime；目标 Agent 不存在、已归档或无法加载时拒绝，不隐式创建跨 Agent runtime。每次投递先在 JSON 中 claim 稳定 `pending_delivery_id`，再写入 InputBox；消费确认携带 delivery identity，迟到确认不会清理后续投递。条件审批还会绑定 Agent、session、trigger revision、delivery 和 occurrence，恢复时逐项 CAS 校验。
 
 `interval_seconds`、`fire_at`、`schedule` **三选一**，不可组合。
 
@@ -25,7 +25,11 @@ P0 约束：新建或修改时拒绝非空 `condition.cmd`（API 错误码 `unsu
 | `interval_seconds` | 固定间隔（秒） |
 | `fire_at` | 单次 Unix 秒时间戳 |
 | `schedule` | 日历调度（`daily` / `weekly` / `monthly`），时区跟随主机 `time.Local` |
-| `cmd` | 已停止支持；旧值保留，但相关任务不会投递，需显式移除 |
+| `cmd` | 可选脚本门控；在目标 Agent 的 session/turn 中执行，复用 hooks、policy、HITL；退出码 0 才满足条件并投递 |
+
+### condition.cmd 条件门控
+
+`condition.cmd` 可用于手动、间隔、单次和日历触发。调度器先持久化 delivery claim，再进入目标 Agent 的条件 turn；策略为自动执行时才打开脚本，策略要求审批时先以普通 `execute_tool` HITL 形式持久化 `awaiting_approval`，审批完成前不会执行命令。审批恢复会校验 Agent、session、trigger revision、delivery、occurrence 及参数摘要；拒绝、非零退出码或执行失败会释放 claim，并按调度规则记录 skipped/error。脚本满足条件后，原始 task template 会投递到同一个主 session。
 
 ### schedule 字段
 
@@ -57,7 +61,7 @@ P0 约束：新建或修改时拒绝非空 `condition.cmd`（API 错误码 `unsu
 
 - `now >= next_fire_at` 且 `now - next_fire_at < 1 个周期` → **补发**
 - 否则 → **只推进** `next_fire_at`（严格在 `now` 之后）
-- 旧 cmd 条件使任务跳过，不执行 shell 或后续任务。
+- 条件脚本退出码非 0 或执行失败时任务跳过/失败，不投递后续任务；审批未完成时保持 `awaiting_approval`，不会重复执行脚本。
 
 ## session_target_mode
 

@@ -109,6 +109,9 @@ func TestConditionApprovalLifecyclePersistsExecutionFenceAndSupportsReject(t *te
 	if pending == nil || len(pending.Items) != 1 {
 		t.Fatalf("pending approval = %#v", pending)
 	}
+	if got, want := pending.Items[0].ConditionApproval.ArgsDigest, turn.Digest(pending.Items[0].ToolCall.Function.Arguments); got != want {
+		t.Fatalf("condition approval args digest = %q, want %q", got, want)
+	}
 	r.handleConditionResume(context.Background(), map[string]any{"type": "approve"}, pending)
 
 	snapshot := r.turnCoordinator.Snapshot()
