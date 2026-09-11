@@ -1386,13 +1386,6 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 	return in
 }
 
-func (o *Orchestrator) buildContextInjections(sessionID string) []ContextInjection {
-	if o == nil {
-		return nil
-	}
-	return o.buildContextInjectionsWithInput(o.systemPromptInput(sessionID))
-}
-
 func (o *Orchestrator) buildContextInjectionsWithInput(in SystemPromptInput) []ContextInjection {
 	if o == nil {
 		return nil

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
-	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -37,7 +37,12 @@ func TestCommandDirectoryPickerReturnsSelectedPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.OK || got.Cancelled || got.Path != runtime.GOROOT() {
+	expectedRaw, err := exec.Command("go", "env", "GOROOT").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := strings.TrimSpace(string(expectedRaw))
+	if !got.OK || got.Cancelled || got.Path != expected {
 		t.Fatalf("result=%+v", got)
 	}
 }

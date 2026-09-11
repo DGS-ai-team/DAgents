@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/DGS-ai-team/DAgents/node/internal/manage"
-	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/manage"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 )
 
 type feedbackCreateInput struct {
@@ -56,7 +57,7 @@ func (s *Server) registerFeedbackRoutes() {
 }
 func (s *Server) handleFeedbackCreate(w http.ResponseWriter, r *http.Request) {
 	if s.feedbackStore == nil {
-		http.Error(w, "feedback unavailable", 503)
+		http.Error(w, "feedback unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var in feedbackCreateInput
@@ -70,7 +71,7 @@ func (s *Server) handleFeedbackCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	destination := strings.TrimRight(strings.TrimSpace(s.cfg.Manage.URL), "/")
 	if in.ExpectedDestination != "" && strings.TrimRight(strings.TrimSpace(in.ExpectedDestination), "/") != destination {
-		http.Error(w, "feedback destination changed", 409)
+		http.Error(w, "feedback destination changed", http.StatusConflict)
 		return
 	}
 	f := store.Feedback{NodeID: s.cfg.NodeID, Category: in.Category, Title: in.Title, Body: in.Body}
@@ -90,7 +91,7 @@ func (s *Server) handleFeedbackCreate(w http.ResponseWriter, r *http.Request) {
 	f.LastError = ""
 	f.Destination = destination
 	if existing, _ := s.feedbackStore.Get(r.Context(), f.ClientFeedbackID); existing == nil && !s.allowNewFeedback(s.cfg.NodeID) {
-		http.Error(w, "feedback rate limit exceeded", 429)
+		http.Error(w, "feedback rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	stored, created, e := s.feedbackStore.Create(r.Context(), f)
@@ -159,7 +160,7 @@ func (s *Server) handleFeedbackTarget(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleFeedbackList(w http.ResponseWriter, r *http.Request) {
 	if s.feedbackStore == nil {
-		http.Error(w, "feedback unavailable", 503)
+		http.Error(w, "feedback unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	v, e := s.feedbackStore.List(r.Context())
@@ -171,7 +172,7 @@ func (s *Server) handleFeedbackList(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleFeedbackGet(w http.ResponseWriter, r *http.Request) {
 	if s.feedbackStore == nil {
-		http.Error(w, "feedback unavailable", 503)
+		http.Error(w, "feedback unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("client_feedback_id")
@@ -188,7 +189,7 @@ func (s *Server) handleFeedbackGet(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleFeedbackSync(w http.ResponseWriter, r *http.Request) {
 	if s.feedbackStore == nil {
-		http.Error(w, "feedback unavailable", 503)
+		http.Error(w, "feedback unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("client_feedback_id")
@@ -198,19 +199,19 @@ func (s *Server) handleFeedbackSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.control == nil {
-		http.Error(w, "manage unavailable", 503)
+		http.Error(w, "manage unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if f.NodeID != s.cfg.NodeID || strings.TrimSpace(f.Destination) != strings.TrimSpace(s.cfg.Manage.URL) {
-		http.Error(w, "feedback destination changed", 409)
+		http.Error(w, "feedback destination changed", http.StatusConflict)
 		return
 	}
 	if !s.cfg.Manage.Enabled {
-		http.Error(w, "manage disabled", 503)
+		http.Error(w, "manage disabled", http.StatusServiceUnavailable)
 		return
 	}
 	if e := s.syncFeedbackRecord(r.Context(), *f); e != nil {
-		http.Error(w, e.Error(), 502)
+		http.Error(w, e.Error(), http.StatusBadGateway)
 		return
 	}
 	fresh, e := s.feedbackStore.Get(r.Context(), id)

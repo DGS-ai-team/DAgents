@@ -22,7 +22,7 @@ type agentExecutionGate struct {
 }
 
 type maintenanceLeaseKey struct{}
-type maintenanceLeaseToken struct{ marker byte }
+type maintenanceLeaseToken struct{}
 
 func newAgentExecutionGate() *agentExecutionGate {
 	return &agentExecutionGate{runtimes: make(map[*runtime]struct{}), wake: make(chan struct{}, 1)}
@@ -164,8 +164,6 @@ func (g *agentExecutionGate) finishDispatch() {
 	g.notify()
 	g.mu.Unlock()
 }
-func (g *agentExecutionGate) blocked() bool { g.mu.Lock(); defer g.mu.Unlock(); return g.maintenance }
-
 func (g *agentExecutionGate) owns(ctx context.Context) bool {
 	if g == nil || ctx == nil {
 		return false
