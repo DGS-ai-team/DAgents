@@ -12,6 +12,8 @@ import {
 } from "../utils/format.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
+import AutoBadge from "./AutoBadge.vue";
+import { readNodePreference, writeNodePreference } from "../utils/nodePreference.js";
 
 const RAIL_CACHE_TTL_MS = 30_000;
 const UNREAD_REFRESH_INTERVAL_MS = 15_000;
@@ -62,11 +64,40 @@ const manualRefreshingAgents = ref(false);
 const deletingId = ref("");
 const renamingId = ref("");
 const renameDraft = ref("");
+const agentFilter = ref("all");
+const agentGroupMode = ref("type");
+const agentSearch = ref("");
+const collapsedAgentGroups = ref(new Set());
+const preferenceNodeId = ref("");
+watch([agentFilter, agentGroupMode, collapsedAgentGroups], () => {
+  if (preferenceNodeId.value) writeNodePreference(preferenceNodeId.value, "agent-view", { filter: agentFilter.value, group: agentGroupMode.value, collapsed: [...collapsedAgentGroups.value] });
+}, { deep: true });
+let preferenceRequest = 0;
+async function loadNodePreferences() {
+  const request = ++preferenceRequest;
+  try {
+    const boot = await api.getUIBootstrap();
+    const id = String(boot?.info?.node_id || boot?.health?.node_id || boot?.info?.NodeID || "").trim();
+    if (request !== preferenceRequest || !id) return;
+    preferenceNodeId.value = id;
+    agentFilter.value = "all";
+    agentGroupMode.value = "type";
+    agentSearch.value = "";
+    collapsedAgentGroups.value = new Set();
+    const saved = readNodePreference(id, "agent-view", null);
+    if (saved) {
+      if (["all", "auto", "normal"].includes(saved.filter)) agentFilter.value = saved.filter;
+      if (["type", "workspace"].includes(saved.group)) agentGroupMode.value = saved.group;
+      if (Array.isArray(saved.collapsed)) collapsedAgentGroups.value = new Set(saved.collapsed);
+    }
+  } catch { /* unknown Node: keep in-memory defaults */ }
+}
 
 /** 分区展开：智能体 / 工作组 */
 const sectionOpen = ref({
   agents: true,
   workgroups: true,
+  autonomous: true,
 });
 const mobileActionOpen = ref("");
 
@@ -105,15 +136,16 @@ const manualRefreshingWgs = ref(false);
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
-const showWorkgroups = computed(() => workgroupsEnabled.value || !!activeWorkgroupId.value);
 const effectiveRealtimeStatus = computed(() => props.realtimeStatus || chromeStore.sseStatus);
 const online = computed(() => effectiveRealtimeStatus.value === "connected");
 const statusClass = computed(() => {
+  if (effectiveRealtimeStatus.value === "unselected") return "nav-rail__dot--unselected";
   if (online.value) return "nav-rail__dot--online";
   if (effectiveRealtimeStatus.value === "connecting") return "nav-rail__dot--connecting";
   return "nav-rail__dot--offline";
 });
 const statusLabel = computed(() => {
+  if (effectiveRealtimeStatus.value === "unselected") return "未选择工作组";
   if (online.value) return "在线";
   if (effectiveRealtimeStatus.value === "connecting") return "连接中";
   return "离线";
@@ -134,8 +166,10 @@ function agentSortTime(agent) {
 }
 
 const sortedAgents = computed(() => {
-  return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a));
+  return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a) || agentRecordId(a).localeCompare(agentRecordId(b)));
 });
+const normalAgents = computed(() => sortedAgents.value.filter((agent) => String(agent?.agent_type || agent?.AgentType || "").toLowerCase() !== "auto"));
+const autonomousAgents = computed(() => sortedAgents.value.filter((agent) => String(agent?.agent_type || agent?.AgentType || "").toLowerCase() === "auto"));
 
 async function refreshAgents({ force = false, manual = false } = {}) {
   if (manual) manualRefreshingAgents.value = true;
@@ -337,6 +371,13 @@ function selectAgent(id) {
   }
 }
 
+function onAgentKeydown(event, id) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  selectAgent(id);
+}
+
 function openCreateAgent() {
   emit("create");
 }
@@ -477,6 +518,7 @@ function onVisibilityChange() {
 }
 
 onMounted(() => {
+  void loadNodePreferences();
   void refresh({ force: false });
   refreshTimer = window.setInterval(() => {
     void refresh({ force: true });
@@ -508,6 +550,7 @@ defineExpose({
   loadMembers,
   expandSection,
   toggleSection,
+  openCreateWg,
 });
 </script>
 
@@ -533,13 +576,12 @@ defineExpose({
             </svg>
           </span>
           <span class="nav-rail__section-title">智能体</span>
-          <span v-if="sortedAgents.length" class="nav-rail__section-count">{{ sortedAgents.length }}</span>
+          <span v-if="normalAgents.length" class="nav-rail__section-count">{{ normalAgents.length }}</span>
           <span
             v-if="agentsLoadError && agentsLoaded"
             class="nav-rail__section-state nav-rail__section-state--error"
             title="智能体列表刷新失败，当前显示上次成功结果"
           >!</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.agents ? "⌄" : "›" }}</span>
         </button>
         <div class="nav-rail__section-actions">
         <button
@@ -562,18 +604,6 @@ defineExpose({
         </div>
         <button
           type="button"
-          class="nav-rail__icon-btn nav-rail__section-collapse"
-          :title="sectionOpen.agents ? '收起智能体' : '展开智能体'"
-          :aria-label="sectionOpen.agents ? '收起智能体' : '展开智能体'"
-          :aria-expanded="sectionOpen.agents"
-          @click.stop="toggleSection('agents')"
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
-            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-        <button
-          type="button"
           class="nav-rail__icon-btn nav-rail__section-more"
           title="更多操作"
           aria-label="更多操作"
@@ -589,10 +619,12 @@ defineExpose({
       <div v-if="sectionOpen.agents">
       <ul class="nav-rail__list" :aria-busy="loadingAgents">
         <li
-          v-for="a in sortedAgents"
+          v-for="a in normalAgents"
           :key="agentRecordId(a)"
           class="nav-rail__item nav-rail__agent-item"
-          :class="{ 'nav-rail__item--active': agentRecordId(a) === activeAgentId }"
+          :class="{ 'nav-rail__item--active': agentRecordId(a) === agentStore.agentId }"
+          tabindex="0"
+          @keydown="onAgentKeydown($event, agentRecordId(a))"
           @click="selectAgent(agentRecordId(a))"
         >
           <div class="nav-rail__item-main">
@@ -612,6 +644,7 @@ defineExpose({
                 :title="agentDisplayTitle(a)"
                 @dblclick.stop="startRename(a)"
               >{{ agentDisplayTitle(a) }}</span>
+              <AutoBadge :agent="a" />
               <span
                 v-if="a.has_unread"
                 class="nav-rail__unread-dot"
@@ -681,8 +714,8 @@ defineExpose({
             </button>
           </div>
         </li>
-        <li v-if="!sortedAgents.length && !agentsLoaded && loadingAgents && !agentsLoadError" class="nav-rail__hint">加载中…</li>
-        <li v-else-if="!sortedAgents.length && agentsLoadError" class="nav-rail__hint nav-rail__hint--error">
+        <li v-if="!normalAgents.length && !agentsLoaded && loadingAgents && !agentsLoadError" class="nav-rail__hint">加载中…</li>
+        <li v-else-if="!normalAgents.length && agentsLoadError" class="nav-rail__hint nav-rail__hint--error">
           <span>暂时无法加载智能体</span>
           <button
             type="button"
@@ -692,13 +725,13 @@ defineExpose({
             @click="refreshAgents({ force: true, manual: true })"
           >重试</button>
         </li>
-        <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
+        <li v-else-if="!normalAgents.length" class="nav-rail__empty">暂无普通智能体</li>
       </ul>
       </div>
     </section>
 
     <!-- Workgroups -->
-    <section v-if="showWorkgroups" class="nav-rail__section">
+    <section class="nav-rail__section">
       <header
         class="nav-rail__section-head"
         :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'workgroups' }"
@@ -723,7 +756,6 @@ defineExpose({
             class="nav-rail__section-state nav-rail__section-state--error"
             title="工作组列表刷新失败，当前显示上次成功结果"
           >!</span>
-          <span class="nav-rail__section-chevron" aria-hidden="true">{{ sectionOpen.workgroups ? "⌄" : "›" }}</span>
         </button>
         <div class="nav-rail__section-actions">
         <button
@@ -760,18 +792,6 @@ defineExpose({
           </svg>
         </button>
         </div>
-        <button
-          type="button"
-          class="nav-rail__icon-btn nav-rail__section-collapse"
-          :title="sectionOpen.workgroups ? '收起工作组' : '展开工作组'"
-          :aria-label="sectionOpen.workgroups ? '收起工作组' : '展开工作组'"
-          :aria-expanded="sectionOpen.workgroups"
-          @click.stop="toggleSection('workgroups')"
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
-            <path class="nav-rail__section-chevron-path" d="m5 6.5 3 3 3-3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
         <button
           type="button"
           class="nav-rail__icon-btn nav-rail__section-more"
@@ -972,6 +992,67 @@ defineExpose({
       </div>
     </section>
 
+    <section class="nav-rail__section nav-rail__section--autonomous">
+      <header
+        class="nav-rail__section-head"
+        :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'autonomous' }"
+      >
+        <button type="button" class="nav-rail__section-toggle" :aria-expanded="sectionOpen.autonomous" @click="toggleSection('autonomous')">
+          <span class="nav-rail__section-icon" aria-hidden="true">✦</span>
+          <span class="nav-rail__section-title">自主智能体</span>
+          <span v-if="autonomousAgents.length" class="nav-rail__section-count">{{ autonomousAgents.length }}</span>
+        </button>
+        <div class="nav-rail__section-actions">
+          <router-link
+            :to="{ name: 'auto-overview' }"
+            class="nav-rail__icon-btn nav-rail__section-action"
+            title="Auto 总览"
+            aria-label="Auto 总览"
+            @click.stop="mobileActionOpen = ''"
+          >
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <path
+                d="m8 1.6 1.7 4.7L14.4 8l-4.7 1.7L8 14.4l-1.7-4.7L1.6 8l4.7-1.7L8 1.6Z"
+                fill="currentColor"
+              />
+            </svg>
+          </router-link>
+        </div>
+        <button
+          type="button"
+          class="nav-rail__icon-btn nav-rail__section-more"
+          title="更多操作"
+          aria-label="更多操作"
+          :aria-expanded="mobileActionOpen === 'autonomous'"
+          @click.stop="toggleSectionActions('autonomous')"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="4" cy="8" r="1" fill="currentColor" /><circle cx="8" cy="8" r="1" fill="currentColor" /><circle cx="12" cy="8" r="1" fill="currentColor" />
+          </svg>
+        </button>
+      </header>
+      <ul v-if="sectionOpen.autonomous" class="nav-rail__list" :aria-busy="loadingAgents">
+        <li v-for="a in autonomousAgents" :key="agentRecordId(a)" class="nav-rail__item nav-rail__agent-item" :class="{ 'nav-rail__item--active': agentRecordId(a) === agentStore.agentId }" tabindex="0" @keydown="onAgentKeydown($event, agentRecordId(a))" @click="selectAgent(agentRecordId(a))">
+          <div class="nav-rail__item-main">
+            <div class="nav-rail__item-title-row">
+              <input v-if="renamingId === agentRecordId(a)" v-model="renameDraft" class="nav-rail__rename" @click.stop @keydown.enter.prevent="commitRename(a)" @keydown.esc.prevent="renamingId = ''" @blur="commitRename(a)" />
+              <span v-else class="nav-rail__item-title" :title="agentDisplayTitle(a)" @dblclick.stop="startRename(a)">{{ agentDisplayTitle(a) }}</span>
+              <span v-if="a.has_unread" class="nav-rail__unread-dot" title="有未读消息" aria-label="有未读消息"></span>
+            </div>
+          </div>
+          <div class="nav-rail__item-trail"><span v-if="a.last_active_at" class="nav-rail__time" :title="a.last_active_at">{{ formatCompactRelativeTime(a.last_active_at) }}</span></div>
+          <div class="nav-rail__item-actions" @click.stop>
+            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="智能体配置" aria-label="智能体配置" @click="openAgentSettings(a)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.75"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V4a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 1-.33 1.82V9c.26.6.91 1 1.51 1H20a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="重命名" aria-label="重命名" @click="startRename(a)">✎</button>
+            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm nav-rail__icon-btn--danger" title="删除 Agent" aria-label="删除 Agent" :disabled="deletingId === agentRecordId(a)" @click="onDeleteAgent(a)">×</button>
+          </div>
+        </li>
+        <li v-if="!autonomousAgents.length" class="nav-rail__empty">暂无自主智能体</li>
+      </ul>
+    </section>
+
     </div>
 
     <footer class="nav-rail__footer">
@@ -1026,3 +1107,41 @@ defineExpose({
     </footer>
   </nav>
 </template>
+
+<style scoped>
+.nav-rail__agent-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 6px 10px 4px;
+}
+.nav-rail__agent-filter:first-child { grid-column: 1 / -1; }
+.nav-rail__agent-filter {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 4px 5px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 11px;
+}
+.nav-rail__agent-group { list-style: none; padding: 5px 10px 2px; }
+.nav-rail__agent-group-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 3px 2px;
+  background: transparent;
+  color: var(--text-secondary, var(--color-text-muted));
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+.nav-rail__agent-group-count { margin-left: auto; }
+.nav-rail__item-title-row { min-width: 0; }
+@media (max-width: 720px) {
+  .nav-rail__agent-filters { grid-template-columns: 1fr; }
+}
+</style>

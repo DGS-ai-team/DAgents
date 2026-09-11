@@ -47,6 +47,10 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_agent", err.Error(), nil)
 		return
 	}
+	requestType := strings.TrimSpace(req.RequestType)
+	if requestType == "" {
+		requestType = "message"
+	}
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
@@ -54,10 +58,6 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	}
-	requestType := strings.TrimSpace(req.RequestType)
-	if requestType == "" {
-		requestType = "message"
 	}
 
 	priority, err := s.sessions.EnqueueMessageWithFileReferences(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.FileReferences, req.ResumeValue, req.UserMessageName)
@@ -190,7 +190,13 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Keep the comment heartbeat for generic SSE clients, and add a
+			// named heartbeat so browser clients can detect half-open streams
+			// after a Node restart instead of waiting forever on EventSource.
 			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "event: stream_heartbeat\ndata: {\"stream_epoch\":\"%s\"}\n\n", subscription.StreamEpoch); err != nil {
 				return
 			}
 			flusher.Flush()

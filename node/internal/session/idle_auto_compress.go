@@ -108,6 +108,7 @@ func (m *Manager) ensureRuntime(sessionID string) (*runtime, error) {
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
+	m.bindMaintenanceGate(rt)
 	m.sessions[sessionID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -149,7 +150,12 @@ func (m *Manager) tryRuntimeIdleAutoCompress(ctx context.Context, rt *runtime, t
 	if !rt.eligibleForIdleAutoCompress(threshold, minTokens, now) {
 		return
 	}
-	result := rt.compressContext(ctx)
+	leaseCtx, release, acquired, err := m.TryAcquireMaintenanceContext(ctx, rt.agentID)
+	if err != nil || !acquired {
+		return
+	}
+	defer release()
+	result := rt.compressContext(leaseCtx)
 	switch result.Status {
 	case "applied", "noop":
 		rt.markIdleAutoCompressApplied()

@@ -44,6 +44,13 @@ type Session struct {
 	AgentID string
 }
 
+func nonNegative(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
 type runtime struct {
 	session Session
 	// InputBox is the FIFO ingress for user/trigger/child-agent inputs. MessageQueue is
@@ -64,7 +71,8 @@ type runtime struct {
 	// 子 runtime 则可能是 RelayHub；生命周期状态必须沿同一出口发布。
 	publisher stream.Publisher
 	// 代理 ID
-	agentID string
+	agentID       string
+	executionGate *agentExecutionGate
 	// 日志
 	logger *slog.Logger
 
@@ -95,6 +103,7 @@ type runtime struct {
 	// turnFenceActive distinguishes production model steps from direct lifecycle
 	// transitions that intentionally do not install a provider fence.
 	turnFenceActive bool
+	onLifecycle     func(string, turn.CoordinatorSnapshot) error
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
 	// second lifecycle projection.
@@ -102,8 +111,11 @@ type runtime struct {
 	lifecycleCommandSeq   uint64
 	lifecycleEventSeq     uint64
 	lifecycleEventsLoaded bool
-	messages              []llm.Message        // 交互消息列表
+	messages              []llm.Message // 交互消息列表
+	pendingInputMessage   *llm.Message
 	historyRevision       uint64               // committed message snapshot revision
+	activeContextStart    int                  // durable transcript index visible to new model requests
+	lastContextResetID    string               // idempotency fence for the last logical reset
 	loadedSkills          []skills.LoadedSkill // 加载的技能列表
 	pendingMemoryScope    string               // scope changes wait for the next human Turn
 	workspaceRoot         string               // Agent 工作区根路径
@@ -129,6 +141,13 @@ type runtime struct {
 	// even when the persisted Agent revision did not change.
 	runtimeMultimodalEnabled bool
 	turnBudget               turn.TurnBudget
+	triggerMaxToolRounds     int
+	triggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
+	conditionValidator       func(context.Context, turn.ConditionApprovalMetadata) error
+	autoAgent                bool
+	budgetResolver           func() (turn.TurnBudget, error)
+	conditionCompletion      func(triggers.ConditionRequest, triggers.ConditionResult) error
+	dreamingAttempt          *DreamingAttempt
 }
 
 // newRuntime 创建新的 session runtime
@@ -231,6 +250,8 @@ func newRuntimeWithPublisher(
 		candidatePipeline:        candidatePipeline,
 		messages:                 append([]llm.Message(nil), initial...),
 		historyRevision:          turnOpts.initialHistoryRevision,
+		activeContextStart:       nonNegative(turnOpts.initialActiveContextStart),
+		lastContextResetID:       strings.TrimSpace(turnOpts.initialLastContextResetID),
 		loadedSkills:             append([]skills.LoadedSkill(nil), loaded...),
 		skillRevision:            turnCatalog.Revision(),
 		workspaceRoot:            workspaceRoot,
@@ -244,7 +265,23 @@ func newRuntimeWithPublisher(
 		llmProfileDigest:         strings.TrimSpace(turnOpts.LLMProfileDigest),
 		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
 		turnBudget:               turnOpts.Budget,
+		// A trigger cap is activation-scoped and can only be granted by the
+		// trusted provider below. Never carry a static option into arbitrary
+		// trigger envelopes.
+		triggerMaxToolRounds:     0,
+		triggerToolRoundProvider: turnOpts.TriggerToolRoundProvider,
+		conditionValidator:       turnOpts.ConditionValidator,
+		conditionCompletion:      turnOpts.ConditionCompletion,
+		autoAgent:                turnOpts.AutoAgent,
+		budgetResolver:           turnOpts.BudgetResolver,
+		onLifecycle:              turnOpts.OnLifecycle,
 		memoryService:            turnOpts.MemoryService,
+	}
+	if len(turnOpts.initialDreamingAttempt) > 0 {
+		var attempt DreamingAttempt
+		if err := json.Unmarshal(turnOpts.initialDreamingAttempt, &attempt); err == nil && attempt.Validate() == nil {
+			rt.dreamingAttempt = &attempt
+		}
 	}
 	if candidatePipeline != nil {
 		candidatePipeline.SetOnChange(func(report memory.ConsolidationReport) {
@@ -313,6 +350,8 @@ func newRuntimeWithPublisher(
 	rt.orch.SetRuntimeRoot(turnOpts.RuntimeDir)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
 	rt.orch.SetRuntimeIdentity(rt.runtimeRevision, rt.runtimeDigest)
+	rt.orch.SetHandbookReader(turnOpts.HandbookReader)
+	rt.orch.SetAgentPromptProvider(turnOpts.AgentPromptProvider)
 	modelRetries := turnOpts.MaxModelRetries
 	if modelRetries == 0 {
 		modelRetries = 2
@@ -555,7 +594,16 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		// Control/continuation records are drained before a new external input.
 		// A human or trigger arriving while HITL is pending therefore stays in
 		// InputBox and cannot preempt the active Turn.
-		if r.queue.Len() > 0 {
+		if r.executionGate != nil {
+			if env, ok := r.executionGate.claimControl(ctx, r); ok {
+				if r.acceptEnvelope(env) {
+					r.dispatchTurnRequest(ctx, env)
+				}
+				r.executionGate.finishDispatch()
+				r.signalInputBox()
+				continue
+			}
+		} else if r.queue.Len() > 0 {
 			env, err := r.queue.Dequeue(ctx)
 			if err != nil {
 				return
@@ -566,21 +614,72 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 			r.signalInputBox()
 			continue
 		}
-		if record, ok := r.popInputIfIdle(); ok {
+		if r.executionGate != nil {
+			blocked, gateWake := r.executionGate.waitSnapshot()
+			if !blocked {
+				goto claimInput
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.inputBox.Wake():
+			case <-gateWake:
+			}
+			continue
+		}
+	claimInput:
+		var record InputRecord
+		var ok bool
+		if r.executionGate != nil {
+			record, ok = r.executionGate.claimInput(r)
+		} else {
+			record, ok = r.popInputIfIdle()
+		}
+		if ok {
 			// Persist the ownership transfer before executing the Turn. If the
 			// process stops during a tool call, startup can recover this input
 			// alongside the lifecycle projection instead of replaying it after
 			// the recovered continuation.
-			r.persist(context.Background())
+			if err := r.persist(context.Background()); err != nil {
+				// Ownership must be durable before any trigger side effect starts.
+				// Put the record back and fail closed; retrying in a hot loop can
+				// spin forever while the persistence backend is unavailable.
+				r.inputBox.RequeueInFlight()
+				if r.executionGate != nil {
+					r.executionGate.finishDispatch()
+				}
+				return
+			}
 			consumed := true
 			if r.acceptEnvelope(record.Env) {
 				consumed = r.dispatchInput(ctx, record)
 			}
 			if consumed && r.inputBox != nil {
 				r.inputBox.MarkCompleted(record.Seq)
-				r.persist(context.Background())
-				r.inputBox.Ack(record.Seq)
-				r.persist(context.Background())
+				if err := r.persist(context.Background()); err == nil {
+					r.inputBox.Ack(record.Seq)
+					if err := r.persist(context.Background()); err == nil {
+						r.clearTriggerDelivery(record.Env)
+					} else {
+						// The durable snapshot still contains the completed in-flight
+						// record. Stop before consuming another input; otherwise a
+						// later turn could overwrite that recovery boundary.
+						r.inputBox.RestoreCompletedInFlight(record)
+						if r.executionGate != nil {
+							r.executionGate.finishDispatch()
+						}
+						return
+					}
+				} else {
+					// Keep the completed in-flight guard and fail closed.
+					if r.executionGate != nil {
+						r.executionGate.finishDispatch()
+					}
+					return
+				}
+			}
+			if r.executionGate != nil {
+				r.executionGate.finishDispatch()
 			}
 			r.signalInputBox()
 			continue
@@ -596,6 +695,7 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 			if r.inputBox.Closed() {
 				return
 			}
+		case <-r.executionWake():
 		}
 	}
 }
@@ -604,6 +704,13 @@ func (r *runtime) signalInputBox() {
 	if r != nil && r.inputBox != nil {
 		r.inputBox.Signal()
 	}
+}
+
+func (r *runtime) executionWake() <-chan struct{} {
+	if r == nil || r.executionGate == nil {
+		return nil
+	}
+	return r.executionGate.Wake()
 }
 
 func (r *runtime) popInputIfIdle() (InputRecord, bool) {
@@ -622,22 +729,73 @@ func (r *runtime) popInputIfIdle() (InputRecord, bool) {
 
 func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	env := record.Env
+	isTrigger := record.Kind == InputKindTrigger || record.Kind == InputKindSystemAuto
+	if isTrigger && record.RecoveredLegacy {
+		// Legacy restored trigger envelopes have no durable delivery identity;
+		// fail closed rather than replaying an unknown side effect.
+		return true
+	}
+	if blocked, ok := r.triggerDelivery.(triggers.RecoveryDeliveryTracker); ok && isTrigger && blocked.IsRecoveryRequired(strings.TrimSpace(env.TriggerID)) {
+		// Discard the recovered mailbox item without executing it or clearing the
+		// durable recovery fence. An explicit recovery action must clear that fence.
+		return true
+	}
+	if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && isTrigger && strings.TrimSpace(env.DeliveryID) != "" && !identity.IsPendingDelivery(strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)) {
+		// The delivery was explicitly recovered (or superseded); consume the
+		// mailbox record without replaying its task.
+		return true
+	}
 	// InputBox records are data-plane inputs. They all enter the normal human
 	// turn path; the UserName/source fields preserve whether the producer was
 	// an actual user or a trigger.
 	env.RequestType = queue.RequestTypeMessage
 	r.clearIdleAutoCompressMark()
 	source := turn.TurnSourceHuman
-	if record.Kind == InputKindTrigger {
+	if isTrigger {
 		source = turn.TurnSourceTrigger
 	} else if record.Kind == InputKindChildAgent {
 		source = turn.TurnSourceChildAgent
 	}
+	baseBudget := r.turnBudget
+	r.triggerMaxToolRounds = 0
+	if isTrigger && r.triggerToolRoundProvider != nil {
+		if limit, trusted, err := r.triggerToolRoundProvider(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)); err != nil {
+			if r.logger != nil {
+				r.logger.Warn("trusted trigger tool-round profile unavailable; activation dropped", "session_id", r.session.ID, "trigger_id", env.TriggerID, "error", err)
+			}
+			return true
+		} else if trusted && limit > 0 {
+			if record.Kind == InputKindSystemAuto {
+				ctx = tools.WithTrustedAutoIdleActivation(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID))
+				if r.orch != nil {
+					r.orch.BeginTrustedAutoIdleActivation(r.session.ID)
+				}
+			}
+			r.triggerMaxToolRounds = limit
+			// A capped trigger is still allowed one no-tool final summary after
+			// its last tool batch. Keep this activation-only flag out of the
+			// runtime's base budget; dispatch restores the snapshot below.
+			r.turnBudget.ReserveFinalSummary = true
+		}
+	}
 	consumed := r.handleInputMessage(ctx, env, source)
-	if consumed && record.Kind == InputKindTrigger && strings.TrimSpace(env.TriggerID) != "" && r.triggerDelivery != nil {
+	r.turnBudget = baseBudget
+	r.triggerMaxToolRounds = 0
+	return consumed
+}
+
+func (r *runtime) clearTriggerDelivery(env queue.Envelope) {
+	if r == nil || r.triggerDelivery == nil || strings.TrimSpace(env.TriggerID) == "" {
+		return
+	}
+	if blocked, ok := r.triggerDelivery.(triggers.RecoveryDeliveryTracker); ok && blocked.IsRecoveryRequired(strings.TrimSpace(env.TriggerID)) {
+		return
+	}
+	if identity, ok := r.triggerDelivery.(triggers.DeliveryIdentityTracker); ok && strings.TrimSpace(env.DeliveryID) != "" {
+		identity.ClearPendingDeliveryIfMatch(strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID))
+	} else {
 		r.triggerDelivery.ClearPendingDelivery(strings.TrimSpace(env.TriggerID))
 	}
-	return consumed
 }
 
 // dispatchTurnRequest is the single runtime entry point for control and
@@ -693,10 +851,14 @@ func (r *runtime) commitStepHistory(history *[]llm.Message) bool {
 	if history == nil {
 		return false
 	}
-	if turn.Digest(r.messages) == turn.Digest(*history) {
+	merged := *history
+	if r.activeContextStart > 0 && r.activeContextStart <= len(r.messages) {
+		merged = append(append([]llm.Message(nil), r.messages[:r.activeContextStart]...), (*history)...)
+	}
+	if turn.Digest(r.messages) == turn.Digest(merged) {
 		return false
 	}
-	r.messages = append([]llm.Message(nil), (*history)...)
+	r.messages = append([]llm.Message(nil), merged...)
 	r.historyRevision++
 	return true
 }
@@ -724,13 +886,17 @@ func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 		}
 	}
 	if !validEpoch {
-		r.logger.Info("stale session event dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_epoch", env.SessionEpoch, "session_epoch", epoch)
+		if r.logger != nil {
+			r.logger.Info("stale session event dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_epoch", env.SessionEpoch, "session_epoch", epoch)
+		}
 		return false
 	}
 	switch env.RequestType {
 	case queue.RequestTypeTurnContinuation, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
 		if !validTurn {
-			r.logger.Info("stale turn continuation dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_turn_id", env.TurnID, "turn_id", turnID, "event_generation", env.Generation, "generation", generation)
+			if r.logger != nil {
+				r.logger.Info("stale turn continuation dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_turn_id", env.TurnID, "turn_id", turnID, "event_generation", env.Generation, "generation", generation)
+			}
 			return false
 		}
 	}
@@ -759,6 +925,9 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 	}
 	r.applyPendingMemoryScope()
 	r.observeSkillCatalogChange()
+	r.mu.Lock()
+	r.pendingInputMessage = &userMsg
+	r.mu.Unlock()
 	if err := r.lifecycleBeginInputTurn(source); err != nil {
 		r.mu.Lock()
 		r.messages = append(r.messages, userMsg)
@@ -767,6 +936,9 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", err)
 		return true
 	}
+	r.mu.Lock()
+	r.pendingInputMessage = nil
+	r.mu.Unlock()
 	// Clear-context may have won the race while lifecycleBeginHumanTurn was
 	// opening the new turn. Do not let an already accepted queue envelope from
 	// before the clear become the first message of the new context.
@@ -855,6 +1027,16 @@ func (r *runtime) applyPendingMemoryScope() {
 }
 
 func (r *runtime) handleTurnContinuation(parent context.Context) {
+	dreamingContinuation := false
+	r.mu.Lock()
+	if r.dreamingAttempt != nil && (r.dreamingAttempt.State == DreamingAttemptRunning || r.dreamingAttempt.State == DreamingAttemptWaiting) {
+		dreamingContinuation = r.turnCoordinator.Snapshot().TurnID == r.dreamingAttempt.TurnID
+	}
+	r.mu.Unlock()
+	continuationCtx := parent
+	if dreamingContinuation {
+		continuationCtx = tools.WithHandbookMaintenance(parent)
+	}
 	started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman)
 	if err != nil {
 		r.logger.Warn("start turn continuation lifecycle failed", "session_id", r.session.ID, "error", err)
@@ -868,7 +1050,7 @@ func (r *runtime) handleTurnContinuation(parent context.Context) {
 		return
 	}
 	historyStart := r.lifecycleHistoryLength()
-	outcome, history := r.runTurnStepWithSideEffects(parent, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(continuationCtx, true, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history)
 	})
 	if err := r.lifecycleAfterModelStep(outcome, history, historyStart); err != nil {
@@ -878,8 +1060,13 @@ func (r *runtime) handleTurnContinuation(parent context.Context) {
 		}
 	}
 	r.commitHistoryFallback(history)
-	outcome = r.runInlineToolContinuationChain(parent, 0, outcome)
+	outcome = r.runInlineToolContinuationChain(continuationCtx, 0, outcome)
 	r.finishTurnIdle(outcome)
+	if dreamingContinuation {
+		if err := r.completeDreamingResume(history, outcome); err != nil && r.logger != nil {
+			r.logger.Warn("complete dreaming resume failed", "session_id", r.session.ID, "error", err)
+		}
+	}
 	r.persist(context.Background())
 }
 
@@ -891,6 +1078,12 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 			"resume_value", resumeValue,
 		)
 		return
+	}
+	for _, item := range pending.Items {
+		if item.ConditionApproval != nil {
+			r.handleConditionResume(parent, resumeValue, pending)
+			return
+		}
 	}
 	pendingKind, pendingToolCallID := pendingHITLLogFields(pending)
 
@@ -913,13 +1106,23 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		"resume_value_kind", resumeKind,
 		"resume_value", resumeValue,
 	)
+	dreamingResume := false
+	r.mu.Lock()
+	if r.dreamingAttempt != nil && r.dreamingAttempt.State == DreamingAttemptWaiting {
+		dreamingResume = r.turnCoordinator.Snapshot().TurnID == r.dreamingAttempt.TurnID
+	}
+	r.mu.Unlock()
+	resumeCtx := parent
+	if dreamingResume {
+		resumeCtx = tools.WithHandbookMaintenance(parent)
+	}
 	if err := r.lifecyclePrepareResume(resumeValue); err != nil {
 		r.logger.Warn("prepare resume lifecycle failed", "session_id", r.session.ID, "error", err)
 		r.persist(context.Background())
 		return
 	}
 
-	outcome, history := r.runTurnStepWithSideEffects(parent, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(resumeCtx, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
 		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending)
 	})
 	if err := r.lifecycleAfterResume(outcome, history); err != nil {
@@ -929,9 +1132,74 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		}
 	}
 	r.commitHistoryFallback(history)
-	outcome = r.runInlineToolContinuationChain(parent, 0, outcome)
+	outcome = r.runInlineToolContinuationChain(resumeCtx, 0, outcome)
+	r.finishTurnIdle(outcome)
+	if dreamingResume {
+		if err := r.completeDreamingResume(history, outcome); err != nil && r.logger != nil {
+			r.logger.Warn("complete dreaming resume failed", "session_id", r.session.ID, "error", err)
+		}
+	}
+	r.persist(context.Background())
+}
+
+func (r *runtime) handleConditionResume(parent context.Context, resumeValue map[string]any, pending *turn.PendingHITL) (turn.StepOutcome, error) {
+	if pending == nil || len(pending.Items) != 1 || pending.Items[0].ConditionApproval == nil {
+		return turn.StepOutcome{}, fmt.Errorf("condition approval is missing")
+	}
+	// Validate the resume payload before resolving the durable interaction. A
+	// malformed payload must leave the approval pending so the user can retry.
+	if _, err := clihitl.ParseApprovalResume(resumeValue, []string{pending.Items[0].ToolCall.ID}); err != nil {
+		r.logger.Warn("invalid condition approval resume", "session_id", r.session.ID, "error", err)
+		return turn.StepOutcome{}, err
+	}
+	item := pending.Items[0]
+	if r.conditionValidator != nil {
+		if err := r.conditionValidator(parent, *item.ConditionApproval); err != nil {
+			return turn.StepOutcome{}, err
+		}
+	}
+	if err := r.lifecyclePrepareResume(resumeValue); err != nil {
+		r.logger.Warn("prepare condition approval resume failed", "session_id", r.session.ID, "error", err)
+		return turn.StepOutcome{}, err
+	}
+	// Fence the external side effect before opening the command.  A restart
+	// after this fact must reconcile the execution rather than replay bash.
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{Type: turn.CommandToolExecutionStarted,
+		SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID,
+		Generation: state.Generation, ToolCallID: item.ToolCall.ID,
+		ToolExecutionID: item.ToolCall.ID + "-execution", At: time.Now().UTC()}); err != nil {
+		r.logger.Warn("start condition execution lifecycle failed", "session_id", r.session.ID, "error", err)
+		return turn.StepOutcome{}, err
+	}
+	conditionRejected := false
+	outcome, history := r.runTurnStepWithSideEffects(parent, false, func(ctx context.Context, history *[]llm.Message) turn.StepOutcome {
+		result, err := r.orch.ExecuteConditionApproval(ctx, r.session.ID, pending, resumeValue)
+		conditionRejected = result.Rejected
+		return turn.StepOutcome{ConditionHandled: true, ConditionMatched: result.Matched,
+			ConditionToolCallID: item.ToolCall.ID, ConditionExecutionID: item.ToolCall.ID + "-execution",
+			ConditionResult: result.ResultContent, StepIndex: turn.StepIndexFromContext(ctx), Err: err}
+	})
+	if err := r.lifecycleAfterResume(outcome, history); err != nil {
+		r.logger.Warn("finish condition approval lifecycle failed", "session_id", r.session.ID, "error", err)
+		return outcome, err
+	}
 	r.finishTurnIdle(outcome)
 	r.persist(context.Background())
+	if r.conditionCompletion != nil && pending.Items[0].ConditionApproval != nil {
+		meta := pending.Items[0].ConditionApproval
+		status := triggers.ConditionNotMatched
+		if execution, ok := r.turnCoordinator.ToolExecutionStatusForCall(item.ToolCall.ID); ok && execution == turn.ToolExecutionStatusSucceeded {
+			status = triggers.ConditionMatched
+		}
+		if err := r.conditionCompletion(triggers.ConditionRequest{TriggerID: meta.TriggerID, DeliveryID: meta.DeliveryID, SessionID: r.session.ID, AgentID: meta.AgentID, Revision: meta.TriggerRevision, Occurrence: meta.Occurrence}, triggers.ConditionResult{Status: status, Rejected: conditionRejected, Failed: outcome.Err != nil}); err != nil {
+			if r.logger != nil {
+				r.logger.Error("condition completion callback failed", "session_id", r.session.ID, "trigger_id", meta.TriggerID, "delivery_id", meta.DeliveryID, "error", err)
+			}
+			return outcome, fmt.Errorf("condition completion callback: %w", err)
+		}
+	}
+	return outcome, nil
 }
 
 func (r *runtime) commitHistoryFallback(history []llm.Message) {
@@ -978,6 +1246,8 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	r.sessionEpoch++
 	newEpoch := r.sessionEpoch
 	r.messages = nil
+	r.activeContextStart = 0
+	r.lastContextResetID = ""
 	r.historyRevision++
 	r.loadedSkills = nil
 	r.mu.Unlock()
@@ -1077,11 +1347,20 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
 	prefix := r.sidecarPrefix()
 	r.mu.Lock()
-	beforeDigest := turn.Digest(r.messages)
-	beforeCount := len(r.messages)
-	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
-	afterDigest := turn.Digest(r.messages)
-	afterCount := len(r.messages)
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+		r.activeContextStart = start
+	}
+	active := append([]llm.Message(nil), r.messages[start:]...)
+	beforeDigest := turn.Digest(active)
+	beforeCount := len(active)
+	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &active, prefix)
+	afterDigest := turn.Digest(active)
+	afterCount := len(active)
+	if result.Status == "applied" {
+		r.messages = append(append([]llm.Message(nil), r.messages[:start]...), active...)
+	}
 	r.mu.Unlock()
 	if result.Status == "applied" {
 		// Manual compression has the same semantics as pre-step compression:
@@ -1177,6 +1456,9 @@ func (r *runtime) appendInput(kind InputKind, env queue.Envelope) (uint64, error
 	}
 	seq, err := r.inputBox.Append(kind, env)
 	if err == nil {
+		if r.executionGate != nil {
+			r.executionGate.notifyInput()
+		}
 		// Persist the accepted tail before the consumer starts processing it.
 		// This preserves inputs accepted while a Turn is waiting for approval.
 		r.persist(context.Background())
@@ -1262,6 +1544,11 @@ func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[str
 	pending := r.pendingSnapshot()
 	if err := r.lifecycleCancel(); err != nil && r.logger != nil {
 		r.logger.Warn("cancel lifecycle failed", "session_id", r.session.ID, "error", err)
+	}
+	if lifecycleWasActive {
+		if err := r.markDreamingCancelled(r.turnCoordinator.Snapshot().TurnID); err != nil && r.logger != nil {
+			r.logger.Warn("persist dreaming cancellation failed", "session_id", r.session.ID, "error", err)
+		}
 	}
 	r.mu.Lock()
 	cancel := r.turnCancel

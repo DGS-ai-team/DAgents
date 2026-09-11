@@ -191,6 +191,13 @@ const memoryScopeOptions = computed(() =>
     >
       <h3 v-if="isFull" class="agent-settings-section__title">基础信息</h3>
       <div :class="{ 'agent-settings-section__body': isFull }">
+        <label class="agent-settings-field agent-settings-field--type">
+          <span class="agent-settings-field__label">智能体类型</span>
+          <select v-model="draft.agentType" class="agent-settings-input">
+            <option value="normal">普通 Agent</option>
+            <option value="auto">Auto Agent（自主任务）</option>
+          </select>
+        </label>
         <label class="agent-settings-field">
           <span
             :class="{
@@ -559,6 +566,39 @@ const memoryScopeOptions = computed(() =>
   border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-section__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle, var(--color-border));
+}
+
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-input {
+  max-width: 100%;
+}
+
+/* Detail settings are intentionally one field per row; the create wizard
+   keeps its compact conversational layout above. */
+.agent-settings-form--full .agent-settings-section--flat .agent-settings-section__body {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 640px) {
+  .agent-settings-form--full .agent-settings-section--flat .agent-settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 .agent-settings-form--create {
   gap: 14px;
   flex: 1 1 auto;
@@ -865,6 +905,25 @@ const memoryScopeOptions = computed(() =>
   margin-top: 14px;
 }
 
+/* The capability areas are intentionally full-width: their tile and skill
+   collections need room to scan, while the scalar role fields below keep the
+   shared label/control alignment. */
+.agent-settings-form--full .agent-settings-advanced__block {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.agent-settings-form--full .agent-settings-advanced__block:first-child,
+.agent-settings-form--full .agent-settings-advanced__block:nth-child(2) {
+  padding-bottom: 2px;
+}
+
+.agent-settings-form--full .agent-settings-advanced__block .agent-settings-toggles--tiles,
+.agent-settings-form--full .agent-settings-advanced__block .agent-settings-skill-list {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .agent-settings-form--full .agent-settings-toggles--tiles {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -884,6 +943,10 @@ const memoryScopeOptions = computed(() =>
   .agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
     grid-column: auto;
     grid-row: auto;
+  }
+
+  .agent-settings-form--full .agent-settings-advanced__block {
+    grid-column: auto;
   }
 }
 </style>

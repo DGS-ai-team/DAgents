@@ -15,6 +15,16 @@ import {
 } from "./agentTemplateForm.js";
 
 describe("agentTemplateForm", () => {
+  it("preserves unrelated hooks without submitting retired risk observation", () => {
+    const draft = draftFromAgentView({
+      display_name: "Auto",
+      agent_type: "auto",
+      config_snapshot: { defaults: { agent: {}, llm: { active: "p" }, hooks: { other_hook: true, risk_observation_enabled: false } } },
+    }, ["p"]);
+    const payload = buildPatchAgentPayload(draft);
+    expect(payload.defaults.hooks).toEqual({ other_hook: true });
+  });
+
   it("expands full draft from template", () => {
     const draft = draftFromTemplate(
       {

@@ -60,6 +60,7 @@ type Orchestrator struct {
 	runtimeRoot     string
 	tools           tools.Executor
 	policy          *policy.Engine
+	policyMu        sync.RWMutex
 	toolHooks       *hooks.Registry
 	toolExecLog     *hooks.ToolExecutionLog
 	skillAccess     SkillAccess
@@ -70,6 +71,9 @@ type Orchestrator struct {
 	toolRetryLimit  int
 	promptCtx       *promptcontext.Reader
 	memoryService   memory.Service
+	handbookReader  HandbookReader
+	handbookMu      sync.Mutex
+	handbookByTurn  map[string]HandbookSnapshot
 	// memoryAutoRecall is separate from the memory tool group: an Agent may
 	// receive automatic context while the model-facing memory tools remain
 	// disabled, or expose tools without automatic recall.
@@ -85,9 +89,11 @@ type Orchestrator struct {
 	turnUsage   map[string]llm.Usage
 	// turnUsageLast stores the last provider snapshot for each model step.
 	// Providers may emit cumulative usage more than once during a stream.
-	turnUsageLast map[string]map[int]llm.Usage
-	summaryMu     sync.Mutex
-	summaryNext   map[string]bool
+	turnUsageLast  map[string]map[int]llm.Usage
+	summaryMu      sync.Mutex
+	summaryNext    map[string]bool
+	noWorkMu       sync.Mutex
+	noWorkEligible map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
@@ -99,6 +105,9 @@ type Orchestrator struct {
 	executionGuard    ExecutionGuard
 
 	systemPromptBuilder     SystemPromptBuilder
+	agentPromptProvider     AgentPromptProvider
+	agentPromptMu           sync.Mutex
+	agentPromptBySession    map[string]AgentPromptSnapshot
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
 	lifecycleCommand        LifecycleCommandSink
@@ -110,6 +119,17 @@ type Orchestrator struct {
 
 	multimodalEnabled bool
 	mediaReg          *media.Registry
+}
+
+const reservedFinalSummaryInstruction = `本轮工具轮次已达到上限。现在只允许进行一次无工具的最终收尾：不要发起或请求任何工具调用，不要输出模拟的 <tool_call>、function 标签或工具 JSON。请用自然语言如实说明已经完成的工作、未完成的工作以及本轮限制；不要声称尚未执行的操作已经完成。`
+
+const reservedFinalSummaryTailInstruction = `工具已在本轮收尾请求中禁用。只用自然语言列出已完成和未完成的工作，并说明本轮工具轮次上限；不要模拟或输出任何工具标签、函数调用或工具 JSON。`
+
+func appendReservedFinalSummaryInstruction(systemPrompt string) string {
+	if strings.TrimSpace(systemPrompt) == "" {
+		return reservedFinalSummaryInstruction
+	}
+	return systemPrompt + "\n\n" + reservedFinalSummaryInstruction
 }
 
 // SetRuntimeRoot separates Node-managed runtime assets from the Agent
@@ -137,6 +157,54 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetAgentPromptProvider binds the Agent-owned role/experience loader. It is
+// consulted only when a new model context snapshot is built; child runtimes do
+// not inherit its data.
+func (o *Orchestrator) SetAgentPromptProvider(provider AgentPromptProvider) {
+	if o != nil {
+		o.agentPromptProvider = provider
+	}
+}
+
+func (o *Orchestrator) resetAgentPrompt(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.agentPromptMu.Lock()
+	delete(o.agentPromptBySession, sessionID)
+	o.agentPromptMu.Unlock()
+}
+
+func (o *Orchestrator) agentPrompt(ctx context.Context, sessionID string) (AgentPromptSnapshot, error) {
+	if o == nil || o.agentPromptProvider == nil || o.isChildSession {
+		return AgentPromptSnapshot{}, nil
+	}
+	o.agentPromptMu.Lock()
+	prompt, ok := o.agentPromptBySession[sessionID]
+	o.agentPromptMu.Unlock()
+	if ok {
+		return prompt, nil
+	}
+	prompt, err := o.agentPromptProvider(ctx, o.agentID)
+	if err != nil {
+		return AgentPromptSnapshot{}, err
+	}
+	o.agentPromptMu.Lock()
+	if o.agentPromptBySession == nil {
+		o.agentPromptBySession = make(map[string]AgentPromptSnapshot)
+	}
+	o.agentPromptBySession[sessionID] = prompt
+	o.agentPromptMu.Unlock()
+	return prompt, nil
+}
+
+func (o *Orchestrator) freshAgentPrompt(ctx context.Context) (AgentPromptSnapshot, error) {
+	if o == nil || o.agentPromptProvider == nil || o.isChildSession {
+		return AgentPromptSnapshot{}, nil
+	}
+	return o.agentPromptProvider(ctx, o.agentID)
 }
 
 // SetContextInjectionBuilder 注入动态上下文构造器；nil 时使用默认
@@ -176,6 +244,14 @@ func (o *Orchestrator) SetMemoryService(service memory.Service) {
 	}
 	o.memoryService = service
 }
+
+func (o *Orchestrator) SetHandbookReader(reader HandbookReader) {
+	if o != nil {
+		o.handbookReader = reader
+	}
+}
+
+// SetHandbookReader binds the Agent-private, read-only handbook source.
 
 // SetMemoryAutoRecall controls whether a fresh model-context boundary performs
 // automatic memory recall. It does not affect the availability of memory
@@ -227,6 +303,16 @@ func (o *Orchestrator) RestoreModelContextSnapshot(sessionID string, snapshot *M
 		return
 	}
 	o.setModelContextSnapshot(sessionID, snapshot)
+	if o.handbookReader != nil && !o.isChildSession {
+		for _, injection := range snapshot.ContextInjections {
+			if injection.Name == "handbook" {
+				o.handbookMu.Lock()
+				o.handbookByTurn[sessionID] = HandbookSnapshot{Index: injection.Content}
+				o.handbookMu.Unlock()
+				break
+			}
+		}
+	}
 }
 
 // RequestModelContextRefresh schedules a new model context snapshot at the
@@ -378,7 +464,9 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	if engine == nil {
 		engine = policy.NewDefaultEngine()
 	}
+	o.policyMu.Lock()
 	o.policy = engine
+	o.policyMu.Unlock()
 	if o.toolHooks != nil {
 		o.toolHooks.SetPolicyEngine(engine)
 	}
@@ -391,10 +479,14 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	history *[]llm.Message,
 	userMsg llm.Message,
 ) StepOutcome {
+	o.resetAgentPrompt(sessionID)
 	if userMsg.Role == "" {
 		userMsg.Role = "user"
 	}
 	o.clearModelContextSnapshot(sessionID)
+	o.handbookMu.Lock()
+	delete(o.handbookByTurn, sessionID)
+	o.handbookMu.Unlock()
 	o.appendHistory(sessionID, history, userMsg)
 	summary := llm.MessageTextSummary(userMsg)
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
@@ -521,11 +613,47 @@ func NewOrchestrator(
 		turnUsageLast:    make(map[string]map[int]llm.Usage),
 		modelSnapshots:   newModelContextSnapshotStore(),
 		contextMutations: make(map[string][]string),
+		handbookByTurn:   make(map[string]HandbookSnapshot),
 		summaryNext:      make(map[string]bool),
+		noWorkEligible:   make(map[string]bool),
 	}
 	orch.executionGuard = executionGuardFunc(orch.evaluateToolBeforeEach)
 	registerSystemPromptBuildHook(orch)
 	return orch
+}
+
+// BeginTrustedAutoIdleActivation resets the side-effect fence for one
+// provider-validated system-auto activation.
+func (o *Orchestrator) BeginTrustedAutoIdleActivation(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.noWorkMu.Lock()
+	o.noWorkEligible[sessionID] = true
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) markAutoIdleIneligible(sessionID string) {
+	o.noWorkMu.Lock()
+	if _, exists := o.noWorkEligible[sessionID]; exists {
+		o.noWorkEligible[sessionID] = false
+	}
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) EndAutoIdleActivation(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.noWorkMu.Lock()
+	delete(o.noWorkEligible, sessionID)
+	o.noWorkMu.Unlock()
+}
+
+func (o *Orchestrator) autoIdleEligible(sessionID string) bool {
+	o.noWorkMu.Lock()
+	defer o.noWorkMu.Unlock()
+	return o.noWorkEligible[sessionID]
 }
 
 // SetNextStepFinalSummary marks the next model request as the reserved
@@ -616,13 +744,30 @@ func (o *Orchestrator) runOneStep(
 		// step may start; the orchestrator only applies the resulting snapshot.
 		systemPrompt = snapshot.SystemPrompt
 		toolDefs = append([]tools.ToolDef(nil), snapshot.ToolDefinitions...)
+		if reg, ok := o.tools.(*tools.Registry); ok {
+			contextual := reg.DefinitionsForContext(ctx)
+			for _, def := range contextual {
+				if def.Function.Name == "auto_idle" {
+					found := false
+					for _, existing := range toolDefs {
+						if existing.Function.Name == "auto_idle" {
+							found = true
+							break
+						}
+					}
+					if !found {
+						toolDefs = append(toolDefs, def)
+					}
+				}
+			}
+		}
 		if finalSummary {
 			toolDefs = nil
 		}
 		msgs = append([]llm.Message(nil), (*history)...)
 		requestHistory = append([]llm.Message(nil), msgs...)
 	} else {
-		toolDefs = o.ToolDefinitions()
+		toolDefs = o.ToolDefinitionsForContext(ctx)
 		if finalSummary {
 			toolDefs = nil
 		}
@@ -630,8 +775,43 @@ func (o *Orchestrator) runOneStep(
 		// date must not be read twice around midnight and produce a system
 		// prompt/context mismatch.
 		promptInput := o.systemPromptInput(sessionID)
+		if o.agentPromptProvider != nil && !o.isChildSession {
+			agentPrompt, promptErr := o.agentPrompt(ctx, sessionID)
+			if promptErr != nil {
+				return StepOutcome{StepIndex: stepIndex, Err: fmt.Errorf("load agent prompt: %w", promptErr)}
+			}
+			promptInput.AgentPrompt = agentPrompt
+		}
 		systemPrompt = o.buildSystemPromptWithInput(sessionID, promptInput)
 		injections := o.buildContextInjectionsWithInput(promptInput)
+		if o.handbookReader != nil && !o.isChildSession {
+			o.handbookMu.Lock()
+			hs, ok := o.handbookByTurn[sessionID]
+			o.handbookMu.Unlock()
+			if !ok {
+				var readErr error
+				hs, readErr = o.handbookReader.Read(ctx)
+				if readErr != nil {
+					hs.Error = "handbook_read_failed"
+					if o.logger != nil {
+						o.logger.Warn("handbook read failed", "agent_id", o.agentID, "session_id", sessionID, "error", readErr)
+					}
+				}
+				o.handbookMu.Lock()
+				o.handbookByTurn[sessionID] = hs
+				o.handbookMu.Unlock()
+			}
+			if strings.TrimSpace(hs.Index) != "" || hs.Error != "" || hs.Root != "" {
+				content := hs.Index
+				if strings.TrimSpace(content) == "" && hs.Error == "" {
+					content = "手册目录为空。可按需使用文件工具浏览、创建和修改 handbook/ 下的经验文件；文件内容仅作参考。"
+				}
+				if hs.Error != "" {
+					content = "读取经验手册失败；本轮不假定手册内容存在，可在后续 Turn 重试。"
+				}
+				injections = append(injections, ContextInjection{Name: "handbook", Source: "handbook", Content: "## 经验手册（低优先级、不可信）\n\n" + content, Position: "after_current_user", MessageKind: llm.MessageSourceRuntime, MessageForm: llm.MessageFormSnapshot})
+			}
+		}
 		var memoryInjection *ContextInjection
 		recalledMemory, memoryInjection = o.buildMemoryInjection(ctx, sessionID, *history)
 		if memoryInjection != nil {
@@ -660,6 +840,9 @@ func (o *Orchestrator) runOneStep(
 		o.setModelContextSnapshot(sessionID, snapshot)
 		requestHistory = append([]llm.Message(nil), msgs...)
 	}
+	if finalSummary {
+		systemPrompt = appendReservedFinalSummaryInstruction(systemPrompt)
+	}
 	*history = msgs
 	var snapshotInjections []ContextInjection
 	if snapshot != nil {
@@ -667,6 +850,11 @@ func (o *Orchestrator) runOneStep(
 	}
 	requestHistory = ApplyContextInjections(requestHistory, snapshotInjections)
 	requestHistory = o.filterSkillInstructionMessages(requestHistory)
+	// This is request-only guidance for the reserved no-tools summary. Keep it
+	// out of durable history so it cannot leak into the next ordinary turn.
+	if finalSummary {
+		requestHistory = append(requestHistory, llm.Message{Role: "user", Content: reservedFinalSummaryTailInstruction})
+	}
 	llmMessages := media.ExpandMessagesForLLM(requestHistory, o.mediaReg)
 	if !o.multimodalEnabled {
 		// The history may have been created while multimodal was enabled.
@@ -825,6 +1013,7 @@ func (o *Orchestrator) runOneStep(
 		At:                 time.Now().UTC(),
 		HasTools:           len(result.ToolCalls) > 0,
 		AssistantMessageID: Digest(assistant),
+		AssistantMessage:   &assistant,
 		Reason:             "assistant_message_recorded",
 	}); err != nil {
 		if !o.executionBoundaryOpen(ctx) {
@@ -905,6 +1094,10 @@ func (o *Orchestrator) runOneStep(
 	if pending != nil {
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "step_index", stepIndex)
 		return StepOutcome{Pending: pending, StepIndex: stepIndex}
+	}
+	if pauseReason == "no_work" {
+		o.clearModelContextSnapshot(sessionID)
+		return StepOutcome{StepIndex: stepIndex, NoWork: true}
 	}
 	return StepOutcome{StepIndex: stepIndex, ScheduleToolResult: true}
 }
@@ -1023,7 +1216,7 @@ func (o *Orchestrator) SystemPromptForSession(sessionID string) string {
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		return snapshot.SystemPrompt
 	}
-	return o.buildSystemPrompt(sessionID)
+	return o.buildSystemPromptWithContext(context.Background(), sessionID)
 }
 
 // ContextInjectionsForSession returns the active Turn's frozen injections, or
@@ -1036,7 +1229,13 @@ func (o *Orchestrator) ContextInjectionsForSession(sessionID string) []ContextIn
 	if snapshot := o.ModelContextSnapshot(sessionID); snapshot != nil {
 		return cloneContextInjections(snapshot.ContextInjections)
 	}
-	return cloneContextInjections(o.buildContextInjections(sessionID))
+	in := o.systemPromptInput(sessionID)
+	if prompt, err := o.freshAgentPrompt(context.Background()); err == nil {
+		in.AgentPrompt = prompt
+	} else {
+		in.AgentPrompt.Todo = "[Agent prompt unavailable: " + err.Error() + "]"
+	}
+	return cloneContextInjections(o.buildContextInjectionsWithInput(in))
 }
 
 // ToolDefinitions 返回与 runOneStep 相同的 tools 列表（侧车压缩前缀对齐用）。
@@ -1067,6 +1266,28 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	return defs
 }
 
+// ToolDefinitionsForContext adds activation-scoped control tools only when
+// the concrete Registry has received a trusted context marker.
+func (o *Orchestrator) ToolDefinitionsForContext(ctx context.Context) []tools.ToolDef {
+	defs := o.ToolDefinitions()
+	reg, ok := o.tools.(*tools.Registry)
+	if !ok || !tools.TrustedAutoIdleAvailable(ctx) {
+		return defs
+	}
+	for _, def := range reg.DefinitionsForContext(ctx) {
+		if def.Function.Name != "auto_idle" {
+			continue
+		}
+		for _, existing := range defs {
+			if existing.Function.Name == "auto_idle" {
+				return defs
+			}
+		}
+		return append(defs, def)
+	}
+	return defs
+}
+
 // ToolDefinitionsForSession returns the active Turn schema when a Turn
 // snapshot exists. Compression and diagnostics should use this form so a
 // skill/MCP change during a running Turn cannot make the sidecar diverge from
@@ -1090,10 +1311,20 @@ func (o *Orchestrator) ToolRegistry() *tools.Registry {
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
+	return o.buildSystemPromptWithContext(context.Background(), sessionID)
+}
+
+func (o *Orchestrator) buildSystemPromptWithContext(ctx context.Context, sessionID string) string {
 	if o == nil {
 		return ""
 	}
-	return o.buildSystemPromptWithInput(sessionID, o.systemPromptInput(sessionID))
+	in := o.systemPromptInput(sessionID)
+	if prompt, err := o.freshAgentPrompt(ctx); err == nil {
+		in.AgentPrompt = prompt
+	} else {
+		in.AgentPrompt.Responsibilities = "[Agent prompt unavailable: " + err.Error() + "]"
+	}
+	return o.buildSystemPromptWithInput(sessionID, in)
 }
 
 func (o *Orchestrator) buildSystemPromptWithInput(sessionID string, in SystemPromptInput) string {
@@ -1153,13 +1384,6 @@ func (o *Orchestrator) systemPromptInput(sessionID string) SystemPromptInput {
 		in.CurrentDate = time.Now().Format("20060102")
 	}
 	return in
-}
-
-func (o *Orchestrator) buildContextInjections(sessionID string) []ContextInjection {
-	if o == nil {
-		return nil
-	}
-	return o.buildContextInjectionsWithInput(o.systemPromptInput(sessionID))
 }
 
 func (o *Orchestrator) buildContextInjectionsWithInput(in SystemPromptInput) []ContextInjection {

@@ -139,6 +139,10 @@ func normalizeEntry(entry Entry) Entry {
 }
 
 func (s *Store) potentialConflicts(ctx context.Context, candidate Entry) ([]Entry, error) {
+	return s.potentialConflictsWith(ctx, s.db, candidate)
+}
+
+func (s *Store) potentialConflictsWith(ctx context.Context, q queryer, candidate Entry) ([]Entry, error) {
 	where := `scope = ? AND status IN (?, ?)`
 	args := []any{string(s.scope), string(StatusActive), string(StatusConflicted)}
 	if candidate.SemanticKey != "" {
@@ -151,7 +155,7 @@ func (s *Store) potentialConflicts(ctx context.Context, candidate Entry) ([]Entr
 		where += ` AND content_hash = ?`
 		args = append(args, candidate.ContentHash)
 	}
-	entries, err := s.list(ctx, where, args...)
+	entries, err := s.listWithQueryer(ctx, q, where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -164,13 +168,7 @@ func (s *Store) insert(ctx context.Context, entry Entry, reason string) (int64, 
 		return 0, err
 	}
 	defer tx.Rollback()
-	if err := insertEntryTx(ctx, tx, entry, s.ftsAvailable()); err != nil {
-		return 0, err
-	}
-	if err := insertRevisionTx(ctx, tx, entry, reason); err != nil {
-		return 0, err
-	}
-	revision, err := s.nextRevision(ctx, tx)
+	revision, err := s.insertTx(ctx, tx, entry, reason)
 	if err != nil {
 		return 0, err
 	}
@@ -180,7 +178,33 @@ func (s *Store) insert(ctx context.Context, entry Entry, reason string) (int64, 
 	return revision, nil
 }
 
+func (s *Store) insertTx(ctx context.Context, tx *sql.Tx, entry Entry, reason string) (int64, error) {
+	if err := insertEntryTx(ctx, tx, entry, s.ftsAvailable()); err != nil {
+		return 0, err
+	}
+	if err := insertRevisionTx(ctx, tx, entry, reason); err != nil {
+		return 0, err
+	}
+	return s.nextRevision(ctx, tx)
+}
+
 func (s *Store) createConflict(ctx context.Context, candidate Entry, existing []Entry, description string) (Conflict, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Conflict{}, err
+	}
+	defer tx.Rollback()
+	conflict, _, err := s.createConflictTx(ctx, tx, candidate, existing, description)
+	if err != nil {
+		return Conflict{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Conflict{}, err
+	}
+	return conflict, nil
+}
+
+func (s *Store) createConflictTx(ctx context.Context, tx *sql.Tx, candidate Entry, existing []Entry, description string) (Conflict, int64, error) {
 	conflictID := newID("conflict")
 	candidate.Status = StatusPending
 	candidate.ConflictGroup = conflictID
@@ -192,56 +216,54 @@ func (s *Store) createConflict(ctx context.Context, candidate Entry, existing []
 	}
 	candidateRaw, err := json.Marshal(candidate)
 	if err != nil {
-		return Conflict{}, err
+		return Conflict{}, 0, err
 	}
 	idsRaw, err := json.Marshal(ids)
 	if err != nil {
-		return Conflict{}, err
+		return Conflict{}, 0, err
 	}
 	revisionsRaw, err := json.Marshal(revisions)
 	if err != nil {
-		return Conflict{}, err
+		return Conflict{}, 0, err
 	}
 	now := time.Now().UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Conflict{}, err
-	}
-	defer tx.Rollback()
 	if err := insertEntryTx(ctx, tx, candidate, s.ftsAvailable()); err != nil {
-		return Conflict{}, err
+		return Conflict{}, 0, err
 	}
 	if err := insertRevisionTx(ctx, tx, candidate, "remember_conflict_pending"); err != nil {
-		return Conflict{}, err
+		return Conflict{}, 0, err
 	}
 	revision, err := s.nextRevision(ctx, tx)
 	if err != nil {
-		return Conflict{}, err
+		return Conflict{}, 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO memory_conflicts(
-id, candidate_json, existing_ids_json, existing_revisions_json, relation,
-description, store_revision, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, conflictID, string(candidateRaw), string(idsRaw), string(revisionsRaw),
-		"contradicts", strings.TrimSpace(description), revision, "pending", now.Format(time.RFC3339Nano)); err != nil {
-		return Conflict{}, err
+	_, err = tx.ExecContext(ctx, `INSERT INTO memory_conflicts(id,candidate_json,existing_ids_json,existing_revisions_json,relation,description,store_revision,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, conflictID, string(candidateRaw), string(idsRaw), string(revisionsRaw), "contradicts", strings.TrimSpace(description), revision, "pending", now.Format(time.RFC3339Nano))
+	if err != nil {
+		return Conflict{}, 0, err
 	}
-	if err := tx.Commit(); err != nil {
-		return Conflict{}, err
-	}
-	return Conflict{ID: conflictID, Candidate: candidate, Existing: existing, ExistingRevisions: revisions,
-		Relation: "contradicts", Description: strings.TrimSpace(description), StoreRevision: revision, CreatedAt: now}, nil
+	return Conflict{ID: conflictID, Candidate: candidate, Existing: existing, ExistingRevisions: revisions, Relation: "contradicts", Description: strings.TrimSpace(description), StoreRevision: revision, CreatedAt: now}, revision, nil
 }
 
 func (s *Store) updateStatus(ctx context.Context, entry Entry, status Status, reason string) (int64, error) {
-	now := time.Now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	revision, err := s.updateStatusTx(ctx, tx, entry, status, reason)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return revision, nil
+}
+
+func (s *Store) updateStatusTx(ctx context.Context, tx *sql.Tx, entry Entry, status Status, reason string) (int64, error) {
+	now := time.Now().UTC()
 	updatedRevision := entry.Revision + 1
-	result, err := tx.ExecContext(ctx, `UPDATE memory_entries SET status=?, revision=?, updated_at=? WHERE id=? AND scope=? AND revision=?`,
-		string(status), updatedRevision, now.Format(time.RFC3339Nano), entry.ID, string(s.scope), entry.Revision)
+	result, err := tx.ExecContext(ctx, `UPDATE memory_entries SET status=?, revision=?, updated_at=? WHERE id=? AND scope=? AND revision=?`, string(status), updatedRevision, now.Format(time.RFC3339Nano), entry.ID, string(s.scope), entry.Revision)
 	if err != nil {
 		return 0, err
 	}
@@ -261,14 +283,7 @@ func (s *Store) updateStatus(ctx context.Context, entry Entry, status Status, re
 	if err := insertRevisionTx(ctx, tx, updated, reason); err != nil {
 		return 0, err
 	}
-	revision, err := s.nextRevision(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return revision, nil
+	return s.nextRevision(ctx, tx)
 }
 
 func (s *Store) updateContent(ctx context.Context, id, content string) (Entry, error) {

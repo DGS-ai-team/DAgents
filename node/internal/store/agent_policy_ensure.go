@@ -46,7 +46,9 @@ func (s *AgentStore) LoadAgentPolicyEngine(ctx context.Context, agentID string) 
 	if err != nil {
 		return nil, err
 	}
-	return policy.NewEngineFromMaps(policy.StringMapsToMaps(rec.Tools, rec.Shell)), nil
+	maps := policy.StringMapsToMaps(rec.Tools, rec.Shell)
+	maps.Grants = rec.Grants
+	return policy.NewEngineFromMaps(maps), nil
 }
 
 // EnsureAgentPromptContext ensures the prompt sidecar row exists.

@@ -16,8 +16,10 @@ import (
 type InputKind string
 
 const (
-	InputKindUser       InputKind = "user"
-	InputKindTrigger    InputKind = "trigger"
+	InputKindUser    InputKind = "user"
+	InputKindTrigger InputKind = "trigger"
+	// InputKindSystemAuto is set by the trusted trigger submitter.
+	InputKindSystemAuto InputKind = "system_auto"
 	InputKindChildAgent InputKind = "child_agent"
 )
 
@@ -38,8 +40,11 @@ var (
 )
 
 func validateInputRecord(record InputRecord) error {
-	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindChildAgent {
+	if record.Kind != InputKindUser && record.Kind != InputKindTrigger && record.Kind != InputKindSystemAuto && record.Kind != InputKindChildAgent {
 		return fmt.Errorf("%w: %q", ErrInvalidInputKind, record.Kind)
+	}
+	if record.Kind == InputKindSystemAuto && (record.Env.TriggerID == "" || record.Env.DeliveryID == "") {
+		return fmt.Errorf("%w: system auto requires trigger and delivery identity", ErrInvalidInputKind)
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
@@ -59,6 +64,9 @@ type InputRecord struct {
 	Kind      InputKind      `json:"kind"`
 	Env       queue.Envelope `json:"env"`
 	Completed bool           `json:"completed,omitempty"`
+	// RecoveredLegacy fences pre-delivery-identity trigger records restored
+	// after restart. It is process-local and deliberately never persisted.
+	RecoveredLegacy bool `json:"-"`
 }
 
 type inputBoxState struct {
@@ -142,11 +150,40 @@ func (b *InputBox) Pop() (InputRecord, bool) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.items) == 0 {
+	if len(b.items) == 0 || b.inFlight != nil {
 		return InputRecord{}, false
 	}
 	record := b.items[0]
 	b.items = b.items[1:]
+	b.inFlight = &record
+	return record, true
+}
+
+// PopForIdle gives a queued user message precedence over an earlier system
+// Auto wakeup. Other records retain their FIFO order.
+func (b *InputBox) PopForIdle() (InputRecord, bool) {
+	if b == nil {
+		return InputRecord{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.items) == 0 || b.inFlight != nil {
+		return InputRecord{}, false
+	}
+	index := 0
+	if b.items[0].Kind == InputKindSystemAuto {
+		for i := 1; i < len(b.items); i++ {
+			if b.items[i].Kind == InputKindUser {
+				index = i
+				break
+			}
+			if b.items[i].Kind != InputKindSystemAuto {
+				break
+			}
+		}
+	}
+	record := b.items[index]
+	b.items = append(b.items[:index], b.items[index+1:]...)
 	b.inFlight = &record
 	return record, true
 }
@@ -197,6 +234,23 @@ func (b *InputBox) Ack(seq uint64) bool {
 	return true
 }
 
+// RestoreCompletedInFlight reinstates the ownership guard when the
+// post-ack snapshot cannot be persisted. The consumer must stop so a later
+// input cannot overwrite this unresolved recovery boundary.
+func (b *InputBox) RestoreCompletedInFlight(record InputRecord) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inFlight != nil {
+		return false
+	}
+	record.Completed = true
+	b.inFlight = &record
+	return true
+}
+
 // RequeueInFlight puts an uncompleted input back at the head of the FIFO.
 // It is used when startup finds that the consumer had not entered a live Turn
 // before the process stopped.
@@ -227,6 +281,15 @@ func (b *InputBox) Len() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.items)
+}
+
+func (b *InputBox) HasInFlight() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.inFlight != nil
 }
 
 // Snapshot returns the durable FIFO tail.  The monotonic sequence is stored
@@ -265,6 +328,14 @@ func (b *InputBox) Restore(raw []byte) error {
 	var state inputBoxState
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return fmt.Errorf("decode input box state: %w", err)
+	}
+	for i := range state.Items {
+		if state.Items[i].Kind == InputKindTrigger && state.Items[i].Env.DeliveryID == "" {
+			state.Items[i].RecoveredLegacy = true
+		}
+	}
+	if state.InFlight != nil && state.InFlight.Kind == InputKindTrigger && state.InFlight.Env.DeliveryID == "" {
+		state.InFlight.RecoveredLegacy = true
 	}
 	if len(state.Items) > InputBoxMaxItems {
 		return fmt.Errorf("input box state exceeds %d items", InputBoxMaxItems)

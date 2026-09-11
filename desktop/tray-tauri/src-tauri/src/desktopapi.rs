@@ -2,7 +2,6 @@
 
 use crate::clipboard;
 use crate::config::ShellConfig;
-use crate::directory;
 use crate::layout::Layout;
 use crate::nodeclient::Client;
 use crate::uifocus::{Store as UIFocusStore, DEFAULT_TTL};
@@ -93,20 +92,6 @@ impl Server {
                 Err(err) => json_response(
                     StatusCode(500),
                     &json!({ "paths": Vec::<String>::new(), "message": err }),
-                ),
-            },
-            (Method::Post, "/v1/desktop/dialog/directory") => match directory::pick_directory() {
-                Ok(Some(path)) => json_response(
-                    StatusCode(200),
-                    &json!({ "ok": true, "cancelled": false, "path": path }),
-                ),
-                Ok(None) => json_response(
-                    StatusCode(200),
-                    &json!({ "ok": true, "cancelled": true, "path": null }),
-                ),
-                Err(err) => json_response(
-                    StatusCode(500),
-                    &json!({ "ok": false, "cancelled": false, "path": null, "message": err }),
                 ),
             },
             (Method::Post, "/v1/desktop/ui/focus") => self.handle_ui_focus(&mut req),

@@ -36,27 +36,42 @@ func NewLLMCandidateExtractor(client llm.Client, maxCandidates, maxInputChars in
 }
 
 func (e *LLMCandidateExtractor) Extract(ctx context.Context, input ExtractionInput) ([]Candidate, error) {
+	candidates, _, err := e.ExtractWithUsage(ctx, input)
+	return candidates, err
+}
+
+// ExtractWithUsage is the usage-aware form used by maintenance accounting.
+// Older llm.Client implementations continue to work; their usage is nil.
+func (e *LLMCandidateExtractor) ExtractWithUsage(ctx context.Context, input ExtractionInput) ([]Candidate, *llm.Usage, error) {
 	if e == nil || e.client == nil {
-		return nil, fmt.Errorf("candidate extractor: llm client is nil")
+		return nil, nil, fmt.Errorf("candidate extractor: llm client is nil")
 	}
 	text := renderExtractionInput(input, e.maxInputChars)
 	if strings.TrimSpace(text) == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
-	result, err := e.client.CompleteText(ctx, llm.CompleteRequest{
+	request := llm.CompleteRequest{
 		SystemPrompt: candidateExtractionSystemPrompt,
 		UserPrompt:   text,
-	})
+	}
+	var result string
+	var usage *llm.Usage
+	var err error
+	if usageClient, ok := e.client.(llm.CompletionWithUsageClient); ok {
+		result, usage, err = usageClient.CompleteTextWithUsage(ctx, request)
+	} else {
+		result, err = e.client.CompleteText(ctx, request)
+	}
 	if err != nil {
-		return nil, err
+		return nil, usage, err
 	}
 	raw := extractJSONArray(result)
 	if raw == "" {
-		return nil, fmt.Errorf("candidate extractor: response is not a JSON array")
+		return nil, usage, fmt.Errorf("candidate extractor: response is not a JSON array")
 	}
 	var payload []candidatePayload
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return nil, fmt.Errorf("candidate extractor: invalid JSON: %w", err)
+		return nil, usage, fmt.Errorf("candidate extractor: invalid JSON: %w", err)
 	}
 	if len(payload) > e.maxCandidates {
 		payload = payload[:e.maxCandidates]
@@ -75,7 +90,7 @@ func (e *LLMCandidateExtractor) Extract(ctx context.Context, input ExtractionInp
 			ExpiresAt: parseCandidateTime(item.ExpiresAt),
 		}})
 	}
-	return out, nil
+	return out, usage, nil
 }
 
 type candidatePayload struct {

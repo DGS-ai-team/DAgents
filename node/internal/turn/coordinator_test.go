@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestTurnCoordinatorRetryMissingUsageRemainsUnknown(t *testing.T) {
+	coordinator := NewTurnCoordinator("s", "a")
+	now := time.Now().UTC()
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "s", TurnID: "t", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestRetrying, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, Usage: StepUsage{TotalTokens: 4}, At: now},
+	}
+	for _, command := range commands {
+		if _, err := coordinator.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.ModelUsageKnown {
+		t.Fatalf("missing first attempt incorrectly known: %#v", snapshot)
+	}
+}
+
 func TestTurnCoordinatorDispatchesOneTurnAcrossMultipleSteps(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	coordinator := NewTurnCoordinator("session-1", "agent-1")
@@ -660,6 +681,35 @@ func TestTurnCoordinatorTracksAndPreflightsTurnBudget(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorPreflightsToolRoundsSeparatelyFromToolCalls(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-rounds", "agent-1")
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-rounds", TurnID: "turn-rounds", Generation: 1, Source: TurnSourceTrigger, Budget: TurnBudget{MaxToolRounds: 1, MaxSteps: 4, ReserveFinalSummary: true}, At: now},
+		{Type: CommandStartStep, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, At: now},
+	} {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
+		t.Fatalf("tool rounds=%d, want 1", got)
+	}
+	if _, err := c.Dispatch(TurnCommand{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, ToolBatchID: "step-1-batch", At: now}); err != nil {
+		t.Fatalf("duplicate assistant event should be idempotent: %v", err)
+	}
+	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
+		t.Fatalf("duplicate assistant changed tool rounds=%d, want 1", got)
+	}
+	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_tool_rounds" {
+		t.Fatalf("next tool round should be rejected: %+v", decision)
+	}
+	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); !decision.Allowed {
+		t.Fatalf("final summary should remain allowed: %+v", decision)
+	}
+}
+
 func TestTurnCoordinatorAccumulatesModelUsageAcrossAttempts(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
@@ -743,6 +793,28 @@ func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
 	}
 	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_output_tokens" {
 		t.Fatalf("output budget decision = %+v", decision)
+	}
+}
+
+func TestTurnCoordinatorRejectsThirdRequestAndToolAfterTotalBudget(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-total", "agent-1")
+	budget := TurnBudget{MaxTotalTokens: 10, MaxSteps: 3, MaxToolCalls: 3}
+	for _, command := range []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-total", TurnID: "turn-total", Generation: 1, Source: TurnSourceHuman, Budget: budget, At: now},
+		{Type: CommandStartStep, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
+		{Type: CommandModelRequestStarted, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
+		{Type: CommandModelUsageRecorded, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, Usage: StepUsage{TotalTokens: 10}, At: now},
+	} {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := c.BudgetDecisionFor(CommandModelRequestStarted); d.Allowed || d.Reason != "max_total_tokens" {
+		t.Fatalf("third request decision=%+v", d)
+	}
+	if d := c.BudgetDecisionFor(CommandToolCallRecorded); d.Allowed || d.Reason != "max_total_tokens" {
+		t.Fatalf("tool decision=%+v", d)
 	}
 }
 

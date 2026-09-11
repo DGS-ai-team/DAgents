@@ -10,6 +10,8 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/memory"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -28,7 +30,8 @@ type BuildParams struct {
 	// Agent (for example Workgroup members) from opening that Agent's personal
 	// memory store. The model-facing memory tools remain unavailable because
 	// TurnOptions.MemoryService is nil.
-	DisableMemory bool
+	DisableMemory        bool
+	WorkspaceCoordinator *workspacecoord.Coordinator
 }
 
 // Built 为 per-agent 运行时产物。
@@ -77,6 +80,9 @@ func Build(p BuildParams) (Built, error) {
 	if err != nil {
 		return Built{}, err
 	}
+	if p.WorkspaceCoordinator != nil {
+		reg.SetWorkspaceCoordinator(p.WorkspaceCoordinator)
+	}
 	if len(groups) == 0 {
 		reg.SetBuiltinEnabledNone()
 	} else {
@@ -87,6 +93,9 @@ func Build(p BuildParams) (Built, error) {
 			return Built{}, err
 		}
 	}
+	// Auto snapshots get the capability by default; dedicated runtime callers
+	// can explicitly disable it after Build before attaching their own handlers.
+	reg.SetAutonomyEnabled(strings.EqualFold(p.Snapshot.AgentType, "auto") && !p.DisableMemory)
 	if p.MCP != nil {
 		effective, err := p.MCP.EffectiveTools(context.Background(), mcp.BindingsFromDefaults(p.Snapshot.Defaults))
 		if err != nil {
@@ -131,6 +140,7 @@ func Build(p BuildParams) (Built, error) {
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
 
 	turnOpts := p.BaseTurn
+	turnOpts.AutoAgent = strings.EqualFold(strings.TrimSpace(p.Snapshot.AgentType), "auto")
 	turnOpts.WorkspaceRoot = workspaceRoot
 	turnOpts.AgentID = strings.TrimSpace(p.AgentID)
 	turnOpts.WorkspaceStateRoot = workspaceStateRoot
@@ -151,11 +161,32 @@ func Build(p BuildParams) (Built, error) {
 			filepath.Join(workspaceStateRoot, "memory", "memory.db"),
 			filepath.Join(p.NodeCFG.RuntimeDir(), "memory", "global.db"),
 			memoryScope,
+			p.AgentID,
 		)
 		if openErr != nil {
 			return Built{}, fmt.Errorf("open memory store: %w", openErr)
 		}
 		turnOpts.MemoryService = memoryService
+	}
+	var handbookRoot string
+	if strings.EqualFold(p.Snapshot.AgentType, "auto") {
+		var err error
+		handbookRoot, err = HandbookRoot(p.NodeCFG.RuntimeDir(), p.AgentID, p.Snapshot.Workspace, p.Snapshot.Handbook)
+		if err != nil {
+			return Built{}, fmt.Errorf("resolve handbook: %w", err)
+		}
+		reader, openErr := turn.NewFileHandbookReader(handbookRoot)
+		if openErr != nil {
+			return Built{}, fmt.Errorf("open handbook: %w", openErr)
+		}
+		turnOpts.HandbookReader = reader
+	}
+	// The reserved handbook/ tool namespace is an explicit Auto capability.
+	// Regular Agents retain their ordinary workspace/handbook semantics.
+	if strings.EqualFold(strings.TrimSpace(p.Snapshot.AgentType), "auto") {
+		if err := reg.SetHandbookRoot(handbookRoot); err != nil {
+			return Built{}, fmt.Errorf("bind handbook: %w", err)
+		}
 	}
 	turnOpts.MemoryAutoExtract = p.NodeCFG.Memory.AutoExtract
 	turnOpts.MemoryCandidateQueueSize = p.NodeCFG.Memory.CandidateQueueSize

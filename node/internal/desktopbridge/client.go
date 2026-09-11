@@ -69,12 +69,6 @@ func (c *Client) Available(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func (c *Client) DirectoryPicker(ctx context.Context) (map[string]any, error) {
-	var out map[string]any
-	err := c.doJSON(ctx, http.MethodPost, "/v1/desktop/dialog/directory", map[string]any{}, &out)
-	return out, err
-}
-
 func (c *Client) ClipboardFiles(ctx context.Context) (map[string]any, error) {
 	var out map[string]any
 	err := c.doJSON(ctx, http.MethodGet, "/v1/desktop/clipboard/files", nil, &out)

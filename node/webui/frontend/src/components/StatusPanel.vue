@@ -83,4 +83,9 @@ onMounted(load);
 .status-panel__refresh svg { width: 15px; height: 15px; }
 .status-panel__health { display: inline-flex; align-items: center; gap: 7px; }
 .status-panel__health-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success, #3d9a5f); }
+@media (max-width: 640px) {
+  .status-panel .command-panel__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .status-panel .command-stat { min-width: 0; }
+  .status-panel__health { white-space: nowrap; }
+}
 </style>

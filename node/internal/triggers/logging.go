@@ -65,6 +65,28 @@ func (s *Store) logDeleted(triggerID string) {
 	s.logger.Info("trigger deleted", "trigger_id", triggerID)
 }
 
+// logAuthorization records the security-relevant part of a scoped operation.
+// Keep this deliberately free of task templates, payloads, and credentials.
+func (s *Store) logAuthorization(p Principal, def Definition, operation, result, reason string) {
+	if s == nil {
+		return
+	}
+	actorID := p.ID
+	if actorID == "" {
+		actorID = p.AgentID
+	}
+	s.logger.Info("trigger authorization",
+		"actor_kind", p.Kind,
+		"actor_id", actorID,
+		"owner_agent_id", def.OwnerAgentID,
+		"trigger_id", def.TriggerID,
+		"revision", def.Revision,
+		"operation", operation,
+		"result", result,
+		"reason", reason,
+	)
+}
+
 func (s *Scheduler) logFireRecord(record FireRecord) {
 	switch record.Status {
 	case FireStatusQueued:

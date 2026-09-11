@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 )
 
 // MockClient 用于单测与无 API Key 联调。
@@ -75,6 +76,9 @@ func (m *MockClient) hasToolResult(messages []Message) bool {
 }
 
 func (m *MockClient) CompleteText(_ context.Context, req CompleteRequest) (string, error) {
+	if req.MaxOutputTokens < 0 {
+		return "", fmt.Errorf("max output tokens cannot be negative")
+	}
 	return "任务目标：压缩摘要\n重要结论：mock\n修改过的文件和资源：无\n下一步动作：继续", nil
 }
 

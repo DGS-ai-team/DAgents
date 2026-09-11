@@ -63,6 +63,64 @@ func TestReadWriteFile(t *testing.T) {
 	}
 }
 
+func TestHandbookWriteIdenticalContentIsNoOp(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, err := NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithHandbookMaintenance(context.Background())
+	if _, err := reg.Execute(ctx, "write_file", `{"path":"handbook/a.md","content":"same"}`); err != nil {
+		t.Fatal(err)
+	}
+	before := reg.HandbookMutationCount()
+	out, err := reg.Execute(ctx, "write_file", `{"path":"handbook/a.md","content":"same"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != reg.HandbookMutationCount() || !strings.Contains(out, "no changes") {
+		t.Fatalf("out=%q mutations=%d/%d", out, reg.HandbookMutationCount(), before)
+	}
+}
+
+func TestHandbookReadDigestCASProtectsExternalEdit(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, err := NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithHandbookMaintenance(context.Background())
+	if _, err := reg.Execute(ctx, "write_file", `{"path":"handbook/cas.md","content":"original"}`); err != nil {
+		t.Fatal(err)
+	}
+	read, err := reg.Execute(ctx, "read_file", `{"path":"handbook/cas.md"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := "文件摘要: "
+	idx := strings.Index(read, marker)
+	if idx < 0 {
+		t.Fatalf("digest missing: %q", read)
+	}
+	digest := strings.TrimSpace(strings.Split(strings.TrimSpace(read[idx+len(marker):]), "\n")[0])
+	if err := os.WriteFile(filepath.Join(handbook, "cas.md"), []byte("external"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(ctx, "write_file", `{"path":"handbook/cas.md","content":"agent","expected_digest":"`+digest+`"}`); err == nil {
+		t.Fatal("expected CAS conflict")
+	}
+	raw, _ := os.ReadFile(filepath.Join(handbook, "cas.md"))
+	if string(raw) != "external" {
+		t.Fatalf("external content overwritten: %q", raw)
+	}
+}
+
 func TestPathEscapeDenied(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)

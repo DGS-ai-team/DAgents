@@ -8,10 +8,12 @@ const props = defineProps({
   hint: { type: String, default: "" },
 });
 
-const emit = defineEmits(["submit"]);
+const emit = defineEmits(["submit", "node-submit"]);
 
 const username = ref(props.defaultUsername || "admin");
 const password = ref("");
+const nodeId = ref("");
+const nodeToken = ref("");
 
 const canSubmit = computed(() => {
   return Boolean(username.value.trim()) && Boolean(password.value) && !props.busy;
@@ -23,6 +25,11 @@ function onSubmit() {
     username: username.value.trim(),
     password: password.value,
   });
+}
+
+function onNodeSubmit() {
+  if (props.busy || !nodeId.value.trim() || !nodeToken.value) return;
+  emit("node-submit", { nodeId: nodeId.value.trim(), token: nodeToken.value });
 }
 </script>
 
@@ -46,7 +53,7 @@ function onSubmit() {
     </aside>
 
     <div class="login-panel">
-      <form class="login-card" @submit.prevent="onSubmit">
+      <div class="login-card">
         <div class="login-brand">
           <h1>管理员登录</h1>
           <p>使用管理员账号进入管理台</p>
@@ -55,6 +62,7 @@ function onSubmit() {
         <p v-if="hint" class="login-hint">{{ hint }}</p>
         <p v-if="error" class="login-error" role="alert">{{ error }}</p>
 
+        <form @submit.prevent="onSubmit">
         <label class="login-field">
           <span>账号</span>
           <input v-model="username" type="text" name="username" autocomplete="username" autofocus />
@@ -72,7 +80,25 @@ function onSubmit() {
         <button type="submit" class="login-submit" :disabled="!canSubmit">
           {{ busy ? "登录中…" : "登录" }}
         </button>
-      </form>
+        </form>
+
+        <details class="login-node-login">
+          <summary>使用 Node 凭据登录</summary>
+          <form @submit.prevent="onNodeSubmit">
+          <label class="login-field">
+            <span>Node ID</span>
+            <input v-model="nodeId" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>Node token</span>
+            <input v-model="nodeToken" type="password" autocomplete="off" />
+          </label>
+          <button type="submit" class="login-submit" :disabled="props.busy || !nodeId.trim() || !nodeToken">
+            {{ busy ? "登录中…" : "Node 登录" }}
+          </button>
+          </form>
+        </details>
+      </div>
     </div>
   </div>
 </template>

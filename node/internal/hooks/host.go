@@ -54,7 +54,8 @@ type LLMCompleteRequest struct {
 
 // LLMCompleteResponse 为 Hook 内 LLM 补全结果。
 type LLMCompleteResponse struct {
-	Text string
+	Text  string
+	Usage *llm.Usage
 }
 
 // Host 为 in-process Hook 可调用的显式能力面（禁止反射）。

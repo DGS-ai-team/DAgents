@@ -11,7 +11,6 @@
 mod clipboard;
 mod config;
 mod desktopapi;
-mod directory;
 mod events;
 mod layout;
 mod nodeclient;

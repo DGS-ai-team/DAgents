@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 )
 
 type readFileArgs struct {
@@ -82,12 +84,16 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 		limit = *args.LineLimit
 	}
 
-	lines, choice, err := r.readTextLinesAt(args.Path, path, args.Encoding)
+	lines, choice, rawBytes, err := r.readTextLinesAndRawAt(args.Path, path, args.Encoding)
 	if err != nil {
 		if _, ok := err.(*encodingDecodeError); ok {
 			return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
 		}
 		return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
+	}
+	digest := ""
+	if r.handbookFS != nil && isHandbookPath(args.Path) && info.Mode().IsRegular() && int64(len(rawBytes)) <= 16*1024*1024 {
+		digest = handbookfs.Digest(rawBytes)
 	}
 	total := len(lines)
 	start, end := windowFromTotal(total, offset, limit)
@@ -117,8 +123,9 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 	if total == 0 {
 		pageStart, pageEnd = 0, 0
 	}
-	header := []string{
-		fmt.Sprintf("文件修改时间: %s", fileMtimeText(path)),
+	header := []string{fmt.Sprintf("文件修改时间: %s", fileMtimeText(path))}
+	if digest != "" {
+		header = append(header, fmt.Sprintf("文件摘要: %s", digest))
 	}
 	header = append(header, formatEncodingHeaderLines(choice, choice.GarbledWarning)...)
 	header = append(header,

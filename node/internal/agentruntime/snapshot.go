@@ -13,9 +13,15 @@ import (
 
 // Snapshot 为 agents.config_snapshot_json 的解析视图。
 type Snapshot struct {
+	AgentType  string          `json:"agent_type,omitempty"`
 	TemplateID string          `json:"template_id"`
 	Defaults   map[string]any  `json:"defaults"`
 	Workspace  WorkspaceConfig `json:"workspace,omitempty"`
+	Handbook   HandbookConfig  `json:"handbook,omitempty"`
+}
+
+type HandbookConfig struct {
+	Directory string `json:"directory,omitempty"`
 }
 
 // ParseSnapshot 解析 config_snapshot JSON。

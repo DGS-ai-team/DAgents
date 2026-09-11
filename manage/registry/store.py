@@ -53,12 +53,14 @@ class AgentRegistryStore:
         self._db = db
         self._load_from_db()
 
-    def register(self, payload: AgentRegisterRequest) -> AgentRecord:
+    def register(self, payload: AgentRegisterRequest, *, expected_node_id: str | None = None) -> AgentRecord:
         now_unix = int(time.time())
         with self._lock:
             agent_key = (payload.agent_id or payload.node_id).strip()
             node_id = (payload.node_id or agent_key).strip()
             existing = self._records.get(agent_key)
+            if existing is not None and expected_node_id and existing.node_id != expected_node_id:
+                raise PermissionError("agent belongs to another node")
             registered_at = existing.registered_at_unix if existing else now_unix
             discovery_group = existing.discovery_group if existing else []
             stored = AgentStoredRecord(

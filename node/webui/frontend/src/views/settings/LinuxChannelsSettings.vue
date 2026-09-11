@@ -474,7 +474,7 @@ onMounted(() => void load());
 .linux-settings__stage-message { min-width:0; overflow:hidden; color:var(--color-text-muted); text-overflow:ellipsis; white-space:nowrap; }
 .linux-settings__stage-duration { color:var(--color-text-muted); font-variant-numeric:tabular-nums; }
 .linux-settings__grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
-.linux-settings__grid--target { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.linux-settings__grid--target { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .linux-settings__field { min-width:0; display:flex; flex-direction:column; gap:6px; }
 .linux-settings__field--wide { grid-column:1 / -1; }
 .linux-settings__field label { display:flex; align-items:center; gap:6px; color:var(--color-text); font-size:12px; font-weight:600; }

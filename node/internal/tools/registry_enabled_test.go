@@ -58,6 +58,24 @@ func TestSetBuiltinEnabledEmptyMeansAll(t *testing.T) {
 	}
 }
 
+func TestRetiredGoalCheckpointIsNotRegisteredOrCallable(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "goal_checkpoint" {
+			t.Fatal("retired goal_checkpoint must not be exposed to the model")
+		}
+	}
+	if _, err := reg.Execute(context.Background(), "goal_checkpoint", `{}`); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("retired goal_checkpoint unexpectedly callable: %v", err)
+	}
+	if err := reg.SetBuiltinEnabled([]string{"goal_checkpoint"}); err == nil || !strings.Contains(err.Error(), "unknown builtin tool") {
+		t.Fatalf("retired goal_checkpoint unexpectedly accepted by allowlist: %v", err)
+	}
+}
+
 func TestSetMultimodalEnabledFiltersReadImage(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {

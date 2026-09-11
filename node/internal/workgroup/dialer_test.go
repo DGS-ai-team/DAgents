@@ -259,3 +259,59 @@ func TestDialerRunReconnectsAfterServerDrop(t *testing.T) {
 		t.Fatalf("expected disconnect callback, got %d", disconnects.Load())
 	}
 }
+
+func TestDialerUsesManageTokenProviderOnReconnect(t *testing.T) {
+	var hits atomic.Int32
+	var token atomic.Value
+	token.Store("token-one")
+	seen := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "done")
+		seen <- r.Header.Get("x-dagents-a2a-token")
+		ctx := r.Context()
+		var hello map[string]any
+		if err := wsjson.Read(ctx, c, &hello); err != nil {
+			return
+		}
+		n := hits.Add(1)
+		_ = wsjson.Write(ctx, c, map[string]any{"type": "session.welcome", "payload": map[string]any{
+			"node_id": "node-token", "connection_generation": n, "schema_version": "0.5.0",
+		}})
+		if n == 1 {
+			_ = c.Close(websocket.StatusGoingAway, "rotate")
+			return
+		}
+		<-ctx.Done()
+	}))
+	defer srv.Close()
+	w := NewWorker(Config{NodeID: "node-token"})
+	d := &Dialer{ManageURL: srv.URL, NodeID: "node-token", Worker: w, ManageTokenProvider: func() string { return token.Load().(string) }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx, func(error, time.Duration) { token.Store("token-two") }) }()
+	var first, second string
+	select {
+	case first = <-seen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first dial did not reach server")
+	}
+	select {
+	case second = <-seen:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconnect did not reach server")
+	}
+	if first != "token-one" || second != "token-two" {
+		t.Fatalf("tokens across dials = %q, %q", first, second)
+	}
+	select {
+	case <-errCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dialer did not stop")
+	}
+}

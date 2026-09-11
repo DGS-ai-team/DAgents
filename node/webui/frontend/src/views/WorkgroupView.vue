@@ -23,6 +23,7 @@ import { markWorkgroupRead, noteWorkgroupTimeline } from "../stores/unread.js";
 
 const route = useRoute();
 const router = useRouter();
+const mobileNavOpen = ref(false);
 const panelRef = ref(null);
 
 const workgroupId = computed(() => String(route.params.workgroupId || "").trim());
@@ -769,6 +770,14 @@ async function loadWorkgroupAccess() {
   }
 }
 
+async function openCreateWorkgroupFromEmpty() {
+  // The rail is collapsed on narrow screens; expose it before opening its
+  // existing create popover so the action remains visible to the user.
+  mobileNavOpen.value = true;
+  await nextTick();
+  panelRef.value?.openCreateWg?.();
+}
+
 async function sendQueuedNow(item) {
   const qid = String(item?.queue_id || "").trim();
   if (!workgroupId.value || !qid) return;
@@ -1337,10 +1346,13 @@ onUnmounted(() => {
 
 <template>
   <div class="app__body app__body--chat-v61">
-    <aside class="app__col app__col--agents">
+    <button type="button" class="mobile-agent-nav-toggle" :aria-expanded="mobileNavOpen ? 'true' : 'false'" @click="mobileNavOpen = !mobileNavOpen">
+      {{ mobileNavOpen ? "收起导航" : "选择 Agent / 工作组" }}
+    </button>
+    <aside class="app__col app__col--agents" :class="{ 'app__col--agents-mobile-open': mobileNavOpen }">
       <NavRail
         ref="panelRef"
-        :realtime-status="workgroupRealtimeStatus"
+        :realtime-status="workgroupId ? workgroupRealtimeStatus : 'unselected'"
         @switch="(id) => router.push({ name: 'agents', params: { agentId: id } })"
         @create="router.push({ name: 'agents', query: { createAgent: '1' } })"
         @delete="onRailDeleteAgent"
@@ -1352,7 +1364,10 @@ onUnmounted(() => {
       <div v-if="error" class="chat-error-banner">{{ error }}</div>
       <div v-else-if="notice" class="chat-notice-banner">{{ notice }}</div>
       <div v-if="!workgroupId" class="chat-empty-agent">
-        <p>选择左侧已订阅工作组，或点击 + 新建。</p>
+        <p>选择左侧已订阅工作组，或创建一个新的工作组。</p>
+        <button type="button" class="btn btn--primary" @click="openCreateWorkgroupFromEmpty">
+          + 新建工作组
+        </button>
         <button type="button" class="wg-chat__link" @click="router.push({ name: 'agents' })">
           返回智能体
         </button>

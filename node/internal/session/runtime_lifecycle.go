@@ -56,6 +56,17 @@ func (r *runtime) lifecycleDispatchLockedErr(command turn.TurnCommand) (turn.Coo
 		}
 		return snapshot, err
 	}
+	if r.onLifecycle != nil {
+		if err := r.onLifecycle(r.session.ID, snapshot); err != nil {
+			if r.logger != nil {
+				r.logger.Warn("turn lifecycle observer failed", "session_id", r.session.ID, "turn_id", snapshot.TurnID, "error", err)
+			}
+			// The observer is the Goal runtime's durable Run binding and
+			// settlement boundary. Continuing execution after it fails can
+			// spend model/tool budget without a persisted Run projection.
+			return snapshot, fmt.Errorf("turn lifecycle observer failed: %w", err)
+		}
+	}
 	if command.Type == turn.CommandAssistantReceived && command.HasTools && snapshot.ToolBatchID != "" {
 		// AssistantReceived creates the batch atomically in the projection;
 		// persist the explicit batch fact as a separate replay/audit marker.
@@ -351,6 +362,7 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 		"interaction_revision":   command.InteractionRevision,
 		"request_digest":         command.RequestDigest,
 		"assistant_message_id":   command.AssistantMessageID,
+		"assistant_message":      command.AssistantMessage,
 		"arguments_json":         lifecycleArgumentsJSON(command.Arguments),
 		"runtime_revision":       command.RuntimeRevision,
 		"runtime_digest":         command.RuntimeDigest,
@@ -374,6 +386,7 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 		"step_index":             snapshot.StepIndex,
 		"context_epoch":          snapshot.ContextEpoch,
 		"recovery_required":      snapshot.RecoveryRequired,
+		"input_message":          r.lifecycleInputMessage(eventType),
 	})
 	if err != nil {
 		return err
@@ -396,7 +409,18 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 	event.CommandID = command.CommandID
 	event.Payload = payload
 	event.PayloadRef = command.PayloadRef
-	stored, err := r.store.AppendTurnEvent(context.Background(), event)
+	var stored turn.TurnEventEnvelope
+	if eventType == turn.EventTurnCompleted {
+		if rebuilt, rebuildErr := r.store.RebuildTurnMessages(context.Background(), event.SessionID, event.TurnID); rebuildErr == nil && len(rebuilt) > 0 {
+			stored, err = r.store.AppendTurnEventWithSnapshot(context.Background(), event, rebuilt)
+		} else {
+			// Preserve the business completion event when maintenance input is
+			// unavailable; no readable snapshot/cursor is created.
+			stored, err = r.store.AppendTurnEventWithSnapshot(context.Background(), event, nil)
+		}
+	} else {
+		stored, err = r.store.AppendTurnEvent(context.Background(), event)
+	}
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Warn("persist turn lifecycle event failed", "session_id", r.session.ID, "event_type", eventType, "command_id", command.CommandID, "error", err)
@@ -405,6 +429,18 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 	}
 	r.setLifecycleEventSequence(stored.SessionSeq)
 	return nil
+}
+
+func (r *runtime) lifecycleInputMessage(eventType turn.EventType) any {
+	if eventType != turn.EventTurnStarted || r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pendingInputMessage == nil {
+		return nil
+	}
+	return r.pendingInputMessage
 }
 
 // recordSideEffectFact is the lifecycle boundary for async tool results that
@@ -495,16 +531,18 @@ func (r *runtime) lifecycleHistoryLength() int {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.messages)
+	start := r.activeContextStart
+	if start < 0 || start > len(r.messages) {
+		start = len(r.messages)
+	}
+	return len(r.messages) - start
 }
 
 func (r *runtime) lifecycleHistorySnapshot() []llm.Message {
 	if r == nil {
 		return nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]llm.Message(nil), r.messages...)
+	return r.activeMessagesSnapshot()
 }
 
 // pendingSnapshot is the API projection of the Coordinator's durable
@@ -591,6 +629,73 @@ func (r *runtime) lifecycleBeginHumanTurn() error {
 	return r.lifecycleBeginInputTurn(turn.TurnSourceHuman)
 }
 
+// ConditionApprovalRequest describes a durable, no-model condition approval.
+// The trigger owns delivery/revision validation; the runtime owns the normal
+// HITL lifecycle and Agent-bound tool execution.
+type ConditionApprovalRequest struct {
+	Metadata turn.ConditionApprovalMetadata
+	Command  string
+}
+
+func (r *runtime) requestConditionApproval(req ConditionApprovalRequest) error {
+	if r == nil || r.orch == nil {
+		return fmt.Errorf("condition approval runtime unavailable")
+	}
+	if req.Metadata.AgentID != "" && req.Metadata.AgentID != r.agentID {
+		return fmt.Errorf("condition approval agent mismatch")
+	}
+	if req.Metadata.SessionID != "" && req.Metadata.SessionID != r.session.ID {
+		return fmt.Errorf("condition approval session mismatch")
+	}
+	pending := turn.BuildConditionApprovalPending(req.Metadata, req.Command)
+	payload, err := json.Marshal(pending)
+	if err != nil {
+		return fmt.Errorf("marshal condition approval: %w", err)
+	}
+	r.lifecycleMu.Lock()
+	if err := r.lifecycleBeginInputTurnLocked(turn.TurnSourceSideEffect); err != nil {
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	state := r.turnCoordinator.Snapshot()
+	item := pending.Items[0]
+	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+		Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, HasTools: true,
+		ToolBatchID: state.StepID + "-condition-batch", AssistantMessageID: item.ToolCall.ID + "-assistant",
+		At: time.Now().UTC(), Reason: "condition_approval",
+	}); err != nil {
+		r.lifecycleCancelLocked()
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	state = r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+		Type: turn.CommandToolCallRecorded, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, ToolCallID: item.ToolCall.ID,
+		ToolExecutionID: item.ToolCall.ID + "-execution", ToolName: item.ToolCall.Function.Name,
+		Arguments: json.RawMessage(item.ToolCall.Function.Arguments), At: time.Now().UTC(),
+	}); err != nil {
+		r.lifecycleCancelLocked()
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	state = r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
+		Type: turn.CommandInteractionRequested, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, InteractionID: state.InteractionID,
+		InteractionKind: "approval", ToolExecutionID: item.ToolCall.ID + "-execution", Payload: payload,
+		At: time.Now().UTC(), Reason: "condition_approval",
+	}); err != nil {
+		r.lifecycleCancelLocked()
+		r.lifecycleMu.Unlock()
+		return err
+	}
+	r.lifecycleMu.Unlock()
+	r.orch.PublishPendingHITL(r.session.ID, pending)
+	return nil
+}
+
 func (r *runtime) lifecycleBeginInputTurn(source turn.TurnSource) error {
 	if r == nil || r.turnCoordinator == nil {
 		return fmt.Errorf("turn coordinator is unavailable")
@@ -610,6 +715,25 @@ func (r *runtime) lifecycleBeginInputTurnLocked(source turn.TurnSource) error {
 	}
 
 	turnID := newContinuationID()
+	if r.budgetResolver != nil {
+		budget, err := r.budgetResolver()
+		if err != nil {
+			return fmt.Errorf("refresh turn budget: %w", err)
+		}
+		r.turnBudget = budget
+	}
+	// Only a provider-validated activation receives the Agent-owned tool-round
+	// budget. It deliberately replaces the legacy Auto step/call/token limits;
+	// those limits must not leak into the new activation. Untrusted triggers
+	// and human turns retain the resolver's ordinary budget.
+	if source == turn.TurnSourceTrigger && r.triggerMaxToolRounds > 0 {
+		r.turnBudget = turn.TurnBudget{
+			MaxToolRounds:       r.triggerMaxToolRounds,
+			ReserveFinalSummary: true,
+		}
+	} else if source == turn.TurnSourceTrigger {
+		r.turnBudget.MaxToolRounds = 0
+	}
 
 	now := time.Now().UTC()
 	if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
@@ -661,6 +785,13 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 			return false, fmt.Errorf("cannot continue without an active turn")
 		}
 		identity, generation = r.lifecycleEnsureIdentity()
+		if r.budgetResolver != nil {
+			budget, err := r.budgetResolver()
+			if err != nil {
+				return false, fmt.Errorf("refresh turn budget: %w", err)
+			}
+			r.turnBudget = budget
+		}
 		now := time.Now().UTC()
 		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
 			Type:       turn.CommandStartTurn,
@@ -722,7 +853,7 @@ func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (
 	}
 	decision := r.turnCoordinator.BudgetDecisionFor(turn.CommandStartStep)
 	if !decision.Allowed {
-		if decision.Reason == "max_steps" || decision.Reason == "max_tool_calls" {
+		if decision.Reason == "max_steps" || decision.Reason == "max_tool_calls" || decision.Reason == "max_tool_rounds" {
 			summaryCommand := turn.TurnCommand{
 				Type: turn.CommandStartStep, SessionID: r.session.ID, TurnID: identity,
 				StepID: lifecycleStepID(identity, state.StepIndex+1), Generation: generation,
@@ -966,7 +1097,11 @@ func (r *runtime) restoreActiveToolCallMessage(calls []llm.ToolCall) {
 		return
 	}
 	r.mu.Lock()
-	r.messages = reordered
+	currentStart := r.activeContextStart
+	if currentStart < 0 || currentStart > len(r.messages) {
+		currentStart = len(r.messages)
+	}
+	r.messages = append(append([]llm.Message(nil), r.messages[:currentStart]...), reordered...)
 	r.historyRevision++
 	r.mu.Unlock()
 	r.persist(context.Background())
@@ -1098,6 +1233,7 @@ func (r *runtime) lifecycleRecordToolFactsMode(history []llm.Message, historySta
 				ToolExecutionID: executionID,
 				ExecutionStatus: status,
 				ErrorKind:       errorKind,
+				ResultContent:   result.Content,
 				At:              now,
 			}); err != nil {
 				return fmt.Errorf("record tool execution result fact: %w", err)
@@ -1111,6 +1247,7 @@ func (r *runtime) lifecycleRecordToolFactsMode(history []llm.Message, historySta
 			Generation:      r.turnCoordinator.Snapshot().Generation,
 			ToolCallID:      call.ID,
 			ToolExecutionID: executionID,
+			ResultContent:   result.Content,
 			At:              now,
 		}); err != nil {
 			return fmt.Errorf("record tool result fact: %w", err)
@@ -1283,6 +1420,28 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 		r.orch.PublishPendingHITL(r.session.ID, outcome.Pending)
 		return nil
 	}
+	if outcome.NoWork {
+		return r.withCommittedHistoryLocked(history, func() error {
+			state := r.turnCoordinator.Snapshot()
+			if state.StepStatus == turn.StepStatusExecutingTools {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolBatchSettled, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: "auto_idle"}); err != nil {
+					return fmt.Errorf("settle auto_idle tool batch: %w", err)
+				}
+			}
+			state = r.turnCoordinator.Snapshot()
+			if !state.StepStatus.Terminal() {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: "auto_idle"}); err != nil {
+					return fmt.Errorf("complete auto_idle step: %w", err)
+				}
+			}
+			if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteTurn, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: "auto_idle"}); err != nil {
+					return fmt.Errorf("complete auto_idle turn: %w", err)
+				}
+			}
+			return nil
+		})
+	}
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		// Tool calls have only been proposed/accepted at this point. The Step
 		// remains executing_tools until the inline continuation or a completed HITL
@@ -1329,6 +1488,9 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 		return err
 	}
 	now := time.Now().UTC()
+	if outcome.ConditionHandled {
+		return r.lifecycleAfterCondition(outcome, history, now)
+	}
 	assistant, hasAssistant := lastAssistantMessage(history, 0)
 	if hasAssistant && len(assistant.ToolCalls) > 0 {
 		if err := r.lifecycleRecordToolFacts(history, 0, assistant.ToolCalls); err != nil {
@@ -1432,6 +1594,40 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 			return fmt.Errorf("complete resumed turn lifecycle: %w", err)
 		}
 		return nil
+	})
+}
+
+func (r *runtime) lifecycleAfterCondition(outcome turn.StepOutcome, history []llm.Message, now time.Time) error {
+	return r.withCommittedHistoryLocked(history, func() error {
+		state := r.turnCoordinator.Snapshot()
+		status := turn.ToolExecutionStatusSucceeded
+		errorKind := ""
+		if !outcome.ConditionMatched || outcome.Err != nil {
+			status = turn.ToolExecutionStatusFailed
+			if outcome.Err != nil {
+				errorKind = "condition_execution_failed"
+			} else {
+				errorKind = "condition_rejected_or_false"
+			}
+		}
+		commandType := turn.CommandToolExecutionCompleted
+		if status != turn.ToolExecutionStatusSucceeded {
+			commandType = turn.CommandToolExecutionFailed
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: commandType, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, ToolCallID: outcome.ConditionToolCallID, ToolExecutionID: outcome.ConditionExecutionID, ExecutionStatus: status, ErrorKind: errorKind, ResultContent: outcome.ConditionResult, At: now}); err != nil {
+			return err
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolResultRecorded, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, ToolCallID: outcome.ConditionToolCallID, ToolExecutionID: outcome.ConditionExecutionID, ResultContent: outcome.ConditionResult, At: now}); err != nil {
+			return err
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandToolBatchSettled, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, At: now}); err != nil {
+			return err
+		}
+		if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteStep, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, At: now, Reason: "condition_completed"}); err != nil {
+			return err
+		}
+		_, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandCompleteTurn, SessionID: r.session.ID, TurnID: state.TurnID, Generation: state.Generation, At: now, Reason: "condition_completed"})
+		return err
 	})
 }
 

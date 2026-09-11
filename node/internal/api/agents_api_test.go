@@ -32,6 +32,11 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	// NewServer starts the trigger scheduler. This fixture swaps in its own
+	// AgentStore, so stop the scheduler before replacing the field it reads.
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 
@@ -170,6 +175,9 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	defer agentsDB.Close()
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerSched != nil {
+		srv.triggerSched.Stop()
+	}
 	t.Cleanup(func() { srv.sessions.Stop() })
 	srv.agents = agentsDB
 

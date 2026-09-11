@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
 // CommandType is the internal command vocabulary used by the TurnCoordinator.
@@ -76,6 +78,7 @@ type TurnCommand struct {
 	InteractionRevision  int64
 	RequestDigest        string
 	AssistantMessageID   string
+	AssistantMessage     *llm.Message
 	RuntimeRevision      int64
 	RuntimeDigest        string
 	PromptDigest         string
@@ -115,6 +118,7 @@ type CoordinatorSnapshot struct {
 	InteractionKind    string
 	InteractionPayload json.RawMessage
 	ModelAttempt       int
+	ModelUsageKnown    bool
 	RuntimeRevision    int64
 	RuntimeDigest      string
 	PromptDigest       string
@@ -767,6 +771,9 @@ func (c *TurnCoordinator) startStepLocked(command TurnCommand) error {
 	c.executions = make(map[string]*ToolExecution)
 	c.toolResults = make(map[string]bool)
 	c.interaction = nil
+	if c.turn.ModelUsagePending {
+		c.turn.ModelUsageMissing = true
+	}
 	c.attempts = nil
 	return c.step.Advance(EventStepStarted, command.At, command.Reason)
 }
@@ -848,6 +855,19 @@ func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
 	if c.step == nil {
 		return fmt.Errorf("assistant response requires an active step")
 	}
+	if command.HasTools && c.batch != nil {
+		batchID := strings.TrimSpace(command.ToolBatchID)
+		if batchID == "" {
+			batchID = c.step.ID + "-batch"
+		}
+		// Replayed assistant events arrive after the step has already entered
+		// tool execution, so they must be handled before advancing the state
+		// machine a second time.
+		if c.batch.ID != batchID {
+			return fmt.Errorf("tool batch already exists for step %s", c.step.ID)
+		}
+		return nil
+	}
 	if err := c.step.Advance(EventAssistantMessageRecorded, command.At, command.Reason); err != nil {
 		return err
 	}
@@ -859,6 +879,7 @@ func (c *TurnCoordinator) recordAssistantLocked(command TurnCommand) error {
 		if batchID == "" {
 			batchID = c.step.ID + "-batch"
 		}
+		c.turn.Usage.ToolRounds++
 		c.batch = &ToolBatch{ID: batchID, StepID: c.step.ID, Status: "created"}
 		c.step.ToolBatchID = batchID
 		return c.step.Advance(EventToolBatchCreated, command.At, command.Reason)
@@ -877,13 +898,19 @@ func (c *TurnCoordinator) startModelAttemptLocked(command TurnCommand) error {
 		}
 	}
 	attemptNumber := len(c.attempts) + 1
+	if c.turn.ModelUsagePending {
+		c.turn.ModelUsageMissing = true
+	}
 	attemptBase := strings.TrimSpace(command.RequestDigest)
 	if attemptBase == "" {
 		attemptBase = c.step.ID
 	}
 	attemptID := fmt.Sprintf("%s-attempt-%d", attemptBase, attemptNumber)
-	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
+	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, TurnID: c.turn.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
 	c.attempts = append(c.attempts, attempt)
+	c.turn.ModelUsagePending = true
+	// A provider callback records the attempt; a completed attempt without a
+	// callback is finalized below when the next step starts or the turn ends.
 	c.step.RequestAttempt = attemptNumber
 	c.step.ModelRequestID = attemptID
 	return c.step.Advance(EventModelRequestStarted, command.At, command.Reason)
@@ -909,6 +936,8 @@ func (c *TurnCoordinator) recordModelUsageLocked(command TurnCommand) error {
 		return fmt.Errorf("model usage requires a model attempt")
 	}
 	last := &c.attempts[len(c.attempts)-1]
+	last.UsageRecorded = true
+	c.turn.ModelUsagePending = false
 	delta := usageDelta(command.Usage, last.Usage)
 	last.Usage = command.Usage
 	c.step.Usage.InputTokens += delta.InputTokens
@@ -1315,6 +1344,7 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 	}
 	if len(c.attempts) > 0 {
 		result.ModelAttempt = c.attempts[len(c.attempts)-1].Attempt
+		result.ModelUsageKnown = !c.turn.ModelUsageMissing && !c.turn.ModelUsagePending
 	}
 	if c.step != nil && c.step.Status == StepStatusExecutingTools {
 		if c.recoveryRequired {
@@ -1368,6 +1398,11 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		decision.Reason = "max_output_tokens"
 		return decision
 	}
+	if c.turn.Budget.MaxTotalTokens > 0 && c.turn.Usage.TotalTokens >= c.turn.Budget.MaxTotalTokens {
+		decision.Allowed = false
+		decision.Reason = "max_total_tokens"
+		return decision
+	}
 	if c.turn.Budget.MaxCost > 0 && c.turn.Usage.Cost >= c.turn.Budget.MaxCost {
 		decision.Allowed = false
 		decision.Reason = "max_cost"
@@ -1386,6 +1421,9 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		} else if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls >= c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
+		} else if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds >= c.turn.Budget.MaxToolRounds && !command.FinalSummary {
+			decision.Allowed = false
+			decision.Reason = "max_tool_rounds"
 		}
 	case CommandToolCallRecorded:
 		// ToolCall facts are emitted before this preflight reaches the actual
@@ -1393,6 +1431,10 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 		if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls > c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
+		}
+		if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds > c.turn.Budget.MaxToolRounds {
+			decision.Allowed = false
+			decision.Reason = "max_tool_rounds"
 		}
 	case CommandToolExecutionRetrying:
 		if c.turn.Budget.MaxToolRetries > 0 && c.turn.Usage.ToolRetries >= c.turn.Budget.MaxToolRetries {

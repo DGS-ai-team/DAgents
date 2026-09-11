@@ -3,6 +3,7 @@ import {
   formatPolicyMode,
   formatTriggerCondition,
   formatUnixTime,
+  triggerFireStatusMessage,
 } from "./panelFormat.js";
 
 describe("panelFormat", () => {
@@ -20,5 +21,11 @@ describe("panelFormat", () => {
     const out = formatUnixTime(1700000000);
     expect(out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(formatUnixTime(0)).toBe("—");
+  });
+
+  it("keeps fire status semantics explicit", () => {
+    expect(triggerFireStatusMessage({ status: "queued" }, "日报")).toContain("已排队");
+    expect(triggerFireStatusMessage({ status: "skipped", reason: "busy" }, "日报")).toContain("已跳过");
+    expect(triggerFireStatusMessage({ status: "error", message: "拒绝" }, "日报")).toContain("投递失败");
   });
 });

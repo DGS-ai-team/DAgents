@@ -12,7 +12,14 @@ type RuntimeState struct {
 	// HistoryRevision monotonically identifies the committed message snapshot.
 	// It is independent from the SSE Hub sequence and the Turn lifecycle
 	// sequence, so hydrate callers can reject an older transcript projection.
-	HistoryRevision         uint64                     `json:"history_revision,omitempty"`
+	HistoryRevision uint64 `json:"history_revision,omitempty"`
+	// ActiveContextStart is the index in the durable transcript from which
+	// future model requests may build context. Older messages remain queryable.
+	ActiveContextStart int `json:"active_context_start,omitempty"`
+	// LastContextResetID makes a dreaming/context-boundary commit idempotent;
+	// retries must not hide messages appended after the original reset.
+	LastContextResetID      string                     `json:"last_context_reset_id,omitempty"`
+	DreamingAttempt         json.RawMessage            `json:"dreaming_attempt,omitempty"`
 	HookStore               map[string]json.RawMessage `json:"hook_store,omitempty"`
 	IdleAutoCompressApplied bool                       `json:"idle_auto_compress_applied,omitempty"`
 	// NotifySeq 为最后需要 Client 关注的 SSE seq（F-E13 IM cursor）。

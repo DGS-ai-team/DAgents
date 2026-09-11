@@ -8,7 +8,10 @@ import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
 import AgentCreatePage from "../components/AgentCreatePage.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
+import AutoBadge from "../components/AutoBadge.vue";
+import AutoTodoPanel from "../components/AutoTodoPanel.vue";
 const TerminalWorkbench = defineAsyncComponent(() => import("../components/TerminalWorkbench.vue"));
+const mobileNavOpen = ref(false);
 import {
   agentStore,
   persistAgentId,
@@ -136,11 +139,14 @@ const turnWatchdog = createTurnWatchdog({
 });
 
 const entries = computed(() => transcriptStore.entries);
+const conversationId = computed(() => agentStore.agentId);
+async function ensureConversation() { return await ensureAgent(); }
 const hitlKind = computed(() => peekHitl()?.kind || "");
 const hasUserInfoHitl = computed(() => hitlKind.value === "user_information");
 const canSend = computed(() => {
   if (hitlStore.busy) return false;
   if (hasUserInfoHitl.value) return true;
+
   if (hitlKind.value) return false;
   return !isTurnProcessing();
 });
@@ -193,18 +199,24 @@ function syncReasoningDisplay(_llm) {
 
 function restartStream() {
   streamHandle.value?.close();
-  if (!agentStore.agentId) {
+  if (!conversationId.value) {
     streamHandle.value = null;
     return;
   }
+  // Keep the stream bound to the Agent conversation that created it so an
+  // obsolete KeepAlive stream cannot repaint a newly selected Agent.
+  const streamConversationId = conversationId.value;
   streamHandle.value = connectStream({
-    getAgentId: () => agentStore.agentId,
+    getAgentId: () => streamConversationId,
     getAfterSeq: () => transcriptStore.lastSeq,
     getAfterAgentSeq: () => transcriptStore.lastAgentSeq,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
-    onEvent: handleEvent,
+    onEvent: (ev) => {
+      if (conversationId.value !== streamConversationId) return;
+      handleEvent(ev);
+    },
     onReconnect: () => {
       terminalRevision.value += 1;
       void resyncAfterSSEGap("reconnect");
@@ -240,7 +252,7 @@ async function resyncAfterSSEGap(reason) {
 }
 
 async function activateAgentStream() {
-  if (!agentStore.agentId) {
+  if (!conversationId.value) {
     clearTranscript();
     clearHitl();
     resetTurnState();
@@ -249,10 +261,10 @@ async function activateAgentStream() {
     chromeStore.sseStatus = "idle";
     return;
   }
-  const prev = agentStore.agentId;
+  const prev = conversationId.value;
   const data = await hydrateAgent();
   if (data === null) return;
-  if (agentStore.agentId !== prev || !streamHandle.value) {
+  if (conversationId.value !== prev || !streamHandle.value) {
     restartStream();
   }
   await syncChildAgentsFromApi();
@@ -313,7 +325,7 @@ async function refreshMeta() {
 async function refreshContextTokens() {
   if (!agentStore.agentId) return;
   try {
-    const ctx = await api.getAgentContext(agentStore.agentId);
+    const ctx = await api.getAgentContext(conversationId.value);
     chromeStore.contextTokens = Number(ctx.messages_total_tokens ?? -1);
   } catch {
     /* keep last */
@@ -448,6 +460,9 @@ function handleEvent(ev) {
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
       refreshContextTokens();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("dagents:agent-turn-finished", { detail: { agentId: conversationId.value } }));
+      }
       break;
     case "resync_required":
       void resyncAfterSSEGap("server-resync");
@@ -555,7 +570,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
   hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalResume(item.data, { approveAll });
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
@@ -579,7 +594,7 @@ async function submitHitlOne(payload, approve) {
   hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalOneResume(item.data, callId, approve);
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
@@ -601,7 +616,7 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
   hitlStore.busyIndex = hitlIndex;
   const resume = buildMemoryConflictResume(item.data, decision, { cancelled });
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
@@ -635,7 +650,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
   hitlStore.busy = true;
   hitlStore.busyIndex = hitlIndex;
   try {
-    await api.submitResume(agentStore.agentId, resume);
+    await api.submitResume(conversationId.value, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
@@ -684,7 +699,7 @@ async function onSendMessage(payload) {
   beginSubmit();
   turnWatchdog.noteActivity();
   try {
-    await api.submitMessage(agentStore.agentId, text, contentParts, fileRefs);
+    await api.submitMessage(conversationId.value, text, contentParts, fileRefs);
     markSubmissionAccepted();
   } catch (e) {
     failTurnSubmission();
@@ -701,7 +716,7 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.action === "clear") {
-    await api.clearContext(await ensureAgent());
+    await api.clearContext(await ensureConversation());
     // clearContext is a durable boundary. Remove the old local projection
     // before hydrate so the dirty-history guard cannot preserve pre-clear
     // messages when the response races with the clear acknowledgement.
@@ -723,7 +738,7 @@ async function handleCommand(cmd) {
   if (res.action === "compress") {
     startStatus("compression");
     try {
-      const out = await api.compressContext(await ensureAgent());
+      const out = await api.compressContext(await ensureConversation());
       if (out.status && out.status !== "applied" && out.status !== "done") {
         addSystem(`压缩: ${out.status}`);
       }
@@ -1058,12 +1073,12 @@ async function cancelTurn() {
   // not propagated its interaction phase into turnState yet. The pending HITL
   // item is therefore also a valid cancellation signal; it must never be
   // mistaken for an answer submission.
-  if (!agentStore.agentId || cancelling.value || (!isTurnProcessing() && !hasUserInfoHitl.value)) return;
+  if (!conversationId.value || cancelling.value || (!isTurnProcessing() && !hasUserInfoHitl.value)) return;
   cancelling.value = true;
   beginTurnCancellation();
   agentStore.error = "";
   try {
-    const response = await api.cancelAgentTurn(agentStore.agentId);
+    const response = await api.cancelAgentTurn(conversationId.value);
     let hydrate = null;
     try {
       hydrate = await hydrateAgent();
@@ -1190,6 +1205,33 @@ function clearTerminalSelection() {
 const workspaceView = computed(() => {
   return terminalOpen.value ? "terminal" : "messages";
 });
+const currentAgentIsAuto = computed(() => {
+  const row = agentList.value.find((a) => agentRecordId(a) === agentStore.agentId);
+  return row?.agent_type === "auto";
+});
+const autoConfig = ref(null);
+const autoConfigError = ref(false);
+let autoConfigRequest = 0;
+watch(
+  () => [agentStore.agentId, agentList.value],
+  async ([id]) => {
+    const request = ++autoConfigRequest;
+    autoConfig.value = null;
+    autoConfigError.value = false;
+    const row = agentList.value.find((a) => agentRecordId(a) === id);
+    if (row?.agent_type !== "auto" || !id) return;
+    try {
+      const data = await api.getAutoConfig(id);
+      if (request === autoConfigRequest && agentStore.agentId === id) autoConfig.value = data;
+    } catch {
+      if (request === autoConfigRequest && agentStore.agentId === id) autoConfigError.value = true;
+    }
+  },
+  { immediate: true },
+);
+const currentConversationTitle = computed(() =>
+  currentAgentTitle.value,
+);
 
 function switchWorkspace(view) {
   const next = String(view || "messages");
@@ -1304,10 +1346,13 @@ onUnmounted(() => {
 
 <template>
   <div class="app__body app__body--chat-v61">
-    <aside class="app__col app__col--agents">
+    <button type="button" class="mobile-agent-nav-toggle" :aria-expanded="mobileNavOpen ? 'true' : 'false'" @click="mobileNavOpen = !mobileNavOpen">
+      {{ mobileNavOpen ? "收起 Agent 列表" : "选择 Agent" }}
+    </button>
+    <aside class="app__col app__col--agents" :class="{ 'app__col--agents-mobile-open': mobileNavOpen }">
       <NavRail
         ref="agentPanelRef"
-        @switch="switchAgent"
+        @switch="(id) => { mobileNavOpen = false; switchAgent(id); }"
         @create="openCreateWizard()"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
@@ -1352,6 +1397,8 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="chat-workspace">
+          <div v-if="currentAgentIsAuto" class="chat-auto-banner" role="status"><AutoBadge :agent="{ agent_type: 'auto' }" /> <span>{{ autoConfigError ? 'Auto 配置不可用' : (!autoConfig ? '加载中…' : (autoConfig.wake_interval_seconds > 0 ? `每 ${Math.max(1, Math.round(autoConfig.wake_interval_seconds / 60))} 分钟自动检查` : '自主激活关闭')) }}</span> <router-link :to="{ name: 'settings-agent-detail', params: { agentId: agentStore.agentId }, query: { section: 'autonomy' } }">Auto 设置</router-link></div>
+          <AutoTodoPanel v-if="currentAgentIsAuto" :agent-id="agentStore.agentId" />
         <MainChatPanel
           v-show="!terminalOpen"
           ref="chatPanelRef"
@@ -1366,7 +1413,7 @@ onUnmounted(() => {
           :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"
           :llm-settings="chromeStore.llmSettings"
-          :agent-title="currentAgentTitle"
+          :agent-title="currentConversationTitle"
           :agent-id="agentStore.agentId"
           :terminal-refresh-key="terminalRevision"
           :workspace-view="workspaceView"
@@ -1395,7 +1442,7 @@ onUnmounted(() => {
           :hitl-queue="hitlStore.queue"
           :tool-verbose="transcriptStore.toolFoldVerbose"
           :agent-disabled="!canSend && !sending"
-          :agent-input-disabled="!agentStore.agentId || hitlStore.busy || cancelling"
+          :agent-input-disabled="!conversationId || hitlStore.busy || cancelling"
           :sending="sending"
           :cancelling="cancelling"
           :error="agentStore.error"
@@ -1403,7 +1450,7 @@ onUnmounted(() => {
           :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"
           :llm-settings="chromeStore.llmSettings"
-          :agent-title="currentAgentTitle"
+          :agent-title="currentConversationTitle"
           @close="closeTerminal"
           @terminal-selected="selectTerminal"
           @terminal-cleared="clearTerminalSelection"
@@ -1463,3 +1510,6 @@ onUnmounted(() => {
 .chat-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-workspace > :deep(.main-chat-panel) { min-height: 0; }
 </style>
+
+
+

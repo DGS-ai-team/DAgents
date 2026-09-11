@@ -334,17 +334,17 @@ watch(
             </label>
           </div>
 
-          <label v-if="draft.has_api_key" class="settings-toggle">
+          <label v-if="draft.has_api_key" class="settings-toggle llm-profile-modal__toggle-row">
             <input v-model="draft.clear_api_key" type="checkbox" />
             <span>清除已保存的 API Key</span>
           </label>
 
-          <div class="setup-config-panel__toggles setup-config-panel__toggles--row">
-            <label class="settings-toggle">
+          <div class="setup-config-panel__toggles llm-profile-modal__toggles">
+            <label class="settings-toggle llm-profile-modal__toggle-row">
               <input v-model="draft.mock" type="checkbox" />
               <span>Mock 模式</span>
             </label>
-            <label class="settings-toggle">
+            <label class="settings-toggle llm-profile-modal__toggle-row">
               <input v-model="draft.multimodal_enabled" type="checkbox" />
               <span>多模态 / Vision</span>
             </label>
@@ -447,9 +447,30 @@ watch(
 }
 
 .llm-profile-modal__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.llm-profile-modal__grid .settings-field {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 14px;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  align-items: center;
+  gap: 20px;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.llm-profile-modal__grid .settings-field__input {
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .llm-profile-modal__grid .settings-field {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 
 .llm-profile-modal__span {
@@ -483,6 +504,28 @@ watch(
   font-size: 12px;
   cursor: pointer;
   text-align: left;
+}
+
+.llm-profile-modal__toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.llm-profile-modal__toggle-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 42px;
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.llm-profile-modal__toggle-row input {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .settings-field__hint {

@@ -166,6 +166,7 @@ describe("hydrateAgent lifecycle", () => {
     expect(transcriptStore.entries[0].text).toBe("local answer");
     expect(transcriptStore.historyDirty).toBe(true);
   });
+
 });
 
 function enqueueStaleApprovalForHydrateTest() {

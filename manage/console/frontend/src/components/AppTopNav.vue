@@ -34,6 +34,8 @@ const adminModules = [
   { id: "agents", label: "Agent 列表", hint: "可加入工作组的运行时 Agent" },
   { id: "permissions", label: "发现组", hint: "Node 可见性分组" },
   { id: "settings", label: "配置", hint: "LLM 与发布" },
+  { id: "feedback", label: "用户反馈", hint: "查看、处理与回复" },
+  { id: "auto", label: "Auto 员工", hint: "只读岗位状态与摘要" },
 ];
 
 const adminActive = computed(() =>

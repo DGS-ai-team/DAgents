@@ -121,11 +121,13 @@ const (
 // TurnBudget contains the sole hard execution limits for one logical Turn.
 type TurnBudget struct {
 	MaxSteps            int           `json:"max_steps"`
+	MaxToolRounds       int           `json:"max_tool_rounds"`
 	MaxToolCalls        int           `json:"max_tool_calls"`
 	MaxToolRetries      int           `json:"max_tool_retries"`
 	MaxWallTime         time.Duration `json:"max_wall_time_ns"`
 	MaxInputTokens      int           `json:"max_input_tokens"`
 	MaxOutputTokens     int           `json:"max_output_tokens"`
+	MaxTotalTokens      int           `json:"max_total_tokens"`
 	MaxCost             float64       `json:"max_cost"`
 	ReserveFinalSummary bool          `json:"reserve_final_summary"`
 }
@@ -149,6 +151,7 @@ type StepUsage struct {
 // provider events.
 type TurnUsage struct {
 	Steps                      int     `json:"steps"`
+	ToolRounds                 int     `json:"tool_rounds"`
 	ToolCalls                  int     `json:"tool_calls"`
 	ToolRetries                int     `json:"tool_retries"`
 	InputTokens                int     `json:"input_tokens"`
@@ -180,10 +183,12 @@ type Turn struct {
 	// ContextEpoch identifies the model-visible context segment. It advances
 	// when a new ModelContextSnapshot is accepted, not when compaction merely
 	// rewrites durable history before that segment is rebuilt.
-	ContextEpoch    int
-	ContextSnapshot *ModelContextSnapshot
-	Budget          TurnBudget
-	Usage           TurnUsage
+	ContextEpoch      int
+	ContextSnapshot   *ModelContextSnapshot
+	Budget            TurnBudget
+	Usage             TurnUsage
+	ModelUsageMissing bool
+	ModelUsagePending bool
 
 	StartedAt  time.Time
 	FinishedAt *time.Time
@@ -266,11 +271,13 @@ type PendingInteraction struct {
 type ModelAttempt struct {
 	ID            string
 	StepID        string
+	TurnID        string
 	Attempt       int
 	RequestDigest string
 	Status        ModelAttemptStatus
 	ErrorKind     string
 	Usage         StepUsage
+	UsageRecorded bool
 	StartedAt     time.Time
 	FinishedAt    *time.Time
 }

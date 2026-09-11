@@ -30,6 +30,7 @@ func TestScreenAPI_Status(t *testing.T) {
 		ConfigSnapshot: json.RawMessage(`{}`),
 	})
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/agents/agt-1/screen/status", nil)
@@ -58,6 +59,7 @@ func TestScreenAPI_StreamUnavailableOrFrames(t *testing.T) {
 		ConfigSnapshot: json.RawMessage(`{}`),
 	})
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.triggerSched.Stop()
 	srv.agents = agentsDB
 
 	st := screen.DetectStatus()

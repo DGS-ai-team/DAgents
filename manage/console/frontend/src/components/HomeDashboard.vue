@@ -6,6 +6,8 @@ import brandIcon from "@dagents-brand/brand-icon.png";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
+  nodeNoGroups: { type: Boolean, default: false },
+  nodeDiscoveryGroup: { type: String, default: "" },
 });
 
 const emit = defineEmits(["navigate", "toast", "refreshed"]);
@@ -50,13 +52,21 @@ async function loadDashboard() {
   try {
     const [health, agentPage, wgs] = await Promise.all([
       fetchHealth().catch(() => ({ agents: 0 })),
-      fetchAgents({ status: "all", page: 1, page_size: 200 }),
+      props.nodeNoGroups
+        ? Promise.resolve({ agents: [] })
+        : fetchAgents({
+            status: "all",
+            page: 1,
+            page_size: 200,
+            ...(props.nodeDiscoveryGroup ? { discovery_group: props.nodeDiscoveryGroup } : {}),
+          }),
       fetchWorkgroups().catch(() => []),
     ]);
     healthAgents.value = Number(health?.agents || 0);
     agents.value = agentPage?.agents || [];
     workgroups.value = Array.isArray(wgs) ? wgs : [];
     Object.assign(stats, computeStats(agents.value));
+    if (props.nodeNoGroups) error.value = "当前 Node 尚未分配发现分组，暂无可查看的 Agent";
     stats.workgroupsTotal = workgroups.value.length;
     stats.workgroupsActive = workgroups.value.filter((w) => w.status === "active").length;
     emit("refreshed", touchLastRefreshedLabel());

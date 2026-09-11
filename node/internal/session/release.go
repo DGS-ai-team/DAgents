@@ -33,6 +33,9 @@ func (m *Manager) Release(sessionID string) (bool, error) {
 	}
 	delete(m.sessions, sid)
 	m.mu.Unlock()
+	if rt.executionGate != nil {
+		rt.executionGate.unregister(rt)
+	}
 	rt.stop()
 	m.logger.Info("session released from memory", "session_id", sid)
 	if m.OnReleased != nil {

@@ -124,6 +124,37 @@ func TestHubAgentCursorReportsHistoryTruncation(t *testing.T) {
 	}
 }
 
+func TestHubAgentCursorReportsStaleHighWatermarkAfterRestart(t *testing.T) {
+	oldHub := NewHub(16, nil)
+	oldHub.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})
+
+	// A fresh Hub represents a restarted Node: its epoch and Agent cursor are
+	// new, while the browser still reconnects with the previous cursor.
+	newHub := NewHub(16, nil)
+	sub := newHub.SubscribeAgentCursor(0, 1, "agt-a")
+	defer newHub.Unsubscribe(sub.Events)
+	if !sub.ResyncRequired {
+		t.Fatalf("expected resync for stale high watermark: %+v", sub)
+	}
+	if sub.CurrentAgentSeq != 0 {
+		t.Fatalf("fresh Hub Agent cursor = %d, want 0", sub.CurrentAgentSeq)
+	}
+	select {
+	case ev := <-sub.Events:
+		t.Fatalf("unexpected replay from fresh Hub: %+v", ev)
+	default:
+	}
+
+	// The same rule applies after the new process has emitted fewer events
+	// than the old cursor; otherwise those events would remain invisible.
+	newHub.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})
+	sub2 := newHub.SubscribeAgentCursor(0, 5, "agt-a")
+	defer newHub.Unsubscribe(sub2.Events)
+	if !sub2.ResyncRequired {
+		t.Fatalf("expected resync for cursor ahead of current: %+v", sub2)
+	}
+}
+
 func TestHubSubscribeLiveSkipsHistory(t *testing.T) {
 	h := NewHub(16, nil)
 	h.Publish("s", "assistant", map[string]any{"content": "old"})

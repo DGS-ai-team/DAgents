@@ -323,57 +323,106 @@ func appendReasoningDetail(full *strings.Builder, detail string) string {
 }
 
 type completeRequestBody struct {
-	Model    string           `json:"model"`
-	Messages []map[string]any `json:"messages"`
+	Model           string           `json:"model"`
+	Messages        []map[string]any `json:"messages"`
+	MaxOutputTokens int              `json:"max_tokens,omitempty"`
 }
 
 type completeResponseBody struct {
 	Choices []struct {
 		Message Message `json:"message"`
 	} `json:"choices"`
+	Usage json.RawMessage `json:"usage"`
 }
 
 // CompleteText 调用非流式 chat/completions（摘要压缩等）。
 func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (string, error) {
+	text, _, err := c.CompleteTextWithUsage(ctx, req)
+	return text, err
+}
+
+// CompleteTextWithUsage calls the non-streaming endpoint and returns provider
+// usage when present. Providers are allowed to omit usage, represented by a
+// nil pointer rather than a fabricated zero-valued Usage.
+func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRequest) (string, *Usage, error) {
+	if req.MaxOutputTokens < 0 {
+		return "", nil, fmt.Errorf("max output tokens cannot be negative")
+	}
 	if strings.TrimSpace(c.cfg.Model) == "" {
-		return "", fmt.Errorf("llm model is not configured")
+		return "", nil, fmt.Errorf("llm model is not configured")
 	}
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return "", fmt.Errorf("llm api key is not configured")
+		return "", nil, fmt.Errorf("llm api key is not configured")
 	}
 	msgs := MessagesWithSystem(req.SystemPrompt, []Message{{Role: "user", Content: req.UserPrompt}})
 	payloads, err := MessagesToAPIPayload(msgs)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads}, c.cfg.RequestExtra)
+	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: payloads, MaxOutputTokens: req.MaxOutputTokens}, c.cfg.RequestExtra)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+	if req.MaxOutputTokens > 0 {
+		body, err = clampCompletionTokenLimit(body, req.MaxOutputTokens)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
+		return "", nil, fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
 	}
 	var parsed completeResponseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", err
+		return "", nil, err
+	}
+	var usage *Usage
+	if usageHasTokenCounts(parsed.Usage) {
+		var decoded Usage
+		if err := json.Unmarshal(parsed.Usage, &decoded); err != nil {
+			return "", nil, err
+		}
+		usage = &decoded
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("empty completion choices")
+		return "", usage, fmt.Errorf("empty completion choices")
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	return strings.TrimSpace(parsed.Choices[0].Message.Content), usage, nil
+}
+
+func usageHasTokenCounts(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil {
+		return false
+	}
+	if validUsageCount(fields["total_tokens"]) {
+		return true
+	}
+	return validUsageCount(fields["prompt_tokens"]) && validUsageCount(fields["completion_tokens"])
+}
+
+func validUsageCount(raw json.RawMessage) bool {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return false
+	}
+	var value int
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	return value >= 0
 }
 
 type toolCallAccumulator struct {
@@ -443,6 +492,26 @@ func marshalChatRequest(body any, extra map[string]any) ([]byte, error) {
 		return nil, err
 	}
 	return mergeRequestExtra(raw, extra)
+}
+
+func clampCompletionTokenLimit(body []byte, limit int) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	if v, ok := payload["max_completion_tokens"].(float64); ok && v >= 0 && int(v) < limit {
+		limit = int(v)
+	}
+	if v, ok := payload["max_tokens"].(float64); ok && v >= 0 && int(v) < limit {
+		limit = int(v)
+	}
+	if _, hasCompletion := payload["max_completion_tokens"]; hasCompletion {
+		payload["max_completion_tokens"] = limit
+		delete(payload, "max_tokens")
+	} else {
+		payload["max_tokens"] = limit
+	}
+	return json.Marshal(payload)
 }
 
 func marshalChatRequestMap(body map[string]any, extra map[string]any) ([]byte, error) {

@@ -11,11 +11,12 @@ import (
 )
 
 type searchReplaceArgs struct {
-	Path       string  `json:"path"`
-	OldString  string  `json:"old_string"`
-	NewString  string  `json:"new_string"`
-	ReplaceAll bool    `json:"replace_all"`
-	Encoding   *string `json:"encoding"`
+	Path           string  `json:"path"`
+	OldString      string  `json:"old_string"`
+	NewString      string  `json:"new_string"`
+	ReplaceAll     bool    `json:"replace_all"`
+	Encoding       *string `json:"encoding"`
+	ExpectedDigest string  `json:"expected_digest,omitempty"`
 }
 
 func searchReplaceToolDef() ToolDef {
@@ -43,7 +44,8 @@ func searchReplaceToolDef() ToolDef {
 						"type":        "boolean",
 						"description": "是否替换全部匹配，默认 false；为 false 时须恰好 1 处匹配",
 					},
-					"encoding": fileEncodingToolProperty(),
+					"encoding":        fileEncodingToolProperty(),
+					"expected_digest": map[string]any{"type": "string", "description": "仅 handbook/ 路径可用：read_file 返回的文件摘要；摘要变化时拒绝覆盖"},
 				},
 				"required":             []string{"path", "old_string", "new_string"},
 				"additionalProperties": false,
@@ -52,7 +54,7 @@ func searchReplaceToolDef() ToolDef {
 	}
 }
 
-func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (string, error) {
+func (r *Registry) execSearchReplace(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args searchReplaceArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -60,6 +62,9 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	path, err := r.resolvePath(args.Path)
 	if err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
+	}
+	if strings.TrimSpace(args.ExpectedDigest) != "" && !isHandbookPath(args.Path) {
+		return formatSearchReplaceFail(args.Path, "expected_digest 仅支持 handbook/ 路径"), nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -70,6 +75,15 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	}
 	if info.IsDir() {
 		return formatSearchReplaceFail(args.Path, fmt.Sprintf("目标是目录，无法编辑：%q", args.Path)), nil
+	}
+	lease, err := r.acquireWorkspaceWrite(ctx, path)
+	if err != nil {
+		return formatSearchReplaceFail(args.Path, fmt.Sprintf("workspace_busy: %v", err)), nil
+	}
+	defer lease.Release()
+	_, err = r.handbookBeforeWrite(ctx, args.Path, path, args.ExpectedDigest)
+	if err != nil {
+		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}
 	if args.OldString == "" {
 		return formatSearchReplaceFail(args.Path, "old_string 不能为空。"), nil
@@ -99,6 +113,13 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 		replaced = 1
 	}
 	if newText == rawText {
+		currentBytes, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return formatSearchReplaceFail(args.Path, readErr.Error()), nil
+		}
+		if err := recordHandbookNoop(ctx, "search_replace", args.Path, currentBytes); err != nil {
+			return "", err
+		}
 		return formatSearchReplaceSuccess(0, args.OldString, args.NewString, lineHint), nil
 	}
 	enc := choice.Encoding
@@ -106,6 +127,15 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	payload, err := encodeFileContentWithBOM(newText, enc, choice.UTF8BOM)
 	if err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
+	}
+	if r.handbookFS != nil && isHandbookPath(args.Path) {
+		if _, err := r.handbookFS.Write(ctx, path, args.ExpectedDigest, payload); err != nil {
+			return formatSearchReplaceFail(args.Path, err.Error()), nil
+		}
+		r.handbookMutations.Add(1)
+		out := formatSearchReplaceSuccess(replaced, args.OldString, args.NewString, lineHint)
+		out, _ = applyMaxTokensToOutput(out, defaultSearchReplaceMaxTokens)
+		return out, nil
 	}
 	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil

@@ -65,6 +65,9 @@ jobs:
           audit_frontend desktop/tray-tauri
 
       - name: Check third-party license policy
+        run: python -m unittest scripts.ci.test_npm_license_policy -v
+
+      - name: Enforce third-party license policy
         run: python scripts/ci/check_npm_license_policy.py
 
       - name: Setup Python

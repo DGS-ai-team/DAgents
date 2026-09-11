@@ -31,9 +31,9 @@ python3 run_manage.py
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  
 基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`（**不入库**，CI / Docker 多阶段构建；本地运行 Manage 或跑 Python 单测前须先 build）。  
 修改 UI 后执行 `./manage/console/build.sh`（或 `cd manage/console/frontend && npm run build`）。  
-默认 **开放模式**：Node 注册/心跳仍可无 token；**Console 浏览器**需登录：
+Manage 默认要求显式鉴权；**Console 浏览器**需登录：
 - Shell「打开 Manage」会带 `?node_id=`，若该 id 已在 Registry 登记则直接进入首页；
-- 直接打开 `/console/` 需管理员账号密码（默认 `admin` / `admin`，可用 `MANAGE_ADMIN_USERNAME` / `MANAGE_ADMIN_PASSWORD` 覆盖）。
+- 直接打开 `/console/` 需管理员账号密码；必须显式设置 `MANAGE_ADMIN_PASSWORD`（可用 `MANAGE_ADMIN_USERNAME` 覆盖用户名），未设置时登录拒绝并提示初始化。
 
 ## Docker 部署（推荐生产 / 联调）
 
@@ -85,9 +85,9 @@ docker stop manage && docker start manage
 
 | 模式 | 条件 | 行为 |
 |------|------|------|
-| **开放模式** | 未设置 `MANAGE_TOKENS` 且未设置 `MANAGE_SHARED_TOKEN` | Node 注册/心跳只需 **agent_id**；无会话 cookie 时 API 仍可匿名（兼容自动化）；**Console UI** 强制会话登录 |
+| **未配置凭据** | 未设置 `MANAGE_TOKENS`、`MANAGE_SHARED_TOKEN` 且未设置管理员密码 | 所有受保护 API/WS 默认拒绝；请先配置管理员密码或 token |
 | **Token 模式** | 配置了上述环境变量 | 启用 admin/member/node 角色（后续完善；权限仍保留在 Manage 端） |
-| **Console 会话** | Cookie `dagents_manage_session` | 管理员密码登录，或已注册 `node_id` 免密进入（权限绑定该 Node 的 discovery_group） |
+| **Console 会话** | Cookie `dagents_manage_session_v2` | 管理员密码登录，或使用与 Node 绑定的 token 登录（权限绑定该 Node 的 discovery_group） |
 
 Node 出站 Header：
 
@@ -107,7 +107,7 @@ Node 出站 Header：
 | `MANAGE_TOKENS` | （空） | **可选**；JSON 角色/token 配置（后续启用 RBAC 时使用） |
 | `MANAGE_SHARED_TOKEN` | （空） | **可选**；单 shared admin token |
 | `MANAGE_ADMIN_USERNAME` | `admin` | Console 管理员账号 |
-| `MANAGE_ADMIN_PASSWORD` | `admin` | Console 管理员密码（生产务必修改） |
+| `MANAGE_ADMIN_PASSWORD` | （空） | Console 管理员密码；未配置时管理员登录拒绝并显示初始化提示 |
 | `MANAGE_AUDIT_PATH` | （空） | 审计 JSONL 追加路径 |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计条数 |
 
@@ -215,6 +215,6 @@ curl -X PATCH http://127.0.0.1:8020/v1/registry/agents/ops-linux-01/groups \
   -d '{"discovery_group":["ops"]}'
 ```
 
-开放模式下 **无需** `node_token`；启用 `MANAGE_TOKENS` 后再配置 token 与角色。
+Node 注册、心跳和工作组 WS 均需发送与 Node 绑定的 `MANAGE_TOKENS` token；Console Node 登录通过 POST body 提交 `node_id` 与 token，不将 token 放入 URL。
 
 符号索引见 [REFERENCE.md](./REFERENCE.md)。

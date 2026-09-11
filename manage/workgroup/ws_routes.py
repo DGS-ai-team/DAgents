@@ -9,7 +9,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from manage.platform.auth import AGENT_ID_HEADER, AuthContext, is_open_mode
+from manage.platform.auth import AGENT_ID_HEADER, AuthContext, authenticate
 from manage.platform.metrics import record_workgroup_ws_event
 from manage.workgroup.d3_models import SessionHello
 from manage.workgroup.errors import WorkgroupError
@@ -20,13 +20,13 @@ InboundHandler = Callable[[str, str, dict[str, Any]], None]
 
 
 def _auth_ws(websocket: WebSocket) -> AuthContext:
-    """WebSocket 鉴权：开放模式放行；否则校验 token（与 HTTP 同源 header）。"""
-    if is_open_mode():
-        return AuthContext(token_id="anonymous", role="admin", discovery_groups=["*"])
-    from manage.platform.auth import authenticate
+    """校验与 HTTP 同源的 header/cookie 鉴权。"""
     from starlette.requests import Request
 
     scope = dict(websocket.scope)
+    # Starlette's Request asserts an HTTP scope; authentication only needs the
+    # headers/cookies, so use an equivalent transient HTTP scope.
+    scope["type"] = "http"
     receive = websocket._receive  # noqa: SLF001
     req = Request(scope, receive)
     return authenticate(req)
@@ -43,7 +43,7 @@ def build_workgroup_ws_router(
     async def workgroup_ws(websocket: WebSocket) -> None:
         await websocket.accept()
         try:
-            _auth_ws(websocket)
+            auth = _auth_ws(websocket)
         except Exception as exc:  # noqa: BLE001
             await websocket.send_json(
                 {"type": "session.error", "payload": {"code": "not_authorized", "message": str(exc)}}
@@ -64,6 +64,15 @@ def build_workgroup_ws_router(
             )
             await websocket.close(code=4400)
             return
+        # A WS connection represents one concrete Node.  Admin sessions may
+        # operate any registered node; node sessions/tokens must be bound to it.
+        if not auth.is_admin:
+            if not ((auth.is_node or auth.session_kind == "node") and auth.agent_id == node_id):
+                await websocket.send_json(
+                    {"type": "session.error", "payload": {"code": "not_authorized", "message": "凭据未绑定该 node_id"}}
+                )
+                await websocket.close(code=4403)
+                return
 
         loop = asyncio.get_running_loop()
         outbound: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()

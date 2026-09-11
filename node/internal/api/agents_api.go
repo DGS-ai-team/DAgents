@@ -28,6 +28,9 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook", s.handleGetAgentHandbook)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook/history", s.handleGetAgentHandbookHistory)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/handbook/restore", s.handleRestoreAgentHandbook)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
 	// Phase 2–4：agent 路径别名（内部仍走 session 实现，id 相同）。
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
@@ -108,12 +111,14 @@ type createAgentRequest struct {
 	Defaults    map[string]any `json:"defaults"`
 	// Workspace is copied into the immutable config snapshot only during creation.
 	Workspace *agentruntime.WorkspaceConfig `json:"workspace"`
+	AgentType string                        `json:"agent_type,omitempty"`
 }
 
 type agentView struct {
 	AgentID        string                        `json:"agent_id"`
 	DisplayName    string                        `json:"display_name"`
 	TemplateID     string                        `json:"template_id"`
+	AgentType      string                        `json:"agent_type"`
 	ConfigSnapshot json.RawMessage               `json:"config_snapshot,omitempty"`
 	Workspace      *agentruntime.WorkspaceConfig `json:"workspace,omitempty"`
 	Host           json.RawMessage               `json:"host,omitempty"`
@@ -135,11 +140,15 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		AgentID:        rec.AgentID,
 		DisplayName:    rec.DisplayName,
 		TemplateID:     rec.TemplateID,
+		AgentType:      "normal",
 		ConfigSnapshot: rec.ConfigSnapshot,
 		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err == nil {
+		if snap.AgentType == "auto" {
+			v.AgentType = "auto"
+		}
 		workspace := snap.Workspace
 		v.Workspace = &workspace
 	}
@@ -226,7 +235,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapRaw, err := marshalAgentSnapshot(tplID, baseDefaults, workspace)
+	snapRaw, err := marshalAgentSnapshotWithType(req.AgentType, tplID, baseDefaults, workspace)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 		return
@@ -373,6 +382,8 @@ type patchAgentRequest struct {
 	DisplayName *string                       `json:"display_name"`
 	Defaults    map[string]any                `json:"defaults"` // 深合并进快照
 	Workspace   *agentruntime.WorkspaceConfig `json:"workspace"`
+	AgentType   *string                       `json:"agent_type"`
+	Handbook    *agentruntime.HandbookConfig  `json:"handbook"`
 }
 
 func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
@@ -399,7 +410,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "workspace_immutable", "workspace cannot be changed after Agent creation", nil)
 		return
 	}
-	if req.DisplayName == nil && req.Defaults == nil {
+	if req.DisplayName == nil && req.Defaults == nil && req.AgentType == nil && req.Handbook == nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "no patch fields", nil)
 		return
 	}
@@ -411,7 +422,26 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		rec.DisplayName = name
 	}
-
+	if req.AgentType != nil && normalizeAgentType(*req.AgentType) != strings.TrimSpace(strings.ToLower(*req.AgentType)) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent_type", "agent_type must be normal or auto", nil)
+		return
+	}
+	if req.AgentType != nil {
+		oldType := "normal"
+		if oldSnap, parseErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot); parseErr == nil && oldSnap.AgentType == "auto" {
+			oldType = "auto"
+		}
+		newType := normalizeAgentType(*req.AgentType)
+		if oldType != newType {
+			if s.sessions != nil {
+				pending, active, _, runtimeErr := s.sessions.RuntimeInfo(id)
+				if runtimeErr == nil && (pending > 0 || active) {
+					writeAPIError(w, http.StatusConflict, "agent_busy", "cannot change Agent type while the main chat is active or queued", nil)
+					return
+				}
+			}
+		}
+	}
 	snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
@@ -422,15 +452,36 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	oldToolGroups := agentruntime.EnabledToolGroups(snap)
 	runtimeDirty := false
+	if req.Handbook != nil {
+		snap.Handbook = *req.Handbook
+		runtimeDirty = true
+	}
 
 	if req.Defaults != nil {
 		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
 		runtimeDirty = true
 	}
+	if req.AgentType != nil {
+		snap.AgentType = normalizeAgentType(*req.AgentType)
+		runtimeDirty = true
+	}
 	if runtimeDirty {
-		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults, snap.Workspace)
+		raw, err := marshalAgentSnapshotWithType(snap.AgentType, snap.TemplateID, snap.Defaults, snap.Workspace)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
+			return
+		}
+		var encoded map[string]any
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			writeAPIError(w, 500, "agent_snapshot_encode_failed", err.Error(), nil)
+			return
+		}
+		if strings.TrimSpace(snap.Handbook.Directory) != "" {
+			encoded["handbook"] = snap.Handbook
+		}
+		raw, err = json.Marshal(encoded)
+		if err != nil {
+			writeAPIError(w, 500, "agent_snapshot_encode_failed", err.Error(), nil)
 			return
 		}
 		rec.ConfigSnapshot = raw
@@ -602,11 +653,12 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("resolve agent llm: %w", err)
 	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
-		NodeCFG:  s.cfg,
-		BaseTurn: s.sessions.DefaultTurnOptions(),
-		AgentID:  id,
-		Snapshot: snapParsed,
-		MCP:      s.mcpManager,
+		NodeCFG:              s.cfg,
+		BaseTurn:             s.sessions.DefaultTurnOptions(),
+		AgentID:              id,
+		Snapshot:             snapParsed,
+		MCP:                  s.mcpManager,
+		WorkspaceCoordinator: s.workspaceCoord,
 	})
 	if err != nil {
 		return fmt.Errorf("build agent runtime: %w", err)
@@ -700,7 +752,8 @@ func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if s.agents != nil {
-			if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
+			err := s.ensureAgentRuntime(r.Context(), id)
+			if err != nil {
 				if err.Error() == "agent_not_found" {
 					s.writeAgentNotFound(w, id)
 					return

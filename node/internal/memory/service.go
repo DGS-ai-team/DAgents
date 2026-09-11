@@ -26,12 +26,13 @@ var ErrScopeForbidden = errors.New("memory scope is not permitted")
 type LocalService struct {
 	agent         *Store
 	global        *Store
+	agentID       string
 	mu            sync.RWMutex
 	scope         Scope
 	consolidateMu sync.Mutex
 }
 
-func OpenLocalService(agentPath, globalPath string, scope Scope) (*LocalService, error) {
+func OpenLocalService(agentPath, globalPath string, scope Scope, identity ...string) (*LocalService, error) {
 	if scope != ScopeAgent && scope != ScopeGlobal {
 		scope = ScopeAgent
 	}
@@ -44,7 +45,7 @@ func OpenLocalService(agentPath, globalPath string, scope Scope) (*LocalService,
 		_ = agent.Close()
 		return nil, err
 	}
-	return &LocalService{agent: agent, global: global, scope: scope}, nil
+	return &LocalService{agent: agent, global: global, scope: scope, agentID: strings.TrimSpace(firstString(identity...))}, nil
 }
 
 func NewLocalService(agent, global *Store, scope Scope) *LocalService {
@@ -52,6 +53,13 @@ func NewLocalService(agent, global *Store, scope Scope) *LocalService {
 		scope = ScopeAgent
 	}
 	return &LocalService{agent: agent, global: global, scope: scope}
+}
+
+func (s *LocalService) AgentID() string {
+	if s == nil {
+		return ""
+	}
+	return s.agentID
 }
 
 func (s *LocalService) Close() error {

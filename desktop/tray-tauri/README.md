@@ -18,7 +18,7 @@ Inno 安装向导在「附加任务」中二选一；静默安装可用 `/TASKS=
 | 单实例 / Node 启停监护 | 对齐 Go `nodectl` |
 | 双击托盘 / 关窗隐藏 | 内嵌 WebView 打开 `{endpoint}/ui/` |
 | SSE 待办 / Toast / icon 闪烁 | 订阅 Node 权威事件；启动/重连时 hydrate |
-| Desktop bridge `:18767` | 仅供 Node 调用的 update / clipboard / ui focus / directory API |
+| Desktop bridge `:18767` | 仅供 Node 调用的 update / clipboard / ui focus API；目录选择由 Node 直接负责 |
 | 更新编排 + `update` CLI | Manage Release Hub |
 
 Web UI 不直接访问 `:18767`。Shell 启动时生成 `.runtime/desktop-bridge.token`，Node 继承

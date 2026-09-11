@@ -122,3 +122,51 @@ func TestGrepFiles(t *testing.T) {
 		t.Fatalf("should not match non-go: %q", out)
 	}
 }
+
+func TestExternalHandbookGlobAndGrepUseHandbookNamespace(t *testing.T) {
+	workspace, handbook := t.TempDir(), t.TempDir()
+	reg, err := NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(handbook); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "write_file", `{"path":"handbook/notes/deep/guide.md","content":"needle in handbook"}`); err != nil {
+		t.Fatal(err)
+	}
+	glob, err := reg.Execute(context.Background(), "glob_files", `{"directory":"handbook","glob_pattern":"**/*.md"}`)
+	if err != nil || !strings.Contains(glob, "handbook/notes/deep/guide.md") || strings.Contains(glob, "..") {
+		t.Fatalf("external handbook glob=%q err=%v", glob, err)
+	}
+	grep, err := reg.Execute(context.Background(), "grep_files", `{"directory":"handbook/notes","pattern":"needle","literal":true,"glob_pattern":"**/*.md"}`)
+	if err != nil || !strings.Contains(grep, "handbook/notes/deep/guide.md") || !strings.Contains(grep, "needle in handbook") {
+		t.Fatalf("external handbook grep=%q err=%v", grep, err)
+	}
+	read, err := reg.Execute(context.Background(), "read_file", `{"path":"handbook/notes/deep/guide.md"}`)
+	if err != nil || !strings.Contains(read, "needle in handbook") {
+		t.Fatalf("handbook read after glob/grep=%q err=%v", read, err)
+	}
+}
+
+func TestHandbookRootSymlinkGlobUsesCanonicalNamespace(t *testing.T) {
+	workspace, realHandbook, parent := t.TempDir(), t.TempDir(), t.TempDir()
+	link := filepath.Join(parent, "handbook-link")
+	if err := os.Symlink(realHandbook, link); err != nil {
+		t.Skipf("symlink unavailable in this environment: %v", err)
+	}
+	reg, err := NewRegistry(workspace, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetHandbookRoot(link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "write_file", `{"path":"handbook/nested/guide.md","content":"canonical"}`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := reg.Execute(context.Background(), "glob_files", `{"directory":"handbook","glob_pattern":"**/*.md"}`)
+	if err != nil || !strings.Contains(out, "handbook/nested/guide.md") || strings.Contains(out, "..") {
+		t.Fatalf("canonical handbook glob=%q err=%v", out, err)
+	}
+}

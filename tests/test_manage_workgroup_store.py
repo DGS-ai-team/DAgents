@@ -84,6 +84,19 @@ class WorkgroupStoreTests(unittest.TestCase):
             )
             self.assertEqual(assign.status, "queued")
 
+    def test_configuring_group_archives_in_one_idempotent_call(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="Draft", created_by_node_id="node-a")
+            )
+            archived = store.begin_archive(group.workgroup_id)
+            self.assertEqual(archived.status, "archived")
+            self.assertIsNotNone(archived.archived_at)
+            again = store.begin_archive(group.workgroup_id)
+            self.assertEqual(again.status, "archived")
+            self.assertEqual(again.archived_at, archived.archived_at)
+
     def test_agent_ref_member_is_session_bound(self) -> None:
         with TemporaryDirectory() as tmp:
             store = self._store(tmp)

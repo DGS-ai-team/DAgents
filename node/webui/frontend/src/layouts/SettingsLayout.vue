@@ -1,5 +1,6 @@
 <script setup>
 import { useRoute, useRouter } from "vue-router";
+import ToolGroupIcon from "../components/ToolGroupIcon.vue";
 
 defineOptions({ name: "SettingsLayout" });
 
@@ -10,35 +11,39 @@ const navGroups = [
   {
     label: "工作区",
     items: [
-      { to: "/settings/general", label: "通用" },
-      { to: "/settings/connection", label: "模型与连接" },
+      { to: "/settings/general", label: "通用", icon: "wrench" },
+      { to: "/settings/connection", label: "模型与连接", icon: "mcp" },
     ],
   },
   {
     label: "工具与运行",
     items: [
-      { to: "/settings/mcp", label: "全局 MCP 服务" },
-      { to: "/settings/linux-channels", label: "全局 Linux 通道" },
-      { to: "/settings/capabilities", label: "能力" },
-      { to: "/settings/skills", label: "技能" },
+      { to: "/settings/mcp", label: "全局 MCP 服务", icon: "mcp" },
+      { to: "/settings/linux-channels", label: "全局 Linux 通道", icon: "linux" },
+      { to: "/settings/capabilities", label: "能力", icon: "computer" },
+      { to: "/settings/skills", label: "技能", icon: "skills" },
     ],
   },
   {
     label: "智能体与自动化",
     items: [
-      { to: "/settings/agents", label: "智能体列表", match: "/settings/agents" },
-      { to: "/settings/triggers", label: "定时任务" },
+      { to: "/settings/agents", label: "智能体列表", match: "/settings/agents", icon: "child_agents" },
+      { to: "/settings/triggers", label: "定时任务", icon: "triggers" },
     ],
   },
-  {
-    label: "系统",
+    {
+      label: "系统",
     items: [
-      { to: "/settings/security", label: "输出防护" },
-      { to: "/settings/context", label: "上下文" },
-      { to: "/settings/about", label: "关于" },
-    ],
-  },
-];
+      { to: "/settings/security", label: "输出防护", icon: "computer" },
+      { to: "/settings/context", label: "上下文", icon: "memory" },
+      { to: "/settings/about", label: "关于", icon: "wrench" },
+      ],
+    },
+    {
+      label: "支持",
+      items: [{ to: "/settings/feedback", label: "帮助与反馈", icon: "hitl" }],
+    },
+  ];
 
 function isActive(item) {
   if (item.match) return route.path === item.match || route.path.startsWith(`${item.match}/`);
@@ -83,7 +88,8 @@ function backToChat() {
               :class="{ 'settings-layout__link--active': isActive(item) }"
               :aria-current="isActive(item) ? 'page' : undefined"
             >
-              {{ item.label }}
+              <ToolGroupIcon :name="item.icon" />
+              <span>{{ item.label }}</span>
             </router-link>
           </section>
         </div>

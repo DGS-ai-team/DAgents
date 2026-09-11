@@ -87,6 +87,8 @@ export function emptyAgentDraft() {
     // 工作目录在创建时确定，创建后不可修改。
     workspaceMode: "private",
     workspacePath: "",
+    agentType: "normal",
+    hooks: {},
   };
 }
 
@@ -162,6 +164,12 @@ function skillsPayload(draft) {
   return { visible };
 }
 
+function hooksPayload(draft) {
+  const hooks = asObject(draft?.hooks);
+  const { risk_observation_enabled: _retiredRiskObservation, ...remaining } = hooks;
+  return remaining;
+}
+
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
 /** 空白 Agent 草稿（不依赖模板）。 */
 export function draftFromBlank(llmProfileIds = []) {
@@ -178,8 +186,8 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   const tools = asObject(defaults.tools);
   const skills = asObject(defaults.skills);
   const prompt = asObject(defaults.prompt_context);
-
   const draft = emptyAgentDraft();
+  draft.hooks = clone(asObject(defaults.hooks));
   draft.templateId = String(template?.id || "").trim();
   draft.displayName = String(template?.display_name || template?.id || "").trim();
   draft.description = String(template?.description || agent.description || "").trim();
@@ -212,8 +220,8 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   const tools = asObject(defaults.tools);
   const skills = asObject(defaults.skills);
   const prompt = asObject(defaults.prompt_context);
-
   const draft = emptyAgentDraft();
+  draft.hooks = clone(asObject(defaults.hooks));
   draft.templateId = String(agent?.template_id || snap.template_id || "").trim();
   draft.displayName = String(agent?.display_name || "").trim();
   draft.description = String(agentMeta.description || "").trim();
@@ -280,11 +288,15 @@ export function buildCreateAgentPayload(draft) {
           ? { custom_md: String(draft.promptCustomMd).trim() }
           : {}),
       },
+      hooks: {
+        ...hooksPayload(draft),
+      },
     },
     workspace: String(draft.workspaceMode || "private").trim() === "custom"
       ? { mode: "custom", path: String(draft.workspacePath || "").trim() }
       : { mode: "private" },
   };
+  payload.agent_type = draft.agentType === "auto" ? "auto" : "normal";
   const tpl = String(draft.templateId || "").trim();
   if (tpl && tpl !== BLANK_TEMPLATE_ID) payload.template_id = tpl;
   return payload;
@@ -296,6 +308,7 @@ export function buildPatchAgentPayload(draft) {
   return {
     display_name: created.display_name,
     defaults: created.defaults,
+    agent_type: draft.agentType === "auto" ? "auto" : "normal",
   };
 }
 
@@ -334,6 +347,9 @@ export function buildCreateTemplatePayload(meta, draft) {
         ...(String(draft?.promptCustomMd || "").trim()
           ? { custom_md: String(draft.promptCustomMd).trim() }
           : {}),
+      },
+      hooks: {
+        ...hooksPayload(draft),
       },
     },
   };

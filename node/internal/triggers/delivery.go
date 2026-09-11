@@ -11,6 +11,16 @@ type DeliveryTracker interface {
 	ClearPendingDelivery(triggerID string)
 }
 
+type DeliveryIdentityTracker interface {
+	DeliveryTracker
+	ClearPendingDeliveryIfMatch(triggerID, deliveryID string)
+	IsPendingDelivery(triggerID, deliveryID string) bool
+}
+
+type RecoveryDeliveryTracker interface {
+	IsRecoveryRequired(triggerID string) bool
+}
+
 // pendingDelivery 为 Store 上的待消费标记（不写入 triggers.json）。
 type pendingDelivery struct {
 	mu      sync.RWMutex

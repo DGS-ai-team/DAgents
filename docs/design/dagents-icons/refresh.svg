@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">refresh · 刷新</title><desc id="desc">DAgents 刷新 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
+  <path class="icon" d="M19 8a7.5 7.5 0 0 0-13.3-1.5L4 8.5M5 16a7.5 7.5 0 0 0 13.3 1.5L20 15.5"/><path class="icon" d="M4 5v3.5h3.5M20 19v-3.5h-3.5"/>
+</svg>

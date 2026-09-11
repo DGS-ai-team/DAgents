@@ -11,7 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
+	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
@@ -21,6 +24,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/platform"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -30,14 +34,29 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
+
+func conditionCompletionCallback(scheduler *triggers.Scheduler, triggerStore *triggers.Store) func(triggers.ConditionRequest, triggers.ConditionResult) error {
+	return func(req triggers.ConditionRequest, result triggers.ConditionResult) error {
+		_, err := scheduler.CompleteCondition(context.Background(), triggers.ConditionCompletion{TriggerID: req.TriggerID, DeliveryID: req.DeliveryID, SessionID: req.SessionID, AgentID: req.AgentID, Revision: req.Revision, Occurrence: req.Occurrence, Matched: result.Status == triggers.ConditionMatched, Rejected: result.Rejected, Failed: result.Failed})
+		if err != nil {
+			if recoveryErr := triggerStore.MarkConditionRecovery(req.TriggerID, req.DeliveryID, err.Error()); recoveryErr != nil {
+				return fmt.Errorf("complete condition: %w; mark recovery: %v", err, recoveryErr)
+			}
+		}
+		return err
+	}
+}
 
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
 	cfg             *config.Config
 	configPath      string
 	llmRuntime      *llm.RuntimeSettings
+	defaultLLM      llm.Client
+	llmInjected     bool
 	logger          *slog.Logger
 	mux             *http.ServeMux
 	sessions        *session.Manager // per-session queue and turn consumer
@@ -54,11 +73,19 @@ type Server struct {
 	store           *store.SQLiteStore
 	triggerStore    *triggers.Store
 	triggerSched    *triggers.Scheduler
+	dreamingSched   *DreamingScheduler
+	startupErr      error
+	autonomyStore   *autonomy.Store
+	autoConfigMu    sync.Mutex
 	registrar       *manage.Registrar
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
+	feedbackStore   *store.FeedbackStore
+	feedbackRateMu  sync.Mutex
+	feedbackRate    map[string][]time.Time
 	tools           *tools.Registry
+	workspaceCoord  *workspacecoord.Coordinator
 	transfers       *tools.LinuxTransferManager
 	browserMu       sync.RWMutex
 	browserMgr      *browser.Manager
@@ -68,6 +95,7 @@ type Server struct {
 	workgroupAgents *workgroupAgentBridge
 	terminals       *terminalSessionRegistry
 	desktopBridge   *desktopbridge.Client
+	directoryPicker platform.DirectoryPicker
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex
@@ -86,13 +114,15 @@ type Server struct {
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	llmClient    llm.Client
-	tools        *tools.Registry
-	policyEngine *policy.Engine
-	sqliteStore  *store.SQLiteStore
-	nodeSettings *store.NodeSettingsStore
-	skipStore    bool
-	configPath   string
+	llmClient       llm.Client
+	llmInjected     bool
+	tools           *tools.Registry
+	policyEngine    *policy.Engine
+	sqliteStore     *store.SQLiteStore
+	nodeSettings    *store.NodeSettingsStore
+	skipStore       bool
+	configPath      string
+	directoryPicker platform.DirectoryPicker
 }
 
 // WithConfigPath 记录 Node 启动时加载的 config.yaml 路径（供 Web UI 保存设置）。
@@ -113,6 +143,7 @@ func WithNodeSettings(ns *store.NodeSettingsStore) Option {
 func WithLLM(client llm.Client) Option {
 	return func(o *serverOptions) {
 		o.llmClient = client
+		o.llmInjected = true
 	}
 }
 
@@ -127,6 +158,14 @@ func WithTools(registry *tools.Registry) Option {
 func WithPolicy(engine *policy.Engine) Option {
 	return func(o *serverOptions) {
 		o.policyEngine = engine
+	}
+}
+
+// WithDirectoryPicker injects the Node-native picker implementation (tests
+// use this to avoid opening a real system dialog).
+func WithDirectoryPicker(picker platform.DirectoryPicker) Option {
+	return func(o *serverOptions) {
+		o.directoryPicker = picker
 	}
 }
 
@@ -159,8 +198,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	llmRuntime := llm.NewRuntimeSettings(cfg)
 	o := serverOptions{llmClient: llm.NewFromConfig(cfg, llmRuntime)}
+	sharedWorkspaceCoord := workspacecoord.New()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.directoryPicker == nil {
+		o.directoryPicker = platform.NewDirectoryPicker()
 	}
 	if o.nodeSettings == nil && !o.skipStore && cfg != nil {
 		ns, err := store.BootstrapNodeSettings(context.Background(), cfg, o.configPath, logger)
@@ -182,6 +225,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		o.tools = reg
 	}
+	o.tools.SetWorkspaceCoordinator(sharedWorkspaceCoord)
 	if o.policyEngine == nil {
 		o.policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
 		logger.Info("policy default engine seeded (per-agent policy stored in agents.db)")
@@ -276,8 +320,23 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	duplicateToolCallEnabled := cfg.DuplicateToolCallHookEnabled()
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	toolResultEnabled := cfg.ToolResultHookEnabled()
+	var autonomyStore *autonomy.Store
+	var autonomyInitErr error
+	if opened, err := autonomy.Open(filepath.Join(cfg.RuntimeDir(), "autonomy.json")); err != nil {
+		logger.Warn("autonomy store init failed", "error", err)
+		autonomyInitErr = err
+	} else {
+		autonomyStore = opened
+	}
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
+	var triggerRoundProvider func(context.Context, string, string, string) (int, bool, error)
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
+		TriggerToolRoundProvider: func(ctx context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
+			if triggerRoundProvider == nil {
+				return 0, false, nil
+			}
+			return triggerRoundProvider(ctx, agentID, triggerID, deliveryID)
+		},
 		WorkspaceRoot: cfg.RuntimeDir(),
 		// MaxSteps 由各 Agent config_snapshot（defaults.llm.max_steps）在装入 runtime 时写入。
 		SkillsRoot:                  cfg.SkillsRoot(),
@@ -314,6 +373,22 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		MemoryCandidateQueueSize: cfg.Memory.CandidateQueueSize,
 		MemoryCandidateMaxItems:  cfg.Memory.MaxCandidates,
 		MemoryCoreBudgetTokens:   cfg.Memory.CoreBudgetTokens,
+		AgentPromptProvider: func(_ context.Context, agentID string) (turn.AgentPromptSnapshot, error) {
+			if autonomyStore == nil {
+				return turn.AgentPromptSnapshot{}, nil
+			}
+			p, _ := autonomyStore.GetProfile(agentID)
+			e, _ := autonomyStore.GetExperience(agentID)
+			todos := autonomyStore.ListTodos(agentID)
+			var todoText strings.Builder
+			for _, todo := range todos {
+				fmt.Fprintf(&todoText, "- [%s] %s (id: %s, revision: %d)\n", todo.Status, todo.Text, todo.ID, todo.Revision)
+			}
+			if len(todos) == 0 {
+				todoText.WriteString("暂无待办（当前列表为空）")
+			}
+			return turn.AgentPromptSnapshot{Responsibilities: p.Responsibility, Experience: e.Content, Todo: todoText.String()}, nil
+		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:            true,
@@ -330,18 +405,29 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
+	startupErr := autonomyInitErr
+	var triggerSubmitter *session.TriggerSubmitter
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {
 		logger.Warn("trigger store init failed", "error", err, "path", cfg.TriggersStorePath())
+		startupErr = err
 	} else {
 		triggerStore = opened
 		triggerStore.SetLogger(logger)
-		triggerSched = triggers.NewScheduler(triggerStore, &session.TriggerSubmitter{Mgr: mgr}, cfg.Triggers.PollSeconds)
+		mgr.SetConditionValidator(func(ctx context.Context, meta turn.ConditionApprovalMetadata) error {
+			_ = ctx
+			def, ok := triggerStore.GetTrigger(meta.TriggerID)
+			if !ok {
+				return fmt.Errorf("condition trigger not found")
+			}
+			return triggers.ValidateConditionIdentity(*def, meta.AgentID, meta.SessionID, meta.DeliveryID, meta.TriggerRevision, meta.Occurrence)
+		})
+		triggerSubmitter = &session.TriggerSubmitter{Mgr: mgr}
+		triggerSched = triggers.NewScheduler(triggerStore, triggerSubmitter, cfg.Triggers.PollSeconds)
 		triggerSched.SetLogger(logger)
 		triggerSched.SetSessionResolver(mgr)
+		triggerSched.SetConditionRunner(mgr.ExecuteCondition)
+		mgr.SetConditionCompletionCallback(conditionCompletionCallback(triggerSched, triggerStore))
 		mgr.SetTriggerDeliveryTracker(triggerStore)
-		if triggerSched != nil {
-			triggerSched.Start()
-		}
 	}
 	mediaRegister := tools.MediaRegisterFunc(func(ctx context.Context, toolCallID, relPath, source, label, caption string) (*tools.MediaArtifactRef, error) {
 		sid := tools.SessionIDFromContext(ctx)
@@ -414,6 +500,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		packageUploader = manage.NewPackageUploader(cfg, logger)
 	}
 	control := manage.NewControlClient(cfg)
+	var feedbackStore *store.FeedbackStore
+	if !o.skipStore {
+		opened, feedbackErr := store.OpenFeedback(store.FeedbackDBPath(cfg.RuntimeDir()))
+		if feedbackErr != nil {
+			logger.Error("feedback store init failed", "error", feedbackErr)
+		} else {
+			feedbackStore = opened
+		}
+	}
 	var wgWorker *workgroup.Worker
 	var wgDialer *workgroup.Dialer
 	var wgAgentBridge *workgroupAgentBridge
@@ -423,10 +518,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			NodeID:        cfg.NodeID,
 			AgentSessions: wgAgentBridge,
 		})
+		manageNodeToken := cfg.Manage.NodeToken
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,
-			NodeID:    cfg.NodeID,
-			Worker:    wgWorker,
+			// Setup changes require a Node restart; capture the startup token so
+			// a concurrent settings PATCH cannot race the reconnect loop.
+			ManageTokenProvider: func() string { return manageNodeToken },
+			NodeID:              cfg.NodeID,
+			Worker:              wgWorker,
 			ListWorkgroups: func(ctx context.Context) ([]string, error) {
 				seen := map[string]struct{}{}
 				ids := make([]string, 0)
@@ -463,6 +562,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		cfg:                  cfg,
 		configPath:           o.configPath,
 		llmRuntime:           llmRuntime,
+		defaultLLM:           o.llmClient,
+		llmInjected:          o.llmInjected,
 		logger:               logger,
 		mux:                  http.NewServeMux(),
 		stream:               hub,
@@ -479,11 +580,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		sessions:             mgr,
 		triggerStore:         triggerStore,
 		triggerSched:         triggerSched,
+		startupErr:           startupErr,
+		autonomyStore:        autonomyStore,
 		registrar:            registrar,
 		updateChecker:        updateChecker,
 		packageUploader:      packageUploader,
 		control:              control,
+		feedbackStore:        feedbackStore,
+		feedbackRate:         make(map[string][]time.Time),
 		tools:                o.tools,
+		workspaceCoord:       sharedWorkspaceCoord,
 		transfers:            transferManager,
 		browserMgr:           browserMgr,
 		mediaRegister:        mediaRegister,
@@ -492,10 +598,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		workgroupAgents:      wgAgentBridge,
 		terminals:            newTerminalSessionRegistry(),
 		desktopBridge:        desktopbridge.NewFromEnv(),
+		directoryPicker:      o.directoryPicker,
 		pendingRuntimeReload: make(map[string]string),
 	}
+	triggerRoundProvider = s.triggerToolRoundProvider
 	if s.workgroupAgents != nil {
 		s.workgroupAgents.server = s
+	}
+	if registrar != nil {
+		registrar.SetAutoSummaryProvider(s.autoSummaryProvider())
 	}
 	s.terminals.setOpener(func(ctx context.Context, agentID string, req tools.TerminalRequest) (tools.Terminal, error) {
 		registry, err := s.terminalToolsRegistry(agentID)
@@ -556,6 +667,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
 	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)
+	if triggerSubmitter != nil {
+		triggerSubmitter.EnsureAgentRuntime = func(agentID string) error {
+			return s.ensureAgentRuntime(context.Background(), agentID)
+		}
+	}
 	if client := wecom.NewClientFromConfig(cfg); client != nil {
 		logger.Info("wecom webhook tools enabled")
 	}
@@ -563,5 +679,46 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mgr.OnStreamEvent(ev)
 	})
 	s.registerRoutes()
+	if triggerSched != nil {
+		valid := map[string]bool{}
+		validAuto := map[string]bool{}
+		if s.agents != nil {
+			if records, err := s.agents.List(context.Background()); err == nil {
+				for _, rec := range records {
+					if !rec.Archived {
+						snap, parseErr := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+						valid[rec.AgentID] = true
+						if parseErr == nil && snap.AgentType == "auto" {
+							validAuto[rec.AgentID] = true
+						}
+					}
+				}
+			} else if s.startupErr == nil {
+				s.startupErr = err
+			}
+		}
+		if s.startupErr == nil && s.autonomyStore != nil && s.triggerStore != nil {
+			if err := s.reconcileAutoDefaults(validAuto); err != nil {
+				s.startupErr = err
+			}
+		}
+		if s.startupErr == nil {
+			if err := s.triggerStore.ValidateOwners(valid); err != nil {
+				logger.Error("trigger owner validation failed", "error", err)
+				triggerSched = nil
+				s.triggerSched = nil
+				s.startupErr = err
+			} else {
+				triggerSched.Start()
+			}
+		} else {
+			triggerSched = nil
+			s.triggerSched = nil
+		}
+	}
+	if s.startupErr == nil && s.autonomyStore != nil && s.agents != nil {
+		s.dreamingSched = NewDreamingScheduler(s.autonomyStore, s.agents, s.sessions, s.ensureAgentRuntime)
+		s.dreamingSched.Start(context.Background())
+	}
 	return s
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
@@ -91,7 +92,17 @@ func (o *Orchestrator) continueAfterApprovalResume(
 		for _, item := range approvalItems {
 			tc := item.ToolCall
 			if plan.IsApproved(tc.ID) {
-				approved = append(approved, tc)
+				// Re-check live policy at the execution boundary. A revoke that
+				// arrives while HITL is pending must turn the call back into an
+				// approval, rather than allowing the stale approval to execute.
+				decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
+				if decision.Action != policy.ActionDeny {
+					approved = append(approved, tc)
+				} else {
+					msg := "rejected: policy_denied"
+					o.publishToolResult(sessionID, tc, msg, true, nil)
+					o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+				}
 			} else {
 				msg := "rejected: user_rejected"
 				o.publishToolResult(sessionID, tc, msg, true, nil)

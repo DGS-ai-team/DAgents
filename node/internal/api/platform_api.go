@@ -27,24 +27,25 @@ func (s *Server) platformAvailable(ctx context.Context) bool {
 }
 
 func (s *Server) handlePlatformCapabilities(w http.ResponseWriter, r *http.Request) {
-	available := s.platformAvailable(r.Context())
+	desktopAvailable := s.platformAvailable(r.Context())
+	nativeDirectoryAvailable := s.directoryPicker != nil && s.directoryPicker.Available(r.Context())
 	writeJSON(w, http.StatusOK, platformCapabilities{
-		DesktopShell:          available,
-		NativeDirectoryPicker: available,
-		ClipboardFilePaths:    available,
-		WindowFocus:           available,
-		UpdateApply:           available,
+		DesktopShell:          desktopAvailable,
+		NativeDirectoryPicker: nativeDirectoryAvailable,
+		ClipboardFilePaths:    desktopAvailable,
+		WindowFocus:           desktopAvailable,
+		UpdateApply:           desktopAvailable,
 	})
 }
 
 func (s *Server) handlePlatformDirectoryPicker(w http.ResponseWriter, r *http.Request) {
-	if s.desktopBridge == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "desktop_unavailable", "当前运行环境不支持本机目录选择，请启动桌面 Shell", nil)
+	if s.directoryPicker == nil || !s.directoryPicker.Available(r.Context()) {
+		writeAPIError(w, http.StatusServiceUnavailable, "native_directory_picker_unavailable", "当前运行环境不支持本机目录选择，请安装系统目录选择器或直接输入绝对路径", nil)
 		return
 	}
-	out, err := s.desktopBridge.DirectoryPicker(r.Context())
+	out, err := s.directoryPicker.Pick(r.Context())
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "desktop_unavailable", err.Error(), nil)
+		writeAPIError(w, http.StatusServiceUnavailable, "native_directory_picker_unavailable", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)

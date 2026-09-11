@@ -30,13 +30,10 @@ async function chooseDirectory() {
       draft.value.workspacePath = path;
       return;
     }
-    if (!result?.cancelled) pickerError.value = "没有获取到所选目录，请重试。";
+    if (!result?.cancelled) pickerError.value = "没有获取到所选目录，请重试或直接输入路径。";
   } catch (error) {
     const message = String(error?.message || "").trim();
-    pickerError.value =
-      message === "Failed to fetch"
-        ? "当前运行环境不支持本机目录选择，请启动桌面 Shell。"
-        : message || "无法打开目录选择器，请确认桌面 Shell 已启动。";
+    pickerError.value = message || "Node 暂时无法打开系统目录选择器，请直接输入绝对路径。";
   } finally {
     selecting.value = false;
   }
@@ -82,17 +79,21 @@ async function chooseDirectory() {
           @change="setMode('custom')"
         />
         <span>
-          <strong>选择本机目录</strong>
-          <small>打开系统文件管理窗口选择已有项目目录。</small>
+          <strong>指定本机目录</strong>
+          <small>点击选择目录打开系统选择器，也可以直接输入绝对路径。</small>
         </span>
       </label>
     </div>
 
     <div v-if="draft.workspaceMode === 'custom'" class="workspace-picker__selection">
       <div class="workspace-picker__selection-head">
-        <span class="workspace-picker__label" :class="{ 'workspace-picker__label--error': props.fieldError }">
-          {{ props.fieldError || "已选择的目录" }}
-        </span>
+        <label
+          for="agent-workspace-path"
+          class="workspace-picker__label"
+          :class="{ 'workspace-picker__label--error': props.fieldError }"
+        >
+          {{ props.fieldError || "工作目录路径" }}
+        </label>
         <button
           type="button"
           class="btn btn--ghost btn--sm"
@@ -102,10 +103,19 @@ async function chooseDirectory() {
           {{ selecting ? "打开中…" : "选择目录" }}
         </button>
       </div>
-      <code v-if="draft.workspacePath" class="workspace-picker__path">{{ draft.workspacePath }}</code>
-      <p v-else class="workspace-picker__empty">尚未选择目录</p>
+      <input
+        id="agent-workspace-path"
+        v-model="draft.workspacePath"
+        class="workspace-picker__path-input"
+        type="text"
+        inputmode="url"
+        autocomplete="off"
+        placeholder="例如 C:\Projects\my-agent 或 /home/user/project"
+        :aria-invalid="Boolean(props.fieldError)"
+        @input="pickerError = ''; emit('clear-error')"
+      />
       <p v-if="pickerError" class="workspace-picker__error">{{ pickerError }}</p>
-      <p class="workspace-picker__hint">选择窗口返回的绝对路径会直接用于创建，不需要手动输入。</p>
+      <p class="workspace-picker__hint">输入 Windows 或 Linux 的绝对路径，创建后不可修改。</p>
     </div>
   </section>
 </template>
@@ -219,14 +229,21 @@ async function chooseDirectory() {
   font-weight: 600;
 }
 
-.workspace-picker__label--error,
-.workspace-picker__error {
+.workspace-picker__label--error {
   color: var(--color-danger);
 }
 
-.workspace-picker__path {
+.workspace-picker__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-picker__path-input {
+  width: 100%;
+  box-sizing: border-box;
   display: block;
-  overflow: hidden;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -235,21 +252,23 @@ async function chooseDirectory() {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
   font-size: 12px;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.workspace-picker__empty,
-.workspace-picker__hint,
-.workspace-picker__error {
+.workspace-picker__path-input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.workspace-picker__path-input:focus {
+  border-color: var(--color-primary);
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  outline-offset: 1px;
+}
+
+.workspace-picker__hint {
   margin: 0;
+  color: var(--color-text-subtle);
   font-size: 12px;
   line-height: 1.45;
-}
-
-.workspace-picker__empty,
-.workspace-picker__hint {
-  color: var(--color-text-subtle);
 }
 
 @media (max-width: 640px) {

@@ -21,6 +21,9 @@ func shouldBumpNotifyOnTurnFinished(data map[string]any) bool {
 		return true
 	}
 	finish, _ := data["finish_reason"].(string)
+	if noWork, _ := data["no_work"].(bool); noWork && finish == "stop" {
+		return false
+	}
 	switch finish {
 	case "error", "cancelled":
 		return false

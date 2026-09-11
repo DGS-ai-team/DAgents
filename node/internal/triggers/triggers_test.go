@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -12,6 +13,13 @@ import (
 func TestEnsureScheduleConditionRejectsEmpty(t *testing.T) {
 	if _, err := EnsureScheduleCondition(map[string]any{}); err == nil {
 		t.Fatal("expected error for empty condition")
+	}
+}
+
+func TestEnsureScheduleConditionRejectsRetiredEventSource(t *testing.T) {
+	_, err := EnsureScheduleCondition(map[string]any{"event_source_id": "events-1"})
+	if err == nil || !strings.Contains(err.Error(), "event_source_id") {
+		t.Fatalf("expected retired event source rejection, got %v", err)
 	}
 }
 
@@ -61,6 +69,7 @@ func TestRenderTaskTemplate(t *testing.T) {
 }
 
 type fakeSubmitter struct {
+	mu       sync.Mutex
 	sessions []string
 	messages []string
 }
@@ -70,12 +79,16 @@ func (f *fakeSubmitter) EnsureSession(requestedID string) (string, error) {
 	if id == "" {
 		id = "sess-generated"
 	}
+	f.mu.Lock()
 	f.sessions = append(f.sessions, id)
+	f.mu.Unlock()
 	return id, nil
 }
 
 func (f *fakeSubmitter) SubmitTriggerMessage(sessionID, triggerID, content string) error {
+	f.mu.Lock()
 	f.messages = append(f.messages, sessionID+":"+triggerID+":"+content)
+	f.mu.Unlock()
 	return nil
 }
 

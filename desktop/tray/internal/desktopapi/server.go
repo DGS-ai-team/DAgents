@@ -58,7 +58,6 @@ func New(updates UpdateProvider, applier *shellupdate.Applier, uiFocus *uifocus.
 	s.mux.HandleFunc("GET /v1/desktop/update", s.handleDesktopUpdate)
 	s.mux.HandleFunc("POST /v1/desktop/update/apply", s.handleDesktopUpdateApply)
 	s.mux.HandleFunc("GET /v1/desktop/clipboard/files", s.handleClipboardFiles)
-	s.mux.HandleFunc("POST /v1/desktop/dialog/directory", s.handleDirectoryPicker)
 	s.mux.HandleFunc("POST /v1/desktop/ui/focus", s.handleUIFocus)
 	return s
 }
@@ -123,32 +122,6 @@ func (s *Server) handleClipboardFiles(w http.ResponseWriter, _ *http.Request) {
 		paths = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"paths": paths})
-}
-
-func (s *Server) handleDirectoryPicker(w http.ResponseWriter, _ *http.Request) {
-	path, err := pickDirectory()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"ok":        false,
-			"cancelled": false,
-			"path":      nil,
-			"message":   err.Error(),
-		})
-		return
-	}
-	if strings.TrimSpace(path) == "" {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":        true,
-			"cancelled": true,
-			"path":      nil,
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"cancelled": false,
-		"path":      path,
-	})
 }
 
 func (s *Server) handleUIFocus(w http.ResponseWriter, r *http.Request) {

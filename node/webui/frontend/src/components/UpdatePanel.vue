@@ -66,10 +66,10 @@ onMounted(load);
 
 <template>
   <section class="panel panel-overlay__card command-panel status-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header class="panel__header command-panel__header">
+    <header v-if="!embedded" class="panel__header command-panel__header">
       <div>
-        <div v-if="!embedded" class="panel__title">版本与更新</div>
-        <div v-if="!embedded" class="command-panel__subtitle">检查可用更新</div>
+        <div class="panel__title">版本与更新</div>
+        <div class="command-panel__subtitle">检查可用更新</div>
       </div>
       <div v-if="!embedded" class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
@@ -131,5 +131,15 @@ onMounted(load);
 .command-panel__source {
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .status-panel .command-panel__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-panel .command-stat {
+    min-width: 0;
+  }
 }
 </style>

@@ -342,7 +342,11 @@ class WorkGroupStore:
                 raise WorkgroupError("not_found", "workgroup not found", http_status=404)
             if group.status == "archived":
                 return group
-            if group.status in {"active", "configuring"}:
+            if group.status == "configuring":
+                # A configuring group has not entered the execution
+                # lifecycle, so archive it atomically in the same request.
+                group = group.model_copy(update={"status": "archived", "archived_at": _now()})
+            elif group.status == "active":
                 group = group.model_copy(update={"status": "archiving"})
             elif group.status == "archiving":
                 group = group.model_copy(update={"status": "archived", "archived_at": _now()})

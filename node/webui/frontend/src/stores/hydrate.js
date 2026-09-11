@@ -59,7 +59,9 @@ export async function hydrateAgent() {
   const data = await api.getAgentHydrate(agentId);
   if (generation !== hydrationGeneration) return null;
   if (shouldApplyHydrateTranscript(data)) {
-    loadTranscriptFromHydrate(data?.transcript, { historyRevision: data?.history_revision });
+    loadTranscriptFromHydrate(data?.transcript, {
+      historyRevision: data?.history_revision,
+    });
   }
   applyToolJobsSnapshot(data?.tool_jobs);
   if (Array.isArray(data?.child_agents)) {

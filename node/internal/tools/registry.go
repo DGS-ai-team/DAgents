@@ -4,19 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
+	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
+	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 )
 
 // Registry 注册内置工具并在 Agent workspace 内执行。
 type Registry struct {
 	workspaceRoot          string
+	handbookRoot           string
 	bashTimeout            int
 	bashHardLimitSec       int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
 	shellOutputEncoding    string
@@ -55,6 +62,65 @@ type Registry struct {
 	desktopMu              sync.Mutex
 	desktopFrames          map[string]screenGeometry
 	mcpTools               map[string]MCPTool
+	autonomyEnabled        bool
+	autonomyTodoStore      *autonomy.Store
+	workspaceCoordinator   *workspacecoord.Coordinator
+	handbookFS             *handbookfs.Service
+	handbookMutations      atomic.Uint64
+}
+
+// HandbookMutationCount reports successful filesystem history commits for the
+// bound handbook, allowing maintenance to distinguish read-only turns.
+func (r *Registry) HandbookMutationCount() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.handbookMutations.Load()
+}
+
+// SetHandbookRoot binds the reserved relative "handbook/" path namespace to
+// an Agent-owned directory. Existing file tools then provide the same policy,
+// quota, and write lease chain for handbook edits.
+func (r *Registry) SetHandbookRoot(root string) error {
+	if r == nil {
+		return fmt.Errorf("registry unavailable")
+	}
+	abs, err := filepath.Abs(filepath.Clean(strings.TrimSpace(root)))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(abs, 0700); err != nil {
+		return err
+	}
+	if real, e := filepath.EvalSymlinks(abs); e == nil {
+		abs = real
+	}
+	r.handbookRoot = abs
+	service, err := handbookfs.New(abs)
+	if err != nil {
+		return err
+	}
+	r.handbookFS = service
+	return nil
+}
+
+// HandbookRoot returns the canonical root bound to the registry. The value is
+// immutable for the lifetime of a built Agent runtime and is safe for callers
+// that need to persist the execution-time handbook identity.
+func (r *Registry) HandbookRoot() string {
+	if r == nil {
+		return ""
+	}
+	return r.handbookRoot
+}
+
+// SetAutonomyEnabled exposes Auto-only todo tools on an explicitly selected
+// Auto main runtime.
+func (r *Registry) SetAutonomyEnabled(enabled bool) {
+	if r == nil {
+		return
+	}
+	r.autonomyEnabled = enabled
 }
 
 // WorkspaceRoot returns the effective Agent workspace used by file, bash and
@@ -65,6 +131,13 @@ func (r *Registry) WorkspaceRoot() string {
 		return ""
 	}
 	return r.workspaceRoot
+}
+
+// SetWorkspaceCoordinator injects the Node-shared local write coordinator.
+func (r *Registry) SetWorkspaceCoordinator(c *workspacecoord.Coordinator) {
+	if r != nil && c != nil {
+		r.workspaceCoordinator = c
+	}
 }
 
 // ResolveLocalTerminalCWD applies the same workspace-relative path policy as
@@ -164,7 +237,22 @@ func (r *Registry) OpenTerminal(ctx context.Context, req TerminalRequest) (Termi
 		if r.localTerminalProvider == nil {
 			return nil, fmt.Errorf("local terminal provider is unavailable")
 		}
-		return r.localTerminalProvider.OpenTerminal(ctx, req)
+		cwd := strings.TrimSpace(req.CWD)
+		if cwd == "" {
+			cwd = r.workspaceRoot
+		} else if resolved, resolveErr := r.resolveRunCWD(cwd); resolveErr == nil {
+			cwd = resolved
+		}
+		lease, err := r.acquireWorkspaceWrite(ctx, cwd)
+		if err != nil {
+			return nil, fmt.Errorf("workspace_busy: %w", err)
+		}
+		terminal, err := r.localTerminalProvider.OpenTerminal(ctx, req)
+		if err != nil {
+			lease.Release()
+			return nil, err
+		}
+		return &coordinatedTerminal{Terminal: terminal, lease: lease}, nil
 	case executionTargetLinuxChannel:
 		if r.linuxProvider == nil {
 			return nil, fmt.Errorf("linux terminal provider is unavailable")
@@ -287,6 +375,7 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 		fileEncoding:          fileEnc,
 		bashCompress:          DefaultBashCompressConfig(),
 		syncShells:            newSyncShellTracker(),
+		workspaceCoordinator:  workspacecoord.New(),
 		shellProvider:         localProvider,
 		localTerminalProvider: localProvider,
 		handlers:              make(map[string]handler),
@@ -348,6 +437,9 @@ func (r *Registry) Definitions() []ToolDef {
 	}
 	base = append(base, r.mcpToolDefs()...)
 	defs := r.filterToolDefs(base)
+	if r.autonomyEnabled && r.autonomyTodoStore != nil {
+		defs = append(defs, autonomyTodoToolDefs()...)
+	}
 	for i := range defs {
 		defs[i].Function.Description = strings.TrimSpace(defs[i].Function.Description) + ResultDescriptionSuffixForTool(defs[i].Function.Name)
 	}
@@ -369,6 +461,27 @@ func (r *Registry) Definitions() []ToolDef {
 // 子 Agent RestrictedRegistry 在通过自身 allowlist 后应使用 WithEnabledBypass，
 // 以免父 Agent 的 enabledOnly 误拦子会话允许的工具。
 func (r *Registry) Execute(ctx context.Context, name, arguments string) (string, error) {
+	if strings.TrimSpace(name) == "auto_idle" {
+		return r.executeAutoIdle(ctx, json.RawMessage(arguments))
+	}
+	if handbookMaintenance(ctx) {
+		switch strings.TrimSpace(name) {
+		case "read_file", "write_file", "search_replace", "glob_files", "grep_file", "grep_files":
+		default:
+			return "", fmt.Errorf("tool %s is unavailable during handbook maintenance", name)
+		}
+		var fields map[string]any
+		if json.Unmarshal([]byte(arguments), &fields) != nil {
+			return "", fmt.Errorf("invalid handbook tool arguments")
+		}
+		pathArg := toolArgString(fields, "path")
+		if pathArg == "" {
+			pathArg = toolArgString(fields, "directory")
+		}
+		if !isHandbookPath(pathArg) {
+			return "", fmt.Errorf("handbook maintenance is limited to handbook/ paths")
+		}
+	}
 	if err := r.rejectIfDisabled(ctx, name); err != nil {
 		return "", err
 	}
@@ -437,5 +550,9 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
+	r.handlers["todo_list"] = r.execTodoList
+	r.handlers["todo_create"] = r.execTodoCreate
+	r.handlers["todo_update"] = r.execTodoUpdate
+	r.handlers["todo_delete"] = r.execTodoDelete
 	r.RegisterChildAgentToolStubs()
 }
