@@ -6,9 +6,9 @@
 
 DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、人工治理和跨机协作。数据、工具和最终执行权保留在 Node；长期任务通过受控唤醒分次推进，跨机协作使用可选的 Manage Workgroup。
 
-长期任务及反馈闭环的单 Node MVP 已在当前工作区验收，尚未发布；已发布版本基线见下节。
+长期任务及反馈闭环的单 Node MVP 已随 v0.11.0 完成发布；已发布版本基线见下节。
 
-## 2. 当前基线（v0.10.7）
+## 2. 当前基线（v0.11.0）
 
 - Go Agent Node：多 Agent、Web UI、HTTP/SSE、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
 - Node Web UI：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口。
@@ -18,7 +18,7 @@ DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、�
 
 ## 3. 优先级
 
-### P0：自主任务上线前的执行与访问基础（已验收，未发布）
+### P0：自主任务上线前的执行与访问基础（已发布）
 
 1. **Manage 默认鉴权**：保护接口不再授予匿名 admin；移除默认管理员密码；Node 登录和 Workgroup WS 绑定认证身份；旧不安全会话失效，提供明确升级配置说明。
 2. **触发器执行归属与权限**：目标必须路由到已有 Agent 的实际运行时，校验会话所属关系；停止任意宿主 shell 条件门控的默认执行路径。
@@ -27,7 +27,7 @@ DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、�
 
 实施边界与验收见 [P0 执行与访问基础](design/p0-controlled-execution-foundation.md)。以上是本轮范围，不包含完整长期目标、反馈系统、SSO/RBAC 或通用 OS sandbox。
 
-### P1：反馈闭环与单 Node 自主长期任务（MVP 已验收，未发布）
+### P1：反馈闭环与单 Node 自主长期任务（MVP 已发布）
 
 1. **反馈先交付**：Node 本地保存与重试 → 当前连接 Manage 的管理员查看、处理、回复 → Node 主动同步状态；身份隔离、去重与更换 Manage 的归属保护一起验收。
 2. **长期目标 MVP**：目标与完成条件、单次 Run/Turn 关联、进度证据、受控下一次唤醒、累计预算、暂停/停止、审批等待和必要通知。
@@ -67,4 +67,4 @@ DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、�
 - 跨组件设计从 [`docs/design/README.md`](./design/README.md) 进入；用户操作从 [`docs/user/README.md`](./user/README.md) 进入。
 - 发现实现与文档不一致时，以代码和测试为准，提交修正文档的 PR。
 
-**最后更新**：2026-09-08。
+**最后更新**：2026-09-11。
