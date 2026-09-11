@@ -8,6 +8,7 @@ import {
   stopTransferEvents,
   cancelTransfer,
 } from "../stores/transfers.js";
+import UiIcon from "./UiIcon.vue";
 
 const expanded = ref(false);
 const tick = ref(0);
@@ -121,12 +122,12 @@ onUnmounted(() => {
         :aria-expanded="expanded"
         @click="expanded = !expanded"
       >
-        <span class="transfer-status-bar__icon" aria-hidden="true">⇅</span>
+        <UiIcon class="transfer-status-bar__icon" name="transfer" :size="16" />
         <span class="transfer-status-bar__text">{{ statusText }}</span>
         <span v-if="transferStore.maxConcurrentFiles" class="transfer-status-bar__limit">
           并发上限 {{ transferStore.maxConcurrentFiles }}
         </span>
-        <span class="transfer-status-bar__chevron" :class="{ 'is-open': expanded }">⌃</span>
+        <UiIcon class="transfer-status-bar__chevron" :class="{ 'is-open': expanded }" name="chevron-up" :size="14" />
       </button>
       <div class="transfer-status-bar__progress" role="progressbar" :aria-valuenow="totalProgress ?? undefined" aria-valuemin="0" aria-valuemax="100">
         <span v-if="totalProgress !== null" :style="{ width: `${totalProgress}%` }" />

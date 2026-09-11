@@ -6,6 +6,7 @@ import AgentTemplateCreateModal from "../../components/AgentTemplateCreateModal.
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { agentHostLabel } from "../../utils/agentTemplateForm.js";
 import AutoBadge from "../../components/AutoBadge.vue";
+import UiIcon from "../../components/UiIcon.vue";
 import { filterAgents, groupAgents, searchAgents } from "../../utils/agentGrouping.js";
 import { readNodePreference, writeNodePreference } from "../../utils/nodePreference.js";
 
@@ -153,7 +154,7 @@ onMounted(load);
             </div>
             <span class="agents-settings__card-action">
               <span>配置</span>
-              <span class="agents-settings__chevron" aria-hidden="true">›</span>
+              <UiIcon class="agents-settings__chevron" name="chevron-right" :size="14" />
             </span>
           </button>
         </li>

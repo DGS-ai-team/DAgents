@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from "vue";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
   targets: { type: Array, default: () => [] },
@@ -59,7 +60,7 @@ defineExpose({ open: openMenu, close: () => { open.value = false; } });
       <ul v-else class="terminal-target-menu__list">
         <li v-for="target in props.targets" :key="`${target.kind}:${target.id || target.shell}`">
           <button type="button" class="terminal-target-menu__item" @click="choose(target)">
-            <span class="terminal-target-menu__icon" aria-hidden="true">&gt;_</span>
+            <ToolGroupIcon name="terminal" class="terminal-target-menu__icon" />
             <span class="terminal-target-menu__item-text">
               <strong>{{ target.label }}</strong>
               <small>{{ target.description }}</small>

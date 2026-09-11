@@ -1,4 +1,6 @@
 <script setup>
+import UiIcon from "./UiIcon.vue";
+
 defineProps({
   title: { type: String, required: true },
   trail: { type: String, default: "" },
@@ -12,7 +14,7 @@ defineProps({
       <h1>
         <template v-if="trail">
           <span class="page-header-crumb">{{ title }}</span>
-          <span class="page-header-sep" aria-hidden="true">›</span>
+          <UiIcon class="page-header-sep" name="chevron-right" :size="14" />
           <span>{{ trail }}</span>
         </template>
         <template v-else>{{ title }}</template>

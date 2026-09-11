@@ -101,6 +101,7 @@ import {
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 import { canToggleThinking, hasThinkingSecondaryControl } from "../utils/llmControls.js";
+import { agentActiveProfile } from "../utils/agentLLM.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -792,6 +793,10 @@ function onAgentsUpdated(list) {
   agentList.value = Array.isArray(list) ? list.slice() : [];
   agentListCount.value = agentList.value.length;
   void syncCurrentAgentDisplayName();
+  // The LLM endpoint exposes the Node-wide profile, while each Agent may be
+  // bound to a different profile in its snapshot. Keep the composer label
+  // aligned with the selected Agent after the rail list arrives.
+  void refreshLLMSettings(agentStore.agentId);
 }
 
 function onCreatePageCancel() {
@@ -984,9 +989,32 @@ async function cycleThinkingEffort() {
   }
 }
 
-async function refreshLLMSettings() {
+async function resolveAgentActiveProfile(agentId) {
+  const id = String(agentId || "").trim();
+  if (!id) return "";
+  // The rail keeps a short-lived cache, so prefer the authoritative Agent
+  // record after a profile switch instead of trusting a stale list snapshot.
   try {
-    chromeStore.llmSettings = await api.getLLMSettings();
+    const profile = agentActiveProfile(await api.getAgent(id));
+    if (profile) return profile;
+  } catch {
+    /* fall back to the latest rail snapshot below */
+  }
+  const fromList = agentList.value.find((agent) => agentRecordId(agent) === id);
+  return agentActiveProfile(fromList);
+}
+
+let llmSettingsRequest = 0;
+
+async function refreshLLMSettings(agentId = agentStore.agentId) {
+  const request = ++llmSettingsRequest;
+  try {
+    const settings = await api.getLLMSettings();
+    const activeProfile = await resolveAgentActiveProfile(agentId);
+    if (request !== llmSettingsRequest) return;
+    chromeStore.llmSettings = activeProfile
+      ? { ...settings, active_profile: activeProfile }
+      : settings;
     syncReasoningDisplay(chromeStore.llmSettings);
   } catch {
     /* best-effort */
@@ -1000,11 +1028,24 @@ async function switchLLMProfile(id) {
     agentStore.error = "请先选择 Agent";
     return;
   }
-  if (profileId === chromeStore.llmSettings?.active_profile) return;
   agentStore.error = "";
   try {
+    const currentProfile = await resolveAgentActiveProfile(agentStore.agentId);
+    if (profileId === currentProfile) {
+      // The Agent may already be bound to the selected profile while the
+      // Node-wide settings endpoint still reports another Agent's profile.
+      // Re-resolve through the guarded path so a concurrent refresh cannot
+      // put the global profile back into the composer.
+      await refreshLLMSettings(agentStore.agentId);
+      return;
+    }
     // 绑定到当前 Agent；ensure/reload 时会应用到进程 LLM（含多模态）。
-    await api.patchAgent(agentStore.agentId, { defaults: { llm: { active: profileId } } });
+    const updatedAgent = await api.patchAgent(agentStore.agentId, { defaults: { llm: { active: profileId } } });
+    if (updatedAgent && agentList.value.length) {
+      agentList.value = agentList.value.map((agent) =>
+        agentRecordId(agent) === agentStore.agentId ? updatedAgent : agent,
+      );
+    }
     await refreshLLMSettings();
     try {
       chromeStore.agentInfo = await api.getAgentInfo();

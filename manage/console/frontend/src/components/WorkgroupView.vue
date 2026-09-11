@@ -16,6 +16,7 @@ import {
   patchWorkgroupACL,
   publishWorkgroup,
 } from "../api.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -718,7 +719,7 @@ onMounted(async () => {
             class="wg-card__create-btn"
             @click="openCreateCard"
           >
-            <span class="wg-card__plus" aria-hidden="true">+</span>
+            <UiIcon class="wg-card__plus" name="plus" :size="20" />
             <span class="wg-card__create-label">新增工作组</span>
           </button>
           <form v-else class="wg-card__create-form" @submit.prevent="submitCreate">

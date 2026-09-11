@@ -6,6 +6,7 @@ import ContextMeter from "./ContextMeter.vue";
 import McpStatusIndicator from "./McpStatusIndicator.vue";
 import SkillsStatusIndicator from "./SkillsStatusIndicator.vue";
 import TerminalSessionIndicator from "./TerminalSessionIndicator.vue";
+import UiIcon from "./UiIcon.vue";
 import { chromeStore } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
@@ -396,7 +397,7 @@ defineExpose({
 <template>
   <footer class="chat__composer">
     <div v-if="error" class="chat__composer-alert" role="alert" aria-live="polite">
-      <span class="chat__composer-alert-icon" aria-hidden="true">!</span>
+      <UiIcon class="chat__composer-alert-icon" name="alert" :size="14" />
       <span>{{ error }}</span>
     </div>
     <div

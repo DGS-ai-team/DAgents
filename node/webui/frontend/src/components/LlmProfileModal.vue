@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { probeLLMModels } from "../api/node.js";
 import UiSelect from "./UiSelect.vue";
+import UiIcon from "./UiIcon.vue";
 
 const PROVIDER_PRESETS = {
   deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-chat" },
@@ -247,7 +248,7 @@ watch(
       <section class="llm-profile-modal" role="dialog" aria-modal="true" :aria-labelledby="'llm-profile-title'">
         <header class="llm-profile-modal__header">
           <h2 id="llm-profile-title" class="llm-profile-modal__title">{{ title }}</h2>
-          <button type="button" class="llm-profile-modal__close" aria-label="关闭" @click="emit('close')">×</button>
+          <button type="button" class="llm-profile-modal__close" aria-label="关闭" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
         </header>
 
         <div class="llm-profile-modal__body">

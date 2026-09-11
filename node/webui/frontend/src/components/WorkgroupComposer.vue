@@ -1,5 +1,6 @@
 <script setup>
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
+import UiIcon from "./UiIcon.vue";
 
 defineProps({
   humanQueueItems: { type: Array, default: () => [] },
@@ -74,7 +75,7 @@ const emit = defineEmits([
             title="取消排队"
             @click="emit('remove-queued', item)"
           >
-            ×
+            <UiIcon name="close" :size="14" />
           </button>
         </template>
       </div>

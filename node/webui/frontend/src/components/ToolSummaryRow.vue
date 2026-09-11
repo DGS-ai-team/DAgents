@@ -22,6 +22,7 @@ import { childAgentIdsFromResult, isTemporaryAgentTool } from "../utils/temporar
 import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
+import UiIcon from "./UiIcon.vue";
 import ChildAgentProgressPanel from "./ChildAgentProgressPanel.vue";
 
 const props = defineProps({
@@ -139,8 +140,8 @@ async function onCancel(ev) {
       >
         <span class="tool-summary-row__glyph" aria-hidden="true">
           <span v-if="inProgress" class="tool-exec-spinner" />
-          <span v-else-if="stepPending" class="tool-summary-row__pending">○</span>
-          <span v-else class="tool-summary-row__check">✓</span>
+          <UiIcon v-else-if="stepPending" class="tool-summary-row__pending" name="pending" :size="14" />
+          <UiIcon v-else class="tool-summary-row__check" name="check" :size="14" />
         </span>
         <span class="tool-summary-row__visual" :title="visual.label">
           <ToolGroupIcon :name="visual.kind" />
@@ -177,7 +178,7 @@ async function onCancel(ev) {
         :aria-label="expanded ? '收起工具详情' : '展开工具详情'"
         @click="toggle"
       >
-        <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+        <UiIcon class="tool-summary-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
       </button>
     </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
@@ -268,13 +269,13 @@ async function onCancel(ev) {
 }
 
 .tool-summary-row--shell .tool-summary-row__visual {
-  color: #e2a053;
+  color: var(--color-warning);
 }
 
 .tool-summary-row--terminal .tool-summary-row__visual,
 .tool-summary-row--browser .tool-summary-row__visual,
 .tool-summary-row--linux .tool-summary-row__visual {
-  color: #569cd6;
+  color: var(--color-info);
 }
 
 .tool-summary-row--fs .tool-summary-row__visual,
@@ -283,11 +284,11 @@ async function onCancel(ev) {
 }
 
 .tool-summary-row--mcp .tool-summary-row__visual {
-  color: #9b8cff;
+  color: var(--color-auto);
 }
 
 .tool-summary-row--child .tool-summary-row__visual {
-  color: #c586c0;
+  color: var(--color-auto);
 }
 
 .tool-summary-row__text {

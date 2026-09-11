@@ -1,6 +1,7 @@
 <script setup>
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import WorkgroupApprovalCard from "./WorkgroupApprovalCard.vue";
+import UiIcon from "./UiIcon.vue";
 
 defineProps({
   item: { type: Object, required: true },
@@ -21,8 +22,8 @@ const emit = defineEmits(["resolve"]);
     <div class="wg-tool-row__bar">
       <span class="wg-tool-row__glyph" aria-hidden="true">
         <span v-if="item.inProgress" class="tool-exec-spinner" />
-        <span v-else-if="item.failed" class="wg-tool-row__mark">−</span>
-        <span v-else class="wg-tool-row__check">✓</span>
+        <UiIcon v-else-if="item.failed" class="wg-tool-row__mark" name="close" :size="14" />
+        <UiIcon v-else class="wg-tool-row__check" name="check" :size="14" />
       </span>
       <span class="wg-tool-row__text">{{ item.summary }}</span>
       <span class="wg-tool-row__status">

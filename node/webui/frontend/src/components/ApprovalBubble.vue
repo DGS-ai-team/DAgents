@@ -9,6 +9,7 @@ import {
 import { extractToolApprovals } from "../stores/hitl.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { buildToolCardModel } from "../utils/toolResultPresentation.js";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
   data: { type: Object, required: true },
@@ -101,7 +102,7 @@ function approveOneLabel() {
               :class="`tool-source-badge--${visual.kind}`"
               :title="visual.label"
             >
-              <span class="tool-source-badge__icon" aria-hidden="true">{{ visual.icon }}</span>
+              <ToolGroupIcon class="tool-source-badge__svg" :name="visual.kind" />
               <span class="tool-source-badge__text">需要批准</span>
             </span>
           </div>
@@ -241,15 +242,15 @@ function approveOneLabel() {
 }
 
 .approval-risk--high {
-  color: #b91c1c;
-  background: color-mix(in srgb, #dc2626 12%, transparent);
-  border-color: color-mix(in srgb, #dc2626 28%, transparent);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
 }
 
 .approval-risk--medium {
-  color: #b45309;
-  background: color-mix(in srgb, #f59e0b 14%, transparent);
-  border-color: color-mix(in srgb, #f59e0b 30%, transparent);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
 }
 
 .approval-tool-item__hint,

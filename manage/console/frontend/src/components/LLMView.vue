@@ -7,6 +7,7 @@ import {
   updateLLMConfig,
 } from "../api.js";
 import LlmConfigModal from "./LlmConfigModal.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -169,7 +170,7 @@ defineExpose({ load });
       </article>
 
       <button type="button" class="llm-card llm-card--add" @click="openCreate">
-        <span class="wg-card__plus" aria-hidden="true">+</span>
+        <UiIcon class="wg-card__plus" name="plus" :size="20" />
         <strong>{{ sortedConfigs.length ? "新建配置" : "新建第一条配置" }}</strong>
         <span class="muted llm-card--add-hint">
           {{
