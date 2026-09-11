@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DAgents UI 视觉审计与统一方向</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f3f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f7fafc;
+      --surface-blue: #edf5fa;
+      --ink: #172739;
+      --ink-soft: #52657a;
+      --ink-faint: #8091a3;
+      --line: #dce6ee;
+      --line-strong: #c9d8e4;
+      --brand: #1598b7;
+      --brand-soft: #d8f3f8;
+      --auto: #7869db;
+      --auto-soft: #eeeafd;
+      --success: #198b65;
+      --success-soft: #dbf4e9;
+      --warning: #b4771f;
+      --warning-soft: #fff0d5;
+      --danger: #bd4f5b;
+      --danger-soft: #fde2e5;
+      --shadow: 0 16px 48px rgba(34, 67, 95, .10);
+      --shadow-small: 0 6px 18px rgba(34, 67, 95, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: radial-gradient(circle at 88% -8%, #dff6fa 0, transparent 32rem), var(--canvas);
+      font: 14px/1.55 Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    .page { width: min(1420px, calc(100% - 56px)); margin: 0 auto; padding: 48px 0 72px; }
+    .topline { display: flex; justify-content: space-between; align-items: center; gap: 20px; color: var(--ink-faint); font-size: 12px; }
+    .eyebrow { color: var(--brand); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    .stamp { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.72); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
+    h1 { max-width: 840px; margin: 14px 0 10px; font-size: clamp(32px, 4vw, 56px); letter-spacing: -.055em; line-height: 1.04; }
+    .lede { max-width: 900px; margin: 0; color: var(--ink-soft); font-size: 16px; }
+    .hero-rule { height: 1px; margin: 34px 0 0; background: linear-gradient(90deg, var(--brand), rgba(21,152,183,0)); }
+    .section { margin-top: 52px; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 17px; }
+    .section-head h2 { margin: 0; font-size: 23px; letter-spacing: -.03em; }
+    .section-head p { max-width: 640px; margin: 0; color: var(--ink-soft); font-size: 13px; text-align: right; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; }
+    .card { border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.9); box-shadow: var(--shadow-small); }
+    .decision { min-height: 170px; padding: 20px; }
+    .decision .kicker { display: flex; align-items: center; gap: 9px; color: var(--ink-faint); font-size: 12px; }
+    .decision h3 { margin: 13px 0 6px; font-size: 18px; letter-spacing: -.025em; }
+    .decision p { margin: 0; color: var(--ink-soft); }
+    .icon { width: 18px; height: 18px; display: inline-block; flex: none; vertical-align: -4px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-lg { width: 23px; height: 23px; }
+    .icon-brand { color: var(--brand); }
+    .icon-auto { color: var(--auto); }
+    .icon-warn { color: var(--warning); }
+    .icon-danger { color: var(--danger); }
+    .icon-success { color: var(--success); }
+    .audit-card { padding: 22px; }
+    .audit-card h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 16px; font-size: 18px; }
+    .audit-card h3 small { margin-left: auto; color: var(--ink-faint); font-size: 11px; font-weight: 500; }
+    .audit-card ul { display: grid; gap: 11px; padding: 0; margin: 0; list-style: none; }
+    .audit-card li { display: grid; grid-template-columns: 19px 1fr; gap: 8px; color: var(--ink-soft); }
+    .audit-card li strong { color: var(--ink); font-weight: 650; }
+    .callout { display: grid; grid-template-columns: auto 1fr; gap: 13px; align-items: start; padding: 16px 18px; border: 1px solid #bde5ee; border-radius: 13px; background: linear-gradient(110deg, #eefbfd, #fff); color: var(--ink-soft); }
+    .callout strong { display: block; margin-bottom: 3px; color: var(--ink); }
+    .inventory { overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--ink-faint); background: var(--surface-soft); font: 700 11px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    td { color: var(--ink-soft); }
+    td strong { color: var(--ink); font-weight: 650; }
+    .priority { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .p0 { color: var(--danger); background: var(--danger-soft); }
+    .p1 { color: var(--warning); background: var(--warning-soft); }
+    .p2 { color: var(--brand); background: var(--brand-soft); }
+    .icon-pair { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--brand); }
+    .icon-pair .arrow { color: var(--ink-faint); }
+    .code { padding: 2px 5px; border-radius: 5px; background: var(--surface-blue); color: #476278; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .note { margin: 11px 0 0; color: var(--ink-faint); font-size: 12px; }
+    .tokens { display: grid; grid-template-columns: repeat(8, minmax(90px, 1fr)); gap: 10px; }
+    .token { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .swatch { height: 56px; }
+    .token b, .token span { display: block; padding: 0 10px; }
+    .token b { padding-top: 8px; font-size: 12px; }
+    .token span { padding-bottom: 10px; color: var(--ink-faint); font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .mock-shell { overflow: hidden; min-height: 460px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
+    .mock-label { display: flex; align-items: center; gap: 9px; padding: 15px 18px; border-bottom: 1px solid var(--line); color: var(--ink-faint); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+    .mock-label b { color: var(--ink); font-size: 13px; letter-spacing: 0; text-transform: none; }
+    .node-mock { display: grid; grid-template-columns: 194px 1fr; min-height: 410px; background: #f5f9fc; }
+    .node-side { padding: 17px 12px; border-right: 1px solid var(--line); background: #eef5fa; }
+    .brand-row { display: flex; align-items: center; gap: 8px; padding: 0 8px 17px; font-weight: 700; }
+    .brand-mark { width: 23px; height: 23px; border-radius: 7px; background: linear-gradient(145deg, #c8f1f7, #70cede); }
+    .group-title { display: flex; align-items: center; justify-content: space-between; padding: 13px 8px 6px; color: var(--ink-faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .side-item { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 9px; border-radius: 8px; color: var(--ink-soft); font-size: 12px; }
+    .side-item.active { color: var(--ink); background: #dceef5; font-weight: 650; }
+    .side-item .count { margin-left: auto; color: var(--ink-faint); font-size: 10px; }
+    .side-bottom { margin-top: 57px; padding: 10px 8px 0; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 11px; }
+    .node-main { padding: 24px 27px; }
+    .mock-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .mock-top h3 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
+    .circle-button { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--brand); }
+    .node-empty { display: grid; place-items: center; min-height: 294px; color: var(--ink-faint); text-align: center; }
+    .node-empty .empty-icon { display: grid; place-items: center; width: 47px; height: 47px; margin: 0 auto 10px; border-radius: 14px; color: var(--auto); background: var(--auto-soft); }
+    .node-empty b { display: block; margin-bottom: 3px; color: var(--ink); }
+    .settings-mock { display: grid; grid-template-columns: 194px 1fr; min-height: 410px; background: #f8fbfd; }
+    .settings-nav { padding: 18px 12px; border-right: 1px solid var(--line); background: #f1f7fa; }
+    .settings-nav h4 { margin: 0 8px 13px; font-size: 13px; }
+    .settings-nav .side-item { min-height: 31px; font-size: 11px; }
+    .settings-content { padding: 23px 27px; }
+    .settings-content h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
+    .settings-content > p { margin: 4px 0 22px; color: var(--ink-faint); font-size: 12px; }
+    .form-row { display: grid; grid-template-columns: minmax(150px, .75fr) 1fr; align-items: center; gap: 18px; min-height: 58px; padding: 9px 0; border-top: 1px solid var(--line); }
+    .form-row label { color: var(--ink); font-weight: 650; }
+    .form-row label span { display: block; margin-top: 2px; color: var(--ink-faint); font-size: 11px; font-weight: 400; }
+    .control { min-height: 36px; padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink-soft); font-size: 12px; }
+    .control.inline { display: flex; align-items: center; justify-content: space-between; }
+    .switch { width: 34px; height: 19px; padding: 2px; border-radius: 99px; background: var(--brand); }
+    .switch i { display: block; width: 15px; height: 15px; margin-left: auto; border-radius: 50%; background: white; }
+    .manage-mock { min-height: 410px; background: #fbfaf8; }
+    .manage-top { display: flex; align-items: center; gap: 28px; padding: 16px 20px; border-bottom: 1px solid #e9e5df; background: #fff; }
+    .manage-brand { display: flex; align-items: center; gap: 8px; margin-right: auto; font-weight: 750; }
+    .manage-nav { display: flex; gap: 20px; color: var(--ink-soft); font-size: 12px; }
+    .manage-nav .active { color: var(--ink); font-weight: 700; }
+    .manage-body { padding: 24px 25px; }
+    .manage-body h3 { margin: 0; color: #2a2927; font-size: 23px; letter-spacing: -.035em; }
+    .manage-body > p { margin: 4px 0 18px; color: #817b74; font-size: 12px; }
+    .metric-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+    .metric { padding: 13px 14px; border: 1px solid #e6e0d9; border-radius: 10px; background: #fff; }
+    .metric span { color: #8c857d; font-size: 10px; }
+    .metric b { display: block; margin-top: 5px; color: #302e2b; font-size: 21px; }
+    .manage-cards { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-top: 13px; }
+    .manage-card { min-height: 135px; padding: 15px; border: 1px solid #e6e0d9; border-left: 3px solid var(--brand); border-radius: 11px; background: #fff; }
+    .manage-card.auto { border-left-color: var(--auto); }
+    .manage-card .card-icon { display: grid; place-items: center; width: 32px; height: 32px; margin-bottom: 13px; border-radius: 9px; color: var(--brand); background: var(--brand-soft); }
+    .manage-card.auto .card-icon { color: var(--auto); background: var(--auto-soft); }
+    .manage-card b { display: block; color: #37332f; font-size: 14px; }
+    .manage-card span { color: #8c857d; font-size: 11px; }
+    .responsive-note { margin-top: 12px; color: var(--ink-faint); font-size: 11px; }
+    .rules { display: grid; gap: 10px; }
+    .rule { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .rule-num { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: var(--brand); background: var(--brand-soft); font: 700 11px ui-monospace, monospace; }
+    .rule b { display: block; margin-bottom: 3px; }
+    .rule p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+    .footer { margin-top: 56px; padding-top: 17px; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 12px; }
+    @media (max-width: 900px) {
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      .section-head { display: block; }
+      .section-head p { margin-top: 6px; text-align: left; }
+      .tokens { grid-template-columns: repeat(4, minmax(90px,1fr)); }
+    }
+    @media (max-width: 620px) {
+      .page { width: min(100% - 28px, 1420px); padding-top: 28px; }
+      .topline { align-items: flex-start; flex-direction: column; }
+      .inventory { overflow-x: auto; }
+      table { min-width: 760px; }
+      .tokens { grid-template-columns: repeat(2,1fr); }
+      .node-mock, .settings-mock { grid-template-columns: 145px 1fr; }
+      .node-side, .settings-nav { padding-left: 7px; padding-right: 7px; }
+      .node-main, .settings-content, .manage-body { padding: 18px 15px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute"><defs>
+    <symbol id="receipt-text" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="bot" viewBox="0 0 24 24"><rect width="18" height="12" x="3" y="8" rx="3"/><path d="M12 4v4M8 14h.01M16 14h.01M8 18h8"/></symbol>
+    <symbol id="sparkles" viewBox="0 0 24 24"><path d="m12 3-1.2 3.7a2 2 0 0 1-1.3 1.3L5.8 9.2l3.7 1.2a2 2 0 0 1 1.3 1.3L12 15.4l1.2-3.7a2 2 0 0 1 1.3-1.3l3.7-1.2-3.7-1.2a2 2 0 0 1-1.3-1.3zM19 15l-.6 1.8a1 1 0 0 1-.6.6L16 18l1.8.6a1 1 0 0 1 .6.6L19 21l.6-1.8a1 1 0 0 1 .6-.6L22 18l-1.8-.6a1 1 0 0 1-.6-.6zM5 3l-.4 1.2a1 1 0 0 1-.6.6L2.8 5.2l1.2.4a1 1 0 0 1 .6.6L5 7.4l.4-1.2a1 1 0 0 1 .6-.6l1.2-.4L6 4.8a1 1 0 0 1-.6-.6z"/></symbol>
+    <symbol id="network" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="9" y="15" width="6" height="6" rx="1"/><path d="M9 6h6M6 9v3h6v3M18 9v3h-6"/></symbol>
+    <symbol id="circle-plus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></symbol>
+    <symbol id="pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></symbol>
+    <symbol id="trash-2" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></symbol>
+    <symbol id="triangle-alert" viewBox="0 0 24 24"><path d="m21.7 18-8.2-14a1.7 1.7 0 0 0-3 0L2.3 18a1.7 1.7 0 0 0 1.5 2.5h16.4A1.7 1.7 0 0 0 21.7 18Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
+    <symbol id="arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M5 12h14"/></symbol>
+    <symbol id="chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="refresh-cw" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3L3 11M4 4v7h7M4 13a8 8 0 0 0 14.9 3L21 13m0 7v-7h-7"/></symbol>
+    <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="settings" viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a2 2 0 1 1-3.2 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a2 2 0 1 1 0-4h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.8 1.8 0 0 0 3-.9v-.2a2 2 0 1 1 3.2 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.8 1.8 0 0 0 .9 3h.2a2 2 0 1 1 0 4h-.2a1.8 1.8 0 0 0-.9 3Z"/></symbol>
+    <symbol id="message-square" viewBox="0 0 24 24"><path d="M21 11.5a8.3 8.3 0 0 1-9 8.2 8.8 8.8 0 0 1-3.8-.9L3 20l1.2-4A8 8 0 1 1 21 11.5Z"/></symbol>
+    <symbol id="plug" viewBox="0 0 24 24"><path d="M12 22v-4M8 2v4M16 2v4M7 6h10v3a5 5 0 0 1-10 0Z"/><path d="M12 14v4"/></symbol>
+    <symbol id="brain-circuit" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0 0 6v1a3 3 0 0 0 3 3h1v-2a2 2 0 0 1 2-2h1V9a2 2 0 0 0-2-2H9Z"/><path d="M15 4a3 3 0 0 1 3 3v1a3 3 0 0 1 0 6v1a3 3 0 0 1-3 3h-1"/><path d="M12 9h.01M16 12h.01M8 12h.01M12 17h.01"/></symbol>
+  </defs></svg>
+
+  <main class="page">
+    <div class="topline"><span class="eyebrow">DAgents / product design review</span><span class="stamp"><i class="dot"></i>视觉审计稿 · 2026-09-11</span></div>
+    <h1>Node 与 Manage 的 UI，收敛成一套可持续的视觉语言</h1>
+    <p class="lede">本稿基于当前可运行页面逐页观察，补齐图标清单，标出不协调的交互符号，并给出 Node、Manage 共同使用的色彩、密度、组件和页面骨架。它是下一轮实现的视觉验收基准。</p>
+    <div class="hero-rule"></div>
+
+    <section class="section">
+      <div class="section-head"><h2>设计判断</h2><p>保留两个产品的角色差异，统一它们看得见的规则，让用户在 Node 与 Manage 之间切换时仍然认得出 DAgents。</p></div>
+      <div class="grid-3">
+        <article class="card decision"><div class="kicker"><svg class="icon icon-brand"><use href="#circle-check"/></svg>共用骨架</div><h3>同一套 icon 与状态语义</h3><p>Lucide round 线性图标、18px 默认尺寸、1.8px 描边。成功、警告、危险和 Auto 状态使用固定色值，文字符号只作为内容字符出现。</p></article>
+        <article class="card decision"><div class="kicker"><svg class="icon icon-auto"><use href="#sparkles"/></svg>保留角色</div><h3>Node 轻、Manage 稳</h3><p>Node 维持淡蓝画布与侧边栏，突出对话和即时操作；Manage 维持暖白工作台，突出列表、审核和跨 Node 汇总。</p></article>
+        <article class="card decision"><div class="kicker"><svg class="icon icon-warn"><use href="#triangle-alert"/></svg>优先收口</div><h3>先解决语义混淆，再装饰</h3><p>优先替换旧的 ✦、✎、×、⌃、!、⌘、M，并把 Auto 总览入口统一为 ReceiptText；阴影、圆角和留白随后按 token 收敛。</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>逐页观察</h2><p>当前环境页面均已打开检查。下面保留优点，同时指出会影响产品感的一致性问题。</p></div>
+      <div class="grid-2">
+        <article class="card audit-card"><h3><svg class="icon icon-brand"><use href="#bot"/></svg>Node <small>对话与运行时</small></h3><ul>
+          <li><svg class="icon icon-success"><use href="#circle-check"/></svg><span><strong>优点：</strong>浅蓝画布、侧边栏分组、底部状态区已经有清晰产品骨架，聊天输入区的层级也容易理解。</span></li>
+          <li><svg class="icon icon-warn"><use href="#triangle-alert"/></svg><span><strong>问题：</strong>Auto 总览悬浮入口仍是旧 sparkle，和画板定稿的 ReceiptText 没有接上。</span></li>
+          <li><svg class="icon icon-warn"><use href="#triangle-alert"/></svg><span><strong>问题：</strong>Auto 分组图标、重命名、删除、折叠、MCP、反馈提示仍存在字符图标，线条风格断裂。</span></li>
+          <li><svg class="icon icon-warn"><use href="#triangle-alert"/></svg><span><strong>问题：</strong>聊天首页出现很长的旧验收文本，首次进入应提供干净的欢迎/空状态，避免把测试噪音当成产品内容。</span></li>
+          <li><svg class="icon icon-brand"><use href="#settings"/></svg><span><strong>方向：</strong>设置页坚持“一配置一行”，工具能力与可见技能拆成两行；侧边栏底部仅保留品牌状态、主题、设置。</span></li>
+        </ul></article>
+        <article class="card audit-card"><h3><svg class="icon" style="color:#a77a42"><use href="#network"/></svg>Manage <small>治理与汇总</small></h3><ul>
+          <li><svg class="icon icon-success"><use href="#circle-check"/></svg><span><strong>优点：</strong>暖白背景、横向顶栏、卡片与表格已经形成稳定工作台气质，列表页的筛选器位置统一。</span></li>
+          <li><svg class="icon icon-warn"><use href="#triangle-alert"/></svg><span><strong>问题：</strong>首页模块、空状态、AskAI 与筛选器里的加号/杂项符号需要接入同一图标注册表。</span></li>
+          <li><svg class="icon icon-warn"><use href="#triangle-alert"/></svg><span><strong>问题：</strong>Auto 员工、用户反馈、能力市场目前空数据时纵向留白偏大，表格 shell 可以保留列头与示例状态。</span></li>
+          <li><svg class="icon icon-brand"><use href="#settings"/></svg><span><strong>方向：</strong>固定内容最大宽度，统一列表筛选条与表格行高；Auto 员工使用独立紫色状态，和 Node 的 Auto 标签呼应。</span></li>
+        </ul></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>遗漏与替换清单</h2><p>优先级以“是否影响当前页面的语义和一致性”为准。建议先建共享 icon registry，再逐页迁移。</p></div>
+      <div class="card inventory"><table><thead><tr><th>优先级</th><th>当前表现</th><th>出现位置</th><th>建议图标</th><th>处理说明</th></tr></thead><tbody>
+        <tr><td><span class="priority p0">P0</span></td><td><strong>旧 sparkle</strong></td><td>Node Auto 总览悬浮入口</td><td><span class="icon-pair"><svg class="icon"><use href="#receipt-text"/></svg>ReceiptText</span></td><td>与画板定稿对齐；悬浮按钮保留 34px 圆角方形。</td></tr>
+        <tr><td><span class="priority p0">P0</span></td><td><strong>✦</strong></td><td>Auto 分组、AutoBadge</td><td><span class="icon-pair"><svg class="icon"><use href="#bot"/></svg>Bot <span class="arrow">+</span> <svg class="icon"><use href="#sparkles"/></svg>Sparkles</span></td><td>普通 Agent 与 Auto Agent 只增加小 sparkle 角标，不改变主体轮廓。</td></tr>
+        <tr><td><span class="priority p0">P0</span></td><td><strong>✎ / ×</strong></td><td>Auto 条目重命名、删除</td><td><span class="icon-pair"><svg class="icon"><use href="#pencil"/></svg>Pencil <span class="arrow">/</span> <svg class="icon icon-danger"><use href="#trash-2"/></svg>Trash2</span></td><td>操作按钮使用 tooltip；危险删除沿用 danger 色，不使用红色文字堆叠。</td></tr>
+        <tr><td><span class="priority p0">P0</span></td><td><strong>! / ✓</strong></td><td>错误系统、Linux 通道、Composer</td><td><span class="icon-pair"><svg class="icon icon-warn"><use href="#triangle-alert"/></svg>TriangleAlert <span class="arrow">/</span> <svg class="icon icon-success"><use href="#circle-check"/></svg>CircleCheck</span></td><td>警告与成功状态必须有颜色和 aria-label 双重表达。</td></tr>
+        <tr><td><span class="priority p1">P1</span></td><td><strong>⌃ / 下拉</strong></td><td>Todo 面板、状态选择器</td><td><span class="icon-pair"><svg class="icon"><use href="#chevron-down"/></svg>ChevronDown / ChevronUp</span></td><td>折叠状态仅旋转图标，避免上下箭头在小尺寸下难以辨认。</td></tr>
+        <tr><td><span class="priority p1">P1</span></td><td><strong>⌘ / M</strong></td><td>MCP、记忆冲突、Transfer 状态</td><td><span class="icon-pair"><svg class="icon"><use href="#plug"/></svg>Plug <span class="arrow">/</span> <svg class="icon"><use href="#brain-circuit"/></svg>BrainCircuit</span></td><td>把“连接”和“记忆”从抽象字母改成可识别的线性图标。</td></tr>
+        <tr><td><span class="priority p1">P1</span></td><td><strong>+</strong></td><td>Manage 新建工作组、LLM 配置、案例库</td><td><span class="icon-pair"><svg class="icon"><use href="#circle-plus"/></svg>CirclePlus</span></td><td>按钮主操作使用 CirclePlus；纯文本加号只保留在数学/版本内容中。</td></tr>
+        <tr><td><span class="priority p2">P2</span></td><td><strong>inline SVG</strong></td><td>NavRail、Composer、Workbench、Manage 顶栏</td><td><span class="icon-pair"><svg class="icon"><use href="#settings"/></svg>共享 registry</span></td><td>现有路径可继续复用，统一由 Icon 组件输出尺寸、描边与 aria-hidden。</td></tr>
+        <tr><td><span class="priority p2">P2</span></td><td><strong>品牌雪花</strong></td><td>程序图标、托盘、Manage 品牌位</td><td>保留现有 PNG</td><td>品牌图片不纳入 Lucide 生产按钮图标，避免把 logo 当功能控件。</td></tr>
+      </tbody></table></div>
+      <p class="note">代码扫描覆盖了 Node 侧 23 个、Manage 侧 7 个含 inline SVG 的 Vue 文件；另有关闭按钮、工具确认态等字符图标已在上表合并统计。已有官方 Lucide SVG 已落在 <span class="code">docs/design/dagents-icons/lucide/</span>；本稿不再新增生产 SVG，只描述迁移顺序。</p>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>统一色彩与尺寸 token</h2><p>Node 与 Manage 可以使用不同画布，但交互语义、品牌强调色和 Auto 状态色应共享。</p></div>
+      <div class="tokens">
+        <div class="token"><div class="swatch" style="background:#1598b7"></div><b>Brand</b><span>#1598B7</span></div>
+        <div class="token"><div class="swatch" style="background:#7869db"></div><b>Auto</b><span>#7869DB</span></div>
+        <div class="token"><div class="swatch" style="background:#198b65"></div><b>Success</b><span>#198B65</span></div>
+        <div class="token"><div class="swatch" style="background:#b4771f"></div><b>Warning</b><span>#B4771F</span></div>
+        <div class="token"><div class="swatch" style="background:#bd4f5b"></div><b>Danger</b><span>#BD4F5B</span></div>
+        <div class="token"><div class="swatch" style="background:#f3f7fb"></div><b>Node canvas</b><span>#F3F7FB</span></div>
+        <div class="token"><div class="swatch" style="background:#fbfaf8"></div><b>Manage canvas</b><span>#FBFAF8</span></div>
+        <div class="token"><div class="swatch" style="background:#dce6ee"></div><b>Border</b><span>#DCE6EE</span></div>
+      </div>
+      <div class="callout" style="margin-top:15px"><svg class="icon icon-brand icon-lg"><use href="#settings"/></svg><div><strong>建议的基础规则</strong>8px 间距网格；卡片圆角 12–16px；控件最小高度 36px、主要按钮 40px；默认图标 18px、紧凑列表 16px；所有图标 round 描边 1.8px。Node 可切换深色主题，Manage 后续补齐同一 token 的深色映射。</div></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>页面方向稿</h2><p>以下是按真实页面骨架绘制的静态示意，用来验收密度、层级、图标位置和两端产品的差异。</p></div>
+      <div class="grid-2">
+        <article class="mock-shell"><div class="mock-label"><svg class="icon icon-brand"><use href="#bot"/></svg><b>Node · 对话与 Auto 入口</b><span>浅蓝画布 / 三组侧栏 / 悬浮总览</span></div><div class="node-mock"><aside class="node-side"><div class="brand-row"><span class="brand-mark"></span>DAgents</div><div class="group-title">智能体 <span>5</span></div><div class="side-item active"><svg class="icon"><use href="#bot"/></svg>通用助手<span class="count">在线</span></div><div class="side-item"><svg class="icon"><use href="#bot"/></svg>研究助手</div><div class="group-title">工作组 <span>0</span></div><div class="side-item"><svg class="icon"><use href="#network"/></svg>暂无工作组</div><div class="group-title">自主智能体 <span>2</span></div><div class="side-item"><svg class="icon icon-auto"><use href="#bot"/></svg>每日整理<span class="count" style="color:var(--auto)">Auto</span></div><div class="side-bottom">● Node 在线　◐　<svg class="icon" style="width:14px;height:14px"><use href="#settings"/></svg></div></aside><div class="node-main"><div class="mock-top"><div><h3>通用助手</h3><span style="color:var(--ink-faint);font-size:11px">普通 Agent · 工作区 / docs</span></div><button class="circle-button" aria-label="Auto 总览"><svg class="icon"><use href="#receipt-text"/></svg></button></div><div class="node-empty"><div><div class="empty-icon"><svg class="icon icon-lg"><use href="#bot"/></svg><svg class="icon" style="position:absolute;transform:translate(13px,13px);color:var(--auto)"><use href="#sparkles"/></svg></div><b>开始与智能体对话</b><span>输入任务，或从右上角查看 Auto 总览</span></div></div></div></div></article>
+        <article class="mock-shell"><div class="mock-label"><svg class="icon icon-brand"><use href="#settings"/></svg><b>Node · 设置的一配置一行</b><span>标签与帮助左侧 / 控件右侧</span></div><div class="settings-mock"><aside class="settings-nav"><h4>设置</h4><div class="group-title">工作区</div><div class="side-item active"><svg class="icon"><use href="#settings"/></svg>通用</div><div class="side-item">模型与连接</div><div class="group-title">智能体与自动化</div><div class="side-item"><svg class="icon"><use href="#bot"/></svg>智能体列表</div><div class="side-item"><svg class="icon icon-auto"><use href="#receipt-text"/></svg>定时任务</div><div class="group-title">支持</div><div class="side-item"><svg class="icon"><use href="#message-square"/></svg>帮助与反馈</div></aside><div class="settings-content"><h3>Auto 智能体配置</h3><p>每日整理 · 自主激活与长期记忆</p><div class="form-row"><label>智能体类型<span>决定侧边栏标识与默认行为</span></label><div class="control inline">Auto Agent（自主任务）<svg class="icon"><use href="#chevron-down"/></svg></div></div><div class="form-row"><label>自主激活频率<span>同步到该 agent 的默认 trigger</span></label><div class="control inline">每天 09:00 <svg class="icon"><use href="#chevron-down"/></svg></div></div><div class="form-row"><label>待办清单<span>激活时自动读取，可由双方修改</span></label><div class="control">3 项进行中 · 打开 Todo 编辑</div></div><div class="form-row"><label>每日 dreaming<span>只在 dreaming 中更新经验字段</span></label><div class="switch"><i></i></div></div></div></div></article>
+        <article class="mock-shell"><div class="mock-label"><svg class="icon" style="color:#a77a42"><use href="#network"/></svg><b>Manage · 总览与治理</b><span>暖白工作台 / 指标 / 模块卡</span></div><div class="manage-mock"><nav class="manage-top"><div class="manage-brand"><span class="brand-mark" style="background:linear-gradient(145deg,#f4e6d2,#d4b27d)"></span>Manage</div><div class="manage-nav"><span class="active">工作组</span><span>能力市场</span></div><svg class="icon"><use href="#settings"/></svg></nav><div class="manage-body"><h3>OVERVIEW</h3><p>跨 Node 管理运行时资源与 Auto 员工</p><div class="metric-row"><div class="metric"><span>在线 Node</span><b>08</b></div><div class="metric"><span>注册合计</span><b>24</b></div><div class="metric"><span>活跃工作组</span><b>03</b></div></div><div class="manage-cards"><div class="manage-card"><div class="card-icon"><svg class="icon"><use href="#network"/></svg></div><b>工作组</b><span>成员、任务与协作状态</span></div><div class="manage-card auto"><div class="card-icon"><svg class="icon"><use href="#receipt-text"/></svg></div><b>Auto 员工</b><span>岗位状态、待办与最近上报</span></div></div></div></div></article>
+        <article class="mock-shell"><div class="mock-label"><svg class="icon icon-auto"><use href="#receipt-text"/></svg><b>Manage · Auto 与反馈列表</b><span>过滤条 / 状态 chip / 紧凑表格</span></div><div class="manage-mock"><div class="manage-body"><div class="mock-top"><div><h3 style="font-size:20px">Auto 员工</h3><p style="margin:3px 0 0">跨 Node 查看岗位状态、待办与最近上报</p></div><button class="circle-button"><svg class="icon"><use href="#refresh-cw"/></svg></button></div><div class="control inline" style="margin-top:17px"><span><svg class="icon" style="width:14px;height:14px"><use href="#search"/></svg> 搜索员工或 Node</span><span>状态：全部 <svg class="icon" style="width:14px;height:14px"><use href="#chevron-down"/></svg></span></div><div class="card" style="margin-top:10px;overflow:hidden"><table><thead><tr><th>员工</th><th>状态</th><th>待办</th><th>最近上报</th></tr></thead><tbody><tr><td><strong><svg class="icon icon-auto" style="width:15px;height:15px"><use href="#bot"/></svg> 每日整理</strong><br><span style="font-size:10px;color:var(--ink-faint)">Node / docs</span></td><td><span class="priority" style="color:var(--success);background:var(--success-soft)"><svg class="icon" style="width:12px;height:12px"><use href="#circle-check"/></svg> 运行中</span></td><td>3</td><td>2 分钟前</td></tr><tr><td><strong><svg class="icon icon-auto" style="width:15px;height:15px"><use href="#bot"/></svg> 资料巡检</strong><br><span style="font-size:10px;color:var(--ink-faint)">Node / research</span></td><td><span class="priority" style="color:var(--warning);background:var(--warning-soft)"><svg class="icon" style="width:12px;height:12px"><use href="#triangle-alert"/></svg> 待处理</span></td><td>7</td><td>1 小时前</td></tr></tbody></table></div></div></div></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>实施顺序</h2><p>这份稿子可以直接作为下一轮 UI 改造的验收顺序。</p></div>
+      <div class="rules">
+        <div class="rule"><div class="rule-num">01</div><div><b>建立 Icon registry</b><p>封装统一 Icon 组件，先覆盖 P0 字符图标；所有图标提供 aria-hidden 与 tooltip 入口。</p></div></div>
+        <div class="rule"><div class="rule-num">02</div><div><b>修正 Node 侧关键入口</b><p>Auto 总览改用 ReceiptText；Auto Agent 用 Bot + Sparkles 角标；保留品牌 PNG，仅用于品牌位。</p></div></div>
+        <div class="rule"><div class="rule-num">03</div><div><b>收敛布局 token</b><p>按一配置一行、列表筛选条、表格行高和 8px 网格调整 Node 设置与 Manage 空状态。</p></div></div>
+        <div class="rule"><div class="rule-num">04</div><div><b>补一次真实数据视觉验收</b><p>Node 注册到 Manage 后，用至少一个普通 Agent、一个 Auto Agent、一个反馈和一个工作组复核状态色、截断和空/满状态。</p></div></div>
+      </div>
+    </section>
+
+    <div class="footer">设计范围：Node 与 Manage 的图标覆盖、颜色、密度和页面骨架审计。此稿只用于评审，未直接修改生产页面；生产图标迁移以 <span class="code">docs/design/dagents-icons/lucide/</span> 为来源。</div>
+  </main>
+</body>
+</html>

@@ -11,15 +11,15 @@
 | Node、Manage、desktop inline SVG | 82 个 `<svg>` 标签，分布在 31 个源码文件 | 映射到本画板的语义 key；后续按组件迁移 |
 | Unicode / 字符图标与 CSS 伪元素 | 49 个包含候选字符的源码文件 | 将功能性字符替换为 SVG；纯文本符号、数学/日志内容继续保留 |
 | 工具来源图标 | `ToolGroupIcon.vue` 的 bash、terminal、browser、child、computer、mcp、linux、fs、hitl、memory、skills、triggers、wecom、wrench | 通用工具使用本系统；企业微信等第三方品牌保留 |
-| 品牌图片 | `@dagents-brand/brand-icon.png`（源文件：`shared/branding/brand-icon.png`）在 Node、Manage 的品牌、空状态、活动状态中复用 | SVG `brand-snowflake` 对齐现有白色六臂外轮廓；正式迁移前继续保留 PNG |
+| 品牌图片 | `@dagents-brand/brand-icon.png`（源文件：`shared/branding/brand-icon.png`）在 Node、Manage 的品牌、空状态、活动状态中复用 | 品牌雪花仅使用现有 PNG；不纳入功能 SVG 图标迁移 |
 
 ### 迁移边界
 
-`brand-snowflake`、`agent`、`workgroup`、`auto`、工具和状态图标适合逐步替换现有 inline SVG。`create`、`search`、`more`、`close`、`expand`、`collapse`、`success` 等适合替换侧边栏、设置页、对话操作中的字符或 CSS 伪元素。第三方标识和数据来源标识不得用通用图标冒充：DeepSeek、OpenAI、Mimo、企业微信以及未来接入的品牌/数据源图标继续使用其品牌资源或专用徽标。
+`agent`、`workgroup`、`auto`、工具和状态图标适合逐步替换现有 inline SVG。`create`、`search`、`more`、`close`、`expand`、`collapse`、`success` 等适合替换侧边栏、设置页、对话操作中的字符或 CSS 伪元素。品牌雪花继续直接复用 `shared/branding/brand-icon.png`，不作为功能 SVG 迁移。第三方标识和数据来源标识不得用通用图标冒充：DeepSeek、OpenAI、Mimo、企业微信以及未来接入的品牌/数据源图标继续使用其品牌资源或专用徽标。
 
-### 品牌对齐与变体
+### 品牌资源边界
 
-`brand-snowflake` 严格取自 `shared/branding/brand-icon.png` 的真实外边界：保留六臂、宽圆角和每个臂上的分叉 / 凹口，只保留一个平滑 contour，不包含眼睛、笑脸、中心圆或其他内部装饰。画板同时提供 `i-brand-snowflake`（24px 正式版）与 `i-brand-snowflake-16`（16px 简化版），两者均为单一外轮廓；独立资产位于 `docs/design/dagents-icons/brand-snowflake.svg` 与 `brand-snowflake-16.svg`，使用 `currentColor`；两者均为 `fill="none"`、`stroke="currentColor"` 的透明外轮廓描边。品牌轮廓的描边是识别特例，功能图标使用 2px 主线。它们只用于品牌锚点，不用于 Auto 或普通功能。
+品牌雪花沿用 `shared/branding/brand-icon.png` 的原始图像，用于程序图标、托盘图标、启动页、favicon 和其他品牌展示。它不进入功能 SVG 图标画板、key、alias 或独立 SVG 资产目录；Auto、普通 Agent 和其他功能图标也不复用完整雪花轮廓。功能图标使用 2px 主线并通过 `currentColor` 继承主题色。
 
 下表中的 alias/variant 共享同一几何，不会因为导航位置而引入第二套图标：
 
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | `nav-agents` → `agent` | nav variant | 导航可加列表容器，Agent 对象保持单人头像 |
 | `nav-workgroups` → `workgroup` | nav variant | 导航可加容器，工作组对象保持三节点拓扑 |
-| `nav-auto` → `auto` | nav variant | 导航可加脉冲/分组提示，Auto 对象保持轨道 + Agent 节点 |
+| `nav-auto` → `auto` | nav variant | 导航可加分组提示，Auto 对象复用 Bot 并叠加 Sparkles 识别点 |
 | `tool-skills` → `skills` | alias | 使用同一星形能力图标，工具来源由文案或外层徽标说明 |
 | `tool-memory` → `memory` | alias | 使用同一书签记忆图标，工具来源由文案或外层徽标说明 |
 | `expand-collapse` → `expand` + `collapse` | legacy alias | 旧调用映射到两个状态 key，画板已拆分为上下两个操作语义 |
@@ -40,7 +40,6 @@
 
 | key | 语义 | 使用位置 | 替换现有 |
 | --- | --- | --- | --- |
-| `brand-snowflake` | 现有 PNG 对齐的白色六臂外轮廓 | Node / Manage 品牌、启动页、favicon | `docs/design/dagents-icons/brand-snowflake.svg`；保留当前 PNG 直到 SVG 资源迁移 |
 | `nav-agents` | 智能体分组（`agent` 的 nav variant） | Node `NavRail.vue` | 是，替换字符/通用轮廓 |
 | `nav-workgroups` | 工作组分组（`workgroup` 的 nav variant） | Node `NavRail.vue`、Manage 工作组页 | 是 |
 | `nav-auto` | 自主智能体分组（`auto` 的 nav variant） | Node `NavRail.vue`、Auto 入口 | 是，使用轨道/脉冲，不使用完整雪花 |
@@ -58,8 +57,8 @@
 | key | 语义 | 使用位置 | 替换现有 |
 | --- | --- | --- | --- |
 | `agent` | 普通智能体 | Agent 列表、空状态、设置页 | 是 |
-| `auto` | 自主智能体 | `AutoBadge.vue`、Agent 类型标识 | 是，使用轨道 + 中央 Agent 节点 + 唤醒脉冲 |
-| `auto-overview` | Auto 总览 / 多 Agent 仪表盘 | Node Auto 总览页、侧栏 section action | 是，使用多节点面板 |
+| `auto` | 自主智能体 | `AutoBadge.vue`、Agent 类型标识 | 是，复用 Bot 主体并叠加 Sparkles 识别点 |
+| `auto-overview` | Auto 总览 / 任务回执 | Node Auto 总览页、侧栏 section action | 是，直接复用 Lucide `ReceiptText`，表达任务记录 / 回执式总览 |
 | `wake-trigger` | 自主激活频率与 Trigger | Agent autonomy 设置、Trigger 设置 | 是，使用时钟 + 唤醒箭头 |
 | `dreaming` | 每日经验整理 | dreaming 设置、运行状态 | 是 |
 | `experience-handbook` | 经验索引与手册目录 | Agent 手册面板、文件系统手册 | 是 |
@@ -126,7 +125,7 @@
 
 ## 保留例外
 
-- `@dagents-brand/brand-icon.png`：当前 Node、Manage 品牌、空状态和活动指示器使用的现有品牌资源，待品牌资源统一后再切换 SVG。
+- `@dagents-brand/brand-icon.png`：当前 Node、Manage 品牌、空状态、程序图标、托盘图标和活动指示器使用的现有品牌资源；品牌雪花保持 PNG-only，不迁移为功能 SVG。
 - `DeepSeek`、`OpenAI`、`Mimo` 等 LLM provider 标识：这是供应商身份和数据来源，保留文字或供应商专用徽标，不用 `model` 图标代替。
 - 企业微信 `wecom`、未来的 GitHub/GitLab 或其他外部连接器徽标：保留第三方品牌规范；系统图标只表示“连接器/工具”这一层语义。
 - 工具结果中的 `×`、`·`、乘法/尺寸符号和日志正文中的普通字符：如果它们是数据内容而不是操作控件，不进行图标替换。
@@ -146,7 +145,7 @@
 
 ## 视觉规则
 
-- 品牌雪花采用现有 PNG 的六臂宽圆角外轮廓，设计资产不包含脸部或中心装饰；功能图标再使用 60° 晶体节点作为局部 DNA，避免把完整雪花机械贴到每个 key。
-- Auto 使用轨道、中央 Agent 节点和唤醒脉冲表达“持续检查—唤醒”，不使用眼睛 / 行星式中心；`wake-trigger` 保留时钟与唤醒箭头，`pending` 使用进度弧与三点并弱化方向标记，Dreaming 使用月牙和晶体星点，工作组使用三个同等节点，子 Agent 使用大父节点、小子节点和父子箭头，模型使用芯片与层级引脚，MCP 使用插头/端口。
+- 品牌展示直接使用现有 PNG；功能图标再使用 60° 晶体节点作为局部 DNA，避免把完整雪花机械贴到每个 key。
+- Auto 复用普通 Agent 的 Bot 主体，并叠加轻量 Sparkles 识别自主循环；唤醒语义由独立的 `wake-trigger` 时钟图标承担，不使用眼睛 / 行星式中心；`pending` 使用进度弧与三点并弱化方向标记，Dreaming 使用月牙和晶体星点，工作组使用三个同等节点，子 Agent 使用大父节点、小子节点和父子箭头，模型使用芯片与层级引脚，MCP 使用插头/端口。
 - 图标只描述一个动作或对象，冷蓝用于导航、工具与 Manage，靛紫只用于 Auto 自主性，绿色用于可执行/成功，暖色用于警告/Dreaming，蓝灰用于 pending，红色用于错误/破坏性动作。
 - 组件通过 `currentColor` 控制状态和主题色；不要在图标内部写死产品主题色。点击目标由外层按钮提供，SVG 保持 `aria-hidden="true"`，可访问名称由按钮的 `aria-label` 提供。
