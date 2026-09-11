@@ -131,20 +131,42 @@ def prepare(version: str, summary: str, release_date: str) -> None:
 
     if not canonical_version.strip():
         raise ValueError(f"{CANONICAL_VERSION_FILE} is empty")
-    readme_updated = replace_once(
-        readme,
-        r"release-v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?-green",
-        f"release-v{version}-green",
-        "README release badge",
-        README_FILE,
+    # README previously used a static shields badge containing the version.
+    # It now uses GitHub's dynamic latest-release badge, so accept either form
+    # while keeping an explicit current-version marker for release validation.
+    readme_updated = readme
+    static_badge = re.search(
+        r"release-v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?-green", readme_updated
     )
-    readme_updated = replace_once(
-        readme_updated,
-        r"当前版本为 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*",
-        f"当前版本为 **v{version}**",
-        "README current version",
-        README_FILE,
-    )
+    if static_badge:
+        readme_updated = replace_once(
+            readme_updated,
+            r"release-v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?-green",
+            f"release-v{version}-green",
+            "README release badge",
+            README_FILE,
+        )
+    elif not re.search(r"github/v/release/[^\"\s]+", readme_updated):
+        raise ValueError(f"README release badge: no static or dynamic release badge found in {README_FILE}")
+
+    current_marker = r"当前版本为 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*"
+    if re.search(current_marker, readme_updated):
+        readme_updated = replace_once(
+            readme_updated,
+            current_marker,
+            f"当前版本为 **v{version}**",
+            "README current version",
+            README_FILE,
+        )
+    else:
+        badge_block = re.search(r"(<p align=\"center\">(?:(?!</p>).)*Latest release(?:(?!</p>).)*</p>)", readme_updated, re.S)
+        if not badge_block:
+            raise ValueError(f"README current version: no release badge block found in {README_FILE}")
+        readme_updated = (
+            readme_updated[: badge_block.end()]
+            + f"\n\n当前版本为 **v{version}**"
+            + readme_updated[badge_block.end() :]
+        )
     handbook_updated = replace_once(
         handbook,
         r"当前发布 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*",
