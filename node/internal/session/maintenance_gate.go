@@ -22,7 +22,7 @@ type agentExecutionGate struct {
 }
 
 type maintenanceLeaseKey struct{}
-type maintenanceLeaseToken struct{}
+type maintenanceLeaseToken struct{ marker *byte }
 
 func newAgentExecutionGate() *agentExecutionGate {
 	return &agentExecutionGate{runtimes: make(map[*runtime]struct{}), wake: make(chan struct{}, 1)}
@@ -93,7 +93,7 @@ func (g *agentExecutionGate) acquireMaintenanceContext(ctx context.Context) (con
 	// The opaque lease marker proves ownership.  Observing maintenance=true is
 	// insufficient because any caller could otherwise run against another
 	// caller's lease.
-	lease := &maintenanceLeaseToken{}
+	lease := &maintenanceLeaseToken{marker: new(byte)}
 	leaseCtx = context.WithValue(leaseCtx, maintenanceLeaseKey{}, lease)
 	g.maintenance = true
 	g.maintenanceCancel = cancel
@@ -169,7 +169,7 @@ func (g *agentExecutionGate) owns(ctx context.Context) bool {
 		return false
 	}
 	v, ok := ctx.Value(maintenanceLeaseKey{}).(*maintenanceLeaseToken)
-	if !ok || v == nil {
+	if !ok || v == nil || v.marker == nil {
 		return false
 	}
 	g.mu.Lock()
