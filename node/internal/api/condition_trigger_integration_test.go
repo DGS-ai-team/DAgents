@@ -66,6 +66,17 @@ func TestConditionTriggerHTTPApprovalExecutesOnce(t *testing.T) {
 		agents.Close()
 		t.Fatal(err)
 	}
+	// Runtime hydration rebuilds the session from the Agent snapshot and the
+	// persisted Agent policy. Keep that durable policy aligned with the
+	// injected policy used by this integration test so approval behavior stays
+	// deterministic across the reload boundary.
+	policyTools, policyShell := policy.MapsToStringMaps(pol.ExportMaps())
+	if err := agents.SaveAgentPolicy(context.Background(), store.AgentPolicyRecord{
+		AgentID: cfg.NodeID, Tools: policyTools, Shell: policyShell, UpdatedAt: now,
+	}); err != nil {
+		agents.Close()
+		t.Fatal(err)
+	}
 	if err := agents.Close(); err != nil {
 		t.Fatal(err)
 	}
