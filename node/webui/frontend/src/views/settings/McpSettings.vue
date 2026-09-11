@@ -334,7 +334,7 @@ onMounted(() => {
       <div v-else-if="!activeTools.length" class="mcp-settings__empty settings-empty-state">没有匹配的工具。</div>
       <div v-else class="mcp-settings__tool-list">
         <label v-for="tool in activeTools" :key="tool.name" class="mcp-settings__tool-row">
-          <input type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
+          <input class="settings-switch-input" type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
           <span>
             <code>{{ tool.name }}</code>
             <small v-if="tool.description">{{ tool.description }}</small>
