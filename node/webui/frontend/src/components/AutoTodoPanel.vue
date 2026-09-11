@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({ agentId: { type: String, required: true } });
 const open = ref(false);
@@ -83,7 +84,7 @@ onBeforeUnmount(() => window.removeEventListener("dagents:agent-turn-finished", 
 
 <template>
   <section class="auto-todo-panel">
-    <button class="auto-todo-panel__heading" type="button" :aria-expanded="open" @click="toggleOpen"><span><span class="settings-kicker">Auto 专属</span><strong>待办事项</strong></span><span aria-hidden="true">{{ open ? "⌃" : "⌄" }}</span></button>
+    <button class="auto-todo-panel__heading" type="button" :aria-expanded="open" @click="toggleOpen"><span><span class="settings-kicker">Auto 专属</span><strong>待办事项</strong></span><UiIcon :name="open ? 'chevron-up' : 'chevron-down'" :size="16" /></button>
     <div v-if="open" class="auto-todo-panel__body">
       <p v-if="error" class="error" role="alert">{{ error }} <button type="button" class="btn btn--ghost" :disabled="saving || loading" @click="reload">重试</button></p>
       <p v-if="conflict" class="error" role="alert">{{ conflict }} <button type="button" class="btn btn--ghost" :disabled="saving" @click="reload">重新加载</button></p>

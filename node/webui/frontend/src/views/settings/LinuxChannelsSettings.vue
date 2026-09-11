@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const channels = ref([]);
@@ -299,7 +300,9 @@ onMounted(() => void load());
           class="linux-settings__stage"
           :class="`linux-settings__stage--${stage.status}`"
         >
-          <span class="linux-settings__stage-mark" aria-hidden="true">{{ stage.status === "passed" ? "✓" : "!" }}</span>
+          <span class="linux-settings__stage-mark" aria-hidden="true">
+            <UiIcon :name="stage.status === 'passed' ? 'check' : 'alert'" :size="12" />
+          </span>
           <span class="linux-settings__stage-name">{{ stage.name }}</span>
           <span class="linux-settings__stage-message">{{ stage.message || "完成" }}</span>
           <span class="linux-settings__stage-duration">{{ stage.duration_ms || 0 }}ms</span>
@@ -349,7 +352,7 @@ onMounted(() => void load());
       <section class="linux-settings__modal" role="dialog" aria-modal="true" aria-labelledby="credential-form-title">
         <div class="linux-settings__modal-head">
           <div><h2 id="credential-form-title">新增凭据</h2><p>保存后会自动生成唯一凭据 ID。</p></div>
-          <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeCredentialForm">×</button>
+          <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeCredentialForm"><UiIcon name="close" :size="16" /></button>
         </div>
         <div class="linux-settings__editor">
           <div class="linux-settings__field">
@@ -397,7 +400,7 @@ onMounted(() => void load());
       <section class="linux-settings__modal linux-settings__modal--wide" role="dialog" aria-modal="true" aria-labelledby="channel-form-title">
         <div class="linux-settings__modal-head">
           <div><h2 id="channel-form-title">{{ editingChannelId ? "编辑 SSH 通道" : "新增 SSH 通道" }}</h2><p>{{ editingChannelId ? `正在修改通道 ${editingChannelId}` : "通道 ID由系统自动生成，一个通道代表一台远程主机。" }}</p></div>
-          <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeChannelForm">×</button>
+          <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeChannelForm"><UiIcon name="close" :size="16" /></button>
         </div>
         <div class="linux-settings__channel-editor">
           <div class="linux-settings__group">

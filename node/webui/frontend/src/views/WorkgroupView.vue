@@ -11,6 +11,7 @@ import WorkgroupDebugPanel from "../components/WorkgroupDebugPanel.vue";
 import WorkgroupToolRow from "../components/WorkgroupToolRow.vue";
 import WorkgroupComposer from "../components/WorkgroupComposer.vue";
 import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
+import UiIcon from "../components/UiIcon.vue";
 import ScrollToTailButton from "../components/ScrollToTailButton.vue";
 import { useWorkgroupTimeline } from "../composables/useWorkgroupTimeline.js";
 import { renderMarkdown } from "../utils/markdown.js";
@@ -1434,7 +1435,7 @@ onUnmounted(() => {
                     v-if="String(cfg.id) === String(workgroupMeta?.llm_profile_id || '')"
                     class="wg-chat__model-option-check"
                     aria-hidden="true"
-                  >✓</span>
+                  ><UiIcon name="check" :size="14" /></span>
                 </button>
               </div>
             </div>
@@ -1538,9 +1539,7 @@ onUnmounted(() => {
                                 : item.taskPreview
                             }}
                           </span>
-                          <span class="wg-task__chevron" aria-hidden="true">
-                            {{ isAssignTaskExpanded(item.taskToggleKey) ? "▾" : "▸" }}
-                          </span>
+                          <UiIcon class="wg-task__chevron" :name="isAssignTaskExpanded(item.taskToggleKey) ? 'chevron-down' : 'chevron-right'" :size="14" />
                         </button>
                         <span class="wg-task__status">
                           <BrandActivityIndicator
@@ -1550,8 +1549,8 @@ onUnmounted(() => {
                             :show-label="false"
                             compact
                           />
-                          <span v-if="item.done && !item.failed" class="wg-task__check" aria-hidden="true">✓</span>
-                          <span v-else-if="item.failed" class="wg-task__mark" aria-hidden="true">−</span>
+                          <UiIcon v-if="item.done && !item.failed" class="wg-task__check" name="check" :size="14" />
+                          <UiIcon v-else-if="item.failed" class="wg-task__mark" name="close" :size="14" />
                           {{ item.statusText }}
                         </span>
                       </div>
@@ -1605,9 +1604,7 @@ onUnmounted(() => {
                           >
                             {{ item.reportPreview }}
                           </span>
-                          <span class="wg-task__report-chevron" aria-hidden="true">
-                            {{ isMemberReportExpanded(item.reportToggleKey) ? "▾" : "▸" }}
-                          </span>
+                          <UiIcon class="wg-task__report-chevron" :name="isMemberReportExpanded(item.reportToggleKey) ? 'chevron-down' : 'chevron-right'" :size="14" />
                         </button>
                         <div
                           v-if="isMemberReportExpanded(item.reportToggleKey)"

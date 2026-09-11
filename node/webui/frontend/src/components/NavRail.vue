@@ -571,8 +571,8 @@ defineExpose({
         >
           <span class="nav-rail__section-icon" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <circle cx="8" cy="5.2" r="2.2" stroke="currentColor" stroke-width="1.2" />
-              <path d="M3.2 13.2c.6-2.4 2.4-3.6 4.8-3.6s4.2 1.2 4.8 3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+              <rect x="2.5" y="5" width="11" height="7.5" rx="2.4" stroke="currentColor" stroke-width="1.2" />
+              <path d="M8 2.5V5M5.5 8.5h.01M10.5 8.5h.01M5.5 10.7h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
             </svg>
           </span>
           <span class="nav-rail__section-title">智能体</span>
@@ -581,7 +581,12 @@ defineExpose({
             v-if="agentsLoadError && agentsLoaded"
             class="nav-rail__section-state nav-rail__section-state--error"
             title="智能体列表刷新失败，当前显示上次成功结果"
-          >!</span>
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+              <path d="M8 2.2 14 13H2L8 2.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+              <path d="M8 6v3M8 11.2v.01" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+            </svg>
+          </span>
         </button>
         <div class="nav-rail__section-actions">
         <button
@@ -708,7 +713,7 @@ defineExpose({
               @click="onDeleteAgent(a)"
             >
               <svg v-if="deletingId !== agentRecordId(a)" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.5h6V6.5M7 8v2.5M9 8v2.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
               <span v-else>…</span>
             </button>
@@ -755,7 +760,12 @@ defineExpose({
             v-if="workgroupsLoadError && workgroupsLoaded"
             class="nav-rail__section-state nav-rail__section-state--error"
             title="工作组列表刷新失败，当前显示上次成功结果"
-          >!</span>
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+              <path d="M8 2.2 14 13H2L8 2.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+              <path d="M8 6v3M8 11.2v.01" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+            </svg>
+          </span>
         </button>
         <div class="nav-rail__section-actions">
         <button
@@ -897,7 +907,7 @@ defineExpose({
               >
                 <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
                   <path
-                    d="M4.5 4.5l7 7M11.5 4.5l-7 7"
+                    d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.5h6V6.5M7 8v2.5M9 8v2.5"
                     fill="none"
                     stroke="currentColor"
                     stroke-width="1.3"
@@ -964,7 +974,7 @@ defineExpose({
                   >
                     <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
                       <path
-                        d="M4.5 4.5l7 7M11.5 4.5l-7 7"
+                        d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.5h6V6.5M7 8v2.5M9 8v2.5"
                         fill="none"
                         stroke="currentColor"
                         stroke-width="1.3"
@@ -998,7 +1008,12 @@ defineExpose({
         :class="{ 'nav-rail__section-head--actions-open': mobileActionOpen === 'autonomous' }"
       >
         <button type="button" class="nav-rail__section-toggle" :aria-expanded="sectionOpen.autonomous" @click="toggleSection('autonomous')">
-          <span class="nav-rail__section-icon" aria-hidden="true">✦</span>
+          <span class="nav-rail__section-icon nav-rail__section-icon--auto" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <path d="m8 1.8.85 2.55a1.8 1.8 0 0 0 1.15 1.15L12.55 6.35 10 7.2a1.8 1.8 0 0 0-1.15 1.15L8 10.9l-.85-2.55A1.8 1.8 0 0 0 6 7.2l-2.55-.85L6 5.5a1.8 1.8 0 0 0 1.15-1.15L8 1.8Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
+              <path d="m12.6 10.1.35 1.05a.8.8 0 0 0 .5.5l1.05.35-1.05.35a.8.8 0 0 0-.5.5l-.35 1.05-.35-1.05a.8.8 0 0 0-.5-.5l-1.05-.35 1.05-.35a.8.8 0 0 0 .5-.5l.35-1.05Z" stroke="currentColor" stroke-width=".95" stroke-linejoin="round" />
+            </svg>
+          </span>
           <span class="nav-rail__section-title">自主智能体</span>
           <span v-if="autonomousAgents.length" class="nav-rail__section-count">{{ autonomousAgents.length }}</span>
         </button>
@@ -1010,11 +1025,9 @@ defineExpose({
             aria-label="Auto 总览"
             @click.stop="mobileActionOpen = ''"
           >
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-              <path
-                d="m8 1.6 1.7 4.7L14.4 8l-4.7 1.7L8 14.4l-1.7-4.7L1.6 8l4.7-1.7L8 1.6Z"
-                fill="currentColor"
-              />
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
+              <path d="M4 2.5v19l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1v-19l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+              <path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
           </router-link>
         </div>
@@ -1045,8 +1058,17 @@ defineExpose({
             <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="智能体配置" aria-label="智能体配置" @click="openAgentSettings(a)">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.75"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V4a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 1-.33 1.82V9c.26.6.91 1 1.51 1H20a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="重命名" aria-label="重命名" @click="startRename(a)">✎</button>
-            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm nav-rail__icon-btn--danger" title="删除 Agent" aria-label="删除 Agent" :disabled="deletingId === agentRecordId(a)" @click="onDeleteAgent(a)">×</button>
+            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm" title="重命名" aria-label="重命名" @click="startRename(a)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+                <path d="M3.5 12.5 6 12l6.2-6.2a1.4 1.4 0 0 0-2-2L4 10l-.5 2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+              </svg>
+            </button>
+            <button type="button" class="nav-rail__icon-btn nav-rail__icon-btn--sm nav-rail__icon-btn--danger" title="删除 Agent" aria-label="删除 Agent" :disabled="deletingId === agentRecordId(a)" @click="onDeleteAgent(a)">
+              <svg v-if="deletingId !== agentRecordId(a)" viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+                <path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.5h6V6.5M7 8v2.5M9 8v2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span v-else aria-hidden="true">…</span>
+            </button>
           </div>
         </li>
         <li v-if="!autonomousAgents.length" class="nav-rail__empty">暂无自主智能体</li>

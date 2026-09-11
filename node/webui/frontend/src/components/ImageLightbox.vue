@@ -6,6 +6,7 @@ import {
   stepLightbox,
   currentLightboxItem,
 } from "../stores/lightbox.js";
+import UiIcon from "./UiIcon.vue";
 const current = computed(() => currentLightboxItem());
 const hasMany = computed(() => lightboxStore.items.length > 1);
 const counter = computed(() =>
@@ -40,7 +41,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
       aria-label="图片预览"
       @click.self="closeLightbox"
     >
-      <button type="button" class="image-lightbox__close" aria-label="关闭" @click="closeLightbox">×</button>
+      <button type="button" class="image-lightbox__close" aria-label="关闭" @click="closeLightbox"><UiIcon name="close" :size="18" /></button>
       <button
         v-if="hasMany"
         type="button"
@@ -48,7 +49,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         aria-label="上一张"
         @click="stepLightbox(-1)"
       >
-        ‹
+        <UiIcon name="chevron-left" :size="22" />
       </button>
       <figure class="image-lightbox__figure">
         <img class="image-lightbox__img" :src="current.src" :alt="current.alt || '图片'" />
@@ -64,7 +65,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         aria-label="下一张"
         @click="stepLightbox(1)"
       >
-        ›
+        <UiIcon name="chevron-right" :size="22" />
       </button>
     </div>
   </Teleport>

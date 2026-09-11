@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { extractUserInfo } from "../stores/hitl.js";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
 
 const props = defineProps({
   data: { type: Object, required: true },
@@ -39,7 +40,7 @@ function onMultiToggle(id, checked) {
       <div class="approval-bubble approval-bubble--user-info">
         <div class="tool-exec-bubble__source">
           <span class="tool-source-badge tool-source-badge--user" title="Agent 询问">
-            <span class="tool-source-badge__icon" aria-hidden="true">?</span>
+            <ToolGroupIcon class="tool-source-badge__svg" name="hitl" />
             <span class="tool-source-badge__text">Agent 询问</span>
           </span>
         </div>

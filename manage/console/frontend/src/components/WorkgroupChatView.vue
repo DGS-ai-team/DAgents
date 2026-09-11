@@ -26,6 +26,7 @@ import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } fr
 import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -2091,8 +2092,8 @@ onUnmounted(() => {
                           :show-label="false"
                           compact
                         />
-                        <span v-if="row.done && !row.failed" class="wg-task__check" aria-hidden="true">✓</span>
-                        <span v-else-if="row.failed" class="wg-task__mark" aria-hidden="true">−</span>
+                        <UiIcon v-if="row.done && !row.failed" class="wg-task__check" name="check" :size="14" />
+                        <UiIcon v-else-if="row.failed" class="wg-task__mark" name="close" :size="14" />
                         {{ row.statusText }}
                         <button
                           v-if="row.canCancel"
@@ -2211,8 +2212,8 @@ onUnmounted(() => {
                         <div class="wg-tool-row__bar">
                           <span class="wg-tool-row__glyph" aria-hidden="true">
                             <span v-if="step.inProgress" class="tool-exec-spinner" />
-                            <span v-else-if="step.failed" class="wg-tool-row__mark">−</span>
-                            <span v-else class="wg-tool-row__check">✓</span>
+                            <UiIcon v-else-if="step.failed" class="wg-tool-row__mark" name="close" :size="14" />
+                            <UiIcon v-else class="wg-tool-row__check" name="check" :size="14" />
                           </span>
                           <span class="wg-tool-row__text">{{ step.summary }}</span>
                           <span class="wg-tool-row__status">
@@ -2344,9 +2345,7 @@ onUnmounted(() => {
                         >
                           {{ row.reportPreview }}
                         </span>
-                        <span class="wg-task__report-chevron" aria-hidden="true">
-                          {{ isMemberReportExpanded(row.reportToggleKey) ? "▾" : "▸" }}
-                        </span>
+                        <UiIcon class="wg-task__report-chevron" :name="isMemberReportExpanded(row.reportToggleKey) ? 'chevron-down' : 'chevron-right'" :size="14" />
                       </button>
                       <div
                         v-if="isMemberReportExpanded(row.reportToggleKey)"
@@ -2367,8 +2366,8 @@ onUnmounted(() => {
                   <div class="wg-tool-row__bar">
                     <span class="wg-tool-row__glyph" aria-hidden="true">
                       <span v-if="row.inProgress" class="tool-exec-spinner" />
-                      <span v-else-if="row.failed" class="wg-tool-row__mark">−</span>
-                      <span v-else class="wg-tool-row__check">✓</span>
+                      <UiIcon v-else-if="row.failed" class="wg-tool-row__mark" name="close" :size="14" />
+                      <UiIcon v-else class="wg-tool-row__check" name="check" :size="14" />
                     </span>
                     <span class="wg-tool-row__text">{{ row.summary }}</span>
                     <span class="wg-tool-row__status">
@@ -2621,7 +2620,7 @@ onUnmounted(() => {
                 title="取消排队"
                 @click="removeQueued(item)"
               >
-                ×
+                <UiIcon name="close" :size="14" />
               </button>
             </template>
           </div>

@@ -292,7 +292,13 @@ onMounted(() => {
           :class="{ 'mcp-settings__server-card--active': activeServerId === server.id }"
           @click="selectServer(server)"
         >
-          <span class="mcp-settings__server-icon" aria-hidden="true">⌘</span>
+          <span class="mcp-settings__server-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+              <path d="M8 12h8M8 8h3M13 16h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M5 5h14v14H5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+              <path d="M3 8V6a1 1 0 0 1 1-1M21 16v2a1 1 0 0 1-1 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+            </svg>
+          </span>
           <span class="mcp-settings__server-main">
             <strong>{{ server.display_name || server.id }}</strong>
             <small>{{ server.id }} · {{ server.transport || "stdio" }}</small>
@@ -301,7 +307,11 @@ onMounted(() => {
             <span class="mcp-settings__status" :data-status="server.status">{{ server.status || "offline" }}</span>
             <small>{{ server.enabled_tool_count || 0 }} / {{ server.tool_count || 0 }} 个工具已启用</small>
           </span>
-          <span class="mcp-settings__server-arrow" aria-hidden="true">›</span>
+          <span class="mcp-settings__server-arrow" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <path d="m6 3 5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
         </button>
       </div>
     </section>

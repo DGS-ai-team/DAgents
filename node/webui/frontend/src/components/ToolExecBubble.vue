@@ -12,6 +12,8 @@ import { hasToolMedia, isShowImageTool } from "../utils/showImage.js";
 import { copyText } from "../utils/clipboard.js";
 import { buildToolCardModel } from "../utils/toolResultPresentation.js";
 import ToolCardFieldList from "./ToolCardFieldList.vue";
+import ToolGroupIcon from "./ToolGroupIcon.vue";
+import UiIcon from "./UiIcon.vue";
 
 const FOLD_LINE_THRESHOLD = 8;
 const FOLD_CHAR_THRESHOLD = 480;
@@ -140,6 +142,9 @@ const isUnsuccessfulResult = computed(() =>
   ),
 );
 const cardIsUnsuccessful = computed(() => ["danger", "warning"].includes(card.value.statusTone));
+const statusIconName = computed(() =>
+  isInterrupted.value || isUnsuccessfulResult.value || cardIsUnsuccessful.value ? "close" : "check",
+);
 const statusText = computed(() => {
   if (props.entry.sideEffectApplied) return "已入库";
   if (props.entry.sideEffectStale) return "已失效";
@@ -224,7 +229,7 @@ onBeforeUnmount(clearCopyState);
         <template v-if="!embedded">
           <div class="tool-exec-bubble__source">
             <span class="tool-source-badge" :class="`tool-source-badge--${visual.kind}`" :title="visual.label">
-              <span class="tool-source-badge__icon" aria-hidden="true">{{ visual.icon }}</span>
+              <ToolGroupIcon class="tool-source-badge__svg" :name="visual.kind" />
               <span class="tool-source-badge__text">{{ visual.label }}</span>
             </span>
           </div>
@@ -232,9 +237,14 @@ onBeforeUnmount(clearCopyState);
             <span class="tool-exec-bubble__name">{{ toolTitle }}</span>
             <span class="tool-exec-bubble__status" role="status" :aria-label="statusText">
               <span v-if="isGenerating" class="tool-exec-spinner" aria-hidden="true" />
-              <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{
-                  isInterrupted || isUnsuccessfulResult || cardIsUnsuccessful ? "−" : "✓"
-              }}</span>
+              <span
+                v-else
+                class="tool-exec-status-icon"
+                :class="statusIconName === 'check' ? 'tool-exec-status-icon--success' : 'tool-exec-status-icon--failure'"
+                aria-hidden="true"
+              >
+                <UiIcon :name="statusIconName" :size="12" />
+              </span>
               <span v-if="showStatusText">{{ statusText }}</span>
             </span>
           </div>

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: "" },
@@ -194,7 +195,7 @@ onBeforeUnmount(() => {
             v-if="opt.value === String(modelValue ?? '')"
             class="ui-select__option-check"
             aria-hidden="true"
-          >✓</span>
+          ><UiIcon name="check" :size="14" /></span>
         </button>
       </div>
     </Teleport>

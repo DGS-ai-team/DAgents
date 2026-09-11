@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -118,7 +119,7 @@ const rows = computed(() =>
       <div class="child-progress__purpose">
         <span class="child-progress__indicator" :class="{ 'child-progress__indicator--active': row.active }">
           <span v-if="row.active" class="child-progress__spinner" aria-hidden="true" />
-          <span v-else aria-hidden="true">✓</span>
+          <UiIcon v-else name="check" :size="14" />
         </span>
         <span class="child-progress__purpose-text" :title="row.purpose || row.childAgentId">
           {{ row.purpose || row.childAgentId }}
@@ -139,7 +140,7 @@ const rows = computed(() =>
               :class="{ 'child-progress__activity-indicator--active': activity.active }"
             >
               <span v-if="activity.active" class="child-progress__spinner" aria-hidden="true" />
-              <span v-else aria-hidden="true">✓</span>
+              <UiIcon v-else name="check" :size="14" />
             </span>
             <code class="child-progress__tool">{{ activity.toolName }}</code>
             <span v-if="activity.current" class="child-progress__current">当前</span>

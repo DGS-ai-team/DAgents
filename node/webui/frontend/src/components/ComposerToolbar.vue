@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { statusStore, hasStatus } from "../stores/statusLines.js";
 import { hasStreamingTextContent } from "../stores/transcript.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   llmSettings: { type: Object, default: null },
@@ -140,7 +141,7 @@ onBeforeUnmount(() => {
           @click="pickProfile(id)"
         >
           <span class="composer-toolbar__option-label">{{ id }}</span>
-          <span v-if="id === activeProfile" class="composer-toolbar__option-check" aria-hidden="true">✓</span>
+          <UiIcon v-if="id === activeProfile" class="composer-toolbar__option-check" name="check" :size="14" />
         </button>
       </div>
     </div>

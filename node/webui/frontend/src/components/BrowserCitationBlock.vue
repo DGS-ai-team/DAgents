@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   refs: { type: Array, default: () => [] },
@@ -67,7 +68,7 @@ function openShots(ref, index) {
         <span class="browser-cite__badge">{{ outcomeLabel(ref) }}</span>
         <span class="browser-cite__summary">{{ truncate(ref.summary) }}</span>
         <span v-if="shotList(ref).length" class="browser-cite__shots-n">{{ shotList(ref).length }} 图</span>
-        <span class="browser-cite__chev" aria-hidden="true">{{ openKey === (ref.key || idx) ? "▾" : "▸" }}</span>
+        <UiIcon class="browser-cite__chev" :name="openKey === (ref.key || idx) ? 'chevron-down' : 'chevron-right'" :size="14" />
       </button>
       <div v-if="openKey === (ref.key || idx)" class="browser-cite__body">
         <p v-if="ref.task" class="browser-cite__row">
