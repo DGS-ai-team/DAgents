@@ -217,6 +217,37 @@ paths:
       responses:
         "200":
           description: OK
+  /v1/agents/{agent_id}/policy/grants:
+    get:
+      x-contract-status: surface-only
+      summary: 读取 Agent 的工作区授权
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 授权列表
+    post:
+      x-contract-status: surface-only
+      summary: 创建 Agent 的工作区授权
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "201":
+          description: 授权已创建
+  /v1/agents/{agent_id}/policy/grants/{grant_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: 撤销 Agent 的工作区授权
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: grant_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 授权已撤销
   /v1/agents/{agent_id}/prompt-context:
     get:
       summary: 读取 Agent prompt context（soul/custom/memory，SQLite）
