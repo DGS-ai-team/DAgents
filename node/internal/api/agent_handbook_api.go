@@ -49,7 +49,14 @@ func (s *Server) handbookDir(w http.ResponseWriter, r *http.Request) (string, st
 }
 
 func safeHandbookPath(root, rel string) (string, error) {
-	rel = filepath.Clean(strings.TrimSpace(rel))
+	rel = strings.TrimSpace(rel)
+	// The Node may run on Linux while a client sends a Windows path (or vice
+	// versa). filepath.IsAbs only understands the host platform, so explicitly
+	// reject drive-prefixed and UNC paths before normalising with filepath.Clean.
+	if isForeignAbsolutePath(rel) {
+		return "", errors.New("invalid handbook path")
+	}
+	rel = filepath.Clean(rel)
 	if rel == "." {
 		return root, nil
 	}
@@ -77,6 +84,20 @@ func safeHandbookPath(root, rel string) (string, error) {
 		}
 	}
 	return p, nil
+}
+
+func isForeignAbsolutePath(path string) bool {
+	if strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
+		return true // UNC path
+	}
+	if len(path) < 2 || path[1] != ':' {
+		return false
+	}
+	// Treat any drive-prefixed path as absolute/foreign. Windows accepts both
+	// C:\\foo and C:/foo, and rejecting C:foo keeps behaviour consistent across
+	// platforms instead of accidentally treating it as a handbook child.
+	c := path[0]
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
 func (s *Server) handleGetAgentHandbook(w http.ResponseWriter, r *http.Request) {
