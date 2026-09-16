@@ -26,9 +26,32 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-当前版本为 **v0.11.0**
+当前发布版本为 **v0.11.0**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
 > DAgents 是一个开源、本地优先的 Agent 控制台：模型负责理解任务，Node 负责会话、工具、权限和审批；数据与执行环境默认留在你的机器上。
+
+## 30 秒看懂
+
+DAgents 把“模型对话”和“可控执行环境”放在一起：你可以先只运行一个本机 Node，随后按需接入 Manage，把多个 Node 上的 Agent 组织成工作组。
+
+| 你要做什么 | 从哪里开始 | 你会得到什么 |
+| --- | --- | --- |
+| 在自己的电脑上使用 Agent | [Node 快速开始](docs/user/getting-started.md) | 对话、文件与命令、终端、MCP、Skills 和审批 |
+| 管理多台机器或多个 Agent | [Manage 与 Workgroup](docs/user/workgroups.md) | Node 注册、工作组协作、集中审计和反馈处理 |
+| 运行长期的自主工作 | [Auto Agent 说明](docs/user/long-term-tasks-and-feedback.md) | 自主激活、Todo、Dreaming、经验与运行记录 |
+
+## 产品界面
+
+Node 和 Manage 是两个互补入口：Node 面向日常对话与执行，Manage 面向跨 Node 的治理和汇总。README 只展示能帮助读者建立整体认知的页面，具体设置项放在用户指南中。
+
+| 页面 | 主要内容 | 本地入口或设计稿 |
+| --- | --- | --- |
+| Node Agent 工作台 | Agent 对话、工具结果、审批和终端工作台 | 运行 Node 后打开 `http://127.0.0.1:18765/ui/` |
+| Node Agent 设置 | 模型连接、工具策略、Auto、Todo 和反馈 | 工作台左下角“设置” |
+| Manage 控制台 | Node 注册、Workgroup、Auto 汇总和反馈管理 | 运行 Manage 后打开 `http://127.0.0.1:8020/console/` |
+| Node / Manage 视觉参考 | 页面骨架、色彩、图标和关键状态的交互式稿 | [UI 视觉审计与方向](docs/design/dagents-ui-audit-and-direction.html) |
+
+产品界面会随版本演进，行为以运行中的 Node、Manage 和契约文档为准；设计稿用于解释信息结构，不代替 API 或用户指南。
 
 ## 为什么是 DAgents
 
@@ -50,7 +73,8 @@ DAgents 不是托管式 SaaS，也不是无边界的自动化脚本运行器。�
 | 文件与命令 | 文件、Shell、终端 | 在 Agent 工作目录内读写文件、搜索和执行命令；可按策略审批 |
 | 外部能力 | MCP、Skills、浏览器 | 通过配置扩展工具和知识，工具结果回到当前会话 |
 | 桌面操作 | 截图、Computer Use | 支持截图、坐标网格和受审批保护的键鼠操作 |
-| 自动化 | Triggers | 按时间或条件启动 Agent 任务 |
+| 长期任务 | Auto Agent、Todo、Dreaming | 在同一个 Agent 会话中按频率自主激活，并保留可追踪的运行记录 |
+| 触发与反馈 | Triggers、用户反馈 | 通过时间/条件触发任务，Node 反馈可在绑定的 Manage 中处理 |
 | 多机协作 | Workgroup | 由 Manage 协调多个 Node，成员在各自机器上执行任务 |
 
 ## 工作方式
@@ -146,6 +170,19 @@ python3 run_manage.py
 
 完整操作路径见 [用户指南](docs/user/README.md)，工具、策略和配置字段见 [参考资料](docs/reference/README.md)。
 
+## 数据归属
+
+Node 的控制面数据与 Agent 工作区分开保存，便于备份、迁移和审计：
+
+| 数据 | 默认位置 | 说明 |
+| --- | --- | --- |
+| Agent 元数据和运行设置 | `.runtime/agents.db`、`.runtime/node_settings.db` | Node 管理目录，不属于任何 Agent 工作区 |
+| 会话快照与恢复状态 | `.runtime/memory/sessions.db` | 用于重启后的会话恢复 |
+| Agent 历史和记忆 | `<workspace>/.dagents/<agent_id>/` | 按 Agent 隔离的审计、记忆和本地状态 |
+| 工具结果文件 | `<workspace>/tool_outputs/<agent_id>/` | 过长输出或需要再次查看的结果 |
+
+这些路径属于运行时数据，不应提交到 Git。升级前请备份 `.runtime/` 和所有自定义工作区；完整的升级行为见[运维指南](docs/user/operations.md)。
+
 ## 安全边界
 
 DAgents 能够调用本机工具，因此请把它当作一个可以执行操作的本地程序来部署：
@@ -170,6 +207,21 @@ DAgents 能够调用本机工具，因此请把它当作一个可以执行操作
 | 未来计划 | [Roadmap](docs/roadmap.md) |
 
 旧版手册章节仍保留为兼容入口，当前文档分层和真相来源以 [docs/README.md](docs/README.md) 为准。
+
+## 仓库结构
+
+```text
+node/                  Agent Node、工具执行、会话与 Node Web UI
+manage/                可选的 Workgroup 控制面与 Manage Console
+client/                Node 客户端与远程连接适配
+desktop/               Windows/Linux 桌面 Shell
+shared/                跨 Go 模块共享的稳定类型与算法
+packaging/             安装包、服务和发布资产
+docs/                  用户、架构、参考、设计与历史文档
+tests/                 Python/跨组件测试
+```
+
+Node 是本地运行时的事实源，Manage 是可选治理层；Web UI 负责展示状态和发起操作，不复制后端业务规则。
 
 ## 开发与验证
 

@@ -124,12 +124,18 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 	sessionID := sessionIDFromContext(ctx)
 	toolCallID := toolCallIDFromContext(ctx)
 	gate := newSyncShellGate()
+	// The synchronous timeout covers the complete operation, including the
+	// workspace lease wait. A long-lived interactive terminal intentionally
+	// holds this lease, so starting the timer only after acquisition can leave
+	// bash_run stuck in "executing" indefinitely.
+	runCtx, cancelRun := context.WithTimeout(ctx, time.Duration(params.timeoutSec)*time.Second)
+	defer cancelRun()
 	registered := r.syncShells != nil && strings.TrimSpace(toolCallID) != ""
 	if registered {
 		r.syncShells.put(&syncShellEntry{sessionID: sessionID, toolCallID: toolCallID, gate: gate})
 		defer r.syncShells.remove(toolCallID)
 	}
-	leaseCtx, stopLeaseWait := context.WithCancel(ctx)
+	leaseCtx, stopLeaseWait := context.WithCancel(runCtx)
 	defer stopLeaseWait()
 	go func() {
 		select {
@@ -140,9 +146,12 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 	}()
 	lease, err := r.acquireWorkspaceWrite(leaseCtx, params.cwd)
 	if err != nil {
+		if runCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+			return "", nil, fmt.Errorf("workspace_busy: timed out waiting for the workspace lease after %ds", params.timeoutSec)
+		}
 		return "", nil, fmt.Errorf("workspace_busy: %w", err)
 	}
-	process, err := r.startShellProcess(ctx, params)
+	process, err := r.startShellProcess(runCtx, params)
 	if err != nil {
 		lease.Release()
 		return fmt.Sprintf("ERROR: %v", err), nil, nil
@@ -171,9 +180,6 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 	}
 	collectDone := r.startShellOutputCollector(execution, params, stdoutPipe, stderrPipe)
 
-	timer := time.NewTimer(time.Duration(params.timeoutSec) * time.Second)
-	defer timer.Stop()
-
 	select {
 	case <-collectDone:
 		execution.mu.Lock()
@@ -198,20 +204,21 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 		_ = process.Terminate(ctx)
 		<-collectDone
 		return formatShellCancelledResult(execution, params), nil, nil
-	case <-timer.C:
+	case <-runCtx.Done():
+		if ctx.Err() != nil {
+			execution.mu.Lock()
+			execution.transitionStatusLocked(shellStatusCancelled, ctx.Err().Error())
+			execution.mu.Unlock()
+			_ = process.Terminate(ctx)
+			<-collectDone
+			return "", nil, ctx.Err()
+		}
 		execution.mu.Lock()
 		execution.transitionStatusLocked(shellStatusCancelled, formatShellHardTimeoutResult(params.timeoutSec))
 		execution.mu.Unlock()
 		_ = process.Terminate(ctx)
 		<-collectDone
 		return formatShellHardTimeoutResult(params.timeoutSec), nil, nil
-	case <-ctx.Done():
-		execution.mu.Lock()
-		execution.transitionStatusLocked(shellStatusCancelled, ctx.Err().Error())
-		execution.mu.Unlock()
-		_ = process.Terminate(ctx)
-		<-collectDone
-		return "", nil, ctx.Err()
 	}
 }
 
