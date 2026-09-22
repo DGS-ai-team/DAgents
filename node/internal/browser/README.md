@@ -1,21 +1,20 @@
 # node/internal/browser
 
-伴生浏览器 session 管理；经 **RemoteDriver** 调用本机 **dagents-browser**（Python + browser-use Agent）。
+主 Agent 所有者的浏览器 Session 管理；经 **RemoteDriver** 调用本机 **dagents-browser**（Python + Playwright）。
 
 ## 架构
 
 | 文件 | 说明 |
 |------|------|
-| `manager.go` | `BrowserManager` Start/Stop、session 上限 |
-| `manager_task.go` | `RunTask*` / `TaskStatus` / `TaskCancel` |
+| `manager.go` | Browser session lifecycle、call/evaluate 串行化 |
 | `remote_driver.go` | HTTP → dagents-browser |
 | `mock_driver.go` | 单测 mock |
 
-薄服务：`browser-service/`（browser-use Agent + CDP attach 本机 Chrome）。
+薄服务：`browser-service/`（Playwright launch/attach 本机 Chromium/Chrome）。
 
-产品路径：主 Agent 仅 `browser_run_task` / `browser_task_status` / `browser_task_cancel`。
+产品路径：主 Agent 直接调用 `browser_call` / `browser_evaluate`，两者均为同步工具。
 
-设计：[browser-remote-service-mode-a.md](../../../docs/design/browser-remote-service-mode-a.md)
+设计：[browser-call-main-agent-playwright-migration.md](../../../docs/design/browser-call-main-agent-playwright-migration.md)
 
 ## 启用
 
@@ -37,5 +36,5 @@ python -m dagents_browser.main --config /path/to/config.yaml
 
 ## 相关
 
-- [browser-tools-and-demonstration.md](../../../docs/design/browser-tools-and-demonstration.md)
+- [browser-call-main-agent-playwright-migration.md](../../../docs/design/browser-call-main-agent-playwright-migration.md)
 - [browser-service/README.md](../../../browser-service/README.md)

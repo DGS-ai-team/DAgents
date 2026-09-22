@@ -66,7 +66,7 @@ func TestLinuxToolGroupWasRemoved(t *testing.T) {
 
 func TestExpandBuiltinToolGroupsBrowser(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{"browser"})
-	want := []string{"browser_run_task", "browser_task_cancel", "browser_task_status"}
+	want := []string{"browser_call", "browser_evaluate"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}

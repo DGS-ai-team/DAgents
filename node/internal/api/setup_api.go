@@ -67,6 +67,10 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	// the Agent registry still has no executable browser tools.
 	browserRuntimeChange := patch.Features != nil || patch.Browser != nil
 	var preparedBrowserManager *browser.Manager
+	if browserRuntimeChange && updated.BrowserEnabled() && !config.BrowserPlatformSupported() {
+		writeAPIError(w, http.StatusNotImplemented, "unsupported_browser_platform", config.BrowserPlatformReason(), nil)
+		return
+	}
 	if browserRuntimeChange && updated.BrowserEnabled() {
 		preparedBrowserManager, err = browser.NewManager(updated, nil)
 		if err != nil {

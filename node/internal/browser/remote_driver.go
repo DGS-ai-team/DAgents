@@ -15,7 +15,7 @@ import (
 
 const defaultBrowserServiceTimeout = 60 * time.Second
 
-// RemoteDriver 经 HTTP 调用本机 dagents-browser（Python + browser-use）。
+// RemoteDriver 经 loopback HTTP 调用本机 Playwright sidecar。
 type RemoteDriver struct {
 	baseURL    string
 	httpClient *http.Client
@@ -28,7 +28,7 @@ func NewRemoteDriver(cfg *config.Config) (*RemoteDriver, error) {
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.Browser.ServiceURL), "/")
 	if baseURL == "" {
-		return nil, fmt.Errorf("browser.service_url is required when browser.driver=remote")
+		return nil, fmt.Errorf("browser.service_url is required")
 	}
 	d := &RemoteDriver{
 		baseURL: baseURL,
@@ -57,7 +57,17 @@ func (d *RemoteDriver) Call(ctx context.Context, req Request) (Response, error) 
 	if err != nil {
 		return Response{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.baseURL+"/v1/browser/call", bytes.NewReader(body))
+	path := "/v2/browser/call"
+	method := http.MethodPost
+	var reader io.Reader = bytes.NewReader(body)
+	if req.Op == "ping" {
+		path = "/v2/browser/ping"
+		method = http.MethodGet
+		reader = nil
+	} else if req.Op == "evaluate" {
+		path = "/v2/browser/evaluate"
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, d.baseURL+path, reader)
 	if err != nil {
 		return Response{}, err
 	}

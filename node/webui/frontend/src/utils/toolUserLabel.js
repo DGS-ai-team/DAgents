@@ -17,9 +17,8 @@ const TOOL_USER_LABELS = {
   show_image: "展示图片",
   screen_capture: "截取屏幕",
   computer_use: "操作桌面",
-  browser_run_task: "浏览器任务",
-  browser_task_status: "查询浏览器任务",
-  browser_task_cancel: "取消浏览器任务",
+  browser_call: "浏览器操作",
+  browser_evaluate: "执行浏览器脚本",
   wecom_send_markdown: "企微推送",
   wecom_send_file: "企微发文件",
   load_skills: "加载技能",
@@ -38,8 +37,8 @@ function sanitizeInline(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
-/** 从 browser_task_* 工具结果 JSON 提取短状态（不含长摘要，留给引用卡片）。 */
-function browserTaskShortStatus(resultEntry) {
+/** 从同步浏览器工具结果提取短状态。 */
+function browserResultStatus(resultEntry) {
   const raw = resultEntry?.data?.content;
   if (raw == null) return "";
   let obj = raw;
@@ -55,20 +54,16 @@ function browserTaskShortStatus(resultEntry) {
   if (!obj || typeof obj !== "object") return "";
   const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
   const status = sanitizeInline(detail.status);
-  if (status === "completed" && detail.success === false) return "未完全完成";
-  if (status === "completed") {
-    const steps = detail.steps;
-    return steps != null ? `已完成 · ${steps} 步` : "已完成";
-  }
+  if (status === "succeeded") return "已完成";
+  if (status === "partial_failure") return "部分失败";
+  if (status === "completed") return "已完成";
   if (status === "failed") return "失败";
   if (status === "cancelled") return "已取消";
   if (status === "running") return "执行中";
-  if (status === "queued") return "排队中";
   return status;
 }
 
-/** 从 browser_task_* 工具结果 JSON 提取一行用户可读提示。 */
-function browserTaskResultHint(resultEntry) {
+function browserResultHint(resultEntry) {
   const raw = resultEntry?.data?.content;
   if (raw == null) return "";
   let obj = raw;
@@ -83,9 +78,9 @@ function browserTaskResultHint(resultEntry) {
   }
   if (!obj || typeof obj !== "object") return "";
   const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
-  const summary = sanitizeInline(detail.summary || obj.extracted_content || detail.extracted_content);
+  const summary = sanitizeInline(detail.summary || detail.error || obj.error);
   if (summary) return summary.length > 48 ? truncateGraphemes(summary, 48) : summary;
-  return browserTaskShortStatus(resultEntry);
+  return browserResultStatus(resultEntry);
 }
 
 function userLabelForTool(name) {
@@ -150,21 +145,12 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
     const path = sanitizeInline(args.path || args.file_path);
     if (path) return `${label}：${path.length > 56 ? truncateGraphemes(path, 56) : path}`;
   }
-  if (name === "browser_run_task") {
-    const task = sanitizeInline(args.task);
-    const short = resultEntry ? browserTaskShortStatus(resultEntry) : "";
-    if (task && short) {
-      const goal = task.length > 40 ? truncateGraphemes(task, 40) : task;
-      return `${label}：${goal} · ${short}`;
-    }
-    if (task) return `${label}：${task.length > 48 ? truncateGraphemes(task, 48) : task}`;
-    if (short) return `${label}：${short}`;
-  }
-  if (name === "browser_task_status" || name === "browser_task_cancel") {
-    const fromResult = browserTaskResultHint(resultEntry);
+  if (name === "browser_call" || name === "browser_evaluate") {
+    const fromResult = browserResultHint(resultEntry);
     if (fromResult) return `${label}：${fromResult}`;
-    const tid = sanitizeInline(args.task_id);
-    if (tid) return `${label}：${tid}`;
+    const actions = Array.isArray(args.actions) ? args.actions : [];
+    const op = sanitizeInline(actions[0]?.op);
+    if (op) return `${label}：${op}`;
   }
   if (name.startsWith("browser_")) {
     const url = sanitizeInline(args.url);

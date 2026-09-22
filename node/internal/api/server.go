@@ -454,7 +454,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}, nil
 	})
 	var browserMgr *browser.Manager
-	if cfg.BrowserEnabled() {
+	if cfg.BrowserEnabled() && config.BrowserPlatformSupported() {
 		bm, err := browser.NewManager(cfg, nil)
 		if err != nil {
 			logger.Error("browser manager init failed", "error", err)
@@ -462,6 +462,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			browserMgr = bm
 			logger.Info("browser tools enabled", "headed", cfg.BrowserHeaded())
 		}
+	} else if cfg.BrowserEnabled() {
+		logger.Warn("browser tools unavailable on this platform", "reason", config.BrowserPlatformReason())
 	}
 	var registrar *manage.Registrar
 	var updateChecker *manage.UpdateChecker

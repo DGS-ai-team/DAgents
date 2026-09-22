@@ -86,7 +86,7 @@ func (c *Config) AvailableAgentToolGroups() []string {
 	for _, g := range all {
 		switch g {
 		case "browser":
-			if !c.BrowserEnabled() {
+			if !c.BrowserEnabled() || !BrowserPlatformSupported() {
 				continue
 			}
 		case "wecom":

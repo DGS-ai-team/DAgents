@@ -724,8 +724,8 @@ echo   dagents node shutdown           Stop background Node
 echo   dagents node restart            Stop then start Node in background
 echo   dagents node --foreground       Start Node in foreground (blocks terminal)
 echo   dagents node --no-wait          Background start without waiting for probe
-echo   dagents browser                 Start browser-use service in background (browser.enabled)
-echo   dagents browser stop            Stop browser-use service
+echo   dagents browser                 Start Playwright browser service in background (browser.enabled)
+echo   dagents browser stop            Stop Playwright browser service
 echo   dagents browser --foreground    Run browser service in foreground
 echo   dagents shell                   Start Desktop Shell in background (tray + Node)
 echo   dagents shell status            Check Shell process

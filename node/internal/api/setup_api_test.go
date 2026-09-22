@@ -100,7 +100,7 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 
 func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/browser/call" {
+		if r.URL.Path != "/v2/browser/ping" {
 			http.NotFound(w, r)
 			return
 		}
@@ -139,11 +139,11 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 	if srv.browserManager() == nil || !srv.browserManager().Enabled() {
 		t.Fatal("browser manager was not installed")
 	}
-	if !hasToolDefinition(srv.tools.Definitions(), "browser_run_task") {
-		t.Fatal("default registry missing browser_run_task after enable")
+	if !hasToolDefinition(srv.tools.Definitions(), "browser_call") || !hasToolDefinition(srv.tools.Definitions(), "browser_evaluate") {
+		t.Fatal("default registry missing browser tools after enable")
 	}
-	if !hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_run_task") {
-		t.Fatal("loaded session registry missing browser_run_task after enable")
+	if !hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_call") || !hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_evaluate") {
+		t.Fatal("loaded session registry missing browser tools after enable")
 	}
 
 	disablePatch := []byte(`{"features":{"browser_enabled":false}}`)
@@ -164,11 +164,11 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 	if srv.browserManager() != nil {
 		t.Fatal("browser manager remained installed after disable")
 	}
-	if hasToolDefinition(srv.tools.Definitions(), "browser_run_task") {
-		t.Fatal("default registry retained browser_run_task after disable")
+	if hasToolDefinition(srv.tools.Definitions(), "browser_call") || hasToolDefinition(srv.tools.Definitions(), "browser_evaluate") {
+		t.Fatal("default registry retained browser tools after disable")
 	}
-	if hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_run_task") {
-		t.Fatal("loaded session registry retained browser_run_task after disable")
+	if hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_call") || hasToolDefinition(srv.sessions.SessionTools(sessionID).Definitions(), "browser_evaluate") {
+		t.Fatal("loaded session registry retained browser tools after disable")
 	}
 }
 

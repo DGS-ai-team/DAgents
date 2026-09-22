@@ -47,11 +47,6 @@ type Registry struct {
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
 	browser                *browser.Manager
-	browserCompanionExists BrowserCompanionExistsFunc
-	browserLLMResolver     BrowserLLMResolver
-	browserTaskMu          sync.Mutex
-	browserTaskNotifier    BrowserTaskNotifier
-	browserTaskWatchers    map[string]struct{}
 	wecom                  *wecom.Client
 	handlers               map[string]handler
 	pathEncMu              sync.Mutex
@@ -380,7 +375,6 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 		localTerminalProvider: localProvider,
 		handlers:              make(map[string]handler),
 		mcpTools:              make(map[string]MCPTool),
-		browserTaskWatchers:   make(map[string]struct{}),
 	}
 	r.registerBuiltins()
 	return r, nil

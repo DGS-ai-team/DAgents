@@ -1,13 +1,13 @@
 # node/internal/tools
 
-N3 在 Node 进程内本地执行；面向模型的普通 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。`browser_run_task(wait=false)` 是独立的显式异步任务接口，使用自己的 task_id 和状态查询，不属于通用后台 job。
+N3 在 Node 进程内本地执行；面向模型的普通 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。Browser 同样是同步的 `browser_call` / `browser_evaluate`，不创建异步任务或回灌会话。
 
 **`bash_run` 超时语义**：
 - **显式传入 `timeout_seconds`**：同步等待该秒数，超时**终止并返回 `timed_out` 失败结果**，不会创建后台 job。
 - **省略 `timeout_seconds`**：最长等待硬上限（默认 600 秒），超时同样**终止并报错**。
 - **UI 控制**（仅 bash）：执行中可「终止」；不支持把 bash_run 转为后台。需要长期运行状态时使用 `terminal_open`。
 
-`bash_run` 只走同步执行路径；`browser_run_task(wait=false)` 是独立的显式异步任务接口，使用自己的 task_id 和状态查询，不属于通用后台任务协议。
+`bash_run` 和 Browser 都走同步执行路径；Browser 不再使用独立 task_id、轮询或异步回灌协议。
 
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。

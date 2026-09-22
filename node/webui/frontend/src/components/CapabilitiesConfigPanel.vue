@@ -74,7 +74,7 @@ onMounted(load);
         <span class="badge badge--beta" title="试验功能">Beta</span>
       </h2>
       <p class="settings-section__desc">
-        需同机运行 dagents-browser。Agent 勾选「浏览器」工具组后自动创建伴生；任务闭环需要非 mock 模型。
+        需同机运行 Playwright 驱动的 dagents-browser。主 Agent 直接获得同步的浏览器操作和脚本工具。
       </p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">

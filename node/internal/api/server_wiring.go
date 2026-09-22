@@ -7,8 +7,6 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
-	"github.com/DGS-ai-team/DAgents/node/internal/queue"
-	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -47,46 +45,12 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
-	attachBrowserTaskNotifier(reg, s.sessions, s.logger)
 	attachProcessEventSink(reg, s.stream, s.store, s.logger)
 	reg.SetTerminalSessionBroker(s.terminals)
 	if s.mediaRegister != nil {
 		reg.SetMediaRegister(s.mediaRegister)
 	}
 	reg.SetBrowserManager(s.browserManager())
-	reg.SetBrowserLLMResolver(func(ctx context.Context) (*browser.LLMSettings, error) {
-		return s.browserLLMForAgent(ctx, targetAgentID)
-	})
-	if s.agents != nil {
-		agents := s.agents
-		reg.SetBrowserCompanionExists(func(ctx context.Context, companionAgentID string) (bool, error) {
-			rec, err := agents.Get(ctx, companionAgentID)
-			if err != nil {
-				return false, err
-			}
-			return rec != nil && !rec.Archived, nil
-		})
-	}
-}
-
-// attachBrowserTaskNotifier 将 browser_run_task(wait=false) 的终态回灌到
-// Agent session；Node 只向已建立的本地 runtime 入队，不需要 sidecar 主动访问 Node。
-func attachBrowserTaskNotifier(reg *tools.Registry, mgr *session.Manager, logger *slog.Logger) {
-	if reg == nil || mgr == nil {
-		return
-	}
-	reg.SetBrowserTaskNotifier(func(sessionID string, done tools.BrowserTaskDone) {
-		if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-			JobID:      done.TaskID,
-			ToolName:   "browser_run_task",
-			ToolCallID: done.ToolCallID,
-			Status:     done.Status,
-			ResultText: done.ResultText,
-			ErrorText:  done.ErrorText,
-		}); err != nil && logger != nil {
-			logger.Warn("browser task completion enqueue failed", "session_id", sessionID, "task_id", done.TaskID, "error", err)
-		}
-	})
 }
 
 // browserManager returns the current process-level browser manager. Browser
