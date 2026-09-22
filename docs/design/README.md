@@ -11,7 +11,7 @@
 | [agent-instance-model.md](agent-instance-model.md) | Node 多 Agent、AgentRef、模板和实例边界 |
 | [agent-hooks.md](agent-hooks.md) | Node Hook 扩展点和执行阶段 |
 | [terminal-websocket.md](terminal-websocket.md) | Terminal WebSocket 输入、输出和生命周期 |
-| [browser-remote-service-mode-a.md](browser-remote-service-mode-a.md) | Browser sidecar 与 Node 任务工具边界 |
+| [browser-call-main-agent-playwright-migration.md](browser-call-main-agent-playwright-migration.md) | Browser 主 Agent + Playwright 双工具设计与迁移 |
 
 ## 当前专题
 

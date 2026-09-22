@@ -11,10 +11,11 @@ func TestManagerStartStopWithMockDriver(t *testing.T) {
 	mock := &MockDriver{
 		Handler: func(_ context.Context, req Request) (Response, error) {
 			switch req.Op {
-			case "start":
+			case "call":
+				if len(req.Actions) != 1 || (req.Actions[0].Op != "start" && req.Actions[0].Op != "stop") {
+					return Response{OK: false, Error: "unexpected lifecycle action"}, nil
+				}
 				return Response{OK: true, URL: "about:blank", Title: ""}, nil
-			case "stop":
-				return Response{OK: true}, nil
 			default:
 				return Response{OK: false, Error: "unexpected " + req.Op}, nil
 			}

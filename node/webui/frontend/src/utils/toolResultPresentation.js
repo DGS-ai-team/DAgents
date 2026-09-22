@@ -24,7 +24,6 @@ const IMPORTANT_RESULT_LABELS = {
   status: "状态",
   message: "消息",
   error: "错误",
-  task_id: "任务 ID",
   trigger_id: "触发器 ID",
   terminal_id: "终端 ID",
   exit_code: "退出码",
@@ -333,11 +332,13 @@ function addTriggerResult(model, name, content) {
 }
 
 function addBrowserInput(model, args) {
-  addField(model.inputFields, "任务", args.task, "multiline");
-  addField(model.inputFields, "任务 ID", args.task_id, "mono");
-  addField(model.inputFields, "最大步数", args.max_steps);
-  if (args.wait != null) addField(model.inputFields, "等待完成", args.wait ? "是" : "否");
-  if (finiteNumber(args.wait_timeout_seconds) > 0) addField(model.inputFields, "等待超时", `${finiteNumber(args.wait_timeout_seconds)} 秒`);
+  if (Array.isArray(args.actions)) {
+    addField(model.inputFields, "动作数量", `${args.actions.length} 个`);
+    const ops = args.actions.map((action) => action?.op).filter(Boolean).join(" → ");
+    addField(model.inputFields, "动作序列", ops, "mono");
+  }
+  addField(model.inputFields, "页面", args.page_id, "mono");
+  if (args.script) addField(model.inputFields, "脚本", args.script, "code");
 }
 
 function addBrowserResult(model, content, name) {
@@ -347,12 +348,12 @@ function addBrowserResult(model, content, name) {
     return;
   }
   const detail = payload.detail && typeof payload.detail === "object" ? payload.detail : payload;
-  if (name === "browser_run_task") addField(model.resultFields, "任务 ID", detail.task_id || payload.task_id, "mono");
-  addField(model.resultFields, "执行步数", detail.steps);
+  addField(model.resultFields, "状态", detail.status || payload.status);
+  if (Array.isArray(detail.action_results)) addField(model.resultFields, "动作数量", `${detail.action_results.length} 个`);
   addField(model.resultFields, "最终地址", payload.url || detail.url);
   addField(model.resultFields, "页面标题", payload.title || detail.title);
   addField(model.resultFields, "错误", payload.error || detail.error, "error");
-  addBlock(model.resultBlocks, "摘要", detail.summary || payload.extracted_content || detail.extracted_content || payload.llm_representation, "text");
+  addBlock(model.resultBlocks, "结果", detail.value || detail.observation || detail.action_results, "text");
 }
 
 function addFileInput(model, args, name) {
@@ -470,7 +471,6 @@ function addGenericResult(model, content) {
       "purpose",
       "terminal_id",
       "trigger_id",
-      "task_id",
       "output",
       "stdout",
       "stderr",
@@ -576,9 +576,8 @@ export function buildToolCardModel({ callEntry = null, resultEntry = null, entry
       addTriggerInput(model, args, name);
       if (resultEntry) addTriggerResult(model, name, content);
       break;
-    case "browser_run_task":
-    case "browser_task_status":
-    case "browser_task_cancel":
+    case "browser_call":
+    case "browser_evaluate":
       addBrowserInput(model, args);
       if (resultEntry) addBrowserResult(model, content, name);
       break;

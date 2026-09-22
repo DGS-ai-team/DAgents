@@ -5,80 +5,56 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func TestRemoteDriverCall(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/browser/call" {
-			http.NotFound(w, r)
-			return
-		}
-		var req Request
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatal(err)
-		}
-		switch req.Op {
-		case "ping":
-			_ = json.NewEncoder(w).Encode(Response{OK: true, Detail: map[string]any{"driver": "browser-use-cdp-v1"}})
-		case "start":
-			_ = json.NewEncoder(w).Encode(Response{OK: true, URL: "about:blank", Title: ""})
-		case "run_task":
-			_ = json.NewEncoder(w).Encode(Response{
-				OK: true,
-				Detail: map[string]any{
-					"task_id": "btask-1",
-					"status":  "queued",
-				},
-			})
+func TestRemoteDriverV2Routes(t *testing.T) {
+	var mu sync.Mutex
+	seen := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v2/browser/ping":
+			_, _ = w.Write([]byte(`{"ok":true,"detail":{"protocol_version":2}}`))
+		case "/v2/browser/call", "/v2/browser/evaluate":
+			var payload Request
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"detail":{"status":"succeeded"}}`))
 		default:
-			_ = json.NewEncoder(w).Encode(Response{OK: true})
+			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
+	defer server.Close()
 
 	on := true
-	cfg := &config.Config{
-		Browser: config.BrowserConfig{
-			Enabled:    &on,
-			ServiceURL: srv.URL,
-		},
-	}
-	d, err := NewRemoteDriver(cfg)
+	cfg := &config.Config{Browser: config.BrowserConfig{Enabled: &on, ServiceURL: server.URL}}
+	driver, err := NewRemoteDriver(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := d.Call(context.Background(), Request{Op: "run_task", SessionKey: "s1", Task: "open https://example.com"})
-	if err != nil {
+	if _, err := driver.Call(context.Background(), Request{Op: "call", SessionKey: "s", Actions: []Action{{Op: "observe"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if !resp.OK {
-		t.Fatalf("resp = %+v", resp)
-	}
-	if resp.Detail["task_id"] != "btask-1" {
-		t.Fatalf("detail = %+v", resp.Detail)
-	}
-}
-
-func TestNewDriverUsesRemote(t *testing.T) {
-	on := true
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(Response{OK: true, Detail: map[string]any{"driver": "browser-use-cdp-v1"}})
-	}))
-	defer srv.Close()
-	cfg := &config.Config{
-		Browser: config.BrowserConfig{
-			Enabled:    &on,
-			ServiceURL: srv.URL,
-		},
-	}
-	d, err := NewDriver(cfg)
-	if err != nil {
+	if _, err := driver.Call(context.Background(), Request{Op: "evaluate", SessionKey: "s", Script: "document.title"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := d.(*RemoteDriver); !ok {
-		t.Fatalf("expected RemoteDriver, got %T", d)
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"GET /v2/browser/ping", "POST /v2/browser/call", "POST /v2/browser/evaluate"}
+	if len(seen) != len(want) {
+		t.Fatalf("routes = %#v", seen)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("route[%d] = %q, want %q", i, seen[i], want[i])
+		}
 	}
 }

@@ -2,58 +2,56 @@ package browser
 
 import "encoding/json"
 
-// LLMSettings 为 Node 解析后的单次浏览器任务模型配置。
-// 它只在 Node 到本机 sidecar 的瞬时请求中传输，不作为 sidecar 配置落盘。
-type LLMSettings struct {
-	Provider          string `json:"provider"`
-	BaseURL           string `json:"base_url,omitempty"`
-	Model             string `json:"model"`
-	APIKeyEnv         string `json:"api_key_env,omitempty"`
-	APIKey            string `json:"api_key,omitempty"`
-	Mock              bool   `json:"mock,omitempty"`
-	MultimodalEnabled bool   `json:"multimodal_enabled,omitempty"`
-	Thinking          string `json:"thinking,omitempty"`
-	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
+// Action is one deterministic browser operation executed by browser_call.
+// Target and Params are validated again by the sidecar according to Op.
+type Action struct {
+	Op        string         `json:"op"`
+	PageID    string         `json:"page_id,omitempty"`
+	Target    map[string]any `json:"target,omitempty"`
+	Params    map[string]any `json:"params,omitempty"`
+	TimeoutMS int            `json:"timeout_ms,omitempty"`
 }
 
-// Request 为 BrowserManager → dagents-browser 的内部请求（任务级 + session 生命周期）。
+// Request is the Node-to-sidecar protocol payload. Op is call, evaluate,
+// start, stop, or ping; start/stop are translated to one-action calls by the
+// Manager and are retained only for lifecycle internals.
 type Request struct {
-	Op         string `json:"op"`
-	SessionKey string `json:"session_key,omitempty"`
-	Headed     *bool  `json:"headed,omitempty"`
-	ViewportW  int    `json:"viewport_width,omitempty"`
-	ViewportH  int    `json:"viewport_height,omitempty"`
-	TimeoutMS  int    `json:"timeout_ms,omitempty"`
-	// 任务级伴生派发（op=run_task / task_status / task_cancel）
-	Task     string       `json:"task,omitempty"`
-	TaskID   string       `json:"task_id,omitempty"`
-	MaxSteps int          `json:"max_steps,omitempty"`
-	LLM      *LLMSettings `json:"llm,omitempty"`
+	Op         string         `json:"op"`
+	SessionKey string         `json:"session_key,omitempty"`
+	Headed     *bool          `json:"headed,omitempty"`
+	ViewportW  int            `json:"viewport_width,omitempty"`
+	ViewportH  int            `json:"viewport_height,omitempty"`
+	TimeoutMS  int            `json:"timeout_ms,omitempty"`
+	CallID     string         `json:"call_id,omitempty"`
+	Actions    []Action       `json:"actions,omitempty"`
+	Script     string         `json:"script,omitempty"`
+	Arg        any            `json:"arg,omitempty"`
+	PageID     string         `json:"page_id,omitempty"`
+	Target     map[string]any `json:"target,omitempty"`
 }
 
-// Response 为 dagents-browser → BrowserManager 的内部响应。
+// Response is the sidecar response envelope. Detail carries the stable v2
+// result payload and any driver-only metadata is removed by the Node tool.
 type Response struct {
-	OK             bool           `json:"ok"`
-	URL            string         `json:"url,omitempty"`
-	Title          string         `json:"title,omitempty"`
-	ScreenshotPath string         `json:"screenshot_path,omitempty"`
-	Error          string         `json:"error,omitempty"`
-	Detail         map[string]any `json:"detail,omitempty"`
+	OK        bool           `json:"ok"`
+	URL       string         `json:"url,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	ErrorCode string         `json:"error_code,omitempty"`
+	Detail    map[string]any `json:"detail,omitempty"`
 }
 
-// ToolResult 为 browser_* 工具返回给 LLM 的统一 JSON 形状。
+// ToolResult is the JSON envelope returned to the model. Browser v2 results
+// live in Detail; execution-specific metadata remains inside that object.
 type ToolResult struct {
-	OK                bool           `json:"ok"`
-	URL               string         `json:"url,omitempty"`
-	Title             string         `json:"title,omitempty"`
-	ScreenshotPath    string         `json:"screenshot_path,omitempty"`
-	LLMRepresentation string         `json:"llm_representation,omitempty"`
-	ExtractedContent  string         `json:"extracted_content,omitempty"`
-	Error             string         `json:"error,omitempty"`
-	Detail            map[string]any `json:"detail,omitempty"`
+	OK        bool           `json:"ok"`
+	URL       string         `json:"url,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	ErrorCode string         `json:"error_code,omitempty"`
+	Detail    map[string]any `json:"detail,omitempty"`
 }
 
-// FormatToolResult 序列化 tool 返回文本。
 func FormatToolResult(r ToolResult) string {
 	raw, err := json.Marshal(r)
 	if err != nil {
@@ -63,39 +61,6 @@ func FormatToolResult(r ToolResult) string {
 }
 
 func toolResultFromResponse(resp Response) ToolResult {
-	out := ToolResult{
-		OK:             resp.OK,
-		URL:            resp.URL,
-		Title:          resp.Title,
-		ScreenshotPath: resp.ScreenshotPath,
-		Error:          resp.Error,
-		Detail:         resp.Detail,
-	}
-	if resp.Detail != nil {
-		detail := make(map[string]any, len(resp.Detail))
-		for k, v := range resp.Detail {
-			if k == "llm_representation" {
-				if s, ok := v.(string); ok && s != "" {
-					out.LLMRepresentation = s
-				}
-				continue
-			}
-			if k == "extracted_content" {
-				if s, ok := v.(string); ok && s != "" {
-					out.ExtractedContent = s
-				}
-				continue
-			}
-			if k == "summary" {
-				if s, ok := v.(string); ok && s != "" && out.ExtractedContent == "" {
-					out.ExtractedContent = s
-				}
-			}
-			detail[k] = v
-		}
-		if len(detail) > 0 {
-			out.Detail = detail
-		}
-	}
-	return out
+	detail := resp.Detail
+	return ToolResult{OK: resp.OK, URL: resp.URL, Title: resp.Title, Error: resp.Error, ErrorCode: resp.ErrorCode, Detail: detail}
 }

@@ -8,14 +8,9 @@ import {
 describe("browserRefs", () => {
   it("parses tool content JSON", () => {
     const parsed = parseBrowserToolContent(
-      JSON.stringify({
-        ok: true,
-        extracted_content: "标题是 Example",
-        detail: { task_id: "btask-1", status: "completed", summary: "标题是 Example", success: true },
-      }),
+      JSON.stringify({ ok: true, detail: { status: "succeeded", value: "标题是 Example" } }),
     );
-    expect(parsed.detail.task_id).toBe("btask-1");
-    expect(parsed.extracted_content).toBe("标题是 Example");
+    expect(parsed.detail.value).toBe("标题是 Example");
   });
 
   it("collects refs between user and assistant slot", () => {
@@ -25,19 +20,14 @@ describe("browserRefs", () => {
         kind: "tool_result",
         id: 2,
         data: {
-          tool_name: "browser_run_task",
-          media: [{ id: "m1", url: "/v1/agents/a/media/m1", label: "browser_run_task" }],
+          tool_name: "browser_call",
+          media: [{ id: "m1", url: "/v1/agents/a/media/m1", label: "browser_call" }],
           content: JSON.stringify({
             ok: true,
             detail: {
-              task_id: "btask-9",
-              status: "completed",
-              summary: "找到了标题",
-              success: true,
-              action_names: ["navigate", "done"],
-              urls: ["https://example.com"],
-              screenshot_paths: ["/tmp/shot.png"],
-              detail_md: "tasks/btask-9.md",
+              status: "succeeded",
+              observation: { content: "找到了标题" },
+              action_results: [{ op: "navigate", status: "succeeded" }],
             },
           }),
         },
@@ -46,11 +36,10 @@ describe("browserRefs", () => {
     ];
     const refs = collectBrowserRefsFromEntries(entries, 2);
     expect(refs).toHaveLength(1);
-    expect(refs[0].task_id).toBe("btask-9");
     expect(refs[0].summary).toBe("找到了标题");
-    expect(refs[0].detail_md).toBe("tasks/btask-9.md");
+    expect(refs[0].action_results[0].op).toBe("navigate");
     expect(refs[0].screenshots).toEqual([
-      { id: "m1", url: "/v1/agents/a/media/m1", label: "browser_run_task", caption: null },
+      { id: "m1", url: "/v1/agents/a/media/m1", label: "browser_call", caption: null },
     ]);
   });
 
@@ -60,16 +49,16 @@ describe("browserRefs", () => {
       {
         kind: "tool_result",
         data: {
-          tool_name: "browser_run_task",
+          tool_name: "browser_evaluate",
           content: JSON.stringify({
             ok: true,
-            detail: { task_id: "t1", status: "completed", summary: "ok", success: true },
+            detail: { status: "succeeded", value: "ok" },
           }),
         },
       },
       { kind: "assistant", text: "答" },
     ];
     attachBrowserRefsToAssistants(entries);
-    expect(entries[2].browser_refs?.[0]?.task_id).toBe("t1");
+    expect(entries[2].browser_refs?.[0]?.summary).toBe("ok");
   });
 });

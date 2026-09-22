@@ -17,11 +17,9 @@ function toggle(key) {
 }
 
 function outcomeLabel(ref) {
-  if (ref.success === true) return "成功";
-  if (ref.success === false) return "未完成";
+  if (ref.status === "succeeded") return "成功";
+  if (ref.status === "partial_failure") return "部分失败";
   if (ref.status === "failed") return "失败";
-  if (ref.status === "cancelled") return "已取消";
-  if (ref.status === "completed") return "完成";
   return ref.status || "引用";
 }
 
@@ -51,7 +49,7 @@ function openShots(ref, index) {
 </script>
 
 <template>
-  <div v-if="items.length" class="browser-cites" aria-label="浏览器任务引用">
+  <div v-if="items.length" class="browser-cites" aria-label="浏览器操作引用">
     <div class="browser-cites__head">浏览器引用</div>
     <div
       v-for="(ref, idx) in items"
@@ -71,18 +69,13 @@ function openShots(ref, index) {
         <UiIcon class="browser-cite__chev" :name="openKey === (ref.key || idx) ? 'chevron-down' : 'chevron-right'" :size="14" />
       </button>
       <div v-if="openKey === (ref.key || idx)" class="browser-cite__body">
-        <p v-if="ref.task" class="browser-cite__row">
-          <span class="browser-cite__label">目标</span>
-          <span>{{ ref.task }}</span>
-        </p>
         <p v-if="ref.summary" class="browser-cite__row">
           <span class="browser-cite__label">结论</span>
           <span>{{ ref.summary }}</span>
         </p>
-        <p v-if="ref.task_id" class="browser-cite__row">
-          <span class="browser-cite__label">任务</span>
-          <code>{{ ref.task_id }}</code>
-          <span v-if="ref.steps != null" class="browser-cite__muted"> · {{ ref.steps }} 步</span>
+        <p v-if="ref.title || ref.url" class="browser-cite__row">
+          <span class="browser-cite__label">页面</span>
+          <span>{{ ref.title || "" }}<span v-if="ref.title && ref.url"> · </span>{{ ref.url || "" }}</span>
         </p>
         <div v-if="shotList(ref).length" class="browser-cite__block">
           <div class="browser-cite__label">截图</div>
@@ -103,40 +96,17 @@ function openShots(ref, index) {
             </button>
           </div>
         </div>
-        <div v-if="ref.urls?.length" class="browser-cite__block">
-          <div class="browser-cite__label">URL</div>
-          <ul class="browser-cite__list">
-            <li v-for="(u, ui) in ref.urls.slice(0, 8)" :key="ui">
-              <a v-if="/^https?:/i.test(u)" :href="u" target="_blank" rel="noopener noreferrer">{{ u }}</a>
-              <span v-else>{{ u }}</span>
-            </li>
-          </ul>
-        </div>
-        <div v-if="ref.action_names?.length" class="browser-cite__block">
+        <div v-if="ref.action_results?.length" class="browser-cite__block">
           <div class="browser-cite__label">动作</div>
           <ol class="browser-cite__list browser-cite__list--actions">
-            <li v-for="(a, ai) in ref.action_names.slice(0, 24)" :key="ai"><code>{{ a }}</code></li>
+            <li v-for="(action, ai) in ref.action_results.slice(0, 24)" :key="ai">
+              <code>{{ action.op }}</code><span class="browser-cite__muted"> · {{ action.status }}</span>
+            </li>
           </ol>
         </div>
-        <div v-if="ref.step_trace?.length" class="browser-cite__block">
-          <div class="browser-cite__label">过程</div>
-          <ul class="browser-cite__list">
-            <li v-for="(st, si) in ref.step_trace.slice(0, 12)" :key="si">
-              <template v-if="st && typeof st === 'object'">
-                <strong>Step {{ st.step ?? si + 1 }}</strong>
-                <span v-if="st.next_goal || st.goal"> — {{ st.next_goal || st.goal }}</span>
-                <span v-if="st.evaluation" class="browser-cite__muted">（{{ st.evaluation }}）</span>
-              </template>
-              <span v-else>{{ st }}</span>
-            </li>
-          </ul>
-        </div>
-        <p v-if="ref.error || ref.errors?.length" class="browser-cite__row browser-cite__row--err">
+        <p v-if="ref.error" class="browser-cite__row browser-cite__row--err">
           <span class="browser-cite__label">错误</span>
-          <span>{{ ref.error || ref.errors.join("；") }}</span>
-        </p>
-        <p v-if="ref.detail_md" class="browser-cite__row browser-cite__muted">
-          详情文件：<code>{{ ref.detail_md }}</code>
+          <span>{{ ref.error }}</span>
         </p>
       </div>
     </div>

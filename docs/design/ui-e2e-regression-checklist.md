@@ -1,8 +1,8 @@
 # Web UI 回归测试清单
 
-本文是 Node 内嵌 Web UI 的可重复回归清单，覆盖真实模型、工具调用、HITL、Turn 取消、连续对话和异步工具回灌。测试目标是验证“浏览器 → SSE → Node MessageQueue → Turn/Step → 工具或浏览器任务 → 回灌 → UI”的完整链路。
+本文是 Node 内嵌 Web UI 的可重复回归清单，覆盖真实模型、工具调用、HITL、Turn 取消、连续对话和同步浏览器工具。测试目标是验证“浏览器 → SSE → Node MessageQueue → Turn/Step → 工具 → UI”的完整链路。
 
-> **状态说明（2026-08-27）**：本文中“bash 超时转后台、自动 `async_tool_result` 回调”和“普通输入打断 pending”的条目是历史回归记录，保留用于追溯，不是当前验收标准。当前 bash_run 超时直接失败；user/trigger 进入 InputBox FIFO；审批等待期间普通输入排队，使用显式 turn cancel 取消，用户询问使用 typed resume。当前异步工具路径仅指 `browser_run_task(wait=false)`。
+> **状态说明（2026-09-22）**：bash_run 与 Browser 工具均为同步调用；user/trigger 进入 InputBox FIFO；审批等待期间普通输入排队，使用显式 turn cancel 取消，用户询问使用 typed resume。
 
 ## 1. 测试前置
 
@@ -164,32 +164,29 @@
 
 预期：第二条正确回复“连续对话校验”，且两轮都产生独立完整的 `turn.completed`。
 
-## 8. 浏览器异步回灌（当前异步路径）
+## 8. 浏览器同步调用
 
-本组测试需要启用浏览器能力，并确保伴生 browser service 可用；它不再使用 `bash_run` 的超时降级或通用后台 job。
+本组测试需要启用浏览器能力，并确保 Playwright `dagents-browser` sidecar 可用。
 
 发送：
 
 ```text
-请调用 browser_run_task，wait=false，执行一个只读页面检查。任务完成后只回复 browser-callback-ok。
+请调用 browser_call，执行 `start`、打开一个只读页面并 `observe`，然后只回复 browser-call-ok。
 ```
 
 预期：
 
-1. 工具立即返回 `task_id` 和已受理状态；
-2. 浏览器任务完成后通过 `async_tool_result` 回灌一次终态；
-3. 模型收到异步结果并完成后续回复；
-4. Context 最终为无 active turn、无 pending tool call、Turn/Step completed；
-5. 不出现重复 callback 或重复 assistant 回复。
+1. 工具在当前 Turn 内返回逐动作结果与页面 observation；
+2. 模型可基于 observation 再调用 `browser_call` 或 `browser_evaluate`；
+3. Context 最终为无 active turn、无 pending tool call、Turn/Step completed；
+4. 不出现后台 job、callback 或重复 assistant 回复。
 
 该测试对应的 Node 内部链路是：
 
 ```text
-browser_run_task(wait=false)
-  → browser task watcher
-  → BrowserTaskNotifier
-  → async_tool_result
-  → side-effect Produce / Apply / Continue
+browser_call(actions=[start, navigate, observe])
+  → Playwright sidecar
+  → structured result
   → 后续模型 Step
   → turn.completed
 ```

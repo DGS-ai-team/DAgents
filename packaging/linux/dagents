@@ -711,8 +711,8 @@ Usage:
   dagents node restart        Stop then start Node in background
   dagents node --foreground   Start Node in foreground (blocks terminal)
   dagents node --no-wait      Background start without waiting for probe
-  dagents browser             Start browser-use service in background (browser.enabled)
-  dagents browser stop        Stop browser-use service
+  dagents browser             Start Playwright browser service in background (browser.enabled)
+  dagents browser stop        Stop Playwright browser service
   dagents browser --foreground    Run browser service in foreground
   dagents doctor              Check installed files
   dagents version             Print version information

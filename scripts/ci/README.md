@@ -7,7 +7,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`build_go_static.sh`** | Go `dagents-node` 静态交叉编译；`BUILD_CLIENT=1` 时额外编 `dagents-client`（probe/update） |
 | **`run_staticcheck.sh`** | 使用固定版本的 Go Staticcheck 检查全部 Go module |
 | **`build_go_linux_static.sh`** | 兼容入口（等同 `GOOS=linux`） |
-| **`build_dagents_browser.sh`** | PyInstaller 单文件 **`dagents-browser`**（browser-use 薄服务） |
+| **`build_dagents_browser.sh`** | PyInstaller 单文件 **`dagents-browser`**（Playwright sidecar） |
 | **`build_linux_rocky8_pyenv.sh`** | **Release CI 默认**：Rocky Linux 8 容器（glibc **2.28**）内 pyenv + PyInstaller（`BROWSER_PI_ARGS`）；`SKIP_DNF=1` 配合预装镜像 |
 | **`../packaging/ci/Dockerfile.rocky8-browser`** | Rocky8 + gcc-toolset-13 预装依赖（CI Buildx + GHA cache）；pyenv 目录另做 actions/cache |
 | **`../packaging/ci/Dockerfile.tauri-linux`** | Ubuntu 24.04 + Rust stable + Tauri Linux 系统依赖；发布到 GHCR 后供 `tauri-shell.yml` 直接复用 |
@@ -28,4 +28,4 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 
 **统一本地门禁**：仓库根运行 `scripts/verify.sh`；Windows 运行 `scripts/verify.ps1`。CI 的 Go 门禁覆盖全部模块，并同时执行 `gofmt`、`go vet`、单测和构建。
 
-Python 运行时依赖使用根目录 `requirements.lock`；浏览器打包依赖使用 `browser-service/requirements.lock`。Windows x86 browser 构建可通过 `BROWSER_CRYPTOGRAPHY_VERSION` 临时选择有 win32 wheel 的兼容版本，x64/Linux 仍使用锁定版本。源文件格式由 `.editorconfig` 和 `.gitattributes` 统一。
+Python 运行时依赖使用根目录 `requirements.lock`；浏览器打包依赖使用 `browser-service/requirements.lock`。源文件格式由 `.editorconfig` 和 `.gitattributes` 统一。
