@@ -57,3 +57,39 @@ func TestBashProcessRetainsWorkspaceLeaseUntilExit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBashRunTimeoutIncludesWorkspaceLeaseWait(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRegistry(root, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := workspacecoord.New()
+	r.SetWorkspaceCoordinator(c)
+	lease, err := r.acquireWorkspaceWrite(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	started := time.Now()
+	_, _, err = runShellSync(r, context.Background(), shellRunParams{
+		command:    "echo should-not-start",
+		cwd:        root,
+		shellType:  shellTypeForTest(),
+		timeoutSec: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "workspace_busy") {
+		t.Fatalf("lease wait err=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("lease wait ignored timeout: elapsed=%s", elapsed)
+	}
+}
+
+func shellTypeForTest() shellType {
+	if runtime.GOOS == "windows" {
+		return shellPowerShell
+	}
+	return shellBash
+}

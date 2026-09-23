@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
@@ -8,51 +8,45 @@ const props = defineProps({
 
 const emit = defineEmits(["action"]);
 const open = ref(false);
-let closeTimer = null;
+const rootRef = ref(null);
 
 const reconnectDisabled = computed(() => ["connecting", "connected", "terminating", "reconnecting"].includes(String(props.status || "")));
 const terminateDisabled = computed(() => String(props.status || "") !== "connected");
 
-function clearCloseTimer() {
-  if (closeTimer) window.clearTimeout(closeTimer);
-  closeTimer = null;
-}
-
-function show() {
-  clearCloseTimer();
-  open.value = true;
-}
-
-function scheduleClose() {
-  clearCloseTimer();
-  closeTimer = window.setTimeout(() => {
-    open.value = false;
-    closeTimer = null;
-  }, 140);
-}
-
 function toggle() {
-  if (open.value) scheduleClose();
-  else show();
+  open.value = !open.value;
 }
 
 function run(action) {
   if (action === "reconnect" && reconnectDisabled.value) return;
   if (action === "terminate" && terminateDisabled.value) return;
   emit("action", action);
-  scheduleClose();
+  open.value = false;
 }
 
-onBeforeUnmount(clearCloseTimer);
+function onDocumentPointerDown(event) {
+  if (!rootRef.value?.contains(event.target)) open.value = false;
+}
+
+function onDocumentKeydown(event) {
+  if (event.key === "Escape") open.value = false;
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", onDocumentPointerDown);
+  document.addEventListener("keydown", onDocumentKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocumentPointerDown);
+  document.removeEventListener("keydown", onDocumentKeydown);
+});
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="terminal-action-menu"
-    @mouseenter="show"
-    @mouseleave="scheduleClose"
-    @focusin="show"
-    @focusout="scheduleClose"
   >
     <button
       type="button"
