@@ -9,7 +9,7 @@ from dagents_browser.server import create_app
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="dagents-browser thin service (browser-use + local Chrome)")
+    parser = argparse.ArgumentParser(description="dagents-browser Playwright service")
     parser.add_argument("--config", default="", help="path to config.yaml (same as dagents-node)")
     parser.add_argument("--listen", default="", help="listen host:port (default 127.0.0.1:18766)")
     args = parser.parse_args()

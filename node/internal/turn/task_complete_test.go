@@ -51,7 +51,7 @@ func TestTaskComplete_openAsyncBatch(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: "user", Content: "run"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{
-			{ID: "async", Function: llm.ToolCallFunction{Name: "browser_run_task"}},
+			{ID: "async", Function: llm.ToolCallFunction{Name: "async_test_tool"}},
 			{ID: "sync", Function: llm.ToolCallFunction{Name: "read_file"}},
 		}},
 		{Role: "tool", ToolCallID: "async", Content: `{"ok":true,"detail":{"status":"accepted"}}`},

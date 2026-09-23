@@ -147,39 +147,19 @@ func screenshotPathsFromContent(content string) []string {
 	}
 	detail, _ := payload["detail"].(map[string]any)
 	if detail != nil {
-		appendPathList(&out, seen, detail["screenshot_paths"])
-	}
-	appendPathList(&out, seen, payload["screenshot_paths"])
-	if detail != nil {
-		if raw, ok := detail["last_screenshot_path"]; ok && raw != nil {
-			add(raw)
+		if actionResults, ok := detail["action_results"].([]any); ok {
+			for _, raw := range actionResults {
+				action, _ := raw.(map[string]any)
+				data, _ := action["data"].(map[string]any)
+				if data != nil {
+					add(data["path"])
+				}
+			}
 		}
-		if raw, ok := detail["screenshot_path"]; ok && raw != nil {
-			add(raw)
-		}
+		add(detail["screenshot_path"])
 	}
-	if raw, ok := payload["screenshot_path"]; ok && raw != nil {
-		add(raw)
-	}
+	add(payload["screenshot_path"])
 	return out
-}
-
-func appendPathList(out *[]string, seen map[string]struct{}, raw any) {
-	arr, ok := raw.([]any)
-	if !ok {
-		return
-	}
-	for _, item := range arr {
-		path := strings.TrimSpace(fmt.Sprint(item))
-		if path == "" || path == "<nil>" {
-			continue
-		}
-		if _, exists := seen[path]; exists {
-			continue
-		}
-		seen[path] = struct{}{}
-		*out = append(*out, path)
-	}
 }
 
 // ParseToolArgumentsMap 解析 tool call arguments JSON。

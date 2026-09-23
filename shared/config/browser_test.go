@@ -30,6 +30,12 @@ func TestBrowserEnabled(t *testing.T) {
 	}
 }
 
+func TestBrowserPlatformSupportHasReason(t *testing.T) {
+	if BrowserPlatformReason() == "" {
+		t.Fatal("expected a platform status reason")
+	}
+}
+
 func TestValidateBrowserRejectsFileScheme(t *testing.T) {
 	on := true
 	cfg := &Config{

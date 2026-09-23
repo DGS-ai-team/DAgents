@@ -332,8 +332,10 @@ func toolActivityInputSummaryFromArgs(toolName string, args map[string]any) stri
 		keys = []string{"data", "command", "terminal_id"}
 	case "read_file", "write_file", "search_replace", "glob_files", "grep_file", "grep_files":
 		keys = []string{"path", "file_path", "directory", "pattern"}
-	case "browser_run_task":
-		keys = []string{"task", "url"}
+	case "browser_call":
+		keys = []string{"actions"}
+	case "browser_evaluate":
+		keys = []string{"script"}
 	case "screen_capture", "computer_use":
 		keys = []string{"action", "coordinate", "x", "y"}
 	}

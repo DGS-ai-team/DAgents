@@ -30,54 +30,54 @@ describe("toolStepUserSummary", () => {
     expect(text).toBe("助手执行了一步操作");
   });
 
-  it("shows browser_run_task goal", () => {
+  it("shows browser_call action", () => {
     const text = toolStepUserSummary({
       callEntry: {
         kind: "tool_call",
-        data: { tool_name: "browser_run_task", arguments: { task: "打开 example.com 提取标题" } },
+        data: { tool_name: "browser_call", arguments: { actions: [{ op: "navigate" }] } },
       },
     });
-    expect(text).toBe("浏览器任务：打开 example.com 提取标题");
+    expect(text).toBe("浏览器操作：navigate");
   });
 
-  it("keeps browser_run_task goal and short status on result (summary left to citation)", () => {
+  it("shows browser_call result status", () => {
     const text = toolStepUserSummary({
       callEntry: {
         kind: "tool_call",
-        data: { tool_name: "browser_run_task", arguments: { task: "打开 example.com 提取标题" } },
+        data: { tool_name: "browser_call", arguments: { actions: [{ op: "observe" }] } },
       },
       resultEntry: {
         kind: "tool_result",
         data: {
-          tool_name: "browser_run_task",
+          tool_name: "browser_call",
           content: JSON.stringify({
             ok: true,
-            detail: { status: "completed", summary: "标题很长很长很长很长", success: true, steps: 4 },
+            detail: { status: "succeeded" },
           }),
         },
       },
     });
-    expect(text).toBe("浏览器任务：打开 example.com 提取标题 · 已完成 · 4 步");
+    expect(text).toBe("浏览器操作：已完成");
   });
 
-  it("shows browser_task_status summary from result JSON", () => {
+  it("shows browser_evaluate result status", () => {
     const text = toolStepUserSummary({
       callEntry: {
         kind: "tool_call",
-        data: { tool_name: "browser_task_status", arguments: { task_id: "btask-1" } },
+        data: { tool_name: "browser_evaluate", arguments: { script: "document.title" } },
       },
       resultEntry: {
         kind: "tool_result",
         data: {
-          tool_name: "browser_task_status",
+          tool_name: "browser_evaluate",
           content: JSON.stringify({
             ok: true,
-            detail: { status: "completed", summary: "标题是 Example Domain", success: true },
+            detail: { status: "succeeded", value: "Example Domain" },
           }),
         },
       },
     });
-    expect(text).toBe("查询浏览器任务：标题是 Example Domain");
+    expect(text).toBe("执行浏览器脚本：已完成");
   });
 });
 
@@ -217,7 +217,7 @@ describe("toolStepStatusText", () => {
   it("shows background for an explicitly queued tool result", () => {
     const result = {
       kind: "tool_result",
-      data: { tool_call_id: "c9", tool_name: "browser_run_task", status: "queued" },
+      data: { tool_call_id: "c9", tool_name: "browser_call", status: "queued" },
     };
     expect(toolStepStatusText({ resultEntry: result })).toBe("后台执行中");
   });

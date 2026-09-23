@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-// BrowserConfig 控制内置 browser_* 工具（remote → dagents-browser + browser-use）。
+// BrowserConfig controls the built-in Playwright browser tools and their
+// loopback sidecar connection.
 type BrowserConfig struct {
 	// Enabled 为 nil 时默认 false（须显式启用）。
 	Enabled *bool `yaml:"enabled"`
@@ -15,9 +16,7 @@ type BrowserConfig struct {
 	OutputDir         string   `yaml:"output_dir"`
 	ChromePath        string   `yaml:"chrome_path"`
 	CDPURL            string   `yaml:"cdp_url"`
-	DebugPort         int      `yaml:"debug_port"`
 	MaxSessions       int      `yaml:"max_sessions"`
-	IdleStopSeconds   int      `yaml:"idle_stop_seconds"`
 	AllowedURLSchemes []string `yaml:"allowed_url_schemes"`
 	// ServiceURL dagents-browser 基址；默认 http://127.0.0.1:18766。
 	ServiceURL string `yaml:"service_url"`
@@ -108,11 +107,8 @@ func (c *Config) applyBrowserDefaults() {
 		c.Browser.OutputDir = "browser"
 	}
 	if c.Browser.MaxSessions <= 0 {
-		// 伴生方案：每主 Agent 一个 Chrome；默认允许多会话并发。
+		// Each main-agent session gets an isolated browser context.
 		c.Browser.MaxSessions = 8
-	}
-	if c.Browser.DebugPort <= 0 {
-		c.Browser.DebugPort = 9222
 	}
 	if len(c.Browser.AllowedURLSchemes) == 0 {
 		c.Browser.AllowedURLSchemes = []string{"https", "http"}

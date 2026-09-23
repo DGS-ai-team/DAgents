@@ -225,7 +225,7 @@ handleInputMessage
 | **Client** | `POST /v1/messages`（`request_type: message`） |
 | **HITL resume** | `POST /v1/messages`（`request_type: resume`） |
 | **工具续跑** | Orchestrator 返回 `ScheduleToolResult`，runtime 在同一 Turn 链内 inline 续跑 |
-| **异步工具** | `browser_run_task(wait=false)` 完成 → `async_tool_result` |
+| **同步工具** | `browser_call` / `browser_evaluate` 在当前 Turn 内返回结构化结果 |
 | **Trigger** | 调度器 fire → InputBox FIFO（`TriggerID` + `UserName=trigger`） |
 
 外部输入需要稳定的 FIFO，并且在 pending HITL 时不能抢占当前 Turn；因此采用 **每 session 一个 `InputBox` + 一个控制 `MessageQueue` + 单 goroutine `consumeLoop`**。InputBox 只负责 user/trigger/child-agent 的顺序与缓存，resume 和异步事实仍由控制队列驱动。

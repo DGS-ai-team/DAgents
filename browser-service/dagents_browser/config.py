@@ -11,13 +11,11 @@ DEFAULT_SERVICE_URL = f"http://127.0.0.1:{DEFAULT_LISTEN_PORT}"
 
 @dataclass
 class BrowserServiceSettings:
-    # Node-managed runtime directory. Browser task workspaces are scoped below
-    # runtime_root/browser/agent_fs/<session>.
+    # Node-managed runtime directory for Playwright profiles and screenshots.
     runtime_root: str
     headed: bool = True
     chrome_path: str = ""
     cdp_url: str = ""
-    debug_port: int = 9222
     ignore_https_errors: bool = False
     default_timeout_ms: int = 30000
     output_dir: str = "browser"
@@ -42,7 +40,6 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
         headed=bool(headed),
         chrome_path=str(browser.get("chrome_path") or "").strip(),
         cdp_url=str(browser.get("cdp_url") or "").strip(),
-        debug_port=int(browser.get("debug_port") or 9222),
         ignore_https_errors=bool(browser.get("ignore_https_errors") or False),
         default_timeout_ms=int(browser.get("default_timeout_ms") or 30000),
         output_dir=str(browser.get("output_dir") or "browser").strip("/") or "browser",

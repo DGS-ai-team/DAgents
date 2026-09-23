@@ -82,6 +82,8 @@ if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
 fi
 if [[ -n "${BROWSER_PI_ARGS:-}" ]]; then
   "${PYENV_PYTHON}" -m pip install -r /src/browser-service/requirements.lock
+  export PLAYWRIGHT_BROWSERS_PATH=0
+  "${PYENV_PYTHON}" -m playwright install chromium
   eval "${PYENV_PYTHON}" -m PyInstaller ${BROWSER_PI_ARGS}
 fi
 

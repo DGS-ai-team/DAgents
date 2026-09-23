@@ -145,10 +145,13 @@ export function toolDisplayName(name, args = {}) {
     if (!cmd) return "bash(—)";
     return `bash(${cmd.length > 48 ? truncateGraphemes(cmd, 48) : cmd})`;
   }
-  if (n === "browser_run_task") {
-    const task = sanitizeInline(args.task);
-    if (!task) return "浏览器任务";
-    return `浏览器任务：${task.length > 56 ? truncateGraphemes(task, 56) : task}`;
+  if (n === "browser_call") {
+    const action = Array.isArray(args.actions) ? args.actions[0] : null;
+    const op = sanitizeInline(action?.op);
+    return op ? `浏览器操作：${op}` : "浏览器操作";
+  }
+  if (n === "browser_evaluate") {
+    return "执行浏览器脚本";
   }
   if (n === "trigger_create") {
     return `trigger_create(${sanitizeInline(args.name) || "—"})`;
@@ -179,9 +182,8 @@ const APPROVAL_TOOL_LABELS = {
   terminal_open: "打开终端",
   terminal_read: "读取终端",
   terminal_terminate: "关闭终端",
-  browser_run_task: "浏览器任务",
-  browser_task_status: "查询浏览器任务",
-  browser_task_cancel: "取消浏览器任务",
+  browser_call: "浏览器操作",
+  browser_evaluate: "执行浏览器脚本",
   read_file: "读取文件",
   write_file: "写入文件",
   search_replace: "替换文件内容",
@@ -241,9 +243,13 @@ export function formatApprovalRawArguments(raw, args = {}) {
 export function approvalItemHint(item) {
   const name = String(item?.name || "").trim();
   const args = approvalItemArguments(item);
-  if (name === "browser_run_task") {
-    const task = sanitizeInline(args.task);
-    return task ? `目标：${task}` : "";
+  if (name === "browser_call") {
+    const action = Array.isArray(args.actions) ? args.actions[0] : null;
+    const op = sanitizeInline(action?.op);
+    return op ? `动作：${op}` : "";
+  }
+  if (name === "browser_evaluate") {
+    return "脚本将在当前页面执行";
   }
   if (name === "bash_run") {
     const cmd = sanitizeInline(args.command);

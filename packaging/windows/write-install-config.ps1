@@ -95,14 +95,13 @@ manage:
 
     # --- browser block ---
     $browserBlock = @"
-# Browser 模式 A：browser-use 薄服务（见 docs/design/browser-remote-service-mode-a.md）
+# Playwright browser sidecar（见 docs/design/browser-call-main-agent-playwright-migration.md）
 browser:
   enabled: $(Bool-Yaml ([bool]$feat.browser_enabled))
   service_url: http://127.0.0.1:18766
   headed: true
   chrome_path: ""
   cdp_url: ""
-  debug_port: 9222
   default_timeout_ms: 30000
   output_dir: browser
   max_sessions: 8
@@ -110,14 +109,13 @@ browser:
 "@
     if (-not [bool]$feat.browser_enabled) {
         $browserBlock = @"
-# Browser 模式 A：browser-use 薄服务（见 docs/design/browser-remote-service-mode-a.md）
+# Playwright browser sidecar（见 docs/design/browser-call-main-agent-playwright-migration.md）
 # browser:
 #   enabled: false
 #   service_url: http://127.0.0.1:18766
 #   headed: true
 #   chrome_path: ""
 #   cdp_url: ""
-#   debug_port: 9222
 #   default_timeout_ms: 30000
 #   output_dir: browser
 #   max_sessions: 8

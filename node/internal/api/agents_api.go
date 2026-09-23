@@ -270,13 +270,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.syncBrowserCompanion(r.Context(), rec); err != nil {
-		s.logger.Warn("browser companion sync failed", "agent_id", agentID, "error", err)
-	}
-	// 重新读取以带上 companion meta。
-	if updated, err := s.agents.Get(r.Context(), agentID); err == nil && updated != nil {
-		rec = *updated
-	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
 }
 
@@ -293,17 +286,6 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	views := make([]agentView, 0, len(list))
 	lastActiveAt := s.loadAgentLastActiveAt(r.Context())
 	for _, rec := range list {
-		if isHiddenCompanionAgent(rec) {
-			continue
-		}
-		// 存量：已启用 browser 组但尚未创建伴生时，列表时尽力补齐。
-		if err := s.syncBrowserCompanion(r.Context(), rec); err != nil {
-			if s.logger != nil {
-				s.logger.Warn("browser companion sync on list failed", "agent_id", rec.AgentID, "error", err)
-			}
-		} else if updated, err := s.agents.Get(r.Context(), rec.AgentID); err == nil && updated != nil {
-			rec = *updated
-		}
 		view := s.enrichAgentNotify(agentViewFromRecord(rec))
 		if activeAt, ok := lastActiveAt[view.AgentID]; ok && !activeAt.IsZero() {
 			view.LastActiveAt = activeAt.UTC().Format(time.RFC3339Nano)
@@ -516,14 +498,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		s.publishRuntimeConfigChanged(id, "agent_snapshot", runtimeApplied)
 	}
-	if runtimeDirty {
-		if err := s.syncBrowserCompanion(r.Context(), *rec); err != nil {
-			s.logger.Warn("browser companion sync after patch failed", "agent_id", id, "error", err)
-		}
-		if updated, err := s.agents.Get(r.Context(), id); err == nil && updated != nil {
-			rec = updated
-		}
-	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(*rec))
 }
 
@@ -700,11 +674,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	}
 	s.clearRuntimeReloadPending(id)
 	s.logger.Info("agent runtime ready", "agent_id", id, "workspace_root", built.WorkspaceRoot, "tool_groups", built.ToolGroups)
-	if !agentruntime.IsBrowserCompanionRecord(rec.ConfigSnapshot) && !agentruntime.IsCompanionBrowserAgentID(id) {
-		if err := s.syncBrowserCompanion(ctx, rec); err != nil {
-			s.logger.Warn("browser companion sync on reload failed", "agent_id", id, "error", err)
-		}
-	}
 	return nil
 }
 
