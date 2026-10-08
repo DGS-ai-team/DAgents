@@ -20,6 +20,15 @@ async function apiFetch(path, { method = "GET", body, params, signal } = {}) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
+  // Desktop supplies this transport through Tauri so settings keep using the
+  // same Node-owned API without an HTTP port exposed to the WebView.
+  if (typeof globalThis.__DAGENTS_API_REQUEST__ === "function") {
+    return globalThis.__DAGENTS_API_REQUEST__({
+      method,
+      path: `${url.pathname}${url.search}`,
+      body,
+    });
+  }
   const resp = await fetch(url, init);
   const data = await readJSON(resp);
   if (!resp.ok) {

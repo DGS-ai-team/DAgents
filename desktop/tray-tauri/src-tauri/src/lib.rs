@@ -18,6 +18,7 @@ mod nodectl;
 mod notify;
 mod pending;
 mod singleinstance;
+mod terminal;
 mod uifocus;
 mod update;
 
@@ -25,7 +26,7 @@ use config::ShellConfig;
 use layout::Layout;
 use nodectl::Health;
 use singleinstance::{acquire, InstanceError};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -34,7 +35,9 @@ use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, RunEvent, State, Url, WebviewUrl, WebviewWindow, WindowEvent,
+};
 
 const ENSURE_TIMEOUT: Duration = Duration::from_secs(45);
 const PROBE_INTERVAL: Duration = Duration::from_secs(3);
@@ -71,6 +74,7 @@ struct Shared {
     start_item: Mutex<Option<MenuItem<tauri::Wry>>>,
     stop_item: Mutex<Option<MenuItem<tauri::Wry>>>,
     restart_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    terminal_relays: Mutex<HashMap<String, terminal::RelayHandle>>,
 }
 
 fn _assert_shared_send_sync() {
@@ -182,9 +186,23 @@ pub fn run() {
         start_item: Mutex::new(None),
         stop_item: Mutex::new(None),
         restart_item: Mutex::new(None),
+        terminal_relays: Mutex::new(HashMap::new()),
     });
 
     tauri::Builder::default()
+        .manage(Arc::clone(&shared))
+        .invoke_handler(tauri::generate_handler![
+            desktop_node_status,
+            desktop_node_connection,
+            desktop_node_request,
+            desktop_list_agents,
+            desktop_hydrate_agent,
+            desktop_send_message,
+            desktop_resume_hitl,
+            desktop_terminal_list,
+            desktop_terminal_open,
+            desktop_terminal_command
+        ])
         .plugin(tauri_plugin_opener::init())
         .setup({
             let shared = Arc::clone(&shared);
@@ -234,6 +252,8 @@ pub fn run() {
                 let pending = Submenu::with_id(app, "pending", "待办：无", false)?;
                 let open =
                     MenuItem::with_id(app, "open_console", "打开控制台", true, None::<&str>)?;
+                let open_mvp =
+                    MenuItem::with_id(app, "open_desktop_mvp", "打开 Desktop", true, None::<&str>)?;
                 let open_manage =
                     MenuItem::with_id(app, "open_manage", "打开 Manage", false, None::<&str>)?;
                 let update =
@@ -284,6 +304,7 @@ pub fn run() {
                     &pending,
                     &sep1,
                     &open,
+                    &open_mvp,
                     &open_manage,
                     &update,
                     &sep2,
@@ -323,6 +344,12 @@ pub fn run() {
                     })
                     .build(app)?;
                 app.manage(tray);
+                // Desktop is the primary shell surface. The legacy Node Web UI
+                // remains available from the tray's “打开控制台” action; an
+                // explicit --legacy-console flag is reserved for diagnostics.
+                if !std::env::args().any(|arg| arg == "--legacy-console") {
+                    open_desktop_mvp(&shared, app.handle());
+                }
 
                 let bg_stop = Arc::clone(&shared.desktop_api_stop);
                 shared.update_checker.set_upgrade_callback({
@@ -370,7 +397,15 @@ pub fn run() {
                         let app = app.handle().clone();
                         move || refresh_pending_ui(&shared, &app)
                     },
-                );
+                )
+                .with_event_handler({
+                    let app = app.handle().clone();
+                    move |event| {
+                        if let Some(window) = app.get_webview_window("desktop_mvp") {
+                            let _ = window.emit("desktop-node-event", event);
+                        }
+                    }
+                });
                 sub.start();
                 if let Ok(mut guard) = shared.sse_subscriber.lock() {
                     *guard = Some(sub);
@@ -446,6 +481,9 @@ fn resolve_layout_from_args() -> Result<Layout, String> {
         }
         i += 1;
     }
+    if config_flag.is_none() {
+        config_flag = std::env::var("DAGENTS_CONFIG").ok();
+    }
     Layout::resolve(config_flag.as_deref())
 }
 
@@ -474,6 +512,7 @@ fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
     match id {
         "pending" => open_first_pending(shared, app),
         "open_console" => open_console(shared, app),
+        "open_desktop_mvp" => open_desktop_mvp(shared, app),
         "open_manage" => open_manage(shared),
         "update" => handle_update_menu(shared, app),
         "start" => {
@@ -502,6 +541,402 @@ fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
         }
         _ => {}
     }
+}
+
+fn ensure_mvp_window(window: &WebviewWindow) -> Result<(), String> {
+    if window.label() == "desktop_mvp" {
+        Ok(())
+    } else {
+        Err("Desktop API 仅对 Desktop MVP 窗口开放".into())
+    }
+}
+
+fn mvp_endpoint_allowed(shared: &Shared) -> bool {
+    Url::parse(&shared.cfg.endpoint)
+        .ok()
+        .and_then(|u| {
+            u.host_str()
+                .map(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"))
+        })
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn desktop_node_status(
+    window: WebviewWindow,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<nodeclient::NodeHealth, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Ok(nodeclient::NodeHealth {
+            online: false,
+            setup_required: false,
+            version: String::new(),
+            error: Some(
+                "Desktop MVP 当前只允许本机 Node。远程连接请使用 SSH 隧道转发到本机 loopback。"
+                    .into(),
+            ),
+        });
+    }
+    Ok(shared.node_client.health())
+}
+
+#[tauri::command]
+fn desktop_node_connection(
+    window: WebviewWindow,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<serde_json::Value, String> {
+    ensure_mvp_window(&window)?;
+    let health = shared.node_client.health();
+    let info = if health.online {
+        shared.node_client.agent_info().ok()
+    } else {
+        None
+    };
+    Ok(serde_json::json!({
+        "endpoint": shared.cfg.endpoint.as_str(),
+        "node_id": info.as_ref().map(|item| item.node_id.as_str()).unwrap_or(""),
+        "manage_enabled": info.as_ref().map(|item| item.manage_enabled).unwrap_or(false),
+        "manage_url": info.as_ref().map(|item| item.manage_url.as_str()).unwrap_or(""),
+        "online": health.online,
+        "setup_required": health.setup_required,
+        "version": health.version,
+        "error": health.error,
+    }))
+}
+
+#[tauri::command]
+fn desktop_node_request(
+    window: WebviewWindow,
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<serde_json::Value, DesktopNodeRequestError> {
+    ensure_mvp_window(&window).map_err(DesktopNodeRequestError::from)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err(DesktopNodeRequestError::from(
+            "Desktop 当前只允许本机 Node；远程 Node 需要安全隧道。".to_string(),
+        ));
+    }
+    shared
+        .node_client
+        .desktop_api_request(&method, &path, body)
+        .map_err(DesktopNodeRequestError::from)
+}
+
+#[derive(serde::Serialize)]
+struct DesktopNodeRequestError {
+    message: String,
+    status: Option<u16>,
+}
+
+impl From<String> for DesktopNodeRequestError {
+    fn from(message: String) -> Self {
+        let status = message
+            .split_once("状态 ")
+            .and_then(|(_, tail)| tail.split(|ch: char| !ch.is_ascii_digit()).next())
+            .and_then(|digits| digits.parse().ok());
+        Self { message, status }
+    }
+}
+
+#[tauri::command]
+fn desktop_list_agents(
+    window: WebviewWindow,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Vec<nodeclient::AgentSummary>, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    if shared.node_client.node_profile_incomplete() {
+        return Err("需要先完成 Node 首次配置。请从托盘菜单打开控制台进行配置。".into());
+    }
+    shared.node_client.list_agents().map_err(|e| {
+        if e.contains("status 403") {
+            "需要先完成 Node 首次配置。请从托盘菜单打开控制台进行配置。".to_string()
+        } else {
+            e
+        }
+    })
+}
+
+#[tauri::command]
+fn desktop_hydrate_agent(
+    window: WebviewWindow,
+    agent_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<serde_json::Value, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    shared.node_client.hydrate(&agent_id)
+}
+
+#[tauri::command]
+fn desktop_send_message(
+    window: WebviewWindow,
+    agent_id: String,
+    content: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<serde_json::Value, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    if content.trim().is_empty() {
+        return Err("消息不能为空".into());
+    }
+    shared.node_client.send_message(&agent_id, content.trim())
+}
+
+#[tauri::command]
+fn desktop_resume_hitl(
+    window: WebviewWindow,
+    agent_id: String,
+    resume_value: serde_json::Value,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<serde_json::Value, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    shared.node_client.resume_hitl(&agent_id, resume_value)
+}
+
+#[tauri::command]
+fn desktop_terminal_open(
+    window: WebviewWindow,
+    app: AppHandle,
+    agent_id: String,
+    connection_id: String,
+    session_id: Option<String>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<String, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("终端仅允许连接本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    let agent_id = agent_id.trim().to_string();
+    if agent_id.is_empty()
+        || !shared
+            .node_client
+            .list_agents()?
+            .iter()
+            .any(|agent| agent.agent_id == agent_id)
+    {
+        return Err("找不到当前 Agent，已阻止跨 Agent 打开终端。".into());
+    }
+    let connection_id = connection_id.trim().to_string();
+    if connection_id.is_empty()
+        || connection_id.len() > 80
+        || !connection_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("终端连接标识无效".into());
+    }
+    let endpoint = Url::parse(&shared.cfg.endpoint).map_err(|e| e.to_string())?;
+    let shell = if cfg!(windows) { "powershell" } else { "bash" };
+    let first_command = match session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        Some(id) => serde_json::json!({ "type": "resume", "session_id": id }),
+        None => serde_json::json!({
+            "type": "open",
+            "target_kind": "local",
+            "shell": shell,
+            "rows": 24,
+            "cols": 80
+        }),
+    };
+    let key = connection_id;
+    let mut relays = shared
+        .terminal_relays
+        .lock()
+        .map_err(|_| "终端连接表暂不可用".to_string())?;
+    relays.retain(|_, relay| relay.alive.load(Ordering::Acquire));
+    if relays.contains_key(&key) {
+        return Err("该终端连接已存在".into());
+    }
+    drop(relays);
+    let (sender, alive) = terminal::start(
+        app,
+        endpoint.to_string(),
+        shared.node_client.client_token(),
+        key.clone(),
+        agent_id.clone(),
+        first_command,
+    );
+    shared
+        .terminal_relays
+        .lock()
+        .map_err(|_| "终端连接表暂不可用".to_string())?
+        .insert(
+            key.clone(),
+            terminal::RelayHandle {
+                agent_id,
+                sender,
+                alive,
+            },
+        );
+    Ok(key)
+}
+
+#[tauri::command]
+fn desktop_terminal_list(
+    window: WebviewWindow,
+    agent_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Vec<nodeclient::TerminalSummary>, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("终端仅允许连接本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    let agent_id = agent_id.trim();
+    if !shared
+        .node_client
+        .list_agents()?
+        .iter()
+        .any(|agent| agent.agent_id == agent_id)
+    {
+        return Err("找不到当前 Agent，已阻止跨 Agent 列举终端。".into());
+    }
+    shared.node_client.list_terminals(agent_id)
+}
+
+#[tauri::command]
+fn desktop_terminal_command(
+    window: WebviewWindow,
+    connection_id: String,
+    agent_id: String,
+    command_type: String,
+    data: Option<String>,
+    rows: Option<u16>,
+    cols: Option<u16>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<(), String> {
+    use base64::Engine;
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("终端仅允许连接本机 Node；远程 Node 需要安全隧道。".into());
+    }
+    let id = connection_id.trim();
+    let mut map = shared
+        .terminal_relays
+        .lock()
+        .map_err(|_| "终端连接表暂不可用".to_string())?;
+    map.retain(|_, relay| relay.alive.load(Ordering::Acquire));
+    let relay = map
+        .get(id)
+        .ok_or_else(|| "终端会话已关闭或不属于当前 Desktop 窗口".to_string())?;
+    if relay.agent_id != agent_id {
+        return Err("终端会话不属于当前 Agent，已阻止跨 Agent 操作。".into());
+    }
+    let sender = relay.sender.clone();
+    let command = match command_type.as_str() {
+        "input" => {
+            let encoded = base64::engine::general_purpose::STANDARD
+                .encode(data.unwrap_or_default().as_bytes());
+            serde_json::json!({ "type": "input", "data": encoded })
+        }
+        "resize" => serde_json::json!({
+            "type": "resize",
+            "rows": rows.unwrap_or(24).clamp(1, 200),
+            "cols": cols.unwrap_or(80).clamp(1, 300)
+        }),
+        "close" | "terminate" | "detach" => serde_json::json!({ "type": command_type }),
+        _ => return Err("不支持的终端动作".into()),
+    };
+    let should_remove = matches!(command_type.as_str(), "close" | "terminate" | "detach");
+    if should_remove {
+        map.remove(id);
+    }
+    drop(map);
+    if sender
+        .send(terminal::TerminalControl { message: command })
+        .is_err()
+        && !should_remove
+    {
+        return Err("终端连接已断开".to_string());
+    }
+    Ok(())
+}
+
+fn open_desktop_mvp(shared: &Arc<Shared>, app: &AppHandle) {
+    let mvp_shared = Arc::clone(shared);
+    let app = app.clone();
+    let main_app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(win) = main_app.get_webview_window("desktop_mvp") {
+            let _ = win.set_skip_taskbar(false);
+            let _ = win.show();
+            let _ = win.set_focus();
+            return;
+        }
+        let Ok(window) = WebviewWindowBuilder::new(
+            &main_app,
+            "desktop_mvp",
+            WebviewUrl::App("index.html".into()),
+        )
+        .title("DAgents Desktop MVP")
+        .inner_size(1180.0, 760.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true)
+        .decorations(false)
+        .on_navigation(is_desktop_mvp_navigation_allowed)
+        .build() else {
+            return;
+        };
+        let close_window = window.clone();
+        let close_shared = Arc::clone(&mvp_shared);
+        window.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                detach_all_terminal_relays(&close_shared);
+                let _ = close_window.hide();
+                let _ = close_window.set_skip_taskbar(true);
+                api.prevent_close();
+            }
+        });
+    });
+}
+
+fn detach_all_terminal_relays(shared: &Arc<Shared>) {
+    let relays = match shared.terminal_relays.lock() {
+        Ok(mut relays) => relays.drain().map(|(_, relay)| relay).collect::<Vec<_>>(),
+        Err(_) => return,
+    };
+    for relay in relays {
+        let _ = relay.sender.send(terminal::TerminalControl {
+            message: serde_json::json!({ "type": "detach" }),
+        });
+    }
+}
+
+fn is_desktop_mvp_navigation_allowed(url: &Url) -> bool {
+    desktop_mvp_navigation_allowed(url, cfg!(debug_assertions))
+}
+
+fn desktop_mvp_navigation_allowed(url: &Url, allow_vite_dev_server: bool) -> bool {
+    if matches!(url.scheme(), "tauri" | "asset") {
+        return true;
+    }
+    if allow_vite_dev_server
+        && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
+        && url.port() == Some(1422)
+    {
+        return true;
+    }
+    matches!(url.scheme(), "http" | "https")
+        && matches!(
+            url.host_str(),
+            Some("tauri.localhost") | Some("asset.localhost")
+        )
+        && url.port().is_none()
 }
 
 fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
@@ -1035,7 +1470,7 @@ fn set_tray_icon(app: &AppHandle, pending: bool) {
 
 #[cfg(test)]
 mod nav_tests {
-    use super::is_navigation_allowed;
+    use super::{desktop_mvp_navigation_allowed, is_navigation_allowed};
     use tauri::Url;
 
     #[test]
@@ -1065,5 +1500,16 @@ mod nav_tests {
             &Url::parse("http://127.0.0.1:9999/ui/").unwrap(),
             ep
         ));
+    }
+
+    #[test]
+    fn mvp_vite_navigation_is_debug_only() {
+        let app = Url::parse("tauri://localhost/index.html").unwrap();
+        let vite = Url::parse("http://127.0.0.1:1422/").unwrap();
+        let attacker = Url::parse("http://127.0.0.1:1423/").unwrap();
+        assert!(desktop_mvp_navigation_allowed(&app, false));
+        assert!(desktop_mvp_navigation_allowed(&vite, true));
+        assert!(!desktop_mvp_navigation_allowed(&vite, false));
+        assert!(!desktop_mvp_navigation_allowed(&attacker, true));
     }
 }

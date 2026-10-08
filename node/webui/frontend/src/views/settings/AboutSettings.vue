@@ -8,6 +8,10 @@ import { COMPOSER_DRAFT_KEY } from "../../utils/helpCommands.js";
 const router = useRouter();
 
 function onPick(cmd) {
+  if (window.__TAURI_INTERNALS__) {
+    window.dispatchEvent(new CustomEvent("desktop-use-chat-command", { detail: { command: cmd } }));
+    return;
+  }
   try {
     sessionStorage.setItem(COMPOSER_DRAFT_KEY, cmd);
   } catch {
