@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">info · 提示</title><desc id="desc">DAgents 提示 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
+  <circle class="icon" cx="12" cy="12" r="8"/><path class="icon" d="M12 10.5v5M12 7.5h.01"/>
+</svg>

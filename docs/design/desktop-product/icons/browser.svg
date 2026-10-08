@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">browser · 浏览器</title><desc id="desc">DAgents 浏览器 icon; currentColor, 2px round cap and join.</desc><style>.icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
+  <rect class="icon" x="3.5" y="4.5" width="17" height="15" rx="2"/><path class="icon" d="M3.5 8.5h17"/><circle class="icon" cx="6.5" cy="6.5" r=".8"/><circle class="icon" cx="9.3" cy="6.5" r=".8"/><circle class="icon" cx="12.1" cy="6.5" r=".8"/>
+</svg>
