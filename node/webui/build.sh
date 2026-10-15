@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建 Node Web UI（Vue）到 node/internal/webui/static/
+# Build the reusable Vue frontend into node/webui/frontend/dist/.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${ROOT}/node/webui/frontend"
@@ -11,5 +11,4 @@ if [[ ! -d node_modules ]]; then
   fi
 fi
 npm run build
-touch "${ROOT}/node/internal/webui/static/.gitkeep"
-echo "Built -> ${ROOT}/node/internal/webui/static/"
+echo "Built reusable frontend -> ${ROOT}/node/webui/frontend/dist/"

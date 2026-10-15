@@ -257,7 +257,6 @@ onMounted(() => void load());
   <div class="settings-page settings-embedded linux-settings">
     <SettingsPageHeader
       title="Linux 通道"
-      eyebrow="全局工具设置"
       description="先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。敏感信息不会进入工具参数或会话上下文。"
     >
       <template #actions>

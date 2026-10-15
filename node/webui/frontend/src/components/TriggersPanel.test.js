@@ -15,9 +15,10 @@ vi.mock("./settings/TriggerEditor.vue", () => ({ default: { template: "<div />" 
 
 describe("TriggersPanel retired legacy records", () => {
   it("keeps current auto triggers actionable and marks legacy controllers retired", async () => {
-    api.listAgents.mockResolvedValue({ agents: [] });
+    routerMock.push.mockReset();
+    api.listAgents.mockResolvedValue({ agents: [{ agent_id: "agent-auto", display_name: "Auto worker" }] });
     api.listTriggers.mockResolvedValue({ triggers: [
-      { trigger_id: "auto-default-agent", name: "Auto 默认触发", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", enabled: true, condition: { interval_seconds: 60 } },
+      { trigger_id: "auto-default-agent", name: "Auto 默认触发", controller: "auto", owner_agent_id: "agent-auto", target_agent_id: "agent-auto", enabled: false, condition: { interval_seconds: 60 } },
       { trigger_id: "legacy-controller", name: "旧任务", controller: "retired", enabled: false, recovery_required: true, condition: { interval_seconds: 60 } },
       { trigger_id: "unknown-maintenance", name: "未知维护", controller: "maintenance", enabled: true, condition: { interval_seconds: 60 } },
       { trigger_id: "user-trigger", name: "用户任务", controller: "user", enabled: true, condition: { interval_seconds: 60 } },
@@ -40,6 +41,7 @@ describe("TriggersPanel retired legacy records", () => {
     const cardByText = (text) => cards.find((card) => card.text().includes(text));
     const autoCard = cardByText("Auto 默认触发");
     expect(autoCard.findAll("button").map((button) => button.text().trim())).toEqual(["打开 Auto 设置", "查看历史"]);
+    expect(autoCard.text()).toContain("已禁用");
     await autoCard.find("button").trigger("click");
     expect(routerMock.push).toHaveBeenCalledWith({ name: "settings-agent-detail", params: { agentId: "agent-auto" }, query: { section: "autonomy" } });
 
@@ -85,5 +87,61 @@ describe("TriggersPanel retired legacy records", () => {
     expect(api.recoverTrigger).toHaveBeenCalledWith("auto-recovery", "delivery-7", 7);
     expect(legacy.text()).not.toContain("确认并丢弃旧投递");
     confirm.mockRestore();
+  });
+
+  it("keeps Auto history visible and explains the unavailable owner without offering a dead link", async () => {
+    routerMock.push.mockReset();
+    api.listAgents.mockResolvedValue({ agents: [] });
+    api.listTriggers.mockResolvedValue({ triggers: [
+      { trigger_id: "archived-auto", name: "归档 Auto 唤醒", controller: "auto", owner_agent_id: "archived-agent", target_agent_id: "archived-agent", enabled: false, recovery_required: true, recovery_reason: "trigger owner is unavailable", pending_delivery_id: "old-delivery", condition: { interval_seconds: 60 } },
+    ] });
+    api.recoverTrigger.mockResolvedValue({ trigger_id: "archived-auto", enabled: false });
+    const wrapper = mount(TriggersPanel, { props: { embedded: true } });
+    await flushPromises();
+
+    const card = wrapper.find(".command-card");
+    expect(card.text()).toContain("所属智能体不可用，无法打开 Auto 设置");
+    expect(card.text()).toContain("trigger owner is unavailable");
+    expect(card.text()).toContain("确认并丢弃旧投递");
+    expect(card.findAll("button").map((button) => button.text().trim())).toContain("查看历史");
+    expect(card.findAll("button").map((button) => button.text().trim())).not.toContain("打开 Auto 设置");
+    expect(routerMock.push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("does not call an Auto owner unavailable while the Agent list failed to load", async () => {
+    routerMock.push.mockReset();
+    api.listAgents.mockRejectedValue(new Error("agent list unavailable"));
+    api.listTriggers.mockResolvedValue({ triggers: [
+      { trigger_id: "unknown-owner-auto", name: "Auto 唤醒", controller: "auto", owner_agent_id: "agent-a", target_agent_id: "agent-a", enabled: false, condition: { interval_seconds: 60 } },
+    ] });
+    const wrapper = mount(TriggersPanel, { props: { embedded: true } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("无法加载智能体列表");
+    expect(wrapper.text()).not.toContain("所属智能体不可用，无法打开 Auto 设置");
+    expect(wrapper.findAll("button").map((button) => button.text().trim())).not.toContain("打开 Auto 设置");
+    expect(wrapper.findAll("button").map((button) => button.text().trim())).toContain("查看历史");
+    expect(routerMock.push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("does not show a missing-owner message while the Agent list is still loading", async () => {
+    routerMock.push.mockReset();
+    let resolveAgents;
+    api.listAgents.mockImplementationOnce(() => new Promise((resolve) => { resolveAgents = resolve; }));
+    api.listTriggers.mockResolvedValue({ triggers: [
+      { trigger_id: "pending-owner-auto", name: "Auto 唤醒", controller: "auto", owner_agent_id: "agent-a", target_agent_id: "agent-a", enabled: false, condition: { interval_seconds: 60 } },
+    ] });
+    const wrapper = mount(TriggersPanel, { props: { embedded: true } });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("所属智能体不可用，无法打开 Auto 设置");
+    expect(wrapper.findAll("button").map((button) => button.text().trim())).not.toContain("打开 Auto 设置");
+    expect(routerMock.push).not.toHaveBeenCalled();
+    resolveAgents({ agents: [] });
+    await flushPromises();
+    expect(wrapper.text()).toContain("所属智能体不可用，无法打开 Auto 设置");
+    wrapper.unmount();
   });
 });

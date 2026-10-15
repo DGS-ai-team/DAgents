@@ -17,7 +17,7 @@ func TestHandleAgentUpdateWindowsReturnsCurrentStatus(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/v1/agent/update")
+	resp, err := http.Get(ts.URL + "/v1/node/update")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestHandleAgentUpdateLinuxUsesChecker(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/v1/agent/update")
+	resp, err := http.Get(ts.URL + "/v1/node/update")
 	if err != nil {
 		t.Fatal(err)
 	}

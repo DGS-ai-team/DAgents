@@ -18,6 +18,7 @@ import {
   toolGroupsFromSetup,
 } from "../../utils/agentTemplateForm.js";
 import { notifyConfigurationChanged, onConfigurationChanged } from "../../utils/configurationEvents.js";
+import { saveAgentDetailStages } from "../../utils/agentDetailSave.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -25,6 +26,8 @@ const router = useRouter();
 const loading = ref(true);
 const saving = ref(false);
 const reloading = ref(false);
+const setupConfigReady = ref(false);
+const promptContextReady = ref(false);
 const error = ref("");
 const statusMessage = ref("");
 const showAdvanced = ref(false);
@@ -35,6 +38,7 @@ const availableToolGroups = ref([]);
 const agentMeta = ref(null);
 const savedMemoryScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
+let loadEpoch = 0;
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
 const detailSections = [
@@ -58,7 +62,12 @@ function setActiveSection(section) {
 }
 
 async function load() {
-  if (!agentId.value) {
+  const requestedAgentId = agentId.value;
+  const epoch = ++loadEpoch;
+  setupConfigReady.value = false;
+  promptContextReady.value = false;
+  agentMeta.value = null;
+  if (!requestedAgentId) {
     error.value = "缺少智能体标识";
     loading.value = false;
     return;
@@ -67,12 +76,15 @@ async function load() {
   error.value = "";
   statusMessage.value = "";
   try {
-    const [agent, setup, promptCtx] = await Promise.all([
-      api.getAgent(agentId.value),
-      api.getSetupConfig().catch(() => null),
-      api.getAgentPromptContext(agentId.value).catch(() => null),
+    const [agent, setupResult, promptResult] = await Promise.all([
+      api.getAgent(requestedAgentId),
+      api.getSetupConfig().then((data) => ({ ok: true, data }), (cause) => ({ ok: false, cause })),
+      api.getAgentPromptContext(requestedAgentId).then((data) => ({ ok: true, data }), (cause) => ({ ok: false, cause })),
     ]);
+    if (epoch !== loadEpoch || agentId.value !== requestedAgentId) return;
     agentMeta.value = agent;
+    const setup = setupResult.ok ? setupResult.data : null;
+    setupConfigReady.value = Boolean(setup && typeof setup === "object");
     llmProfiles.value = Array.isArray(setup?.llm?.profiles)
       ? setup.llm.profiles
           .map((p) => ({
@@ -82,7 +94,7 @@ async function load() {
           }))
           .filter((p) => p.id)
       : [];
-    availableToolGroups.value = toolGroupsFromSetup(setup);
+    availableToolGroups.value = setupConfigReady.value ? toolGroupsFromSetup(setup) : [];
     Object.assign(
       draft,
       draftFromAgentView(
@@ -91,8 +103,11 @@ async function load() {
       ),
     );
     draft.agentType = agent?.agent_type === "auto" ? "auto" : "normal";
-    pruneDraftToolGroups(draft, availableToolGroups.value);
-    if (promptCtx) {
+    if (setupConfigReady.value) pruneDraftToolGroups(draft, availableToolGroups.value);
+
+    const promptCtx = promptResult.ok ? promptResult.data : null;
+    promptContextReady.value = Boolean(promptCtx && typeof promptCtx === "object");
+    if (promptContextReady.value) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
       draft.promptCustomMd = String(promptCtx.custom_md || "");
       savedMemoryScope.value =
@@ -101,14 +116,28 @@ async function load() {
           : "agent";
       draft.promptMemoryScope = savedMemoryScope.value;
     }
+    const loadErrors = [];
+    if (!setupConfigReady.value) {
+      loadErrors.push(`无法读取模型与能力目录，已保留 Agent 现有工具组并阻止保存：${setupResult.cause?.message || "配置响应为空"}`);
+    }
+    if (!promptContextReady.value) {
+      loadErrors.push(`无法读取提示词设置，已阻止保存以免覆盖现有内容：${promptResult.cause?.message || "提示词设置响应为空"}`);
+    }
+    error.value = loadErrors.join(" ");
   } catch (e) {
-    error.value = e.message || "加载失败";
+    if (epoch === loadEpoch && agentId.value === requestedAgentId) {
+      error.value = e.message || "加载失败";
+    }
   } finally {
-    loading.value = false;
+    if (epoch === loadEpoch) loading.value = false;
   }
 }
 
 async function save() {
+  if (loading.value || !setupConfigReady.value || !promptContextReady.value) {
+    error.value = "模型/能力目录或提示词设置尚未成功读取，当前不能保存；请重新加载后再试。";
+    return;
+  }
   if (!draft.displayName?.trim()) {
     error.value = "显示名称不能为空";
     return;
@@ -120,17 +149,35 @@ async function save() {
   saving.value = true;
   error.value = "";
   statusMessage.value = "";
+  const targetAgentId = agentId.value;
+  const nextMemoryScope = draft.promptMemoryScope === "global" ? "global" : "agent";
   try {
-    const updated = await api.patchAgent(agentId.value, buildPatchAgentPayload(draft));
-    agentMeta.value = updated;
-    const nextMemoryScope = draft.promptMemoryScope === "global" ? "global" : "agent";
-    await api.putAgentPromptContext(agentId.value, {
-      soul_md: draft.promptSoulMd || "",
-      custom_md: draft.promptCustomMd || "",
-      memory_scope: nextMemoryScope,
+    const result = await saveAgentDetailStages({
+      agentId: targetAgentId,
+      agentPayload: buildPatchAgentPayload(draft),
+      promptPayload: {
+        soul_md: draft.promptSoulMd || "",
+        custom_md: draft.promptCustomMd || "",
+        memory_scope: nextMemoryScope,
+      },
+      patchAgent: api.patchAgent,
+      putPromptContext: api.putAgentPromptContext,
+      reloadAgentRuntime: api.reloadAgentRuntime,
     });
-    savedMemoryScope.value = nextMemoryScope;
-    await api.reloadAgentRuntime(agentId.value);
+    if (agentId.value !== targetAgentId) return;
+    if (result.updatedAgent) agentMeta.value = result.updatedAgent;
+    if (result.promptSaved) savedMemoryScope.value = nextMemoryScope;
+    if (!result.ok) {
+      const detail = result.error?.message || String(result.error || "未知错误");
+      if (result.stage === "agent") {
+        error.value = `智能体配置保存请求未确认，请刷新核对后再重试：${detail}`;
+      } else if (result.stage === "prompt") {
+        error.value = `智能体配置已保存，但提示词保存结果未确认；编辑内容仍保留，请核对后重试：${detail}`;
+      } else {
+        error.value = `智能体配置和提示词已保存，但运行时重载失败；当前会话可能仍使用旧配置：${detail}`;
+      }
+      return;
+    }
     policyRefreshKey.value += 1;
     notifyConfigurationChanged("tools");
     statusMessage.value = "已保存并应用到该智能体。";
@@ -190,11 +237,10 @@ onUnmounted(() => stopConfigurationEvents());
   <div class="settings-page settings-embedded">
     <header class="settings-page__header">
       <div class="settings-page__header-main">
-        <span class="agent-detail__eyebrow">智能体配置</span>
         <h1 class="settings-page__title">
           {{ agentMeta?.display_name || "智能体配置" }}
         </h1>
-        <p class="agent-detail__intro">管理这个智能体的行为、工具权限和运行连接。</p>
+        <p class="agent-detail__intro">管理行为、工具权限和运行连接。</p>
       </div>
       <div class="settings-page__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="backToList">
@@ -224,19 +270,13 @@ onUnmounted(() => stopConfigurationEvents());
       <p v-if="error && !agentMeta" class="agent-detail__error" role="alert">{{ error }}</p>
 
       <section v-if="activeSection === 'autonomy' && agentMeta?.agent_type === 'auto'" class="agent-detail__section agent-detail__section--first">
-        <div class="agent-detail__section-heading"><div><span class="agent-detail__section-kicker">Auto</span><h2>自动检查与手册</h2></div><span>管理职责、检查频率和可编辑手册</span></div>
+        <div class="agent-detail__section-heading"><h2>自动检查与手册</h2><span>管理职责、检查频率和可编辑手册</span></div>
         <SimplifiedAutoPanel :key="agentId" :agent-id="agentId" />
         <AgentHandbookPanel :key="`handbook-${agentId}`" :agent-id="agentId" />
       </section>
 
       <section v-else-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
-        <div class="agent-detail__section-heading">
-          <div>
-            <span class="agent-detail__section-kicker">核心配置</span>
-            <h2>基本设置</h2>
-          </div>
-          <span>影响该智能体的每次新对话</span>
-        </div>
+        <h2 class="agent-detail__section-title">基本设置</h2>
         <AgentSettingsForm
           v-model:draft="draft"
           :llm-profiles="llmProfiles"
@@ -258,7 +298,12 @@ onUnmounted(() => stopConfigurationEvents());
             >
               {{ reloading ? "加载中…" : "重新加载" }}
             </button>
-            <button type="button" class="btn btn--primary" :disabled="saving" @click="save">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="saving || loading || !setupConfigReady || !promptContextReady"
+            @click="save"
+          >
               {{ saving ? "保存中…" : "保存并应用" }}
             </button>
           </div>
@@ -381,6 +426,8 @@ onUnmounted(() => stopConfigurationEvents());
   font-size: 17px;
   font-weight: 600;
 }
+
+.agent-detail__section-title { margin: 0 0 10px; color: var(--color-text); font-size: 15px; font-weight: 600; }
 
 .agent-detail__section-heading > span {
   padding-bottom: 2px;

@@ -18,6 +18,10 @@ packaging/agent-client/policy.local.yaml
 # local runtime/state files
 .runtime/
 logs/
+# Codex local environment metadata and disposable desktop smoke-test state.
+/.codex/
+/.runtime-test*/
+/tauri-dev.log
 # 仅忽略仓库根下名为 history 的目录，避免误伤 `app/harness/history/` 源码包。
 /history/
 *.sqlite3

@@ -13,7 +13,7 @@ import (
 
 func TestRemoteDriverV2Routes(t *testing.T) {
 	var mu sync.Mutex
-	seen := make([]string, 0, 3)
+	seen := make([]string, 0, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path)
@@ -46,9 +46,12 @@ func TestRemoteDriverV2Routes(t *testing.T) {
 	if _, err := driver.Call(context.Background(), Request{Op: "evaluate", SessionKey: "s", Script: "document.title"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := driver.Call(context.Background(), Request{Op: "view", SessionKey: "s", PageID: "page-1", TimeoutMS: 5000}); err != nil {
+		t.Fatal(err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	want := []string{"GET /v2/browser/ping", "POST /v2/browser/call", "POST /v2/browser/evaluate"}
+	want := []string{"GET /v2/browser/ping", "POST /v2/browser/call", "POST /v2/browser/evaluate", "POST /v2/browser/call"}
 	if len(seen) != len(want) {
 		t.Fatalf("routes = %#v", seen)
 	}

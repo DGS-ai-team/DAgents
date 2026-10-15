@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAgentTodo, deleteAgentTodo, putAutoConfig, updateAgentTodo } from "./node.js";
+import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, putAutoConfig, updateAgentTodo } from "./node.js";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("simplified Auto todo API", () => {
   it("uses the correct verbs and CAS request bodies", async () => {
@@ -20,5 +20,14 @@ describe("simplified Auto todo API", () => {
     expect(fetchMock.mock.calls[3][1]).toMatchObject({ method: "DELETE" });
     expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ expected_revision: 4 });
     expect(String(fetchMock.mock.calls[2][0])).toContain("t%2F2");
+  });
+});
+
+describe("read-only Agent browser view API", () => {
+  it("uses the authenticated Desktop JSON bridge with the Agent-owned path and optional page id", async () => {
+    const request = vi.fn(async () => ({ page_id: "page-1", image_base64: "cG5n" }));
+    vi.stubGlobal("__DAGENTS_API_REQUEST__", request);
+    await getAgentBrowserView("agent/1", "page/2");
+    expect(request).toHaveBeenCalledWith({ method: "GET", path: "/v1/agents/agent%2F1/browser/view?page_id=page%2F2", body: undefined });
   });
 });

@@ -49,19 +49,22 @@ pub fn plan_sync(
 }
 
 pub struct Notifier {
-    endpoint: String,
+    enabled: bool,
     last: Mutex<HashMap<String, Entry>>,
 }
 
 impl Notifier {
-    pub fn new(endpoint: String) -> Self {
+    pub fn new(enabled: bool) -> Self {
         Self {
-            endpoint,
+            enabled,
             last: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn sync(&self, entries: &[Entry], retain_ids: &HashSet<String>) {
+        if !self.enabled {
+            return;
+        }
         let Ok(mut last) = self.last.lock() else {
             return;
         };
@@ -75,17 +78,15 @@ impl Notifier {
     }
 
     pub fn push_update_available(&self, latest_version: &str) -> Result<(), String> {
-        push_update_toast(&self.endpoint, latest_version)
+        if self.enabled {
+            push_update_toast(latest_version)
+        } else {
+            Ok(())
+        }
     }
 
     fn push_pending(&self, e: &Entry) -> Result<(), String> {
-        let id = if e.agent_id.trim().is_empty() {
-            e.session_id.trim()
-        } else {
-            e.agent_id.trim()
-        };
-        let target = agent_url(&self.endpoint, id);
-        push_pending_toast(&target, &e.summary_label())
+        push_pending_toast(&e.summary_label())
     }
 }
 
@@ -98,73 +99,42 @@ fn entry_key(e: &Entry) -> String {
     }
 }
 
-fn agent_url(endpoint: &str, agent_id: &str) -> String {
-    let base = format!("{}/ui/", endpoint.trim().trim_end_matches('/'));
-    if agent_id.trim().is_empty() {
-        base
-    } else {
-        format!("{base}agents/{}", path_escape(agent_id.trim()))
-    }
-}
-
 #[cfg(windows)]
-fn settings_about_url(endpoint: &str) -> String {
-    format!(
-        "{}/ui/settings/about",
-        endpoint.trim().trim_end_matches('/')
-    )
-}
-
-fn path_escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-#[cfg(windows)]
-fn push_pending_toast(target: &str, message: &str) -> Result<(), String> {
+fn push_pending_toast(message: &str) -> Result<(), String> {
     use winrt_notification::{Duration, Toast};
     Toast::new(Toast::POWERSHELL_APP_ID)
         .title("DAgents 待处理")
         .text1(message)
-        .text2(target)
+        .text2("请打开 DAgents Desktop 查看")
         .duration(Duration::Short)
         .show()
         .map_err(|e| e.to_string())
 }
 
 #[cfg(not(windows))]
-fn push_pending_toast(_target: &str, _message: &str) -> Result<(), String> {
+fn push_pending_toast(_message: &str) -> Result<(), String> {
     Ok(())
 }
 
 #[cfg(windows)]
-fn push_update_toast(endpoint: &str, latest_version: &str) -> Result<(), String> {
+fn push_update_toast(latest_version: &str) -> Result<(), String> {
     use winrt_notification::{Duration, Toast};
     let latest = if latest_version.trim().is_empty() {
         "新版本"
     } else {
         latest_version.trim()
     };
-    let target = settings_about_url(endpoint);
     Toast::new(Toast::POWERSHELL_APP_ID)
         .title("DAgents 新版本可用")
         .text1(&format!("可升级到 {latest}，点击查看详情"))
-        .text2(&target)
+        .text2("请打开 DAgents Desktop 查看")
         .duration(Duration::Short)
         .show()
         .map_err(|e| e.to_string())
 }
 
 #[cfg(not(windows))]
-fn push_update_toast(_endpoint: &str, _latest_version: &str) -> Result<(), String> {
+fn push_update_toast(_latest_version: &str) -> Result<(), String> {
     Ok(())
 }
 

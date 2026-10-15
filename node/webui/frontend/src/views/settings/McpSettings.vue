@@ -231,7 +231,6 @@ onMounted(() => {
   <div class="settings-page settings-embedded mcp-settings">
     <SettingsPageHeader
       title="MCP 服务"
-      eyebrow="全局工具设置"
       description="管理 Node 全局可用的 MCP 服务和工具目录；具体智能体的启用范围在智能体设置中绑定。"
     >
       <template #actions>

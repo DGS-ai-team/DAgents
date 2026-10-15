@@ -1,0 +1,2 @@
+QA uninstall passed: binaries were removed while bootstrap, .runtime database/policy/sentinel, and local Desktop JSON remained unchanged.
+For a final persistence check, run Stage Verify.

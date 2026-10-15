@@ -5,6 +5,10 @@ import LlmProfileModal from "./LlmProfileModal.vue";
 import UiIcon from "./UiIcon.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
+const props = defineProps({
+  subtitle: { type: String, default: "管理模型配置、默认模型和 Manage 连接。" },
+});
+
 const DEEPSEEK_DEFAULT = {
   id: "deepseek-chat",
   provider: "deepseek",
@@ -169,6 +173,7 @@ onMounted(async () => {
 <template>
   <ConfigPanelShell
     title="模型与连接"
+    :subtitle="props.subtitle"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"
@@ -260,6 +265,23 @@ onMounted(async () => {
             :disabled="manageFieldsDisabled"
             autocomplete="off"
           />
+        </label>
+        <label class="settings-field settings-field--stack">
+          <span class="settings-field__label">Node Token</span>
+          <input
+            v-model="form.manage.node_token"
+            class="settings-field__input"
+            type="password"
+            autocomplete="new-password"
+            placeholder="留空保持当前凭据"
+          />
+          <small class="settings-field__hint">
+            {{ form.manage.has_node_token ? "已配置凭据；替换时输入新值。" : "尚未配置凭据。" }}
+          </small>
+        </label>
+        <label v-if="form.manage.has_node_token" class="settings-toggle">
+          <input v-model="form.manage.clear_node_token" type="checkbox" />
+          <span>清除已保存的 Node Token</span>
         </label>
         <label class="settings-toggle" :class="{ 'settings-toggle--disabled': manageFieldsDisabled }">
           <input

@@ -6,7 +6,9 @@
 # 2. 较新的 **Ubuntu 20.04 (focal)** 链（glibc 2.31）产物可能依赖 **GLIBC_2.30+**；旧环境请用本脚本而非 `build_linux_focal_pyenv.sh`。
 #
 # 硬边界：
-# - **RHEL 6 / CentOS 6（glibc 2.12）无法运行 CPython 3.13**；若必须支持，只能换更低版本 Python 或容器化部署，勿期望本仓库 PyInstaller 产物兼容。
+# - RHEL 6 / CentOS 6 are outside the supported runtime baseline. Use SSH from
+#   those hosts to a currently supported Linux machine; this build does not add
+#   an old-system compatibility target.
 # - 官方 `rockylinux:8` 极简镜像不含 **find**（findutils），pyenv python-build 会因此失败；勿装完整 coreutils（与 coreutils-single 冲突）。
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：

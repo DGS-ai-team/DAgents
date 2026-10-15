@@ -1173,8 +1173,8 @@ sidecar 不负责：
 | 环境 | 期望 | 场景 |
 |---|---|---|
 | Windows 10 | 不注册 Browser 工具 | platform gate、UI 诊断、Node 其它能力可用 |
-| Windows Server 2012 R2 | 不注册 Browser 工具 | 同上 |
-| Windows Server 2016 | 不注册 Browser 工具 | 同上 |
+| Windows Server 2012 R2 | 不支持 | 旧版 Server 不纳入 DAgents 运行支持或 Browser 验收 |
+| Windows Server 2016 | 不支持 | 旧版 Server 不纳入 DAgents 运行支持或 Browser 验收 |
 | Windows Server 2019 | 支持 | 完整 contract、launch、attach、SSO |
 | Windows Server 2022 | 支持 | 完整 contract、launch、attach、SSO |
 | Windows 11 | 支持 | headed、用户接管、persistent profile、扩展/SSO |

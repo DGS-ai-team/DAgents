@@ -2,7 +2,7 @@ import { reactive, ref } from "vue";
 import * as api from "../api/node.js";
 
 const emptyForm = () => ({
-  node: { listen_host: "", listen_port: 0, local_endpoint: "" },
+  node: { listen_host: "", listen_port: 0 },
   llm: { active: "", profiles: [] },
   manage: {},
   features: {},
@@ -43,6 +43,8 @@ export function useSetupConfig() {
         }))
       : [];
     Object.assign(form.manage, data.manage || {});
+    form.manage.node_token = "";
+    form.manage.clear_node_token = false;
     Object.assign(form.features, data.features || {});
     Object.assign(form.compression, data.compression || {});
     Object.assign(form.runtime, data.runtime || {});

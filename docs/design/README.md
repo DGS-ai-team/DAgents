@@ -39,6 +39,7 @@
 
 | 文档 | 说明 |
 |---|---|
+| [desktop-product/](desktop-product/) | Desktop 产品设计资料包：当前界面图、交互原型、技术方案、视觉资产和完整产品设计缺口 |
 | [workgroup-multi-agent-collaboration-refactor-plan.md](workgroup-multi-agent-collaboration-refactor-plan.md) | 多智能体委派、子 Agent Turn、工具审批、Ask User、取消恢复与前端投影重构方案 |
 | [workgroup-agent-membership-ui.md](workgroup-agent-membership-ui.md) | Workgroup 成员 UI 的后续增强 |
 

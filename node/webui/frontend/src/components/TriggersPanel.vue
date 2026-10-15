@@ -26,6 +26,7 @@ const statusMessage = ref("");
 const data = ref(null);
 const agents = ref([]);
 const agentsLoading = ref(false);
+const agentsLoaded = ref(false);
 const historyById = ref({});
 const historyOpenId = ref("");
 const editingId = ref(null);
@@ -56,8 +57,23 @@ function displayName(item) {
 }
 
 function openAutoSettings(item) {
-  const agentId = String(item?.target_agent_id || item?.owner_agent_id || "").trim();
-  if (agentId) router.push({ name: "settings-agent-detail", params: { agentId }, query: { section: "autonomy" } });
+  const agentId = autoSettingsAgentId(item);
+  if (agentId && isAutoSettingsAvailable(item)) {
+    router.push({ name: "settings-agent-detail", params: { agentId }, query: { section: "autonomy" } });
+  }
+}
+
+function autoSettingsAgentId(item) {
+  return String(item?.target_agent_id || item?.owner_agent_id || "").trim();
+}
+
+function isAutoSettingsAvailable(item) {
+  const agentId = autoSettingsAgentId(item);
+  return Boolean(agentsLoaded.value && agentId && agents.value.some((agent) => String(agent.agent_id || agent.id || "") === agentId));
+}
+
+function isAutoOwnerUnavailable(item) {
+  return Boolean(agentsLoaded.value && !isAutoSettingsAvailable(item));
 }
 
 function resetForm() {
@@ -68,6 +84,7 @@ function resetForm() {
 async function load() {
   loading.value = true;
   agentsLoading.value = true;
+  agentsLoaded.value = false;
   error.value = "";
   statusMessage.value = "";
   try {
@@ -77,6 +94,7 @@ async function load() {
     if (agentResult.status === "fulfilled") {
       const agentData = agentResult.value;
       agents.value = Array.isArray(agentData?.agents) ? agentData.agents : Array.isArray(agentData) ? agentData : [];
+      agentsLoaded.value = true;
     } else {
       agents.value = [];
       error.value = "无法加载智能体列表，请重试后再创建任务";
@@ -264,14 +282,20 @@ function targetHint(item) {
       new_session: "每次新建会话",
       fixed: "固定会话",
     }[mode] || (mode || "未指定");
-  const bound = item.target_session_id;
   const targetId = String(item.target_agent_id || "").trim();
   const target = agents.value.find((agent) => String(agent.agent_id || agent.id || "") === targetId);
-  const targetLabel = target
-    ? `${target.display_name || target.name || targetId}${targetId ? ` · ${shortId(targetId, 12)}` : ""}`
-    : targetId ? `未找到智能体 · ${shortId(targetId, 12)}` : "未指定智能体";
-  if (bound) return `${targetLabel} · ${modeLabel} · ${shortId(bound, 12)}`;
+  const targetLabel = target ? (target.display_name || target.name || "目标智能体") : targetId ? "未找到智能体" : "未指定智能体";
   return `${targetLabel} · ${modeLabel}`;
+}
+
+function formatSchedule(item) {
+  const condition = item?.condition || {};
+  const interval = Number(condition.interval_seconds);
+  if (!Number.isFinite(interval) || interval <= 0) return formatTriggerCondition(condition);
+  if (interval % 86400 === 0) return `每 ${interval / 86400} 天`;
+  if (interval % 3600 === 0) return `每 ${interval / 3600} 小时`;
+  if (interval % 60 === 0) return `每 ${interval / 60} 分钟`;
+  return `每 ${interval} 秒`;
 }
 
 onMounted(load);
@@ -353,7 +377,7 @@ onMounted(load);
                   <dl class="command-kv-list command-kv-list--compact">
                     <div class="command-kv">
                       <dt>调度</dt>
-                      <dd>{{ formatTriggerCondition(item.condition) }}</dd>
+                      <dd>{{ formatSchedule(item) }}</dd>
                     </div>
                     <div class="command-kv">
                       <dt>下次</dt>
@@ -369,15 +393,25 @@ onMounted(load);
                     </div>
                   </dl>
                   <div v-if="item.task_template" class="command-card__preview">
-                    任务: {{ truncateText(item.task_template, 120) }}
+                    任务：{{ truncateText(item.task_template, 80) }}
                   </div>
-                  <p v-if="isRetired(item)" class="command-panel__hint">{{ isAutoManaged(item) ? "请在 Auto 设置中调整默认唤醒。" : "这是已退役的历史触发器，仅供查看。" }}</p>
+                  <details class="trigger-technical-details">
+                    <summary>技术详情</summary>
+                    <dl>
+                      <template v-if="item.trigger_id"><dt>任务 ID</dt><dd><code>{{ item.trigger_id }}</code></dd></template>
+                      <template v-if="item.target_agent_id || item.owner_agent_id"><dt>智能体 ID</dt><dd><code>{{ item.target_agent_id || item.owner_agent_id }}</code></dd></template>
+                      <template v-if="item.target_session_id"><dt>会话 ID</dt><dd><code>{{ item.target_session_id }}</code></dd></template>
+                      <template v-if="item.task_template"><dt>完整任务</dt><dd class="trigger-technical-details__task">{{ item.task_template }}</dd></template>
+                    </dl>
+                  </details>
+                  <p v-if="isAutoOwnerUnavailable(item)" class="command-panel__hint">所属智能体不可用，无法打开 Auto 设置</p>
+                  <p v-else-if="isRetired(item)" class="command-panel__hint">{{ isAutoManaged(item) ? "请在 Auto 设置中调整默认唤醒。" : "这是已退役的历史触发器，仅供查看。" }}</p>
                   <div v-if="item.recovery_required && (!isRetired(item) || isAutoManaged(item))" class="command-panel__error">
                     {{ item.recovery_reason || "上次投递结果未知，请核对后恢复。" }}
                     <button type="button" class="btn btn--danger btn--sm" :disabled="rowBusy(`recover:${item.trigger_id}`)" @click="recoverPending(item)">确认并丢弃旧投递</button>
                   </div>
                   <div v-if="isRetired(item)" class="command-card__actions">
-                    <button v-if="isAutoManaged(item)" type="button" class="btn btn--primary btn--sm" @click="openAutoSettings(item)">打开 Auto 设置</button>
+                    <button v-if="isAutoSettingsAvailable(item)" type="button" class="btn btn--primary btn--sm" @click="openAutoSettings(item)">打开 Auto 设置</button>
                     <button type="button" class="btn btn--ghost btn--sm" :disabled="!!editingId" @click="loadHistory(item)">
                       {{ historyOpenId === item.trigger_id ? "刷新历史" : "查看历史" }}
                     </button>
@@ -438,3 +472,13 @@ onMounted(load);
     </div>
   </section>
 </template>
+
+<style scoped>
+.trigger-technical-details { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; }
+.trigger-technical-details summary { width: fit-content; cursor: pointer; }
+.trigger-technical-details dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px; margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-alt, var(--color-surface)); }
+.trigger-technical-details dt { color: var(--color-text-muted); }
+.trigger-technical-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--color-text); }
+.trigger-technical-details code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.trigger-technical-details__task { white-space: pre-wrap; }
+</style>

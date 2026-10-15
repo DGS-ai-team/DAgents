@@ -1,12 +1,12 @@
 openapi: 3.0.3
 info:
   title: DAgents Agent Node API
-  version: "0.5"
+  version: "0.6"
   description: |
     Agent Node 本地 HTTP API。对外契约以 **Agent** 为中心（1 Agent = 1 主对话）。
     `/v1/sessions*` 已移除（未注册 → 404）；请使用 `/v1/agents/{agent_id}/...`。
 servers:
-  - url: http://127.0.0.1:18789
+  - url: http://127.0.0.1:18765
     description: 默认本机 Node
 paths:
   /health:
@@ -443,14 +443,6 @@ paths:
         "200":
           description: OK
 
-  /ui:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/agent-templates:
     get:
       x-contract-status: surface-only
@@ -458,38 +450,6 @@ paths:
       responses:
         "200":
           description: OK
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agent/info:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/desktop/runtime-config:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agent/update:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agent/update/apply:
     post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -511,38 +471,6 @@ paths:
       x-contract-status: surface-only
       summary: Open the Node-native directory picker
       description: The Node process opens the host chooser directly. User cancellation is a successful response with cancelled=true.
-      responses:
-        "200":
-          description: OK
-
-  /v1/platform/clipboard/files:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/platform/ui-focus:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/platform/update/apply:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agent/upgrade-readiness:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
       responses:
         "200":
           description: OK
@@ -765,20 +693,6 @@ paths:
         "200":
           description: OK
 
-  /v1/setup/config:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-    patch:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/skills/catalog:
     get:
       x-contract-status: surface-only
@@ -854,14 +768,6 @@ paths:
           in: path
           required: true
           schema: {type: string}
-
-  /v1/ui/bootstrap:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
 
   /v1/workgroups:
     get:
@@ -1111,14 +1017,6 @@ paths:
         "200":
           description: OK
 
-  /v1/setup/llm/probe-models:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/transfers/{transfer_id}/cancel:
     post:
       x-contract-status: surface-only
@@ -1253,8 +1151,289 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/AutoOverviewResponse'}}}
         '503': {description: Overview stores unavailable}
 
+
+  /v1/agents/{agent_id}/terminals/{terminal_id}:
+    delete:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/browser/view:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/workspace:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/agents/{agent_id}/workspace/file:
+    get:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+    put:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/bootstrap:
+    get:
+      summary: Node UI bootstrap aggregate
+      responses:
+        "200":
+          description: Aggregate containing health, info, LLM, user, onboarding, and Agent views
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeBootstrap'}
+
+  /v1/node/info:
+    get:
+      summary: Node identity and capability information
+      responses:
+        "200":
+          description: Node info DTO
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeInfo'}
+
+  /v1/node/update:
+    get:
+      summary: Check the configured Manage release channel now
+      responses:
+        "200":
+          description: Shared update.Status DTO; installation remains a Desktop Shell responsibility
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeUpdateStatus'}
+
+  /v1/node/update/package:
+    get:
+      summary: Download and verify the latest update candidate
+      description: Loopback only. Requires a successful update check no older than 15 minutes. No query or request body is accepted.
+      responses:
+        "200":
+          description: Verified release bytes
+          headers:
+            Content-Disposition: {schema: {type: string}}
+            Content-Length: {schema: {type: integer, format: int64}}
+            X-Node-Package-Version: {schema: {type: string}}
+            X-Node-Package-SHA256: {schema: {type: string}}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "400": {description: Query/body is not accepted}
+        "403": {description: Request is not loopback}
+        "409": {description: Update status is unavailable or stale}
+        "502": {description: Manage asset metadata, download, or integrity check failed}
+
+  /v1/node/upgrade-readiness:
+    get:
+      summary: Existing session-manager upgrade readiness DTO
+      description: Available before Node onboarding only to loopback callers so the local installer can check real session activity before upgrade or uninstall.
+      responses:
+        "200":
+          description: Readiness for a Shell-controlled upgrade
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeUpgradeReadiness'}
+        "403":
+          description: Onboarding is incomplete and the caller is not loopback
+
+  /v1/settings:
+    get:
+      summary: Read Node-owned runtime setup settings
+      responses:
+        "200":
+          description: SettingsView; secrets are represented by presence flags, not plaintext
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeSettingsView'}
+    patch:
+      summary: Patch Node-owned runtime setup settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NodeSettingsPatch'}
+      responses:
+        "200":
+          description: Updated SettingsView with write-only Manage token redaction
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeSettingsView'}
+
+  /v1/agents/{agent_id}/workspace/upload:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
+  /v1/llm/probe-models:
+    post:
+      x-contract-status: surface-only
+      summary: Route registered in the Node HTTP server
+      responses:
+        "200":
+          description: OK
+
 components:
   schemas:
+    NodeInfo:
+      type: object
+      required: [node_id, capabilities, multimodal_enabled, manage_enabled, workgroup_enabled, manage_registered]
+      properties:
+        node_id: {type: string, description: Node service identity}
+        name: {type: string, description: Display name for the Node-owned primary Agent}
+        capabilities: {type: array, items: {type: string}}
+        multimodal_enabled: {type: boolean}
+        manage_enabled: {type: boolean}
+        workgroup_enabled: {type: boolean}
+        manage_url: {type: string}
+        manage_registered: {type: boolean}
+        llm: {type: object, additionalProperties: true}
+        compression: {type: object, additionalProperties: {type: integer}}
+    NodeBootstrap:
+      type: object
+      required: [health, info, llm, user, onboarding, agent]
+      properties:
+        health: {type: object, additionalProperties: true}
+        info: {$ref: '#/components/schemas/NodeInfo'}
+        llm: {type: object, additionalProperties: true}
+        user: {type: object, additionalProperties: true}
+        onboarding: {type: object, additionalProperties: true}
+        agent: {type: object, additionalProperties: true}
+    NodeUpgradeReadiness:
+      type: object
+      required: [ready, has_active_turn, active_turn_count]
+      properties:
+        ready: {type: boolean}
+        has_active_turn: {type: boolean}
+        active_turn_count: {type: integer}
+        active_session_ids: {type: array, items: {type: string}}
+    NodeUpdateStatus:
+      type: object
+      required: [current_version, latest_version, upgrade_available, manage_reachable, manage_enabled, update_enabled, channel, platform, apply_command]
+      properties:
+        current_version: {type: string}
+        latest_version: {type: string}
+        upgrade_available: {type: boolean}
+        manage_reachable: {type: boolean}
+        manage_enabled: {type: boolean}
+        update_enabled: {type: boolean}
+        check_interval_seconds: {type: integer}
+        last_checked_at: {type: string, format: date-time}
+        channel: {type: string}
+        platform: {type: string}
+        release_notes: {type: string}
+        message: {type: string}
+        apply_command: {type: string}
+        asset:
+          type: object
+          additionalProperties: true
+          description: Manage-selected candidate; package download validates download_url, filename, sha256 and size_bytes.
+    NodeManageSettingsView:
+      type: object
+      required: [enabled, url, team, registration_base_url, workgroup_enabled, has_node_token, registration_interval_seconds, registration_ttl_seconds]
+      properties:
+        enabled: {type: boolean}
+        url: {type: string}
+        team: {type: string}
+        registration_base_url: {type: string}
+        workgroup_enabled: {type: boolean}
+        has_node_token: {type: boolean, description: Indicates a stored token without returning it}
+        registration_interval_seconds: {type: integer}
+        registration_ttl_seconds: {type: integer}
+    NodeSettingsView:
+      type: object
+      required: [config_writable, restart_required, node, llm, manage, features, compression, memory, runtime, agent, user, onboarding, child_agents, browser, wecom, tools, hooks, available_tool_groups]
+      properties:
+        config_path: {type: string}
+        config_writable: {type: boolean}
+        restart_required: {type: boolean}
+        node:
+          type: object
+          required: [listen_host, listen_port]
+          properties:
+            listen_host: {type: string}
+            listen_port: {type: integer}
+          description: Node listener only; Desktop endpoint is stored by Desktop.
+        llm: {type: object, additionalProperties: true}
+        manage: {$ref: '#/components/schemas/NodeManageSettingsView'}
+        features: {type: object, additionalProperties: true}
+        compression: {type: object, additionalProperties: true}
+        memory: {type: object, additionalProperties: true}
+        runtime: {type: object, additionalProperties: true}
+        agent:
+          type: object
+          description: Node display profile; its name is required to complete initial Node setup.
+          properties:
+            name: {type: string}
+            description: {type: string}
+        user:
+          type: object
+          description: Optional preferred name for the single local profile owner; not an account or authentication identity.
+          properties:
+            preferred_name: {type: string}
+        onboarding:
+          type: object
+          description: Node profile setup state only; completion does not imply that an LLM is configured or reachable.
+          properties:
+            node_profile_completed: {type: boolean}
+        child_agents: {type: object, additionalProperties: true}
+        browser: {type: object, additionalProperties: true}
+        wecom: {type: object, additionalProperties: true}
+        tools: {type: object, additionalProperties: true}
+        hooks: {type: object, additionalProperties: true}
+        available_tool_groups: {type: array, items: {type: string}}
+    NodeSettingsPatch:
+      type: object
+      properties:
+        agent:
+          type: object
+          description: Update the Node display profile. A non-empty name is required when completing Node setup.
+          properties:
+            name: {type: string}
+            description: {type: string}
+        user:
+          type: object
+          description: Optional single-owner preferred-name hint. Omit or leave empty to use no name in prompts.
+          properties:
+            preferred_name: {type: string}
+        onboarding:
+          type: object
+          description: node_profile_completed tracks Node profile setup and does not indicate LLM readiness; use profile configuration and model probing to assess LLM availability.
+          properties:
+            node_profile_completed: {type: boolean}
+        manage:
+          type: object
+          properties:
+            enabled: {type: boolean}
+            url: {type: string, description: Empty explicitly clears URL; enabled integration then fails validation}
+            team: {type: string}
+            registration_base_url: {type: string}
+            workgroup_enabled: {type: boolean}
+            node_token: {type: string, writeOnly: true, description: Empty preserves the saved token}
+            clear_node_token: {type: boolean, description: Explicitly remove the saved token}
+            registration_interval_seconds: {type: integer, minimum: 1}
+            registration_ttl_seconds: {type: integer, minimum: 1}
+          additionalProperties: true
+      additionalProperties: true
     AutonomyV2Profile:
       type: object
       required: [agent_id, revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]

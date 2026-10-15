@@ -39,7 +39,14 @@ func NewUpdateChecker(cfg *config.Config, logger *slog.Logger) *UpdateChecker {
 	return &UpdateChecker{
 		cfg:    cfg,
 		logger: logger,
-		client: &http.Client{Timeout: 20 * time.Second},
+		client: &http.Client{
+			Timeout: 20 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				// Release check requests carry the Node credential. Reject redirects
+				// so it can never be forwarded to another origin.
+				return http.ErrUseLastResponse
+			},
+		},
 		status: UpdateStatus{
 			CurrentVersion:       version.Version,
 			LatestVersion:        version.Version,

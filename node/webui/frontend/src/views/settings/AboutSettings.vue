@@ -5,9 +5,15 @@ import HelpPanel from "../../components/HelpPanel.vue";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { COMPOSER_DRAFT_KEY } from "../../utils/helpCommands.js";
 
+const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
+
 const router = useRouter();
 
 function onPick(cmd) {
+  if (window.__TAURI_INTERNALS__) {
+    window.dispatchEvent(new CustomEvent("desktop-use-chat-command", { detail: { command: cmd } }));
+    return;
+  }
   try {
     sessionStorage.setItem(COMPOSER_DRAFT_KEY, cmd);
   } catch {
@@ -21,7 +27,6 @@ function onPick(cmd) {
   <div class="settings-page settings-embedded">
     <SettingsPageHeader
       title="关于与帮助"
-      eyebrow="系统信息"
       description="查看当前版本、更新渠道与常用命令；需要更新时按页面提示操作。"
     />
 
@@ -39,10 +44,10 @@ function onPick(cmd) {
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">命令帮助</h2>
-          <p class="settings-section__desc">点击命令即可填入对话输入框，补全参数后发送。</p>
+          <p class="settings-section__desc">{{ isDesktop ? "点击命令可填入对话输入区，补全参数后发送。" : "点击命令即可填入对话输入框，补全参数后发送。" }}</p>
         </div>
       </div>
-      <HelpPanel embedded @close="() => {}" @pick="onPick" />
+      <HelpPanel embedded :desktop="isDesktop" @close="() => {}" @pick="onPick" />
     </section>
   </div>
 </template>

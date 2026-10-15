@@ -7,21 +7,22 @@
 | 组件 | 要求 |
 |---|---|
 | Go | 1.25+（Node/Client） |
-| Node.js | 用于构建 Node Web UI 和 Manage Console |
+| Node.js | 用于构建 Desktop UI 和 Manage Console；Go Node 构建不依赖前端 |
 | Python | 3.11+（Manage；建议命令使用 `python3`） |
 | Docker | 仅在构建/运行 Manage 镜像时需要 |
 
-Web UI 静态资源不提交 Git。首次构建 Node 或 Manage 前必须先构建对应前端。
+Desktop 和 Manage Console 的前端资源不提交 Git。Go Node 只提供 API，不嵌入前端；构建或测试 Node 不需要先构建前端。修改共享 Desktop UI 时运行其独立测试和构建。
+
+Node 当前 HTTP 路由、设置所有权、消息/SSE 与更新包协议见 [Node Runtime API 接入契约](api/node-integration.md)；字段级机器可读路由表见 [OpenAPI](architecture/openapi-node.yaml)。Node 首配只完成单 owner Node 档案：Node 名必填，`user.preferred_name` 可选；该标记不代表 LLM profile 已配置或可用，详见 `/v1/settings` 的 OpenAPI 描述。
 
 ## 2. 从源码启动
 
 ```bash
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
-npm run build --prefix node/webui/frontend
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```
 
-打开 `http://127.0.0.1:18765/ui/`。LLM、Agent、policy、skills 等运行时配置优先通过 Web UI 设置；无 API Key 的结构联调可启用 Mock LLM。
+Node 默认只提供 `http://127.0.0.1:18765` 上的 API。Windows 安装包附带独立 DAgents Desktop；从源码运行 Windows Desktop 时设置 `DAGENTS_HOME` 与 `DAGENTS_CONFIG`，再执行 `npm install --prefix desktop/tray-tauri` 和 `npm run tauri:dev --prefix desktop/tray-tauri`。Node 与 Agent 运行时设置通过 Desktop 配置；无 API Key 的结构联调可启用 Mock LLM。
 
 可选启动 Manage：
 
@@ -36,11 +37,11 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 
 | 范围 | 命令 | 说明 |
 |---|---|---|
-| Node Web UI | `npm test --prefix node/webui/frontend -- --run` | Vitest |
-| Node UI 构建 | `npm run build --prefix node/webui/frontend` | 生成 Go embed 静态资源 |
+| Node Web UI | `npm test --prefix node/webui/frontend` | Vitest 与共享图标契约 |
+| Desktop UI 构建 | `npm run build --prefix desktop/tray-tauri` | 构建独立桌面 UI 资源 |
 | Manage Console 构建 | `npm run build --prefix manage/console/frontend` | 生成 Console 静态资源 |
-| Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
-| Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...` | 全部 Go 模块 |
+| Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...` | 当前 Go 模块 |
+| Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...` | 当前 Go 模块 |
 | Python | `python3 -m unittest discover -s tests -p "test_*.py" -v` | 默认不发现 `tests/integration/` |
 | Python 质量 | `python3 -m ruff check manage scripts tests && python3 -m pyright --project pyrightconfig.json` | 错误与类型门禁 |
 | API/Fixture 契约 | `python3 scripts/ci/check_contracts.py` | OpenAPI 路由与 Workgroup Schema/fixture |
@@ -52,7 +53,7 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 
 ## 4. 代码导航和修改边界
 
-先阅读 [架构](architecture.md)，再进入对应子系统。每个 Go 包的职责见包内 `README.md`，类型/函数/字段见 `REFERENCE.md`；不要把包级细节重复抄进总架构。
+先阅读 [架构](architecture.md)，再进入对应子系统。Node API 调用方核对请使用 [Node Runtime API 接入契约](api/node-integration.md)。每个 Go 包的职责见包内 `README.md`，类型/函数/字段见 `REFERENCE.md`；不要把包级细节重复抄进总架构。
 
 新增能力按以下顺序判断落点：
 

@@ -168,7 +168,6 @@ onMounted(() => {
 <template>
   <div class="settings-page settings-embedded feedback-settings">
     <SettingsPageHeader
-      eyebrow="本机反馈"
       title="帮助与反馈"
       description="向当前连接的 Manage 管理员报告问题或提出建议。日志、对话、文件和截图不会自动附带。"
     />

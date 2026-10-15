@@ -1,7 +1,6 @@
 <script setup>
 import { computed, reactive, ref, onMounted } from "vue";
 import * as api from "../api/node.js";
-import { setTheme, themeStore } from "../stores/theme.js";
 import UiSelect from "../components/UiSelect.vue";
 
 const PROVIDER_PRESETS = {
@@ -26,25 +25,22 @@ const PROVIDER_OPTIONS = [
 
 const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm", "glm", "minimax", "mimo"]);
 
-const THEME_OPTIONS = [
-  { id: "light", title: "浅色" },
-  { id: "dark", title: "深色" },
-  { id: "system", title: "跟随系统" },
-];
-
 const emit = defineEmits(["completed"]);
 
 const loading = ref(true);
+const loadSucceeded = ref(false);
 const saving = ref(false);
 const error = ref("");
-/** @type {import('vue').Ref<'theme' | 'identity' | 'llm'>} */
-const step = ref("theme");
+/** @type {import('vue').Ref<'identity' | 'llm'>} */
+const step = ref("identity");
 
 const preferredName = ref("");
 const nodeName = ref("");
 const description = ref("");
 /** 称呼失焦后用于页头寒暄 */
 const greetedName = ref("");
+const existingProfiles = ref([]);
+const currentProfileId = ref("");
 
 const llm = reactive({
   id: PROVIDER_PRESETS.deepseek.model,
@@ -64,33 +60,29 @@ const probedModels = ref(/** @type {string[]} */ ([]));
 const modelManual = ref(false);
 
 const stepIndex = computed(() => {
-  if (step.value === "theme") return 1;
-  if (step.value === "identity") return 2;
-  return 3;
+  return step.value === "identity" ? 1 : 2;
 });
 
 const stepTitle = computed(() => {
-  if (step.value === "theme") return "你喜欢哪种外观？";
   if (step.value === "identity") return "先认识一下";
   return "最后，接上模型";
 });
 
 const stepLead = computed(() => {
-  if (step.value === "theme") return "选一个顺眼的就行，之后还能在侧栏随时改。";
   if (step.value === "identity") {
     if (greetedName.value) return `你好呀，${greetedName.value}`;
-    return "告诉我怎么称呼你，再给这台 Node 起个名字。";
+    return "可以留下称呼，也可以直接为当前 Node 配置模型。";
   }
   if (probeState.message) return probeState.message;
   return "配好一条 LLM，我们就可以开始聊天了。";
 });
 
 const canNextIdentity = computed(() => {
-  return preferredName.value.trim().length > 0 && nodeName.value.trim().length > 0 && !saving.value;
+  return loadSucceeded.value && nodeName.value.trim().length > 0 && !saving.value;
 });
 
 const canSubmitLLM = computed(() => {
-  if (saving.value) return false;
+  if (!loadSucceeded.value || saving.value) return false;
   return String(llm.model || "").trim().length > 0;
 });
 
@@ -100,8 +92,9 @@ const modelOptions = computed(() =>
   probedModels.value.map((m) => ({ value: m, label: m })),
 );
 
-onMounted(async () => {
+async function loadInitialConfig() {
   loading.value = true;
+  loadSucceeded.value = false;
   error.value = "";
   try {
     const boot = await api.getUIBootstrap();
@@ -118,8 +111,13 @@ onMounted(async () => {
       nodeName.value = String(setup.agent.name);
     }
     const profiles = Array.isArray(setup?.llm?.profiles) ? setup.llm.profiles : [];
-    const first = profiles.find((p) => !p?.mock && String(p?.provider || "") !== "mock") || profiles[0];
+    existingProfiles.value = profiles.map((profile) => ({ ...profile }));
+    const activeId = String(setup?.llm?.active || "").trim();
+    const first = profiles.find((profile) => String(profile?.id || "") === activeId)
+      || profiles.find((profile) => !profile?.mock && String(profile?.provider || "") !== "mock")
+      || profiles[0];
     if (first && !first.mock && String(first.provider || "") !== "mock") {
+      currentProfileId.value = String(first.id || "").trim();
       const provider = String(first.provider || "deepseek").trim() || "deepseek";
       llm.provider = ALLOWED_PROVIDERS.has(provider) ? provider : "deepseek";
       llm.base_url = String(first.base_url || "").trim();
@@ -131,22 +129,17 @@ onMounted(async () => {
       if (!llm.model && PROVIDER_PRESETS[llm.provider]) {
         llm.model = PROVIDER_PRESETS[llm.provider].model;
       }
-      // 首配默认用模型名作配置名；旧的 default 占位不保留
-      const prevId = String(first.id || "").trim();
-      llm.id =
-        (llm.model && (prevId === "default" || !prevId) ? llm.model : prevId || llm.model) ||
-        PROVIDER_PRESETS.deepseek.model;
+      llm.id = currentProfileId.value || llm.model || PROVIDER_PRESETS.deepseek.model;
     }
+    loadSucceeded.value = true;
   } catch (e) {
     error.value = e.message || "没加载上来，请稍后再试";
   } finally {
     loading.value = false;
   }
-});
-
-function chooseTheme(mode) {
-  setTheme(mode);
 }
+
+onMounted(loadInitialConfig);
 
 function onPreferredNameBlur() {
   const name = preferredName.value.trim();
@@ -169,11 +162,6 @@ function applyProviderPreset() {
   modelManual.value = false;
   probeState.message = "";
   probeState.ok = false;
-}
-
-function goTheme() {
-  error.value = "";
-  step.value = "theme";
 }
 
 function goIdentity() {
@@ -237,7 +225,21 @@ async function submit() {
   error.value = "";
   try {
     const model = String(llm.model || "").trim();
-    const profileId = model || String(llm.id || "").trim() || "default";
+    const profileId = currentProfileId.value || String(llm.id || "").trim() || model || "default";
+    const existing = existingProfiles.value.map((profile) => ({ ...profile }));
+    const updatedProfile = {
+      ...(existing.find((profile) => String(profile.id || "") === profileId) || {}),
+      id: profileId,
+      provider: llm.provider,
+      base_url: String(llm.base_url || "").trim(),
+      model,
+      api_key: String(llm.api_key || "").trim() || undefined,
+      mock: false,
+      multimodal_enabled: !!llm.multimodal_enabled,
+    };
+    const existingIndex = existing.findIndex((profile) => String(profile.id || "") === profileId);
+    if (existingIndex >= 0) existing.splice(existingIndex, 1, updatedProfile);
+    else existing.push(updatedProfile);
     await api.patchSetupConfig({
       user: { preferred_name: preferredName.value.trim() },
       agent: {
@@ -246,20 +248,18 @@ async function submit() {
       },
       llm: {
         active: profileId,
-        profiles: [
-          {
-            id: profileId,
-            provider: llm.provider,
-            base_url: String(llm.base_url || "").trim(),
-            model,
-            api_key: String(llm.api_key || "").trim() || undefined,
-            mock: false,
-            multimodal_enabled: !!llm.multimodal_enabled,
-          },
-        ],
+        profiles: existing,
       },
       onboarding: { node_profile_completed: true },
     });
+    const confirmed = await api.getSetupConfig();
+    const selected = (confirmed?.llm?.profiles || []).find((profile) => String(profile?.id || "") === profileId);
+    if (!confirmed?.onboarding?.node_profile_completed || !selected
+      || String(confirmed?.llm?.active || "") !== profileId
+      || String(selected.provider || "") !== String(llm.provider)
+      || String(selected.model || "") !== model) {
+      throw new Error("配置已提交，但 Node 未确认当前模型设置；请检查连接后重试。");
+    }
     emit("completed");
   } catch (e) {
     error.value = e.message || "没保存成功，请再试一次";
@@ -273,6 +273,7 @@ async function submit() {
   <div class="first-run">
     <section class="first-run__shell" :class="{ 'first-run__shell--wide': step === 'llm' }">
       <header class="first-run__header">
+        <span class="first-run__node-badge">当前 Node 配置</span>
         <h1 class="first-run__title">{{ stepTitle }}</h1>
         <p class="first-run__lead">
           {{ stepLead }}
@@ -283,41 +284,16 @@ async function submit() {
         <p class="first-run__hint">稍等，正在准备…</p>
       </div>
 
-      <!-- Step 1: theme -->
-      <div
-        v-else-if="step === 'theme'"
-        class="first-run__body"
-        tabindex="0"
-        @keydown.enter.prevent="goIdentity"
-      >
-        <div class="first-run__segment" role="radiogroup" aria-label="主题">
-          <button
-            v-for="opt in THEME_OPTIONS"
-            :key="opt.id"
-            type="button"
-            class="first-run__segment-item"
-            role="radio"
-            :aria-checked="themeStore.mode === opt.id"
-            :class="{ 'first-run__segment-item--active': themeStore.mode === opt.id }"
-            @click="chooseTheme(opt.id)"
-          >
-            <span class="first-run__swatch" :data-theme-dot="opt.id" aria-hidden="true" />
-            {{ opt.title }}
-          </button>
-        </div>
-        <p v-if="error" class="first-run__error">{{ error }}</p>
-      </div>
-
-      <!-- Step 2: identity -->
+      <!-- Step 1: current Node identity -->
       <form v-else-if="step === 'identity'" class="first-run__body first-run__body--form" @submit.prevent="goLLM">
         <label class="settings-field">
-          <span class="settings-field__label">我该怎么称呼你？</span>
+          <span class="settings-field__label">我该怎么称呼你？<small>可选</small></span>
           <input
             v-model="preferredName"
             class="settings-field__input"
             type="text"
             maxlength="64"
-            placeholder="例如：小明"
+            placeholder="可留空，例如：小明"
             autocomplete="nickname"
             autofocus
             @blur="onPreferredNameBlur"
@@ -334,10 +310,10 @@ async function submit() {
             autocomplete="off"
           />
         </label>
-        <p v-if="error" class="first-run__error">{{ error }}</p>
+        <div v-if="error" class="first-run__error">{{ error }}<button v-if="!loadSucceeded" type="button" @click="loadInitialConfig">重新读取 Node 设置</button></div>
       </form>
 
-      <!-- Step 3: LLM -->
+      <!-- Step 2: LLM -->
       <form v-else id="first-run-llm" class="first-run__body first-run__body--form" @submit.prevent="submit">
         <label class="settings-field">
           <span class="settings-field__label">用哪家模型？</span>
@@ -406,29 +382,21 @@ async function submit() {
           </div>
         </label>
 
-        <p v-if="error" class="first-run__error">{{ error }}</p>
+        <div v-if="error" class="first-run__error">{{ error }}<button v-if="!loadSucceeded" type="button" @click="loadInitialConfig">重新读取 Node 设置</button></div>
       </form>
 
       <footer v-if="!loading" class="first-run__footer">
         <button
-          v-if="step !== 'theme'"
+          v-if="step === 'llm'"
           type="button"
           class="btn btn--ghost"
           :disabled="saving"
-          @click="step === 'llm' ? goIdentity() : goTheme()"
+          @click="goIdentity()"
         >
           返回上一步
         </button>
         <button
-          v-if="step === 'theme'"
-          type="button"
-          class="btn btn--primary first-run__footer-primary"
-          @click="goIdentity"
-        >
-          继续
-        </button>
-        <button
-          v-else-if="step === 'identity'"
+          v-if="step === 'identity'"
           type="button"
           class="btn btn--primary first-run__footer-primary"
           :disabled="!canNextIdentity"
@@ -453,11 +421,11 @@ async function submit() {
           aria-label="进度"
           :aria-valuenow="stepIndex"
           aria-valuemin="1"
-          aria-valuemax="3"
+            aria-valuemax="2"
           role="progressbar"
         >
           <span
-            v-for="n in 3"
+            v-for="n in 2"
             :key="n"
             class="first-run__progress-seg"
             :class="{
@@ -466,7 +434,7 @@ async function submit() {
             }"
           />
         </div>
-        <span class="first-run__progress-label">{{ stepIndex }} / 3</span>
+        <span class="first-run__progress-label">{{ stepIndex }} / 2</span>
       </div>
     </section>
   </div>
@@ -503,6 +471,15 @@ async function submit() {
   align-items: center;
   padding: 0;
   width: 100%;
+}
+
+.first-run__node-badge {
+  margin-bottom: 10px;
+  padding: 4px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .first-run__title {

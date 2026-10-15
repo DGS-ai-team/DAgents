@@ -7,6 +7,7 @@ import UiIcon from "./UiIcon.vue";
 const props = defineProps({
   llmSettings: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
+  desktopCompact: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["switch-profile"]);
@@ -23,11 +24,15 @@ const activeProfile = computed(() => String(props.llmSettings?.active_profile ||
 const showProfileSwitch = computed(() => profiles.value.length > 0);
 const canSwitch = computed(() => !props.disabled && profiles.value.length > 1);
 const activeLabel = computed(() => activeProfile.value || props.llmSettings?.model || "Auto");
+const displayLabel = computed(() => props.desktopCompact
+  ? String(props.llmSettings?.model || "Auto").trim()
+  : activeLabel.value);
 const titleText = computed(() => {
   const provider = String(props.llmSettings?.provider || "").trim();
-  const model = String(props.llmSettings?.model || activeLabel.value).trim();
-  if (provider && model) return `${provider} / ${model}`;
-  return model || provider || activeLabel.value;
+  const model = String(props.llmSettings?.model || displayLabel.value).trim();
+  const profile = props.desktopCompact && activeProfile.value ? `配置: ${activeProfile.value}` : "";
+  const providerModel = provider && model ? `${provider} / ${model}` : model || provider || displayLabel.value;
+  return profile ? `${providerModel} · ${profile}` : providerModel;
 });
 
 const prefillingActive = computed(() => {
@@ -103,7 +108,7 @@ onBeforeUnmount(() => {
         aria-haspopup="listbox"
         @click="toggleMenu"
       >
-        <span class="composer-toolbar__trigger-label">{{ activeLabel }}</span>
+        <span class="composer-toolbar__trigger-label">{{ displayLabel }}</span>
         <UiIcon v-if="canSwitch" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
       </button>
 
@@ -135,7 +140,7 @@ onBeforeUnmount(() => {
       class="composer-toolbar__model"
       :title="titleText"
     >
-      {{ activeLabel }}
+      {{ displayLabel }}
     </span>
   </div>
 </template>

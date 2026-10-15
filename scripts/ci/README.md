@@ -16,14 +16,14 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`build_windows_installer.sh`** | Windows：按 `windows-amd64`/`windows-386` staging `bundle/` + Inno Setup 生成 x64/x86 `.exe` 安装包 |
 | **`build_manage_docker.sh`** | Manage Docker 镜像构建与 tar.gz 导出（本地/CI 中间产物，不单独进 Release） |
 | **`assemble_manage_bundle.sh`** | 组装 **`dagents-manage-bundle-*`** 离线包（镜像 + compose + 导入/重启脚本；Release 附件） |
-| **`build_dagents_shell_tauri.sh`** / **`build_dagents_shell.sh`** | Windows Shell（Tauri 推荐 + Go legacy） |
+| **`build_dagents_shell_tauri.sh`** | Windows DAgents Desktop（Tauri）；Go tray 已退役，不参与构建或发行 |
 | **`check_brand_assets.py`** | 校验 Web UI 不复制 favicon，且桌面生成物仍由 `shared/branding/brand-icon.png` 统一供给 |
 
 **Release 打包**：仓库根 `scripts/package_local_assistant.sh`；CI 见 `.github/workflows/build-and-release.yml`：
 
-- Linux 与 Windows（Go / Tauri Shell / browser）在单测后**并行**；
+- Linux 与 Windows（Go / Tauri Desktop / browser）在单测后**并行**；
 - Tauri Linux 检查优先使用 GHCR 预构建镜像，不在正常 CI 中重复安装 apt 依赖；镜像由 `tauri-linux-image.yml` 在 `dev/main` 发布并通过 BuildKit GHA cache 加速构建。镜像首次发布前仅允许一次 bootstrap apt 兜底。
-- Windows x64/x86 各自构建 Go、Tauri/legacy Shell 与 Browser，产物合流后分别 assemble + Inno；不生成 Windows 免安装归档；
+- Windows x64/x86 分别构建 Go、Tauri Desktop 与 Browser，再 assemble + Inno；不生成 Windows 免安装归档；
 - Manage 离线包**只依赖** `linux-amd64` 助手包（不再空等 Windows）。
 
 **统一本地门禁**：仓库根运行 `scripts/verify.sh`；Windows 运行 `scripts/verify.ps1`。CI 的 Go 门禁覆盖全部模块，并同时执行 `gofmt`、`go vet`、单测和构建。

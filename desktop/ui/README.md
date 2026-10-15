@@ -1,0 +1,15 @@
+# Desktop MVP UI
+
+This Vue surface is bundled by `desktop/tray-tauri` and talks to the Node only through typed Tauri commands. The standalone Vite preview is layout-only and reports the host as unavailable; it does not use mock Node data.
+
+Desktop runtime icons are imported from the canonical `shared/icons/desktop/` directory. The complete collection, aliases, preserved variants, and source/license notes are documented in [`shared/icons/README.md`](../../shared/icons/README.md) and `shared/icons/desktop/manifest.json`.
+
+The Desktop connects to real Node status, first-run setup, Agent creation/settings, the shared message stream and HITL cards, model selection, attachments, and SSE updates. Rust relays authenticated JSON, bounded workspace/media binaries, and terminal WebSockets; blocking HTTP work runs outside the UI thread. Historical images use Agent-scoped blob URLs rather than exposing Node credentials in image URLs.
+
+Resources have separate tabs and retain a compact conversation dock. Terminal rendering uses xterm with multiple Agent-scoped sessions; switching Agents detaches the view while preserving the Node PTY. Workspace files support directory navigation, inert text/raster previews, upload/download, and ETag-protected editing. Restored local drafts retain their original ETag, so external modifications cannot be silently overwritten. Generic workspace endpoints cannot access the private `.dagents` namespace or escape the Agent workspace.
+
+Manage-backed workgroups support configuration, members, messages, queues and approval cards. Auto overview opens from the top menu and links to Agent chat/settings. Browser resources are **read-only views of the same Agent's Node-managed Playwright session**: they do not create a second browser session, navigate it, or provide user takeover. Browser support requires an enabled Node browser capability and running browser-service; workgroups require an enabled and reachable Manage with a Supervisor model configuration. Disabled/unavailable dependencies show actionable states.
+
+The configured Node endpoint must resolve to loopback. Remote connection profiles, capability/version negotiation, browser takeover, rich Office/PDF viewers, and cross-platform release packaging are outside this local daily-use integration.
+
+See the [daily-use integration record](../../docs/design/desktop-product/daily-use-integration.md) for the latest scope and evidence; the [earlier MVP record](../../docs/design/desktop-product/mvp-closeout.md) retains prior live-model verification. Run `npm run test:ui --prefix desktop/tray-tauri` for draft, approval, route, terminal-output, workspace transfer and conflict regressions. Vue workgroup/browser contract tests live in `node/webui/frontend/src/views/WorkgroupDesktopContract.test.js`.

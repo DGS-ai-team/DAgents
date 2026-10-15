@@ -13,6 +13,7 @@ pub struct Subscriber {
     client: Arc<Client>,
     store: Arc<Store>,
     on_change: Arc<dyn Fn() + Send + Sync>,
+    on_event: Option<Arc<dyn Fn(crate::nodeclient::StreamEvent) + Send + Sync>>,
     stop: Arc<AtomicBool>,
     started: Mutex<bool>,
 }
@@ -27,9 +28,18 @@ impl Subscriber {
             client,
             store,
             on_change: Arc::new(on_change),
+            on_event: None,
             stop: Arc::new(AtomicBool::new(false)),
             started: Mutex::new(false),
         }
+    }
+
+    pub fn with_event_handler(
+        mut self,
+        handler: impl Fn(crate::nodeclient::StreamEvent) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_event = Some(Arc::new(handler));
+        self
     }
 
     pub fn start(&self) {
@@ -59,6 +69,7 @@ impl Subscriber {
             client: Arc::clone(&self.client),
             store: Arc::clone(&self.store),
             on_change: Arc::clone(&self.on_change),
+            on_event: self.on_event.clone(),
             stop: Arc::clone(&self.stop),
         }
     }
@@ -68,6 +79,7 @@ struct Parts {
     client: Arc<Client>,
     store: Arc<Store>,
     on_change: Arc<dyn Fn() + Send + Sync>,
+    on_event: Option<Arc<dyn Fn(crate::nodeclient::StreamEvent) + Send + Sync>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -86,6 +98,9 @@ fn connect_once(parts: &Parts) -> Result<(), String> {
     sync_agents(parts);
     let stop = Arc::clone(&parts.stop);
     parts.client.stream_events(&stop, |ev| {
+        if let Some(handler) = &parts.on_event {
+            handler(ev.clone());
+        }
         if pending::apply_notification_changed(&parts.store, &ev) {
             (parts.on_change)();
         }

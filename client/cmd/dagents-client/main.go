@@ -38,7 +38,7 @@ func run(args []string) int {
 	case "update":
 		return cmdUpdate(*configPath, rest)
 	case "chat", "tui":
-		fmt.Fprintf(os.Stderr, "command %q removed: use Web UI at http://127.0.0.1:<listen.port>/ui/ (start with: dagents node)\n", cmd)
+		fmt.Fprintf(os.Stderr, "command %q removed: start DAgents Desktop for the local interface, or use the Node API directly\n", cmd)
 		return 2
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q (supported: probe, update, version)\n", cmd)

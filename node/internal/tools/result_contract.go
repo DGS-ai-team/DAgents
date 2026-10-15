@@ -215,7 +215,7 @@ func classifyJSONResult(content string) (ResultStatus, string) {
 		return ResultStatusTimedOut, stringField(obj, "error")
 	}
 	if detail, ok := obj["detail"].(map[string]any); ok {
-		if status := normalizeResultStatus(stringField(detail, "status")); status != "" {
+		if status := normalizeExecutionEnvelopeStatus(stringField(detail, "status")); status != "" {
 			return status, stringField(obj, "error")
 		}
 	}
@@ -223,7 +223,7 @@ func classifyJSONResult(content string) (ResultStatus, string) {
 		if !okValue {
 			return ResultStatusFailed, stringField(obj, "error")
 		}
-		if status := normalizeResultStatus(stringField(obj, "status")); status != "" {
+		if status := normalizeExecutionEnvelopeStatus(stringField(obj, "status")); status != "" {
 			return status, stringField(obj, "error")
 		}
 		return ResultStatusSucceeded, stringField(obj, "error")
@@ -248,11 +248,15 @@ func normalizeResultStatus(raw string) ResultStatus {
 		return ResultStatusFailed
 	case "denied", "rejected":
 		return ResultStatusDenied
-	case "running", "in_progress", "in-progress":
+	case "running":
 		return ResultStatusRunning
 	case "queued", "accepted":
 		return ResultStatusQueued
-	case "pending", "awaiting_user", "awaiting_hitl", "awaiting_approval":
+	// A generic JSON `status: pending` is ambiguous: tools such as todo_create
+	// return domain objects whose lifecycle status is pending even though the
+	// tool call completed successfully. HITL responses must use an explicit
+	// awaiting_user / awaiting_hitl / awaiting_approval status.
+	case "awaiting_user", "awaiting_hitl", "awaiting_approval":
 		return ResultStatusAwaitingUser
 	case "cancelled", "canceled", "interrupted":
 		return ResultStatusCancelled
@@ -260,6 +264,21 @@ func normalizeResultStatus(raw string) ResultStatus {
 		return ResultStatusTimedOut
 	case "unknown", "orphaned":
 		return ResultStatusUnknown
+	default:
+		return ""
+	}
+}
+
+// in_progress is ambiguous in a bare domain object (for example an Auto todo),
+// but remains accepted inside an explicit execution envelope. Producers that
+// report execution directly should prefer the public `running` spelling.
+func normalizeExecutionEnvelopeStatus(raw string) ResultStatus {
+	if status := normalizeResultStatus(raw); status != "" {
+		return status
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "in_progress", "in-progress":
+		return ResultStatusRunning
 	default:
 		return ""
 	}

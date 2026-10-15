@@ -13,12 +13,10 @@ const applying = ref(false);
 const error = ref("");
 const data = ref(null);
 
-const applyCommand = computed(() => {
-  const cmd = String(data.value?.apply_command || "dagents update").trim();
-  return cmd || "dagents update";
-});
-
-const canApplyInUI = computed(() => data.value?.apply_available === true && !!data.value?.upgrade_available);
+const canApplyInUI = computed(() => data.value?.apply_available === true
+  && data.value?.update_enabled === true
+  && data.value?.manage_reachable === true
+  && !!data.value?.upgrade_available);
 
 async function load() {
   loading.value = true;
@@ -30,14 +28,6 @@ async function load() {
     data.value = null;
   } finally {
     loading.value = false;
-  }
-}
-
-async function copyApplyCommand() {
-  try {
-    await navigator.clipboard.writeText(applyCommand.value);
-  } catch {
-    // ignore
   }
 }
 
@@ -109,17 +99,13 @@ onMounted(load);
         <section v-if="data.upgrade_available" class="command-section">
           <h3 class="command-section__title">安装</h3>
           <template v-if="canApplyInUI">
-            <p class="command-panel__hint">Shell 可在此直接升级（会先检查 Node 是否空闲）。</p>
+            <p class="command-panel__hint">Desktop 将向 Node 请求已校验的安装包，并在确认 Node 空闲后启动本机安装。</p>
             <button type="button" class="btn btn--primary btn--sm" :disabled="applying" @click="applyUpgrade">
               {{ applying ? "升级中…" : `升级到 ${data.latest_version}` }}
             </button>
           </template>
           <template v-else>
-            <p class="command-panel__hint">请在安装目录终端执行：</p>
-            <div class="command-panel__copy-row">
-              <code class="command-kv__mono">{{ applyCommand }}</code>
-              <button type="button" class="btn btn--ghost btn--sm" @click="copyApplyCommand">复制</button>
-            </div>
+            <p class="command-panel__hint">当前运行环境无法安装 Desktop 更新；请在受支持的 Desktop Shell 中打开此页面。</p>
           </template>
         </section>
       </template>

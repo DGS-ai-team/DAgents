@@ -23,8 +23,7 @@ const (
 	// ExitUpToDate 表示当前已是最新版本，无需下载。
 	ExitUpToDate = 3
 
-	tokenHeader   = "x-dagents-a2a-token"
-	agentIDHeader = "x-dagents-agent-id"
+	nodeUpdatePackageMaxBytes = int64(1 << 30)
 )
 
 // Options 控制 update 子命令行为。
@@ -64,7 +63,7 @@ func Run(ctx context.Context, cfg *config.Config, opt Options) int {
 			return 1
 		}
 	}
-	if err := downloadPackage(ctx, cfg, status, opt.Output); err != nil {
+	if err := downloadPackage(ctx, client, status, opt.Output); err != nil {
 		fmt.Fprintf(os.Stderr, "download failed: %v\n", err)
 		return 1
 	}
@@ -108,31 +107,24 @@ func confirm(prompt string) (bool, error) {
 	return ans == "y" || ans == "yes", nil
 }
 
-func downloadPackage(ctx context.Context, cfg *config.Config, status *update.Status, destPath string) error {
+func downloadPackage(ctx context.Context, client *nodeapi.Client, status *update.Status, destPath string) error {
 	if status.Asset == nil {
 		return fmt.Errorf("update response missing asset")
 	}
-	downloadURL, _ := status.Asset["download_url"].(string)
-	downloadURL = strings.TrimSpace(downloadURL)
-	if downloadURL == "" {
-		return fmt.Errorf("update response missing download_url")
-	}
 	expectedSHA, _ := status.Asset["sha256"].(string)
 	expectedSHA = strings.ToLower(strings.TrimSpace(expectedSHA))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return err
+	sizeValue, ok := status.Asset["size_bytes"].(float64)
+	if !ok || sizeValue <= 0 || sizeValue > float64(nodeUpdatePackageMaxBytes) || sizeValue != float64(int64(sizeValue)) {
+		return fmt.Errorf("update response missing valid size_bytes")
 	}
-	if id := strings.TrimSpace(cfg.NodeID); id != "" {
-		req.Header.Set(agentIDHeader, id)
+	expectedSize := int64(sizeValue)
+	if len(expectedSHA) != sha256.Size*2 {
+		return fmt.Errorf("update response missing valid sha256")
 	}
-	if token := strings.TrimSpace(cfg.Manage.NodeToken); token != "" {
-		req.Header.Set(tokenHeader, token)
+	if _, err := hex.DecodeString(expectedSHA); err != nil {
+		return fmt.Errorf("update response has invalid sha256")
 	}
-
-	client := &http.Client{Timeout: 15 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := client.GetNodeUpdatePackage(ctx)
 	if err != nil {
 		return err
 	}
@@ -140,6 +132,15 @@ func downloadPackage(ctx context.Context, cfg *config.Config, status *update.Sta
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("download HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if resp.ContentLength >= 0 && resp.ContentLength != expectedSize {
+		return fmt.Errorf("package size mismatch: expected %d, got %d", expectedSize, resp.ContentLength)
+	}
+	if got := strings.ToLower(strings.TrimSpace(resp.Header.Get("X-Node-Package-SHA256"))); got != expectedSHA {
+		return fmt.Errorf("node package checksum does not match update status")
+	}
+	if got := strings.TrimSpace(resp.Header.Get("X-Node-Package-Version")); got != strings.TrimSpace(status.LatestVersion) {
+		return fmt.Errorf("node package version does not match update status")
 	}
 
 	tmpPath := destPath + ".part"
@@ -149,7 +150,8 @@ func downloadPackage(ctx context.Context, cfg *config.Config, status *update.Sta
 	}
 	hasher := sha256.New()
 	writer := io.MultiWriter(out, hasher)
-	if _, err := io.Copy(writer, resp.Body); err != nil {
+	written, err := io.Copy(writer, io.LimitReader(resp.Body, expectedSize+1))
+	if err != nil {
 		out.Close()
 		os.Remove(tmpPath)
 		return err
@@ -157,6 +159,10 @@ func downloadPackage(ctx context.Context, cfg *config.Config, status *update.Sta
 	if err := out.Close(); err != nil {
 		os.Remove(tmpPath)
 		return err
+	}
+	if written != expectedSize {
+		os.Remove(tmpPath)
+		return fmt.Errorf("package size mismatch: expected %d, got %d", expectedSize, written)
 	}
 	if expectedSHA != "" {
 		got := hex.EncodeToString(hasher.Sum(nil))

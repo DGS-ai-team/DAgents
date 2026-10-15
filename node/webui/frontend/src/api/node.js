@@ -20,6 +20,15 @@ async function apiFetch(path, { method = "GET", body, params, signal } = {}) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
+  // Desktop supplies this transport through Tauri so settings keep using the
+  // same Node-owned API without an HTTP port exposed to the WebView.
+  if (typeof globalThis.__DAGENTS_API_REQUEST__ === "function") {
+    return globalThis.__DAGENTS_API_REQUEST__({
+      method,
+      path: `${url.pathname}${url.search}`,
+      body,
+    });
+  }
   const resp = await fetch(url, init);
   const data = await readJSON(resp);
   if (!resp.ok) {
@@ -38,7 +47,7 @@ export function getHealth() {
 }
 
 export function getAgentInfo() {
-  return apiFetch("/v1/agent/info");
+  return apiFetch("/v1/node/info");
 }
 
 // 用户反馈由 Node 权威保存并负责向当前 Manage 投递；浏览器只保存未提交草稿。
@@ -67,16 +76,25 @@ export function syncFeedback(feedbackId) {
 
 /** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
 export function getUIBootstrap() {
-  return apiFetch("/v1/ui/bootstrap");
+  return apiFetch("/v1/bootstrap");
 }
 
 export function getAgentUpdate() {
-  return apiFetch("/v1/agent/update");
+  return apiFetch("/v1/node/update");
 }
 
 /** 当前 Node 可用的宿主/桌面能力；UI 不直接探测 Shell 端口。 */
 export function getPlatformCapabilities() {
-  return apiFetch("/v1/platform/capabilities");
+  return apiFetch("/v1/platform/capabilities").then(async (node) => {
+    const desktopRequest = globalThis.__DAGENTS_DESKTOP_REQUEST__;
+    if (typeof desktopRequest !== "function") return node;
+    try {
+      const desktop = await desktopRequest({ method: "GET", path: "/v1/platform/capabilities" });
+      return { ...node, ...desktop };
+    } catch {
+      return node;
+    }
+  });
 }
 
 export function pickPlatformDirectory() {
@@ -84,19 +102,25 @@ export function pickPlatformDirectory() {
 }
 
 export function getPlatformClipboardFiles() {
-  return apiFetch("/v1/platform/clipboard/files");
+  const desktopRequest = globalThis.__DAGENTS_DESKTOP_REQUEST__;
+  if (typeof desktopRequest !== "function") {
+    return Promise.resolve({ available: false, files: [] });
+  }
+  return desktopRequest({ method: "GET", path: "/v1/platform/clipboard/files" });
 }
 
 export function reportPlatformUIFocus(payload = {}) {
-  return apiFetch("/v1/platform/ui-focus", { method: "POST", body: payload });
+  const desktopRequest = globalThis.__DAGENTS_DESKTOP_REQUEST__;
+  if (typeof desktopRequest !== "function") return Promise.resolve({ ok: false });
+  return desktopRequest({ method: "POST", path: "/v1/platform/ui-focus", body: payload });
 }
 
 export function applyAgentUpdate({ force = false } = {}) {
-  return apiFetch("/v1/agent/update/apply", {
-    method: "POST",
-    body: { force },
-  });
+  const desktopRequest = globalThis.__DAGENTS_DESKTOP_REQUEST__;
+  if (typeof desktopRequest !== "function") return Promise.reject(new Error("Desktop updater is unavailable"));
+  return desktopRequest({ method: "POST", path: "/v1/platform/update/apply", body: { force } });
 }
+
 
 export function getLLMSettings() {
   return apiFetch("/v1/llm/settings");
@@ -107,16 +131,16 @@ export function patchLLMSettings(patch) {
 }
 
 export function getSetupConfig() {
-  return apiFetch("/v1/setup/config");
+  return apiFetch("/v1/settings");
 }
 
 export function patchSetupConfig(patch) {
-  return apiFetch("/v1/setup/config", { method: "PATCH", body: patch });
+  return apiFetch("/v1/settings", { method: "PATCH", body: patch });
 }
 
 /** 用 base_url + api_key 探测 OpenAI 兼容 /models 列表。 */
 export function probeLLMModels(payload = {}) {
-  return apiFetch("/v1/setup/llm/probe-models", { method: "POST", body: payload });
+  return apiFetch("/v1/llm/probe-models", { method: "POST", body: payload });
 }
 
 export function listAgentTemplates() {
@@ -209,6 +233,13 @@ export function getAutoOverview(params = {}) {
   return apiFetch("/v1/auto/overview", { params });
 }
 
+/** Read-only browser page view for an already-running Agent browser session. */
+export function getAgentBrowserView(agentId, pageId = "") {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/browser/view`, {
+    params: { page_id: pageId || undefined },
+  });
+}
+
 export function patchAgent(agentId, patch = {}) {
   const body = {};
   if (patch.display_name != null || patch.displayName != null) {
@@ -269,6 +300,10 @@ export function cancelTransfer(transferId) {
 
 export function listAgentTerminals(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/terminals`);
+}
+
+export function closeAgentTerminal(agentId, terminalId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/terminals/${encodeURIComponent(terminalId)}`, { method: "DELETE" });
 }
 
 export function clearContext(agentId) {

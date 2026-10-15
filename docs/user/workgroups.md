@@ -9,6 +9,8 @@
 3. 在 Node 的 Manage 设置中启用 Workgroup；
 4. 确认 Node 能主动建立到 Manage 的 WebSocket，Manage 不需要访问 Node 的入站 HTTP。
 
+另外，Manage Registry 管理员必须为发起调用的 Node 和成员 Agent 的 Home Node 配置至少一个相同的 `discovery_group`。同节点成员也遵守这一校验：Node 与 Agent 在 Registry 中是不同记录，必须各自被分配到共享组。Node 凭据的可见组范围不会自动给 Registry 记录分配组；缺少共享组时，添加成员会返回 `403 not_authorized`。请在 Manage 的 Registry 管理中创建或选择分组，并分别将相关 Node/Agent 加入该组后重试。
+
 ## 2. 创建工作组
 
 在 Manage Console 或 Node Web UI 中：
