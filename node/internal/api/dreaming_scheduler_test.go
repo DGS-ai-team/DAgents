@@ -335,7 +335,13 @@ func TestDreamingSchedulerRunsRealSessionWhenWakeIsOff(t *testing.T) {
 	for _, message := range client.requests[0].Messages {
 		prompt += message.Role + "\n" + message.Content + "\n"
 	}
-	for _, want := range []string{"当前工具名称", "当前职责以本次请求的 system prompt 为准", "当前手册根目录", "会被系统持久化", "历史消息中的工具名称、路径和规则可能已经退役"} {
+	for _, want := range []string{
+		"当前工具名称", "当前职责以本次请求的 system prompt 为准", "当前手册根目录", "会被系统持久化",
+		"单次审批只授权其明确批准的操作", "不得把一次性批准推演为未来权限",
+		"不得编写绕过、弱化或推断用户授权的规则", "限制和授权只按用户明确说明的时间、对象和范围理解",
+		"当前请求中的用户限制、拒绝、撤回与现行审批规则仍然有效",
+		"历史消息中的工具名称、路径和规则可能已经退役",
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("dreaming prompt missing %q: %s", want, prompt)
 		}

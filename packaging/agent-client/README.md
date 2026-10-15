@@ -1,14 +1,14 @@
-# Agent + Client 同包示例
+# Agent Node 与 Client 示例
 
-Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本地副本见根目录 `.gitignore`。
+Go Node 与独立 Client 共用配置类型，但职责不同；**仓库只提交 `*.example.yaml`**，本地副本见根目录 `.gitignore`。
 
 ## 文件
 
 | 文件 | 说明 |
 |------|------|
-| `config.example.yaml` | **引导配置**（可提交）：仅 `listen` / `local` |
+| `config.example.yaml` | Node bootstrap（可提交）：仅包含 `listen` |
 
-其余 Node 设置在首次启动写入 `./.runtime/node_settings.db`（路径固定）；LLM 档案在 `llm_configs.db`；Agent 策略/侧车在 `agents.db`。Triggers 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)；工具组见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md)。
+Node 设置在首次启动后写入 `./.runtime/node_settings.db`（路径固定）；LLM 档案在 `llm_configs.db`；Agent 策略/侧车在 `agents.db`。Triggers 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)；工具组见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md)。
 
 ## 本地配置
 
@@ -17,13 +17,13 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-按需改 `listen` / `local`。LLM、压缩、skills/triggers、hooks 等请在 **Web UI「设置」** 修改（写入 SQLite）。
+按需改 `listen`。Node 运行时设置请在 **DAgents Desktop** 中修改（写入 SQLite）。Go/Python CLI 可单独配置 `local.endpoint` 连接目标 Node；Node bootstrap 文件不保存这类客户端设置。
 
 `config.yaml` **不会被 Git 跟踪**。
 
 ### Agent 身份与 Manage 注册
 
-身份在 **`node_settings.db`（Web UI）** 中配置；Node 注册 Manage 时自动组装 `card` JSON 上报。字段含义：
+身份在 **`node_settings.db`（DAgents Desktop）** 中配置；Node 注册 Manage 时自动组装 `card` JSON 上报。字段含义：
 
 | 字段 | 说明 |
 |------|------|

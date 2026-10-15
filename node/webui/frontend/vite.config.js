@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
+      "@shared-icons": fileURLToPath(new URL("../../../shared/icons", import.meta.url)),
       "@dagents-brand": fileURLToPath(new URL("../../../shared/branding", import.meta.url)),
     },
   },
@@ -17,7 +18,7 @@ export default defineConfig({
   },
   base: "/ui/",
   build: {
-    outDir: fileURLToPath(new URL("../../internal/webui/static", import.meta.url)),
+    outDir: fileURLToPath(new URL("./dist", import.meta.url)),
     emptyOutDir: true,
     rollupOptions: {
       output: {
@@ -39,6 +40,7 @@ export default defineConfig({
     },
   },
   server: {
+    fs: { allow: [fileURLToPath(new URL("../../../", import.meta.url))] },
     host: true,
     port: Number(process.env.WEBUI_DEV_PORT || 5173),
     strictPort: true,

@@ -5,6 +5,7 @@ import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const { loading, saving, error, statusMessage, configPath, configWritable, form, load, save } =
   useSetupConfig();
+const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
 
 async function saveGeneral() {
   await save({
@@ -24,7 +25,8 @@ onMounted(load);
 
 <template>
   <ConfigPanelShell
-    title="通用设置"
+    title="通用"
+    :subtitle="isDesktop ? '管理当前连接 Node 的显示信息、日志和运行状态。' : '管理当前节点的显示信息、日志和运行状态。'"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"
@@ -35,15 +37,11 @@ onMounted(load);
   >
     <section class="settings-section">
       <h2 class="settings-section__title">访问地址</h2>
-      <p class="settings-section__desc">以下地址由启动配置决定，修改后需要重启节点。</p>
+      <p class="settings-section__desc">监听地址由启动配置决定，修改后需要重启节点。</p>
       <div class="setup-config-panel__readonly-grid">
         <div class="command-stat">
           <span class="command-stat__label">监听</span>
           <span class="command-stat__value">{{ form.node.listen_host || "—" }}:{{ form.node.listen_port || "—" }}</span>
-        </div>
-        <div class="command-stat">
-          <span class="command-stat__label">连接地址</span>
-          <span class="command-stat__value">{{ form.node.local_endpoint || "—" }}</span>
         </div>
       </div>
     </section>
@@ -58,7 +56,7 @@ onMounted(load);
             v-model="form.user.preferred_name"
             class="settings-field__input"
             type="text"
-            placeholder="本机使用者称呼"
+            :placeholder="isDesktop ? '当前节点使用者称呼' : '节点使用者称呼'"
             autocomplete="nickname"
           />
         </label>

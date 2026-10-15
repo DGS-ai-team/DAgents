@@ -5,20 +5,24 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub const ENV_HOME: &str = "DAGENTS_HOME";
+pub const ENV_DESKTOP_CONFIG: &str = "DAGENTS_DESKTOP_CONFIG";
 
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub home: PathBuf,
     pub config_path: PathBuf,
+    pub desktop_config_path: PathBuf,
+    pub managed_node_path: PathBuf,
     pub node_exe: PathBuf,
-    pub pid_file: PathBuf,
     pub log_out: PathBuf,
     pub log_err: PathBuf,
-    pub desktop_bridge_token_file: PathBuf,
 }
 
 impl Layout {
-    pub fn resolve(config_flag: Option<&str>) -> Result<Self, String> {
+    pub fn resolve(
+        config_flag: Option<&str>,
+        desktop_config_flag: Option<&str>,
+    ) -> Result<Self, String> {
         let home = resolve_home()?;
         let cfg = match config_flag.map(str::trim).filter(|s| !s.is_empty()) {
             Some(p) => {
@@ -33,6 +37,18 @@ impl Layout {
         };
         let cfg = cfg.canonicalize().unwrap_or_else(|_| absolutize(&cfg));
 
+        let desktop_cfg = match desktop_config_flag.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(p) => {
+                let path = PathBuf::from(p);
+                if path.is_absolute() {
+                    path
+                } else {
+                    env::current_dir().unwrap_or(home.clone()).join(path)
+                }
+            }
+            None => default_desktop_config_path()?,
+        };
+
         let runtime = home.join(".runtime");
         let log_dir = runtime.join("logs");
         let day = dated_stamp();
@@ -44,20 +60,44 @@ impl Layout {
 
         Ok(Self {
             node_exe: home.join("bin").join(node_name),
-            pid_file: runtime.join("node.pid"),
+            managed_node_path: runtime.join("managed-node.json"),
             log_out: log_dir.join(format!("node-{day}.log")),
             log_err: log_dir.join(format!("node-{day}.err.log")),
-            desktop_bridge_token_file: runtime.join("desktop-bridge.token"),
             home,
             config_path: cfg,
+            desktop_config_path: desktop_cfg,
         })
     }
+}
 
-    pub fn relative_config_arg(&self) -> Result<String, String> {
-        if let Ok(rel) = self.config_path.strip_prefix(&self.home) {
-            return Ok(rel.to_string_lossy().replace('\\', "/"));
-        }
-        Ok(self.config_path.to_string_lossy().to_string())
+fn default_desktop_config_path() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        let root = env::var_os("APPDATA")
+            .or_else(|| env::var_os("LOCALAPPDATA"))
+            .map(PathBuf::from)
+            .ok_or_else(|| "无法解析当前用户的 AppData 目录".to_string())?;
+        return Ok(root.join("DAgents").join("desktop").join("settings.json"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "无法解析当前用户主目录".to_string())?;
+        return Ok(home
+            .join("Library")
+            .join("Application Support")
+            .join("DAgents")
+            .join("desktop")
+            .join("settings.json"));
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let root = env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+            .ok_or_else(|| "无法解析 XDG 配置目录".to_string())?;
+        Ok(root.join("dagents").join("desktop").join("settings.json"))
     }
 }
 

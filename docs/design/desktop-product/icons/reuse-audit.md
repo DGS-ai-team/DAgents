@@ -1,14 +1,14 @@
 # Desktop prototype icon reuse audit
 
-`node/webui/frontend` does not have a standalone production SVG icon directory. Its production icons are inline SVG geometry in [`UiIcon.vue`](../../../../node/webui/frontend/src/components/UiIcon.vue). The standalone DAgents icon library is [`docs/design/dagents-icons`](../../dagents-icons/README.md) (also copied into `visual-system/dagents-icons`); the 60 corresponding SVG files have matching hashes.
+As of 2026-10-09, DAgents and Lucide SVGs are maintained canonically under [`shared/icons/`](../../../../shared/icons/). Earlier visual-system copies were removed after path and content verification; this audit retains its source comparison as historical provenance.
 
 ## Reuse in the prototype
 
-These existing DAgents assets are copied into the Desktop source library unchanged: `browser`, `terminal`, `pending`, `success`, `error`, `create`, `more`, and `upload`. Other same-name DAgents source icons also match where applicable; `folder-open` remains Lucide because its open-folder outline better describes the existing resource collection entry than the closed-folder asset. `upload` remains cataloged for future actual upload semantics and is not used for the current attachment affordance.
+Production uses the canonical Desktop assets declared in `shared/icons/desktop/manifest.json`. Browser resources use a Lucide window outline; the former globe remains a historical gallery variant. Workspaces use `folder-open`, individual files use the supplied file silhouette, and the composer uses the supplied attachment silhouette. `upload` remains cataloged for future upload semantics.
 
-`send.svg` uses the `send` path geometry from the inline Node Web UI `UiIcon.vue`, extracted into a local `currentColor` SVG. Both message composers use it. `play.svg` is reserved for terminal command execution. The production Vue component remains the source reference; there is no Web UI SVG asset to copy for this symbol.
+`send.svg` is the simple upward arrow used by both composers. `play.svg` is reserved for terminal command execution. Node and Manage registries expose semantic aliases for agent, workgroup, Auto, skills, browser, attachment, file, tools, and send; legacy names remain for unrelated technical meanings.
 
-The user-provided `user.svg`, `robot.svg`, `wrench.svg`, and `team.svg` artwork remains authoritative for agent, Auto, tools, and workgroup assets. Normal agent entries consistently use the agent icon; the wrench is reserved for tool semantics.
+The supplied `user.svg`, `wrench.svg`, `team.svg`, and file artwork remains authoritative. Auto keeps its four-point star, optically scaled by 1.08 around the 24-unit center without changing its outline. Skills use Lucide Puzzle, distinct from Auto. Standard neutral states inherit `currentColor`; disabled controls reduce contrast, while status icons may use status colors.
 
 ## Reviewed 2026-09-29 download candidates
 
@@ -22,4 +22,4 @@ The user-provided `user.svg`, `robot.svg`, `wrench.svg`, and `team.svg` artwork 
 | `file.svg`, `message.svg`, `attachment.svg` | Used | They serve the generic file resource, return-to-conversation action, and add-attachment action. |
 | `image.svg`, `edit.svg` | Reserved | Included in the gallery and manifest, without adding controls that have no current action. |
 
-The gallery is a local HTML file and loads only the manifest's local SVG assets, so it remains inspectable without a network connection.
+The gallery uses local SVG assets and its existing HTTP guidance. It previews 16/18/20px glyphs in default, hover, selected, and disabled neutral states.

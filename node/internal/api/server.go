@@ -17,7 +17,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
-	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -94,7 +93,6 @@ type Server struct {
 	workgroupDialer *workgroup.Dialer
 	workgroupAgents *workgroupAgentBridge
 	terminals       *terminalSessionRegistry
-	desktopBridge   *desktopbridge.Client
 	directoryPicker platform.DirectoryPicker
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
@@ -125,7 +123,7 @@ type serverOptions struct {
 	directoryPicker platform.DirectoryPicker
 }
 
-// WithConfigPath 记录 Node 启动时加载的 config.yaml 路径（供 Web UI 保存设置）。
+// WithConfigPath 记录 Node 启动时加载的 config.yaml 路径，供 Node settings API 保存设置。
 func WithConfigPath(path string) Option {
 	return func(o *serverOptions) {
 		o.configPath = strings.TrimSpace(path)
@@ -599,7 +597,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		workgroupDialer:      wgDialer,
 		workgroupAgents:      wgAgentBridge,
 		terminals:            newTerminalSessionRegistry(),
-		desktopBridge:        desktopbridge.NewFromEnv(),
 		directoryPicker:      o.directoryPicker,
 		pendingRuntimeReload: make(map[string]string),
 	}

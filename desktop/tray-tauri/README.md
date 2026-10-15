@@ -1,67 +1,75 @@
-# `desktop/tray-tauri/` — DAgents Shell（Tauri，推荐轨）
+# DAgents Desktop（Tauri）
 
-用 **Tauri 2** 实现的 Windows 桌面托盘 Shell（内嵌 WebView2）。Windows x64/x86 Inno 安装包的「**推荐**」Shell 均使用本实现；发布不再提供免安装 zip。
+当前 Windows 人机入口是内嵌前端的 Tauri 2 Desktop。Node 只提供运行 API，不提供 /ui/ 页面；已退休 Go Shell 的模块和构建入口已移除。主线是一个使用者拥有一个 Node，可从多个 Desktop 访问，不实现多用户租户隔离。
 
-## 与兼容轨的关系
+## 已接入与职责
 
-| 轨 | 目录 | CI 产物 | 适用 |
-|----|------|---------|------|
-| **推荐** | `desktop/tray-tauri/` | `dagents-shell-tauri.exe` | Win10/11 + WebView2，内嵌 Web UI |
-| **兼容** | [`desktop/tray/`](../tray/) | `dagents-shell-legacy.exe` | 低版本 Windows，系统浏览器开 Web UI |
+- 对话、模型切换、工具与审批、Agent 管理、Auto 设置与总览。
+- Node 终端、工作区文件查看/编辑/上传、现有浏览器会话只读查看、Manage 工作组。
+- Node 设置通过 Rust transport 保存；Desktop 的连接、通知和更新偏好单独保存。
+- 首配只配置当前 Node，称呼可选，移除外观步骤；未首配或离线仍可打开 Desktop 设置。
+- 关闭窗口隐藏到托盘，重复启动恢复原窗口；退出 Desktop 后 Node 继续运行。
+- 本机 Node 启停核验路径、配置、PID 和进程创建时间，不认领外部 Node。
 
-Inno 安装向导在「附加任务」中二选一；静默安装可用 `/TASKS=shellmodern` 或 `/TASKS=shelllegacy`。未检测到 WebView2 时向导默认勾选兼容模式。
+设置复用 node/webui/frontend 内的 Vue 组件源码，Node 构建不依赖前端产物。当前浏览器资源是 Node 侧会话的只读展示；人工接管和地址栏控制尚未实现。
 
-## 已实现
+## 连接模式
 
-| 能力 | 说明 |
-|------|------|
-| 单实例 / Node 启停监护 | 对齐 Go `nodectl` |
-| 双击托盘 / 关窗隐藏 | 内嵌 WebView 打开 `{endpoint}/ui/` |
-| SSE 待办 / Toast / icon 闪烁 | 订阅 Node 权威事件；启动/重连时 hydrate |
-| Desktop bridge `:18767` | 仅供 Node 调用的 update / clipboard / ui focus API；目录选择由 Node 直接负责 |
-| 更新编排 + `update` CLI | Manage Release Hub |
+| 模式 | 行为 |
+| --- | --- |
+| local（默认） | 连接本机 Node，可启动与监护本安装拥有的 Node。 |
+| tunnel | 连接用户已经建立的 SSH 隧道的 loopback HTTP 端口；不会启动、恢复、停止或重启本机 Node，不从远端 Node 安装本机更新。 |
 
-### Desktop（当前主入口）
+两种模式都只接受 loopback HTTP origin，不接受公网/LAN 地址、URL 凭据、路径或 query。SSH 隧道由用户在 Desktop 外建立；当前没有自动 SSH 管理或 Node 通用 Bearer 用户认证。端口转发必须受访问控制，不能公开裸 Node API。
 
-Shell 启动后默认打开 Desktop 窗口；托盘菜单中的「打开控制台」仍进入 Node `/ui/`，用于首配和高级管理。启动参数 `--legacy-console` 可在诊断时跳过 Desktop。Desktop 通过 Rust Tauri commands 访问本机 Node；认证凭据由 Rust 宿主持有，WebView 可显示连接地址但不直接请求 Node。当前只接受 loopback Node（可用 SSH 隧道转发到 loopback），不接受 LAN/WAN 地址。对话、审批和终端资源已接入真实 Node API；浏览器、文件和工作组仍明确未接入。终端通过 Tauri Rust 中继到 Node，关闭会话会移除 PTY，切换 Agent 或退出窗口会 detach 并保留进程。
+隧道模式的 Agent 工作目录、终端、文件和浏览器属于连接的 Node。工作目录输入 Node 侧路径，原生 Node 目录选择器禁用。Desktop 附件上传后转为 Node 引用，不把本机路径当作远端文件。
 
-Desktop「设置」复用 Node WebUI 的完整配置页面，通过固定本机 Node 的 Tauri API 通道读取和保存通用、模型、工具、智能体、触发器、安全、反馈等设置。Node 仍是配置数据的权威来源；Desktop 不另存配置副本。
+## 配置存储
 
-本轮范围、实际测试与下一阶段缺口见 [Desktop MVP 收束记录](../../docs/design/desktop-product/mvp-closeout.md)。当前仍为本机开发 MVP，尚未完成资源预览、全部日常对话操作和多平台发布验收。
+Desktop JSON 默认位置：
 
-本地 Windows 开发：
+- Windows：%APPDATA%/DAgents/desktop/settings.json
+- macOS：~/Library/Application Support/DAgents/desktop/settings.json
+- Linux：$XDG_CONFIG_HOME/dagents/desktop/settings.json（缺省使用用户 .config）
+
+字段为 connection_mode、node_endpoint、notification_enabled、update_check_enabled、update_check_interval_seconds。旧 JSON 缺少模式时按 local 读取。保存后重启 Desktop 生效；读取失败时禁止覆盖默认值，保存失败保留草稿。
+
+Node config.yaml 只保存 listen。Node 名称、使用者称呼、LLM、Manage、工具和运行设置留在 Node 的 .runtime 数据库。Manage 凭据不写入 Desktop JSON。
+
+--config 指定本机 Node bootstrap，--desktop-config 指定 Desktop JSON；DAGENTS_HOME 是安装根，DAGENTS_DESKTOP_CONFIG 可指定 Desktop JSON。包装命令还支持 DAGENTS_CONFIG，它不是 Desktop 偏好来源。
+
+## 构建与开发
+
+在仓库根目录准备 Node 二进制和 bootstrap，再启动 Desktop：
 
 ```powershell
+New-Item -ItemType Directory -Force bin | Out-Null
+go build -o bin/dagents-node.exe ./node/cmd/dagents-node
+Copy-Item packaging/agent-client/config.example.yaml config.yaml
 $env:DAGENTS_HOME = (Resolve-Path .).Path
-$env:DAGENTS_CONFIG = Join-Path $env:DAGENTS_HOME 'packaging/agent-client/config.yaml'
-cd desktop/tray-tauri
-npm install
+npm ci --prefix desktop/tray-tauri
+Set-Location desktop/tray-tauri
 npm run tauri:dev
 ```
 
-参数需传给 Tauri 子进程。Node 已在默认端口 `127.0.0.1:18765` 运行时，Shell 复用该进程；尚未完成 Node 首配时，MVP 会引导用户通过原 `/ui/` 控制台完成配置。单独 `npm run dev` 可在浏览器查看排版预览，但会明确显示预览状态，不能连接或伪装真实 Node 数据。
+只运行 Vite 是排版预览，不能伪装真实 Node。内嵌前端的候选构建：
 
-Web UI 不直接访问 `:18767`。Shell 启动时生成 `.runtime/desktop-bridge.token`，Node 继承
-`DAGENTS_DESKTOP_API_URL` 与 `DAGENTS_DESKTOP_BRIDGE_TOKEN` 后，通过
-`/v1/platform/*` 统一转发桌面能力；Go 兼容轨使用相同契约。
-
-## 开发
-
-```bash
-cd desktop/tray-tauri
-npm install
-npm run tauri:dev
+```powershell
+npx --no-install tauri build --debug --no-bundle --features tauri/custom-protocol
 ```
 
-```bash
-# 仓库根目录（Windows）
-scripts/ci/build_dagents_shell_tauri.sh   # → dist/dagents-shell-tauri.exe + dagents-shell.exe
-scripts/ci/build_dagents_shell.sh         # → dist/dagents-shell-legacy.exe（Go）
-```
+Release 使用 scripts/ci/build_dagents_shell_tauri.sh，正式 Windows 包由 Inno Setup 包装。完整能力以 Win11 x64 为主要目标；浏览器要求 Win11 / Server2019+，Win10 只保留基础能力。最低要求不等于所有目标平台已经验收。
 
-## CI
+## 生命周期命令
 
-| Workflow | 作用 |
-|----------|------|
-| [`tauri-shell.yml`](../../.github/workflows/tauri-shell.yml) | `cargo test` + 构建 Tauri 产物 |
-| `build-and-release.yml` / `manual-package.yml` | 同时构建 Tauri + Go legacy，打入安装包 |
+dagents-shell.exe 提供 --desktop-status、--node-status、--owned-node-status、--start-owned-node、--stop-owned-node [--require-idle]、--quit-desktop。控制入口先于 GUI 初始化；设备连接不创建另一份 runtime。
+
+隧道模式不允许本机 Node 启停。安装器 require-idle 在没有存活本机 owner 时可以无操作完成；若残留此前本机模式启动的受管 Node，需切回本机模式处理，不能用远端状态判断本机进程。
+
+升级下载后再次检查 Node readiness；当前无 Node 原子维护锁，检查和停止之间仍有新回合竞态。隧道模式的本机更新安装禁用，远端 Node 与本机 Desktop 的平台发布和升级需分别设计。
+
+## 验证与限制
+
+运行 npm run test:ui、cargo test --offline、cargo fmt --check。CI 见 [tauri-shell.yml](../../.github/workflows/tauri-shell.yml)。
+
+实际证据及缺口见 [日常接入记录](../../docs/design/desktop-product/daily-use-integration.md)、[生命周期验收](../../docs/design/desktop-product/audits/2026-10-13/lifecycle-install/README.md)、[Node API 文档](../../docs/api/node-integration.md)。自动 SSH 管理、直连远程认证、浏览器人工接管、丰富文件查看器和多平台安装签名尚未完成。缺少 ISCC 时不能以构建 Tauri EXE 代替安装、升级和卸载验收。

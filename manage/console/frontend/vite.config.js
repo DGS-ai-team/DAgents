@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
+      "@shared-icons": fileURLToPath(new URL("../../../shared/icons", import.meta.url)),
       "@dagents-brand": fileURLToPath(new URL("../../../shared/branding", import.meta.url)),
     },
   },
@@ -17,6 +18,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    fs: { allow: [fileURLToPath(new URL("../../../", import.meta.url))] },
     host: true,
     port: Number(process.env.CONSOLE_DEV_PORT || 5174),
     strictPort: true,

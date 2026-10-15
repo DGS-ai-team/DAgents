@@ -237,7 +237,7 @@
         <tr><td><span class="priority p2">P2</span></td><td><strong>inline SVG</strong></td><td>NavRail、Composer、Workbench、Manage 顶栏</td><td><span class="icon-pair"><svg class="icon"><use href="#settings"/></svg>共享 registry</span></td><td>现有路径可继续复用，统一由 Icon 组件输出尺寸、描边与 aria-hidden。</td></tr>
         <tr><td><span class="priority p2">P2</span></td><td><strong>品牌雪花</strong></td><td>程序图标、托盘、Manage 品牌位</td><td>保留现有 PNG</td><td>品牌图片不纳入 Lucide 生产按钮图标，避免把 logo 当功能控件。</td></tr>
       </tbody></table></div>
-      <p class="note">代码扫描覆盖了 Node 侧 23 个、Manage 侧 7 个含 inline SVG 的 Vue 文件；另有关闭按钮、工具确认态等字符图标已在上表合并统计。已有官方 Lucide SVG 已落在 <span class="code">docs/design/dagents-icons/lucide/</span>；本稿不再新增生产 SVG，只描述迁移顺序。</p>
+      <p class="note">代码扫描覆盖了 Node 侧 23 个、Manage 侧 7 个含 inline SVG 的 Vue 文件；另有关闭按钮、工具确认态等字符图标已在上表合并统计。已有官方 Lucide SVG 已落在 <span class="code">shared/icons/lucide/</span>；本稿不再新增生产 SVG，只描述迁移顺序。</p>
     </section>
 
     <section class="section">
@@ -275,7 +275,7 @@
       </div>
     </section>
 
-    <div class="footer">设计范围：Node 与 Manage 的图标覆盖、颜色、密度和页面骨架审计。此稿只用于评审，未直接修改生产页面；生产图标迁移以 <span class="code">docs/design/dagents-icons/lucide/</span> 为来源。</div>
+    <div class="footer">设计范围：Node 与 Manage 的图标覆盖、颜色、密度和页面骨架审计。此稿只用于评审，未直接修改生产页面；生产图标迁移以 <span class="code">shared/icons/lucide/</span> 为来源。</div>
   </main>
 </body>
 </html>

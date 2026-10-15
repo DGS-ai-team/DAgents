@@ -57,7 +57,7 @@ type agentInfoPayload struct {
 	LLM              llmInfoPayload `json:"llm"`
 }
 
-// Node 对 local.endpoint 执行 GET /health 与 GET /v1/agent/info，并可选校验配置中的 node_id。
+// Node 对 local.endpoint 执行 GET /health 与 GET /v1/node/info，并可选校验配置中的 node_id。
 // 首配未完成时 agent/info 返回 403（node_profile_required）：仍视为探活成功（ProfilePending=true），
 // 避免 Linux/Windows 启动脚本误判「Node 未就绪」。
 func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Result, error) {
@@ -161,22 +161,22 @@ func fetchHealth(ctx context.Context, client *http.Client, base string) (*health
 }
 
 func fetchAgentInfo(ctx context.Context, client *http.Client, base string) (*agentInfoPayload, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/agent/info", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/node/info", nil)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GET /v1/agent/info: %w", err)
+		return nil, fmt.Errorf("GET /v1/node/info: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, &httpStatusError{path: "/v1/agent/info", code: resp.StatusCode, body: string(body)}
+		return nil, &httpStatusError{path: "/v1/node/info", code: resp.StatusCode, body: string(body)}
 	}
 	var payload agentInfoPayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode /v1/agent/info: %w", err)
+		return nil, fmt.Errorf("decode /v1/node/info: %w", err)
 	}
 	return &payload, nil
 }

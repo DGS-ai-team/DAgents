@@ -48,6 +48,7 @@ type terminalWSEvent struct {
 func (s *Server) registerTerminalRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/terminals/ws", s.handleAgentTerminalWS)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/terminals", s.handleAgentTerminals)
+	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}/terminals/{terminal_id}", s.handleDeleteAgentTerminal)
 }
 
 func (s *Server) ensureTerminalAgentRuntime(ctx context.Context, agentID string) error {
@@ -85,6 +86,30 @@ func (s *Server) handleAgentTerminals(w http.ResponseWriter, r *http.Request) {
 	}
 	items := s.terminals.List(agentID)
 	writeJSON(w, http.StatusOK, map[string]any{"terminals": items, "count": len(items)})
+}
+
+func (s *Server) handleDeleteAgentTerminal(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.PathValue("agent_id"))
+	terminalID := strings.TrimSpace(r.PathValue("terminal_id"))
+	if err := s.ensureTerminalAgentRuntime(r.Context(), agentID); err != nil {
+		status := http.StatusInternalServerError
+		code := "agent_ensure_failed"
+		if err.Error() == "agent_not_found" {
+			status = http.StatusNotFound
+			code = "agent_not_found"
+		}
+		writeAPIError(w, status, code, err.Error(), map[string]any{"agent_id": agentID})
+		return
+	}
+	if s.terminals == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "terminal_registry_unavailable", "terminal registry is unavailable", nil)
+		return
+	}
+	if err := s.terminals.Close(agentID, terminalID); err != nil {
+		writeAPIError(w, http.StatusNotFound, "terminal_not_found", err.Error(), map[string]any{"agent_id": agentID, "terminal_id": terminalID})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": agentID, "terminal_id": terminalID})
 }
 
 func (s *Server) terminalToolsRegistry(agentID string) (*tools.Registry, error) {

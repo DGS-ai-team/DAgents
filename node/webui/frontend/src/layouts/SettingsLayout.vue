@@ -1,12 +1,16 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import UiIcon from "../components/UiIcon.vue";
+import FirstRunNodeProfile from "../views/FirstRunNodeProfile.vue";
 
 defineOptions({ name: "SettingsLayout" });
 
 const route = useRoute();
 const router = useRouter();
+const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
+const desktopNodeSetupRequired = inject("desktopNodeSetupRequired", ref(false));
+const desktopFirstRunCompleted = inject("desktopFirstRunCompleted", () => {});
 const navScroll = ref(null);
 const navContent = ref(null);
 const fadeStart = ref(false);
@@ -66,11 +70,12 @@ onBeforeUnmount(() => {
 
 watch(() => route.fullPath, refreshNavigation);
 
-const navGroups = [
+const sharedNavGroups = [
   {
     label: "工作区",
     items: [
-      { to: "/settings/general", label: "通用", icon: "wrench" },
+      { to: "/settings/general", label: "通用", icon: "settings" },
+      ...(window.__TAURI_INTERNALS__ ? [{ to: "/settings/desktop", label: "Desktop", icon: "monitor" }] : []),
       { to: "/settings/connection", label: "模型与连接", icon: "plug" },
     ],
   },
@@ -80,13 +85,13 @@ const navGroups = [
       { to: "/settings/mcp", label: "全局 MCP 服务", icon: "server" },
       { to: "/settings/linux-channels", label: "全局 Linux 通道", icon: "square-terminal" },
       { to: "/settings/capabilities", label: "能力", icon: "monitor" },
-      { to: "/settings/skills", label: "技能", icon: "sparkles" },
+      { to: "/settings/skills", label: "技能", icon: "skills" },
     ],
   },
   {
     label: "智能体与自动化",
     items: [
-      { to: "/settings/agents", label: "智能体列表", match: "/settings/agents", icon: "bot" },
+      { to: "/settings/agents", label: "智能体列表", match: "/settings/agents", icon: "agent" },
       { to: "/settings/triggers", label: "定时任务", icon: "clock" },
     ],
   },
@@ -104,9 +109,27 @@ const navGroups = [
   },
 ];
 
+const navGroups = window.__TAURI_INTERNALS__
+  ? [
+      { label: "本机应用", items: [{ to: "/settings/desktop", label: "Desktop 设置", icon: "monitor" }] },
+      {
+        label: "当前 Node",
+        items: [
+          { to: "/settings/general", label: "Node 通用", icon: "settings" },
+          { to: "/settings/connection", label: "模型与连接", icon: "plug" },
+        ],
+      },
+      ...sharedNavGroups.slice(1),
+    ]
+  : sharedNavGroups;
+
 function isActive(item) {
   if (item.match) return route.path === item.match || route.path.startsWith(`${item.match}/`);
   return route.path === item.to;
+}
+
+function shouldGateNodeSettings(viewRoute) {
+  return isDesktop && desktopNodeSetupRequired.value && viewRoute.path !== "/settings/desktop";
 }
 
 function backToChat() {
@@ -150,7 +173,12 @@ function backToChat() {
                   :class="{ 'settings-layout__link--active': isActive(item) }"
                   :aria-current="isActive(item) ? 'page' : undefined"
                 >
-                  <UiIcon class="settings-layout__link-icon" :name="item.icon" :size="18" />
+                  <UiIcon
+                    class="settings-layout__link-icon"
+                    :class="{ 'settings-layout__link-icon--skills': item.icon === 'skills' }"
+                    :name="item.icon"
+                    :size="item.icon === 'skills' ? 14 : 16"
+                  />
                   <span>{{ item.label }}</span>
                 </router-link>
               </section>
@@ -161,7 +189,12 @@ function backToChat() {
       <main class="settings-layout__main">
         <router-view v-slot="{ Component, route: viewRoute }">
           <Transition name="settings-page-transition" mode="out-in">
-            <component :is="Component" :key="viewRoute.fullPath" />
+            <FirstRunNodeProfile
+              v-if="shouldGateNodeSettings(viewRoute)"
+              :key="`first-run-${viewRoute.fullPath}`"
+              @completed="desktopFirstRunCompleted"
+            />
+            <component v-else :is="Component" :key="viewRoute.fullPath" />
           </Transition>
         </router-view>
       </main>

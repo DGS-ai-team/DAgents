@@ -44,23 +44,19 @@
 | `internal/llm/` | LLM 客户端与消息适配 |
 | `internal/store/`、`history/` | SQLite 与 JSONL 审计 |
 | `internal/version/` | **全项目唯一**构建版本号（`GET /health.version`） |
-| `internal/webui/` | 内嵌浏览器 Web UI（`go:embed` 静态资源，`GET /ui/`） |
-| `webui/` | Web UI 前端源码（Vue 3 + Vite）与 `build.sh` |
+| `webui/` | 可复用 Web UI 前端源码（Vue 3 + Vite）；Node 不内嵌或托管 UI |
 
 系统服务安装：Linux [`scripts/linux/install_node_service.sh`](../scripts/linux/install_node_service.sh)；Windows [`scripts/windows/install_node_service.cmd`](../scripts/windows/install_node_service.cmd)。
 
-## Web UI（浏览器 Client）
+## Web UI 前端源码
 
-Node 启动后可直接在本机浏览器（Chrome/Edge）打开：
+Node 是 runtime API 服务，不提供 `/ui` 静态页面，也不依赖生成好的前端静态资源来编译或测试。Vue 源码由 Desktop WebView 复用；单独开发时运行 Vite：
 
-```text
-http://127.0.0.1:<listen.port>/ui/
+```bash
+cd node/webui/frontend && npm run dev
 ```
 
-- 配置：`ui.enabled`（默认 `true`；`false` 时不挂载 `/ui/`）
-- 构建：`bash node/webui/build.sh`（产出 `node/internal/webui/static/`，不入库，嵌入二进制）
-- 开发：`cd node/webui/frontend && npm run dev`（Vite 代理 `/v1`、`/health` 到 Node）
-- 能力：对话、SSE 流式、HITL 审批/询问、斜杠命令、Sessions/Context/Skills/Children/Policy/Triggers 面板
+Vite 将 `/v1` 与 `/health` 代理到本地 Node。前端单测用 `npm test --prefix node/webui/frontend`。生产 UI 由 Desktop 自身构建流程打包。
 
 ## 本地运行
 

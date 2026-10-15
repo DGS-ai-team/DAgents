@@ -32,9 +32,9 @@
 
 ## 为什么是 DAgents
 
-DAgents 适合希望掌控数据、工具权限和执行边界的个人开发者、企业内网和多机协作团队。
+DAgents 面向希望掌控数据、工具权限和执行边界的个人使用者；同一使用者可从多台 Desktop 访问自己的 Node，并通过可选 Manage 进行多机协作。当前不提供多人共用 Node 的账号、私人上下文或租户隔离。
 
-- **本机运行**：Go Agent Node 在本地承载对话、工具调用、审批和内嵌 Web UI。
+- **本机运行**：Go Agent Node 在本地承载会话、工具调用、审批和 API；独立 DAgents Desktop 提供本机工作界面。
 - **显式授权**：每个 Agent 独立配置工作目录、模型、工具组、Skills 和策略；危险操作可以要求人工审批。
 - **可观察、可恢复**：流式消息、工具结果、审批、取消和刷新恢复都有明确状态。
 - **按需扩展**：支持终端、文件、MCP、Skills、浏览器任务、定时触发和 Computer Use 等能力。
@@ -59,8 +59,8 @@ DAgents 不是托管式 SaaS，也不是无边界的自动化脚本运行器。�
 
 ```mermaid
 flowchart LR
-    U[浏览器或桌面 Shell] --> N[Agent Node · Go]
-    N --> A[Agent 会话、工具、审批、Web UI]
+    U[DAgents Desktop] --> N[Agent Node · Go API]
+    N --> A[Agent 会话、工具、审批]
     N -. 可选：出站 WebSocket .-> M[Manage · Python]
     M --> W[Workgroup、Registry、Console]
     N2[其他机器上的 Agent Node] -. 可选：加入工作组 .-> M
@@ -68,9 +68,9 @@ flowchart LR
 
 | 组件 | 用途 | 是否必需 |
 | --- | --- | --- |
-| **Agent Node** | 本地 Agent、会话、工具、审批和 Web UI | 是 |
+| **Agent Node** | 本地 Agent、会话、工具、审批和 API | 是 |
 | **Manage** | Node 注册、Workgroup、集中 Console 和发布服务 | 仅多机协作时需要 |
-| **桌面 Shell** | Windows 托盘、启动和打开本地 Web UI | 可选 |
+| **DAgents Desktop** | 本机桌面界面、Node 启动和管理 | 推荐的本机界面 |
 
 ## 安装
 
@@ -85,7 +85,7 @@ flowchart LR
 | Linux 64 位 | `linux-amd64` 本地助手 tar.gz |
 | Manage 控制面 | 可选 Manage 离线包 |
 
-Windows 只发布安装包，不提供免安装归档。安装完成后打开本机 Web UI，在“设置 → 连接”中配置模型；LLM、Agent、工具和工作组设置不要求手工编辑大 YAML 文件。
+Windows 只发布安装包，不提供免安装归档。安装完成后打开 DAgents Desktop 配置本机 Node 与模型。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。
 
 ### 从源码运行
 
@@ -96,7 +96,7 @@ Windows 只发布安装包，不提供免安装归档。安装完成后打开本
 | 组件 | 要求 | 用途 |
 | --- | --- | --- |
 | Go | 1.25 或更高 | Agent Node、Client |
-| Node.js | 22 或更高 | 构建 Node Web UI；使用 Manage 时还要构建 Console |
+| Node.js | 22 或更高 | 构建 DAgents Desktop；使用 Manage 时还要构建 Console |
 | Python | 3.11 或更高 | 仅 Manage、测试和部分打包流程 |
 | Docker | 可选 | 构建或运行 Manage 镜像 |
 
@@ -114,17 +114,15 @@ Windows PowerShell 使用：
 Copy-Item packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-`config.yaml` 只承担监听和本地引导配置；运行时设置默认写入 `.runtime/` 下的 SQLite。该文件已被 Git 忽略，不要提交真实配置或密钥。
+`config.yaml` 是 Node bootstrap 文件，只保存监听地址；Client 另用 `local.endpoint` 指定连接目标。Node 运行时设置默认写入 `.runtime/` 下的 SQLite。该文件已被 Git 忽略，不要提交真实配置或密钥。
 
-**2. 构建 Web UI 并启动 Node**
+**2. 启动 Node API 与 Desktop**
 
 ```bash
-npm ci --prefix node/webui/frontend
-npm run build --prefix node/webui/frontend
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```
 
-打开 [http://127.0.0.1:18765/ui/](http://127.0.0.1:18765/ui/)，完成首次设置并创建 Agent。没有 API Key 时，可以在设置中选择 Mock LLM 做结构联调；真实对话需要配置对应 Provider 的密钥环境变量。
+Node 默认监听 `127.0.0.1:18765` 并只提供 API。Windows 10 是 Node 基础运行最低版本；完整 Desktop 体验推荐 Windows 11。Windows Server 2019 及更新版本面向服务端部署。Windows 7/8/8.1 与旧版 Server 不受支持。现代 Linux 可运行 Node；较旧的 Linux 主机建议通过 SSH 使用较新的运行环境。从源码启动 Windows Desktop 时，在 PowerShell 设置 `DAGENTS_HOME`、`DAGENTS_CONFIG`，再在 `desktop/tray-tauri` 执行 `npm install` 和 `npm run tauri:dev`。在 Desktop 中配置模型和创建 Agent；真实对话需要配置对应 Provider 的密钥。
 
 **3. 可选：启动 Manage 和 Workgroup**
 
@@ -191,7 +189,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 
 ```bash
 npm test --prefix node/webui/frontend -- --run
-go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 

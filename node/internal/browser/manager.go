@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -172,6 +173,33 @@ func (m *Manager) Evaluate(ctx context.Context, sessionKey, callID, script strin
 	lock.Lock()
 	defer lock.Unlock()
 	return m.call(ctx, Request{Op: "evaluate", SessionKey: sessionKey, CallID: strings.TrimSpace(callID), Script: script, Arg: arg, PageID: strings.TrimSpace(pageID), Target: target, TimeoutMS: timeoutMS})
+}
+
+// View returns a bounded screenshot and tab metadata for an already-running
+// session. It serializes with Agent browser tools and never observes a page or
+// changes the snapshot refs used by browser_call.
+func (m *Manager) View(ctx context.Context, sessionKey, pageID string) (ToolResult, error) {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return ToolResult{OK: false, ErrorCode: "invalid_action", Error: "session_key is required"}, nil
+	}
+	if !m.Enabled() {
+		return ToolResult{OK: false, ErrorCode: "browser_disabled", Error: "browser tools disabled (set browser.enabled: true)"}, nil
+	}
+	m.mu.Lock()
+	_, started := m.sessions[sessionKey]
+	m.mu.Unlock()
+	if !started {
+		return ToolResult{OK: false, ErrorCode: "browser_not_started", Error: "browser session is not started"}, nil
+	}
+	lock := m.sessionLock(sessionKey)
+	if !lock.TryLock() {
+		return ToolResult{OK: false, ErrorCode: "browser_busy", Error: "Agent browser is currently in use"}, nil
+	}
+	defer lock.Unlock()
+	viewCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return m.call(viewCtx, Request{Op: "view", SessionKey: sessionKey, PageID: strings.TrimSpace(pageID), TimeoutMS: 5000})
 }
 
 // Start 启动绑定 session 的本机 Chrome（CDP）。

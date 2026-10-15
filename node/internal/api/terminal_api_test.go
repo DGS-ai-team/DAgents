@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -326,4 +327,96 @@ func TestAgentTerminalWebSocketDisconnectCanResume(t *testing.T) {
 		}
 	}
 	_ = wsjson.Write(ctx, resumeConn, terminalWSCommand{Type: "close"})
+}
+
+func TestAgentTerminalDeleteClosesDetachedSessionAndChecksAgentOwnership(t *testing.T) {
+	cfg := testConfig(t)
+	// Keep the spawned shell's working directory outside testing.T.TempDir:
+	// Windows may release a closed ConPTY process asynchronously, and the
+	// test runner cannot remove a directory while that process still uses it.
+	registry, err := tools.NewRegistry(os.TempDir(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithTools(registry), WithSkipStore())
+	t.Cleanup(srv.Close)
+	httpServer := httptest.NewServer(srv.Handler())
+	t.Cleanup(httpServer.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/v1/agents/" + cfg.NodeID + "/terminals/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell := "sh"
+	if runtime.GOOS == "windows" {
+		shell = "cmd"
+	}
+	if err := wsjson.Write(ctx, conn, terminalWSCommand{Type: "open", Shell: shell}); err != nil {
+		conn.CloseNow()
+		t.Fatal(err)
+	}
+	var started terminalWSEvent
+	if err := wsjson.Read(ctx, conn, &started); err != nil {
+		conn.CloseNow()
+		t.Fatal(err)
+	}
+	conn.CloseNow()
+
+	deadline := time.Now().Add(2 * time.Second)
+	detached := false
+	for time.Now().Before(deadline) {
+		srv.terminals.mu.Lock()
+		session := srv.terminals.sessions[started.SessionID]
+		srv.terminals.mu.Unlock()
+		if session != nil {
+			session.mu.Lock()
+			detached = session.conn == nil
+			session.mu.Unlock()
+			if detached {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !detached {
+		t.Fatal("terminal session did not detach after WebSocket close")
+	}
+	if got := len(srv.terminals.List(cfg.NodeID)); got != 1 {
+		t.Fatalf("detached sessions=%d, want 1 before API close", got)
+	}
+
+	wrongOwnerReq, err := http.NewRequest(http.MethodDelete, httpServer.URL+"/v1/agents/other-agent/terminals/"+started.SessionID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongOwnerResp, err := http.DefaultClient.Do(wrongOwnerReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongOwnerResp.Body.Close()
+	if wrongOwnerResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("wrong-owner delete status=%d, want 404", wrongOwnerResp.StatusCode)
+	}
+	if got := len(srv.terminals.List(cfg.NodeID)); got != 1 {
+		t.Fatalf("wrong-owner delete changed original Agent sessions=%d, want 1", got)
+	}
+
+	deleteReq, err := http.NewRequest(http.MethodDelete, httpServer.URL+"/v1/agents/"+cfg.NodeID+"/terminals/"+started.SessionID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteResp, err := http.DefaultClient.Do(deleteReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusOK {
+		t.Fatalf("detached close status=%d, want 200", deleteResp.StatusCode)
+	}
+	if got := len(srv.terminals.List(cfg.NodeID)); got != 0 {
+		t.Fatalf("sessions after detached close=%d, want 0", got)
+	}
 }

@@ -17,7 +17,7 @@ func TestNode_success(t *testing.T) {
 			"status": "ok", "node_id": "a1", "version": "0.2.2",
 		})
 	})
-	mux.HandleFunc("GET /v1/agent/info", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/node/info", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"node_id":      "a1",
 			"capabilities": []string{"shell"}, "manage_registered": false,
@@ -48,7 +48,7 @@ func TestNode_profilePendingStillOK(t *testing.T) {
 			"status": "ok", "node_id": "a1", "version": "0.9.5",
 		})
 	})
-	mux.HandleFunc("GET /v1/agent/info", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/node/info", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{

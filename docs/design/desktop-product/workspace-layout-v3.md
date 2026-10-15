@@ -26,7 +26,7 @@
 
 ## Desktop 图标资产
 
-建立独立 `icons/` 作为本 Desktop 原型使用图标的**源目录**，构建时同步到 `prototype/public/assets/icons/`。24×24 viewBox、`currentColor`、2px 圆端线条、统一光学大小；16px 检查必须可辨认。优先从此前验收过的 DAgents/Lucide 资产选用，只有确实缺少的 Desktop 操作语义才按同一笔画语言补绘，记录每个图标的来源、映射和许可。品牌雪花仍使用现有 PNG，不改造成功能 SVG。
+当前原型直接通过 `@shared-icons` 使用 `shared/icons/desktop/` canonical 图标；`shared/icons/desktop/manifest.json` 保留来源与许可记录，不再复制 SVG 到 `prototype/public/assets/icons/`。24×24 viewBox、`currentColor`、2px 圆端线条、统一光学大小；16px 检查必须可辨认。优先从此前验收过的 DAgents/Lucide 资产选用，只有确实缺少的 Desktop 操作语义才按同一笔画语言补绘，记录每个图标的来源、映射和许可。品牌雪花仍使用现有 PNG，不改造成功能 SVG。
 
 [iconfont](https://www.iconfont.cn/) 可用于查找形态参考；其搜索结果跨多个作者和风格，不能直接混用成产品图标集。若今后选定某一完整系列替换现有基础集，应先统一许可、笔画、视图框和 16px 表现，再整体迁移。
 

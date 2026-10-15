@@ -8,7 +8,7 @@
 - [offline install](../../packaging/OFFLINE_INSTALL.md)
 - [Manage packaging](../../packaging/manage/README.md)
 
-Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙白名单、反向代理或 SSH 隧道，不要未经加固直接暴露公网。
+Node 默认监听 `127.0.0.1:18765`。Desktop 的远程接入只支持用户预先建立的 SSH 本地转发，连接方式选“SSH 隧道”，地址填写本机 loopback 监听端点。Node HTTP API 没有通用设备鉴权，防火墙白名单本身不提供身份验证；本产品当前不提供 Desktop 的 LAN/WAN 直连模式。
 
 ## 升级与兼容性
 
@@ -40,7 +40,7 @@ Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙
 2. 打开一个旧 Agent，验证历史仍可恢复，再执行一次只读工具，确认相对路径以 workspace 为基准；
 3. 检查 `.dagents/<agent_id>/history/`、`memory/memory.db` 和 `tool_outputs/<agent_id>/` 是否按预期生成；
 4. 新建一个临时 Agent，确认不会创建 `.runtime/data/`，并确认 workspace 创建后不能修改；
-5. 如使用桌面端，同时验证 Tauri 与 Go Shell 两条轨道的 Node 连接和更新检查。
+5. 如使用桌面端，验证 DAgents Desktop 的 Node 连接和更新检查。Go Shell 已退役，不再构建或发布。
 
 ## 诊断顺序
 
@@ -57,7 +57,7 @@ Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙
 npm test --prefix node/webui/frontend -- --run
 npm run build --prefix node/webui/frontend
 npm run build --prefix manage/console/frontend
-go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 git diff --check
 ```

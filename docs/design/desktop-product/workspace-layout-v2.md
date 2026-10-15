@@ -41,7 +41,7 @@
 
 ## 图标资产规则
 
-唯一语义源：[`visual-system/dagents-icons/`](visual-system/dagents-icons/)，其中包含 DAgents 语义 SVG 与已归集的 Lucide 来源。原型需要的图标可由构建脚本同步到 `prototype/public/assets/icons/`，但**不得手工维护另一套近似图形**。建议至少用以下语义 key：`agent`、`workgroup`、`auto`、`terminal`、`browser`、`file`、`settings`、`tools`、`pending`、`success`、`error`、`create`、`more`、`upload`、`refresh`、`collapse`、`expand`。确实缺少的通用操作图标先查既有 `lucide/` 来源，再补入同一资产目录并记录许可；品牌雪花继续使用现有 PNG。
+当前 canonical 图标来源为 [`shared/icons/`](../../../shared/icons/)，包含 DAgents、Lucide 与 Desktop SVG；原型通过 `@shared-icons` Vite alias 直接加载，不在 `prototype/public/assets/icons/` 维护副本。此前“构建同步到 public”属于历史方案，已废止。设计来源与许可继续记录在 [`shared/icons/desktop/manifest.json`](../../../shared/icons/desktop/manifest.json)。
 
 ## 本轮原型验收
 

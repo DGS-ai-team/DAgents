@@ -5,12 +5,12 @@ import * as api from "../../api/node.js";
 import AgentTemplateCreateModal from "../../components/AgentTemplateCreateModal.vue";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import { agentHostLabel } from "../../utils/agentTemplateForm.js";
-import AutoBadge from "../../components/AutoBadge.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { filterAgents, groupAgents, searchAgents } from "../../utils/agentGrouping.js";
 import { readNodePreference, writeNodePreference } from "../../utils/nodePreference.js";
 
 const router = useRouter();
+const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
 const loading = ref(true);
 const templatesLoading = ref(true);
 const error = ref("");
@@ -113,8 +113,7 @@ onMounted(load);
   <div class="settings-page settings-embedded">
     <SettingsPageHeader
       title="智能体"
-      eyebrow="智能体与自动化"
-      description="管理本机智能体的名称、模型与能力；新建智能体请从对话页开始。"
+      :description="isDesktop ? '管理本机智能体的名称、模型与能力；新建智能体请从顶部菜单开始。' : '管理本机智能体的名称、模型与能力；新建智能体请从对话页开始。'"
     />
 
     <section class="agents-settings__section">
@@ -145,10 +144,15 @@ onMounted(load);
         <li v-for="a in group.agents" :key="a.agent_id">
           <button type="button" class="agents-settings__card" @click="openAgent(a)">
             <div class="agents-settings__card-main">
-              <span class="agents-settings__name">{{ a.display_name || a.agent_id }} <AutoBadge :agent="a" /></span>
+              <span class="agents-settings__name">
+                {{ a.display_name || a.agent_id }}
+                <span v-if="a.agent_type === 'auto'" class="agents-settings__auto-type" aria-label="Auto 智能体" title="Auto 智能体">
+                  <UiIcon name="auto" :size="14" />
+                </span>
+              </span>
               <span class="agents-settings__meta">
                 {{ hostLabel(a) }}
-                · {{ a.agent_type === "auto" ? "Auto · 自主任务" : "普通 Agent" }}
+                <template v-if="a.agent_type !== 'auto'"> · 普通 Agent</template>
                 <template v-if="a.template_id"> · 模板 {{ a.template_id }}</template>
               </span>
             </div>
@@ -237,6 +241,8 @@ onMounted(load);
 .agents-settings__group h3 { display: flex; gap: 7px; align-items: baseline; margin: 0 0 7px; color: var(--text-secondary); font-size: 12px; }
 .agents-settings__group h3 span { font-size: 11px; }
 .agents-settings__name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.agents-settings__auto-type { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-muted); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.agents-settings__auto-type :deep(svg) { color: var(--color-text-muted); }
 @media (max-width: 720px) { .agents-settings__filters { grid-template-columns: 1fr; } }
 
 .agents-settings__section-title-row {

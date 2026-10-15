@@ -1,9 +1,11 @@
 <script setup>
+import { computed } from "vue";
 import { HELP_SECTIONS, HELP_SHORTCUTS } from "../utils/helpCommands.js";
 
-defineProps({
-  embedded: { type: Boolean, default: false },
-});
+const props = defineProps({ embedded: { type: Boolean, default: false }, desktop: { type: Boolean, default: false } });
+const sections = computed(() => props.desktop
+  ? HELP_SECTIONS.map((section) => ({ ...section, items: section.items.map((item) => item.cmd.startsWith("/thinking") ? { ...item, desc: "开启或关闭 thinking 模式；也可使用对话输入区的控制按钮。" } : item) }))
+  : HELP_SECTIONS);
 
 const emit = defineEmits(["close", "pick"]);
 </script>
@@ -29,7 +31,7 @@ const emit = defineEmits(["close", "pick"]);
         </ul>
       </section>
 
-      <section v-for="section in HELP_SECTIONS" :key="section.title" class="help-section">
+      <section v-for="section in sections" :key="section.title" class="help-section">
         <h3 class="help-section__title">{{ section.title }}</h3>
         <ul class="help-cmd-list">
           <li v-for="item in section.items" :key="item.cmd" class="help-cmd-item">

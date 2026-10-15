@@ -13,6 +13,7 @@ const triggersSettings = () => import("../../../node/webui/frontend/src/views/se
 const securitySettings = () => import("../../../node/webui/frontend/src/views/settings/SecuritySettings.vue");
 const aboutSettings = () => import("../../../node/webui/frontend/src/views/settings/AboutSettings.vue");
 const feedbackSettings = () => import("../../../node/webui/frontend/src/views/settings/FeedbackSettings.vue");
+const desktopSettings = () => import("./views/DesktopSettings.vue");
 const chatRoute = { render: () => null };
 
 const router = createRouter({
@@ -24,6 +25,7 @@ const router = createRouter({
     redirect: "/settings/general",
     children: [
       { path: "general", component: generalSettings },
+      { path: "desktop", component: desktopSettings },
       { path: "connection", component: connectionSettings },
       { path: "mcp", component: mcpSettings },
       { path: "linux-channels", component: linuxChannelsSettings },

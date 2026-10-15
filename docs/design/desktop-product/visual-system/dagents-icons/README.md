@@ -39,7 +39,7 @@ direct 候选的官方 SVG 已复制到 `lucide/` vendor 目录，Gallery 会在
 
 ## key 清单
 
-当前画板包含 60 个功能视觉卡片；`expand` 与 `collapse` 是两个独立 key，因此可交付目录包含 60 个功能语义 SVG 文件。品牌雪花使用现有 PNG，不计入功能图标清单。画板每张卡同时显示 24px 主图和 16px smoke test，重点检查 `file`、`audit-log`、`release-update`、`mcp`、`pending`、`dreaming` 等细节密集图标在小尺寸下的可辨识度。
+当前画板包含 60 个功能视觉卡片；canonical SVG 文件集中维护在 `shared/icons/`，画板不再保留副本。品牌雪花使用现有 PNG，不计入功能图标清单。画板每张卡同时显示 24px 主图和 16px smoke test，重点检查 `file`、`audit-log`、`release-update`、`mcp`、`pending`、`dreaming` 等细节密集图标在小尺寸下的可辨识度。
 
 ### 品牌与导航
 

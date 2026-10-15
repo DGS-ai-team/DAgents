@@ -29,7 +29,7 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/v1/setup/config")
+	resp, err := http.Get(ts.URL + "/v1/settings")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	}
 
 	patchBody := []byte(`{"llm":{"profiles":[{"id":"default","provider":"mock","model":"mock","mock":true}]}}`)
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(patchBody))
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(patchBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	}
 
 	compBody := []byte(`{"compression":{"silent_trigger_tokens":60000,"blocking_trigger_tokens":90000}}`)
-	compReq, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(compBody))
+	compReq, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(compBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +95,122 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	}
 	if reloaded2.Compression.SilentTriggerTokens != 60000 || reloaded2.Compression.BlockingTriggerTokens != 90000 {
 		t.Fatalf("file compression = %+v", reloaded2.Compression)
+	}
+}
+
+func TestHandleSetupConfigCompletesNodeProfileWithoutPreferredNameOrLLMKey(t *testing.T) {
+	const missingKeyEnv = "DAGENTS_TEST_SETUP_MISSING_LLM_KEY"
+	t.Setenv(missingKeyEnv, "")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := testConfig(t)
+	cfg.Agent.Name = ""
+	cfg.User.PreferredName = ""
+	cfg.Onboarding.NodeProfileCompleted = false
+	cfg.LLM.Mock = false
+	cfg.LLM.APIKeyEnv = missingKeyEnv
+	if err := config.SaveFile(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	req := httptest.NewRequest(http.MethodPatch, "/v1/settings", bytes.NewReader([]byte(
+		`{"agent":{"name":"local-node"},"onboarding":{"node_profile_completed":true}}`,
+	)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cfg.NodeProfileCompleted() || cfg.Agent.Name != "local-node" || cfg.PreferredName() != "" {
+		t.Fatalf("config after Node-only setup: completed=%v agent=%+v user=%+v", cfg.NodeProfileCompleted(), cfg.Agent, cfg.User)
+	}
+	if cfg.LLM.Mock {
+		t.Fatal("fixture unexpectedly configured a mock model")
+	}
+}
+
+func TestSettingsNodeTokenIsRedactedAndWriteOnly(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := testConfig(t)
+	workgroupEnabled := false
+	cfg.Manage.Enabled = true
+	cfg.Manage.URL = "https://manage.example.test"
+	cfg.Manage.Registration.Team = "keep-team"
+	cfg.Manage.Registration.BaseURL = "https://register.example.test"
+	cfg.Manage.Registration.IntervalSeconds = 90
+	cfg.Manage.Registration.TTLSeconds = 180
+	cfg.Manage.Workgroup.Enabled = &workgroupEnabled
+	cfg.Manage.NodeToken = "manage-node-secret"
+	if err := config.SaveFile(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || bytes.Contains(body, []byte("manage-node-secret")) || bytes.Contains(body, []byte(`"local_endpoint"`)) {
+		t.Fatalf("GET settings status=%d leaked forbidden field: %s", resp.StatusCode, body)
+	}
+	var view setup.SettingsView
+	if err := json.Unmarshal(body, &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.Manage.HasNodeToken {
+		t.Fatalf("redacted token view = %+v", view.Manage)
+	}
+
+	patch := func(body string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader([]byte(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		patchResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer patchResp.Body.Close()
+		if patchResp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(patchResp.Body)
+			t.Fatalf("PATCH status=%d body=%s", patchResp.StatusCode, raw)
+		}
+	}
+	patch(`{"manage":{"node_token":""}}`)
+	reloaded, err := config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Manage.NodeToken != "manage-node-secret" {
+		t.Fatal("blank write-only token replaced the stored credential")
+	}
+	assertManageSettingsPreserved(t, reloaded)
+	patch(`{"manage":{"clear_node_token":true}}`)
+	reloaded, err = config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Manage.NodeToken != "" {
+		t.Fatal("explicit clear did not remove the stored credential")
+	}
+	assertManageSettingsPreserved(t, reloaded)
+}
+
+func assertManageSettingsPreserved(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	if !cfg.Manage.Enabled || cfg.Manage.URL != "https://manage.example.test" || cfg.Manage.Registration.Team != "keep-team" || cfg.Manage.Registration.BaseURL != "https://register.example.test" || cfg.Manage.Registration.IntervalSeconds != 90 || cfg.Manage.Registration.TTLSeconds != 180 || cfg.Manage.Workgroup.Enabled == nil || *cfg.Manage.Workgroup.Enabled {
+		t.Fatalf("token-only settings patch changed Manage configuration: %+v", cfg.Manage)
 	}
 }
 
@@ -122,7 +238,7 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 	patch := []byte(`{"features":{"browser_enabled":true}}`)
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(patch))
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(patch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +263,7 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 	}
 
 	disablePatch := []byte(`{"features":{"browser_enabled":false}}`)
-	disableReq, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(disablePatch))
+	disableReq, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(disablePatch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +301,7 @@ func TestHandlePatchSetupConfigBrowserFailsBeforePersisting(t *testing.T) {
 	defer ts.Close()
 
 	patch := []byte(`{"features":{"browser_enabled":true}}`)
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(patch))
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(patch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +342,7 @@ func TestHandlePatchSetupConfig_noConfigPath(t *testing.T) {
 	defer ts.Close()
 
 	body := []byte(`{"llm":{"profiles":[{"id":"default","provider":"mock","model":"mock","mock":true}]}}`)
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/setup/config", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +396,7 @@ func TestProbeLLMModels(t *testing.T) {
 		"api_key":  "sk-x",
 		"provider": "openai",
 	})
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/setup/llm/probe-models", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/llm/probe-models", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

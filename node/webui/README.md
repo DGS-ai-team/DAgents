@@ -1,102 +1,18 @@
-# Node Web UI
+# Node Web UI source
 
-浏览器 Client，挂载在 Agent Node `GET /ui/`，UI 对齐 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) 工作台风格（双栏布局、浅色主题、气泡消息、内联工具审批）。
+This directory contains the reusable Vue 3 + Vite frontend source. Agent Node is an API/runtime process and does not serve `/ui/` or embed frontend assets. Desktop WebView reuses these sources through its own build pipeline.
 
-## 目录
-
-| 路径 | 说明 |
-|------|------|
-| `frontend/` | Vue 3 + Vite 源码 |
-| `build.sh` | 构建到 `../internal/webui/static/`（`go:embed`） |
-
-品牌图标唯一来源是 `shared/branding/brand-icon.png`。Node Web UI 通过 `@dagents-brand` alias 打包品牌图标，并在启动时将同一资源设置为 favicon；`frontend/public/` 不再放置重复的 favicon 文件。
-
-## 构建与测试
+## Development
 
 ```bash
-bash node/webui/build.sh
-cd node/webui/frontend && npm test
+cd node/webui/frontend
+npm run dev
 ```
 
-产出写入 `node/internal/webui/static/`（**不入库**，CI / Release 构建；本地 `go test` / `go build` 前须先执行本脚本），由 `dagents-node` 内嵌提供。
+Vite proxies `/v1` and `/health` to `http://127.0.0.1:18765` by default. Set `DAGENTS_NODE_URL` to use another local Node endpoint. The dev server opens at `http://localhost:5173/ui/`; that Vite path does not mean Node serves `/ui/`.
 
-## 部署后带 UI 启动
+To produce a standalone frontend build for inspection, run `bash node/webui/build.sh`; output goes to `node/webui/frontend/dist/`. Node Go builds and tests do not require this output. Frontend tests use `npm test --prefix node/webui/frontend`.
 
-Web UI **已打包进 `dagents-node` 二进制**，无需 Node.js 或单独前端服务。
+The API adapter is `frontend/src/api/node.js`. Node-native directory selection goes through `/v1/platform/directory-picker`. Clipboard file paths, window focus, and update apply use the Desktop-only `__DAGENTS_DESKTOP_REQUEST__` bridge when running inside Desktop; they are not Node HTTP endpoints. Browser-only UI reports Shell features unavailable.
 
-```bash
-# 1. 配置（与其它 Client 共用）
-cp packaging/agent-client/config.example.yaml config.yaml
-# 编辑 llm、listen.port 等；ui.enabled 省略时默认 true
-
-# 2. 启动 Node（Release 包 / 本地编译均可）
-./dagents node
-# 或: ./bin/dagents-node -config config.yaml
-# 或: ./scripts/startup/linux/start-node.sh
-
-# 3. 浏览器打开（端口见 config listen.port，默认 18765）
-http://127.0.0.1:18765/ui/
-```
-
-`dagents node` 就绪后会打印 `[dagents] Web UI: http://127.0.0.1:…/ui/`。
-
-关闭 UI：在 `config.yaml` 中设置 `ui.enabled: false`（仅隐藏 `/ui/`，不影响 Node API）。
-
-## 开发
-
-与 Go 运维 Client **共用** `packaging/agent-client/config.yaml`（从 `config.example.yaml` 复制后按需编辑）。
-
-### 方式 A：VS Code / Cursor 复合调试
-
-| 配置 | 说明 |
-|------|------|
-| **Web UI: Node + Vite** | Node 终端 + Vite 热更新 |
-| **Web UI: Chrome** | 打开 `http://localhost:5173/ui/`（需 Vite 已运行） |
-| **Node: run (terminal)** | 仅 Go Node（内嵌 `/ui/`，无热更新） |
-| **Web UI: Node + 内嵌 UI** | Node + Chrome 直连 `http://127.0.0.1:18765/ui/` |
-
-开发时优先用 Vite（热更新）；验收 embed 时用 Node 内嵌 `/ui/`。
-
-### 方式 B：手动双终端
-
-```bash
-# 终端 1：Node
-go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
-
-# 终端 2：Vite（代理 /v1、/health → Node）
-cd node/webui/frontend && npm run dev
-```
-
-浏览器打开 **`http://localhost:5173/ui/`**（勿用 Node 内嵌 `/ui/`，否则无热更新）。
-
-环境变量（可选）：
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `DAGENTS_NODE_URL` | `http://127.0.0.1:18765` | Vite 代理目标 |
-| `WEBUI_DEV_PORT` | `5173` | Vite 开发端口 |
-
-## 配置
-
-`config.yaml` 中可选：
-
-```yaml
-ui:
-  enabled: true   # false 时不挂载 /ui/
-```
-
-## 功能
-
-- **双栏工作台**：主聊天 + Runtime（会话、审批、工具执行气泡）。
-- **远程工作者条**：输入框上方显示工作中子 Agent / 对端 Agent 数量（SSE + `listChildAgents`）。
-- **`read_file` 预览**：按扩展名渲染 Markdown、HTML、JSON、CSV、代码高亮或纯文本。
-- **HITL**：内联工具审批与用户询问；订阅 **`hitl_required`**（`expandHitlRequired` 展开入队），子 Agent 审批通过 relay 事件回传父 Agent。
-
-## API
-
-复用 Node 现有 `/v1` HTTP/SSE，封装见 `frontend/src/api/node.js`。目录选择、剪贴板文件路径、窗口焦点和更新安装等桌面能力统一使用
-`/v1/platform/*` 或 `/v1/agent/update*`；Web UI 不直接访问 Desktop Shell 的 `:18767` bridge。
-
-目录选择由 Node 进程直接调用宿主系统能力：Windows 使用 PowerShell STA
-`FolderBrowserDialog`，macOS 使用 `osascript`，Linux 按顺序尝试 `zenity`、`kdialog`、`yad`。
-因此目录选择不依赖 Desktop Shell；取消选择会返回 `200` 和 `{"cancelled":true}`，选择器不可用时返回错误，Web UI 仍允许直接输入绝对路径作为兜底。
+The native directory picker runs on the Node host: Windows uses PowerShell STA `FolderBrowserDialog`, macOS uses `osascript`, and Linux tries `zenity`, `kdialog`, then `yad`. Cancellation returns `200` with `{"cancelled":true}`; when no picker is available the UI can still accept a manually entered absolute path.

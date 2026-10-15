@@ -1,39 +1,42 @@
-# Windows 安装包
+# Windows installer
 
-## 文件
+## Installer contents
 
-| 文件 | 说明 |
-|------|------|
-| `dagents-installer.iss` | Inno Setup 6 脚本（安装 + 可选 policy 覆盖；**须 UTF-8 BOM**，否则 `[Code]` 中文会编译失败） |
-| `languages/ChineseSimplified.isl` | 简体中文向导文案（CI choco 安装的 Inno 不含此文件，仓库自带） |
-| `dagents.cmd` | 安装目录入口 |
-| `write-install-config.ps1` | 从 JSON 生成 `config.yaml` 的辅助脚本（仍随包分发；**安装器不再调用**） |
+The Inno Setup package installs the Agent Node, command-line tools, and the
+standalone Tauri Desktop application. The installer has one supported Desktop
+Shell; the former Go browser-based Shell is retained in source only and is not
+included in bundles or offered as an installation choice.
 
-## 安装流程
+Windows 10 is the minimum workstation baseline for Node. Windows 11 is
+recommended for the full Desktop experience. Server deployments require
+Windows Server 2019 or newer. Windows 7/8/8.1 and older Server releases are
+unsupported. The installer checks the OS version before checking WebView2.
 
-安装程序**不再**在安装向导中配置 LLM / Manage / 功能开关。首次安装时：
+The installer copies `config.example.yaml` to `config.yaml` only when no config
+exists. This Node bootstrap file contains only the listener address. Desktop
+preferences stay in `%APPDATA%\DAgents\desktop\settings.json`; LLM and Manage
+credentials stay in Node's runtime settings store. The installer also seeds policy files,
+creates the browser runtime directory, adds the install paths to the user's
+`PATH`, and registers Desktop to start at login.
 
-- 若不存在 `config.yaml`，从 `config.example.yaml` **复制**一份（不覆盖已有配置）
-- 可选覆盖 `policy.yaml` 种子
-- 创建 `.runtime/browser/` 目录
-- **注册 Shell 登录自启**（`HKCU\...\Run` → `dagents shell --background`）并可选立即启动托盘
-- 将安装目录与 `.runtime/externaltools` 追加到用户 `PATH`
-- 完成页提示打开 Web UI **「设置 › 连接」** 完成 LLM、Manage 与功能开关配置（不再弹出额外 MsgBox）
+New installs default to the current user's Programs directory because Node's
+bootstrap config and `.runtime` data are writable under the install directory.
+The installer runs in user mode and rejects Program Files paths or any selected
+directory the current user cannot write. It keeps the recorded install path
+during upgrades and calls lifecycle commands only when the installed Shell has
+the protocol marker shipped by this version. Older unmarked installs are refused
+before any command is sent to their Shell; older machine-wide installs under
+Program Files are blocked with a migration message. The installer does not move
+or delete existing Node data. Uninstall preserves `config.yaml`, the entire
+`.runtime` tree (including edits to installer-seeded policy and skills), and the
+per-user Desktop settings at `%APPDATA%\DAgents\desktop\settings.json`.
 
-安装包提供 **双轨 Shell**（附加任务二选一，落地均为 `bin\dagents-shell.exe`）：
+DAgents Desktop requires the Microsoft Edge WebView2 Evergreen Runtime. The
+installer checks its documented Edge Update registration and stops with the
+Microsoft download page when it is missing. The runtime is not bundled, so a
+fully offline first install must provision WebView2 separately beforehand.
 
-| 选项 | 产物 | 说明 |
-|------|------|------|
-| **推荐**（默认，有 WebView2 时） | `dagents-shell-tauri.exe` | [`desktop/tray-tauri/`](../../desktop/tray-tauri/)，内嵌 Web UI |
-| **兼容模式** | `dagents-shell-legacy.exe` | [`desktop/tray/`](../../desktop/tray/) Go Shell，系统浏览器 |
-
-静默：`/TASKS=shellmodern` 或 `/TASKS=shelllegacy`。Windows 发布只提供 Inno 安装包，不再提供免安装 zip。
-
-**API Key** 可在 Web UI 中直接输入并由 Node 加密保存；`api_key_env` 仍作为兼容方式保留。使用环境变量时，修改变量后需要重启 Node 才能让进程读取新值。
-
-升级安装：若已存在 `config.yaml`，不会被覆盖；policy 覆盖仍可选询问。
-
-## 构建
+## Build
 
 ```bash
 for platform in windows-amd64 windows-386; do
@@ -42,18 +45,22 @@ for platform in windows-amd64 windows-386; do
 done
 ```
 
-产物命名为 `dagents-local-assistant-windows-amd64-installer-*.exe`（x64）和
-`dagents-local-assistant-windows-386-installer-*.exe`（x86）。两套安装包内的
-Node、Client、Browser 和 Desktop Shell 均使用对应架构构建；x86 安装包可运行在
-32 位 Windows，也可安装在 64 位 Windows 的 32 位兼容目录中。
+The artifacts are named `dagents-local-assistant-windows-amd64-installer-*.exe`
+and `dagents-local-assistant-windows-386-installer-*.exe`. Both architectures
+include the matching Node, Client, Browser, and Desktop binaries. The x86
+installer also works on 64-bit Windows in its 32-bit compatibility directory.
 
-需安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，并设置 `ISCC` 指向 `ISCC.exe`。
+Install [Inno Setup 6](https://jrsoftware.org/isinfo.php) and set `ISCC` to the
+path of `ISCC.exe`.
 
-## 界面
+The package build also requires the matching architecture binaries and staged
+bundle from `assemble_local_assistant_bundle.sh`. CI installs Inno Setup before
+compiling; the installer's WebView2 prerequisite is checked at runtime and does
+not require network access when Evergreen Runtime is already present.
 
-- `WizardStyle=modern`、简体中文语言包
-- **Workbench 浅色主题**：侧栏/角标 BMP 与 Web UI `tokens.css` 浅色模式对齐（`#f3f3f3` 背景 / `#0078d4` 主色 / `#1a1a1a` 正文、`Segoe UI` 字体）
-- 侧栏：品牌图标 +「DAgents / 本机智能助手」层级，底部「Workbench · 安装向导」；欢迎/完成页用分点文案，避免大段说明
-- 资源：`assets/wizard-sidebar.bmp`、`assets/wizard-small.bmp`（`scripts/generate-wizard-assets.py` 可从 `shared/branding/brand-icon.png` 重新生成；**须使用带 CJK 字形的字体**，否则副标题「本机智能助手」会显示为 □□）
-- 图标：`scripts/generate-tray-icons.py` 从唯一品牌源 `../../shared/branding/brand-icon.png` 生成 Go/Tauri Shell 的 Windows ICO/PNG；安装器将同一图标用于应用、开始菜单和可选桌面快捷方式。`desktop/tray*/` 下的图标是构建输入生成物，修改品牌后应重新运行脚本，不要把它们当作独立源文件维护
-- 自定义欢迎/完成页文案；完成页可选创建「DAgents Shell（系统托盘）」桌面快捷方式；开始菜单增加「打开 Web UI」快捷方式
+## Installer artwork
+
+The Workbench light theme follows the UI palette and uses the generated assets
+in `assets/`. `scripts/generate-wizard-assets.py` rebuilds the wizard bitmaps;
+`scripts/generate-tray-icons.py` rebuilds the shared app icons from
+`shared/branding/brand-icon.png`.

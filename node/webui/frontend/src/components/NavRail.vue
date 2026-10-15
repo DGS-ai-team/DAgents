@@ -571,7 +571,7 @@ defineExpose({
           @click="toggleSection('agents')"
         >
           <span class="nav-rail__section-icon" aria-hidden="true">
-            <UiIcon name="bot" :size="16" />
+            <UiIcon name="agent" :size="16" />
           </span>
           <span class="nav-rail__section-title">智能体</span>
           <span v-if="normalAgents.length" class="nav-rail__section-count">{{ normalAgents.length }}</span>
@@ -710,7 +710,7 @@ defineExpose({
           @click="toggleSection('workgroups')"
         >
           <span class="nav-rail__section-icon" aria-hidden="true">
-            <UiIcon name="users" :size="16" />
+            <UiIcon name="workgroup" :size="16" />
           </span>
           <span class="nav-rail__section-title">工作组</span>
           <span v-if="workgroups.length" class="nav-rail__section-count">{{ workgroups.length }}</span>
@@ -853,7 +853,7 @@ defineExpose({
                 @click="openWorkgroup(wg.workgroup_id)"
               >
                 <span class="nav-rail__member-mark" aria-hidden="true">
-                  <UiIcon name="bot" :size="15" />
+                  <UiIcon name="agent" :size="15" />
                 </span>
                 <span class="nav-rail__item-title">{{ memberLabel(m) }}</span>
                 <span class="nav-rail__meta">{{ m.status }}</span>
@@ -903,7 +903,7 @@ defineExpose({
       >
         <button type="button" class="nav-rail__section-toggle" :aria-expanded="sectionOpen.autonomous" @click="toggleSection('autonomous')">
           <span class="nav-rail__section-icon nav-rail__section-icon--auto" aria-hidden="true">
-            <UiIcon name="sparkles" :size="16" />
+            <UiIcon name="auto" :size="16" />
           </span>
           <span class="nav-rail__section-title">自主智能体</span>
           <span v-if="autonomousAgents.length" class="nav-rail__section-count">{{ autonomousAgents.length }}</span>

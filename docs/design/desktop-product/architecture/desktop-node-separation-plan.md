@@ -2,7 +2,9 @@
 
 > **状态**：技术提案快照，更新：2026-09-23。第 3.5–3.7 节，以及后文涉及三栏、右侧资源面板、Auto 总览和 Node 快切的描述与验收条目，属于较早的界面设想；Desktop 界面以本资料包的最新原型为准。实现前应同步修订这些章节。
 >
-> 本方案把 Desktop 定义为唯一的人机界面，把 Node 定义为无头 Agent 执行引擎。目标 Shell 采用现有 Rust/Tauri 2 轨并扩展为 Windows、macOS、Linux 产品；Node 不再嵌入产品 UI。当前实现仍以 Windows、本机 Node 和 `/ui/` 为主，文中目标架构需要按阶段迁移，不能当作当前行为说明。
+> 本方案把 Desktop 定义为唯一的人机界面，把 Node 定义为无头 Agent 执行引擎。目标 Shell 采用现有 Rust/Tauri 2 轨并扩展为 Windows、macOS、Linux 产品；Node 不再嵌入产品 UI。2026-09-23 当时的实现仍以 Windows、本机 Node 和 `/ui/` 为主，文中目标架构需要按阶段迁移，不能当作当前行为说明。
+>
+> 本文是历史提案快照；Go Shell 已从当前产品和构建树移除。当前产品路线见 [2026-10-14 产品收束方向](../product-direction-simplification-2026-10-14.md)，实际支持范围以根目录 README 和 Windows 安装说明为准。
 
 ## 1. 决策结论
 

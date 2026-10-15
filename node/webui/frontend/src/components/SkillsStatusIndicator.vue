@@ -108,7 +108,7 @@ onBeforeUnmount(() => {
       @click="toggle"
     >
       <span class="skills-status-indicator__icon" aria-hidden="true">
-        <UiIcon name="sparkles" :size="17" />
+        <UiIcon name="skills" :size="17" />
       </span>
       <span v-if="skillsEnabled" class="skills-status-indicator__count" aria-hidden="true">{{ countBadge }}</span>
     </button>

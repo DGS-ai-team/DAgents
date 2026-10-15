@@ -38,10 +38,10 @@ const emit = defineEmits(["save"]);
 
     <div class="panel__body setup-config-panel__body">
       <div v-if="loading && !configPath" class="command-panel__loading">加载中…</div>
-      <div v-else-if="error" class="command-panel__error">{{ error }}</div>
       <template v-else>
+        <div v-if="error" class="command-panel__error" role="alert">{{ error }}</div>
         <p v-if="statusMessage" class="setup-config-panel__status">{{ statusMessage }}</p>
-        <slot />
+        <slot v-if="configPath || configWritable" />
       </template>
     </div>
   </section>

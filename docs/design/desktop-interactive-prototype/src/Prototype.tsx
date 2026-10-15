@@ -1,10 +1,17 @@
 import { useMemo, useState } from "react";
+import aliases from "../../../../shared/icons/aliases.json";
+const iconUrls = import.meta.glob("@shared-icons/**/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const aliasFiles = aliases as Record<string, string>;
+const iconSources = Object.fromEntries(Object.entries(aliasFiles).filter(([alias]) => alias.startsWith("legacy-prototype/")).map(([alias, file]) => {
+  const key = Object.keys(iconUrls).find((candidate) => candidate.endsWith(`/shared/icons/${file}`));
+  return [alias.slice("legacy-prototype/".length, -".svg".length), key ? iconUrls[key] : ""];
+}));
 import "./prototype.css";
 
 type Resource = { id: string; kind: "terminal" | "browser" | "file"; title: string; detail?: string };
 type Message = { role: "user" | "assistant"; text: string; time: string };
 
-const icon = (name: string, className = "") => <span className={`icon ${className}`} style={{ maskImage: `url(/assets/icons/${name}.svg)`, WebkitMaskImage: `url(/assets/icons/${name}.svg)` }} aria-hidden="true" />;
+const icon = (name: string, className = "") => <span className={`icon ${className}`} style={{ maskImage: `url(${iconSources[name] ?? ""})`, WebkitMaskImage: `url(${iconSources[name] ?? ""})` }} aria-hidden="true" />;
 const initialMessages: Message[] = [
   { role: "user", text: "帮我构建一下当前项目。", time: "10:41" },
   { role: "assistant", text: "我会先检查项目脚本，再运行构建。", time: "10:41" },

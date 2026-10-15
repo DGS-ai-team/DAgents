@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-output.test.js",
+    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-close.test.js ../ui/terminal-output.test.js ../ui/workspace-files-state.test.js ../ui/workgroup-state.test.js ./desktop-settings-state.test.js ./top-slot-icons.test.js ../../shared/icons/icons.test.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -15,9 +15,12 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "dompurify": "3.4.13",
     "highlight.js": "11.11.2",
     "marked": "15.0.12",
+    "morphicons": "1.7.1",
     "vue": "^3.5.13",
     "vue-router": "^4.6.4"
   },

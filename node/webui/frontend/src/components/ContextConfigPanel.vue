@@ -18,6 +18,14 @@ async function refreshAgentInfo() {
 }
 
 async function saveContext() {
+  const silent = Number(form.compression.silent_trigger_tokens || 0);
+  const blocking = Number(form.compression.blocking_trigger_tokens || 0);
+  if (silent > 0 && blocking > 0 && blocking < silent) {
+    error.value = "阻塞压缩阈值不能小于静默压缩阈值";
+    statusMessage.value = "";
+    return;
+  }
+
   const ok = await save({
     compression: { ...form.compression },
     hooks: {

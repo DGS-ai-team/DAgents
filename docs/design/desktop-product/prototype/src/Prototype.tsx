@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import desktopIconManifest from "@shared-icons/desktop/manifest.json";
+const desktopIconUrls = {
+  ...import.meta.glob("@shared-icons/desktop/**/*.svg", { eager: true, query: "?url", import: "default" }),
+  ...import.meta.glob("@shared-icons/lucide/**/*.svg", { eager: true, query: "?url", import: "default" }),
+} as Record<string, string>;
+const desktopIconFiles = Object.fromEntries((desktopIconManifest.icons as Array<{ name: string; file: string }>).map(({ name, file }) => {
+  const key = Object.keys(desktopIconUrls).find((candidate) => candidate.endsWith(`/shared/icons/${file}`));
+  return [name, key ? desktopIconUrls[key] : ""];
+}));
 import "./prototype.css";
 
 type Kind = "terminal" | "browser" | "file";
@@ -6,13 +15,13 @@ type Resource = { id: string; kind: Kind; title: string; detail: string };
 type Message = { role: "user" | "assistant"; text: string; time: string };
 type Approval = "pending" | "allowed" | "denied" | "none";
 const icon = (name: string, cls = "") => {
-  const source = `url("/assets/icons/${name}.svg")`;
+  const source = `url("${desktopIconFiles[name] ?? ""}")`;
   return <span className={`icon ${cls}`} style={{ maskImage: source, WebkitMaskImage: source }} aria-hidden="true" />;
 };
 const agents = ["通用助手", "代码助手", "产品顾问", "数据分析师"];
 const groups = [{ id: "agents", label: "智能体", glyph: "nav-agents", items: agents }, { id: "teams", label: "工作组", glyph: "nav-workgroups", items: ["前端团队", "后端团队"] }, { id: "auto", label: "自主智能体", glyph: "nav-auto", items: ["Auto Dev", "Auto Ops"] }];
 const initial: Message[] = [{ role: "user", text: "帮我构建一下当前项目。", time: "10:41" }, { role: "assistant", text: "我会先检查项目脚本，再运行构建。", time: "10:41" }, { role: "assistant", text: "构建需要安装缺少的依赖。安装前我会先请求审批。", time: "10:42" }];
-const seed: Resource[] = [{ id: "terminal-1", kind: "terminal", title: "终端 1 · bash", detail: "bash · Node dev-machine" }, { id: "browser-docs", kind: "browser", title: "浏览器 · 文档", detail: "https://vite.dev/guide/" }, { id: "file-readme", kind: "file", title: "README.md", detail: "项目说明文件" }];
+const seed: Resource[] = [{ id: "terminal-1", kind: "terminal", title: "bash", detail: "bash · Node dev-machine" }, { id: "browser-docs", kind: "browser", title: "Vite 文档", detail: "https://vite.dev/guide/" }, { id: "file-readme", kind: "file", title: "README.md", detail: "项目说明文件" }];
 const seedTerminalLines = ["user@dev-machine:~/projects$ npm run build", "> my-app@0.1.0 build", "> vite build", "vite v5.0.8 building for production...", "Error during build:", "Error: Cannot find package '@vitejs/plugin-vue'", "    at resolve (node:internal/modules/…)", "npm ERR! code 1"];
 const topMenus = ["DAgents", "文件", "编辑", "视图", "运行", "工具", "帮助"];
 type MenuItem = { label: string; action: string; shortcut?: string; hint?: string };
@@ -75,7 +84,7 @@ export function Prototype() {
   const addResource = (kind: Kind) => {
     const n = resources.filter((r) => r.kind === kind).length + 1;
     const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const r: Resource = kind === "terminal" ? { id, kind, title: `终端 ${n} · bash`, detail: `bash · Node dev-machine · 会话 ${n}` } : kind === "browser" ? { id, kind, title: "浏览器 · 新标签", detail: "输入网址以访问页面" } : { id, kind, title: "README.md", detail: "工作区文件 · 只读" };
+    const r: Resource = kind === "terminal" ? { id, kind, title: n === 1 ? "bash" : `bash ${n}`, detail: `bash · Node dev-machine · 会话 ${n}` } : kind === "browser" ? { id, kind, title: "新标签", detail: "输入网址以访问页面" } : { id, kind, title: "README.md", detail: "工作区文件 · 只读" };
     updateResources((items) => [...items, r]); setActiveTab(r.id); setShowAdd(false); setBrowserDraft("");
   };
   const closeResource = (id: string) => { const i = resources.findIndex((r) => r.id === id); const next = resources.filter((r) => r.id !== id); updateResources(() => next); if (activeTab === id) setActiveTab(next[Math.min(i, next.length - 1)]?.id ?? "chat"); };
@@ -110,7 +119,7 @@ export function Prototype() {
   const decideApproval = (decision: "allowed" | "denied") => { setApprovalByAgent((a) => ({ ...a, [activeAgent]: decision })); updateTerminalLines((l) => [...l, decision === "allowed" ? "已批准一次：npm i -D @vitejs/plugin-vue" : "已拒绝安装依赖", ...(decision === "allowed" ? ["审批已通过，等待 Agent 继续执行"] : [])]); };
   const resourceIcon = (r: Resource) => r.kind === "terminal" ? "terminal" : r.kind === "browser" ? "browser" : "file";
   const cite = () => { if (!activeResource) return; const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }); setConversations((c) => ({ ...c, [activeAgent]: [...(c[activeAgent] ?? []), { role: "assistant", text: `已将${activeResource.kind === "browser" ? `浏览器演示页面：${activeResource.detail}` : `工作区文件：${activeResource.title}`}添加到对话上下文（演示内容）。`, time }] })); setActiveTab("chat"); };
-  const navigate = (e: React.FormEvent) => { e.preventDefault(); if (!activeResource || !browserDraft.trim()) return; const url = /^https?:\/\//i.test(browserDraft) ? browserDraft : `https://${browserDraft}`; updateResources((items) => items.map((r) => r.id === activeResource.id ? { ...r, detail: url } : r)); setBrowserDraft(url); showNotice("已打开模拟页面：演示内容，未连接真实网站"); };
+  const navigate = (e: React.FormEvent) => { e.preventDefault(); if (!activeResource || !browserDraft.trim()) return; const url = /^https?:\/\//i.test(browserDraft) ? browserDraft : `https://${browserDraft}`; const pageTitle = new URL(url).hostname.replace(/^www\./, ""); updateResources((items) => items.map((r) => r.id === activeResource.id ? { ...r, title: pageTitle, detail: url } : r)); setBrowserDraft(url); showNotice("已打开模拟页面：演示内容，未连接真实网站"); };
   const toggleMenu = (name: string, event?: React.MouseEvent) => {
     event?.stopPropagation();
     setShowAdd(false);
@@ -202,11 +211,11 @@ export function Prototype() {
       {collapsed && sideGroup && <button className="popover-dismiss" aria-label="关闭对象列表" onClick={() => setSideGroup("")} />}
       <section className="workspace">
         <div className="workspace-nav">
-          <button type="button" className={`conversation-tab ${activeTab === "chat" ? "active" : ""}`} onClick={() => { setActiveTab("chat"); setStatusOpen(false); }} title={`${activeAgent} · 对话`}>
-            {icon("agent")}<b>{activeAgent}</b><span>对话</span>
+          <button type="button" className={`conversation-tab ${activeTab === "chat" ? "active" : ""}`} onClick={() => { setActiveTab("chat"); setStatusOpen(false); }} title={activeAgent} aria-label={`对话：${activeAgent}`}>
+            {icon("agent")}<b>{activeAgent}</b>
           </button>
           <div className="resource-tabs">{resources.map((r) => <div className={`resource-tab ${activeTab === r.id ? "active" : ""}`} key={r.id}>
-            <button type="button" className="resource-tab-main" onClick={() => { setActiveTab(r.id); setShowAdd(false); setMenu(""); }}>{icon(resourceIcon(r))}<span>{r.title}</span></button>
+            <button type="button" className="resource-tab-main" title={r.title} aria-label={r.title} onClick={() => { setActiveTab(r.id); setShowAdd(false); setMenu(""); }}>{icon(resourceIcon(r))}<span>{r.title}</span></button>
             <button type="button" className="tab-close" aria-label={`关闭${r.title}`} title={`关闭${r.title}`} onClick={() => closeResource(r.id)}>{icon("circle-x")}</button>
           </div>)}</div>
           <div className="nav-actions">

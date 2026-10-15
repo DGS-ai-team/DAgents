@@ -17,7 +17,6 @@ $goPackages = @(
     "./shared/update/...",
     "./node/...",
     "./client/...",
-    "./desktop/tray/..."
 )
 
 Invoke-Step "install Node Web UI dependencies" { npm ci --prefix node/webui/frontend }
@@ -61,7 +60,7 @@ function Invoke-Staticcheck {
     } else {
         $staticcheckPath = $staticcheckCommand.Source
     }
-    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "node", "client", "desktop/tray")) {
+    foreach ($module in @("shared/config", "shared/logfiles", "shared/update", "node", "client")) {
         Invoke-Step "Staticcheck $module" {
             Push-Location $module
             try {

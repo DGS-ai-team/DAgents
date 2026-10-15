@@ -14,9 +14,9 @@ import (
 )
 
 func (s *Server) registerSetupRoutes() {
-	s.mux.HandleFunc("GET /v1/setup/config", s.handleGetSetupConfig)
-	s.mux.HandleFunc("PATCH /v1/setup/config", s.handlePatchSetupConfig)
-	s.mux.HandleFunc("POST /v1/setup/llm/probe-models", s.handleProbeLLMModels)
+	s.mux.HandleFunc("GET /v1/settings", s.handleGetSetupConfig)
+	s.mux.HandleFunc("PATCH /v1/settings", s.handlePatchSetupConfig)
+	s.mux.HandleFunc("POST /v1/llm/probe-models", s.handleProbeLLMModels)
 }
 
 func (s *Server) setupWritable() bool {

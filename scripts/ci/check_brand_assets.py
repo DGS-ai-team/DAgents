@@ -1,7 +1,7 @@
 """Check that branding has one source and known native build inputs.
 
-The native shells need checked-in images because Go ``embed`` and the Tauri
-bundler consume files from their package directories. The files are generated
+The native Desktop needs checked-in images because the Tauri bundler consumes
+files from its package directory. The files are generated
 from ``shared/branding/brand-icon.png``; this check prevents a second web
 favicon source from quietly returning to the repository and verifies that the
 native build inputs remain present.
@@ -24,8 +24,6 @@ TRAY_GENERATOR = ROOT / "packaging" / "windows" / "scripts" / "generate-tray-ico
 WIZARD_GENERATOR = ROOT / "packaging" / "windows" / "scripts" / "generate-wizard-assets.py"
 
 GENERATED_NATIVE_ASSETS = (
-    ROOT / "desktop" / "tray" / "assets" / "icon.ico",
-    ROOT / "desktop" / "tray" / "assets" / "icon_pending.ico",
     ROOT / "desktop" / "tray-tauri" / "src-tauri" / "icons" / "icon.ico",
     ROOT / "desktop" / "tray-tauri" / "src-tauri" / "icons" / "icon_pending.ico",
     ROOT / "desktop" / "tray-tauri" / "src-tauri" / "icons" / "tray-icon.ico",
@@ -75,7 +73,6 @@ def main() -> int:
         if expected_source not in generator:
             errors.append("tray icon generator does not use shared/branding/brand-icon.png")
         for output_dir in (
-            'REPO / "desktop" / "tray" / "assets"',
             'REPO / "desktop" / "tray-tauri" / "src-tauri" / "icons"',
         ):
             if output_dir not in generator:

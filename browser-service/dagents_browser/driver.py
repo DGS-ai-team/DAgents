@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -18,6 +19,8 @@ MAX_ACTIONS = 12
 MAX_SCRIPT = 16_000
 MAX_ARG_BYTES = 32 * 1024
 MAX_RESULT_BYTES = 64 * 1024
+MAX_VIEW_IMAGE_BYTES = 4 * 1024 * 1024
+DEFAULT_VIEW_TIMEOUT_SECONDS = 5.0
 DEFAULT_EVALUATE_TIMEOUT_MS = 5_000
 MAX_EVALUATE_TIMEOUT_MS = 10_000
 RECEIPT_TTL_SECONDS = 600
@@ -81,6 +84,8 @@ class PlaywrightDriver:
         op = str(req.get("op") or "").strip()
         if op == "ping":
             return {"ok": True, "detail": {"driver": "playwright-v2", "protocol_version": 2}}
+        if op == "view":
+            return await self._view(req)
         if op in {"call", "start", "stop"}:
             if op != "call":
                 req = {**req, "op": "call", "actions": [{"op": op}]}
@@ -88,6 +93,36 @@ class PlaywrightDriver:
         if op == "evaluate":
             return await self._evaluate(req)
         return {"ok": False, "error_code": "invalid_action", "error": f"unknown op: {op}"}
+
+    async def _view(self, req: dict[str, Any]) -> dict[str, Any]:
+        session_key = str(req.get("session_key") or "").strip()
+        if not session_key:
+            return self._error("invalid_action", "session_key is required")
+        state = self._sessions.get(session_key)
+        if state is None:
+            return self._error("browser_not_started", "browser session is not started")
+        page_id = str(req.get("page_id") or "").strip()
+        try:
+            async with asyncio.timeout(DEFAULT_VIEW_TIMEOUT_SECONDS):
+                async with state.lock:
+                    live_pages = [(key, item.page) for key, item in state.pages.items() if not item.page.is_closed()]
+                    if not live_pages:
+                        return self._error("browser_not_started", "browser session has no open pages")
+                    selected = next(((key, page) for key, page in live_pages if key == page_id), None) if page_id else live_pages[-1]
+                    if selected is None:
+                        return self._error("page_not_found", "page does not belong to this browser session")
+                    selected_id, page = selected
+                    pages = [{"page_id": key, "url": item.url, "title": await item.title()} for key, item in live_pages]
+                    screenshot = await page.screenshot(type="png", full_page=False, timeout=DEFAULT_VIEW_TIMEOUT_SECONDS * 1000)
+                    if len(screenshot) > MAX_VIEW_IMAGE_BYTES:
+                        return self._error("image_too_large", "browser view screenshot exceeds the 4 MiB limit")
+                    title = await page.title()
+                    url = page.url
+                    return {"ok": True, "url": url, "title": title, "detail": {"pages": pages, "page_id": selected_id, "title": title, "url": url, "mime": "image/png", "image_base64": base64.b64encode(screenshot).decode("ascii")}}
+        except TimeoutError:
+            return self._error("view_timeout", "browser view timed out after 5 seconds")
+        except Exception as exc:
+            return self._error("view_failed", str(exc))
 
     async def _ensure_playwright(self) -> Playwright:
         if self._playwright is None:

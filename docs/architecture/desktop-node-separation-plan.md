@@ -2,7 +2,9 @@
 
 > **状态**：提案，面向下一轮架构重构。更新：2026-09-23。
 >
-> 本方案把 Desktop 定义为唯一的人机界面，把 Node 定义为无头 Agent 执行引擎。目标 Shell 采用现有 Rust/Tauri 2 轨并扩展为 Windows、macOS、Linux 产品；Node 不再嵌入产品 UI。当前实现仍以 Windows、本机 Node 和 `/ui/` 为主，文中目标架构需要按阶段迁移，不能当作当前行为说明。
+> 本方案把 Desktop 定义为唯一的人机界面，把 Node 定义为无头 Agent 执行引擎。目标 Shell 采用现有 Rust/Tauri 2 轨并扩展为 Windows、macOS、Linux 产品；Node 不再嵌入产品 UI。2026-09-23 当时的实现仍以 Windows、本机 Node 和 `/ui/` 为主，文中目标架构需要按阶段迁移，不能当作当前行为说明。
+>
+> 本文是历史提案快照；Go Shell 已从当前产品和构建树移除。当前产品路线见 [2026-10-14 产品收束方向](../design/desktop-product/product-direction-simplification-2026-10-14.md)，实际支持范围以根目录 [README](../../README.md) 和 Windows 安装说明为准。
 
 > 2026-10-08：Windows 本机 Desktop 首条工作台链路已实装，见 [MVP 收束记录](../design/desktop-product/mvp-closeout.md)。当前仅支持 loopback Node，配置组件仍复用 Node WebUI 源码。本文的三栏资源区、侧栏 Auto 总览及 Node 顶栏快切属于早期布局，已由 [当前原型](../design/desktop-product/prototype/) 中的独立对话/资源页签与右下消息坞替代；远程连接、浏览器/文件和最终无头 Node 仍是后续目标。
 

@@ -75,8 +75,6 @@ button:focus-visible,input:focus-visible{outline:2px solid #087b9b;outline-offse
 .conversation-tab.active{border-color:#d6e3e8;background:#f2f7f8;color:#253d51}
 .conversation-tab .icon{width:16px;height:16px;flex:none;color:var(--brand)}
 .conversation-tab b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
-.conversation-tab span{flex:none;color:#586b7b;font-size:11px}
-.conversation-tab span::before{content:"";display:inline-block;height:14px;margin:0 6px -3px 0;border-left:1px solid var(--line)}
 .nav-actions{display:flex;align-items:center;gap:3px;flex:none}
 .workspace-title{display:flex;align-items:center;gap:9px;min-width:0;color:#344a60}
 .workspace-title .icon{color:var(--brand);width:18px;height:18px}
@@ -150,7 +148,7 @@ button:focus-visible,input:focus-visible{outline:2px solid #087b9b;outline-offse
 .model-popover button span{color:#176b50}
 .send-button{width:40px;height:40px;border:0;border-radius:50%;display:grid;place-items:center;margin-left:6px;background:var(--brand);color:#fff}
 .send-button:hover{background:#066580}
-.send-button .icon{width:17px;height:17px;filter:brightness(0) invert(1);transform:rotate(90deg)}
+.send-button .icon{width:17px;height:17px;filter:brightness(0) invert(1)}
 
 /* Approval cards remain actionable in chat and in the resource dock. */
 .approval-card{width:min(100%,650px);border:1px solid #ead7b8;background:#fffaf2;border-radius:10px;padding:12px 14px;color:#495b6a;font-size:12px}
@@ -254,4 +252,4 @@ button:focus-visible,input:focus-visible{outline:2px solid #087b9b;outline-offse
 .notice-toast{position:fixed;right:24px;top:58px;z-index:60;padding:10px 14px;background:#294255;color:white;border-radius:7px;box-shadow:0 8px 22px #12243c29;font-size:12px}
 
 @media(max-width:1050px){.sidebar{width:210px;min-width:210px}.workspace-nav{gap:5px;padding-inline:8px}.conversation-tab{flex-basis:148px}.resource-tab{min-width:96px;max-width:145px}.agent-dock{right:10px;bottom:10px;width:min(380px,calc(100% - 20px))}.dock-details{max-height:min(330px,calc(100vh - 160px))}.conversation{padding-inline:22px}}
-@media(max-width:860px){.sidebar{width:205px;min-width:205px}.conversation-tab{flex-basis:126px;padding-inline:6px;gap:5px}.conversation-tab span::before{margin-left:0;margin-right:4px}.resource-tab{min-width:88px;max-width:120px}.workspace-nav{gap:4px;padding-inline:6px}.resource-entry{padding-inline:6px;font-size:11px}.agent-dock{width:min(360px,calc(100% - 16px));right:8px;bottom:8px}.dock-details{max-height:min(300px,calc(100vh - 155px))}.conversation{padding-inline:18px}}
+@media(max-width:860px){.sidebar{width:205px;min-width:205px}.conversation-tab{flex-basis:126px;padding-inline:6px;gap:5px}.resource-tab{min-width:88px;max-width:120px}.workspace-nav{gap:4px;padding-inline:6px}.resource-entry{padding-inline:6px;font-size:11px}.agent-dock{width:min(360px,calc(100% - 16px));right:8px;bottom:8px}.dock-details{max-height:min(300px,calc(100vh - 155px))}.conversation{padding-inline:18px}}

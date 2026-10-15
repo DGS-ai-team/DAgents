@@ -12,9 +12,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
-	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func (s *Server) writeAgentNotFound(w http.ResponseWriter, agentID string) {
@@ -28,6 +26,10 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/workspace", s.handleWorkspaceList)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/workspace/file", s.handleWorkspaceGet)
+	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/workspace/file", s.handleWorkspacePut)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/workspace/upload", s.handleWorkspaceUpload)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook", s.handleGetAgentHandbook)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook/history", s.handleGetAgentHandbookHistory)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/handbook/restore", s.handleRestoreAgentHandbook)
@@ -606,69 +608,15 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if s.sessions == nil {
 		return fmt.Errorf("sessions manager not configured")
 	}
-	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	runtime, err := s.buildAgentSessionRuntime(ctx, &rec, agentSessionRuntimeOptions{})
 	if err != nil {
-		return fmt.Errorf("parse agent snapshot: %w", err)
+		return err
 	}
-	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), id, snapParsed.Workspace); err != nil {
-		return fmt.Errorf("ensure agent workspace: %w", err)
-	}
-	var policyEngine *policy.Engine
-	if s.agents != nil {
-		engine, err := s.agents.LoadAgentPolicyEngine(ctx, id)
-		if err != nil {
-			s.logger.Warn("agent policy load failed", "agent_id", id, "error", err)
-		} else {
-			policyEngine = engine
-		}
-	}
-	client, llmProfileDigest, err := s.llmClientForAgent(ctx, &rec, id)
-	if err != nil {
-		return fmt.Errorf("resolve agent llm: %w", err)
-	}
-	built, err := agentruntime.Build(agentruntime.BuildParams{
-		NodeCFG:              s.cfg,
-		BaseTurn:             s.sessions.DefaultTurnOptions(),
-		AgentID:              id,
-		Snapshot:             snapParsed,
-		MCP:                  s.mcpManager,
-		WorkspaceCoordinator: s.workspaceCoord,
-	})
-	if err != nil {
-		return fmt.Errorf("build agent runtime: %w", err)
-	}
-	s.attachNodeRuntimeDeps(built.Registry, id)
-	rev := rec.RuntimeRevision
-	built.TurnOptions.RuntimeRevision = rev
-	built.TurnOptions.LLMProfileDigest = llmProfileDigest
-	if s.cfg != nil {
-		built.TurnOptions.PreferredName = s.cfg.PreferredName()
-	}
-	if s.agents != nil {
-		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id); err != nil {
-			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)
-		} else {
-			built.TurnOptions.PromptContent = promptContentFromRecord(pc)
-		}
-	}
-	// Runtime digest is an identity of the built model-visible inputs. The
-	// per-Turn snapshot also records the exact prompt/tool digests, so a live
-	// memory refresh can be distinguished from a runtime rebuild.
-	var promptSeed string
-	if built.TurnOptions.PromptContent != nil {
-		if raw, err := json.Marshal(built.TurnOptions.PromptContent); err == nil {
-			promptSeed = string(raw)
-		}
-	}
-	built.TurnOptions.RuntimeDigest = turn.RuntimeDigestFromInputs(
-		snapParsed,
-		promptSeed,
-		built.Registry.Definitions(),
-	)
+	built := runtime.Built
 	// Build and hydrate the replacement before swapping the manager entry. A
 	// failed load/start therefore leaves the previous good runtime serving
 	// requests instead of creating a release-then-create gap.
-	if _, _, err := s.sessions.ReplaceWithOptionsAndLLM(id, built.TurnOptions, built.Registry, policyEngine, client, id); err != nil {
+	if _, _, err := s.sessions.ReplaceWithOptionsAndLLM(id, built.TurnOptions, built.Registry, runtime.Policy, runtime.LLM, id); err != nil {
 		_ = built.Close()
 		return err
 	}

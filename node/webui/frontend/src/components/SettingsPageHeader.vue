@@ -1,7 +1,7 @@
 <script setup>
 defineProps({
   title: { type: String, required: true },
-  eyebrow: { type: String, default: "设置" },
+  eyebrow: { type: String, default: "" },
   description: { type: String, default: "" },
 });
 </script>

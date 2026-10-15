@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Server) registerUIAggregateRoutes() {
-	s.mux.HandleFunc("GET /v1/ui/bootstrap", s.handleUIBootstrap)
+	s.mux.HandleFunc("GET /v1/bootstrap", s.handleUIBootstrap)
 }
 
 // uiBootstrapResponse 聚合 Chat 首屏常用只读信息，减少并行 GET。

@@ -9,7 +9,7 @@ When implementing from a selected generated mock, treat that image as the source
 ## Durable design decisions
 
 - Keep the desktop menu on one row; omit search and the Node quick switch.
-- Keep a fixed “对话” tab beside closable resource tabs for terminals, browsers, and files; keep the active Agent name visible on the conversation tab.
+- Keep a fixed conversation entry beside closable resource tabs. Show only its icon and active Agent name; resource tabs show only the resource icon and its actual name, such as a terminal session name, browser page title, or file name.
 - Use one-column, mutually exclusive top menus with clear groups, shortcut/status hints, disabled styling for unavailable actions, outside-click dismissal, and Escape dismissal. Only show shortcuts that the prototype intercepts and executes; do not claim browser shortcuts that are not implemented.
 - Menu actions operate on the active Agent's prototype state. Label Node and browser activity as simulated, and never execute real operating-system actions.
 - Do not add assistant avatars. Keep message input addressed to the active Agent.

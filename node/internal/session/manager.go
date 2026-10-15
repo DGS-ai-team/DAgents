@@ -531,9 +531,41 @@ func (m *Manager) createWithOptions(
 	llmClient llm.Client,
 	runtimeAgentID string,
 ) (*Session, bool, error) {
+	session, created, _, err := m.createWithOptionsReuse(requestedID, turnOpts, toolExec, policyEngine, llmClient, runtimeAgentID)
+	return session, created, err
+}
+
+// CreateWithOptionsAndLLMReuse reports whether an already-live runtime was
+// reused. The created result retains its existing meaning: whether this is a
+// new persisted conversation rather than a restored one.
+func (m *Manager) CreateWithOptionsAndLLMReuse(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, bool, error) {
+	if llmClient == nil {
+		llmClient = m.llm
+	}
+	if strings.TrimSpace(runtimeAgentID) == "" {
+		runtimeAgentID = m.agentID
+	}
+	return m.createWithOptionsReuse(requestedID, turnOpts, toolExec, policyEngine, llmClient, runtimeAgentID)
+}
+
+func (m *Manager) createWithOptionsReuse(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, bool, error) {
 	id := strings.TrimSpace(requestedID)
 	if id == "" {
-		return nil, false, fmt.Errorf("session id is required for CreateWithOptions")
+		return nil, false, false, fmt.Errorf("session id is required for CreateWithOptions")
 	}
 	if toolExec == nil {
 		toolExec = m.tools
@@ -545,12 +577,12 @@ func (m *Manager) createWithOptions(
 	defer m.mu.Unlock()
 	if existing, ok := m.sessions[id]; ok {
 		m.logger.Info("session reuse", "session_id", id)
-		return &existing.session, false, nil
+		return &existing.session, false, true, nil
 	}
 	restore, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
-		return nil, false, err
+		return nil, false, false, err
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
 	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
@@ -565,7 +597,7 @@ func (m *Manager) createWithOptions(
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
 	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	m.bindMaintenanceGate(rt)
 	m.sessions[id] = rt
@@ -578,7 +610,7 @@ func (m *Manager) createWithOptions(
 	} else {
 		m.logger.Info("session restored", "session_id", id, "messages", len(restore.Messages))
 	}
-	return &rt.session, created, nil
+	return &rt.session, created, false, nil
 }
 
 // ReplaceWithOptions atomically replaces an existing runtime after the new

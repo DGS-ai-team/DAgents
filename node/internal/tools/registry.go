@@ -232,22 +232,11 @@ func (r *Registry) OpenTerminal(ctx context.Context, req TerminalRequest) (Termi
 		if r.localTerminalProvider == nil {
 			return nil, fmt.Errorf("local terminal provider is unavailable")
 		}
-		cwd := strings.TrimSpace(req.CWD)
-		if cwd == "" {
-			cwd = r.workspaceRoot
-		} else if resolved, resolveErr := r.resolveRunCWD(cwd); resolveErr == nil {
-			cwd = resolved
-		}
-		lease, err := r.acquireWorkspaceWrite(ctx, cwd)
-		if err != nil {
-			return nil, fmt.Errorf("workspace_busy: %w", err)
-		}
-		terminal, err := r.localTerminalProvider.OpenTerminal(ctx, req)
-		if err != nil {
-			lease.Release()
-			return nil, err
-		}
-		return &coordinatedTerminal{Terminal: terminal, lease: lease}, nil
+		// An interactive PTY can remain open indefinitely. Holding the
+		// workspace write lease for its lifetime would block bash_run, file
+		// writes, and other terminals in the same workspace. The coordinator
+		// is reserved for bounded operations with a clear completion point.
+		return r.localTerminalProvider.OpenTerminal(ctx, req)
 	case executionTargetLinuxChannel:
 		if r.linuxProvider == nil {
 			return nil, fmt.Errorf("linux terminal provider is unavailable")
