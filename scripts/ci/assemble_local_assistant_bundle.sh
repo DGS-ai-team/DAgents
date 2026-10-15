@@ -55,6 +55,21 @@ if [[ ! -f "${BROWSER_BIN}" ]]; then
   fi
 fi
 
+# Resolve every binary before changing the previous staging directory. Inputs
+# may point into a prior staging tree, so deleting first would destroy them.
+SHELL_TAURI=""
+if [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
+  SHELL_TAURI="${SHELL_TAURI_BIN:-${REPO_ROOT}/dist/dagents-shell-tauri${EXE}}"
+  SHELL_DEFAULT="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
+  if [[ ! -f "${SHELL_TAURI}" && -f "${SHELL_DEFAULT}" ]]; then
+    SHELL_TAURI="${SHELL_DEFAULT}"
+  fi
+  if [[ ! -f "${SHELL_TAURI}" ]]; then
+    echo "[assemble] missing dagents-shell-tauri${EXE} (run build_dagents_shell_tauri.sh)" >&2
+    exit 1
+  fi
+fi
+
 BUNDLE_NAME="dagents-local-assistant-${PLATFORM}"
 BUNDLE_DIR="${REPO_ROOT}/dist/${BUNDLE_NAME}"
 ARCHIVE_BASE="${REPO_ROOT}/dist/${BUNDLE_NAME}-${VERSION}"
@@ -78,10 +93,38 @@ if [[ "${dist_real}" != "${repo_root_real}/dist" ||
   echo "[assemble] refusing to replace an unexpected bundle path: ${BUNDLE_DIR}" >&2
   exit 1
 fi
-bundle_src_real="$(cd "$(dirname "${NODE_BIN}")" && pwd -P)/$(basename "${NODE_BIN}")"
-if [[ "${bundle_src_real}" == "${BUNDLE_DIR}" || "${bundle_src_real}" == "${BUNDLE_DIR}/"* ]]; then
-  echo "[assemble] Node input must not be inside the bundle directory being replaced" >&2
-  exit 1
+bundle_real="${dist_real}/${expected_bundle_name}"
+assert_input_outside_bundle() {
+  local label="$1"
+  local input="$2"
+  local input_real
+  local compare_input compare_bundle
+  if [[ -L "${input}" ]]; then
+    echo "[assemble] refusing symlinked ${label} input: ${input}" >&2
+    exit 1
+  fi
+  input_real="$(cd "$(dirname "${input}")" && pwd -P)/$(basename "${input}")"
+  compare_input="${input_real}"
+  compare_bundle="${bundle_real}"
+  if [[ "${PLATFORM}" == windows-* ]]; then
+    compare_input="${compare_input,,}"
+    compare_bundle="${compare_bundle,,}"
+  fi
+  case "${compare_input}" in
+    "${compare_bundle}"|"${compare_bundle}/"*)
+      echo "[assemble] ${label} input must not be inside the bundle directory being replaced: ${input}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+assert_input_outside_bundle "Node" "${NODE_BIN}"
+assert_input_outside_bundle "Client" "${CLIENT_BIN}"
+if [[ -f "${BROWSER_BIN}" ]]; then
+  assert_input_outside_bundle "Browser" "${BROWSER_BIN}"
+fi
+if [[ -n "${SHELL_TAURI}" ]]; then
+  assert_input_outside_bundle "Desktop Shell" "${SHELL_TAURI}"
 fi
 
 rm -rf "${BUNDLE_DIR}"

@@ -86,6 +86,10 @@ jobs:
             exit 1
           fi
 
+      - name: Verify assembler preserves staging when an input is invalid
+        shell: bash
+        run: bash scripts/ci/test_assemble_bundle_contract.sh
+
   installer-contract:
     name: Windows installer contract
     runs-on: ubuntu-latest
