@@ -15,8 +15,8 @@ const KIND = {
   hook: {
     title: "上传 Hook 包",
     idKey: "package_id",
-    idPlaceholder: "protect-loaded-skill",
-    namePlaceholder: "Protect Loaded Skill",
+    idPlaceholder: "example-hook",
+    namePlaceholder: "Example Hook",
     fileLabel: ".so 文件",
     accept: ".so",
     showPlatform: true,
