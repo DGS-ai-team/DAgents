@@ -104,8 +104,7 @@ test('route and visible tab stay aligned on initial load and navigation', () => 
 })
 
 test('shared chat route preserves an explicitly selected resource across settings round trips', () => {
-  let tab = tabForRoute('/settings/feedback')
-  tab = 'file'
+  let tab = 'file'
   tab = tabForRoute('/chat', tab)
   assert.equal(tab, 'file')
   tab = tabForRoute('/settings/general', tab)

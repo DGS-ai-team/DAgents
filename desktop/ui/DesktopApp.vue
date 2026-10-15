@@ -503,25 +503,27 @@ async function addImages(event) {
 }
 async function processAttachments(files, ownerId) {
   const remaining = 8 - (pendingImagesByAgent.value[ownerId] || []).length - (pendingFilesByAgent.value[ownerId] || []).length
+  const priorUploadError = workspaceUploadErrors.get(ownerId)
+  let batchHadFailure = false
   for (const file of files.slice(0, Math.max(0, remaining))) {
-    if (file.size > 16 * 1024 * 1024) { if (activeId.value === ownerId) error.value = `${file.name}：文件不能超过 16 MiB`; continue }
+    if (file.size > 16 * 1024 * 1024) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (activeId.value === ownerId) error.value = `${file.name}：文件不能超过 16 MiB`; continue }
     if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
-      if (file.size > 10 * 1024 * 1024) { if (activeId.value === ownerId) error.value = `${file.name}：图片不能超过 10 MB`; continue }
+      if (file.size > 10 * 1024 * 1024) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (activeId.value === ownerId) error.value = `${file.name}：图片不能超过 10 MB`; continue }
       try {
       const image = { name: file.name, url: await readImage(file) }
       pendingImagesByAgent.value[ownerId] = [...(pendingImagesByAgent.value[ownerId] || []), image]
-      } catch (e) { if (activeId.value === ownerId) error.value = String(e.message || e) }
+      } catch (e) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (activeId.value === ownerId) error.value = String(e.message || e) }
     } else {
       try {
         const uploaded = await uploadWorkspaceFile(ownerId, '', file)
-        const priorUploadError = workspaceUploadErrors.get(ownerId)
-        if (activeId.value === ownerId && shouldClearWorkspaceUploadError(error.value, priorUploadError)) {
+        if (activeId.value === ownerId && shouldClearWorkspaceUploadError(error.value, priorUploadError, batchHadFailure)) {
           error.value = ''
           workspaceUploadErrors.delete(ownerId)
         }
         const refs = pendingFilesByAgent.value[ownerId] || []
         if (!refs.some(item => item.path === uploaded.file_ref)) pendingFilesByAgent.value[ownerId] = [...refs, { path: uploaded.file_ref, name: uploaded.name || file.name }]
       } catch (e) {
+        batchHadFailure = true
         if (activeId.value === ownerId) {
           const message = `${file.name}：${String(e.message || e)}`
           workspaceUploadErrors.set(ownerId, message)

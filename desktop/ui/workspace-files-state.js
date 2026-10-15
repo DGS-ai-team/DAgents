@@ -4,8 +4,8 @@ export function workspaceUploadPath(directory, name) {
   return [String(directory || '').replace(/^\/+|\/+$/g, ''), String(name || '').replace(/^\/+/, '')].filter(Boolean).join('/')
 }
 
-export function shouldClearWorkspaceUploadError(currentError, failedUploadError) {
-  return Boolean(failedUploadError) && currentError === failedUploadError
+export function shouldClearWorkspaceUploadError(currentError, failedUploadError, batchHadFailure = false) {
+  return !batchHadFailure && Boolean(failedUploadError) && currentError === failedUploadError
 }
 
 export function toNodeFileReference(file) {

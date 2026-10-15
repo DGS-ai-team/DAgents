@@ -312,7 +312,7 @@
       span.className = `icon-mask tone-${tone(key)}${small ? ' small' : ''}`;
       span.dataset.icon = key;
       span.setAttribute('aria-hidden', 'true');
-      hydrateIcon(span, key, small);
+      hydrateIcon(span, key);
       return span;
     }
     function makeCard(key) {

@@ -9,9 +9,13 @@ test('workspace uploads target the complete relative filename and preserve direc
 })
 
 test('successful workspace uploads only clear the exact stale upload error', () => {
-  assert.equal(shouldClearWorkspaceUploadError('input.txt：同名文件已存在，请换名后重新上传。', 'input.txt：同名文件已存在，请换名后重新上传。'), true)
-  assert.equal(shouldClearWorkspaceUploadError('网络连接失败', 'input.txt：同名文件已存在，请换名后重新上传。'), false)
-  assert.equal(shouldClearWorkspaceUploadError('input.txt：同名文件已存在，请换名后重新上传。', ''), false)
+  const priorError = 'input.txt：同名文件已存在，请换名后重新上传。'
+  assert.equal(shouldClearWorkspaceUploadError(priorError, priorError), true)
+  assert.equal(shouldClearWorkspaceUploadError('网络连接失败', priorError), false)
+  assert.equal(shouldClearWorkspaceUploadError(priorError, ''), false)
+  // A prior file failing in this batch must remain visible after a later upload succeeds.
+  assert.equal(shouldClearWorkspaceUploadError(priorError, priorError, true), false)
+  assert.equal(shouldClearWorkspaceUploadError('first.txt：上传失败', priorError, true), false)
 })
 
 test('only explicitly selected file refs are serialized in the Node API object contract', () => {

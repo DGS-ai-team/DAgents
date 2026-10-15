@@ -137,10 +137,10 @@ func downloadPackage(ctx context.Context, client *nodeapi.Client, status *update
 		return fmt.Errorf("package size mismatch: expected %d, got %d", expectedSize, resp.ContentLength)
 	}
 	if got := strings.ToLower(strings.TrimSpace(resp.Header.Get("X-Node-Package-SHA256"))); got != expectedSHA {
-		return fmt.Errorf("Node package checksum does not match update status")
+		return fmt.Errorf("node package checksum does not match update status")
 	}
 	if got := strings.TrimSpace(resp.Header.Get("X-Node-Package-Version")); got != strings.TrimSpace(status.LatestVersion) {
-		return fmt.Errorf("Node package version does not match update status")
+		return fmt.Errorf("node package version does not match update status")
 	}
 
 	tmpPath := destPath + ".part"
