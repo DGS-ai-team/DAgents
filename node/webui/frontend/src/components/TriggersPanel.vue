@@ -282,7 +282,6 @@ function targetHint(item) {
       new_session: "每次新建会话",
       fixed: "固定会话",
     }[mode] || (mode || "未指定");
-  const bound = item.target_session_id;
   const targetId = String(item.target_agent_id || "").trim();
   const target = agents.value.find((agent) => String(agent.agent_id || agent.id || "") === targetId);
   const targetLabel = target ? (target.display_name || target.name || "目标智能体") : targetId ? "未找到智能体" : "未指定智能体";

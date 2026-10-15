@@ -8,6 +8,8 @@ COPY manage/console/frontend/ ./
 # The Manage Vite app imports the canonical product mark through the
 # repository-level @dagents-brand alias.
 COPY shared/branding/ /src/shared/branding/
+# ManageUiIcon.vue and its canonical SVG registry are shared with the Node UI.
+COPY shared/icons/ /src/shared/icons/
 # WorkgroupChatView reuses the Node-side branded activity indicator.
 COPY node/webui/frontend/src/components/BrandActivityIndicator.vue /src/node/webui/frontend/src/components/BrandActivityIndicator.vue
 COPY node/webui/frontend/src/utils/toolCalls.js /src/node/webui/frontend/src/utils/toolCalls.js

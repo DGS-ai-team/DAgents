@@ -23,6 +23,9 @@
 - Node 前端初验 407/407，合入最新 `dev` 后为 410/410（75 个测试文件）；共享图标 6/6；Desktop UI 修复并合并后 51/51；Desktop Vite 构建通过。
 - Rust `cargo test` 30/30 与 `cargo check` 通过。额外启用隔离 Node 的 `live_local_node_terminal_open_input_detach_resume_close_smoke`：1/1 通过，实际覆盖 PTY 输入、detach、resume、输出回放、close 与 session 移除。默认 Rust 测试中的其他 opt-in live smoke 并未自动执行。
 - API contracts、OpenAPI 路由同步、Manage Console build/lint、Ruff、Pyright 通过。按锁定依赖创建的独立 Python 3.13 环境完整 unittest 197/197。默认 Anaconda 环境缺 FastAPI 的首次导入失败不作为产品失败；隔离依赖环境的重跑结果为最终结果。
+- PR 首轮 CI 发现的 Node 未使用变量与 Manage Docker 共享图标复制遗漏已修正。依赖审计修复后，三套前端 `npm audit --audit-level=high` 均为 0 vulnerabilities，许可证策略覆盖 219 个 package/version pairs；Node 410/410 和 Desktop 51/51 再次通过。Docker 镜像构建由远端 CI 复验，本机没有 Docker CLI。
+
+隔离 Auto 已禁用唤醒；Desktop 退出后，最后通过指定 fixture JSON 的 owned-node CLI 停止空闲测试 Node，`18974` 不再监听。首次清理命令未指定该 JSON，因默认 endpoint 的 readiness 无法确认而安全拒绝；没有停止其他 Node。未删除测试数据或凭据文件。
 
 ## 验证限制
 
