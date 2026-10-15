@@ -548,27 +548,29 @@ defineExpose({ load, openNewTerminal });
       :style="bodyGridStyle"
     >
       <section class="terminal-workbench__terminal-area" aria-label="终端区域">
-        <nav v-if="terminals.length" class="terminal-workbench__terminal-tabs" aria-label="终端会话">
-          <button
-            v-for="item in terminals"
-            :key="item.terminal_id"
-            type="button"
-            class="terminal-workbench__terminal-tab"
-            :class="{ 'terminal-workbench__terminal-tab--active': String(item.terminal_id || '') === activeTerminalId }"
-            :aria-current="String(item.terminal_id || '') === activeTerminalId ? 'page' : undefined"
-            :title="terminalTabLabel(item)"
-            @click="selectTerminal(item)"
-          >
-            <span class="terminal-workbench__terminal-tab-status" :class="`terminal-workbench__terminal-tab-status--${item.status || 'idle'}`" aria-hidden="true"></span>
-            <span>{{ terminalTabLabel(item) }}</span>
-          </button>
+        <div v-if="terminals.length || hasTerminal" class="terminal-workbench__terminal-tabs-row">
+          <nav class="terminal-workbench__terminal-tabs" aria-label="终端会话">
+            <button
+              v-for="item in terminals"
+              :key="item.terminal_id"
+              type="button"
+              class="terminal-workbench__terminal-tab"
+              :class="{ 'terminal-workbench__terminal-tab--active': String(item.terminal_id || '') === activeTerminalId }"
+              :aria-current="String(item.terminal_id || '') === activeTerminalId ? 'page' : undefined"
+              :title="terminalTabLabel(item)"
+              @click="selectTerminal(item)"
+            >
+              <span class="terminal-workbench__terminal-tab-status" :class="`terminal-workbench__terminal-tab-status--${item.status || 'idle'}`" aria-hidden="true"></span>
+              <span>{{ terminalTabLabel(item) }}</span>
+            </button>
+          </nav>
           <TerminalActionMenu
             v-if="hasTerminal"
             class="terminal-workbench__terminal-tab-actions"
             :status="terminalStatus"
             @action="onTerminalAction"
           />
-        </nav>
+        </div>
         <p v-if="loading && !terminals.length" class="terminal-workbench__muted">加载终端列表中…</p>
         <p v-else-if="terminalError" class="terminal-workbench__error" role="alert">{{ terminalError }}</p>
         <div v-else-if="emptyState" class="terminal-workbench__empty">
@@ -780,19 +782,32 @@ defineExpose({ load, openNewTerminal });
   background: var(--color-surface, #fff);
 }
 
+.terminal-workbench__terminal-tabs-row {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface, #fff) 96%, var(--color-text, #111));
+}
+
 .terminal-workbench__terminal-tabs {
   display: flex;
   min-height: 34px;
   align-items: center;
   gap: 2px;
   padding: 4px 7px 0;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow-x: auto;
-  border-bottom: 1px solid var(--color-border);
-  background: color-mix(in srgb, var(--color-surface, #fff) 96%, var(--color-text, #111));
   scrollbar-width: thin;
 }
 
-.terminal-workbench__terminal-tab-actions { margin-left: auto; flex: 0 0 auto; }
+.terminal-workbench__terminal-tab-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 4px 7px 0;
+}
 
 .terminal-workbench__terminal-tab {
   display: inline-flex;

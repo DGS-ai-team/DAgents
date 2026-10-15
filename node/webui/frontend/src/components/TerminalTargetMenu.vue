@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiIcon from "./UiIcon.vue";
 
@@ -11,6 +11,7 @@ const props = defineProps({
 
 const emit = defineEmits(["select", "refresh"]);
 const open = ref(false);
+const rootRef = ref(null);
 
 function openMenu() {
   open.value = true;
@@ -30,11 +31,29 @@ function choose(target) {
   emit("select", target);
 }
 
+function onDocumentPointerDown(event) {
+  if (!rootRef.value?.contains(event.target)) open.value = false;
+}
+
+function onDocumentKeydown(event) {
+  if (event.key === "Escape") open.value = false;
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", onDocumentPointerDown);
+  document.addEventListener("keydown", onDocumentKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocumentPointerDown);
+  document.removeEventListener("keydown", onDocumentKeydown);
+});
+
 defineExpose({ open: openMenu, close: () => { open.value = false; } });
 </script>
 
 <template>
-  <div class="terminal-target-menu">
+  <div ref="rootRef" class="terminal-target-menu">
     <button
       type="button"
       class="btn btn--ghost btn--sm terminal-target-menu__trigger"
