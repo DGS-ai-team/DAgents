@@ -10,6 +10,11 @@ import (
 
 var envPlaceholderPattern = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
+// RedactedSecretPlaceholder is returned for literal environment/header values
+// in the editable config projection. A PUT may use it only to retain an
+// existing stored value; it is never a usable credential itself.
+const RedactedSecretPlaceholder = "__DAGENTS_SECRET_REDACTED__"
+
 // ConfigText is the portable MCP configuration shape used by the Node UI.
 // It follows the mcpServers format used by common MCP clients while keeping
 // credentials as environment-variable placeholders.
@@ -73,7 +78,11 @@ func ParseConfigText(text string, existing []ServerConfig) ([]ServerConfig, erro
 			cfg.Transport = TransportStreamableHTTP
 		}
 		if len(raw.Env) > 0 {
-			refs, values, err := splitConfiguredValues(raw.Env, "environment")
+			env, err := restoreRedactedValues(raw.Env, existingByID[id].EnvRefs, existingByID[id].EnvValues)
+			if err != nil {
+				return nil, fmt.Errorf("MCP server %q: %w", id, err)
+			}
+			refs, values, err := splitConfiguredValues(env, "environment")
 			if err != nil {
 				return nil, fmt.Errorf("MCP server %q: %w", id, err)
 			}
@@ -81,7 +90,11 @@ func ParseConfigText(text string, existing []ServerConfig) ([]ServerConfig, erro
 			cfg.EnvValues = values
 		}
 		if len(raw.Headers) > 0 {
-			refs, values, err := splitConfiguredValues(raw.Headers, "header")
+			headers, err := restoreRedactedValues(raw.Headers, existingByID[id].HeaderRefs, existingByID[id].HeaderValues)
+			if err != nil {
+				return nil, fmt.Errorf("MCP server %q: %w", id, err)
+			}
+			refs, values, err := splitConfiguredValues(headers, "header")
 			if err != nil {
 				return nil, fmt.Errorf("MCP server %q: %w", id, err)
 			}
@@ -117,7 +130,10 @@ func FormatConfigText(configs []ServerConfig) (string, error) {
 	servers := make(map[string]any, len(ids))
 	for _, id := range ids {
 		cfg := byID[id]
-		item := map[string]any{}
+		item := map[string]any{
+			"enabled":       cfg.Enabled,
+			"enabled_tools": append([]string{}, cfg.EnabledTools...),
+		}
 		if cfg.DisplayName != "" {
 			item["display_name"] = cfg.DisplayName
 		}
@@ -141,6 +157,30 @@ func FormatConfigText(configs []ServerConfig) (string, error) {
 		return "", err
 	}
 	return string(data) + "\n", nil
+}
+
+// FormatConfigTextRedacted is the HTTP editor projection. The formatter above
+// remains lossless for local serialization and runtime use; API responses use
+// this version so literal credentials never leave the encrypted store.
+func FormatConfigTextRedacted(configs []ServerConfig) (string, error) {
+	redacted := make([]ServerConfig, len(configs))
+	for i, cfg := range configs {
+		redacted[i] = cfg
+		redacted[i].EnvValues = redactLiteralValues(cfg.EnvValues)
+		redacted[i].HeaderValues = redactLiteralValues(cfg.HeaderValues)
+	}
+	return FormatConfigText(redacted)
+}
+
+func redactLiteralValues(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return values
+	}
+	redacted := make(map[string]string, len(values))
+	for key := range values {
+		redacted[key] = RedactedSecretPlaceholder
+	}
+	return redacted
 }
 
 func splitConfiguredValues(values map[string]string, kind string) (map[string]string, map[string]string, error) {
@@ -182,6 +222,29 @@ func configuredValues(refs, literals map[string]string) map[string]string {
 		out[key] = "${" + strings.TrimSpace(refs[key]) + "}"
 	}
 	return out
+}
+
+func restoreRedactedValues(values, existingRefs, existingLiterals map[string]string) (map[string]string, error) {
+	if len(values) == 0 {
+		return values, nil
+	}
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		if value != RedactedSecretPlaceholder {
+			result[key] = value
+			continue
+		}
+		if literal, ok := existingLiterals[key]; ok {
+			result[key] = literal
+			continue
+		}
+		if ref, ok := existingRefs[key]; ok {
+			result[key] = "${" + ref + "}"
+			continue
+		}
+		return nil, fmt.Errorf("redacted secret %q can only retain an existing value", key)
+	}
+	return result, nil
 }
 
 func jsonFieldPresent(raw json.RawMessage, field string) bool {

@@ -250,6 +250,8 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `GET` | `/v1/mcp/servers/{server_id}/tools` | `handleMCPServerTools` | [mcp_api.go#L41](../../node/internal/api/mcp_api.go#L41) |
 | `GET` | `/v1/mcp/status` | `handleMCPStatus` | [mcp_api.go#L35](../../node/internal/api/mcp_api.go#L35) |
 
+`GET /v1/mcp/config` 返回可编辑配置视图，其中字面量环境变量和请求头值会替换为 `__DAGENTS_SECRET_REDACTED__`。`PUT` 仅可用该标记保留同一服务、同一键已有的值；若没有对应旧值则拒绝保存。提交新值会轮换密钥，删除键或服务会真正删除旧值。配置视图包含 `enabled` 与 `enabled_tools`，因此 GET 后原样 PUT 会保留服务停用状态及工具允许列表。此处只遮罩 API 编辑视图；本地运行时格式化仍保持原值。
+
 ### 文件传输、feedback 与 Manage upload
 
 | Method | Path | Handler | Source |

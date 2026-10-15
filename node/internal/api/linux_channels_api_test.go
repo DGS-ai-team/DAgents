@@ -104,6 +104,19 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 	if err != nil || len(bindings) != 1 || bindings[0].ChannelID != channelID {
 		t.Fatalf("binding replacement was not atomic: %+v err=%v", bindings, err)
 	}
+	if status, body := postJSON(http.MethodGet, "/v1/linux/credentials", nil); status != http.StatusOK {
+		t.Fatalf("credential list status=%d body=%v", status, body)
+	} else if encoded, _ := json.Marshal(body); bytes.Contains(encoded, []byte(directPassword)) || bytes.Contains(encoded, []byte(privateKey)) || bytes.Contains(encoded, []byte(directCredential.SecretRef)) {
+		t.Fatalf("credential list exposed secret material: %s", encoded)
+	}
+	if status, body := postJSON(http.MethodGet, "/v1/linux/channels", nil); status != http.StatusOK {
+		t.Fatalf("channel list status=%d body=%v", status, body)
+	} else if encoded, _ := json.Marshal(body); bytes.Contains(encoded, []byte(directPassword)) || bytes.Contains(encoded, []byte(privateKey)) || bytes.Contains(encoded, []byte(directCredential.SecretRef)) {
+		t.Fatalf("channel list exposed secret material: %s", encoded)
+	}
+	if status, body := postJSON(http.MethodGet, "/v1/agents/agent-a/linux-channels", nil); status != http.StatusOK || body["agent_id"] != "agent-a" {
+		t.Fatalf("agent binding read status=%d body=%v", status, body)
+	}
 }
 
 func bodyCredentialID(body map[string]any) string {

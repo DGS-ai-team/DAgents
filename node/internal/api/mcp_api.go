@@ -54,7 +54,7 @@ func (s *Server) handleGetMCPConfig(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "mcp_config_load_failed", err.Error(), nil)
 		return
 	}
-	configText, err := mcp.FormatConfigText(configs)
+	configText, err := mcp.FormatConfigTextRedacted(configs)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "mcp_config_format_failed", err.Error(), nil)
 		return
@@ -98,7 +98,7 @@ func (s *Server) handlePutMCPConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.reloadMCPBoundAgents(r.Context())
-	configText, err := mcp.FormatConfigText(configs)
+	configText, err := mcp.FormatConfigTextRedacted(configs)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "mcp_config_format_failed", err.Error(), nil)
 		return
