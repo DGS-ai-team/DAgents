@@ -25,6 +25,7 @@
 - API contracts、OpenAPI 路由同步、Manage Console build/lint、Ruff、Pyright 通过。按锁定依赖创建的独立 Python 3.13 环境完整 unittest 197/197。默认 Anaconda 环境缺 FastAPI 的首次导入失败不作为产品失败；隔离依赖环境的重跑结果为最终结果。
 - PR 首轮 CI 发现的 Node 未使用变量与 Manage Docker 共享图标复制遗漏已修正。依赖审计修复后，三套前端 `npm audit --audit-level=high` 均为 0 vulnerabilities，许可证策略覆盖 219 个 package/version pairs；Node 410/410 和 Desktop 51/51 再次通过。Docker 镜像构建由远端 CI 复验，本机没有 Docker CLI。
 - 第二轮远端 CI 已通过 Manage Docker 构建、Linux Rust、API contracts、Desktop UI、安装器与 bundle 契约、Linux Go 全模块测试及 vet；之后检出的 Client 两条静态检查文案已改为小写并通过同版本 staticcheck。Python `multidict` 升至最小修复版 6.9.1，主依赖及 Browser 既有例外清单下的审计均通过，197 项测试重跑通过。多附件先失败后成功会保留本批失败提示，针对性 workspace 测试 9/9 通过。最终远端状态以 PR 当前 head 为准。
+- `6c9f2654` 的远端 CI 已通过 Windows x64/x86 Desktop 构建、Python、Linux Rust、Go 全模块测试/vet/staticcheck 和 session/turn/queue race 回归。随后 govulncheck 在旧 Go 1.26.8 标准库检出 9 项漏洞，报告修复版均为 1.26.9；测试、自动发布与手工打包工作流的 9 处固定版本已统一更新至官方提供的 Go 1.26.9，未新增漏洞忽略项。该次旧工具链流水线不是全绿记录。
 
 隔离 Auto 已禁用唤醒；Desktop 退出后，最后通过指定 fixture JSON 的 owned-node CLI 停止空闲测试 Node，`18974` 不再监听。首次清理命令未指定该 JSON，因默认 endpoint 的 readiness 无法确认而安全拒绝；没有停止其他 Node。未删除测试数据或凭据文件。
 
