@@ -20,7 +20,7 @@
 ## 自动化验证
 
 - Node 全模块 `go test -count=1 ./...`、shared/config、shared/logfiles、shared/update、Client 测试及各模块 `go vet` 通过；包括 Runtime 隔离、重复 Open、Close/Open 历史、busy close 拒绝、Auto 与普通 Agent 的工具区分以及进程重启持久化。
-- Node 前端 407/407；共享图标 6/6；Desktop UI 修复后 51/51；Desktop Vite 构建通过。
+- Node 前端初验 407/407，合入最新 `dev` 后为 410/410（75 个测试文件）；共享图标 6/6；Desktop UI 修复并合并后 51/51；Desktop Vite 构建通过。
 - Rust `cargo test` 30/30 与 `cargo check` 通过。额外启用隔离 Node 的 `live_local_node_terminal_open_input_detach_resume_close_smoke`：1/1 通过，实际覆盖 PTY 输入、detach、resume、输出回放、close 与 session 移除。默认 Rust 测试中的其他 opt-in live smoke 并未自动执行。
 - API contracts、OpenAPI 路由同步、Manage Console build/lint、Ruff、Pyright 通过。按锁定依赖创建的独立 Python 3.13 环境完整 unittest 197/197。默认 Anaconda 环境缺 FastAPI 的首次导入失败不作为产品失败；隔离依赖环境的重跑结果为最终结果。
 

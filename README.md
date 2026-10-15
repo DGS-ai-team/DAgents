@@ -209,17 +209,17 @@ DAgents 能够调用本机工具，因此请把它当作一个可以执行操作
 ## 仓库结构
 
 ```text
-node/                  Agent Node、工具执行、会话与 Node Web UI
+node/                  Agent Node API、工具执行、会话与共享设置前端源码
 manage/                可选的 Workgroup 控制面与 Manage Console
 client/                Node 客户端与远程连接适配
-desktop/               Windows/Linux 桌面 Shell
-shared/                跨 Go 模块共享的稳定类型与算法
+desktop/               独立 Tauri Desktop、工作台与资源界面
+shared/                共享 Go 模块、品牌与规范化图标资源
 packaging/             安装包、服务和发布资产
 docs/                  用户、架构、参考、设计与历史文档
 tests/                 Python/跨组件测试
 ```
 
-Node 是本地运行时的事实源，Manage 是可选治理层；Web UI 负责展示状态和发起操作，不复制后端业务规则。
+Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 负责展示状态和发起操作，不复制后端业务规则。`node/webui/frontend` 现保留为 Desktop 复用的设置和消息组件源码，Node 不再托管 `/ui/`。
 
 ## 开发与验证
 
@@ -240,7 +240,8 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 常用的局部验证命令：
 
 ```bash
-npm test --prefix node/webui/frontend -- --run
+npm test --prefix node/webui/frontend
+npm run test:ui --prefix desktop/tray-tauri
 go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
