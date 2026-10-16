@@ -1175,6 +1175,10 @@ onMounted(async () => {
       streamingText.value += event.data.content || ''
       return
     }
+    if (event.event_type === 'runtime/notice' && event.data?.message_kind === 'context_boundary') {
+      await selectAgent(event.agent_id)
+      return
+    }
     if (['turn_state', 'turn_finished', 'hitl_required', 'tool_call', 'tool_result', 'error'].includes(event.event_type)) {
       const eventAgentId = event.agent_id
       if (activeId.value !== eventAgentId) return

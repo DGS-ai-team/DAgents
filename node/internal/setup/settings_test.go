@@ -183,11 +183,9 @@ func TestApplyPatch_compression(t *testing.T) {
 
 	updated, err := ApplyPatch(cfg, SettingsPatch{
 		Compression: &CompressionSettings{
-			SilentTriggerTokens:         50000,
-			BlockingTriggerTokens:       70000,
-			IdleAutoCompressSeconds:     3600,
-			IdleAutoCompressPollSeconds: 120,
-			IdleAutoCompressMinTokens:   40000,
+			SilentTriggerTokens:        50000,
+			BlockingTriggerTokens:      70000,
+			IdleNewConversationSeconds: 3600,
 		},
 	})
 	if err != nil {
@@ -195,7 +193,7 @@ func TestApplyPatch_compression(t *testing.T) {
 	}
 	if updated.Compression.SilentTriggerTokens != 50000 ||
 		updated.Compression.BlockingTriggerTokens != 70000 ||
-		updated.Compression.IdleAutoCompressSeconds != 3600 {
+		updated.Compression.IdleNewConversationSeconds != 3600 {
 		t.Fatalf("compression = %+v", updated.Compression)
 	}
 

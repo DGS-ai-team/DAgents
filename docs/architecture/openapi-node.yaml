@@ -1359,6 +1359,13 @@ components:
         has_node_token: {type: boolean, description: Indicates a stored token without returning it}
         registration_interval_seconds: {type: integer}
         registration_ttl_seconds: {type: integer}
+    NodeCompressionSettings:
+      type: object
+      description: Whole-block settings; GET and merge before PATCH. Idle boundaries apply only to new human turns of ordinary Agents, require an archive, and do not replace token-threshold compression.
+      properties:
+        silent_trigger_tokens: {type: integer, minimum: 0}
+        blocking_trigger_tokens: {type: integer, minimum: 0}
+        idle_new_conversation_seconds: {type: integer, minimum: 0, default: 0, description: Zero disables idle boundaries. After a completed interaction becomes idle, the next human message starts a new model context segment while retaining the transcript. Auto Agents use Dreaming instead.}
     NodeSettingsView:
       type: object
       required: [config_writable, restart_required, node, llm, manage, features, compression, memory, runtime, agent, user, onboarding, child_agents, browser, wecom, tools, hooks, available_tool_groups]
@@ -1376,7 +1383,7 @@ components:
         llm: {type: object, additionalProperties: true}
         manage: {$ref: '#/components/schemas/NodeManageSettingsView'}
         features: {type: object, additionalProperties: true}
-        compression: {type: object, additionalProperties: true}
+        compression: {$ref: '#/components/schemas/NodeCompressionSettings'}
         memory: {type: object, additionalProperties: true}
         runtime: {type: object, additionalProperties: true}
         agent:
@@ -1404,6 +1411,7 @@ components:
     NodeSettingsPatch:
       type: object
       properties:
+        compression: {$ref: '#/components/schemas/NodeCompressionSettings'}
         agent:
           type: object
           description: Update the Node display profile. A non-empty name is required when completing Node setup.

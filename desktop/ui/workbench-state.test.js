@@ -213,6 +213,18 @@ test('Desktop chat adapter keeps hydrate tools and gives id-less history stable 
   assert.notEqual(desktopChatEntries('agent-b', transcript)[0].id, entries[0].id)
 })
 
+test('Desktop chat adapter preserves the safe conversation boundary in hydrated history', () => {
+  const entries = desktopChatEntries('agent-a', [
+    { kind: 'user', text: 'Earlier' },
+    { kind: 'assistant', text: 'Earlier answer' },
+    { kind: 'context_boundary', boundary_id: 'stable-id' },
+    { kind: 'user', text: 'New question' },
+  ])
+  assert.deepEqual(entries.map(entry => entry.kind), ['user', 'assistant', 'context_boundary', 'user'])
+  assert.equal(entries[2].boundary_id, 'stable-id')
+  assert.equal(entries[2].text, undefined)
+})
+
 test('streaming assistant reserves its history index and terminal hydrate keeps keys stable across turns', () => {
   const live = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Question' }], 'Answer')
   const completedTranscript = [

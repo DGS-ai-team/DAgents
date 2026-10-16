@@ -72,6 +72,10 @@ curl -X PATCH http://127.0.0.1:18765/v1/settings \
 
 ### 消息、SSE 与 HITL
 
+普通 Agent 的空闲边界由 Node 管理，设置字段为 `compression.idle_new_conversation_seconds`（非负整数，`0` 关闭）。它在空闲后的下一条真实用户消息开始前执行，不是后台摘要任务；修改后按设置响应中的 `restart_required` 完成重启。原 `idle_auto_compress_seconds`、扫描间隔及最低 token 字段不再属于当前配置。Auto 使用自身 Dreaming 流程，不按此间隔重置。
+
+成功持久化新段后，SSE `runtime/notice` 的安全载荷包含 `message_kind: "context_boundary"` 和稳定的 `boundary_id`。hydrate transcript 中对应 `{ "kind": "context_boundary", "boundary_id": "..." }`。客户端按 ID 去重，在本次真实用户消息之前显示“新对话 · 上下文已重置”，不得渲染内部衔接正文或归档路径。消息队列中较晚到达的输入不改变此边界的顺序。SQLite 中的既有 transcript 继续保留；模型可读的段归档由 Node 写入 Agent 自身工作区的 `.dagents/<agent_id>/history/`。
+
 `POST /v1/messages` 接收 `agent_id`、`content` 和可选 `request_type`；默认类型为 `message`，`resume` 用于继续等待 HITL 的 Agent。Node 异步执行 turn，接口立即返回 `{ "accepted": true, "agent_id": "...", "priority": "..." }` 一类的接受结果。
 
 ```sh

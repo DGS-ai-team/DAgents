@@ -771,7 +771,7 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 		return newRuntimeWithPublisher(
 			"session-1", "agent-1", hub, hub,
 			&llm.MockClient{}, nil, nil, st, logx.Discard(), nil, nil, nil,
-			false, 0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
+			0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
 		)
 	}
 
@@ -838,7 +838,7 @@ func TestRuntimeLifecycleRecoveryPreservesLoadedHistoryRevision(t *testing.T) {
 		return newRuntimeWithPublisher(
 			"session-revision", "agent-1", hub, hub,
 			&llm.MockClient{}, nil, nil, st, logx.Discard(), initial, nil, nil,
-			false, 0, 0, TurnOptions{
+			0, 0, TurnOptions{
 				WorkspaceRoot:          t.TempDir(),
 				SkillsEnabled:          false,
 				initialHistoryRevision: revision,
@@ -927,7 +927,7 @@ func TestRuntimeLifecycleRecoversCompletedToolResultFromHistory(t *testing.T) {
 	recovered := newRuntimeWithPublisher(
 		"session-1", "agent-1", hub, hub,
 		&llm.MockClient{}, nil, nil, st, logx.Discard(), history, nil, nil,
-		false, 0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
+		0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
 	)
 	state = recovered.turnCoordinator.Snapshot()
 	if state.RecoveryRequired || state.StepIndex != 2 || state.StepStatus != turn.StepStatusRequesting {

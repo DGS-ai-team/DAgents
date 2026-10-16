@@ -337,17 +337,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		},
 		WorkspaceRoot: cfg.RuntimeDir(),
 		// MaxSteps 由各 Agent config_snapshot（defaults.llm.max_steps）在装入 runtime 时写入。
-		SkillsRoot:                  cfg.SkillsRoot(),
-		SkillsEnabled:               cfg.Skills.Enabled,
-		SkillsMaxInPrompt:           cfg.Skills.MaxInPrompt,
-		RuntimeDir:                  cfg.RuntimeDir(),
-		CompressionSilent:           cfg.Compression.SilentTriggerTokens,
-		CompressionBlocking:         cfg.Compression.BlockingTriggerTokens,
-		IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
-		IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
-		IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
-		RawMessageHistoryEnabled:    cfg.RawMessageHistoryEnabled(),
-		RawMessageHistoryDir:        cfg.RawMessageHistoryDir(),
+		SkillsRoot:                 cfg.SkillsRoot(),
+		SkillsEnabled:              cfg.Skills.Enabled,
+		SkillsMaxInPrompt:          cfg.Skills.MaxInPrompt,
+		RuntimeDir:                 cfg.RuntimeDir(),
+		CompressionSilent:          cfg.Compression.SilentTriggerTokens,
+		CompressionBlocking:        cfg.Compression.BlockingTriggerTokens,
+		IdleNewConversationSeconds: cfg.Compression.IdleNewConversationSeconds,
+		RawMessageHistoryEnabled:   cfg.RawMessageHistoryEnabled(),
+		RawMessageHistoryDir:       cfg.RawMessageHistoryDir(),
 		DuplicateToolCall: hooks.DuplicateConfig{
 			Enabled:       &duplicateToolCallEnabled,
 			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
@@ -398,9 +396,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}, hub, cfg.NodeID, logger)
 	childMgr.SetRunRepository(session.NewChildRunRepository(st))
 	mgr.SetChildAgentManager(childMgr)
-	if cfg.IdleAutoCompressEnabled() {
-		mgr.StartIdleAutoCompressScanner()
-	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
 	startupErr := autonomyInitErr

@@ -17,9 +17,7 @@ const setupConfig = () => ({
   compression: {
     silent_trigger_tokens: 64000,
     blocking_trigger_tokens: 96000,
-    idle_auto_compress_seconds: 0,
-    idle_auto_compress_poll_seconds: 0,
-    idle_auto_compress_min_tokens: 0,
+    idle_new_conversation_seconds: 0,
   },
   hooks: {
     inject_today_date_enabled: false,
@@ -49,7 +47,7 @@ describe("ContextConfigPanel save errors", () => {
 
     expect(wrapper.get('[role="alert"]').text()).toContain("服务暂时不可用");
     expect(wrapper.get('input[type="number"]').element.value).toBe("81000");
-    expect(wrapper.findAll('input[type="number"]')).toHaveLength(6);
+    expect(wrapper.findAll('input[type="number"]')).toHaveLength(4);
     expect(wrapper.get('input[type="number"]').element.disabled).toBe(false);
     expect(api.patchSetupConfig).toHaveBeenCalledTimes(1);
     wrapper.unmount();
@@ -103,6 +101,24 @@ describe("ContextConfigPanel save errors", () => {
 
     expect(api.patchSetupConfig).toHaveBeenCalledTimes(1);
     expect(wrapper.find('input[type="number"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("saves the idle new-conversation duration and explains its trigger", async () => {
+    const wrapper = mount(ContextConfigPanel);
+    await flushPromises();
+    expect(wrapper.text()).toContain("普通 Agent 空闲达到设定时间后，下条用户消息");
+    expect(wrapper.text()).toContain("开启新对话并归档旧上下文");
+    const idle = wrapper.findAll('input[type="number"]')[2];
+    await idle.setValue("3600");
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+
+    expect(api.patchSetupConfig).toHaveBeenCalledWith(expect.objectContaining({
+      compression: expect.objectContaining({ idle_new_conversation_seconds: 3600 }),
+    }));
+    expect(wrapper.text()).not.toContain("扫描间隔");
+    expect(wrapper.text()).not.toContain("最低 tokens");
     wrapper.unmount();
   });
 });

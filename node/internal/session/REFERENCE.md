@@ -75,13 +75,16 @@
 | `estimateMessageTokens` | messages token 粗算 |
 | `pendingToolCallsCount` | 从 `PendingHITL` 统计待处理 tool call 数 |
 
-## release.go / idle_auto_compress.go
+## release.go / idle_context_boundary.go
 
 | 符号 | 说明 |
 |------|------|
 | `Release` | persist → stop consumer → 移出 `m.sessions`；不删 SQLite（F-NM1） |
-| `scanIdleSessionMaintenance` | idle 扫描：可选压缩 → Release（F-NM2–NM5） |
-| `StartIdleAutoCompressScanner` | 启动 idle 维护后台循环 |
+| `maybeStartIdleConversation` | 新真实用户轮次前按 `LastHumanInteraction` 判断空闲；归档成功后提交新活动起点和隐藏 bridge，失败保留旧上下文 |
+| `lastMeaningfulHumanExchange` | 提取上一段的用户请求和最后有正文的助手回复，分别限制长度 |
+| `recoverLastHumanInteraction` | 用终态 human 生命周期事件校正 checkpoint 的时间，只向后推进，不越过清空上下文的新时间屏障 |
+
+原后台空闲压缩扫描器已移除。`Release` 仍可卸载 runtime，但空闲新段切换不需要后台恢复或卸载 runtime。
 
 ## triggers.go
 

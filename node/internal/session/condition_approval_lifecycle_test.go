@@ -49,7 +49,7 @@ func newConditionLifecycleRuntime(t *testing.T, st *store.SQLiteStore, sessionID
 	}})
 	hub := stream.NewHub(32, logx.Discard())
 	return newRuntimeWithPublisher(sessionID, "agent-1", hub, hub, &llm.MockClient{}, registry,
-		policyEngine, st, logx.Discard(), nil, nil, nil, false, 0, 0,
+		policyEngine, st, logx.Discard(), nil, nil, nil, 0, 0,
 		TurnOptions{WorkspaceRoot: workspace, SkillsEnabled: false}, nil)
 }
 

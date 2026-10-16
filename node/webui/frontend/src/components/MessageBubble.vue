@@ -74,6 +74,9 @@ function userImageThumb(src) {
 </script>
 
 <template>
+  <div v-if="entry.kind === 'context_boundary'" class="context-boundary" role="separator" aria-label="新对话，上下文已重置">
+    <span>新对话 · 上下文已重置</span>
+  </div>
   <div v-if="entry.kind === 'user'" class="msg msg--user">
     <div class="msg__body">
       <div v-if="entry.text" class="msg__bubble msg__bubble--user">
@@ -147,6 +150,22 @@ function userImageThumb(src) {
 </template>
 
 <style scoped>
+.context-boundary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.context-boundary::before,
+.context-boundary::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
 .msg__image-btn {
   padding: 0;
   border: 0;
