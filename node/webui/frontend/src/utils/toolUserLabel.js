@@ -1,6 +1,7 @@
 import { truncateGraphemes } from "./textTruncate.js";
 import { resolveToolArgumentsFromData, toolCallPurpose } from "./toolCalls.js";
 import {
+  bashControlMode,
   toolCallIdFromEntry,
   toolJobsStore,
 } from "../stores/toolJobs.js";
@@ -181,9 +182,9 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
     if (resultStatus === "failed" || resultStatus === "error" || resultStatus === "unknown") return "failed";
     if (resultStatus === "cancelled" || resultStatus === "canceled" || resultStatus === "timed_out") return "cancelled";
     if (resultStatus === "queued") return "background";
-    if (resultStatus === "running") return "running";
+    if (["running", "in_progress", "executing", "started"].includes(resultStatus)) return "running";
     if (resultStatus === "awaiting_user") return "pending";
-    if (resultStatus === "succeeded") return "completed";
+    if (["succeeded", "completed", "ok"].includes(resultStatus)) return "completed";
   }
   if (
     resultEntry?.data?.interrupted ||
@@ -195,6 +196,20 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
     return "interrupted";
   }
 
+  // A result with no execution status is still a settled result. Do not let a
+  // stale running-call cache make it active again.
+  if (resultEntry) return "completed";
+
+  // Without a result, use the lifecycle execution hint before the eventually
+  // consistent /tool-jobs cache.
+  if (executionHint === "settled") return "completed";
+  if (executionHint === "failed") return "failed";
+  if (executionHint === "cancelled") return "cancelled";
+  if (executionHint === "rejected") return "rejected";
+  if (executionHint === "interrupted") return "interrupted";
+
+  if (executionHint === "pending") return "pending";
+
   const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
   if (id && toolJobsStore.runningCallIds.includes(id)) return "running";
 
@@ -204,11 +219,6 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   if (callEntry?.partial) {
     return executionHint === "pending" ? "pending" : "generating";
   }
-
-  if (executionHint === "settled") return "completed";
-  if (executionHint === "failed") return "failed";
-
-  if (resultEntry) return "completed";
 
   if (callEntry && !resultEntry) {
     // HITL 待批：尚未开跑
@@ -252,6 +262,23 @@ export function toolStepStatusText({ callEntry, resultEntry, executionHint = nul
 export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null } = {}) {
   const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint });
   return phase === "generating" || phase === "running" || phase === "background";
+}
+
+/** A result phase outranks cached execution hints from an earlier SSE snapshot. */
+export function toolStepIsActiveInGroup(step = {}) {
+  if (!step.callEntry) return false;
+  const phase = resolveToolStepPhase(step);
+  return !["completed", "failed", "cancelled", "rejected", "interrupted"].includes(phase);
+}
+
+/** A lagging bash job snapshot must not override an explicit terminal result. */
+export function bashControlModeForStep({ callEntry, resultEntry, executionHint = null } = {}) {
+  if (resultEntry) {
+    if (!toolStepIsInProgress({ callEntry, resultEntry })) return null;
+  } else if (["settled", "failed", "cancelled", "rejected", "interrupted"].includes(executionHint)) {
+    return null;
+  }
+  return bashControlMode({ callEntry, resultEntry });
 }
 
 /** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */

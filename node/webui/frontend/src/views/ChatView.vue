@@ -79,6 +79,8 @@ import {
 import {
   turnStateStore,
   applyTurnState,
+  applyTurnFinishedEvent,
+  budgetExhaustionMessage,
   setOutputChannel,
   markTurnAccepted,
   failTurnSubmission,
@@ -457,9 +459,19 @@ function handleEvent(ev) {
       );
       break;
     case "turn_finished":
+      // Only the explicit, correlated terminal event may release the composer.
+      // Generic error events and stale finishes from a prior turn are not turn
+      // completion signals.
+      if (!applyTurnFinishedEvent(ev.data)) break;
+      syncTurnStatus(turnStateStore);
+      clearHitl();
+      if (String(ev.data?.finish_reason || "").trim().toLowerCase() === "budget_exhausted") {
+        addSystem(budgetExhaustionMessage(ev.data?.budget_reason));
+      }
       finalizeAssistant();
       finalizeReasoning();
       finalizePartialToolCalls({ interrupted: true });
+      resetToolStream();
       refreshContextTokens();
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("dagents:agent-turn-finished", { detail: { agentId: conversationId.value } }));

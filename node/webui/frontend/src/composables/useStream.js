@@ -107,7 +107,7 @@ export function annotateToolExecutionHints(items, hitlQueue = [], authority = tu
       ? (authority === turnStateStore ? toolExecutionForCall(id) : authority?.toolExecutions?.find((row) => row.toolCallId === id))
       : null;
     const status = String(execution?.status || "").trim().toLowerCase();
-    if (["succeeded", "denied", "cancelled", "timed_out", "unknown"].includes(status)) {
+    if (["succeeded", "failed", "denied", "cancelled", "timed_out", "unknown"].includes(status)) {
       item.executionHint = status === "succeeded" ? "settled" : "failed";
     } else if (["running"].includes(status)) {
       item.executionHint = "active";
