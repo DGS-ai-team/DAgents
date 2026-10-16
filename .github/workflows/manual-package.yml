@@ -8,7 +8,7 @@ on:
         description: "必须与所检出源码的 VERSION 完全一致（写入产物版本元数据）"
         required: true
       skip_tests:
-        description: "跳过构建前 Go/Python 单测（仅调试打包脚本时用）"
+        description: "跳过构建前 Go/Python/Web/Desktop 测试（仅调试打包脚本时用）"
         type: boolean
         default: false
 
@@ -40,7 +40,7 @@ jobs:
         run: python scripts/release/validate_release.py --version "${PACKAGE_VERSION}"
 
   test:
-    name: Pre-build tests (Go + Python + Web UI)
+    name: Pre-build tests (Go + Python + Web UI + Desktop UI)
     needs: validate-version
     if: ${{ !inputs.skip_tests && needs.validate-version.result == 'success' }}
     runs-on: ubuntu-latest
@@ -54,6 +54,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
+            desktop/tray-tauri/package-lock.json
             node/webui/frontend/package-lock.json
             manage/console/frontend/package-lock.json
 
@@ -61,6 +62,12 @@ jobs:
         run: |
           npm ci --prefix node/webui/frontend
           npm test --prefix node/webui/frontend
+
+      - name: Test Desktop UI
+        run: |
+          npm ci --prefix desktop/tray-tauri
+          npm run test:ui --prefix desktop/tray-tauri
+          npm run build --prefix desktop/tray-tauri
 
       - name: Lint Web UI
         run: npm run lint --prefix node/webui/frontend
@@ -92,7 +99,6 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
-          architecture: ${{ matrix.python_arch }}
           cache: pip
 
       - name: Python test
@@ -113,13 +119,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -217,13 +216,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: node/webui/frontend/package-lock.json
-
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -313,7 +305,6 @@ jobs:
           OUT_DIR="${GITHUB_WORKSPACE}/dist/${{ matrix.platform }}" \
             TAURI_TARGET="${{ matrix.tauri_target }}" \
             bash scripts/ci/build_dagents_shell_tauri.sh
-          test -f "dist/${{ matrix.platform }}/dagents-shell-tauri.exe"
           test -f "dist/${{ matrix.platform }}/dagents-shell.exe"
 
       - name: Upload shell binaries
@@ -425,7 +416,6 @@ jobs:
               NODE_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-node.exe" \
               CLIENT_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-client.exe" \
               BROWSER_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-browser.exe" \
-              SHELL_TAURI_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell-tauri.exe" \
               SHELL_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell.exe" \
               bash scripts/ci/assemble_local_assistant_bundle.sh
           done

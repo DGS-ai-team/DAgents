@@ -54,7 +54,7 @@ prepare_old_staging() {
   printf 'keep this staging tree\n' > "${bundle}/sentinel.txt"
   printf 'old client\n' > "${bundle}/bin/dagents-client.exe"
   printf 'old browser\n' > "${bundle}/bin/dagents-browser.exe"
-  printf 'old shell\n' > "${bundle}/bin/dagents-shell-tauri.exe"
+  printf 'old shell\n' > "${bundle}/bin/dagents-shell.exe"
 }
 
 run_assembler() {
@@ -66,7 +66,7 @@ run_assembler() {
     NODE_BIN="${root}/dist/node.exe" \
     CLIENT_BIN="${root}/dist/client.exe" \
     BROWSER_BIN="${root}/dist/browser.exe" \
-    SHELL_TAURI_BIN="${root}/dist/shell.exe" \
+    SHELL_BIN="${root}/dist/shell.exe" \
     "$@" \
     bash "${root}/scripts/ci/assemble_local_assistant_bundle.sh"
 }
@@ -81,7 +81,7 @@ expect_preserved_failure() {
   case "${source_var}" in
     CLIENT_BIN) source="${bundle}/bin/dagents-client.exe" ;;
     BROWSER_BIN) source="${bundle}/bin/dagents-browser.exe" ;;
-    SHELL_TAURI_BIN) source="${bundle}/bin/dagents-shell-tauri.exe" ;;
+    SHELL_BIN) source="${bundle}/bin/dagents-shell.exe" ;;
     *) fail "unknown fixture input: ${source_var}" ;;
   esac
   if run_assembler "${root}" "${source_var}=${source}" > /dev/null 2>&1; then
@@ -93,7 +93,7 @@ expect_preserved_failure() {
 
 expect_preserved_failure client-from-staging CLIENT_BIN
 expect_preserved_failure browser-from-staging BROWSER_BIN
-expect_preserved_failure shell-from-staging SHELL_TAURI_BIN
+expect_preserved_failure shell-from-staging SHELL_BIN
 
 root="$(new_fixture windows-case-alias)"
 prepare_old_staging "${root}"
@@ -110,22 +110,34 @@ root="$(new_fixture missing-shell)"
 prepare_old_staging "${root}"
 bundle="${root}/dist/dagents-local-assistant-windows-amd64"
 if run_assembler "${root}" \
-  SHELL_TAURI_BIN="${root}/dist/missing-shell.exe" \
-  SHELL_BIN="${root}/dist/missing-default-shell.exe" > /dev/null 2>&1; then
+  SHELL_BIN="${root}/dist/missing-shell.exe" > /dev/null 2>&1; then
   fail "missing-shell: assembler unexpectedly accepted a missing required shell"
 fi
 [[ -f "${bundle}/sentinel.txt" ]] || fail "missing-shell: old staging sentinel was deleted"
+
+root="$(new_fixture legacy-shell-alias)"
+prepare_old_staging "${root}"
+bundle="${root}/dist/dagents-local-assistant-windows-amd64"
+rm -f "${root}/dist/shell.exe"
+printf 'legacy shell alias\n' > "${root}/dist/dagents-shell-tauri.exe"
+if run_assembler "${root}" \
+  SHELL_BIN="${root}/dist/missing-shell.exe" \
+  SHELL_TAURI_BIN="${root}/dist/dagents-shell-tauri.exe" > /dev/null 2>&1; then
+  fail "legacy-shell-alias: assembler accepted the retired tauri-suffixed entry point"
+fi
+[[ -f "${bundle}/sentinel.txt" ]] || fail "legacy-shell-alias: old staging sentinel was deleted"
 
 root="$(new_fixture skip-optional-payloads)"
 run_assembler "${root}" \
   SKIP_BROWSER=1 \
   BROWSER_BIN="${root}/dist/missing-browser.exe" \
   SKIP_SHELL=1 \
-  SHELL_TAURI_BIN="${root}/dist/missing-shell.exe" > /dev/null
+  SHELL_BIN="${root}/dist/missing-shell.exe" > /dev/null
 bundle="${root}/dist/dagents-local-assistant-windows-amd64"
 [[ -f "${bundle}/bin/dagents-node.exe" ]] || fail "skip-optional-payloads: Node was omitted"
 [[ ! -e "${bundle}/bin/dagents-browser.exe" ]] || fail "skip-optional-payloads: skipped browser was packaged"
 [[ ! -e "${bundle}/bin/dagents-shell.exe" ]] || fail "skip-optional-payloads: skipped shell was packaged"
+[[ ! -e "${bundle}/bin/dagents-shell-tauri.exe" ]] || fail "skip-optional-payloads: retired shell alias was packaged"
 
 root="$(new_fixture successful-assembly)"
 cp -a "${REPO_ROOT}/packaging/runtime/." "${root}/packaging/runtime/"
@@ -135,10 +147,10 @@ for expected in \
   "${bundle}/bin/dagents-node.exe" \
   "${bundle}/bin/dagents-client.exe" \
   "${bundle}/bin/dagents-browser.exe" \
-  "${bundle}/bin/dagents-shell.exe" \
-  "${bundle}/bin/dagents-shell-tauri.exe"; do
+  "${bundle}/bin/dagents-shell.exe"; do
   [[ -f "${expected}" ]] || fail "successful-assembly: missing expected payload $(basename "${expected}")"
 done
+[[ ! -e "${bundle}/bin/dagents-shell-tauri.exe" ]] || fail "successful-assembly: retired shell alias was packaged"
 [[ ! -e "${bundle}/sentinel.txt" ]] || fail "successful-assembly: stale staging sentinel survived replacement"
 skill_source="${REPO_ROOT}/packaging/runtime/skills/write-skill/SKILL.md"
 skill_staged="${bundle}/.runtime/skills/write-skill/SKILL.md"

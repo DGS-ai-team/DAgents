@@ -10,7 +10,10 @@ import (
 
 // LLMProfileSettings 单个 LLM 配置（Web UI / setup API）。
 type LLMProfileSettings struct {
-	ID                string `json:"id"`
+	ID string `json:"id"`
+	// OriginalID is write-only PATCH metadata used when renaming a profile so
+	// its stored secret can move with it. It is never populated in GET views.
+	OriginalID        string `json:"original_id,omitempty"`
 	Provider          string `json:"provider"`
 	BaseURL           string `json:"base_url"`
 	Model             string `json:"model"`

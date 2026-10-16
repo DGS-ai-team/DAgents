@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -175,9 +176,46 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		return nil
 	}
 	existing := map[string]store.LLMConfigRecord{}
-	if records, err := s.llmConfigs.List(ctx); err == nil {
-		for _, rec := range records {
-			existing[rec.ID] = rec
+	existingRecords, err := s.llmConfigs.List(ctx)
+	if err != nil {
+		return fmt.Errorf("load existing llm configs: %w", err)
+	}
+	for _, rec := range existingRecords {
+		existing[rec.ID] = rec
+	}
+
+	// Validate secret moves before ReplaceAll starts its transaction. A blank
+	// key on a renamed profile means "keep the old key", so ambiguity must fail
+	// instead of silently dropping or attaching another profile's secret.
+	destinations := make(map[string]bool, len(profiles))
+	for _, p := range profiles {
+		if id := strings.TrimSpace(p.ID); id != "" {
+			destinations[id] = true
+		}
+	}
+	migrations := map[string]string{} // destination ID -> source ID
+	sourceDestinations := map[string]int{}
+	for _, p := range profiles {
+		id := strings.TrimSpace(p.ID)
+		sourceID := strings.TrimSpace(p.OriginalID)
+		if id == "" || sourceID == "" || sourceID == id || p.ClearAPIKey || strings.TrimSpace(p.APIKey) != "" {
+			continue
+		}
+		if _, destinationExists := existing[id]; destinationExists && id != sourceID {
+			return fmt.Errorf("cannot preserve API key while renaming %q: destination %q already exists", sourceID, id)
+		}
+		if _, ok := existing[sourceID]; !ok {
+			return fmt.Errorf("cannot preserve API key while renaming %q: source profile does not exist", sourceID)
+		}
+		if destinations[sourceID] {
+			return fmt.Errorf("cannot preserve API key while renaming %q: source profile is still present", sourceID)
+		}
+		sourceDestinations[sourceID]++
+		migrations[id] = sourceID
+	}
+	for sourceID, count := range sourceDestinations {
+		if count > 1 {
+			return fmt.Errorf("cannot preserve API key from %q: multiple profiles reference the same source", sourceID)
 		}
 	}
 	records := make([]store.LLMConfigRecord, 0, len(profiles))
@@ -190,7 +228,11 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		}
 		thinking := strings.TrimSpace(p.Thinking)
 		effort := strings.TrimSpace(p.ReasoningEffort)
-		if old, ok := existing[id]; ok {
+		old, ok := existing[id]
+		if !ok {
+			old, ok = existing[migrations[id]]
+		}
+		if ok {
 			if thinking == "" {
 				thinking = old.Thinking
 			}
@@ -216,6 +258,17 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		if key := strings.TrimSpace(p.APIKey); key != "" {
 			keys[id] = key
 			continue
+		}
+		if sourceID := migrations[id]; sourceID != "" {
+			source := existing[sourceID]
+			if source.HasAPIKey() {
+				key, err := s.llmConfigs.DecryptAPIKey(source)
+				if err != nil {
+					return fmt.Errorf("read API key for source profile %q: %w", sourceID, err)
+				}
+				keys[id] = key
+				continue
+			}
 		}
 		if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
 			if v := strings.TrimSpace(os.Getenv(env)); v != "" {

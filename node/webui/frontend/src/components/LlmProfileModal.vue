@@ -57,7 +57,8 @@ const probedModels = ref(/** @type {string[]} */ ([]));
 const modelManual = ref(false);
 
 const title = computed(() => (props.mode === "create" ? "新建 LLM 配置" : "编辑 LLM 配置"));
-const originalId = computed(() => String(props.profile?.id || "").trim());
+const currentId = computed(() => String(props.profile?.id || "").trim());
+const originalId = computed(() => String(props.profile?.original_id || props.profile?.id || "").trim());
 const canProbe = computed(() => {
   if (draft.mock || draft.provider === "mock") return false;
   return String(draft.base_url || "").trim().length > 0;
@@ -128,8 +129,9 @@ function applyProviderPreset() {
   resetProbeUI();
 }
 
-/** 探测/下拉选中模型后，用模型名填「名称」，免去手工输入。 */
+/** 新建时可用模型名建议配置名称；编辑时保留用户当前 ID。 */
 function syncNameFromModel(model) {
+  if (props.mode !== "create") return;
   const m = String(model || "").trim();
   if (m) draft.id = m;
 }
@@ -197,7 +199,7 @@ function submit() {
     localError.message = "请填写配置名称（将显示在输入栏）";
     return;
   }
-  const others = (props.existingIds || []).filter((x) => x !== originalId.value);
+  const others = (props.existingIds || []).filter((x) => x !== currentId.value);
   if (others.includes(id)) {
     localError.message = `配置「${id}」已存在`;
     return;

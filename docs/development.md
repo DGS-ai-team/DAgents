@@ -38,7 +38,9 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 | 范围 | 命令 | 说明 |
 |---|---|---|
 | Node Web UI | `npm test --prefix node/webui/frontend` | Vitest 与共享图标契约 |
+| Desktop UI 测试 | `npm run test:ui --prefix desktop/tray-tauri` | 工作台、终端、设置与共享图标契约 |
 | Desktop UI 构建 | `npm run build --prefix desktop/tray-tauri` | 构建独立桌面 UI 资源 |
+| Desktop Rust | `cargo test --locked --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml --lib` | 启动路径、Node 管理、终端与本机桥接 |
 | Manage Console 构建 | `npm run build --prefix manage/console/frontend` | 生成 Console 静态资源 |
 | Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...` | 当前 Go 模块 |
 | Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...` | 当前 Go 模块 |
@@ -91,7 +93,7 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 ## 7. 发布前检查
 
 1. 更新根目录 `VERSION`，再由 `scripts/release/prepare_release.py` 同步包元数据和 `CHANGELOG.md`；
-2. 构建两套前端并确认静态产物未被意外提交；
+2. 测试共享前端与 Desktop UI，构建 Desktop 和 Manage Console，确认静态产物未被意外提交；
 3. 运行 `scripts/verify.sh`（Windows 使用 `scripts/verify.ps1`）；
 4. 对新增接口检查旧客户端、重连、重复消息和错误路径；
 5. 真实 UI 测试至少覆盖对话、工具、HITL、取消、刷新恢复；工作组变更还要覆盖 Agent 注册、成员加入、任务分派、审批和断线；

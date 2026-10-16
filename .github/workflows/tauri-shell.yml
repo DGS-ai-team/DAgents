@@ -153,11 +153,10 @@ jobs:
             TAURI_TARGET="${{ matrix.tauri_target }}" \
             bash scripts/ci/build_dagents_shell_tauri.sh
           test -f "dist/${{ matrix.platform }}/dagents-shell.exe"
-          test -f "dist/${{ matrix.platform }}/dagents-shell-tauri.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dagents-shell-tauri-${{ matrix.platform }}
+          name: dagents-shell-${{ matrix.platform }}
           path: dist/${{ matrix.platform }}/*
           if-no-files-found: error

@@ -2,21 +2,21 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
+import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
 
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
-  const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0', resources: [{ type: 'browser', id: 'current', label: '浏览器 · Writer', active: true }] })
+  const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0' })
   assert.deepEqual(desktopMenuNames, ['DAgents', '资源', '视图', '智能体', '帮助'])
   assert.equal(menus.DAgents.find(item => item.action === 'settings-general').label, '通用设置')
   assert.equal(menus.DAgents.find(item => item.label.startsWith('Node ·')).hint, '0.11.0')
   assert.equal(menus.DAgents.find(item => item.action === 'quit-desktop').label, '退出 Desktop')
   assert.equal(menus.DAgents.find(item => item.action === 'quit-desktop').hint, 'Node 将继续运行')
   assert.equal(menus['资源'].find(item => item.action === 'open-browser').disabled, false)
+  assert.equal(menus['资源'].find(item => item.action === 'create-terminal').label, '打开终端…')
   assert.equal(menus['资源'].find(item => item.action === 'close-resource').hint, '浏览器')
   assert.equal(menus['视图'].find(item => item.action === 'agent-chat').disabled, false)
-  const browserResource = menus['视图'].find(item => item.action === 'switch-resource')
-  assert.equal(browserResource.resourceId, 'current')
-  assert.equal(browserResource.disabled, true)
+  assert.equal(menus['视图'].some(item => item.action === 'switch-resource'), false)
   assert.equal(menus['智能体'].find(item => item.action === 'approval').disabled, false)
   assert.equal(menus['帮助'].find(item => item.action === 'feedback').label, '提交反馈')
 
@@ -44,6 +44,51 @@ test('Desktop menubar groups actions by user task and disables unavailable opera
   assert.equal(nonApprovalHitl['智能体'][0].label, 'Writer')
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'approval').disabled, true)
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'clear-context').disabled, true)
+})
+
+test('terminal creation asks for a target, while resuming an existing session bypasses the chooser', () => {
+  assert.deepEqual(terminalOpenIntent(), { kind: 'choose-target' })
+  assert.deepEqual(terminalOpenIntent('session-123'), { kind: 'resume', sessionId: 'session-123' })
+  const channels = [
+    { channel_id: 'enabled-a', enabled: true, display_name: 'Staging', host: 'stage.example', port: 22, username: 'deploy' },
+    { channel_id: 'disabled', enabled: false, display_name: 'Disabled' },
+  ]
+  const windows = terminalDialogChoices('Windows', channels)
+  assert.equal(windows[0].label, 'Node 本机 PowerShell')
+  assert.deepEqual(windows.map(choice => choice.targetId), [undefined, 'enabled-a'])
+  assert.deepEqual(terminalOpenArguments(windows[0], 'Windows'), { targetKind: 'local', targetId: null, shell: 'powershell' })
+  assert.deepEqual(terminalOpenArguments(windows[1], 'Windows'), { targetKind: 'linux_channel', targetId: 'enabled-a', shell: null })
+  assert.equal(terminalDialogChoices('linux', [])[0].label, 'Node 本机默认终端')
+  assert.equal(terminalDialogChoices('darwin', [])[0].label, 'Node 本机默认终端')
+  assert.equal(terminalDialogChoices('unknown', [])[0].label, 'Node 本机默认终端')
+  assert.deepEqual(terminalOpenArguments(terminalDialogChoices('darwin', [])[0], 'darwin'), { targetKind: 'local', targetId: null, shell: null })
+  assert.throws(() => terminalOpenArguments({ kind: 'linux_channel', targetId: 'invalid/id' }, 'Windows'), /请选择有效的 Linux 主机/)
+})
+
+test('terminal chooser ignores stale loads after cancellation, retry, or Agent switch', () => {
+  const request = { requestEpoch: 3, currentEpoch: 3, ownerId: 'agent-a', activeAgentId: 'agent-a', dialogOpen: true }
+  assert.equal(isTerminalDialogRequestCurrent(request), true)
+  assert.equal(isTerminalDialogRequestCurrent({ ...request, currentEpoch: 4 }), false)
+  assert.equal(isTerminalDialogRequestCurrent({ ...request, dialogOpen: false }), false)
+  assert.equal(isTerminalDialogRequestCurrent({ ...request, activeAgentId: 'agent-b' }), false)
+})
+
+test('running terminal list removes non-running and duplicate rows, and de-duplicates only within its Agent', () => {
+  const sessions = [
+    { terminal_id: 'one', status: 'running' },
+    { terminal_id: 'one', status: 'running', name: 'duplicate' },
+    { terminal_id: 'two', status: 'closed' },
+    { terminal_id: 'three', status: 'running' },
+  ]
+  assert.deepEqual(runningTerminalSessions(sessions), [sessions[0], sessions[3]])
+  const a = { id: 'a-one', agentId: 'agent-a', sessionId: 'one' }
+  const b = { id: 'b-one', agentId: 'agent-b', sessionId: 'one' }
+  assert.equal(findTerminalInstanceForSession([a, b], 'agent-a', 'one'), a)
+  assert.equal(findTerminalInstanceForSession([a, b], 'agent-b', 'one'), b)
+  assert.equal(findTerminalInstanceForSession([a, b], 'agent-c', 'one'), null)
+  assert.equal(reusableTerminalConnection({ ...a, connectionId: 'relay-a', status: 'connected' }).id, a.id)
+  assert.equal(reusableTerminalConnection({ ...a, connectionId: 'relay-a', status: 'error' }), null)
+  assert.equal(reusableTerminalConnection({ ...a, status: 'connected' }), null)
 })
 
 test('DesktopApp wires the active connection mode into the top-menu model', () => {

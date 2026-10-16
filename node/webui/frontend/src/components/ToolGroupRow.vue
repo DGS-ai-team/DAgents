@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import { resolveToolGroupVisual } from "../utils/toolSource.js";
-import { toolStepIsActiveInGroup } from "../utils/toolUserLabel.js";
+import { resolveToolStepPhase } from "../utils/toolUserLabel.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiIcon from "./UiIcon.vue";
 
@@ -14,19 +14,68 @@ const props = defineProps({
 
 const expanded = ref(false);
 
+const phaseCounts = computed(() => {
+  const counts = {
+    generating: 0,
+    running: 0,
+    background: 0,
+    pending: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+    rejected: 0,
+    interrupted: 0,
+    idle: 0,
+  };
+  for (const step of props.steps) {
+    const phase = resolveToolStepPhase(step);
+    counts[phase] = (counts[phase] || 0) + 1;
+  }
+  return counts;
+});
 const activeSteps = computed(() =>
-  props.steps.filter((step) => toolStepIsActiveInGroup(step)),
+  props.steps.filter((step) => ["generating", "running", "background"].includes(resolveToolStepPhase(step))),
 );
-
-const completedCount = computed(() => props.steps.filter((step) => !!step?.resultEntry).length);
 const hasActive = computed(() => activeSteps.value.length > 0);
+const hasPending = computed(() => phaseCounts.value.pending > 0);
 const visual = computed(() => {
   return resolveToolGroupVisual(props.steps);
 });
+const statusParts = computed(() => {
+  const counts = phaseCounts.value;
+  const parts = [];
+  const activeCount = counts.generating + counts.running;
+  if (activeCount) parts.push(`${activeCount} 项执行中`);
+  if (counts.background) parts.push(`${counts.background} 项后台执行中`);
+  if (counts.pending) parts.push(`${counts.pending} 项待批准`);
+  if (counts.completed) {
+    if (props.steps.length === counts.completed) return [`${props.steps.length} 项已完成`];
+    parts.push(`${counts.completed} 项成功`);
+  }
+  if (counts.failed) parts.push(`${counts.failed} 项失败`);
+  if (counts.cancelled) parts.push(`${counts.cancelled} 项取消`);
+  if (counts.rejected) parts.push(`${counts.rejected} 项拒绝`);
+  if (counts.interrupted) parts.push(`${counts.interrupted} 项中断`);
+  if (counts.idle) parts.push(`${counts.idle} 项状态未知`);
+  return parts;
+});
 const statusText = computed(() => {
-  if (hasActive.value) return `${activeSteps.value.length} 项执行中`;
-  if (completedCount.value === props.steps.length) return `${props.steps.length} 项已完成`;
-  return `${completedCount.value}/${props.steps.length} 项完成`;
+  return statusParts.value.join(" · ");
+});
+const statusIcon = computed(() => {
+  if (hasActive.value) return "";
+  if (hasPending.value) return "pending";
+  if (phaseCounts.value.failed || phaseCounts.value.rejected) return "close";
+  if (phaseCounts.value.cancelled || phaseCounts.value.interrupted) return "close";
+  if (props.steps.length > 0 && phaseCounts.value.completed === props.steps.length) return "check";
+  return "alert";
+});
+const statusTone = computed(() => {
+  if (hasActive.value) return "active";
+  if (phaseCounts.value.failed || phaseCounts.value.rejected) return "danger";
+  if (phaseCounts.value.cancelled || phaseCounts.value.interrupted) return "warning";
+  if (props.steps.length > 0 && phaseCounts.value.completed === props.steps.length) return "success";
+  return "muted";
 });
 
 function toggle() {
@@ -51,7 +100,7 @@ function toggle() {
     >
       <span class="tool-group-row__glyph" aria-hidden="true">
         <BrandActivityIndicator v-if="hasActive" mode="tool" :show-label="false" compact />
-        <UiIcon v-else name="check" :size="14" />
+        <UiIcon v-else :class="`tool-group-row__status-icon--${statusTone}`" :name="statusIcon" :size="14" />
       </span>
       <span class="tool-group-row__visual" :title="visual.label">
         <ToolGroupIcon :name="visual.kind" />
@@ -129,6 +178,10 @@ function toggle() {
   font-size: 12px;
 }
 
+.tool-group-row__status-icon--danger { color: var(--color-danger); }
+.tool-group-row__status-icon--warning { color: var(--color-warning); }
+.tool-group-row__status-icon--muted { color: var(--color-text-subtle); }
+
 .tool-group-row__visual {
   display: inline-flex;
   align-items: center;
@@ -183,10 +236,14 @@ function toggle() {
 }
 
 .tool-group-row__status {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 52%;
   color: var(--color-text-subtle);
   font-size: 11px;
-  white-space: nowrap;
+  line-height: 1.3;
+  text-align: right;
+  white-space: normal;
 }
 
 .tool-group-row__chevron {

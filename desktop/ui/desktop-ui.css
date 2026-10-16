@@ -391,8 +391,7 @@ textarea {
 .icon-mask { color: #343a3d; }
 .agent-item:hover .icon-mask,
 .resource-tab-main:hover .icon-mask,
-.menu-item:hover .icon-mask,
-.add-resource:hover .icon-mask { color: #1e2326; }
+.menu-item:hover .icon-mask { color: #1e2326; }
 button:disabled .icon-mask { color: #a0a5a8; }
 
 .agent-row { position: relative; min-width: 0; margin: 2px 0; }
@@ -917,83 +916,6 @@ button:disabled .icon-mask { color: #a0a5a8; }
   gap: 3px;
 }
 
-.resource-entry {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 34px;
-  padding: 0 9px;
-  border: 1px solid #cbdfe5;
-  border-radius: 7px;
-  background: #f8fcfd;
-  color: #555d62;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.resource-entry .icon-mask,
-.add-resource .icon-mask {
-  width: 16px;
-  height: 16px;
-  color: #343a3d;
-}
-
-.resource-entry .chevron-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.add-resource {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.add-resource:hover {
-  background: #eef4f6;
-}
-
-.add-resource .icon-mask {
-  width: 19px;
-  height: 19px;
-}
-
-.resource-popover {
-  top: 41px;
-  right: 0;
-  left: auto;
-  width: 220px;
-}
-
-.resource-popover strong {
-  display: block;
-  padding: 8px 9px;
-  color: #30495d;
-  font-size: 12px;
-}
-
-.resource-popover .menu-item {
-  justify-content: flex-start;
-  gap: 8px;
-}
-
-.resource-popover .icon-mask {
-  width: 17px;
-  height: 17px;
-}
-
-.empty-resource-menu {
-  display: block;
-  padding: 8px 9px;
-  color: #586b7b;
-  font-size: 12px;
-}
-
 .notice {
   display: flex;
   justify-content: space-between;
@@ -1278,7 +1200,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   margin: 0 auto;
   padding: 6px 8px;
   border: 1px solid #d9e2e4;
-  border-radius: 18px;
+  border-radius: 999px;
   box-shadow: 0 1px 2px #1933460a;
 }
 
@@ -1310,7 +1232,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   grid-template-rows: minmax(28px, auto) 34px;
   align-items: center;
   row-gap: 1px;
-  border-radius: 16px;
+  border-radius: 22px;
 }
 .composer.has-multiline textarea { align-self: start; }
 .composer-restore { grid-area: restore; max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1424,6 +1346,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 
 /* Terminal resource */
 .terminal-resource {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -1451,6 +1374,23 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   color: #526879;
   font-size: 11px;
 }
+
+.terminal-owner-note {
+  flex: 0 0 auto;
+  padding: 5px 22px;
+  border-bottom: 1px solid #e2e9eb;
+  background: #fbfcfd;
+  color: #59666b;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-end-dialog { max-width: 460px; }
+.terminal-end-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.terminal-end-dialog .dialog-actions button { min-height: 32px; padding: 0 11px; border: 1px solid #cbd2d5; border-radius: 6px; background: #fff; color: #353c40; cursor: pointer; }
+.terminal-end-dialog .dialog-actions .danger { background: #353c40; border-color: #353c40; color: #fff; }
 
 .terminal-resource-head > div {
   display: flex;
@@ -1509,7 +1449,8 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 12px 22px 108px;
+  box-sizing: border-box;
+  padding: 12px 22px 18px;
   background: #fbfcfd;
   color: #264865;
   font: 13px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -1533,7 +1474,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   overflow-wrap: anywhere;
 }
 
-.terminal-output .desktop-xterm { flex: 1; min-height: 0; }
+.terminal-output .desktop-xterm { flex: 1 1 0; width: 100%; min-width: 0; min-height: 0; box-sizing: border-box; }
 
 .terminal-output-empty { padding: 0; background: #f8fafb; color: #33434a; font-family: inherit; }
 .terminal-empty-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; padding: 24px; color: #33434a; font: 12px/1.5 "Segoe UI", sans-serif; text-align: center; }
@@ -1603,120 +1544,134 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   position: absolute;
   z-index: 4;
   right: 14px;
-  bottom: 55px;
+  bottom: 14px;
   width: min(380px, calc(100% - 28px));
+}
+
+.dock-input-surface {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 56px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid #d7e0e3;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 8px 26px #172f3b20;
+}
+
+.dock-status-icon {
+  display: block;
+  flex: 0 0 19px;
+  width: 19px;
+  height: 19px;
+  margin-left: 5px;
+  background-color: #555d62;
+}
+
+.dock-status-icon.is-pending { background-color: #c18526; }
+.dock-status-icon.is-generating { background-color: #555d62; animation: dock-icon-spin 1.4s linear infinite; }
+.dock-status-icon.is-offline { background-color: #b7534c; }
+@keyframes dock-icon-spin { to { transform: rotate(360deg); } }
+
+.dock-message-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 38px;
+  padding: 0 5px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #263740;
+  font-size: 13px;
+}
+.dock-message-input:focus-visible { outline: 2px solid #aeb9bd; outline-offset: -1px; border-radius: 5px; }
+.dock-message-input::placeholder { color: #65777f; }
+.dock-message-input:disabled { color: #87969b; }
+
+.dock-expand-toggle,
+.dock-action {
+  display: grid;
+  flex: 0 0 36px;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.dock-expand-toggle { background: transparent; color: #4b555a; }
+.dock-expand-toggle:hover:not(:disabled) { background: #eceeef; }
+.dock-expand-toggle .icon-mask { width: 16px; height: 16px; color: currentColor; }
+.dock-action { background: #353c40; color: #fff; }
+.dock-action:hover:not(:disabled) { background: #454d52; }
+.dock-action .icon-mask { width: 16px; height: 16px; color: #fff; }
+.dock-action:disabled { opacity: .3; cursor: not-allowed; }
+.dock-action:focus-visible,
+.dock-expand-toggle:focus-visible,
+.dock-restore:focus-visible,
+.dock-back-to-chat:focus-visible { outline: 2px solid #65777f; outline-offset: 2px; }
+.dock-restore {
+  flex: none;
+  padding: 4px 5px;
+  border: 0;
+  background: transparent;
+  color: #9b6320;
+  font-size: 10px;
+  cursor: pointer;
+}
+.dock-restore:disabled { color: #9aa7ab; cursor: not-allowed; }
+
+.dock-details-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: min(360px, max(100px, calc(100vh - 180px)));
+  max-height: min(360px, max(100px, calc(100dvh - 180px)));
   overflow: hidden;
   border: 1px solid #d7e0e3;
   border-radius: 11px;
   background: #fff;
-  box-shadow: 0 8px 26px #172f3b26;
+  box-shadow: 0 8px 26px #172f3b20;
 }
-
-.terminal-agent-dock.resource-dock {
-  bottom: 14px;
-}
-
-.dock-heading {
+.dock-panel-enter-active,
+.dock-panel-leave-active { transition: opacity 180ms ease, transform 180ms ease; transform-origin: bottom center; }
+.dock-panel-enter-from,
+.dock-panel-leave-to { opacity: 0; transform: translateY(6px); }
+.dock-details-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 39px;
-  padding: 0 11px;
-  border: 0;
-  background: #fff;
-  color: #263740;
-  text-align: left;
-  cursor: pointer;
-}
-
-.dock-heading b {
-  max-width: 190px;
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dock-heading > span:nth-of-type(1) {
-  margin-left: auto;
-  color: #526777;
-  font-size: 11px;
-}
-
-.dock-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #2c9b70;
-}
-
-.dock-dot.pending { background: #d28a22; }
-.dock-dot.busy {
-  background: #879196;
-  animation: pulse 1s infinite alternate;
-}
-
-.dock-composer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px 8px;
-}
-
-.dock-composer input {
-  flex: 1;
-  min-width: 0;
-  height: 34px;
-  padding: 0 9px;
-  border: 1px solid #d9e2e4;
-  border-radius: 7px;
-  outline: 0;
-  color: #263740;
-  font-size: 12px;
-}
-
-.dock-composer input:focus { border-color: #bcc2c5; }
-.dock-composer input::placeholder { color: #65777f; }
-.dock-composer button {
-  display: grid;
   flex: 0 0 34px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 6px 0;
+}
+.dock-back-to-chat {
+  display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: #353c40;
-  color: #fff;
+  border-radius: 6px;
+  background: transparent;
+  color: #4c5559;
   cursor: pointer;
 }
-.dock-composer .send-icon { width: 16px; height: 16px; color: #fff; }
-.dock-composer button:disabled {
-  background: #353c40;
-  opacity: .28;
-  cursor: not-allowed;
-}
-.dock-composer .restore-failed-draft {
-  flex: none;
-  width: auto;
-  height: auto;
-  padding: 2px;
-  border-radius: 0;
-  background: transparent;
-  color: #9b6320;
-}
-.dock-composer .restore-failed-draft:disabled {
-  background: transparent;
-  color: #9aa7ab;
-}
+.dock-back-to-chat:hover { background: #eceeef; }
+.dock-back-to-chat .icon-mask { width: 16px; height: 16px; color: currentColor; }
+.dock-details-content { min-height: 0; overflow: auto; }
 
 .dock-details {
-  max-height: 250px;
-  overflow: auto;
-  padding: 8px 10px 10px;
-  border-top: 1px solid #e7edef;
-  background: #fbfcfc;
+  max-height: none;
+  overflow: visible;
+  padding: 0 10px 10px;
+  background: #fff;
 }
 
 .dock-detail-row {
@@ -1771,24 +1726,29 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   font-size: 11px;
 }
 
-.dock-return {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  width: 100%;
-  margin-top: 7px;
-  padding: 7px;
-  border: 1px solid #dbe4e6;
-  border-radius: 6px;
-  background: #fff;
-  color: #555d62;
-  font-size: 11px;
-  cursor: pointer;
+.composer-surface-root { display: contents; }
+.composer-surface-slot { display: contents; }
+.composer-surface-slot.is-inactive {
+  position: absolute;
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
 }
-
-.terminal-resource.dock-expanded .terminal-output {
-  padding-bottom: 390px;
+.composer-surface-chat.is-inactive { right: 0; bottom: 0; left: 0; }
+.composer-surface-dock.is-inactive { inset: 0; }
+.composer-surface-root.is-transitioning .composer,
+.composer-surface-root.is-transitioning .terminal-agent-dock {
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+.composer-surface-root.is-transitioning .composer-surface-slot { pointer-events: none; }
+.composer-surface-motion { position: fixed; z-index: 60; inset: 0; pointer-events: none; }
+.composer-surface-motion-shape {
+  position: absolute;
+  border: 1px solid #d4dde0;
+  background: #fff;
+  box-shadow: 0 8px 26px #172f3b1a;
+  will-change: left, top, width, height, border-radius, opacity;
 }
 
 /* About dialog */
@@ -1854,6 +1814,9 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .dock-status-icon.is-generating { animation: none; }
+  .dock-panel-enter-active,
+  .dock-panel-leave-active { transition: none; }
   .desktop-shell,
   .rail,
   .top-sidebar-slot,
@@ -1870,7 +1833,9 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   .main-panel > .app .agent-detail__subnav-item,
   .top-slot-morph,
   .top-slot-swap-enter-active,
-  .top-slot-swap-leave-active {
+  .top-slot-swap-leave-active,
+  .composer-surface-root.is-transitioning .composer,
+  .composer-surface-root.is-transitioning .terminal-agent-dock {
     transition: none;
   }
 }

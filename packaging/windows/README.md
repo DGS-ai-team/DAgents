@@ -4,8 +4,8 @@
 
 The Inno Setup package installs the Agent Node, command-line tools, and the
 standalone Tauri Desktop application. The installer has one supported Desktop
-Shell; the former Go browser-based Shell is retained in source only and is not
-included in bundles or offered as an installation choice.
+Shell; the former Go browser-based Shell has been retired and is not included
+in bundles or offered as an installation choice.
 
 Windows 10 is the minimum workstation baseline for Node. Windows 11 is
 recommended for the full Desktop experience. Server deployments require
@@ -15,9 +15,12 @@ unsupported. The installer checks the OS version before checking WebView2.
 The installer copies `config.example.yaml` to `config.yaml` only when no config
 exists. This Node bootstrap file contains only the listener address. Desktop
 preferences stay in `%APPDATA%\DAgents\desktop\settings.json`; LLM and Manage
-credentials stay in Node's runtime settings store. The installer also seeds policy files,
-creates the browser runtime directory, adds the install paths to the user's
-`PATH`, and registers Desktop to start at login.
+credentials stay in Node's runtime settings store. Start Menu and optional
+Desktop shortcuts launch `bin\dagents-shell.exe` directly with the install root
+and bootstrap config pinned to that installation. Login startup is an explicit
+unchecked installation task and keeps its previous choice during upgrades.
+The installer also seeds policy files, creates the browser runtime directory,
+and adds the install paths to the user's `PATH`.
 
 New installs default to the current user's Programs directory because Node's
 bootstrap config and `.runtime` data are writable under the install directory.

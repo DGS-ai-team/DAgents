@@ -1,0 +1,139 @@
+// @vitest-environment jsdom
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
+import { defineComponent, h, nextTick, ref } from 'vue'
+import ComposerSurface from '../../../../../desktop/ui/components/ComposerSurface.vue'
+import { COMPOSER_MORPH_DURATION_MS } from '../../../../../desktop/ui/composer-surface-motion.js'
+
+function rect(left, top, width, height) {
+  return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} }
+}
+
+function setupGeometry() {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    if (this.matches?.('.composer')) return rect(100, 700, 600, 56)
+    if (this.matches?.('.dock-input-surface')) return rect(800, 650, 300, 56)
+    const left = Number.parseFloat(this.style.left) || 0
+    const top = Number.parseFloat(this.style.top) || 0
+    const width = Number.parseFloat(this.style.width) || 0
+    const height = Number.parseFloat(this.style.height) || 0
+    return rect(left, top, width, height)
+  })
+  Object.defineProperty(HTMLElement.prototype, 'animate', {
+    configurable: true,
+    value: vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() })),
+  })
+  Object.defineProperty(HTMLElement.prototype, 'getAnimations', { configurable: true, value: vi.fn(() => []) })
+  window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+}
+
+function mountSurface() {
+  const mode = ref('chat')
+  const draft = ref('chat draft')
+  const wrapper = mount(defineComponent({
+    setup() {
+      return () => h(ComposerSurface, { mode: mode.value }, {
+        chat: () => h('footer', { class: 'composer-wrap' }, [h('div', { class: 'composer' }, [h('textarea', { value: draft.value, onInput: event => { draft.value = event.target.value } })])]),
+        dock: () => h('section', { class: 'terminal-agent-dock' }, [h('div', { class: 'dock-input-surface' }, [h('input', { class: 'dock-composer-input' })])]),
+      })
+    },
+  }), { attachTo: document.body })
+  return { mode, wrapper }
+}
+
+describe('ComposerSurface', () => {
+  it('keeps both slots mounted, animates through the three shape phases, and activates the dock after completion', async () => {
+    setupGeometry()
+    const { mode, wrapper } = mountSurface()
+    const chat = wrapper.find('.composer-surface-chat')
+    const dock = wrapper.find('.composer-surface-dock')
+    expect(chat.exists()).toBe(true)
+    expect(dock.exists()).toBe(true)
+    expect(chat.attributes('aria-hidden')).toBe('false')
+    expect(dock.attributes('aria-hidden')).toBe('true')
+    const originalInput = wrapper.find('.composer textarea').element
+    originalInput.value = 'unsent draft'
+    originalInput.dispatchEvent(new Event('input', { bubbles: true }))
+
+    mode.value = 'dock'
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.find('.composer-surface-root').attributes('data-mode')).toBe('dock')
+    expect(wrapper.find('.composer-surface-chat').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.find('.composer-surface-dock').attributes('aria-hidden')).toBe('false')
+    expect(HTMLElement.prototype.animate).toHaveBeenCalledTimes(3)
+    expect(HTMLElement.prototype.animate.mock.calls.map(([, options]) => options.duration)).toEqual(Array(3).fill(COMPOSER_MORPH_DURATION_MS / 3))
+    expect(wrapper.find('.composer').exists()).toBe(true)
+    expect(wrapper.find('.composer textarea').element).toBe(originalInput)
+    expect(wrapper.find('.composer textarea').element.value).toBe('unsent draft')
+    expect(wrapper.find('.terminal-agent-dock').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('switches immediately with reduced motion and creates no transient overlay', async () => {
+    setupGeometry()
+    window.matchMedia.mockReturnValue({ matches: true })
+    const { mode, wrapper } = mountSurface()
+    mode.value = 'dock'
+    await nextTick()
+    await flushPromises()
+    expect(wrapper.find('.composer-surface-root').attributes('data-mode')).toBe('dock')
+    expect(wrapper.find('.composer-surface-motion').exists()).toBe(false)
+    expect(HTMLElement.prototype.animate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('cancels an in-flight target when the mode changes quickly and finishes on the latest mode', async () => {
+    setupGeometry()
+    const animations = []
+    HTMLElement.prototype.animate.mockImplementation(() => {
+      let resolve
+      let reject
+      const finished = new Promise((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
+      const animation = {
+        finished,
+        finish: resolve,
+        cancel: vi.fn(() => reject(new Error('superseded'))),
+      }
+      animations.push(animation)
+      return animation
+    })
+    const { mode, wrapper } = mountSurface()
+    mode.value = 'dock'
+    await nextTick()
+    await flushPromises()
+    expect(animations).toHaveLength(1)
+
+    mode.value = 'chat'
+    await nextTick()
+    await flushPromises()
+    expect(animations[0].cancel).toHaveBeenCalled()
+    for (let index = 1; index <= 3; index += 1) {
+      await flushPromises()
+      animations[index]?.finish()
+    }
+    await flushPromises()
+    expect(wrapper.find('.composer-surface-root').attributes('data-mode')).toBe('chat')
+    expect(wrapper.find('.composer-surface-chat').attributes('aria-hidden')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('cancels the active morph when unmounted', async () => {
+    setupGeometry()
+    const pending = []
+    HTMLElement.prototype.animate.mockImplementation(() => {
+      let reject
+      const finished = new Promise((_, rejectPromise) => { reject = rejectPromise })
+      const animation = { finished, cancel: vi.fn(() => reject(new Error('cancelled'))) }
+      pending.push(animation)
+      return animation
+    })
+    const { mode, wrapper } = mountSurface()
+    mode.value = 'dock'
+    await nextTick()
+    await flushPromises()
+    wrapper.unmount()
+    expect(pending[0]?.cancel).toHaveBeenCalled()
+  })
+})

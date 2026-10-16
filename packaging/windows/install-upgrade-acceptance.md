@@ -1,10 +1,16 @@
 # Windows install and upgrade acceptance
 
-Updated: 2026-10-14
+Updated: 2026-10-16
 
 This is the Windows acceptance checklist for the Node API plus Tauri Desktop
 package. It is intended for a disposable Windows profile or VM. Do not run the
 upgrade/uninstall cases against a developer profile with real Node data.
+
+The Oct 16 release/installer changes passed source checks, Desktop tests and
+native build, plus production/QA installer compilation for x64 and x86 using
+inert fixtures. See [the release packaging report](../../docs/design/desktop-product/audits/2026-10-16/release-packaging.md)
+for evidence and remaining environment checks; this does not extend the Oct 14
+runtime acceptance results below.
 
 ## Package and prerequisite checks
 
@@ -42,6 +48,20 @@ validate an installer build, installation, upgrade, or uninstall.
 
 - Install as a standard user. The default directory is under that user's
   Programs directory. No elevation prompt appears.
+- Confirm the Start Menu contains one `DAgents Desktop` entry pointing directly
+  to `bin\dagents-shell.exe`, with `--home` and `--config` set to this install
+  root, the install directory as its working directory, and the installed app
+  icon. It must not offer Node launchers or a Command Prompt shortcut. The
+  optional Desktop icon uses the same target and arguments and is unchecked by
+  default.
+- Confirm the `登录时启动 DAgents Desktop` task is unchecked by default. Select
+  it on a fresh install and verify the per-user Run entry points directly to
+  this install's Shell executable with the same home and config paths. On
+  upgrade, preserve both checked and unchecked states; an existing legacy
+  `dagents.cmd shell --background` entry for this install should migrate to the
+  new executable command. Upgrade and uninstall remove old launcher shortcuts
+  only when their target and arguments point to this install. Uninstall removes
+  only the exact owned Run command.
 - Enter an install directory containing spaces and Chinese characters. Confirm
   `dagents.cmd`, Node, and Desktop Shell launch with the correct working
   directory and config file.
@@ -52,9 +72,9 @@ validate an installer build, installation, upgrade, or uninstall.
 - Verify first install creates `config.yaml` only from the listen-only example.
   It must not overwrite an existing Node config, `.runtime` database, policy,
   or `%APPDATA%\DAgents\desktop\settings.json`.
-- Confirm the installer and Desktop agree on login autostart: one Shell starts
-  at login, while explicit Shell Quit leaves a managed Node running and close
-  hides Desktop to the tray.
+- Confirm login autostart follows the optional installer task selection. When
+  enabled, one Shell starts at login; explicit Shell Quit leaves a managed Node
+  running and close hides Desktop to the tray.
 
 ## Upgrade and removal
 
@@ -88,14 +108,15 @@ does not create shortcuts, run the app after setup, change login autostart, or
 edit the user PATH. WebView2 and Windows version checks remain enabled.
 
 ```bash
-export ISCC="$PWD/.runtime-test-install-delivery/tools/inno-6.7.3/ISCC.exe"
-export INSTALLER_QA=1 PLATFORM=windows-amd64 VERSION=0.11.0.1
+export ISCC="/c/tools/Inno Setup 6/ISCC.exe" # use your actual compiler path
+export INSTALLER_QA=1 PLATFORM=windows-amd64 VERSION="$(cat VERSION)"
 bash scripts/ci/build_windows_installer.sh
 ```
 
 ```powershell
 $fixture = Join-Path (Resolve-Path .).Path '.runtime-test-install-delivery\qa-install'
-$installer = Resolve-Path 'dist-installer\dagents-local-assistant-windows-amd64-installer-0.11.0.1-qa.exe'
+$version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+$installer = Resolve-Path "dist-installer\dagents-local-assistant-windows-amd64-installer-$version-qa.exe"
 $dirArg = '/DIR="' + $fixture + '"'
 & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART $dirArg
 ```

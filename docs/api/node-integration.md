@@ -64,6 +64,12 @@ curl -X PATCH http://127.0.0.1:18765/v1/settings \
   -d '{"manage":{"clear_node_token":true}}'
 ```
 
+### LLM 配置与密钥保留
+
+`PATCH /v1/settings` 的 `llm.profiles` 是完整配置列表；更新时保留其他仍需使用的配置，并用 `llm.active` 指定当前配置 ID。每个 profile 的 `api_key` 是只写字段：省略或留空保留该配置的已存密钥，非空值替换密钥，`clear_api_key: true` 明确清空且优先于新值。GET/PATCH 的响应仅通过 `has_api_key` 表示是否已保存，不回传明文。
+
+主动修改配置 ID 时，为该条目附带只写 `original_id`，表示从哪个现有配置保留密钥；它只用于本次保存，不会作为配置字段或长期别名回传。未提供新密钥且未要求清空时，Node 从原配置迁移密钥；来源不存在、来源仍保留在最终列表、多个目标引用同一个来源或目标与其他已有配置冲突时，保存失败，不能静默丢弃或误用密钥。配置 ID 仍是 Agent 绑定的引用键，主动改名不等于迁移各 Agent 的绑定。Desktop 编辑已有配置时，测试获取模型或选择模型不会自动修改配置 ID。
+
 ### 消息、SSE 与 HITL
 
 `POST /v1/messages` 接收 `agent_id`、`content` 和可选 `request_type`；默认类型为 `message`，`resume` 用于继续等待 HITL 的 Agent。Node 异步执行 turn，接口立即返回 `{ "accepted": true, "agent_id": "...", "priority": "..." }` 一类的接受结果。

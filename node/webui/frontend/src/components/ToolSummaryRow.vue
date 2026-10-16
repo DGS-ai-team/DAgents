@@ -5,7 +5,6 @@ import {
   bashControlModeForStep,
   resolveToolStepPhase,
   toolStepIsInProgress,
-  toolStepIsPending,
   toolStepStatusText,
   toolStepToolLabel,
 } from "../utils/toolUserLabel.js";
@@ -46,7 +45,18 @@ const stepArgs = computed(() => ({
 const toolLabel = computed(() => toolStepToolLabel(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
 const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
-const stepPending = computed(() => toolStepIsPending(stepArgs.value));
+const statusIcon = computed(() => {
+  if (phase.value === "completed") return "check";
+  if (["failed", "cancelled", "rejected", "interrupted"].includes(phase.value)) return "close";
+  if (phase.value === "idle") return "alert";
+  return "pending";
+});
+const statusTone = computed(() => {
+  if (phase.value === "completed") return "success";
+  if (["failed", "rejected"].includes(phase.value)) return "danger";
+  if (["cancelled", "interrupted"].includes(phase.value)) return "warning";
+  return "muted";
+});
 const controlMode = computed(() => bashControlModeForStep(stepArgs.value));
 const inProgress = computed(() => stepInProgress.value || controlMode.value === "running");
 const showBashControls = computed(() => controlMode.value != null);
@@ -70,6 +80,8 @@ const status = computed(() => {
   void nowTick.value;
   if (controlMode.value === "running" || phase.value === "running") return "执行中";
   const base = toolStepStatusText(stepArgs.value);
+  if (phase.value === "idle") return "状态未知";
+  if (phase.value === "pending") return "待批准";
   if (phase.value !== "generating" || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
   if (!elapsed) return base || "生成中";
@@ -140,8 +152,13 @@ async function onCancel(ev) {
       >
         <span class="tool-summary-row__glyph" aria-hidden="true">
           <span v-if="inProgress" class="tool-exec-spinner" />
-          <UiIcon v-else-if="stepPending" class="tool-summary-row__pending" name="pending" :size="14" />
-          <UiIcon v-else class="tool-summary-row__check" name="check" :size="14" />
+          <UiIcon
+            v-else
+            class="tool-summary-row__status-icon"
+            :class="`tool-summary-row__status-icon--${statusTone}`"
+            :name="statusIcon"
+            :size="14"
+          />
         </span>
         <span class="tool-summary-row__visual" :title="visual.label">
           <ToolGroupIcon :name="visual.kind" />
@@ -250,13 +267,23 @@ async function onCancel(ev) {
   font-size: 12px;
 }
 
-.tool-summary-row__check {
+.tool-summary-row__status-icon {
   opacity: 0.9;
 }
 
-.tool-summary-row__pending {
-  opacity: 0.55;
-  font-size: 11px;
+.tool-summary-row__status-icon--success {
+  color: var(--color-success);
+}
+
+.tool-summary-row__status-icon--danger {
+  color: var(--color-danger);
+}
+
+.tool-summary-row__status-icon--warning {
+  color: var(--color-warning);
+}
+
+.tool-summary-row__status-icon--muted {
   color: var(--color-text-subtle);
 }
 

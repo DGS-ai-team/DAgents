@@ -42,12 +42,12 @@ DAgents 把“模型对话”和“可控执行环境”放在一起：你可以
 
 ## 产品界面
 
-Node 和 Manage 是两个互补入口：Node 面向日常对话与执行，Manage 面向跨 Node 的治理和汇总。README 只展示能帮助读者建立整体认知的页面，具体设置项放在用户指南中。
+Desktop 和 Manage 是两个互补入口：Desktop 连接 Node，提供日常对话与执行界面；Manage 面向跨 Node 的治理和汇总。具体设置项放在用户指南中。
 
 | 页面 | 主要内容 | 本地入口或设计稿 |
 | --- | --- | --- |
-| Node Agent 工作台 | Agent 对话、工具结果、审批和终端工作台 | 运行 Node 后打开 `http://127.0.0.1:18765/ui/` |
-| Node Agent 设置 | 模型连接、工具策略、Auto、Todo 和反馈 | 工作台左下角“设置” |
+| Desktop Agent 工作台 | Agent 对话、工具结果、审批和终端工作台 | 开始菜单中的 `DAgents Desktop`；Node 只提供 API |
+| Desktop 设置 | 本机偏好、Node 连接、模型、工具策略、Auto、Todo 和反馈 | 顶栏 `DAgents → 通用设置`；智能体条目可进入其设置 |
 | Manage 控制台 | Node 注册、Workgroup、Auto 汇总和反馈管理 | 运行 Manage 后打开 `http://127.0.0.1:8020/console/` |
 | Node / Manage 视觉参考 | 页面骨架、色彩、图标和关键状态的交互式稿 | [UI 视觉审计与方向](docs/design/dagents-ui-audit-and-direction.html) |
 
@@ -109,7 +109,7 @@ flowchart LR
 | Linux 64 位 | `linux-amd64` 本地助手 tar.gz |
 | Manage 控制面 | 可选 Manage 离线包 |
 
-Windows 只发布安装包，不提供免安装归档。安装完成后打开 DAgents Desktop 配置本机 Node 与模型。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。
+Windows 只发布安装包，不提供免安装归档。安装完成后，从开始菜单打开 DAgents Desktop 配置本机 Node 与模型；桌面快捷方式和登录自启动均为可选项，默认不勾选，升级时保留原选择。Desktop 需要预先安装 WebView2 Evergreen Runtime。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。详细安装与升级边界见 [Windows 安装说明](packaging/windows/README.md)。
 
 ### 从源码运行
 

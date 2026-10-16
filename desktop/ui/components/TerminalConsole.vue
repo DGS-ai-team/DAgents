@@ -4,15 +4,24 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-const props = defineProps({ output: { type: String, default: '' }, connected: { type: Boolean, default: false } })
+const props = defineProps({ output: { type: String, default: '' }, connected: { type: Boolean, default: false }, readOnly: { type: Boolean, default: false } })
 const emit = defineEmits(['input', 'resize'])
 const host = ref(null)
 let terminal
 let fitAddon
 let resizeObserver
+let fitFrame = 0
 let outputSnapshot = ''
 
 function fit() {
+  if (fitFrame || !terminal || !fitAddon) return
+  fitFrame = requestAnimationFrame(() => {
+    fitFrame = 0
+    fitNow()
+  })
+}
+
+function fitNow() {
   if (!terminal || !fitAddon || !host.value?.clientWidth || !host.value?.clientHeight) return
   try {
     fitAddon.fit()
@@ -21,7 +30,10 @@ function fit() {
 
 onMounted(async () => {
   terminal = new Terminal({
-    cursorBlink: true,
+    cursorBlink: !props.readOnly,
+    cursorStyle: 'bar',
+    cursorInactiveStyle: props.readOnly ? 'none' : 'outline',
+    disableStdin: props.readOnly,
     convertEol: false,
     scrollback: 10000,
     fontFamily: 'Cascadia Code, Consolas, monospace',
@@ -40,7 +52,7 @@ onMounted(async () => {
   resizeObserver = new ResizeObserver(() => fit())
   resizeObserver.observe(host.value)
   await nextTick()
-  fit()
+  fitNow()
 })
 
 watch(() => props.output, value => {
@@ -51,8 +63,16 @@ watch(() => props.output, value => {
   outputSnapshot = next
 })
 watch(() => props.connected, value => { if (value) void nextTick(fit) })
+watch(() => props.readOnly, value => {
+  if (!terminal) return
+  terminal.options.disableStdin = value
+  terminal.options.cursorBlink = !value
+  terminal.options.cursorInactiveStyle = value ? 'none' : 'outline'
+  if (value) terminal.blur()
+})
 
 onUnmounted(() => {
+  if (fitFrame) cancelAnimationFrame(fitFrame)
   resizeObserver?.disconnect()
   terminal?.dispose()
 })
