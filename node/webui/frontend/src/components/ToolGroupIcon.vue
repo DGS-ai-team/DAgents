@@ -9,21 +9,21 @@ const props = defineProps({
 
 const iconName = computed(() => {
   const aliases = {
-    bash: "square-terminal",
-    shell: "square-terminal",
+    bash: "code-2",
+    shell: "code-2",
     terminal: "terminal",
     browser: "browser",
-    child_agents: "network",
-    child: "network",
+    child_agents: "bot",
+    child: "bot",
     computer: "monitor",
     mcp: "network",
     linux: "square-terminal",
     fs: "file",
     hitl: "message-circle",
-    memory: "bookmark",
+    memory: "brain",
     skills: "skills",
     triggers: "clock",
-    wecom: "message-circle",
+    wecom: "send",
     wrench: "wrench",
   };
   return aliases[props.name] || props.name || "info";

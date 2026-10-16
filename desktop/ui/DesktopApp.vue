@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
 import { closeTerminalFlow } from './terminal-close.js'
+import { composerPageSettlementMatches, composerPageVisibility } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, shouldClearWorkspaceUploadError, toNodeFileReference } from './workspace-files-state.js'
 import { agentStore } from '../../node/webui/frontend/src/stores/agent.js'
@@ -95,6 +96,9 @@ const composerExpanded = ref(false)
 const userInfoSelected = ref([])
 const chatPanel = ref(null)
 const activeTab = ref('chat')
+const displayedTab = ref(activeTab.value)
+const visitedTabs = ref(new Set(['chat']))
+const pendingComposerPage = ref(null)
 const workspaceOpenedByAgent = ref({})
 const workspaceNameByAgent = ref({})
 const browserOpenedByAgent = ref({})
@@ -287,7 +291,52 @@ const terminalDialogAgentId = ref('')
 const terminalDialogReturnFocus = ref(null)
 const terminalEndConfirmation = ref(null)
 const terminalEndReturnFocus = ref(null)
-const composerMode = computed(() => activeTab.value === 'chat' ? 'chat' : ['terminal', 'file', 'browser'].includes(activeTab.value) ? 'dock' : 'hidden')
+function composerModeForTab(tab) { return tab === 'chat' ? 'chat' : ['terminal', 'file', 'browser'].includes(tab) ? 'dock' : 'hidden' }
+const composerMode = computed(() => composerModeForTab(activeTab.value))
+
+watch(activeTab, (tab, previousTab) => {
+  if (['chat', 'terminal', 'file', 'browser'].includes(tab)) {
+    const next = new Set(visitedTabs.value)
+    next.add(tab)
+    visitedTabs.value = next
+  }
+  const decision = composerPageVisibility({
+    requestedTab: tab,
+    displayedTab: displayedTab.value,
+    modeForTab: composerModeForTab,
+    composerMounted: previousTab != null && !showNodeFirstRun.value && previousTab !== 'settings',
+    pendingTransition: Boolean(pendingComposerPage.value),
+  })
+  if (decision.kind === 'show') {
+    pendingComposerPage.value = null
+    displayedTab.value = tab
+  } else {
+    const current = pendingComposerPage.value
+    pendingComposerPage.value = { mode: decision.mode, id: current?.mode === decision.mode ? current.id : null }
+  }
+}, { flush: 'sync', immediate: true })
+
+watch(showNodeFirstRun, visible => {
+  if (!visible) return
+  pendingComposerPage.value = null
+  displayedTab.value = activeTab.value
+}, { flush: 'sync' })
+
+function onComposerTransitionStart({ id, mode }) {
+  if (pendingComposerPage.value?.mode === mode) pendingComposerPage.value = { ...pendingComposerPage.value, id }
+}
+
+function onComposerTransitionSettled({ id, mode }) {
+  if (!pendingComposerPage.value || !composerPageSettlementMatches({
+    eventId: id,
+    eventMode: mode,
+    pendingId: pendingComposerPage.value.id,
+    pendingMode: pendingComposerPage.value.mode,
+    currentMode: composerMode.value,
+  })) return
+  displayedTab.value = activeTab.value
+  pendingComposerPage.value = null
+}
 
 async function refreshHealth() {
   try { status.value = await invoke('desktop_node_status'); return status.value }
@@ -1265,7 +1314,7 @@ onUnmounted(() => {
         <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div></div>
       </div>
       <div v-if="error || status.setup_required" class="notice" :class="status.setup_required ? 'setup' : ''"><span>{{ error || 'Node 需要首次配置' }}</span><button v-if="status.setup_required" @click="showSettings">打开连接配置</button><button v-else-if="isTauri" @click="loadAgents">重试</button></div>
-      <section v-if="activeTab === 'chat'" class="conversation">
+      <section v-if="visitedTabs.has('chat')" v-show="displayedTab === 'chat'" class="conversation" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
         <div v-if="!status.online" class="empty-state"><div class="empty-icon"><i></i></div><h2>{{ status.connection_mode === 'tunnel' ? '等待隧道中的 Node' : '等待本机 Node' }}</h2><template v-if="status.connection_mode === 'tunnel'"><p>请确认 SSH 本地转发与远程 Node 正在运行。</p><small v-if="status.error" class="connection-diagnostic">诊断：{{ status.error }}</small></template><p v-else>{{ status.error || '启动 DAgents Node 后，Desktop 会自动连接。' }}</p></div>
         <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成 Node 首次配置</h2><p>在 Desktop 的连接设置中完成 Node 配置后即可使用。</p><button class="quiet" @click="showSettings">打开连接配置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
@@ -1276,15 +1325,15 @@ onUnmounted(() => {
           </div>
         </template>
       </section>
-      <section v-else-if="activeTab === 'terminal'" class="terminal-resource">
+      <section v-if="visitedTabs.has('terminal')" v-show="displayedTab === 'terminal'" class="terminal-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
         <div class="terminal-resource-head"><div><strong>{{ terminalResourceName }}</strong><span class="terminal-status" :class="`state-${terminalStatus}`"><i></i>{{ ({idle:'未连接',connecting:'连接中',reconnecting:'恢复会话中',connected:'已连接',disconnected:'连接已断开',error:'连接错误',exited:'进程已退出',closed:'已关闭'})[terminalStatus] || terminalStatus }}</span></div><div class="terminal-actions"><button v-if="terminalConnectionId && !terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled" @click="enableTerminalInput">启用手动输入</button><button v-if="terminalConnectionId" @click="closeTerminal('disconnect')">断开连接</button><button v-else-if="['disconnected','error','closed'].includes(terminalStatus) && terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId" @click="reconnectActiveTerminal">重新连接</button><button v-if="terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId" @click="requestEndTerminal()">结束终端</button></div></div>
         <div class="terminal-owner-note">此终端属于 {{ activeAgent?.display_name || activeAgent?.agent_id || '当前 Agent' }}；模型可能正在使用。{{ terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId && !terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled ? '恢复会话只读查看。' : '手动输入已启用。' }}</div>
         <div class="terminal-output" :class="{ 'terminal-output-empty': !terminalConnectionId }"><div v-if="!terminalConnectionId" class="terminal-empty-state"><span class="icon-mask" :style="{ ...maskStyle(terminalIcon), width: '24px', height: '24px' }" aria-hidden="true"></span><h2>终端尚未连接</h2><p>打开终端选择器以新建或恢复当前 Agent 的运行中会话。</p><div><button @click="requestNewTerminal()">打开终端…</button></div></div><TerminalConsole v-if="terminalConnectionId" :key="terminalConnectionId" :output="terminalOutput" :connected="terminalStatus === 'connected'" :read-only="!terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled" @input="sendTerminalInput" @resize="resizeTerminal" /><p v-if="terminalError" class="terminal-error">{{ terminalError }}</p></div>
       </section>
-      <section v-else-if="activeTab === 'file'" class="file-resource"><WorkspaceFiles :key="activeId" :agent-id="activeId" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" /></section>
-      <section v-else-if="activeTab === 'browser'" class="file-resource"><BrowserViewer :key="activeId" :agent-id="activeId" :active="activeTab === 'browser'" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
-      <section v-else-if="activeTab === 'workgroups'" class="file-resource workgroup-resource"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
-      <ComposerSurface :mode="composerMode">
+      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="displayedTab === 'file'" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles :key="activeId" :agent-id="activeId" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" /></section>
+      <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="displayedTab === 'browser'" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer :key="activeId" :agent-id="activeId" :active="displayedTab === 'browser'" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
+      <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
+      <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
       <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <button class="attach-button" type="button" aria-label="添加附件" title="添加图片或文件" :disabled="pendingImages.length + pendingFiles.length >= 8" @click="attachmentInput?.click()"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>

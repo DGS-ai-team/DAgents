@@ -697,11 +697,10 @@ const memoryScopeOptions = computed(() =>
 }
 
 .agent-settings-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
   margin: 0;
   min-height: 52px;
   width: 100%;
@@ -727,9 +726,12 @@ const memoryScopeOptions = computed(() =>
 
 .agent-settings-tile__icon {
   display: inline-flex;
+  width: 24px;
+  height: 24px;
   align-items: center;
   justify-content: center;
   color: var(--color-text-muted);
+  flex: none;
 }
 
 .agent-settings-tile--active .agent-settings-tile__icon {
@@ -737,9 +739,12 @@ const memoryScopeOptions = computed(() =>
 }
 
 .agent-settings-tile__label {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.3;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .agent-settings-field__label {
@@ -887,11 +892,8 @@ const memoryScopeOptions = computed(() =>
 }
 
 .agent-settings-tile--compact {
-  flex-direction: row;
-  align-items: center;
   min-height: 44px;
   padding: 10px 12px;
-  gap: 10px;
 }
 
 .agent-settings-advanced {

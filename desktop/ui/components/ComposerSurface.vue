@@ -1,10 +1,11 @@
 <script setup>
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { COMPOSER_MORPH_DURATION_MS, createComposerMotionController } from '../composer-surface-motion.js'
 
 const props = defineProps({
   mode: { type: String, default: 'chat', validator: value => ['chat', 'dock', 'hidden'].includes(value) },
 })
+const emit = defineEmits(['transition-start', 'transition-settled'])
 
 const root = ref(null)
 const overlay = ref(null)
@@ -55,6 +56,7 @@ function cancelMotion() {
 async function moveTo(nextMode, fromOverride) {
   const id = ++transitionId
   cancelMotion()
+  emit('transition-start', { id, mode: nextMode })
   const from = fromOverride || currentRect()
   const target = surfaceFor(nextMode)
   await nextTick()
@@ -68,6 +70,7 @@ async function moveTo(nextMode, fromOverride) {
     transitioning.value = false
     overlayStyle.value = {}
     if (to) lastVisibleRect = to
+    emit('transition-settled', { id, mode: nextMode, animated: false })
     return
   }
 
@@ -76,6 +79,7 @@ async function moveTo(nextMode, fromOverride) {
     transitioning.value = false
     overlayStyle.value = {}
     lastVisibleRect = to
+    emit('transition-settled', { id, mode: nextMode, animated: false })
     return
   }
 
@@ -96,6 +100,7 @@ async function moveTo(nextMode, fromOverride) {
   transitioning.value = false
   overlayStyle.value = {}
   lastVisibleRect = to
+  emit('transition-settled', { id, mode: nextMode, animated: true })
 }
 
 function onResize() {
@@ -130,6 +135,10 @@ onBeforeUnmount(() => {
   motionController.dispose()
   resizeObserver?.disconnect()
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
+})
+
+onMounted(() => {
+  emit('transition-settled', { id: transitionId, mode: activeMode.value, animated: false, initial: true })
 })
 </script>
 

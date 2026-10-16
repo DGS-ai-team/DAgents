@@ -1,9 +1,25 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPOSER_MORPH_DURATION_MS, composerMorphStages, createComposerMotionController, runComposerMorph } from './composer-surface-motion.js'
+import { COMPOSER_MORPH_DURATION_MS, composerMorphStages, composerPageSettlementMatches, composerPageVisibility, createComposerMotionController, runComposerMorph } from './composer-surface-motion.js'
 
 const from = { left: 20, top: 100, width: 600, height: 56 }
 const to = { left: 800, top: 650, width: 300, height: 84 }
+
+test('resource pages sharing the dock show immediately while cross-mode pages wait for settled', () => {
+  const modeForTab = tab => tab === 'chat' ? 'chat' : ['terminal', 'file', 'browser'].includes(tab) ? 'dock' : 'hidden'
+  assert.deepEqual(composerPageVisibility({ requestedTab: 'file', displayedTab: 'terminal', modeForTab }), { kind: 'show', tab: 'file' })
+  assert.deepEqual(composerPageVisibility({ requestedTab: 'terminal', displayedTab: 'chat', modeForTab }), { kind: 'wait', tab: 'chat', mode: 'dock' })
+  assert.deepEqual(composerPageVisibility({ requestedTab: 'terminal', displayedTab: 'file', modeForTab, pendingTransition: true }), { kind: 'wait', tab: 'file', mode: 'dock' })
+  assert.deepEqual(composerPageVisibility({ requestedTab: 'chat', displayedTab: 'chat', modeForTab, pendingTransition: true }), { kind: 'wait', tab: 'chat', mode: 'chat' })
+  assert.deepEqual(composerPageVisibility({ requestedTab: 'settings', displayedTab: 'chat', modeForTab }), { kind: 'show', tab: 'settings' })
+})
+
+test('only the latest matching settled event can reveal the requested page', () => {
+  const pending = { id: 8, mode: 'dock' }
+  assert.equal(composerPageSettlementMatches({ eventId: 7, eventMode: 'dock', pendingId: pending.id, pendingMode: pending.mode, currentMode: 'dock' }), false)
+  assert.equal(composerPageSettlementMatches({ eventId: 8, eventMode: 'chat', pendingId: pending.id, pendingMode: pending.mode, currentMode: 'chat' }), false)
+  assert.equal(composerPageSettlementMatches({ eventId: 8, eventMode: 'dock', pendingId: pending.id, pendingMode: pending.mode, currentMode: 'dock' }), true)
+})
 
 test('composer morph collapses, travels as a circle, then expands in order', () => {
   const [collapse, travel, expand] = composerMorphStages(from, to, 28, 11)

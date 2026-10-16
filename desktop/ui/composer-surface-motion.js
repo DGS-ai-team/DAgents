@@ -1,6 +1,18 @@
 const phases = ['collapse', 'travel', 'expand']
 export const COMPOSER_MORPH_DURATION_MS = 840
 
+export function composerPageVisibility({ requestedTab, displayedTab, modeForTab, composerMounted = true, pendingTransition = false }) {
+  if (!composerMounted || requestedTab === 'settings') return { kind: 'show', tab: requestedTab }
+  const mode = modeForTab(requestedTab)
+  if (pendingTransition) return { kind: 'wait', tab: displayedTab, mode }
+  if (mode === modeForTab(displayedTab)) return { kind: 'show', tab: requestedTab }
+  return { kind: 'wait', tab: displayedTab, mode }
+}
+
+export function composerPageSettlementMatches({ eventId, eventMode, pendingId, pendingMode, currentMode }) {
+  return eventId === pendingId && eventMode === pendingMode && eventMode === currentMode
+}
+
 function rectStyle(rect, radius) {
   return {
     left: `${rect.left}px`,
