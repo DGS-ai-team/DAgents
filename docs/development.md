@@ -24,6 +24,8 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 
 Node 默认只提供 `http://127.0.0.1:18765` 上的 API。Windows 安装包附带独立 DAgents Desktop；从源码运行 Windows Desktop 时设置 `DAGENTS_HOME` 与 `DAGENTS_CONFIG`，再执行 `npm install --prefix desktop/tray-tauri` 和 `npm run tauri:dev --prefix desktop/tray-tauri`。Node 与 Agent 运行时设置通过 Desktop 配置；无 API Key 的结构联调可启用 Mock LLM。
 
+Node 的 `.runtime` 相对于进程工作目录解析；`--config` 只选择引导配置，不会切换工作目录。手动运行隔离实例时，应先进入该实例目录再启动；以 `Start-Process` 运行时显式设置 `-WorkingDirectory`，避免多个实例意外共享同一份运行数据。
+
 可选启动 Manage：
 
 ```bash
