@@ -119,6 +119,9 @@ Type: files; Name: "{userdesktop}\DAgents Desktop（系统托盘）.lnk"
 #endif
 
 [Code]
+function SetEnvironmentVariableW(Name, Value: string): Longint;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
 const
   { Desktop UI theme — Inno 颜色为 BGR $00BBGGRR }
   ClrBg = $00F3F3F3;
@@ -489,6 +492,9 @@ end;
 function RunShellCommand(const AppDir, CommandLine: string): Integer;
 var
   ShellExe, Params: string;
+  PreviousHome, PreviousConfig, PreviousDesktopConfig, DesktopConfig: string;
+  ExecResult: Integer;
+  RestoreSucceeded: Boolean;
 begin
   ShellExe := AppDir + '\bin\dagents-shell.exe';
   if not FileExists(ShellExe) then
@@ -497,8 +503,28 @@ begin
     Exit;
   end;
   Params := CommandLine;
-  if not Exec(ShellExe, Params, AppDir, SW_HIDE, ewWaitUntilTerminated, Result) then
-    Result := -1;
+  PreviousHome := GetEnv('DAGENTS_HOME');
+  PreviousConfig := GetEnv('DAGENTS_CONFIG');
+  PreviousDesktopConfig := GetEnv('DAGENTS_DESKTOP_CONFIG');
+  DesktopConfig := '';
+#ifdef IsolatedQaBuild
+  DesktopConfig := AppDir + '\qa-desktop-settings.json';
+#endif
+
+  Result := -1;
+  try
+    if SetEnvironmentVariableW('DAGENTS_HOME', AppDir) = 0 then Exit;
+    if SetEnvironmentVariableW('DAGENTS_CONFIG', AppDir + '\config.yaml') = 0 then Exit;
+    if SetEnvironmentVariableW('DAGENTS_DESKTOP_CONFIG', DesktopConfig) = 0 then Exit;
+    if not Exec(ShellExe, Params, AppDir, SW_HIDE, ewWaitUntilTerminated, ExecResult) then Exit;
+    Result := ExecResult;
+  finally
+    RestoreSucceeded := True;
+    if SetEnvironmentVariableW('DAGENTS_HOME', PreviousHome) = 0 then RestoreSucceeded := False;
+    if SetEnvironmentVariableW('DAGENTS_CONFIG', PreviousConfig) = 0 then RestoreSucceeded := False;
+    if SetEnvironmentVariableW('DAGENTS_DESKTOP_CONFIG', PreviousDesktopConfig) = 0 then RestoreSucceeded := False;
+    if not RestoreSucceeded then Result := -1;
+  end;
 end;
 
 function DesktopConfigArgument(const AppDir: string): string;

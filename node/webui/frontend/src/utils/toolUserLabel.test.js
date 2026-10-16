@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  bashControlModeForStep,
   resolveToolStepPhase,
+  toolStepIsActiveInGroup,
   toolStepIsInProgress,
   toolStepIsPending,
   toolStepPurpose,
@@ -220,6 +222,48 @@ describe("toolStepStatusText", () => {
       data: { tool_call_id: "c9", tool_name: "browser_call", status: "queued" },
     };
     expect(toolStepStatusText({ resultEntry: result })).toBe("后台执行中");
+  });
+
+  it("lets an explicit failed bash result win over a lagging running snapshot and active hint", () => {
+    const callEntry = {
+      kind: "tool_call",
+      blockId: "bash-last",
+      data: { tool_name: "bash_run", tool_call_id: "bash-last" },
+    };
+    const resultEntry = {
+      kind: "tool_result",
+      blockId: "bash-last",
+      data: { tool_name: "bash_run", tool_call_id: "bash-last", status: "failed", exit_code: 1 },
+    };
+    const step = { callEntry, resultEntry, executionHint: "active" };
+    applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-last"] });
+
+    expect(resolveToolStepPhase(step)).toBe("failed");
+    expect(toolStepIsActiveInGroup(step)).toBe(false);
+    expect(bashControlModeForStep(step)).toBe(null);
+  });
+
+  it("prefers an existing failed or queued result over a stale settled hint", () => {
+    const callEntry = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "bash-result" } };
+    const failedResult = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "bash-result", status: "failed" } };
+    const queuedResult = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "bash-result", status: "queued" } };
+    applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-result"] });
+
+    expect(resolveToolStepPhase({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe("failed");
+    expect(bashControlModeForStep({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe(null);
+    expect(resolveToolStepPhase({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("background");
+    expect(toolStepIsInProgress({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe(true);
+    expect(bashControlModeForStep({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("running");
+  });
+
+  it.each(["running", "queued"])("keeps a nonterminal bash result in progress (%s)", (status) => {
+    const callEntry = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "bash-live" } };
+    const resultEntry = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "bash-live", status } };
+    const step = { callEntry, resultEntry, executionHint: "active" };
+    applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-live"] });
+
+    expect(toolStepIsActiveInGroup(step)).toBe(true);
+    expect(bashControlModeForStep(step)).toBe("running");
   });
 
   it("prefers a real running job over a stale partial tool call", () => {

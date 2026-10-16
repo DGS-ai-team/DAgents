@@ -1,0 +1,27 @@
+import unittest
+
+from scripts.release.validate_release import has_current_version_marker
+from scripts.release.prepare_release import update_readme_current_version_marker
+
+
+class CurrentVersionMarkerTests(unittest.TestCase):
+    def test_accepts_current_version_wording(self) -> None:
+        self.assertTrue(has_current_version_marker("当前版本为 **v0.11.0**。", "0.11.0"))
+
+    def test_accepts_current_release_version_wording(self) -> None:
+        self.assertTrue(has_current_version_marker("当前发布版本为 **v0.11.0**。", "0.11.0"))
+
+    def test_rejects_a_different_version(self) -> None:
+        self.assertFalse(has_current_version_marker("当前发布版本为 **v0.11.0**。", "0.11.1"))
+
+    def test_release_preparation_rewrites_both_marker_phrasings(self) -> None:
+        for wording in ("当前版本为", "当前发布版本为"):
+            with self.subTest(wording=wording):
+                readme = f"{wording} **v0.11.0**。"
+                updated = update_readme_current_version_marker(readme, "0.11.1")
+                self.assertEqual(updated, "当前版本为 **v0.11.1**。")
+                self.assertNotIn("v0.11.0", updated)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -7,6 +7,7 @@ export const TERMINAL_TURN_PHASES = Object.freeze([
   "cancelled",
   "interrupted",
   "budget_exhausted",
+  "finished",
 ]);
 
 export const PROCESSING_TURN_PHASES = Object.freeze([
@@ -129,6 +130,58 @@ export function applyTurnState(raw, { source = "event" } = {}) {
 
 export function applyHydrateTurnState(data = {}) {
   return applyTurnState(data?.turn_state || {}, { source: "hydrate" });
+}
+
+/**
+ * `turn_finished` is an explicit terminal event, but it can race with the
+ * terminal turn_state projection (and some terminal paths have no projection
+ * event). Correlate it to the active turn before using it to release the UI.
+ */
+export function applyTurnFinishedEvent(data = {}) {
+  if (data.turn_complete !== true) return false;
+  const turnId = trim(data.turn_id);
+  const generation = Number(data.turn_generation) || 0;
+  if (!turnId || generation <= 0) return false;
+  if (!turnStateStore.turnId || turnStateStore.turnId !== turnId) return false;
+  if (turnStateStore.generation !== generation) return false;
+  // A terminal lifecycle projection carries richer information (recovery,
+  // execution statuses, and the exact end reason); don't replace it with the
+  // smaller SSE finish envelope.
+  if (isTurnTerminal()) return true;
+
+  const finishReason = trim(data.finish_reason).toLowerCase();
+  const phase = finishReason === "budget_exhausted"
+    ? "budget_exhausted"
+    : finishReason === "cancelled"
+      ? "cancelled"
+      : ["error", "failed"].includes(finishReason)
+        ? "failed"
+        : ["stop", "completed", "success"].includes(finishReason)
+          ? "completed"
+          : "finished";
+  return applyTurnState({
+    authority: "turn_coordinator",
+    phase,
+    turn_id: turnId,
+    generation,
+    lifecycle_seq: turnStateStore.lifecycleSeq,
+    terminal: true,
+    end_reason: trim(data.budget_reason) || finishReason,
+  });
+}
+
+const BUDGET_REASON_LABELS = Object.freeze({
+  max_input_tokens: "输入令牌数上限",
+  max_steps: "模型步骤数上限",
+  max_summary_steps: "收尾摘要步骤预算",
+  max_tool_calls: "工具调用数上限",
+  max_tool_rounds: "工具轮次上限",
+});
+
+export function budgetExhaustionMessage(reason) {
+  const key = trim(reason).toLowerCase();
+  const label = BUDGET_REASON_LABELS[key];
+  return label ? `本轮已达到${label}，请缩小任务后继续。` : "本轮已达到运行预算上限，请缩小任务后继续。";
 }
 
 export function setOutputChannel(channel) {

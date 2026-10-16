@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "产物版本号后缀（写入 dagents-local-assistant-* / dagents-manage-bundle-{version}）"
+        description: "必须与所检出源码的 VERSION 完全一致（写入产物版本元数据）"
         required: true
       skip_tests:
         description: "跳过构建前 Go/Python 单测（仅调试打包脚本时用）"
@@ -27,15 +27,17 @@ jobs:
     name: Validate package version
     runs-on: ubuntu-latest
     steps:
-      - name: Validate version input
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate source release metadata and package version
         shell: bash
-        run: |
-          set -euo pipefail
-          version="${PACKAGE_VERSION}"
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid package version: ${version}; expected SemVer" >&2
-            exit 1
-          fi
+        run: python scripts/release/validate_release.py --version "${PACKAGE_VERSION}"
 
   test:
     name: Pre-build tests (Go + Python + Web UI)

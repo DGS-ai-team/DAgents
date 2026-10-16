@@ -69,6 +69,18 @@ def _read_lock_version(path: Path) -> tuple[str, str]:
     return str(payload.get("version", "")), root["version"]
 
 
+def has_current_version_marker(readme: str, version: str) -> bool:
+    """Accept the two current-version phrasings used in repository READMEs."""
+
+    return any(
+        marker in readme
+        for marker in (
+            f"当前版本为 **v{version}**",
+            f"当前发布版本为 **v{version}**",
+        )
+    )
+
+
 def validate(expected: str | None = None) -> list[str]:
     errors: list[str] = []
     try:
@@ -145,7 +157,7 @@ def validate(expected: str | None = None) -> list[str]:
         has_dynamic_badge = bool(re.search(r"github/v/release/[^\"\s]+", readme))
         if not has_static_badge and not has_dynamic_badge:
             errors.append(f"README.md has no release badge for v{version}")
-        if f"当前版本为 **v{version}**" not in readme:
+        if not has_current_version_marker(readme, version):
             errors.append(f"README.md has no current-version marker for v{version}")
     if "docs/handbook/README.md" in contents and f"当前发布 **v{version}**" not in contents["docs/handbook/README.md"]:
         errors.append(f"docs/handbook/README.md has no current-release marker for v{version}")

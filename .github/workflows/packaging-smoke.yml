@@ -86,6 +86,10 @@ jobs:
             exit 1
           fi
 
+      - name: Verify assembler preserves staging when an input is invalid
+        shell: bash
+        run: bash scripts/ci/test_assemble_bundle_contract.sh
+
   installer-contract:
     name: Windows installer contract
     runs-on: ubuntu-latest
@@ -109,3 +113,61 @@ jobs:
           grep -Fq 'Version.ProductType = VER_NT_WORKSTATION' packaging/windows/dagents-installer.iss
           grep -Fq '(Version.Build >= 10240)' packaging/windows/dagents-installer.iss
           grep -Fq '(Version.Build >= 17763)' packaging/windows/dagents-installer.iss
+          # Source contract only: lifecycle helper binds commands to this AppDir and restores inherited environment.
+          grep -Fq "SetEnvironmentVariableW@kernel32.dll stdcall" packaging/windows/dagents-installer.iss
+          grep -Fq "SetEnvironmentVariableW('DAGENTS_HOME', AppDir)" packaging/windows/dagents-installer.iss
+          grep -Fq "SetEnvironmentVariableW('DAGENTS_CONFIG', AppDir + '\\config.yaml')" packaging/windows/dagents-installer.iss
+          grep -Fq "SetEnvironmentVariableW('DAGENTS_DESKTOP_CONFIG', DesktopConfig)" packaging/windows/dagents-installer.iss
+          grep -Fq "SetEnvironmentVariableW('DAGENTS_HOME', PreviousHome)" packaging/windows/dagents-installer.iss
+          grep -Fq "SetEnvironmentVariableW('DAGENTS_CONFIG', PreviousConfig)" packaging/windows/dagents-installer.iss
+          grep -Fq "SetEnvironmentVariableW('DAGENTS_DESKTOP_CONFIG', PreviousDesktopConfig)" packaging/windows/dagents-installer.iss
+          grep -Fq 'finally' packaging/windows/dagents-installer.iss
+
+  windows-installer-compile:
+    name: Windows installer compile contract
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Inno Setup compiler
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile production and isolated QA installers (x64 and x86)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compile-only contract: these empty fixtures are packaged as files and never executed.
+          input_dir="${RUNNER_TEMP}/dagents-installer-compile-input"
+          mkdir -p "${input_dir}"
+          for name in dagents-node.exe dagents-client.exe dagents-browser.exe dagents-shell-tauri.exe; do
+            : > "${input_dir}/${name}"
+          done
+
+          version=0.0.0
+          for platform in windows-amd64 windows-386; do
+            PLATFORM="${platform}" \
+            VERSION="${version}" \
+            NODE_BIN="${input_dir}/dagents-node.exe" \
+            CLIENT_BIN="${input_dir}/dagents-client.exe" \
+            BROWSER_BIN="${input_dir}/dagents-browser.exe" \
+            SHELL_TAURI_BIN="${input_dir}/dagents-shell-tauri.exe" \
+            SHELL_BIN="${input_dir}/dagents-shell-tauri.exe" \
+              bash scripts/ci/assemble_local_assistant_bundle.sh
+
+            bundle="${GITHUB_WORKSPACE}/dist/dagents-local-assistant-${platform}"
+            PLATFORM="${platform}" VERSION="${version}" BUNDLE_SRC="${bundle}" \
+              bash scripts/ci/build_windows_installer.sh
+            PLATFORM="${platform}" VERSION="${version}" BUNDLE_SRC="${bundle}" INSTALLER_QA=1 \
+              bash scripts/ci/build_windows_installer.sh
+          done
+
+          for output in \
+            dist-installer/dagents-local-assistant-windows-amd64-installer-${version}.exe \
+            dist-installer/dagents-local-assistant-windows-amd64-installer-${version}-qa.exe \
+            dist-installer/dagents-local-assistant-windows-386-installer-${version}.exe \
+            dist-installer/dagents-local-assistant-windows-386-installer-${version}-qa.exe; do
+            test -s "${output}"
+          done
+          # This job intentionally uploads no package and never invokes an installer.

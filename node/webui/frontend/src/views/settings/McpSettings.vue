@@ -5,22 +5,11 @@ import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
-const DEFAULT_CONFIG = `{
-  "mcpServers": {
-    "tencent-docs": {
-      "type": "streamable-http",
-      "url": "https://docs.qq.com/openapi/mcp",
-      "headers": {
-        "Authorization": "\${TENCENT_DOC_KEY}"
-      }
-    }
-  }
-}`;
-
 const configText = ref("");
 const servers = ref([]);
 const activeServerId = ref("");
 const loading = ref(false);
+const loaded = ref(false);
 const saving = ref(false);
 const refreshing = ref("");
 const toolSaving = ref("");
@@ -31,6 +20,20 @@ const redactedSecrets = ref({});
 const draft = reactive({ configText: "" });
 
 const REDACTED_SECRET = "__DAGENTS_SECRET_REDACTED__";
+const configBusy = computed(() => loading.value || saving.value || Boolean(toolSaving.value) || Boolean(refreshing.value));
+
+function hasEditableServer(serverId) {
+  try {
+    const parsed = JSON.parse(draft.configText);
+    return Boolean(parsed?.mcpServers && typeof parsed.mcpServers === "object" && !Array.isArray(parsed.mcpServers)
+      && parsed.mcpServers[serverId] && typeof parsed.mcpServers[serverId] === "object" && !Array.isArray(parsed.mcpServers[serverId]));
+  } catch {
+    return false;
+  }
+}
+
+const canSave = computed(() => loaded.value && !configBusy.value);
+const canChangeActiveTools = computed(() => canSave.value && hasEditableServer(activeServerId.value));
 
 function isReferenceValue(value) {
   return /^\$\{[^}]+\}$/.test(value) || /^env:/i.test(value);
@@ -121,6 +124,7 @@ async function load() {
   error.value = "";
   try {
     setConfigFromResponse(await api.getMcpConfig());
+    loaded.value = true;
   } catch (e) {
     error.value = e.message || "加载 MCP 配置失败";
   } finally {
@@ -129,6 +133,7 @@ async function load() {
 }
 
 async function save() {
+  if (!canSave.value) return;
   saving.value = true;
   error.value = "";
   status.value = "";
@@ -145,7 +150,7 @@ async function save() {
 }
 
 function reloadDraft() {
-  configText.value = draft.configText;
+  if (configBusy.value) return;
   void load();
 }
 
@@ -169,7 +174,7 @@ function serverToolEnabled(tool) {
 }
 
 async function refreshServer(server) {
-  if (!server?.id || refreshing.value) return;
+  if (!server?.id || !loaded.value || configBusy.value) return;
   refreshing.value = server.id;
   error.value = "";
   try {
@@ -186,18 +191,27 @@ async function refreshServer(server) {
 }
 
 async function setTools(server, enabledTools) {
-  if (!server?.id || toolSaving.value) return;
+  if (!server?.id || !loaded.value || configBusy.value || !hasEditableServer(server.id)) return;
+  const previousToolStates = (server.tools || []).map((tool) => [tool.name, tool.enabled === true]);
+  const enabledSet = new Set(enabledTools);
+  for (const tool of server.tools || []) tool.enabled = enabledSet.has(tool.name);
   toolSaving.value = server.id;
   error.value = "";
   try {
     const updated = await api.patchMcpServer(server.id, { enabled_tools: enabledTools });
     const index = servers.value.findIndex((item) => item.id === server.id);
     if (index >= 0) servers.value[index] = updated;
+    const parsed = JSON.parse(draft.configText);
+    parsed.mcpServers[server.id].enabled_tools = [...enabledTools];
+    draft.configText = `${JSON.stringify(parsed, null, 2)}\n`;
     notifyConfigurationChanged("mcp-catalog");
     status.value = `${server.display_name || server.id} 的工具启停已保存`;
   } catch (e) {
+    for (const [name, enabled] of previousToolStates) {
+      const tool = (server.tools || []).find((item) => item.name === name);
+      if (tool) tool.enabled = enabled;
+    }
     error.value = e.message || "保存工具启停状态失败";
-    await load();
   } finally {
     toolSaving.value = "";
   }
@@ -222,7 +236,6 @@ function disableAll() {
 }
 
 onMounted(() => {
-  draft.configText = DEFAULT_CONFIG;
   void load();
 });
 </script>
@@ -234,7 +247,7 @@ onMounted(() => {
       description="管理 Node 全局可用的 MCP 服务和工具目录；具体智能体的启用范围在智能体设置中绑定。"
     >
       <template #actions>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="reloadDraft">重新加载</button>
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="configBusy" @click="reloadDraft">重新加载</button>
       </template>
     </SettingsPageHeader>
 
@@ -250,8 +263,8 @@ onMounted(() => {
           <p class="settings-section__desc">支持标准 mcpServers 格式。敏感值建议使用环境变量引用，例如 <code>${ENV_NAME}</code>；直接输入的凭据会加密存储。</p>
         </div>
         <div class="settings-section__actions">
-          <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="formatDraft">格式化</button>
-          <button type="button" class="btn btn--primary btn--sm" :disabled="saving" @click="save">
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="!loaded || configBusy" @click="formatDraft">格式化</button>
+          <button type="button" class="btn btn--primary btn--sm" :disabled="!canSave" @click="save">
             {{ saving ? "保存中…" : "保存并刷新" }}
           </button>
         </div>
@@ -262,6 +275,7 @@ onMounted(() => {
         spellcheck="false"
         autocomplete="off"
         aria-label="MCP 原始配置"
+        :disabled="!loaded || configBusy"
         placeholder='{
   "mcpServers": {}
 }'
@@ -318,11 +332,11 @@ onMounted(() => {
           <p class="settings-section__desc">只启用确实需要暴露给智能体的工具。</p>
         </div>
         <div class="settings-section__actions">
-          <button type="button" class="btn btn--ghost btn--sm" :disabled="refreshing === activeServer.id" @click="refreshServer(activeServer)">
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="configBusy" @click="refreshServer(activeServer)">
             {{ refreshing === activeServer.id ? "刷新中…" : "刷新目录" }}
           </button>
-          <button type="button" class="btn btn--ghost btn--sm" :disabled="toolSaving === activeServer.id" @click="enableAll">全部启用</button>
-          <button type="button" class="btn btn--ghost btn--sm" :disabled="toolSaving === activeServer.id" @click="disableAll">全部禁用</button>
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="!canChangeActiveTools" @click="enableAll">全部启用</button>
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="!canChangeActiveTools" @click="disableAll">全部禁用</button>
         </div>
       </div>
       <div class="mcp-settings__tool-toolbar">
@@ -333,7 +347,7 @@ onMounted(() => {
       <div v-else-if="!activeTools.length" class="mcp-settings__empty settings-empty-state">没有匹配的工具。</div>
       <div v-else class="mcp-settings__tool-list">
         <label v-for="tool in activeTools" :key="tool.name" class="mcp-settings__tool-row">
-          <input class="settings-switch-input" type="checkbox" :checked="serverToolEnabled(tool)" :disabled="toolSaving === activeServer.id" @change="toggleTool(activeServer, tool)" />
+          <input class="settings-switch-input" type="checkbox" :checked="serverToolEnabled(tool)" :disabled="!canChangeActiveTools" @change="toggleTool(activeServer, tool)" />
           <span>
             <code>{{ tool.name }}</code>
             <small v-if="tool.description">{{ tool.description }}</small>

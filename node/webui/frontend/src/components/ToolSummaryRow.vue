@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { formatToolElapsed } from "../utils/format.js";
 import {
+  bashControlModeForStep,
   resolveToolStepPhase,
   toolStepIsInProgress,
   toolStepIsPending,
@@ -11,7 +12,6 @@ import {
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import {
-  bashControlMode,
   cancelBashToolCall,
   toolCallIdFromEntry,
   toolNameFromEntry,
@@ -47,7 +47,7 @@ const toolLabel = computed(() => toolStepToolLabel(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
 const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
 const stepPending = computed(() => toolStepIsPending(stepArgs.value));
-const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const controlMode = computed(() => bashControlModeForStep(stepArgs.value));
 const inProgress = computed(() => stepInProgress.value || controlMode.value === "running");
 const showBashControls = computed(() => controlMode.value != null);
 const detailEntry = computed(() => props.resultEntry || props.callEntry);

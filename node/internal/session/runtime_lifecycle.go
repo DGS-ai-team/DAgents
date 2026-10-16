@@ -777,8 +777,16 @@ func (r *runtime) lifecycleBeginContinuationStep(source turn.TurnSource) (bool, 
 		return false, fmt.Errorf("turn coordinator is unavailable")
 	}
 	r.lifecycleMu.Lock()
-	defer r.lifecycleMu.Unlock()
-	return r.lifecycleBeginContinuationStepLocked(source)
+	before := r.turnCoordinator.Snapshot()
+	started, err := r.lifecycleBeginContinuationStepLocked(source)
+	state := r.turnCoordinator.Snapshot()
+	r.lifecycleMu.Unlock()
+	if err == nil && !started && before.TurnStatus != turn.TurnStatusBudgetExhausted && state.TurnStatus == turn.TurnStatusBudgetExhausted && r.orch != nil {
+		// Publish only after releasing lifecycleMu: terminal turn_state is
+		// already visible, and turn.done hooks cannot re-enter this lock.
+		r.orch.PublishBudgetExhausted(r.session.ID, state.TurnID, state.Generation, state.TurnEndReason)
+	}
+	return started, err
 }
 
 func (r *runtime) lifecycleBeginContinuationStepLocked(source turn.TurnSource) (bool, error) {

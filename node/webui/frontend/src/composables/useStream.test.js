@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildStream } from "./useStream.js";
+import { toolStepIsActiveInGroup } from "../utils/toolUserLabel.js";
 
 function entry(id, kind, extra = {}) {
   return { id, kind, ...extra };
@@ -31,6 +32,25 @@ describe("buildStream", () => {
 
     expect(items.filter((item) => item.kind === "tool_step")).toHaveLength(2);
     expect(items.filter((item) => item.kind === "tool_step").every((item) => item.resultEntry)).toBe(true);
+  });
+
+  it("does not keep the final failed bash step active when a prior active hint lingers", () => {
+    const steps = buildStream([
+      entry(1, "tool_call", {
+        blockId: "bash-final",
+        data: { tool_name: "bash_run", tool_call_id: "bash-final", arguments: '{"command":"exit 1"}' },
+      }),
+      entry(2, "tool_result", {
+        blockId: "bash-final",
+        data: { tool_name: "bash_run", tool_call_id: "bash-final", status: "failed", exit_code: 1 },
+      }),
+    ]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].resultEntry.data.status).toBe("failed");
+
+    // Simulate a cached execution hint racing with the terminal result.
+    steps[0].executionHint = "active";
+    expect(toolStepIsActiveInGroup(steps[0])).toBe(false);
   });
 
   it("keys replacement HITL entries by request id", () => {

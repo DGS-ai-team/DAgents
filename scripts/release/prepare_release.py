@@ -93,6 +93,27 @@ def update_cargo_package(text: str, version: str, path: Path) -> str:
     )
 
 
+def update_readme_current_version_marker(readme: str, version: str) -> str:
+    current_marker = r"当前(?:发布)?版本为 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*"
+    if re.search(current_marker, readme):
+        return replace_once(
+            readme,
+            current_marker,
+            f"当前版本为 **v{version}**",
+            "README current version",
+            README_FILE,
+        )
+
+    badge_block = re.search(r"(<p align=\"center\">(?:(?!</p>).)*Latest release(?:(?!</p>).)*</p>)", readme, re.S)
+    if not badge_block:
+        raise ValueError(f"README current version: no release badge block found in {README_FILE}")
+    return (
+        readme[: badge_block.end()]
+        + f"\n\n当前版本为 **v{version}**"
+        + readme[badge_block.end() :]
+    )
+
+
 def prepare(version: str, summary: str, release_date: str) -> None:
     if not SEMVER.fullmatch(version):
         raise ValueError(f"invalid SemVer: {version!r}")
@@ -149,24 +170,7 @@ def prepare(version: str, summary: str, release_date: str) -> None:
     elif not re.search(r"github/v/release/[^\"\s]+", readme_updated):
         raise ValueError(f"README release badge: no static or dynamic release badge found in {README_FILE}")
 
-    current_marker = r"当前版本为 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*"
-    if re.search(current_marker, readme_updated):
-        readme_updated = replace_once(
-            readme_updated,
-            current_marker,
-            f"当前版本为 **v{version}**",
-            "README current version",
-            README_FILE,
-        )
-    else:
-        badge_block = re.search(r"(<p align=\"center\">(?:(?!</p>).)*Latest release(?:(?!</p>).)*</p>)", readme_updated, re.S)
-        if not badge_block:
-            raise ValueError(f"README current version: no release badge block found in {README_FILE}")
-        readme_updated = (
-            readme_updated[: badge_block.end()]
-            + f"\n\n当前版本为 **v{version}**"
-            + readme_updated[badge_block.end() :]
-        )
+    readme_updated = update_readme_current_version_marker(readme_updated, version)
     handbook_updated = replace_once(
         handbook,
         r"当前发布 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*",

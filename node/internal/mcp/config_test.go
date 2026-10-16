@@ -59,6 +59,21 @@ func TestConfigTextSupportsLiteralCredentials(t *testing.T) {
 	if err != nil || !contains(rendered, "Bearer plaintext") {
 		t.Fatalf("rendered=%s err=%v", rendered, err)
 	}
+	redacted, err := FormatConfigTextRedacted(configs)
+	if err != nil || contains(redacted, "Bearer plaintext") || !contains(redacted, RedactedSecretPlaceholder) {
+		t.Fatalf("redacted=%s err=%v", redacted, err)
+	}
+	roundTripped, err := ParseConfigText(redacted, configs)
+	if err != nil || len(roundTripped) != 1 || roundTripped[0].HeaderValues["Authorization"] != "Bearer plaintext" {
+		t.Fatalf("redacted round trip=%+v err=%v", roundTripped, err)
+	}
+}
+
+func TestConfigTextCannotCreateCredentialFromRedactedPlaceholder(t *testing.T) {
+	_, err := ParseConfigText(`{"mcpServers":{"new":{"type":"streamable-http","url":"https://example.com/mcp","headers":{"Authorization":"`+RedactedSecretPlaceholder+`"}}}}`, nil)
+	if err == nil || !contains(err.Error(), "can only retain an existing value") {
+		t.Fatalf("expected placeholder without prior secret to fail, got %v", err)
+	}
 }
 
 func contains(text, value string) bool {

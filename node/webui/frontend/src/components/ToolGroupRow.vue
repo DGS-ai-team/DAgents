@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import { resolveToolGroupVisual } from "../utils/toolSource.js";
-import { resolveToolStepPhase } from "../utils/toolUserLabel.js";
+import { toolStepIsActiveInGroup } from "../utils/toolUserLabel.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiIcon from "./UiIcon.vue";
 
@@ -15,11 +15,7 @@ const props = defineProps({
 const expanded = ref(false);
 
 const activeSteps = computed(() =>
-  props.steps.filter((step) => {
-    if (!step?.callEntry) return false;
-    if (step.executionHint === "active") return true;
-    return !step.resultEntry && resolveToolStepPhase(step) !== "interrupted";
-  }),
+  props.steps.filter((step) => toolStepIsActiveInGroup(step)),
 );
 
 const completedCount = computed(() => props.steps.filter((step) => !!step?.resultEntry).length);
