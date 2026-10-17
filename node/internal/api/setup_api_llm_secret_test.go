@@ -142,6 +142,188 @@ func TestPersistLLMConfigsRejectsAmbiguousSecretMoveWithoutChangingStore(t *test
 	}
 }
 
+func TestPersistLLMConfigsProtectsAgentProfileReferences(t *testing.T) {
+	ctx := context.Background()
+	st := openTestLLMConfigStore(t)
+	seedTestLLMProfiles(t, st, []store.LLMConfigRecord{
+		{ID: "bound", Provider: "openai", Model: "original-model"},
+		{ID: "spare", Provider: "qwen", Model: "spare-model"},
+	}, map[string]string{"bound": "synthetic-bound-key", "spare": "synthetic-spare-key"})
+	agents, err := store.OpenAgents(filepath.Join(t.TempDir(), "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agents.Close()
+	for _, rec := range []store.AgentRecord{
+		{AgentID: "normal-agent", ConfigSnapshot: json.RawMessage(`{"agent_type":"normal","defaults":{"llm":{"active":"bound"}}}`)},
+		{AgentID: "auto-agent", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto","defaults":{"llm":{"active":"bound"}}}`)},
+		{AgentID: "archived-agent", Archived: true, ConfigSnapshot: json.RawMessage(`{"agent_type":"normal","defaults":{"llm":{"active":"bound"}}}`)},
+	} {
+		if err := agents.Save(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := &Server{llmConfigs: st, agents: agents}
+
+	for _, profiles := range [][]setup.LLMProfileSettings{
+		{{ID: "renamed", OriginalID: "bound", Provider: "openai", Model: "new-model"}, {ID: "spare", Provider: "qwen", Model: "spare-model"}},
+		{{ID: "spare", Provider: "qwen", Model: "spare-model"}},
+	} {
+		if err := srv.persistLLMConfigs(ctx, profiles); err == nil || !strings.Contains(err.Error(), "无法删除或改名模型配置「bound」") || !strings.Contains(err.Error(), "auto-agent") || !strings.Contains(err.Error(), "normal-agent") || strings.Contains(err.Error(), "archived-agent") {
+			t.Fatalf("referenced profile mutation error = %v", err)
+		}
+		if got := resolveTestLLMKey(t, st, "bound"); got != "synthetic-bound-key" {
+			t.Fatal("referenced profile or secret changed after rejection")
+		}
+		if rec, err := st.Get(ctx, "bound"); err != nil || rec.Model != "original-model" {
+			t.Fatalf("referenced profile = %+v, err=%v", rec, err)
+		}
+	}
+
+	// Editing the same referenced ID and renaming an unreferenced ID stay valid.
+	if err := srv.persistLLMConfigs(ctx, []setup.LLMProfileSettings{
+		{ID: "bound", Provider: "openai", Model: "edited-model"},
+		{ID: "spare-renamed", OriginalID: "spare", Provider: "qwen", Model: "spare-model"},
+	}); err != nil {
+		t.Fatalf("same-ID edit plus unreferenced rename failed: %v", err)
+	}
+	if got := resolveTestLLMKey(t, st, "bound"); got != "synthetic-bound-key" {
+		t.Fatal("same-ID edit did not retain the referenced key")
+	}
+	for _, id := range []string{"normal-agent", "auto-agent"} {
+		if err := agents.SoftDelete(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := srv.persistLLMConfigs(ctx, []setup.LLMProfileSettings{
+		{ID: "renamed", OriginalID: "bound", Provider: "openai", Model: "renamed-model"},
+		{ID: "spare-renamed", Provider: "qwen", Model: "spare-model"},
+	}); err != nil {
+		t.Fatalf("rename after archiving referencing Agents failed: %v", err)
+	}
+}
+
+func TestPatchSetupRejectsReferencedProfileBeforePersistingSettingsOrSecrets(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	profiles := map[string]config.LLMProfileConfig{
+		"bound": {Provider: "openai", Model: "original-model"},
+		"spare": {Provider: "qwen", Model: "spare-model"},
+	}
+	cfg := testConfig(t)
+	cfg.LLM.Profiles = profiles
+	cfg.LLM.ProfileOrder = []string{"bound", "spare"}
+	if err := cfg.SetActiveLLMProfile("bound"); err != nil {
+		t.Fatal(err)
+	}
+	llmStore := openTestLLMConfigStore(t)
+	seedTestLLMProfiles(t, llmStore, []store.LLMConfigRecord{
+		{ID: "bound", Provider: "openai", Model: "original-model"},
+		{ID: "spare", Provider: "qwen", Model: "spare-model"},
+	}, map[string]string{"bound": "synthetic-bound-key", "spare": "synthetic-spare-key"})
+	settings, err := store.OpenNodeSettings(filepath.Join(root, "node_settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.Save(ctx, store.AgentRecord{AgentID: "agent-bound", ConfigSnapshot: json.RawMessage(`{"agent_type":"normal","defaults":{"llm":{"active":"bound"}}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore())
+	srv.llmConfigs = llmStore
+	srv.nodeSettings = settings
+	srv.agents = agents
+	t.Cleanup(func() {
+		_ = agents.Close()
+		_ = settings.Close()
+	})
+	patch := []byte(`{"llm":{"active":"spare","profiles":[{"id":"spare","provider":"qwen","model":"spare-model"}]}}`)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/settings", bytes.NewReader(patch)))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "llm_profile_in_use") || !strings.Contains(rec.Body.String(), "agent-bound") || !strings.Contains(rec.Body.String(), "无法删除或改名") {
+		t.Fatalf("PATCH status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	loaded, err := settings.Load(ctx)
+	if err != nil || loaded == nil || loaded.LLM.Active != "bound" {
+		t.Fatalf("node settings changed after rejection: settings=%+v err=%v", loaded, err)
+	}
+	if got := resolveTestLLMKey(t, llmStore, "bound"); got != "synthetic-bound-key" {
+		t.Fatal("LLM secret store changed after rejected setup PATCH")
+	}
+}
+
+func TestAgentLLMProfileAssignmentsRequireExistingProfiles(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(t)
+	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
+		"bound": {Provider: "openai", Model: "model-a"},
+	}
+	cfg.LLM.ProfileOrder = []string{"bound"}
+	if err := cfg.SetActiveLLMProfile("bound"); err != nil {
+		t.Fatal(err)
+	}
+	llmStore := openTestLLMConfigStore(t)
+	seedTestLLMProfiles(t, llmStore, []store.LLMConfigRecord{{ID: "bound", Provider: "openai", Model: "model-a"}}, nil)
+	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore())
+	srv.agents = agents
+	srv.llmConfigs = llmStore
+	t.Cleanup(srv.Close)
+
+	create := func(active string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"display_name": "profile test",
+			"defaults":     map[string]any{"llm": map[string]any{"active": active}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body)))
+		return rec
+	}
+	invalidCreate := create("missing")
+	if invalidCreate.Code != http.StatusBadRequest || !strings.Contains(invalidCreate.Body.String(), "invalid_agent_llm_profile") || !strings.Contains(invalidCreate.Body.String(), "模型配置「missing」不存在") {
+		t.Fatalf("invalid create status=%d body=%s", invalidCreate.Code, invalidCreate.Body.String())
+	}
+	if records, err := agents.List(context.Background()); err != nil || len(records) != 0 {
+		t.Fatalf("invalid create persisted Agent: records=%+v err=%v", records, err)
+	}
+
+	validCreate := create("bound")
+	if validCreate.Code != http.StatusOK {
+		t.Fatalf("valid create status=%d body=%s", validCreate.Code, validCreate.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(validCreate.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	before, err := agents.Get(context.Background(), created.AgentID)
+	if err != nil || before == nil {
+		t.Fatalf("created Agent missing: rec=%+v err=%v", before, err)
+	}
+	patchBody := []byte(`{"defaults":{"llm":{"active":"missing"}}}`)
+	patchRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(patchRec, httptest.NewRequest(http.MethodPatch, "/v1/agents/"+created.AgentID, bytes.NewReader(patchBody)))
+	if patchRec.Code != http.StatusBadRequest || !strings.Contains(patchRec.Body.String(), "invalid_agent_llm_profile") {
+		t.Fatalf("invalid patch status=%d body=%s", patchRec.Code, patchRec.Body.String())
+	}
+	after, err := agents.Get(context.Background(), created.AgentID)
+	if err != nil || after == nil || !bytes.Equal(after.ConfigSnapshot, before.ConfigSnapshot) {
+		t.Fatalf("invalid patch changed Agent snapshot: before=%s after=%+v err=%v", before.ConfigSnapshot, after, err)
+	}
+}
+
 func TestSetupSettingsReadDoesNotExposeLLMKeyOrRenameMetadata(t *testing.T) {
 	st := openTestLLMConfigStore(t)
 	seedTestLLMProfiles(t, st, []store.LLMConfigRecord{{ID: "custom", Provider: "openai", Model: "gpt-test"}}, map[string]string{"custom": "synthetic-private-key"})

@@ -165,6 +165,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "agents_unavailable", "agents store not configured", nil)
 		return
 	}
+	s.llmRefMu.RLock()
+	defer s.llmRefMu.RUnlock()
 	var req createAgentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
@@ -204,6 +206,18 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		soulMD, customMD = agenttemplate.PromptBodiesFromDefaults(tpl.Defaults)
 	}
 	agenttemplate.StripPromptBodiesFromDefaults(baseDefaults)
+	profileID := agentruntime.LLMActiveFromDefaults(agentruntime.Snapshot{Defaults: baseDefaults})
+	if profileID != "" {
+		exists, err := s.llmProfileExists(r.Context(), profileID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "llm_config_load_failed", err.Error(), nil)
+			return
+		}
+		if !exists {
+			writeAPIError(w, http.StatusBadRequest, "invalid_agent_llm_profile", fmt.Sprintf("模型配置「%s」不存在；请先在 Node 设置中创建该配置，或选择现有配置", profileID), map[string]any{"profile_id": profileID})
+			return
+		}
+	}
 
 	name := strings.TrimSpace(req.DisplayName)
 	if name == "" && tpl != nil {
@@ -375,6 +389,8 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "agents_unavailable", "agents store not configured", nil)
 		return
 	}
+	s.llmRefMu.RLock()
+	defer s.llmRefMu.RUnlock()
 	id := strings.TrimSpace(r.PathValue("agent_id"))
 	rec, err := s.agents.Get(r.Context(), id)
 	if err != nil {
@@ -444,6 +460,20 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Defaults != nil {
 		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
 		runtimeDirty = true
+		if requestedAgentLLMProfile(req.Defaults) {
+			profileID := agentruntime.LLMActiveFromDefaults(snap)
+			if profileID != "" {
+				exists, err := s.llmProfileExists(r.Context(), profileID)
+				if err != nil {
+					writeAPIError(w, http.StatusInternalServerError, "llm_config_load_failed", err.Error(), nil)
+					return
+				}
+				if !exists {
+					writeAPIError(w, http.StatusBadRequest, "invalid_agent_llm_profile", fmt.Sprintf("模型配置「%s」不存在；请先在 Node 设置中创建该配置，或选择现有配置", profileID), map[string]any{"profile_id": profileID})
+					return
+				}
+			}
+		}
 	}
 	if req.AgentType != nil {
 		snap.AgentType = normalizeAgentType(*req.AgentType)
@@ -640,6 +670,39 @@ func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
+}
+
+func requestedAgentLLMProfile(defaults map[string]any) bool {
+	llmDefaults, ok := defaults["llm"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = llmDefaults["active"]
+	return ok
+}
+
+func (s *Server) llmProfileExists(ctx context.Context, profileID string) (bool, error) {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return true, nil
+	}
+	if s.llmConfigs != nil {
+		records, err := s.llmConfigs.List(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, record := range records {
+			if record.ID == profileID {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if s.cfg == nil {
+		return false, fmt.Errorf("LLM 配置不可用")
+	}
+	_, exists := s.cfg.LLM.GetProfile(profileID)
+	return exists, nil
 }
 
 func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {

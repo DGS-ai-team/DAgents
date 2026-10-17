@@ -117,4 +117,32 @@ describe("SetupConfigPanel LLM profile editing", () => {
       model: "new-model",
     });
   });
+
+  it("shows an actionable server error when saving a profile change blocked by Agent references", async () => {
+    getSetupConfig.mockResolvedValue({
+      config_writable: true,
+      config_path: "node_settings.db",
+      llm: {
+        active: "profile-bound",
+        profiles: [
+          { id: "profile-bound", provider: "openai", model: "model-a", has_api_key: true },
+          { id: "profile-spare", provider: "qwen", model: "model-b", has_api_key: false },
+        ],
+      },
+      manage: { enabled: false },
+    });
+    patchSetupConfig.mockRejectedValue(new Error(
+      '无法删除或改名模型配置「profile-bound」：仍被 Agent「agent-one」使用。请先修改这些 Agent 的模型配置，或删除这些 Agent 后重试。',
+    ));
+
+    wrapper = mount(SetupConfigPanel, { attachTo: document.body });
+    await flushPromises();
+    await wrapper.get(".btn--primary").trigger("click");
+    await flushPromises();
+
+    expect(patchSetupConfig).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('[role="alert"]').text()).toContain("agent-one");
+    expect(wrapper.get('[role="alert"]').text()).toContain("请先修改这些 Agent 的模型配置");
+    expect(wrapper.text()).not.toContain("已保存。");
+  });
 });

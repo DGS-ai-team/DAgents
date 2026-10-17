@@ -65,6 +65,7 @@ type Server struct {
 	linuxChannels   *store.LinuxChannelStore
 	linuxProvider   *tools.LinuxShellProvider
 	llmConfigs      *store.LLMConfigStore
+	llmRefMu        sync.RWMutex // serializes Agent snapshot writes against LLM profile removal
 	nodeSettings    *store.NodeSettingsStore
 	stream          *stream.Hub // 进程内 SSE 事件总线
 	transferStream  *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）

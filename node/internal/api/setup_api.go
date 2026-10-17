@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
@@ -50,6 +52,8 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "至少提供一个配置块", nil)
 		return
 	}
+	s.llmRefMu.Lock()
+	defer s.llmRefMu.Unlock()
 
 	if setup.PatchHasNonLLMBlock(patch) && s.nodeSettings == nil && !(s.configPath != "" && configPathWritable(s.configPath)) {
 		writeAPIError(w, http.StatusForbidden, "config_not_writable", "node_settings 不可用且 config.yaml 不可写", nil)
@@ -89,6 +93,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	needsLLMPersist := patch.LLM != nil && len(patch.LLM.Profiles) > 0 && s.llmConfigs != nil
+	needsLLMReferenceCheck := patch.LLM != nil && len(patch.LLM.Profiles) > 0
 	var llmSnapshot []store.LLMConfigRecord
 	var settingsSnapshot *config.Config
 	if needsLLMPersist {
@@ -98,6 +103,24 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		llmSnapshot = records
+	}
+	if needsLLMReferenceCheck {
+		records := llmSnapshot
+		if !needsLLMPersist {
+			records = llmProfileRecordsFromConfig(s.cfg)
+		}
+		if err := s.validateLLMProfileReferences(r.Context(), records, patch.LLM.Profiles); err != nil {
+			if inUse, ok := err.(*llmProfileInUseError); ok {
+				writeAPIError(w, http.StatusConflict, "llm_profile_in_use", inUse.Error(), map[string]any{
+					"profile_id": inUse.ProfileID,
+					"agent_ids":  inUse.AgentIDs,
+					"action":     "先修改这些 Agent 的模型配置，或删除这些 Agent 后重试",
+				})
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "llm_profile_reference_check_failed", err.Error(), nil)
+			return
+		}
 	}
 	if s.nodeSettings != nil {
 		prev, err := s.nodeSettings.Load(r.Context())
@@ -182,6 +205,9 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 	}
 	for _, rec := range existingRecords {
 		existing[rec.ID] = rec
+	}
+	if err := s.validateLLMProfileReferences(ctx, existingRecords, profiles); err != nil {
+		return err
 	}
 
 	// Validate secret moves before ReplaceAll starts its transaction. A blank
@@ -277,6 +303,83 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		}
 	}
 	return s.llmConfigs.ReplaceAll(ctx, records, keys, clearIDs)
+}
+
+type llmProfileInUseError struct {
+	ProfileID string
+	AgentIDs  []string
+}
+
+func (e *llmProfileInUseError) Error() string {
+	return fmt.Sprintf("无法删除或改名模型配置「%s」：仍被 Agent「%s」使用。请先修改这些 Agent 的模型配置，或删除这些 Agent 后重试。", e.ProfileID, strings.Join(e.AgentIDs, "、"))
+}
+
+func llmProfileRecordsFromConfig(cfg *config.Config) []store.LLMConfigRecord {
+	if cfg == nil {
+		return nil
+	}
+	records := make([]store.LLMConfigRecord, 0, len(cfg.LLM.Profiles))
+	for id := range cfg.LLM.Profiles {
+		records = append(records, store.LLMConfigRecord{ID: id})
+	}
+	return records
+}
+
+func (s *Server) validateLLMProfileReferences(ctx context.Context, existing []store.LLMConfigRecord, profiles []setup.LLMProfileSettings) error {
+	if s.agents == nil || len(existing) == 0 {
+		return nil
+	}
+	retained := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		if id := strings.TrimSpace(profile.ID); id != "" {
+			retained[id] = struct{}{}
+		}
+	}
+	removed := make(map[string]struct{})
+	for _, record := range existing {
+		if _, ok := retained[record.ID]; !ok {
+			removed[record.ID] = struct{}{}
+		}
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	agents, err := s.agents.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list Agents while checking LLM config references: %w", err)
+	}
+	refs := make(map[string]map[string]struct{})
+	for _, agent := range agents {
+		snapshot, err := agentruntime.ParseSnapshot(agent.ConfigSnapshot)
+		if err != nil {
+			return fmt.Errorf("cannot verify LLM config references because Agent %q has an invalid config snapshot: %w", agent.AgentID, err)
+		}
+		id := agentruntime.LLMActiveFromDefaults(snapshot)
+		if _, ok := removed[id]; !ok {
+			continue
+		}
+		if refs[id] == nil {
+			refs[id] = make(map[string]struct{})
+		}
+		refs[id][agent.AgentID] = struct{}{}
+	}
+	removedIDs := make([]string, 0, len(removed))
+	for profileID := range removed {
+		removedIDs = append(removedIDs, profileID)
+	}
+	sort.Strings(removedIDs)
+	for _, profileID := range removedIDs {
+		agentIDs := make([]string, 0, len(refs[profileID]))
+		for id := range refs[profileID] {
+			agentIDs = append(agentIDs, id)
+		}
+		if len(agentIDs) == 0 {
+			continue
+		}
+		sort.Strings(agentIDs)
+		return &llmProfileInUseError{ProfileID: profileID, AgentIDs: agentIDs}
+	}
+	return nil
 }
 
 func (s *Server) enrichLLMSettingsView(llm *setup.LLMSettings) {
