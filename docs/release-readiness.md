@@ -31,13 +31,14 @@
 - [x] 两个设计原型的兼容依赖修复，分别 build 与 4 项测试通过、npm audit 0；确认 `glib` 只在非发行的 Linux Desktop 图中，Windows x64/x86 不包含它。
 - [x] 移除 Desktop 未使用的 `zip 7.2.0` 及其专属依赖，关闭三项 RustSec 漏洞；锁文件扫描为 0 漏洞、7 项明示警告，CI 增加固定版本的无忽略项审计。
 - [x] 正式与手动发布工作流仅组装 x64 完整包；更新查询增加 `platform_supported`，无匹配架构时明确提示且不下载其他架构。旧 Manage/Node 缺字段默认允许原有行为；覆盖 Node 失败状态、托盘提示和 CLI 检查分支。
+- [x] 固定产品源码 `29fc308`，重建 Go 1.26.9 Node/Client、Tauri Desktop 和实际 Browser 输入，完成 x64 完整 bundle 与 QA/正式 Inno 安装器编译。主线程独立核对全部 51 个文件和两种安装器哈希；[候选记录](design/desktop-product/audits/2026-10-17/release-candidate.md)。版本仍为 `0.11.0` 开发验收值，没有发布或执行安装。
 - [x] 发布说明补齐 Desktop/API-only、配置分离、资源、工具、浏览器协议和安装行为；README 增加当前原生截图，文档入口与路线图同步。
 
 ## P0：进入稳定版前必须关闭
 
 以下是本次建议的发布门槛，不表示这些能力都尚未实现。每项以最终候选提交和实际包为准，记录环境、包哈希、步骤与结果；失败项修复后重测受影响链路。
 
-- [ ] **最新提交的 CI、审查与集成。** PR #347 合入 `dev` 前，Go 测试/vet/staticcheck/race/漏洞扫描、Python、前端、Rust、Windows x64、Docker 和打包检查全部通过。`024356d1` 已全绿；本轮后续变更仍以最新 head 检查为准。合并后冻结一个候选提交。
+- [ ] **最新提交的 CI、审查与集成。** 本轮产品源码 `29fc308` 在提交 `12738e4a` 的[全量 CI](https://github.com/DGS-ai-team/DAgents/actions/runs/39011353761) 已通过，覆盖 Go 测试/vet/staticcheck/并发回归/漏洞扫描、Python、前端、Rust、Windows x64/x86 源码编译、Docker、打包与联网 RustSec 审计。PR #347 仍需审查并合入 `dev`；后续文档补录也以最新 head 检查为准。合并后再冻结正式候选提交。
 - [ ] **最终包的标准用户初装、升级、卸载与恢复。** 在一次性 Windows 用户或 VM 中，用真实二进制跑初装→首配→使用→运行中升级→重开→卸载；覆盖中文/空格路径、快捷方式、可选自启的开/关状态及静默升级、非本安装 Node/另一安装不受影响。确认配置、LLM 密钥、Agent 历史/记忆、工作区、Desktop 偏好保留。补无 WebView2、不可写路径、文件占用失败和从备份恢复的演练。不得声称已有应用级事务回滚。操作见 [安装升级清单](../packaging/windows/install-upgrade-acceptance.md)。
 - [ ] **v0.11.0 用户迁移。** 脱敏旧数据打开、配对解密、Agent/Auto/workspace/session 与未决 Trigger 恢复已通过，备份后卸载重装流程已成文。v0.11.0 本身已使用 SQLite，不新增 fat YAML 导入兼容；旧空闲压缩值不继承为新上下文阈值。剩余为真实旧发行安装包备份→卸载→新装→恢复与失败恢复演练；无 marker 拒绝覆盖不能计作迁移通过。
 - [ ] **LLM 与 MCP 配置往返。** 当前真实窗口已通过空 Key 探测/保存/重开探测与 MCP 工具开关/高级 JSON/凭据往返，失败草稿不覆盖已存配置。HTTP 对端为本地合成服务，仍需在最终安装候选与实际 Provider/外部 MCP 上做冒烟；清空/替换 Key、取消和探测失败仍以自动回归为主，未逐一原生复验。
