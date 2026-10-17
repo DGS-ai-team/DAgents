@@ -1,5 +1,7 @@
 # Desktop MVP 收束与验收记录
 
+> 当前发布状态见[发布收束清单](../../release-readiness.md)。本文保留逐阶段事实；早期“尚未替代 WebUI”、简单文本终端、仅本机连接等描述已被后续实现取代，不能当作当前缺口。
+
 > 2026-10-15 更新：下文为 10 月 8 日的阶段记录。当前 Node 已只提供 API，独立 Desktop 承载界面；Go 托盘与 Node `/ui/` 服务路径已移除，Desktop 本地配置与 Node 业务配置已分离。当前边界见 [产品收束方向](product-direction-simplification-2026-10-14.md)，后续验收见 [10 月 14 日收束记录](audits/2026-10-14/product-closeout/README.md) 与 [10 月 15 日日常回归](audits/2026-10-15/daily-use/README.md)。
 
 > 后续进展：本文件保留本轮早期验收事实。2026-10-08 后续已接入创建、附件媒体、xterm、文件、工作组、Auto 总览与浏览器只读观看，最新覆盖范围和验证限制见 [daily-use-integration.md](daily-use-integration.md)。下文“尚未接入”的描述属于当时阶段，不能作为当前功能清单。

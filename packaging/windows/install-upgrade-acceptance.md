@@ -2,6 +2,10 @@
 
 Updated: 2026-10-16
 
+Release scope update (2026-10-17): the next complete Windows release is x64
+only; x86 is suspended. Earlier dual-architecture compile results below are
+historical evidence, not a claim that a new x86 package will be published.
+
 This is the Windows acceptance checklist for the Node API plus Tauri Desktop
 package. It is intended for a disposable Windows profile or VM. Do not run the
 upgrade/uninstall cases against a developer profile with real Node data.
@@ -14,8 +18,8 @@ runtime acceptance results below.
 
 ## Package and prerequisite checks
 
-- Build both `windows-amd64` and `windows-386` staging bundles, then compile
-  each with Inno Setup 6 (`ISCC.exe`). Confirm the installer includes
+- Build the `windows-amd64` staging bundle, then compile
+  it with Inno Setup 6 (`ISCC.exe`). Confirm the installer includes
   `dagents-node.exe`, `dagents-client.exe`, `dagents-browser.exe`,
   `dagents-shell.exe`, `dagents.cmd`, bootstrap config, and seed files.
 - With WebView2 Evergreen Runtime registered, the installer opens normally.

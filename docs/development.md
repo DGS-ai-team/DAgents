@@ -13,6 +13,8 @@
 
 Desktop 和 Manage Console 的前端资源不提交 Git。Go Node 只提供 API，不嵌入前端；构建或测试 Node 不需要先构建前端。修改共享 Desktop UI 时运行其独立测试和构建。
 
+发行构建的 Go 补丁版本以 CI 固定值为准，目前为 `1.26.9`。满足 `go.mod` 的最低版本不代表已包含当前安全修复。需要临时切换时，可在单次构建进程设置 `GOTOOLCHAIN=go1.26.9`，核对 `go version` 和产物的 `go version -m`；不要使用旧工具链的构建产物替代已通过漏洞扫描的候选包。
+
 Node 当前 HTTP 路由、设置所有权、消息/SSE 与更新包协议见 [Node Runtime API 接入契约](api/node-integration.md)；字段级机器可读路由表见 [OpenAPI](architecture/openapi-node.yaml)。Node 首配只完成单 owner Node 档案：Node 名必填，`user.preferred_name` 可选；该标记不代表 LLM profile 已配置或可用，详见 `/v1/settings` 的 OpenAPI 描述。
 
 ## 2. 从源码启动
