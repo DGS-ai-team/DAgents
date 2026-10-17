@@ -38,6 +38,7 @@ func ArchiveIdleContext(baseDir, sessionID, resetID string, messages []llm.Messa
 	// Retries can cross local midnight. Find an archive for this reset ID
 	// before choosing today's directory so the first path remains canonical.
 	if matches, _ := filepath.Glob(filepath.Join(historyDir, "*", name)); len(matches) > 0 {
+		canonicalPath := matches[0]
 		for _, existingPath := range matches {
 			existing, readErr := os.ReadFile(existingPath)
 			if readErr != nil {
@@ -46,8 +47,8 @@ func ArchiveIdleContext(baseDir, sessionID, resetID string, messages []llm.Messa
 			if !bytes.Equal(existing, data) {
 				return "", fmt.Errorf("context archive reset ID already exists with different content: %s", existingPath)
 			}
-			return existingPath, nil
 		}
+		return canonicalPath, nil
 	}
 	dir := filepath.Join(historyDir, day)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

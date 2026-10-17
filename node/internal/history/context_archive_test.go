@@ -121,6 +121,42 @@ func TestArchiveIdleContextRetryAcrossDateKeepsOriginalPath(t *testing.T) {
 	}
 }
 
+func TestArchiveIdleContextChecksAllDateMatchesBeforeReturningCanonicalPath(t *testing.T) {
+	root := t.TempDir()
+	messages := []llm.Message{{Role: "user", Content: "canonical content"}}
+	projected, err := json.MarshalIndent(projectArchiveMessages(messages), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected = append(projected, '\n')
+	firstPath := filepath.Join(root, "history", "2026-10-15", contextArchiveFilename("session", "reset"))
+	secondPath := filepath.Join(root, "history", "2026-10-16", contextArchiveFilename("session", "reset"))
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(firstPath, projected, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("conflicting content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ArchiveIdleContext(root, "session", "reset", messages); err == nil {
+		t.Fatal("expected later date match conflict to fail even when first match is identical")
+	}
+	if err := os.WriteFile(secondPath, projected, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, err := ArchiveIdleContext(root, "session", "reset", messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != firstPath {
+		t.Fatalf("matching duplicate path = %q, want canonical first path %q", path, firstPath)
+	}
+}
+
 func TestContextArchiveFilenameBoundsLongIdentifiers(t *testing.T) {
 	name := contextArchiveFilename(strings.Repeat("s", 500), strings.Repeat("r", 500))
 	if len(name) > 255 {
