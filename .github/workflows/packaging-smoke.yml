@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           input_dir="${RUNNER_TEMP}/dagents-windows-bundle-input"
           mkdir -p "${input_dir}"
-          for name in dagents-node.exe dagents-client.exe dagents-browser.exe dagents-shell-tauri.exe dagents-shell.exe; do
+          for name in dagents-node.exe dagents-client.exe dagents-browser.exe dagents-shell.exe; do
             touch "${input_dir}/${name}"
             chmod +x "${input_dir}/${name}"
           done
@@ -74,12 +74,12 @@ jobs:
             NODE_BIN="${input_dir}/dagents-node.exe" \
             CLIENT_BIN="${input_dir}/dagents-client.exe" \
             BROWSER_BIN="${input_dir}/dagents-browser.exe" \
-            SHELL_TAURI_BIN="${input_dir}/dagents-shell-tauri.exe" \
             SHELL_BIN="${input_dir}/dagents-shell.exe" \
               bash scripts/ci/assemble_local_assistant_bundle.sh
             bundle="dist/dagents-local-assistant-${platform}"
             test -f "${bundle}/VERSION"
             test -f "${bundle}/bin/dagents-shell.exe"
+            test ! -e "${bundle}/bin/dagents-shell-tauri.exe"
           done
           if compgen -G 'dist/dagents-local-assistant-windows-*.zip' > /dev/null; then
             echo 'Windows portable archives must not be generated' >&2
@@ -96,6 +96,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify canonical installer payload preflight
+        shell: bash
+        run: bash scripts/ci/test_windows_installer_contract.sh
 
       - name: Verify installer inputs
         shell: bash
@@ -141,9 +145,10 @@ jobs:
           # Compile-only contract: these empty fixtures are packaged as files and never executed.
           input_dir="${RUNNER_TEMP}/dagents-installer-compile-input"
           mkdir -p "${input_dir}"
-          for name in dagents-node.exe dagents-client.exe dagents-browser.exe dagents-shell-tauri.exe; do
+          for name in dagents-node.exe dagents-client.exe dagents-browser.exe; do
             : > "${input_dir}/${name}"
           done
+          printf 'canonical desktop fixture\n' > "${input_dir}/dagents-shell.exe"
 
           version=0.0.0
           for platform in windows-amd64 windows-386; do
@@ -152,8 +157,7 @@ jobs:
             NODE_BIN="${input_dir}/dagents-node.exe" \
             CLIENT_BIN="${input_dir}/dagents-client.exe" \
             BROWSER_BIN="${input_dir}/dagents-browser.exe" \
-            SHELL_TAURI_BIN="${input_dir}/dagents-shell-tauri.exe" \
-            SHELL_BIN="${input_dir}/dagents-shell-tauri.exe" \
+            SHELL_BIN="${input_dir}/dagents-shell.exe" \
               bash scripts/ci/assemble_local_assistant_bundle.sh
 
             bundle="${GITHUB_WORKSPACE}/dist/dagents-local-assistant-${platform}"

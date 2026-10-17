@@ -45,6 +45,7 @@ class ReleaseCheckResponse(BaseModel):
     current: str
     latest: str
     upgrade_available: bool
+    platform_supported: bool = True
     published_at: int | None = None
     release_notes_url: str = ""
     release_notes: str = ""

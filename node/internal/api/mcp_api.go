@@ -365,6 +365,8 @@ func agentMCPToolAllowed(binding mcp.Binding, name string) bool {
 }
 
 func (s *Server) handlePutAgentMCP(w http.ResponseWriter, r *http.Request) {
+	s.llmRefMu.RLock()
+	defer s.llmRefMu.RUnlock()
 	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
 		return

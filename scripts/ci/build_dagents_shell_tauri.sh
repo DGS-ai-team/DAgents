@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 编译 Tauri 版 Windows Desktop Shell → dist/dagents-shell*.exe
+# Tauri Windows Desktop shell: dist/dagents-shell.exe
 #
 # 须在 Windows 上运行（MSVC + WebView2；GitHub windows-2022 即可）。
 #
@@ -68,17 +68,18 @@ if [[ -n "${TAURI_TARGET}" ]]; then
   TARGET_RELEASE_DIR="${APP_DIR}/src-tauri/target/${TAURI_TARGET}/release"
 fi
 SRC="${TARGET_RELEASE_DIR}/dagents-shell.exe"
-if [[ ! -f "${SRC}" ]]; then
+if [[ ! -s "${APP_DIR}/dist/index.html" ]]; then
+  echo "[build] Desktop frontend output missing after Tauri build: ${APP_DIR}/dist/index.html" >&2
+  exit 1
+fi
+if [[ ! -s "${SRC}" ]]; then
   echo "[build] expected binary missing: ${SRC}" >&2
   ls -la "${TARGET_RELEASE_DIR}/" >&2 || true
   exit 1
 fi
 
-# 安装包组件名与默认壳均使用 tauri 后缀；assemble 会再复制为 dagents-shell.exe。
-DEST_TAURI="${OUT_DIR}/dagents-shell-tauri.exe"
-DEST_DEFAULT="${OUT_DIR}/dagents-shell.exe"
-cp "${SRC}" "${DEST_TAURI}"
-cp "${SRC}" "${DEST_DEFAULT}"
-echo "[done] ${DEST_TAURI}"
-echo "[done] ${DEST_DEFAULT} (default shell)"
-ls -la "${DEST_TAURI}" "${DEST_DEFAULT}"
+# Packaging has one canonical Desktop entry point.
+DEST="${OUT_DIR}/dagents-shell.exe"
+cp "${SRC}" "${DEST}"
+echo "[done] ${DEST}"
+ls -la "${DEST}"

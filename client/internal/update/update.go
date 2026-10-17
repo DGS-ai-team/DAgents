@@ -42,6 +42,9 @@ func Run(ctx context.Context, cfg *config.Config, opt Options) int {
 		return 1
 	}
 	printStatus(status)
+	if !status.PlatformSupported {
+		return 1
+	}
 	if opt.CheckOnly {
 		return 0
 	}

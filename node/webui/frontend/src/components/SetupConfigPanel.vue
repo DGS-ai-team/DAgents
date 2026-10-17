@@ -72,18 +72,20 @@ async function onModalConfirm(payload) {
       multimodal_enabled: !!payload.multimodal_enabled,
     });
   } else {
-    const fromId = String(payload.original_id || editingId.value || "").trim();
-    const target = form.llm.profiles.find((p) => p.id === fromId);
+    const currentId = String(editingId.value || "").trim();
+    const sourceId = String(payload.original_id || currentId).trim();
+    const target = form.llm.profiles.find((p) => p.id === currentId);
     if (!target) {
       error.value = "配置不存在";
       return;
     }
     const nextId = String(payload.id || "").trim();
-    if (nextId !== fromId && form.llm.profiles.some((p) => p.id === nextId)) {
+    if (nextId !== currentId && form.llm.profiles.some((p) => p.id === nextId)) {
       error.value = `配置「${nextId}」已存在`;
       return;
     }
     target.id = nextId;
+    if (nextId !== currentId) target.original_id = target.original_id || sourceId;
     target.provider = payload.provider;
     target.base_url = payload.base_url;
     target.model = payload.model;
@@ -91,6 +93,7 @@ async function onModalConfirm(payload) {
     target.clear_api_key = !!payload.clear_api_key;
     target.mock = !!payload.mock;
     target.multimodal_enabled = !!payload.multimodal_enabled;
+    if (String(form.llm.active || "") === currentId) form.llm.active = nextId;
     editingId.value = nextId;
   }
   modalOpen.value = false;
@@ -125,8 +128,10 @@ function moveProfile(id, delta) {
 function llmPayload() {
   ensureProfiles();
   return {
+    active: form.llm.active || profiles.value[0]?.id || "",
     profiles: form.llm.profiles.map((p) => ({
       id: p.id,
+      original_id: p.original_id || undefined,
       provider: p.provider,
       base_url: p.base_url,
       model: p.model,

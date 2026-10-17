@@ -61,12 +61,15 @@ function Get-ProductionSnapshot {
         $userPath = (Get-ItemProperty -LiteralPath 'HKCU:\Environment' -Name 'Path' -ErrorAction Stop).Path
     } catch { }
 
-    $desktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)) 'DAgents Desktop（系统托盘）.lnk'
+    $desktopRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+    $desktopShortcut = Join-Path $desktopRoot 'DAgents Desktop.lnk'
+    $legacyDesktopShortcut = Join-Path $desktopRoot 'DAgents Desktop（系统托盘）.lnk'
     $productionSettings = Join-Path $env:APPDATA 'DAgents\desktop\settings.json'
     return [ordered]@{
         runValueSha256 = Get-TextHash $runValue
         userPathSha256 = Get-TextHash $userPath
         desktopShortcutSha256 = Get-FileHashValue $desktopShortcut
+        legacyDesktopShortcutSha256 = Get-FileHashValue $legacyDesktopShortcut
         desktopSettingsSha256 = Get-FileHashValue $productionSettings
     }
 }
@@ -74,7 +77,7 @@ function Get-ProductionSnapshot {
 function Assert-ProductionSnapshot {
     param($Expected)
     $current = Get-ProductionSnapshot
-    foreach ($key in @('runValueSha256', 'userPathSha256', 'desktopShortcutSha256', 'desktopSettingsSha256')) {
+    foreach ($key in @('runValueSha256', 'userPathSha256', 'desktopShortcutSha256', 'legacyDesktopShortcutSha256', 'desktopSettingsSha256')) {
         if ($current[$key] -ne $Expected[$key]) {
             throw "Production-side-effect guard failed: $key changed. Snapshot stores hashes only."
         }

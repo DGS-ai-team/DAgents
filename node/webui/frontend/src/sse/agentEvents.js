@@ -28,6 +28,7 @@ export const AGENT_STREAM_EVENT_POLICIES = Object.freeze({
   side_effect_applied: "side-effect",
   side_effects_cleared: "side-effect",
   "runtime/config-changed": "runtime-config",
+  "runtime/notice": "notice",
   "memory/changed": "runtime-memory",
   "skills/changed": "runtime-skills",
   "mcp/catalog-changed": "runtime-mcp",

@@ -64,7 +64,17 @@ curl -X PATCH http://127.0.0.1:18765/v1/settings \
   -d '{"manage":{"clear_node_token":true}}'
 ```
 
+### LLM 配置与密钥保留
+
+`PATCH /v1/settings` 的 `llm.profiles` 是完整配置列表；更新时保留其他仍需使用的配置，并用 `llm.active` 指定当前配置 ID。每个 profile 的 `api_key` 是只写字段：省略或留空保留该配置的已存密钥，非空值替换密钥，`clear_api_key: true` 明确清空且优先于新值。GET/PATCH 的响应仅通过 `has_api_key` 表示是否已保存，不回传明文。
+
+主动修改配置 ID 时，为该条目附带只写 `original_id`，表示从哪个现有配置保留密钥；它只用于本次保存，不会作为配置字段或长期别名回传。未提供新密钥且未要求清空时，Node 从原配置迁移密钥；来源不存在、来源仍保留在最终列表、多个目标引用同一个来源或目标与其他已有配置冲突时，保存失败，不能静默丢弃或误用密钥。Node 会检查所有未归档 Agent 快照（包括 Auto Agent）的 `defaults.llm.active`：仍被引用的配置 ID 不能改名或删除，`PATCH /v1/settings` 返回 `409 llm_profile_in_use`，错误详情列出 Agent ID，并提示先更新或删除这些 Agent。删除 Agent 会归档其记录，因此归档 Agent 不再阻止配置变更。相同 ID 的普通配置编辑，以及未被活动 Agent 引用的配置改名或删除仍可保存；Node 不会迁移 Agent 绑定。子 Agent 是临时运行时并继承父 Agent 的模型设置，没有独立持久化的模型配置 ID，因此由父 Agent 引用检查覆盖。工作组 Supervisor 配置由 Manage 保存并使用 Manage 的模型配置 ID 命名空间，不属于 Node `llm_configs.db` 的引用检查范围。Desktop 编辑已有配置时，测试获取模型或选择模型不会自动修改配置 ID。
+
 ### 消息、SSE 与 HITL
+
+普通 Agent 的空闲边界由 Node 管理，设置字段为 `compression.idle_new_conversation_seconds`（非负整数，`0` 关闭）。它在空闲后的下一条真实用户消息开始前执行，不是后台摘要任务；修改后按设置响应中的 `restart_required` 完成重启。原 `idle_auto_compress_seconds`、扫描间隔及最低 token 字段不再属于当前配置。Auto 使用自身 Dreaming 流程，不按此间隔重置。
+
+成功持久化新段后，SSE `runtime/notice` 的安全载荷包含 `message_kind: "context_boundary"` 和稳定的 `boundary_id`。hydrate transcript 中对应 `{ "kind": "context_boundary", "boundary_id": "..." }`。客户端按 ID 去重，在本次真实用户消息之前显示“新对话 · 上下文已重置”，不得渲染内部衔接正文或归档路径。消息队列中较晚到达的输入不改变此边界的顺序。SQLite 中的既有 transcript 继续保留；模型可读的段归档由 Node 写入 Agent 自身工作区的 `.dagents/<agent_id>/history/`。
 
 `POST /v1/messages` 接收 `agent_id`、`content` 和可选 `request_type`；默认类型为 `message`，`resume` 用于继续等待 HITL 的 Agent。Node 异步执行 turn，接口立即返回 `{ "accepted": true, "agent_id": "...", "priority": "..." }` 一类的接受结果。
 
@@ -84,7 +94,7 @@ HITL resume、tool-call cancel、execution reconcile 等接口维护运行时状
 
 ### 更新查询和二进制包
 
-`GET /v1/node/update` 每次主动请求时执行 Manage release check，直接返回 shared `update.Status`：`current_version`、`latest_version`、`upgrade_available`、`manage_reachable`、`manage_enabled`、`update_enabled`、可选 `check_interval_seconds`、`last_checked_at`、`channel`、`platform`、可选 `release_notes`、`message`、`apply_command`、`asset`。Node status 不声称 Shell 能安装更新。
+`GET /v1/node/update` 每次主动请求时执行 Manage release check，直接返回 shared `update.Status`：`current_version`、`latest_version`、`upgrade_available`、`manage_reachable`、`platform_supported`、`manage_enabled`、`update_enabled`、可选 `check_interval_seconds`、`last_checked_at`、`channel`、`platform`、可选 `release_notes`、`message`、`apply_command`、`asset`。`platform_supported=false` 表示当前 `platform` 没有已发布安装包；release check 与下载都按完整平台标识匹配，不会回退到其他架构。Node status 不声称 Shell 能安装更新。
 
 `GET /v1/node/upgrade-readiness` 返回当前 session manager 的活动状态。首配完成前仅 loopback 请求可用，以便本机 Desktop 安装器在升级或卸载前确认没有活动 turn 或待处理 HITL；该状态不会通过远程访问开放。
 

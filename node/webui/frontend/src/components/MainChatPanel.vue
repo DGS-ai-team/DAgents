@@ -356,7 +356,7 @@ defineExpose({
       </button>
       <template v-for="item in renderedStream" :key="item.key">
         <MessageBubble
-          v-if="['user', 'assistant', 'reasoning', 'system'].includes(item.kind)"
+          v-if="['user', 'assistant', 'reasoning', 'system', 'context_boundary'].includes(item.kind)"
           :entry="item.entry"
         />
         <ToolSummaryRow

@@ -29,6 +29,50 @@ pub struct RelayHandle {
     pub alive: Arc<AtomicBool>,
 }
 
+pub fn build_open_command(
+    target_kind: Option<&str>,
+    target_id: Option<&str>,
+    shell: Option<&str>,
+) -> Result<Value, String> {
+    let kind = target_kind.unwrap_or("local").trim();
+    let id = target_id.unwrap_or("").trim();
+    let shell = shell.unwrap_or("").trim();
+    let valid_id = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 120
+            && value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    };
+    if !shell.is_empty()
+        && (shell.len() > 64
+            || !shell
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/')))
+    {
+        return Err("终端 shell 参数无效".into());
+    }
+    let (target_kind, target_id) = match kind {
+        "local" if id.is_empty() => ("local", None),
+        "linux_channel" if valid_id(id) => ("linux_channel", Some(id)),
+        "local" => return Err("本机终端不能指定远程主机".into()),
+        "linux_channel" => return Err("请选择有效的 Linux 主机".into()),
+        _ => return Err("不支持的终端目标".into()),
+    };
+    let mut command = serde_json::Map::new();
+    command.insert("type".into(), json!("open"));
+    command.insert("target_kind".into(), json!(target_kind));
+    if let Some(id) = target_id {
+        command.insert("target_id".into(), json!(id));
+    }
+    if !shell.is_empty() {
+        command.insert("shell".into(), json!(shell));
+    }
+    command.insert("rows".into(), json!(24));
+    command.insert("cols".into(), json!(80));
+    Ok(Value::Object(command))
+}
+
 #[derive(Clone, Serialize)]
 struct RelayEvent<'a> {
     connection_id: &'a str,
@@ -212,6 +256,40 @@ mod tests {
     use base64::Engine;
     use std::time::{Duration, Instant};
     use tungstenite::http::HeaderValue;
+
+    #[test]
+    fn terminal_open_command_serializes_selected_node_target() {
+        let local = build_open_command(Some("local"), None, None).unwrap();
+        assert_eq!(local["type"], "open");
+        assert_eq!(local["target_kind"], "local");
+        assert!(local.get("target_id").is_none());
+        assert!(local.get("shell").is_none());
+
+        let remote =
+            build_open_command(Some("linux_channel"), Some("channel_abc-1"), Some("bash")).unwrap();
+        assert_eq!(remote["target_kind"], "linux_channel");
+        assert_eq!(remote["target_id"], "channel_abc-1");
+        assert_eq!(remote["shell"], "bash");
+        assert_eq!(
+            build_open_command(
+                Some("linux_channel"),
+                Some("channel_abc-1"),
+                Some("/bin/bash")
+            )
+            .unwrap()["shell"],
+            "/bin/bash"
+        );
+    }
+
+    #[test]
+    fn terminal_open_command_rejects_malformed_targets_and_shells() {
+        assert!(build_open_command(Some("ssh"), Some("host"), None).is_err());
+        assert!(build_open_command(Some("local"), Some("host"), None).is_err());
+        assert!(build_open_command(Some("linux_channel"), Some("host;id"), None).is_err());
+        assert!(
+            build_open_command(Some("linux_channel"), Some("host"), Some("bash -c id")).is_err()
+        );
+    }
 
     #[test]
     fn websocket_url_is_limited_to_root_loopback_endpoint() {

@@ -1,5 +1,7 @@
 # DAgents Desktop 产品设计资料包
 
+> 当前入口（2026-10-17）：本目录下的图稿和原型保留设计来源，生产实现已进入独立 Windows Desktop 收束阶段。当前产品边界见[个人 Node 与 Desktop 职责](product-direction-simplification-2026-10-14.md)，API 见[Node 接入说明](../../api/node-integration.md)，已接入能力见[日常使用接入](daily-use-integration.md)，剩余发布条件见[发布收束清单](../../release-readiness.md)。下文 9 月设计快照中的“尚未接入”“正式契约未冻结”不作为当前实现状态。
+
 更新：2026-09-24。这里集中保存 Desktop 设计已经产生的材料，供产品决策、视觉设计和下一轮开发共同使用。**这是设计资料快照，不代表这些功能已经在正式产品中实现。**现有文件仍保留在原位置，以免破坏项目中的引用；修改共享色彩或图标时，应先更新原始文件，再同步本资料包，避免产生两个事实来源。
 
 每项材料的原始路径见 [来源清单](SOURCE-MANIFEST.md)。

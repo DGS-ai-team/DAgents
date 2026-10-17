@@ -146,6 +146,11 @@ func runShellSync(r *Registry, ctx context.Context, params shellRunParams) (stri
 	}()
 	lease, err := r.acquireWorkspaceWrite(leaseCtx, params.cwd)
 	if err != nil {
+		select {
+		case <-gate.cancelCh:
+			return formatShellCancelledResult(nil, params), nil, nil
+		default:
+		}
 		if runCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 			return "", nil, fmt.Errorf("workspace_busy: timed out waiting for the workspace lease after %ds", params.timeoutSec)
 		}

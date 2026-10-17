@@ -398,6 +398,7 @@ pub fn run() {
             desktop_send_message,
             desktop_resume_hitl,
             desktop_terminal_list,
+            desktop_linux_terminal_channels,
             desktop_terminal_open,
             desktop_terminal_command
         ])
@@ -630,48 +631,85 @@ pub fn run() {
     });
 }
 
-fn resolve_layout_from_args() -> Result<Layout, String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut config_flag: Option<String> = None;
-    let mut desktop_config_flag: Option<String> = None;
+#[derive(Debug, Default, PartialEq, Eq)]
+struct LayoutArgs {
+    home: Option<String>,
+    config: Option<String>,
+    desktop_config: Option<String>,
+}
+
+fn parse_layout_args(args: &[String]) -> Result<LayoutArgs, String> {
+    let mut parsed = LayoutArgs::default();
     let mut i = 0;
     while i < args.len() {
-        let a = &args[i];
-        if a == "--config" || a == "-config" {
-            if i + 1 >= args.len() {
-                return Err("--config 需要路径参数".into());
-            }
-            config_flag = Some(args[i + 1].clone());
-            i += 2;
-            continue;
-        }
-        if a == "--desktop-config" {
-            if i + 1 >= args.len() {
-                return Err("--desktop-config 需要路径参数".into());
-            }
-            desktop_config_flag = Some(args[i + 1].clone());
-            i += 2;
-            continue;
-        }
-        if let Some(rest) = a.strip_prefix("--config=") {
-            config_flag = Some(rest.to_string());
+        let arg = args[i].as_str();
+        let (flag, value): (&str, Option<String>) = if arg == "--home" {
+            ("--home", None)
+        } else if arg == "--config" || arg == "-config" {
+            ("--config", None)
+        } else if arg == "--desktop-config" {
+            ("--desktop-config", None)
+        } else if let Some(value) = arg.strip_prefix("--home=") {
+            ("--home", Some(value.to_string()))
+        } else if let Some(value) = arg.strip_prefix("--config=") {
+            parsed.config = Some(value.to_string());
             i += 1;
             continue;
-        }
-        if let Some(rest) = a.strip_prefix("--desktop-config=") {
-            desktop_config_flag = Some(rest.to_string());
+        } else if let Some(value) = arg.strip_prefix("--desktop-config=") {
+            parsed.desktop_config = Some(value.to_string());
             i += 1;
             continue;
+        } else {
+            i += 1;
+            continue;
+        };
+
+        let value = match value {
+            Some(value) => value,
+            None => {
+                let next = args.get(i + 1).map(String::as_str);
+                if next.is_none() || next.is_some_and(is_option_argument) {
+                    return Err(format!("{flag} 需要路径参数"));
+                }
+                let value = next.unwrap().to_string();
+                i += 1;
+                value
+            }
+        };
+        if flag == "--home" && value.trim().is_empty() {
+            return Err("--home 需要非空路径".into());
+        }
+        match flag {
+            "--home" => parsed.home = Some(value),
+            "--config" => parsed.config = Some(value),
+            "--desktop-config" => parsed.desktop_config = Some(value),
+            _ => unreachable!(),
         }
         i += 1;
     }
+    Ok(parsed)
+}
+
+fn is_option_argument(arg: &str) -> bool {
+    arg.starts_with('-')
+}
+
+fn resolve_layout_from_args() -> Result<Layout, String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let parsed = parse_layout_args(&args)?;
+    let mut config_flag = parsed.config;
+    let mut desktop_config_flag = parsed.desktop_config;
     if config_flag.is_none() {
         config_flag = std::env::var("DAGENTS_CONFIG").ok();
     }
     if desktop_config_flag.is_none() {
         desktop_config_flag = std::env::var(layout::ENV_DESKTOP_CONFIG).ok();
     }
-    Layout::resolve(config_flag.as_deref(), desktop_config_flag.as_deref())
+    Layout::resolve(
+        parsed.home.as_deref(),
+        config_flag.as_deref(),
+        desktop_config_flag.as_deref(),
+    )
 }
 
 fn update_args_from_args() -> Option<Vec<String>> {
@@ -679,11 +717,14 @@ fn update_args_from_args() -> Option<Vec<String>> {
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
-        if a == "--config" || a == "-config" {
+        if a == "--config" || a == "-config" || a == "--home" || a == "--desktop-config" {
             i += 2;
             continue;
         }
-        if a.starts_with("--config=") {
+        if a.starts_with("--home=")
+            || a.starts_with("--config=")
+            || a.starts_with("--desktop-config=")
+        {
             i += 1;
             continue;
         }
@@ -1188,6 +1229,9 @@ async fn desktop_terminal_open(
     agent_id: String,
     connection_id: String,
     session_id: Option<String>,
+    target_kind: Option<String>,
+    target_id: Option<String>,
+    shell: Option<String>,
     shared: State<'_, Arc<Shared>>,
 ) -> Result<String, String> {
     ensure_mvp_window(&window)?;
@@ -1219,20 +1263,21 @@ async fn desktop_terminal_open(
         return Err("终端连接标识无效".into());
     }
     let endpoint = Url::parse(&shared.cfg.node_endpoint).map_err(|e| e.to_string())?;
-    let shell = if cfg!(windows) { "powershell" } else { "bash" };
-    let first_command = match session_id
+    let session_id = session_id
         .as_deref()
         .map(str::trim)
-        .filter(|id| !id.is_empty())
-    {
-        Some(id) => serde_json::json!({ "type": "resume", "session_id": id }),
-        None => serde_json::json!({
-            "type": "open",
-            "target_kind": "local",
-            "shell": shell,
-            "rows": 24,
-            "cols": 80
-        }),
+        .filter(|id| !id.is_empty());
+    let first_command = if let Some(id) = session_id {
+        if target_kind.is_some() || target_id.is_some() || shell.is_some() {
+            return Err("恢复终端会话时不能修改目标或 shell".into());
+        }
+        serde_json::json!({ "type": "resume", "session_id": id })
+    } else {
+        terminal::build_open_command(
+            target_kind.as_deref(),
+            target_id.as_deref(),
+            shell.as_deref(),
+        )?
     };
     let key = connection_id;
     let mut relays = shared
@@ -1265,6 +1310,35 @@ async fn desktop_terminal_open(
             },
         );
     Ok(key)
+}
+
+#[tauri::command]
+async fn desktop_linux_terminal_channels(
+    window: WebviewWindow,
+    agent_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Vec<nodeclient::LinuxTerminalChannel>, String> {
+    ensure_mvp_window(&window)?;
+    if !mvp_endpoint_allowed(&shared) {
+        return Err("远程 SSH 终端需要本机 Node 连接或已配置的 loopback SSH 隧道。".into());
+    }
+    let agent_id = agent_id.trim().to_string();
+    if agent_id.is_empty() {
+        return Err("找不到当前 Agent，已阻止列出其他 Agent 的 SSH 主机。".into());
+    }
+    let client = Arc::clone(&shared.node_client);
+    let verified_id = agent_id.clone();
+    let agent_exists = spawn_node_blocking(move || {
+        client
+            .list_agents()
+            .map(|agents| agents.iter().any(|agent| agent.agent_id == verified_id))
+    })
+    .await??;
+    if !agent_exists {
+        return Err("找不到当前 Agent，已阻止列出其他 Agent 的 SSH 主机。".into());
+    }
+    let client = Arc::clone(&shared.node_client);
+    spawn_node_blocking(move || client.list_agent_linux_terminal_channels(&agent_id)).await?
 }
 
 #[tauri::command]
@@ -1425,7 +1499,8 @@ fn handle_update_menu(shared: &Arc<Shared>, app: &AppHandle) {
         open_update_settings(shared, app);
         return;
     }
-    if shared.update_checker.snapshot().upgrade_available {
+    let status = shared.update_checker.snapshot();
+    if status.upgrade_available || !status.platform_supported {
         open_update_settings(shared, app);
     } else {
         check_update_now(shared);
@@ -1705,24 +1780,38 @@ fn refresh_update_ui(shared: &Shared) {
     }
     let cfg = shared.update_checker.config_snapshot();
     let status = shared.update_checker.snapshot();
-    let text_enabled = if !cfg.update_check_enabled {
+    let text_enabled = update_menu_status_text(&status, cfg.update_check_enabled);
+    if let Ok(guard) = shared.update_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_text(text_enabled.0);
+            let _ = item.set_enabled(text_enabled.1);
+        }
+    }
+}
+
+fn update_menu_status_text(
+    status: &crate::update::Status,
+    update_check_enabled: bool,
+) -> (String, bool) {
+    if !update_check_enabled {
         ("更新：自动检查已关闭（点击手动检查）".to_string(), true)
+    } else if !status.manage_reachable
+        && !status.message.trim().is_empty()
+        && status.message.trim() != "等待检查"
+    {
+        ("更新：Node 检查失败（点击重试）".to_string(), true)
     } else if status.last_checked_at.trim().is_empty() {
         ("更新：检查中…".to_string(), false)
     } else if !status.manage_reachable {
         ("更新：Node 检查失败（点击重试）".to_string(), true)
     } else if !status.update_enabled {
         ("更新：Node 已关闭更新".to_string(), false)
+    } else if !status.platform_supported {
+        ("更新：当前平台未发布安装包".to_string(), true)
     } else if status.upgrade_available {
         (format!("更新：新版本 {} 可用", status.latest_version), true)
     } else {
         ("更新：已是最新（点击重试）".to_string(), true)
-    };
-    if let Ok(guard) = shared.update_item.lock() {
-        if let Some(item) = guard.as_ref() {
-            let _ = item.set_text(text_enabled.0);
-            let _ = item.set_enabled(text_enabled.1);
-        }
     }
 }
 
@@ -1857,7 +1946,11 @@ fn set_tray_icon(app: &AppHandle, pending: bool) {
 
 #[cfg(test)]
 mod nav_tests {
-    use super::{args_have_flag, desktop_mvp_navigation_allowed, require_idle_readiness_check};
+    use super::{
+        args_have_flag, desktop_mvp_navigation_allowed, parse_layout_args,
+        require_idle_readiness_check, update_menu_status_text, LayoutArgs,
+    };
+    use crate::update::Status;
     use tauri::Url;
 
     #[test]
@@ -1871,6 +1964,34 @@ mod nav_tests {
         assert!(!desktop_mvp_navigation_allowed(&attacker, true));
         let node_ui = Url::parse("http://127.0.0.1:18765/ui/").unwrap();
         assert!(!desktop_mvp_navigation_allowed(&node_ui, true));
+    }
+
+    #[test]
+    fn unsupported_update_platform_is_not_reported_as_up_to_date() {
+        let status = Status {
+            manage_reachable: true,
+            update_enabled: true,
+            platform_supported: false,
+            last_checked_at: "2026-10-17T00:00:00Z".into(),
+            ..Status::default()
+        };
+        let (label, enabled) = update_menu_status_text(&status, true);
+        assert_eq!(label, "更新：当前平台未发布安装包");
+        assert!(enabled);
+        assert!(!label.contains("已是最新"));
+    }
+
+    #[test]
+    fn failed_update_check_is_not_reported_as_still_checking() {
+        let status = Status {
+            manage_reachable: false,
+            platform_supported: true,
+            message: "Node 请求失败".into(),
+            ..Status::default()
+        };
+        let (label, enabled) = update_menu_status_text(&status, true);
+        assert_eq!(label, "更新：Node 检查失败（点击重试）");
+        assert!(enabled);
     }
 
     #[test]
@@ -1898,5 +2019,64 @@ mod nav_tests {
             Err("当前 endpoint 为外部 Node，不能安全升级或卸载")
         );
         assert_eq!(require_idle_readiness_check(true, false), Ok(true));
+    }
+
+    #[test]
+    fn layout_args_keep_home_config_and_desktop_config_paths_separate() {
+        let args = vec![
+            "--config".into(),
+            r"C:\Program Files\DAgents\config.yaml".into(),
+            "--home".into(),
+            r"C:\用户\DAgents 安装".into(),
+            r"--desktop-config=C:\Users\测试\settings.json".into(),
+        ];
+        assert_eq!(
+            parse_layout_args(&args).unwrap(),
+            LayoutArgs {
+                home: Some(r"C:\用户\DAgents 安装".into()),
+                config: Some(r"C:\Program Files\DAgents\config.yaml".into()),
+                desktop_config: Some(r"C:\Users\测试\settings.json".into()),
+            }
+        );
+
+        let equals_args = vec![
+            "--home=C:\\用户\\DAgents 安装".into(),
+            "--config=C:\\Program Files\\DAgents\\config.yaml".into(),
+        ];
+        assert_eq!(
+            parse_layout_args(&equals_args).unwrap(),
+            LayoutArgs {
+                home: Some(r"C:\用户\DAgents 安装".into()),
+                config: Some(r"C:\Program Files\DAgents\config.yaml".into()),
+                desktop_config: None,
+            }
+        );
+    }
+
+    #[test]
+    fn layout_args_reject_missing_or_blank_home_without_consuming_other_flags() {
+        let missing_before_config = vec!["--home".into(), "--config".into(), "C:\\cfg.yaml".into()];
+        assert_eq!(
+            parse_layout_args(&missing_before_config).unwrap_err(),
+            "--home 需要路径参数"
+        );
+
+        let missing_before_control = vec!["--home".into(), "--quit-desktop".into()];
+        assert_eq!(
+            parse_layout_args(&missing_before_control).unwrap_err(),
+            "--home 需要路径参数"
+        );
+
+        let missing_config = vec!["--config".into(), "--home".into(), "C:\\install".into()];
+        assert_eq!(
+            parse_layout_args(&missing_config).unwrap_err(),
+            "--config 需要路径参数"
+        );
+
+        let blank_home = vec!["--home= \t".into()];
+        assert_eq!(
+            parse_layout_args(&blank_home).unwrap_err(),
+            "--home 需要非空路径"
+        );
     }
 }

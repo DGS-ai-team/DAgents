@@ -39,6 +39,7 @@ docs/private-enterprise-positioning.md
 .worktrees/
 
 # frontend/tooling artifacts (for split-repo collaboration)
+/node_modules/
 .pnpm-store/
 pnpm-debug.log*
 npm-debug.log*

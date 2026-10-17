@@ -107,28 +107,29 @@ type runtime struct {
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
 	// second lifecycle projection.
-	lifecycleMu           sync.Mutex
-	lifecycleCommandSeq   uint64
-	lifecycleEventSeq     uint64
-	lifecycleEventsLoaded bool
-	messages              []llm.Message // 交互消息列表
-	pendingInputMessage   *llm.Message
-	historyRevision       uint64               // committed message snapshot revision
-	activeContextStart    int                  // durable transcript index visible to new model requests
-	lastContextResetID    string               // idempotency fence for the last logical reset
-	loadedSkills          []skills.LoadedSkill // 加载的技能列表
-	pendingMemoryScope    string               // scope changes wait for the next human Turn
-	workspaceRoot         string               // Agent 工作区根路径
-	media                 *media.Registry      // session 媒体索引（F-M1）
-	memoryService         memory.Service       // v2 workspace memory authority
+	lifecycleMu                sync.Mutex
+	lifecycleCommandSeq        uint64
+	lifecycleEventSeq          uint64
+	lifecycleEventsLoaded      bool
+	messages                   []llm.Message // 交互消息列表
+	pendingInputMessage        *llm.Message
+	historyRevision            uint64 // committed message snapshot revision
+	activeContextStart         int    // durable transcript index visible to new model requests
+	lastContextResetID         string // idempotency fence for the last logical reset
+	lastHumanInteraction       time.Time
+	loadedSkills               []skills.LoadedSkill // 加载的技能列表
+	pendingMemoryScope         string               // scope changes wait for the next human Turn
+	workspaceRoot              string               // Agent 工作区根路径
+	workspaceStateRoot         string
+	idleNewConversationSeconds int
+	media                      *media.Registry // session 媒体索引（F-M1）
+	memoryService              memory.Service  // v2 workspace memory authority
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
 	sideEffects *sideEffectStore // 旁路回灌缓冲（子 session 跳过）
 
 	childMeta *childRuntimeMeta // 子 Agent 元数据
-
-	idleAutoCompressApplied bool // 无动作自动压缩已完成；新对话时清除
 
 	notifySeq int // F-E13：最后需 Client 关注的 SSE seq
 	ackSeq    int // F-E13：Client 已确认看到的最大 SSE seq
@@ -162,14 +163,13 @@ func newRuntime(
 	initial []llm.Message,
 	loaded []skills.LoadedSkill,
 	initialHookStore map[string]json.RawMessage,
-	idleAutoCompressApplied bool,
 	initialNotifySeq int,
 	initialAckSeq int,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	return newRuntimeWithPublisher(id, agentID, hub, hub, llmClient, registry, policyEngine, st, logger,
-		initial, loaded, initialHookStore, idleAutoCompressApplied, initialNotifySeq, initialAckSeq, turnOpts, triggerDelivery)
+		initial, loaded, initialHookStore, initialNotifySeq, initialAckSeq, turnOpts, triggerDelivery)
 }
 
 // newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
@@ -185,7 +185,6 @@ func newRuntimeWithPublisher(
 	initial []llm.Message,
 	loaded []skills.LoadedSkill,
 	initialHookStore map[string]json.RawMessage,
-	idleAutoCompressApplied bool,
 	initialNotifySeq int,
 	initialAckSeq int,
 	turnOpts TurnOptions,
@@ -247,24 +246,26 @@ func newRuntimeWithPublisher(
 			}
 			return coord
 		}(),
-		candidatePipeline:        candidatePipeline,
-		messages:                 append([]llm.Message(nil), initial...),
-		historyRevision:          turnOpts.initialHistoryRevision,
-		activeContextStart:       nonNegative(turnOpts.initialActiveContextStart),
-		lastContextResetID:       strings.TrimSpace(turnOpts.initialLastContextResetID),
-		loadedSkills:             append([]skills.LoadedSkill(nil), loaded...),
-		skillRevision:            turnCatalog.Revision(),
-		workspaceRoot:            workspaceRoot,
-		triggerDelivery:          triggerDelivery,
-		sideEffects:              newSideEffectStore(),
-		idleAutoCompressApplied:  idleAutoCompressApplied,
-		notifySeq:                initialNotifySeq,
-		ackSeq:                   initialAckSeq,
-		runtimeRevision:          turnOpts.RuntimeRevision,
-		runtimeDigest:            strings.TrimSpace(turnOpts.RuntimeDigest),
-		llmProfileDigest:         strings.TrimSpace(turnOpts.LLMProfileDigest),
-		runtimeMultimodalEnabled: turnOpts.MultimodalEnabled,
-		turnBudget:               turnOpts.Budget,
+		candidatePipeline:          candidatePipeline,
+		messages:                   append([]llm.Message(nil), initial...),
+		historyRevision:            turnOpts.initialHistoryRevision,
+		activeContextStart:         nonNegative(turnOpts.initialActiveContextStart),
+		lastContextResetID:         strings.TrimSpace(turnOpts.initialLastContextResetID),
+		lastHumanInteraction:       turnOpts.initialLastHumanInteraction,
+		loadedSkills:               append([]skills.LoadedSkill(nil), loaded...),
+		skillRevision:              turnCatalog.Revision(),
+		workspaceRoot:              workspaceRoot,
+		workspaceStateRoot:         strings.TrimSpace(turnOpts.WorkspaceStateRoot),
+		idleNewConversationSeconds: turnOpts.IdleNewConversationSeconds,
+		triggerDelivery:            triggerDelivery,
+		sideEffects:                newSideEffectStore(),
+		notifySeq:                  initialNotifySeq,
+		ackSeq:                     initialAckSeq,
+		runtimeRevision:            turnOpts.RuntimeRevision,
+		runtimeDigest:              strings.TrimSpace(turnOpts.RuntimeDigest),
+		llmProfileDigest:           strings.TrimSpace(turnOpts.LLMProfileDigest),
+		runtimeMultimodalEnabled:   turnOpts.MultimodalEnabled,
+		turnBudget:                 turnOpts.Budget,
 		// A trigger cap is activation-scoped and can only be granted by the
 		// trusted provider below. Never carry a static option into arbitrary
 		// trigger envelopes.
@@ -749,7 +750,6 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	// turn path; the UserName/source fields preserve whether the producer was
 	// an actual user or a trigger.
 	env.RequestType = queue.RequestTypeMessage
-	r.clearIdleAutoCompressMark()
 	source := turn.TurnSourceHuman
 	if isTrigger {
 		source = turn.TurnSourceTrigger
@@ -804,11 +804,9 @@ func (r *runtime) clearTriggerDelivery(env queue.Envelope) {
 func (r *runtime) dispatchTurnRequest(ctx context.Context, env queue.Envelope) {
 	switch env.RequestType {
 	case queue.RequestTypeResume:
-		r.clearIdleAutoCompressMark()
 		r.logResumeDequeued(env.ResumeValue)
 		r.handleResume(ctx, env.ResumeValue)
 	case queue.RequestTypeAsyncToolResult:
-		r.clearIdleAutoCompressMark()
 		r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
 	case queue.RequestTypeSideEffectContinue:
 		r.handleSideEffectContinue(ctx, env.SideEffectContinueSource)
@@ -922,6 +920,11 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		}
 		r.signalInputBox()
 		return false
+	}
+	if source == turn.TurnSourceHuman {
+		if err := r.maybeStartIdleConversation(parent, env.SessionEpoch); err != nil && r.logger != nil {
+			r.logger.Warn("idle conversation boundary failed; retaining existing context", "session_id", r.session.ID, "error", err)
+		}
 	}
 	r.applyPendingMemoryScope()
 	r.observeSkillCatalogChange()
@@ -1242,12 +1245,18 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	if r.sideEffectsEnabled() {
 		r.sideEffects.ClearSession(r.session.ID, r.orch)
 	}
+	// A prior snapshot writer must finish before the clear mutates memory. Keep
+	// the lifecycle epoch, transcript clear, and replacement snapshot within one
+	// serialized durability boundary so an old Save cannot resurrect history.
+	r.lifecycleMu.Lock()
+	r.persistMu.Lock()
 	r.mu.Lock()
 	r.sessionEpoch++
 	newEpoch := r.sessionEpoch
 	r.messages = nil
 	r.activeContextStart = 0
 	r.lastContextResetID = ""
+	r.lastHumanInteraction = time.Now().UTC()
 	r.historyRevision++
 	r.loadedSkills = nil
 	r.mu.Unlock()
@@ -1259,12 +1268,18 @@ func (r *runtime) clearMessages(ctx context.Context) {
 		r.orch.SyncLoadedSkillHooks(nil)
 	}
 	if r.store != nil {
-		_ = r.store.ClearMessages(ctx, r.session.ID)
+		if err := r.store.ClearMessages(ctx, r.session.ID); err != nil && r.logger != nil {
+			r.logger.Warn("clear persisted runtime messages failed", "session_id", r.session.ID, "error", err)
+		}
 		// ClearMessages intentionally resets the durable transcript snapshot. Persist the
 		// monotonic revision again so an older in-flight hydrate cannot become
 		// newer merely because the context was cleared.
-		r.persist(ctx)
+		if err := r.persistLocked(ctx); err != nil && r.logger != nil {
+			r.logger.Warn("persist cleared runtime snapshot failed", "session_id", r.session.ID, "error", err)
+		}
 	}
+	r.persistMu.Unlock()
+	r.lifecycleMu.Unlock()
 }
 
 func (r *runtime) messagesSnapshot() []llm.Message {

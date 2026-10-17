@@ -199,6 +199,7 @@ class ReleasePackageStore:
             "current": current,
             "latest": latest_version,
             "upgrade_available": available,
+            "platform_supported": latest_pkg is not None,
             "published_at": latest_pkg.updated_at if latest_pkg else None,
             "release_notes": latest_pkg.release_notes if latest_pkg else "",
             "asset": asset,

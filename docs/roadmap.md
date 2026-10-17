@@ -4,11 +4,13 @@
 
 ## 1. 产品定位
 
-DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、人工治理和跨机协作。数据、工具和最终执行权保留在 Node；长期任务通过受控唤醒分次推进，跨机协作使用可选的 Manage Workgroup。
+DAgents 面向个人使用者：Windows Desktop 提供交互，自己的 Node 持有数据、会话并持续执行任务；可通过自建 SSH 隧道连接远端 Node。多个 Desktop 共享同一使用者的业务事实，当前不引入多人账号、私人上下文或租户隔离。Manage 是可选的跨节点工作组控制面。
 
 长期任务及反馈闭环的单 Node MVP 已随 v0.11.0 完成发布；已发布版本基线见下节。
 
-## 2. 当前基线（v0.11.0）
+## 2. 已发布基线（v0.11.0）
+
+本节是上次正式发布的范围；当前开发线的 Desktop、API-only Node 和配置归属以[发布收束清单](release-readiness.md)为准。
 
 - Go Agent Node：多 Agent、Web UI、HTTP/SSE、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
 - Node Web UI：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口。
@@ -16,41 +18,32 @@ DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、�
 - Workgroup：选择 Node 上已有 Agent 作为成员；每个 `workgroup_id + member_id` 使用独立 Session；工具执行回到成员 home Node。
 - 发布：Windows/Linux 安装包和可选桌面托盘；Manage 可选，不是本机对话的前置依赖。
 
-## 3. 优先级
+## 3. 当前开发线与下一版
 
-### P0：自主任务上线前的执行与访问基础（已发布）
+下一版建议为 v0.12.0，进入功能冻结和候选包验收，不再叠加新的产品系统。完整状态、证据和未完成项集中维护于[发布收束清单](release-readiness.md)。
 
-1. **Manage 默认鉴权**：保护接口不再授予匿名 admin；移除默认管理员密码；Node 登录和 Workgroup WS 绑定认证身份；旧不安全会话失效，提供明确升级配置说明。
-2. **触发器执行归属与权限**：目标必须路由到已有 Agent 的实际运行时，校验会话所属关系；停止任意宿主 shell 条件门控的默认执行路径。
-3. **触发投递安全**：并发原子领取、投递身份持久化、落盘失败不派发；重启未决投递需要对账，无法确认时暂停并提供人工恢复入口，不自动重放副作用。
-4. **基础 UI 闭环**：启动失败可重试并查看帮助；定时任务明确目标 Agent，提供立即运行和触发历史，区分已投递、失败与待核对。
+### P0：形成可安全安装、迁移和恢复的发行版
 
-实施边界与验收见 [P0 执行与访问基础](design/p0-controlled-execution-foundation.md)。以上是本轮范围，不包含完整长期目标、反馈系统、SSO/RBAC 或通用 OS sandbox。
+1. 关闭模型配置引用与密钥保存行为，保护 MCP 配置往返和草稿。
+2. 验收最终 Windows 包的标准用户初装、快捷方式/自启、运行中升级、卸载、备份恢复及 v0.11.0 数据迁移。
+3. 对最终候选完成日常对话、资源、审批、工具失败收尾、空闲后新上下文与 Auto/Dreaming 的恢复和耐久测试。
+4. 真实 SSH 隧道、Linux Node 与打包 Browser/Chromium 进行环境验收；下一版 Windows 仅发 x64 完整包，暂停 x86。
+5. 统一版本元数据、变更说明、支持矩阵、依赖审计和更新安装链路，按 dev → main 的发布 PR 流程交付。
 
-### P1：反馈闭环与单 Node 自主长期任务（MVP 已发布）
+### P1：体验与可维护性收尾
 
-1. **反馈先交付**：Node 本地保存与重试 → 当前连接 Manage 的管理员查看、处理、回复 → Node 主动同步状态；身份隔离、去重与更换 Manage 的归属保护一起验收。
-2. **长期目标 MVP**：目标与完成条件、单次 Run/Turn 关联、进度证据、受控下一次唤醒、累计预算、暂停/停止、审批等待和必要通知。
-3. **任务 UI**：在现有 Agent 工作区提供长期任务详情、运行时间线、产物与待处理入口，保持原对话和终端布局。
-   当前入口已调整为独立 Auto Agent 类型的智能体设置；旧 Goal 页面保留历史。任务终态后复用同一 Agent 开启新周期尚未实现。
-4. **场景验收**：三类合成文件目标通过真实 LLM 验证；取消、审批恢复、并发和重启采用确定性回归。长期运行及 browser/terminal 外部故障演练仍属扩大验证范围。详细证据和边界见 [P1 验收记录](design/p1-feedback-and-autonomous-goals.md)。
+- 小窗口、DPI、键盘操作和减少动画偏好；不再次重写已确认的视觉系统。
+- 真实 MCP、反馈到 Manage、工作组审批/取消/恢复的组合回归。
+- 当前文档入口与历史设计快照分开；重复/退役代码按实际使用证据清理，不以行数作为删功能的依据。
 
-### P2：受控多机协作与运维
+### P2：有独立需求后再立项
 
-进入扩大多机投入前，优先补齐 Auto 任务周期复用、持续观察的无变化语义、Node 结果与待处理汇总、长时故障演练；这些是后续规划。定位与排序见[普通/Auto 产品评估](comparative-analysis/2026-09-08-normal-and-auto-product-assessment.md)。
+- 浏览器人工接管与可交互嵌入式页签。
+- Desktop 自建 SSH 隧道；现阶段继续由用户建立加密转发。
+- macOS/Linux Desktop、多用户/租户隔离和 LAN/WAN 直连鉴权。
+- 更广泛的事件源、工作流画布、插件发布生态与成本计账。
 
-1. Workgroup catalog、resume、gap reconcile、连接 fencing 和重复投递的真实网络演练。
-2. Manage Console 与 Node UI 对齐成员、Session、Assign、审批、Timeline 和任务状态。
-3. 工具 policy overlay、审计脱敏、资源并发与未知副作用处理；控制面只能收紧本地权限。
-4. doctor/脱敏支持包、版本兼容矩阵、升级备份与回滚；按支持场景建设设备身份、RBAC、Secret Store 和 OS sandbox。
-
-### P3：能力生态与规模化产品能力
-
-- Skills / plugins / external tools 的版本、审批、发布、禁用、回滚和 Node 主动同步。
-- Webhook、事件条件、死信、模型路由、成本记账和配额。
-- 稳定 SDK/Provider/Recipe 契约、发布签名和外部案例。
-
-验证发现的安全或数据一致性缺陷随时提升为 P0，不受以上功能排期限制。
+以上均不是本版稳定发布的前置功能。安全或数据一致性缺陷随时提升为 P0。
 
 ## 4. 明确不作为主线
 
@@ -67,4 +60,4 @@ DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、�
 - 跨组件设计从 [`docs/design/README.md`](./design/README.md) 进入；用户操作从 [`docs/user/README.md`](./user/README.md) 进入。
 - 发现实现与文档不一致时，以代码和测试为准，提交修正文档的 PR。
 
-**最后更新**：2026-09-11。
+**最后更新**：2026-10-17。

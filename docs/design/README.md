@@ -15,6 +15,8 @@
 
 ## 当前专题
 
+Windows Desktop 已实现主要日常功能，正在收束发布验收；当前入口见 [Desktop 资料包](desktop-product/README.md) 与[发布收束清单](../release-readiness.md)。下方早期 Auto/Goal 和 Web UI 设计记录保留历史背景，当前行为以代码、Node API 和个人 Node 产品边界为准。
+
 | 文档 | 状态 |
 |---|---|
 | [manage-architecture.md](manage-architecture.md) | Manage/Registry/Workgroup 现网架构，历史 A2A 仅作背景 |
@@ -39,7 +41,6 @@
 
 | 文档 | 说明 |
 |---|---|
-| [desktop-product/](desktop-product/) | Desktop 产品设计资料包：当前界面图、交互原型、技术方案、视觉资产和完整产品设计缺口 |
 | [workgroup-multi-agent-collaboration-refactor-plan.md](workgroup-multi-agent-collaboration-refactor-plan.md) | 多智能体委派、子 Agent Turn、工具审批、Ask User、取消恢复与前端投影重构方案 |
 | [workgroup-agent-membership-ui.md](workgroup-agent-membership-ui.md) | Workgroup 成员 UI 的后续增强 |
 

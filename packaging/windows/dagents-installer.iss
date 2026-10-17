@@ -82,7 +82,6 @@ chinesesimp.WizardInstallingLabel=请稍候，正在安装 DAgents…
 [Files]
 ; 安装包只发布独立 Desktop Shell（Tauri）。
 Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion; Excludes: "dagents-shell-tauri.exe"
-Source: "..\..\bundle\bin\dagents-shell-tauri.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion
 Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "lifecycle-protocol-v1.marker"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\desktop\tray-tauri\src-tauri\icons\icon.ico"; DestDir: "{app}\assets"; DestName: "dagents.ico"; Flags: ignoreversion
@@ -97,25 +96,21 @@ Source: "..\..\bundle\.runtime\policy\*"; DestDir: "{app}\.runtime\_seed\policy"
 Source: "..\..\bundle\packaging\agent-templates\*"; DestDir: "{app}\packaging\agent-templates"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 #ifndef IsolatedQaBuild
+[Tasks]
+Name: "desktopicon"; Description: "创建 DAgents Desktop 桌面快捷方式"; Flags: unchecked
+Name: "autostart"; Description: "登录时启动 DAgents Desktop"; Flags: unchecked
+
 [Icons]
-Name: "{group}\DAgents Desktop（系统托盘）"; Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\DAgents Command Prompt"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\Start Agent Node (background)"; Filename: "{app}\dagents.cmd"; Parameters: "node --background"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Parameters: "node --foreground"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{group}\DAgents Desktop"; Filename: "{app}\bin\dagents-shell.exe"; Parameters: "--home ""{app}"" --config ""{app}\config.yaml"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{userdesktop}\DAgents Desktop"; Filename: "{app}\bin\dagents-shell.exe"; Parameters: "--home ""{app}"" --config ""{app}\config.yaml"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"; Tasks: desktopicon
 #endif
 
 [Registry]
 
 #ifndef IsolatedQaBuild
 [Run]
-Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "验证安装文件 (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
-; Silent upgrades launched by the Shell must start the new Shell after replacement.
-Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Desktop（系统托盘）"; Flags: postinstall nowait runascurrentuser
-#endif
-
-#ifndef IsolatedQaBuild
-[UninstallDelete]
-Type: files; Name: "{userdesktop}\DAgents Desktop（系统托盘）.lnk"
+; Silent upgrades launched by the Shell must start the new Desktop after replacement.
+Filename: "{app}\bin\dagents-shell.exe"; Parameters: "--home ""{app}"" --config ""{app}\config.yaml"""; WorkingDir: "{app}"; Description: "启动 DAgents Desktop"; Flags: postinstall nowait runascurrentuser
 #endif
 
 [Code]
@@ -136,8 +131,7 @@ const
 var
   OverwritePolicy: Boolean;
   OverwritePolicyAnswered: Boolean;
-  DesktopShortcutCheck: TNewCheckBox;
-  DesktopShortcutCreated: Boolean;
+  LauncherTasksInitialized: Boolean;
 
 function WebView2VersionIsInstalled(const VersionText: string): Boolean;
 var
@@ -254,7 +248,7 @@ end;
 
 procedure StyleFinishedLabels;
 var
-  ContentLeft, ContentWidth, BodyTop, FinishedHeight, CheckTop: Integer;
+  ContentLeft, ContentWidth, BodyTop, FinishedHeight: Integer;
 begin
   ContentLeft := WizardForm.FinishedHeadingLabel.Left;
   ContentWidth := WizardForm.ClientWidth - ContentLeft - ScaleX(28);
@@ -287,21 +281,6 @@ begin
   if FinishedHeight < ScaleY(70) then
     FinishedHeight := ScaleY(70);
   WizardForm.FinishedLabel.Height := FinishedHeight;
-
-  if DesktopShortcutCheck <> nil then
-  begin
-    DesktopShortcutCheck.Font.Name := 'Segoe UI';
-    DesktopShortcutCheck.Font.Size := 9;
-    DesktopShortcutCheck.Font.Color := ClrText;
-    DesktopShortcutCheck.Left := ContentLeft;
-    DesktopShortcutCheck.Width := ContentWidth;
-    DesktopShortcutCheck.Height := ScaleY(22);
-    CheckTop := BodyTop + FinishedHeight + ScaleY(8);
-    if WizardForm.RunList.Visible and
-      ((CheckTop + DesktopShortcutCheck.Height) > WizardForm.RunList.Top) then
-      CheckTop := WizardForm.RunList.Top - DesktopShortcutCheck.Height - ScaleY(8);
-    DesktopShortcutCheck.Top := CheckTop;
-  end;
 end;
 
 procedure StyleInnerPageLabels;
@@ -398,15 +377,76 @@ begin
   ForceDirectories(AppDir + '\.runtime\browser\profiles');
 end;
 
+#ifndef IsolatedQaBuild
+function OwnedAutostartCommand(const Value, AppDir: string): Boolean;
+var
+  CurrentCommand, LegacyCommand: string;
+begin
+  CurrentCommand := '"' + AppDir + '\bin\dagents-shell.exe" --home "' + AppDir + '" --config "' + AppDir + '\config.yaml"';
+  LegacyCommand := '"' + AppDir + '\dagents.cmd" shell --background';
+  Result := SameText(Value, CurrentCommand) or SameText(Value, LegacyCommand);
+end;
+
+function HasExplicitTaskSelection: Boolean;
+var
+  I: Integer;
+  Arg: string;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    Arg := Uppercase(ParamStr(I));
+    if (Arg = '/TASKS') or (Pos('/TASKS=', Arg) = 1) or
+       (Arg = '/MERGETASKS') or (Pos('/MERGETASKS=', Arg) = 1) then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function ShortcutMatches(const LinkPath, TargetPath, Arguments: string): Boolean;
+var
+  Shell, Link: Variant;
+  ActualTarget, ActualArguments: string;
+begin
+  Result := False;
+  if not FileExists(LinkPath) then
+    Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Link := Shell.CreateShortcut(LinkPath);
+    ActualTarget := Link.TargetPath;
+    ActualArguments := Link.Arguments;
+    Result := SameText(ActualTarget, TargetPath) and SameText(ActualArguments, Arguments);
+  except
+    Result := False;
+  end;
+end;
+
+procedure SelectPreviousLauncherTasks;
+var
+  AppDir, CurrentCommand: string;
+begin
+  if HasExplicitTaskSelection then
+    Exit;
+  AppDir := ExpandConstant('{app}');
+  if RegQueryStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CurrentCommand) and
+     OwnedAutostartCommand(CurrentCommand, AppDir) then
+    WizardSelectTasks('autostart')
+  else
+    WizardSelectTasks('!autostart');
+
+  if ShortcutMatches(
+       ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk'),
+       AppDir + '\dagents.cmd', 'shell --background') then
+    WizardSelectTasks('desktopicon');
+end;
+#endif
+
 procedure InitializeWizard;
 begin
-  DesktopShortcutCreated := False;
-#ifndef IsolatedQaBuild
-  DesktopShortcutCheck := TNewCheckBox.Create(WizardForm);
-  DesktopShortcutCheck.Parent := WizardForm.FinishedPage;
-  DesktopShortcutCheck.Caption := '创建 DAgents Desktop 桌面快捷方式';
-  DesktopShortcutCheck.Checked := False;
-#endif
+  LauncherTasksInitialized := False;
   ApplyWorkbenchTheme;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
@@ -423,7 +463,7 @@ begin
   WizardForm.FinishedLabel.Caption :=
     'DAgents 已就绪。' + #13#10 + #13#10 +
     '  ·  打开 DAgents Desktop 完成配置' + #13#10 +
-    '  ·  Desktop 将随登录自启并管理本机 Node' + #13#10 + #13#10 +
+    '  ·  可在安装任务中选择是否随登录启动' + #13#10 + #13#10 +
     '可用 dagents shell status 查看 Desktop 状态。';
 #endif
   StyleFinishedLabels;
@@ -432,38 +472,20 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   ApplyWorkbenchTheme;
+#ifndef IsolatedQaBuild
+  if (CurPageID = wpSelectTasks) and not LauncherTasksInitialized then
+  begin
+    SelectPreviousLauncherTasks;
+    LauncherTasksInitialized := True;
+  end;
+#endif
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  AppDir, ShortcutPath, CreatedLink: string;
+  AppDir: string;
 begin
   Result := True;
-  if CurPageID = wpFinished then
-  begin
-#ifndef IsolatedQaBuild
-    if (DesktopShortcutCheck <> nil) and DesktopShortcutCheck.Checked and
-      (not DesktopShortcutCreated) then
-    begin
-      ShortcutPath := ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk');
-      try
-        CreatedLink := CreateShellLink(
-          ShortcutPath,
-          'DAgents Desktop（系统托盘）',
-          ExpandConstant('{app}\dagents.cmd'),
-          'shell --background',
-          ExpandConstant('{app}'),
-          ExpandConstant('{app}\assets\dagents.ico'),
-          0,
-          SW_SHOWNORMAL);
-        DesktopShortcutCreated := CreatedLink <> '';
-      except
-        MsgBox('无法创建桌面快捷方式，请稍后手动创建。', mbError, MB_OK);
-      end;
-    end;
-#endif
-    Exit;
-  end;
   if CurPageID <> wpSelectDir then
     Exit;
   if OverwritePolicyAnswered then
@@ -546,6 +568,15 @@ var
   ProbeCreated: Boolean;
 begin
   Result := '';
+#ifndef IsolatedQaBuild
+  { Silent upgrades skip the task page; initialize its choices from the existing
+    owned Run value before ssPostInstall applies the selected autostart task. }
+  if not LauncherTasksInitialized then
+  begin
+    SelectPreviousLauncherTasks;
+    LauncherTasksInitialized := True;
+  end;
+#endif
   AppDir := ExpandConstant('{app}');
   if IsUnderDirectory(AppDir, ExpandConstant('{commonpf}')) or
      IsUnderDirectory(AppDir, ExpandConstant('{commonpf32}')) then
@@ -632,6 +663,38 @@ begin
   Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') <> 0;
 end;
 
+procedure RemoveLegacyLauncherShortcuts;
+var
+  AppDir: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  if ShortcutMatches(ExpandConstant('{group}\DAgents Desktop（系统托盘）.lnk'),
+       AppDir + '\dagents.cmd', 'shell --background') then
+    DeleteFile(ExpandConstant('{group}\DAgents Desktop（系统托盘）.lnk'));
+  if ShortcutMatches(ExpandConstant('{group}\DAgents Command Prompt.lnk'),
+       ExpandConstant('{cmd}'), '/K cd /d "' + AppDir + '" && dagents help') then
+    DeleteFile(ExpandConstant('{group}\DAgents Command Prompt.lnk'));
+  if ShortcutMatches(ExpandConstant('{group}\Start Agent Node (background).lnk'),
+       AppDir + '\dagents.cmd', 'node --background') then
+    DeleteFile(ExpandConstant('{group}\Start Agent Node (background).lnk'));
+  if ShortcutMatches(ExpandConstant('{group}\Start Agent Node (foreground).lnk'),
+       AppDir + '\dagents.cmd', 'node --foreground') then
+    DeleteFile(ExpandConstant('{group}\Start Agent Node (foreground).lnk'));
+  if ShortcutMatches(ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk'),
+       AppDir + '\dagents.cmd', 'shell --background') then
+    DeleteFile(ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk'));
+end;
+
+procedure RemoveShellAutostart;
+var
+  CurrentCommand, AppDir: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  if RegQueryStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CurrentCommand) and
+     OwnedAutostartCommand(CurrentCommand, AppDir) then
+    RegDeleteValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}');
+end;
+
 procedure InstallShellAutostart;
 var
   AppDir, CmdLine: string;
@@ -639,19 +702,13 @@ begin
   AppDir := ExpandConstant('{app}');
   if not FileExists(AppDir + '\bin\dagents-shell.exe') then
     Exit;
-  CmdLine := '"' + AppDir + '\dagents.cmd" shell --background';
-  RegWriteStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CmdLine);
-end;
-
-procedure RemoveShellAutostart;
-var
-  CurrentCommand, OwnedCommand, AppDir: string;
-begin
-  AppDir := ExpandConstant('{app}');
-  OwnedCommand := '"' + AppDir + '\dagents.cmd" shell --background';
-  if RegQueryStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CurrentCommand) and
-     SameText(CurrentCommand, OwnedCommand) then
-    RegDeleteValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}');
+  if WizardIsTaskSelected('autostart') then
+  begin
+    CmdLine := '"' + AppDir + '\bin\dagents-shell.exe" --home "' + AppDir + '" --config "' + AppDir + '\config.yaml"';
+    RegWriteStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CmdLine);
+  end
+  else
+    RemoveShellAutostart;
 end;
 #endif
 
@@ -750,6 +807,7 @@ begin
   begin
     RemoveShellAutostart;
     AppDir := ExpandConstant('{app}');
+    RemoveLegacyLauncherShortcuts;
     if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then
       Path := '';
     Path := RemovePathEntry(Path, AppDir);
@@ -769,6 +827,7 @@ begin
     CopyDefaultConfigIfMissing;
     EnsureBrowserRuntimeDir;
 #ifndef IsolatedQaBuild
+    RemoveLegacyLauncherShortcuts;
     InstallShellAutostart;
 #endif
   end;

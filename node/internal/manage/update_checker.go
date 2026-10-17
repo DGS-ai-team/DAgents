@@ -50,6 +50,7 @@ func NewUpdateChecker(cfg *config.Config, logger *slog.Logger) *UpdateChecker {
 		status: UpdateStatus{
 			CurrentVersion:       version.Version,
 			LatestVersion:        version.Version,
+			PlatformSupported:    true,
 			ManageEnabled:        cfg.Manage.Enabled,
 			UpdateEnabled:        cfg.ManageUpdateEnabled(),
 			CheckIntervalSeconds: cfg.Manage.Update.CheckIntervalSeconds,
@@ -72,7 +73,7 @@ func (u *UpdateChecker) Snapshot() UpdateStatus {
 // periodic goroutine remains disabled there because Shell owns scheduling.
 func (u *UpdateChecker) CheckNow() UpdateStatus {
 	if u == nil {
-		return UpdateStatus{}
+		return UpdateStatus{PlatformSupported: true}
 	}
 	u.checkOnce()
 	return u.Snapshot()
@@ -125,6 +126,7 @@ func (u *UpdateChecker) fetchCheck() UpdateStatus {
 		return UpdateStatus{
 			CurrentVersion:       version.Version,
 			LatestVersion:        version.Version,
+			PlatformSupported:    true,
 			ManageEnabled:        u.cfg.Manage.Enabled,
 			UpdateEnabled:        false,
 			CheckIntervalSeconds: u.cfg.Manage.Update.CheckIntervalSeconds,

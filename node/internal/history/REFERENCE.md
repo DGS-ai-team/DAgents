@@ -13,6 +13,12 @@
 | `journalFilePath` | `func(baseDir, sessionID string) string` | `<baseDir>/YYYYMMDD/<session>.jsonl` |
 | `RuntimeJournalRelativePath` | `func(sessionID string, at time.Time) string` | 未绑定 Agent 时使用的运行时相对路径 `history/YYYYMMDD/<session>.jsonl`；已绑定 Agent 的会话使用 workspace 下 `.dagents/<agent_id>/history/` 前缀 |
 
+## `context_archive.go`
+
+| 符号 | 类型 | 说明 |
+|------|------|------|
+| `ArchiveIdleContext` | `func(baseDir, sessionID, resetID string, messages []llm.Message) (string, error)` | baseDir 为 Agent 的工作区状态根目录；从权威快照创建精简段归档，返回实际绝对路径。同 ID、同内容幂等，不同内容报错；独立于 Journal 开关 |
+
 ## 相关
 
 `reasoning_content` 写入前规范化见 **`node/internal/llm/provider*.go`** 与 **`Client.NormalizeAssistant`**；JSONL message 对象由 **`llm.MessageToJournalPayload`** 生成。

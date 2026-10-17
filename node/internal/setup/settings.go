@@ -10,7 +10,10 @@ import (
 
 // LLMProfileSettings 单个 LLM 配置（Web UI / setup API）。
 type LLMProfileSettings struct {
-	ID                string `json:"id"`
+	ID string `json:"id"`
+	// OriginalID is write-only PATCH metadata used when renaming a profile so
+	// its stored secret can move with it. It is never populated in GET views.
+	OriginalID        string `json:"original_id,omitempty"`
 	Provider          string `json:"provider"`
 	BaseURL           string `json:"base_url"`
 	Model             string `json:"model"`
@@ -72,11 +75,9 @@ type FeatureSettings struct {
 
 // CompressionSettings 上下文压缩阈值（config compression 块）。
 type CompressionSettings struct {
-	SilentTriggerTokens         int `json:"silent_trigger_tokens"`
-	BlockingTriggerTokens       int `json:"blocking_trigger_tokens"`
-	IdleAutoCompressSeconds     int `json:"idle_auto_compress_seconds"`
-	IdleAutoCompressPollSeconds int `json:"idle_auto_compress_poll_seconds"`
-	IdleAutoCompressMinTokens   int `json:"idle_auto_compress_min_tokens"`
+	SilentTriggerTokens        int `json:"silent_trigger_tokens"`
+	BlockingTriggerTokens      int `json:"blocking_trigger_tokens"`
+	IdleNewConversationSeconds int `json:"idle_new_conversation_seconds"`
 }
 
 // MemorySettings controls the optional compression-to-memory background
@@ -252,11 +253,9 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
 		},
 		Compression: CompressionSettings{
-			SilentTriggerTokens:         cfg.Compression.SilentTriggerTokens,
-			BlockingTriggerTokens:       cfg.Compression.BlockingTriggerTokens,
-			IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
-			IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
-			IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
+			SilentTriggerTokens:        cfg.Compression.SilentTriggerTokens,
+			BlockingTriggerTokens:      cfg.Compression.BlockingTriggerTokens,
+			IdleNewConversationSeconds: cfg.Compression.IdleNewConversationSeconds,
 		},
 		Memory: MemorySettings{
 			AutoExtract:        cfg.Memory.AutoExtract,
@@ -571,14 +570,8 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 	if p.BlockingTriggerTokens < 0 {
 		return fmt.Errorf("compression.blocking_trigger_tokens must be >= 0")
 	}
-	if p.IdleAutoCompressSeconds < 0 {
-		return fmt.Errorf("compression.idle_auto_compress_seconds must be >= 0")
-	}
-	if p.IdleAutoCompressPollSeconds < 0 {
-		return fmt.Errorf("compression.idle_auto_compress_poll_seconds must be >= 0")
-	}
-	if p.IdleAutoCompressMinTokens < 0 {
-		return fmt.Errorf("compression.idle_auto_compress_min_tokens must be >= 0")
+	if p.IdleNewConversationSeconds < 0 {
+		return fmt.Errorf("compression.idle_new_conversation_seconds must be >= 0")
 	}
 	silent := p.SilentTriggerTokens
 	blocking := p.BlockingTriggerTokens
@@ -587,9 +580,7 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 	}
 	cfg.Compression.SilentTriggerTokens = silent
 	cfg.Compression.BlockingTriggerTokens = blocking
-	cfg.Compression.IdleAutoCompressSeconds = p.IdleAutoCompressSeconds
-	cfg.Compression.IdleAutoCompressPollSeconds = p.IdleAutoCompressPollSeconds
-	cfg.Compression.IdleAutoCompressMinTokens = p.IdleAutoCompressMinTokens
+	cfg.Compression.IdleNewConversationSeconds = p.IdleNewConversationSeconds
 	return nil
 }
 

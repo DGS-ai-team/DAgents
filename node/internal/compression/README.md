@@ -30,15 +30,13 @@ Go Node 侧上下文摘要压缩：silent 异步 + blocking 同步；M2 侧车 `
 
 - `silent_trigger_tokens`：`<=0` 关闭 silent
 - `blocking_trigger_tokens`：`<=0` 关闭 blocking
-- `idle_auto_compress_seconds`：session 无动作超过该秒数后后台自动 `ForceBlocking` 压缩；`<=0` 关闭
-- `idle_auto_compress_poll_seconds`：扫描间隔（默认 60s）
-- `idle_auto_compress_min_tokens`：上下文估算 token 低于该值时不触发 idle 自动压缩；`<=0` 表示不限制
+- `idle_new_conversation_seconds`：普通 Agent 空闲后，下一条真实用户输入到来时开启新的模型上下文段；`0` 关闭。该功能由 session 包处理，不调用摘要模型。
 
 阻塞优先于静默。silent 在 `readyCompressions` pending 或 apply 后冷却期（默认 60s / +4000 tokens）内不重复启动侧车。
 
-**Idle 自动压缩**：以 SQLite `updated_at`（最后 persist 时间）为「无动作」基准；压缩成功或 `noop` 后在 `runtime_state.idle_auto_compress_applied` 打标，扫描器跳过该 session；用户新消息 / resume / trigger 等入队时清除标记，下次 idle 周期可再次压缩。
+**空闲后的新对话**：使用持久化的交互完成时间判断空闲，先归档上一段，再推进活动上下文起点；保留完整 SQLite 历史。Auto、审批恢复和活动轮次不因用户空闲被打断。后台不再恢复闲置 runtime 进行 LLM 压缩，活动中的 token 阈值压缩仍保留。详见[设计与验收](../../../docs/design/idle-conversation-boundary.md)。
 
-**History 与 system（P9）**：session/SQLite `messages` 仅含 user/assistant/tool；`BuildSystemPrompt` 经 `llm.MessagesWithSystem` 出站注入，不落库。压缩区间自 `leadingSystemSkip` 起（生产恒为 0）；journal 异常写入 leading `system` 时跳过以免与侧车 `SystemPrompt` 重复。
+**History 与 system（P9）**：session/SQLite `messages` 仅含 user/assistant/tool；`BuildSystemPrompt` 经 `llm.MessagesWithSystem` 出站注入，不落库。压缩区间自 `leadingSystemSkip` 起：跳过防御性的 leading `system`，并保留紧随其后的空闲新对话 bridge，避免摘要替换掉持久化分隔线。其他 runtime notice 和技能消息不会因此全部固定。
 
 `evaluateCompression`：达阈值但 plan 失败时 `Should=false` 且 `TriggerLevel` 仍为 silent/blocking（P8）。
 

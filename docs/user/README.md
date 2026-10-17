@@ -8,5 +8,6 @@
 | 工作组、成员和审批 | [workgroups.md](workgroups.md) |
 | Auto Agent、长期任务与反馈 | [long-term-tasks-and-feedback.md](long-term-tasks-and-feedback.md) |
 | 安装包、升级、故障排查 | [operations.md](operations.md) |
+| v0.11.0 备份、迁移与恢复 | [migrate-from-v0.11.md](migrate-from-v0.11.md) |
 
 更深入的接口和实现分别见 [reference](../reference/README.md) 与 [architecture](../architecture.md)。
