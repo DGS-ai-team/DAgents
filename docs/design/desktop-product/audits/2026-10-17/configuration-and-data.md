@@ -38,4 +38,4 @@ v0.11.0 的代表性 SQLite/JSON 文件已用脱敏旧 schema 构建，并通过
 
 三套生产前端 `npm audit --audit-level=moderate` 为 0 漏洞；Python 主依赖审计通过，Browser 审计沿用仓库已有明确例外且未新增忽略项。原型与 Rust 告警的目标范围见 [依赖记录](../../../../development/dependency-readiness-2026-10-17.md)。
 
-本轮共享前端 85 文件、470 项和共享图标 6 项通过；Desktop UI 67 项、Vite build、两套生产前端 lint、API contracts、Python unittest 201 项通过。Go 工具链与最终回归单独见 [运行时回归](runtime-regression.md)，候选输入及打包见 [候选记录](release-candidate.md)。
+本轮共享前端 85 文件、470 项和共享图标 6 项通过；Desktop UI 67 项、Vite build、两套生产前端 lint、API contracts 通过。增加跨架构更新回归后，Python 3.13 全量 unittest 202 项通过，Ruff/Pyright 与 219 个 npm 包版本的许可检查通过。系统默认 `python` 指向缺少 FastAPI 的 Anaconda 环境；完整测试明确使用 `py -3.13`，环境导入失败不计为产品回归通过。Go 工具链、终端协议与最终回归单独见 [运行时回归](runtime-regression.md)，候选输入及打包见 [候选记录](release-candidate.md)。
