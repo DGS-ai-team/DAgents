@@ -1499,7 +1499,8 @@ fn handle_update_menu(shared: &Arc<Shared>, app: &AppHandle) {
         open_update_settings(shared, app);
         return;
     }
-    if shared.update_checker.snapshot().upgrade_available {
+    let status = shared.update_checker.snapshot();
+    if status.upgrade_available || !status.platform_supported {
         open_update_settings(shared, app);
     } else {
         check_update_now(shared);
@@ -1779,24 +1780,38 @@ fn refresh_update_ui(shared: &Shared) {
     }
     let cfg = shared.update_checker.config_snapshot();
     let status = shared.update_checker.snapshot();
-    let text_enabled = if !cfg.update_check_enabled {
+    let text_enabled = update_menu_status_text(&status, cfg.update_check_enabled);
+    if let Ok(guard) = shared.update_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_text(text_enabled.0);
+            let _ = item.set_enabled(text_enabled.1);
+        }
+    }
+}
+
+fn update_menu_status_text(
+    status: &crate::update::Status,
+    update_check_enabled: bool,
+) -> (String, bool) {
+    if !update_check_enabled {
         ("更新：自动检查已关闭（点击手动检查）".to_string(), true)
+    } else if !status.manage_reachable
+        && !status.message.trim().is_empty()
+        && status.message.trim() != "等待检查"
+    {
+        ("更新：Node 检查失败（点击重试）".to_string(), true)
     } else if status.last_checked_at.trim().is_empty() {
         ("更新：检查中…".to_string(), false)
     } else if !status.manage_reachable {
         ("更新：Node 检查失败（点击重试）".to_string(), true)
     } else if !status.update_enabled {
         ("更新：Node 已关闭更新".to_string(), false)
+    } else if !status.platform_supported {
+        ("更新：当前平台未发布安装包".to_string(), true)
     } else if status.upgrade_available {
         (format!("更新：新版本 {} 可用", status.latest_version), true)
     } else {
         ("更新：已是最新（点击重试）".to_string(), true)
-    };
-    if let Ok(guard) = shared.update_item.lock() {
-        if let Some(item) = guard.as_ref() {
-            let _ = item.set_text(text_enabled.0);
-            let _ = item.set_enabled(text_enabled.1);
-        }
     }
 }
 
@@ -1933,8 +1948,9 @@ fn set_tray_icon(app: &AppHandle, pending: bool) {
 mod nav_tests {
     use super::{
         args_have_flag, desktop_mvp_navigation_allowed, parse_layout_args,
-        require_idle_readiness_check, LayoutArgs,
+        require_idle_readiness_check, update_menu_status_text, LayoutArgs,
     };
+    use crate::update::Status;
     use tauri::Url;
 
     #[test]
@@ -1948,6 +1964,34 @@ mod nav_tests {
         assert!(!desktop_mvp_navigation_allowed(&attacker, true));
         let node_ui = Url::parse("http://127.0.0.1:18765/ui/").unwrap();
         assert!(!desktop_mvp_navigation_allowed(&node_ui, true));
+    }
+
+    #[test]
+    fn unsupported_update_platform_is_not_reported_as_up_to_date() {
+        let status = Status {
+            manage_reachable: true,
+            update_enabled: true,
+            platform_supported: false,
+            last_checked_at: "2026-10-17T00:00:00Z".into(),
+            ..Status::default()
+        };
+        let (label, enabled) = update_menu_status_text(&status, true);
+        assert_eq!(label, "更新：当前平台未发布安装包");
+        assert!(enabled);
+        assert!(!label.contains("已是最新"));
+    }
+
+    #[test]
+    fn failed_update_check_is_not_reported_as_still_checking() {
+        let status = Status {
+            manage_reachable: false,
+            platform_supported: true,
+            message: "Node 请求失败".into(),
+            ..Status::default()
+        };
+        let (label, enabled) = update_menu_status_text(&status, true);
+        assert_eq!(label, "更新：Node 检查失败（点击重试）");
+        assert!(enabled);
     }
 
     #[test]

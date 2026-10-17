@@ -61,6 +61,18 @@ func TestRunUpToDate(t *testing.T) {
 	}
 }
 
+func TestRunUnsupportedPlatformFailsCheckOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"current_version":"0.5.1","latest_version":"0.5.1","upgrade_available":false,"manage_reachable":true,"platform_supported":false,"platform":"windows-386","message":"当前平台没有可用的更新包"}`))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{Local: config.LocalConfig{Endpoint: srv.URL}}
+	if got := Run(context.Background(), cfg, Options{CheckOnly: true}); got != 1 {
+		t.Fatalf("Run unsupported platform = %d, want failure", got)
+	}
+}
+
 func TestRunDownloadsBinaryPackageFromNodeWithoutManageCredential(t *testing.T) {
 	payload := []byte("verified node package")
 	digest := sha256.Sum256(payload)

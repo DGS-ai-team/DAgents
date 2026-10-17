@@ -94,7 +94,7 @@ HITL resume、tool-call cancel、execution reconcile 等接口维护运行时状
 
 ### 更新查询和二进制包
 
-`GET /v1/node/update` 每次主动请求时执行 Manage release check，直接返回 shared `update.Status`：`current_version`、`latest_version`、`upgrade_available`、`manage_reachable`、`manage_enabled`、`update_enabled`、可选 `check_interval_seconds`、`last_checked_at`、`channel`、`platform`、可选 `release_notes`、`message`、`apply_command`、`asset`。Node status 不声称 Shell 能安装更新。
+`GET /v1/node/update` 每次主动请求时执行 Manage release check，直接返回 shared `update.Status`：`current_version`、`latest_version`、`upgrade_available`、`manage_reachable`、`platform_supported`、`manage_enabled`、`update_enabled`、可选 `check_interval_seconds`、`last_checked_at`、`channel`、`platform`、可选 `release_notes`、`message`、`apply_command`、`asset`。`platform_supported=false` 表示当前 `platform` 没有已发布安装包；release check 与下载都按完整平台标识匹配，不会回退到其他架构。Node status 不声称 Shell 能安装更新。
 
 `GET /v1/node/upgrade-readiness` 返回当前 session manager 的活动状态。首配完成前仅 loopback 请求可用，以便本机 Desktop 安装器在升级或卸载前确认没有活动 turn 或待处理 HITL；该状态不会通过远程访问开放。
 

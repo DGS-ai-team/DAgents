@@ -80,12 +80,13 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
 	if s.updateChecker == nil {
 		writeJSON(w, http.StatusOK, manage.UpdateStatus{
-			CurrentVersion: version.Version,
-			LatestVersion:  version.Version,
-			Platform:       manage.ReleasePlatform(),
-			Channel:        "stable",
-			ApplyCommand:   "dagents update",
-			Message:        "Manage 未启用，无法检查更新",
+			CurrentVersion:    version.Version,
+			LatestVersion:     version.Version,
+			PlatformSupported: true,
+			Platform:          manage.ReleasePlatform(),
+			Channel:           "stable",
+			ApplyCommand:      "dagents update",
+			Message:           "Manage 未启用，无法检查更新",
 		})
 		return
 	}

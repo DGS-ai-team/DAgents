@@ -209,9 +209,6 @@ jobs:
           - label: x64
             platform: windows-amd64
             goarch: amd64
-          - label: x86
-            platform: windows-386
-            goarch: '386'
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -260,10 +257,6 @@ jobs:
             platform: windows-amd64
             goarch: amd64
             tauri_target: x86_64-pc-windows-msvc
-          - label: x86
-            platform: windows-386
-            goarch: '386'
-            tauri_target: i686-pc-windows-msvc
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -328,9 +321,6 @@ jobs:
           - label: x64
             platform: windows-amd64
             python_arch: x64
-          - label: x86
-            platform: windows-386
-            python_arch: x86
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -376,23 +366,11 @@ jobs:
           name: ci-win-go-windows-amd64
           path: dist/windows-amd64
 
-      - name: Download Windows x86 Go binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ci-win-go-windows-386
-          path: dist/windows-386
-
       - name: Download Windows x64 shell binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ci-win-shell-windows-amd64
           path: dist/windows-amd64
-
-      - name: Download Windows x86 shell binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ci-win-shell-windows-386
-          path: dist/windows-386
 
       - name: Download Windows x64 browser binary
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -400,18 +378,12 @@ jobs:
           name: ci-win-browser-windows-amd64
           path: dist/windows-amd64
 
-      - name: Download Windows x86 browser binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ci-win-browser-windows-386
-          path: dist/windows-386
-
       - name: Assemble Windows installer staging directories
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${PACKAGE_VERSION}"
-          for platform in windows-amd64 windows-386; do
+          for platform in windows-amd64; do
             PLATFORM="${platform}" VERSION="${VERSION}" \
               NODE_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-node.exe" \
               CLIENT_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-client.exe" \
@@ -429,23 +401,23 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      - name: Build Windows installers (Inno x64 + x86)
+      - name: Build Windows installer (Inno x64)
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${PACKAGE_VERSION}"
-          for platform in windows-amd64 windows-386; do
+          for platform in windows-amd64; do
             PLATFORM="${platform}" VERSION="${VERSION}" \
               BUNDLE_SRC="${GITHUB_WORKSPACE}/dist/dagents-local-assistant-${platform}" \
               bash scripts/ci/build_windows_installer.sh
           done
-          ls -la dist-installer dist/dagents-local-assistant-windows-*-installer-*.exe
+          ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
 
       - name: Upload Windows installer (Inno)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dagents-windows-installers
-          path: dist/dagents-local-assistant-windows-*-installer-*.exe
+          path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
           if-no-files-found: error
 
   build-manage-docker:
