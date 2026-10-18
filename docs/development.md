@@ -13,6 +13,8 @@
 
 Desktop 和 Manage Console 的前端资源不提交 Git。Go Node 只提供 API，不嵌入前端；构建或测试 Node 不需要先构建前端。修改共享 Desktop UI 时运行其独立测试和构建。
 
+发行构建的 Go 补丁版本以 CI 固定值为准，目前为 `1.26.9`。满足 `go.mod` 的最低版本不代表已包含当前安全修复。需要临时切换时，可在单次构建进程设置 `GOTOOLCHAIN=go1.26.9`，核对 `go version` 和产物的 `go version -m`；不要使用旧工具链的构建产物替代已通过漏洞扫描的候选包。
+
 Node 当前 HTTP 路由、设置所有权、消息/SSE 与更新包协议见 [Node Runtime API 接入契约](api/node-integration.md)；字段级机器可读路由表见 [OpenAPI](architecture/openapi-node.yaml)。Node 首配只完成单 owner Node 档案：Node 名必填，`user.preferred_name` 可选；该标记不代表 LLM profile 已配置或可用，详见 `/v1/settings` 的 OpenAPI 描述。
 
 ## 2. 从源码启动
@@ -23,6 +25,8 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```
 
 Node 默认只提供 `http://127.0.0.1:18765` 上的 API。Windows 安装包附带独立 DAgents Desktop；从源码运行 Windows Desktop 时设置 `DAGENTS_HOME` 与 `DAGENTS_CONFIG`，再执行 `npm install --prefix desktop/tray-tauri` 和 `npm run tauri:dev --prefix desktop/tray-tauri`。Node 与 Agent 运行时设置通过 Desktop 配置；无 API Key 的结构联调可启用 Mock LLM。
+
+Node 的 `.runtime` 相对于进程工作目录解析；`--config` 只选择引导配置，不会切换工作目录。手动运行隔离实例时，应先进入该实例目录再启动；以 `Start-Process` 运行时显式设置 `-WorkingDirectory`，避免多个实例意外共享同一份运行数据。
 
 可选启动 Manage：
 
@@ -38,7 +42,9 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 | 范围 | 命令 | 说明 |
 |---|---|---|
 | Node Web UI | `npm test --prefix node/webui/frontend` | Vitest 与共享图标契约 |
+| Desktop UI 测试 | `npm run test:ui --prefix desktop/tray-tauri` | 工作台、终端、设置与共享图标契约 |
 | Desktop UI 构建 | `npm run build --prefix desktop/tray-tauri` | 构建独立桌面 UI 资源 |
+| Desktop Rust | `cargo test --locked --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml --lib` | 启动路径、Node 管理、终端与本机桥接 |
 | Manage Console 构建 | `npm run build --prefix manage/console/frontend` | 生成 Console 静态资源 |
 | Go | `go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...` | 当前 Go 模块 |
 | Go 静态检查 | `go vet ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...` | 当前 Go 模块 |
@@ -91,7 +97,7 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 ## 7. 发布前检查
 
 1. 更新根目录 `VERSION`，再由 `scripts/release/prepare_release.py` 同步包元数据和 `CHANGELOG.md`；
-2. 构建两套前端并确认静态产物未被意外提交；
+2. 测试共享前端与 Desktop UI，构建 Desktop 和 Manage Console，确认静态产物未被意外提交；
 3. 运行 `scripts/verify.sh`（Windows 使用 `scripts/verify.ps1`）；
 4. 对新增接口检查旧客户端、重连、重复消息和错误路径；
 5. 真实 UI 测试至少覆盖对话、工具、HITL、取消、刷新恢复；工作组变更还要覆盖 Agent 注册、成员加入、任务分派、审批和断线；

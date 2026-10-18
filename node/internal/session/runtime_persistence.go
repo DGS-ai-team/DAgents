@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -26,15 +27,22 @@ func (r *runtime) persist(ctx context.Context) error {
 	}
 	r.persistMu.Lock()
 	defer r.persistMu.Unlock()
+	return r.persistLocked(ctx)
+}
+
+// persistLocked writes one runtime snapshot while the caller owns persistMu.
+// It is used by compound durability boundaries that must roll back memory
+// before another snapshot writer can publish the tentative state.
+func (r *runtime) persistLocked(ctx context.Context) error {
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	idleMarked := r.idleAutoCompressApplied
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
 	activeContextStart := r.activeContextStart
 	lastContextResetID := r.lastContextResetID
+	lastHumanInteraction := r.lastHumanInteraction
 	var dreamingAttempt json.RawMessage
 	if r.dreamingAttempt != nil {
 		dreamingAttempt, _ = json.Marshal(*r.dreamingAttempt)
@@ -54,15 +62,15 @@ func (r *runtime) persist(ctx context.Context) error {
 		Messages:     msgs,
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{
-			InputBoxState:           inputBoxState,
-			HistoryRevision:         historyRevision,
-			ActiveContextStart:      activeContextStart,
-			LastContextResetID:      lastContextResetID,
-			DreamingAttempt:         dreamingAttempt,
-			HookStore:               hookStore,
-			IdleAutoCompressApplied: idleMarked,
-			NotifySeq:               notifySeq,
-			AckSeq:                  ackSeq,
+			InputBoxState:        inputBoxState,
+			HistoryRevision:      historyRevision,
+			ActiveContextStart:   activeContextStart,
+			LastContextResetID:   lastContextResetID,
+			LastHumanInteraction: lastHumanInteraction,
+			DreamingAttempt:      dreamingAttempt,
+			HookStore:            hookStore,
+			NotifySeq:            notifySeq,
+			AckSeq:               ackSeq,
 		},
 	})
 	if err != nil && r.logger != nil {
@@ -179,17 +187,17 @@ func (r *runtime) historyHasUserMessageLocked(target llm.Message) bool {
 // this state from SQLite after persist; keeping this fallback prevents tests
 // and embedded callers from losing history during a swap.
 type runtimeReplacementData struct {
-	Messages           []llm.Message
-	LoadedSkills       []skills.LoadedSkill
-	HookStore          map[string]json.RawMessage
-	IdleAutoCompress   bool
-	NotifySeq          int
-	AckSeq             int
-	HistoryRevision    uint64
-	ActiveContextStart int
-	LastContextResetID string
-	DreamingAttempt    json.RawMessage
-	InputBoxState      json.RawMessage
+	Messages             []llm.Message
+	LoadedSkills         []skills.LoadedSkill
+	HookStore            map[string]json.RawMessage
+	NotifySeq            int
+	AckSeq               int
+	HistoryRevision      uint64
+	ActiveContextStart   int
+	LastContextResetID   string
+	LastHumanInteraction time.Time
+	DreamingAttempt      json.RawMessage
+	InputBoxState        json.RawMessage
 }
 
 func (r *runtime) replacementData() runtimeReplacementData {
@@ -199,12 +207,12 @@ func (r *runtime) replacementData() runtimeReplacementData {
 	r.mu.Lock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
-	idleMarked := r.idleAutoCompressApplied
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
 	activeContextStart := r.activeContextStart
 	lastContextResetID := r.lastContextResetID
+	lastHumanInteraction := r.lastHumanInteraction
 	var dreamingAttempt json.RawMessage
 	if r.dreamingAttempt != nil {
 		dreamingAttempt, _ = json.Marshal(*r.dreamingAttempt)
@@ -220,7 +228,8 @@ func (r *runtime) replacementData() runtimeReplacementData {
 	}
 	return runtimeReplacementData{
 		Messages: msgs, LoadedSkills: loaded, HookStore: hookStore,
-		IdleAutoCompress: idleMarked, NotifySeq: notifySeq, AckSeq: ackSeq,
+		NotifySeq: notifySeq, AckSeq: ackSeq,
 		HistoryRevision: historyRevision, ActiveContextStart: activeContextStart, LastContextResetID: lastContextResetID, InputBoxState: inputBoxState, DreamingAttempt: dreamingAttempt,
+		LastHumanInteraction: lastHumanInteraction,
 	}
 }

@@ -16,7 +16,74 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-func TestAgentTerminalToolSessionIsListedAndTerminated(t *testing.T) {
+func executeTerminalTool(t *testing.T, registry *tools.Registry, name, arguments string) string {
+	t.Helper()
+	result, err := registry.Execute(context.Background(), name, arguments)
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	return result
+}
+
+func terminalInputArguments(t *testing.T, terminalID, data string) string {
+	t.Helper()
+	arguments, err := json.Marshal(struct {
+		TerminalID string `json:"terminal_id"`
+		Data       string `json:"data"`
+	}{TerminalID: terminalID, Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(arguments)
+}
+
+func waitForTerminalSessionOutput(t *testing.T, session *terminalSession, want string) string {
+	t.Helper()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		session.mu.Lock()
+		wake := session.outputWake
+		session.mu.Unlock()
+
+		out := session.snapshotOutput(0, terminalReplayBytes, false)
+		var output strings.Builder
+		for _, chunk := range out.Chunks {
+			output.Write(chunk.Data)
+		}
+		if strings.Contains(output.String(), want) {
+			return output.String()
+		}
+		select {
+		case <-wake:
+		case <-timeout.C:
+			t.Fatalf("terminal output did not contain %q; got %q", want, output.String())
+		}
+	}
+}
+
+func waitForTerminalSessionDetached(t *testing.T, session *terminalSession) {
+	t.Helper()
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		session.mu.Lock()
+		detached := session.conn == nil
+		session.mu.Unlock()
+		if detached {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatal("terminal WebSocket did not detach")
+		}
+	}
+}
+
+func TestAgentTerminalToolSessionResumesAcrossWebSocketDisconnect(t *testing.T) {
 	cfg := testConfig(t)
 	registry, err := tools.NewRegistry(t.TempDir(), 10)
 	if err != nil {
@@ -62,26 +129,155 @@ func TestAgentTerminalToolSessionIsListedAndTerminated(t *testing.T) {
 		t.Fatalf("status=%d listed=%+v", resp.StatusCode, listed)
 	}
 
-	terminated, err := registry.Execute(context.Background(), "terminal_terminate", `{"terminal_id":"`+openedPayload.Terminal.ID+`"}`)
+	terminalID := openedPayload.Terminal.ID
+	input := "echo tool-session-resume-ready\n"
+	if runtime.GOOS == "windows" {
+		input = "echo tool-session-resume-ready\r\n"
+	}
+	executeTerminalTool(t, registry, "terminal_input", terminalInputArguments(t, terminalID, input))
+	srv.terminals.mu.Lock()
+	toolSession := srv.terminals.sessions[terminalID]
+	srv.terminals.mu.Unlock()
+	if toolSession == nil {
+		t.Fatalf("tool-opened terminal session %q was not registered", terminalID)
+	}
+	waitForTerminalSessionOutput(t, toolSession, "tool-session-resume-ready")
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/v1/agents/" + cfg.NodeID + "/terminals/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resumeConn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(terminated, `"status":"terminated"`) {
-		t.Fatalf("terminated=%s", terminated)
+	if err := wsjson.Write(ctx, resumeConn, terminalWSCommand{Type: "resume", SessionID: terminalID}); err != nil {
+		resumeConn.CloseNow()
+		t.Fatal(err)
 	}
+	var resumed terminalWSEvent
+	if err := wsjson.Read(ctx, resumeConn, &resumed); err != nil {
+		resumeConn.CloseNow()
+		t.Fatal(err)
+	}
+	if resumed.Type != "started" || resumed.SessionID != terminalID {
+		resumeConn.CloseNow()
+		t.Fatalf("tool-opened session did not resume: %+v", resumed)
+	}
+	var replayed strings.Builder
+	for !strings.Contains(replayed.String(), "tool-session-resume-ready") {
+		var event terminalWSEvent
+		if err := wsjson.Read(ctx, resumeConn, &event); err != nil {
+			resumeConn.CloseNow()
+			t.Fatal(err)
+		}
+		if event.Type == "error" {
+			resumeConn.CloseNow()
+			t.Fatalf("resume error: %s", event.Error)
+		}
+		if event.Type == "output" {
+			replayed.Write(event.Data)
+		}
+	}
+	resumeConn.CloseNow()
+	waitForTerminalSessionDetached(t, toolSession)
+	if got := len(srv.terminals.List(cfg.NodeID)); got != 1 {
+		t.Fatalf("tool-opened session after UI disconnect=%d, want 1", got)
+	}
+	toolRead := executeTerminalTool(t, registry, "terminal_read", `{"terminal_id":"`+terminalID+`"}`)
+	if !strings.Contains(toolRead, "tool-session-resume-ready") {
+		t.Fatalf("UI replay consumed tool-side unread output: %s", toolRead)
+	}
+
+	input = "echo tool-write-after-ui-disconnect\n"
+	if runtime.GOOS == "windows" {
+		input = "echo tool-write-after-ui-disconnect\r\n"
+	}
+	executeTerminalTool(t, registry, "terminal_input", terminalInputArguments(t, terminalID, input))
+	waitForTerminalSessionOutput(t, toolSession, "tool-write-after-ui-disconnect")
+	toolRead = executeTerminalTool(t, registry, "terminal_read", `{"terminal_id":"`+terminalID+`"}`)
+	if !strings.Contains(toolRead, "tool-write-after-ui-disconnect") {
+		t.Fatalf("tool-side read after disconnect=%s", toolRead)
+	}
+
+	wrongAgentURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/v1/agents/other-agent/terminals/ws"
+	wrongAgentConn, wrongAgentResponse, wrongAgentErr := websocket.Dial(ctx, wrongAgentURL, nil)
+	if wrongAgentConn != nil {
+		wrongAgentConn.CloseNow()
+	}
+	if wrongAgentErr == nil || wrongAgentResponse == nil || wrongAgentResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-Agent WebSocket resume status=%v err=%v, want 404", wrongAgentResponse, wrongAgentErr)
+	}
+	if _, err := srv.terminals.get(terminalID, "other-agent"); err == nil {
+		t.Fatal("terminal registry allowed another Agent to resume the session")
+	}
+
+	resumeConn, _, err = websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, resumeConn, terminalWSCommand{Type: "resume", SessionID: terminalID}); err != nil {
+		resumeConn.CloseNow()
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, resumeConn, &resumed); err != nil {
+		resumeConn.CloseNow()
+		t.Fatal(err)
+	}
+	if resumed.Type != "started" || resumed.SessionID != terminalID {
+		resumeConn.CloseNow()
+		t.Fatalf("tool-opened session did not resume after tool writes: %+v", resumed)
+	}
+	var secondReplay strings.Builder
+	for !strings.Contains(secondReplay.String(), "tool-write-after-ui-disconnect") {
+		var event terminalWSEvent
+		if err := wsjson.Read(ctx, resumeConn, &event); err != nil {
+			resumeConn.CloseNow()
+			t.Fatal(err)
+		}
+		if event.Type == "error" {
+			resumeConn.CloseNow()
+			t.Fatalf("second resume error: %s", event.Error)
+		}
+		if event.Type == "output" {
+			secondReplay.Write(event.Data)
+		}
+	}
+	if err := wsjson.Write(ctx, resumeConn, terminalWSCommand{Type: "close"}); err != nil {
+		resumeConn.CloseNow()
+		t.Fatal(err)
+	}
+	var closedEvent terminalWSEvent
+	for closedEvent.Type == "" {
+		if err := wsjson.Read(ctx, resumeConn, &closedEvent); err != nil {
+			resumeConn.CloseNow()
+			t.Fatal(err)
+		}
+		if closedEvent.Type == "error" {
+			resumeConn.CloseNow()
+			t.Fatalf("explicit close error: %s", closedEvent.Error)
+		}
+		if closedEvent.Type != "closed" {
+			closedEvent = terminalWSEvent{}
+		}
+	}
+	if closedEvent.SessionID != terminalID {
+		resumeConn.CloseNow()
+		t.Fatalf("explicit close event=%+v", closedEvent)
+	}
+	resumeConn.CloseNow()
 	resp2, err := http.Get(httpServer.URL + "/v1/agents/" + cfg.NodeID + "/terminals")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp2.Body.Close()
-	var closed struct {
+	var closedList struct {
 		Count int `json:"count"`
 	}
-	if err := json.NewDecoder(resp2.Body).Decode(&closed); err != nil {
+	if err := json.NewDecoder(resp2.Body).Decode(&closedList); err != nil {
 		t.Fatal(err)
 	}
-	if resp2.StatusCode != http.StatusOK || closed.Count != 0 {
-		t.Fatalf("after close status=%d listed=%+v", resp2.StatusCode, closed)
+	if resp2.StatusCode != http.StatusOK || closedList.Count != 0 {
+		t.Fatalf("after explicit close status=%d listed=%+v", resp2.StatusCode, closedList)
 	}
 }
 

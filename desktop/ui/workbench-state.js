@@ -155,11 +155,9 @@ export function createDesktopMenuModel(context = {}) {
     hasPendingApproval = false,
     hasPendingHitl = false,
     sidebarCollapsed = false,
-    resources = [],
   } = context
   const hasAgent = Boolean(activeAgentId) && !isWorkgroup
   const canOpenResource = online && !setupRequired && hasAgent
-  const resourceRows = Array.isArray(resources) ? resources : []
   const closeableResource = ['terminal', 'file', 'browser'].includes(activeTab) && !isWorkgroup
   const separator = { separator: true }
   const item = (label, action, disabled = false, extra = {}) => ({ label, action, disabled, ...extra })
@@ -175,14 +173,13 @@ export function createDesktopMenuModel(context = {}) {
     资源: [
       item('打开工作区文件', 'open-workspace', !canOpenResource),
       item('查看浏览器', 'open-browser', !canOpenResource),
-      item('新建终端', 'create-terminal', !canOpenResource),
+      item('打开终端…', 'create-terminal', !canOpenResource),
       separator,
       item('关闭当前资源', 'close-resource', !closeableResource, { hint: closeableResource ? ({ terminal: '终端', file: '工作区', browser: '浏览器' })[activeTab] : '' }),
     ],
     视图: [
       item(sidebarCollapsed ? '展开侧栏' : '收起侧栏', 'sidebar'),
       item('返回当前智能体对话', 'agent-chat', activeTab === 'chat' || !activeAgentId || isWorkgroup),
-      ...(resourceRows.length ? [separator, ...resourceRows.map(resource => item(resource.label, 'switch-resource', resource.active === true, { hint: resource.hint || '', resourceType: resource.type, resourceId: resource.id }))] : []),
     ],
     智能体: [
       { header: true, label: activeAgentName },

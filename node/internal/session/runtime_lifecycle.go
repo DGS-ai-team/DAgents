@@ -406,6 +406,9 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 		event.InteractionID = snapshot.InteractionID
 	}
 	event.Source = string(command.Source)
+	if event.Source == "" {
+		event.Source = string(snapshot.Source)
+	}
 	event.CommandID = command.CommandID
 	event.Payload = payload
 	event.PayloadRef = command.PayloadRef

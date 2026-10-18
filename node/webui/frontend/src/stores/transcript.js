@@ -136,6 +136,41 @@ export function addSystem(text) {
   transcriptStore.entries.push({ id: ++idSeq, kind: "system", text });
 }
 
+export function addContextBoundary(boundaryId) {
+  const stableId = String(boundaryId || "").trim();
+  if (!stableId || transcriptStore.entries.some((entry) => entry.kind === "context_boundary" && entry.boundary_id === stableId)) {
+    return false;
+  }
+  const entry = { id: ++idSeq, kind: "context_boundary", boundary_id: stableId };
+  // The idle notice arrives after the new request was inserted optimistically.
+  // Anchor it before the first user after the last completed assistant: this
+  // also keeps the boundary ahead of later optimistic/queued user entries.
+  let lastAssistantIndex = -1;
+  for (let index = transcriptStore.entries.length - 1; index >= 0; index -= 1) {
+    if (transcriptStore.entries[index]?.kind === "assistant") {
+      lastAssistantIndex = index;
+      break;
+    }
+  }
+  let firstPendingUserIndex = -1;
+  for (let index = lastAssistantIndex + 1; index < transcriptStore.entries.length; index += 1) {
+    if (transcriptStore.entries[index]?.kind === "user") {
+      firstPendingUserIndex = index;
+      break;
+    }
+  }
+  if (firstPendingUserIndex >= 0) transcriptStore.entries.splice(firstPendingUserIndex, 0, entry);
+  else transcriptStore.entries.push(entry);
+  markLocalHistoryDirty();
+  return true;
+}
+
+/** Accepts only the sanitized runtime notice contract; never renders its body. */
+export function addContextBoundaryNotice(data) {
+  if (String(data?.message_kind || "").trim() !== "context_boundary") return false;
+  return addContextBoundary(data?.boundary_id);
+}
+
 export function appendAssistant(delta) {
   if (!delta) return;
   markLocalHistoryDirty();

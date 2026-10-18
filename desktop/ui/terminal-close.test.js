@@ -8,7 +8,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-test('detached close targets its captured Agent and does not overwrite a different selection', async () => {
+test('explicit end targets its captured Agent and does not overwrite a different selection', async () => {
   const terminalA = { id: 'session-a', sessionId: 'session-a', connectionId: '', agentId: 'agent-a', status: 'disconnected' }
   const terminalB = { id: 'session-b', sessionId: 'session-b', connectionId: 'relay-b', agentId: 'agent-b', status: 'connected' }
   const ui = { activeAgentId: 'agent-a', activeTerminalId: 'session-a', connectionId: '', status: 'disconnected', output: 'A output', resources: [terminalA, terminalB] }
@@ -18,6 +18,7 @@ test('detached close targets its captured Agent and does not overwrite a differe
     agentId: ui.activeAgentId,
     terminal: terminalA,
     connectionId: ui.connectionId,
+    commandType: 'terminate',
     closeRelay: async () => assert.fail('detached close must not reconnect through the UI relay'),
     closeSession: async request => { closeCalls.push(request); await pending.promise },
     selectionIsCurrent: () => ui.activeAgentId === 'agent-a' && ui.activeTerminalId === 'session-a',
@@ -42,7 +43,7 @@ test('detached close targets its captured Agent and does not overwrite a differe
   })
 })
 
-test('failed detached close keeps the original terminal available for retry', async () => {
+test('failed detached end keeps the original terminal available for retry', async () => {
   const terminal = { id: 'session-a', sessionId: 'session-a', connectionId: '', agentId: 'agent-a', status: 'disconnected' }
   const resources = [terminal]
   let terminalError = ''
@@ -50,6 +51,7 @@ test('failed detached close keeps the original terminal available for retry', as
   const closed = await closeTerminalFlow({
     agentId: 'agent-a',
     terminal,
+    commandType: 'terminate',
     closeRelay: async () => assert.fail('detached close must use the Node API'),
     closeSession: async () => { throw new Error('Node unavailable') },
     selectionIsCurrent: () => true,
@@ -66,23 +68,24 @@ test('failed detached close keeps the original terminal available for retry', as
   assert.deepEqual(resources, [terminal])
 })
 
-test('failed relay close falls back to owner-scoped Node cleanup', async () => {
+test('explicit termination confirms Node deletion before best-effort relay detach', async () => {
   const calls = []
   const closed = await closeTerminalFlow({
     agentId: 'agent-a',
     terminal: { sessionId: 'session-a' },
     connectionId: 'relay-a',
+    commandType: 'terminate',
     closeRelay: async request => { calls.push(['relay', request]); throw new Error('relay gone') },
     closeSession: async request => calls.push(['api', request]),
   })
   assert.equal(closed, true)
   assert.deepEqual(calls, [
-    ['relay', { agentId: 'agent-a', connectionId: 'relay-a', commandType: 'close' }],
     ['api', { agentId: 'agent-a', terminalId: 'session-a' }],
+    ['relay', { agentId: 'agent-a', connectionId: 'relay-a', commandType: 'detach' }],
   ])
 })
 
-test('failed detach relay does not close the retained PTY through the Node API', async () => {
+test('failed view-close relay does not close the retained PTY through the Node API', async () => {
   const calls = []
   const failures = []
   const terminal = { sessionId: 'session-a' }
@@ -100,4 +103,45 @@ test('failed detach relay does not close the retained PTY through the Node API',
     ['relay', { agentId: 'agent-a', connectionId: 'relay-a', commandType: 'detach' }],
   ])
   assert.deepEqual(failures, ['relay gone'])
+})
+
+test('view close detaches the relay and never destroys a retained session', async () => {
+  const calls = []
+  const terminal = { id: 'session-a', sessionId: 'session-a', agentId: 'agent-a' }
+  const detached = await closeTerminalFlow({
+    agentId: 'agent-a', terminal, connectionId: 'relay-a',
+    closeRelay: async request => calls.push(['relay', request]),
+    closeSession: async request => calls.push(['api', request]),
+  })
+  assert.equal(detached, true)
+  assert.deepEqual(calls, [['relay', { agentId: 'agent-a', connectionId: 'relay-a', commandType: 'detach' }]])
+})
+
+test('disconnect keeps the tab and a later explicit end uses Node destruction', async () => {
+  const calls = []
+  const terminal = { id: 'session-a', sessionId: 'session-a', agentId: 'agent-a' }
+  await closeTerminalFlow({ agentId: 'agent-a', terminal, connectionId: 'relay-a', commandType: 'detach', closeRelay: async request => calls.push(request), closeSession: async request => calls.push(request) })
+  await closeTerminalFlow({ agentId: 'agent-a', terminal, connectionId: '', commandType: 'terminate', closeRelay: async request => calls.push(request), closeSession: async request => calls.push(request) })
+  assert.deepEqual(calls, [
+    { agentId: 'agent-a', connectionId: 'relay-a', commandType: 'detach' },
+    { agentId: 'agent-a', terminalId: 'session-a' },
+  ])
+})
+
+test('failed Node deletion leaves terminal available and never pretends relay termination succeeded', async () => {
+  const calls = []
+  const terminal = { id: 'session-a', sessionId: 'session-a', agentId: 'agent-a' }
+  const ended = await closeTerminalFlow({
+    agentId: 'agent-a', terminal, connectionId: 'relay-a', commandType: 'terminate',
+    closeRelay: async request => calls.push(['relay', request]),
+    closeSession: async request => { calls.push(['api', request]); throw new Error('Node unavailable') },
+  })
+  assert.equal(ended, false)
+  assert.deepEqual(calls, [['api', { agentId: 'agent-a', terminalId: 'session-a' }]])
+})
+
+test('legacy close command is normalized to detach and cannot destroy a PTY', async () => {
+  const calls = []
+  await closeTerminalFlow({ agentId: 'agent-a', terminal: { sessionId: 'session-a' }, connectionId: 'relay-a', commandType: 'close', closeRelay: async request => calls.push(request), closeSession: async request => calls.push(request) })
+  assert.deepEqual(calls, [{ agentId: 'agent-a', connectionId: 'relay-a', commandType: 'detach' }])
 })

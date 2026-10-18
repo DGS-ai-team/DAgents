@@ -90,6 +90,8 @@ func MessageSourceForUserName(name string) (MessageSource, MessageProvenance) {
 		return MessageSource{Kind: MessageSourcePlugin, Form: MessageFormInstructions}, MessageProvenance{Producer: "skills"}
 	case UserNameDate:
 		return MessageSource{Kind: MessageSourceRuntime, Form: MessageFormNotice}, MessageProvenance{Producer: UserNameDate}
+	case UserNameConversationBoundary:
+		return MessageSource{Kind: MessageSourceRuntime, Form: MessageFormNotice}, MessageProvenance{Producer: "idle_context", Operation: "continue-from-archive"}
 	case UserNameAsyncTool:
 		return MessageSource{Kind: MessageSourceAsyncTool, Form: MessageFormRelay}, MessageProvenance{Producer: UserNameAsyncTool}
 	case UserNameCompression:
@@ -163,7 +165,7 @@ func IsHiddenInjectedUserMessage(message Message) bool {
 	case MessageSourcePlugin:
 		return source.Form == MessageFormInstructions
 	case MessageSourceRuntime:
-		return strings.EqualFold(provenance.Producer, UserNameDate)
+		return strings.EqualFold(provenance.Producer, UserNameDate) || source.Form == MessageFormNotice && strings.EqualFold(provenance.Producer, "idle_context")
 	case MessageSourceMemory:
 		return true
 	case MessageSourceAsyncTool, MessageSourceCompression:

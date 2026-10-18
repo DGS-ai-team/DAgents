@@ -91,11 +91,36 @@ pub struct TerminalSummary {
     #[serde(default)]
     pub terminal_id: String,
     #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub config_id: String,
+    #[serde(default)]
+    pub target_kind: String,
+    #[serde(default)]
+    pub target_id: String,
+    #[serde(default)]
     pub status: String,
     #[serde(default)]
     pub shell: String,
     #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LinuxTerminalChannel {
+    pub channel_id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
@@ -235,6 +260,96 @@ impl Client {
             .map_err(|e| format!("GET /v1/agents/{id}/terminals JSON: {e}"))?;
         serde_json::from_value(value.get("terminals").cloned().unwrap_or_default())
             .map_err(|e| format!("GET /v1/agents/{id}/terminals decode: {e}"))
+    }
+
+    pub fn list_agent_linux_terminal_channels(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<LinuxTerminalChannel>, String> {
+        let id = utf8_percent_encode(agent_id.trim(), NON_ALPHANUMERIC).to_string();
+        let channels_url = format!("{}/v1/linux/channels", self.base);
+        let bindings_url = format!("{}/v1/agents/{id}/linux-channels", self.base);
+        let channels: serde_json::Value = self
+            .authorize(ureq::get(&channels_url))
+            .timeout(Duration::from_secs(10))
+            .call()
+            .map_err(|e| format!("GET /v1/linux/channels: {e}"))?
+            .into_json()
+            .map_err(|e| format!("GET /v1/linux/channels JSON: {e}"))?;
+        let bindings: serde_json::Value = self
+            .authorize(ureq::get(&bindings_url))
+            .timeout(Duration::from_secs(10))
+            .call()
+            .map_err(|e| format!("GET /v1/agents/{id}/linux-channels: {e}"))?
+            .into_json()
+            .map_err(|e| format!("GET /v1/agents/{id}/linux-channels JSON: {e}"))?;
+        Ok(Self::linux_terminal_channels_from_payloads(
+            &channels, &bindings,
+        ))
+    }
+
+    fn linux_terminal_channels_from_payloads(
+        channels: &serde_json::Value,
+        bindings: &serde_json::Value,
+    ) -> Vec<LinuxTerminalChannel> {
+        let channel_rows = channels
+            .get("channels")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let binding_rows = bindings
+            .get("bindings")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut result = Vec::new();
+        for binding in binding_rows {
+            if binding.get("enabled").and_then(serde_json::Value::as_bool) != Some(true) {
+                continue;
+            }
+            let Some(channel_id) = binding
+                .get("channel_id")
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            let Some(channel) = channel_rows.iter().find(|channel| {
+                channel
+                    .get("channel_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(channel_id)
+                    && channel.get("enabled").and_then(serde_json::Value::as_bool) == Some(true)
+            }) else {
+                continue;
+            };
+            result.push(LinuxTerminalChannel {
+                channel_id: channel_id.to_string(),
+                display_name: channel
+                    .get("display_name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                host: channel
+                    .get("host")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                port: channel
+                    .get("port")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(22) as u16,
+                username: channel
+                    .get("username")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                is_default: binding
+                    .get("is_default")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            });
+        }
+        result
     }
 
     pub fn health(&self) -> NodeHealth {
@@ -931,6 +1046,8 @@ fn decode_stream_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
 
     #[test]
     fn failed_exclusive_package_create_preserves_existing_file() {
@@ -965,6 +1082,100 @@ mod tests {
         ] {
             assert!(validate_desktop_api_path(path).is_err(), "accepted {path}");
         }
+    }
+
+    #[test]
+    fn terminal_list_preserves_existing_target_and_directory_metadata() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let size = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..size]);
+            assert!(request.starts_with("GET /v1/agents/agent%2Da/terminals "));
+            let body = serde_json::json!({"terminals":[{
+                "terminal_id":"terminal-abc12345",
+                "agent_id":"agent-a",
+                "config_id":"linux-config-1",
+                "target_kind":"linux_channel",
+                "target_id":"staging-host",
+                "status":"running",
+                "shell":"/bin/bash",
+                "cwd":"/workspace/project",
+                "created_at":"2026-10-16T00:00:00Z"
+            }]})
+            .to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let client = Client {
+            base: format!("http://{address}"),
+            token: String::new(),
+        };
+        let terminals = client.list_terminals("agent-a").unwrap();
+        server.join().unwrap();
+        assert_eq!(terminals.len(), 1);
+        let terminal = &terminals[0];
+        assert_eq!(terminal.agent_id, "agent-a");
+        assert_eq!(terminal.config_id, "linux-config-1");
+        assert_eq!(terminal.target_kind, "linux_channel");
+        assert_eq!(terminal.target_id, "staging-host");
+        assert_eq!(terminal.cwd, "/workspace/project");
+        let serialized = serde_json::to_value(terminal).unwrap();
+        for (key, value) in [
+            ("agent_id", "agent-a"),
+            ("config_id", "linux-config-1"),
+            ("target_kind", "linux_channel"),
+            ("target_id", "staging-host"),
+            ("cwd", "/workspace/project"),
+        ] {
+            assert_eq!(serialized[key], value);
+        }
+    }
+
+    #[test]
+    fn linux_terminal_channels_are_limited_to_enabled_agent_bindings() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 2048];
+                let size = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..size]);
+                let body = if request.starts_with("GET /v1/linux/channels ") {
+                    serde_json::json!({"channels":[
+                        {"channel_id":"enabled-host","enabled":true,"display_name":"staging","host":"staging.example","port":22,"username":"deploy","credential_id":"credential-secret-ref"},
+                        {"channel_id":"disabled-host","enabled":false,"display_name":"disabled"},
+                        {"channel_id":"unbound-host","enabled":true,"display_name":"unbound"}
+                    ]})
+                } else {
+                    assert!(request.starts_with("GET /v1/agents/agent%2Da/linux-channels "));
+                    serde_json::json!({"bindings":[
+                        {"channel_id":"enabled-host","enabled":true,"is_default":true},
+                        {"channel_id":"disabled-host","enabled":true},
+                        {"channel_id":"unbound-host","enabled":false}
+                    ]})
+                };
+                let body = body.to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+        });
+        let client = Client {
+            base: format!("http://{address}"),
+            token: String::new(),
+        };
+        let channels = client
+            .list_agent_linux_terminal_channels("agent-a")
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].channel_id, "enabled-host");
+        assert_eq!(channels[0].host, "staging.example");
+        assert!(channels[0].is_default);
+        let serialized = serde_json::to_value(&channels[0]).unwrap();
+        assert!(serialized.get("credential_id").is_none());
+        assert!(serialized.get("secret").is_none());
     }
 
     #[test]

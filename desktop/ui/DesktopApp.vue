@@ -6,6 +6,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
 import { closeTerminalFlow } from './terminal-close.js'
+import { composerPageSettlementMatches, composerPageVisibility } from './composer-surface-motion.js'
+import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, shouldClearWorkspaceUploadError, toNodeFileReference } from './workspace-files-state.js'
 import { agentStore } from '../../node/webui/frontend/src/stores/agent.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '../../node/webui/frontend/src/stores/hitl.js'
@@ -17,6 +19,10 @@ import FirstRunNodeProfile from '../../node/webui/frontend/src/views/FirstRunNod
 import ComposerToolbar from '../../node/webui/frontend/src/components/ComposerToolbar.vue'
 import ImageLightbox from '../../node/webui/frontend/src/components/ImageLightbox.vue'
 import TerminalConsole from './components/TerminalConsole.vue'
+import TerminalOpenDialog from './components/TerminalOpenDialog.vue'
+import TerminalEndDialog from './components/TerminalEndDialog.vue'
+import ComposerSurface from './components/ComposerSurface.vue'
+import ResourceAgentDock from './components/ResourceAgentDock.vue'
 import WorkspaceFiles from './components/WorkspaceFiles.vue'
 import BrowserViewer from './components/BrowserViewer.vue'
 import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
@@ -35,14 +41,10 @@ import terminalIcon from '@shared-icons/desktop/terminal.svg?url'
 import browserIcon from '@shared-icons/desktop/browser.svg?url'
 import fileIcon from '@shared-icons/desktop/file.svg?url'
 import attachmentIcon from '@shared-icons/desktop/attachment.svg?url'
-import createIcon from '@shared-icons/desktop/create.svg?url'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import circleXIcon from '@shared-icons/desktop/circle-x.svg?url'
-import messageIcon from '@shared-icons/desktop/message.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
-import chevronDownIcon from '@shared-icons/desktop/chevron-down.svg?url'
-import chevronUpIcon from '@shared-icons/desktop/chevron-up.svg?url'
 import './desktop-ui.css'
 
 const maskStyle = (icon) => ({
@@ -94,6 +96,9 @@ const composerExpanded = ref(false)
 const userInfoSelected = ref([])
 const chatPanel = ref(null)
 const activeTab = ref('chat')
+const displayedTab = ref(activeTab.value)
+const visitedTabs = ref(new Set(['chat']))
+const pendingComposerPage = ref(null)
 const workspaceOpenedByAgent = ref({})
 const workspaceNameByAgent = ref({})
 const browserOpenedByAgent = ref({})
@@ -124,6 +129,7 @@ const dockDrafts = ref({})
 const failedSendDrafts = ref({})
 const pendingUserByAgent = ref({})
 const dockExpanded = ref(false)
+const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value ? 'pending' : agentGenerating.value ? 'generating' : 'idle')
 const isTauri = !!window.__TAURI_INTERNALS__
 const router = useRouter()
 const route = useRoute()
@@ -138,6 +144,10 @@ provide('desktopFirstRunCompleted', onFirstRunCompleted)
 
 watch(() => route.path, path => { activeTab.value = tabForRoute(path, activeTab.value) }, { immediate: true })
 watch(activeId, id => { agentStore.agentId = id || '' }, { immediate: true })
+watch(activeId, (id, previousId) => {
+  if (previousId && id !== previousId) terminalEndConfirmation.value = null
+  if (previousId && id !== previousId && terminalOpenDialog.value) void closeTerminalOpenDialog()
+})
 watch([input, activeId], () => { void nextTick(resizeComposer) }, { flush: 'post' })
 
 function resizeComposer() {
@@ -210,6 +220,9 @@ let modelRequestSequence = 0
 let pollTimer = null
 let summaryRefreshTimer = 0
 let composerResizeObserver = null
+let terminalDialogRequestEpoch = 0
+let terminalSessionListEpoch = 0
+let terminalChannelRequestEpoch = 0
 const terminalDecoders = new Map()
 const mediaObjectUrls = new Map()
 const currentWindow = isTauri ? getCurrentWindow() : null
@@ -266,12 +279,64 @@ const menuEntries = computed(() => createDesktopMenuModel({
   hasPendingApproval: approvalQueueIndex.value >= 0,
   hasPendingHitl: Boolean(pending.value),
   sidebarCollapsed: sidebarCollapsed.value,
-  resources: [
-    ...(workspaceOpened.value ? [{ type: 'file', id: 'workspace', label: workspaceName.value, hint: workspaceName.value === '工作区' ? '' : '工作区', active: activeTab.value === 'file' }] : []),
-    ...(browserOpened.value ? [{ type: 'browser', id: 'browser', label: browserName.value, hint: browserName.value === '浏览器' ? '' : '浏览器', active: activeTab.value === 'browser' }] : []),
-    ...terminalInstances.value.filter(terminal => terminal.agentId === activeId.value).map(terminal => ({ type: 'terminal', id: terminal.id, label: terminal.name, hint: terminal.name === '终端' ? '' : '终端', active: activeTab.value === 'terminal' && activeTerminalInstanceId.value === terminal.id })),
-  ],
 }))
+const terminalOpenDialog = ref(false)
+const terminalOpenChoices = ref([])
+const terminalSessionLoading = ref(false)
+const terminalSessionError = ref('')
+const terminalChannelLoading = ref(false)
+const terminalChannelError = ref('')
+const terminalDialogPlatform = ref('')
+const terminalDialogAgentId = ref('')
+const terminalDialogReturnFocus = ref(null)
+const terminalEndConfirmation = ref(null)
+const terminalEndReturnFocus = ref(null)
+function composerModeForTab(tab) { return tab === 'chat' ? 'chat' : ['terminal', 'file', 'browser'].includes(tab) ? 'dock' : 'hidden' }
+const composerMode = computed(() => composerModeForTab(activeTab.value))
+
+watch(activeTab, (tab, previousTab) => {
+  if (['chat', 'terminal', 'file', 'browser'].includes(tab)) {
+    const next = new Set(visitedTabs.value)
+    next.add(tab)
+    visitedTabs.value = next
+  }
+  const decision = composerPageVisibility({
+    requestedTab: tab,
+    displayedTab: displayedTab.value,
+    modeForTab: composerModeForTab,
+    composerMounted: previousTab != null && !showNodeFirstRun.value && previousTab !== 'settings',
+    pendingTransition: Boolean(pendingComposerPage.value),
+  })
+  if (decision.kind === 'show') {
+    pendingComposerPage.value = null
+    displayedTab.value = tab
+  } else {
+    const current = pendingComposerPage.value
+    pendingComposerPage.value = { mode: decision.mode, id: current?.mode === decision.mode ? current.id : null }
+  }
+}, { flush: 'sync', immediate: true })
+
+watch(showNodeFirstRun, visible => {
+  if (!visible) return
+  pendingComposerPage.value = null
+  displayedTab.value = activeTab.value
+}, { flush: 'sync' })
+
+function onComposerTransitionStart({ id, mode }) {
+  if (pendingComposerPage.value?.mode === mode) pendingComposerPage.value = { ...pendingComposerPage.value, id }
+}
+
+function onComposerTransitionSettled({ id, mode }) {
+  if (!pendingComposerPage.value || !composerPageSettlementMatches({
+    eventId: id,
+    eventMode: mode,
+    pendingId: pendingComposerPage.value.id,
+    pendingMode: pendingComposerPage.value.mode,
+    currentMode: composerMode.value,
+  })) return
+  displayedTab.value = activeTab.value
+  pendingComposerPage.value = null
+}
 
 async function refreshHealth() {
   try { status.value = await invoke('desktop_node_status'); return status.value }
@@ -568,6 +633,7 @@ function showWorkgroups() { selectedWorkgroupId.value = ''; selectedWorkgroupNam
 function openWorkgroup(id) { selectedWorkgroupId.value = String(id || ''); selectedWorkgroupName.value = workgroupList.value.find(group => group.workgroup_id === selectedWorkgroupId.value)?.display_name || ''; activeTab.value = 'workgroups' }
 function openWorkgroupConnectionSettings() { void router.push('/settings/connection') }
 function openBrowserCapabilitySettings() { void router.push('/settings/capabilities') }
+async function openLinuxChannelSettings() { await closeTerminalOpenDialog(); await router.push('/settings/linux-channels') }
 function openAutoChat(id) { dialog.value = ''; void selectAgent(id) }
 async function openAutoConfig(id) { dialog.value = ''; await selectAgent(id); await router.push(`/settings/agents/${encodeURIComponent(id)}`) }
 async function openAgentSettings(id) { await selectAgent(id); await router.push(`/settings/agents/${encodeURIComponent(id)}`) }
@@ -583,6 +649,109 @@ async function sendFromDock() {
   const sent = await sendMessageToActiveAgent(text)
   if (!sent) dockDraft.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, dockDraft.value, text)
 }
+async function requestNewTerminal(sessionId = '') {
+  const intent = terminalOpenIntent(sessionId)
+  if (intent.kind === 'resume') { await openTerminal(intent.sessionId, {}, activeId.value); return }
+  if (!activeId.value || !status.value.online || status.value.setup_required) return
+  const agentId = activeId.value
+  terminalDialogRequestEpoch += 1
+  if (!terminalOpenDialog.value) {
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const menuTrigger = activeElement?.closest('[role="menu"]')?.closest('[data-menu-anchor]')?.querySelector('[data-menubar-trigger]')
+    terminalDialogReturnFocus.value = menuTrigger instanceof HTMLElement ? menuTrigger : activeElement
+  }
+  terminalOpenDialog.value = true
+  terminalDialogAgentId.value = agentId
+  terminalDialogPlatform.value = ''
+  terminalOpenChoices.value = terminalDialogChoices('', [])
+  terminalSessionError.value = ''
+  terminalChannelError.value = ''
+  terminalSessionLoading.value = true
+  await Promise.all([loadTerminalDialogSessions(agentId), loadTerminalDialogChannels(agentId)])
+}
+function terminalDialogRequestIsCurrent(agentId, requestEpoch = terminalDialogRequestEpoch) {
+  return isTerminalDialogRequestCurrent({ requestEpoch, currentEpoch: terminalDialogRequestEpoch, ownerId: agentId, activeAgentId: activeId.value, dialogOpen: terminalOpenDialog.value }) && terminalDialogAgentId.value === agentId
+}
+async function loadTerminalDialogSessions(agentId) {
+  const listEpoch = ++terminalSessionListEpoch
+  terminalSessionLoading.value = true
+  terminalSessionError.value = ''
+  try {
+    const sessions = await invoke('desktop_terminal_list', { agentId })
+    if (listEpoch !== terminalSessionListEpoch || !terminalDialogRequestIsCurrent(agentId)) return
+    terminalSessions.value = runningTerminalSessions(sessions)
+  } catch (e) {
+    if (listEpoch === terminalSessionListEpoch && terminalDialogRequestIsCurrent(agentId)) terminalSessionError.value = String(e?.message || e)
+  } finally {
+    if (listEpoch === terminalSessionListEpoch && terminalDialogRequestIsCurrent(agentId)) terminalSessionLoading.value = false
+  }
+}
+async function loadTerminalDialogChannels(agentId) {
+  const channelEpoch = ++terminalChannelRequestEpoch
+  terminalChannelLoading.value = true
+  terminalChannelError.value = ''
+  terminalOpenChoices.value = terminalDialogChoices(terminalDialogPlatform.value, [])
+  const [agentResult, channelsResult] = await Promise.allSettled([
+      getAgent(agentId),
+      isTauri ? invoke('desktop_linux_terminal_channels', { agentId }) : Promise.resolve([]),
+    ])
+  if (channelEpoch !== terminalChannelRequestEpoch || !terminalDialogRequestIsCurrent(agentId)) return
+  if (agentResult.status === 'fulfilled') {
+    const agent = agentResult.value?.agent || agentResult.value
+    terminalDialogPlatform.value = String(agent?.host?.os_kind || agent?.host?.sys_platform || '')
+  }
+  if (channelsResult.status === 'fulfilled') terminalOpenChoices.value = terminalDialogChoices(terminalDialogPlatform.value, channelsResult.value)
+  else {
+    terminalOpenChoices.value = terminalDialogChoices(terminalDialogPlatform.value, [])
+    terminalChannelError.value = String(channelsResult.reason?.message || channelsResult.reason)
+  }
+  if (channelEpoch === terminalChannelRequestEpoch && terminalDialogRequestIsCurrent(agentId)) terminalChannelLoading.value = false
+}
+async function closeTerminalOpenDialog({ preserveOwner = false } = {}) {
+  terminalDialogRequestEpoch += 1
+  terminalSessionListEpoch += 1
+  terminalChannelRequestEpoch += 1
+  terminalOpenDialog.value = false
+  terminalSessionLoading.value = false
+  terminalChannelLoading.value = false
+  if (!preserveOwner) terminalDialogAgentId.value = ''
+  await nextTick()
+  if (terminalDialogReturnFocus.value?.isConnected) terminalDialogReturnFocus.value.focus()
+  terminalDialogReturnFocus.value = null
+}
+async function createTerminalFromDialog(choice) {
+  const agentId = terminalDialogAgentId.value
+  if (!agentId || activeId.value !== agentId || !status.value.online) return
+  const availableChoice = terminalOpenChoices.value.find(item => item.kind === choice?.kind && (item.kind === 'local' || item.targetId === choice?.targetId))
+  if (!availableChoice) return
+  let target
+  try { target = terminalOpenArguments(availableChoice, terminalDialogPlatform.value) }
+  catch (e) { terminalChannelError.value = String(e?.message || e); return }
+  const channel = terminalOpenChoices.value.find(item => item.kind === 'linux_channel' && item.targetId === target.targetId)
+  const terminalName = target.targetKind === 'linux_channel' ? (channel?.label || 'SSH 终端') : (isWindowsPlatform(terminalDialogPlatform.value) ? 'PowerShell' : '终端')
+  await closeTerminalOpenDialog({ preserveOwner: true })
+  if (activeId.value !== agentId || terminalDialogAgentId.value !== agentId) return
+  terminalDialogAgentId.value = ''
+  await openTerminal('', { ...target, name: terminalName }, agentId)
+}
+async function resumeTerminalFromDialog(session) {
+  const agentId = terminalDialogAgentId.value
+  const available = terminalSessions.value.find(item => item.terminal_id === session?.terminal_id && item.status === 'running')
+  if (!agentId || activeId.value !== agentId || !available) return
+  await closeTerminalOpenDialog({ preserveOwner: true })
+  if (activeId.value !== agentId || terminalDialogAgentId.value !== agentId) return
+  terminalDialogAgentId.value = ''
+  await openTerminal(available.terminal_id, {}, agentId)
+}
+function retryTerminalSessionList() {
+  const agentId = terminalDialogAgentId.value
+  if (agentId && terminalDialogRequestIsCurrent(agentId)) void loadTerminalDialogSessions(agentId)
+}
+function retryTerminalChannels() {
+  const agentId = terminalDialogAgentId.value
+  if (!agentId || !terminalDialogRequestIsCurrent(agentId)) return
+  void loadTerminalDialogChannels(agentId)
+}
 function restoreFailedSendDraft(target) {
   const text = failedSendDraft.value
   if (!text) return
@@ -592,26 +761,6 @@ function restoreFailedSendDraft(target) {
   inputDrafts.value[activeId.value] = target === 'chat' ? text : inputDrafts.value[activeId.value]
   dockDrafts.value[activeId.value] = target === 'dock' ? text : dockDrafts.value[activeId.value]
   delete failedSendDrafts.value[activeId.value]
-}
-async function showTerminal() {
-  showResourceTab('terminal')
-  terminalError.value = ''
-  if (terminalConnectionId.value) {
-    try {
-      await invoke('desktop_terminal_command', { connectionId: terminalConnectionId.value, agentId: activeId.value, commandType: 'resize', rows: 24, cols: 80 })
-    } catch {
-      terminalConnectionId.value = ''
-      if (terminalStatus.value === 'connected') terminalStatus.value = 'disconnected'
-    }
-  }
-  if (!terminalConnectionId.value && activeId.value && status.value.online) {
-    try {
-      terminalSessions.value = await invoke('desktop_terminal_list', { agentId: activeId.value })
-      if (terminalSessionByAgent.value[activeId.value] && !terminalSessions.value.some(item => item.terminal_id === terminalSessionByAgent.value[activeId.value])) {
-        terminalSessionByAgent.value[activeId.value] = ''
-      }
-    } catch (e) { terminalError.value = String(e) }
-  }
 }
 function showWorkspace() {
   if (!activeId.value) return
@@ -626,7 +775,7 @@ function showBrowser() {
 }
 function closeCurrentResource() {
   const transition = closeResourceTransition(activeTab.value)
-  if (transition.closeTerminal) void closeTerminal('close')
+  if (transition.closeTerminal) void closeTerminal('view-close', activeTerminalInstanceId.value)
   else if (transition.workspaceOpened === false) { workspaceOpened.value = false; showChat() }
   else if (transition.browserOpened === false) { browserOpened.value = false; showChat() }
 }
@@ -643,40 +792,60 @@ function activateTerminal(id, { reconnect = true } = {}) {
   // Agent switches detach the PTY while preserving its session. Reopening the
   // retained tab should attach to that session again instead of leaving the
   // user at the disconnected placeholder.
-  if (shouldReconnectTerminal(terminal, reconnect)) void openTerminal(terminal.sessionId)
+  if (shouldReconnectTerminal(terminal, reconnect)) void openTerminal(terminal.sessionId, {}, terminal.agentId)
 }
-async function openTerminal(sessionId = '') {
-  if (!activeId.value || !status.value.online) return
-  const agentId = activeId.value
+async function openTerminal(sessionId = '', target = {}, ownerId = activeId.value) {
+  const agentId = ownerId
+  if (!agentId || activeId.value !== agentId || !status.value.online) return
+  const requestedSessionId = String(sessionId || '')
+  let existing = requestedSessionId ? findTerminalInstanceForSession(terminalInstances.value, agentId, requestedSessionId) : null
+  if (reusableTerminalConnection(existing)) {
+    activateTerminal(existing.id, { reconnect: false })
+    return
+  }
   terminalError.value = ''
   const connectionId = globalThis.crypto?.randomUUID?.() || `term-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  const resourceId = sessionId || connectionId
-  const session = terminalSessions.value.find(item => item.terminal_id === sessionId)
-  const terminal = { id: resourceId, agentId, sessionId: sessionId || '', connectionId, name: session?.display_name || session?.name || session?.shell || 'Shell', status: sessionId ? 'reconnecting' : 'connecting', output: '', error: '' }
-  const existing = terminalInstances.value.findIndex(item => item.id === resourceId && item.agentId === agentId)
-  if (existing >= 0) terminalInstances.value.splice(existing, 1, terminal)
-  else terminalInstances.value.push(terminal)
+  const resourceId = requestedSessionId || connectionId
+  const session = terminalSessions.value.find(item => item.terminal_id === requestedSessionId)
+  const terminal = existing || { id: resourceId, agentId, sessionId: requestedSessionId, name: session?.display_name || session?.name || session?.shell || target.name || '终端', output: '', error: '', manualInputEnabled: !requestedSessionId }
+  terminal.connectionId = connectionId
+  terminal.status = requestedSessionId ? 'reconnecting' : 'connecting'
+  if (requestedSessionId) {
+    terminal.output = ''
+    terminal.manualInputEnabled = false
+    terminal.error = ''
+  }
+  if (!terminal.name) terminal.name = session?.display_name || session?.name || session?.shell || target.name || '终端'
+  if (!terminalInstances.value.includes(terminal)) terminalInstances.value.push(terminal)
   terminalDecoders.set(connectionId, new TextDecoder())
   activeTerminalInstanceId.value = resourceId
   terminalConnectionId.value = connectionId
+  terminalOutput.value = terminal.output || ''
   terminalStatus.value = sessionId ? 'reconnecting' : 'connecting'
   showResourceTab('terminal')
   try {
     await invoke('desktop_terminal_open', {
       agentId,
       connectionId,
-      sessionId: sessionId || null,
+      sessionId: requestedSessionId || null,
+      targetKind: requestedSessionId ? null : target.targetKind || 'local',
+      targetId: requestedSessionId ? null : target.targetId || null,
+      shell: requestedSessionId ? null : target.shell || null,
     })
   } catch (e) {
-    if (terminalConnectionId.value === connectionId) {
+    terminal.connectionId = ''
+    terminal.status = 'error'
+    terminal.error = String(e?.message || e)
+    if (activeId.value === agentId && activeTerminalInstanceId.value === terminal.id && terminalConnectionId.value === connectionId) {
       terminalConnectionId.value = ''
       terminalStatus.value = 'error'
-      terminalError.value = String(e)
+      terminalError.value = terminal.error
     }
   }
 }
 async function sendTerminalInput(data) {
-  if (!terminalConnectionId.value || terminalStatus.value !== 'connected') return
+  const terminal = terminalInstances.value.find(item => item.id === activeTerminalInstanceId.value && item.agentId === activeId.value)
+  if (!terminal?.manualInputEnabled || !terminalConnectionId.value || terminalStatus.value !== 'connected') return
   try { await invoke('desktop_terminal_command', { connectionId: terminalConnectionId.value, agentId: activeId.value, commandType: 'input', data }) }
   catch (e) { terminalError.value = String(e); terminalStatus.value = 'error' }
 }
@@ -685,36 +854,35 @@ async function resizeTerminal({ rows, cols }) {
   try { await invoke('desktop_terminal_command', { connectionId: terminalConnectionId.value, agentId: activeId.value, commandType: 'resize', rows, cols }) }
   catch (e) { terminalError.value = String(e) }
 }
-async function closeTerminal(commandType = 'close') {
-  const agentId = activeId.value
-  const terminalId = activeTerminalInstanceId.value
-  const connectionId = terminalConnectionId.value
-  const current = terminalInstances.value.find(item => item.id === terminalId && item.agentId === agentId)
+async function closeTerminal(action = 'view-close', terminalId = activeTerminalInstanceId.value) {
+  const current = terminalInstances.value.find(item => item.id === terminalId)
+  const agentId = current?.agentId || activeId.value
   if (!agentId || !current) return
   const isCurrent = () => activeId.value === agentId && activeTerminalInstanceId.value === current.id
+  const connectionId = current.connectionId || ''
   let selectionUnchangedAtCommit = false
   const closed = await closeTerminalFlow({
     agentId,
     terminal: current,
     connectionId: connectionId || current.connectionId,
-    commandType,
+    commandType: action === 'end' ? 'terminate' : 'detach',
     closeRelay: ({ agentId: ownerId, connectionId: relayId, commandType: action }) => invoke('desktop_terminal_command', { connectionId: relayId, agentId: ownerId, commandType: action }),
     closeSession: ({ agentId: ownerId, terminalId: sessionId }) => closeAgentTerminal(ownerId, sessionId),
     selectionIsCurrent: isCurrent,
     onFailure: (error, stillCurrent) => {
-      current.error = `关闭终端失败：${String(error)}`
+      current.error = `${action === 'end' ? '结束' : '断开'}终端失败：${String(error)}`
       if (stillCurrent) terminalError.value = current.error
     },
     onSuccess: stillCurrent => {
       selectionUnchangedAtCommit = stillCurrent
-      if (commandType === 'close' || commandType === 'terminate') {
+      if (action === 'view-close' || action === 'end') {
         if (current.sessionId) delete terminalSessionByAgent.value[agentId]
         terminalInstances.value = terminalInstances.value.filter(item => item !== current)
-      } else if (current) { current.connectionId = ''; current.status = 'disconnected' }
+      } else { current.connectionId = ''; current.status = 'disconnected' }
       if (!stillCurrent) return
       terminalConnectionId.value = ''
       terminalError.value = ''
-      if (commandType === 'close' || commandType === 'terminate') {
+      if (action === 'view-close' || action === 'end') {
         const next = terminalInstances.value.find(item => item.agentId === agentId)
         if (next) activateTerminal(next.id)
         else {
@@ -748,6 +916,36 @@ async function closeTerminal(commandType = 'close') {
       if (activeId.value === agentId && activeTerminalInstanceId.value === expectedTerminalId) terminalSessions.value = []
     }
   }
+}
+function requestEndTerminal(terminalId = activeTerminalInstanceId.value) {
+  const terminal = terminalInstances.value.find(item => item.id === terminalId && item.agentId === activeId.value)
+  if (terminal?.sessionId) {
+    terminalEndReturnFocus.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    terminalEndConfirmation.value = { agentId: terminal.agentId, terminalId: terminal.id, name: terminal.name }
+  }
+}
+function returnFocusAfterEndDialog() {
+  const target = terminalEndReturnFocus.value
+  terminalEndReturnFocus.value = null
+  void nextTick(() => { if (target?.isConnected) target.focus() })
+}
+function cancelEndTerminal() { terminalEndConfirmation.value = null; returnFocusAfterEndDialog() }
+async function confirmEndTerminal() {
+  const captured = terminalEndConfirmation.value
+  terminalEndConfirmation.value = null
+  returnFocusAfterEndDialog()
+  if (!captured || captured.agentId !== activeId.value) return
+  const terminal = terminalInstances.value.find(item => item.id === captured.terminalId && item.agentId === captured.agentId)
+  if (!terminal) return
+  await closeTerminal('end', terminal.id)
+}
+function reconnectActiveTerminal() {
+  const terminal = terminalInstances.value.find(item => item.id === activeTerminalInstanceId.value && item.agentId === activeId.value)
+  if (terminal?.sessionId && terminal.status !== 'exited') void openTerminal(terminal.sessionId, {}, terminal.agentId)
+}
+function enableTerminalInput() {
+  const terminal = terminalInstances.value.find(item => item.id === activeTerminalInstanceId.value && item.agentId === activeId.value)
+  if (terminal) terminal.manualInputEnabled = true
 }
 async function resumeHitl(index, resumeValue) {
   const hitl = hitlQueue.value[index]
@@ -880,7 +1078,7 @@ function handleMenubarKeydown(event) {
   return false
 }
 
-function runMenuAction(action, entry = {}) {
+function runMenuAction(action) {
   openMenu.value = ''
   if (action === 'refresh') loadAgents()
   else if (action === 'settings-general') void router.push('/settings/general')
@@ -894,22 +1092,21 @@ function runMenuAction(action, entry = {}) {
   else if (action === 'stop-turn') void stopCurrentTurn()
   else if (action === 'clear-context') void clearCurrentContext()
   else if (action === 'auto-overview') void showAutoOverview()
-  else if (action === 'open-terminal') void showTerminal()
-  else if (action === 'create-terminal') void openTerminal()
+  else if (action === 'create-terminal') void requestNewTerminal()
   else if (action === 'open-workspace') showWorkspace()
   else if (action === 'open-browser') showBrowser()
   else if (action === 'close-resource') closeCurrentResource()
   else if (action === 'feedback') void router.push('/settings/feedback')
   else if (action === 'help-about') void router.push('/settings/about')
-  else if (action === 'switch-resource') {
-    if (entry.resourceType === 'file') showWorkspace()
-    else if (entry.resourceType === 'browser') showBrowser()
-    else if (entry.resourceType === 'terminal') activateTerminal(entry.resourceId)
-  }
 }
 function onDocumentClick(event) { if (!event.target.closest('.menu-anchor[data-menu-anchor]')) openMenu.value = '' }
 function onKeydown(event) {
   if (handleMenubarKeydown(event)) return
+  if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't' && !event.altKey && !terminalOpenDialog.value) {
+    event.preventDefault()
+    void requestNewTerminal()
+    return
+  }
   if (event.key === 'Escape') { openMenu.value = ''; dialog.value = ''; showAgentCreate.value = false }
 }
 function onDesktopBackToChat() { showChat() }
@@ -976,6 +1173,10 @@ onMounted(async () => {
     }
     if (event.event_type === 'assistant' && event.data?.display_type === 'delta') {
       streamingText.value += event.data.content || ''
+      return
+    }
+    if (event.event_type === 'runtime/notice' && event.data?.message_kind === 'context_boundary') {
+      await selectAgent(event.agent_id)
       return
     }
     if (['turn_state', 'turn_finished', 'hitl_required', 'tool_call', 'tool_result', 'error'].includes(event.event_type)) {
@@ -1056,13 +1257,13 @@ onUnmounted(() => {
           <div class="menu-anchor" data-menu-anchor="DAgents" @mouseenter="setTopMenuFromHover('DAgents')">
             <button class="menu-brand" type="button" role="menuitem" data-menubar-trigger="DAgents" aria-haspopup="menu" :aria-expanded="openMenu === 'DAgents'" @click.stop="toggleTopMenu('DAgents')"><span class="brand-word">DAgents</span></button>
             <div v-if="openMenu === 'DAgents'" class="menu-popover" role="menu" aria-label="DAgents 菜单">
-              <template v-for="(item, i) in menuEntries.DAgents" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action, item)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
+              <template v-for="(item, i) in menuEntries.DAgents" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
             </div>
           </div>
           <div v-for="name in desktopMenuNames.slice(1)" :key="name" class="menu-anchor" :data-menu-anchor="name" @mouseenter="setTopMenuFromHover(name)">
             <button class="menu-trigger" :class="{ active: openMenu === name }" type="button" role="menuitem" :data-menubar-trigger="name" aria-haspopup="menu" :aria-expanded="openMenu === name" @click.stop="toggleTopMenu(name)">{{ name }}</button>
             <div v-if="openMenu === name" class="menu-popover" role="menu" :aria-label="`${name}菜单`">
-              <template v-for="(item, i) in menuEntries[name]" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><div v-else-if="item.header" class="menu-section-label">{{ item.label }}</div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action, item)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
+              <template v-for="(item, i) in menuEntries[name]" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><div v-else-if="item.header" class="menu-section-label">{{ item.label }}</div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
             </div>
           </div>
         </nav>
@@ -1114,15 +1315,10 @@ onUnmounted(() => {
       <div class="resource-tabs">
         <button v-if="activeTab !== 'workgroups'" class="conversation-tab" :class="{ active: activeTab === 'chat' }" :title="activeAgent?.display_name || '当前智能体'" @click="showChat"><span class="icon-mask tab-icon" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span><b>{{ activeAgent?.display_name || '当前智能体' }}</b></button>
         <div v-else class="conversation-tab active workgroup-conversation-tab" :title="activeWorkgroupName"><span class="icon-mask tab-icon" :style="maskStyle(navWorkgroupsIcon)"></span><b>{{ activeWorkgroupName }}</b></div>
-        <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="activateTerminal(terminal.id, { reconnect: false }); closeTerminal('close')"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div></div>
-        <div v-if="activeTab !== 'workgroups'" class="resource-nav-actions">
-          <div class="menu-anchor"><button class="resource-entry" :aria-expanded="openMenu === 'resources'" @click.stop="openMenu = openMenu === 'resources' ? '' : 'resources'"><span class="icon-mask" :style="maskStyle(folderOpenIcon)"></span>资源 · {{ terminalInstances.filter(item => item.agentId === activeId).length + Number(workspaceOpened) + Number(browserOpened) }}<span class="icon-mask chevron-icon" :style="maskStyle(chevronDownIcon)"></span></button><div v-if="openMenu === 'resources'" class="menu-popover resource-popover"><strong>切换资源</strong><button v-if="workspaceOpened" class="menu-item" @click="showWorkspace(); openMenu = ''">{{ workspaceName }}</button><button v-if="browserOpened" class="menu-item" @click="showBrowser(); openMenu = ''">{{ browserName }}</button><button v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="menu-item" @click="activateTerminal(terminal.id); openMenu = ''">{{ terminal.name }}</button><span v-if="!workspaceOpened && !browserOpened && !terminalInstances.some(item => item.agentId === activeId)" class="empty-resource-menu">暂无已打开资源</span></div></div>
-          <div class="menu-anchor"><button class="add-resource" aria-label="新增资源" title="新增资源" :aria-expanded="openMenu === 'add-resource'" @click.stop="openMenu = openMenu === 'add-resource' ? '' : 'add-resource'"><span class="icon-mask" :style="maskStyle(createIcon)"></span></button><div v-if="openMenu === 'add-resource'" class="menu-popover resource-popover"><strong>新建资源</strong><button class="menu-item" :disabled="!status.online || !activeId" @click="openTerminal(); openMenu = ''"><span class="icon-mask" :style="maskStyle(terminalIcon)"></span>新建终端</button><button class="menu-item" :disabled="!status.online || !activeId" @click="showWorkspace(); openMenu = ''"><span class="icon-mask" :style="maskStyle(folderOpenIcon)"></span>打开工作区</button><button class="menu-item" :disabled="!status.online || !activeId" @click="showBrowser(); openMenu = ''"><span class="icon-mask" :style="maskStyle(browserIcon)"></span>查看 Agent 浏览器</button></div></div>
-        </div>
-        <div v-else class="resource-nav-actions"><button class="return-agent-chat" @click="showChat">返回 {{ activeAgent?.display_name || '当前 Agent' }} 对话</button></div>
+        <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div></div>
       </div>
       <div v-if="error || status.setup_required" class="notice" :class="status.setup_required ? 'setup' : ''"><span>{{ error || 'Node 需要首次配置' }}</span><button v-if="status.setup_required" @click="showSettings">打开连接配置</button><button v-else-if="isTauri" @click="loadAgents">重试</button></div>
-      <section v-if="activeTab === 'chat'" class="conversation">
+      <section v-if="visitedTabs.has('chat')" v-show="displayedTab === 'chat'" class="conversation" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
         <div v-if="!status.online" class="empty-state"><div class="empty-icon"><i></i></div><h2>{{ status.connection_mode === 'tunnel' ? '等待隧道中的 Node' : '等待本机 Node' }}</h2><template v-if="status.connection_mode === 'tunnel'"><p>请确认 SSH 本地转发与远程 Node 正在运行。</p><small v-if="status.error" class="connection-diagnostic">诊断：{{ status.error }}</small></template><p v-else>{{ status.error || '启动 DAgents Node 后，Desktop 会自动连接。' }}</p></div>
         <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成 Node 首次配置</h2><p>在 Desktop 的连接设置中完成 Node 配置后即可使用。</p><button class="quiet" @click="showSettings">打开连接配置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
@@ -1133,14 +1329,17 @@ onUnmounted(() => {
           </div>
         </template>
       </section>
-      <section v-else-if="activeTab === 'terminal'" class="terminal-resource" :class="{ 'dock-expanded': dockExpanded }">
-        <div class="terminal-resource-head"><div><strong>{{ terminalResourceName }}</strong><span class="terminal-status" :class="`state-${terminalStatus}`"><i></i>{{ ({idle:'未连接',connecting:'连接中',reconnecting:'恢复会话中',connected:'已连接',disconnected:'连接已断开',error:'连接错误',exited:'进程已退出',closed:'已关闭'})[terminalStatus] || terminalStatus }}</span></div><div class="terminal-actions"><button v-if="terminalConnectionId" @click="closeTerminal('terminate')">终止进程</button></div></div>
-        <div class="terminal-output" :class="{ 'terminal-output-empty': !terminalConnectionId }"><div v-if="!terminalConnectionId" class="terminal-empty-state"><span class="icon-mask" :style="{ ...maskStyle(terminalIcon), width: '24px', height: '24px' }" aria-hidden="true"></span><h2>终端尚未连接</h2><p>新建终端，或恢复当前 Agent 的已有会话。</p><div><button @click="openTerminal()">新建终端</button><button v-for="session in terminalSessions.filter(item => item.status === 'running')" :key="session.terminal_id" @click="openTerminal(session.terminal_id)">{{ session.display_name || session.name || session.shell || 'Shell' }}</button></div></div><TerminalConsole v-if="terminalConnectionId" :key="terminalConnectionId" :output="terminalOutput" :connected="terminalStatus === 'connected'" @input="sendTerminalInput" @resize="resizeTerminal" /><p v-if="terminalError" class="terminal-error">{{ terminalError }}</p></div>
+      <section v-if="visitedTabs.has('terminal')" v-show="displayedTab === 'terminal'" class="terminal-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
+        <div class="terminal-resource-head"><div><strong>{{ terminalResourceName }}</strong><span class="terminal-status" :class="`state-${terminalStatus}`"><i></i>{{ ({idle:'未连接',connecting:'连接中',reconnecting:'恢复会话中',connected:'已连接',disconnected:'连接已断开',error:'连接错误',exited:'进程已退出',closed:'已关闭'})[terminalStatus] || terminalStatus }}</span></div><div class="terminal-actions"><button v-if="terminalConnectionId && !terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled" @click="enableTerminalInput">启用手动输入</button><button v-if="terminalConnectionId" @click="closeTerminal('disconnect')">断开连接</button><button v-else-if="['disconnected','error','closed'].includes(terminalStatus) && terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId" @click="reconnectActiveTerminal">重新连接</button><button v-if="terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId" @click="requestEndTerminal()">结束终端</button></div></div>
+        <div class="terminal-owner-note">此终端属于 {{ activeAgent?.display_name || activeAgent?.agent_id || '当前 Agent' }}；模型可能正在使用。{{ terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId && !terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled ? '恢复会话只读查看。' : '手动输入已启用。' }}</div>
+        <div class="terminal-output" :class="{ 'terminal-output-empty': !terminalConnectionId }"><div v-if="!terminalConnectionId" class="terminal-empty-state"><span class="icon-mask" :style="{ ...maskStyle(terminalIcon), width: '24px', height: '24px' }" aria-hidden="true"></span><h2>终端尚未连接</h2><p>打开终端选择器以新建或恢复当前 Agent 的运行中会话。</p><div><button @click="requestNewTerminal()">打开终端…</button></div></div><TerminalConsole v-if="terminalConnectionId" :key="terminalConnectionId" :output="terminalOutput" :connected="terminalStatus === 'connected'" :read-only="!terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled" @input="sendTerminalInput" @resize="resizeTerminal" /><p v-if="terminalError" class="terminal-error">{{ terminalError }}</p></div>
       </section>
-      <section v-else-if="activeTab === 'file'" class="file-resource"><WorkspaceFiles :key="activeId" :agent-id="activeId" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" /></section>
-      <section v-else-if="activeTab === 'browser'" class="file-resource"><BrowserViewer :key="activeId" :agent-id="activeId" :active="activeTab === 'browser'" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
-      <section v-else-if="activeTab === 'workgroups'" class="file-resource workgroup-resource"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
-      <footer v-if="activeTab === 'chat'" class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
+      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="displayedTab === 'file'" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles :key="activeId" :agent-id="activeId" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" /></section>
+      <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="displayedTab === 'browser'" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer :key="activeId" :agent-id="activeId" :active="displayedTab === 'browser'" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
+      <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
+      <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
+      <template #chat>
+      <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <button class="attach-button" type="button" aria-label="添加附件" title="添加图片或文件" :disabled="pendingImages.length + pendingFiles.length >= 8" @click="attachmentInput?.click()"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
   <input ref="attachmentInput" class="visually-hidden" type="file" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
@@ -1149,18 +1348,38 @@ onUnmounted(() => {
   <button v-if="agentGenerating" class="send-button" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button>
   <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
 </form><p v-if="error" class="composer-error">{{ error }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
-      <aside v-if="['terminal', 'file', 'browser'].includes(activeTab)" class="terminal-agent-dock" :class="{ expanded: dockExpanded, 'resource-dock': activeTab !== 'terminal' }">
-        <button class="dock-heading" @click="dockExpanded = !dockExpanded" :aria-expanded="dockExpanded"><i :class="['dock-dot', { pending: pending, busy: agentGenerating && !pending }]"/><b>{{ activeAgent?.display_name || '当前 Agent' }}</b><span>{{ pending ? '待审批' : agentGenerating ? '生成中' : '空闲' }}</span><span class="icon-mask dock-chevron" :style="maskStyle(dockExpanded ? chevronDownIcon : chevronUpIcon)"></span></button>
-        <form class="dock-composer" @submit.prevent="sendFromDock"><input v-model="dockDraft" :disabled="!activeId || !status.online || status.setup_required" aria-label="向当前智能体发送消息" placeholder="发消息给当前 Agent…"><button v-if="failedSendDraft" type="button" class="restore-failed-draft" :disabled="!!dockDraft.trim()" @click="restoreFailedSendDraft('dock')">恢复</button><button v-if="agentGenerating" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button><button v-else :disabled="!canSendMessage || !dockDraft.trim()" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button></form>
-          <div v-if="dockExpanded" class="dock-details">
-          <div v-if="lastConversationMessage?.text" class="dock-detail-row"><small>最近消息</small><span>{{ lastConversationMessage.text }}</span></div>
-          <div v-if="lastToolActivity" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
-          <div v-if="pending" class="dock-approval"><strong>{{ pending.message || '有待处理的请求' }}</strong><div v-for="call in approvalCalls" :key="call.id" class="dock-approval-call"><code>{{ call.name }}</code><span>{{ call.reason }}</span><pre v-if="call.argumentsText" class="approval-arguments">{{ call.argumentsText }}</pre></div><div v-if="approvalCalls.length" class="approval-actions"><button class="quiet" :disabled="busy" @click.prevent="rejectAll(approvalQueueIndex)">拒绝</button><button class="approve" :disabled="busy" @click.prevent="approveAll(approvalQueueIndex)">批准并继续</button></div><p v-else>请返回完整对话处理此请求。</p></div>
-          <button class="dock-return" @click="showChat"><span class="icon-mask message-icon" :style="maskStyle(messageIcon)"></span>返回完整对话</button>
-        </div>
-      </aside>
+      </template>
+      <template #dock>
+      <ResourceAgentDock
+        v-model="dockDraft"
+        v-model:expanded="dockExpanded"
+        :status="dockStatus"
+        :agent-name="activeAgent?.display_name || '当前智能体'"
+        :can-send="canSendMessage"
+        :disabled="!activeId || !status.online || status.setup_required"
+        :can-stop="canCancelTurn"
+        :cancelling="cancellingTurn"
+        :failed-draft="Boolean(failedSendDraft)"
+        :restore-disabled="Boolean(dockDraft.trim())"
+        @send="sendFromDock"
+        @stop="stopCurrentTurn"
+        @restore="restoreFailedSendDraft('dock')"
+        @back-to-chat="showChat"
+      >
+        <template #details>
+          <div class="dock-details">
+            <div v-if="streamingText || lastConversationMessage?.text" class="dock-detail-row"><small>最近消息</small><span>{{ streamingText || lastConversationMessage.text }}</span></div>
+            <div v-if="lastToolActivity" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
+            <div v-if="pending" class="dock-approval"><strong>{{ pending.message || '有待处理的请求' }}</strong><div v-for="call in approvalCalls" :key="call.id" class="dock-approval-call"><code>{{ call.name }}</code><span>{{ call.reason }}</span><pre v-if="call.argumentsText" class="approval-arguments">{{ call.argumentsText }}</pre></div><div v-if="approvalCalls.length" class="approval-actions"><button class="quiet" :disabled="busy" @click.prevent="rejectAll(approvalQueueIndex)">拒绝</button><button class="approve" :disabled="busy" @click.prevent="approveAll(approvalQueueIndex)">批准并继续</button></div><p v-else>请使用右上角按钮返回完整对话处理此请求。</p></div>
+          </div>
+        </template>
+      </ResourceAgentDock>
+      </template>
+      </ComposerSurface>
       </div>
     </main>
+    <TerminalOpenDialog :open="terminalOpenDialog" :choices="terminalOpenChoices" :sessions="terminalSessions" :sessions-loading="terminalSessionLoading" :sessions-error="terminalSessionError" :channels-loading="terminalChannelLoading" :channels-error="terminalChannelError" @cancel="closeTerminalOpenDialog" @create="createTerminalFromDialog" @resume="resumeTerminalFromDialog" @retry-sessions="retryTerminalSessionList" @retry-channels="retryTerminalChannels" @open-settings="openLinuxChannelSettings" />
+    <TerminalEndDialog :open="Boolean(terminalEndConfirmation)" :terminal-name="terminalEndConfirmation?.name" @cancel="cancelEndTerminal" @confirm="confirmEndTerminal" />
     <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close" aria-label="关闭" @click="dialog = ''">×</button><AutoOverviewPanel @open-chat="openAutoChat" @open-config="openAutoConfig" /></section></div>
     <div v-if="showAgentCreate" class="agent-create-overlay"><AgentCreatePage @cancel="showAgentCreate = false" @created="onAgentCreated" /></div>
     <ImageLightbox />

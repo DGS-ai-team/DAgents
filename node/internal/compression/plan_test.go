@@ -312,6 +312,66 @@ func TestBuildSidecarSkipsLeadingSystem(t *testing.T) {
 	}
 }
 
+func TestIdleContextBoundaryIsPreservedAsOnlyRuntimeLeadingPrefix(t *testing.T) {
+	t.Parallel()
+	boundary := llm.UserMessageWithSource(
+		"bridge body", llm.UserNameConversationBoundary,
+		llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormNotice},
+		&llm.MessageProvenance{Producer: "idle_context", Operation: "continue-from-archive", Reference: "/workspace/.dagents/a/history/day/s-r.json"},
+	)
+	skill := llm.UserMessage("skill instructions", llm.UserNameSkill)
+	otherRuntime := llm.UserMessageWithSource("keep normally compressible", "runtime", llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormNotice}, &llm.MessageProvenance{Producer: "other_runtime"})
+	msgs := []llm.Message{
+		{Role: "system", Content: "journal system"},
+		boundary,
+		skill,
+		otherRuntime,
+		{Role: "user", Content: "previous task"},
+		{Role: "assistant", Content: "previous answer"},
+		{Role: "user", Content: "current task"},
+		{Role: "assistant", Content: "tail"},
+	}
+	if got := leadingSystemSkip(msgs); got != 2 {
+		t.Fatalf("leading protected prefix = %d, want system + boundary", got)
+	}
+	plan, ok := buildCompressionPlan(msgs)
+	if !ok {
+		t.Fatal("expected compression plan")
+	}
+	if got := compressionSlice(msgs, plan); len(got) == 0 || got[0].Name != llm.UserNameSkill {
+		t.Fatalf("compression slice should begin after bridge: %+v", got)
+	}
+	fp := compressionSourceFingerprint(msgs, plan)
+	merged, status := applyCompressionReplacement(msgs, plan, "summary", fp)
+	if status != "applied" {
+		t.Fatalf("apply status = %q", status)
+	}
+	if len(merged) < 3 || merged[0].Content != "journal system" || !llm.IsMessageSource(merged[1], llm.MessageSourceRuntime, llm.MessageFormNotice, "idle_context") || merged[1].Content != boundary.Content {
+		t.Fatalf("boundary prefix was not preserved: %+v", merged)
+	}
+	if merged[2].Name != llm.UserNameCompression {
+		t.Fatalf("expected other leading content to be compressible, got %+v", merged[2])
+	}
+	if !llm.IsHiddenInjectedUserMessage(merged[1]) {
+		t.Fatal("boundary should remain hidden from hydrate transcript")
+	}
+}
+
+func TestBuildSidecarSkipsSystemAndBoundaryPrefix(t *testing.T) {
+	t.Parallel()
+	boundary := llm.UserMessageWithSource("bridge", llm.UserNameConversationBoundary, llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormNotice}, &llm.MessageProvenance{Producer: "idle_context"})
+	msgs := []llm.Message{{Role: "system", Content: "dup"}, boundary, llm.UserMessage("task", llm.UserNameHuman), {Role: "assistant", Content: "done"}}
+	req := BuildSidecarChatRequest(SidecarInput{SidecarPrefix: SidecarPrefix{SystemPrompt: "real"}, Messages: msgs, End: 2, SidecarAppend: sidecarAppendUserOnly}, "summarize")
+	for _, m := range req.Messages {
+		if llm.IsMessageSource(m, llm.MessageSourceRuntime, llm.MessageFormNotice, "idle_context") {
+			t.Fatal("bridge should be excluded from summary source, while preserved in main history")
+		}
+	}
+	if len(req.Messages) != 2 || req.Messages[0].Content != "task" {
+		t.Fatalf("sidecar messages = %+v", req.Messages)
+	}
+}
+
 func TestMergeSummaryWithUser(t *testing.T) {
 	t.Parallel()
 

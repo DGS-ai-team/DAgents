@@ -1,5 +1,7 @@
 # 快速开始
 
+使用 Windows 发布包时，安装完成后从开始菜单打开 **DAgents Desktop**。安装器会准备本机 Node，Desktop 会启动或连接它；无需先执行下面的源码启动命令。桌面快捷方式、登录自启动默认不勾选，可在安装任务中选择。Desktop 需要 WebView2 Evergreen Runtime；缺失时须先安装该运行时。配置入口为顶栏 **DAgents → 通用设置**。
+
 ## 1. 启动本机 Node
 
 ```bash

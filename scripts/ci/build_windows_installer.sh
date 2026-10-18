@@ -58,6 +58,15 @@ if [[ ! -d "${BUNDLE_SRC}" ]]; then
   exit 1
 fi
 
+if [[ ! -s "${BUNDLE_SRC}/bin/dagents-shell.exe" ]]; then
+  echo "[installer] missing canonical Desktop binary: ${BUNDLE_SRC}/bin/dagents-shell.exe" >&2
+  exit 1
+fi
+if [[ -e "${BUNDLE_SRC}/bin/dagents-shell-tauri.exe" ]]; then
+  echo "[installer] retired tauri-suffixed Desktop alias is not accepted" >&2
+  exit 1
+fi
+
 if [[ -z "${ISCC:-}" ]]; then
   for candidate in \
     "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
@@ -81,7 +90,9 @@ if [[ "${bundle_parent_real}" != "${repo_root_real}" || "$(basename "${BUNDLE_DI
 fi
 bundle_src_real="$(cd "${BUNDLE_SRC}" && pwd -P)"
 bundle_target_real="${repo_root_real}/bundle"
-if [[ "${bundle_src_real}" == "${bundle_target_real}" || "${bundle_src_real}" == "${bundle_target_real}/"* ]]; then
+bundle_src_key="$(printf '%s' "${bundle_src_real}" | tr '[:upper:]' '[:lower:]')"
+bundle_target_key="$(printf '%s' "${bundle_target_real}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${bundle_src_key}" == "${bundle_target_key}" || "${bundle_src_key}" == "${bundle_target_key}/"* ]]; then
   echo "[installer] bundle source must not be inside the staging directory: ${BUNDLE_SRC}" >&2
   exit 1
 fi
@@ -94,7 +105,6 @@ if [[ "${bundle_version}" != "${VERSION}" ]]; then
   echo "[installer] VERSION mismatch: requested ${VERSION}, bundle contains ${bundle_version}" >&2
   exit 1
 fi
-
 echo "[installer] staging ${BUNDLE_SRC} -> ${BUNDLE_DIR}"
 rm -rf "${BUNDLE_DIR}"
 cp -a "${BUNDLE_SRC}/." "${BUNDLE_DIR}/"

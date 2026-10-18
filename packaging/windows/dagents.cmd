@@ -691,7 +691,7 @@ echo.
 echo Background Node is owned and supervised by DAgents Desktop; closing this terminal leaves it running.
 echo   A foreground Node is external to Desktop ownership; stop it with Ctrl+C in its terminal.
 echo   Desktop Shell (dagents shell) shows HITL toasts in the tray.
-echo   For boot persistence Shell registers login autostart via the Windows installer.
+echo   Optional login startup is selected by the Windows installer task.
 echo   Legacy: scripts\windows\install_node_service.cmd (admin) for Node-only service.
 echo.
 echo Options:

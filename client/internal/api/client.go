@@ -194,17 +194,18 @@ func (c *Client) GetAgentInfo(ctx context.Context) (*AgentInfo, error) {
 
 // AgentUpdateStatus 为 GET /v1/node/update 响应（Manage Release Hub 摘要）。
 type AgentUpdateStatus struct {
-	CurrentVersion   string         `json:"current_version"`
-	LatestVersion    string         `json:"latest_version"`
-	UpgradeAvailable bool           `json:"upgrade_available"`
-	ManageReachable  bool           `json:"manage_reachable"`
-	LastCheckedAt    string         `json:"last_checked_at,omitempty"`
-	Channel          string         `json:"channel"`
-	Platform         string         `json:"platform"`
-	ReleaseNotes     string         `json:"release_notes,omitempty"`
-	Message          string         `json:"message,omitempty"`
-	ApplyCommand     string         `json:"apply_command"`
-	Asset            map[string]any `json:"asset,omitempty"`
+	CurrentVersion    string         `json:"current_version"`
+	LatestVersion     string         `json:"latest_version"`
+	UpgradeAvailable  bool           `json:"upgrade_available"`
+	ManageReachable   bool           `json:"manage_reachable"`
+	PlatformSupported *bool          `json:"platform_supported,omitempty"`
+	LastCheckedAt     string         `json:"last_checked_at,omitempty"`
+	Channel           string         `json:"channel"`
+	Platform          string         `json:"platform"`
+	ReleaseNotes      string         `json:"release_notes,omitempty"`
+	Message           string         `json:"message,omitempty"`
+	ApplyCommand      string         `json:"apply_command"`
+	Asset             map[string]any `json:"asset,omitempty"`
 }
 
 // GetAgentUpdate 调用 GET /v1/node/update。

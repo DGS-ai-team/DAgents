@@ -18,12 +18,14 @@ pub const EXIT_UP_TO_DATE: i32 = 3;
 pub const EXIT_NODE_BUSY: i32 = 4;
 const DEFAULT_NODE_START_WAIT: Duration = Duration::from_secs(45);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
     pub current_version: String,
     pub latest_version: String,
     pub upgrade_available: bool,
     pub manage_reachable: bool,
+    #[serde(default = "default_platform_supported")]
+    pub platform_supported: bool,
     #[serde(default)]
     pub manage_enabled: bool,
     #[serde(default)]
@@ -41,6 +43,28 @@ pub struct Status {
     pub apply_command: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub asset: Option<std::collections::HashMap<String, Value>>,
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Self {
+            current_version: String::new(),
+            latest_version: String::new(),
+            upgrade_available: false,
+            manage_reachable: false,
+            platform_supported: true,
+            manage_enabled: false,
+            update_enabled: false,
+            check_interval_seconds: 0,
+            last_checked_at: String::new(),
+            channel: String::new(),
+            platform: String::new(),
+            release_notes: String::new(),
+            message: String::new(),
+            apply_command: String::new(),
+            asset: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -75,6 +99,7 @@ impl Checker {
             latest_version: current,
             channel: "node-managed".into(),
             platform: release_platform(),
+            platform_supported: true,
             apply_command: "Desktop 本机安装".into(),
             update_enabled: cfg.update_check_enabled,
             check_interval_seconds: cfg.update_check_interval_seconds,
@@ -234,6 +259,10 @@ impl Applier {
             status: status.clone(),
             message: status.message.clone(),
         };
+        if !status.platform_supported {
+            result.message = "当前平台没有可用的更新包".into();
+            return (result, 1);
+        }
         if opt.check_only {
             print_status(&status);
             return if status.upgrade_available {
@@ -450,6 +479,10 @@ fn is_zero_u64(value: &u64) -> bool {
     *value == 0
 }
 
+fn default_platform_supported() -> bool {
+    true
+}
+
 fn sleep_until_stopped(stop: &AtomicBool, duration: Duration) {
     let deadline = std::time::Instant::now() + duration;
     while !stop.load(Ordering::SeqCst) {
@@ -486,5 +519,44 @@ mod tests {
             ..status
         };
         assert!(!is_windows_installer_asset(&status));
+    }
+
+    #[test]
+    fn platform_supported_defaults_true_for_legacy_node_status() {
+        let status: Status = serde_json::from_str(
+            r#"{"current_version":"0.7.0","latest_version":"0.7.0","upgrade_available":false,"manage_reachable":true,"channel":"stable","platform":"windows-386","apply_command":"dagents update"}"#,
+        )
+        .expect("legacy Node status should deserialize");
+        assert!(status.platform_supported);
+        assert!(Status::default().platform_supported);
+    }
+
+    #[test]
+    fn platform_supported_preserves_explicit_false() {
+        let status: Status = serde_json::from_str(
+            r#"{"current_version":"0.7.0","latest_version":"0.7.0","upgrade_available":false,"manage_reachable":true,"platform_supported":false,"channel":"stable","platform":"windows-386","apply_command":"dagents update"}"#,
+        )
+        .expect("current Node status should deserialize");
+        assert!(!status.platform_supported);
+    }
+
+    #[test]
+    fn node_check_failure_keeps_platform_supported() {
+        let home = std::env::temp_dir().join(format!(
+            "dagents-update-check-failure-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let checker = Checker::new(
+            Arc::new(ShellConfig::default()),
+            home,
+            Arc::new(Client::new("http://127.0.0.1:1")),
+        );
+        let status = checker.check_once();
+        assert!(!status.manage_reachable);
+        assert!(status.platform_supported);
+        assert!(!status.message.is_empty());
     }
 }

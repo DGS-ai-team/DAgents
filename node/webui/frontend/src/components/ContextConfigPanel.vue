@@ -68,20 +68,12 @@ onMounted(load);
     </section>
 
     <section class="settings-section">
-      <h2 class="settings-section__title">空闲自动压缩</h2>
-      <p class="settings-section__desc">长时间无操作时自动压缩；空闲秒数设为 0 表示关闭。</p>
+      <h2 class="settings-section__title">空闲后开启新对话</h2>
+      <p class="settings-section__desc">普通 Agent 空闲达到设定时间后，下条用户消息会开启新对话并归档旧上下文；历史消息仍保留。设为 0 可关闭。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
-          <span class="settings-field__label">空闲秒数</span>
-          <input v-model.number="form.compression.idle_auto_compress_seconds" class="settings-field__input" type="number" min="0" step="60" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">扫描间隔（秒）</span>
-          <input v-model.number="form.compression.idle_auto_compress_poll_seconds" class="settings-field__input" type="number" min="0" step="10" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">最低 tokens</span>
-          <input v-model.number="form.compression.idle_auto_compress_min_tokens" class="settings-field__input" type="number" min="0" step="1000" />
+          <span class="settings-field__label">空闲时长（秒）</span>
+          <input v-model.number="form.compression.idle_new_conversation_seconds" class="settings-field__input" type="number" min="0" step="60" />
         </label>
       </div>
     </section>

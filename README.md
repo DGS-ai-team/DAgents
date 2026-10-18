@@ -28,6 +28,8 @@
 
 当前发布版本为 **v0.11.0**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
+本页描述当前开发线。独立 Desktop、Node API-only 与新的上下文分段尚未发布到 v0.11.0 安装包；下一版范围与验收进度见[发布收束清单](docs/release-readiness.md)。旧版迁移请先阅读[运维指南](docs/user/operations.md#升级与兼容性)，不要直接覆盖正在使用的数据目录。
+
 > DAgents 是一个开源、本地优先的 Agent 控制台：模型负责理解任务，Node 负责会话、工具、权限和审批；数据与执行环境默认留在你的机器上。
 
 ## 30 秒看懂
@@ -42,16 +44,29 @@ DAgents 把“模型对话”和“可控执行环境”放在一起：你可以
 
 ## 产品界面
 
-Node 和 Manage 是两个互补入口：Node 面向日常对话与执行，Manage 面向跨 Node 的治理和汇总。README 只展示能帮助读者建立整体认知的页面，具体设置项放在用户指南中。
+Desktop 和 Manage 是两个互补入口：Desktop 连接 Node，提供日常对话与执行界面；Manage 面向跨 Node 的治理和汇总。具体设置项放在用户指南中。
 
 | 页面 | 主要内容 | 本地入口或设计稿 |
 | --- | --- | --- |
-| Node Agent 工作台 | Agent 对话、工具结果、审批和终端工作台 | 运行 Node 后打开 `http://127.0.0.1:18765/ui/` |
-| Node Agent 设置 | 模型连接、工具策略、Auto、Todo 和反馈 | 工作台左下角“设置” |
+| Desktop Agent 工作台 | Agent 对话、工具结果、审批和终端工作台 | 开始菜单中的 `DAgents Desktop`；Node 只提供 API |
+| Desktop 设置 | 本机偏好、Node 连接、模型、工具策略、Auto、Todo 和反馈 | 顶栏 `DAgents → 通用设置`；智能体条目可进入其设置 |
 | Manage 控制台 | Node 注册、Workgroup、Auto 汇总和反馈管理 | 运行 Manage 后打开 `http://127.0.0.1:8020/console/` |
 | Node / Manage 视觉参考 | 页面骨架、色彩、图标和关键状态的交互式稿 | [UI 视觉审计与方向](docs/design/dagents-ui-audit-and-direction.html) |
 
 产品界面会随版本演进，行为以运行中的 Node、Manage 和契约文档为准；设计稿用于解释信息结构，不代替 API 或用户指南。
+
+以下为 2026-10-17 真实 Windows Tauri 开发构建，使用隔离 Mock 对话与合成 MCP 服务；截图展示当前工作台和配置布局，不代表已经发布的版本或外部模型效果。
+
+![Desktop 对话工作台与上下文分隔](docs/images/desktop/chat-context-2026-10-17.jpg)
+
+<details>
+<summary>查看 MCP 设置与工具配置界面</summary>
+
+![Desktop MCP 设置与遮罩后的配置](docs/images/desktop/settings-mcp-2026-10-17.jpg)
+
+</details>
+
+Desktop 当前原生验收与界面记录见[日常使用](docs/design/desktop-product/audits/2026-10-15/daily-use/README.md)、[资源工作台](docs/design/desktop-product/audits/2026-10-16/resource-workbench.md)和[空闲后新对话](docs/design/idle-conversation-boundary.md)。这些记录注明了构建与测试条件，不以设计原型代替已接入能力。
 
 ## 为什么是 DAgents
 
@@ -105,11 +120,10 @@ flowchart LR
 | 平台 | 发布产物 |
 | --- | --- |
 | Windows 64 位 | `windows-amd64` Inno Setup 安装包 |
-| Windows 32 位 | `windows-386` Inno Setup 安装包 |
 | Linux 64 位 | `linux-amd64` 本地助手 tar.gz |
 | Manage 控制面 | 可选 Manage 离线包 |
 
-Windows 只发布安装包，不提供免安装归档。安装完成后打开 DAgents Desktop 配置本机 Node 与模型。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。
+下一版 Windows 仅发布 x64 安装包，暂停 x86 完整包，不提供免安装归档；历史 x86 用户不会跨架构接收 x64 安装器。安装完成后，从开始菜单打开 DAgents Desktop 配置本机 Node 与模型；桌面快捷方式和登录自启动均为可选项，默认不勾选，升级时保留原选择。Desktop 需要预先安装 WebView2 Evergreen Runtime。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。详细安装与升级边界见 [Windows 安装说明](packaging/windows/README.md)。
 
 ### 从源码运行
 

@@ -148,6 +148,62 @@ class ReleaseRoutesTest(unittest.TestCase):
             "dagents-local-assistant-windows-386-installer-0.10.5.exe",
         )
 
+    def test_windows_release_checks_never_fallback_across_architectures(self):
+        client, _, _ = _release_client()
+
+        def upload(platform: str, version: str, filename: str, payload: bytes):
+            response = client.post(
+                "/v1/releases/packages",
+                data={
+                    "artifact": "dagents-local-assistant",
+                    "version": version,
+                    "platform": platform,
+                    "channel": "stable",
+                    "publish": "true",
+                    "set_latest": "true",
+                },
+                files={"file": (filename, payload, "application/octet-stream")},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        upload(
+            "windows-amd64",
+            "0.12.0",
+            "dagents-local-assistant-windows-amd64-installer-0.12.0.exe",
+            b"x64-release",
+        )
+
+        # A new x64 package must not be advertised to a 32-bit client.
+        check_386 = client.get(
+            "/v1/releases/check",
+            params={"current": "0.11.0", "platform": "windows-386"},
+        )
+        self.assertEqual(check_386.status_code, 200, check_386.text)
+        self.assertEqual(check_386.json()["latest"], "0.11.0")
+        self.assertFalse(check_386.json()["upgrade_available"])
+        self.assertFalse(check_386.json()["platform_supported"])
+        self.assertIsNone(check_386.json()["asset"])
+        latest_386 = client.get(
+            "/v1/releases/packages/dagents-local-assistant/stable/windows-386/latest/download"
+        )
+        self.assertEqual(latest_386.status_code, 404)
+
+        # If an older x86 package exists, x86 clients continue to get that
+        # platform's own latest release rather than the newer x64 package.
+        old_x86_filename = "dagents-local-assistant-windows-386-installer-0.10.5.exe"
+        upload("windows-386", "0.10.5", old_x86_filename, b"old-x86-release")
+        check_386 = client.get(
+            "/v1/releases/check",
+            params={"current": "0.10.0", "platform": "windows-386"},
+        )
+        self.assertEqual(check_386.status_code, 200, check_386.text)
+        payload = check_386.json()
+        self.assertEqual(payload["latest"], "0.10.5")
+        self.assertTrue(payload["upgrade_available"])
+        self.assertTrue(payload["platform_supported"])
+        self.assertEqual(payload["asset"]["filename"], old_x86_filename)
+        self.assertIn("/windows-386/latest/download", payload["asset"]["download_url"])
+
 
 class ReleaseSeedTest(unittest.TestCase):
     def test_seed_bundled_releases(self):

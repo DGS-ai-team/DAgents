@@ -148,6 +148,22 @@ func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
 	if state.HasActiveTurn && !state.TurnStatus.Terminal() {
 		return
 	}
+	if state.TurnStatus.Terminal() && state.Source == turn.TurnSourceHuman {
+		if state.TurnFinishedAt != nil {
+			finishedAt := state.TurnFinishedAt.UTC()
+			r.mu.Lock()
+			canCommit := finishedAt.After(r.lastHumanInteraction)
+			if canCommit {
+				r.lastHumanInteraction = finishedAt
+			}
+			r.mu.Unlock()
+			if canCommit {
+				if err := r.persist(context.Background()); err != nil && r.logger != nil {
+					r.logger.Warn("persist last human interaction failed", "session_id", r.session.ID, "error", err)
+				}
+			}
+		}
+	}
 	// No-work is a successful terminal fact only after lifecycle persistence has
 	// completed without error. A failed/cancelled turn must follow the ordinary
 	// error path and must never emit a successful no_work notification.

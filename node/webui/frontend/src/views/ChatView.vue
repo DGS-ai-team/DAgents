@@ -31,6 +31,7 @@ import {
   markSideEffectsApplied,
   markSideEffectsStale,
   addSystem,
+  addContextBoundaryNotice,
   appendAssistant,
   appendReasoning,
   finalizeAssistant,
@@ -421,6 +422,9 @@ function handleEvent(ev) {
       break;
     case "system_notice":
       addSystem(String(ev.data?.message || "工具集已变更"));
+      break;
+    case "runtime/notice":
+      addContextBoundaryNotice(ev.data);
       break;
     case "runtime/config-changed":
       agentPanelRef.value?.refresh?.();

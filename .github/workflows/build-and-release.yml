@@ -4,8 +4,8 @@ name: Build And Release Binary
 # dev/main 的提交检查由 ci-required.yml 负责，避免 main push 与 tag 重复跑单测。
 #
 # 发版墙钟优化（相对旧矩阵串行）：
-# - Linux / Windows(Go+Shell+Browser) 与单测后并行；Manage 只等 linux 包
-# - Windows：Go / Tauri Shell / browser 三路并行后再 assemble+Inno
+# - Linux / Windows x64(Go+Shell+Browser) 与单测后并行；Manage 只等 linux 包
+# - Windows x64：Go / Tauri Shell / browser 三路并行后再 assemble+Inno
 # - Linux browser：Rocky8 预装依赖镜像 + pyenv 目录 GHA cache
 on:
   push:
@@ -62,7 +62,7 @@ jobs:
         run: python scripts/release/validate_release.py --version "${GITHUB_REF_NAME#v}"
 
   unit-tests:
-    name: Unit tests (Go + Python + Web UI)
+    name: Unit tests (Go + Python + Web UI + Desktop UI)
     needs: validate-release
     if: ${{ needs.validate-release.result == 'success' }}
     runs-on: ubuntu-latest
@@ -76,6 +76,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
+            desktop/tray-tauri/package-lock.json
             node/webui/frontend/package-lock.json
             manage/console/frontend/package-lock.json
 
@@ -83,6 +84,12 @@ jobs:
         run: |
           npm ci --prefix node/webui/frontend
           npm test --prefix node/webui/frontend
+
+      - name: Test Desktop UI
+        run: |
+          npm ci --prefix desktop/tray-tauri
+          npm run test:ui --prefix desktop/tray-tauri
+          npm run build --prefix desktop/tray-tauri
 
       - name: Lint Web UI
         run: npm run lint --prefix node/webui/frontend
@@ -138,13 +145,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -233,19 +233,9 @@ jobs:
           - label: x64
             platform: windows-amd64
             goarch: amd64
-          - label: x86
-            platform: windows-386
-            goarch: '386'
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -289,10 +279,6 @@ jobs:
             platform: windows-amd64
             goarch: amd64
             tauri_target: x86_64-pc-windows-msvc
-          - label: x86
-            platform: windows-386
-            goarch: '386'
-            tauri_target: i686-pc-windows-msvc
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -334,7 +320,6 @@ jobs:
           OUT_DIR="${GITHUB_WORKSPACE}/dist/${{ matrix.platform }}" \
             TAURI_TARGET="${{ matrix.tauri_target }}" \
             bash scripts/ci/build_dagents_shell_tauri.sh
-          test -f "dist/${{ matrix.platform }}/dagents-shell-tauri.exe"
           test -f "dist/${{ matrix.platform }}/dagents-shell.exe"
 
       - name: Upload shell binaries
@@ -356,9 +341,6 @@ jobs:
           - label: x64
             platform: windows-amd64
             python_arch: x64
-          - label: x86
-            platform: windows-386
-            python_arch: x86
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -404,23 +386,11 @@ jobs:
           name: ci-win-go-windows-amd64
           path: dist/windows-amd64
 
-      - name: Download Windows x86 Go binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ci-win-go-windows-386
-          path: dist/windows-386
-
       - name: Download Windows x64 shell binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ci-win-shell-windows-amd64
           path: dist/windows-amd64
-
-      - name: Download Windows x86 shell binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ci-win-shell-windows-386
-          path: dist/windows-386
 
       - name: Download Windows x64 browser binary
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -428,23 +398,16 @@ jobs:
           name: ci-win-browser-windows-amd64
           path: dist/windows-amd64
 
-      - name: Download Windows x86 browser binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ci-win-browser-windows-386
-          path: dist/windows-386
-
       - name: Assemble Windows installer staging directories
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          for platform in windows-amd64 windows-386; do
+          for platform in windows-amd64; do
             PLATFORM="${platform}" VERSION="${VERSION}" \
               NODE_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-node.exe" \
               CLIENT_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-client.exe" \
               BROWSER_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-browser.exe" \
-              SHELL_TAURI_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell-tauri.exe" \
               SHELL_BIN="${GITHUB_WORKSPACE}/dist/${platform}/dagents-shell.exe" \
               bash scripts/ci/assemble_local_assistant_bundle.sh
           done
@@ -458,23 +421,23 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      - name: Build Windows installers (Inno x64 + x86)
+      - name: Build Windows installer (Inno x64)
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          for platform in windows-amd64 windows-386; do
+          for platform in windows-amd64; do
             PLATFORM="${platform}" VERSION="${VERSION}" \
               BUNDLE_SRC="${GITHUB_WORKSPACE}/dist/dagents-local-assistant-${platform}" \
               bash scripts/ci/build_windows_installer.sh
           done
-          ls -la dist-installer dist/dagents-local-assistant-windows-*-installer-*.exe
+          ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
 
       - name: Upload Windows installer (Inno)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dagents-windows-installers
-          path: dist/dagents-local-assistant-windows-*-installer-*.exe
+          path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
           if-no-files-found: error
 
   build-manage-docker:
@@ -578,7 +541,7 @@ jobs:
         with:
           files: |
             dist/dagents-local-assistant-*.tar.gz
-            dist/dagents-local-assistant-windows-*-installer-*.exe
+            dist/dagents-local-assistant-windows-amd64-installer-*.exe
             dist/dagents-manage-bundle-*.tar.gz
             dist/SHA256SUMS
             dist/release-manifest.json

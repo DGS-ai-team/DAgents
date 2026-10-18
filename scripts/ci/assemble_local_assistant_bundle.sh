@@ -57,15 +57,10 @@ fi
 
 # Resolve every binary before changing the previous staging directory. Inputs
 # may point into a prior staging tree, so deleting first would destroy them.
-SHELL_TAURI=""
 if [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
-  SHELL_TAURI="${SHELL_TAURI_BIN:-${REPO_ROOT}/dist/dagents-shell-tauri${EXE}}"
-  SHELL_DEFAULT="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
-  if [[ ! -f "${SHELL_TAURI}" && -f "${SHELL_DEFAULT}" ]]; then
-    SHELL_TAURI="${SHELL_DEFAULT}"
-  fi
-  if [[ ! -f "${SHELL_TAURI}" ]]; then
-    echo "[assemble] missing dagents-shell-tauri${EXE} (run build_dagents_shell_tauri.sh)" >&2
+  SHELL_BIN="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
+  if [[ ! -f "${SHELL_BIN}" ]]; then
+    echo "[assemble] missing canonical dagents-shell${EXE} (run build_dagents_shell_tauri.sh)" >&2
     exit 1
   fi
 fi
@@ -123,8 +118,8 @@ assert_input_outside_bundle "Client" "${CLIENT_BIN}"
 if [[ -f "${BROWSER_BIN}" ]]; then
   assert_input_outside_bundle "Browser" "${BROWSER_BIN}"
 fi
-if [[ -n "${SHELL_TAURI}" ]]; then
-  assert_input_outside_bundle "Desktop Shell" "${SHELL_TAURI}"
+if [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
+  assert_input_outside_bundle "Desktop Shell" "${SHELL_BIN}"
 fi
 
 rm -rf "${BUNDLE_DIR}"
@@ -136,22 +131,12 @@ if [[ -f "${BROWSER_BIN}" ]]; then
   install -m 0755 "${BROWSER_BIN}" "${BUNDLE_DIR}/bin/dagents-browser${EXE}"
 fi
 
-# Windows: bundle only the standalone Tauri Desktop Shell; Go legacy is not distributed.
+# Windows bundle uses one canonical standalone Desktop Shell entry point.
 if [[ "${PLATFORM}" == windows-* ]]; then
-  SHELL_TAURI="${SHELL_TAURI_BIN:-${REPO_ROOT}/dist/dagents-shell-tauri${EXE}}"
-  SHELL_DEFAULT="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
   if [[ "${SKIP_SHELL:-}" == "1" ]]; then
-    echo "[assemble] SKIP_SHELL=1: omitting dagents-shell*"
+    echo "[assemble] SKIP_SHELL=1: omitting dagents-shell${EXE}"
   else
-    if [[ ! -f "${SHELL_TAURI}" && -f "${SHELL_DEFAULT}" ]]; then
-      SHELL_TAURI="${SHELL_DEFAULT}"
-    fi
-    if [[ ! -f "${SHELL_TAURI}" ]]; then
-      echo "[assemble] missing dagents-shell-tauri${EXE} (run build_dagents_shell_tauri.sh)" >&2
-      exit 1
-    fi
-    install -m 0755 "${SHELL_TAURI}" "${BUNDLE_DIR}/bin/dagents-shell-tauri${EXE}"
-    install -m 0755 "${SHELL_TAURI}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
+    install -m 0755 "${SHELL_BIN}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
   fi
 fi
 
@@ -200,30 +185,22 @@ fi
 
 if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
-DAgents Local Assistant (Go Node + Desktop Shell)
+DAgents Desktop for Windows
 
-1. copy config.example.yaml to config.yaml (Node bootstrap: listen only)
-2. Start Desktop Shell (recommended; tray supervises Node + HITL toasts):
-     dagents shell --background          (logs in .runtime\logs\shell-YYYY-MM-DD.log)
-     dagents shell status / shell stop
-3. Or start Node only (legacy / debug):
-     dagents                    (default: start Node in background)
-     dagents node               (same: background + wait until ready)
-     dagents node --foreground  (blocks terminal)
-     dagents node --background  (background without wait)
-     bin\dagents-node.exe -config config.yaml
-     scripts\startup\windows\start-node.bat
-   Logs: .runtime\logs\node-YYYY-MM-DD.log / .err.log
-4. Connect Desktop to the local Node API (no UI is served by Node):
-     http://127.0.0.1:<listen.port>   (default 18765)
-     The Node startup command prints this API endpoint when ready.
-5. Browser tool (when browser.enabled: true in config):
-     dagents browser --background          (recommended; logs .runtime\logs\browser-YYYY-MM-DD.log)
-     dagents browser stop
-     bin\dagents-browser.exe --config config.yaml
+Recommended: install DAgents Desktop and launch it from the Start Menu. On first run,
+use Desktop settings to configure the local Agent Node. Node settings are stored in
+its settings database; Desktop preferences are stored in your Windows AppData folder.
+The Desktop app supervises the local Node. Optional shortcuts and startup behavior
+can be selected in the installer.
 
-Install Node as SYSTEM startup task (admin CMD):
-  scripts\windows\install_node_service.cmd install config.yaml
+For CLI debugging, the package also includes the Node and Browser commands:
+  bin\dagents-node.exe -config config.yaml
+  dagents node --foreground
+  dagents browser --background
+  dagents browser stop
+
+Enable Browser support in DAgents Desktop's Node settings before starting the Browser
+service. Node exposes an API; it does not serve the Desktop interface.
 
 Optional third-party CLIs (not bundled; see .runtime/RECOMMENDED_CLI_TOOLS.md):
   OfficeCLI for .docx/.xlsx/.pptx — install then /skill load officecli
@@ -233,36 +210,28 @@ EOF
   echo "[assemble] Windows portable archive disabled; staging directory is for Inno Setup only"
 else
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
-DAgents Local Assistant（Go Node API）
+DAgents Local Assistant（Linux Node API + CLI）
 
-便携使用：
-1. cp config.example.yaml config.yaml   # Node bootstrap：仅 listen
-2. 启动 Node：
-     ./dagents                    （默认：后台启动 Node 并打印 API endpoint）
-     ./dagents node               （同上：后台 + 等待就绪）
-     ./dagents node --foreground  （前台阻塞）
-     ./dagents node --background  （后台且不等待 probe）
-     ./scripts/startup/linux/start-node.sh
-   日志：.runtime/logs/node-YYYY-MM-DD.log / .err.log
-3. DAgents Desktop 通过 Node API 连接本机 Node：
-     http://127.0.0.1:<listen.port>   （默认 18765）
-     Node 就绪后 `dagents` 或 `dagents node` 会打印 API endpoint。
-4. Browser 工具（config / Web UI 中启用 browser 能力时）：
-     ./dagents browser --background    （推荐；日志 .runtime/logs/browser-YYYY-MM-DD.log）
-     ./dagents browser stop
-     ./bin/dagents-browser --config config.yaml
+Node 初始化配置通过 DAgents Node 设置完成；发布包中的 config.example.yaml 仅包含
+Node 启动所需的 listen 配置。启动 Node：
+  ./dagents node --foreground
+  ./dagents node --background
+  ./scripts/startup/linux/start-node.sh
+日志：.runtime/logs/node-YYYY-MM-DD.log / .err.log
 
-安装到固定目录（推荐）：
+Browser 工具请先在 Node 设置中启用，再启动 Browser 服务：
+  ./dagents browser --background
+  ./dagents browser stop
+  ./bin/dagents-browser --config config.yaml
+
+安装到固定目录：
   ./install.sh              用户级 ~/.local/share/dagents
-  sudo ./install.sh         系统级 /opt/dagents（写入 /etc/profile.d/dagents.sh）
-  安装后新开 shell，执行 dagents doctor 验证
+  sudo ./install.sh         系统级 /opt/dagents
 
+Linux 发布包提供 Node API 与 CLI，不包含 DAgents Desktop 图形界面。
 A2A / Registry 控制面请单独部署 Manage（见 packaging/manage/README.md）。
-
 注册 Node 为 systemd 服务（需 root）：
   sudo ./scripts/linux/install_node_service.sh install --config config.yaml
-
-DAgents Desktop 提供独立本地界面；Node 只提供 API。
 
 可选第三方 CLI（发布包不含；见 .runtime/RECOMMENDED_CLI_TOOLS.md）：
   OfficeCLI（Office 文档）— 自行安装后 /skill load officecli

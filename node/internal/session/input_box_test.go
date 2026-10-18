@@ -219,7 +219,7 @@ func TestActiveTurnDefersPoppedInputWithoutDroppingIt(t *testing.T) {
 	hub := stream.NewHub(8, logx.Discard())
 	rt := newRuntimeWithPublisher(
 		"session-input-race", "agent-1", hub, hub, &llm.MockClient{}, nil, nil, nil,
-		logx.Discard(), nil, nil, nil, false, 0, 0, TurnOptions{}, nil,
+		logx.Discard(), nil, nil, nil, 0, 0, TurnOptions{}, nil,
 	)
 	if err := rt.lifecycleBeginHumanTurn(); err != nil {
 		t.Fatal(err)
