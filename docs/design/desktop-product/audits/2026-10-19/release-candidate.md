@@ -66,7 +66,7 @@ An additional read-only SQLite transaction snapshot covered all nine fixture dat
 
 The unrelated Desktop was absent from the observed window inventory before uninstall, so this uninstall run makes no claim about preserving a concurrently open second Desktop. The earlier upgrade run did verify that separate Desktop remained running. Production-setting hash guards passed throughout both stages. Detailed JSON evidence is under the fixture's `evidence/`, and all QA user data was retained after uninstall.
 
-## Unresolved startup crash
+## Startup crash and follow-up
 
 The first direct PowerShell `&` GUI launch faulted shortly after creating a window. Windows Application Error event 1000 recorded exception `0xc0000409`, offset `0x262135`, PID 31892 at 13:29:49. A later independent `Start-Process` launch, PID 31868, stayed running and completed the native setup/use checks before the installer quit it normally during upgrade.
 
@@ -76,4 +76,6 @@ LLVM symbolization maps the fault RVA to Rust `abort_internal`, with inline loca
 
 Several raw stack words match the encoding of an OS error 232 under the [matching Rust source's bit-packed I/O error representation](https://github.com/rust-lang/rust/blob/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/io/error/repr_bitpacked.rs). Windows defines 232 as [ERROR_NO_DATA, a closing pipe](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-). Stack words also symbolize to `print_to` / `_eprint`, but these are address candidates, not verified caller frames. The attempted offline walk did not produce a trustworthy full stack; a stderr write failure remains a hypothesis. No verified business call site or panic message was recovered, and no product source patch was made on that basis. The local WER dump was not transmitted.
 
-Keep this as an open release risk. The next investigation needs a controlled reproduction capturing the panic message and reliable caller evidence. Successful setup and upgrade do not close the crash investigation or justify stable-release approval.
+At this baseline investigation stage, the crash remained open; successful setup and upgrade alone did not close it. A subsequent [controlled reproduction and fix](desktop-startup-panic.md) captured the panic message and reliable `events::sync_agents` call stack. Closing the stderr reader reproduces the abort in this exact release candidate; the fix tolerates failed output writes. A follow-up covers the same stdout failure in CLI status commands.
+
+The fix source is `09c6fb1c`. Its production-mode x64 Desktop (SHA-256 `d1bd926a0dcdc12c2b34e690585f1aa483621569399a86468e68094e46d0d7db`) passed the closed-stderr process regression and stdout CLI contract/closed-pipe checks. The preceding stderr-only fix also passed a 120-second closed-pipe run with native embedded-UI interaction. See the linked audit for exact per-build scope. This closes the reproduced local defect, not the complete release gate: these newer executables have not been assembled into or installed from a new final candidate package. The original candidate hashes and installation evidence above remain unchanged.
