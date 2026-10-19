@@ -42,10 +42,10 @@
 以下是本次建议的发布门槛，不表示这些能力都尚未实现。每项以最终候选提交和实际包为准，记录环境、包哈希、步骤与结果；失败项修复后重测受影响链路。
 
 - [x] **最新提交的 CI、审查与集成。** PR #348 已合入 `dev`，产品候选源码冻结为 `95e3f98cbce0a210e41a15590e45d42e353c119a`。该合并提交的[全量 CI](https://github.com/DGS-ai-team/DAgents/actions/runs/39202528888) 与 [CodeQL](https://github.com/DGS-ai-team/DAgents/actions/runs/39202528519) 均通过，包含 Go/Python/契约/Rust/Windows 源码构建/Docker/打包审计。安装验收工具的后续修正须单独记录工具版本和回归结果；不能将源码 CI 通过计作发行包安装通过。
-- [ ] **Desktop 首次启动崩溃。** 本机候选在首次 PowerShell `&` 启动后记录 `0xc0000409`，后续独立 `Start-Process` 启动及原生首配、Mock 对话正常。当前缺少匹配 PDB，具体函数和原因未定位；不能归因到执行环境或将随后启动成功当作问题已关闭。证据见[当前候选与本机验收](design/desktop-product/audits/2026-10-19/release-candidate.md)。
+- [ ] **Desktop 首次启动崩溃。** 本机候选在首次 PowerShell `&` 启动后记录 `0xc0000409`，后续独立 `Start-Process` 启动及原生首配、Mock 对话正常。初次符号检查遗漏了实际 target-triple 构建目录的 PDB，现已找到候选符号文件继续定位；具体原因尚未确认，不能归因到执行环境或将随后启动成功当作问题已关闭。证据见[当前候选与本机验收](design/desktop-product/audits/2026-10-19/release-candidate.md)。
 - [ ] **最终包的标准用户初装、升级、卸载与恢复。** 在一次性 Windows 用户或 VM 中，用真实二进制跑初装→首配→使用→运行中升级→重开→卸载；覆盖中文/空格路径、快捷方式、可选自启的开/关状态及静默升级、非本安装 Node/另一安装不受影响。确认配置、LLM 密钥、Agent 历史/记忆、工作区、Desktop 偏好保留。补无 WebView2、不可写路径、文件占用失败和从备份恢复的演练。不得声称已有应用级事务回滚。操作见 [安装升级清单](../packaging/windows/install-upgrade-acceptance.md)。
 
-  10 月 19 日已按用户授权在开发机完成当前 `95e3f98c` x64 QA 包初装、原生首配/创建 Agent/Mock 对话，以及同产品 payload 的 `0.11.0 → 0.11.0.1` 合成安装器升级。安装后文件哈希、配置/策略/Desktop 样本与 Node 设置逻辑摘要通过；正式安装的受检设置未变。升级后重启被自动审批拒绝，重开恢复、卸载、正式快捷方式/自启/PATH、标准用户与旧发行迁移仍未完成，见[候选记录](design/desktop-product/audits/2026-10-19/release-candidate.md)。
+  10 月 19 日已按用户授权在开发机完成当前 `95e3f98c` x64 QA 包初装、原生首配/创建 Agent/Mock 对话、同产品 payload 的 `0.11.0 → 0.11.0.1` 合成安装器升级，以及用户手动重启后的历史恢复、运行中卸载和最终校验。安装后文件哈希、配置/策略/Desktop 样本与 Node 设置逻辑摘要通过；另比对九个 fixture 数据库与历史文件，卸载前后逻辑/文件哈希一致，正式安装的受检设置未变。当前只是管理员开发机 QA 范围；正式快捷方式/自启/PATH、标准用户、已配置密钥、旧发行迁移及故障恢复仍未完成，见[候选记录](design/desktop-product/audits/2026-10-19/release-candidate.md)。
 - [ ] **v0.11.0 用户迁移。** 脱敏旧数据打开、配对解密、Agent/Auto/workspace/session 与未决 Trigger 恢复已通过，备份后卸载重装流程已成文。v0.11.0 本身已使用 SQLite，不新增 fat YAML 导入兼容；旧空闲压缩值不继承为新上下文阈值。剩余为真实旧发行安装包备份→卸载→新装→恢复与失败恢复演练；无 marker 拒绝覆盖不能计作迁移通过。
 - [ ] **LLM 与 MCP 配置往返。** 当前真实窗口已通过空 Key 探测/保存/重开探测与 MCP 工具开关/高级 JSON/凭据往返，失败草稿不覆盖已存配置。HTTP 对端为本地合成服务，仍需在最终安装候选与实际 Provider/外部 MCP 上做冒烟；清空/替换 Key、取消和探测失败仍以自动回归为主，未逐一原生复验。
 - [x] **配置 ID 改名的 Agent 引用。** 活动 Agent 引用中的 ID 改名/删除返回 `409 llm_profile_in_use`，列出 Agent 并要求先修改绑定或删除 Agent；软归档 Agent 不阻止变更。拒绝发生于设置和密钥持久化前，创建/PATCH 还会拒绝不存在的目标 ID，详见 [API 契约](api/node-integration.md) 与配置验收记录。
