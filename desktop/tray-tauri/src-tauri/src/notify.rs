@@ -71,7 +71,7 @@ impl Notifier {
         let plan = plan_sync(&last, entries, retain_ids);
         for e in &plan.to_push {
             if let Err(err) = self.push_pending(e) {
-                eprintln!("shell toast: {err}");
+                crate::diagnostics::stderr_best_effort(format_args!("shell toast: {err}"));
             }
         }
         *last = plan.next_last;

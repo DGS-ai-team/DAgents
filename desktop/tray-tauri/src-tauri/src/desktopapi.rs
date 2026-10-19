@@ -12,11 +12,13 @@ pub fn run_update_command(args: &[String], layout: Layout, cfg: Arc<ShellConfig>
     let (check_only, force) = parse_update_args(args);
     if cfg.can_manage_local_node() {
         if let Err(error) = nodectl::start(&layout, &cfg, Duration::from_secs(45)) {
-            eprintln!("启动 Node 失败: {error}");
+            crate::diagnostics::stderr_best_effort(format_args!("启动 Node 失败: {error}"));
             return 1;
         }
     } else if !check_only {
-        eprintln!("隧道模式只连接现有 Node；不支持从 Desktop 更新本机安装");
+        crate::diagnostics::stderr_best_effort(format_args!(
+            "隧道模式只连接现有 Node；不支持从 Desktop 更新本机安装"
+        ));
         return 1;
     }
     let client = Arc::new(Client::new(&cfg.node_endpoint));
@@ -32,7 +34,7 @@ pub fn run_update_command(args: &[String], layout: Layout, cfg: Arc<ShellConfig>
         ..Default::default()
     });
     if !result.message.trim().is_empty() && code != 0 && code != update::EXIT_UP_TO_DATE {
-        eprintln!("{}", result.message);
+        crate::diagnostics::stderr_best_effort(format_args!("{}", result.message));
     }
     code
 }

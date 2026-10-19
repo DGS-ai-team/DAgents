@@ -87,7 +87,7 @@ fn stream_loop(parts: Parts) {
     while !parts.stop.load(Ordering::SeqCst) {
         if let Err(e) = connect_once(&parts) {
             if !parts.stop.load(Ordering::SeqCst) {
-                eprintln!("shell sse: {e}");
+                crate::diagnostics::stderr_best_effort(format_args!("shell sse: {e}"));
             }
         }
         sleep_until_stopped(&parts.stop, RECONNECT_DELAY);
@@ -118,7 +118,7 @@ fn sync_agents(parts: &Parts) {
                 (parts.on_change)();
             }
         }
-        Err(e) => eprintln!("shell sync agents: {e}"),
+        Err(e) => crate::diagnostics::stderr_best_effort(format_args!("shell sync agents: {e}")),
     }
 }
 
