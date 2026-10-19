@@ -1,47 +1,16 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from "vue";
-import { renderMarkdown } from "../utils/markdown.js";
-import { copyText } from "../utils/clipboard.js";
+import { computed } from "vue";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import BrowserCitationBlock from "./BrowserCitationBlock.vue";
 import UiIcon from "./UiIcon.vue";
+import ResourceMarkdown from "./ResourceMarkdown.vue";
 
 const props = defineProps({
   entry: { type: Object, required: true },
-});
-
-const markdownActionTimer = ref(null);
-
-function resetMarkdownAction(button) {
-  if (button) button.textContent = button.dataset.defaultLabel || "复制代码";
-  if (markdownActionTimer.value) {
-    clearTimeout(markdownActionTimer.value);
-    markdownActionTimer.value = null;
-  }
-}
-
-async function onMarkdownAction(event) {
-  const button = event.target?.closest?.("[data-markdown-action]");
-  if (!button) return;
-  const code =
-    button.dataset.code ||
-    button.closest(".markdown-code-block")?.querySelector("code")?.textContent ||
-    "";
-  if (!code) return;
-  button.dataset.defaultLabel = button.textContent || "复制代码";
-  try {
-    button.textContent = (await copyText(code)) ? "已复制" : "复制失败";
-  } catch {
-    button.textContent = "操作失败";
-  }
-  if (markdownActionTimer.value) clearTimeout(markdownActionTimer.value);
-  markdownActionTimer.value = setTimeout(() => resetMarkdownAction(button), 1600);
-}
-
-onBeforeUnmount(() => {
-  if (markdownActionTimer.value) clearTimeout(markdownActionTimer.value);
+  agentId: { type: String, default: "" },
+  source: { type: String, default: "main" },
 });
 
 const browserRefs = computed(() =>
@@ -136,9 +105,7 @@ function userImageThumb(src) {
         <div
           class="tool-exec-bubble__markdown assistant-msg__md"
           :class="{ 'assistant-msg__md--streaming': entry.streaming }"
-          v-html="renderMarkdown(entry.text)"
-          @click="onMarkdownAction"
-        />
+        ><ResourceMarkdown :entry="entry" :agent-id="agentId" :source="source" /></div>
         <BrowserCitationBlock v-if="!entry.streaming && browserRefs.length" :refs="browserRefs" />
       </div>
     </div>

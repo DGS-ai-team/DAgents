@@ -1,11 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentMediaId, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceUploadPath } from './workspace-files-state.js'
+import { agentMediaId, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceUploadPath } from './workspace-files-state.js'
 import { listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from './workspace-files-api.js'
 
 test('workspace uploads target the complete relative filename and preserve directories', () => {
   assert.equal(workspaceUploadPath('', 'image.png'), 'image.png')
   assert.equal(workspaceUploadPath('src/assets/', '/image.png'), 'src/assets/image.png')
+})
+
+test('workspace path normalization preserves dotfiles while removing only explicit current-directory prefixes', () => {
+  assert.equal(normalizeWorkspacePath('.gitignore'), '.gitignore')
+  assert.equal(normalizeWorkspacePath('.config/settings.json'), '.config/settings.json')
+  assert.equal(normalizeWorkspacePath('./reports/summary.md'), 'reports/summary.md')
+  assert.equal(normalizeWorkspacePath('.'), '')
+  assert.deepEqual(workspaceFileLocation('reports/annual/summary.md'), { path: 'reports/annual/summary.md', parent: 'reports/annual', name: 'summary.md' })
+  assert.deepEqual(workspaceFileLocation('.config/settings.json'), { path: '.config/settings.json', parent: '.config', name: 'settings.json' })
 })
 
 test('successful workspace uploads only clear the exact stale upload error', () => {
@@ -31,11 +40,34 @@ test('workspace binary sniffing previews actual raster images and treats source-
   assert.equal(workspaceContentType('binary.bin', 'application/octet-stream', Uint8Array.from([0, 255])), 'application/octet-stream')
 })
 
-test('workspace request epochs reject stale Agent and file responses; drafts are Agent/path scoped', () => {
-  const current = { epoch: 4, agentId: 'agent-b', path: 'src/new.md' }
+test('resource image blobs trust raster signatures rather than filenames or response MIME', () => {
+  const fixtures = [
+    ['chart.png', 'image/svg+xml', [137,80,78,71,13,10,26,10], 'image/png'],
+    ['photo.jpg', 'text/html', [0xff,0xd8,0xff,0x00], 'image/jpeg'],
+    ['animation.gif', 'application/octet-stream', [...new TextEncoder().encode('GIF89a')], 'image/gif'],
+    ['plot.webp', 'application/octet-stream', [...new TextEncoder().encode('RIFF') ,0,0,0,0,...new TextEncoder().encode('WEBP')], 'image/webp'],
+  ]
+  for (const [path, contentType, signature, expected] of fixtures) {
+    assert.equal(workspaceRasterBlob(path, { contentType, bytes: Uint8Array.from(signature) }).type, expected)
+  }
+  for (const [path, contentType, bytes] of [
+    ['spoof.png', 'image/png', new TextEncoder().encode('<html>not an image</html>')],
+    ['vector.svg', 'image/svg+xml', new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>')],
+  ]) assert.throws(() => workspaceRasterBlob(path, { contentType, bytes }), /不是受支持的/)
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>')
+  assert.equal(workspaceImageBlob('chart.svg', { contentType: 'application/octet-stream', bytes: svg }).type, 'image/svg+xml')
+  assert.throws(() => workspaceImageBlob('chart.svg', { contentType: 'text/html', bytes: svg }), /响应类型无效/)
+  assert.throws(() => workspaceImageBlob('chart.svg', { contentType: 'application/octet-stream', bytes: Uint8Array.from([0xff, 0xfe]) }), /UTF-8/)
+  assert.throws(() => workspaceImageBlob('chart.svg', { contentType: 'application/octet-stream', bytes: new Uint8Array(1024 * 1024 + 1) }), /1 MiB/)
+})
+
+test('workspace request epochs reject stale Agent, path, and connection responses; drafts include stable Node scope', () => {
+  const current = { epoch: 4, agentId: 'agent-b', path: 'src/new.md', generation: 3 }
   assert.equal(isWorkspaceRequestCurrent({ epoch: 3, agentId: 'agent-a', path: 'src/old.md' }, current), false)
   assert.equal(isWorkspaceRequestCurrent({ epoch: 4, agentId: 'agent-b', path: 'src/new.md' }, current), true)
+  assert.equal(isWorkspaceRequestCurrent({ epoch: 4, agentId: 'agent-b', path: 'src/new.md', generation: 2 }, current), false)
   assert.notEqual(workspaceDraftKey('agent-a', 'src/new.md'), workspaceDraftKey('agent-b', 'src/new.md'))
+  assert.notEqual(workspaceDraftKey('agent-b', 'src/new.md', 'node-a'), workspaceDraftKey('agent-b', 'src/new.md', 'node-b'))
   assert.notEqual(workspaceDraftKey('agent-b', 'src/old.md'), workspaceDraftKey('agent-b', 'src/new.md'))
 })
 
@@ -74,6 +106,21 @@ test('workspace transport uses authenticated Node JSON listing and bounded binar
     delete globalThis.__DAGENTS_API_REQUEST__
     delete globalThis.__DAGENTS_DESKTOP_INVOKE__
   }
+})
+
+test('conditional workspace reads preserve the 304 status without decoding it as empty file content', async () => {
+  let call
+  globalThis.__DAGENTS_DESKTOP_INVOKE__ = async (command, args) => {
+    call = { command, args }
+    return { status: 304, content_type: 'application/octet-stream', etag: '"r2"', body_base64: '' }
+  }
+  try {
+    const response = await readWorkspaceFile('agent-a', 'notes.txt', { ifNoneMatch: '"r1"' })
+    assert.equal(response.notModified, true)
+    assert.equal(response.status, 304)
+    assert.equal(response.bytes, null)
+    assert.equal(call.args.ifNoneMatch, '"r1"')
+  } finally { delete globalThis.__DAGENTS_DESKTOP_INVOKE__ }
 })
 
 test('workspace upload collisions have a rename message while revision conflicts keep the reload message', async () => {

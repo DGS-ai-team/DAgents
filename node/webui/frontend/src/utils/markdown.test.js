@@ -76,6 +76,14 @@ describe("renderMarkdown", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
+  it("keeps custom resource schemes inert in the ordinary renderer", () => {
+    const html = renderMarkdown("[file](dagents://resource/file?path=docs%2Fa.md) ![image](dagents://resource/image?path=images%2Fa.png)");
+    expect(html).not.toContain("dagents:");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("file");
+    expect(html).toContain("image");
+  });
+
   it("renders unordered lists with inline formatting", () => {
     const html = renderMarkdown("- **成员 ID**：`mb_abc`\n- 显示名称：reader");
     expect(html).toContain("<ul>");

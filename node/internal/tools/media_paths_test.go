@@ -3,6 +3,7 @@ package tools
 import "testing"
 
 func TestExtractToolMediaPaths_showImage(t *testing.T) {
+	// Historical show_image tool results remain renderable during hydrate.
 	got, ok := ExtractToolMediaPaths("show_image", "[SHOW_IMAGE]\npath=reports/chart.png\nstatus=ok", map[string]any{
 		"path":    "reports/chart.png",
 		"caption": "对比图",

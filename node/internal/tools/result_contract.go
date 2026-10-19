@@ -150,7 +150,7 @@ func ResultDescriptionSuffixForTool(name string) string {
 		shape = " grep 正文包含匹配行和分页信息；无匹配是成功的零结果，不应当作工具失败。"
 	case "search_replace":
 		shape = " search_replace 正文明确给出成功、替换次数和必要的诊断；成功为 false 时不要声称已修改。"
-	case "read_image", "show_image":
+	case "read_image":
 		shape = " 图片工具正文包含 path 和 status=ok/error；成功还可能伴随媒体或视觉输入副作用。"
 	case "screen_capture", "computer_use":
 		shape = " 桌面工具正文为 JSON，包含 status、coordinate_space、virtual_bounds、frame_id、frame_stable 和动作后截图；computer_use 坐标始终基于带 frame_id 的最近稳定截图。actions 批处理最多 4 步，返回 action_count 和最终截图。"

@@ -1,6 +1,44 @@
 const phases = ['collapse', 'travel', 'expand']
 export const COMPOSER_MORPH_DURATION_MS = 840
 
+export function composerPageHandoffNeedsFade(fromTab, toTab, modeForTab, reducedMotion = false) {
+  if (reducedMotion) return false
+  const fromMode = modeForTab(fromTab)
+  const toMode = modeForTab(toTab)
+  return (fromMode === 'chat' && toMode === 'dock') || (fromMode === 'dock' && toMode === 'chat')
+}
+
+export function composerPageHandoffReady(pending) {
+  return Boolean(pending?.composerSettled && pending?.fadeOutDone)
+}
+
+export function composerPageFadeOutCompletion(pending, key) {
+  return pending?.key === key ? { ...pending, fadeOutDone: true } : pending
+}
+
+export function composerPageHandoffContinues(pending, nextMode) {
+  return Boolean(pending && pending.mode === nextMode)
+}
+
+export function composerPageHandoffKeepsOutgoingFade(pending, displayedTab) {
+  return Boolean(pending?.fadeOut && pending.fromTab === displayedTab)
+}
+
+export function createComposerPageHandoff({ current, mode, id = null, displayedTab, fadeOut, sequence }) {
+  const sameMode = composerPageHandoffContinues(current, mode)
+  const keepOutgoing = composerPageHandoffKeepsOutgoingFade(current, displayedTab)
+  const continueFade = sameMode || keepOutgoing
+  return {
+    mode,
+    id: sameMode ? current.id : id,
+    key: continueFade ? current.key : sequence,
+    fromTab: continueFade ? current.fromTab : displayedTab,
+    fadeOut: continueFade ? current.fadeOut : fadeOut,
+    fadeOutDone: continueFade ? current.fadeOutDone : !fadeOut,
+    composerSettled: sameMode ? current.composerSettled : false,
+  }
+}
+
 export function composerPageVisibility({ requestedTab, displayedTab, modeForTab, composerMounted = true, pendingTransition = false }) {
   if (!composerMounted || requestedTab === 'settings') return { kind: 'show', tab: requestedTab }
   const mode = modeForTab(requestedTab)

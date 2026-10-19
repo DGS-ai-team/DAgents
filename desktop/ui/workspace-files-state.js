@@ -4,6 +4,17 @@ export function workspaceUploadPath(directory, name) {
   return [String(directory || '').replace(/^\/+|\/+$/g, ''), String(name || '').replace(/^\/+/, '')].filter(Boolean).join('/')
 }
 
+export function normalizeWorkspacePath(value) {
+  return String(value || '').replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\.$/, '').replace(/\/+$/, '')
+}
+
+export function workspaceFileLocation(value) {
+  const path = normalizeWorkspacePath(value)
+  const parts = path.split('/').filter(Boolean)
+  const name = parts.pop() || ''
+  return { path, name, parent: parts.join('/') }
+}
+
 export function shouldClearWorkspaceUploadError(currentError, failedUploadError, batchHadFailure = false) {
   return !batchHadFailure && Boolean(failedUploadError) && currentError === failedUploadError
 }
@@ -12,8 +23,8 @@ export function toNodeFileReference(file) {
   return { path: String(file?.path || ''), name: String(file?.name || '') }
 }
 
-export function workspaceDraftKey(agentId, path) {
-  return `dagents.desktop.workspace-draft:${encodeURIComponent(agentId)}:${encodeURIComponent(path)}`
+export function workspaceDraftKey(agentId, path, scope = 'default') {
+  return `dagents.desktop.workspace-draft:${encodeURIComponent(scope)}:${encodeURIComponent(agentId)}:${encodeURIComponent(path)}`
 }
 
 export function serializeWorkspaceDraft(content, revision) {
@@ -44,6 +55,7 @@ export function agentMediaId(source, expectedAgentId) {
 
 export function isWorkspaceRequestCurrent(request, current) {
   return request.epoch === current.epoch && request.agentId === current.agentId
+    && (request.generation === undefined || request.generation === current.generation)
     && (!request.path || request.path === current.path)
 }
 
@@ -59,6 +71,28 @@ export function workspaceContentType(name, suppliedType, bytes) {
   if (explicit.startsWith('text/') || explicit === 'application/json' || explicit === 'application/xml' || explicit === 'application/javascript') return isUtf8Text(data) ? 'text/plain' : 'application/octet-stream'
   if (isUtf8Text(data)) return 'text/plain'
   return 'application/octet-stream'
+}
+
+export function workspaceRasterBlob(path, result) {
+  const bytes = result?.bytes instanceof Uint8Array ? result.bytes : new Uint8Array(result?.bytes || [])
+  const contentType = workspaceContentType(path, result?.contentType, bytes)
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(contentType)) {
+    throw new Error('此工作区文件不是受支持的 PNG、JPEG、GIF 或 WebP 图片。')
+  }
+  return new Blob([bytes], { type: contentType })
+}
+
+export function workspaceImageBlob(path, result) {
+  const extension = String(path || '').split('.').at(-1)?.toLowerCase()
+  if (extension === 'svg') {
+    const bytes = result?.bytes instanceof Uint8Array ? result.bytes : new Uint8Array(result?.bytes || [])
+    if (bytes.length > 1024 * 1024 || bytes.length === 0) throw new Error('SVG 图片为空或超过 1 MiB 限制。')
+    try { new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { throw new Error('SVG 图片不是有效的 UTF-8 文本。') }
+    const supplied = String(result?.contentType || '').split(';')[0].trim().toLowerCase()
+    if (supplied && !['image/svg+xml', 'application/octet-stream', 'text/plain'].includes(supplied)) throw new Error('SVG 图片响应类型无效。')
+    return new Blob([bytes], { type: 'image/svg+xml' })
+  }
+  return workspaceRasterBlob(path, result)
 }
 
 function isUtf8Text(bytes) {

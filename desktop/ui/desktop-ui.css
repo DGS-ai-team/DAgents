@@ -678,6 +678,26 @@ button:disabled .icon-mask { color: #a0a5a8; }
   min-height: 0;
 }
 
+.composer-page-enter-active {
+  transition: opacity 200ms ease-in-out;
+}
+
+.composer-page-leave-active {
+  transition: opacity 160ms ease-out;
+}
+
+.composer-page-enter-from,
+.composer-page-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-page-enter-active,
+  .composer-page-leave-active {
+    transition-duration: 0ms !important;
+  }
+}
+
 .main-panel > .app {
   display: block;
   height: 100%;
@@ -1110,6 +1130,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 
 .composer-wrap {
   flex: 0 0 auto;
+  margin-top: auto;
   height: auto;
   min-height: 70px;
   padding: 8px 18px 10px;
@@ -1438,6 +1459,14 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   cursor: pointer;
 }
 
+.terminal-actions button.icon-only {
+  display: grid;
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  place-items: center;
+}
+
 .terminal-actions button:hover {
   border-color: #91b7c0;
   color: #555d62;
@@ -1484,6 +1513,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .terminal-empty-state > div:last-child { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .terminal-empty-state button { min-height: 32px; padding: 0 11px; border: 1px solid #d6dadd; border-radius: 6px; background: #fff; color: #39474d; font: inherit; cursor: pointer; }
 .terminal-empty-state button:hover { border-color: #a9b4b8; background: #f3f5f6; }
+.terminal-empty-state button.icon-only { display: grid; width: 34px; min-width: 34px; padding: 0; place-items: center; }
 
 .terminal-composer {
   display: flex;
@@ -1681,6 +1711,11 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   padding: 5px 1px;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.dock-detail-row--message {
+  grid-template-columns: minmax(0, 1fr);
+  padding-top: 2px;
 }
 
 .dock-detail-row small { color: #526777; }

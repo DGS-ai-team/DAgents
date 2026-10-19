@@ -48,7 +48,7 @@ export async function listWorkspace(agentId, path = '') {
   return globalThis.__DAGENTS_API_REQUEST__({ method: 'GET', path: `${agentPath(agentId)}${query}`, body: null })
 }
 
-async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, ifNoneMatch } = {}) {
+async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, ifNoneMatch, allowNotModified = false } = {}) {
   const query = `?path=${encodePath(path)}`
   const response = await desktopInvoke('desktop_workspace_binary_request', {
     method,
@@ -57,12 +57,13 @@ async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, 
     ifMatch: ifMatch || null,
     ifNoneMatch: ifNoneMatch || null,
   })
-  assertResponse(response)
-  return { bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag }
+  if (!(allowNotModified && response.status === 304)) assertResponse(response)
+  if (response.status === 304) return { notModified: true, bytes: null, contentType: response.content_type, etag: response.etag, status: response.status }
+  return { notModified: false, bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag, status: response.status }
 }
 
-export async function readWorkspaceFile(agentId, path) {
-  return binaryRequest(agentId, 'file', 'GET', path)
+export async function readWorkspaceFile(agentId, path, { ifNoneMatch } = {}) {
+  return binaryRequest(agentId, 'file', 'GET', path, { ifNoneMatch, allowNotModified: true })
 }
 
 export async function saveWorkspaceFile(agentId, path, bytes, etag) {

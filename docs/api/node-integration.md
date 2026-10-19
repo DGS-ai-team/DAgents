@@ -111,6 +111,8 @@ curl -f http://127.0.0.1:18765/v1/node/update/package -o dagents-update-package
 
 Workspace 文件路径通过 `path` query 参数传递。读取使用 `GET /v1/agents/{agent_id}/workspace/file?path=...`，响应体是原始文件字节并带 ETag；更新使用 `PUT` 和原始字节请求体，必须携带 `If-Match: <etag>`，新建则用 `If-None-Match: *`。上传使用 `POST /v1/agents/{agent_id}/workspace/upload?path=...`，请求体同样是文件原始字节（不是 multipart）；Node 按新建处理，目标已存在时返回 412。成功的写入/上传返回 JSON 元数据和新的 ETag。Desktop 客户端通过 `desktop_workspace_binary_request` 传输这些二进制请求，路径和条件头分别作为 IPC 参数传入。媒体读取是另一条二进制路由：`GET /v1/agents/{agent_id}/media/{media_id}`。
 
+文件 GET 支持 `If-None-Match` 条件读取：使用内容摘要生成的强 ETag，条件比较按 HTTP 的弱比较语义处理；匹配返回 `304`、当前 ETag 和空正文，未匹配返回 `200` 及最新字节。客户端必须保留 304 之前的内容，不能把空正文当作空文件。此读取条件不改变 PUT 的 `If-Match` 冲突保护。Desktop 自动刷新只检查当前可见目录及打开文件；大小与修改时间用于加速发现变化，不能替代内容版本校验。调度及草稿规则见[资源页自动刷新方案](../design/desktop-product/resource-auto-refresh.md)，消息资源引用和 HTML/SVG 预览见[资源引用协议](../development/resource-references.md)。
+
 Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=...` 提供；它读取该 Agent 已有浏览器会话的页面/截图，不会启动浏览器、执行页面代码或提供交互控制。AutoDreaming 状态由 `/v1/agents/{agent_id}/dreaming` 提供，体验条目、待办和唤醒触发器分别由 experience/todos/triggers 领域路由管理。Node 没有 SSH tunnel endpoint；Desktop tunnel mode 使用外部 SSH 端口转发连到 loopback Node，并不增加 Node 路由或 Node Bearer 认证。
 
 `GET /v1/agents/{agent_id}/terminals/ws` 升级为 WebSocket。客户端首帧可为 `open`（创建终端，可带 target、shell、cwd、rows、cols）或 `resume`（用 `session_id` 重新连接已有会话）；后续客户端命令为 `input`、`resize`、`terminate`、`close`、`ping`。JSON 中的 `data` 是 base64 编码的字节。断开 WebSocket 会 detach 会话，终端仍可恢复；显式 `close` 或 `terminate` 才关闭会话。screen stream、transfer events 也是流协议，细节以 handler 为准。目录选择是 Node host 原生能力：`/v1/platform/capabilities` 报告例如 `native_directory_picker`，`POST /v1/platform/directory-picker` 由 Node 进程调用 OS picker。

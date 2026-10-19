@@ -7,6 +7,8 @@ import agentSemantic from '../desktop/agent.svg?raw'
 import workgroupSemantic from '../desktop/nav-workgroups.svg?raw'
 import autoSemantic from '../desktop/auto.svg?raw'
 import skillsSemantic from '../lucide/puzzle.svg?raw'
+import saveSemantic from '../legacy-prototype/save.svg?raw'
+import uploadSemantic from '../desktop/upload.svg?raw'
 import icon0 from './close.svg?raw'
 import icon1 from './check.svg?raw'
 import icon2 from './pending.svg?raw'
@@ -58,7 +60,7 @@ import icon52 from './node-fallback.svg?raw'
 
 const body = svg => svg.replace(/^[\s\S]*?<svg\b[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim()
 
-export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","server","users","globe","wrench","bookmark","tool"]
+export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","server","users","globe","wrench","bookmark","tool","save","upload"]
 export const nodeIconRegistry = Object.freeze({
   "close": body(icon0),
   "check": body(icon1),
@@ -107,6 +109,8 @@ export const nodeIconRegistry = Object.freeze({
   "users": body(icon47),
   "globe": body(icon48),
   "bookmark": body(icon50),
+  "save": saveSemantic,
+  "upload": uploadSemantic,
   "agent": agentSemantic,
   "workgroup": workgroupSemantic,
   "auto": autoSemantic,
