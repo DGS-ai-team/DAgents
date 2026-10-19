@@ -8,9 +8,16 @@
 //! - 关闭窗口隐藏到托盘（不停 Node）
 //! - health 轮询 + 基础自动恢复
 
+macro_rules! safe_eprintln {
+    ($($arg:tt)*) => {{
+        diagnostics::stderr_best_effort(format_args!($($arg)*));
+    }};
+}
+
 mod clipboard;
 mod config;
 mod desktopapi;
+mod diagnostics;
 mod events;
 mod layout;
 mod nodeclient;
@@ -122,7 +129,7 @@ pub fn run() {
     let layout = match resolve_layout_from_args() {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("dagents-shell: {e}");
+            safe_eprintln!("dagents-shell: {e}");
             std::process::exit(1);
         }
     };
@@ -132,7 +139,7 @@ pub fn run() {
         match singleinstance::request_quit_and_wait(&layout, Duration::from_secs(30)) {
             Ok(()) => std::process::exit(0),
             Err(error) => {
-                eprintln!("dagents-shell: {error}");
+                safe_eprintln!("dagents-shell: {error}");
                 std::process::exit(1);
             }
         }
@@ -141,11 +148,11 @@ pub fn run() {
     if args_have_flag(&cli_args, "--desktop-status") {
         match singleinstance::is_running(&layout) {
             Ok(running) => {
-                println!("{{\"running\":{running}}}");
+                diagnostics::stdout_line_best_effort(format_args!("{{\"running\":{running}}}"));
                 std::process::exit(0);
             }
             Err(error) => {
-                eprintln!("dagents-shell: {error}");
+                safe_eprintln!("dagents-shell: {error}");
                 std::process::exit(1);
             }
         }
@@ -171,12 +178,12 @@ pub fn run() {
             Err(InstanceError::AlreadyRunning) => match singleinstance::request_show(&layout) {
                 Ok(true) | Ok(false) => std::process::exit(0),
                 Err(error) => {
-                    eprintln!("dagents-shell: 无法唤醒现有 Desktop: {error}");
+                    safe_eprintln!("dagents-shell: 无法唤醒现有 Desktop: {error}");
                     std::process::exit(1);
                 }
             },
             Err(InstanceError::Other(error)) => {
-                eprintln!("dagents-shell: single instance: {error}");
+                safe_eprintln!("dagents-shell: single instance: {error}");
                 std::process::exit(1);
             }
         }
@@ -187,7 +194,7 @@ pub fn run() {
     let cfg = match ShellConfig::load_or_create(&layout.desktop_config_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("dagents-shell: {e}");
+            safe_eprintln!("dagents-shell: {e}");
             std::process::exit(1);
         }
     };
@@ -196,7 +203,7 @@ pub fn run() {
     if args_have_flag(&cli_args, "--node-status") {
         match nodectl::probe(&cfg) {
             Ok(health) => {
-                println!(
+                diagnostics::stdout_line_best_effort(format_args!(
                     "{}",
                     serde_json::json!({
                         "online": health.ok,
@@ -204,11 +211,11 @@ pub fn run() {
                         "node_id": health.node_id,
                         "version": health.version,
                     })
-                );
+                ));
                 std::process::exit(if health.ok { 0 } else { 1 });
             }
             Err(_) => {
-                println!("{{\"online\":false}}");
+                diagnostics::stdout_line_best_effort(format_args!("{{\"online\":false}}"));
                 std::process::exit(1);
             }
         }
@@ -219,13 +226,13 @@ pub fn run() {
             Ok(owned_process) => {
                 let endpoint_ready = nodectl::is_running(&cfg);
                 let managed = owned_process && nodectl::is_managed(&layout, &cfg);
-                println!(
+                diagnostics::stdout_line_best_effort(format_args!(
                     "{{\"owned_process\":{owned_process},\"endpoint_ready\":{endpoint_ready},\"managed\":{managed}}}"
-                );
+                ));
                 std::process::exit(0);
             }
             Err(error) => {
-                eprintln!("dagents-shell: {error}");
+                safe_eprintln!("dagents-shell: {error}");
                 std::process::exit(1);
             }
         }
@@ -235,14 +242,14 @@ pub fn run() {
         if !cfg.can_manage_local_node() {
             match nodectl::owned_process_is_live(&layout) {
                 Ok(true) => {
-                    eprintln!(
+                    safe_eprintln!(
                         "dagents-shell: 隧道模式不能管理本机 Node；请切回本机模式处理受监督进程"
                     );
                     std::process::exit(1);
                 }
                 Ok(false) => std::process::exit(0),
                 Err(error) => {
-                    eprintln!("dagents-shell: {error}");
+                    safe_eprintln!("dagents-shell: {error}");
                     std::process::exit(1);
                 }
             }
@@ -251,7 +258,7 @@ pub fn run() {
             let owned_live = match nodectl::owned_process_is_live(&layout) {
                 Ok(value) => value,
                 Err(error) => {
-                    eprintln!("dagents-shell: {error}");
+                    safe_eprintln!("dagents-shell: {error}");
                     std::process::exit(1);
                 }
             };
@@ -259,7 +266,7 @@ pub fn run() {
                 match require_idle_readiness_check(owned_live, nodectl::is_running(&cfg)) {
                     Ok(check) => check,
                     Err(error) => {
-                        eprintln!("dagents-shell: {error}");
+                        safe_eprintln!("dagents-shell: {error}");
                         std::process::exit(1);
                     }
                 };
@@ -273,16 +280,16 @@ pub fn run() {
                         } else {
                             "Node 尚未报告升级就绪".into()
                         };
-                        eprintln!("dagents-shell: Node 当前不可安全停止（{reason}）");
+                        safe_eprintln!("dagents-shell: Node 当前不可安全停止（{reason}）");
                         std::process::exit(1);
                     }
                     Err(error) => {
-                        eprintln!("dagents-shell: 无法确认 Node 升级就绪: {error}");
+                        safe_eprintln!("dagents-shell: 无法确认 Node 升级就绪: {error}");
                         std::process::exit(1);
                     }
                 }
                 if !nodectl::is_managed(&layout, &cfg) {
-                    eprintln!(
+                    safe_eprintln!(
                         "dagents-shell: 受监督 Node 与当前 endpoint 不匹配；不能安全升级或卸载"
                     );
                     std::process::exit(1);
@@ -292,7 +299,7 @@ pub fn run() {
         match nodectl::stop(&layout, &cfg) {
             Ok(()) => std::process::exit(0),
             Err(error) => {
-                eprintln!("dagents-shell: {error}");
+                safe_eprintln!("dagents-shell: {error}");
                 std::process::exit(1);
             }
         }
@@ -300,17 +307,19 @@ pub fn run() {
 
     if args_have_flag(&cli_args, "--start-owned-node") {
         if !cfg.can_manage_local_node() {
-            eprintln!("dagents-shell: 隧道模式只连接已有 Node，不会启动本机 Node");
+            safe_eprintln!("dagents-shell: 隧道模式只连接已有 Node，不会启动本机 Node");
             std::process::exit(1);
         }
         match nodectl::start(&layout, &cfg, WAIT_READY) {
             Ok(()) if nodectl::is_managed(&layout, &cfg) => std::process::exit(0),
             Ok(()) => {
-                eprintln!("dagents-shell: 当前 endpoint 为外部 Node，不能将其登记为受监督进程");
+                safe_eprintln!(
+                    "dagents-shell: 当前 endpoint 为外部 Node，不能将其登记为受监督进程"
+                );
                 std::process::exit(1);
             }
             Err(error) => {
-                eprintln!("dagents-shell: 启动受监督 Node 失败: {error}");
+                safe_eprintln!("dagents-shell: 启动受监督 Node 失败: {error}");
                 std::process::exit(1);
             }
         }
