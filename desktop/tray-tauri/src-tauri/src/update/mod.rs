@@ -451,8 +451,10 @@ pub fn release_platform() -> String {
 }
 
 fn confirm_upgrade(latest: &str) -> bool {
-    print!("升级到 {}？ [y/N] ", latest.trim());
-    let _ = std::io::Write::flush(&mut std::io::stdout());
+    if crate::diagnostics::stdout_prompt(format_args!("升级到 {}？ [y/N] ", latest.trim())).is_err()
+    {
+        return false;
+    }
     let mut line = String::new();
     if std::io::stdin().read_line(&mut line).is_err() {
         return false;
@@ -461,18 +463,24 @@ fn confirm_upgrade(latest: &str) -> bool {
 }
 
 pub fn print_status(status: &Status) {
-    println!("当前版本: {}", status.current_version);
-    println!("最新版本: {}", status.latest_version);
-    println!("平台: {}", status.platform);
-    println!(
+    crate::diagnostics::stdout_line_best_effort(format_args!(
+        "当前版本: {}",
+        status.current_version
+    ));
+    crate::diagnostics::stdout_line_best_effort(format_args!(
+        "最新版本: {}",
+        status.latest_version
+    ));
+    crate::diagnostics::stdout_line_best_effort(format_args!("平台: {}", status.platform));
+    crate::diagnostics::stdout_line_best_effort(format_args!(
         "Node 更新服务: {}",
         if status.manage_reachable {
             "可用"
         } else {
             "不可用"
         }
-    );
-    println!("{}", status.message);
+    ));
+    crate::diagnostics::stdout_line_best_effort(format_args!("{}", status.message));
 }
 
 fn is_zero_u64(value: &u64) -> bool {

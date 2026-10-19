@@ -148,7 +148,7 @@ pub fn run() {
     if args_have_flag(&cli_args, "--desktop-status") {
         match singleinstance::is_running(&layout) {
             Ok(running) => {
-                println!("{{\"running\":{running}}}");
+                diagnostics::stdout_line_best_effort(format_args!("{{\"running\":{running}}}"));
                 std::process::exit(0);
             }
             Err(error) => {
@@ -203,7 +203,7 @@ pub fn run() {
     if args_have_flag(&cli_args, "--node-status") {
         match nodectl::probe(&cfg) {
             Ok(health) => {
-                println!(
+                diagnostics::stdout_line_best_effort(format_args!(
                     "{}",
                     serde_json::json!({
                         "online": health.ok,
@@ -211,11 +211,11 @@ pub fn run() {
                         "node_id": health.node_id,
                         "version": health.version,
                     })
-                );
+                ));
                 std::process::exit(if health.ok { 0 } else { 1 });
             }
             Err(_) => {
-                println!("{{\"online\":false}}");
+                diagnostics::stdout_line_best_effort(format_args!("{{\"online\":false}}"));
                 std::process::exit(1);
             }
         }
@@ -226,9 +226,9 @@ pub fn run() {
             Ok(owned_process) => {
                 let endpoint_ready = nodectl::is_running(&cfg);
                 let managed = owned_process && nodectl::is_managed(&layout, &cfg);
-                println!(
+                diagnostics::stdout_line_best_effort(format_args!(
                     "{{\"owned_process\":{owned_process},\"endpoint_ready\":{endpoint_ready},\"managed\":{managed}}}"
-                );
+                ));
                 std::process::exit(0);
             }
             Err(error) => {
