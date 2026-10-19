@@ -117,6 +117,14 @@ export INSTALLER_QA=1 PLATFORM=windows-amd64 VERSION="$(cat VERSION)"
 bash scripts/ci/build_windows_installer.sh
 ```
 
+For an upgrade test using the same frozen payload, keep the source `VERSION`
+and assembled bundle `VERSION` unchanged. Set `QA_PACKAGE_VERSION` to the same
+three-part version plus a positive fourth sequence component, for example
+`0.11.0.1` for a `0.11.0` bundle. This QA-only value controls the installer
+filename and Inno `AppVersion`; production builds reject the override. The QA
+manifest records `packageVersion`/`version` separately from `bundleVersion` so
+the synthetic metadata cannot be mistaken for a rebuilt product payload.
+
 ```powershell
 $fixture = Join-Path (Resolve-Path .).Path '.runtime-test-install-delivery\qa-install'
 $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
@@ -129,9 +137,10 @@ This is a disposable QA installer for exercising shared installer/lifecycle
 paths. A successful compile or fixture run does not establish full production
 upgrade, uninstall, shortcut, autostart, or release-package acceptance.
 The build script writes a .manifest.json sidecar with the QA macro marker,
-QA AppId, version, installer filename and SHA-256, plus names and SHA-256
-hashes for every executable in the staged `bin` directory. The fixture runner
-requires the sidecar and verifies the QA identity and installer hash.
+QA AppId, package and bundle versions, installer filename and SHA-256, plus
+names and SHA-256 hashes for every executable in the staged `bin` directory.
+The fixture runner requires the sidecar and verifies the QA identity, installer
+hash, and exact hashes of the four canonical installed executables.
 
 ## Build results for this checkout
 

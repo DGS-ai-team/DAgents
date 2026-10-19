@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 $QaAppId = '{B5D1A7C3-2E49-4F60-A8B1-7C3D9E5F2046}'
 $ProductionAppId = '{A3B8C2D1-9E4F-4A7B-8C6D-1E2F3A4B5C6D}'
 $QaEndpoint = 'http://127.0.0.1:18972'
-$ExpectedInstallerName = '^dagents-local-assistant-windows-(?<platform>amd64|386)-installer-(?<version>\d+\.\d+\.\d+\.\d+)-qa\.exe$'
+$ExpectedInstallerName = '^dagents-local-assistant-windows-(?<platform>amd64|386)-installer-(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-qa\.exe$'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $FixtureRoot = [IO.Path]::GetFullPath($FixtureRoot)
 
@@ -65,19 +65,30 @@ function Get-ProductionSnapshot {
     $desktopShortcut = Join-Path $desktopRoot 'DAgents Desktop.lnk'
     $legacyDesktopShortcut = Join-Path $desktopRoot 'DAgents Desktop（系统托盘）.lnk'
     $productionSettings = Join-Path $env:APPDATA 'DAgents\desktop\settings.json'
+    $productionUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\' + $ProductionAppId + '_is1'
+    $productionUninstall = $null
+    try { $productionUninstall = Get-ItemProperty -LiteralPath $productionUninstallKey -ErrorAction Stop } catch { }
+    $uninstallFields = [ordered]@{}
+    foreach ($name in @('DisplayName', 'DisplayVersion', 'InstallLocation', 'UninstallString', 'QuietUninstallString', 'DisplayIcon')) {
+        $property = if ($null -ne $productionUninstall) { $productionUninstall.PSObject.Properties[$name] } else { $null }
+        $value = if ($null -ne $property) { [string]$property.Value } else { $null }
+        $uninstallFields[$name] = Get-TextHash $value
+    }
+    $productionUninstallSummary = if ($null -eq $productionUninstall) { 'missing' } else { Get-TextHash ($uninstallFields | ConvertTo-Json -Compress) }
     return [ordered]@{
         runValueSha256 = Get-TextHash $runValue
         userPathSha256 = Get-TextHash $userPath
         desktopShortcutSha256 = Get-FileHashValue $desktopShortcut
         legacyDesktopShortcutSha256 = Get-FileHashValue $legacyDesktopShortcut
         desktopSettingsSha256 = Get-FileHashValue $productionSettings
+        productionUninstallKeySha256 = $productionUninstallSummary
     }
 }
 
 function Assert-ProductionSnapshot {
     param($Expected)
     $current = Get-ProductionSnapshot
-    foreach ($key in @('runValueSha256', 'userPathSha256', 'desktopShortcutSha256', 'legacyDesktopShortcutSha256', 'desktopSettingsSha256')) {
+    foreach ($key in @('runValueSha256', 'userPathSha256', 'desktopShortcutSha256', 'legacyDesktopShortcutSha256', 'desktopSettingsSha256', 'productionUninstallKeySha256')) {
         if ($current[$key] -ne $Expected[$key]) {
             throw "Production-side-effect guard failed: $key changed. Snapshot stores hashes only."
         }
@@ -117,24 +128,85 @@ function Assert-FixtureRoot {
     if (-not (Test-PathWithin $RepoRoot $FixtureRoot) -or $FixtureRoot -eq $RepoRoot) {
         throw "FixtureRoot must be a child of this workspace: $RepoRoot"
     }
+    Assert-NoReparsePointsWithin -Path $FixtureRoot -Boundary $RepoRoot
     if (-not (Test-Path -LiteralPath $FixtureRoot -PathType Container)) {
         New-Item -ItemType Directory -Path $FixtureRoot -Force | Out-Null
     }
-    Assert-NoReparsePointsWithin $FixtureRoot
+    Assert-NoReparsePointsWithin -Path $FixtureRoot -Boundary $RepoRoot
 }
 
 function Assert-NoReparsePointsWithin {
-    param([string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Boundary)
+    $boundaryFull = [IO.Path]::GetFullPath($Boundary).TrimEnd('\', '/')
     $current = [IO.Path]::GetFullPath($Path)
-    while (Test-Path -LiteralPath $current) {
-        $item = Get-Item -LiteralPath $current -Force
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    if (-not (Test-PathWithin $boundaryFull $current)) {
+        throw "Refusing path outside the allowed fixture boundary: $current"
+    }
+    while ($true) {
+        try { $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] { $item = $null }
+        if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Refusing fixture path containing a symbolic link or junction: $current"
         }
-        if ($current.TrimEnd('\', '/') -eq $RepoRoot.TrimEnd('\', '/')) { break }
-        $parent = Split-Path -Parent $current
-        if (-not $parent -or -not (Test-PathWithin $RepoRoot $parent)) { break }
+        if ([string]::Equals($current.TrimEnd('\', '/'), $boundaryFull, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $parent = [IO.Path]::GetFullPath((Split-Path -Parent $current)).TrimEnd('\', '/')
+        if (-not $parent -or [string]::Equals($parent, $current.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Could not reach allowed fixture boundary while checking path: $Path"
+        }
+        if (-not (Test-PathWithin $boundaryFull $parent)) {
+            throw "Refusing path whose ancestor escapes the allowed fixture boundary: $current"
+        }
         $current = $parent
+    }
+}
+
+function Assert-NoReparsePointsInTree {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $rootFull = [IO.Path]::GetFullPath($Root)
+    Assert-NoReparsePointsWithin -Path $rootFull -Boundary $FixtureRoot
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($rootFull)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing fixture tree containing a symbolic link or junction: $($item.FullName)"
+            }
+            if ($item.PSIsContainer) { $pending.Push($item.FullName) }
+        }
+    }
+}
+
+function Parse-QaPackageVersion {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    if ($Value -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
+        throw "QA installer version must contain exactly three or four numeric components: $Value"
+    }
+    try { return [Version]::Parse($Value) }
+    catch { throw "QA installer version is invalid: $Value" }
+}
+
+function Assert-QaManifestPackageVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageVersion,
+        [Parameter(Mandatory = $true)][string]$BundleVersion,
+        [Parameter(Mandatory = $true)][string]$SourceVersion,
+        [AllowNull()][string]$PackageVersionKind
+    )
+    [void](Parse-QaPackageVersion $PackageVersion)
+    if ($PackageVersion -ceq $BundleVersion) {
+        if ($PackageVersionKind -and $PackageVersionKind -cne 'bundle') {
+            throw 'QA manifest packageVersionKind is inconsistent with an unmodified bundle version.'
+        }
+        if ($BundleVersion -cne $SourceVersion) { throw 'QA manifest bundleVersion does not match the source VERSION.' }
+        return
+    }
+    if ($PackageVersionKind -cne 'synthetic-qa-sequence' -or
+        $SourceVersion -notmatch '^\d+\.\d+\.\d+$' -or
+        $BundleVersion -cne $SourceVersion -or
+        $PackageVersion -notmatch '^\d+\.\d+\.\d+\.[1-9]\d*$' -or
+        $PackageVersion.Substring(0, $PackageVersion.LastIndexOf('.')) -cne $BundleVersion) {
+        throw 'QA manifest has an invalid synthetic packageVersion/bundleVersion relationship.'
     }
 }
 
@@ -144,7 +216,7 @@ function Assert-QaInstaller {
     $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
     if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "Installer not found: $Path" }
     if (-not (Test-PathWithin $RepoRoot $resolved)) { throw 'Installer must be a build artifact inside this workspace.' }
-    Assert-NoReparsePointsWithin $resolved
+    Assert-NoReparsePointsWithin -Path $resolved -Boundary $RepoRoot
     $name = [IO.Path]::GetFileName($resolved)
     if ($name -notmatch $ExpectedInstallerName) { throw "Refusing non-QA or unexpected installer name: $name" }
     $nameVersion = $Matches.version
@@ -152,10 +224,16 @@ function Assert-QaInstaller {
 
     $manifestPath = $resolved + '.manifest.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "QA build manifest required beside installer: $manifestPath" }
-    Assert-NoReparsePointsWithin $manifestPath
+    Assert-NoReparsePointsWithin -Path $manifestPath -Boundary $RepoRoot
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+    $packageVersion = if ($manifest.ContainsKey('packageVersion')) { [string]$manifest['packageVersion'] } else { [string]$manifest['version'] }
+    $sourceVersion = (Get-Content -LiteralPath (Join-Path $RepoRoot 'VERSION') -Raw -Encoding ASCII).Trim()
+    $bundleVersion = [string]$manifest.bundleVersion
+    $packageVersionKind = if ($manifest.ContainsKey('packageVersionKind')) { [string]$manifest.packageVersionKind } else { $null }
+    Assert-QaManifestPackageVersion -PackageVersion $packageVersion -BundleVersion $bundleVersion -SourceVersion $sourceVersion -PackageVersionKind $packageVersionKind
     if ($manifest.macro -ne 'IsolatedQaBuild=1' -or $manifest.appId -ne $QaAppId -or
-        [string]$manifest.version -cne $nameVersion -or
+        [string]$manifest.version -cne $nameVersion -or $packageVersion -cne $nameVersion -or
+        [string]$manifest.bundleVersion -cne $sourceVersion -or
         $manifest.installer -ne $name -or $manifest.appId -eq $ProductionAppId) {
         throw 'Installer manifest does not identify the isolated QA build and expected QA AppId.'
     }
@@ -166,8 +244,33 @@ function Assert-QaInstaller {
     if ($ExpectedHash -and $actualHash -ne $ExpectedHash) {
         throw 'Installer changed since the isolated fixture was installed.'
     }
-    $version = [Version]::Parse($nameVersion)
-    return [pscustomobject]@{ Path = $resolved; Name = $name; Sha256 = $actualHash; Version = $version.ToString(); Platform = $namePlatform; ManifestPath = $manifestPath }
+    $version = Parse-QaPackageVersion $nameVersion
+    return [pscustomobject]@{ Path = $resolved; Name = $name; Sha256 = $actualHash; Version = $version.ToString(); Platform = $namePlatform; ManifestPath = $manifestPath; Manifest = $manifest }
+}
+
+function Assert-InstalledQaPayload {
+    param([string]$Root, $Installer)
+    $required = @('dagents-node.exe', 'dagents-client.exe', 'dagents-browser.exe', 'dagents-shell.exe')
+    $payloads = @($Installer.Manifest.payloads)
+    if ($payloads.Count -ne $required.Count) { throw 'QA manifest must contain exactly the four canonical executable payloads.' }
+    $installedExecutables = @(Get-ChildItem -LiteralPath (Join-Path $Root 'bin') -File -Filter '*.exe' -ErrorAction Stop | ForEach-Object { $_.Name })
+    if ($installedExecutables.Count -ne $required.Count -or @($installedExecutables | Where-Object { $_ -notin $required }).Count -gt 0) {
+        throw 'Installed QA bin directory must contain exactly the four canonical executable names.'
+    }
+    $byName = @{}
+    foreach ($payload in $payloads) {
+        $name = [string]$payload.name
+        if ($name -notin $required) { throw "QA manifest contains an unexpected or retired executable alias: $name" }
+        if ($byName.ContainsKey($name)) { throw "QA manifest contains duplicate executable payload: $name" }
+        if ([string]$payload.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "QA manifest has an invalid SHA-256 for $name." }
+        $byName[$name] = ([string]$payload.sha256).ToLowerInvariant()
+    }
+    foreach ($name in $required) {
+        if (-not $byName.ContainsKey($name)) { throw "QA manifest is missing executable payload: $name" }
+        $path = Join-Path $Root (Join-Path 'bin' $name)
+        $actual = Get-FileHashValue $path
+        if ($actual -ne $byName[$name]) { throw "Installed QA executable hash differs from the selected manifest: $name" }
+    }
 }
 
 function Get-QaUninstallEntry {
@@ -251,7 +354,7 @@ finally:
 
 function Assert-InstalledQaFiles {
     param([string]$Root)
-    Assert-NoReparsePointsWithin $Root
+    Assert-NoReparsePointsWithin -Path $Root -Boundary $FixtureRoot
     foreach ($relative in @('bin\dagents-node.exe', 'bin\dagents-client.exe', 'bin\dagents-browser.exe', 'bin\dagents-shell.exe', 'dagents.cmd', 'config.yaml', 'lifecycle-protocol-v1.marker', 'unins000.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $Root $relative) -PathType Leaf)) {
             throw "Expected QA installer payload is missing: $relative"
@@ -384,7 +487,7 @@ function Assert-OwnedNodeStopped {
 
 Assert-FixtureRoot
 $targetRoot = Resolve-InstallRoot
-if (Test-Path -LiteralPath $targetRoot) { Assert-NoReparsePointsWithin $targetRoot }
+Assert-NoReparsePointsWithin -Path $targetRoot -Boundary $FixtureRoot
 $statePath = Get-FixtureStatePath
 
 switch ($Stage) {
@@ -410,6 +513,7 @@ switch ($Stage) {
         try {
             Invoke-HiddenInstaller $installer.Path $argumentList $targetRoot (Join-Path $targetRoot 'qa-desktop-settings.json')
             Assert-InstalledQaFiles $targetRoot
+            Assert-InstalledQaPayload $targetRoot $installer
             $uninstallEntry = Get-QaUninstallEntry $targetRoot
             if ($uninstallEntry.displayVersion -ne $installer.Version) { throw 'Installed QA DisplayVersion does not match the selected installer package version.' }
             Assert-ProductionSnapshot $snapshot
@@ -449,6 +553,7 @@ switch ($Stage) {
         $state = Read-State
         if ($state.phase -ne 'installed' -or [IO.Path]::GetFullPath($state.installRoot) -ne $targetRoot) { throw 'Seed requires the matching freshly installed QA fixture.' }
         Assert-InstalledQaFiles $targetRoot
+        Assert-NoReparsePointsInTree $targetRoot
         $configPath = Join-Path $targetRoot 'config.yaml'
         $configText = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
         if ($configText -notmatch '(?m)^listen:\s*(?:#.*)?$' -or $configText -match '(?m)^(?!listen:)[A-Za-z_][A-Za-z0-9_-]*:\s*(?:#.*)?$') {
@@ -490,10 +595,11 @@ switch ($Stage) {
         if ($state.phase -ne 'seeded' -or [IO.Path]::GetFullPath($state.installRoot) -ne $targetRoot) { throw 'Upgrade requires the matching seeded QA fixture.' }
         if ($state.qaAppId -ne $QaAppId) { throw 'Fixture state does not belong to the isolated QA AppId.' }
         if ($state.installedPlatform -ne $installer.Platform) { throw 'Upgrade candidate architecture differs from the installed fixture package.' }
-        if ([Version]::Parse($installer.Version) -le [Version]::Parse($state.installedVersion)) {
-            throw 'Upgrade candidate must have a strictly greater four-part QA version than the currently installed package.'
+        if ((Parse-QaPackageVersion $installer.Version).CompareTo((Parse-QaPackageVersion $state.installedVersion)) -le 0) {
+            throw 'Upgrade candidate must have a strictly greater three- or four-part numeric QA version than the currently installed package.'
         }
         Assert-InstalledQaFiles $targetRoot
+        Assert-NoReparsePointsInTree $targetRoot
         Assert-QaUninstallIdentity $targetRoot $state.installedVersion $state.installedUninstallerSha256 | Out-Null
         Assert-OwnedNodeRunning $targetRoot
         Assert-DesktopRunning $targetRoot
@@ -513,6 +619,7 @@ switch ($Stage) {
         try {
             Invoke-HiddenInstaller $installer.Path $argumentList $targetRoot (Join-Path $targetRoot 'qa-desktop-settings.json')
             Assert-InstalledQaFiles $targetRoot
+            Assert-InstalledQaPayload $targetRoot $installer
             Assert-DesktopStopped $targetRoot
             Assert-OwnedNodeStopped $targetRoot
             $after = Get-PersistedFixtureHashes $targetRoot
@@ -552,6 +659,7 @@ switch ($Stage) {
         if ($state.phase -ne 'upgraded' -or [IO.Path]::GetFullPath($state.installRoot) -ne $targetRoot) { throw 'Uninstall requires the matching upgraded QA fixture.' }
         if ($state.qaAppId -ne $QaAppId) { throw 'Fixture state does not belong to the isolated QA AppId.' }
         Assert-InstalledQaFiles $targetRoot
+        Assert-NoReparsePointsInTree $targetRoot
         Assert-QaUninstallIdentity $targetRoot $state.installedVersion $state.installedUninstallerSha256 | Out-Null
         Assert-OwnedNodeRunning $targetRoot
         Assert-DesktopRunning $targetRoot
