@@ -21,4 +21,15 @@ describe("MessageBubble context boundary", () => {
     expect(wrapper.find('[role="separator"]').exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it("keeps assistant markdown code copy controls wired through ResourceMarkdown", async () => {
+    const wrapper = mount(MessageBubble, {
+      props: { entry: { kind: "assistant", text: "```text\ncopy me\n```" }, agentId: "agent-a" },
+    });
+    const copy = wrapper.find('[data-markdown-action="copy"]');
+    expect(copy.exists()).toBe(true);
+    await copy.trigger("click");
+    expect(wrapper.find('[data-markdown-action="copy"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
 });

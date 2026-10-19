@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -92,6 +94,106 @@ func TestWorkspaceHTTPCRUDAndRevisions(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "folder", "note.bin")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWorkspaceHTTPGetIfNoneMatchSemantics(t *testing.T) {
+	s, _ := workspaceTestServer(t)
+	const path = "/v1/agents/agt-one/workspace/file?path=report.txt"
+	created := workspaceRequest(s, http.MethodPut, path, []byte("current content"), map[string]string{"If-None-Match": "*"})
+	if created.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
+	}
+	etag := created.Header().Get("ETag")
+	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `"`) {
+		t.Fatalf("ETag must be quoted: %q", etag)
+	}
+
+	for name, values := range map[string][]string{
+		"strong tag":             {etag},
+		"weak tag":               {"W/" + etag},
+		"comma-separated list":   {`"different", W/` + etag},
+		"quoted comma plus list": {`"opaque,tag", W/` + etag},
+		"wildcard":               {"*"},
+		"repeated field lines":   {`"different"`, "W/" + etag},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			for _, value := range values {
+				req.Header.Add("If-None-Match", value)
+			}
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 || rec.Header().Get("ETag") != etag {
+				t.Fatalf("status=%d body=%q ETag=%q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
+			}
+			if rec.Header().Get("Content-Length") != "" {
+				t.Fatalf("304 unexpectedly has Content-Length %q", rec.Header().Get("Content-Length"))
+			}
+		})
+	}
+
+	for name, value := range map[string]string{
+		"non-matching list":                `W/"different,opaque", "other"`,
+		"unquoted tag":                     "W/" + strings.Trim(etag, `"`),
+		"wildcard mixed with list":         `*, "other"`,
+		"matching tag with malformed tail": etag + `, malformed`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := workspaceRequest(s, http.MethodGet, path, nil, map[string]string{"If-None-Match": value})
+			if rec.Code != http.StatusOK || rec.Body.String() != "current content" || rec.Header().Get("ETag") != etag {
+				t.Fatalf("status=%d body=%q ETag=%q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
+			}
+		})
+	}
+
+	missing := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path=missing.txt", nil, map[string]string{"If-None-Match": "*"})
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("wildcard conditional request for missing file status=%d body=%s", missing.Code, missing.Body)
+	}
+}
+
+func TestWorkspaceHTTPGetHashesSameSizeSameMtimeAndPutStillRejectsStaleRevision(t *testing.T) {
+	s, root := workspaceTestServer(t)
+	const requestPath = "/v1/agents/agt-one/workspace/file?path=revision.txt"
+	created := workspaceRequest(s, http.MethodPut, requestPath, []byte("alpha"), map[string]string{"If-None-Match": "*"})
+	if created.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
+	}
+	oldETag := created.Header().Get("ETag")
+	filePath := filepath.Join(root, "revision.txt")
+	fixedTime := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filePath, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, []byte("omega"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filePath, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("test setup did not preserve size/mtime: before=(%d,%s) after=(%d,%s)", before.Size(), before.ModTime(), after.Size(), after.ModTime())
+	}
+	got := workspaceRequest(s, http.MethodGet, requestPath, nil, map[string]string{"If-None-Match": oldETag})
+	if got.Code != http.StatusOK || got.Body.String() != "omega" || got.Header().Get("ETag") == oldETag {
+		t.Fatalf("GET status=%d body=%q oldETag=%q newETag=%q", got.Code, got.Body.String(), oldETag, got.Header().Get("ETag"))
+	}
+	stale := workspaceRequest(s, http.MethodPut, requestPath, []byte("stale"), map[string]string{"If-Match": oldETag})
+	if stale.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale PUT status=%d body=%s", stale.Code, stale.Body)
+	}
+	contents, err := os.ReadFile(filePath)
+	if err != nil || string(contents) != "omega" {
+		t.Fatalf("stale PUT changed file: contents=%q err=%v", contents, err)
 	}
 }
 

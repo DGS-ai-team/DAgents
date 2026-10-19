@@ -46,6 +46,24 @@ test('Desktop menubar groups actions by user task and disables unavailable opera
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'clear-context').disabled, true)
 })
 
+test('resource menu only exposes draft recovery when the active file panel offers it', () => {
+  const fileMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'file', online: true, resourceActions: { canRecoverDraft: true, recoveryLabel: '丢弃草稿并重试' } })['资源']
+  assert.equal(fileMenu.find(item => item.action === 'discard-workspace-draft')?.label, '丢弃草稿并重试')
+  const cleanFileMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'file', online: true })['资源']
+  assert.equal(cleanFileMenu.some(item => item.action === 'discard-workspace-draft'), false)
+  const browserMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'browser', online: true, resourceActions: { canRecoverDraft: true } })['资源']
+  assert.equal(browserMenu.some(item => item.action === 'discard-workspace-draft'), false)
+  const terminalMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'terminal', online: true, resourceActions: { canEnableTerminalInput: true, canEndTerminal: true } })['资源']
+  assert.equal(terminalMenu.find(item => item.action === 'enable-terminal-input')?.label, '启用手动输入')
+  assert.equal(terminalMenu.find(item => item.action === 'end-terminal')?.label, '结束当前终端…')
+  const chatMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'chat', online: true, resourceActions: { canEnableTerminalInput: true, canEndTerminal: true } })['资源']
+  assert.equal(chatMenu.some(item => ['enable-terminal-input', 'end-terminal'].includes(item.action)), false)
+  const offlineFileMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'file', online: false, resourceActions: { canRecoverDraft: true } })['资源']
+  assert.equal(offlineFileMenu.some(item => item.action === 'discard-workspace-draft'), false)
+  const setupTerminalMenu = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'terminal', online: true, setupRequired: true, resourceActions: { canEnableTerminalInput: true, canEndTerminal: true } })['资源']
+  assert.equal(setupTerminalMenu.some(item => ['enable-terminal-input', 'end-terminal'].includes(item.action)), false)
+})
+
 test('terminal creation asks for a target, while resuming an existing session bypasses the chooser', () => {
   assert.deepEqual(terminalOpenIntent(), { kind: 'choose-target' })
   assert.deepEqual(terminalOpenIntent('session-123'), { kind: 'resume', sessionId: 'session-123' })

@@ -111,3 +111,15 @@ test('shared renderer preserves SVG viewBox and hyphenated drawing attributes', 
   assert.equal(outlined.attributes['stroke-width'], '2')
   assert.equal(outlined.attributes['stroke-linecap'], 'round')
 })
+
+test('Node save and upload icons keep stroke attributes when rendered through UiIcon', () => {
+  const source = fs.readFileSync(path.join(iconsRoot, 'ui/node-registry.js'), 'utf8')
+  assert.match(source, /"save": saveSemantic/)
+  assert.match(source, /"upload": uploadSemantic/)
+  for (const file of ['legacy-prototype/save.svg', 'desktop/upload.svg']) {
+    const parsed = parseIconMarkup(fs.readFileSync(path.join(iconsRoot, file), 'utf8'))
+    assert.equal(parsed.attributes.stroke, 'currentColor', `${file} preserves its stroke color`)
+    assert.equal(parsed.attributes['stroke-width'], '2', `${file} preserves its stroke width`)
+    assert.match(parsed.markup, /<(?:path|polyline|line)\b/)
+  }
+})

@@ -28,6 +28,8 @@ func ExtractAllToolMediaPaths(toolName, content string, args map[string]any) []T
 	name := strings.TrimSpace(toolName)
 	switch name {
 	case "show_image":
+		// Retain parsing for media rehydration of historical messages. The
+		// show_image tool is no longer registered for new model calls.
 		if got, ok := extractPathToolMedia("show_image", "show_image", args, content, captionFromArgs(args)); ok {
 			return []ToolMediaPath{got}
 		}

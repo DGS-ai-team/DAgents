@@ -373,7 +373,6 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
-		showImageToolDef(),
 	}
 	if r.multimodalEnabled {
 		base = append(base, readImageToolDef())
@@ -481,7 +480,7 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 // committed.
 func (r *Registry) ToolRetryAllowed(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files", "screen_capture",
+	case "read_file", "read_image", "glob_files", "grep_file", "grep_files", "screen_capture",
 		"terminal_read", "terminal_list":
 		return true
 	default:
@@ -491,7 +490,6 @@ func (r *Registry) ToolRetryAllowed(name string) bool {
 
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
-	r.handlers["show_image"] = r.execShowImage
 	r.handlers["read_image"] = r.execReadImage
 	r.handlers["write_file"] = r.execWriteFile
 	r.handlers["glob_files"] = r.execGlobFiles

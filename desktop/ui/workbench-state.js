@@ -155,6 +155,7 @@ export function createDesktopMenuModel(context = {}) {
     hasPendingApproval = false,
     hasPendingHitl = false,
     sidebarCollapsed = false,
+    resourceActions = {},
   } = context
   const hasAgent = Boolean(activeAgentId) && !isWorkgroup
   const canOpenResource = online && !setupRequired && hasAgent
@@ -175,6 +176,15 @@ export function createDesktopMenuModel(context = {}) {
       item('查看浏览器', 'open-browser', !canOpenResource),
       item('打开终端…', 'create-terminal', !canOpenResource),
       separator,
+      ...(canOpenResource && activeTab === 'file' && resourceActions.canRecoverDraft
+        ? [item(resourceActions.recoveryLabel || '丢弃草稿并重载', 'discard-workspace-draft')]
+        : []),
+      ...(canOpenResource && activeTab === 'terminal' && resourceActions.canEnableTerminalInput
+        ? [item('启用手动输入', 'enable-terminal-input')]
+        : []),
+      ...(canOpenResource && activeTab === 'terminal' && resourceActions.canEndTerminal
+        ? [separator, item('结束当前终端…', 'end-terminal')]
+        : []),
       item('关闭当前资源', 'close-resource', !closeableResource, { hint: closeableResource ? ({ terminal: '终端', file: '工作区', browser: '浏览器' })[activeTab] : '' }),
     ],
     视图: [

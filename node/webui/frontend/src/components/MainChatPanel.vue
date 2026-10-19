@@ -358,6 +358,7 @@ defineExpose({
         <MessageBubble
           v-if="['user', 'assistant', 'reasoning', 'system', 'context_boundary'].includes(item.kind)"
           :entry="item.entry"
+          :agent-id="agentId"
         />
         <ToolSummaryRow
           v-else-if="item.kind === 'tool_step'"

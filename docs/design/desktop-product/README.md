@@ -6,6 +6,12 @@
 
 每项材料的原始路径见 [来源清单](SOURCE-MANIFEST.md)。
 
+2026-10-18 新增[资源页自动刷新方案](resource-auto-refresh.md)，规定文件静默更新、编辑冲突保护，以及终端与浏览器的刷新边界；实现与初期 HTML/SVG 消息预览的证据见[验收记录](audits/2026-10-18/resource-refresh-and-inline-previews.md)。后续 HTML/SVG 已决定收束为显式 `dagents-render` 展示协议，最新规则及验收进度见[显式展示块验收](audits/2026-10-18/explicit-display-blocks.md)。
+
+2026-10-19 的 HTML 短内容留白改进及隔离测高边界，见[预览高度适配验收](audits/2026-10-19/html-preview-height.md)。
+
+同日后续按用户反馈调整长预览滚动、紧凑消息卡、文件提示与资源操作，见[资源页布局收束](audits/2026-10-19/resource-layout-polish.md)。
+
 2026-10-08 实装进度见 [Desktop MVP 收束与验收记录](mvp-closeout.md)。其中区分了已接入的 Windows 本机工作台、模拟原型和尚未完成的产品能力；不要将原型中的浏览器/文件交互视为已经实现。
 
 ## 从哪里开始
