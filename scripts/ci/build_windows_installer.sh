@@ -21,6 +21,11 @@ if [[ -z "${VERSION}" ]]; then
   echo "[installer] VERSION is required; pass the release/package version explicitly" >&2
   exit 1
 fi
+source_version="$(tr -d '\r\n' < "${REPO_ROOT}/VERSION")"
+if [[ "${VERSION}" != "${source_version}" ]]; then
+  echo "[installer] VERSION mismatch: requested ${VERSION}, source VERSION contains ${source_version}" >&2
+  exit 1
+fi
 PLATFORM="${PLATFORM:-windows-amd64}"
 case "${PLATFORM}" in
   windows-amd64)
@@ -40,11 +45,29 @@ BUNDLE_DIR="${REPO_ROOT}/bundle"
 OUTPUT_DIR="${REPO_ROOT}/dist-installer"
 OUTPUT_BASE="dagents-local-assistant-${PLATFORM}-installer-${VERSION}"
 INSTALLER_QA="${INSTALLER_QA:-0}"
+PACKAGE_VERSION="${VERSION}"
+PACKAGE_VERSION_KIND="bundle"
 case "${INSTALLER_QA}" in
   0)
+    if [[ -n "${QA_PACKAGE_VERSION:-}" ]]; then
+      echo "[installer] QA_PACKAGE_VERSION is allowed only with INSTALLER_QA=1" >&2
+      exit 1
+    fi
     ;;
   1)
-    OUTPUT_BASE="${OUTPUT_BASE}-qa"
+    if [[ -n "${QA_PACKAGE_VERSION:-}" ]]; then
+      qa_base="${QA_PACKAGE_VERSION%.*}"
+      qa_revision="${QA_PACKAGE_VERSION##*.}"
+      if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+         [[ ! "${QA_PACKAGE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[1-9][0-9]*$ ]] ||
+         [[ "${qa_base}" != "${VERSION}" ]] || [[ ! "${qa_revision}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "[installer] QA_PACKAGE_VERSION must append a positive numeric fourth component to the three-part source VERSION" >&2
+        exit 1
+      fi
+      PACKAGE_VERSION="${QA_PACKAGE_VERSION}"
+      PACKAGE_VERSION_KIND="synthetic-qa-sequence"
+    fi
+    OUTPUT_BASE="dagents-local-assistant-${PLATFORM}-installer-${PACKAGE_VERSION}-qa"
     ;;
   *)
     echo "[installer] INSTALLER_QA must be 0 or 1" >&2
@@ -101,8 +124,8 @@ if [[ ! -f "${BUNDLE_SRC}/VERSION" ]]; then
   exit 1
 fi
 bundle_version="$(tr -d '\r\n' < "${BUNDLE_SRC}/VERSION")"
-if [[ "${bundle_version}" != "${VERSION}" ]]; then
-  echo "[installer] VERSION mismatch: requested ${VERSION}, bundle contains ${bundle_version}" >&2
+if [[ "${bundle_version}" != "${source_version}" || "${bundle_version}" != "${VERSION}" ]]; then
+  echo "[installer] VERSION mismatch: source=${source_version}, requested=${VERSION}, bundle=${bundle_version}" >&2
   exit 1
 fi
 echo "[installer] staging ${BUNDLE_SRC} -> ${BUNDLE_DIR}"
@@ -115,7 +138,7 @@ COMPILE_LOG="${OUTPUT_DIR}/${OUTPUT_BASE}.compile.log"
 
 # Git Bash (MSYS) 会把 /D... 转成 D:\...，Inno Setup 会误当作第二个脚本路径。
 define_args=(
-  "//DMyAppVersion=${VERSION}"
+  "//DMyAppVersion=${PACKAGE_VERSION}"
   "//DMyAppArch=${INNO_ARCH}"
   "//DMyOutputBaseFilename=${OUTPUT_BASE}"
 )
@@ -148,8 +171,8 @@ if [[ "${INSTALLER_QA}" == "1" ]]; then
     payloads_json+="${payload_separator}{\"name\":\"${payload_name}\",\"sha256\":\"${payload_hash}\"}"
     payload_separator=','
   done
-  printf '{"macro":"IsolatedQaBuild=1","appId":"{B5D1A7C3-2E49-4F60-A8B1-7C3D9E5F2046}","version":"%s","bundleVersion":"%s","installer":"%s","sha256":"%s","payloads":[%s]}\n' \
-    "${VERSION}" "${bundle_version}" "$(basename "${INSTALLER}")" "${installer_hash}" "${payloads_json}" > "${INSTALLER}.manifest.json"
+  printf '{"macro":"IsolatedQaBuild=1","appId":"{B5D1A7C3-2E49-4F60-A8B1-7C3D9E5F2046}","version":"%s","packageVersion":"%s","packageVersionKind":"%s","bundleVersion":"%s","installer":"%s","sha256":"%s","payloads":[%s]}\n' \
+    "${PACKAGE_VERSION}" "${PACKAGE_VERSION}" "${PACKAGE_VERSION_KIND}" "${bundle_version}" "$(basename "${INSTALLER}")" "${installer_hash}" "${payloads_json}" > "${INSTALLER}.manifest.json"
 fi
 
 mkdir -p "${REPO_ROOT}/dist"

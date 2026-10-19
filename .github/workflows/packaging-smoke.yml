@@ -134,6 +134,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Verify isolated installer harness contract
+        shell: pwsh
+        run: ./packaging/windows/tests/test-isolated-installer-contract.ps1
+
       - name: Install Inno Setup compiler
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -150,7 +154,7 @@ jobs:
           done
           printf 'canonical desktop fixture\n' > "${input_dir}/dagents-shell.exe"
 
-          version=0.0.0
+          version="$(tr -d '[:space:]' < VERSION)"
           for platform in windows-amd64 windows-386; do
             PLATFORM="${platform}" \
             VERSION="${version}" \
