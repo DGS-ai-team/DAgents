@@ -30,8 +30,9 @@ import BrowserViewer from './components/BrowserViewer.vue'
 import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
 import AutoOverviewPanel from './components/AutoOverviewPanel.vue'
 import TopLeftSlotIcon from './components/TopLeftSlotIcon.vue'
-import { cancelAgentTurn, clearContext, closeAgentTerminal, deleteAgent, getAgent, getLLMSettings, getSetupConfig, patchAgent, submitMessage } from '../../node/webui/frontend/src/api/node.js'
+import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getLLMSettings, getSetupConfig, patchAgent, patchLLMSettings, submitMessage, uploadExternalToolToManage, uploadPluginToManage, uploadSkillToManage } from '../../node/webui/frontend/src/api/node.js'
 import { agentActiveProfile } from '../../node/webui/frontend/src/utils/agentLLM.js'
+import { dispatchDesktopSlashCommand } from './slash-commands.js'
 import { openLightbox } from '../../node/webui/frontend/src/stores/lightbox.js'
 import { readAgentMedia, readWorkspaceFile, uploadWorkspaceFile } from './workspace-files-api.js'
 import normalAgentIcon from '@shared-icons/desktop/agent.svg?url'
@@ -81,6 +82,7 @@ const cancellingByAgent = ref({})
 const hitlBusyIndexByAgent = ref({})
 const agentErrors = ref({})
 const globalError = ref('')
+const commandNotice = ref('')
 const busy = computed(() => isAgentBusy(busyByAgent.value, activeId.value))
 const cancellingTurn = computed(() => isAgentBusy(cancellingByAgent.value, activeId.value))
 const hitlBusyIndex = computed(() => Number.isInteger(hitlBusyIndexByAgent.value[activeId.value]) ? hitlBusyIndexByAgent.value[activeId.value] : -1)
@@ -156,6 +158,7 @@ provide(ResourceRenderContextKey, { agentId: activeId, readImage: readResourceIm
 watch(() => route.path, path => { activeTab.value = tabForRoute(path, activeTab.value) }, { immediate: true })
 watch(activeId, id => { agentStore.agentId = id || '' }, { immediate: true })
 watch(activeId, (id, previousId) => {
+  if (id !== previousId) commandNotice.value = ''
   if (id !== previousId) resourceNavigationError.value = ''
   if (previousId && id !== previousId) terminalEndConfirmation.value = null
   if (previousId && id !== previousId && terminalOpenDialog.value) void closeTerminalOpenDialog()
@@ -611,13 +614,23 @@ async function selectAgent(id, { clearError = true, openChat = false } = {}) {
   } catch (e) { if (epoch === selectionEpoch) error.value = String(e) }
 }
 async function send() {
-  if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'chat'); return }
-  if (hitlQueue.value.length) { error.value = '请先处理当前对话中的待处理请求。'; return }
-  if (agentGenerating.value) return
   const text = input.value.trim()
   const images = pendingImages.value.slice()
   const files = pendingFiles.value.slice()
-  if ((!text && !images.length && !files.length) || !activeId.value || agentGenerating.value) return
+  if ((!text && !images.length && !files.length) || !activeId.value) return
+  if (text.startsWith('/')) {
+    const agentId = activeId.value
+    input.value = ''
+    inputDrafts.value[agentId] = ''
+    pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
+    pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
+    await executeSlashCommand(text, agentId)
+    return
+  }
+  commandNotice.value = ''
+  if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'chat'); return }
+  if (hitlQueue.value.length) { error.value = '请先处理当前对话中的待处理请求。'; return }
+  if (agentGenerating.value) return
   const agentId = activeId.value
   input.value = ''
   inputDrafts.value[agentId] = ''
@@ -660,6 +673,35 @@ async function sendMessageToActiveAgent(text, images = [], files = []) {
   }
   finally { setAgentBusy(agentId, false) }
   return false
+}
+async function executeSlashCommand(text, agentId) {
+  error.value = ''
+  commandNotice.value = ''
+  const consumed = await dispatchDesktopSlashCommand(text, {
+    agentId,
+    clearContext,
+    compressContext,
+    getLLMSettings,
+    refresh: async id => {
+      if (activeId.value !== id) return
+      streamingText.value = ''
+      await selectAgent(id)
+    },
+    patchLLMSettings: async patch => {
+      const settings = await patchLLMSettings(patch)
+      llmSettings.value = settings
+      return settings
+    },
+    upload: async spec => {
+      if (spec.kind === 'skill' || spec.kind === 'skills') return uploadSkillToManage({ path: spec.path, skillId: spec.id, version: spec.version, name: spec.name, publish: spec.publish })
+      if (['externaltool', 'externaltools', 'tool', 'tools'].includes(spec.kind)) return uploadExternalToolToManage({ path: spec.path, toolId: spec.id, version: spec.version, name: spec.name, platform: spec.platform, publish: spec.publish })
+      if (spec.kind === 'plugin' || spec.kind === 'plugins') return uploadPluginToManage({ path: spec.path, pluginId: spec.id, version: spec.version, name: spec.name, platform: spec.platform, publish: spec.publish })
+      throw new Error(`未知 upload 类型: ${spec.kind}`)
+    },
+    onError: message => { error.value = message },
+    onNotice: message => { commandNotice.value = message },
+  })
+  if (!consumed) error.value = '无法处理此斜杠命令'
 }
 function attachWorkspaceFile(fileRef) {
   if (!activeId.value || !fileRef) return
@@ -757,10 +799,17 @@ function openAutoChat(id) { dialog.value = ''; void selectAgent(id) }
 async function openAutoConfig(id) { dialog.value = ''; await selectAgent(id); await router.push(`/settings/agents/${encodeURIComponent(id)}`) }
 async function openAgentSettings(id) { await selectAgent(id); await router.push(`/settings/agents/${encodeURIComponent(id)}`) }
 async function sendFromDock() {
+  const text = dockDraft.value
+  if (text.trim().startsWith('/') && activeId.value) {
+    dockDraft.value = ''
+    dockDrafts.value[activeId.value] = ''
+    await executeSlashCommand(text.trim(), activeId.value)
+    return
+  }
+  commandNotice.value = ''
   if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'dock'); return }
   if (hitlQueue.value.length) { error.value = '请先返回完整对话处理待处理请求。'; return }
   if (agentGenerating.value) return
-  const text = dockDraft.value
   if (!text.trim() || !activeId.value || agentGenerating.value) return
   const agentId = activeId.value
   dockDraft.value = ''
@@ -1551,7 +1600,7 @@ onUnmounted(() => {
   <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
   <button v-if="agentGenerating" class="send-button" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button>
   <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
-</form><p v-if="error" class="composer-error">{{ error }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
+</form><p v-if="error" class="composer-error" role="alert">{{ error }}</p><p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
       </template>
       <template #dock>
       <ResourceAgentDock
@@ -1572,6 +1621,8 @@ onUnmounted(() => {
       >
         <template #details>
           <div class="dock-details">
+            <p v-if="error" class="composer-error" role="alert">{{ error }}</p>
+            <p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p>
             <div v-if="dockLatestMessage" class="dock-detail-row dock-detail-row--message"><ResourceMarkdown :entry="dockLatestMessage" :agent-id="activeId" source="dock" /></div>
             <div v-if="lastToolActivity" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
             <div v-if="pending" class="dock-approval"><strong>{{ pending.message || '有待处理的请求' }}</strong><div v-for="call in approvalCalls" :key="call.id" class="dock-approval-call"><code>{{ call.name }}</code><span>{{ call.reason }}</span><pre v-if="call.argumentsText" class="approval-arguments">{{ call.argumentsText }}</pre></div><div v-if="approvalCalls.length" class="approval-actions"><button class="quiet" :disabled="busy" @click.prevent="rejectAll(approvalQueueIndex)">拒绝</button><button class="approve" :disabled="busy" @click.prevent="approveAll(approvalQueueIndex)">批准并继续</button></div><p v-else>请使用右上角按钮返回完整对话处理此请求。</p></div>

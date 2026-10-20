@@ -1203,6 +1203,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .attach-button .icon-mask { width: 17px; height: 17px; color: #343a3d; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .composer-error { max-width: 900px; margin: 3px auto 0; color: #a53c38; font-size: 11px; }
+.composer-notice { max-width: 900px; margin: 3px auto 0; color: #5d5d5d; font-size: 11px; }
 .overview-json { max-height: 55vh; overflow: auto; padding: 12px; border-radius: 7px; background: #f4f5f5; color: #3f484d; font-size: 11px; white-space: pre-wrap; }
 .agent-create-overlay { position: fixed; z-index: 25; top: 48px; right: 0; bottom: 0; left: 0; overflow: auto; background: #f4f5f5; --app-background: #f4f5f5; --color-primary: #555d62; --color-primary-strong: #41484c; --color-border: #d6dadd; --color-surface: #fff; --color-text: #30383c; --color-text-muted: #60696d; --color-text-subtle: #747d81; }
 .agent-create-overlay .agent-create-page { min-height: 100%; background: #f4f5f5; }
