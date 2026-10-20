@@ -16,7 +16,7 @@ $goPackages = @(
     "./shared/logfiles/...",
     "./shared/update/...",
     "./node/...",
-    "./client/...",
+    "./client/..."
 )
 
 Invoke-Step "install Node Web UI dependencies" { npm ci --prefix node/webui/frontend }

@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+
+## [0.12.0] - 2026-10-20
+
+独立 Desktop 与 Node API 收束版
+
+- 完成 Windows Desktop 与 Node API 分离，覆盖对话、资源工作台、Auto 任务及安装升级流程。
+- 强化工具执行收尾、配置密钥保护、资源安全展示与数据恢复边界。
+
 ### Desktop 与 Node 分离
 
 - Windows 的日常入口改为独立 Tauri Desktop，Node 只提供 API，退役 Go 托盘、Node `/ui/` 与重复 Shell 路径。沿用一个使用者的 Node，多个 Desktop 共享 Agent 状态，不按客户端新增用户或 runtime。
