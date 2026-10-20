@@ -9,6 +9,7 @@ known security advisories.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -22,11 +23,82 @@ ALLOWED_LICENSES = {
     "ISC",
     "MIT-0",
     "MIT",
-    "Apache-2.0 OR MIT",
-    "MIT OR Apache-2.0",
-    "MPL-2.0 OR Apache-2.0",
-    "(MPL-2.0 OR Apache-2.0)",
+    "MPL-2.0",
+    "Python-2.0",
+    "Zlib",
 }
+
+# npm metadata still contains a few non-SPDX spellings. Keep these explicit so
+# new packages cannot silently inherit a permissive interpretation.
+LEGACY_LICENSE_ALIASES = {
+    "MIT/X11": "MIT",
+}
+
+SPDX_TOKEN = re.compile(r"\s*(\(|\)|AND\b|OR\b|[A-Za-z0-9.+-]+)")
+
+
+def license_expression_allowed(
+    expression: str | None,
+    package_name: str | None = None,
+    package_version: str | None = None,
+) -> bool:
+    """Accept only allowed SPDX IDs, respecting OR and AND semantics."""
+    if not expression:
+        return False
+    if (package_name, package_version, expression.strip()) == ("duck", "0.1.12", "BSD"):
+        # duck's metadata uses a generic label; its bundled LICENSE is BSD-2-Clause.
+        expression = "BSD-2-Clause"
+    expression = LEGACY_LICENSE_ALIASES.get(expression.strip(), expression.strip())
+    tokens: list[str] = []
+    position = 0
+    while position < len(expression):
+        match = SPDX_TOKEN.match(expression, position)
+        if not match:
+            return False
+        tokens.append(match.group(1))
+        position = match.end()
+
+    index = 0
+
+    def parse_primary() -> bool:
+        nonlocal index
+        if index >= len(tokens):
+            raise ValueError("missing license identifier")
+        token = tokens[index]
+        if token == "(":
+            index += 1
+            value = parse_or()
+            if index >= len(tokens) or tokens[index] != ")":
+                raise ValueError("unmatched opening parenthesis")
+            index += 1
+            return value
+        if token in {")", "AND", "OR"}:
+            raise ValueError("unexpected operator")
+        index += 1
+        return token in ALLOWED_LICENSES
+
+    def parse_and() -> bool:
+        nonlocal index
+        value = parse_primary()
+        while index < len(tokens) and tokens[index] == "AND":
+            index += 1
+            value = parse_primary() and value
+        return value
+
+    def parse_or() -> bool:
+        nonlocal index
+        value = parse_and()
+        while index < len(tokens) and tokens[index] == "OR":
+            index += 1
+            alternative = parse_and()
+            value = value or alternative
+        return value
+
+    try:
+        result = parse_or()
+        return index == len(tokens) and result
+    except ValueError:
+        return False
 
 
 def package_roots(node_modules: Path) -> list[Path]:
@@ -84,7 +156,7 @@ def main() -> int:
             if key in inspected:
                 continue
             inspected.add(key)
-            if license_name not in ALLOWED_LICENSES:
+            if not license_expression_allowed(license_name, name, version):
                 failures.append(f"{name}@{version}: license={license_name!r}")
 
     if failures:
