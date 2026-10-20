@@ -6,9 +6,9 @@
 
 建议下一版定位为 **v0.12.0：独立 Desktop 与 Node API 收束版**。候选分支 `codex/release-0.12.0-rc` 已从 `642cd15` 准备版本元数据；提交 `e1578049` 已推送，包含 Desktop 斜杠命令分发及上下文状态修复。官方手动打包正在验证该提交；更早的 `80feadbb`、`a8d124e2` 打包结果均已被此候选取代。尚未冻结最终发行包、创建发布 PR 或标签，也没有最终候选的 CodeQL 结果。当前不宜直接发布稳定版，主要缺口仍是最终候选的 PR/CI/CodeQL、安装恢复和外部环境验收。
 
-10 月 20 日完成的临时标准用户 QA 关闭了隔离 QA 包的初装、升级、卸载保留数据和重装恢复核心路径；它不等于最终发行候选放行。该 QA 包的安装器版本为 `0.11.0.1`，其中 payload 和 bundle `VERSION` 仍为 `0.11.0`，不是发布候选。最终候选仍需验证 WebView2 缺失、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、真实 Provider/SSH 和至少 24 小时 Auto 耐久。10 月 17 日的完整包基于更早源码，不能作为当前资源改动的最终发行候选。
+10 月 20 日完成的临时标准用户 QA 关闭了隔离 QA 包的初装、升级、卸载保留数据和重装恢复核心路径；它不等于最终发行候选放行。该 QA 包的安装器版本为 `0.11.0.1`，其中 payload 和 bundle `VERSION` 仍为 `0.11.0`，不是发布候选。最终候选仍需验证 WebView2 缺失、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、真实 Provider 与本机 Browser 联动，以及至少 24 小时 Auto 耐久。10 月 17 日的完整包基于更早源码，不能作为当前资源改动的最终发行候选。
 
-本版覆盖 Windows Desktop、本机 Node、通过用户自建 SSH 隧道访问自己的 Node，以及可选 Manage 协作。Node 不再提供 `/ui/`；多个 Desktop 共享同一使用者的 Node 事实，不引入多人账号与 runtime 隔离。远端文件、终端、浏览器属于 Node 所在机器。浏览器资源当前是 Node 会话的只读观看，不承诺人工接管或本地嵌入式浏览器。
+本版覆盖 Windows Desktop、本机 Node 与可选 Manage 协作。Desktop 固定连接同机 Node，不保存远程 Node 或 SSH 隧道配置；Node 不再提供 `/ui/`。多个 Desktop 可各自使用本机 Node，不引入多人账号与 runtime 隔离。远程主机操作通过 Node 的 SSH/远程终端工具完成。浏览器资源当前是 Node 会话的只读观看，不承诺人工接管或本地嵌入式浏览器。
 
 2026-10-17 用户已确认：下一版 Windows 仅发布 x64 完整包，暂停 x86 完整包。核查发现锁定的 greenlet 缺少 win32 wheel，Playwright 包内驱动为 x64，不能把 x86 Go/Desktop 编译成功当作完整产品可用。历史 x86 更新仍严格按平台选择，不能回退到 x64。Linux 发布 Node/Client/Browser 服务包，不发布 Linux Desktop。
 
@@ -23,6 +23,7 @@
 | Auto、Todo、Dreaming、工作组 | 真实唤醒、Todo 审批、Dreaming 更新经验与清空活动上下文、Supervisor→worker→汇总已验证；非多日耐久或所有故障场景通过。见 [Auto 与工作组](design/desktop-product/audits/2026-10-12/auto-workgroup/README.md)。 |
 | 空闲后新上下文 | 自动回归、出站请求捕获、真实 Tauri + Mock 两轮对话、归档及重新加载后的分隔线已通过。见 [上下文边界](design/idle-conversation-boundary.md)。 |
 | 资源刷新与消息展示 | 条件读取、草稿/版本冲突保护、资源链接、显式隔离 HTML/SVG、预览实际高度、页面过渡与紧凑消息卡已实现；安全与组件回归、Windows Tauri 原生专项通过。见[资源页收束](design/desktop-product/audits/2026-10-19/resource-layout-polish.md)及本轮发版验收。不是实际 SSH、Browser 发行包或标准用户安装验收。 |
+| Desktop 本地 Node 连接 | Desktop 固定连接 `127.0.0.1:18765`，Browser sidecar 固定连接 `127.0.0.1:18766`；移除了远程 Node/SSH tunnel 设置和生命周期分支。真实 DeepSeek 对话已通过隔离 Node 写入并由原生 Desktop 收到、渲染；版本/API 能力握手仍是后续 P0 缺口。 |
 | 配置密钥与安装链路修复 | 密钥保留和 MCP 工具开关/JSON 往返已有真实 Tauri + 合成 HTTP 服务验证；活动 Agent 的模型 ID 引用保护已通过 API/Store/组件回归。管理员开发机和临时标准 Windows 用户均完成各自 QA 范围内的安装生命周期验证；10 月 20 日标准用户轮次覆盖静默初装、Mock 对话、升级、卸载数据保留与重装恢复。此证据仅针对 QA-only `0.11.0.1` 安装器；缺失 WebView2、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、旧发行迁移、真实 Provider/SSH 和长时 Auto 仍未验收。 |
 
 ## 本轮已关闭的工作
@@ -31,7 +32,7 @@
 - [x] 修复 Bash 等待工作区写锁时收到 UI 取消却返回 `workspace_busy`；增加确定性回归，针对取消边界重复 20 次通过，Go 1.26.9 五模块全量回归通过。
 - [x] v0.11.0 持久化数据结构核对、脱敏恢复与配对密钥/缺失密钥回归；落地[迁移指南](user/migrate-from-v0.11.md)。不把数据 Store 测试计作安装迁移。
 - [x] 原生 LLM 空 Key 探测→保存→重开探测、MCP 工具开关→JSON 保存、遮罩凭据往返及无效草稿失败验证；[配置验收记录](design/desktop-product/audits/2026-10-17/configuration-and-data.md)。
-- [x] Desktop 自定义输入栏补齐 `/clear`、`/compress`、`/thinking` 和 `/upload` 分发；主对话与资源页悬浮输入栏复用 Web UI 命令解析，未知命令显示错误而不提交给模型。`/compress` 保留正在显示的流式回复，`/clear` 清除待落盘的乐观消息。82 项 Desktop UI 测试和生产构建通过；修复提交 `e1578049` 已推送，最终候选官方打包正在运行。
+- [x] Desktop 自定义输入栏补齐 `/clear`、`/compress`、`/thinking` 和 `/upload` 分发；主对话与资源页悬浮输入栏复用共享命令解析，未知命令显示错误而不提交给模型。`/compress` 保留正在显示的流式回复，`/clear` 清除待落盘的乐观消息。82 项 Desktop UI 测试和生产构建通过；修复提交 `e1578049` 已推送，最终候选官方打包正在运行。
 - [x] 两个设计原型的兼容依赖修复，分别 build 与 4 项测试通过、npm audit 0；确认 `glib` 只在非发行的 Linux Desktop 图中，Windows x64/x86 不包含它。
 - [x] 移除 Desktop 未使用的 `zip 7.2.0` 及其专属依赖，关闭三项 RustSec 漏洞；锁文件扫描为 0 漏洞、7 项明示警告，CI 增加固定版本的无忽略项审计。
 - [x] 正式与手动发布工作流仅组装 x64 完整包；更新查询增加 `platform_supported`，无匹配架构时明确提示且不下载其他架构。旧 Manage/Node 缺字段默认允许原有行为；覆盖 Node 失败状态、托盘提示和 CLI 检查分支。
@@ -55,7 +56,7 @@
 - [ ] **LLM 与 MCP 配置往返。** 当前真实窗口已通过空 Key 探测/保存/重开探测与 MCP 工具开关/高级 JSON/凭据往返，失败草稿不覆盖已存配置。HTTP 对端为本地合成服务，仍需在最终安装候选与实际 Provider/外部 MCP 上做冒烟；清空/替换 Key、取消和探测失败仍以自动回归为主，未逐一原生复验。
 - [x] **配置 ID 改名的 Agent 引用。** 活动 Agent 引用中的 ID 改名/删除返回 `409 llm_profile_in_use`，列出 Agent 并要求先修改绑定或删除 Agent；软归档 Agent 不阻止变更。拒绝发生于设置和密钥持久化前，创建/PATCH 还会拒绝不存在的目标 ID，详见 [API 契约](api/node-integration.md) 与配置验收记录。
 - [ ] **最终候选的任务恢复与 Auto 耐久。** 做一轮不少于 24 小时的持续运行，覆盖唤醒、无事可做、用户插话、Todo 修改、待审批、拒绝、停止、Dreaming、经验注入和手册文件。分别在运行/待审批/空闲状态重启 Desktop 或 Node，核对队列、历史、工具副作用和调度，不重复执行未知副作用；工具无工具收尾、失败批次及空闲上下文边界一并做候选包冒烟。既有各专项证据保留，不要求重复全部测试矩阵。
-- [ ] **实际 SSH 与发行服务。** Windows Desktop 经用户创建的 SSH loopback 隧道连接现代 Linux Node，验证掉线/重连、远端文件上传下载/冲突、终端恢复与明确结束，确认不会启动本机 Node。Windows 打包 Browser/Chromium 已在全新 runtime 与隔离用户目录运行：健康/协议、启动 Chromium、本地页面导航/DOM/截图、停止会话与关闭后状态通过；只证明独立 sidecar，不涵盖 Node 工具与 Desktop Browser 资源联动、外站或 Linux 包。真实 SSH 与 Linux 仍待验收。Windows x86 完整包已按用户决策暂停。
+- [ ] **本机 Browser 与发行服务。** Windows 打包 Browser/Chromium 已在全新 runtime 与隔离用户目录运行：健康/协议、启动 Chromium、本地页面导航/DOM/截图、停止会话与关闭后状态通过；仍需在最终候选上验收 Node 工具与 Desktop Browser 资源联动、外站和升级后的状态。Linux Node 按独立服务包验收，不属于 Desktop 远程连接矩阵。Windows x86 完整包已按用户决策暂停。
 - [ ] **版本资料、依赖审计与发布产物。** `Unreleased`、README 原生截图、操作手册、路线图与支持范围已同步。候选已用 `prepare_release.py` 统一为 `0.12.0`，`validate_release.py --version 0.12.0` 通过；剩余为冻结后的联网依赖审计与真实发布构建，核对文件版本、包内容、许可证、SHA256SUMS、release-manifest 和更新选包/下载后安装链路。已生成的手动 QA 安装包 Authenticode 状态为 `NotSigned`；正式 release workflow 当前没有签名步骤，需在冻结前确认签名策略以及 SmartScreen 提示是否可接受，不能把手动 QA 包当作最终 Release 资产。
 
 ## 依赖告警的处置范围
@@ -76,13 +77,13 @@
 
 ## 不作为本版前置条件
 
-浏览器人工接管与可交互嵌入式页签、Desktop 自建 SSH 隧道、LAN/WAN 直连鉴权、多用户/租户隔离、macOS/Linux Desktop、新事件总线/工作流系统，以及再次全面重写 UI/runtime，均留到后续独立立项。当前个人 Node + 外部 SSH 转发的边界不变。
+浏览器人工接管与可交互嵌入式页签、远程 Desktop→Node 连接、LAN/WAN Node 档案、多用户/租户隔离、macOS/Linux Desktop、新事件总线/工作流系统，以及再次全面重写 UI/runtime，均留到后续独立立项。当前产品边界是 Desktop 只连接同机 Node；远程 SSH 终端是 Node 的工具能力，不改变 Desktop 与 Node 的本地连接关系。
 
 ## 执行顺序
 
 1. PR #348—#352 已完成 `dev` 集成；PR #352 位于 `33106ead` 且检查通过。`6a0107c2` 是此前候选冻结点，不是包含全部后续提交的最终发行候选。
 2. 保留候选来源、哈希和本地验收结果；标准用户 QA 核心安装与恢复路径已关闭，仍需对最终冻结包重验，并关闭缺失 WebView2、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、旧发行迁移及其他外部环境缺口。
-3. 完成最终安装候选的真实 Provider/MCP、SSH/Linux 与 Browser 联动冒烟；Auto 耐久另按不少于 24 小时记录。
+3. 完成最终安装候选的真实 Provider/MCP、本机 Browser 联动冒烟；Linux Node 服务包单独验收，Auto 耐久另按不少于 24 小时记录。
 4. 关闭上述验收发现的问题，重建候选并只重测受影响链路；补齐版本资料与最终依赖审计。
 5. 按 [发布流程](release-process.md) 建立 `dev → main` 发布 PR，通过检查和审查后，在 `main` 对应提交打标签；发布后校验实际资产、安装与升级，再同步 `main → dev`。
 
@@ -90,6 +91,6 @@
 
 2026-10-20 补充：已完成打包 Node → Browser → 原生 Desktop 整链，以及管理员开发机上的正式安装任务开关、官方 v0.11.0 普通 Agent 冷备份迁移、合成加密 Key 恢复和运行中卸载。验收发现并修复中文路径卸载损坏 PATH、已有 policy 导致静默安装挂起两项问题，PR #352 已合并至 `dev`（`33106ead`），PR 检查通过；失败候选和成功修正候选分别留证。另在临时标准 Windows 用户下完成 QA-only `0.11.0.1` 安装器的静默初装、Mock 对话、快捷方式重开、`0.11.0 → 0.11.0.1` 升级、卸载保留数据及重装恢复，详见[标准用户安装恢复审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。该 QA 的 payload/bundle `VERSION` 仍为 `0.11.0`，不属于发布候选；缺失 WebView2、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、真实 Provider/SSH 和 24 小时 Auto 仍未关闭，本轮不据此发布稳定版。
 
-2026-10-20 继续：从 `642cd15` 建立 `codex/release-0.12.0-rc` 候选并同步正式版本元数据。Windows 本地完整验证通过：Node Web UI 534 项、Desktop UI 77 项、Python 202 项、Rust 51 项，Go 测试/vet/Staticcheck/构建通过；Manage 构建与 lint 通过，Desktop UI 构建通过。release metadata 的 4 项单测和 `validate_release.py --version 0.12.0` 通过；隔离安装器契约测试 30 项通过。完整验证首次发现 `scripts/verify.ps1` 的 Go 包列表有 PowerShell 尾随逗号语法错误，修复后整套验证通过。该轮候选提交 `80feadbb` 已推送并通过官方手动打包；随后安装冒烟确认安装目录版本为 `0.12.0`，随包 Node 启动、状态和停止命令均成功，原隔离 Node `18977` 保持运行。该包不含下一条记录中的斜杠命令修复，且 Authenticode 未签名，现已由新候选取代。
+2026-10-20 继续：从 `642cd15` 建立 `codex/release-0.12.0-rc` 候选并同步正式版本元数据。Windows 本地完整验证通过：共享 UI 源码 534 项、Desktop UI 77 项、Python 202 项、Rust 51 项，Go 测试/vet/Staticcheck/构建通过；Manage 构建与 lint 通过，Desktop UI 构建通过。release metadata 的 4 项单测和 `validate_release.py --version 0.12.0` 通过；隔离安装器契约测试 30 项通过。完整验证首次发现 `scripts/verify.ps1` 的 Go 包列表有 PowerShell 尾随逗号语法错误，修复后整套验证通过。该轮候选提交 `80feadbb` 已推送并通过官方手动打包；随后安装冒烟确认安装目录版本为 `0.12.0`，随包 Node 启动、状态和停止命令均成功，原隔离 Node `18977` 保持运行。该包不含下一条记录中的斜杠命令修复，且 Authenticode 未签名，现已由新候选取代。
 
-2026-10-20 斜杠命令回归：发现 Desktop 自定义 Composer 绕过 Web UI 的命令分发，导致 `/clear`、`/compress`、`/thinking`、`/upload` 被当成普通消息提交。修复与上下文状态边界处理已加入 `e1578049` 并推送；Desktop UI 82 项、Web UI 534 项通过，Desktop Vite 生产构建通过。官方手动打包工作流 [39366512900](https://github.com/DGS-ai-team/DAgents/actions/runs/39366512900) 正在运行；较早的 [39365962542](https://github.com/DGS-ai-team/DAgents/actions/runs/39365962542) 对应 `a8d124e2`，已经被新提交取代。最终候选仍缺 PR CI/CodeQL、冻结发行包安装迁移验收、真实 Provider/SSH、Browser 联动和长时 Auto 验收。
+2026-10-20 斜杠命令回归：发现 Desktop 自定义 Composer 绕过共享命令分发，导致 `/clear`、`/compress`、`/thinking`、`/upload` 被当成普通消息提交。修复与上下文状态边界处理已加入 `e1578049` 并推送；Desktop UI 82 项、共享 UI 源码 534 项通过，Desktop Vite 生产构建通过。官方手动打包工作流 [39366512900](https://github.com/DGS-ai-team/DAgents/actions/runs/39366512900) 正在运行；较早的 [39365962542](https://github.com/DGS-ai-team/DAgents/actions/runs/39365962542) 对应 `a8d124e2`，已经被新提交取代。最终候选仍缺 PR CI/CodeQL、冻结发行包安装迁移验收、真实 Provider/SSH、Browser 联动和长时 Auto 验收。

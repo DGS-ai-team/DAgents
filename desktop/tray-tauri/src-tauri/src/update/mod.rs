@@ -244,16 +244,6 @@ impl Applier {
     }
 
     pub fn run(&self, opt: ApplyOptions) -> (ApplyResult, i32) {
-        if !opt.check_only && !self.config_snapshot().can_manage_local_node() {
-            let status = self.checker.snapshot();
-            return (
-                ApplyResult {
-                    status,
-                    message: "隧道模式只连接远程 Node，不支持从 Desktop 更新本机 Node 安装".into(),
-                },
-                1,
-            );
-        }
         let status = self.checker.check_once();
         let mut result = ApplyResult {
             status: status.clone(),

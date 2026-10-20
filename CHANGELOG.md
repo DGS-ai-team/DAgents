@@ -4,6 +4,7 @@
 
 ## [Unreleased]
 
+- 移除共享 Vue 前端的独立网页启动与构建入口，DAgents Desktop 成为唯一 Agent 交互界面；Node 继续只提供 API。
 
 ## [0.12.0] - 2026-10-20
 

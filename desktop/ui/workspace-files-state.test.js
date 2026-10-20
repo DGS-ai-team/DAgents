@@ -35,7 +35,7 @@ test('workspace binary sniffing previews actual raster images and treats source-
   const png = Uint8Array.from([137,80,78,71,13,10,26,10,0])
   assert.equal(workspaceContentType('preview.png', 'application/octet-stream', png), 'image/png')
   assert.equal(workspaceContentType('readme.md', 'application/octet-stream', new TextEncoder().encode('# safe')), 'text/plain')
-  assert.equal(workspaceContentType('page.html', 'text/html', new TextEncoder().encode('<script>')), 'text/plain')
+  assert.equal(workspaceContentType('page.html', 'text/html', new TextEncoder().encode('<script>')), 'text/html')
   assert.equal(workspaceContentType('spoof.png', 'application/octet-stream', new TextEncoder().encode('not an image')), 'text/plain')
   assert.equal(workspaceContentType('binary.bin', 'application/octet-stream', Uint8Array.from([0, 255])), 'application/octet-stream')
 })

@@ -199,6 +199,12 @@
       "file": "lucide/puzzle.svg",
       "source": "Lucide Puzzle from official repository, fetched 2026-10-09",
       "license": "ISC"
+    },
+    {
+      "name": "disconnect",
+      "file": "desktop/unplug.svg",
+      "source": "Lucide Unplug from the official icon repository",
+      "license": "ISC"
     }
   ]
 }

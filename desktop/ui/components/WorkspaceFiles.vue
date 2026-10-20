@@ -1,10 +1,11 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiIcon from '../../../node/webui/frontend/src/components/UiIcon.vue'
+import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '../../../node/webui/frontend/src/utils/resourceContext.js'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import { createWorkspaceFile, downloadBytes, listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from '../workspace-files-api.js'
-import { deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, serializeWorkspaceDraft, workspaceContentType, workspaceDraftKey, workspaceFileLocation } from '../workspace-files-state.js'
+import { deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
 
 const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, requestGeneration: { type: Number, default: 0 } })
 const emit = defineEmits(['resource-name', 'attach-file'])
@@ -25,6 +26,15 @@ const error = ref('')
 const refreshError = ref('')
 const uploadInput = ref(null)
 const previewUrl = ref('')
+const svgPreviewUrl = ref('')
+const previewKind = ref('')
+const previewMode = ref('preview')
+const documentHtml = ref('')
+const documentWarnings = ref([])
+const documentPreviewError = ref('')
+const highlightedContent = ref('')
+const workbookSheets = ref([])
+const workbookSheetName = ref('')
 const fileRefs = ref({})
 const editorRef = ref(null)
 const draftOwnerId = ref('')
@@ -44,8 +54,25 @@ let disposed = false
 let fileReadSequence = 0
 let refreshAfterSave = false
 let saveSequence = 0
+let highlightSequence = 0
 const filename = computed(() => selectedPath.value.split('/').filter(Boolean).at(-1) || '')
-const canEditText = computed(() => Boolean(selectedPath.value) && !fileContentType.value.startsWith('image/') && !fileContentType.value.startsWith('application/octet-stream'))
+const canEditText = computed(() => Boolean(selectedPath.value) && ['text/plain', 'text/html', 'application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value) && !['pdf', 'docx', 'xlsx', 'image', 'unsupported', 'unsupported-invalid', 'unsupported-legacy-office'].includes(previewKind.value))
+const canTogglePreview = computed(() => canEditText.value && ['code', 'html', 'svg'].includes(previewKind.value))
+const canOverwriteDraft = computed(() => dirty.value && canEditText.value && !fileMissing.value && (draftConflict.value || externalUpdate.value))
+const workbookPreview = computed(() => workbookSheets.value.find(sheet => sheet.name === workbookSheetName.value) || null)
+const unsupportedPreviewNotice = computed(() => previewKind.value.startsWith('unsupported') ? workspaceFilePreviewNotice(filename.value, previewKind.value) : '')
+const draftStatusText = computed(() => fileMissing.value
+  ? '工作区文件已移除，本地草稿仍保留。'
+  : draftConflict.value || externalUpdate.value
+    ? '工作区文件已有新版本，本地草稿仍保留。'
+    : '有未保存的本地修改。')
+const safeDocumentPreview = computed(() => {
+  const raw = previewKind.value === 'docx' ? documentHtml.value : content.value
+  if (!raw || !['docx', 'html'].includes(previewKind.value)) return ''
+  const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
+  const contentSecurityPolicy = "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:;"
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;min-height:100%;background:#fff;color:#30383c;font:14px/1.65 system-ui,"Segoe UI",sans-serif}body{box-sizing:border-box;padding:24px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse}td,th{padding:6px 8px;border:1px solid #d9e0e2}</style></head><body>${sanitized}</body></html>`
+})
 const breadcrumbs = computed(() => currentPath.value ? currentPath.value.split('/').filter(Boolean) : [])
 const noticeDetails = computed(() => [
   draftConflict.value ? '本地草稿基于较旧文件版本；保存会被拒绝。可以从资源菜单丢弃草稿并重新载入。' : '',
@@ -57,7 +84,92 @@ const noticeDetails = computed(() => [
 const noticeSummary = computed(() => draftConflict.value ? '文件版本冲突' : fileMissing.value ? '文件已从工作区移除' : error.value || refreshError.value ? '工作区文件操作失败' : externalUpdate.value ? '工作区文件已更新' : '')
 
 function workspacePath(parent, child) { return [parent, child].filter(Boolean).join('/') }
-function revokePreview() { if (previewUrl.value) URL.revokeObjectURL(previewUrl.value); previewUrl.value = '' }
+function revokePreview() {
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  if (svgPreviewUrl.value) URL.revokeObjectURL(svgPreviewUrl.value)
+  previewUrl.value = ''
+  svgPreviewUrl.value = ''
+}
+function refreshSvgPreview() {
+  if (svgPreviewUrl.value) URL.revokeObjectURL(svgPreviewUrl.value)
+  svgPreviewUrl.value = ''
+  if (previewKind.value !== 'svg' || !content.value) return
+  const sanitized = DOMPurify.sanitize(content.value, { USE_PROFILES: { svg: true }, FORBID_TAGS: ['script', 'foreignObject'] })
+  if (/<svg\b/i.test(sanitized)) svgPreviewUrl.value = URL.createObjectURL(new Blob([sanitized], { type: 'image/svg+xml' }))
+}
+function resetPreviewData() {
+  previewKind.value = ''
+  previewMode.value = 'preview'
+  documentHtml.value = ''
+  documentWarnings.value = []
+  documentPreviewError.value = ''
+  workbookSheets.value = []
+  workbookSheetName.value = ''
+}
+function defaultPreviewMode(kind) { return ['code', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
+function xlsxColumnLabel(index) {
+  let value = index
+  let label = ''
+  while (value > 0) { value--; label = String.fromCharCode(65 + value % 26) + label; value = Math.floor(value / 26) }
+  return label
+}
+async function buildFilePreview(path, suppliedType, bytes, draftContent, isCurrent) {
+  if (!isCurrent()) return null
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  const type = workspaceContentType(path, suppliedType, data)
+  const kind = workspacePreviewKind(path, suppliedType, data)
+  const snapshot = { kind, contentType: kind === 'svg' ? 'text/plain' : type, content: '', url: '', html: '', warnings: [], sheets: [], error: '' }
+  if (data.byteLength > workspacePreviewLimits.bytes) {
+    snapshot.error = `文件超过 ${Math.round(workspacePreviewLimits.bytes / 1024 / 1024)} MiB，暂不生成预览；可以下载原文件查看。`
+    return snapshot
+  }
+  try {
+    if (kind === 'image') snapshot.url = URL.createObjectURL(new Blob([data], { type }))
+    else if (kind === 'svg') {
+      if (data.length > 1024 * 1024) throw new Error('SVG 图片超过 1 MiB 限制。')
+      const source = new TextDecoder('utf-8', { fatal: true }).decode(data)
+      const sanitized = DOMPurify.sanitize(source, { USE_PROFILES: { svg: true }, FORBID_TAGS: ['script', 'foreignObject'] })
+      if (!/<svg\b/i.test(sanitized)) throw new Error('SVG 内容无效，无法预览。')
+      snapshot.content = draftContent ?? source
+    } else if (kind === 'pdf') snapshot.url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+    else if (kind === 'docx') {
+      const { convertDocxToHtml } = await import('../../tray-tauri/src/workspace-documents.js')
+      const converted = await convertDocxToHtml(data)
+      snapshot.html = converted.html
+      snapshot.warnings = converted.warnings
+    } else if (kind === 'xlsx') {
+      const { readXlsxPreview } = await import('../../tray-tauri/src/workspace-documents.js')
+      snapshot.sheets = await readXlsxPreview(data)
+    }
+    else if (['html', 'code', 'text'].includes(kind)) snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
+    if (!isCurrent()) {
+      if (snapshot.url) URL.revokeObjectURL(snapshot.url)
+      return null
+    }
+  } catch (error) {
+    if (snapshot.url) URL.revokeObjectURL(snapshot.url)
+    snapshot.url = ''
+    snapshot.error = String(error?.message || error)
+  }
+  return snapshot
+}
+function applyFilePreview(snapshot, { keepMode = false } = {}) {
+  if (!snapshot) return
+  const priorMode = previewMode.value
+  revokePreview()
+  previewKind.value = snapshot.kind
+  fileContentType.value = snapshot.contentType
+  previewUrl.value = snapshot.url
+  content.value = snapshot.content
+  refreshSvgPreview()
+  documentHtml.value = snapshot.html
+  documentWarnings.value = snapshot.warnings
+  documentPreviewError.value = snapshot.error
+  workbookSheets.value = snapshot.sheets
+  workbookSheetName.value = snapshot.sheets[0]?.name || ''
+  previewMode.value = keepMode && canTogglePreview.value ? priorMode : defaultPreviewMode(snapshot.kind)
+}
+function togglePreviewMode() { if (canTogglePreview.value) previewMode.value = previewMode.value === 'preview' ? 'source' : 'preview' }
 function saveDraft() {
   if (!selectedPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
   const key = workspaceDraftKey(draftOwnerId.value, selectedPath.value, draftOwnerScope.value)
@@ -82,6 +194,7 @@ async function loadDirectory(path = currentPath.value) {
     fileBytes.value = null
     dirty.value = false
     revokePreview()
+    resetPreviewData()
     emit('resource-name', currentPath.value.split('/').filter(Boolean).at(-1) || '工作区')
     return { ok: true, canceled: false }
   } catch (e) {
@@ -123,27 +236,22 @@ async function openEntry(entry, discard = false) {
   if (!discard && !confirmDiscard()) return false
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path: entry.path, scope: props.workspaceScope, generation: props.requestGeneration }
   loading.value = true; error.value = ''; revokePreview()
+  resetPreviewData()
   try {
     const result = await readWorkspaceFile(request.agentId, request.path)
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: request.path, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return false
+    const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
+    revision.value = draft?.conflict ? draft.revision : result.etag
+    const snapshot = await buildFilePreview(request.path, result.contentType, result.bytes, draft?.content, () => isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: entry.path, generation: props.requestGeneration }) && request.scope === props.workspaceScope)
+    if (!snapshot) return false
     selectedPath.value = entry.path
     draftOwnerId.value = request.agentId
     draftOwnerScope.value = request.scope
     contentEditVersion++
     fileBytes.value = result.bytes
-    const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
-    revision.value = draft?.conflict ? draft.revision : result.etag
+    applyFilePreview(snapshot)
     draftConflict.value = Boolean(draft?.conflict)
-    fileContentType.value = workspaceContentType(entry.name, result.contentType, result.bytes)
-    if (fileContentType.value.startsWith('image/')) {
-      previewUrl.value = URL.createObjectURL(new Blob([result.bytes], { type: fileContentType.value }))
-      content.value = ''
-    } else if (fileContentType.value.startsWith('text/') || ['application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value)) {
-      content.value = draft?.content ?? new TextDecoder().decode(result.bytes)
-    } else {
-      content.value = ''
-    }
-    dirty.value = draft !== null && draft.content !== new TextDecoder().decode(result.bytes)
+    dirty.value = canEditText.value && draft !== null && draft.content !== new TextDecoder().decode(result.bytes)
     externalUpdate.value = false
     fileMissing.value = false
     lastFileCheck = Date.now()
@@ -154,38 +262,68 @@ async function openEntry(entry, discard = false) {
   } catch (e) { if (request.epoch === requestEpoch && request.agentId === props.agentId) error.value = String(e.message || e); return false }
   finally { if (request.epoch === requestEpoch && request.agentId === props.agentId) loading.value = false }
 }
-function updateContent(value) { contentEditVersion++; content.value = value; dirty.value = true; saveDraft() }
-function discardDraftAndReload() {
-  if (loading.value || saving.value || !selectedPath.value || !(draftConflict.value || fileMissing.value || externalUpdate.value)) return
-  if (!window.confirm('丢弃当前本地草稿并重新读取工作区文件？')) return
+function updateContent(value) { contentEditVersion++; content.value = value; if (previewKind.value === 'svg') refreshSvgPreview(); dirty.value = true; saveDraft() }
+async function refreshHighlightedContent() {
+  const sequence = ++highlightSequence
+  const source = content.value
+  if (previewKind.value !== 'code' || previewMode.value !== 'preview') { highlightedContent.value = ''; return }
+  try {
+    const { highlightWorkspaceSource } = await import('../../tray-tauri/src/workspace-syntax.js')
+    if (sequence !== highlightSequence || source !== content.value || previewKind.value !== 'code' || previewMode.value !== 'preview') return
+    highlightedContent.value = highlightWorkspaceSource(source, workspaceCodeLanguage(filename.value))
+  } catch { if (sequence === highlightSequence) highlightedContent.value = '' }
+}
+async function discardDraftAndReload({ confirm = true } = {}) {
+  if (loading.value || saving.value || !selectedPath.value || !dirty.value && !draftConflict.value && !fileMissing.value && !externalUpdate.value) return
+  if (confirm && !window.confirm('丢弃当前本地草稿并重新读取工作区文件？')) return
   const path = selectedPath.value
   try { localStorage.removeItem(workspaceDraftKey(draftOwnerId.value, path, draftOwnerScope.value)) } catch { /* ignore unavailable storage */ }
   dirty.value = false
   draftConflict.value = false
   externalUpdate.value = false
+  error.value = ''
+  refreshError.value = ''
   const entry = entries.value.find(item => item.path === path)
-  if (entry) void openEntry(entry, true)
-  else void refreshResources('manual')
+  if (entry) return openEntry(entry, true)
+  selectedPath.value = ''
+  content.value = ''
+  fileBytes.value = null
+  revokePreview()
+  resetPreviewData()
+  return refreshResources('manual')
 }
-async function saveFile() {
-  if (!selectedPath.value || !canEditText.value || !dirty.value || saving.value) return
+async function saveFile({ overwrite = false, confirm = true } = {}) {
+  if (!selectedPath.value || !canEditText.value || !dirty.value || saving.value || fileMissing.value) return
+  if (!overwrite && (draftConflict.value || externalUpdate.value)) return
+  if (overwrite && confirm && !window.confirm('覆盖工作区中的较新版本？此操作会用当前本地草稿替换文件内容。')) return
   const request = { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, scope: props.workspaceScope, generation: props.requestGeneration, saveId: ++saveSequence }
   const text = content.value
   saving.value = true; error.value = ''
   try {
     const bytes = new TextEncoder().encode(text)
-    const response = await saveWorkspaceFile(request.agentId, request.path, bytes, revision.value)
+    let baseRevision = revision.value
+    if (overwrite) {
+      const current = await readWorkspaceFile(request.agentId, request.path)
+      if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope || request.saveId !== saveSequence) return
+      baseRevision = current.etag
+      if (!baseRevision) throw new Error('无法确认工作区文件版本，请重新载入后再保存。')
+    }
+    const response = await saveWorkspaceFile(request.agentId, request.path, bytes, baseRevision)
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope || request.saveId !== saveSequence) return
-    revision.value = response.etag || revision.value
+    revision.value = response.etag || baseRevision
     fileBytes.value = bytes
     dirty.value = content.value !== text
-    if (!dirty.value) { draftConflict.value = false; externalUpdate.value = false; fileMissing.value = false; saveDraft() }
+    draftConflict.value = false
+    externalUpdate.value = false
+    fileMissing.value = false
+    if (!dirty.value) saveDraft()
     lastFileCheck = Date.now()
     lastDirectoryCheck = 0
     void refreshResources('local-write')
   } catch (e) {
     if (request.epoch === requestEpoch && request.agentId === props.agentId && request.scope === props.workspaceScope && request.generation === props.requestGeneration && request.saveId === saveSequence) {
-      if (e?.status === 412) draftConflict.value = true
+      if (e?.status === 412) { draftConflict.value = true; externalUpdate.value = true }
+      if (e?.status === 404) fileMissing.value = true
       error.value = String(e.message || e)
     }
   }
@@ -284,37 +422,27 @@ async function refreshSelectedFile() {
   if (result.notModified || result.etag && result.etag === revision.value) { externalUpdate.value = false; return true }
   if (saving.value) { lastFileCheck = 0; refreshAfterSave = true; return false }
   if (dirty.value || contentEditVersion !== editedAtStart) { externalUpdate.value = true; return true }
-  const nextType = workspaceContentType(path, result.contentType, result.bytes)
-  if (nextType.startsWith('image/')) {
-    const nextUrl = URL.createObjectURL(new Blob([result.bytes], { type: nextType }))
-    try {
-      const image = new Image()
-      image.src = nextUrl
-      if (typeof image.decode === 'function') await image.decode()
-      if (disposed || request.epoch !== requestEpoch || request.agentId !== props.agentId || request.scope !== props.workspaceScope || request.generation !== props.requestGeneration || request.path !== selectedPath.value || revision.value !== revisionAtStart || contentEditVersion !== editedAtStart || readSequence !== fileReadSequence || saving.value) { URL.revokeObjectURL(nextUrl); lastFileCheck = 0; if (saving.value) refreshAfterSave = true; else refreshQueued = true; return false }
-      const oldUrl = previewUrl.value
-      fileBytes.value = result.bytes
-      revision.value = result.etag || revision.value
-      fileContentType.value = nextType
-      previewUrl.value = nextUrl
-      if (oldUrl) URL.revokeObjectURL(oldUrl)
-    } catch (e) { URL.revokeObjectURL(nextUrl); throw e }
-    content.value = ''
-  } else {
-    if (revision.value !== revisionAtStart || contentEditVersion !== editedAtStart || readSequence !== fileReadSequence || dirty.value || saving.value) { lastFileCheck = 0; if (saving.value) refreshAfterSave = true; else refreshQueued = true; return false }
-    const editor = editorRef.value
-    const selection = editor ? [editor.selectionStart, editor.selectionEnd, editor.scrollTop] : null
-    const nextContent = nextType.startsWith('text/') || ['application/json', 'application/xml', 'application/javascript'].includes(nextType) ? new TextDecoder().decode(result.bytes) : ''
-    content.value = nextContent
-    fileBytes.value = result.bytes
-    revision.value = result.etag || revision.value
-    fileContentType.value = nextType
-    await nextTick()
-    const currentEditor = editorRef.value
-    if (currentEditor && selection && request.epoch === requestEpoch && request.path === selectedPath.value && request.scope === props.workspaceScope) {
-      currentEditor.setSelectionRange(Math.min(selection[0], nextContent.length), Math.min(selection[1], nextContent.length))
-      currentEditor.scrollTop = selection[2]
-    }
+  const editor = editorRef.value
+  const selection = editor ? [editor.selectionStart, editor.selectionEnd, editor.scrollTop] : null
+  const isCurrent = () => !disposed
+    && isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration })
+    && request.scope === props.workspaceScope && revision.value === revisionAtStart
+    && contentEditVersion === editedAtStart && readSequence === fileReadSequence && !dirty.value && !saving.value
+  const snapshot = await buildFilePreview(path, result.contentType, result.bytes, null, isCurrent)
+  if (!snapshot || !isCurrent()) {
+    if (saving.value) refreshAfterSave = true
+    else { lastFileCheck = 0; refreshQueued = true }
+    return false
+  }
+  const keepMode = previewKind.value === snapshot.kind
+  fileBytes.value = result.bytes
+  revision.value = result.etag || revision.value
+  applyFilePreview(snapshot, { keepMode })
+  await nextTick()
+  const currentEditor = editorRef.value
+  if (currentEditor && selection && request.epoch === requestEpoch && request.path === selectedPath.value && request.scope === props.workspaceScope) {
+    currentEditor.setSelectionRange(Math.min(selection[0], content.value.length), Math.min(selection[1], content.value.length))
+    currentEditor.scrollTop = selection[2]
   }
   draftConflict.value = false
   externalUpdate.value = false
@@ -342,6 +470,11 @@ async function performRefresh(reason) {
 }
 async function refreshResources(reason = 'manual') {
   if (!props.active || document.visibilityState === 'hidden' || !props.agentId || disposed) return
+  if (reason === 'manual' && selectedPath.value && dirty.value) {
+    if (!window.confirm('刷新会丢弃当前本地草稿并重新读取工作区文件。继续？')) return
+    await discardDraftAndReload({ confirm: false })
+    return
+  }
   if (refreshInFlight) {
     refreshQueued = true
     if (['tool', 'local-write', 'manual', 'return'].includes(reason)) refreshQueuedReason = reason
@@ -400,11 +533,12 @@ function attachSelectedFile() {
   if (fileRef) emit('attach-file', { path: fileRef, name: filename.value })
 }
 function resourceMenuActions() {
-  const canRecoverDraft = Boolean(selectedPath.value && !loading.value && !saving.value && (draftConflict.value || fileMissing.value || externalUpdate.value))
+  const canRecoverDraft = Boolean(selectedPath.value && !loading.value && !saving.value && (dirty.value || draftConflict.value || fileMissing.value || externalUpdate.value))
   return { canRecoverDraft, recoveryLabel: fileMissing.value ? '丢弃草稿并重试' : '丢弃草稿并重载' }
 }
 defineExpose({ openPath, refreshResources, discardDraftAndReload, resourceMenuActions })
 watch(() => [content.value, dirty.value, selectedPath.value, props.agentId], saveDraft)
+watch(() => [content.value, filename.value, previewKind.value, previewMode.value], () => { void refreshHighlightedContent() }, { immediate: true })
 watch(() => [props.agentId, props.workspaceScope], () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
 watch(() => props.requestGeneration, () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
 watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
@@ -415,29 +549,53 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
 <template>
   <section class="workspace-files" aria-label="Agent 工作区文件">
     <header class="workspace-files__toolbar">
-      <button type="button" :disabled="!currentPath || loading" title="上级目录" aria-label="上级目录" @click="goUp"><UiIcon name="arrow-up" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" :disabled="!currentPath || loading" title="上级目录" aria-label="上级目录" @click="goUp"><UiIcon name="arrow-up" :size="16" /></button>
       <div class="workspace-files__breadcrumbs"><button type="button" @click="loadDirectory('')">工作区</button><template v-for="(part,index) in breadcrumbs" :key="index"><span>/</span><button type="button" @click="loadDirectory(breadcrumbs.slice(0,index+1).join('/'))">{{ part }}</button></template><span v-if="filename">/</span><b v-if="filename" :title="filename">{{ filename }}</b></div>
-      <button type="button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
-      <button type="button" title="新建文件" aria-label="新建文件" :disabled="loading" @click="createFile"><UiIcon name="file-plus" :size="16" /></button>
-      <button type="button" title="上传到当前目录" aria-label="上传文件" :disabled="loading" @click="uploadInput?.click()"><UiIcon name="upload" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" title="新建文件" aria-label="新建文件" :disabled="loading" @click="createFile"><UiIcon name="file-plus" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" title="上传到当前目录" aria-label="上传文件" :disabled="loading" @click="uploadInput?.click()"><UiIcon name="upload" :size="16" /></button>
       <input ref="uploadInput" class="workspace-files__hidden" type="file" multiple @change="onUpload">
-      <button type="button" :title="dirty && canEditText ? '下载当前本地草稿副本' : '下载文件'" aria-label="下载文件" :disabled="!selectedPath" @click="downloadFile"><UiIcon name="arrow-down" :size="16" /></button>
-      <button type="button" title="添加到对话" aria-label="添加到对话" :disabled="!fileRefs[selectedPath]" @click="attachSelectedFile"><UiIcon name="paperclip" :size="16" /></button>
-      <button type="button" :title="saving ? '正在保存' : draftConflict ? '文件版本冲突，无法保存' : fileMissing ? '文件已移除，无法保存' : '保存文件（使用读取时的ETag校验）'" aria-label="保存文件" :disabled="!dirty || saving || !canEditText || draftConflict || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" :title="dirty && canEditText ? '下载当前本地草稿副本' : '下载文件'" aria-label="下载文件" :disabled="!selectedPath" @click="downloadFile"><UiIcon name="arrow-down" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" title="添加到对话" aria-label="添加到对话" :disabled="!fileRefs[selectedPath]" @click="attachSelectedFile"><UiIcon name="paperclip" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
+      <button v-if="canTogglePreview" type="button" class="desktop-icon-button workspace-files__mode-toggle" :title="previewMode === 'preview' ? '查看源代码' : '查看预览'" :aria-label="previewMode === 'preview' ? '查看源代码' : '查看预览'" @click="togglePreviewMode"><UiIcon :name="previewMode === 'preview' ? 'code-2' : 'image'" :size="16" /></button>
+      <span v-if="previewKind === 'docx' && documentWarnings.length && !documentPreviewError" class="workspace-files__format-warning" tabindex="0" role="status" aria-label="Word 预览格式提示" :title="documentWarnings.join('\n')"><UiIcon name="alert" :size="15" /></span>
       <span v-if="noticeSummary" class="workspace-files__notice" tabindex="0" role="status" aria-live="polite" :aria-label="noticeSummary" aria-describedby="workspace-files-notice-detail"><UiIcon name="alert" :size="16" /><span class="workspace-files__sr-only">{{ noticeSummary }}</span><span id="workspace-files-notice-detail" class="workspace-files__notice-detail" role="tooltip"><span v-for="(detail,index) in noticeDetails" :key="index">{{ detail }}</span></span></span>
     </header>
     <div class="workspace-files__body">
       <nav class="workspace-files__list" aria-label="文件列表">
-        <button v-for="entry in entries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" :size="16" /><span>{{ entry.name }}</span><small v-if="!entry.is_dir">{{ entry.size }}</small></button>
+        <button v-for="entry in entries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" :size="16" /><span>{{ entry.name }}</span></button>
       </nav>
       <main class="workspace-files__editor">
-        <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
-        <template v-else-if="selectedPath">
-          <img v-if="fileContentType.startsWith('image/')" class="workspace-files__image" :src="previewUrl" :alt="filename">
-          <textarea ref="editorRef" v-else-if="canEditText" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" />
-          <div v-else class="workspace-files__empty">已读取此二进制文件，可下载到本机查看。</div>
-        </template>
-        <div v-else class="workspace-files__empty">{{ entries.length ? '选择工作区文件以预览或编辑。' : '此目录为空，可新建文件或上传文件开始使用。' }}</div>
+        <div v-if="dirty" class="workspace-files__draft-bar" :class="{ 'is-conflict': draftConflict || externalUpdate || fileMissing }" role="status" aria-live="polite">
+          <span>{{ draftStatusText }}</span>
+          <div class="workspace-files__draft-actions">
+            <button v-if="canOverwriteDraft" type="button" :disabled="saving || loading" @click="saveFile({ overwrite: true })">覆盖保存</button>
+          </div>
+        </div>
+        <div class="workspace-files__editor-content">
+          <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
+          <template v-else-if="selectedPath">
+            <div v-if="documentPreviewError" class="workspace-files__empty workspace-files__preview-error"><span>{{ documentPreviewError }}</span><button type="button" @click="downloadFile">下载原文件</button></div>
+            <img v-else-if="previewKind === 'image'" class="workspace-files__image" :src="previewUrl" :alt="filename">
+            <iframe v-else-if="previewKind === 'pdf'" class="workspace-files__document-frame workspace-files__pdf-frame" :src="previewUrl" :title="`${filename} PDF 预览`"></iframe>
+            <iframe v-else-if="['html', 'docx'].includes(previewKind) && previewMode === 'preview'" class="workspace-files__document-frame" :srcdoc="safeDocumentPreview" :title="`${filename} 文档预览`" sandbox=""></iframe>
+            <img v-else-if="previewKind === 'svg' && previewMode === 'preview'" class="workspace-files__image" :src="svgPreviewUrl" :alt="filename">
+            <section v-else-if="previewKind === 'xlsx'" class="workspace-files__sheet-preview" :aria-label="`${filename} Excel 预览`">
+              <div v-if="workbookSheets.length" class="workspace-files__sheet-toolbar">
+                <select v-model="workbookSheetName" aria-label="选择工作表"><option v-for="sheet in workbookSheets" :key="sheet.name" :value="sheet.name">{{ sheet.name }}</option></select>
+                <span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列</span>
+              </div>
+              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="(_, index) in workbookPreview.rows[0]" :key="index">{{ xlsxColumnLabel(index + 1) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookPreview.rows" :key="rowIndex"><td v-for="(cell,index) in row" :key="index">{{ cell }}</td></tr></tbody></table></div>
+              <div v-else class="workspace-files__empty">{{ documentPreviewError || '此工作簿没有可显示的数据。' }}</div>
+            </section>
+            <div v-else-if="previewKind === 'code' && previewMode === 'preview'" class="workspace-files__code-preview"><pre><code class="hljs" v-html="highlightedContent"></code></pre></div>
+            <textarea v-else-if="canEditText" ref="editorRef" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" />
+            <div v-else-if="unsupportedPreviewNotice" class="workspace-files__empty workspace-files__unsupported"><span>{{ unsupportedPreviewNotice }}</span><button type="button" @click="downloadFile">下载原文件</button></div>
+            <div v-else class="workspace-files__empty">无法读取此文件。<button type="button" @click="downloadFile">下载原文件</button></div>
+          </template>
+          <div v-else class="workspace-files__empty">{{ entries.length ? '选择工作区文件以预览或编辑。' : '此目录为空，可新建文件或上传文件开始使用。' }}</div>
+        </div>
       </main>
     </div>
   </section>
@@ -445,4 +603,41 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
 
 <style scoped>
 .workspace-files{display:flex;flex:1;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;background:#fff;color:#30383c}.workspace-files__toolbar{display:flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border-bottom:1px solid #e1e4e6}.workspace-files__toolbar button{display:grid;place-items:center;min-width:30px;height:30px;padding:0 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#4c5559;font-size:11px;cursor:pointer}.workspace-files__toolbar button:hover:not(:disabled){background:#eceeef}.workspace-files__toolbar button:disabled{opacity:.45}.workspace-files__breadcrumbs{display:flex;flex:1;align-items:center;gap:6px;min-width:0;overflow:hidden;color:#777f83;font-size:12px}.workspace-files__breadcrumbs button{overflow:hidden;max-width:160px;padding:3px 1px;border:0;background:transparent;color:#566065;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.workspace-files__breadcrumbs b{overflow:hidden;color:#30383c;text-overflow:ellipsis;white-space:nowrap}.workspace-files__body{display:flex;flex:1;min-height:0}.workspace-files__list{flex:0 0 245px;min-width:150px;overflow:auto;scroll-padding-bottom:82px;padding:8px;border-right:1px solid #d4dce0;background:#fafbfc}.workspace-files__list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#4a5357;text-align:left;font-size:12px;cursor:pointer}.workspace-files__list button.selected,.workspace-files__list button:hover{background:#eceeef}.workspace-files__list button span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-files__list button .workspace-files__folder-icon{flex:none;width:16px;height:16px;background:#586166;mask-repeat:no-repeat;mask-position:center;mask-size:contain}.workspace-files__list button small{color:#777f83;font-size:10px}.workspace-files__editor{display:flex;background:#fff;flex:1;min-width:0;min-height:0;align-items:stretch;justify-content:stretch}.workspace-files__editor textarea{flex:1;min-width:0;min-height:0;scroll-padding-bottom:82px;padding:16px;border:0;outline:0;background:#fff;color:#30383c;font:12px/1.6 Consolas,monospace;resize:none}.workspace-files__image{max-width:100%;max-height:100%;margin:auto;object-fit:contain}.workspace-files__empty{display:grid;flex:1;place-items:center;padding:24px;color:#777f83;font-size:12px;text-align:center}.workspace-files__hidden{display:none}.workspace-files__notice{position:relative;display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;border-radius:5px;color:#a53c38;cursor:help}.workspace-files__notice:hover,.workspace-files__notice:focus-visible{background:#fff1ef;outline:2px solid #b74a43;outline-offset:1px}.workspace-files__notice-detail{position:absolute;z-index:50;top:calc(100% + 5px);right:0;display:none;min-width:220px;max-width:min(420px,70vw);padding:9px 11px;border:1px solid #e2c7c8;border-radius:6px;background:#fff7f6;box-shadow:0 5px 16px #26374024;color:#7f302d;font-size:11px;line-height:1.45;white-space:normal}.workspace-files__notice-detail>span{display:block}.workspace-files__notice-detail>span+span{margin-top:5px}.workspace-files__notice:hover .workspace-files__notice-detail,.workspace-files__notice:focus .workspace-files__notice-detail{display:block}.workspace-files__sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.workspace-files__mode-toggle { flex: 0 0 30px; width:30px; min-width:30px; padding:0; }
+.workspace-files__document-frame { display:block; flex:1; width:100%; min-width:0; min-height:0; border:0; background:#fff; }
+.workspace-files__pdf-frame { height:100%; }
+.workspace-files__code-preview { flex:1; min-width:0; min-height:0; overflow:auto; background:#fbfcfc; }
+.workspace-files__code-preview pre { box-sizing:border-box; min-width:max-content; min-height:100%; margin:0; padding:16px 20px; color:#364147; font:12px/1.65 Consolas,Monaco,monospace; tab-size:2; }
+.workspace-files__code-preview code { font:inherit; }
+.workspace-files__code-preview .hljs-comment,.workspace-files__code-preview .hljs-quote { color:#7c8588; font-style:italic; }
+.workspace-files__code-preview .hljs-keyword,.workspace-files__code-preview .hljs-selector-tag,.workspace-files__code-preview .hljs-literal,.workspace-files__code-preview .hljs-section { color:#805a94; }
+.workspace-files__code-preview .hljs-string,.workspace-files__code-preview .hljs-attr,.workspace-files__code-preview .hljs-template-tag,.workspace-files__code-preview .hljs-template-variable { color:#367660; }
+.workspace-files__code-preview .hljs-number,.workspace-files__code-preview .hljs-variable,.workspace-files__code-preview .hljs-symbol,.workspace-files__code-preview .hljs-bullet { color:#93632f; }
+.workspace-files__code-preview .hljs-title,.workspace-files__code-preview .hljs-title.function_,.workspace-files__code-preview .hljs-built_in { color:#315e7a; }
+.workspace-files__code-preview .hljs-type,.workspace-files__code-preview .hljs-params { color:#9a5146; }
+.workspace-files__sheet-preview { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; overflow:hidden; }
+.workspace-files__sheet-toolbar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:0 12px; border-bottom:1px solid #e4e8e9; color:#788185; font-size:11px; }
+.workspace-files__sheet-toolbar select { max-width:min(260px,60%); padding:5px 24px 5px 8px; border:1px solid #d9e0e2; border-radius:5px; background:#fff; color:#30383c; }
+.workspace-files__sheet-scroll { flex:1; min-height:0; overflow:auto; }
+.workspace-files__sheet-scroll table { border-collapse:separate; border-spacing:0; color:#3c4549; font-size:12px; }
+.workspace-files__sheet-scroll th,.workspace-files__sheet-scroll td { min-width:90px; max-width:360px; padding:6px 9px; border-right:1px solid #e6e9ea; border-bottom:1px solid #e6e9ea; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+.workspace-files__sheet-scroll th { position:sticky; top:0; z-index:1; background:#f5f7f7; color:#606a6e; font-weight:600; }
+.workspace-files__sheet-scroll td { white-space:pre-wrap; }
+.workspace-files__format-warning { display:grid; flex:0 0 30px; width:30px; height:30px; place-items:center; border-radius:5px; color:#a77d32; cursor:help; }
+.workspace-files__format-warning:hover,.workspace-files__format-warning:focus-visible { background:#fff7e6; outline:2px solid #d5bf8c; outline-offset:1px; }
+.workspace-files__preview-error,.workspace-files__unsupported { align-content:center; gap:10px; }
+.workspace-files__preview-error button,.workspace-files__unsupported button,.workspace-files__empty button { padding:5px 10px; border:1px solid #d2dadd; border-radius:5px; background:#fff; color:#3e484c; cursor:pointer; }
+.workspace-files__editor { flex-direction:column; }
+.workspace-files__editor-content { display:flex; flex:1; min-width:0; min-height:0; align-items:stretch; justify-content:stretch; overflow:hidden; }
+.workspace-files__editor-content > * { min-width:0; }
+.workspace-files__draft-bar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:5px 12px; border-bottom:1px solid #e6e9ea; background:#f5f7f7; color:#586469; font-size:12px; }
+.workspace-files__draft-bar.is-conflict { border-bottom-color:#ead7bb; background:#fff9ef; color:#795a2b; }
+.workspace-files__draft-actions { display:flex; flex:none; align-items:center; gap:6px; }
+.workspace-files__draft-actions button { min-height:28px; padding:4px 9px; border:1px solid #d2dadd; border-radius:5px; background:#fff; color:#3e484c; font:inherit; cursor:pointer; }
+.workspace-files__draft-actions button:hover:not(:disabled) { background:#edf0f1; }
+.workspace-files__draft-actions button:disabled { opacity:.5; cursor:default; }
+@media (max-width: 760px) {
+  .workspace-files__draft-bar { align-items:flex-start; flex-direction:column; gap:7px; }
+  .workspace-files__draft-actions { align-self:flex-end; }
+}
 </style>

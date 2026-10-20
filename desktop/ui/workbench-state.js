@@ -71,7 +71,9 @@ export function desktopChatEntries(agentId, transcript = [], streamingText = '',
     entries.push({
       id: `${agentId || 'agent'}:pending-response:${pendingUser?.id || 'active'}`,
       kind: 'assistant',
-      text: '正在生成回复…',
+      // Match the WebUI: an empty streaming assistant entry renders the
+      // animated brand activity mark instead of a textual placeholder.
+      text: '',
       streaming: true,
     })
   } else if (streamingText && !terminal) {
@@ -144,7 +146,6 @@ export const desktopMenuNames = ['DAgents', '资源', '视图', '智能体', '�
 export function createDesktopMenuModel(context = {}) {
   const {
     online = false,
-    connectionMode = 'local',
     setupRequired = false,
     nodeVersion = '',
     activeAgentId = '',
@@ -164,7 +165,7 @@ export function createDesktopMenuModel(context = {}) {
   const item = (label, action, disabled = false, extra = {}) => ({ label, action, disabled, ...extra })
   return {
     DAgents: [
-      item(`Node · ${online ? '在线' : '离线'}`, '', true, { hint: nodeVersion || (connectionMode === 'tunnel' ? 'SSH 隧道' : '本机') }),
+      item(`Node · ${online ? '在线' : '离线'}`, '', true, { hint: nodeVersion || '本机' }),
       item('检查 Node 连接', 'refresh'),
       separator,
       item('通用设置', 'settings-general'),

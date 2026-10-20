@@ -1,4 +1,6 @@
-const textExtensions = new Set(['md', 'txt', 'json', 'js', 'mjs', 'ts', 'css', 'html', 'xml', 'yaml', 'yml', 'csv', 'py', 'go', 'rs', 'toml', 'sh', 'ps1'])
+const textExtensions = new Set(['md', 'txt', 'json', 'js', 'mjs', 'ts', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'csv', 'py', 'go', 'rs', 'toml', 'sh', 'ps1', 'sql', 'java', 'cs', 'cpp', 'c', 'h', 'rb', 'php'])
+const codeExtensions = new Set(['json', 'js', 'mjs', 'ts', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'py', 'go', 'rs', 'toml', 'sh', 'ps1', 'sql', 'java', 'cs', 'cpp', 'c', 'h', 'rb', 'php'])
+export const workspacePreviewLimits = Object.freeze({ bytes: 32 * 1024 * 1024, rows: 500, columns: 60 })
 
 export function workspaceUploadPath(directory, name) {
   return [String(directory || '').replace(/^\/+|\/+$/g, ''), String(name || '').replace(/^\/+/, '')].filter(Boolean).join('/')
@@ -62,15 +64,55 @@ export function isWorkspaceRequestCurrent(request, current) {
 export function workspaceContentType(name, suppliedType, bytes) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
   const explicit = String(suppliedType || '').split(';')[0].trim().toLowerCase()
-  const detectedImage = ['image/png','image/jpeg','image/gif','image/webp'].find(type => hasImageSignature(type, data))
+  const detectedImage = ['image/png','image/jpeg','image/gif','image/webp','image/bmp','image/x-icon'].find(type => hasImageSignature(type, data))
   if (detectedImage) return detectedImage
   if (explicit.startsWith('image/')) return 'application/octet-stream'
   const extension = String(name || '').split('.').pop()?.toLowerCase()
+  if (extension === 'pdf' && hasPdfSignature(data)) return 'application/pdf'
+  if (extension === 'docx' && hasZipSignature(data)) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (extension === 'xlsx' && hasZipSignature(data)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (extension === 'html' || extension === 'htm' || explicit === 'text/html') return isUtf8Text(data) ? 'text/html' : 'application/octet-stream'
   if (textExtensions.has(extension) && isUtf8Text(data)) return 'text/plain'
-  if (explicit === 'application/pdf' && data[0] === 0x25 && data[1] === 0x50 && data[2] === 0x44 && data[3] === 0x46) return explicit
-  if (explicit.startsWith('text/') || explicit === 'application/json' || explicit === 'application/xml' || explicit === 'application/javascript') return isUtf8Text(data) ? 'text/plain' : 'application/octet-stream'
+  if (explicit === 'application/pdf' && hasPdfSignature(data)) return explicit
+  if (explicit.startsWith('text/') || explicit === 'application/json' || explicit === 'application/xml' || explicit === 'application/javascript') return isUtf8Text(data) ? explicit : 'application/octet-stream'
   if (isUtf8Text(data)) return 'text/plain'
   return 'application/octet-stream'
+}
+
+export function workspacePreviewKind(name, suppliedType, bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  const extension = String(name || '').split('.').pop()?.toLowerCase() || ''
+  const type = workspaceContentType(name, suppliedType, data)
+  if (extension === 'doc' || extension === 'xls') return 'unsupported-legacy-office'
+  if (extension === 'pdf') return hasPdfSignature(data) ? 'pdf' : 'unsupported-invalid'
+  if (extension === 'docx') return hasZipSignature(data) ? 'docx' : 'unsupported-invalid'
+  if (extension === 'xlsx') return hasZipSignature(data) ? 'xlsx' : 'unsupported-invalid'
+  if (type.startsWith('image/')) return 'image'
+  if (extension === 'svg' && hasSvgMarkup(data)) return 'svg'
+  if ((extension === 'html' || extension === 'htm' || type === 'text/html') && isUtf8Text(data)) return 'html'
+  if (codeExtensions.has(extension) && isUtf8Text(data)) return 'code'
+  if (type.startsWith('text/') || ['application/json', 'application/xml', 'application/javascript'].includes(type) || isUtf8Text(data)) return 'text'
+  return 'unsupported'
+}
+
+export function workspaceCodeLanguage(name) {
+  const extension = String(name || '').split('.').pop()?.toLowerCase() || ''
+  return ({
+    c: 'c', cpp: 'cpp', cs: 'csharp', css: 'css', go: 'go', h: 'c', html: 'xml', htm: 'xml',
+    java: 'java', js: 'javascript', json: 'json', mjs: 'javascript', php: 'php', py: 'python',
+    rb: 'ruby', rs: 'rust', sh: 'bash', sql: 'sql', toml: 'ini', ts: 'typescript', xml: 'xml',
+    yaml: 'yaml', yml: 'yaml', ps1: 'powershell',
+  })[extension] || ''
+}
+
+export function workspaceFilePreviewNotice(name, kind) {
+  const extension = String(name || '').split('.').pop()?.toLowerCase() || 'unknown'
+  if (kind === 'unsupported-invalid') return `无法预览此 .${extension} 文件，格式无效或内容不完整。可下载原文件检查。`
+  if (kind === 'unsupported-legacy-office') {
+    if (extension === 'doc') return '暂不支持预览旧版 Word .doc 文件，可下载查看；建议另存为 .docx。'
+    return '暂不支持预览旧版 Excel .xls 文件，可下载查看；建议另存为 .xlsx。'
+  }
+  return `暂不支持预览 .${extension} 格式，可下载原文件查看。`
 }
 
 export function workspaceRasterBlob(path, result) {
@@ -105,5 +147,20 @@ function hasImageSignature(type, bytes) {
   if (type === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
   if (type === 'image/gif') return bytes.length >= 6 && ['GIF87a','GIF89a'].includes(new TextDecoder().decode(bytes.subarray(0,6)))
   if (type === 'image/webp') return bytes.length >= 12 && new TextDecoder().decode(bytes.subarray(0,4)) === 'RIFF' && new TextDecoder().decode(bytes.subarray(8,12)) === 'WEBP'
+  if (type === 'image/bmp') return bytes.length >= 14 && bytes[0] === 0x42 && bytes[1] === 0x4d
+  if (type === 'image/x-icon') return bytes.length >= 4 && bytes[0] === 0 && bytes[1] === 0 && bytes[2] === 1 && bytes[3] === 0
   return false
+}
+
+function hasPdfSignature(bytes) {
+  return bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d
+}
+
+function hasZipSignature(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && [0x03, 0x05, 0x07].includes(bytes[2]) && [0x04, 0x06, 0x08].includes(bytes[3])
+}
+
+function hasSvgMarkup(bytes) {
+  if (!isUtf8Text(bytes)) return false
+  return /^\s*(?:<\?xml\s+[^>]*>\s*)?<svg\b/i.test(new TextDecoder().decode(bytes))
 }

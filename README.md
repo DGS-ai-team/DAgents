@@ -233,7 +233,7 @@ docs/                  用户、架构、参考、设计与历史文档
 tests/                 Python/跨组件测试
 ```
 
-Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 负责展示状态和发起操作，不复制后端业务规则。`node/webui/frontend` 现保留为 Desktop 复用的设置和消息组件源码，Node 不再托管 `/ui/`。
+Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 是唯一产品界面，负责展示状态和发起操作，不复制后端业务规则。`node/webui/frontend` 仅保留供 Desktop 复用的 Vue 组件源码；Node 只提供 API，不提供网页版入口或 `/ui/` 路由。
 
 ## 开发与验证
 

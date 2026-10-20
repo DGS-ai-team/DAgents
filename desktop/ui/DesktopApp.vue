@@ -13,6 +13,7 @@ import { agentMediaId, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadErro
 import { agentStore } from '../../node/webui/frontend/src/stores/agent.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '../../node/webui/frontend/src/stores/hitl.js'
 import { applyHydrateTurnState } from '../../node/webui/frontend/src/stores/turnState.js'
+import { createTurnWatchdog } from '../../node/webui/frontend/src/stores/turnWatchdog.js'
 import MainChatPanel from '../../node/webui/frontend/src/components/MainChatPanel.vue'
 import ResourceMarkdown from '../../node/webui/frontend/src/components/ResourceMarkdown.vue'
 import UiIcon from '../../node/webui/frontend/src/components/UiIcon.vue'
@@ -45,7 +46,6 @@ import browserIcon from '@shared-icons/desktop/browser.svg?url'
 import fileIcon from '@shared-icons/desktop/file.svg?url'
 import attachmentIcon from '@shared-icons/desktop/attachment.svg?url'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
-import circleXIcon from '@shared-icons/desktop/circle-x.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
 import './desktop-ui.css'
@@ -231,6 +231,7 @@ let unlistenTerminal = null
 let unlistenWindowResize = null
 let unlistenWindowFocus = null
 let selectionEpoch = 0
+let activeHydrationSequence = 0
 let resourceNavigationEpoch = 0
 const resourceNavigationError = ref('')
 let sendSequence = 0
@@ -238,6 +239,7 @@ let modelRequestSequence = 0
 let pollTimer = null
 let summaryRefreshTimer = 0
 let resourceRefreshTimer = 0
+let activeHydrateTimer = 0
 let workspaceConnectionState = ''
 let composerResizeObserver = null
 let terminalDialogRequestEpoch = 0
@@ -291,6 +293,16 @@ const approvalCalls = computed(() => {
 const phase = computed(() => hydrate.value?.turn_state?.phase || (busy.value ? 'running' : 'idle'))
 const canCancelTurn = computed(() => ['queued', 'model_generating', 'tool_executing'].includes(hydrate.value?.turn_state?.phase))
 const agentGenerating = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
+const turnWatchdog = createTurnWatchdog({
+  isAwaiting: () => Boolean(activeId.value && status.value.online),
+  hasStuckStatus: () => agentGenerating.value || Boolean(streamingText.value),
+  onStuck: async () => {
+    const id = activeId.value
+    if (!id) return
+    await hydrateAgentSnapshot(id)
+    void refreshAgentSummaries()
+  },
+})
 function activeResourceMenuActions() {
   if (!status.value.online || status.value.setup_required || isWorkgroupView.value || pendingComposerPage.value || activeTab.value === 'settings') return {}
   if (activeTab.value === 'file') return workspaceFilesPanel.value?.resourceMenuActions?.() || {}
@@ -303,7 +315,6 @@ function activeResourceMenuActions() {
 }
 const menuEntries = computed(() => createDesktopMenuModel({
   online: status.value.online,
-  connectionMode: status.value.connection_mode,
   setupRequired: status.value.setup_required,
   nodeVersion: status.value.version,
   activeAgentId: activeId.value,
@@ -431,7 +442,7 @@ function onComposerTransitionSettled({ id, mode }) {
 async function refreshHealth() {
   try {
     const next = await invoke('desktop_node_status')
-    const identity = `${Boolean(next.online)}:${next.connection_mode || 'local'}`
+    const identity = `${Boolean(next.online)}`
     const connectionChanged = Boolean(workspaceConnectionState && workspaceConnectionState !== identity)
     if (connectionChanged) workspaceRequestGeneration.value++
     workspaceConnectionState = identity
@@ -478,7 +489,7 @@ async function loadAgents() {
   error.value = ''
   await refreshHealth()
   if (!status.value.online) return
-  if (status.value.setup_required) { error.value = '请先完成 Node 首次配置。请打开 Desktop 设置中的连接配置。'; return }
+  if (status.value.setup_required) { error.value = '请先在 Desktop 设置中完成本机 Node 的首次初始化。'; return }
   try {
     const latest = await invoke('desktop_list_agents')
     agents.value = Array.isArray(latest) ? latest : []
@@ -541,6 +552,33 @@ async function restoreAgentMedia(snapshot, agentId) {
   }))
   return { ...snapshot, transcript: rows }
 }
+async function hydrateAgentSnapshot(id) {
+  if (!id || activeId.value !== id) return
+  const requestSequence = ++activeHydrationSequence
+  const snapshot = await invoke('desktop_hydrate_agent', { agentId: id })
+  if (requestSequence !== activeHydrationSequence || activeId.value !== id) return
+  turnWatchdog.noteActivity()
+  hydrate.value = snapshot
+  applyHydrateTurnState(snapshot)
+  void restoreAgentMedia(snapshot, id).then(withMedia => {
+    if (requestSequence === activeHydrationSequence && activeId.value === id) hydrate.value = withMedia
+  }).catch(e => {
+    if (requestSequence === activeHydrationSequence && activeId.value === id) error.value = `无法读取会话图片：${String(e.message || e)}`
+  })
+  if (snapshot.turn_state?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted'].includes(snapshot.turn_state?.phase)) {
+    streamingText.value = ''
+  }
+}
+function scheduleActiveAgentHydrate(id, delay = 100) {
+  if (!id || id !== activeId.value) return
+  if (activeHydrateTimer) clearTimeout(activeHydrateTimer)
+  activeHydrateTimer = window.setTimeout(() => {
+    activeHydrateTimer = 0
+    void hydrateAgentSnapshot(id).catch(e => {
+      if (activeId.value === id) error.value = String(e)
+    })
+  }, delay)
+}
 async function switchLLMProfile(profileId) {
   const id = activeId.value
   if (!id || !profileId || agentGenerating.value) return
@@ -599,18 +637,8 @@ async function selectAgent(id, { clearError = true, openChat = false } = {}) {
   }
   if (clearError) error.value = ''
   try {
-    const snapshot = await invoke('desktop_hydrate_agent', { agentId: id })
-    if (epoch === selectionEpoch && activeId.value === id) {
-      hydrate.value = snapshot
-      applyHydrateTurnState(snapshot)
-      void restoreAgentMedia(snapshot, id).then(withMedia => {
-        if (epoch === selectionEpoch && activeId.value === id) hydrate.value = withMedia
-      }).catch(e => { if (epoch === selectionEpoch && activeId.value === id) error.value = `无法读取会话图片：${String(e.message || e)}` })
-      void refreshAgentModel(id)
-      if (snapshot.turn_state?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted'].includes(snapshot.turn_state?.phase)) {
-        streamingText.value = ''
-      }
-    }
+    await hydrateAgentSnapshot(id)
+    if (epoch === selectionEpoch && activeId.value === id) void refreshAgentModel(id)
   } catch (e) { if (epoch === selectionEpoch) error.value = String(e) }
 }
 async function send() {
@@ -1403,6 +1431,12 @@ onMounted(async () => {
   previouslyOnline.value = status.value.online
   unlisten = await listen('desktop-node-event', async ev => {
     const event = ev.payload
+    if (event.event_type === 'resync_required') {
+      if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+      summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
+      if (activeId.value) scheduleActiveAgentHydrate(activeId.value, 0)
+      return
+    }
     if (event.agent_id !== activeId.value) {
       const row = agents.value.find(agent => agent.agent_id === event.agent_id)
       if (event.event_type === 'hitl_required' && row) row.has_pending_hitl = true
@@ -1412,6 +1446,7 @@ onMounted(async () => {
       }
       return
     }
+    turnWatchdog.noteActivity()
     if (event.event_type === 'assistant' && event.data?.display_type === 'delta') {
       streamingText.value += event.data.content || ''
       return
@@ -1431,9 +1466,10 @@ onMounted(async () => {
       }
       const eventAgentId = event.agent_id
       if (activeId.value !== eventAgentId) return
-      await selectAgent(eventAgentId)
+      const terminalEvent = ['turn_finished', 'hitl_required', 'error'].includes(event.event_type)
+      scheduleActiveAgentHydrate(eventAgentId, terminalEvent ? 0 : 120)
       const finalToolCall = event.event_type === 'tool_call' && !event.data?.partial
-      if (activeId.value === eventAgentId && (['turn_finished', 'error', 'hitl_required'].includes(event.event_type) || finalToolCall)) streamingText.value = ''
+      if (terminalEvent || finalToolCall) streamingText.value = ''
     }
   })
   unlistenTerminal = await listen('desktop-terminal-event', ev => {
@@ -1479,6 +1515,7 @@ onMounted(async () => {
     if (!previouslyOnline.value && current.online) await loadAgents()
     previouslyOnline.value = current.online
   }, 2500)
+  turnWatchdog.start()
 })
 onUnmounted(() => {
   window.removeEventListener('resize', resizeComposer)
@@ -1491,7 +1528,8 @@ onUnmounted(() => {
   for (const terminal of terminalInstances.value.filter(item => item.connectionId)) {
     void invoke('desktop_terminal_command', { connectionId: terminal.connectionId, agentId: terminal.agentId, commandType: 'detach' }).catch(() => {})
   }
-  unlisten?.(); unlistenTerminal?.(); clearInterval(pollTimer); clearTimeout(summaryRefreshTimer); clearTimeout(resourceRefreshTimer); document.removeEventListener('click', onDocumentClick); document.removeEventListener('keydown', onKeydown)
+  unlisten?.(); unlistenTerminal?.(); clearInterval(pollTimer); clearTimeout(summaryRefreshTimer); clearTimeout(resourceRefreshTimer); clearTimeout(activeHydrateTimer); document.removeEventListener('click', onDocumentClick); document.removeEventListener('keydown', onKeydown)
+  turnWatchdog.stop()
   for (const url of mediaObjectUrls.values()) URL.revokeObjectURL(url)
   mediaObjectUrls.clear()
 })
@@ -1555,7 +1593,7 @@ onUnmounted(() => {
           <div v-if="sidebarCollapsed && collapsedGroup === 'auto'" class="sidebar-popover"><b>自主智能体</b><div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
         </section>
       </div>
-      <div class="node-indicator" :class="status.online ? 'online' : 'offline'" :title="`Node · ${status.online ? '在线' : '离线'} · ${status.connection_mode === 'tunnel' ? 'SSH 隧道' : '本机'}${status.version ? ' · v' + status.version : ''}`" :aria-label="`Node · ${status.online ? '在线' : '离线'} · ${status.connection_mode === 'tunnel' ? 'SSH 隧道' : '本机'}${status.version ? ' · v' + status.version : ''}`"><span>{{ `Node · ${status.online ? '在线' : '离线'} · ${status.connection_mode === 'tunnel' ? 'SSH 隧道' : '本机'}${status.version ? ' · v' + status.version : ''}` }}</span><i></i></div>
+      <div class="node-indicator" :class="status.online ? 'online' : 'offline'" :title="`本机 Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`" :aria-label="`本机 Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`"><span>{{ `Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}` }}</span><i></i></div>
     </aside>
     <main class="main-panel">
       <FirstRunNodeProfile v-if="showNodeFirstRun && activeTab !== 'settings'" class="desktop-first-run" @completed="onFirstRunCompleted" />
@@ -1564,14 +1602,14 @@ onUnmounted(() => {
       <div class="resource-tabs">
         <button v-if="activeTab !== 'workgroups'" class="conversation-tab" :class="{ active: activeTab === 'chat' }" :title="activeAgent?.display_name || '当前智能体'" @click="showChat"><span class="icon-mask tab-icon" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span><b>{{ activeAgent?.display_name || '当前智能体' }}</b></button>
         <div v-else class="conversation-tab active workgroup-conversation-tab" :title="activeWorkgroupName"><span class="icon-mask tab-icon" :style="maskStyle(navWorkgroupsIcon)"></span><b>{{ activeWorkgroupName }}</b></div>
-        <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><span class="icon-mask" :style="maskStyle(circleXIcon)"></span></button></div></div>
+        <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><UiIcon name="close" :size="14" /></button></div></div>
       </div>
-      <div v-if="error || status.setup_required" class="notice" :class="status.setup_required ? 'setup' : ''"><span>{{ error || 'Node 需要首次配置' }}</span><button v-if="status.setup_required" @click="showSettings">打开连接配置</button><button v-else-if="isTauri" @click="loadAgents">重试</button></div>
+      <div v-if="error || status.setup_required" class="notice" :class="status.setup_required ? 'setup' : ''"><span>{{ error || 'Node 需要首次配置' }}</span><button v-if="status.setup_required" @click="showSettings">打开设置</button><button v-else-if="isTauri" @click="loadAgents">重试</button></div>
       <div v-if="resourceNavigationError" class="notice resource-navigation-notice" role="alert"><span>{{ resourceNavigationError }}</span><button type="button" aria-label="关闭资源提示" @click="resourceNavigationError = ''">关闭</button></div>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('chat')" @after-leave="onComposerPageAfterLeave('chat', $event)" @after-enter="onComposerPageAfterEnter('chat', $event)">
       <section v-if="visitedTabs.has('chat')" v-show="composerPageVisible('chat')" data-composer-page="chat" class="conversation" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
-        <div v-if="!status.online" class="empty-state"><div class="empty-icon"><i></i></div><h2>{{ status.connection_mode === 'tunnel' ? '等待隧道中的 Node' : '等待本机 Node' }}</h2><template v-if="status.connection_mode === 'tunnel'"><p>请确认 SSH 本地转发与远程 Node 正在运行。</p><small v-if="status.error" class="connection-diagnostic">诊断：{{ status.error }}</small></template><p v-else>{{ status.error || '启动 DAgents Node 后，Desktop 会自动连接。' }}</p></div>
-        <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成 Node 首次配置</h2><p>在 Desktop 的连接设置中完成 Node 配置后即可使用。</p><button class="quiet" @click="showSettings">打开连接配置</button></div>
+        <div v-if="!status.online" class="empty-state"><div class="empty-icon"><i></i></div><h2>等待本机 Node</h2><p>{{ status.error || '启动 DAgents Node 后，Desktop 会自动连接。' }}</p></div>
+        <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成本机 Node 首次配置</h2><p>设置 Node 名称与模型后即可开始使用。</p><button class="quiet" @click="showSettings">打开设置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
         <template v-else>
           <div v-if="!chatEntries.length && !hitlQueue.length" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在连接的 Node 中。</p><span class="real-tag">真实 Node 会话</span></div>
@@ -1583,8 +1621,7 @@ onUnmounted(() => {
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('terminal')" @after-leave="onComposerPageAfterLeave('terminal', $event)" @after-enter="onComposerPageAfterEnter('terminal', $event)">
       <section v-if="visitedTabs.has('terminal')" v-show="composerPageVisible('terminal')" data-composer-page="terminal" class="terminal-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
-        <div class="terminal-resource-head"><div><strong>{{ terminalResourceName }}</strong><span class="terminal-status" :class="`state-${terminalStatus}`"><i></i>{{ ({idle:'未连接',connecting:'连接中',reconnecting:'恢复会话中',connected:'已连接',disconnected:'连接已断开',error:'连接错误',exited:'进程已退出',closed:'已关闭'})[terminalStatus] || terminalStatus }}</span></div><div class="terminal-actions"><button v-if="terminalConnectionId" class="icon-only" type="button" title="断开终端连接（保留进程）" aria-label="断开终端连接（保留进程）" @click="closeTerminal('disconnect')"><UiIcon name="plug" :size="16" /></button><button v-else-if="['disconnected','error','closed'].includes(terminalStatus) && terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId" class="icon-only" type="button" title="重新连接" aria-label="重新连接终端" @click="reconnectActiveTerminal"><UiIcon name="refresh-cw" :size="16" /></button></div></div>
-        <div class="terminal-owner-note">此终端属于 {{ activeAgent?.display_name || activeAgent?.agent_id || '当前 Agent' }}；模型可能正在使用。{{ terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId && !terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled ? '恢复会话只读查看。' : '手动输入已启用。' }}</div>
+        <div class="terminal-resource-head"><div><strong>{{ terminalResourceName }}</strong><span class="terminal-status" :class="`state-${terminalStatus}`"><i></i>{{ ({idle:'未连接',connecting:'连接中',reconnecting:'恢复会话中',connected:'已连接',disconnected:'连接已断开',error:'连接错误',exited:'进程已退出',closed:'已关闭'})[terminalStatus] || terminalStatus }}</span><span v-if="terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId && !terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled" class="terminal-readonly" title="恢复的终端当前为只读查看">只读</span></div><div class="terminal-actions"><button v-if="terminalConnectionId" class="icon-only" type="button" title="断开连接（保留终端进程）" aria-label="断开终端连接，保留终端进程" @click="closeTerminal('disconnect')"><UiIcon name="unplug" :size="16" /></button><button v-else-if="['disconnected','error','closed'].includes(terminalStatus) && terminalInstances.find(item => item.id === activeTerminalInstanceId)?.sessionId" class="icon-only" type="button" title="重新连接" aria-label="重新连接终端" @click="reconnectActiveTerminal"><UiIcon name="refresh-cw" :size="16" /></button></div></div>
         <div class="terminal-output" :class="{ 'terminal-output-empty': !terminalConnectionId }"><div v-if="!terminalConnectionId" class="terminal-empty-state"><span class="icon-mask" :style="{ ...maskStyle(terminalIcon), width: '24px', height: '24px' }" aria-hidden="true"></span><h2>终端尚未连接</h2><p>打开终端选择器以新建或恢复当前 Agent 的运行中会话。</p><div><button class="icon-only" type="button" title="打开终端" aria-label="打开终端选择器" @click="requestNewTerminal()"><UiIcon name="terminal" :size="17" /></button></div></div><TerminalConsole v-if="terminalConnectionId" :key="terminalConnectionId" :output="terminalOutput" :connected="terminalStatus === 'connected'" :read-only="!terminalInstances.find(item => item.id === activeTerminalInstanceId)?.manualInputEnabled" @input="sendTerminalInput" @resize="resizeTerminal" /><p v-if="terminalError" class="terminal-error">{{ terminalError }}</p></div>
       </section>
       </Transition>
@@ -1640,7 +1677,7 @@ onUnmounted(() => {
     </main>
     <TerminalOpenDialog :open="terminalOpenDialog" :choices="terminalOpenChoices" :sessions="terminalSessions" :sessions-loading="terminalSessionLoading" :sessions-error="terminalSessionError" :channels-loading="terminalChannelLoading" :channels-error="terminalChannelError" @cancel="closeTerminalOpenDialog" @create="createTerminalFromDialog" @resume="resumeTerminalFromDialog" @retry-sessions="retryTerminalSessionList" @retry-channels="retryTerminalChannels" @open-settings="openLinuxChannelSettings" />
     <TerminalEndDialog :open="Boolean(terminalEndConfirmation)" :terminal-name="terminalEndConfirmation?.name" @cancel="cancelEndTerminal" @confirm="confirmEndTerminal" />
-    <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close" aria-label="关闭" @click="dialog = ''">×</button><AutoOverviewPanel @open-chat="openAutoChat" @open-config="openAutoConfig" /></section></div>
+    <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel @open-chat="openAutoChat" @open-config="openAutoConfig" /></section></div>
     <div v-if="showAgentCreate" class="agent-create-overlay"><AgentCreatePage @cancel="showAgentCreate = false" @created="onAgentCreated" /></div>
     <ImageLightbox />
   </div>

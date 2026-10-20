@@ -18,7 +18,7 @@
 | 原则 | 说明 |
 |------|------|
 | **一进程多 Agent** | Node 进程持有多个 Agent 实例；对外按 `agent_id` 寻址 |
-| **默认本机绑定** | 默认 `127.0.0.1`；人机为 Web UI `/ui/` |
+| **默认本机绑定** | 默认 `127.0.0.1`；Agent 交互由 DAgents Desktop 连接 Node API |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
 | **跨 Node 协作** | 经 Manage **Workgroup**（Dialer / 反代） |
 | **工具边界** | 工具组 + policy + Agent `workspace_root`；Node 管理目录使用 `runtime_root`，无独立沙箱进程 |
@@ -28,9 +28,8 @@
 
 | 前缀 | 调用方 | 说明 |
 |------|--------|------|
-| `/ui/` | 浏览器 | 内嵌 Web UI |
-| `/v1/agents/...` | Web UI / 本机客户端 | **主契约**：对话、策略、侧车、子 Agent |
-| `/v1/workgroups/...` | Web UI（反代 Manage） | 工作组 |
+| `/v1/agents/...` | Desktop / 本机客户端 | **主契约**：对话、策略、侧车、子 Agent |
+| `/v1/workgroups/...` | Desktop（反代 Manage） | 工作组 |
 | `/v1/...` | 本机 | messages、streams、triggers、setup、llm |
 | `/health` | 探活 | 运维脚本 |
 
@@ -239,7 +238,7 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 - `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
 - 子 Agent 内部 `turn_finished`：**不**转发为父 Agent 终态（`node/internal/childagent/relay_hub.go`）。
 
-**Web UI 等交互客户端**：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。等待审批期间不能因为普通 human message 清除卡片；只有显式 cancel 或 resume 才改变该 turn。
+**Desktop 等交互客户端**：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。等待审批期间不能因为普通 human message 清除卡片；只有显式 cancel 或 resume 才改变该 turn。
 
 #### 2.4.2 `hitl_required` 载荷（本地 turn）
 
@@ -329,7 +328,7 @@ POST /v1/agents/{agent_id}/skills/unload
 
 写盘后 Node 热更新该 Agent runtime 的 policy engine；`ask_user_information` 禁止设为 `deny`。全局 `/v1/policy*` 已移除（404）。
 
-Web UI：Agents 设置页 Policy 面板。
+Desktop：智能体设置中的 Policy 面板。
 
 ### 2.7 Context 诊断中的 Skills 成本
 

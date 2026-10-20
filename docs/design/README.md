@@ -27,8 +27,8 @@ Windows Desktop 已实现主要日常功能，正在收束发布验收；当前�
 | [memory-v2-architecture-and-refactor-guide.md](memory-v2-architecture-and-refactor-guide.md) | Memory 分层、Turn 级召回、冲突判定与 Workspace 存储 |
 | [turn-cancellation-message-integrity-plan.md](turn-cancellation-message-integrity-plan.md) | Turn/工具取消、流式草稿与 Canonical LLM History 边界 |
 | [ux-agent-owned-file-approval.md](ux-agent-owned-file-approval.md) | Agent 自有文件写入的审批信任链 |
-| [ui-e2e-regression-checklist.md](ui-e2e-regression-checklist.md) | 当前 Node Web UI 回归清单 |
-| [ui-product-grade-redesign.md](ui-product-grade-redesign.md) | Node Web UI 产品级评审、已落地的核心改造与持续精修基线 |
+| [ui-e2e-regression-checklist.md](ui-e2e-regression-checklist.md) | 已退役 Node Web UI 的历史回归清单；不适用于当前 Desktop |
+| [ui-product-grade-redesign.md](ui-product-grade-redesign.md) | Node Web UI 的历史产品评审与重构记录 |
 | [p0-controlled-execution-foundation.md](p0-controlled-execution-foundation.md) | P0 已验收：默认鉴权、Trigger 归属/投递安全与恢复记录 |
 | [p1-feedback-and-autonomous-goals.md](p1-feedback-and-autonomous-goals.md) | P1 MVP 已验收、未发布：反馈闭环、单 Node 长期目标与验收边界 |
 | [2026-09-08-auto-agent-product-model.md](2026-09-08-auto-agent-product-model.md) | 当前 Auto 类型、主聊天与任务设置边界，取代早期 P1 入口假设 |

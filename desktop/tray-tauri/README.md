@@ -1,6 +1,6 @@
 # DAgents Desktop（Tauri）
 
-当前 Windows 人机入口是内嵌前端的 Tauri 2 Desktop。Node 只提供运行 API，不提供 /ui/ 页面；已退休 Go Shell 的模块和构建入口已移除。主线是一个使用者拥有一个 Node，可从多个 Desktop 访问，不实现多用户租户隔离。
+当前唯一的 Agent 人机入口是内嵌前端的 Tauri 2 Desktop。Node 只提供运行 API，不提供 `/ui/` 页面；共享 Vue 源码不能独立启动为网页应用。已退休 Go Shell 的模块和构建入口已移除。一个 Desktop 固定连接同机 Node，不支持连接远程 Node。
 
 ## 已接入与职责
 
@@ -13,16 +13,9 @@
 
 设置复用 node/webui/frontend 内的 Vue 组件源码，Node 构建不依赖前端产物。当前浏览器资源是 Node 侧会话的只读展示；人工接管和地址栏控制尚未实现。
 
-## 连接模式
+## 本机组件地址
 
-| 模式 | 行为 |
-| --- | --- |
-| local（默认） | 连接本机 Node，可启动与监护本安装拥有的 Node。 |
-| tunnel | 连接用户已经建立的 SSH 隧道的 loopback HTTP 端口；不会启动、恢复、停止或重启本机 Node，不从远端 Node 安装本机更新。 |
-
-两种模式都只接受 loopback HTTP origin，不接受公网/LAN 地址、URL 凭据、路径或 query。SSH 隧道由用户在 Desktop 外建立；当前没有自动 SSH 管理或 Node 通用 Bearer 用户认证。端口转发必须受访问控制，不能公开裸 Node API。
-
-隧道模式的 Agent 工作目录、终端、文件和浏览器属于连接的 Node。工作目录输入 Node 侧路径，原生 Node 目录选择器禁用。Desktop 附件上传后转为 Node 引用，不把本机路径当作远端文件。
+Desktop 固定访问 Node `http://127.0.0.1:18765`；Node 管理的 Browser sidecar 固定使用 `http://127.0.0.1:18766`。用户设置中不保存 endpoint、连接模式或隧道配置。Node bootstrap YAML 仍保留 listener 字段供服务部署和测试启动使用；Desktop 不会根据该字段切换连接目标。
 
 ## 配置存储
 
@@ -32,7 +25,7 @@ Desktop JSON 默认位置：
 - macOS：~/Library/Application Support/DAgents/desktop/settings.json
 - Linux：$XDG_CONFIG_HOME/dagents/desktop/settings.json（缺省使用用户 .config）
 
-字段为 connection_mode、node_endpoint、notification_enabled、update_check_enabled、update_check_interval_seconds。旧 JSON 缺少模式时按 local 读取。保存后重启 Desktop 生效；读取失败时禁止覆盖默认值，保存失败保留草稿。
+Desktop JSON 只保存 notification_enabled、update_check_enabled、update_check_interval_seconds。旧 JSON 中的 node_endpoint 与 connection_mode 会被忽略，保存时不会再写回。保存后重启 Desktop 生效；读取失败时禁止覆盖默认值，保存失败保留草稿。
 
 Node config.yaml 只保存 listen。Node 名称、使用者称呼、LLM、Manage、工具和运行设置留在 Node 的 .runtime 数据库。Manage 凭据不写入 Desktop JSON。
 
@@ -64,9 +57,7 @@ Release 使用 scripts/ci/build_dagents_shell_tauri.sh，正式 Windows 包由 I
 
 dagents-shell.exe 提供 --desktop-status、--node-status、--owned-node-status、--start-owned-node、--stop-owned-node [--require-idle]、--quit-desktop。控制入口先于 GUI 初始化；设备连接不创建另一份 runtime。
 
-隧道模式不允许本机 Node 启停。安装器 require-idle 在没有存活本机 owner 时可以无操作完成；若残留此前本机模式启动的受管 Node，需切回本机模式处理，不能用远端状态判断本机进程。
-
-升级下载后再次检查 Node readiness；当前无 Node 原子维护锁，检查和停止之间仍有新回合竞态。隧道模式的本机更新安装禁用，远端 Node 与本机 Desktop 的平台发布和升级需分别设计。
+升级下载后再次检查 Node readiness；当前无 Node 原子维护锁，检查和停止之间仍有新回合竞态。
 
 ## 验证与限制
 

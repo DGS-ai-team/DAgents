@@ -21,13 +21,13 @@ jobs:
           cache: npm
           cache-dependency-path: node/webui/frontend/package-lock.json
 
-      - name: Install Web UI test dependencies
+      - name: Install shared Desktop UI test dependencies
         run: npm ci --prefix node/webui/frontend
 
-      - name: Test Web UI
+      - name: Test shared Desktop UI sources
         run: npm test --prefix node/webui/frontend
 
-      - name: Lint Web UI
+      - name: Lint shared Desktop UI sources
         run: npm run lint --prefix node/webui/frontend
 
       - name: Setup Go

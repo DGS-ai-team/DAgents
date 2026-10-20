@@ -148,23 +148,14 @@ class PlaywrightDriver:
         browser: Browser | None = None
         owns_context = True
         try:
-            if self.settings.cdp_url:
-                browser = await pw.chromium.connect_over_cdp(self.settings.cdp_url)
-                contexts = browser.contexts
-                if not contexts:
-                    context = await browser.new_context(viewport={"width": width, "height": height}, service_workers="block")
-                else:
-                    context = contexts[0]
-                    owns_context = False
-            else:
-                context = await pw.chromium.launch_persistent_context(
-                    str(profile),
-                    headless=not headed,
-                    executable_path=self.settings.chrome_path or None,
-                    viewport={"width": width, "height": height},
-                    ignore_https_errors=bool(self.settings.ignore_https_errors),
-                    service_workers="block",
-                )
+            context = await pw.chromium.launch_persistent_context(
+                str(profile),
+                headless=not headed,
+                executable_path=self.settings.chrome_path or None,
+                viewport={"width": width, "height": height},
+                ignore_https_errors=bool(self.settings.ignore_https_errors),
+                service_workers="block",
+            )
             state = SessionState(session_key=session_key, context=context, browser=browser, owns_context=owns_context)
             context.on("page", lambda page: self._register_page_nowait(state, page))
             await self._install_network_policy(context)

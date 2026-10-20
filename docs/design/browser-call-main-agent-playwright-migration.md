@@ -7,6 +7,8 @@
 > 目标版本：分阶段交付，不绑定单一版本号
 > 本文是当前 Browser 架构的唯一设计基线；旧的 browser-use/伴生任务设计文档已删除。
 
+> 2026-10-20 implementation note: the service address is now fixed to local `127.0.0.1:18766`, managed by Node. User-configured `service_url` and CDP attach have been removed from the supported product path; examples below describing those options are historical design context.
+
 ## 1. 决策摘要
 
 本方案将 Browser 能力从“主 Agent 把自然语言任务委派给 browser-use Agent”调整为“主 Agent 直接调用确定性浏览器动作”。

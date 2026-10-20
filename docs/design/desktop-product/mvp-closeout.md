@@ -32,7 +32,7 @@
 | 图标 | `shared/icons/desktop/` | Canonical shared assets; Desktop design provenance and license notes remain in [`shared/icons/desktop/manifest.json`](../../../shared/icons/desktop/manifest.json) |
 | 设计参考 | 本目录的 `prototype/`、`icons/`、`visuals/` | 模拟交互、图标画板、历史探索与当前布局参考，不能当作已接入的功能 |
 
-目前只接受 loopback Node，原始认证凭据由 Rust 宿主持有，UI 通过 Tauri commands 调用固定 Node。Node 地址可作为连接信息显示；UI 不自行直连 Node。终端会话归属于 Agent：切换 Agent/关窗脱离连接并保留进程，明确关闭资源则关闭会话。原托盘 Console 与 Node `/ui/` 保留用于首配和未迁移功能。
+当时的验收基线只接受 loopback Node，原始认证凭据由 Rust 宿主持有，UI 通过 Tauri commands 调用固定 Node。终端会话归属于 Agent：切换 Agent/关窗脱离连接并保留进程，明确关闭资源则关闭会话。其后 Node `/ui/` 已移除；当前只有独立 Desktop 提供 Agent 交互界面，见本文件顶部的状态更新。
 
 ## 验收证据与限度
 

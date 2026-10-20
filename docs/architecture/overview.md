@@ -5,14 +5,14 @@
 ## 组件
 
 ```text
-浏览器 ──HTTP/SSE──► Agent Node（Go + 内嵌 Web UI）
-                           │
-                           │ Node 主动 HTTPS/WSS
-                           ▼
-                    Manage（Python + Console，可选）
+DAgents Desktop ──HTTP/SSE──► Agent Node（Go API）
+                                  │
+                                  │ Node 主动 HTTPS/WSS
+                                  ▼
+                           Manage（Python + Console，可选）
 ```
 
-- Node 负责 Agent、Session/Turn/Step、LLM、工具、policy、HITL、本地历史与 UI。
+- Desktop 是产品交互入口；Node 只提供 Agent、Session/Turn/Step、LLM、工具、policy、HITL 和本地历史 API，不提供网页版入口。
 - Manage 负责 Registry、Workgroup、Console、制品/Release 元数据和协作 Timeline。
 - Node 是到 Manage 的连接发起方；Manage 不反向访问 Node。
 

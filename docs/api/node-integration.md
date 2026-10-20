@@ -4,7 +4,7 @@
 
 ## 传输与安全边界
 
-Node 默认监听 `127.0.0.1:18765`（实际监听地址由启动 YAML 决定）。Node HTTP API 本身没有通用 Bearer 鉴权，也不提供多用户 ACL。Desktop 的 `connection_mode: "tunnel"` 连接到本机 loopback 上由 SSH 等外部机制建立的端口转发；隧道的身份验证、授权和加密由外部 SSH 连接负责，Node 不会验证隧道用户身份。不要把这类外部转发描述为 Node 远程认证。`GET /v1/node/update/package` 与未完成首配时的 `GET /v1/node/upgrade-readiness` 另有 loopback 请求限制。Node 发往 Manage 的凭据仅用于出站请求，不会由 settings 或 update API 回传。
+Node 默认监听 `127.0.0.1:18765`（实际监听地址仍由启动 YAML 决定）。Desktop transport 固定访问本机 `127.0.0.1:18765`，不支持远程 Node 或 SSH tunnel 模式。Node HTTP API 本身没有通用 Bearer 鉴权，也不提供多用户 ACL，因此不要将 API 暴露到不可信网络。`GET /v1/node/update/package` 与未完成首配时的 `GET /v1/node/upgrade-readiness` 另有 loopback 请求限制。Node 发往 Manage 的凭据仅用于出站请求，不会由 settings 或 update API 回传。
 
 多数 JSON 成功响应直接返回 DTO 或操作结果，不存在统一的 `data` envelope。标准错误由 `writeAPIError` 返回 `{"error":{"code":"...","message":"...","details":{...}}}`。具体 handler 可能有专属状态码、二进制或流响应；应以实现和 DTO 为准。Go `ServeMux` 的 method pattern 属于接口契约。
 
@@ -20,7 +20,7 @@ Node 默认监听 `127.0.0.1:18765`（实际监听地址由启动 YAML 决定）
 | Linux channel 与 credential（含 SSH/远程主机配置） | Node Linux channel store。 | `/v1/linux/*`；属于 Node host 管理能力。当前没有独立 `/v1/ssh/*` 路由。 |
 | Agent handbook 与 workspace | 每个 Agent 对应的 Node 文件系统和 handbook 存储。 | `/v1/agents/{agent_id}/handbook*`、`workspace*`、`/media/*`。目录选择由 Node host 的原生 directory-picker 执行。 |
 | Manage 连接凭据 | Node 配置：Manage URL、Node token、registration 和 Workgroup 配置。 | `/v1/settings` 接受 write-only `manage.node_token`。GET 仅返回 `has_node_token`。PATCH `node_token: ""` 保留已保存值；`clear_node_token: true` 才清除。 |
-| Desktop endpoint 与 Shell 设置 | Desktop 自有 settings JSON：旧字段 `node_endpoint`、`notification_enabled`、`update_check_enabled`、`update_check_interval_seconds`，以及 `connection_mode`（`local` 或 `tunnel`）。旧 JSON 缺少 `connection_mode` 时默认为 `local`。 | 不属于 Node `/v1/settings`。`local` 管理本机 Node；`tunnel` 连接经 SSH 等外部机制转发到 loopback 的 Node endpoint，不表示 Node 实现了远程认证。 |
+| Desktop endpoint 与 Shell 设置 | Desktop 自有 settings JSON：`notification_enabled`、`update_check_enabled`、`update_check_interval_seconds`。Node endpoint 固定为 `127.0.0.1:18765`；旧 `node_endpoint` / `connection_mode` 字段被忽略并在下次保存时移除。 | 不属于 Node `/v1/settings`。Desktop 固定管理本机 Node，不提供远程连接档案或 tunnel 配置。 |
 | Desktop notifications 与 schedule | Desktop 自己持有的设置和状态。 | 不属于 Node runtime 设置。 |
 | 显示偏好和草稿 | 前端 `localStorage`。 | 不属于服务端配置，也不在 Node/Desktop profile 间共享。 |
 
@@ -30,7 +30,7 @@ Node 首配维护单 owner 档案：`agent.name` 是完成 Node 初始化所必�
 
 ### Node 信息、聚合与设置
 
-`GET /v1/node/info` 返回 Node info DTO，字段包含 `node_id`、`manage_enabled`、`manage_url`、`manage_registered`，也提供 capabilities、LLM 与 compression 信息。DAgents Desktop connection view 会消费这些字段。`GET /v1/bootstrap` 为 Desktop WebView 首屏提供 `health`、`info`、`llm`、`user`、`onboarding`、`agent` 聚合；Node 不托管 Web UI；此聚合减少首屏往返，不取代原子 info/settings API。
+`GET /v1/node/info` 返回 Node info DTO，字段包含 `node_id`、`manage_enabled`、`manage_url`、`manage_registered`，也提供 capabilities、LLM 与 compression 信息。`GET /v1/bootstrap` 为 Desktop WebView 首屏提供 `health`、`info`、`llm`、`user`、`onboarding`、`agent` 聚合；Node 不托管 Web UI；此聚合减少首屏往返，不取代原子 info/settings API。
 
 `GET /v1/settings` 返回 `SettingsView`；`PATCH /v1/settings` 顶层可省略不相关设置块。view 顶层包含 `node`、`llm`、`manage`、`features`、`compression`、`memory`、`runtime`、`agent`、`user`、`onboarding`、`child_agents`、`browser`、`wecom`、`tools`、`hooks`、`available_tool_groups`。`node` 仅含 listener 字段。除 `manage` 以字段 presence 合并外，大多数设置块按其 DTO 一次整体应用；发 patch 前先 GET 并合并该块，仅在客户端明确提供完整块或接口定义了专门的子字段合并时省略旧字段。`manage` 的字段是可选指针，未出现的字段保留现值；出现的字段按 presence 更新。Manage token GET 示例是 `{"has_node_token":true}`，不会有 `node_token` 明文。PATCH `node_token: ""` 保留原 token；`clear_node_token: true` 才清除。显式 `url: ""` 是清空 URL，若最终 `enabled: true` 会因缺 URL 而校验失败。Setup panel 加载时密码输入框始终空白，空值提交保持原 token，明确清除需勾选清除字段。首配完成只要求 Node 名；`preferred_name` 可空。完整 DTO/patch 合并逻辑见 `node/internal/setup/settings.go`。
 
@@ -113,7 +113,7 @@ Workspace 文件路径通过 `path` query 参数传递。读取使用 `GET /v1/a
 
 文件 GET 支持 `If-None-Match` 条件读取：使用内容摘要生成的强 ETag，条件比较按 HTTP 的弱比较语义处理；匹配返回 `304`、当前 ETag 和空正文，未匹配返回 `200` 及最新字节。客户端必须保留 304 之前的内容，不能把空正文当作空文件。此读取条件不改变 PUT 的 `If-Match` 冲突保护。Desktop 自动刷新只检查当前可见目录及打开文件；大小与修改时间用于加速发现变化，不能替代内容版本校验。调度及草稿规则见[资源页自动刷新方案](../design/desktop-product/resource-auto-refresh.md)，消息资源引用和 HTML/SVG 预览见[资源引用协议](../development/resource-references.md)。
 
-Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=...` 提供；它读取该 Agent 已有浏览器会话的页面/截图，不会启动浏览器、执行页面代码或提供交互控制。AutoDreaming 状态由 `/v1/agents/{agent_id}/dreaming` 提供，体验条目、待办和唤醒触发器分别由 experience/todos/triggers 领域路由管理。Node 没有 SSH tunnel endpoint；Desktop tunnel mode 使用外部 SSH 端口转发连到 loopback Node，并不增加 Node 路由或 Node Bearer 认证。
+Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=...` 提供；它读取该 Agent 已有浏览器会话的页面/截图，不会启动浏览器、执行页面代码或提供交互控制。AutoDreaming 状态由 `/v1/agents/{agent_id}/dreaming` 提供，体验条目、待办和唤醒触发器分别由 experience/todos/triggers 领域路由管理。Browser sidecar 固定在 `127.0.0.1:18766`，由本机 Node 启动和停止。
 
 `GET /v1/agents/{agent_id}/terminals/ws` 升级为 WebSocket。客户端首帧可为 `open`（创建终端，可带 target、shell、cwd、rows、cols）或 `resume`（用 `session_id` 重新连接已有会话）；后续客户端命令为 `input`、`resize`、`terminate`、`close`、`ping`。JSON 中的 `data` 是 base64 编码的字节。断开 WebSocket 会 detach 会话，终端仍可恢复；显式 `close` 或 `terminate` 才关闭会话。screen stream、transfer events 也是流协议，细节以 handler 为准。目录选择是 Node host 原生能力：`/v1/platform/capabilities` 报告例如 `native_directory_picker`，`POST /v1/platform/directory-picker` 由 Node 进程调用 OS picker。
 
@@ -121,7 +121,7 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 
 ## 路由边界与调整结论
 
-- `GET /v1/bootstrap` 与 `GET /v1/node/info` 保留：前者是减少 Desktop WebView 首屏请求的聚合，后者是 Desktop connection 使用的独立 DTO。
+- `GET /v1/bootstrap` 与 `GET /v1/node/info` 保留：前者是减少 Desktop WebView 首屏请求的聚合，后者是 Node 信息的独立 DTO。
 - `/v1/settings` 与 `/v1/llm/settings` 都保留：settings 是全量 Node 管理/setup 视图，LLM endpoint 是现有 runtime profile 的轻量操作面；职责虽有字段重叠，但消费者和保存通道不同，当前不合并。
 - Agent、policy、context、workspace、HITL、tools、MCP、Linux channels、Manage Workgroups、feedback、Manage upload 保留为领域 API。Workgroup 路由由当前 Node Workgroup adapter 处理，不是已退役的 Desktop bridge API；Feedback 写入 Node 本地记录并尝试同步 Manage；Manage upload 是 Node 到 Manage 的上传代理。不能因为 Desktop WebView 当下没有调用就移除 Manage、Node 内部工具或 Go/Python client 依赖的操作。
 - Desktop Shell 专属路径退出 Node HTTP：剪贴板、窗口聚焦与 update apply 改走 Shell IPC；Node 自己的 native directory picker 和 host API 仍保留。

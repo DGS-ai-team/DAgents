@@ -202,7 +202,7 @@ fn build_ws_url(endpoint: &str, agent_id: &str) -> Result<String, String> {
         || base.query().is_some()
         || base.fragment().is_some()
     {
-        return Err("终端仅允许连接本机 HTTP Node；远程请使用 loopback SSH 隧道".into());
+        return Err("终端仅允许连接本机 HTTP Node".into());
     }
     let host = base.host_str().ok_or("Node 地址缺少主机名")?;
     let port = base.port().unwrap_or(80);

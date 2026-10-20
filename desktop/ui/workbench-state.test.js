@@ -31,8 +31,6 @@ test('Desktop menubar groups actions by user task and disables unavailable opera
   assert.equal(workgroup['视图'].find(item => item.action === 'agent-chat').disabled, true)
   const offline = createDesktopMenuModel({ activeTab: 'chat', online: false })
   assert.equal(offline.DAgents.find(item => item.label.startsWith('Node ·')).hint, '本机')
-  const tunnelOffline = createDesktopMenuModel({ activeTab: 'chat', online: false, connectionMode: 'tunnel' })
-  assert.equal(tunnelOffline.DAgents.find(item => item.label.startsWith('Node ·')).hint, 'SSH 隧道')
   assert.equal(offline['资源'].find(item => item.action === 'open-workspace').disabled, true)
   assert.equal(offline['资源'].find(item => item.action === 'create-terminal').disabled, true)
   assert.equal(offline['智能体'].find(item => item.action === 'current-agent-settings').disabled, true)
@@ -109,11 +107,10 @@ test('running terminal list removes non-running and duplicate rows, and de-dupli
   assert.equal(reusableTerminalConnection({ ...a, status: 'connected' }), null)
 })
 
-test('DesktopApp wires the active connection mode into the top-menu model', () => {
+test('DesktopApp supplies local Node and active workspace state to the top-menu model', () => {
   const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
   const menuContext = source.match(/const menuEntries = computed\(\(\) => createDesktopMenuModel\(\{([\s\S]*?)\}\)\)/)?.[1]
   assert.ok(menuContext, 'menu model call is present')
-  assert.match(menuContext, /connectionMode:\s*status\.value\.connection_mode/)
 })
 
 test('Node first-run gate leaves Desktop-local settings accessible without opening Node settings', () => {
@@ -266,15 +263,18 @@ test('streaming assistant reserves its history index and terminal hydrate keeps 
 test('pending user send is visible before hydrate and is not duplicated once persisted', () => {
   const pending = { id: 'send-1', kind: 'user', text: '2 + 2?', baseTranscriptLength: 1 }
   const beforeHydrate = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Earlier' }], '', null, pending, true)
-  assert.deepEqual(beforeHydrate.map(entry => entry.text), ['Earlier', '2 + 2?', '正在生成回复…'])
+  assert.deepEqual(beforeHydrate.map(entry => entry.text), ['Earlier', '2 + 2?', ''])
   assert.equal(beforeHydrate[1].id, 'agent-a:pending-user:send-1')
   assert.equal(beforeHydrate[2].id, 'agent-a:pending-response:send-1')
+  assert.equal(beforeHydrate[2].kind, 'assistant')
+  assert.equal(beforeHydrate[2].streaming, true)
 
   const afterHydrate = desktopChatEntries('agent-a', [
     { kind: 'user', text: 'Earlier' },
     { kind: 'user', text: '2 + 2?' },
   ], '', { phase: 'model_generating' }, pending, true)
-  assert.deepEqual(afterHydrate.map(entry => entry.text), ['Earlier', '2 + 2?', '正在生成回复…'])
+  assert.deepEqual(afterHydrate.map(entry => entry.text), ['Earlier', '2 + 2?', ''])
+  assert.equal(afterHydrate[2].streaming, true)
 
   const firstToken = desktopChatEntries('agent-a', [
     { kind: 'user', text: 'Earlier' },

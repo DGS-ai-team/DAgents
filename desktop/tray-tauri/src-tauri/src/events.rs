@@ -2,6 +2,8 @@
 
 use crate::nodeclient::Client;
 use crate::pending::{self, Store};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -71,6 +73,8 @@ impl Subscriber {
             on_change: Arc::clone(&self.on_change),
             on_event: self.on_event.clone(),
             stop: Arc::clone(&self.stop),
+            cursor: StreamCursor::default(),
+            ever_connected: false,
         }
     }
 }
@@ -81,11 +85,20 @@ struct Parts {
     on_change: Arc<dyn Fn() + Send + Sync>,
     on_event: Option<Arc<dyn Fn(crate::nodeclient::StreamEvent) + Send + Sync>>,
     stop: Arc<AtomicBool>,
+    cursor: StreamCursor,
+    ever_connected: bool,
+}
+
+#[derive(Default)]
+struct StreamCursor {
+    seq: Option<i32>,
+    epoch: String,
 }
 
 fn stream_loop(parts: Parts) {
+    let mut parts = parts;
     while !parts.stop.load(Ordering::SeqCst) {
-        if let Err(e) = connect_once(&parts) {
+        if let Err(e) = connect_once(&mut parts) {
             if !parts.stop.load(Ordering::SeqCst) {
                 crate::diagnostics::stderr_best_effort(format_args!("shell sse: {e}"));
             }
@@ -94,18 +107,81 @@ fn stream_loop(parts: Parts) {
     }
 }
 
-fn connect_once(parts: &Parts) -> Result<(), String> {
+fn connect_once(parts: &mut Parts) -> Result<(), String> {
     sync_agents(parts);
     let stop = Arc::clone(&parts.stop);
-    parts.client.stream_events(&stop, |ev| {
-        if let Some(handler) = &parts.on_event {
-            handler(ev.clone());
-        }
-        if pending::apply_notification_changed(&parts.store, &ev) {
-            (parts.on_change)();
-        }
-        !parts.stop.load(Ordering::SeqCst)
-    })
+    let was_connected = parts.ever_connected;
+    let connected = AtomicBool::new(false);
+    let reconnect_handler = parts.on_event.clone();
+    let after_seq = parts.cursor.seq;
+    let client = Arc::clone(&parts.client);
+    let on_event = parts.on_event.clone();
+    let store = Arc::clone(&parts.store);
+    let on_change = Arc::clone(&parts.on_change);
+    let cursor = &mut parts.cursor;
+    let result = client.stream_events_after(
+        &stop,
+        after_seq,
+        || {
+            connected.store(true, Ordering::SeqCst);
+            if was_connected {
+                if let Some(handler) = &reconnect_handler {
+                    handler(transport_resync_event("stream_reconnected"));
+                }
+            }
+        },
+        |ev| {
+            let epoch_changed = !cursor.epoch.is_empty()
+                && !ev.stream_epoch.is_empty()
+                && cursor.epoch != ev.stream_epoch;
+            if epoch_changed && ev.event_type != "resync_required" {
+                if let Some(handler) = &on_event {
+                    handler(transport_resync_event("stream_epoch_changed"));
+                }
+                cursor.seq = None;
+            }
+            if !ev.stream_epoch.is_empty() {
+                cursor.epoch = ev.stream_epoch.clone();
+            }
+            if ev.event_type == "resync_required" {
+                cursor.seq = ev
+                    .data
+                    .get("seq")
+                    .and_then(Value::as_i64)
+                    .and_then(|seq| i32::try_from(seq).ok());
+            } else if ev.seq > 0 && cursor.seq.is_none_or(|seq| ev.seq > seq) {
+                cursor.seq = Some(ev.seq);
+            }
+            if let Some(handler) = &on_event {
+                handler(ev.clone());
+            }
+            if pending::apply_notification_changed(&store, &ev) {
+                on_change();
+            }
+            !stop.load(Ordering::SeqCst)
+        },
+    );
+    if connected.load(Ordering::SeqCst) {
+        parts.ever_connected = true;
+    }
+    result
+}
+
+fn transport_resync_event(reason: &str) -> crate::nodeclient::StreamEvent {
+    let mut data = HashMap::new();
+    data.insert("reason".into(), Value::String(reason.into()));
+    data.insert("requires_hydrate".into(), Value::Bool(true));
+    crate::nodeclient::StreamEvent {
+        event_type: "resync_required".into(),
+        session_id: String::new(),
+        agent_id: String::new(),
+        seq: 0,
+        agent_seq: 0,
+        event_version: 1,
+        stream_epoch: String::new(),
+        delivery: "transient".into(),
+        data,
+    }
 }
 
 fn sync_agents(parts: &Parts) {

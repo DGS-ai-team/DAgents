@@ -1,27 +1,20 @@
-//! Desktop-local preferences, stored separately from the supervised Node config.
+//! Desktop-local preferences. Node and Browser addresses are fixed loopback
+//! endpoints and are deliberately not persisted as user settings.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use url::Url;
 
-pub const DEFAULT_NODE_ENDPOINT: &str = "http://127.0.0.1:18765";
+pub const NODE_ENDPOINT: &str = "http://127.0.0.1:18765";
 pub const DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS: u64 = 6 * 3600;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionMode {
-    #[default]
-    Local,
-    Tunnel,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ShellConfig {
-    pub connection_mode: ConnectionMode,
-    pub node_endpoint: String,
+    #[cfg(test)]
+    #[serde(skip, default = "default_node_endpoint")]
+    pub(crate) node_endpoint: String,
     pub notification_enabled: bool,
     pub update_check_enabled: bool,
     pub update_check_interval_seconds: u64,
@@ -30,8 +23,8 @@ pub struct ShellConfig {
 impl Default for ShellConfig {
     fn default() -> Self {
         Self {
-            connection_mode: ConnectionMode::Local,
-            node_endpoint: DEFAULT_NODE_ENDPOINT.into(),
+            #[cfg(test)]
+            node_endpoint: default_node_endpoint(),
             notification_enabled: true,
             update_check_enabled: true,
             update_check_interval_seconds: DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS,
@@ -40,8 +33,15 @@ impl Default for ShellConfig {
 }
 
 impl ShellConfig {
-    pub fn can_manage_local_node(&self) -> bool {
-        self.connection_mode == ConnectionMode::Local
+    pub fn node_endpoint(&self) -> &str {
+        #[cfg(test)]
+        {
+            return &self.node_endpoint;
+        }
+        #[cfg(not(test))]
+        {
+            NODE_ENDPOINT
+        }
     }
 
     pub fn load_or_create(path: &Path) -> Result<Self, String> {
@@ -52,23 +52,20 @@ impl ShellConfig {
         }
         let text = fs::read_to_string(path)
             .map_err(|e| format!("读取 Desktop 设置失败 {}: {e}", path.display()))?;
-        let mut config: Self = serde_json::from_str(&text)
+        let config: Self = serde_json::from_str(&text)
             .map_err(|e| format!("解析 Desktop 设置失败 {}: {e}", path.display()))?;
-        config.node_endpoint = validate_node_endpoint(&config.node_endpoint)?;
         config.validate()?;
         Ok(config)
     }
 
     pub fn save_atomic(&self, path: &Path) -> Result<(), String> {
-        let mut normalized = self.clone();
-        normalized.node_endpoint = validate_node_endpoint(&normalized.node_endpoint)?;
-        normalized.validate()?;
+        self.validate()?;
         let parent = path
             .parent()
             .ok_or_else(|| "Desktop 设置路径没有父目录".to_string())?;
         fs::create_dir_all(parent).map_err(|e| format!("创建 Desktop 设置目录失败: {e}"))?;
-        let bytes = serde_json::to_vec_pretty(&normalized)
-            .map_err(|e| format!("序列化 Desktop 设置失败: {e}"))?;
+        let bytes =
+            serde_json::to_vec_pretty(self).map_err(|e| format!("序列化 Desktop 设置失败: {e}"))?;
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -94,7 +91,6 @@ impl ShellConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        validate_node_endpoint(&self.node_endpoint)?;
         if !(60..=7 * 24 * 3600).contains(&self.update_check_interval_seconds) {
             return Err("Desktop 更新检查间隔必须为 60 秒至 7 天".into());
         }
@@ -106,34 +102,9 @@ impl ShellConfig {
     }
 }
 
-pub fn validate_node_endpoint(value: &str) -> Result<String, String> {
-    let value = value.trim().trim_end_matches('/');
-    let parsed = Url::parse(value).map_err(|_| "Node 地址格式无效".to_string())?;
-    if parsed.scheme() != "http"
-        || parsed.username() != ""
-        || parsed.password().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || !matches!(parsed.path(), "" | "/")
-    {
-        return Err("Desktop MVP 仅支持不含路径的本机 HTTP Node 地址".into());
-    }
-    let loopback = match parsed.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
-        None => false,
-    };
-    if !loopback {
-        return Err(
-            "Node 地址必须是 loopback HTTP；隧道模式请填入预先建立的本机 SSH 转发地址".into(),
-        );
-    }
-    Ok(parsed
-        .origin()
-        .ascii_serialization()
-        .trim_end_matches('/')
-        .to_string())
+#[cfg(test)]
+fn default_node_endpoint() -> String {
+    NODE_ENDPOINT.to_string()
 }
 
 #[cfg(test)]
@@ -152,48 +123,37 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_desktop_local_and_round_trip_atomically() {
+    fn defaults_are_local_and_round_trip_atomically() {
         let path = temp_path();
         let initial = ShellConfig::load_or_create(&path).unwrap();
-        assert_eq!(initial.node_endpoint, DEFAULT_NODE_ENDPOINT);
-        assert_eq!(initial.connection_mode, ConnectionMode::Local);
+        assert_eq!(initial.node_endpoint(), "http://127.0.0.1:18765");
         let mut changed = initial.clone();
         changed.notification_enabled = false;
         changed.update_check_interval_seconds = 900;
         changed.save_atomic(&path).unwrap();
         assert_eq!(ShellConfig::load_or_create(&path).unwrap(), changed);
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("node_endpoint"));
+        assert!(!saved.contains("connection_mode"));
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
-    fn old_desktop_json_defaults_to_local_and_tunnel_stays_loopback_only() {
-        let old: ShellConfig =
-            serde_json::from_str(r#"{"node_endpoint":"http://127.0.0.1:18765"}"#).unwrap();
-        assert_eq!(old.connection_mode, ConnectionMode::Local);
-
-        let mut tunnel = old;
-        tunnel.connection_mode = ConnectionMode::Tunnel;
-        tunnel.node_endpoint = "http://localhost:18766".into();
-        assert!(tunnel.validate().is_ok());
-        tunnel.node_endpoint = "http://node.example:18766".into();
-        assert!(tunnel.validate().is_err());
-    }
-
-    #[test]
-    fn endpoint_requires_loopback_http_origin() {
-        assert_eq!(
-            validate_node_endpoint("http://localhost:18765/").unwrap(),
-            "http://localhost:18765"
-        );
-        for invalid in [
-            "https://127.0.0.1:18765",
-            "http://example.com",
-            "http://127.0.0.1:2/path",
-        ] {
-            assert!(
-                validate_node_endpoint(invalid).is_err(),
-                "accepted {invalid}"
-            );
-        }
+    fn legacy_tunnel_fields_are_ignored_and_cannot_change_local_endpoint() {
+        let path = temp_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{"connection_mode":"tunnel","node_endpoint":"http://127.0.0.1:18766","notification_enabled":false}"#,
+        )
+        .unwrap();
+        let config = ShellConfig::load_or_create(&path).unwrap();
+        assert!(!config.notification_enabled);
+        assert_eq!(config.node_endpoint(), "http://127.0.0.1:18765");
+        config.save_atomic(&path).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("tunnel"));
+        assert!(!saved.contains("18766"));
+        let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 }

@@ -93,4 +93,3 @@ an Agent snapshot, or a log.
 
 - `go test ./node/...`
 - `npm test --prefix node/webui/frontend -- --run`
-- `npm run build --prefix node/webui/frontend`

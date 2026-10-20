@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -215,24 +216,20 @@ func assertManageSettingsPreserved(t *testing.T, cfg *config.Config) {
 }
 
 func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
-	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/browser/ping" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	defer service.Close()
-
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	cfg := testConfig(t)
-	cfg.Browser.ServiceURL = service.URL
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	var factoryEndpoint string
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), func(o *serverOptions) {
+		o.browserRuntimeFactory = func(cfg *config.Config) (*browser.Manager, *browser.ServiceProcess, error) {
+			factoryEndpoint = cfg.Browser.ServiceURL
+			manager, err := browser.NewManager(cfg, &browser.MockDriver{})
+			return manager, nil, err
+		}
+	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -254,6 +251,9 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 	}
 	if srv.browserManager() == nil || !srv.browserManager().Enabled() {
 		t.Fatal("browser manager was not installed")
+	}
+	if factoryEndpoint != config.DefaultBrowserServiceURL {
+		t.Fatalf("browser runtime endpoint = %q, want fixed local %q", factoryEndpoint, config.DefaultBrowserServiceURL)
 	}
 	if !hasToolDefinition(srv.tools.Definitions(), "browser_call") || !hasToolDefinition(srv.tools.Definitions(), "browser_evaluate") {
 		t.Fatal("default registry missing browser tools after enable")

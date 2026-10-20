@@ -65,20 +65,25 @@ func (s *Server) browserManager() *browser.Manager {
 	return s.browserMgr
 }
 
-// installBrowserManager atomically swaps the process-level browser manager
+// installBrowserRuntime atomically swaps the process-level browser manager
 // and rebinds all loaded Agent/workgroup registries. The session manager
 // requests a model-context refresh rather than mutating an active Step's
 // frozen tool snapshot.
-func (s *Server) installBrowserManager(next *browser.Manager) {
+func (s *Server) installBrowserRuntime(next *browser.Manager, service *browser.ServiceProcess, endpoint string) {
 	if s == nil {
 		if next != nil {
 			_ = next.Close()
 		}
+		_ = service.Close()
 		return
 	}
 	s.browserMu.Lock()
-	previous := s.browserMgr
+	previous, previousService := s.browserMgr, s.browserService
+	if service == nil && next != nil && previousService != nil && strings.TrimRight(previousService.Endpoint(), "/") == strings.TrimRight(endpoint, "/") {
+		service = previousService
+	}
 	s.browserMgr = next
+	s.browserService = service
 	s.browserMu.Unlock()
 
 	if s.tools != nil {
@@ -91,6 +96,24 @@ func (s *Server) installBrowserManager(next *browser.Manager) {
 		if err := previous.Close(); err != nil && s.logger != nil {
 			s.logger.Warn("previous browser manager close failed", "error", err)
 		}
+	}
+	if previousService != nil && previousService != service {
+		if err := previousService.Close(); err != nil && s.logger != nil {
+			s.logger.Warn("previous browser service stop failed", "error", err)
+		}
+	}
+}
+
+func (s *Server) closeBrowserService() {
+	if s == nil {
+		return
+	}
+	s.browserMu.Lock()
+	service := s.browserService
+	s.browserService = nil
+	s.browserMu.Unlock()
+	if err := service.Close(); err != nil && s.logger != nil {
+		s.logger.Warn("browser service stop failed", "error", err)
 	}
 }
 

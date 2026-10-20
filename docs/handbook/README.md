@@ -18,7 +18,7 @@
 | [00 · 导读](00-导读.md) | 读者路径、术语、源码导航 | [docs README](../README.md) |
 | [01 · 愿景与架构](01-愿景与架构.md) | 产品边界和组件关系 | [架构](../architecture.md) |
 | [02 · Agent Node 核心](02-Agent-Node-核心.md) | Session、Queue、Turn、Step | [架构](../architecture.md) + 子系统 README |
-| [03 · API 与 Client](03-API与Client.md) | Node API、SSE、Web UI | [参考资料](../reference/README.md) |
+| [03 · API 与 Client](03-API与Client.md) | Node API、SSE、Desktop 接入 | [参考资料](../reference/README.md) |
 | [04 · 能力与策略](04-能力与策略.md) | Tools、Policy、Skills、Compression | [内置工具参考](附录/内置工具参考.md) |
 | [05 · Manage 与协作面](05-Manage与A2A.md) | Registry、Workgroup、WS | [工作组指南](../user/workgroups.md) |
 | [06 · 运维与案例](06-运维与案例.md) | 启动、测试、发布、诊断 | [开发与验证](../development.md) |

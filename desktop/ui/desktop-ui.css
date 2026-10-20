@@ -3,6 +3,11 @@
   box-sizing: border-box;
 }
 
+:root {
+  --desktop-font-ui: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-ui: var(--desktop-font-ui);
+}
+
 html,
 body,
 #app {
@@ -11,7 +16,7 @@ body,
   margin: 0;
   background: #f7f9fa;
   color: #263740;
-  font-family: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--desktop-font-ui);
 }
 
 button,
@@ -30,6 +35,25 @@ textarea {
   overflow: hidden;
   background: #fff;
   transition: grid-template-columns 200ms cubic-bezier(.2, .75, .25, 1);
+}
+
+/* Keep all icon-only controls centered, including controls inside embedded Node settings. */
+.desktop-shell button:has(> .ui-icon:only-child),
+.desktop-shell button:has(> .icon-mask:only-child),
+.desktop-shell button:has(> .window-control-icon:only-child) {
+  display: grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+  text-align: center !important;
+}
+
+.desktop-shell button:has(> .ui-icon:only-child) > .ui-icon,
+.desktop-shell button:has(> .icon-mask:only-child) > .icon-mask,
+.desktop-shell button:has(> .window-control-icon:only-child) > .window-control-icon {
+  align-self: center !important;
+  justify-self: center !important;
+  margin: 0 !important;
 }
 
 .desktop-shell:has(.rail.collapsed) {
@@ -667,7 +691,8 @@ button:disabled .icon-mask { color: #a0a5a8; }
   --color-primary-strong: #454d52;
   --color-primary-soft: #eceeef;
   --color-accent: #555d62;
-  --font-ui: Inter, "Segoe UI", sans-serif;
+  --font-ui: var(--desktop-font-ui);
+  font-family: var(--desktop-font-ui);
 }
 
 .desktop-chat-workspace {
@@ -704,6 +729,8 @@ button:disabled .icon-mask { color: #a0a5a8; }
   min-height: 0;
   background: #fff;
   color: #263b49;
+  font-family: var(--desktop-font-ui);
+  --font-ui: var(--desktop-font-ui);
   --app-background: #fff;
   --color-bg: #fff;
   --color-surface: #fff;
@@ -912,11 +939,15 @@ button:disabled .icon-mask { color: #a0a5a8; }
 .tab-close {
   display: grid;
   place-items: center;
-  width: 24px;
+  flex: 0 0 22px;
+  box-sizing: border-box;
+  width: 22px;
   height: 26px;
+  padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
+  line-height: 0;
   cursor: pointer;
 }
 
@@ -928,6 +959,7 @@ button:disabled .icon-mask { color: #a0a5a8; }
   width: 15px;
   height: 15px;
 }
+.tab-close .ui-icon { width: 14px; height: 14px; color: #697277; }
 
 .resource-nav-actions {
   display: flex;
@@ -1214,7 +1246,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   grid-template-columns: 28px minmax(0, 1fr) auto auto 34px;
   grid-template-rows: minmax(28px, auto);
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   max-width: 900px;
   width: 100%;
   height: auto;
@@ -1270,7 +1302,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   place-items: center;
   width: 34px;
   height: 34px;
-  margin-left: 4px;
+  margin-left: 0;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -1397,18 +1429,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   font-size: 11px;
 }
 
-.terminal-owner-note {
-  flex: 0 0 auto;
-  padding: 5px 22px;
-  border-bottom: 1px solid #e2e9eb;
-  background: #fbfcfd;
-  color: #59666b;
-  font-size: 11px;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.terminal-readonly { padding: 2px 6px; border: 1px solid #dce2e4; border-radius: 4px; color: #6e777b; font-size: 10px; line-height: 1.3; }
 .terminal-end-dialog { max-width: 460px; }
 .terminal-end-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .terminal-end-dialog .dialog-actions button { min-height: 32px; padding: 0 11px; border: 1px solid #cbd2d5; border-radius: 6px; background: #fff; color: #353c40; cursor: pointer; }
@@ -1507,7 +1528,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .terminal-output .desktop-xterm { flex: 1 1 0; width: 100%; min-width: 0; min-height: 0; box-sizing: border-box; }
 
 .terminal-output-empty { padding: 0; background: #f8fafb; color: #33434a; font-family: inherit; }
-.terminal-empty-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; padding: 24px; color: #33434a; font: 12px/1.5 "Segoe UI", sans-serif; text-align: center; }
+.terminal-empty-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; padding: 24px; color: #33434a; font: 12px/1.5 var(--desktop-font-ui); text-align: center; }
 .terminal-empty-state .empty-icon { flex: none; }
 .terminal-empty-state h2 { margin: 0 0 7px; font-size: 17px; font-weight: 600; }
 .terminal-empty-state p { margin: 0 0 16px; color: #66757b; font-size: 12px; }
@@ -1577,7 +1598,12 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   right: 14px;
   bottom: 14px;
   width: min(380px, calc(100% - 28px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
 }
+.terminal-agent-dock.is-collapsed { width: min(380px, calc(100% - 28px)); }
 
 .dock-input-surface {
   display: flex;
@@ -1591,6 +1617,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   border-radius: 999px;
   background: #fff;
   box-shadow: 0 8px 26px #172f3b20;
+  pointer-events: auto;
 }
 
 .dock-status-icon {
@@ -1623,7 +1650,8 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .dock-message-input:disabled { color: #87969b; }
 
 .dock-expand-toggle,
-.dock-action {
+.dock-action,
+.dock-collapse-toggle {
   display: grid;
   flex: 0 0 36px;
   place-items: center;
@@ -1637,6 +1665,9 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .dock-expand-toggle { background: transparent; color: #4b555a; }
 .dock-expand-toggle:hover:not(:disabled) { background: #eceeef; }
 .dock-expand-toggle .icon-mask { width: 16px; height: 16px; color: currentColor; }
+.dock-collapse-toggle { flex-basis: 30px; width: 30px; height: 30px; background: transparent; color: #7a8488; }
+.dock-collapse-toggle:hover:not(:disabled) { background: #eceeef; color: #3f484c; }
+.dock-collapse-toggle .icon-mask { width: 14px; height: 14px; color: currentColor; }
 .dock-action { background: #353c40; color: #fff; }
 .dock-action:hover:not(:disabled) { background: #454d52; }
 .dock-action .icon-mask { width: 16px; height: 16px; color: #fff; }
@@ -1670,6 +1701,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   border-radius: 11px;
   background: #fff;
   box-shadow: 0 8px 26px #172f3b20;
+  pointer-events: auto;
 }
 .dock-panel-enter-active,
 .dock-panel-leave-active { transition: opacity 180ms ease, transform 180ms ease; transform-origin: bottom center; }
@@ -1697,6 +1729,14 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .dock-back-to-chat:hover { background: #eceeef; }
 .dock-back-to-chat .icon-mask { width: 16px; height: 16px; color: currentColor; }
 .dock-details-content { min-height: 0; overflow: auto; }
+.dock-details-panel { width: min(380px, calc(100vw - 28px)); }
+.dock-collapsed-toggle { position:relative; display:grid; align-self:flex-end; width:46px; height:46px; padding:0; place-items:center; border:1px solid #d7e0e3; border-radius:50%; background:#fff; box-shadow:0 8px 26px #172f3b20; cursor:pointer; pointer-events:auto; }
+.dock-collapsed-toggle .dock-status-icon { width:20px; height:20px; margin:0; }
+.dock-collapsed-chevron { position:absolute; right:7px; top:7px; width:10px; height:10px; background:#596368; }
+.dock-collapsed-toggle:hover { border-color:#aeb9bd; background:#f8f9f9; }
+.dock-collapsed-toggle:focus-visible,.dock-collapse-toggle:focus-visible { outline:2px solid #65777f; outline-offset:2px; }
+.dock-bar-enter-active,.dock-bar-leave-active { transition: opacity 190ms ease, transform 190ms cubic-bezier(.2,.75,.25,1); transform-origin:right center; }
+.dock-bar-enter-from,.dock-bar-leave-to { opacity:0; transform:scale(.97); }
 
 .dock-details {
   max-height: none;
@@ -1824,11 +1864,22 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   right: 12px;
   width: 28px;
   height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 0;
   background: transparent;
   color: #586b72;
-  font-size: 20px;
+  line-height: 0;
   cursor: pointer;
+}
+
+.desktop-icon-button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+  text-align: center;
 }
 
 .dialog > .approve {
@@ -1852,7 +1903,10 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 @media (prefers-reduced-motion: reduce) {
   .dock-status-icon.is-generating { animation: none; }
   .dock-panel-enter-active,
-  .dock-panel-leave-active { transition: none; }
+  .dock-panel-leave-active,
+  .dock-bar-enter-active,
+  .dock-bar-leave-active,
+  .terminal-agent-dock { transition: none; }
   .desktop-shell,
   .rail,
   .top-sidebar-slot,

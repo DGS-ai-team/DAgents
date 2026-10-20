@@ -13,9 +13,9 @@ import { applyToolJobsSnapshot } from "./toolJobs.js";
 import { resetStatusLines, syncTurnStatus } from "./statusLines.js";
 import { turnStateStore } from "./turnState.js";
 
-// ChatView is KeepAlive-ed. A hydrate request can outlive the view that
-// started it (for example while navigating to Agent settings). Do not let a
-// response from that obsolete view overwrite a newer HITL/UI state.
+// A hydrate request can outlive the view that started it (for example while
+// navigating to Agent settings). Do not let an obsolete response overwrite a
+// newer HITL/UI state.
 let hydrationGeneration = 0;
 
 export function invalidateHydration() {

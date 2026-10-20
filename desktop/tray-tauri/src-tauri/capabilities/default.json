@@ -17,6 +17,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-skip-taskbar",
     "core:window:allow-unminimize",
-    "opener:default"
+    "opener:default",
+    "dialog:allow-open"
   ]
 }

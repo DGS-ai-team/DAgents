@@ -157,7 +157,8 @@ const runtimeStatusText = computed(() => {
   const workers = workerStripText();
   if (workers) parts.push(workers);
   // Hydrate 后没有 SSE 草稿可恢复，但权威 Turn 终态仍应对用户可见。
-  // 取消请求的即时响应已经由 ChatView 写入系统消息，避免这里重复展示。
+  // The Desktop chat lifecycle may already have surfaced the immediate cancel
+  // response; keep this fallback only when no other status is available.
   if (!parts.length && turnStateStore.phase === "cancelled" && turnStateStore.cancelState !== "confirmed") {
     parts.push("本轮已取消");
   }

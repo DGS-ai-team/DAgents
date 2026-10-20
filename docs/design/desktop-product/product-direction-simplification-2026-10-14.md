@@ -2,6 +2,8 @@
 
 日期：2026-10-14。状态：用户已确认实施；本轮完成产品主线收束、退役代码清理、Runtime 构造统一与 Desktop/Node 配置分离。验收边界见 [本轮记录](audits/2026-10-14/product-closeout/README.md)。
 
+> 2026-10-20 决策更新：本文中“Desktop 可连接远程 Node/SSH tunnel”的路线已被后续用户决定替代。当前 Desktop 只连接本机 Node；Linux 通过 Node 的 SSH/终端能力操作，不连接远程 Node。实现与当前限制见 [Desktop 接入范围与 Node 交互收束](desktop-node-interaction-review-2026-10-20.md)。
+
 ## 推荐定位
 
 DAgents 是面向个人的 Agent 工作台与持续执行服务。Desktop 负责交互，Node 持有 Agent 状态并执行任务；同一个使用者可以从多台 Desktop 访问自己的 Node。Auto 是持续工作的数字员工，普通 Agent 是按需交互的助手。Manage 是可选的多节点、Agent 工作组协作控制面。

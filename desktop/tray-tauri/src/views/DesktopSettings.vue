@@ -34,28 +34,9 @@ onMounted(load);
       <span>{{ state.error }}</span>
       <button class="btn btn--ghost btn--sm" type="button" :disabled="state.loading || state.saving" @click="load">重新读取</button>
     </div>
-    <p v-if="state.saved && !dirty" class="settings-section__desc" role="status">已保存。请重启 Desktop，使连接方式、地址、通知和更新检查设置生效。</p>
+    <p v-if="state.saved && !dirty" class="settings-section__desc" role="status">已保存。通知与更新检查设置已生效。</p>
 
     <fieldset class="desktop-settings__fields settings-embedded-panel" :disabled="!state.loaded || state.loading || state.saving">
-      <section class="settings-section">
-        <h2 class="settings-section__title">Node 连接</h2>
-        <p class="settings-section__desc">隧道模式只使用你预先建立的 SSH 本地转发，不会自动创建或管理 SSH 隧道。两种模式都只接受 loopback HTTP 地址。隧道模式下请手动填写 Node 机器上的工作区路径，或通过工作区目录 API 浏览；Desktop 不会在本机替远程 Node 打开目录选择器。</p>
-        <div class="setup-config-panel__field-grid">
-          <label class="settings-field">
-            <span><span class="settings-field__label">连接方式</span><small class="settings-field__hint">隧道模式只连接已运行的 Node。</small></span>
-            <select v-model="settings.connection_mode" class="settings-field__input">
-              <option value="local">本机 Node（Desktop 可管理本机进程）</option>
-              <option value="tunnel">已有 SSH 隧道（只连接，不管理 Node）</option>
-            </select>
-          </label>
-          <label class="settings-field">
-            <span><span class="settings-field__label">Node loopback 地址</span><small class="settings-field__hint">例如 http://127.0.0.1:18765；隧道模式填本地 SSH 转发监听地址。</small></span>
-            <input v-model="settings.node_endpoint" class="settings-field__input" type="url" autocomplete="url" />
-          </label>
-        </div>
-        <p class="settings-section__desc">当前运行连接：{{ state.runtimeConnectionMode === "tunnel" ? "已有 SSH 隧道" : "本机 Node" }} · {{ state.runtimeEndpoint || "—" }}。连接方式或地址保存后需重启 Desktop 生效。</p>
-      </section>
-
       <section class="settings-section">
         <h2 class="settings-section__title">通知</h2>
         <label class="settings-toggle">

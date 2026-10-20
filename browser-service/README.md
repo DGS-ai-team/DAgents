@@ -44,8 +44,9 @@ bin\dagents-browser.exe --config config.yaml
 ```yaml
 browser:
   enabled: true
-  service_url: http://127.0.0.1:18766
 ```
+
+Node 在本机 `127.0.0.1:18766` 启动 sidecar；地址固定，不配置远程 Browser endpoint。
 
 ## API
 

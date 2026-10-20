@@ -35,6 +35,7 @@ func (s *Server) Handler() http.Handler {
 // 1. 先启动 Manage sidecar 和 HTTP listener；
 // 2. ctx 取消后停止后台运行时、关闭持久化资源，最后关闭 HTTP listener。
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	defer s.closeBrowserService()
 	if s.startupErr != nil {
 		return fmt.Errorf("node startup failed: %w", s.startupErr)
 	}
@@ -94,6 +95,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.tools != nil {
 			_ = s.tools.CloseBrowser()
 		}
+		s.closeBrowserService()
 		if s.store != nil {
 			_ = s.store.Close()
 		}
@@ -259,6 +261,7 @@ func (s *Server) Close() {
 	if s.tools != nil {
 		_ = s.tools.CloseBrowser()
 	}
+	s.closeBrowserService()
 	if s.store != nil {
 		_ = s.store.Close()
 	}

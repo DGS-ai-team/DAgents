@@ -130,14 +130,12 @@ type ChildAgentsLimits struct {
 
 // BrowserSettings Browser 工具参数（enabled 见 features）。
 type BrowserSettings struct {
-	ServiceURL        string `json:"service_url"`
 	Headed            bool   `json:"headed"`
 	DefaultTimeoutMS  int    `json:"default_timeout_ms"`
 	OutputDir         string `json:"output_dir"`
 	MaxSessions       int    `json:"max_sessions"`
 	IgnoreHTTPSErrors bool   `json:"ignore_https_errors"`
 	ChromePath        string `json:"chrome_path"`
-	CDPURL            string `json:"cdp_url"`
 }
 
 // WeComSettings 企业微信消息推送（enabled 见 features）。
@@ -286,14 +284,12 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 		},
 		Browser: BrowserSettings{
-			ServiceURL:        cfg.Browser.ServiceURL,
 			Headed:            cfg.BrowserHeaded(),
 			DefaultTimeoutMS:  cfg.Browser.DefaultTimeoutMS,
 			OutputDir:         cfg.Browser.OutputDir,
 			MaxSessions:       cfg.Browser.MaxSessions,
 			IgnoreHTTPSErrors: cfg.Browser.BrowserIgnoreHTTPSErrors(),
 			ChromePath:        cfg.Browser.ChromePath,
-			CDPURL:            cfg.Browser.CDPURL,
 		},
 		WeCom: weComSettingsFromConfig(cfg),
 		Tools: ToolsSettings{
@@ -667,7 +663,11 @@ func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 }
 
 func applyBrowserPatch(cfg *config.Config, p BrowserSettings) error {
-	cfg.Browser.ServiceURL = strings.TrimSpace(p.ServiceURL)
+	// Browser runs as a Node-owned local sidecar. The service endpoint and
+	// attach-to-external-Chrome mode are fixed implementation details, not
+	// settings exposed to Desktop/Web UI.
+	cfg.Browser.ServiceURL = config.DefaultBrowserServiceURL
+	cfg.Browser.CDPURL = ""
 	cfg.Browser.Headed = boolPtr(p.Headed)
 	if p.DefaultTimeoutMS > 0 {
 		cfg.Browser.DefaultTimeoutMS = p.DefaultTimeoutMS
@@ -680,7 +680,6 @@ func applyBrowserPatch(cfg *config.Config, p BrowserSettings) error {
 	}
 	cfg.Browser.IgnoreHTTPSErrors = boolPtr(p.IgnoreHTTPSErrors)
 	cfg.Browser.ChromePath = strings.TrimSpace(p.ChromePath)
-	cfg.Browser.CDPURL = strings.TrimSpace(p.CDPURL)
 	return nil
 }
 

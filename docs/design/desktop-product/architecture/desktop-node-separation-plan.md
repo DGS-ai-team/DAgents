@@ -5,6 +5,8 @@
 > 本方案把 Desktop 定义为唯一的人机界面，把 Node 定义为无头 Agent 执行引擎。目标 Shell 采用现有 Rust/Tauri 2 轨并扩展为 Windows、macOS、Linux 产品；Node 不再嵌入产品 UI。2026-09-23 当时的实现仍以 Windows、本机 Node 和 `/ui/` 为主，文中目标架构需要按阶段迁移，不能当作当前行为说明。
 >
 > 本文是历史提案快照；Go Shell 已从当前产品和构建树移除。当前产品路线见 [2026-10-14 产品收束方向](../product-direction-simplification-2026-10-14.md)，实际支持范围以根目录 README 和 Windows 安装说明为准。
+>
+> 2026-10-20 决策：Desktop 仅连接同机 Node，远程 Node 与 SSH tunnel 不进入当前产品路线。本文中远程连接、身份与隧道章节仅供理解历史方案；现行实现与待办见[Desktop 与 Node 交互评估](../desktop-node-interaction-review-2026-10-20.md)。
 
 ## 1. 决策结论
 

@@ -1,4 +1,4 @@
-/** Web UI slash 命令帮助（仅保留前端暂无直接入口的命令）。 */
+/** 聊天界面的斜杠命令帮助（仅保留前端暂无直接入口的命令）。 */
 export const COMPOSER_DRAFT_KEY = "dagents.ui.composerDraft";
 
 export const HELP_SHORTCUTS = [

@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openNativeDialog } from "@tauri-apps/plugin-dialog";
 import App from "./App.vue";
 import router from "./settings-router.js";
 import "../../../node/webui/frontend/src/styles/tokens.css";
@@ -42,6 +43,13 @@ globalThis.__DAGENTS_DESKTOP_REQUEST__ = async ({ method, path, body }) => {
     return invoke("desktop_shell_request", { method, path, body: body ?? null });
   }
   throw new Error(`Unsupported Desktop shell request: ${method} ${path}`);
+};
+
+globalThis.__DAGENTS_PICK_DIRECTORY__ = async () => {
+  const path = await openNativeDialog({ directory: true, multiple: false, title: "选择工作目录" });
+  return path
+    ? { ok: true, cancelled: false, path }
+    : { ok: true, cancelled: true };
 };
 
 createApp(App).use(router).mount("#app");

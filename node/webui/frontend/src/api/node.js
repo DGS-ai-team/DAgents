@@ -50,7 +50,7 @@ export function getAgentInfo() {
   return apiFetch("/v1/node/info");
 }
 
-// 用户反馈由 Node 权威保存并负责向当前 Manage 投递；浏览器只保存未提交草稿。
+// 用户反馈由 Node 权威保存并负责向当前 Manage 投递；Desktop 只保存未提交草稿。
 export function listFeedback(params = {}) {
   return apiFetch("/v1/feedback", { params });
 }
@@ -98,6 +98,8 @@ export function getPlatformCapabilities() {
 }
 
 export function pickPlatformDirectory() {
+  const desktopPicker = globalThis.__DAGENTS_PICK_DIRECTORY__;
+  if (typeof desktopPicker === "function") return desktopPicker();
   return apiFetch("/v1/platform/directory-picker", { method: "POST", body: {} });
 }
 

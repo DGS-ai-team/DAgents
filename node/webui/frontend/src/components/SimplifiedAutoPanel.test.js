@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const routerMock = vi.hoisted(() => ({ push: vi.fn() }));
 import SimplifiedAutoPanel from "./SimplifiedAutoPanel.vue";
 import * as api from "../api/node.js";
-import router from "../router/index.js";
 
 vi.mock("../api/node.js", () => ({ getAutoConfig: vi.fn(), getAutoExperience: vi.fn(), getAgentDreamingStatus: vi.fn(), getTrigger: vi.fn(), putAutoConfig: vi.fn(), reconcileAutoConfig: vi.fn() }));
+vi.mock("vue-router", () => ({ useRouter: () => routerMock }));
 
 describe("SimplifiedAutoPanel", () => {
   beforeEach(() => {
@@ -77,15 +78,16 @@ describe("SimplifiedAutoPanel", () => {
     expect(wrapper.find(".simplified-auto-panel__row").classes()).toContain("simplified-auto-panel__row");
   });
 
-  it("reads the default trigger recovery state and links to the mounted triggers route", async () => {
+  it("reads trigger recovery state and opens the Desktop triggers settings route", async () => {
     api.getTrigger.mockResolvedValueOnce({ trigger_id: "auto-default:auto-1", recovery_required: true, pending_delivery_id: "delivery-1", revision: 7 });
     const wrapper = mount(SimplifiedAutoPanel, { props: { agentId: "auto-1" } });
     await flushPromises();
     expect(api.getTrigger).toHaveBeenCalledWith("auto-default:auto-1");
     expect(wrapper.text()).toContain("默认唤醒");
-    expect(wrapper.get('a[href="/ui/settings/triggers"]').text()).toContain("定时任务");
-    expect(router.resolve("/settings/triggers").name).toBe("settings-triggers");
-    expect(router.resolve("/settings/triggers").href).toBe("/ui/settings/triggers");
+    const openSettings = wrapper.get('[aria-label="打开定时任务设置"]');
+    expect(openSettings.text()).toContain("定时任务");
+    await openSettings.trigger("click");
+    expect(routerMock.push).toHaveBeenCalledWith("/settings/triggers");
   });
 
   it("does not treat dreaming recovery as a trigger delivery recovery", async () => {
@@ -104,14 +106,14 @@ describe("SimplifiedAutoPanel", () => {
     api.getTrigger.mockResolvedValueOnce({ recovery_required: true, pending_delivery_id: "delivery-2", revision: 8 });
     const triggerRow = wrapper.findAll(".simplified-auto-panel__row").find((row) => row.text().includes("默认唤醒"));
     expect(triggerRow).toBeTruthy();
-    await triggerRow.find("button").trigger("click");
+    await triggerRow.findAll("button").find((button) => button.text().includes("刷新状态")).trigger("click");
     await flushPromises();
     expect(wrapper.get('[aria-label="职责"]').element.value).toBe("尚未保存的职责");
-    expect(wrapper.get('a[href="/ui/settings/triggers"]').attributes("target")).toBe("_blank");
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("shows a friendly status when the default trigger has not been synchronized", async () => {
-    api.getTrigger.mockRejectedValueOnce(Object.assign(new Error("missing"), { status: 404 }));
+    api.getTrigger.mockReset().mockRejectedValue(Object.assign(new Error("missing"), { status: 404 }));
     const wrapper = mount(SimplifiedAutoPanel, { props: { agentId: "auto-1" } });
     await flushPromises();
     expect(wrapper.text()).toContain("默认唤醒尚未同步");

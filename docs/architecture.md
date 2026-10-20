@@ -7,11 +7,11 @@
 DAgents 由一个本地优先的 Agent Node 和一个可选的 Manage 控制面组成：
 
 ```text
-浏览器 / API Client
+DAgents Desktop
         │ HTTP + SSE
         ▼
 ┌──────────────────────────── Agent Node（Go）
-│  HTTP API / Web UI
+│  HTTP API
 │       │
 │       ▼
 │  session.Manager
@@ -32,11 +32,11 @@ DAgents 由一个本地优先的 Agent Node 和一个可选的 Manage 控制面�
 
 | 组件 | 负责 | 不负责 |
 |---|---|---|
-| Agent Node | Agent 会话、LLM turn、工具执行、审批、终端、SSE、Node Web UI | Manage 的全局目录与控制面存储 |
+| Agent Node | Agent 会话、LLM turn、工具执行、审批、终端、SSE 和运行 API | Manage 的全局目录与控制面存储；不提供 Web UI |
 | session runtime | 单 Agent 的队列、历史、运行态、side-effect 对账 | 进程级 Agent 目录 |
 | turn | 单个模型 Step、工具批处理、HITL 暂停/恢复、模型可见上下文 | 会话 CRUD、队列消费、持久化 |
 | Manage | Node Registry、工作组 Leader、ACL、Timeline、RunHistory、Console | 直接访问 Node；不主动向 Node 发 HTTP |
-| Web UI / Console | 展示权威事件、提交用户动作 | 自己推断运行态或绕过 Node/Manage API |
+| Desktop / Console | 展示权威事件、提交用户动作 | 自己推断运行态或绕过 Node/Manage API |
 
 ## 2. 一次本地请求
 
@@ -77,17 +77,16 @@ tool schema → tool router → policy / hook → executor → result contract �
 
 工具结果通过结构化状态区分成功、失败、拒绝、运行中、取消、超时和未知；正文保留工具自身证据。文件工具使用工作区相对路径，Shell/终端是否可用由工具组、policy 和运行态共同决定。HITL 的审批事实由 Node 或 Manage 持久化，UI 只能依据权威事件和快照更新卡片。
 
-## 5. Node、Web UI 与 Desktop Shell
+## 5. Desktop 与 Node API
 
-三者采用“Node 业务核心 + Web UI 同源客户端 + Shell 宿主适配器”的边界：
+DAgents Desktop 是产品唯一的 Agent 交互入口。Node 只提供 HTTP/SSE API，不托管 `/ui/` 页面；`node/webui/frontend` 保留 Vue 源码，供 Desktop 构建复用，不再作为可独立启动的网页应用。
 
 | 组件 | 负责 | 不负责 |
 |---|---|---|
-| Node | Agent/Session/Turn、工具、历史、HITL、SSE、配置和更新状态；直接调用操作系统目录选择器 | 剪贴板、窗口焦点和安装态更新编排 |
-| Web UI | 通过当前 Node 的同源 `/v1` API 展示状态、提交用户操作 | 探测 `:18767`、读取桌面配置、直连 Shell |
-| Desktop Shell | Node 启停监护、通知、剪贴板/窗口焦点等原生能力、安装态更新编排 | 复制 Node 的业务状态机和配置存储；目录选择不再是前置能力 |
+| Node | Agent/Session/Turn、工具、历史、HITL、SSE、配置和更新 API；直接调用操作系统目录选择器 | 页面渲染和 Desktop 偏好存储 |
+| Desktop | Agent 交互、资源页、设置和 Node 生命周期管理；宿主剪贴板/窗口焦点等原生能力 | 复制 Node 的业务状态机和配置存储 |
 
-Web UI 的宿主能力统一走 Node `/v1/platform/*`。目录选择由 Node 直接调用宿主系统：Windows 使用 PowerShell STA `FolderBrowserDialog`，macOS 使用 `osascript`，Linux 使用可用的 `zenity`、`kdialog` 或 `yad`；用户取消返回成功响应并标记 `cancelled=true`。剪贴板文件路径、窗口焦点和安装态更新仍可由 Node 通过环境变量配置的带 Bearer token 私有 bridge 请求 Desktop Shell。纯浏览器启动 Node 时，目录选择能力与 Shell 能力分别探测，目录选择不以 Desktop Shell 为前置条件。`:18767` 只属于 Shell↔Node 的内部 bridge，不是 Web UI 公共 API。
+目录选择由 Node 直接调用宿主系统：Windows 使用 PowerShell STA `FolderBrowserDialog`，macOS 使用 `osascript`，Linux 使用可用的 `zenity`、`kdialog` 或 `yad`；用户取消返回成功响应并标记 `cancelled=true`。剪贴板文件路径、窗口焦点和安装态更新使用 Desktop Shell 私有 bridge。`:18767` 只属于 Shell↔Node 的内部 bridge，不是公共 API。
 
 Shell 的两条实现轨（Tauri 推荐轨、Go 兼容轨）共享这组 HTTP/SSE 语义和 token 约束，只在窗口、通知、剪贴板和安装器等宿主实现上不同。Node 是状态真相源：Shell 待办表启动/重连时通过 `/v1/agents` hydrate，运行中由 Node 的 `notification_changed` 事件增量更新；不再以 60 秒轮询或工具事件名称推断 HITL/未读状态。
 
@@ -129,7 +128,7 @@ Manage Leader 负责工作组编排；成员 Agent 在自己的 Node 上执行�
 | 工具、policy、Hook | `node/internal/tools/`、`policy/`、`hooks/` |
 | Context、skills、压缩 | `promptcontext/`、`skills/`、`compression/` |
 | Node↔Manage / Workgroup | `node/internal/manage/`、`node/internal/workgroup/`、`manage/workgroup/` |
-| Node Web UI | `node/webui/frontend/` |
+| Desktop 复用的 Vue 源码 | `node/webui/frontend/`（无独立网页入口） |
 | Manage Console | `manage/console/frontend/` |
 | 共用契约 | `shared/config/`、`docs/design/fixtures/` |
 

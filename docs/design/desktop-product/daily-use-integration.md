@@ -2,6 +2,8 @@
 
 日期：2026-10-08。基于已有本机 Desktop MVP，目标是不依赖打开旧 Node WebUI 完成主要日常操作。以下勾选表示已接入，实际验证范围和限制分别记录在后文，不表示所有分支均已人工实测。
 
+> 2026-10-20 产品边界更新：以下早期日期段落保留当时的验收事实；其中关于 Desktop 连接远程 Node/SSH tunnel 的描述已被后文“Oct 20 本机连接与流状态收束”取代。当前 Desktop 只连接同机 Node，操作远程主机请使用 Node 的 SSH/远程终端工具。
+
 ## 功能闭环
 
 - [x] 首次配置在 Desktop 内完成；空 Node 可以创建第一个智能体。
@@ -17,7 +19,7 @@
 
 ## 实现约束
 
-Desktop 保持单一连接的本机 Node；远程连接、版本能力协商和三平台发行不属于本轮日常功能接入验收。Rust 持有 Node 认证，负责 JSON、二进制和终端传输。文件读写由 Node 完成，不能用 Desktop 本地文件读取代替 Node 资源接口。
+Desktop 固定连接同机 Node；远程连接不属于当前产品范围，版本能力协商和三平台发行也不属于本轮日常功能接入验收。Rust 持有 Node 认证，负责 JSON、二进制和终端传输。文件读写由 Node 完成，不能用 Desktop 本地文件读取代替 Node 资源接口。
 
 文件接口按智能体的工作目录限制路径，检查相对路径、符号链接及 Windows 路径逃逸；上传、读取和写入有大小限制。不能把文件内容当成网页执行。图片与文件缓存、资源页签、草稿和会话必须按智能体隔离。
 
@@ -72,7 +74,7 @@ Rust 的健康检查、设置、附件与资源传输移到异步命令的阻塞
 
 ### 后续范围
 
-本机 Desktop 主要日常入口已接入。远程 Node、版本/能力协商、浏览器人工接管、Office/PDF 等丰富文件查看器、三平台安装签名和升级回滚仍需后续开发。工作组需要可用 Manage 与 supervisor 模型，浏览器需要 browser-service 且 Agent 已通过工具启动会话。
+本机 Desktop 主要日常入口已接入。远程 Node 连接不在当前产品路线；版本/能力协商、浏览器人工接管、Office/PDF 等丰富文件查看器、三平台安装签名和升级回滚仍需后续评估或开发。工作组需要可用 Manage 与 supervisor 模型，浏览器需要 browser-service 且 Agent 已通过工具启动会话。
 
 新增链路主要用 Mock 验证传输和显示，不替代真模型端到端验证。此前真模型聊天和工具审批见 [mvp-closeout.md](mvp-closeout.md)。自动激活、Dreaming、各类审批、断线恢复和长时间运行仍需完整场景回归。Desktop 仍复用仓库内 Node WebUI 组件源码；无需打开旧网页操作，但源码职责拆分与移除旧 UI 入口尚未完成。
 
@@ -84,7 +86,7 @@ Oct 8 的功能接入记录保留为历史基线；后续真实链路覆盖见 [
 
 ### Oct 14 产品线与配置归属收束
 
-当前主线为一个使用者的 Node，可连接多台 Desktop，不引入多用户账号或用户级 runtime。Go tray 及其构建链路已退役；本机与已有 SSH 隧道模式的进程控制边界、两步 Node 首配、独立 Desktop 设置均已实现。隧道离线与首配完成在原生内嵌窗口验收；完整远程链路、新版 Inno 安装/升级尚未验收。详情见 [Oct 14 收束记录](audits/2026-10-14/product-closeout/README.md) 和 [Node API 接入契约](../../api/node-integration.md)。
+（截至 Oct 14 的历史验收事实）当时主线为一个使用者的 Node，可连接多台 Desktop，不引入多用户账号或用户级 runtime；本机与已有 SSH 隧道模式的进程控制边界也曾实现。2026-10-20 起 Desktop 远程 Node/tunnel 路径已从产品主线移除。历史测试详情见 [Oct 14 收束记录](audits/2026-10-14/product-closeout/README.md)；当前契约见 [Node API 接入文档](../../api/node-integration.md)。
 
 ### Oct 12 设置保存闭环审计
 
@@ -97,3 +99,11 @@ Oct 8 的功能接入记录保留为历史基线；后续真实链路覆盖见 [
 以上记录保留为历史事实。当前 Node 已移除 `/ui/` 和旧 Desktop bridge；Desktop 偏好独立保存于用户 JSON，Node bootstrap 只保留 listener，其余运行设置仍归 Node。前端源码继续复用仓库内 Vue 组件，并不代表 Node 仍提供网页。完整接入清单见 [Node 接入 API 文档](../../api/node-integration.md)，原生配置保存及内嵌前端证据见 [职责边界验收](audits/2026-10-12/node-api-boundary/README.md)。
 
 本轮实测关闭窗口、重复启动恢复同窗、顶栏正常退出保留 Node、按安装目录退出互不影响、受管停止、错误进程身份拒绝及命令行状态/退出码。退出 Desktop 不再中断 Auto 后台运行。安装器的用户范围、数据保留与生命周期协议已修改，但尚缺 ISCC 编译和隔离 Windows 安装/升级/卸载证据，详见 [生命周期与安装验收](audits/2026-10-13/lifecycle-install/README.md)。
+
+### Oct 20 本机连接与流状态收束
+
+产品范围改为 Desktop 只连同机 Node，移除远程 Node/tunnel 连接逻辑。Node endpoint 固定 `127.0.0.1:18765`，Browser sidecar 固定 `127.0.0.1:18766`；Desktop 设置 JSON 不再持久化连接地址/模式，旧值保存时清理。Node Browser 设置不再显示服务地址与 CDP 地址。
+
+审计发现 Desktop 之前用 `live=1` 重新订阅 SSE，断线期间若最终事件漏失，恢复后只刷新 Agent 列表、不会 hydrate 当前对话；Node 重启后旧全局游标高于新进程序号还会过滤新事件。现已接入 cursor replay、Node 重启后的 `resync_required` 与游标重置、Desktop reconnect hydrate，并复用共享 30 秒 Turn watchdog。工具事件的刷新改为 debounce hydrate，不再重新选择 Agent、重复读取模型配置。已移除未调用的 Node connection 查询和消息发送 command。Desktop 固定连接 `127.0.0.1:18765`；Node Browser sidecar 固定使用 `127.0.0.1:18766`，远程 Node/SSH tunnel 设置与生命周期分支已删除。
+
+范围与剩余缺口见 [Desktop 接入范围与 Node 交互收束](desktop-node-interaction-review-2026-10-20.md)。当前工作树复验中，定向 Go 包通过，Rust 库 50 项、Desktop UI 88 项、Node WebUI 536 项及共享图标 7 项通过。本轮还从已安装 DAgents 的真实 LLM 配置制作了隔离 QA runtime，使用 DeepSeek 完成一条普通对话，并在原生 Tauri Desktop 中确认消息与最终回复均已显示。测试 Node 已停止，`18765` 当前空闲；隔离目录仍待清理，见本轮交付说明。此验收只覆盖单条无工具对话，不证明长任务、审批或重启恢复的全部组合场景。

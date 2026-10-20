@@ -44,19 +44,13 @@
 | `internal/llm/` | LLM 客户端与消息适配 |
 | `internal/store/`、`history/` | SQLite 与 JSONL 审计 |
 | `internal/version/` | **全项目唯一**构建版本号（`GET /health.version`） |
-| `webui/` | 可复用 Web UI 前端源码（Vue 3 + Vite）；Node 不内嵌或托管 UI |
+| `webui/` | Desktop 复用的 Vue 源码与测试；Node 不内嵌或托管 UI |
 
 系统服务安装：Linux [`scripts/linux/install_node_service.sh`](../scripts/linux/install_node_service.sh)；Windows [`scripts/windows/install_node_service.cmd`](../scripts/windows/install_node_service.cmd)。
 
-## Web UI 前端源码
+## Desktop 共享前端源码
 
-Node 是 runtime API 服务，不提供 `/ui` 静态页面，也不依赖生成好的前端静态资源来编译或测试。Vue 源码由 Desktop WebView 复用；单独开发时运行 Vite：
-
-```bash
-cd node/webui/frontend && npm run dev
-```
-
-Vite 将 `/v1` 与 `/health` 代理到本地 Node。前端单测用 `npm test --prefix node/webui/frontend`。生产 UI 由 Desktop 自身构建流程打包。
+Node 是 runtime API 服务，不提供 `/ui` 静态页面，也不依赖前端产物来编译或测试。Vue 源码由 Desktop WebView 复用；共享组件测试和 lint 命令见 [`node/webui/README.md`](webui/README.md)。Desktop 的生产 UI 由 `desktop/tray-tauri` 构建流程打包。
 
 ## 本地运行
 

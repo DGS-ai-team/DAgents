@@ -4,7 +4,7 @@
  * Keep this registry next to the transport rather than duplicating the list
  * in a view. EventSource does not expose a wildcard listener for named
  * events, so adding a backend event without adding it here makes the event
- * silently disappear from the Web UI.
+ * silently disappear from the client UI.
  */
 export const AGENT_STREAM_EVENT_POLICIES = Object.freeze({
   assistant: "transcript",

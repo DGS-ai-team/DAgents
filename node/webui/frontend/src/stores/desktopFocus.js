@@ -11,11 +11,11 @@ function createFocusSourceId() {
     if (existing) return existing;
     const generated =
       globalThis.crypto?.randomUUID?.() ||
-      `webui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      `desktop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     window.sessionStorage?.setItem(FOCUS_SOURCE_STORAGE_KEY, generated);
     return generated;
   } catch {
-    return `webui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return `desktop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 }
 
@@ -51,9 +51,8 @@ async function sendFocus(agentId, { force = false } = {}) {
       source_id: FOCUS_SOURCE_ID,
     });
   } catch (error) {
-    // The same Web UI also runs in a browser-only Node process. In that
-    // mode the desktop Shell endpoint intentionally returns this capability
-    // error; it must not become an unhandled rejection in the page.
+    // Focus reporting is optional while the Desktop Shell is starting or
+    // when this shared module is exercised outside the native host.
     const message = String(error?.message || error || "");
     if (message.includes("desktop Shell is unavailable")) return;
     throw error;

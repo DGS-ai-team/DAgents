@@ -31,6 +31,7 @@ function result(text, etag = 'etag-1') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path] || [] }))
   api.readWorkspaceFile.mockImplementation(async (_agentId, path) => result(path))
@@ -221,7 +222,7 @@ describe('Desktop workspace resource navigation', () => {
     await wrapper.vm.openPath('a.md')
     await wrapper.find('textarea').setValue('keep this local draft')
     api.readWorkspaceFile.mockResolvedValueOnce(result('external version', 'etag-2'))
-    await wrapper.vm.refreshResources('manual')
+    await wrapper.vm.refreshResources('tool')
 
     expect(wrapper.vm.resourceMenuActions()).toEqual({ canRecoverDraft: true, recoveryLabel: '丢弃草稿并重载' })
     window.confirm.mockReturnValue(false)
@@ -244,7 +245,7 @@ describe('Desktop workspace resource navigation', () => {
 
     api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path]?.filter(entry => entry.path !== 'a.md') || [] }))
     api.readWorkspaceFile.mockRejectedValue(Object.assign(new Error('missing'), { status: 404 }))
-    await wrapper.vm.refreshResources('manual')
+    await wrapper.vm.refreshResources('tool')
     await vi.advanceTimersByTimeAsync(400)
 
     expect(wrapper.find('.workspace-files__notice-detail').text()).toContain('已从工作区移除')
@@ -264,7 +265,7 @@ describe('Desktop workspace resource navigation', () => {
     let finishRead
     api.readWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
     api.readWorkspaceFile.mockResolvedValueOnce({ notModified: true, bytes: null, etag: 'etag-saved' })
-    const refreshing = wrapper.vm.refreshResources('manual')
+    const refreshing = wrapper.vm.refreshResources('tool')
     await flushPromises()
 
     api.saveWorkspaceFile.mockResolvedValueOnce({ etag: 'etag-saved' })

@@ -52,6 +52,7 @@ import icon42 from './brain.svg?raw'
 import icon43 from './info.svg?raw'
 import icon44 from './network.svg?raw'
 import icon45 from './plug.svg?raw'
+import unplugSemantic from '../desktop/unplug.svg?raw'
 import icon46 from './server.svg?raw'
 import icon47 from './users.svg?raw'
 import icon48 from './globe.svg?raw'
@@ -60,7 +61,7 @@ import icon52 from './node-fallback.svg?raw'
 
 const body = svg => svg.replace(/^[\s\S]*?<svg\b[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim()
 
-export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","server","users","globe","wrench","bookmark","tool","save","upload"]
+export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","unplug","server","users","globe","wrench","bookmark","tool","save","upload"]
 export const nodeIconRegistry = Object.freeze({
   "close": body(icon0),
   "check": body(icon1),
@@ -105,6 +106,7 @@ export const nodeIconRegistry = Object.freeze({
   "info": body(icon43),
   "network": body(icon44),
   "plug": body(icon45),
+  "unplug": unplugSemantic,
   "server": body(icon46),
   "users": body(icon47),
   "globe": body(icon48),
