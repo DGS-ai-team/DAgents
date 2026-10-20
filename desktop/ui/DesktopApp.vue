@@ -679,12 +679,17 @@ async function executeSlashCommand(text, agentId) {
   commandNotice.value = ''
   const consumed = await dispatchDesktopSlashCommand(text, {
     agentId,
-    clearContext,
+    clearContext: async id => {
+      await clearContext(id)
+      const next = { ...pendingUserByAgent.value }
+      delete next[id]
+      pendingUserByAgent.value = next
+      if (activeId.value === id) streamingText.value = ''
+    },
     compressContext,
     getLLMSettings,
     refresh: async id => {
       if (activeId.value !== id) return
-      streamingText.value = ''
       await selectAgent(id)
     },
     patchLLMSettings: async patch => {
