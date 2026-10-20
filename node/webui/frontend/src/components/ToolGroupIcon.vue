@@ -23,7 +23,7 @@ const iconName = computed(() => {
     memory: "brain",
     skills: "skills",
     triggers: "clock",
-    wecom: "send",
+    wecom: "wecom",
     wrench: "wrench",
   };
   return aliases[props.name] || props.name || "info";

@@ -45,6 +45,28 @@ afterEach(() => {
 })
 
 describe('Desktop workspace resource navigation', () => {
+  it('keeps refresh and save in the toolbar and moves secondary actions into the overflow menu', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect(wrapper.find('[aria-label="刷新"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="保存文件"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="更多文件操作"]').exists()).toBe(true)
+    expect(wrapper.findAll('.workspace-files__actions-popover button')).toHaveLength(4)
+    expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="上传文件"]').exists()).toBe(false)
+    expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="下载文件"]').exists()).toBe(false)
+  })
+
+  it('restores the floating message bar from its file toolbar icon', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', dockCollapsed: true, dockStatus: 'generating', dockAgentName: '测试 Agent' } })
+    await flushPromises()
+
+    const restore = wrapper.find('.workspace-files__dock-toggle')
+    expect(restore.attributes('title')).toContain('测试 Agent · 生成中')
+    await restore.trigger('click')
+    expect(wrapper.emitted('expand-agent-dock')).toHaveLength(1)
+  })
+
   it('preserves dotfiles and opens a nested resource by listing its parent directory', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
@@ -226,11 +248,25 @@ describe('Desktop workspace resource navigation', () => {
 
     expect(wrapper.vm.resourceMenuActions()).toEqual({ canRecoverDraft: true, recoveryLabel: '丢弃草稿并重载' })
     window.confirm.mockReturnValue(false)
-    wrapper.vm.discardDraftAndReload()
+    await wrapper.vm.discardDraftAndReload()
 
     expect(wrapper.find('textarea').element.value).toBe('keep this local draft')
     expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md')).toContain('keep this local draft')
     expect(wrapper.vm.resourceMenuActions().canRecoverDraft).toBe(true)
+  })
+
+  it('uses an in-app file-name dialog instead of a browser prompt', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    const prompt = vi.spyOn(window, 'prompt')
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.get('.workspace-files__actions-popover button').trigger('click')
+    await flushPromises()
+
+    const dialog = document.body.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('新建文件')
+    expect(dialog?.querySelector('input')).not.toBeNull()
+    expect(prompt).not.toHaveBeenCalled()
   })
 
   it('shows only one recovery action when a draft conflict and missing file overlap', async () => {

@@ -18,6 +18,7 @@
     "core:window:allow-set-skip-taskbar",
     "core:window:allow-unminimize",
     "opener:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-message"
   ]
 }

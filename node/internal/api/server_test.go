@@ -233,6 +233,29 @@ func TestSessionsRoutesRemoved(t *testing.T) {
 	}
 }
 
+func TestRetiredNodeRoutesReturnNotFound(t *testing.T) {
+	_, ts := newTestServer(t)
+	defer ts.Close()
+
+	paths := []string{
+		"/v1/agents/agent-1/execution-events",
+		"/v1/agents/agent-1/child-agents/child-1",
+		"/v1/agents/agent-1/screen/stream",
+		"/v1/mcp/servers/server-1/tools",
+	}
+	for _, path := range paths {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s status=%d body=%s; want 404", path, resp.StatusCode, body)
+		}
+	}
+}
+
 func TestHandleStreamsConnectsImmediately(t *testing.T) {
 	srv, ts := newTestServer(t)
 	defer ts.Close()

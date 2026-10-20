@@ -40,8 +40,8 @@ function mockDetail({ events = timelineFixture, hitl = approvalFixture } = {}) {
   api.listWorkgroupAgents.mockResolvedValue({ agents: [{ agent_id: 'agent-2', name: 'Planner', node_id: 'node-2' }] })
 }
 
-beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); api.getAgentBrowserView.mockReset(); mockDetail(); api.getAgentInfo.mockResolvedValue({ node_id: 'node-1' }); api.fetchWorkgroupHumanQueue.mockResolvedValue({ items: [], busy: false }); api.postWorkgroupMessage.mockResolvedValue({ loop: { status: 'succeeded' } }); api.getAutoOverview.mockResolvedValue({ items: [], total: 0, counts: {} }) })
-afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers() })
+beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); api.getAgentBrowserView.mockReset(); api.listWorkgroups.mockResolvedValue([]); mockDetail(); api.getAgentInfo.mockResolvedValue({ node_id: 'node-1' }); api.fetchWorkgroupHumanQueue.mockResolvedValue({ items: [], busy: false }); api.postWorkgroupMessage.mockResolvedValue({ loop: { status: 'succeeded' } }); api.getAutoOverview.mockResolvedValue({ items: [], total: 0, counts: {} }) })
+afterEach(() => { wrapper?.unmount(); wrapper = null; vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('Desktop Auto overview API contract', () => {
   it('shows real state, todo, wake, and dreaming values and emits navigation targets', async () => {
@@ -55,6 +55,17 @@ describe('Desktop Auto overview API contract', () => {
     await wrapper.findAll('button').find(button => button.text() === '设置').trigger('click')
     expect(wrapper.emitted('open-chat')).toEqual([['auto-1']])
     expect(wrapper.emitted('open-config')).toEqual([['auto-1']])
+    await wrapper.findAll('button').find(button => button.text() === '删除').trigger('click')
+    expect(wrapper.emitted('delete-agent')).toEqual([['auto-1']])
+  })
+
+  it('disables deleting an Auto Agent while its autonomous run is active', async () => {
+    api.getAutoOverview.mockResolvedValue({ items: [{ agent_id: 'auto-running', display_name: '运行中', state: 'working' }], total: 1, page: 1, page_size: 20 })
+    wrapper = mount(AutoOverviewPanel)
+    await flushPromises()
+    const remove = wrapper.findAll('button').find(button => button.text() === '删除')
+    expect(remove.attributes('disabled')).toBeDefined()
+    expect(remove.attributes('title')).toContain('运行中')
   })
 })
 
@@ -140,6 +151,10 @@ describe('Desktop workgroup API contract', () => {
   it('binds each resource setup action to its matching settings destination', () => {
     expect(desktopAppSource).toMatch(/<BrowserViewer\b[^>]*@open-connection-settings="openBrowserCapabilitySettings"/)
     expect(desktopAppSource).toMatch(/<WorkgroupWorkspace\b[^>]*@open-connection-settings="openWorkgroupConnectionSettings"/)
+    expect(desktopAppSource).toMatch(/<AutoOverviewPanel\b[^>]*@delete-agent="deleteAgentById"/)
+    expect(desktopAppSource).toMatch(/async function deleteAgentById\(agentId\)/)
+    expect(desktopAppSource).toMatch(/async function deleteCurrentAgent\(\)\s*\{\s*await deleteAgentById\(activeId\.value\)\s*\}/)
+    expect(desktopAppSource).toMatch(/function onWorkgroupRemoved\(id\)/)
   })
 
   it('uses canonical timeline events and does not render streaming previews as durable messages', async () => {
@@ -228,18 +243,54 @@ describe('Desktop workgroup API contract', () => {
   })
 
   it('refreshes and emits the sidebar list after a subscription succeeds', async () => {
-    api.listWorkgroups.mockResolvedValue([{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }])
-    api.subscribeWorkgroup.mockResolvedValue({ subscribed: true })
+    let subscribed = false
+    api.listWorkgroups.mockImplementation(({ scope }) => Promise.resolve(scope === 'subscribed' && subscribed ? [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }] : scope === 'all' ? [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }] : []))
+    api.subscribeWorkgroup.mockImplementation(async () => { subscribed = true; return { subscribed: true } })
     wrapper = mount(WorkgroupWorkspace, { props: { workgroupId: 'wg-a' } })
     await flushPromises()
     await wrapper.findAll('button').find(button => button.text() === '订阅').trigger('click')
     await flushPromises()
     expect(api.listWorkgroups).toHaveBeenCalledWith({ scope: 'all' })
-    expect(wrapper.emitted('list').at(-1)).toEqual([[{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }]])
+    expect(api.listWorkgroups).toHaveBeenCalledWith({ scope: 'subscribed' })
+    expect(wrapper.emitted('list').at(-1)).toEqual([[{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active', subscribed: true }]])
+  })
+
+  it('removes a workgroup from this Node subscription while keeping it available in Manage', async () => {
+    let subscribed = true
+    api.listWorkgroups.mockImplementation(({ scope }) => Promise.resolve(scope === 'subscribed' && !subscribed ? [] : [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }]))
+    api.unsubscribeWorkgroup.mockImplementation(async () => { subscribed = false; return { ok: true } })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    wrapper = mount(WorkgroupWorkspace)
+    await flushPromises()
+    const remove = wrapper.findAll('button').find(button => button.text() === '移除')
+    expect(remove).toBeTruthy()
+    await remove.trigger('click')
+    await flushPromises()
+    expect(api.unsubscribeWorkgroup).toHaveBeenCalledWith('wg-a')
+    expect(wrapper.emitted('removed')).toEqual([['wg-a']])
+    expect(wrapper.emitted('list').at(-1)).toEqual([[]])
+    expect(wrapper.text()).toContain('调研组')
+    expect(wrapper.findAll('button').some(button => button.text() === '订阅')).toBe(true)
+  })
+
+  it('offers the same local removal from a subscribed workgroup detail page', async () => {
+    api.listWorkgroups.mockImplementation(({ scope }) => Promise.resolve(scope === 'subscribed' ? [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }] : [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active' }]))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    wrapper = mount(WorkgroupWorkspace, { props: { workgroupId: 'wg-a' } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '从此 Node 移除').trigger('click')
+    await flushPromises()
+    expect(api.unsubscribeWorkgroup).toHaveBeenCalledWith('wg-a')
+    expect(wrapper.emitted('removed')).toEqual([['wg-a']])
   })
 
   it('shows a Manage failure and the connection-settings action instead of an empty list', async () => {
-    api.listWorkgroups.mockResolvedValueOnce([{ workgroup_id: 'wg-stale', display_name: '旧工作组', status: 'active' }]).mockRejectedValueOnce(new Error('manage is not enabled'))
+    let call = 0
+    api.listWorkgroups.mockImplementation(({ scope }) => {
+      call++
+      if (call <= 2) return Promise.resolve(scope === 'all' ? [{ workgroup_id: 'wg-stale', display_name: '旧工作组', status: 'active' }] : [])
+      return Promise.reject(new Error('manage is not enabled'))
+    })
     wrapper = mount(WorkgroupWorkspace)
     await flushPromises()
     expect(wrapper.text()).toContain('旧工作组')

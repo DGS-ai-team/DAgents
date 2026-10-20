@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
+import { confirmDesktopAction } from "../utils/desktopDialogs.js";
 
 const props = defineProps({
   agentId: { type: String, required: true },
@@ -111,7 +112,7 @@ async function saveEdit(entry) {
 
 async function deleteEntry(entry) {
   if (!entry?.id || deletingId.value) return;
-  if (typeof window !== "undefined" && !window.confirm("确定删除这条长期记忆吗？")) return;
+  if (!await confirmDesktopAction("确定删除这条长期记忆吗？")) return;
   deletingId.value = entry.id;
   mutationError.value = "";
   try {

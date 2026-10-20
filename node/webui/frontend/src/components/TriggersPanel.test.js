@@ -84,6 +84,7 @@ describe("TriggersPanel retired legacy records", () => {
     const legacy = cards.find((card) => card.text().includes("旧维护"));
     expect(auto.text()).toContain("确认并丢弃旧投递");
     await auto.find("button").trigger("click");
+    await flushPromises();
     expect(api.recoverTrigger).toHaveBeenCalledWith("auto-recovery", "delivery-7", 7);
     expect(legacy.text()).not.toContain("确认并丢弃旧投递");
     confirm.mockRestore();

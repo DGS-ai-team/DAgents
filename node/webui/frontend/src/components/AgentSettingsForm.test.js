@@ -86,7 +86,7 @@ describe("ToolGroupIcon semantic aliases", () => {
     ["child", "bot"],
     ["mcp", "network"],
     ["memory", "brain"],
-    ["wecom", "send"],
+    ["wecom", "wecom"],
     ["hitl", "message-circle"],
   ])("maps %s to the shared %s icon", (name, expected) => {
     const wrapper = mount(ToolGroupIcon, {

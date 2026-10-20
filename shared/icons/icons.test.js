@@ -39,12 +39,13 @@ test('Node and Manage registries cover their former UiIcon names and retain curr
     send: '../desktop/send.svg',
     wrench: '../desktop/tools.svg',
     tool: '../desktop/tools.svg',
+    wecom: './wecom.svg',
   }
   for (const app of ['node', 'manage']) {
     const registryPath = path.join(iconsRoot, `ui/${app}-registry.js`)
     const source = fs.readFileSync(registryPath, 'utf8')
     const names = JSON.parse(source.match(new RegExp(`export const ${app}IconNames = (\\[[^\\n]+\\])`))[1])
-    for (const semantic of ['agent', 'workgroup', 'auto', 'skills', 'browser', 'attachment']) {
+    for (const semantic of ['agent', 'workgroup', 'auto', 'skills', 'browser', 'attachment', 'wecom']) {
       assert.ok(names.includes(semantic), `${app} exposes the ${semantic} semantic name`)
     }
     const imports = [...source.matchAll(/import (\w+) from '([^']+)\?raw'/g)]

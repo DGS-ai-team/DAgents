@@ -55,10 +55,11 @@ import icon100 from './users.svg?raw'
 import icon101 from './globe.svg?raw'
 import icon103 from './bookmark.svg?raw'
 import icon105 from './node-fallback.svg?raw'
+import wecomSemantic from './wecom.svg?raw'
 
 const body = svg => svg.replace(/^[\s\S]*?<svg\b[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim()
 
-export const manageIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","server","users","globe","wrench","bookmark","tool"]
+export const manageIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","server","users","globe","wrench","wecom","bookmark","tool"]
 export const manageIconRegistry = Object.freeze({
   "close": body(icon53),
   "check": body(icon54),
@@ -118,6 +119,7 @@ export const manageIconRegistry = Object.freeze({
   "send": sendSemantic,
   "wrench": toolsSemantic,
   "tool": toolsSemantic,
+  "wecom": wecomSemantic,
   __fallback: body(icon105),
 })
 export const resolveManageIcon = name => manageIconRegistry[name] || manageIconRegistry.__fallback

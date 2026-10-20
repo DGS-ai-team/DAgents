@@ -1,14 +1,15 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiIcon from '../../../node/webui/frontend/src/components/UiIcon.vue'
+import { confirmDesktopAction } from '../../../node/webui/frontend/src/utils/desktopDialogs.js'
 import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '../../../node/webui/frontend/src/utils/resourceContext.js'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import { createWorkspaceFile, downloadBytes, listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from '../workspace-files-api.js'
 import { deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
 
-const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, requestGeneration: { type: Number, default: 0 } })
-const emit = defineEmits(['resource-name', 'attach-file'])
+const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, requestGeneration: { type: Number, default: 0 }, dockCollapsed: { type: Boolean, default: false }, dockStatus: { type: String, default: 'idle' }, dockAgentName: { type: String, default: '当前智能体' } })
+const emit = defineEmits(['resource-name', 'attach-file', 'expand-agent-dock'])
 const entries = ref([])
 const currentPath = ref('')
 const selectedPath = ref('')
@@ -25,6 +26,8 @@ const saving = ref(false)
 const error = ref('')
 const refreshError = ref('')
 const uploadInput = ref(null)
+const toolbarMenu = ref(null)
+const dockRestoreButton = ref(null)
 const previewUrl = ref('')
 const svgPreviewUrl = ref('')
 const previewKind = ref('')
@@ -37,9 +40,14 @@ const workbookSheets = ref([])
 const workbookSheetName = ref('')
 const fileRefs = ref({})
 const editorRef = ref(null)
+const createNameDialogOpen = ref(false)
+const newFileName = ref('')
+const newFileNameError = ref('')
+const newFileNameInput = ref(null)
 const draftOwnerId = ref('')
 const draftOwnerScope = ref('')
 const folderMaskStyle = { maskImage: `url("${folderOpenIcon}")`, WebkitMaskImage: `url("${folderOpenIcon}")` }
+const dockStatusLabel = computed(() => ({ offline: '离线', pending: '待审批', generating: '生成中', idle: '空闲' }[props.dockStatus] || props.dockStatus))
 let requestEpoch = 0
 let contentEditVersion = 0
 let refreshTimer = 0
@@ -178,10 +186,10 @@ function saveDraft() {
     else localStorage.removeItem(key)
   } catch { /* Workspace edits remain in memory when local storage is unavailable. */ }
 }
-function confirmDiscard() { return !dirty.value || window.confirm('当前文件有未保存修改。继续操作会保留本地草稿并离开编辑器，是否继续？') }
+async function confirmDiscard() { return !dirty.value || await confirmDesktopAction('当前文件有未保存修改。继续操作会保留本地草稿并离开编辑器，是否继续？') }
 async function loadDirectory(path = currentPath.value) {
   if (!props.agentId) return { ok: false, canceled: false }
-  if (!confirmDiscard()) return { ok: false, canceled: true }
+  if (!await confirmDiscard()) return { ok: false, canceled: true }
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path, scope: props.workspaceScope, generation: props.requestGeneration }
   loading.value = true; error.value = ''
   try {
@@ -233,7 +241,7 @@ async function openPath(path) {
 }
 async function openEntry(entry, discard = false) {
   if (entry.is_dir) return loadDirectory(entry.path)
-  if (!discard && !confirmDiscard()) return false
+  if (!discard && !await confirmDiscard()) return false
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path: entry.path, scope: props.workspaceScope, generation: props.requestGeneration }
   loading.value = true; error.value = ''; revokePreview()
   resetPreviewData()
@@ -275,7 +283,7 @@ async function refreshHighlightedContent() {
 }
 async function discardDraftAndReload({ confirm = true } = {}) {
   if (loading.value || saving.value || !selectedPath.value || !dirty.value && !draftConflict.value && !fileMissing.value && !externalUpdate.value) return
-  if (confirm && !window.confirm('丢弃当前本地草稿并重新读取工作区文件？')) return
+  if (confirm && !await confirmDesktopAction('丢弃当前本地草稿并重新读取工作区文件？')) return
   const path = selectedPath.value
   try { localStorage.removeItem(workspaceDraftKey(draftOwnerId.value, path, draftOwnerScope.value)) } catch { /* ignore unavailable storage */ }
   dirty.value = false
@@ -295,7 +303,7 @@ async function discardDraftAndReload({ confirm = true } = {}) {
 async function saveFile({ overwrite = false, confirm = true } = {}) {
   if (!selectedPath.value || !canEditText.value || !dirty.value || saving.value || fileMissing.value) return
   if (!overwrite && (draftConflict.value || externalUpdate.value)) return
-  if (overwrite && confirm && !window.confirm('覆盖工作区中的较新版本？此操作会用当前本地草稿替换文件内容。')) return
+  if (overwrite && confirm && !await confirmDesktopAction('覆盖工作区中的较新版本？此操作会用当前本地草稿替换文件内容。')) return
   const request = { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, scope: props.workspaceScope, generation: props.requestGeneration, saveId: ++saveSequence }
   const text = content.value
   saving.value = true; error.value = ''
@@ -335,17 +343,29 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
   }
 }
 async function createFile() {
-  if (!confirmDiscard()) return
+  if (!await confirmDiscard()) return
+  newFileName.value = ''
+  newFileNameError.value = ''
+  createNameDialogOpen.value = true
+  await nextTick()
+  newFileNameInput.value?.focus()
+}
+function cancelCreateFile() {
+  createNameDialogOpen.value = false
+  newFileNameError.value = ''
+}
+async function submitCreateFile() {
+  const name = newFileName.value.trim()
+  if (!name) { newFileNameError.value = '请输入文件名。'; newFileNameInput.value?.focus(); return }
+  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') { newFileNameError.value = '请输入单个文件名。'; newFileNameInput.value?.focus(); return }
+  cancelCreateFile()
   const ownerId = props.agentId
-  const name = window.prompt('新文件名（相对于当前目录）')
-  if (!name?.trim()) return
-  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') { error.value = '请输入单个文件名'; return }
   try {
-    const path = workspacePath(currentPath.value, name.trim())
+    const path = workspacePath(currentPath.value, name)
     await createWorkspaceFile(ownerId, path, new TextEncoder().encode(''))
     if (ownerId !== props.agentId) return
     await loadDirectory(currentPath.value)
-    await openEntry({ name: name.trim(), path, is_dir: false })
+    await openEntry({ name, path, is_dir: false })
   } catch (e) { if (ownerId === props.agentId) error.value = String(e.message || e) }
 }
 async function onUpload(event) {
@@ -471,7 +491,7 @@ async function performRefresh(reason) {
 async function refreshResources(reason = 'manual') {
   if (!props.active || document.visibilityState === 'hidden' || !props.agentId || disposed) return
   if (reason === 'manual' && selectedPath.value && dirty.value) {
-    if (!window.confirm('刷新会丢弃当前本地草稿并重新读取工作区文件。继续？')) return
+    if (!await confirmDesktopAction('刷新会丢弃当前本地草稿并重新读取工作区文件。继续？')) return
     await discardDraftAndReload({ confirm: false })
     return
   }
@@ -532,6 +552,19 @@ function attachSelectedFile() {
   const fileRef = fileRefs.value[selectedPath.value]
   if (fileRef) emit('attach-file', { path: fileRef, name: filename.value })
 }
+function closeToolbarMenu() { if (toolbarMenu.value) toolbarMenu.value.open = false }
+function runToolbarAction(action) {
+  closeToolbarMenu()
+  action()
+}
+function onToolbarPointerDown(event) {
+  if (toolbarMenu.value && !toolbarMenu.value.contains(event.target)) closeToolbarMenu()
+}
+function onToolbarKeydown(event) {
+  if (event.key !== 'Escape' || !toolbarMenu.value?.open) return
+  closeToolbarMenu()
+  toolbarMenu.value.querySelector('summary')?.focus()
+}
 function resourceMenuActions() {
   const canRecoverDraft = Boolean(selectedPath.value && !loading.value && !saving.value && (dirty.value || draftConflict.value || fileMissing.value || externalUpdate.value))
   return { canRecoverDraft, recoveryLabel: fileMissing.value ? '丢弃草稿并重试' : '丢弃草稿并重载' }
@@ -542,8 +575,13 @@ watch(() => [content.value, filename.value, previewKind.value, previewMode.value
 watch(() => [props.agentId, props.workspaceScope], () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
 watch(() => props.requestGeneration, () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
 watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
-onMounted(() => { document.addEventListener('visibilitychange', onVisibilityChange); if (props.active) void refreshResources('return') })
-onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); revokePreview() })
+watch(() => props.dockCollapsed, async collapsed => {
+  if (!collapsed) return
+  await nextTick()
+  dockRestoreButton.value?.focus()
+})
+onMounted(() => { document.addEventListener('visibilitychange', onVisibilityChange); document.addEventListener('pointerdown', onToolbarPointerDown); document.addEventListener('keydown', onToolbarKeydown); if (props.active) void refreshResources('return') })
+onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); document.removeEventListener('pointerdown', onToolbarPointerDown); document.removeEventListener('keydown', onToolbarKeydown); revokePreview() })
 </script>
 
 <template>
@@ -551,16 +589,24 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
     <header class="workspace-files__toolbar">
       <button type="button" class="desktop-icon-button" :disabled="!currentPath || loading" title="上级目录" aria-label="上级目录" @click="goUp"><UiIcon name="arrow-up" :size="16" /></button>
       <div class="workspace-files__breadcrumbs"><button type="button" @click="loadDirectory('')">工作区</button><template v-for="(part,index) in breadcrumbs" :key="index"><span>/</span><button type="button" @click="loadDirectory(breadcrumbs.slice(0,index+1).join('/'))">{{ part }}</button></template><span v-if="filename">/</span><b v-if="filename" :title="filename">{{ filename }}</b></div>
-      <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
-      <button type="button" class="desktop-icon-button" title="新建文件" aria-label="新建文件" :disabled="loading" @click="createFile"><UiIcon name="file-plus" :size="16" /></button>
-      <button type="button" class="desktop-icon-button" title="上传到当前目录" aria-label="上传文件" :disabled="loading" @click="uploadInput?.click()"><UiIcon name="upload" :size="16" /></button>
-      <input ref="uploadInput" class="workspace-files__hidden" type="file" multiple @change="onUpload">
-      <button type="button" class="desktop-icon-button" :title="dirty && canEditText ? '下载当前本地草稿副本' : '下载文件'" aria-label="下载文件" :disabled="!selectedPath" @click="downloadFile"><UiIcon name="arrow-down" :size="16" /></button>
-      <button type="button" class="desktop-icon-button" title="添加到对话" aria-label="添加到对话" :disabled="!fileRefs[selectedPath]" @click="attachSelectedFile"><UiIcon name="paperclip" :size="16" /></button>
-      <button type="button" class="desktop-icon-button" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
-      <button v-if="canTogglePreview" type="button" class="desktop-icon-button workspace-files__mode-toggle" :title="previewMode === 'preview' ? '查看源代码' : '查看预览'" :aria-label="previewMode === 'preview' ? '查看源代码' : '查看预览'" @click="togglePreviewMode"><UiIcon :name="previewMode === 'preview' ? 'code-2' : 'image'" :size="16" /></button>
       <span v-if="previewKind === 'docx' && documentWarnings.length && !documentPreviewError" class="workspace-files__format-warning" tabindex="0" role="status" aria-label="Word 预览格式提示" :title="documentWarnings.join('\n')"><UiIcon name="alert" :size="15" /></span>
       <span v-if="noticeSummary" class="workspace-files__notice" tabindex="0" role="status" aria-live="polite" :aria-label="noticeSummary" aria-describedby="workspace-files-notice-detail"><UiIcon name="alert" :size="16" /><span class="workspace-files__sr-only">{{ noticeSummary }}</span><span id="workspace-files-notice-detail" class="workspace-files__notice-detail" role="tooltip"><span v-for="(detail,index) in noticeDetails" :key="index">{{ detail }}</span></span></span>
+      <input ref="uploadInput" class="workspace-files__hidden" type="file" multiple @change="onUpload">
+      <div class="workspace-files__toolbar-actions">
+      <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
+      <details ref="toolbarMenu" class="workspace-files__actions-menu">
+        <summary class="desktop-icon-button" title="更多文件操作" aria-label="更多文件操作"><UiIcon name="more-horizontal" :size="16" /></summary>
+        <div class="workspace-files__actions-popover" aria-label="更多文件操作">
+          <button type="button" :disabled="loading" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
+          <button type="button" :disabled="loading" @click="runToolbarAction(() => uploadInput?.click())"><UiIcon name="upload" :size="15" /><span>上传到当前目录</span></button>
+          <button type="button" :disabled="!selectedPath" @click="runToolbarAction(downloadFile)"><UiIcon name="arrow-down" :size="15" /><span>{{ dirty && canEditText ? '下载本地草稿' : '下载文件' }}</span></button>
+          <button type="button" :disabled="!fileRefs[selectedPath]" @click="runToolbarAction(attachSelectedFile)"><UiIcon name="paperclip" :size="15" /><span>添加到对话</span></button>
+          <button v-if="canTogglePreview" type="button" @click="runToolbarAction(togglePreviewMode)"><UiIcon :name="previewMode === 'preview' ? 'code-2' : 'image'" :size="15" /><span>{{ previewMode === 'preview' ? '查看源代码' : '查看预览' }}</span></button>
+        </div>
+      </details>
+      <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
+      </div>
     </header>
     <div class="workspace-files__body">
       <nav class="workspace-files__list" aria-label="文件列表">
@@ -599,10 +645,22 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
       </main>
     </div>
   </section>
+  <Teleport to="body">
+    <div v-if="createNameDialogOpen" class="workspace-files__create-scrim" @click.self="cancelCreateFile">
+      <form class="workspace-files__create-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-create-file-title" @submit.prevent="submitCreateFile" @keydown.esc.stop.prevent="cancelCreateFile">
+        <header><div><h2 id="workspace-create-file-title">新建文件</h2><p>将在 {{ currentPath || '工作区根目录' }} 中创建一个空文件。</p></div><button type="button" aria-label="关闭" @click="cancelCreateFile"><UiIcon name="close" :size="16" /></button></header>
+        <label for="workspace-create-file-name">文件名</label>
+        <input id="workspace-create-file-name" ref="newFileNameInput" v-model="newFileName" type="text" maxlength="255" autocomplete="off" placeholder="例如：notes.md" :aria-invalid="Boolean(newFileNameError)" :aria-describedby="newFileNameError ? 'workspace-create-file-error' : undefined" @input="newFileNameError = ''">
+        <p v-if="newFileNameError" id="workspace-create-file-error" class="workspace-files__create-error" role="alert">{{ newFileNameError }}</p>
+        <footer><button type="button" @click="cancelCreateFile">取消</button><button type="submit" class="is-primary">创建</button></footer>
+      </form>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .workspace-files{display:flex;flex:1;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;background:#fff;color:#30383c}.workspace-files__toolbar{display:flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border-bottom:1px solid #e1e4e6}.workspace-files__toolbar button{display:grid;place-items:center;min-width:30px;height:30px;padding:0 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#4c5559;font-size:11px;cursor:pointer}.workspace-files__toolbar button:hover:not(:disabled){background:#eceeef}.workspace-files__toolbar button:disabled{opacity:.45}.workspace-files__breadcrumbs{display:flex;flex:1;align-items:center;gap:6px;min-width:0;overflow:hidden;color:#777f83;font-size:12px}.workspace-files__breadcrumbs button{overflow:hidden;max-width:160px;padding:3px 1px;border:0;background:transparent;color:#566065;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.workspace-files__breadcrumbs b{overflow:hidden;color:#30383c;text-overflow:ellipsis;white-space:nowrap}.workspace-files__body{display:flex;flex:1;min-height:0}.workspace-files__list{flex:0 0 245px;min-width:150px;overflow:auto;scroll-padding-bottom:82px;padding:8px;border-right:1px solid #d4dce0;background:#fafbfc}.workspace-files__list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#4a5357;text-align:left;font-size:12px;cursor:pointer}.workspace-files__list button.selected,.workspace-files__list button:hover{background:#eceeef}.workspace-files__list button span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-files__list button .workspace-files__folder-icon{flex:none;width:16px;height:16px;background:#586166;mask-repeat:no-repeat;mask-position:center;mask-size:contain}.workspace-files__list button small{color:#777f83;font-size:10px}.workspace-files__editor{display:flex;background:#fff;flex:1;min-width:0;min-height:0;align-items:stretch;justify-content:stretch}.workspace-files__editor textarea{flex:1;min-width:0;min-height:0;scroll-padding-bottom:82px;padding:16px;border:0;outline:0;background:#fff;color:#30383c;font:12px/1.6 Consolas,monospace;resize:none}.workspace-files__image{max-width:100%;max-height:100%;margin:auto;object-fit:contain}.workspace-files__empty{display:grid;flex:1;place-items:center;padding:24px;color:#777f83;font-size:12px;text-align:center}.workspace-files__hidden{display:none}.workspace-files__notice{position:relative;display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;border-radius:5px;color:#a53c38;cursor:help}.workspace-files__notice:hover,.workspace-files__notice:focus-visible{background:#fff1ef;outline:2px solid #b74a43;outline-offset:1px}.workspace-files__notice-detail{position:absolute;z-index:50;top:calc(100% + 5px);right:0;display:none;min-width:220px;max-width:min(420px,70vw);padding:9px 11px;border:1px solid #e2c7c8;border-radius:6px;background:#fff7f6;box-shadow:0 5px 16px #26374024;color:#7f302d;font-size:11px;line-height:1.45;white-space:normal}.workspace-files__notice-detail>span{display:block}.workspace-files__notice-detail>span+span{margin-top:5px}.workspace-files__notice:hover .workspace-files__notice-detail,.workspace-files__notice:focus .workspace-files__notice-detail{display:block}.workspace-files__sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.workspace-files__toolbar-actions{position:relative;display:flex;flex:none;align-items:center;gap:4px;margin-left:auto}.workspace-files__actions-menu{position:relative;flex:none}.workspace-files__actions-menu>summary{display:grid;place-items:center;list-style:none;width:30px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;color:#4c5559;cursor:pointer}.workspace-files__actions-menu>summary::-webkit-details-marker{display:none}.workspace-files__actions-menu>summary:hover,.workspace-files__actions-menu[open]>summary{background:#eceeef}.workspace-files__actions-popover{position:absolute;z-index:40;top:calc(100% + 5px);right:0;display:grid;min-width:190px;padding:4px;border:1px solid #d9e0e2;border-radius:7px;background:#fff;box-shadow:0 8px 24px #26374020}.workspace-files__actions-popover button{display:flex!important;align-items:center;justify-content:flex-start;gap:9px;width:100%;min-width:0!important;height:34px;padding:0 9px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#3d474b!important;text-align:left!important;font:inherit!important;cursor:pointer}.workspace-files__actions-popover button:hover:not(:disabled){background:#f0f2f2!important}.workspace-files__actions-popover button:disabled{color:#9aa3a6!important;cursor:default}.workspace-files__actions-popover button .ui-icon{flex:none}.workspace-files__dock-toggle{position:relative;color:#3f484c}.workspace-files__dock-toggle i{position:absolute;right:3px;top:3px;width:7px;height:7px;border:1px solid #fff;border-radius:50%;background:#7a8589}.workspace-files__dock-toggle i.is-pending{background:#c18526}.workspace-files__dock-toggle i.is-generating{background:#657780}.workspace-files__dock-toggle i.is-offline{background:#b7534c}.workspace-files__dock-toggle:focus-visible,.workspace-files__actions-menu>summary:focus-visible{outline:2px solid #65777f;outline-offset:1px}
 .workspace-files__mode-toggle { flex: 0 0 30px; width:30px; min-width:30px; padding:0; }
 .workspace-files__document-frame { display:block; flex:1; width:100%; min-width:0; min-height:0; border:0; background:#fff; }
 .workspace-files__pdf-frame { height:100%; }
@@ -636,6 +694,22 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
 .workspace-files__draft-actions button { min-height:28px; padding:4px 9px; border:1px solid #d2dadd; border-radius:5px; background:#fff; color:#3e484c; font:inherit; cursor:pointer; }
 .workspace-files__draft-actions button:hover:not(:disabled) { background:#edf0f1; }
 .workspace-files__draft-actions button:disabled { opacity:.5; cursor:default; }
+.workspace-files__create-scrim { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:24px; background:#17212655; }
+.workspace-files__create-dialog { box-sizing:border-box; width:min(420px,100%); padding:20px; border:1px solid #d8dfe1; border-radius:10px; background:#fff; color:#30383c; box-shadow:0 18px 54px #18292d30; font:inherit; }
+.workspace-files__create-dialog header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.workspace-files__create-dialog h2 { margin:0; color:#30383c; font-size:17px; font-weight:600; }
+.workspace-files__create-dialog header p { margin:5px 0 0; color:#6b7579; font-size:12px; line-height:1.5; }
+.workspace-files__create-dialog header button { display:grid; flex:none; width:30px; height:30px; place-items:center; padding:0; border:0; border-radius:5px; background:transparent; color:#596469; cursor:pointer; }
+.workspace-files__create-dialog header button:hover { background:#eef0f1; }
+.workspace-files__create-dialog label { display:block; margin-bottom:6px; color:#475257; font-size:12px; font-weight:600; }
+.workspace-files__create-dialog input { box-sizing:border-box; width:100%; height:36px; padding:0 10px; border:1px solid #cbd3d6; border-radius:6px; outline:0; background:#fff; color:#30383c; font:inherit; font-size:13px; line-height:1.4; }
+.workspace-files__create-dialog input:focus-visible { border-color:#727e83; box-shadow:0 0 0 2px #707d831c; }
+.workspace-files__create-dialog footer { display:flex; justify-content:flex-end; gap:8px; margin-top:22px; }
+.workspace-files__create-dialog footer button { min-width:72px; height:32px; padding:0 12px; border:1px solid #cbd3d6; border-radius:6px; background:#fff; color:#3f494e; font:inherit; font-size:12px; cursor:pointer; }
+.workspace-files__create-dialog footer button:hover { background:#f1f3f4; }
+.workspace-files__create-dialog footer button.is-primary { border-color:#343c40; background:#343c40; color:#fff; }
+.workspace-files__create-dialog footer button.is-primary:hover { background:#242b2f; }
+.workspace-files__create-error { margin:7px 0 0; color:#a13c37; font-size:12px; }
 @media (max-width: 760px) {
   .workspace-files__draft-bar { align-items:flex-start; flex-direction:column; gap:7px; }
   .workspace-files__draft-actions { align-self:flex-end; }

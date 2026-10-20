@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openNativeDialog } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmNative, message as showNativeMessage, open as openNativeDialog } from "@tauri-apps/plugin-dialog";
 import App from "./App.vue";
 import router from "./settings-router.js";
 import "../../../node/webui/frontend/src/styles/tokens.css";
@@ -50,6 +50,20 @@ globalThis.__DAGENTS_PICK_DIRECTORY__ = async () => {
   return path
     ? { ok: true, cancelled: false, path }
     : { ok: true, cancelled: true };
+};
+
+globalThis.__DAGENTS_NATIVE_DIALOGS__ = {
+  confirm: (message, options = {}) => confirmNative(message, {
+    title: options.title || "DAgents",
+    kind: options.kind || "warning",
+    okLabel: options.okLabel || "确定",
+    cancelLabel: options.cancelLabel || "取消",
+  }),
+  message: (message, options = {}) => showNativeMessage(message, {
+    title: options.title || "DAgents",
+    kind: options.kind || "info",
+    buttons: { ok: options.okLabel || "确定" },
+  }),
 };
 
 createApp(App).use(router).mount("#app");

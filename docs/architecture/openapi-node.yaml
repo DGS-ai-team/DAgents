@@ -483,23 +483,7 @@ paths:
         "200":
           description: OK
 
-  /v1/agents/{agent_id}/child-agents/{child_agent_id}:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/agents/{agent_id}/context:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agents/{agent_id}/execution-events:
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -552,14 +536,6 @@ paths:
           description: OK
 
   /v1/agents/{agent_id}/screen/status:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agents/{agent_id}/screen/stream:
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -671,14 +647,6 @@ paths:
         "200":
           description: OK
     post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/mcp/servers/{server_id}/tools:
-    get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:

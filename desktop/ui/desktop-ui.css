@@ -1645,7 +1645,8 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   color: #263740;
   font-size: 13px;
 }
-.dock-message-input:focus-visible { outline: 2px solid #aeb9bd; outline-offset: -1px; border-radius: 5px; }
+.dock-message-input:focus,
+.dock-message-input:focus-visible { outline: 0; box-shadow: none; }
 .dock-message-input::placeholder { color: #65777f; }
 .dock-message-input:disabled { color: #87969b; }
 
@@ -1731,6 +1732,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .dock-details-content { min-height: 0; overflow: auto; }
 .dock-details-panel { width: min(380px, calc(100vw - 28px)); }
 .dock-collapsed-toggle { position:relative; display:grid; align-self:flex-end; width:46px; height:46px; padding:0; place-items:center; border:1px solid #d7e0e3; border-radius:50%; background:#fff; box-shadow:0 8px 26px #172f3b20; cursor:pointer; pointer-events:auto; }
+.dock-collapsed-placeholder { display:none; }
 .dock-collapsed-toggle .dock-status-icon { width:20px; height:20px; margin:0; }
 .dock-collapsed-chevron { position:absolute; right:7px; top:7px; width:10px; height:10px; background:#596368; }
 .dock-collapsed-toggle:hover { border-color:#aeb9bd; background:#f8f9f9; }

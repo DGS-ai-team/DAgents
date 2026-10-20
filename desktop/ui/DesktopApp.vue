@@ -32,6 +32,7 @@ import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
 import AutoOverviewPanel from './components/AutoOverviewPanel.vue'
 import TopLeftSlotIcon from './components/TopLeftSlotIcon.vue'
 import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getLLMSettings, getSetupConfig, patchAgent, patchLLMSettings, submitMessage, uploadExternalToolToManage, uploadPluginToManage, uploadSkillToManage } from '../../node/webui/frontend/src/api/node.js'
+import { confirmDesktopAction } from '../../node/webui/frontend/src/utils/desktopDialogs.js'
 import { agentActiveProfile } from '../../node/webui/frontend/src/utils/agentLLM.js'
 import { dispatchDesktopSlashCommand } from './slash-commands.js'
 import { openLightbox } from '../../node/webui/frontend/src/stores/lightbox.js'
@@ -141,6 +142,7 @@ const dockDrafts = ref({})
 const failedSendDrafts = ref({})
 const pendingUserByAgent = ref({})
 const dockExpanded = ref(false)
+const dockCollapsed = ref(false)
 const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value ? 'pending' : agentGenerating.value ? 'generating' : 'idle')
 const isTauri = !!window.__TAURI_INTERNALS__
 const router = useRouter()
@@ -212,6 +214,9 @@ const previouslyOnline = ref(false)
 const sidebarCollapsed = ref(false)
 const openMenu = ref('')
 const dialog = ref('')
+const autoOverviewPanel = ref(null)
+const deletingAgentId = ref('')
+const autoOverviewActionError = ref('')
 const windowMaximized = ref(false)
 const showAgentCreate = ref(false)
 const workgroupList = ref([])
@@ -805,26 +810,47 @@ async function stopCurrentTurn() {
   finally { setAgentCancelling(id, false) }
 }
 async function clearCurrentContext() {
-  if (!activeId.value || agentGenerating.value || !window.confirm('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return
+  if (!activeId.value || agentGenerating.value || !await confirmDesktopAction('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return
   const id = activeId.value
   try { await clearContext(id); if (activeId.value === id) { streamingText.value = ''; await selectAgent(id) } }
   catch (e) { if (activeId.value === id) setAgentError(id, String(e.message || e)) }
 }
-async function deleteCurrentAgent() {
-  const agent = activeAgent.value
-  if (!agent || agentGenerating.value || !window.confirm(`删除 Agent「${agent.display_name || agent.agent_id}」？`)) return
-  try { await deleteAgent(agent.agent_id); activeId.value = ''; hydrate.value = null; await loadAgents() }
-  catch (e) { if (activeId.value === agent.agent_id) setAgentError(agent.agent_id, String(e.message || e)) }
+async function deleteAgentById(agentId) {
+  const id = String(agentId || '').trim()
+  const agent = agents.value.find(item => item.agent_id === id)
+  if (!agent || deletingAgentId.value || (activeId.value === id && agentGenerating.value)) return
+  const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
+  const name = agent.display_name || id
+  if (!await confirmDesktopAction(`删除${kind}「${name}」？\n该操作会在当前 Node 归档此智能体并移除其运行时。`)) return
+  autoOverviewActionError.value = ''
+  deletingAgentId.value = id
+  try {
+    await deleteAgent(id)
+    if (activeId.value === id) { activeId.value = ''; hydrate.value = null; streamingText.value = '' }
+    await refreshAgentSummaries()
+    await nextTick()
+    await autoOverviewPanel.value?.refresh?.()
+  } catch (e) {
+    const message = String(e.message || e)
+    setAgentError(id, message)
+    if (dialog.value === 'auto-overview') autoOverviewActionError.value = message
+  } finally { if (deletingAgentId.value === id) deletingAgentId.value = '' }
 }
+async function deleteCurrentAgent() { await deleteAgentById(activeId.value) }
 async function onAgentCreated(agent) {
   showAgentCreate.value = false
   await loadAgents()
   const createdId = agent?.agent_id || agent?.id
   if (createdId && agents.value.some(item => item.agent_id === createdId)) await selectAgent(createdId)
 }
-function showAutoOverview() { dialog.value = 'auto-overview' }
+function showAutoOverview() { autoOverviewActionError.value = ''; dialog.value = 'auto-overview' }
 function showWorkgroups() { selectedWorkgroupId.value = ''; selectedWorkgroupName.value = ''; activeTab.value = 'workgroups' }
 function openWorkgroup(id) { selectedWorkgroupId.value = String(id || ''); selectedWorkgroupName.value = workgroupList.value.find(group => group.workgroup_id === selectedWorkgroupId.value)?.display_name || ''; activeTab.value = 'workgroups' }
+function onWorkgroupRemoved(id) {
+  const removedId = String(id || '')
+  workgroupList.value = workgroupList.value.filter(group => group.workgroup_id !== removedId)
+  if (selectedWorkgroupId.value === removedId) { selectedWorkgroupId.value = ''; selectedWorkgroupName.value = '' }
+}
 function openWorkgroupConnectionSettings() { void router.push('/settings/connection') }
 function openBrowserCapabilitySettings() { void router.push('/settings/capabilities') }
 async function openLinuxChannelSettings() { await closeTerminalOpenDialog(); await router.push('/settings/linux-channels') }
@@ -1626,12 +1652,12 @@ onUnmounted(() => {
       </section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('file')" @after-leave="onComposerPageAfterLeave('file', $event)" @after-enter="onComposerPageAfterEnter('file', $event)">
-      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" /></section>
+      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" @expand-agent-dock="dockCollapsed = false" /></section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('browser')" @after-leave="onComposerPageAfterLeave('browser', $event)" @after-enter="onComposerPageAfterEnter('browser', $event)">
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
       </Transition>
-      <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
+      <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
       <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
@@ -1648,6 +1674,8 @@ onUnmounted(() => {
       <ResourceAgentDock
         v-model="dockDraft"
         v-model:expanded="dockExpanded"
+        v-model:collapsed="dockCollapsed"
+        :collapsed-in-toolbar="activeTab === 'file'"
         :status="dockStatus"
         :agent-name="activeAgent?.display_name || '当前智能体'"
         :can-send="canSendMessage"
@@ -1677,7 +1705,7 @@ onUnmounted(() => {
     </main>
     <TerminalOpenDialog :open="terminalOpenDialog" :choices="terminalOpenChoices" :sessions="terminalSessions" :sessions-loading="terminalSessionLoading" :sessions-error="terminalSessionError" :channels-loading="terminalChannelLoading" :channels-error="terminalChannelError" @cancel="closeTerminalOpenDialog" @create="createTerminalFromDialog" @resume="resumeTerminalFromDialog" @retry-sessions="retryTerminalSessionList" @retry-channels="retryTerminalChannels" @open-settings="openLinuxChannelSettings" />
     <TerminalEndDialog :open="Boolean(terminalEndConfirmation)" :terminal-name="terminalEndConfirmation?.name" @cancel="cancelEndTerminal" @confirm="confirmEndTerminal" />
-    <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel @open-chat="openAutoChat" @open-config="openAutoConfig" /></section></div>
+    <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel ref="autoOverviewPanel" :deleting-agent-id="deletingAgentId" :action-error="autoOverviewActionError" @open-chat="openAutoChat" @open-config="openAutoConfig" @delete-agent="deleteAgentById" /></section></div>
     <div v-if="showAgentCreate" class="agent-create-overlay"><AgentCreatePage @cancel="showAgentCreate = false" @created="onAgentCreated" /></div>
     <ImageLightbox />
   </div>

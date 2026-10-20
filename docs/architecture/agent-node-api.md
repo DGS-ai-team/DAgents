@@ -362,7 +362,6 @@ Desktop：智能体设置中的 Policy 面板。
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下的活跃与最近终态子 Agent 快照 |
-| GET | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}` | 查询单个子 Agent 状态 |
 | POST | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
 - 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，创建工具同步等待子 Agent 终态，**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_progress` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** Agent 的 `GET /v1/streams`。

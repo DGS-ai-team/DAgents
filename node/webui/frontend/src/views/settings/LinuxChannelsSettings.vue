@@ -4,6 +4,7 @@ import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
+import { confirmDesktopAction } from "../../utils/desktopDialogs.js";
 
 const channels = ref([]);
 const credentials = ref([]);
@@ -215,7 +216,7 @@ async function pinTestFingerprint() {
   if (!fingerprint || !channelID || result?.error_code !== "host_key_unknown" || saving.value) return;
   const item = channels.value.find((entry) => entry.channel_id === channelID);
   const label = item?.display_name || item?.host || channelID;
-  const confirmed = window.confirm(
+  const confirmed = await confirmDesktopAction(
     `请先通过可信渠道核对主机指纹：\\n\\n${fingerprint}\\n\\n确认将 ${label} 保存为固定指纹吗？`,
   );
   if (!confirmed) return;
@@ -240,7 +241,7 @@ async function pinTestFingerprint() {
 }
 
 async function removeChannel(item) {
-  if (!item?.channel_id || !window.confirm(`删除通道 ${item.display_name || item.channel_id}？`)) return;
+  if (!item?.channel_id || !await confirmDesktopAction(`删除通道 ${item.display_name || item.channel_id}？`)) return;
   try {
     await api.deleteLinuxChannel(item.channel_id);
     await load();
