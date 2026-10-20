@@ -2,7 +2,7 @@
 
 这份说明适用于从正式版 `v0.11.0` 的 Windows 安装迁移到当前 Desktop + Node API 版本。建议采用“完整备份旧数据、卸载旧程序、安装新版、恢复数据”的方式。旧安装没有当前安装器要求的 ownership marker，因此新版安装器会拒绝直接覆盖；不要把 QA 安装器或同一源码下的测试当作旧版应用升级验收。
 
-目前没有完成真实 v0.11.0 安装包到当前安装包的端到端迁移验收。仓库内的 Go in-process 测试只验证脱敏 v0.11 数据文件可由当前持久化 Store 读取，以及 pending trigger 的安全恢复行为；它不能证明 Windows 安装器、卸载器、快捷方式、WebView2 或用户工作目录迁移全部正常。
+2026-10-20 已在获准使用的 Windows 11 管理员开发机上，完成官方 v0.11.0 安装包到修正候选包的合成数据迁移：完整冷备份、旧版卸载、新目录安装恢复、普通 Agent 历史与私有工作区、配套测试 Key 解密、维护安装及数据保留卸载均通过，见[实测记录](../design/desktop-product/audits/2026-10-20/v011-production-migration.md)。这不覆盖标准用户、外部工作区、实际服务凭据、Auto/未决 Trigger 或故障回退的完整安装演练；Go in-process fixture 对 pending trigger 的恢复验证仍是另一层证据。
 
 ## v0.11.0 的数据位置
 
@@ -36,4 +36,4 @@ v0.11.0 的 `compression.idle_auto_compress_seconds`、`idle_auto_compress_poll_
 
 已由 Go in-process 脱敏 fixture 覆盖：v0.11 形态的 Node settings 与 LLM 档案读取、配套 key 解密、缺少配套 key 时显式解密失败、Agent/Auto 配置快照与 workspace 路径保留、session 历史读取，以及 schema 2 trigger 恢复时暂停 pending delivery 并保留历史。没有读取真实密钥，也没有启动 Node、Desktop、浏览器或安装器。
 
-仍需在一次性 Windows 用户或 VM 中按 [安装升级验收清单](../../packaging/windows/install-upgrade-acceptance.md) 做真实旧版备份、卸载、新版安装和恢复；验证 Desktop 本地设置、权限、快捷方式、自启和故障回滚。完成前不要将 P0 “v0.11.0 用户迁移”标为通过。
+真实旧包的管理员开发机普通 Agent 路径已按上述实测记录完成。仍需在一次性 Windows 标准用户或 VM 中按[安装升级验收清单](../../packaging/windows/install-upgrade-acceptance.md)覆盖权限、外部工作区、登录后自启和故障回退；Auto/未决 Trigger 与实际服务凭据也需各自验收。不要将已通过的普通 Agent 合成数据路径等同于 P0“v0.11.0 用户迁移”的全部场景通过。

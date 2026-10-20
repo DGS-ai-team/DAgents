@@ -112,6 +112,8 @@ jobs:
           grep -Fq '#define MyAppVersion' packaging/windows/dagents-installer.iss
           grep -Fq 'SetupIconFile=' packaging/windows/dagents-installer.iss
           grep -Fq 'ArchitecturesAllowed=x64compatible' packaging/windows/dagents-installer.iss
+          grep -Fq 'SuppressibleMsgBox(' packaging/windows/dagents-installer.iss
+          grep -Fq 'MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES' packaging/windows/dagents-installer.iss
           grep -Fq 'ArchitecturesAllowed=x86compatible' packaging/windows/dagents-installer.iss
           grep -Fq 'GetWindowsVersionEx(Version)' packaging/windows/dagents-installer.iss
           grep -Fq 'Version.ProductType = VER_NT_WORKSTATION' packaging/windows/dagents-installer.iss
@@ -141,6 +143,18 @@ jobs:
       - name: Install Inno Setup compiler
         shell: pwsh
         run: choco install innosetup --no-progress -y
+
+      - name: Verify production PATH cleanup with Inno
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          ./packaging/windows/tests/test-path-cleanup-inno.ps1 -Iscc $iscc
+
+      - name: Verify silent policy preservation with Inno
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          ./packaging/windows/tests/test-silent-policy-preservation-inno.ps1 -Iscc $iscc
 
       - name: Compile production and isolated QA installers (x64 and x86)
         shell: bash
