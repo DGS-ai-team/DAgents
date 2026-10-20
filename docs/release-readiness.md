@@ -82,3 +82,5 @@
 5. 按 [发布流程](release-process.md) 建立 `dev → main` 发布 PR，通过检查和审查后，在 `main` 对应提交打标签；发布后校验实际资产、安装与升级，再同步 `main → dev`。
 
 本轮只提交开发 PR 和评估清单，不创建发布标签，不把未验证项目标为完成。
+
+2026-10-20 补充：已完成打包 Node → Browser → 原生 Desktop 整链，以及管理员开发机上的正式安装任务开关、官方 v0.11.0 普通 Agent 冷备份迁移、合成加密 Key 恢复和运行中卸载。验收发现并修复中文路径卸载损坏 PATH、已有 policy 导致静默安装挂起两项问题，新增真实 Inno 回归并接入 CI；失败候选和成功修正候选分别留证。详见[正式包验收](design/desktop-product/audits/2026-10-20/browser-chain-and-production-install.md)与[旧版迁移](design/desktop-product/audits/2026-10-20/v011-production-migration.md)。标准用户、故障回退、真实远程/服务以及 24 小时 Auto 等门槛仍未关闭，本轮不据此发布稳定版。

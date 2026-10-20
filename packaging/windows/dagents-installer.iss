@@ -498,11 +498,11 @@ begin
     Exit;
   end;
   OverwritePolicy :=
-    (MsgBox(
+    (SuppressibleMsgBox(
       '检测到已有 policy 配置（.runtime\policy）。' + #13#10 +
       '是否用安装包中的 policy 覆盖？' + #13#10#13#10 +
       '选「否」将保留现有 policy。',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES);
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES);
   OverwritePolicyAnswered := True;
 end;
 
@@ -715,30 +715,41 @@ end;
 #ifndef IsolatedQaBuild
 function RemovePathEntry(const Path, Dir: string): string;
 var
-  Remaining, Entry: string;
-  Separator: Integer;
+  Entries, Remaining: TArrayOfString;
+  Entry, NormalizedEntry, NormalizedDir: string;
+  EntryLength, DirLength, I, Count: Integer;
 begin
-  Result := '';
-  Remaining := Path;
-  while True do
+  { Keep Unicode string operations and preserve drive roots: C:\ must not become C:. }
+  Entries := StringSplit(Path, [';'], stAll);
+  NormalizedDir := Dir;
+  DirLength := Length(NormalizedDir);
+  while (DirLength > 0) and (NormalizedDir[DirLength] = '\') and
+    not ((DirLength = 3) and (NormalizedDir[2] = ':')) do
   begin
-    Separator := Pos(';', Remaining);
-    if Separator = 0 then
-      Entry := Remaining
-    else
-    begin
-      Entry := Copy(Remaining, 1, Separator - 1);
-      Delete(Remaining, 1, Separator);
-    end;
-    if (Entry <> '') and not SameText(RemoveBackslash(Entry), RemoveBackslash(Dir)) then
-    begin
-      if Result <> '' then
-        Result := Result + ';';
-      Result := Result + Entry;
-    end;
-    if Separator = 0 then
-      Break;
+    Dec(DirLength);
   end;
+  NormalizedDir := Copy(NormalizedDir, 1, DirLength);
+  SetArrayLength(Remaining, 0);
+  Count := 0;
+  for I := 0 to GetArrayLength(Entries) - 1 do
+  begin
+    Entry := Entries[I];
+    NormalizedEntry := Entry;
+    EntryLength := Length(NormalizedEntry);
+    while (EntryLength > 0) and (NormalizedEntry[EntryLength] = '\') and
+      not ((EntryLength = 3) and (NormalizedEntry[2] = ':')) do
+    begin
+      Dec(EntryLength);
+    end;
+    NormalizedEntry := Copy(NormalizedEntry, 1, EntryLength);
+    if not SameText(NormalizedEntry, NormalizedDir) then
+    begin
+      SetArrayLength(Remaining, Count + 1);
+      Remaining[Count] := Entry;
+      Inc(Count);
+    end;
+  end;
+  Result := StringJoin(';', Remaining);
 end;
 #endif
 
