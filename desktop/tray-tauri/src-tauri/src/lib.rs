@@ -170,6 +170,13 @@ pub fn run() {
     .iter()
     .any(|flag| args_have_flag(&cli_args, flag))
         || update_args_from_args().is_some();
+    if !cli_only {
+        if let Err(error) = notify::register_app_identity() {
+            diagnostics::stderr_best_effort(format_args!(
+                "register Windows notification identity: {error}"
+            ));
+        }
+    }
     let guard = if cli_only {
         None
     } else {
