@@ -833,6 +833,7 @@ async function captureScreenshot() {
     screenshotSelection.value = selection
     if (currentWindow) {
       try {
+        await nextTick()
         await currentWindow.setAlwaysOnTop(true)
         if (!selection.previousFullscreen) await currentWindow.setFullscreen(true)
       } catch (error) {

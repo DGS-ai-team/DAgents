@@ -819,7 +819,9 @@ async fn desktop_capture_screenshot(window: WebviewWindow) -> Result<String, Str
     window
         .hide()
         .map_err(|error| format!("无法暂时隐藏 Desktop：{error}"))?;
-    thread::sleep(Duration::from_millis(140));
+    // Let Windows finish composing the hide/restore transition before reading
+    // the monitor. A short delay can capture the Desktop's fading surface.
+    thread::sleep(Duration::from_millis(480));
     let capture_result =
         spawn_node_blocking(move || screen_capture::capture_monitor_png(x, y, width, height)).await;
     let _ = window.show();
