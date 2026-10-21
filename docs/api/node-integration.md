@@ -166,9 +166,11 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `POST` | `/v1/agents` | `handleCreateAgent` | [agents_api.go#L25](../../node/internal/api/agents_api.go#L25) |
 | `DELETE` | `/v1/agents/{agent_id}` | `handleDeleteAgent` | [agents_api.go#L36](../../node/internal/api/agents_api.go#L36) |
 | `GET` | `/v1/agents/{agent_id}` | `handleGetAgent` | [agents_api.go#L27](../../node/internal/api/agents_api.go#L27) |
+| `GET` | `/v1/agents/{agent_id}/model-view` | `handleGetAgentModelView` | [agent_model_view_api.go](../../node/internal/api/agent_model_view_api.go) |
 | `PATCH` | `/v1/agents/{agent_id}` | `handlePatchAgent` | [agents_api.go#L28](../../node/internal/api/agents_api.go#L28) |
 | `POST` | `/v1/agents/{agent_id}/ack` | `handleAgentAck` | [agents_api.go#L46](../../node/internal/api/agents_api.go#L46) |
 | `GET` | `/v1/agents/{agent_id}/auto-config` | `handleAutonomyV2ConfigGet` | [autonomy_v2_api.go#L16](../../node/internal/api/autonomy_v2_api.go#L16) |
+| `GET` | `/v1/agents/{agent_id}/auto-settings` | `handleAutonomyV2SettingsGet` | [autonomy_v2_api.go](../../node/internal/api/autonomy_v2_api.go) |
 | `PUT` | `/v1/agents/{agent_id}/auto-config` | `handleAutonomyV2ConfigPut` | [autonomy_v2_api.go#L17](../../node/internal/api/autonomy_v2_api.go#L17) |
 | `POST` | `/v1/agents/{agent_id}/auto-config/reconcile` | `handleAutonomyV2ConfigReconcile` | [autonomy_v2_api.go#L18](../../node/internal/api/autonomy_v2_api.go#L18) |
 | `GET` | `/v1/agents/{agent_id}/browser/view` | `handleAgentBrowserView` | [browser_view_api.go#L9](../../node/internal/api/browser_view_api.go#L9) |
@@ -282,12 +284,17 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 
 ### Manage Workgroups
 
+Desktop 使用以下聚合读取接口减少 WebView 往返：`GET /v1/workgroups/desktop/list` 合并全量列表和当前 Node 订阅状态；`GET /v1/workgroups/{id}/desktop-snapshot` 返回工作组、成员、Timeline、待审批，并按工作组状态附加队列或模型配置，首次加载可加 `include_agents=true`；`GET /v1/workgroups/{id}/desktop-progress` 将 Timeline 与人工队列合并为一个刷新请求。它们只组合现有 Node→Manage 查询，不改变 Manage 的数据所有权；单项修改仍使用下方原子接口。
+
 | Method | Path | Handler | Source |
 |---|---|---|---|
 | `GET` | `/v1/workgroups` | `handleListWorkgroups` | [workgroup_api.go#L16](../../node/internal/api/workgroup_api.go#L16) |
+| `GET` | `/v1/workgroups/desktop/list` | `handleDesktopWorkgroupList` | [workgroup_api.go](../../node/internal/api/workgroup_api.go) |
 | `POST` | `/v1/workgroups` | `handleCreateWorkgroup` | [workgroup_api.go#L17](../../node/internal/api/workgroup_api.go#L17) |
 | `GET` | `/v1/workgroups/meta/agents` | `handleListRegisteredAgents` | [workgroup_api.go#L18](../../node/internal/api/workgroup_api.go#L18) |
 | `GET` | `/v1/workgroups/{workgroupId}` | `handleGetWorkgroup` | [workgroup_api.go#L19](../../node/internal/api/workgroup_api.go#L19) |
+| `GET` | `/v1/workgroups/{workgroupId}/desktop-snapshot` | `handleDesktopWorkgroupSnapshot` | [workgroup_api.go](../../node/internal/api/workgroup_api.go) |
+| `GET` | `/v1/workgroups/{workgroupId}/desktop-progress` | `handleDesktopWorkgroupProgress` | [workgroup_api.go](../../node/internal/api/workgroup_api.go) |
 | `PATCH` | `/v1/workgroups/{workgroupId}` | `handlePatchWorkgroup` | [workgroup_api.go#L20](../../node/internal/api/workgroup_api.go#L20) |
 | `GET` | `/v1/workgroups/{workgroupId}/acl` | `handleGetWorkgroupACL` | [workgroup_api.go#L23](../../node/internal/api/workgroup_api.go#L23) |
 | `POST` | `/v1/workgroups/{workgroupId}/collaborators` | `handleAddWorkgroupCollaborator` | [workgroup_api.go#L24](../../node/internal/api/workgroup_api.go#L24) |

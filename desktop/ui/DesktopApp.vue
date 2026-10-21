@@ -24,6 +24,7 @@ import ImageLightbox from '../../node/webui/frontend/src/components/ImageLightbo
 import TerminalConsole from './components/TerminalConsole.vue'
 import TerminalOpenDialog from './components/TerminalOpenDialog.vue'
 import TerminalEndDialog from './components/TerminalEndDialog.vue'
+import ScreenshotRegionDialog from './components/ScreenshotRegionDialog.vue'
 import ComposerSurface from './components/ComposerSurface.vue'
 import ResourceAgentDock from './components/ResourceAgentDock.vue'
 import WorkspaceFiles from './components/WorkspaceFiles.vue'
@@ -31,7 +32,7 @@ import BrowserViewer from './components/BrowserViewer.vue'
 import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
 import AutoOverviewPanel from './components/AutoOverviewPanel.vue'
 import TopLeftSlotIcon from './components/TopLeftSlotIcon.vue'
-import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getLLMSettings, getSetupConfig, patchAgent, patchLLMSettings, submitMessage, uploadExternalToolToManage, uploadPluginToManage, uploadSkillToManage } from '../../node/webui/frontend/src/api/node.js'
+import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getAgentModelView, patchAgent, patchLLMSettings, submitMessage, unsubscribeWorkgroup, uploadExternalToolToManage, uploadPluginToManage, uploadSkillToManage } from '../../node/webui/frontend/src/api/node.js'
 import { confirmDesktopAction } from '../../node/webui/frontend/src/utils/desktopDialogs.js'
 import { agentActiveProfile } from '../../node/webui/frontend/src/utils/agentLLM.js'
 import { dispatchDesktopSlashCommand } from './slash-commands.js'
@@ -46,6 +47,8 @@ import terminalIcon from '@shared-icons/desktop/terminal.svg?url'
 import browserIcon from '@shared-icons/desktop/browser.svg?url'
 import fileIcon from '@shared-icons/desktop/file.svg?url'
 import attachmentIcon from '@shared-icons/desktop/attachment.svg?url'
+import uploadActionIcon from '@shared-icons/desktop/upload.svg?url'
+import screenshotActionIcon from '@shared-icons/desktop/image.svg?url'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
@@ -77,6 +80,7 @@ const agents = ref([])
 const activeId = ref('')
 const hydrate = ref(null)
 const llmSettings = ref(null)
+const llmProfileCatalog = ref([])
 const input = ref('')
 const busyByAgent = ref({})
 const cancellingByAgent = ref({})
@@ -97,6 +101,10 @@ const error = computed({
 const workspaceUploadErrors = new Map()
 const streamingText = ref('')
 const textarea = ref(null)
+const attachmentActionsOpen = ref(false)
+const attachmentActionAnchor = ref(null)
+const screenshotInProgress = ref(false)
+const screenshotSelection = ref(null)
 const composerExpanded = ref(false)
 const userInfoSelected = ref([])
 const chatPanel = ref(null)
@@ -213,6 +221,9 @@ watch(activeTab, async tab => {
 const previouslyOnline = ref(false)
 const sidebarCollapsed = ref(false)
 const openMenu = ref('')
+const entryContextMenu = ref(null)
+const entryContextMenuElement = ref(null)
+const removingWorkgroupId = ref('')
 const dialog = ref('')
 const autoOverviewPanel = ref(null)
 const deletingAgentId = ref('')
@@ -229,6 +240,7 @@ const pendingImages = computed({
   get: () => pendingImagesByAgent.value[activeId.value] || [],
   set: images => { if (activeId.value) pendingImagesByAgent.value[activeId.value] = images },
 })
+const attachmentLimitReached = computed(() => pendingImages.value.length + pendingFiles.value.length >= 8)
 const attachmentInput = ref(null)
 const lightboxImage = ref('')
 let unlisten = null
@@ -248,6 +260,7 @@ let activeHydrateTimer = 0
 let workspaceConnectionState = ''
 let composerResizeObserver = null
 let terminalDialogRequestEpoch = 0
+let contextMenuReturnFocus = null
 let terminalSessionListEpoch = 0
 let terminalChannelRequestEpoch = 0
 const terminalDecoders = new Map()
@@ -516,16 +529,10 @@ async function refreshAgentModel(id) {
   const requestSequence = ++modelRequestSequence
   if (!id) { llmSettings.value = null; return }
   try {
-    const [settings, response, setup] = await Promise.all([getLLMSettings(), getAgent(id), getSetupConfig().catch(() => null)])
-    const agent = response?.agent || response
+    const response = await getAgentModelView(id)
     if (activeId.value !== id || requestSequence !== modelRequestSequence) return
-    const profile = agentActiveProfile(agent)
-    const profileConfig = setup?.llm?.profiles?.find(item => item?.id === profile)
-    llmSettings.value = {
-      ...settings,
-      ...(profileConfig ? { provider: profileConfig.provider, model: profileConfig.model } : {}),
-      ...(profile ? { active_profile: profile } : {}),
-    }
+    llmProfileCatalog.value = Array.isArray(response?.profile_catalog) ? response.profile_catalog : []
+    llmSettings.value = response?.llm_settings || null
   } catch {
     if (activeId.value === id && requestSequence === modelRequestSequence) llmSettings.value = null
   }
@@ -589,8 +596,23 @@ async function switchLLMProfile(profileId) {
   if (!id || !profileId || agentGenerating.value) return
   error.value = ''
   try {
-    await patchAgent(id, { defaults: { llm: { active: profileId } } })
-    await refreshAgentModel(id)
+    const response = await patchAgent(id, { defaults: { llm: { active: profileId } } })
+    if (activeId.value !== id) return
+    const agent = response?.agent || response
+    const profile = agentActiveProfile(agent) || profileId
+    const profileConfig = llmProfileCatalog.value.find(item => item?.id === profile)
+    llmSettings.value = {
+      ...llmSettings.value,
+      ...(profileConfig ? {
+        provider: profileConfig.provider,
+        model: profileConfig.model,
+        mock: Boolean(profileConfig.mock),
+        multimodal_enabled: Boolean(profileConfig.multimodal_enabled),
+        thinking: profileConfig.thinking || '',
+        reasoning_effort: profileConfig.reasoning_effort || '',
+      } : {}),
+      active_profile: profile,
+    }
   } catch (e) {
     if (activeId.value === id) error.value = String(e.message || e)
   }
@@ -765,6 +787,61 @@ async function addImages(event) {
   event.target.value = ''
   await processAttachments(files, ownerId)
 }
+async function toggleAttachmentActions() {
+  if (attachmentActionsOpen.value) { closeAttachmentActions(); return }
+  attachmentActionsOpen.value = true
+  await nextTick()
+  attachmentActionAnchor.value?.querySelector('.attachment-action-option:not(:disabled)')?.focus()
+}
+function closeAttachmentActions(restoreFocus = false) {
+  attachmentActionsOpen.value = false
+  if (restoreFocus) void nextTick(() => attachmentActionAnchor.value?.querySelector('.attach-button')?.focus())
+}
+function onAttachmentMenuKeydown(event) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const items = Array.from(attachmentActionAnchor.value?.querySelectorAll('.attachment-action-option:not(:disabled)') || [])
+  if (!items.length) return
+  event.preventDefault()
+  const index = items.indexOf(document.activeElement)
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (index + 1 + items.length) % items.length : (index <= 0 ? items.length - 1 : index - 1)
+  items[next]?.focus()
+}
+function openFilePicker() {
+  closeAttachmentActions()
+  attachmentInput.value?.click()
+}
+async function captureScreenshot() {
+  const ownerId = activeId.value
+  if (!ownerId || screenshotInProgress.value || (pendingImagesByAgent.value[ownerId]?.length || 0) + (pendingFilesByAgent.value[ownerId]?.length || 0) >= 8) return
+  closeAttachmentActions()
+  screenshotInProgress.value = true
+  try {
+    const base64 = await invoke('desktop_capture_screenshot')
+    screenshotSelection.value = { url: `data:image/png;base64,${base64}`, ownerId }
+  } catch (e) {
+    const name = String(e?.name || '')
+    if (name !== 'AbortError' && activeId.value === ownerId) {
+      setAgentError(ownerId, String(e?.message || e))
+    }
+  } finally {
+    screenshotInProgress.value = false
+  }
+}
+async function confirmScreenshotSelection(file) {
+  const selection = screenshotSelection.value
+  if (!selection || !file) return
+  closeScreenshotSelection()
+  await processAttachments([file], selection.ownerId)
+}
+function closeScreenshotSelection() {
+  const url = screenshotSelection.value?.url
+  screenshotSelection.value = null
+  if (url) URL.revokeObjectURL(url)
+}
+function onScreenshotSelectionError(message) {
+  const ownerId = screenshotSelection.value?.ownerId
+  if (ownerId && activeId.value === ownerId) setAgentError(ownerId, message)
+}
 async function processAttachments(files, ownerId) {
   const remaining = 8 - (pendingImagesByAgent.value[ownerId] || []).length - (pendingFilesByAgent.value[ownerId] || []).length
   const priorUploadError = workspaceUploadErrors.get(ownerId)
@@ -818,7 +895,7 @@ async function clearCurrentContext() {
 async function deleteAgentById(agentId) {
   const id = String(agentId || '').trim()
   const agent = agents.value.find(item => item.agent_id === id)
-  if (!agent || deletingAgentId.value || (activeId.value === id && agentGenerating.value)) return
+  if (!agent || !status.value.online || status.value.setup_required || deletingAgentId.value || agent.state === 'working' || (activeId.value === id && agentGenerating.value)) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const name = agent.display_name || id
   if (!await confirmDesktopAction(`删除${kind}「${name}」？\n该操作会在当前 Node 归档此智能体并移除其运行时。`)) return
@@ -836,7 +913,116 @@ async function deleteAgentById(agentId) {
     if (dialog.value === 'auto-overview') autoOverviewActionError.value = message
   } finally { if (deletingAgentId.value === id) deletingAgentId.value = '' }
 }
-async function deleteCurrentAgent() { await deleteAgentById(activeId.value) }
+async function openEntryContextMenu(event, { title = '', items = [], anchor = event?.currentTarget } = {}) {
+  event?.preventDefault?.()
+  event?.stopPropagation?.()
+  if (!items.length) return
+  openMenu.value = ''
+  contextMenuReturnFocus = anchor instanceof HTMLElement ? anchor : null
+  const rect = contextMenuReturnFocus?.getBoundingClientRect?.()
+  const hasPointerPosition = Number(event?.clientX) > 0 || Number(event?.clientY) > 0
+  const x = hasPointerPosition ? Number(event.clientX) : (rect?.left || 0) + 12
+  const y = hasPointerPosition ? Number(event.clientY) : (rect?.bottom || 0)
+  entryContextMenu.value = { title, items, x, y }
+  await nextTick()
+  const bounds = entryContextMenuElement.value?.getBoundingClientRect?.()
+  if (!bounds) return
+  const margin = 8
+  entryContextMenu.value = {
+    ...entryContextMenu.value,
+    x: Math.max(margin, Math.min(x, window.innerWidth - bounds.width - margin)),
+    y: Math.max(margin, Math.min(y, window.innerHeight - bounds.height - margin)),
+  }
+  await nextTick()
+  entryContextMenuElement.value?.querySelector('button:not(:disabled)')?.focus()
+}
+function closeEntryContextMenu(restoreFocus = false) {
+  const target = contextMenuReturnFocus
+  entryContextMenu.value = null
+  contextMenuReturnFocus = null
+  if (restoreFocus && target?.isConnected) void nextTick(() => target.focus?.())
+}
+function runEntryContextMenuItem(item) {
+  if (!item || item.disabled) return
+  closeEntryContextMenu()
+  void item.run?.()
+}
+function handleEntryContextMenuKeydown(event) {
+  if (!entryContextMenu.value) return false
+  const menu = entryContextMenuElement.value
+  const items = Array.from(menu?.querySelectorAll('button:not(:disabled)') || [])
+  const index = items.indexOf(document.activeElement)
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeEntryContextMenu(true)
+    return true
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+    event.preventDefault()
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (index + 1) % items.length : (index <= 0 ? items.length - 1 : index - 1)
+    items[next]?.focus()
+    return true
+  }
+  if (event.key === 'Tab') closeEntryContextMenu()
+  return false
+}
+function openAgentContextMenu(event, agent, anchor = event?.currentTarget) {
+  const id = String(agent?.agent_id || '').trim()
+  if (!id) return
+  const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
+  const isWorking = agent.state === 'working' || (activeId.value === id && agentGenerating.value)
+  void openEntryContextMenu(event, {
+    title: agent.display_name || id,
+    anchor,
+    items: [{ label: `删除${kind}`, danger: true, disabled: Boolean(!status.value.online || status.value.setup_required || deletingAgentId.value || isWorking), run: () => deleteAgentById(id) }],
+  })
+}
+function onAgentEntryKeydown(event, agent) {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  event.preventDefault()
+  openAgentContextMenu(event, agent)
+}
+function openAutoOverviewContextMenu(payload) {
+  const item = payload?.item
+  if (!item) return
+  openAgentContextMenu(payload.event, { ...item, agent_type: 'auto' }, payload.anchor)
+}
+function openSidebarWorkgroupContextMenu(event, group, anchor = event?.currentTarget) {
+  const id = String(group?.workgroup_id || '').trim()
+  if (!id) return
+  void openEntryContextMenu(event, {
+    title: group.display_name || id,
+    anchor,
+    items: [{ label: '从此 Node 移除工作组', danger: true, disabled: Boolean(!status.value.online || status.value.setup_required || removingWorkgroupId.value), run: () => removeSidebarWorkgroup(group) }],
+  })
+}
+function onWorkgroupEntryKeydown(event, group) {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  event.preventDefault()
+  openSidebarWorkgroupContextMenu(event, group)
+}
+function openDelegatedContextMenu(payload) {
+  if (payload?.event) void openEntryContextMenu(payload.event, payload)
+}
+async function removeSidebarWorkgroup(group) {
+  const id = String(group?.workgroup_id || '').trim()
+  if (!id || !status.value.online || status.value.setup_required || removingWorkgroupId.value) return
+  const label = String(group?.display_name || id)
+  if (!await confirmDesktopAction(`从此 Node 移除工作组「${label}」？\n这会取消当前 Node 的订阅，Manage 中的工作组数据会保留。`)) return
+  removingWorkgroupId.value = id
+  resourceNavigationError.value = ''
+  try {
+    await unsubscribeWorkgroup(id)
+    onWorkgroupRemoved(id)
+  } catch (e) {
+    const message = String(e?.message || e)
+    if (activeId.value) setAgentError(activeId.value, message)
+    else globalError.value = message
+  } finally {
+    if (removingWorkgroupId.value === id) removingWorkgroupId.value = ''
+  }
+}
 async function onAgentCreated(agent) {
   showAgentCreate.value = false
   await loadAgents()
@@ -1378,7 +1564,6 @@ function runMenuAction(action) {
   else if (action === 'agent-chat') showChat()
   else if (action === 'create-agent') showAgentCreate.value = true
   else if (action === 'current-agent-settings' && activeId.value) void router.push(`/settings/agents/${encodeURIComponent(activeId.value)}`)
-  else if (action === 'delete-agent') void deleteCurrentAgent()
   else if (action === 'stop-turn') void stopCurrentTurn()
   else if (action === 'clear-context') void clearCurrentContext()
   else if (action === 'auto-overview') void showAutoOverview()
@@ -1392,8 +1577,25 @@ function runMenuAction(action) {
   else if (action === 'feedback') void router.push('/settings/feedback')
   else if (action === 'help-about') void router.push('/settings/about')
 }
-function onDocumentClick(event) { if (!event.target.closest('.menu-anchor[data-menu-anchor]')) openMenu.value = '' }
+function onDocumentClick(event) {
+  if (!event.target.closest('.menu-anchor[data-menu-anchor]')) openMenu.value = ''
+  if (entryContextMenu.value && !event.target.closest('.entry-context-menu')) closeEntryContextMenu()
+  if (attachmentActionsOpen.value && !event.target.closest('.attachment-action')) closeAttachmentActions()
+}
 function onKeydown(event) {
+  if (handleEntryContextMenuKeydown(event)) return
+  if (screenshotSelection.value && event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeScreenshotSelection()
+    return
+  }
+  if (attachmentActionsOpen.value && event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeAttachmentActions(true)
+    return
+  }
   if (handleMenubarKeydown(event)) return
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't' && !event.altKey && !terminalOpenDialog.value) {
     event.preventDefault()
@@ -1544,6 +1746,7 @@ onMounted(async () => {
   turnWatchdog.start()
 })
 onUnmounted(() => {
+  closeScreenshotSelection()
   window.removeEventListener('resize', resizeComposer)
   composerResizeObserver?.disconnect()
   window.removeEventListener('desktop-back-to-chat', onDesktopBackToChat)
@@ -1596,27 +1799,27 @@ onUnmounted(() => {
           <template v-else>
             <div class="group-title"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span><span>智能体</span><button class="group-add" aria-label="新建 Agent" title="新建 Agent" @click="showAgentCreate = true">+</button></div>
             <div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row">
-              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
+              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
               <button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button>
             </div>
           </template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'agents'" class="sidebar-popover"><div class="sidebar-popover-heading"><b>智能体</b><button class="group-add" type="button" aria-label="新建 Agent" title="新建 Agent" @click="showAgentCreate = true">+</button></div><div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
+          <div v-if="sidebarCollapsed && collapsedGroup === 'agents'" class="sidebar-popover"><div class="sidebar-popover-heading"><b>智能体</b><button class="group-add" type="button" aria-label="新建 Agent" title="新建 Agent" @click="showAgentCreate = true">+</button></div><div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
         </section>
         <section class="side-section">
           <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: activeTab === 'workgroups' }" aria-label="工作组" title="工作组" :aria-expanded="collapsedGroup === 'workgroups'" @click="collapsedGroup = collapsedGroup === 'workgroups' ? '' : 'workgroups'"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span></button>
-          <template v-else><button class="group-title group-title-button" :class="{ selected: isWorkgroupView }" :aria-current="isWorkgroupView ? 'page' : undefined" @click="showWorkgroups"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span><span>工作组</span></button><button v-for="group in workgroupList" :key="group.workgroup_id" class="agent-item" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" :title="group.display_name || group.workgroup_id" @click="openWorkgroup(group.workgroup_id)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'workgroups'" class="sidebar-popover"><button class="sidebar-popover-title" type="button" @click="showWorkgroups">工作组</button><button v-for="group in workgroupList" :key="group.workgroup_id" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" @click="openWorkgroup(group.workgroup_id)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></div>
+          <template v-else><button class="group-title group-title-button" :class="{ selected: isWorkgroupView }" :aria-current="isWorkgroupView ? 'page' : undefined" @click="showWorkgroups"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span><span>工作组</span></button><button v-for="group in workgroupList" :key="group.workgroup_id" class="agent-item" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" :title="group.display_name || group.workgroup_id" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></template>
+          <div v-if="sidebarCollapsed && collapsedGroup === 'workgroups'" class="sidebar-popover"><button class="sidebar-popover-title" type="button" @click="showWorkgroups">工作组</button><button v-for="group in workgroupList" :key="group.workgroup_id" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></div>
         </section>
         <section class="side-section">
           <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type === 'auto' }" aria-label="自主智能体" title="自主智能体" :aria-expanded="collapsedGroup === 'auto'" @click="collapsedGroup = collapsedGroup === 'auto' ? '' : 'auto'"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span></button>
           <template v-else>
             <div class="group-title"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span><span>自主智能体</span></div>
             <div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row">
-              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
+              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
               <button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button>
             </div>
           </template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'auto'" class="sidebar-popover"><b>自主智能体</b><div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
+          <div v-if="sidebarCollapsed && collapsedGroup === 'auto'" class="sidebar-popover"><b>自主智能体</b><div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
         </section>
       </div>
       <div class="node-indicator" :class="status.online ? 'online' : 'offline'" :title="`本机 Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`" :aria-label="`本机 Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`"><span>{{ `Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}` }}</span><i></i></div>
@@ -1630,7 +1833,12 @@ onUnmounted(() => {
         <div v-else class="conversation-tab active workgroup-conversation-tab" :title="activeWorkgroupName"><span class="icon-mask tab-icon" :style="maskStyle(navWorkgroupsIcon)"></span><b>{{ activeWorkgroupName }}</b></div>
         <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><UiIcon name="close" :size="14" /></button></div></div>
       </div>
-      <div v-if="error || status.setup_required" class="notice" :class="status.setup_required ? 'setup' : ''"><span>{{ error || 'Node 需要首次配置' }}</span><button v-if="status.setup_required" @click="showSettings">打开设置</button><button v-else-if="isTauri" @click="loadAgents">重试</button></div>
+      <div v-if="status.setup_required" class="notice setup"><span>Node 需要首次配置</span><button @click="showSettings">打开设置</button></div>
+      <div v-if="error && status.online && !status.setup_required && displayedTab !== 'chat'" class="desktop-error-hint desktop-error-hint--resource" role="alert" tabindex="0" aria-describedby="desktop-resource-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
+        <UiIcon name="alert" :size="14" aria-hidden="true" />
+        <span>操作未完成</span>
+        <span id="desktop-resource-error-detail" class="desktop-error-hint__detail" role="tooltip">{{ error }}</span>
+      </div>
       <div v-if="resourceNavigationError" class="notice resource-navigation-notice" role="alert"><span>{{ resourceNavigationError }}</span><button type="button" aria-label="关闭资源提示" @click="resourceNavigationError = ''">关闭</button></div>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('chat')" @after-leave="onComposerPageAfterLeave('chat', $event)" @after-enter="onComposerPageAfterEnter('chat', $event)">
       <section v-if="visitedTabs.has('chat')" v-show="composerPageVisible('chat')" data-composer-page="chat" class="conversation" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
@@ -1643,6 +1851,12 @@ onUnmounted(() => {
             <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :hide-composer="true" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
           </div>
         </template>
+        <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint" role="alert" tabindex="0" aria-describedby="desktop-chat-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
+          <UiIcon name="alert" :size="14" aria-hidden="true" />
+          <span>操作未完成</span>
+          <button v-if="isTauri && !activeAgent" class="desktop-error-hint__retry" type="button" aria-label="重试连接" title="重试" @click.stop="loadAgents"><UiIcon name="refresh-cw" :size="13" /></button>
+          <span id="desktop-chat-error-detail" class="desktop-error-hint__detail" role="tooltip">{{ error }}</span>
+        </div>
       </section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('terminal')" @after-leave="onComposerPageAfterLeave('terminal', $event)" @after-enter="onComposerPageAfterEnter('terminal', $event)">
@@ -1657,18 +1871,24 @@ onUnmounted(() => {
       <Transition name="composer-page" :css="composerPageTransitionEnabled('browser')" @after-leave="onComposerPageAfterLeave('browser', $event)" @after-enter="onComposerPageAfterEnter('browser', $event)">
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
       </Transition>
-      <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
+      <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
       <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
-  <button class="attach-button" type="button" aria-label="添加附件" title="添加图片或文件" :disabled="pendingImages.length + pendingFiles.length >= 8" @click="attachmentInput?.click()"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
+  <div ref="attachmentActionAnchor" class="attachment-action">
+    <button class="attach-button" type="button" aria-label="添加文件或图片" title="添加文件或图片" :aria-expanded="attachmentActionsOpen" aria-haspopup="menu" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
+    <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="附件操作" @keydown="onAttachmentMenuKeydown">
+      <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span></button>
+      <button class="attachment-action-option" type="button" role="menuitem" :aria-label="screenshotInProgress ? '正在截图' : '截图'" :title="screenshotInProgress ? '正在截图…' : '截图'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span></button>
+    </div></Transition>
+  </div>
   <input ref="attachmentInput" class="visually-hidden" type="file" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
   <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :desktop-compact="true" :disabled="agentGenerating || !activeId" @switch-profile="switchLLMProfile"/>
   <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
   <button v-if="agentGenerating" class="send-button" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button>
   <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
-</form><p v-if="error" class="composer-error" role="alert">{{ error }}</p><p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
+</form><p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
       </template>
       <template #dock>
       <ResourceAgentDock
@@ -1691,7 +1911,6 @@ onUnmounted(() => {
       >
         <template #details>
           <div class="dock-details">
-            <p v-if="error" class="composer-error" role="alert">{{ error }}</p>
             <p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p>
             <div v-if="dockLatestMessage" class="dock-detail-row dock-detail-row--message"><ResourceMarkdown :entry="dockLatestMessage" :agent-id="activeId" source="dock" /></div>
             <div v-if="lastToolActivity" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
@@ -1705,8 +1924,17 @@ onUnmounted(() => {
     </main>
     <TerminalOpenDialog :open="terminalOpenDialog" :choices="terminalOpenChoices" :sessions="terminalSessions" :sessions-loading="terminalSessionLoading" :sessions-error="terminalSessionError" :channels-loading="terminalChannelLoading" :channels-error="terminalChannelError" @cancel="closeTerminalOpenDialog" @create="createTerminalFromDialog" @resume="resumeTerminalFromDialog" @retry-sessions="retryTerminalSessionList" @retry-channels="retryTerminalChannels" @open-settings="openLinuxChannelSettings" />
     <TerminalEndDialog :open="Boolean(terminalEndConfirmation)" :terminal-name="terminalEndConfirmation?.name" @cancel="cancelEndTerminal" @confirm="confirmEndTerminal" />
-    <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel ref="autoOverviewPanel" :deleting-agent-id="deletingAgentId" :action-error="autoOverviewActionError" @open-chat="openAutoChat" @open-config="openAutoConfig" @delete-agent="deleteAgentById" /></section></div>
+    <ScreenshotRegionDialog v-if="screenshotSelection" :image-url="screenshotSelection.url" @cancel="closeScreenshotSelection" @confirm="confirmScreenshotSelection" @error="onScreenshotSelectionError" />
+    <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel ref="autoOverviewPanel" :action-error="autoOverviewActionError" @open-chat="openAutoChat" @open-config="openAutoConfig" @context-menu="openAutoOverviewContextMenu" /></section></div>
     <div v-if="showAgentCreate" class="agent-create-overlay"><AgentCreatePage @cancel="showAgentCreate = false" @created="onAgentCreated" /></div>
+    <Teleport to="body">
+      <div v-if="entryContextMenu" class="entry-context-menu-layer" @pointerdown.self="closeEntryContextMenu()" @contextmenu.prevent="closeEntryContextMenu()" @click.self="closeEntryContextMenu()">
+        <div ref="entryContextMenuElement" class="entry-context-menu" role="menu" :aria-label="entryContextMenu.title" :style="{ left: `${entryContextMenu.x}px`, top: `${entryContextMenu.y}px` }">
+          <div v-if="entryContextMenu.title" class="entry-context-menu-title">{{ entryContextMenu.title }}</div>
+          <button v-for="(item, index) in entryContextMenu.items" :key="`${item.label}-${index}`" type="button" role="menuitem" :disabled="item.disabled" :class="{ danger: item.danger }" @click="runEntryContextMenuItem(item)">{{ item.label }}</button>
+        </div>
+      </div>
+    </Teleport>
     <ImageLightbox />
   </div>
 </template>

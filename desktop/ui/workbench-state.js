@@ -196,7 +196,6 @@ export function createDesktopMenuModel(context = {}) {
       { header: true, label: activeAgentName },
       item('新建智能体', 'create-agent', !online || setupRequired),
       item('当前智能体设置', 'current-agent-settings', !hasAgent || !online),
-      item('删除当前智能体', 'delete-agent', !hasAgent || !online || generating),
       separator,
       item('停止当前回合', 'stop-turn', !hasAgent || !online || !generating),
       item('清空当前对话', 'clear-context', !hasAgent || !online || generating || hasPendingHitl),

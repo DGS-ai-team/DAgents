@@ -19,6 +19,7 @@ tauri-plugin-dialog = "2.8.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 url = "2"
 percent-encoding = "2"
 thiserror = "2"
@@ -30,7 +31,7 @@ hex = "0.4.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-windows = { version = "0.62.2", default-features = false, features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
+windows = { version = "0.62.2", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
 winrt-notification = { package = "tauri-winrt-notification", version = "0.8.1" }
 
 [profile.release]

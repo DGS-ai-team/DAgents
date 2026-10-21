@@ -625,6 +625,7 @@ version = "0.12.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
+ "image",
  "open",
  "percent-encoding",
  "serde",

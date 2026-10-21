@@ -24,6 +24,7 @@ mod nodeclient;
 mod nodectl;
 mod notify;
 mod pending;
+mod screen_capture;
 mod singleinstance;
 mod terminal;
 mod uifocus;
@@ -383,6 +384,7 @@ pub fn run() {
             desktop_node_request,
             desktop_workspace_binary_request,
             desktop_media_binary_request,
+            desktop_capture_screenshot,
             desktop_list_agents,
             desktop_hydrate_agent,
             desktop_resume_hitl,
@@ -800,6 +802,22 @@ async fn desktop_node_status(
         })
     })
     .await
+}
+
+#[tauri::command]
+async fn desktop_capture_screenshot(window: WebviewWindow) -> Result<String, String> {
+    use base64::Engine;
+
+    ensure_mvp_window(&window)?;
+    window
+        .hide()
+        .map_err(|error| format!("无法暂时隐藏 Desktop：{error}"))?;
+    thread::sleep(Duration::from_millis(140));
+    let capture_result = spawn_node_blocking(screen_capture::capture_current_screen_png).await;
+    let _ = window.show();
+    let _ = window.set_focus();
+    let png = capture_result??;
+    Ok(base64::engine::general_purpose::STANDARD.encode(png))
 }
 
 #[tauri::command]

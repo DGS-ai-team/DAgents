@@ -24,6 +24,7 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents", s.handleCreateAgent)
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/model-view", s.handleGetAgentModelView)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/workspace", s.handleWorkspaceList)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/workspace/file", s.handleWorkspaceGet)

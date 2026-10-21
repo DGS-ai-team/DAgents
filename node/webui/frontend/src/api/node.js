@@ -185,6 +185,10 @@ export function getAgent(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
+export function getAgentModelView(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/model-view`);
+}
+
 export function getAgentHandbook(agentId, path = "") {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/handbook`, { params: { path } });
 }
@@ -198,6 +202,10 @@ export function restoreAgentHandbook(agentId, payload = {}) {
 // depend on the retired Goal/Cycle autonomy resources.
 export function getAutoConfig(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-config`);
+}
+
+export function getAutoSettings(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/auto-settings`);
 }
 
 export function putAutoConfig(agentId, payload = {}) {
@@ -603,6 +611,18 @@ export function uploadPluginToManage({ path, pluginId, version, name, platform =
 /** 工作组列表：scope=subscribed|acl|all */
 export function listWorkgroups({ scope = "subscribed" } = {}) {
   return apiFetch("/v1/workgroups", { params: { scope } });
+}
+
+export function getDesktopWorkgroupList() {
+  return apiFetch("/v1/workgroups/desktop/list");
+}
+
+export function getDesktopWorkgroupSnapshot(workgroupId, { includeAgents = false } = {}) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/desktop-snapshot`, { params: { include_agents: includeAgents ? "true" : undefined } });
+}
+
+export function getDesktopWorkgroupProgress(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/desktop-progress`);
 }
 
 export function listWorkgroupAgents() {

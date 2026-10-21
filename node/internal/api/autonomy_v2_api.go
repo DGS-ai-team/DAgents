@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
+	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
 func (s *Server) registerAutonomyV2Routes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/auto-config", s.handleAutonomyV2ConfigGet)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/auto-settings", s.handleAutonomyV2SettingsGet)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/auto-config", s.handleAutonomyV2ConfigPut)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/auto-config/reconcile", s.handleAutonomyV2ConfigReconcile)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/todos", s.handleAutonomyV2TodosGet)
@@ -21,6 +23,60 @@ func (s *Server) registerAutonomyV2Routes() {
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}/todos/{todo_id}", s.handleAutonomyV2TodoPatch)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}/todos/{todo_id}", s.handleAutonomyV2TodoDelete)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/experience", s.handleAutonomyV2ExperienceGet)
+}
+
+type autonomySettingsView struct {
+	autonomy.Profile
+	Experience          *autonomy.Experience `json:"experience"`
+	ExperienceAvailable bool                 `json:"experience_available"`
+	DreamingStatus      *DreamingStatus      `json:"dreaming_status"`
+	DreamingAvailable   bool                 `json:"dreaming_available"`
+	Trigger             *triggers.Definition `json:"trigger"`
+	TriggerAvailable    bool                 `json:"trigger_available"`
+	TriggerRecovery     *triggers.Definition `json:"trigger_recovery,omitempty"`
+	NeedsReconcile      bool                 `json:"needs_reconcile"`
+}
+
+func (s *Server) autonomySettingsSnapshot(agentID string, profile autonomy.Profile) autonomySettingsView {
+	view := autonomySettingsView{Profile: profile, ExperienceAvailable: s.autonomyStore != nil, DreamingAvailable: s.dreamingSched != nil, TriggerAvailable: s.triggerStore != nil}
+	if experience, ok := s.autonomyStore.GetExperience(agentID); ok {
+		view.Experience = &experience
+	}
+	if s.dreamingSched != nil {
+		status := s.dreamingSched.CurrentStatus(agentID, time.Now())
+		view.DreamingStatus = &status
+	}
+	if s.triggerStore == nil {
+		view.NeedsReconcile = profile.WakeIntervalSeconds > 0
+		return view
+	}
+	trigger, exists := s.triggerStore.GetTrigger(triggers.AutoDefaultTriggerID(agentID))
+	if exists {
+		view.Trigger = trigger
+		if trigger.RecoveryRequired {
+			view.TriggerRecovery = trigger
+			return view
+		}
+	}
+	if profile.WakeIntervalSeconds > 0 {
+		interval, valid := triggers.ConfiguredIntervalSeconds(trigger.Condition)
+		view.NeedsReconcile = !exists || !trigger.Enabled || !valid || interval != profile.WakeIntervalSeconds
+	} else {
+		view.NeedsReconcile = exists && trigger.Enabled
+	}
+	return view
+}
+
+func (s *Server) handleAutonomyV2SettingsGet(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.autonomyV2Agent(w, r)
+	if !ok {
+		return
+	}
+	profile, exists := s.autonomyStore.GetProfile(id)
+	if !exists {
+		profile = autonomy.Profile{AgentID: id, MaxToolRounds: 32, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
+	}
+	writeJSON(w, http.StatusOK, s.autonomySettingsSnapshot(id, profile))
 }
 
 func (s *Server) autonomyV2Agent(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -109,7 +165,7 @@ func (s *Server) handleAutonomyV2ConfigPut(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, s.autonomySettingsSnapshot(id, updated))
 }
 
 // handleAutonomyV2ConfigReconcile repairs the trigger projection from the
@@ -129,12 +185,12 @@ func (s *Server) handleAutonomyV2ConfigReconcile(w http.ResponseWriter, r *http.
 	if !exists {
 		profile = autonomy.Profile{AgentID: id, MaxToolRounds: 32, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
 	}
-	trigger, err := s.triggerStore.EnsureAutoDefault(id, profile.WakeIntervalSeconds, time.Now().UTC())
+	_, err := s.triggerStore.EnsureAutoDefault(id, profile.WakeIntervalSeconds, time.Now().UTC())
 	if err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "trigger_sync_failed", err.Error(), map[string]any{"profile": profile, "trigger_sync": "pending"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"profile": profile, "trigger": trigger})
+	writeJSON(w, http.StatusOK, s.autonomySettingsSnapshot(id, profile))
 }
 
 func (s *Server) handleAutonomyV2TodosGet(w http.ResponseWriter, r *http.Request) {
