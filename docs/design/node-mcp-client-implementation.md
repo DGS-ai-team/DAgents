@@ -44,7 +44,6 @@ PATCH  /v1/mcp/servers/{server_id}
 DELETE /v1/mcp/servers/{server_id}
 POST   /v1/mcp/servers/{server_id}/test
 POST   /v1/mcp/servers/{server_id}/refresh
-GET    /v1/mcp/servers/{server_id}/tools
 GET    /v1/agents/{agent_id}/mcp
 PUT    /v1/agents/{agent_id}/mcp
 GET    /v1/agents/{agent_id}/mcp/effective-tools
@@ -93,4 +92,3 @@ an Agent snapshot, or a log.
 
 - `go test ./node/...`
 - `npm test --prefix node/webui/frontend -- --run`
-- `npm run build --prefix node/webui/frontend`

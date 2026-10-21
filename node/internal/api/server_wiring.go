@@ -2,12 +2,10 @@ package api
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
-	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
@@ -45,7 +43,7 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
-	attachProcessEventSink(reg, s.stream, s.store, s.logger)
+	attachProcessEventSink(reg, s.stream)
 	reg.SetTerminalSessionBroker(s.terminals)
 	if s.mediaRegister != nil {
 		reg.SetMediaRegister(s.mediaRegister)
@@ -65,20 +63,25 @@ func (s *Server) browserManager() *browser.Manager {
 	return s.browserMgr
 }
 
-// installBrowserManager atomically swaps the process-level browser manager
+// installBrowserRuntime atomically swaps the process-level browser manager
 // and rebinds all loaded Agent/workgroup registries. The session manager
 // requests a model-context refresh rather than mutating an active Step's
 // frozen tool snapshot.
-func (s *Server) installBrowserManager(next *browser.Manager) {
+func (s *Server) installBrowserRuntime(next *browser.Manager, service *browser.ServiceProcess, endpoint string) {
 	if s == nil {
 		if next != nil {
 			_ = next.Close()
 		}
+		_ = service.Close()
 		return
 	}
 	s.browserMu.Lock()
-	previous := s.browserMgr
+	previous, previousService := s.browserMgr, s.browserService
+	if service == nil && next != nil && previousService != nil && strings.TrimRight(previousService.Endpoint(), "/") == strings.TrimRight(endpoint, "/") {
+		service = previousService
+	}
 	s.browserMgr = next
+	s.browserService = service
 	s.browserMu.Unlock()
 
 	if s.tools != nil {
@@ -91,6 +94,24 @@ func (s *Server) installBrowserManager(next *browser.Manager) {
 		if err := previous.Close(); err != nil && s.logger != nil {
 			s.logger.Warn("previous browser manager close failed", "error", err)
 		}
+	}
+	if previousService != nil && previousService != service {
+		if err := previousService.Close(); err != nil && s.logger != nil {
+			s.logger.Warn("previous browser service stop failed", "error", err)
+		}
+	}
+}
+
+func (s *Server) closeBrowserService() {
+	if s == nil {
+		return
+	}
+	s.browserMu.Lock()
+	service := s.browserService
+	s.browserService = nil
+	s.browserMu.Unlock()
+	if err := service.Close(); err != nil && s.logger != nil {
+		s.logger.Warn("browser service stop failed", "error", err)
 	}
 }
 
@@ -112,8 +133,8 @@ func attachWeComRuntime(reg *tools.Registry, cfg *config.Config) {
 }
 
 // attachProcessEventSink 将执行生命周期事件接入 Node stream。
-// 输出片段使用 ephemeral SSE，生命周期事件可回放并写入审计库。
-func attachProcessEventSink(reg *tools.Registry, hub *stream.Hub, auditStore *store.SQLiteStore, logger *slog.Logger) {
+// 输出片段使用 ephemeral SSE，生命周期事件可回放。
+func attachProcessEventSink(reg *tools.Registry, hub *stream.Hub) {
 	if reg == nil || hub == nil {
 		return
 	}
@@ -146,45 +167,5 @@ func attachProcessEventSink(reg *tools.Registry, hub *stream.Hub, auditStore *st
 			return
 		}
 		hub.Publish(sessionID, "execution", payload)
-		if auditStore == nil {
-			return
-		}
-		agentID := strings.TrimSpace(ev.Context.AgentID)
-		if agentID == "" {
-			agentID = sessionID
-		}
-		var exitCode *int
-		exitError := ""
-		if ev.Exit != nil {
-			code := ev.Exit.Code
-			exitCode = &code
-			exitError = ev.Exit.Error
-		}
-		if err := auditStore.AppendExecutionEvent(context.Background(), store.ExecutionEventRecord{
-			AgentID:        agentID,
-			SessionID:      sessionID,
-			ProcessID:      ev.ProcessID,
-			ProcessSeq:     ev.Seq,
-			EventType:      string(ev.Type),
-			Stream:         ev.Stream,
-			TurnID:         ev.Context.TurnID,
-			ToolCallID:     ev.Context.ToolCallID,
-			TargetKind:     ev.Context.Target.Kind,
-			TargetID:       ev.Context.Target.ID,
-			PolicyDecision: ev.Context.PolicyDecision,
-			ApprovalID:     ev.Context.ApprovalID,
-			RiskLevel:      ev.Context.RiskLevel,
-			CommandDigest:  ev.Context.CommandDigest,
-			OutputBytes:    ev.OutputBytes,
-			ExitCode:       exitCode,
-			ExitError:      exitError,
-		}); err != nil && logger != nil {
-			logger.Warn("execution event audit persist failed",
-				"session_id", sessionID,
-				"process_id", ev.ProcessID,
-				"seq", ev.Seq,
-				"error", err,
-			)
-		}
 	})
 }

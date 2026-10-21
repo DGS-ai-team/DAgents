@@ -8,7 +8,7 @@ Agent Node 对本地 Client 暴露的 HTTP/SSE 端点（composition root）。
 |------|------|
 | `server.go` | `Server` 结构、Option 和 `NewServer` 组合根 |
 | `server_routes.go` | 统一挂载核心与领域路由 |
-| `server_wiring.go` | Node 级依赖注入、执行事件审计、后台任务回灌 |
+| `server_wiring.go` | Node 级依赖注入、执行事件 SSE、后台任务回灌 |
 | `server_lifecycle.go` | HTTP 监听、Manage sidecar、优雅关闭 |
 | `server_messages.go` | `/v1/messages` 入队与 `/v1/streams` SSE |
 | `server_agent_api.go` | health、Agent 信息、context、hydrate、skills 等基础接口 |

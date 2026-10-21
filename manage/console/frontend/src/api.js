@@ -231,6 +231,10 @@ export async function fetchReleasePackages(params = {}) {
   return apiFetch("/v1/releases/packages", params);
 }
 
+export async function fetchPublicReleasePackages() {
+  return apiFetch("/v1/releases/public/packages");
+}
+
 export async function publishReleasePackage(pkg, { setLatest = false } = {}) {
   const { artifact, channel, platform, version } = pkg;
   return apiFetch(

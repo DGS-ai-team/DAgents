@@ -4,7 +4,7 @@
 
 ## 1. 产品定位
 
-DAgents 面向个人使用者：Windows Desktop 提供交互，自己的 Node 持有数据、会话并持续执行任务；可通过自建 SSH 隧道连接远端 Node。多个 Desktop 共享同一使用者的业务事实，当前不引入多人账号、私人上下文或租户隔离。Manage 是可选的跨节点工作组控制面。
+DAgents 面向个人使用者：Windows Desktop 提供交互，默认启动或连接同机 Node；Node 持有数据、会话并持续执行任务。Desktop 不保存远程 Node 档案，也不支持 SSH 隧道连接。多个 Desktop 可在各自机器上连接各自的本机 Node；当前不引入多人账号、私人上下文或租户隔离。Manage 是可选的跨节点工作组控制面。
 
 长期任务及反馈闭环的单 Node MVP 已随 v0.11.0 完成发布；已发布版本基线见下节。
 
@@ -27,7 +27,7 @@ DAgents 面向个人使用者：Windows Desktop 提供交互，自己的 Node �
 1. 关闭模型配置引用与密钥保存行为，保护 MCP 配置往返和草稿。
 2. 验收最终 Windows 包的标准用户初装、快捷方式/自启、运行中升级、卸载、备份恢复及 v0.11.0 数据迁移。
 3. 对最终候选完成日常对话、资源、审批、工具失败收尾、空闲后新上下文与 Auto/Dreaming 的恢复和耐久测试。
-4. 真实 SSH 隧道、Linux Node 与打包 Browser/Chromium 进行环境验收；下一版 Windows 仅发 x64 完整包，暂停 x86。
+4. 对本机 Node、打包 Browser/Chromium 和真实 Provider 进行组合验收；Linux Node 按独立服务包验收，不通过 Desktop 远程连接；下一版 Windows 仅发 x64 完整包，暂停 x86。
 5. 统一版本元数据、变更说明、支持矩阵、依赖审计和更新安装链路，按 dev → main 的发布 PR 流程交付。
 
 ### P1：体验与可维护性收尾
@@ -39,7 +39,7 @@ DAgents 面向个人使用者：Windows Desktop 提供交互，自己的 Node �
 ### P2：有独立需求后再立项
 
 - 浏览器人工接管与可交互嵌入式页签。
-- Desktop 自建 SSH 隧道；现阶段继续由用户建立加密转发。
+- Desktop 连接远程 Node、SSH 隧道与 LAN/WAN Node 档案：当前产品明确只支持同机 Desktop→Node 连接；远程 Linux 主机仍可通过本机 Node 的 SSH/远程终端工具操作。
 - macOS/Linux Desktop、多用户/租户隔离和 LAN/WAN 直连鉴权。
 - 更广泛的事件源、工作流画布、插件发布生态与成本计账。
 

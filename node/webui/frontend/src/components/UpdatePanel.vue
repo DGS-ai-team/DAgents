@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import * as platformApi from "../api/platform.js";
+import { confirmDesktopAction, showDesktopMessage } from "../utils/desktopDialogs.js";
 
 defineProps({
   embedded: { type: Boolean, default: false },
@@ -35,13 +36,13 @@ async function applyUpgrade() {
   if (!canApplyInUI.value || applying.value) return;
   const latest = String(data.value?.latest_version || "").trim();
   if (!latest) return;
-  if (!window.confirm(`升级到 ${latest}？升级期间 Node 将短暂停止。`)) return;
+  if (!await confirmDesktopAction(`升级到 ${latest}？升级期间 Node 将短暂停止。`)) return;
   applying.value = true;
   error.value = "";
   try {
     const result = await platformApi.applyAgentUpdate({ force: false });
     if (result?.message) {
-      window.alert(result.message);
+      await showDesktopMessage(result.message);
     }
     await load();
   } catch (e) {

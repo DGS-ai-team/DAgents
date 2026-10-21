@@ -13,6 +13,8 @@ import messageIcon from '@shared-icons/desktop/message.svg?url'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   expanded: { type: Boolean, default: false },
+  collapsed: { type: Boolean, default: false },
+  collapsedInToolbar: { type: Boolean, default: false },
   status: { type: String, default: 'offline', validator: value => ['offline', 'pending', 'generating', 'idle'].includes(value) },
   agentName: { type: String, default: '当前智能体' },
   canSend: { type: Boolean, default: false },
@@ -23,9 +25,12 @@ const props = defineProps({
   restoreDisabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:modelValue', 'update:expanded', 'send', 'stop', 'restore', 'back-to-chat'])
+const emit = defineEmits(['update:modelValue', 'update:expanded', 'update:collapsed', 'send', 'stop', 'restore', 'back-to-chat'])
 const panel = ref(null)
 const toggleButton = ref(null)
+const collapsedToggle = ref(null)
+const messageInput = ref(null)
+const collapsed = computed(() => props.collapsed)
 const draft = computed(() => String(props.modelValue || ''))
 const statusCopy = computed(() => ({
   offline: '离线', pending: '有待处理的审批', generating: props.cancelling ? '正在停止' : '生成中', idle: '空闲',
@@ -42,6 +47,20 @@ const actionDisabled = computed(() => showStop.value
 
 function setExpanded(value) {
   emit('update:expanded', Boolean(value))
+}
+
+async function setCollapsed(value) {
+  emit('update:collapsed', Boolean(value))
+  await nextTick()
+  focusVisibleBarControl()
+}
+
+function focusVisibleBarControl() {
+  if (collapsed.value) {
+    if (!props.collapsedInToolbar) collapsedToggle.value?.focus()
+    return
+  }
+  messageInput.value?.focus()
 }
 
 function submit() {
@@ -75,7 +94,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="terminal-agent-dock resource-agent-dock" :class="{ expanded }">
+  <aside class="terminal-agent-dock resource-agent-dock" :class="{ expanded, 'is-collapsed': collapsed, 'is-collapsed-in-toolbar': collapsed && collapsedInToolbar }">
     <Transition name="dock-panel" @before-leave="makePanelInert">
       <section
         v-if="expanded"
@@ -101,52 +120,28 @@ onBeforeUnmount(() => {
       </section>
     </Transition>
 
-    <form class="dock-input-surface" @submit.prevent="submit">
-      <span
-        class="icon-mask dock-status-icon"
-        :class="`is-${status}`"
-        role="img"
-        :aria-label="statusLabel"
-        :title="statusLabel"
-        :style="iconStyle(statusIcon)"
-      ></span>
-      <input
-        class="dock-message-input"
-        :value="draft"
-        :disabled="disabled"
-        :aria-label="`向${agentName || '当前智能体'}发送消息`"
-        placeholder="发消息…"
-        @input="emit('update:modelValue', $event.target.value)"
-      >
-      <button
-        v-if="failedDraft"
-        type="button"
-        class="dock-restore"
-        :disabled="restoreDisabled"
-        aria-label="恢复失败消息"
-        title="恢复失败消息"
-        @click="emit('restore')"
-      >恢复</button>
-      <button
-        ref="toggleButton"
-        type="button"
-        class="dock-expand-toggle"
-        :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'"
-        :title="expanded ? '收起消息区' : status === 'pending' ? '展开消息区，查看待审批请求' : '展开消息区'"
-        aria-controls="resource-agent-dock-details"
-        :aria-expanded="expanded"
-        @click="setExpanded(!expanded)"
-      ><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
-      <button
-        :type="showStop ? 'button' : 'submit'"
-        class="dock-action"
-        :class="{ 'is-stop': showStop }"
-        :disabled="actionDisabled"
-        :aria-label="actionLabel"
-        :title="actionLabel"
-        :aria-busy="cancelling"
-        @click="showStop && stop()"
-      ><span class="icon-mask" :style="iconStyle(actionIcon)" aria-hidden="true"></span></button>
-    </form>
+    <Transition name="dock-bar" mode="out-in" @after-enter="focusVisibleBarControl">
+      <form v-if="!collapsed" key="expanded" id="resource-agent-dock-input" class="dock-input-surface" @submit.prevent="submit">
+        <span class="icon-mask dock-status-icon" :class="`is-${status}`" role="img" :aria-label="statusLabel" :title="statusLabel" :style="iconStyle(statusIcon)"></span>
+        <input
+          ref="messageInput"
+          class="dock-message-input"
+          :value="draft"
+          :disabled="disabled"
+          :aria-label="`向${agentName || '当前智能体'}发送消息`"
+          placeholder="发消息…"
+          @input="emit('update:modelValue', $event.target.value)"
+        >
+        <button v-if="failedDraft" type="button" class="dock-restore" :disabled="restoreDisabled" aria-label="恢复失败消息" title="恢复失败消息" @click="emit('restore')">恢复</button>
+        <button ref="toggleButton" type="button" class="dock-expand-toggle" :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'" :title="expanded ? '收起消息区' : status === 'pending' ? '展开消息区，查看待审批请求' : '展开消息区'" aria-controls="resource-agent-dock-details" :aria-expanded="expanded" @click="setExpanded(!expanded)"><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
+        <button type="button" class="dock-collapse-toggle" aria-label="收起快速消息栏" title="收起消息栏" aria-expanded="true" @click="setCollapsed(true)"><span class="icon-mask" :style="iconStyle(chevronDownIcon)" aria-hidden="true"></span></button>
+        <button :type="showStop ? 'button' : 'submit'" class="dock-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask" :style="iconStyle(actionIcon)" aria-hidden="true"></span></button>
+      </form>
+      <button v-else-if="!collapsedInToolbar" key="collapsed" ref="collapsedToggle" type="button" class="dock-collapsed-toggle" :aria-label="`${statusLabel}；展开快速消息栏`" title="展开快速消息栏" :aria-expanded="false" @click="setCollapsed(false)">
+        <span class="icon-mask dock-status-icon" :class="`is-${status}`" aria-hidden="true" :style="iconStyle(statusIcon)"></span>
+        <span class="icon-mask dock-collapsed-chevron" :style="iconStyle(chevronUpIcon)" aria-hidden="true"></span>
+      </button>
+      <span v-else key="collapsed-in-toolbar" class="dock-collapsed-placeholder" aria-hidden="true"></span>
+    </Transition>
   </aside>
 </template>

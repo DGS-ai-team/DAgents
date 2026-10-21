@@ -62,7 +62,7 @@ function visualForKind(kind) {
   return { kind, label: meta.label, short: meta.short, icon: meta.icon };
 }
 
-/** 工具来源/类别，用于 Web UI 视觉区分（终端无法做到的丰富样式）。 */
+/** 工具来源/类别，用于图形界面视觉区分（终端无法做到的丰富样式）。 */
 export function resolveToolVisual(entry) {
   const data = entry?.data || entry || {};
   const name = String(data.tool_name || data.name || entry?.tool_name || "").trim();

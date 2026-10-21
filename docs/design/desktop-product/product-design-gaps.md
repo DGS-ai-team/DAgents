@@ -2,6 +2,8 @@
 
 评估基线：2026-09-24 的 [当前界面图](visuals/current-desktop-mockup.png)、[交互原型](prototype/)、[技术方案](architecture/desktop-node-separation-plan.md) 与 [现有视觉系统](visual-system/)。这里评价的是**设计是否足以指导完整产品开发**，并不评价已有 Node 功能是否可用。
 
+> 2026-10-20 更新：本文保留为历史设计审计。文中“保存远程 Node”等范围已取消；当前 Desktop 仅连接同机 Node。现行功能缺口和 Node 交互边界见 [Desktop 接入范围与 Node 交互收束](desktop-node-interaction-review-2026-10-20.md)。
+
 ## 已经具备
 
 - **架构边界**：Desktop 默认连本机 Node，可保存远程 Node，但同一时间只激活一个；Agent/Session/Auto/Trigger 的权威数据仍在 Node。技术方案已经讨论原生 Shell、远程能力、浏览器侧会话、NodeFile / DesktopFile / Artifact、上传下载、截图、性能、安全和发布阶段。

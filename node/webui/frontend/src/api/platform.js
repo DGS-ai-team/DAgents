@@ -8,10 +8,9 @@ import {
 } from "./node.js";
 
 /**
- * Node 平台能力适配层。
+ * Node platform capability adapter used by the Desktop UI.
  *
- * 这里不包含桌面端地址、CORS 或 Shell fallback；WebUI 始终只和当前
- * Node 的同源 API 通信，由 Node 决定宿主能力是否可用。
+ * It keeps Node-owned capabilities separate from Desktop-only host requests.
  */
 export {
   getPlatformCapabilities,

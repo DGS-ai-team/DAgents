@@ -31,6 +31,7 @@ function result(text, etag = 'etag-1') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path] || [] }))
   api.readWorkspaceFile.mockImplementation(async (_agentId, path) => result(path))
@@ -44,6 +45,28 @@ afterEach(() => {
 })
 
 describe('Desktop workspace resource navigation', () => {
+  it('keeps refresh and save in the toolbar and moves secondary actions into the overflow menu', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect(wrapper.find('[aria-label="刷新"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="保存文件"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="更多文件操作"]').exists()).toBe(true)
+    expect(wrapper.findAll('.workspace-files__actions-popover button')).toHaveLength(4)
+    expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="上传文件"]').exists()).toBe(false)
+    expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="下载文件"]').exists()).toBe(false)
+  })
+
+  it('restores the floating message bar from its file toolbar icon', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', dockCollapsed: true, dockStatus: 'generating', dockAgentName: '测试 Agent' } })
+    await flushPromises()
+
+    const restore = wrapper.find('.workspace-files__dock-toggle')
+    expect(restore.attributes('title')).toContain('测试 Agent · 生成中')
+    await restore.trigger('click')
+    expect(wrapper.emitted('expand-agent-dock')).toHaveLength(1)
+  })
+
   it('preserves dotfiles and opens a nested resource by listing its parent directory', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
@@ -221,15 +244,29 @@ describe('Desktop workspace resource navigation', () => {
     await wrapper.vm.openPath('a.md')
     await wrapper.find('textarea').setValue('keep this local draft')
     api.readWorkspaceFile.mockResolvedValueOnce(result('external version', 'etag-2'))
-    await wrapper.vm.refreshResources('manual')
+    await wrapper.vm.refreshResources('tool')
 
     expect(wrapper.vm.resourceMenuActions()).toEqual({ canRecoverDraft: true, recoveryLabel: '丢弃草稿并重载' })
     window.confirm.mockReturnValue(false)
-    wrapper.vm.discardDraftAndReload()
+    await wrapper.vm.discardDraftAndReload()
 
     expect(wrapper.find('textarea').element.value).toBe('keep this local draft')
     expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md')).toContain('keep this local draft')
     expect(wrapper.vm.resourceMenuActions().canRecoverDraft).toBe(true)
+  })
+
+  it('uses an in-app file-name dialog instead of a browser prompt', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    const prompt = vi.spyOn(window, 'prompt')
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.get('.workspace-files__actions-popover button').trigger('click')
+    await flushPromises()
+
+    const dialog = document.body.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('新建文件')
+    expect(dialog?.querySelector('input')).not.toBeNull()
+    expect(prompt).not.toHaveBeenCalled()
   })
 
   it('shows only one recovery action when a draft conflict and missing file overlap', async () => {
@@ -244,7 +281,7 @@ describe('Desktop workspace resource navigation', () => {
 
     api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path]?.filter(entry => entry.path !== 'a.md') || [] }))
     api.readWorkspaceFile.mockRejectedValue(Object.assign(new Error('missing'), { status: 404 }))
-    await wrapper.vm.refreshResources('manual')
+    await wrapper.vm.refreshResources('tool')
     await vi.advanceTimersByTimeAsync(400)
 
     expect(wrapper.find('.workspace-files__notice-detail').text()).toContain('已从工作区移除')
@@ -264,7 +301,7 @@ describe('Desktop workspace resource navigation', () => {
     let finishRead
     api.readWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
     api.readWorkspaceFile.mockResolvedValueOnce({ notModified: true, bytes: null, etag: 'etag-saved' })
-    const refreshing = wrapper.vm.refreshResources('manual')
+    const refreshing = wrapper.vm.refreshResources('tool')
     await flushPromises()
 
     api.saveWorkspaceFile.mockResolvedValueOnce({ etag: 'etag-saved' })

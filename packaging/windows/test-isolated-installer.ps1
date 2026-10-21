@@ -21,7 +21,6 @@ Set-StrictMode -Version Latest
 
 $QaAppId = '{B5D1A7C3-2E49-4F60-A8B1-7C3D9E5F2046}'
 $ProductionAppId = '{A3B8C2D1-9E4F-4A7B-8C6D-1E2F3A4B5C6D}'
-$QaEndpoint = 'http://127.0.0.1:18972'
 $ExpectedInstallerName = '^dagents-local-assistant-windows-(?<platform>amd64|386)-installer-(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-qa\.exe$'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $FixtureRoot = [IO.Path]::GetFullPath($FixtureRoot)
@@ -384,8 +383,8 @@ function Assert-QaBootstrapConfig {
         if ($values.ContainsKey($key)) { throw "QA listen bootstrap contains duplicate $key settings." }
         $values[$key] = $Matches[2].Trim().Trim('"', "'")
     }
-    if ($values.Count -ne 2 -or $values.host -ne '127.0.0.1' -or $values.port -ne '18972') {
-        throw 'QA listen bootstrap must keep host 127.0.0.1 and port 18972.'
+    if ($values.Count -ne 2 -or $values.host -ne '127.0.0.1' -or $values.port -ne '18765') {
+        throw 'QA listen bootstrap must keep host 127.0.0.1 and port 18765.'
     }
 }
 
@@ -554,13 +553,14 @@ switch ($Stage) {
         if ($state.phase -ne 'installed' -or [IO.Path]::GetFullPath($state.installRoot) -ne $targetRoot) { throw 'Seed requires the matching freshly installed QA fixture.' }
         Assert-InstalledQaFiles $targetRoot
         Assert-NoReparsePointsInTree $targetRoot
+        if (Get-NetTCPConnection -State Listen -LocalPort 18765 -ErrorAction SilentlyContinue) { throw 'The fixed local Node port 18765 is already in use; stop the other Node before seeding this isolated QA fixture.' }
         $configPath = Join-Path $targetRoot 'config.yaml'
         $configText = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
         if ($configText -notmatch '(?m)^listen:\s*(?:#.*)?$' -or $configText -match '(?m)^(?!listen:)[A-Za-z_][A-Za-z0-9_-]*:\s*(?:#.*)?$') {
             throw 'Installed config.yaml is not a listen-only bootstrap config.'
         }
-        $updatedConfig = [regex]::Replace($configText, '(?m)^(\s*port:\s*)\d+(\s*(?:#.*)?)$', '${1}18972${2}', 1)
-        if ($updatedConfig -eq $configText -or $updatedConfig -notmatch '(?m)^\s*port:\s*18972\s*$') { throw 'Could not set the fixture-only Node port to 18972.' }
+        $updatedConfig = [regex]::Replace($configText, '(?m)^(\s*port:\s*)\d+(\s*(?:#.*)?)$', '${1}18765${2}', 1)
+        if ($updatedConfig -eq $configText -or $updatedConfig -notmatch '(?m)^\s*port:\s*18765\s*$') { throw 'Could not set the fixture-only Node port to 18765.' }
         [IO.File]::WriteAllText($configPath, $updatedConfig, (New-Object Text.UTF8Encoding $false))
         Assert-QaBootstrapConfig $targetRoot
 
@@ -573,8 +573,6 @@ switch ($Stage) {
             [IO.File]::AppendAllText($policyPath, "`r`n$policyMarker`r`n", (New-Object Text.UTF8Encoding $false))
         }
         $desktopSettings = [ordered]@{
-            connection_mode = 'local'
-            node_endpoint = $QaEndpoint
             notification_enabled = $false
             update_check_enabled = $false
             update_check_interval_seconds = 21600
@@ -586,7 +584,7 @@ switch ($Stage) {
         Assert-ProductionSnapshot $state.productionSnapshotHashes
         Write-State $state
         Write-Host 'Seeded fixture sentinel, modified policy, listen-only bootstrap, and isolated Desktop JSON (no credentials).'
-        Write-Host 'Start and initialize the QA Node manually before Upgrade; keep its endpoint at 127.0.0.1:18972.'
+        Write-Host 'Start and initialize the QA Node manually before Upgrade; it must listen at 127.0.0.1:18765.'
     }
 
     'Upgrade' {

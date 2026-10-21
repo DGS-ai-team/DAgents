@@ -15,7 +15,6 @@ class BrowserServiceSettings:
     runtime_root: str
     headed: bool = True
     chrome_path: str = ""
-    cdp_url: str = ""
     ignore_https_errors: bool = False
     default_timeout_ms: int = 30000
     output_dir: str = "browser"
@@ -39,7 +38,6 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
         runtime_root=os.path.abspath(runtime_root),
         headed=bool(headed),
         chrome_path=str(browser.get("chrome_path") or "").strip(),
-        cdp_url=str(browser.get("cdp_url") or "").strip(),
         ignore_https_errors=bool(browser.get("ignore_https_errors") or False),
         default_timeout_ms=int(browser.get("default_timeout_ms") or 30000),
         output_dir=str(browser.get("output_dir") or "browser").strip("/") or "browser",

@@ -62,7 +62,7 @@ jobs:
         run: python scripts/release/validate_release.py --version "${GITHUB_REF_NAME#v}"
 
   unit-tests:
-    name: Unit tests (Go + Python + Web UI + Desktop UI)
+    name: Unit tests (Go + Python + shared UI + Desktop UI)
     needs: validate-release
     if: ${{ needs.validate-release.result == 'success' }}
     runs-on: ubuntu-latest
@@ -80,7 +80,7 @@ jobs:
             node/webui/frontend/package-lock.json
             manage/console/frontend/package-lock.json
 
-      - name: Test Web UI
+      - name: Test shared Desktop UI sources
         run: |
           npm ci --prefix node/webui/frontend
           npm test --prefix node/webui/frontend
@@ -91,7 +91,7 @@ jobs:
           npm run test:ui --prefix desktop/tray-tauri
           npm run build --prefix desktop/tray-tauri
 
-      - name: Lint Web UI
+      - name: Lint shared Desktop UI sources
         run: npm run lint --prefix node/webui/frontend
 
       - name: Build Manage Console
@@ -103,7 +103,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
@@ -149,7 +149,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
@@ -240,7 +240,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: |
             node/go.sum
             client/go.sum
@@ -293,7 +293,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: |
             node/go.sum
             client/go.sum

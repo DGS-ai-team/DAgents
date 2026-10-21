@@ -82,6 +82,10 @@ func autonomyV2Request(s *Server, method, path, body string) *httptest.ResponseR
 
 func TestAutonomyV2ConfigDefaultsPutCASAndStrictInput(t *testing.T) {
 	s, _ := autonomyV2TestServer(t)
+	settings := autonomyV2Request(s, http.MethodGet, "/v1/agents/auto-v2/auto-settings", "")
+	if settings.Code != http.StatusOK || !bytes.Contains(settings.Body.Bytes(), []byte(`"dreaming_available"`)) || !bytes.Contains(settings.Body.Bytes(), []byte(`"experience_available":true`)) {
+		t.Fatalf("aggregate settings=%d %s", settings.Code, settings.Body)
+	}
 	w := autonomyV2Request(s, http.MethodGet, "/v1/agents/auto-v2/auto-config", "")
 	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(`"max_tool_rounds":32`)) {
 		t.Fatalf("default=%d %s", w.Code, w.Body)
@@ -89,6 +93,9 @@ func TestAutonomyV2ConfigDefaultsPutCASAndStrictInput(t *testing.T) {
 	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"keep","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != 200 {
 		t.Fatalf("put=%d %s", w.Code, w.Body)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"needs_reconcile"`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"dreaming_status"`)) {
+		t.Fatalf("put should return the refreshed aggregate state=%s", w.Body)
 	}
 	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"stale","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != 409 {

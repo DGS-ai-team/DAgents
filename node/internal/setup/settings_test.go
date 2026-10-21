@@ -43,6 +43,37 @@ func TestViewFromConfig(t *testing.T) {
 	}
 }
 
+func TestBrowserEndpointIsFixedAndHiddenFromSettingsAPI(t *testing.T) {
+	cfg := testBaseConfig(t)
+	enabled := true
+	cfg.Browser = config.BrowserConfig{
+		Enabled:    &enabled,
+		ServiceURL: "http://192.0.2.10:9000",
+		CDPURL:     "http://192.0.2.11:9222",
+	}
+	cfg.ApplyDefaults()
+	if cfg.Browser.ServiceURL != config.DefaultBrowserServiceURL || cfg.Browser.CDPURL != "" {
+		t.Fatalf("Browser address was not fixed to local sidecar: %+v", cfg.Browser)
+	}
+
+	view := ViewFromConfig(cfg)
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "service_url") || strings.Contains(string(raw), "cdp_url") {
+		t.Fatalf("Browser transport addresses must not be exposed as settings: %s", raw)
+	}
+
+	updated, err := ApplyPatch(cfg, SettingsPatch{Browser: &BrowserSettings{Headed: false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Browser.ServiceURL != config.DefaultBrowserServiceURL || updated.Browser.CDPURL != "" {
+		t.Fatalf("Browser patch changed fixed transport: %+v", updated.Browser)
+	}
+}
+
 func TestApplyPatch_nodeTokenIsWriteOnlyPreservingAndExplicitlyClearable(t *testing.T) {
 	cfg := testBaseConfig(t)
 	workgroupEnabled := false

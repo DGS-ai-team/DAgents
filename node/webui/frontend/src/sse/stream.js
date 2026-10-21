@@ -87,7 +87,7 @@ export function connectStream({ getAgentId, onEvent, onStatus, getAfterSeq, getA
     if (stopped) return;
     const agentId = (getAgentId?.() ?? "").trim();
     const reconnecting = expectingReconnect || openCount > 0;
-    // ChatView hydrates before opening its filtered stream. Starting from the
+    // Desktop hydrates before opening its filtered stream. Starting from the
     // hydrate cursor on the very first connection closes the gap between the
     // snapshot and SSE registration; do not collapse agent_seq=0 to live=1.
     const resume = reconnecting || Boolean(agentId && getAfterAgentSeq);

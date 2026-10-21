@@ -26,7 +26,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-当前发布版本为 **v0.11.0**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
+当前版本为 **v0.12.0**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
 本页描述当前开发线。独立 Desktop、Node API-only 与新的上下文分段尚未发布到 v0.11.0 安装包；下一版范围与验收进度见[发布收束清单](docs/release-readiness.md)。旧版迁移请先阅读[运维指南](docs/user/operations.md#升级与兼容性)，不要直接覆盖正在使用的数据目录。
 
@@ -233,7 +233,7 @@ docs/                  用户、架构、参考、设计与历史文档
 tests/                 Python/跨组件测试
 ```
 
-Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 负责展示状态和发起操作，不复制后端业务规则。`node/webui/frontend` 现保留为 Desktop 复用的设置和消息组件源码，Node 不再托管 `/ui/`。
+Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 是唯一产品界面，负责展示状态和发起操作，不复制后端业务规则。`node/webui/frontend` 仅保留供 Desktop 复用的 Vue 组件源码；Node 只提供 API，不提供网页版入口或 `/ui/` 路由。
 
 ## 开发与验证
 

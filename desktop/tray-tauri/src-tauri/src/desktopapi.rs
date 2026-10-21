@@ -10,18 +10,11 @@ use std::time::Duration;
 
 pub fn run_update_command(args: &[String], layout: Layout, cfg: Arc<ShellConfig>) -> i32 {
     let (check_only, force) = parse_update_args(args);
-    if cfg.can_manage_local_node() {
-        if let Err(error) = nodectl::start(&layout, &cfg, Duration::from_secs(45)) {
-            crate::diagnostics::stderr_best_effort(format_args!("启动 Node 失败: {error}"));
-            return 1;
-        }
-    } else if !check_only {
-        crate::diagnostics::stderr_best_effort(format_args!(
-            "隧道模式只连接现有 Node；不支持从 Desktop 更新本机安装"
-        ));
+    if let Err(error) = nodectl::start(&layout, &cfg, Duration::from_secs(45)) {
+        crate::diagnostics::stderr_best_effort(format_args!("启动 Node 失败: {error}"));
         return 1;
     }
-    let client = Arc::new(Client::new(&cfg.node_endpoint));
+    let client = Arc::new(Client::new(crate::config::NODE_ENDPOINT));
     let checker = Arc::new(Checker::new(
         Arc::clone(&cfg),
         layout.home.clone(),

@@ -74,19 +74,9 @@ onMounted(load);
         <span class="badge badge--beta" title="试验功能">Beta</span>
       </h2>
       <p class="settings-section__desc">
-        需同机运行 Playwright 驱动的 dagents-browser。主 Agent 直接获得同步的浏览器操作和脚本工具。
+        启用后 Node 会自动启动本机浏览器服务（127.0.0.1:18766）。源码部署需将 dagents-browser 放在 Node 同级目录。
       </p>
       <div class="setup-config-panel__field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">服务地址</span>
-          <input
-            v-model="form.browser.service_url"
-            class="settings-field__input"
-            type="text"
-            autocomplete="off"
-            placeholder="http://127.0.0.1:18766"
-          />
-        </label>
         <label class="settings-field">
           <span class="settings-field__label">默认超时（ms）</span>
           <input
@@ -124,16 +114,6 @@ onMounted(load);
             type="text"
             autocomplete="off"
             placeholder="留空则自动查找"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">CDP 地址（可选）</span>
-          <input
-            v-model="form.browser.cdp_url"
-            class="settings-field__input"
-            type="text"
-            autocomplete="off"
-            placeholder="attach 已打开的 Chrome"
           />
         </label>
       </div>

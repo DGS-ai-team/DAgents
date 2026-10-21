@@ -13,7 +13,7 @@
 
 ## 2. 创建工作组
 
-在 Manage Console 或 Node Web UI 中：
+在 Manage Console 或 DAgents Desktop 中：
 
 1. 创建工作组并配置 Supervisor LLM；
 2. 将需要协作的 Node 加入 ACL；

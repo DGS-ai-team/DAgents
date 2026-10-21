@@ -24,6 +24,7 @@ mod nodeclient;
 mod nodectl;
 mod notify;
 mod pending;
+mod screen_capture;
 mod singleinstance;
 mod terminal;
 mod uifocus;
@@ -170,6 +171,13 @@ pub fn run() {
     .iter()
     .any(|flag| args_have_flag(&cli_args, flag))
         || update_args_from_args().is_some();
+    if !cli_only {
+        if let Err(error) = notify::register_app_identity() {
+            diagnostics::stderr_best_effort(format_args!(
+                "register Windows notification identity: {error}"
+            ));
+        }
+    }
     let guard = if cli_only {
         None
     } else {
@@ -239,21 +247,6 @@ pub fn run() {
     }
 
     if args_have_flag(&cli_args, "--stop-owned-node") {
-        if !cfg.can_manage_local_node() {
-            match nodectl::owned_process_is_live(&layout) {
-                Ok(true) => {
-                    safe_eprintln!(
-                        "dagents-shell: 隧道模式不能管理本机 Node；请切回本机模式处理受监督进程"
-                    );
-                    std::process::exit(1);
-                }
-                Ok(false) => std::process::exit(0),
-                Err(error) => {
-                    safe_eprintln!("dagents-shell: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
         if args_have_flag(&cli_args, "--require-idle") {
             let owned_live = match nodectl::owned_process_is_live(&layout) {
                 Ok(value) => value,
@@ -271,7 +264,7 @@ pub fn run() {
                     }
                 };
             if check_readiness {
-                let readiness = nodeclient::Client::new(&cfg.node_endpoint).upgrade_readiness();
+                let readiness = nodeclient::Client::new(config::NODE_ENDPOINT).upgrade_readiness();
                 match readiness {
                     Ok(readiness) if readiness.ready => {}
                     Ok(readiness) => {
@@ -306,18 +299,8 @@ pub fn run() {
     }
 
     if args_have_flag(&cli_args, "--start-owned-node") {
-        if !cfg.can_manage_local_node() {
-            safe_eprintln!("dagents-shell: 隧道模式只连接已有 Node，不会启动本机 Node");
-            std::process::exit(1);
-        }
         match nodectl::start(&layout, &cfg, WAIT_READY) {
-            Ok(()) if nodectl::is_managed(&layout, &cfg) => std::process::exit(0),
-            Ok(()) => {
-                safe_eprintln!(
-                    "dagents-shell: 当前 endpoint 为外部 Node，不能将其登记为受监督进程"
-                );
-                std::process::exit(1);
-            }
+            Ok(()) => std::process::exit(0),
             Err(error) => {
                 safe_eprintln!("dagents-shell: 启动受监督 Node 失败: {error}");
                 std::process::exit(1);
@@ -336,7 +319,7 @@ pub fn run() {
         &layout,
         &format!(
             "shell start endpoint={} config={}",
-            cfg.node_endpoint,
+            config::NODE_ENDPOINT,
             layout.config_path.display()
         ),
     );
@@ -344,7 +327,7 @@ pub fn run() {
     // 单实例锁保留在主线程栈上：Windows Mutex HANDLE 非 Send，不可放入 Arc 跨线程。
     let _instance_guard = guard;
 
-    let node_client = Arc::new(nodeclient::Client::new(&cfg.node_endpoint));
+    let node_client = Arc::new(nodeclient::Client::new(config::NODE_ENDPOINT));
     let pending_store = Arc::new(pending::Store::new());
     let notifier = Arc::new(notify::Notifier::new(cfg.notification_enabled));
     let update_checker = Arc::new(update::Checker::new(
@@ -394,7 +377,6 @@ pub fn run() {
         .manage(Arc::clone(&shared))
         .invoke_handler(tauri::generate_handler![
             desktop_node_status,
-            desktop_node_connection,
             desktop_settings_get,
             desktop_settings_save,
             desktop_quit,
@@ -402,9 +384,9 @@ pub fn run() {
             desktop_node_request,
             desktop_workspace_binary_request,
             desktop_media_binary_request,
+            desktop_capture_screenshot,
             desktop_list_agents,
             desktop_hydrate_agent,
-            desktop_send_message,
             desktop_resume_hitl,
             desktop_terminal_list,
             desktop_linux_terminal_channels,
@@ -412,6 +394,7 @@ pub fn run() {
             desktop_terminal_command
         ])
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup({
             let shared = Arc::clone(&shared);
             move |app| {
@@ -564,20 +547,13 @@ pub fn run() {
                     }
                 });
 
-                // 本机模式监督 Node 启动与恢复；隧道模式只观察现有 endpoint。
+                // Desktop 管理固定 loopback Node 的启动、恢复与更新检查。
                 let boot = Arc::clone(&shared);
                 let app_handle = app.handle().clone();
                 let checker_stop = Arc::clone(&bg_stop);
                 thread::spawn(move || {
-                    if boot.cfg.can_manage_local_node() {
-                        ensure_node(&boot);
-                        boot.update_checker.start(checker_stop);
-                    } else {
-                        set_err(
-                            &boot,
-                            Some("隧道模式仅连接现有 Node；本机进程管理和安装更新已关闭".into()),
-                        );
-                    }
+                    ensure_node(&boot);
+                    boot.update_checker.start(checker_stop);
                     refresh_status(&boot);
                     refresh_update_ui(&boot);
                     refresh_pending_ui(&boot, &app_handle);
@@ -766,25 +742,16 @@ fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
         "open_manage" => open_manage(shared),
         "update" => handle_update_menu(shared, app),
         "start" => {
-            if !shared.cfg.can_manage_local_node() {
-                return;
-            }
             shared.hold_stopped.store(false, Ordering::SeqCst);
             run_action(shared, "启动", |s| {
                 nodectl::start(&s.layout, &s.cfg, WAIT_READY)
             });
         }
         "stop" => {
-            if !shared.cfg.can_manage_local_node() {
-                return;
-            }
             shared.hold_stopped.store(true, Ordering::SeqCst);
             run_action(shared, "停止", |s| nodectl::stop(&s.layout, &s.cfg));
         }
         "restart" => {
-            if !shared.cfg.can_manage_local_node() {
-                return;
-            }
             shared.hold_stopped.store(false, Ordering::SeqCst);
             run_action(shared, "重启", |s| {
                 nodectl::restart(&s.layout, &s.cfg, WAIT_READY)
@@ -810,10 +777,6 @@ fn ensure_mvp_window(window: &WebviewWindow) -> Result<(), String> {
     }
 }
 
-fn mvp_endpoint_allowed(shared: &Shared) -> bool {
-    crate::config::validate_node_endpoint(&shared.cfg.node_endpoint).is_ok()
-}
-
 async fn spawn_node_blocking<T: Send + 'static>(
     task: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, String> {
@@ -828,29 +791,7 @@ async fn desktop_node_status(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<serde_json::Value, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        let health = nodeclient::NodeHealth {
-            online: false,
-            setup_required: false,
-            version: String::new(),
-            error: Some(
-                "Node 地址必须是 loopback HTTP；隧道模式请使用预先建立的 SSH 本地转发。".into(),
-            ),
-        };
-        return Ok(serde_json::json!({
-            "online": health.online,
-            "setup_required": health.setup_required,
-            "version": health.version,
-            "error": health.error,
-            "connection_mode": if shared.cfg.connection_mode == config::ConnectionMode::Tunnel { "tunnel" } else { "local" },
-        }));
-    }
     let client = Arc::clone(&shared.node_client);
-    let connection_mode = if shared.cfg.connection_mode == config::ConnectionMode::Tunnel {
-        "tunnel"
-    } else {
-        "local"
-    };
     spawn_node_blocking(move || {
         let health = client.health();
         serde_json::json!({
@@ -858,10 +799,25 @@ async fn desktop_node_status(
             "setup_required": health.setup_required,
             "version": health.version,
             "error": health.error,
-            "connection_mode": connection_mode,
         })
     })
     .await
+}
+
+#[tauri::command]
+async fn desktop_capture_screenshot(window: WebviewWindow) -> Result<String, String> {
+    use base64::Engine;
+
+    ensure_mvp_window(&window)?;
+    window
+        .hide()
+        .map_err(|error| format!("无法暂时隐藏 Desktop：{error}"))?;
+    thread::sleep(Duration::from_millis(140));
+    let capture_result = spawn_node_blocking(screen_capture::capture_current_screen_png).await;
+    let _ = window.show();
+    let _ = window.set_focus();
+    let png = capture_result??;
+    Ok(base64::engine::general_purpose::STANDARD.encode(png))
 }
 
 #[tauri::command]
@@ -873,8 +829,6 @@ fn desktop_settings_get(
     let settings = config::ShellConfig::load_or_create(&shared.layout.desktop_config_path)?;
     Ok(serde_json::json!({
         "settings": settings,
-        "runtime_node_endpoint": shared.cfg.node_endpoint,
-        "runtime_connection_mode": shared.cfg.connection_mode,
     }))
 }
 
@@ -905,19 +859,13 @@ async fn desktop_shell_request(
 ) -> Result<serde_json::Value, String> {
     ensure_mvp_window(&window)?;
     match (method.as_str(), path.as_str()) {
-        ("GET", "/v1/platform/capabilities") => {
-            let mut capabilities = serde_json::json!({
-                "desktop_shell": true,
-                "clipboard_file_paths": cfg!(windows),
-                "window_focus": true,
-                "update_apply": cfg!(windows)
-            });
-            if shared.cfg.connection_mode == config::ConnectionMode::Tunnel {
-                capabilities["native_directory_picker"] = serde_json::Value::Bool(false);
-                capabilities["update_apply"] = serde_json::Value::Bool(false);
-            }
-            Ok(capabilities)
-        }
+        ("GET", "/v1/platform/capabilities") => Ok(serde_json::json!({
+            "desktop_shell": true,
+            "clipboard_file_paths": cfg!(windows),
+            "native_directory_picker": true,
+            "window_focus": true,
+            "update_apply": cfg!(windows)
+        })),
         ("GET", "/v1/platform/clipboard/files") => {
             let paths = clipboard::file_paths()?;
             Ok(serde_json::json!({"paths": paths}))
@@ -939,9 +887,6 @@ async fn desktop_shell_request(
             Ok(serde_json::json!({"ok": true}))
         }
         ("POST", "/v1/platform/update/apply") => {
-            if !shared.cfg.can_manage_local_node() {
-                return Err("隧道模式只连接远程 Node，不支持从 Desktop 更新本机安装".into());
-            }
             let force = body
                 .as_ref()
                 .and_then(|v| v.get("force"))
@@ -976,44 +921,6 @@ async fn desktop_shell_request(
 }
 
 #[tauri::command]
-async fn desktop_node_connection(
-    window: WebviewWindow,
-    shared: State<'_, Arc<Shared>>,
-) -> Result<serde_json::Value, String> {
-    ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
-    }
-    let client = Arc::clone(&shared.node_client);
-    let endpoint = shared.cfg.node_endpoint.to_string();
-    let connection_mode = if shared.cfg.connection_mode == config::ConnectionMode::Tunnel {
-        "tunnel"
-    } else {
-        "local"
-    };
-    spawn_node_blocking(move || {
-        let health = client.health();
-        let info = if health.online {
-            client.agent_info().ok()
-        } else {
-            None
-        };
-        serde_json::json!({
-            "endpoint": endpoint,
-            "connection_mode": connection_mode,
-            "node_id": info.as_ref().map(|item| item.node_id.as_str()).unwrap_or(""),
-            "manage_enabled": info.as_ref().map(|item| item.manage_enabled).unwrap_or(false),
-            "manage_url": info.as_ref().map(|item| item.manage_url.as_str()).unwrap_or(""),
-            "online": health.online,
-            "setup_required": health.setup_required,
-            "version": health.version,
-            "error": health.error,
-        })
-    })
-    .await
-}
-
-#[tauri::command]
 async fn desktop_node_request(
     window: WebviewWindow,
     method: String,
@@ -1022,34 +929,11 @@ async fn desktop_node_request(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<serde_json::Value, DesktopNodeRequestError> {
     ensure_mvp_window(&window).map_err(DesktopNodeRequestError::from)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err(DesktopNodeRequestError::from(
-            "Desktop 当前只允许本机 Node；远程 Node 需要安全隧道。".to_string(),
-        ));
-    }
-    if shared.cfg.connection_mode == config::ConnectionMode::Tunnel
-        && method.eq_ignore_ascii_case("POST")
-        && path == "/v1/platform/directory-picker"
-    {
-        return Err(DesktopNodeRequestError::from(
-            "隧道模式不能打开远程 Node 的本机目录选择器；请手动填写 Node 工作区路径或使用 API 目录浏览。".to_string(),
-        ));
-    }
     let client = Arc::clone(&shared.node_client);
-    let tunnel_mode = shared.cfg.connection_mode == config::ConnectionMode::Tunnel;
-    let capabilities_request =
-        method.eq_ignore_ascii_case("GET") && path == "/v1/platform/capabilities";
-    let response = spawn_node_blocking(move || client.desktop_api_request(&method, &path, body))
+    spawn_node_blocking(move || client.desktop_api_request(&method, &path, body))
         .await
         .map_err(DesktopNodeRequestError::from)?
-        .map_err(DesktopNodeRequestError::from)?;
-    if tunnel_mode && capabilities_request {
-        let mut response = response;
-        response["native_directory_picker"] = serde_json::Value::Bool(false);
-        response["update_apply"] = serde_json::Value::Bool(false);
-        return Ok(response);
-    }
-    Ok(response)
+        .map_err(DesktopNodeRequestError::from)
 }
 
 #[tauri::command]
@@ -1064,9 +948,6 @@ async fn desktop_workspace_binary_request(
 ) -> Result<serde_json::Value, String> {
     use base64::Engine;
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("工作区文件只允许访问本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let bytes = body_base64
         .as_deref()
         .map(|encoded| {
@@ -1107,9 +988,6 @@ async fn desktop_media_binary_request(
 ) -> Result<serde_json::Value, String> {
     use base64::Engine;
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("媒体只允许访问本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let client = Arc::clone(&shared.node_client);
     let response =
         spawn_node_blocking(move || client.agent_media_binary_request(&agent_id, &media_id))
@@ -1161,14 +1039,12 @@ async fn desktop_list_agents(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<Vec<nodeclient::AgentSummary>, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let client = Arc::clone(&shared.node_client);
     spawn_node_blocking(move || {
         if client.node_profile_incomplete() {
             return Err(
-                "需要先完成 Node 首次配置。请在 Desktop 设置中完成 Node 连接配置。".to_string(),
+                "需要先完成本机 Node 首次初始化。请在 Desktop 设置中配置 Node 名称与模型。"
+                    .to_string(),
             );
         }
         client.list_agents()
@@ -1177,7 +1053,7 @@ async fn desktop_list_agents(
     .map_err(|e| e)?
     .map_err(|e| {
         if e.contains("status 403") {
-            "需要先完成 Node 首次配置。请在 Desktop 设置中完成 Node 连接配置。".to_string()
+            "需要先完成本机 Node 首次初始化。请在 Desktop 设置中配置 Node 名称与模型。".to_string()
         } else {
             e
         }
@@ -1191,29 +1067,8 @@ async fn desktop_hydrate_agent(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<serde_json::Value, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let client = Arc::clone(&shared.node_client);
     spawn_node_blocking(move || client.hydrate(&agent_id)).await?
-}
-
-#[tauri::command]
-async fn desktop_send_message(
-    window: WebviewWindow,
-    agent_id: String,
-    content: String,
-    shared: State<'_, Arc<Shared>>,
-) -> Result<serde_json::Value, String> {
-    ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
-    }
-    if content.trim().is_empty() {
-        return Err("消息不能为空".into());
-    }
-    let client = Arc::clone(&shared.node_client);
-    spawn_node_blocking(move || client.send_message(&agent_id, content.trim())).await?
 }
 
 #[tauri::command]
@@ -1224,9 +1079,6 @@ async fn desktop_resume_hitl(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<serde_json::Value, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("Desktop MVP 当前只允许本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let client = Arc::clone(&shared.node_client);
     spawn_node_blocking(move || client.resume_hitl(&agent_id, resume_value)).await?
 }
@@ -1244,9 +1096,6 @@ async fn desktop_terminal_open(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<String, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("终端仅允许连接本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let agent_id = agent_id.trim().to_string();
     if agent_id.is_empty() {
         return Err("找不到当前 Agent，已阻止跨 Agent 打开终端。".into());
@@ -1271,7 +1120,7 @@ async fn desktop_terminal_open(
     {
         return Err("终端连接标识无效".into());
     }
-    let endpoint = Url::parse(&shared.cfg.node_endpoint).map_err(|e| e.to_string())?;
+    let endpoint = Url::parse(config::NODE_ENDPOINT).map_err(|e| e.to_string())?;
     let session_id = session_id
         .as_deref()
         .map(str::trim)
@@ -1328,9 +1177,6 @@ async fn desktop_linux_terminal_channels(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<Vec<nodeclient::LinuxTerminalChannel>, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("远程 SSH 终端需要本机 Node 连接或已配置的 loopback SSH 隧道。".into());
-    }
     let agent_id = agent_id.trim().to_string();
     if agent_id.is_empty() {
         return Err("找不到当前 Agent，已阻止列出其他 Agent 的 SSH 主机。".into());
@@ -1357,9 +1203,6 @@ async fn desktop_terminal_list(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<Vec<nodeclient::TerminalSummary>, String> {
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("终端仅允许连接本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let agent_id = agent_id.trim();
     let client = Arc::clone(&shared.node_client);
     let verified_id = agent_id.to_string();
@@ -1390,9 +1233,6 @@ fn desktop_terminal_command(
 ) -> Result<(), String> {
     use base64::Engine;
     ensure_mvp_window(&window)?;
-    if !mvp_endpoint_allowed(&shared) {
-        return Err("终端仅允许连接本机 Node；远程 Node 需要安全隧道。".into());
-    }
     let id = connection_id.trim();
     let mut map = shared
         .terminal_relays
@@ -1504,10 +1344,6 @@ fn open_update_settings(shared: &Arc<Shared>, app: &AppHandle) {
 }
 
 fn handle_update_menu(shared: &Arc<Shared>, app: &AppHandle) {
-    if !shared.cfg.can_manage_local_node() {
-        open_update_settings(shared, app);
-        return;
-    }
     let status = shared.update_checker.snapshot();
     if status.upgrade_available || !status.platform_supported {
         open_update_settings(shared, app);
@@ -1517,10 +1353,6 @@ fn handle_update_menu(shared: &Arc<Shared>, app: &AppHandle) {
 }
 
 fn check_update_now(shared: &Arc<Shared>) {
-    if !shared.cfg.can_manage_local_node() {
-        refresh_update_ui(shared);
-        return;
-    }
     if shared
         .update_check_in_flight
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -1594,9 +1426,6 @@ fn open_manage(shared: &Arc<Shared>) {
 }
 
 fn ensure_node(shared: &Arc<Shared>) {
-    if !shared.cfg.can_manage_local_node() {
-        return;
-    }
     if shared
         .lifecycle_busy
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -1686,7 +1515,7 @@ fn refresh_status(shared: &Shared) {
     let busy = shared.lifecycle_busy.load(Ordering::SeqCst);
     if let Ok(guard) = shared.start_item.lock() {
         if let Some(item) = guard.as_ref() {
-            let _ = item.set_enabled(shared.cfg.can_manage_local_node() && !busy && !running);
+            let _ = item.set_enabled(!busy && !running);
         }
     }
     if let Ok(guard) = shared.stop_item.lock() {
@@ -1699,7 +1528,7 @@ fn refresh_status(shared: &Shared) {
             let _ = item.set_enabled(!busy && managed);
         }
     }
-    let manage_available = if running && shared.cfg.can_manage_local_node() {
+    let manage_available = if running {
         shared
             .node_client
             .agent_info()
@@ -1729,9 +1558,6 @@ fn format_running(h: &Health, managed: bool) -> String {
 }
 
 fn maybe_recover(shared: &Arc<Shared>) {
-    if !shared.cfg.can_manage_local_node() {
-        return;
-    }
     if shared.hold_stopped.load(Ordering::SeqCst) {
         return;
     }
@@ -1778,15 +1604,6 @@ fn maybe_recover(shared: &Arc<Shared>) {
 }
 
 fn refresh_update_ui(shared: &Shared) {
-    if !shared.cfg.can_manage_local_node() {
-        if let Ok(guard) = shared.update_item.lock() {
-            if let Some(item) = guard.as_ref() {
-                let _ = item.set_text("更新：隧道模式不支持本机安装更新");
-                let _ = item.set_enabled(false);
-            }
-        }
-        return;
-    }
     let cfg = shared.update_checker.config_snapshot();
     let status = shared.update_checker.snapshot();
     let text_enabled = update_menu_status_text(&status, cfg.update_check_enabled);

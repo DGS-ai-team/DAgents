@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 )
@@ -68,6 +69,7 @@ type envAdapterClient struct {
 	fallbackAdapter MessageAdapter
 	settings        *RuntimeSettings
 	logger          *slog.Logger
+	mockMu          sync.Mutex
 	mock            *MockClient
 }
 
@@ -135,11 +137,14 @@ func (c *envAdapterClient) NormalizeAssistant(existing []Message, msg Message) M
 }
 
 func (c *envAdapterClient) mockClient(adapter MessageAdapter) *MockClient {
+	c.mockMu.Lock()
 	if c.mock == nil {
 		c.mock = &MockClient{}
 	}
-	c.mock.adapter = adapter
-	return c.mock
+	mock := c.mock
+	c.mockMu.Unlock()
+	mock.setAdapter(adapter)
+	return mock
 }
 
 func (c *envAdapterClient) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {

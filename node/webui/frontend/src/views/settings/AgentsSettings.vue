@@ -8,6 +8,7 @@ import { agentHostLabel } from "../../utils/agentTemplateForm.js";
 import UiIcon from "../../components/UiIcon.vue";
 import { filterAgents, groupAgents, searchAgents } from "../../utils/agentGrouping.js";
 import { readNodePreference, writeNodePreference } from "../../utils/nodePreference.js";
+import { confirmDesktopAction } from "../../utils/desktopDialogs.js";
 
 const router = useRouter();
 const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
@@ -89,7 +90,7 @@ async function onDeleteTemplate(tpl) {
   const id = String(tpl?.id || "").trim();
   if (!id || tpl?.source !== "user") return;
   const name = tpl.display_name || id;
-  if (!window.confirm(`确定删除模板「${name}」？此操作不可恢复。`)) return;
+  if (!await confirmDesktopAction(`确定删除模板「${name}」？此操作不可恢复。`)) return;
   deletingTemplateId.value = id;
   templatesError.value = "";
   try {

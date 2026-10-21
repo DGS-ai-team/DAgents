@@ -483,23 +483,7 @@ paths:
         "200":
           description: OK
 
-  /v1/agents/{agent_id}/child-agents/{child_agent_id}:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
   /v1/agents/{agent_id}/context:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agents/{agent_id}/execution-events:
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -552,14 +536,6 @@ paths:
           description: OK
 
   /v1/agents/{agent_id}/screen/status:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/agents/{agent_id}/screen/stream:
     get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
@@ -671,14 +647,6 @@ paths:
         "200":
           description: OK
     post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/mcp/servers/{server_id}/tools:
-    get:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server
       responses:
@@ -1292,6 +1260,122 @@ paths:
         "200":
           description: OK
 
+
+  /v1/agents/{agent_id}/auto-settings:
+    get:
+      summary: 获取 Desktop 所需的完整 Auto 设置快照
+      description: 一次返回 Auto 配置、经验、dreaming 状态和默认 trigger，减少 Desktop 的 Node 请求往返。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: Auto 设置快照；Profile 字段位于响应顶层，并包含 experience、dreaming_status、trigger 与状态标志
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404": {description: Agent 不存在或不是自主智能体}
+        "503": {description: Auto 存储不可用}
+
+  /v1/agents/{agent_id}/model-view:
+    get:
+      summary: 获取 Agent 的模型视图与可选配置
+      description: 合并 Agent 当前模型、有效 LLM 设置与可选配置目录，避免 Desktop 分别读取多个来源。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 返回 agent、llm_settings 与 profile_catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent, llm_settings, profile_catalog]
+                properties:
+                  agent: {type: object}
+                  llm_settings: {type: object}
+                  profile_catalog:
+                    type: array
+                    items: {type: object}
+        "404": {description: Agent 不存在或已归档}
+        "503": {description: Agent 存储不可用}
+
+  /v1/workgroups/desktop/list:
+    get:
+      summary: 获取 Desktop 工作组列表与订阅状态
+      description: 合并全部工作组和当前 Node 的订阅列表；单个工作组附加 subscribed 标志。
+      responses:
+        "200":
+          description: 工作组数组与 scope=desktop
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workgroups, scope]
+                properties:
+                  workgroups: {type: array, items: {type: object}}
+                  scope: {type: string, enum: [desktop]}
+        "502": {description: Manage 请求失败}
+        "503": {description: Manage 或工作组功能未启用}
+
+  /v1/workgroups/{workgroupId}/desktop-progress:
+    get:
+      summary: 获取工作组活动与人工队列快照
+      description: 并行读取工作组 Timeline 和待处理人工队列，供 Desktop 一次刷新工作组进度。
+      parameters:
+        - name: workgroupId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: 合并的 events 与 human_queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, human_queue]
+                properties:
+                  events: {type: object}
+                  human_queue: {type: object}
+        "400": {description: 缺少工作组 ID}
+        "502": {description: Manage 请求失败}
+        "503": {description: Manage 或工作组功能未启用}
+
+  /v1/workgroups/{workgroupId}/desktop-snapshot:
+    get:
+      summary: 获取工作组 Desktop 首屏快照
+      description: 合并工作组、成员、Timeline、审批和当前状态需要的队列或模型配置；include_agents=true 时附带 Node 注册 Agent。
+      parameters:
+        - name: workgroupId
+          in: path
+          required: true
+          schema: {type: string}
+        - name: include_agents
+          in: query
+          required: false
+          schema: {type: boolean, default: false}
+      responses:
+        "200":
+          description: 工作组及其成员、events、hitl；按状态包含 human_queue 或 llm_configs，可选 agents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workgroup, node_id, members, events, hitl]
+                properties:
+                  workgroup: {type: object}
+                  node_id: {type: string}
+                  members: {type: object}
+                  events: {type: object}
+                  hitl: {type: object}
+                  human_queue: {type: object}
+                  llm_configs: {type: object}
+                  agents: {type: object}
+        "400": {description: 缺少工作组 ID}
+        "502": {description: Manage 请求失败}
+        "503": {description: Manage 或工作组功能未启用}
 components:
   schemas:
     NodeInfo:

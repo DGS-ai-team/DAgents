@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
+from pathlib import PureWindowsPath
 
 from manage.releases.models import ReleasePackage
 
@@ -14,7 +17,8 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 def validate_slug(value: str, field: str) -> str:
     text = str(value or "").strip()
-    if not text or not _SLUG_RE.match(text):
+    maximum = {"artifact": 128, "version": 64, "platform": 64, "channel": 64}.get(field, 128)
+    if not text or text in {".", ".."} or len(text) > maximum or not _SLUG_RE.match(text):
         raise ValueError(f"invalid {field}")
     return text
 
@@ -52,16 +56,14 @@ def write_manifest(version_path: Path, pkg: ReleasePackage) -> None:
         "content_type": pkg.content_type,
         "status": pkg.status,
         "is_latest": pkg.is_latest,
+        "published_at": pkg.published_at,
         "source": pkg.source,
         "release_notes": pkg.release_notes,
         "uploaded_by": pkg.uploaded_by,
         "created_at": pkg.created_at,
         "updated_at": pkg.updated_at,
     }
-    (version_path / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_atomic(version_path / "manifest.json", manifest)
 
 
 def write_latest_pointer(
@@ -82,10 +84,30 @@ def write_latest_pointer(
         "filename": filename,
         "path": rel_path_for(artifact, channel, platform, version, filename),
     }
-    (platform_dir / "latest.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_atomic(platform_dir / "latest.json", payload)
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    """Replace small release metadata files atomically to avoid partial JSON."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def package_file_path(releases_dir: Path, pkg: ReleasePackage) -> Path:
@@ -101,8 +123,33 @@ def remove_package_tree(releases_dir: Path, pkg: ReleasePackage) -> None:
 
 
 def allowed_release_filename(name: str) -> bool:
-    lower = str(name or "").lower()
-    return lower.endswith(".tar.gz") or lower.endswith(".zip") or lower.endswith(".exe")
+    try:
+        safe_release_filename(name)
+    except ValueError:
+        return False
+    return True
+
+
+def safe_release_filename(name: str) -> str:
+    """Validate an uploaded filename as a single safe path component."""
+    value = str(name or "").strip()
+    if (
+        not value
+        or value in {".", ".."}
+        or len(value.encode("utf-8")) > 255
+        or value != name
+        or Path(value).name != value
+        or PureWindowsPath(value).name != value
+        or PureWindowsPath(value).drive
+        or any(char in '<>:"|?*' for char in value)
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or value.endswith((".", " "))
+    ):
+        raise ValueError("invalid package filename")
+    lower = value.lower()
+    if not (lower.endswith(".tar.gz") or lower.endswith(".zip") or lower.endswith(".exe")):
+        raise ValueError("file must be .tar.gz, .zip, or .exe")
+    return value
 
 
 def content_type_for_filename(name: str) -> str:

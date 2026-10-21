@@ -15,6 +15,7 @@ import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
 import AutoBadge from "./AutoBadge.vue";
 import UiIcon from "./UiIcon.vue";
 import { readNodePreference, writeNodePreference } from "../utils/nodePreference.js";
+import { confirmDesktopAction } from "../utils/desktopDialogs.js";
 
 const RAIL_CACHE_TTL_MS = 30_000;
 const UNREAD_REFRESH_INTERVAL_MS = 15_000;
@@ -451,7 +452,7 @@ async function removeWorkgroup(wg) {
   const wid = String(wg?.workgroup_id || "").trim();
   if (!wid) return;
   const label = String(wg?.display_name || wid).trim();
-  if (!window.confirm(`确定删除工作组「${label}」？\n将取消本机订阅，工作组数据仍保留在 Manage。`)) {
+  if (!await confirmDesktopAction(`确定删除工作组「${label}」？\n将取消本机订阅，工作组数据仍保留在 Manage。`)) {
     return;
   }
   try {
@@ -486,7 +487,7 @@ async function removeMember(wgId, member) {
   const mid = String(member?.member_id || "").trim();
   if (!wid || !mid) return;
   const label = memberLabel(member);
-  if (!window.confirm(`确定删除成员「${label}」？`)) return;
+  if (!await confirmDesktopAction(`确定删除成员「${label}」？`)) return;
   try {
     await api.archiveWorkgroupMember(wid, mid);
     await loadMembers(wid, true);

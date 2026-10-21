@@ -41,7 +41,7 @@ Console 地址为 `http://127.0.0.1:8020/console/`。Node 侧须启用 Manage/Wo
 
 | 范围 | 命令 | 说明 |
 |---|---|---|
-| Node Web UI | `npm test --prefix node/webui/frontend` | Vitest 与共享图标契约 |
+| Shared Desktop UI source | `npm test --prefix node/webui/frontend` | Desktop 复用的 Vue 源码测试与图标契约 |
 | Desktop UI 测试 | `npm run test:ui --prefix desktop/tray-tauri` | 工作台、终端、设置与共享图标契约 |
 | Desktop UI 构建 | `npm run build --prefix desktop/tray-tauri` | 构建独立桌面 UI 资源 |
 | Desktop Rust | `cargo test --locked --manifest-path desktop/tray-tauri/src-tauri/Cargo.toml --lib` | 启动路径、Node 管理、终端与本机桥接 |

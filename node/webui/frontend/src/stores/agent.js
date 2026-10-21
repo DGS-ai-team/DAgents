@@ -201,7 +201,7 @@ export function applyHydrateTurnState(data) {
 	return applyAuthoritativeHydrateTurnState(data);
 }
 
-/** New lifecycle adapter used by ChatView; kept separate from transcript seq fencing. */
+/** Lifecycle adapter used by Desktop chat; kept separate from transcript sequence fencing. */
 export function applyAuthoritativeTurnState(data, options) {
 	return applyAuthoritativeHydrateTurnState(data, options);
 }

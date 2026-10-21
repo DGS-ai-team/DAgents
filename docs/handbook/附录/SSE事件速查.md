@@ -1,6 +1,6 @@
 # SSE 事件速查
 
-实现：`node/internal/stream/`、`node/internal/turn/sse_publish.go`。Web UI 订阅：`GET /v1/streams?agent_id=`。
+实现：`node/internal/stream/`、`node/internal/turn/sse_publish.go`。Desktop 订阅：`GET /v1/streams?agent_id=`。
 
 ---
 

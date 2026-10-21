@@ -16,6 +16,12 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL("../static", import.meta.url)),
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        console: fileURLToPath(new URL("./index.html", import.meta.url)),
+        product: fileURLToPath(new URL("./product.html", import.meta.url)),
+      },
+    },
   },
   server: {
     fs: { allow: [fileURLToPath(new URL("../../../", import.meta.url))] },

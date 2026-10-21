@@ -1,18 +1,11 @@
-# Node Web UI source
+# Shared Desktop UI source
 
-This directory contains the reusable Vue 3 + Vite frontend source. Agent Node is an API/runtime process and does not serve `/ui/` or embed frontend assets. Desktop WebView reuses these sources through its own build pipeline.
+This directory contains Vue components and settings pages reused by DAgents Desktop. It is not a standalone web application: Agent Node exposes APIs only, there is no `/ui/` route, and this package has no browser `dev`, `build`, or `preview` command. The supported product interface is the Tauri Desktop application.
 
-## Development
+## UI source tests and lint
 
-```bash
-cd node/webui/frontend
-npm run dev
-```
+Run `npm ci --prefix node/webui/frontend`, `npm test --prefix node/webui/frontend`, and `npm run lint --prefix node/webui/frontend` to validate the shared Vue source. To run the interface, build and launch DAgents Desktop from `desktop/tray-tauri`; this source package does not provide a browser entry point.
 
-Vite proxies `/v1` and `/health` to `http://127.0.0.1:18765` by default. Set `DAGENTS_NODE_URL` to use another local Node endpoint. The dev server opens at `http://localhost:5173/ui/`; that Vite path does not mean Node serves `/ui/`.
-
-To produce a standalone frontend build for inspection, run `bash node/webui/build.sh`; output goes to `node/webui/frontend/dist/`. Node Go builds and tests do not require this output. Frontend tests use `npm test --prefix node/webui/frontend`.
-
-The API adapter is `frontend/src/api/node.js`. Node-native directory selection goes through `/v1/platform/directory-picker`. Clipboard file paths, window focus, and update apply use the Desktop-only `__DAGENTS_DESKTOP_REQUEST__` bridge when running inside Desktop; they are not Node HTTP endpoints. Browser-only UI reports Shell features unavailable.
+The API adapter is `frontend/src/api/node.js`. Node-native directory selection goes through `/v1/platform/directory-picker`. Clipboard file paths, window focus, and update apply use the Desktop-only `__DAGENTS_DESKTOP_REQUEST__` bridge; they are not Node HTTP endpoints.
 
 The native directory picker runs on the Node host: Windows uses PowerShell STA `FolderBrowserDialog`, macOS uses `osascript`, and Linux tries `zenity`, `kdialog`, then `yad`. Cancellation returns `200` with `{"cancelled":true}`; when no picker is available the UI can still accept a manually entered absolute path.

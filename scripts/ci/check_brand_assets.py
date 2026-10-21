@@ -1,23 +1,22 @@
-"""Check that branding has one source and known native build inputs.
+"""Check the canonical brand source, Desktop-only UI entry, and native inputs.
 
 The native Desktop needs checked-in images because the Tauri bundler consumes
 files from its package directory. The files are generated
-from ``shared/branding/brand-icon.png``; this check prevents a second web
-favicon source from quietly returning to the repository and verifies that the
-native build inputs remain present.
+from ``shared/branding/brand-icon.png``. This check also guards against
+reintroducing a standalone browser entry for the shared Desktop UI.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = ROOT / "shared" / "branding" / "brand-icon.png"
-NODE_PUBLIC = ROOT / "node" / "webui" / "frontend" / "public"
-NODE_INDEX = ROOT / "node" / "webui" / "frontend" / "index.html"
-NODE_MAIN = ROOT / "node" / "webui" / "frontend" / "src" / "main.js"
+SHARED_UI_ROOT = ROOT / "node" / "webui" / "frontend"
+SHARED_UI_PACKAGE = SHARED_UI_ROOT / "package.json"
 MANAGE_PUBLIC = ROOT / "manage" / "console" / "frontend" / "public"
 MANAGE_MAIN = ROOT / "manage" / "console" / "frontend" / "src" / "main.js"
 TRAY_GENERATOR = ROOT / "packaging" / "windows" / "scripts" / "generate-tray-icons.py"
@@ -41,24 +40,27 @@ def main() -> int:
         errors.append(f"missing canonical brand source: {CANONICAL.relative_to(ROOT)}")
 
     for filename in ("favicon.ico", "favicon.png"):
-        for public_dir in (NODE_PUBLIC, MANAGE_PUBLIC):
-            duplicate = public_dir / filename
-            if duplicate.exists():
-                errors.append(f"Web UI public must not contain a copied favicon: {duplicate.relative_to(ROOT)}")
+        duplicate = MANAGE_PUBLIC / filename
+        if duplicate.exists():
+            errors.append(f"Manage Console must not contain a copied favicon: {duplicate.relative_to(ROOT)}")
+
+    for entry in (
+        SHARED_UI_ROOT / "index.html",
+        SHARED_UI_ROOT / "src" / "main.js",
+        SHARED_UI_ROOT / "src" / "App.vue",
+        SHARED_UI_ROOT / "src" / "router" / "index.js",
+    ):
+        if entry.exists():
+            errors.append(f"standalone browser UI entry must not be present: {entry.relative_to(ROOT)}")
 
     try:
-        index = NODE_INDEX.read_text(encoding="utf-8")
-        if "/favicon" in index:
-            errors.append("Node index.html still references a public favicon")
-    except OSError as error:
-        errors.append(f"cannot read Node index.html: {error}")
-
-    try:
-        main_js = NODE_MAIN.read_text(encoding="utf-8")
-        if '@dagents-brand/brand-icon.png' not in main_js:
-            errors.append("Node main.js does not import the canonical brand icon")
-    except OSError as error:
-        errors.append(f"cannot read Node main.js: {error}")
+        package = json.loads(SHARED_UI_PACKAGE.read_text(encoding="utf-8"))
+        scripts = package.get("scripts", {})
+        for command in ("dev", "build", "preview"):
+            if command in scripts:
+                errors.append(f"shared UI package must not expose the browser `{command}` command")
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"cannot read shared UI package metadata: {error}")
 
     try:
         manage_main = MANAGE_MAIN.read_text(encoding="utf-8")
@@ -97,7 +99,7 @@ def main() -> int:
             print(f"brand-assets: {error}", file=sys.stderr)
         return 1
 
-    print("brand-assets: canonical source and native generated inputs are present")
+    print("desktop-ui: browser entry is absent; canonical brand source and native inputs are present")
     return 0
 
 

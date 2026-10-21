@@ -16,9 +16,8 @@ GO_PACKAGES=(
   ./client/...
 )
 
-echo "[verify] install and build Node Web UI"
+echo "[verify] install and validate shared Desktop UI sources"
 npm ci --prefix node/webui/frontend
-npm run build --prefix node/webui/frontend
 npm test --prefix node/webui/frontend
 npm run lint --prefix node/webui/frontend
 python3 scripts/ci/check_brand_assets.py

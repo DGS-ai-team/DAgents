@@ -394,6 +394,7 @@ impl Client {
         self.json_request("GET", &path, None)
     }
 
+    #[cfg(test)]
     pub fn send_message(&self, agent_id: &str, content: &str) -> Result<Value, String> {
         self.json_request(
             "POST",
@@ -813,15 +814,38 @@ impl Client {
         body.onboarding.node_profile_completed == Some(false)
     }
 
+    #[cfg(test)]
     pub fn stream_events<F>(&self, stop: &AtomicBool, mut handler: F) -> Result<(), String>
     where
         F: FnMut(StreamEvent) -> bool,
     {
+        self.stream_events_after(stop, None, || {}, &mut handler)
+    }
+
+    /// Subscribe to the live stream initially, then resume from the last
+    /// process-global cursor after reconnect. `on_connected` runs only after
+    /// the HTTP stream is established, so callers can reconcile durable state
+    /// without treating an offline retry as a successful resync.
+    pub fn stream_events_after<F, C>(
+        &self,
+        stop: &AtomicBool,
+        after_seq: Option<i32>,
+        on_connected: C,
+        mut handler: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(StreamEvent) -> bool,
+        C: FnOnce(),
+    {
         if self.base.is_empty() {
             return Err("node client: empty base URL".into());
         }
+        let url = match after_seq {
+            Some(seq) => format!("{}/v1/streams?after_seq={seq}", self.base),
+            None => format!("{}/v1/streams?live=1", self.base),
+        };
         let req = self
-            .authorize(ureq::get(&format!("{}/v1/streams?live=1", self.base)))
+            .authorize(ureq::get(&url))
             .set("Accept", "text/event-stream");
         // 勿设 timeout(0)：ureq/Windows 会当成零读超时，空闲 SSE 立刻失败并重连刷屏。
         // 不设 overall timeout，与 Go tray `http.Client{Timeout: 0}`（无限）对齐。
@@ -829,6 +853,7 @@ impl Client {
         if resp.status() != 200 {
             return Err(format!("GET /v1/streams: status {}", resp.status()));
         }
+        on_connected();
         parse_sse(stop, resp.into_reader(), &mut handler)
     }
 
@@ -1082,6 +1107,36 @@ mod tests {
         ] {
             assert!(validate_desktop_api_path(path).is_err(), "accepted {path}");
         }
+    }
+
+    #[test]
+    fn sse_resume_uses_global_cursor_and_signals_successful_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let count = socket.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..count]);
+            assert!(
+                request.starts_with("GET /v1/streams?after_seq=17 HTTP/1.1"),
+                "{request}"
+            );
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+
+        let client = Client::new(&format!("http://{address}"));
+        let stop = AtomicBool::new(false);
+        let mut connected = false;
+        client
+            .stream_events_after(&stop, Some(17), || connected = true, |_| true)
+            .unwrap();
+        server.join().unwrap();
+        assert!(connected, "connection callback should run after HTTP 200");
     }
 
     #[test]

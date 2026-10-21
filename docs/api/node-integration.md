@@ -1,10 +1,10 @@
 # Node Runtime API 接入契约
 
-本文覆盖 Node Go HTTP Server 当前注册的 **150 个 method/path 路由**：`GET /health` 与 149 个 `/v1` 操作。它描述的是 Node runtime API，不是 Desktop 设置 API，也不是 Manage 服务 API。路径参数用 `{name}` 表示。Node 不内嵌 Web UI、不提供 `/ui` 静态页面；`node/webui/frontend` 源码仍由 Desktop WebView 复用。
+本文覆盖 Node Go HTTP Server 当前注册的 **146 个 method/path 路由**：`GET /health` 与 145 个 `/v1` 操作。它描述的是 Node runtime API，不是 Desktop 设置 API，也不是 Manage 服务 API。路径参数用 `{name}` 表示。Node 不内嵌 Web UI、不提供 `/ui` 静态页面；`node/webui/frontend` 源码仍由 Desktop WebView 复用。
 
 ## 传输与安全边界
 
-Node 默认监听 `127.0.0.1:18765`（实际监听地址由启动 YAML 决定）。Node HTTP API 本身没有通用 Bearer 鉴权，也不提供多用户 ACL。Desktop 的 `connection_mode: "tunnel"` 连接到本机 loopback 上由 SSH 等外部机制建立的端口转发；隧道的身份验证、授权和加密由外部 SSH 连接负责，Node 不会验证隧道用户身份。不要把这类外部转发描述为 Node 远程认证。`GET /v1/node/update/package` 与未完成首配时的 `GET /v1/node/upgrade-readiness` 另有 loopback 请求限制。Node 发往 Manage 的凭据仅用于出站请求，不会由 settings 或 update API 回传。
+Node 默认监听 `127.0.0.1:18765`（实际监听地址仍由启动 YAML 决定）。Desktop transport 固定访问本机 `127.0.0.1:18765`，不支持远程 Node 或 SSH tunnel 模式。Node HTTP API 本身没有通用 Bearer 鉴权，也不提供多用户 ACL，因此不要将 API 暴露到不可信网络。`GET /v1/node/update/package` 与未完成首配时的 `GET /v1/node/upgrade-readiness` 另有 loopback 请求限制。Node 发往 Manage 的凭据仅用于出站请求，不会由 settings 或 update API 回传。
 
 多数 JSON 成功响应直接返回 DTO 或操作结果，不存在统一的 `data` envelope。标准错误由 `writeAPIError` 返回 `{"error":{"code":"...","message":"...","details":{...}}}`。具体 handler 可能有专属状态码、二进制或流响应；应以实现和 DTO 为准。Go `ServeMux` 的 method pattern 属于接口契约。
 
@@ -20,7 +20,7 @@ Node 默认监听 `127.0.0.1:18765`（实际监听地址由启动 YAML 决定）
 | Linux channel 与 credential（含 SSH/远程主机配置） | Node Linux channel store。 | `/v1/linux/*`；属于 Node host 管理能力。当前没有独立 `/v1/ssh/*` 路由。 |
 | Agent handbook 与 workspace | 每个 Agent 对应的 Node 文件系统和 handbook 存储。 | `/v1/agents/{agent_id}/handbook*`、`workspace*`、`/media/*`。目录选择由 Node host 的原生 directory-picker 执行。 |
 | Manage 连接凭据 | Node 配置：Manage URL、Node token、registration 和 Workgroup 配置。 | `/v1/settings` 接受 write-only `manage.node_token`。GET 仅返回 `has_node_token`。PATCH `node_token: ""` 保留已保存值；`clear_node_token: true` 才清除。 |
-| Desktop endpoint 与 Shell 设置 | Desktop 自有 settings JSON：旧字段 `node_endpoint`、`notification_enabled`、`update_check_enabled`、`update_check_interval_seconds`，以及 `connection_mode`（`local` 或 `tunnel`）。旧 JSON 缺少 `connection_mode` 时默认为 `local`。 | 不属于 Node `/v1/settings`。`local` 管理本机 Node；`tunnel` 连接经 SSH 等外部机制转发到 loopback 的 Node endpoint，不表示 Node 实现了远程认证。 |
+| Desktop endpoint 与 Shell 设置 | Desktop 自有 settings JSON：`notification_enabled`、`update_check_enabled`、`update_check_interval_seconds`。Node endpoint 固定为 `127.0.0.1:18765`；旧 `node_endpoint` / `connection_mode` 字段被忽略并在下次保存时移除。 | 不属于 Node `/v1/settings`。Desktop 固定管理本机 Node，不提供远程连接档案或 tunnel 配置。 |
 | Desktop notifications 与 schedule | Desktop 自己持有的设置和状态。 | 不属于 Node runtime 设置。 |
 | 显示偏好和草稿 | 前端 `localStorage`。 | 不属于服务端配置，也不在 Node/Desktop profile 间共享。 |
 
@@ -30,7 +30,7 @@ Node 首配维护单 owner 档案：`agent.name` 是完成 Node 初始化所必�
 
 ### Node 信息、聚合与设置
 
-`GET /v1/node/info` 返回 Node info DTO，字段包含 `node_id`、`manage_enabled`、`manage_url`、`manage_registered`，也提供 capabilities、LLM 与 compression 信息。DAgents Desktop connection view 会消费这些字段。`GET /v1/bootstrap` 为 Desktop WebView 首屏提供 `health`、`info`、`llm`、`user`、`onboarding`、`agent` 聚合；Node 不托管 Web UI；此聚合减少首屏往返，不取代原子 info/settings API。
+`GET /v1/node/info` 返回 Node info DTO，字段包含 `node_id`、`manage_enabled`、`manage_url`、`manage_registered`，也提供 capabilities、LLM 与 compression 信息。`GET /v1/bootstrap` 为 Desktop WebView 首屏提供 `health`、`info`、`llm`、`user`、`onboarding`、`agent` 聚合；Node 不托管 Web UI；此聚合减少首屏往返，不取代原子 info/settings API。
 
 `GET /v1/settings` 返回 `SettingsView`；`PATCH /v1/settings` 顶层可省略不相关设置块。view 顶层包含 `node`、`llm`、`manage`、`features`、`compression`、`memory`、`runtime`、`agent`、`user`、`onboarding`、`child_agents`、`browser`、`wecom`、`tools`、`hooks`、`available_tool_groups`。`node` 仅含 listener 字段。除 `manage` 以字段 presence 合并外，大多数设置块按其 DTO 一次整体应用；发 patch 前先 GET 并合并该块，仅在客户端明确提供完整块或接口定义了专门的子字段合并时省略旧字段。`manage` 的字段是可选指针，未出现的字段保留现值；出现的字段按 presence 更新。Manage token GET 示例是 `{"has_node_token":true}`，不会有 `node_token` 明文。PATCH `node_token: ""` 保留原 token；`clear_node_token: true` 才清除。显式 `url: ""` 是清空 URL，若最终 `enabled: true` 会因缺 URL 而校验失败。Setup panel 加载时密码输入框始终空白，空值提交保持原 token，明确清除需勾选清除字段。首配完成只要求 Node 名；`preferred_name` 可空。完整 DTO/patch 合并逻辑见 `node/internal/setup/settings.go`。
 
@@ -90,7 +90,7 @@ curl -X POST http://127.0.0.1:18765/v1/messages \
 curl -N 'http://127.0.0.1:18765/v1/streams?agent_id=AGENT_ID&live=1'
 ```
 
-HITL resume、tool-call cancel、execution reconcile 等接口维护运行时状态，不能只根据某个界面暂未调用就判定为废弃。消息请求和 SSE event wire schema 分别见 `node/internal/api/server_messages.go`、`node/internal/api/execution_events_api.go` 与 `node/internal/stream/hub.go`。
+HITL resume、tool-call cancel、execution reconcile 等接口维护运行时状态，不能只根据某个界面暂未调用就判定为废弃。消息请求和 SSE event wire schema 见 `node/internal/api/server_messages.go` 与 `node/internal/stream/hub.go`。
 
 ### 更新查询和二进制包
 
@@ -113,7 +113,7 @@ Workspace 文件路径通过 `path` query 参数传递。读取使用 `GET /v1/a
 
 文件 GET 支持 `If-None-Match` 条件读取：使用内容摘要生成的强 ETag，条件比较按 HTTP 的弱比较语义处理；匹配返回 `304`、当前 ETag 和空正文，未匹配返回 `200` 及最新字节。客户端必须保留 304 之前的内容，不能把空正文当作空文件。此读取条件不改变 PUT 的 `If-Match` 冲突保护。Desktop 自动刷新只检查当前可见目录及打开文件；大小与修改时间用于加速发现变化，不能替代内容版本校验。调度及草稿规则见[资源页自动刷新方案](../design/desktop-product/resource-auto-refresh.md)，消息资源引用和 HTML/SVG 预览见[资源引用协议](../development/resource-references.md)。
 
-Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=...` 提供；它读取该 Agent 已有浏览器会话的页面/截图，不会启动浏览器、执行页面代码或提供交互控制。AutoDreaming 状态由 `/v1/agents/{agent_id}/dreaming` 提供，体验条目、待办和唤醒触发器分别由 experience/todos/triggers 领域路由管理。Node 没有 SSH tunnel endpoint；Desktop tunnel mode 使用外部 SSH 端口转发连到 loopback Node，并不增加 Node 路由或 Node Bearer 认证。
+Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=...` 提供；它读取该 Agent 已有浏览器会话的页面/截图，不会启动浏览器、执行页面代码或提供交互控制。AutoDreaming 状态由 `/v1/agents/{agent_id}/dreaming` 提供，体验条目、待办和唤醒触发器分别由 experience/todos/triggers 领域路由管理。Browser sidecar 固定在 `127.0.0.1:18766`，由本机 Node 启动和停止。
 
 `GET /v1/agents/{agent_id}/terminals/ws` 升级为 WebSocket。客户端首帧可为 `open`（创建终端，可带 target、shell、cwd、rows、cols）或 `resume`（用 `session_id` 重新连接已有会话）；后续客户端命令为 `input`、`resize`、`terminate`、`close`、`ping`。JSON 中的 `data` 是 base64 编码的字节。断开 WebSocket 会 detach 会话，终端仍可恢复；显式 `close` 或 `terminate` 才关闭会话。screen stream、transfer events 也是流协议，细节以 handler 为准。目录选择是 Node host 原生能力：`/v1/platform/capabilities` 报告例如 `native_directory_picker`，`POST /v1/platform/directory-picker` 由 Node 进程调用 OS picker。
 
@@ -121,12 +121,16 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 
 ## 路由边界与调整结论
 
-- `GET /v1/bootstrap` 与 `GET /v1/node/info` 保留：前者是减少 Desktop WebView 首屏请求的聚合，后者是 Desktop connection 使用的独立 DTO。
+- `GET /v1/bootstrap` 与 `GET /v1/node/info` 保留：前者是减少 Desktop WebView 首屏请求的聚合，后者是 Node 信息的独立 DTO。
 - `/v1/settings` 与 `/v1/llm/settings` 都保留：settings 是全量 Node 管理/setup 视图，LLM endpoint 是现有 runtime profile 的轻量操作面；职责虽有字段重叠，但消费者和保存通道不同，当前不合并。
 - Agent、policy、context、workspace、HITL、tools、MCP、Linux channels、Manage Workgroups、feedback、Manage upload 保留为领域 API。Workgroup 路由由当前 Node Workgroup adapter 处理，不是已退役的 Desktop bridge API；Feedback 写入 Node 本地记录并尝试同步 Manage；Manage upload 是 Node 到 Manage 的上传代理。不能因为 Desktop WebView 当下没有调用就移除 Manage、Node 内部工具或 Go/Python client 依赖的操作。
+- 移除无当前消费者且可由现有集合接口替代的 `GET /v1/agents/{agent_id}/child-agents/{child_agent_id}`、`GET /v1/mcp/servers/{server_id}/tools`，以及没有产品界面的屏幕流 `GET /v1/agents/{agent_id}/screen/stream`。
+- 移除进程执行审计查询与其新增持久化：`GET /v1/agents/{agent_id}/execution-events`。执行过程仍通过 `/v1/streams` 实时发出；既有 SQLite `execution_events` 表不会被本次版本删除，历史记录保留但不再写入或提供 HTTP 查询。
+- `GET /v1/agents/{agent_id}/timeline` 暂时保留为持久化 turn 事件游标读取，适用于诊断与补偿回放；目前没有 Desktop/Manage 生产调用，后续若统一由 SSE hydrate/重放覆盖，可再移除。
+- `POST /v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile` 保留：它会在 Node 重启后恢复 Agent runtime，并由用户/Client 对副作用不确定的工具执行作出结论，解除 turn 恢复栅栏；删除会破坏跨重启恢复闭环。
+- `GET /v1/agents/{agent_id}/screen/status` 暂时保留为独立的宿主屏幕能力探测接口；没有当前客户端调用。屏幕采集工具仍在 Node 内使用该底层能力，若不计划支持 UI 屏幕能力检查，可与屏幕流一起移除。
 - Desktop Shell 专属路径退出 Node HTTP：剪贴板、窗口聚焦与 update apply 改走 Shell IPC；Node 自己的 native directory picker 和 host API 仍保留。
 - Node update status 与 binary package 留在 Node：Manage token 仅由 Node 持有；Shell 仅读取状态和完整性已验证的包。Node 不再暴露 Desktop runtime config 或安装动作。
-- 当前没有为剩余路由推断弃用状态。拆分应以真实所有权和消费者为准，不为减少路径而强行合并不同 domain CRUD。
 
 ## 当前路由全集
 
@@ -162,22 +166,22 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `POST` | `/v1/agents` | `handleCreateAgent` | [agents_api.go#L25](../../node/internal/api/agents_api.go#L25) |
 | `DELETE` | `/v1/agents/{agent_id}` | `handleDeleteAgent` | [agents_api.go#L36](../../node/internal/api/agents_api.go#L36) |
 | `GET` | `/v1/agents/{agent_id}` | `handleGetAgent` | [agents_api.go#L27](../../node/internal/api/agents_api.go#L27) |
+| `GET` | `/v1/agents/{agent_id}/model-view` | `handleGetAgentModelView` | [agent_model_view_api.go](../../node/internal/api/agent_model_view_api.go) |
 | `PATCH` | `/v1/agents/{agent_id}` | `handlePatchAgent` | [agents_api.go#L28](../../node/internal/api/agents_api.go#L28) |
 | `POST` | `/v1/agents/{agent_id}/ack` | `handleAgentAck` | [agents_api.go#L46](../../node/internal/api/agents_api.go#L46) |
 | `GET` | `/v1/agents/{agent_id}/auto-config` | `handleAutonomyV2ConfigGet` | [autonomy_v2_api.go#L16](../../node/internal/api/autonomy_v2_api.go#L16) |
+| `GET` | `/v1/agents/{agent_id}/auto-settings` | `handleAutonomyV2SettingsGet` | [autonomy_v2_api.go](../../node/internal/api/autonomy_v2_api.go) |
 | `PUT` | `/v1/agents/{agent_id}/auto-config` | `handleAutonomyV2ConfigPut` | [autonomy_v2_api.go#L17](../../node/internal/api/autonomy_v2_api.go#L17) |
 | `POST` | `/v1/agents/{agent_id}/auto-config/reconcile` | `handleAutonomyV2ConfigReconcile` | [autonomy_v2_api.go#L18](../../node/internal/api/autonomy_v2_api.go#L18) |
 | `GET` | `/v1/agents/{agent_id}/browser/view` | `handleAgentBrowserView` | [browser_view_api.go#L9](../../node/internal/api/browser_view_api.go#L9) |
 | `POST` | `/v1/agents/{agent_id}/cancel` | `handleAgentCancel` | [agents_api.go#L44](../../node/internal/api/agents_api.go#L44) |
 | `GET` | `/v1/agents/{agent_id}/child-agents` | `handleAgentListChildAgents` | [agents_api.go#L52](../../node/internal/api/agents_api.go#L52) |
-| `GET` | `/v1/agents/{agent_id}/child-agents/{child_agent_id}` | `handleAgentGetChildAgent` | [agents_api.go#L53](../../node/internal/api/agents_api.go#L53) |
 | `POST` | `/v1/agents/{agent_id}/child-agents/{child_agent_id}/cancel` | `handleAgentCancelChildAgent` | [agents_api.go#L54](../../node/internal/api/agents_api.go#L54) |
 | `POST` | `/v1/agents/{agent_id}/clear-context` | `handleAgentClearContext` | [agents_api.go#L47](../../node/internal/api/agents_api.go#L47) |
 | `POST` | `/v1/agents/{agent_id}/compress` | `handleAgentCompress` | [agents_api.go#L48](../../node/internal/api/agents_api.go#L48) |
 | `GET` | `/v1/agents/{agent_id}/context` | `handleAgentContext` | [agents_api.go#L45](../../node/internal/api/agents_api.go#L45) |
 | `GET` | `/v1/agents/{agent_id}/dreaming` | `handleDreamingStatus` | [dreaming_scheduler.go#L185](../../node/internal/api/dreaming_scheduler.go#L185) |
 | `POST` | `/v1/agents/{agent_id}/ensure` | `handleAgentEnsure` | [agents_api.go#L38](../../node/internal/api/agents_api.go#L38) |
-| `GET` | `/v1/agents/{agent_id}/execution-events` | `handleAgentExecutionEvents` | [agents_api.go#L41](../../node/internal/api/agents_api.go#L41) |
 | `GET` | `/v1/agents/{agent_id}/experience` | `handleAutonomyV2ExperienceGet` | [autonomy_v2_api.go#L23](../../node/internal/api/autonomy_v2_api.go#L23) |
 | `GET` | `/v1/agents/{agent_id}/handbook` | `handleGetAgentHandbook` | [agents_api.go#L33](../../node/internal/api/agents_api.go#L33) |
 | `GET` | `/v1/agents/{agent_id}/handbook/history` | `handleGetAgentHandbookHistory` | [agents_api.go#L34](../../node/internal/api/agents_api.go#L34) |
@@ -201,7 +205,6 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `PATCH` | `/v1/agents/{agent_id}/prompt-context/memory/{entry_id}` | `handlePatchAgentMemoryEntry` | [agent_policy_api.go#L41](../../node/internal/api/agent_policy_api.go#L41) |
 | `POST` | `/v1/agents/{agent_id}/reload` | `handleAgentReload` | [agents_api.go#L39](../../node/internal/api/agents_api.go#L39) |
 | `GET` | `/v1/agents/{agent_id}/screen/status` | `handleAgentScreenStatus` | [screen_api.go#L17](../../node/internal/api/screen_api.go#L17) |
-| `GET` | `/v1/agents/{agent_id}/screen/stream` | `handleAgentScreenStream` | [screen_api.go#L16](../../node/internal/api/screen_api.go#L16) |
 | `GET` | `/v1/agents/{agent_id}/skills` | `handleAgentListSkills` | [agents_api.go#L49](../../node/internal/api/agents_api.go#L49) |
 | `POST` | `/v1/agents/{agent_id}/skills/load` | `handleAgentLoadSkill` | [agents_api.go#L50](../../node/internal/api/agents_api.go#L50) |
 | `POST` | `/v1/agents/{agent_id}/skills/unload` | `handleAgentUnloadSkill` | [agents_api.go#L51](../../node/internal/api/agents_api.go#L51) |
@@ -259,7 +262,6 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `PATCH` | `/v1/mcp/servers/{server_id}` | `handlePatchMCPServer` | [mcp_api.go#L37](../../node/internal/api/mcp_api.go#L37) |
 | `POST` | `/v1/mcp/servers/{server_id}/refresh` | `handleRefreshMCPServer` | [mcp_api.go#L40](../../node/internal/api/mcp_api.go#L40) |
 | `POST` | `/v1/mcp/servers/{server_id}/test` | `handleTestMCPServer` | [mcp_api.go#L39](../../node/internal/api/mcp_api.go#L39) |
-| `GET` | `/v1/mcp/servers/{server_id}/tools` | `handleMCPServerTools` | [mcp_api.go#L41](../../node/internal/api/mcp_api.go#L41) |
 | `GET` | `/v1/mcp/status` | `handleMCPStatus` | [mcp_api.go#L35](../../node/internal/api/mcp_api.go#L35) |
 
 `GET /v1/mcp/config` 返回可编辑配置视图，其中字面量环境变量和请求头值会替换为 `__DAGENTS_SECRET_REDACTED__`。`PUT` 仅可用该标记保留同一服务、同一键已有的值；若没有对应旧值则拒绝保存。提交新值会轮换密钥，删除键或服务会真正删除旧值。配置视图包含 `enabled` 与 `enabled_tools`，因此 GET 后原样 PUT 会保留服务停用状态及工具允许列表。此处只遮罩 API 编辑视图；本地运行时格式化仍保持原值。
@@ -282,12 +284,17 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 
 ### Manage Workgroups
 
+Desktop 使用以下聚合读取接口减少 WebView 往返：`GET /v1/workgroups/desktop/list` 合并全量列表和当前 Node 订阅状态；`GET /v1/workgroups/{id}/desktop-snapshot` 返回工作组、成员、Timeline、待审批，并按工作组状态附加队列或模型配置，首次加载可加 `include_agents=true`；`GET /v1/workgroups/{id}/desktop-progress` 将 Timeline 与人工队列合并为一个刷新请求。它们只组合现有 Node→Manage 查询，不改变 Manage 的数据所有权；单项修改仍使用下方原子接口。
+
 | Method | Path | Handler | Source |
 |---|---|---|---|
 | `GET` | `/v1/workgroups` | `handleListWorkgroups` | [workgroup_api.go#L16](../../node/internal/api/workgroup_api.go#L16) |
+| `GET` | `/v1/workgroups/desktop/list` | `handleDesktopWorkgroupList` | [workgroup_api.go](../../node/internal/api/workgroup_api.go) |
 | `POST` | `/v1/workgroups` | `handleCreateWorkgroup` | [workgroup_api.go#L17](../../node/internal/api/workgroup_api.go#L17) |
 | `GET` | `/v1/workgroups/meta/agents` | `handleListRegisteredAgents` | [workgroup_api.go#L18](../../node/internal/api/workgroup_api.go#L18) |
 | `GET` | `/v1/workgroups/{workgroupId}` | `handleGetWorkgroup` | [workgroup_api.go#L19](../../node/internal/api/workgroup_api.go#L19) |
+| `GET` | `/v1/workgroups/{workgroupId}/desktop-snapshot` | `handleDesktopWorkgroupSnapshot` | [workgroup_api.go](../../node/internal/api/workgroup_api.go) |
+| `GET` | `/v1/workgroups/{workgroupId}/desktop-progress` | `handleDesktopWorkgroupProgress` | [workgroup_api.go](../../node/internal/api/workgroup_api.go) |
 | `PATCH` | `/v1/workgroups/{workgroupId}` | `handlePatchWorkgroup` | [workgroup_api.go#L20](../../node/internal/api/workgroup_api.go#L20) |
 | `GET` | `/v1/workgroups/{workgroupId}/acl` | `handleGetWorkgroupACL` | [workgroup_api.go#L23](../../node/internal/api/workgroup_api.go#L23) |
 | `POST` | `/v1/workgroups/{workgroupId}/collaborators` | `handleAddWorkgroupCollaborator` | [workgroup_api.go#L24](../../node/internal/api/workgroup_api.go#L24) |

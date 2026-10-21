@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import * as api from "../api/node.js";
+import { confirmDesktopAction } from "../utils/desktopDialogs.js";
 import TriggerEditor from "./settings/TriggerEditor.vue";
 import { formatTriggerCondition, formatUnixTime, shortId, truncateText, triggerFireStatusMessage } from "../utils/panelFormat.js";
 import {
@@ -144,7 +145,7 @@ async function recoverPending(item) {
   const confirmation = isAutoManaged(item)
     ? "确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后默认唤醒保持禁用，请返回 Auto 设置同步唤醒。"
     : "确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后任务会保持禁用，需要你手动启用。";
-  if (!window.confirm(confirmation)) return;
+  if (!await confirmDesktopAction(confirmation)) return;
   busyKey.value = `recover:${id}`;
   error.value = "";
   try {
@@ -257,7 +258,7 @@ async function removeTriggerConfirmed(item) {
   const id = item?.trigger_id;
   const label = item?.name || id;
   if (!id || rowBusy(`delete:${id}`)) return;
-  if (!window.confirm(`确定删除定时任务「${label}」？\n\n删除后不可恢复。`)) return;
+  if (!await confirmDesktopAction(`确定删除定时任务「${label}」？\n\n删除后不可恢复。`)) return;
   busyKey.value = `delete:${id}`;
   error.value = "";
   statusMessage.value = "";

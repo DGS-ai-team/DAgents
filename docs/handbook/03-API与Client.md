@@ -6,10 +6,10 @@
 
 - 查阅 Agent Node 对外 HTTP/SSE 契约并对照 `node/internal/api/` 实现  
 - 构造 HITL `resume` 请求  
-- 使用 **Web UI**（默认）并联调 Node  
+- 使用 **DAgents Desktop**（唯一 Agent 交互入口）并联调 Node
 - 配置 `packaging/agent-client/config.yaml`  
 
-> 人机入口是 **内嵌 Web UI**（`/ui/`）。`dagents-client` 提供 probe / update / version 等运维命令。
+> 人机入口是独立的 **DAgents Desktop**。Node 仅提供运行 API，不托管 `/ui/` 网页。`dagents-client` 提供 probe / update / version 等运维命令。
 
 ---
 
@@ -19,7 +19,7 @@
 |------|------|
 | **用户面 = Agent** | 1 Agent = 1 主对话；主路径 `/v1/agents/{agent_id}/...` |
 | **Policy / 侧车按 Agent** | SQLite（`agents.db`） |
-| **UI / 工具只连 Node** | 浏览器打开本机 `/ui/`；工具在 Node 内执行 |
+| **Desktop / 工具只连 Node** | Desktop 通过 API/SSE 连接 Node；工具在 Node 内执行 |
 | **跨 Node = Workgroup** | 注册与 ACL 使用 `node_id` |
 
 ### 1.1 路径前缀
@@ -27,7 +27,6 @@
 | 前缀 | 调用方 |
 |------|--------|
 | `/health` | 探活 |
-| `/ui/` | 内嵌 Web UI 静态资源 |
 | `/v1/agents/...` | **主契约**（对话、策略、侧车、子 Agent） |
 | `/v1/workgroups/...` | 工作组（Node 反代 Manage；需启用 manage.workgroup） |
 | `/v1/...` | messages、streams、triggers、setup |
@@ -117,7 +116,7 @@ Content-Type: application/json
 GET /v1/streams?agent_id=agt-...&live=1
 ```
 
-- Web UI 通常维持一条 SSE；可用 `agent_id` query 过滤。
+- Desktop 通常维持一条 SSE；可用 `agent_id` query 过滤。
 - 过滤流重连使用 `after_agent_seq`；无 Agent 过滤的 Node 级流才使用 `after_seq`。`stream_epoch` 变化或收到 `resync_required` 时必须 hydrate。
 - 事件类型速查：[附录/SSE事件速查](./附录/SSE事件速查.md)。
 
@@ -137,23 +136,22 @@ GET /v1/streams?agent_id=agt-...&live=1
 
 ## 3. 人机入口
 
-### 3.1 现行：Web UI
+### 3.1 现行：Desktop
 
 ```text
-浏览器 ──HTTP/SSE──► Agent Node（:18765）
-                      ├── /ui/     Vue Workbench
-                      └── /v1/*    Agents · streams · workgroups 反代
+DAgents Desktop ──HTTP/SSE──► Agent Node（:18765）
+                                 └── /v1/*    Agents · streams · workgroups 反代
 ```
 
 | 场景 | 入口 |
 |------|------|
-| 本机对话 / 设置 / 工作组 | `http://127.0.0.1:18765/ui/` |
+| 本机对话 / 设置 / 工作组 | 启动 DAgents Desktop |
 | 探活 | `curl /health` 或 `dagents-client probe` |
 | Manage 运维 Console | `http://127.0.0.1:8020/console/`（另起 Manage） |
 
-源码：`node/webui/frontend/`（构建产物 **不入库**；`go:embed`）。API 封装：`src/api/node.js`。
+共享 Vue 源码：`node/webui/frontend/`，由 Desktop 自身打包，不提供独立浏览器入口。API 封装：`src/api/node.js`。
 
-### 3.2 HITL 行为（Web UI）
+### 3.2 HITL 行为（Desktop）
 
 - 收到 **`hitl_required`** 后按 `items[]` 入队（ask / 审批）；用户分步 `POST resume`。  
 - 取消在途 turn：`POST /v1/agents/{id}/cancel`（或工作组 turn cancel）。  
@@ -175,14 +173,14 @@ GET /v1/streams?agent_id=agt-...&live=1
 
 | 读者 | 常用键 |
 |------|--------|
-| Node | `listen`、`manage`、`ui`（其余多在 SQLite / Web UI） |
+| Node | `listen`、`manage`（业务设置存于 Node runtime 数据库） |
 
 完整键表：[附录/配置项参考](./附录/配置项参考.md)。  
 运行时根固定 `./.runtime`（不可配置）。
 
 ### 4.2 跨机访问 Node（可选）
 
-目标机跑 Node 且需从他机浏览器打开 `/ui/` 时：
+Node 可按部署需要监听可访问的地址，以接受授权的 Node API 客户端请求：
 
 ```yaml
 listen:
@@ -190,7 +188,7 @@ listen:
   port: 18765
 ```
 
-Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`）；Agent 工具文件操作使用各 Agent 自己的 `workspace_root`。建议防火墙白名单或 SSH 隧道。
+Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`）；Agent 工具文件操作使用各 Agent 自己的 `workspace_root`。当前 Desktop 只连接同机 Node，不提供远程 Node 连接或浏览器网页入口。远程暴露 API 前应使用防火墙白名单或 SSH 隧道。
 
 ### 4.3 Node 运行目录与 Agent 工作区
 
@@ -221,7 +219,7 @@ Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`
 | SSE handler | `node/internal/api/stream.go` |
 | 工作组反代 | `node/internal/api/workgroup_api.go` |
 | 配置加载 | `shared/config/config.go` |
-| Web UI | `node/webui/frontend/` |
+| Desktop 复用的 Vue 源码 | `node/webui/frontend/` |
 | 精简 client | `client/cmd/dagents-client/` |
 
 ---
@@ -231,15 +229,11 @@ Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`
 ```bash
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 
-# Web UI 静态资源不入库（Windows 可用 npm）
-npm run build --prefix node/webui/frontend
-# 或：bash node/webui/build.sh
-
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
-# 浏览器打开 http://127.0.0.1:18765/ui/
+# 另行启动 DAgents Desktop 连接本机 Node
 ```
 
-默认可开 **mock LLM**（Web UI / `node_settings`）无 API Key 联调。
+默认可在 DAgents Desktop 的 LLM 设置中启用 **Mock**，无 API Key 联调。
 
 ---
 

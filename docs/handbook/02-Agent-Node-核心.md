@@ -437,8 +437,8 @@ newRuntimeWithPublisher
 
 **文件**：`stream/hub.go`
 
-- Manager 级 **单例** Hub；Orchestrator 经 `stream.Publisher` 发布。  
-- 每条事件带 Agent 维度 id，Web UI 只展示当前 Agent。  
+- Manager 级 **单例** Hub；Orchestrator 经 `stream.Publisher` 发布。
+- 每条事件带 Agent 维度 id，Desktop 只展示当前 Agent。
 - `Subscribe(afterSeq)`：断点续传。
 
 ### 4.7 源码索引（§4）

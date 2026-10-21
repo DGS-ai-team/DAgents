@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, putAutoConfig, updateAgentTodo } from "./node.js";
+import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, pickPlatformDirectory, putAutoConfig, updateAgentTodo } from "./node.js";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -29,5 +29,24 @@ describe("read-only Agent browser view API", () => {
     vi.stubGlobal("__DAGENTS_API_REQUEST__", request);
     await getAgentBrowserView("agent/1", "page/2");
     expect(request).toHaveBeenCalledWith({ method: "GET", path: "/v1/agents/agent%2F1/browser/view?page_id=page%2F2", body: undefined });
+  });
+});
+
+describe("platform directory picker", () => {
+  it("uses the Desktop-owned native dialog when the Desktop bridge is available", async () => {
+    const picker = vi.fn(async () => ({ ok: true, cancelled: false, path: "D:\\Projects\\agent" }));
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    vi.stubGlobal("__DAGENTS_PICK_DIRECTORY__", picker);
+
+    await expect(pickPlatformDirectory()).resolves.toEqual({ ok: true, cancelled: false, path: "D:\\Projects\\agent" });
+    expect(picker).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the Node API when the native picker bridge is not injected", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true, json: async () => ({ ok: true, cancelled: true }) });
+    await expect(pickPlatformDirectory()).resolves.toEqual({ ok: true, cancelled: true });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/v1/platform/directory-picker");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
   });
 });

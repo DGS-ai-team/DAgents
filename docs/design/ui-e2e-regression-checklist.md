@@ -1,5 +1,7 @@
 # Web UI 回归测试清单
 
+> 已退役：Node `/ui/` 网页入口已移除。本清单仅作历史记录，不再作为当前验收步骤；请使用 [Desktop 日常使用接入记录](desktop-product/daily-use-integration.md) 与 [发布收束清单](../release-readiness.md)。
+
 本文是 Node 内嵌 Web UI 的可重复回归清单，覆盖真实模型、工具调用、HITL、Turn 取消、连续对话和同步浏览器工具。测试目标是验证“浏览器 → SSE → Node MessageQueue → Turn/Step → 工具 → UI”的完整链路。
 
 > **状态说明（2026-09-22）**：bash_run 与 Browser 工具均为同步调用；user/trigger 进入 InputBox FIFO；审批等待期间普通输入排队，使用显式 turn cancel 取消，用户询问使用 typed resume。

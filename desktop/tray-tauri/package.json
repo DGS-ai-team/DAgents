@@ -1,24 +1,28 @@
 {
   "name": "dagents-shell",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-close.test.js ../ui/terminal-output.test.js ../ui/composer-surface-motion.test.js ../ui/workspace-files-state.test.js ../ui/workgroup-state.test.js ./desktop-settings-state.test.js ./top-slot-icons.test.js ../../shared/icons/icons.test.js",
+    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-close.test.js ../ui/terminal-output.test.js ../ui/composer-surface-motion.test.js ../ui/workspace-files-state.test.js ../ui/workspace-preview.test.js ../ui/workgroup-state.test.js ../ui/slash-commands.test.js ./src/workspace-documents.test.js ./src/workspace-syntax.test.js ./desktop-settings-state.test.js ./top-slot-icons.test.js ../../shared/icons/icons.test.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
     "@tauri-apps/plugin-opener": "^2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "dompurify": "3.4.17",
+    "exceljs": "4.4.0",
     "highlight.js": "11.11.2",
+    "jszip": "3.10.2",
+    "mammoth": "1.13.0",
     "marked": "15.0.12",
     "morphicons": "1.7.1",
     "vue": "^3.5.13",
@@ -28,5 +32,14 @@
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^5.2.1",
     "vite": "^6.0.3"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    },
+    "mammoth": {
+      "argparse": "2.0.1"
+    },
+    "unzipper": "0.12.5"
   }
 }

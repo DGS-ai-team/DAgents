@@ -46,7 +46,7 @@ struct HealthPayload {
 }
 
 pub fn probe(cfg: &ShellConfig) -> Result<Health, String> {
-    let url = format!("{}/health", cfg.node_endpoint.trim_end_matches('/'));
+    let url = format!("{}/health", cfg.node_endpoint().trim_end_matches('/'));
     let resp = ureq::get(&url)
         .timeout(Duration::from_secs(3))
         .call()
@@ -68,9 +68,6 @@ pub fn is_running(cfg: &ShellConfig) -> bool {
 }
 
 pub fn is_managed(layout: &Layout, cfg: &ShellConfig) -> bool {
-    if !cfg.can_manage_local_node() {
-        return false;
-    }
     let Some(owner) = read_managed_node(&layout.managed_node_path).ok().flatten() else {
         return false;
     };
@@ -108,9 +105,6 @@ fn owner_matches_process(owner: &ManagedNode, identity: &ProcessIdentity) -> boo
 }
 
 pub fn start(layout: &Layout, cfg: &ShellConfig, wait_ready: Duration) -> Result<(), String> {
-    if !cfg.can_manage_local_node() {
-        return Err("隧道模式只连接已运行的 Node，不会启动本机 Node".into());
-    }
     // 已有健康 Node（包括外部 Node）可以连接使用，但不认领其进程所有权。
     if is_running(cfg) {
         return Ok(());
@@ -226,9 +220,6 @@ pub fn start(layout: &Layout, cfg: &ShellConfig, wait_ready: Duration) -> Result
 }
 
 pub fn stop(layout: &Layout, cfg: &ShellConfig) -> Result<(), String> {
-    if !cfg.can_manage_local_node() {
-        return Err("隧道模式只连接已运行的 Node，不会停止本机 Node".into());
-    }
     let Some(owner) = read_managed_node(&layout.managed_node_path)? else {
         // 无本地 owner 记录时这是明确 no-op；不能用健康 endpoint 或旧裸 PID 推断所有权。
         return Ok(());
@@ -527,7 +518,7 @@ struct AgentInfoPayload {
 
 /// 从 Node `/v1/node/info` 解析 Manage Console URL（附带 node_id）。
 pub fn manage_console_url(cfg: &ShellConfig) -> Result<String, String> {
-    let info_url = format!("{}/v1/node/info", cfg.node_endpoint.trim_end_matches('/'));
+    let info_url = format!("{}/v1/node/info", cfg.node_endpoint().trim_end_matches('/'));
     let resp = ureq::get(&info_url)
         .timeout(Duration::from_secs(3))
         .call()
@@ -573,9 +564,6 @@ fn urlencoding_node_id(node_id: &str) -> String {
 
 /// ensure Node 后用系统浏览器打开 Manage Console（带 node_id）。
 pub fn open_manage(layout: &Layout, cfg: &ShellConfig, wait_ready: Duration) -> Result<(), String> {
-    if !cfg.can_manage_local_node() {
-        return Err("隧道模式不会启动本机 Node 或自动打开本机 Manage".into());
-    }
     start(layout, cfg, wait_ready)?;
     let url = manage_console_url(cfg)?;
     open_url(&url)
@@ -676,26 +664,6 @@ mod lifecycle_tests {
     }
 
     #[test]
-    fn tunnel_mode_never_starts_or_stops_local_node() {
-        let (mut layout, _, _) = fixture();
-        layout.managed_node_path = std::env::temp_dir().join(format!(
-            "dagents-tunnel-owner-{}-{}.json",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let mut cfg = ShellConfig::default();
-        cfg.connection_mode = crate::config::ConnectionMode::Tunnel;
-        assert!(start(&layout, &cfg, Duration::from_millis(1))
-            .unwrap_err()
-            .contains("隧道模式"));
-        assert!(stop(&layout, &cfg).unwrap_err().contains("隧道模式"));
-        assert!(!layout.managed_node_path.exists());
-    }
-
-    #[test]
     fn invalid_owner_record_fails_closed_and_preserves_evidence() {
         let (mut layout, _, _) = fixture();
         layout.managed_node_path = std::env::temp_dir().join(format!(
@@ -744,7 +712,6 @@ mod lifecycle_tests {
                 .as_nanos()
         ));
         let cfg = ShellConfig {
-            connection_mode: crate::config::ConnectionMode::Local,
             node_endpoint: format!("http://{address}"),
             ..ShellConfig::default()
         };

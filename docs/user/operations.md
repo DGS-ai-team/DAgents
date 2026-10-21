@@ -8,7 +8,7 @@
 - [offline install](../../packaging/OFFLINE_INSTALL.md)
 - [Manage packaging](../../packaging/manage/README.md)
 
-Node 默认监听 `127.0.0.1:18765`。Desktop 的远程接入只支持用户预先建立的 SSH 本地转发，连接方式选“SSH 隧道”，地址填写本机 loopback 监听端点。Node HTTP API 没有通用设备鉴权，防火墙白名单本身不提供身份验证；本产品当前不提供 Desktop 的 LAN/WAN 直连模式。
+Node 默认监听 `127.0.0.1:18765`。Desktop 固定连接同机的 `127.0.0.1:18765`，不支持远程 Node 档案或 SSH 隧道连接；Node 与 Browser sidecar 之间固定使用 `127.0.0.1:18766`。Node bootstrap YAML 仍可配置监听地址，供 Node API 的独立服务部署使用；这不会改变 Desktop 的固定本机连接目标。Node HTTP API 没有通用设备鉴权，不要将它暴露到不可信网络。
 
 下一版 Windows 完整安装包仅提供 x64，暂停 x86。历史 x86 安装仍按自身平台检查更新，不会自动切换到 x64；迁移到 x64 需确认操作系统支持并采用完整备份、重新安装和数据恢复流程，不能在 32 位系统上运行 x64 安装器。
 
@@ -61,7 +61,6 @@ Node 默认监听 `127.0.0.1:18765`。Desktop 的远程接入只支持用户预�
 
 ```bash
 npm test --prefix node/webui/frontend -- --run
-npm run build --prefix node/webui/frontend
 npm run build --prefix manage/console/frontend
 go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v

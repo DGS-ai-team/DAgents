@@ -72,12 +72,13 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	// the Agent registry still has no executable browser tools.
 	browserRuntimeChange := patch.Features != nil || patch.Browser != nil
 	var preparedBrowserManager *browser.Manager
+	var preparedBrowserService *browser.ServiceProcess
 	if browserRuntimeChange && updated.BrowserEnabled() && !config.BrowserPlatformSupported() {
 		writeAPIError(w, http.StatusNotImplemented, "unsupported_browser_platform", config.BrowserPlatformReason(), nil)
 		return
 	}
 	if browserRuntimeChange && updated.BrowserEnabled() {
-		preparedBrowserManager, err = browser.NewManager(updated, nil)
+		preparedBrowserManager, preparedBrowserService, err = s.browserRuntimeFactory(updated)
 		if err != nil {
 			writeAPIError(w, http.StatusServiceUnavailable, "browser_service_unavailable", err.Error(), nil)
 			return
@@ -88,6 +89,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		defer func() {
 			if !browserManagerCommitted {
 				_ = preparedBrowserManager.Close()
+				_ = preparedBrowserService.Close()
 			}
 		}()
 	}
@@ -177,7 +179,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 
 	setup.CopyConfig(s.cfg, updated)
 	if browserRuntimeChange {
-		s.installBrowserManager(preparedBrowserManager)
+		s.installBrowserRuntime(preparedBrowserManager, preparedBrowserService, updated.Browser.ServiceURL)
 		browserManagerCommitted = true
 	}
 	s.syncLLMRuntimeFromStore(r.Context())
