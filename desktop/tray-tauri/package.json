@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-close.test.js ../ui/terminal-output.test.js ../ui/composer-surface-motion.test.js ../ui/workspace-files-state.test.js ../ui/workspace-preview.test.js ../ui/workgroup-state.test.js ../ui/slash-commands.test.js ./src/workspace-documents.test.js ./src/workspace-syntax.test.js ./desktop-settings-state.test.js ./top-slot-icons.test.js ../../shared/icons/icons.test.js",
+    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-close.test.js ../ui/terminal-output.test.js ../ui/composer-surface-motion.test.js ../ui/workspace-files-state.test.js ../ui/workspace-references.test.js ../ui/workspace-preview.test.js ../ui/workgroup-state.test.js ../ui/slash-commands.test.js ./src/workspace-documents.test.js ./src/workspace-syntax.test.js ./desktop-settings-state.test.js ./top-slot-icons.test.js ../../shared/icons/icons.test.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -25,6 +25,7 @@
     "mammoth": "1.13.0",
     "marked": "15.0.12",
     "morphicons": "1.7.1",
+    "pdfjs-dist": "6.4.299",
     "vue": "^3.5.13",
     "vue-router": "^4.6.4"
   },

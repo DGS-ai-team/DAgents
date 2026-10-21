@@ -20,6 +20,7 @@ const directories = {
     { name: 'reports', path: 'reports', is_dir: true, size: 0 },
     { name: 'a.md', path: 'a.md', is_dir: false, size: 10 },
     { name: 'b.md', path: 'b.md', is_dir: false, size: 10 },
+    { name: 'records.csv', path: 'records.csv', is_dir: false, size: 32 },
   ],
   reports: [{ name: 'summary.md', path: 'reports/summary.md', is_dir: false, size: 20 }],
 }
@@ -79,6 +80,29 @@ describe('Desktop workspace resource navigation', () => {
     expect(api.listWorkspace).toHaveBeenLastCalledWith('agent-a', 'reports')
     expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'reports/summary.md')
     expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('summary.md')
+  })
+
+  it('opens a right-click reference action for a CSV cell and emits it to the existing composer flow', async () => {
+    api.readWorkspaceFile.mockImplementation(async (_agentId, path) => path === 'records.csv'
+      ? { bytes: bytes('name,amount\nAlpha,12\nBeta,34'), contentType: 'text/csv', etag: 'csv-revision-1' }
+      : result(path))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect((await wrapper.vm.openPath('records.csv')).ok).toBe(true)
+    const cells = wrapper.findAll('.workspace-files__sheet-preview tbody td')
+    expect(cells.map(cell => cell.text())).toEqual(['name', 'amount', 'Alpha', '12', 'Beta', '34'])
+
+    await cells[2].trigger('pointerdown', { button: 0 })
+    await cells[2].trigger('contextmenu', { clientX: 120, clientY: 80 })
+    expect(document.body.querySelector('.workspace-files__reference-menu-context')?.textContent).toContain('records.csv!A2')
+    expect(document.body.querySelector('[aria-label="文件修改意见"]')).toBeNull()
+    document.body.querySelector('.workspace-files__reference-menu button').click()
+    await flushPromises()
+
+    const [payload] = wrapper.emitted('quote-reference')[0]
+    expect(payload).toMatchObject({ agentId: 'agent-a', path: 'records.csv', revision: 'csv-revision-1' })
+    expect(payload.anchor).toMatchObject({ type: 'sheet-range', label: 'records.csv!A2', quote: 'Alpha' })
   })
 
   it('keeps the current editor and its draft when confirmation to leave is canceled', async () => {

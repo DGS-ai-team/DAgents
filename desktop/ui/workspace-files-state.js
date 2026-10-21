@@ -2,6 +2,43 @@ const textExtensions = new Set(['md', 'txt', 'json', 'js', 'mjs', 'ts', 'css', '
 const codeExtensions = new Set(['json', 'js', 'mjs', 'ts', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'py', 'go', 'rs', 'toml', 'sh', 'ps1', 'sql', 'java', 'cs', 'cpp', 'c', 'h', 'rb', 'php'])
 export const workspacePreviewLimits = Object.freeze({ bytes: 32 * 1024 * 1024, rows: 500, columns: 60 })
 
+export function parseWorkspaceCsvPreview(source, { rows: maxRows = workspacePreviewLimits.rows, columns: maxColumns = workspacePreviewLimits.columns } = {}) {
+  const text = String(source || '').replace(/^\uFEFF/, '')
+  if (!text) return { rows: [], truncated: false }
+  const rows = []
+  let row = []
+  let field = ''
+  let quoted = false
+  let truncated = false
+  const pushField = () => {
+    if (row.length < maxColumns) row.push(field)
+    else truncated = true
+    field = ''
+  }
+  const pushRow = () => {
+    pushField()
+    if (rows.length < maxRows) rows.push(row)
+    else truncated = true
+    row = []
+  }
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') { field += '"'; index += 1 }
+      else if (character === '"') quoted = false
+      else field += character
+    } else if (character === '"' && field === '') quoted = true
+    else if (character === ',') pushField()
+    else if (character === '\n' || character === '\r') {
+      if (character === '\r' && text[index + 1] === '\n') index += 1
+      pushRow()
+    } else field += character
+  }
+  if (field || row.length || !/[\r\n]$/.test(text)) pushRow()
+  return { rows, truncated }
+}
+
 export function workspaceUploadPath(directory, name) {
   return [String(directory || '').replace(/^\/+|\/+$/g, ''), String(name || '').replace(/^\/+/, '')].filter(Boolean).join('/')
 }
@@ -90,6 +127,7 @@ export function workspacePreviewKind(name, suppliedType, bytes) {
   if (type.startsWith('image/')) return 'image'
   if (extension === 'svg' && hasSvgMarkup(data)) return 'svg'
   if ((extension === 'html' || extension === 'htm' || type === 'text/html') && isUtf8Text(data)) return 'html'
+  if (extension === 'csv' && isUtf8Text(data)) return 'csv'
   if (codeExtensions.has(extension) && isUtf8Text(data)) return 'code'
   if (type.startsWith('text/') || ['application/json', 'application/xml', 'application/javascript'].includes(type) || isUtf8Text(data)) return 'text'
   return 'unsupported'

@@ -19,7 +19,7 @@ test('XLSX preview returns sheet names, cell values, and bounded rows/columns', 
   sheet.addRow(['January', 120])
   sheet.addRow(['February', { formula: '60*2', result: 120 }])
   const result = await readXlsxPreview(new Uint8Array(await source.xlsx.writeBuffer()))
-  assert.deepEqual(result, [{ name: 'Quarterly', rows: [['Month', 'Revenue'], ['January', '120'], ['February', '120']], truncated: false }])
+  assert.deepEqual(result, [{ name: 'Quarterly', rows: [['Month', 'Revenue'], ['January', '120'], ['February', '120']], merges: [], truncated: false }])
 
   const largeWorkbook = new ExcelJS.Workbook()
   const large = largeWorkbook.addWorksheet('Large')
@@ -27,6 +27,27 @@ test('XLSX preview returns sheet names, cell values, and bounded rows/columns', 
   const bounded = await readXlsxPreview(new Uint8Array(await largeWorkbook.xlsx.writeBuffer()))
   assert.equal(bounded[0].rows.length, workspaceDocumentPreviewLimits.rows)
   assert.equal(bounded[0].truncated, true)
+})
+
+test('XLSX preview preserves merged ranges and the blank cells covered by them', async () => {
+  const source = new ExcelJS.Workbook()
+  const sheet = source.addWorksheet('Summary')
+  sheet.mergeCells('B2:D3')
+  sheet.getCell('B2').value = 'Quarterly total'
+  sheet.getCell('A4').value = 'Total'
+  sheet.getCell('D4').value = 42
+  const result = await readXlsxPreview(new Uint8Array(await source.xlsx.writeBuffer()))
+  assert.deepEqual(result, [{
+    name: 'Summary',
+    rows: [
+      ['', '', '', ''],
+      ['', 'Quarterly total', 'Quarterly total', 'Quarterly total'],
+      ['', 'Quarterly total', 'Quarterly total', 'Quarterly total'],
+      ['Total', '', '', '42'],
+    ],
+    merges: [{ startRow: 2, endRow: 3, startColumn: 2, endColumn: 4 }],
+    truncated: false,
+  }])
 })
 
 test('XLSX preview keeps cell data when an unsupported default-namespace chart drawing is present', async () => {
@@ -46,5 +67,5 @@ test('XLSX preview keeps cell data when an unsupported default-namespace chart d
   const bytes = await archive.generateAsync({ type: 'uint8array' })
 
   const result = await readXlsxPreview(bytes)
-  assert.deepEqual(result, [{ name: 'Summary', rows: [['Topic', 'Count'], ['Open items', '4']], truncated: false }])
+  assert.deepEqual(result, [{ name: 'Summary', rows: [['Topic', 'Count'], ['Open items', '4']], merges: [], truncated: false }])
 })

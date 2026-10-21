@@ -1270,6 +1270,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 
 .composer-attachment img { width: 34px; height: 34px; border-radius: 4px; object-fit: cover; cursor: zoom-in; }
 .composer-attachment.file-attachment .tab-icon { flex: 0 0 24px; width: 24px; height: 30px; color: #343a3d; }
+.composer-attachment.reference-attachment .ui-icon { flex: 0 0 24px; width: 24px; color: #343a3d; }
 .composer-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachment i { position: absolute; top: 0; right: 5px; border: 0; color: #6b7478; font-size: 16px; font-style: normal; cursor: pointer; }
 .desktop-composer-toolbar {

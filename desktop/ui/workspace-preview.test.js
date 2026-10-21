@@ -14,6 +14,7 @@ test('workspace preview recognizes supported formats by extension and file signa
   assert.equal(workspacePreviewKind('picture.bmp', 'application/octet-stream', Uint8Array.from([0x42,0x4d,0,0,0,0,0,0,0,0,0,0,0,0])), 'image')
   assert.equal(workspacePreviewKind('favicon.ico', 'application/octet-stream', Uint8Array.from([0,0,1,0])), 'image')
   assert.equal(workspacePreviewKind('main.go', 'text/plain', text('package main')), 'code')
+  assert.equal(workspacePreviewKind('table.csv', 'text/plain', text('name,value\na,1')), 'csv')
 })
 
 test('workspace preview reports malformed and legacy Office files as unsupported', () => {

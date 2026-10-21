@@ -10,6 +10,7 @@ import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceImageBlob } from './workspace-files-state.js'
+import { createWorkspaceReference, formatWorkspaceReferencesMessage } from './workspace-references.js'
 import { agentStore } from '../../node/webui/frontend/src/stores/agent.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '../../node/webui/frontend/src/stores/hitl.js'
 import { applyHydrateTurnState } from '../../node/webui/frontend/src/stores/turnState.js'
@@ -237,12 +238,14 @@ const selectedWorkgroupId = ref('')
 const selectedWorkgroupName = ref('')
 const pendingImagesByAgent = ref({})
 const pendingFilesByAgent = ref({})
+const pendingWorkspaceReferencesByAgent = ref({})
 const pendingFiles = computed(() => pendingFilesByAgent.value[activeId.value] || [])
+const pendingWorkspaceReferences = computed(() => pendingWorkspaceReferencesByAgent.value[activeId.value] || [])
 const pendingImages = computed({
   get: () => pendingImagesByAgent.value[activeId.value] || [],
   set: images => { if (activeId.value) pendingImagesByAgent.value[activeId.value] = images },
 })
-const attachmentLimitReached = computed(() => pendingImages.value.length + pendingFiles.value.length >= 8)
+const attachmentLimitReached = computed(() => pendingImages.value.length + pendingFiles.value.length + pendingWorkspaceReferences.value.length >= 8)
 const attachmentInput = ref(null)
 const imageAttachmentInput = ref(null)
 const lightboxImage = ref('')
@@ -675,13 +678,12 @@ async function send() {
   const text = input.value.trim()
   const images = pendingImages.value.slice()
   const files = pendingFiles.value.slice()
-  if ((!text && !images.length && !files.length) || !activeId.value) return
-  if (text.startsWith('/')) {
+  const references = pendingWorkspaceReferences.value.slice()
+  if ((!text && !images.length && !files.length && !references.length) || !activeId.value) return
+  if (text.startsWith('/') && !images.length && !files.length && !references.length) {
     const agentId = activeId.value
     input.value = ''
     inputDrafts.value[agentId] = ''
-    pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
-    pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
     await executeSlashCommand(text, agentId)
     return
   }
@@ -690,12 +692,20 @@ async function send() {
   if (hitlQueue.value.length) { error.value = '请先处理当前对话中的待处理请求。'; return }
   if (agentGenerating.value) return
   const agentId = activeId.value
+  const message = formatWorkspaceReferencesMessage({ text, references })
+  const referenceImages = references.filter(reference => reference.imageUrl).map(reference => ({ name: reference.name, url: reference.imageUrl }))
+  const sendImages = [...images, ...referenceImages]
+  const sendFiles = [...files]
+  for (const reference of references) {
+    if (!sendFiles.some(file => file.path === reference.fileRef)) sendFiles.push({ path: reference.fileRef, name: reference.name })
+  }
   input.value = ''
   inputDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(text, images, files)
+  const sent = await sendMessageToActiveAgent(message, sendImages, sendFiles)
   if (!sent) input.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, input.value, text)
   else pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
   if (sent) pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
+  if (sent) pendingWorkspaceReferencesByAgent.value[agentId] = (pendingWorkspaceReferencesByAgent.value[agentId] || []).filter(reference => !references.includes(reference))
 }
 async function sendMessageToActiveAgent(text, images = [], files = []) {
   text = String(text || '').trim()
@@ -775,6 +785,29 @@ function attachWorkspaceFile(fileRef) {
   if (!current.some(file => file.path === path)) pendingFilesByAgent.value[activeId.value] = [...current, { path, name }]
   showChat()
 }
+async function handleWorkspaceReference(payload) {
+  const agentId = String(payload?.agentId || '')
+  if (!agentId || agentId !== activeId.value || !payload.path) return
+  const existing = pendingWorkspaceReferencesByAgent.value[agentId] || []
+  const total = (pendingImagesByAgent.value[agentId] || []).length + (pendingFilesByAgent.value[agentId] || []).length + existing.length
+  if (total >= 8) { error.value = '一条消息最多添加 8 个附件或引用。'; return }
+  try {
+    const reference = createWorkspaceReference(payload)
+    pendingWorkspaceReferencesByAgent.value[agentId] = [...existing, reference]
+    error.value = ''
+    showChat()
+    await nextTick()
+    textarea.value?.focus()
+  } catch (cause) { error.value = String(cause?.message || cause) }
+}
+function removeWorkspaceReference(index) {
+  const agentId = activeId.value
+  if (!agentId) return
+  pendingWorkspaceReferencesByAgent.value[agentId] = (pendingWorkspaceReferencesByAgent.value[agentId] || []).filter((_, itemIndex) => itemIndex !== index)
+}
+function workspaceReferenceTitle(reference) {
+  return [reference.path, reference.anchor.label, reference.anchor.quote].filter(Boolean).join('\n')
+}
 function readImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -819,7 +852,7 @@ function openImagePicker() {
 }
 async function captureScreenshot() {
   const ownerId = activeId.value
-  if (!ownerId || screenshotInProgress.value || (pendingImagesByAgent.value[ownerId]?.length || 0) + (pendingFilesByAgent.value[ownerId]?.length || 0) >= 8) return
+  if (!ownerId || screenshotInProgress.value || (pendingImagesByAgent.value[ownerId]?.length || 0) + (pendingFilesByAgent.value[ownerId]?.length || 0) + (pendingWorkspaceReferencesByAgent.value[ownerId]?.length || 0) >= 8) return
   closeAttachmentActions()
   screenshotInProgress.value = true
   try {
@@ -879,7 +912,7 @@ function onScreenshotSelectionError(message) {
   if (ownerId && activeId.value === ownerId) setAgentError(ownerId, message)
 }
 async function processAttachments(files, ownerId) {
-  const remaining = 8 - (pendingImagesByAgent.value[ownerId] || []).length - (pendingFilesByAgent.value[ownerId] || []).length
+  const remaining = 8 - (pendingImagesByAgent.value[ownerId] || []).length - (pendingFilesByAgent.value[ownerId] || []).length - (pendingWorkspaceReferencesByAgent.value[ownerId] || []).length
   const priorUploadError = workspaceUploadErrors.get(ownerId)
   let batchHadFailure = false
   for (const file of files.slice(0, Math.max(0, remaining))) {
@@ -1902,7 +1935,7 @@ onUnmounted(() => {
       </section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('file')" @after-leave="onComposerPageAfterLeave('file', $event)" @after-enter="onComposerPageAfterEnter('file', $event)">
-      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" @expand-agent-dock="dockCollapsed = false" /></section>
+      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" @quote-reference="handleWorkspaceReference" @expand-agent-dock="dockCollapsed = false" /></section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('browser')" @after-leave="onComposerPageAfterLeave('browser', $event)" @after-enter="onComposerPageAfterEnter('browser', $event)">
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
@@ -1910,7 +1943,7 @@ onUnmounted(() => {
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
-      <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
+      <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length || pendingWorkspaceReferences.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button><button v-for="(reference,index) in pendingWorkspaceReferences" :key="reference.id" class="composer-attachment file-attachment reference-attachment" type="button" :title="workspaceReferenceTitle(reference)"><img v-if="reference.imageUrl" :src="reference.imageUrl" :alt="reference.name"><UiIcon v-else name="paperclip" :size="15" /><span>{{ reference.name }} · {{ reference.anchor.label }}</span><i @click.stop="removeWorkspaceReference(index)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <div ref="attachmentActionAnchor" class="attachment-action">
     <button class="attach-button" type="button" aria-label="添加文件或图片" title="添加文件或图片" :aria-expanded="attachmentActionsOpen" aria-haspopup="menu" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
     <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="添加附件" @keydown="onAttachmentMenuKeydown">
@@ -1925,7 +1958,7 @@ onUnmounted(() => {
   <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :desktop-compact="true" :disabled="agentGenerating || !activeId" @switch-profile="switchLLMProfile"/>
   <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
   <button v-if="agentGenerating" class="send-button" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button>
-  <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
+  <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length && !pendingWorkspaceReferences.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
 </form><p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
       </template>
       <template #dock>

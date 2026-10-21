@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentMediaId, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceUploadPath } from './workspace-files-state.js'
+import { agentMediaId, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceUploadPath } from './workspace-files-state.js'
 import { listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from './workspace-files-api.js'
 
 test('workspace uploads target the complete relative filename and preserve directories', () => {
@@ -15,6 +15,17 @@ test('workspace path normalization preserves dotfiles while removing only explic
   assert.equal(normalizeWorkspacePath('.'), '')
   assert.deepEqual(workspaceFileLocation('reports/annual/summary.md'), { path: 'reports/annual/summary.md', parent: 'reports/annual', name: 'summary.md' })
   assert.deepEqual(workspaceFileLocation('.config/settings.json'), { path: '.config/settings.json', parent: '.config', name: 'settings.json' })
+})
+
+test('CSV preview parses quoted delimiters, escaped quotes, and multiline cells within preview bounds', () => {
+  assert.deepEqual(parseWorkspaceCsvPreview('\uFEFFname,note\r\n"Doe, Jane","said ""hello"""\r\nnext,"line one\nline two"'), {
+    rows: [['name', 'note'], ['Doe, Jane', 'said "hello"'], ['next', 'line one\nline two']],
+    truncated: false,
+  })
+  assert.deepEqual(parseWorkspaceCsvPreview('a,b,c\n1,2,3', { rows: 1, columns: 2 }), {
+    rows: [['a', 'b']],
+    truncated: true,
+  })
 })
 
 test('successful workspace uploads only clear the exact stale upload error', () => {

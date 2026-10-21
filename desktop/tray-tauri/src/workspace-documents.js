@@ -35,15 +35,38 @@ function cellText(cell) {
   return ''
 }
 
+function columnNumber(label) {
+  let value = 0
+  for (const character of label.toUpperCase()) value = value * 26 + character.charCodeAt(0) - 64
+  return value
+}
+
+function parseCellReference(value) {
+  const match = /^\$?([A-Z]+)\$?(\d+)$/i.exec(String(value || ''))
+  return match ? { row: Number(match[2]), column: columnNumber(match[1]) } : null
+}
+
 function worksheetPreview(worksheet) {
-  const columnCount = Math.min(worksheet.columnCount || 0, MAX_PREVIEW_COLUMNS)
-  const rows = []
-  let truncated = (worksheet.columnCount || 0) > MAX_PREVIEW_COLUMNS || (worksheet.actualRowCount || 0) > MAX_PREVIEW_ROWS
-  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber > MAX_PREVIEW_ROWS) { truncated = true; return }
-    rows.push(Array.from({ length: columnCount }, (_, index) => cellText(row.getCell(index + 1))))
+  const merges = (worksheet.model?.merges || []).flatMap(reference => {
+    const [start, end = start] = String(reference).split(':')
+    const first = parseCellReference(start)
+    const last = parseCellReference(end)
+    return first && last ? [{ startRow: first.row, endRow: last.row, startColumn: first.column, endColumn: last.column }] : []
   })
-  return { name: worksheet.name, rows, truncated }
+  const fullRowCount = Math.max(worksheet.rowCount || worksheet.actualRowCount || 0, ...merges.map(range => range.endRow))
+  const fullColumnCount = Math.max(worksheet.columnCount || 0, ...merges.map(range => range.endColumn))
+  const rowCount = Math.min(fullRowCount, MAX_PREVIEW_ROWS)
+  const columnCount = Math.min(fullColumnCount, MAX_PREVIEW_COLUMNS)
+  const rows = Array.from({ length: rowCount }, (_, rowIndex) =>
+    Array.from({ length: columnCount }, (_, columnIndex) => cellText(worksheet.getCell(rowIndex + 1, columnIndex + 1))))
+  const visibleMerges = merges.filter(range => range.startRow <= rowCount && range.startColumn <= columnCount)
+    .map(range => ({ ...range, endRow: Math.min(range.endRow, rowCount), endColumn: Math.min(range.endColumn, columnCount) }))
+  return {
+    name: worksheet.name,
+    rows,
+    merges: visibleMerges,
+    truncated: fullColumnCount > MAX_PREVIEW_COLUMNS || fullRowCount > MAX_PREVIEW_ROWS,
+  }
 }
 
 export async function readXlsxPreview(bytes) {

@@ -1,15 +1,17 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiIcon from '../../../node/webui/frontend/src/components/UiIcon.vue'
 import { confirmDesktopAction } from '../../../node/webui/frontend/src/utils/desktopDialogs.js'
 import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '../../../node/webui/frontend/src/utils/resourceContext.js'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import { createWorkspaceFile, downloadBytes, listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from '../workspace-files-api.js'
-import { deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
+import { deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
+import { textRangeAnchor } from '../workspace-references.js'
+const PdfPreview = defineAsyncComponent(() => import('../../tray-tauri/src/components/WorkspacePdfPreview.vue'))
 
 const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, requestGeneration: { type: Number, default: 0 }, dockCollapsed: { type: Boolean, default: false }, dockStatus: { type: String, default: 'idle' }, dockAgentName: { type: String, default: '当前智能体' } })
-const emit = defineEmits(['resource-name', 'attach-file', 'expand-agent-dock'])
+const emit = defineEmits(['resource-name', 'attach-file', 'quote-reference', 'expand-agent-dock'])
 const entries = ref([])
 const currentPath = ref('')
 const selectedPath = ref('')
@@ -38,6 +40,15 @@ const documentPreviewError = ref('')
 const highlightedContent = ref('')
 const workbookSheets = ref([])
 const workbookSheetName = ref('')
+const spreadsheetSelection = ref(null)
+const spreadsheetDragStart = ref(null)
+const imageSelection = ref(null)
+const imageDragStart = ref(null)
+const documentFrame = ref(null)
+const referenceMenu = ref(null)
+const referenceMenuElement = ref(null)
+const textAnchor = ref(null)
+const pdfAnchor = ref(null)
 const fileRefs = ref({})
 const editorRef = ref(null)
 const createNameDialogOpen = ref(false)
@@ -65,9 +76,39 @@ let saveSequence = 0
 let highlightSequence = 0
 const filename = computed(() => selectedPath.value.split('/').filter(Boolean).at(-1) || '')
 const canEditText = computed(() => Boolean(selectedPath.value) && ['text/plain', 'text/html', 'application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value) && !['pdf', 'docx', 'xlsx', 'image', 'unsupported', 'unsupported-invalid', 'unsupported-legacy-office'].includes(previewKind.value))
-const canTogglePreview = computed(() => canEditText.value && ['code', 'html', 'svg'].includes(previewKind.value))
+const canTogglePreview = computed(() => canEditText.value && ['code', 'csv', 'html', 'svg'].includes(previewKind.value))
 const canOverwriteDraft = computed(() => dirty.value && canEditText.value && !fileMissing.value && (draftConflict.value || externalUpdate.value))
 const workbookPreview = computed(() => workbookSheets.value.find(sheet => sheet.name === workbookSheetName.value) || null)
+const workbookColumnCount = computed(() => Math.max(0, ...(workbookPreview.value?.rows || []).map(row => row.length)))
+const workbookGrid = computed(() => {
+  if (!workbookPreview.value) return []
+  const sheet = workbookPreview.value
+  const rowCount = sheet.rows.length
+  const columnCount = Math.max(0, ...sheet.rows.map(row => row.length))
+  const covered = new Set()
+  const masters = new Map()
+  for (const merge of sheet.merges || []) {
+    const startRow = Math.max(1, merge.startRow)
+    const endRow = Math.min(rowCount, merge.endRow)
+    const startColumn = Math.max(1, merge.startColumn)
+    const endColumn = Math.min(columnCount, merge.endColumn)
+    masters.set(`${startRow}:${startColumn}`, { rowspan: endRow - startRow + 1, colspan: endColumn - startColumn + 1 })
+    for (let row = startRow; row <= endRow; row += 1) {
+      for (let column = startColumn; column <= endColumn; column += 1) {
+        if (row !== startRow || column !== startColumn) covered.add(`${row}:${column}`)
+      }
+    }
+  }
+  return sheet.rows.map((row, rowIndex) => Array.from({ length: columnCount }, (_, columnIndex) => {
+    const value = row[columnIndex] ?? ''
+    const rowNumber = rowIndex + 1
+    const columnNumber = columnIndex + 1
+    const address = `${xlsxColumnLabel(columnNumber)}${rowNumber}`
+    const merge = masters.get(`${rowNumber}:${columnNumber}`)
+    return { value, address, rowNumber, columnNumber, covered: covered.has(`${rowNumber}:${columnNumber}`), rowspan: merge?.rowspan || 1, colspan: merge?.colspan || 1, selected: spreadsheetCellSelected(rowNumber, columnNumber) }
+  }))
+})
+const activeReferenceAnchor = computed(() => pdfAnchor.value || imageSelection.value || spreadsheetAnchor() || textAnchor.value || { type: 'file', label: '整个文件', quote: '', location: {} })
 const unsupportedPreviewNotice = computed(() => previewKind.value.startsWith('unsupported') ? workspaceFilePreviewNotice(filename.value, previewKind.value) : '')
 const draftStatusText = computed(() => fileMissing.value
   ? '工作区文件已移除，本地草稿仍保留。'
@@ -113,13 +154,245 @@ function resetPreviewData() {
   documentPreviewError.value = ''
   workbookSheets.value = []
   workbookSheetName.value = ''
+  spreadsheetSelection.value = null
+  spreadsheetDragStart.value = null
+  imageSelection.value = null
+  imageDragStart.value = null
+  textAnchor.value = null
+  pdfAnchor.value = null
+  referenceMenu.value = null
 }
-function defaultPreviewMode(kind) { return ['code', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
+function defaultPreviewMode(kind) { return ['code', 'csv', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
 function xlsxColumnLabel(index) {
   let value = index
   let label = ''
   while (value > 0) { value--; label = String.fromCharCode(65 + value % 26) + label; value = Math.floor(value / 26) }
   return label
+}
+function cellAddress(row, column) { return `${xlsxColumnLabel(column)}${row}` }
+function spreadsheetCellSelected(row, column) {
+  const selection = spreadsheetSelection.value
+  if (!selection) return false
+  return row >= Math.min(selection.start.row, selection.end.row) && row <= Math.max(selection.start.row, selection.end.row)
+    && column >= Math.min(selection.start.column, selection.end.column) && column <= Math.max(selection.start.column, selection.end.column)
+}
+function spreadsheetAnchor() {
+  const selection = spreadsheetSelection.value
+  if (!selection || !workbookPreview.value) return null
+  const startRow = Math.min(selection.start.row, selection.end.row)
+  const endRow = Math.max(selection.start.row, selection.end.row)
+  const startColumn = Math.min(selection.start.column, selection.end.column)
+  const endColumn = Math.max(selection.start.column, selection.end.column)
+  const firstCell = cellAddress(startRow, startColumn)
+  const lastCell = cellAddress(endRow, endColumn)
+  const range = firstCell === lastCell ? firstCell : `${firstCell}:${lastCell}`
+  const quote = workbookPreview.value.rows.slice(startRow - 1, endRow).map(row => row.slice(startColumn - 1, endColumn).join('\t')).join('\n')
+  const sheetName = workbookPreview.value.name
+  return {
+    type: 'sheet-range',
+    label: `${sheetName}!${range}`,
+    quote,
+    location: { sheet: sheetName, range, format: previewKind.value },
+  }
+}
+function startSpreadsheetSelection(event, cell) {
+  if (event.button !== 0) return
+  event.preventDefault()
+  const position = { row: cell.rowNumber, column: cell.columnNumber }
+  spreadsheetDragStart.value = position
+  const start = event.shiftKey && spreadsheetSelection.value ? spreadsheetSelection.value.start : position
+  spreadsheetSelection.value = { start, end: position }
+  textAnchor.value = null
+  pdfAnchor.value = null
+  imageSelection.value = null
+}
+function continueSpreadsheetSelection(cell) {
+  if (!spreadsheetDragStart.value) return
+  spreadsheetSelection.value = { start: spreadsheetDragStart.value, end: { row: cell.rowNumber, column: cell.columnNumber } }
+}
+function stopSpreadsheetSelection() { spreadsheetDragStart.value = null }
+function captureTextSelection(event) {
+  const target = event?.target
+  if (!target || typeof target.selectionStart !== 'number' || typeof target.selectionEnd !== 'number') return
+  const anchor = textRangeAnchor(content.value, target.selectionStart, target.selectionEnd)
+  textAnchor.value = anchor.quote ? anchor : null
+  spreadsheetSelection.value = null
+  pdfAnchor.value = null
+  imageSelection.value = null
+}
+function captureCodeSelection() {
+  const quote = window.getSelection?.()?.toString().trim()
+  if (!quote) { textAnchor.value = null; return }
+  const start = content.value.indexOf(quote)
+  textAnchor.value = start >= 0
+    ? textRangeAnchor(content.value, start, start + quote.length, '代码选区')
+    : { type: 'text-range', label: '代码选区', quote: quote.slice(0, 2000), location: {} }
+  spreadsheetSelection.value = null
+  pdfAnchor.value = null
+  imageSelection.value = null
+}
+function captureRenderedTextSelection(text, type = 'document-text', location = {}) {
+  const quote = String(text || '').trim()
+  if (!quote) return
+  const frameDocument = documentFrame.value?.contentDocument
+  const fullText = frameDocument?.body?.innerText || ''
+  const start = fullText.indexOf(quote)
+  textAnchor.value = {
+    type,
+    label: type === 'html-region' ? 'HTML 预览文本' : '文档段落文本',
+    quote: quote.slice(0, 2000),
+    location: { ...location, ...(start >= 0 ? { start, end: start + quote.length, before: fullText.slice(Math.max(0, start - 100), start), after: fullText.slice(start + quote.length, start + quote.length + 100) } : {}) },
+  }
+  spreadsheetSelection.value = null
+  pdfAnchor.value = null
+  imageSelection.value = null
+}
+function domElementPath(element, root) {
+  const segments = []
+  let current = element
+  while (current && current !== root && current.nodeType === 1 && segments.length < 8) {
+    const tag = current.tagName.toLowerCase()
+    const siblings = current.parentElement ? Array.from(current.parentElement.children).filter(child => child.tagName === current.tagName) : []
+    segments.unshift(`${tag}:nth-of-type(${Math.max(1, siblings.indexOf(current) + 1)})`)
+    current = current.parentElement
+  }
+  return segments.join(' > ')
+}
+function readDocumentFrameSelection() {
+  const frameDocument = documentFrame.value?.contentDocument
+  const selection = frameDocument?.getSelection?.()
+  const quote = selection?.toString().trim()
+  if (!quote) return
+  const range = selection.getRangeAt(0)
+  const element = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement
+  const type = previewKind.value === 'html' ? 'html-region' : 'document-text'
+  captureRenderedTextSelection(quote, type, { block: domElementPath(element, frameDocument.body) })
+}
+function onDocumentFrameLoad() {
+  try {
+    const frameDocument = documentFrame.value?.contentDocument
+    frameDocument?.addEventListener('mouseup', readDocumentFrameSelection)
+    frameDocument?.addEventListener('contextmenu', event => {
+      event.preventDefault()
+      readDocumentFrameSelection()
+      const bounds = documentFrame.value?.getBoundingClientRect()
+      openReferenceMenu({
+        clientX: (bounds?.left || 0) + event.clientX,
+        clientY: (bounds?.top || 0) + event.clientY,
+        preventDefault() {},
+      })
+    })
+  } catch { /* Sandboxed previews may deny parent access. */ }
+}
+function capturePdfSelection(anchor) {
+  pdfAnchor.value = anchor
+  if (anchor) {
+    spreadsheetSelection.value = null
+    imageSelection.value = null
+    textAnchor.value = null
+  }
+}
+function imagePoint(event) {
+  const bounds = event.currentTarget.getBoundingClientRect()
+  return { x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)), y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height)) }
+}
+function startImageSelection(event) {
+  if (event.button !== 0) return
+  event.preventDefault()
+  event.currentTarget.setPointerCapture?.(event.pointerId)
+  const point = imagePoint(event)
+  imageDragStart.value = point
+  imageSelection.value = { type: 'image-region', label: '图片区域', quote: '', location: { x: point.x, y: point.y, width: 0, height: 0 } }
+  spreadsheetSelection.value = null
+  textAnchor.value = null
+  pdfAnchor.value = null
+}
+function moveImageSelection(event) {
+  if (!imageDragStart.value) return
+  const point = imagePoint(event)
+  const x = Math.min(point.x, imageDragStart.value.x)
+  const y = Math.min(point.y, imageDragStart.value.y)
+  const width = Math.abs(point.x - imageDragStart.value.x)
+  const height = Math.abs(point.y - imageDragStart.value.y)
+  imageSelection.value = { type: 'image-region', label: '图片区域', quote: '', location: { x, y, width, height } }
+}
+function stopImageSelection(event) {
+  if (!imageDragStart.value) return
+  moveImageSelection(event)
+  imageDragStart.value = null
+  const location = imageSelection.value?.location
+  if (!location || location.width < 0.012 || location.height < 0.012) imageSelection.value = null
+  else imageSelection.value.label = `图片区域 · ${Math.round(location.x * 100)}%, ${Math.round(location.y * 100)}%`
+}
+function imageSelectionStyle() {
+  const location = imageSelection.value?.location
+  return location ? { left: `${location.x * 100}%`, top: `${location.y * 100}%`, width: `${location.width * 100}%`, height: `${location.height * 100}%` } : {}
+}
+function imageBytesAsDataUrl(bytes, mimeType) {
+  if (!bytes?.byteLength || bytes.byteLength > 10 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mimeType)) return Promise.resolve('')
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('无法读取图片引用'))
+    reader.readAsDataURL(new Blob([new Uint8Array(bytes)], { type: mimeType }))
+  })
+}
+function columnNumberFromLabel(label) {
+  return [...String(label || '')].reduce((value, character) => value * 26 + character.charCodeAt(0) - 64, 0)
+}
+function openReferenceMenu(event) {
+  if (!selectedPath.value || loading.value) return
+  event?.preventDefault?.()
+  const target = event?.target
+  if (previewKind.value === 'xlsx' || previewKind.value === 'csv') {
+    const cell = target?.closest?.('[data-cell-address]')
+    const match = cell?.dataset?.cellAddress?.match(/^([A-Z]+)(\d+)$/)
+    if (match) {
+      const position = { row: Number(match[2]), column: columnNumberFromLabel(match[1]) }
+      if (!spreadsheetCellSelected(position.row, position.column)) spreadsheetSelection.value = { start: position, end: position }
+      textAnchor.value = null
+      imageSelection.value = null
+      pdfAnchor.value = null
+    }
+  } else if (target?.selectionStart !== undefined && target?.selectionEnd !== undefined) {
+    captureTextSelection({ target })
+  } else if (previewKind.value === 'code') {
+    captureCodeSelection()
+  } else if (['image', 'svg'].includes(previewKind.value) && !imageSelection.value) {
+    imageSelection.value = { type: 'image-region', label: '整张图片', quote: '', location: { x: 0, y: 0, width: 1, height: 1 } }
+  }
+  const anchor = activeReferenceAnchor.value
+  const x = Number(event?.clientX) || 0
+  const y = Number(event?.clientY) || 0
+  referenceMenu.value = {
+    x: Math.max(8, Math.min(x, window.innerWidth - 224)),
+    y: Math.max(8, Math.min(y, window.innerHeight - 92)),
+    anchor: { ...anchor, location: { ...anchor.location } },
+  }
+  void nextTick(() => referenceMenuElement.value?.querySelector('button')?.focus())
+}
+async function quoteSelection() {
+  const selected = referenceMenu.value
+  if (!selected || !selectedPath.value) return
+  const payload = {
+    agentId: props.agentId,
+    path: selectedPath.value,
+    name: filename.value,
+    fileRef: fileRefs.value[selectedPath.value] || selectedPath.value,
+    revision: revision.value,
+    draft: dirty.value,
+    anchor: selected.anchor,
+  }
+  const imageBytes = previewKind.value === 'image' ? fileBytes.value : null
+  const imageType = fileContentType.value
+  referenceMenu.value = null
+  if (imageBytes) {
+    try { payload.imageUrl = await imageBytesAsDataUrl(imageBytes, imageType) }
+    catch { /* The workspace file reference remains attached if inline image conversion fails. */ }
+  }
+  emit('quote-reference', {
+    ...payload,
+  })
 }
 async function buildFilePreview(path, suppliedType, bytes, draftContent, isCurrent) {
   if (!isCurrent()) return null
@@ -139,8 +412,7 @@ async function buildFilePreview(path, suppliedType, bytes, draftContent, isCurre
       const sanitized = DOMPurify.sanitize(source, { USE_PROFILES: { svg: true }, FORBID_TAGS: ['script', 'foreignObject'] })
       if (!/<svg\b/i.test(sanitized)) throw new Error('SVG 内容无效，无法预览。')
       snapshot.content = draftContent ?? source
-    } else if (kind === 'pdf') snapshot.url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
-    else if (kind === 'docx') {
+    } else if (kind === 'docx') {
       const { convertDocxToHtml } = await import('../../tray-tauri/src/workspace-documents.js')
       const converted = await convertDocxToHtml(data)
       snapshot.html = converted.html
@@ -148,6 +420,10 @@ async function buildFilePreview(path, suppliedType, bytes, draftContent, isCurre
     } else if (kind === 'xlsx') {
       const { readXlsxPreview } = await import('../../tray-tauri/src/workspace-documents.js')
       snapshot.sheets = await readXlsxPreview(data)
+    } else if (kind === 'csv') {
+      snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
+      const parsed = parseWorkspaceCsvPreview(snapshot.content)
+      snapshot.sheets = [{ name: String(path).split('/').at(-1) || 'CSV', rows: parsed.rows, merges: [], truncated: parsed.truncated }]
     }
     else if (['html', 'code', 'text'].includes(kind)) snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
     if (!isCurrent()) {
@@ -175,6 +451,10 @@ function applyFilePreview(snapshot, { keepMode = false } = {}) {
   documentPreviewError.value = snapshot.error
   workbookSheets.value = snapshot.sheets
   workbookSheetName.value = snapshot.sheets[0]?.name || ''
+  spreadsheetSelection.value = null
+  imageSelection.value = null
+  textAnchor.value = null
+  pdfAnchor.value = null
   previewMode.value = keepMode && canTogglePreview.value ? priorMode : defaultPreviewMode(snapshot.kind)
 }
 function togglePreviewMode() { if (canTogglePreview.value) previewMode.value = previewMode.value === 'preview' ? 'source' : 'preview' }
@@ -270,7 +550,19 @@ async function openEntry(entry, discard = false) {
   } catch (e) { if (request.epoch === requestEpoch && request.agentId === props.agentId) error.value = String(e.message || e); return false }
   finally { if (request.epoch === requestEpoch && request.agentId === props.agentId) loading.value = false }
 }
-function updateContent(value) { contentEditVersion++; content.value = value; if (previewKind.value === 'svg') refreshSvgPreview(); dirty.value = true; saveDraft() }
+function updateContent(value) {
+  contentEditVersion++
+  content.value = value
+  if (previewKind.value === 'svg') refreshSvgPreview()
+  if (previewKind.value === 'csv') {
+    const parsed = parseWorkspaceCsvPreview(value)
+    workbookSheets.value = [{ name: filename.value || 'CSV', rows: parsed.rows, merges: [], truncated: parsed.truncated }]
+    workbookSheetName.value = filename.value || 'CSV'
+    spreadsheetSelection.value = null
+  }
+  dirty.value = true
+  saveDraft()
+}
 async function refreshHighlightedContent() {
   const sequence = ++highlightSequence
   const source = content.value
@@ -559,11 +851,15 @@ function runToolbarAction(action) {
 }
 function onToolbarPointerDown(event) {
   if (toolbarMenu.value && !toolbarMenu.value.contains(event.target)) closeToolbarMenu()
+  if (referenceMenu.value && !referenceMenuElement.value?.contains(event.target)) referenceMenu.value = null
 }
 function onToolbarKeydown(event) {
-  if (event.key !== 'Escape' || !toolbarMenu.value?.open) return
-  closeToolbarMenu()
-  toolbarMenu.value.querySelector('summary')?.focus()
+  if (event.key !== 'Escape') return
+  if (referenceMenu.value) { referenceMenu.value = null; return }
+  if (toolbarMenu.value?.open) {
+    closeToolbarMenu()
+    toolbarMenu.value.querySelector('summary')?.focus()
+  }
 }
 function resourceMenuActions() {
   const canRecoverDraft = Boolean(selectedPath.value && !loading.value && !saving.value && (dirty.value || draftConflict.value || fileMissing.value || externalUpdate.value))
@@ -580,8 +876,8 @@ watch(() => props.dockCollapsed, async collapsed => {
   await nextTick()
   dockRestoreButton.value?.focus()
 })
-onMounted(() => { document.addEventListener('visibilitychange', onVisibilityChange); document.addEventListener('pointerdown', onToolbarPointerDown); document.addEventListener('keydown', onToolbarKeydown); if (props.active) void refreshResources('return') })
-onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); document.removeEventListener('pointerdown', onToolbarPointerDown); document.removeEventListener('keydown', onToolbarKeydown); revokePreview() })
+onMounted(() => { document.addEventListener('visibilitychange', onVisibilityChange); document.addEventListener('pointerdown', onToolbarPointerDown); document.addEventListener('pointerup', stopSpreadsheetSelection); document.addEventListener('keydown', onToolbarKeydown); if (props.active) void refreshResources('return') })
+onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); document.removeEventListener('pointerdown', onToolbarPointerDown); document.removeEventListener('pointerup', stopSpreadsheetSelection); document.removeEventListener('keydown', onToolbarKeydown); revokePreview() })
 </script>
 
 <template>
@@ -612,7 +908,7 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
       <nav class="workspace-files__list" aria-label="文件列表">
         <button v-for="entry in entries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" :size="16" /><span>{{ entry.name }}</span></button>
       </nav>
-      <main class="workspace-files__editor">
+      <main class="workspace-files__editor" @contextmenu="openReferenceMenu">
         <div v-if="dirty" class="workspace-files__draft-bar" :class="{ 'is-conflict': draftConflict || externalUpdate || fileMissing }" role="status" aria-live="polite">
           <span>{{ draftStatusText }}</span>
           <div class="workspace-files__draft-actions">
@@ -623,20 +919,25 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
           <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
           <template v-else-if="selectedPath">
             <div v-if="documentPreviewError" class="workspace-files__empty workspace-files__preview-error"><span>{{ documentPreviewError }}</span><button type="button" @click="downloadFile">下载原文件</button></div>
-            <img v-else-if="previewKind === 'image'" class="workspace-files__image" :src="previewUrl" :alt="filename">
-            <iframe v-else-if="previewKind === 'pdf'" class="workspace-files__document-frame workspace-files__pdf-frame" :src="previewUrl" :title="`${filename} PDF 预览`"></iframe>
-            <iframe v-else-if="['html', 'docx'].includes(previewKind) && previewMode === 'preview'" class="workspace-files__document-frame" :srcdoc="safeDocumentPreview" :title="`${filename} 文档预览`" sandbox=""></iframe>
-            <img v-else-if="previewKind === 'svg' && previewMode === 'preview'" class="workspace-files__image" :src="svgPreviewUrl" :alt="filename">
+            <div v-else-if="previewKind === 'image'" class="workspace-files__image-stage"><div class="workspace-files__image-target" @pointerdown="startImageSelection" @pointermove="moveImageSelection" @pointerup="stopImageSelection" @pointercancel="stopImageSelection"><img class="workspace-files__image" :src="previewUrl" :alt="filename" draggable="false"><div v-if="imageSelection" class="workspace-files__image-selection" :style="imageSelectionStyle()"></div></div></div>
+            <PdfPreview v-else-if="previewKind === 'pdf'" :bytes="fileBytes || new Uint8Array()" @selection="capturePdfSelection" @reference-contextmenu="openReferenceMenu" />
+            <iframe v-else-if="['html', 'docx'].includes(previewKind) && previewMode === 'preview'" ref="documentFrame" class="workspace-files__document-frame" :srcdoc="safeDocumentPreview" :title="`${filename} 文档预览`" sandbox="allow-same-origin" @load="onDocumentFrameLoad"></iframe>
+            <div v-else-if="previewKind === 'svg' && previewMode === 'preview'" class="workspace-files__image-stage"><div class="workspace-files__image-target" @pointerdown="startImageSelection" @pointermove="moveImageSelection" @pointerup="stopImageSelection" @pointercancel="stopImageSelection"><img class="workspace-files__image" :src="svgPreviewUrl" :alt="filename" draggable="false"><div v-if="imageSelection" class="workspace-files__image-selection" :style="imageSelectionStyle()"></div></div></div>
             <section v-else-if="previewKind === 'xlsx'" class="workspace-files__sheet-preview" :aria-label="`${filename} Excel 预览`">
               <div v-if="workbookSheets.length" class="workspace-files__sheet-toolbar">
                 <select v-model="workbookSheetName" aria-label="选择工作表"><option v-for="sheet in workbookSheets" :key="sheet.name" :value="sheet.name">{{ sheet.name }}</option></select>
                 <span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列</span>
               </div>
-              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="(_, index) in workbookPreview.rows[0]" :key="index">{{ xlsxColumnLabel(index + 1) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookPreview.rows" :key="rowIndex"><td v-for="(cell,index) in row" :key="index">{{ cell }}</td></tr></tbody></table></div>
+              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="index in workbookColumnCount" :key="index">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><template v-for="cell in row" :key="cell.address"><td v-if="!cell.covered" :rowspan="cell.rowspan" :colspan="cell.colspan" :class="{ 'is-selected': cell.selected }" :data-cell-address="cell.address" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></template></tr></tbody></table></div>
               <div v-else class="workspace-files__empty">{{ documentPreviewError || '此工作簿没有可显示的数据。' }}</div>
             </section>
-            <div v-else-if="previewKind === 'code' && previewMode === 'preview'" class="workspace-files__code-preview"><pre><code class="hljs" v-html="highlightedContent"></code></pre></div>
-            <textarea v-else-if="canEditText" ref="editorRef" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" />
+            <section v-else-if="previewKind === 'csv' && previewMode === 'preview'" class="workspace-files__sheet-preview" :aria-label="`${filename} CSV 预览`">
+              <div class="workspace-files__sheet-toolbar"><span>CSV 表格预览</span><span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列</span></div>
+              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="index in workbookColumnCount" :key="index">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><td v-for="cell in row" :key="cell.address" :class="{ 'is-selected': cell.selected }" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></tr></tbody></table></div>
+              <div v-else class="workspace-files__empty">CSV 文件没有可显示的数据。</div>
+            </section>
+            <div v-else-if="previewKind === 'code' && previewMode === 'preview'" class="workspace-files__code-preview" @mouseup="captureCodeSelection"><pre><code class="hljs" v-html="highlightedContent"></code></pre></div>
+            <textarea v-else-if="canEditText" ref="editorRef" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" @select="captureTextSelection" />
             <div v-else-if="unsupportedPreviewNotice" class="workspace-files__empty workspace-files__unsupported"><span>{{ unsupportedPreviewNotice }}</span><button type="button" @click="downloadFile">下载原文件</button></div>
             <div v-else class="workspace-files__empty">无法读取此文件。<button type="button" @click="downloadFile">下载原文件</button></div>
           </template>
@@ -644,6 +945,12 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
         </div>
       </main>
     </div>
+    <Teleport to="body">
+      <div v-if="referenceMenu" ref="referenceMenuElement" class="workspace-files__reference-menu" role="menu" :style="{ left: `${referenceMenu.x}px`, top: `${referenceMenu.y}px` }" @pointerdown.stop @contextmenu.prevent>
+        <div class="workspace-files__reference-menu-context"><strong>{{ referenceMenu.anchor.label }}</strong><span v-if="referenceMenu.anchor.quote">{{ referenceMenu.anchor.quote }}</span><span v-else>{{ selectedPath }}</span></div>
+        <button type="button" role="menuitem" @click="quoteSelection"><UiIcon name="paperclip" :size="15" /><span>引用到消息</span></button>
+      </div>
+    </Teleport>
   </section>
   <Teleport to="body">
     <div v-if="createNameDialogOpen" class="workspace-files__create-scrim" @click.self="cancelCreateFile">
@@ -659,6 +966,19 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
 </template>
 
 <style scoped>
+.workspace-files{position:relative}
+.workspace-files__image-stage{display:flex;flex:1;min-width:0;min-height:0;align-items:center;justify-content:center;overflow:auto;padding:12px}
+.workspace-files__image-target{position:relative;flex:none;max-width:100%;max-height:100%;cursor:crosshair;touch-action:none;user-select:none}
+.workspace-files__image-target .workspace-files__image{display:block;max-width:100%;max-height:calc(100vh - 190px);margin:0;object-fit:contain;pointer-events:none}
+.workspace-files__image-selection{position:absolute;border:2px solid #536c76;background:#78909c38;pointer-events:none}
+.workspace-files__sheet-preview td{user-select:none;cursor:cell}
+.workspace-files__sheet-preview td.is-selected{background:#dfe8eb;box-shadow:inset 0 0 0 1px #788f98}
+.workspace-files__reference-menu{position:fixed;z-index:1000;box-sizing:border-box;width:216px;padding:5px;border:1px solid #d6dddf;border-radius:7px;background:#fff;color:#30383c;box-shadow:0 8px 26px #17212630}
+.workspace-files__reference-menu-context{display:grid;gap:4px;padding:7px 8px 8px;border-bottom:1px solid #edf0f1}
+.workspace-files__reference-menu-context strong{overflow:hidden;color:#59656a;font-size:11px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.workspace-files__reference-menu-context span{display:-webkit-box;max-height:40px;overflow:hidden;color:#778186;font-size:10px;line-height:1.4;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.workspace-files__reference-menu>button{display:flex;align-items:center;gap:8px;width:100%;height:32px;margin-top:4px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#3d474b;font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.workspace-files__reference-menu>button:hover,.workspace-files__reference-menu>button:focus-visible{outline:0;background:#eef1f2}
 .workspace-files{display:flex;flex:1;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;background:#fff;color:#30383c}.workspace-files__toolbar{display:flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border-bottom:1px solid #e1e4e6}.workspace-files__toolbar button{display:grid;place-items:center;min-width:30px;height:30px;padding:0 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#4c5559;font-size:11px;cursor:pointer}.workspace-files__toolbar button:hover:not(:disabled){background:#eceeef}.workspace-files__toolbar button:disabled{opacity:.45}.workspace-files__breadcrumbs{display:flex;flex:1;align-items:center;gap:6px;min-width:0;overflow:hidden;color:#777f83;font-size:12px}.workspace-files__breadcrumbs button{overflow:hidden;max-width:160px;padding:3px 1px;border:0;background:transparent;color:#566065;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.workspace-files__breadcrumbs b{overflow:hidden;color:#30383c;text-overflow:ellipsis;white-space:nowrap}.workspace-files__body{display:flex;flex:1;min-height:0}.workspace-files__list{flex:0 0 245px;min-width:150px;overflow:auto;scroll-padding-bottom:82px;padding:8px;border-right:1px solid #d4dce0;background:#fafbfc}.workspace-files__list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#4a5357;text-align:left;font-size:12px;cursor:pointer}.workspace-files__list button.selected,.workspace-files__list button:hover{background:#eceeef}.workspace-files__list button span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-files__list button .workspace-files__folder-icon{flex:none;width:16px;height:16px;background:#586166;mask-repeat:no-repeat;mask-position:center;mask-size:contain}.workspace-files__list button small{color:#777f83;font-size:10px}.workspace-files__editor{display:flex;background:#fff;flex:1;min-width:0;min-height:0;align-items:stretch;justify-content:stretch}.workspace-files__editor textarea{flex:1;min-width:0;min-height:0;scroll-padding-bottom:82px;padding:16px;border:0;outline:0;background:#fff;color:#30383c;font:12px/1.6 Consolas,monospace;resize:none}.workspace-files__image{max-width:100%;max-height:100%;margin:auto;object-fit:contain}.workspace-files__empty{display:grid;flex:1;place-items:center;padding:24px;color:#777f83;font-size:12px;text-align:center}.workspace-files__hidden{display:none}.workspace-files__notice{position:relative;display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;border-radius:5px;color:#a53c38;cursor:help}.workspace-files__notice:hover,.workspace-files__notice:focus-visible{background:#fff1ef;outline:2px solid #b74a43;outline-offset:1px}.workspace-files__notice-detail{position:absolute;z-index:50;top:calc(100% + 5px);right:0;display:none;min-width:220px;max-width:min(420px,70vw);padding:9px 11px;border:1px solid #e2c7c8;border-radius:6px;background:#fff7f6;box-shadow:0 5px 16px #26374024;color:#7f302d;font-size:11px;line-height:1.45;white-space:normal}.workspace-files__notice-detail>span{display:block}.workspace-files__notice-detail>span+span{margin-top:5px}.workspace-files__notice:hover .workspace-files__notice-detail,.workspace-files__notice:focus .workspace-files__notice-detail{display:block}.workspace-files__sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .workspace-files__toolbar-actions{position:relative;display:flex;flex:none;align-items:center;gap:4px;margin-left:auto}.workspace-files__actions-menu{position:relative;flex:none}.workspace-files__actions-menu>summary{display:grid;place-items:center;list-style:none;width:30px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;color:#4c5559;cursor:pointer}.workspace-files__actions-menu>summary::-webkit-details-marker{display:none}.workspace-files__actions-menu>summary:hover,.workspace-files__actions-menu[open]>summary{background:#eceeef}.workspace-files__actions-popover{position:absolute;z-index:40;top:calc(100% + 5px);right:0;display:grid;min-width:190px;padding:4px;border:1px solid #d9e0e2;border-radius:7px;background:#fff;box-shadow:0 8px 24px #26374020}.workspace-files__actions-popover button{display:flex!important;align-items:center;justify-content:flex-start;gap:9px;width:100%;min-width:0!important;height:34px;padding:0 9px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#3d474b!important;text-align:left!important;font:inherit!important;cursor:pointer}.workspace-files__actions-popover button:hover:not(:disabled){background:#f0f2f2!important}.workspace-files__actions-popover button:disabled{color:#9aa3a6!important;cursor:default}.workspace-files__actions-popover button .ui-icon{flex:none}.workspace-files__dock-toggle{position:relative;color:#3f484c}.workspace-files__dock-toggle i{position:absolute;right:3px;top:3px;width:7px;height:7px;border:1px solid #fff;border-radius:50%;background:#7a8589}.workspace-files__dock-toggle i.is-pending{background:#c18526}.workspace-files__dock-toggle i.is-generating{background:#657780}.workspace-files__dock-toggle i.is-offline{background:#b7534c}.workspace-files__dock-toggle:focus-visible,.workspace-files__actions-menu>summary:focus-visible{outline:2px solid #65777f;outline-offset:1px}
 .workspace-files__mode-toggle { flex: 0 0 30px; width:30px; min-width:30px; padding:0; }
