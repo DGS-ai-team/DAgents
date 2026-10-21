@@ -48,7 +48,8 @@ import browserIcon from '@shared-icons/desktop/browser.svg?url'
 import fileIcon from '@shared-icons/desktop/file.svg?url'
 import attachmentIcon from '@shared-icons/desktop/attachment.svg?url'
 import uploadActionIcon from '@shared-icons/desktop/upload.svg?url'
-import screenshotActionIcon from '@shared-icons/desktop/image.svg?url'
+import imageUploadActionIcon from '@shared-icons/desktop/image.svg?url'
+import screenshotActionIcon from '@shared-icons/desktop/screenshot.svg?url'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
@@ -105,6 +106,7 @@ const attachmentActionsOpen = ref(false)
 const attachmentActionAnchor = ref(null)
 const screenshotInProgress = ref(false)
 const screenshotSelection = ref(null)
+let screenshotClosePromise = null
 const composerExpanded = ref(false)
 const userInfoSelected = ref([])
 const chatPanel = ref(null)
@@ -242,6 +244,7 @@ const pendingImages = computed({
 })
 const attachmentLimitReached = computed(() => pendingImages.value.length + pendingFiles.value.length >= 8)
 const attachmentInput = ref(null)
+const imageAttachmentInput = ref(null)
 const lightboxImage = ref('')
 let unlisten = null
 let unlistenTerminal = null
@@ -810,6 +813,10 @@ function openFilePicker() {
   closeAttachmentActions()
   attachmentInput.value?.click()
 }
+function openImagePicker() {
+  closeAttachmentActions()
+  imageAttachmentInput.value?.click()
+}
 async function captureScreenshot() {
   const ownerId = activeId.value
   if (!ownerId || screenshotInProgress.value || (pendingImagesByAgent.value[ownerId]?.length || 0) + (pendingFilesByAgent.value[ownerId]?.length || 0) >= 8) return
@@ -817,7 +824,22 @@ async function captureScreenshot() {
   screenshotInProgress.value = true
   try {
     const base64 = await invoke('desktop_capture_screenshot')
-    screenshotSelection.value = { url: `data:image/png;base64,${base64}`, ownerId }
+    const selection = {
+      url: `data:image/png;base64,${base64}`,
+      ownerId,
+      previousFullscreen: currentWindow ? await currentWindow.isFullscreen() : false,
+      previousAlwaysOnTop: currentWindow ? await currentWindow.isAlwaysOnTop() : false,
+    }
+    screenshotSelection.value = selection
+    if (currentWindow) {
+      try {
+        await currentWindow.setAlwaysOnTop(true)
+        if (!selection.previousFullscreen) await currentWindow.setFullscreen(true)
+      } catch (error) {
+        await closeScreenshotSelection()
+        throw error
+      }
+    }
   } catch (e) {
     const name = String(e?.name || '')
     if (name !== 'AbortError' && activeId.value === ownerId) {
@@ -830,13 +852,26 @@ async function captureScreenshot() {
 async function confirmScreenshotSelection(file) {
   const selection = screenshotSelection.value
   if (!selection || !file) return
-  closeScreenshotSelection()
+  await closeScreenshotSelection()
   await processAttachments([file], selection.ownerId)
 }
-function closeScreenshotSelection() {
-  const url = screenshotSelection.value?.url
-  screenshotSelection.value = null
-  if (url) URL.revokeObjectURL(url)
+async function closeScreenshotSelection() {
+  if (screenshotClosePromise) return screenshotClosePromise
+  const selection = screenshotSelection.value
+  if (!selection) return
+  screenshotClosePromise = (async () => {
+    try {
+      if (currentWindow) {
+        if (!selection.previousFullscreen) await currentWindow.setFullscreen(false)
+        await currentWindow.setAlwaysOnTop(selection.previousAlwaysOnTop)
+      }
+    } finally {
+      screenshotSelection.value = null
+      if (selection.url) URL.revokeObjectURL(selection.url)
+      screenshotClosePromise = null
+    }
+  })()
+  return screenshotClosePromise
 }
 function onScreenshotSelectionError(message) {
   const ownerId = screenshotSelection.value?.ownerId
@@ -1877,12 +1912,14 @@ onUnmounted(() => {
       <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <div ref="attachmentActionAnchor" class="attachment-action">
     <button class="attach-button" type="button" aria-label="添加文件或图片" title="添加文件或图片" :aria-expanded="attachmentActionsOpen" aria-haspopup="menu" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
-    <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="附件操作" @keydown="onAttachmentMenuKeydown">
-      <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span></button>
-      <button class="attachment-action-option" type="button" role="menuitem" :aria-label="screenshotInProgress ? '正在截图' : '截图'" :title="screenshotInProgress ? '正在截图…' : '截图'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span></button>
+    <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="添加附件" @keydown="onAttachmentMenuKeydown">
+      <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span><span>文件</span></button>
+      <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传图片" title="上传图片" @click.stop="openImagePicker"><span class="icon-mask" :style="maskStyle(imageUploadActionIcon)"></span><span>图片</span></button>
+      <button class="attachment-action-option" type="button" role="menuitem" :aria-label="screenshotInProgress ? '正在截图' : '截屏'" :title="screenshotInProgress ? '正在截图…' : '截屏'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span><span>截屏</span></button>
     </div></Transition>
   </div>
   <input ref="attachmentInput" class="visually-hidden" type="file" multiple @change="addImages">
+  <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
   <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :desktop-compact="true" :disabled="agentGenerating || !activeId" @switch-profile="switchLLMProfile"/>
   <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>

@@ -1,5 +1,10 @@
 #[cfg(windows)]
-pub fn capture_current_screen_png() -> Result<Vec<u8>, String> {
+pub fn capture_monitor_png(
+    x: i32,
+    y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+) -> Result<Vec<u8>, String> {
     use image::codecs::png::PngEncoder;
     use image::{ExtendedColorType, ImageEncoder};
     use std::ffi::c_void;
@@ -8,23 +13,22 @@ pub fn capture_current_screen_png() -> Result<Vec<u8>, String> {
         GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT,
         DIB_RGB_COLORS, SRCCOPY,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-        SM_YVIRTUALSCREEN,
-    };
-
-    let x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
-    let y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
-    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
-    if width <= 0 || height <= 0 || width > 32_768 || height > 32_768 {
+    if monitor_width == 0
+        || monitor_height == 0
+        || monitor_width > 32_768
+        || monitor_height > 32_768
+    {
         return Err("无法读取当前屏幕的有效尺寸。".into());
     }
-    let pixel_count = (width as usize)
-        .checked_mul(height as usize)
+    let width =
+        i32::try_from(monitor_width).map_err(|_| "屏幕宽度超出截图处理范围。".to_string())?;
+    let height =
+        i32::try_from(monitor_height).map_err(|_| "屏幕高度超出截图处理范围。".to_string())?;
+    let pixel_count = (monitor_width as usize)
+        .checked_mul(monitor_height as usize)
         .ok_or_else(|| "屏幕尺寸超出截图处理范围。".to_string())?;
     if pixel_count > 50_000_000 {
-        return Err("当前虚拟屏幕分辨率过大，暂不支持直接截图。".into());
+        return Err("当前屏幕分辨率过大，暂不支持直接截图。".into());
     }
 
     unsafe {
@@ -97,7 +101,12 @@ pub fn capture_current_screen_png() -> Result<Vec<u8>, String> {
                 }
                 let mut png = Vec::new();
                 PngEncoder::new(&mut png)
-                    .write_image(&rgba, width as u32, height as u32, ExtendedColorType::Rgba8)
+                    .write_image(
+                        &rgba,
+                        monitor_width,
+                        monitor_height,
+                        ExtendedColorType::Rgba8,
+                    )
                     .map_err(|error| format!("压缩屏幕截图失败：{error}"))?;
                 Ok(png)
             })()
@@ -112,6 +121,6 @@ pub fn capture_current_screen_png() -> Result<Vec<u8>, String> {
 }
 
 #[cfg(not(windows))]
-pub fn capture_current_screen_png() -> Result<Vec<u8>, String> {
+pub fn capture_monitor_png(_x: i32, _y: i32, _width: u32, _height: u32) -> Result<Vec<u8>, String> {
     Err("当前 Desktop 平台尚未实现本机屏幕截图。".into())
 }

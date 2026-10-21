@@ -10,6 +10,13 @@ const selection = ref(null)
 const drawing = ref(false)
 const origin = ref(null)
 const hasSelection = computed(() => Boolean(selection.value && selection.value.width >= 8 && selection.value.height >= 8))
+const selectionDimensions = computed(() => {
+  const box = selection.value
+  const source = image.value
+  const bounds = stage.value?.getBoundingClientRect()
+  if (!box || !source || !bounds) return ''
+  return `${Math.round(box.width * source.naturalWidth / bounds.width)} × ${Math.round(box.height * source.naturalHeight / bounds.height)} px`
+})
 const selectionStyle = computed(() => {
   const box = selection.value
   if (!box) return {}
@@ -100,59 +107,54 @@ async function confirmSelection() {
 </script>
 
 <template>
-  <div class="screenshot-select-scrim" @pointerdown.self="emit('cancel')">
-    <section class="screenshot-select-dialog" role="dialog" aria-modal="true" aria-labelledby="screenshot-select-title" @keydown="onKeydown">
-      <header class="screenshot-select-header">
-        <div>
-          <h2 id="screenshot-select-title">选择截图区域</h2>
-          <p>拖动鼠标框选区域，确认后添加到消息</p>
-        </div>
-        <button class="screenshot-select-close" type="button" aria-label="取消截图" title="取消截图" @click="emit('cancel')"><UiIcon name="close" :size="16" /></button>
-      </header>
-      <div class="screenshot-stage-frame">
-        <div
-          ref="stage"
-          class="screenshot-stage"
-          tabindex="0"
-          aria-label="截图预览，拖动以选择截图区域"
-          @pointerdown="onPointerDown"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-          @pointercancel="onPointerUp"
-        >
-          <img ref="image" :src="imageUrl" alt="屏幕截图预览" draggable="false">
-          <div v-if="selection" class="screenshot-selection" :class="{ 'is-drawing': drawing }" :style="selectionStyle"></div>
-        </div>
+  <section class="screenshot-select-scrim" role="dialog" aria-modal="true" aria-labelledby="screenshot-select-title" @keydown="onKeydown">
+    <div
+      ref="stage"
+      class="screenshot-stage"
+      tabindex="0"
+      aria-label="冻结的屏幕画面，拖动以选择截图区域"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
+    >
+      <img ref="image" :src="imageUrl" alt="冻结的屏幕画面" draggable="false">
+      <div v-if="selection" class="screenshot-selection" :class="{ 'is-drawing': drawing }" :style="selectionStyle"></div>
+    </div>
+    <header class="screenshot-select-header">
+      <div class="screenshot-select-instruction">
+        <strong id="screenshot-select-title">选择截图区域</strong>
+        <span>拖动框选 · Esc 取消</span>
       </div>
-      <footer class="screenshot-select-footer">
-        <span class="screenshot-select-hint">{{ hasSelection ? '已选中区域' : '请拖动鼠标选择区域' }}</span>
-        <button type="button" @click="resetSelection">重新选择</button>
-        <button type="button" class="is-primary" :disabled="!hasSelection" @click="confirmSelection">确认截图</button>
-      </footer>
-    </section>
-  </div>
+      <button class="screenshot-select-close" type="button" aria-label="取消截图" title="取消截图" @click="emit('cancel')"><UiIcon name="close" :size="16" /></button>
+    </header>
+    <footer class="screenshot-select-footer">
+      <span class="screenshot-select-hint" aria-live="polite">{{ hasSelection ? selectionDimensions : '拖动鼠标框选要发送的区域' }}</span>
+      <button type="button" class="screenshot-select-reset" :disabled="!selection" @click="resetSelection">重选</button>
+      <button type="button" class="is-primary" :disabled="!hasSelection" @click="confirmSelection">添加截图</button>
+    </footer>
+  </section>
 </template>
 
 <style scoped>
-.screenshot-select-scrim { position:fixed; z-index:90; inset:0; display:grid; place-items:center; padding:24px; background:#111a1ed9; backdrop-filter:blur(2px); }
-.screenshot-select-dialog { display:flex; flex-direction:column; width:min(1120px,calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:hidden; border:1px solid #d7dcde; border-radius:12px; background:#f8f9f9; color:#30383c; box-shadow:0 18px 60px #0005; }
-.screenshot-select-header { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 18px; border-bottom:1px solid #e2e5e6; }
-.screenshot-select-header h2 { margin:0; font-size:15px; font-weight:600; }
-.screenshot-select-header p { margin:4px 0 0; color:#697378; font-size:12px; }
-.screenshot-select-close { display:grid; flex:none; width:30px; height:30px; place-items:center; padding:0; border:0; border-radius:6px; background:transparent; color:#50595e; cursor:pointer; }
-.screenshot-select-close:hover { background:#eceeef; }
-.screenshot-stage-frame { display:grid; min-height:0; flex:1; place-items:center; overflow:auto; padding:12px; background:#e6e9ea; }
-.screenshot-stage { position:relative; display:inline-block; justify-self:center; align-self:center; width:fit-content; max-width:100%; max-height:100%; flex:none; cursor:crosshair; line-height:0; touch-action:none; user-select:none; outline:none; }
-.screenshot-stage:focus-visible { box-shadow:0 0 0 2px #454d51; }
-.screenshot-stage img { display:block; max-width:min(100%,calc(100vw - 80px)); max-height:calc(100vh - 190px); object-fit:contain; pointer-events:none; user-select:none; }
-.screenshot-selection { position:absolute; z-index:1; box-sizing:border-box; border:1px solid #fff; outline:1px solid #313a3e; box-shadow:0 0 0 9999px #10161970; pointer-events:none; }
+.screenshot-select-scrim { position:fixed; z-index:9999; inset:0; width:100vw; height:100vh; overflow:hidden; background:#111; color:#30383c; }
+.screenshot-stage { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; cursor:crosshair; line-height:0; touch-action:none; user-select:none; outline:none; }
+.screenshot-stage:focus-visible { outline:2px solid #fff; outline-offset:-3px; }
+.screenshot-stage img { display:block; width:100%; height:100%; object-fit:fill; pointer-events:none; user-select:none; }
+.screenshot-selection { position:absolute; z-index:1; box-sizing:border-box; border:1px solid #fff; outline:1px solid #30383c; box-shadow:0 0 0 9999px #111a21a8; pointer-events:none; }
 .screenshot-selection.is-drawing { border-color:#fff; }
-.screenshot-select-footer { display:flex; align-items:center; gap:8px; min-height:54px; padding:8px 14px; border-top:1px solid #e2e5e6; }
-.screenshot-select-hint { flex:1; color:#6a7479; font-size:12px; }
-.screenshot-select-footer button { min-width:76px; height:32px; padding:0 12px; border:1px solid #cbd2d5; border-radius:6px; background:#fff; color:#353c40; font:inherit; font-size:12px; cursor:pointer; }
+.screenshot-select-header { position:absolute; z-index:2; top:18px; left:20px; right:20px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; pointer-events:none; }
+.screenshot-select-instruction { display:flex; align-items:center; gap:10px; min-height:38px; padding:0 13px; border:1px solid #d9dfe1; border-radius:10px; background:rgb(255 255 255 / 95%); box-shadow:0 5px 22px #1115; pointer-events:auto; }
+.screenshot-select-instruction strong { font-size:12px; font-weight:600; }
+.screenshot-select-instruction span { padding-left:10px; border-left:1px solid #e1e5e6; color:#687277; font-size:11px; }
+.screenshot-select-close { display:grid; flex:none; width:36px; height:36px; place-items:center; padding:0; border:1px solid #d9dfe1; border-radius:10px; background:rgb(255 255 255 / 95%); color:#434b4f; box-shadow:0 5px 22px #1115; cursor:pointer; pointer-events:auto; }
+.screenshot-select-close:hover { background:#f0f2f2; }
+.screenshot-select-footer { position:absolute; z-index:2; right:50%; bottom:20px; display:flex; align-items:center; gap:8px; min-height:48px; width:max-content; max-width:calc(100vw - 24px); padding:6px 7px 6px 14px; transform:translateX(50%); border:1px solid #d9dfe1; border-radius:13px; background:rgb(255 255 255 / 96%); box-shadow:0 8px 26px #1115; backdrop-filter:blur(14px); }
+.screenshot-select-hint { min-width:180px; color:#5e696e; font-size:11px; }
+.screenshot-select-footer button { min-width:64px; height:32px; padding:0 11px; border:1px solid transparent; border-radius:8px; background:transparent; color:#343a3d; font:inherit; font-size:11px; cursor:pointer; }
 .screenshot-select-footer button:hover:not(:disabled) { background:#f0f2f2; }
-.screenshot-select-footer button.is-primary { border-color:#353c40; background:#353c40; color:#fff; }
-.screenshot-select-footer button.is-primary:hover:not(:disabled) { background:#242a2d; }
-.screenshot-select-footer button:disabled { opacity:.48; cursor:default; }
-@media (max-width:600px) { .screenshot-select-scrim { padding:8px; } .screenshot-select-dialog { width:100%; max-height:calc(100vh - 16px); } .screenshot-stage-frame { padding:6px; } .screenshot-stage img { max-width:calc(100vw - 30px); max-height:calc(100vh - 145px); } .screenshot-select-footer { gap:6px; padding-right:8px; padding-left:8px; } .screenshot-select-footer button { min-width:64px; padding:0 8px; } }
+.screenshot-select-footer button.is-primary { border-color:#343a3d; background:#343a3d; color:#fff; }
+.screenshot-select-footer button.is-primary:hover:not(:disabled) { background:#22282b; }
+.screenshot-select-footer button:disabled { opacity:.42; cursor:default; }
+@media (max-width:600px) { .screenshot-select-header { top:10px; left:10px; right:10px; } .screenshot-select-instruction { align-items:flex-start; flex-direction:column; justify-content:center; gap:3px; padding:5px 9px; } .screenshot-select-instruction span { padding:0; border:0; } .screenshot-select-footer { bottom:10px; gap:4px; padding-left:9px; } .screenshot-select-hint { min-width:0; max-width:40vw; } .screenshot-select-footer button { min-width:52px; padding:0 7px; } }
 </style>

@@ -57,6 +57,12 @@
       "license": "DAgents project asset"
     },
     {
+      "name": "screenshot",
+      "file": "desktop/screenshot.svg",
+      "source": "DAgents Desktop screen framing corners with a center focus mark",
+      "license": "DAgents project asset"
+    },
+    {
       "name": "edit",
       "file": "desktop/edit.svg",
       "source": "User-provided Downloads/edit.svg geometry, cleaned and adapted as a currentColor mask asset; reserved",
