@@ -27,6 +27,16 @@ jobs:
         run: |
           docker run --rm dagents-manage:ci python -c "from manage.workgroup.native_tools import load_assign_workgroup_task_tool; tool = load_assign_workgroup_task_tool(); assert tool['function']['name'] == 'assign_workgroup_task'"
 
+  manage-bundle-assembly:
+    name: Manage bundle assembly
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify bundle does not duplicate seeded Node release
+        run: bash scripts/ci/test_manage_bundle_contract.sh
+
   assistant-bundle:
     name: Assistant bundle layout
     runs-on: ubuntu-latest

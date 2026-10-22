@@ -28,7 +28,7 @@
 
 - Windows 的日常入口改为独立 Tauri Desktop，Node 只提供 API，退役 Go 托盘、Node `/ui/` 与重复 Shell 路径。沿用一个使用者的 Node，多个 Desktop 共享 Agent 状态，不按客户端新增用户或 runtime。
 - Desktop 接入首配、普通/Auto Agent 创建与配置、聊天、模型切换、停止、附件、工作区文件、终端、Auto 总览和 Manage 工作组；浏览器资源可观看 Node 侧会话，暂不提供人工接管。
-- Desktop 本机偏好、连接端点、通知与更新配置保存在本机；模型、Agent、工具、记忆、调度和 Manage 业务设置由 Node 持有。远程模式只连接用户预先建立的 SSH loopback 转发，不启动本机 Node，不开放 LAN/WAN 直连模式。
+- Desktop 本机偏好、通知与更新配置保存在本机；模型、Agent、工具、记忆、调度和 Manage 业务设置由 Node 持有。Desktop 固定连接同机 Node；远程主机操作通过 Node 的 SSH/远程终端工具完成。
 - 顶栏合并菜单和窗口控制，侧栏按普通 Agent、工作组、Auto 分组；统一共享 SVG、黑灰强调与设置布局。对话和资源以图标及实际名称区分页签，资源页提供固定输入位置的悬浮消息坞，内容等待输入栏过渡结束后展示。
 
 ### 执行、工具与资源
@@ -48,6 +48,7 @@
 
 ### 发布与升级
 
+- Windows x64 候选安装包约 391 MB，主要由随包 Browser/Chromium 服务占用；Manage 离线包移除镜像已 seed 的重复 Linux 安装归档。
 - Windows 安装包未做 Authenticode 签名，首次下载或运行时 Windows SmartScreen 可能显示提示。
 - Windows 统一安装 `dagents-shell.exe`，开始菜单直接打开 Desktop；安装路径与工作目录固定，桌面快捷方式和登录自启可选且默认关闭，升级保留已有选择。
 - Windows 完整安装包收束为 x64，暂停 x86：锁定浏览器依赖缺少一致的 32 位运行链路。历史 x86 更新保持按平台选择，不向其回退投递 x64 安装器；Go 386 源码编译检查不等于完整包发行承诺。
