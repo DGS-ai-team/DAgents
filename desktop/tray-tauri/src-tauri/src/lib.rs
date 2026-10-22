@@ -809,11 +809,21 @@ async fn desktop_capture_screenshot(window: WebviewWindow) -> Result<String, Str
     use base64::Engine;
 
     ensure_mvp_window(&window)?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| format!("无法读取 Desktop 所在屏幕：{error}"))?
+        .ok_or_else(|| "无法确定 Desktop 所在的屏幕。".to_string())?;
+    let position = monitor.position();
+    let size = monitor.size();
+    let (x, y, width, height) = (position.x, position.y, size.width, size.height);
     window
         .hide()
         .map_err(|error| format!("无法暂时隐藏 Desktop：{error}"))?;
-    thread::sleep(Duration::from_millis(140));
-    let capture_result = spawn_node_blocking(screen_capture::capture_current_screen_png).await;
+    // Let Windows finish composing the hide/restore transition before reading
+    // the monitor. A short delay can capture the Desktop's fading surface.
+    thread::sleep(Duration::from_millis(480));
+    let capture_result =
+        spawn_node_blocking(move || screen_capture::capture_monitor_png(x, y, width, height)).await;
     let _ = window.show();
     let _ = window.set_focus();
     let png = capture_result??;

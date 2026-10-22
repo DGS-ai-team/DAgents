@@ -149,7 +149,7 @@ DAgents Desktop ──HTTP/SSE──► Agent Node（:18765）
 | 探活 | `curl /health` 或 `dagents-client probe` |
 | Manage 运维 Console | `http://127.0.0.1:8020/console/`（另起 Manage） |
 
-共享 Vue 源码：`node/webui/frontend/`，由 Desktop 自身打包，不提供独立浏览器入口。API 封装：`src/api/node.js`。
+Desktop Vue 源码：`desktop/tray-tauri/src/`，由 Desktop 应用自身打包；Node 不提供独立浏览器入口。API 封装：`desktop/tray-tauri/src/ui/api/node.js`。
 
 ### 3.2 HITL 行为（Desktop）
 
@@ -219,7 +219,7 @@ Node 管理目录与 SQLite 仍在目标机 `runtime_root`（默认 `./.runtime`
 | SSE handler | `node/internal/api/stream.go` |
 | 工作组反代 | `node/internal/api/workgroup_api.go` |
 | 配置加载 | `shared/config/config.go` |
-| Desktop 复用的 Vue 源码 | `node/webui/frontend/` |
+| Desktop Vue 源码 | `desktop/tray-tauri/src/` |
 | 精简 client | `client/cmd/dagents-client/` |
 
 ---

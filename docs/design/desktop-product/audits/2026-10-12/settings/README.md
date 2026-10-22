@@ -29,7 +29,7 @@
 
 3. setup 工具组目录 GET 失败原先被转为 `null`，随后会把 Agent 快照工具组裁剪为空并可能覆盖现有能力。现在目录读取失败显示错误、保留原工具组并禁用保存；成功返回 `available_tool_groups=[]` 仍作为合法空目录处理。
 
-新回归位于 `node/webui/frontend/src/views/settings/AgentDetailSettings.test.js` 和 `src/utils/agentDetailSave.test.js`，覆盖 prompt/setup 目录读取失败禁止保存、setup 失败保留已有工具组、prompt 写入失败保留草稿和明确成功阶段、reload 阶段失败结果、异步保存期间换 Agent 仍固定写入原 Agent、成功调用顺序。
+新回归当时位于 `node/webui/frontend/src/views/settings/AgentDetailSettings.test.js` 和 `src/utils/agentDetailSave.test.js`；源码随后迁至 `desktop/tray-tauri/src/ui/views/settings/` 与 `desktop/tray-tauri/src/ui/utils/`。测试覆盖 prompt/setup 目录读取失败禁止保存、setup 失败保留已有工具组、prompt 写入失败保留草稿和明确成功阶段、reload 阶段失败结果、异步保存期间换 Agent 仍固定写入原 Agent、成功调用顺序。
 
 未把 `restart_required` 提示粒度改成逐字段判断。当前 setup API 对所有非 browser patch 设置 `restart_required=true`，而 LLM runtime 同请求会同步；需确认各 Node 设置的实际重启边界后，再单独修正提示契约。
 

@@ -1,0 +1,287 @@
+import { truncateGraphemes } from "@shared-frontend/utils/textTruncate.js";
+import { resolveToolArgumentsFromData, toolCallPurpose } from "@shared-frontend/utils/toolCalls.js";
+import {
+  bashControlMode,
+  toolCallIdFromEntry,
+  toolJobsStore,
+} from "../stores/toolJobs.js";
+
+/** 面向普通用户的工具类别名（非技术 tool id）。 */
+const TOOL_USER_LABELS = {
+  bash_run: "执行命令",
+  read_file: "读取文件",
+  write_file: "写入文件",
+  search_replace: "编辑文件",
+  glob_files: "查找文件",
+  grep_files: "搜索文件",
+  read_image: "读取图片",
+  show_image: "展示图片",
+  screen_capture: "截取屏幕",
+  computer_use: "操作桌面",
+  browser_call: "浏览器操作",
+  browser_evaluate: "执行浏览器脚本",
+  wecom_send_markdown: "企微推送",
+  wecom_send_file: "企微发文件",
+  load_skills: "加载技能",
+  unload_skills: "卸载技能",
+  clear_skills: "清空技能",
+  tool_callback: "处理回调",
+  get_callback: "获取回调",
+  ask_user_information: "向你提问",
+  create_temporary_agent: "创建子任务",
+  cancel_temporary_agent: "取消子任务",
+};
+
+const GENERIC_TOOL_LABEL = "助手执行了一步操作";
+
+function sanitizeInline(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+/** 从同步浏览器工具结果提取短状态。 */
+function browserResultStatus(resultEntry) {
+  const raw = resultEntry?.data?.content;
+  if (raw == null) return "";
+  let obj = raw;
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s.startsWith("{")) return "";
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      return "";
+    }
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
+  const status = sanitizeInline(detail.status);
+  if (status === "succeeded") return "已完成";
+  if (status === "partial_failure") return "部分失败";
+  if (status === "completed") return "已完成";
+  if (status === "failed") return "失败";
+  if (status === "cancelled") return "已取消";
+  if (status === "running") return "执行中";
+  return status;
+}
+
+function browserResultHint(resultEntry) {
+  const raw = resultEntry?.data?.content;
+  if (raw == null) return "";
+  let obj = raw;
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s.startsWith("{")) return "";
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      return "";
+    }
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
+  const summary = sanitizeInline(detail.summary || detail.error || obj.error);
+  if (summary) return summary.length > 48 ? truncateGraphemes(summary, 48) : summary;
+  return browserResultStatus(resultEntry);
+}
+
+function userLabelForTool(name) {
+  const n = String(name || "").trim();
+  if (!n || n === "tool" || n === "unknown" || n === "unknown_tool") {
+    return GENERIC_TOOL_LABEL;
+  }
+  return TOOL_USER_LABELS[n] || "助手使用工具";
+}
+
+function argsFromStep(callEntry, resultEntry) {
+  const data = resultEntry?.data || callEntry?.data || {};
+  const parsed = resolveToolArgumentsFromData(data);
+  if (Object.keys(parsed).length) return parsed;
+  if (callEntry?.data) return resolveToolArgumentsFromData(callEntry.data);
+  return {};
+}
+
+function toolNameFromStep(callEntry, resultEntry) {
+  const data = resultEntry?.data || callEntry?.data || {};
+  const name = String(data.tool_name || data.name || callEntry?.data?.tool_name || callEntry?.data?.name || "").trim();
+  if (name && name !== "tool" && name !== "unknown") return name;
+  return "";
+}
+
+/** 工具气泡仅展示模型给出的用户目的，不重复展示工具名称或技术文案。 */
+export function toolStepPurpose({ callEntry, resultEntry } = {}) {
+  const args = argsFromStep(callEntry, resultEntry);
+  const purpose = toolCallPurpose(args);
+  if (purpose) return purpose;
+
+  // 临时 Agent 的 schema 使用 purpose，而普通工具统一使用 call_purpose。
+  const directPurpose = sanitizeInline(args.purpose);
+  return directPurpose ? truncateGraphemes(directPurpose, 48) : "";
+}
+
+/** 工具行标题保留稳定的“工具名(执行目的)”结构；详情面板不再重复目的。 */
+export function toolStepToolLabel({ callEntry, resultEntry } = {}) {
+  const name = toolNameFromStep(callEntry, resultEntry);
+  if (!name) return GENERIC_TOOL_LABEL;
+  const base = name === "bash_run" ? "bash" : name;
+  const purpose = toolStepPurpose({ callEntry, resultEntry });
+  return purpose ? `${base}(${purpose})` : base;
+}
+
+/**
+ * 用户向一行摘要（F-UI6）；禁止出现裸 tool()。
+ */
+export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
+  const name = toolNameFromStep(callEntry, resultEntry);
+  const args = argsFromStep(callEntry, resultEntry);
+  const label = userLabelForTool(name);
+  const purpose = toolCallPurpose(args);
+
+  if (purpose) return `${label}：${purpose}`;
+
+  if (name === "bash_run") {
+    const cmd = sanitizeInline(args.command);
+    if (cmd) return `${label}：${cmd.length > 48 ? truncateGraphemes(cmd, 48) : cmd}`;
+  }
+  if (["read_file", "write_file", "search_replace", "show_image", "read_image"].includes(name)) {
+    const path = sanitizeInline(args.path || args.file_path);
+    if (path) return `${label}：${path.length > 56 ? truncateGraphemes(path, 56) : path}`;
+  }
+  if (name === "browser_call" || name === "browser_evaluate") {
+    const fromResult = browserResultHint(resultEntry);
+    if (fromResult) return `${label}：${fromResult}`;
+    const actions = Array.isArray(args.actions) ? args.actions : [];
+    const op = sanitizeInline(actions[0]?.op);
+    if (op) return `${label}：${op}`;
+  }
+  if (name.startsWith("browser_")) {
+    const url = sanitizeInline(args.url);
+    if (url) return `${label}：${url.length > 48 ? truncateGraphemes(url, 48) : url}`;
+  }
+
+  const entrySummary = String(resultEntry?.summary || callEntry?.summary || "").trim();
+  if (entrySummary && entrySummary !== "tool" && !entrySummary.endsWith("()")) {
+    return entrySummary;
+  }
+
+  if (name) return label;
+  return GENERIC_TOOL_LABEL;
+}
+
+/**
+ * 工具步骤相位（同批免审批 tool_call 后端并行执行）：
+ * generating | running | background | pending | completed | failed | cancelled | rejected | interrupted | idle
+ *
+ * @param {{ callEntry?: object, resultEntry?: object, executionHint?: 'active' | 'pending' | null }} args
+ */
+export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null } = {}) {
+  const entry = resultEntry || callEntry || {};
+  if (entry.sideEffectApplied) return "completed";
+  const resultStatus = String(resultEntry?.data?.status || "").trim().toLowerCase();
+  if (resultEntry) {
+    if (resultStatus === "denied") return "rejected";
+    if (resultStatus === "failed" || resultStatus === "error" || resultStatus === "unknown") return "failed";
+    if (resultStatus === "cancelled" || resultStatus === "canceled" || resultStatus === "timed_out") return "cancelled";
+    if (resultStatus === "queued") return "background";
+    if (["running", "in_progress", "executing", "started"].includes(resultStatus)) return "running";
+    if (resultStatus === "awaiting_user") return "pending";
+    if (["succeeded", "completed", "ok"].includes(resultStatus)) return "completed";
+  }
+  if (
+    resultEntry?.data?.interrupted ||
+    callEntry?.data?.interrupted ||
+    resultEntry?.data?.interrupted_by_stream_cancel ||
+    resultEntry?.data?.interrupted_by_user_message ||
+    resultEntry?.data?.interrupted_by_toolset_change
+  ) {
+    return "interrupted";
+  }
+
+  // A result with no execution status is still a settled result. Do not let a
+  // stale running-call cache make it active again.
+  if (resultEntry) return "completed";
+
+  // Without a result, use the lifecycle execution hint before the eventually
+  // consistent /tool-jobs cache.
+  if (executionHint === "settled") return "completed";
+  if (executionHint === "failed") return "failed";
+  if (executionHint === "cancelled") return "cancelled";
+  if (executionHint === "rejected") return "rejected";
+  if (executionHint === "interrupted") return "interrupted";
+
+  if (executionHint === "pending") return "pending";
+
+  const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
+  if (id && toolJobsStore.runningCallIds.includes(id)) return "running";
+
+  // A partial tool_call means the model is still assembling arguments only
+  // until the executor registers the call. Once a real job is visible above,
+  // execution state must win so the bubble cannot remain "生成中".
+  if (callEntry?.partial) {
+    return executionHint === "pending" ? "pending" : "generating";
+  }
+
+  if (callEntry && !resultEntry) {
+    // HITL 待批：尚未开跑
+    if (executionHint === "pending") return "pending";
+    // 并行模型：已 final 的 tool_call 默认即在执行（含 /tool-jobs 未登记的 FS 等）
+    return "running";
+  }
+  return "idle";
+}
+
+export function toolStepStatusText({ callEntry, resultEntry, executionHint = null } = {}) {
+  const entry = resultEntry || callEntry || {};
+  if (entry.sideEffectStale) return "已失效";
+  if (entry.sideEffectApplied) return "已入库";
+
+  switch (resolveToolStepPhase({ callEntry, resultEntry, executionHint })) {
+    case "generating":
+      return "生成中";
+    case "running":
+      return "执行中";
+    case "background":
+      return "后台执行中";
+    case "pending":
+      return "待执行";
+    case "cancelled":
+      return "已终止";
+    case "failed":
+      return "执行失败";
+    case "rejected":
+      return "已拒绝";
+    case "interrupted":
+      return "已中断";
+    case "completed":
+      return "已完成";
+    default:
+      return "";
+  }
+}
+
+/** 真正在跑（生成参数 / 执行 / 后台）— 用于转圈与高亮；待审批不算。 */
+export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null } = {}) {
+  const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint });
+  return phase === "generating" || phase === "running" || phase === "background";
+}
+
+/** A result phase outranks cached execution hints from an earlier SSE snapshot. */
+export function toolStepIsActiveInGroup(step = {}) {
+  if (!step.callEntry) return false;
+  const phase = resolveToolStepPhase(step);
+  return !["completed", "failed", "cancelled", "rejected", "interrupted"].includes(phase);
+}
+
+/** A lagging bash job snapshot must not override an explicit terminal result. */
+export function bashControlModeForStep({ callEntry, resultEntry, executionHint = null } = {}) {
+  if (resultEntry) {
+    if (!toolStepIsInProgress({ callEntry, resultEntry })) return null;
+  } else if (["settled", "failed", "cancelled", "rejected", "interrupted"].includes(executionHint)) {
+    return null;
+  }
+  return bashControlMode({ callEntry, resultEntry });
+}
+
+/** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */
+export function toolStepIsPending({ callEntry, resultEntry, executionHint = null } = {}) {
+  return resolveToolStepPhase({ callEntry, resultEntry, executionHint }) === "pending";
+}

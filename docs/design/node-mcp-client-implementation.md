@@ -75,7 +75,7 @@ Configure a Node server with:
 ```
 
 Set `TENCENT_DOC_KEY` in the environment of the Node process, then use the
-Node Web UI's MCP connection test. The test performs `initialize` and
+DAgents Desktop's MCP connection test. The test performs `initialize` and
 `tools/list`; bind the discovered tools to an Agent in that Agent's MCP panel.
 The token is space-scoped and must be obtained from Tencent Docs' MCP token
 page. Never put the token directly in `mcp_servers.db`, a checked-in config,
@@ -91,4 +91,4 @@ an Agent snapshot, or a log.
 ## Verification
 
 - `go test ./node/...`
-- `npm test --prefix node/webui/frontend -- --run`
+- `npm run test:frontend --prefix desktop/tray-tauri`

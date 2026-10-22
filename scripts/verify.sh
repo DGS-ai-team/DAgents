@@ -16,10 +16,12 @@ GO_PACKAGES=(
   ./client/...
 )
 
-echo "[verify] install and validate shared Desktop UI sources"
-npm ci --prefix node/webui/frontend
-npm test --prefix node/webui/frontend
-npm run lint --prefix node/webui/frontend
+echo "[verify] install and validate Desktop frontend"
+npm ci --prefix desktop/tray-tauri
+npm run test:frontend --prefix desktop/tray-tauri
+npm run test:ui --prefix desktop/tray-tauri
+npm run lint --prefix desktop/tray-tauri
+npm run build --prefix desktop/tray-tauri
 python3 scripts/ci/check_brand_assets.py
 
 echo "[verify] build Manage Console"

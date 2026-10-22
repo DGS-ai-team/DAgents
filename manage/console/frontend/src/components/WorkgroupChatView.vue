@@ -22,10 +22,10 @@ import {
   getWorkgroupRunHistory,
 } from "../api.js";
 import { renderMarkdown } from "../utils/markdown.js";
-import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "../../../../../node/webui/frontend/src/utils/toolCalls.js";
-import { createSerializedRefresh } from "../../../../../shared/frontend/serializedRefresh.js";
+import { approvalItemDisplayName, approvalItemHint, approvalItemHintVisible } from "@shared-frontend/utils/toolCalls.js";
+import { createSerializedRefresh } from "@shared-frontend/serializedRefresh.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
-import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
+import BrandActivityIndicator from "@shared-frontend/components/BrandActivityIndicator.vue";
 import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({

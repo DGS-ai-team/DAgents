@@ -17,6 +17,10 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-skip-taskbar",
     "core:window:allow-unminimize",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-always-on-top",
+    "core:window:allow-set-always-on-top",
     "opener:default",
     "dialog:allow-open",
     "dialog:allow-message"

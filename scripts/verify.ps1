@@ -19,9 +19,11 @@ $goPackages = @(
     "./client/..."
 )
 
-Invoke-Step "install shared Desktop UI dependencies" { npm ci --prefix node/webui/frontend }
-Invoke-Step "test shared Desktop UI sources" { npm test --prefix node/webui/frontend }
-Invoke-Step "lint shared Desktop UI sources" { npm run lint --prefix node/webui/frontend }
+Invoke-Step "install Desktop frontend dependencies" { npm ci --prefix desktop/tray-tauri }
+Invoke-Step "test Desktop frontend sources" { npm run test:frontend --prefix desktop/tray-tauri }
+Invoke-Step "test Desktop UI state" { npm run test:ui --prefix desktop/tray-tauri }
+Invoke-Step "lint Desktop frontend sources" { npm run lint --prefix desktop/tray-tauri }
+Invoke-Step "build Desktop frontend" { npm run build --prefix desktop/tray-tauri }
 Invoke-Step "branding asset contract" { python scripts/ci/check_brand_assets.py }
 Invoke-Step "install Manage Console dependencies" { npm ci --prefix manage/console/frontend }
 Invoke-Step "build Manage Console" { npm run build --prefix manage/console/frontend }

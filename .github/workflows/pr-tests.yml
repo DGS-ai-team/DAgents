@@ -23,7 +23,6 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
-            node/webui/frontend/package-lock.json
             manage/console/frontend/package-lock.json
             desktop/tray-tauri/package-lock.json
 
@@ -35,8 +34,8 @@ jobs:
 
       - name: Audit frontend dependencies
         run: |
-          npm ci --prefix node/webui/frontend
           npm ci --prefix desktop/tray-tauri
+          npm ci --prefix manage/console/frontend
           audit_frontend() {
             local package_dir="$1"
             local attempt output status
@@ -60,7 +59,6 @@ jobs:
             done
             return "$status"
           }
-          audit_frontend node/webui/frontend
           audit_frontend manage/console/frontend
           audit_frontend desktop/tray-tauri
 

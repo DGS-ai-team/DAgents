@@ -37,7 +37,7 @@ GET /v1/agents/{agent_id}/terminals/ws
 {"type":"resume","session_id":"local-terminal-1"}
 ```
 
-The Node Web UI consumes this protocol through the native browser `WebSocket`
+DAgents Desktop consumes this protocol through the native browser `WebSocket`
 API. The first UI slice intentionally avoids a terminal rendering dependency:
 it uses a bounded `<pre>` buffer, sends UTF-8 command bytes, preserves the
 server's base64 byte framing, reconnects with `session_id`, and surfaces

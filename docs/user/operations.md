@@ -60,7 +60,9 @@ Node 默认监听 `127.0.0.1:18765`。Desktop 固定连接同机的 `127.0.0.1:1
 ## 发布门禁
 
 ```bash
-npm test --prefix node/webui/frontend -- --run
+npm run test:frontend --prefix desktop/tray-tauri
+npm run test:ui --prefix desktop/tray-tauri
+npm run build --prefix desktop/tray-tauri
 npm run build --prefix manage/console/frontend
 go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v

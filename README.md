@@ -233,7 +233,7 @@ docs/                  用户、架构、参考、设计与历史文档
 tests/                 Python/跨组件测试
 ```
 
-Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 是唯一产品界面，负责展示状态和发起操作，不复制后端业务规则。`node/webui/frontend` 仅保留供 Desktop 复用的 Vue 组件源码；Node 只提供 API，不提供网页版入口或 `/ui/` 路由。
+Node 是本地运行时的事实源，Manage 是可选治理层；Desktop 是唯一 Agent 产品界面，负责展示状态和发起操作，不复制后端业务规则。Desktop Vue 源码、入口和 Tauri 宿主共同归属 `desktop/tray-tauri`；跨产品复用的展示 helper 放在 `shared/frontend`。Node 只提供 API，不提供网页版入口或 `/ui/` 路由。
 
 ## 开发与验证
 
@@ -254,8 +254,9 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 常用的局部验证命令：
 
 ```bash
-npm test --prefix node/webui/frontend
+npm run test:frontend --prefix desktop/tray-tauri
 npm run test:ui --prefix desktop/tray-tauri
+npm run build --prefix desktop/tray-tauri
 go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```

@@ -1,6 +1,6 @@
 # Shared SVG icons
 
-`shared/icons/` is the source for production icon geometry used by Desktop, Node Web UI, Manage Console, and the design gallery. Keep semantic names explicit: `agent`, `workgroup`, `auto`, `skills`, `browser`, `folder-open`, `file`, `attachment`, `tools`, and `send` refer to distinct product concepts. Older technical names such as `bot`, `users`, `sparkles`, and `globe` remain available where their original meanings still apply.
+`shared/icons/` is the source for production icon geometry used by Desktop, Manage Console, and the design gallery. Keep semantic names explicit: `agent`, `workgroup`, `auto`, `skills`, `browser`, `folder-open`, `file`, `attachment`, `tools`, and `send` refer to distinct product concepts. Older technical names such as `bot`, `users`, `sparkles`, and `globe` remain available where their original meanings still apply.
 
 ## Visual language
 
@@ -21,6 +21,6 @@ Manifest, aliases, wrappers, production call sites, and this gallery should agre
 
 ## Desktop top-left slot
 
-The fixed 30×32 top-left slot is owned by `desktop/ui/components/TopLeftSlotIcon.vue`. It provides the panel open/close control on chat and resource pages, a noninteractive page marker on settings, and page identity glyphs for terminal, workspace, browser, workgroups, and the Auto overview dialog. `desktop/ui/top-slot-state.js` owns the accessible names and interaction state. Keep the slot mounted while context changes so the animation can continue without layout movement.
+The fixed 30×32 top-left slot is owned by `desktop/tray-tauri/src/ui/components/TopLeftSlotIcon.vue`. It provides the panel open/close control on chat and resource pages, a noninteractive page marker on settings, and page identity glyphs for terminal, workspace, browser, workgroups, and the Auto overview dialog. `desktop/tray-tauri/src/ui/top-slot-state.js` owns the accessible names and interaction state. Keep the slot mounted while context changes so the animation can continue without layout movement.
 
 Morphicons 1.7.1 (`morphicons/vue` and `morphicons/adapters`, MIT) morphs only the stroke-based panel/settings/terminal/browser/folder icons. The panel divider stays on the left throughout its 6.5↔9 unit range: the narrow left rail is the expanded-sidebar action, and the wider left rail is the collapsed-sidebar action. The filled workgroup silhouette and transformed Auto star remain the approved shared SVG masks and cross-fade briefly. Do not add Auto routes or animate those assets through the stroke adapter. The MorphIcon honors the OS reduced-motion preference (`reducedMotion="user"`); its instance is mounted once and released with the component.

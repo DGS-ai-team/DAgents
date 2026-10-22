@@ -77,22 +77,20 @@ jobs:
           cache: npm
           cache-dependency-path: |
             desktop/tray-tauri/package-lock.json
-            node/webui/frontend/package-lock.json
             manage/console/frontend/package-lock.json
 
-      - name: Test shared Desktop UI sources
+      - name: Install and test Desktop frontend
         run: |
-          npm ci --prefix node/webui/frontend
-          npm test --prefix node/webui/frontend
+          npm ci --prefix desktop/tray-tauri
+          npm run test:frontend --prefix desktop/tray-tauri
 
       - name: Test Desktop UI
         run: |
-          npm ci --prefix desktop/tray-tauri
           npm run test:ui --prefix desktop/tray-tauri
           npm run build --prefix desktop/tray-tauri
 
-      - name: Lint shared Desktop UI sources
-        run: npm run lint --prefix node/webui/frontend
+      - name: Lint Desktop frontend sources
+        run: npm run lint --prefix desktop/tray-tauri
 
       - name: Build Manage Console
         run: bash manage/console/build.sh

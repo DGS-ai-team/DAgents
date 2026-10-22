@@ -19,16 +19,16 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: node/webui/frontend/package-lock.json
+          cache-dependency-path: desktop/tray-tauri/package-lock.json
 
-      - name: Install shared Desktop UI test dependencies
-        run: npm ci --prefix node/webui/frontend
+      - name: Install Desktop frontend dependencies
+        run: npm ci --prefix desktop/tray-tauri
 
-      - name: Test shared Desktop UI sources
-        run: npm test --prefix node/webui/frontend
+      - name: Test Desktop frontend sources
+        run: npm run test:frontend --prefix desktop/tray-tauri
 
-      - name: Lint shared Desktop UI sources
-        run: npm run lint --prefix node/webui/frontend
+      - name: Lint Desktop frontend sources
+        run: npm run lint --prefix desktop/tray-tauri
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5

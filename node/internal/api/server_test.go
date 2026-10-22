@@ -154,6 +154,8 @@ func TestRemovedDesktopRoutesReturnNotFound(t *testing.T) {
 	_, ts := newTestServer(t)
 	defer ts.Close()
 	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/"},
+		{http.MethodGet, "/index.html"},
 		{http.MethodGet, "/ui"},
 		{http.MethodGet, "/ui/"},
 		{http.MethodGet, "/v1/desktop/runtime-config"},

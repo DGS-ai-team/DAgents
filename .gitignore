@@ -54,10 +54,10 @@ client/dagents-client
 **/__debug_bin*
 **/.tmp-gocache/
 
-# Node Web UI (npm ci in CI / build.sh)
+# Legacy local Node WebUI outputs; the source package and runtime entry are retired.
 node/webui/frontend/node_modules/
-node/internal/webui/static/*
-!node/internal/webui/static/.gitkeep
+node/webui/frontend/dist/
+node/internal/webui/static/
 
 # Manage Console (npm ci in CI / build.sh)
 manage/console/frontend/node_modules/

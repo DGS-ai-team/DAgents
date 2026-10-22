@@ -1,7 +1,7 @@
 # Third-party license policy
 
 DAgents is distributed under the MIT license. Dependencies shipped in the
-Node Web UI and Manage Console must have a permissive license compatible with
+DAgents Desktop and Manage Console must have a permissive license compatible with
 that distribution model. The CI policy currently allows:
 
 - MIT, ISC, 0BSD, BlueOak-1.0.0

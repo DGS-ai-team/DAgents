@@ -1,7 +1,7 @@
 <script setup>
 import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, reactive } from "vue";
-import SettingsPageHeader from "../../../../node/webui/frontend/src/components/SettingsPageHeader.vue";
+import SettingsPageHeader from "@desktop-ui/components/SettingsPageHeader.vue";
 import { createDesktopSettingsState, desktopSettingsDirty, loadDesktopSettings, saveDesktopSettings } from "../desktop-settings-state.js";
 
 const state = reactive(createDesktopSettingsState());

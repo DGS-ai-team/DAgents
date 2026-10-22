@@ -1,4 +1,4 @@
-"""Check the canonical brand source, Desktop-only UI entry, and native inputs.
+"""Check the canonical brand source, retired Node UI paths, and native inputs.
 
 The native Desktop needs checked-in images because the Tauri bundler consumes
 files from its package directory. The files are generated
@@ -8,15 +8,16 @@ reintroducing a standalone browser entry for the shared Desktop UI.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = ROOT / "shared" / "branding" / "brand-icon.png"
-SHARED_UI_ROOT = ROOT / "node" / "webui" / "frontend"
-SHARED_UI_PACKAGE = SHARED_UI_ROOT / "package.json"
+NODE_WEBUI_ROOT = ROOT / "node" / "webui"
+NODE_STATIC_WEBUI_ROOT = ROOT / "node" / "internal" / "webui"
+DESKTOP_UI_ROOT = ROOT / "desktop" / "tray-tauri" / "src" / "ui"
+DESKTOP_PACKAGE = ROOT / "desktop" / "tray-tauri" / "package.json"
 MANAGE_PUBLIC = ROOT / "manage" / "console" / "frontend" / "public"
 MANAGE_MAIN = ROOT / "manage" / "console" / "frontend" / "src" / "main.js"
 TRAY_GENERATOR = ROOT / "packaging" / "windows" / "scripts" / "generate-tray-icons.py"
@@ -44,23 +45,14 @@ def main() -> int:
         if duplicate.exists():
             errors.append(f"Manage Console must not contain a copied favicon: {duplicate.relative_to(ROOT)}")
 
-    for entry in (
-        SHARED_UI_ROOT / "index.html",
-        SHARED_UI_ROOT / "src" / "main.js",
-        SHARED_UI_ROOT / "src" / "App.vue",
-        SHARED_UI_ROOT / "src" / "router" / "index.js",
-    ):
-        if entry.exists():
-            errors.append(f"standalone browser UI entry must not be present: {entry.relative_to(ROOT)}")
+    for retired_path in (NODE_WEBUI_ROOT, NODE_STATIC_WEBUI_ROOT):
+        if retired_path.exists():
+            errors.append(f"retired Node WebUI path must not be present: {retired_path.relative_to(ROOT)}")
 
-    try:
-        package = json.loads(SHARED_UI_PACKAGE.read_text(encoding="utf-8"))
-        scripts = package.get("scripts", {})
-        for command in ("dev", "build", "preview"):
-            if command in scripts:
-                errors.append(f"shared UI package must not expose the browser `{command}` command")
-    except (OSError, json.JSONDecodeError) as error:
-        errors.append(f"cannot read shared UI package metadata: {error}")
+    if not (DESKTOP_UI_ROOT / "DesktopApp.vue").is_file():
+        errors.append("Desktop Vue entry is missing from desktop/tray-tauri/src/ui")
+    if not DESKTOP_PACKAGE.is_file():
+        errors.append("Desktop package metadata is missing")
 
     try:
         manage_main = MANAGE_MAIN.read_text(encoding="utf-8")
@@ -99,7 +91,7 @@ def main() -> int:
             print(f"brand-assets: {error}", file=sys.stderr)
         return 1
 
-    print("desktop-ui: browser entry is absent; canonical brand source and native inputs are present")
+    print("desktop-ui: Node WebUI is retired; Desktop source, canonical brand, and native inputs are present")
     return 0
 
 

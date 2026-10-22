@@ -22,7 +22,7 @@
 
 ## 对话消息
 
-对照 `node/webui/frontend/src/components/MessageBubble.vue` 与 `node/webui/frontend/src/styles/workbench.css`：用户消息左对齐、柔和浅底与小圆角差异；助手消息是同一阅读列的无边框正文；不添加头像、姓名栏或仿短信的左右对打。时间可放在每条消息下方，11–12px、低对比但仍可读，不和正文抢层级。审批卡继续在对话流内完整呈现。
+对照 `desktop/tray-tauri/src/ui/components/MessageBubble.vue` 与 `desktop/tray-tauri/src/ui/styles/workbench.css`：用户消息左对齐、柔和浅底与小圆角差异；助手消息是同一阅读列的无边框正文；不添加头像、姓名栏或仿短信的左右对打。时间可放在每条消息下方，11–12px、低对比但仍可读，不和正文抢层级。审批卡继续在对话流内完整呈现。
 
 ## Desktop 图标资产
 

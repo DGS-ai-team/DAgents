@@ -79,7 +79,7 @@ tool schema → tool router → policy / hook → executor → result contract �
 
 ## 5. Desktop 与 Node API
 
-DAgents Desktop 是产品唯一的 Agent 交互入口。Node 只提供 HTTP/SSE API，不托管 `/ui/` 页面；`node/webui/frontend` 保留 Vue 源码，供 Desktop 构建复用，不再作为可独立启动的网页应用。
+DAgents Desktop 是产品唯一的 Agent 交互入口。Node 只提供 HTTP、SSE 与 WebSocket API，不托管 `/ui/` 页面；Desktop Vue 源码、入口和 Tauri 宿主位于 `desktop/tray-tauri`。跨产品共享的展示 helper 放在 `shared/frontend`。
 
 | 组件 | 负责 | 不负责 |
 |---|---|---|
@@ -128,7 +128,7 @@ Manage Leader 负责工作组编排；成员 Agent 在自己的 Node 上执行�
 | 工具、policy、Hook | `node/internal/tools/`、`policy/`、`hooks/` |
 | Context、skills、压缩 | `promptcontext/`、`skills/`、`compression/` |
 | Node↔Manage / Workgroup | `node/internal/manage/`、`node/internal/workgroup/`、`manage/workgroup/` |
-| Desktop 复用的 Vue 源码 | `node/webui/frontend/`（无独立网页入口） |
+| Desktop Vue 源码 | `desktop/tray-tauri/src/` |
 | Manage Console | `manage/console/frontend/` |
 | 共用契约 | `shared/config/`、`docs/design/fixtures/` |
 

@@ -12,8 +12,8 @@ DAgents 面向个人使用者：Windows Desktop 提供交互，默认启动或�
 
 本节是上次正式发布的范围；当前开发线的 Desktop、API-only Node 和配置归属以[发布收束清单](release-readiness.md)为准。
 
-- Go Agent Node：多 Agent、Web UI、HTTP/SSE、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
-- Node Web UI：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口。
+- Go Agent Node：多 Agent、HTTP/SSE API、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
+- DAgents Desktop：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口；Node 不提供浏览器 UI。
 - Manage：Node/Agent Registry、Workgroup、Node 主动建立的 WS、Console、LLM/Skills/Release/Cases 元数据。
 - Workgroup：选择 Node 上已有 Agent 作为成员；每个 `workgroup_id + member_id` 使用独立 Session；工具执行回到成员 home Node。
 - 发布：Windows/Linux 安装包和可选桌面托盘；Manage 可选，不是本机对话的前置依赖。

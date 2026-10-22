@@ -10,6 +10,7 @@ export default defineConfig({
     alias: {
       "@shared-icons": fileURLToPath(new URL("../../../shared/icons", import.meta.url)),
       "@dagents-brand": fileURLToPath(new URL("../../../shared/branding", import.meta.url)),
+      "@shared-frontend": fileURLToPath(new URL("../../../shared/frontend", import.meta.url)),
     },
   },
   base: "/console/",

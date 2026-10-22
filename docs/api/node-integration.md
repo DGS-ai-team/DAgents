@@ -1,6 +1,6 @@
 # Node Runtime API 接入契约
 
-本文覆盖 Node Go HTTP Server 当前注册的 **146 个 method/path 路由**：`GET /health` 与 145 个 `/v1` 操作。它描述的是 Node runtime API，不是 Desktop 设置 API，也不是 Manage 服务 API。路径参数用 `{name}` 表示。Node 不内嵌 Web UI、不提供 `/ui` 静态页面；`node/webui/frontend` 源码仍由 Desktop WebView 复用。
+本文覆盖 Node Go HTTP Server 当前注册的 **146 个 method/path 路由**：`GET /health` 与 145 个 `/v1` 操作。它描述的是 Node runtime API，不是 Desktop 设置 API，也不是 Manage 服务 API。路径参数用 `{name}` 表示。Node 不内嵌 Web UI、不提供 `/ui` 静态页面；Desktop WebView 源码归属 `desktop/tray-tauri/src`。
 
 ## 传输与安全边界
 
