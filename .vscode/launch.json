@@ -15,14 +15,11 @@
       "console": "integratedTerminal"
     },
     {
-      "name": "Debug: UI",
+      "name": "Debug: Desktop WebView",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npm run dev",
-      "cwd": "${workspaceFolder}/node/webui/frontend",
-      "env": {
-        "DAGENTS_NODE_URL": "http://127.0.0.1:18765"
-      }
+      "command": "npm run tauri:dev",
+      "cwd": "${workspaceFolder}/desktop/tray-tauri"
     },
     {
       "name": "Debug: Manage API",

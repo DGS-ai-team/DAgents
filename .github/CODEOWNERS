@@ -2,7 +2,6 @@
 # without rewriting the whole file. Until additional component owners are
 # nominated, the current maintainer is the fallback owner for every area.
 /node/ @AphroditeOotsuka
-/node/webui/ @AphroditeOotsuka
 /manage/ @AphroditeOotsuka
 /client/ @AphroditeOotsuka
 /desktop/ @AphroditeOotsuka

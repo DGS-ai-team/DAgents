@@ -79,8 +79,8 @@ test('Node and Manage registries cover their former UiIcon names and retain curr
 })
 
 test('settings navigation applies a smaller optical size to the full-coverage puzzle glyph', () => {
-  const layout = fs.readFileSync(path.resolve(iconsRoot, '../../node/webui/frontend/src/layouts/SettingsLayout.vue'), 'utf8')
-  const styles = fs.readFileSync(path.resolve(iconsRoot, '../../node/webui/frontend/src/styles/layout.css'), 'utf8')
+  const layout = fs.readFileSync(path.resolve(iconsRoot, '../../desktop/tray-tauri/src/ui/layouts/SettingsLayout.vue'), 'utf8')
+  const styles = fs.readFileSync(path.resolve(iconsRoot, '../../desktop/tray-tauri/src/ui/styles/layout.css'), 'utf8')
   assert.match(layout, /:size="item\.icon === 'skills' \? 14 : 16"/)
   assert.match(styles, /settings-layout__link-icon\s*\{\s*width:\s*16px;\s*height:\s*16px;/)
   assert.match(styles, /settings-layout__link-icon--skills\s*\{\s*width:\s*14px;\s*height:\s*14px;/)

@@ -4,6 +4,8 @@
 
 > 2026-10-15 更新：下文为 10 月 8 日的阶段记录。当前 Node 已只提供 API，独立 Desktop 承载界面；Go 托盘与 Node `/ui/` 服务路径已移除，Desktop 本地配置与 Node 业务配置已分离。当前边界见 [产品收束方向](product-direction-simplification-2026-10-14.md)，后续验收见 [10 月 14 日收束记录](audits/2026-10-14/product-closeout/README.md) 与 [10 月 15 日日常回归](audits/2026-10-15/daily-use/README.md)。
 
+> 2026-10-22 更新：Desktop Vue 源码现统一归入 `desktop/tray-tauri/src/ui`，Tauri 入口与宿主适配位于同一包的 `src/`；`node/webui` 前端包已退役。跨产品复用代码集中在 `shared/frontend`。
+
 > 后续进展：本文件保留本轮早期验收事实。2026-10-08 后续已接入创建、附件媒体、xterm、文件、工作组、Auto 总览与浏览器只读观看，最新覆盖范围和验证限制见 [daily-use-integration.md](daily-use-integration.md)。下文“尚未接入”的描述属于当时阶段，不能作为当前功能清单。
 
 日期：2026-10-08。对象是 `desktop/tray-tauri` 中的真实 Windows Tauri 窗口及本机 Node，设计原型仅作布局参考。
@@ -24,9 +26,9 @@
 
 | 部分 | 入口 | 职责 |
 | --- | --- | --- |
-| 工作台 | `desktop/ui/DesktopApp.vue`、`desktop-ui.css` | 布局、Agent 选择、对话/资源呈现、草稿与审批交互 |
-| 可测试的局部状态 | `desktop/ui/workbench-state.js` | 路由映射、参数展示、草稿切换与失败恢复 |
-| 终端文本呈现 | `desktop/ui/terminal-output.js` | 跨块 UTF-8 解码及 CSI/OSC 过滤；不是完整终端模拟器 |
+| 工作台 | `desktop/tray-tauri/src/ui/DesktopApp.vue`、`desktop/tray-tauri/src/ui/desktop-ui.css` | 布局、Agent 选择、对话/资源呈现、草稿与审批交互 |
+| 可测试的局部状态 | `desktop/tray-tauri/src/ui/workbench-state.js` | 路由映射、参数展示、草稿切换与失败恢复 |
+| 终端文本呈现 | `desktop/tray-tauri/src/ui/terminal-output.js` | 跨块 UTF-8 解码及 CSI/OSC 过滤；不是完整终端模拟器 |
 | 设置承载 | `desktop/tray-tauri/src/settings-router.js`、`src/main.js` | 复用配置页面，通过 Tauri transport 调用 Node API；同步当前 Agent 到诊断组件 |
 | 宿主与传输 | `desktop/tray-tauri/src-tauri/src/lib.rs`、`nodeclient.rs`、`terminal.rs`、`events.rs` | 窗口/托盘、REST/SSE、PTY WebSocket 中继与命令校验 |
 | 图标 | `shared/icons/desktop/` | Canonical shared assets; Desktop design provenance and license notes remain in [`shared/icons/desktop/manifest.json`](../../../shared/icons/desktop/manifest.json) |
@@ -61,7 +63,7 @@
 2. **资源能力**：将简单文本终端推进到可支持交互程序和尺寸变化的终端组件；接入实际文件打开/预览/上传下载、内置浏览器观看与接管，明确 Node 文件与 Desktop 文件边界。
 3. **设置深度验收**：覆盖全部修改/保存/重载与错误分支，使用真实 MCP/SSH/Manage 验证服务和反馈闭环；修正继承页面中的 WebUI 专属说明与快捷键。
 4. **连接与发布**：远程 Node、连接握手/版本能力协商、凭据与缓存隔离、CSP 和权限收紧、三平台构建/性能/DPI 验收、安装升级回滚。
-5. **最终职责分离**：抽出共享设置组件/API 契约，消除 Desktop 对 `node/webui/frontend/src` 的源码依赖。功能覆盖并稳定后再移除 Node UI 与旧 Shell 轨道。
+5. **前端源码归属**：已完成。Desktop UI 位于 `desktop/tray-tauri/src/ui`，跨产品展示代码位于 `shared/frontend`；Node 不再保留 WebUI 包，也不需要前端产物参与构建。
 
 工作组、浏览器和文件入口在当前实现中明确不可用。以上缺口使本轮适合作为本地开发 MVP 验收点，尚不足以直接宣布完整 Desktop 产品迁移或正式发布。
 

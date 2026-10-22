@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:ui": "node --test ../ui/workbench-state.test.js ../ui/terminal-close.test.js ../ui/terminal-output.test.js ../ui/composer-surface-motion.test.js ../ui/workspace-files-state.test.js ../ui/workspace-references.test.js ../ui/workspace-preview.test.js ../ui/workgroup-state.test.js ../ui/slash-commands.test.js ./src/workspace-documents.test.js ./src/workspace-syntax.test.js ./desktop-settings-state.test.js ./top-slot-icons.test.js ../../shared/icons/icons.test.js",
+    "test:frontend": "vitest run --config vitest.config.js && node --test ../../shared/icons/icons.test.js",
+    "test:ui": "node --test ./src/ui/workbench-state.test.js ./src/ui/terminal-close.test.js ./src/ui/terminal-output.test.js ./src/ui/composer-surface-motion.test.js ./src/ui/workspace-files-state.test.js ./src/ui/workspace-references.test.js ./src/ui/workspace-preview.test.js ./src/ui/workgroup-state.test.js ./src/ui/slash-commands.test.js ./src/workspace-documents.test.js ./src/workspace-syntax.test.js ./src/desktop-settings-state.test.js ./src/top-slot-icons.test.js",
+    "test": "npm run test:frontend && npm run test:ui",
+    "lint": "eslint ./src --quiet",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -30,8 +33,15 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.5.0",
+    "eslint": "^10.9.1",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.11.0",
+    "jsdom": "^26.1.0",
+    "vitest": "^4.1.11",
     "vite": "^6.0.3"
   },
   "overrides": {

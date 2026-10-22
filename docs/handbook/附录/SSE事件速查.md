@@ -91,5 +91,5 @@ Produce 阶段的 `tool_call` / `tool_result` 只展示回调预览并携带 `si
 | `node/internal/turn/sse_publish.go` | assistant / HITL / turn_finished / usage / side-effect 事件 |
 | `node/internal/session/turn_state_view.go` | Turn Coordinator 权威状态快照 |
 | `node/internal/childagent/relay_hub.go` | 子 Agent 终态隔离 |
-| `node/webui/frontend/src/sse/stream.js` | SSE 事件解析和 Agent 游标重连 |
-| `node/webui/frontend/src/views/ChatView.vue` | 事件路由、HITL 和 turn 投影 |
+| `desktop/tray-tauri/src/ui/composables/useStream.js` | Desktop SSE 事件解析和 Agent 游标重连 |
+| `desktop/tray-tauri/src/ui/DesktopApp.vue` | 事件路由、HITL 和 turn 投影 |

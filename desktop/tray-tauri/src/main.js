@@ -3,13 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm as confirmNative, message as showNativeMessage, open as openNativeDialog } from "@tauri-apps/plugin-dialog";
 import App from "./App.vue";
 import router from "./settings-router.js";
-import "../../../node/webui/frontend/src/styles/tokens.css";
-import "../../../node/webui/frontend/src/styles/layout.css";
-import "../../../node/webui/frontend/src/styles/workbench.css";
-import "../../../node/webui/frontend/src/styles/overrides.css";
+import "@desktop-ui/styles/tokens.css";
+import "@desktop-ui/styles/layout.css";
+import "@desktop-ui/styles/workbench.css";
+import "@desktop-ui/styles/overrides.css";
 
-// The Desktop workbench uses the light palette; the reused Node settings
-// components read their semantic colors from this shared theme attribute.
+// The Desktop workbench and its settings use the same semantic theme tokens.
 document.documentElement.dataset.theme = "light";
 
 globalThis.__DAGENTS_API_REQUEST__ = async ({ method, path, body }) => {

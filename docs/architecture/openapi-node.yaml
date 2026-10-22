@@ -1160,7 +1160,7 @@ paths:
 
   /v1/bootstrap:
     get:
-      summary: Node UI bootstrap aggregate
+      summary: Desktop UI bootstrap aggregate
       responses:
         "200":
           description: Aggregate containing health, info, LLM, user, onboarding, and Agent views

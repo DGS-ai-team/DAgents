@@ -1,12 +1,14 @@
 # DAgents Desktop 与 Node 分离技术方案
 
-> **状态**：提案，面向下一轮架构重构。更新：2026-09-23。
+> **状态**：历史提案快照，更新：2026-09-23。本文保留当时的方案论证，不作为当前代码结构或产品行为的说明。
 >
 > 本方案把 Desktop 定义为唯一的人机界面，把 Node 定义为无头 Agent 执行引擎。目标 Shell 采用现有 Rust/Tauri 2 轨并扩展为 Windows、macOS、Linux 产品；Node 不再嵌入产品 UI。2026-09-23 当时的实现仍以 Windows、本机 Node 和 `/ui/` 为主，文中目标架构需要按阶段迁移，不能当作当前行为说明。
 >
 > 本文是历史提案快照；Go Shell 已从当前产品和构建树移除。当前产品路线见 [2026-10-14 产品收束方向](../design/desktop-product/product-direction-simplification-2026-10-14.md)，实际支持范围以根目录 [README](../../README.md) 和 Windows 安装说明为准。
 >
 > 2026-10-20 决策：Desktop 仅连接同机 Node，远程 Node 与 SSH tunnel 不进入当前产品路线。本文中远程连接、身份与隧道章节仅供理解历史方案；现行实现与待办见[Desktop 与 Node 交互评估](../design/desktop-product/desktop-node-interaction-review-2026-10-20.md)。
+
+> 2026-10-22 实施状态：Node `/ui/` 浏览器入口与旧 `node/webui/frontend` 源码包已退役；Desktop Vue 源码统一位于 `desktop/tray-tauri/src/ui`，Node 不依赖前端构建。本文中 `desktop/ui` 的目录设想是此前的迁移中间态，不是当前路径。
 
 > 2026-10-08：Windows 本机 Desktop 首条工作台链路已实装，见 [MVP 收束记录](../design/desktop-product/mvp-closeout.md)。当前仅支持 loopback Node，配置组件仍复用 Node WebUI 源码。本文的三栏资源区、侧栏 Auto 总览及 Node 顶栏快切属于早期布局，已由 [当前原型](../design/desktop-product/prototype/) 中的独立对话/资源页签与右下消息坞替代；远程连接、浏览器/文件和最终无头 Node 仍是后续目标。
 

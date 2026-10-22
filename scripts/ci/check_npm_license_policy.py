@@ -133,7 +133,6 @@ def license_value(package_json: Path) -> str | None:
 
 def main() -> int:
     roots = [
-        Path("node/webui/frontend/node_modules"),
         Path("manage/console/frontend/node_modules"),
         Path("desktop/tray-tauri/node_modules"),
     ]

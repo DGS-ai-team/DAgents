@@ -1,5 +1,5 @@
 <script setup>
-import DesktopApp from '../../ui/DesktopApp.vue'
+import DesktopApp from './ui/DesktopApp.vue'
 </script>
 
 <template><DesktopApp /></template>

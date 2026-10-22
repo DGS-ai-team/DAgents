@@ -95,7 +95,7 @@ Node 负责资源的真实状态、鉴权、工作区边界和内容版本；Des
 3. Desktop 资源事件失效接入，浏览器恢复策略和终端会话元信息同步。
 4. 在真实 Tauri 窗口、真实 Node 文件与终端上验收；不需要调用付费 LLM来验证磁盘刷新。
 
-涉及代码：`desktop/ui/components/WorkspaceFiles.vue`、`desktop/ui/workspace-files-api.js`、`desktop/ui/DesktopApp.vue`、`desktop/ui/components/BrowserViewer.vue`、`node/internal/api/workspace_api.go`，必要时调整 Tauri 二进制响应处理及对应测试。逻辑抽取仅用于复用请求调度和可测试的状态判断，不建立新的全局资源管理框架。
+涉及代码：`desktop/tray-tauri/src/ui/components/WorkspaceFiles.vue`、`desktop/tray-tauri/src/ui/workspace-files-api.js`、`desktop/tray-tauri/src/ui/DesktopApp.vue`、`desktop/tray-tauri/src/ui/components/BrowserViewer.vue`、`node/internal/api/workspace_api.go`，必要时调整 Tauri 二进制响应处理及对应测试。逻辑抽取仅用于复用请求调度和可测试的状态判断，不建立新的全局资源管理框架。
 
 - [ ] 外部新增/删除文件在目录检查后出现；无需关闭资源页，选中文件与滚动不丢失。
 - [ ] 文本、PNG 等被外部改写后自动更新；同大小同修改时间的改动也能在强校验后发现。

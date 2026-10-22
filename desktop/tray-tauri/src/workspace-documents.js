@@ -1,7 +1,7 @@
 import mammoth from 'mammoth'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
-import { workspacePreviewLimits } from '../../ui/workspace-files-state.js'
+import { workspacePreviewLimits } from './ui/workspace-files-state.js'
 
 const { bytes: MAX_PREVIEW_BYTES, rows: MAX_PREVIEW_ROWS, columns: MAX_PREVIEW_COLUMNS } = workspacePreviewLimits
 

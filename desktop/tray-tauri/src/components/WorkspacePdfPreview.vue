@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import * as pdfjs from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import UiIcon from '../../../../node/webui/frontend/src/components/UiIcon.vue'
+import UiIcon from '@desktop-ui/components/UiIcon.vue'
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 

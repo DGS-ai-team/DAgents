@@ -9,8 +9,10 @@ export default defineConfig(() => ({
   plugins: [vue()],
   resolve: {
     alias: [
+      { find: "@desktop-ui", replacement: fileURLToPath(new URL("./src/ui", import.meta.url)) },
       { find: "@shared-icons", replacement: fileURLToPath(new URL("../../shared/icons", import.meta.url)) },
       { find: "@dagents-brand", replacement: fileURLToPath(new URL("../../shared/branding", import.meta.url)) },
+      { find: "@shared-frontend", replacement: fileURLToPath(new URL("../../shared/frontend", import.meta.url)) },
       { find: /^morphicons\/vue$/, replacement: fileURLToPath(new URL("./node_modules/morphicons/dist/vue.js", import.meta.url)) },
       { find: /^morphicons\/adapters$/, replacement: fileURLToPath(new URL("./node_modules/morphicons/dist/adapters.js", import.meta.url)) },
       { find: "vue", replacement: fileURLToPath(new URL("./node_modules/vue/dist/vue.esm-bundler.js", import.meta.url)) },
@@ -26,7 +28,12 @@ export default defineConfig(() => ({
   },
   clearScreen: false,
   server: {
-    fs: { allow: [fileURLToPath(new URL("../../", import.meta.url))] },
+    fs: {
+      allow: [
+        fileURLToPath(new URL("./", import.meta.url)),
+        fileURLToPath(new URL("../../shared", import.meta.url)),
+      ],
+    },
     port: 1422,
     strictPort: true,
     host: host || "127.0.0.1",

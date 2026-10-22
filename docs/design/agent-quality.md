@@ -73,6 +73,6 @@ human message
 | Prompt / tool snapshot | `node/internal/turn/` |
 | Skill 加载 | `node/internal/skills/` |
 | ContextInjection | `node/internal/turn/`、`node/internal/session/` |
-| 事件与 UI 状态 | `node/internal/stream/`、`node/webui/frontend/src/stores/` |
+| 事件与 UI 状态 | `node/internal/stream/`、`desktop/tray-tauri/src/ui/stores/` |
 | 压缩与缓存 | `node/internal/compression/`、[`context-compression-cache-analysis.md`](./context-compression-cache-analysis.md) |
 | 工具规则 | [`../handbook/04-能力与策略.md`](../handbook/04-能力与策略.md)、[`../../node/internal/tools/REFERENCE.md`](../../node/internal/tools/REFERENCE.md) |

@@ -4,7 +4,18 @@
 
 ## [Unreleased]
 
-- 移除共享 Vue 前端的独立网页启动与构建入口，DAgents Desktop 成为唯一 Agent 交互界面；Node 继续只提供 API。
+面向 v1.0 的 Desktop 发布候选，补齐资源工作流并收束 Desktop 与 Node 的代码边界。
+
+### Desktop 资源与截图
+
+- 工作区资源支持 Word、Excel（保留合并单元格）、CSV、PDF、图片、SVG、HTML 与代码预览；不支持的格式会明确提示，并保留原文件下载。
+- 可从文件内容中选择片段并通过右键附加到现有消息输入栏；引用跟随消息发送，不新增独立批注流程。
+- 截图采用全屏冻结与区域框选；在窗口收起完成后再冻结画面，避免截入 Desktop 残影。
+
+### 架构与开发流程
+
+- Desktop Vue 界面统一迁入 Tauri 应用包，跨产品复用的前端组件与工具归入 `shared/frontend`；Node 不再内置或构建网页界面，只保留功能 API。
+- 移除旧 Node WebUI 的专属页面与运行入口，更新 Desktop、Manage 的构建容器、CI、验证脚本和开发文档以使用新目录。
 
 ## [0.12.0] - 2026-10-20
 

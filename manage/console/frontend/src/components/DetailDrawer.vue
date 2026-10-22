@@ -121,14 +121,7 @@ const discoveryGroups = computed(() => {
       </div>
 
       <footer class="drawer-footer">
-        <a
-          class="btn btn-primary btn-block"
-          :href="agent.base_url"
-          target="_blank"
-          rel="noopener"
-        >
-          打开 Node Web UI
-        </a>
+        <p class="node-drawer__hint">Agent 对话与操作请使用 DAgents Desktop 连接此 Node。</p>
       </footer>
     </div>
   </aside>

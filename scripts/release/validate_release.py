@@ -20,7 +20,6 @@ README_FILE = ROOT / "README.md"
 HANDBOOK_FILE = ROOT / "docs/handbook/README.md"
 ROADMAP_FILE = ROOT / "docs/roadmap.md"
 PACKAGE_FILES = (
-    ROOT / "node/webui/frontend/package.json",
     ROOT / "manage/console/frontend/package.json",
     ROOT / "desktop/tray-tauri/package.json",
 )

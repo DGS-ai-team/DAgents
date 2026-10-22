@@ -34,7 +34,7 @@ Linux Release CI：Runner **ubuntu-latest**；Go 二进制 **CGO_ENABLED=0** 静
 
 - Windows 桌面界面由独立 **Tauri Desktop** 提供；Node 只提供 API，不再托管 `/ui/` 浏览器应用。
 - Linux Node archive 是 API 服务包，不包含 Desktop UI 或其他桌面运行时。
-- `node/webui/` 作为共享 UI 源码保留给 Desktop 构建；Go Node 构建不再依赖其静态资源。
+- `desktop/tray-tauri/src/` 由 Desktop 自身构建；`shared/frontend/` 仅保留跨产品共享的展示 helper。Go Node 构建不依赖前端源码或静态资源。
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|

@@ -31,7 +31,7 @@
 | [`icons/`](icons/) | Desktop 独立 SVG 源、来源清单及[图标画板](icons/gallery.html) | 基于已验收的 DAgents/Lucide 形态筛选并补绘 Desktop 操作图标；原型构建时同步，不修改 Node/Manage 共享资产 |
 | [`architecture/`](architecture/) | Desktop / Node 分离方案和早期 SVG 布局图 | 复制自 `docs/architecture/`；**技术边界参考**，其中三栏资源区、Auto 总览和 Node 快切的旧 UI 描述已被最新原型覆盖 |
 | [`visual-system/`](visual-system/) | 品牌图、配色、图标文件/画板、Node 与 Manage UI 审计 | 复制自 `shared/branding/` 与 `docs/design/`；属跨产品视觉材料，Desktop 适用性仍需单独定稿 |
-| [`references/ui-product-grade-redesign.md`](references/ui-product-grade-redesign.md) | 现有 Node Web UI 的产品级改造背景 | 复制自 `docs/design/ui-product-grade-redesign.md`；帮助保留现有体验，不等于 Desktop 规格 |
+| [`references/ui-product-grade-redesign.md`](references/ui-product-grade-redesign.md) | 旧 Node WebUI 的产品级改造背景 | 复制自 `docs/design/ui-product-grade-redesign.md`；仅作历史体验参考，不等于当前 Desktop 规格 |
 
 ## 当前明确的界面方向
 

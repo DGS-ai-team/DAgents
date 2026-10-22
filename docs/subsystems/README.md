@@ -31,7 +31,7 @@
 
 - API/OpenAPI：[`../architecture/agent-node-api.md`](../architecture/agent-node-api.md)、[`../architecture/openapi-node.yaml`](../architecture/openapi-node.yaml)
 - Workgroup schemas/fixtures：[`../design/fixtures/workgroup-d05/`](../design/fixtures/workgroup-d05/)
-- Node UI：`node/webui/frontend/src/`
+- Desktop UI 与 Tauri 宿主：`desktop/tray-tauri/src/`、`desktop/tray-tauri/src-tauri/`
 - Manage Console：`manage/console/frontend/src/`
 - 公共配置：`shared/config/`
 
