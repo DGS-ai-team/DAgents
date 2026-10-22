@@ -18,7 +18,7 @@ cp "${repo_root}/packaging/manage/scripts/import-image.bat" "${tmp_root}/packagi
 cp "${repo_root}/packaging/manage/scripts/restart.bat" "${tmp_root}/packaging/manage/scripts/"
 
 version="0.0.0-ci"
-product_prefix="da""gents"
+product_prefix="dagents"
 printf 'test image' > "${tmp_root}/dist/${product_prefix}-manage-${version}.tar.gz"
 printf 'test release, already seeded in the image' > "${tmp_root}/dist/${product_prefix}-local-assistant-linux-amd64-${version}.tar.gz"
 
