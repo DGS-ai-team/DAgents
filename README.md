@@ -26,9 +26,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-当前版本为 **v0.12.0**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
+当前版本为 **v1.0.0**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
-本页描述当前开发线。独立 Desktop、Node API-only 与新的上下文分段尚未发布到 v0.11.0 安装包；下一版范围与验收进度见[发布收束清单](docs/release-readiness.md)。旧版迁移请先阅读[运维指南](docs/user/operations.md#升级与兼容性)，不要直接覆盖正在使用的数据目录。
+v1.0.0 是 DAgents 首个稳定版，提供独立 Windows Desktop 与 API-only Node。由 v0.11.0 升级时，请先阅读[迁移指南](docs/user/migrate-from-v0.11.md)和[Windows 安装说明](packaging/windows/README.md)，备份现有 `.runtime` 后再安装；不要直接覆盖正在使用的数据目录。
 
 > DAgents 是一个开源、本地优先的 Agent 控制台：模型负责理解任务，Node 负责会话、工具、权限和审批；数据与执行环境默认留在你的机器上。
 
@@ -123,7 +123,7 @@ flowchart LR
 | Linux 64 位 | `linux-amd64` 本地助手 tar.gz |
 | Manage 控制面 | 可选 Manage 离线包 |
 
-下一版 Windows 仅发布 x64 安装包，暂停 x86 完整包，不提供免安装归档；历史 x86 用户不会跨架构接收 x64 安装器。安装完成后，从开始菜单打开 DAgents Desktop 配置本机 Node 与模型；桌面快捷方式和登录自启动均为可选项，默认不勾选，升级时保留原选择。Desktop 需要预先安装 WebView2 Evergreen Runtime。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。详细安装与升级边界见 [Windows 安装说明](packaging/windows/README.md)。
+Windows v1.0.0 发布 x64 完整安装包，暂停 x86 完整包且不提供免安装归档；历史 x86 用户不会跨架构接收 x64 安装器。安装完成后，从开始菜单打开 DAgents Desktop 配置本机 Node 与模型；桌面快捷方式和登录自启动均为可选项，默认不勾选，升级时保留原选择。Desktop 需要预先安装 WebView2 Evergreen Runtime。Linux tar.gz 提供 Node API、客户端和 Browser service，不包含 Desktop UI。详细安装与升级边界见 [Windows 安装说明](packaging/windows/README.md)。
 
 ### 从源码运行
 

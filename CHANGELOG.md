@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-22
+
+首个稳定版：交付独立 Windows Desktop、本机 Node 与完整资源工作台，统一长期任务和数据恢复体验。
+
 面向 v1.0 的 Desktop 发布候选，补齐资源工作流并收束 Desktop 与 Node 的代码边界。
 
 ### Desktop 资源与截图
@@ -16,10 +20,6 @@
 
 - Desktop Vue 界面统一迁入 Tauri 应用包，跨产品复用的前端组件与工具归入 `shared/frontend`；Node 不再内置或构建网页界面，只保留功能 API。
 - 移除旧 Node WebUI 的专属页面与运行入口，更新 Desktop、Manage 的构建容器、CI、验证脚本和开发文档以使用新目录。
-
-## [0.12.0] - 2026-10-20
-
-独立 Desktop 与 Node API 收束版
 
 - 完成 Windows Desktop 与 Node API 分离，覆盖对话、资源工作台、Auto 任务及安装升级流程。
 - 强化工具执行收尾、配置密钥保护、资源安全展示与数据恢复边界。

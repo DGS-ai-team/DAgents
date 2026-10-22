@@ -1,10 +1,10 @@
-# 下一版发布收束清单
+# v1.0.0 发布验收清单
 
-评估日期：2026-10-20。最近正式发布仍为 `v0.11.0`（2026-09-11）。PR #347—#352 已合入 `dev`；PR #352 的合入提交为 `33106ead`，PR 检查通过。当前收束资源自动刷新、消息资源引用、显式 HTML/SVG 展示、资源页布局、输出管道关闭时的启动崩溃及安装器生命周期安全。源码复核见[发版验收](design/desktop-product/audits/2026-10-19/release-acceptance.md)，此前安装与 Browser 结果见[最终候选复验](design/desktop-product/audits/2026-10-19/release-candidate-6a0107c2.md)，标准用户安装恢复结果见[10 月 20 日审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。
+评估日期：2026-10-22。最近正式发布仍为 `v0.11.0`（2026-09-11）。v1.0.0 候选从 `dev` 合并提交 `7a745704` 开始准备，候选工作分支为 `codex/release-v1.0.0`。开发线 PR #355 已合并；新版本元数据已在候选分支更新，发布 PR、冻结包和标签尚未创建。当前重点是对最终候选关闭安装迁移、真实集成和 Auto 耐久门槛。
 
 ## 发布判断与范围
 
-建议下一版定位为 **v0.12.0：独立 Desktop 与 Node API 收束版**。候选分支 `codex/release-0.12.0-rc` 已从 `642cd15` 准备版本元数据；提交 `e1578049` 已推送，包含 Desktop 斜杠命令分发及上下文状态修复。官方手动打包正在验证该提交；更早的 `80feadbb`、`a8d124e2` 打包结果均已被此候选取代。尚未冻结最终发行包、创建发布 PR 或标签，也没有最终候选的 CodeQL 结果。当前不宜直接发布稳定版，主要缺口仍是最终候选的 PR/CI/CodeQL、安装恢复和外部环境验收。
+本次目标是 **v1.0.0：DAgents 首个稳定版**，包含独立 Windows Desktop、API-only Node、资源工作台及 Auto Agent。候选元数据已通过 `prepare_release.py` 更新；冻结候选的 CI、CodeQL、最终安装包验收和外部环境测试仍须在发布 PR/实际发行包上完成。未关闭的 P0 项在下文逐项列出，不能仅凭开发分支 CI 通过视为发布放行。
 
 10 月 20 日完成的临时标准用户 QA 关闭了隔离 QA 包的初装、升级、卸载保留数据和重装恢复核心路径；它不等于最终发行候选放行。该 QA 包的安装器版本为 `0.11.0.1`，其中 payload 和 bundle `VERSION` 仍为 `0.11.0`，不是发布候选。最终候选仍需验证 WebView2 缺失、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、真实 Provider 与本机 Browser 联动，以及至少 24 小时 Auto 耐久。10 月 17 日的完整包基于更早源码，不能作为当前资源改动的最终发行候选。
 
@@ -32,7 +32,7 @@
 - [x] 修复 Bash 等待工作区写锁时收到 UI 取消却返回 `workspace_busy`；增加确定性回归，针对取消边界重复 20 次通过，Go 1.26.9 五模块全量回归通过。
 - [x] v0.11.0 持久化数据结构核对、脱敏恢复与配对密钥/缺失密钥回归；落地[迁移指南](user/migrate-from-v0.11.md)。不把数据 Store 测试计作安装迁移。
 - [x] 原生 LLM 空 Key 探测→保存→重开探测、MCP 工具开关→JSON 保存、遮罩凭据往返及无效草稿失败验证；[配置验收记录](design/desktop-product/audits/2026-10-17/configuration-and-data.md)。
-- [x] Desktop 自定义输入栏补齐 `/clear`、`/compress`、`/thinking` 和 `/upload` 分发；主对话与资源页悬浮输入栏复用共享命令解析，未知命令显示错误而不提交给模型。`/compress` 保留正在显示的流式回复，`/clear` 清除待落盘的乐观消息。82 项 Desktop UI 测试和生产构建通过；修复提交 `e1578049` 已推送，最终候选官方打包正在运行。
+- [x] Desktop 自定义输入栏补齐 `/clear`、`/compress`、`/thinking` 和 `/upload` 分发；主对话与资源页悬浮输入栏复用共享命令解析，未知命令显示错误而不提交给模型。`/compress` 保留正在显示的流式回复，`/clear` 清除待落盘的乐观消息。该修复现已随 PR #355 合入 `dev`；针对当时 82 项 Desktop UI 测试和生产构建通过。
 - [x] 两个设计原型的兼容依赖修复，分别 build 与 4 项测试通过、npm audit 0；确认 `glib` 只在非发行的 Linux Desktop 图中，Windows x64/x86 不包含它。
 - [x] 移除 Desktop 未使用的 `zip 7.2.0` 及其专属依赖，关闭三项 RustSec 漏洞；锁文件扫描为 0 漏洞、7 项明示警告，CI 增加固定版本的无忽略项审计。
 - [x] 正式与手动发布工作流仅组装 x64 完整包；更新查询增加 `platform_supported`，无匹配架构时明确提示且不下载其他架构。旧 Manage/Node 缺字段默认允许原有行为；覆盖 Node 失败状态、托盘提示和 CLI 检查分支。
@@ -43,7 +43,7 @@
 
 以下是本次建议的发布门槛，不表示这些能力都尚未实现。每项以最终候选提交和实际包为准，记录环境、包哈希、步骤与结果；失败项修复后重测受影响链路。
 
-- [ ] **最终冻结候选的 CI、CodeQL、审查与集成。** PR #349 安装验收工具、PR #350 启动/输出崩溃修复和 PR #352 安装生命周期环境绑定修复均已合入 `dev`；PR #352 的提交 `33106ead` 和 PR 检查通过是已完成的开发分支集成证据。此前冻结提交 `6a0107c2694da7cbe2571813f7da628f04ba431c` 的[全量 CI](https://github.com/DGS-ai-team/DAgents/actions/runs/39275310959) 与 [CodeQL](https://github.com/DGS-ai-team/DAgents/actions/runs/39275320492) 通过，但不包含之后所有 `dev` 提交。候选版本元数据和本机完整验证通过；提交 `e1578049` 的官方手动打包正在运行，但手动打包不是 PR CI 或 CodeQL，尚未冻结、审查或集成。冻结后仍须完成审查与集成，QA 安装结果不替代此门槛。
+- [ ] **v1.0.0 冻结候选的 CI、CodeQL、审查与集成。** PR #355 已合入 `dev`；合并提交 `7a745704` 的 CI 与 CodeQL 已通过。当前 `codex/release-v1.0.0` 只包含版本资料准备，尚未推送或创建针对 `main` 的发布 PR，因此 v1.0.0 发布分支自身的 CI、CodeQL、审查与集成仍未完成。开发线检查和旧候选证据不能替代最终发布提交的门槛。
 - [x] **已复现的 Desktop 首次启动崩溃。** 同一发行候选在 stderr 正常时存活，关闭读端后复现 `0xc0000409`；诊断版捕获 `failed printing to stderr`、错误码 232 和 `events::sync_agents` 的可靠调用栈。修复统一处理进程输出 I/O 失败，并补齐同类 CLI stdout 问题；51 项 Rust 测试通过，正式模式构建通过闭管道进程与 CLI 输出验证。stderr 修复还完成 120 秒闭管道运行和原生内嵌 UI 交互。原始 dump 的完整业务栈未恢复；受控复现与原异常线索一致，但不把其他启动故障一并视为通过。各构建哈希及验收范围见[专项记录](design/desktop-product/audits/2026-10-19/desktop-startup-panic.md)。新代码的 PR 集成和最终包验收仍由相邻门槛约束。
 - [x] **标准用户 QA 核心初装、升级、卸载保留与重装恢复。** 临时标准 Windows 用户在开发机上使用 QA-only `0.11.0.1` 安装器完成静默初装、原生首配与 Mock 对话、快捷方式退出/重开持久性、`0.11.0 → 0.11.0.1` 静默升级、卸载数据保留及重新安装后 Agent/历史恢复；最终测试卸载已完成。安装器版本为 `0.11.0.1`，但 bundle/payload `VERSION` 为 `0.11.0`，不可视为发行候选。证据、快照与哈希见[标准用户安装恢复审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。
 
@@ -57,7 +57,7 @@
 - [x] **配置 ID 改名的 Agent 引用。** 活动 Agent 引用中的 ID 改名/删除返回 `409 llm_profile_in_use`，列出 Agent 并要求先修改绑定或删除 Agent；软归档 Agent 不阻止变更。拒绝发生于设置和密钥持久化前，创建/PATCH 还会拒绝不存在的目标 ID，详见 [API 契约](api/node-integration.md) 与配置验收记录。
 - [ ] **最终候选的任务恢复与 Auto 耐久。** 做一轮不少于 24 小时的持续运行，覆盖唤醒、无事可做、用户插话、Todo 修改、待审批、拒绝、停止、Dreaming、经验注入和手册文件。分别在运行/待审批/空闲状态重启 Desktop 或 Node，核对队列、历史、工具副作用和调度，不重复执行未知副作用；工具无工具收尾、失败批次及空闲上下文边界一并做候选包冒烟。既有各专项证据保留，不要求重复全部测试矩阵。
 - [ ] **本机 Browser 与发行服务。** Windows 打包 Browser/Chromium 已在全新 runtime 与隔离用户目录运行：健康/协议、启动 Chromium、本地页面导航/DOM/截图、停止会话与关闭后状态通过；仍需在最终候选上验收 Node 工具与 Desktop Browser 资源联动、外站和升级后的状态。Linux Node 按独立服务包验收，不属于 Desktop 远程连接矩阵。Windows x86 完整包已按用户决策暂停。
-- [ ] **版本资料、依赖审计与发布产物。** `Unreleased`、README 原生截图、操作手册、路线图与支持范围已同步。候选已用 `prepare_release.py` 统一为 `0.12.0`，`validate_release.py --version 0.12.0` 通过；剩余为冻结后的联网依赖审计与真实发布构建，核对文件版本、包内容、许可证、SHA256SUMS、release-manifest 和更新选包/下载后安装链路。已生成的手动 QA 安装包 Authenticode 状态为 `NotSigned`；正式 release workflow 当前没有签名步骤，需在冻结前确认签名策略以及 SmartScreen 提示是否可接受，不能把手动 QA 包当作最终 Release 资产。
+- [ ] **版本资料、依赖审计与发布产物。** v1.0.0 版本元数据、README、手册、路线图和 changelog 已在候选分支更新；`validate_release.py --version 1.0.0` 通过。联网依赖审计和正式 tag 构建尚未执行；构建后仍须核对文件版本、包内容、许可证、`SHA256SUMS`、`release-manifest.json` 与更新选包/下载链路。当前工作流不对 Windows 安装包做 Authenticode 签名，v1.0.0 若沿用现行发布配置将显示 Windows SmartScreen 提示；发布资产和说明必须明确这一点。
 
 ## 依赖告警的处置范围
 
@@ -87,10 +87,12 @@
 4. 关闭上述验收发现的问题，重建候选并只重测受影响链路；补齐版本资料与最终依赖审计。
 5. 按 [发布流程](release-process.md) 建立 `dev → main` 发布 PR，通过检查和审查后，在 `main` 对应提交打标签；发布后校验实际资产、安装与升级，再同步 `main → dev`。
 
-当前阶段准备本地候选与验收记录；完成最终验收和审查后再创建发布 PR，不创建发布标签，也不把未验证项目标为完成。
+当前阶段准备 v1.0.0 候选并关闭 P0 验收项；完成最终验收后创建 `dev → main` 发布 PR。PR 合并后才创建 `v1.0.0` 标签；不把未验证项目标为完成。
 
 2026-10-20 补充：已完成打包 Node → Browser → 原生 Desktop 整链，以及管理员开发机上的正式安装任务开关、官方 v0.11.0 普通 Agent 冷备份迁移、合成加密 Key 恢复和运行中卸载。验收发现并修复中文路径卸载损坏 PATH、已有 policy 导致静默安装挂起两项问题，PR #352 已合并至 `dev`（`33106ead`），PR 检查通过；失败候选和成功修正候选分别留证。另在临时标准 Windows 用户下完成 QA-only `0.11.0.1` 安装器的静默初装、Mock 对话、快捷方式重开、`0.11.0 → 0.11.0.1` 升级、卸载保留数据及重装恢复，详见[标准用户安装恢复审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。该 QA 的 payload/bundle `VERSION` 仍为 `0.11.0`，不属于发布候选；缺失 WebView2、文件占用、不可写路径、备份恢复故障注入、自启开启状态保留、真实 Provider/SSH 和 24 小时 Auto 仍未关闭，本轮不据此发布稳定版。
 
-2026-10-20 继续：从 `642cd15` 建立 `codex/release-0.12.0-rc` 候选并同步正式版本元数据。Windows 本地完整验证通过：共享 UI 源码 534 项、Desktop UI 77 项、Python 202 项、Rust 51 项，Go 测试/vet/Staticcheck/构建通过；Manage 构建与 lint 通过，Desktop UI 构建通过。release metadata 的 4 项单测和 `validate_release.py --version 0.12.0` 通过；隔离安装器契约测试 30 项通过。完整验证首次发现 `scripts/verify.ps1` 的 Go 包列表有 PowerShell 尾随逗号语法错误，修复后整套验证通过。该轮候选提交 `80feadbb` 已推送并通过官方手动打包；随后安装冒烟确认安装目录版本为 `0.12.0`，随包 Node 启动、状态和停止命令均成功，原隔离 Node `18977` 保持运行。该包不含下一条记录中的斜杠命令修复，且 Authenticode 未签名，现已由新候选取代。
+历史验证（2026-10-20）：从 `642cd15` 建立的 `codex/release-0.12.0-rc` 候选同步过正式版本元数据。Windows 本地验证通过：共享 UI 源码 534 项、Desktop UI 77 项、Python 202 项、Rust 51 项，Go 测试/vet/Staticcheck/构建通过；Manage 构建与 lint 通过，Desktop UI 构建通过。release metadata 单测、当时的 `validate_release.py --version 0.12.0` 和隔离安装器契约测试 30 项通过。候选提交 `80feadbb` 曾通过官方手动打包和安装冒烟；该包不含之后的斜杠命令修复且 Authenticode 未签名，不作为 v1.0.0 发行证据。
 
-2026-10-20 斜杠命令回归：发现 Desktop 自定义 Composer 绕过共享命令分发，导致 `/clear`、`/compress`、`/thinking`、`/upload` 被当成普通消息提交。修复与上下文状态边界处理已加入 `e1578049` 并推送；Desktop UI 82 项、共享 UI 源码 534 项通过，Desktop Vite 生产构建通过。官方手动打包工作流 [39366512900](https://github.com/DGS-ai-team/DAgents/actions/runs/39366512900) 正在运行；较早的 [39365962542](https://github.com/DGS-ai-team/DAgents/actions/runs/39365962542) 对应 `a8d124e2`，已经被新提交取代。最终候选仍缺 PR CI/CodeQL、冻结发行包安装迁移验收、真实 Provider/SSH、Browser 联动和长时 Auto 验收。
+历史验证（2026-10-20）：发现并修复 Desktop Composer 将 `/clear`、`/compress`、`/thinking`、`/upload` 当作普通消息提交的问题，并修正上下文状态边界。Desktop UI 82 项、共享 UI 源码 534 项和 Desktop Vite 生产构建通过；修复现已包含在 PR #355 与当前 `dev` 基线中。此前手动打包工作流只用于中间候选，不代表 v1.0.0 发行包验收。
+
+2026-10-22 更新：v1.0.0 版本资料已在 `codex/release-v1.0.0` 更新；本地版本校验与发布准备单测通过。仍需完成上述 P0 验收、发布 PR 的 CI/CodeQL/审查，以及 tag 产物检查。
