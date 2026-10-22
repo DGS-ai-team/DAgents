@@ -39,6 +39,14 @@ class RoadmapReleaseMarkerTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(updated, "准备发布 v1.0.0。")
 
+    def test_updates_current_release_baseline(self) -> None:
+        roadmap = "## 当前发布基线（v1.0.0）"
+        updated, count = ROADMAP_RELEASE.subn(
+            lambda match: f"{match.group('prefix')}v1.1.0", roadmap, count=1
+        )
+        self.assertEqual(count, 1)
+        self.assertEqual(updated, "## 当前发布基线（v1.1.0）")
+
 
 if __name__ == "__main__":
     unittest.main()

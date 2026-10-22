@@ -36,7 +36,7 @@ PACKAGE_LOCK_FILES = tuple(path.with_name("package-lock.json") for path in PACKA
 CARGO_FILE = ROOT / "desktop/tray-tauri/src-tauri/Cargo.toml"
 CARGO_LOCK_FILE = ROOT / "desktop/tray-tauri/src-tauri/Cargo.lock"
 ROADMAP_RELEASE = re.compile(
-    r"(?:准备发布|下一版建议为) v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?"
+    r"(?P<prefix>准备发布 |下一版建议为 |当前发布基线（)v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?"
 )
 
 
@@ -180,7 +180,9 @@ def prepare(version: str, summary: str, release_date: str) -> None:
         HANDBOOK_FILE,
     )
 
-    roadmap_updated, roadmap_count = ROADMAP_RELEASE.subn(f"准备发布 v{version}", roadmap, count=1)
+    roadmap_updated, roadmap_count = ROADMAP_RELEASE.subn(
+        lambda match: f"{match.group('prefix')}v{version}", roadmap, count=1
+    )
 
     changelog_entry = f"## [{version}] - {release_date}\n\n{summary.strip()}\n\n"
     unreleased = re.compile(r"(## \[Unreleased\]\s*\n)")
