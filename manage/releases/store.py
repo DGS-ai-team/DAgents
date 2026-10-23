@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import threading
+from functools import cmp_to_key
 
 from manage.releases.models import DEFAULT_ARTIFACT, DEFAULT_CHANNEL, ReleasePackage, ReleasePackageCreate
-from manage.releases.semver import upgrade_available
+from manage.releases.semver import compare_versions, upgrade_available
 from manage.storage.sqlite import SQLiteDatabase
 
 
@@ -30,6 +31,31 @@ class ReleasePackageStore:
                 "VALUES(?,?,?,?,?) "
                 "ON CONFLICT(artifact,channel,platform,version) DO UPDATE SET payload_json=excluded.payload_json",
                 (pkg.artifact, pkg.channel, pkg.platform, pkg.version, pkg.model_dump_json()),
+            )
+            conn.commit()
+
+    def _save_many(self, packages: list[ReleasePackage]) -> None:
+        if not packages:
+            return
+        if self._db is None:
+            for pkg in packages:
+                self._mem[self._key(pkg.artifact, pkg.channel, pkg.platform, pkg.version)] = pkg
+            return
+        with self._db.connect() as conn:
+            conn.executemany(
+                "INSERT INTO release_packages(artifact,channel,platform,version,payload_json) "
+                "VALUES(?,?,?,?,?) "
+                "ON CONFLICT(artifact,channel,platform,version) DO UPDATE SET payload_json=excluded.payload_json",
+                [
+                    (
+                        pkg.artifact,
+                        pkg.channel,
+                        pkg.platform,
+                        pkg.version,
+                        pkg.model_dump_json(),
+                    )
+                    for pkg in packages
+                ],
             )
             conn.commit()
 
@@ -75,7 +101,17 @@ class ReleasePackageStore:
             rows = [p for p in rows if p.platform == platform]
         if status and status != "all":
             rows = [p for p in rows if p.status == status]
-        return sorted(rows, key=lambda p: (p.platform, p.channel, p.version), reverse=True)
+        def compare_packages(left: ReleasePackage, right: ReleasePackage) -> int:
+            left_group = (left.platform, left.channel, left.artifact)
+            right_group = (right.platform, right.channel, right.artifact)
+            if left_group != right_group:
+                return -1 if left_group < right_group else 1
+            by_version = compare_versions(right.version, left.version)
+            if by_version:
+                return by_version
+            return (right.updated_at > left.updated_at) - (right.updated_at < left.updated_at)
+
+        return sorted(rows, key=cmp_to_key(compare_packages))
 
     def create_draft(self, payload: ReleasePackageCreate, now: int) -> ReleasePackage:
         with self._lock:
@@ -108,11 +144,16 @@ class ReleasePackageStore:
                 return None
             if pkg.status != "published":
                 pkg.status = "published"
+                pkg.published_at = now
+            elif pkg.published_at is None:
+                # Fill the field for packages published before published_at existed.
+                pkg.published_at = pkg.updated_at
             pkg.updated_at = now
+            changed = [pkg]
             if set_latest:
-                self._clear_latest(artifact, channel, platform, except_version=version)
+                changed.extend(self._clear_latest(artifact, channel, platform, except_version=version))
                 pkg.is_latest = True
-            self._save(pkg)
+            self._save_many(changed)
             return pkg
 
     def promote(self, artifact: str, channel: str, platform: str, version: str, now: int) -> ReleasePackage | None:
@@ -120,13 +161,15 @@ class ReleasePackageStore:
             pkg = self.get(artifact, channel, platform, version)
             if not pkg or pkg.status != "published":
                 return None
-            self._clear_latest(artifact, channel, platform, except_version=version)
+            changed = self._clear_latest(artifact, channel, platform, except_version=version)
             pkg.is_latest = True
             pkg.updated_at = now
-            self._save(pkg)
+            changed.append(pkg)
+            self._save_many(changed)
             return pkg
 
-    def _clear_latest(self, artifact: str, channel: str, platform: str, *, except_version: str) -> None:
+    def _clear_latest(self, artifact: str, channel: str, platform: str, *, except_version: str) -> list[ReleasePackage]:
+        changed = []
         for pkg in self._all():
             if (
                 pkg.artifact == artifact
@@ -136,7 +179,8 @@ class ReleasePackageStore:
                 and pkg.version != except_version
             ):
                 pkg.is_latest = False
-                self._save(pkg)
+                changed.append(pkg)
+        return changed
 
     def get_latest(self, artifact: str, channel: str, platform: str) -> ReleasePackage | None:
         matches = [
@@ -199,7 +243,8 @@ class ReleasePackageStore:
             "current": current,
             "latest": latest_version,
             "upgrade_available": available,
-            "published_at": latest_pkg.updated_at if latest_pkg else None,
+            "platform_supported": latest_pkg is not None,
+            "published_at": (latest_pkg.published_at or latest_pkg.updated_at) if latest_pkg else None,
             "release_notes": latest_pkg.release_notes if latest_pkg else "",
             "asset": asset,
         }

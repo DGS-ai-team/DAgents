@@ -86,19 +86,53 @@ func TestRunToolBeforeEachViaRunPhase_duplicate(t *testing.T) {
 func TestRunToolBeforeEachViaRunPhase_registersThreePhaseHooks(t *testing.T) {
 	reg := NewRegistry(nil, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 	matched := reg.phaseHooksFor(PhaseToolBeforeEach)
-	if len(matched) != 4 {
-		t.Fatalf("before_each phaseHooks = %d, want 4", len(matched))
+	if len(matched) != 3 {
+		t.Fatalf("before_each phaseHooks = %d, want 3", len(matched))
 	}
 	names := hookNames(matched)
 	want := []string{
 		"builtin.policy",
 		"builtin.agent_owned_file",
-		"builtin.loaded_skill_file_guard",
 		"builtin.duplicate_tool_call",
 	}
 	for i, name := range want {
 		if names[i] != name {
 			t.Fatalf("names = %v, want %v", names, want)
+		}
+	}
+}
+
+func TestLoadedSkillDoesNotBlockWorkspaceFileTools(t *testing.T) {
+	cases := []ToolBeforeEachInput{
+		{ToolName: "write_file", ToolArgs: map[string]any{"path": "skills/writer/SKILL.md", "content": "updated"}},
+		{ToolName: "search_replace", ToolArgs: map[string]any{"path": "skills/writer/SKILL.md", "old_string": "old", "new_string": "new"}},
+		{ToolName: "bash_run", ToolArgs: map[string]any{"command": "printf updated > skills/writer/SKILL.md", "shell_type": "bash"}},
+	}
+	modes := []struct {
+		name   string
+		mode   policy.ApprovalMode
+		action policy.Action
+	}{
+		{"never", policy.ModeNever, policy.ActionAuto},
+		{"always", policy.ModeAlways, policy.ActionRequireApproval},
+		{"deny", policy.ModeDeny, policy.ActionDeny},
+	}
+	for _, input := range cases {
+		for _, mode := range modes {
+			t.Run(input.ToolName+"/"+mode.name, func(t *testing.T) {
+				engine := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{input.ToolName: mode.mode}})
+				reg := NewRegistry(engine, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
+				hc := BuildToolBeforeEachContext(input)
+				hc.LoadedSkills = []LoadedSkillInfo{{Name: "writer", Description: "Write docs"}}
+				out, err := reg.RunPhase(context.Background(), PhaseToolBeforeEach, hc, NoopHost())
+				if err != nil {
+					t.Fatal(err)
+				}
+				decision := ToolBeforeEachDecisionFrom(out)
+				if decision.Action != mode.action {
+					t.Fatalf("action = %q, want %q (approval reason %q)", decision.Action, mode.action, decision.ApprovalReason)
+				}
+			})
 		}
 	}
 }

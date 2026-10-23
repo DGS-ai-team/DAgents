@@ -38,7 +38,6 @@ func (s *Server) registerMCPRoutes() {
 	s.mux.HandleFunc("DELETE /v1/mcp/servers/{server_id}", s.handleDeleteMCPServer)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{server_id}/test", s.handleTestMCPServer)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{server_id}/refresh", s.handleRefreshMCPServer)
-	s.mux.HandleFunc("GET /v1/mcp/servers/{server_id}/tools", s.handleMCPServerTools)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/mcp", s.handleGetAgentMCP)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/mcp", s.handlePutAgentMCP)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/mcp/effective-tools", s.handleGetAgentEffectiveMCPTools)
@@ -54,7 +53,7 @@ func (s *Server) handleGetMCPConfig(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "mcp_config_load_failed", err.Error(), nil)
 		return
 	}
-	configText, err := mcp.FormatConfigText(configs)
+	configText, err := mcp.FormatConfigTextRedacted(configs)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "mcp_config_format_failed", err.Error(), nil)
 		return
@@ -98,7 +97,7 @@ func (s *Server) handlePutMCPConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.reloadMCPBoundAgents(r.Context())
-	configText, err := mcp.FormatConfigText(configs)
+	configText, err := mcp.FormatConfigTextRedacted(configs)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "mcp_config_format_failed", err.Error(), nil)
 		return
@@ -291,19 +290,6 @@ func (s *Server) handleMCPProbe(w http.ResponseWriter, r *http.Request, persist 
 	writeJSON(w, http.StatusOK, view)
 }
 
-func (s *Server) handleMCPServerTools(w http.ResponseWriter, r *http.Request) {
-	if s.mcpManager == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "mcp_unavailable", "MCP manager is not configured", nil)
-		return
-	}
-	view, ok := s.mcpManager.Get(strings.TrimSpace(r.PathValue("server_id")))
-	if !ok {
-		writeAPIError(w, http.StatusNotFound, "mcp_server_not_found", "MCP server not found", nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"tools": view.Tools, "status": view.Status})
-}
-
 func (s *Server) handleGetAgentMCP(w http.ResponseWriter, r *http.Request) {
 	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
@@ -365,6 +351,8 @@ func agentMCPToolAllowed(binding mcp.Binding, name string) bool {
 }
 
 func (s *Server) handlePutAgentMCP(w http.ResponseWriter, r *http.Request) {
+	s.llmRefMu.RLock()
+	defer s.llmRefMu.RUnlock()
 	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
 		return

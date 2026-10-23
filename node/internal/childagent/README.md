@@ -41,7 +41,7 @@ flowchart TB
 6. `progress.go`：从子 SSE 事件生成轻量进度快照。
 7. `tools_handler.go`：父工具入口。
 8. `session/manager_child.go`、`runtime_child.go`：宿主和子 runtime 粘合。
-9. `webui/frontend/src/stores/remoteWorkers.js`：前端实时/恢复投影。
+9. `desktop/tray-tauri/src/ui/stores/remoteWorkers.js`：Desktop 前端实时/恢复投影。
 
 ## 状态模型
 
@@ -141,7 +141,7 @@ Manager 内存中的运行账本，包含：
 go test ./node/internal/childagent -run Child
 go test ./node/internal/session -run ChildAgent
 go test ./node/internal/api -run ChildAgent
-npm test --prefix node/webui/frontend -- --run src/stores/remoteWorkers.test.js
+npm run test:frontend --prefix desktop/tray-tauri
 ```
 
 推荐跟读路径：`HandleCreate` → `SpawnChild` → `newChildRuntime` → `tryCompleteChildIfIdle` → `OnChildSettled/OnChildFailed` → `finishWithEvent` → `ListSnapshots`。

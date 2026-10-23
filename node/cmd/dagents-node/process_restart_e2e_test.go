@@ -314,7 +314,7 @@ log:
 
 func completeProcessOnboarding(t *testing.T, baseURL, llmURL string) {
 	t.Helper()
-	postProcessJSON(t, http.MethodPatch, baseURL+"/v1/setup/config", map[string]any{
+	postProcessJSON(t, http.MethodPatch, baseURL+"/v1/settings", map[string]any{
 		"agent": map[string]any{"name": "process-e2e-node", "description": "process restart test"},
 		"user":  map[string]any{"preferred_name": "process-e2e-user"},
 		"llm": map[string]any{

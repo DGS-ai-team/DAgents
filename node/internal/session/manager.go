@@ -59,10 +59,11 @@ type TurnOptions struct {
 	// Lifecycle recovery may persist a repaired provider history during
 	// construction, so the constructor must start from the revision loaded from
 	// SQLite instead of the zero value.
-	initialHistoryRevision    uint64
-	initialActiveContextStart int
-	initialLastContextResetID string
-	initialDreamingAttempt    json.RawMessage
+	initialHistoryRevision      uint64
+	initialActiveContextStart   int
+	initialLastContextResetID   string
+	initialLastHumanInteraction time.Time
+	initialDreamingAttempt      json.RawMessage
 	// initialLifecycleEvents are supplied by Manager when it already loaded the
 	// session projection. Keeping the load marker separate from the slice lets
 	// an empty, successfully-read event log avoid a second database scan.
@@ -92,16 +93,14 @@ type TurnOptions struct {
 	SkillsEnabled     bool
 	SkillsMaxInPrompt int
 	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
-	SkillsVisibleRestrict       bool
-	SkillsVisible               []string
-	RuntimeDir                  string
-	CompressionSilent           int
-	CompressionBlocking         int
-	IdleAutoCompressSeconds     int
-	IdleAutoCompressPollSeconds int
-	IdleAutoCompressMinTokens   int
-	RawMessageHistoryEnabled    bool
-	RawMessageHistoryDir        string
+	SkillsVisibleRestrict      bool
+	SkillsVisible              []string
+	RuntimeDir                 string
+	CompressionSilent          int
+	CompressionBlocking        int
+	IdleNewConversationSeconds int
+	RawMessageHistoryEnabled   bool
+	RawMessageHistoryDir       string
 	// RawMessageHistoryRelativeRoot is the workspace-relative path shown in
 	// compression hints; the actual write root is RawMessageHistoryDir.
 	RawMessageHistoryRelativeRoot string
@@ -531,9 +530,41 @@ func (m *Manager) createWithOptions(
 	llmClient llm.Client,
 	runtimeAgentID string,
 ) (*Session, bool, error) {
+	session, created, _, err := m.createWithOptionsReuse(requestedID, turnOpts, toolExec, policyEngine, llmClient, runtimeAgentID)
+	return session, created, err
+}
+
+// CreateWithOptionsAndLLMReuse reports whether an already-live runtime was
+// reused. The created result retains its existing meaning: whether this is a
+// new persisted conversation rather than a restored one.
+func (m *Manager) CreateWithOptionsAndLLMReuse(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, bool, error) {
+	if llmClient == nil {
+		llmClient = m.llm
+	}
+	if strings.TrimSpace(runtimeAgentID) == "" {
+		runtimeAgentID = m.agentID
+	}
+	return m.createWithOptionsReuse(requestedID, turnOpts, toolExec, policyEngine, llmClient, runtimeAgentID)
+}
+
+func (m *Manager) createWithOptionsReuse(
+	requestedID string,
+	turnOpts TurnOptions,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	llmClient llm.Client,
+	runtimeAgentID string,
+) (*Session, bool, bool, error) {
 	id := strings.TrimSpace(requestedID)
 	if id == "" {
-		return nil, false, fmt.Errorf("session id is required for CreateWithOptions")
+		return nil, false, false, fmt.Errorf("session id is required for CreateWithOptions")
 	}
 	if toolExec == nil {
 		toolExec = m.tools
@@ -545,15 +576,16 @@ func (m *Manager) createWithOptions(
 	defer m.mu.Unlock()
 	if existing, ok := m.sessions[id]; ok {
 		m.logger.Info("session reuse", "session_id", id)
-		return &existing.session, false, nil
+		return &existing.session, false, true, nil
 	}
 	restore, err := m.loadSessionData(id)
 	if err != nil {
 		m.logger.Error("session load failed", "session_id", id, "error", err)
-		return nil, false, err
+		return nil, false, false, err
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
 	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 	if turnOpts.ConditionValidator == nil {
 		turnOpts.ConditionValidator = m.conditionValidator
 	}
@@ -561,11 +593,11 @@ func (m *Manager) createWithOptions(
 		turnOpts.ConditionCompletion = m.conditionCompletion
 	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
-		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
 	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	m.bindMaintenanceGate(rt)
 	m.sessions[id] = rt
@@ -578,7 +610,7 @@ func (m *Manager) createWithOptions(
 	} else {
 		m.logger.Info("session restored", "session_id", id, "messages", len(restore.Messages))
 	}
-	return &rt.session, created, nil
+	return &rt.session, created, false, nil
 }
 
 // ReplaceWithOptions atomically replaces an existing runtime after the new
@@ -654,7 +686,9 @@ func (m *Manager) replaceWithOptions(
 		restore.Messages = replacement.Messages
 		restore.LoadedSkills = replacement.LoadedSkills
 		restore.HookStore = replacement.HookStore
-		restore.IdleAutoCompress = replacement.IdleAutoCompress
+		if replacement.LastHumanInteraction.After(restore.LastHumanInteraction) {
+			restore.LastHumanInteraction = replacement.LastHumanInteraction
+		}
 		restore.NotifySeq = replacement.NotifySeq
 		restore.AckSeq = replacement.AckSeq
 		restore.HistoryRevision = replacement.HistoryRevision
@@ -672,6 +706,7 @@ func (m *Manager) replaceWithOptions(
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
 	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 	if turnOpts.ConditionValidator == nil {
 		turnOpts.ConditionValidator = m.conditionValidator
 	}
@@ -679,7 +714,7 @@ func (m *Manager) replaceWithOptions(
 		turnOpts.ConditionCompletion = m.conditionCompletion
 	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
-		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 	rt.restoreInputBoxState(restore.InputBoxState)
 	rt.reconcileRestoredInputBox()
 	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
@@ -736,6 +771,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 		}
 		created := len(restore.Messages) == 0 && !restore.Found
 		turnOpts := withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 		if turnOpts.ConditionValidator == nil {
 			turnOpts.ConditionValidator = m.conditionValidator
 		}
@@ -743,7 +779,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			turnOpts.ConditionCompletion = m.conditionCompletion
 		}
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
-			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.IdleAutoCompress, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
+			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
 		rt.restoreInputBoxState(restore.InputBoxState)
 		rt.reconcileRestoredInputBox()
 		if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
@@ -771,7 +807,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, false, 0, 0, m.turn, m.triggerDelivery)
+	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, 0, m.turn, m.triggerDelivery)
 	m.bindMaintenanceGate(rt)
 	m.sessions[newID] = rt
 	m.attachUserChildTools(rt)
@@ -787,7 +823,6 @@ type sessionRestoreData struct {
 	Messages              []llm.Message
 	LoadedSkills          []skills.LoadedSkill
 	HookStore             map[string]json.RawMessage
-	IdleAutoCompress      bool
 	NotifySeq             int
 	AckSeq                int
 	HistoryRevision       uint64
@@ -795,6 +830,7 @@ type sessionRestoreData struct {
 	LastContextResetID    string
 	InputBoxState         json.RawMessage
 	DreamingAttempt       json.RawMessage
+	LastHumanInteraction  time.Time
 	LifecycleEvents       []turn.TurnEventEnvelope
 	LifecycleEventsLoaded bool
 }
@@ -814,12 +850,16 @@ func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) 
 	if lifecycleErr != nil {
 		lifecycle.events = nil
 	}
+	lastHumanAt := recoverLastHumanInteraction(
+		lifecycle.events,
+		rec.RuntimeState.LastHumanInteraction,
+	)
 	return sessionRestoreData{
 		Found:                 true,
 		Messages:              rec.Messages,
 		LoadedSkills:          rec.LoadedSkills,
 		HookStore:             rec.RuntimeState.HookStore,
-		IdleAutoCompress:      rec.RuntimeState.IdleAutoCompressApplied,
+		LastHumanInteraction:  lastHumanAt,
 		NotifySeq:             rec.RuntimeState.NotifySeq,
 		AckSeq:                rec.RuntimeState.AckSeq,
 		HistoryRevision:       rec.RuntimeState.HistoryRevision,

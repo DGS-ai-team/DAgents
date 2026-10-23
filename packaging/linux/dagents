@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # DAgents Local Assistant 命令行入口（对齐 packaging/windows/dagents.cmd）。
-# Phase 4：人机入口仅为 Web UI；本脚本负责 Node/browser 启停与更新。
+# Phase 4：人机入口仅为 DAgents Desktop；本脚本负责 Node/browser 启停与更新；Linux 发布包仅提供 Node API。
 set -euo pipefail
 
 # install.sh 会在 BIN_DIR（如 /usr/local/bin）创建指向 PREFIX/dagents 的符号链接；
@@ -69,15 +69,15 @@ probe_node() {
 # 首配未完成时提示（不阻塞启动）。
 hint_node_onboarding_if_needed() {
   local boot=""
-  boot="$(curl -fsS --max-time 2 "$(node_base_url)/v1/ui/bootstrap" 2>/dev/null || true)"
+  boot="$(curl -fsS --max-time 2 "$(node_base_url)/v1/bootstrap" 2>/dev/null || true)"
   if [[ -n "${boot}" ]] && grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*false' <<<"${boot}"; then
-    echo "[dagents] 首次使用：运行 dagents init 完成命令行首配，或打开 Web UI 配置身份与 LLM"
+    echo "[dagents] 首次使用：运行 dagents init 完成本机首配"
   fi
 }
 
 node_profile_completed() {
   local boot=""
-  boot="$(curl -fsS --max-time 2 "$(node_base_url)/v1/ui/bootstrap" 2>/dev/null || true)"
+  boot="$(curl -fsS --max-time 2 "$(node_base_url)/v1/bootstrap" 2>/dev/null || true)"
   [[ -n "${boot}" ]] || return 1
   grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*true' <<<"${boot}"
 }
@@ -221,7 +221,7 @@ EOF
 
   if node_profile_completed && [[ "${force}" -ne 1 ]]; then
     echo "[dagents] Node 首配已完成。如需重配请加 --force"
-    print_webui_url
+    print_node_api_url
     return 0
   fi
 
@@ -230,7 +230,7 @@ EOF
   default_node="${default_node// /-}"; default_node="${default_node:0:64}"
 
   if [[ "${interactive}" -eq 1 ]]; then
-    echo "[dagents] Linux 命令行首配（与 Web UI 写入同一套 node_settings / llm_configs）"
+    echo "[dagents] Linux 命令行首配（写入 Node settings / LLM profiles）"
     [[ -n "${preferred_name}" ]] || preferred_name="$(prompt_with_default "我该怎么称呼你" "")"
     [[ -n "${node_name}" ]] || node_name="$(prompt_with_default "这台 Node 叫什么" "${default_node}")"
     if [[ -z "${provider}" ]]; then
@@ -321,11 +321,11 @@ EOF
   rm -f "${tmp_resp}"
 
   echo "[dagents] 首配完成：user=${preferred_name} node=${node_name} provider=${provider} model=${model}"
-  print_webui_url
-  echo "[dagents] 下一步：dagents node（若未在跑）然后打开 Web UI 开始对话"
+  print_node_api_url
+  echo "[dagents] 下一步：使用本机 API Client 调用 Node；本发布包不包含桌面界面"
 }
 
-# 首配未完成时提示打开 Web UI（不阻塞启动）。
+# 首配未完成时提示 CLI 首配（不阻塞启动）。
 hint_node_onboarding_if_needed() {
   local port="18765"
   if [[ -f "${ROOT}/${CFG}" ]]; then
@@ -334,9 +334,9 @@ hint_node_onboarding_if_needed() {
     [[ -n "${p}" ]] && port="${p}"
   fi
   local boot=""
-  boot="$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/v1/ui/bootstrap" 2>/dev/null || true)"
+  boot="$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/v1/bootstrap" 2>/dev/null || true)"
   if [[ -n "${boot}" ]] && grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*false' <<<"${boot}"; then
-    echo "[dagents] 首次使用：请打开 Web UI 完成身份与 LLM 配置后再使用对话等功能"
+    echo "[dagents] 首次使用：请运行 dagents init 完成身份与 LLM 配置后再使用 API Client"
   fi
 }
 
@@ -519,16 +519,16 @@ start_node_background() {
   write_node_pid "$!"
 }
 
-print_webui_url() {
-  local url="http://127.0.0.1:18765/ui/"
-  if [[ -x "${ROOT}/scripts/webui-url.sh" ]]; then
-    url="$("${ROOT}/scripts/webui-url.sh" "${ROOT}/${CFG}")"
+print_node_api_url() {
+  local url="http://127.0.0.1:18765"
+  if [[ -x "${ROOT}/scripts/node-api-url.sh" ]]; then
+    url="$("${ROOT}/scripts/node-api-url.sh" "${ROOT}/${CFG}")"
   elif [[ -f "${ROOT}/${CFG}" ]]; then
     local port
     port="$(grep -A10 '^listen:' "${ROOT}/${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
-    [[ -n "${port}" ]] && url="http://127.0.0.1:${port}/ui/"
+    [[ -n "${port}" ]] && url="http://127.0.0.1:${port}"
   fi
-  echo "[dagents] Web UI: ${url}"
+  echo "[dagents] Node API: ${url}"
 }
 
 wait_node_ready() {
@@ -545,14 +545,14 @@ wait_node_ready() {
 start_node_default() {
   if probe_node; then
     echo "[dagents] node already running"
-    print_webui_url
+    print_node_api_url
     hint_node_onboarding_if_needed
     return 0
   fi
   start_node_background
   wait_node_ready
   echo "[dagents] node is ready"
-  print_webui_url
+  print_node_api_url
   hint_node_onboarding_if_needed
 }
 
@@ -561,7 +561,7 @@ restart_node() {
   start_node_background
   wait_node_ready
   echo "[dagents] node restarted"
-  print_webui_url
+  print_node_api_url
   hint_node_onboarding_if_needed
 }
 
@@ -576,7 +576,7 @@ cmd_doctor() {
       if [[ "${name}" == "dagents-browser" ]]; then
         echo "[optional missing] bin/${name}"
       elif [[ "${name}" == "dagents-client" ]]; then
-        # client 用于 probe/update；缺失不影响日常 Web UI，但 doctor 标为警告
+        # client 用于 probe/update；缺失不影响日常 DAgents Desktop，但 doctor 标为警告
         echo "[optional missing] bin/${name} (probe/update unavailable)"
       else
         echo "[missing] bin/${name}"
@@ -704,15 +704,15 @@ cmd_update() {
 cmd_help() {
   cat <<'EOF'
 Usage:
-  dagents                     Start Node in background and print Web UI URL
+  dagents                     Start Node in background and print its API endpoint
   dagents init                First-time setup via CLI (identity + LLM; alias: setup)
   dagents node                Start Agent Node in background (default; waits until ready)
   dagents node shutdown       Stop background Node
   dagents node restart        Stop then start Node in background
   dagents node --foreground   Start Node in foreground (blocks terminal)
   dagents node --no-wait      Background start without waiting for probe
-  dagents browser             Start browser-use service in background (browser.enabled)
-  dagents browser stop        Stop browser-use service
+  dagents browser             Start Playwright browser service in background (browser.enabled)
+  dagents browser stop        Stop Playwright browser service
   dagents browser --foreground    Run browser service in foreground
   dagents doctor              Check installed files
   dagents version             Print version information
@@ -721,18 +721,18 @@ Usage:
   dagents update --force      Apply without confirmation prompt
 
 First-time setup (Linux):
-  dagents init                Interactive; writes the same onboarding as Web UI
+  dagents init                Interactive; writes Node settings through the Setup API
   dagents init --yes --preferred-name YOU --node-name NODE --provider mock
-  Or open Web UI and complete the onboarding wizard.
+  This Linux package does not include a desktop UI.
 
-Web UI (embedded in dagents-node):
-  After `dagents` / `dagents node`, open http://127.0.0.1:<listen.port>/ui/ (default port 18765).
+Desktop:
+  This Linux package includes no desktop runtime; startup prints the local Node API endpoint.
 
 Removed:
-  dagents chat / dagents tui  — use Web UI instead
+  dagents chat / dagents tui  — removed; this package exposes the Node API only
 
 Config:
-  Bootstrap: config.yaml (listen/local). Runtime settings & LLM profiles: .runtime/*.db via init or Web UI.
+  Bootstrap: config.yaml (listen-only). Runtime settings & LLM profiles: .runtime/*.db via init.
   A2A / Registry: deploy Manage separately (packaging/manage/README.md).
   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
 EOF
@@ -753,7 +753,7 @@ case "$1" in
     exit $?
     ;;
   chat|tui)
-    die "command '$1' removed; use Web UI: run 'dagents node' then open http://127.0.0.1:18765/ui/"
+    die "command '$1' removed; start Node with 'dagents node' and connect an API Client to the local Node"
     ;;
   node)
     shift

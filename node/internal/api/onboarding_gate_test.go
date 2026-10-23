@@ -20,9 +20,10 @@ func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 		method, path string
 	}{
 		{http.MethodGet, "/health"},
-		{http.MethodGet, "/v1/ui/bootstrap"},
-		{http.MethodGet, "/v1/setup/config"},
-		{http.MethodPost, "/v1/setup/llm/probe-models"},
+		{http.MethodGet, "/v1/bootstrap"},
+		{http.MethodGet, "/v1/settings"},
+		{http.MethodGet, "/v1/node/info"},
+		{http.MethodPost, "/v1/llm/probe-models"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		rr := httptest.NewRecorder()
@@ -32,12 +33,11 @@ func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 		}
 	}
 
-	// 拦截：agents / messages / llm / agent info
+	// 拦截：业务 APIs
 	for _, tc := range []struct {
 		method, path string
 	}{
 		{http.MethodGet, "/v1/agents"},
-		{http.MethodGet, "/v1/agent/info"},
 		{http.MethodGet, "/v1/llm/settings"},
 		{http.MethodPost, "/v1/messages"},
 		{http.MethodGet, "/v1/streams"},
@@ -60,6 +60,7 @@ func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 func TestOnboardingGate_allowsAfterComplete(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.LLM.Mock = true
+	cfg.User.PreferredName = ""
 	cfg.Onboarding.NodeProfileCompleted = true
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
@@ -71,13 +72,24 @@ func TestOnboardingGate_allowsAfterComplete(t *testing.T) {
 }
 
 func TestOnboardingPathAllowed(t *testing.T) {
-	if !onboardingPathAllowed(http.MethodGet, "/ui/assets/app.js") {
-		t.Fatal("ui assets should be allowed")
-	}
-	if !onboardingPathAllowed(http.MethodPost, "/v1/setup/llm/probe-models") {
+	if !onboardingPathAllowed(http.MethodPost, "/v1/llm/probe-models") {
 		t.Fatal("probe-models should be allowed during onboarding")
 	}
 	if onboardingPathAllowed(http.MethodGet, "/v1/agents") {
 		t.Fatal("agents should be blocked")
+	}
+}
+
+func TestOnboardingGateKeepsRemovedUIAndUnknownPathsNotFound(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Onboarding.NodeProfileCompleted = false
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	for _, path := range []string{"/ui", "/ui/", "/ui/assets/app.js", "/not-a-route"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status=%d body=%s; want 404", path, rec.Code, rec.Body.String())
+		}
 	}
 }

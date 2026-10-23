@@ -81,12 +81,18 @@ type LLMSettingsPatch struct {
 	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
 }
 
-// AgentInfo 为 GET /v1/agent/info 响应。
+// AgentInfo 为 GET /v1/node/info 的 Node service identity 与能力视图。
 type AgentInfo struct {
-	AgentID          string      `json:"agent_id"`
-	Capabilities     []string    `json:"capabilities"`
-	ManageRegistered bool        `json:"manage_registered"`
-	LLM              LLMSettings `json:"llm"`
+	NodeID            string         `json:"node_id"`
+	Name              string         `json:"name"`
+	Capabilities      []string       `json:"capabilities"`
+	MultimodalEnabled bool           `json:"multimodal_enabled"`
+	ManageEnabled     bool           `json:"manage_enabled"`
+	WorkgroupEnabled  bool           `json:"workgroup_enabled"`
+	ManageURL         string         `json:"manage_url"`
+	ManageRegistered  bool           `json:"manage_registered"`
+	LLM               LLMSettings    `json:"llm"`
+	Compression       map[string]int `json:"compression"`
 }
 
 // AgentSummary 为 GET /v1/agents 列表项。
@@ -177,37 +183,54 @@ type ContextMessagePreview struct {
 	HasReasoningContent bool   `json:"has_reasoning_content"`
 }
 
-// GetAgentInfo 调用 GET /v1/agent/info。
+// GetAgentInfo 调用 GET /v1/node/info。
 func (c *Client) GetAgentInfo(ctx context.Context) (*AgentInfo, error) {
 	var info AgentInfo
-	if err := c.getJSON(ctx, "/v1/agent/info", &info); err != nil {
+	if err := c.getJSON(ctx, "/v1/node/info", &info); err != nil {
 		return nil, err
 	}
 	return &info, nil
 }
 
-// AgentUpdateStatus 为 GET /v1/agent/update 响应（Manage Release Hub 摘要）。
+// AgentUpdateStatus 为 GET /v1/node/update 响应（Manage Release Hub 摘要）。
 type AgentUpdateStatus struct {
-	CurrentVersion   string         `json:"current_version"`
-	LatestVersion    string         `json:"latest_version"`
-	UpgradeAvailable bool           `json:"upgrade_available"`
-	ManageReachable  bool           `json:"manage_reachable"`
-	LastCheckedAt    string         `json:"last_checked_at,omitempty"`
-	Channel          string         `json:"channel"`
-	Platform         string         `json:"platform"`
-	ReleaseNotes     string         `json:"release_notes,omitempty"`
-	Message          string         `json:"message,omitempty"`
-	ApplyCommand     string         `json:"apply_command"`
-	Asset            map[string]any `json:"asset,omitempty"`
+	CurrentVersion    string         `json:"current_version"`
+	LatestVersion     string         `json:"latest_version"`
+	UpgradeAvailable  bool           `json:"upgrade_available"`
+	ManageReachable   bool           `json:"manage_reachable"`
+	PlatformSupported *bool          `json:"platform_supported,omitempty"`
+	LastCheckedAt     string         `json:"last_checked_at,omitempty"`
+	Channel           string         `json:"channel"`
+	Platform          string         `json:"platform"`
+	ReleaseNotes      string         `json:"release_notes,omitempty"`
+	Message           string         `json:"message,omitempty"`
+	ApplyCommand      string         `json:"apply_command"`
+	Asset             map[string]any `json:"asset,omitempty"`
 }
 
-// GetAgentUpdate 调用 GET /v1/agent/update。
+// GetAgentUpdate 调用 GET /v1/node/update。
 func (c *Client) GetAgentUpdate(ctx context.Context) (*AgentUpdateStatus, error) {
 	var status AgentUpdateStatus
-	if err := c.getJSON(ctx, "/v1/agent/update", &status); err != nil {
+	if err := c.getJSON(ctx, "/v1/node/update", &status); err != nil {
 		return nil, err
 	}
 	return &status, nil
+}
+
+// GetNodeUpdatePackage requests Node's already-verified binary release package.
+// The returned response body is owned by the caller and must be closed.
+func (c *Client) GetNodeUpdatePackage(ctx context.Context) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/node/update/package", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+	client := *c.httpClient
+	if client.Timeout < 15*time.Minute {
+		client.Timeout = 15 * time.Minute
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return client.Do(req)
 }
 
 // GetLLMSettings 调用 GET /v1/llm/settings。

@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,12 +23,106 @@ func TestViewFromConfig(t *testing.T) {
 	cfg := testBaseConfig(t)
 	cfg.Manage.Enabled = true
 	cfg.Manage.URL = "http://127.0.0.1:8020"
+	cfg.Manage.NodeToken = "manage-secret"
 	cfg.Manage.Registration.Team = "platform"
 	cfg.Skills.Enabled = false
 
 	view := ViewFromConfig(cfg)
 	if len(view.LLM.Profiles) == 0 || view.LLM.Profiles[0].Provider != "deepseek" || view.Manage.Enabled != true || view.Features.SkillsEnabled != false {
 		t.Fatalf("view = %+v", view)
+	}
+	if !view.Manage.HasNodeToken {
+		t.Fatalf("Manage token view must be redacted with presence flag: %+v", view.Manage)
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "manage-secret") || strings.Contains(string(raw), `"local_endpoint"`) {
+		t.Fatalf("settings view leaked secret or Desktop endpoint: %s", raw)
+	}
+}
+
+func TestBrowserEndpointIsFixedAndHiddenFromSettingsAPI(t *testing.T) {
+	cfg := testBaseConfig(t)
+	enabled := true
+	cfg.Browser = config.BrowserConfig{
+		Enabled:    &enabled,
+		ServiceURL: "http://192.0.2.10:9000",
+		CDPURL:     "http://192.0.2.11:9222",
+	}
+	cfg.ApplyDefaults()
+	if cfg.Browser.ServiceURL != config.DefaultBrowserServiceURL || cfg.Browser.CDPURL != "" {
+		t.Fatalf("Browser address was not fixed to local sidecar: %+v", cfg.Browser)
+	}
+
+	view := ViewFromConfig(cfg)
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "service_url") || strings.Contains(string(raw), "cdp_url") {
+		t.Fatalf("Browser transport addresses must not be exposed as settings: %s", raw)
+	}
+
+	updated, err := ApplyPatch(cfg, SettingsPatch{Browser: &BrowserSettings{Headed: false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Browser.ServiceURL != config.DefaultBrowserServiceURL || updated.Browser.CDPURL != "" {
+		t.Fatalf("Browser patch changed fixed transport: %+v", updated.Browser)
+	}
+}
+
+func TestApplyPatch_nodeTokenIsWriteOnlyPreservingAndExplicitlyClearable(t *testing.T) {
+	cfg := testBaseConfig(t)
+	workgroupEnabled := false
+	cfg.Manage.Enabled = true
+	cfg.Manage.URL = "https://manage.example.test"
+	cfg.Manage.Registration.Team = "keep-team"
+	cfg.Manage.Registration.BaseURL = "https://register.example.test"
+	cfg.Manage.Registration.IntervalSeconds = 90
+	cfg.Manage.Registration.TTLSeconds = 180
+	cfg.Manage.Workgroup.Enabled = &workgroupEnabled
+	cfg.Manage.NodeToken = "existing-secret"
+
+	view := ViewFromConfig(cfg)
+	if !view.Manage.HasNodeToken {
+		t.Fatalf("GET view = %+v", view.Manage)
+	}
+
+	emptyToken := ""
+	updated, err := ApplyPatch(cfg, SettingsPatch{Manage: &ManageSettingsPatch{NodeToken: &emptyToken}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Manage.NodeToken != "existing-secret" {
+		t.Fatal("empty write-only token should preserve the saved token")
+	}
+
+	newToken := "new-secret"
+	updated, err = ApplyPatch(updated, SettingsPatch{Manage: &ManageSettingsPatch{NodeToken: &newToken}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Manage.NodeToken != "new-secret" {
+		t.Fatal("non-empty token should replace the saved token")
+	}
+	assertManageSettingsPreserved(t, updated)
+	updated, err = ApplyPatch(updated, SettingsPatch{Manage: &ManageSettingsPatch{ClearNodeToken: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Manage.NodeToken != "" || ViewFromConfig(updated).Manage.HasNodeToken {
+		t.Fatal("explicit clear should remove the saved token")
+	}
+	assertManageSettingsPreserved(t, updated)
+}
+
+func assertManageSettingsPreserved(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	if !cfg.Manage.Enabled || cfg.Manage.URL != "https://manage.example.test" || cfg.Manage.Registration.Team != "keep-team" || cfg.Manage.Registration.BaseURL != "https://register.example.test" || cfg.Manage.Registration.IntervalSeconds != 90 || cfg.Manage.Registration.TTLSeconds != 180 || cfg.Manage.Workgroup.Enabled == nil || *cfg.Manage.Workgroup.Enabled {
+		t.Fatalf("token-only patch changed Manage settings: %+v", cfg.Manage)
 	}
 }
 
@@ -92,8 +187,10 @@ func TestApplyPatch_llmAndFeatures(t *testing.T) {
 
 func TestApplyPatch_manageRequiresURL(t *testing.T) {
 	cfg := testBaseConfig(t)
+	enabled := true
+	emptyURL := ""
 	_, err := ApplyPatch(cfg, SettingsPatch{
-		Manage: &ManageSettings{Enabled: true, URL: ""},
+		Manage: &ManageSettingsPatch{Enabled: &enabled, URL: &emptyURL},
 	})
 	if err == nil {
 		t.Fatal("expected error for empty manage.url")
@@ -117,11 +214,9 @@ func TestApplyPatch_compression(t *testing.T) {
 
 	updated, err := ApplyPatch(cfg, SettingsPatch{
 		Compression: &CompressionSettings{
-			SilentTriggerTokens:         50000,
-			BlockingTriggerTokens:       70000,
-			IdleAutoCompressSeconds:     3600,
-			IdleAutoCompressPollSeconds: 120,
-			IdleAutoCompressMinTokens:   40000,
+			SilentTriggerTokens:        50000,
+			BlockingTriggerTokens:      70000,
+			IdleNewConversationSeconds: 3600,
 		},
 	})
 	if err != nil {
@@ -129,7 +224,7 @@ func TestApplyPatch_compression(t *testing.T) {
 	}
 	if updated.Compression.SilentTriggerTokens != 50000 ||
 		updated.Compression.BlockingTriggerTokens != 70000 ||
-		updated.Compression.IdleAutoCompressSeconds != 3600 {
+		updated.Compression.IdleNewConversationSeconds != 3600 {
 		t.Fatalf("compression = %+v", updated.Compression)
 	}
 
@@ -239,30 +334,36 @@ func TestApplyPatch_wecomWebhook(t *testing.T) {
 }
 
 func TestApplyPatch_completeNodeProfile(t *testing.T) {
+	const missingKeyEnv = "DAGENTS_TEST_SETUP_PROFILE_MISSING_KEY"
+	t.Setenv(missingKeyEnv, "")
 	cfg := testBaseConfig(t)
 	cfg.Onboarding.NodeProfileCompleted = false
 	cfg.Agent.Name = ""
+	cfg.LLM.Mock = false
+	cfg.LLM.APIKeyEnv = missingKeyEnv
 
 	_, err := ApplyPatch(cfg, SettingsPatch{
 		Onboarding: &OnboardingSettings{NodeProfileCompleted: true},
 	})
 	if err == nil {
-		t.Fatal("expected error when completing without names")
+		t.Fatal("expected error when completing without a Node name")
 	}
 
 	updated, err := ApplyPatch(cfg, SettingsPatch{
-		User:       &UserSettings{PreferredName: "小明"},
 		Agent:      &AgentSettings{Name: "desk-node", Description: "desk"},
 		Onboarding: &OnboardingSettings{NodeProfileCompleted: true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated.NodeProfileCompleted() || updated.PreferredName() != "小明" || updated.Agent.Name != "desk-node" {
+	if !updated.NodeProfileCompleted() || updated.PreferredName() != "" || updated.Agent.Name != "desk-node" {
 		t.Fatalf("updated=%+v user=%+v onboarding=%+v", updated.Agent, updated.User, updated.Onboarding)
 	}
+	if updated.LLM.Mock {
+		t.Fatal("test setup should not use a mock LLM")
+	}
 	view := ViewFromConfig(updated)
-	if !view.Onboarding.NodeProfileCompleted || view.User.PreferredName != "小明" {
+	if !view.Onboarding.NodeProfileCompleted || view.User.PreferredName != "" {
 		t.Fatalf("view=%+v", view)
 	}
 }

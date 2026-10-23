@@ -5,27 +5,30 @@ import (
 	"strings"
 )
 
-// BrowserConfig 控制内置 browser_* 工具（remote → dagents-browser + browser-use）。
+// BrowserConfig controls the built-in Playwright browser tools and their
+// loopback sidecar connection.
 type BrowserConfig struct {
 	// Enabled 为 nil 时默认 false（须显式启用）。
 	Enabled *bool `yaml:"enabled"`
 	// Headed 为 nil 时默认 true（演示/回放场景）。
-	Headed            *bool    `yaml:"headed"`
-	DefaultTimeoutMS  int      `yaml:"default_timeout_ms"`
-	OutputDir         string   `yaml:"output_dir"`
-	ChromePath        string   `yaml:"chrome_path"`
+	Headed           *bool  `yaml:"headed"`
+	DefaultTimeoutMS int    `yaml:"default_timeout_ms"`
+	OutputDir        string `yaml:"output_dir"`
+	ChromePath       string `yaml:"chrome_path"`
+	// Retained for decoding old bootstrap YAML; ApplyDefaults clears it because
+	// the local sidecar no longer attaches to an externally managed browser.
 	CDPURL            string   `yaml:"cdp_url"`
-	DebugPort         int      `yaml:"debug_port"`
 	MaxSessions       int      `yaml:"max_sessions"`
-	IdleStopSeconds   int      `yaml:"idle_stop_seconds"`
 	AllowedURLSchemes []string `yaml:"allowed_url_schemes"`
-	// ServiceURL dagents-browser 基址；默认 http://127.0.0.1:18766。
+	// ServiceURL is retained for internal/test plumbing. ApplyDefaults always
+	// replaces it with the fixed local sidecar address.
 	ServiceURL string `yaml:"service_url"`
 	// IgnoreHTTPSErrors 为 nil 时默认 false。
 	IgnoreHTTPSErrors *bool `yaml:"ignore_https_errors"`
 }
 
 const DefaultBrowserServicePort = 18766
+const DefaultBrowserServiceURL = "http://127.0.0.1:18766"
 
 // BrowserEnabled 是否启用 browser_* 工具。
 func (c *Config) BrowserEnabled() bool {
@@ -108,26 +111,21 @@ func (c *Config) applyBrowserDefaults() {
 		c.Browser.OutputDir = "browser"
 	}
 	if c.Browser.MaxSessions <= 0 {
-		// 伴生方案：每主 Agent 一个 Chrome；默认允许多会话并发。
+		// Each main-agent session gets an isolated browser context.
 		c.Browser.MaxSessions = 8
-	}
-	if c.Browser.DebugPort <= 0 {
-		c.Browser.DebugPort = 9222
 	}
 	if len(c.Browser.AllowedURLSchemes) == 0 {
 		c.Browser.AllowedURLSchemes = []string{"https", "http"}
 	}
-	if strings.TrimSpace(c.Browser.ServiceURL) == "" {
-		c.Browser.ServiceURL = fmt.Sprintf("http://127.0.0.1:%d", DefaultBrowserServicePort)
-	}
+	// Desktop, Node and Browser sidecar share a fixed local-only address plan.
+	// Ignore legacy/custom endpoints so Node cannot connect to another host.
+	c.Browser.ServiceURL = DefaultBrowserServiceURL
+	c.Browser.CDPURL = ""
 }
 
 func validateBrowserConfig(c *Config) error {
 	if c == nil || !c.BrowserEnabled() {
 		return nil
-	}
-	if strings.TrimSpace(c.Browser.ServiceURL) == "" {
-		return fmt.Errorf("browser.service_url is required when browser.enabled=true")
 	}
 	for _, scheme := range c.BrowserAllowedURLSchemes() {
 		if scheme != "http" && scheme != "https" {

@@ -15,8 +15,8 @@ const emit = defineEmits(["navigate", "toast", "refreshed"]);
 
 const loading = ref(false);
 const error = ref("");
-const healthAgents = ref(0);
-const agents = ref([]);
+const registeredEntities = ref(0);
+const nodes = ref([]);
 const workgroups = ref([]);
 
 const stats = reactive({
@@ -28,7 +28,7 @@ const stats = reactive({
 });
 
 const statusLine = computed(() => {
-  if (loading.value && !agents.value.length) return "正在汇总运行状态…";
+  if (loading.value && !nodes.value.length) return "正在汇总运行状态…";
   return `${stats.online} 个 Node 在线 · ${stats.workgroupsActive} 个工作组进行中`;
 });
 
@@ -51,11 +51,12 @@ async function loadDashboard() {
   loading.value = true;
   error.value = "";
   try {
-    const [health, agentPage, wgs] = await Promise.all([
+    const [health, nodePage, wgs] = await Promise.all([
       fetchHealth().catch(() => ({ agents: 0 })),
       props.nodeNoGroups
         ? Promise.resolve({ agents: [] })
         : fetchAgents({
+            kind: "node",
             status: "all",
             page: 1,
             page_size: 200,
@@ -63,10 +64,10 @@ async function loadDashboard() {
           }),
       fetchWorkgroups().catch(() => []),
     ]);
-    healthAgents.value = Number(health?.agents || 0);
-    agents.value = agentPage?.agents || [];
+    registeredEntities.value = Number(health?.agents || 0);
+    nodes.value = nodePage?.agents || [];
     workgroups.value = Array.isArray(wgs) ? wgs : [];
-    Object.assign(stats, computeStats(agents.value));
+    Object.assign(stats, computeStats(nodes.value));
     if (props.nodeNoGroups) error.value = "当前 Node 尚未分配发现分组，暂无可查看的 Agent";
     stats.workgroupsTotal = workgroups.value.length;
     stats.workgroupsActive = workgroups.value.filter((w) => w.status === "active").length;
@@ -110,8 +111,8 @@ defineExpose({ refresh: loadDashboard });
         <strong class="home-metric-value">{{ stats.online }}</strong>
       </div>
       <div class="home-metric">
-        <span class="home-metric-label">注册合计</span>
-        <strong class="home-metric-value">{{ stats.total || healthAgents }}</strong>
+        <span class="home-metric-label">注册实体</span>
+        <strong class="home-metric-value">{{ registeredEntities }}</strong>
       </div>
       <div class="home-metric">
         <span class="home-metric-label">活跃工作组</span>

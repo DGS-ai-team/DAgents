@@ -10,4 +10,4 @@
 | `internal/update` | Manage Release Hub 下载 |
 | `internal/desktop` | 桌面更新辅助 |
 
-人机交互见 `node/webui/`。
+Agent 人机交互与本机桥接见 `desktop/tray-tauri/`。

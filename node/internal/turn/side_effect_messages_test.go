@@ -17,12 +17,12 @@ func TestBuildMergedCallbackBatch_twoAsync(t *testing.T) {
 		{Role: "user", Content: "run async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
 			ID: "call-bg-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+			Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 		}}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
-	async1 := queue.AsyncToolResultPayload{JobID: "job-1", ToolName: "browser_run_task", Status: "succeeded", ResultText: "done"}
-	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "browser_run_task", Status: "failed", ErrorText: "exit 1"}
+	async1 := queue.AsyncToolResultPayload{JobID: "job-1", ToolName: "async_test_tool", Status: "succeeded", ResultText: "done"}
+	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "async_test_tool", Status: "failed", ErrorText: "exit 1"}
 	e1 := SideEffectBatchEntry{
 		Built: orch.BuildAsyncSideEffectMessages("s", history, async1),
 		Async: async1,

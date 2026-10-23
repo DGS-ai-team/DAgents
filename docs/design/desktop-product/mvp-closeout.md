@@ -1,0 +1,98 @@
+# Desktop MVP 收束与验收记录
+
+> 当前发布状态见[发布收束清单](../../release-readiness.md)。本文保留逐阶段事实；早期“尚未替代 WebUI”、简单文本终端、仅本机连接等描述已被后续实现取代，不能当作当前缺口。
+
+> 2026-10-15 更新：下文为 10 月 8 日的阶段记录。当前 Node 已只提供 API，独立 Desktop 承载界面；Go 托盘与 Node `/ui/` 服务路径已移除，Desktop 本地配置与 Node 业务配置已分离。当前边界见 [产品收束方向](product-direction-simplification-2026-10-14.md)，后续验收见 [10 月 14 日收束记录](audits/2026-10-14/product-closeout/README.md) 与 [10 月 15 日日常回归](audits/2026-10-15/daily-use/README.md)。
+
+> 2026-10-22 更新：Desktop Vue 源码现统一归入 `desktop/tray-tauri/src/ui`，Tauri 入口与宿主适配位于同一包的 `src/`；`node/webui` 前端包已退役。跨产品复用代码集中在 `shared/frontend`。
+
+> 后续进展：本文件保留本轮早期验收事实。2026-10-08 后续已接入创建、附件媒体、xterm、文件、工作组、Auto 总览与浏览器只读观看，最新覆盖范围和验证限制见 [daily-use-integration.md](daily-use-integration.md)。下文“尚未接入”的描述属于当时阶段，不能作为当前功能清单。
+
+日期：2026-10-08。对象是 `desktop/tray-tauri` 中的真实 Windows Tauri 窗口及本机 Node，设计原型仅作布局参考。
+
+## 本轮交付边界
+
+这是可连接本机 Node 的开发版 Desktop 工作台。它完成了已有智能体的对话、工具审批、终端资源和配置页面的首条实际使用链路；它尚未替代 Node WebUI，也不代表 Desktop / Node 分离技术方案全部完成。
+
+- Desktop 主窗口使用合并菜单/窗口控制栏。设置位于 DAgents 菜单，侧栏底部只显示连接状态。
+- 侧栏保留智能体、工作组、自主智能体三组；可折叠到图标导航，空分组和未接入能力有明确提示。
+- 对话与终端资源分开展示。终端页右下角有消息坞，可发送消息、展开最近消息/工具和审批、返回完整对话；悬浮坞避让终端命令栏。
+- Agent 切换时清除上一位的流式文本，并保留各自的输入草稿。发送失败会恢复或保留待恢复文本，避免覆盖用户继续输入的内容。
+- execute_tool 审批展示工具名、审批理由和实际参数，可批准或拒绝。同日后续修订接入原 WebUI 的用户信息和记忆冲突卡片，更多请求类型的真实模型验收仍待完成。
+- 设置页复用现有 Node 的通用、模型与连接、MCP、Linux 通道、能力、技能、智能体与详情、定时任务、输出防护、上下文、关于、反馈组件。配置事实仍只保存在 Node。
+- 设置页与外围使用统一底色；进入/离开设置时侧栏和顶栏位置平滑过渡，支持减少动画偏好。导航溢出用边缘渐隐提示，保留滚轮和键盘滚动。
+
+## 当前实现职责
+
+| 部分 | 入口 | 职责 |
+| --- | --- | --- |
+| 工作台 | `desktop/tray-tauri/src/ui/DesktopApp.vue`、`desktop/tray-tauri/src/ui/desktop-ui.css` | 布局、Agent 选择、对话/资源呈现、草稿与审批交互 |
+| 可测试的局部状态 | `desktop/tray-tauri/src/ui/workbench-state.js` | 路由映射、参数展示、草稿切换与失败恢复 |
+| 终端文本呈现 | `desktop/tray-tauri/src/ui/terminal-output.js` | 跨块 UTF-8 解码及 CSI/OSC 过滤；不是完整终端模拟器 |
+| 设置承载 | `desktop/tray-tauri/src/settings-router.js`、`src/main.js` | 复用配置页面，通过 Tauri transport 调用 Node API；同步当前 Agent 到诊断组件 |
+| 宿主与传输 | `desktop/tray-tauri/src-tauri/src/lib.rs`、`nodeclient.rs`、`terminal.rs`、`events.rs` | 窗口/托盘、REST/SSE、PTY WebSocket 中继与命令校验 |
+| 图标 | `shared/icons/desktop/` | Canonical shared assets; Desktop design provenance and license notes remain in [`shared/icons/desktop/manifest.json`](../../../shared/icons/desktop/manifest.json) |
+| 设计参考 | 本目录的 `prototype/`、`icons/`、`visuals/` | 模拟交互、图标画板、历史探索与当前布局参考，不能当作已接入的功能 |
+
+当时的验收基线只接受 loopback Node，原始认证凭据由 Rust 宿主持有，UI 通过 Tauri commands 调用固定 Node。终端会话归属于 Agent：切换 Agent/关窗脱离连接并保留进程，明确关闭资源则关闭会话。其后 Node `/ui/` 已移除；当前只有独立 Desktop 提供 Agent 交互界面，见本文件顶部的状态更新。
+
+## 验收证据与限度
+
+| 项目 | 结果与证据 |
+| --- | --- |
+| 真模型对话 | 在隔离 Node 中复用已有的非 Mock `mimo-v2.5-pro` 配置，从真实 Tauri 输入并发送连通性测试。实际回复“Desktop 实测通过”，Node hydrate 中回合已完成且消息持久化。 |
+| 真模型工具审批 | 在临时 Agent 工作目录创建 `hello.txt`，将 `read_file` 设置为每次审批。实际模型发出 read_file 请求；在 Tauri 中批准后工具成功执行，模型返回 `DESKTOP_APPROVAL_ACCEPTED`。未在日常 Agent 会话中写入验收消息。 |
+| 终端链路 | 开启 `DAGENTS_TERMINAL_SMOKE` 后，Rust 测试实际连接 Node PTY，验证输入、脱离、恢复、历史回放和关闭。原生窗口另核对连接状态、关闭资源菜单、消息坞和命令栏布局。未通过 UI 自动化输入系统命令。 |
+| Node 流与回合 | 开启 `DAGENTS_MVP_SMOKE`，验证真实本机 Node REST/SSE/hydrate 链路；该 transport smoke 使用 Mock 模型，与上面真模型测试分开记录。 |
+| 配置 | 原生窗口验证通用配置保存成功，并检查设置页面导航、实际数据和空状态。页面迁移不等于所有表单、凭据、SSH/MCP 实际服务、升级和反馈投递均已端到端实测。 |
+| 原生视觉 | 检查合并顶栏、对话输入、设置底色/过渡/导航渐隐、终端与消息坞；修复提示行截断、审批参数挤在一行、终端 OSC 乱码和消息坞遮挡命令栏。 |
+| Desktop 检查 | `npm run build`、`npm run test:ui`（9 项）、`cargo fmt --check`、`cargo test --lib`（28 项，包括两个启用的 live smoke）通过。 |
+| 干净依赖构建 | 临时移开 Node WebUI 的 `node_modules` 后 Desktop 仍可构建，随后恢复。Desktop 显式声明并解析 Markdown 依赖，不依赖 Node 前端已安装的包。 |
+| 共享 WebUI 回归 | Node 前端构建成功；67 个测试文件、369 项测试通过。 |
+| 当前模拟原型 | `prototype/` 构建成功，`test:sites` 4 项通过。它的模拟浏览器/文件不算生产能力。 |
+
+上述检查在 Windows 本机开发环境完成。没有据此验证 macOS/Linux 原生窗口、发行安装包、签名、更新回滚、网络长时间断线或多 DPI 完整矩阵。隔离真实模型测试目录中的凭据副本应在验收后清除；运行状态、私钥、数据库、依赖和构建输出均不入库。
+
+本次清理状态：临时真实模型 Node 已停止，常规开发窗口恢复连接 `18765` 的 Mock 测试 Node。自动审批拒绝了删除本地临时文件的操作（只返回 `blocked by policy`）；`.runtime-test-desktop-real/.runtime/llm_configs.db` 与 `.llm_secret_key` 两个测试副本仍需由用户清理。该目录已忽略，不在提交中；主工作区原有模型配置未修改。
+
+## 下一阶段仍需完成
+
+按产品闭环优先排序，不在本次基础工作台收束中扩展：
+
+1. **日常对话完整性**：新建 Agent/对话、停止与恢复、模型切换、附件与媒体传输；补齐空 Node 的直接首配，并完成更多 HITL 类型、Auto 激活/审批的原生窗口长时间运行测试。后续 UI 修订已复用 WebUI 的 Markdown、工具气泡和 HITL 展示，见下文。
+2. **资源能力**：将简单文本终端推进到可支持交互程序和尺寸变化的终端组件；接入实际文件打开/预览/上传下载、内置浏览器观看与接管，明确 Node 文件与 Desktop 文件边界。
+3. **设置深度验收**：覆盖全部修改/保存/重载与错误分支，使用真实 MCP/SSH/Manage 验证服务和反馈闭环；修正继承页面中的 WebUI 专属说明与快捷键。
+4. **连接与发布**：远程 Node、连接握手/版本能力协商、凭据与缓存隔离、CSP 和权限收紧、三平台构建/性能/DPI 验收、安装升级回滚。
+5. **前端源码归属**：已完成。Desktop UI 位于 `desktop/tray-tauri/src/ui`，跨产品展示代码位于 `shared/frontend`；Node 不再保留 WebUI 包，也不需要前端产物参与构建。
+
+工作组、浏览器和文件入口在当前实现中明确不可用。以上缺口使本轮适合作为本地开发 MVP 验收点，尚不足以直接宣布完整 Desktop 产品迁移或正式发布。
+
+## 同日后续 UI 修订
+
+按用户新的视觉反馈，Desktop 的装饰图标、强调文字、设置导航和主按钮统一使用黑灰色；连接、错误、审批等语义状态仍可使用状态色。两个消息输入入口采用简单的向上箭头，空会话的图文在页签与输入栏之间的可用画布居中。
+
+消息展示直接复用 Node WebUI 的 `MainChatPanel`，包括 `MessageBubble`、工具合并/展开、Markdown、HITL 卡片和 `ScrollToTailButton`。普通/Auto 对话不显示头像或角色名。历史消息适配器补充稳定的前端 ID，保留原始工具及附件字段；切换 Agent 时隔离消息面板和回合状态。用户翻阅历史时，新消息不会强制拉回底部，自己发送后恢复跟随。
+
+原顶栏跳转审批和独立输入栏已接入共享面板的滚动/审批交互。用户信息、记忆冲突使用原 WebUI 的请求格式，经现有 Tauri resume 命令提交；这属于接线完成，尚未覆盖这些请求类型的完整真实模型验收。图片灯箱已挂载，但 Desktop 尚未代理 Node 的 `/v1/media` 二进制请求，不能将其视为图片附件完整迁移。
+
+本轮在真实 Tauri 窗口检查设置用色、空会话、原消息样式和历史滚动浮球；另外只读打开上一轮隔离真实模型 Node 的既有 `read_file` 回合，核对工具气泡、参数、结果和文件内容预览，没有为这项检查新增模型调用。检查后停止该隔离 Node，恢复连接 `18765` 的 Mock 测试 Node。
+
+在该 Mock Node 中通过原生主输入栏和资源消息坞发送消息，确认同一 Agent 的消息持久化及 Markdown 标题、列表、代码块展示；模拟背景新回合时，历史阅读位置保持，浮球显示两条新增消息，点击后回到底部。流式占位与最终历史行共用稳定索引，修复了新增计数重复。此项验证使用 Mock 回显，不作为新的真模型推理证明。
+
+Desktop UI 测试 12 项、消息流/工具合并/HITL/跟随滚动共享测试 36 项通过；Desktop 和当前设计原型构建成功，图标同步完成，`git diff --check` 通过。Desktop 构建仍有主 chunk 大于 500 kB 的提示，性能分包保留在后续收束范围。当前原生窗口已经使用本轮更新。
+
+## 同日侧栏层级与选中态修订
+
+自主智能体及其分组图标恢复为 Node WebUI `UiIcon.vue` 的四角星，设计源、图标展示页、原型资源和 Desktop 副本同步。展开的普通/自主智能体子项去除重复类型图标，名称起点为侧栏左侧约 52 px；分组仍保留图标。未来工作组成员宜再增加一级轻量缩进，当前工作组尚未接入，不作为已完成能力。
+
+名称保持固定左对齐。选中项采用浅灰背景、左侧 2 px 标记及稍深文字，背景/颜色过渡约 160 ms；不通过将文字滑到右对齐表示选中，以免改变阅读锚点、挤占名称和尾部状态空间。设置一级导航保留区分功能的图标，选中态和智能体配置区段采用同一中性视觉；减少动画偏好下关闭这些过渡。
+
+折叠态保留三个分组图标，当前智能体所属分组持续高亮，浮出列表标明当前项并保留审批状态。底部仅保留居中的连接状态点，完整状态和版本由悬停提示及无障碍标签提供。Root 已在重启后的真实 Tauri 窗口检查四角星、展开层级、折叠当前分组、浮出列表及关闭后的状态保持；设置一级导航及智能体配置区段选中态完成视觉核对。另修复折叠后进入设置残留 64 px 空白列的 CSS 优先级问题，设置始终隐藏工作台侧栏并保留原有过渡。Desktop 现有 UI 测试 12 项及构建通过，未新增模型调用。
+
+## 同日文件图标与资源页签修订
+
+Desktop 的通用文件图标同步用户提供的 `Downloads/file.svg` 原始几何，设计源与原型资源采用同一 currentColor 资产；共享 `UiIcon` 的 `file` 分支按 1024→24 等比缩放同步，覆盖附件及文件工具图标。新增、删除文件和目录等不同操作仍使用各自符号。
+
+对话入口仅显示智能体图标和名称，资源页签仅显示资源图标及名称；终端名称优先取会话 display_name/name/shell，尚未提供时使用 Shell。切换资源菜单使用相同名称，长名省略且可通过悬停查看完整名称。原型中的终端实例、浏览器页面标题与文件名遵循相同规则。
+
+Root 已在真实 Tauri 窗口核对对话/终端页签切换及新文件图标入口，创建空闲 PTY 用于连接状态核对，未执行终端命令或新增模型请求。原型中 README.md、bash、Vite 文档三个资源页签与文件画布完成视觉核对；这不代表实际文件/浏览器能力已接入。Desktop UI 测试 12 项、Desktop 与原型构建及差异格式检查通过。

@@ -17,7 +17,7 @@
 
 | 目录 | 场景摘要 |
 |------|----------|
-| [`centos7-feature-tour/`](centos7-feature-tour/) | **CentOS 7** 静态 Node；Web UI 特性导览（Mock / 真实 LLM） |
+| [`centos7-feature-tour/`](centos7-feature-tour/) | 历史容器回归案例；不代表当前 Linux 支持承诺 |
 
 ## 通用约定
 

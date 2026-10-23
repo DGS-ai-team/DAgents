@@ -13,7 +13,7 @@ description: 指导在技能目录中编写符合约定的 Agent 技能（SKILL.
    - **`skills/<name>/data/`**：任务需持续保留的数据（历史记录、持久化产物等）
    - **`skills/<name>/config/`**：配置类文件（见下文「config 与安全」）
    - **`skills/<name>/hooks/`**：可选，存放本 skill 的 Hook plugin（`*.so`）；编写约定见 **`write-hook`** skill
-   - **`write-skill` 内置防护**：Node 自带 `builtin.loaded_skill_file_guard`（`tool.before_each`），当会话 `loaded_skills` 非空时，禁止 `write_file` / `search_replace` / 会改文件的 `bash_run` 触及 `skills/<已加载名>/` 下任意路径；返回「已加载的技能文件不允许修改」。**默认无需再加载插件**；仅在需要 skill 级独立 `.so` 定制时，可编译 `hooks/protect-loaded-skill/`（与内置同逻辑的示例）。
+   - 已加载只表示当前会话正在使用该 skill 的说明，不会锁定其文件；可按用户授权正常编辑 `skills/<name>/`。当前 Turn 的 skill 正文保持快照稳定，改动会在后续新 Turn 创建 catalog view 后生效。
 
 ## SKILL.md 头部元数据（frontmatter）
 
@@ -74,7 +74,7 @@ description: 单行：做什么 + 何时用。
 ## 编写过程要点
 
 - 加载本 skill 后，可视为进入「编写 skill」流程；注意：
-  - 在 skill **定稿前勿加载正在编写的 skill**；**修改 SKILL.md 前先 `unload_skills` 卸载该 skill**（或 `clear_skills`），避免旧正文残留在会话、且频繁改动导致上下文缓存失效。
+  - skill 加载状态不阻止文件编辑。当前 Turn 的模型上下文仍使用创建该 Turn 时的 skill 正文快照；需要验证新正文时，在写入后开启新 Turn 并重新加载/查看 skill。
   - 定稿后可用 **`load_skills` 加载验证**，并用 **`/context`** 或 **`/skill load <name>`** 确认 `loaded_skills` 与后续 Step 的独立 skill ContextInjection 正确。
   - 若在用户引导下边做任务边写 skill，**每完成一阶段须先落地步骤或转为 `scripts/` 脚本**。
   - 步骤若多次试错，**成功后须记录可行做法**（写入正文或 `reference/`）。

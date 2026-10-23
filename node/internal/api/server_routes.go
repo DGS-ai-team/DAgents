@@ -1,17 +1,15 @@
 package api
 
-import "github.com/DGS-ai-team/DAgents/node/internal/webui"
-
 // registerRoutes 构建 Node 的 HTTP 路由树。
 // 各领域路由仍由对应文件实现，Server 只负责统一挂载顺序。
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
-	s.mux.HandleFunc("GET /v1/desktop/runtime-config", s.handleDesktopRuntimeConfig)
-	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
-	s.mux.HandleFunc("POST /v1/agent/update/apply", s.handlePlatformUpdateApply)
-	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
+	s.mux.HandleFunc("GET /v1/node/info", s.handleAgentInfo)
+	s.mux.HandleFunc("GET /v1/node/update", s.handleAgentUpdate)
+	s.mux.HandleFunc("GET /v1/node/update/package", s.handleNodeUpdatePackage)
+	s.mux.HandleFunc("GET /v1/node/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.registerBrowserViewRoutes()
 	s.registerAutonomyV2Routes()
 	s.registerDreamingRoutes()
 	s.mux.HandleFunc("GET /v1/auto/overview", s.handleAutoOverview)
@@ -33,6 +31,4 @@ func (s *Server) registerRoutes() {
 	s.registerManageUploadRoutes()
 	s.registerFeedbackRoutes()
 	s.mux.HandleFunc("GET /v1/skills/catalog", s.handleNodeSkillsCatalog)
-	s.mux.Handle("GET /ui/", webui.Handler())
-	s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
 }

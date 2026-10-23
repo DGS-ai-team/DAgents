@@ -5,8 +5,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from manage.config import ManageSettings
@@ -145,8 +145,22 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     )
 
     @app.get("/", include_in_schema=False)
-    def root_redirect() -> RedirectResponse:
-        return RedirectResponse(url="/console/")
+    def root_product_page() -> FileResponse:
+        page = _CONSOLE_DIR / "product.html"
+        if not page.is_file():
+            raise HTTPException(status_code=503, detail="product download page not built")
+        return FileResponse(page)
+
+    @app.get("/download", include_in_schema=False)
+    def download_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/download/")
+
+    @app.get("/download/", include_in_schema=False)
+    def download_product_page() -> FileResponse:
+        page = _CONSOLE_DIR / "product.html"
+        if not page.is_file():
+            raise HTTPException(status_code=503, detail="product download page not built")
+        return FileResponse(page)
 
     @app.get("/console", include_in_schema=False)
     def console_redirect() -> RedirectResponse:

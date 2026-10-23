@@ -83,10 +83,52 @@ CREATE TABLE IF NOT EXISTS agents (
 	if err != nil {
 		return err
 	}
+	if err := s.ensureAgentSchema(); err != nil {
+		return err
+	}
 	if err := s.ensurePolicySchema(); err != nil {
 		return err
 	}
 	return s.ensurePromptContextSchema()
+}
+
+// ensureAgentSchema adds columns introduced after the initial agents.db schema.
+// Older databases keep their existing columns and rows; these additive defaults
+// let the current runtime read and update them without a destructive rebuild.
+func (s *AgentStore) ensureAgentSchema() error {
+	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return err
+	}
+	columns := make(map[string]struct{})
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		columns[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if _, ok := columns["host_json"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN host_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return fmt.Errorf("add agents.host_json: %w", err)
+		}
+	}
+	if _, ok := columns["runtime_revision"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN runtime_revision INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return fmt.Errorf("add agents.runtime_revision: %w", err)
+		}
+	}
+	return nil
 }
 
 // Save 写入或更新 Agent 元数据。

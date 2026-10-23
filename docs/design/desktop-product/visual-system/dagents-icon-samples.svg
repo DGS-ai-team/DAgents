@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">DAgents icon samples</title>
+  <desc id="desc">A dark icon design board for DAgents, showing twelve icons on a shared 24 by 24 logical grid.</desc>
+
+  <defs>
+    <linearGradient id="board" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111d"/>
+      <stop offset="0.58" stop-color="#0b1725"/>
+      <stop offset="1" stop-color="#101829"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#122237"/>
+      <stop offset="1" stop-color="#0d192b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8ee8ff"/>
+      <stop offset="1" stop-color="#7aa6ff"/>
+    </linearGradient>
+    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd78b"/>
+      <stop offset="1" stop-color="#b99aff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#020611" flood-opacity="0.34"/>
+    </filter>
+    <pattern id="grain" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M0 35.5h36M35.5 0v36" stroke="#5f8bad" stroke-opacity="0.06"/>
+    </pattern>
+
+    <!-- Brand geometry: six 60° rays, used only by the brand and success marks. -->
+    <g id="snowflake24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2.3v19.4M3.6 7.15l16.8 9.7M3.6 16.85l16.8-9.7"/>
+      <path d="m12 2.3-1.8 1.8M12 2.3l1.8 1.8M12 21.7l-1.8-1.8M12 21.7l1.8-1.8"/>
+      <path d="m3.6 7.15 2.45.15M3.6 7.15l.65 2.36M20.4 16.85l-2.45-.15M20.4 16.85l-.65-2.36"/>
+      <path d="m3.6 16.85 2.45-.15M3.6 16.85l.65-2.36M20.4 7.15l-2.45.15M20.4 7.15l-.65 2.36"/>
+    </g>
+    <g id="crystal24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+      <path d="m12 2.8 7 4v8.4l-7 4-7-4V6.8l7-4Z"/>
+      <path d="m5 6.8 7 4 7-4M12 10.8v8.4" stroke-opacity="0.62"/>
+    </g>
+    <g id="node24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3.2" fill="#0d192b"/>
+      <path d="M12 2.8v5.8M12 15.4v5.8M2.8 12h5.8M15.4 12h5.8"/>
+    </g>
+    <g id="card-frame">
+      <rect width="240" height="200" rx="16" fill="url(#card)" stroke="#294662"/>
+      <path d="M16 104h208" stroke="#24425d" stroke-opacity="0.6"/>
+    </g>
+    <style>
+      .label { fill: #e7f3ff; font: 600 14px Inter, "Segoe UI", sans-serif; letter-spacing: .02em; }
+      .meaning { fill: #9cb5c9; font: 13px "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+      .note { fill: #718ba3; font: 11px Inter, "Segoe UI", "Noto Sans SC", sans-serif; }
+      .icon { color: #8ee8ff; }
+      .icon-soft { color: #9db8ff; }
+      .icon-warm { color: #ffd78b; }
+      .stroke { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+      .thin { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="900" fill="url(#board)"/>
+  <rect width="1200" height="900" fill="url(#grain)"/>
+  <circle cx="1090" cy="-44" r="220" fill="#4087b9" fill-opacity="0.08"/>
+  <circle cx="80" cy="882" r="200" fill="#7660cc" fill-opacity="0.06"/>
+
+  <g transform="translate(48 42)">
+    <g class="icon" transform="translate(0 1)"><use href="#snowflake24" xlink:href="#snowflake24"/></g>
+    <text x="34" y="17" fill="#f1f8ff" font-family="Inter, Segoe UI, sans-serif" font-size="24" font-weight="700" letter-spacing=".04em">DAgents</text>
+    <text x="35" y="44" fill="#9cb5c9" font-family="Noto Sans SC, Microsoft YaHei, sans-serif" font-size="13">专有图标样稿 · 24×24 逻辑网格 · dark product language</text>
+    <text x="1104" y="18" text-anchor="end" fill="#6f8da8" font-family="Inter, Segoe UI, sans-serif" font-size="11" letter-spacing=".12em">ICON STUDY / 01</text>
+    <path d="M0 68h1104" stroke="#294662"/>
+  </g>
+
+  <!-- Row 1 -->
+  <g transform="translate(48 140)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon"><use href="#snowflake24" xlink:href="#snowflake24"/></g>
+    <text x="112" y="43" class="label">brand-snowflake</text>
+    <text x="112" y="67" class="meaning">品牌雪花</text>
+    <text x="20" y="132" class="note">六向 60° 几何 · 中心晶体</text>
+    <text x="20" y="153" class="note">作为品牌锚点，保持独占性</text>
+  </g>
+
+  <g transform="translate(336 140)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-soft">
+      <circle cx="12" cy="8" r="3.3" class="stroke"/>
+      <path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6" class="stroke"/>
+      <path d="m17.8 3.3 2.8 1.6-1.6 2.8-2.8-1.6 1.6-2.8Z" class="thin"/>
+      <circle cx="19.4" cy="4.9" r=".9" fill="currentColor"/>
+    </g>
+    <text x="112" y="43" class="label">agent</text>
+    <text x="112" y="67" class="meaning">智能体</text>
+    <text x="20" y="132" class="note">人物轮廓 + 切角晶体</text>
+    <text x="20" y="153" class="note">表达角色、能力与可配置性</text>
+  </g>
+
+  <g transform="translate(624 140)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon">
+      <path d="M12 6.2 5.6 16.8h12.8L12 6.2Z" class="stroke"/>
+      <path d="M12 6.2v5.2M5.6 16.8 10 14M18.4 16.8 14 14" class="thin"/>
+      <circle cx="12" cy="6.2" r="2.2" fill="#0d192b" class="stroke"/>
+      <circle cx="5.6" cy="16.8" r="2.2" fill="#0d192b" class="stroke"/>
+      <circle cx="18.4" cy="16.8" r="2.2" fill="#0d192b" class="stroke"/>
+    </g>
+    <text x="112" y="43" class="label">workgroup</text>
+    <text x="112" y="67" class="meaning">工作组</text>
+    <text x="20" y="132" class="note">三节点协作拓扑</text>
+    <text x="20" y="153" class="note">节点彼此连接，不重复贴雪花</text>
+  </g>
+
+  <g transform="translate(912 140)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon">
+      <ellipse cx="12" cy="12" rx="8.8" ry="4.2" class="thin" transform="rotate(-28 12 12)"/>
+      <circle cx="18.8" cy="7.1" r="2.1" fill="currentColor"/>
+      <path d="M3.5 18.7h4.1l1.6-3.2 2.1 4.1 2.2-5 1.8 2.7h5.2" class="stroke"/>
+    </g>
+    <text x="112" y="43" class="label">auto</text>
+    <text x="112" y="67" class="meaning">自主智能体</text>
+    <text x="20" y="132" class="note">轨道 + 脉冲</text>
+    <text x="20" y="153" class="note">与普通 Agent 的持续运行差异</text>
+  </g>
+
+  <!-- Row 2 -->
+  <g transform="translate(48 364)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-soft">
+      <circle cx="12" cy="12" r="8.5" class="thin"/>
+      <path d="M12 7v5l3.4 2" class="stroke"/>
+      <path d="m18.6 3.5 2.4 2.4-2.4 2.4" class="stroke"/>
+      <path d="M21 5.9h-5.4" class="thin"/>
+    </g>
+    <text x="112" y="43" class="label">wake-trigger</text>
+    <text x="112" y="67" class="meaning">唤醒触发器</text>
+    <text x="20" y="132" class="note">时钟 + 回环箭头</text>
+    <text x="20" y="153" class="note">强调“何时检查”，而非执行本身</text>
+  </g>
+
+  <g transform="translate(336 364)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-warm">
+      <path d="M16.8 4.4A8.5 8.5 0 1 0 19.6 16 7.4 7.4 0 0 1 16.8 4.4Z" class="stroke"/>
+      <path d="M5.3 5.4h.1M7.2 18.8h.1M20 5.8h.1" class="stroke"/>
+      <path d="m4.2 10.3.9.9M19.7 12.1l.9-.9" class="thin"/>
+    </g>
+    <text x="112" y="43" class="label">dreaming</text>
+    <text x="112" y="67" class="meaning">梦境整理</text>
+    <text x="20" y="132" class="note">月牙 + 低亮星点</text>
+    <text x="20" y="153" class="note">代表每日经验沉淀与上下文重置</text>
+  </g>
+
+  <g transform="translate(624 364)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-soft">
+      <path d="M3.5 5.1c2.8-.8 5.5-.2 8.5 2v12c-3-2.2-5.7-2.8-8.5-2V5.1ZM20.5 5.1c-2.8-.8-5.5-.2-8.5 2v12c3-2.2 5.7-2.8 8.5-2V5.1Z" class="stroke"/>
+      <path d="m12 9.1 1.6 1.6-1.6 1.6-1.6-1.6L12 9.1Z" fill="#0d192b" class="stroke"/>
+    </g>
+    <text x="112" y="43" class="label">experience-handbook</text>
+    <text x="112" y="67" class="meaning">经验 / 手册</text>
+    <text x="20" y="132" class="note">打开的文件 + 中心晶体</text>
+    <text x="20" y="153" class="note">经验索引与可持续编辑的知识</text>
+  </g>
+
+  <g transform="translate(912 364)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon">
+      <path d="M4 8.3h7l1.8 2h7v8.4H4V8.3ZM4 8.3V5.9h6l1.8 2.4" class="stroke"/>
+      <path d="M8 13.2h8M8 16h5" class="thin"/>
+      <path d="m18.2 4.1 2 2-2 2-2-2 2-2Z" class="thin"/>
+    </g>
+    <text x="112" y="43" class="label">filesystem</text>
+    <text x="112" y="67" class="meaning">文件系统</text>
+    <text x="20" y="132" class="note">文件夹 + 晶体切角</text>
+    <text x="20" y="153" class="note">提示手册与资源以文件形式存在</text>
+  </g>
+
+  <!-- Row 3 -->
+  <g transform="translate(48 588)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-soft">
+      <rect x="3.5" y="4.2" width="17" height="15.6" rx="2.6" class="stroke"/>
+      <path d="M3.5 8.3h17" class="thin"/>
+      <path d="m7.2 12 2.6 2-2.6 2M12.1 16h4.1" class="stroke"/>
+      <circle cx="6.3" cy="6.2" r=".7" fill="currentColor"/><circle cx="8.5" cy="6.2" r=".7" fill="currentColor"/>
+    </g>
+    <text x="112" y="43" class="label">terminal</text>
+    <text x="112" y="67" class="meaning">终端</text>
+    <text x="20" y="132" class="note">命令提示符 + 窗口框</text>
+    <text x="20" y="153" class="note">表达可执行、可观察的本机能力</text>
+  </g>
+
+  <g transform="translate(336 588)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon">
+      <circle cx="12" cy="12" r="8.7" class="stroke"/>
+      <path d="M3.8 9h16.4M3.8 15h16.4M12 3.3c2.2 2.4 3.2 5.3 3.2 8.7S14.2 18.3 12 20.7M12 3.3C9.8 5.7 8.8 8.6 8.8 12s1 6.3 3.2 8.7" class="thin"/>
+      <path d="M3.9 5.8h16.2" class="thin" stroke-opacity=".7"/>
+    </g>
+    <text x="112" y="43" class="label">browser</text>
+    <text x="112" y="67" class="meaning">浏览器</text>
+    <text x="20" y="132" class="note">球面经纬线 + 页面边界</text>
+    <text x="20" y="153" class="note">表达外部信息与网页环境</text>
+  </g>
+
+  <g transform="translate(624 588)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-warm">
+      <path d="m12 2.8 7 4v8.4l-7 4-7-4V6.8l7-4Z" class="stroke"/>
+      <path d="m7.6 12.2 2.8 2.8 6-6" class="stroke"/>
+      <path d="M12 2.8v3.1" class="thin"/>
+    </g>
+    <text x="112" y="43" class="label">success</text>
+    <text x="112" y="67" class="meaning">成功</text>
+    <text x="20" y="132" class="note">晶体容器 + 勾选</text>
+    <text x="20" y="153" class="note">使用于完成、通过与稳定状态</text>
+  </g>
+
+  <g transform="translate(912 588)" filter="url(#shadow)">
+    <use href="#card-frame" xlink:href="#card-frame"/>
+    <g transform="translate(20 16)" class="icon-soft">
+      <rect x="4" y="4" width="16" height="16" rx="3.2" class="stroke"/>
+      <path d="M8 8h8M8 12h8M8 16h5" class="thin"/>
+      <path d="m5.2 4 2.1-1.2L9.4 4" class="thin"/>
+      <circle cx="6" cy="8" r=".8" fill="currentColor"/><circle cx="6" cy="12" r=".8" fill="currentColor"/><circle cx="6" cy="16" r=".8" fill="currentColor"/>
+    </g>
+    <text x="112" y="43" class="label">auto-overview</text>
+    <text x="112" y="67" class="meaning">自主总览</text>
+    <text x="20" y="132" class="note">仪表盘 + 状态节点</text>
+    <text x="20" y="153" class="note">与 Auto 入口相连，但不复制轨道符号</text>
+  </g>
+
+  <g transform="translate(48 824)">
+    <text x="0" y="0" fill="#7894ad" font-family="Inter, Segoe UI, sans-serif" font-size="11" letter-spacing=".08em">DESIGN RULES</text>
+    <text x="0" y="25" fill="#a8bdcf" font-family="Noto Sans SC, Microsoft YaHei, sans-serif" font-size="12">线宽 1.6 · round cap/join · 24×24 网格 · 品牌几何只用于锚点与完成状态</text>
+    <text x="1104" y="0" text-anchor="end" fill="#58748e" font-family="Inter, Segoe UI, sans-serif" font-size="11">DAgents / internal sample / 2026</text>
+  </g>
+</svg>

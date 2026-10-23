@@ -124,13 +124,32 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 // publishTurnFinished 推送 turn_finished SSE。它只表示一个 turn 已进入
 // 终态；HITL 暂停不发送该事件，暂停事实由 hitl_required + turn_state 表达。
 func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string, noWork ...bool) {
+	additional := map[string]any{}
+	if len(noWork) > 0 && noWork[0] {
+		additional["no_work"] = true
+	}
+	o.publishTurnFinishedWithDetails(sessionID, finishReason, additional)
+}
+
+// PublishBudgetExhausted emits the terminal SSE after the lifecycle projection
+// has recorded a budget-exhausted Turn. budgetReason identifies the actual
+// limit that prevented further work (for example max_steps or max_input_tokens).
+func (o *Orchestrator) PublishBudgetExhausted(sessionID, turnID string, generation uint64, budgetReason string) {
+	o.publishTurnFinishedWithDetails(sessionID, "budget_exhausted", map[string]any{
+		"budget_reason":   budgetReason,
+		"turn_id":         turnID,
+		"turn_generation": generation,
+	})
+}
+
+func (o *Orchestrator) publishTurnFinishedWithDetails(sessionID, finishReason string, additional map[string]any) {
 	o.runTurnDonePhase(sessionID, finishReason)
 	payload := map[string]any{
 		"finish_reason": finishReason,
 		"turn_complete": true,
 	}
-	if len(noWork) > 0 && noWork[0] {
-		payload["no_work"] = true
+	for key, value := range additional {
+		payload[key] = value
 	}
 	if m := o.contextMetrics(sessionID); m != nil {
 		payload["tool_context_metrics"] = m.snapshot()

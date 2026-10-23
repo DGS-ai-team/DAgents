@@ -246,6 +246,10 @@ func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 		n = DefaultMaxSteps
 	}
 	turn.Budget.MaxSteps = n
+	// Agent Turns reserve one additional, tool-free summary Step so reaching
+	// max_steps ends with a user-facing result instead of a silent stop. Other
+	// budget dimensions (tokens, cost, wall time) still gate that request.
+	turn.Budget.ReserveFinalSummary = true
 	if pc := PromptContextFromDefaults(snap); pc != nil {
 		turn.PromptContext = *pc
 	}

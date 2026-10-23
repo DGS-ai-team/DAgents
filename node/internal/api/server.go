@@ -17,7 +17,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/autonomy"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
-	"github.com/DGS-ai-team/DAgents/node/internal/desktopbridge"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -52,50 +51,52 @@ func conditionCompletionCallback(scheduler *triggers.Scheduler, triggerStore *tr
 
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
-	cfg             *config.Config
-	configPath      string
-	llmRuntime      *llm.RuntimeSettings
-	defaultLLM      llm.Client
-	llmInjected     bool
-	logger          *slog.Logger
-	mux             *http.ServeMux
-	sessions        *session.Manager // per-session queue and turn consumer
-	agents          *store.AgentStore
-	mcpServers      *store.MCPServerStore
-	mcpManager      *mcp.Manager
-	linuxChannels   *store.LinuxChannelStore
-	linuxProvider   *tools.LinuxShellProvider
-	llmConfigs      *store.LLMConfigStore
-	nodeSettings    *store.NodeSettingsStore
-	stream          *stream.Hub // 进程内 SSE 事件总线
-	transferStream  *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）
-	workgroupStream *stream.Hub // Manage 工作组 Timeline + 实时协作事件
-	store           *store.SQLiteStore
-	triggerStore    *triggers.Store
-	triggerSched    *triggers.Scheduler
-	dreamingSched   *DreamingScheduler
-	startupErr      error
-	autonomyStore   *autonomy.Store
-	autoConfigMu    sync.Mutex
-	registrar       *manage.Registrar
-	updateChecker   *manage.UpdateChecker
-	packageUploader *manage.PackageUploader
-	control         *manage.ControlClient
-	feedbackStore   *store.FeedbackStore
-	feedbackRateMu  sync.Mutex
-	feedbackRate    map[string][]time.Time
-	tools           *tools.Registry
-	workspaceCoord  *workspacecoord.Coordinator
-	transfers       *tools.LinuxTransferManager
-	browserMu       sync.RWMutex
-	browserMgr      *browser.Manager
-	mediaRegister   tools.MediaRegisterFunc
-	workgroupWorker *workgroup.Worker
-	workgroupDialer *workgroup.Dialer
-	workgroupAgents *workgroupAgentBridge
-	terminals       *terminalSessionRegistry
-	desktopBridge   *desktopbridge.Client
-	directoryPicker platform.DirectoryPicker
+	cfg                   *config.Config
+	configPath            string
+	llmRuntime            *llm.RuntimeSettings
+	defaultLLM            llm.Client
+	llmInjected           bool
+	logger                *slog.Logger
+	mux                   *http.ServeMux
+	sessions              *session.Manager // per-session queue and turn consumer
+	agents                *store.AgentStore
+	mcpServers            *store.MCPServerStore
+	mcpManager            *mcp.Manager
+	linuxChannels         *store.LinuxChannelStore
+	linuxProvider         *tools.LinuxShellProvider
+	llmConfigs            *store.LLMConfigStore
+	llmRefMu              sync.RWMutex // serializes Agent snapshot writes against LLM profile removal
+	nodeSettings          *store.NodeSettingsStore
+	stream                *stream.Hub // 进程内 SSE 事件总线
+	transferStream        *stream.Hub // Linux 文件传输状态 SSE（与对话事件隔离）
+	workgroupStream       *stream.Hub // Manage 工作组 Timeline + 实时协作事件
+	store                 *store.SQLiteStore
+	triggerStore          *triggers.Store
+	triggerSched          *triggers.Scheduler
+	dreamingSched         *DreamingScheduler
+	startupErr            error
+	autonomyStore         *autonomy.Store
+	autoConfigMu          sync.Mutex
+	registrar             *manage.Registrar
+	updateChecker         *manage.UpdateChecker
+	packageUploader       *manage.PackageUploader
+	control               *manage.ControlClient
+	feedbackStore         *store.FeedbackStore
+	feedbackRateMu        sync.Mutex
+	feedbackRate          map[string][]time.Time
+	tools                 *tools.Registry
+	workspaceCoord        *workspacecoord.Coordinator
+	transfers             *tools.LinuxTransferManager
+	browserMu             sync.RWMutex
+	browserMgr            *browser.Manager
+	browserService        *browser.ServiceProcess
+	browserRuntimeFactory browserRuntimeFactoryFn
+	mediaRegister         tools.MediaRegisterFunc
+	workgroupWorker       *workgroup.Worker
+	workgroupDialer       *workgroup.Dialer
+	workgroupAgents       *workgroupAgentBridge
+	terminals             *terminalSessionRegistry
+	directoryPicker       platform.DirectoryPicker
 
 	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
 	manageMu      sync.Mutex
@@ -114,18 +115,21 @@ type Server struct {
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	llmClient       llm.Client
-	llmInjected     bool
-	tools           *tools.Registry
-	policyEngine    *policy.Engine
-	sqliteStore     *store.SQLiteStore
-	nodeSettings    *store.NodeSettingsStore
-	skipStore       bool
-	configPath      string
-	directoryPicker platform.DirectoryPicker
+	llmClient             llm.Client
+	llmInjected           bool
+	tools                 *tools.Registry
+	policyEngine          *policy.Engine
+	sqliteStore           *store.SQLiteStore
+	nodeSettings          *store.NodeSettingsStore
+	skipStore             bool
+	configPath            string
+	directoryPicker       platform.DirectoryPicker
+	browserRuntimeFactory browserRuntimeFactoryFn
 }
 
-// WithConfigPath 记录 Node 启动时加载的 config.yaml 路径（供 Web UI 保存设置）。
+type browserRuntimeFactoryFn func(*config.Config) (*browser.Manager, *browser.ServiceProcess, error)
+
+// WithConfigPath 记录 Node 启动时加载的 config.yaml 路径，供 Node settings API 保存设置。
 func WithConfigPath(path string) Option {
 	return func(o *serverOptions) {
 		o.configPath = strings.TrimSpace(path)
@@ -201,6 +205,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	sharedWorkspaceCoord := workspacecoord.New()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.browserRuntimeFactory == nil {
+		o.browserRuntimeFactory = browser.NewManagerWithAutoStart
 	}
 	if o.directoryPicker == nil {
 		o.directoryPicker = platform.NewDirectoryPicker()
@@ -339,17 +346,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		},
 		WorkspaceRoot: cfg.RuntimeDir(),
 		// MaxSteps 由各 Agent config_snapshot（defaults.llm.max_steps）在装入 runtime 时写入。
-		SkillsRoot:                  cfg.SkillsRoot(),
-		SkillsEnabled:               cfg.Skills.Enabled,
-		SkillsMaxInPrompt:           cfg.Skills.MaxInPrompt,
-		RuntimeDir:                  cfg.RuntimeDir(),
-		CompressionSilent:           cfg.Compression.SilentTriggerTokens,
-		CompressionBlocking:         cfg.Compression.BlockingTriggerTokens,
-		IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
-		IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
-		IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
-		RawMessageHistoryEnabled:    cfg.RawMessageHistoryEnabled(),
-		RawMessageHistoryDir:        cfg.RawMessageHistoryDir(),
+		SkillsRoot:                 cfg.SkillsRoot(),
+		SkillsEnabled:              cfg.Skills.Enabled,
+		SkillsMaxInPrompt:          cfg.Skills.MaxInPrompt,
+		RuntimeDir:                 cfg.RuntimeDir(),
+		CompressionSilent:          cfg.Compression.SilentTriggerTokens,
+		CompressionBlocking:        cfg.Compression.BlockingTriggerTokens,
+		IdleNewConversationSeconds: cfg.Compression.IdleNewConversationSeconds,
+		RawMessageHistoryEnabled:   cfg.RawMessageHistoryEnabled(),
+		RawMessageHistoryDir:       cfg.RawMessageHistoryDir(),
 		DuplicateToolCall: hooks.DuplicateConfig{
 			Enabled:       &duplicateToolCallEnabled,
 			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
@@ -400,9 +405,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}, hub, cfg.NodeID, logger)
 	childMgr.SetRunRepository(session.NewChildRunRepository(st))
 	mgr.SetChildAgentManager(childMgr)
-	if cfg.IdleAutoCompressEnabled() {
-		mgr.StartIdleAutoCompressScanner()
-	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
 	startupErr := autonomyInitErr
@@ -454,14 +456,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}, nil
 	})
 	var browserMgr *browser.Manager
-	if cfg.BrowserEnabled() {
-		bm, err := browser.NewManager(cfg, nil)
+	var browserService *browser.ServiceProcess
+	if cfg.BrowserEnabled() && config.BrowserPlatformSupported() {
+		bm, service, err := o.browserRuntimeFactory(cfg)
 		if err != nil {
 			logger.Error("browser manager init failed", "error", err)
 		} else {
 			browserMgr = bm
+			browserService = service
 			logger.Info("browser tools enabled", "headed", cfg.BrowserHeaded())
 		}
+	} else if cfg.BrowserEnabled() {
+		logger.Warn("browser tools unavailable on this platform", "reason", config.BrowserPlatformReason())
 	}
 	var registrar *manage.Registrar
 	var updateChecker *manage.UpdateChecker
@@ -559,47 +565,48 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger.Info("workgroup dialer enabled", "manage_url", cfg.Manage.URL)
 	}
 	s := &Server{
-		cfg:                  cfg,
-		configPath:           o.configPath,
-		llmRuntime:           llmRuntime,
-		defaultLLM:           o.llmClient,
-		llmInjected:          o.llmInjected,
-		logger:               logger,
-		mux:                  http.NewServeMux(),
-		stream:               hub,
-		transferStream:       transferHub,
-		workgroupStream:      workgroupStream,
-		store:                st,
-		agents:               agentsStore,
-		mcpServers:           mcpServerStore,
-		mcpManager:           mcpManager,
-		linuxChannels:        linuxChannelStore,
-		linuxProvider:        linuxProvider,
-		llmConfigs:           llmConfigStore,
-		nodeSettings:         o.nodeSettings,
-		sessions:             mgr,
-		triggerStore:         triggerStore,
-		triggerSched:         triggerSched,
-		startupErr:           startupErr,
-		autonomyStore:        autonomyStore,
-		registrar:            registrar,
-		updateChecker:        updateChecker,
-		packageUploader:      packageUploader,
-		control:              control,
-		feedbackStore:        feedbackStore,
-		feedbackRate:         make(map[string][]time.Time),
-		tools:                o.tools,
-		workspaceCoord:       sharedWorkspaceCoord,
-		transfers:            transferManager,
-		browserMgr:           browserMgr,
-		mediaRegister:        mediaRegister,
-		workgroupWorker:      wgWorker,
-		workgroupDialer:      wgDialer,
-		workgroupAgents:      wgAgentBridge,
-		terminals:            newTerminalSessionRegistry(),
-		desktopBridge:        desktopbridge.NewFromEnv(),
-		directoryPicker:      o.directoryPicker,
-		pendingRuntimeReload: make(map[string]string),
+		cfg:                   cfg,
+		configPath:            o.configPath,
+		llmRuntime:            llmRuntime,
+		defaultLLM:            o.llmClient,
+		llmInjected:           o.llmInjected,
+		logger:                logger,
+		mux:                   http.NewServeMux(),
+		stream:                hub,
+		transferStream:        transferHub,
+		workgroupStream:       workgroupStream,
+		store:                 st,
+		agents:                agentsStore,
+		mcpServers:            mcpServerStore,
+		mcpManager:            mcpManager,
+		linuxChannels:         linuxChannelStore,
+		linuxProvider:         linuxProvider,
+		llmConfigs:            llmConfigStore,
+		nodeSettings:          o.nodeSettings,
+		sessions:              mgr,
+		triggerStore:          triggerStore,
+		triggerSched:          triggerSched,
+		startupErr:            startupErr,
+		autonomyStore:         autonomyStore,
+		registrar:             registrar,
+		updateChecker:         updateChecker,
+		packageUploader:       packageUploader,
+		control:               control,
+		feedbackStore:         feedbackStore,
+		feedbackRate:          make(map[string][]time.Time),
+		tools:                 o.tools,
+		workspaceCoord:        sharedWorkspaceCoord,
+		transfers:             transferManager,
+		browserMgr:            browserMgr,
+		browserService:        browserService,
+		browserRuntimeFactory: o.browserRuntimeFactory,
+		mediaRegister:         mediaRegister,
+		workgroupWorker:       wgWorker,
+		workgroupDialer:       wgDialer,
+		workgroupAgents:       wgAgentBridge,
+		terminals:             newTerminalSessionRegistry(),
+		directoryPicker:       o.directoryPicker,
+		pendingRuntimeReload:  make(map[string]string),
 	}
 	triggerRoundProvider = s.triggerToolRoundProvider
 	if s.workgroupAgents != nil {

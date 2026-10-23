@@ -132,16 +132,16 @@
 
 ## 源码盘点索引
 
-以下是本次 `82` 个 inline SVG 标签所在的 `31` 个源码文件。文件名是迁移时的定位索引，具体控件按上面的语义 key 复用，不为每个组件再建立一套视觉图标。
+本表是图标审计的定位索引；原始数量是当时的审计快照，路径已更新到当前 Desktop 源码树，已退役的旧 WebUI 组件不再列出。具体控件按上面的语义 key 复用，不为每个组件再建立一套视觉图标。
 
 | 产品面 | 文件 |
 | --- | --- |
-| Node 对话与工作台 | `node/webui/frontend/src/components/ChatComposer.vue`、`ComposerToolbar.vue`、`ContextMeter.vue`、`MessageBubble.vue`、`ScrollToTailButton.vue`、`StatusPanel.vue`、`TerminalActionMenu.vue`、`TerminalPanel.vue`、`TerminalSessionIndicator.vue`、`TerminalTargetMenu.vue`、`TerminalWorkbench.vue`、`TerminalWorkbenchComposer.vue`、`ToolGroupIcon.vue`、`UiSelect.vue`、`WorkgroupComposer.vue`、`WorkgroupMemberModal.vue`、`WorkspaceSwitcher.vue` |
-| Node 导航与设置 | `node/webui/frontend/src/components/NavRail.vue`、`node/webui/frontend/src/layouts/SettingsLayout.vue` |
-| Node 状态与页面 | `node/webui/frontend/src/components/AgentEmptyState.vue`、`node/webui/frontend/src/components/McpStatusIndicator.vue`、`node/webui/frontend/src/components/SkillsPanel.vue`、`node/webui/frontend/src/components/SkillsStatusIndicator.vue`、`node/webui/frontend/src/views/WorkgroupView.vue` |
+| Desktop 对话与工作台 | `desktop/tray-tauri/src/ui/components/ChatComposer.vue`、`ComposerToolbar.vue`、`ContextMeter.vue`、`MessageBubble.vue`、`ScrollToTailButton.vue`、`StatusPanel.vue`、`TerminalSessionIndicator.vue`、`ToolGroupIcon.vue`、`UiSelect.vue`、`WorkspaceSwitcher.vue` |
+| Desktop 导航与设置 | `desktop/tray-tauri/src/ui/components/TopLeftSlotIcon.vue`、`desktop/tray-tauri/src/ui/layouts/SettingsLayout.vue` |
+| Desktop 状态与页面 | `desktop/tray-tauri/src/ui/components/McpStatusIndicator.vue`、`SkillsPanel.vue`、`SkillsStatusIndicator.vue`、`desktop/tray-tauri/src/ui/components/WorkgroupWorkspace.vue` |
 | Manage 控制台 | `manage/console/frontend/src/components/AppTopNav.vue`、`AskAiButton.vue`、`DetailDrawer.vue`、`HomeDashboard.vue`、`LoginView.vue`、`WorkgroupChatView.vue`、`WorkgroupView.vue` |
 
-字符候选主要位于 `NavRail.vue`（`✦`、`✎`、`×`）、`AutoBadge.vue`（`✦`）、`AutoTodoPanel.vue` 与 `workbench.css`（`⌃`、`⌄`）、`AgentDetailSettings.vue`（`←`）、`McpSettings.vue`（`⌘`、`›`）、`UiSelect.vue` 与工具结果行（`✓`）、`ImageLightbox.vue`（`‹`、`›`）、`TransferStatusBar.vue`（`⌃`），以及 Manage `PageHeader.vue`（`›`）。其余命中的字符属于测试数据、日志文本、尺寸符号、路径分隔符或普通文案，保留原文。
+字符候选主要位于 Desktop 的 `AutoOverviewPanel.vue`、`AgentDetailSettings.vue`、`McpSettings.vue`、`UiSelect.vue`、`ImageLightbox.vue` 和工具结果行；Manage 的 `PageHeader.vue` 也有导航字符。其余命中的字符属于测试数据、日志文本、尺寸符号、路径分隔符或普通文案，保留原文。
 
 ## 视觉规则
 

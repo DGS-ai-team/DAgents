@@ -11,6 +11,25 @@ import (
 	"time"
 )
 
+func TestGetAgentInfoDecodesNodeServiceIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/node/info" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"node_id":"node-a","name":"Workstation","manage_enabled":true,"manage_url":"http://manage.local","manage_registered":true,"capabilities":["messages"]}`))
+	}))
+	defer server.Close()
+
+	info, err := New(server.URL, nil).GetAgentInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.NodeID != "node-a" || info.Name != "Workstation" || !info.ManageEnabled || !info.ManageRegistered {
+		t.Fatalf("Node info = %+v", info)
+	}
+}
+
 func TestClientCreateMessageStream(t *testing.T) {
 	mux := http.NewServeMux()
 	var mu sync.Mutex

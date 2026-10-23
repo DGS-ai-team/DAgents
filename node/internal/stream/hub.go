@@ -287,15 +287,22 @@ func (h *Hub) subscribeLocked(afterGlobalSeq, afterAgentSeq int, filter string, 
 		currentAgent := h.agentSeq[filter]
 		if afterAgentSeq > currentAgent {
 			resync = true
+			// The cursor belongs to an earlier Node process. Clamp it so future
+			// events from this process are delivered immediately after resync.
+			afterAgentSeq = currentAgent
 		} else if len(h.history) > 0 && currentAgent > afterAgentSeq {
 			firstAgent := firstRetainedAgentSeq(h.history, filter)
 			resync = firstAgent == 0 || afterAgentSeq < firstAgent-1
 		}
-	} else if checkRetention && len(h.history) > 0 {
-		first := h.history[0]
-		if filter == "" {
-			resync = afterGlobalSeq < first.Seq-1
-		} else {
+	} else if checkRetention {
+		if afterGlobalSeq > h.seq {
+			// A global cursor above the current sequence indicates a process
+			// restart. Reset it to this Hub's current sequence after requesting
+			// a hydrate, otherwise the client would silently filter new events.
+			resync = true
+			afterGlobalSeq = h.seq
+		} else if len(h.history) > 0 {
+			first := h.history[0]
 			resync = afterGlobalSeq < first.Seq-1
 		}
 	}

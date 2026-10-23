@@ -1,0 +1,167 @@
+Inno Setup 6 Command-Line Compiler
+Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+Portions Copyright (C) 2001-2004 Alex Yackimoff. All rights reserved.
+https://www.innosetup.com
+
+Compiler engine version: Inno Setup 6.7.3
+Non-commercial use only
+
+Preprocessing
+   Reading file: C:\Users\Administrator\.codex\worktrees\2321\DAgents\.runtime-test-install-delivery\tools\inno-6.7.3\ISPPBuiltins.iss
+Parsing [Setup] section, line 27
+Parsing [Setup] section, line 31
+Parsing [Setup] section, line 33
+Parsing [Setup] section, line 34
+Parsing [Setup] section, line 35
+Parsing [Setup] section, line 38
+Parsing [Setup] section, line 42
+Parsing [Setup] section, line 44
+Parsing [Setup] section, line 45
+Parsing [Setup] section, line 46
+Parsing [Setup] section, line 47
+Parsing [Setup] section, line 48
+Parsing [Setup] section, line 49
+Parsing [Setup] section, line 50
+Parsing [Setup] section, line 52
+Parsing [Setup] section, line 53
+Parsing [Setup] section, line 57
+Parsing [Setup] section, line 58
+Parsing [Setup] section, line 59
+Parsing [Setup] section, line 60
+Parsing [Setup] section, line 61
+Parsing [Setup] section, line 62
+Parsing [Setup] section, line 63
+Parsing [Setup] section, line 64
+Parsing [Setup] section, line 65
+Parsing [Setup] section, line 66
+Parsing [Setup] section, line 67
+Reading file (WizardImageFile)
+   Reading file: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\assets\wizard-sidebar.bmp
+Reading file (WizardSmallImageFile)
+   Reading file: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\assets\wizard-small.bmp
+Preparing Setup program executable
+   Verification successful
+   Updating icons (Setup.e32)
+   Updating version info (Setup.e32)
+Determining language code pages
+Parsing [Languages] section, line 70
+   Reading file: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\languages\ChineseSimplified.isl
+   Messages in script file
+Reading default messages from Default.isl
+Parsing [Languages] section, line 70
+   Reading file: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\languages\ChineseSimplified.isl
+Parsing [LangOptions], [Messages], and [CustomMessages] sections
+   Messages in script file
+Reading [Code] section
+Parsing [Icons] section, line 101
+Parsing [Icons] section, line 102
+Parsing [Icons] section, line 103
+Parsing [Icons] section, line 104
+Parsing [UninstallDelete] section, line 118
+Parsing [Run] section, line 111
+Parsing [Run] section, line 113
+Parsing [Files] section, line 84
+Parsing [Files] section, line 85
+Parsing [Files] section, line 86
+Parsing [Files] section, line 87
+Parsing [Files] section, line 88
+Parsing [Files] section, line 89
+Parsing [Files] section, line 90
+Parsing [Files] section, line 91
+Parsing [Files] section, line 92
+Parsing [Files] section, line 93
+Parsing [Files] section, line 94
+Parsing [Files] section, line 95
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools_menu.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\README.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\RECOMMENDED_CLI_TOOLS.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\.gitkeep
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\OFFICECLI.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\README.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\serve\README.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\serve\shutdown.d\.gitkeep
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\serve\startup.d\.gitkeep
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\history\.gitkeep
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\memory\.gitkeep
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\plugins\README.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\prompt_context\custom.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\prompt_context\README.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\prompt_context\soul.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\README.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\browser-control\SKILL.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-hook\SKILL.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-skill\SKILL.md
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-skill\hooks\build.sh
+   Reading version info: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-skill\hooks\protect-loaded-skill\README.md
+Parsing [Files] section, line 96
+Parsing [Files] section, line 97
+Compiling [Code] section
+Deleting dagents-local-assistant-windows-amd64-installer-0.11.0.2.exe from output directory
+Creating setup files
+   Verification successful
+   Updating icons (Setup.exe)
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\bin\dagents-browser.exe
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\bin\dagents-client.exe
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\bin\dagents-node.exe
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\bin\dagents-shell.exe
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\bin\dagents-shell-tauri.exe
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\dagents.cmd
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\lifecycle-protocol-v1.marker
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\desktop\tray-tauri\src-tauri\icons\icon.ico
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\node-api-url.bat
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\node-api-url.sh
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\linux\install_node_service.sh
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\linux\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\service\dagents-node.service.template
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\service\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\startup\linux\start-node.sh
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\startup\windows\start-browser-detached.ps1
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\startup\windows\start-node.bat
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\startup\windows\start-shell-detached.ps1
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\windows\install_node_service.cmd
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\windows\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\scripts\windows\write-install-config.ps1
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\write-install-config.ps1
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\config.example.yaml
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.env.example
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\README.txt
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\VERSION
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools_menu.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\RECOMMENDED_CLI_TOOLS.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\.gitkeep
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\OFFICECLI.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\serve\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\serve\shutdown.d\.gitkeep
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\externaltools\serve\startup.d\.gitkeep
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\history\.gitkeep
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\memory\.gitkeep
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\plugins\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\prompt_context\custom.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\prompt_context\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\prompt_context\soul.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\browser-control\SKILL.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-hook\SKILL.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-skill\SKILL.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-skill\hooks\build.sh
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\skills\write-skill\hooks\protect-loaded-skill\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\policy\tool.approval.txt
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\policy\shell\bash.approval.txt
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\policy\shell\cmd.approval.txt
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\policy\shell\powershell.approval.txt
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\.runtime\policy\shell\README.md
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\packaging\agent-templates\code-reviewer.yaml
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\packaging\agent-templates\general.yaml
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\packaging\agent-templates\ops-runner.yaml
+   Compressing: C:\Users\Administrator\.codex\worktrees\2321\DAgents\packaging\windows\..\..\bundle\packaging\agent-templates\README.md
+   Compressing Setup program executable
+   Updating version info (Setup.exe)
+   Updating manifest (Setup.exe)
+
+
+Successful compile (53.063 sec). Resulting Setup program filename is:
+C:\Users\Administrator\.codex\worktrees\2321\DAgents\dist-installer\dagents-local-assistant-windows-amd64-installer-0.11.0.2.exe

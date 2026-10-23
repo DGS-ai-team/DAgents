@@ -1,6 +1,9 @@
 package store
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // RuntimeState 保存会话的非生命周期运行时状态。
 // Turn/Step/Interaction 状态统一由生命周期事件重放得到，不在这里复制。
@@ -18,10 +21,12 @@ type RuntimeState struct {
 	ActiveContextStart int `json:"active_context_start,omitempty"`
 	// LastContextResetID makes a dreaming/context-boundary commit idempotent;
 	// retries must not hide messages appended after the original reset.
-	LastContextResetID      string                     `json:"last_context_reset_id,omitempty"`
-	DreamingAttempt         json.RawMessage            `json:"dreaming_attempt,omitempty"`
-	HookStore               map[string]json.RawMessage `json:"hook_store,omitempty"`
-	IdleAutoCompressApplied bool                       `json:"idle_auto_compress_applied,omitempty"`
+	LastContextResetID string                     `json:"last_context_reset_id,omitempty"`
+	DreamingAttempt    json.RawMessage            `json:"dreaming_attempt,omitempty"`
+	HookStore          map[string]json.RawMessage `json:"hook_store,omitempty"`
+	// LastHumanInteraction is set only after a human-originated logical turn
+	// reaches a terminal state; it is the idle baseline, never UpdatedAt.
+	LastHumanInteraction time.Time `json:"last_human_interaction,omitempty"`
 	// NotifySeq 为最后需要 Client 关注的 SSE seq（F-E13 IM cursor）。
 	NotifySeq int `json:"notify_seq,omitempty"`
 	// AckSeq 为各 Client 已确认看到的最大 SSE seq。

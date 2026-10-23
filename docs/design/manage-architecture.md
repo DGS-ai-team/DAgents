@@ -8,7 +8,7 @@
 
 | 组件 | 负责 | 不负责 |
 |---|---|---|
-| Agent Node（Go） | Agent 实例、Session/Turn/Step、LLM、工具、policy、HITL、本地历史与 Web UI | 管理全网目录；直接访问其他 Node |
+| Agent Node（Go） | Agent 实例、Session/Turn/Step、LLM、工具、policy、HITL、本地历史与运行 API | 提供 Web UI；管理全网目录；直接访问其他 Node |
 | Manage（Python） | Node/Agent Registry、Workgroup、ACL、成员引用、Timeline、Console、LLM/制品/Release 元数据 | 代替 Node 执行本地工具；主动请求 Node HTTP |
 | Manage Console（Vue） | 管理 Node、Agent、工作组和审计视图 | 持有 Node 的本地工具权限 |
 
@@ -22,7 +22,7 @@
 ## 2. 组件关系
 
 ```text
-浏览器 ──HTTP/SSE──► Node Web UI / Node API
+DAgents Desktop ──HTTP/SSE──► Node API
                          │
                          │ Node 主动 HTTPS 注册/心跳
                          │ Node 主动 WSS 建立 Workgroup Dialer

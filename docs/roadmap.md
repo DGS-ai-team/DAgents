@@ -4,53 +4,36 @@
 
 ## 1. 产品定位
 
-DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、人工治理和跨机协作。数据、工具和最终执行权保留在 Node；长期任务通过受控唤醒分次推进，跨机协作使用可选的 Manage Workgroup。
+DAgents 面向个人使用者：Windows Desktop 提供交互，默认启动或连接同机 Node；Node 持有数据、会话并持续执行任务。Desktop 不保存远程 Node 档案，也不支持 SSH 隧道连接。多个 Desktop 可在各自机器上连接各自的本机 Node；当前不引入多人账号、私人上下文或租户隔离。Manage 是可选的跨节点工作组控制面。
 
-长期任务及反馈闭环的单 Node MVP 已随 v0.11.0 完成发布；已发布版本基线见下节。
+长期任务及反馈闭环已在 v0.11.0 建立，并在 v1.0.0 中随独立 Desktop 形成完整的个人使用产品。
 
-## 2. 当前基线（v0.11.0）
+## 2. 当前发布基线（v1.0.0）
 
-- Go Agent Node：多 Agent、Web UI、HTTP/SSE、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
-- Node Web UI：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口。
-- Manage：Node/Agent Registry、Workgroup、Node 主动建立的 WS、Console、LLM/Skills/Release/Cases 元数据。
-- Workgroup：选择 Node 上已有 Agent 作为成员；每个 `workgroup_id + member_id` 使用独立 Session；工具执行回到成员 home Node。
-- 发布：Windows/Linux 安装包和可选桌面托盘；Manage 可选，不是本机对话的前置依赖。
+v1.0.0 是首个稳定版，覆盖独立 Desktop、同机 Node 与可选 Manage 协作。
 
-## 3. 优先级
+- Windows x64 DAgents Desktop 是个人使用入口，Node 只提供 API 并管理会话、工具、记忆、模型和自主任务；Desktop 与 Node 需要在同一台机器。
+- 对话工作台包含资源页签、文档预览和引用、终端、浏览器会话查看、截图、工具审批及上下文管理。
+- Auto Agent 支持自主激活、Todo、Dreaming、经验和文件系统手册；长期任务与普通聊天共享 Agent 身份和会话。
+- 可选 Manage 提供 Node 注册、工作组协作、反馈处理及产品包分发；单机使用不依赖 Manage。
+- Linux 发布 Node、Client 和 Browser 服务包，不发布 Linux Desktop；Windows 暂停 x86 完整包。
 
-### P0：自主任务上线前的执行与访问基础（已发布）
+## 3. 后续方向
 
-1. **Manage 默认鉴权**：保护接口不再授予匿名 admin；移除默认管理员密码；Node 登录和 Workgroup WS 绑定认证身份；旧不安全会话失效，提供明确升级配置说明。
-2. **触发器执行归属与权限**：目标必须路由到已有 Agent 的实际运行时，校验会话所属关系；停止任意宿主 shell 条件门控的默认执行路径。
-3. **触发投递安全**：并发原子领取、投递身份持久化、落盘失败不派发；重启未决投递需要对账，无法确认时暂停并提供人工恢复入口，不自动重放副作用。
-4. **基础 UI 闭环**：启动失败可重试并查看帮助；定时任务明确目标 Agent，提供立即运行和触发历史，区分已投递、失败与待核对。
+v1.0.0 发布后优先维护稳定性、升级迁移和日常使用体验。尚无下一版本号或发布日期；新需求先根据真实使用反馈排优先级。
 
-实施边界与验收见 [P0 执行与访问基础](design/p0-controlled-execution-foundation.md)。以上是本轮范围，不包含完整长期目标、反馈系统、SSO/RBAC 或通用 OS sandbox。
+### 稳定性与维护
 
-### P1：反馈闭环与单 Node 自主长期任务（MVP 已发布）
+- 持续验证 Windows x64 安装、升级与 v0.11.0 数据迁移；Linux 服务包按独立发布矩阵维护。
+- 根据实际用户反馈完善模型/MCP 配置、资源预览、终端与 Manage 协作，并保持已发布 API 契约稳定。
+- 维护依赖审计、供应链校验、版本元数据和发布资产清单；修复问题使用 hotfix 流程。
 
-1. **反馈先交付**：Node 本地保存与重试 → 当前连接 Manage 的管理员查看、处理、回复 → Node 主动同步状态；身份隔离、去重与更换 Manage 的归属保护一起验收。
-2. **长期目标 MVP**：目标与完成条件、单次 Run/Turn 关联、进度证据、受控下一次唤醒、累计预算、暂停/停止、审批等待和必要通知。
-3. **任务 UI**：在现有 Agent 工作区提供长期任务详情、运行时间线、产物与待处理入口，保持原对话和终端布局。
-   当前入口已调整为独立 Auto Agent 类型的智能体设置；旧 Goal 页面保留历史。任务终态后复用同一 Agent 开启新周期尚未实现。
-4. **场景验收**：三类合成文件目标通过真实 LLM 验证；取消、审批恢复、并发和重启采用确定性回归。长期运行及 browser/terminal 外部故障演练仍属扩大验证范围。详细证据和边界见 [P1 验收记录](design/p1-feedback-and-autonomous-goals.md)。
+### 后续探索
 
-### P2：受控多机协作与运维
+- 根据用户需求评估远程 Desktop→Node 连接、macOS/Linux Desktop、多用户隔离和更丰富的事件触发。
+- 浏览器人工接管、可交互嵌入式页签、工作流画布与插件生态单独立项，不作为当前产品承诺。
 
-进入扩大多机投入前，优先补齐 Auto 任务周期复用、持续观察的无变化语义、Node 结果与待处理汇总、长时故障演练；这些是后续规划。定位与排序见[普通/Auto 产品评估](comparative-analysis/2026-09-08-normal-and-auto-product-assessment.md)。
-
-1. Workgroup catalog、resume、gap reconcile、连接 fencing 和重复投递的真实网络演练。
-2. Manage Console 与 Node UI 对齐成员、Session、Assign、审批、Timeline 和任务状态。
-3. 工具 policy overlay、审计脱敏、资源并发与未知副作用处理；控制面只能收紧本地权限。
-4. doctor/脱敏支持包、版本兼容矩阵、升级备份与回滚；按支持场景建设设备身份、RBAC、Secret Store 和 OS sandbox。
-
-### P3：能力生态与规模化产品能力
-
-- Skills / plugins / external tools 的版本、审批、发布、禁用、回滚和 Node 主动同步。
-- Webhook、事件条件、死信、模型路由、成本记账和配额。
-- 稳定 SDK/Provider/Recipe 契约、发布签名和外部案例。
-
-验证发现的安全或数据一致性缺陷随时提升为 P0，不受以上功能排期限制。
+远程主机仍可通过本机 Node 的 SSH/远程终端工具操作。安全或数据一致性缺陷始终按最高优先级处理。
 
 ## 4. 明确不作为主线
 
@@ -67,4 +50,4 @@ DAgents 面向组织自有 Windows/Linux 机器，提供本地 Agent 执行、�
 - 跨组件设计从 [`docs/design/README.md`](./design/README.md) 进入；用户操作从 [`docs/user/README.md`](./user/README.md) 进入。
 - 发现实现与文档不一致时，以代码和测试为准，提交修正文档的 PR。
 
-**最后更新**：2026-09-11。
+**最后更新**：2026-10-22。

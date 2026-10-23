@@ -1,8 +1,8 @@
 # CentOS 7 特性导览（Docker）
 
-在 **CentOS 7（glibc 2.17）** 用户态容器中运行 **静态编译** 的 `dagents-node`，通过 Node 内嵌的 **Web UI** 体验 Mock 对话、Context、Skills、Session 持久化等本地助手能力；可选切换 **真实 LLM** 验证工具循环与 HITL 审批。
+这是一个 **历史容器回归案例**，用于观察静态 Node 在 CentOS 7 用户态容器中的 API 行为，不代表当前 Linux 运行支持承诺。Node 现只提供 API，不含内嵌 Web UI；较旧 Linux 主机建议通过 SSH 使用较新的 Linux 运行环境。
 
-> Docker 提供老企业 Linux **用户态**；`uname -r` 仍为宿主机内核。Release 二进制为 **`CGO_ENABLED=0`**，适合 RHEL 7 量级环境。
+> Docker 提供旧版企业 Linux **用户态**；`uname -r` 仍为宿主机内核。该回归案例不能用来推断当前 Release 对 RHEL 7 或其它旧发行版的支持。
 
 | 组件 | Agent ID | 对外端口 |
 |------|----------|----------|

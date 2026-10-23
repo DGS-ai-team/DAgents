@@ -587,6 +587,19 @@ func (r *terminalSessionRegistry) remove(id string, expected *terminalSession) {
 	}
 }
 
+// Close removes an Agent-owned terminal session without sending input through
+// its PTY. This is used by clients that retained a detached session ID but no
+// longer have the WebSocket relay needed to send a close command.
+func (r *terminalSessionRegistry) Close(agentID, terminalID string) error {
+	id := strings.TrimSpace(terminalID)
+	session, err := r.get(id, strings.TrimSpace(agentID))
+	if err != nil {
+		return err
+	}
+	r.remove(id, session)
+	return nil
+}
+
 func (r *terminalSessionRegistry) expire(id string, expected *terminalSession) {
 	r.remove(id, expected)
 }

@@ -1,0 +1,132 @@
+<script setup>
+import { computed, onMounted, ref } from "vue";
+import * as platformApi from "../api/platform.js";
+import { confirmDesktopAction, showDesktopMessage } from "../utils/desktopDialogs.js";
+
+defineProps({
+  embedded: { type: Boolean, default: false },
+});
+
+const emit = defineEmits(["close"]);
+
+const loading = ref(false);
+const applying = ref(false);
+const error = ref("");
+const data = ref(null);
+
+const canApplyInUI = computed(() => data.value?.apply_available === true
+  && data.value?.update_enabled === true
+  && data.value?.manage_reachable === true
+  && !!data.value?.upgrade_available);
+
+async function load() {
+  loading.value = true;
+  error.value = "";
+  try {
+    data.value = await platformApi.getUpdateStatus();
+  } catch (e) {
+    error.value = e.message;
+    data.value = null;
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function applyUpgrade() {
+  if (!canApplyInUI.value || applying.value) return;
+  const latest = String(data.value?.latest_version || "").trim();
+  if (!latest) return;
+  if (!await confirmDesktopAction(`升级到 ${latest}？升级期间 Node 将短暂停止。`)) return;
+  applying.value = true;
+  error.value = "";
+  try {
+    const result = await platformApi.applyAgentUpdate({ force: false });
+    if (result?.message) {
+      await showDesktopMessage(result.message);
+    }
+    await load();
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    applying.value = false;
+  }
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <section class="panel panel-overlay__card command-panel status-panel" :class="{ 'settings-embedded-panel': embedded }">
+    <header v-if="!embedded" class="panel__header command-panel__header">
+      <div>
+        <div class="panel__title">版本与更新</div>
+        <div class="command-panel__subtitle">检查可用更新</div>
+      </div>
+      <div v-if="!embedded" class="command-panel__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+      </div>
+    </header>
+
+    <div class="panel__body command-panel__body">
+      <div v-if="loading && !data" class="command-panel__loading">加载中…</div>
+      <div v-else-if="error" class="command-panel__error">{{ error }}</div>
+      <template v-else-if="data">
+        <div class="command-panel__stats">
+          <div class="command-stat">
+            <span class="command-stat__label">当前版本</span>
+            <span class="command-stat__value">{{ data.current_version || "—" }}</span>
+          </div>
+          <div class="command-stat">
+            <span class="command-stat__label">最新版本</span>
+            <span class="command-stat__value">{{ data.latest_version || "—" }}</span>
+          </div>
+          <div class="command-stat">
+            <span class="command-stat__label">平台</span>
+            <span class="command-stat__value">{{ data.platform || "—" }}</span>
+          </div>
+          <div class="command-stat">
+            <span class="command-stat__label">Manage</span>
+            <span class="command-stat__value">{{ data.manage_reachable ? "可达" : "不可达" }}</span>
+          </div>
+        </div>
+
+        <p v-if="data.message" class="command-panel__hint">{{ data.message }}</p>
+
+        <section v-if="data.release_notes" class="command-section">
+          <h3 class="command-section__title">更新说明</h3>
+          <pre class="command-panel__raw command-panel__raw--compact">{{ data.release_notes }}</pre>
+        </section>
+
+        <section v-if="data.upgrade_available" class="command-section">
+          <h3 class="command-section__title">安装</h3>
+          <template v-if="canApplyInUI">
+            <p class="command-panel__hint">Desktop 将向 Node 请求已校验的安装包，并在确认 Node 空闲后启动本机安装。</p>
+            <button type="button" class="btn btn--primary btn--sm" :disabled="applying" @click="applyUpgrade">
+              {{ applying ? "升级中…" : `升级到 ${data.latest_version}` }}
+            </button>
+          </template>
+          <template v-else>
+            <p class="command-panel__hint">当前运行环境无法安装 Desktop 更新；请在受支持的 Desktop Shell 中打开此页面。</p>
+          </template>
+        </section>
+      </template>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.command-panel__source {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .status-panel .command-panel__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-panel .command-stat {
+    min-width: 0;
+  }
+}
+</style>

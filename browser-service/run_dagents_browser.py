@@ -1,4 +1,4 @@
-"""PyInstaller 入口：dagents-browser 薄服务（browser-use + 本机 Chrome）。"""
+"""PyInstaller entry point for the Playwright browser service."""
 from dagents_browser.main import main
 
 if __name__ == "__main__":

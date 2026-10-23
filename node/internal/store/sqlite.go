@@ -90,9 +90,6 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
 	if err != nil {
 		return err
 	}
-	if err := s.initExecutionEventSchema(); err != nil {
-		return err
-	}
 	if err := s.initTurnEventSchema(); err != nil {
 		return err
 	}

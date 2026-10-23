@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
-	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func (s *Server) writeAgentNotFound(w http.ResponseWriter, agentID string) {
@@ -27,7 +24,12 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents", s.handleCreateAgent)
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/model-view", s.handleGetAgentModelView)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/workspace", s.handleWorkspaceList)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/workspace/file", s.handleWorkspaceGet)
+	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/workspace/file", s.handleWorkspacePut)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/workspace/upload", s.handleWorkspaceUpload)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook", s.handleGetAgentHandbook)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/handbook/history", s.handleGetAgentHandbookHistory)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/handbook/restore", s.handleRestoreAgentHandbook)
@@ -36,7 +38,6 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/reload", s.handleAgentReload)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/execution-events", s.handleAgentExecutionEvents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/timeline", s.handleAgentTimeline)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile", s.handleAgentReconcileToolExecution)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
@@ -48,7 +49,6 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/skills/load", s.handleAgentLoadSkill)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/skills/unload", s.handleAgentUnloadSkill)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents", s.handleAgentListChildAgents)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents/{child_agent_id}", s.handleAgentGetChildAgent)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/child-agents/{child_agent_id}/cancel", s.handleAgentCancelChildAgent)
 	s.registerAgentPolicyRoutes()
 }
@@ -163,6 +163,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "agents_unavailable", "agents store not configured", nil)
 		return
 	}
+	s.llmRefMu.RLock()
+	defer s.llmRefMu.RUnlock()
 	var req createAgentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
@@ -202,6 +204,18 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		soulMD, customMD = agenttemplate.PromptBodiesFromDefaults(tpl.Defaults)
 	}
 	agenttemplate.StripPromptBodiesFromDefaults(baseDefaults)
+	profileID := agentruntime.LLMActiveFromDefaults(agentruntime.Snapshot{Defaults: baseDefaults})
+	if profileID != "" {
+		exists, err := s.llmProfileExists(r.Context(), profileID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "llm_config_load_failed", err.Error(), nil)
+			return
+		}
+		if !exists {
+			writeAPIError(w, http.StatusBadRequest, "invalid_agent_llm_profile", fmt.Sprintf("模型配置「%s」不存在；请先在 Node 设置中创建该配置，或选择现有配置", profileID), map[string]any{"profile_id": profileID})
+			return
+		}
+	}
 
 	name := strings.TrimSpace(req.DisplayName)
 	if name == "" && tpl != nil {
@@ -270,13 +284,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.syncBrowserCompanion(r.Context(), rec); err != nil {
-		s.logger.Warn("browser companion sync failed", "agent_id", agentID, "error", err)
-	}
-	// 重新读取以带上 companion meta。
-	if updated, err := s.agents.Get(r.Context(), agentID); err == nil && updated != nil {
-		rec = *updated
-	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
 }
 
@@ -293,17 +300,6 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	views := make([]agentView, 0, len(list))
 	lastActiveAt := s.loadAgentLastActiveAt(r.Context())
 	for _, rec := range list {
-		if isHiddenCompanionAgent(rec) {
-			continue
-		}
-		// 存量：已启用 browser 组但尚未创建伴生时，列表时尽力补齐。
-		if err := s.syncBrowserCompanion(r.Context(), rec); err != nil {
-			if s.logger != nil {
-				s.logger.Warn("browser companion sync on list failed", "agent_id", rec.AgentID, "error", err)
-			}
-		} else if updated, err := s.agents.Get(r.Context(), rec.AgentID); err == nil && updated != nil {
-			rec = *updated
-		}
 		view := s.enrichAgentNotify(agentViewFromRecord(rec))
 		if activeAt, ok := lastActiveAt[view.AgentID]; ok && !activeAt.IsZero() {
 			view.LastActiveAt = activeAt.UTC().Format(time.RFC3339Nano)
@@ -391,6 +387,8 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "agents_unavailable", "agents store not configured", nil)
 		return
 	}
+	s.llmRefMu.RLock()
+	defer s.llmRefMu.RUnlock()
 	id := strings.TrimSpace(r.PathValue("agent_id"))
 	rec, err := s.agents.Get(r.Context(), id)
 	if err != nil {
@@ -460,6 +458,20 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Defaults != nil {
 		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
 		runtimeDirty = true
+		if requestedAgentLLMProfile(req.Defaults) {
+			profileID := agentruntime.LLMActiveFromDefaults(snap)
+			if profileID != "" {
+				exists, err := s.llmProfileExists(r.Context(), profileID)
+				if err != nil {
+					writeAPIError(w, http.StatusInternalServerError, "llm_config_load_failed", err.Error(), nil)
+					return
+				}
+				if !exists {
+					writeAPIError(w, http.StatusBadRequest, "invalid_agent_llm_profile", fmt.Sprintf("模型配置「%s」不存在；请先在 Node 设置中创建该配置，或选择现有配置", profileID), map[string]any{"profile_id": profileID})
+					return
+				}
+			}
+		}
 	}
 	if req.AgentType != nil {
 		snap.AgentType = normalizeAgentType(*req.AgentType)
@@ -515,14 +527,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("agent runtime reload after patch failed", "agent_id", id, "error", err)
 		}
 		s.publishRuntimeConfigChanged(id, "agent_snapshot", runtimeApplied)
-	}
-	if runtimeDirty {
-		if err := s.syncBrowserCompanion(r.Context(), *rec); err != nil {
-			s.logger.Warn("browser companion sync after patch failed", "agent_id", id, "error", err)
-		}
-		if updated, err := s.agents.Get(r.Context(), id); err == nil && updated != nil {
-			rec = updated
-		}
 	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(*rec))
 }
@@ -632,79 +636,20 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if s.sessions == nil {
 		return fmt.Errorf("sessions manager not configured")
 	}
-	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	runtime, err := s.buildAgentSessionRuntime(ctx, &rec, agentSessionRuntimeOptions{})
 	if err != nil {
-		return fmt.Errorf("parse agent snapshot: %w", err)
+		return err
 	}
-	if _, err := agentruntime.EnsureWorkspace(s.cfg.RuntimeDir(), id, snapParsed.Workspace); err != nil {
-		return fmt.Errorf("ensure agent workspace: %w", err)
-	}
-	var policyEngine *policy.Engine
-	if s.agents != nil {
-		engine, err := s.agents.LoadAgentPolicyEngine(ctx, id)
-		if err != nil {
-			s.logger.Warn("agent policy load failed", "agent_id", id, "error", err)
-		} else {
-			policyEngine = engine
-		}
-	}
-	client, llmProfileDigest, err := s.llmClientForAgent(ctx, &rec, id)
-	if err != nil {
-		return fmt.Errorf("resolve agent llm: %w", err)
-	}
-	built, err := agentruntime.Build(agentruntime.BuildParams{
-		NodeCFG:              s.cfg,
-		BaseTurn:             s.sessions.DefaultTurnOptions(),
-		AgentID:              id,
-		Snapshot:             snapParsed,
-		MCP:                  s.mcpManager,
-		WorkspaceCoordinator: s.workspaceCoord,
-	})
-	if err != nil {
-		return fmt.Errorf("build agent runtime: %w", err)
-	}
-	s.attachNodeRuntimeDeps(built.Registry, id)
-	rev := rec.RuntimeRevision
-	built.TurnOptions.RuntimeRevision = rev
-	built.TurnOptions.LLMProfileDigest = llmProfileDigest
-	if s.cfg != nil {
-		built.TurnOptions.PreferredName = s.cfg.PreferredName()
-	}
-	if s.agents != nil {
-		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id); err != nil {
-			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)
-		} else {
-			built.TurnOptions.PromptContent = promptContentFromRecord(pc)
-		}
-	}
-	// Runtime digest is an identity of the built model-visible inputs. The
-	// per-Turn snapshot also records the exact prompt/tool digests, so a live
-	// memory refresh can be distinguished from a runtime rebuild.
-	var promptSeed string
-	if built.TurnOptions.PromptContent != nil {
-		if raw, err := json.Marshal(built.TurnOptions.PromptContent); err == nil {
-			promptSeed = string(raw)
-		}
-	}
-	built.TurnOptions.RuntimeDigest = turn.RuntimeDigestFromInputs(
-		snapParsed,
-		promptSeed,
-		built.Registry.Definitions(),
-	)
+	built := runtime.Built
 	// Build and hydrate the replacement before swapping the manager entry. A
 	// failed load/start therefore leaves the previous good runtime serving
 	// requests instead of creating a release-then-create gap.
-	if _, _, err := s.sessions.ReplaceWithOptionsAndLLM(id, built.TurnOptions, built.Registry, policyEngine, client, id); err != nil {
+	if _, _, err := s.sessions.ReplaceWithOptionsAndLLM(id, built.TurnOptions, built.Registry, runtime.Policy, runtime.LLM, id); err != nil {
 		_ = built.Close()
 		return err
 	}
 	s.clearRuntimeReloadPending(id)
 	s.logger.Info("agent runtime ready", "agent_id", id, "workspace_root", built.WorkspaceRoot, "tool_groups", built.ToolGroups)
-	if !agentruntime.IsBrowserCompanionRecord(rec.ConfigSnapshot) && !agentruntime.IsCompanionBrowserAgentID(id) {
-		if err := s.syncBrowserCompanion(ctx, rec); err != nil {
-			s.logger.Warn("browser companion sync on reload failed", "agent_id", id, "error", err)
-		}
-	}
 	return nil
 }
 
@@ -723,6 +668,39 @@ func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
+}
+
+func requestedAgentLLMProfile(defaults map[string]any) bool {
+	llmDefaults, ok := defaults["llm"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = llmDefaults["active"]
+	return ok
+}
+
+func (s *Server) llmProfileExists(ctx context.Context, profileID string) (bool, error) {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return true, nil
+	}
+	if s.llmConfigs != nil {
+		records, err := s.llmConfigs.List(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, record := range records {
+			if record.ID == profileID {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if s.cfg == nil {
+		return false, fmt.Errorf("LLM 配置不可用")
+	}
+	_, exists := s.cfg.LLM.GetProfile(profileID)
+	return exists, nil
 }
 
 func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
@@ -770,82 +748,6 @@ func (s *Server) handleAgentHydrate(w http.ResponseWriter, r *http.Request) {
 	s.withAgentRuntime(s.handleAgentHydrateImpl)(w, r)
 }
 
-func (s *Server) handleAgentExecutionEvents(w http.ResponseWriter, r *http.Request) {
-	s.withAgentRuntime(s.handleAgentExecutionEventsImpl)(w, r)
-}
-
-type executionEventResponse struct {
-	ID             int64  `json:"id"`
-	AgentID        string `json:"agent_id"`
-	SessionID      string `json:"session_id"`
-	ProcessID      string `json:"process_id"`
-	ProcessSeq     uint64 `json:"process_seq"`
-	EventType      string `json:"event_type"`
-	Stream         string `json:"stream,omitempty"`
-	TurnID         string `json:"turn_id,omitempty"`
-	ToolCallID     string `json:"tool_call_id,omitempty"`
-	TargetKind     string `json:"target_kind,omitempty"`
-	TargetID       string `json:"target_id,omitempty"`
-	PolicyDecision string `json:"policy_decision,omitempty"`
-	ApprovalID     string `json:"approval_id,omitempty"`
-	RiskLevel      string `json:"risk_level,omitempty"`
-	CommandDigest  string `json:"command_digest,omitempty"`
-	OutputBytes    int64  `json:"output_bytes,omitempty"`
-	ExitCode       *int   `json:"exit_code,omitempty"`
-	ExitError      string `json:"exit_error,omitempty"`
-	CreatedAt      string `json:"created_at"`
-}
-
-func (s *Server) handleAgentExecutionEventsImpl(w http.ResponseWriter, r *http.Request) {
-	if s.store == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "store_unavailable", "execution event audit is unavailable", nil)
-		return
-	}
-	limit := 100
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed <= 0 {
-			writeAPIError(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer", nil)
-			return
-		}
-		limit = parsed
-	}
-	agentID := strings.TrimSpace(r.PathValue("agent_id"))
-	events, err := s.store.ListExecutionEvents(r.Context(), agentID, limit)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "execution_event_list_failed", err.Error(), nil)
-		return
-	}
-	items := make([]executionEventResponse, 0, len(events))
-	for _, event := range events {
-		items = append(items, executionEventResponse{
-			ID:             event.ID,
-			AgentID:        event.AgentID,
-			SessionID:      event.SessionID,
-			ProcessID:      event.ProcessID,
-			ProcessSeq:     event.ProcessSeq,
-			EventType:      event.EventType,
-			Stream:         event.Stream,
-			TurnID:         event.TurnID,
-			ToolCallID:     event.ToolCallID,
-			TargetKind:     event.TargetKind,
-			TargetID:       event.TargetID,
-			PolicyDecision: event.PolicyDecision,
-			ApprovalID:     event.ApprovalID,
-			RiskLevel:      event.RiskLevel,
-			CommandDigest:  event.CommandDigest,
-			OutputBytes:    event.OutputBytes,
-			ExitCode:       event.ExitCode,
-			ExitError:      event.ExitError,
-			CreatedAt:      event.CreatedAt.Format(time.RFC3339Nano),
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id": agentID,
-		"events":   items,
-	})
-}
-
 func (s *Server) handleAgentCancel(w http.ResponseWriter, r *http.Request) {
 	s.withAgentRuntime(s.handleAgentCancelImpl)(w, r)
 }
@@ -880,10 +782,6 @@ func (s *Server) handleAgentUnloadSkill(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleAgentListChildAgents(w http.ResponseWriter, r *http.Request) {
 	s.withAgentRuntime(s.handleListChildAgents)(w, r)
-}
-
-func (s *Server) handleAgentGetChildAgent(w http.ResponseWriter, r *http.Request) {
-	s.withAgentRuntime(s.handleGetChildAgent)(w, r)
 }
 
 func (s *Server) handleAgentCancelChildAgent(w http.ResponseWriter, r *http.Request) {

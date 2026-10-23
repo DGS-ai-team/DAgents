@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -482,13 +484,36 @@ func TestRuntimeLifecycleAfterModelStepPropagatesPersistenceFailure(t *testing.T
 }
 
 func TestRuntimeLifecycleStopsContinuationAtStepBudget(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "budget.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hub := stream.NewHub(32, logx.Discard())
+	orch := turn.NewOrchestrator("agent-1", t.TempDir(), hub, &llm.MockClient{}, nil, nil, turn.SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	r := newLifecycleTestRuntime()
+	r.publisher = hub
+	r.orch = orch
+	r.store = db
 	r.turnBudget = turn.TurnBudget{MaxSteps: 1}
-	r.lifecycleBeginHumanTurn()
-	r.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{
+	orch.SetLifecycleMetadataProvider(func(sessionID string) map[string]any {
+		if sessionID != r.session.ID {
+			return nil
+		}
+		state := r.turnCoordinator.Snapshot()
+		return map[string]any{"turn_id": state.TurnID, "turn_generation": state.Generation}
+	})
+	events := hub.Subscribe(hub.CurrentSeq())
+	defer hub.Unsubscribe(events)
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "call-budget"}}},
 		{Role: "tool", ToolCallID: "call-budget", Content: "ok"},
-	}, 0)
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
 	if started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman); err != nil {
 		t.Fatal(err)
 	} else if started {
@@ -498,6 +523,54 @@ func TestRuntimeLifecycleStopsContinuationAtStepBudget(t *testing.T) {
 	if snapshot.TurnStatus != turn.TurnStatusBudgetExhausted || snapshot.TurnEndReason == "" {
 		t.Fatalf("budget projection = %#v", snapshot)
 	}
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	var received []stream.Event
+	for countTerminalEvents(received) < 2 {
+		select {
+		case event := <-events:
+			received = append(received, event)
+		case <-deadline.C:
+			t.Fatalf("budget exhaustion did not publish terminal SSE: %+v", received)
+		}
+	}
+	finished, terminalState := stream.Event{}, stream.Event{}
+	finishCount, terminalStateCount := 0, 0
+	finishIndex, terminalIndex := -1, -1
+	for i, event := range received {
+		if event.Type == "turn_finished" && event.Data["finish_reason"] == "budget_exhausted" {
+			finished, finishCount, finishIndex = event, finishCount+1, i
+		}
+		if event.Type == "turn_state" && event.Data["terminal"] == true {
+			terminalState, terminalStateCount, terminalIndex = event, terminalStateCount+1, i
+		}
+	}
+	if finishCount != 1 || terminalStateCount != 1 || terminalIndex < 0 || finishIndex <= terminalIndex {
+		t.Fatalf("budget terminal events must publish once, state before finish: %+v", received)
+	}
+	if finished.Data["finish_reason"] != "budget_exhausted" || finished.Data["budget_reason"] != "max_steps" || finished.Data["turn_complete"] != true {
+		t.Fatalf("budget terminal SSE = %+v", finished)
+	}
+	if finished.Data["turn_id"] != terminalState.Data["turn_id"] || fmt.Sprint(finished.Data["turn_generation"]) != fmt.Sprint(terminalState.Data["generation"]) || terminalState.Data["turn_status"] != string(turn.TurnStatusBudgetExhausted) {
+		t.Fatalf("terminal SSE identity/status mismatch: finished=%+v state=%+v", finished, terminalState)
+	}
+	stored, err := db.ListTurnEvents(context.Background(), r.session.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) == 0 || stored[len(stored)-1].EventType != turn.EventTurnBudgetExhausted {
+		t.Fatalf("terminal lifecycle fact missing: %v", stored)
+	}
+}
+
+func countTerminalEvents(events []stream.Event) int {
+	count := 0
+	for _, event := range events {
+		if event.Type == "turn_finished" && event.Data["finish_reason"] == "budget_exhausted" || event.Type == "turn_state" && event.Data["terminal"] == true {
+			count++
+		}
+	}
+	return count
 }
 
 func TestRuntimeLifecycleUsesReservedFinalSummaryStep(t *testing.T) {
@@ -698,7 +771,7 @@ func TestRuntimeLifecycleMarksUnknownAndContinuesOnlyAfterReconciliation(t *test
 		return newRuntimeWithPublisher(
 			"session-1", "agent-1", hub, hub,
 			&llm.MockClient{}, nil, nil, st, logx.Discard(), nil, nil, nil,
-			false, 0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
+			0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
 		)
 	}
 
@@ -765,7 +838,7 @@ func TestRuntimeLifecycleRecoveryPreservesLoadedHistoryRevision(t *testing.T) {
 		return newRuntimeWithPublisher(
 			"session-revision", "agent-1", hub, hub,
 			&llm.MockClient{}, nil, nil, st, logx.Discard(), initial, nil, nil,
-			false, 0, 0, TurnOptions{
+			0, 0, TurnOptions{
 				WorkspaceRoot:          t.TempDir(),
 				SkillsEnabled:          false,
 				initialHistoryRevision: revision,
@@ -854,7 +927,7 @@ func TestRuntimeLifecycleRecoversCompletedToolResultFromHistory(t *testing.T) {
 	recovered := newRuntimeWithPublisher(
 		"session-1", "agent-1", hub, hub,
 		&llm.MockClient{}, nil, nil, st, logx.Discard(), history, nil, nil,
-		false, 0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
+		0, 0, TurnOptions{WorkspaceRoot: t.TempDir(), SkillsEnabled: false}, nil,
 	)
 	state = recovered.turnCoordinator.Snapshot()
 	if state.RecoveryRequired || state.StepIndex != 2 || state.StepStatus != turn.StepStatusRequesting {
