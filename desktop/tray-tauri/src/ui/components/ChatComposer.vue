@@ -397,9 +397,22 @@ defineExpose({
 
 <template>
   <footer class="chat__composer">
-    <div v-if="error" class="chat__composer-alert" role="alert" aria-live="polite">
-      <UiIcon class="chat__composer-alert-icon" name="alert" :size="14" />
-      <span>{{ error }}</span>
+    <div v-if="error || attachmentNotice" class="chat__composer-transients">
+      <div
+        v-if="error"
+        class="chat__composer-alert"
+        role="alert"
+        tabindex="0"
+        aria-label="操作未完成；聚焦或悬浮查看详细错误"
+        aria-describedby="chat-composer-error-detail"
+      >
+        <UiIcon class="chat__composer-alert-icon" name="alert" :size="14" />
+        <span>操作未完成</span>
+        <span id="chat-composer-error-detail" class="chat__composer-alert-detail" role="tooltip">{{ error }}</span>
+      </div>
+      <div v-if="attachmentNotice" class="chat__composer-attachment-notice" role="status" aria-live="polite">
+        {{ attachmentNotice }}
+      </div>
     </div>
     <div
       v-if="pendingFiles.length || (multimodalEnabled && pendingImages.length)"
@@ -470,9 +483,6 @@ defineExpose({
           </div>
         </div>
       </div>
-    </div>
-    <div v-if="attachmentNotice" class="chat__composer-attachment-notice" role="status" aria-live="polite">
-      {{ attachmentNotice }}
     </div>
     <div
       class="chat__composer-runtime-rail"
