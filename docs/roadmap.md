@@ -6,44 +6,34 @@
 
 DAgents 面向个人使用者：Windows Desktop 提供交互，默认启动或连接同机 Node；Node 持有数据、会话并持续执行任务。Desktop 不保存远程 Node 档案，也不支持 SSH 隧道连接。多个 Desktop 可在各自机器上连接各自的本机 Node；当前不引入多人账号、私人上下文或租户隔离。Manage 是可选的跨节点工作组控制面。
 
-长期任务及反馈闭环的单 Node MVP 已随 v0.11.0 完成发布；已发布版本基线见下节。
+长期任务及反馈闭环已在 v0.11.0 建立，并在 v1.0.0 中随独立 Desktop 形成完整的个人使用产品。
 
-## 2. 已发布基线（v0.11.0）
+## 2. 当前发布基线（v1.0.0）
 
-本节是上次正式发布的范围；当前开发线的 Desktop、API-only Node 和配置归属以[发布收束清单](release-readiness.md)为准。
+v1.0.0 是首个稳定版，覆盖独立 Desktop、同机 Node 与可选 Manage 协作。
 
-- Go Agent Node：多 Agent、HTTP/SSE API、Session/Turn/Step、工具、HITL、skills、triggers、临时子 Agent、压缩和媒体产物。
-- DAgents Desktop：消息、上下文、工具审批、终端、浏览器任务、设置和工作组入口；Node 不提供浏览器 UI。
-- Manage：Node/Agent Registry、Workgroup、Node 主动建立的 WS、Console、LLM/Skills/Release/Cases 元数据。
-- Workgroup：选择 Node 上已有 Agent 作为成员；每个 `workgroup_id + member_id` 使用独立 Session；工具执行回到成员 home Node。
-- 发布：Windows/Linux 安装包和可选桌面托盘；Manage 可选，不是本机对话的前置依赖。
+- Windows x64 DAgents Desktop 是个人使用入口，Node 只提供 API 并管理会话、工具、记忆、模型和自主任务；Desktop 与 Node 需要在同一台机器。
+- 对话工作台包含资源页签、文档预览和引用、终端、浏览器会话查看、截图、工具审批及上下文管理。
+- Auto Agent 支持自主激活、Todo、Dreaming、经验和文件系统手册；长期任务与普通聊天共享 Agent 身份和会话。
+- 可选 Manage 提供 Node 注册、工作组协作、反馈处理及产品包分发；单机使用不依赖 Manage。
+- Linux 发布 Node、Client 和 Browser 服务包，不发布 Linux Desktop；Windows 暂停 x86 完整包。
 
-## 3. 当前开发线与下一版
+## 3. 后续方向
 
-下一版建议为 v0.12.0，进入功能冻结和候选包验收，不再叠加新的产品系统。完整状态、证据和未完成项集中维护于[发布收束清单](release-readiness.md)。
+v1.0.0 发布后优先维护稳定性、升级迁移和日常使用体验。尚无下一版本号或发布日期；新需求先根据真实使用反馈排优先级。
 
-### P0：形成可安全安装、迁移和恢复的发行版
+### 稳定性与维护
 
-1. 关闭模型配置引用与密钥保存行为，保护 MCP 配置往返和草稿。
-2. 验收最终 Windows 包的标准用户初装、快捷方式/自启、运行中升级、卸载、备份恢复及 v0.11.0 数据迁移。
-3. 对最终候选完成日常对话、资源、审批、工具失败收尾、空闲后新上下文与 Auto/Dreaming 的恢复和耐久测试。
-4. 对本机 Node、打包 Browser/Chromium 和真实 Provider 进行组合验收；Linux Node 按独立服务包验收，不通过 Desktop 远程连接；下一版 Windows 仅发 x64 完整包，暂停 x86。
-5. 统一版本元数据、变更说明、支持矩阵、依赖审计和更新安装链路，按 dev → main 的发布 PR 流程交付。
+- 持续验证 Windows x64 安装、升级与 v0.11.0 数据迁移；Linux 服务包按独立发布矩阵维护。
+- 根据实际用户反馈完善模型/MCP 配置、资源预览、终端与 Manage 协作，并保持已发布 API 契约稳定。
+- 维护依赖审计、供应链校验、版本元数据和发布资产清单；修复问题使用 hotfix 流程。
 
-### P1：体验与可维护性收尾
+### 后续探索
 
-- 小窗口、DPI、键盘操作和减少动画偏好；不再次重写已确认的视觉系统。
-- 真实 MCP、反馈到 Manage、工作组审批/取消/恢复的组合回归。
-- 当前文档入口与历史设计快照分开；重复/退役代码按实际使用证据清理，不以行数作为删功能的依据。
+- 根据用户需求评估远程 Desktop→Node 连接、macOS/Linux Desktop、多用户隔离和更丰富的事件触发。
+- 浏览器人工接管、可交互嵌入式页签、工作流画布与插件生态单独立项，不作为当前产品承诺。
 
-### P2：有独立需求后再立项
-
-- 浏览器人工接管与可交互嵌入式页签。
-- Desktop 连接远程 Node、SSH 隧道与 LAN/WAN Node 档案：当前产品明确只支持同机 Desktop→Node 连接；远程 Linux 主机仍可通过本机 Node 的 SSH/远程终端工具操作。
-- macOS/Linux Desktop、多用户/租户隔离和 LAN/WAN 直连鉴权。
-- 更广泛的事件源、工作流画布、插件发布生态与成本计账。
-
-以上均不是本版稳定发布的前置功能。安全或数据一致性缺陷随时提升为 P0。
+远程主机仍可通过本机 Node 的 SSH/远程终端工具操作。安全或数据一致性缺陷始终按最高优先级处理。
 
 ## 4. 明确不作为主线
 
@@ -60,4 +50,4 @@ DAgents 面向个人使用者：Windows Desktop 提供交互，默认启动或�
 - 跨组件设计从 [`docs/design/README.md`](./design/README.md) 进入；用户操作从 [`docs/user/README.md`](./user/README.md) 进入。
 - 发现实现与文档不一致时，以代码和测试为准，提交修正文档的 PR。
 
-**最后更新**：2026-10-17。
+**最后更新**：2026-10-22。

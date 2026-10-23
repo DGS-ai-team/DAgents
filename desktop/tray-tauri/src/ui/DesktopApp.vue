@@ -54,6 +54,7 @@ import screenshotActionIcon from '@shared-icons/desktop/screenshot.svg?url'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
+import brandIconUrl from '@dagents-brand/brand-icon.png?url'
 import './desktop-ui.css'
 
 const maskStyle = (icon) => ({
@@ -90,6 +91,19 @@ const hitlBusyIndexByAgent = ref({})
 const agentErrors = ref({})
 const globalError = ref('')
 const commandNotice = ref('')
+let commandNoticeTimer = 0
+function clearCommandNotice() {
+  if (commandNoticeTimer) window.clearTimeout(commandNoticeTimer)
+  commandNoticeTimer = 0
+  commandNotice.value = ''
+}
+function showCommandNotice(message) {
+  clearCommandNotice()
+  const notice = String(message || '')
+  if (!notice) return
+  commandNotice.value = notice
+  commandNoticeTimer = window.setTimeout(clearCommandNotice, 4200)
+}
 const busy = computed(() => isAgentBusy(busyByAgent.value, activeId.value))
 const cancellingTurn = computed(() => isAgentBusy(cancellingByAgent.value, activeId.value))
 const hitlBusyIndex = computed(() => Number.isInteger(hitlBusyIndexByAgent.value[activeId.value]) ? hitlBusyIndexByAgent.value[activeId.value] : -1)
@@ -108,7 +122,6 @@ const attachmentActionAnchor = ref(null)
 const screenshotInProgress = ref(false)
 const screenshotSelection = ref(null)
 let screenshotClosePromise = null
-const composerExpanded = ref(false)
 const userInfoSelected = ref([])
 const chatPanel = ref(null)
 const activeTab = ref('chat')
@@ -156,6 +169,9 @@ const dockExpanded = ref(false)
 const dockCollapsed = ref(false)
 const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value ? 'pending' : agentGenerating.value ? 'generating' : 'idle')
 const isTauri = !!window.__TAURI_INTERNALS__
+const startupReady = ref(false)
+const startupTimedOut = ref(false)
+let startupTimeoutTimer = 0
 const router = useRouter()
 const route = useRoute()
 const showNodeFirstRun = computed(() => shouldShowNodeFirstRun({
@@ -171,7 +187,7 @@ provide(ResourceRenderContextKey, { agentId: activeId, readImage: readResourceIm
 watch(() => route.path, path => { activeTab.value = tabForRoute(path, activeTab.value) }, { immediate: true })
 watch(activeId, id => { agentStore.agentId = id || '' }, { immediate: true })
 watch(activeId, (id, previousId) => {
-  if (id !== previousId) commandNotice.value = ''
+  if (id !== previousId) clearCommandNotice()
   if (id !== previousId) resourceNavigationError.value = ''
   if (previousId && id !== previousId) clearWorkspaceAnnotations(previousId)
   if (previousId && id !== previousId) terminalEndConfirmation.value = null
@@ -182,24 +198,15 @@ watch([input, activeId], () => { void nextTick(resizeComposer) }, { flush: 'post
 function resizeComposer() {
   const field = textarea.value
   if (!field) return
-  const form = field.form
-  const tracks = form ? window.getComputedStyle(form).gridTemplateColumns.trim().split(/\s+/) : []
-  const compactWidth = Number.parseFloat(tracks[1]) || field.clientWidth
-  const previousWidth = field.style.width
-  field.style.width = `${compactWidth}px`
   const style = window.getComputedStyle(field)
   const lineHeight = Number.parseFloat(style.lineHeight) || 20
   const verticalPadding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0)
-  const oneLineHeight = lineHeight + verticalPadding
-  const maxHeight = lineHeight * 6 + verticalPadding
-  field.style.height = `${oneLineHeight}px`
-  const compactContentHeight = field.scrollHeight
-  field.style.width = previousWidth
+  const oneLineHeight = Math.max(lineHeight + verticalPadding, Number.parseFloat(style.minHeight) || 0)
+  const maxHeight = Math.max(oneLineHeight, lineHeight * 6 + verticalPadding)
   field.style.height = `${oneLineHeight}px`
   const contentHeight = field.scrollHeight
   field.style.height = `${Math.max(oneLineHeight, Math.min(contentHeight, maxHeight))}px`
   field.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
-  composerExpanded.value = compactContentHeight > oneLineHeight + 1
 }
 
 function observeComposerField() {
@@ -214,7 +221,6 @@ watch(activeTab, async tab => {
   if (tab !== 'chat') {
     composerResizeObserver?.disconnect()
     composerResizeObserver = null
-    composerExpanded.value = false
     return
   }
   await nextTick()
@@ -405,6 +411,34 @@ watch(showNodeFirstRun, visible => {
 
 function prefersReducedMotion() {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
+function finishStartup() {
+  startupReady.value = true
+  startupTimedOut.value = false
+  if (startupTimeoutTimer) window.clearTimeout(startupTimeoutTimer)
+  startupTimeoutTimer = 0
+}
+
+function waitForNodeStartup() {
+  if (startupTimeoutTimer) window.clearTimeout(startupTimeoutTimer)
+  startupTimedOut.value = false
+  startupTimeoutTimer = window.setTimeout(() => {
+    startupTimeoutTimer = 0
+    if (!startupReady.value) startupTimedOut.value = true
+  }, 18000)
+}
+
+function retryNodeStartup() {
+  status.value = { ...status.value, error: '正在重新连接本机 Node…' }
+  waitForNodeStartup()
+  void loadAgents().then(() => {
+    if (status.value.online) finishStartup()
+  })
+}
+
+function continueOffline() {
+  finishStartup()
 }
 
 function composerPageVisible(tab) {
@@ -685,7 +719,7 @@ async function send() {
     await executeSlashCommand(text, agentId)
     return
   }
-  commandNotice.value = ''
+  clearCommandNotice()
   if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'chat'); return }
   if (hitlQueue.value.length) { error.value = '请先处理当前对话中的待处理请求。'; return }
   if (agentGenerating.value) return
@@ -734,7 +768,7 @@ async function sendMessageToActiveAgent(text, images = [], files = []) {
 }
 async function executeSlashCommand(text, agentId) {
   error.value = ''
-  commandNotice.value = ''
+  clearCommandNotice()
   const consumed = await dispatchDesktopSlashCommand(text, {
     agentId,
     clearContext: async id => {
@@ -762,7 +796,7 @@ async function executeSlashCommand(text, agentId) {
       throw new Error(`未知 upload 类型: ${spec.kind}`)
     },
     onError: message => { error.value = message },
-    onNotice: message => { commandNotice.value = message },
+    onNotice: showCommandNotice,
   })
   if (!consumed) error.value = '无法处理此斜杠命令'
 }
@@ -1120,7 +1154,7 @@ async function sendFromDock() {
     await executeSlashCommand(text.trim(), activeId.value)
     return
   }
-  commandNotice.value = ''
+  clearCommandNotice()
   if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'dock'); return }
   if (hitlQueue.value.length) { error.value = '请先返回完整对话处理待处理请求。'; return }
   if (agentGenerating.value) return
@@ -1721,9 +1755,12 @@ onMounted(async () => {
   if (!window.__TAURI_INTERNALS__) {
     status.value = { online: false, setup_required: false, version: '', error: '浏览器预览模式：请在 Tauri Desktop MVP 窗口中连接真实 Node。' }
     error.value = '预览模式仅展示界面；Node 状态、Agent 与消息仅从 Tauri Rust transport 获取。'
+    finishStartup()
     return
   }
+  waitForNodeStartup()
   await loadAgents()
+  if (status.value.online) finishStartup()
   if (pendingDesktopAgentId && agents.value.some(agent => agent.agent_id === pendingDesktopAgentId)) {
     const agentId = pendingDesktopAgentId
     pendingDesktopAgentId = ''
@@ -1813,13 +1850,18 @@ onMounted(async () => {
   })
   pollTimer = window.setInterval(async () => {
     const current = await refreshHealth()
-    if (!previouslyOnline.value && current.online) await loadAgents()
+    if (!previouslyOnline.value && current.online) {
+      await loadAgents()
+      if (status.value.online) finishStartup()
+    }
     previouslyOnline.value = current.online
   }, 2500)
   turnWatchdog.start()
 })
 onUnmounted(() => {
+  if (startupTimeoutTimer) window.clearTimeout(startupTimeoutTimer)
   closeScreenshotSelection()
+  clearCommandNotice()
   window.removeEventListener('resize', resizeComposer)
   composerResizeObserver?.disconnect()
   window.removeEventListener('desktop-back-to-chat', onDesktopBackToChat)
@@ -1838,7 +1880,28 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="desktop-shell" :class="{ 'settings-mode': activeTab === 'settings' }">
+  <section v-if="isTauri && !startupReady" class="desktop-startup-screen" aria-live="polite">
+    <header class="desktop-startup-topbar" data-tauri-drag-region>
+      <strong data-tauri-drag-region>DAgents</strong>
+      <div class="window-controls">
+        <button type="button" aria-label="最小化" title="最小化" @click="minimizeWindow"><span class="window-control-icon minimize" aria-hidden="true"></span></button>
+        <button type="button" :aria-label="windowMaximized ? '还原' : '最大化'" :title="windowMaximized ? '还原' : '最大化'" @click="toggleMaximizeWindow"><span class="window-control-icon" :class="windowMaximized ? 'restore' : 'maximize'" aria-hidden="true"></span></button>
+        <button type="button" aria-label="关闭到托盘" title="关闭到托盘" @click="closeWindow"><span class="window-control-icon close" aria-hidden="true"></span></button>
+      </div>
+    </header>
+    <div class="desktop-startup-card">
+      <span class="desktop-startup-mark" aria-hidden="true"><img :src="brandIconUrl" alt=""></span>
+      <p class="desktop-startup-brand">DAgents Desktop</p>
+      <h1>{{ startupTimedOut ? '仍在等待本机 Node' : '正在启动 DAgents' }}</h1>
+      <p class="desktop-startup-description">{{ startupTimedOut ? (status.online ? 'Node 已连接，但工作区还没有完成加载。请重试，或离线打开 Desktop 设置。' : status.error || '本机 Node 尚未就绪。你可以重试连接，或先离线打开 Desktop 设置。') : '正在启动并连接本机 Node，准备好后会自动打开工作区。' }}</p>
+      <div v-if="startupTimedOut" class="desktop-startup-actions">
+        <button class="desktop-startup-retry" type="button" @click="retryNodeStartup">重试连接</button>
+        <button class="desktop-startup-continue" type="button" @click="continueOffline">离线打开</button>
+      </div>
+      <div v-else class="desktop-startup-progress"><span></span>连接本机 Node</div>
+    </div>
+  </section>
+  <div v-else class="desktop-shell" :class="{ 'settings-mode': activeTab === 'settings' }">
     <header class="topbar" data-tauri-drag-region>
       <div class="top-left" data-tauri-drag-region>
         <TopLeftSlotIcon :tab="activeTab" :collapsed="sidebarCollapsed" :auto-overview="dialog === 'auto-overview'" @toggle="sidebarCollapsed = !sidebarCollapsed; collapsedGroup = ''" />
@@ -1947,23 +2010,29 @@ onUnmounted(() => {
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
-      <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" :class="{ 'has-multiline': composerExpanded }" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
-  <div ref="attachmentActionAnchor" class="attachment-action">
-    <button class="attach-button" type="button" aria-label="添加文件或图片" title="添加文件或图片" :aria-expanded="attachmentActionsOpen" aria-haspopup="menu" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
-    <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="添加附件" @keydown="onAttachmentMenuKeydown">
-      <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span><span>文件</span></button>
-      <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传图片" title="上传图片" @click.stop="openImagePicker"><span class="icon-mask" :style="maskStyle(imageUploadActionIcon)"></span><span>图片</span></button>
-      <button class="attachment-action-option" type="button" role="menuitem" :aria-label="screenshotInProgress ? '正在截图' : '截屏'" :title="screenshotInProgress ? '正在截图…' : '截屏'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span><span>截屏</span></button>
-    </div></Transition>
-  </div>
+      <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <input ref="attachmentInput" class="visually-hidden" type="file" multiple @change="addImages">
   <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
-  <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :desktop-compact="true" :disabled="agentGenerating || !activeId" @switch-profile="switchLLMProfile"/>
-  <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
-  <button v-if="agentGenerating" class="send-button" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button>
-  <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
-</form><p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
+  <div class="composer-toolbar-row">
+    <div class="composer-toolbar-left">
+      <div ref="attachmentActionAnchor" class="attachment-action">
+        <button class="attach-button" type="button" aria-label="添加文件或图片" title="添加文件或图片" :aria-expanded="attachmentActionsOpen" aria-haspopup="menu" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
+        <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="添加附件" @keydown="onAttachmentMenuKeydown">
+          <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span><span>文件</span></button>
+          <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传图片" title="上传图片" @click.stop="openImagePicker"><span class="icon-mask" :style="maskStyle(imageUploadActionIcon)"></span><span>图片</span></button>
+          <button class="attachment-action-option" type="button" role="menuitem" :aria-label="screenshotInProgress ? '正在截图' : '截屏'" :title="screenshotInProgress ? '正在截图…' : '截屏'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span><span>截屏</span></button>
+        </div></Transition>
+      </div>
+    </div>
+    <div class="composer-toolbar-right">
+      <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
+      <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :desktop-compact="true" :disabled="agentGenerating || !activeId" @switch-profile="switchLLMProfile"/>
+      <button v-if="agentGenerating" class="send-button" type="button" :disabled="!canCancelTurn || cancellingTurn" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)"></span></button>
+      <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
+    </div>
+  </div>
+</form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
       </template>
       <template #dock>
       <ResourceAgentDock
@@ -1988,7 +2057,7 @@ onUnmounted(() => {
       >
         <template #details>
           <div class="dock-details">
-            <p v-if="commandNotice" class="composer-notice" role="status">{{ commandNotice }}</p>
+            <p v-if="commandNotice" class="dock-command-notice" role="status" aria-live="polite">{{ commandNotice }}</p>
             <div v-if="dockLatestMessage" class="dock-detail-row dock-detail-row--message"><ResourceMarkdown :entry="dockLatestMessage" :agent-id="activeId" source="dock" /></div>
             <div v-if="lastToolActivity" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
             <div v-if="pending" class="dock-approval"><strong>{{ pending.message || '有待处理的请求' }}</strong><div v-for="call in approvalCalls" :key="call.id" class="dock-approval-call"><code>{{ call.name }}</code><span>{{ call.reason }}</span><pre v-if="call.argumentsText" class="approval-arguments">{{ call.argumentsText }}</pre></div><div v-if="approvalCalls.length" class="approval-actions"><button class="quiet" :disabled="busy" @click.prevent="rejectAll(approvalQueueIndex)">拒绝</button><button class="approve" :disabled="busy" @click.prevent="approveAll(approvalQueueIndex)">批准并继续</button></div><p v-else>请使用右上角按钮返回完整对话处理此请求。</p></div>

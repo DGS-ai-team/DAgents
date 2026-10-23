@@ -34,6 +34,8 @@ docker compose up -d --build
 | `scripts/import-image.sh` / `.bat` | 离线 `docker load` |
 | `scripts/restart.sh` / `.bat` | 启动或重启容器 |
 
+Linux 本地助手包由 Manage 镜像内置并在首次启动时导入下载库。离线 bundle 不再附带第二份副本，以免重复下载大型安装归档。
+
 ```bash
 # 联网机构建 bundle
 VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh

@@ -37,6 +37,134 @@ textarea {
   transition: grid-template-columns 200ms cubic-bezier(.2, .75, .25, 1);
 }
 
+.desktop-startup-screen {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #f7f8f9;
+  color: #283136;
+}
+
+.desktop-startup-topbar {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding-left: 18px;
+  border-bottom: 1px solid #e0e3e5;
+  background: #f7f8f9;
+  color: #3f4448;
+  font-size: 13px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+}
+
+.desktop-startup-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(420px, calc(100% - 48px));
+  text-align: center;
+}
+
+.desktop-startup-mark {
+  display: block;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 18px;
+}
+
+.desktop-startup-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.desktop-startup-brand {
+  margin: 0 0 7px;
+  color: #778085;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.desktop-startup-card h1 {
+  margin: 0;
+  color: #273035;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+.desktop-startup-description {
+  max-width: 380px;
+  margin: 10px 0 0;
+  color: #737d82;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.desktop-startup-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  color: #687277;
+  font-size: 12px;
+}
+
+.desktop-startup-progress span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #656e73;
+  animation: desktop-startup-pulse 1.25s ease-in-out infinite;
+}
+
+.desktop-startup-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.desktop-startup-actions button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid #d8dddf;
+  border-radius: 8px;
+  background: #fff;
+  color: #3e474b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.desktop-startup-actions .desktop-startup-retry {
+  border-color: #41494d;
+  background: #41494d;
+  color: #fff;
+}
+
+.desktop-startup-actions button:hover { filter: brightness(.97); }
+
+@keyframes desktop-startup-pulse {
+  50% { opacity: .35; transform: scale(.78); }
+}
+
 /* Keep all icon-only controls centered, including controls inside Desktop settings. */
 .desktop-shell button:has(> .ui-icon:only-child),
 .desktop-shell button:has(> .icon-mask:only-child),
@@ -1275,6 +1403,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 }
 
 .composer-wrap {
+  position: relative;
   flex: 0 0 auto;
   margin-top: auto;
   height: auto;
@@ -1313,15 +1442,14 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .composer-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachment i { position: absolute; top: 0; right: 5px; border: 0; color: #6b7478; font-size: 16px; font-style: normal; cursor: pointer; }
 .desktop-composer-toolbar {
-  grid-area: model;
   justify-self: end;
   min-width: 0;
-  max-width: 150px;
+  max-width: 190px;
   color: #4b5256;
 }
 .desktop-composer-toolbar .composer-toolbar__profile { min-width: 0; max-width: 100%; }
 .desktop-composer-toolbar .composer-toolbar__trigger {
-  max-width: 150px;
+  max-width: 190px;
   min-height: 28px;
   gap: 4px;
   padding: 3px 5px;
@@ -1337,14 +1465,14 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 }
 .desktop-composer-toolbar .composer-toolbar__trigger-label,
 .desktop-composer-toolbar .composer-toolbar__model {
-  max-width: 112px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .desktop-composer-toolbar .composer-toolbar__model { padding: 4px 5px; color: #4b5256; font-size: 11px; }
 .desktop-composer-toolbar .composer-toolbar__chevron { flex: 0 0 auto; }
-.attachment-action { position: relative; z-index: 4; grid-area: attach; display: grid; place-items: center; width: 28px; height: 28px; }
+.attachment-action { position: relative; z-index: 4; display: grid; place-items: center; width: 30px; height: 30px; }
 .attach-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .attach-button:hover { background: #eceeef; }
 .attach-button:focus-visible { outline: 2px solid #8a9296; outline-offset: 2px; }
@@ -1465,26 +1593,59 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   top: calc(100% + 6px);
   bottom: auto;
 }
-.composer-notice { max-width: 900px; margin: 3px auto 0; color: #5d5d5d; font-size: 11px; }
+.composer-notice {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(720px, calc(100% - 36px));
+  margin: 0;
+  padding: 7px 11px;
+  transform: translateX(-50%);
+  border: 1px solid #dce1e3;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 4px 14px #172f3b12;
+  color: #4d575b;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.composer-notice-enter-active,
+.composer-notice-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.composer-notice-enter-from,
+.composer-notice-leave-to { opacity: 0; transform: translate(-50%, 5px); }
+.dock-command-notice {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid #dce1e3;
+  border-radius: 7px;
+  background: #f7f8f8;
+  color: #4d575b;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .overview-json { max-height: 55vh; overflow: auto; padding: 12px; border-radius: 7px; background: #f4f5f5; color: #3f484d; font-size: 11px; white-space: pre-wrap; }
 .agent-create-overlay { position: fixed; z-index: 25; top: 48px; right: 0; bottom: 0; left: 0; overflow: auto; background: #f4f5f5; --app-background: #f4f5f5; --color-primary: #555d62; --color-primary-strong: #41484c; --color-border: #d6dadd; --color-surface: #fff; --color-text: #30383c; --color-text-muted: #60696d; --color-text-subtle: #747d81; }
 .agent-create-overlay .agent-create-page { min-height: 100%; background: #f4f5f5; }
 
 .composer {
-  display: grid;
-  grid-template-areas: "attach input model restore send";
-  grid-template-columns: 28px minmax(0, 1fr) auto auto 34px;
-  grid-template-rows: minmax(28px, auto);
-  align-items: center;
-  gap: 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
   max-width: 900px;
   width: 100%;
   height: auto;
-  min-height: 56px;
+  min-height: 82px;
   margin: 0 auto;
-  padding: 6px 8px;
+  padding: 7px 10px 6px;
   border: 1px solid #d9e2e4;
-  border-radius: 999px;
+  border-radius: 17px;
   box-shadow: 0 1px 2px #1933460a;
 }
 
@@ -1493,14 +1654,15 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 }
 
 .composer textarea {
-  grid-area: input;
-  align-self: center;
+  display: block;
+  flex: 1 1 auto;
+  align-self: stretch;
   width: 100%;
   min-width: 0;
-  min-height: 28px;
-  max-height: 128px;
-  height: 28px;
-  padding: 4px 6px;
+  min-height: 36px;
+  max-height: 136px;
+  height: 36px;
+  padding: 5px 7px 4px;
   overflow-y: hidden;
   border: 0;
   outline: 0;
@@ -1511,27 +1673,34 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   resize: none;
 }
 
-.composer.has-multiline {
-  grid-template-areas: ". input input input input" "attach . model restore send";
-  grid-template-rows: minmax(28px, auto) 34px;
+.composer-toolbar-row,
+.composer-toolbar-left,
+.composer-toolbar-right {
+  display: flex;
   align-items: center;
-  row-gap: 1px;
-  border-radius: 22px;
 }
-.composer.has-multiline textarea { align-self: start; }
-.composer-restore { grid-area: restore; max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.composer-toolbar-row {
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 0 1px;
+}
+
+.composer-toolbar-left { flex: 1 1 auto; min-width: 0; }
+.composer-toolbar-right { flex: 0 0 auto; gap: 6px; }
+.composer-restore { max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .composer textarea::placeholder {
   color: #586b72;
 }
 
 .send-button {
-  grid-area: send;
   display: grid;
-  flex: 0 0 34px;
+  flex: 0 0 30px;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   margin-left: 0;
   padding: 0;
   border: 0;
