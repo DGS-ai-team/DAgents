@@ -16,15 +16,15 @@ if [[ ! -x "./bin/dagents-node" ]]; then
 fi
 
 echo "[startup] starting dagents-node -config ${CFG}"
-if [[ -x "${ROOT}/scripts/webui-url.sh" ]]; then
-  WEBUI_URL="$("${ROOT}/scripts/webui-url.sh" "${CFG}")"
+if [[ -x "${ROOT}/scripts/node-api-url.sh" ]]; then
+  NODE_API_URL="$("${ROOT}/scripts/node-api-url.sh" "${CFG}")"
 else
   PORT="18765"
   if [[ -f "${CFG}" ]]; then
     parsed="$(grep -A10 '^listen:' "${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
     [[ -n "${parsed}" ]] && PORT="${parsed}"
   fi
-  WEBUI_URL="http://127.0.0.1:${PORT}/ui/"
+  NODE_API_URL="http://127.0.0.1:${PORT}"
 fi
-echo "[startup] Web UI: ${WEBUI_URL} (内嵌于 dagents-node；ui.enabled 默认 true)"
+echo "[startup] Node API: ${NODE_API_URL} (use DAgents Desktop for the local UI)"
 exec ./bin/dagents-node -config "${CFG}"

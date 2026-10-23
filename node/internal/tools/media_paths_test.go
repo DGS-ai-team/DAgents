@@ -3,6 +3,7 @@ package tools
 import "testing"
 
 func TestExtractToolMediaPaths_showImage(t *testing.T) {
+	// Historical show_image tool results remain renderable during hydrate.
 	got, ok := ExtractToolMediaPaths("show_image", "[SHOW_IMAGE]\npath=reports/chart.png\nstatus=ok", map[string]any{
 		"path":    "reports/chart.png",
 		"caption": "对比图",
@@ -12,17 +13,9 @@ func TestExtractToolMediaPaths_showImage(t *testing.T) {
 	}
 }
 
-func TestExtractToolMediaPaths_browserSnapshot(t *testing.T) {
-	content := `{"ok":true,"screenshot_path":".runtime/browser/snap.png"}`
-	got, ok := ExtractToolMediaPaths("browser_snapshot", content, nil)
-	if !ok || got.RelPath != ".runtime/browser/snap.png" || got.Source != "browser" {
-		t.Fatalf("got=%+v ok=%v", got, ok)
-	}
-}
-
-func TestExtractAllToolMediaPaths_browserRunTaskScreenshots(t *testing.T) {
-	content := `{"ok":true,"detail":{"status":"completed","screenshot_paths":["/tmp/a.png","/tmp/b.png"],"last_screenshot_path":"/tmp/b.png"}}`
-	got := ExtractAllToolMediaPaths("browser_run_task", content, nil)
+func TestExtractAllToolMediaPaths_browserScreenshots(t *testing.T) {
+	content := `{"ok":true,"detail":{"status":"succeeded","action_results":[{"op":"screenshot","status":"succeeded","data":{"path":"/tmp/a.png"}},{"op":"screenshot","status":"succeeded","data":{"path":"/tmp/b.png"}}]}}`
+	got := ExtractAllToolMediaPaths("browser_call", content, nil)
 	if len(got) != 2 {
 		t.Fatalf("len=%d got=%+v", len(got), got)
 	}

@@ -28,7 +28,7 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 		ID:   "call-approve-1",
 		Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "browser_run_task",
+			Name:      "async_test_tool",
 			Arguments: `{"command":"echo hi","call_purpose":"test"}`,
 		},
 	}
@@ -38,7 +38,7 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 		{Role: "user", Content: "run async task then approve"},
 		{Role: "assistant", Content: "ok", ToolCalls: []llm.ToolCall{{
 			ID: "call-async-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+			Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 		}}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 		{Role: "user", Content: "now run sync"},
@@ -52,7 +52,7 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
 		JobID:      "job-old",
-		ToolName:   "browser_run_task",
+		ToolName:   "async_test_tool",
 		ToolCallID: "async-job-old",
 		Status:     "failed",
 		ErrorText:  "exit 1",

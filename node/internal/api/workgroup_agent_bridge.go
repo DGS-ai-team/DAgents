@@ -8,13 +8,9 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
-	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
-	"github.com/DGS-ai-team/DAgents/node/internal/session"
-	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
-	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
 )
 
@@ -25,6 +21,7 @@ import (
 type workgroupAgentBridge struct {
 	server *Server
 
+	openMu     sync.Mutex // serializes runtime construction and binding for session IDs
 	mu         sync.Mutex
 	bindings   map[string]workgroupAgentBinding // session_id -> binding
 	registries map[string]*tools.Registry       // session_id -> scoped tool registry
@@ -45,6 +42,17 @@ type workgroupAgentTurn struct {
 	childTurnID string
 	attemptID   string
 	cancel      func()
+}
+
+type agentSessionRuntimeOwnership struct {
+	built       agentruntime.Built
+	transferred bool
+}
+
+func (o *agentSessionRuntimeOwnership) closeIfUntransferred() {
+	if o != nil && !o.transferred {
+		_ = o.built.Close()
+	}
 }
 
 func newWorkgroupAgentBridge(server *Server) *workgroupAgentBridge {
@@ -90,6 +98,40 @@ func (b *workgroupAgentBridge) OpenAgentSession(ctx context.Context, req workgro
 	if req.WorkgroupID == "" || req.MemberID == "" || req.AgentID == "" || req.SessionID == "" {
 		return workgroup.AgentSessionResult{}, fmt.Errorf("workgroup_id, member_id, agent_id and session_id are required")
 	}
+	b.openMu.Lock()
+	defer b.openMu.Unlock()
+	binding := workgroupAgentBinding{
+		workgroupID: req.WorkgroupID,
+		memberID:    req.MemberID,
+		agentID:     req.AgentID,
+		sessionID:   req.SessionID,
+	}
+	b.mu.Lock()
+	existing, bound := b.bindings[req.SessionID]
+	registry := b.registries[req.SessionID]
+	b.mu.Unlock()
+	if bound {
+		if existing != binding {
+			return workgroup.AgentSessionResult{}, fmt.Errorf("agent session is already bound to a different workgroup member")
+		}
+		if registry == nil {
+			return workgroup.AgentSessionResult{}, fmt.Errorf("agent session binding has no tool registry")
+		}
+		if _, _, _, runtimeErr := b.server.sessions.RuntimeInfo(req.SessionID); runtimeErr == nil {
+			return readyAgentSessionResult(binding), nil
+		}
+		// Idle-session release removes the manager runtime but leaves this
+		// adapter's binding cache. Drop that stale pair so the next open can
+		// restore history into a fresh runtime.
+		b.mu.Lock()
+		if b.bindings[req.SessionID] == existing && b.registries[req.SessionID] == registry {
+			delete(b.bindings, req.SessionID)
+			delete(b.registries, req.SessionID)
+		}
+		b.mu.Unlock()
+	} else if registry != nil {
+		return workgroup.AgentSessionResult{}, fmt.Errorf("agent session registry exists without a binding")
+	}
 	if b.server.agents == nil {
 		return workgroup.AgentSessionResult{}, fmt.Errorf("agent store unavailable")
 	}
@@ -104,32 +146,50 @@ func (b *workgroupAgentBridge) OpenAgentSession(ctx context.Context, req workgro
 	// A workgroup gets a separate durable session namespace. The Agent's
 	// configured prompt/tools remain the source of truth, but history, queue,
 	// compression and turn lifecycle are isolated by session_id.
-	turnOpts, registry, policyEngine, client, err := b.buildAgentSessionRuntime(ctx, rec, req)
+	runtime, err := b.server.buildAgentSessionRuntime(ctx, rec, agentSessionRuntimeOptions{
+		// Workgroup sessions use the Agent's tools and policy but never its
+		// personal memory store.
+		DisableMemory:       true,
+		RequireStoreContext: true,
+	})
 	if err != nil {
 		return workgroup.AgentSessionResult{}, err
 	}
-	if _, _, err := b.server.sessions.CreateWithOptionsAndLLM(
-		req.SessionID, turnOpts, registry, policyEngine, client, req.AgentID,
-	); err != nil {
+	ownership := agentSessionRuntimeOwnership{built: runtime.Built}
+	defer ownership.closeIfUntransferred()
+	policyEngine := runtime.Policy
+	if policyEngine == nil {
+		policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
+	}
+	_, _, reused, err := b.server.sessions.CreateWithOptionsAndLLMReuse(
+		req.SessionID, runtime.Built.TurnOptions, runtime.Built.Registry, policyEngine, runtime.LLM, req.AgentID,
+	)
+	if err != nil {
 		return workgroup.AgentSessionResult{}, err
 	}
+	if reused {
+		// The manager retained its original executor. Without a bridge binding,
+		// this call cannot safely claim ownership or replace it.
+		return workgroup.AgentSessionResult{}, fmt.Errorf("agent session runtime already exists without a matching workgroup binding")
+	}
+	ownership.transferred = true
+	registry = runtime.Built.Registry
 
 	b.mu.Lock()
 	b.registries[req.SessionID] = registry
-	b.bindings[req.SessionID] = workgroupAgentBinding{
-		workgroupID: req.WorkgroupID,
-		memberID:    req.MemberID,
-		agentID:     req.AgentID,
-		sessionID:   req.SessionID,
-	}
+	b.bindings[req.SessionID] = binding
 	b.mu.Unlock()
+	return readyAgentSessionResult(binding), nil
+}
+
+func readyAgentSessionResult(binding workgroupAgentBinding) workgroup.AgentSessionResult {
 	return workgroup.AgentSessionResult{
-		WorkgroupID: req.WorkgroupID,
-		MemberID:    req.MemberID,
-		AgentID:     req.AgentID,
-		SessionID:   req.SessionID,
+		WorkgroupID: binding.workgroupID,
+		MemberID:    binding.memberID,
+		AgentID:     binding.agentID,
+		SessionID:   binding.sessionID,
 		Status:      "ready",
-	}, nil
+	}
 }
 
 // registryForSession lets Node-owned brokers open a resource on behalf of a
@@ -144,70 +204,6 @@ func (b *workgroupAgentBridge) registryForSession(sessionID string) *tools.Regis
 	registry := b.registries[strings.TrimSpace(sessionID)]
 	b.mu.Unlock()
 	return registry
-}
-
-func (b *workgroupAgentBridge) buildAgentSessionRuntime(
-	ctx context.Context,
-	rec *store.AgentRecord,
-	req workgroup.AgentSessionOpenRequest,
-) (session.TurnOptions, *tools.Registry, *policy.Engine, llm.Client, error) {
-	if b == nil || b.server == nil || b.server.cfg == nil || rec == nil {
-		return session.TurnOptions{}, nil, nil, nil, fmt.Errorf("agent runtime unavailable")
-	}
-	var policyEngine *policy.Engine
-	snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
-	if err != nil {
-		return session.TurnOptions{}, nil, nil, nil, err
-	}
-	built, err := agentruntime.Build(agentruntime.BuildParams{
-		NodeCFG:              b.server.cfg,
-		BaseTurn:             b.server.sessions.DefaultTurnOptions(),
-		AgentID:              req.AgentID,
-		Snapshot:             snap,
-		MCP:                  b.server.mcpManager,
-		WorkspaceCoordinator: b.server.workspaceCoord,
-		// A Workgroup member is an isolated execution runtime, not the Agent's
-		// personal conversation. Do not open or mutate its memory store.
-		DisableMemory: true,
-	})
-	if err != nil {
-		return session.TurnOptions{}, nil, nil, nil, err
-	}
-	b.server.attachNodeRuntimeDeps(built.Registry, req.AgentID)
-	if b.server.cfg != nil {
-		built.TurnOptions.PreferredName = b.server.cfg.PreferredName()
-	}
-	if b.server.agents != nil {
-		pc, pcErr := b.server.agents.EnsureAgentPromptContext(ctx, req.AgentID)
-		if pcErr != nil {
-			return session.TurnOptions{}, nil, nil, nil, pcErr
-		}
-		built.TurnOptions.PromptContent = promptContentFromRecord(pc)
-		engine, policyErr := b.server.agents.LoadAgentPolicyEngine(ctx, req.AgentID)
-		if policyErr != nil {
-			return session.TurnOptions{}, nil, nil, nil, policyErr
-		}
-		policyEngine = engine
-	}
-	if policyEngine == nil {
-		policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
-	}
-	promptSeed := ""
-	if built.TurnOptions.PromptContent != nil {
-		promptSeed = built.TurnOptions.PromptContent.Custom + built.TurnOptions.PromptContent.Soul
-	}
-	built.TurnOptions.RuntimeDigest = turn.RuntimeDigestFromInputs(
-		snap, promptSeed, built.Registry.Definitions(),
-	)
-	if rec.RuntimeRevision > 0 {
-		built.TurnOptions.RuntimeRevision = rec.RuntimeRevision
-	}
-	client, llmProfileDigest, err := b.server.llmClientForAgent(ctx, rec, req.AgentID)
-	if err != nil {
-		return session.TurnOptions{}, nil, nil, nil, err
-	}
-	built.TurnOptions.LLMProfileDigest = llmProfileDigest
-	return built.TurnOptions, built.Registry, policyEngine, client, nil
 }
 
 func (b *workgroupAgentBridge) StartAgentTurn(_ context.Context, req workgroup.AgentTurnStartRequest) error {
@@ -436,12 +432,43 @@ func (b *workgroupAgentBridge) ResumeAgentTurn(_ context.Context, req workgroup.
 }
 
 func (b *workgroupAgentBridge) CloseAgentSession(_ context.Context, req workgroup.AgentSessionOpenRequest) error {
+	if b == nil || b.server == nil || b.server.sessions == nil {
+		return fmt.Errorf("node session manager unavailable")
+	}
+	b.openMu.Lock()
+	defer b.openMu.Unlock()
 	b.mu.Lock()
+	binding, bound := b.bindings[req.SessionID]
+	if !bound {
+		b.mu.Unlock()
+		return nil
+	}
+	if binding.workgroupID != strings.TrimSpace(req.WorkgroupID) || binding.memberID != strings.TrimSpace(req.MemberID) || binding.agentID != strings.TrimSpace(req.AgentID) {
+		b.mu.Unlock()
+		return fmt.Errorf("agent session is not bound to this workgroup member")
+	}
+	for _, active := range b.turns {
+		if active.binding.sessionID == req.SessionID {
+			b.mu.Unlock()
+			return fmt.Errorf("cannot close busy agent session")
+		}
+	}
+	queuePending, active, _, runtimeErr := b.server.sessions.RuntimeInfo(req.SessionID)
+	if runtimeErr == nil && (active || queuePending > 0) {
+		b.mu.Unlock()
+		return fmt.Errorf("cannot close busy agent session")
+	}
+	if runtimeErr == nil {
+		if _, err := b.server.sessions.Release(req.SessionID); err != nil {
+			b.mu.Unlock()
+			return fmt.Errorf("release agent session: %w", err)
+		}
+	}
 	delete(b.bindings, req.SessionID)
 	delete(b.registries, req.SessionID)
 	b.mu.Unlock()
-	// Session history remains durable for reconnect and later assignments; a
-	// close only removes the Workgroup binding, not the user's Agent session.
+	// Release persists session history and drops the isolated runtime, allowing
+	// a later open to restore that history with a fresh registry.
 	return nil
 }
 

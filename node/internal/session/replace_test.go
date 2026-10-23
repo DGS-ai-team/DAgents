@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
@@ -11,6 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func TestReplaceWithOptionsFailureKeepsPreviousRuntime(t *testing.T) {
@@ -19,6 +21,7 @@ func TestReplaceWithOptionsFailureKeepsPreviousRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer st.Close()
 	reg, err := tools.NewRegistry(filepath.Join(dir, "runtime"), 30)
 	if err != nil {
 		t.Fatal(err)
@@ -81,5 +84,51 @@ func TestReplaceWithOptionsSwapsRuntimeAndKeepsInMemoryState(t *testing.T) {
 	}
 	if got := current.messageCount(); got != 1 {
 		t.Fatalf("replacement lost in-memory messages: count=%d", got)
+	}
+}
+
+func TestReplaceWithOptionsKeepsRecoveredTerminalInteractionClock(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	reg, err := tools.NewRegistry(filepath.Join(dir, "runtime"), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol := policy.NewDefaultEngine()
+	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), &llm.MockClient{}, reg, pol, st, TurnOptions{SkillsEnabled: false}, logx.Discard())
+	defer mgr.Stop()
+	sess, _, err := mgr.Create("replace-clock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := mgr.getRuntime(sess.ID)
+	if err := old.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{{Role: "assistant", Content: "finished"}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	terminal := old.turnCoordinator.Snapshot()
+	if terminal.TurnFinishedAt == nil || terminal.Source != turn.TurnSourceHuman {
+		t.Fatalf("expected persisted terminal human fact, got %+v", terminal)
+	}
+	// Model the crash gap: the lifecycle terminal fact is durable, but the
+	// runtime checkpoint still has the previous interaction clock.
+	old.mu.Lock()
+	old.lastHumanInteraction = terminal.TurnFinishedAt.Add(-time.Hour)
+	old.mu.Unlock()
+	if err := old.persist(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mgr.ReplaceWithOptions(sess.ID, TurnOptions{SkillsEnabled: false}, reg, pol); err != nil {
+		t.Fatal(err)
+	}
+	replacement := mgr.getRuntime(sess.ID)
+	if replacement == nil || !replacement.lastHumanInteraction.Equal(*terminal.TurnFinishedAt) {
+		t.Fatalf("replacement lost recovered terminal clock: got=%v want=%v", replacement.lastHumanInteraction, terminal.TurnFinishedAt)
 	}
 }

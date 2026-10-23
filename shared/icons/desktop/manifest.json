@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "style": "24 logical units; stroke icons generally use 1.8–2px round strokes, with supplied filled silhouettes retained as masks. Production semantic names identify agent, workgroup, auto, skills, attachment, browser, and folder-open independently of legacy technical aliases.",
+  "icons": [
+    {
+      "name": "agent",
+      "file": "desktop/agent.svg",
+      "source": "User-provided Downloads/user.svg geometry, cleaned and adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "workgroup",
+      "file": "desktop/nav-workgroups.svg",
+      "source": "User-provided Downloads/team.svg geometry, cleaned and adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "auto",
+      "file": "desktop/auto.svg",
+      "source": "Node Web UI UiIcon.vue sparkles paths, adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "terminal",
+      "file": "desktop/terminal.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "browser",
+      "file": "desktop/browser.svg",
+      "source": "Lucide PanelTop, canonical browser-resource window outline",
+      "license": "ISC"
+    },
+    {
+      "name": "file",
+      "file": "desktop/file.svg",
+      "source": "User-provided Downloads/file.svg geometry, cleaned and adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "attachment",
+      "file": "desktop/attachment.svg",
+      "source": "User-provided Downloads/attachment.svg geometry, cleaned and adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "message",
+      "file": "desktop/message.svg",
+      "source": "User-provided Downloads/message.svg geometry, cleaned and adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "image",
+      "file": "desktop/image.svg",
+      "source": "User-provided Downloads/image.svg geometry, cleaned and adapted as a currentColor mask asset; reserved",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "screenshot",
+      "file": "desktop/screenshot.svg",
+      "source": "DAgents Desktop screen framing corners with a center focus mark",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "edit",
+      "file": "desktop/edit.svg",
+      "source": "User-provided Downloads/edit.svg geometry, cleaned and adapted as a currentColor mask asset; reserved",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "tools",
+      "file": "desktop/tools.svg",
+      "source": "User-provided Downloads/wrench.svg geometry, cleaned and adapted as a currentColor mask asset",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "pending",
+      "file": "desktop/pending.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "success",
+      "file": "desktop/success.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "error",
+      "file": "desktop/error.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "create",
+      "file": "desktop/create.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "more",
+      "file": "desktop/more.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "upload",
+      "file": "desktop/upload.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "collapse",
+      "file": "desktop/collapse.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "expand",
+      "file": "desktop/expand.svg",
+      "source": "DAgents visual-system semantic SVG",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "nav-agents",
+      "file": "desktop/agent.svg",
+      "source": "User-provided Downloads/user.svg geometry, reused for the agent navigation heading",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "nav-workgroups",
+      "file": "desktop/nav-workgroups.svg",
+      "source": "User-provided Downloads/team.svg geometry, reused for the workgroup navigation heading",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "nav-auto",
+      "file": "desktop/auto.svg",
+      "source": "Node Web UI UiIcon.vue sparkles paths, same geometry as auto.svg for the navigation group heading",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "arrow-left-right",
+      "file": "desktop/arrow-left-right.svg",
+      "source": "Lucide ArrowLeftRight",
+      "license": "ISC"
+    },
+    {
+      "name": "chevron-down",
+      "file": "desktop/chevron-down.svg",
+      "source": "Lucide ChevronDown",
+      "license": "ISC"
+    },
+    {
+      "name": "chevron-up",
+      "file": "desktop/chevron-up.svg",
+      "source": "Lucide ChevronUp",
+      "license": "ISC"
+    },
+    {
+      "name": "circle-x",
+      "file": "desktop/circle-x.svg",
+      "source": "Lucide CircleX",
+      "license": "ISC"
+    },
+    {
+      "name": "circle-check",
+      "file": "desktop/circle-check.svg",
+      "source": "Lucide CircleCheck",
+      "license": "ISC"
+    },
+    {
+      "name": "play",
+      "file": "desktop/play.svg",
+      "source": "Lucide Play",
+      "license": "ISC"
+    },
+    {
+      "name": "folder-open",
+      "file": "desktop/folder-open.svg",
+      "source": "Lucide FolderOpen",
+      "license": "ISC"
+    },
+    {
+      "name": "send",
+      "file": "desktop/send.svg",
+      "source": "DAgents Desktop upward-arrow send symbol",
+      "license": "DAgents project asset"
+    },
+    {
+      "name": "panel-left-close",
+      "file": "desktop/panel-left-close.svg",
+      "source": "DAgents Desktop original 24-unit stroke panel; Morphicons-compatible divider geometry",
+      "license": "DAgents Desktop original asset"
+    },
+    {
+      "name": "panel-left-open",
+      "file": "desktop/panel-left-open.svg",
+      "source": "DAgents Desktop original 24-unit stroke panel; Morphicons-compatible divider geometry",
+      "license": "DAgents Desktop original asset"
+    },
+    {
+      "name": "skills",
+      "file": "lucide/puzzle.svg",
+      "source": "Lucide Puzzle from official repository, fetched 2026-10-09",
+      "license": "ISC"
+    },
+    {
+      "name": "disconnect",
+      "file": "desktop/unplug.svg",
+      "source": "Lucide Unplug from the official icon repository",
+      "license": "ISC"
+    }
+  ]
+}

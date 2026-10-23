@@ -2,7 +2,6 @@ go 1.25.0
 
 use (
 	./client
-	./desktop/tray
 	./node
 	./shared/config
 	./shared/logfiles

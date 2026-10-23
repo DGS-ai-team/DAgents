@@ -1,6 +1,8 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -56,6 +58,9 @@ func buildToolCallIndex(messages []llm.Message) map[string]llm.ToolCall {
 func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall, reg *media.Registry) []TranscriptEntry {
 	switch strings.TrimSpace(msg.Role) {
 	case "user":
+		if isConversationBoundaryNotice(msg) {
+			return []TranscriptEntry{{"kind": "context_boundary", "boundary_id": conversationBoundaryID(msg)}}
+		}
 		if shouldSkipHydrateUser(msg) {
 			return nil
 		}
@@ -68,6 +73,24 @@ func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCa
 		}
 	}
 	return nil
+}
+
+func conversationBoundaryID(msg llm.Message) string {
+	reference := strings.TrimSpace(llm.EffectiveMessageProvenance(msg).Reference)
+	if reference == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(reference))
+	return hex.EncodeToString(digest[:])
+}
+
+// isConversationBoundaryNotice keeps the durable bridge message out of the
+// chat transcript while projecting a safe display marker. Its body and archive
+// reference are intentionally never copied into the UI payload.
+func isConversationBoundaryNotice(msg llm.Message) bool {
+	return llm.IsMessageSource(msg, llm.MessageSourceRuntime, llm.MessageFormNotice, "idle_context") &&
+		strings.TrimSpace(msg.Name) == llm.UserNameConversationBoundary &&
+		strings.EqualFold(strings.TrimSpace(llm.EffectiveMessageProvenance(msg).Operation), "continue-from-archive")
 }
 
 // shouldSkipHydrateUser 隐藏注入型 user 消息（日期、Skill 正文、异步回灌、压缩摘要等），避免污染对话展示。

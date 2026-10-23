@@ -28,7 +28,7 @@ func TestSideEffectProduceAsyncDoesNotMutateHistoryDuringHITL(t *testing.T) {
 	rt.messages = []llm.Message{
 		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
-			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`}},
+			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`}},
 			approvalCall,
 		}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
@@ -37,7 +37,7 @@ func TestSideEffectProduceAsyncDoesNotMutateHistoryDuringHITL(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,19 +146,19 @@ func TestSideEffectFIFOApplyOrder(t *testing.T) {
 		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
 			ID: "call-async-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+			Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 		}}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "first",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "succeeded", ResultText: "first",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-2", ToolName: "browser_run_task", ToolCallID: "async-2", Status: "succeeded", ResultText: "second",
+		JobID: "job-2", ToolName: "async_test_tool", ToolCallID: "async-2", Status: "succeeded", ResultText: "second",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestDuplicateAsyncResultIsAppliedOnce(t *testing.T) {
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{
 			ID: "call-background-duplicate",
 			Function: llm.ToolCallFunction{
-				Name:      "browser_run_task",
+				Name:      "async_test_tool",
 				Arguments: `{}`,
 			},
 		}}},
@@ -225,7 +225,7 @@ func TestDuplicateAsyncResultIsAppliedOnce(t *testing.T) {
 
 	payload := queue.AsyncToolResultPayload{
 		JobID:      "job-duplicate",
-		ToolName:   "browser_run_task",
+		ToolName:   "async_test_tool",
 		ToolCallID: "async-job-duplicate",
 		Status:     "succeeded",
 		ResultText: "done",

@@ -124,6 +124,48 @@ func TestHubAgentCursorReportsHistoryTruncation(t *testing.T) {
 	}
 }
 
+func TestHubGlobalCursorFromPreviousProcessResyncsAndClamps(t *testing.T) {
+	h := NewHub(16, nil)
+	h.Publish("agt-a", "assistant", map[string]any{"content": "new process history"})
+
+	sub := h.SubscribeAgentCursor(42, 0, "")
+	defer h.Unsubscribe(sub.Events)
+	if !sub.ResyncRequired {
+		t.Fatal("expected resync when global cursor is ahead of this process")
+	}
+
+	want := h.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})
+	select {
+	case got := <-sub.Events:
+		if got.Seq != want.Seq {
+			t.Fatalf("received seq %d, want %d after cursor clamp", got.Seq, want.Seq)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("new process events were filtered by the stale cursor")
+	}
+}
+
+func TestHubAgentCursorFromPreviousProcessResyncsAndClamps(t *testing.T) {
+	h := NewHub(16, nil)
+	h.Publish("agt-a", "assistant", map[string]any{"content": "new process history"})
+
+	sub := h.SubscribeAgentCursor(0, 42, "agt-a")
+	defer h.Unsubscribe(sub.Events)
+	if !sub.ResyncRequired {
+		t.Fatal("expected resync when agent cursor is ahead of this process")
+	}
+
+	want := h.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})
+	select {
+	case got := <-sub.Events:
+		if got.AgentSeq != want.AgentSeq {
+			t.Fatalf("received agent seq %d, want %d after cursor clamp", got.AgentSeq, want.AgentSeq)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("new process agent events were filtered by the stale cursor")
+	}
+}
+
 func TestHubAgentCursorReportsStaleHighWatermarkAfterRestart(t *testing.T) {
 	oldHub := NewHub(16, nil)
 	oldHub.Publish("agt-a", "turn_finished", map[string]any{"finish_reason": "stop"})

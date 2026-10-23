@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from "vue";
+import { reactive, ref, watch } from "vue";
 import {
   deleteReleasePackage,
   fetchReleasePackages,
@@ -17,11 +17,12 @@ const packages = ref([]);
 const loading = ref(false);
 const error = ref("");
 const uploading = ref(false);
+const actionKey = ref("");
 const fileInput = ref(null);
 
 const form = reactive({
   version: "",
-  platform: "linux-amd64",
+  platform: "windows-amd64",
   channel: "stable",
   releaseNotes: "",
   publish: false,
@@ -38,8 +39,8 @@ async function load() {
   try {
     packages.value = await fetchReleasePackages();
   } catch (err) {
-    error.value = err.message;
-    emit("toast", { message: err.message, type: "error" });
+    error.value = err.message || "加载发布列表失败";
+    emit("toast", { message: error.value, type: "error" });
   } finally {
     loading.value = false;
   }
@@ -61,6 +62,7 @@ function downloadUrl(pkg) {
 }
 
 async function onUpload() {
+  if (uploading.value || actionKey.value) return;
   if (!form.version.trim() || !form.platform.trim() || !form.file) {
     emit("toast", { message: "version / platform / 文件 必填", type: "error" });
     return;
@@ -95,33 +97,50 @@ async function onUpload() {
 }
 
 async function onPublish(pkg, setLatest = false) {
+  const key = `publish:${pkg.platform}:${pkg.version}`;
+  if (uploading.value || actionKey.value) return;
+  actionKey.value = key;
   try {
     await publishReleasePackage(pkg, { setLatest });
-    emit("toast", { message: `已发布 ${pkg.version}`, type: "success" });
+    emit("toast", {
+      message: setLatest ? `已发布并设为 latest：${pkg.version}` : `已发布 ${pkg.version}`,
+      type: "success",
+    });
     await load();
   } catch (err) {
     emit("toast", { message: err.message, type: "error" });
+  } finally {
+    actionKey.value = "";
   }
 }
 
 async function onPromote(pkg) {
+  const key = `promote:${pkg.platform}:${pkg.version}`;
+  if (uploading.value || actionKey.value) return;
+  actionKey.value = key;
   try {
     await promoteReleasePackage(pkg);
     emit("toast", { message: `已设为 latest: ${pkg.version}`, type: "success" });
     await load();
   } catch (err) {
     emit("toast", { message: err.message, type: "error" });
+  } finally {
+    actionKey.value = "";
   }
 }
 
 async function onDelete(pkg) {
+  if (uploading.value || actionKey.value) return;
   if (!window.confirm(`删除 ${pkg.version} (${pkg.platform})？`)) return;
+  actionKey.value = `delete:${pkg.platform}:${pkg.version}`;
   try {
     await deleteReleasePackage(pkg);
     emit("toast", { message: "已删除", type: "success" });
     await load();
   } catch (err) {
     emit("toast", { message: err.message, type: "error" });
+  } finally {
+    actionKey.value = "";
   }
 }
 
@@ -133,9 +152,6 @@ watch(
   { immediate: true },
 );
 
-onMounted(() => {
-  if (props.active) load();
-});
 </script>
 
 <template>
@@ -163,7 +179,7 @@ onMounted(() => {
         </label>
         <label class="form-grid__wide">
           <span>release notes</span>
-          <input v-model="form.releaseNotes" placeholder="可选" />
+          <textarea v-model="form.releaseNotes" maxlength="16384" rows="3" placeholder="可选，最多 16 KiB" />
         </label>
         <label class="form-grid__wide">
           <span>安装包 (.tar.gz / .zip / .exe)</span>
@@ -181,7 +197,7 @@ onMounted(() => {
         </label>
       </div>
       <div class="panel-actions">
-        <button class="btn btn-primary" :disabled="uploading" @click="onUpload">
+        <button class="btn btn-primary" :disabled="uploading || Boolean(actionKey)" @click="onUpload">
           {{ uploading ? "上传中…" : "上传" }}
         </button>
       </div>
@@ -189,6 +205,7 @@ onMounted(() => {
 
     <p v-if="error" class="banner banner-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="muted">加载中…</p>
+    <p v-if="!loading && !error && packages.length === 0" class="muted releases-empty">还没有安装包。上传后可先保存为草稿，再检查并发布。</p>
 
     <div v-if="drafts().length" class="table-block">
       <h3 class="table-block__title">草稿</h3>
@@ -204,9 +221,9 @@ onMounted(() => {
               <td>{{ formatSize(pkg.size_bytes) }}</td>
               <td>{{ pkg.source || "upload" }}</td>
               <td class="actions-cell">
-                <button class="btn btn-sm btn-ghost" @click="onPublish(pkg, false)">发布</button>
-                <button class="btn btn-sm btn-primary" @click="onPublish(pkg, true)">发布并 latest</button>
-                <button class="btn btn-sm btn-danger" @click="onDelete(pkg)">删除</button>
+                <button class="btn btn-sm btn-ghost" :disabled="Boolean(actionKey) || uploading" @click="onPublish(pkg, false)">发布</button>
+                <button class="btn btn-sm btn-primary" :disabled="Boolean(actionKey) || uploading" @click="onPublish(pkg, true)">发布并 latest</button>
+                <button class="btn btn-sm btn-danger" :disabled="Boolean(actionKey) || uploading" @click="onDelete(pkg)">删除</button>
               </td>
             </tr>
           </tbody>
@@ -232,8 +249,8 @@ onMounted(() => {
               <td>{{ formatSize(pkg.size_bytes) }}</td>
               <td class="actions-cell">
                 <a class="btn btn-sm btn-ghost" :href="downloadUrl(pkg)" target="_blank" rel="noopener">下载</a>
-                <button v-if="!pkg.is_latest" class="btn btn-sm btn-primary" @click="onPromote(pkg)">设为 latest</button>
-                <button v-if="!pkg.is_latest" class="btn btn-sm btn-danger" @click="onDelete(pkg)">删除</button>
+                <button v-if="!pkg.is_latest" class="btn btn-sm btn-primary" :disabled="Boolean(actionKey) || uploading" @click="onPromote(pkg)">设为 latest</button>
+                <button v-if="!pkg.is_latest" class="btn btn-sm btn-danger" :disabled="Boolean(actionKey) || uploading" @click="onDelete(pkg)">删除</button>
               </td>
             </tr>
           </tbody>

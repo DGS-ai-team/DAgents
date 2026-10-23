@@ -34,3 +34,17 @@ func TestMessageSourceSurvivesJSONRoundTrip(t *testing.T) {
 		t.Fatalf("restored = %#v", restored)
 	}
 }
+
+func TestConversationBoundaryIsOnlyHiddenForIdleContextProducer(t *testing.T) {
+	m := UserMessage("private bridge", UserNameConversationBoundary)
+	if m.Source == nil || m.Source.Kind != MessageSourceRuntime || m.Source.Form != MessageFormNotice || m.Provenance == nil || m.Provenance.Producer != "idle_context" {
+		t.Fatalf("boundary metadata = %#v / %#v", m.Source, m.Provenance)
+	}
+	if !IsHiddenInjectedUserMessage(m) {
+		t.Fatal("idle context bridge should be hidden")
+	}
+	other := UserMessageWithSource("runtime content", "runtime", MessageSource{Kind: MessageSourceRuntime, Form: MessageFormNotice}, &MessageProvenance{Producer: "other_runtime"})
+	if IsHiddenInjectedUserMessage(other) {
+		t.Fatal("other runtime user content must remain visible")
+	}
+}

@@ -296,6 +296,7 @@ mod tests {
         AgentSummary {
             agent_id: id.into(),
             display_name: name.into(),
+            agent_type: String::new(),
             has_unread: unread,
             has_pending_hitl: hitl,
             pending_hitl_items: items,

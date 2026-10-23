@@ -32,13 +32,12 @@ func SaveFile(path string, cfg *Config) error {
 	return writeAtomic(path, out)
 }
 
-// BootstrapConfig 为进程引导 YAML：仅 listen / local（运行时根固定 DefaultRuntimeRoot）。
+// BootstrapConfig 为 Node 进程引导 YAML：仅包含监听地址。
 type BootstrapConfig struct {
 	Listen ListenConfig `yaml:"listen"`
-	Local  LocalConfig  `yaml:"local"`
 }
 
-// SaveBootstrapFile 仅写入 listen/local，供 Node 引导；其余设置在 node_settings.db。
+// SaveBootstrapFile 仅写入 Node 监听配置；客户端 endpoint 等配置由客户端自己管理。
 func SaveBootstrapFile(path string, cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("nil config")
@@ -47,24 +46,18 @@ func SaveBootstrapFile(path string, cfg *Config) error {
 	if path == "" {
 		return fmt.Errorf("empty config path")
 	}
-	boot := BootstrapConfig{
-		Listen: cfg.Listen,
-		Local:  cfg.Local,
-	}
+	boot := BootstrapConfig{Listen: cfg.Listen}
 	if strings.TrimSpace(boot.Listen.Host) == "" {
 		boot.Listen.Host = DefaultListenHost
 	}
 	if boot.Listen.Port == 0 {
 		boot.Listen.Port = DefaultListenPort
 	}
-	if strings.TrimSpace(boot.Local.Endpoint) == "" {
-		boot.Local.Endpoint = fmt.Sprintf("http://%s:%d", boot.Listen.Host, boot.Listen.Port)
-	}
 	out, err := yaml.Marshal(&boot)
 	if err != nil {
 		return fmt.Errorf("marshal bootstrap config: %w", err)
 	}
-	header := []byte("# DAgents Node bootstrap（仅 listen/local）\n# 其余设置保存在 ./.runtime/node_settings.db 与 llm_configs.db，请用 Web UI 修改。\n")
+	header := []byte("# DAgents Node bootstrap（仅 listen）\n# 其余设置保存在 ./.runtime/node_settings.db 与 llm_configs.db，请用 DAgents Desktop 修改。\n")
 	return writeAtomic(path, append(header, out...))
 }
 

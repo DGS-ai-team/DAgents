@@ -34,6 +34,24 @@ class ReleasePackageCreate(BaseModel):
 class ReleasePackage(ReleasePackageCreate):
     status: str = "draft"
     is_latest: bool = False
+    published_at: int | None = None
+    created_at: int
+    updated_at: int
+
+
+class PublicReleasePackage(BaseModel):
+    """公开下载页使用的字段，不包含上传者标识或存储路径。"""
+
+    artifact: str
+    version: str
+    platform: str
+    channel: str
+    filename: str
+    sha256: str
+    size_bytes: int
+    release_notes: str = ""
+    is_latest: bool = False
+    published_at: int | None = None
     created_at: int
     updated_at: int
 
@@ -45,6 +63,7 @@ class ReleaseCheckResponse(BaseModel):
     current: str
     latest: str
     upgrade_available: bool
+    platform_supported: bool = True
     published_at: int | None = None
     release_notes_url: str = ""
     release_notes: str = ""

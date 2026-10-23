@@ -103,10 +103,12 @@ type TurnCommand struct {
 // remain in their existing history store.
 type CoordinatorSnapshot struct {
 	SessionID          string
+	Source             TurnSource
 	TurnID             string
 	StepID             string
 	Generation         uint64
 	TurnStatus         TurnStatus
+	TurnFinishedAt     *time.Time
 	TurnEndReason      string
 	StepStatus         StepStatus
 	StepEndReason      string
@@ -1294,7 +1296,12 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 	}
 	if c.turn != nil {
 		result.TurnID = c.turn.ID
+		result.Source = c.turn.Source
 		result.TurnStatus = c.turn.Status
+		if c.turn.FinishedAt != nil {
+			finished := *c.turn.FinishedAt
+			result.TurnFinishedAt = &finished
+		}
 		result.TurnEndReason = c.turn.EndReason
 		result.StepIndex = c.turn.StepIndex
 		result.ContextEpoch = c.turn.ContextEpoch

@@ -14,9 +14,12 @@ import (
 
 func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups", s.handleListWorkgroups)
+	s.mux.HandleFunc("GET /v1/workgroups/desktop/list", s.handleDesktopWorkgroupList)
 	s.mux.HandleFunc("POST /v1/workgroups", s.handleCreateWorkgroup)
 	s.mux.HandleFunc("GET /v1/workgroups/meta/agents", s.handleListRegisteredAgents)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}", s.handleGetWorkgroup)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/desktop-snapshot", s.handleDesktopWorkgroupSnapshot)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/desktop-progress", s.handleDesktopWorkgroupProgress)
 	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}", s.handlePatchWorkgroup)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/publish", s.handlePublishWorkgroup)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/llm-configs", s.handleListWorkgroupLLMConfigs)
@@ -42,6 +45,156 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/turn/cancel", s.handleCancelWorkgroupTurn)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/runs", s.handleListWorkgroupRuns)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/runs/{runId}/history", s.handleGetWorkgroupRunHistory)
+}
+
+type desktopWorkgroupListItem struct {
+	manage.WorkgroupListItem
+	Subscribed bool `json:"subscribed"`
+}
+
+func (s *Server) handleDesktopWorkgroupList(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	type listResult struct {
+		items []manage.WorkgroupListItem
+		err   error
+	}
+	allResult := make(chan listResult, 1)
+	subscribedResult := make(chan listResult, 1)
+	go func() {
+		items, err := s.control.ListWorkgroups(r.Context(), manage.WorkgroupListAll)
+		allResult <- listResult{items: items, err: err}
+	}()
+	go func() {
+		items, err := s.control.ListWorkgroups(r.Context(), manage.WorkgroupListSubscribed)
+		subscribedResult <- listResult{items: items, err: err}
+	}()
+	allResponse, subscribedResponse := <-allResult, <-subscribedResult
+	if allResponse.err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", allResponse.err.Error(), nil)
+		return
+	}
+	if subscribedResponse.err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", subscribedResponse.err.Error(), nil)
+		return
+	}
+	all, subscribed := allResponse.items, subscribedResponse.items
+	subscribedIDs := make(map[string]struct{}, len(subscribed))
+	for _, item := range subscribed {
+		subscribedIDs[item.WorkgroupID] = struct{}{}
+	}
+	items := make([]desktopWorkgroupListItem, 0, len(all))
+	for _, item := range all {
+		_, isSubscribed := subscribedIDs[item.WorkgroupID]
+		items = append(items, desktopWorkgroupListItem{WorkgroupListItem: item, Subscribed: isSubscribed})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workgroups": items, "scope": "desktop"})
+}
+
+func (s *Server) handleDesktopWorkgroupSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	if wid == "" {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "workgroup_id required", nil)
+		return
+	}
+	group, err := s.control.GetWorkgroup(r.Context(), wid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	groupView := group
+	if nested, ok := group["workgroup"].(map[string]any); ok {
+		groupView = nested
+	}
+	status := strings.TrimSpace(strAny(groupView["status"]))
+	type result struct {
+		key   string
+		value any
+		err   error
+	}
+	tasks := []struct {
+		key string
+		fn  func() (any, error)
+	}{
+		{"members", func() (any, error) { return s.control.ListWorkgroupMembers(r.Context(), wid) }},
+		{"events", func() (any, error) { return s.control.GetWorkgroupTimeline(r.Context(), wid) }},
+		{"hitl", func() (any, error) { return s.control.ListWorkgroupHITL(r.Context(), wid, true) }},
+	}
+	if r.URL.Query().Get("include_agents") == "true" {
+		tasks = append(tasks, struct {
+			key string
+			fn  func() (any, error)
+		}{"agents", func() (any, error) { return s.control.ListRegisteredAgents(r.Context()) }})
+	}
+	if status == "active" {
+		tasks = append(tasks, struct {
+			key string
+			fn  func() (any, error)
+		}{"human_queue", func() (any, error) { return s.control.ListWorkgroupHumanQueue(r.Context(), wid) }})
+	}
+	if status == "configuring" {
+		tasks = append(tasks, struct {
+			key string
+			fn  func() (any, error)
+		}{"llm_configs", func() (any, error) { return s.control.ListWorkgroupLLMConfigs(r.Context(), wid) }})
+	}
+	results := make(chan result, len(tasks))
+	for _, task := range tasks {
+		task := task
+		go func() {
+			value, callErr := task.fn()
+			results <- result{key: task.key, value: value, err: callErr}
+		}()
+	}
+	snapshot := map[string]any{"workgroup": group, "node_id": s.cfg.NodeID}
+	for range tasks {
+		item := <-results
+		if item.err != nil {
+			writeAPIError(w, http.StatusBadGateway, "manage_error", item.err.Error(), map[string]any{"section": item.key})
+			return
+		}
+		snapshot[item.key] = item.value
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) handleDesktopWorkgroupProgress(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	if wid == "" {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "workgroup_id required", nil)
+		return
+	}
+	type result struct {
+		key   string
+		value any
+		err   error
+	}
+	results := make(chan result, 2)
+	go func() {
+		value, err := s.control.GetWorkgroupTimeline(r.Context(), wid)
+		results <- result{key: "events", value: value, err: err}
+	}()
+	go func() {
+		value, err := s.control.ListWorkgroupHumanQueue(r.Context(), wid)
+		results <- result{key: "human_queue", value: value, err: err}
+	}()
+	payload := make(map[string]any, 2)
+	for range 2 {
+		item := <-results
+		if item.err != nil {
+			writeAPIError(w, http.StatusBadGateway, "manage_error", item.err.Error(), map[string]any{"section": item.key})
+			return
+		}
+		payload[item.key] = item.value
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) workgroupProxyReady(w http.ResponseWriter) bool {

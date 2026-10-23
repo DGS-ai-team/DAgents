@@ -1029,10 +1029,10 @@ last_event_seq
 
 涉及：
 
-- `node/webui/frontend/src/composables/useWorkgroupTimeline.js`
-- `node/webui/frontend/src/components/WorkgroupToolRow.vue`
-- `node/webui/frontend/src/components/WorkgroupApprovalCard.vue`
-- `node/webui/frontend/src/views/WorkgroupView.vue`
+- `desktop/tray-tauri/src/ui/composables/useWorkgroupTimeline.js`
+- `desktop/tray-tauri/src/ui/components/WorkgroupToolRow.vue`
+- `desktop/tray-tauri/src/ui/components/WorkgroupApprovalCard.vue`
+- `desktop/tray-tauri/src/ui/components/WorkgroupWorkspace.vue`
 
 工作：
 

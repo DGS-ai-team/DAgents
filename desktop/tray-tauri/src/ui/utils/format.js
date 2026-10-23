@@ -1,0 +1,147 @@
+import {
+  toolDisplayName,
+  approvalItemDisplayName,
+  approvalItemHint,
+  approvalItemHintVisible,
+  approvalItemPurpose,
+  approvalItemToolLabel,
+  formatApprovalRawArguments,
+  parseToolArguments,
+} from "@shared-frontend/utils/toolCalls.js";
+import { truncateGraphemes } from "@shared-frontend/utils/textTruncate.js";
+import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
+import { isTerminalResultTool, normalizeTerminalResultContent } from "./terminalOutput.js";
+
+export {
+  toolDisplayName,
+  approvalItemDisplayName,
+  approvalItemHint,
+  approvalItemHintVisible,
+  approvalItemPurpose,
+  approvalItemToolLabel,
+  formatApprovalRawArguments,
+};
+
+function normalizedResultStatus(data) {
+  const status = String(data?.status || "").trim().toLowerCase();
+  return status || "";
+}
+
+function resultStatusLabel(status) {
+  switch (status) {
+    case "denied":
+      return "已拒绝";
+    case "failed":
+    case "error":
+      return "执行失败";
+    case "cancelled":
+    case "canceled":
+      return "已终止";
+    case "timed_out":
+      return "已超时";
+    case "running":
+      return "执行中";
+    case "queued":
+      return "后台执行中";
+    case "awaiting_user":
+      return "等待输入";
+    case "unknown":
+      return "状态未知";
+    case "succeeded":
+      return "已完成";
+    default:
+      return "已完成";
+  }
+}
+
+export function formatToolCallLine(entry) {
+  const data = entry?.data || entry || {};
+  const name = entry?.summary || data.summary || toolDisplayName(data.tool_name || data.name, data.arguments || {});
+  const partial = entry?.partial || data.partial ? " …" : "";
+  return `▶ ${name}${partial}`;
+}
+
+/** 对齐 Python format_tool_result / parse_temporary_agent_tool_result。 */
+export function formatToolResultDisplay(entry, { verbose = false } = {}) {
+  const data = entry?.data || entry || {};
+  const name = String(data.tool_name || data.name || "tool").trim();
+  const content = String(data.content || data.output || "").trim();
+  const terminalResult = isTerminalResultTool(name);
+  const displayContent = terminalResult ? normalizeTerminalResultContent(content) : content;
+  const status = normalizedResultStatus(data);
+  const denied = status === "denied";
+  const elapsed = formatToolElapsed(data.duration_seconds);
+  const args = parseToolArguments(data.arguments ?? data.raw_arguments);
+
+  const parsed = parseTemporaryAgentToolResult(name, content);
+  if (parsed) {
+    let headline = parsed.summary;
+    if (status && status !== "succeeded") headline = `${resultStatusLabel(status)} · ${headline}`;
+    else if (elapsed) headline += elapsed;
+    return {
+      headline,
+      detail: parsed.detail || "",
+      raw: verbose ? content : "",
+    };
+  }
+
+  const displayName = entry?.summary || data.summary || toolDisplayName(name, args);
+  const resultLabel = resultStatusLabel(status);
+  let headline = `${displayName} · ${resultLabel}${elapsed}`;
+  // A failed/cancelled result is evidence the model may need to recover from;
+  // only policy-denied results hide the body for the compact UI.
+  const detail = !denied && displayContent ? displayContent : "";
+  return { headline, detail, raw: verbose ? displayContent : detail };
+}
+
+export function formatToolElapsed(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return "";
+  const s = Math.max(0, Number(seconds));
+  if (s < 1) return ` · ${Math.round(s * 1000)}ms`;
+  if (s < 60) return ` · ${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return ` · ${m}m${Math.round(s - m * 60)}s`;
+}
+
+export function formatRelativeTime(iso) {
+  if (!iso) return "";
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return "";
+  const diff = Date.now() - ts;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "刚刚";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day} 天前`;
+  return new Date(ts).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+/** 侧栏紧凑相对时间：1m / 9h / 2d */
+export function formatCompactRelativeTime(iso) {
+  if (!iso) return "";
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return "";
+  const diff = Math.max(0, Date.now() - ts);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 14) return `${day}d`;
+  return new Date(ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
+
+export function agentRecordId(agent) {
+  return String(agent?.agent_id || agent?.AgentID || "").trim();
+}
+
+export function agentDisplayTitle(agent) {
+  const name = String(agent?.display_name || agent?.DisplayName || "").trim();
+  if (name) return name.length > 48 ? truncateGraphemes(name, 48) : name;
+  return "未命名 Agent";
+}

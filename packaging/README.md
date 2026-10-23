@@ -6,14 +6,14 @@
 
 | 名称 | 含义 |
 |------|------|
-| **`dagents-local-assistant-linux-amd64-*.tar.gz`** | Linux **Go Node + 内嵌 Web UI**：`dagents-node`（含 `go:embed` 的 `/ui/`）、`dagents-client`（probe/update）、`dagents-browser` + 配置、`.runtime/`、`packaging/agent-templates/`、**`scripts/`** |
+| **`dagents-local-assistant-linux-amd64-*.tar.gz`** | Linux Go Node API、`dagents-client`（probe/update）、`dagents-browser`、bootstrap 配置、`.runtime/`、Agent templates 与启动脚本；不包含 Desktop UI |
 | **`dagents-manage-bundle-*.tar.gz`** | Manage **离线包**（唯一 Manage Release 附件）：内含镜像 + `docker-compose` + 导入/重启脚本 |
 | **`dagents-manage-*.tar.gz`**（本地） | 纯镜像导出；仅 `build_manage_docker.sh` 中间产物，**不再单独发布** |
 | **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端；**Release CI 已不再构建** |
-| **`dagents-cli`**（removed） | 原 Textual TUI；Phase 4 起移除，请用 Web UI |
+| **`dagents-cli`**（removed） | 原 Textual TUI；Phase 4 起移除 |
 
-| **`dagents-local-assistant-windows-amd64-installer-*.exe`** | Windows **x64 Inno** 安装包（附加任务可选 Tauri 推荐轨 / Go 兼容轨 Shell） |
-| **`dagents-local-assistant-windows-386-installer-*.exe`** | Windows **x86/32 位 Inno** 安装包（附加任务可选 Tauri 推荐轨 / Go 兼容轨 Shell） |
+| **`dagents-local-assistant-windows-amd64-installer-*.exe`** | Windows **x64 Inno** 安装包（Agent Node + Tauri Desktop） |
+| **`dagents-local-assistant-windows-386-installer-*.exe`** | Windows **x86/32 位 Inno** 安装包（Agent Node + Tauri Desktop） |
 | **`DAgents Setup`（removed）** | 原便携 Tauri Setup 向导已移除；请直接使用 Inno 安装包 |
 
 本地/CI 打包：
@@ -28,13 +28,13 @@ scripts/package_local_assistant.sh
 # dist/dagents-local-assistant-windows-386-installer-0.5.1.exe
 ```
 
-Linux Release CI：Runner **ubuntu-latest**；Go 二进制 **CGO_ENABLED=0** 静态编译；**Release 构建前执行 `node/webui/build.sh`**（Web UI 不入库，嵌入 `dagents-node`）；Manage Console 由 **`manage/console/build.sh`** 或 Docker 多阶段构建。Windows Release CI 在 x64/x86 矩阵中分别构建全部二进制并生成 Inno 安装包；不再发布 Windows 免安装归档。`dagents-cli`（Textual TUI）已移除。
+Linux Release CI：Runner **ubuntu-latest**；Go 二进制 **CGO_ENABLED=0** 静态编译，不需要构建前端；Linux Node 包只提供 API，不包含 Desktop Runtime。Manage Console 由 **`manage/console/build.sh`** 或 Docker 多阶段构建。Windows Release CI 在 x64/x86 矩阵中构建 Node 与 Tauri Desktop 并生成 Inno 安装包；Go browser-based Shell 仅保留源码，不发行。`dagents-cli`（Textual TUI）已移除。
 
-### Web UI 与安装包
+### Desktop UI 与 Node package
 
-- **无需单独 UI 安装包**：浏览器 Client 静态资源通过 `go:embed` 打进 **`dagents-node`**，启动 Node 后访问 `http://127.0.0.1:<port>/ui/`。
-- **开发**时可用 Vite 热更新（见 [`node/webui/README.md`](../node/webui/README.md)）；**生产/Release** 须在 `go build` 前运行 `bash node/webui/build.sh`（CI 已自动化；静态产物不提交 Git）。
-- 若 `ui.enabled: false`，Node 不挂载 `/ui/` 路由。
+- Windows 桌面界面由独立 **Tauri Desktop** 提供；Node 只提供 API，不再托管 `/ui/` 浏览器应用。
+- Linux Node archive 是 API 服务包，不包含 Desktop UI 或其他桌面运行时。
+- `desktop/tray-tauri/src/` 由 Desktop 自身构建；`shared/frontend/` 仅保留跨产品共享的展示 helper。Go Node 构建不依赖前端源码或静态资源。
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|
@@ -44,7 +44,7 @@ Linux Release CI：Runner **ubuntu-latest**；Go 二进制 **CGO_ENABLED=0** 静
 
 | 路径 | 说明 |
 |------|------|
-| **`agent-client/`** | Go Node + Client **共用 YAML** 启动示例（`config.example.yaml`） |
+| **`agent-client/`** | Node bootstrap 示例（`config.example.yaml` 仅含 `listen`）；独立 Client 的 `local` endpoint 配置仍由各 Client 自己管理 |
 | **`agent-templates/`** | 内置 Agent 模板（含 soul/custom 预设；打入发布包，并 `go:embed` 进 Node） |
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等；**`RECOMMENDED_CLI_TOOLS.md`** 推荐第三方 CLI） |
 | **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -83,6 +84,41 @@ func TestMockClientRespectsContextCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestMockClientNormalizeAssistantIsSafeDuringAdapterChanges(t *testing.T) {
+	normalizeConcurrently := func(t *testing.T, m *MockClient, updateAdapter bool) {
+		t.Helper()
+		var wg sync.WaitGroup
+		for i := 0; i < 32; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for j := 0; j < 50; j++ {
+					if updateAdapter {
+						if i%2 == 0 {
+							m.setAdapter(openAIAdapter{})
+						} else {
+							m.setAdapter(deepSeekAdapter{})
+						}
+					}
+					got := m.NormalizeAssistant(nil, Message{Role: "assistant", Content: "reply"})
+					if got.Role != "assistant" || got.Content != "reply" {
+						t.Errorf("normalized message = %+v", got)
+						return
+					}
+				}
+			}(i)
+		}
+		wg.Wait()
+	}
+
+	t.Run("default adapter initialization", func(t *testing.T) {
+		normalizeConcurrently(t, &MockClient{}, false)
+	})
+	t.Run("runtime adapter updates", func(t *testing.T) {
+		normalizeConcurrently(t, &MockClient{}, true)
+	})
 }
 
 func TestChildAgentFlowMockParentThenChild(t *testing.T) {

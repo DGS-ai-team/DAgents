@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
@@ -14,9 +17,9 @@ import (
 )
 
 func (s *Server) registerSetupRoutes() {
-	s.mux.HandleFunc("GET /v1/setup/config", s.handleGetSetupConfig)
-	s.mux.HandleFunc("PATCH /v1/setup/config", s.handlePatchSetupConfig)
-	s.mux.HandleFunc("POST /v1/setup/llm/probe-models", s.handleProbeLLMModels)
+	s.mux.HandleFunc("GET /v1/settings", s.handleGetSetupConfig)
+	s.mux.HandleFunc("PATCH /v1/settings", s.handlePatchSetupConfig)
+	s.mux.HandleFunc("POST /v1/llm/probe-models", s.handleProbeLLMModels)
 }
 
 func (s *Server) setupWritable() bool {
@@ -49,6 +52,8 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "至少提供一个配置块", nil)
 		return
 	}
+	s.llmRefMu.Lock()
+	defer s.llmRefMu.Unlock()
 
 	if setup.PatchHasNonLLMBlock(patch) && s.nodeSettings == nil && !(s.configPath != "" && configPathWritable(s.configPath)) {
 		writeAPIError(w, http.StatusForbidden, "config_not_writable", "node_settings 不可用且 config.yaml 不可写", nil)
@@ -67,8 +72,13 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	// the Agent registry still has no executable browser tools.
 	browserRuntimeChange := patch.Features != nil || patch.Browser != nil
 	var preparedBrowserManager *browser.Manager
+	var preparedBrowserService *browser.ServiceProcess
+	if browserRuntimeChange && updated.BrowserEnabled() && !config.BrowserPlatformSupported() {
+		writeAPIError(w, http.StatusNotImplemented, "unsupported_browser_platform", config.BrowserPlatformReason(), nil)
+		return
+	}
 	if browserRuntimeChange && updated.BrowserEnabled() {
-		preparedBrowserManager, err = browser.NewManager(updated, nil)
+		preparedBrowserManager, preparedBrowserService, err = s.browserRuntimeFactory(updated)
 		if err != nil {
 			writeAPIError(w, http.StatusServiceUnavailable, "browser_service_unavailable", err.Error(), nil)
 			return
@@ -79,11 +89,13 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		defer func() {
 			if !browserManagerCommitted {
 				_ = preparedBrowserManager.Close()
+				_ = preparedBrowserService.Close()
 			}
 		}()
 	}
 
 	needsLLMPersist := patch.LLM != nil && len(patch.LLM.Profiles) > 0 && s.llmConfigs != nil
+	needsLLMReferenceCheck := patch.LLM != nil && len(patch.LLM.Profiles) > 0
 	var llmSnapshot []store.LLMConfigRecord
 	var settingsSnapshot *config.Config
 	if needsLLMPersist {
@@ -93,6 +105,24 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		llmSnapshot = records
+	}
+	if needsLLMReferenceCheck {
+		records := llmSnapshot
+		if !needsLLMPersist {
+			records = llmProfileRecordsFromConfig(s.cfg)
+		}
+		if err := s.validateLLMProfileReferences(r.Context(), records, patch.LLM.Profiles); err != nil {
+			if inUse, ok := err.(*llmProfileInUseError); ok {
+				writeAPIError(w, http.StatusConflict, "llm_profile_in_use", inUse.Error(), map[string]any{
+					"profile_id": inUse.ProfileID,
+					"agent_ids":  inUse.AgentIDs,
+					"action":     "先修改这些 Agent 的模型配置，或删除这些 Agent 后重试",
+				})
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "llm_profile_reference_check_failed", err.Error(), nil)
+			return
+		}
 	}
 	if s.nodeSettings != nil {
 		prev, err := s.nodeSettings.Load(r.Context())
@@ -149,7 +179,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 
 	setup.CopyConfig(s.cfg, updated)
 	if browserRuntimeChange {
-		s.installBrowserManager(preparedBrowserManager)
+		s.installBrowserRuntime(preparedBrowserManager, preparedBrowserService, updated.Browser.ServiceURL)
 		browserManagerCommitted = true
 	}
 	s.syncLLMRuntimeFromStore(r.Context())
@@ -171,9 +201,49 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		return nil
 	}
 	existing := map[string]store.LLMConfigRecord{}
-	if records, err := s.llmConfigs.List(ctx); err == nil {
-		for _, rec := range records {
-			existing[rec.ID] = rec
+	existingRecords, err := s.llmConfigs.List(ctx)
+	if err != nil {
+		return fmt.Errorf("load existing llm configs: %w", err)
+	}
+	for _, rec := range existingRecords {
+		existing[rec.ID] = rec
+	}
+	if err := s.validateLLMProfileReferences(ctx, existingRecords, profiles); err != nil {
+		return err
+	}
+
+	// Validate secret moves before ReplaceAll starts its transaction. A blank
+	// key on a renamed profile means "keep the old key", so ambiguity must fail
+	// instead of silently dropping or attaching another profile's secret.
+	destinations := make(map[string]bool, len(profiles))
+	for _, p := range profiles {
+		if id := strings.TrimSpace(p.ID); id != "" {
+			destinations[id] = true
+		}
+	}
+	migrations := map[string]string{} // destination ID -> source ID
+	sourceDestinations := map[string]int{}
+	for _, p := range profiles {
+		id := strings.TrimSpace(p.ID)
+		sourceID := strings.TrimSpace(p.OriginalID)
+		if id == "" || sourceID == "" || sourceID == id || p.ClearAPIKey || strings.TrimSpace(p.APIKey) != "" {
+			continue
+		}
+		if _, destinationExists := existing[id]; destinationExists && id != sourceID {
+			return fmt.Errorf("cannot preserve API key while renaming %q: destination %q already exists", sourceID, id)
+		}
+		if _, ok := existing[sourceID]; !ok {
+			return fmt.Errorf("cannot preserve API key while renaming %q: source profile does not exist", sourceID)
+		}
+		if destinations[sourceID] {
+			return fmt.Errorf("cannot preserve API key while renaming %q: source profile is still present", sourceID)
+		}
+		sourceDestinations[sourceID]++
+		migrations[id] = sourceID
+	}
+	for sourceID, count := range sourceDestinations {
+		if count > 1 {
+			return fmt.Errorf("cannot preserve API key from %q: multiple profiles reference the same source", sourceID)
 		}
 	}
 	records := make([]store.LLMConfigRecord, 0, len(profiles))
@@ -186,7 +256,11 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		}
 		thinking := strings.TrimSpace(p.Thinking)
 		effort := strings.TrimSpace(p.ReasoningEffort)
-		if old, ok := existing[id]; ok {
+		old, ok := existing[id]
+		if !ok {
+			old, ok = existing[migrations[id]]
+		}
+		if ok {
 			if thinking == "" {
 				thinking = old.Thinking
 			}
@@ -213,6 +287,17 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 			keys[id] = key
 			continue
 		}
+		if sourceID := migrations[id]; sourceID != "" {
+			source := existing[sourceID]
+			if source.HasAPIKey() {
+				key, err := s.llmConfigs.DecryptAPIKey(source)
+				if err != nil {
+					return fmt.Errorf("read API key for source profile %q: %w", sourceID, err)
+				}
+				keys[id] = key
+				continue
+			}
+		}
 		if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
 			if v := strings.TrimSpace(os.Getenv(env)); v != "" {
 				keys[id] = v
@@ -220,6 +305,83 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		}
 	}
 	return s.llmConfigs.ReplaceAll(ctx, records, keys, clearIDs)
+}
+
+type llmProfileInUseError struct {
+	ProfileID string
+	AgentIDs  []string
+}
+
+func (e *llmProfileInUseError) Error() string {
+	return fmt.Sprintf("无法删除或改名模型配置「%s」：仍被 Agent「%s」使用。请先修改这些 Agent 的模型配置，或删除这些 Agent 后重试。", e.ProfileID, strings.Join(e.AgentIDs, "、"))
+}
+
+func llmProfileRecordsFromConfig(cfg *config.Config) []store.LLMConfigRecord {
+	if cfg == nil {
+		return nil
+	}
+	records := make([]store.LLMConfigRecord, 0, len(cfg.LLM.Profiles))
+	for id := range cfg.LLM.Profiles {
+		records = append(records, store.LLMConfigRecord{ID: id})
+	}
+	return records
+}
+
+func (s *Server) validateLLMProfileReferences(ctx context.Context, existing []store.LLMConfigRecord, profiles []setup.LLMProfileSettings) error {
+	if s.agents == nil || len(existing) == 0 {
+		return nil
+	}
+	retained := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		if id := strings.TrimSpace(profile.ID); id != "" {
+			retained[id] = struct{}{}
+		}
+	}
+	removed := make(map[string]struct{})
+	for _, record := range existing {
+		if _, ok := retained[record.ID]; !ok {
+			removed[record.ID] = struct{}{}
+		}
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	agents, err := s.agents.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list Agents while checking LLM config references: %w", err)
+	}
+	refs := make(map[string]map[string]struct{})
+	for _, agent := range agents {
+		snapshot, err := agentruntime.ParseSnapshot(agent.ConfigSnapshot)
+		if err != nil {
+			return fmt.Errorf("cannot verify LLM config references because Agent %q has an invalid config snapshot: %w", agent.AgentID, err)
+		}
+		id := agentruntime.LLMActiveFromDefaults(snapshot)
+		if _, ok := removed[id]; !ok {
+			continue
+		}
+		if refs[id] == nil {
+			refs[id] = make(map[string]struct{})
+		}
+		refs[id][agent.AgentID] = struct{}{}
+	}
+	removedIDs := make([]string, 0, len(removed))
+	for profileID := range removed {
+		removedIDs = append(removedIDs, profileID)
+	}
+	sort.Strings(removedIDs)
+	for _, profileID := range removedIDs {
+		agentIDs := make([]string, 0, len(refs[profileID]))
+		for id := range refs[profileID] {
+			agentIDs = append(agentIDs, id)
+		}
+		if len(agentIDs) == 0 {
+			continue
+		}
+		sort.Strings(agentIDs)
+		return &llmProfileInUseError{ProfileID: profileID, AgentIDs: agentIDs}
+	}
+	return nil
 }
 
 func (s *Server) enrichLLMSettingsView(llm *setup.LLMSettings) {

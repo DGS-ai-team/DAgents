@@ -6,7 +6,7 @@
 
 | 子系统 | 代码 | 说明 |
 |---|---|---|
-| API / Server | `node/internal/api/` | HTTP、SSE、Web UI 和工作组反代 |
+| API / Server | `node/internal/api/` | Node HTTP/SSE API 和工作组反代；不托管 UI 页面 |
 | Session | `node/internal/session/` | Manager、runtime、队列消费、持久化边界 |
 | Turn | `node/internal/turn/` | 单 Step 模型循环、工具路由、HITL |
 | Queue | `node/internal/queue/` | 多来源消息、优先级和 FIFO |
@@ -31,7 +31,7 @@
 
 - API/OpenAPI：[`../architecture/agent-node-api.md`](../architecture/agent-node-api.md)、[`../architecture/openapi-node.yaml`](../architecture/openapi-node.yaml)
 - Workgroup schemas/fixtures：[`../design/fixtures/workgroup-d05/`](../design/fixtures/workgroup-d05/)
-- Node UI：`node/webui/frontend/src/`
+- Desktop UI 与 Tauri 宿主：`desktop/tray-tauri/src/`、`desktop/tray-tauri/src-tauri/`
 - Manage Console：`manage/console/frontend/src/`
 - 公共配置：`shared/config/`
 

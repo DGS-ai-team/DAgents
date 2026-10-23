@@ -18,6 +18,10 @@ packaging/agent-client/policy.local.yaml
 # local runtime/state files
 .runtime/
 logs/
+# Codex local environment metadata and disposable desktop smoke-test state.
+/.codex/
+/.runtime-test*/
+/tauri-dev.log
 # 仅忽略仓库根下名为 history 的目录，避免误伤 `app/harness/history/` 源码包。
 /history/
 *.sqlite3
@@ -35,6 +39,7 @@ docs/private-enterprise-positioning.md
 .worktrees/
 
 # frontend/tooling artifacts (for split-repo collaboration)
+/node_modules/
 .pnpm-store/
 pnpm-debug.log*
 npm-debug.log*
@@ -49,10 +54,10 @@ client/dagents-client
 **/__debug_bin*
 **/.tmp-gocache/
 
-# Node Web UI (npm ci in CI / build.sh)
+# Legacy local Node WebUI outputs; the source package and runtime entry are retired.
 node/webui/frontend/node_modules/
-node/internal/webui/static/*
-!node/internal/webui/static/.gitkeep
+node/webui/frontend/dist/
+node/internal/webui/static/
 
 # Manage Console (npm ci in CI / build.sh)
 manage/console/frontend/node_modules/

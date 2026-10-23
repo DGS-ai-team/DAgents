@@ -1,11 +1,12 @@
 {
   "name": "dagents-manage-console",
   "private": true,
-  "version": "0.11.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:icons": "node --test ../../../shared/icons/icons.test.js",
     "preview": "vite preview",
     "lint": "eslint . --quiet"
   },

@@ -24,6 +24,11 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
 	cfg := &config.Config{NodeID: "node-test", RuntimeRoot: t.TempDir()}
 	cfg.ApplyDefaults()
+	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
+		"mock": {Provider: "mock", Model: "mock"},
+	}
+	cfg.LLM.ProfileOrder = []string{"mock"}
+	cfg.SetActiveLLMProfile("mock")
 	cfg.Onboarding.NodeProfileCompleted = true
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
 	if err != nil {

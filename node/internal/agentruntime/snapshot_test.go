@@ -123,13 +123,13 @@ func TestApplyDefaultsToTurnOptions_maxStepsFromSnapshot(t *testing.T) {
 	ApplyDefaultsToTurnOptions(&turn, Snapshot{Defaults: map[string]any{
 		"llm": map[string]any{"max_steps": float64(8)},
 	}})
-	if turn.Budget.MaxSteps != 8 {
-		t.Fatalf("got %d want 8", turn.Budget.MaxSteps)
+	if turn.Budget.MaxSteps != 8 || !turn.Budget.ReserveFinalSummary {
+		t.Fatalf("budget=%+v want max_steps=8 with reserved final summary", turn.Budget)
 	}
 	var empty session.TurnOptions
 	empty.Budget.MaxSteps = 99 // BaseTurn 值不得覆盖 Agent 缺省
 	ApplyDefaultsToTurnOptions(&empty, Snapshot{})
-	if empty.Budget.MaxSteps != DefaultMaxSteps {
-		t.Fatalf("got %d want creation default %d", empty.Budget.MaxSteps, DefaultMaxSteps)
+	if empty.Budget.MaxSteps != DefaultMaxSteps || !empty.Budget.ReserveFinalSummary {
+		t.Fatalf("budget=%+v want creation default max_steps=%d with reserved final summary", empty.Budget, DefaultMaxSteps)
 	}
 }

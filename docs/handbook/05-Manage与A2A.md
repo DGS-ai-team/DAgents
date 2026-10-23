@@ -19,7 +19,7 @@ Manage 不负责本地 Agent 的 turn loop、工具执行或终端，也不主�
 
 ```text
 Node Registrar / Dialer ──出站 WS──► Manage
-Node Web UI ──HTTP/SSE──► Node ──Workgroup API/WS──► Manage
+DAgents Desktop ──HTTP/SSE──► Node ──Workgroup API/WS──► Manage
 Manage Console ──HTTP──► Manage
 ```
 

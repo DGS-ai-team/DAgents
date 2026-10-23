@@ -1,0 +1,485 @@
+<script setup>
+import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
+import * as api from "../api/node.js";
+import { confirmDesktopAction } from "../utils/desktopDialogs.js";
+import TriggerEditor from "./settings/TriggerEditor.vue";
+import { formatTriggerCondition, formatUnixTime, shortId, truncateText, triggerFireStatusMessage } from "../utils/panelFormat.js";
+import {
+  buildCreatePayload,
+  buildTriggerPatch,
+  defaultTriggerForm,
+  triggerToForm,
+  validateTriggerForm,
+} from "../utils/triggerForm.js";
+
+defineProps({
+  embedded: { type: Boolean, default: false },
+});
+
+const emit = defineEmits(["close"]);
+const router = useRouter();
+
+const loading = ref(false);
+const busyKey = ref("");
+const error = ref("");
+const statusMessage = ref("");
+const data = ref(null);
+const agents = ref([]);
+const agentsLoading = ref(false);
+const agentsLoaded = ref(false);
+const historyById = ref({});
+const historyOpenId = ref("");
+const editingId = ref(null);
+const form = reactive(defaultTriggerForm());
+const formSnapshot = ref("");
+const formError = ref("");
+
+const triggers = computed(() => {
+  const rows = data.value?.triggers;
+  return Array.isArray(rows) ? rows : [];
+});
+
+function rowBusy(key) {
+  return busyKey.value === key;
+}
+
+function isAutoManaged(item) {
+  return String(item?.controller || "").trim().toLowerCase() === "auto";
+}
+
+function isRetired(item) {
+  const controller = String(item?.controller || "").trim().toLowerCase();
+  return isAutoManaged(item) || (controller !== "" && controller !== "user");
+}
+
+function displayName(item) {
+  return item?.name || (isRetired(item) ? "已退役触发器" : "(未命名)");
+}
+
+function openAutoSettings(item) {
+  const agentId = autoSettingsAgentId(item);
+  if (agentId && isAutoSettingsAvailable(item)) {
+    router.push({ name: "settings-agent-detail", params: { agentId }, query: { section: "autonomy" } });
+  }
+}
+
+function autoSettingsAgentId(item) {
+  return String(item?.target_agent_id || item?.owner_agent_id || "").trim();
+}
+
+function isAutoSettingsAvailable(item) {
+  const agentId = autoSettingsAgentId(item);
+  return Boolean(agentsLoaded.value && agentId && agents.value.some((agent) => String(agent.agent_id || agent.id || "") === agentId));
+}
+
+function isAutoOwnerUnavailable(item) {
+  return Boolean(agentsLoaded.value && !isAutoSettingsAvailable(item));
+}
+
+function resetForm() {
+  Object.assign(form, defaultTriggerForm());
+  formError.value = "";
+}
+
+async function load() {
+  loading.value = true;
+  agentsLoading.value = true;
+  agentsLoaded.value = false;
+  error.value = "";
+  statusMessage.value = "";
+  try {
+    const [triggerResult, agentResult] = await Promise.allSettled([api.listTriggers(), api.listAgents()]);
+    if (triggerResult.status === "rejected") throw triggerResult.reason;
+    data.value = triggerResult.value;
+    if (agentResult.status === "fulfilled") {
+      const agentData = agentResult.value;
+      agents.value = Array.isArray(agentData?.agents) ? agentData.agents : Array.isArray(agentData) ? agentData : [];
+      agentsLoaded.value = true;
+    } else {
+      agents.value = [];
+      error.value = "无法加载智能体列表，请重试后再创建任务";
+    }
+  } catch (e) {
+    error.value = e.message;
+    data.value = null;
+  } finally {
+    loading.value = false;
+    agentsLoading.value = false;
+  }
+}
+
+async function fireNow(item) {
+  const id = item?.trigger_id;
+  if (!id || rowBusy(`fire:${id}`)) return;
+  busyKey.value = `fire:${id}`;
+  error.value = "";
+  statusMessage.value = "";
+  try {
+    const record = await api.fireTrigger(id);
+    statusMessage.value = triggerFireStatusMessage(record, item.name || id);
+    await loadHistory(item);
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busyKey.value = "";
+  }
+}
+
+async function loadHistory(item) {
+  const id = item?.trigger_id;
+  if (!id) return;
+  historyOpenId.value = id;
+  try {
+    const result = await api.getTriggerHistory(id);
+    historyById.value = { ...historyById.value, [id]: result?.records || [] };
+  } catch (e) {
+    error.value = `无法加载触发历史：${e.message}`;
+  }
+}
+
+async function recoverPending(item) {
+  const id = item?.trigger_id;
+  const deliveryId = String(item?.pending_delivery_id || "").trim();
+  if (!id || !deliveryId || rowBusy(`recover:${id}`)) return;
+  const confirmation = isAutoManaged(item)
+    ? "确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后默认唤醒保持禁用，请返回 Auto 设置同步唤醒。"
+    : "确认并丢弃这次未确认的旧投递？\n\n不会重放该投递；恢复后任务会保持禁用，需要你手动启用。";
+  if (!await confirmDesktopAction(confirmation)) return;
+  busyKey.value = `recover:${id}`;
+  error.value = "";
+  try {
+    const updated = await api.recoverTrigger(id, deliveryId, item.revision);
+    replaceTrigger(updated);
+    statusMessage.value = isAutoManaged(item)
+      ? `已丢弃旧投递「${item.name || id}」；请返回 Auto 设置同步唤醒。`
+      : `已丢弃旧投递「${item.name || id}」，任务保持禁用；请核对后手动启用。`;
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busyKey.value = "";
+  }
+}
+
+function cancelEdit() {
+  editingId.value = null;
+  resetForm();
+}
+
+function startCreate() {
+  editingId.value = "new";
+  resetForm();
+  form.enabled = true;
+  formSnapshot.value = "";
+}
+
+function startEdit(item) {
+  editingId.value = item.trigger_id;
+  Object.assign(form, triggerToForm(item));
+  formSnapshot.value = JSON.stringify(form);
+  formError.value = "";
+}
+
+function replaceTrigger(updated) {
+  if (!data.value || !updated?.trigger_id) return;
+  const rows = Array.isArray(data.value.triggers) ? [...data.value.triggers] : [];
+  const idx = rows.findIndex((row) => row.trigger_id === updated.trigger_id);
+  if (idx >= 0) rows[idx] = updated;
+  else rows.unshift(updated);
+  data.value = { ...data.value, triggers: rows };
+}
+
+function removeTrigger(triggerId) {
+  if (!data.value) return;
+  data.value = {
+    ...data.value,
+    triggers: triggers.value.filter((row) => row.trigger_id !== triggerId),
+  };
+}
+
+async function saveForm() {
+  const validationError = validateTriggerForm(form);
+  if (validationError) {
+    formError.value = validationError;
+    return;
+  }
+  formError.value = "";
+  if (!String(form.targetAgentId || "").trim()) {
+    formError.value = "请选择目标智能体";
+    return;
+  }
+  const isCreate = editingId.value === "new";
+  busyKey.value = isCreate ? "save:new" : `save:${editingId.value}`;
+  error.value = "";
+  statusMessage.value = "";
+  try {
+    if (isCreate) {
+      const created = await api.createTrigger(buildCreatePayload(form));
+      replaceTrigger(created);
+      statusMessage.value = `已创建「${created.name || form.name}」`;
+    } else {
+      const previous = formSnapshot.value ? JSON.parse(formSnapshot.value) : null;
+      const changed = buildTriggerPatch(previous, form);
+      if (!Object.keys(changed).length) {
+        cancelEdit();
+        return;
+      }
+      const updated = await api.updateTrigger(editingId.value, changed);
+      replaceTrigger(updated);
+      statusMessage.value = `已保存「${updated.name || form.name}」`;
+    }
+    cancelEdit();
+  } catch (e) {
+    formError.value = e.message;
+  } finally {
+    busyKey.value = "";
+  }
+}
+
+async function toggleEnabled(item) {
+  const id = item?.trigger_id;
+  if (!id || rowBusy(`toggle:${id}`)) return;
+  const next = !item.enabled;
+  busyKey.value = `toggle:${id}`;
+  error.value = "";
+  statusMessage.value = "";
+  try {
+    const updated = await api.updateTrigger(id, { enabled: next });
+    replaceTrigger(updated);
+    statusMessage.value = next ? `已启用「${updated.name || id}」` : `已禁用「${updated.name || id}」`;
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busyKey.value = "";
+  }
+}
+
+async function removeTriggerConfirmed(item) {
+  const id = item?.trigger_id;
+  const label = item?.name || id;
+  if (!id || rowBusy(`delete:${id}`)) return;
+  if (!await confirmDesktopAction(`确定删除定时任务「${label}」？\n\n删除后不可恢复。`)) return;
+  busyKey.value = `delete:${id}`;
+  error.value = "";
+  statusMessage.value = "";
+  try {
+    await api.deleteTrigger(id);
+    if (editingId.value === id) cancelEdit();
+    removeTrigger(id);
+    statusMessage.value = `已删除「${label}」`;
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busyKey.value = "";
+  }
+}
+
+function targetHint(item) {
+  const mode = String(item.session_target_mode || "").trim();
+  const modeLabel =
+    {
+      latest_active: "最近活跃会话",
+      bound_agent: "绑定智能体",
+      new_session: "每次新建会话",
+      fixed: "固定会话",
+    }[mode] || (mode || "未指定");
+  const targetId = String(item.target_agent_id || "").trim();
+  const target = agents.value.find((agent) => String(agent.agent_id || agent.id || "") === targetId);
+  const targetLabel = target ? (target.display_name || target.name || "目标智能体") : targetId ? "未找到智能体" : "未指定智能体";
+  return `${targetLabel} · ${modeLabel}`;
+}
+
+function formatSchedule(item) {
+  const condition = item?.condition || {};
+  const interval = Number(condition.interval_seconds);
+  if (!Number.isFinite(interval) || interval <= 0) return formatTriggerCondition(condition);
+  if (interval % 86400 === 0) return `每 ${interval / 86400} 天`;
+  if (interval % 3600 === 0) return `每 ${interval / 3600} 小时`;
+  if (interval % 60 === 0) return `每 ${interval / 60} 分钟`;
+  return `每 ${interval} 秒`;
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <section class="panel panel-overlay__card command-panel triggers-panel" :class="{ 'settings-embedded-panel': embedded }">
+    <header v-if="!embedded" class="panel__header command-panel__header">
+      <div>
+        <div class="panel__title">定时任务</div>
+      </div>
+      <div class="command-panel__header-actions">
+        <button type="button" class="btn btn--primary btn--sm" :disabled="loading || editingId === 'new'" @click="startCreate">
+          新建
+        </button>
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+      </div>
+    </header>
+
+    <div class="panel__body command-panel__body">
+      <div v-if="loading && !data" class="command-panel__loading">加载中…</div>
+      <div v-else-if="error" class="command-panel__error">{{ error }}</div>
+      <p v-if="statusMessage" class="command-panel__status">{{ statusMessage }}</p>
+      <template v-if="data">
+        <section v-if="editingId === 'new'" class="command-section trigger-editor-section">
+          <h3 class="command-section__title">新建定时任务</h3>
+          <TriggerEditor
+            v-model:form="form"
+            :form-error="formError"
+            :busy="rowBusy('save:new')"
+            :agents="agents"
+            :agents-loading="agentsLoading"
+            submit-label="创建"
+            @submit="saveForm"
+            @cancel="cancelEdit"
+          />
+        </section>
+
+        <section class="command-section">
+          <div class="command-section__intro">
+              <div>
+                <h3 class="command-section__title">已配置任务</h3>
+                <p class="command-section__hint">任务会按调度条件自动投递；禁用后保留配置但不会触发。</p>
+              </div>
+            <div class="command-section__actions">
+              <span class="command-section__count">{{ triggers.length }}</span>
+              <button type="button" class="btn btn--primary btn--sm" :disabled="loading || editingId === 'new'" @click="startCreate">新建</button>
+            </div>
+          </div>
+          <ul v-if="triggers.length" class="command-card-list">
+            <li v-for="item in triggers" :key="item.trigger_id" class="command-card">
+              <div class="command-card__main">
+                <template v-if="editingId === item.trigger_id">
+                  <h4 class="trigger-form__heading">编辑 · {{ displayName(item) }}</h4>
+                  <TriggerEditor
+                    v-model:form="form"
+                    :form-error="formError"
+                    :busy="rowBusy(`save:${item.trigger_id}`)"
+                    :agents="agents"
+                    :agents-loading="agentsLoading"
+                    enabled-label="启用"
+                    @submit="saveForm"
+                    @cancel="cancelEdit"
+                  />
+                </template>
+                <template v-else>
+                  <div class="command-card__title">
+                    {{ displayName(item) }}
+                    <span
+                      class="command-card__badge"
+                      :class="item.enabled ? 'command-card__badge--active' : 'command-card__badge--muted'"
+                    >
+                      {{ item.enabled ? "已启用" : "已禁用" }}
+                    </span>
+                    <span v-if="isRetired(item)" class="command-card__badge command-card__badge--muted">{{ isAutoManaged(item) ? "由 Auto 设置管理" : "已退役" }}</span>
+                    <span v-if="item.recovery_required" class="command-card__badge command-card__badge--muted">需要核对</span>
+                  </div>
+                  <div class="command-card__meta command-card__meta--mono">{{ isRetired(item) ? "配置入口受限 · 仅查看" : shortId(item.trigger_id, 12) }}</div>
+                  <dl class="command-kv-list command-kv-list--compact">
+                    <div class="command-kv">
+                      <dt>调度</dt>
+                      <dd>{{ formatSchedule(item) }}</dd>
+                    </div>
+                    <div class="command-kv">
+                      <dt>下次</dt>
+                      <dd>{{ formatUnixTime(item.next_fire_at) }}</dd>
+                    </div>
+                    <div class="command-kv">
+                      <dt>触发</dt>
+                      <dd>{{ item.fire_count ?? 0 }} 次 · 上次 {{ formatUnixTime(item.last_fired_at) }}</dd>
+                    </div>
+                    <div class="command-kv">
+                      <dt>目标</dt>
+                      <dd>{{ targetHint(item) }}</dd>
+                    </div>
+                  </dl>
+                  <div v-if="item.task_template" class="command-card__preview">
+                    任务：{{ truncateText(item.task_template, 80) }}
+                  </div>
+                  <details class="trigger-technical-details">
+                    <summary>技术详情</summary>
+                    <dl>
+                      <template v-if="item.trigger_id"><dt>任务 ID</dt><dd><code>{{ item.trigger_id }}</code></dd></template>
+                      <template v-if="item.target_agent_id || item.owner_agent_id"><dt>智能体 ID</dt><dd><code>{{ item.target_agent_id || item.owner_agent_id }}</code></dd></template>
+                      <template v-if="item.target_session_id"><dt>会话 ID</dt><dd><code>{{ item.target_session_id }}</code></dd></template>
+                      <template v-if="item.task_template"><dt>完整任务</dt><dd class="trigger-technical-details__task">{{ item.task_template }}</dd></template>
+                    </dl>
+                  </details>
+                  <p v-if="isAutoOwnerUnavailable(item)" class="command-panel__hint">所属智能体不可用，无法打开 Auto 设置</p>
+                  <p v-else-if="isRetired(item)" class="command-panel__hint">{{ isAutoManaged(item) ? "请在 Auto 设置中调整默认唤醒。" : "这是已退役的历史触发器，仅供查看。" }}</p>
+                  <div v-if="item.recovery_required && (!isRetired(item) || isAutoManaged(item))" class="command-panel__error">
+                    {{ item.recovery_reason || "上次投递结果未知，请核对后恢复。" }}
+                    <button type="button" class="btn btn--danger btn--sm" :disabled="rowBusy(`recover:${item.trigger_id}`)" @click="recoverPending(item)">确认并丢弃旧投递</button>
+                  </div>
+                  <div v-if="isRetired(item)" class="command-card__actions">
+                    <button v-if="isAutoSettingsAvailable(item)" type="button" class="btn btn--primary btn--sm" @click="openAutoSettings(item)">打开 Auto 设置</button>
+                    <button type="button" class="btn btn--ghost btn--sm" :disabled="!!editingId" @click="loadHistory(item)">
+                      {{ historyOpenId === item.trigger_id ? "刷新历史" : "查看历史" }}
+                    </button>
+                  </div>
+                  <div v-else class="command-card__actions">
+                    <label class="settings-toggle command-card__toggle">
+                      <input
+                        type="checkbox"
+                        :checked="!!item.enabled"
+                        :disabled="item.recovery_required || rowBusy(`toggle:${item.trigger_id}`)"
+                        @click.prevent="toggleEnabled(item)"
+                      />
+                      <span>{{ item.enabled ? "已启用" : "已禁用" }}</span>
+                    </label>
+                    <button
+                      type="button"
+                      class="btn btn--ghost btn--sm"
+                      :disabled="!!editingId || rowBusy(`save:${item.trigger_id}`)"
+                      @click="startEdit(item)"
+                    >
+                      编辑
+                    </button>
+                    <button type="button" class="btn btn--secondary btn--sm" :disabled="!!editingId || item.recovery_required || rowBusy(`fire:${item.trigger_id}`)" @click="fireNow(item)">
+                      {{ rowBusy(`fire:${item.trigger_id}`) ? "投递中…" : "立即运行" }}
+                    </button>
+                    <button type="button" class="btn btn--ghost btn--sm" :disabled="!!editingId" @click="loadHistory(item)">
+                      {{ historyOpenId === item.trigger_id ? "刷新历史" : "触发历史" }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn--danger btn--sm"
+                      :disabled="!!editingId || rowBusy(`delete:${item.trigger_id}`)"
+                      @click="removeTriggerConfirmed(item)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <div v-if="historyOpenId === item.trigger_id" class="command-card__history">
+                    <strong>触发历史</strong>
+                    <p v-if="!historyById[item.trigger_id]?.length">暂无记录</p>
+                    <div v-for="record in historyById[item.trigger_id] || []" :key="record.fire_id" class="command-card__history-row">
+                      <span>{{ record.status === "queued" ? "已排队" : record.status === "skipped" ? "已跳过" : record.status === "error" ? "失败" : record.status }}</span>
+                      <span>{{ formatUnixTime(record.fired_at) }}</span>
+                      <span>{{ record.message || record.reason || "—" }}</span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </li>
+          </ul>
+          <div v-else class="command-panel__empty-card">
+            <strong>暂无定时任务</strong>
+            <span>创建后，任务会按照设定的频率向目标智能体投递消息。</span>
+            <button type="button" class="btn btn--secondary btn--sm" @click="startCreate">新建定时任务</button>
+          </div>
+        </section>
+      </template>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.trigger-technical-details { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; }
+.trigger-technical-details summary { width: fit-content; cursor: pointer; }
+.trigger-technical-details dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px; margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-alt, var(--color-surface)); }
+.trigger-technical-details dt { color: var(--color-text-muted); }
+.trigger-technical-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--color-text); }
+.trigger-technical-details code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.trigger-technical-details__task { white-space: pre-wrap; }
+</style>

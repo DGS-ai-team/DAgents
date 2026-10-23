@@ -9,7 +9,6 @@ import (
 // knownBuiltinTools 为 Node 可配置启用的内置工具名全集（与 node/internal/tools/registry.go 对齐）。
 var knownBuiltinTools = map[string]struct{}{
 	"read_file":              {},
-	"show_image":             {},
 	"read_image":             {},
 	"write_file":             {},
 	"glob_files":             {},
@@ -43,9 +42,8 @@ var knownBuiltinTools = map[string]struct{}{
 	"trigger_delete":         {},
 	"create_temporary_agent": {},
 	"cancel_temporary_agent": {},
-	"browser_run_task":       {},
-	"browser_task_status":    {},
-	"browser_task_cancel":    {},
+	"browser_call":           {},
+	"browser_evaluate":       {},
 	"wecom_send_markdown":    {},
 	"wecom_send_file":        {},
 	"todo_list":              {},
@@ -59,7 +57,6 @@ var knownBuiltinTools = map[string]struct{}{
 var builtinToolGroups = map[string][]string{
 	"fs": {
 		"read_file",
-		"show_image",
 		"read_image",
 		"write_file",
 		"glob_files",
@@ -110,12 +107,10 @@ var builtinToolGroups = map[string][]string{
 		"create_temporary_agent",
 		"cancel_temporary_agent",
 	},
-	// browser：主 Agent 任务级派发（伴生 Chrome + sidecar browser_use.Agent）。
-	// 细粒度 CDP/DOM 工具已退役，不再作为 LLM 工具暴露。
+	// browser：主 Agent 直接控制 Playwright sidecar。
 	"browser": {
-		"browser_run_task",
-		"browser_task_status",
-		"browser_task_cancel",
+		"browser_call",
+		"browser_evaluate",
 	},
 	"wecom": {
 		"wecom_send_markdown",

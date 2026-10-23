@@ -1,6 +1,6 @@
 # SSE 事件速查
 
-实现：`node/internal/stream/`、`node/internal/turn/sse_publish.go`。Web UI 订阅：`GET /v1/streams?agent_id=`。
+实现：`node/internal/stream/`、`node/internal/turn/sse_publish.go`。Desktop 订阅：`GET /v1/streams?agent_id=`。
 
 ---
 
@@ -54,6 +54,8 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 
 核心原则：`hitl_required` 和 `turn_state.phase=tool_waiting|waiting_user` 表示暂停；暂停不发送 `turn_finished`。`turn_finished` 的 `turn_complete` 固定为 `true`，不再携带 `awaiting` 这种会改变语义的字段。
 
+结束事件须与当前 `turn_id`、`turn_generation` 匹配后才可收尾，已有终态 `turn_state` 的详细信息应保留。预算阻止继续执行时，`finish_reason=budget_exhausted`，`budget_reason` 标明具体限制；Node 在持久化预算终态之后发布该结束事件。工具行已有终态结果时，不应再被滞后的 running 任务缓存覆盖；结果正文未到时，权威工具执行状态中的 `failed` 同样表示该工具已经结束。
+
 ---
 
 ## HITL
@@ -89,5 +91,5 @@ Produce 阶段的 `tool_call` / `tool_result` 只展示回调预览并携带 `si
 | `node/internal/turn/sse_publish.go` | assistant / HITL / turn_finished / usage / side-effect 事件 |
 | `node/internal/session/turn_state_view.go` | Turn Coordinator 权威状态快照 |
 | `node/internal/childagent/relay_hub.go` | 子 Agent 终态隔离 |
-| `node/webui/frontend/src/sse/stream.js` | SSE 事件解析和 Agent 游标重连 |
-| `node/webui/frontend/src/views/ChatView.vue` | 事件路由、HITL 和 turn 投影 |
+| `desktop/tray-tauri/src/ui/composables/useStream.js` | Desktop SSE 事件解析和 Agent 游标重连 |
+| `desktop/tray-tauri/src/ui/DesktopApp.vue` | 事件路由、HITL 和 turn 投影 |

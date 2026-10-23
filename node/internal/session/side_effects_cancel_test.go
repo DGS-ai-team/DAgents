@@ -36,14 +36,14 @@ func TestCancelRecoverySchedulesContinueWhenBufferReady(t *testing.T) {
 		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
 			ID: "call-async-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+			Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 		}}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestCancelWithPendingAndBufferDoesNotScheduleContinue(t *testing.T) {
 	rt.messages = []llm.Message{
 		{Role: "user", Content: "bg + sync"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
-			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`}},
+			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`}},
 			approvalCall,
 		}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
@@ -97,7 +97,7 @@ func TestCancelWithPendingAndBufferDoesNotScheduleContinue(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestClearContextDropsSideEffectBuffer(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestHumanMessageDuringPendingHITLWaitsForExplicitCancel(t *testing.T) {
 	rt.messages = []llm.Message{
 		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
-			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`}},
+			{ID: "call-async-1", Type: "function", Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`}},
 			approvalCall,
 		}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
@@ -197,7 +197,7 @@ func TestHumanMessageDuringPendingHITLWaitsForExplicitCancel(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -272,14 +272,14 @@ func TestCancelRecoveryPublishesSideEffectTurnStartSSE(t *testing.T) {
 		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
 			ID: "call-async-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+			Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 		}}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -336,14 +336,14 @@ func TestSideEffectApplyPublishesAppliedSSE(t *testing.T) {
 		{Role: "user", Content: "async task"},
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{
 			ID: "call-async-1", Type: "function",
-			Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+			Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 		}}},
 		{Role: "tool", ToolCallID: "call-async-1", Content: `{"ok":true,"detail":{"status":"accepted"}}`},
 	}
 	rt.mu.Unlock()
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestClearContextPublishesSideEffectsClearedSSE(t *testing.T) {
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}})
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-1", Status: "failed", ErrorText: "exit 1",
 	}); err != nil {
 		t.Fatal(err)
 	}

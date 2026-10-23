@@ -14,7 +14,7 @@ func TestUIBootstrap(t *testing.T) {
 	cfg.LLM.Mock = true
 	cfg.Onboarding.NodeProfileCompleted = true
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
-	req := httptest.NewRequest(http.MethodGet, "/v1/ui/bootstrap", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -45,7 +45,7 @@ func TestUIBootstrap_onboardingIncomplete(t *testing.T) {
 	cfg.User.PreferredName = ""
 	cfg.Agent.Name = "seed-node"
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
-	req := httptest.NewRequest(http.MethodGet, "/v1/ui/bootstrap", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -60,5 +60,35 @@ func TestUIBootstrap_onboardingIncomplete(t *testing.T) {
 	}
 	if out.Agent.Name != "seed-node" {
 		t.Fatalf("agent=%+v", out.Agent)
+	}
+}
+
+func TestUIBootstrap_nodeProfileCompletionDoesNotRequireLLMKey(t *testing.T) {
+	const missingKeyEnv = "DAGENTS_TEST_UNCONFIGURED_LLM_KEY"
+	t.Setenv(missingKeyEnv, "")
+	cfg := testConfig(t)
+	cfg.LLM.Mock = false
+	cfg.LLM.APIKeyEnv = missingKeyEnv
+	cfg.User.PreferredName = ""
+	cfg.Onboarding.NodeProfileCompleted = true
+	srv := NewServer(cfg, nil, WithSkipStore())
+	req := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out uiBootstrapResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Onboarding.NodeProfileCompleted {
+		t.Fatal("Node profile should be complete without requiring an LLM key")
+	}
+	if out.User.PreferredName != "" {
+		t.Fatalf("preferred_name should remain optional, got %q", out.User.PreferredName)
+	}
+	if cfg.LLM.Mock {
+		t.Fatal("fixture unexpectedly has a usable mock model")
 	}
 }

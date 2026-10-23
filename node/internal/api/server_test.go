@@ -107,7 +107,7 @@ func TestHandleAgentInfo(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/v1/agent/info")
+	resp, err := http.Get(ts.URL + "/v1/node/info")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,42 +150,37 @@ func TestHandleAgentCancelExposesTurnScope(t *testing.T) {
 	}
 }
 
-func TestHandleDesktopRuntimeConfig(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.Manage.Enabled = true
-	cfg.Manage.URL = "http://manage.local/"
-	cfg.Manage.NodeToken = "node-secret"
-	cfg.Manage.Update.CheckIntervalSeconds = 17
-	cfg.Manage.Update.Channel = "beta"
-	srv := NewServer(cfg, nil, WithSkipStore())
-	ts := httptest.NewServer(srv.Handler())
+func TestRemovedDesktopRoutesReturnNotFound(t *testing.T) {
+	_, ts := newTestServer(t)
 	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/v1/desktop/runtime-config")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	var got desktopRuntimeConfig
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if !got.ManageEnabled || got.ManageURL != "http://manage.local/" || got.ManageNodeToken != "node-secret" {
-		t.Fatalf("unexpected manage config: %+v", got)
-	}
-	if got.ManageUpdateCheckIntervalSeconds != 17 || got.ManageUpdateChannel != "beta" || !got.ManageUpdateEnabled {
-		t.Fatalf("unexpected update config: %+v", got)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/desktop/runtime-config", nil)
-	req.RemoteAddr = "192.0.2.10:1234"
-	recorder := httptest.NewRecorder()
-	srv.handleDesktopRuntimeConfig(recorder, req)
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("non-loopback status = %d, want %d", recorder.Code, http.StatusForbidden)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/"},
+		{http.MethodGet, "/index.html"},
+		{http.MethodGet, "/ui"},
+		{http.MethodGet, "/ui/"},
+		{http.MethodGet, "/v1/desktop/runtime-config"},
+		{http.MethodPost, "/v1/agent/update/apply"},
+		{http.MethodPost, "/v1/platform/update/apply"},
+		{http.MethodGet, "/v1/platform/clipboard/files"},
+		{http.MethodPost, "/v1/platform/ui-focus"},
+		{http.MethodGet, "/v1/agent/info"},
+		{http.MethodGet, "/v1/ui/bootstrap"},
+		{http.MethodGet, "/v1/setup/config"},
+		{http.MethodPatch, "/v1/setup/config"},
+		{http.MethodPost, "/v1/setup/llm/probe-models"},
+	} {
+		req, err := http.NewRequest(route.method, ts.URL+route.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s %s status=%d; want 404", route.method, route.path, resp.StatusCode)
+		}
 	}
 }
 
@@ -236,6 +231,29 @@ func TestSessionsRoutesRemoved(t *testing.T) {
 		// 410 桩已删除：路由不再注册，应为 404（非 Gone / sessions_moved）。
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.path, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestRetiredNodeRoutesReturnNotFound(t *testing.T) {
+	_, ts := newTestServer(t)
+	defer ts.Close()
+
+	paths := []string{
+		"/v1/agents/agent-1/execution-events",
+		"/v1/agents/agent-1/child-agents/child-1",
+		"/v1/agents/agent-1/screen/stream",
+		"/v1/mcp/servers/server-1/tools",
+	}
+	for _, path := range paths {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s status=%d body=%s; want 404", path, resp.StatusCode, body)
 		}
 	}
 }

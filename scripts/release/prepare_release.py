@@ -28,7 +28,6 @@ README_FILE = ROOT / "README.md"
 HANDBOOK_FILE = ROOT / "docs/handbook/README.md"
 ROADMAP_FILE = ROOT / "docs/roadmap.md"
 PACKAGE_FILES = (
-    ROOT / "node/webui/frontend/package.json",
     ROOT / "manage/console/frontend/package.json",
     ROOT / "desktop/tray-tauri/package.json",
 )
@@ -36,7 +35,9 @@ APP_VERSION_FILES = (ROOT / "desktop/tray-tauri/src-tauri/tauri.conf.json",)
 PACKAGE_LOCK_FILES = tuple(path.with_name("package-lock.json") for path in PACKAGE_FILES)
 CARGO_FILE = ROOT / "desktop/tray-tauri/src-tauri/Cargo.toml"
 CARGO_LOCK_FILE = ROOT / "desktop/tray-tauri/src-tauri/Cargo.lock"
-ROADMAP_RELEASE = re.compile(r"准备发布 v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?")
+ROADMAP_RELEASE = re.compile(
+    r"(?P<prefix>准备发布 |下一版建议为 |当前发布基线（)v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?"
+)
 
 
 def replace_once(text: str, pattern: str | re.Pattern[str], replacement: str, label: str, source: Path) -> str:
@@ -90,6 +91,27 @@ def update_cargo_package(text: str, version: str, path: Path) -> str:
         rf"\g<1>{version}\g<2>",
         "Cargo package version",
         path,
+    )
+
+
+def update_readme_current_version_marker(readme: str, version: str) -> str:
+    current_marker = r"当前(?:发布)?版本为 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*"
+    if re.search(current_marker, readme):
+        return replace_once(
+            readme,
+            current_marker,
+            f"当前版本为 **v{version}**",
+            "README current version",
+            README_FILE,
+        )
+
+    badge_block = re.search(r"(<p align=\"center\">(?:(?!</p>).)*Latest release(?:(?!</p>).)*</p>)", readme, re.S)
+    if not badge_block:
+        raise ValueError(f"README current version: no release badge block found in {README_FILE}")
+    return (
+        readme[: badge_block.end()]
+        + f"\n\n当前版本为 **v{version}**"
+        + readme[badge_block.end() :]
     )
 
 
@@ -149,24 +171,7 @@ def prepare(version: str, summary: str, release_date: str) -> None:
     elif not re.search(r"github/v/release/[^\"\s]+", readme_updated):
         raise ValueError(f"README release badge: no static or dynamic release badge found in {README_FILE}")
 
-    current_marker = r"当前版本为 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*"
-    if re.search(current_marker, readme_updated):
-        readme_updated = replace_once(
-            readme_updated,
-            current_marker,
-            f"当前版本为 **v{version}**",
-            "README current version",
-            README_FILE,
-        )
-    else:
-        badge_block = re.search(r"(<p align=\"center\">(?:(?!</p>).)*Latest release(?:(?!</p>).)*</p>)", readme_updated, re.S)
-        if not badge_block:
-            raise ValueError(f"README current version: no release badge block found in {README_FILE}")
-        readme_updated = (
-            readme_updated[: badge_block.end()]
-            + f"\n\n当前版本为 **v{version}**"
-            + readme_updated[badge_block.end() :]
-        )
+    readme_updated = update_readme_current_version_marker(readme_updated, version)
     handbook_updated = replace_once(
         handbook,
         r"当前发布 \*\*v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?\*\*",
@@ -176,7 +181,7 @@ def prepare(version: str, summary: str, release_date: str) -> None:
     )
 
     roadmap_updated, roadmap_count = ROADMAP_RELEASE.subn(
-        f"准备发布 v{version}", roadmap, count=1
+        lambda match: f"{match.group('prefix')}v{version}", roadmap, count=1
     )
 
     changelog_entry = f"## [{version}] - {release_date}\n\n{summary.strip()}\n\n"

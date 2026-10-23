@@ -47,11 +47,6 @@ type Registry struct {
 	enabledOnly            map[string]struct{}
 	multimodalEnabled      bool
 	browser                *browser.Manager
-	browserCompanionExists BrowserCompanionExistsFunc
-	browserLLMResolver     BrowserLLMResolver
-	browserTaskMu          sync.Mutex
-	browserTaskNotifier    BrowserTaskNotifier
-	browserTaskWatchers    map[string]struct{}
 	wecom                  *wecom.Client
 	handlers               map[string]handler
 	pathEncMu              sync.Mutex
@@ -237,22 +232,11 @@ func (r *Registry) OpenTerminal(ctx context.Context, req TerminalRequest) (Termi
 		if r.localTerminalProvider == nil {
 			return nil, fmt.Errorf("local terminal provider is unavailable")
 		}
-		cwd := strings.TrimSpace(req.CWD)
-		if cwd == "" {
-			cwd = r.workspaceRoot
-		} else if resolved, resolveErr := r.resolveRunCWD(cwd); resolveErr == nil {
-			cwd = resolved
-		}
-		lease, err := r.acquireWorkspaceWrite(ctx, cwd)
-		if err != nil {
-			return nil, fmt.Errorf("workspace_busy: %w", err)
-		}
-		terminal, err := r.localTerminalProvider.OpenTerminal(ctx, req)
-		if err != nil {
-			lease.Release()
-			return nil, err
-		}
-		return &coordinatedTerminal{Terminal: terminal, lease: lease}, nil
+		// An interactive PTY can remain open indefinitely. Holding the
+		// workspace write lease for its lifetime would block bash_run, file
+		// writes, and other terminals in the same workspace. The coordinator
+		// is reserved for bounded operations with a clear completion point.
+		return r.localTerminalProvider.OpenTerminal(ctx, req)
 	case executionTargetLinuxChannel:
 		if r.linuxProvider == nil {
 			return nil, fmt.Errorf("linux terminal provider is unavailable")
@@ -380,7 +364,6 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 		localTerminalProvider: localProvider,
 		handlers:              make(map[string]handler),
 		mcpTools:              make(map[string]MCPTool),
-		browserTaskWatchers:   make(map[string]struct{}),
 	}
 	r.registerBuiltins()
 	return r, nil
@@ -390,7 +373,6 @@ func NewRegistry(workspaceRoot string, bashTimeoutSeconds int, encodings ...stri
 func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
-		showImageToolDef(),
 	}
 	if r.multimodalEnabled {
 		base = append(base, readImageToolDef())
@@ -498,7 +480,7 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 // committed.
 func (r *Registry) ToolRetryAllowed(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "read_file", "read_image", "show_image", "glob_files", "grep_file", "grep_files", "screen_capture",
+	case "read_file", "read_image", "glob_files", "grep_file", "grep_files", "screen_capture",
 		"terminal_read", "terminal_list":
 		return true
 	default:
@@ -508,7 +490,6 @@ func (r *Registry) ToolRetryAllowed(name string) bool {
 
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
-	r.handlers["show_image"] = r.execShowImage
 	r.handlers["read_image"] = r.execReadImage
 	r.handlers["write_file"] = r.execWriteFile
 	r.handlers["glob_files"] = r.execGlobFiles
