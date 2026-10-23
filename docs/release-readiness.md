@@ -1,6 +1,6 @@
 # v1.0.0 发布验收清单
 
-评估日期：2026-10-22。最近正式发布仍为 `v0.11.0`（2026-09-11）。v1.0.0 候选源自 `dev` 合并提交 `7a745704`，候选分支为 `codex/release-v1.0.0`，当前头为 `0d058a64`。候选版本资料已校验；CI run `39741735618` 与完整候选打包 run `39741735977` 均成功（均基于 `a446490e`，后续为测试 fixture 与发布记录更新）。候选包体积与验收记录见[本轮发布构建记录](design/desktop-product/audits/2026-10-22/v1-release-build.md)。用户明确要求本次不再验证安装流程与 Auto 耐久；这两项仍未验证，按用户决定不作为本次放行阻断项。真实 Provider 冒烟、Browser 与 Desktop 联动、发布 PR 检查/CodeQL/审查和正式 tag 产物核对仍未关闭。
+评估日期：2026-10-23。最近正式发布仍为 `v0.11.0`（2026-09-11）。v1.0.0 候选源自 `dev` 合并提交 `7a745704`，候选分支为 `codex/release-v1.0.0`，当前头为 `c143ed6e`，PR #356 面向 `dev`。候选 CI run `39881664235`、CodeQL run `39881662928` 和 PR hygiene 均通过；本地版本元数据、Desktop frontend 76 个文件/466 项测试、共享图标 7 项、Desktop UI 85 项、ESLint 与 Vite 生产构建也通过。手动完整包 run `39752935793` 基于前一候选提交 `715e397d`，不是当前头的最终 tag 产物。候选包体积与验收记录见[本轮发布构建记录](design/desktop-product/audits/2026-10-22/v1-release-build.md)。用户明确要求本次不再验证安装流程与 Auto 耐久；这两项仍未验证，按用户决定不作为本次放行阻断项。真实 Provider 冒烟、Browser 与 Desktop 联动、独立审查、合入 `dev`、最终发布 PR 及 tag 产物核对仍未关闭。
 
 ## 发布判断与范围
 
@@ -45,7 +45,7 @@
 
 清单标记：`[x]` 已验证，`[ ]` 尚待完成，`[~]` 用户明确豁免、仍未验证且不作为本次放行阻断项。
 
-- [ ] **v1.0.0 冻结候选的 CI、CodeQL、审查与集成。** PR #355 已合入 `dev`；合并提交 `7a745704` 的 CI 与 CodeQL 已通过。候选分支的 CI workflow run `39741735618` 和手动完整打包 run `39741735977` 均通过，版本元数据本地校验也通过；但这不是针对 `main` 的发布 PR。发布 PR 的 Release metadata preflight、PR CI、CodeQL、独立审查及与 `main` 集成仍须完成。
+- [ ] **v1.0.0 冻结候选的审查与分支集成。** PR #356 当前头 `c143ed6e` 面向 `dev`；CI run `39881664235`、CodeQL run `39881662928` 与 PR hygiene 已通过。候选 PR 仍需独立审查后合入 `dev`。其后还须完成未关闭的集成验收，并创建 `dev → main` 发布 PR；只有该发布 PR 的 Release metadata preflight、CI、CodeQL 和审查通过并合入 `main` 后，才能创建正式标签。
 - [x] **已复现的 Desktop 首次启动崩溃。** 同一发行候选在 stderr 正常时存活，关闭读端后复现 `0xc0000409`；诊断版捕获 `failed printing to stderr`、错误码 232 和 `events::sync_agents` 的可靠调用栈。修复统一处理进程输出 I/O 失败，并补齐同类 CLI stdout 问题；51 项 Rust 测试通过，正式模式构建通过闭管道进程与 CLI 输出验证。stderr 修复还完成 120 秒闭管道运行和原生内嵌 UI 交互。原始 dump 的完整业务栈未恢复；受控复现与原异常线索一致，但不把其他启动故障一并视为通过。各构建哈希及验收范围见[专项记录](design/desktop-product/audits/2026-10-19/desktop-startup-panic.md)。新代码的 PR 集成和最终包验收仍由相邻门槛约束。
 - [x] **标准用户 QA 核心初装、升级、卸载保留与重装恢复。** 临时标准 Windows 用户在开发机上使用 QA-only `0.11.0.1` 安装器完成静默初装、原生首配与 Mock 对话、快捷方式退出/重开持久性、`0.11.0 → 0.11.0.1` 静默升级、卸载数据保留及重新安装后 Agent/历史恢复；最终测试卸载已完成。安装器版本为 `0.11.0.1`，但 bundle/payload `VERSION` 为 `0.11.0`，不可视为发行候选。证据、快照与哈希见[标准用户安装恢复审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。
 
@@ -98,4 +98,4 @@
 
 历史验证（2026-10-20）：发现并修复 Desktop Composer 将 `/clear`、`/compress`、`/thinking`、`/upload` 当作普通消息提交的问题，并修正上下文状态边界。Desktop UI 82 项、共享 UI 源码 534 项和 Desktop Vite 生产构建通过；修复现已包含在 PR #355 与当前 `dev` 基线中。此前手动打包工作流只用于中间候选，不代表 v1.0.0 发行包验收。
 
-2026-10-22 更新：v1.0.0 候选 CI 与手动完整打包通过；Manage 离线 bundle 删除重复归档，打包契约测试通过。用户豁免本轮安装流程与 Auto 耐久验收（未验证，不阻断）；真实 Provider 冒烟、Browser/Desktop 联动、发布 PR 的 CI/CodeQL/独立审查，以及 tag 产物检查仍待完成。
+2026-10-23 更新：候选 PR #356 的最新提交 `c143ed6e` 已通过 CI 与 CodeQL；加入 Desktop 启动等待页、分层输入栏和悬浮状态提示，并通过本地完整 Desktop 前端测试、UI 测试、lint 和生产构建。用户豁免本轮安装/升级验收与 Auto 耐久（未验证，不阻断）；真实 Provider 对话、Browser/Desktop 联动、独立审查、`dev → main` 发布 PR 与正式 tag 产物检查仍待完成。
