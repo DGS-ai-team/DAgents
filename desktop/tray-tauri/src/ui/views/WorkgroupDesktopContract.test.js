@@ -11,7 +11,7 @@ import * as api from '../api/node.js'
 vi.mock('../api/node.js', () => ({
   getAutoOverview: vi.fn(),
   getAgentInfo: vi.fn(),
-  getAgentBrowserView: vi.fn(),
+  getAgentBrowserView: vi.fn(), postAgentBrowserAction: vi.fn(),
   getDesktopWorkgroupList: vi.fn(), getDesktopWorkgroupSnapshot: vi.fn(), getDesktopWorkgroupProgress: vi.fn(),
   listWorkgroups: vi.fn(), getWorkgroup: vi.fn(), listWorkgroupMembers: vi.fn(),
   getWorkgroupTimeline: vi.fn(), listWorkgroupHITL: vi.fn(), listWorkgroupAgents: vi.fn(),
@@ -72,9 +72,9 @@ describe('Desktop browser viewer API contract', () => {
     api.getAgentBrowserView.mockResolvedValue({ page_id: 'page-1', title: '第一页', url: 'https://example.test/one', mime: 'image/png', image_base64: 'cG5n', pages: [{ page_id: 'page-1', title: '第一页', url: 'https://example.test/one' }, { page_id: 'page-2', title: '第二页', url: 'https://example.test/two' }] })
     wrapper = mount(BrowserViewer, { props: { agentId: 'agent-1', active: true } })
     await flushPromises()
-    expect(wrapper.find('h1').text()).toBe('第一页')
+    expect(wrapper.find('.browser-tab.is-active .browser-tab__title').text()).toBe('第一页')
     expect(wrapper.find('img').attributes('src')).toBe('data:image/png;base64,cG5n')
-    await wrapper.findAll('button').find(button => button.text() === '第二页').trigger('click')
+    await wrapper.findAll('.browser-tab')[1].trigger('click')
     await flushPromises()
     expect(api.getAgentBrowserView).toHaveBeenLastCalledWith('agent-1', 'page-2')
   })
@@ -88,7 +88,7 @@ describe('Desktop browser viewer API contract', () => {
     await flushPromises()
     finishOld({ page_id: 'old-page', title: '旧 Agent 页面', image_base64: 'b2xk', pages: [] })
     await flushPromises()
-    expect(wrapper.find('h1').text()).toBe('新 Agent 页面')
+    expect(wrapper.find('.browser-tab.is-active .browser-tab__title').text()).toBe('新 Agent 页面')
     expect(wrapper.text()).not.toContain('旧 Agent 页面')
   })
 
@@ -96,17 +96,15 @@ describe('Desktop browser viewer API contract', () => {
     api.getAgentBrowserView.mockRejectedValueOnce(Object.assign(new Error('浏览器能力未配置或未启用'), { status: 503, data: { error: { code: 'browser_disabled' } } }))
     wrapper = mount(BrowserViewer, { props: { agentId: 'agent-1', active: true } })
     await flushPromises()
-    expect(wrapper.find('[role="status"]').text()).toContain('尚未启用浏览器')
-    expect(wrapper.find('[role="status"]').classes()).toContain('browser-viewer__error--neutral')
-    await wrapper.find('[aria-label="前往浏览器能力设置"]').trigger('click')
+    expect(wrapper.find('.browser-empty').text()).toContain('浏览器尚未启用')
+    await wrapper.find('.browser-primary-action').trigger('click')
     expect(wrapper.emitted('open-connection-settings')).toHaveLength(1)
     wrapper.unmount(); wrapper = null
     api.getAgentBrowserView.mockRejectedValueOnce(Object.assign(new Error('browser session is not started'), { status: 409, data: { error: { code: 'browser_not_started' } } }))
     wrapper = mount(BrowserViewer, { props: { agentId: 'agent-2', active: true } })
     await flushPromises()
-    expect(wrapper.find('[role="status"]').text()).toContain('尚未启动')
-    expect(wrapper.find('[role="status"]').classes()).toContain('browser-viewer__error--neutral')
-    expect(wrapper.find('[role="status"] button').exists()).toBe(false)
+    expect(wrapper.find('.browser-empty').text()).toContain('打开浏览器')
+    expect(wrapper.find('.browser-empty button').text()).toContain('启动浏览器')
   })
 
   it('keeps the last screenshot on browser_busy and retries with a slower five-second delay', async () => {
@@ -117,18 +115,18 @@ describe('Desktop browser viewer API contract', () => {
     wrapper = mount(BrowserViewer, { props: { agentId: 'agent-1', active: true } })
     await flushPromises()
     const previousImage = wrapper.find('img').attributes('src')
-    await wrapper.find('header button').trigger('click')
+    await wrapper.vm.refreshResources('manual')
     await flushPromises()
     expect(wrapper.find('img').attributes('src')).toBe(previousImage)
-    expect(wrapper.find('[role="status"]').text()).toContain('稍后将自动重试')
+    expect(wrapper.find('[role="status"]').text()).toContain('完成后会自动更新')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     await vi.advanceTimersByTimeAsync(6000)
     await flushPromises()
     expect(api.getAgentBrowserView).toHaveBeenCalledTimes(3)
     expect(wrapper.find('img').attributes('src')).toBe(previousImage)
-    await wrapper.find('header button').trigger('click')
+    await wrapper.vm.refreshResources('manual')
     await flushPromises()
-    expect(wrapper.find('h1').text()).toBe('新画面')
+    expect(wrapper.find('.browser-tab.is-active .browser-tab__title').text()).toBe('新画面')
   })
 
   it('does not keep polling when the browser session has not started', async () => {

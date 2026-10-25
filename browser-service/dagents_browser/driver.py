@@ -280,11 +280,24 @@ class PlaywrightDriver:
         if op == "stop":
             await self._stop_session(str(req.get("session_key") or ""))
             return {"stopped": True}
+        if op == "new_page":
+            page = await state.context.new_page()
+            page_state = await self._register_page(state, page)
+            return {"page_id": page_state.page_id}
         page = await self._page_for(state, raw.get("page_id"))
         if page is None:
             raise RuntimeError("page_closed")
         if op == "tabs":
             return [{"page_id": p.page_id, "url": p.page.url, "title": await p.page.title()} for p in state.pages.values() if not p.page.is_closed()]
+        if op == "close_page":
+            live_pages = [item for item in state.pages.values() if not item.page.is_closed()]
+            if len(live_pages) <= 1:
+                raise RuntimeError("last_page")
+            page_state = next((item for item in live_pages if item.page is page), None)
+            await page.close()
+            if page_state is not None:
+                state.pages.pop(page_state.page_id, None)
+            return {"closed": True}
         if op == "observe":
             return await self._observe(state, page)
         if op == "screenshot":
@@ -301,6 +314,9 @@ class PlaywrightDriver:
             return {"url": page.url}
         if op == "back":
             await page.go_back(timeout=int(raw.get("timeout_ms") or self.settings.default_timeout_ms))
+            return {"url": page.url}
+        if op == "forward":
+            await page.go_forward(timeout=int(raw.get("timeout_ms") or self.settings.default_timeout_ms))
             return {"url": page.url}
         if op == "reload":
             await page.reload(wait_until="domcontentloaded", timeout=int(raw.get("timeout_ms") or self.settings.default_timeout_ms))
@@ -469,6 +485,6 @@ class PlaywrightDriver:
     @staticmethod
     def _error_code(exc: Exception) -> str:
         message = str(exc)
-        for code in ("stale_ref", "target_not_found", "ambiguous_target", "navigation_blocked", "unsupported_action", "page_closed"):
+        for code in ("stale_ref", "target_not_found", "ambiguous_target", "navigation_blocked", "unsupported_action", "page_closed", "last_page"):
             if code in message: return code
         return "action_timeout" if "Timeout" in type(exc).__name__ or "timeout" in message.lower() else "internal_error"

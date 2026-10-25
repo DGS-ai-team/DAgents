@@ -243,10 +243,18 @@ export function getAutoOverview(params = {}) {
   return apiFetch("/v1/auto/overview", { params });
 }
 
-/** Read-only browser page view for an already-running Agent browser session. */
+/** Current page image and live tab metadata for an Agent browser session. */
 export function getAgentBrowserView(agentId, pageId = "") {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/browser/view`, {
     params: { page_id: pageId || undefined },
+  });
+}
+
+/** Desktop controls for the Agent-owned Browser session. */
+export function postAgentBrowserAction(agentId, payload = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/browser/action`, {
+    method: "POST",
+    body: payload,
   });
 }
 

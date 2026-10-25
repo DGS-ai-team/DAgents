@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
@@ -31,16 +32,20 @@ func TestAgentBrowserViewRequiresStoredAgentAndStartedBrowser(t *testing.T) {
 
 	called := false
 	busyResponse := false
+	var desktopAction browser.Action
 	enabled := true
 	manager, err := browser.NewManager(&config.Config{Browser: config.BrowserConfig{Enabled: &enabled, DefaultTimeoutMS: 5000}}, &browser.MockDriver{Handler: func(_ context.Context, req browser.Request) (browser.Response, error) {
 		if req.Op == "call" {
+			if len(req.Actions) > 0 {
+				desktopAction = req.Actions[0]
+			}
 			return browser.Response{OK: true}, nil
 		}
 		called = true
 		if req.Op != "view" || req.SessionKey != "agent-1" {
 			t.Fatalf("view request = %+v", req)
 		}
-		if req.PageID != "page-1" {
+		if req.PageID != "" && req.PageID != "page-1" {
 			return browser.Response{OK: false, ErrorCode: "page_not_found", Error: "page does not belong to this browser session"}, nil
 		}
 		if busyResponse {
@@ -55,14 +60,15 @@ func TestAgentBrowserViewRequiresStoredAgentAndStartedBrowser(t *testing.T) {
 	srv.browserMu.Lock()
 	srv.browserMgr = manager
 	srv.browserMu.Unlock()
-	if out, err := manager.Start(context.Background(), "agent-1", nil, 1280, 720); err != nil || !out.OK {
-		t.Fatalf("start = %+v, %v", out, err)
-	}
-
 	missing := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/agents/unknown/browser/view", nil))
 	if missing.Code != http.StatusNotFound || called {
 		t.Fatalf("missing agent status=%d called=%v body=%s", missing.Code, called, missing.Body.String())
+	}
+	start := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(start, httptest.NewRequest(http.MethodPost, "/v1/agents/agent-1/browser/action", strings.NewReader(`{"action":"start"}`)))
+	if start.Code != http.StatusOK || desktopAction.Op != "start" {
+		t.Fatalf("start status=%d action=%+v body=%s", start.Code, desktopAction, start.Body.String())
 	}
 
 	response := httptest.NewRecorder()
@@ -76,6 +82,17 @@ func TestAgentBrowserViewRequiresStoredAgentAndStartedBrowser(t *testing.T) {
 	}
 	if payload["page_id"] != "page-1" || payload["image_base64"] != "cG5n" {
 		t.Fatalf("view payload = %#v", payload)
+	}
+
+	navigate := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(navigate, httptest.NewRequest(http.MethodPost, "/v1/agents/agent-1/browser/action", strings.NewReader(`{"action":"navigate","page_id":"page-1","url":"example.test/docs"}`)))
+	if navigate.Code != http.StatusOK || desktopAction.Op != "navigate" || desktopAction.Params["url"] != "https://example.test/docs" {
+		t.Fatalf("navigate status=%d action=%+v body=%s", navigate.Code, desktopAction, navigate.Body.String())
+	}
+	invalidURL := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(invalidURL, httptest.NewRequest(http.MethodPost, "/v1/agents/agent-1/browser/action", strings.NewReader(`{"action":"navigate","url":"javascript:alert(1)"}`)))
+	if invalidURL.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe URL status=%d body=%s", invalidURL.Code, invalidURL.Body.String())
 	}
 	busyResponse = true
 	busy := httptest.NewRecorder()
@@ -108,5 +125,22 @@ func TestAgentBrowserViewRequiresStoredAgentAndStartedBrowser(t *testing.T) {
 	srv.Handler().ServeHTTP(unstarted, httptest.NewRequest(http.MethodGet, "/v1/agents/agent-1/browser/view", nil))
 	if unstarted.Code != http.StatusConflict {
 		t.Fatalf("unstarted status=%d body=%s", unstarted.Code, unstarted.Body.String())
+	}
+}
+
+func TestNormalizeDesktopBrowserURL(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"example.com/path", "https://example.com/path"},
+		{"http://127.0.0.1:8080", "http://127.0.0.1:8080"},
+	} {
+		got, err := normalizeDesktopBrowserURL(tc.raw)
+		if err != nil || got != tc.want {
+			t.Fatalf("normalizeDesktopBrowserURL(%q) = %q, %v; want %q", tc.raw, got, err, tc.want)
+		}
+	}
+	for _, raw := range []string{"", "javascript:alert(1)", "file:///tmp/page", "https://user:pass@example.com"} {
+		if _, err := normalizeDesktopBrowserURL(raw); err == nil {
+			t.Fatalf("normalizeDesktopBrowserURL(%q) unexpectedly succeeded", raw)
+		}
 	}
 }

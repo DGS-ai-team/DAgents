@@ -2,7 +2,7 @@ import unittest
 import asyncio
 
 from dagents_browser.config import BrowserServiceSettings, parse_listen
-from dagents_browser.driver import PlaywrightDriver, navigation_url_allowed
+from dagents_browser.driver import PlaywrightDriver, SessionState, navigation_url_allowed
 
 
 class DriverProtocolTests(unittest.IsolatedAsyncioTestCase):
@@ -127,6 +127,49 @@ class DriverProtocolTests(unittest.IsolatedAsyncioTestCase):
             result = await driver.call({"op": "view", "session_key": "agent-1"})
             self.assertFalse(result["ok"])
             self.assertEqual(result["error_code"], "image_too_large")
+        finally:
+            driver._sessions.clear()
+
+    async def test_desktop_tab_actions_open_close_and_navigate_selected_page(self):
+        driver = PlaywrightDriver(self.settings())
+
+        class FakePage:
+            url = "about:blank"
+
+            def __init__(self, title):
+                self._title = title
+                self.closed = False
+                self.forwarded = 0
+                self.callbacks = {}
+
+            def is_closed(self): return self.closed
+            async def title(self): return self._title
+            def on(self, event, callback): self.callbacks[event] = callback
+            async def close(self):
+                self.closed = True
+                callback = self.callbacks.get("close")
+                if callback: callback()
+            async def go_forward(self, **_kwargs): self.forwarded += 1
+
+        class FakeContext:
+            async def new_page(self): return FakePage("New tab")
+
+        first = FakePage("First")
+        state = SessionState(session_key="agent-1", context=FakeContext(), browser=None)
+        await driver._register_page(state, first)
+        driver._sessions["agent-1"] = state
+        try:
+            created = await driver._action(state, {"op": "new_page"}, {"session_key": "agent-1"})
+            self.assertEqual(created["page_id"], "page_2")
+            self.assertEqual(list(state.pages), ["page_1", "page_2"])
+
+            await driver._action(state, {"op": "forward", "page_id": "page_1"}, {"session_key": "agent-1"})
+            self.assertEqual(first.forwarded, 1)
+
+            await driver._action(state, {"op": "close_page", "page_id": "page_2"}, {"session_key": "agent-1"})
+            self.assertEqual(list(state.pages), ["page_1"])
+            with self.assertRaisesRegex(RuntimeError, "last_page"):
+                await driver._action(state, {"op": "close_page", "page_id": "page_1"}, {"session_key": "agent-1"})
         finally:
             driver._sessions.clear()
 

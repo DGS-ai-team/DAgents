@@ -45,6 +45,32 @@ func TestManagerViewReturnsBusyWithoutWaitingForAgentBrowserLock(t *testing.T) {
 	}
 }
 
+func TestManagerControlLimitsActionsAndReturnsBusyWithoutWaiting(t *testing.T) {
+	enabled := true
+	called := false
+	m := &Manager{cfg: testBrowserConfig(enabled), sessions: map[string]struct{}{"agent-1": {}}, locks: map[string]*sync.Mutex{}, driver: &MockDriver{Handler: func(_ context.Context, req Request) (Response, error) {
+		called = true
+		if req.Op != "call" || req.SessionKey != "agent-1" || len(req.Actions) != 1 || req.Actions[0].Op != "navigate" || req.Actions[0].PageID != "page-1" {
+			t.Fatalf("control request = %+v", req)
+		}
+		return Response{OK: true, Detail: map[string]any{"status": "succeeded"}}, nil
+	}}}
+	out, err := m.Control(context.Background(), "agent-1", "page-1", Action{Op: "navigate", Params: map[string]any{"url": "https://example.test"}})
+	if err != nil || !out.OK || !called {
+		t.Fatalf("Control = %+v, err=%v, called=%v", out, err, called)
+	}
+	called = false
+	if out, err = m.Control(context.Background(), "agent-1", "", Action{Op: "evaluate"}); err != nil || out.OK || out.ErrorCode != "invalid_action" || called {
+		t.Fatalf("unsupported Control = %+v, err=%v, called=%v", out, err, called)
+	}
+	lock := m.sessionLock("agent-1")
+	lock.Lock()
+	defer lock.Unlock()
+	if out, err = m.Control(context.Background(), "agent-1", "page-1", Action{Op: "navigate"}); err != nil || out.OK || out.ErrorCode != "browser_busy" || called {
+		t.Fatalf("busy Control = %+v, err=%v, called=%v", out, err, called)
+	}
+}
+
 func TestManagerStartStopWithMockDriver(t *testing.T) {
 	mock := &MockDriver{
 		Handler: func(_ context.Context, req Request) (Response, error) {

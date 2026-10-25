@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, pickPlatformDirectory, putAutoConfig, updateAgentTodo } from "./node.js";
+import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, pickPlatformDirectory, postAgentBrowserAction, putAutoConfig, updateAgentTodo } from "./node.js";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -23,12 +23,14 @@ describe("simplified Auto todo API", () => {
   });
 });
 
-describe("read-only Agent browser view API", () => {
-  it("uses the authenticated Desktop JSON bridge with the Agent-owned path and optional page id", async () => {
+describe("Agent browser resource API", () => {
+  it("uses the authenticated Desktop JSON bridge with the Agent-owned view and action routes", async () => {
     const request = vi.fn(async () => ({ page_id: "page-1", image_base64: "cG5n" }));
     vi.stubGlobal("__DAGENTS_API_REQUEST__", request);
     await getAgentBrowserView("agent/1", "page/2");
+    await postAgentBrowserAction("agent/1", { action: "navigate", page_id: "page/2", url: "https://example.test" });
     expect(request).toHaveBeenCalledWith({ method: "GET", path: "/v1/agents/agent%2F1/browser/view?page_id=page%2F2", body: undefined });
+    expect(request).toHaveBeenLastCalledWith({ method: "POST", path: "/v1/agents/agent%2F1/browser/action", body: { action: "navigate", page_id: "page/2", url: "https://example.test" } });
   });
 });
 

@@ -202,6 +202,39 @@ func (m *Manager) View(ctx context.Context, sessionKey, pageID string) (ToolResu
 	return m.call(viewCtx, Request{Op: "view", SessionKey: sessionKey, PageID: strings.TrimSpace(pageID), TimeoutMS: 5000})
 }
 
+// Control executes the small set of browser actions exposed to the Desktop
+// resource surface. It never waits behind an Agent turn: a busy session is
+// reported so the UI can retain its current page and retry later.
+func (m *Manager) Control(ctx context.Context, sessionKey, pageID string, action Action) (ToolResult, error) {
+	sessionKey = strings.TrimSpace(sessionKey)
+	pageID = strings.TrimSpace(pageID)
+	action.Op = strings.TrimSpace(action.Op)
+	if sessionKey == "" {
+		return ToolResult{OK: false, ErrorCode: "invalid_action", Error: "session_key is required"}, nil
+	}
+	switch action.Op {
+	case "new_page", "close_page", "navigate", "back", "forward", "reload", "tabs":
+	default:
+		return ToolResult{OK: false, ErrorCode: "invalid_action", Error: "unsupported Desktop browser action"}, nil
+	}
+	if !m.Enabled() {
+		return ToolResult{OK: false, ErrorCode: "browser_disabled", Error: "browser tools disabled (set browser.enabled: true)"}, nil
+	}
+	m.mu.Lock()
+	_, started := m.sessions[sessionKey]
+	m.mu.Unlock()
+	if !started {
+		return ToolResult{OK: false, ErrorCode: "browser_not_started", Error: "browser session is not started"}, nil
+	}
+	lock := m.sessionLock(sessionKey)
+	if !lock.TryLock() {
+		return ToolResult{OK: false, ErrorCode: "browser_busy", Error: "Agent browser is currently in use"}, nil
+	}
+	defer lock.Unlock()
+	action.PageID = pageID
+	return m.call(ctx, Request{Op: "call", SessionKey: sessionKey, Actions: []Action{action}})
+}
+
 // Start 启动绑定 session 的本机 Chrome（CDP）。
 func (m *Manager) Start(ctx context.Context, sessionKey string, headed *bool, viewportW, viewportH int) (ToolResult, error) {
 	sessionKey = strings.TrimSpace(sessionKey)
