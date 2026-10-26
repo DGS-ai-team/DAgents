@@ -600,13 +600,8 @@
   font-size: 12px;
 }
 
-.msg--generating,
 .msg--status {
   margin: 6px 0;
-}
-
-.msg__body--hint-only {
-  padding: 2px 0;
 }
 
 /* ---------- app shell ---------- */
