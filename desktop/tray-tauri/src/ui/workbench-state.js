@@ -52,7 +52,23 @@ export function chooseActiveAgentId(agents, currentId) {
   return String(rows[0]?.agent_id || '')
 }
 
-export function desktopChatEntries(agentId, transcript = [], streamingText = '', turnState = null, pendingUser = null, generating = false) {
+export function desktopComposerStatus({ generating = false, cancelling = false, streamingText = '', turnState = {} } = {}) {
+  const phase = String(turnState?.phase || '')
+  if (!generating || turnState?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted', 'finished'].includes(phase)) return ''
+  if (cancelling) return '正在停止'
+  if (phase === 'queued') return '等待执行'
+  if (phase === 'tool_executing') return '工具执行中'
+  if (phase === 'tool_waiting') return '等待工具审批'
+  if (phase === 'waiting_user') return '等待你的输入'
+  if (streamingText) {
+    return phase === 'model_generating' && turnState?.outputChannel === 'reasoning'
+      ? '思考中'
+      : '正在生成回复'
+  }
+  return '正在等待回复'
+}
+
+export function desktopChatEntries(agentId, transcript = [], streamingText = '', turnState = null, pendingUser = null) {
   const rows = Array.isArray(transcript) ? transcript : []
   const terminal = isTerminalTurn(turnState)
   const entries = rows.map((entry, index) => ({
@@ -67,16 +83,7 @@ export function desktopChatEntries(agentId, transcript = [], streamingText = '',
     delete entry.baseTranscriptLength
     entries.push({ ...entry, id: `${agentId || 'agent'}:pending-user:${pendingUser.id}`, data: {} })
   }
-  if (generating && !streamingText && !terminal) {
-    entries.push({
-      id: `${agentId || 'agent'}:pending-response:${pendingUser?.id || 'active'}`,
-      kind: 'assistant',
-      // Match the WebUI: an empty streaming assistant entry renders the
-      // animated brand activity mark instead of a textual placeholder.
-      text: '',
-      streaming: true,
-    })
-  } else if (streamingText && !terminal) {
+  if (streamingText && !terminal) {
     entries.push({
       id: `${agentId || 'agent'}:history:${entries.length}`,
       kind: 'assistant',

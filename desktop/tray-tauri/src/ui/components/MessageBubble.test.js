@@ -4,6 +4,14 @@ import { describe, expect, it } from "vitest";
 import MessageBubble from "./MessageBubble.vue";
 
 describe("MessageBubble context boundary", () => {
+  it("does not render an empty streaming assistant placeholder", () => {
+    const wrapper = mount(MessageBubble, {
+      props: { entry: { kind: "assistant", text: "", streaming: true } },
+    });
+    expect(wrapper.find(".msg--assistant").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("renders the reset separator without rendering bridge content", () => {
     const wrapper = mount(MessageBubble, {
       props: { entry: { kind: "context_boundary", text: "private bridge body" } },

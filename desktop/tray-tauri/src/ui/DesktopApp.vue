@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
 import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
@@ -13,7 +13,7 @@ import { agentMediaId, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadErro
 import { createWorkspaceReference, formatWorkspaceReferencesMessage } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
-import { applyHydrateTurnState } from '@desktop-ui/stores/turnState.js'
+import { applyHydrateTurnState, turnStateStore } from '@desktop-ui/stores/turnState.js'
 import { createTurnWatchdog } from '@desktop-ui/stores/turnWatchdog.js'
 import MainChatPanel from '@desktop-ui/components/MainChatPanel.vue'
 import ResourceMarkdown from '@desktop-ui/components/ResourceMarkdown.vue'
@@ -287,7 +287,7 @@ const failedSendDraft = computed(() => failedSendDrafts.value[activeId.value] ||
 const normalAgents = computed(() => agents.value.filter(a => a.agent_type !== 'auto'))
 const autoAgents = computed(() => agents.value.filter(a => a.agent_type === 'auto'))
 const fullTranscript = computed(() => hydrate.value?.transcript || [])
-const chatEntries = computed(() => desktopChatEntries(activeId.value, fullTranscript.value, streamingText.value, hydrate.value?.turn_state, pendingUserByAgent.value[activeId.value], agentGenerating.value))
+const chatEntries = computed(() => desktopChatEntries(activeId.value, fullTranscript.value, streamingText.value, hydrate.value?.turn_state, pendingUserByAgent.value[activeId.value]))
 const hitlQueue = computed(() => {
   const expanded = expandHitlRequired(pending.value)
   return desktopHitlQueue(expanded)
@@ -321,6 +321,12 @@ const approvalCalls = computed(() => {
 })
 const canCancelTurn = computed(() => ['queued', 'model_generating', 'tool_executing'].includes(hydrate.value?.turn_state?.phase))
 const agentGenerating = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
+const composerRuntimeStatus = computed(() => desktopComposerStatus({
+  generating: agentGenerating.value,
+  cancelling: cancellingTurn.value,
+  streamingText: streamingText.value,
+  turnState: turnStateStore,
+}))
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => Boolean(activeId.value && status.value.online),
   hasStuckStatus: () => agentGenerating.value || Boolean(streamingText.value),
@@ -2010,7 +2016,7 @@ onUnmounted(() => {
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
-      <footer class="composer-wrap"><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
+      <footer class="composer-wrap"><div v-if="composerRuntimeStatus" class="desktop-composer-runtime-pill" role="status" aria-live="polite">{{ composerRuntimeStatus }}</div><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <input ref="attachmentInput" class="visually-hidden" type="file" multiple @change="addImages">
   <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>

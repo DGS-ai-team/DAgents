@@ -1413,6 +1413,38 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   background: #fff;
 }
 
+.desktop-composer-runtime-pill {
+  position: absolute;
+  right: 78px;
+  bottom: calc(100% - 2px);
+  z-index: 15;
+  max-width: min(520px, calc(100% - 100px));
+  overflow: hidden;
+  padding: 4px 10px;
+  border: 1px solid #d9e2e4;
+  border-radius: 999px;
+  background: #fff;
+  color: #586b72;
+  box-shadow: 0 2px 8px #19334612;
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.desktop-composer-runtime-pill::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #64777e;
+  content: "";
+  vertical-align: 1px;
+  animation: composer-pulse 1.2s ease-in-out infinite;
+}
+
 .composer-attachments {
   display: flex;
   max-width: 900px;
