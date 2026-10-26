@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
 
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
   const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeAgentName: 'autotest', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0' })
@@ -128,6 +128,19 @@ test('DesktopApp supplies local Node and active workspace state to the top-menu 
   const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
   const menuContext = source.match(/const menuEntries = computed\(\(\) => createDesktopMenuModel\(\{([\s\S]*?)\}\)\)/)?.[1]
   assert.ok(menuContext, 'menu model call is present')
+})
+
+test('DesktopApp renders composer status in the visible footer and follows Turn and stream state', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  assert.match(source, /desktopComposerStatus\(\{[\s\S]*?turnState: turnStateStore/)
+  assert.match(source, /class="desktop-composer-runtime-pill"[^>]*role="status"[^>]*>\{\{ composerRuntimeStatus \}\}/)
+
+  assert.equal(desktopComposerStatus({ generating: true }), '正在等待回复')
+  assert.equal(desktopComposerStatus({ generating: true, streamingText: '首个 token', turnState: { phase: 'model_generating' } }), '正在生成回复')
+  assert.equal(desktopComposerStatus({ generating: true, streamingText: 'reasoning', turnState: { phase: 'model_generating', outputChannel: 'reasoning' } }), '思考中')
+  assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'tool_executing' } }), '工具执行中')
+  assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'completed', terminal: true } }), '')
+  assert.equal(desktopComposerStatus({ generating: false, streamingText: 'late text' }), '')
 })
 
 test('Node first-run gate leaves Desktop-local settings accessible without opening Node settings', () => {
@@ -279,26 +292,23 @@ test('streaming assistant reserves its history index and terminal hydrate keeps 
 
 test('pending user send is visible before hydrate and is not duplicated once persisted', () => {
   const pending = { id: 'send-1', kind: 'user', text: '2 + 2?', baseTranscriptLength: 1 }
-  const beforeHydrate = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Earlier' }], '', null, pending, true)
-  assert.deepEqual(beforeHydrate.map(entry => entry.text), ['Earlier', '2 + 2?', ''])
+  const beforeHydrate = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Earlier' }], '', null, pending)
+  assert.deepEqual(beforeHydrate.map(entry => entry.text), ['Earlier', '2 + 2?'])
   assert.equal(beforeHydrate[1].id, 'agent-a:pending-user:send-1')
-  assert.equal(beforeHydrate[2].id, 'agent-a:pending-response:send-1')
-  assert.equal(beforeHydrate[2].kind, 'assistant')
-  assert.equal(beforeHydrate[2].streaming, true)
 
   const afterHydrate = desktopChatEntries('agent-a', [
     { kind: 'user', text: 'Earlier' },
     { kind: 'user', text: '2 + 2?' },
-  ], '', { phase: 'model_generating' }, pending, true)
-  assert.deepEqual(afterHydrate.map(entry => entry.text), ['Earlier', '2 + 2?', ''])
-  assert.equal(afterHydrate[2].streaming, true)
+  ], '', { phase: 'model_generating' }, pending)
+  assert.deepEqual(afterHydrate.map(entry => entry.text), ['Earlier', '2 + 2?'])
 
   const firstToken = desktopChatEntries('agent-a', [
     { kind: 'user', text: 'Earlier' },
     { kind: 'user', text: '2 + 2?' },
-  ], '4', { phase: 'model_generating' }, null, true)
+  ], '4', { phase: 'model_generating' })
   assert.deepEqual(firstToken.map(entry => entry.text), ['Earlier', '2 + 2?', '4'])
 })
+
 
 test('Desktop HITL adapter preserves every supported request type and queue order', () => {
   const userInfo = { content: 'Which environment?', user_information_args: { question: 'Which environment?' } }

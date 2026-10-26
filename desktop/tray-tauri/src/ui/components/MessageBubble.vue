@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
-import BrandActivityIndicator from "@shared-frontend/components/BrandActivityIndicator.vue";
 import BrowserCitationBlock from "./BrowserCitationBlock.vue";
 import UiIcon from "./UiIcon.vue";
 import ResourceMarkdown from "./ResourceMarkdown.vue";
@@ -96,12 +95,9 @@ function userImageThumb(src) {
     </div>
   </div>
 
-  <div v-else-if="entry.kind === 'assistant'" class="msg msg--assistant" data-kind="assistant" :class="{ 'msg--generating': entry.streaming }">
+  <div v-else-if="entry.kind === 'assistant' && entry.text" class="msg msg--assistant" data-kind="assistant">
     <div class="msg__body">
-      <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
-        <BrandActivityIndicator label="正在生成" mode="generating" :show-label="false" />
-      </div>
-      <div v-else class="msg__bubble msg__bubble--assistant-md">
+      <div class="msg__bubble msg__bubble--assistant-md">
         <div
           class="tool-exec-bubble__markdown assistant-msg__md"
           :class="{ 'assistant-msg__md--streaming': entry.streaming }"
