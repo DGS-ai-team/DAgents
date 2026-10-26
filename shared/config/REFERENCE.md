@@ -11,7 +11,7 @@
 | `LocalConfig` | `struct` | Client 用 endpoint 与可选 agent_id 校验 |
 | `LLMConfig` | `struct` | LLM 配置；`mock=true` 时用 MockClient；工具步数上限见 Agent snapshot `max_steps` |
 | `SkillsConfig` | `struct` | skills 开关、`max_in_prompt` |
-| `CompressionConfig` | `struct` | `silent_trigger_tokens`、`blocking_trigger_tokens`（`<=0` 关闭对应档位）；`idle_auto_compress_seconds` / `idle_auto_compress_poll_seconds` / `idle_auto_compress_min_tokens`（无动作自动压缩） |
+| `CompressionConfig` | `struct` | `silent_trigger_tokens`、`blocking_trigger_tokens`（`<=0` 关闭对应档位）；`idle_new_conversation_seconds`（普通 Agent 空闲后下一条用户输入开启新上下文，`0` 关闭） |
 | `MemoryConfig` | `struct` | `auto_extract`（默认 false）；`candidate_queue_size`（默认 16）；`max_candidates`（默认 8）；`core_budget_tokens`（默认 2000）；仅控制压缩后的可选后台候选整理 |
 | `TriggersConfig` | `struct` | `enabled`、`poll_seconds` |
 | `RawMessageHistoryConfig` | `struct` | 原始消息 JSONL 开关（`enabled` 指针，缺省 true） |

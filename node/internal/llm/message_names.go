@@ -7,14 +7,15 @@ import "strings"
 //
 // 见 https://api-docs.deepseek.com/zh-cn/api/create-chat-completion
 const (
-	UserNameHuman              = "human"
-	UserNameTrigger            = "trigger"
-	UserNameChildTask          = "child_task"
-	UserNameCompression        = "compression"
-	UserNameAsyncTool          = "async_tool"
-	UserNameCompressionSidecar = "compression_sidecar"
-	UserNameToolVision         = "tool_vision"
-	UserNameDate               = "date"
+	UserNameHuman                = "human"
+	UserNameTrigger              = "trigger"
+	UserNameChildTask            = "child_task"
+	UserNameCompression          = "compression"
+	UserNameAsyncTool            = "async_tool"
+	UserNameCompressionSidecar   = "compression_sidecar"
+	UserNameToolVision           = "tool_vision"
+	UserNameDate                 = "date"
+	UserNameConversationBoundary = "conversation_boundary"
 	// UserNameSkill marks a durable, model-facing SKILL.md instruction
 	// message. It is distinct from a human request and is hidden from the
 	// normal transcript projection.

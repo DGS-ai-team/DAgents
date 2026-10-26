@@ -1,0 +1,2 @@
+QA upgrade passed: a newer manifest-verified package ran installer-owned quit/stop, fixture files and logical Node database persisted, and production settings stayed unchanged.
+Manually restart the QA-owned Node and Desktop before running Stage Uninstall.

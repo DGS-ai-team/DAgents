@@ -80,7 +80,7 @@ func TestTriggerPopPersistenceFailureDoesNotExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr := NewManager("agent-1", nil, &llm.MockClient{}, nil, nil, st, TurnOptions{}, nil)
-	rt := newRuntime("persist-failure", "agent-1", nil, mgr.llm, nil, nil, st, nil, nil, nil, nil, false, 0, 0, mgr.turn, nil)
+	rt := newRuntime("persist-failure", "agent-1", nil, mgr.llm, nil, nil, st, nil, nil, nil, nil, 0, 0, mgr.turn, nil)
 	rt.session = Session{ID: "persist-failure", AgentID: "agent-1"}
 	if _, err := rt.inputBox.Append(InputKindTrigger, queue.Envelope{TriggerID: "t", DeliveryID: "d", Content: "must not run"}); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestTriggerPostCompletePersistenceFailureRetainsGuard(t *testing.T) {
 	}
 	mgr := NewManager("agent-1", nil, &llm.MockClient{}, nil, nil, st, TurnOptions{}, nil)
 	tracker := &closeStoreDeliveryTracker{st: st}
-	rt := newRuntime("postcomplete-failure", "agent-1", nil, mgr.llm, nil, nil, st, logx.Discard(), nil, nil, nil, false, 0, 0, mgr.turn, tracker)
+	rt := newRuntime("postcomplete-failure", "agent-1", nil, mgr.llm, nil, nil, st, logx.Discard(), nil, nil, nil, 0, 0, mgr.turn, tracker)
 	rt.session = Session{ID: "postcomplete-failure", AgentID: "agent-1"}
 	if _, err := rt.inputBox.Append(InputKindTrigger, queue.Envelope{TriggerID: "t", DeliveryID: "d", Content: "drop"}); err != nil {
 		t.Fatal(err)

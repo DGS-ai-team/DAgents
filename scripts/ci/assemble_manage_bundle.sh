@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 组装 Manage 离线发布包：镜像 tar.gz + docker-compose + 导入/重启脚本。
+# Node 下载包已嵌入镜像并由 Manage 启动时 seed；不要在外层重复打包。
 #
 # 用法（仓库根）：
 #   VERSION=0.3.7 scripts/ci/assemble_manage_bundle.sh
@@ -42,14 +43,6 @@ cp "${REPO_ROOT}/packaging/manage/scripts/restart.sh" "${BUNDLE_DIR}/scripts/"
 cp "${REPO_ROOT}/packaging/manage/scripts/import-image.bat" "${BUNDLE_DIR}/scripts/"
 cp "${REPO_ROOT}/packaging/manage/scripts/restart.bat" "${BUNDLE_DIR}/scripts/"
 chmod +x "${BUNDLE_DIR}/scripts/"*.sh
-
-ASSISTANT_TAR="${REPO_ROOT}/dist/dagents-local-assistant-linux-amd64-${VERSION}.tar.gz"
-if [[ -f "${ASSISTANT_TAR}" ]]; then
-  RELEASE_DIR="${BUNDLE_DIR}/releases/dagents-local-assistant/stable/linux-amd64/${VERSION}"
-  mkdir -p "${RELEASE_DIR}"
-  cp "${ASSISTANT_TAR}" "${RELEASE_DIR}/"
-  echo "[assemble-manage] bundled release: ${ASSISTANT_TAR}"
-fi
 
 echo "${VERSION}" > "${BUNDLE_DIR}/VERSION"
 

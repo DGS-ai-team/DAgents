@@ -1,4 +1,12 @@
 ﻿#define MyAppName "DAgents 本地助手"
+#ifdef IsolatedQaBuild
+#define MyQaAppName "DAgents QA 本地助手"
+#define MyAppId "{{B5D1A7C3-2E49-4F60-A8B1-7C3D9E5F2046}"
+#define MyDefaultDir "{localappdata}\DAgents-QA"
+#else
+#define MyAppId "{{A3B8C2D1-9E4F-4A7B-8C6D-1E2F3A4B5C6D}"
+#define MyDefaultDir "{userpf}\DAgents"
+#endif
 #ifndef MyAppVersion
 #define MyAppVersion "0.0.0"
 #endif
@@ -6,26 +14,40 @@
 #define MyAppArch "x64"
 #endif
 #ifndef MyOutputBaseFilename
+#ifdef IsolatedQaBuild
+#define MyOutputBaseFilename "dagents-local-assistant-windows-qa-installer"
+#else
 #define MyOutputBaseFilename "dagents-local-assistant-windows-amd64-installer"
+#endif
 #endif
 #define ShellAutostartRunName "DAgents Shell"
 #define ShellAutostartRegKey "Software\Microsoft\Windows\CurrentVersion\Run"
 
 [Setup]
-AppId={{A3B8C2D1-9E4F-4A7B-8C6D-1E2F3A4B5C6D}
+AppId={#MyAppId}
+#ifdef IsolatedQaBuild
+AppName={#MyQaAppName}
+#else
 AppName={#MyAppName}
+#endif
 AppVersion={#MyAppVersion}
 AppPublisher=DAgents
 AppPublisherURL=https://github.com/DGS-ai-team/DAgents
-DefaultDirName={autopf}\DAgents
+; Node keeps mutable config and runtime data under its working directory, so
+; install in the current user's Programs directory.
+DefaultDirName={#MyDefaultDir}
+#ifdef IsolatedQaBuild
+DefaultGroupName={#MyQaAppName}
+#else
 DefaultGroupName=DAgents
+#endif
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist-installer
 OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
 SolidCompression=yes
-CloseApplications=yes
-RestartApplications=yes
+CloseApplications=no
+RestartApplications=no
 #if MyAppArch == "x64"
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -33,12 +55,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x86compatible
 #endif
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\assets\dagents.ico
 ChangesEnvironment=yes
 WizardStyle=modern
 ShowLanguageDialog=no
-SetupIconFile=..\..\desktop\tray\assets\icon.ico
+SetupIconFile=..\..\desktop\tray-tauri\src-tauri\icons\icon.ico
 WizardImageFile=assets\wizard-sidebar.bmp
 WizardSmallImageFile=assets\wizard-small.bmp
 WizardImageStretch=yes
@@ -49,61 +70,55 @@ DisableFinishedPage=no
 Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [CustomMessages]
-chinesesimp.WelcomeLabel2=安装完成后请打开 Web UI「设置 › 连接」完成配置。
+chinesesimp.WelcomeLabel2=安装完成后请打开 DAgents Desktop 完成配置。
 chinesesimp.WizardSelectDir=选择安装位置
 chinesesimp.WizardSelectDirLabel3=DAgents 将安装到以下文件夹。
-chinesesimp.WizardSelectTasks=选择 Shell
-chinesesimp.WizardSelectTasksLabel2=Desktop Shell 二选一；有 WebView2 时推荐内嵌 Web UI。
 chinesesimp.WizardReady=准备安装
 chinesesimp.WizardReadyLabel1=已准备好安装 DAgents 本地助手。
 chinesesimp.WizardReadyLabel2a=点击「安装」开始，或返回上一步检查设置。
 chinesesimp.WizardInstalling=正在安装
 chinesesimp.WizardInstallingLabel=请稍候，正在安装 DAgents…
-chinesesimp.ShellGroup=Desktop Shell
-chinesesimp.ShellModernTask=推荐 · Win10/11 + WebView2（内嵌 Web UI）
-chinesesimp.ShellLegacyTask=兼容 · 低版本 Windows（系统浏览器打开 Web UI）
-
-[Tasks]
-Name: "shellmodern"; Description: "{cm:ShellModernTask}"; GroupDescription: "{cm:ShellGroup}"; Flags: exclusive
-Name: "shelllegacy"; Description: "{cm:ShellLegacyTask}"; GroupDescription: "{cm:ShellGroup}"; Flags: exclusive unchecked
 
 [Files]
-; 核心二进制：排除两套 Shell，按 Tasks 二选一写成 bin\dagents-shell.exe
-Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion; Excludes: "dagents-shell.exe;dagents-shell-tauri.exe;dagents-shell-legacy.exe"
-Source: "..\..\bundle\bin\dagents-shell-tauri.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion; Tasks: shellmodern
-Source: "..\..\bundle\bin\dagents-shell-legacy.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion; Tasks: shelllegacy
+; 安装包只发布独立 Desktop Shell（Tauri）。
+Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion; Excludes: "dagents-shell-tauri.exe"
 Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\desktop\tray\assets\icon.ico"; DestDir: "{app}\assets"; DestName: "dagents.ico"; Flags: ignoreversion
+Source: "lifecycle-protocol-v1.marker"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\desktop\tray-tauri\src-tauri\icons\icon.ico"; DestDir: "{app}\assets"; DestName: "dagents.ico"; Flags: ignoreversion
 Source: "..\..\bundle\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "write-install-config.ps1"; DestDir: "{app}\scripts\windows"; Flags: ignoreversion
 Source: "..\..\bundle\config.example.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\bundle\.env.example"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\bundle\README.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\bundle\VERSION"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "..\..\bundle\.runtime\*"; DestDir: "{app}\.runtime"; Flags: recursesubdirs onlyifdoesntexist createallsubdirs; Excludes: "policy\*"
-Source: "..\..\bundle\.runtime\policy\*"; DestDir: "{app}\.runtime\_seed\policy"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\bundle\.runtime\*"; DestDir: "{app}\.runtime"; Flags: recursesubdirs onlyifdoesntexist createallsubdirs uninsneveruninstall; Excludes: "policy\*"
+Source: "..\..\bundle\.runtime\policy\*"; DestDir: "{app}\.runtime\_seed\policy"; Flags: ignoreversion recursesubdirs createallsubdirs uninsneveruninstall
 Source: "..\..\bundle\packaging\agent-templates\*"; DestDir: "{app}\packaging\agent-templates"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
+#ifndef IsolatedQaBuild
+[Tasks]
+Name: "desktopicon"; Description: "创建 DAgents Desktop 桌面快捷方式"; Flags: unchecked
+Name: "autostart"; Description: "登录时启动 DAgents Desktop"; Flags: unchecked
+
 [Icons]
-Name: "{group}\DAgents Shell（系统托盘）"; Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\Start Agent Node (background)"; Filename: "{app}\dagents.cmd"; Parameters: "node"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Parameters: "node --foreground"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
-Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{group}\DAgents Desktop"; Filename: "{app}\bin\dagents-shell.exe"; Parameters: "--home ""{app}"" --config ""{app}\config.yaml"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{userdesktop}\DAgents Desktop"; Filename: "{app}\bin\dagents-shell.exe"; Parameters: "--home ""{app}"" --config ""{app}\config.yaml"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"; Tasks: desktopicon
+#endif
 
 [Registry]
 
+#ifndef IsolatedQaBuild
 [Run]
-Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "验证安装文件 (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
-; Silent upgrades launched by the Shell must start the new Shell after replacement.
-Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Shell（托盘监护 Node）"; Flags: postinstall nowait runascurrentuser
-
-[UninstallDelete]
-Type: files; Name: "{userdesktop}\DAgents Shell（系统托盘）.lnk"
+; Silent upgrades launched by the Shell must start the new Desktop after replacement.
+Filename: "{app}\bin\dagents-shell.exe"; Parameters: "--home ""{app}"" --config ""{app}\config.yaml"""; WorkingDir: "{app}"; Description: "启动 DAgents Desktop"; Flags: postinstall nowait runascurrentuser
+#endif
 
 [Code]
+function SetEnvironmentVariableW(Name, Value: string): Longint;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
 const
-  { Web UI tokens.css light — Inno 颜色为 BGR $00BBGGRR }
+  { Desktop UI theme — Inno 颜色为 BGR $00BBGGRR }
   ClrBg = $00F3F3F3;
   ClrSurface = $00FFFFFF;
   ClrSurfaceMuted = $00F6F6F6;
@@ -116,9 +131,85 @@ const
 var
   OverwritePolicy: Boolean;
   OverwritePolicyAnswered: Boolean;
-  ShellTaskDefaultsApplied: Boolean;
-  DesktopShortcutCheck: TNewCheckBox;
-  DesktopShortcutCreated: Boolean;
+  LauncherTasksInitialized: Boolean;
+
+function WebView2VersionIsInstalled(const VersionText: string): Boolean;
+var
+  PackedVersion: Int64;
+begin
+  Result := StrToVersion(VersionText, PackedVersion) and (PackedVersion > 0);
+end;
+
+function WebView2RuntimeInstalled: Boolean;
+var
+  Version: string;
+begin
+  Result := False;
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE_32,
+       'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+       'pv', Version) and WebView2VersionIsInstalled(Version) then
+    Result := True;
+  if not Result and RegQueryStringValue(HKEY_CURRENT_USER_32,
+       'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+       'pv', Version) and WebView2VersionIsInstalled(Version) then
+    Result := True;
+  if not Result and IsWin64 then
+  begin
+    if RegQueryStringValue(HKEY_LOCAL_MACHINE_64,
+         'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+         'pv', Version) and WebView2VersionIsInstalled(Version) then
+      Result := True;
+    if not Result and RegQueryStringValue(HKEY_CURRENT_USER_64,
+         'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+         'pv', Version) and WebView2VersionIsInstalled(Version) then
+      Result := True;
+  end;
+end;
+
+function SupportedWindowsVersion: Boolean;
+var
+  Version: TWindowsVersion;
+begin
+  Result := False;
+  GetWindowsVersionEx(Version);
+  if not Version.NTPlatform then
+    Exit;
+
+  { Workstations: Windows 10 (10.0.10240) is the Node baseline. Windows 11
+    (build 22000+) is recommended for the full Desktop experience. }
+  if Version.ProductType = VER_NT_WORKSTATION then
+    Result := (Version.Major > 10) or
+      ((Version.Major = 10) and ((Version.Minor > 0) or
+       ((Version.Minor = 0) and (Version.Build >= 10240))))
+  else
+    { Windows Server 2019 is 10.0.17763; older Server releases are unsupported. }
+    Result := (Version.Major > 10) or
+      ((Version.Major = 10) and ((Version.Minor > 0) or
+       ((Version.Minor = 0) and (Version.Build >= 17763))));
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Result := True;
+  if not SupportedWindowsVersion then
+  begin
+    MsgBox(
+      '此 DAgents 版本要求 Windows 10 或更新版本；Windows Server 需为 Server 2019 或更新版本。' + #13#10 + #13#10 +
+      '完整 Desktop 体验推荐 Windows 11。Windows 7/8/8.1 和旧版 Windows Server 不受支持。',
+      mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  if not WebView2RuntimeInstalled then
+  begin
+    MsgBox(
+      'DAgents Desktop 需要 Microsoft Edge WebView2 Runtime。' + #13#10 + #13#10 +
+      '请先安装 Evergreen Runtime，然后重新运行 DAgents 安装程序：' + #13#10 +
+      'https://developer.microsoft.com/microsoft-edge/webview2/',
+      mbError, MB_OK);
+    Result := False;
+  end;
+end;
 
 procedure StyleButton(B: TNewButton);
 begin
@@ -157,7 +248,7 @@ end;
 
 procedure StyleFinishedLabels;
 var
-  ContentLeft, ContentWidth, BodyTop, FinishedHeight, CheckTop: Integer;
+  ContentLeft, ContentWidth, BodyTop, FinishedHeight: Integer;
 begin
   ContentLeft := WizardForm.FinishedHeadingLabel.Left;
   ContentWidth := WizardForm.ClientWidth - ContentLeft - ScaleX(28);
@@ -190,21 +281,6 @@ begin
   if FinishedHeight < ScaleY(70) then
     FinishedHeight := ScaleY(70);
   WizardForm.FinishedLabel.Height := FinishedHeight;
-
-  if DesktopShortcutCheck <> nil then
-  begin
-    DesktopShortcutCheck.Font.Name := 'Segoe UI';
-    DesktopShortcutCheck.Font.Size := 9;
-    DesktopShortcutCheck.Font.Color := ClrText;
-    DesktopShortcutCheck.Left := ContentLeft;
-    DesktopShortcutCheck.Width := ContentWidth;
-    DesktopShortcutCheck.Height := ScaleY(22);
-    CheckTop := BodyTop + FinishedHeight + ScaleY(8);
-    if WizardForm.RunList.Visible and
-      ((CheckTop + DesktopShortcutCheck.Height) > WizardForm.RunList.Top) then
-      CheckTop := WizardForm.RunList.Top - DesktopShortcutCheck.Height - ScaleY(8);
-    DesktopShortcutCheck.Top := CheckTop;
-  end;
 end;
 
 procedure StyleInnerPageLabels;
@@ -301,82 +377,115 @@ begin
   ForceDirectories(AppDir + '\.runtime\browser\profiles');
 end;
 
-function IsWebView2Installed: Boolean;
+#ifndef IsolatedQaBuild
+function OwnedAutostartCommand(const Value, AppDir: string): Boolean;
+var
+  CurrentCommand, LegacyCommand: string;
 begin
-  { Evergreen WebView2 Runtime client id }
-  Result :=
-    RegKeyExists(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') or
-    RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') or
-    RegKeyExists(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}');
+  CurrentCommand := '"' + AppDir + '\bin\dagents-shell.exe" --home "' + AppDir + '" --config "' + AppDir + '\config.yaml"';
+  LegacyCommand := '"' + AppDir + '\dagents.cmd" shell --background';
+  Result := SameText(Value, CurrentCommand) or SameText(Value, LegacyCommand);
 end;
+
+function HasExplicitTaskSelection: Boolean;
+var
+  I: Integer;
+  Arg: string;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    Arg := Uppercase(ParamStr(I));
+    if (Arg = '/TASKS') or (Pos('/TASKS=', Arg) = 1) or
+       (Arg = '/MERGETASKS') or (Pos('/MERGETASKS=', Arg) = 1) then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function ShortcutMatches(const LinkPath, TargetPath, Arguments: string): Boolean;
+var
+  Shell, Link: Variant;
+  ActualTarget, ActualArguments: string;
+begin
+  Result := False;
+  if not FileExists(LinkPath) then
+    Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Link := Shell.CreateShortcut(LinkPath);
+    ActualTarget := Link.TargetPath;
+    ActualArguments := Link.Arguments;
+    Result := SameText(ActualTarget, TargetPath) and SameText(ActualArguments, Arguments);
+  except
+    Result := False;
+  end;
+end;
+
+procedure SelectPreviousLauncherTasks;
+var
+  AppDir, CurrentCommand: string;
+begin
+  if HasExplicitTaskSelection then
+    Exit;
+  AppDir := ExpandConstant('{app}');
+  if RegQueryStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CurrentCommand) and
+     OwnedAutostartCommand(CurrentCommand, AppDir) then
+    WizardSelectTasks('autostart')
+  else
+    WizardSelectTasks('!autostart');
+
+  if ShortcutMatches(
+       ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk'),
+       AppDir + '\dagents.cmd', 'shell --background') then
+    WizardSelectTasks('desktopicon');
+end;
+#endif
 
 procedure InitializeWizard;
 begin
-  ShellTaskDefaultsApplied := False;
-  DesktopShortcutCreated := False;
-  DesktopShortcutCheck := TNewCheckBox.Create(WizardForm);
-  DesktopShortcutCheck.Parent := WizardForm.FinishedPage;
-  DesktopShortcutCheck.Caption := '创建桌面快捷方式（DAgents Shell 托盘程序）';
-  DesktopShortcutCheck.Checked := False;
+  LauncherTasksInitialized := False;
   ApplyWorkbenchTheme;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
     'DAgents 安装包包含：' + #13#10 + #13#10 +
     '  ·  Agent Node（本地运行时）' + #13#10 +
-    '  ·  Desktop Shell（系统托盘）' + #13#10 +
+    '  ·  DAgents Desktop（独立桌面应用）' + #13#10 +
     '' + #13#10 +
-    '下一步可选择 Shell 类型。' + #13#10 +
-    '安装完成后，请在 Web UI「设置 › 连接」配置 LLM 与 Manage。';
+    '安装完成后，请打开 DAgents Desktop 配置本机 Node、LLM 与 Manage。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';
+#ifdef IsolatedQaBuild
+  WizardForm.FinishedLabel.Caption :=
+    'DAgents QA 安装已就绪。此构建仅用于隔离验证；Desktop 设置保存在安装目录内。';
+#else
   WizardForm.FinishedLabel.Caption :=
     'DAgents 已就绪。' + #13#10 + #13#10 +
-    '  ·  打开 Web UI 完成「设置 › 连接」' + #13#10 +
-    '  ·  Shell 将随登录自启并监护 Node' + #13#10 + #13#10 +
-    '可用 dagents shell status 查看托盘状态。';
+    '  ·  打开 DAgents Desktop 完成配置' + #13#10 +
+    '  ·  可在安装任务中选择是否随登录启动' + #13#10 + #13#10 +
+    '可用 dagents shell status 查看 Desktop 状态。';
+#endif
   StyleFinishedLabels;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
   ApplyWorkbenchTheme;
-  if (CurPageID = wpSelectTasks) and (not ShellTaskDefaultsApplied) then
+#ifndef IsolatedQaBuild
+  if (CurPageID = wpSelectTasks) and not LauncherTasksInitialized then
   begin
-    ShellTaskDefaultsApplied := True;
-    if IsWebView2Installed then
-      WizardSelectTasks('shellmodern')
-    else
-      WizardSelectTasks('shelllegacy');
+    SelectPreviousLauncherTasks;
+    LauncherTasksInitialized := True;
   end;
+#endif
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  AppDir, ShortcutPath, CreatedLink: string;
+  AppDir: string;
 begin
   Result := True;
-  if CurPageID = wpFinished then
-  begin
-    if (DesktopShortcutCheck <> nil) and DesktopShortcutCheck.Checked and
-      (not DesktopShortcutCreated) then
-    begin
-      ShortcutPath := ExpandConstant('{userdesktop}\DAgents Shell（系统托盘）.lnk');
-      try
-        CreatedLink := CreateShellLink(
-          ShortcutPath,
-          'DAgents Shell（系统托盘）',
-          ExpandConstant('{app}\dagents.cmd'),
-          'shell --background',
-          ExpandConstant('{app}'),
-          ExpandConstant('{app}\assets\dagents.ico'),
-          0,
-          SW_SHOWNORMAL);
-        DesktopShortcutCreated := CreatedLink <> '';
-      except
-        MsgBox('无法创建桌面快捷方式，请稍后手动创建。', mbError, MB_OK);
-      end;
-    end;
-    Exit;
-  end;
   if CurPageID <> wpSelectDir then
     Exit;
   if OverwritePolicyAnswered then
@@ -389,30 +498,201 @@ begin
     Exit;
   end;
   OverwritePolicy :=
-    (MsgBox(
+    (SuppressibleMsgBox(
       '检测到已有 policy 配置（.runtime\policy）。' + #13#10 +
       '是否用安装包中的 policy 覆盖？' + #13#10#13#10 +
       '选「否」将保留现有 policy。',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES);
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES);
   OverwritePolicyAnswered := True;
 end;
 
-function PathContains(const Path, Dir: string): Boolean;
+function IsUnderDirectory(const Path, Dir: string): Boolean;
 begin
-  Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') <> 0;
+  Result := Pos(Uppercase(AddBackslash(Dir)), Uppercase(AddBackslash(Path))) = 1;
+end;
+
+function RunShellCommand(const AppDir, CommandLine: string): Integer;
+var
+  ShellExe, Params: string;
+  PreviousHome, PreviousConfig, PreviousDesktopConfig, DesktopConfig: string;
+  ExecResult: Integer;
+  RestoreSucceeded: Boolean;
+begin
+  ShellExe := AppDir + '\bin\dagents-shell.exe';
+  if not FileExists(ShellExe) then
+  begin
+    Result := -1;
+    Exit;
+  end;
+  Params := CommandLine;
+  PreviousHome := GetEnv('DAGENTS_HOME');
+  PreviousConfig := GetEnv('DAGENTS_CONFIG');
+  PreviousDesktopConfig := GetEnv('DAGENTS_DESKTOP_CONFIG');
+  DesktopConfig := '';
+#ifdef IsolatedQaBuild
+  DesktopConfig := AppDir + '\qa-desktop-settings.json';
+#endif
+
+  Result := -1;
+  try
+    if SetEnvironmentVariableW('DAGENTS_HOME', AppDir) = 0 then Exit;
+    if SetEnvironmentVariableW('DAGENTS_CONFIG', AppDir + '\config.yaml') = 0 then Exit;
+    if SetEnvironmentVariableW('DAGENTS_DESKTOP_CONFIG', DesktopConfig) = 0 then Exit;
+    if not Exec(ShellExe, Params, AppDir, SW_HIDE, ewWaitUntilTerminated, ExecResult) then Exit;
+    Result := ExecResult;
+  finally
+    RestoreSucceeded := True;
+    if SetEnvironmentVariableW('DAGENTS_HOME', PreviousHome) = 0 then RestoreSucceeded := False;
+    if SetEnvironmentVariableW('DAGENTS_CONFIG', PreviousConfig) = 0 then RestoreSucceeded := False;
+    if SetEnvironmentVariableW('DAGENTS_DESKTOP_CONFIG', PreviousDesktopConfig) = 0 then RestoreSucceeded := False;
+    if not RestoreSucceeded then Result := -1;
+  end;
+end;
+
+function DesktopConfigArgument(const AppDir: string): string;
+begin
+#ifdef IsolatedQaBuild
+  Result := ' --desktop-config "' + AppDir + '\qa-desktop-settings.json"';
+#else
+  Result := '';
+#endif
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
   AppDir: string;
+  ProbePath: string;
+  ProbeSource: string;
+  ProbeIndex: Integer;
+  ProbeCreated: Boolean;
 begin
   Result := '';
-  AppDir := ExpandConstant('{app}');
-  if FileExists(AppDir + '\dagents.cmd') then
+#ifndef IsolatedQaBuild
+  { Silent upgrades skip the task page; initialize its choices from the existing
+    owned Run value before ssPostInstall applies the selected autostart task. }
+  if not LauncherTasksInitialized then
   begin
-    Exec(AppDir + '\dagents.cmd', 'node shutdown', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    SelectPreviousLauncherTasks;
+    LauncherTasksInitialized := True;
   end;
+#endif
+  AppDir := ExpandConstant('{app}');
+  if IsUnderDirectory(AppDir, ExpandConstant('{commonpf}')) or
+     IsUnderDirectory(AppDir, ExpandConstant('{commonpf32}')) then
+  begin
+    Result := 'DAgents 当前只支持按当前用户安装。检测到所选目录位于 Program Files：' + #13#10 +
+      AppDir + #13#10#13#10 +
+      '安装器不会移动或覆盖这个目录中的 Node 配置和运行数据。请先为该旧目录备份数据，再选择用户可写的安装目录。';
+    Exit;
+  end;
+  if not ForceDirectories(AppDir) then
+  begin
+    Result := '无法创建安装目录，请选择当前用户可写的位置：' + #13#10 + AppDir;
+    Exit;
+  end;
+  ProbeSource := GenerateUniqueName(ExpandConstant('{tmp}'), '.tmp');
+  if not SaveStringToFile(ProbeSource, 'DAgents install write check', False) then
+  begin
+    Result := '无法创建安装目录权限检查文件。';
+    Exit;
+  end;
+  ProbeCreated := False;
+  ProbePath := '';
+  for ProbeIndex := 0 to 99 do
+  begin
+    ProbePath := AddBackslash(AppDir) + '.dagents-write-test-' + IntToStr(ProbeIndex) + '.tmp';
+    if CopyFile(ProbeSource, ProbePath, True) then
+    begin
+      ProbeCreated := True;
+      Break;
+    end;
+    if not FileExists(ProbePath) then
+      Break;
+  end;
+  DeleteFile(ProbeSource);
+  if not ProbeCreated then
+  begin
+    Result := '当前用户无法写入所选安装目录，请选择一个可写的位置：' + #13#10 + AppDir;
+    Exit;
+  end;
+  DeleteFile(ProbePath);
+  if FileExists(AppDir + '\bin\dagents-shell.exe') then
+  begin
+    if not FileExists(AppDir + '\lifecycle-protocol-v1.marker') then
+    begin
+      Result := '此目录中的 DAgents 版本不支持安全升级协议。安装已取消，且未调用旧 Shell。' + #13#10#13#10 +
+        '请先在旧版 Desktop 中退出并备份数据，再使用旧版本自己的卸载程序，然后选择新的用户可写目录安装。安装器不会自动迁移数据。';
+      Exit;
+    end;
+    ResultCode := RunShellCommand(AppDir, '--quit-desktop --config "' + AppDir + '\config.yaml"' +
+      DesktopConfigArgument(AppDir));
+    if ResultCode <> 0 then
+    begin
+      Result := '无法安全退出此安装中的 DAgents Desktop，升级已取消。' + #13#10#13#10 +
+        '请先在 Desktop 中选择退出，然后重试。';
+      Exit;
+    end;
+  end;
+  if FileExists(AppDir + '\bin\dagents-node.exe') then
+  begin
+    ResultCode := RunShellCommand(AppDir, '--stop-owned-node --require-idle --config "' + AppDir + '\config.yaml"' +
+      DesktopConfigArgument(AppDir));
+    if ResultCode <> 0 then
+    begin
+      Result := '无法验证并停止此安装管理的 Agent Node。为避免覆盖仍在运行的 Node，升级已取消。' + #13#10#13#10 +
+        '请确认 Node 空闲且由此 Desktop 管理，然后重试。';
+      Exit;
+    end;
+  end
+  else if FileExists(AppDir + '\bin\dagents-shell.exe') then
+  begin
+    ResultCode := RunShellCommand(AppDir, '--stop-owned-node --require-idle --config "' + AppDir + '\config.yaml"' +
+      DesktopConfigArgument(AppDir));
+    if ResultCode <> 0 then
+    begin
+      Result := '无法验证此安装是否仍有受管 Node 运行，升级已取消。';
+      Exit;
+    end;
+  end;
+end;
+
+#ifndef IsolatedQaBuild
+function PathContains(const Path, Dir: string): Boolean;
+begin
+  Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') <> 0;
+end;
+
+procedure RemoveLegacyLauncherShortcuts;
+var
+  AppDir: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  if ShortcutMatches(ExpandConstant('{group}\DAgents Desktop（系统托盘）.lnk'),
+       AppDir + '\dagents.cmd', 'shell --background') then
+    DeleteFile(ExpandConstant('{group}\DAgents Desktop（系统托盘）.lnk'));
+  if ShortcutMatches(ExpandConstant('{group}\DAgents Command Prompt.lnk'),
+       ExpandConstant('{cmd}'), '/K cd /d "' + AppDir + '" && dagents help') then
+    DeleteFile(ExpandConstant('{group}\DAgents Command Prompt.lnk'));
+  if ShortcutMatches(ExpandConstant('{group}\Start Agent Node (background).lnk'),
+       AppDir + '\dagents.cmd', 'node --background') then
+    DeleteFile(ExpandConstant('{group}\Start Agent Node (background).lnk'));
+  if ShortcutMatches(ExpandConstant('{group}\Start Agent Node (foreground).lnk'),
+       AppDir + '\dagents.cmd', 'node --foreground') then
+    DeleteFile(ExpandConstant('{group}\Start Agent Node (foreground).lnk'));
+  if ShortcutMatches(ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk'),
+       AppDir + '\dagents.cmd', 'shell --background') then
+    DeleteFile(ExpandConstant('{userdesktop}\DAgents Desktop（系统托盘）.lnk'));
+end;
+
+procedure RemoveShellAutostart;
+var
+  CurrentCommand, AppDir: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  if RegQueryStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CurrentCommand) and
+     OwnedAutostartCommand(CurrentCommand, AppDir) then
+    RegDeleteValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}');
 end;
 
 procedure InstallShellAutostart;
@@ -422,28 +702,130 @@ begin
   AppDir := ExpandConstant('{app}');
   if not FileExists(AppDir + '\bin\dagents-shell.exe') then
     Exit;
-  CmdLine := '"' + AppDir + '\dagents.cmd" shell --background';
-  RegWriteStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CmdLine);
+  if WizardIsTaskSelected('autostart') then
+  begin
+    CmdLine := '"' + AppDir + '\bin\dagents-shell.exe" --home "' + AppDir + '" --config "' + AppDir + '\config.yaml"';
+    RegWriteStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CmdLine);
+  end
+  else
+    RemoveShellAutostart;
 end;
+#endif
 
-procedure RemoveShellAutostart;
+#ifndef IsolatedQaBuild
+function RemovePathEntry(const Path, Dir: string): string;
+var
+  Entries, Remaining: TArrayOfString;
+  Entry, NormalizedEntry, NormalizedDir: string;
+  EntryLength, DirLength, I, Count: Integer;
 begin
-  if RegValueExists(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}') then
-    RegDeleteValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}');
+  { Keep Unicode string operations and preserve drive roots: C:\ must not become C:. }
+  Entries := StringSplit(Path, [';'], stAll);
+  NormalizedDir := Dir;
+  DirLength := Length(NormalizedDir);
+  while (DirLength > 0) and (NormalizedDir[DirLength] = '\') and
+    not ((DirLength = 3) and (NormalizedDir[2] = ':')) do
+  begin
+    Dec(DirLength);
+  end;
+  NormalizedDir := Copy(NormalizedDir, 1, DirLength);
+  SetArrayLength(Remaining, 0);
+  Count := 0;
+  for I := 0 to GetArrayLength(Entries) - 1 do
+  begin
+    Entry := Entries[I];
+    NormalizedEntry := Entry;
+    EntryLength := Length(NormalizedEntry);
+    while (EntryLength > 0) and (NormalizedEntry[EntryLength] = '\') and
+      not ((EntryLength = 3) and (NormalizedEntry[2] = ':')) do
+    begin
+      Dec(EntryLength);
+    end;
+    NormalizedEntry := Copy(NormalizedEntry, 1, EntryLength);
+    if not SameText(NormalizedEntry, NormalizedDir) then
+    begin
+      SetArrayLength(Remaining, Count + 1);
+      Remaining[Count] := Entry;
+      Inc(Count);
+    end;
+  end;
+  Result := StringJoin(';', Remaining);
+end;
+#endif
+
+function InitializeUninstall: Boolean;
+var
+  AppDir: string;
+  ResultCode: Integer;
+begin
+  Result := True;
+  AppDir := ExpandConstant('{app}');
+  if FileExists(AppDir + '\bin\dagents-shell.exe') then
+  begin
+    if not FileExists(AppDir + '\lifecycle-protocol-v1.marker') then
+    begin
+      MsgBox(
+        '此目录中的 DAgents 版本不支持安全卸载协议，卸载已取消。请先在旧版 Desktop 中退出并备份数据，再使用旧版本自己的卸载程序。',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    ResultCode := RunShellCommand(AppDir, '--quit-desktop --config "' + AppDir + '\config.yaml"' +
+      DesktopConfigArgument(AppDir));
+    if ResultCode <> 0 then
+    begin
+      MsgBox(
+        '无法安全退出此安装中的 DAgents Desktop。卸载已取消。' + #13#10#13#10 +
+        '请先在 Desktop 中选择退出，然后重试。',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
+  if FileExists(AppDir + '\bin\dagents-node.exe') then
+  begin
+    ResultCode := RunShellCommand(AppDir, '--stop-owned-node --require-idle --config "' + AppDir + '\config.yaml"' +
+      DesktopConfigArgument(AppDir));
+    if ResultCode <> 0 then
+    begin
+      MsgBox(
+        '无法验证并停止此安装管理的 Agent Node。为避免误停外部 Node，卸载已取消。' + #13#10#13#10 +
+        '请确认 Node 空闲且由此 Desktop 管理，然后重试。',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end
+  else if FileExists(AppDir + '\bin\dagents-shell.exe') then
+  begin
+    ResultCode := RunShellCommand(AppDir, '--stop-owned-node --require-idle --config "' + AppDir + '\config.yaml"' +
+      DesktopConfigArgument(AppDir));
+    if ResultCode <> 0 then
+    begin
+      MsgBox('无法验证此安装是否仍有受管 Node 运行。卸载已取消。', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  ResultCode: Integer;
-  AppDir: string;
+  Path, AppDir: string;
 begin
+#ifndef IsolatedQaBuild
   if CurUninstallStep = usUninstall then
   begin
-    AppDir := ExpandConstant('{app}');
-    if FileExists(AppDir + '\dagents.cmd') and FileExists(AppDir + '\bin\dagents-shell.exe') then
-      Exec(AppDir + '\dagents.cmd', 'shell stop', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
     RemoveShellAutostart;
+    AppDir := ExpandConstant('{app}');
+    RemoveLegacyLauncherShortcuts;
+    if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then
+      Path := '';
+    Path := RemovePathEntry(Path, AppDir);
+    Path := RemovePathEntry(Path, AppDir + '\.runtime\externaltools');
+    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path);
   end;
+#endif
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -455,10 +837,14 @@ begin
     ApplyPolicySeed;
     CopyDefaultConfigIfMissing;
     EnsureBrowserRuntimeDir;
+#ifndef IsolatedQaBuild
+    RemoveLegacyLauncherShortcuts;
     InstallShellAutostart;
+#endif
   end;
   if CurStep <> ssPostInstall then
     Exit;
+#ifndef IsolatedQaBuild
   AppDir := ExpandConstant('{app}');
   ExternalToolsDir := AppDir + '\.runtime\externaltools';
   if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then
@@ -468,4 +854,5 @@ begin
   if not PathContains(Path, ExternalToolsDir) then
     Path := Path + ';' + ExternalToolsDir;
   RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path);
+#endif
 end;

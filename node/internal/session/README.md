@@ -93,7 +93,7 @@ cancelled result；普通 human 输入仍只进入 InputBox 排队，不会打�
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与同时启用数量上限 |
 | `RuntimeDir` | Node runtime root，供 `promptcontext.Reader` 使用 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
-| `IdleAutoCompressSeconds` / `IdleAutoCompressPollSeconds` / `IdleAutoCompressMinTokens` | idle 维护：无动作自动压缩 + **卸内存**（见 `idle_auto_compress.go`、`release.go`） |
+| `IdleNewConversationSeconds` | 普通 Agent 在交互完成后空闲达到阈值，下一条用户输入开启新上下文段；`0` 关闭，Auto 不适用 |
 | `RawMessageHistoryEnabled` / `RawMessageHistoryDir` | 原始 message journal |
 | `MemoryService` | workspace memory v2 权威服务；仅在上下文边界召回，结果以 request-only user context 注入，不写入 system prompt |
 | `MemoryAutoExtract` / `MemoryCandidateQueueSize` / `MemoryCandidateMaxItems` / `MemoryCoreBudgetTokens` | 压缩后的可选后台候选提取与确定性维护；默认关闭，不影响当前 Turn |
@@ -105,7 +105,8 @@ cancelled result；普通 human 输入仍只进入 InputBox 排队，不会打�
 | 文件 | 说明 |
 |------|------|
 | `manager.go` | `Manager`、`TurnOptions`、会话 CRUD、入队、skills、上下文 API |
-| `idle_auto_compress.go` | idle 维护扫描：可选压缩 + `Release` 卸内存（F-NM2–NM5） |
+| `idle_context_boundary.go` | 新用户轮次前检查空闲时间，先归档，再持久化活动上下文边界与隐藏衔接提示；发出安全分隔线事件 |
+| `interaction_clock.go` | 从已持久化的 human 轮次终态恢复交互完成时间，保留清空上下文的时间屏障 |
 | `release.go` | `Manager.Release`：persist → stop → 移出 map，保留 SQLite（F-NM1） |
 | `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理 |
 | `runtime_persistence.go` | 运行时快照持久化、InputBox 崩溃恢复与替换数据提取 |

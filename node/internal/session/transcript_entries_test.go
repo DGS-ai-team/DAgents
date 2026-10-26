@@ -105,6 +105,25 @@ func TestMessagesToTranscriptEntries_skipsInjectedUserMessages(t *testing.T) {
 	}
 }
 
+func TestMessagesToTranscriptEntries_projectsConversationBoundaryWithoutBridgeBody(t *testing.T) {
+	t.Parallel()
+	msg := llm.UserMessage("private bridge content with archive path", llm.UserNameConversationBoundary)
+	msg.Provenance.Reference = `C:\private\history\archive.md`
+	entries := MessagesToTranscriptEntries([]llm.Message{msg})
+	if len(entries) != 1 || entries[0]["kind"] != "context_boundary" {
+		t.Fatalf("entries = %#v, want one safe context boundary", entries)
+	}
+	if _, ok := entries[0]["text"]; ok {
+		t.Fatalf("boundary leaked bridge body: %#v", entries[0])
+	}
+	if _, ok := entries[0]["data"]; ok {
+		t.Fatalf("boundary leaked metadata: %#v", entries[0])
+	}
+	if id, ok := entries[0]["boundary_id"].(string); !ok || len(id) != 64 {
+		t.Fatalf("boundary_id = %#v, want stable opaque SHA-256 identifier", entries[0]["boundary_id"])
+	}
+}
+
 func TestMessagesToTranscriptEntries_userImages(t *testing.T) {
 	t.Parallel()
 	messages := []llm.Message{

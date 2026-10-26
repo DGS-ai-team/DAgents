@@ -1,11 +1,12 @@
 {
   "name": "dagents-manage-console",
   "private": true,
-  "version": "0.11.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:icons": "node --test ../../../shared/icons/icons.test.js",
     "preview": "vite preview",
     "lint": "eslint . --quiet"
   },
@@ -14,7 +15,8 @@
     "highlight.js": "^11.11.2",
     "marked": "^15.0.12",
     "page-agent": "^1.7.1",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

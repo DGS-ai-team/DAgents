@@ -18,8 +18,8 @@ func TestRegistryRegisterAndOpen(t *testing.T) {
 	}
 	art, err := reg.RegisterFromPath(RegisterOpts{
 		Path:   "shot.png",
-		Source: "browser_snapshot",
-		Label:  "browser_snapshot",
+		Source: "browser",
+		Label:  "browser_call",
 	})
 	if err != nil {
 		t.Fatal(err)

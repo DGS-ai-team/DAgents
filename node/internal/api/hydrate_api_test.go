@@ -124,3 +124,60 @@ func TestHandleSessionHydrate_notFound(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }
+
+func TestHandleSessionHydrateTreatsTodoLifecycleStatusAsCompletedTool(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(filepath.Join(cfg.RuntimeDir(), "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithStore(st), WithSkipStore())
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	for _, todoStatus := range []string{"pending", "in_progress", "completed"} {
+		t.Run(todoStatus, func(t *testing.T) {
+			sessionID := "auto-hydrate-todo-" + todoStatus
+			callID := "call-todo-" + todoStatus
+			content := `{"id":"todo-1","text":"record the verified result","status":"` + todoStatus + `"}`
+			if err := st.Save(context.Background(), store.Record{
+				AgentID: sessionID,
+				Messages: []llm.Message{
+					{Role: "assistant", ToolCalls: []llm.ToolCall{{
+						ID: callID, Type: "function",
+						Function: llm.ToolCallFunction{Name: "todo_update", Arguments: `{"text":"record the verified result"}`},
+					}}},
+					llm.ToolResultMessage(callID, "todo_update", content),
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := http.Get(ts.URL + "/v1/agents/" + sessionID + "/hydrate")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d body = %s", resp.StatusCode, body)
+			}
+			var got sessionHydrateResponse
+			if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range got.Transcript {
+				if entry["kind"] != "tool_result" || entry["blockId"] != callID {
+					continue
+				}
+				data, ok := entry["data"].(map[string]any)
+				if !ok || data["status"] != "succeeded" {
+					t.Fatalf("hydrated tool result status = %#v, want succeeded", entry["data"])
+				}
+				return
+			}
+			t.Fatalf("todo tool result missing from hydrated transcript: %#v", got.Transcript)
+		})
+	}
+}

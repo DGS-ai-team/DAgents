@@ -115,7 +115,7 @@ default_paths() {
 
 validate_source() {
   local name
-  # Phase 4 起人机入口为 Web UI；发布包不再含 dagents-cli（Textual TUI）。
+  # Node 仅提供 API；发布包不包含 Desktop Runtime 或旧 Textual TUI。
   for name in bin/dagents-node bin/dagents-client dagents; do
     [[ -e "${SOURCE}/${name}" ]] || die "missing ${SOURCE}/${name}; run install.sh from extracted bundle root"
   done
@@ -208,7 +208,7 @@ install_files() {
   fi
   if [[ ! -f "${PREFIX}/config.yaml" && -f "${PREFIX}/config.example.yaml" ]]; then
     cp "${PREFIX}/config.example.yaml" "${PREFIX}/config.yaml"
-    info "created ${PREFIX}/config.yaml from config.example.yaml (bootstrap listen/local; LLM 等请用 Web UI)"
+    info "created ${PREFIX}/config.yaml from config.example.yaml (Node bootstrap listen only; runtime settings are configured in DAgents Desktop)"
   fi
   chmod +x "${PREFIX}/bin/"* "${PREFIX}/dagents" 2>/dev/null || true
   find "${PREFIX}/scripts" -type f -name '*.sh' -exec chmod +x {} + 2>/dev/null || true

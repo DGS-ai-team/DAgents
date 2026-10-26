@@ -8,11 +8,17 @@
 - [offline install](../../packaging/OFFLINE_INSTALL.md)
 - [Manage packaging](../../packaging/manage/README.md)
 
-Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙白名单、反向代理或 SSH 隧道，不要未经加固直接暴露公网。
+Node 默认监听 `127.0.0.1:18765`。Desktop 固定连接同机的 `127.0.0.1:18765`，不支持远程 Node 档案或 SSH 隧道连接；Node 与 Browser sidecar 之间固定使用 `127.0.0.1:18766`。Node bootstrap YAML 仍可配置监听地址，供 Node API 的独立服务部署使用；这不会改变 Desktop 的固定本机连接目标。Node HTTP API 没有通用设备鉴权，不要将它暴露到不可信网络。
+
+下一版 Windows 完整安装包仅提供 x64，暂停 x86。历史 x86 安装仍按自身平台检查更新，不会自动切换到 x64；迁移到 x64 需确认操作系统支持并采用完整备份、重新安装和数据恢复流程，不能在 32 位系统上运行 x64 安装器。
 
 ## 升级与兼容性
 
 升级前先完整备份 `.runtime/` 和所有自定义 Agent workspace。升级程序不会主动删除旧目录，但工作区解析规则和私有状态布局已经收敛，不能把“目录仍存在”理解为“旧路径仍会继续被使用”。
+
+完整备份还应包括安装目录的 `config.yaml`、`.runtime/llm_configs.db` 配套的密钥材料和 Desktop 本机偏好。停止 Node 后再复制 SQLite 数据，或使用 SQLite 一致性备份；不要在运行中只复制一个 `.db` 文件而遗漏 WAL。保留原目录和原版程序，恢复时成套还原，不能假设较旧程序可读取新版已写入的数据库。
+
+当前无安装协议 marker 的旧目录会被新安装器安全拒绝覆盖。这不表示旧数据已迁移成功；步骤见 [v0.11.0 迁移指南](migrate-from-v0.11.md)，未完成的环境验收见[发布收束清单](../release-readiness.md)。不应手工伪造 marker 绕过检查。
 
 ### 当前数据归属
 
@@ -40,12 +46,12 @@ Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙
 2. 打开一个旧 Agent，验证历史仍可恢复，再执行一次只读工具，确认相对路径以 workspace 为基准；
 3. 检查 `.dagents/<agent_id>/history/`、`memory/memory.db` 和 `tool_outputs/<agent_id>/` 是否按预期生成；
 4. 新建一个临时 Agent，确认不会创建 `.runtime/data/`，并确认 workspace 创建后不能修改；
-5. 如使用桌面端，同时验证 Tauri 与 Go Shell 两条轨道的 Node 连接和更新检查。
+5. 如使用桌面端，验证 DAgents Desktop 的 Node 连接和更新检查。Go Shell 已退役，不再构建或发布。
 
 ## 诊断顺序
 
 1. `GET /health` 是否成功；
-2. Web UI 是否能建立 SSE；
+2. Desktop 是否连接了预期的 Node，事件流与 hydrate 是否正常；
 3. Agent 是否有有效 LLM profile；
 4. 工具组和 policy 是否允许目标工具；
 5. 若是工作组，检查 Node 是否已注册、WS 是否在线、ACL/订阅和成员 Agent 是否 ready；
@@ -54,10 +60,11 @@ Node 默认监听 `127.0.0.1:18765`。需要跨机器访问时应使用防火墙
 ## 发布门禁
 
 ```bash
-npm test --prefix node/webui/frontend -- --run
-npm run build --prefix node/webui/frontend
+npm run test:frontend --prefix desktop/tray-tauri
+npm run test:ui --prefix desktop/tray-tauri
+npm run build --prefix desktop/tray-tauri
 npm run build --prefix manage/console/frontend
-go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/... ./desktop/tray/...
+go test ./shared/config/... ./shared/logfiles/... ./shared/update/... ./node/... ./client/...
 python3 -m unittest discover -s tests -p "test_*.py" -v
 git diff --check
 ```

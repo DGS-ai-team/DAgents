@@ -30,6 +30,8 @@ func (s *Server) handlePatchLLMSettings(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusServiceUnavailable, "llm_unavailable", "LLM runtime not configured", nil)
 		return
 	}
+	s.llmRefMu.Lock()
+	defer s.llmRefMu.Unlock()
 	var patch llm.LLMSettingsPatch
 	if err := decodeJSON(r, &patch); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)

@@ -2,18 +2,24 @@ package api
 
 import (
 	"net/http"
-	"strings"
 )
 
 // onboardingGateMiddleware 在 Node 身份首配完成前拦截业务 API。
-// 仅放行探活、bootstrap、setup 读写、LLM 探测与 /ui 静态资源（供首配页加载）。
+// 仅放行探活、Node 信息、bootstrap、settings 与 LLM 探测。
 func (s *Server) onboardingGateMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s == nil || s.cfg == nil || s.cfg.NodeProfileCompleted() {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if onboardingPathAllowed(r.Method, r.URL.Path) {
+		// Let ServeMux preserve its normal 404/405 behavior for paths that are
+		// not registered. The onboarding gate only applies to actual API routes.
+		if _, pattern := s.mux.Handler(r); pattern == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if onboardingPathAllowed(r.Method, r.URL.Path) &&
+			(r.URL.Path != "/v1/node/upgrade-readiness" || isLoopbackRequest(r)) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -23,22 +29,20 @@ func (s *Server) onboardingGateMiddleware(next http.Handler) http.Handler {
 }
 
 func onboardingPathAllowed(method, path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		path = "/"
-	}
 	switch {
 	case method == http.MethodGet && path == "/health":
 		return true
-	case method == http.MethodGet && path == "/v1/ui/bootstrap":
+	case method == http.MethodGet && path == "/v1/node/info":
 		return true
-	case method == http.MethodGet && path == "/v1/setup/config":
+	case method == http.MethodGet && path == "/v1/node/upgrade-readiness":
 		return true
-	case method == http.MethodPatch && path == "/v1/setup/config":
+	case method == http.MethodGet && path == "/v1/bootstrap":
 		return true
-	case method == http.MethodPost && path == "/v1/setup/llm/probe-models":
+	case method == http.MethodGet && path == "/v1/settings":
 		return true
-	case method == http.MethodGet && (path == "/ui" || path == "/ui/" || strings.HasPrefix(path, "/ui/")):
+	case method == http.MethodPatch && path == "/v1/settings":
+		return true
+	case method == http.MethodPost && path == "/v1/llm/probe-models":
 		return true
 	default:
 		return false

@@ -17,7 +17,8 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 
 | 块 | 说明 |
 |----|------|
-| `listen` / `local` | Node 监听与 Client 连接 endpoint |
+| `listen` | Node bootstrap 监听地址；Node bootstrap YAML 仅保存此配置 |
+| `local` | 独立 Go/Python Client 的 Node 连接 endpoint，不随 Node bootstrap 写入 |
 | `llm` | 模型连接快照；工具步数上限见 Agent snapshot |
 | `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `memory/`、`skills/`、`policy/` 等控制面目录相对此根；Agent workspace 另由创建时绑定 |
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{runtime_root}/skills`；不属于 Agent workspace） |
@@ -26,7 +27,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | `triggers` | 触发器调度（见下表） |
 | `tools` | 内置工具编码与 bash 压缩（工具组见 Agent 快照） |
 | `log` | Node stderr 日志级别 |
-| `ui` | 内嵌浏览器 Web UI（`GET /ui/`）；`enabled` 省略时默认 `true` |
+| `ui` | 历史配置块；当前 Desktop UI 由独立桌面应用提供 |
 
 ### `tools`
 
@@ -50,7 +51,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
 | `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
 | `child_agents` | `create_temporary_agent`、`cancel_temporary_agent` |
-| `browser` | 任务级：`browser_run_task` / `browser_task_status` / `browser_task_cancel`（伴生 Chrome） |
+| `browser` | 主 Agent 直接控制：`browser_call` / `browser_evaluate`（Playwright） |
 
 各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
 

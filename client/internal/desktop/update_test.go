@@ -60,4 +60,23 @@ func TestResolveAgentUpdateUsesNodeOnLinuxPath(t *testing.T) {
 	if status.LatestVersion != "0.7.0" {
 		t.Fatalf("latest = %q", status.LatestVersion)
 	}
+	if !status.PlatformSupported {
+		t.Fatal("missing platform_supported from a legacy Node should default to supported")
+	}
+}
+
+func TestResolveAgentUpdatePreservesUnsupportedPlatform(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"current_version":"0.7.0","latest_version":"0.7.0","manage_reachable":true,"platform_supported":false,"platform":"windows-386","message":"当前平台没有可用的更新包"}`))
+	}))
+	defer node.Close()
+
+	client := nodeapi.New(node.URL, &http.Client{})
+	status, err := ResolveAgentUpdate(context.Background(), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.PlatformSupported {
+		t.Fatalf("status=%+v", status)
+	}
 }

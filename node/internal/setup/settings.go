@@ -10,7 +10,10 @@ import (
 
 // LLMProfileSettings 单个 LLM 配置（Web UI / setup API）。
 type LLMProfileSettings struct {
-	ID                string `json:"id"`
+	ID string `json:"id"`
+	// OriginalID is write-only PATCH metadata used when renaming a profile so
+	// its stored secret can move with it. It is never populated in GET views.
+	OriginalID        string `json:"original_id,omitempty"`
 	Provider          string `json:"provider"`
 	BaseURL           string `json:"base_url"`
 	Model             string `json:"model"`
@@ -37,9 +40,24 @@ type ManageSettings struct {
 	Team                        string `json:"team"`
 	RegistrationBaseURL         string `json:"registration_base_url"`
 	WorkgroupEnabled            bool   `json:"workgroup_enabled"`
-	NodeToken                   string `json:"node_token"`
+	HasNodeToken                bool   `json:"has_node_token"`
 	RegistrationIntervalSeconds int    `json:"registration_interval_seconds"`
 	RegistrationTTLSeconds      int    `json:"registration_ttl_seconds"`
+}
+
+// ManageSettingsPatch merges only fields explicitly present in PATCH. The
+// token is write-only: an empty value preserves the stored token and
+// clear_node_token is the explicit deletion operation.
+type ManageSettingsPatch struct {
+	Enabled                     *bool   `json:"enabled,omitempty"`
+	URL                         *string `json:"url,omitempty"`
+	Team                        *string `json:"team,omitempty"`
+	RegistrationBaseURL         *string `json:"registration_base_url,omitempty"`
+	WorkgroupEnabled            *bool   `json:"workgroup_enabled,omitempty"`
+	NodeToken                   *string `json:"node_token,omitempty"`
+	ClearNodeToken              bool    `json:"clear_node_token,omitempty"`
+	RegistrationIntervalSeconds *int    `json:"registration_interval_seconds,omitempty"`
+	RegistrationTTLSeconds      *int    `json:"registration_ttl_seconds,omitempty"`
 }
 
 // FeatureSettings 功能开关（安装向导原批次 3）。
@@ -57,11 +75,9 @@ type FeatureSettings struct {
 
 // CompressionSettings 上下文压缩阈值（config compression 块）。
 type CompressionSettings struct {
-	SilentTriggerTokens         int `json:"silent_trigger_tokens"`
-	BlockingTriggerTokens       int `json:"blocking_trigger_tokens"`
-	IdleAutoCompressSeconds     int `json:"idle_auto_compress_seconds"`
-	IdleAutoCompressPollSeconds int `json:"idle_auto_compress_poll_seconds"`
-	IdleAutoCompressMinTokens   int `json:"idle_auto_compress_min_tokens"`
+	SilentTriggerTokens        int `json:"silent_trigger_tokens"`
+	BlockingTriggerTokens      int `json:"blocking_trigger_tokens"`
+	IdleNewConversationSeconds int `json:"idle_new_conversation_seconds"`
 }
 
 // MemorySettings controls the optional compression-to-memory background
@@ -76,12 +92,11 @@ type MemorySettings struct {
 
 // NodeEndpointView 只读：Node 监听地址（须改 config.yaml 并重启）。
 type NodeEndpointView struct {
-	ListenHost    string `json:"listen_host"`
-	ListenPort    int    `json:"listen_port"`
-	LocalEndpoint string `json:"local_endpoint"`
+	ListenHost string `json:"listen_host"`
+	ListenPort int    `json:"listen_port"`
 }
 
-// RuntimeSettings 运行时路径与日志（不含 listen/local）。
+// RuntimeSettings 运行时路径与日志；listener 单独通过只读 NodeEndpointView 暴露。
 type RuntimeSettings struct {
 	NodeID      string `json:"node_id"`
 	RuntimeRoot string `json:"runtime_root"`
@@ -115,14 +130,12 @@ type ChildAgentsLimits struct {
 
 // BrowserSettings Browser 工具参数（enabled 见 features）。
 type BrowserSettings struct {
-	ServiceURL        string `json:"service_url"`
 	Headed            bool   `json:"headed"`
 	DefaultTimeoutMS  int    `json:"default_timeout_ms"`
 	OutputDir         string `json:"output_dir"`
 	MaxSessions       int    `json:"max_sessions"`
 	IgnoreHTTPSErrors bool   `json:"ignore_https_errors"`
 	ChromePath        string `json:"chrome_path"`
-	CDPURL            string `json:"cdp_url"`
 }
 
 // WeComSettings 企业微信消息推送（enabled 见 features）。
@@ -159,7 +172,7 @@ type HooksSettings struct {
 	InjectTodayDateEnabled         bool `json:"inject_today_date_enabled"`
 }
 
-// SettingsView GET /v1/setup/config 响应。
+// SettingsView GET /v1/settings response.
 type SettingsView struct {
 	ConfigPath      string              `json:"config_path,omitempty"`
 	ConfigWritable  bool                `json:"config_writable"`
@@ -183,10 +196,10 @@ type SettingsView struct {
 	AvailableToolGroups []string `json:"available_tool_groups"`
 }
 
-// SettingsPatch PATCH /v1/setup/config 请求体（字段均可选）。
+// SettingsPatch PATCH /v1/settings 请求体（字段均可选）。
 type SettingsPatch struct {
 	LLM         *LLMSettings         `json:"llm,omitempty"`
-	Manage      *ManageSettings      `json:"manage,omitempty"`
+	Manage      *ManageSettingsPatch `json:"manage,omitempty"`
 	Features    *FeatureSettings     `json:"features,omitempty"`
 	Compression *CompressionSettings `json:"compression,omitempty"`
 	Memory      *MemorySettings      `json:"memory,omitempty"`
@@ -211,11 +224,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 		workgroupEnabled = *cfg.Manage.Workgroup.Enabled
 	}
 	return SettingsView{
-		Node: NodeEndpointView{
-			ListenHost:    cfg.Listen.Host,
-			ListenPort:    cfg.Listen.Port,
-			LocalEndpoint: cfg.Local.Endpoint,
-		},
+		Node: NodeEndpointView{ListenHost: cfg.Listen.Host, ListenPort: cfg.Listen.Port},
 		LLM: LLMSettings{
 			Active:   cfg.LLM.ActiveProfileID(),
 			Profiles: llmProfilesFromConfig(cfg),
@@ -226,7 +235,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			Team:                        cfg.Manage.Registration.Team,
 			RegistrationBaseURL:         cfg.Manage.Registration.BaseURL,
 			WorkgroupEnabled:            workgroupEnabled,
-			NodeToken:                   cfg.Manage.NodeToken,
+			HasNodeToken:                strings.TrimSpace(cfg.Manage.NodeToken) != "",
 			RegistrationIntervalSeconds: cfg.Manage.Registration.IntervalSeconds,
 			RegistrationTTLSeconds:      cfg.Manage.Registration.TTLSeconds,
 		},
@@ -242,11 +251,9 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
 		},
 		Compression: CompressionSettings{
-			SilentTriggerTokens:         cfg.Compression.SilentTriggerTokens,
-			BlockingTriggerTokens:       cfg.Compression.BlockingTriggerTokens,
-			IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
-			IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
-			IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
+			SilentTriggerTokens:        cfg.Compression.SilentTriggerTokens,
+			BlockingTriggerTokens:      cfg.Compression.BlockingTriggerTokens,
+			IdleNewConversationSeconds: cfg.Compression.IdleNewConversationSeconds,
 		},
 		Memory: MemorySettings{
 			AutoExtract:        cfg.Memory.AutoExtract,
@@ -277,14 +284,12 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 		},
 		Browser: BrowserSettings{
-			ServiceURL:        cfg.Browser.ServiceURL,
 			Headed:            cfg.BrowserHeaded(),
 			DefaultTimeoutMS:  cfg.Browser.DefaultTimeoutMS,
 			OutputDir:         cfg.Browser.OutputDir,
 			MaxSessions:       cfg.Browser.MaxSessions,
 			IgnoreHTTPSErrors: cfg.Browser.BrowserIgnoreHTTPSErrors(),
 			ChromePath:        cfg.Browser.ChromePath,
-			CDPURL:            cfg.Browser.CDPURL,
 		},
 		WeCom: weComSettingsFromConfig(cfg),
 		Tools: ToolsSettings{
@@ -497,26 +502,44 @@ func llmProfilesFromConfig(cfg *config.Config) []LLMProfileSettings {
 	return out
 }
 
-func applyManagePatch(cfg *config.Config, p ManageSettings) error {
-	cfg.Manage.Enabled = p.Enabled
-	cfg.Manage.NodeToken = strings.TrimSpace(p.NodeToken)
-	cfg.Manage.Workgroup.Enabled = boolPtr(p.WorkgroupEnabled)
-	if p.RegistrationIntervalSeconds > 0 {
-		cfg.Manage.Registration.IntervalSeconds = p.RegistrationIntervalSeconds
+func applyManagePatch(cfg *config.Config, p ManageSettingsPatch) error {
+	if p.Enabled != nil {
+		cfg.Manage.Enabled = *p.Enabled
 	}
-	if p.RegistrationTTLSeconds > 0 {
-		cfg.Manage.Registration.TTLSeconds = p.RegistrationTTLSeconds
+	if p.ClearNodeToken {
+		cfg.Manage.NodeToken = ""
+	} else if p.NodeToken != nil {
+		if token := strings.TrimSpace(*p.NodeToken); token != "" {
+			cfg.Manage.NodeToken = token
+		}
 	}
-	if !p.Enabled {
-		return nil
+	if p.WorkgroupEnabled != nil {
+		cfg.Manage.Workgroup.Enabled = boolPtr(*p.WorkgroupEnabled)
 	}
-	url := strings.TrimSpace(p.URL)
-	if url == "" {
+	if p.RegistrationIntervalSeconds != nil {
+		if *p.RegistrationIntervalSeconds <= 0 {
+			return fmt.Errorf("manage.registration_interval_seconds must be > 0")
+		}
+		cfg.Manage.Registration.IntervalSeconds = *p.RegistrationIntervalSeconds
+	}
+	if p.RegistrationTTLSeconds != nil {
+		if *p.RegistrationTTLSeconds <= 0 {
+			return fmt.Errorf("manage.registration_ttl_seconds must be > 0")
+		}
+		cfg.Manage.Registration.TTLSeconds = *p.RegistrationTTLSeconds
+	}
+	if p.URL != nil {
+		cfg.Manage.URL = strings.TrimSpace(*p.URL)
+	}
+	if p.Team != nil {
+		cfg.Manage.Registration.Team = strings.TrimSpace(*p.Team)
+	}
+	if p.RegistrationBaseURL != nil {
+		cfg.Manage.Registration.BaseURL = strings.TrimSpace(*p.RegistrationBaseURL)
+	}
+	if cfg.Manage.Enabled && strings.TrimSpace(cfg.Manage.URL) == "" {
 		return fmt.Errorf("manage.url is required when manage is enabled")
 	}
-	cfg.Manage.URL = url
-	cfg.Manage.Registration.Team = strings.TrimSpace(p.Team)
-	cfg.Manage.Registration.BaseURL = strings.TrimSpace(p.RegistrationBaseURL)
 	return nil
 }
 
@@ -543,14 +566,8 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 	if p.BlockingTriggerTokens < 0 {
 		return fmt.Errorf("compression.blocking_trigger_tokens must be >= 0")
 	}
-	if p.IdleAutoCompressSeconds < 0 {
-		return fmt.Errorf("compression.idle_auto_compress_seconds must be >= 0")
-	}
-	if p.IdleAutoCompressPollSeconds < 0 {
-		return fmt.Errorf("compression.idle_auto_compress_poll_seconds must be >= 0")
-	}
-	if p.IdleAutoCompressMinTokens < 0 {
-		return fmt.Errorf("compression.idle_auto_compress_min_tokens must be >= 0")
+	if p.IdleNewConversationSeconds < 0 {
+		return fmt.Errorf("compression.idle_new_conversation_seconds must be >= 0")
 	}
 	silent := p.SilentTriggerTokens
 	blocking := p.BlockingTriggerTokens
@@ -559,9 +576,7 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 	}
 	cfg.Compression.SilentTriggerTokens = silent
 	cfg.Compression.BlockingTriggerTokens = blocking
-	cfg.Compression.IdleAutoCompressSeconds = p.IdleAutoCompressSeconds
-	cfg.Compression.IdleAutoCompressPollSeconds = p.IdleAutoCompressPollSeconds
-	cfg.Compression.IdleAutoCompressMinTokens = p.IdleAutoCompressMinTokens
+	cfg.Compression.IdleNewConversationSeconds = p.IdleNewConversationSeconds
 	return nil
 }
 
@@ -619,9 +634,6 @@ func applyOnboardingPatch(cfg *config.Config, p OnboardingSettings) error {
 		if strings.TrimSpace(cfg.Agent.Name) == "" {
 			return fmt.Errorf("agent.name is required to complete node profile")
 		}
-		if strings.TrimSpace(cfg.User.PreferredName) == "" {
-			return fmt.Errorf("user.preferred_name is required to complete node profile")
-		}
 	}
 	cfg.Onboarding.NodeProfileCompleted = p.NodeProfileCompleted
 	return nil
@@ -651,7 +663,11 @@ func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 }
 
 func applyBrowserPatch(cfg *config.Config, p BrowserSettings) error {
-	cfg.Browser.ServiceURL = strings.TrimSpace(p.ServiceURL)
+	// Browser runs as a Node-owned local sidecar. The service endpoint and
+	// attach-to-external-Chrome mode are fixed implementation details, not
+	// settings exposed to Desktop/Web UI.
+	cfg.Browser.ServiceURL = config.DefaultBrowserServiceURL
+	cfg.Browser.CDPURL = ""
 	cfg.Browser.Headed = boolPtr(p.Headed)
 	if p.DefaultTimeoutMS > 0 {
 		cfg.Browser.DefaultTimeoutMS = p.DefaultTimeoutMS
@@ -664,7 +680,6 @@ func applyBrowserPatch(cfg *config.Config, p BrowserSettings) error {
 	}
 	cfg.Browser.IgnoreHTTPSErrors = boolPtr(p.IgnoreHTTPSErrors)
 	cfg.Browser.ChromePath = strings.TrimSpace(p.ChromePath)
-	cfg.Browser.CDPURL = strings.TrimSpace(p.CDPURL)
 	return nil
 }
 

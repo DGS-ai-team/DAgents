@@ -24,7 +24,8 @@ func readFileToolDef() ToolDef {
 		Function: FunctionDef{
 			Name: "read_file",
 			Description: "soul/custom 已作为当前请求的运行时上下文提供（存于数据库），用户称呼由 Node PreferredName 注入，通常无需 read_file 读取这些运行时资料；记忆由 Memory service 按当前任务自动召回或通过 memory 工具查询。" +
-				" Node 将原始对话审计写入当前 workspace 的 `.dagents/<agent_id>/history/YYYYMMDD/<session_id>.jsonl`；该文件不是用户项目文件。" +
+				" Node 会在空闲上下文重置时将精简对话归档写入当前 workspace 的 `.dagents/<agent_id>/history/YYYY-MM-DD/<session>-<reset>.json`；归档仅含 role/content，assistant 工具调用与工具结果会转成可读文本。可选 JSONL 是独立原始审计日志，不用于新对话上下文。" +
+				" Node 原始对话审计可写入 `.dagents/<agent_id>/history/YYYYMMDD/<session_id>.jsonl`；该文件不是用户项目文件。" +
 				" 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",

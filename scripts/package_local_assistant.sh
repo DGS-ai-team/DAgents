@@ -52,8 +52,6 @@ bash "${REPO_ROOT}/scripts/ci/build_dagents_browser.sh"
 if [[ "${GOOS}" == "windows" ]]; then
   OUT_DIR="${REPO_ROOT}/dist" \
     bash "${REPO_ROOT}/scripts/ci/build_dagents_shell_tauri.sh"
-  OUT_DIR="${REPO_ROOT}/dist" GOOS=windows GOARCH="${GOARCH}" \
-    bash "${REPO_ROOT}/scripts/ci/build_dagents_shell.sh"
   PLATFORM="${PLATFORM}" VERSION="${VERSION}" \
     bash "${REPO_ROOT}/scripts/ci/assemble_local_assistant_bundle.sh"
   PLATFORM="${PLATFORM}" VERSION="${VERSION}" \

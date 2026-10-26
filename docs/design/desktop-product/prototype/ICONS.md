@@ -1,0 +1,1 @@
+`shared/icons/` is the canonical SVG asset directory. This prototype imports icon URLs from `shared/icons/desktop/manifest.json` through the `@shared-icons` Vite alias; it does not copy SVGs into `public/`. The canonical Desktop manifest also retains each asset's source and license notes.

@@ -36,7 +36,7 @@ func writeTestPolicyFile(t *testing.T, dir, rel, content string) {
 
 func TestPolicyToolHookModes(t *testing.T) {
 	dir := writeTestPolicyDir(t,
-		"read_file=never\nwrite_file=always\nbash_run=rule\n",
+		"read_file=never\nwrite_file=always\ndelete_agent=deny\nbash_run=rule\n",
 		"echo=never\ngit=always\n",
 	)
 	engine, err := policy.LoadFromDir(dir)
@@ -55,6 +55,7 @@ func TestPolicyToolHookModes(t *testing.T) {
 	}{
 		{"never read", "read_file", nil, policy.ModeNever, policy.ActionAuto},
 		{"always write", "write_file", map[string]any{"path": "x"}, policy.ModeAlways, policy.ActionRequireApproval},
+		{"explicit deny", "delete_agent", nil, policy.ModeDeny, policy.ActionDeny},
 		{"rule bash auto", "bash_run", map[string]any{"command": "echo ok", "shell_type": "bash"}, policy.ModeRule, policy.ActionAuto},
 		{"rule bash require", "bash_run", map[string]any{"command": "git status", "shell_type": "bash"}, policy.ModeRule, policy.ActionRequireApproval},
 	}

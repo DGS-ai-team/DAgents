@@ -73,38 +73,6 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
-	parentID := strings.TrimSpace(r.PathValue("agent_id"))
-	childID := resolveChildPathID(r)
-	items, err := s.sessions.ListChildAgents(parentID)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "agent_not_found", err.Error(), nil)
-		return
-	}
-	for _, it := range items {
-		if it.ChildAgentID == childID {
-			writeJSON(w, http.StatusOK, sessionChildAgentViewJSON{
-				ChildAgentID: it.ChildAgentID,
-				ToolCallID:   it.ToolCallID,
-				Status:       it.Status,
-				Purpose:      it.Purpose,
-				AllowedTools: append([]string(nil), it.AllowedTools...),
-				LoadedSkills: append([]string(nil), it.LoadedSkills...),
-				CreatedAt:    it.CreatedAt.Format(timeRFC3339),
-				ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
-				FinishedAt:   formatOptionalTime(it.FinishedAt),
-				TurnCount:    it.TurnCount,
-				MaxTurns:     it.MaxTurns,
-				Progress:     it.Progress,
-			})
-			return
-		}
-	}
-	writeAPIError(w, http.StatusNotFound, "child_agent_not_found", "child agent not found", map[string]any{
-		"child_agent_id": childID,
-	})
-}
-
 func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) {
 	parentID := strings.TrimSpace(r.PathValue("agent_id"))
 	childID := resolveChildPathID(r)

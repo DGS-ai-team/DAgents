@@ -7,10 +7,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 )
 
-func marshalAgentSnapshot(templateID string, defaults map[string]any, workspace ...agentruntime.WorkspaceConfig) (json.RawMessage, error) {
-	return marshalAgentSnapshotWithType("normal", templateID, defaults, workspace...)
-}
-
 func marshalAgentSnapshotWithType(agentType, templateID string, defaults map[string]any, workspace ...agentruntime.WorkspaceConfig) (json.RawMessage, error) {
 	if defaults == nil {
 		defaults = map[string]any{}

@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "node_id": "df970813-3466-47f7-b85f-b5a62f7127bb",
+  "feedback_delivery": "delivered",
+  "manage_list_total": 1,
+  "manage_detail": "verified",
+  "scope": "isolated local Node HTTP + actual Manage FastAPI HTTP; synthetic feedback only; no native UI"
+}

@@ -62,7 +62,7 @@ func TestHandleLLMSettingsGetPatch(t *testing.T) {
 		t.Fatalf("patched = %+v", patched)
 	}
 
-	infoResp, err := http.Get(ts.URL + "/v1/agent/info")
+	infoResp, err := http.Get(ts.URL + "/v1/node/info")
 	if err != nil {
 		t.Fatal(err)
 	}

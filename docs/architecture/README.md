@@ -8,6 +8,7 @@
 | [openapi-node.yaml](openapi-node.yaml) | Node OpenAPI 文档 | 机器可验证 |
 | [go-node-internals.md](go-node-internals.md) | Go Node 内部调用与 runtime 结构 | 当前参考 |
 | [child-agent-tools.md](child-agent-tools.md) | 临时子 Agent 工具与生命周期 | 当前参考 |
+| [desktop-node-separation-plan.md](desktop-node-separation-plan.md) | Desktop Shell、Node 分离、内置浏览器、文件预览、性能和跨平台发布方案 | 提案 |
 | [overview.md](overview.md) | 旧版架构总览兼容页 | 逐步收敛到 `docs/architecture.md` |
 
 构建矩阵、RHEL 旧环境和历史 Client/TUI 验收已不再是当前架构正文，见 [archive/README.md](../archive/README.md)。

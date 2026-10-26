@@ -9,6 +9,11 @@ func TestValidateBuiltinToolNames(t *testing.T) {
 	if err := validateBuiltinToolNames([]string{"not_a_tool"}); err == nil {
 		t.Fatal("expected error")
 	}
+	for _, name := range AllBuiltinToolNames() {
+		if name == "show_image" {
+			t.Fatal("retired show_image must not be a configurable builtin tool")
+		}
+	}
 }
 
 func TestExpandBuiltinToolGroups(t *testing.T) {
@@ -66,7 +71,7 @@ func TestLinuxToolGroupWasRemoved(t *testing.T) {
 
 func TestExpandBuiltinToolGroupsBrowser(t *testing.T) {
 	got := ExpandBuiltinToolGroups([]string{"browser"})
-	want := []string{"browser_run_task", "browser_task_cancel", "browser_task_status"}
+	want := []string{"browser_call", "browser_evaluate"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}
@@ -112,7 +117,7 @@ func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
 func TestBuiltinToolGroupMembers(t *testing.T) {
 	members, ok := BuiltinToolGroupMembers("fs")
 	want := []string{
-		"read_file", "show_image", "read_image", "write_file",
+		"read_file", "read_image", "write_file",
 		"glob_files", "grep_file", "grep_files", "search_replace",
 	}
 	if !ok || len(members) != len(want) {

@@ -1,0 +1,9 @@
+# Lucide source notes
+
+Lucide source SVGs in this shared icon set originate from the official [Lucide repository](https://github.com/lucide-icons/lucide), under its [ISC license](https://github.com/lucide-icons/lucide/blob/main/LICENSE). The files were fetched from the repository's moving `main` branch on 2026-09-11; no commit was pinned for that source set. Their standard geometry uses a 24×24 viewBox, no fill, `currentColor` stroke, 2px width, and round caps and joins.
+
+`puzzle.svg` was fetched directly from the official [Lucide Puzzle source](https://github.com/lucide-icons/lucide/blob/main/icons/puzzle.svg) on 2026-10-09 and retains the ISC license and upstream geometry.
+
+The historical included-name list is: `alarm-clock.svg`, `arrow-left-right.svg`, `book-open.svg`, `bot.svg`, `brain.svg`, `chevron-down.svg`, `chevron-up.svg`, `circle-check.svg`, `circle-plus.svg`, `circle-x.svg`, `clipboard.svg`, `cpu.svg`, `ellipsis.svg`, `file.svg`, `folder-open.svg`, `folder-tree.svg`, `id-card.svg`, `inbox.svg`, `info.svg`, `key-round.svg`, `layout-dashboard.svg`, `list-checks.svg`, `loader-circle.svg`, `megaphone.svg`, `menu.svg`, `message-circle.svg`, `moon-star.svg`, `network.svg`, `panel-top.svg`, `pencil.svg`, `play.svg`, `plug.svg`, `puzzle.svg`, `refresh-cw.svg`, `receipt-text.svg`, `save.svg`, `scroll-text.svg`, `search.svg`, `server.svg`, `settings.svg`, `sliders-horizontal.svg`, `sparkles.svg`, `square.svg`, `square-terminal.svg`, `terminal.svg`, `trash.svg`, `triangle-alert.svg`, `upload.svg`, `user-plus.svg`, `users-round.svg`, and `wrench.svg`.
+
+The `delete` semantic uses official `trash.svg` because `trash-2.svg` was not present in the fetched source set. Physical files are de-duplicated into canonical assets under `shared/icons/`; historical names resolve through `shared/icons/aliases.json`.

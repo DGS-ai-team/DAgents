@@ -11,9 +11,9 @@
 
 ## Lucide 复用映射
 
-`../dagents-icon-gallery.html` 在每张卡片上标注 Lucide 名称和来源策略；direct 卡片实际加载本地 `lucide/` vendor SVG，composed/custom 使用 DAgents fallback。画板不从网络加载 Lucide，也不新增 npm 依赖。`direct Lucide reuse` 表示语义和几何可直接采用官方图标，`composed` 表示用官方原语组合产品关系，`custom` 只保留 DAgents 专属形态。
+`../dagents-icon-gallery.html` 在每张卡片上标注 Lucide 名称和来源策略；Gallery cards load canonical files from `shared/icons/lucide/` or `shared/icons/dაგენტs/` using the alias map in `docs/design/icon-gallery-assets.js`; no SVG path geometry is embedded in the page.`direct Lucide reuse` 表示语义和几何可直接采用官方图标，`composed` 表示用官方原语组合产品关系，`custom` 只保留 DAgents 专属形态。
 
-direct 候选的官方 SVG 已复制到 `lucide/` vendor 目录，Gallery 会在 direct 卡片中实际加载这些本地文件；内联 DAgents fallback 保障 `file://` 或 CSS mask 不可用时仍可预览。来源、抓取日期、ISC License 和当前 main 分支说明见 `lucide/README.md`。
+Canonical SVGs are maintained in `shared/icons/`; the gallery uses CSS masks and the same static path map for `file://` and HTTP previews.来源、抓取日期、ISC License 和当前 main 分支说明见 `lucide/README.md`。
 
 - Auto 复用普通 Agent 的 `Bot` 主体，右上角叠加小型 `Sparkles`，表达轻量自主循环；`wake-trigger` 继续使用 `AlarmClock` 表达唤醒。
 - `child-agent` 使用 `GitBranch + Bot`，表达父子委派关系；`auto-overview` 直接使用 Lucide `ReceiptText` 表达任务记录与回执；`Network` 保留给工作组语义。
@@ -39,7 +39,7 @@ direct 候选的官方 SVG 已复制到 `lucide/` vendor 目录，Gallery 会在
 
 ## key 清单
 
-当前画板包含 60 个功能视觉卡片；`expand` 与 `collapse` 是两个独立 key，因此可交付目录包含 60 个功能语义 SVG 文件。品牌雪花使用现有 PNG，不计入功能图标清单。画板每张卡同时显示 24px 主图和 16px smoke test，重点检查 `file`、`audit-log`、`release-update`、`mcp`、`pending`、`dreaming` 等细节密集图标在小尺寸下的可辨识度。
+当前画板包含 60 个功能视觉卡片；canonical SVG 文件集中维护在 `shared/icons/`，画板不再保留副本。品牌雪花使用现有 PNG，不计入功能图标清单。画板每张卡同时显示 24px 主图和 16px smoke test，重点检查 `file`、`audit-log`、`release-update`、`mcp`、`pending`、`dreaming` 等细节密集图标在小尺寸下的可辨识度。
 
 ### 品牌与导航
 

@@ -22,11 +22,6 @@ if [[ -z "${VERSION}" ]]; then
 fi
 LDFLAGS="${LDFLAGS} -X github.com/DGS-ai-team/DAgents/node/internal/version.Version=${VERSION}"
 
-if [[ "${SKIP_WEBUI_BUILD:-0}" != "1" ]]; then
-  echo "[build] embedding Web UI (node/webui/build.sh)"
-  bash "${REPO_ROOT}/node/webui/build.sh"
-fi
-
 EXE=""
 if [[ "${GOOS}" == "windows" ]]; then
 	EXE=".exe"
@@ -61,9 +56,9 @@ if [[ "${BUILD_CLIENT}" == "1" ]]; then
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node + Client (Go static build, Windows)
 
-1. copy config.example.yaml to config.yaml (bootstrap: listen/local; configure LLM in Web UI)
+1. copy config.example.yaml to config.yaml (Node bootstrap: listen only)
 2. bin\dagents-node.exe -config config.yaml
-3. Open Web UI: http://127.0.0.1:<listen.port>/ui/ (default 18765; ui.enabled defaults to true)
+3. Connect DAgents Desktop to the Node API at http://127.0.0.1:<listen.port> (default 18765)
 4. bin\dagents-client.exe -config config.yaml probe
    bin\dagents-client.exe -config config.yaml update --check
 
@@ -73,9 +68,9 @@ EOF
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node + Client (Go static build)
 
-1. cp config.example.yaml config.yaml（bootstrap：listen/local；LLM 等用 Web UI 配置）
+1. cp config.example.yaml config.yaml（Node bootstrap：仅 listen）
 2. ./bin/dagents-node -config config.yaml
-3. 浏览器打开 http://127.0.0.1:<listen.port>/ui/（默认 18765；ui.enabled 默认 true）
+3. 在 DAgents Desktop 中连接 Node API：http://127.0.0.1:<listen.port>（默认 18765）
 4. ./bin/dagents-client -config config.yaml probe
    ./bin/dagents-client -config config.yaml update --check
 
@@ -87,13 +82,13 @@ else
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node (Go static build, Windows)
 
-Use scripts/package_local_assistant.sh to bundle the full local assistant (Web UI embedded in dagents-node).
+Use scripts/package_local_assistant.sh to bundle the Node, clients, browser service, and Windows Desktop Shell.
 EOF
   else
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node (Go static build)
 
-完整本地助手请使用 scripts/package_local_assistant.sh（Web UI 内嵌于 dagents-node）。
+完整本地助手请使用 scripts/package_local_assistant.sh（包含独立 Desktop UI）。
 EOF
   fi
 fi

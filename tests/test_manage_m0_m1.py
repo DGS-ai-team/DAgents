@@ -37,10 +37,15 @@ class ManageM0Tests(unittest.TestCase):
 
     def test_console_served(self) -> None:
         app = create_app()
-        with TestClient(app, headers={"x-dagents-a2a-token": "test-admin-token"}) as client:
+        with TestClient(app) as client:
             root = client.get("/", follow_redirects=False)
+            downloads = client.get("/download/")
+        with TestClient(app) as client:
             page = client.get("/console/")
-        self.assertEqual(root.status_code, 307)
+        self.assertEqual(root.status_code, 200)
+        self.assertIn('id="product-app"', root.text)
+        self.assertEqual(downloads.status_code, 200)
+        self.assertIn('id="product-app"', downloads.text)
         self.assertEqual(page.status_code, 200)
         self.assertIn("DAgents Manage", page.text)
         self.assertIn('id="app"', page.text)

@@ -81,15 +81,21 @@ func evaluateCompression(messages []llm.Message, silentThreshold, blockingThresh
 	}
 }
 
-// leadingSystemSkip 返回 messages 首部连续 role=system 条数（P9）。
+// leadingSystemSkip 返回不可压缩的 leading prefix：role=system 前缀，以及
+// 紧随其后的 idle-context boundary notice（若存在）。
 //
 // 生产路径：session/SQLite messages 仅含 user/assistant/tool；system 由
 // llm.MessagesWithSystem 在出站 StreamChat 时注入，不落库（见 node/internal/llm/messages.go）。
 // 防御：若 journal InsertMessage 等异常写入 leading system，压缩与侧车跳过该前缀，
-// 避免与 SidecarPrefix.SystemPrompt 重复且被 apply 误替换。
+// 避免与 SidecarPrefix.SystemPrompt 重复且被 apply 误替换。新的对话边界 bridge
+// 在 reset 后是模型续接旧上下文的唯一提示，必须连同紧邻 system 保留；其它
+// runtime notice、skill/plugin 指令仍留在普通压缩范围内。
 func leadingSystemSkip(messages []llm.Message) int {
 	n := 0
 	for n < len(messages) && messages[n].Role == "system" {
+		n++
+	}
+	if n < len(messages) && llm.IsMessageSource(messages[n], llm.MessageSourceRuntime, llm.MessageFormNotice, "idle_context") {
 		n++
 	}
 	return n

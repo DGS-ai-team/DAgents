@@ -141,8 +141,8 @@ creating → active → completed
 | `node/internal/session/runtime_child.go` | 子 runtime 创建与完成判断 |
 | `node/internal/session/child_run_repository.go` | store 适配 |
 | `node/internal/turn/tool_router.go` | 父 ToolCall 的审批、执行和 ToolResult 接回 |
-| `node/webui/frontend/src/stores/remoteWorkers.js` | 前端实时/刷新投影 |
-| `node/webui/frontend/src/stores/hydrate.js` | hydrate 与审批恢复 |
+| `desktop/tray-tauri/src/ui/stores/remoteWorkers.js` | Desktop 前端实时/刷新投影 |
+| `desktop/tray-tauri/src/ui/stores/turnState.js`、`DesktopApp.vue` | hydrate 与审批状态恢复 |
 
 ## 11. 验证
 
@@ -150,5 +150,5 @@ creating → active → completed
 go test ./node/internal/childagent -run Child
 go test ./node/internal/session -run ChildAgent
 go test ./node/internal/api -run ChildAgent
-npm test --prefix node/webui/frontend -- --run src/stores/remoteWorkers.test.js
+npm run test:frontend --prefix desktop/tray-tauri
 ```

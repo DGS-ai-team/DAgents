@@ -60,17 +60,22 @@ func agentStatusToShared(status *nodeapi.AgentUpdateStatus) *update.Status {
 	if status == nil {
 		return nil
 	}
+	platformSupported := true // Legacy Nodes did not expose this field.
+	if status.PlatformSupported != nil {
+		platformSupported = *status.PlatformSupported
+	}
 	return &update.Status{
-		CurrentVersion:   status.CurrentVersion,
-		LatestVersion:    status.LatestVersion,
-		UpgradeAvailable: status.UpgradeAvailable,
-		ManageReachable:  status.ManageReachable,
-		LastCheckedAt:    status.LastCheckedAt,
-		Channel:          status.Channel,
-		Platform:         status.Platform,
-		ReleaseNotes:     status.ReleaseNotes,
-		Message:          status.Message,
-		ApplyCommand:     status.ApplyCommand,
-		Asset:            status.Asset,
+		CurrentVersion:    status.CurrentVersion,
+		LatestVersion:     status.LatestVersion,
+		UpgradeAvailable:  status.UpgradeAvailable,
+		ManageReachable:   status.ManageReachable,
+		PlatformSupported: platformSupported,
+		LastCheckedAt:     status.LastCheckedAt,
+		Channel:           status.Channel,
+		Platform:          status.Platform,
+		ReleaseNotes:      status.ReleaseNotes,
+		Message:           status.Message,
+		ApplyCommand:      status.ApplyCommand,
+		Asset:             status.Asset,
 	}
 }

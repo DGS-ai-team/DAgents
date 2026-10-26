@@ -29,7 +29,7 @@ Assign   = { assign_id, member_id, leader_run_id, parent_turn_id, child_turn_id,
 
 ```text
 1. Node 注册 node_id 与本地 Agent catalog
-2. 用户在 Manage/Node UI 选择已有 AgentRef
+2. 用户在 Manage/DAgents Desktop 中选择已有 AgentRef
 3. Manage 持久化 Member，状态 binding
 4. Manage 通过现有 WS 发送 agent.session.open
 5. Node 校验 agent_id，创建/恢复隔离 Session，返回 session.ready
@@ -96,7 +96,7 @@ Timeline 只保存工作组需要看到的最终产出、Assign 状态、审批�
 
 ### UI 订阅
 
-Node UI 通过 `/v1/workgroups/{workgroup_id}/events` 接收工作组事件，并与 hydrate/Timeline 对账；个人 Agent 页面只显示个人 Session。前端状态必须由 `session.*`、`turn.*`、`timeline.*` 等权威事件驱动。
+DAgents Desktop 通过 `/v1/workgroups/{workgroup_id}/events` 接收工作组事件，并与 hydrate/Timeline 对账；个人 Agent 页面只显示个人 Session。前端状态必须由 `session.*`、`turn.*`、`timeline.*` 等权威事件驱动。
 
 ## 7. 状态机
 
@@ -129,5 +129,5 @@ Turn:    queued → accepted → running → completed | failed | canceled | ind
 | Manage Workgroup | `manage/workgroup/routes.py`、`turn_kernel.py`、`assignment_service.py`、`vertical.py`、`ws_hub.py` |
 | Node Dialer/Worker | `node/internal/workgroup/dialer.go`、`worker.go` |
 | Node Session | `node/internal/session/` |
-| UI | `node/webui/frontend/src/views/WorkgroupView.vue`、`manage/console/frontend/` |
+| UI | `desktop/tray-tauri/src/ui/components/WorkgroupWorkspace.vue`、`manage/console/frontend/` |
 | 用户操作 | [`docs/user/workgroups.md`](../user/workgroups.md) |

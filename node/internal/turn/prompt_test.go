@@ -41,6 +41,27 @@ func TestBuildSystemPrompt_keepsStablePrefixOnly(t *testing.T) {
 	}
 }
 
+func TestSystemPromptsDescribeHarnessAndResourceLinksWithoutGreetingRule(t *testing.T) {
+	rootPrompt := BuildSystemPrompt(SystemPromptInput{})
+	childPrompt := BuildChildSystemPrompt(ChildSystemPromptInput{})
+	for name, prompt := range map[string]string{"root": rootPrompt, "child": childPrompt} {
+		if contains(prompt, "主动打招呼") || contains(prompt, "当用户初次跟你打招呼") {
+			t.Fatalf("%s prompt contains a forced greeting rule: %q", name, prompt)
+		}
+		if !containsAll(prompt,
+			"当前连接的 Node 主机执行", "不是 Desktop 本机", "Node policy/审批结果",
+			"[报告](dagents://resource/file?path=reports%2Fsummary.md)",
+			"![图片](dagents://resource/image?path=images%2Fplot.png)",
+			"[终端](dagents://resource/terminal?id=local-terminal-5)",
+			"恰好 URL 编码一次", "不要猜测或编造 ID", "不执行工具，也不绕过",
+			"<dagents-render type=\"html\">", "type 仅使用 html 或 svg", "开始和结束标签各自独占一行", "不要给块加 Markdown 代码围栏",
+			"切换到源码并复制源码", "不执行模型提供的脚本", "CSP 哈希限制",
+			"不访问外网、Node 或本地文件", "也不导航", "不进入宿主 DOM") {
+			t.Fatalf("%s prompt is missing harness/resource guidance: %q", name, prompt)
+		}
+	}
+}
+
 func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
 	prompt := BuildSystemPrompt(SystemPromptInput{
 		AgentID:               "ops-01",

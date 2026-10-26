@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 // MockClient 用于单测与无 API Key 联调。
@@ -11,15 +12,24 @@ type MockClient struct {
 	FixedReply string
 	// EnableTools 为 true 时：首轮返回 read_file tool call，次轮返回工具结果摘要。
 	EnableTools bool
+	adapterMu   sync.RWMutex
 	adapter     MessageAdapter
-	callCount   int
 }
 
 func (m *MockClient) NormalizeAssistant(existing []Message, msg Message) Message {
-	if m.adapter == nil {
-		m.adapter = openAIAdapter{}
+	m.adapterMu.RLock()
+	adapter := m.adapter
+	m.adapterMu.RUnlock()
+	if adapter == nil {
+		adapter = openAIAdapter{}
 	}
-	return m.adapter.NormalizeAssistantForStorage(existing, msg, nil)
+	return adapter.NormalizeAssistantForStorage(existing, msg, nil)
+}
+
+func (m *MockClient) setAdapter(adapter MessageAdapter) {
+	m.adapterMu.Lock()
+	m.adapter = adapter
+	m.adapterMu.Unlock()
 }
 
 // StubNormalizeAssistant 供测试 mock 实现 llm.Client 时复用。
@@ -29,8 +39,6 @@ func StubNormalizeAssistant(existing []Message, msg Message) Message {
 
 // StreamChat 模拟流式输出；EnableTools 时驱动工具循环测试。
 func (m *MockClient) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {
-	m.callCount++
-
 	if m.EnableTools && len(req.Tools) > 0 {
 		if m.hasToolResult(req.Messages) {
 			text := "已读取文件"

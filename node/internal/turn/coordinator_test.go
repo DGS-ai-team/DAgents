@@ -782,7 +782,7 @@ func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
 	for _, command := range []TurnCommand{
-		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-budget-usage", Generation: 1, Source: TurnSourceHuman, Budget: TurnBudget{MaxOutputTokens: 5, MaxCost: 1}, At: now},
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-budget-usage", Generation: 1, Source: TurnSourceHuman, Budget: TurnBudget{MaxSteps: 1, MaxOutputTokens: 5, MaxCost: 1, ReserveFinalSummary: true}, At: now},
 		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-budget-usage", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandModelRequestStarted, SessionID: "session-1", TurnID: "turn-budget-usage", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandModelUsageRecorded, SessionID: "session-1", TurnID: "turn-budget-usage", StepID: "step-1", Generation: 1, Usage: StepUsage{OutputTokens: 5, TotalTokens: 5, Cost: 1}, At: now},
@@ -793,6 +793,9 @@ func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
 	}
 	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_output_tokens" {
 		t.Fatalf("output budget decision = %+v", decision)
+	}
+	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); decision.Allowed || decision.Reason != "max_output_tokens" {
+		t.Fatalf("reserved summary bypassed output budget = %+v", decision)
 	}
 }
 

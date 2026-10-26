@@ -134,18 +134,23 @@ Node 出站 Header：
 
 ## Release Hub（安装包托管）
 
-Manage 在 `MANAGE_RELEASES_DIR`（默认 `/data/releases`）托管 `dagents-local-assistant` 安装包。Console → **管理 → 版本发布** 可上传草稿、发布、设为 latest。
+Manage 在 `MANAGE_RELEASES_DIR` 托管 `dagents-local-assistant` 安装包；未设置时，若配置了 `MANAGE_DB_PATH`，则使用数据库同级的 `releases/` 目录；两者都未配置时，发布与下载服务关闭。生产环境应将包目录与数据库一起放在持久化卷中。Console → **管理 → 版本发布** 可上传草稿、发布、设为 latest。上传会流式写入磁盘并按配置限制大小；发布前会检查包文件和 SHA-256。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/v1/releases/packages` | Admin 上传（默认 draft） |
-| GET | `/v1/releases/packages` | 列表 |
+| GET | `/v1/releases/packages` | Admin 列表（含内部元数据） |
 | POST | `/v1/releases/packages/{artifact}/{channel}/{platform}/{version}/publish` | 发布 |
 | POST | `/v1/releases/packages/{artifact}/{channel}/{platform}/{version}/promote` | 设为 latest |
 | GET | `/v1/releases/check` | Node 版本检查 |
 | GET | `/v1/releases/packages/.../latest/download` | 下载 latest |
+| GET | `/v1/releases/public/packages` | 公开下载页使用的已发布版本清单（不含存储路径与上传者） |
+| GET | `/v1/releases/public/packages/{channel}/{platform}/{version}/download` | 公开下载指定版本 |
+| GET | `/v1/releases/public/latest/{channel}/{platform}/download` | 公开下载 latest |
 
-发版时 CI 将同版本 Linux `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）；Windows x64/x86 Inno `.exe` 可按对应平台上传到 Release Hub。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
+Release Hub 的数据库和文件目录必须使用持久化存储；仅设置 `MANAGE_RELEASES_DIR` 而不设置 `MANAGE_DB_PATH` 会使用内存元数据，重启后发布记录无法保留。公开下载页只列出文件存在且大小与元数据相符的版本；发布操作会校验 SHA-256，下载响应也会提供 SHA-256 供客户端核对。
+
+发版时 CI 将同版本 Linux `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）；Windows 完整安装包当前只发布 x64 Inno `.exe`，历史 x86 版本仍可下载与供旧客户端检查更新。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
 
 Node：`GET /v1/agent/update`（需 `manage.enabled`）。
 

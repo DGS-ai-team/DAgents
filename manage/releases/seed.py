@@ -12,6 +12,7 @@ from pathlib import Path
 from manage.releases.files import (
     content_type_for_filename,
     rel_path_for,
+    safe_release_filename,
     validate_slug,
     version_dir,
     write_latest_pointer,
@@ -46,13 +47,23 @@ def _load_manifest(path: Path) -> dict | None:
 
 def _find_package_file(version_path: Path, manifest: dict | None) -> Path | None:
     if manifest:
-        candidate = version_path / str(manifest.get("filename") or "")
-        if candidate.is_file():
-            return candidate
+        try:
+            filename = safe_release_filename(str(manifest.get("filename") or ""))
+        except ValueError:
+            filename = ""
+        if filename:
+            candidate = version_path / filename
+            if candidate.is_file() and candidate.resolve().is_relative_to(version_path.resolve()):
+                return candidate
     for pattern in ("*.tar.gz", "*.zip", "*.exe"):
         matches = sorted(version_path.glob(pattern))
-        if matches:
-            return matches[0]
+        for candidate in matches:
+            try:
+                safe_release_filename(candidate.name)
+            except ValueError:
+                continue
+            if candidate.is_file() and candidate.resolve().is_relative_to(version_path.resolve()):
+                return candidate
     return None
 
 

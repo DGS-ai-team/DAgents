@@ -1,5 +1,7 @@
 # Linux 通道设计方案（历史记录）
 
+> **当前产品决策（2026-10-22）：** 本文仅保留早期多连接设计论证。Desktop 与 Node 固定在同一台机器，Node 不提供浏览器 UI；Linux 通道仍是 Node 能力，通过 DAgents Desktop 配置。当前路线见[产品收束方向](desktop-product/product-direction-simplification-2026-10-14.md)。
+
 > **文档性质**：历史设计记录，不是当前 API 契约。当前实现以 `terminal_*` 工具、Linux channel API 和内置工具参考为准；本文中的 `linux_exec` 是早期方案名，不应重新实现或加入兼容入口。
 >
 > 状态：主路径已实现；Agent 通过 `terminal_*` 使用已绑定的 Linux 通道。
@@ -10,7 +12,7 @@
 
 ### 1.1 目标
 
-- 在 Node Web UI 中管理多个 Linux 连接配置；
+- 在 DAgents Desktop 中管理 Linux 通道配置；
 - 支持不同 IP/域名、端口、Linux 用户和认证方式；
 - 一个 Agent 可以绑定多个 Linux 通道；
 - 一个 Linux 通道可以被多个 Agent 复用，但每个 Agent 使用独立的运行会话；
@@ -114,7 +116,7 @@ agent_id + channel_id + session_id
 ## 4. 推荐架构
 
 ```text
-Web UI / Client
+DAgents Desktop / Client
         │ REST/SSE
         ▼
 Node API
@@ -254,7 +256,7 @@ Node 严格执行主机密钥校验，不提供 insecure fallback：
 
 - `known_hosts`：读取 Node 当前系统用户的 `~/.ssh/known_hosts`，或使用 `host_key_ref` 指定路径；
 - `pinned`：`host_key_ref` 保存 `SHA256:...` 主机指纹；
-- 首次测试遇到未知主机时，后端只返回观测到的公钥指纹，不自动信任；用户通过可信渠道核对后，才能在 Web UI 中保存为 `pinned`；
+- 首次测试遇到未知主机时，后端只返回观测到的公钥指纹，不自动信任；用户通过可信渠道核对后，才能在 Desktop 中保存为 `pinned`；
 - 未知密钥和已配置指纹不匹配分别返回 `host_key_unknown`、`host_key_mismatch`。
 
 ## 7. 通道生命周期
@@ -628,7 +630,7 @@ linux_approval_required
 - `linux_list_channels`、`linux_exec`、`linux_channel_status`；
 - 复用 Agent policy、HITL、SSE、取消；
 - 每条命令独立 SSH session；
-- Web UI 配置和测试。
+- Desktop 配置和测试。
 
 ### Phase 2：连接池和远程文件
 
@@ -848,7 +850,7 @@ API + Agent binding
         ↓
 Policy/HITL/SSE/audit
         ↓
-Web UI
+DAgents Desktop
         ↓
 MVP E2E
         ↓

@@ -76,6 +76,35 @@ func TestRetiredGoalCheckpointIsNotRegisteredOrCallable(t *testing.T) {
 	}
 }
 
+func TestShowImageIsRetiredButReadImageRemainsAvailable(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "show_image" {
+			t.Fatal("retired show_image must not be exposed to the model")
+		}
+	}
+	if _, err := reg.Execute(context.Background(), "show_image", `{}`); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("retired show_image unexpectedly callable: %v", err)
+	}
+	if err := reg.SetBuiltinEnabled([]string{"show_image"}); err == nil || !strings.Contains(err.Error(), "unknown builtin tool") {
+		t.Fatalf("retired show_image unexpectedly accepted by allowlist: %v", err)
+	}
+
+	reg.SetMultimodalEnabled(true)
+	foundReadImage := false
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "read_image" {
+			foundReadImage = true
+		}
+	}
+	if !foundReadImage {
+		t.Fatal("read_image must remain available when multimodal tools are enabled")
+	}
+}
+
 func TestSetMultimodalEnabledFiltersReadImage(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {

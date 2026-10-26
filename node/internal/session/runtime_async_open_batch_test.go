@@ -40,7 +40,7 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{
 			{
 				ID: "call-async-1", Type: "function",
-				Function: llm.ToolCallFunction{Name: "browser_run_task", Arguments: `{}`},
+				Function: llm.ToolCallFunction{Name: "async_test_tool", Arguments: `{}`},
 			},
 			approvalCall,
 		}},
@@ -53,7 +53,7 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 	setTestPendingHITL(t, rt, pending)
 
 	if err := mgr.EnqueueAsyncToolResult(sess.ID, queue.AsyncToolResultPayload{
-		JobID: "job-1", ToolName: "browser_run_task", ToolCallID: "async-job-1",
+		JobID: "job-1", ToolName: "async_test_tool", ToolCallID: "async-job-1",
 		Status: "succeeded", ResultText: "done",
 	}); err != nil {
 		t.Fatal(err)

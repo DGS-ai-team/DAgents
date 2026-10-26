@@ -12,7 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
 BRAND = REPO / "shared" / "branding" / "brand-icon.png"
 OUT_DIRS = (
-    REPO / "desktop" / "tray" / "assets",
     REPO / "desktop" / "tray-tauri" / "src-tauri" / "icons",
 )
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -54,7 +53,7 @@ def main() -> None:
                 png_icon.save(out_dir / filename, format="PNG")
             else:
                 icon.save(out_dir / filename, format="ICO", sizes=sizes)
-    print("wrote shared Go and Tauri Windows tray icons")
+    print("wrote Tauri Windows tray icons")
 
 
 if __name__ == "__main__":

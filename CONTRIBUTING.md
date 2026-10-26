@@ -19,9 +19,9 @@
 
 - `node/`：本地 Agent Node、Turn/Step 生命周期、工具执行和对外 HTTP/SSE。
 - `manage/`：可选的工作组控制面、注册表、审计、发布元数据和 Console API。
-- `shared/`：只能放跨 Go 模块确实共享的稳定类型或算法，不放业务编排。
+- `shared/`：放跨产品复用的图标、品牌资产和小型展示 helper，不放业务编排。
 - `client/`、`desktop/`：客户端和桌面适配层，不把 UI 状态反向写入 Node 事实源。
-- `node/webui/frontend/`、`manage/console/frontend/`：展示与事件投影；不要在组件中复制后端业务规则。
+- `desktop/tray-tauri/src/`、`manage/console/frontend/`：各自产品的展示与事件投影；不要在组件中复制后端业务规则。Desktop 与 Manage 复用的前端组件与 helper 放在 `shared/frontend/`。
 
 新增跨层字段必须同步代码模型、OpenAPI/JSON Schema、兼容说明和回归测试。工作组 WS 使用 Node→Manage 出站连接；不要新增 Manage→Node 反向 HTTP 依赖。
 

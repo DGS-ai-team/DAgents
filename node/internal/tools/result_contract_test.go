@@ -16,13 +16,19 @@ func TestClassifyResultUsesOneAuthoritativeStatus(t *testing.T) {
 	}{
 		{name: "empty success", tool: "bash_run", content: "[BASH_RESULT] status=SUCCEEDED", status: ResultStatusSucceeded},
 		{name: "shell failure", tool: "bash_run", content: "[BASH_RESULT] status=ERROR\nerror=exit", status: ResultStatusFailed},
-		{name: "async accepted", tool: "browser_run_task", content: `{"ok":true,"detail":{"status":"accepted"}}`, status: ResultStatusQueued},
-		{name: "browser detail failure", tool: "browser_run_task", content: `{"ok":true,"detail":{"status":"failed"},"error":"step failed"}`, status: ResultStatusFailed},
+		{name: "browser batch success", tool: "browser_call", content: `{"ok":true,"detail":{"status":"succeeded","action_results":[]}}`, status: ResultStatusSucceeded},
+		{name: "todo domain pending is a successful tool result", tool: "todo_create", content: `{"id":"todo-1","text":"follow up","status":"pending"}`, status: ResultStatusSucceeded},
+		{name: "todo domain in progress is a successful tool result", tool: "todo_update", content: `{"id":"todo-1","text":"follow up","status":"in_progress"}`, status: ResultStatusSucceeded},
+		{name: "todo domain completed is a successful tool result", tool: "todo_update", content: `{"id":"todo-1","text":"follow up","status":"completed"}`, status: ResultStatusSucceeded},
+		{name: "explicit running status remains running", tool: "terminal_command", content: `{"status":"running"}`, status: ResultStatusRunning},
+		{name: "execution detail envelope may use in progress", tool: "browser_call", content: `{"ok":true,"detail":{"status":"in_progress"}}`, status: ResultStatusRunning},
+		{name: "explicit user wait remains awaiting", tool: "ask_user_information", content: `{"status":"awaiting_user","prompt":"confirm"}`, status: ResultStatusAwaitingUser},
+		{name: "browser evaluate failure", tool: "browser_evaluate", content: `{"ok":false,"error_code":"script_runtime_error","error":"step failed"}`, status: ResultStatusFailed},
 		{name: "policy denial", tool: "write_file", content: "rejected: policy_denied", rejected: true, status: ResultStatusDenied},
 		{name: "persisted policy denial", tool: "write_file", content: "rejected: policy_denied", status: ResultStatusDenied},
 		{name: "execution error is not denial", tool: "terminal_command", content: "ERROR: connection refused", rejected: true, status: ResultStatusFailed},
 		{name: "cancelled", tool: "terminal_read", content: "流式输出被用户中断。", status: ResultStatusCancelled},
-		{name: "timeout", tool: "browser_run_task", content: `{"ok":true,"wait_timed_out":true,"error":"use status"}`, status: ResultStatusTimedOut},
+		{name: "timeout", tool: "browser_call", content: `{"ok":false,"error_code":"call_timeout","error":"timed out"}`, status: ResultStatusTimedOut},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,7 +90,7 @@ func TestToolDefinitionsKeepCommonResultProtocolOutOfEachDescription(t *testing.
 }
 
 func TestResultContractJSONErrorsRemainMachineReadable(t *testing.T) {
-	fields := ResultEventFields("browser_run_task", `{"ok":false,"error":"no companion"}`, false)
+	fields := ResultEventFields("browser_call", `{"ok":false,"error_code":"target_not_found","error":"target missing"}`, false)
 	raw, err := json.Marshal(fields)
 	if err != nil {
 		t.Fatal(err)

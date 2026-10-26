@@ -6,7 +6,7 @@
 >
 > 重点：工具、Prompt、记忆、Skill、MCP 和执行通道变化时的生效边界，以及对 DeepSeek 前缀缓存的影响。
 >
-> **历史说明**：本文记录 2026-08-19 的分析结论。之后 prompt sidecar、主机身份和已加载 Skill 正文已改为 request-only `ContextInjection`；涉及它们进入 system prompt 的段落仅保留作历史对照。当前实现以 [`docs/architecture/go-node-internals.md`](../architecture/go-node-internals.md) 与 [`docs/design/agent-quality.md`](../design/agent-quality.md) 为准。
+> **历史说明**：本文记录 2026-08-19 的分析结论。之后 prompt sidecar、主机身份和已加载 Skill 正文已改为 request-only `ContextInjection`；涉及它们进入 system prompt 的段落仅保留作历史对照。本文所述“Skill 文件保护 hook”也属于当时实现，该 hook 已移除；当前只保留 Turn 内 Catalog 快照稳定性，已加载状态不限制文件修改。当前实现以 [`docs/architecture/go-node-internals.md`](../architecture/go-node-internals.md) 与 [`docs/design/agent-quality.md`](../design/agent-quality.md) 为准。
 
 ## 1. 结论
 

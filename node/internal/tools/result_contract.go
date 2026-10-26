@@ -150,7 +150,7 @@ func ResultDescriptionSuffixForTool(name string) string {
 		shape = " grep 正文包含匹配行和分页信息；无匹配是成功的零结果，不应当作工具失败。"
 	case "search_replace":
 		shape = " search_replace 正文明确给出成功、替换次数和必要的诊断；成功为 false 时不要声称已修改。"
-	case "read_image", "show_image":
+	case "read_image":
 		shape = " 图片工具正文包含 path 和 status=ok/error；成功还可能伴随媒体或视觉输入副作用。"
 	case "screen_capture", "computer_use":
 		shape = " 桌面工具正文为 JSON，包含 status、coordinate_space、virtual_bounds、frame_id、frame_stable 和动作后截图；computer_use 坐标始终基于带 frame_id 的最近稳定截图。actions 批处理最多 4 步，返回 action_count 和最终截图。"
@@ -172,8 +172,10 @@ func ResultDescriptionSuffixForTool(name string) string {
 		shape = " list_available_skills 结果为 JSON 元数据页，包含 status、catalog_revision、query、skills、has_more 和 next_cursor；skills 只含可见 Skill 的名称、目录名和 description，不包含 SKILL.md 正文。"
 	case "trigger_list", "trigger_get", "trigger_create", "trigger_update", "trigger_delete":
 		shape = " 触发器正文为 JSON，包含 ok 及 trigger 或错误信息；写操作成功后再用 get/list 验证。"
-	case "browser_run_task", "browser_task_status", "browser_task_cancel":
-		shape = " 浏览器正文为 JSON，包含 ok、detail.status、摘要、截图/URL 和 error；detail.status 优先于 ok 判断任务终态。"
+	case "browser_call":
+		shape = " 浏览器正文为 JSON，包含 ok、detail.status、action_results、observation 和稳定 error.code；按逐动作状态判断批次是否部分失败。"
+	case "browser_evaluate":
+		shape = " 浏览器脚本正文为 JSON，包含 ok、detail.status、value、observation 和稳定 script_* error.code；脚本失败后不要自动重试。"
 	case "wecom_send_markdown", "wecom_send_file":
 		shape = " 企微正文为 JSON，包含 ok、message 和必要的 remote_id/error；ok=true 才表示已受理。"
 	case "ask_user_information":
@@ -209,8 +211,11 @@ func classifyJSONResult(content string) (ResultStatus, string) {
 	if timedOut, ok := obj["wait_timed_out"].(bool); ok && timedOut {
 		return ResultStatusTimedOut, stringField(obj, "error")
 	}
+	if code := strings.ToLower(stringField(obj, "error_code")); code == "call_timeout" || code == "script_timeout" {
+		return ResultStatusTimedOut, stringField(obj, "error")
+	}
 	if detail, ok := obj["detail"].(map[string]any); ok {
-		if status := normalizeResultStatus(stringField(detail, "status")); status != "" {
+		if status := normalizeExecutionEnvelopeStatus(stringField(detail, "status")); status != "" {
 			return status, stringField(obj, "error")
 		}
 	}
@@ -218,7 +223,7 @@ func classifyJSONResult(content string) (ResultStatus, string) {
 		if !okValue {
 			return ResultStatusFailed, stringField(obj, "error")
 		}
-		if status := normalizeResultStatus(stringField(obj, "status")); status != "" {
+		if status := normalizeExecutionEnvelopeStatus(stringField(obj, "status")); status != "" {
 			return status, stringField(obj, "error")
 		}
 		return ResultStatusSucceeded, stringField(obj, "error")
@@ -243,11 +248,15 @@ func normalizeResultStatus(raw string) ResultStatus {
 		return ResultStatusFailed
 	case "denied", "rejected":
 		return ResultStatusDenied
-	case "running", "in_progress", "in-progress":
+	case "running":
 		return ResultStatusRunning
 	case "queued", "accepted":
 		return ResultStatusQueued
-	case "pending", "awaiting_user", "awaiting_hitl", "awaiting_approval":
+	// A generic JSON `status: pending` is ambiguous: tools such as todo_create
+	// return domain objects whose lifecycle status is pending even though the
+	// tool call completed successfully. HITL responses must use an explicit
+	// awaiting_user / awaiting_hitl / awaiting_approval status.
+	case "awaiting_user", "awaiting_hitl", "awaiting_approval":
 		return ResultStatusAwaitingUser
 	case "cancelled", "canceled", "interrupted":
 		return ResultStatusCancelled
@@ -255,6 +264,21 @@ func normalizeResultStatus(raw string) ResultStatus {
 		return ResultStatusTimedOut
 	case "unknown", "orphaned":
 		return ResultStatusUnknown
+	default:
+		return ""
+	}
+}
+
+// in_progress is ambiguous in a bare domain object (for example an Auto todo),
+// but remains accepted inside an explicit execution envelope. Producers that
+// report execution directly should prefer the public `running` spelling.
+func normalizeExecutionEnvelopeStatus(raw string) ResultStatus {
+	if status := normalizeResultStatus(raw); status != "" {
+		return status
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "in_progress", "in-progress":
+		return ResultStatusRunning
 	default:
 		return ""
 	}

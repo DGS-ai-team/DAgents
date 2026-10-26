@@ -2,8 +2,7 @@
 
 | 路径 | 说明 |
 |------|------|
-| **`linux/install_node_service.sh`** | Linux：**systemd** 注册 dagents-node（RHEL 7+，需 root） |
-| **`linux/install_node_service_sysv.sh`** | Linux：**SysV init** 注册 dagents-node（**RHEL 6**，需 root） |
+| **`linux/install_node_service.sh`** | 现代 Linux：**systemd** 注册 dagents-node（需 root） |
 | **`windows/install_node_service.cmd`** | Windows：**SYSTEM 开机计划任务**（需管理员 CMD） |
 | **`service/`** | systemd unit 模板，见 `service/README.md` |
 | **`package_local_assistant.sh`** | 本地打 **`dagents-local-assistant-*`** 包（含 Manage 种子与 `scripts/`） |
@@ -11,15 +10,7 @@
 
 ## Node 系统服务
 
-**RHEL 6（SysV，无 systemd）**：
-
-```bash
-chmod +x scripts/linux/install_node_service_sysv.sh
-sudo scripts/linux/install_node_service_sysv.sh install --config packaging/agent-client/config.yaml --build
-scripts/linux/install_node_service_sysv.sh status
-```
-
-**Linux systemd**（RHEL 7+，仓库根目录）：
+**现代 Linux systemd**（仓库根目录）：
 
 ```bash
 chmod +x scripts/linux/install_node_service.sh
@@ -27,6 +18,9 @@ sudo scripts/linux/install_node_service.sh install --config packaging/agent-clie
 scripts/linux/install_node_service.sh status
 sudo scripts/linux/install_node_service.sh uninstall
 ```
+
+较旧 Linux 主机不在当前运行目标内；优先通过 SSH 使用较新的 Linux
+运行环境，不要把旧版 SysV helper 视为受支持安装承诺。
 
 **Windows**（管理员 CMD，仓库根目录）：
 

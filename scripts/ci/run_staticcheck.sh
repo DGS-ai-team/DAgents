@@ -21,7 +21,6 @@ MODULES=(
   shared/update
   node
   client
-  desktop/tray
 )
 
 for module in "${MODULES[@]}"; do

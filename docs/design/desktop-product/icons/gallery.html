@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAgents Desktop · 图标画板</title>
+  <style>
+    :root{font-family:Inter,"Noto Sans SC",system-ui,sans-serif;color:#252a2d;background:#f5f6f6;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;--line:#dfe2e3;--muted:#697176}
+    *{box-sizing:border-box}
+    body{margin:0;min-width:320px;background:#f6f8f9}
+    .page{width:min(1440px,100%);margin:0 auto;padding:32px clamp(16px,3vw,40px) 56px}
+    header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:32px}
+    h1{margin:0 0 8px;font-size:25px;letter-spacing:-.02em;color:#1c3346}
+    .intro{margin:0;color:#526777;font-size:13px;line-height:1.6}
+    .manifest-link{flex:none;padding:9px 12px;border:1px solid var(--line);border-radius:7px;background:white;color:#176d84;font-size:12px;text-decoration:none}
+    .manifest-link:hover{background:#edf5f7}
+    section{margin-top:30px}
+    .section-head{display:flex;align-items:baseline;gap:10px;margin:0 0 12px}
+    h2{margin:0;color:#2d4659;font-size:15px}
+    .section-count{color:#526777;font-size:11px;font-variant-numeric:tabular-nums}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,285px),1fr));gap:12px}
+    .card{min-width:0;border:1px solid var(--line);border-radius:10px;background:#fff;padding:12px 12px 11px;box-shadow:0 1px 2px #17334a08}
+    .card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+    .name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#203a4e;font:600 12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace}
+    .size-note{flex:none;color:#526777;font-size:10px}
+    .preview-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+    .preview-row{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .sample{height:78px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid #e3e5e6;border-radius:7px;color:#343a3d;background:#fff}
+    .sample.hover{background:#f0f1f1;color:#24292c}
+    .sample.selected{background:#e9ebec;color:#202528;border-color:#d5d9da}
+    .sample.disabled{background:#fafafa;color:#a1a6a8}
+    .sample-label{font-size:9px;line-height:1;color:inherit;opacity:.9}
+    .glyph-pair{height:28px;display:flex;align-items:center;justify-content:center;gap:12px}
+    .glyph{display:block;width:20px;height:20px;background:currentColor;mask:var(--asset) center/contain no-repeat;-webkit-mask:var(--asset) center/contain no-repeat}
+    .glyph.s16{width:16px;height:16px}.glyph.s18{width:18px;height:18px}.glyph.s20{width:20px;height:20px}
+    .glyph-pair{gap:7px}
+    .source{margin:9px 0 0;color:#526777;font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+    footer{margin-top:28px;padding-top:14px;border-top:1px solid var(--line);color:#526777;font-size:11px;line-height:1.6}
+    @media(max-width:560px){.page{padding-top:22px}header{display:block}.manifest-link{display:inline-flex;margin-top:12px}.grid{grid-template-columns:1fr}.sample{height:64px}}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>DAgents Desktop 图标画板</h1>
+        <p class="intro"><span id="icon-count">图标清单</span> 个 canonical 生产图标。每个图标展示 16、18、20px，以及默认、悬浮、选中、禁用中性状态。</p>
+      </div>
+      <a class="manifest-link" href="../../../../shared/icons/desktop/manifest.json">查看来源与许可清单</a>
+    </header>
+    <div id="gallery" aria-live="polite"></div>
+    <footer>画板直接引用 <code>shared/icons/</code> 中的 SVG，不加载网络字体或远程资源。设计入口与来源说明见 <a href="../../../../shared/icons/desktop/manifest.json">shared/icons/desktop/manifest.json</a>。</footer>
+  </main>
+  <script>
+    // Gallery presentation metadata mirrors the canonical shared Desktop manifest.
+    const icons = [
+      {name:"agent",file:"desktop/agent.svg",source:"User-provided Downloads/user.svg geometry · DAgents project asset",group:"导航"},
+      {name:"workgroup",file:"desktop/nav-workgroups.svg",source:"User-provided Downloads/team.svg geometry · DAgents project asset",group:"导航"},
+      {name:"auto",file:"desktop/auto.svg",source:"Node Web UI UiIcon.vue sparkles geometry",group:"导航"},
+      {name:"nav-agents",file:"desktop/agent.svg",source:"User-provided Downloads/user.svg geometry · navigation group heading",group:"导航"},
+      {name:"nav-workgroups",file:"desktop/nav-workgroups.svg",source:"User-provided Downloads/team.svg geometry · navigation group heading",group:"导航"},
+      {name:"nav-auto",file:"desktop/auto.svg",source:"Node Web UI UiIcon.vue sparkles geometry · same as auto entry",group:"导航"},
+      {name:"panel-left-close",file:"desktop/panel-left-close.svg",source:"DAgents Desktop original 24-unit stroke panel · Morphicons-compatible",group:"导航"},
+      {name:"panel-left-open",file:"desktop/panel-left-open.svg",source:"DAgents Desktop original 24-unit stroke panel · Morphicons-compatible",group:"导航"},
+      {name:"arrow-left-right",file:"desktop/arrow-left-right.svg",source:"Lucide ArrowLeftRight · ISC · reserved",group:"预留"},
+      {name:"message",file:"desktop/message.svg",source:"User-provided Downloads/message.svg geometry · return to full conversation",group:"导航"},
+      {name:"terminal",file:"desktop/terminal.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"资源"},
+      {name:"browser",file:"desktop/browser.svg",source:"Lucide PanelTop · ISC · production resource glyph",group:"资源"},
+      {name:"file",file:"desktop/file.svg",source:"User-provided Downloads/file.svg geometry · DAgents project asset",group:"资源"},
+      {name:"folder-open",file:"desktop/folder-open.svg",source:"Lucide FolderOpen · ISC · production workspace glyph",group:"资源"},
+      {name:"skills",file:"lucide/puzzle.svg",source:"Lucide Puzzle · ISC · production skills glyph",group:"资源"},
+      {name:"tools",file:"desktop/tools.svg",source:"User-provided Downloads/wrench.svg geometry · DAgents project asset",group:"资源"},
+      {name:"pending",file:"desktop/pending.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"状态"},
+      {name:"success",file:"desktop/success.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"状态"},
+      {name:"error",file:"desktop/error.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"状态"},
+      {name:"circle-check",file:"desktop/circle-check.svg",source:"Lucide CircleCheck · ISC",group:"状态"},
+      {name:"circle-x",file:"desktop/circle-x.svg",source:"Lucide CircleX · ISC",group:"状态"},
+      {name:"create",file:"desktop/create.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"操作"},
+      {name:"more",file:"desktop/more.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"操作"},
+      {name:"upload",file:"desktop/upload.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"操作"},
+      {name:"attachment",file:"desktop/attachment.svg",source:"User-provided Downloads/attachment.svg geometry · add attachment control",group:"操作"},
+      {name:"collapse",file:"desktop/collapse.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"操作"},
+      {name:"expand",file:"desktop/expand.svg",source:"DAgents visual-system semantic SVG · DAgents project asset",group:"操作"},
+      {name:"chevron-down",file:"desktop/chevron-down.svg",source:"Lucide ChevronDown · ISC",group:"操作"},
+      {name:"chevron-up",file:"desktop/chevron-up.svg",source:"Lucide ChevronUp · ISC",group:"操作"},
+      {name:"play",file:"desktop/play.svg",source:"Lucide Play · terminal command execution · ISC",group:"操作"},
+      {name:"send",file:"desktop/send.svg",source:"Node Web UI UiIcon.vue send geometry · both message composers",group:"操作"},
+      {name:"image",file:"desktop/image.svg",source:"User-provided Downloads/image.svg geometry · reserved",group:"预留"},
+      {name:"edit",file:"desktop/edit.svg",source:"User-provided Downloads/edit.svg geometry · reserved",group:"预留"}
+    ];
+    document.querySelector("#icon-count").textContent = String(icons.length);
+    const labels = [{key:"default",text:"默认"},{key:"hover",text:"悬浮"},{key:"selected",text:"选中"},{key:"disabled",text:"禁用"}];
+    const gallery = document.querySelector("#gallery");
+    for (const group of ["导航","资源","状态","操作","预留","历史"]) {
+      const entries = icons.filter(icon => icon.group === group);
+      const section = document.createElement("section");
+      const heading = document.createElement("div");
+      heading.className = "section-head";
+      heading.innerHTML = `<h2>${group}</h2><span class="section-count">${entries.length} 个图标</span>`;
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const entry of entries) {
+        const card = document.createElement("article");
+        card.className = "card";
+        const samples = labels.map(({key,text}) => `<div class="sample ${key}"><div class="glyph-pair">${[16,18,20].map(size=>`<span class="glyph s${size}" style="--asset:url('../../../../shared/icons/${entry.file}')"></span>`).join("")}</div><span class="sample-label">${text}</span></div>`).join("");
+        card.innerHTML = `<div class="card-head"><span class="name">${entry.name}</span><span class="size-note">16 / 18 / 20px</span></div><div class="preview-row">${samples}</div><p class="source">${entry.source}</p>`;
+        grid.append(card);
+      }
+      section.append(heading,grid);
+      gallery.append(section);
+    }
+  </script>
+</body>
+</html>

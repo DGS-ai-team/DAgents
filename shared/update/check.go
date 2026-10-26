@@ -22,10 +22,11 @@ const (
 
 // Status 为 Manage /v1/releases/check 结果的 Client 视图。
 type Status struct {
-	CurrentVersion   string `json:"current_version"`
-	LatestVersion    string `json:"latest_version"`
-	UpgradeAvailable bool   `json:"upgrade_available"`
-	ManageReachable  bool   `json:"manage_reachable"`
+	CurrentVersion    string `json:"current_version"`
+	LatestVersion     string `json:"latest_version"`
+	UpgradeAvailable  bool   `json:"upgrade_available"`
+	ManageReachable   bool   `json:"manage_reachable"`
+	PlatformSupported bool   `json:"platform_supported"`
 	// ManageEnabled distinguishes a disabled Manage integration from a
 	// temporarily unreachable one. Desktop shells use this to decide whether
 	// the update action should be offered and whether it can be retried.
@@ -39,6 +40,25 @@ type Status struct {
 	Message              string         `json:"message,omitempty"`
 	ApplyCommand         string         `json:"apply_command"`
 	Asset                map[string]any `json:"asset,omitempty"`
+}
+
+// UnmarshalJSON treats a missing capability field as supported for backwards
+// compatibility with Node and Desktop versions predating platform checks.
+func (s *Status) UnmarshalJSON(data []byte) error {
+	type statusAlias Status
+	var decoded statusAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = Status(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["platform_supported"]; !ok {
+		s.PlatformSupported = true
+	}
+	return nil
 }
 
 // CheckRequest 控制一次 Manage 版本检查。
@@ -123,14 +143,15 @@ func Check(req CheckRequest) Status {
 	}
 
 	base := Status{
-		CurrentVersion:  current,
-		LatestVersion:   current,
-		ManageReachable: false,
-		LastCheckedAt:   time.Now().UTC().Format(time.RFC3339),
-		Channel:         channel,
-		Platform:        platform,
-		ApplyCommand:    applyCommand,
-		Message:         "无法连接 Manage，暂无法检查更新",
+		CurrentVersion:    current,
+		LatestVersion:     current,
+		ManageReachable:   false,
+		PlatformSupported: true,
+		LastCheckedAt:     time.Now().UTC().Format(time.RFC3339),
+		Channel:           channel,
+		Platform:          platform,
+		ApplyCommand:      applyCommand,
+		Message:           "无法连接 Manage，暂无法检查更新",
 	}
 
 	endpoint, err := CheckURL(req.ManageURL, current, platform, channel)
@@ -180,10 +201,18 @@ func Check(req CheckRequest) Status {
 	if upgrade, ok := raw["upgrade_available"].(bool); ok {
 		out.UpgradeAvailable = upgrade
 	}
+	// Older Manage servers do not expose platform_supported. Preserve their
+	// historical behavior while honoring the explicit capability signal when
+	// available.
+	if supported, ok := raw["platform_supported"].(bool); ok {
+		out.PlatformSupported = supported
+	}
 	if asset, ok := raw["asset"].(map[string]any); ok && asset != nil {
 		out.Asset = NormalizeAssetURLs(req.ManageURL, asset)
 	}
 	switch {
+	case !out.PlatformSupported:
+		out.Message = "当前平台没有可用的更新包"
 	case out.UpgradeAvailable:
 		out.Message = fmt.Sprintf("新版本 %s 可用", out.LatestVersion)
 	case out.LatestVersion == out.CurrentVersion:
