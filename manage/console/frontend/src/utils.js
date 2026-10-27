@@ -79,10 +79,6 @@ export const VIEW_META = {
     title: "工作组",
     subtitle: "创建与管理协作组及配置",
   },
-  chat: {
-    title: "对话",
-    subtitle: "与工作组 Supervisor 对话",
-  },
   marketplace: {
     title: "能力市场",
     subtitle: "浏览、上传与发布 Node 扩展能力包",

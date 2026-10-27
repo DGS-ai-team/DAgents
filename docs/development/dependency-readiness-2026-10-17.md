@@ -2,7 +2,7 @@
 
 ## Desktop design prototypes
 
-Updated the Vite pin from 6.4.2 to 6.4.4 in both `docs/design/desktop-product/prototype` and `docs/design/desktop-interactive-prototype`. `npm audit fix` refreshed compatible transitive lockfile entries without a major-version change. These are prototype-only manifests and lockfiles; no production desktop dependency was changed.
+At the time of this check, the Vite pin was updated from 6.4.2 to 6.4.4 in both `docs/design/desktop-product/prototype` and `docs/design/desktop-interactive-prototype`. `npm audit fix` refreshed compatible transitive lockfile entries without a major-version change. These are prototype-only manifests and lockfiles; no production desktop dependency was changed. The current design-product README marks `docs/design/desktop-interactive-prototype/` as retired; do not continue routine dependency updates there.
 
 Verification in each prototype directory:
 

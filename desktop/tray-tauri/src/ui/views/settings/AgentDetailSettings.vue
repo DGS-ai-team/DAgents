@@ -146,6 +146,11 @@ async function save() {
     error.value = "请选择 LLM 配置";
     return;
   }
+  const maxToolCalls = Number(draft.maxToolCalls);
+  if (!Number.isInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > 4096) {
+    error.value = "最大工具调用数需为 1–4096 的整数。";
+    return;
+  }
   saving.value = true;
   error.value = "";
   statusMessage.value = "";

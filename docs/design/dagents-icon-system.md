@@ -136,10 +136,10 @@
 
 | 产品面 | 文件 |
 | --- | --- |
-| Desktop 对话与工作台 | `desktop/tray-tauri/src/ui/components/ChatComposer.vue`、`ComposerToolbar.vue`、`ContextMeter.vue`、`MessageBubble.vue`、`ScrollToTailButton.vue`、`StatusPanel.vue`、`TerminalSessionIndicator.vue`、`ToolGroupIcon.vue`、`UiSelect.vue`、`WorkspaceSwitcher.vue` |
+| Desktop 对话与工作台 | `desktop/tray-tauri/src/ui/DesktopApp.vue`、`ComposerToolbar.vue`、`ContextMeter.vue`、`MessageBubble.vue`、`ScrollToTailButton.vue`、`StatusPanel.vue`、`TerminalSessionIndicator.vue`、`ToolGroupIcon.vue`、`UiSelect.vue`、`WorkspaceSwitcher.vue` |
 | Desktop 导航与设置 | `desktop/tray-tauri/src/ui/components/TopLeftSlotIcon.vue`、`desktop/tray-tauri/src/ui/layouts/SettingsLayout.vue` |
 | Desktop 状态与页面 | `desktop/tray-tauri/src/ui/components/McpStatusIndicator.vue`、`SkillsPanel.vue`、`SkillsStatusIndicator.vue`、`desktop/tray-tauri/src/ui/components/WorkgroupWorkspace.vue` |
-| Manage 控制台 | `manage/console/frontend/src/components/AppTopNav.vue`、`AskAiButton.vue`、`DetailDrawer.vue`、`HomeDashboard.vue`、`LoginView.vue`、`WorkgroupChatView.vue`、`WorkgroupView.vue` |
+| Manage 控制台 | `manage/console/frontend/src/components/AppTopNav.vue`、`AskAiButton.vue`、`DetailDrawer.vue`、`HomeDashboard.vue`、`LoginView.vue`、`WorkgroupView.vue` |
 
 字符候选主要位于 Desktop 的 `AutoOverviewPanel.vue`、`AgentDetailSettings.vue`、`McpSettings.vue`、`UiSelect.vue`、`ImageLightbox.vue` 和工具结果行；Manage 的 `PageHeader.vue` 也有导航字符。其余命中的字符属于测试数据、日志文本、尺寸符号、路径分隔符或普通文案，保留原文。
 

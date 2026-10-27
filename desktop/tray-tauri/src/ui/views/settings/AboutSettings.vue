@@ -19,7 +19,7 @@ function onPick(cmd) {
   } catch {
     /* ignore */
   }
-  router.push({ name: "agents" });
+  router.push({ name: "chat" });
 }
 </script>
 

@@ -30,6 +30,14 @@ describe("MessageBubble context boundary", () => {
     wrapper.unmount();
   });
 
+  it("keeps the empty streaming assistant placeholder out of the message area", () => {
+    const wrapper = mount(MessageBubble, {
+      props: { entry: { kind: "assistant", text: "", streaming: true } },
+    });
+    expect(wrapper.find(".msg--assistant").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("keeps assistant markdown code copy controls wired through ResourceMarkdown", async () => {
     const wrapper = mount(MessageBubble, {
       props: { entry: { kind: "assistant", text: "```text\ncopy me\n```" }, agentId: "agent-a" },
