@@ -10,6 +10,7 @@ import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceImageBlob } from './workspace-files-state.js'
+import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
 import { createWorkspaceReference, formatWorkspaceReferencesMessage } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
@@ -512,7 +513,11 @@ async function refreshHealth() {
     status.value = next
     if (next.online && (!workspaceNodeIdentity.value || workspaceNodeIdentity.value === 'node:unknown' || connectionChanged)) {
       try {
-        const info = await invoke('desktop_node_info')
+        const info = await invoke('desktop_node_request', {
+          method: 'GET',
+          path: '/v1/node/info',
+          body: null,
+        })
         const stableIdentity = String(info?.node_id || info?.endpoint || '').trim()
         if (stableIdentity && workspaceNodeIdentity.value !== stableIdentity) workspaceNodeIdentity.value = stableIdentity
       } catch { /* The generation still isolates requests if identity lookup is unavailable. */ }
@@ -583,7 +588,6 @@ async function refreshAgentModel(id) {
   }
 }
 async function restoreAgentMedia(snapshot, agentId) {
-  const transcript = Array.isArray(snapshot?.transcript) ? snapshot.transcript : []
   const loadSource = async source => {
     const raw = String(source || '')
     if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw
@@ -601,13 +605,7 @@ async function restoreAgentMedia(snapshot, agentId) {
     }
     return objectUrl
   }
-  const rows = await Promise.all(transcript.map(async entry => {
-    const out = { ...entry }
-    if (Array.isArray(entry.images)) out.images = await Promise.all(entry.images.map(loadSource))
-    if (Array.isArray(entry.media)) out.media = await Promise.all(entry.media.map(async item => item && typeof item === 'object' && item.url ? { ...item, url: await loadSource(item.url) } : item))
-    return out
-  }))
-  return { ...snapshot, transcript: rows }
+  return restoreTranscriptMedia(snapshot, loadSource)
 }
 async function hydrateAgentSnapshot(id) {
   if (!id || activeId.value !== id) return
@@ -872,13 +870,13 @@ function closeAttachmentActions(restoreFocus = false) {
   attachmentActionsOpen.value = false
   if (restoreFocus) void nextTick(() => attachmentActionAnchor.value?.querySelector('.attach-button')?.focus())
 }
-function onAttachmentMenuKeydown(event) {
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+function onAttachmentActionsKeydown(event) {
+  if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
   const items = Array.from(attachmentActionAnchor.value?.querySelectorAll('.attachment-action-option:not(:disabled)') || [])
   if (!items.length) return
   event.preventDefault()
   const index = items.indexOf(document.activeElement)
-  const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (index + 1 + items.length) % items.length : (index <= 0 ? items.length - 1 : index - 1)
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowRight' ? (index + 1 + items.length) % items.length : (index <= 0 ? items.length - 1 : index - 1)
   items[next]?.focus()
 }
 function openFilePicker() {
@@ -1990,7 +1988,7 @@ onUnmounted(() => {
         <template v-else>
           <div v-if="!chatEntries.length && !hitlQueue.length" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在连接的 Node 中。</p><span class="real-tag">真实 Node 会话</span></div>
           <div v-else class="desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :hide-composer="true" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
+            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
           </div>
         </template>
         <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint" role="alert" tabindex="0" aria-describedby="desktop-chat-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
@@ -2023,11 +2021,11 @@ onUnmounted(() => {
   <div class="composer-toolbar-row">
     <div class="composer-toolbar-left">
       <div ref="attachmentActionAnchor" class="attachment-action">
-        <button class="attach-button" type="button" aria-label="添加文件或图片" title="添加文件或图片" :aria-expanded="attachmentActionsOpen" aria-haspopup="menu" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
-        <Transition name="attachment-actions"><div v-if="attachmentActionsOpen" class="attachment-actions-popover" role="menu" aria-label="添加附件" @keydown="onAttachmentMenuKeydown">
-          <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span><span>文件</span></button>
-          <button class="attachment-action-option" type="button" role="menuitem" aria-label="上传图片" title="上传图片" @click.stop="openImagePicker"><span class="icon-mask" :style="maskStyle(imageUploadActionIcon)"></span><span>图片</span></button>
-          <button class="attachment-action-option" type="button" role="menuitem" :aria-label="screenshotInProgress ? '正在截图' : '截屏'" :title="screenshotInProgress ? '正在截图…' : '截屏'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span><span>截屏</span></button>
+        <button class="attach-button" type="button" aria-label="添加附件操作" title="添加附件操作" :aria-expanded="attachmentActionsOpen" aria-controls="attachment-action-options" :disabled="attachmentLimitReached" @click.stop="toggleAttachmentActions"><span class="icon-mask" :style="maskStyle(attachmentIcon)"></span></button>
+        <Transition name="attachment-actions"><div v-show="attachmentActionsOpen" id="attachment-action-options" class="attachment-action-expanded" role="group" aria-label="附件操作" @keydown="onAttachmentActionsKeydown">
+          <button class="attachment-action-option" type="button" aria-label="上传文件" title="上传文件" @click.stop="openFilePicker"><span class="icon-mask" :style="maskStyle(uploadActionIcon)"></span></button>
+          <button class="attachment-action-option" type="button" aria-label="上传图片" title="上传图片" @click.stop="openImagePicker"><span class="icon-mask" :style="maskStyle(imageUploadActionIcon)"></span></button>
+          <button class="attachment-action-option" type="button" :aria-label="screenshotInProgress ? '正在截屏' : '截屏'" :title="screenshotInProgress ? '正在截屏…' : '截屏'" :disabled="screenshotInProgress || attachmentLimitReached" @click.stop="captureScreenshot"><span class="icon-mask" :style="maskStyle(screenshotActionIcon)"></span></button>
         </div></Transition>
       </div>
     </div>
@@ -2038,7 +2036,7 @@ onUnmounted(() => {
       <button v-else class="send-button" :disabled="!canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" aria-label="发送消息" title="发送消息"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)"></span></button>
     </div>
   </div>
-</form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span><span>{{ agentGenerating ? '生成中' : '就绪' }}</span></div></footer>
+</form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span></div></footer>
       </template>
       <template #dock>
       <ResourceAgentDock

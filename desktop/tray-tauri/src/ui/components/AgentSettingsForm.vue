@@ -252,6 +252,21 @@ const memoryScopeOptions = computed(() =>
               : "请先在「设置 › 连接」中添加模型配置"
           }}
         </p>
+        <label v-if="isFull" class="agent-settings-field agent-settings-field--tool-call-limit">
+          <span class="agent-settings-field__label">
+            最大工具调用数
+            <small>每次人工对话中模型发起的调用总数，范围 1–4096；并行调用逐个计数。Auto 自主激活与 dreaming 使用各自的轮次上限。</small>
+          </span>
+          <input
+            v-model.number="draft.maxToolCalls"
+            type="number"
+            min="1"
+            max="4096"
+            step="1"
+            class="agent-settings-input"
+            aria-label="每轮最大工具调用数"
+          />
+        </label>
         <p v-if="isCreateBasics" class="agent-settings-hint agent-settings-hint--later">
           角色设定、技能白名单等，创建后可在智能体设置里慢慢调。
         </p>
@@ -753,6 +768,15 @@ const memoryScopeOptions = computed(() =>
   font-weight: 500;
   line-height: 1.4;
   color: var(--color-text-muted);
+}
+
+.agent-settings-field__label small {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .agent-settings-field__label--error {

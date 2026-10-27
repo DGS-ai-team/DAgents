@@ -90,7 +90,8 @@ func defaultAgentCreationDefaults() map[string]any {
 			"description": "",
 		},
 		"llm": map[string]any{
-			"max_steps": agentruntime.DefaultMaxSteps,
+			"max_steps":      agentruntime.DefaultMaxSteps,
+			"max_tool_calls": agentruntime.DefaultMaxToolCalls,
 		},
 		"tools": map[string]any{
 			"enabled_groups": []any{},
@@ -196,6 +197,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		baseDefaults = agentruntime.MergeDefaults(tpl.Defaults, nil)
 	} else {
 		baseDefaults = defaultAgentCreationDefaults()
+	}
+	if err := agentruntime.ValidateMaxToolCalls(agentruntime.Snapshot{Defaults: baseDefaults}); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent_tool_call_limit", err.Error(), nil)
+		return
 	}
 
 	// soul/custom 正文：优先请求 defaults，其次模板预设；写入侧车表，不进 snapshot。
@@ -457,6 +462,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 
 	if req.Defaults != nil {
 		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
+		if err := agentruntime.ValidateMaxToolCalls(snap); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_agent_tool_call_limit", err.Error(), nil)
+			return
+		}
 		runtimeDirty = true
 		if requestedAgentLLMProfile(req.Defaults) {
 			profileID := agentruntime.LLMActiveFromDefaults(snap)

@@ -1,6 +1,5 @@
 <script setup>
 import { computed, ref, shallowRef, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import ChatComposer from "./ChatComposer.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import MessageBubble from "./MessageBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
@@ -22,29 +21,18 @@ const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
   toolVerbose: { type: Boolean, default: false },
-  disabled: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
   cancelling: { type: Boolean, default: false },
   hitlBusy: { type: Boolean, default: false },
   hitlBusyIndex: { type: Number, default: -1 },
-  thinkingSupported: { type: Boolean, default: false },
-  llmSettings: { type: Object, default: null },
   agentTitle: { type: String, default: "" },
-  error: { type: String, default: "" },
-  hideComposer: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
   workspaceView: { type: String, default: "messages" },
   showWorkspaceSwitcher: { type: Boolean, default: true },
   agentId: { type: String, default: "" },
-  terminalRefreshKey: { type: Number, default: 0 },
 });
 
 const emit = defineEmits([
-  "send",
-  "cancel",
-  "toggle-thinking",
-  "cycle-effort",
-  "switch-profile",
   "approve-all",
   "reject-all",
   "approve-one",
@@ -57,7 +45,6 @@ const emit = defineEmits([
 ]);
 
 const streamRef = ref(null);
-const composerRef = ref(null);
 const userInfoSelected = ref([]);
 
 function onUserInfoSelected(next) {
@@ -302,15 +289,7 @@ watch(displayStream, (items, previousItems) => {
   previousStreamItemCount = items.length;
 }, { immediate: true });
 
-function onComposerSend(payload) {
-  scrollToTail();
-  emit("send", payload);
-}
-
 defineExpose({
-  setDraft(text) {
-    composerRef.value?.setDraft(text);
-  },
   scrollToTail,
 });
 </script>
@@ -405,25 +384,5 @@ defineExpose({
       />
     </div>
 
-    <ChatComposer
-      v-if="!hideComposer"
-      ref="composerRef"
-      :hitl-queue="hitlQueue"
-      :disabled="disabled"
-      :sending="sending"
-      :cancelling="cancelling"
-      :hitl-busy="hitlBusy"
-      :thinking-supported="thinkingSupported"
-      :llm-settings="llmSettings"
-      :error="error"
-      :agent-id="agentId"
-      :workspace-view="workspaceView"
-      :terminal-refresh-key="terminalRefreshKey"
-      @send="onComposerSend"
-      @cancel="emit('cancel')"
-      @toggle-thinking="emit('toggle-thinking')"
-      @cycle-effort="emit('cycle-effort')"
-      @switch-profile="(id) => emit('switch-profile', id)"
-    />
   </section>
 </template>

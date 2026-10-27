@@ -28,7 +28,7 @@
 - `node/internal/turn/orchestrator.go` 与 `cancel_partial.go`：取消时丢弃流式半成品，只允许完整调用进入 canonical history；
 - `node/internal/session/manager.go`、`runtime_lifecycle.go`、`runtime_persistence.go`：生命周期恢复，以及从 durable tool-call facts 重建 assistant batch；
 - `node/internal/llm/messageutil.go` 与 adapter：provider 出站前的最终不可绕过校验；
-- `desktop/tray-tauri/src/ui/components/ChatComposer.vue`：hydrate 后保留可见的 Turn 取消终态；
+- `desktop/tray-tauri/src/ui/DesktopApp.vue`：hydrate 后保留可见的 Turn 取消终态；
 - `desktop/tray-tauri/src/ui/utils/toolUserLabel.js`：根据统一结果状态生成取消工具结果的用户文案。
 
 已完成验证：Go 全量测试、Web UI Vitest、Node 重启恢复，以及 Mimo 最新前端包上的长输出取消、工具执行中取消、工具单独取消、HITL 排队取消、刷新恢复和取消后继续发送。询问等待时，普通消息保留在 InputBox，显式 Turn cancel 后按原序处理；主 Agent UI 也提供独立的“取消本轮”入口，不与询问答案提交复用。

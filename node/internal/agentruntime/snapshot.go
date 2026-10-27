@@ -167,6 +167,65 @@ func MaxStepsFromDefaults(snap Snapshot) int {
 	}
 }
 
+// MaxToolCallsFromDefaults 读取 defaults.llm.max_tool_calls；无则返回 0。
+func MaxToolCallsFromDefaults(snap Snapshot) int {
+	llmRaw, ok := snap.Defaults["llm"]
+	if !ok || llmRaw == nil {
+		return 0
+	}
+	llmMap, ok := llmRaw.(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch v := llmMap["max_tool_calls"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+// ValidateMaxToolCalls validates the optional per-turn tool-call limit.
+func ValidateMaxToolCalls(snap Snapshot) error {
+	llmRaw, ok := snap.Defaults["llm"]
+	if !ok || llmRaw == nil {
+		return nil
+	}
+	llmMap, ok := llmRaw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, exists := llmMap["max_tool_calls"]
+	if !exists || raw == nil {
+		return nil
+	}
+	limit := 0
+	switch v := raw.(type) {
+	case float64:
+		if v < 1 || v > MaxConfiguredToolCalls || v != float64(int(v)) {
+			return fmt.Errorf("defaults.llm.max_tool_calls must be an integer between 1 and %d", MaxConfiguredToolCalls)
+		}
+		limit = int(v)
+	case int:
+		limit = v
+	case int64:
+		if v < 1 || v > MaxConfiguredToolCalls {
+			return fmt.Errorf("defaults.llm.max_tool_calls must be an integer between 1 and %d", MaxConfiguredToolCalls)
+		}
+		limit = int(v)
+	default:
+		return fmt.Errorf("defaults.llm.max_tool_calls must be an integer between 1 and %d", MaxConfiguredToolCalls)
+	}
+	if limit < 1 || limit > MaxConfiguredToolCalls {
+		return fmt.Errorf("defaults.llm.max_tool_calls must be an integer between 1 and %d", MaxConfiguredToolCalls)
+	}
+	return nil
+}
+
 // SkillsConfig 为 defaults.skills 解析结果；能力开关见工具组 skills。
 type SkillsConfig struct {
 	// VisibleRestrict 表示 snapshot 显式写了 visible（含空列表）；false 表示未限制。
@@ -246,6 +305,11 @@ func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 		n = DefaultMaxSteps
 	}
 	turn.Budget.MaxSteps = n
+	maxToolCalls := MaxToolCallsFromDefaults(snap)
+	if maxToolCalls <= 0 {
+		maxToolCalls = DefaultMaxToolCalls
+	}
+	turn.Budget.MaxToolCalls = maxToolCalls
 	// Agent Turns reserve one additional, tool-free summary Step so reaching
 	// max_steps ends with a user-facing result instead of a silent stop. Other
 	// budget dimensions (tokens, cost, wall time) still gate that request.

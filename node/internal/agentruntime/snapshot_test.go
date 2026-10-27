@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -131,5 +132,36 @@ func TestApplyDefaultsToTurnOptions_maxStepsFromSnapshot(t *testing.T) {
 	ApplyDefaultsToTurnOptions(&empty, Snapshot{})
 	if empty.Budget.MaxSteps != DefaultMaxSteps || !empty.Budget.ReserveFinalSummary {
 		t.Fatalf("budget=%+v want creation default max_steps=%d with reserved final summary", empty.Budget, DefaultMaxSteps)
+	}
+}
+
+func TestApplyDefaultsToTurnOptions_maxToolCallsFromSnapshot(t *testing.T) {
+	var configured session.TurnOptions
+	ApplyDefaultsToTurnOptions(&configured, Snapshot{Defaults: map[string]any{
+		"llm": map[string]any{"max_tool_calls": float64(12)},
+	}})
+	if configured.Budget.MaxToolCalls != 12 {
+		t.Fatalf("MaxToolCalls=%d want 12", configured.Budget.MaxToolCalls)
+	}
+
+	var empty session.TurnOptions
+	ApplyDefaultsToTurnOptions(&empty, Snapshot{})
+	if empty.Budget.MaxToolCalls != DefaultMaxToolCalls {
+		t.Fatalf("MaxToolCalls=%d want default %d", empty.Budget.MaxToolCalls, DefaultMaxToolCalls)
+	}
+}
+
+func TestValidateMaxToolCalls(t *testing.T) {
+	valid := Snapshot{Defaults: map[string]any{"llm": map[string]any{"max_tool_calls": float64(12)}}}
+	if err := ValidateMaxToolCalls(valid); err != nil {
+		t.Fatalf("valid setting rejected: %v", err)
+	}
+	for _, value := range []any{float64(0), float64(1.5), float64(MaxConfiguredToolCalls + 1), "12"} {
+		t.Run(fmt.Sprint(value), func(t *testing.T) {
+			snap := Snapshot{Defaults: map[string]any{"llm": map[string]any{"max_tool_calls": value}}}
+			if err := ValidateMaxToolCalls(snap); err == nil {
+				t.Fatalf("invalid value %v accepted", value)
+			}
+		})
 	}
 }

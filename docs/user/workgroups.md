@@ -13,13 +13,13 @@
 
 ## 2. 创建工作组
 
-在 Manage Console 或 DAgents Desktop 中：
+在 Manage Console 或 DAgents Desktop 中完成配置：
 
 1. 创建工作组并配置 Supervisor LLM；
 2. 将需要协作的 Node 加入 ACL；
 3. 从 Agent 目录选择已有 `agent_id` 作为成员；
 4. 发布工作组，等待成员状态变为 ready；
-5. 从 Console 或已订阅 Node 打开工作组对话。
+5. 在 DAgents Desktop 打开工作组并开始对话。
 
 成员是 Agent 引用，不是重新创建的受限 Agent。成员当前的模型、工具、skills 和本地工作区仍由 Home Node 管理；工作组只增加协作范围和权限约束。
 

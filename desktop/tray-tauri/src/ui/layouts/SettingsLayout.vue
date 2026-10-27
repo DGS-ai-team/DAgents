@@ -15,7 +15,11 @@ const navScroll = ref(null);
 const navContent = ref(null);
 const fadeStart = ref(false);
 const fadeEnd = ref(false);
+const activeIndicatorStyle = ref({ width: "0px", height: "0px", transform: "translate3d(0, 0, 0)" });
+const activeIndicatorVisible = ref(false);
+const activeIndicatorReady = ref(false);
 let resizeObserver;
+let activeIndicatorFrame = 0;
 
 function updateScrollState() {
   const el = navScroll.value;
@@ -45,9 +49,37 @@ function keepActiveLinkVisible() {
   }
 }
 
+function updateActiveIndicator() {
+  const content = navContent.value;
+  const activeLink = content?.querySelector('.settings-layout__link[aria-current="page"]');
+  if (!content || !activeLink) {
+    activeIndicatorVisible.value = false;
+    return;
+  }
+
+  const contentRect = content.getBoundingClientRect();
+  const linkRect = activeLink.getBoundingClientRect();
+  activeIndicatorStyle.value = {
+    width: `${linkRect.width}px`,
+    height: `${linkRect.height}px`,
+    transform: `translate3d(${linkRect.left - contentRect.left}px, ${linkRect.top - contentRect.top}px, 0)`,
+  };
+  activeIndicatorVisible.value = true;
+
+  // Set the first position before enabling transitions so the indicator does
+  // not animate in from the top-left when settings opens.
+  if (!activeIndicatorReady.value && !activeIndicatorFrame) {
+    activeIndicatorFrame = window.requestAnimationFrame(() => {
+      activeIndicatorReady.value = true;
+      activeIndicatorFrame = 0;
+    });
+  }
+}
+
 async function refreshNavigation() {
   await nextTick();
   keepActiveLinkVisible();
+  updateActiveIndicator();
   updateScrollState();
 }
 
@@ -66,6 +98,7 @@ onBeforeUnmount(() => {
   navScroll.value?.removeEventListener("scroll", updateScrollState);
   window.removeEventListener("resize", refreshNavigation);
   resizeObserver?.disconnect();
+  if (activeIndicatorFrame) window.cancelAnimationFrame(activeIndicatorFrame);
 });
 
 watch(() => route.fullPath, refreshNavigation);
@@ -137,7 +170,7 @@ function backToChat() {
     window.dispatchEvent(new CustomEvent("desktop-back-to-chat"));
     return;
   }
-  router.push({ name: "agents" });
+  router.push({ name: "chat" });
 }
 </script>
 
@@ -163,6 +196,15 @@ function backToChat() {
         >
           <div ref="navScroll" class="settings-layout__nav-scroll" role="region" tabindex="0" aria-label="设置项目">
             <div ref="navContent" class="settings-layout__nav-content">
+              <div
+                class="settings-layout__active-indicator"
+                :class="{
+                  'settings-layout__active-indicator--visible': activeIndicatorVisible,
+                  'settings-layout__active-indicator--ready': activeIndicatorReady,
+                }"
+                :style="activeIndicatorStyle"
+                aria-hidden="true"
+              />
               <section v-for="group in navGroups" :key="group.label" class="settings-layout__group">
                 <h2 class="settings-layout__group-title">{{ group.label }}</h2>
                 <router-link

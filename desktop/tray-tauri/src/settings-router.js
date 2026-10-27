@@ -14,12 +14,10 @@ const securitySettings = () => import("@desktop-ui/views/settings/SecuritySettin
 const aboutSettings = () => import("@desktop-ui/views/settings/AboutSettings.vue");
 const feedbackSettings = () => import("@desktop-ui/views/settings/FeedbackSettings.vue");
 const desktopSettings = () => import("./views/DesktopSettings.vue");
-const chatRoute = { render: () => null };
-
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-  { path: "/chat", component: chatRoute }, {
+  { path: "/chat", name: "chat" }, {
     path: "/settings",
     component: settingsLayout,
     redirect: "/settings/general",

@@ -34,6 +34,9 @@ func TestBuild_usesAgentWorkspaceAndToolGroups(t *testing.T) {
 	if built.TurnOptions.Budget.MaxSteps != DefaultMaxSteps {
 		t.Fatalf("MaxSteps=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.Budget.MaxSteps, DefaultMaxSteps)
 	}
+	if built.TurnOptions.Budget.MaxToolCalls != DefaultMaxToolCalls {
+		t.Fatalf("MaxToolCalls=%d want %d", built.TurnOptions.Budget.MaxToolCalls, DefaultMaxToolCalls)
+	}
 	wantWorkspace, err := filepath.Abs(filepath.Join(root, "agents", "agt-abc", "workspace"))
 	if err != nil {
 		t.Fatal(err)
