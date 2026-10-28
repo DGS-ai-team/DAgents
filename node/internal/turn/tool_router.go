@@ -49,6 +49,14 @@ func (o *Orchestrator) processToolCalls(
 			o.appendMissingToolResponses(sessionID, history, calls,
 				"ERROR: turn budget exhausted",
 				map[string]any{"budget_exhausted": true, "budget_reason": reason})
+			if reason == "max_tool_calls" {
+				// The assistant has already proposed and recorded the complete batch.
+				// Close every call with a result, then let the normal continuation
+				// budget check either start the reserved no-tools summary or terminate
+				// the turn when no summary is available. Returning ErrBudgetExhausted
+				// here would end the turn before that summary path can run.
+				return nil, "", nil
+			}
 			return nil, "", fmt.Errorf("%w: %s", ErrBudgetExhausted, reason)
 		}
 	}

@@ -1,16 +1,4 @@
 /* Shared Vue UI overrides */
-#app {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-}
-
-html,
-body,
-#app {
-  height: 100%;
-}
-
 .panel-overlay {
   position: absolute;
   inset: 0;

@@ -21,6 +21,7 @@ const (
 	terminalForceTimeout   = 2 * time.Second
 	terminalForceWait      = 500 * time.Millisecond
 	terminalIdleTimeout    = 10 * time.Minute
+	terminalWSWriteTimeout = 5 * time.Second
 )
 
 type terminalOutputFrame struct {
@@ -587,6 +588,40 @@ func (r *terminalSessionRegistry) remove(id string, expected *terminalSession) {
 	}
 }
 
+// removeWithFinalEvent makes the session disappear from registry reads before
+// sending a final WebSocket event. This lets an explicit close acknowledgement
+// serve as a synchronization point for clients that immediately refresh the
+// session list. The attached connection remains open until after the event is
+// written, then normal shutdown releases the terminal and socket.
+func (r *terminalSessionRegistry) removeWithFinalEvent(parent context.Context, id string, expected *terminalSession, notify func(context.Context, *terminalSession) error) error {
+	if r == nil {
+		return fmt.Errorf("terminal registry is unavailable")
+	}
+	r.mu.Lock()
+	session := r.sessions[id]
+	if session != nil && (expected == nil || session == expected) {
+		delete(r.sessions, id)
+	} else {
+		session = nil
+	}
+	r.mu.Unlock()
+	if session == nil {
+		return fmt.Errorf("terminal session is unavailable")
+	}
+	var sendErr error
+	if notify != nil {
+		if parent == nil {
+			parent = context.Background()
+		}
+		notifyCtx, cancel := context.WithTimeout(parent, terminalWSWriteTimeout)
+		sendErr = notify(notifyCtx, session)
+		cancel()
+	}
+	session.shutdown()
+	r.publishChange(session, "terminal.closed")
+	return sendErr
+}
+
 // Close removes an Agent-owned terminal session without sending input through
 // its PTY. This is used by clients that retained a detached session ID but no
 // longer have the WebSocket relay needed to send a close command.
@@ -840,7 +875,7 @@ func writeTerminalWSEventLocked(ctx context.Context, conn *websocket.Conn, event
 }
 
 func writeTerminalWSEventWithTimeout(conn *websocket.Conn, event terminalWSEvent) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), terminalWSWriteTimeout)
 	defer cancel()
 	return writeTerminalWSEventLocked(ctx, conn, event)
 }

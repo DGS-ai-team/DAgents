@@ -58,21 +58,30 @@ func (c *turnFinishFixtureClient) capturedRequests() []llm.ChatRequest {
 }
 
 func newAgentTurnFixture(t *testing.T, maxSteps int, client *turnFinishFixtureClient) (*session.Manager, *stream.Hub, *store.SQLiteStore, *session.Session, Built) {
+	return newAgentTurnFixtureWithBudget(t, maxSteps, 0, true, client)
+}
+
+func newAgentTurnFixtureWithBudget(t *testing.T, maxSteps, maxToolCalls int, reserveSummary bool, client *turnFinishFixtureClient) (*session.Manager, *stream.Hub, *store.SQLiteStore, *session.Session, Built) {
 	t.Helper()
 	root := t.TempDir()
 	cfg := &config.Config{NodeID: "node-1", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
+	llmDefaults := map[string]any{"max_steps": float64(maxSteps)}
+	if maxToolCalls > 0 {
+		llmDefaults["max_tool_calls"] = float64(maxToolCalls)
+	}
 	built, err := Build(BuildParams{
 		NodeCFG: cfg,
 		AgentID: "agent-1",
 		Snapshot: Snapshot{Defaults: map[string]any{
-			"llm":   map[string]any{"max_steps": float64(maxSteps)},
+			"llm":   llmDefaults,
 			"tools": map[string]any{"enabled_groups": []any{"fs", "bash"}},
 		}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	built.TurnOptions.Budget.ReserveFinalSummary = reserveSummary
 	availableTools := map[string]bool{}
 	for _, definition := range built.Registry.Definitions() {
 		availableTools[definition.Function.Name] = true
@@ -192,6 +201,223 @@ func TestAgentMaxStepsReservesToolFreeFinalSummary(t *testing.T) {
 	}
 	if !summaryStep || !completed {
 		t.Fatalf("durable summary/completion facts missing: %v", eventTypes(stored))
+	}
+}
+
+func TestAgentToolCallOverflowClosesBatchAndUsesReservedSummary(t *testing.T) {
+	calls := []llm.ToolCall{
+		{ID: "overflow-one", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"one.txt"}`}},
+		{ID: "overflow-two", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two.txt"}`}},
+	}
+	client := &turnFinishFixtureClient{first: calls}
+	manager, hub, st, created, _ := newAgentTurnFixtureWithBudget(t, 4, 1, true, client)
+	events := hub.Subscribe(hub.CurrentSeq())
+	defer hub.Unsubscribe(events)
+	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read both", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	seen := awaitTurnFinished(t, events)
+	requests := client.capturedRequests()
+	if len(requests) != 2 || len(requests[0].Tools) == 0 || len(requests[1].Tools) != 0 {
+		t.Fatalf("overflow should be followed by a tool-free summary request: requests=%d tool_counts=%v", len(requests), requestToolCounts(requests))
+	}
+	if !containsText(requests[1].SystemPrompt, "只允许进行一次无工具的最终收尾") {
+		t.Fatalf("summary request lacks the reserved-summary instruction: %q", requests[1].SystemPrompt)
+	}
+	providerResults := map[string]bool{}
+	for _, message := range requests[1].Messages {
+		if message.Role == "tool" {
+			providerResults[message.ToolCallID] = true
+		}
+	}
+	if !providerResults[calls[0].ID] || !providerResults[calls[1].ID] {
+		t.Fatalf("summary provider request did not include results for both calls: %v; messages=%+v", providerResults, requests[1].Messages)
+	}
+	results := map[string]bool{}
+	terminalFinished, terminalStates := 0, 0
+	for _, event := range seen {
+		if event.Type == "tool_result" {
+			id, _ := event.Data["tool_call_id"].(string)
+			results[id] = true
+		}
+		if event.Type == "turn_finished" && event.Data["turn_complete"] == true {
+			terminalFinished++
+		}
+		if event.Type == "turn_state" && event.Data["terminal"] == true {
+			terminalStates++
+		}
+	}
+	if !results[calls[0].ID] || !results[calls[1].ID] {
+		t.Fatalf("overflow tool calls lack paired results: %v", results)
+	}
+	if terminalFinished != 1 || terminalStates != 1 {
+		t.Fatalf("expected one terminal publication, got finished=%d states=%d events=%+v", terminalFinished, terminalStates, seen)
+	}
+	stored, err := st.ListTurnEvents(context.Background(), created.ID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executionsStarted, resultsRecorded, summaries, completed := 0, 0, 0, false
+	for _, event := range stored {
+		switch event.EventType {
+		case turn.EventToolExecutionStarted:
+			executionsStarted++
+		case turn.EventToolResultRecorded:
+			resultsRecorded++
+		case turn.EventStepStarted:
+			var payload map[string]any
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["final_summary"] == true {
+				summaries++
+			}
+		case turn.EventTurnCompleted:
+			completed = true
+		}
+	}
+	if executionsStarted != 0 || resultsRecorded != 2 || summaries != 1 || !completed {
+		t.Fatalf("overflow lifecycle incomplete: starts=%d results=%d summaries=%d completed=%t events=%v", executionsStarted, resultsRecorded, summaries, completed, eventTypes(stored))
+	}
+}
+
+func requestToolCounts(requests []llm.ChatRequest) []int {
+	counts := make([]int, len(requests))
+	for i, request := range requests {
+		counts[i] = len(request.Tools)
+	}
+	return counts
+}
+
+func TestAgentToolCallOverflowTerminatesWithoutReservedSummary(t *testing.T) {
+	calls := []llm.ToolCall{
+		{ID: "no-summary-one", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"one.txt"}`}},
+		{ID: "no-summary-two", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two.txt"}`}},
+	}
+	client := &turnFinishFixtureClient{first: calls}
+	manager, hub, st, created, _ := newAgentTurnFixtureWithBudget(t, 4, 1, false, client)
+	events := hub.Subscribe(hub.CurrentSeq())
+	defer hub.Unsubscribe(events)
+	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read both", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	seen := awaitTurnFinished(t, events)
+	requests := client.capturedRequests()
+	if len(requests) != 1 {
+		t.Fatalf("summary was sent without a reservation: %d requests", len(requests))
+	}
+	results := map[string]bool{}
+	finishedCount, terminalStateCount := 0, 0
+	for _, event := range seen {
+		if event.Type == "tool_result" {
+			id, _ := event.Data["tool_call_id"].(string)
+			results[id] = true
+		}
+		if event.Type == "turn_finished" && event.Data["finish_reason"] == "budget_exhausted" {
+			finishedCount++
+		}
+		if event.Type == "turn_state" && event.Data["terminal"] == true {
+			terminalStateCount++
+		}
+	}
+	if !results[calls[0].ID] || !results[calls[1].ID] || finishedCount != 1 || terminalStateCount != 1 {
+		t.Fatalf("overflow did not close calls and terminate once: results=%v finished=%d states=%d events=%+v", results, finishedCount, terminalStateCount, seen)
+	}
+	stored, err := st.ListTurnEvents(context.Background(), created.ID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetTerminals, resultFacts := 0, 0
+	for _, event := range stored {
+		if event.EventType == turn.EventTurnBudgetExhausted {
+			budgetTerminals++
+		}
+		if event.EventType == turn.EventToolResultRecorded {
+			resultFacts++
+		}
+	}
+	if budgetTerminals != 1 || resultFacts != 2 {
+		t.Fatalf("budget terminal/result facts = %d/%d, events=%v", budgetTerminals, resultFacts, eventTypes(stored))
+	}
+}
+
+func TestAgentLaterOverflowBatchPreservesEarlierToolResultInSummary(t *testing.T) {
+	first := llm.ToolCall{ID: "earlier-success", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"input.txt"}`}}
+	second := []llm.ToolCall{
+		{ID: "later-overflow-one", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"one.txt"}`}},
+		{ID: "later-overflow-two", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two.txt"}`}},
+	}
+	client := &turnFinishFixtureClient{steps: [][]llm.ToolCall{{first}, second}}
+	manager, hub, st, created, built := newAgentTurnFixtureWithBudget(t, 5, 2, true, client)
+	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "input.txt"), []byte("earlier tool evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events := hub.Subscribe(hub.CurrentSeq())
+	defer hub.Unsubscribe(events)
+	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read the evidence", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	seen := awaitTurnFinished(t, events)
+	requests := client.capturedRequests()
+	if len(requests) != 3 || len(requests[0].Tools) == 0 || len(requests[1].Tools) == 0 || len(requests[2].Tools) != 0 {
+		t.Fatalf("expected two tool requests followed by a tool-free summary: requests=%d tool_counts=%v", len(requests), requestToolCounts(requests))
+	}
+	if !containsText(requests[2].SystemPrompt, "只允许进行一次无工具的最终收尾") {
+		t.Fatalf("final summary request lacks reserved-summary instruction: %q", requests[2].SystemPrompt)
+	}
+	providerResults := map[string]string{}
+	for _, message := range requests[2].Messages {
+		if message.Role == "tool" {
+			providerResults[message.ToolCallID] = message.Content
+		}
+	}
+	if !strings.Contains(providerResults[first.ID], "earlier tool evidence") || !strings.Contains(providerResults[second[0].ID], "turn budget exhausted") || !strings.Contains(providerResults[second[1].ID], "turn budget exhausted") {
+		t.Fatalf("summary provider request lost or misrepresented tool results: %#v", providerResults)
+	}
+	resultContents := map[string]string{}
+	terminalFinished, terminalStates := 0, 0
+	for _, event := range seen {
+		if event.Type == "tool_result" {
+			id, _ := event.Data["tool_call_id"].(string)
+			content, _ := event.Data["content"].(string)
+			resultContents[id] = content
+		}
+		if event.Type == "turn_finished" && event.Data["turn_complete"] == true {
+			terminalFinished++
+		}
+		if event.Type == "turn_state" && event.Data["terminal"] == true {
+			terminalStates++
+		}
+	}
+	if !strings.Contains(resultContents[first.ID], "earlier tool evidence") || !strings.Contains(resultContents[second[0].ID], "turn budget exhausted") || !strings.Contains(resultContents[second[1].ID], "turn budget exhausted") {
+		t.Fatalf("tool result events do not cover the successful and rejected calls: %#v", resultContents)
+	}
+	if terminalFinished != 1 || terminalStates != 1 {
+		t.Fatalf("expected one terminal publication, got finished=%d states=%d", terminalFinished, terminalStates)
+	}
+	stored, err := st.ListTurnEvents(context.Background(), created.ID, 0, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts, resultFacts, summaries := 0, 0, 0
+	for _, event := range stored {
+		switch event.EventType {
+		case turn.EventToolExecutionStarted:
+			starts++
+		case turn.EventToolResultRecorded:
+			resultFacts++
+		case turn.EventStepStarted:
+			var payload map[string]any
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["final_summary"] == true {
+				summaries++
+			}
+		}
+	}
+	if starts != 1 || resultFacts != 3 || summaries != 1 {
+		t.Fatalf("later overflow execution/lifecycle counts = starts:%d results:%d summaries:%d events:%v", starts, resultFacts, summaries, eventTypes(stored))
 	}
 }
 

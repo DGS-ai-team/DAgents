@@ -1,6 +1,6 @@
 # v1.0.0 发布验收清单
 
-评估日期：2026-10-23。最近正式发布仍为 `v0.11.0`（2026-09-11）。v1.0.0 候选 PR #356 已合入 `dev`，合并提交为 `73f28d8a8129816eb70cc2788019236d111ed5a5`。合并后的 CI run `39917308138`、CodeQL run `39917307641` 均通过；版本元数据校验通过，完整 Manual Package Binary run `39917868139` 基于该合并提交并成功生成各平台候选包。隔离验收使用该次构建的 Node 与 Browser 二进制完成真实 DeepSeek 对话、Browser 本地页面导航/DOM/截图，并在对应源码构建的 Tauri Desktop 中确认 Browser 资源正确显示。候选包体积与历史验收记录见[本轮发布构建记录](design/desktop-product/audits/2026-10-22/v1-release-build.md)。用户明确要求本次不再验证最终安装/升级流程与 Auto 耐久；两项仍未验证，按用户决定不作为本次放行阻断项。当前待完成 `dev → main` 发布 PR 的审查与合并，以及正式 `v1.0.0` tag 构建后对发布资产、校验和、manifest 和下载链路的核对。
+评估日期：2026-10-26。最近正式发布仍为 `v0.11.0`（2026-09-11）。v1.0.0 发布 PR #359 已于 2026-10-26 合入 `main`，提交为 `d416c5c93b1dcbf650fb1e5d9ee4393842ac39a1`，PR 检查全部通过。用户要求本次先同步 `main → dev`，再创建正式 `v1.0.0` tag；同步 PR 与 tag 发布资产核对仍待完成。既有隔离验收使用候选 Node 与 Browser 二进制完成真实 DeepSeek 对话、Browser 本地页面导航/DOM/截图，并在对应源码构建的 Tauri Desktop 中确认 Browser 资源正确显示。候选包体积与历史验收记录见[本轮发布构建记录](design/desktop-product/audits/2026-10-22/v1-release-build.md)。用户明确要求本次不再验证最终安装/升级流程与 Auto 耐久；两项仍未验证，按用户决定不作为本次放行阻断项。
 
 ## 发布判断与范围
 
@@ -45,7 +45,7 @@
 
 清单标记：`[x]` 已验证，`[ ]` 尚待完成，`[~]` 用户明确豁免、仍未验证且不作为本次放行阻断项。
 
-- [ ] **`dev → main` 发布审查与分支集成。** PR #356 已通过审查并合入 `dev`，合并提交 `73f28d8a8129816eb70cc2788019236d111ed5a5` 的 CI run `39917308138`、CodeQL run `39917307641` 均通过。真实 Provider 与 Browser/Desktop 联动也已完成。仍需创建并审查 `dev → main` 发布 PR；只有其 Release metadata preflight、CI、CodeQL 和独立审查通过并合入 `main` 后，才能创建正式标签。
+- [ ] **`main → dev` 发布后同步。** 发布 PR #359 已合入 `main`（`d416c5c93b1dcbf650fb1e5d9ee4393842ac39a1`）。当前正在准备 `main → dev` 同步 PR；由于 Desktop Composer 状态提示与 `dev` 后续 UI 变更交叠，需在同步中保留 `main` 已验收的输入框上方等待状态胶囊，并通过同步 PR 检查后合入。
 - [x] **已复现的 Desktop 首次启动崩溃。** 同一发行候选在 stderr 正常时存活，关闭读端后复现 `0xc0000409`；诊断版捕获 `failed printing to stderr`、错误码 232 和 `events::sync_agents` 的可靠调用栈。修复统一处理进程输出 I/O 失败，并补齐同类 CLI stdout 问题；51 项 Rust 测试通过，正式模式构建通过闭管道进程与 CLI 输出验证。stderr 修复还完成 120 秒闭管道运行和原生内嵌 UI 交互。原始 dump 的完整业务栈未恢复；受控复现与原异常线索一致，但不把其他启动故障一并视为通过。各构建哈希及验收范围见[专项记录](design/desktop-product/audits/2026-10-19/desktop-startup-panic.md)。新代码的 PR 集成和最终包验收仍由相邻门槛约束。
 - [x] **标准用户 QA 核心初装、升级、卸载保留与重装恢复。** 临时标准 Windows 用户在开发机上使用 QA-only `0.11.0.1` 安装器完成静默初装、原生首配与 Mock 对话、快捷方式退出/重开持久性、`0.11.0 → 0.11.0.1` 静默升级、卸载数据保留及重新安装后 Agent/历史恢复；最终测试卸载已完成。安装器版本为 `0.11.0.1`，但 bundle/payload `VERSION` 为 `0.11.0`，不可视为发行候选。证据、快照与哈希见[标准用户安装恢复审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。
 
@@ -58,7 +58,7 @@
 - [x] **配置 ID 改名的 Agent 引用。** 活动 Agent 引用中的 ID 改名/删除返回 `409 llm_profile_in_use`，列出 Agent 并要求先修改绑定或删除 Agent；软归档 Agent 不阻止变更。拒绝发生于设置和密钥持久化前，创建/PATCH 还会拒绝不存在的目标 ID，详见 [API 契约](api/node-integration.md) 与配置验收记录。
 - [~] **Auto 耐久（用户豁免）。** 用户明确要求本次不做 Auto 测试，因此跳过不少于 24 小时的最终候选运行/恢复测试；相关耐久范围仍未验证，不作为本次放行阻断项。既有唤醒、Todo、Dreaming、工作组和恢复专项证据保留，不表述为本次候选已通过耐久测试。
 - [x] **本机 Browser 与 Desktop 资源联动。** 本轮完整包 run `39917868139` 的 Windows x64 Node、Browser 二进制通过健康/协议检查，启动 Chromium 并完成本地页面导航、DOM 读取与截图；真实 Browser 工具链结束后，隔离 Tauri Desktop 成功打开只读 Browser 资源并显示标题与页面内容。外站与升级后状态未覆盖。Linux Node 按独立服务包验收，不属于 Desktop 远程连接矩阵。Windows x86 完整包已按用户决策暂停。
-- [ ] **正式版本资料审查与 tag 发布产物。** v1.0.0 版本元数据、README、手册、路线图和 changelog 已更新；`validate_release.py --version 1.0.0` 通过，完整候选打包工作流 run `39917868139` 成功。CI 产物元数据显示 Windows x64 安装器约 391 MB、Linux 助手包约 365 MB、Manage 离线 bundle 约 426 MB；Manage bundle 已移除镜像已 seed 的重复 Linux 安装归档。`dev → main` 发布 PR 与正式 tag 构建仍待完成；tag 构建后须核对文件版本、许可证、`SHA256SUMS`、`release-manifest.json` 与更新选包/下载链路。当前工作流不对 Windows 安装包做 Authenticode 签名，v1.0.0 若沿用现行发布配置将显示 Windows SmartScreen 提示；发布资产和说明必须明确这一点。
+- [ ] **正式版本资料审查与 tag 发布产物。** v1.0.0 版本元数据、README、手册、路线图和 changelog 已更新；`validate_release.py --version 1.0.0` 通过，完整候选打包工作流 run `39917868139` 成功。CI 产物元数据显示 Windows x64 安装器约 391 MB、Linux 助手包约 365 MB、Manage 离线 bundle 约 426 MB；Manage bundle 已移除镜像已 seed 的重复 Linux 安装归档。PR #359 已合入 `main`，同步合入 `dev` 后将在 main 发布 `v1.0.0`；tag 构建后须核对文件版本、许可证、`SHA256SUMS`、`release-manifest.json` 与更新选包/下载链路。当前工作流不对 Windows 安装包做 Authenticode 签名，v1.0.0 若沿用现行发布配置将显示 Windows SmartScreen 提示；发布资产和说明必须明确这一点。
 
 ## 依赖告警的处置范围
 
@@ -86,11 +86,11 @@
 
 1. PR #356 已合入 `dev`（`73f28d8a8129816eb70cc2788019236d111ed5a5`）；合并后 CI、CodeQL 和基于该提交的完整手动包构建均通过。
 2. 候选包的真实 Provider 对话与 Browser/Desktop 联动已在隔离 runtime 完成；用户明确豁免最终安装/升级验收与 Auto 耐久，仍未验证但不作为本次放行阻断项。未配置外部 MCP server，不声称外部 MCP 验收通过。
-3. 创建 `dev → main` 发布 PR，等待 Release metadata preflight、CI、CodeQL 和独立审查通过后合并。
-4. 仅在合并后的 `main` 最新提交创建并推送 `v1.0.0`，等待官方 release workflow 完成。
-5. 核对正式发布资产、版本、许可证、`SHA256SUMS`、`release-manifest.json` 与下载/更新选包链路，再按流程创建 `main → dev` 同步 PR。
+3. 创建 `main → dev` 同步 PR，保留已发布 main 的修复并解决 Composer UI 重叠；检查通过后合入 `dev`。
+4. 确认 `main` 仍指向 `d416c5c93b1dcbf650fb1e5d9ee4393842ac39a1`，校验 `v1.0.0` 元数据后创建并推送 tag。
+5. 等待官方 release workflow 完成，核对正式发布资产、版本、许可证、`SHA256SUMS`、`release-manifest.json` 与下载/更新选包链路。
 
-当前候选验收已关闭真实 Provider 与 Browser/Desktop 联动门槛。下一步是创建 `dev → main` 发布 PR；只有 PR 审查和必需检查通过并合入 `main` 后才创建 `v1.0.0` 标签。用户豁免项仍标记为未验证，不把它们写成通过。
+当前 v1.0.0 发布 PR #359 已合入 `main`，真实 Provider 与 Browser/Desktop 联动验收已完成。下一步是完成 `main → dev` 同步 PR，再在 `main` 创建 `v1.0.0` tag 并核验发布资产。用户豁免项仍标记为未验证，不把它们写成通过。
 
 2026-10-20 补充：已完成打包 Node → Browser → 原生 Desktop 整链，以及管理员开发机上的正式安装任务开关、官方 v0.11.0 普通 Agent 冷备份迁移、合成加密 Key 恢复和运行中卸载。验收发现并修复中文路径卸载损坏 PATH、已有 policy 导致静默安装挂起两项问题，PR #352 已合并至 `dev`（`33106ead`），PR 检查通过；失败候选和成功修正候选分别留证。另在临时标准 Windows 用户下完成 QA-only `0.11.0.1` 安装器的静默初装、Mock 对话、快捷方式重开、`0.11.0 → 0.11.0.1` 升级、卸载保留数据及重装恢复，详见[标准用户安装恢复审计](design/desktop-product/audits/2026-10-20/standard-user-install-and-recovery.md)。该 QA 的 payload/bundle `VERSION` 仍为 `0.11.0`，不属于发布候选；该日的未完成项和放行判断为历史状态，当前以本页 10 月 22 日更新为准。
 
@@ -98,4 +98,4 @@
 
 历史验证（2026-10-20）：发现并修复 Desktop Composer 将 `/clear`、`/compress`、`/thinking`、`/upload` 当作普通消息提交的问题，并修正上下文状态边界。Desktop UI 82 项、共享 UI 源码 534 项和 Desktop Vite 生产构建通过；修复现已包含在 PR #355 与当前 `dev` 基线中。此前手动打包工作流只用于中间候选，不代表 v1.0.0 发行包验收。
 
-2026-10-23 更新：候选 PR #356 已合入 `dev`，合并提交 `73f28d8a8129816eb70cc2788019236d111ed5a5` 的 CI 和 CodeQL 通过；基于该提交的完整 Manual Package Binary run `39917868139` 所有作业通过。隔离验收已完成真实 DeepSeek 对话、Windows Browser 工具链与 Tauri Desktop Browser 资源页展示。用户豁免本轮最终安装/升级验收与 Auto 耐久（未验证，不阻断）。仍待 `dev → main` 发布 PR 的检查与独立审查、正式 tag 构建和产物核对。
+2026-10-26 更新：v1.0.0 发布 PR #359 已合入 `main`（`d416c5c93b1dcbf650fb1e5d9ee4393842ac39a1`），PR 检查全部通过。按用户要求先完成 `main → dev` 同步，再发布正式 tag；目前同步 PR 检查/合并与 tag 构建、资产核对仍待完成。用户豁免本轮最终安装/升级验收与 Auto 耐久（未验证，不阻断）。

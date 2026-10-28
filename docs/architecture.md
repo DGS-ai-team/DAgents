@@ -88,7 +88,7 @@ DAgents Desktop 是产品唯一的 Agent 交互入口。Node 只提供 HTTP、SS
 
 目录选择由 Node 直接调用宿主系统：Windows 使用 PowerShell STA `FolderBrowserDialog`，macOS 使用 `osascript`，Linux 使用可用的 `zenity`、`kdialog` 或 `yad`；用户取消返回成功响应并标记 `cancelled=true`。剪贴板文件路径、窗口焦点和安装态更新使用 Desktop Shell 私有 bridge。`:18767` 只属于 Shell↔Node 的内部 bridge，不是公共 API。
 
-Shell 的两条实现轨（Tauri 推荐轨、Go 兼容轨）共享这组 HTTP/SSE 语义和 token 约束，只在窗口、通知、剪贴板和安装器等宿主实现上不同。Node 是状态真相源：Shell 待办表启动/重连时通过 `/v1/agents` hydrate，运行中由 Node 的 `notification_changed` 事件增量更新；不再以 60 秒轮询或工具事件名称推断 HITL/未读状态。
+Tauri Desktop 是唯一的 Agent 交互 Shell；Manage 负责注册、配置和运维管理，工作组对话界面只在 Desktop 提供。Node 是状态真相源：Desktop 待办表启动/重连时通过 `/v1/agents` hydrate，运行中由 Node 的 `notification_changed` 事件增量更新；不再以 60 秒轮询或工具事件名称推断 HITL/未读状态。
 
 ## 6. Workgroup
 

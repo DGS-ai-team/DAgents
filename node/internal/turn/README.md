@@ -52,7 +52,7 @@ sequenceDiagram
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
 - `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
-`policy == nil` 时加载默认策略；Turn 步数上限由 Agent snapshot 的 `defaults.llm.max_steps` 装入 `TurnBudget.MaxSteps`，达到上限后由生命周期预算终止。
+`policy == nil` 时加载默认策略；Agent snapshot 的 `defaults.llm.max_steps` 与 `defaults.llm.max_tool_calls` 分别装入 `TurnBudget.MaxSteps` 和 `TurnBudget.MaxToolCalls`。达到任一上限后由生命周期预算禁止继续调用工具，并尝试进行一次无工具收尾。Auto 自主激活和 dreaming 使用各自的 `MaxToolRounds` 预算。
 
 ---
 
