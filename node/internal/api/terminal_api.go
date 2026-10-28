@@ -265,21 +265,24 @@ func (s *Server) handleAgentTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case "terminate":
 			if _, err := session.terminate(ctx); err != nil {
-				_ = session.send(ctx, terminalWSEvent{Type: "error", SessionID: session.id, TerminalID: session.id, Error: err.Error()})
-				s.terminals.remove(session.id, session)
+				_ = s.terminals.removeWithFinalEvent(ctx, session.id, session, func(writeCtx context.Context, closing *terminalSession) error {
+					return closing.send(writeCtx, terminalWSEvent{Type: "error", SessionID: closing.id, TerminalID: closing.id, Error: err.Error()})
+				})
 				return
 			}
-			sendErr := session.send(ctx, terminalWSEvent{Type: "terminated", SessionID: session.id, TerminalID: session.id})
-			s.terminals.remove(session.id, session)
-			if sendErr != nil {
+			if err := s.terminals.removeWithFinalEvent(ctx, session.id, session, func(writeCtx context.Context, closing *terminalSession) error {
+				return closing.send(writeCtx, terminalWSEvent{Type: "terminated", SessionID: closing.id, TerminalID: closing.id})
+			}); err != nil {
 				return
 			}
 			return
 		case "close":
-			if err := session.send(ctx, terminalWSEvent{Type: "closed", SessionID: session.id, TerminalID: session.id}); err != nil {
-				return
-			}
-			s.terminals.remove(session.id, session)
+			// Remove the session before acknowledging closure. Clients commonly
+			// list terminals as soon as they receive this event; sending first
+			// allowed that request to race the registry deletion below.
+			_ = s.terminals.removeWithFinalEvent(ctx, session.id, session, func(writeCtx context.Context, closing *terminalSession) error {
+				return closing.send(writeCtx, terminalWSEvent{Type: "closed", SessionID: closing.id, TerminalID: closing.id})
+			})
 			return
 		case "ping":
 			if err := session.send(ctx, terminalWSEvent{Type: "pong", SessionID: session.id, TerminalID: session.id}); err != nil {
