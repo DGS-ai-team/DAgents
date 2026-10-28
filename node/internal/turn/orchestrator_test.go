@@ -59,6 +59,30 @@ func TestOrchestratorForgetSessionReleasesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestToolBudgetOverflowClosesWholeBatchForContinuation(t *testing.T) {
+	hub := stream.NewHub(16, logx.Discard())
+	orch := NewOrchestrator("agent", t.TempDir(), hub, &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	orch.SetToolBudgetCheck(func(string) (bool, string) { return false, "max_tool_calls" })
+	calls := []llm.ToolCall{
+		{ID: "call-1", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"one"}`}},
+		{ID: "call-2", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two"}`}},
+	}
+	history := []llm.Message{{Role: "assistant", ToolCalls: calls}}
+	pending, reason, err := orch.processToolCalls(context.Background(), "session-budget-overflow", &history, calls)
+	if err != nil || pending != nil || reason != "" {
+		t.Fatalf("overflow batch should close and continue: pending=%v reason=%q err=%v", pending, reason, err)
+	}
+	if len(history) != 3 {
+		t.Fatalf("history should contain one result per proposed call: %#v", history)
+	}
+	for i, call := range calls {
+		result := history[i+1]
+		if result.Role != "tool" || result.ToolCallID != call.ID || !strings.Contains(result.Content, "turn budget exhausted") {
+			t.Fatalf("result %d does not close denied call %q: %#v", i, call.ID, result)
+		}
+	}
+}
+
 func TestToolDefinitions_exposesSkillDiscoveryWithSkillsTools(t *testing.T) {
 	root := t.TempDir()
 	reg := testRegistry(t)

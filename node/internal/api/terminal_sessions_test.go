@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -11,6 +12,48 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
+
+func TestTerminalRegistryRemovesBeforeFinalNotificationAndCleansOnSendError(t *testing.T) {
+	registry := newTerminalSessionRegistry()
+	terminal := newInterruptibleTestTerminal()
+	session, err := newTerminalSession("agent-final-event", terminal, registry, tools.TerminalRequest{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.add(session); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := context.DeadlineExceeded
+	err = registry.removeWithFinalEvent(context.Background(), session.id, session, func(notifyCtx context.Context, closing *terminalSession) error {
+		if closing != session {
+			t.Fatalf("final notification received session %p, want %p", closing, session)
+		}
+		deadline, ok := notifyCtx.Deadline()
+		if !ok || time.Until(deadline) > terminalWSWriteTimeout || time.Until(deadline) <= 0 {
+			t.Fatalf("final notification context must have a bounded deadline: deadline=%v ok=%t", deadline, ok)
+		}
+		if got := registry.List("agent-final-event"); len(got) != 0 {
+			t.Fatalf("session must be absent before final notification: %+v", got)
+		}
+		session.mu.Lock()
+		closed := session.closed
+		session.mu.Unlock()
+		if closed {
+			t.Fatal("session was shut down before final notification")
+		}
+		// Model a WebSocket writer that hits the bounded write deadline.
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("final notification error = %v, want %v", err, wantErr)
+	}
+	session.mu.Lock()
+	closed := session.closed
+	session.mu.Unlock()
+	if !closed || len(registry.List("agent-final-event")) != 0 {
+		t.Fatalf("failed final notification did not clean up session: closed=%t sessions=%+v", closed, registry.List("agent-final-event"))
+	}
+}
 
 type interruptibleTestTerminal struct {
 	mu       sync.Mutex
