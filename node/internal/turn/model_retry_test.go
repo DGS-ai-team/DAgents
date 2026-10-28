@@ -55,8 +55,8 @@ func TestOrchestratorChecksToolBudgetBeforeSideEffect(t *testing.T) {
 
 	var history []llm.Message
 	outcome := orch.RunHumanMessageTurn(context.Background(), "session-1", &history, llm.UserMessage("run", llm.UserNameHuman))
-	if !errors.Is(outcome.Err, ErrBudgetExhausted) {
-		t.Fatalf("outcome error = %v", outcome.Err)
+	if outcome.Err != nil || !outcome.ScheduleToolResult {
+		t.Fatalf("overflow batch should close and enter budget continuation: %+v", outcome)
 	}
 	if executor.calls != 0 {
 		t.Fatalf("tool side effect calls = %d, want 0", executor.calls)
