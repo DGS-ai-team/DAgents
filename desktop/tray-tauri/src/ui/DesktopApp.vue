@@ -9,7 +9,7 @@ import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/uti
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentMediaId, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceImageBlob } from './workspace-files-state.js'
+import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceImageBlob } from './workspace-files-state.js'
 import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
 import { createWorkspaceReference, formatWorkspaceReferencesMessage } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
@@ -39,7 +39,7 @@ import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import { agentActiveProfile } from '@desktop-ui/utils/agentLLM.js'
 import { dispatchDesktopSlashCommand } from './slash-commands.js'
 import { openLightbox } from '@desktop-ui/stores/lightbox.js'
-import { readAgentMedia, readWorkspaceFile, uploadWorkspaceFile } from './workspace-files-api.js'
+import { cancelWorkspaceWrite, newWorkspaceWriteRequestId, pickWorkspaceImport, readAgentMedia, readWorkspaceFile, uploadWorkspaceFile } from './workspace-files-api.js'
 import normalAgentIcon from '@shared-icons/desktop/agent.svg?url'
 import autoAgentIcon from '@shared-icons/desktop/auto.svg?url'
 import navAgentsIcon from '@shared-icons/desktop/agent.svg?url'
@@ -188,6 +188,16 @@ provide(ResourceRenderContextKey, { agentId: activeId, readImage: readResourceIm
 watch(() => route.path, path => { activeTab.value = tabForRoute(path, activeTab.value) }, { immediate: true })
 watch(activeId, id => { agentStore.agentId = id || '' }, { immediate: true })
 watch(activeId, (id, previousId) => {
+  if (activeAttachmentBatch && activeAttachmentBatch.ownerId !== id) {
+    cancelWorkspaceAttachmentBatch(activeAttachmentBatch)
+    activeAttachmentBatch = null
+  }
+  if (composerWriteOwner.value && id !== composerWriteOwner.value) {
+    void Promise.resolve(cancelWorkspaceWrite(composerWriteRequest.value)).catch(() => {})
+    composerWriteRequest.value = ''
+    composerWriteOwner.value = ''
+    composerWriteProgress.value = null
+  }
   if (id !== previousId) clearCommandNotice()
   if (id !== previousId) resourceNavigationError.value = ''
   if (previousId && id !== previousId) clearWorkspaceAnnotations(previousId)
@@ -246,6 +256,10 @@ const selectedWorkgroupId = ref('')
 const selectedWorkgroupName = ref('')
 const pendingImagesByAgent = ref({})
 const pendingFilesByAgent = ref({})
+const composerWriteRequest = ref('')
+const composerWriteOwner = ref('')
+const composerWriteProgress = ref(null)
+let activeAttachmentBatch = null
 const pendingWorkspaceReferencesByAgent = ref({})
 const pendingFiles = computed(() => pendingFilesByAgent.value[activeId.value] || [])
 const pendingWorkspaceReferences = computed(() => pendingWorkspaceReferencesByAgent.value[activeId.value] || [])
@@ -254,9 +268,9 @@ const pendingImages = computed({
   set: images => { if (activeId.value) pendingImagesByAgent.value[activeId.value] = images },
 })
 const attachmentLimitReached = computed(() => pendingImages.value.length + pendingFiles.value.length + pendingWorkspaceReferences.value.length >= 8)
-const attachmentInput = ref(null)
 const imageAttachmentInput = ref(null)
 let unlisten = null
+let unlistenWorkspaceWrite = null
 let unlistenTerminal = null
 let unlistenWindowResize = null
 let unlistenWindowFocus = null
@@ -881,7 +895,41 @@ function onAttachmentActionsKeydown(event) {
 }
 function openFilePicker() {
   closeAttachmentActions()
-  attachmentInput.value?.click()
+  void importComposerFiles()
+}
+async function importComposerFiles() {
+  const ownerId = activeId.value
+  if (!ownerId || composerWriteRequest.value || activeAttachmentBatch) return
+  const remaining = 8 - (pendingImagesByAgent.value[ownerId] || []).length - (pendingFilesByAgent.value[ownerId] || []).length - (pendingWorkspaceReferencesByAgent.value[ownerId] || []).length
+  if (remaining <= 0) return
+  const requestId = newWorkspaceWriteRequestId()
+  composerWriteRequest.value = requestId
+  composerWriteOwner.value = ownerId
+  composerWriteProgress.value = { bytes: 0, total: 0, phase: 'preparing' }
+  try {
+    const result = await pickWorkspaceImport(ownerId, '', { requestId, maxFiles: Math.min(8, remaining) })
+    if (activeId.value !== ownerId || composerWriteRequest.value !== requestId) return
+    const refs = [...(pendingFilesByAgent.value[ownerId] || [])]
+    for (const item of result.results || []) {
+      if (item.status === 'saved') {
+        if (item.file_ref && !refs.some(ref => ref.path === item.file_ref)) refs.push({ path: item.file_ref, name: item.name || '文件' })
+      } else if (item.status !== 'cancelled') setAgentError(ownerId, `${item.name || '文件'}：${item.message || item.status}`)
+    }
+    pendingFilesByAgent.value[ownerId] = refs
+  } catch (e) {
+    if (activeId.value === ownerId && composerWriteRequest.value === requestId) setAgentError(ownerId, String(e.message || e))
+  } finally {
+    if (composerWriteRequest.value === requestId) { composerWriteRequest.value = ''; composerWriteOwner.value = ''; composerWriteProgress.value = null }
+  }
+}
+async function cancelComposerImport() {
+  const requestId = composerWriteRequest.value
+  if (!requestId) return
+  const batch = activeAttachmentBatch
+  const cancellingBatch = Boolean(batch && batch.ownerId === composerWriteOwner.value && batch.currentRequestId === requestId)
+  if (cancellingBatch) cancelWorkspaceAttachmentBatch(batch)
+  try { await cancelWorkspaceWrite(requestId) }
+  catch (e) { if (!cancellingBatch && activeId.value === composerWriteOwner.value) setAgentError(composerWriteOwner.value, String(e.message || e)) }
 }
 function openImagePicker() {
   closeAttachmentActions()
@@ -949,35 +997,55 @@ function onScreenshotSelectionError(message) {
   if (ownerId && activeId.value === ownerId) setAgentError(ownerId, message)
 }
 async function processAttachments(files, ownerId) {
+  if (activeAttachmentBatch || composerWriteRequest.value) return
+  const batch = createWorkspaceAttachmentBatch(ownerId)
+  activeAttachmentBatch = batch
+  const isCurrent = () => isWorkspaceAttachmentBatchCurrent(batch, activeAttachmentBatch, activeId.value)
   const remaining = 8 - (pendingImagesByAgent.value[ownerId] || []).length - (pendingFilesByAgent.value[ownerId] || []).length - (pendingWorkspaceReferencesByAgent.value[ownerId] || []).length
   const priorUploadError = workspaceUploadErrors.get(ownerId)
   let batchHadFailure = false
-  for (const file of files.slice(0, Math.max(0, remaining))) {
-    if (file.size > 16 * 1024 * 1024) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (activeId.value === ownerId) error.value = `${file.name}：文件不能超过 16 MiB`; continue }
-    if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
-      if (file.size > 10 * 1024 * 1024) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (activeId.value === ownerId) error.value = `${file.name}：图片不能超过 10 MB`; continue }
-      try {
-      const image = { name: file.name, url: await readImage(file) }
-      pendingImagesByAgent.value[ownerId] = [...(pendingImagesByAgent.value[ownerId] || []), image]
-      } catch (e) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (activeId.value === ownerId) error.value = String(e.message || e) }
-    } else {
-      try {
-        const uploaded = await uploadWorkspaceFile(ownerId, '', file)
-        if (activeId.value === ownerId && shouldClearWorkspaceUploadError(error.value, priorUploadError, batchHadFailure)) {
-          error.value = ''
-          workspaceUploadErrors.delete(ownerId)
-        }
-        const refs = pendingFilesByAgent.value[ownerId] || []
-        if (!refs.some(item => item.path === uploaded.file_ref)) pendingFilesByAgent.value[ownerId] = [...refs, { path: uploaded.file_ref, name: uploaded.name || file.name }]
-      } catch (e) {
-        batchHadFailure = true
-        if (activeId.value === ownerId) {
-          const message = `${file.name}：${String(e.message || e)}`
-          workspaceUploadErrors.set(ownerId, message)
-          error.value = message
+  try {
+    for (const file of files.slice(0, Math.max(0, remaining))) {
+      if (!isCurrent()) break
+      if (file.size > 16 * 1024 * 1024) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (isCurrent()) error.value = `${file.name}：文件不能超过 16 MiB`; continue }
+      if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
+        if (file.size > 10 * 1024 * 1024) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (isCurrent()) error.value = `${file.name}：图片不能超过 10 MB`; continue }
+        try {
+          const image = { name: file.name, url: await readImage(file) }
+          if (!isCurrent()) { URL.revokeObjectURL(image.url); break }
+          pendingImagesByAgent.value[ownerId] = [...(pendingImagesByAgent.value[ownerId] || []), image]
+        } catch (e) { batchHadFailure = true; workspaceUploadErrors.delete(ownerId); if (isCurrent()) error.value = String(e.message || e) }
+      } else {
+        const requestId = newWorkspaceWriteRequestId()
+        batch.currentRequestId = requestId
+        composerWriteRequest.value = requestId
+        composerWriteOwner.value = ownerId
+        composerWriteProgress.value = { bytes: 0, total: file.size, phase: 'preparing' }
+        try {
+          const uploaded = await uploadWorkspaceFile(ownerId, '', file, { requestId, signal: batch.controller.signal })
+          if (!isCurrent()) break
+          if (shouldClearWorkspaceUploadError(error.value, priorUploadError, batchHadFailure)) {
+            error.value = ''
+            workspaceUploadErrors.delete(ownerId)
+          }
+          const refs = pendingFilesByAgent.value[ownerId] || []
+          if (!refs.some(item => item.path === uploaded.file_ref)) pendingFilesByAgent.value[ownerId] = [...refs, { path: uploaded.file_ref, name: uploaded.name || file.name }]
+        } catch (e) {
+          if (e?.writeStatus === 'cancelled') batch.cancelled = true
+          else if (isCurrent()) {
+            batchHadFailure = true
+            const message = `${file.name}：${String(e.message || e)}`
+            workspaceUploadErrors.set(ownerId, message)
+            error.value = message
+          }
+        } finally {
+          if (composerWriteRequest.value === requestId) { composerWriteRequest.value = ''; composerWriteOwner.value = ''; composerWriteProgress.value = null }
+          if (batch.currentRequestId === requestId) batch.currentRequestId = ''
         }
       }
     }
+  } finally {
+    if (activeAttachmentBatch === batch) activeAttachmentBatch = null
   }
 }
 function handleAttachmentDrop(event) { void processAttachments(Array.from(event.dataTransfer?.files || []), activeId.value) }
@@ -1750,6 +1818,13 @@ onMounted(async () => {
   window.addEventListener('desktop-use-chat-command', onDesktopUseChatCommand)
   window.addEventListener('desktop-open-agent', onDesktopOpenAgent)
   window.addEventListener('desktop-open-settings', onDesktopOpenSettings)
+  if (window.__TAURI_INTERNALS__) {
+    unlistenWorkspaceWrite = await listen('workspace-write-progress', event => {
+      const progress = event.payload
+      if (!progress || progress.requestId !== composerWriteRequest.value || composerWriteOwner.value !== activeId.value) return
+      composerWriteProgress.value = { bytes: Number(progress.bytes) || 0, total: Number(progress.total) || 0, phase: progress.phase || '' }
+    })
+  }
   if (currentWindow) {
     void syncWindowMaximized()
     void syncResourceWindowState()
@@ -1863,6 +1938,7 @@ onMounted(async () => {
   turnWatchdog.start()
 })
 onUnmounted(() => {
+  if (composerWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(composerWriteRequest.value)).catch(() => {})
   if (startupTimeoutTimer) window.clearTimeout(startupTimeoutTimer)
   closeScreenshotSelection()
   clearCommandNotice()
@@ -1876,7 +1952,7 @@ onUnmounted(() => {
   for (const terminal of terminalInstances.value.filter(item => item.connectionId)) {
     void invoke('desktop_terminal_command', { connectionId: terminal.connectionId, agentId: terminal.agentId, commandType: 'detach' }).catch(() => {})
   }
-  unlisten?.(); unlistenTerminal?.(); clearInterval(pollTimer); clearTimeout(summaryRefreshTimer); clearTimeout(resourceRefreshTimer); clearTimeout(activeHydrateTimer); document.removeEventListener('click', onDocumentClick); document.removeEventListener('keydown', onKeydown)
+  unlisten?.(); unlistenWorkspaceWrite?.(); unlistenTerminal?.(); clearInterval(pollTimer); clearTimeout(summaryRefreshTimer); clearTimeout(resourceRefreshTimer); clearTimeout(activeHydrateTimer); document.removeEventListener('click', onDocumentClick); document.removeEventListener('keydown', onKeydown)
   turnWatchdog.stop()
   for (const url of mediaObjectUrls.values()) URL.revokeObjectURL(url)
   mediaObjectUrls.clear()
@@ -2014,8 +2090,7 @@ onUnmounted(() => {
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
-      <footer class="composer-wrap"><div v-if="composerRuntimeStatus" class="desktop-composer-runtime-pill" role="status" aria-live="polite">{{ composerRuntimeStatus }}</div><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
-  <input ref="attachmentInput" class="visually-hidden" type="file" multiple @change="addImages">
+      <footer class="composer-wrap"><div v-if="composerRuntimeStatus" class="desktop-composer-runtime-pill" role="status" aria-live="polite">{{ composerRuntimeStatus }}</div><div v-if="composerWriteRequest" class="desktop-composer-runtime-pill" role="status" aria-live="polite">{{ composerWriteProgress?.phase === 'committing' ? '正在提交，取消后结果可能未知。' : composerWriteProgress?.total ? `导入进度 ${Math.min(100, Math.floor(composerWriteProgress.bytes * 100 / composerWriteProgress.total))}%` : '正在准备导入…' }}<button type="button" @click="cancelComposerImport">请求取消</button></div><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
   <div class="composer-toolbar-row">

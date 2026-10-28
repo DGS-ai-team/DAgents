@@ -1,4 +1,4 @@
-import { workspaceUploadPath } from './workspace-files-state.js'
+import { workspacePreviewLimits } from './workspace-files-state.js'
 
 async function desktopInvoke(...args) {
   if (globalThis.__DAGENTS_DESKTOP_INVOKE__) return globalThis.__DAGENTS_DESKTOP_INVOKE__(...args)
@@ -14,16 +14,6 @@ function decodeBase64(value) {
   return Uint8Array.from(raw, char => char.charCodeAt(0))
 }
 
-function encodeBase64(bytes) {
-  const array = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let offset = 0; offset < array.length; offset += chunkSize) {
-    binary += String.fromCharCode(...array.subarray(offset, Math.min(offset + chunkSize, array.length)))
-  }
-  return btoa(binary)
-}
-
 function assertResponse(response) {
   if (response.status >= 200 && response.status < 300) return
   let code = ''
@@ -34,7 +24,7 @@ function assertResponse(response) {
   const message = code === 'workspace_file_exists'
     ? '同名文件已存在，请换名后重新上传。'
     : code === 'workspace_file_too_large'
-      ? '单次完整读取、上传或保存上限为 16 MiB。大文本可分段只读预览；可使用“另存为原文件”保存任意大小的工作区文件。'
+      ? '单次完整读取和文本保存上限为 16 MiB。大文本可分段只读预览；通过本机文件选择器导入上限为 1 GiB，拖放或粘贴导入上限为 16 MiB；可使用“另存为原文件”导出完整文件。'
     : response.status === 412
       ? '文件已被其他操作修改，请重新载入后再保存。'
       : response.status === 428
@@ -48,19 +38,6 @@ function assertResponse(response) {
 export async function listWorkspace(agentId, path = '') {
   const query = `?path=${encodePath(path)}`
   return globalThis.__DAGENTS_API_REQUEST__({ method: 'GET', path: `${agentPath(agentId)}${query}`, body: null })
-}
-
-async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, ifNoneMatch } = {}) {
-  const query = `?path=${encodePath(path)}`
-  const response = await desktopInvoke('desktop_workspace_binary_request', {
-    method,
-    path: `${agentPath(agentId)}/${endpoint}${query}`,
-    bodyBase64: bytes ? encodeBase64(bytes) : null,
-    ifMatch: ifMatch || null,
-    ifNoneMatch: ifNoneMatch || null,
-  })
-  assertResponse(response)
-  return { notModified: false, bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag, fileSize: response.file_size, nextOffset: response.next_offset, status: response.status }
 }
 
 export async function readWorkspaceFile(agentId, path, { ifNoneMatch } = {}) {
@@ -99,18 +76,59 @@ export async function revealWorkspaceFile(agentId, path) {
   return desktopInvoke('desktop_workspace_reveal', { agentId, path: String(path || '').replaceAll('\\', '/') })
 }
 
-export async function saveWorkspaceFile(agentId, path, bytes, etag) {
-  return binaryRequest(agentId, 'file', 'PUT', path, { bytes, ifMatch: etag })
+export async function saveWorkspaceFile(agentId, path, bytes, etag, { requestId = newWorkspaceWriteRequestId() } = {}) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  if (data.byteLength > workspacePreviewLimits.bytes) throw new Error('文本保存上限为 16 MiB。')
+  const content = new TextDecoder('utf-8', { ignoreBOM: true }).decode(data)
+  const result = await desktopInvoke('desktop_workspace_save_text', { agentId, path: String(path || '').replaceAll('\\', '/'), content, expectedRevision: etag, requestId })
+  return assertWriteResult(result)
 }
 
-export async function createWorkspaceFile(agentId, path, bytes) {
-  return binaryRequest(agentId, 'file', 'PUT', path, { bytes, ifNoneMatch: '*' })
+function assertWriteResult(result) {
+  if (result?.status === 'saved') {
+    const revision = result.revision ?? result.etag ?? ''
+    const etag = revision && !(revision.startsWith('"') && revision.endsWith('"')) ? `"${revision}"` : revision
+    return { ...result, file_ref: result.fileRef ?? result.file_ref, etag }
+  }
+  const message = result?.message || (result?.errorCode === 'workspace_file_exists' ? '同名文件已存在，请换名后重新导入。' : { conflict: '文件已被其他操作修改，请重新载入后再保存。', unknown: '写入结果未知。请重新读取文件并保留当前草稿。', cancelled: '操作已取消。' }[result?.status] || '工作区写入失败。')
+  const error = new Error(message)
+  error.status = result?.httpStatus || (result?.status === 'conflict' ? 412 : 0)
+  error.writeStatus = result?.status || 'error'
+  throw error
+}
+export function newWorkspaceWriteRequestId() {
+  return globalThis.crypto?.randomUUID?.() || `workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-export async function uploadWorkspaceFile(agentId, directory, file) {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  const response = await binaryRequest(agentId, 'upload', 'POST', workspaceUploadPath(directory, file.name), { bytes })
-  return JSON.parse(new TextDecoder().decode(response.bytes))
+export async function createWorkspaceFile(agentId, path, bytes, { requestId = newWorkspaceWriteRequestId() } = {}) {
+  const normalized = String(path || '').replaceAll('\\', '/')
+  const slash = normalized.lastIndexOf('/')
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  if (data.byteLength > workspacePreviewLimits.bytes) throw new Error('文本保存上限为 16 MiB。')
+  const content = new TextDecoder('utf-8', { ignoreBOM: true }).decode(data)
+  const result = await desktopInvoke('desktop_workspace_create_text', { agentId, directory: slash < 0 ? '' : normalized.slice(0, slash), fileName: normalized.slice(slash + 1), content, requestId })
+  return assertWriteResult(result)
+}
+
+export async function uploadWorkspaceFile(agentId, directory, file, { requestId = newWorkspaceWriteRequestId(), signal } = {}) {
+  if (file.size > workspacePreviewLimits.bytes) throw new Error('拖放或剪贴板导入上限为 16 MiB；使用“导入本机文件”选择大文件。')
+  if (signal?.aborted) throw Object.assign(new Error('操作已取消。'), { writeStatus: 'cancelled' })
+  const buffer = await file.arrayBuffer()
+  if (signal?.aborted) throw Object.assign(new Error('操作已取消。'), { writeStatus: 'cancelled' })
+  const bytes = new Uint8Array(buffer)
+  const result = await desktopInvoke('desktop_workspace_import_bytes', { agentId, directory: String(directory || '').replaceAll('\\', '/'), fileName: file.name, bytes: Array.from(bytes), requestId })
+  return assertWriteResult(result)
+}
+
+export async function pickWorkspaceImport(agentId, directory, { requestId = newWorkspaceWriteRequestId(), maxFiles = 8 } = {}) {
+  const result = await desktopInvoke('desktop_workspace_pick_import', { agentId, directory: String(directory || '').replaceAll('\\', '/'), requestId, maxFiles })
+  if (Array.isArray(result?.results)) return { ...result, results: result.results.map(item => item.status === 'saved' ? assertWriteResult(item) : item) }
+  return assertWriteResult(result)
+}
+
+export async function cancelWorkspaceWrite(requestId) {
+  if (!requestId) return
+  return desktopInvoke('desktop_workspace_cancel_write', { requestId })
 }
 
 export async function readAgentMedia(agentId, mediaId) {

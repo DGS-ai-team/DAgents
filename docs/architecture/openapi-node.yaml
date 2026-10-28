@@ -1144,13 +1144,37 @@ paths:
         "200":
           description: OK
 
-  /v1/agents/{agent_id}/workspace/file:
-    put:
+  /v1/agents/{agent_id}/workspace/location:
+    get:
       x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
+      summary: Resolve the current Agent workspace for native local operations
       responses:
         "200":
           description: OK
+
+  /v1/agents/{agent_id}/workspace/writes:
+    post:
+      x-contract-status: surface-only
+      summary: Prepare a local staging file with an Agent-bound operation ID
+      responses:
+        "200":
+          description: Staging path, identity and expiry for the native bridge
+
+  /v1/agents/{agent_id}/workspace/writes/{operation_id}/commit:
+    post:
+      x-contract-status: surface-only
+      summary: Validate staged content and commit under the workspace coordinator
+      responses:
+        "200":
+          description: Committed file metadata and SHA-256 revision
+
+  /v1/agents/{agent_id}/workspace/writes/{operation_id}/cancel:
+    post:
+      x-contract-status: surface-only
+      summary: Cancel an uncommitted workspace operation
+      responses:
+        "200":
+          description: Cancelled or already committed
 
   /v1/bootstrap:
     get:
@@ -1237,14 +1261,6 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/NodeSettingsView'}
-
-  /v1/agents/{agent_id}/workspace/upload:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
 
   /v1/llm/probe-models:
     post:

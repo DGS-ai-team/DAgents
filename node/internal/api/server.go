@@ -86,6 +86,7 @@ type Server struct {
 	feedbackRate          map[string][]time.Time
 	tools                 *tools.Registry
 	workspaceCoord        *workspacecoord.Coordinator
+	workspaceWrites       *workspaceWriteManager
 	transfers             *tools.LinuxTransferManager
 	browserMu             sync.RWMutex
 	browserMgr            *browser.Manager
@@ -596,6 +597,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		feedbackRate:          make(map[string][]time.Time),
 		tools:                 o.tools,
 		workspaceCoord:        sharedWorkspaceCoord,
+		workspaceWrites:       newWorkspaceWriteManager(filepath.Join(cfg.RuntimeDir(), "workspace-writes")),
 		transfers:             transferManager,
 		browserMgr:            browserMgr,
 		browserService:        browserService,

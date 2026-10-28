@@ -5,8 +5,8 @@ import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
-import { createWorkspaceFile, listWorkspace, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspaceFile, saveWorkspaceFile, saveWorkspaceFileAs, uploadWorkspaceFile } from '../workspace-files-api.js'
-import { createWorkspaceCsvPreviewParser, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
+import { cancelWorkspaceWrite, createWorkspaceFile, listWorkspace, newWorkspaceWriteRequestId, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspaceFile, saveWorkspaceFile, saveWorkspaceFileAs } from '../workspace-files-api.js'
+import { createWorkspaceCsvPreviewParser, decodeWorkspaceText, deserializeWorkspaceDraft, encodeWorkspaceText, isWorkspaceRequestCurrent, isWorkspaceWriteRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits, workspaceTextFormat, workspaceWriteProgressLabel } from '../workspace-files-state.js'
 import { textRangeAnchor } from '../workspace-references.js'
 import { renderWorkspaceMarkdown } from '../utils/workspaceMarkdown.js'
 const PdfPreview = defineAsyncComponent(() => import('../../components/WorkspacePdfPreview.vue'))
@@ -33,7 +33,9 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const refreshError = ref('')
-const uploadInput = ref(null)
+const writeProgress = ref(null)
+const activeWriteRequest = ref('')
+const textFormat = ref({ hasBom: false, newline: '\n' })
 const toolbarMenu = ref(null)
 const dockRestoreButton = ref(null)
 const previewUrl = ref('')
@@ -479,11 +481,11 @@ async function buildFilePreview(path, suppliedType, bytes, draftContent, isCurre
       const { readXlsxPreview } = await import('../../workspace-documents.js')
       snapshot.sheets = await readXlsxPreview(data)
     } else if (kind === 'csv') {
-      snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
+      snapshot.content = draftContent ?? decodeWorkspaceText(data)
       const parsed = parseWorkspaceCsvPreview(snapshot.content)
       snapshot.sheets = [{ name: String(path).split('/').at(-1) || 'CSV', rows: parsed.rows, merges: [], truncated: parsed.truncated }]
     }
-    else if (['html', 'code', 'text', 'markdown'].includes(kind)) snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
+    else if (['html', 'code', 'text', 'markdown'].includes(kind)) snapshot.content = draftContent ?? decodeWorkspaceText(data)
     if (!isCurrent()) {
       if (snapshot.url) URL.revokeObjectURL(snapshot.url)
       return null
@@ -540,6 +542,7 @@ async function loadDirectory(path = currentPath.value) {
     selectedPath.value = ''
     content.value = ''
     fileBytes.value = null
+    textFormat.value = { hasBom: false, newline: '\n' }
     dirty.value = false
     revokePreview()
     resetPreviewData()
@@ -587,6 +590,7 @@ async function openEntry(entry, discard = false) {
   selectedPath.value = entry.path
   content.value = ''
   fileBytes.value = null
+  textFormat.value = { hasBom: false, newline: '\n' }
   fileContentType.value = ''
   revision.value = ''
   dirty.value = false
@@ -618,6 +622,7 @@ async function openEntry(entry, discard = false) {
     }
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: request.path, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return false
     const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
+    const originalFormat = workspaceTextFormat(result.bytes)
     revision.value = draft?.conflict ? draft.revision : result.etag
     const snapshot = await buildFilePreview(request.path, result.contentType, result.bytes, draft?.content, () => isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: entry.path, generation: props.requestGeneration }) && request.scope === props.workspaceScope)
     if (!snapshot) return false
@@ -636,9 +641,10 @@ async function openEntry(entry, discard = false) {
     draftOwnerScope.value = request.scope
     contentEditVersion++
     fileBytes.value = chunkedText.value ? null : result.bytes
+    textFormat.value = originalFormat
     applyFilePreview(snapshot)
     draftConflict.value = Boolean(draft?.conflict)
-    dirty.value = canEditText.value && draft !== null && draft.content !== new TextDecoder().decode(result.bytes)
+    dirty.value = canEditText.value && draft !== null && draft.content !== decodeWorkspaceText(result.bytes)
     externalUpdate.value = false
     fileMissing.value = false
     lastFileCheck = Date.now()
@@ -761,14 +767,16 @@ async function discardDraftAndReload({ confirm = true } = {}) {
   return refreshResources('manual')
 }
 async function saveFile({ overwrite = false, confirm = true } = {}) {
-  if (!selectedPath.value || !canEditText.value || !dirty.value || saving.value || fileMissing.value) return
+  if (!selectedPath.value || !canEditText.value || !dirty.value || saving.value || activeWriteRequest.value || fileMissing.value) return
   if (!overwrite && (draftConflict.value || externalUpdate.value)) return
   if (overwrite && confirm && !await confirmDesktopAction('覆盖工作区中的较新版本？此操作会用当前本地草稿替换文件内容。')) return
   const request = { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, scope: props.workspaceScope, generation: props.requestGeneration, saveId: ++saveSequence }
+  const writeRequestId = newWorkspaceWriteRequestId()
+  activeWriteRequest.value = writeRequestId
   const text = content.value
   saving.value = true; error.value = ''
   try {
-    const bytes = new TextEncoder().encode(text)
+    const bytes = encodeWorkspaceText(text, textFormat.value)
     let baseRevision = revision.value
     if (overwrite) {
       const current = await readWorkspaceFile(request.agentId, request.path)
@@ -776,7 +784,7 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
       baseRevision = current.etag
       if (!baseRevision) throw new Error('无法确认工作区文件版本，请重新载入后再保存。')
     }
-    const response = await saveWorkspaceFile(request.agentId, request.path, bytes, baseRevision)
+    const response = await saveWorkspaceFile(request.agentId, request.path, bytes, baseRevision, { requestId: writeRequestId })
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope || request.saveId !== saveSequence) return
     revision.value = response.etag || baseRevision
     fileBytes.value = bytes
@@ -785,6 +793,7 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
     externalUpdate.value = false
     fileMissing.value = false
     if (!dirty.value) saveDraft()
+    actionStatus.value = '已保存'
     lastFileCheck = Date.now()
     lastDirectoryCheck = 0
     void refreshResources('local-write')
@@ -793,9 +802,10 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
       if (e?.status === 412) { draftConflict.value = true; externalUpdate.value = true }
       if (e?.status === 404) fileMissing.value = true
       error.value = String(e.message || e)
+      actionStatus.value = e?.writeStatus === 'unknown' ? '写入结果未知；草稿已保留，请重新读取工作区确认。' : e?.writeStatus === 'cancelled' ? '写入已取消；草稿已保留。' : ''
     }
   }
-  finally { if (request.saveId === saveSequence) saving.value = false }
+  finally { if (request.saveId === saveSequence) saving.value = false; if (activeWriteRequest.value === writeRequestId) { activeWriteRequest.value = ''; writeProgress.value = null } }
   if (refreshAfterSave && request.epoch === requestEpoch && request.agentId === props.agentId && request.scope === props.workspaceScope && request.generation === props.requestGeneration && request.saveId === saveSequence) {
     refreshAfterSave = false
     refreshQueued = false
@@ -815,34 +825,65 @@ function cancelCreateFile() {
   newFileNameError.value = ''
 }
 async function submitCreateFile() {
+  if (activeWriteRequest.value || loading.value) return
   const name = newFileName.value.trim()
   if (!name) { newFileNameError.value = '请输入文件名。'; newFileNameInput.value?.focus(); return }
   if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') { newFileNameError.value = '请输入单个文件名。'; newFileNameInput.value?.focus(); return }
   cancelCreateFile()
   const ownerId = props.agentId
+  const directory = currentPath.value
+  const writeRequestId = newWorkspaceWriteRequestId()
+  const writeRequest = { requestId: writeRequestId, agentId: ownerId, path: directory, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch }
   try {
-    const path = workspacePath(currentPath.value, name)
-    await createWorkspaceFile(ownerId, path, new TextEncoder().encode(''))
-    if (ownerId !== props.agentId) return
-    await loadDirectory(currentPath.value)
+    const path = workspacePath(directory, name)
+    activeWriteRequest.value = writeRequestId
+    const created = await createWorkspaceFile(ownerId, path, new Uint8Array(), { requestId: writeRequestId })
+    if (created?.status === 'unknown') throw Object.assign(new Error(created.message || '写入结果未知，请重新读取文件。'), { writeStatus: 'unknown' })
+    if (!isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) return
+    await loadDirectory(directory)
+    if (writeRequest.requestId !== activeWriteRequest.value || ownerId !== props.agentId || directory !== currentPath.value || writeRequest.scope !== props.workspaceScope || writeRequest.generation !== props.requestGeneration) return
     await openEntry({ name, path, is_dir: false })
-  } catch (e) { if (ownerId === props.agentId) error.value = String(e.message || e) }
+    if (ownerId === props.agentId && writeRequest.requestId === activeWriteRequest.value) actionStatus.value = '已创建文件'
+  } catch (e) {
+    if (isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) {
+      error.value = String(e.message || e)
+      actionStatus.value = e?.writeStatus === 'unknown' ? '写入结果未知；请重新读取工作区确认。' : e?.writeStatus === 'cancelled' ? '创建已取消。' : ''
+    }
+  } finally { if (activeWriteRequest.value === writeRequestId) { activeWriteRequest.value = ''; writeProgress.value = null } }
 }
 async function onUpload(event) {
-  const files = Array.from(event.target.files || [])
+  if (activeWriteRequest.value || loading.value) return
   const ownerId = props.agentId
   const directory = currentPath.value
-  event.target.value = ''
-  for (const file of files) {
-    if (file.size > 16 * 1024 * 1024) { error.value = `${file.name} 超过16MiB限制`; continue }
-    try {
-      const result = await uploadWorkspaceFile(ownerId, directory, file)
-      if (ownerId !== props.agentId) break
-      fileRefs.value[result.path] = result.file_ref
-      // Uploading only writes to the workspace; attaching remains an explicit action.
-    } catch (e) { error.value = String(e.message || e); break }
+  const requestId = newWorkspaceWriteRequestId()
+  const writeRequest = { requestId, agentId: ownerId, path: directory, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch }
+  activeWriteRequest.value = requestId
+  writeProgress.value = { bytes: 0, total: 0 }
+  error.value = ''
+  try {
+    const result = await pickWorkspaceImport(ownerId, directory, { requestId, maxFiles: 8 })
+    if (!isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) return
+    let savedCount = 0
+    let failedCount = 0
+    for (const item of result.results || []) {
+      if (item.status === 'saved') { savedCount++; if (item.path && item.fileRef) fileRefs.value[item.path] = item.fileRef }
+      else if (item.status !== 'cancelled') { failedCount++; error.value = `${item.name || '文件'}：${item.message || item.status}` }
+    }
+    await refreshDirectorySilently()
+    if (activeWriteRequest.value === requestId) actionStatus.value = result.status === 'cancelled' ? '导入已取消。' : savedCount && failedCount ? `导入部分完成：成功 ${savedCount} 个，失败 ${failedCount} 个。` : savedCount ? `已导入 ${savedCount} 个文件。` : failedCount ? `导入失败 ${failedCount} 个文件。` : '没有选择文件。'
+  } catch (e) {
+    if (isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) {
+      error.value = String(e.message || e)
+      actionStatus.value = e?.writeStatus === 'unknown' ? '导入结果未知；请刷新工作区确认。' : e?.writeStatus === 'cancelled' ? '导入已取消。' : ''
+    }
   }
-  await refreshDirectorySilently()
+  finally { if (activeWriteRequest.value === requestId) { activeWriteRequest.value = ''; writeProgress.value = null } }
+}
+async function cancelActiveWorkspaceWrite() {
+  const requestId = activeWriteRequest.value
+  if (!requestId) return
+  try { await cancelWorkspaceWrite(requestId); actionStatus.value = writeProgress.value?.phase === 'committing' ? '已请求取消；提交结果可能未知，正在等待确认…' : '正在请求取消写入…' }
+  catch (e) { error.value = String(e.message || e) }
 }
 function entryMetadata(entry) {
   return JSON.stringify([entry?.size ?? null, entry?.modified_at ?? entry?.modified ?? entry?.mod_time ?? null, entry?.etag ?? null])
@@ -1037,16 +1078,28 @@ watch(selectedPath, (path, previousPath) => { if (previousPath && path !== previ
 defineExpose({ openPath, refreshResources, discardDraftAndReload, resourceMenuActions, clearAnnotations, removeAnnotation })
 watch(() => [content.value, dirty.value, selectedPath.value, props.agentId], saveDraft)
 watch(() => [content.value, filename.value, previewKind.value, previewMode.value], () => { void refreshHighlightedContent() }, { immediate: true })
-watch(() => [props.agentId, props.workspaceScope], () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
-watch(() => props.requestGeneration, () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
+watch(() => [props.agentId, props.workspaceScope], () => { if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {}); activeWriteRequest.value = ''; writeProgress.value = null; requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
+watch(() => props.requestGeneration, () => { if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {}); activeWriteRequest.value = ''; writeProgress.value = null; requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
 watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
 watch(() => props.dockCollapsed, async collapsed => {
   if (!collapsed) return
   await nextTick()
   dockRestoreButton.value?.focus()
 })
-onMounted(() => { document.addEventListener('visibilitychange', onVisibilityChange); document.addEventListener('pointerdown', onToolbarPointerDown); document.addEventListener('pointerup', stopSpreadsheetSelection); document.addEventListener('keydown', onToolbarKeydown); if (props.active) void refreshResources('return') })
-onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); document.removeEventListener('pointerdown', onToolbarPointerDown); document.removeEventListener('pointerup', stopSpreadsheetSelection); document.removeEventListener('keydown', onToolbarKeydown); revokePreview() })
+let unlistenWriteProgress = null
+onMounted(async () => {
+  document.addEventListener('visibilitychange', onVisibilityChange); document.addEventListener('pointerdown', onToolbarPointerDown); document.addEventListener('pointerup', stopSpreadsheetSelection); document.addEventListener('keydown', onToolbarKeydown)
+  try {
+    const { listen } = await import('@tauri-apps/api/event')
+    unlistenWriteProgress = await listen('workspace-write-progress', event => {
+      const progress = event.payload
+      if (!progress || progress.requestId !== activeWriteRequest.value) return
+      writeProgress.value = { bytes: Number(progress.bytes) || 0, total: Number(progress.total) || 0, phase: progress.phase || '' }
+    })
+  } catch { /* non-Tauri tests and previews do not expose event APIs */ }
+  if (props.active) void refreshResources('return')
+})
+onUnmounted(() => { disposed = true; requestEpoch++; if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {}); unlistenWriteProgress?.(); if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); document.removeEventListener('pointerdown', onToolbarPointerDown); document.removeEventListener('pointerup', stopSpreadsheetSelection); document.removeEventListener('keydown', onToolbarKeydown); revokePreview() })
 </script>
 
 <template>
@@ -1056,14 +1109,13 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
       <div class="workspace-files__breadcrumbs"><button type="button" @click="loadDirectory('')">工作区</button><template v-for="(part,index) in breadcrumbs" :key="index"><span>/</span><button type="button" @click="loadDirectory(breadcrumbs.slice(0,index+1).join('/'))">{{ part }}</button></template><span v-if="filename">/</span><b v-if="filename" :title="filename">{{ filename }}</b></div>
       <span v-if="previewKind === 'docx' && documentWarnings.length && !documentPreviewError" class="workspace-files__format-warning" tabindex="0" role="status" aria-label="Word 预览格式提示" :title="documentWarnings.join('\n')"><UiIcon name="alert" :size="15" /></span>
       <span v-if="noticeSummary" class="workspace-files__notice" tabindex="0" role="status" aria-live="polite" :aria-label="noticeSummary" aria-describedby="workspace-files-notice-detail"><UiIcon name="alert" :size="16" /><span class="workspace-files__sr-only">{{ noticeSummary }}</span><span id="workspace-files-notice-detail" class="workspace-files__notice-detail" role="tooltip"><span v-for="(detail,index) in noticeDetails" :key="index">{{ detail }}</span></span></span>
-      <input ref="uploadInput" class="workspace-files__hidden" type="file" multiple @change="onUpload">
       <div class="workspace-files__toolbar-actions">
       <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
       <details ref="toolbarMenu" class="workspace-files__actions-menu">
         <summary class="desktop-icon-button" title="更多文件操作" aria-label="更多文件操作"><UiIcon name="more-horizontal" :size="16" /></summary>
         <div class="workspace-files__actions-popover" aria-label="更多文件操作">
-          <button type="button" :disabled="loading" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
-          <button type="button" :disabled="loading" @click="runToolbarAction(() => uploadInput?.click())"><UiIcon name="upload" :size="15" /><span>上传到当前目录</span></button>
+          <button type="button" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
+          <button type="button" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(onUpload)"><UiIcon name="upload" :size="15" /><span>导入本机文件</span></button>
           <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(saveSelectedAs)"><UiIcon name="arrow-down" :size="15" /><span>另存为</span></button>
           <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(revealSelectedFile)"><UiIcon name="file" :size="15" /><span>在文件管理器中定位</span></button>
           <button type="button" :disabled="!fileRefs[selectedPath]" @click="runToolbarAction(attachSelectedFile)"><UiIcon name="paperclip" :size="15" /><span>添加到对话</span></button>
@@ -1071,7 +1123,7 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
         </div>
       </details>
       <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
-      <button type="button" class="desktop-icon-button" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
+      <button type="button" class="desktop-icon-button" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || Boolean(activeWriteRequest) || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
       </div>
     </header>
     <div class="workspace-files__body">
@@ -1086,6 +1138,10 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
           </div>
         </div>
         <div v-if="actionStatus" class="workspace-files__action-status" role="status" aria-live="polite">{{ actionStatus }}</div>
+        <div v-if="activeWriteRequest" class="workspace-files__action-status" role="status" aria-live="polite">
+          {{ workspaceWriteProgressLabel(writeProgress?.phase, writeProgress?.bytes, writeProgress?.total) }}
+          <button type="button" @click="cancelActiveWorkspaceWrite">请求取消</button>
+        </div>
         <div class="workspace-files__editor-content">
           <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
           <div v-else-if="error" class="workspace-files__empty workspace-files__preview-error"><span>{{ error }}</span><button v-if="chunkedText || canRetrySelectedText" type="button" @click="reloadSelectedFile">重新读取文件</button><button v-if="selectedPath" type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
@@ -1145,7 +1201,7 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
         <label for="workspace-create-file-name">文件名</label>
         <input id="workspace-create-file-name" ref="newFileNameInput" v-model="newFileName" type="text" maxlength="255" autocomplete="off" placeholder="例如：notes.md" :aria-invalid="Boolean(newFileNameError)" :aria-describedby="newFileNameError ? 'workspace-create-file-error' : undefined" @input="newFileNameError = ''">
         <p v-if="newFileNameError" id="workspace-create-file-error" class="workspace-files__create-error" role="alert">{{ newFileNameError }}</p>
-        <footer><button type="button" @click="cancelCreateFile">取消</button><button type="submit" class="is-primary">创建</button></footer>
+        <footer><button type="button" :disabled="Boolean(activeWriteRequest)" @click="cancelCreateFile">取消</button><button type="submit" class="is-primary" :disabled="Boolean(activeWriteRequest)">创建</button></footer>
       </form>
     </div>
   </Teleport>

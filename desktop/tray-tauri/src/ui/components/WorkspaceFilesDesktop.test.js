@@ -6,7 +6,10 @@ import * as api from '../workspace-files-api.js'
 
 vi.mock('../workspace-files-api.js', () => ({
   createWorkspaceFile: vi.fn(),
+  cancelWorkspaceWrite: vi.fn(),
   listWorkspace: vi.fn(),
+  newWorkspaceWriteRequestId: vi.fn(() => 'write-request-1'),
+  pickWorkspaceImport: vi.fn(),
   readWorkspaceFile: vi.fn(),
   readWorkspaceTextChunk: vi.fn(),
   revealWorkspaceFile: vi.fn(),
@@ -461,6 +464,32 @@ describe('Desktop workspace resource navigation', () => {
     expect(api.readWorkspaceFile).toHaveBeenCalledTimes(3)
   })
 
+  it('keeps the quoted commit ETag as baseline while later edits survive conditional refresh', async () => {
+    const revision = 'b'.repeat(64)
+    api.readWorkspaceFile.mockImplementation(async (_agentId, _path, { ifNoneMatch } = {}) => {
+      if (ifNoneMatch) return { notModified: true, bytes: null, etag: ifNoneMatch, status: 304 }
+      return { ...result('original content', '"initial"'), contentType: 'text/plain' }
+    })
+    api.saveWorkspaceFile.mockResolvedValueOnce({ status: 'saved', revision, etag: `"${revision}"` })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('saved baseline')
+    await wrapper.find('[aria-label="保存文件"]').trigger('click')
+    await flushPromises()
+    expect(api.saveWorkspaceFile.mock.calls[0][3]).toBe('"initial"')
+    expect(wrapper.findAll('.workspace-files__action-status').map(status => status.text())).toContain('已保存')
+    expect(wrapper.text()).not.toContain('此阶段取消后结果可能未知')
+
+    await wrapper.find('textarea').setValue('later local edits')
+    await wrapper.vm.refreshSelectedFile()
+    await flushPromises()
+    expect(api.readWorkspaceFile).toHaveBeenCalledWith('agent-a', 'a.md', { ifNoneMatch: `"${revision}"` })
+    expect(wrapper.find('textarea').element.value).toBe('later local edits')
+    expect(wrapper.find('.workspace-files__draft-bar').text()).not.toContain('较旧文件版本')
+    expect(wrapper.find('.workspace-files__draft-bar').classes()).not.toContain('is-conflict')
+  })
+
   it('does not let an old Agent 404 mark the new Agent file missing', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
@@ -523,5 +552,63 @@ describe('Desktop workspace resource navigation', () => {
     await flushPromises()
     expect(wrapper.find('textarea').element.value).toBe('draft survives reconnect')
     expect(wrapper.find('[aria-label="保存文件"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('serializes create and import writes and keeps a newer request when an old create settles', async () => {
+    let finishCreate
+    let finishImport
+    api.newWorkspaceWriteRequestId.mockReturnValueOnce('create-a').mockReturnValueOnce('import-b')
+    api.createWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { finishCreate = resolve }))
+    api.pickWorkspaceImport.mockImplementationOnce(() => new Promise(resolve => { finishImport = resolve }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.createFile()
+    const input = document.body.querySelector('#workspace-create-file-name')
+    input.value = 'draft.md'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    const creating = wrapper.vm.submitCreateFile()
+    await flushPromises()
+    expect(api.createWorkspaceFile).toHaveBeenCalledTimes(1)
+    await wrapper.vm.submitCreateFile()
+    await wrapper.vm.onUpload()
+    expect(api.createWorkspaceFile).toHaveBeenCalledTimes(1)
+    expect(api.pickWorkspaceImport).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ agentId: 'agent-b' })
+    await flushPromises()
+    await wrapper.vm.loadDirectory('')
+    const importing = wrapper.vm.onUpload()
+    await flushPromises()
+    expect(api.pickWorkspaceImport).toHaveBeenCalledTimes(1)
+
+    finishCreate({ status: 'saved' })
+    await creating
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__action-status').text()).toContain('正在复制文件到暂存区')
+    finishImport({ status: 'complete', results: [] })
+    await importing
+    await flushPromises()
+    expect(wrapper.findAll('.workspace-files__action-status').map(status => status.text())).toContain('没有选择文件。')
+    expect(wrapper.text()).not.toContain('此阶段取消后结果可能未知')
+    expect(wrapper.findAll('.workspace-files__action-status').some(status => status.find('button').exists())).toBe(false)
+  })
+
+  it('ignores an import rejection after Agent and request scope change', async () => {
+    let rejectImport
+    api.newWorkspaceWriteRequestId.mockReturnValueOnce('stale-import')
+    api.pickWorkspaceImport.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectImport = reject }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.loadDirectory('')
+    const importing = wrapper.vm.onUpload()
+    await flushPromises()
+    expect(api.pickWorkspaceImport).toHaveBeenCalledTimes(1)
+    await wrapper.setProps({ agentId: 'agent-b' })
+    await flushPromises()
+    rejectImport(new Error('stale import failure'))
+    await importing
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 })

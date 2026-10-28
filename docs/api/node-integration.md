@@ -109,7 +109,7 @@ curl -f http://127.0.0.1:18765/v1/node/update/package -o dagents-update-package
 
 ### Workspace、媒体、terminal 与平台能力
 
-Workspace 文件内容由 Desktop Tauri 原生本地命令读取；Node 提供目录元数据、PUT 保存和 POST 上传。更新使用原始字节请求体，必须携带 `If-Match: <etag>`，新建则用 `If-None-Match: *`。上传使用 `POST /v1/agents/{agent_id}/workspace/upload?path=...`，请求体是文件原始字节（不是 multipart）；Node 按新建处理，目标已存在时返回 412。成功的写入/上传返回 JSON 元数据和新的 ETag。Desktop 客户端通过 `desktop_workspace_binary_request` 传输这些二进制写请求，路径和条件头分别作为 IPC 参数传入。媒体读取是另一条二进制路由：`GET /v1/agents/{agent_id}/media/{media_id}`。
+Workspace 文件内容由 Desktop Tauri 原生本地命令读取。Node 提供目录和工作区位置元数据，以及 `POST .../workspace/writes`、`POST .../writes/{operation_id}/commit`、`POST .../writes/{operation_id}/cancel` 三个 JSON 控制接口。Desktop 原生层将文本或所选本机文件写入 Node 创建的受控暂存文件，HTTP 仅传操作 ID、路径、大小、预期版本和摘要。Node 校验暂存文件身份，在共享工作区协调锁内检查目标版本并发布；新建重名和旧版本保存返回 412。旧 `workspace/file`、`workspace/chunk` 和 `workspace/upload` 二进制路由已移除。具体限制和失败语义见[工作区文件 API](../development/workspace-file-api.md)。历史媒体读取另有 `GET /v1/agents/{agent_id}/media/{media_id}`。
 
 Desktop 自动刷新只检查当前可见目录及打开文件；大小与修改时间用于加速发现变化，保存仍使用内容版本校验。调度及草稿规则见[资源页自动刷新方案](../design/desktop-product/resource-auto-refresh.md)，消息资源引用和 HTML/SVG 预览见[资源引用协议](../development/resource-references.md)。
 
@@ -220,8 +220,10 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `GET` | `/v1/agents/{agent_id}/tool-jobs` | `handleAgentToolJobs` | [tool_call_control_api.go#L13](../../node/internal/api/tool_call_control_api.go#L13) |
 | `POST` | `/v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile` | `handleAgentReconcileToolExecution` | [agents_api.go#L43](../../node/internal/api/agents_api.go#L43) |
 | `GET` | `/v1/agents/{agent_id}/workspace` | `handleWorkspaceList` | [agents_api.go#L29](../../node/internal/api/agents_api.go#L29) |
-| `PUT` | `/v1/agents/{agent_id}/workspace/file` | `handleWorkspacePut` | [agents_api.go#L31](../../node/internal/api/agents_api.go#L31) |
-| `POST` | `/v1/agents/{agent_id}/workspace/upload` | `handleWorkspaceUpload` | [agents_api.go#L32](../../node/internal/api/agents_api.go#L32) |
+| `GET` | `/v1/agents/{agent_id}/workspace/location` | `handleWorkspaceLocation` | [workspace_api.go](../../node/internal/api/workspace_api.go) |
+| `POST` | `/v1/agents/{agent_id}/workspace/writes` | `handleWorkspaceWritePrepare` | [workspace_writes.go](../../node/internal/api/workspace_writes.go) |
+| `POST` | `/v1/agents/{agent_id}/workspace/writes/{operation_id}/commit` | `handleWorkspaceWriteCommit` | [workspace_writes.go](../../node/internal/api/workspace_writes.go) |
+| `POST` | `/v1/agents/{agent_id}/workspace/writes/{operation_id}/cancel` | `handleWorkspaceWriteCancel` | [workspace_writes.go](../../node/internal/api/workspace_writes.go) |
 | `POST` | `/v1/messages` | `handlePostMessage` | [server_routes.go#L25](../../node/internal/api/server_routes.go#L25) |
 | `GET` | `/v1/streams` | `handleStreams` | [server_routes.go#L26](../../node/internal/api/server_routes.go#L26) |
 

@@ -2,6 +2,32 @@ const textExtensions = new Set(['md', 'txt', 'json', 'js', 'mjs', 'ts', 'css', '
 const codeExtensions = new Set(['json', 'js', 'mjs', 'ts', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'py', 'go', 'rs', 'toml', 'sh', 'ps1', 'sql', 'java', 'cs', 'cpp', 'c', 'h', 'rb', 'php'])
 export const workspacePreviewLimits = Object.freeze({ bytes: 16 * 1024 * 1024, textChunkBytes: 256 * 1024, rows: 500, columns: 60 })
 
+// Textarea values normalize line endings, so retain the original file's format
+// separately and restore it when encoding an edited buffer.
+export function workspaceTextFormat(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  const hasBom = data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf
+  const source = new TextDecoder('utf-8').decode(hasBom ? data.subarray(3) : data)
+  const crlf = (source.match(/\r\n/g) || []).length
+  const lf = (source.match(/(?<!\r)\n/g) || []).length
+  const cr = (source.match(/\r(?!\n)/g) || []).length
+  const newline = crlf >= lf && crlf >= cr && crlf ? '\r\n' : cr > lf && cr ? '\r' : '\n'
+  return { hasBom, newline }
+}
+
+export function decodeWorkspaceText(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])
+  const hasBom = data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf
+  return new TextDecoder('utf-8').decode(hasBom ? data.subarray(3) : data).replace(/\r\n|\r/g, '\n')
+}
+
+export function encodeWorkspaceText(content, format = {}) {
+  const newline = format.newline || '\n'
+  const normalized = String(content ?? '').replace(/\r\n|\r|\n/g, '\n').replace(/\n/g, newline)
+  const encoded = new TextEncoder().encode(`${format.hasBom ? '\uFEFF' : ''}${normalized}`)
+  return encoded
+}
+
 export function createWorkspaceCsvPreviewParser({ rows: maxRows = workspacePreviewLimits.rows, columns: maxColumns = workspacePreviewLimits.columns, maxCellChars = 64 * 1024 } = {}) {
   const rows = []
   let row = []
@@ -86,10 +112,6 @@ export function parseWorkspaceCsvPreview(source, options = {}) {
   return result
 }
 
-export function workspaceUploadPath(directory, name) {
-  return [String(directory || '').replace(/^\/+|\/+$/g, ''), String(name || '').replace(/^\/+/, '')].filter(Boolean).join('/')
-}
-
 export function normalizeWorkspacePath(value) {
   return String(value || '').replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\.$/, '').replace(/\/+$/, '')
 }
@@ -143,6 +165,33 @@ export function isWorkspaceRequestCurrent(request, current) {
   return request.epoch === current.epoch && request.agentId === current.agentId
     && (request.generation === undefined || request.generation === current.generation)
     && (!request.path || request.path === current.path)
+}
+
+export function isWorkspaceWriteRequestCurrent(request, current) {
+  return Boolean(request && current && request.requestId === current.requestId
+    && request.agentId === current.agentId && request.path === current.path
+    && request.scope === current.scope && request.generation === current.generation
+    && request.epoch === current.epoch)
+}
+
+export function workspaceWriteProgressLabel(phase, bytes = 0, total = 0) {
+  if (phase === 'committing') return '正在提交到工作区；此阶段取消后结果可能未知。'
+  if (total > 0) return `正在导入 ${Math.min(100, Math.floor(bytes * 100 / total))}%`
+  return phase === 'preparing' ? '正在准备暂存文件…' : '正在复制文件到暂存区…'
+}
+
+export function createWorkspaceAttachmentBatch(ownerId) {
+  return { ownerId, controller: new AbortController(), cancelled: false, currentRequestId: '' }
+}
+
+export function cancelWorkspaceAttachmentBatch(batch) {
+  if (!batch || batch.cancelled) return
+  batch.cancelled = true
+  batch.controller.abort()
+}
+
+export function isWorkspaceAttachmentBatchCurrent(batch, activeBatch, activeAgentId) {
+  return Boolean(batch && batch === activeBatch && !batch.cancelled && batch.ownerId === activeAgentId)
 }
 
 export function workspaceContentType(name, suppliedType, bytes) {

@@ -31,6 +31,7 @@ mod uifocus;
 mod update;
 mod workspace_native;
 mod workspace_read;
+mod workspace_write;
 
 use config::ShellConfig;
 use layout::Layout;
@@ -384,7 +385,11 @@ pub fn run() {
             desktop_quit,
             desktop_shell_request,
             desktop_node_request,
-            desktop_workspace_binary_request,
+            desktop_workspace_save_text,
+            desktop_workspace_create_text,
+            desktop_workspace_import_bytes,
+            desktop_workspace_pick_import,
+            desktop_workspace_cancel_write,
             desktop_workspace_read_chunk,
             desktop_workspace_save_as,
             desktop_workspace_reveal,
@@ -953,51 +958,6 @@ async fn desktop_node_request(
 }
 
 #[tauri::command]
-async fn desktop_workspace_binary_request(
-    window: WebviewWindow,
-    method: String,
-    path: String,
-    body_base64: Option<String>,
-    if_match: Option<String>,
-    if_none_match: Option<String>,
-    shared: State<'_, Arc<Shared>>,
-) -> Result<serde_json::Value, String> {
-    use base64::Engine;
-    ensure_mvp_window(&window)?;
-    let bytes = body_base64
-        .as_deref()
-        .map(|encoded| {
-            let max_encoded = nodeclient::MAX_WORKSPACE_FILE_BYTES.div_ceil(3) * 4;
-            if encoded.len() > max_encoded {
-                return Err("工作区单文件不能超过 16 MiB".to_string());
-            }
-            base64::engine::general_purpose::STANDARD
-                .decode(encoded)
-                .map_err(|e| format!("文件内容编码无效: {e}"))
-        })
-        .transpose()?;
-    let client = Arc::clone(&shared.node_client);
-    let response = spawn_node_blocking(move || {
-        client.workspace_binary_request(
-            &method,
-            &path,
-            bytes,
-            if_match.as_deref(),
-            if_none_match.as_deref(),
-        )
-    })
-    .await??;
-    Ok(serde_json::json!({
-        "status": response.status,
-        "content_type": response.content_type,
-        "etag": response.etag,
-        "file_size": response.file_size,
-        "next_offset": response.next_offset,
-        "body_base64": base64::engine::general_purpose::STANDARD.encode(response.body),
-    }))
-}
-
-#[tauri::command]
 async fn desktop_workspace_read_chunk(
     window: WebviewWindow,
     agent_id: String,
@@ -1041,6 +1001,179 @@ async fn desktop_workspace_save_as(
         draft_content,
     )
     .await
+}
+
+#[tauri::command]
+async fn desktop_workspace_save_text(
+    window: WebviewWindow,
+    agent_id: String,
+    path: String,
+    content: String,
+    expected_revision: String,
+    request_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<workspace_write::CommandResult, String> {
+    ensure_mvp_window(&window)?;
+    if request_id.is_empty() || request_id.len() > 128 {
+        return Err("requestId 无效".into());
+    }
+    let client = Arc::clone(&shared.node_client);
+    let rid = request_id.clone();
+    let app = window.app_handle().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        workspace_write::write_bytes(
+            app,
+            client,
+            &agent_id,
+            &path,
+            content.as_bytes(),
+            Some(&expected_revision),
+            false,
+            "text",
+            &rid,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn desktop_workspace_create_text(
+    window: WebviewWindow,
+    agent_id: String,
+    directory: String,
+    file_name: String,
+    content: String,
+    request_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<workspace_write::CommandResult, String> {
+    ensure_mvp_window(&window)?;
+    if request_id.is_empty() || request_id.len() > 128 {
+        return Err("requestId 无效".into());
+    }
+    let path = if directory.is_empty() {
+        file_name
+    } else {
+        format!("{}/{}", directory.trim_end_matches('/'), file_name)
+    };
+    let client = Arc::clone(&shared.node_client);
+    let rid = request_id.clone();
+    let app = window.app_handle().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        workspace_write::write_bytes(
+            app,
+            client,
+            &agent_id,
+            &path,
+            content.as_bytes(),
+            None,
+            true,
+            "text",
+            &rid,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn desktop_workspace_import_bytes(
+    window: WebviewWindow,
+    agent_id: String,
+    directory: String,
+    file_name: String,
+    bytes: Vec<u8>,
+    request_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<workspace_write::CommandResult, String> {
+    ensure_mvp_window(&window)?;
+    if request_id.is_empty() || request_id.len() > 128 {
+        return Err("requestId 无效".into());
+    }
+    workspace_write::validate_inline_import_size(bytes.len())?;
+    let path = if directory.is_empty() {
+        file_name
+    } else {
+        format!("{}/{}", directory.trim_end_matches('/'), file_name)
+    };
+    let client = Arc::clone(&shared.node_client);
+    let rid = request_id.clone();
+    let app = window.app_handle().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        workspace_write::write_bytes(
+            app, client, &agent_id, &path, &bytes, None, true, "import", &rid,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn desktop_workspace_pick_import(
+    window: WebviewWindow,
+    agent_id: String,
+    directory: String,
+    request_id: String,
+    max_files: usize,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    ensure_mvp_window(&window)?;
+    if request_id.is_empty() || request_id.len() > 128 || max_files == 0 || max_files > 8 {
+        return Err("导入请求参数无效".into());
+    }
+    let task = workspace_write::ActiveTask::begin(&agent_id, &request_id)?;
+    let app = window.app_handle().clone();
+    let progress_app = app.clone();
+    let client = Arc::clone(&shared.node_client);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _task_guard = task;
+        let selected = app.dialog().file().blocking_pick_files();
+        let Some(files) = selected else {
+            return Ok(serde_json::json!({"status":"cancelled","results":[]}));
+        };
+        let mut results = Vec::new();
+        for file in files.into_iter().take(max_files) {
+            if _task_guard.is_cancelled() {
+                break;
+            }
+            let source = match file.into_path() {
+                Ok(path) => path,
+                Err(e) => {
+                    results.push(serde_json::json!({"status":"error","message":e.to_string()}));
+                    continue;
+                }
+            };
+            let name = source
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let result = workspace_write::import_file(
+                progress_app.clone(),
+                Arc::clone(&client),
+                &agent_id,
+                &directory,
+                &source,
+                &name,
+                &_task_guard,
+            );
+            results.push(serde_json::to_value(result).unwrap_or(serde_json::Value::Null));
+        }
+        Ok(serde_json::json!({"status":"complete","results":results}))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn desktop_workspace_cancel_write(
+    window: WebviewWindow,
+    request_id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<(), String> {
+    ensure_mvp_window(&window)?;
+    workspace_write::cancel(Arc::clone(&shared.node_client), &request_id)
 }
 
 #[tauri::command]
