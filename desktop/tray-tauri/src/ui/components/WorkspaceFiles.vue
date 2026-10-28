@@ -5,9 +5,10 @@ import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
-import { createWorkspaceFile, downloadBytes, listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from '../workspace-files-api.js'
-import { deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
+import { createWorkspaceFile, listWorkspace, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspaceFile, saveWorkspaceFile, saveWorkspaceFileAs, uploadWorkspaceFile } from '../workspace-files-api.js'
+import { createWorkspaceCsvPreviewParser, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from '../workspace-files-state.js'
 import { textRangeAnchor } from '../workspace-references.js'
+import { renderWorkspaceMarkdown } from '../utils/workspaceMarkdown.js'
 const PdfPreview = defineAsyncComponent(() => import('../../components/WorkspacePdfPreview.vue'))
 
 const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, requestGeneration: { type: Number, default: 0 }, dockCollapsed: { type: Boolean, default: false }, dockStatus: { type: String, default: 'idle' }, dockAgentName: { type: String, default: '当前智能体' }, attachmentLimitReached: { type: Boolean, default: false } })
@@ -17,6 +18,11 @@ const currentPath = ref('')
 const selectedPath = ref('')
 const content = ref('')
 const fileBytes = ref(null)
+const chunkedText = ref(false)
+const textChunkRange = ref({ start: 0, end: 0, size: 0 })
+const textChunkBusy = ref(false)
+const actionStatus = ref('')
+const resourceActionBusy = ref(false)
 const fileContentType = ref('')
 const revision = ref('')
 const dirty = ref(false)
@@ -76,9 +82,16 @@ let fileReadSequence = 0
 let refreshAfterSave = false
 let saveSequence = 0
 let highlightSequence = 0
+let textChunkDecoder = null
+let textChunkRevision = ''
+let csvPreviewParser = null
 const filename = computed(() => selectedPath.value.split('/').filter(Boolean).at(-1) || '')
-const canEditText = computed(() => Boolean(selectedPath.value) && ['text/plain', 'text/html', 'application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value) && !['pdf', 'docx', 'xlsx', 'image', 'unsupported', 'unsupported-invalid', 'unsupported-legacy-office'].includes(previewKind.value))
-const canTogglePreview = computed(() => canEditText.value && ['code', 'csv', 'html', 'svg'].includes(previewKind.value))
+const selectedEntry = computed(() => entries.value.find(entry => entry.path === selectedPath.value) || null)
+const canRetrySelectedText = computed(() => Boolean(selectedEntry.value) && selectedEntry.value.size > workspacePreviewLimits.bytes && isSegmentableText(selectedEntry.value.name))
+const canEditText = computed(() => Boolean(selectedPath.value) && !chunkedText.value && ['text/plain', 'text/html', 'application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value) && !['pdf', 'docx', 'xlsx', 'image', 'unsupported', 'unsupported-invalid', 'unsupported-legacy-office'].includes(previewKind.value))
+const canTogglePreview = computed(() => (canEditText.value || chunkedText.value || previewKind.value === 'markdown') && ['markdown', 'code', 'csv', 'html', 'svg'].includes(previewKind.value))
+const hasNextTextChunk = computed(() => chunkedText.value && textChunkRange.value.end < textChunkRange.value.size)
+const renderedMarkdown = computed(() => renderWorkspaceMarkdown(content.value))
 const canOverwriteDraft = computed(() => dirty.value && canEditText.value && !fileMissing.value && (draftConflict.value || externalUpdate.value))
 const workbookPreview = computed(() => workbookSheets.value.find(sheet => sheet.name === workbookSheetName.value) || null)
 const workbookColumnCount = computed(() => Math.max(0, ...(workbookPreview.value?.rows || []).map(row => row.length)))
@@ -163,6 +176,12 @@ function resetPreviewData() {
   textAnchor.value = null
   pdfAnchor.value = null
   referenceMenu.value = null
+  chunkedText.value = false
+  textChunkRange.value = { start: 0, end: 0, size: 0 }
+  textChunkBusy.value = false
+  textChunkDecoder = null
+  textChunkRevision = ''
+  csvPreviewParser = null
 }
 function defaultPreviewMode(kind) { return ['code', 'csv', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
 function xlsxColumnLabel(index) {
@@ -464,7 +483,7 @@ async function buildFilePreview(path, suppliedType, bytes, draftContent, isCurre
       const parsed = parseWorkspaceCsvPreview(snapshot.content)
       snapshot.sheets = [{ name: String(path).split('/').at(-1) || 'CSV', rows: parsed.rows, merges: [], truncated: parsed.truncated }]
     }
-    else if (['html', 'code', 'text'].includes(kind)) snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
+    else if (['html', 'code', 'text', 'markdown'].includes(kind)) snapshot.content = draftContent ?? new TextDecoder('utf-8').decode(data)
     if (!isCurrent()) {
       if (snapshot.url) URL.revokeObjectURL(snapshot.url)
       return null
@@ -509,6 +528,8 @@ async function confirmDiscard() { return !dirty.value || await confirmDesktopAct
 async function loadDirectory(path = currentPath.value) {
   if (!props.agentId) return { ok: false, canceled: false }
   if (!await confirmDiscard()) return { ok: false, canceled: true }
+  actionStatus.value = ''
+  resourceActionBusy.value = false
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path, scope: props.workspaceScope, generation: props.requestGeneration }
   loading.value = true; error.value = ''
   try {
@@ -561,21 +582,60 @@ async function openPath(path) {
 async function openEntry(entry, discard = false) {
   if (entry.is_dir) return loadDirectory(entry.path)
   if (!discard && !await confirmDiscard()) return false
+  actionStatus.value = ''
+  resourceActionBusy.value = false
+  selectedPath.value = entry.path
+  content.value = ''
+  fileBytes.value = null
+  fileContentType.value = ''
+  revision.value = ''
+  dirty.value = false
+  draftConflict.value = false
+  externalUpdate.value = false
+  fileMissing.value = false
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path: entry.path, scope: props.workspaceScope, generation: props.requestGeneration }
   loading.value = true; error.value = ''; revokePreview()
   resetPreviewData()
   try {
-    const result = await readWorkspaceFile(request.agentId, request.path)
+    let result
+    const segmentedText = entry.size > workspacePreviewLimits.bytes && isSegmentableText(entry.name)
+    if (segmentedText) {
+      result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
+      chunkedText.value = true
+      textChunkDecoder = new TextDecoder('utf-8', { fatal: false })
+      textChunkRevision = result.etag
+      textChunkRange.value = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
+    } else {
+      try { result = await readWorkspaceFile(request.agentId, request.path) }
+      catch (readError) {
+        if (readError?.status !== 413 || !isSegmentableText(entry.name)) throw readError
+        result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
+        chunkedText.value = true
+        textChunkDecoder = new TextDecoder('utf-8', { fatal: false })
+        textChunkRevision = result.etag
+        textChunkRange.value = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
+      }
+    }
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: request.path, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return false
     const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
     revision.value = draft?.conflict ? draft.revision : result.etag
     const snapshot = await buildFilePreview(request.path, result.contentType, result.bytes, draft?.content, () => isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: entry.path, generation: props.requestGeneration }) && request.scope === props.workspaceScope)
     if (!snapshot) return false
+    if (chunkedText.value) {
+      const finalChunk = textChunkRange.value.end >= textChunkRange.value.size
+      snapshot.content = textChunkDecoder.decode(result.bytes, { stream: !finalChunk })
+      if (finalChunk) snapshot.content += textChunkDecoder.decode()
+      if (snapshot.kind === 'csv') {
+        csvPreviewParser = createWorkspaceCsvPreviewParser()
+        const parsed = csvPreviewParser.append(snapshot.content, { final: finalChunk })
+        snapshot.sheets = [{ name: String(request.path).split('/').at(-1) || 'CSV', ...parsed, truncated: parsed.truncated || !finalChunk, merges: [] }]
+      }
+    }
     selectedPath.value = entry.path
     draftOwnerId.value = request.agentId
     draftOwnerScope.value = request.scope
     contentEditVersion++
-    fileBytes.value = result.bytes
+    fileBytes.value = chunkedText.value ? null : result.bytes
     applyFilePreview(snapshot)
     draftConflict.value = Boolean(draft?.conflict)
     dirty.value = canEditText.value && draft !== null && draft.content !== new TextDecoder().decode(result.bytes)
@@ -586,10 +646,78 @@ async function openEntry(entry, discard = false) {
     if (entry.file_ref) fileRefs.value[entry.path] = entry.file_ref
     emit('resource-name', entry.name)
     return true
-  } catch (e) { if (request.epoch === requestEpoch && request.agentId === props.agentId) error.value = String(e.message || e); return false }
+  } catch (e) { if (request.epoch === requestEpoch && request.agentId === props.agentId) { resetPreviewData(); fileBytes.value = null; content.value = ''; error.value = String(e.message || e) } return false }
   finally { if (request.epoch === requestEpoch && request.agentId === props.agentId) loading.value = false }
 }
+function isSegmentableText(name) {
+  return new Set(['md','txt','json','js','mjs','ts','css','html','htm','xml','yaml','yml','csv','py','go','rs','toml','sh','ps1','sql','java','cs','cpp','c','h','rb','php']).has(String(name || '').split('.').at(-1)?.toLowerCase())
+}
+async function loadNextTextChunk() {
+  if (!hasNextTextChunk.value || textChunkBusy.value || !selectedPath.value) return
+  const request = { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, scope: props.workspaceScope, generation: props.requestGeneration }
+  const start = textChunkRange.value.end
+  textChunkBusy.value = true
+  try {
+    const result = await readWorkspaceTextChunk(request.agentId, request.path, start, workspacePreviewLimits.textChunkBytes, textChunkRevision)
+    if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return
+    let text = textChunkDecoder.decode(result.bytes, { stream: (result.nextOffset ?? start + result.bytes.length) < textChunkRange.value.size })
+    const end = result.nextOffset ?? start + result.bytes.length
+    const finalChunk = end >= textChunkRange.value.size
+    if (finalChunk) text += textChunkDecoder.decode()
+    content.value += text
+    textChunkRange.value = { start: 0, end, size: result.fileSize ?? textChunkRange.value.size }
+    if (previewKind.value === 'csv') {
+      const parsed = csvPreviewParser?.append(text, { final: finalChunk }) || parseWorkspaceCsvPreview(content.value)
+      workbookSheets.value = [{ name: filename.value || 'CSV', rows: parsed.rows, merges: [], truncated: parsed.truncated || chunkedText.value }]
+      workbookSheetName.value = filename.value || 'CSV'
+    }
+    textAnchor.value = null
+  } catch (e) {
+    if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return
+    if (e?.status === 409) error.value = '文件在分段读取期间发生变化，请重新打开文件。'
+    else error.value = String(e.message || e)
+  } finally { textChunkBusy.value = false }
+}
+function reloadSelectedFile() {
+  const entry = entries.value.find(item => item.path === selectedPath.value)
+  return entry ? openEntry(entry, true) : undefined
+}
+function resourceActionOwner() { return { agentId: props.agentId, path: selectedPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch } }
+function resourceActionOwnerCurrent(owner) {
+  return !disposed && owner.agentId === props.agentId && owner.path === selectedPath.value && owner.scope === props.workspaceScope
+    && owner.generation === props.requestGeneration && owner.epoch === requestEpoch
+}
+async function saveSelectedAs() {
+  if (!selectedPath.value || resourceActionBusy.value) return
+  const owner = resourceActionOwner()
+  const draftContent = dirty.value && canEditText.value ? content.value : null
+  resourceActionBusy.value = true
+  actionStatus.value = '正在选择保存位置或另存文件…'
+  error.value = ''
+  try {
+    const result = await saveWorkspaceFileAs(owner.agentId, owner.path, draftContent)
+    if (!resourceActionOwnerCurrent(owner)) return
+    if (result?.status === 'saved') actionStatus.value = `已另存为（${Number(result.bytesWritten || 0).toLocaleString()} 字节）`
+    else if (result?.status === 'cancelled') actionStatus.value = '已取消另存'
+  } catch (e) {
+    if (resourceActionOwnerCurrent(owner)) error.value = String(e.message || e)
+  } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
+}
+async function revealSelectedFile() {
+  if (!selectedPath.value || resourceActionBusy.value) return
+  const owner = resourceActionOwner()
+  resourceActionBusy.value = true
+  actionStatus.value = '正在文件管理器中定位…'
+  error.value = ''
+  try {
+    await revealWorkspaceFile(owner.agentId, owner.path)
+    if (resourceActionOwnerCurrent(owner)) actionStatus.value = '已在文件管理器中定位'
+  } catch (e) {
+    if (resourceActionOwnerCurrent(owner)) error.value = String(e.message || e)
+  } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
+}
 function updateContent(value) {
+  actionStatus.value = ''
   contentEditVersion++
   content.value = value
   if (previewKind.value === 'svg') refreshSvgPreview()
@@ -605,6 +733,7 @@ function updateContent(value) {
 async function refreshHighlightedContent() {
   const sequence = ++highlightSequence
   const source = content.value
+  if (chunkedText.value) { highlightedContent.value = ''; return }
   if (previewKind.value !== 'code' || previewMode.value !== 'preview') { highlightedContent.value = ''; return }
   try {
     const { highlightWorkspaceSource } = await import('../../workspace-syntax.js')
@@ -874,10 +1003,6 @@ function isRefreshOwnerCurrent(owner) {
     && owner.scope === props.workspaceScope && owner.generation === props.requestGeneration)
 }
 function onVisibilityChange() { if (document.visibilityState === 'hidden') { if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0 } else if (props.active) void refreshResources('return') }
-function downloadFile() {
-  const bytes = dirty.value && canEditText.value ? new TextEncoder().encode(content.value) : fileBytes.value
-  if (bytes) downloadBytes(bytes, filename.value, fileContentType.value || 'text/plain')
-}
 function goUp() {
   const parts = currentPath.value.split('/').filter(Boolean)
   parts.pop()
@@ -912,8 +1037,8 @@ watch(selectedPath, (path, previousPath) => { if (previousPath && path !== previ
 defineExpose({ openPath, refreshResources, discardDraftAndReload, resourceMenuActions, clearAnnotations, removeAnnotation })
 watch(() => [content.value, dirty.value, selectedPath.value, props.agentId], saveDraft)
 watch(() => [content.value, filename.value, previewKind.value, previewMode.value], () => { void refreshHighlightedContent() }, { immediate: true })
-watch(() => [props.agentId, props.workspaceScope], () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
-watch(() => props.requestGeneration, () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
+watch(() => [props.agentId, props.workspaceScope], () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
+watch(() => props.requestGeneration, () => { requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
 watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
 watch(() => props.dockCollapsed, async collapsed => {
   if (!collapsed) return
@@ -939,7 +1064,8 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
         <div class="workspace-files__actions-popover" aria-label="更多文件操作">
           <button type="button" :disabled="loading" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
           <button type="button" :disabled="loading" @click="runToolbarAction(() => uploadInput?.click())"><UiIcon name="upload" :size="15" /><span>上传到当前目录</span></button>
-          <button type="button" :disabled="!selectedPath" @click="runToolbarAction(downloadFile)"><UiIcon name="arrow-down" :size="15" /><span>{{ dirty && canEditText ? '下载本地草稿' : '下载文件' }}</span></button>
+          <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(saveSelectedAs)"><UiIcon name="arrow-down" :size="15" /><span>另存为</span></button>
+          <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(revealSelectedFile)"><UiIcon name="file" :size="15" /><span>在文件管理器中定位</span></button>
           <button type="button" :disabled="!fileRefs[selectedPath]" @click="runToolbarAction(attachSelectedFile)"><UiIcon name="paperclip" :size="15" /><span>添加到对话</span></button>
           <button v-if="canTogglePreview" type="button" @click="runToolbarAction(togglePreviewMode)"><UiIcon :name="previewMode === 'preview' ? 'code-2' : 'image'" :size="15" /><span>{{ previewMode === 'preview' ? '查看源代码' : '查看预览' }}</span></button>
         </div>
@@ -959,10 +1085,12 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
             <button v-if="canOverwriteDraft" type="button" :disabled="saving || loading" @click="saveFile({ overwrite: true })">覆盖保存</button>
           </div>
         </div>
+        <div v-if="actionStatus" class="workspace-files__action-status" role="status" aria-live="polite">{{ actionStatus }}</div>
         <div class="workspace-files__editor-content">
           <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
+          <div v-else-if="error" class="workspace-files__empty workspace-files__preview-error"><span>{{ error }}</span><button v-if="chunkedText || canRetrySelectedText" type="button" @click="reloadSelectedFile">重新读取文件</button><button v-if="selectedPath" type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
           <template v-else-if="selectedPath">
-            <div v-if="documentPreviewError" class="workspace-files__empty workspace-files__preview-error"><span>{{ documentPreviewError }}</span><button type="button" @click="downloadFile">下载原文件</button></div>
+            <div v-if="documentPreviewError" class="workspace-files__empty workspace-files__preview-error"><span>{{ documentPreviewError }}</span><button type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
             <div v-else-if="previewKind === 'image'" class="workspace-files__image-stage"><div class="workspace-files__image-target" @pointerdown="startImageSelection" @pointermove="moveImageSelection" @pointerup="stopImageSelection" @pointercancel="stopImageSelection"><img class="workspace-files__image" :src="previewUrl" :alt="filename" draggable="false"><div v-if="imageSelection" class="workspace-files__image-selection" :style="imageSelectionStyle()"></div></div></div>
             <PdfPreview v-else-if="previewKind === 'pdf'" :bytes="fileBytes || new Uint8Array()" @selection="capturePdfSelection" @reference-contextmenu="openReferenceMenu" />
             <iframe v-else-if="['html', 'docx'].includes(previewKind) && previewMode === 'preview'" ref="documentFrame" class="workspace-files__document-frame" :srcdoc="safeDocumentPreview" :title="`${filename} 文档预览`" sandbox="allow-same-origin" @load="onDocumentFrameLoad"></iframe>
@@ -976,16 +1104,23 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
               <div v-else class="workspace-files__empty">{{ documentPreviewError || '此工作簿没有可显示的数据。' }}</div>
             </section>
             <section v-else-if="previewKind === 'csv' && previewMode === 'preview'" class="workspace-files__sheet-preview" :aria-label="`${filename} CSV 预览`">
-              <div class="workspace-files__sheet-toolbar"><span>CSV 表格预览</span><span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列</span></div>
+              <div class="workspace-files__sheet-toolbar"><span>CSV 表格预览</span><span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列<span v-if="chunkedText">；切换到源代码可继续分段阅读</span></span></div>
               <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="index in workbookColumnCount" :key="index">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><td v-for="cell in row" :key="cell.address" :class="{ 'is-selected': cell.selected }" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></tr></tbody></table></div>
               <div v-else class="workspace-files__empty">CSV 文件没有可显示的数据。</div>
             </section>
+            <div v-else-if="previewKind === 'markdown' && previewMode === 'preview'" class="workspace-files__markdown-preview" v-html="renderedMarkdown"></div>
+            <div v-else-if="chunkedText" class="workspace-files__chunked-text"><pre>{{ content }}</pre></div>
             <div v-else-if="previewKind === 'code' && previewMode === 'preview'" class="workspace-files__code-preview" @mouseup="captureCodeSelection"><pre><code class="hljs" v-html="highlightedContent"></code></pre></div>
             <textarea v-else-if="canEditText" ref="editorRef" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" @select="captureTextSelection" />
-            <div v-else-if="unsupportedPreviewNotice" class="workspace-files__empty workspace-files__unsupported"><span>{{ unsupportedPreviewNotice }}</span><button type="button" @click="downloadFile">下载原文件</button></div>
-            <div v-else class="workspace-files__empty">无法读取此文件。<button type="button" @click="downloadFile">下载原文件</button></div>
+            <div v-else-if="unsupportedPreviewNotice" class="workspace-files__empty workspace-files__unsupported"><span>{{ unsupportedPreviewNotice }}</span><button type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
+            <div v-else class="workspace-files__empty">无法读取此文件。<button type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
           </template>
           <div v-else class="workspace-files__empty">{{ entries.length ? '选择工作区文件以预览或编辑。' : '此目录为空，可新建文件或上传文件开始使用。' }}</div>
+        </div>
+        <div v-if="chunkedText" class="workspace-files__chunk-toolbar" role="status">
+          <span>{{ textChunkRange.end < textChunkRange.size ? '大文件部分内容' : '大文件已完整读取' }} · 已读取 {{ textChunkRange.end.toLocaleString() }} / {{ textChunkRange.size.toLocaleString() }} 字节 · 剩余 {{ Math.max(0, textChunkRange.size - textChunkRange.end).toLocaleString() }} 字节 · 只读</span>
+          <button v-if="hasNextTextChunk" type="button" :disabled="textChunkBusy" @click="loadNextTextChunk">{{ textChunkBusy ? '读取中…' : '读取下一段' }}</button>
+          <span v-else>已到文件末尾</span>
         </div>
       </main>
     </div>
@@ -1050,6 +1185,14 @@ onUnmounted(() => { disposed = true; requestEpoch++; if (refreshTimer) window.cl
 .workspace-files__code-preview { flex:1; min-width:0; min-height:0; overflow:auto; background:#fbfcfc; }
 .workspace-files__code-preview pre { box-sizing:border-box; min-width:max-content; min-height:100%; margin:0; padding:16px 20px; color:#364147; font:12px/1.65 Consolas,Monaco,monospace; tab-size:2; }
 .workspace-files__code-preview code { font:inherit; }
+.workspace-files__markdown-preview { flex:1; min-width:0; min-height:0; overflow:auto; padding:18px 22px; color:var(--text-primary,#30383c); line-height:1.7; overflow-wrap:anywhere; }
+.workspace-files__markdown-preview :deep(pre) { overflow:auto; padding:12px; border-radius:8px; background:var(--surface-secondary,#f4f6f6); }
+.workspace-files__markdown-preview :deep(img) { max-width:100%; }
+.workspace-files__chunked-text { flex:1; min-width:0; min-height:0; overflow:auto; }
+.workspace-files__chunked-text pre { box-sizing:border-box; min-width:max-content; min-height:100%; margin:0; padding:16px 20px; white-space:pre-wrap; overflow-wrap:anywhere; color:#364147; font:12px/1.65 Consolas,Monaco,monospace; }
+.workspace-files__chunk-toolbar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-top:1px solid var(--border-subtle,#e4e8e9); color:var(--text-secondary,#6a7478); font-size:12px; }
+.workspace-files__chunk-toolbar button { flex:none; }
+.workspace-files__action-status { flex:none; padding:7px 12px; border-bottom:1px solid var(--border-subtle,#e4e8e9); background:var(--surface-secondary,#f6f8f8); color:var(--text-secondary,#606b70); font-size:12px; }
 .workspace-files__code-preview .hljs-comment,.workspace-files__code-preview .hljs-quote { color:#7c8588; font-style:italic; }
 .workspace-files__code-preview .hljs-keyword,.workspace-files__code-preview .hljs-selector-tag,.workspace-files__code-preview .hljs-literal,.workspace-files__code-preview .hljs-section { color:#805a94; }
 .workspace-files__code-preview .hljs-string,.workspace-files__code-preview .hljs-attr,.workspace-files__code-preview .hljs-template-tag,.workspace-files__code-preview .hljs-template-variable { color:#367660; }

@@ -33,6 +33,8 @@ function assertResponse(response) {
   } catch { /* non-JSON error bodies keep the status-based fallback */ }
   const message = code === 'workspace_file_exists'
     ? '同名文件已存在，请换名后重新上传。'
+    : code === 'workspace_file_too_large'
+      ? '单次完整读取、上传或保存上限为 16 MiB。大文本可分段只读预览；可使用“另存为原文件”保存任意大小的工作区文件。'
     : response.status === 412
       ? '文件已被其他操作修改，请重新载入后再保存。'
       : response.status === 428
@@ -48,7 +50,7 @@ export async function listWorkspace(agentId, path = '') {
   return globalThis.__DAGENTS_API_REQUEST__({ method: 'GET', path: `${agentPath(agentId)}${query}`, body: null })
 }
 
-async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, ifNoneMatch, allowNotModified = false } = {}) {
+async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, ifNoneMatch } = {}) {
   const query = `?path=${encodePath(path)}`
   const response = await desktopInvoke('desktop_workspace_binary_request', {
     method,
@@ -57,13 +59,44 @@ async function binaryRequest(agentId, endpoint, method, path, { bytes, ifMatch, 
     ifMatch: ifMatch || null,
     ifNoneMatch: ifNoneMatch || null,
   })
-  if (!(allowNotModified && response.status === 304)) assertResponse(response)
-  if (response.status === 304) return { notModified: true, bytes: null, contentType: response.content_type, etag: response.etag, status: response.status }
-  return { notModified: false, bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag, status: response.status }
+  assertResponse(response)
+  return { notModified: false, bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag, fileSize: response.file_size, nextOffset: response.next_offset, status: response.status }
 }
 
 export async function readWorkspaceFile(agentId, path, { ifNoneMatch } = {}) {
-  return binaryRequest(agentId, 'file', 'GET', path, { ifNoneMatch, allowNotModified: true })
+  const response = await desktopInvoke('desktop_workspace_read_file', {
+    agentId,
+    path: String(path || '').replaceAll('\\', '/'),
+    ifNoneMatch: ifNoneMatch || null,
+  })
+  if (!(response.status === 304)) assertResponse(response)
+  if (response.status === 304) return { notModified: true, bytes: null, contentType: response.content_type, etag: response.etag, status: response.status }
+  return { notModified: false, bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag, fileSize: response.file_size, nextOffset: response.next_offset, status: response.status }
+}
+
+async function readWorkspaceChunk(agentId, path, offset = 0, limit = 256 * 1024, revision = '', text = false) {
+  const response = await desktopInvoke('desktop_workspace_read_chunk', {
+    agentId,
+    path: String(path || '').replaceAll('\\', '/'),
+    offset,
+    limit,
+    revision: revision || null,
+    text,
+  })
+  assertResponse(response)
+  return { notModified: false, bytes: decodeBase64(response.body_base64), contentType: response.content_type, etag: response.etag, fileSize: response.file_size, nextOffset: response.next_offset, status: response.status }
+}
+
+export async function readWorkspaceTextChunk(agentId, path, offset = 0, limit = 256 * 1024, revision = '') {
+  return readWorkspaceChunk(agentId, path, offset, limit, revision, true)
+}
+
+export async function saveWorkspaceFileAs(agentId, path, draftContent = null) {
+  return desktopInvoke('desktop_workspace_save_as', { agentId, path: String(path || '').replaceAll('\\', '/'), draftContent })
+}
+
+export async function revealWorkspaceFile(agentId, path) {
+  return desktopInvoke('desktop_workspace_reveal', { agentId, path: String(path || '').replaceAll('\\', '/') })
 }
 
 export async function saveWorkspaceFile(agentId, path, bytes, etag) {
@@ -84,14 +117,4 @@ export async function readAgentMedia(agentId, mediaId) {
   const response = await desktopInvoke('desktop_media_binary_request', { agentId, mediaId })
   if (response.status < 200 || response.status >= 300) throw new Error(`媒体读取失败（${response.status}）`)
   return new Blob([decodeBase64(response.body_base64)], { type: response.content_type || 'application/octet-stream' })
-}
-
-export function downloadBytes(bytes, filename, contentType = 'application/octet-stream') {
-  const blob = new Blob([bytes], { type: contentType })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

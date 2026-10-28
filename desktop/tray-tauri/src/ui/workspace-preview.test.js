@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { workspaceCodeLanguage, workspaceFilePreviewNotice, workspacePreviewKind } from './workspace-files-state.js'
+import { workspaceCodeLanguage, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits } from './workspace-files-state.js'
 
 const text = value => new TextEncoder().encode(value)
 
@@ -15,6 +15,9 @@ test('workspace preview recognizes supported formats by extension and file signa
   assert.equal(workspacePreviewKind('favicon.ico', 'application/octet-stream', Uint8Array.from([0,0,1,0])), 'image')
   assert.equal(workspacePreviewKind('main.go', 'text/plain', text('package main')), 'code')
   assert.equal(workspacePreviewKind('table.csv', 'text/plain', text('name,value\na,1')), 'csv')
+  assert.equal(workspacePreviewKind('notes.md', 'text/plain', text('# Notes')), 'markdown')
+  assert.equal(workspacePreviewLimits.bytes, 16 * 1024 * 1024)
+  assert.equal(workspacePreviewLimits.textChunkBytes, 256 * 1024)
 })
 
 test('workspace preview reports malformed and legacy Office files as unsupported', () => {

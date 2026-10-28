@@ -702,7 +702,7 @@ echo Config:
 echo   config.yaml is Node bootstrap-only (listen); configure Node settings in DAgents Desktop.
 echo   It is created from config.example.yaml on first run.
 echo   A2A / Registry: deploy Manage separately (packaging/manage/README.md).
-echo   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
+echo   CLI configuration: local endpoint must use loopback; set via DAGENTS_CONFIG
 popd >nul
 exit /b 0
 

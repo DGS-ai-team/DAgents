@@ -1145,12 +1145,6 @@ paths:
           description: OK
 
   /v1/agents/{agent_id}/workspace/file:
-    get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
     put:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server

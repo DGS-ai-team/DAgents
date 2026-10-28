@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentMediaId, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceUploadPath } from './workspace-files-state.js'
-import { listWorkspace, readWorkspaceFile, saveWorkspaceFile, uploadWorkspaceFile } from './workspace-files-api.js'
+import { agentMediaId, createWorkspaceCsvPreviewParser, deserializeWorkspaceDraft, isWorkspaceRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceUploadPath } from './workspace-files-state.js'
+import { listWorkspace, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspaceFile, saveWorkspaceFile, saveWorkspaceFileAs, uploadWorkspaceFile } from './workspace-files-api.js'
 
 test('workspace uploads target the complete relative filename and preserve directories', () => {
   assert.equal(workspaceUploadPath('', 'image.png'), 'image.png')
@@ -26,6 +26,25 @@ test('CSV preview parses quoted delimiters, escaped quotes, and multiline cells 
     rows: [['a', 'b']],
     truncated: true,
   })
+})
+
+test('incremental CSV preview carries quote, CRLF, and escaped-quote state across chunks', () => {
+  const parser = createWorkspaceCsvPreviewParser()
+  parser.append('id,note\r\n1,"line "')
+  parser.append('"quoted""\ncontinued"\r')
+  const result = parser.append('\n2,last', { final: true })
+  assert.deepEqual(result.rows, [
+    ['id', 'note'],
+    ['1', 'line "quoted"\ncontinued'],
+    ['2', 'last'],
+  ])
+})
+
+test('incremental CSV parser caps rows, columns, and retained cell length', () => {
+  const parser = createWorkspaceCsvPreviewParser({ rows: 2, columns: 1, maxCellChars: 3 })
+  const result = parser.append('long,value\na,2\nb,3', { final: true })
+  assert.deepEqual(result.rows, [['lon'], ['a']])
+  assert.equal(result.truncated, true)
 })
 
 test('successful workspace uploads only clear the exact stale upload error', () => {
@@ -95,7 +114,7 @@ test('media URLs are accepted only for the owning Agent and the Node media route
   assert.equal(agentMediaId('/v1/agents/agent-a/media/../secret', 'agent-a'), '')
 })
 
-test('workspace transport uses authenticated Node JSON listing and bounded binary commands with file_ref payload shape', async () => {
+test('workspace listing and writes use Node while file reads use the native full-read command', async () => {
   const calls = []
   globalThis.__DAGENTS_API_REQUEST__ = async options => { calls.push(['json', options]); return { path: 'src', entries: [] } }
   globalThis.__DAGENTS_DESKTOP_INVOKE__ = async (command, args) => {
@@ -110,6 +129,7 @@ test('workspace transport uses authenticated Node JSON listing and bounded binar
     assert.equal(listing.path, 'src')
     assert.equal(file.etag, '"r1"')
     assert.equal(uploaded.file_ref, 'C:/private/agent/src/a.md')
+    assert.deepEqual(calls[1], ['desktop_workspace_read_file', { agentId: 'agent/1', path: 'src/a.md', ifNoneMatch: null }])
     assert.match(calls[0][1].path, /agents%2F1|agents\/agent%2F1/)
     assert.match(calls[2][1].path, /workspace\/upload\?path=src%2Fa.md$/)
     assert.equal(calls[2][1].method, 'POST')
@@ -119,7 +139,7 @@ test('workspace transport uses authenticated Node JSON listing and bounded binar
   }
 })
 
-test('conditional workspace reads preserve the 304 status without decoding it as empty file content', async () => {
+test('conditional native workspace reads preserve the 304 status without decoding it as empty file content', async () => {
   let call
   globalThis.__DAGENTS_DESKTOP_INVOKE__ = async (command, args) => {
     call = { command, args }
@@ -130,7 +150,42 @@ test('conditional workspace reads preserve the 304 status without decoding it as
     assert.equal(response.notModified, true)
     assert.equal(response.status, 304)
     assert.equal(response.bytes, null)
-    assert.equal(call.args.ifNoneMatch, '"r1"')
+    assert.deepEqual(call, { command: 'desktop_workspace_read_file', args: { agentId: 'agent-a', path: 'notes.txt', ifNoneMatch: '"r1"' } })
+  } finally { delete globalThis.__DAGENTS_DESKTOP_INVOKE__ }
+})
+
+test('workspace text chunks use the native bounded read command with revision guards', async () => {
+  const calls = []
+  globalThis.__DAGENTS_DESKTOP_INVOKE__ = async (command, args) => {
+    calls.push({ command, args })
+    return { status: 200, content_type: 'text/plain', etag: 'W/"rev"', file_size: 300000, next_offset: 256, body_base64: btoa('hi') }
+  }
+  try {
+    const text = await readWorkspaceTextChunk('agent-a', 'notes.txt', 0, 256, 'W/"rev"')
+    assert.equal(new TextDecoder().decode(text.bytes), 'hi')
+    assert.equal(text.fileSize, 300000)
+    assert.deepEqual(calls, [
+      { command: 'desktop_workspace_read_chunk', args: { agentId: 'agent-a', path: 'notes.txt', offset: 0, limit: 256, revision: 'W/"rev"', text: true } },
+    ])
+  } finally { delete globalThis.__DAGENTS_DESKTOP_INVOKE__ }
+})
+
+test('native Save As and reveal commands receive only Agent-relative paths and optional draft text', async () => {
+  const calls = []
+  globalThis.__DAGENTS_DESKTOP_INVOKE__ = async (command, args) => {
+    calls.push({ command, args })
+    return command === 'desktop_workspace_save_as' ? { status: 'cancelled', bytesWritten: 0 } : undefined
+  }
+  try {
+    const result = await saveWorkspaceFileAs('agent-a', 'docs\\notes.md', 'draft text')
+    await saveWorkspaceFileAs('agent-a', 'docs/clean.md', null)
+    await revealWorkspaceFile('agent-a', 'docs\\notes.md')
+    assert.deepEqual(result, { status: 'cancelled', bytesWritten: 0 })
+    assert.deepEqual(calls, [
+      { command: 'desktop_workspace_save_as', args: { agentId: 'agent-a', path: 'docs/notes.md', draftContent: 'draft text' } },
+      { command: 'desktop_workspace_save_as', args: { agentId: 'agent-a', path: 'docs/clean.md', draftContent: null } },
+      { command: 'desktop_workspace_reveal', args: { agentId: 'agent-a', path: 'docs/notes.md' } },
+    ])
   } finally { delete globalThis.__DAGENTS_DESKTOP_INVOKE__ }
 })
 
@@ -153,6 +208,26 @@ test('workspace upload collisions have a rename message while revision conflicts
     await assert.rejects(
       uploadWorkspaceFile('agent-1', '', { name: 'notes.txt', arrayBuffer: async () => new ArrayBuffer(0) }),
       error => error.status === 412 && error.message === '同名文件已存在，请换名后重新上传。',
+    )
+  } finally {
+    delete globalThis.__DAGENTS_DESKTOP_INVOKE__
+  }
+})
+
+test('workspace full-file limit explains read-only preview and native Save As', async () => {
+  globalThis.__DAGENTS_DESKTOP_INVOKE__ = async () => ({
+    status: 413,
+    content_type: 'application/json',
+    etag: '',
+    body_base64: btoa(JSON.stringify({ error: { code: 'workspace_file_too_large' } })),
+  })
+  try {
+    await assert.rejects(
+      readWorkspaceFile('agent-1', 'archive.bin'),
+      error => error.status === 413
+        && error.message.includes('完整读取、上传或保存上限为 16 MiB')
+        && error.message.includes('分段只读预览')
+        && error.message.includes('另存为原文件'),
     )
   } finally {
     delete globalThis.__DAGENTS_DESKTOP_INVOKE__

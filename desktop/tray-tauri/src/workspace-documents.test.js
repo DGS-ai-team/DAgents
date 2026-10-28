@@ -3,13 +3,55 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
-import { convertDocxToHtml, readXlsxPreview, workspaceDocumentPreviewLimits } from './workspace-documents.js'
+import { convertDocxToHtml, readXlsxPreview, validateOfficeZipLimits, workspaceDocumentPreviewLimits, workspaceOfficeZipLimits } from './workspace-documents.js'
+
+async function zipBytes(files, options = {}) {
+  const archive = new JSZip()
+  for (const [name, data] of Object.entries(files)) archive.file(name, data)
+  return new Uint8Array(await archive.generateAsync({ type: 'uint8array', ...options }))
+}
 
 test('DOCX preview converts paragraphs and tables to readable HTML', async () => {
   const bytes = await readFile(new URL('../node_modules/mammoth/test/test-data/single-paragraph.docx', import.meta.url))
   const result = await convertDocxToHtml(bytes)
   assert.match(result.html, /<p>Walking on imported air<\/p>/)
   assert.deepEqual(result.warnings, [])
+})
+
+test('Office preview errors use the shared 16 MiB limit', async () => {
+  const oversized = new Uint8Array(workspaceDocumentPreviewLimits.bytes + 1)
+  await assert.rejects(() => convertDocxToHtml(oversized), /超过 16 MiB/)
+  await assert.rejects(() => readXlsxPreview(oversized), /超过 16 MiB/)
+})
+
+test('Office ZIP preflight limits entry count and declared expanded size', async () => {
+  const bytes = await zipBytes({ 'a.xml': '<a/>', 'b.xml': '<b/>' })
+  assert.throws(() => validateOfficeZipLimits(bytes, { ...workspaceOfficeZipLimits, entries: 1 }), /过多 ZIP 条目/)
+  assert.throws(() => validateOfficeZipLimits(bytes, { ...workspaceOfficeZipLimits, totalUncompressedBytes: 4 }), /展开后超过/)
+  assert.throws(() => validateOfficeZipLimits(new Uint8Array([1, 2, 3])), /ZIP 目录无效/)
+})
+
+test('Office ZIP preflight rejects suspicious compression ratios before parsers run', async () => {
+  const bytes = await zipBytes({ 'xl/worksheets/sheet1.xml': 'x'.repeat(2048) }, { compression: 'DEFLATE' })
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let eocd = -1
+  for (let index = bytes.length - 22; index >= Math.max(0, bytes.length - 22 - 0xffff); index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) { eocd = index; break }
+  }
+  let central = view.getUint32(eocd + 16, true)
+  const directoryEntries = view.getUint16(eocd + 10, true)
+  for (let index = 0; index < directoryEntries; index += 1) {
+    const nameLength = view.getUint16(central + 28, true)
+    const extraLength = view.getUint16(central + 30, true)
+    const commentLength = view.getUint16(central + 32, true)
+    const name = new TextDecoder().decode(bytes.subarray(central + 46, central + 46 + nameLength))
+    if (name === 'xl/worksheets/sheet1.xml') break
+    central += 46 + nameLength + extraLength + commentLength
+  }
+  assert.notEqual(central, -1)
+  const compressed = view.getUint32(central + 20, true)
+  view.setUint32(central + 24, compressed * (workspaceOfficeZipLimits.compressionRatio + 1), true)
+  assert.throws(() => validateOfficeZipLimits(bytes), /压缩比超过/)
 })
 
 test('XLSX preview returns sheet names, cell values, and bounded rows/columns', async () => {

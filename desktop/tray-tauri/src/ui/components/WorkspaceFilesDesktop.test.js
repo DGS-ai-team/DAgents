@@ -6,10 +6,12 @@ import * as api from '../workspace-files-api.js'
 
 vi.mock('../workspace-files-api.js', () => ({
   createWorkspaceFile: vi.fn(),
-  downloadBytes: vi.fn(),
   listWorkspace: vi.fn(),
   readWorkspaceFile: vi.fn(),
+  readWorkspaceTextChunk: vi.fn(),
+  revealWorkspaceFile: vi.fn(),
   saveWorkspaceFile: vi.fn(),
+  saveWorkspaceFileAs: vi.fn(),
   uploadWorkspaceFile: vi.fn(),
 }))
 
@@ -21,6 +23,11 @@ const directories = {
     { name: 'a.md', path: 'a.md', is_dir: false, size: 10 },
     { name: 'b.md', path: 'b.md', is_dir: false, size: 10 },
     { name: 'records.csv', path: 'records.csv', is_dir: false, size: 32 },
+    { name: 'large.bin', path: 'large.bin', is_dir: false, size: 17 * 1024 * 1024 },
+    { name: 'too-large.bin', path: 'too-large.bin', is_dir: false, size: 257 * 1024 * 1024 },
+    { name: 'large.md', path: 'large.md', is_dir: false, size: 17 * 1024 * 1024 },
+    { name: 'large.go', path: 'large.go', is_dir: false, size: 17 * 1024 * 1024 },
+    { name: 'large.csv', path: 'large.csv', is_dir: false, size: 17 * 1024 * 1024 },
   ],
   reports: [{ name: 'summary.md', path: 'reports/summary.md', is_dir: false, size: 20 }],
 }
@@ -35,7 +42,13 @@ beforeEach(() => {
   localStorage.clear()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path] || [] }))
-  api.readWorkspaceFile.mockImplementation(async (_agentId, path) => result(path))
+  api.readWorkspaceFile.mockImplementation(async (_agentId, path) => {
+    if (path === 'large.bin' || path === 'too-large.bin') throw Object.assign(new Error('File exceeds the full read limit'), { status: 413 })
+    return result(path)
+  })
+  api.readWorkspaceTextChunk.mockImplementation(async (_agentId, _path, offset = 0) => offset === 0
+    ? { ...result('# First section\n'), fileSize: 300000, nextOffset: 262144 }
+    : { ...result('\n## Next section\n'), fileSize: 300000, nextOffset: 300000 })
 })
 
 afterEach(() => {
@@ -46,6 +59,109 @@ afterEach(() => {
 })
 
 describe('Desktop workspace resource navigation', () => {
+  it('renders Markdown and lazily appends bounded chunks for large text files', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect(await wrapper.vm.openPath('large.md')).toEqual({ ok: true, canceled: false })
+    expect(api.readWorkspaceFile).not.toHaveBeenCalledWith('agent-a', 'large.md')
+    expect(api.readWorkspaceTextChunk).toHaveBeenCalledWith('agent-a', 'large.md', 0, 256 * 1024)
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('查看预览')).trigger('click')
+    expect(wrapper.find('.workspace-files__markdown-preview h1').text()).toBe('First section')
+    expect(wrapper.text()).toContain('剩余 37,856 字节')
+
+    await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 262144, 256 * 1024, 'etag-1')
+    expect(wrapper.find('.workspace-files__markdown-preview h2').text()).toBe('Next section')
+    expect(wrapper.find('.workspace-files__markdown-preview').text()).toContain('First section')
+    expect(wrapper.find('[aria-label="保存文件"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('shows large chunked source as plain read-only text and labels the preview partial', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.go')
+
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('# First section')
+    expect(wrapper.find('.workspace-files__code-preview').exists()).toBe(false)
+    expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('大文件部分内容')
+    expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('剩余')
+  })
+
+  it('offers reload instead of a broken download when a chunk revision changes', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+    api.readWorkspaceTextChunk.mockRejectedValueOnce(Object.assign(new Error('revision changed'), { status: 409 }))
+    await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('重新读取文件')
+    expect(wrapper.text()).not.toContain('下载原文件')
+  })
+
+  it('sends the current dirty text to native Save As and reports completion', async () => {
+    let finishSaveAs
+    api.saveWorkspaceFileAs.mockImplementationOnce(() => new Promise(resolve => { finishSaveAs = resolve }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('current draft text')
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('另存为')).trigger('click')
+    await flushPromises()
+
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.md', 'current draft text')
+    expect(wrapper.find('.workspace-files__action-status').text()).toBe('正在选择保存位置或另存文件…')
+    finishSaveAs({ status: 'saved', bytesWritten: 18 })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__action-status').text()).toContain('已另存为')
+    expect(wrapper.find('.workspace-files__action-status').text()).toContain('18 字节')
+  })
+
+  it('reports native Save As cancellation and supports files beyond the former download cap', async () => {
+    api.saveWorkspaceFileAs.mockResolvedValueOnce({ status: 'cancelled', bytesWritten: 0 })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('too-large.bin')
+    expect(wrapper.text()).toContain('File exceeds the full read limit')
+    const saveOriginal = wrapper.find('.workspace-files__preview-error button:last-child')
+    expect(saveOriginal.text()).toBe('另存为原文件')
+    await saveOriginal.trigger('click')
+    await flushPromises()
+
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'too-large.bin', null)
+    expect(wrapper.find('.workspace-files__action-status').text()).toBe('已取消另存')
+    expect(wrapper.text()).not.toContain('256 MiB')
+  })
+
+  it('reveals the selected file through the native command and reports failures', async () => {
+    api.revealWorkspaceFile.mockRejectedValueOnce(new Error('定位失败'))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('在文件管理器中定位')).trigger('click')
+    await flushPromises()
+
+    expect(api.revealWorkspaceFile).toHaveBeenCalledWith('agent-a', 'a.md')
+    expect(wrapper.text()).toContain('定位失败')
+  })
+
+  it('keeps large CSV table preview capped at 500 rows and exposes remaining source text', async () => {
+    const source = Array.from({ length: 501 }, (_, index) => `row${index},value`).join('\n')
+    api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result(source), fileSize: 17 * 1024 * 1024, nextOffset: 256 * 1024 })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.csv')
+    expect(wrapper.findAll('.workspace-files__sheet-scroll tbody tr')).toHaveLength(500)
+    expect(wrapper.text()).toContain('切换到源代码可继续分段阅读')
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('查看源代码')).trigger('click')
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('row500')
+  })
+
   it('keeps refresh and save in the toolbar and moves secondary actions into the overflow menu', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
@@ -53,7 +169,7 @@ describe('Desktop workspace resource navigation', () => {
     expect(wrapper.find('[aria-label="刷新"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="保存文件"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="更多文件操作"]').exists()).toBe(true)
-    expect(wrapper.findAll('.workspace-files__actions-popover button')).toHaveLength(4)
+    expect(wrapper.findAll('.workspace-files__actions-popover button')).toHaveLength(5)
     expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="上传文件"]').exists()).toBe(false)
     expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="下载文件"]').exists()).toBe(false)
   })

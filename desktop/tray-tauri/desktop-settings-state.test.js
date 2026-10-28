@@ -12,12 +12,12 @@ test("a failed settings read keeps controls unsavable", async () => {
   assert.equal(writes, 0);
 });
 
-test("legacy Node connection fields are ignored and not written back", async () => {
+test("Desktop settings expose only supported local preferences", async () => {
   const state = createDesktopSettingsState();
   const writes = [];
   const invoke = async (command, args) => {
     if (command === "desktop_settings_get") {
-      return { settings: { ...createDesktopSettingsState().settings, connection_mode: "tunnel", node_endpoint: "http://127.0.0.1:18766" } };
+      return { settings: { ...createDesktopSettingsState().settings, unsupported_setting: "ignored" } };
     }
     if (command === "desktop_settings_save") {
       writes.push(args.settings);
@@ -26,8 +26,7 @@ test("legacy Node connection fields are ignored and not written back", async () 
     throw new Error(`unexpected command ${command}`);
   };
   await loadDesktopSettings(state, invoke);
-  assert.equal(Object.hasOwn(state.settings, "connection_mode"), false);
-  assert.equal(Object.hasOwn(state.settings, "node_endpoint"), false);
+  assert.equal(Object.hasOwn(state.settings, "unsupported_setting"), false);
   assert.equal(await saveDesktopSettings(state, invoke), true);
   assert.deepEqual(Object.keys(writes[0]).sort(), ["notification_enabled", "update_check_enabled", "update_check_interval_seconds"]);
 
@@ -36,7 +35,7 @@ test("legacy Node connection fields are ignored and not written back", async () 
     ? { settings: writes[0] }
     : undefined;
   await loadDesktopSettings(reopened, persistedInvoke);
-  assert.equal(Object.hasOwn(reopened.settings, "connection_mode"), false);
+  assert.equal(Object.hasOwn(reopened.settings, "unsupported_setting"), false);
 });
 
 test("a failed read can be retried without writing defaults over saved settings", async () => {

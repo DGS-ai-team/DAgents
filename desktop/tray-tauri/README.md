@@ -25,7 +25,7 @@ Desktop JSON 默认位置：
 - macOS：~/Library/Application Support/DAgents/desktop/settings.json
 - Linux：$XDG_CONFIG_HOME/dagents/desktop/settings.json（缺省使用用户 .config）
 
-Desktop JSON 只保存 notification_enabled、update_check_enabled、update_check_interval_seconds。旧 JSON 中的 node_endpoint 与 connection_mode 会被忽略，保存时不会再写回。保存后重启 Desktop 生效；读取失败时禁止覆盖默认值，保存失败保留草稿。
+Desktop JSON 只保存 notification_enabled、update_check_enabled、update_check_interval_seconds。Node 连接目标固定为本机 `127.0.0.1:18765`，不属于 Desktop 用户设置。保存后重启 Desktop 生效；读取失败时禁止覆盖默认值，保存失败保留草稿。
 
 Node config.yaml 只保存 listen。Node 名称、使用者称呼、LLM、Manage、工具和运行设置留在 Node 的 .runtime 数据库。Manage 凭据不写入 Desktop JSON。
 

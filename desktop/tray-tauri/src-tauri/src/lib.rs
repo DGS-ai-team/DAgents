@@ -29,6 +29,8 @@ mod singleinstance;
 mod terminal;
 mod uifocus;
 mod update;
+mod workspace_native;
+mod workspace_read;
 
 use config::ShellConfig;
 use layout::Layout;
@@ -383,6 +385,10 @@ pub fn run() {
             desktop_shell_request,
             desktop_node_request,
             desktop_workspace_binary_request,
+            desktop_workspace_read_chunk,
+            desktop_workspace_save_as,
+            desktop_workspace_reveal,
+            workspace_read::desktop_workspace_read_file,
             desktop_media_binary_request,
             desktop_capture_screenshot,
             desktop_list_agents,
@@ -985,8 +991,67 @@ async fn desktop_workspace_binary_request(
         "status": response.status,
         "content_type": response.content_type,
         "etag": response.etag,
+        "file_size": response.file_size,
+        "next_offset": response.next_offset,
         "body_base64": base64::engine::general_purpose::STANDARD.encode(response.body),
     }))
+}
+
+#[tauri::command]
+async fn desktop_workspace_read_chunk(
+    window: WebviewWindow,
+    agent_id: String,
+    path: String,
+    offset: u64,
+    limit: usize,
+    revision: Option<String>,
+    text: Option<bool>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<workspace_read::ReadResult, String> {
+    ensure_mvp_window(&window)?;
+    let client = Arc::clone(&shared.node_client);
+    spawn_node_blocking(move || {
+        let location = client.workspace_location(&agent_id)?;
+        workspace_read::read_chunk(
+            std::path::Path::new(&location.root),
+            &path,
+            offset,
+            limit,
+            revision.as_deref(),
+            text.unwrap_or(false),
+        )
+    })
+    .await?
+}
+
+#[tauri::command]
+async fn desktop_workspace_save_as(
+    window: WebviewWindow,
+    agent_id: String,
+    path: String,
+    draft_content: Option<String>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<workspace_native::SaveAsResult, String> {
+    ensure_mvp_window(&window)?;
+    workspace_native::save_as(
+        window.app_handle().clone(),
+        Arc::clone(&shared.node_client),
+        agent_id,
+        path,
+        draft_content,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn desktop_workspace_reveal(
+    window: WebviewWindow,
+    agent_id: String,
+    path: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<(), String> {
+    ensure_mvp_window(&window)?;
+    workspace_native::reveal(Arc::clone(&shared.node_client), agent_id, path).await
 }
 
 #[tauri::command]

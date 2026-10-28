@@ -1,14 +1,16 @@
 const textExtensions = new Set(['md', 'txt', 'json', 'js', 'mjs', 'ts', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'csv', 'py', 'go', 'rs', 'toml', 'sh', 'ps1', 'sql', 'java', 'cs', 'cpp', 'c', 'h', 'rb', 'php'])
 const codeExtensions = new Set(['json', 'js', 'mjs', 'ts', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'py', 'go', 'rs', 'toml', 'sh', 'ps1', 'sql', 'java', 'cs', 'cpp', 'c', 'h', 'rb', 'php'])
-export const workspacePreviewLimits = Object.freeze({ bytes: 32 * 1024 * 1024, rows: 500, columns: 60 })
+export const workspacePreviewLimits = Object.freeze({ bytes: 16 * 1024 * 1024, textChunkBytes: 256 * 1024, rows: 500, columns: 60 })
 
-export function parseWorkspaceCsvPreview(source, { rows: maxRows = workspacePreviewLimits.rows, columns: maxColumns = workspacePreviewLimits.columns } = {}) {
-  const text = String(source || '').replace(/^\uFEFF/, '')
-  if (!text) return { rows: [], truncated: false }
+export function createWorkspaceCsvPreviewParser({ rows: maxRows = workspacePreviewLimits.rows, columns: maxColumns = workspacePreviewLimits.columns, maxCellChars = 64 * 1024 } = {}) {
   const rows = []
   let row = []
   let field = ''
   let quoted = false
+  let pendingQuote = false
+  let pendingCR = false
+  let hasRecordContent = false
+  let finished = false
   let truncated = false
   const pushField = () => {
     if (row.length < maxColumns) row.push(field)
@@ -21,22 +23,67 @@ export function parseWorkspaceCsvPreview(source, { rows: maxRows = workspacePrev
     else truncated = true
     row = []
   }
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]
-    if (quoted) {
-      if (character === '"' && text[index + 1] === '"') { field += '"'; index += 1 }
-      else if (character === '"') quoted = false
-      else field += character
-    } else if (character === '"' && field === '') quoted = true
-    else if (character === ',') pushField()
-    else if (character === '\n' || character === '\r') {
-      if (character === '\r' && text[index + 1] === '\n') index += 1
-      pushRow()
-    } else field += character
+  const appendField = character => {
+    if (field.length < maxCellChars) field += character
+    else truncated = true
   }
-  if (field || row.length || !/[\r\n]$/.test(text)) pushRow()
-  return { rows, truncated }
+
+  function append(source, { final = false } = {}) {
+    if (finished) return snapshot()
+    let text = String(source || '')
+    if (rows.length === 0 && row.length === 0 && field === '' && !hasRecordContent) text = text.replace(/^\uFEFF/, '')
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index]
+      if (pendingCR) {
+        pendingCR = false
+        if (character === '\n') continue
+      }
+      if (pendingQuote) {
+        pendingQuote = false
+        if (character === '"') { appendField('"'); hasRecordContent = true; continue }
+        quoted = false
+      }
+      if (quoted) {
+        if (character === '"') {
+          if (index + 1 < text.length) {
+            if (text[index + 1] === '"') { appendField('"'); index += 1 }
+            else quoted = false
+          } else pendingQuote = true
+        } else appendField(character)
+        hasRecordContent = true
+      } else if (character === '"' && field === '') {
+        quoted = true
+        hasRecordContent = true
+      } else if (character === ',') {
+        pushField()
+        hasRecordContent = true
+      } else if (character === '\n' || character === '\r') {
+        pushRow()
+        hasRecordContent = false
+        if (character === '\r' && index + 1 < text.length && text[index + 1] === '\n') index += 1
+        else if (character === '\r' && index + 1 === text.length) pendingCR = true
+      } else {
+        appendField(character)
+        hasRecordContent = true
+      }
+    }
+    if (final) {
+      if (pendingQuote) { pendingQuote = false; quoted = false }
+      if (field || row.length || hasRecordContent) pushRow()
+      finished = true
+    }
+    return snapshot()
+  }
+  function snapshot() { return { rows: rows.map(cells => [...cells]), truncated } }
+  return { append, snapshot }
+}
+
+export function parseWorkspaceCsvPreview(source, options = {}) {
+  const parser = createWorkspaceCsvPreviewParser(options)
+  const result = parser.append(source, { final: true })
+  const text = String(source || '').replace(/^\uFEFF/, '')
+  if (!text) return { rows: [], truncated: false }
+  return result
 }
 
 export function workspaceUploadPath(directory, name) {
@@ -121,6 +168,7 @@ export function workspacePreviewKind(name, suppliedType, bytes) {
   const extension = String(name || '').split('.').pop()?.toLowerCase() || ''
   const type = workspaceContentType(name, suppliedType, data)
   if (extension === 'doc' || extension === 'xls') return 'unsupported-legacy-office'
+  if (extension === 'md' && isUtf8Text(data)) return 'markdown'
   if (extension === 'pdf') return hasPdfSignature(data) ? 'pdf' : 'unsupported-invalid'
   if (extension === 'docx') return hasZipSignature(data) ? 'docx' : 'unsupported-invalid'
   if (extension === 'xlsx') return hasZipSignature(data) ? 'xlsx' : 'unsupported-invalid'

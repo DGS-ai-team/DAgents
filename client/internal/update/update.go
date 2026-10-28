@@ -35,6 +35,10 @@ type Options struct {
 
 // Run 通过 Node 查询更新状态，可选下载安装包到 Output。
 func Run(ctx context.Context, cfg *config.Config, opt Options) int {
+	if err := nodeapi.ValidateLocalNodeEndpoint(cfg.Local.Endpoint); err != nil {
+		fmt.Fprintf(os.Stderr, "update check failed: %v\n", err)
+		return 1
+	}
 	client := nodeapi.New(cfg.Local.Endpoint, &http.Client{Timeout: 30 * time.Second})
 	status, err := desktop.ResolveAgentUpdate(ctx, client)
 	if err != nil {

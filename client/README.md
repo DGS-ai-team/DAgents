@@ -17,8 +17,10 @@ go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml pr
 go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml update --check
 ```
 
-启动 Node 后由 Desktop 按 Desktop 自己保存的 Node endpoint 连接：
+Client 是本机运维命令，只接受 loopback 地址（`localhost`、`127.0.0.0/8` 或 `::1`，端口可自定义），不会连接远程 Node。DAgents Desktop 固定连接同机 `127.0.0.1:18765`：
 
 ```bash
 ./dagents node
 ```
+
+Node 如需向 Manage 公告非 loopback 的可达地址，应单独配置 `manage.registration.base_url`；不要将 CLI 指向远程地址。

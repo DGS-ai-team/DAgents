@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -30,6 +31,33 @@ func New(base string, httpClient *http.Client) *Client {
 		base:       strings.TrimRight(base, "/"),
 		httpClient: httpClient,
 	}
+}
+
+// ValidateLocalNodeEndpoint restricts the maintenance CLI to its local Node.
+// Node's own configuration remains free to advertise a reachable address to Manage.
+func ValidateLocalNodeEndpoint(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid local Node endpoint: %w", err)
+	}
+	if parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" && parsed.Path != "/" {
+		return fmt.Errorf("local Node endpoint must be a plain http loopback URL")
+	}
+	if port := parsed.Port(); port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return fmt.Errorf("local Node endpoint has an invalid port")
+		}
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("maintenance CLI only connects to a loopback Node; remote endpoints are not supported")
+	}
+	return nil
 }
 
 // StreamEvent 表示一条 SSE 业务事件（已解析 JSON data 行）。

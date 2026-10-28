@@ -42,6 +42,13 @@ func TestRunCheckOnly(t *testing.T) {
 	}
 }
 
+func TestRunRejectsRemoteNodeEndpoint(t *testing.T) {
+	cfg := &config.Config{Local: config.LocalConfig{Endpoint: "http://192.0.2.10:18765"}}
+	if code := Run(context.Background(), cfg, Options{CheckOnly: true}); code == 0 {
+		t.Fatal("expected remote endpoint to be rejected")
+	}
+}
+
 func TestRunUpToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(nodeapi.AgentUpdateStatus{

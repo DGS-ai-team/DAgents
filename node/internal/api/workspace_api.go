@@ -27,6 +27,31 @@ type workspaceEntry struct {
 	FileRef    string `json:"file_ref,omitempty"`
 }
 
+// handleWorkspaceLocation returns the authoritative, resolved workspace root
+// for the native Desktop shell. It never returns file contents; callers still
+// have to supply a validated workspace-relative path to native file commands.
+func (s *Server) handleWorkspaceLocation(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Dagents-Native-Workspace") != "1" {
+		writeAPIError(w, http.StatusForbidden, "native_workspace_marker_required", "missing X-Dagents-Native-Workspace invocation marker", nil)
+		return
+	}
+	root, ok := s.workspaceRoot(w, r)
+	if !ok {
+		return
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		writeAPIError(w, 400, "workspace_unavailable", "workspace root cannot be resolved", nil)
+		return
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		writeAPIError(w, 400, "workspace_unavailable", "workspace root cannot be resolved", nil)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"agent_id": strings.TrimSpace(r.PathValue("agent_id")), "root": filepath.Clean(abs)})
+}
+
 func (s *Server) workspaceRoot(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := strings.TrimSpace(r.PathValue("agent_id"))
 	if s.agents == nil {
@@ -115,82 +140,6 @@ func reservedWorkspacePath(rel string) bool {
 
 func fileRevision(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
-// ifNoneMatchMatches implements If-None-Match's weak entity-tag comparison.
-// Commas inside a quoted opaque tag are not list separators; the wildcard is
-// valid only as the complete field value.
-func ifNoneMatchMatches(values []string, currentETag string) bool {
-	if len(values) == 0 {
-		return false
-	}
-	raw := strings.Join(values, ",")
-	if strings.Trim(raw, " \t") == "*" {
-		return true
-	}
-	currentOpaque, ok := entityTagOpaque(currentETag)
-	if !ok {
-		return false
-	}
-
-	matched := false
-	for i := 0; i < len(raw); {
-		for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == ',') {
-			i++
-		}
-		if i == len(raw) {
-			break
-		}
-		if strings.HasPrefix(raw[i:], "W/") {
-			i += 2
-		}
-		if i == len(raw) || raw[i] != '"' {
-			return false
-		}
-		i++
-		start := i
-		for i < len(raw) && raw[i] != '"' {
-			c := raw[i]
-			if c < 0x21 || c == 0x7f {
-				return false
-			}
-			i++
-		}
-		if i == len(raw) {
-			return false
-		}
-		opaque := raw[start:i]
-		i++
-		for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t') {
-			i++
-		}
-		if i < len(raw) && raw[i] != ',' {
-			return false
-		}
-		if opaque == currentOpaque {
-			// If-None-Match always uses weak comparison, so the W/ prefix
-			// does not participate in matching.
-			matched = true
-		}
-		if i < len(raw) {
-			i++
-		}
-	}
-	return matched
-}
-
-func entityTagOpaque(tag string) (string, bool) {
-	tag = strings.Trim(tag, " \t")
-	tag = strings.TrimPrefix(tag, "W/")
-	if len(tag) < 2 || tag[0] != '"' || tag[len(tag)-1] != '"' {
-		return "", false
-	}
-	for i := 1; i < len(tag)-1; i++ {
-		if tag[i] < 0x21 || tag[i] == '"' || tag[i] == 0x7f {
-			return "", false
-		}
-	}
-	return tag[1 : len(tag)-1], true
-}
-
 func (s *Server) handleWorkspaceList(w http.ResponseWriter, r *http.Request) {
 	root, ok := s.workspaceRoot(w, r)
 	if !ok {
@@ -257,57 +206,6 @@ func (s *Server) workspaceFile(w http.ResponseWriter, r *http.Request) (string, 
 		return "", "", false
 	}
 	return root, rel, true
-}
-func (s *Server) handleWorkspaceGet(w http.ResponseWriter, r *http.Request) {
-	root, rel, ok := s.workspaceFile(w, r)
-	if !ok {
-		return
-	}
-	rootFS, err := os.OpenRoot(root)
-	if err != nil {
-		writeAPIError(w, 400, "workspace_unavailable", err.Error(), nil)
-		return
-	}
-	defer rootFS.Close()
-	info, err := rootFS.Lstat(rel)
-	if err != nil {
-		writeAPIError(w, 404, "workspace_file_not_found", "file not found", nil)
-		return
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		writeAPIError(w, 400, "workspace_not_file", "path is not a regular file", nil)
-		return
-	}
-	f, err := rootFS.Open(rel)
-	if err != nil {
-		writeAPIError(w, 404, "workspace_file_not_found", "file not found", nil)
-		return
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil || !st.Mode().IsRegular() {
-		writeAPIError(w, 400, "workspace_not_file", "path is not a regular file", nil)
-		return
-	}
-	if st.Size() > workspaceFileLimit {
-		writeAPIError(w, 413, "workspace_file_too_large", "file exceeds 16 MiB", nil)
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(f, workspaceFileLimit+1))
-	if err != nil || len(data) > workspaceFileLimit {
-		writeAPIError(w, 413, "workspace_file_too_large", "file exceeds 16 MiB", nil)
-		return
-	}
-	etag := `"` + fileRevision(data) + `"`
-	w.Header().Set("ETag", etag)
-	if ifNoneMatchMatches(r.Header.Values("If-None-Match"), etag) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
-	w.WriteHeader(200)
-	_, _ = w.Write(data)
 }
 func (s *Server) handleWorkspacePut(w http.ResponseWriter, r *http.Request) {
 	root, rel, ok := s.workspaceFile(w, r)

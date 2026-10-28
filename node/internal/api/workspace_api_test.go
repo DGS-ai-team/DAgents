@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,6 +55,40 @@ func workspaceRequest(s *Server, method, path string, body []byte, headers map[s
 	return w
 }
 
+func TestWorkspaceLocationReturnsAuthoritativeAgentRoot(t *testing.T) {
+	s, root := workspaceTestServer(t)
+	w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/location", nil, map[string]string{"X-Dagents-Native-Workspace": "1"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("location status=%d body=%s", w.Code, w.Body)
+	}
+	var got struct {
+		AgentID string `json:"agent_id"`
+		Root    string `json:"root"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != "agt-one" || filepath.Clean(got.Root) != filepath.Clean(want) {
+		t.Fatalf("location=%+v want agent=agt-one root=%q", got, want)
+	}
+	missing := workspaceRequest(s, http.MethodGet, "/v1/agents/unknown/workspace/location", nil, map[string]string{"X-Dagents-Native-Workspace": "1"})
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown agent status=%d body=%s", missing.Code, missing.Body)
+	}
+}
+
+func TestWorkspaceLocationIsUnavailableThroughGenericWebViewProxy(t *testing.T) {
+	s, _ := workspaceTestServer(t)
+	w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/location", nil, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("location without native bridge header status=%d body=%s", w.Code, w.Body)
+	}
+}
+
 func TestWorkspaceHTTPCRUDAndRevisions(t *testing.T) {
 	s, root := workspaceTestServer(t)
 	w := workspaceRequest(s, http.MethodPut, "/v1/agents/agt-one/workspace/file?path=folder%2Fnote.bin", []byte{0, 1, 2, 255}, map[string]string{"If-None-Match": "*"})
@@ -63,10 +98,6 @@ func TestWorkspaceHTTPCRUDAndRevisions(t *testing.T) {
 	rev := w.Header().Get("ETag")
 	if rev == "" {
 		t.Fatal("missing ETag")
-	}
-	w = workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path=folder%2Fnote.bin", nil, nil)
-	if w.Code != 200 || !bytes.Equal(w.Body.Bytes(), []byte{0, 1, 2, 255}) || w.Header().Get("ETag") != rev {
-		t.Fatalf("read status=%d body=%v etag=%s", w.Code, w.Body.Bytes(), w.Header().Get("ETag"))
 	}
 	w = workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace?path=folder", nil, nil)
 	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(`"file_ref"`)) || bytes.Contains(w.Body.Bytes(), []byte(`"revision"`)) {
@@ -97,63 +128,19 @@ func TestWorkspaceHTTPCRUDAndRevisions(t *testing.T) {
 	}
 }
 
-func TestWorkspaceHTTPGetIfNoneMatchSemantics(t *testing.T) {
+func TestWorkspaceReadRoutesAreNoLongerRegistered(t *testing.T) {
 	s, _ := workspaceTestServer(t)
-	const path = "/v1/agents/agt-one/workspace/file?path=report.txt"
-	created := workspaceRequest(s, http.MethodPut, path, []byte("current content"), map[string]string{"If-None-Match": "*"})
-	if created.Code != http.StatusOK {
-		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
+	file := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path=note.txt", nil, nil)
+	if file.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET workspace file status=%d; want 405 from the remaining PUT route", file.Code)
 	}
-	etag := created.Header().Get("ETag")
-	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `"`) {
-		t.Fatalf("ETag must be quoted: %q", etag)
-	}
-
-	for name, values := range map[string][]string{
-		"strong tag":             {etag},
-		"weak tag":               {"W/" + etag},
-		"comma-separated list":   {`"different", W/` + etag},
-		"quoted comma plus list": {`"opaque,tag", W/` + etag},
-		"wildcard":               {"*"},
-		"repeated field lines":   {`"different"`, "W/" + etag},
-	} {
-		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			for _, value := range values {
-				req.Header.Add("If-None-Match", value)
-			}
-			rec := httptest.NewRecorder()
-			s.Handler().ServeHTTP(rec, req)
-			if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 || rec.Header().Get("ETag") != etag {
-				t.Fatalf("status=%d body=%q ETag=%q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
-			}
-			if rec.Header().Get("Content-Length") != "" {
-				t.Fatalf("304 unexpectedly has Content-Length %q", rec.Header().Get("Content-Length"))
-			}
-		})
-	}
-
-	for name, value := range map[string]string{
-		"non-matching list":                `W/"different,opaque", "other"`,
-		"unquoted tag":                     "W/" + strings.Trim(etag, `"`),
-		"wildcard mixed with list":         `*, "other"`,
-		"matching tag with malformed tail": etag + `, malformed`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			rec := workspaceRequest(s, http.MethodGet, path, nil, map[string]string{"If-None-Match": value})
-			if rec.Code != http.StatusOK || rec.Body.String() != "current content" || rec.Header().Get("ETag") != etag {
-				t.Fatalf("status=%d body=%q ETag=%q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
-			}
-		})
-	}
-
-	missing := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path=missing.txt", nil, map[string]string{"If-None-Match": "*"})
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("wildcard conditional request for missing file status=%d body=%s", missing.Code, missing.Body)
+	chunk := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/chunk?path=note.txt&offset=0", nil, nil)
+	if chunk.Code != http.StatusNotFound {
+		t.Fatalf("GET workspace chunk status=%d; want 404", chunk.Code)
 	}
 }
 
-func TestWorkspaceHTTPGetHashesSameSizeSameMtimeAndPutStillRejectsStaleRevision(t *testing.T) {
+func TestWorkspaceHTTPPutStillRejectsStaleRevision(t *testing.T) {
 	s, root := workspaceTestServer(t)
 	const requestPath = "/v1/agents/agt-one/workspace/file?path=revision.txt"
 	created := workspaceRequest(s, http.MethodPut, requestPath, []byte("alpha"), map[string]string{"If-None-Match": "*"})
@@ -183,10 +170,6 @@ func TestWorkspaceHTTPGetHashesSameSizeSameMtimeAndPutStillRejectsStaleRevision(
 	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatalf("test setup did not preserve size/mtime: before=(%d,%s) after=(%d,%s)", before.Size(), before.ModTime(), after.Size(), after.ModTime())
 	}
-	got := workspaceRequest(s, http.MethodGet, requestPath, nil, map[string]string{"If-None-Match": oldETag})
-	if got.Code != http.StatusOK || got.Body.String() != "omega" || got.Header().Get("ETag") == oldETag {
-		t.Fatalf("GET status=%d body=%q oldETag=%q newETag=%q", got.Code, got.Body.String(), oldETag, got.Header().Get("ETag"))
-	}
 	stale := workspaceRequest(s, http.MethodPut, requestPath, []byte("stale"), map[string]string{"If-Match": oldETag})
 	if stale.Code != http.StatusPreconditionFailed {
 		t.Fatalf("stale PUT status=%d body=%s", stale.Code, stale.Body)
@@ -197,39 +180,45 @@ func TestWorkspaceHTTPGetHashesSameSizeSameMtimeAndPutStillRejectsStaleRevision(
 	}
 }
 
-func TestWorkspaceHTTPRejectsTraversalPrivateStateAndLinks(t *testing.T) {
+func TestWorkspaceWritesRejectTraversalPrivateStateAndSymlinks(t *testing.T) {
 	s, root := workspaceTestServer(t)
-	outside := filepath.Join(t.TempDir(), "secret")
+	outside := filepath.Join(t.TempDir(), "secret.txt")
 	if err := os.WriteFile(outside, []byte("secret"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"../secret", ".dagents/agt-one/history/log", "C:%5Csecret", "%5C%5Cserver%5Cshare"} {
-		w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path="+path, nil, nil)
-		if w.Code < 400 {
-			t.Errorf("path %q accepted", path)
+	paths := []string{"../secret.txt", ".dagents/agt-one/private", "C:%5Csecret", "%5C%5Cserver%5Cshare"}
+	for _, path := range paths {
+		put := workspaceRequest(s, http.MethodPut, "/v1/agents/agt-one/workspace/file?path="+path, []byte("x"), map[string]string{"If-None-Match": "*"})
+		if put.Code < 400 {
+			t.Errorf("PUT accepted unsafe path %q: %d", path, put.Code)
 		}
-	}
-	for _, path := range []string{".DAGENTS/agt-one/private", "%2eDAGENTS/agt-one/private"} {
-		w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path="+path, nil, nil)
-		if w.Code < 400 {
-			t.Errorf("reserved path %q accepted", path)
+		upload := workspaceRequest(s, http.MethodPost, "/v1/agents/agt-one/workspace/upload?path="+path, []byte("x"), nil)
+		if upload.Code < 400 {
+			t.Errorf("upload accepted unsafe path %q: %d", path, upload.Code)
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(root, ".dagents", "agt-one"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.WriteFile(filepath.Join(root, ".dagents", "agt-one", "private"), []byte("secret"), 0600)
+	if err := os.WriteFile(filepath.Join(root, ".dagents", "agt-one", "private"), []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(filepath.Join(root, ".dagents", "agt-one"), filepath.Join(root, "private-link")); err == nil {
-		w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path=private-link%2Fprivate", nil, nil)
+		w := workspaceRequest(s, http.MethodPut, "/v1/agents/agt-one/workspace/file?path=private-link%2Fprivate", []byte("overwrite"), map[string]string{"If-Match": fileRevision([]byte("secret"))})
 		if w.Code < 400 {
-			t.Fatalf("link into private namespace accepted: %d", w.Code)
+			t.Fatalf("PUT followed link into private state: %d", w.Code)
 		}
 	}
-	link := filepath.Join(root, "escape")
-	if err := os.Symlink(filepath.Dir(outside), link); err == nil {
-		w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-one/workspace/file?path=escape%2Fsecret", nil, nil)
-		if w.Code < 400 {
-			t.Fatalf("symlink escape accepted: %d", w.Code)
+	if err := os.Symlink(filepath.Dir(outside), filepath.Join(root, "escape")); err == nil {
+		for _, method := range []string{http.MethodPut, http.MethodPost} {
+			path := "/v1/agents/agt-one/workspace/file?path=escape%2Fsecret.txt"
+			if method == http.MethodPost {
+				path = "/v1/agents/agt-one/workspace/upload?path=escape%2Fsecret.txt"
+			}
+			w := workspaceRequest(s, method, path, []byte("overwrite"), map[string]string{"If-None-Match": "*"})
+			if w.Code < 400 {
+				t.Errorf("%s followed workspace escape: %d", method, w.Code)
+			}
 		}
 	} else if runtime.GOOS != "windows" {
 		t.Fatalf("create symlink: %v", err)
@@ -244,9 +233,9 @@ func TestWorkspaceHTTPDistinctAgentIsolation(t *testing.T) {
 	if err := s.agents.Save(context.Background(), store.AgentRecord{AgentID: "agt-two", DisplayName: "Two", ConfigSnapshot: []byte(`{"workspace":{"mode":"private"}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-two/workspace/file?path=only-one.txt", nil, nil)
-	if w.Code != 404 {
-		t.Fatalf("other Agent saw private workspace file: %d %s", w.Code, w.Body)
+	w := workspaceRequest(s, http.MethodGet, "/v1/agents/agt-two/workspace", nil, nil)
+	if w.Code != 200 || strings.Contains(w.Body.String(), "only-one.txt") {
+		t.Fatalf("other Agent workspace listing leaked file: %d %s", w.Code, w.Body)
 	}
 }
 

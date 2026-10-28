@@ -87,3 +87,10 @@ func TestNode_agentIDMismatch(t *testing.T) {
 		t.Fatal("expected mismatch error")
 	}
 }
+
+func TestNode_rejectsRemoteEndpointBeforeRequest(t *testing.T) {
+	cfg := &config.Config{Local: config.LocalConfig{Endpoint: "http://192.0.2.10:18765"}}
+	if _, err := Node(context.Background(), cfg, nil); err == nil {
+		t.Fatal("expected remote endpoint to be rejected")
+	}
+}

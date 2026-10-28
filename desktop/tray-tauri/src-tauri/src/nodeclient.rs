@@ -45,6 +45,8 @@ pub struct WorkspaceBinaryResponse {
     pub status: u16,
     pub content_type: String,
     pub etag: String,
+    pub file_size: Option<u64>,
+    pub next_offset: Option<u64>,
     pub body: Vec<u8>,
 }
 
@@ -131,6 +133,12 @@ pub struct AgentInfo {
     pub manage_enabled: bool,
     #[serde(default)]
     pub manage_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceLocation {
+    pub agent_id: String,
+    pub root: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -237,6 +245,38 @@ impl Client {
             .into_json()
             .map_err(|e| format!("GET /v1/agents JSON: {e}"))?;
         Ok(out.agents)
+    }
+
+    /// Resolve workspace authority for one native file operation. The root is
+    /// deliberately fetched on demand and is never accepted from the WebView.
+    pub fn workspace_location(&self, agent_id: &str) -> Result<WorkspaceLocation, String> {
+        let id = agent_id.trim();
+        if id.is_empty()
+            || id.len() > 128
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        {
+            return Err("invalid agent id for workspace read".into());
+        }
+        let path = format!("/v1/agents/{id}/workspace/location");
+        let response = self
+            .authorize(ureq::get(&format!("{}{path}", self.base)))
+            .set("X-Dagents-Native-Workspace", "1")
+            .timeout(Duration::from_secs(15))
+            .call()
+            .map_err(|e| format!("GET {path}: {e}"))?;
+        let body = response
+            .into_string()
+            .map_err(|e| format!("GET {path} body: {e}"))?;
+        let value: Value =
+            serde_json::from_str(&body).map_err(|e| format!("GET {path} JSON: {e}"))?;
+        let location: WorkspaceLocation = serde_json::from_value(value)
+            .map_err(|e| format!("Node 返回了无效的工作区位置: {e}"))?;
+        if location.agent_id != id || location.root.trim().is_empty() {
+            return Err("Node 工作区位置与请求的 Agent 不匹配".into());
+        }
+        Ok(location)
     }
 
     pub fn list_terminals(&self, agent_id: &str) -> Result<Vec<TerminalSummary>, String> {
@@ -522,8 +562,8 @@ impl Client {
         if_none_match: Option<&str>,
     ) -> Result<WorkspaceBinaryResponse, String> {
         let method = method.trim().to_ascii_uppercase();
-        if !matches!(method.as_str(), "GET" | "PUT" | "POST") {
-            return Err("工作区文件只支持 GET、PUT、POST".into());
+        if !matches!(method.as_str(), "PUT" | "POST") {
+            return Err("工作区文件中转只支持 PUT、POST 写入".into());
         }
         let path = validate_workspace_binary_path(path, &method)?;
         if body
@@ -531,9 +571,6 @@ impl Client {
             .is_some_and(|bytes| bytes.len() > MAX_WORKSPACE_FILE_BYTES)
         {
             return Err("工作区单文件不能超过 16 MiB".into());
-        }
-        if method == "GET" && body.is_some() {
-            return Err("读取工作区文件不能携带内容".into());
         }
         let url = format!("{}{}", self.base, path);
         let mut request = self
@@ -545,22 +582,14 @@ impl Client {
         if let Some(value) = if_none_match.filter(|value| !value.trim().is_empty()) {
             request = request.set("If-None-Match", value);
         }
-        if let Some(bytes) = body.as_deref() {
-            request = request.set("Content-Type", "application/octet-stream");
-            let response = match request.send_bytes(bytes) {
-                Ok(response) => response,
-                Err(ureq::Error::Status(_, response)) => response,
-                Err(error) => return Err(format!("{method} {path}: {error}")),
-            };
-            read_workspace_binary_response(response)
-        } else {
-            let response = match request.call() {
-                Ok(response) => response,
-                Err(ureq::Error::Status(_, response)) => response,
-                Err(error) => return Err(format!("{method} {path}: {error}")),
-            };
-            read_workspace_binary_response(response)
-        }
+        let bytes = body.ok_or_else(|| "写入工作区文件必须提供内容".to_string())?;
+        request = request.set("Content-Type", "application/octet-stream");
+        let response = match request.send_bytes(&bytes) {
+            Ok(response) => response,
+            Err(ureq::Error::Status(_, response)) => response,
+            Err(error) => return Err(format!("{method} {path}: {error}")),
+        };
+        read_workspace_binary_response(response)
     }
 
     pub fn agent_media_binary_request(
@@ -875,6 +904,12 @@ fn read_workspace_binary_response(
         .unwrap_or("application/octet-stream")
         .to_string();
     let etag = response.header("ETag").unwrap_or("").to_string();
+    let file_size = response
+        .header("X-Workspace-File-Size")
+        .and_then(|value| value.parse().ok());
+    let next_offset = response
+        .header("X-Workspace-Next-Offset")
+        .and_then(|value| value.parse().ok());
     let mut body = Vec::new();
     response
         .into_reader()
@@ -888,6 +923,8 @@ fn read_workspace_binary_response(
         status,
         content_type,
         etag,
+        file_size,
+        next_offset,
         body,
     })
 }
@@ -906,10 +943,7 @@ pub fn validate_workspace_binary_path(path: &str, method: &str) -> Result<String
         return Err("工作区文件路径无效".into());
     }
     let endpoint = parts[5];
-    if !matches!(
-        (method, endpoint),
-        ("GET", "file") | ("PUT", "file") | ("POST", "upload")
-    ) {
+    if !matches!((method, endpoint), ("PUT", "file") | ("POST", "upload")) {
         return Err("工作区文件路径不允许此操作".into());
     }
     let relative = url
@@ -1110,6 +1144,28 @@ mod tests {
     }
 
     #[test]
+    fn workspace_location_uses_native_bridge_header_and_binds_agent_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let count = socket.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..count]).to_ascii_lowercase();
+            assert!(request.starts_with("get /v1/agents/agent-1/workspace/location http/1.1"));
+            assert!(request.contains("x-dagents-native-workspace: 1"));
+            let body = r#"{"agent_id":"agent-1","root":"C:\\workspace"}"#;
+            write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let client = Client::new(&format!("http://{address}"));
+        let location = client.workspace_location("agent-1").unwrap();
+        assert_eq!(location.agent_id, "agent-1");
+        assert_eq!(location.root, r"C:\workspace");
+        assert!(client.workspace_location("../other").is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
     fn sse_resume_uses_global_cursor_and_signals_successful_connection() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1237,7 +1293,7 @@ mod tests {
     fn workspace_binary_path_is_limited_to_relative_workspace_files() {
         assert!(validate_workspace_binary_path(
             "/v1/agents/agent-1/workspace/file?path=src%2Fmain.rs",
-            "GET"
+            "PUT"
         )
         .is_ok());
         assert!(validate_workspace_binary_path(
@@ -1246,14 +1302,6 @@ mod tests {
         )
         .is_ok());
         for (method, path) in [
-            (
-                "GET",
-                "/v1/agents/agent-1/workspace/file?path=%2e%2e%2Fsecret.txt",
-            ),
-            (
-                "GET",
-                "/v1/agents/agent-1/workspace/file?path=C%3A%5Csecret.txt",
-            ),
             ("PUT", "/v1/agents/agent-1/workspace/upload?path=new.txt"),
             ("GET", "/v1/agents/agent-1/context?path=notes.txt"),
             ("POST", "/v1/agents/agent-1/workspace/file?path=notes.txt"),

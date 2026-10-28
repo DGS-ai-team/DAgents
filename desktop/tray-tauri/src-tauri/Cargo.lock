@@ -636,6 +636,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-winrt-notification",
+ "tempfile",
  "thiserror 2.0.19",
  "tungstenite",
  "ureq",
