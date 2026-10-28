@@ -130,7 +130,7 @@ func TestRunDreamingMaxToolRoundsLeavesFinalRequestToolFree(t *testing.T) {
 		t.Fatalf("final summary exposed tools: %d", len(final.Tools))
 	}
 	for _, phrase := range []string{
-		"工具轮次已达到上限",
+		"本轮执行预算已达到上限",
 		"不要发起或请求任何工具调用",
 		"不要输出模拟的 <tool_call>",
 		"如实说明已经完成的工作、未完成的工作",

@@ -380,9 +380,7 @@
   /* 勿用 smooth：流式高频 pin 时动画未到新底部会触发 @scroll，误关 stick-to-bottom */
 }
 
-:root[data-theme="light"] .chat__stream,
-:root[data-theme="light"] .chat__composer,
-:root[data-theme="light"] .wg-chat__body {
+:root[data-theme="light"] .chat__stream {
   background: transparent;
 }
 
@@ -570,7 +568,7 @@
   max-width: 100%;
 }
 
-/* Agent 对话区使用稳定的阅读列；输入栏仍由 ChatComposer 原样占据底部。 */
+/* Agent 对话区使用稳定的阅读列；输入栏由 Desktop 工作区单独管理。 */
 .app__body--chat-v61 .chat__stream > .msg--user,
 .app__body--chat-v61 .chat__stream > .msg--assistant,
 .app__body--chat-v61 .chat__stream > .msg--system {
@@ -1781,29 +1779,6 @@ select.settings-field__input {
   color: var(--color-primary-strong);
 }
 
-.chat__composer {
-  position: relative;
-  flex-shrink: 0;
-  padding: 10px 20px 14px;
-  background: var(--color-editor);
-  border-top: 0;
-  border-radius: 0;
-}
-
-.chat__composer-transients {
-  position: absolute;
-  right: 92px;
-  bottom: calc(100% + 8px);
-  left: 20px;
-  z-index: 16;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  min-width: 0;
-  pointer-events: none;
-}
-
 .chat__pending-attachments {
   position: absolute;
   right: 20px;
@@ -1816,56 +1791,6 @@ select.settings-field__input {
   gap: 6px;
   pointer-events: none;
 }
-
-.chat__composer-alert {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  max-width: 100%;
-  margin: 0;
-  padding: 5px 9px;
-  border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--color-border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-danger-soft) 94%, var(--color-surface));
-  box-shadow: var(--shadow-sm);
-  color: var(--color-danger);
-  font-size: 11px;
-  line-height: 1.35;
-  cursor: help;
-  pointer-events: auto;
-}
-
-.chat__composer-alert:focus-visible {
-  outline: 2px solid var(--color-danger);
-  outline-offset: 2px;
-}
-
-.chat__composer-alert-detail {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  display: none;
-  box-sizing: border-box;
-  width: max-content;
-  max-width: min(560px, calc(100vw - 48px));
-  max-height: min(280px, 40vh);
-  overflow: auto;
-  padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--color-border));
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-md);
-  color: var(--color-text);
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  cursor: text;
-}
-
-.chat__composer-alert:hover .chat__composer-alert-detail,
-.chat__composer-alert:focus .chat__composer-alert-detail { display: block; }
 
 .markdown-code-block {
   margin: 0.5em 0;
@@ -1926,139 +1851,6 @@ select.settings-field__input {
 .markdown-code-block > pre {
   margin-top: 0;
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-}
-
-.chat__composer-alert-icon {
-  flex: 0 0 auto;
-  display: inline-grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.chat__composer-pill {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  min-height: 48px;
-  padding: 8px 10px 8px 8px;
-  border-radius: 28px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.chat__composer-pill-left,
-.chat__composer-pill-right {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-bottom: 2px;
-}
-
-.chat__composer-pill-center {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.chat__composer-plus {
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-
-.chat__composer-plus svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-
-.chat__composer-plus:hover:not(:disabled) {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-
-.chat__composer-plus:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.chat__composer-plus--secondary {
-  width: 28px;
-  height: 28px;
-}
-
-.chat__composer-plus--secondary svg {
-  width: 14px;
-  height: 14px;
-}
-
-.chat__composer-send {
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  border: 0;
-  background: var(--color-text);
-  color: var(--color-text-invert);
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-  transition: opacity 0.12s ease, background 0.12s ease;
-}
-
-.chat__composer-send svg {
-  width: 15px;
-  height: 15px;
-  display: block;
-}
-
-.chat__composer-send:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
-.chat__composer-send:disabled {
-  opacity: 0.28;
-  cursor: not-allowed;
-}
-
-.chat__composer-send--cancel {
-  background: transparent;
-  color: var(--color-danger);
-  border: 1px solid var(--color-border);
-}
-
-.chat__composer-send--cancel:hover:not(:disabled) {
-  opacity: 1;
-  background: var(--color-danger-soft);
-}
-
-.chat__composer-send--cancelling {
-  color: var(--color-warning);
-  border-color: color-mix(in srgb, var(--color-warning) 38%, var(--color-border));
-}
-
-.chat__composer-stop-spinner {
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: chat-composer-spin 0.8s linear infinite;
 }
 
 @keyframes chat-composer-spin {
@@ -2214,20 +2006,6 @@ select.settings-field__input {
 
 .chat__pending-file--invalid {
   border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
-}
-
-.chat__composer-attachment-notice {
-  max-width: 100%;
-  margin: 0;
-  padding: 5px 9px;
-  border: 1px solid color-mix(in srgb, var(--color-warning) 28%, var(--color-border));
-  border-radius: 999px;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-  color: var(--color-warning);
-  font-size: 11px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
 }
 
 .chat__pending-images-list {
@@ -2391,91 +2169,10 @@ select.settings-field__input {
   outline-offset: 1px;
 }
 
-.chat__composer-toolbar {
-  flex: 0 0 auto;
-}
-
 /*
  * 瞬时 turn/step 状态悬浮在消息/终端工作区右下角，不参与输入区排版。
  * 右侧为“回到底部”等浮动控件预留空间；底部状态线只保留稳定控制项。
  */
-.chat__composer-runtime-rail {
-  position: absolute;
-  right: 68px;
-  bottom: calc(100% + 8px);
-  z-index: 15;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  max-width: min(520px, calc(100% - 92px));
-  min-width: 0;
-  min-height: 24px;
-  margin: 0;
-  padding: 3px 9px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
-  color: var(--color-text-subtle);
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(10px);
-  font-size: 11px;
-  line-height: 1.45;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
-}
-
-.chat__composer-runtime-rail::before {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--color-primary);
-  content: "";
-  animation: composer-pulse 1.2s ease-in-out infinite;
-}
-
-.chat__composer-runtime-rail--idle {
-  opacity: 0;
-  transform: translateY(4px);
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.chat__composer-statusline {
-  position: relative;
-  z-index: 12;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 22px;
-  margin-top: 8px;
-  padding: 0 6px;
-}
-
-.chat__composer-statusline-left,
-.chat__composer-statusline-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.chat__composer-statusline-left {
-  flex: 1 1 auto;
-  overflow: visible;
-}
-
-.chat__composer-statusline-right {
-  flex: 0 0 auto;
-  margin-left: auto;
-  justify-content: flex-end;
-}
 
 .chat__statusline-thinking {
   display: inline-flex;
@@ -3754,28 +3451,6 @@ select.settings-field__input {
 
 .composer-toolbar__label {
   font-weight: 500;
-}
-
-.composer-toolbar__pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  animation: composer-pulse 1.2s ease-in-out infinite;
-}
-
-.composer-toolbar__pulse--prefill {
-  background: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-soft);
-}
-
-.composer-toolbar__pulse--think {
-  background: #0891b2;
-  box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.18);
-}
-
-.composer-toolbar__pulse--compress {
-  background: #d97706;
-  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18);
 }
 
 @keyframes composer-pulse {
@@ -5066,15 +4741,6 @@ select.settings-field__input {
     gap: 16px;
   }
 
-  .chat__composer {
-    padding-inline: 12px;
-  }
-
-  .chat__composer-statusline-left,
-  .chat__composer-statusline-right {
-    gap: 6px;
-  }
-
   .composer-toolbar__model,
   .composer-toolbar__trigger {
     max-width: 132px;
@@ -5096,58 +4762,11 @@ select.settings-field__input {
     max-width: 94%;
   }
 
-  .chat__composer {
-    padding: 8px 8px 10px;
-  }
-
-  .chat__composer-pill {
-    gap: 4px;
-    padding: 7px 8px 7px 6px;
-    border-radius: 20px;
-  }
-
-  .chat__composer-pill-left,
-  .chat__composer-pill-right {
-    gap: 2px;
-  }
-
-  .chat__composer-plus {
-    width: 28px;
-    height: 28px;
-  }
-
-  .chat__composer-plus--secondary {
-    display: inline-grid;
-    width: 26px;
-    height: 26px;
-  }
-
   .composer-toolbar__model,
   .composer-toolbar__trigger {
     max-width: 92px;
     padding-inline: 5px;
     font-size: 11px;
-  }
-
-  .chat__composer-statusline {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 4px 8px;
-    min-height: 20px;
-    margin-top: 6px;
-  }
-
-  .chat__composer-statusline-left {
-    flex: 1 1 100%;
-    order: 2;
-    min-width: 0;
-  }
-
-  .chat__composer-statusline-right {
-    flex: 1 1 100%;
-    order: 1;
-    justify-content: flex-end;
-    min-width: 0;
   }
 
   .chat__input-strip-left {
@@ -5161,25 +4780,6 @@ select.settings-field__input {
 }
 
 @media (max-width: 480px) {
-  .chat__composer-pill {
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .chat__composer-pill-center {
-    order: 1;
-    flex: 1 1 100%;
-    width: 100%;
-  }
-
-  .chat__composer-pill-left {
-    order: 2;
-  }
-
-  .chat__composer-pill-right {
-    order: 3;
-    margin-left: auto;
-  }
 
   .composer-toolbar__model,
   .composer-toolbar__trigger {

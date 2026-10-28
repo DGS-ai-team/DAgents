@@ -1,7 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { statusStore, hasStatus } from "../stores/statusLines.js";
-import { hasStreamingTextContent } from "../stores/transcript.js";
+import { statusPhaseLabel, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
@@ -35,17 +34,21 @@ const titleText = computed(() => {
   return profile ? `${providerModel} · ${profile}` : providerModel;
 });
 
-const prefillingActive = computed(() => {
-  void statusStore.tick;
-  return hasStatus("prefilling") && !hasStreamingTextContent();
-});
-const thinkingActive = computed(() => {
-  void statusStore.tick;
-  return hasStatus("thinking");
-});
-const compressionActive = computed(() => {
-  void statusStore.tick;
-  return hasStatus("compression");
+const statusShortLabels = {
+  queued: "排队中",
+  model_generating: "生成中",
+  prefilling: "准备中",
+  thinking: "思考中",
+  assistant_generating: "回复中",
+  tool_executing: "工具中",
+  tool_waiting: "待审批",
+  waiting_user: "待输入",
+  compression: "压缩中",
+};
+
+const activeStatus = computed(() => {
+  const phase = ["compression", ...statusPhaseOrder].find(hasStatus);
+  return phase ? { phase, label: statusShortLabels[phase] || statusPhaseLabel(phase) } : null;
 });
 
 function closeMenu() {
@@ -93,9 +96,16 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="composer-toolbar">
-    <span v-if="prefillingActive" class="composer-toolbar__pulse composer-toolbar__pulse--prefill" title="prefilling" />
-    <span v-if="thinkingActive" class="composer-toolbar__pulse composer-toolbar__pulse--think" title="thinking" />
-    <span v-if="compressionActive" class="composer-toolbar__pulse composer-toolbar__pulse--compress" title="正在压缩上下文" />
+    <span
+      v-if="activeStatus"
+      class="composer-toolbar__status"
+      role="status"
+      aria-live="polite"
+      :title="statusPhaseLabel(activeStatus.phase)"
+    >
+      <span class="composer-toolbar__status-dot" aria-hidden="true" />
+      <span>{{ activeStatus.label }}</span>
+    </span>
 
     <div v-if="showProfileSwitch" ref="rootRef" class="composer-toolbar__profile">
       <button

@@ -18,6 +18,13 @@ import (
 // DefaultMaxSteps 为新建 Agent 未指定时的 defaults.llm.max_steps。
 const DefaultMaxSteps = 32
 
+// DefaultMaxToolCalls 为 Agent 单个聊天 Turn 未指定时的工具调用上限。
+// 模型可以在一个步骤中并行提出多个工具，因此该值独立于 max_steps。
+const DefaultMaxToolCalls = 64
+
+// MaxConfiguredToolCalls 限制可配置范围，避免无效或意外的超大值。
+const MaxConfiguredToolCalls = 4096
+
 // BuildParams 为构造 per-agent Registry / TurnOptions 的输入。
 type BuildParams struct {
 	NodeCFG     *config.Config

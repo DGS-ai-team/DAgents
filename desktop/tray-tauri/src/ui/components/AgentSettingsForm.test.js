@@ -37,6 +37,29 @@ function mountForm({ mode, showAdvanced = false, draft, groups }) {
 }
 
 describe("AgentSettingsForm tool group tiles", () => {
+  it("exposes the per-turn tool-call cap and updates the draft", async () => {
+    const draft = reactive({
+      agentType: "normal",
+      displayName: "助手",
+      description: "",
+      llmProfileId: "default",
+      maxToolCalls: 64,
+      toolGroups: [],
+      visibleSkills: null,
+      promptSoulMd: "",
+      promptCustomMd: "",
+      promptMemoryScope: "agent",
+    });
+    const wrapper = mountForm({ mode: "full", draft, groups: [] });
+    const input = wrapper.get('[aria-label="每轮最大工具调用数"]');
+
+    expect(input.element.value).toBe("64");
+    expect(wrapper.text()).toContain("Auto 自主激活与 dreaming 使用各自的轮次上限");
+    await input.setValue("12");
+    expect(draft.maxToolCalls).toBe(12);
+    wrapper.unmount();
+  });
+
   it("toggles selected tool-group data and aria state in the create flow", async () => {
     const draft = reactive({ toolGroups: [] });
     const wrapper = mountForm({

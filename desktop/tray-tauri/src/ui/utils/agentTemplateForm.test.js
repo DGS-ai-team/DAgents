@@ -45,6 +45,7 @@ describe("agentTemplateForm", () => {
     );
     expect(draft.templateId).toBe("ops-runner");
     expect(draft.llmProfileId).toBe("deepseek");
+    expect(draft.maxToolCalls).toBe(64);
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
     expect(draft.visibleSkills).toBeNull();
     expect(draft.promptSoulMd).toBe("你是运维助手");
@@ -98,7 +99,7 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的助手");
     expect(payload.workspace).toEqual({ mode: "private" });
     expect(payload.sandbox).toBeUndefined();
-    expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_steps: 16 });
+    expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_steps: 16, max_tool_calls: 64 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
     expect(payload.defaults.skills).toEqual({
       visible: ["write-skill", "write-hook"],
@@ -109,6 +110,15 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.prompt_context.user_enabled).toBeUndefined();
     expect(payload.defaults.prompt_context.soul_md).toBe("你是助手");
     expect(payload.defaults.prompt_context.custom_md).toBeUndefined();
+  });
+
+  it("preserves and submits the per-turn tool-call limit", () => {
+    const draft = draftFromAgentView({
+      display_name: "受限 Agent",
+      config_snapshot: { defaults: { llm: { active: "p", max_tool_calls: 9 } } },
+    }, ["p"]);
+    expect(draft.maxToolCalls).toBe(9);
+    expect(buildPatchAgentPayload(draft).defaults.llm.max_tool_calls).toBe(9);
   });
 
   it("enables automatic memory recall when memory tool group is selected", () => {
@@ -251,7 +261,7 @@ describe("agentTemplateForm", () => {
     );
     expect(payload.id).toBe("my-bot");
     expect(payload.display_name).toBe("我的 Bot");
-    expect(payload.defaults.llm).toEqual({ active: "default", max_steps: 20 });
+    expect(payload.defaults.llm).toEqual({ active: "default", max_steps: 20, max_tool_calls: 64 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "memory"]);
     expect(payload.defaults.child_agents).toBeUndefined();
     expect(payload.defaults.skills).toEqual({});

@@ -32,7 +32,7 @@ function mountPage() {
         UiIcon: true,
         AgentSettingsForm: {
           props: ["draft"],
-          template: '<textarea aria-label="提示词草稿" v-model="draft.promptCustomMd"></textarea><output aria-label="工具组">{{ draft.toolGroups.join(",") }}</output>',
+          template: '<textarea aria-label="提示词草稿" v-model="draft.promptCustomMd"></textarea><input aria-label="每轮最大工具调用数" v-model.number="draft.maxToolCalls"><output aria-label="工具组">{{ draft.toolGroups.join(",") }}</output>',
         },
         PolicyPanel: true,
         McpAgentPanel: true,
@@ -57,6 +57,18 @@ beforeEach(() => {
 });
 
 describe("AgentDetailSettings staged persistence", () => {
+  it("rejects a non-integer tool-call limit before saving", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('input[aria-label="每轮最大工具调用数"]').setValue("1.5");
+    await wrapper.get(".agent-detail__actions .btn--primary").trigger("click");
+    await flushPromises();
+
+    expect(api.patchAgent).not.toHaveBeenCalled();
+    expect(wrapper.get('[role="alert"]').text()).toContain("最大工具调用数需为 1–4096 的整数");
+    wrapper.unmount();
+  });
+
   it("keeps prompt edits and explains confirmed base save when prompt save fails", async () => {
     api.putAgentPromptContext.mockRejectedValueOnce(new Error("prompt write failed"));
     const wrapper = mountPage();

@@ -76,6 +76,7 @@ export function emptyAgentDraft() {
     role: "assistant",
     llmProfileId: "",
     maxSteps: 32,
+    maxToolCalls: 64,
     toolGroups: [],
     // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
     visibleSkills: null,
@@ -193,6 +194,7 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.description = String(template?.description || agent.description || "").trim();
   draft.role = String(agent.role || "assistant").trim() || "assistant";
   draft.maxSteps = numberOr(llm.max_steps, 32);
+  draft.maxToolCalls = numberOr(llm.max_tool_calls, 64);
   draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
@@ -227,6 +229,7 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.description = String(agentMeta.description || "").trim();
   draft.role = String(agentMeta.role || "assistant").trim() || "assistant";
   draft.maxSteps = numberOr(llm.max_steps, 32);
+  draft.maxToolCalls = numberOr(llm.max_tool_calls, 64);
   draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
@@ -271,6 +274,7 @@ export function buildCreateAgentPayload(draft) {
       llm: {
         ...(llmActive ? { active: llmActive } : {}),
         max_steps: numberOr(draft.maxSteps, 32),
+        max_tool_calls: numberOr(draft.maxToolCalls, 64),
       },
       tools: {
         enabled_groups: normalizeToolGroupNames(draft.toolGroups),
@@ -331,6 +335,7 @@ export function buildCreateTemplatePayload(meta, draft) {
       llm: {
         ...(llmActive ? { active: llmActive } : {}),
         max_steps: numberOr(draft?.maxSteps, 32),
+        max_tool_calls: numberOr(draft?.maxToolCalls, 64),
       },
       tools: {
         enabled_groups: normalizeToolGroupNames(draft?.toolGroups),

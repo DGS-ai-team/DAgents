@@ -21,7 +21,7 @@ import UiIcon from "./UiIcon.vue";
 const props = defineProps({
   active: { type: Boolean, default: false },
 });
-const emit = defineEmits(["toast", "open-chat", "page-meta"]);
+const emit = defineEmits(["toast", "page-meta"]);
 
 const loading = ref(false);
 const loadingDetail = ref(false);
@@ -89,7 +89,7 @@ const configMembers = computed(() => {
       home_node_id: "manage",
       llm_profile_id: wg.llm_profile_id,
       llm_profile_revision: wg.llm_profile_revision,
-      hint: "工作组编排者；对话与分派由 Manage 侧 leader 执行",
+      hint: "工作组编排者；负责协调成员完成工作组任务",
     });
   }
   for (const m of sortedMembers.value) {
@@ -133,10 +133,6 @@ function statusLabel(status) {
     archived: "已归档",
   };
   return map[status] || status || "—";
-}
-
-function canChat(item) {
-  return String(item?.status || "") === "active";
 }
 
 function formatTime(iso) {
@@ -492,18 +488,6 @@ async function loadSettings() {
   }
 }
 
-function openChat(item) {
-  if (!canChat(item)) {
-    emit("toast", { message: "请先在配置页发布工作组后再对话", type: "error" });
-    return;
-  }
-  createOpen.value = false;
-  emit("open-chat", {
-    workgroupId: item.workgroup_id,
-    displayName: item.display_name || item.workgroup_id,
-  });
-}
-
 async function onPublish(item) {
   const id = item?.workgroup_id;
   if (!id || publishingId.value || item.status !== "configuring") return;
@@ -513,7 +497,7 @@ async function onPublish(item) {
     workgroups.value = (workgroups.value || []).map((row) =>
       row.workgroup_id === updated.workgroup_id ? updated : row,
     );
-    emit("toast", { message: "工作组已发布，可以开始对话", type: "success" });
+    emit("toast", { message: "工作组已发布，可在 Desktop 中使用", type: "success" });
   } catch (err) {
     emit("toast", { message: err.message || "发布失败", type: "error" });
   } finally {
@@ -660,16 +644,6 @@ onMounted(async () => {
             <button
               type="button"
               class="wg-card__action"
-              title="对话"
-              aria-label="对话"
-              :disabled="!canChat(item)"
-              @click="openChat(item)"
-            >
-              <UiIcon name="message-square" :size="17" />
-            </button>
-            <button
-              type="button"
-              class="wg-card__action"
               title="配置"
               aria-label="配置"
               @click="openSettings(item.workgroup_id)"
@@ -742,7 +716,7 @@ onMounted(async () => {
               </span>
             </div>
           </div>
-          <div class="wg-detail-header__actions">
+          <div v-if="selectedWorkgroup.status === 'configuring'" class="wg-detail-header__actions">
             <button
               v-if="selectedWorkgroup.status === 'configuring'"
               type="button"
@@ -750,21 +724,12 @@ onMounted(async () => {
               :disabled="publishingId === selectedWorkgroup.workgroup_id"
               @click="onPublish(selectedWorkgroup)"
             >
-              {{ publishingId === selectedWorkgroup.workgroup_id ? "发布中…" : "发布" }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-ghost"
-              :disabled="!canChat(selectedWorkgroup)"
-              :title="canChat(selectedWorkgroup) ? '打开对话' : '发布后可对话'"
-              @click="openChat(selectedWorkgroup)"
-            >
-              对话
+            {{ publishingId === selectedWorkgroup.workgroup_id ? "发布中…" : "发布" }}
             </button>
           </div>
         </div>
         <p v-if="selectedWorkgroup.status === 'configuring'" class="muted wg-detail-header__hint">
-          当前为配置中：请完成 Supervisor / 成员配置后点击「发布」，方可开始对话。
+          当前为配置中：完成 Supervisor / 成员配置并发布后，即可在 Desktop 中使用。
         </p>
       </header>
 
@@ -935,7 +900,7 @@ onMounted(async () => {
                   <p v-if="m.hint" class="wg-member-config__hint muted">{{ m.hint }}</p>
                 </div>
                 <div class="wg-member-config__head-right">
-                  <span class="wg-chat-rail__status" :data-status="m.status">
+                  <span class="workgroup-member-status" :data-status="m.status">
                     {{ memberStatusLabel(m.status) }}
                   </span>
                   <div v-if="m.kind === 'member'" class="wg-member-config__actions">
