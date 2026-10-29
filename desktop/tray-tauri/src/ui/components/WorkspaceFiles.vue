@@ -1078,8 +1078,49 @@ watch(selectedPath, (path, previousPath) => { if (previousPath && path !== previ
 defineExpose({ openPath, refreshResources, discardDraftAndReload, resourceMenuActions, clearAnnotations, removeAnnotation })
 watch(() => [content.value, dirty.value, selectedPath.value, props.agentId], saveDraft)
 watch(() => [content.value, filename.value, previewKind.value, previewMode.value], () => { void refreshHighlightedContent() }, { immediate: true })
-watch(() => [props.agentId, props.workspaceScope], () => { if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {}); activeWriteRequest.value = ''; writeProgress.value = null; requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; currentPath.value = ''; selectedPath.value = ''; draftOwnerId.value = ''; draftOwnerScope.value = ''; dirty.value = false; fileRefs.value = {}; revision.value = ''; fileMissing.value = false; externalUpdate.value = false; lastDirectoryCheck = 0; lastFileCheck = 0; void loadDirectory('') }, { immediate: true })
-watch(() => props.requestGeneration, () => { if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {}); activeWriteRequest.value = ''; writeProgress.value = null; requestEpoch++; saveSequence++; saving.value = false; refreshAfterSave = false; actionStatus.value = ''; resourceActionBusy.value = false; if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); missingConfirmTimer = 0; lastDirectoryCheck = 0; lastFileCheck = 0; if (refreshTimer) window.clearTimeout(refreshTimer); refreshTimer = 0; if (props.active) void refreshResources('return') })
+watch(() => [props.agentId, props.workspaceScope], () => {
+  if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
+  activeWriteRequest.value = '';
+  writeProgress.value = null;
+  requestEpoch++;
+  saveSequence++;
+  saving.value = false;
+  refreshAfterSave = false;
+  actionStatus.value = '';
+  resourceActionBusy.value = false;
+  if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer);
+  missingConfirmTimer = 0;
+  currentPath.value = '';
+  selectedPath.value = '';
+  draftOwnerId.value = '';
+  draftOwnerScope.value = '';
+  dirty.value = false;
+  fileRefs.value = {};
+  revision.value = '';
+  fileMissing.value = false;
+  externalUpdate.value = false;
+  lastDirectoryCheck = 0;
+  lastFileCheck = 0;
+  void loadDirectory('');
+}, { immediate: true });
+watch(() => props.requestGeneration, () => {
+  if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
+  activeWriteRequest.value = '';
+  writeProgress.value = null;
+  requestEpoch++;
+  saveSequence++;
+  saving.value = false;
+  refreshAfterSave = false;
+  actionStatus.value = '';
+  resourceActionBusy.value = false;
+  if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer);
+  missingConfirmTimer = 0;
+  lastDirectoryCheck = 0;
+  lastFileCheck = 0;
+  if (refreshTimer) window.clearTimeout(refreshTimer);
+  refreshTimer = 0;
+  if (props.active) void refreshResources('return');
+});
 watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
 watch(() => props.dockCollapsed, async collapsed => {
   if (!collapsed) return
@@ -1099,7 +1140,19 @@ onMounted(async () => {
   } catch { /* non-Tauri tests and previews do not expose event APIs */ }
   if (props.active) void refreshResources('return')
 })
-onUnmounted(() => { disposed = true; requestEpoch++; if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {}); unlistenWriteProgress?.(); if (refreshTimer) window.clearTimeout(refreshTimer); if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer); document.removeEventListener('visibilitychange', onVisibilityChange); document.removeEventListener('pointerdown', onToolbarPointerDown); document.removeEventListener('pointerup', stopSpreadsheetSelection); document.removeEventListener('keydown', onToolbarKeydown); revokePreview() })
+onUnmounted(() => {
+  disposed = true;
+  requestEpoch++;
+  if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
+  unlistenWriteProgress?.();
+  if (refreshTimer) window.clearTimeout(refreshTimer);
+  if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  document.removeEventListener('pointerdown', onToolbarPointerDown);
+  document.removeEventListener('pointerup', stopSpreadsheetSelection);
+  document.removeEventListener('keydown', onToolbarKeydown);
+  revokePreview();
+});
 </script>
 
 <template>

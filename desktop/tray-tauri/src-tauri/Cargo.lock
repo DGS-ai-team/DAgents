@@ -626,6 +626,7 @@ dependencies = [
  "base64 0.22.1",
  "hex",
  "image",
+ "libc",
  "open",
  "percent-encoding",
  "serde",
