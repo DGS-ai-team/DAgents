@@ -570,8 +570,23 @@ async function readFileForPreview(request, entry, { revision: expectedRevision =
       range: { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size },
       csvParser: null,
     }
-    if (chunkState.range.size <= workspacePreviewLimits.bytes
-      && chunkState.range.end >= chunkState.range.size && result.bytes.byteLength >= chunkState.range.size) chunkState = null
+  }
+  const isCompleteSmallChunk = () => chunkState && chunkState.range.size <= workspacePreviewLimits.bytes
+    && chunkState.range.end >= chunkState.range.size && result.bytes.byteLength >= chunkState.range.size
+  const upgradeCompleteChunk = async () => {
+    if (!isCompleteSmallChunk()) return
+    try {
+      const fullResult = await readWorkspaceFile(request.agentId, request.path)
+      if (!isCurrent()) return
+      result = fullResult
+      chunkState = null
+    } catch (readError) {
+      if (readError?.status !== 413) throw readError
+      if (!isCurrent()) return
+      // A file may grow between its chunk and full reads. Refresh the bounded preview once;
+      // keep it read-only even if this second chunk is also complete.
+      await readFirstChunk()
+    }
   }
   if (entry.size > workspacePreviewLimits.bytes && isSegmentableText(entry.name) && !preferFullRead) await readFirstChunk()
   else {
@@ -585,6 +600,7 @@ async function readFileForPreview(request, entry, { revision: expectedRevision =
       await readFirstChunk()
     }
   }
+  await upgradeCompleteChunk()
   return isCurrent() ? { result, chunkState } : null
 }
 function finishChunkedPreview(snapshot, path, bytes, chunkState) {

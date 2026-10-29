@@ -94,13 +94,37 @@ describe('Desktop workspace resource navigation', () => {
   })
 
   it('treats a complete first chunk as a full file when directory size metadata is stale', async () => {
-    api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('now small'), fileSize: 8, nextOffset: 8, etag: 'etag-small' })
+    const strongRevision = `"${'a'.repeat(64)}"`
+    api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('now small'), fileSize: 8, nextOffset: 8, etag: 'W/"8-123"' })
+    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('now small'), contentType: 'text/plain', etag: strongRevision })
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
     await wrapper.vm.openPath('large.md')
 
     expect(wrapper.find('.workspace-files__chunk-toolbar').exists()).toBe(false)
     expect(wrapper.find('textarea').element.value).toBe('now small')
+    await wrapper.find('textarea').setValue('edited small file')
+    api.saveWorkspaceFile.mockResolvedValueOnce({ status: 'saved', etag: strongRevision })
+    await wrapper.find('[aria-label="保存文件"]').trigger('click')
+    await flushPromises()
+    expect(api.saveWorkspaceFile.mock.calls.at(-1)[3]).toBe(strongRevision)
+  })
+
+  it('keeps a complete chunk read-only if the file grows before its strong full read', async () => {
+    api.readWorkspaceTextChunk
+      .mockResolvedValueOnce({ ...result('old complete content'), fileSize: 20, nextOffset: 20, etag: 'W/"20-123"' })
+      .mockResolvedValueOnce({ ...result('# New large prefix\n'), fileSize: 17 * 1024 * 1024, nextOffset: 256 * 1024, etag: 'W/"17825792-456"' })
+    api.readWorkspaceFile.mockRejectedValueOnce(Object.assign(new Error('File exceeds full read limit'), { status: 413 }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+
+    expect(api.readWorkspaceFile).toHaveBeenCalledTimes(1)
+    expect(api.readWorkspaceTextChunk).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('New large prefix')
+    expect(wrapper.find('.workspace-files__chunk-toolbar').exists()).toBe(true)
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="保存文件"]').attributes('disabled')).toBeDefined()
   })
 
   it('offers reload instead of a broken download when a chunk revision changes', async () => {

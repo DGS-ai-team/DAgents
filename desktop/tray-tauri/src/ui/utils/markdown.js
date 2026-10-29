@@ -78,11 +78,21 @@ export function renderMarkdown(text) {
   const source = String(text || "").replace(/\r\n?/g, "\n");
   const cached = markdownCache.get(source);
   if (cached !== undefined) return cached;
-  const html = marked.parse(source);
-  const rendered = sanitizer ? sanitizer.sanitize(html, { ADD_ATTR: ["target", "rel"] }) : html;
+  const rendered = renderMarkdownSource(source);
   markdownCache.set(source, rendered);
   if (markdownCache.size > MARKDOWN_CACHE_LIMIT) markdownCache.delete(markdownCache.keys().next().value);
   return rendered;
+}
+
+/** Renders through the shared parser and sanitizer without retaining source or HTML. */
+export function renderMarkdownUncached(text) {
+  const source = String(text || "").replace(/\r\n?/g, "\n");
+  return renderMarkdownSource(source);
+}
+
+function renderMarkdownSource(source) {
+  const html = marked.parse(source);
+  return sanitizer ? sanitizer.sanitize(html, { ADD_ATTR: ["target", "rel"] }) : html;
 }
 
 function tokenizeRenderWrapper(source) {
