@@ -268,6 +268,111 @@ describe('Desktop workspace resource navigation', () => {
     expect(wrapper.find('textarea').element.value).toBe('newer file')
   })
 
+  it('restores a saved draft when reopening its file after navigating away', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('A draft to keep')
+
+    await wrapper.vm.openPath('b.md')
+    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md')).toContain('A draft to keep')
+    await wrapper.vm.openPath('a.md')
+
+    expect(wrapper.find('textarea').element.value).toBe('A draft to keep')
+  })
+
+  it('keeps a file draft in storage when reopening that file fails to read', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('draft survives failed read')
+    await wrapper.vm.openPath('b.md')
+    const draftKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.md'
+    const storedDraft = localStorage.getItem(draftKey)
+    api.readWorkspaceFile.mockRejectedValueOnce(new Error('temporary read failure'))
+
+    expect((await wrapper.vm.openPath('a.md')).ok).toBe(false)
+    expect(localStorage.getItem(draftKey)).toBe(storedDraft)
+  })
+
+  it('ignores a delayed segmented read after switching Agents', async () => {
+    let resolveChunk
+    api.readWorkspaceTextChunk.mockImplementationOnce(() => new Promise(resolve => { resolveChunk = resolve }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    const opening = wrapper.vm.openPath('large.md')
+    await flushPromises()
+    await wrapper.setProps({ agentId: 'agent-b' })
+    await flushPromises()
+    resolveChunk({ ...result('stale Agent content'), fileSize: 300000, nextOffset: 20 })
+    await flushPromises()
+
+    expect((await opening).ok).toBe(false)
+    expect(wrapper.find('.workspace-files__chunked-text').exists()).toBe(false)
+    expect(wrapper.find('.workspace-files__chunk-toolbar').exists()).toBe(false)
+  })
+
+  it('does not start a 413 chunk fallback after the selected path changes', async () => {
+    let rejectA
+    api.readWorkspaceFile.mockImplementation((_agentId, path) => path === 'a.md'
+      ? new Promise((_resolve, reject) => { rejectA = reject })
+      : Promise.resolve(result(`contents for ${path}`)))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    const openingA = wrapper.vm.openPath('a.md')
+    await flushPromises()
+    const openingB = wrapper.vm.openPath('b.md')
+    await flushPromises()
+    expect((await openingB).ok).toBe(true)
+    rejectA(Object.assign(new Error('full read limit'), { status: 413 }))
+    await flushPromises()
+
+    expect((await openingA).ok).toBe(false)
+    expect(api.readWorkspaceTextChunk).not.toHaveBeenCalledWith('agent-a', 'a.md', 0, 256 * 1024)
+    expect(wrapper.find('textarea').element.value).toBe('contents for b.md')
+  })
+
+  it('does not let an old chunk response clear the busy state of the newly opened file', async () => {
+    const pendingChunks = []
+    api.readWorkspaceTextChunk.mockImplementation((_agentId, path, offset = 0) => offset === 0
+      ? Promise.resolve({ ...result(`first ${path}`), fileSize: 300000, nextOffset: 100 })
+      : new Promise(resolve => { pendingChunks.push({ path, resolve }) }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+    const oldLoad = wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+
+    await wrapper.vm.openPath('large.go')
+    const currentLoad = wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    pendingChunks[0].resolve({ ...result('stale tail'), fileSize: 300000, nextOffset: 200 })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__chunk-toolbar button').attributes('disabled')).toBeDefined()
+
+    pendingChunks[1].resolve({ ...result('current tail'), fileSize: 300000, nextOffset: 300000 })
+    await Promise.all([oldLoad, currentLoad])
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('current tail')
+  })
+
+  it('keeps the editor usable when a text save exceeds the native limit', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('still editable after the save error')
+    api.saveWorkspaceFile.mockRejectedValueOnce(new Error('文本保存上限为 16 MiB。'))
+
+    await wrapper.find('[aria-label="保存文件"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('textarea').element.value).toBe('still editable after the save error')
+    expect(wrapper.find('.workspace-files__preview-error').exists()).toBe(false)
+    expect(wrapper.find('[role="alert"]').text()).toContain('16 MiB')
+    await wrapper.find('textarea').setValue('shortened draft')
+    expect(wrapper.find('textarea').element.value).toBe('shortened draft')
+  })
+
   it('opens a root file link while the initial directory listing is still pending', async () => {
     let resolveInitialList
     let listCalls = 0

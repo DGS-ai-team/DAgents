@@ -32,6 +32,7 @@ const fileMissing = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
+const actionError = ref('')
 const refreshError = ref('')
 const writeProgress = ref(null)
 const activeWriteRequest = ref('')
@@ -67,6 +68,7 @@ const newFileNameError = ref('')
 const newFileNameInput = ref(null)
 const draftOwnerId = ref('')
 const draftOwnerScope = ref('')
+const draftOwnerPath = ref('')
 const folderMaskStyle = { maskImage: `url("${folderOpenIcon}")`, WebkitMaskImage: `url("${folderOpenIcon}")` }
 const dockStatusLabel = computed(() => ({ offline: '离线', pending: '待审批', generating: '生成中', idle: '空闲' }[props.dockStatus] || props.dockStatus))
 let requestEpoch = 0
@@ -144,10 +146,11 @@ const noticeDetails = computed(() => [
   draftConflict.value ? '本地草稿基于较旧文件版本；保存会被拒绝。可以从资源菜单丢弃草稿并重新载入。' : '',
   fileMissing.value ? '此文件已从工作区移除；本地草稿仍保留，保存不会自动重新创建文件。可以从资源菜单丢弃草稿并重试。' : '',
   error.value ? `文件操作错误：${error.value}` : '',
+  actionError.value ? `操作错误：${actionError.value}` : '',
   refreshError.value ? `刷新错误：${refreshError.value}` : '',
   externalUpdate.value ? '工作区文件已在其他位置更新；当前编辑内容和版本基线已保留。可以从资源菜单丢弃草稿并重新载入。' : '',
 ].filter(Boolean))
-const noticeSummary = computed(() => draftConflict.value ? '文件版本冲突' : fileMissing.value ? '文件已从工作区移除' : error.value || refreshError.value ? '工作区文件操作失败' : externalUpdate.value ? '工作区文件已更新' : '')
+const noticeSummary = computed(() => draftConflict.value ? '文件版本冲突' : fileMissing.value ? '文件已从工作区移除' : error.value || refreshError.value || actionError.value ? '工作区文件操作失败' : externalUpdate.value ? '工作区文件已更新' : '')
 
 function workspacePath(parent, child) { return [parent, child].filter(Boolean).join('/') }
 function revokePreview() {
@@ -519,17 +522,22 @@ function applyFilePreview(snapshot, { keepMode = false } = {}) {
 }
 function togglePreviewMode() { if (canTogglePreview.value) previewMode.value = previewMode.value === 'preview' ? 'source' : 'preview' }
 function saveDraft() {
-  if (!selectedPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
-  const key = workspaceDraftKey(draftOwnerId.value, selectedPath.value, draftOwnerScope.value)
+  if (!draftOwnerPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
+  const key = workspaceDraftKey(draftOwnerId.value, draftOwnerPath.value, draftOwnerScope.value)
   try {
     if (dirty.value) localStorage.setItem(key, serializeWorkspaceDraft(content.value, revision.value))
     else localStorage.removeItem(key)
   } catch { /* Workspace edits remain in memory when local storage is unavailable. */ }
 }
+function isFileRequestCurrent(request) {
+  return isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration })
+    && request.scope === props.workspaceScope
+}
 async function confirmDiscard() { return !dirty.value || await confirmDesktopAction('当前文件有未保存修改。继续操作会保留本地草稿并离开编辑器，是否继续？') }
 async function loadDirectory(path = currentPath.value) {
   if (!props.agentId) return { ok: false, canceled: false }
   if (!await confirmDiscard()) return { ok: false, canceled: true }
+  saveDraft()
   actionStatus.value = ''
   resourceActionBusy.value = false
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path, scope: props.workspaceScope, generation: props.requestGeneration }
@@ -537,8 +545,12 @@ async function loadDirectory(path = currentPath.value) {
   try {
     const result = await listWorkspace(request.agentId, request.path)
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: request.path, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return { ok: false, canceled: false }
+    actionError.value = ''
     currentPath.value = normalizeWorkspacePath(result.path || path)
     entries.value = Array.isArray(result.entries) ? result.entries : []
+    draftOwnerId.value = ''
+    draftOwnerScope.value = ''
+    draftOwnerPath.value = ''
     selectedPath.value = ''
     content.value = ''
     fileBytes.value = null
@@ -585,7 +597,13 @@ async function openPath(path) {
 async function openEntry(entry, discard = false) {
   if (entry.is_dir) return loadDirectory(entry.path)
   if (!discard && !await confirmDiscard()) return false
+  saveDraft()
+  const request = { epoch: ++requestEpoch, agentId: props.agentId, path: entry.path, scope: props.workspaceScope, generation: props.requestGeneration }
+  draftOwnerId.value = ''
+  draftOwnerScope.value = ''
+  draftOwnerPath.value = ''
   actionStatus.value = ''
+  actionError.value = ''
   resourceActionBusy.value = false
   selectedPath.value = entry.path
   content.value = ''
@@ -597,39 +615,45 @@ async function openEntry(entry, discard = false) {
   draftConflict.value = false
   externalUpdate.value = false
   fileMissing.value = false
-  const request = { epoch: ++requestEpoch, agentId: props.agentId, path: entry.path, scope: props.workspaceScope, generation: props.requestGeneration }
   loading.value = true; error.value = ''; revokePreview()
   resetPreviewData()
+  let opened = false
   try {
     let result
     const segmentedText = entry.size > workspacePreviewLimits.bytes && isSegmentableText(entry.name)
+    let nextChunkedText = false
+    let nextChunkDecoder = null
+    let nextChunkRevision = ''
+    let nextChunkRange = { start: 0, end: 0, size: 0 }
     if (segmentedText) {
       result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
-      chunkedText.value = true
-      textChunkDecoder = new TextDecoder('utf-8', { fatal: false })
-      textChunkRevision = result.etag
-      textChunkRange.value = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
+      nextChunkedText = true
+      nextChunkDecoder = new TextDecoder('utf-8', { fatal: false })
+      nextChunkRevision = result.etag
+      nextChunkRange = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
     } else {
       try { result = await readWorkspaceFile(request.agentId, request.path) }
       catch (readError) {
         if (readError?.status !== 413 || !isSegmentableText(entry.name)) throw readError
+        if (!isFileRequestCurrent(request)) return false
         result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
-        chunkedText.value = true
-        textChunkDecoder = new TextDecoder('utf-8', { fatal: false })
-        textChunkRevision = result.etag
-        textChunkRange.value = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
+        nextChunkedText = true
+        nextChunkDecoder = new TextDecoder('utf-8', { fatal: false })
+        nextChunkRevision = result.etag
+        nextChunkRange = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
       }
     }
-    if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: request.path, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return false
+    if (!isFileRequestCurrent(request)) return false
     const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
     const originalFormat = workspaceTextFormat(result.bytes)
-    revision.value = draft?.conflict ? draft.revision : result.etag
+    const nextRevision = draft?.conflict ? draft.revision : result.etag
     const snapshot = await buildFilePreview(request.path, result.contentType, result.bytes, draft?.content, () => isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: entry.path, generation: props.requestGeneration }) && request.scope === props.workspaceScope)
     if (!snapshot) return false
-    if (chunkedText.value) {
-      const finalChunk = textChunkRange.value.end >= textChunkRange.value.size
-      snapshot.content = textChunkDecoder.decode(result.bytes, { stream: !finalChunk })
-      if (finalChunk) snapshot.content += textChunkDecoder.decode()
+    if (!isFileRequestCurrent(request)) return false
+    if (nextChunkedText) {
+      const finalChunk = nextChunkRange.end >= nextChunkRange.size
+      snapshot.content = nextChunkDecoder.decode(result.bytes, { stream: !finalChunk })
+      if (finalChunk) snapshot.content += nextChunkDecoder.decode()
       if (snapshot.kind === 'csv') {
         csvPreviewParser = createWorkspaceCsvPreviewParser()
         const parsed = csvPreviewParser.append(snapshot.content, { final: finalChunk })
@@ -639,8 +663,14 @@ async function openEntry(entry, discard = false) {
     selectedPath.value = entry.path
     draftOwnerId.value = request.agentId
     draftOwnerScope.value = request.scope
+    draftOwnerPath.value = request.path
+    revision.value = nextRevision
+    chunkedText.value = nextChunkedText
+    textChunkDecoder = nextChunkDecoder
+    textChunkRevision = nextChunkRevision
+    textChunkRange.value = nextChunkRange
     contentEditVersion++
-    fileBytes.value = chunkedText.value ? null : result.bytes
+    fileBytes.value = nextChunkedText ? null : result.bytes
     textFormat.value = originalFormat
     applyFilePreview(snapshot)
     draftConflict.value = Boolean(draft?.conflict)
@@ -651,9 +681,10 @@ async function openEntry(entry, discard = false) {
     error.value = ''
     if (entry.file_ref) fileRefs.value[entry.path] = entry.file_ref
     emit('resource-name', entry.name)
+    opened = true
     return true
-  } catch (e) { if (request.epoch === requestEpoch && request.agentId === props.agentId) { resetPreviewData(); fileBytes.value = null; content.value = ''; error.value = String(e.message || e) } return false }
-  finally { if (request.epoch === requestEpoch && request.agentId === props.agentId) loading.value = false }
+  } catch (e) { if (isFileRequestCurrent(request)) { resetPreviewData(); fileBytes.value = null; content.value = ''; error.value = String(e.message || e) } return false }
+  finally { if (isFileRequestCurrent(request)) { loading.value = false; if (!opened) { draftOwnerId.value = ''; draftOwnerScope.value = ''; draftOwnerPath.value = '' } } }
 }
 function isSegmentableText(name) {
   return new Set(['md','txt','json','js','mjs','ts','css','html','htm','xml','yaml','yml','csv','py','go','rs','toml','sh','ps1','sql','java','cs','cpp','c','h','rb','php']).has(String(name || '').split('.').at(-1)?.toLowerCase())
@@ -682,7 +713,7 @@ async function loadNextTextChunk() {
     if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return
     if (e?.status === 409) error.value = '文件在分段读取期间发生变化，请重新打开文件。'
     else error.value = String(e.message || e)
-  } finally { textChunkBusy.value = false }
+  } finally { if (isFileRequestCurrent(request)) textChunkBusy.value = false }
 }
 function reloadSelectedFile() {
   const entry = entries.value.find(item => item.path === selectedPath.value)
@@ -699,14 +730,14 @@ async function saveSelectedAs() {
   const draftContent = dirty.value && canEditText.value ? content.value : null
   resourceActionBusy.value = true
   actionStatus.value = '正在选择保存位置或另存文件…'
-  error.value = ''
+  actionError.value = ''
   try {
     const result = await saveWorkspaceFileAs(owner.agentId, owner.path, draftContent)
     if (!resourceActionOwnerCurrent(owner)) return
     if (result?.status === 'saved') actionStatus.value = `已另存为（${Number(result.bytesWritten || 0).toLocaleString()} 字节）`
     else if (result?.status === 'cancelled') actionStatus.value = '已取消另存'
   } catch (e) {
-    if (resourceActionOwnerCurrent(owner)) error.value = String(e.message || e)
+    if (resourceActionOwnerCurrent(owner)) actionError.value = String(e.message || e)
   } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
 }
 async function revealSelectedFile() {
@@ -714,16 +745,17 @@ async function revealSelectedFile() {
   const owner = resourceActionOwner()
   resourceActionBusy.value = true
   actionStatus.value = '正在文件管理器中定位…'
-  error.value = ''
+  actionError.value = ''
   try {
     await revealWorkspaceFile(owner.agentId, owner.path)
     if (resourceActionOwnerCurrent(owner)) actionStatus.value = '已在文件管理器中定位'
   } catch (e) {
-    if (resourceActionOwnerCurrent(owner)) error.value = String(e.message || e)
+    if (resourceActionOwnerCurrent(owner)) actionError.value = String(e.message || e)
   } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
 }
 function updateContent(value) {
   actionStatus.value = ''
+  actionError.value = ''
   contentEditVersion++
   content.value = value
   if (previewKind.value === 'svg') refreshSvgPreview()
@@ -774,7 +806,7 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
   const writeRequestId = newWorkspaceWriteRequestId()
   activeWriteRequest.value = writeRequestId
   const text = content.value
-  saving.value = true; error.value = ''
+  saving.value = true; actionError.value = ''
   try {
     const bytes = encodeWorkspaceText(text, textFormat.value)
     let baseRevision = revision.value
@@ -801,7 +833,7 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
     if (request.epoch === requestEpoch && request.agentId === props.agentId && request.scope === props.workspaceScope && request.generation === props.requestGeneration && request.saveId === saveSequence) {
       if (e?.status === 412) { draftConflict.value = true; externalUpdate.value = true }
       if (e?.status === 404) fileMissing.value = true
-      error.value = String(e.message || e)
+      actionError.value = String(e.message || e)
       actionStatus.value = e?.writeStatus === 'unknown' ? '写入结果未知；草稿已保留，请重新读取工作区确认。' : e?.writeStatus === 'cancelled' ? '写入已取消；草稿已保留。' : ''
     }
   }
@@ -834,6 +866,7 @@ async function submitCreateFile() {
   const directory = currentPath.value
   const writeRequestId = newWorkspaceWriteRequestId()
   const writeRequest = { requestId: writeRequestId, agentId: ownerId, path: directory, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch }
+  actionError.value = ''
   try {
     const path = workspacePath(directory, name)
     activeWriteRequest.value = writeRequestId
@@ -846,7 +879,7 @@ async function submitCreateFile() {
     if (ownerId === props.agentId && writeRequest.requestId === activeWriteRequest.value) actionStatus.value = '已创建文件'
   } catch (e) {
     if (isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) {
-      error.value = String(e.message || e)
+      actionError.value = String(e.message || e)
       actionStatus.value = e?.writeStatus === 'unknown' ? '写入结果未知；请重新读取工作区确认。' : e?.writeStatus === 'cancelled' ? '创建已取消。' : ''
     }
   } finally { if (activeWriteRequest.value === writeRequestId) { activeWriteRequest.value = ''; writeProgress.value = null } }
@@ -859,7 +892,7 @@ async function onUpload(event) {
   const writeRequest = { requestId, agentId: ownerId, path: directory, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch }
   activeWriteRequest.value = requestId
   writeProgress.value = { bytes: 0, total: 0 }
-  error.value = ''
+  actionError.value = ''
   try {
     const result = await pickWorkspaceImport(ownerId, directory, { requestId, maxFiles: 8 })
     if (!isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) return
@@ -867,13 +900,13 @@ async function onUpload(event) {
     let failedCount = 0
     for (const item of result.results || []) {
       if (item.status === 'saved') { savedCount++; if (item.path && item.fileRef) fileRefs.value[item.path] = item.fileRef }
-      else if (item.status !== 'cancelled') { failedCount++; error.value = `${item.name || '文件'}：${item.message || item.status}` }
+      else if (item.status !== 'cancelled') { failedCount++; actionError.value = `${item.name || '文件'}：${item.message || item.status}` }
     }
     await refreshDirectorySilently()
     if (activeWriteRequest.value === requestId) actionStatus.value = result.status === 'cancelled' ? '导入已取消。' : savedCount && failedCount ? `导入部分完成：成功 ${savedCount} 个，失败 ${failedCount} 个。` : savedCount ? `已导入 ${savedCount} 个文件。` : failedCount ? `导入失败 ${failedCount} 个文件。` : '没有选择文件。'
   } catch (e) {
     if (isWorkspaceWriteRequestCurrent(writeRequest, { requestId: activeWriteRequest.value, agentId: props.agentId, path: currentPath.value, scope: props.workspaceScope, generation: props.requestGeneration, epoch: requestEpoch })) {
-      error.value = String(e.message || e)
+      actionError.value = String(e.message || e)
       actionStatus.value = e?.writeStatus === 'unknown' ? '导入结果未知；请刷新工作区确认。' : e?.writeStatus === 'cancelled' ? '导入已取消。' : ''
     }
   }
@@ -883,7 +916,7 @@ async function cancelActiveWorkspaceWrite() {
   const requestId = activeWriteRequest.value
   if (!requestId) return
   try { await cancelWorkspaceWrite(requestId); actionStatus.value = writeProgress.value?.phase === 'committing' ? '已请求取消；提交结果可能未知，正在等待确认…' : '正在请求取消写入…' }
-  catch (e) { error.value = String(e.message || e) }
+  catch (e) { actionError.value = String(e.message || e) }
 }
 function entryMetadata(entry) {
   return JSON.stringify([entry?.size ?? null, entry?.modified_at ?? entry?.modified ?? entry?.mod_time ?? null, entry?.etag ?? null])
@@ -1079,6 +1112,7 @@ defineExpose({ openPath, refreshResources, discardDraftAndReload, resourceMenuAc
 watch(() => [content.value, dirty.value, selectedPath.value, props.agentId], saveDraft)
 watch(() => [content.value, filename.value, previewKind.value, previewMode.value], () => { void refreshHighlightedContent() }, { immediate: true })
 watch(() => [props.agentId, props.workspaceScope], () => {
+  saveDraft();
   if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
   activeWriteRequest.value = '';
   writeProgress.value = null;
@@ -1087,6 +1121,7 @@ watch(() => [props.agentId, props.workspaceScope], () => {
   saving.value = false;
   refreshAfterSave = false;
   actionStatus.value = '';
+  actionError.value = '';
   resourceActionBusy.value = false;
   if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer);
   missingConfirmTimer = 0;
@@ -1094,6 +1129,7 @@ watch(() => [props.agentId, props.workspaceScope], () => {
   selectedPath.value = '';
   draftOwnerId.value = '';
   draftOwnerScope.value = '';
+  draftOwnerPath.value = '';
   dirty.value = false;
   fileRefs.value = {};
   revision.value = '';
@@ -1112,6 +1148,7 @@ watch(() => props.requestGeneration, () => {
   saving.value = false;
   refreshAfterSave = false;
   actionStatus.value = '';
+  actionError.value = '';
   resourceActionBusy.value = false;
   if (missingConfirmTimer) window.clearTimeout(missingConfirmTimer);
   missingConfirmTimer = 0;
@@ -1191,6 +1228,7 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-if="actionStatus" class="workspace-files__action-status" role="status" aria-live="polite">{{ actionStatus }}</div>
+        <div v-if="actionError" class="workspace-files__action-status workspace-files__action-error" role="alert">{{ actionError }}</div>
         <div v-if="activeWriteRequest" class="workspace-files__action-status" role="status" aria-live="polite">
           {{ workspaceWriteProgressLabel(writeProgress?.phase, writeProgress?.bytes, writeProgress?.total) }}
           <button type="button" @click="cancelActiveWorkspaceWrite">请求取消</button>
