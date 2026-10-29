@@ -74,7 +74,7 @@ pub async fn save_as(
             let Some(source) = source.as_mut() else {
                 return Err("工作区源文件已不存在，无法另存当前文件".into());
             };
-            replace_with_file(source, &target)
+            replace_with_file(source, &target, &source_path)
         }
     })
     .await
@@ -154,7 +154,14 @@ fn opened_file_path(file: &File) -> Result<PathBuf, String> {
     }
 }
 
-fn replace_with_file(source: &mut File, target: &Path) -> Result<SaveAsResult, String> {
+fn replace_with_file(
+    source: &mut File,
+    target: &Path,
+    original_source_path: &Path,
+) -> Result<SaveAsResult, String> {
+    if same_path(target, original_source_path)? {
+        return Err("另存目标仍是工作区源文件路径，已取消以保护源文件".into());
+    }
     let source_metadata = source
         .metadata()
         .map_err(|e| format!("检查源文件失败: {e}"))?;
@@ -203,7 +210,7 @@ fn replace_with_file(source: &mut File, target: &Path) -> Result<SaveAsResult, S
             return Err("源文件在另存期间发生变化，请重试".into());
         }
         drop(temporary);
-        publish_temp(&temporary_path, target, Some(source))?;
+        publish_temp(&temporary_path, target, Some(source), original_source_path)?;
         Ok(SaveAsResult {
             status: "saved".into(),
             bytes_written,
@@ -252,7 +259,7 @@ fn replace_with_draft(
             }
         }
         drop(temporary);
-        publish_temp(&temporary_path, target, None)?;
+        publish_temp(&temporary_path, target, None, original_source_path)?;
         Ok(SaveAsResult {
             status: "saved".into(),
             bytes_written: bytes.len() as u64,
@@ -322,8 +329,16 @@ fn create_temp_sibling(target: &Path) -> Result<(File, PathBuf), String> {
     Err("无法分配临时另存文件名".into())
 }
 
-fn publish_temp(temp: &Path, target: &Path, source: Option<&File>) -> Result<(), String> {
+fn publish_temp(
+    temp: &Path,
+    target: &Path,
+    source: Option<&File>,
+    protected_source_path: &Path,
+) -> Result<(), String> {
     reject_reparse_target(target)?;
+    if same_path(target, protected_source_path)? {
+        return Err("另存目标仍是工作区源文件路径，已取消以保护源文件".into());
+    }
     if let Some(source) = source {
         if existing_target_is_same_file_handle(source, target)? {
             return Err("另存目标与工作区源文件相同或为其硬链接，已取消以保护源文件".into());
@@ -464,10 +479,48 @@ mod tests {
         fs::write(&source_path, vec![37u8; 2 * 1024 * 1024 + 3]).unwrap();
         fs::write(&target, b"old target").unwrap();
         let mut source = File::open(&source_path).unwrap();
-        let result = replace_with_file(&mut source, &target).unwrap();
+        let result = replace_with_file(&mut source, &target, &source_path).unwrap();
         assert_eq!(result.status, "saved");
         assert_eq!(result.bytes_written, 2 * 1024 * 1024 + 3);
         assert_eq!(fs::read(target).unwrap(), vec![37u8; 2 * 1024 * 1024 + 3]);
+    }
+
+    fn atomically_replace(path: &Path, bytes: &[u8]) {
+        let (mut replacement, replacement_path) = create_temp_sibling(path).unwrap();
+        replacement.write_all(bytes).unwrap();
+        replacement.sync_all().unwrap();
+        drop(replacement);
+        replace_existing(&replacement_path, path).unwrap();
+    }
+
+    #[test]
+    fn clean_export_refuses_original_path_after_source_was_atomically_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("source.txt");
+        fs::write(&source_path, b"old bytes").unwrap();
+        let mut old_source = File::open(&source_path).unwrap();
+
+        atomically_replace(&source_path, b"new bytes from Node");
+
+        let error = replace_with_file(&mut old_source, &source_path, &source_path).unwrap_err();
+        assert!(error.contains("源文件路径"));
+        assert_eq!(fs::read(&source_path).unwrap(), b"new bytes from Node");
+    }
+
+    #[test]
+    fn clean_export_to_another_path_keeps_the_opened_source_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("source.txt");
+        let export_path = dir.path().join("export.txt");
+        fs::write(&source_path, b"old handle bytes").unwrap();
+        let mut old_source = File::open(&source_path).unwrap();
+
+        atomically_replace(&source_path, b"new path bytes");
+
+        let result = replace_with_file(&mut old_source, &export_path, &source_path).unwrap();
+        assert_eq!(result.status, "saved");
+        assert_eq!(fs::read(&export_path).unwrap(), b"old handle bytes");
+        assert_eq!(fs::read(&source_path).unwrap(), b"new path bytes");
     }
 
     #[test]
@@ -479,7 +532,7 @@ mod tests {
         let hard_link = dir.path().join("hard-link.txt");
         fs::hard_link(&source_path, &hard_link).unwrap();
         let mut source = File::open(&source_path).unwrap();
-        assert!(replace_with_file(&mut source, &hard_link)
+        assert!(replace_with_file(&mut source, &hard_link, &source_path)
             .unwrap_err()
             .contains("硬链接"));
         assert_eq!(fs::read(&source_path).unwrap(), b"preserve me");
@@ -639,7 +692,7 @@ mod tests {
         fs::write(&source_path, b"source").unwrap();
         fs::create_dir(&destination_dir).unwrap();
         let mut source = File::open(&source_path).unwrap();
-        assert!(replace_with_file(&mut source, &destination_dir).is_err());
+        assert!(replace_with_file(&mut source, &destination_dir, &source_path).is_err());
         assert!(destination_dir.is_dir());
         assert_eq!(fs::read(source_path).unwrap(), b"source");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);

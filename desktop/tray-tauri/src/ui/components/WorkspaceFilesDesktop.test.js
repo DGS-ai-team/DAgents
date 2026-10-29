@@ -93,6 +93,16 @@ describe('Desktop workspace resource navigation', () => {
     expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('剩余')
   })
 
+  it('treats a complete first chunk as a full file when directory size metadata is stale', async () => {
+    api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('now small'), fileSize: 8, nextOffset: 8, etag: 'etag-small' })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+
+    expect(wrapper.find('.workspace-files__chunk-toolbar').exists()).toBe(false)
+    expect(wrapper.find('textarea').element.value).toBe('now small')
+  })
+
   it('offers reload instead of a broken download when a chunk revision changes', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
@@ -422,6 +432,131 @@ describe('Desktop workspace resource navigation', () => {
 
     expect(wrapper.find('textarea').element.value).toBe(oldText)
     expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'a.md', { ifNoneMatch: 'etag-1' })
+  })
+
+  it('uses the refreshed BOM and dominant newline format for the next save', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('\uFEFFfirst\r\nsecond\r\n'), contentType: 'text/plain', etag: 'etag-format' })
+    await wrapper.vm.refreshResources('tool')
+
+    expect(wrapper.find('textarea').element.value).toBe('first\nsecond\n')
+    await wrapper.find('textarea').setValue('edited\nagain\n')
+    api.saveWorkspaceFile.mockResolvedValueOnce({ etag: 'etag-saved' })
+    await wrapper.find('[aria-label="保存文件"]').trigger('click')
+    await flushPromises()
+
+    const savedBytes = api.saveWorkspaceFile.mock.calls.at(-1)[2]
+    expect(Array.from(savedBytes.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf])
+    expect(new TextDecoder('utf-8', { ignoreBOM: true }).decode(savedBytes)).toBe('\uFEFFedited\r\nagain\r\n')
+  })
+
+  it('does not install a clean-looking refresh over a revision-conflicted draft', async () => {
+    localStorage.setItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md', JSON.stringify({ content: 'a.md', revision: 'older-revision' }))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', active: true } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    api.readWorkspaceFile.mockResolvedValueOnce(result('external replacement', 'newer-revision'))
+    await wrapper.vm.refreshResources('tool')
+
+    expect(wrapper.find('textarea').element.value).toBe('a.md')
+    expect(wrapper.vm.$.setupState.draftConflict).toBe(true)
+  })
+
+  it('clears chunked read-only state when a refreshed large file now fits a full read', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+    api.readWorkspaceFile.mockResolvedValueOnce(result('now small and editable', 'etag-small'))
+    await wrapper.vm.refreshResources('tool')
+
+    expect(wrapper.find('.workspace-files__chunk-toolbar').exists()).toBe(false)
+    expect(wrapper.find('textarea').element.value).toBe('now small and editable')
+    expect(wrapper.find('[aria-label="保存文件"]').attributes('disabled')).toBeDefined()
+    await wrapper.find('textarea').setValue('editable after shrink')
+    expect(wrapper.find('[aria-label="保存文件"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('refreshes changed large content from an unpinned first chunk and keeps later chunks revision-guarded', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+    api.readWorkspaceFile.mockRejectedValueOnce(Object.assign(new Error('full read limit'), { status: 413 }))
+    api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('# External update\n'), fileSize: 320000, nextOffset: 262144, etag: 'etag-external' })
+
+    await wrapper.vm.refreshResources('tool')
+
+    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'large.md', { ifNoneMatch: 'etag-1' })
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 0, 256 * 1024)
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('External update')
+    expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('320,000')
+    await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 262144, 256 * 1024, 'etag-external')
+  })
+
+  it('discards a pending continuation from the previous same-path refresh version', async () => {
+    const pending = []
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+    api.readWorkspaceTextChunk.mockImplementation((_agentId, _path, offset = 0) => offset === 0
+      ? Promise.resolve({ ...result('# refreshed version\n'), fileSize: 300000, nextOffset: 262144, etag: 'etag-refreshed' })
+      : new Promise(resolve => { pending.push(resolve) }))
+    const oldContinuation = wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+
+    api.readWorkspaceFile.mockRejectedValueOnce(Object.assign(new Error('full read limit'), { status: 413 }))
+    await wrapper.vm.refreshResources('tool')
+    const currentContinuation = wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    pending[0]({ ...result('stale continuation'), fileSize: 300000, nextOffset: 300000, etag: 'etag-1' })
+    await flushPromises()
+
+    expect(wrapper.find('.workspace-files__chunk-toolbar button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.workspace-files__chunked-text').text()).not.toContain('stale continuation')
+    pending[1]({ ...result('current continuation'), fileSize: 300000, nextOffset: 300000, etag: 'etag-refreshed' })
+    await Promise.all([oldContinuation, currentContinuation])
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('current continuation')
+    expect(wrapper.find('.workspace-files__chunked-text').text()).not.toContain('stale continuation')
+  })
+
+  it('releases the busy state after a middle chunk so a third chunk can be read', async () => {
+    api.readWorkspaceTextChunk.mockImplementation(async (_agentId, _path, offset = 0) => {
+      if (offset === 0) return { ...result('first '), fileSize: 300, nextOffset: 100, etag: 'etag-three' }
+      if (offset === 100) return { ...result('second '), fileSize: 300, nextOffset: 200, etag: 'etag-three' }
+      return { ...result('third'), fileSize: 300, nextOffset: 300, etag: 'etag-three' }
+    })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('large.md')
+
+    await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__chunk-toolbar button').exists()).toBe(true)
+    expect(wrapper.find('.workspace-files__chunk-toolbar button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('second')
+
+    await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
+    await flushPromises()
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 200, 256 * 1024, 'etag-three')
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('third')
+    expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('已到文件末尾')
+  })
+
+  it('preserves BOM and CRLF in the draft passed to native Save As', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('\uFEFFfirst\r\nsecond\r\n'), contentType: 'text/plain', etag: 'etag-format' })
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('draft\nline\n')
+    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
+    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('另存为')).trigger('click')
+    await flushPromises()
+
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.md', '\uFEFFdraft\r\nline\r\n')
   })
 
   it('confirms deletion without a 404 polling storm', async () => {

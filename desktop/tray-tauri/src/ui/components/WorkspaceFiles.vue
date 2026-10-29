@@ -181,6 +181,9 @@ function resetPreviewData() {
   textAnchor.value = null
   pdfAnchor.value = null
   referenceMenu.value = null
+  resetChunkedTextState()
+}
+function resetChunkedTextState() {
   chunkedText.value = false
   textChunkRange.value = { start: 0, end: 0, size: 0 }
   textChunkBusy.value = false
@@ -520,6 +523,20 @@ function applyFilePreview(snapshot, { keepMode = false } = {}) {
   pdfAnchor.value = null
   previewMode.value = keepMode && canTogglePreview.value ? priorMode : defaultPreviewMode(snapshot.kind)
 }
+function installFileResult(result, snapshot, { keepMode = false, chunkState = null, nextRevision = result.etag } = {}) {
+  fileBytes.value = chunkState ? null : result.bytes
+  revision.value = nextRevision || revision.value
+  textFormat.value = workspaceTextFormat(result.bytes)
+  if (chunkState) {
+    chunkedText.value = true
+    textChunkRange.value = chunkState.range
+    textChunkBusy.value = false
+    textChunkDecoder = chunkState.decoder
+    textChunkRevision = chunkState.revision
+    csvPreviewParser = chunkState.csvParser
+  } else resetChunkedTextState()
+  applyFilePreview(snapshot, { keepMode })
+}
 function togglePreviewMode() { if (canTogglePreview.value) previewMode.value = previewMode.value === 'preview' ? 'source' : 'preview' }
 function saveDraft() {
   if (!draftOwnerPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
@@ -532,6 +549,45 @@ function saveDraft() {
 function isFileRequestCurrent(request) {
   return isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration })
     && request.scope === props.workspaceScope
+}
+async function readFileForPreview(request, entry, { revision: expectedRevision = '', preferFullRead = false, isCurrent = () => isFileRequestCurrent(request) } = {}) {
+  let result
+  let chunkState = null
+  const readFirstChunk = async () => {
+    result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
+    chunkState = {
+      decoder: new TextDecoder('utf-8', { fatal: false }),
+      revision: result.etag,
+      range: { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size },
+      csvParser: null,
+    }
+    if (chunkState.range.size <= workspacePreviewLimits.bytes
+      && chunkState.range.end >= chunkState.range.size && result.bytes.byteLength >= chunkState.range.size) chunkState = null
+  }
+  if (entry.size > workspacePreviewLimits.bytes && isSegmentableText(entry.name) && !preferFullRead) await readFirstChunk()
+  else {
+    try {
+      result = expectedRevision
+        ? await readWorkspaceFile(request.agentId, request.path, { ifNoneMatch: expectedRevision })
+        : await readWorkspaceFile(request.agentId, request.path)
+    } catch (readError) {
+      if (readError?.status !== 413 || !isSegmentableText(entry.name)) throw readError
+      if (!isCurrent()) return null
+      await readFirstChunk()
+    }
+  }
+  return isCurrent() ? { result, chunkState } : null
+}
+function finishChunkedPreview(snapshot, path, bytes, chunkState) {
+  if (!chunkState) return
+  const finalChunk = chunkState.range.end >= chunkState.range.size
+  snapshot.content = chunkState.decoder.decode(bytes, { stream: !finalChunk })
+  if (finalChunk) snapshot.content += chunkState.decoder.decode()
+  if (snapshot.kind === 'csv') {
+    chunkState.csvParser = createWorkspaceCsvPreviewParser()
+    const parsed = chunkState.csvParser.append(snapshot.content, { final: finalChunk })
+    snapshot.sheets = [{ name: String(path).split('/').at(-1) || 'CSV', ...parsed, truncated: parsed.truncated || !finalChunk, merges: [] }]
+  }
 }
 async function confirmDiscard() { return !dirty.value || await confirmDesktopAction('当前文件有未保存修改。继续操作会保留本地草稿并离开编辑器，是否继续？') }
 async function loadDirectory(path = currentPath.value) {
@@ -619,60 +675,21 @@ async function openEntry(entry, discard = false) {
   resetPreviewData()
   let opened = false
   try {
-    let result
-    const segmentedText = entry.size > workspacePreviewLimits.bytes && isSegmentableText(entry.name)
-    let nextChunkedText = false
-    let nextChunkDecoder = null
-    let nextChunkRevision = ''
-    let nextChunkRange = { start: 0, end: 0, size: 0 }
-    if (segmentedText) {
-      result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
-      nextChunkedText = true
-      nextChunkDecoder = new TextDecoder('utf-8', { fatal: false })
-      nextChunkRevision = result.etag
-      nextChunkRange = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
-    } else {
-      try { result = await readWorkspaceFile(request.agentId, request.path) }
-      catch (readError) {
-        if (readError?.status !== 413 || !isSegmentableText(entry.name)) throw readError
-        if (!isFileRequestCurrent(request)) return false
-        result = await readWorkspaceTextChunk(request.agentId, request.path, 0, workspacePreviewLimits.textChunkBytes)
-        nextChunkedText = true
-        nextChunkDecoder = new TextDecoder('utf-8', { fatal: false })
-        nextChunkRevision = result.etag
-        nextChunkRange = { start: 0, end: result.nextOffset ?? result.bytes.length, size: result.fileSize ?? entry.size }
-      }
-    }
-    if (!isFileRequestCurrent(request)) return false
+    const prepared = await readFileForPreview(request, entry)
+    if (!prepared) return false
+    const { result, chunkState: nextChunkState } = prepared
     const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
-    const originalFormat = workspaceTextFormat(result.bytes)
     const nextRevision = draft?.conflict ? draft.revision : result.etag
     const snapshot = await buildFilePreview(request.path, result.contentType, result.bytes, draft?.content, () => isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: entry.path, generation: props.requestGeneration }) && request.scope === props.workspaceScope)
     if (!snapshot) return false
     if (!isFileRequestCurrent(request)) return false
-    if (nextChunkedText) {
-      const finalChunk = nextChunkRange.end >= nextChunkRange.size
-      snapshot.content = nextChunkDecoder.decode(result.bytes, { stream: !finalChunk })
-      if (finalChunk) snapshot.content += nextChunkDecoder.decode()
-      if (snapshot.kind === 'csv') {
-        csvPreviewParser = createWorkspaceCsvPreviewParser()
-        const parsed = csvPreviewParser.append(snapshot.content, { final: finalChunk })
-        snapshot.sheets = [{ name: String(request.path).split('/').at(-1) || 'CSV', ...parsed, truncated: parsed.truncated || !finalChunk, merges: [] }]
-      }
-    }
+    finishChunkedPreview(snapshot, request.path, result.bytes, nextChunkState)
     selectedPath.value = entry.path
     draftOwnerId.value = request.agentId
     draftOwnerScope.value = request.scope
     draftOwnerPath.value = request.path
-    revision.value = nextRevision
-    chunkedText.value = nextChunkedText
-    textChunkDecoder = nextChunkDecoder
-    textChunkRevision = nextChunkRevision
-    textChunkRange.value = nextChunkRange
     contentEditVersion++
-    fileBytes.value = nextChunkedText ? null : result.bytes
-    textFormat.value = originalFormat
-    applyFilePreview(snapshot)
+    installFileResult(result, snapshot, { chunkState: nextChunkState, nextRevision })
     draftConflict.value = Boolean(draft?.conflict)
     dirty.value = canEditText.value && draft !== null && draft.content !== decodeWorkspaceText(result.bytes)
     externalUpdate.value = false
@@ -693,14 +710,19 @@ async function loadNextTextChunk() {
   if (!hasNextTextChunk.value || textChunkBusy.value || !selectedPath.value) return
   const request = { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, scope: props.workspaceScope, generation: props.requestGeneration }
   const start = textChunkRange.value.end
+  const decoder = textChunkDecoder
+  const chunkRevision = textChunkRevision
+  const isCurrentChunkOwner = () => isFileRequestCurrent(request) && chunkedText.value
+    && decoder === textChunkDecoder && chunkRevision === textChunkRevision
+  const isCurrentChunkResponse = () => isCurrentChunkOwner() && start === textChunkRange.value.end
   textChunkBusy.value = true
   try {
-    const result = await readWorkspaceTextChunk(request.agentId, request.path, start, workspacePreviewLimits.textChunkBytes, textChunkRevision)
-    if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return
-    let text = textChunkDecoder.decode(result.bytes, { stream: (result.nextOffset ?? start + result.bytes.length) < textChunkRange.value.size })
+    const result = await readWorkspaceTextChunk(request.agentId, request.path, start, workspacePreviewLimits.textChunkBytes, chunkRevision)
+    if (!isCurrentChunkResponse()) return
+    let text = decoder.decode(result.bytes, { stream: (result.nextOffset ?? start + result.bytes.length) < textChunkRange.value.size })
     const end = result.nextOffset ?? start + result.bytes.length
     const finalChunk = end >= textChunkRange.value.size
-    if (finalChunk) text += textChunkDecoder.decode()
+    if (finalChunk) text += decoder.decode()
     content.value += text
     textChunkRange.value = { start: 0, end, size: result.fileSize ?? textChunkRange.value.size }
     if (previewKind.value === 'csv') {
@@ -710,10 +732,10 @@ async function loadNextTextChunk() {
     }
     textAnchor.value = null
   } catch (e) {
-    if (!isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || request.scope !== props.workspaceScope) return
+    if (!isCurrentChunkResponse()) return
     if (e?.status === 409) error.value = '文件在分段读取期间发生变化，请重新打开文件。'
     else error.value = String(e.message || e)
-  } finally { if (isFileRequestCurrent(request)) textChunkBusy.value = false }
+  } finally { if (isCurrentChunkOwner()) textChunkBusy.value = false }
 }
 function reloadSelectedFile() {
   const entry = entries.value.find(item => item.path === selectedPath.value)
@@ -727,7 +749,9 @@ function resourceActionOwnerCurrent(owner) {
 async function saveSelectedAs() {
   if (!selectedPath.value || resourceActionBusy.value) return
   const owner = resourceActionOwner()
-  const draftContent = dirty.value && canEditText.value ? content.value : null
+  const draftContent = dirty.value && canEditText.value
+    ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(encodeWorkspaceText(content.value, textFormat.value))
+    : null
   resourceActionBusy.value = true
   actionStatus.value = '正在选择保存位置或另存文件…'
   actionError.value = ''
@@ -965,9 +989,12 @@ async function refreshSelectedFile() {
   const editedAtStart = contentEditVersion
   const revisionAtStart = revision.value
   const readSequence = ++fileReadSequence
-  let result
-  try { result = await readWorkspaceFile(agentId, path, { ifNoneMatch: revisionAtStart }) }
+  let prepared
+  const entry = entries.value.find(item => item.path === path) || { path, name: path.split('/').at(-1) || '', size: 0 }
+  try { prepared = await readFileForPreview(request, entry, { revision: revisionAtStart, preferFullRead: true, isCurrent: () => !disposed && isFileRequestCurrent(request) }) }
   catch (e) { if (request.epoch === requestEpoch && agentId === props.agentId && scope === props.workspaceScope && request.generation === props.requestGeneration && path === selectedPath.value) lastFileCheck = Date.now(); throw e }
+  if (!prepared) return false
+  const { result, chunkState } = prepared
   if (disposed || !isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration }) || scope !== props.workspaceScope) return false
   if (revision.value !== revisionAtStart || readSequence !== fileReadSequence) { lastFileCheck = 0; refreshQueued = true; return false }
   lastFileCheck = Date.now()
@@ -975,7 +1002,7 @@ async function refreshSelectedFile() {
   refreshError.value = ''
   if (result.notModified || result.etag && result.etag === revision.value) { externalUpdate.value = false; return true }
   if (saving.value) { lastFileCheck = 0; refreshAfterSave = true; return false }
-  if (dirty.value || contentEditVersion !== editedAtStart) { externalUpdate.value = true; return true }
+  if (dirty.value || draftConflict.value || externalUpdate.value || contentEditVersion !== editedAtStart) { externalUpdate.value = true; return true }
   const editor = editorRef.value
   const selection = editor ? [editor.selectionStart, editor.selectionEnd, editor.scrollTop] : null
   const isCurrent = () => !disposed
@@ -988,19 +1015,19 @@ async function refreshSelectedFile() {
     else { lastFileCheck = 0; refreshQueued = true }
     return false
   }
+  finishChunkedPreview(snapshot, path, result.bytes, chunkState)
   const keepMode = previewKind.value === snapshot.kind
-  fileBytes.value = result.bytes
-  revision.value = result.etag || revision.value
-  applyFilePreview(snapshot, { keepMode })
-  await nextTick()
-  const currentEditor = editorRef.value
-  if (currentEditor && selection && request.epoch === requestEpoch && request.path === selectedPath.value && request.scope === props.workspaceScope) {
-    currentEditor.setSelectionRange(Math.min(selection[0], content.value.length), Math.min(selection[1], content.value.length))
-    currentEditor.scrollTop = selection[2]
-  }
+  installFileResult(result, snapshot, { keepMode, chunkState, nextRevision: result.etag || revision.value })
   draftConflict.value = false
   externalUpdate.value = false
   saveDraft()
+  await nextTick()
+  if (disposed || readSequence !== fileReadSequence || !isFileRequestCurrent(request) || scope !== props.workspaceScope || request.generation !== props.requestGeneration) return true
+  const currentEditor = editorRef.value
+  if (currentEditor && selection) {
+    currentEditor.setSelectionRange(Math.min(selection[0], content.value.length), Math.min(selection[1], content.value.length))
+    currentEditor.scrollTop = selection[2]
+  }
   return true
 }
 async function performRefresh(reason) {
