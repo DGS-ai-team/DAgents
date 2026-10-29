@@ -17,7 +17,7 @@ Node 设置在首次启动后写入 `./.runtime/node_settings.db`（路径固定
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-按需改 `listen`。Node 运行时设置请在 **DAgents Desktop** 中修改（写入 SQLite）。Go/Python CLI 可单独配置 `local.endpoint` 连接目标 Node；Node bootstrap 文件不保存这类客户端设置。
+按需改 `listen`。Node 运行时设置请在 **DAgents Desktop** 中修改（写入 SQLite）。本机维护 CLI（probe/update/version）读取 `local.endpoint`，但只允许 loopback 主机（`localhost`、`127.0.0.0/8` 或 `::1`，端口可自定义）；Node bootstrap 文件不保存这类客户端设置。若 Node 需要向 Manage 公告非 loopback 的可达地址，请单独配置 `manage.registration.base_url`，该 Node 服务配置不改变 CLI 的本机限制。
 
 `config.yaml` **不会被 Git 跟踪**。
 

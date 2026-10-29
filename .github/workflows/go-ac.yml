@@ -25,7 +25,7 @@ jobs:
         run: npm ci --prefix desktop/tray-tauri
 
       - name: Test Desktop frontend sources
-        run: npm run test:frontend --prefix desktop/tray-tauri
+        run: npm test --prefix desktop/tray-tauri
 
       - name: Lint Desktop frontend sources
         run: npm run lint --prefix desktop/tray-tauri

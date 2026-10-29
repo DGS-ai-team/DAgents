@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const CLIENT_TOKEN_ENV: &str = "DAGENTS_CLIENT_TOKEN";
-pub const MAX_WORKSPACE_FILE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_MEDIA_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_NODE_UPDATE_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 
 fn disposition_filename(value: &str) -> Option<String> {
@@ -41,11 +41,28 @@ pub struct DownloadedPackage {
     pub path: PathBuf,
 }
 
-pub struct WorkspaceBinaryResponse {
+pub struct MediaBinaryResponse {
     pub status: u16,
     pub content_type: String,
-    pub etag: String,
     pub body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkspaceWriteResult {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub revision: String,
+    #[serde(default)]
+    pub file_ref: Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceWritePrepare {
+    pub operation_id: String,
+    pub staging_path: PathBuf,
+    pub staging_root: PathBuf,
+    pub staging_identity: String,
 }
 
 #[derive(Debug)]
@@ -54,6 +71,54 @@ pub struct DesktopApiError {
     pub code: Option<String>,
     pub message: String,
     pub details: Option<Value>,
+}
+
+fn validate_workspace_write_agent(value: &str) -> Result<String, String> {
+    let id = value.trim();
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        return Err("invalid agent id for workspace write".into());
+    }
+    Ok(id.to_string())
+}
+
+fn validate_workspace_write_relative_path(value: &str) -> Result<String, String> {
+    let path = value.replace('\\', "/");
+    if path.is_empty()
+        || path.starts_with('/')
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || path.contains(':')
+        || path.chars().any(char::is_control)
+    {
+        return Err("工作区写入路径必须是安全的相对路径".into());
+    }
+    Ok(path)
+}
+
+fn desktop_api_error(status: u16, response: ureq::Response) -> DesktopApiError {
+    let text = response.into_string().unwrap_or_default();
+    let body = serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
+    let payload = body.get("error").filter(|v| v.is_object()).unwrap_or(&body);
+    DesktopApiError {
+        status: Some(status),
+        code: payload
+            .get("code")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        message: payload
+            .get("message")
+            .or_else(|| payload.get("error"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| text.chars().take(240).collect()),
+        details: payload.get("details").cloned(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +196,12 @@ pub struct AgentInfo {
     pub manage_enabled: bool,
     #[serde(default)]
     pub manage_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceLocation {
+    pub agent_id: String,
+    pub root: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -237,6 +308,194 @@ impl Client {
             .into_json()
             .map_err(|e| format!("GET /v1/agents JSON: {e}"))?;
         Ok(out.agents)
+    }
+
+    /// Resolve workspace authority for one native file operation. The root is
+    /// deliberately fetched on demand and is never accepted from the WebView.
+    pub fn workspace_location(&self, agent_id: &str) -> Result<WorkspaceLocation, String> {
+        let id = agent_id.trim();
+        if id.is_empty()
+            || id.len() > 128
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        {
+            return Err("invalid agent id for workspace read".into());
+        }
+        let path = format!("/v1/agents/{id}/workspace/location");
+        let response = self
+            .authorize(ureq::get(&format!("{}{path}", self.base)))
+            .set("X-Dagents-Native-Workspace", "1")
+            .timeout(Duration::from_secs(15))
+            .call()
+            .map_err(|e| format!("GET {path}: {e}"))?;
+        let body = response
+            .into_string()
+            .map_err(|e| format!("GET {path} body: {e}"))?;
+        let value: Value =
+            serde_json::from_str(&body).map_err(|e| format!("GET {path} JSON: {e}"))?;
+        let location: WorkspaceLocation = serde_json::from_value(value)
+            .map_err(|e| format!("Node 返回了无效的工作区位置: {e}"))?;
+        if location.agent_id != id || location.root.trim().is_empty() {
+            return Err("Node 工作区位置与请求的 Agent 不匹配".into());
+        }
+        Ok(location)
+    }
+
+    pub fn workspace_write_prepare(
+        &self,
+        agent_id: &str,
+        path: &str,
+        mode: &str,
+        kind: &str,
+        expected_revision: Option<&str>,
+        size: u64,
+    ) -> Result<WorkspaceWritePrepare, DesktopApiError> {
+        let id = validate_workspace_write_agent(agent_id).map_err(|message| DesktopApiError {
+            status: None,
+            code: Some("invalid_agent_id".into()),
+            message,
+            details: None,
+        })?;
+        let path =
+            validate_workspace_write_relative_path(path).map_err(|message| DesktopApiError {
+                status: None,
+                code: Some("invalid_path".into()),
+                message,
+                details: None,
+            })?;
+        if !matches!(mode, "replace" | "create") || !matches!(kind, "text" | "import") {
+            return Err(DesktopApiError {
+                status: None,
+                code: Some("invalid_request".into()),
+                message: "无效的工作区写入类型".into(),
+                details: None,
+            });
+        }
+        let route = format!("/v1/agents/{id}/workspace/writes");
+        let url = format!("{}{route}", self.base);
+        let result = self.authorize(ureq::post(&url)).set("X-Dagents-Native-Workspace", "1").timeout(Duration::from_secs(30)).send_json(serde_json::json!({"path":path,"mode":mode,"kind":kind,"expected_revision":expected_revision,"size":size}));
+        let response = match result {
+            Ok(r) => r,
+            Err(ureq::Error::Status(s, r)) => return Err(desktop_api_error(s, r)),
+            Err(e) => {
+                return Err(DesktopApiError {
+                    status: None,
+                    code: Some("node_request_failed".into()),
+                    message: format!("POST {route}: {e}"),
+                    details: None,
+                })
+            }
+        };
+        let text = response.into_string().map_err(|e| DesktopApiError {
+            status: None,
+            code: Some("response_read_failed".into()),
+            message: e.to_string(),
+            details: None,
+        })?;
+        serde_json::from_str(&text).map_err(|e| DesktopApiError {
+            status: None,
+            code: Some("response_decode_failed".into()),
+            message: e.to_string(),
+            details: None,
+        })
+    }
+
+    pub fn workspace_write_commit(
+        &self,
+        agent_id: &str,
+        operation_id: &str,
+        size: u64,
+        sha256: &str,
+    ) -> Result<WorkspaceWriteResult, DesktopApiError> {
+        let id = validate_workspace_write_agent(agent_id).map_err(|message| DesktopApiError {
+            status: None,
+            code: Some("invalid_agent_id".into()),
+            message,
+            details: None,
+        })?;
+        if operation_id.is_empty()
+            || operation_id.len() > 128
+            || !operation_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err(DesktopApiError {
+                status: None,
+                code: Some("invalid_operation_id".into()),
+                message: "无效的写入操作 ID".into(),
+                details: None,
+            });
+        }
+        let route = format!("/v1/agents/{id}/workspace/writes/{operation_id}/commit");
+        let url = format!("{}{route}", self.base);
+        let result = self
+            .authorize(ureq::post(&url))
+            .set("X-Dagents-Native-Workspace", "1")
+            .timeout(Duration::from_secs(60))
+            .send_json(serde_json::json!({"size":size,"sha256":sha256}));
+        let response = match result {
+            Ok(r) => r,
+            Err(ureq::Error::Status(s, r)) => return Err(desktop_api_error(s, r)),
+            Err(e) => {
+                return Err(DesktopApiError {
+                    status: None,
+                    code: Some("node_request_failed".into()),
+                    message: format!("POST {route}: {e}"),
+                    details: None,
+                })
+            }
+        };
+        let text = response.into_string().map_err(|e| DesktopApiError {
+            status: None,
+            code: Some("response_read_failed".into()),
+            message: e.to_string(),
+            details: None,
+        })?;
+        serde_json::from_str(&text).map_err(|e| DesktopApiError {
+            status: None,
+            code: Some("response_decode_failed".into()),
+            message: e.to_string(),
+            details: None,
+        })
+    }
+
+    pub fn workspace_write_cancel(
+        &self,
+        agent_id: &str,
+        operation_id: &str,
+    ) -> Result<Value, DesktopApiError> {
+        let id = validate_workspace_write_agent(agent_id).map_err(|message| DesktopApiError {
+            status: None,
+            code: Some("invalid_agent_id".into()),
+            message,
+            details: None,
+        })?;
+        let route = format!("/v1/agents/{id}/workspace/writes/{operation_id}/cancel");
+        let url = format!("{}{route}", self.base);
+        let result = self
+            .authorize(ureq::post(&url))
+            .set("X-Dagents-Native-Workspace", "1")
+            .timeout(Duration::from_secs(15))
+            .send_json(serde_json::json!({}));
+        let response = match result {
+            Ok(r) => r,
+            Err(ureq::Error::Status(s, r)) => return Err(desktop_api_error(s, r)),
+            Err(e) => {
+                return Err(DesktopApiError {
+                    status: None,
+                    code: Some("node_request_failed".into()),
+                    message: format!("POST {route}: {e}"),
+                    details: None,
+                })
+            }
+        };
+        response.into_json().map_err(|e| DesktopApiError {
+            status: None,
+            code: Some("response_decode_failed".into()),
+            message: e.to_string(),
+            details: None,
+        })
     }
 
     pub fn list_terminals(&self, agent_id: &str) -> Result<Vec<TerminalSummary>, String> {
@@ -513,61 +772,11 @@ impl Client {
         }
     }
 
-    pub fn workspace_binary_request(
-        &self,
-        method: &str,
-        path: &str,
-        body: Option<Vec<u8>>,
-        if_match: Option<&str>,
-        if_none_match: Option<&str>,
-    ) -> Result<WorkspaceBinaryResponse, String> {
-        let method = method.trim().to_ascii_uppercase();
-        if !matches!(method.as_str(), "GET" | "PUT" | "POST") {
-            return Err("工作区文件只支持 GET、PUT、POST".into());
-        }
-        let path = validate_workspace_binary_path(path, &method)?;
-        if body
-            .as_ref()
-            .is_some_and(|bytes| bytes.len() > MAX_WORKSPACE_FILE_BYTES)
-        {
-            return Err("工作区单文件不能超过 16 MiB".into());
-        }
-        if method == "GET" && body.is_some() {
-            return Err("读取工作区文件不能携带内容".into());
-        }
-        let url = format!("{}{}", self.base, path);
-        let mut request = self
-            .authorize(ureq::request(&method, &url))
-            .timeout(Duration::from_secs(30));
-        if let Some(value) = if_match.filter(|value| !value.trim().is_empty()) {
-            request = request.set("If-Match", value);
-        }
-        if let Some(value) = if_none_match.filter(|value| !value.trim().is_empty()) {
-            request = request.set("If-None-Match", value);
-        }
-        if let Some(bytes) = body.as_deref() {
-            request = request.set("Content-Type", "application/octet-stream");
-            let response = match request.send_bytes(bytes) {
-                Ok(response) => response,
-                Err(ureq::Error::Status(_, response)) => response,
-                Err(error) => return Err(format!("{method} {path}: {error}")),
-            };
-            read_workspace_binary_response(response)
-        } else {
-            let response = match request.call() {
-                Ok(response) => response,
-                Err(ureq::Error::Status(_, response)) => response,
-                Err(error) => return Err(format!("{method} {path}: {error}")),
-            };
-            read_workspace_binary_response(response)
-        }
-    }
-
     pub fn agent_media_binary_request(
         &self,
         agent_id: &str,
         media_id: &str,
-    ) -> Result<WorkspaceBinaryResponse, String> {
+    ) -> Result<MediaBinaryResponse, String> {
         for (label, value) in [("agent", agent_id), ("media", media_id)] {
             if value.is_empty()
                 || value.len() > 128
@@ -591,7 +800,7 @@ impl Client {
             Err(ureq::Error::Status(_, response)) => response,
             Err(error) => return Err(format!("GET {path}: {error}")),
         };
-        read_workspace_binary_response(response)
+        read_media_binary_response(response)
     }
 
     fn json_request(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
@@ -866,70 +1075,26 @@ impl Client {
     }
 }
 
-fn read_workspace_binary_response(
-    response: ureq::Response,
-) -> Result<WorkspaceBinaryResponse, String> {
+fn read_media_binary_response(response: ureq::Response) -> Result<MediaBinaryResponse, String> {
     let status = response.status();
     let content_type = response
         .header("Content-Type")
         .unwrap_or("application/octet-stream")
         .to_string();
-    let etag = response.header("ETag").unwrap_or("").to_string();
     let mut body = Vec::new();
     response
         .into_reader()
-        .take((MAX_WORKSPACE_FILE_BYTES + 1) as u64)
+        .take((MAX_MEDIA_RESPONSE_BYTES + 1) as u64)
         .read_to_end(&mut body)
         .map_err(|error| format!("读取工作区响应失败: {error}"))?;
-    if body.len() > MAX_WORKSPACE_FILE_BYTES {
-        return Err("Node 文件响应超过 16 MiB".into());
+    if body.len() > MAX_MEDIA_RESPONSE_BYTES {
+        return Err("Node 媒体响应超过 16 MiB".into());
     }
-    Ok(WorkspaceBinaryResponse {
+    Ok(MediaBinaryResponse {
         status,
         content_type,
-        etag,
         body,
     })
-}
-
-pub fn validate_workspace_binary_path(path: &str, method: &str) -> Result<String, String> {
-    let normalized = validate_desktop_api_path(path)?;
-    let url = url::Url::parse(&format!("http://localhost{normalized}"))
-        .map_err(|_| "工作区文件路径无效".to_string())?;
-    let parts: Vec<_> = url.path().split('/').collect();
-    if parts.len() != 6
-        || parts[1] != "v1"
-        || parts[2] != "agents"
-        || parts[3].is_empty()
-        || parts[4] != "workspace"
-    {
-        return Err("工作区文件路径无效".into());
-    }
-    let endpoint = parts[5];
-    if !matches!(
-        (method, endpoint),
-        ("GET", "file") | ("PUT", "file") | ("POST", "upload")
-    ) {
-        return Err("工作区文件路径不允许此操作".into());
-    }
-    let relative = url
-        .query_pairs()
-        .find(|(key, _)| key == "path")
-        .map(|(_, value)| value.into_owned())
-        .unwrap_or_default();
-    if relative.contains('\\')
-        || relative.starts_with('/')
-        || relative.contains(':')
-        || relative
-            .split('/')
-            .any(|segment| matches!(segment, ".." | "."))
-    {
-        return Err("工作区路径必须是安全的相对路径".into());
-    }
-    if endpoint == "file" && relative.trim().is_empty() {
-        return Err("文件路径不能为空".into());
-    }
-    Ok(normalized)
 }
 
 fn validate_desktop_api_path(path: &str) -> Result<String, String> {
@@ -1110,6 +1275,85 @@ mod tests {
     }
 
     #[test]
+    fn workspace_location_uses_native_bridge_header_and_binds_agent_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let count = socket.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..count]).to_ascii_lowercase();
+            assert!(request.starts_with("get /v1/agents/agent-1/workspace/location http/1.1"));
+            assert!(request.contains("x-dagents-native-workspace: 1"));
+            let body = r#"{"agent_id":"agent-1","root":"C:\\workspace"}"#;
+            write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let client = Client::new(&format!("http://{address}"));
+        let location = client.workspace_location("agent-1").unwrap();
+        assert_eq!(location.agent_id, "agent-1");
+        assert_eq!(location.root, r"C:\workspace");
+        assert!(client.workspace_location("../other").is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn workspace_write_prepare_sends_only_authenticated_metadata_json() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buffer).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..n]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                    assert!(
+                        headers.starts_with("post /v1/agents/agent-1/workspace/writes http/1.1")
+                    );
+                    assert!(headers.contains("x-dagents-native-workspace: 1"));
+                    assert!(headers.contains("content-type: application/json"));
+                    assert!(!headers.contains("application/octet-stream"));
+                    let length = headers
+                        .lines()
+                        .find_map(|l| {
+                            l.strip_prefix("content-length: ")
+                                .and_then(|v| v.parse::<usize>().ok())
+                        })
+                        .unwrap();
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let raw = String::from_utf8_lossy(&request);
+            let body = raw.split("\r\n\r\n").nth(1).unwrap();
+            assert!(body.contains("expected_revision"));
+            assert!(body.contains("\"kind\":\"text\""));
+            assert!(!body.contains("editor secret"));
+            let body = r#"{"operation_id":"op-1","staging_path":"/runtime/workspace-writes/op-1","staging_root":"/runtime/workspace-writes","staging_identity":"unix:1:2","expires_at":"soon"}"#;
+            write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+        });
+        let client = Client::new(&format!("http://{address}"));
+        let result = client
+            .workspace_write_prepare(
+                "agent-1",
+                "notes.txt",
+                "replace",
+                "text",
+                Some("sha256"),
+                12,
+            )
+            .unwrap();
+        assert_eq!(result.operation_id, "op-1");
+        server.join().unwrap();
+    }
+
+    #[test]
     fn sse_resume_uses_global_cursor_and_signals_successful_connection() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1231,38 +1475,6 @@ mod tests {
         let serialized = serde_json::to_value(&channels[0]).unwrap();
         assert!(serialized.get("credential_id").is_none());
         assert!(serialized.get("secret").is_none());
-    }
-
-    #[test]
-    fn workspace_binary_path_is_limited_to_relative_workspace_files() {
-        assert!(validate_workspace_binary_path(
-            "/v1/agents/agent-1/workspace/file?path=src%2Fmain.rs",
-            "GET"
-        )
-        .is_ok());
-        assert!(validate_workspace_binary_path(
-            "/v1/agents/agent-1/workspace/upload?path=assets",
-            "POST"
-        )
-        .is_ok());
-        for (method, path) in [
-            (
-                "GET",
-                "/v1/agents/agent-1/workspace/file?path=%2e%2e%2Fsecret.txt",
-            ),
-            (
-                "GET",
-                "/v1/agents/agent-1/workspace/file?path=C%3A%5Csecret.txt",
-            ),
-            ("PUT", "/v1/agents/agent-1/workspace/upload?path=new.txt"),
-            ("GET", "/v1/agents/agent-1/context?path=notes.txt"),
-            ("POST", "/v1/agents/agent-1/workspace/file?path=notes.txt"),
-        ] {
-            assert!(
-                validate_workspace_binary_path(path, method).is_err(),
-                "accepted {method} {path}"
-            );
-        }
     }
 
     #[test]

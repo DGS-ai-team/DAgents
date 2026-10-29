@@ -109,9 +109,9 @@ curl -f http://127.0.0.1:18765/v1/node/update/package -o dagents-update-package
 
 ### Workspace、媒体、terminal 与平台能力
 
-Workspace 文件路径通过 `path` query 参数传递。读取使用 `GET /v1/agents/{agent_id}/workspace/file?path=...`，响应体是原始文件字节并带 ETag；更新使用 `PUT` 和原始字节请求体，必须携带 `If-Match: <etag>`，新建则用 `If-None-Match: *`。上传使用 `POST /v1/agents/{agent_id}/workspace/upload?path=...`，请求体同样是文件原始字节（不是 multipart）；Node 按新建处理，目标已存在时返回 412。成功的写入/上传返回 JSON 元数据和新的 ETag。Desktop 客户端通过 `desktop_workspace_binary_request` 传输这些二进制请求，路径和条件头分别作为 IPC 参数传入。媒体读取是另一条二进制路由：`GET /v1/agents/{agent_id}/media/{media_id}`。
+Workspace 文件内容由 Desktop Tauri 原生本地命令读取。Node 提供目录和工作区位置元数据，以及 `POST .../workspace/writes`、`POST .../writes/{operation_id}/commit`、`POST .../writes/{operation_id}/cancel` 三个 JSON 控制接口。Desktop 原生层将文本或所选本机文件写入 Node 创建的受控暂存文件，HTTP 仅传操作 ID、路径、大小、预期版本和摘要。Node 校验暂存文件身份，在共享工作区协调锁内检查目标版本并发布；新建重名和旧版本保存返回 412。旧 `workspace/file`、`workspace/chunk` 和 `workspace/upload` 二进制路由已移除。具体限制和失败语义见[工作区文件 API](../development/workspace-file-api.md)。历史媒体读取另有 `GET /v1/agents/{agent_id}/media/{media_id}`。
 
-文件 GET 支持 `If-None-Match` 条件读取：使用内容摘要生成的强 ETag，条件比较按 HTTP 的弱比较语义处理；匹配返回 `304`、当前 ETag 和空正文，未匹配返回 `200` 及最新字节。客户端必须保留 304 之前的内容，不能把空正文当作空文件。此读取条件不改变 PUT 的 `If-Match` 冲突保护。Desktop 自动刷新只检查当前可见目录及打开文件；大小与修改时间用于加速发现变化，不能替代内容版本校验。调度及草稿规则见[资源页自动刷新方案](../design/desktop-product/resource-auto-refresh.md)，消息资源引用和 HTML/SVG 预览见[资源引用协议](../development/resource-references.md)。
+Desktop 自动刷新只检查当前可见目录及打开文件；大小与修改时间用于加速发现变化，保存仍使用内容版本校验。调度及草稿规则见[资源页自动刷新方案](../design/desktop-product/resource-auto-refresh.md)，消息资源引用和 HTML/SVG 预览见[资源引用协议](../development/resource-references.md)。
 
 Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=...` 提供；它读取该 Agent 已有浏览器会话的页面/截图，不会启动浏览器、执行页面代码或提供交互控制。AutoDreaming 状态由 `/v1/agents/{agent_id}/dreaming` 提供，体验条目、待办和唤醒触发器分别由 experience/todos/triggers 领域路由管理。Browser sidecar 固定在 `127.0.0.1:18766`，由本机 Node 启动和停止。
 
@@ -220,9 +220,10 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `GET` | `/v1/agents/{agent_id}/tool-jobs` | `handleAgentToolJobs` | [tool_call_control_api.go#L13](../../node/internal/api/tool_call_control_api.go#L13) |
 | `POST` | `/v1/agents/{agent_id}/turns/{turn_id}/steps/{step_id}/tool-executions/{execution_id}/reconcile` | `handleAgentReconcileToolExecution` | [agents_api.go#L43](../../node/internal/api/agents_api.go#L43) |
 | `GET` | `/v1/agents/{agent_id}/workspace` | `handleWorkspaceList` | [agents_api.go#L29](../../node/internal/api/agents_api.go#L29) |
-| `GET` | `/v1/agents/{agent_id}/workspace/file` | `handleWorkspaceGet` | [agents_api.go#L30](../../node/internal/api/agents_api.go#L30) |
-| `PUT` | `/v1/agents/{agent_id}/workspace/file` | `handleWorkspacePut` | [agents_api.go#L31](../../node/internal/api/agents_api.go#L31) |
-| `POST` | `/v1/agents/{agent_id}/workspace/upload` | `handleWorkspaceUpload` | [agents_api.go#L32](../../node/internal/api/agents_api.go#L32) |
+| `GET` | `/v1/agents/{agent_id}/workspace/location` | `handleWorkspaceLocation` | [workspace_api.go](../../node/internal/api/workspace_api.go) |
+| `POST` | `/v1/agents/{agent_id}/workspace/writes` | `handleWorkspaceWritePrepare` | [workspace_writes.go](../../node/internal/api/workspace_writes.go) |
+| `POST` | `/v1/agents/{agent_id}/workspace/writes/{operation_id}/commit` | `handleWorkspaceWriteCommit` | [workspace_writes.go](../../node/internal/api/workspace_writes.go) |
+| `POST` | `/v1/agents/{agent_id}/workspace/writes/{operation_id}/cancel` | `handleWorkspaceWriteCancel` | [workspace_writes.go](../../node/internal/api/workspace_writes.go) |
 | `POST` | `/v1/messages` | `handlePostMessage` | [server_routes.go#L25](../../node/internal/api/server_routes.go#L25) |
 | `GET` | `/v1/streams` | `handleStreams` | [server_routes.go#L26](../../node/internal/api/server_routes.go#L26) |
 

@@ -66,11 +66,9 @@ Node 负责资源的真实状态、鉴权、工作区边界和内容版本；Des
 
 ### 3.3 最小 API 调整
 
-复用现有 `GET /v1/agents/{agent_id}/workspace?path=...` 和 `GET .../workspace/file?path=...`，不新增 watch/stat 路由。
+复用现有 `GET /v1/agents/{agent_id}/workspace?path=...` 获取目录元数据，由 Desktop 原生本地命令读取可见文件内容；不新增 watch/stat 路由。
 
-- 文件 GET 支持 `If-None-Match`：内容强 ETag 一致返回 304、无正文；变化返回 200、正文及新 ETag。按 HTTP 条件请求语义解析，而非简单字符串相等。
-- Desktop 二进制传输已可转发 `If-None-Match`；客户端需将 304 表示为 `notModified`，不能当作错误或空文件。
-- Node 仍需读取并计算内容摘要才能确定强 ETag。304 节省传输与渲染，不承诺消除磁盘读取开销；仅校验当前文件并降低大文件频率控制成本。
+- 文件内容由 Desktop 本地命令读取；大小和修改时间可用于发现刷新候选，保存时仍通过内容 revision 检测冲突。
 - 首轮目录仍返回现有 JSON，由客户端比较条目；不为降低少量 JSON 传输增加目录 ETag 或服务端缓存。
 - 保留现有路径规范、`.dagents` 隔离、符号链接/目录联接防逃逸、文件大小限制，以及 PUT 的 `If-Match` 约束。
 

@@ -11,6 +11,33 @@ import (
 	"time"
 )
 
+func TestValidateLocalNodeEndpoint(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{name: "localhost custom port", url: "http://localhost:22117"},
+		{name: "ipv4 loopback", url: "http://127.0.0.1:18765"},
+		{name: "ipv4 loopback range", url: "http://127.42.0.2:9000"},
+		{name: "ipv6 loopback", url: "http://[::1]:18765"},
+		{name: "remote ipv4", url: "http://192.168.1.8:18765", wantErr: true},
+		{name: "remote hostname", url: "http://node.example:18765", wantErr: true},
+		{name: "https", url: "https://localhost:18765", wantErr: true},
+		{name: "path", url: "http://localhost:18765/api", wantErr: true},
+		{name: "userinfo", url: "http://user@localhost:18765", wantErr: true},
+		{name: "invalid port", url: "http://localhost:70000", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateLocalNodeEndpoint(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateLocalNodeEndpoint(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestGetAgentInfoDecodesNodeServiceIdentity(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/node/info" {

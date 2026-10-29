@@ -11,7 +11,7 @@
 | Desktop / Client | 展示可用版本，经过用户确认后执行更新命令 |
 | 安装器/桌面 Shell | Windows Inno 负责替换与回滚；DAgents Desktop 负责就绪检查、停止 Node、启动安装器 |
 
-Desktop 本机模式连接本机 Node；隧道模式仅连接外部 SSH 转发的 loopback endpoint，并禁用本机安装器更新动作。Manage 不反向访问 Node。Node API 不内嵌 Web UI。
+Desktop 固定连接同机 Node `127.0.0.1:18765`；远程主机操作通过 Node 的 SSH/远程终端工具完成。Manage 不反向访问 Node。Node API 不内嵌 Web UI。
 
 ## 2. Manage API
 

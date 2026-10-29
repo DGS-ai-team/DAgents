@@ -712,7 +712,7 @@ mod lifecycle_tests {
                 .as_nanos()
         ));
         let cfg = ShellConfig {
-            node_endpoint: format!("http://{address}"),
+            test_node_endpoint: format!("http://{address}"),
             ..ShellConfig::default()
         };
 
