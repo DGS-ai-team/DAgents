@@ -13,8 +13,10 @@ pub const DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS: u64 = 6 * 3600;
 #[serde(default)]
 pub struct ShellConfig {
     #[cfg(test)]
-    #[serde(skip, default = "default_node_endpoint")]
-    pub(crate) node_endpoint: String,
+    // Test-only loopback injection for node-controller integration tests; no
+    // endpoint override is loaded from or exposed through Desktop settings.
+    #[serde(skip, default = "default_test_node_endpoint")]
+    pub(crate) test_node_endpoint: String,
     pub notification_enabled: bool,
     pub update_check_enabled: bool,
     pub update_check_interval_seconds: u64,
@@ -24,7 +26,7 @@ impl Default for ShellConfig {
     fn default() -> Self {
         Self {
             #[cfg(test)]
-            node_endpoint: default_node_endpoint(),
+            test_node_endpoint: default_test_node_endpoint(),
             notification_enabled: true,
             update_check_enabled: true,
             update_check_interval_seconds: DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS,
@@ -36,7 +38,7 @@ impl ShellConfig {
     pub fn node_endpoint(&self) -> &str {
         #[cfg(test)]
         {
-            return &self.node_endpoint;
+            return &self.test_node_endpoint;
         }
         #[cfg(not(test))]
         {
@@ -103,7 +105,7 @@ impl ShellConfig {
 }
 
 #[cfg(test)]
-fn default_node_endpoint() -> String {
+fn default_test_node_endpoint() -> String {
     NODE_ENDPOINT.to_string()
 }
 
@@ -133,27 +135,22 @@ mod tests {
         changed.save_atomic(&path).unwrap();
         assert_eq!(ShellConfig::load_or_create(&path).unwrap(), changed);
         let saved = fs::read_to_string(&path).unwrap();
-        assert!(!saved.contains("node_endpoint"));
-        assert!(!saved.contains("connection_mode"));
-        let _ = fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn legacy_tunnel_fields_are_ignored_and_cannot_change_local_endpoint() {
-        let path = temp_path();
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(
-            &path,
-            r#"{"connection_mode":"tunnel","node_endpoint":"http://127.0.0.1:18766","notification_enabled":false}"#,
-        )
-        .unwrap();
-        let config = ShellConfig::load_or_create(&path).unwrap();
-        assert!(!config.notification_enabled);
-        assert_eq!(config.node_endpoint(), "http://127.0.0.1:18765");
-        config.save_atomic(&path).unwrap();
-        let saved = fs::read_to_string(&path).unwrap();
-        assert!(!saved.contains("tunnel"));
-        assert!(!saved.contains("18766"));
+        let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        let mut saved_fields: Vec<_> = saved
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        saved_fields.sort_unstable();
+        assert_eq!(
+            saved_fields,
+            [
+                "notification_enabled",
+                "update_check_enabled",
+                "update_check_interval_seconds"
+            ]
+        );
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 }

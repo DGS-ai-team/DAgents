@@ -651,7 +651,31 @@ func (c *Config) ManageUpdateCheckInterval() time.Duration {
 
 // ListenAddr 返回 host:port 监听地址字符串。
 func (c *Config) ListenAddr() string {
-	return fmt.Sprintf("%s:%d", c.Listen.Host, c.Listen.Port)
+	return net.JoinHostPort(strings.Trim(strings.TrimSpace(c.Listen.Host), "[]"), fmt.Sprint(c.Listen.Port))
+}
+
+// LocalNodeEndpoint 返回本机 CLI 连接 Node 时使用的 endpoint。
+// ApplyDefaults 会把空 local.endpoint 派生成监听地址供 Node/Manage 使用；
+// 通配监听地址只能用于 bind，客户端应通过 loopback 访问本机 Node。
+// 仅当 endpoint 与当前监听地址完全对应时才规范化，显式配置的 remote endpoint
+// 会原样返回并由调用方的本地 endpoint 校验拒绝。Local.Endpoint 本身不变，
+// 因此 Manage 公告仍使用原有地址。
+func (c *Config) LocalNodeEndpoint() string {
+	if c == nil {
+		return ""
+	}
+	host := strings.Trim(strings.TrimSpace(c.Listen.Host), "[]")
+	endpoint := strings.TrimSpace(c.Local.Endpoint)
+	if endpoint != "http://"+c.ListenAddr() {
+		return endpoint
+	}
+	switch host {
+	case "0.0.0.0":
+		return fmt.Sprintf("http://%s", net.JoinHostPort("127.0.0.1", fmt.Sprint(c.Listen.Port)))
+	case "::":
+		return fmt.Sprintf("http://%s", net.JoinHostPort("::1", fmt.Sprint(c.Listen.Port)))
+	}
+	return endpoint
 }
 
 // MemoryDir 返回 Node 控制面持久化目录（`<runtime>/memory`）。Agent 私有 workspace 状态不使用此路径。

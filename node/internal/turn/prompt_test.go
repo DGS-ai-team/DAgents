@@ -49,7 +49,7 @@ func TestSystemPromptsDescribeHarnessAndResourceLinksWithoutGreetingRule(t *test
 			t.Fatalf("%s prompt contains a forced greeting rule: %q", name, prompt)
 		}
 		if !containsAll(prompt,
-			"当前连接的 Node 主机执行", "不是 Desktop 本机", "Node policy/审批结果",
+			"Desktop 与 Node 位于同一设备", "本机 Node 执行", "SSH/远程终端等工具可在其他主机执行", "Node policy/审批结果",
 			"[报告](dagents://resource/file?path=reports%2Fsummary.md)",
 			"![图片](dagents://resource/image?path=images%2Fplot.png)",
 			"[终端](dagents://resource/terminal?id=local-terminal-5)",
@@ -58,6 +58,9 @@ func TestSystemPromptsDescribeHarnessAndResourceLinksWithoutGreetingRule(t *test
 			"切换到源码并复制源码", "不执行模型提供的脚本", "CSP 哈希限制",
 			"不访问外网、Node 或本地文件", "也不导航", "不进入宿主 DOM") {
 			t.Fatalf("%s prompt is missing harness/resource guidance: %q", name, prompt)
+		}
+		if contains(prompt, "路径可能属于远程 Node") {
+			t.Fatalf("%s prompt still treats the connected Node as remote: %q", name, prompt)
 		}
 	}
 }

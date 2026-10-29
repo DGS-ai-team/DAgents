@@ -36,6 +36,9 @@ func (s *Server) Handler() http.Handler {
 // 2. ctx 取消后停止后台运行时、关闭持久化资源，最后关闭 HTTP listener。
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	defer s.closeBrowserService()
+	if s.workspaceWrites != nil {
+		defer s.workspaceWrites.close()
+	}
 	if s.startupErr != nil {
 		return fmt.Errorf("node startup failed: %w", s.startupErr)
 	}
@@ -49,6 +52,22 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	regCtx, regCancel := context.WithCancel(ctx)
 	defer regCancel()
+	if s.workspaceWrites != nil {
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-regCtx.Done():
+					return
+				case now := <-ticker.C:
+					s.workspaceWrites.mu.Lock()
+					s.workspaceWrites.cleanup(now)
+					s.workspaceWrites.mu.Unlock()
+				}
+			}
+		}()
+	}
 	s.manageMu.Lock()
 	s.manageCtx = regCtx
 	s.manageCancel = regCancel
@@ -245,6 +264,9 @@ func (s *Server) maybeStartManageSidecars() {
 func (s *Server) Close() {
 	if s == nil {
 		return
+	}
+	if s.workspaceWrites != nil {
+		s.workspaceWrites.close()
 	}
 	if s.triggerSched != nil {
 		s.triggerSched.Stop()

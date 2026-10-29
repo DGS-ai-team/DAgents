@@ -68,6 +68,44 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLocalNodeEndpointNormalizesOnlyDerivedWildcardListenEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     string
+		wantBind string
+		wantNode string
+	}{
+		{name: "ipv4 wildcard", host: "0.0.0.0", wantBind: "http://0.0.0.0:18765", wantNode: "http://127.0.0.1:18765"},
+		{name: "ipv6 wildcard", host: "::", wantBind: "http://[::]:18765", wantNode: "http://[::1]:18765"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Listen: ListenConfig{Host: tt.host, Port: 18765}}
+			cfg.ApplyDefaults()
+			if cfg.Local.Endpoint != tt.wantBind {
+				t.Fatalf("local.endpoint = %q, want bind/announcement address %q", cfg.Local.Endpoint, tt.wantBind)
+			}
+			if got := cfg.LocalNodeEndpoint(); got != tt.wantNode {
+				t.Fatalf("LocalNodeEndpoint() = %q, want %q", got, tt.wantNode)
+			}
+			if got := cfg.ManageRegistryBaseURL(); got != tt.wantBind {
+				t.Fatalf("ManageRegistryBaseURL() = %q, want unchanged announcement %q", got, tt.wantBind)
+			}
+		})
+	}
+}
+
+func TestLocalNodeEndpointPreservesExplicitRemoteEndpoint(t *testing.T) {
+	cfg := &Config{
+		Listen: ListenConfig{Host: "0.0.0.0", Port: 18765},
+		Local:  LocalConfig{Endpoint: "http://192.0.2.10:18765"},
+	}
+	cfg.ApplyDefaults()
+	if got := cfg.LocalNodeEndpoint(); got != cfg.Local.Endpoint {
+		t.Fatalf("LocalNodeEndpoint() = %q, want explicit endpoint %q", got, cfg.Local.Endpoint)
+	}
+}
+
 func TestLoadFile_ignoresYAMLRuntimeRoot(t *testing.T) {
 	path, _ := testConfigPath(t, "node_id: fixed-root\nruntime_root: /should/be/ignored\n")
 	cfg, err := LoadFile(path)

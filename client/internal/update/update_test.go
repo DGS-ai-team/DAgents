@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
@@ -39,6 +42,57 @@ func TestRunCheckOnly(t *testing.T) {
 	}
 	if got := Run(context.Background(), cfg, Options{CheckOnly: true}); got != 0 {
 		t.Fatalf("Run check-only = %d, want 0", got)
+	}
+}
+
+func TestRunRejectsRemoteNodeEndpoint(t *testing.T) {
+	cfg := &config.Config{Local: config.LocalConfig{Endpoint: "http://192.0.2.10:18765"}}
+	if code := Run(context.Background(), cfg, Options{CheckOnly: true}); code == 0 {
+		t.Fatal("expected remote endpoint to be rejected")
+	}
+}
+
+func TestRunCheckOnlyUsesLoopbackForDerivedWildcardListenEndpoint(t *testing.T) {
+	for _, host := range []string{"0.0.0.0", "::"} {
+		t.Run(host, func(t *testing.T) {
+			bindHost := "127.0.0.1"
+			if host == "::" {
+				bindHost = "::1"
+			}
+			listener, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
+			if err != nil {
+				t.Skipf("cannot bind %s loopback: %v", bindHost, err)
+			}
+			_, portText, err := net.SplitHostPort(listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			port, err := strconv.Atoi(portText)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var called atomic.Bool
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/node/update" {
+					http.NotFound(w, r)
+					return
+				}
+				called.Store(true)
+				_ = json.NewEncoder(w).Encode(nodeapi.AgentUpdateStatus{CurrentVersion: "1.0.0", LatestVersion: "1.0.0", ManageReachable: true})
+			})
+			srv := httptest.NewUnstartedServer(handler)
+			srv.Listener = listener
+			srv.Start()
+			t.Cleanup(srv.Close)
+			cfg := &config.Config{Listen: config.ListenConfig{Host: host, Port: port}}
+			cfg.ApplyDefaults()
+			if code := Run(context.Background(), cfg, Options{CheckOnly: true}); code != 0 {
+				t.Fatalf("Run check-only = %d (local.endpoint %q)", code, cfg.Local.Endpoint)
+			}
+			if !called.Load() {
+				t.Fatal("expected update request to the local Node")
+			}
+		})
 	}
 }
 

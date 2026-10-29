@@ -394,7 +394,8 @@ mod tests {
         if std::env::var("DAGENTS_TERMINAL_SMOKE").as_deref() != Ok("1") {
             return;
         }
-        let endpoint = std::env::var("DAGENTS_NODE_ENDPOINT")
+        // Test-only Node override; product code always targets the fixed local Node.
+        let endpoint = std::env::var("DAGENTS_TEST_NODE_ENDPOINT")
             .unwrap_or_else(|_| "http://127.0.0.1:18765".into());
         let agent_id =
             std::env::var("DAGENTS_MVP_AGENT_ID").expect("DAGENTS_MVP_AGENT_ID required");

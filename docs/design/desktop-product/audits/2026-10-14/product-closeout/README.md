@@ -2,6 +2,8 @@
 
 日期：2026-10-14。方案依据：[产品方向收束](../../../product-direction-simplification-2026-10-14.md)。本轮由 Luna 编码，主线程负责方向、审查、文档与原生窗口验收；未提交或推送，保留工作区既有变更。
 
+> 历史验收记录：本轮测试的本机 Node / SSH loopback 隧道模式已于 2026-10-20 从产品路线取消。以下隧道 UI、行为和测试结果仅记录当时状态，不代表当前 Desktop 支持远程 Node 连接。
+
 ## 产品与删除范围
 
 - 一个 Node 对应一个使用者档案，可由同一使用者的多台 Desktop 访问；不新增账号、membership、用户 ACL 或 Desktop 专属 runtime。
