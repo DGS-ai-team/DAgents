@@ -16,6 +16,7 @@ type lineSearchOptions struct {
 	contextLines    int
 	maxOutputTokens float64
 	fileEncoding    *string
+	cursorName      string
 }
 
 func compileLinePattern(rawPat string, literal, caseSensitive bool) (*regexp.Regexp, error) {
@@ -51,6 +52,9 @@ func normalizeLineSearchOptions(args lineSearchOptions) lineSearchOptions {
 	if out.maxOutputTokens <= 0 {
 		out.maxOutputTokens = defaultSearchMaxTokens
 	}
+	if strings.TrimSpace(out.cursorName) == "" {
+		out.cursorName = "index_offset"
+	}
 	return out
 }
 
@@ -81,8 +85,9 @@ func grepFileContentAtPath(displayPath string, lines []string, re *regexp.Regexp
 	}
 	if indexCapped {
 		header = append(header, fmt.Sprintf(
-			"命中索引列表: 仅保留前 %d 处供 index_offset 分页；全文件命中数仍为上值。",
+			"命中索引列表: 仅保留前 %d 处供 %s 分页；全文件命中数仍为上值。",
 			maxSearchHitIndexes,
+			opt.cursorName,
 		))
 	}
 
@@ -129,7 +134,7 @@ func grepFileContentAtPath(displayPath string, lines []string, re *regexp.Regexp
 
 	header = append(header,
 		fmt.Sprintf("本页命中: %s / 可分页 %d 处", pageDesc, pageableTotal),
-		fmt.Sprintf("next_index_offset: %s", nextIndex),
+		fmt.Sprintf("next_%s: %s", opt.cursorName, nextIndex),
 		fmt.Sprintf("前方是否还有命中: %s", yesNo(hasEarlier)),
 		fmt.Sprintf("后方是否还有命中: %s", yesNo(hasLater)),
 		"---",
@@ -140,7 +145,7 @@ func grepFileContentAtPath(displayPath string, lines []string, re *regexp.Regexp
 	}
 	out, truncated := applyMaxTokensToOutput(fullOut, opt.maxOutputTokens)
 	if truncated {
-		out += "\nnext_index_offset: " + nextIndex
+		out += "\nnext_" + opt.cursorName + ": " + nextIndex
 	}
 	return out, nil
 }

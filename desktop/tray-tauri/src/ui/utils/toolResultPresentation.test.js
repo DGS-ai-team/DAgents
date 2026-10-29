@@ -6,6 +6,64 @@ function entry(kind, data) {
 }
 
 describe("buildToolCardModel", () => {
+  it("presents unified grep_files results for a single file", () => {
+    const model = buildToolCardModel({
+      callEntry: entry("tool_call", {
+        tool_name: "grep_files",
+        arguments: { path: "src/main.go", pattern: "TODO", hit_offset: 1, max_hits: 5 },
+      }),
+      resultEntry: entry("tool_result", {
+        tool_name: "grep_files",
+        content: [
+          "文件: src/main.go",
+          "全文件命中数: 3",
+          "本页命中: 第 2-3 处 / 可分页 3 处",
+          "next_hit_offset: 无",
+          "---",
+          "TODO second",
+          "TODO third",
+        ].join("\n"),
+      }),
+    });
+
+    expect(model.inputFields).toContainEqual({ label: "路径", value: "src/main.go", kind: "mono" });
+    expect(model.inputFields).toContainEqual({ label: "分页偏移", value: "1", kind: "text" });
+    expect(model.resultFields).toEqual(
+      expect.arrayContaining([
+        { label: "全文件命中数", value: "3", kind: "text" },
+        { label: "下一页偏移", value: "无", kind: "text" },
+      ]),
+    );
+    expect(model.resultBlocks).toContainEqual(expect.objectContaining({ content: "TODO second\nTODO third" }));
+  });
+
+  it("presents unified grep_files results for a directory tree", () => {
+    const model = buildToolCardModel({
+      callEntry: entry("tool_call", {
+        tool_name: "grep_files",
+        arguments: { directory: "src", pattern: "TODO", glob_pattern: "**/*.go", hit_offset: 0, max_hits: 10 },
+      }),
+      resultEntry: entry("tool_result", {
+        tool_name: "grep_files",
+        content: [
+          "directory: src",
+          'glob_pattern: "**/*.go"',
+          "全树命中数: 2",
+          "本页命中: 第 1-2 处 / 可分页 2 处",
+          "next_hit_offset: 无",
+          "---",
+          "src/a.go: TODO one",
+          "src/b.go: TODO two",
+        ].join("\n"),
+      }),
+    });
+
+    expect(model.inputFields).toContainEqual({ label: "路径", value: "src", kind: "mono" });
+    expect(model.resultFields).toContainEqual({ label: "匹配数量", value: "2", kind: "text" });
+    expect(model.resultFields).toContainEqual({ label: "下一页偏移", value: "无", kind: "text" });
+    expect(model.resultBlocks).toContainEqual(expect.objectContaining({ content: "src/a.go: TODO one\nsrc/b.go: TODO two" }));
+  });
+
   it("presents computer actions and screenshot coordinate space", () => {
     const model = buildToolCardModel({
       callEntry: {

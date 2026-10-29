@@ -43,7 +43,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 
 | 组名 | 包含工具 |
 |------|----------|
-| `fs` | `read_file`、`write_file`、`glob_files`、`grep_file`、`grep_files`、`search_replace` |
+| `fs` | `read_file`、`read_image`、`write_file`、`search_replace`、`glob_files`、`grep_files`（覆盖单文件与目录树搜索） |
 | `bash` | `bash_run` |
 | `terminal` | `terminal_config_list`、`terminal_open`、`terminal_input`、`terminal_read`、`terminal_terminate`、`terminal_list` |
 | `hitl` | `ask_user_information` |
@@ -54,6 +54,7 @@ Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `d
 | `browser` | 主 Agent 直接控制：`browser_call` / `browser_evaluate`（Playwright） |
 
 各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
+旧工具名 `grep_file` 仍可识别显式权限配置，但不属于公开工具组，也不再提供给模型。
 
 ### `triggers`
 

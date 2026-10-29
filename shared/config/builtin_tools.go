@@ -53,6 +53,12 @@ var knownBuiltinTools = map[string]struct{}{
 	"auto_idle":              {},
 }
 
+// legacyBuiltinToolAliases remain recognized for existing explicit tool
+// permissions, but are not offered in public tool groups or model schemas.
+var legacyBuiltinToolAliases = map[string]struct{}{
+	"grep_file": {},
+}
+
 // builtinToolGroups 为 Agent defaults.tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
 var builtinToolGroups = map[string][]string{
 	"fs": {
@@ -60,7 +66,6 @@ var builtinToolGroups = map[string][]string{
 		"read_image",
 		"write_file",
 		"glob_files",
-		"grep_file",
 		"grep_files",
 		"search_replace",
 	},
@@ -136,6 +141,9 @@ func init() {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := builtinToolToGroup[name]; !ok {
+			if _, legacy := legacyBuiltinToolAliases[name]; legacy {
+				continue
+			}
 			panic("config: tool " + name + " missing from builtinToolGroups")
 		}
 	}

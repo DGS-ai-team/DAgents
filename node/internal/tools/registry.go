@@ -380,7 +380,6 @@ func (r *Registry) Definitions() []ToolDef {
 	base = append(base,
 		writeFileToolDef(),
 		globFilesToolDef(),
-		grepFileToolDef(),
 		grepFilesToolDef(),
 		searchReplaceToolDef(),
 		bashRunToolDef(),

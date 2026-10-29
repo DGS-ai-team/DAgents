@@ -73,6 +73,10 @@ func (r *Registry) execGrepFile(_ context.Context, raw json.RawMessage) (string,
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
+	return r.execGrepFileArgs(args, "index_offset")
+}
+
+func (r *Registry) execGrepFileArgs(args grepFileArgs, cursorName string) (string, error) {
 	re, err := compileLinePattern(args.Pattern, args.Literal, args.CaseSensitive)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
@@ -93,5 +97,6 @@ func (r *Registry) execGrepFile(_ context.Context, raw json.RawMessage) (string,
 		opt.contextLines = *args.ContextLines
 	}
 	opt.fileEncoding = args.Encoding
+	opt.cursorName = cursorName
 	return r.grepSingleFile(args.Path, re, opt)
 }

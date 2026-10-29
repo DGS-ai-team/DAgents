@@ -337,7 +337,7 @@ func DefaultScenarios() []Scenario {
 			UserInput: "同时收集工作区中的文件列表和匹配项，最后合并报告。",
 			Criteria: []Criterion{
 				{ID: "glob", Kind: CheckToolCalled, Value: "glob_files", Description: "获取文件列表"},
-				{ID: "grep", Kind: CheckToolCalled, Value: "grep_file", Description: "获取匹配内容"},
+				{ID: "grep", Kind: CheckToolCalled, Value: "grep_files", Description: "获取匹配内容"},
 			},
 		},
 		{

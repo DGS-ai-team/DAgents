@@ -21,7 +21,7 @@ const (
 
 // DefaultChildAllowedTools 在未指定 allowed_tools 时使用的默认工具集。
 func DefaultChildAllowedTools() []string {
-	return []string{"read_file", "glob_files", "grep_file", "bash_run"}
+	return []string{"read_file", "glob_files", "grep_files", "bash_run"}
 }
 
 // FormatChildTask 规范化临时 Agent 首条 user 任务正文（角色与边界由子 Agent system prompt 承载）。

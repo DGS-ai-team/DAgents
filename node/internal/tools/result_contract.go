@@ -147,7 +147,7 @@ func ResultDescriptionSuffixForTool(name string) string {
 	case "glob_files":
 		shape = " glob_files 正文包含匹配路径、分页 offset/next_offset 或 has_more 信息；空匹配是成功的零结果。"
 	case "grep_file", "grep_files":
-		shape = " grep 正文包含匹配行和分页信息；无匹配是成功的零结果，不应当作工具失败。"
+		shape = " grep_files 可用 path 搜索单文件，或用 directory 与 glob_pattern 搜索目录树；正文包含匹配行和分页信息，无匹配是成功的零结果。"
 	case "search_replace":
 		shape = " search_replace 正文明确给出成功、替换次数和必要的诊断；成功为 false 时不要声称已修改。"
 	case "read_image":
