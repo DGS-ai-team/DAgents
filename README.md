@@ -152,7 +152,7 @@ Windows PowerShell 使用：
 Copy-Item packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-`config.yaml` 是 Node bootstrap 文件，只保存监听地址；本机运维 CLI 的 `local.endpoint` 只接受 loopback 地址（`localhost`、`127.0.0.0/8` 或 `::1`，端口可自定义），不会连接远程 Node。Node 运行时设置默认写入 `.runtime/` 下的 SQLite。若 Node 需要向 Manage 公告可从其他机器访问的地址，请配置 `manage.registration.base_url`；该字段用于 Node 注册信息，不会改变 CLI 的 loopback 限制。该文件已被 Git 忽略，不要提交真实配置或密钥。
+`config.yaml` 是 Node bootstrap 文件，只保存监听地址；本机运维 CLI 的 `local.endpoint` 只接受 loopback 地址（`localhost`、`127.0.0.0/8` 或 `::1`，端口可自定义），不会连接远程 Node。仅配置通配监听地址 `0.0.0.0` 或 `::` 时，CLI 自动使用同端口的 IPv4 或 IPv6 loopback 连接，不改变 Node 的监听和公告地址。Node 运行时设置默认写入 `.runtime/` 下的 SQLite。若 Node 需要向 Manage 公告可从其他机器访问的地址，请配置 `manage.registration.base_url`；该字段用于 Node 注册信息，不会改变 CLI 的 loopback 限制。该文件已被 Git 忽略，不要提交真实配置或密钥。
 
 **2. 启动 Node API 与 Desktop**
 

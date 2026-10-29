@@ -62,13 +62,14 @@ type agentInfoPayload struct {
 // 首配未完成时 agent/info 返回 403（node_profile_required）：仍视为探活成功（ProfilePending=true），
 // 避免 Linux/Windows 启动脚本误判「Node 未就绪」。
 func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Result, error) {
-	if err := nodeapi.ValidateLocalNodeEndpoint(cfg.Local.Endpoint); err != nil {
+	endpoint := cfg.LocalNodeEndpoint()
+	if err := nodeapi.ValidateLocalNodeEndpoint(endpoint); err != nil {
 		return nil, err
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	base := strings.TrimRight(cfg.Local.Endpoint, "/")
+	base := strings.TrimRight(endpoint, "/")
 
 	health, err := fetchHealth(ctx, httpClient, base)
 	if err != nil {
