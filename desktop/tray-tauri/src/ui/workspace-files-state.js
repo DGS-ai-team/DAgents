@@ -135,8 +135,12 @@ export function workspaceDraftKey(agentId, path, scope = 'default') {
   return `dagents.desktop.workspace-draft:${encodeURIComponent(scope)}:${encodeURIComponent(agentId)}:${encodeURIComponent(path)}`
 }
 
-export function serializeWorkspaceDraft(content, revision) {
-  return JSON.stringify({ content: String(content || ''), revision: String(revision || '') })
+export function serializeWorkspaceDraft(content, revision, textFormat = null) {
+  const draft = { content: String(content || ''), revision: String(revision || '') }
+  if (textFormat && typeof textFormat === 'object') {
+    draft.textFormat = { hasBom: Boolean(textFormat.hasBom), newline: ['\r\n', '\r', '\n'].includes(textFormat.newline) ? textFormat.newline : '\n' }
+  }
+  return JSON.stringify(draft)
 }
 
 export function deserializeWorkspaceDraft(raw, serverRevision) {
@@ -144,7 +148,10 @@ export function deserializeWorkspaceDraft(raw, serverRevision) {
   try {
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string') {
-      return { content: parsed.content, revision: String(parsed.revision || ''), conflict: Boolean(parsed.revision && serverRevision && parsed.revision !== serverRevision) }
+      const textFormat = parsed.textFormat && typeof parsed.textFormat === 'object'
+        ? { hasBom: Boolean(parsed.textFormat.hasBom), newline: ['\r\n', '\r', '\n'].includes(parsed.textFormat.newline) ? parsed.textFormat.newline : '\n' }
+        : undefined
+      return { content: parsed.content, revision: String(parsed.revision || ''), conflict: Boolean(parsed.revision && serverRevision && parsed.revision !== serverRevision), ...(textFormat ? { textFormat } : {}) }
     }
   } catch { /* Older drafts were stored as plain text. */ }
   return { content: String(raw), revision: '', conflict: false }

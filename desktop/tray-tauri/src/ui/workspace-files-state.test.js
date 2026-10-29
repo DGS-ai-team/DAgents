@@ -138,6 +138,8 @@ test('workspace drafts retain their base ETag and surface external edits as conf
   const saved = serializeWorkspaceDraft('local edits', '"revision-a"')
   assert.deepEqual(deserializeWorkspaceDraft(saved, '"revision-a"'), { content: 'local edits', revision: '"revision-a"', conflict: false })
   assert.deepEqual(deserializeWorkspaceDraft(saved, '"revision-b"'), { content: 'local edits', revision: '"revision-a"', conflict: true })
+  const formatted = serializeWorkspaceDraft('local edits', '"revision-a"', { hasBom: true, newline: '\r\n' })
+  assert.deepEqual(deserializeWorkspaceDraft(formatted, '"revision-a"'), { content: 'local edits', revision: '"revision-a"', conflict: false, textFormat: { hasBom: true, newline: '\r\n' } })
 })
 
 test('media URLs are accepted only for the owning Agent and the Node media route', () => {

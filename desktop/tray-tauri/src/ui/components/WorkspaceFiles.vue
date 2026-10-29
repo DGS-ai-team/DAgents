@@ -69,6 +69,7 @@ const newFileNameInput = ref(null)
 const draftOwnerId = ref('')
 const draftOwnerScope = ref('')
 const draftOwnerPath = ref('')
+const retainedDraft = ref(null)
 const folderMaskStyle = { maskImage: `url("${folderOpenIcon}")`, WebkitMaskImage: `url("${folderOpenIcon}")` }
 const dockStatusLabel = computed(() => ({ offline: '离线', pending: '待审批', generating: '生成中', idle: '空闲' }[props.dockStatus] || props.dockStatus))
 let requestEpoch = 0
@@ -91,6 +92,11 @@ let textChunkRevision = ''
 let csvPreviewParser = null
 const filename = computed(() => selectedPath.value.split('/').filter(Boolean).at(-1) || '')
 const selectedEntry = computed(() => entries.value.find(entry => entry.path === selectedPath.value) || null)
+const retainedDraftForCurrent = computed(() => {
+  const draft = retainedDraft.value
+  return draft && draft.agentId === props.agentId && draft.scope === props.workspaceScope && draft.path === selectedPath.value ? draft : null
+})
+const hasRetainedDraft = computed(() => Boolean(retainedDraftForCurrent.value))
 const canRetrySelectedText = computed(() => Boolean(selectedEntry.value) && selectedEntry.value.size > workspacePreviewLimits.bytes && isSegmentableText(selectedEntry.value.name))
 const canEditText = computed(() => Boolean(selectedPath.value) && !chunkedText.value && ['text/plain', 'text/html', 'application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value) && !['pdf', 'docx', 'xlsx', 'image', 'unsupported', 'unsupported-invalid', 'unsupported-legacy-office'].includes(previewKind.value))
 const canTogglePreview = computed(() => (canEditText.value || chunkedText.value || previewKind.value === 'markdown') && ['markdown', 'code', 'csv', 'html', 'svg'].includes(previewKind.value))
@@ -542,9 +548,12 @@ function saveDraft() {
   if (!draftOwnerPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
   const key = workspaceDraftKey(draftOwnerId.value, draftOwnerPath.value, draftOwnerScope.value)
   try {
-    if (dirty.value) localStorage.setItem(key, serializeWorkspaceDraft(content.value, revision.value))
-    else localStorage.removeItem(key)
+    if (dirty.value) localStorage.setItem(key, serializeWorkspaceDraft(content.value, revision.value, textFormat.value))
   } catch { /* Workspace edits remain in memory when local storage is unavailable. */ }
+}
+function removeWorkspaceDraft(agentId, path, scope) {
+  if (!agentId || !path || !scope) return
+  try { localStorage.removeItem(workspaceDraftKey(agentId, path, scope)) } catch { /* ignore unavailable storage */ }
 }
 function isFileRequestCurrent(request) {
   return isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: selectedPath.value, generation: props.requestGeneration })
@@ -607,6 +616,7 @@ async function loadDirectory(path = currentPath.value) {
     draftOwnerId.value = ''
     draftOwnerScope.value = ''
     draftOwnerPath.value = ''
+    retainedDraft.value = null
     selectedPath.value = ''
     content.value = ''
     fileBytes.value = null
@@ -658,6 +668,7 @@ async function openEntry(entry, discard = false) {
   draftOwnerId.value = ''
   draftOwnerScope.value = ''
   draftOwnerPath.value = ''
+  retainedDraft.value = null
   actionStatus.value = ''
   actionError.value = ''
   resourceActionBusy.value = false
@@ -680,6 +691,7 @@ async function openEntry(entry, discard = false) {
     const { result, chunkState: nextChunkState } = prepared
     const draft = deserializeWorkspaceDraft(localStorage.getItem(workspaceDraftKey(request.agentId, request.path, request.scope)), result.etag)
     const nextRevision = draft?.conflict ? draft.revision : result.etag
+    const nextTextFormat = draft ? (draft.textFormat || { hasBom: false, newline: '\n' }) : workspaceTextFormat(result.bytes)
     const snapshot = await buildFilePreview(request.path, result.contentType, result.bytes, draft?.content, () => isWorkspaceRequestCurrent(request, { epoch: requestEpoch, agentId: props.agentId, path: entry.path, generation: props.requestGeneration }) && request.scope === props.workspaceScope)
     if (!snapshot) return false
     if (!isFileRequestCurrent(request)) return false
@@ -690,8 +702,17 @@ async function openEntry(entry, discard = false) {
     draftOwnerPath.value = request.path
     contentEditVersion++
     installFileResult(result, snapshot, { chunkState: nextChunkState, nextRevision })
+    textFormat.value = nextTextFormat
     draftConflict.value = Boolean(draft?.conflict)
     dirty.value = canEditText.value && draft !== null && draft.content !== decodeWorkspaceText(result.bytes)
+    if (draft && !canEditText.value) retainedDraft.value = {
+      agentId: request.agentId,
+      scope: request.scope,
+      path: request.path,
+      content: draft.content,
+      revision: draft.revision,
+      textFormat: nextTextFormat,
+    }
     externalUpdate.value = false
     fileMissing.value = false
     lastFileCheck = Date.now()
@@ -764,6 +785,23 @@ async function saveSelectedAs() {
     if (resourceActionOwnerCurrent(owner)) actionError.value = String(e.message || e)
   } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
 }
+async function saveRetainedDraftAs() {
+  const draft = retainedDraftForCurrent.value
+  if (!draft || resourceActionBusy.value) return
+  const owner = resourceActionOwner()
+  resourceActionBusy.value = true
+  actionStatus.value = '正在另存本地草稿…'
+  actionError.value = ''
+  try {
+    const draftContent = new TextDecoder('utf-8', { ignoreBOM: true }).decode(encodeWorkspaceText(draft.content, draft.textFormat))
+    const result = await saveWorkspaceFileAs(owner.agentId, owner.path, draftContent)
+    if (!resourceActionOwnerCurrent(owner) || retainedDraftForCurrent.value !== draft) return
+    if (result?.status === 'saved') actionStatus.value = `本地草稿已另存为（${Number(result.bytesWritten || 0).toLocaleString()} 字节）`
+    else if (result?.status === 'cancelled') actionStatus.value = '已取消另存本地草稿'
+  } catch (e) {
+    if (resourceActionOwnerCurrent(owner) && retainedDraftForCurrent.value === draft) actionError.value = String(e.message || e)
+  } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
+}
 async function revealSelectedFile() {
   if (!selectedPath.value || resourceActionBusy.value) return
   const owner = resourceActionOwner()
@@ -804,10 +842,12 @@ async function refreshHighlightedContent() {
   } catch { if (sequence === highlightSequence) highlightedContent.value = '' }
 }
 async function discardDraftAndReload({ confirm = true } = {}) {
-  if (loading.value || saving.value || !selectedPath.value || !dirty.value && !draftConflict.value && !fileMissing.value && !externalUpdate.value) return
+  if (loading.value || saving.value || !selectedPath.value || !dirty.value && !draftConflict.value && !fileMissing.value && !externalUpdate.value && !hasRetainedDraft.value) return
   if (confirm && !await confirmDesktopAction('丢弃当前本地草稿并重新读取工作区文件？')) return
   const path = selectedPath.value
-  try { localStorage.removeItem(workspaceDraftKey(draftOwnerId.value, path, draftOwnerScope.value)) } catch { /* ignore unavailable storage */ }
+  const retained = retainedDraftForCurrent.value
+  removeWorkspaceDraft(retained?.agentId || draftOwnerId.value, path, retained?.scope || draftOwnerScope.value)
+  retainedDraft.value = null
   dirty.value = false
   draftConflict.value = false
   externalUpdate.value = false
@@ -848,7 +888,10 @@ async function saveFile({ overwrite = false, confirm = true } = {}) {
     draftConflict.value = false
     externalUpdate.value = false
     fileMissing.value = false
-    if (!dirty.value) saveDraft()
+    if (!dirty.value) {
+      removeWorkspaceDraft(request.agentId, request.path, request.scope)
+      if (retainedDraftForCurrent.value) retainedDraft.value = null
+    } else saveDraft()
     actionStatus.value = '已保存'
     lastFileCheck = Date.now()
     lastDirectoryCheck = 0
@@ -1131,7 +1174,7 @@ function onToolbarKeydown(event) {
   }
 }
 function resourceMenuActions() {
-  const canRecoverDraft = Boolean(selectedPath.value && !loading.value && !saving.value && (dirty.value || draftConflict.value || fileMissing.value || externalUpdate.value))
+  const canRecoverDraft = Boolean(selectedPath.value && !loading.value && !saving.value && (dirty.value || draftConflict.value || fileMissing.value || externalUpdate.value || hasRetainedDraft.value))
   return { canRecoverDraft, recoveryLabel: fileMissing.value ? '丢弃草稿并重试' : '丢弃草稿并重载' }
 }
 watch(selectedPath, (path, previousPath) => { if (previousPath && path !== previousPath) clearAnnotations({ notify: true }) })
@@ -1157,6 +1200,7 @@ watch(() => [props.agentId, props.workspaceScope], () => {
   draftOwnerId.value = '';
   draftOwnerScope.value = '';
   draftOwnerPath.value = '';
+  retainedDraft.value = null;
   dirty.value = false;
   fileRefs.value = {};
   revision.value = '';
@@ -1253,6 +1297,10 @@ onUnmounted(() => {
           <div class="workspace-files__draft-actions">
             <button v-if="canOverwriteDraft" type="button" :disabled="saving || loading" @click="saveFile({ overwrite: true })">覆盖保存</button>
           </div>
+        </div>
+        <div v-if="hasRetainedDraft" class="workspace-files__draft-bar is-conflict is-retained" role="status" aria-live="polite">
+          <span>当前显示源文件的{{ chunkedText ? '只读分段预览' : '只读预览' }}；本地草稿已独立保留，可另存草稿或通过资源菜单明确丢弃。</span>
+          <div class="workspace-files__draft-actions"><button type="button" :disabled="resourceActionBusy" @click="saveRetainedDraftAs">另存本地草稿</button></div>
         </div>
         <div v-if="actionStatus" class="workspace-files__action-status" role="status" aria-live="polite">{{ actionStatus }}</div>
         <div v-if="actionError" class="workspace-files__action-status workspace-files__action-error" role="alert">{{ actionError }}</div>

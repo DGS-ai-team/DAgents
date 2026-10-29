@@ -305,6 +305,43 @@ describe('Desktop workspace resource navigation', () => {
     expect(localStorage.getItem(draftKey)).toBe(storedDraft)
   })
 
+  it('retains and lets users save as a draft when the source grows into a chunked preview', async () => {
+    const draftKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.md'
+    api.readWorkspaceFile.mockResolvedValueOnce({
+      bytes: new TextEncoder().encode('\uFEFForiginal\r\nsource\r\n'),
+      contentType: 'text/plain',
+      etag: 'original-format-etag',
+    })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('original local draft\nsecond line')
+    const storedDraft = localStorage.getItem(draftKey)
+    await wrapper.vm.openPath('b.md')
+
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
+      path,
+      entries: path === '' ? directories[''].map(entry => entry.path === 'a.md' ? { ...entry, size: 17 * 1024 * 1024 } : entry) : directories[path] || [],
+    }))
+    api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('# New large source chunk\n'), fileSize: 17 * 1024 * 1024, nextOffset: 256 * 1024, etag: 'large-etag' })
+    await wrapper.vm.openPath('a.md')
+
+    expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('New large source chunk')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.find('.workspace-files__draft-bar.is-retained').text()).toContain('只读分段预览')
+    expect(localStorage.getItem(draftKey)).toBe(storedDraft)
+
+    api.saveWorkspaceFileAs.mockResolvedValueOnce({ status: 'saved', bytesWritten: 20 })
+    await wrapper.find('.workspace-files__draft-bar.is-retained button').trigger('click')
+    await flushPromises()
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.md', '\uFEFForiginal local draft\r\nsecond line')
+    expect(localStorage.getItem(draftKey)).toBe(storedDraft)
+
+    await wrapper.vm.discardDraftAndReload({ confirm: false })
+    expect(localStorage.getItem(draftKey)).toBeNull()
+    expect(wrapper.find('.workspace-files__draft-bar.is-retained').exists()).toBe(false)
+  })
+
   it('ignores a delayed segmented read after switching Agents', async () => {
     let resolveChunk
     api.readWorkspaceTextChunk.mockImplementationOnce(() => new Promise(resolve => { resolveChunk = resolve }))
@@ -718,6 +755,7 @@ describe('Desktop workspace resource navigation', () => {
     await wrapper.find('[aria-label="保存文件"]').trigger('click')
     await flushPromises()
     expect(api.saveWorkspaceFile.mock.calls[0][3]).toBe('"initial"')
+    expect(localStorage.getItem('dagents.desktop.workspace-draft:default:agent-a:a.md')).toBeNull()
     expect(wrapper.findAll('.workspace-files__action-status').map(status => status.text())).toContain('已保存')
     expect(wrapper.text()).not.toContain('此阶段取消后结果可能未知')
 
@@ -792,6 +830,24 @@ describe('Desktop workspace resource navigation', () => {
     await flushPromises()
     expect(wrapper.find('textarea').element.value).toBe('draft survives reconnect')
     expect(wrapper.find('[aria-label="保存文件"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps edits made while save is pending in the local draft', async () => {
+    const draftKey = 'dagents.desktop.workspace-draft:default:agent-a:a.md'
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('textarea').setValue('submitted text')
+    let finishSave
+    api.saveWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { finishSave = resolve }))
+    await wrapper.find('[aria-label="保存文件"]').trigger('click')
+    await wrapper.find('textarea').setValue('newer text while saving')
+    expect(localStorage.getItem(draftKey)).toContain('newer text while saving')
+
+    finishSave({ status: 'saved', etag: 'saved-etag' })
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('newer text while saving')
+    expect(localStorage.getItem(draftKey)).toContain('newer text while saving')
   })
 
   it('serializes create and import writes and keeps a newer request when an old create settles', async () => {
