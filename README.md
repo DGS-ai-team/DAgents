@@ -26,7 +26,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-当前版本为 **v1.0.1**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
+当前版本为 **v1.0.2**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
 v1.0.0 是 DAgents 首个稳定版，提供独立 Windows Desktop 与 API-only Node。由 v0.11.0 升级时，请先阅读[迁移指南](docs/user/migrate-from-v0.11.md)和[Windows 安装说明](packaging/windows/README.md)，备份现有 `.runtime` 后再安装；不要直接覆盖正在使用的数据目录。
 
@@ -152,7 +152,7 @@ Windows PowerShell 使用：
 Copy-Item packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-`config.yaml` 是 Node bootstrap 文件，只保存监听地址；Client 另用 `local.endpoint` 指定连接目标。Node 运行时设置默认写入 `.runtime/` 下的 SQLite。该文件已被 Git 忽略，不要提交真实配置或密钥。
+`config.yaml` 是 Node bootstrap 文件，只保存监听地址；本机运维 CLI 的 `local.endpoint` 只接受 loopback 地址（`localhost`、`127.0.0.0/8` 或 `::1`，端口可自定义），不会连接远程 Node。仅配置通配监听地址 `0.0.0.0` 或 `::` 时，CLI 自动使用同端口的 IPv4 或 IPv6 loopback 连接，不改变 Node 的监听和公告地址。Node 运行时设置默认写入 `.runtime/` 下的 SQLite。若 Node 需要向 Manage 公告可从其他机器访问的地址，请配置 `manage.registration.base_url`；该字段用于 Node 注册信息，不会改变 CLI 的 loopback 限制。该文件已被 Git 忽略，不要提交真实配置或密钥。
 
 **2. 启动 Node API 与 Desktop**
 
@@ -225,7 +225,7 @@ DAgents 能够调用本机工具，因此请把它当作一个可以执行操作
 ```text
 node/                  Agent Node API、工具执行、会话与共享设置前端源码
 manage/                可选的 Workgroup 控制面与 Manage Console
-client/                Node 客户端与远程连接适配
+client/                Node 运维与更新 CLI 客户端
 desktop/               独立 Tauri Desktop、工作台与资源界面
 shared/                共享 Go 模块、品牌与规范化图标资源
 packaging/             安装包、服务和发布资产

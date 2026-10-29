@@ -154,7 +154,7 @@ onMounted(loadPackages);
             </div>
             <div class="product-hero-meta">
               <span><UiIcon name="shield-check" :size="15" /> 数据默认留在自己的环境</span>
-              <span><UiIcon name="server" :size="15" /> Windows 桌面 · 本地或远程 Node</span>
+              <span><UiIcon name="server" :size="15" /> Windows 桌面 · 本机 Node</span>
             </div>
           </div>
 
@@ -219,9 +219,9 @@ onMounted(loadPackages);
           </article>
           <article class="product-feature-card">
             <span class="product-feature-icon"><UiIcon name="server" :size="20" /></span>
-            <span class="product-feature-number">03 / 灵活连接</span>
-            <h3>本机运行，也能连接远程 Node</h3>
-            <p>默认从本地开始；需要时连接远程 Linux 或其他工作环境，继续在熟悉的桌面中协作。</p>
+            <span class="product-feature-number">03 / 本机协同</span>
+            <h3>Desktop 与 Node 同机协作</h3>
+            <p>Desktop 固定连接本机 Node，工作区、会话和任务由 Node 管理；需要操作其他主机时，可使用 Node 的 SSH 或远程终端工具。</p>
           </article>
           <article class="product-feature-card product-feature-card--auto">
             <span class="product-feature-icon"><UiIcon name="auto" :size="20" /></span>

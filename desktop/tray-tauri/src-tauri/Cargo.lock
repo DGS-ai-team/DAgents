@@ -621,11 +621,12 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "dagents-shell"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "base64 0.22.1",
  "hex",
  "image",
+ "libc",
  "open",
  "percent-encoding",
  "serde",
@@ -636,6 +637,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-winrt-notification",
+ "tempfile",
  "thiserror 2.0.19",
  "tungstenite",
  "ureq",

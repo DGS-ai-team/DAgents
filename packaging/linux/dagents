@@ -734,7 +734,7 @@ Removed:
 Config:
   Bootstrap: config.yaml (listen-only). Runtime settings & LLM profiles: .runtime/*.db via init.
   A2A / Registry: deploy Manage separately (packaging/manage/README.md).
-  CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
+  CLI configuration: local endpoint must use loopback; set via DAGENTS_CONFIG
 EOF
 }
 
