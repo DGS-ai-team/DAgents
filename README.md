@@ -26,7 +26,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-当前版本为 **v1.0.2**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
+当前版本为 **v1.0.3**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
 v1.0.0 是 DAgents 首个稳定版，提供独立 Windows Desktop 与 API-only Node。由 v0.11.0 升级时，请先阅读[迁移指南](docs/user/migrate-from-v0.11.md)和[Windows 安装说明](packaging/windows/README.md)，备份现有 `.runtime` 后再安装；不要直接覆盖正在使用的数据目录。
 

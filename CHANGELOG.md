@@ -4,7 +4,9 @@
 
 ## [Unreleased]
 
-- Node 的模型工具列表将单文件与目录树文本搜索统一为 `grep_files`，分别通过 `path` 或 `directory` 调用；`grep_file` 保留为隐藏的服务端兼容别名。
+## [1.0.3] - 2026-10-30
+
+- 将 Node 模型可见的文件搜索统一为 `grep_files`，支持通过 `path` 搜索单文件、通过 `directory` 递归搜索；旧 `grep_file` 保留为隐藏的服务端兼容别名。
 
 ## [1.0.2] - 2026-10-29
 
