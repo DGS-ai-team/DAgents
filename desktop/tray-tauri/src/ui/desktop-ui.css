@@ -1413,7 +1413,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   background: #fff;
 }
 
-.desktop-composer-runtime-pill {
+.desktop-composer-progress-pill {
   position: absolute;
   right: 78px;
   bottom: calc(100% - 2px);
@@ -1430,10 +1430,10 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
-.desktop-composer-runtime-pill::before {
+.desktop-composer-progress-pill::before {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -1476,7 +1476,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .desktop-composer-toolbar {
   justify-self: end;
   min-width: 0;
-  max-width: 190px;
+  max-width: 270px;
   color: #4b5256;
 }
 .desktop-composer-toolbar .composer-toolbar__profile { min-width: 0; max-width: 100%; }
@@ -1576,7 +1576,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  max-width: 88px;
+  max-width: 104px;
   padding: 4px 7px;
   border-radius: 999px;
   background: #f0f2f2;
@@ -2144,7 +2144,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 }
 
 .dock-status-icon.is-pending { background-color: #c18526; }
-.dock-status-icon.is-generating { background-color: #555d62; animation: dock-icon-spin 1.4s linear infinite; }
+.dock-status-icon.is-generating { background-color: #555d62; animation: dock-icon-spin 1s linear infinite; }
 .dock-status-icon.is-offline { background-color: #b7534c; }
 @keyframes dock-icon-spin { to { transform: rotate(360deg); } }
 

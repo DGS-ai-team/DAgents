@@ -72,7 +72,7 @@ export async function saveWorkspaceFileAs(agentId, path, draftContent = null) {
   return desktopInvoke('desktop_workspace_save_as', { agentId, path: String(path || '').replaceAll('\\', '/'), draftContent })
 }
 
-export async function revealWorkspaceFile(agentId, path) {
+export async function revealWorkspacePath(agentId, path) {
   return desktopInvoke('desktop_workspace_reveal', { agentId, path: String(path || '').replaceAll('\\', '/') })
 }
 
