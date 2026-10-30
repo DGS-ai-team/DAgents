@@ -88,25 +88,40 @@ pub async fn reveal(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let location = client.workspace_location(&agent_id)?;
-        let (file, _root) =
-            crate::workspace_read::open_workspace_file(Path::new(&location.root), &relative_path)?;
-        let path = opened_file_path(&file)?;
+        let root = Path::new(&location.root);
+        let (path, is_file) =
+            match crate::workspace_read::resolve_workspace_directory(root, &relative_path) {
+                Ok(path) => (path, false),
+                Err(_) => {
+                    let (file, _root) =
+                        crate::workspace_read::open_workspace_file(root, &relative_path)?;
+                    (opened_file_path(&file)?, true)
+                }
+            };
         #[cfg(target_os = "windows")]
         {
-            let mut select_argument = std::ffi::OsString::from("/select,");
-            select_argument.push(&path);
-            std::process::Command::new("explorer.exe")
-                .arg(select_argument)
+            let mut command = std::process::Command::new("explorer.exe");
+            if is_file {
+                let mut select_argument = std::ffi::OsString::from("/select,");
+                select_argument.push(&path);
+                command.arg(select_argument);
+            } else {
+                command.arg(&path);
+            }
+            command
                 .spawn()
-                .map_err(|e| format!("无法在文件管理器中显示文件: {e}"))?;
+                .map_err(|e| format!("无法在文件管理器中打开工作区路径: {e}"))?;
             Ok(())
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let parent = path
-                .parent()
-                .ok_or_else(|| "工作区文件没有父目录".to_string())?;
-            open::that(parent).map_err(|e| format!("无法打开文件管理器: {e}"))
+            let target = if is_file {
+                path.parent()
+                    .ok_or_else(|| "工作区文件没有父目录".to_string())?
+            } else {
+                path.as_path()
+            };
+            open::that(target).map_err(|e| format!("无法打开文件管理器: {e}"))
         }
     })
     .await

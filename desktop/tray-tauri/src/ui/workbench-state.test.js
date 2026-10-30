@@ -133,7 +133,8 @@ test('DesktopApp supplies local Node and active workspace state to the top-menu 
 test('DesktopApp renders composer status in the visible footer and follows Turn and stream state', () => {
   const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
   assert.match(source, /desktopComposerStatus\(\{[\s\S]*?turnState: turnStateStore/)
-  assert.match(source, /class="desktop-composer-runtime-pill"[^>]*role="status"[^>]*>\{\{ composerRuntimeStatus \}\}/)
+  assert.match(source, /<ComposerToolbar[^>]*:status-label="composerRuntimeStatus"/)
+  assert.doesNotMatch(source, /desktop-composer-runtime-pill[^>]*>\{\{ composerRuntimeStatus \}\}/)
 
   assert.equal(desktopComposerStatus({ generating: true }), '正在等待回复')
   assert.equal(desktopComposerStatus({ generating: true, streamingText: '首个 token', turnState: { phase: 'model_generating' } }), '正在生成回复')
