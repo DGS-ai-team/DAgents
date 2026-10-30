@@ -372,8 +372,8 @@ function addFileInput(model, args, name) {
   } else {
     addField(model.inputFields, "匹配模式", args.pattern || args.query || args.glob_pattern);
     if (name === "glob_files") addField(model.inputFields, "包含目录", args.include_dirs ? "是" : "否");
-    addField(model.inputFields, "分页偏移", args.index_offset ?? args.offset ?? args.line_offset);
-    addField(model.inputFields, "数量上限", args.count_limit ?? args.max_results ?? args.line_limit);
+    addField(model.inputFields, "分页偏移", args.hit_offset ?? args.index_offset ?? args.offset ?? args.line_offset);
+    addField(model.inputFields, "数量上限", args.max_hits ?? args.count_limit ?? args.max_results ?? args.line_limit);
   }
 }
 
@@ -414,8 +414,10 @@ function addSearchResult(model, content, name) {
         ["后方是否还有结果", "还有更多结果"],
       ]
     : [
+        ["全树命中数", "匹配数量"],
         ["全文件命中数", "全文件命中数"],
         ["本页命中", "当前页命中"],
+        ["next_hit_offset", "下一页偏移"],
         ["next_index_offset", "下一页偏移"],
         ["前方是否还有命中", "前方还有命中"],
         ["后方是否还有命中", "后方还有命中"],

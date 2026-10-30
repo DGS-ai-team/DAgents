@@ -53,6 +53,13 @@ var knownBuiltinTools = map[string]struct{}{
 	"auto_idle":              {},
 }
 
+// legacyBuiltinToolAliases map hidden aliases to their canonical tools. They
+// remain recognized for execution compatibility without appearing in groups
+// or model schemas.
+var legacyBuiltinToolAliases = map[string]string{
+	"grep_file": "grep_files",
+}
+
 // builtinToolGroups 为 Agent defaults.tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
 var builtinToolGroups = map[string][]string{
 	"fs": {
@@ -60,7 +67,6 @@ var builtinToolGroups = map[string][]string{
 		"read_image",
 		"write_file",
 		"glob_files",
-		"grep_file",
 		"grep_files",
 		"search_replace",
 	},
@@ -136,6 +142,9 @@ func init() {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := builtinToolToGroup[name]; !ok {
+			if _, legacy := legacyBuiltinToolAliases[name]; legacy {
+				continue
+			}
 			panic("config: tool " + name + " missing from builtinToolGroups")
 		}
 	}
@@ -226,6 +235,35 @@ func ExpandBuiltinToolGroups(groups []string) []string {
 	if len(out) == 0 {
 		return nil
 	}
+	return out
+}
+
+// IncludeLegacyBuiltinToolAliases adds hidden compatibility names for enabled
+// canonical tools. Use this only for execution allowlists, never for model
+// schemas or UI group members.
+func IncludeLegacyBuiltinToolAliases(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(names)+len(legacyBuiltinToolAliases))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	for alias, canonical := range legacyBuiltinToolAliases {
+		if _, enabled := seen[canonical]; enabled {
+			seen[alias] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
 	return out
 }
 

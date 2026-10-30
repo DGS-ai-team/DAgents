@@ -13,6 +13,7 @@ const (
 )
 
 type grepFilesArgs struct {
+	Path          string  `json:"path"`
 	Directory     string  `json:"directory"`
 	Pattern       string  `json:"pattern"`
 	GlobPattern   string  `json:"glob_pattern"`
@@ -35,14 +36,19 @@ func grepFilesToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "grep_files",
-			Description: "在目录树内先按 glob_pattern 筛选文件，再按 pattern 逐行搜索文本内容，分页返回跨文件命中及上下文。" +
-				"directory 为起始目录；pattern 匹配行内文本；glob_pattern 相对 directory，支持 **，默认 **/*。",
+			Description: "按行搜索文本并分页返回命中和上下文。" +
+				"单文件搜索提供 path；目录树搜索提供 directory，可用 glob_pattern 限定文件。path 与 directory 必须且只能提供一个。" +
+				"pattern 匹配行内文本；literal=true 时按普通字符串匹配。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"directory": map[string]any{
 						"type":        "string",
-						"description": "起始目录（必填）；传 . 表示工作区根",
+						"description": "目录树搜索的起始目录；传 . 表示工作区根，与 path 二选一",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "单文件搜索的文件路径，与 directory 二选一",
 					},
 					"pattern": map[string]any{
 						"type":        "string",
@@ -55,7 +61,7 @@ func grepFilesToolDef() ToolDef {
 					"hit_offset": map[string]any{
 						"type":        "integer",
 						"minimum":     0,
-						"description": "跳过前 N 个跨文件命中（可选，默认 0）",
+						"description": "跳过前 N 个命中（可选，默认 0）",
 					},
 					"max_hits": map[string]any{
 						"type":        "integer",
@@ -83,7 +89,7 @@ func grepFilesToolDef() ToolDef {
 					},
 					"encoding": fileEncodingToolProperty(),
 				},
-				"required":             []string{"directory", "pattern"},
+				"required":             []string{"pattern"},
 				"additionalProperties": false,
 			}),
 		},
@@ -94,6 +100,34 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	var args grepFilesArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	path := strings.TrimSpace(args.Path)
+	directory := strings.TrimSpace(args.Directory)
+	if path != "" {
+		if directory != "" {
+			return "ERROR: path 与 directory 只能提供一个。", nil
+		}
+		if strings.TrimSpace(args.GlobPattern) != "" || args.MaxFiles != nil {
+			return "ERROR: 单文件搜索不接受 glob_pattern 或 max_files。", nil
+		}
+		maxHits := defaultGrepFilesMaxHits
+		if args.MaxHits != nil && *args.MaxHits >= 1 {
+			maxHits = *args.MaxHits
+		}
+		singleArgs := grepFileArgs{
+			Path:          path,
+			Pattern:       args.Pattern,
+			IndexOffset:   args.HitOffset,
+			CountLimit:    &maxHits,
+			ContextLines:  args.ContextLines,
+			CaseSensitive: args.CaseSensitive,
+			Literal:       args.Literal,
+			Encoding:      args.Encoding,
+		}
+		return r.execGrepFileArgs(singleArgs, "hit_offset")
+	}
+	if directory == "" {
+		return "ERROR: 必须提供 path 或 directory。", nil
 	}
 	re, err := compileLinePattern(args.Pattern, args.Literal, args.CaseSensitive)
 	if err != nil {
@@ -163,10 +197,7 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	}
 
 	pageableTotal := len(allHits)
-	dir := strings.TrimSpace(args.Directory)
-	if dir == "" {
-		dir = "."
-	}
+	dir := directory
 
 	header := []string{
 		fmt.Sprintf("directory: %s", dir),

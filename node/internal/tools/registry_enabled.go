@@ -32,6 +32,7 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 		r.enabledOnly = nil
 		return nil
 	}
+	names = config.IncludeLegacyBuiltinToolAliases(names)
 	set := make(map[string]struct{}, len(names))
 	for _, raw := range names {
 		name := strings.TrimSpace(raw)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func TestGlobFiles(t *testing.T) {
@@ -65,6 +67,80 @@ func TestGrepFile(t *testing.T) {
 	}
 	if !strings.Contains(out, "全文件命中数: 1") || !strings.Contains(out, "beta foo") {
 		t.Fatalf("grep_file: %q", out)
+	}
+}
+
+func TestLegacyGrepFileAliasRunsWithFilesystemGroupButStaysHidden(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"fs"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "legacy.txt"), []byte("legacy match\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := reg.Execute(context.Background(), "grep_file", `{"path":"legacy.txt","pattern":"legacy","literal":true}`)
+	if err != nil {
+		t.Fatalf("legacy grep_file call should remain executable with fs enabled: %v", err)
+	}
+	if !strings.Contains(out, "legacy match") {
+		t.Fatalf("legacy grep_file result: %q", out)
+	}
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "grep_file" {
+			t.Fatal("legacy grep_file alias must remain hidden from model definitions")
+		}
+	}
+
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"bash"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "grep_file", `{"path":"legacy.txt","pattern":"legacy","literal":true}`); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("legacy alias must remain disabled without filesystem capability, got %v", err)
+	}
+}
+
+func TestGrepFilesSupportsSingleFileSearch(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "single.txt"), []byte("hit one\nhit two\nmiss\nhit three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := reg.Execute(context.Background(), "grep_files", `{"path":"single.txt","pattern":"hit","literal":true,"hit_offset":1,"max_hits":1,"context_lines":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"全文件命中数: 3", "本页命中: 第 2-2 处", "next_hit_offset: 2", "hit two"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("single-file search missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestGrepFilesRequiresExactlyOneSearchRoot(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range []string{
+		`{"pattern":"x"}`,
+		`{"path":"a.txt","directory":".","pattern":"x"}`,
+	} {
+		out, err := reg.Execute(context.Background(), "grep_files", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "必须提供 path 或 directory") && !strings.Contains(out, "只能提供一个") {
+			t.Fatalf("unexpected validation result for %s: %s", args, out)
+		}
 	}
 }
 
