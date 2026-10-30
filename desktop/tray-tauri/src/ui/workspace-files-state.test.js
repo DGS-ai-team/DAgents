@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, createWorkspaceCsvPreviewParser, decodeWorkspaceText, deserializeWorkspaceDraft, encodeWorkspaceText, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, isWorkspaceWriteRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceTextFormat, workspaceWriteProgressLabel } from './workspace-files-state.js'
-import { createWorkspaceFile, listWorkspace, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspaceFile, saveWorkspaceFile, saveWorkspaceFileAs, uploadWorkspaceFile } from './workspace-files-api.js'
+import { createWorkspaceFile, listWorkspace, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspacePath, saveWorkspaceFile, saveWorkspaceFileAs, uploadWorkspaceFile } from './workspace-files-api.js'
 
 test('text editor round-trips UTF-8 BOM and dominant line endings, including new files', () => {
   const encoder = new TextEncoder()
@@ -208,7 +208,7 @@ test('workspace text chunks use the native bounded read command with revision gu
   } finally { delete globalThis.__DAGENTS_DESKTOP_INVOKE__ }
 })
 
-test('native Save As and reveal commands receive only Agent-relative paths and optional draft text', async () => {
+test('native Save As and path reveal commands receive only Agent-relative paths and optional draft text', async () => {
   const calls = []
   globalThis.__DAGENTS_DESKTOP_INVOKE__ = async (command, args) => {
     calls.push({ command, args })
@@ -217,7 +217,7 @@ test('native Save As and reveal commands receive only Agent-relative paths and o
   try {
     const result = await saveWorkspaceFileAs('agent-a', 'docs\\notes.md', 'draft text')
     await saveWorkspaceFileAs('agent-a', 'docs/clean.md', null)
-    await revealWorkspaceFile('agent-a', 'docs\\notes.md')
+    await revealWorkspacePath('agent-a', 'docs\\notes.md')
     assert.deepEqual(result, { status: 'cancelled', bytesWritten: 0 })
     assert.deepEqual(calls, [
       { command: 'desktop_workspace_save_as', args: { agentId: 'agent-a', path: 'docs/notes.md', draftContent: 'draft text' } },

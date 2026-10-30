@@ -1,12 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { statusPhaseLabel, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   llmSettings: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
   desktopCompact: { type: Boolean, default: false },
+  statusLabel: { type: String, default: "" },
 });
 
 const emit = defineEmits(["switch-profile"]);
@@ -32,23 +32,6 @@ const titleText = computed(() => {
   const profile = props.desktopCompact && activeProfile.value ? `配置: ${activeProfile.value}` : "";
   const providerModel = provider && model ? `${provider} / ${model}` : model || provider || displayLabel.value;
   return profile ? `${providerModel} · ${profile}` : providerModel;
-});
-
-const statusShortLabels = {
-  queued: "排队中",
-  model_generating: "生成中",
-  prefilling: "准备中",
-  thinking: "思考中",
-  assistant_generating: "回复中",
-  tool_executing: "工具中",
-  tool_waiting: "待审批",
-  waiting_user: "待输入",
-  compression: "压缩中",
-};
-
-const activeStatus = computed(() => {
-  const phase = ["compression", ...statusPhaseOrder].find(hasStatus);
-  return phase ? { phase, label: statusShortLabels[phase] || statusPhaseLabel(phase) } : null;
 });
 
 function closeMenu() {
@@ -97,14 +80,14 @@ onBeforeUnmount(() => {
 <template>
   <div class="composer-toolbar">
     <span
-      v-if="activeStatus"
+      v-if="statusLabel"
       class="composer-toolbar__status"
       role="status"
       aria-live="polite"
-      :title="statusPhaseLabel(activeStatus.phase)"
+      :title="statusLabel"
     >
       <span class="composer-toolbar__status-dot" aria-hidden="true" />
-      <span>{{ activeStatus.label }}</span>
+      <span>{{ statusLabel }}</span>
     </span>
 
     <div v-if="showProfileSwitch" ref="rootRef" class="composer-toolbar__profile">
