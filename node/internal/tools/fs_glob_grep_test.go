@@ -68,6 +68,46 @@ func TestGrepFile(t *testing.T) {
 	}
 }
 
+func TestGrepFilesSupportsSingleFileSearch(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "single.txt"), []byte("hit one\nhit two\nmiss\nhit three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := reg.Execute(context.Background(), "grep_files", `{"path":"single.txt","pattern":"hit","literal":true,"hit_offset":1,"max_hits":1,"context_lines":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"全文件命中数: 3", "本页命中: 第 2-2 处", "next_hit_offset: 2", "hit two"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("single-file search missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestGrepFilesRequiresExactlyOneSearchRoot(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range []string{
+		`{"pattern":"x"}`,
+		`{"path":"a.txt","directory":".","pattern":"x"}`,
+	} {
+		out, err := reg.Execute(context.Background(), "grep_files", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "必须提供 path 或 directory") && !strings.Contains(out, "只能提供一个") {
+			t.Fatalf("unexpected validation result for %s: %s", args, out)
+		}
+	}
+}
+
 func TestGrepFileRejectsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)

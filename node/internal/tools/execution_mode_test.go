@@ -18,8 +18,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"write_file":           {CallPurposeKey, "path", "content"},
 		"search_replace":       {CallPurposeKey, "path", "old_string", "new_string"},
 		"glob_files":           {CallPurposeKey, "directory", "glob_pattern"},
-		"grep_file":            {CallPurposeKey, "path", "pattern"},
-		"grep_files":           {CallPurposeKey, "directory", "pattern"},
+		"grep_files":           {CallPurposeKey, "pattern"},
 		"bash_run":             {CallPurposeKey, "command"},
 		"terminal_config_list": {CallPurposeKey},
 		"terminal_open":        {CallPurposeKey, "config_id"},
@@ -82,6 +81,11 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 			if _, ok := props[field]; !ok {
 				t.Fatalf("tool %q: required field %q missing in properties", name, field)
 			}
+		}
+	}
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "grep_file" {
+			t.Fatal("legacy grep_file alias must not be exposed to the model")
 		}
 	}
 }

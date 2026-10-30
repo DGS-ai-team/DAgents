@@ -109,6 +109,9 @@ func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
 	}
 	for name := range knownBuiltinTools {
 		if _, ok := seen[name]; !ok {
+			if _, legacy := legacyBuiltinToolAliases[name]; legacy {
+				continue
+			}
 			t.Fatalf("tool %q not in any group", name)
 		}
 	}
@@ -118,7 +121,7 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 	members, ok := BuiltinToolGroupMembers("fs")
 	want := []string{
 		"read_file", "read_image", "write_file",
-		"glob_files", "grep_file", "grep_files", "search_replace",
+		"glob_files", "grep_files", "search_replace",
 	}
 	if !ok || len(members) != len(want) {
 		t.Fatalf("fs members = %v ok=%v want len %d", members, ok, len(want))
@@ -136,5 +139,16 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 	}
 	if members, ok := BuiltinToolGroupMembers("terminal"); !ok || len(members) != 9 {
 		t.Fatalf("terminal members = %v ok=%v want 9 terminal/Linux tools", members, ok)
+	}
+}
+
+func TestLegacyGrepFileAliasRemainsRecognizedButIsNotGrouped(t *testing.T) {
+	if err := validateBuiltinToolNames([]string{"grep_file"}); err != nil {
+		t.Fatalf("legacy permission name should remain valid: %v", err)
+	}
+	for _, name := range ExpandBuiltinToolGroups([]string{"fs"}) {
+		if name == "grep_file" {
+			t.Fatal("legacy alias must not be enabled as part of the public fs group")
+		}
 	}
 }

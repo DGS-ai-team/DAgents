@@ -50,7 +50,7 @@ tools/
 ├── 文件 fs_*
 │   fs_read.go / fs_write.go / fs_search_replace.go
 │   fs_glob_tool.go / fs_glob_internal.go
-│   fs_grep_file.go / fs_grep_files.go / fs_grep_shared.go
+│   fs_grep_file.go / fs_grep_files.go / fs_grep_shared.go  # grep_file 仅留兼容 handler；模型只见覆盖两种模式的 grep_files
 │   fs_helpers.go / fs_encoding.go / fs_path_encoding.go
 │   fs_stat.go                # StatRelPath（写盘信任链 Hook）
 │   fs_*_test.go
