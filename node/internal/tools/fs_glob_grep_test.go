@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func TestGlobFiles(t *testing.T) {
@@ -65,6 +67,40 @@ func TestGrepFile(t *testing.T) {
 	}
 	if !strings.Contains(out, "全文件命中数: 1") || !strings.Contains(out, "beta foo") {
 		t.Fatalf("grep_file: %q", out)
+	}
+}
+
+func TestLegacyGrepFileAliasRunsWithFilesystemGroupButStaysHidden(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"fs"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "legacy.txt"), []byte("legacy match\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := reg.Execute(context.Background(), "grep_file", `{"path":"legacy.txt","pattern":"legacy","literal":true}`)
+	if err != nil {
+		t.Fatalf("legacy grep_file call should remain executable with fs enabled: %v", err)
+	}
+	if !strings.Contains(out, "legacy match") {
+		t.Fatalf("legacy grep_file result: %q", out)
+	}
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "grep_file" {
+			t.Fatal("legacy grep_file alias must remain hidden from model definitions")
+		}
+	}
+
+	if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups([]string{"bash"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "grep_file", `{"path":"legacy.txt","pattern":"legacy","literal":true}`); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("legacy alias must remain disabled without filesystem capability, got %v", err)
 	}
 }
 
