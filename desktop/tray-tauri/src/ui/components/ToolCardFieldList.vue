@@ -88,7 +88,8 @@ function copyFieldLabel(label) {
   grid-column: 1 / -1;
 }
 .tool-card__field {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
   gap: 8px;
   align-items: start;
   min-width: 0;
@@ -101,12 +102,12 @@ function copyFieldLabel(label) {
   line-height: 1.45;
 }
 .tool-card__field dt {
-  flex: 0 0 auto;
-  max-width: 9em;
+  min-width: 0;
   color: var(--color-text-subtle);
   font-weight: 500;
   line-height: 1.45;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .tool-card__field dd {
   flex: 1 1 auto;
