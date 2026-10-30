@@ -20,10 +20,16 @@ const RESULT_STATUS_LABELS = {
 };
 
 const IMPORTANT_RESULT_LABELS = {
+  action: "操作",
   ok: "调用结果",
   status: "状态",
   message: "消息",
   error: "错误",
+  hooks_status: "技能钩子状态",
+  model_context_applied: "模型上下文",
+  model_context_applied_boundary: "模型上下文生效边界",
+  session_state_applied: "会话状态",
+  session_state_applied_boundary: "会话状态生效边界",
   trigger_id: "触发器 ID",
   terminal_id: "终端 ID",
   exit_code: "退出码",
@@ -39,6 +45,39 @@ const IMPORTANT_RESULT_LABELS = {
   deleted: "删除结果",
   fire_count: "触发次数",
   next_fire_at: "下次执行",
+};
+
+const IMPORTANT_RESULT_VALUES = {
+  action: {
+    set_loaded_skills: "更新已加载技能",
+  },
+  hooks_status: {
+    synchronized: "已同步",
+    partial: "部分同步",
+    failed: "同步失败",
+  },
+  model_context_applied: {
+    immediately: "立即生效",
+    immediate: "立即生效",
+    unchanged: "未变化",
+    next_model_step: "下一模型步骤生效",
+    next_human_turn: "下一次用户消息生效",
+  },
+  model_context_applied_boundary: {
+    immediately: "立即生效",
+    immediate: "立即生效",
+    unchanged: "未变化",
+    next_model_step: "下一模型步骤生效",
+    next_human_turn: "下一次用户消息生效",
+  },
+  session_state_applied: {
+    immediately: "立即生效",
+    immediate: "立即生效",
+  },
+  session_state_applied_boundary: {
+    immediately: "立即生效",
+    immediate: "立即生效",
+  },
 };
 
 function stringValue(value) {
@@ -485,7 +524,13 @@ function addGenericResult(model, content) {
     if (!(key in IMPORTANT_RESULT_LABELS) && typeof value === "object") continue;
     const valueText = displayValue(value);
     if (!valueText) continue;
-    addField(model.resultFields, IMPORTANT_RESULT_LABELS[key] || key, valueText, key === "error" ? "error" : "text");
+    const localizedValue = IMPORTANT_RESULT_VALUES[key]?.[stringValue(value).toLowerCase()] || valueText;
+    addField(
+      model.resultFields,
+      IMPORTANT_RESULT_LABELS[key] || key,
+      localizedValue,
+      key === "error" ? "error" : "text",
+    );
     hasField = true;
   }
   addBlock(model.resultBlocks, "结果", detail.summary || detail.output || detail.stdout || payload.message, "text");
