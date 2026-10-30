@@ -152,3 +152,25 @@ func TestLegacyGrepFileAliasRemainsRecognizedButIsNotGrouped(t *testing.T) {
 		}
 	}
 }
+
+func TestIncludeLegacyBuiltinToolAliasesOnlyAddsEnabledAliases(t *testing.T) {
+	fsNames := IncludeLegacyBuiltinToolAliases(ExpandBuiltinToolGroups([]string{"fs"}))
+	if !containsString(fsNames, "grep_file") {
+		t.Fatalf("filesystem execution allowlist must include the grep_file alias: %v", fsNames)
+	}
+	if got := ExpandBuiltinToolGroups([]string{"fs"}); containsString(got, "grep_file") {
+		t.Fatalf("public filesystem group must not expose the legacy alias: %v", got)
+	}
+	if got := IncludeLegacyBuiltinToolAliases(ExpandBuiltinToolGroups([]string{"bash"})); containsString(got, "grep_file") {
+		t.Fatalf("unrelated tool group must not enable the alias: %v", got)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
