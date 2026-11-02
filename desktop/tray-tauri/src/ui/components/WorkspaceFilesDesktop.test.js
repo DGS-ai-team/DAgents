@@ -255,7 +255,7 @@ describe('Desktop workspace resource navigation', () => {
 
     await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports').trigger('contextmenu', { clientX: 30, clientY: 40 })
     await flushPromises()
-    const entryMenu = document.body.querySelector('.workspace-files__entry-menu')
+    const entryMenu = document.body.querySelector('.ui-context-menu')
     expect(entryMenu?.textContent).toContain('在文件管理器中打开文件夹')
     entryMenu.querySelector('button').click()
     await flushPromises()
@@ -263,16 +263,85 @@ describe('Desktop workspace resource navigation', () => {
 
     await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.md').trigger('contextmenu', { clientX: 40, clientY: 50 })
     await flushPromises()
-    const fileMenu = document.body.querySelector('.workspace-files__entry-menu')
-    expect(fileMenu?.textContent).toContain('在文件管理器中定位文件')
+    const fileMenu = document.body.querySelector('.ui-context-menu')
+    expect(fileMenu?.textContent).toContain('在文件管理器中显示')
     fileMenu.querySelector('button').click()
     await flushPromises()
     expect(api.revealWorkspacePath).toHaveBeenLastCalledWith('agent-a', 'a.md')
 
     await wrapper.find('.workspace-files__list').trigger('contextmenu', { clientX: 30, clientY: 40 })
-    document.body.querySelector('.workspace-files__entry-menu button').click()
+    document.body.querySelector('.ui-context-menu button').click()
     await flushPromises()
     expect(api.revealWorkspacePath).toHaveBeenLastCalledWith('agent-a', '')
+  })
+
+  it('keeps reveal success quiet while preserving failures and supports keyboard context menus', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    wrapper.vm.actionStatus = 'stale success notice'
+    await wrapper.vm.revealSelectedFile()
+    expect(wrapper.find('.workspace-files__action-status').exists()).toBe(false)
+    expect(wrapper.vm.actionStatus).toBe('')
+
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    document.body.querySelector('.ui-context-menu button').click()
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__action-status').exists()).toBe(false)
+
+    api.revealWorkspacePath.mockRejectedValueOnce(new Error('文件管理器不可用'))
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.md').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    document.body.querySelector('.ui-context-menu button').click()
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toContain('文件管理器不可用')
+
+    const entry = wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports')
+    await entry.trigger('keydown', { key: 'ContextMenu' })
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')?.textContent).toContain('在文件管理器中打开文件夹')
+    expect(document.activeElement).toBe(document.body.querySelector('.ui-context-menu button'))
+  })
+
+  it('closes floating context menus when workspace ownership or selection changes', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
+    await flushPromises()
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')).not.toBeNull()
+    await wrapper.setProps({ active: false })
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')).toBeNull()
+
+    await wrapper.setProps({ active: true, agentId: 'agent-b' })
+    await flushPromises()
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    await wrapper.setProps({ agentId: 'agent-c' })
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')).toBeNull()
+
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    wrapper.vm.selectedPath = 'reports'
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')).toBeNull()
+  })
+
+  it('opens reference actions from the workspace keyboard context-menu key', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' }, attachTo: document.body })
+    await flushPromises()
+    await wrapper.vm.openPath('a.md')
+    await wrapper.find('.workspace-files__editor').trigger('keydown', { key: 'F10', shiftKey: true })
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')?.textContent).toContain('添加注解')
+    document.body.querySelector('.ui-context-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.find('.workspace-files__editor').element)
+    await wrapper.find('.workspace-files__editor').trigger('keydown', { key: 'F10', shiftKey: true })
+    await flushPromises()
+    expect(document.body.querySelector('.ui-context-menu')?.textContent).toContain('添加注解')
   })
 
   it('keeps large CSV table preview capped at 500 rows and exposes remaining source text', async () => {
@@ -338,8 +407,8 @@ describe('Desktop workspace resource navigation', () => {
 
     await cells[2].trigger('pointerdown', { button: 0 })
     await cells[2].trigger('contextmenu', { clientX: 120, clientY: 80 })
-    expect(document.body.querySelector('.workspace-files__reference-menu-context')?.textContent).toContain('records.csv!A2')
-    document.body.querySelector('.workspace-files__reference-menu button').click()
+    expect(document.body.querySelector('.ui-context-menu__context')?.textContent).toContain('records.csv!A2')
+    document.body.querySelector('.ui-context-menu button').click()
     await flushPromises()
 
     const textarea = document.body.querySelector('[aria-label="注解内容"]')

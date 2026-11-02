@@ -145,3 +145,85 @@ class DriverHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DesktopControlTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from dagents_browser.driver import PageState, SessionState
+        self.driver = PlaywrightDriver(BrowserServiceSettings(runtime_root='.runtime-test', headed=True))
+        self.pages = []
+        class Page:
+            url = 'about:blank'
+            closed = False
+            def __init__(self): self.events = {}; self.operations = []
+            def is_closed(self): return self.closed
+            def on(self, event, handler): self.events[event] = handler
+            async def title(self): return 'Test page'
+            async def screenshot(self, **kwargs): return b'png'
+            async def goto(self, url, **kwargs):
+                self.url = url; self.operations.append('navigate')
+                handler = self.events.get('framenavigated')
+                if handler: handler(type('Frame', (), {'parent_frame': None})())
+            async def go_back(self, **kwargs): self.operations.append('back')
+            async def go_forward(self, **kwargs): self.operations.append('forward')
+            async def reload(self, **kwargs): self.operations.append('reload')
+            async def close(self): self.closed = True
+        pages = self.pages
+        class Context:
+            async def new_page(self):
+                page = Page(); pages.append(page); return page
+        self.context = Context()
+        self.state = SessionState('agent-1', self.context, None)
+        self.page = await self.driver._register_page(self.state, await self.context.new_page())
+        self.page.refs['old'] = {'role': 'button'}
+        self.driver._sessions['agent-1'] = self.state
+
+    async def asyncTearDown(self):
+        self.driver._sessions.clear()
+
+    async def test_navigation_history_reload_and_cross_session_isolation(self):
+        for command in ('navigate', 'back', 'forward', 'reload'):
+            result = await self.driver.call({'op': 'control', 'session_key': 'agent-1', 'page_id': self.page.page_id, 'command': command, 'url': 'https://example.test'})
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['detail']['page_id'], self.page.page_id)
+        self.assertEqual(self.page.page.operations, ['navigate', 'back', 'forward', 'reload'])
+        self.assertEqual(self.page.refs, {})
+        # Explicit navigation invalidates refs; read-only view never rebuilds them.
+        self.assertEqual(self.page.snapshot_counter, 0)
+        result = await self.driver.call({'op': 'control', 'session_key': 'agent-1', 'page_id': 'foreign-page', 'command': 'navigate', 'url': 'https://example.test'})
+        self.assertEqual(result['error_code'], 'page_not_found')
+        self.assertEqual(len(self.page.page.operations), 4)
+
+    async def test_new_close_all_and_reopen(self):
+        result = await self.driver.call({'op': 'control', 'session_key': 'agent-1', 'command': 'new'})
+        self.assertTrue(result['ok'])
+        second = result['detail']['page_id']
+        self.assertNotEqual(second, self.page.page_id)
+        for page_id in (second, self.page.page_id):
+            result = await self.driver.call({'op': 'control', 'session_key': 'agent-1', 'command': 'close', 'page_id': page_id})
+            self.assertTrue(result['ok'])
+        view = await self.driver.call({'op': 'view', 'session_key': 'agent-1'})
+        self.assertTrue(view['ok'])
+        self.assertEqual(view['detail']['pages'], [])
+        result = await self.driver.call({'op': 'control', 'session_key': 'agent-1', 'command': 'navigate', 'url': 'https://example.test'})
+        self.assertTrue(result['ok'])
+        self.assertEqual(len(self.state.pages), 1)
+
+    async def test_start_is_headless_and_invalid_commands_never_start(self):
+        from unittest.mock import AsyncMock
+        self.driver._start = AsyncMock(return_value=(self.state, None))
+        for command, url in [('evaluate', ''), ('navigate', 'file:///private'), ('navigate', 'javascript:alert(1)'), ('navigate', 'http://[')]:
+            result = await self.driver.call({'op': 'control', 'session_key': 'fresh-agent', 'command': command, 'url': url})
+            self.assertFalse(result['ok'])
+        self.driver._start.assert_not_awaited()
+        result = await self.driver.call({'op': 'control', 'session_key': 'fresh-agent', 'command': 'navigate', 'url': 'https://example.test'})
+        self.assertTrue(result['ok'])
+        self.assertIs(self.driver._start.call_args.args[0]['headed'], False)
+
+    async def test_navigation_error_keeps_started_session_and_does_not_retry(self):
+        from unittest.mock import AsyncMock
+        self.page.page.goto = AsyncMock(side_effect=TimeoutError('timeout'))
+        result = await self.driver.call({'op': 'control', 'session_key': 'agent-1', 'command': 'navigate', 'url': 'https://example.test'})
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['error_code'], 'action_timeout')
+        self.assertTrue(result['detail']['started'])
+        self.page.page.goto.assert_awaited_once()

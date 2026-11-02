@@ -1136,6 +1136,56 @@ paths:
         "200":
           description: OK
 
+  /v1/agents/{agent_id}/browser/control:
+    post:
+      summary: Navigate the stored Agent's shared browser from Desktop
+      description: |
+        Explicit user actions only; no arbitrary scripts. Navigate/new can start
+        a headless session. Other commands require page_id. Uses the Agent tool
+        lock and returns 423 without queuing when busy. Mutations are not retried.
+        Read /browser/view afterwards for the resulting page image and history.
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [command]
+              properties:
+                command: {type: string, enum: [navigate, new, back, forward, reload, close]}
+                page_id: {type: string}
+                url: {type: string, description: HTTP(S) URL required for navigate; embedded credentials are rejected}
+      responses:
+        "200":
+          description: Navigation completed; page_id is empty after closing the last page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  started: {type: boolean}
+                  page_id: {type: string}
+        "400":
+          description: Invalid command or blocked URL
+        "404":
+          description: Agent or Agent-owned page not found
+        "409":
+          description: Browser has not started
+        "423":
+          description: Browser is in use; no action was performed
+        "502":
+          description: Browser action failed
+        "503":
+          description: Browser capability unavailable
+        "504":
+          description: Navigation timed out; refresh the view before retrying
+
   /v1/agents/{agent_id}/workspace:
     get:
       x-contract-status: surface-only

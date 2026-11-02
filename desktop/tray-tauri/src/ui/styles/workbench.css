@@ -1797,6 +1797,13 @@ select.settings-field__input {
   min-width: 0;
 }
 
+.markdown-code-block:has(> .markdown-code-block__toolbar) {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-code-bg);
+}
+
 .markdown-code-block__toolbar {
   display: flex;
   align-items: center;
@@ -1804,9 +1811,7 @@ select.settings-field__input {
   gap: 8px;
   min-height: 26px;
   padding: 4px 8px;
-  border: 1px solid var(--color-border-strong);
-  border-bottom: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-bottom: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-code-bg) 88%, var(--color-surface));
 }
 
@@ -1848,9 +1853,10 @@ select.settings-field__input {
   outline-offset: 1px;
 }
 
-.markdown-code-block > pre {
-  margin-top: 0;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+.markdown-code-block:has(> .markdown-code-block__toolbar) > pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 @keyframes chat-composer-spin {

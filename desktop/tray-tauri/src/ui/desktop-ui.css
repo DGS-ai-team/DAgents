@@ -4,6 +4,13 @@
 }
 
 :root {
+  --desktop-menu-surface: #fff;
+  --desktop-menu-border: #d7dfe2;
+  --desktop-menu-text: #3d474b;
+  --desktop-menu-muted: #778186;
+  --desktop-menu-hover: #eef1f2;
+  --desktop-menu-danger: #a23c3c;
+  --desktop-menu-shadow: 0 8px 24px #17212630;
   --desktop-font-ui: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-ui: var(--desktop-font-ui);
 }
@@ -888,81 +895,6 @@ button:disabled .icon-mask { color: #a0a5a8; }
   .composer-page-leave-active {
     transition-duration: 0ms !important;
   }
-}
-
-.entry-context-menu-layer {
-  position: fixed;
-  z-index: 2000;
-  inset: 0;
-  background: transparent;
-}
-
-.entry-context-menu {
-  position: fixed;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  width: 224px;
-  max-width: calc(100vw - 16px);
-  padding: 5px;
-  overflow: hidden;
-  border: 1px solid #dfe3e6;
-  border-radius: 9px;
-  background: #fff;
-  box-shadow: 0 12px 32px #1b2a381f, 0 2px 6px #1b2a380d;
-  color: #30363a;
-  font-family: var(--desktop-font-ui);
-}
-
-.entry-context-menu-title {
-  padding: 7px 9px 8px;
-  overflow: hidden;
-  border-bottom: 1px solid #eceeef;
-  color: #777f84;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.entry-context-menu > button {
-  display: flex !important;
-  align-items: center;
-  justify-content: flex-start !important;
-  width: 100%;
-  min-height: 34px;
-  margin-top: 2px;
-  padding: 0 9px !important;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: #343a3e;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px !important;
-  text-align: left;
-  cursor: default;
-}
-
-.entry-context-menu > button:hover:not(:disabled),
-.entry-context-menu > button:focus-visible {
-  outline: 0;
-  background: #f0f2f3;
-}
-
-.entry-context-menu > button.danger {
-  color: #a23c3c;
-}
-
-.entry-context-menu > button.danger:hover:not(:disabled),
-.entry-context-menu > button.danger:focus-visible {
-  background: #fbefef;
-}
-
-.entry-context-menu > button:disabled {
-  color: #a1a7aa;
-  cursor: not-allowed;
 }
 
 .main-panel > .app {
