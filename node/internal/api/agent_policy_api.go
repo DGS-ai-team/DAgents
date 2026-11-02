@@ -437,7 +437,24 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 			}
 			promptDefaults["memory_scope"] = scope
 			parsed.Defaults["prompt_context"] = promptDefaults
-			raw, err := json.Marshal(map[string]any{"template_id": parsed.TemplateID, "defaults": parsed.Defaults})
+			// Change only the defaults block. Rebuilding the snapshot from a
+			// partial map drops placement and other metadata (workspace,
+			// handbook, agent type) that must survive prompt-context edits.
+			var snapshot map[string]json.RawMessage
+			if err := json.Unmarshal(rec.ConfigSnapshot, &snapshot); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
+				return
+			}
+			if snapshot == nil {
+				snapshot = make(map[string]json.RawMessage)
+			}
+			defaultsJSON, err := json.Marshal(parsed.Defaults)
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
+				return
+			}
+			snapshot["defaults"] = defaultsJSON
+			raw, err := json.Marshal(snapshot)
 			if err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 				return
