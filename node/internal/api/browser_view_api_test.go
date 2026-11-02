@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
@@ -108,5 +109,60 @@ func TestAgentBrowserViewRequiresStoredAgentAndStartedBrowser(t *testing.T) {
 	srv.Handler().ServeHTTP(unstarted, httptest.NewRequest(http.MethodGet, "/v1/agents/agent-1/browser/view", nil))
 	if unstarted.Code != http.StatusConflict {
 		t.Fatalf("unstarted status=%d body=%s", unstarted.Code, unstarted.Body.String())
+	}
+}
+
+func TestAgentBrowserControlValidationAndOwnership(t *testing.T) {
+	cfg := &config.Config{NodeID: "browser-control", RuntimeRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	cfg.Onboarding.NodeProfileCompleted = true
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	t.Cleanup(func() { srv.sessions.Stop() })
+	agents, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agents.Close()
+	if err := agents.Save(context.Background(), store.AgentRecord{AgentID: "agent-1", ConfigSnapshot: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	srv.agents = agents
+	enabled, calls := true, 0
+	manager, err := browser.NewManager(&config.Config{Browser: config.BrowserConfig{Enabled: &enabled}}, &browser.MockDriver{Handler: func(_ context.Context, req browser.Request) (browser.Response, error) {
+		calls++
+		if req.Op != "control" || req.SessionKey != "agent-1" {
+			t.Fatalf("request = %+v", req)
+		}
+		if req.PageID == "foreign" {
+			return browser.Response{ErrorCode: "page_not_found"}, nil
+		}
+		return browser.Response{OK: true, Detail: map[string]any{"page_id": "page-1"}}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.browserMgr = manager
+	for _, tc := range []struct {
+		agent, body string
+		want        int
+		calls       int
+	}{
+		{"missing", `{"command":"navigate","url":"https://example.test"}`, 404, 0},
+		{"agent-1", `{"command":"evaluate"}`, 400, 0},
+		{"agent-1", `{"command":"navigate","url":"javascript:alert(1)"}`, 400, 0},
+		{"agent-1", `{"command":"navigate","url":"file:///C:/secret"}`, 400, 0},
+		{"agent-1", `{"command":"navigate","url":"https://user:pass@example.test"}`, 400, 0},
+		{"agent-1", `{"command":"close"}`, 400, 0},
+		{"agent-1", `{"command":"new","script":"alert(1)"}`, 400, 0},
+		{"agent-1", `{"command":"navigate","url":"https://example.test"}`, 200, 1},
+		{"agent-1", `{"command":"reload","page_id":"foreign"}`, 404, 1},
+		{"agent-1", `{"command":"new"}`, 200, 1},
+	} {
+		before := calls
+		response := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/agents/"+tc.agent+"/browser/control", strings.NewReader(tc.body)))
+		if response.Code != tc.want || calls-before != tc.calls {
+			t.Fatalf("%s: status=%d calls=%d body=%s", tc.body, response.Code, calls-before, response.Body.String())
+		}
 	}
 }

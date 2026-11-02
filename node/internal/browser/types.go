@@ -13,10 +13,12 @@ type Action struct {
 }
 
 // Request is the Node-to-sidecar protocol payload. Op is call, evaluate,
-// view, start, stop, or ping; start/stop are translated to one-action calls by the
+// view, control, start, stop, or ping; start/stop are translated to one-action calls by the
 // Manager and are retained only for lifecycle internals.
 type Request struct {
 	Op         string         `json:"op"`
+	Command    string         `json:"command,omitempty"`
+	URL        string         `json:"url,omitempty"`
 	SessionKey string         `json:"session_key,omitempty"`
 	Headed     *bool          `json:"headed,omitempty"`
 	ViewportW  int            `json:"viewport_width,omitempty"`

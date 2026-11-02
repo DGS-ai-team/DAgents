@@ -250,6 +250,13 @@ export function getAgentBrowserView(agentId, pageId = "") {
   });
 }
 
+/** Explicit user navigation in the same browser session used by the Agent. */
+export function controlAgentBrowser(agentId, command, pageId = "", url = "") {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/browser/control`, {
+    method: "POST", body: { command, page_id: pageId, url },
+  });
+}
+
 export function patchAgent(agentId, patch = {}) {
   const body = {};
   if (patch.display_name != null || patch.displayName != null) {
