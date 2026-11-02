@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiIcon from '@desktop-ui/components/UiIcon.vue'
+import UiContextMenu from '@desktop-ui/components/UiContextMenu.vue'
 import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
@@ -40,7 +41,6 @@ const textFormat = ref({ hasBom: false, newline: '\n' })
 const toolbarMenu = ref(null)
 const dockRestoreButton = ref(null)
 const entryMenu = ref(null)
-const entryMenuElement = ref(null)
 const previewUrl = ref('')
 const svgPreviewUrl = ref('')
 const previewKind = ref('')
@@ -57,7 +57,6 @@ const imageSelection = ref(null)
 const imageDragStart = ref(null)
 const documentFrame = ref(null)
 const referenceMenu = ref(null)
-const referenceMenuElement = ref(null)
 const annotations = ref([])
 const annotationInputRefs = new Map()
 const textAnchor = ref(null)
@@ -316,10 +315,32 @@ function readDocumentFrameSelection() {
   const type = previewKind.value === 'html' ? 'html-region' : 'document-text'
   captureRenderedTextSelection(quote, type, { block: domElementPath(element, frameDocument.body) })
 }
+function contextMenuPoint(event, target = event?.currentTarget) {
+  const hasPointerPosition = event?.type !== 'keydown'
+    && Number.isFinite(Number(event?.clientX)) && Number.isFinite(Number(event?.clientY))
+  if (hasPointerPosition) return { x: Number(event.clientX), y: Number(event.clientY) }
+  const bounds = target?.getBoundingClientRect?.()
+  let left = bounds?.left || 0
+  let bottom = bounds?.bottom || bounds?.top || 0
+  if (target?.ownerDocument && target.ownerDocument !== document) {
+    const frameBounds = documentFrame.value?.getBoundingClientRect?.()
+    left += frameBounds?.left || 0
+    bottom += frameBounds?.top || 0
+  }
+  return { x: left + 12, y: bottom }
+}
 function onDocumentFrameLoad() {
   try {
     const frameDocument = documentFrame.value?.contentDocument
     frameDocument?.addEventListener('mouseup', readDocumentFrameSelection)
+    frameDocument?.addEventListener('keydown', event => {
+      if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+      event.preventDefault()
+      readDocumentFrameSelection()
+      const target = frameDocument.activeElement || frameDocument.body
+      const point = contextMenuPoint(event, target)
+      openReferenceMenu({ clientX: point.x, clientY: point.y, target, currentTarget: target, trigger: target === frameDocument.body ? documentFrame.value : target, preventDefault() {} })
+    })
     frameDocument?.addEventListener('contextmenu', event => {
       event.preventDefault()
       readDocumentFrameSelection()
@@ -327,6 +348,9 @@ function onDocumentFrameLoad() {
       openReferenceMenu({
         clientX: (bounds?.left || 0) + event.clientX,
         clientY: (bounds?.top || 0) + event.clientY,
+        target: event.target,
+        currentTarget: event.target,
+        trigger: documentFrame.value,
         preventDefault() {},
       })
     })
@@ -410,15 +434,22 @@ function openReferenceMenu(event) {
     imageSelection.value = { type: 'image-region', label: '整张图片', quote: '', location: { x: 0, y: 0, width: 1, height: 1 } }
   }
   const anchor = activeReferenceAnchor.value
-  const x = Number(event?.clientX) || 0
-  const y = Number(event?.clientY) || 0
+  const point = contextMenuPoint(event, target)
   referenceMenu.value = {
-    x: Math.max(8, Math.min(x, window.innerWidth - 224)),
-    y: Math.max(8, Math.min(y, window.innerHeight - 92)),
+    ...point,
+    trigger: event?.trigger || (target?.ownerDocument && target.ownerDocument !== document ? documentFrame.value : target?.matches?.('textarea, input, button, [tabindex]') ? target : event?.currentTarget || target),
     anchor: { ...anchor, location: { ...anchor.location } },
+    title: anchor.label,
+    context: { summary: anchor.quote || selectedPath.value },
+    items: [{ label: '添加注解', icon: 'pencil', disabled: props.attachmentLimitReached, title: props.attachmentLimitReached ? '一条消息最多添加 8 个附件或注解' : '在此位置添加注解' }],
   }
-  void nextTick(() => referenceMenuElement.value?.querySelector('button')?.focus())
 }
+function onReferenceMenuKeydown(event) {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  event.preventDefault()
+  openReferenceMenu(event)
+}
+function onReferenceMenuSelect(_item, snapshot) { void addAnnotation(snapshot) }
 function setAnnotationInput(id, element) {
   if (element) annotationInputRefs.set(id, element)
   else annotationInputRefs.delete(id)
@@ -442,8 +473,7 @@ function clearAnnotations({ notify = false } = {}) {
   annotationInputRefs.clear()
   if (notify) for (const id of ids) emit('annotation-remove', id)
 }
-async function addAnnotation() {
-  const selected = referenceMenu.value
+async function addAnnotation(selected) {
   if (!selected || !selectedPath.value || props.attachmentLimitReached) return
   const path = selectedPath.value
   const payload = {
@@ -459,7 +489,6 @@ async function addAnnotation() {
   const point = { x: selected.x, y: selected.y }
   const imageBytes = previewKind.value === 'image' ? fileBytes.value : null
   const imageType = fileContentType.value
-  referenceMenu.value = null
   if (imageBytes) {
     try { payload.imageUrl = await imageBytesAsDataUrl(imageBytes, imageType) }
     catch { /* The workspace file reference remains attached if inline image conversion fails. */ }
@@ -835,11 +864,10 @@ async function revealSelectedFile() {
   if (!selectedPath.value || resourceActionBusy.value) return
   const owner = resourceActionOwner()
   resourceActionBusy.value = true
-  actionStatus.value = '正在文件管理器中定位…'
+  actionStatus.value = ''
   actionError.value = ''
   try {
     await revealWorkspacePath(owner.agentId, owner.path)
-    if (resourceActionOwnerCurrent(owner)) actionStatus.value = '已在文件管理器中定位'
   } catch (e) {
     if (resourceActionOwnerCurrent(owner)) actionError.value = String(e.message || e)
   } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
@@ -849,32 +877,31 @@ function openEntryMenu(event, entry = null) {
   event.stopPropagation()
   closeToolbarMenu()
   entryMenu.value = {
-    x: Math.max(8, Math.min(event.clientX, window.innerWidth - 260)),
-    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 76)),
+    ...contextMenuPoint(event),
     entry: entry ? { path: entry.path, name: entry.name, is_dir: Boolean(entry.is_dir) } : null,
     trigger: event.currentTarget,
+    title: entry?.name || (currentPath.value || '工作区根目录'),
+    context: { path: entry?.path || currentPath.value || '工作区' },
+    items: [{ label: entry ? entry.is_dir ? '在文件管理器中打开文件夹' : '在文件管理器中显示' : currentPath.value ? '在文件管理器中打开当前目录' : '在文件管理器中打开工作区', icon: entry?.is_dir || !entry ? 'folder-open' : 'file', disabled: resourceActionBusy.value }],
   }
-  void nextTick(() => entryMenuElement.value?.querySelector('button')?.focus())
 }
-function closeEntryMenu(restoreFocus = false) {
-  const trigger = entryMenu.value?.trigger
-  entryMenu.value = null
-  if (restoreFocus) void nextTick(() => trigger?.focus?.())
+function onEntryMenuSelect(_item, snapshot) { void revealContextPath(snapshot) }
+function onEntryKeydown(event, entry) {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  event.preventDefault()
+  openEntryMenu(event, entry)
 }
-async function revealContextPath() {
-  const menu = entryMenu.value
+async function revealContextPath(menu) {
   if (!menu || resourceActionBusy.value || !props.agentId) return
   const path = menu.entry?.path ?? currentPath.value
   const owner = { agentId: props.agentId, scope: props.workspaceScope, generation: props.requestGeneration }
   const isOwnerCurrent = () => !disposed && owner.agentId === props.agentId
     && owner.scope === props.workspaceScope && owner.generation === props.requestGeneration
-  closeEntryMenu()
   resourceActionBusy.value = true
-  actionStatus.value = '正在文件管理器中打开工作区路径…'
+  actionStatus.value = ''
   actionError.value = ''
   try {
     await revealWorkspacePath(owner.agentId, path)
-    if (isOwnerCurrent()) actionStatus.value = menu.entry?.is_dir ? '已在文件管理器中打开目录' : menu.entry ? '已在文件管理器中定位文件' : '已在文件管理器中打开工作区路径'
   } catch (e) {
     if (isOwnerCurrent()) actionError.value = String(e.message || e)
   } finally {
@@ -1229,13 +1256,9 @@ function runToolbarAction(action) {
 }
 function onToolbarPointerDown(event) {
   if (toolbarMenu.value && !toolbarMenu.value.contains(event.target)) closeToolbarMenu()
-  if (referenceMenu.value && !referenceMenuElement.value?.contains(event.target)) referenceMenu.value = null
-  if (entryMenu.value && !entryMenuElement.value?.contains(event.target)) closeEntryMenu()
 }
 function onToolbarKeydown(event) {
   if (event.key !== 'Escape') return
-  if (entryMenu.value) { closeEntryMenu(true); return }
-  if (referenceMenu.value) { referenceMenu.value = null; return }
   if (toolbarMenu.value?.open) {
     closeToolbarMenu()
     toolbarMenu.value.querySelector('summary')?.focus()
@@ -1298,6 +1321,17 @@ watch(() => props.requestGeneration, () => {
   if (props.active) void refreshResources('return');
 });
 watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
+watch([
+  () => props.agentId,
+  () => props.active,
+  () => props.workspaceScope,
+  () => props.requestGeneration,
+  currentPath,
+  selectedPath,
+], () => {
+  entryMenu.value = null
+  referenceMenu.value = null
+})
 watch(() => props.dockCollapsed, async collapsed => {
   if (!collapsed) return
   await nextTick()
@@ -1359,10 +1393,10 @@ onUnmounted(() => {
       </div>
     </header>
     <div class="workspace-files__body">
-      <nav class="workspace-files__list" aria-label="文件列表" @contextmenu.prevent="openEntryMenu($event)">
-        <button v-for="entry in sortedEntries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)" @contextmenu.stop.prevent="openEntryMenu($event, entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" class="workspace-files__file-icon" :size="16" /><span>{{ entry.name }}</span></button>
+      <nav class="workspace-files__list" aria-label="文件列表" tabindex="0" @contextmenu.prevent="openEntryMenu($event)" @keydown="onEntryKeydown($event, selectedEntry)">
+        <button v-for="entry in sortedEntries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)" @contextmenu.stop.prevent="openEntryMenu($event, entry)" @keydown="onEntryKeydown($event, entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" class="workspace-files__file-icon" :size="16" /><span>{{ entry.name }}</span></button>
       </nav>
-      <main class="workspace-files__editor" @contextmenu="openReferenceMenu">
+      <main class="workspace-files__editor" tabindex="-1" @contextmenu="openReferenceMenu" @keydown="onReferenceMenuKeydown">
         <div v-if="dirty" class="workspace-files__draft-bar" :class="{ 'is-conflict': draftConflict || externalUpdate || fileMissing }" role="status" aria-live="polite">
           <span>{{ draftStatusText }}</span>
           <div class="workspace-files__draft-actions">
@@ -1417,18 +1451,8 @@ onUnmounted(() => {
         </div>
       </main>
     </div>
-    <Teleport to="body">
-      <div v-if="entryMenu" ref="entryMenuElement" class="workspace-files__entry-menu" role="menu" :style="{ left: `${entryMenu.x}px`, top: `${entryMenu.y}px` }" @pointerdown.stop @contextmenu.prevent>
-        <div class="workspace-files__entry-menu-context"><strong>{{ entryMenu.entry?.name || (currentPath || '工作区根目录') }}</strong><span>{{ entryMenu.entry?.path || currentPath || '工作区' }}</span></div>
-        <button type="button" role="menuitem" :disabled="resourceActionBusy" @click="revealContextPath"><span v-if="entryMenu.entry?.is_dir || !entryMenu.entry" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" class="workspace-files__file-icon" :size="15" /><span>{{ entryMenu.entry ? entryMenu.entry.is_dir ? '在文件管理器中打开文件夹' : '在文件管理器中定位文件' : currentPath ? '在文件管理器中打开当前目录' : '在文件管理器中打开工作区' }}</span></button>
-      </div>
-    </Teleport>
-    <Teleport to="body">
-      <div v-if="referenceMenu" ref="referenceMenuElement" class="workspace-files__reference-menu" role="menu" :style="{ left: `${referenceMenu.x}px`, top: `${referenceMenu.y}px` }" @pointerdown.stop @contextmenu.prevent>
-        <div class="workspace-files__reference-menu-context"><strong>{{ referenceMenu.anchor.label }}</strong><span v-if="referenceMenu.anchor.quote">{{ referenceMenu.anchor.quote }}</span><span v-else>{{ selectedPath }}</span></div>
-        <button type="button" role="menuitem" :disabled="attachmentLimitReached" :title="attachmentLimitReached ? '一条消息最多添加 8 个附件或注解' : '在此位置添加注解'" @click="addAnnotation"><UiIcon name="pencil" :size="15" /><span>添加注解</span></button>
-      </div>
-    </Teleport>
+    <UiContextMenu v-model="entryMenu" :label="entryMenu?.entry?.name || currentPath || '工作区'" :width="260" @select="onEntryMenuSelect" />
+    <UiContextMenu v-model="referenceMenu" :label="referenceMenu?.anchor?.label" :width="216" @select="onReferenceMenuSelect" />
     <Teleport to="body">
       <section v-for="annotation in annotations" :key="annotation.id" class="workspace-files__annotation-popover" role="dialog" aria-label="资源注解" :style="annotationStyle(annotation)" @pointerdown.stop>
         <header><div><strong>资源注解</strong><span :title="`${annotation.reference.path} · ${annotation.reference.anchor.label}`">{{ annotation.reference.name }} · {{ annotation.reference.anchor.label }}</span></div><button type="button" aria-label="取消注解" title="取消注解" @click="removeAnnotation(annotation.id, { notify: true })"><UiIcon name="close" :size="15" /></button></header>
@@ -1458,13 +1482,6 @@ onUnmounted(() => {
 .workspace-files__image-selection{position:absolute;border:2px solid #536c76;background:#78909c38;pointer-events:none}
 .workspace-files__sheet-preview td{user-select:none;cursor:cell}
 .workspace-files__sheet-preview td.is-selected{background:#dfe8eb;box-shadow:inset 0 0 0 1px #788f98}
-.workspace-files__reference-menu{position:fixed;z-index:1000;box-sizing:border-box;width:216px;padding:5px;border:1px solid #d6dddf;border-radius:7px;background:#fff;color:#30383c;box-shadow:0 8px 26px #17212630}
-.workspace-files__reference-menu-context{display:grid;gap:4px;padding:7px 8px 8px;border-bottom:1px solid #edf0f1}
-.workspace-files__reference-menu-context strong{overflow:hidden;color:#59656a;font-size:11px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
-.workspace-files__reference-menu-context span{display:-webkit-box;max-height:40px;overflow:hidden;color:#778186;font-size:10px;line-height:1.4;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2}
-.workspace-files__reference-menu>button{display:flex;align-items:center;gap:8px;width:100%;height:32px;margin-top:4px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#3d474b;font:inherit;font-size:12px;text-align:left;cursor:pointer}
-.workspace-files__reference-menu>button:hover,.workspace-files__reference-menu>button:focus-visible{outline:0;background:#eef1f2}
-.workspace-files__reference-menu>button:disabled{color:#929b9f;cursor:default}
 .workspace-files__annotation-popover{position:fixed;z-index:1001;box-sizing:border-box;width:min(320px,calc(100vw - 16px));padding:10px;border:1px solid #d6dddf;border-radius:9px;background:#fff;color:#30383c;box-shadow:0 10px 30px #17212636}
 .workspace-files__annotation-popover>header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .workspace-files__annotation-popover>header>div{display:grid;flex:1;min-width:0;gap:3px}
@@ -1567,17 +1584,6 @@ onUnmounted(() => {
 .workspace-files__create-error { margin:7px 0 0; color:#a13c37; font-size:12px; }
 .workspace-files__list button .workspace-files__folder-icon { background:#5b83a7; }
 .workspace-files__list button .workspace-files__file-icon { flex:none; color:#7c878c; }
-.workspace-files__entry-menu { position:fixed; z-index:1200; box-sizing:border-box; width:260px; padding:4px; border:1px solid #d7dfe2; border-radius:7px; background:#fff; box-shadow:0 8px 24px #26374024; }
-.workspace-files__entry-menu-context { display:grid; gap:2px; padding:7px 9px; border-bottom:1px solid #edf0f1; }
-.workspace-files__entry-menu-context strong,.workspace-files__entry-menu-context span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workspace-files__entry-menu-context strong { color:#374247; font-size:11px; font-weight:600; }
-.workspace-files__entry-menu-context span { color:#788388; font-size:10px; }
-.workspace-files__entry-menu button { display:flex; align-items:center; gap:8px; width:100%; min-height:34px; margin-top:3px; padding:5px 8px; border:0; border-radius:5px; background:transparent; color:#3f4b50; text-align:left; font:inherit; font-size:11px; cursor:pointer; }
-.workspace-files__entry-menu button:hover:not(:disabled) { background:#eef2f4; }
-.workspace-files__entry-menu button:disabled { color:#9aa3a6; cursor:default; }
-.workspace-files__entry-menu button .ui-icon { flex:none; color:#5b83a7; }
-.workspace-files__entry-menu button .workspace-files__folder-icon { flex:none; width:15px; height:15px; background:#5b83a7; mask-repeat:no-repeat; mask-position:center; mask-size:contain; }
-.workspace-files__entry-menu button:focus-visible { outline:2px solid #6f8797; outline-offset:-2px; }
 @media (max-width: 760px) {
   .workspace-files__draft-bar { align-items:flex-start; flex-direction:column; gap:7px; }
   .workspace-files__draft-actions { align-self:flex-end; }

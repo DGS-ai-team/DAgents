@@ -154,8 +154,12 @@ function requestWorkgroupContextMenu(event, item) {
   if (!item?.workgroup_id) return
   const current = String(item.workgroup_id) === String(props.workgroupId)
   const items = []
-  if (!current) items.push({ label: '打开工作组', run: () => openGroup(item.workgroup_id) })
-  if (item.subscribed) items.push({ label: '从此 Node 移除工作组', danger: true, disabled: busy.value, run: () => removeWorkgroup(item) })
+  if (!current) items.push({ label: '打开工作组', icon: 'workgroup', run: () => openGroup(item.workgroup_id) })
+  if (item.subscribed) {
+    if (items.length) items.push({ separator: true })
+    const disabledReason = busy.value ? '工作组操作进行中，请稍后再试' : ''
+    items.push({ label: '从此 Node 移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeWorkgroup(item) })
+  }
   if (items.length) {
     event.preventDefault()
     event.stopPropagation()
