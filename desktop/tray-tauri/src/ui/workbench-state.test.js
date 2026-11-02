@@ -87,13 +87,13 @@ test('terminal creation asks for a target, while resuming an existing session by
     { channel_id: 'disabled', enabled: false, display_name: 'Disabled' },
   ]
   const windows = terminalDialogChoices('Windows', channels)
-  assert.equal(windows[0].label, 'Node 本机 PowerShell')
+  assert.equal(windows[0].label, '本机 PowerShell')
   assert.deepEqual(windows.map(choice => choice.targetId), [undefined, 'enabled-a'])
   assert.deepEqual(terminalOpenArguments(windows[0], 'Windows'), { targetKind: 'local', targetId: null, shell: 'powershell' })
   assert.deepEqual(terminalOpenArguments(windows[1], 'Windows'), { targetKind: 'linux_channel', targetId: 'enabled-a', shell: null })
-  assert.equal(terminalDialogChoices('linux', [])[0].label, 'Node 本机默认终端')
-  assert.equal(terminalDialogChoices('darwin', [])[0].label, 'Node 本机默认终端')
-  assert.equal(terminalDialogChoices('unknown', [])[0].label, 'Node 本机默认终端')
+  assert.equal(terminalDialogChoices('linux', [])[0].label, '本机默认终端')
+  assert.equal(terminalDialogChoices('darwin', [])[0].label, '本机默认终端')
+  assert.equal(terminalDialogChoices('unknown', [])[0].label, '本机默认终端')
   assert.deepEqual(terminalOpenArguments(terminalDialogChoices('darwin', [])[0], 'darwin'), { targetKind: 'local', targetId: null, shell: null })
   assert.throws(() => terminalOpenArguments({ kind: 'linux_channel', targetId: 'invalid/id' }, 'Windows'), /请选择有效的 Linux 主机/)
 })
