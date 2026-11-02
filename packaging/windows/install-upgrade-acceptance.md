@@ -1,6 +1,6 @@
 # Windows install and upgrade acceptance
 
-Updated: 2026-10-16
+Updated: 2026-11-02
 
 Release scope update (2026-10-17): the next complete Windows release is x64
 only; x86 is suspended. Earlier dual-architecture compile results below are
@@ -82,6 +82,17 @@ validate an installer build, installation, upgrade, or uninstall.
 
 ## Upgrade and removal
 
+- Enable the bundled browser service and open a real Chromium page before an
+  upgrade. A health ping alone does not launch Playwright/Chromium and cannot
+  validate this case. Confirm the old PyInstaller bootloader, worker and browser
+  descendants exit, `bin\dagents-browser.exe` matches the new manifest, and no
+  Windows restart is needed. Restart Manager is restricted to the browser
+  payload in this installation; another install's browser must remain running.
+- With the new Node, repeat using both a normal browser-service close and a
+  forced owned-Node stop. Windows binds the sidecar and its descendants to the
+  Node's job lifetime, including when the installer/uninstaller forcibly stops
+  Node. A separately started browser service that Node merely attaches to must
+  remain outside this job.
 - Seed the disposable profile with a non-default `config.yaml`, `.runtime`
   database and policy, plus Desktop `settings.json`. Upgrade in place and
   confirm every file remains unchanged.
@@ -101,6 +112,25 @@ validate an installer build, installation, upgrade, or uninstall.
   `config.yaml`, the whole `.runtime` tree (including edits to seeded policy,
   skills, and documentation), and Desktop `settings.json` remain. Installer
   payload files outside `.runtime` can be removed with the application.
+
+### Browser lifetime regression (2026-11-02)
+
+On Windows 11 x64, the v1.0.4 payload in isolated QA package `1.0.4.2` was
+upgraded to a fix candidate in QA package `1.0.4.3` with a real bundled browser
+session open. All eight processes in the old sidecar/Playwright/Chromium tree
+exited, the four installed payload hashes matched the candidate manifest, and
+setup reported no reboot. The candidate Node then launched and observed a real
+Chromium page; uninstall stopped its entire eight-process browser tree and
+removed the executables. Bootstrap config, policy, Desktop JSON and logical Node
+settings were preserved, and the production-settings guard remained unchanged.
+
+Native Go tests additionally verify normal job close and forced owner death
+against a three-level child tree while an unrelated process survives. The
+Inno inert regression extracts production Restart Manager settings, replaces a
+locked browser executable, and confirms another install's same-name browser
+and an external Node survive. Both regressions run in Windows packaging CI.
+This is isolated QA coverage, not standard-user VM or interactive installer
+acceptance; interactive setup can ask to close detected applications.
 
 ## Isolated QA installer
 
