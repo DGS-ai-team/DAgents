@@ -146,6 +146,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Set up Go for native Windows browser lifetime tests
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: node/go.sum
+
+      - name: Verify Windows browser process lifetime
+        shell: pwsh
+        run: go test ./node/internal/browser -count=1
+
       - name: Verify isolated installer harness contract
         shell: pwsh
         run: ./packaging/windows/tests/test-isolated-installer-contract.ps1
@@ -165,6 +175,12 @@ jobs:
         run: |
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           ./packaging/windows/tests/test-silent-policy-preservation-inno.ps1 -Iscc $iscc
+
+      - name: Verify browser file lock cleanup with Inno
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          ./packaging/windows/tests/test-browser-lock-inno.ps1 -Iscc $iscc
 
       - name: Compile production and isolated QA installers (x64 and x86)
         shell: bash
@@ -202,4 +218,4 @@ jobs:
             dist-installer/dagents-local-assistant-windows-386-installer-${version}-qa.exe; do
             test -s "${output}"
           done
-          # This job intentionally uploads no package and never invokes an installer.
+          # This compile step uploads no package and never invokes a product installer.

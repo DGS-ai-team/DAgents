@@ -24,7 +24,7 @@ const browserServiceStartupTimeout = 30 * time.Second
 // ServiceProcess is a browser sidecar process started and owned by this Node.
 // The temporary config contains only effective browser settings, never Node secrets.
 type ServiceProcess struct {
-	cmd        *exec.Cmd
+	stopChild  func() error
 	endpoint   string
 	configPath string
 	logPath    string
@@ -47,11 +47,11 @@ func (p *ServiceProcess) Close() error {
 	}
 	var closeErr error
 	p.once.Do(func() {
-		if p.cmd != nil && p.cmd.Process != nil {
+		if p.stopChild != nil {
 			select {
 			case <-p.done:
 			default:
-				if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && !processAlreadyFinished(p.done) {
+				if err := p.stopChild(); err != nil && !errors.Is(err, os.ErrProcessDone) && !processAlreadyFinished(p.done) {
 					closeErr = err
 				}
 			}
@@ -224,19 +224,15 @@ func startServiceProcess(cfg *config.Config, address, endpoint string) (*Service
 	if err != nil {
 		return nil, fmt.Errorf("open browser service log: %w", err)
 	}
-	listen := address
-	cmd := exec.Command(executable, "--config", configPath, "--listen", listen)
-	cmd.Dir = settings.RuntimeRoot
-	cmd.Stdout, cmd.Stderr = logFile, logFile
-	configureBrowserCommand(cmd)
-	if err := cmd.Start(); err != nil {
+	stopChild, waitChild, err := startBrowserProcess(executable, []string{"--config", configPath, "--listen", address}, settings.RuntimeRoot, logFile)
+	if err != nil {
 		_ = logFile.Close()
 		return nil, fmt.Errorf("launch %s: %w", filepath.Base(executable), err)
 	}
 	cleanupConfig = false
-	process := &ServiceProcess{cmd: cmd, endpoint: endpoint, configPath: configPath, logPath: logPath, logFile: logFile, done: make(chan struct{})}
+	process := &ServiceProcess{stopChild: stopChild, endpoint: endpoint, configPath: configPath, logPath: logPath, logFile: logFile, done: make(chan struct{})}
 	go func() {
-		_ = cmd.Wait()
+		_ = waitChild()
 		close(process.done)
 		_ = os.Remove(configPath)
 		_ = logFile.Close()
