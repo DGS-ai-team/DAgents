@@ -9,6 +9,7 @@ import autoSemantic from '../desktop/auto.svg?raw'
 import skillsSemantic from '../lucide/puzzle.svg?raw'
 import saveSemantic from '../legacy-prototype/save.svg?raw'
 import uploadSemantic from '../desktop/upload.svg?raw'
+import searchSemantic from '../legacy-prototype/search.svg?raw'
 import icon0 from './close.svg?raw'
 import icon1 from './check.svg?raw'
 import icon2 from './pending.svg?raw'
@@ -62,7 +63,7 @@ import wecomSemantic from './wecom.svg?raw'
 
 const body = svg => svg.replace(/^[\s\S]*?<svg\b[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim()
 
-export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","unplug","server","users","globe","wrench","wecom","bookmark","tool","save","upload"]
+export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","unplug","server","users","globe","wrench","wecom","bookmark","tool","save","upload","search"]
 export const nodeIconRegistry = Object.freeze({
   "close": body(icon0),
   "check": body(icon1),
@@ -91,6 +92,7 @@ export const nodeIconRegistry = Object.freeze({
   "square": body(icon27),
   "refresh-cw": body(icon28),
   "settings": body(icon29),
+  "search": searchSemantic,
   "monitor": body(icon30),
   "sun": body(icon31),
   "moon": body(icon32),
