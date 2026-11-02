@@ -8,6 +8,7 @@ import {
   toolStepPurpose,
   toolStepStatusText,
   toolStepToolLabel,
+  toolStepToolLabelParts,
   toolStepUserSummary,
 } from "./toolUserLabel.js";
 import { applyToolJobsSnapshot } from "../stores/toolJobs.js";
@@ -125,6 +126,15 @@ describe("toolStepToolLabel", () => {
         callEntry: { kind: "tool_call", data: { tool_name: "terminal_command", arguments: {} } },
       }),
     ).toBe("terminal_command");
+  });
+
+  it("shares normalized name and purpose parts with animated headers", () => {
+    expect(toolStepToolLabelParts({
+      callEntry: { data: { tool_name: "bash_run", arguments: { call_purpose: "检查服务状态" } } },
+    })).toEqual({ name: "bash", purpose: "检查服务状态" });
+    expect(toolStepToolLabelParts({
+      callEntry: { data: { tool_name: "read_file", arguments: {} } },
+    })).toEqual({ name: "read_file", purpose: "" });
   });
 });
 

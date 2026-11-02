@@ -1296,15 +1296,7 @@ html body .desktop-chat-wrapper .tool-summary-row--linux .tool-summary-row__visu
 html body .desktop-chat-wrapper .tool-summary-row--fs .tool-summary-row__visual,
 html body .desktop-chat-wrapper .tool-summary-row--skills .tool-summary-row__visual,
 html body .desktop-chat-wrapper .tool-summary-row--mcp .tool-summary-row__visual,
-html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--shell .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--terminal .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--browser .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--linux .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--fs .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--skills .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--mcp .tool-group-row__visual,
-html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
+html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visual {
   color: #626a6f;
 }
 
