@@ -1,9 +1,8 @@
 <script setup>
 import { computed, ref } from "vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
-import BrandActivityIndicator from "@shared-frontend/components/BrandActivityIndicator.vue";
-import { resolveToolGroupVisual } from "../utils/toolSource.js";
-import { resolveToolStepPhase } from "../utils/toolUserLabel.js";
+import { resolveToolVisual } from "../utils/toolSource.js";
+import { resolveToolStepPhase, toolStepToolLabelParts } from "../utils/toolUserLabel.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiIcon from "./UiIcon.vue";
 
@@ -36,11 +35,32 @@ const phaseCounts = computed(() => {
 const activeSteps = computed(() =>
   props.steps.filter((step) => ["generating", "running", "background"].includes(resolveToolStepPhase(step))),
 );
+const foregroundSteps = computed(() =>
+  props.steps.filter((step) => ["generating", "running"].includes(resolveToolStepPhase(step))),
+);
 const hasActive = computed(() => activeSteps.value.length > 0);
+const hasForeground = computed(() => foregroundSteps.value.length > 0);
 const hasPending = computed(() => phaseCounts.value.pending > 0);
-const visual = computed(() => {
-  return resolveToolGroupVisual(props.steps);
+const pendingSteps = computed(() => props.steps.filter((step) => resolveToolStepPhase(step) === "pending"));
+const selectedStep = computed(() => {
+  const steps = foregroundSteps.value.length
+    ? foregroundSteps.value
+    : pendingSteps.value.length
+      ? pendingSteps.value
+      : activeSteps.value;
+  return steps.length ? steps[steps.length - 1] : props.steps[props.steps.length - 1] || null;
 });
+const selectedVisual = computed(() => {
+  const step = selectedStep.value;
+  return resolveToolVisual(step?.resultEntry || step?.callEntry || step || {});
+});
+const selectedLabel = computed(() => toolStepToolLabelParts(selectedStep.value || {}));
+const selectedIdentity = computed(() => selectedLabel.value.name);
+const purposeIdentity = computed(() => `${selectedIdentity.value}\u0000${selectedLabel.value.purpose}`);
+const titleLabel = computed(() => selectedLabel.value.purpose
+  ? `${selectedLabel.value.name}(${selectedLabel.value.purpose})`
+  : selectedLabel.value.name);
+const headLabel = computed(() => `${titleLabel.value}，${statusText.value || "工具执行清单"}，${expanded.value ? "收起" : "展开"}`);
 const statusParts = computed(() => {
   const counts = phaseCounts.value;
   const parts = [];
@@ -87,7 +107,7 @@ function toggle() {
   <div
     class="tool-group-row"
     :class="[
-      `tool-group-row--${visual.kind}`,
+      `tool-group-row--${selectedVisual.kind}`,
       { 'tool-group-row--expanded': expanded, 'tool-group-row--progress': hasActive },
     ]"
   >
@@ -95,17 +115,21 @@ function toggle() {
       type="button"
       class="tool-group-row__head"
       :aria-expanded="expanded"
-      :aria-label="expanded ? '收起工具执行清单' : '展开工具执行清单'"
+      :aria-label="headLabel"
       @click="toggle"
     >
       <span class="tool-group-row__glyph" aria-hidden="true">
-        <BrandActivityIndicator v-if="hasActive" mode="tool" :show-label="false" compact />
+        <span v-if="hasActive" class="tool-group-row__activity-dot" />
         <UiIcon v-else :class="`tool-group-row__status-icon--${statusTone}`" :name="statusIcon" :size="14" />
       </span>
-      <span class="tool-group-row__visual" :title="visual.label">
-        <ToolGroupIcon :name="visual.kind" />
+      <span class="tool-group-row__visual" :title="selectedVisual.label">
+        <ToolGroupIcon :name="selectedVisual.kind" />
       </span>
-      <span class="tool-group-row__title">工具执行清单</span>
+      <span class="tool-group-row__title" :class="{ 'tool-group-row__title--active': hasForeground, 'tool-group-row__title--purpose': !!selectedLabel.purpose }" :title="titleLabel">
+        <Transition name="tool-title">
+          <span :key="selectedIdentity" class="tool-group-row__title-name"><span class="tool-group-row__title-tool-name">{{ selectedLabel.name }}</span><span class="tool-group-row__title-purpose-viewport"><Transition name="tool-purpose"><span v-if="selectedLabel.purpose" :key="purposeIdentity" class="tool-group-row__title-purpose">({{ selectedLabel.purpose }})</span></Transition></span></span>
+        </Transition>
+      </span>
       <span class="tool-group-row__status">{{ statusText }}</span>
       <UiIcon class="tool-group-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
     </button>
@@ -178,6 +202,13 @@ function toggle() {
   font-size: 12px;
 }
 
+.tool-group-row__activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
 .tool-group-row__status-icon--danger { color: var(--color-danger); }
 .tool-group-row__status-icon--warning { color: var(--color-warning); }
 .tool-group-row__status-icon--muted { color: var(--color-text-subtle); }
@@ -195,44 +226,130 @@ function toggle() {
   height: 20px;
 }
 
-/* 合并气泡沿用独立工具气泡的工具组色彩，避免同一命令行工具出现两种颜色。 */
-.tool-group-row--shell .tool-group-row__visual {
-  color: var(--color-warning);
-}
-
-.tool-group-row--terminal .tool-group-row__visual,
-.tool-group-row--browser .tool-group-row__visual,
-.tool-group-row--linux .tool-group-row__visual {
-  color: var(--color-info);
-}
-
-.tool-group-row--fs .tool-group-row__visual,
-.tool-group-row--skills .tool-group-row__visual {
-  color: var(--color-success);
-}
-
-.tool-group-row--mcp .tool-group-row__visual {
-  color: var(--color-auto);
-}
-
-.tool-group-row--child .tool-group-row__visual {
-  color: var(--color-auto);
-}
-
-.tool-group-row--wrench .tool-group-row__visual,
-.tool-group-row--tool .tool-group-row__visual {
-  color: var(--color-text-muted);
-}
-
 .tool-group-row__title {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  position: relative;
+  height: 1.35em;
   color: var(--color-text);
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 400;
   line-height: 1.35;
   white-space: nowrap;
+}
+
+.tool-group-row__title-name {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.tool-group-row__title-tool-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-row__title--purpose .tool-group-row__title-tool-name {
+  max-width: 60%;
+}
+
+.tool-group-row__title-purpose-viewport {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 1.35em;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tool-group-row__title-purpose {
+  display: inline-block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-row__title--active {
+  color: var(--color-text);
+}
+
+.tool-group-row__title--active .tool-group-row__title-tool-name,
+.tool-group-row__title--active .tool-group-row__title-purpose {
+  background-image: linear-gradient(100deg, var(--color-text-muted) 0%, var(--color-text) 35%, var(--color-text-muted) 70%);
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tool-title-shimmer 3.8s ease-in-out infinite;
+}
+
+.tool-title-enter-active,
+.tool-title-leave-active,
+.tool-purpose-enter-active,
+.tool-purpose-leave-active {
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+
+.tool-title-enter-active,
+.tool-title-leave-active,
+.tool-purpose-enter-active,
+.tool-purpose-leave-active {
+  position: absolute;
+  inset-inline: 0;
+  overflow: hidden;
+}
+
+.tool-title-enter-from,
+.tool-purpose-enter-from {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+.tool-title-leave-to,
+.tool-purpose-leave-to {
+  opacity: 0;
+  transform: translateY(-100%);
+}
+
+@keyframes tool-title-shimmer {
+  0%, 35% { background-position: 100% 0; }
+  70%, 100% { background-position: -120% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-group-row__title--active .tool-group-row__title-tool-name,
+  .tool-group-row__title--active .tool-group-row__title-purpose {
+    background: none;
+    -webkit-text-fill-color: var(--color-text);
+    animation: none;
+  }
+  .tool-title-enter-active,
+  .tool-title-leave-active,
+  .tool-purpose-enter-active,
+  .tool-purpose-leave-active { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .tool-group-row__title,
+  .tool-group-row__title--active {
+    color: CanvasText;
+    background: none;
+    -webkit-text-fill-color: CanvasText !important;
+  }
+  .tool-group-row__title--active .tool-group-row__title-tool-name,
+  .tool-group-row__title--active .tool-group-row__title-purpose,
+  .tool-group-row__title-tool-name,
+  .tool-group-row__title-purpose { background: none !important; animation: none; -webkit-text-fill-color: CanvasText !important; }
 }
 
 .tool-group-row__status {
