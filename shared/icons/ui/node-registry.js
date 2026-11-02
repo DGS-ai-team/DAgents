@@ -1,5 +1,6 @@
 import attachmentSemantic from '../desktop/attachment.svg?raw'
 import fileSemantic from '../desktop/file.svg?raw'
+import folderOpenSemantic from '../desktop/folder-open.svg?raw'
 import toolsSemantic from '../desktop/tools.svg?raw'
 import sendSemantic from '../desktop/send.svg?raw'
 import browserSemantic from '../desktop/browser.svg?raw'
@@ -63,7 +64,7 @@ import wecomSemantic from './wecom.svg?raw'
 
 const body = svg => svg.replace(/^[\s\S]*?<svg\b[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim()
 
-export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","unplug","server","users","globe","wrench","wecom","bookmark","tool","save","upload","search"]
+export const nodeIconNames = ["attachment","browser","agent","workgroup","auto","skills","close","check","pending","transfer","alert","plus","chevron-right","chevron-left","chevron-up","chevron-down","trash","arrow-left","arrow-up","arrow-down","paperclip","image","file","folder-open","file-plus","receipt-text","circle-plus","code-2","briefcase","package","panel-right","send","pencil","more-horizontal","square","refresh-cw","settings","monitor","sun","moon","terminal","square-terminal","message-square","message-circle","bot","sparkles","clock","shield","shield-check","brain","info","network","plug","unplug","server","users","globe","wrench","wecom","bookmark","tool","save","upload","search"]
 export const nodeIconRegistry = Object.freeze({
   "close": body(icon0),
   "check": body(icon1),
@@ -124,6 +125,7 @@ export const nodeIconRegistry = Object.freeze({
   "attachment": attachmentSemantic,
   "paperclip": attachmentSemantic,
   "file": fileSemantic,
+  "folder-open": folderOpenSemantic,
   "send": sendSemantic,
   "wrench": toolsSemantic,
   "tool": toolsSemantic,

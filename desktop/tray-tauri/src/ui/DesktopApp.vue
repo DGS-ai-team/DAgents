@@ -19,6 +19,7 @@ import { createTurnWatchdog } from '@desktop-ui/stores/turnWatchdog.js'
 import MainChatPanel from '@desktop-ui/components/MainChatPanel.vue'
 import ResourceMarkdown from '@desktop-ui/components/ResourceMarkdown.vue'
 import UiIcon from '@desktop-ui/components/UiIcon.vue'
+import UiContextMenu from '@desktop-ui/components/UiContextMenu.vue'
 import AgentCreatePage from '@desktop-ui/components/AgentCreatePage.vue'
 import FirstRunNodeProfile from '@desktop-ui/views/FirstRunNodeProfile.vue'
 import ComposerToolbar from '@desktop-ui/components/ComposerToolbar.vue'
@@ -243,7 +244,6 @@ const previouslyOnline = ref(false)
 const sidebarCollapsed = ref(false)
 const openMenu = ref('')
 const entryContextMenu = ref(null)
-const entryContextMenuElement = ref(null)
 const removingWorkgroupId = ref('')
 const dialog = ref('')
 const autoOverviewPanel = ref(null)
@@ -287,7 +287,6 @@ let activeHydrateTimer = 0
 let workspaceConnectionState = ''
 let composerResizeObserver = null
 let terminalDialogRequestEpoch = 0
-let contextMenuReturnFocus = null
 let terminalSessionListEpoch = 0
 let terminalChannelRequestEpoch = 0
 const terminalDecoders = new Map()
@@ -1087,69 +1086,32 @@ async function deleteAgentById(agentId) {
     if (dialog.value === 'auto-overview') autoOverviewActionError.value = message
   } finally { if (deletingAgentId.value === id) deletingAgentId.value = '' }
 }
-async function openEntryContextMenu(event, { title = '', items = [], anchor = event?.currentTarget } = {}) {
+function openEntryContextMenu(event, { title = '', items = [], anchor = event?.currentTarget } = {}) {
   event?.preventDefault?.()
   event?.stopPropagation?.()
   if (!items.length) return
   openMenu.value = ''
-  contextMenuReturnFocus = anchor instanceof HTMLElement ? anchor : null
-  const rect = contextMenuReturnFocus?.getBoundingClientRect?.()
+  const focusAnchor = anchor instanceof HTMLElement ? anchor : null
+  const rect = focusAnchor?.getBoundingClientRect?.()
   const hasPointerPosition = Number(event?.clientX) > 0 || Number(event?.clientY) > 0
   const x = hasPointerPosition ? Number(event.clientX) : (rect?.left || 0) + 12
   const y = hasPointerPosition ? Number(event.clientY) : (rect?.bottom || 0)
-  entryContextMenu.value = { title, items, x, y }
-  await nextTick()
-  const bounds = entryContextMenuElement.value?.getBoundingClientRect?.()
-  if (!bounds) return
-  const margin = 8
-  entryContextMenu.value = {
-    ...entryContextMenu.value,
-    x: Math.max(margin, Math.min(x, window.innerWidth - bounds.width - margin)),
-    y: Math.max(margin, Math.min(y, window.innerHeight - bounds.height - margin)),
-  }
-  await nextTick()
-  entryContextMenuElement.value?.querySelector('button:not(:disabled)')?.focus()
-}
-function closeEntryContextMenu(restoreFocus = false) {
-  const target = contextMenuReturnFocus
-  entryContextMenu.value = null
-  contextMenuReturnFocus = null
-  if (restoreFocus && target?.isConnected) void nextTick(() => target.focus?.())
+  entryContextMenu.value = { title, items, x, y, trigger: focusAnchor }
 }
 function runEntryContextMenuItem(item) {
   if (!item || item.disabled) return
-  closeEntryContextMenu()
   void item.run?.()
-}
-function handleEntryContextMenuKeydown(event) {
-  if (!entryContextMenu.value) return false
-  const menu = entryContextMenuElement.value
-  const items = Array.from(menu?.querySelectorAll('button:not(:disabled)') || [])
-  const index = items.indexOf(document.activeElement)
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeEntryContextMenu(true)
-    return true
-  }
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
-    event.preventDefault()
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (index + 1) % items.length : (index <= 0 ? items.length - 1 : index - 1)
-    items[next]?.focus()
-    return true
-  }
-  if (event.key === 'Tab') closeEntryContextMenu()
-  return false
 }
 function openAgentContextMenu(event, agent, anchor = event?.currentTarget) {
   const id = String(agent?.agent_id || '').trim()
   if (!id) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const isWorking = agent.state === 'working' || (activeId.value === id && agentGenerating.value)
+  const disabledReason = !status.value.online ? '请先连接 Node' : status.value.setup_required ? '请先完成 Node 初始化' : deletingAgentId.value ? '正在删除智能体' : isWorking ? '智能体工作中，暂不能删除' : ''
   void openEntryContextMenu(event, {
     title: agent.display_name || id,
     anchor,
-    items: [{ label: `删除${kind}`, danger: true, disabled: Boolean(!status.value.online || status.value.setup_required || deletingAgentId.value || isWorking), run: () => deleteAgentById(id) }],
+    items: [{ label: `删除${kind}`, icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => deleteAgentById(id) }],
   })
 }
 function onAgentEntryKeydown(event, agent) {
@@ -1165,10 +1127,11 @@ function openAutoOverviewContextMenu(payload) {
 function openSidebarWorkgroupContextMenu(event, group, anchor = event?.currentTarget) {
   const id = String(group?.workgroup_id || '').trim()
   if (!id) return
+  const disabledReason = !status.value.online ? '请先连接 Node' : status.value.setup_required ? '请先完成 Node 初始化' : removingWorkgroupId.value ? '正在移除工作组' : ''
   void openEntryContextMenu(event, {
     title: group.display_name || id,
     anchor,
-    items: [{ label: '从此 Node 移除工作组', danger: true, disabled: Boolean(!status.value.online || status.value.setup_required || removingWorkgroupId.value), run: () => removeSidebarWorkgroup(group) }],
+    items: [{ label: '从此 Node 移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeSidebarWorkgroup(group) }],
   })
 }
 function onWorkgroupEntryKeydown(event, group) {
@@ -1679,7 +1642,7 @@ function focusMenuItem(menuName, key = 'ArrowDown') {
 }
 function handleMenubarKeydown(event) {
   const trigger = event.target.closest?.('[data-menubar-trigger]')
-  const menu = event.target.closest?.('[role="menu"]')
+  const menu = event.target.closest?.('.menu-anchor [role="menu"]')
   const menuNames = desktopMenuNames
   if (trigger) {
     const name = trigger.dataset.menubarTrigger
@@ -1758,11 +1721,9 @@ function runMenuAction(action) {
 }
 function onDocumentClick(event) {
   if (!event.target.closest('.menu-anchor[data-menu-anchor]')) openMenu.value = ''
-  if (entryContextMenu.value && !event.target.closest('.entry-context-menu')) closeEntryContextMenu()
   if (attachmentActionsOpen.value && !event.target.closest('.attachment-action')) closeAttachmentActions()
 }
 function onKeydown(event) {
-  if (handleEntryContextMenuKeydown(event)) return
   if (screenshotSelection.value && event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -2151,14 +2112,7 @@ onUnmounted(() => {
     <ScreenshotRegionDialog v-if="screenshotSelection" :image-url="screenshotSelection.url" @cancel="closeScreenshotSelection" @confirm="confirmScreenshotSelection" @error="onScreenshotSelectionError" />
     <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel ref="autoOverviewPanel" :action-error="autoOverviewActionError" @open-chat="openAutoChat" @open-config="openAutoConfig" @context-menu="openAutoOverviewContextMenu" /></section></div>
     <div v-if="showAgentCreate" class="agent-create-overlay"><AgentCreatePage @cancel="showAgentCreate = false" @created="onAgentCreated" /></div>
-    <Teleport to="body">
-      <div v-if="entryContextMenu" class="entry-context-menu-layer" @pointerdown.self="closeEntryContextMenu()" @contextmenu.prevent="closeEntryContextMenu()" @click.self="closeEntryContextMenu()">
-        <div ref="entryContextMenuElement" class="entry-context-menu" role="menu" :aria-label="entryContextMenu.title" :style="{ left: `${entryContextMenu.x}px`, top: `${entryContextMenu.y}px` }">
-          <div v-if="entryContextMenu.title" class="entry-context-menu-title">{{ entryContextMenu.title }}</div>
-          <button v-for="(item, index) in entryContextMenu.items" :key="`${item.label}-${index}`" type="button" role="menuitem" :disabled="item.disabled" :class="{ danger: item.danger }" @click="runEntryContextMenuItem(item)">{{ item.label }}</button>
-        </div>
-      </div>
-    </Teleport>
+    <UiContextMenu v-model="entryContextMenu" :label="entryContextMenu?.title" @select="runEntryContextMenuItem" />
     <ImageLightbox />
   </div>
 </template>

@@ -141,6 +141,10 @@ describe('Desktop browser viewer API contract', () => {
 })
 
 describe('Desktop workgroup API contract', () => {
+  it('keeps right-click menus out of the top menubar keyboard handler', () => {
+    expect(desktopAppSource).toMatch(/event\.target\.closest\?\.\('\.menu-anchor \[role="menu"\]'\)/)
+  })
+
   it('keeps browser capability setup separate from workgroup connection setup', () => {
     expect(desktopAppSource).toMatch(/function openWorkgroupConnectionSettings\(\)\s*\{\s*void router\.push\('\/settings\/connection'\)\s*\}/)
     expect(desktopAppSource).toMatch(/function openBrowserCapabilitySettings\(\)\s*\{\s*void router\.push\('\/settings\/capabilities'\)\s*\}/)
@@ -262,6 +266,7 @@ describe('Desktop workgroup API contract', () => {
     await flushPromises()
     await wrapper.find('.wg-group').trigger('contextmenu', { clientX: 20, clientY: 30 })
     const menu = wrapper.emitted('context-menu').at(-1)[0]
+    expect(menu.items.map(item => item.icon || (item.separator ? 'separator' : ''))).toEqual(['workgroup', 'separator', 'trash'])
     await menu.items.find(item => item.label === '从此 Node 移除工作组').run()
     await flushPromises()
     expect(api.unsubscribeWorkgroup).toHaveBeenCalledWith('wg-a')
@@ -282,6 +287,17 @@ describe('Desktop workgroup API contract', () => {
     await flushPromises()
     expect(api.unsubscribeWorkgroup).toHaveBeenCalledWith('wg-a')
     expect(wrapper.emitted('removed')).toEqual([['wg-a']])
+  })
+
+  it('explains why a delegated workgroup removal action is disabled while busy', async () => {
+    api.getDesktopWorkgroupList.mockResolvedValue({ workgroups: [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active', subscribed: true }] })
+    wrapper = mount(WorkgroupWorkspace)
+    await flushPromises()
+    wrapper.vm.busy = true
+    await wrapper.find('.wg-group').trigger('contextmenu', { clientX: 20, clientY: 30 })
+    const menu = wrapper.emitted('context-menu').at(-1)[0]
+    const remove = menu.items.find(item => item.label === '从此 Node 移除工作组')
+    expect(remove).toMatchObject({ icon: 'trash', danger: true, disabled: true, title: '工作组操作进行中，请稍后再试' })
   })
 
   it('shows a Manage failure and the connection-settings action instead of an empty list', async () => {
