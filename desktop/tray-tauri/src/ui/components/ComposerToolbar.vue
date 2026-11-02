@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
@@ -22,6 +22,7 @@ const profiles = computed(() => {
 const activeProfile = computed(() => String(props.llmSettings?.active_profile || "").trim());
 const showProfileSwitch = computed(() => profiles.value.length > 0);
 const canSwitch = computed(() => !props.disabled && profiles.value.length > 1);
+const hasProfileChoice = computed(() => profiles.value.length > 1);
 const activeLabel = computed(() => activeProfile.value || props.llmSettings?.model || "Auto");
 const displayLabel = computed(() => props.desktopCompact
   ? String(props.llmSettings?.model || "Auto").trim()
@@ -48,9 +49,13 @@ function toggleMenu() {
 
 function pickProfile(id) {
   closeMenu();
-  if (!id || id === activeProfile.value) return;
+  if (!canSwitch.value || !id || id === activeProfile.value) return;
   emit("switch-profile", id);
 }
+
+watch(canSwitch, (available) => {
+  if (!available) closeMenu();
+});
 
 function onDocPointerDown(event) {
   if (!open.value) return;
@@ -80,14 +85,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="composer-toolbar">
     <span
-      v-if="statusLabel"
       class="composer-toolbar__status"
       role="status"
       aria-live="polite"
-      :title="statusLabel"
+      aria-atomic="true"
+      :title="statusLabel || undefined"
     >
-      <span class="composer-toolbar__status-dot" aria-hidden="true" />
-      <span>{{ statusLabel }}</span>
+      <span class="visually-hidden">{{ statusLabel }}</span>
+      <span class="composer-toolbar__status-window" aria-hidden="true">
+        <Transition name="composer-status" appear>
+          <span v-if="statusLabel" :key="statusLabel" class="composer-toolbar__status-line">
+            <span class="composer-toolbar__status-text">{{ statusLabel }}</span>
+          </span>
+        </Transition>
+      </span>
     </span>
 
     <div v-if="showProfileSwitch" ref="rootRef" class="composer-toolbar__profile">
@@ -102,7 +113,7 @@ onBeforeUnmount(() => {
         @click="toggleMenu"
       >
         <span class="composer-toolbar__trigger-label">{{ displayLabel }}</span>
-        <UiIcon v-if="canSwitch" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
+        <UiIcon v-if="hasProfileChoice" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
       </button>
 
       <div

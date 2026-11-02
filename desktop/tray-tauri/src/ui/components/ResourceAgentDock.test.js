@@ -34,8 +34,10 @@ describe('ResourceAgentDock', () => {
     await wrapper.find('.dock-input-surface').trigger('submit')
     expect(wrapper.emitted('send')).toHaveLength(1)
 
+    const actionElement = wrapper.find('.dock-action').element
     await wrapper.setProps({ status: 'generating', canStop: true, cancelling: false })
     expect(wrapper.findAll('.dock-action')).toHaveLength(1)
+    expect(wrapper.find('.dock-action').element).toBe(actionElement)
     expect(wrapper.find('.dock-action').attributes('aria-label')).toBe('停止本轮')
     await wrapper.find('.dock-input-surface').trigger('submit')
     expect(wrapper.emitted('send')).toHaveLength(1)
