@@ -46,7 +46,11 @@ OutputDir=..\..\dist-installer
 OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
 SolidCompression=yes
-CloseApplications=no
+; Legacy Nodes can leave a PyInstaller browser worker holding its executable.
+; Restart Manager checks only this install's browser payload, never Node or
+; Desktop (which retain the verified lifecycle/ownership protocol below).
+CloseApplications=force
+CloseApplicationsFilter=dagents-browser.exe
 RestartApplications=no
 #if MyAppArch == "x64"
 ArchitecturesAllowed=x64compatible
