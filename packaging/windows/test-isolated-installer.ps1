@@ -435,24 +435,34 @@ function Invoke-ShellJson {
     $shell = Join-Path $Root 'bin\dagents-shell.exe'
     $config = Join-Path $Root 'config.yaml'
     $desktop = Join-Path $Root 'qa-desktop-settings.json'
-    $token = [Guid]::NewGuid().ToString('N')
-    $stdout = Join-Path $FixtureRoot ".qa-cli-$token.out"
-    $stderr = Join-Path $FixtureRoot ".qa-cli-$token.err"
-    $oldHome = $env:DAGENTS_HOME
-    $oldDesktop = $env:DAGENTS_DESKTOP_CONFIG
-    try {
-        $env:DAGENTS_HOME = $Root
-        $env:DAGENTS_DESKTOP_CONFIG = $desktop
-        $arguments = "$Command --config `"$config`" --desktop-config `"$desktop`""
-        $process = Start-Process -FilePath $shell -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-        $output = if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout -Raw -Encoding UTF8 } else { '' }
-        if ($process.ExitCode -ne 0) { throw "Shell $Command failed with exit code $($process.ExitCode)." }
-        return ($output | ConvertFrom-Json)
-    } finally {
-        $env:DAGENTS_HOME = $oldHome
-        $env:DAGENTS_DESKTOP_CONFIG = $oldDesktop
-        Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $shell
+    $processInfo.WorkingDirectory = $Root
+    $processInfo.UseShellExecute = $false
+    $processInfo.CreateNoWindow = $true
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+    # Keep each CLI token separate; an aggregate argument string can be treated
+    # as one argument when paths contain spaces, launching the Desktop instead.
+    [void]$processInfo.ArgumentList.Add($Command)
+    [void]$processInfo.ArgumentList.Add('--config')
+    [void]$processInfo.ArgumentList.Add($config)
+    [void]$processInfo.ArgumentList.Add('--desktop-config')
+    [void]$processInfo.ArgumentList.Add($desktop)
+    $processInfo.Environment['DAGENTS_HOME'] = $Root
+    $processInfo.Environment['DAGENTS_DESKTOP_CONFIG'] = $desktop
+
+    $process = [System.Diagnostics.Process]::Start($processInfo)
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $output = $stdoutTask.GetAwaiter().GetResult()
+    $errorOutput = $stderrTask.GetAwaiter().GetResult()
+    if ($process.ExitCode -ne 0) {
+        throw "Shell $Command failed with exit code $($process.ExitCode): $errorOutput"
     }
+    if ([string]::IsNullOrWhiteSpace($output)) { throw "Shell $Command returned no JSON output." }
+    return ($output | ConvertFrom-Json)
 }
 
 function Assert-OwnedNodeRunning {

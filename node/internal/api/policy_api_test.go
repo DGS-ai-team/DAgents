@@ -337,6 +337,78 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	}
 }
 
+func TestHandleAgentPromptContextScopeChangePreservesSnapshotMetadata(t *testing.T) {
+	srv, ts, agentID := testAgentPolicyServer(t)
+	rec, err := srv.agents.Get(t.Context(), agentID)
+	if err != nil || rec == nil {
+		t.Fatalf("load agent: rec=%v err=%v", rec, err)
+	}
+	snapshot, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(t.TempDir(), "custom-workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.AgentType = "auto"
+	snapshot.Workspace = agentruntime.WorkspaceConfig{Mode: agentruntime.WorkspaceModeCustom, Path: workspace}
+	snapshot.Handbook = agentruntime.HandbookConfig{Directory: "handbook"}
+	rec.ConfigSnapshot, err = json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.agents.Save(t.Context(), *rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.reloadAgentRuntime(t.Context(), *rec); err != nil {
+		t.Fatal(err)
+	}
+	wantWorkspaceRoot, ok := srv.sessions.SessionWorkspaceRoot(agentID)
+	if !ok {
+		t.Fatal("custom workspace was not loaded")
+	}
+
+	putBody := []byte(`{"memory_scope":"global","memory_entries":[{"content":"scope change sentinel"}]}`)
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/agents/"+agentID+"/prompt-context", bytes.NewReader(putBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT prompt-context status=%d", resp.StatusCode)
+	}
+
+	updated, err := srv.agents.Get(t.Context(), agentID)
+	if err != nil || updated == nil {
+		t.Fatalf("reload agent: rec=%v err=%v", updated, err)
+	}
+	updatedSnapshot, err := agentruntime.ParseSnapshot(updated.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedSnapshot.AgentType != "auto" {
+		t.Fatalf("agent_type=%q, want auto", updatedSnapshot.AgentType)
+	}
+	if updatedSnapshot.Workspace.Mode != agentruntime.WorkspaceModeCustom || updatedSnapshot.Workspace.Path != workspace {
+		t.Fatalf("workspace=%+v, want custom workspace %q", updatedSnapshot.Workspace, workspace)
+	}
+	if updatedSnapshot.Handbook.Directory != "handbook" {
+		t.Fatalf("handbook=%+v, want handbook directory preserved", updatedSnapshot.Handbook)
+	}
+	if got := agentruntime.MemoryScopeFromDefaults(updatedSnapshot); got != "global" {
+		t.Fatalf("memory_scope=%q, want global", got)
+	}
+	if got, ok := srv.sessions.SessionWorkspaceRoot(agentID); !ok || got != wantWorkspaceRoot {
+		t.Fatalf("runtime workspace=%q ok=%v, want preserved root %q", got, ok, wantWorkspaceRoot)
+	}
+}
+
 func TestHandleAgentMemoryEntryMutation(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
 	base := ts.URL + "/v1/agents/" + agentID + "/prompt-context"
