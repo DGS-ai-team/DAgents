@@ -419,8 +419,6 @@ onBeforeUnmount(() => { window.removeEventListener("message", onHtmlPreviewMessa
 .markdown-render-block__preview { max-width: 100%; min-width: 0; }
 .markdown-render-block__source { max-width: 100%; min-width: 0; }
 .markdown-render-block__source .markdown-code-block { margin: 0; }
-.markdown-render-block__source .markdown-code-block__toolbar { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
-.markdown-render-block__source pre { margin-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
 .markdown-live-preview__frame { display: block; width: 100%; border: 0; background: transparent; }
 .markdown-live-preview__image-button { display: block; max-width: 100%; margin: 0; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .markdown-live-preview__svg { display: block; width: auto; max-width: 100%; max-height: 420px; object-fit: contain; }
