@@ -58,3 +58,12 @@ Node 在本机 `127.0.0.1:18766` 启动 sidecar；地址固定，不配置远程
 | POST | `/v2/browser/evaluate` |
 
 设计说明：[browser-call-main-agent-playwright-migration.md](../docs/design/browser-call-main-agent-playwright-migration.md)
+
+Desktop 浏览器资源页通过 Node 的 `POST /v1/agents/{agent_id}/browser/control`
+提交明确的导航动作（navigate/new/back/forward/reload/close），与 Agent 共用
+同一 Playwright context 和会话锁。首次手动打开网页采用 headless 模式；已运行
+的 Agent 浏览器保持原有模式。界面通过 `/browser/view` 同步页面预览与实际前进/
+后退状态，网页内点击、输入等仍由 Agent 工具执行；它不是另一个独立的 WebView。
+控制动作不调用 `_observe`，不重建模型的 snapshot refs；实际导航仍会清除失效 refs。
+忙碌时返回 423，用户动作不会排队或自动重放。页面只接受 HTTP(S) 网址并继续应用
+现有浏览器网络策略。
