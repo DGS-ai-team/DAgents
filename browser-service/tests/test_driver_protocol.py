@@ -167,9 +167,10 @@ class DesktopControlTests(unittest.IsolatedAsyncioTestCase):
             async def go_forward(self, **kwargs): self.operations.append('forward')
             async def reload(self, **kwargs): self.operations.append('reload')
             async def close(self): self.closed = True
+        pages = self.pages
         class Context:
-            async def new_page(inner):
-                page = Page(); self.pages.append(page); return page
+            async def new_page(self):
+                page = Page(); pages.append(page); return page
         self.context = Context()
         self.state = SessionState('agent-1', self.context, None)
         self.page = await self.driver._register_page(self.state, await self.context.new_page())
