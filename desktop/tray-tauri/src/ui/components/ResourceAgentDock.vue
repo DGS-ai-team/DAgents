@@ -42,7 +42,6 @@ const statusLabel = computed(() => `${props.agentName || '当前智能体'}：${
 const iconStyle = icon => ({ maskImage: `url("${icon}")`, WebkitMaskImage: `url("${icon}")` })
 const showStop = computed(() => props.status === 'generating' || props.canStop)
 const hasReferences = computed(() => props.references.length > 0)
-const actionIcon = computed(() => showStop.value ? stopIcon : sendIcon)
 const actionLabel = computed(() => showStop.value ? (props.cancelling ? '正在停止本轮' : '停止本轮') : '发送消息')
 const actionDisabled = computed(() => showStop.value
   ? !props.canStop || props.cancelling
@@ -152,7 +151,7 @@ onBeforeUnmount(() => {
         <button v-if="failedDraft" type="button" class="dock-restore" :disabled="restoreDisabled" aria-label="恢复失败消息" title="恢复失败消息" @click="emit('restore')">恢复</button>
         <button ref="toggleButton" type="button" class="dock-expand-toggle" :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'" :title="expanded ? '收起消息区' : status === 'pending' ? '展开消息区，查看待审批请求' : '展开消息区'" aria-controls="resource-agent-dock-details" :aria-expanded="expanded" @click="setExpanded(!expanded)"><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
         <button type="button" class="dock-collapse-toggle" aria-label="收起快速消息栏" title="收起消息栏" aria-expanded="true" @click="setCollapsed(true)"><span class="icon-mask" :style="iconStyle(chevronDownIcon)" aria-hidden="true"></span></button>
-        <button :type="showStop ? 'button' : 'submit'" class="dock-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask" :style="iconStyle(actionIcon)" aria-hidden="true"></span></button>
+        <button :type="showStop ? 'button' : 'submit'" class="dock-action composer-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask composer-action__send" :style="iconStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask composer-action__stop" :style="iconStyle(stopIcon)" aria-hidden="true"></span></button>
       </form>
       <button v-else-if="!collapsedInToolbar" key="collapsed" ref="collapsedToggle" type="button" class="dock-collapsed-toggle" :aria-label="`${statusLabel}；展开快速消息栏`" title="展开快速消息栏" :aria-expanded="false" @click="setCollapsed(false)">
         <span class="icon-mask dock-status-icon" :class="`is-${status}`" aria-hidden="true" :style="iconStyle(statusIcon)"></span>

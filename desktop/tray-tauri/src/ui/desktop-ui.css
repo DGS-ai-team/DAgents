@@ -1476,7 +1476,7 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .desktop-composer-toolbar {
   justify-self: end;
   min-width: 0;
-  max-width: 270px;
+  max-width: 280px;
   color: #4b5256;
 }
 .desktop-composer-toolbar .composer-toolbar__profile { min-width: 0; max-width: 100%; }
@@ -1572,26 +1572,69 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 .attachment-actions-leave-active .attachment-action-option:nth-child(3) { transition-delay: 0s; }
 .composer-toolbar__status {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 0 1 80px;
   align-items: center;
-  gap: 5px;
   min-width: 0;
-  max-width: 104px;
-  padding: 4px 7px;
-  border-radius: 999px;
-  background: #f0f2f2;
-  color: #596469;
-  font-size: 10px;
-  line-height: 1;
+  width: 80px;
+  height: 18px;
+  color: #6d777e;
+  font-size: 9.5px;
+  line-height: 18px;
   white-space: nowrap;
 }
-.composer-toolbar__status-dot {
-  flex: 0 0 6px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #7b8b90;
-  animation: composer-pulse 1.2s ease-in-out infinite;
+.composer-toolbar__status-window {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.composer-toolbar__status-line {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.composer-toolbar__status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .composer-toolbar__status-text {
+    background-image: linear-gradient(110deg, #6d777e 38%, #adb5ba 50%, #6d777e 62%);
+    background-size: 250% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: composer-status-shimmer 2.6s ease-in-out infinite;
+  }
+}
+@keyframes composer-status-shimmer {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+.composer-status-enter-active,
+.composer-status-leave-active {
+  transition: transform 260ms cubic-bezier(.22,.8,.25,1), opacity 260ms ease;
+}
+.composer-status-enter-from { transform: translateY(100%); opacity: 0; }
+.composer-status-leave-to { transform: translateY(-100%); opacity: 0; }
+
+.composer-action { position: relative; }
+.composer-action__send,
+.composer-action__stop {
+  grid-area: 1 / 1;
+  transition: opacity 200ms ease, transform 240ms cubic-bezier(.22,.8,.25,1);
+}
+.composer-action__send { opacity: 1; transform: translateY(0) scale(1); }
+.composer-action__stop { opacity: 0; transform: translateY(3px) scale(.65); }
+.composer-action.is-stop .composer-action__send { opacity: 0; transform: translateY(-3px) scale(.65); }
+.composer-action.is-stop .composer-action__stop { opacity: 1; transform: translateY(0) scale(1); }
+.composer-action.is-stop:disabled { opacity: .75; }
+
+@media (forced-colors: active) {
+  .composer-toolbar__status-text { background: none; color: CanvasText; animation: none; }
 }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .desktop-error-hint {
@@ -2418,7 +2461,11 @@ html body .desktop-chat-wrapper .tool-group-row--child .tool-group-row__visual {
 
 @media (prefers-reduced-motion: reduce) {
   .dock-status-icon.is-generating { animation: none; }
-  .composer-toolbar__status-dot { animation: none; }
+  .composer-toolbar__status-text { animation: none; background: none; color: #6d777e; }
+  .composer-status-enter-active,
+  .composer-status-leave-active,
+  .composer-action__send,
+  .composer-action__stop { transition: none; }
   .dock-panel-enter-active,
   .dock-panel-leave-active,
   .dock-bar-enter-active,
