@@ -87,6 +87,12 @@
       "license": "DAgents project asset"
     },
     {
+      "name": "loading",
+      "file": "desktop/loading.svg",
+      "source": "Lucide LoaderCircle from the official icon repository",
+      "license": "ISC"
+    },
+    {
       "name": "error",
       "file": "desktop/error.svg",
       "source": "DAgents visual-system semantic SVG",

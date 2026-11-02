@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import WorkspaceFiles from './WorkspaceFiles.vue'
 import * as api from '../workspace-files-api.js'
 
@@ -12,7 +14,7 @@ vi.mock('../workspace-files-api.js', () => ({
   pickWorkspaceImport: vi.fn(),
   readWorkspaceFile: vi.fn(),
   readWorkspaceTextChunk: vi.fn(),
-  revealWorkspaceFile: vi.fn(),
+  revealWorkspacePath: vi.fn(),
   saveWorkspaceFile: vi.fn(),
   saveWorkspaceFileAs: vi.fn(),
   uploadWorkspaceFile: vi.fn(),
@@ -62,6 +64,62 @@ afterEach(() => {
 })
 
 describe('Desktop workspace resource navigation', () => {
+  it('opens DOCX files in the rendered document preview by default', async () => {
+    const docx = new Uint8Array(await readFile(resolve(process.cwd(), 'node_modules/mammoth/test/test-data/single-paragraph.docx')))
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
+      path,
+      entries: path ? [] : [{ name: 'guide.docx', path: 'guide.docx', is_dir: false, size: docx.byteLength }],
+    }))
+    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: docx, contentType: 'application/octet-stream', etag: 'docx-etag' })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect(await wrapper.vm.openPath('guide.docx')).toEqual({ ok: true, canceled: false })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__document-frame').exists()).toBe(true)
+    expect(wrapper.find('.workspace-files__document-frame').attributes('srcdoc')).toContain('Walking on imported air')
+    expect(wrapper.text()).not.toContain('无法读取此文件')
+  })
+
+  it('shows Python syntax highlighting and a visible preview/source switch', async () => {
+    const source = 'def answer():\n    return 42\n'
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
+      path,
+      entries: path ? [] : [{ name: 'answer.py', path: 'answer.py', is_dir: false, size: source.length }],
+    }))
+    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes(source), contentType: 'application/octet-stream', etag: 'python-etag' })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect(await wrapper.vm.openPath('answer.py')).toEqual({ ok: true, canceled: false })
+    await flushPromises()
+    await vi.waitFor(() => expect(wrapper.find('.workspace-files__code-preview .hljs-keyword').text()).toBe('def'))
+    expect(wrapper.find('.workspace-files__code-preview .hljs-number').text()).toBe('42')
+    expect(wrapper.find('.workspace-files__preview-toggle').exists()).toBe(true)
+    await wrapper.findAll('.workspace-files__preview-toggle button').find(button => button.text() === '源代码').trigger('click')
+    expect(wrapper.find('textarea').element.value).toBe(source)
+  })
+
+  it('offers an inline Markdown preview/source switch in the toolbar', async () => {
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
+      path,
+      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 8 }],
+    }))
+    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('# Guide'), contentType: 'application/octet-stream', etag: 'markdown-etag' })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    expect(await wrapper.vm.openPath('guide.md')).toEqual({ ok: true, canceled: false })
+    const controls = wrapper.findAll('.workspace-files__preview-toggle button')
+    expect(controls).toHaveLength(2)
+    expect(controls[1].attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('textarea').element.value).toBe('# Guide')
+    await controls[0].trigger('click')
+    expect(wrapper.find('.workspace-files__markdown-preview h1').text()).toBe('Guide')
+    await controls[1].trigger('click')
+    expect(wrapper.find('textarea').element.value).toBe('# Guide')
+  })
+
   it('renders Markdown and lazily appends bounded chunks for large text files', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
@@ -69,8 +127,7 @@ describe('Desktop workspace resource navigation', () => {
     expect(await wrapper.vm.openPath('large.md')).toEqual({ ok: true, canceled: false })
     expect(api.readWorkspaceFile).not.toHaveBeenCalledWith('agent-a', 'large.md')
     expect(api.readWorkspaceTextChunk).toHaveBeenCalledWith('agent-a', 'large.md', 0, 256 * 1024)
-    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
-    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('查看预览')).trigger('click')
+    await wrapper.findAll('.workspace-files__preview-toggle button').find(button => button.text() === '预览').trigger('click')
     expect(wrapper.find('.workspace-files__markdown-preview h1').text()).toBe('First section')
     expect(wrapper.text()).toContain('剩余 37,856 字节')
 
@@ -174,7 +231,7 @@ describe('Desktop workspace resource navigation', () => {
   })
 
   it('reveals the selected file through the native command and reports failures', async () => {
-    api.revealWorkspaceFile.mockRejectedValueOnce(new Error('定位失败'))
+    api.revealWorkspacePath.mockRejectedValueOnce(new Error('定位失败'))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
     await wrapper.vm.openPath('a.md')
@@ -182,8 +239,40 @@ describe('Desktop workspace resource navigation', () => {
     await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('在文件管理器中定位')).trigger('click')
     await flushPromises()
 
-    expect(api.revealWorkspaceFile).toHaveBeenCalledWith('agent-a', 'a.md')
+    expect(api.revealWorkspacePath).toHaveBeenCalledWith('agent-a', 'a.md')
     expect(wrapper.text()).toContain('定位失败')
+  })
+
+  it('sorts folders before files and exposes native path actions from the file-list context menu', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+
+    const names = wrapper.findAll('.workspace-files__list button').map(button => button.text())
+    expect(names[0]).toBe('reports')
+    expect(names.slice(1)).toEqual([...names.slice(1)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }) || a.localeCompare(b)))
+    expect(wrapper.find('.workspace-files__folder-icon').exists()).toBe(true)
+    expect(wrapper.find('.workspace-files__file-icon').exists()).toBe(true)
+
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'reports').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    const entryMenu = document.body.querySelector('.workspace-files__entry-menu')
+    expect(entryMenu?.textContent).toContain('在文件管理器中打开文件夹')
+    entryMenu.querySelector('button').click()
+    await flushPromises()
+    expect(api.revealWorkspacePath).toHaveBeenCalledWith('agent-a', 'reports')
+
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.md').trigger('contextmenu', { clientX: 40, clientY: 50 })
+    await flushPromises()
+    const fileMenu = document.body.querySelector('.workspace-files__entry-menu')
+    expect(fileMenu?.textContent).toContain('在文件管理器中定位文件')
+    fileMenu.querySelector('button').click()
+    await flushPromises()
+    expect(api.revealWorkspacePath).toHaveBeenLastCalledWith('agent-a', 'a.md')
+
+    await wrapper.find('.workspace-files__list').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    document.body.querySelector('.workspace-files__entry-menu button').click()
+    await flushPromises()
+    expect(api.revealWorkspacePath).toHaveBeenLastCalledWith('agent-a', '')
   })
 
   it('keeps large CSV table preview capped at 500 rows and exposes remaining source text', async () => {
@@ -193,9 +282,10 @@ describe('Desktop workspace resource navigation', () => {
     await flushPromises()
     await wrapper.vm.openPath('large.csv')
     expect(wrapper.findAll('.workspace-files__sheet-scroll tbody tr')).toHaveLength(500)
+    expect(wrapper.findAll('.workspace-files__sheet-scroll thead th')).toHaveLength(3)
+    expect(wrapper.find('.workspace-files__row-index').text()).toBe('1')
     expect(wrapper.text()).toContain('切换到源代码可继续分段阅读')
-    await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
-    await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('查看源代码')).trigger('click')
+    await wrapper.findAll('.workspace-files__preview-toggle button').find(button => button.text() === '原始数据').trigger('click')
     expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('row500')
   })
 

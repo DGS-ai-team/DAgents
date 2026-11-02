@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import agentIcon from '@shared-icons/desktop/agent.svg?url'
 import warningIcon from '@shared-icons/dagents/warning.svg?url'
-import syncIcon from '@shared-icons/dagents/sync.svg?url'
+import loadingIcon from '@shared-icons/desktop/loading.svg?url'
 import errorIcon from '@shared-icons/desktop/error.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
@@ -37,7 +37,7 @@ const draft = computed(() => String(props.modelValue || ''))
 const statusCopy = computed(() => ({
   offline: '离线', pending: '有待处理的审批', generating: props.cancelling ? '正在停止' : '生成中', idle: '空闲',
 }[props.status]))
-const statusIcon = computed(() => ({ offline: errorIcon, pending: warningIcon, generating: syncIcon, idle: agentIcon }[props.status]))
+const statusIcon = computed(() => ({ offline: errorIcon, pending: warningIcon, generating: loadingIcon, idle: agentIcon }[props.status]))
 const statusLabel = computed(() => `${props.agentName || '当前智能体'}：${statusCopy.value}`)
 const iconStyle = icon => ({ maskImage: `url("${icon}")`, WebkitMaskImage: `url("${icon}")` })
 const showStop = computed(() => props.status === 'generating' || props.canStop)

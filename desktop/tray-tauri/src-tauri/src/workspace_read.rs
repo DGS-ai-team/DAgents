@@ -292,6 +292,46 @@ pub fn open_workspace_file(root: &Path, raw_path: &str) -> Result<(File, PathBuf
     Ok((file, canonical_root))
 }
 
+/// Resolve an authorized workspace directory for opening it in the native
+/// file manager. Empty paths refer to the already-authorized workspace root.
+pub fn resolve_workspace_directory(root: &Path, raw_path: &str) -> Result<PathBuf, String> {
+    let canonical_root = fs::canonicalize(root).map_err(|e| format!("工作区不可用: {e}"))?;
+    if !same_authorized_root(root, &canonical_root) {
+        return Err("Node 授权的工作区根目录已改变".into());
+    }
+    if raw_path.is_empty() {
+        return Ok(canonical_root);
+    }
+
+    let relative = validate_relative_path(raw_path)?;
+    reject_reparse_components(&canonical_root, &relative)?;
+    let target = canonical_root.join(relative);
+    let metadata = fs::symlink_metadata(&target).map_err(|e| format!("无法访问工作区目录: {e}"))?;
+    if is_reparse_point(&metadata) {
+        return Err("工作区符号链接不可读取".into());
+    }
+    if !metadata.is_dir() {
+        return Err("工作区路径不是目录".into());
+    }
+    let resolved = fs::canonicalize(&target).map_err(|e| format!("无法解析工作区目录: {e}"))?;
+    if !path_is_within_root(&resolved, &canonical_root) {
+        return Err("工作区目录指向授权根目录之外".into());
+    }
+    Ok(resolved)
+}
+
+#[cfg(windows)]
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    let path = normalize_windows_final_path(path.to_string_lossy().into_owned());
+    let root = normalize_windows_final_path(root.to_string_lossy().into_owned());
+    path_is_within_windows(&path, &root)
+}
+
+#[cfg(not(windows))]
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+}
+
 /// Validate the Agent-authorized root and a safe workspace file path while
 /// allowing the file or any later path component to be missing. Every
 /// existing ancestor is still checked for reparse points. This supports
@@ -651,6 +691,23 @@ mod tests {
                 .status,
             400
         );
+    }
+
+    #[test]
+    fn resolves_only_authorized_workspace_directories_for_native_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        fs::create_dir(dir.path().join("reports")).unwrap();
+        fs::write(dir.path().join("note.txt"), b"content").unwrap();
+
+        assert_eq!(resolve_workspace_directory(&root, "").unwrap(), root);
+        assert_eq!(
+            resolve_workspace_directory(&root, "reports").unwrap(),
+            fs::canonicalize(dir.path().join("reports")).unwrap()
+        );
+        assert!(resolve_workspace_directory(&root, "note.txt").is_err());
+        assert!(resolve_workspace_directory(&root, "../outside").is_err());
+        assert!(resolve_workspace_directory(&root, ".dagents").is_err());
     }
 
     #[cfg(windows)]

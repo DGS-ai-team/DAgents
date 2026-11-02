@@ -61,7 +61,7 @@ export async function convertDocxToHtml(bytes) {
   const converter = mammoth.images.imgElement(image => image.read('base64').then(base64 => ({
     src: `data:${image.contentType};base64,${base64}`,
   })))
-  const input = typeof window === 'undefined' && typeof Buffer !== 'undefined'
+  const input = globalThis.process?.versions?.node && typeof Buffer !== 'undefined'
     ? { buffer: Buffer.from(bytes) }
     : { arrayBuffer: toArrayBuffer(bytes) }
   const result = await mammoth.convertToHtml(input, { convertImage: converter })

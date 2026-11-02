@@ -5,7 +5,7 @@ import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import DOMPurify from 'dompurify'
 import { validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
-import { cancelWorkspaceWrite, createWorkspaceFile, listWorkspace, newWorkspaceWriteRequestId, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspaceFile, saveWorkspaceFile, saveWorkspaceFileAs } from '../workspace-files-api.js'
+import { cancelWorkspaceWrite, createWorkspaceFile, listWorkspace, newWorkspaceWriteRequestId, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspacePath, saveWorkspaceFile, saveWorkspaceFileAs } from '../workspace-files-api.js'
 import { createWorkspaceCsvPreviewParser, decodeWorkspaceText, deserializeWorkspaceDraft, encodeWorkspaceText, isWorkspaceRequestCurrent, isWorkspaceWriteRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits, workspaceTextFormat, workspaceWriteProgressLabel } from '../workspace-files-state.js'
 import { textRangeAnchor } from '../workspace-references.js'
 import { renderWorkspaceMarkdown } from '../utils/workspaceMarkdown.js'
@@ -39,6 +39,8 @@ const activeWriteRequest = ref('')
 const textFormat = ref({ hasBom: false, newline: '\n' })
 const toolbarMenu = ref(null)
 const dockRestoreButton = ref(null)
+const entryMenu = ref(null)
+const entryMenuElement = ref(null)
 const previewUrl = ref('')
 const svgPreviewUrl = ref('')
 const previewKind = ref('')
@@ -92,6 +94,13 @@ let textChunkRevision = ''
 let csvPreviewParser = null
 const filename = computed(() => selectedPath.value.split('/').filter(Boolean).at(-1) || '')
 const selectedEntry = computed(() => entries.value.find(entry => entry.path === selectedPath.value) || null)
+const sortedEntries = computed(() => [...entries.value].sort((left, right) => {
+  const directoryOrder = Number(Boolean(right.is_dir)) - Number(Boolean(left.is_dir))
+  if (directoryOrder) return directoryOrder
+  return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+    || left.name.localeCompare(right.name)
+    || left.path.localeCompare(right.path)
+}))
 const retainedDraftForCurrent = computed(() => {
   const draft = retainedDraft.value
   return draft && draft.agentId === props.agentId && draft.scope === props.workspaceScope && draft.path === selectedPath.value ? draft : null
@@ -100,11 +109,13 @@ const hasRetainedDraft = computed(() => Boolean(retainedDraftForCurrent.value))
 const canRetrySelectedText = computed(() => Boolean(selectedEntry.value) && selectedEntry.value.size > workspacePreviewLimits.bytes && isSegmentableText(selectedEntry.value.name))
 const canEditText = computed(() => Boolean(selectedPath.value) && !chunkedText.value && ['text/plain', 'text/html', 'application/json', 'application/xml', 'application/javascript'].includes(fileContentType.value) && !['pdf', 'docx', 'xlsx', 'image', 'unsupported', 'unsupported-invalid', 'unsupported-legacy-office'].includes(previewKind.value))
 const canTogglePreview = computed(() => (canEditText.value || chunkedText.value || previewKind.value === 'markdown') && ['markdown', 'code', 'csv', 'html', 'svg'].includes(previewKind.value))
+const sourceModeLabel = computed(() => previewKind.value === 'markdown' ? '源内容' : previewKind.value === 'csv' ? '原始数据' : '源代码')
 const hasNextTextChunk = computed(() => chunkedText.value && textChunkRange.value.end < textChunkRange.value.size)
 const renderedMarkdown = computed(() => renderWorkspaceMarkdown(content.value))
 const canOverwriteDraft = computed(() => dirty.value && canEditText.value && !fileMissing.value && (draftConflict.value || externalUpdate.value))
 const workbookPreview = computed(() => workbookSheets.value.find(sheet => sheet.name === workbookSheetName.value) || null)
 const workbookColumnCount = computed(() => Math.max(0, ...(workbookPreview.value?.rows || []).map(row => row.length)))
+const workbookRowCount = computed(() => workbookPreview.value?.rows.length || 0)
 const workbookGrid = computed(() => {
   if (!workbookPreview.value) return []
   const sheet = workbookPreview.value
@@ -145,7 +156,9 @@ const safeDocumentPreview = computed(() => {
   if (!raw || !['docx', 'html'].includes(previewKind.value)) return ''
   const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
   const contentSecurityPolicy = "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:;"
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;min-height:100%;background:#fff;color:#30383c;font:14px/1.65 system-ui,"Segoe UI",sans-serif}body{box-sizing:border-box;padding:24px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse}td,th{padding:6px 8px;border:1px solid #d9e0e2}</style></head><body>${sanitized}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="no-referrer"><style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f3f5f6;color:#30383c;font:14px/1.7 system-ui,"Segoe UI",sans-serif}body{padding:28px 20px 48px;overflow-wrap:anywhere}main{width:min(100%,980px);min-height:100%;margin:0 auto;padding:42px 54px;background:#fff;border:1px solid #e2e6e8;border-radius:4px;box-shadow:0 4px 18px #26343b0d}h1,h2,h3,h4{color:#26343b;line-height:1.35}h1{margin:0 0 24px;font-size:26px}h2{margin:30px 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e9eb;font-size:20px}h3{margin:24px 0 10px;font-size:16px}p{margin:0 0 12px}ul,ol{padding-left:1.7em}li{padding-left:3px;margin:3px 0}img{max-width:100%;height:auto}table{width:100%;max-width:100%;margin:18px 0;border-collapse:collapse;font-size:13px}td,th{padding:8px 10px;border:1px solid #dfe4e6;text-align:left;vertical-align:top}th{background:#f2f5f6;color:#34434a;font-weight:600}tr:nth-child(even) td{background:#fafbfb}blockquote{margin:16px 0;padding:8px 16px;border-left:3px solid #9eb0b8;background:#f6f8f8;color:#59666c}hr{border:0;border-top:1px solid #e5e9eb;margin:24px 0}
+  </style></head><body><main>${sanitized}</main></body></html>`
 })
 const breadcrumbs = computed(() => currentPath.value ? currentPath.value.split('/').filter(Boolean) : [])
 const noticeDetails = computed(() => [
@@ -197,7 +210,7 @@ function resetChunkedTextState() {
   textChunkRevision = ''
   csvPreviewParser = null
 }
-function defaultPreviewMode(kind) { return ['code', 'csv', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
+function defaultPreviewMode(kind) { return ['code', 'csv', 'docx', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
 function xlsxColumnLabel(index) {
   let value = index
   let label = ''
@@ -543,7 +556,7 @@ function installFileResult(result, snapshot, { keepMode = false, chunkState = nu
   } else resetChunkedTextState()
   applyFilePreview(snapshot, { keepMode })
 }
-function togglePreviewMode() { if (canTogglePreview.value) previewMode.value = previewMode.value === 'preview' ? 'source' : 'preview' }
+function setPreviewMode(mode) { if (canTogglePreview.value && ['preview', 'source'].includes(mode)) previewMode.value = mode }
 function saveDraft() {
   if (!draftOwnerPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
   const key = workspaceDraftKey(draftOwnerId.value, draftOwnerPath.value, draftOwnerScope.value)
@@ -825,11 +838,48 @@ async function revealSelectedFile() {
   actionStatus.value = '正在文件管理器中定位…'
   actionError.value = ''
   try {
-    await revealWorkspaceFile(owner.agentId, owner.path)
+    await revealWorkspacePath(owner.agentId, owner.path)
     if (resourceActionOwnerCurrent(owner)) actionStatus.value = '已在文件管理器中定位'
   } catch (e) {
     if (resourceActionOwnerCurrent(owner)) actionError.value = String(e.message || e)
   } finally { if (resourceActionOwnerCurrent(owner)) resourceActionBusy.value = false }
+}
+function openEntryMenu(event, entry = null) {
+  event.preventDefault()
+  event.stopPropagation()
+  closeToolbarMenu()
+  entryMenu.value = {
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - 260)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 76)),
+    entry: entry ? { path: entry.path, name: entry.name, is_dir: Boolean(entry.is_dir) } : null,
+    trigger: event.currentTarget,
+  }
+  void nextTick(() => entryMenuElement.value?.querySelector('button')?.focus())
+}
+function closeEntryMenu(restoreFocus = false) {
+  const trigger = entryMenu.value?.trigger
+  entryMenu.value = null
+  if (restoreFocus) void nextTick(() => trigger?.focus?.())
+}
+async function revealContextPath() {
+  const menu = entryMenu.value
+  if (!menu || resourceActionBusy.value || !props.agentId) return
+  const path = menu.entry?.path ?? currentPath.value
+  const owner = { agentId: props.agentId, scope: props.workspaceScope, generation: props.requestGeneration }
+  const isOwnerCurrent = () => !disposed && owner.agentId === props.agentId
+    && owner.scope === props.workspaceScope && owner.generation === props.requestGeneration
+  closeEntryMenu()
+  resourceActionBusy.value = true
+  actionStatus.value = '正在文件管理器中打开工作区路径…'
+  actionError.value = ''
+  try {
+    await revealWorkspacePath(owner.agentId, path)
+    if (isOwnerCurrent()) actionStatus.value = menu.entry?.is_dir ? '已在文件管理器中打开目录' : menu.entry ? '已在文件管理器中定位文件' : '已在文件管理器中打开工作区路径'
+  } catch (e) {
+    if (isOwnerCurrent()) actionError.value = String(e.message || e)
+  } finally {
+    if (isOwnerCurrent()) resourceActionBusy.value = false
+  }
 }
 function updateContent(value) {
   actionStatus.value = ''
@@ -1180,9 +1230,11 @@ function runToolbarAction(action) {
 function onToolbarPointerDown(event) {
   if (toolbarMenu.value && !toolbarMenu.value.contains(event.target)) closeToolbarMenu()
   if (referenceMenu.value && !referenceMenuElement.value?.contains(event.target)) referenceMenu.value = null
+  if (entryMenu.value && !entryMenuElement.value?.contains(event.target)) closeEntryMenu()
 }
 function onToolbarKeydown(event) {
   if (event.key !== 'Escape') return
+  if (entryMenu.value) { closeEntryMenu(true); return }
   if (referenceMenu.value) { referenceMenu.value = null; return }
   if (toolbarMenu.value?.open) {
     closeToolbarMenu()
@@ -1287,8 +1339,12 @@ onUnmounted(() => {
       <span v-if="previewKind === 'docx' && documentWarnings.length && !documentPreviewError" class="workspace-files__format-warning" tabindex="0" role="status" aria-label="Word 预览格式提示" :title="documentWarnings.join('\n')"><UiIcon name="alert" :size="15" /></span>
       <span v-if="noticeSummary" class="workspace-files__notice" tabindex="0" role="status" aria-live="polite" :aria-label="noticeSummary" aria-describedby="workspace-files-notice-detail"><UiIcon name="alert" :size="16" /><span class="workspace-files__sr-only">{{ noticeSummary }}</span><span id="workspace-files-notice-detail" class="workspace-files__notice-detail" role="tooltip"><span v-for="(detail,index) in noticeDetails" :key="index">{{ detail }}</span></span></span>
       <div class="workspace-files__toolbar-actions">
-      <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
-      <details ref="toolbarMenu" class="workspace-files__actions-menu">
+        <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
+        <div v-if="canTogglePreview" class="workspace-files__preview-toggle" role="group" aria-label="资源显示模式">
+          <button type="button" :aria-pressed="previewMode === 'preview'" :class="{ 'is-active': previewMode === 'preview' }" @click="setPreviewMode('preview')">预览</button>
+          <button type="button" :aria-pressed="previewMode === 'source'" :class="{ 'is-active': previewMode === 'source' }" @click="setPreviewMode('source')">{{ sourceModeLabel }}</button>
+        </div>
+        <details ref="toolbarMenu" class="workspace-files__actions-menu">
         <summary class="desktop-icon-button" title="更多文件操作" aria-label="更多文件操作"><UiIcon name="more-horizontal" :size="16" /></summary>
         <div class="workspace-files__actions-popover" aria-label="更多文件操作">
           <button type="button" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
@@ -1296,7 +1352,6 @@ onUnmounted(() => {
           <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(saveSelectedAs)"><UiIcon name="arrow-down" :size="15" /><span>另存为</span></button>
           <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(revealSelectedFile)"><UiIcon name="file" :size="15" /><span>在文件管理器中定位</span></button>
           <button type="button" :disabled="!fileRefs[selectedPath]" @click="runToolbarAction(attachSelectedFile)"><UiIcon name="paperclip" :size="15" /><span>添加到对话</span></button>
-          <button v-if="canTogglePreview" type="button" @click="runToolbarAction(togglePreviewMode)"><UiIcon :name="previewMode === 'preview' ? 'code-2' : 'image'" :size="15" /><span>{{ previewMode === 'preview' ? '查看源代码' : '查看预览' }}</span></button>
         </div>
       </details>
       <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
@@ -1304,8 +1359,8 @@ onUnmounted(() => {
       </div>
     </header>
     <div class="workspace-files__body">
-      <nav class="workspace-files__list" aria-label="文件列表">
-        <button v-for="entry in entries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" :size="16" /><span>{{ entry.name }}</span></button>
+      <nav class="workspace-files__list" aria-label="文件列表" @contextmenu.prevent="openEntryMenu($event)">
+        <button v-for="entry in sortedEntries" :key="entry.path" type="button" :class="{ selected: selectedPath === entry.path }" :title="entry.path" @click="openEntry(entry)" @contextmenu.stop.prevent="openEntryMenu($event, entry)"><span v-if="entry.is_dir" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" class="workspace-files__file-icon" :size="16" /><span>{{ entry.name }}</span></button>
       </nav>
       <main class="workspace-files__editor" @contextmenu="openReferenceMenu">
         <div v-if="dirty" class="workspace-files__draft-bar" :class="{ 'is-conflict': draftConflict || externalUpdate || fileMissing }" role="status" aria-live="polite">
@@ -1335,18 +1390,18 @@ onUnmounted(() => {
             <div v-else-if="previewKind === 'svg' && previewMode === 'preview'" class="workspace-files__image-stage"><div class="workspace-files__image-target" @pointerdown="startImageSelection" @pointermove="moveImageSelection" @pointerup="stopImageSelection" @pointercancel="stopImageSelection"><img class="workspace-files__image" :src="svgPreviewUrl" :alt="filename" draggable="false"><div v-if="imageSelection" class="workspace-files__image-selection" :style="imageSelectionStyle()"></div></div></div>
             <section v-else-if="previewKind === 'xlsx'" class="workspace-files__sheet-preview" :aria-label="`${filename} Excel 预览`">
               <div v-if="workbookSheets.length" class="workspace-files__sheet-toolbar">
-                <select v-model="workbookSheetName" aria-label="选择工作表"><option v-for="sheet in workbookSheets" :key="sheet.name" :value="sheet.name">{{ sheet.name }}</option></select>
-                <span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列</span>
+                <div class="workspace-files__sheet-meta"><span class="workspace-files__sheet-name">工作表</span><select v-model="workbookSheetName" aria-label="选择工作表"><option v-for="sheet in workbookSheets" :key="sheet.name" :value="sheet.name">{{ sheet.name }}</option></select></div>
+                <span class="workspace-files__sheet-count">{{ workbookRowCount }} 行 <i>·</i> {{ workbookColumnCount }} 列<span v-if="workbookPreview?.truncated"> <i>·</i> 预览上限 {{ workspacePreviewLimits.rows }} × {{ workspacePreviewLimits.columns }}</span></span>
               </div>
-              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="index in workbookColumnCount" :key="index">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><template v-for="cell in row" :key="cell.address"><td v-if="!cell.covered" :rowspan="cell.rowspan" :colspan="cell.colspan" :class="{ 'is-selected': cell.selected }" :data-cell-address="cell.address" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></template></tr></tbody></table></div>
+              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th class="workspace-files__sheet-corner" aria-label="行号和列号"></th><th v-for="index in workbookColumnCount" :key="index" scope="col">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><th class="workspace-files__row-index" scope="row">{{ rowIndex + 1 }}</th><template v-for="cell in row" :key="cell.address"><td v-if="!cell.covered" :rowspan="cell.rowspan" :colspan="cell.colspan" :class="{ 'is-selected': cell.selected }" :data-cell-address="cell.address" :title="`${cell.address}${cell.value ? ` · ${cell.value}` : ''}`" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></template></tr></tbody></table></div>
               <div v-else class="workspace-files__empty">{{ documentPreviewError || '此工作簿没有可显示的数据。' }}</div>
             </section>
             <section v-else-if="previewKind === 'csv' && previewMode === 'preview'" class="workspace-files__sheet-preview" :aria-label="`${filename} CSV 预览`">
-              <div class="workspace-files__sheet-toolbar"><span>CSV 表格预览</span><span v-if="workbookPreview?.truncated">预览上限：{{ workspacePreviewLimits.rows }} 行、{{ workspacePreviewLimits.columns }} 列<span v-if="chunkedText">；切换到源代码可继续分段阅读</span></span></div>
-              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th v-for="index in workbookColumnCount" :key="index">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><td v-for="cell in row" :key="cell.address" :class="{ 'is-selected': cell.selected }" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></tr></tbody></table></div>
+              <div class="workspace-files__sheet-toolbar"><span class="workspace-files__sheet-name">CSV 数据</span><span class="workspace-files__sheet-count">{{ workbookRowCount }} 行 <i>·</i> {{ workbookColumnCount }} 列<span v-if="workbookPreview?.truncated"> <i>·</i> 预览上限 {{ workspacePreviewLimits.rows }} × {{ workspacePreviewLimits.columns }}<span v-if="chunkedText">；切换到源代码可继续分段阅读</span></span></span></div>
+              <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th class="workspace-files__sheet-corner" aria-label="行号和列号"></th><th v-for="index in workbookColumnCount" :key="index" scope="col">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><th class="workspace-files__row-index" scope="row">{{ rowIndex + 1 }}</th><td v-for="cell in row" :key="cell.address" :class="{ 'is-selected': cell.selected }" :data-cell-address="cell.address" :title="`${cell.address}${cell.value ? ` · ${cell.value}` : ''}`" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></tr></tbody></table></div>
               <div v-else class="workspace-files__empty">CSV 文件没有可显示的数据。</div>
             </section>
-            <div v-else-if="previewKind === 'markdown' && previewMode === 'preview'" class="workspace-files__markdown-preview" v-html="renderedMarkdown"></div>
+            <div v-else-if="previewKind === 'markdown' && previewMode === 'preview'" class="workspace-files__markdown-preview"><article class="workspace-files__markdown-document" v-html="renderedMarkdown"></article></div>
             <div v-else-if="chunkedText" class="workspace-files__chunked-text"><pre>{{ content }}</pre></div>
             <div v-else-if="previewKind === 'code' && previewMode === 'preview'" class="workspace-files__code-preview" @mouseup="captureCodeSelection"><pre><code class="hljs" v-html="highlightedContent"></code></pre></div>
             <textarea v-else-if="canEditText" ref="editorRef" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" @select="captureTextSelection" />
@@ -1362,6 +1417,12 @@ onUnmounted(() => {
         </div>
       </main>
     </div>
+    <Teleport to="body">
+      <div v-if="entryMenu" ref="entryMenuElement" class="workspace-files__entry-menu" role="menu" :style="{ left: `${entryMenu.x}px`, top: `${entryMenu.y}px` }" @pointerdown.stop @contextmenu.prevent>
+        <div class="workspace-files__entry-menu-context"><strong>{{ entryMenu.entry?.name || (currentPath || '工作区根目录') }}</strong><span>{{ entryMenu.entry?.path || currentPath || '工作区' }}</span></div>
+        <button type="button" role="menuitem" :disabled="resourceActionBusy" @click="revealContextPath"><span v-if="entryMenu.entry?.is_dir || !entryMenu.entry" class="workspace-files__folder-icon" :style="folderMaskStyle" aria-hidden="true"></span><UiIcon v-else name="file" class="workspace-files__file-icon" :size="15" /><span>{{ entryMenu.entry ? entryMenu.entry.is_dir ? '在文件管理器中打开文件夹' : '在文件管理器中定位文件' : currentPath ? '在文件管理器中打开当前目录' : '在文件管理器中打开工作区' }}</span></button>
+      </div>
+    </Teleport>
     <Teleport to="body">
       <div v-if="referenceMenu" ref="referenceMenuElement" class="workspace-files__reference-menu" role="menu" :style="{ left: `${referenceMenu.x}px`, top: `${referenceMenu.y}px` }" @pointerdown.stop @contextmenu.prevent>
         <div class="workspace-files__reference-menu-context"><strong>{{ referenceMenu.anchor.label }}</strong><span v-if="referenceMenu.anchor.quote">{{ referenceMenu.anchor.quote }}</span><span v-else>{{ selectedPath }}</span></div>
@@ -1417,34 +1478,64 @@ onUnmounted(() => {
 .workspace-files__annotation-popover p{margin:6px 1px 0;color:#727d81;font-size:10px;line-height:1.4}
 .workspace-files{display:flex;flex:1;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;background:#fff;color:#30383c}.workspace-files__toolbar{display:flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border-bottom:1px solid #e1e4e6}.workspace-files__toolbar button{display:grid;place-items:center;min-width:30px;height:30px;padding:0 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#4c5559;font-size:11px;cursor:pointer}.workspace-files__toolbar button:hover:not(:disabled){background:#eceeef}.workspace-files__toolbar button:disabled{opacity:.45}.workspace-files__breadcrumbs{display:flex;flex:1;align-items:center;gap:6px;min-width:0;overflow:hidden;color:#777f83;font-size:12px}.workspace-files__breadcrumbs button{overflow:hidden;max-width:160px;padding:3px 1px;border:0;background:transparent;color:#566065;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.workspace-files__breadcrumbs b{overflow:hidden;color:#30383c;text-overflow:ellipsis;white-space:nowrap}.workspace-files__body{display:flex;flex:1;min-height:0}.workspace-files__list{flex:0 0 245px;min-width:150px;overflow:auto;scroll-padding-bottom:82px;padding:8px;border-right:1px solid #d4dce0;background:#fafbfc}.workspace-files__list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#4a5357;text-align:left;font-size:12px;cursor:pointer}.workspace-files__list button.selected,.workspace-files__list button:hover{background:#eceeef}.workspace-files__list button span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-files__list button .workspace-files__folder-icon{flex:none;width:16px;height:16px;background:#586166;mask-repeat:no-repeat;mask-position:center;mask-size:contain}.workspace-files__list button small{color:#777f83;font-size:10px}.workspace-files__editor{display:flex;background:#fff;flex:1;min-width:0;min-height:0;align-items:stretch;justify-content:stretch}.workspace-files__editor textarea{flex:1;min-width:0;min-height:0;scroll-padding-bottom:82px;padding:16px;border:0;outline:0;background:#fff;color:#30383c;font:12px/1.6 Consolas,monospace;resize:none}.workspace-files__image{max-width:100%;max-height:100%;margin:auto;object-fit:contain}.workspace-files__empty{display:grid;flex:1;place-items:center;padding:24px;color:#777f83;font-size:12px;text-align:center}.workspace-files__hidden{display:none}.workspace-files__notice{position:relative;display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;border-radius:5px;color:#a53c38;cursor:help}.workspace-files__notice:hover,.workspace-files__notice:focus-visible{background:#fff1ef;outline:2px solid #b74a43;outline-offset:1px}.workspace-files__notice-detail{position:absolute;z-index:50;top:calc(100% + 5px);right:0;display:none;min-width:220px;max-width:min(420px,70vw);padding:9px 11px;border:1px solid #e2c7c8;border-radius:6px;background:#fff7f6;box-shadow:0 5px 16px #26374024;color:#7f302d;font-size:11px;line-height:1.45;white-space:normal}.workspace-files__notice-detail>span{display:block}.workspace-files__notice-detail>span+span{margin-top:5px}.workspace-files__notice:hover .workspace-files__notice-detail,.workspace-files__notice:focus .workspace-files__notice-detail{display:block}.workspace-files__sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .workspace-files__toolbar-actions{position:relative;display:flex;flex:none;align-items:center;gap:4px;margin-left:auto}.workspace-files__actions-menu{position:relative;flex:none}.workspace-files__actions-menu>summary{display:grid;place-items:center;list-style:none;width:30px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;color:#4c5559;cursor:pointer}.workspace-files__actions-menu>summary::-webkit-details-marker{display:none}.workspace-files__actions-menu>summary:hover,.workspace-files__actions-menu[open]>summary{background:#eceeef}.workspace-files__actions-popover{position:absolute;z-index:40;top:calc(100% + 5px);right:0;display:grid;min-width:190px;padding:4px;border:1px solid #d9e0e2;border-radius:7px;background:#fff;box-shadow:0 8px 24px #26374020}.workspace-files__actions-popover button{display:flex!important;align-items:center;justify-content:flex-start;gap:9px;width:100%;min-width:0!important;height:34px;padding:0 9px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#3d474b!important;text-align:left!important;font:inherit!important;cursor:pointer}.workspace-files__actions-popover button:hover:not(:disabled){background:#f0f2f2!important}.workspace-files__actions-popover button:disabled{color:#9aa3a6!important;cursor:default}.workspace-files__actions-popover button .ui-icon{flex:none}.workspace-files__dock-toggle{position:relative;color:#3f484c}.workspace-files__dock-toggle i{position:absolute;right:3px;top:3px;width:7px;height:7px;border:1px solid #fff;border-radius:50%;background:#7a8589}.workspace-files__dock-toggle i.is-pending{background:#c18526}.workspace-files__dock-toggle i.is-generating{background:#657780}.workspace-files__dock-toggle i.is-offline{background:#b7534c}.workspace-files__dock-toggle:focus-visible,.workspace-files__actions-menu>summary:focus-visible{outline:2px solid #65777f;outline-offset:1px}
+.workspace-files__preview-toggle{display:flex;flex:none;align-items:center;gap:2px;padding:2px;border:1px solid #dfe4e6;border-radius:7px;background:#f3f5f6}
+.workspace-files__preview-toggle button{display:flex!important;align-items:center;justify-content:center;min-width:54px!important;height:25px!important;padding:0 9px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#667277!important;font:inherit!important;font-size:11px!important;cursor:pointer}
+.workspace-files__preview-toggle button.is-active{background:#fff!important;color:#344249!important;box-shadow:0 1px 3px #23323a1c}
+.workspace-files__preview-toggle button:focus-visible{outline:2px solid #718a98;outline-offset:1px}
 .workspace-files__mode-toggle { flex: 0 0 30px; width:30px; min-width:30px; padding:0; }
 .workspace-files__document-frame { display:block; flex:1; width:100%; min-width:0; min-height:0; border:0; background:#fff; }
 .workspace-files__pdf-frame { height:100%; }
-.workspace-files__code-preview { flex:1; min-width:0; min-height:0; overflow:auto; background:#fbfcfc; }
-.workspace-files__code-preview pre { box-sizing:border-box; min-width:max-content; min-height:100%; margin:0; padding:16px 20px; color:#364147; font:12px/1.65 Consolas,Monaco,monospace; tab-size:2; }
+.workspace-files__code-preview { flex:1; min-width:0; min-height:0; overflow:auto; background:#f7f9fa; }
+.workspace-files__code-preview pre { box-sizing:border-box; min-width:max-content; min-height:100%; margin:0; padding:18px 24px; color:#354149; font:12px/1.75 Consolas,Monaco,monospace; tab-size:2; }
 .workspace-files__code-preview code { font:inherit; }
-.workspace-files__markdown-preview { flex:1; min-width:0; min-height:0; overflow:auto; padding:18px 22px; color:var(--text-primary,#30383c); line-height:1.7; overflow-wrap:anywhere; }
-.workspace-files__markdown-preview :deep(pre) { overflow:auto; padding:12px; border-radius:8px; background:var(--surface-secondary,#f4f6f6); }
-.workspace-files__markdown-preview :deep(img) { max-width:100%; }
+.workspace-files__markdown-preview { flex:1; min-width:0; min-height:0; overflow:auto; padding:28px 36px 48px; color:var(--text-primary,#30383c); line-height:1.72; overflow-wrap:anywhere; }
+.workspace-files__markdown-document { width:min(100%,900px); margin:0 auto; }
+.workspace-files__markdown-preview :deep(*) { box-sizing:border-box; }
+.workspace-files__markdown-preview :deep(h1),.workspace-files__markdown-preview :deep(h2),.workspace-files__markdown-preview :deep(h3),.workspace-files__markdown-preview :deep(h4) { color:#2f3b40; line-height:1.35; }
+.workspace-files__markdown-preview :deep(h1) { margin:0 0 22px; padding-bottom:12px; border-bottom:1px solid #e4e9eb; font-size:25px; }
+.workspace-files__markdown-preview :deep(h2) { margin:30px 0 12px; padding-bottom:7px; border-bottom:1px solid #e8ecee; font-size:19px; }
+.workspace-files__markdown-preview :deep(h3) { margin:24px 0 10px; font-size:16px; }
+.workspace-files__markdown-preview :deep(p),.workspace-files__markdown-preview :deep(ul),.workspace-files__markdown-preview :deep(ol) { margin:0 0 14px; }
+.workspace-files__markdown-preview :deep(ul),.workspace-files__markdown-preview :deep(ol) { padding-left:1.65em; }
+.workspace-files__markdown-preview :deep(li) { margin:4px 0; padding-left:3px; }
+.workspace-files__markdown-preview :deep(blockquote) { margin:16px 0; padding:8px 16px; border-left:3px solid #9aabb3; border-radius:0 6px 6px 0; background:#f4f7f8; color:#58676e; }
+.workspace-files__markdown-preview :deep(code) { padding:2px 5px; border-radius:4px; background:#edf1f3; color:#40525b; font:0.92em Consolas,Monaco,monospace; }
+.workspace-files__markdown-preview :deep(pre) { overflow:auto; padding:14px 16px; border:1px solid #e3e8ea; border-radius:8px; background:#f6f8f9; }
+.workspace-files__markdown-preview :deep(pre code) { padding:0; background:transparent; }
+.workspace-files__markdown-preview :deep(a) { color:#416b85; text-decoration:underline; text-decoration-color:#9db2bf; text-underline-offset:2px; }
+.workspace-files__markdown-preview :deep(img) { max-width:100%; height:auto; }
+.workspace-files__markdown-preview :deep(table) { width:100%; margin:16px 0 22px; border-collapse:collapse; font-size:12px; }
+.workspace-files__markdown-preview :deep(th),.workspace-files__markdown-preview :deep(td) { padding:8px 10px; border:1px solid #dfe5e7; text-align:left; vertical-align:top; }
+.workspace-files__markdown-preview :deep(th) { background:#f1f5f6; color:#35444b; font-weight:600; }
+.workspace-files__markdown-preview :deep(hr) { margin:24px 0; border:0; border-top:1px solid #e4e9eb; }
 .workspace-files__chunked-text { flex:1; min-width:0; min-height:0; overflow:auto; }
 .workspace-files__chunked-text pre { box-sizing:border-box; min-width:max-content; min-height:100%; margin:0; padding:16px 20px; white-space:pre-wrap; overflow-wrap:anywhere; color:#364147; font:12px/1.65 Consolas,Monaco,monospace; }
 .workspace-files__chunk-toolbar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-top:1px solid var(--border-subtle,#e4e8e9); color:var(--text-secondary,#6a7478); font-size:12px; }
 .workspace-files__chunk-toolbar button { flex:none; }
 .workspace-files__action-status { flex:none; padding:7px 12px; border-bottom:1px solid var(--border-subtle,#e4e8e9); background:var(--surface-secondary,#f6f8f8); color:var(--text-secondary,#606b70); font-size:12px; }
-.workspace-files__code-preview .hljs-comment,.workspace-files__code-preview .hljs-quote { color:#7c8588; font-style:italic; }
-.workspace-files__code-preview .hljs-keyword,.workspace-files__code-preview .hljs-selector-tag,.workspace-files__code-preview .hljs-literal,.workspace-files__code-preview .hljs-section { color:#805a94; }
-.workspace-files__code-preview .hljs-string,.workspace-files__code-preview .hljs-attr,.workspace-files__code-preview .hljs-template-tag,.workspace-files__code-preview .hljs-template-variable { color:#367660; }
-.workspace-files__code-preview .hljs-number,.workspace-files__code-preview .hljs-variable,.workspace-files__code-preview .hljs-symbol,.workspace-files__code-preview .hljs-bullet { color:#93632f; }
-.workspace-files__code-preview .hljs-title,.workspace-files__code-preview .hljs-title.function_,.workspace-files__code-preview .hljs-built_in { color:#315e7a; }
-.workspace-files__code-preview .hljs-type,.workspace-files__code-preview .hljs-params { color:#9a5146; }
+.workspace-files__code-preview :deep(.hljs-comment),.workspace-files__code-preview :deep(.hljs-quote) { color:#7c8588; font-style:italic; }
+.workspace-files__code-preview :deep(.hljs-keyword),.workspace-files__code-preview :deep(.hljs-selector-tag),.workspace-files__code-preview :deep(.hljs-literal),.workspace-files__code-preview :deep(.hljs-section) { color:#805a94; }
+.workspace-files__code-preview :deep(.hljs-string),.workspace-files__code-preview :deep(.hljs-attr),.workspace-files__code-preview :deep(.hljs-template-tag),.workspace-files__code-preview :deep(.hljs-template-variable) { color:#367660; }
+.workspace-files__code-preview :deep(.hljs-number),.workspace-files__code-preview :deep(.hljs-variable),.workspace-files__code-preview :deep(.hljs-symbol),.workspace-files__code-preview :deep(.hljs-bullet) { color:#93632f; }
+.workspace-files__code-preview :deep(.hljs-title),.workspace-files__code-preview :deep(.hljs-title.function_),.workspace-files__code-preview :deep(.hljs-built_in) { color:#315e7a; }
+.workspace-files__code-preview :deep(.hljs-type),.workspace-files__code-preview :deep(.hljs-params) { color:#9a5146; }
 .workspace-files__sheet-preview { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; overflow:hidden; }
-.workspace-files__sheet-toolbar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:0 12px; border-bottom:1px solid #e4e8e9; color:#788185; font-size:11px; }
-.workspace-files__sheet-toolbar select { max-width:min(260px,60%); padding:5px 24px 5px 8px; border:1px solid #d9e0e2; border-radius:5px; background:#fff; color:#30383c; }
-.workspace-files__sheet-scroll { flex:1; min-height:0; overflow:auto; }
-.workspace-files__sheet-scroll table { border-collapse:separate; border-spacing:0; color:#3c4549; font-size:12px; }
-.workspace-files__sheet-scroll th,.workspace-files__sheet-scroll td { min-width:90px; max-width:360px; padding:6px 9px; border-right:1px solid #e6e9ea; border-bottom:1px solid #e6e9ea; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
-.workspace-files__sheet-scroll th { position:sticky; top:0; z-index:1; background:#f5f7f7; color:#606a6e; font-weight:600; }
-.workspace-files__sheet-scroll td { white-space:pre-wrap; }
+.workspace-files__sheet-toolbar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; min-height:44px; padding:0 14px; border-bottom:1px solid #e4e9eb; background:#fbfcfc; color:#748087; font-size:11px; }
+.workspace-files__sheet-meta { display:flex; align-items:center; gap:8px; min-width:0; }
+.workspace-files__sheet-name { color:#435158; font-size:12px; font-weight:600; }
+.workspace-files__sheet-toolbar select { max-width:min(260px,60%); min-width:100px; padding:5px 26px 5px 9px; border:1px solid #d9e0e2; border-radius:6px; outline:0; background:#fff; color:#30383c; font:inherit; }
+.workspace-files__sheet-toolbar select:focus-visible { border-color:#879aa3; box-shadow:0 0 0 2px #879aa31c; }
+.workspace-files__sheet-count { flex:none; padding:5px 8px; border:1px solid #e6eaec; border-radius:6px; background:#fff; color:#68757b; font-variant-numeric:tabular-nums; }
+.workspace-files__sheet-count i { padding:0 2px; color:#a0aaae; font-style:normal; }
+.workspace-files__sheet-scroll { flex:1; min-height:0; overflow:auto; background:#fff; }
+.workspace-files__sheet-scroll table { width:max-content; min-width:100%; border-collapse:separate; border-spacing:0; color:#3c4549; font-size:12px; }
+.workspace-files__sheet-scroll th,.workspace-files__sheet-scroll td { min-width:100px; max-width:360px; padding:7px 10px; border-right:1px solid #e8edef; border-bottom:1px solid #e8edef; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+.workspace-files__sheet-scroll th { position:sticky; top:0; z-index:1; background:#f2f5f6; color:#657278; font-size:11px; font-weight:600; text-align:center; }
+.workspace-files__sheet-scroll .workspace-files__sheet-corner { left:0; z-index:3; width:48px; min-width:48px; max-width:48px; background:#edf1f2; }
+.workspace-files__sheet-scroll .workspace-files__row-index { left:0; z-index:2; width:48px; min-width:48px; max-width:48px; padding-right:8px; padding-left:8px; background:#f7f9fa; color:#879398; font-variant-numeric:tabular-nums; font-weight:500; text-align:center; }
+.workspace-files__sheet-scroll tbody tr:hover td { background:#f7fafb; }
+.workspace-files__sheet-scroll td { background:#fff; white-space:pre-wrap; }
+.workspace-files__sheet-scroll td.is-selected,.workspace-files__sheet-preview td.is-selected { position:relative; z-index:1; background:#e6eff3; box-shadow:inset 0 0 0 2px #718f9e; }
 .workspace-files__format-warning { display:grid; flex:0 0 30px; width:30px; height:30px; place-items:center; border-radius:5px; color:#a77d32; cursor:help; }
 .workspace-files__format-warning:hover,.workspace-files__format-warning:focus-visible { background:#fff7e6; outline:2px solid #d5bf8c; outline-offset:1px; }
 .workspace-files__preview-error,.workspace-files__unsupported { align-content:center; gap:10px; }
@@ -1474,6 +1565,19 @@ onUnmounted(() => {
 .workspace-files__create-dialog footer button.is-primary { border-color:#343c40; background:#343c40; color:#fff; }
 .workspace-files__create-dialog footer button.is-primary:hover { background:#242b2f; }
 .workspace-files__create-error { margin:7px 0 0; color:#a13c37; font-size:12px; }
+.workspace-files__list button .workspace-files__folder-icon { background:#5b83a7; }
+.workspace-files__list button .workspace-files__file-icon { flex:none; color:#7c878c; }
+.workspace-files__entry-menu { position:fixed; z-index:1200; box-sizing:border-box; width:260px; padding:4px; border:1px solid #d7dfe2; border-radius:7px; background:#fff; box-shadow:0 8px 24px #26374024; }
+.workspace-files__entry-menu-context { display:grid; gap:2px; padding:7px 9px; border-bottom:1px solid #edf0f1; }
+.workspace-files__entry-menu-context strong,.workspace-files__entry-menu-context span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace-files__entry-menu-context strong { color:#374247; font-size:11px; font-weight:600; }
+.workspace-files__entry-menu-context span { color:#788388; font-size:10px; }
+.workspace-files__entry-menu button { display:flex; align-items:center; gap:8px; width:100%; min-height:34px; margin-top:3px; padding:5px 8px; border:0; border-radius:5px; background:transparent; color:#3f4b50; text-align:left; font:inherit; font-size:11px; cursor:pointer; }
+.workspace-files__entry-menu button:hover:not(:disabled) { background:#eef2f4; }
+.workspace-files__entry-menu button:disabled { color:#9aa3a6; cursor:default; }
+.workspace-files__entry-menu button .ui-icon { flex:none; color:#5b83a7; }
+.workspace-files__entry-menu button .workspace-files__folder-icon { flex:none; width:15px; height:15px; background:#5b83a7; mask-repeat:no-repeat; mask-position:center; mask-size:contain; }
+.workspace-files__entry-menu button:focus-visible { outline:2px solid #6f8797; outline-offset:-2px; }
 @media (max-width: 760px) {
   .workspace-files__draft-bar { align-items:flex-start; flex-direction:column; gap:7px; }
   .workspace-files__draft-actions { align-self:flex-end; }

@@ -50,6 +50,7 @@ func TestSystemPromptsDescribeHarnessAndResourceLinksWithoutGreetingRule(t *test
 		}
 		if !containsAll(prompt,
 			"Desktop 与 Node 位于同一设备", "本机 Node 执行", "SSH/远程终端等工具可在其他主机执行", "Node policy/审批结果",
+			"网页链接优先写成 [页面名称](https://example.com/path)", "不在 URL 或 ]( 之间插入空格、换行", "不要写成 **重点内容 **", "配置键等需要精确复制的字面量使用行内代码",
 			"[报告](dagents://resource/file?path=reports%2Fsummary.md)",
 			"![图片](dagents://resource/image?path=images%2Fplot.png)",
 			"[终端](dagents://resource/terminal?id=local-terminal-5)",

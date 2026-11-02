@@ -289,6 +289,28 @@ describe("buildToolCardModel", () => {
     expect(model.resultFields.some((item) => item.value.includes("secret"))).toBe(false);
   });
 
+  it("localizes skill lifecycle result fields", () => {
+    const model = buildToolCardModel({
+      callEntry: entry("tool_call", { tool_name: "load_skills", arguments: { skill_names: ["writer"] } }),
+      resultEntry: entry("tool_result", {
+        tool_name: "load_skills",
+        content: JSON.stringify({
+          action: "set_loaded_skills",
+          hooks_status: "synchronized",
+          model_context_applied_boundary: "next_model_step",
+          session_state_applied_boundary: "immediate",
+        }),
+      }),
+    });
+
+    expect(model.resultFields).toEqual([
+      { label: "操作", value: "更新已加载技能", kind: "text" },
+      { label: "技能钩子状态", value: "已同步", kind: "text" },
+      { label: "模型上下文生效边界", value: "下一模型步骤生效", kind: "text" },
+      { label: "会话状态生效边界", value: "立即生效", kind: "text" },
+    ]);
+  });
+
   it("does not repeat the call purpose in expanded card input", () => {
     const model = buildToolCardModel({
       callEntry: entry("tool_call", {
