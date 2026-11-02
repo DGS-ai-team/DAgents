@@ -202,6 +202,30 @@ func (m *Manager) View(ctx context.Context, sessionKey, pageID string) (ToolResu
 	return m.call(viewCtx, Request{Op: "view", SessionKey: sessionKey, PageID: strings.TrimSpace(pageID), TimeoutMS: 5000})
 }
 
+// Control runs one explicit Desktop navigation action. It never queues a
+// mutation behind an Agent action: the user can retry after browser_busy.
+func (m *Manager) Control(ctx context.Context, sessionKey, command, pageID, url string) (ToolResult, error) {
+	if !m.Enabled() {
+		return ToolResult{ErrorCode: "browser_disabled", Error: "browser is disabled"}, nil
+	}
+	lock := m.sessionLock(sessionKey)
+	if !lock.TryLock() {
+		return ToolResult{ErrorCode: "browser_busy", Error: "Agent browser is currently in use"}, nil
+	}
+	defer lock.Unlock()
+	controlCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	out, err := m.call(controlCtx, Request{Op: "control", SessionKey: sessionKey, Command: command, PageID: pageID, URL: url, TimeoutMS: 30000})
+	// A navigation can fail after successfully starting the session. Register
+	// that session too, so view and shutdown still find its current page.
+	if out.Detail["started"] == true {
+		m.mu.Lock()
+		m.sessions[sessionKey] = struct{}{}
+		m.mu.Unlock()
+	}
+	return out, err
+}
+
 // Start 启动绑定 session 的本机 Chrome（CDP）。
 func (m *Manager) Start(ctx context.Context, sessionKey string, headed *bool, viewportW, viewportH int) (ToolResult, error) {
 	sessionKey = strings.TrimSpace(sessionKey)

@@ -110,3 +110,31 @@ func testBrowserConfig(enabled bool) config.BrowserConfig {
 		AllowedURLSchemes: []string{"https", "http"},
 	}
 }
+
+func TestManagerControlSharesAgentLockAndTracksStartedSessionAfterNavigationFailure(t *testing.T) {
+	called := false
+	m, err := NewManager(&config.Config{Browser: testBrowserConfig(true)}, &MockDriver{Handler: func(_ context.Context, req Request) (Response, error) {
+		called = true
+		if req.Op != "control" || req.SessionKey != "agent-1" || req.Command != "navigate" || req.URL != "https://example.test" {
+			t.Fatalf("unexpected request: %+v", req)
+		}
+		return Response{ErrorCode: "action_timeout", Detail: map[string]any{"started": true}}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := m.sessionLock("agent-1")
+	lock.Lock()
+	result, _ := m.Control(context.Background(), "agent-1", "navigate", "", "https://example.test")
+	lock.Unlock()
+	if called || result.ErrorCode != "browser_busy" {
+		t.Fatalf("busy control = %+v, called=%v", result, called)
+	}
+	result, _ = m.Control(context.Background(), "agent-1", "navigate", "", "https://example.test")
+	if !called || result.ErrorCode != "action_timeout" {
+		t.Fatalf("control = %+v", result)
+	}
+	if _, ok := m.sessions["agent-1"]; !ok {
+		t.Fatal("started session was not registered")
+	}
+}
