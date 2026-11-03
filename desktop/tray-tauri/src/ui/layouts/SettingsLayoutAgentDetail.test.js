@@ -2,7 +2,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { defineComponent, ref } from "vue";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsLayout from "./SettingsLayout.vue";
 import AgentDetailSettings from "../views/settings/AgentDetailSettings.vue";
 import * as api from "../api/node.js";
@@ -47,13 +47,17 @@ function createSettingsRouter() {
 }
 
 function installLayoutBrowserAPIs() {
-  window.matchMedia ??= () => ({ matches: false, addListener() {}, removeListener() {} });
-  window.requestAnimationFrame ??= (callback) => window.setTimeout(callback, 0);
-  window.cancelAnimationFrame ??= (id) => window.clearTimeout(id);
-  globalThis.ResizeObserver ??= class {
+  vi.stubGlobal("matchMedia", () => ({ matches: false, addListener() {}, removeListener() {} }));
+  vi.stubGlobal("requestAnimationFrame", (callback) => window.setTimeout(callback, 0));
+  vi.stubGlobal("cancelAnimationFrame", (id) => window.clearTimeout(id));
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback) {
+      this.callback = callback;
+    }
+
     observe() {}
     disconnect() {}
-  };
+  });
 }
 
 function mountSettings(router) {
@@ -88,6 +92,10 @@ beforeEach(() => {
   api.patchAgent.mockImplementation(async (id) => agent(id));
   api.putAgentPromptContext.mockResolvedValue({});
   api.reloadAgentRuntime.mockResolvedValue({});
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("settings layout Agent detail routing", () => {
