@@ -122,8 +122,10 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 ## 路由边界与调整结论
 
 - `GET /v1/bootstrap` 与 `GET /v1/node/info` 保留：前者是减少 Desktop WebView 首屏请求的聚合，后者是 Node 信息的独立 DTO。
-- `/v1/settings` 与 `/v1/llm/settings` 都保留：settings 是全量 Node 管理/setup 视图，LLM endpoint 是现有 runtime profile 的轻量操作面；职责虽有字段重叠，但消费者和保存通道不同，当前不合并。
-- Agent、policy、context、workspace、HITL、tools、MCP、Linux channels、Manage Workgroups、feedback、Manage upload 保留为领域 API。Workgroup 路由由当前 Node Workgroup adapter 处理，不是已退役的 Desktop bridge API；Feedback 写入 Node 本地记录并尝试同步 Manage；Manage upload 是 Node 到 Manage 的上传代理。不能因为 Desktop WebView 当下没有调用就移除 Manage、Node 内部工具或 Go/Python client 依赖的操作。
+- `/v1/settings` 保存完整模型配置，包括每份配置自己的 `thinking`、`reasoning_effort` 和可选 `thinking_budget`。`GET /v1/llm/settings` 返回当前默认配置的运行视图，`PATCH` 只接受 `active_profile`；不再提供跨智能体的思考参数覆盖。`GET /v1/llm/capabilities?provider=...&model=...` 返回该模型可用的思考控件、强度选项和预算范围；未知模型不声明支持。
+- Agent、policy、context、workspace、HITL、tools、MCP、Linux channels、Manage Workgroups、feedback 保留为领域 API。Workgroup 路由由当前 Node Workgroup adapter 处理；Feedback 写入 Node 本地记录并尝试同步 Manage。
+- Desktop/Node 扩展包上传链路已退役：`/v1/manage/upload/{skill,externaltool,plugin}` 未注册并返回 404，配套客户端方法和上传代理删除。Manage 自身仓库管理、Node 下载和使用已安装技能/工具的能力保留。
+- 临时岗位授权及 `/v1/agents/{agent_id}/policy/grants*` 已移除；工具和 Shell 的常规允许、审批、禁止策略保留。
 - 移除无当前消费者且可由现有集合接口替代的 `GET /v1/agents/{agent_id}/child-agents/{child_agent_id}`、`GET /v1/mcp/servers/{server_id}/tools`，以及没有产品界面的屏幕流 `GET /v1/agents/{agent_id}/screen/stream`。
 - 移除进程执行审计查询与其新增持久化：`GET /v1/agents/{agent_id}/execution-events`。执行过程仍通过 `/v1/streams` 实时发出；既有 SQLite `execution_events` 表不会被本次版本删除，历史记录保留但不再写入或提供 HTTP 查询。
 - `GET /v1/agents/{agent_id}/timeline` 暂时保留为持久化 turn 事件游标读取，适用于诊断与补偿回放；目前没有 Desktop/Manage 生产调用，后续若统一由 SSE hydrate/重放覆盖，可再移除。
@@ -145,6 +147,7 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `POST` | `/v1/llm/probe-models` | `handleProbeLLMModels` | [setup_api.go#L19](../../node/internal/api/setup_api.go#L19) |
 | `GET` | `/v1/llm/settings` | `handleGetLLMSettings` | [llm_api.go#L16](../../node/internal/api/llm_api.go#L16) |
 | `PATCH` | `/v1/llm/settings` | `handlePatchLLMSettings` | [llm_api.go#L17](../../node/internal/api/llm_api.go#L17) |
+| `GET` | `/v1/llm/capabilities` | `handleGetLLMCapabilities` | [llm_api.go](../../node/internal/api/llm_api.go) |
 | `GET` | `/v1/node/info` | `handleAgentInfo` | [server_routes.go#L7](../../node/internal/api/server_routes.go#L7) |
 | `GET` | `/v1/node/update` | `handleAgentUpdate` | [server_routes.go#L8](../../node/internal/api/server_routes.go#L8) |
 | `GET` | `/v1/node/update/package` | `handleNodeUpdatePackage` | [server_routes.go#L9](../../node/internal/api/server_routes.go#L9) |
@@ -194,9 +197,6 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `GET` | `/v1/agents/{agent_id}/mcp/effective-tools` | `handleGetAgentEffectiveMCPTools` | [mcp_api.go#L44](../../node/internal/api/mcp_api.go#L44) |
 | `GET` | `/v1/agents/{agent_id}/media/{media_id}` | `handleGetAgentMedia` | [media_api.go#L19](../../node/internal/api/media_api.go#L19) |
 | `GET` | `/v1/agents/{agent_id}/policy` | `handleGetAgentPolicy` | [agent_policy_api.go#L33](../../node/internal/api/agent_policy_api.go#L33) |
-| `GET` | `/v1/agents/{agent_id}/policy/grants` | `handleGetAgentPolicyGrants` | [agent_policy_api.go#L36](../../node/internal/api/agent_policy_api.go#L36) |
-| `POST` | `/v1/agents/{agent_id}/policy/grants` | `handlePostAgentPolicyGrant` | [agent_policy_api.go#L37](../../node/internal/api/agent_policy_api.go#L37) |
-| `DELETE` | `/v1/agents/{agent_id}/policy/grants/{grant_id}` | `handleDeleteAgentPolicyGrant` | [agent_policy_api.go#L38](../../node/internal/api/agent_policy_api.go#L38) |
 | `PUT` | `/v1/agents/{agent_id}/policy/shell/{shell_type}` | `handlePutAgentShellPolicy` | [agent_policy_api.go#L35](../../node/internal/api/agent_policy_api.go#L35) |
 | `PUT` | `/v1/agents/{agent_id}/policy/tools` | `handlePutAgentToolPolicy` | [agent_policy_api.go#L34](../../node/internal/api/agent_policy_api.go#L34) |
 | `GET` | `/v1/agents/{agent_id}/prompt-context` | `handleGetAgentPromptContext` | [agent_policy_api.go#L39](../../node/internal/api/agent_policy_api.go#L39) |
@@ -267,7 +267,7 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 
 `GET /v1/mcp/config` 返回可编辑配置视图，其中字面量环境变量和请求头值会替换为 `__DAGENTS_SECRET_REDACTED__`。`PUT` 仅可用该标记保留同一服务、同一键已有的值；若没有对应旧值则拒绝保存。提交新值会轮换密钥，删除键或服务会真正删除旧值。配置视图包含 `enabled` 与 `enabled_tools`，因此 GET 后原样 PUT 会保留服务停用状态及工具允许列表。此处只遮罩 API 编辑视图；本地运行时格式化仍保持原值。
 
-### 文件传输、feedback 与 Manage upload
+### 文件传输与 feedback
 
 | Method | Path | Handler | Source |
 |---|---|---|---|
@@ -276,9 +276,6 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `GET` | `/v1/feedback/target` | `handleFeedbackTarget` | [feedback_api.go#L53](../../node/internal/api/feedback_api.go#L53) |
 | `GET` | `/v1/feedback/{client_feedback_id}` | `handleFeedbackGet` | [feedback_api.go#L55](../../node/internal/api/feedback_api.go#L55) |
 | `POST` | `/v1/feedback/{client_feedback_id}/sync` | `handleFeedbackSync` | [feedback_api.go#L56](../../node/internal/api/feedback_api.go#L56) |
-| `POST` | `/v1/manage/upload/externaltool` | `handleManageUploadExternalTool` | [manage_upload.go#L40](../../node/internal/api/manage_upload.go#L40) |
-| `POST` | `/v1/manage/upload/plugin` | `handleManageUploadPlugin` | [manage_upload.go#L41](../../node/internal/api/manage_upload.go#L41) |
-| `POST` | `/v1/manage/upload/skill` | `handleManageUploadSkill` | [manage_upload.go#L39](../../node/internal/api/manage_upload.go#L39) |
 | `GET` | `/v1/transfers` | `handleLinuxTransfers` | [linux_transfer_api.go#L11](../../node/internal/api/linux_transfer_api.go#L11) |
 | `GET` | `/v1/transfers/events` | `handleLinuxTransferEvents` | [linux_transfer_api.go#L13](../../node/internal/api/linux_transfer_api.go#L13) |
 | `POST` | `/v1/transfers/{transfer_id}/cancel` | `handleLinuxTransferCancel` | [linux_transfer_api.go#L12](../../node/internal/api/linux_transfer_api.go#L12) |

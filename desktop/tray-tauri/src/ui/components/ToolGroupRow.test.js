@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import ToolGroupRow from "./ToolGroupRow.vue";
+import ToolSummaryRow from "./ToolSummaryRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { applyToolJobsSnapshot } from "../stores/toolJobs.js";
 import { resetTurnState, applyTurnState } from "../stores/turnState.js";
@@ -38,6 +39,16 @@ function namedStep(id, name, phase, purpose = "", status = null) {
 }
 
 describe("ToolGroupRow terminal tool results", () => {
+  it("shows a running bash tool without a per-tool stop control", () => {
+    const wrapper = mount(ToolSummaryRow, {
+      props: { callEntry: toolStep("bash-running", "active").callEntry, executionHint: "active" },
+    });
+
+    expect(wrapper.find(".tool-summary-row__status").text()).toBe("执行中");
+    expect(wrapper.findAll("button").some((button) => /终止/.test(button.text() + button.attributes("aria-label")))).toBe(false);
+    wrapper.unmount();
+  });
+
   beforeEach(() => {
     applyToolJobsSnapshot({ running: 0, running_call_ids: [] });
     resetTurnState();
@@ -189,7 +200,6 @@ describe("ToolGroupRow terminal tool results", () => {
     await wrapper.get(".tool-group-row__head").trigger("click");
     expect(wrapper.findAll(".tool-summary-row__status").map((node) => node.text())).toContain("执行失败");
     expect(wrapper.find(".tool-exec-spinner").exists()).toBe(false);
-    expect(wrapper.find(".tool-summary-row__actions").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -224,7 +234,6 @@ describe("ToolGroupRow terminal tool results", () => {
     await wrapper.get(".tool-group-row__head").trigger("click");
     expect(wrapper.find(".tool-summary-row__status").text()).toBe("执行失败");
     expect(wrapper.find(".tool-exec-spinner").exists()).toBe(false);
-    expect(wrapper.find(".tool-summary-row__actions").exists()).toBe(false);
     wrapper.unmount();
   });
 

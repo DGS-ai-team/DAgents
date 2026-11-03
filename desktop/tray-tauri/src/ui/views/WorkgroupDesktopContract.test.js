@@ -255,7 +255,7 @@ describe('Desktop workgroup API contract', () => {
     expect(wrapper.emitted('list').at(-1)).toEqual([[{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active', subscribed: true }]])
   })
 
-  it('removes a workgroup from this Node subscription while keeping it available in Manage', async () => {
+  it('removes a workgroup from this local service subscription while keeping it available in the management console', async () => {
     let subscribed = true
     api.getDesktopWorkgroupList.mockImplementation(() => Promise.resolve({ workgroups: [{ workgroup_id: 'wg-a', display_name: '调研组', status: 'active', subscribed }] }))
     api.unsubscribeWorkgroup.mockImplementation(async () => { subscribed = false; return { ok: true } })
@@ -265,7 +265,7 @@ describe('Desktop workgroup API contract', () => {
     await wrapper.find('.wg-group').trigger('contextmenu', { clientX: 20, clientY: 30 })
     const menu = wrapper.emitted('context-menu').at(-1)[0]
     expect(menu.items.map(item => item.icon || (item.separator ? 'separator' : ''))).toEqual(['workgroup', 'separator', 'trash'])
-    await menu.items.find(item => item.label === '从此 Node 移除工作组').run()
+    await menu.items.find(item => item.label === '从本机服务移除工作组').run()
     await flushPromises()
     expect(api.unsubscribeWorkgroup).toHaveBeenCalledWith('wg-a')
     expect(wrapper.emitted('removed')).toEqual([['wg-a']])
@@ -281,7 +281,7 @@ describe('Desktop workgroup API contract', () => {
     await flushPromises()
     await wrapper.find('.wg-head').trigger('contextmenu', { clientX: 20, clientY: 30 })
     const menu = wrapper.emitted('context-menu').at(-1)[0]
-    await menu.items.find(item => item.label === '从此 Node 移除工作组').run()
+    await menu.items.find(item => item.label === '从本机服务移除工作组').run()
     await flushPromises()
     expect(api.unsubscribeWorkgroup).toHaveBeenCalledWith('wg-a')
     expect(wrapper.emitted('removed')).toEqual([['wg-a']])
@@ -294,7 +294,7 @@ describe('Desktop workgroup API contract', () => {
     wrapper.vm.busy = true
     await wrapper.find('.wg-group').trigger('contextmenu', { clientX: 20, clientY: 30 })
     const menu = wrapper.emitted('context-menu').at(-1)[0]
-    const remove = menu.items.find(item => item.label === '从此 Node 移除工作组')
+    const remove = menu.items.find(item => item.label === '从本机服务移除工作组')
     expect(remove).toMatchObject({ icon: 'trash', danger: true, disabled: true, title: '工作组操作进行中，请稍后再试' })
   })
 
@@ -305,7 +305,7 @@ describe('Desktop workgroup API contract', () => {
     expect(wrapper.text()).toContain('旧工作组')
     await wrapper.findAll('button').find(button => button.text() === '刷新').trigger('click')
     await flushPromises()
-    expect(wrapper.find('[role="status"]').text()).toContain('Manage 尚未启用')
+    expect(wrapper.find('[role="status"]').text()).toContain('管理后台尚未启用')
     expect(wrapper.findAll('button').find(button => button.text() === '新建工作组').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).not.toContain('旧工作组')
     expect(wrapper.emitted('list').at(-1)).toEqual([[]])
@@ -339,7 +339,7 @@ describe('Desktop workgroup API contract', () => {
     await flushPromises()
     const publish = wrapper.findAll('button').find(button => button.text() === '发布')
     expect(publish.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('Manage 尚无当前节点可用的 LLM 配置')
+    expect(wrapper.text()).toContain('管理后台尚无当前本机服务可用的模型配置')
     await wrapper.findAll('button').find(button => button.text() === '前往连接配置').trigger('click')
     expect(wrapper.emitted('open-connection-settings')).toHaveLength(1)
     expect(api.publishWorkgroup).not.toHaveBeenCalled()

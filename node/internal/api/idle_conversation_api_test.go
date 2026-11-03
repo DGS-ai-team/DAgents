@@ -59,7 +59,8 @@ func TestIdleConversationBoundaryThroughHTTP(t *testing.T) {
 	cfg.LLM.BaseURL = provider.URL
 	cfg.LLM.Model = "idle-test-model"
 	cfg.LLM.APIKeyEnv = "IDLE_BOUNDARY_TEST_API_KEY"
-	cfg.SyncActiveProfileFromFlat()
+	cfg.LLM.Profiles = nil
+	cfg.ApplyDefaults()
 	client := &idleConversationHTTPClient{inner: llm.NewOpenAIClient(llm.OpenAIConfig{BaseURL: provider.URL, Model: "idle-test-model", APIKey: "test"})}
 	srv := NewServer(cfg, nil, WithLLM(client), WithTools(registry), WithStore(st), WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())

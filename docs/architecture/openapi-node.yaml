@@ -217,37 +217,6 @@ paths:
       responses:
         "200":
           description: OK
-  /v1/agents/{agent_id}/policy/grants:
-    get:
-      x-contract-status: surface-only
-      summary: 读取 Agent 的工作区授权
-      parameters:
-        - $ref: "#/components/parameters/AgentID"
-      responses:
-        "200":
-          description: 授权列表
-    post:
-      x-contract-status: surface-only
-      summary: 创建 Agent 的工作区授权
-      parameters:
-        - $ref: "#/components/parameters/AgentID"
-      responses:
-        "201":
-          description: 授权已创建
-  /v1/agents/{agent_id}/policy/grants/{grant_id}:
-    delete:
-      x-contract-status: surface-only
-      summary: 撤销 Agent 的工作区授权
-      parameters:
-        - $ref: "#/components/parameters/AgentID"
-        - name: grant_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: 授权已撤销
   /v1/agents/{agent_id}/prompt-context:
     get:
       summary: 读取 Agent prompt context（soul/custom/memory，SQLite）
@@ -619,11 +588,48 @@ paths:
         "200":
           description: OK
     patch:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
+      summary: 切换默认模型配置
+      description: 思考参数在 /v1/settings 的模型配置中保存，不再支持全局运行时覆盖。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [active_profile]
+              properties:
+                active_profile: {type: string, minLength: 1}
       responses:
         "200":
           description: OK
+        "400":
+          description: 配置不存在或包含不支持的字段
+
+  /v1/llm/capabilities:
+    get:
+      summary: 查询具体模型的思考参数能力
+      description: 与请求适配器共用能力定义；未知模型返回 supported false，不推测提供商下全部型号的能力。
+      parameters:
+        - {name: provider, in: query, required: true, schema: {type: string}}
+        - {name: model, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: 能力描述
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supported: {type: boolean}
+                  thinking_control: {type: string, enum: ["", toggle, effort, budget, fixed]}
+                  thinking_label: {type: string}
+                  thinking_secondary_label: {type: string}
+                  allowed_efforts: {type: array, nullable: true, items: {type: string}}
+                  default_effort: {type: string}
+                  can_disable_thinking: {type: boolean}
+                  thinking_budget_min: {type: integer}
+                  thinking_budget_max: {type: integer}
 
   /v1/mcp/config:
     get:
@@ -938,30 +944,6 @@ paths:
           description: OK
 
   /v1/linux/channels/{channel_id}/test:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/manage/upload/externaltool:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/manage/upload/plugin:
-    post:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
-      responses:
-        "200":
-          description: OK
-
-  /v1/manage/upload/skill:
     post:
       x-contract-status: surface-only
       summary: Route registered in the Node HTTP server

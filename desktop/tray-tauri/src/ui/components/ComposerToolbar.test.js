@@ -60,4 +60,36 @@ describe("ComposerToolbar status", () => {
     expect(wrapper.emitted('switch-profile')).toEqual([['b']]);
     wrapper.unmount();
   });
+
+  it("opens the model settings action with a single profile outside the options listbox", async () => {
+    const wrapper = mount(ComposerToolbar, {
+      props: { llmSettings: { model: "model-a", active_profile: "profile-a", profiles: ["profile-a"] }, desktopCompact: true },
+    });
+
+    await wrapper.find('.composer-toolbar__trigger').trigger('click');
+    expect(wrapper.find('[role="listbox"] [role="option"]').exists()).toBe(true);
+    const settingsAction = wrapper.find('.composer-toolbar__settings-action');
+    expect(settingsAction.text()).toBe('模型设置…');
+    expect(wrapper.find('[role="listbox"]').attributes('aria-label')).toBe('选择模型配置');
+    expect(settingsAction.element.closest('[role="listbox"]')).toBeNull();
+    await settingsAction.trigger('click');
+    expect(wrapper.emitted('open-model-settings')).toEqual([['profile-a']]);
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("falls back to the active Agent profile when model settings omit active_profile", async () => {
+    const wrapper = mount(ComposerToolbar, {
+      props: {
+        llmSettings: { model: "model-a", profiles: ["profile-a"] },
+        settingsProfileId: "profile-a",
+        desktopCompact: true,
+      },
+    });
+
+    await wrapper.find('.composer-toolbar__trigger').trigger('click');
+    await wrapper.find('.composer-toolbar__settings-action').trigger('click');
+    expect(wrapper.emitted('open-model-settings')).toEqual([['profile-a']]);
+    wrapper.unmount();
+  });
 });

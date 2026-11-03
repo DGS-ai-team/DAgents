@@ -103,21 +103,20 @@ onBeforeUnmount(() => {
 
 watch(() => route.fullPath, refreshNavigation);
 
+const workspaceNavItems = [
+  { to: "/settings/general", label: "通用设置", icon: "settings" },
+  ...(window.__TAURI_INTERNALS__ ? [{ to: "/settings/desktop", label: "桌面设置", icon: "monitor" }] : []),
+  { to: "/settings/connection", label: "模型与连接", icon: "plug" },
+];
+
 const sharedNavGroups = [
-  {
-    label: "工作区",
-    items: [
-      { to: "/settings/general", label: "通用", icon: "settings" },
-      ...(window.__TAURI_INTERNALS__ ? [{ to: "/settings/desktop", label: "Desktop", icon: "monitor" }] : []),
-      { to: "/settings/connection", label: "模型与连接", icon: "plug" },
-    ],
-  },
+  { label: "工作区", items: workspaceNavItems },
   {
     label: "工具与运行",
     items: [
       { to: "/settings/mcp", label: "全局 MCP 服务", icon: "server" },
       { to: "/settings/linux-channels", label: "全局 Linux 通道", icon: "square-terminal" },
-      { to: "/settings/capabilities", label: "能力", icon: "monitor" },
+      { to: "/settings/capabilities", label: "共享服务", icon: "monitor" },
       { to: "/settings/skills", label: "技能", icon: "skills" },
     ],
   },
@@ -144,14 +143,8 @@ const sharedNavGroups = [
 
 const navGroups = window.__TAURI_INTERNALS__
   ? [
-      { label: "本机应用", items: [{ to: "/settings/desktop", label: "Desktop 设置", icon: "monitor" }] },
-      {
-        label: "当前 Node",
-        items: [
-          { to: "/settings/general", label: "Node 通用", icon: "settings" },
-          { to: "/settings/connection", label: "模型与连接", icon: "plug" },
-        ],
-      },
+      { label: "本机应用", items: workspaceNavItems.filter((item) => item.to === "/settings/desktop") },
+      { label: "本机服务", items: workspaceNavItems.filter((item) => item.to !== "/settings/desktop") },
       ...sharedNavGroups.slice(1),
     ]
   : sharedNavGroups;
@@ -179,9 +172,14 @@ function backToChat() {
     <div class="settings-layout">
       <nav class="settings-layout__nav" aria-label="设置导航">
         <div class="settings-layout__nav-head">
-          <button type="button" class="settings-layout__back" @click="backToChat">
-            <UiIcon name="arrow-left" :size="15" />
-            <span>返回对话</span>
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm settings-layout__back desktop-icon-button"
+            aria-label="返回对话"
+            title="返回对话"
+            @click="backToChat"
+          >
+            <UiIcon name="arrow-left" :size="18" />
           </button>
           <div class="settings-layout__identity">
             <strong>设置</strong>
@@ -236,7 +234,7 @@ function backToChat() {
               :key="`first-run-${viewRoute.fullPath}`"
               @completed="desktopFirstRunCompleted"
             />
-            <component v-else :is="Component" :key="viewRoute.fullPath" />
+            <component v-else :is="Component" :key="viewRoute.path" />
           </Transition>
         </router-view>
       </main>

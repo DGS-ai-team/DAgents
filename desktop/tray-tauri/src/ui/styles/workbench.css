@@ -134,6 +134,14 @@
   font-size: 12px;
 }
 
+.btn.desktop-icon-button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -647,6 +655,20 @@
 }
 
 .settings-page__header-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-page__header-back {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.settings-page__header-copy {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -946,7 +968,9 @@
 select.settings-field__input {
   appearance: none;
   -webkit-appearance: none;
-  padding-right: 2rem;
+  box-sizing: border-box;
+  min-height: 38px;
+  padding: 8px 36px 8px 12px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
@@ -976,6 +1000,35 @@ select.settings-field__input {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.settings-savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface, Canvas);
+}
+
+.settings-savebar__status {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.settings-savebar__status--error {
+  color: var(--color-danger);
+}
+
+.settings-savebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .setup-config-panel__body {
@@ -3417,6 +3470,13 @@ select.settings-field__input {
   opacity: 0.9;
 }
 
+.composer-toolbar__settings-action {
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  color: var(--color-text-secondary);
+}
+
 .composer-toolbar__btn {
   display: inline-flex;
   align-items: center;
@@ -4470,15 +4530,6 @@ select.settings-field__input {
   background: var(--color-surface);
 }
 
-/* Grant fields are vertical settings fields; the toolbar flex basis must not
-   become an input height when the same filter class is reused here. */
-.policy-panel__grant-form .policy-panel__filter {
-  flex: 0 1 auto;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
 .policy-panel__hint {
   margin: 0 0 12px;
   font-size: 12px;
@@ -4500,6 +4551,11 @@ select.settings-field__input {
   margin-left: auto;
 }
 
+.policy-panel__select {
+  flex: 0 1 180px;
+  min-width: 150px;
+}
+
 .policy-panel__bulk-hint {
   margin-top: -4px;
 }
@@ -4510,14 +4566,6 @@ select.settings-field__input {
   gap: 8px;
   margin-bottom: 12px;
   align-items: center;
-}
-
-.policy-panel__decision-select {
-  padding: 7px 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  font-size: 13px;
-  background: var(--color-surface);
 }
 
 .policy-panel__status {

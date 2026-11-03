@@ -8,13 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -85,53 +82,18 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	return srv, ts, created.AgentID
 }
 
-func TestAgentPolicyGrantRevokeConcurrentWithToolPutDoesNotResurrect(t *testing.T) {
+func TestAgentPolicyGrantRoutesRemoved(t *testing.T) {
 	_, ts, agentID := testAgentPolicyServer(t)
-	workspace := t.TempDir()
-	create := doPolicyJSON(t, ts, http.MethodPost, "/v1/agents/"+agentID+"/policy/grants", map[string]any{"tools": []string{"write_file"}, "workspace": workspace, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
-	var grant map[string]any
-	if err := json.Unmarshal(create, &grant); err != nil {
-		t.Fatal(err)
-	}
-	id, _ := grant["id"].(string)
-	var wg sync.WaitGroup
-	statuses := make(chan int, 2)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_, status := doPolicyJSONResult(ts, http.MethodDelete, "/v1/agents/"+agentID+"/policy/grants/"+id, nil)
-		statuses <- status
-	}()
-	go func() {
-		defer wg.Done()
-		_, status := doPolicyJSONResult(ts, http.MethodPut, "/v1/agents/"+agentID+"/policy/tools", map[string]any{"updates": []map[string]string{{"name": "write_file", "mode": "rule"}}})
-		statuses <- status
-	}()
-	wg.Wait()
-	close(statuses)
-	for status := range statuses {
-		if status < 200 || status >= 300 {
-			t.Fatalf("concurrent policy request status=%d", status)
+	for _, request := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/agents/" + agentID + "/policy/grants"},
+		{http.MethodPost, "/v1/agents/" + agentID + "/policy/grants"},
+		{http.MethodDelete, "/v1/agents/" + agentID + "/policy/grants/old"},
+	} {
+		_, status := doPolicyJSONResult(ts, request.method, request.path, nil)
+		if status != http.StatusNotFound {
+			t.Fatalf("%s %s status=%d, want 404", request.method, request.path, status)
 		}
 	}
-	grants := doPolicyJSON(t, ts, http.MethodGet, "/v1/agents/"+agentID+"/policy/grants", nil)
-	var result struct {
-		Grants []policy.Grant `json:"grants"`
-	}
-	if err := json.Unmarshal(grants, &result); err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Grants) != 1 || result.Grants[0].RevokedAt == nil {
-		t.Fatalf("grant resurrected: %+v", result.Grants)
-	}
-}
-
-func doPolicyJSON(t *testing.T, ts *httptest.Server, method, path string, body any) []byte {
-	raw, status := doPolicyJSONResult(ts, method, path, body)
-	if status >= 300 {
-		t.Fatalf("%s %s status=%d body=%s", method, path, status, raw)
-	}
-	return []byte(raw)
 }
 
 func doPolicyJSONResult(ts *httptest.Server, method, path string, body any) (string, int) {

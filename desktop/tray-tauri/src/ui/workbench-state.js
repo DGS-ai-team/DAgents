@@ -25,6 +25,14 @@ export function shouldShowNodeFirstRun({ online, setupRequired, activeTab, route
   return Boolean(online && setupRequired && !(activeTab === 'settings' && routePath === '/settings/desktop'));
 }
 
+export function shouldShowWorkgroupSidebar({ collaborationEnabled, hasWorkgroups, isWorkgroupView } = {}) {
+  return Boolean(collaborationEnabled || hasWorkgroups || isWorkgroupView);
+}
+
+export function workgroupCollaborationEnabled(manageSettings) {
+  return manageSettings?.enabled === true && manageSettings?.workgroup_enabled === true;
+}
+
 // Entering another Agent is navigation, while an event refresh for the
 // selected Agent should retain its open resource. Explicit sidebar intent also
 // returns to chat when that Agent is already selected (for example from a
@@ -68,9 +76,8 @@ export function desktopComposerStatus({ generating = false, cancelling = false, 
   return '正在等待回复'
 }
 
-export function desktopChatEntries(agentId, transcript = [], streamingText = '', turnState = null, pendingUser = null) {
+export function desktopChatEntries(agentId, transcript = [], pendingUser = null) {
   const rows = Array.isArray(transcript) ? transcript : []
-  const terminal = isTerminalTurn(turnState)
   const entries = rows.map((entry, index) => ({
     ...entry,
     id: `${agentId || 'agent'}:history:${index}`,
@@ -83,19 +90,7 @@ export function desktopChatEntries(agentId, transcript = [], streamingText = '',
     delete entry.baseTranscriptLength
     entries.push({ ...entry, id: `${agentId || 'agent'}:pending-user:${pendingUser.id}`, data: {} })
   }
-  if (streamingText && !terminal) {
-    entries.push({
-      id: `${agentId || 'agent'}:history:${entries.length}`,
-      kind: 'assistant',
-      text: String(streamingText),
-      streaming: true,
-    });
-  }
   return entries;
-}
-
-function isTerminalTurn(turnState) {
-  return turnState?.terminal === true || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted'].includes(turnState?.phase)
 }
 
 export function desktopHitlQueue(expanded = {}) {
@@ -154,7 +149,6 @@ export function createDesktopMenuModel(context = {}) {
   const {
     online = false,
     setupRequired = false,
-    nodeVersion = '',
     activeAgentId = '',
     activeAgentName = '尚未选择智能体',
     isWorkgroup = false,
@@ -171,22 +165,22 @@ export function createDesktopMenuModel(context = {}) {
   const separator = { separator: true }
   const item = (label, action, disabled = false, extra = {}) => ({ label, action, disabled, ...extra })
   const resourceUnavailableReason = !online
-    ? 'Node 未连接'
+    ? '本地服务未连接'
     : setupRequired
-      ? '请先完成 Node 首次设置'
+      ? '请先完成本地服务首次设置'
       : isWorkgroup
         ? '工作组暂不支持此操作'
         : !activeAgentId
           ? '请先选择智能体'
           : ''
   const agentUnavailableReason = !online
-    ? 'Node 未连接'
+    ? '本地服务未连接'
     : isWorkgroup
       ? '此操作仅适用于单个智能体'
       : !activeAgentId
         ? '请先选择智能体'
         : ''
-  const setupUnavailableReason = !online ? 'Node 未连接' : '请先完成 Node 首次设置'
+  const setupUnavailableReason = !online ? '本地服务未连接' : '请先完成本地服务首次设置'
   const conversationUnavailableReason = !activeAgentId
     ? '请先选择智能体'
     : isWorkgroup
@@ -196,12 +190,12 @@ export function createDesktopMenuModel(context = {}) {
         : ''
   return {
     DAgents: [
-      { status: true, online, label: `Node · ${online ? '在线' : '离线'}`, hint: nodeVersion || '本机' },
-      item('检查 Node 连接', 'refresh'),
+      item('检查本地服务连接', 'refresh'),
       separator,
       item('通用设置', 'settings-general'),
+      item('工作组 / 协作设置', 'workgroups-settings'),
       separator,
-      item('退出 Desktop', 'quit-desktop', false, { hint: 'Node 将继续运行' }),
+      item('退出桌面应用', 'quit-desktop', false, { hint: '本地服务将继续运行' }),
     ],
     资源: [
       item('打开工作区文件', 'open-workspace', !canOpenResource, canOpenResource ? {} : { hint: resourceUnavailableReason }),
@@ -230,11 +224,12 @@ export function createDesktopMenuModel(context = {}) {
       { header: true, label: '当前会话' },
       item('停止当前回合', 'stop-turn', !hasAgent || !online || !generating, { hint: !hasAgent || !online ? agentUnavailableReason : !generating ? '当前没有生成中的任务' : '' }),
       item('清空当前对话', 'clear-context', !hasAgent || !online || generating || hasPendingHitl, { hint: !hasAgent || !online ? agentUnavailableReason : generating ? '请先停止当前生成' : hasPendingHitl ? '请先处理待审批请求' : '' }),
+      item('压缩上下文', 'compress-context', !hasAgent || !online || setupRequired || generating || hasPendingHitl || hasPendingApproval, { hint: !hasAgent || !online ? agentUnavailableReason : setupRequired ? setupUnavailableReason : generating ? '请等待当前生成结束' : hasPendingHitl || hasPendingApproval ? '请先处理待审批请求' : '' }),
       item('查看待审批', 'approval', !hasAgent || !online || !hasPendingApproval, { hint: !hasAgent || !online ? agentUnavailableReason : !hasPendingApproval ? '当前没有待审批请求' : '' }),
       separator,
       { header: true, label: '管理' },
       item('新建智能体', 'create-agent', !online || setupRequired, { hint: !online || setupRequired ? setupUnavailableReason : '' }),
-      item('自主智能体总览', 'auto-overview', !online, { hint: !online ? 'Node 未连接' : '' }),
+      item('自主智能体总览', 'auto-overview', !online, { hint: !online ? '本地服务未连接' : '' }),
     ],
     帮助: [
       item('使用说明与版本', 'help-about'),

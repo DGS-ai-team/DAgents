@@ -44,10 +44,26 @@ DeepSeek / Qwen 的 `reasoning_content` 出站规则集中在对应 adapter；`o
 `[TOOL_RESULT_METADATA]`，让模型可读取运行时的 `status/error`，而 `MessageToAPIPayload` 不会把内部
 `tool_result_metadata` 字段作为非标准 provider 字段发送。
 
-`GET /v1/llm/settings` 会返回 `thinking_control`、`thinking_label` 和
-`thinking_secondary_label`，由前端按当前 provider/model 决定右下角显示的开关。
-这样不会把某个厂商的参数名称误用到另一家接口；例如 Qwen 的 high/max 会映射为
-`thinking_budget`，而 GLM、MiniMax、MiMo 不会发送 `reasoning_effort`。
+模型能力由 `/v1/llm/capabilities` 按 provider 与模型名解析；未知模型不展示思考控制，
+也不会收到推理参数。参数保存在各自的 LLM profile，`PATCH /v1/llm/settings` 只切换
+active profile，避免 Node 级开关覆盖不同 Agent 的模型配置。
+
+## Verified reasoning controls
+
+| Provider / model family | UI control and request fields | Source |
+|---|---|---|
+| DeepSeek Flash / Pro, including V4 | Toggle + `reasoning_effort` (`low`, `high`, `max`); `thinking.type` | [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) |
+| OpenAI o1/o3/o3-mini/o4-mini, GPT-5, GPT-5.1 | `reasoning_effort` only; GPT-5.1 allows `none`, GPT-5 classic allows `minimal`. No DeepSeek `thinking` object. Other OpenAI models remain unsupported here. | [Reasoning guide](https://developers.openai.com/api/docs/guides/reasoning), [GPT-5.1](https://developers.openai.com/api/docs/models/gpt-5.1) |
+| Qwen Plus / Flash and listed Qwen3 hybrid models | Toggle + optional integer `thinking_budget`; thinking-only variants keep thinking on. An empty budget leaves the service default intact. | [Deep Thinking](https://help.aliyun.com/zh/model-studio/deep-thinking) |
+| GLM 4.5/4.6/4.7 | Toggle + preserved `reasoning_content` mode | [Thinking](https://docs.bigmodel.cn/cn/guide/capabilities/thinking) |
+| GLM 5.2 / 5.3 families | Effort (`high`/`max`, or `low`/`high`/`max` for 5.3); defaults to `max`. 5.3 and Flash cannot be disabled. | [Thinking](https://docs.bigmodel.cn/cn/guide/capabilities/thinking) |
+| MiniMax M3 | Adaptive / disabled thinking | [Text OpenAI API](https://platform.minimax.io/docs/api-reference/text-openai-api) |
+| MiniMax M3.1-Flash | Effort (`low`, `medium`, `high`, `xhigh`, `max`) via `reasoning_effort`, default `max`; thinking stays enabled. | [Text OpenAI API](https://platform.minimax.io/docs/api-reference/text-openai-api) |
+| MiniMax M2.x | Thinking remains enabled; no toggle. | [Text OpenAI API](https://platform.minimax.io/docs/api-reference/text-openai-api) |
+| MiMo v2.5 and v2-Flash | Thinking toggle | [Reasoning content](https://platform.xiaomimimo.com/docs/en-US/usage-guide/passing-back-reasoning_content) |
+
+OpenAI model requests remain on the existing Chat Completions transport. This table does not imply
+support for model families whose reasoning controls require another transport.
 
 ## 相关文档
 

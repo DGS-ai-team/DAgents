@@ -45,7 +45,7 @@ func TestV011StoresRestoreRepresentativeReleaseData(t *testing.T) {
 	// This literal mirrors v0.11.0's Config JSON field names. In particular it
 	// contains old idle compression fields that current code must not reinterpret
 	// as the different new-context setting.
-	settingsJSON := `{"NodeID":"node-v011-fixture","Agent":{"Name":"fixture-node","Description":"synthetic release data"},"User":{"PreferredName":"Fixture User"},"Onboarding":{"NodeProfileCompleted":true},"LLM":{"Active":"fixture-provider","Provider":"openai","BaseURL":"https://example.invalid/v1","Model":"fixture-model"},"Skills":{"Enabled":true,"MaxInPrompt":4},"Compression":{"SilentTriggerTokens":51000,"BlockingTriggerTokens":72000,"IdleAutoCompressSeconds":3600,"IdleAutoCompressPollSeconds":60,"IdleAutoCompressMinTokens":12000},"Triggers":{"Enabled":true,"PollSeconds":11},"ChildAgents":{"Enabled":true,"DefaultMaxTurns":13}}`
+	settingsJSON := `{"NodeID":"node-v011-fixture","Agent":{"Name":"fixture-node","Description":"synthetic release data"},"User":{"PreferredName":"Fixture User"},"Onboarding":{"NodeProfileCompleted":true},"LLM":{"Active":"fixture-provider","Provider":"qwen","BaseURL":"https://stale-legacy.example.invalid/v1","Model":"stale-legacy-model"},"Skills":{"Enabled":true,"MaxInPrompt":4},"Compression":{"SilentTriggerTokens":51000,"BlockingTriggerTokens":72000,"IdleAutoCompressSeconds":3600,"IdleAutoCompressPollSeconds":60,"IdleAutoCompressMinTokens":12000},"Triggers":{"Enabled":true,"PollSeconds":11},"ChildAgents":{"Enabled":true,"DefaultMaxTurns":13}}`
 	if _, err := nodeDB.Exec(`INSERT INTO node_settings(id, settings_json, schema_version, updated_at) VALUES(1, ?, 1, ?)`, string(settingsJSON), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -53,16 +53,18 @@ func TestV011StoresRestoreRepresentativeReleaseData(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrapPath := filepath.Join(root, "config.yaml")
-	if err := config.SaveBootstrapFile(bootstrapPath, &config.Config{
-		NodeID: "node-v011-fixture",
-		Listen: config.ListenConfig{Host: "127.0.0.1", Port: 18765},
-		Local:  config.LocalConfig{Endpoint: "http://127.0.0.1:18765"},
-	}); err != nil {
+	// A fat YAML may still be present after upgrade. It must not override
+	// node_settings business data or an existing llm_configs database.
+	legacyYAML := "listen:\n  host: 127.0.0.1\n  port: 18765\nllm:\n  active: yaml-profile\n  provider: minimax\n  model: stale-yaml-model\n  profiles:\n    yaml-profile:\n      provider: minimax\n      model: stale-yaml-model\n"
+	if err := os.WriteFile(bootstrapPath, []byte(legacyYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.LoadFile(bootstrapPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.LLM.Provider != "minimax" || cfg.LLM.Model != "stale-yaml-model" {
+		t.Fatalf("fixture did not load conflicting fat YAML: %+v", cfg.LLM)
 	}
 	cfg.RuntimeRoot = runtimeRoot
 	nodeStore, err := BootstrapNodeSettings(ctx, cfg, bootstrapPath, nil)
@@ -74,6 +76,9 @@ func TestV011StoresRestoreRepresentativeReleaseData(t *testing.T) {
 		!cfg.Skills.Enabled || cfg.Compression.SilentTriggerTokens != 51000 ||
 		!cfg.Triggers.Enabled || cfg.Triggers.PollSeconds != 11 || !cfg.ChildAgents.Enabled || cfg.Compression.IdleNewConversationSeconds != 0 {
 		t.Fatalf("v0.11 node settings were not restored: %+v", cfg)
+	}
+	if cfg.LLM.Provider != "qwen" || cfg.LLM.Model != "stale-legacy-model" {
+		t.Fatalf("node_settings migration input should replace YAML model copy: %+v", cfg.LLM)
 	}
 
 	// v0.11.0 llm_configs.db stores AES-GCM(base64(nonce|ciphertext)); the
@@ -126,9 +131,22 @@ func TestV011StoresRestoreRepresentativeReleaseData(t *testing.T) {
 	if !ok || profile.Model != "fixture-model" || !config.ProfileMultimodalEnabled(profile) {
 		t.Fatalf("LLM profile was not restored: profile=%+v ok=%v", profile, ok)
 	}
+	if cfg.LLM.Provider != "openai" || cfg.LLM.Model != "fixture-model" || cfg.LLM.BaseURL != "https://example.invalid/v1" {
+		t.Fatalf("legacy node_settings replica overrode llm_configs.db: %+v", cfg.LLM)
+	}
 	resolvedKey, err := llmStore.ResolveAPIKey(ctx, "fixture-provider")
 	if err != nil || resolvedKey != syntheticAPIKey {
 		t.Fatalf("synthetic key restore failed: match=%v err=%v", resolvedKey == syntheticAPIKey, err)
+	}
+	if err := nodeStore.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	compactedSettings, err := nodeStore.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compactedSettings.LLM.Active != "fixture-provider" || compactedSettings.LLM.Provider != "" || compactedSettings.LLM.Model != "" {
+		t.Fatalf("node settings retained duplicate model configuration: %+v", compactedSettings.LLM)
 	}
 	// A database-only copy must not be reported as a successful credential
 	// restore. The ciphertext remains present, while the missing paired key

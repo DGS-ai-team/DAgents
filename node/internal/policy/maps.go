@@ -8,9 +8,8 @@ import (
 
 // Maps 为内存中的工具/shell 策略映射（可 JSON 序列化）。
 type Maps struct {
-	Tools  map[string]ApprovalMode
-	Shell  map[ShellType]map[string]ApprovalMode
-	Grants []Grant
+	Tools map[string]ApprovalMode
+	Shell map[ShellType]map[string]ApprovalMode
 }
 
 // NewDefaultEngine 构造当前版本使用的默认策略引擎。
@@ -42,16 +41,7 @@ func NewEngineFromMaps(m Maps) *Engine {
 		}
 		shellCopy[st] = inner
 	}
-	grants := make([]Grant, len(m.Grants))
-	for i, grant := range m.Grants {
-		grants[i] = grant
-		grants[i].Tools = append([]string(nil), grant.Tools...)
-		if grant.RevokedAt != nil {
-			revoked := *grant.RevokedAt
-			grants[i].RevokedAt = &revoked
-		}
-	}
-	return &Engine{toolModes: toolCopy, shellModes: shellCopy, grants: grants}
+	return &Engine{toolModes: toolCopy, shellModes: shellCopy}
 }
 
 // ExportMaps 导出 Engine 当前映射副本。
@@ -74,16 +64,7 @@ func (e *Engine) ExportMaps() Maps {
 		}
 		shell[st] = inner
 	}
-	grants := make([]Grant, len(e.grants))
-	for i, grant := range e.grants {
-		grants[i] = grant
-		grants[i].Tools = append([]string(nil), grant.Tools...)
-		if grant.RevokedAt != nil {
-			revoked := *grant.RevokedAt
-			grants[i].RevokedAt = &revoked
-		}
-	}
-	return Maps{Tools: tools, Shell: shell, Grants: grants}
+	return Maps{Tools: tools, Shell: shell}
 }
 
 // MapsToStringMaps 转为可 JSON 存库的 string map。

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import AgentTemplateCreateModal from "../../components/AgentTemplateCreateModal.vue";
@@ -9,9 +9,9 @@ import UiIcon from "../../components/UiIcon.vue";
 import { filterAgents, groupAgents, searchAgents } from "../../utils/agentGrouping.js";
 import { readNodePreference, writeNodePreference } from "../../utils/nodePreference.js";
 import { confirmDesktopAction } from "../../utils/desktopDialogs.js";
+import UiSelect from "../../components/UiSelect.vue";
 
 const router = useRouter();
-const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
 const loading = ref(true);
 const templatesLoading = ref(true);
 const error = ref("");
@@ -24,6 +24,12 @@ const agentFilter = ref("all");
 const agentSearch = ref("");
 const preferenceNodeId = ref("");
 const agentGroups = computed(() => groupAgents(searchAgents(filterAgents(agents.value, agentFilter.value), agentSearch.value), "type"));
+function createAgent() {
+  window.dispatchEvent(new CustomEvent("desktop-open-agent-create"));
+}
+function onAgentCreated() {
+  void loadAgents();
+}
 watch([agentFilter, agentSearch], () => {
   if (preferenceNodeId.value) writeNodePreference(preferenceNodeId.value, "settings-agent-view", { filter: agentFilter.value, search: agentSearch.value });
 }, { deep: true });
@@ -107,14 +113,18 @@ function onTemplateCreated() {
   void loadTemplates();
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  window.addEventListener("desktop-agent-created", onAgentCreated);
+});
+onUnmounted(() => window.removeEventListener("desktop-agent-created", onAgentCreated));
 </script>
 
 <template>
   <div class="settings-page settings-embedded">
     <SettingsPageHeader
       title="智能体"
-      :description="isDesktop ? '管理本机智能体的名称、模型与能力；新建智能体请从顶部菜单开始。' : '管理本机智能体的名称、模型与能力；新建智能体请从对话页开始。'"
+      description="管理本机智能体的名称、模型与能力。"
     />
 
     <section class="agents-settings__section">
@@ -126,16 +136,34 @@ onMounted(load);
           </div>
           <p class="agents-settings__section-desc">选择一个智能体进入详细配置。</p>
         </div>
+        <button
+          type="button"
+          class="btn btn--primary btn--sm desktop-icon-button"
+          aria-label="新建智能体"
+          title="新建智能体"
+          @click="createAgent"
+        >
+          <UiIcon name="plus" :size="16" />
+        </button>
       </div>
       <p v-if="loading" class="agents-settings__status">加载中…</p>
       <p v-else-if="error" class="agents-settings__error">{{ error }}</p>
       <p v-else-if="!agents.length" class="agents-settings__status settings-empty-state">
-        还没有智能体，请先回到对话页创建。
+        还没有智能体；点击右上角加号创建智能体。
       </p>
 
       <div v-else class="agents-settings__filters">
         <input v-model="agentSearch" type="search" placeholder="搜索名称、ID或工作目录…" aria-label="搜索智能体" />
-        <select v-model="agentFilter" aria-label="智能体类型筛选"><option value="all">全部</option><option value="auto">Auto</option><option value="normal">普通</option></select>
+        <UiSelect
+          v-model="agentFilter"
+          :options="[
+            { value: 'all', label: '全部' },
+            { value: 'auto', label: 'Auto' },
+            { value: 'normal', label: '普通' },
+          ]"
+          aria-label="智能体类型筛选"
+          size="compact"
+        />
       </div>
 
       <div v-if="!loading && !error && agents.length" class="agents-settings__group-list">
@@ -177,8 +205,14 @@ onMounted(load);
             创建智能体时可选用模板预填。内置模板只读；自定义模板可删除后重建。
           </p>
         </div>
-        <button type="button" class="btn btn--primary btn--sm" @click="showTemplateCreateModal = true">
-          新建模板
+        <button
+          type="button"
+          class="btn btn--primary btn--sm desktop-icon-button"
+          aria-label="新建模板"
+          title="新建模板"
+          @click="showTemplateCreateModal = true"
+        >
+          <UiIcon name="plus" :size="16" />
         </button>
       </div>
 
@@ -237,7 +271,7 @@ onMounted(load);
   font-weight: 600;
 }
 .agents-settings__filters { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 8px; margin: 0 0 12px; }
-.agents-settings__filters input, .agents-settings__filters select { min-width: 0; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 10px; background: var(--color-surface); color: var(--color-text); }
+.agents-settings__filters input { min-width: 0; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 10px; background: var(--color-surface); color: var(--color-text); }
 .agents-settings__group { margin-top: 14px; }
 .agents-settings__group h3 { display: flex; gap: 7px; align-items: baseline; margin: 0 0 7px; color: var(--text-secondary); font-size: 12px; }
 .agents-settings__group h3 span { font-size: 11px; }

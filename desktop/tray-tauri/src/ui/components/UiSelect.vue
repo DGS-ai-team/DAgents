@@ -75,6 +75,28 @@ function closeMenu() {
   query.value = "";
 }
 
+function enabledIndices() {
+  return filtered.value.flatMap((option, index) => option.disabled ? [] : [index]);
+}
+
+function nextEnabledIndex(key, currentIndex) {
+  const enabled = enabledIndices();
+  if (!enabled.length) return -1;
+  if (key === "Home") return enabled[0];
+  if (key === "End") return enabled.at(-1);
+  const currentPosition = enabled.indexOf(currentIndex);
+  const step = key === "ArrowDown" ? 1 : -1;
+  return enabled[(currentPosition + step + enabled.length) % enabled.length];
+}
+
+function focusOption(index) {
+  if (index < 0) return;
+  activeIndex.value = index;
+  const option = menuRef.value?.querySelectorAll(".ui-select__option")[index];
+  option?.focus();
+  option?.scrollIntoView?.({ block: "nearest" });
+}
+
 function placeMenu() {
   const el = triggerRef.value;
   if (!el) return;
@@ -99,7 +121,7 @@ function placeMenu() {
   };
 }
 
-async function toggleMenu() {
+async function toggleMenu(openingKey = "") {
   if (props.disabled) return;
   if (open.value) {
     closeMenu();
@@ -108,23 +130,40 @@ async function toggleMenu() {
   open.value = true;
   query.value = "";
   resetActive();
+  if (openingKey === "ArrowUp" && !selected.value) activeIndex.value = enabledIndices().at(-1) ?? -1;
   await nextTick();
   placeMenu();
   if (props.searchable) searchRef.value?.focus();
-  else menuRef.value?.querySelector('[aria-selected="true"]')?.focus?.();
+  else focusOption(activeIndex.value);
 }
 
 function pick(opt) {
-  if (props.disabled || !opt || opt.disabled) return;
+  if (props.disabled || triggerRef.value?.matches(":disabled") || !opt || opt.disabled) return;
   emit("update:modelValue", opt.value);
   emit("change", opt.value);
   closeMenu();
   triggerRef.value?.focus();
 }
 
+function onOptionKeydown(event, index) {
+  if (!props.searchable && event.key === "Enter") {
+    event.preventDefault();
+    pick(filtered.value[index]);
+    return;
+  }
+  if (!props.searchable && event.key === "Tab") {
+    closeMenu();
+    triggerRef.value?.focus();
+    return;
+  }
+  if (props.searchable || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  focusOption(nextEnabledIndex(event.key, index));
+}
+
 function resetActive() {
   const selectedIndex = filtered.value.findIndex(opt => !opt.disabled && opt.value === String(props.modelValue ?? ""));
-  activeIndex.value = selectedIndex >= 0 ? selectedIndex : filtered.value.findIndex(opt => !opt.disabled);
+  activeIndex.value = selectedIndex >= 0 ? selectedIndex : enabledIndices()[0] ?? -1;
 }
 
 async function onSearchKeydown(event) {
@@ -134,12 +173,7 @@ async function onSearchKeydown(event) {
     pick(filtered.value[activeIndex.value]);
   } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
     event.preventDefault();
-    const enabled = filtered.value.map((opt, index) => opt.disabled ? -1 : index).filter(index => index >= 0);
-    if (!enabled.length) return;
-    const current = enabled.indexOf(activeIndex.value);
-    const next = event.key === "Home" ? 0 : event.key === "End" ? enabled.length - 1
-      : (current + (event.key === "ArrowDown" ? 1 : -1) + enabled.length) % enabled.length;
-    activeIndex.value = enabled[next];
+    activeIndex.value = nextEnabledIndex(event.key, activeIndex.value);
     await nextTick();
     document.getElementById(activeOptionId.value)?.scrollIntoView?.({ block: "nearest" });
   } else if (event.key === "Tab") {
@@ -149,10 +183,15 @@ async function onSearchKeydown(event) {
 }
 
 function onTriggerKeydown(event) {
-  if (!props.searchable || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+  if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
   event.preventDefault();
-  if (!open.value) void toggleMenu();
-  else searchRef.value?.focus();
+  if (!open.value) {
+    void toggleMenu(event.key);
+  } else if (props.searchable) {
+    searchRef.value?.focus();
+  } else {
+    focusOption(activeIndex.value);
+  }
 }
 
 watch(filtered, resetActive);
@@ -266,6 +305,7 @@ onBeforeUnmount(() => {
           :class="{ 'ui-select__option--active': opt.value === String(modelValue ?? ''), 'ui-select__option--focused': searchable && index === activeIndex }"
           @mousedown="searchable && $event.preventDefault()"
           @click="pick(opt)"
+          @keydown="onOptionKeydown($event, index)"
         >
           <span class="ui-select__option-copy"><span class="ui-select__option-label">{{ opt.label }}</span><small v-if="opt.description" class="ui-select__option-description">{{ opt.description }}</small></span>
           <span
@@ -291,13 +331,18 @@ onBeforeUnmount(() => {
   max-width: 520px;
 }
 
+.ui-select--compact .ui-select__trigger {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
 .ui-select__trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  min-height: 36px;
+  min-height: 38px;
   padding: 8px 12px;
   border-radius: var(--radius-md, 8px);
   border: 1px solid var(--color-border);

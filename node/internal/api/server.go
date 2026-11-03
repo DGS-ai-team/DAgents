@@ -79,7 +79,6 @@ type Server struct {
 	autoConfigMu          sync.Mutex
 	registrar             *manage.Registrar
 	updateChecker         *manage.UpdateChecker
-	packageUploader       *manage.PackageUploader
 	control               *manage.ControlClient
 	feedbackStore         *store.FeedbackStore
 	feedbackRateMu        sync.Mutex
@@ -279,6 +278,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			logger.Error("llm configs store init failed", "error", err, "path", cfg.LLMConfigsDBPath())
 		} else {
 			llmConfigStore = opened
+			existingProfiles, countErr := llmConfigStore.Count(context.Background())
+			llmStoreWasEmpty := countErr == nil && existingProfiles == 0
 			if err := store.EnsureDefaultLLMConfig(context.Background(), llmConfigStore, cfg); err != nil {
 				logger.Error("llm default config initialization failed", "error", err)
 			} else if records, err := llmConfigStore.List(context.Background()); err != nil {
@@ -292,6 +293,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 				llmRuntime.SyncFromConfig(cfg)
 				if key, err := llmConfigStore.ResolveAPIKey(context.Background(), cfg.LLM.ActiveProfileID()); err == nil {
 					llmRuntime.SetAPIKey(key)
+				}
+				if o.nodeSettings != nil {
+					if oldSettings, loadErr := o.nodeSettings.Load(context.Background()); loadErr == nil && oldSettings != nil && store.HasLegacyLLMSettings(oldSettings.LLM) {
+						if saveErr := o.nodeSettings.Save(context.Background(), cfg); saveErr != nil {
+							logger.Warn("compact legacy Node LLM settings failed", "error", saveErr)
+						}
+					}
+				}
+				if llmStoreWasEmpty && o.configPath != "" && configPathWritable(o.configPath) {
+					if err := config.SaveBootstrapFile(o.configPath, cfg); err != nil {
+						logger.Warn("slim bootstrap YAML after LLM seed failed", "path", o.configPath, "error", err)
+					}
 				}
 			}
 		}
@@ -472,7 +485,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var registrar *manage.Registrar
 	var updateChecker *manage.UpdateChecker
-	var packageUploader *manage.PackageUploader
 	if cfg.Manage.Enabled {
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
@@ -504,7 +516,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		// Node still exposes an on-demand check using effective runtime config.
 		// This keeps secrets and node_settings.db inside Node.
 		updateChecker = manage.NewUpdateChecker(cfg, logger)
-		packageUploader = manage.NewPackageUploader(cfg, logger)
 	}
 	control := manage.NewControlClient(cfg)
 	var feedbackStore *store.FeedbackStore
@@ -591,7 +602,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		autonomyStore:         autonomyStore,
 		registrar:             registrar,
 		updateChecker:         updateChecker,
-		packageUploader:       packageUploader,
 		control:               control,
 		feedbackStore:         feedbackStore,
 		feedbackRate:          make(map[string][]time.Time),

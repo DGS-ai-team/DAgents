@@ -13,7 +13,7 @@ const KIND = {
     showPlatform: false,
   },
   hook: {
-    title: "上传 Hook 包",
+    title: "上传 Hook 插件包",
     idKey: "package_id",
     idPlaceholder: "example-hook",
     namePlaceholder: "Example Hook",

@@ -35,11 +35,6 @@ func BootstrapNodeSettings(ctx context.Context, cfg *config.Config, configPath s
 			_ = s.Close()
 			return nil, err
 		}
-		if configPath != "" {
-			if err := config.SaveBootstrapFile(configPath, cfg); err != nil {
-				logger.Warn("slim bootstrap YAML failed", "path", configPath, "error", err)
-			}
-		}
 	}
 	snap, err := s.Load(ctx)
 	if err != nil {

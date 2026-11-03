@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -29,6 +32,7 @@ func ApplyLLMConfigsToConfig(cfg *config.Config, records []LLMConfigRecord, acti
 			Mock:              rec.Mock,
 			Thinking:          rec.Thinking,
 			ReasoningEffort:   rec.ReasoningEffort,
+			ThinkingBudget:    rec.ThinkingBudget,
 			MultimodalEnabled: &mm,
 		}
 		order = append(order, id)
@@ -47,8 +51,9 @@ func ApplyLLMConfigsToConfig(cfg *config.Config, records []LLMConfigRecord, acti
 	_ = cfg.SetActiveLLMProfile(active)
 }
 
-// EnsureDefaultLLMConfig 在全新安装的档案库为空时创建唯一的默认档案。
-// 运行时设置不再从旧 YAML/profile 结构迁移；当前设置来源始终是 llm_configs.db。
+// EnsureDefaultLLMConfig seeds an empty database once. Legacy node_settings
+// profile data is imported as a migration; ordinary YAML business values are
+// ignored by OverlayNodeSettings.
 func EnsureDefaultLLMConfig(ctx context.Context, s *LLMConfigStore, cfg *config.Config) error {
 	if s == nil || cfg == nil {
 		return nil
@@ -59,6 +64,45 @@ func EnsureDefaultLLMConfig(ctx context.Context, s *LLMConfigStore, cfg *config.
 	}
 	if n > 0 {
 		return nil
+	}
+	ids := cfg.LLM.ProfileIDs()
+	if len(ids) > 0 {
+		records := make([]LLMConfigRecord, 0, len(ids))
+		keys := make(map[string]string)
+		missingKeyEnv := make([]string, 0)
+		for order, id := range ids {
+			profile, ok := cfg.LLM.GetProfile(id)
+			if !ok {
+				continue
+			}
+			records = append(records, LLMConfigRecord{
+				ID:                id,
+				SortOrder:         order,
+				Provider:          profile.Provider,
+				BaseURL:           profile.BaseURL,
+				Model:             profile.Model,
+				Mock:              profile.Mock,
+				Thinking:          profile.Thinking,
+				ReasoningEffort:   profile.ReasoningEffort,
+				ThinkingBudget:    profile.ThinkingBudget,
+				MultimodalEnabled: config.ProfileMultimodalEnabled(profile),
+			})
+			if env := strings.TrimSpace(profile.APIKeyEnv); env != "" {
+				if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+					keys[id] = value
+				} else {
+					missingKeyEnv = append(missingKeyEnv, env)
+				}
+			}
+		}
+		if len(missingKeyEnv) > 0 {
+			sort.Strings(missingKeyEnv)
+			missingKeyEnv = compactStrings(missingKeyEnv)
+			return fmt.Errorf("cannot migrate legacy LLM profiles: required environment variable(s) %s are unset; keep the original settings and start Node with these variables to retry", strings.Join(missingKeyEnv, ", "))
+		}
+		if len(records) > 0 {
+			return s.ReplaceAll(ctx, records, keys, nil)
+		}
 	}
 	id := strings.TrimSpace(cfg.LLM.Active)
 	if id == "" {
@@ -72,7 +116,29 @@ func EnsureDefaultLLMConfig(ctx context.Context, s *LLMConfigStore, cfg *config.
 		Mock:              cfg.LLM.Mock,
 		Thinking:          cfg.LLM.Thinking,
 		ReasoningEffort:   cfg.LLM.ReasoningEffort,
+		ThinkingBudget:    cfg.LLM.ThinkingBudget,
 		MultimodalEnabled: cfg.MultimodalEnabled(),
 	}
-	return s.ReplaceAll(ctx, []LLMConfigRecord{rec}, nil, nil)
+	keys := map[string]string{}
+	if env := strings.TrimSpace(cfg.LLM.APIKeyEnv); env != "" {
+		if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+			keys[id] = value
+		} else {
+			return fmt.Errorf("cannot migrate legacy LLM profile: required environment variable %s is unset; keep the original settings and start Node with this variable to retry", env)
+		}
+	}
+	return s.ReplaceAll(ctx, []LLMConfigRecord{rec}, keys, nil)
+}
+
+func compactStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	out := values[:1]
+	for _, value := range values[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
+		}
+	}
+	return out
 }

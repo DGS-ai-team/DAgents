@@ -61,7 +61,7 @@ describe("AgentDetailSettings staged persistence", () => {
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get('input[aria-label="每轮最大工具调用数"]').setValue("1.5");
-    await wrapper.get(".agent-detail__actions .btn--primary").trigger("click");
+    await wrapper.get(".settings-savebar .btn--primary").trigger("click");
     await flushPromises();
 
     expect(api.patchAgent).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe("AgentDetailSettings staged persistence", () => {
     await flushPromises();
     const prompt = wrapper.get('textarea[aria-label="提示词草稿"]');
     await prompt.setValue("unsaved prompt draft");
-    await wrapper.get(".agent-detail__actions .btn--primary").trigger("click");
+    await wrapper.get(".settings-savebar .btn--primary").trigger("click");
     await flushPromises();
 
     expect(api.patchAgent).toHaveBeenCalledWith("agent-a", expect.any(Object));
@@ -92,7 +92,7 @@ describe("AgentDetailSettings staged persistence", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("已阻止保存以免覆盖现有内容");
-    expect(wrapper.get(".agent-detail__actions .btn--primary").element.disabled).toBe(true);
+    expect(wrapper.get(".settings-savebar .btn--primary").element.disabled).toBe(true);
     expect(api.patchAgent).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -108,7 +108,7 @@ describe("AgentDetailSettings staged persistence", () => {
 
     expect(wrapper.get('[aria-label="工具组"]').text()).toBe("fs");
     expect(wrapper.text()).toContain("已保留 Agent 现有工具组并阻止保存");
-    expect(wrapper.get(".agent-detail__actions .btn--primary").element.disabled).toBe(true);
+    expect(wrapper.get(".settings-savebar .btn--primary").element.disabled).toBe(true);
     expect(api.patchAgent).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -118,7 +118,7 @@ describe("AgentDetailSettings staged persistence", () => {
     api.putAgentPromptContext.mockImplementationOnce(() => new Promise((resolve) => { releasePrompt = resolve; }));
     const wrapper = mountPage();
     await flushPromises();
-    const pending = wrapper.get(".agent-detail__actions .btn--primary").trigger("click");
+    const pending = wrapper.get(".settings-savebar .btn--primary").trigger("click");
     await flushPromises();
     globalThis.__agentDetailSettingsRoute.params.agentId = "agent-b";
     await flushPromises();

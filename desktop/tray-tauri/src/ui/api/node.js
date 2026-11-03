@@ -128,8 +128,8 @@ export function getLLMSettings() {
   return apiFetch("/v1/llm/settings");
 }
 
-export function patchLLMSettings(patch) {
-  return apiFetch("/v1/llm/settings", { method: "PATCH", body: patch });
+export function getLLMCapabilities(provider, model) {
+  return apiFetch("/v1/llm/capabilities", { params: { provider, model } });
 }
 
 export function getSetupConfig() {
@@ -293,17 +293,6 @@ export function cancelAgentTurn(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/cancel`, { method: "POST", body: {} });
 }
 
-export function cancelAgentToolCall(agentId, toolCallId) {
-  return apiFetch(
-    `/v1/agents/${encodeURIComponent(agentId)}/tool-calls/${encodeURIComponent(toolCallId)}/cancel`,
-    { method: "POST", body: {} },
-  );
-}
-
-export function getAgentToolJobs(agentId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/tool-jobs`);
-}
-
 export function listTransfers(agentId = "") {
   return apiFetch("/v1/transfers", { params: agentId ? { agent_id: agentId } : {} });
 }
@@ -380,10 +369,6 @@ export function unloadSkill(agentId, skillName) {
     method: "POST",
     body: { skill_name: skillName },
   });
-}
-
-export function listChildAgents(agentId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/child-agents`);
 }
 
 export function cancelChildAgent(agentId, childAgentId, reason = "") {
@@ -568,18 +553,6 @@ export function deleteTrigger(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
 }
 
-export function listAgentPolicyGrants(agentId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants`);
-}
-
-export function createAgentPolicyGrant(agentId, body) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants`, { method: "POST", body });
-}
-
-export function revokeAgentPolicyGrant(agentId, grantId) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" });
-}
-
 export function fireTrigger(triggerId) {
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/fire`, { method: "POST", body: {} });
 }
@@ -592,27 +565,6 @@ export function recoverTrigger(triggerId, deliveryId, revision) {
   const body = { delivery_id: deliveryId };
   if (revision !== undefined && revision !== null) body.revision = revision;
   return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}/recover`, { method: "POST", body });
-}
-
-export function uploadSkillToManage({ path, skillId, version, name, publish = false }) {
-  return apiFetch("/v1/manage/upload/skill", {
-    method: "POST",
-    body: { path, skill_id: skillId, version, name, publish },
-  });
-}
-
-export function uploadExternalToolToManage({ path, toolId, version, name, platform = "", publish = false }) {
-  return apiFetch("/v1/manage/upload/externaltool", {
-    method: "POST",
-    body: { path, tool_id: toolId, version, name, platform, publish },
-  });
-}
-
-export function uploadPluginToManage({ path, pluginId, version, name, platform = "", publish = false }) {
-  return apiFetch("/v1/manage/upload/plugin", {
-    method: "POST",
-    body: { path, plugin_id: pluginId, version, name, platform, publish },
-  });
 }
 
 /** 工作组列表：scope=subscribed|acl|all */

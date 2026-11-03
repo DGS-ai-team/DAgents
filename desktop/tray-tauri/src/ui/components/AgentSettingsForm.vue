@@ -22,6 +22,8 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
   /** 模板编辑没有固定工作目录；Agent 设置页显示已绑定的工作目录。 */
   showWorkspace: { type: Boolean, default: true },
+  /** Hide the form's basic-information title when an enclosing detail section supplies it. */
+  hideBasicHeading: { type: Boolean, default: false },
   /**
    * full：设置页完整表单
    * create-basics：创建弹窗身份步
@@ -171,6 +173,10 @@ const llmProfileOptions = computed(() =>
 const memoryScopeOptions = computed(() =>
   MEMORY_SCOPES.map((opt) => ({ value: opt.value, label: opt.label })),
 );
+const agentTypeOptions = [
+  { value: "normal", label: "普通 Agent" },
+  { value: "auto", label: "Auto Agent（自主任务）" },
+];
 </script>
 
 <template>
@@ -189,14 +195,11 @@ const memoryScopeOptions = computed(() =>
       class="agent-settings-section"
       :class="{ 'agent-settings-section--flat': isFull }"
     >
-      <h3 v-if="isFull" class="agent-settings-section__title">基础信息</h3>
+      <h3 v-if="isFull && !hideBasicHeading" class="agent-settings-section__title">基础信息</h3>
       <div :class="{ 'agent-settings-section__body': isFull }">
         <label class="agent-settings-field agent-settings-field--type">
           <span class="agent-settings-field__label">智能体类型</span>
-          <select v-model="draft.agentType" class="agent-settings-input">
-            <option value="normal">普通 Agent</option>
-            <option value="auto">Auto Agent（自主任务）</option>
-          </select>
+          <UiSelect v-model="draft.agentType" :options="agentTypeOptions" />
         </label>
         <label class="agent-settings-field">
           <span
@@ -663,7 +666,6 @@ const memoryScopeOptions = computed(() =>
   resize: none;
 }
 
-.agent-settings-form--create .agent-settings-field :deep(.ui-select__trigger),
 .agent-settings-form--create .agent-settings-input {
   background: var(--color-input, var(--color-surface));
 }
@@ -809,13 +811,6 @@ const memoryScopeOptions = computed(() =>
 
 .agent-settings-field :deep(.ui-select) {
   max-width: none;
-}
-
-.agent-settings-field :deep(.ui-select__trigger) {
-  padding: 7px 12px;
-  min-height: 34px;
-  border-radius: 8px;
-  background: var(--color-surface);
 }
 
 .agent-settings-input {

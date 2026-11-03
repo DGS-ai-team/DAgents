@@ -422,3 +422,18 @@ ORDER BY session_seq ASC LIMIT ?`, sessionID, afterSeq, limit)
 	}
 	return events, rows.Err()
 }
+
+// TurnEventLogVersion returns the newest durable event ID and event count for
+// a session. The pair detects both appends and ordinary deletion/rebuilds
+// without reading or retaining the journal payloads.
+func (s *SQLiteStore) TurnEventLogVersion(ctx context.Context, sessionID string) (latestID int64, count int64, err error) {
+	if s == nil || s.db == nil {
+		return 0, 0, fmt.Errorf("store is nil")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return 0, 0, fmt.Errorf("session id is required")
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_id), 0), COUNT(*) FROM turn_events WHERE session_id = ?`, sessionID).Scan(&latestID, &count)
+	return latestID, count, err
+}

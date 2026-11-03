@@ -199,6 +199,10 @@ type Manager struct {
 	mediaOnlyMu sync.Mutex
 	mediaOnly   map[string]*media.Registry
 
+	lifecycleProjectionMu    sync.Mutex
+	lifecycleProjectionCache map[lifecycleProjectionKey]lifecycleProjectionCacheEntry
+	lifecycleProjectionOrder []lifecycleProjectionKey
+
 	triggerDelivery     triggers.DeliveryTracker
 	conditionCompletion func(triggers.ConditionRequest, triggers.ConditionResult) error
 	conditionValidator  func(context.Context, turn.ConditionApprovalMetadata) error
@@ -256,18 +260,19 @@ func NewManager(
 		turnOpts.MaxModelRetries = 2
 	}
 	return &Manager{
-		agentID:          agentID,
-		hub:              hub,
-		llm:              llmClient,
-		tools:            registry,
-		policy:           policyEngine,
-		store:            st,
-		turn:             turnOpts,
-		ctx:              ctx,
-		cancel:           cancel,
-		sessions:         make(map[string]*runtime),
-		maintenanceGates: make(map[string]*agentExecutionGate),
-		logger:           logx.OrDefault(logger),
+		agentID:                  agentID,
+		hub:                      hub,
+		llm:                      llmClient,
+		tools:                    registry,
+		policy:                   policyEngine,
+		store:                    st,
+		turn:                     turnOpts,
+		ctx:                      ctx,
+		cancel:                   cancel,
+		sessions:                 make(map[string]*runtime),
+		maintenanceGates:         make(map[string]*agentExecutionGate),
+		lifecycleProjectionCache: make(map[lifecycleProjectionKey]lifecycleProjectionCacheEntry),
+		logger:                   logx.OrDefault(logger),
 	}
 }
 

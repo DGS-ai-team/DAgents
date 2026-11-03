@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"strings"
 	"time"
 )
@@ -16,17 +15,15 @@ type AgentPolicyRecord struct {
 	Tools     map[string]string            // tool_name → always|never|rule|deny
 	Shell     map[string]map[string]string // shell_type → command → mode
 	UpdatedAt time.Time
-	Grants    []policy.Grant
 }
 
 type agentPolicyJSON struct {
-	Tools  map[string]string            `json:"tools"`
-	Shell  map[string]map[string]string `json:"shell"`
-	Grants []policy.Grant               `json:"grants,omitempty"`
+	Tools map[string]string            `json:"tools"`
+	Shell map[string]map[string]string `json:"shell"`
 }
 
 // MutateAgentPolicy serializes a read-modify-write policy update, preventing
-// concurrent grant creation/revocation from resurrecting stale grants.
+// concurrent policy updates from overwriting each other.
 func (s *AgentStore) MutateAgentPolicy(ctx context.Context, agentID string, mutate func(*AgentPolicyRecord) error) (*AgentPolicyRecord, error) {
 	if s == nil {
 		return nil, fmt.Errorf("agent store unavailable")
@@ -95,7 +92,6 @@ SELECT agent_id, policy_json, updated_at FROM agent_policy WHERE agent_id = ?`, 
 		AgentID:   id,
 		Tools:     parsed.Tools,
 		Shell:     parsed.Shell,
-		Grants:    parsed.Grants,
 		UpdatedAt: ut,
 	}, nil
 }
@@ -126,7 +122,7 @@ func (s *AgentStore) saveAgentPolicy(ctx context.Context, rec AgentPolicyRecord)
 	if shell == nil {
 		shell = map[string]map[string]string{}
 	}
-	payload, err := json.Marshal(agentPolicyJSON{Tools: tools, Shell: shell, Grants: rec.Grants})
+	payload, err := json.Marshal(agentPolicyJSON{Tools: tools, Shell: shell})
 	if err != nil {
 		return err
 	}

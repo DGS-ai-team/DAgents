@@ -47,7 +47,6 @@ func (s *AgentStore) LoadAgentPolicyEngine(ctx context.Context, agentID string) 
 		return nil, err
 	}
 	maps := policy.StringMapsToMaps(rec.Tools, rec.Shell)
-	maps.Grants = rec.Grants
 	return policy.NewEngineFromMaps(maps), nil
 }
 

@@ -128,12 +128,13 @@ func assertManageSettingsPreserved(t *testing.T, cfg *config.Config) {
 
 func TestApplyPatch_llmProfiles(t *testing.T) {
 	cfg := testBaseConfig(t)
+	budget := 12000
 	updated, err := ApplyPatch(cfg, SettingsPatch{
 		LLM: &LLMSettings{
 			Active: "qwen",
 			Profiles: []LLMProfileSettings{
 				{ID: "default", Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY", MultimodalEnabled: false},
-				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY", MultimodalEnabled: true},
+				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY", Thinking: "enabled", ThinkingBudget: &budget, MultimodalEnabled: true},
 			},
 		},
 	})
@@ -157,7 +158,7 @@ func TestApplyPatch_llmProfiles(t *testing.T) {
 			break
 		}
 	}
-	if qwen == nil || !qwen.MultimodalEnabled {
+	if qwen == nil || !qwen.MultimodalEnabled || qwen.ThinkingBudget == nil || *qwen.ThinkingBudget != budget {
 		t.Fatalf("qwen profile view = %+v", qwen)
 	}
 }

@@ -22,4 +22,24 @@ describe("AgentsSettings agent view", () => {
     expect(wrapper.text()).toContain("暂无符合条件的智能体");
     wrapper.unmount();
   });
+
+  it("opens the existing desktop creation flow from the list", async () => {
+    const dispatch = vi.spyOn(window, "dispatchEvent");
+    const wrapper = mount(AgentsSettings, { global: { stubs: { AgentTemplateCreateModal: true } } });
+    await flushPromises();
+    await wrapper.get('[aria-label="新建智能体"]').trigger("click");
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "desktop-open-agent-create" }));
+    wrapper.unmount();
+    dispatch.mockRestore();
+  });
+
+  it("refreshes the list after the shared creation flow succeeds", async () => {
+    const wrapper = mount(AgentsSettings, { global: { stubs: { AgentTemplateCreateModal: true } } });
+    await flushPromises();
+    const callsBeforeCreation = api.listAgents.mock.calls.length;
+    window.dispatchEvent(new CustomEvent("desktop-agent-created", { detail: { agentId: "agent-new" } }));
+    await flushPromises();
+    expect(api.listAgents).toHaveBeenCalledTimes(callsBeforeCreation + 1);
+    wrapper.unmount();
+  });
 });

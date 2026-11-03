@@ -68,6 +68,20 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadFileOnlyValidatesBootstrapFields(t *testing.T) {
+	path, _ := testConfigPath(t, "node_id: cli-bootstrap\nmanage:\n  enabled: true\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile should let the Node DB override stale business settings: %v", err)
+	}
+	if cfg.LocalNodeEndpoint() != "http://127.0.0.1:18765" {
+		t.Fatalf("CLI bootstrap endpoint = %q", cfg.LocalNodeEndpoint())
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("full validation should reject the unoverlaid business config")
+	}
+}
+
 func TestLocalNodeEndpointNormalizesOnlyDerivedWildcardListenEndpoint(t *testing.T) {
 	tests := []struct {
 		name     string

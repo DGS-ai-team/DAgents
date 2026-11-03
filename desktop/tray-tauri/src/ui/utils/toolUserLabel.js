@@ -1,10 +1,6 @@
 import { truncateGraphemes } from "@shared-frontend/utils/textTruncate.js";
 import { resolveToolArgumentsFromData, toolCallPurpose } from "@shared-frontend/utils/toolCalls.js";
-import {
-  bashControlMode,
-  toolCallIdFromEntry,
-  toolJobsStore,
-} from "../stores/toolJobs.js";
+import { toolCallIdFromEntry, toolJobsStore } from "../stores/toolJobs.js";
 
 /** 面向普通用户的工具类别名（非技术 tool id）。 */
 const TOOL_USER_LABELS = {
@@ -275,16 +271,6 @@ export function toolStepIsActiveInGroup(step = {}) {
   if (!step.callEntry) return false;
   const phase = resolveToolStepPhase(step);
   return !["completed", "failed", "cancelled", "rejected", "interrupted"].includes(phase);
-}
-
-/** A lagging bash job snapshot must not override an explicit terminal result. */
-export function bashControlModeForStep({ callEntry, resultEntry, executionHint = null } = {}) {
-  if (resultEntry) {
-    if (!toolStepIsInProgress({ callEntry, resultEntry })) return null;
-  } else if (["settled", "failed", "cancelled", "rejected", "interrupted"].includes(executionHint)) {
-    return null;
-  }
-  return bashControlMode({ callEntry, resultEntry });
 }
 
 /** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */

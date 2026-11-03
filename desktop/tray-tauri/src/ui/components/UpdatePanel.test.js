@@ -19,4 +19,21 @@ describe("UpdatePanel headers", () => {
     await flushPromises();
     expect(wrapper.find("header").exists()).toBe(hasHeader);
   });
+
+  it("presents management-platform availability in localized copy", async () => {
+    platformApi.getUpdateStatus.mockResolvedValue({
+      current_version: "1",
+      latest_version: "1",
+      upgrade_available: false,
+      manage_reachable: false,
+      message: "Manage 未启用，无法检查更新",
+    });
+    const wrapper = mount(UpdatePanel, { props: { embedded: true } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("管理平台连接");
+    expect(wrapper.text()).toContain("不可达");
+    expect(wrapper.text()).toContain("管理平台未启用，无法检查更新。");
+    expect(wrapper.text()).not.toContain("Manage");
+  });
 });

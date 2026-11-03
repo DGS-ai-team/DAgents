@@ -2054,6 +2054,19 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   overflow: auto;
   pointer-events: auto;
 }
+.dock-reference-target {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border: 1px solid #dfe6e8;
+  border-radius: 7px;
+  background: #f3f6f7;
+  color: #748087;
+  font-size: 11px;
+  line-height: 1.2;
+}
 .dock-reference {
   display: flex;
   align-items: center;

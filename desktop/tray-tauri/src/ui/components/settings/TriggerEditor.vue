@@ -1,9 +1,12 @@
 <script setup>
+import { computed } from "vue";
 import {
   TRIGGER_SCHEDULE_OPTIONS,
   WEEKDAY_OPTIONS,
   isCalendarScheduleKind,
 } from "../../utils/triggerForm.js";
+import UiSelect from "../UiSelect.vue";
+import UiIcon from "../UiIcon.vue";
 
 const form = defineModel("form", { type: Object, required: true });
 
@@ -17,6 +20,17 @@ defineProps({
 });
 
 const emit = defineEmits(["submit", "cancel"]);
+const scheduleOptions = TRIGGER_SCHEDULE_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
+const weekdayOptions = WEEKDAY_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
+const sessionModeOptions = computed(() => [
+  { value: "fixed", label: "固定会话（由系统绑定）" },
+  ...(form.value.sessionTargetMode === "fixed" ? [] : [{
+    value: form.value.sessionTargetMode,
+    label: form.value.sessionTargetMode === "new_session" ? "每次使用新会话（仅保留原值）" : "使用最近活跃会话（仅保留原值）",
+    disabled: true,
+  }]),
+]);
+function setWeekday(value) { form.value.weekday = Number(value); }
 </script>
 
 <template>
@@ -30,11 +44,12 @@ const emit = defineEmits(["submit", "cancel"]);
 
     <label class="settings-field">
       <span class="settings-field__label">调度类型</span>
-      <select v-model="form.scheduleKind" class="settings-field__input">
-        <option v-for="opt in TRIGGER_SCHEDULE_OPTIONS" :key="opt.value" :value="opt.value">
-          {{ opt.label }}
-        </option>
-      </select>
+      <UiSelect
+        :model-value="form.scheduleKind"
+        :options="scheduleOptions"
+        aria-label="调度类型"
+        @update:model-value="form.scheduleKind = $event"
+      />
     </label>
 
     <label class="settings-field">
@@ -50,12 +65,12 @@ const emit = defineEmits(["submit", "cancel"]);
 
     <label class="settings-field">
       <span class="settings-field__label">会话策略</span>
-      <select v-model="form.sessionTargetMode" class="settings-field__input">
-        <option value="fixed">固定会话（由系统绑定）</option>
-        <option v-if="form.sessionTargetMode !== 'fixed'" :value="form.sessionTargetMode" disabled>
-          {{ form.sessionTargetMode === "new_session" ? "每次使用新会话（仅保留原值）" : "使用最近活跃会话（仅保留原值）" }}
-        </option>
-      </select>
+      <UiSelect
+        :model-value="form.sessionTargetMode"
+        :options="sessionModeOptions"
+        aria-label="会话策略"
+        @update:model-value="form.sessionTargetMode = $event"
+      />
       <span class="settings-field__hint">任务使用目标智能体的主会话。</span>
     </label>
 
@@ -90,9 +105,7 @@ const emit = defineEmits(["submit", "cancel"]);
 
       <label v-if="form.scheduleKind === 'weekly'" class="settings-field">
         <span class="settings-field__label">星期</span>
-        <select v-model.number="form.weekday" class="settings-field__input">
-          <option v-for="opt in WEEKDAY_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </select>
+        <UiSelect :model-value="form.weekday" :options="weekdayOptions" aria-label="星期" @update:model-value="setWeekday" />
       </label>
 
       <label v-else-if="form.scheduleKind === 'monthly'" class="settings-field">
@@ -102,7 +115,15 @@ const emit = defineEmits(["submit", "cancel"]);
 
       <div v-if="form.cmd" class="trigger-form__legacy-warning">
         <span>该任务包含旧版命令检查，当前不会执行。</span>
-        <button type="button" class="btn btn--ghost btn--sm" @click="form.cmd = ''">清除旧检查</button>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          aria-label="清除旧版命令检查"
+          title="清除旧版命令检查"
+          @click="form.cmd = ''"
+        >
+          <UiIcon name="trash" :size="15" />
+        </button>
       </div>
     </template>
 

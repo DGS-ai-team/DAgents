@@ -128,7 +128,8 @@ onBeforeUnmount(() => {
       </section>
     </Transition>
 
-    <div v-if="!collapsed && references.length" class="dock-references" role="list" aria-label="已引用资源">
+    <div v-if="!collapsed && references.length" class="dock-references" role="list" :aria-label="`${agentName} 的已引用资源`">
+      <span class="dock-reference-target">发送给 {{ agentName }}</span>
       <div v-for="reference in references" :key="reference.id" class="dock-reference" role="listitem" :title="referenceTitle(reference)">
         <UiIcon name="paperclip" :size="14" aria-hidden="true" />
         <span>{{ referenceLabel(reference) }}</span>

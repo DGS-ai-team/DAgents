@@ -208,21 +208,21 @@ func TestOpenAIAdapter_prepareOutbound_stripsFinalAssistantReasoning(t *testing.
 }
 
 func TestOpenAIBuildRequestExtra(t *testing.T) {
-	extra := BuildRequestExtraForModel("openai", "", "enabled", "high")
-	if extra["thinking"] == nil {
-		t.Fatal("missing thinking")
+	extra := BuildRequestExtraForModel("openai", "o3", "enabled", "high")
+	if extra["thinking"] != nil {
+		t.Fatalf("OpenAI must not receive provider-specific thinking object: %v", extra)
 	}
 	if extra["reasoning_effort"] != "high" {
 		t.Fatalf("reasoning_effort = %v", extra["reasoning_effort"])
 	}
-	disabled := BuildRequestExtraForModel("openai", "", "disabled", "high")
-	if disabled["thinking"] == nil {
-		t.Fatal("missing thinking disabled")
+	disabled := BuildRequestExtraForModel("openai", "o3", "disabled", "high")
+	if disabled["thinking"] != nil || disabled["reasoning_effort"] != "high" {
+		t.Fatalf("OpenAI reasoning extra = %v", disabled)
 	}
 }
 
 func TestDeepSeekBuildRequestExtra(t *testing.T) {
-	extra := BuildRequestExtraForModel("deepseek", "", "enabled", "high")
+	extra := BuildRequestExtraForModel("deepseek", "deepseek-v4-pro", "enabled", "high")
 	if extra["thinking"] == nil {
 		t.Fatal("missing thinking extra")
 	}

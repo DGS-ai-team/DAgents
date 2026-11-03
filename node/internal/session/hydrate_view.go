@@ -3,9 +3,11 @@ package session
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
@@ -96,6 +98,7 @@ func (m *Manager) buildHydrateView(
 		mediaByCall := media.RehydrateFromMessages(reg, messages, callIndex)
 		EnrichTranscriptMedia(transcript, mediaByCall)
 	}
+	transcript = appendActiveToolCalls(transcript, lifecycle.ActiveToolCalls)
 	turnState := buildTurnStateView(lifecycle, lifecycleSeq)
 	turnState.HistoryRevision = historyRevision
 	return &HydrateView{
@@ -111,4 +114,42 @@ func (m *Manager) buildHydrateView(
 		HasUnread:       notifySeq > ackSeq,
 		ChildAgents:     []ChildAgentView{},
 	}
+}
+
+// appendActiveToolCalls adds a read-only view of calls in the coordinator's
+// current batch. The lifecycle snapshot is atomic with the
+// history snapshot; deduplication also avoids moving/repeating calls already
+// accepted into the durable transcript (including a result that raced ahead).
+func appendActiveToolCalls(transcript []TranscriptEntry, calls []turn.ToolCallProjection) []TranscriptEntry {
+	if len(calls) == 0 {
+		return transcript
+	}
+	seen := make(map[string]bool, len(transcript))
+	for _, entry := range transcript {
+		if entry == nil {
+			continue
+		}
+		if id, ok := entry["blockId"].(string); ok && strings.TrimSpace(id) != "" {
+			seen[strings.TrimSpace(id)] = true
+		}
+		if data, ok := entry["data"].(map[string]any); ok {
+			if id, ok := data["tool_call_id"].(string); ok && strings.TrimSpace(id) != "" {
+				seen[strings.TrimSpace(id)] = true
+			}
+		}
+	}
+	for _, call := range calls {
+		id := strings.TrimSpace(call.ID)
+		if id == "" || seen[id] || tools.IsAskUserInformation(call.ToolName) {
+			continue
+		}
+		entry := toolCallEntryFromCall(llm.ToolCall{
+			ID:       id,
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: call.ToolName, Arguments: string(call.Arguments)},
+		}, nil)
+		transcript = append(transcript, entry)
+		seen[id] = true
+	}
+	return transcript
 }

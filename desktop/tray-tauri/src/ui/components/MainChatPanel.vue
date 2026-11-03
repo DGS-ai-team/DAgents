@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, shallowRef, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { computed, ref, shallowRef, watch, nextTick, onMounted, onBeforeUnmount, triggerRef } from "vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import MessageBubble from "./MessageBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
@@ -11,6 +11,7 @@ import ToolGroupRow from "./ToolGroupRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { groupConsecutiveToolSteps } from "../utils/streamDisplay.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
+import { turnStateStore } from "../stores/turnState.js";
 import { countNewStreamItems } from "../utils/streamUnread.js";
 import {
   measureSync,
@@ -19,6 +20,7 @@ import {
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
+  streamingText: { type: String, default: "" },
   hitlQueue: { type: Array, default: () => [] },
   toolVerbose: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
@@ -64,44 +66,56 @@ let scrollUpdateHandle = null;
 let streamWatchInitialized = false;
 
 const stream = shallowRef([]);
+const displayStream = shallowRef([]);
+
+function entryValueKey(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? String(value ?? "");
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+// Track exact history payloads for same-length edits. This key is independent
+// of live assistant text, so token deltas never rescan or stringify history.
+const entriesInputKey = computed(() => {
+  const parts = [props.entries.length];
+  for (const entry of props.entries) {
+    parts.push(
+      entry.id,
+      entry.kind,
+      entry.text,
+      entryValueKey(entry.file_refs),
+      entry.streaming ? 1 : 0,
+      entry.partial ? 1 : 0,
+      entry.summary,
+      entry.data?.tool_call_id,
+      entry.data?.tool_name,
+      entryValueKey(entry.data?.content),
+      entryValueKey(entry.data?.arguments),
+    );
+  }
+  return parts.join("\0");
+});
 
 /**
  * 流式 token、工具轮询和 SSE 状态可能在同一帧内连续变化。
  * 将展示层重建合并到下一帧，避免每个 token 都重复构建消息列表和测量布局。
  */
-const streamInputKey = computed(() => {
-  const parts = [props.entries.length, props.hitlQueue.length];
-  for (const entry of props.entries) {
-    parts.push(
-      entry.id,
-      entry.kind,
-      (entry.text || "").length,
-      Array.isArray(entry.file_refs) ? entry.file_refs.map((file) => file?.path || "").join(",") : "",
-      entry.streaming ? 1 : 0,
-      entry.partial ? 1 : 0,
-      String(entry.summary || "").length,
-      String(entry.data?.content || "").length,
-      String(entry.data?.arguments || "").length,
-    );
-  }
-  for (const hitl of props.hitlQueue) {
-    parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
-  }
-  parts.push(
-    toolJobsStore.runningCallIds.join(","),
-  );
-  return parts.join("\0");
-});
-
 function rebuildStream() {
   streamBuildHandle = null;
+  const entries = props.streamingText
+    ? [...props.entries, liveAssistantEntry(props.streamingText)]
+    : props.entries;
   const items = measureSync(
     "stream.build",
-    () => buildStream(props.entries, props.hitlQueue),
-    { entries: props.entries.length },
+    () => buildStream(entries, props.hitlQueue),
+    { entries: entries.length },
   );
-  updateRuntimeMetrics({ entries: props.entries.length, streamItems: items.length });
+  updateRuntimeMetrics({ entries: entries.length, streamItems: items.length });
   stream.value = items;
+  displayStream.value = groupConsecutiveToolSteps(items);
 }
 
 function scheduleStreamBuild() {
@@ -114,9 +128,46 @@ function scheduleStreamBuild() {
   }
 }
 
-const displayStream = computed(() => groupConsecutiveToolSteps(stream.value));
+const executionInputKey = computed(() => [
+  toolJobsStore.runningCallIds.join(","),
+  ...turnStateStore.toolExecutions.map((execution) => `${execution.toolCallId}:${execution.status}:${execution.attempt}`),
+].join("\0"));
 
-watch(streamInputKey, scheduleStreamBuild, { immediate: true });
+function liveAssistantEntry(text) {
+  return {
+    id: `${props.agentId || "agent"}:live-assistant`,
+    kind: "assistant",
+    text: String(text || ""),
+    streaming: true,
+  };
+}
+
+function patchStreamingTail(text) {
+  const last = stream.value.at(-1);
+  const isLiveTail = last?.kind === "assistant" && last.entry?.streaming && last.entry?.id === `${props.agentId || "agent"}:live-assistant`;
+  if (!text) {
+    if (!isLiveTail) return;
+    stream.value.pop();
+    displayStream.value.pop();
+    triggerRef(stream);
+    triggerRef(displayStream);
+    return;
+  }
+  if (!isLiveTail) {
+    scheduleStreamBuild();
+    return;
+  }
+  const entry = liveAssistantEntry(text);
+  last.entry = entry;
+  displayStream.value.at(-1).entry = entry;
+  triggerRef(stream);
+  triggerRef(displayStream);
+}
+
+watch(entriesInputKey, scheduleStreamBuild, { immediate: true });
+watch(() => props.hitlQueue, scheduleStreamBuild);
+watch(executionInputKey, scheduleStreamBuild);
+watch(() => props.streamingText, patchStreamingTail);
 
 const renderedStream = computed(() => {
   let visible = displayStream.value;
@@ -145,33 +196,6 @@ const hitlQueueKey = computed(() =>
     .join("\0"),
 );
 /** 消息/HITL/状态条等内容变化指纹；流式 assistant 改 text 长度也会触发。 */
-const tailContentKey = computed(() => {
-  return measureSync("tail.key", () => {
-    const parts = [stream.value.length, props.hitlQueue.length];
-    for (const entry of props.entries) {
-      parts.push(
-        entry.id,
-        entry.kind,
-        (entry.text || "").length,
-        Array.isArray(entry.file_refs) ? entry.file_refs.length : 0,
-        entry.streaming ? 1 : 0,
-      );
-      // 工具气泡内容在 data 上，text 常为空；纳入 summary / content 长度以免漏钉尾
-      if (entry.kind === "tool_call" || entry.kind === "tool_result") {
-        parts.push(
-          String(entry.summary || "").length,
-          String(entry.data?.content || "").length,
-          entry.partial ? 1 : 0,
-        );
-      }
-    }
-    for (const hitl of props.hitlQueue) {
-      parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
-    }
-    return parts.join("\0");
-  }, { entries: props.entries.length });
-});
-
 function maybeScrollToTail() {
   if (scrollUpdateHandle !== null) return;
   const run = () => {
@@ -190,7 +214,7 @@ function maybeScrollToTail() {
   }
 }
 
-watch(tailContentKey, () => {
+watch([displayStream, hitlQueueKey, () => props.streamingText], () => {
   maybeScrollToTail();
 });
 

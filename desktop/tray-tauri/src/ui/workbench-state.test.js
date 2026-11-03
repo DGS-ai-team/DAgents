@@ -3,18 +3,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
   const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeAgentName: 'autotest', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0' })
   assert.deepEqual(desktopMenuNames, ['DAgents', '资源', '视图', '智能体', '帮助'])
   assert.equal(menus.DAgents.find(item => item.action === 'settings-general').label, '通用设置')
-  const nodeStatus = menus.DAgents.find(item => item.status)
-  assert.equal(nodeStatus.label, 'Node · 在线')
-  assert.equal(nodeStatus.hint, '0.11.0')
-  assert.equal(nodeStatus.disabled, undefined)
-  assert.equal(menus.DAgents.find(item => item.action === 'quit-desktop').label, '退出 Desktop')
-  assert.equal(menus.DAgents.find(item => item.action === 'quit-desktop').hint, 'Node 将继续运行')
+  assert.equal(menus.DAgents.some(item => item.status), false)
+  assert.equal(menus.DAgents.find(item => item.action === 'refresh').label, '检查本地服务连接')
+  assert.equal(menus.DAgents.find(item => item.action === 'quit-desktop').label, '退出桌面应用')
+  assert.equal(menus.DAgents.find(item => item.action === 'quit-desktop').hint, '本地服务将继续运行')
   assert.equal(menus['资源'].find(item => item.action === 'open-browser').disabled, false)
   assert.equal(menus['资源'].find(item => item.action === 'create-terminal').label, '打开终端…')
   assert.equal(menus['资源'].find(item => item.action === 'close-resource').hint, '浏览器')
@@ -22,6 +20,7 @@ test('Desktop menubar groups actions by user task and disables unavailable opera
   assert.equal(menus['视图'].find(item => item.action === 'agent-chat').disabled, false)
   assert.equal(menus['视图'].some(item => item.action === 'switch-resource'), false)
   assert.equal(menus['智能体'].find(item => item.action === 'approval').disabled, false)
+  assert.equal(menus['智能体'].find(item => item.action === 'compress-context').disabled, true)
   assert.equal(menus['智能体'].some(item => item.action === 'delete-agent'), false)
   assert.deepEqual(menus['智能体'].filter(item => item.header).map(item => item.label), ['autotest', '当前会话', '管理'])
   assert.equal(menus['帮助'].find(item => item.action === 'feedback').label, '提交反馈')
@@ -40,25 +39,30 @@ test('Desktop menubar groups actions by user task and disables unavailable opera
   assert.equal(workgroup['视图'].find(item => item.action === 'agent-chat').disabled, true)
   assert.equal(workgroup['视图'].find(item => item.action === 'agent-chat').hint, '工作组没有独立的智能体对话')
   const offline = createDesktopMenuModel({ activeTab: 'chat', online: false })
-  assert.equal(offline.DAgents.find(item => item.label.startsWith('Node ·')).hint, '本机')
+  assert.equal(offline.DAgents.some(item => item.status), false)
   assert.equal(offline['资源'].find(item => item.action === 'open-workspace').disabled, true)
-  assert.equal(offline['资源'].find(item => item.action === 'open-workspace').hint, 'Node 未连接')
+  assert.equal(offline['资源'].find(item => item.action === 'open-workspace').hint, '本地服务未连接')
   assert.equal(offline['资源'].find(item => item.action === 'create-terminal').disabled, true)
-  assert.equal(offline['资源'].find(item => item.action === 'create-terminal').hint, 'Node 未连接')
+  assert.equal(offline['资源'].find(item => item.action === 'create-terminal').hint, '本地服务未连接')
   assert.equal(offline['智能体'].find(item => item.action === 'current-agent-settings').disabled, true)
-  assert.equal(offline['智能体'].find(item => item.action === 'current-agent-settings').hint, 'Node 未连接')
+  assert.equal(offline['智能体'].find(item => item.action === 'current-agent-settings').hint, '本地服务未连接')
   assert.equal(offline['智能体'].some(item => item.action === 'delete-agent'), false)
   const setup = createDesktopMenuModel({ activeAgentId: 'agent-a', activeTab: 'chat', online: true, setupRequired: true })
   assert.equal(setup['资源'].find(item => item.action === 'open-workspace').disabled, true)
-  assert.equal(setup['资源'].find(item => item.action === 'open-workspace').hint, '请先完成 Node 首次设置')
+  assert.equal(setup['资源'].find(item => item.action === 'open-workspace').hint, '请先完成本地服务首次设置')
   assert.equal(setup['智能体'].find(item => item.action === 'create-agent').disabled, true)
-  assert.equal(setup['智能体'].find(item => item.action === 'create-agent').hint, '请先完成 Node 首次设置')
+  assert.equal(setup['智能体'].find(item => item.action === 'create-agent').hint, '请先完成本地服务首次设置')
   const nonApprovalHitl = createDesktopMenuModel({ activeAgentId: 'agent-a', activeAgentName: 'Writer', online: true, hasPendingHitl: true, hasPendingApproval: false })
   assert.equal(nonApprovalHitl['智能体'][0].label, 'Writer')
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'approval').disabled, true)
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'approval').hint, '当前没有待审批请求')
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'clear-context').disabled, true)
   assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'clear-context').hint, '请先处理待审批请求')
+  assert.equal(nonApprovalHitl['智能体'].find(item => item.action === 'compress-context').disabled, true)
+  const compressBusy = createDesktopMenuModel({ activeAgentId: 'agent-a', online: true, generating: true })
+  assert.equal(compressBusy['智能体'].find(item => item.action === 'compress-context').disabled, true)
+  const compressReady = createDesktopMenuModel({ activeAgentId: 'agent-a', online: true })
+  assert.equal(compressReady['智能体'].find(item => item.action === 'compress-context').disabled, false)
 })
 
 test('resource menu only exposes draft recovery when the active file panel offers it', () => {
@@ -124,7 +128,7 @@ test('running terminal list removes non-running and duplicate rows, and de-dupli
   assert.equal(reusableTerminalConnection({ ...a, status: 'connected' }), null)
 })
 
-test('DesktopApp supplies local Node and active workspace state to the top-menu model', () => {
+test('DesktopApp supplies connection and active workspace state to the top-menu model', () => {
   const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
   const menuContext = source.match(/const menuEntries = computed\(\(\) => createDesktopMenuModel\(\{([\s\S]*?)\}\)\)/)?.[1]
   assert.ok(menuContext, 'menu model call is present')
@@ -249,13 +253,12 @@ test('Desktop chat adapter keeps hydrate tools and gives id-less history stable 
     { kind: 'tool_result', blockId: 'call-1', text: 'contents' },
     { kind: 'assistant', text: 'Done' },
   ]
-  const entries = desktopChatEntries('agent-a', transcript, 'Continuing')
-  assert.deepEqual(entries.map(entry => entry.kind), ['user', 'tool_call', 'tool_result', 'assistant', 'assistant'])
+  const entries = desktopChatEntries('agent-a', transcript)
+  assert.deepEqual(entries.map(entry => entry.kind), ['user', 'tool_call', 'tool_result', 'assistant'])
   assert.deepEqual(entries.map(entry => entry.id), [
-    'agent-a:history:0', 'agent-a:history:1', 'agent-a:history:2', 'agent-a:history:3', 'agent-a:history:4',
+    'agent-a:history:0', 'agent-a:history:1', 'agent-a:history:2', 'agent-a:history:3',
   ])
   assert.deepEqual(entries[1].data.arguments, { path: 'a.txt' })
-  assert.equal(entries[4].streaming, true)
   assert.notEqual(desktopChatEntries('agent-b', transcript)[0].id, entries[0].id)
 })
 
@@ -271,43 +274,17 @@ test('Desktop chat adapter preserves the safe conversation boundary in hydrated 
   assert.equal(entries[2].text, undefined)
 })
 
-test('streaming assistant reserves its history index and terminal hydrate keeps keys stable across turns', () => {
-  const live = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Question' }], 'Answer')
-  const completedTranscript = [
-    { kind: 'user', text: 'Question' },
-    { kind: 'assistant', text: 'Answer' },
-  ]
-  const terminalState = { phase: 'completed', terminal: true }
-  const terminal = desktopChatEntries('agent-a', completedTranscript, 'Answer', terminalState)
-  assert.equal(live.at(-1).id, 'agent-a:history:1')
-  assert.equal(terminal.filter(entry => entry.kind === 'assistant').length, 1)
-  assert.equal(terminal.at(-1).id, live.at(-1).id)
-  assert.equal(terminal.at(-1).streaming, undefined)
-  assert.deepEqual(desktopChatEntries('agent-a', completedTranscript, '', terminalState).map(entry => entry.id), terminal.map(entry => entry.id))
-
-  const nextTurn = [...completedTranscript, { kind: 'user', text: 'Next question' }]
-  const nextLive = desktopChatEntries('agent-a', nextTurn, 'Next answer', { phase: 'model_generating', terminal: false })
-  assert.equal(nextLive[1].id, 'agent-a:history:1')
-  assert.equal(nextLive.at(-1).id, 'agent-a:history:3')
-})
-
 test('pending user send is visible before hydrate and is not duplicated once persisted', () => {
   const pending = { id: 'send-1', kind: 'user', text: '2 + 2?', baseTranscriptLength: 1 }
-  const beforeHydrate = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Earlier' }], '', null, pending)
+  const beforeHydrate = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Earlier' }], pending)
   assert.deepEqual(beforeHydrate.map(entry => entry.text), ['Earlier', '2 + 2?'])
   assert.equal(beforeHydrate[1].id, 'agent-a:pending-user:send-1')
 
   const afterHydrate = desktopChatEntries('agent-a', [
     { kind: 'user', text: 'Earlier' },
     { kind: 'user', text: '2 + 2?' },
-  ], '', { phase: 'model_generating' }, pending)
+  ], pending)
   assert.deepEqual(afterHydrate.map(entry => entry.text), ['Earlier', '2 + 2?'])
-
-  const firstToken = desktopChatEntries('agent-a', [
-    { kind: 'user', text: 'Earlier' },
-    { kind: 'user', text: '2 + 2?' },
-  ], '4', { phase: 'model_generating' })
-  assert.deepEqual(firstToken.map(entry => entry.text), ['Earlier', '2 + 2?', '4'])
 })
 
 
@@ -364,4 +341,16 @@ test('pending send and its failure stay with Agent A after switching to Agent B'
   const errors = updateAgentError({}, 'agent-a', 'A 的请求失败')
   assert.equal(agentErrorFor(errors, 'agent-b'), '')
   assert.equal(agentErrorFor(errors, 'agent-a'), 'A 的请求失败')
+})
+
+test('workgroup sidebar appears only for enabled collaboration, existing groups, or its active view', () => {
+  assert.equal(workgroupCollaborationEnabled({ enabled: true, workgroup_enabled: false }), false)
+  assert.equal(workgroupCollaborationEnabled({ enabled: false, workgroup_enabled: true }), false)
+  assert.equal(workgroupCollaborationEnabled({ enabled: true, workgroup_enabled: true }), true)
+  assert.equal(shouldShowWorkgroupSidebar({ collaborationEnabled: false }), false)
+  assert.equal(shouldShowWorkgroupSidebar({ collaborationEnabled: true }), true)
+  assert.equal(shouldShowWorkgroupSidebar({ hasWorkgroups: true }), true)
+  assert.equal(shouldShowWorkgroupSidebar({ isWorkgroupView: true }), true)
+  const menu = createDesktopMenuModel().DAgents
+  assert.equal(menu.find(item => item.action === 'workgroups-settings').label, '工作组 / 协作设置')
 })

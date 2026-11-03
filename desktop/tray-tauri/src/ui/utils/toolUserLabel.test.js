@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
-  bashControlModeForStep,
   resolveToolStepPhase,
   toolStepIsActiveInGroup,
   toolStepIsInProgress,
@@ -250,7 +249,6 @@ describe("toolStepStatusText", () => {
 
     expect(resolveToolStepPhase(step)).toBe("failed");
     expect(toolStepIsActiveInGroup(step)).toBe(false);
-    expect(bashControlModeForStep(step)).toBe(null);
   });
 
   it("prefers an existing failed or queued result over a stale settled hint", () => {
@@ -260,10 +258,8 @@ describe("toolStepStatusText", () => {
     applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-result"] });
 
     expect(resolveToolStepPhase({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe("failed");
-    expect(bashControlModeForStep({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe(null);
     expect(resolveToolStepPhase({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("background");
     expect(toolStepIsInProgress({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe(true);
-    expect(bashControlModeForStep({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("running");
   });
 
   it.each(["running", "queued"])("keeps a nonterminal bash result in progress (%s)", (status) => {
@@ -273,7 +269,6 @@ describe("toolStepStatusText", () => {
     applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-live"] });
 
     expect(toolStepIsActiveInGroup(step)).toBe(true);
-    expect(bashControlModeForStep(step)).toBe("running");
   });
 
   it("prefers a real running job over a stale partial tool call", () => {
