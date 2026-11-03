@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, ref } from 'vue'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import WorkspaceFiles from './WorkspaceFiles.vue'
+import WorkspaceReferenceAttachments from './WorkspaceReferenceAttachments.vue'
+import { dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences } from '../workspace-references.js'
 import * as api from '../workspace-files-api.js'
 import { clearWorkspaceViewsForTests } from '../workspace-view-state.js'
 
@@ -145,6 +148,68 @@ describe('Desktop workspace resource navigation', () => {
     const limitedReferenceButton = wrapper.find('[aria-label="无法引用：一条消息最多添加 8 个附件或注解"]')
     expect(limitedReferenceButton.element.disabled).toBe(true)
     expect(limitedReferenceButton.attributes('title')).toContain('最多添加 8 个附件或注解')
+  })
+
+  it('carries a selected whole-file reference into chat, sends its file_ref, and retains it after failure', async () => {
+    const submit = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined)
+    const agentId = 'reference-chat-agent'
+    const ChatHarness = defineComponent({
+      setup() {
+        const inChat = ref(false)
+        const references = ref([])
+        const captureReference = reference => {
+          if (reference.agentId === agentId) references.value = [...references.value, reference]
+        }
+        const send = async () => {
+          const sentReferences = references.value.slice()
+          try {
+            await dispatchWorkspaceMessage({ agentId, references: sentReferences }, submit)
+            references.value = settleWorkspaceReferences({ [agentId]: references.value }, agentId, sentReferences, true)[agentId]
+          } catch { /* A failed submit leaves the selected reference queued for retry. */ }
+        }
+        return () => h('div', [
+          h('button', { type: 'button', onClick: () => { inChat.value = !inChat.value } }, '切换到聊天'),
+          inChat.value
+            ? h('section', [
+              h(WorkspaceReferenceAttachments, { references: references.value }),
+              h('button', { type: 'button', disabled: !hasWorkspaceMessageContent({ references: references.value }), onClick: send }, '发送'),
+            ])
+            : h(WorkspaceFiles, { agentId, onAnnotationUpdate: captureReference }),
+        ])
+      },
+    })
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
+      path,
+      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', file_ref: 'node-file-guide', is_dir: false, size: 8 }],
+    }))
+    api.readWorkspaceFile.mockResolvedValueOnce(result('# Guide'))
+    wrapper = mount(ChatHarness)
+    await flushPromises()
+    const guide = wrapper.findAll('.workspace-files__list button').find(button => button.text().includes('guide.md'))
+    await guide.trigger('click')
+    await flushPromises()
+    await wrapper.find('[aria-label="引用文件到对话"]').trigger('click')
+    expect(wrapper.findComponent(WorkspaceFiles).emitted('annotation-update')?.[0]?.[0]).toMatchObject({ agentId, path: 'guide.md' })
+    await wrapper.findAll('button').find(button => button.text() === '切换到聊天').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('guide.md · 整个文件')
+    const sendButton = wrapper.findAll('section button').find(button => button.text() === '发送')
+    expect(sendButton.element.disabled).toBe(false)
+    await sendButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('guide.md · 整个文件')
+    expect(submit).toHaveBeenCalledTimes(1)
+    await sendButton.trigger('click')
+    await flushPromises()
+    expect(submit).toHaveBeenCalledTimes(2)
+    expect(submit.mock.calls[1]).toMatchObject([
+      agentId,
+      expect.stringContaining('文件：`guide.md`'),
+      [],
+      [{ path: 'node-file-guide', name: 'guide.md' }],
+    ])
+    expect(wrapper.text()).not.toContain('guide.md · 整个文件')
   })
 
   it('offers the same whole-file reference action in the file context menu', async () => {

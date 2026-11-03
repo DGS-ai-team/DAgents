@@ -37,6 +37,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		rt.mu.Lock()
 		messages := append([]llm.Message(nil), rt.messages...)
 		historyRevision := rt.historyRevision
+		projectionBoundary := rt.toolCallProjectionHiddenThroughGeneration
 		queuePending := rt.queue.Len()
 		if rt.inputBox != nil {
 			queuePending += rt.inputBox.Len()
@@ -46,6 +47,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		pending := rt.pendingSnapshot()
 		lifecycle := rt.turnCoordinator.Snapshot()
 		hasActiveTurn := lifecycle.HasActiveTurn
+		lifecycle = hideClearedToolCallProjection(lifecycle, projectionBoundary)
 		rt.mu.Unlock()
 		rt.lifecycleMu.Unlock()
 		view := m.buildHydrateView(sessionID, messages, pending, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq)
@@ -72,9 +74,17 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		hasActiveTurn = lifecycle.HasActiveTurn
 	}
 	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
+	lifecycle = hideClearedToolCallProjection(lifecycle, rec.RuntimeState.ToolCallProjectionHiddenThroughGeneration)
 	view := m.buildHydrateView(sessionID, rec.Messages, pending, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
 	view.ChildAgents, _ = m.ListChildAgents(sessionID)
 	return view, nil
+}
+
+func hideClearedToolCallProjection(snapshot turn.CoordinatorSnapshot, throughGeneration uint64) turn.CoordinatorSnapshot {
+	if snapshot.Generation <= throughGeneration {
+		snapshot.ActiveToolCalls = nil
+	}
+	return snapshot
 }
 
 func (m *Manager) buildHydrateView(

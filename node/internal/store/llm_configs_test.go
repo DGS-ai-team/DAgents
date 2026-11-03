@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -236,5 +237,91 @@ func TestLLMConfigStoreNormalizesLegacyQwenReasoningEffort(t *testing.T) {
 	profile, ok := cfg.LLM.GetProfile("legacy-qwen")
 	if !ok || profile.ReasoningEffort != "" || profile.Thinking != "enabled" || profile.ThinkingBudget == nil || *profile.ThinkingBudget != budget {
 		t.Fatalf("config projection retained invalid Qwen effort: %+v", profile)
+	}
+}
+
+func TestNormalizeLLMConfigRecordEnforcesModelCapabilities(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high"} {
+		t.Run("o3-valid-"+effort, func(t *testing.T) {
+			rec := NormalizeLLMConfigRecord(LLMConfigRecord{
+				ID: "openai-o3", Provider: "openai", Model: "o3", Thinking: "enabled",
+				ReasoningEffort: effort, APIKeyCiphertext: "preserve-ciphertext",
+			})
+			if rec.ReasoningEffort != effort || rec.Thinking != "enabled" || rec.APIKeyCiphertext != "preserve-ciphertext" {
+				t.Fatalf("valid OpenAI o3 record changed: %+v", rec)
+			}
+			if err := llm.ValidateThinkingSettings(rec.Provider, rec.Model, rec.Thinking, rec.ReasoningEffort, rec.ThinkingBudget); err != nil {
+				t.Fatalf("normalized valid record fails validation: %v", err)
+			}
+		})
+	}
+
+	badBudgetLow, badBudgetHigh := 0, 32769
+	validBudgetLow, validBudgetHigh := 1, 32768
+	tests := []struct {
+		name         string
+		record       LLMConfigRecord
+		wantThinking string
+		wantEffort   string
+		wantBudget   *int
+	}{
+		{
+			name:         "unknown o3 effort clears instead of mapping max",
+			record:       LLMConfigRecord{Provider: "openai", Model: "o3", Thinking: "enabled", ReasoningEffort: "max", APIKeyCiphertext: "cipher"},
+			wantThinking: "enabled",
+			wantEffort:   "",
+		},
+		{
+			name:         "invalid thinking uses model default",
+			record:       LLMConfigRecord{Provider: "openai", Model: "o3", Thinking: "mystery", ReasoningEffort: "high"},
+			wantThinking: "enabled",
+			wantEffort:   "high",
+		},
+		{
+			name:         "disallowed disabled state uses model default",
+			record:       LLMConfigRecord{Provider: "openai", Model: "o3", Thinking: "disabled", ReasoningEffort: "medium"},
+			wantThinking: "enabled",
+			wantEffort:   "medium",
+		},
+		{
+			name:         "budget lower boundary preserved",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &validBudgetLow},
+			wantThinking: "enabled",
+			wantBudget:   &validBudgetLow,
+		},
+		{
+			name:         "budget upper boundary preserved",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &validBudgetHigh},
+			wantThinking: "enabled",
+			wantBudget:   &validBudgetHigh,
+		},
+		{
+			name:         "out of range low budget cleared",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &badBudgetLow},
+			wantThinking: "enabled",
+		},
+		{
+			name:         "out of range high budget cleared",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &badBudgetHigh},
+			wantThinking: "enabled",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := NormalizeLLMConfigRecord(test.record)
+			if got.Thinking != test.wantThinking || got.ReasoningEffort != test.wantEffort {
+				t.Fatalf("normalized controls = thinking %q effort %q, want %q/%q", got.Thinking, got.ReasoningEffort, test.wantThinking, test.wantEffort)
+			}
+			if (got.ThinkingBudget == nil) != (test.wantBudget == nil) ||
+				(got.ThinkingBudget != nil && *got.ThinkingBudget != *test.wantBudget) {
+				t.Fatalf("normalized budget = %v, want %v", got.ThinkingBudget, test.wantBudget)
+			}
+			if got.APIKeyCiphertext != test.record.APIKeyCiphertext {
+				t.Fatalf("normalization changed stored key ciphertext: got %q want %q", got.APIKeyCiphertext, test.record.APIKeyCiphertext)
+			}
+			if err := llm.ValidateThinkingSettings(got.Provider, got.Model, got.Thinking, got.ReasoningEffort, got.ThinkingBudget); err != nil {
+				t.Fatalf("normalized legacy controls still fail validation: %v", err)
+			}
+		})
 	}
 }

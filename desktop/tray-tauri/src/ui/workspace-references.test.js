@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createWorkspaceReference, formatWorkspaceReferencesMessage, normalizeWorkspaceReferenceAnchor, textRangeAnchor } from './workspace-references.js'
+import { composeWorkspaceMessage, createWorkspaceReference, formatWorkspaceReferencesMessage, normalizeWorkspaceReferenceAnchor, settleWorkspaceReferences, textRangeAnchor, workspaceReferencesForAgent } from './workspace-references.js'
 
 test('workspace references retain a normalized file and selected content anchor', () => {
   const reference = createWorkspaceReference({
@@ -65,6 +65,39 @@ test('reference context supports sending a reference without additional user tex
   })
   assert.match(message, /^请结合我引用的工作区内容处理/)
   assert.match(message, /selected text/)
+})
+
+test('full-chat and dock reference sends compose the same text and attachments without duplicates', () => {
+  const reference = createWorkspaceReference({ path: 'notes.md', fileRef: 'node-ref-notes', name: 'notes.md', anchor: { type: 'text-range', label: '文本选区', quote: 'selected text' } })
+  const imageReference = createWorkspaceReference({ path: 'images/chart.png', fileRef: 'node-ref-chart', name: 'chart.png', imageUrl: 'data:image/png;base64,Y2hhcnQ=' })
+  const message = composeWorkspaceMessage({
+    references: [reference, imageReference],
+    files: [{ path: 'node-ref-notes', name: 'notes.md' }],
+    images: [{ name: 'chart.png', url: imageReference.imageUrl }],
+  })
+
+  assert.match(message.text, /请结合我引用的工作区内容处理/)
+  assert.match(message.text, /selected text/)
+  assert.deepEqual(message.files, [
+    { path: 'node-ref-notes', name: 'notes.md' },
+    { path: 'node-ref-chart', name: 'chart.png' },
+  ])
+  assert.deepEqual(message.images, [{ name: 'chart.png', url: imageReference.imageUrl }])
+})
+
+test('pending references remain visible per agent, survive failed sends, and clear only sent references on success', () => {
+  const first = createWorkspaceReference({ id: 'first', path: 'first.md' })
+  const addedWhileSending = createWorkspaceReference({ id: 'later', path: 'later.md' })
+  const otherAgent = createWorkspaceReference({ id: 'other', path: 'other.md' })
+  const byAgent = { agentA: [first, addedWhileSending], agentB: [otherAgent] }
+
+  assert.deepEqual(workspaceReferencesForAgent(byAgent, 'agentA'), [first, addedWhileSending])
+  assert.deepEqual(workspaceReferencesForAgent(byAgent, 'agentB'), [otherAgent])
+  assert.equal(settleWorkspaceReferences(byAgent, 'agentA', [first], false), byAgent)
+  assert.deepEqual(settleWorkspaceReferences(byAgent, 'agentA', [first], true), {
+    agentA: [addedWhileSending],
+    agentB: [otherAgent],
+  })
 })
 
 test('unsafe workspace paths are rejected and unknown anchors degrade to a whole file', () => {

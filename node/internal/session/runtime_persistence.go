@@ -40,6 +40,7 @@ func (r *runtime) persistLocked(ctx context.Context) error {
 	notifySeq := r.notifySeq
 	ackSeq := r.ackSeq
 	historyRevision := r.historyRevision
+	toolCallProjectionHiddenThroughGeneration := r.toolCallProjectionHiddenThroughGeneration
 	activeContextStart := r.activeContextStart
 	lastContextResetID := r.lastContextResetID
 	lastHumanInteraction := r.lastHumanInteraction
@@ -62,15 +63,16 @@ func (r *runtime) persistLocked(ctx context.Context) error {
 		Messages:     msgs,
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{
-			InputBoxState:        inputBoxState,
-			HistoryRevision:      historyRevision,
-			ActiveContextStart:   activeContextStart,
-			LastContextResetID:   lastContextResetID,
-			LastHumanInteraction: lastHumanInteraction,
-			DreamingAttempt:      dreamingAttempt,
-			HookStore:            hookStore,
-			NotifySeq:            notifySeq,
-			AckSeq:               ackSeq,
+			InputBoxState:   inputBoxState,
+			HistoryRevision: historyRevision,
+			ToolCallProjectionHiddenThroughGeneration: toolCallProjectionHiddenThroughGeneration,
+			ActiveContextStart:                        activeContextStart,
+			LastContextResetID:                        lastContextResetID,
+			LastHumanInteraction:                      lastHumanInteraction,
+			DreamingAttempt:                           dreamingAttempt,
+			HookStore:                                 hookStore,
+			NotifySeq:                                 notifySeq,
+			AckSeq:                                    ackSeq,
 		},
 	})
 	if err != nil && r.logger != nil {

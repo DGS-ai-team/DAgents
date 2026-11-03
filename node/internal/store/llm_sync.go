@@ -11,20 +11,53 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// NormalizeLLMConfigRecord drops legacy controls that do not apply to the
-// record's current provider/model. Historical Qwen profiles may contain a
-// reasoning_effort value even though DashScope uses thinking_budget; never
-// reinterpret that value as a budget.
+// NormalizeLLMConfigRecord drops or normalizes persisted controls that are not
+// valid for the record's current provider/model. This is a read projection for
+// legacy data; writes from current settings APIs remain strictly validated.
 func NormalizeLLMConfigRecord(rec LLMConfigRecord) LLMConfigRecord {
 	capability := llm.ModelCapabilities(rec.Provider, rec.Model)
-	if capability.Control != llm.ThinkingControlEffort {
-		rec.ReasoningEffort = ""
-	}
-	if capability.Control != llm.ThinkingControlBudget {
-		rec.ThinkingBudget = nil
-	}
 	if capability.Control == "" {
 		rec.Thinking = ""
+		rec.ReasoningEffort = ""
+		rec.ThinkingBudget = nil
+		return rec
+	}
+
+	if strings.TrimSpace(rec.Thinking) != "" {
+		thinking, _ := llm.NormalizeThinkingSettingsForModel(rec.Provider, rec.Model, rec.Thinking, "")
+		if thinking == "" {
+			thinking = "enabled"
+		}
+		rec.Thinking = thinking
+	}
+
+	if capability.Control == llm.ThinkingControlEffort {
+		rec.ThinkingBudget = nil
+		value := strings.ToLower(strings.TrimSpace(rec.ReasoningEffort))
+		allowed := false
+		for _, option := range capability.AllowedEfforts {
+			if value == option {
+				allowed = true
+				break
+			}
+		}
+		if allowed {
+			rec.ReasoningEffort = value
+		} else {
+			// Do not reinterpret an old value (for example OpenAI o3's "max")
+			// as a different supported effort. Empty means provider/model default.
+			rec.ReasoningEffort = ""
+		}
+	} else {
+		rec.ReasoningEffort = ""
+	}
+
+	if capability.Control != llm.ThinkingControlBudget {
+		rec.ThinkingBudget = nil
+	} else if rec.ThinkingBudget != nil &&
+		(*rec.ThinkingBudget < capability.BudgetMin || *rec.ThinkingBudget > capability.BudgetMax) {
+		// Invalid legacy budgets must not make unrelated settings PATCHes fail.
+		rec.ThinkingBudget = nil
 	}
 	return rec
 }

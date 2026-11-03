@@ -12,7 +12,7 @@ import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindo
 import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceImageBlob } from './workspace-files-state.js'
 import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
 import { onConfigurationChanged } from './utils/configurationEvents.js'
-import { createWorkspaceReference, formatWorkspaceReferencesMessage } from './workspace-references.js'
+import { createWorkspaceReference, dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences, workspaceReferencesForAgent } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
 import { applyRemoteWorkerEvent, currentRemoteWorkerEventVersion, replaceChildrenFromHydrate, setRemoteWorkerParent } from '@desktop-ui/stores/remoteWorkers.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
@@ -32,6 +32,7 @@ import TerminalEndDialog from './components/TerminalEndDialog.vue'
 import ScreenshotRegionDialog from './components/ScreenshotRegionDialog.vue'
 import ComposerSurface from './components/ComposerSurface.vue'
 import ResourceAgentDock from './components/ResourceAgentDock.vue'
+import WorkspaceReferenceAttachments from './components/WorkspaceReferenceAttachments.vue'
 import WorkspaceFiles from './components/WorkspaceFiles.vue'
 import BrowserViewer from './components/BrowserViewer.vue'
 import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
@@ -269,7 +270,8 @@ const composerWriteProgress = ref(null)
 let activeAttachmentBatch = null
 const pendingWorkspaceReferencesByAgent = ref({})
 const pendingFiles = computed(() => pendingFilesByAgent.value[activeId.value] || [])
-const pendingWorkspaceReferences = computed(() => pendingWorkspaceReferencesByAgent.value[activeId.value] || [])
+const pendingWorkspaceReferences = computed(() => workspaceReferencesForAgent(pendingWorkspaceReferencesByAgent.value, activeId.value))
+const hasComposerContent = computed(() => hasWorkspaceMessageContent({ text: input.value, images: pendingImages.value, files: pendingFiles.value, references: pendingWorkspaceReferences.value }))
 const pendingImages = computed({
   get: () => pendingImagesByAgent.value[activeId.value] || [],
   set: images => { if (activeId.value) pendingImagesByAgent.value[activeId.value] = images },
@@ -757,8 +759,9 @@ async function send() {
   const text = input.value.trim()
   const images = pendingImages.value.slice()
   const files = pendingFiles.value.slice()
-  if ((!text && !images.length && !files.length) || !activeId.value) return
-  if (text.startsWith('/') && !images.length && !files.length) {
+  const references = pendingWorkspaceReferences.value.slice()
+  if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value) return
+  if (text.startsWith('/') && !images.length && !files.length && !references.length) {
     const agentId = activeId.value
     input.value = ''
     inputDrafts.value[agentId] = ''
@@ -772,45 +775,55 @@ async function send() {
   const agentId = activeId.value
   input.value = ''
   inputDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(text, images, files)
+  const sent = await sendMessageToActiveAgent(text, images, files, references)
   if (!sent) input.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, input.value, text)
-  else pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
-  if (sent) pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
-}
-async function sendMessageToActiveAgent(text, images = [], files = []) {
-  text = String(text || '').trim()
-  if ((!text && !images.length && !files.length) || !activeId.value || agentGenerating.value) return false
-  const agentId = activeId.value
-  const pendingUser = {
-    id: ++sendSequence,
-    kind: 'user',
-    text,
-    images: images.map(image => image.url),
-    file_refs: files.map(toNodeFileReference),
-    baseTranscriptLength: fullTranscript.value.length,
+  else {
+    pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
+    pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
   }
-  pendingUserByAgent.value = { ...pendingUserByAgent.value, [agentId]: pendingUser }
+}
+async function sendMessageToActiveAgent(text, images = [], files = [], references = []) {
+  text = String(text || '').trim()
+  if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value || agentGenerating.value) return false
+  const agentId = activeId.value
+  let pendingUser
   setAgentError(agentId, '')
   setAgentBusy(agentId, true)
   try {
-    const contentParts = images.map(image => ({ type: 'image_url', image_url: { url: image.url } }))
-    await submitMessage(agentId, text, contentParts, files.map(toNodeFileReference))
-    if (activeId.value === agentId) {
-      await selectAgent(agentId)
-      await nextTick()
-      chatPanel.value?.scrollToTail()
-    }
-    return true
+    await dispatchWorkspaceMessage({ agentId, text, images, files, references }, submitMessage, message => {
+      pendingUser = {
+        id: ++sendSequence,
+        kind: 'user',
+        text: message.text,
+        images: message.images.map(image => image.url),
+        file_refs: message.files.map(toNodeFileReference),
+        baseTranscriptLength: fullTranscript.value.length,
+      }
+      pendingUserByAgent.value = { ...pendingUserByAgent.value, [agentId]: pendingUser }
+    })
+    if (references.length) consumeWorkspaceReferences(agentId, references)
   } catch (e) {
-    if (pendingUserByAgent.value[agentId]?.id === pendingUser.id) {
+    if (pendingUser && pendingUserByAgent.value[agentId]?.id === pendingUser.id) {
       const next = { ...pendingUserByAgent.value }
       delete next[agentId]
       pendingUserByAgent.value = next
     }
     setAgentError(agentId, String(e))
+    return false
+  } finally {
+    setAgentBusy(agentId, false)
   }
-  finally { setAgentBusy(agentId, false) }
-  return false
+  if (activeId.value === agentId) {
+    try {
+      await selectAgent(agentId)
+      await nextTick()
+      chatPanel.value?.scrollToTail()
+    } catch (e) {
+      // The send already succeeded; keep the message and cleared references while reporting refresh trouble.
+      setAgentError(agentId, String(e))
+    }
+  }
+  return true
 }
 async function executeSlashCommand(text, agentId) {
   error.value = ''
@@ -865,6 +878,14 @@ function clearWorkspaceAnnotations(agentId = activeId.value) {
   if (!agentId) return
   pendingWorkspaceReferencesByAgent.value[agentId] = []
   if (agentId === activeId.value) workspaceFilesPanel.value?.clearAnnotations?.()
+}
+function consumeWorkspaceReferences(agentId, references) {
+  pendingWorkspaceReferencesByAgent.value = settleWorkspaceReferences(pendingWorkspaceReferencesByAgent.value, agentId, references, true)
+  const sentIds = new Set(references.map(reference => reference.id))
+  if (!sentIds.size) return
+  if (agentId === activeId.value) {
+    for (const id of sentIds) workspaceFilesPanel.value?.removeAnnotation?.(id)
+  }
 }
 function readImage(file) {
   return new Promise((resolve, reject) => {
@@ -1218,14 +1239,10 @@ async function sendFromDock() {
   if (agentGenerating.value) return
   if ((!text.trim() && !references.length) || !activeId.value || agentGenerating.value) return
   const agentId = activeId.value
-  const message = formatWorkspaceReferencesMessage({ text, references })
-  const images = [...new Map(references.filter(reference => reference.imageUrl).map(reference => [reference.fileRef, { name: reference.name, url: reference.imageUrl }])).values()]
-  const files = [...new Map(references.map(reference => [reference.fileRef, { path: reference.fileRef, name: reference.name }])).values()]
   dockDraft.value = ''
   dockDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(message, images, files)
+  const sent = await sendMessageToActiveAgent(text, [], [], references)
   if (!sent) dockDraft.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, dockDraft.value, text)
-  else if (references.length) clearWorkspaceAnnotations(agentId)
 }
 async function requestNewTerminal(sessionId = '') {
   const intent = terminalOpenIntent(sessionId)
@@ -2078,7 +2095,7 @@ onUnmounted(() => {
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
-      <footer class="composer-wrap"><div v-if="composerWriteRequest" class="desktop-composer-progress-pill" role="status" aria-live="polite">{{ composerWriteProgress?.phase === 'committing' ? '正在提交，取消后结果可能未知。' : composerWriteProgress?.total ? `导入进度 ${Math.min(100, Math.floor(composerWriteProgress.bytes * 100 / composerWriteProgress.total))}%` : '正在准备导入…' }}<button type="button" @click="cancelComposerImport">请求取消</button></div><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
+      <footer class="composer-wrap"><div v-if="composerWriteRequest" class="desktop-composer-progress-pill" role="status" aria-live="polite">{{ composerWriteProgress?.phase === 'committing' ? '正在提交，取消后结果可能未知。' : composerWriteProgress?.total ? `导入进度 ${Math.min(100, Math.floor(composerWriteProgress.bytes * 100 / composerWriteProgress.total))}%` : '正在准备导入…' }}<button type="button" @click="cancelComposerImport">请求取消</button></div><div v-if="pendingImages.length || pendingFiles.length || pendingWorkspaceReferences.length" class="composer-attachments" role="group" aria-label="待发送附件和引用"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button><WorkspaceReferenceAttachments :references="pendingWorkspaceReferences" @remove="removeWorkspaceReferenceById" /></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
   <div class="composer-toolbar-row">
@@ -2095,7 +2112,7 @@ onUnmounted(() => {
     <div class="composer-toolbar-right">
       <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
       <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="agentGenerating || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
-      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canCancelTurn || cancellingTurn : !canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
+      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canCancelTurn || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
     </div>
   </div>
 </form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span></div></footer>
