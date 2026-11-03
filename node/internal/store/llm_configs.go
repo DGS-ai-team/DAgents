@@ -137,7 +137,7 @@ ORDER BY sort_order ASC, id ASC`)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rec)
+		out = append(out, NormalizeLLMConfigRecord(rec))
 	}
 	return out, rows.Err()
 }
@@ -152,7 +152,11 @@ func (s *LLMConfigStore) Get(ctx context.Context, id string) (LLMConfigRecord, e
 SELECT id, sort_order, provider, base_url, model, api_key_ciphertext, mock,
        thinking, reasoning_effort, thinking_budget, multimodal_enabled, created_at, updated_at
 FROM llm_configs WHERE id = ?`, id)
-	return scanLLMConfig(row)
+	rec, err := scanLLMConfig(row)
+	if err != nil {
+		return LLMConfigRecord{}, err
+	}
+	return NormalizeLLMConfigRecord(rec), nil
 }
 
 // HasAPIKey 是否已存密文 key。

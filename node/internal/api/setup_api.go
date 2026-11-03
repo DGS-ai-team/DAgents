@@ -23,7 +23,14 @@ func (s *Server) registerSetupRoutes() {
 }
 
 func (s *Server) setupWritable() bool {
-	return s.nodeSettings != nil && s.llmConfigs != nil
+	return s.nodeSettings != nil && s.llmConfigs != nil && s.llmConfigMigrationErr == nil
+}
+
+func (s *Server) settingsWriteUnavailableMessage() string {
+	if s.llmConfigMigrationErr != nil {
+		return "模型配置迁移尚未完成，设置写入已暂停；请按 Node 启动日志修复迁移问题后重启：" + s.llmConfigMigrationErr.Error()
+	}
+	return "Node 设置库或模型配置库不可用，无法保存设置"
 }
 
 func (s *Server) handleGetSetupConfig(w http.ResponseWriter, _ *http.Request) {
@@ -35,8 +42,8 @@ func (s *Server) handleGetSetupConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) {
-	if s.nodeSettings == nil || s.llmConfigs == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "settings_store_unavailable", "Node 设置库或模型配置库不可用，无法保存设置", nil)
+	if !s.setupWritable() {
+		writeAPIError(w, http.StatusServiceUnavailable, "settings_store_unavailable", s.settingsWriteUnavailableMessage(), nil)
 		return
 	}
 	var patch setup.SettingsPatch

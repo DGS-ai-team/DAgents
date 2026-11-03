@@ -14,10 +14,10 @@
 | 子智能体进度 | 现有 SSE 与 hydrate.child_agents 合并到同一状态；切换父 Agent 清空作用域，空快照清理残留，拒绝旧请求覆盖新事件 | `stores/remoteWorkers.js`、`composables/useStream.js`、`DesktopApp.vue` |
 | 模型配置权威 | 模型档案只保存在 llm_configs.db；node_settings 仅保留活动引用；无持久库时返回错误，不再假保存到 YAML | `node/internal/store/llm_sync.go`、`node_settings.go`、`node/internal/api/setup_api.go`、`llm_api.go` |
 | 启动与迁移 | 先校验监听等引导配置，加载持久设置后再校验业务配置；已有模型库优先，旧副本成功迁移后才精简 | `shared/config/config.go`、`node/internal/store/node_settings_bootstrap.go`、`node/internal/api/server.go` |
-| 凭据保护 | 保留已有 .llm_secret_key；旧 APIKeyEnv 缺失时拒绝部分迁移，保留旧数据并提示带原环境变量重试 | `node/internal/store/llm_sync.go`、`node_settings_test.go`、`v011_restore_test.go` |
+| 凭据保护 | 保留已有 .llm_secret_key；旧 APIKeyEnv 缺失时拒绝部分迁移并暂停设置写入，保留旧数据并提示带原环境变量重试 | `node/internal/store/llm_sync.go`、`node_settings_test.go`、`v011_restore_test.go`、`node/internal/api/llm_migration_readiness_test.go` |
 | 临时岗位授权 | 移除 UI、策略存储和路由；权限继续通过智能体工具策略配置 | `components/PolicyPanel.vue`、`node/internal/policy`、`node/internal/api/agent_policy_api.go` |
 | 命令与扩展包 | 移除命令帮助、/thinking、Desktop/Node 上传发布链路；保留 /clear 与菜单中的上下文压缩；Manage 仓库保留 | `slash-commands.js`、`DesktopApp.vue`、`node/internal/api/server_routes.go` |
-| 模型思考参数 | 根据 provider/model 显示支持的开关、强度和预算，切模型时清理不适用参数 | `components/LlmProfileModal.vue`、`node/internal/llm/runtime_settings.go` |
+| 模型思考参数 | 根据 provider/model 显示支持的开关、强度和预算，切模型时清理不适用参数；旧档案读取时移除不支持的字段，避免旧 Qwen effort 阻止无关设置保存 | `components/LlmProfileModal.vue`、`node/internal/llm/runtime_settings.go`、`node/internal/store/llm_sync.go` |
 | 高级设置 | 上下文、输出防护、共享服务的低频参数折叠；上下文页仍显示当前自动压缩和空闲归档策略 | `components/ContextConfigPanel.vue`、`SecurityConfigPanel.vue`、`CapabilitiesConfigPanel.vue` |
 | 设置一致性 | 共用标题、保存栏、选择器；智能体详情子页切换保留父框架；常用界面使用“本地服务”等用户可理解措辞 | `components/SettingsPageHeader.vue`、`SettingsSectionHeader.vue`、`SettingsSaveBar.vue`、`UiSelect.vue`、`views/settings/AgentDetailSettings.vue` |
 | 资源配置闭环 | MCP/Linux 空状态可跳转新增，保存后回到原智能体；新增全局连接不会自动授予该智能体权限 | `components/McpAgentPanel.vue`、`LinuxAgentPanel.vue`、`views/settings/McpSettings.vue`、`LinuxChannelsSettings.vue` |
@@ -36,6 +36,7 @@
 - Manage：控制台 lint/build、Ruff、Pyright、212 项 Python unittest 通过。使用独立测试数据库分别登录管理员与节点身份，确认发布按钮和空状态文案按角色一致。
 - Go：Go 1.26.10 下五个模块的 test、vet、staticcheck 通过；Node 与 client 构建通过。完整脚本发现的两项 staticcheck 遗留已修正并补跑。
 - Rust：格式检查与 77 项测试通过。品牌资源契约、API/fixture 契约、OpenAPI 路由覆盖和 git diff 检查通过。
+- PR 升级回归：缺环境变量时，无关设置保存与模型切换都不会删除旧模型副本；带原变量重启后两档模型及密钥恢复。旧 Qwen effort 不再回显，合法预算与密钥保留，新提交的非法 effort 仍被拒绝。
 - 原生联调：使用独立运行目录和本地 OpenAI SSE fixture，执行真实 PowerShell 固定睡眠命令；界面显示“执行中”，气泡无终止按钮。点击输入栏“停止本轮”后，服务返回 `cancelled_by_user`、工具状态 `cancelled`、`has_active_turn=false`、运行工具数 0。fixture、临时 Agent 和临时模型档案已清理。
 - 工具组的参数独立切换、工具名称整体切换、快速更新与展开态保持由组件测试覆盖；单工具行本来不使用工具组标题动画。降低动态效果与强制颜色模式继续禁用扫光/过渡。
 

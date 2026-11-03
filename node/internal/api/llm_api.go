@@ -67,8 +67,8 @@ func (s *Server) handlePatchLLMSettings(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, http.StatusBadRequest, "invalid_llm_settings", "active_profile is required", nil)
 			return
 		}
-		if s.nodeSettings == nil || s.llmConfigs == nil {
-			writeAPIError(w, http.StatusServiceUnavailable, "settings_store_unavailable", "Node 设置库或模型配置库不可用，无法切换模型", nil)
+		if !s.setupWritable() {
+			writeAPIError(w, http.StatusServiceUnavailable, "settings_store_unavailable", s.settingsWriteUnavailableMessage(), nil)
 			return
 		}
 		if err := s.switchActiveLLMProfile(r.Context(), id); err != nil {
@@ -96,7 +96,7 @@ func (s *Server) switchActiveLLMProfile(ctx context.Context, id string) error {
 	if s.cfg == nil {
 		return fmt.Errorf("llm config unavailable")
 	}
-	if s.nodeSettings == nil || s.llmConfigs == nil {
+	if !s.setupWritable() {
 		return fmt.Errorf("node settings and LLM config stores are required")
 	}
 	updated := *s.cfg

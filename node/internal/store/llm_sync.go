@@ -7,8 +7,27 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
+
+// NormalizeLLMConfigRecord drops legacy controls that do not apply to the
+// record's current provider/model. Historical Qwen profiles may contain a
+// reasoning_effort value even though DashScope uses thinking_budget; never
+// reinterpret that value as a budget.
+func NormalizeLLMConfigRecord(rec LLMConfigRecord) LLMConfigRecord {
+	capability := llm.ModelCapabilities(rec.Provider, rec.Model)
+	if capability.Control != llm.ThinkingControlEffort {
+		rec.ReasoningEffort = ""
+	}
+	if capability.Control != llm.ThinkingControlBudget {
+		rec.ThinkingBudget = nil
+	}
+	if capability.Control == "" {
+		rec.Thinking = ""
+	}
+	return rec
+}
 
 // ApplyLLMConfigsToConfig 用 SQLite 中的配置覆盖 cfg.LLM.Profiles（不含明文 key）。
 // activeID 为空时选用第一条；若仍为空则保持原 active。
@@ -19,6 +38,7 @@ func ApplyLLMConfigsToConfig(cfg *config.Config, records []LLMConfigRecord, acti
 	next := make(map[string]config.LLMProfileConfig, len(records))
 	order := make([]string, 0, len(records))
 	for _, rec := range records {
+		rec = NormalizeLLMConfigRecord(rec)
 		id := strings.TrimSpace(rec.ID)
 		if id == "" {
 			continue

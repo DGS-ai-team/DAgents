@@ -65,6 +65,7 @@ type Server struct {
 	linuxChannels         *store.LinuxChannelStore
 	linuxProvider         *tools.LinuxShellProvider
 	llmConfigs            *store.LLMConfigStore
+	llmConfigMigrationErr error        // prevents settings snapshots from discarding an unimported legacy LLM source
 	llmRefMu              sync.RWMutex // serializes Agent snapshot writes against LLM profile removal
 	nodeSettings          *store.NodeSettingsStore
 	stream                *stream.Hub // 进程内 SSE 事件总线
@@ -272,6 +273,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 	}
 	var llmConfigStore *store.LLMConfigStore
+	var llmConfigMigrationErr error
 	if !o.skipStore {
 		opened, err := store.OpenLLMConfigs(cfg.LLMConfigsDBPath(), cfg.RuntimeDir())
 		if err != nil {
@@ -281,7 +283,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			existingProfiles, countErr := llmConfigStore.Count(context.Background())
 			llmStoreWasEmpty := countErr == nil && existingProfiles == 0
 			if err := store.EnsureDefaultLLMConfig(context.Background(), llmConfigStore, cfg); err != nil {
-				logger.Error("llm default config initialization failed", "error", err)
+				llmConfigMigrationErr = err
+				logger.Error("LLM profile migration failed; Node settings writes are disabled to preserve the legacy source. Fix the reported cause and restart Node", "error", err)
 			} else if records, err := llmConfigStore.List(context.Background()); err != nil {
 				logger.Error("llm configs list failed", "error", err)
 			} else if len(records) > 0 {
@@ -594,6 +597,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		linuxChannels:         linuxChannelStore,
 		linuxProvider:         linuxProvider,
 		llmConfigs:            llmConfigStore,
+		llmConfigMigrationErr: llmConfigMigrationErr,
 		nodeSettings:          o.nodeSettings,
 		sessions:              mgr,
 		triggerStore:          triggerStore,
