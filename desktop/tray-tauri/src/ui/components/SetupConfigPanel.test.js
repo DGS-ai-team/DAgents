@@ -3,17 +3,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import SetupConfigPanel from "./SetupConfigPanel.vue";
 
-const { getSetupConfig, patchSetupConfig, probeLLMModels } = vi.hoisted(() => ({
+const { getSetupConfig, patchSetupConfig, probeLLMModels, getLLMCapabilities } = vi.hoisted(() => ({
   getSetupConfig: vi.fn(),
   patchSetupConfig: vi.fn(),
   probeLLMModels: vi.fn(),
+  getLLMCapabilities: vi.fn(),
 }));
+const { notifyConfigurationChanged } = vi.hoisted(() => ({ notifyConfigurationChanged: vi.fn() }));
 
 vi.mock("../api/node.js", () => ({
   getSetupConfig,
   patchSetupConfig,
   probeLLMModels,
+  getLLMCapabilities,
 }));
+vi.mock("../utils/configurationEvents.js", () => ({ notifyConfigurationChanged }));
 
 let wrapper;
 
@@ -22,6 +26,40 @@ afterEach(() => {
   wrapper = null;
   document.body.innerHTML = "";
   vi.resetAllMocks();
+});
+
+describe("LLM reasoning profile settings", () => {
+  it("opens only the requested profile after setup finishes loading", async () => {
+    getSetupConfig.mockResolvedValue({
+      config_writable: true,
+      llm: {
+        active: "first",
+        profiles: [
+          { id: "first", provider: "qwen", model: "qwen-plus" },
+          { id: "second", provider: "openai", model: "o3" },
+        ],
+      },
+      manage: { enabled: false, has_node_token: true },
+    });
+    getLLMCapabilities.mockResolvedValue({ supported: true, thinking_control: "effort", allowed_efforts: ["low", "medium", "high"], default_effort: "medium" });
+
+    wrapper = mount(SetupConfigPanel, {
+      props: { requestedProfileId: "second" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("管理模型配置、默认模型和管理平台连接");
+    expect(wrapper.text()).toContain("连接到管理平台后可注册本机服务");
+    expect(wrapper.text()).toContain("管理平台连接密钥");
+    expect(wrapper.text()).toContain("清除已保存的管理平台连接密钥");
+
+    const modal = document.body.querySelector(".llm-profile-modal");
+    expect(modal?.textContent).toContain("模型配置");
+    expect(modal?.querySelector("input[type='text']")?.value).toBe("second");
+    expect(getLLMCapabilities).toHaveBeenCalledWith("openai", "o3");
+    expect(wrapper.emitted("profile-request-handled")).toHaveLength(1);
+  });
 });
 
 describe("SetupConfigPanel LLM profile editing", () => {
@@ -82,6 +120,7 @@ describe("SetupConfigPanel LLM profile editing", () => {
     const confirmButton = [...modal.querySelectorAll("button")].find((button) => button.textContent.trim() === "确定");
     confirmButton.click();
     await flushPromises();
+    expect(notifyConfigurationChanged).not.toHaveBeenCalled();
 
     expect(patchSetupConfig).toHaveBeenCalledTimes(1);
     const patch = patchSetupConfig.mock.calls[0][0];
@@ -107,6 +146,8 @@ describe("SetupConfigPanel LLM profile editing", () => {
     retryIdInput.dispatchEvent(new Event("input", { bubbles: true }));
     [...retryModal.querySelectorAll("button")].find((button) => button.textContent.trim() === "确定").click();
     await flushPromises();
+    expect(notifyConfigurationChanged).toHaveBeenCalledTimes(1);
+    expect(notifyConfigurationChanged).toHaveBeenCalledWith("llm");
 
     expect(patchSetupConfig).toHaveBeenCalledTimes(2);
     const retriedPatch = patchSetupConfig.mock.calls[1][0];
@@ -144,5 +185,6 @@ describe("SetupConfigPanel LLM profile editing", () => {
     expect(wrapper.get('[role="alert"]').text()).toContain("agent-one");
     expect(wrapper.get('[role="alert"]').text()).toContain("请先修改这些 Agent 的模型配置");
     expect(wrapper.text()).not.toContain("已保存。");
+    expect(notifyConfigurationChanged).not.toHaveBeenCalled();
   });
 });

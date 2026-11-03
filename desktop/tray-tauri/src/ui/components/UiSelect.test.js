@@ -38,4 +38,48 @@ describe('UiSelect', () => {
     expect(wrapper.get('.ui-select__trigger').attributes('disabled')).toBeDefined()
     expect(wrapper.emitted('change')).toBeUndefined()
   })
+
+  it('supports arrow and Home/End navigation in the non-searchable listbox', async () => {
+    wrapper = mount(UiSelect, { attachTo: document.body, props: { modelValue: 'a', options: [
+      { value: 'a', label: 'First' }, { value: 'b', label: 'Second' }, { value: 'c', label: 'Third', disabled: true },
+    ] } })
+    await wrapper.get('.ui-select__trigger').trigger('click')
+    const options = () => [...document.querySelectorAll('.ui-select__option')]
+    expect(document.activeElement).toBe(options()[0])
+    await options()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement).toBe(options()[1])
+    await options()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(document.activeElement).toBe(options()[1])
+    options()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(wrapper.emitted('change')).toEqual([['b']])
+  })
+
+  it('opens from trigger arrows and focuses an enabled option when nothing is selected', async () => {
+    wrapper = mount(UiSelect, { attachTo: document.body, props: { options: [
+      { value: 'a', label: 'First' }, { value: 'b', label: 'Second' },
+    ] } })
+    await wrapper.get('.ui-select__trigger').trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+    const options = () => [...document.querySelectorAll('.ui-select__option')]
+    expect(document.activeElement).toBe(options()[0])
+    options()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement).toBe(options()[1])
+    options()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+    expect(document.activeElement).toBe(wrapper.get('.ui-select__trigger').element)
+    await wrapper.get('.ui-select__trigger').trigger('keydown', { key: 'ArrowUp' })
+    await nextTick()
+    expect(document.activeElement).toBe(options()[1])
+  })
+
+  it('does not pick through a disabled ancestor fieldset', async () => {
+    const fieldset = document.createElement('fieldset')
+    document.body.append(fieldset)
+    wrapper = mount(UiSelect, { attachTo: fieldset, props: { options: ['first', 'second'] } })
+    await wrapper.get('.ui-select__trigger').trigger('click')
+    fieldset.disabled = true
+    await document.querySelectorAll('.ui-select__option')[1].click()
+    expect(wrapper.emitted('change')).toBeUndefined()
+  })
 })

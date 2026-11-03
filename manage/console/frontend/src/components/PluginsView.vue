@@ -6,6 +6,7 @@ import PackageUploadModal from "./PackageUploadModal.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
+  canManage: { type: Boolean, default: false },
 });
 const emit = defineEmits(["toast"]);
 
@@ -36,6 +37,13 @@ const catalogMeta = computed(() => {
   return `${catalog.value.length} 条`;
 });
 
+const emptyCatalogMessage = computed(() => {
+  if (catalog.value.length) return "无匹配项";
+  return props.canManage
+    ? "暂无已发布 Hook 插件，可通过右上角「新建」上传并发布。"
+    : "暂无已发布 Hook 插件，请联系管理员发布。";
+});
+
 async function load() {
   loading.value = true;
   error.value = "";
@@ -50,6 +58,7 @@ async function load() {
 }
 
 async function onUploadSubmit(payload) {
+  if (!props.canManage) return;
   uploading.value = true;
   try {
     const pkg = await uploadPluginPackage({
@@ -74,6 +83,7 @@ async function onUploadSubmit(payload) {
 }
 
 async function onPublish(pkg) {
+  if (!props.canManage) return;
   try {
     await publishPlugin(pkg.plugin_id, pkg.version);
     emit("toast", { message: `已发布 ${pkg.plugin_id}@${pkg.version}`, type: "success" });
@@ -109,15 +119,15 @@ defineExpose({ load });
         v-model="query"
         type="search"
         class="mkt-search"
-        placeholder="搜索已发布 Hook…"
+        placeholder="搜索已发布 Hook 插件…"
         autocomplete="off"
       />
-      <button type="button" class="btn btn-primary btn-sm" @click="modalOpen = true">
+      <button v-if="canManage" type="button" class="btn btn-primary btn-sm" @click="modalOpen = true">
         新建
       </button>
     </div>
 
-    <div v-if="drafts.length" class="panel mkt-panel">
+    <div v-if="canManage && drafts.length" class="panel mkt-panel">
       <div class="panel-head">
         <h3 class="table-block__title">待发布草稿</h3>
         <span class="panel-meta">{{ drafts.length }} 条 · 刷新页面后本地草稿会清空</span>
@@ -144,7 +154,7 @@ defineExpose({ load });
                 <span class="pill" :class="riskPillClass(d.risk_level)">{{ riskLabel(d.risk_level) }}</span>
               </td>
               <td>
-                <button type="button" class="btn btn-primary btn-sm" @click="onPublish(d)">发布</button>
+                <button v-if="canManage" type="button" class="btn btn-primary btn-sm" @click="onPublish(d)">发布</button>
               </td>
             </tr>
           </tbody>
@@ -186,7 +196,7 @@ defineExpose({ load });
             <tr v-if="!loading && !filteredCatalog.length">
               <td colspan="6" class="empty">
                 <div class="empty-state">
-                  {{ catalog.length ? "无匹配项" : "暂无已发布 Hook，点击右上角「新建」上传" }}
+                  {{ emptyCatalogMessage }}
                 </div>
               </td>
             </tr>
@@ -196,6 +206,7 @@ defineExpose({ load });
     </div>
 
     <PackageUploadModal
+      v-if="canManage"
       :open="modalOpen"
       kind="hook"
       :uploading="uploading"

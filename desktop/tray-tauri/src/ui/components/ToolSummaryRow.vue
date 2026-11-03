@@ -2,7 +2,6 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { formatToolElapsed } from "../utils/format.js";
 import {
-  bashControlModeForStep,
   resolveToolStepPhase,
   toolStepIsInProgress,
   toolStepStatusText,
@@ -10,15 +9,9 @@ import {
 } from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
-import {
-  cancelBashToolCall,
-  toolCallIdFromEntry,
-  toolNameFromEntry,
-  toolJobsStore,
-} from "../stores/toolJobs.js";
+import { toolCallIdFromEntry, toolNameFromEntry } from "../stores/toolJobs.js";
 import { childProgressForTool } from "../stores/remoteWorkers.js";
 import { childAgentIdsFromResult, isTemporaryAgentTool } from "../utils/temporaryAgentResults.js";
-import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiIcon from "./UiIcon.vue";
@@ -34,7 +27,6 @@ const props = defineProps({
 
 const expanded = ref(false);
 const nowTick = ref(Date.now());
-const actionError = ref("");
 let tickTimer = null;
 
 const stepArgs = computed(() => ({
@@ -57,9 +49,7 @@ const statusTone = computed(() => {
   if (["cancelled", "interrupted"].includes(phase.value)) return "warning";
   return "muted";
 });
-const controlMode = computed(() => bashControlModeForStep(stepArgs.value));
-const inProgress = computed(() => stepInProgress.value || controlMode.value === "running");
-const showBashControls = computed(() => controlMode.value != null);
+const inProgress = computed(() => stepInProgress.value);
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
 const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
@@ -74,11 +64,9 @@ const childProgress = computed(() => {
   if (!isTemporaryAgentTool(toolName.value)) return [];
   return childProgressForTool(toolCallId.value, childAgentIds.value);
 });
-const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] || "");
-
 const status = computed(() => {
   void nowTick.value;
-  if (controlMode.value === "running" || phase.value === "running") return "执行中";
+  if (phase.value === "running") return "执行中";
   const base = toolStepStatusText(stepArgs.value);
   if (phase.value === "idle") return "状态未知";
   if (phase.value === "pending") return "待批准";
@@ -116,19 +104,6 @@ onUnmounted(stopTick);
 
 function toggle() {
   expanded.value = !expanded.value;
-}
-
-async function onCancel(ev) {
-  ev?.stopPropagation?.();
-  actionError.value = "";
-  const agentId = agentStore.agentId;
-  const callId = toolCallId.value;
-  if (!agentId || !callId || busyAction.value) return;
-  try {
-    await cancelBashToolCall(agentId, callId);
-  } catch (err) {
-    actionError.value = err?.message || "终止失败";
-  }
 }
 
 </script>
@@ -173,18 +148,6 @@ async function onCancel(ev) {
           />
         </span>
       </button>
-      <div v-if="showBashControls" class="tool-summary-row__actions">
-        <button
-          type="button"
-          class="tool-summary-row__action"
-          :disabled="!!busyAction"
-          :title="actionError || '仅终止此工具，Agent 可能继续处理'"
-          :aria-label="busyAction === 'cancel' ? '正在终止此工具' : '仅终止此工具，Agent 可能继续处理'"
-          @click="onCancel"
-        >
-          {{ busyAction === "cancel" ? "终止中…" : "终止" }}
-        </button>
-      </div>
       <span v-if="status" class="tool-summary-row__status">
         {{ status }}
       </span>
@@ -341,41 +304,6 @@ async function onCancel(ev) {
   border-radius: 4px;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
-}
-
-.tool-summary-row__actions {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  gap: 4px;
-}
-
-.tool-summary-row__action {
-  appearance: none;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-elevated);
-  color: var(--color-text);
-  font: inherit;
-  font-size: 11px;
-  line-height: 1.2;
-  padding: 2px 9px;
-  border-radius: 8px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.tool-summary-row__action:hover:not(:disabled) {
-  border-color: var(--color-text-muted);
-}
-
-.tool-summary-row__action:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.tool-summary-row__action--secondary {
-  color: var(--color-text-muted);
 }
 
 .tool-summary-row__status {

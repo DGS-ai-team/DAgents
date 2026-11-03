@@ -2,7 +2,9 @@
 import { onMounted, ref } from "vue";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import UiIcon from "../../components/UiIcon.vue";
 import { feedbackDelivery, feedbackDraft, feedbackProcessing, hasDestinationChanged, unwrapFeedback } from "../../utils/feedback.js";
+import UiSelect from "../../components/UiSelect.vue";
 
 const DRAFT_KEY = "dagents.feedback.draft";
 const form = ref({ type: "problem", title: "", body: "", client_feedback_id: "" });
@@ -187,7 +189,17 @@ onMounted(() => {
         <span class="feedback-draft" v-if="form.title || form.body">草稿自动保留</span>
       </div>
       <div class="feedback-form">
-        <label>类型<select v-model="form.type"><option value="problem">问题</option><option value="suggestion">建议</option></select></label>
+        <label>
+          类型
+          <UiSelect
+            v-model="form.type"
+            :options="[
+              { value: 'problem', label: '问题' },
+              { value: 'suggestion', label: '建议' },
+            ]"
+            aria-label="类型"
+          />
+        </label>
         <label>标题<input v-model="form.title" maxlength="160" placeholder="用一句话概括" @input="persistDraft" /></label>
         <label class="feedback-form__wide">正文<textarea v-model="form.body" maxlength="10000" rows="7" placeholder="请描述发生了什么、期望结果是什么" @input="persistDraft" /></label>
       </div>
@@ -195,7 +207,21 @@ onMounted(() => {
     </section>
 
     <section class="feedback-card" aria-labelledby="feedback-history-title">
-      <div class="feedback-card__head"><div><h2 id="feedback-history-title">我的反馈</h2><p>送达状态与管理员处理状态分开显示。</p></div><button class="btn btn--ghost" type="button" @click="load">刷新</button></div>
+      <div class="feedback-card__head">
+        <div>
+          <h2 id="feedback-history-title">我的反馈</h2>
+          <p>送达状态与管理员处理状态分开显示。</p>
+        </div>
+        <button
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          type="button"
+          aria-label="刷新反馈列表"
+          title="刷新反馈列表"
+          @click="load"
+        >
+          <UiIcon name="refresh-cw" :size="16" />
+        </button>
+      </div>
       <div v-if="loading" class="feedback-empty">正在加载…</div>
       <div v-else-if="!items.length" class="feedback-empty">还没有反馈记录。</div>
       <div v-else class="feedback-list">
@@ -207,7 +233,23 @@ onMounted(() => {
     </section>
 
     <section v-if="selected" class="feedback-card feedback-detail" aria-labelledby="feedback-detail-title">
-      <div class="feedback-card__head"><div><h2 id="feedback-detail-title">反馈详情</h2><p class="feedback-id">{{ selected.client_feedback_id }}</p></div><div class="feedback-actions"><button class="btn btn--ghost" type="button" @click="refreshDetail">同步状态</button></div></div>
+      <div class="feedback-card__head">
+        <div>
+          <h2 id="feedback-detail-title">反馈详情</h2>
+          <p class="feedback-id">{{ selected.client_feedback_id }}</p>
+        </div>
+        <div class="feedback-actions">
+          <button
+            class="btn btn--ghost btn--sm desktop-icon-button"
+            type="button"
+            aria-label="同步反馈状态"
+            title="同步反馈状态"
+            @click="refreshDetail"
+          >
+            <UiIcon name="refresh-cw" :size="16" />
+          </button>
+        </div>
+      </div>
       <h3>{{ selected.title }}</h3>
       <pre class="feedback-body">{{ selected.body }}</pre>
       <div class="feedback-detail__meta"><span>送达：{{ delivery(selected) }}</span><span>处理：{{ processing(selected) }}</span><span v-if="selected.manage_target || selected.destination">目的：{{ selected.manage_target || selected.destination }}</span></div>
@@ -230,7 +272,7 @@ onMounted(() => {
 .feedback-form { display: flex; flex-direction: column; gap: 0; margin-top: 20px; }
 .feedback-form label { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.7fr); align-items: center; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-subtle); }
 .feedback-form__wide { display: block !important; padding-top: 18px !important; }
-.feedback-form input,.feedback-form select,.feedback-form textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: 6px; padding: 9px 10px; background: var(--color-surface-alt); color: var(--color-text); font: inherit; }.feedback-form textarea { resize: vertical; min-height: 180px; }
+.feedback-form input,.feedback-form textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: 6px; padding: 9px 10px; background: var(--color-surface-alt); color: var(--color-text); font: inherit; }.feedback-form textarea { resize: vertical; min-height: 180px; }
 .feedback-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 16px; }.feedback-message { margin: 12px 0; font-size: 13px; }.feedback-message--error { color: var(--color-danger, #c53030); }.feedback-message--success { color: var(--color-success, #2f855a); }
 .feedback-list { margin-top: 16px; border-top: 1px solid var(--color-border); }.feedback-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 4px; border: 0; border-bottom: 1px solid var(--color-border); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }.feedback-row:hover,.feedback-row.is-selected { background: var(--color-surface-alt); }.feedback-row span:first-child { display: grid; gap: 5px; }.feedback-row small { color: var(--color-text-subtle); }.feedback-row__statuses { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }.feedback-row em { padding: 3px 7px; border-radius: 999px; background: var(--color-surface-alt); color: var(--color-text-subtle); font-size: 12px; font-style: normal; white-space: nowrap; }.feedback-empty { padding: 24px 0; color: var(--color-text-subtle); text-align: center; }.feedback-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 14px; border-radius: 6px; background: var(--color-surface-alt); color: var(--color-text); font: inherit; line-height: 1.55; }.feedback-detail__meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; color: var(--color-text-subtle); font-size: 13px; }.feedback-reply { margin-top: 18px; padding: 14px; border-left: 3px solid var(--color-action, #4f46e5); background: var(--color-surface-alt); }.feedback-reply p { margin: 6px 0 0; white-space: pre-wrap; }
 @media (max-width: 640px) { .feedback-form label { grid-template-columns: 1fr; gap: 8px; }.feedback-form__wide { display: grid !important; }.feedback-row { align-items: flex-start; flex-direction: column; }.feedback-row__statuses { justify-content: flex-start; } }

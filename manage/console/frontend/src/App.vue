@@ -80,7 +80,10 @@ const viewMeta = computed(() => {
     };
   }
   const base = VIEW_META[view.value] || VIEW_META.home;
-  return { title: base.title, trail: "", subtitle: base.subtitle || "", showBack: false };
+  const subtitle = view.value === "marketplace" && authKind.value === "admin"
+    ? "浏览、上传与发布 Node 扩展能力包"
+    : base.subtitle || "";
+  return { title: base.title, trail: "", subtitle, showBack: false };
 });
 const isHome = computed(() => view.value === "home");
 const shellVariant = computed(() => (isHome.value ? "home" : "app"));
@@ -386,6 +389,7 @@ onMounted(() => {
             v-if="view === 'home'"
             ref="homeRef"
             :active="view === 'home'"
+            :can-manage="authKind === 'admin'"
             :node-no-groups="authKind === 'node' && authGroups.length === 0"
             :node-discovery-group="authKind === 'node' ? (authGroups[0] || '') : ''"
             @navigate="navigate"
@@ -404,6 +408,7 @@ onMounted(() => {
           <MarketplaceView
             v-if="view === 'marketplace'"
             :active="view === 'marketplace'"
+            :can-manage="authKind === 'admin'"
             @toast="showToast($event.message, $event.type)"
           />
 

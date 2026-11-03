@@ -72,7 +72,7 @@ func (r *runtime) contextView() *ContextView {
 	if start < 0 || start > len(r.messages) {
 		start = len(r.messages)
 	}
-	msgs := append([]llm.Message(nil), r.messages[start:]...)
+	msgs := cloneContextMessages(r.messages[start:])
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
 	promptCatalog := r.skillsTurnCatalog
 	if promptCatalog == nil {
@@ -84,35 +84,35 @@ func (r *runtime) contextView() *ContextView {
 	}
 	state := r.turnState()
 	view := &ContextView{
-		SessionID:           r.session.ID,
-		MessagesCount:       len(msgs),
-		MessagesTotalTokens: estimateMessageTokens(msgs),
-		ToolLoopCount:       lifecycle.Usage.Steps,
-		LoadedSkills:        loaded,
-		QueuePending:        queuePending,
-		HasActiveTurn:       lifecycle.HasActiveTurn,
-		TurnID:              lifecycle.TurnID,
-		StepID:              lifecycle.StepID,
-		StepIndex:           lifecycle.StepIndex,
-		ContextEpoch:        lifecycle.ContextEpoch,
-		TurnStatus:          lifecycle.TurnStatus,
-		TurnEndReason:       lifecycle.TurnEndReason,
-		StepStatus:          lifecycle.StepStatus,
-		StepEndReason:       lifecycle.StepEndReason,
-		TurnGeneration:      lifecycle.Generation,
-		RuntimeRevision:     lifecycle.RuntimeRevision,
-		RuntimeDigest:       lifecycle.RuntimeDigest,
-		PromptDigest:        lifecycle.PromptDigest,
-		ToolDigest:          lifecycle.ToolDigest,
-		RecoveryRequired:    lifecycle.RecoveryRequired,
-		TurnState:           state,
-		Messages:            msgs,
+		SessionID:        r.session.ID,
+		MessagesCount:    len(msgs),
+		ToolLoopCount:    lifecycle.Usage.Steps,
+		LoadedSkills:     loaded,
+		QueuePending:     queuePending,
+		HasActiveTurn:    lifecycle.HasActiveTurn,
+		TurnID:           lifecycle.TurnID,
+		StepID:           lifecycle.StepID,
+		StepIndex:        lifecycle.StepIndex,
+		ContextEpoch:     lifecycle.ContextEpoch,
+		TurnStatus:       lifecycle.TurnStatus,
+		TurnEndReason:    lifecycle.TurnEndReason,
+		StepStatus:       lifecycle.StepStatus,
+		StepEndReason:    lifecycle.StepEndReason,
+		TurnGeneration:   lifecycle.Generation,
+		RuntimeRevision:  lifecycle.RuntimeRevision,
+		RuntimeDigest:    lifecycle.RuntimeDigest,
+		PromptDigest:     lifecycle.PromptDigest,
+		ToolDigest:       lifecycle.ToolDigest,
+		RecoveryRequired: lifecycle.RecoveryRequired,
+		TurnState:        state,
+		Messages:         msgs,
 	}
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
 	}
 	r.mu.Unlock()
 	r.lifecycleMu.Unlock()
+	view.MessagesTotalTokens = estimateMessageTokens(msgs)
 	pending := r.pendingSnapshot()
 	view.PendingToolCallsCount = pendingToolCallsCount(pending)
 	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
@@ -137,6 +137,46 @@ func (r *runtime) contextView() *ContextView {
 		}
 	}
 	return view
+}
+
+// cloneContextMessages detaches every mutable member of a message before the
+// runtime lock is released. Message estimates and later JSON encoding can then
+// run without racing runtime history updates.
+func cloneContextMessages(messages []llm.Message) []llm.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	clones := make([]llm.Message, len(messages))
+	for index, message := range messages {
+		clone := message
+		clone.ContentParts = append([]llm.ContentPart(nil), message.ContentParts...)
+		for partIndex := range clone.ContentParts {
+			if image := message.ContentParts[partIndex].ImageURL; image != nil {
+				imageCopy := *image
+				clone.ContentParts[partIndex].ImageURL = &imageCopy
+			}
+		}
+		clone.FileReferences = append([]llm.FileReference(nil), message.FileReferences...)
+		clone.ToolCalls = append([]llm.ToolCall(nil), message.ToolCalls...)
+		if message.Source != nil {
+			source := *message.Source
+			clone.Source = &source
+		}
+		if message.Provenance != nil {
+			provenance := *message.Provenance
+			clone.Provenance = &provenance
+		}
+		if message.ToolResultMetadata != nil {
+			metadata := *message.ToolResultMetadata
+			if message.ToolResultMetadata.Error != nil {
+				detail := *message.ToolResultMetadata.Error
+				metadata.Error = &detail
+			}
+			clone.ToolResultMetadata = &metadata
+		}
+		clones[index] = clone
+	}
+	return clones
 }
 
 func estimateMessageTokens(messages []llm.Message) int {

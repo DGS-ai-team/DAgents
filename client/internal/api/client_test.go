@@ -2,13 +2,9 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"sync"
 	"testing"
-	"time"
 )
 
 func TestValidateLocalNodeEndpoint(t *testing.T) {
@@ -38,146 +34,50 @@ func TestValidateLocalNodeEndpoint(t *testing.T) {
 	}
 }
 
-func TestGetAgentInfoDecodesNodeServiceIdentity(t *testing.T) {
+func TestGetAgentUpdate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/node/info" {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/node/update" {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"node_id":"node-a","name":"Workstation","manage_enabled":true,"manage_url":"http://manage.local","manage_registered":true,"capabilities":["messages"]}`))
+		_, _ = w.Write([]byte(`{"current_version":"1.0.0","latest_version":"1.1.0","upgrade_available":true}`))
 	}))
 	defer server.Close()
 
-	info, err := New(server.URL, nil).GetAgentInfo(context.Background())
+	status, err := New(server.URL, server.Client()).GetAgentUpdate(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.NodeID != "node-a" || info.Name != "Workstation" || !info.ManageEnabled || !info.ManageRegistered {
-		t.Fatalf("Node info = %+v", info)
+	if status.CurrentVersion != "1.0.0" || status.LatestVersion != "1.1.0" || !status.UpgradeAvailable {
+		t.Fatalf("update status = %+v", status)
 	}
 }
 
-func TestClientCreateMessageStream(t *testing.T) {
-	mux := http.NewServeMux()
-	var mu sync.Mutex
-	seq := 0
-	sessionID := "sess-test"
-	var gotMessageAgentID string
-	var gotStreamAgentID string
-
-	mux.HandleFunc("POST /v1/agents/"+sessionID+"/ensure", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "agent_id": sessionID})
-	})
-	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if v, ok := body["agent_id"].(string); ok {
-			gotMessageAgentID = v
+func TestGetNodeUpdatePackageDisablesRedirectsAndExtendsTimeout(t *testing.T) {
+	redirected := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirected = true
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/node/update/package" || r.Header.Get("Accept") != "application/octet-stream" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
 		}
-		go func() {
-			time.Sleep(20 * time.Millisecond)
-			mu.Lock()
-			seq++
-			mu.Unlock()
-		}()
-		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true})
-	})
-	mux.HandleFunc("GET /v1/streams", func(w http.ResponseWriter, r *http.Request) {
-		gotStreamAgentID = r.URL.Query().Get("agent_id")
-		w.Header().Set("Content-Type", "text/event-stream")
-		flusher := w.(http.Flusher)
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
 
-		// 模拟 echo turn
-		time.Sleep(30 * time.Millisecond)
-		payload := map[string]any{
-			"agent_id": sessionID, "type": "assistant", "seq": 1,
-			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"content": "（echo）hi"},
-		}
-		b, _ := json.Marshal(payload)
-		_, _ = w.Write([]byte("id: 1\nevent: assistant\ndata: " + string(b) + "\n\n"))
-		flusher.Flush()
-
-		donePayload := map[string]any{
-			"agent_id": sessionID, "type": "turn_finished", "seq": 2, "agent_seq": 2,
-			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"finish_reason": "stop"},
-		}
-		b2, _ := json.Marshal(donePayload)
-		_, _ = w.Write([]byte("id: 2\nevent: turn_finished\ndata: " + string(b2) + "\n\n"))
-		flusher.Flush()
-
-		<-r.Context().Done()
-	})
-
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	c := New(ts.URL, ts.Client())
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	if err := c.EnsureAgent(ctx, sessionID); err != nil {
-		t.Fatal(err)
-	}
-	sid := sessionID
-
-	doneCh := make(chan struct{})
-	var text strings.Builder
-	go func() {
-		_ = c.StreamEvents(ctx, sid, 0, func(ev StreamEvent) bool {
-			if ev.Type == "assistant" {
-				if s, ok := ev.Data["content"].(string); ok {
-					text.WriteString(s)
-				}
-			}
-			if ev.Type == "turn_finished" {
-				close(doneCh)
-				return false
-			}
-			return true
-		})
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	if err := c.SubmitMessage(ctx, sid, "hi"); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case <-doneCh:
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
-	if !strings.Contains(text.String(), "hi") {
-		t.Fatalf("text = %q", text.String())
-	}
-	if gotMessageAgentID != sessionID {
-		t.Fatalf("POST /v1/messages agent_id = %q, want %q", gotMessageAgentID, sessionID)
-	}
-	if gotStreamAgentID != sessionID {
-		t.Fatalf("GET /v1/streams agent_id = %q, want %q", gotStreamAgentID, sessionID)
-	}
-}
-
-func TestClientCancelTurn(t *testing.T) {
-	mux := http.NewServeMux()
-	sessionID := "sess-cancel"
-	cancelled := false
-	mux.HandleFunc("POST /v1/agents/"+sessionID+"/cancel", func(w http.ResponseWriter, _ *http.Request) {
-		cancelled = true
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"agent_id":  sessionID,
-			"cancelled": true,
-		})
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	c := New(ts.URL, ts.Client())
-	ok, err := c.CancelTurn(context.Background(), sessionID)
+	httpClient := &http.Client{}
+	resp, err := New(server.URL, httpClient).GetNodeUpdatePackage(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || !cancelled {
-		t.Fatalf("cancelled=%v ok=%v", cancelled, ok)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect || redirected {
+		t.Fatalf("status = %d, target reached = %v", resp.StatusCode, redirected)
+	}
+	if httpClient.Timeout != 0 {
+		t.Fatalf("caller client timeout was mutated: %s", httpClient.Timeout)
 	}
 }

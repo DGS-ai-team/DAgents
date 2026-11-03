@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiIcon from '@desktop-ui/components/UiIcon.vue'
 import UiContextMenu from '@desktop-ui/components/UiContextMenu.vue'
 import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
@@ -9,11 +9,12 @@ import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import { cancelWorkspaceWrite, createWorkspaceFile, listWorkspace, newWorkspaceWriteRequestId, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspacePath, saveWorkspaceFile, saveWorkspaceFileAs } from '../workspace-files-api.js'
 import { createWorkspaceCsvPreviewParser, decodeWorkspaceText, deserializeWorkspaceDraft, encodeWorkspaceText, isWorkspaceRequestCurrent, isWorkspaceWriteRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, workspaceCodeLanguage, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceFilePreviewNotice, workspacePreviewKind, workspacePreviewLimits, workspaceTextFormat, workspaceWriteProgressLabel } from '../workspace-files-state.js'
 import { textRangeAnchor } from '../workspace-references.js'
+import { getWorkspaceView, rememberWorkspaceView } from '../workspace-view-state.js'
 import { renderWorkspaceMarkdown } from '../utils/workspaceMarkdown.js'
 const PdfPreview = defineAsyncComponent(() => import('../../components/WorkspacePdfPreview.vue'))
 
-const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, requestGeneration: { type: Number, default: 0 }, dockCollapsed: { type: Boolean, default: false }, dockStatus: { type: String, default: 'idle' }, dockAgentName: { type: String, default: '当前智能体' }, attachmentLimitReached: { type: Boolean, default: false } })
-const emit = defineEmits(['resource-name', 'attach-file', 'annotation-update', 'annotation-remove', 'expand-agent-dock'])
+const props = defineProps({ agentId: { type: String, required: true }, active: { type: Boolean, default: false }, workspaceScope: { type: String, default: 'default' }, workspaceLocation: { type: String, default: '' }, requestGeneration: { type: Number, default: 0 }, dockCollapsed: { type: Boolean, default: false }, dockStatus: { type: String, default: 'idle' }, dockAgentName: { type: String, default: '当前智能体' }, attachmentLimitReached: { type: Boolean, default: false } })
+const emit = defineEmits(['resource-name', 'annotation-update', 'annotation-remove', 'expand-agent-dock'])
 const entries = ref([])
 const currentPath = ref('')
 const selectedPath = ref('')
@@ -63,6 +64,8 @@ const textAnchor = ref(null)
 const pdfAnchor = ref(null)
 const fileRefs = ref({})
 const editorRef = ref(null)
+const editorContentRef = ref(null)
+const pendingScrollRestore = ref(null)
 const createNameDialogOpen = ref(false)
 const newFileName = ref('')
 const newFileNameError = ref('')
@@ -72,6 +75,72 @@ const draftOwnerScope = ref('')
 const draftOwnerPath = ref('')
 const retainedDraft = ref(null)
 const folderMaskStyle = { maskImage: `url("${folderOpenIcon}")`, WebkitMaskImage: `url("${folderOpenIcon}")` }
+function rememberView(agentId = props.agentId, scope = props.workspaceScope, location = props.workspaceLocation) {
+  if (!agentId) return
+  const rawScope = scope
+  scope = `${scope}\u0000${location || ''}`
+  const old = getWorkspaceView(agentId, scope)
+  const modes = old?.modes || {}
+  if (selectedPath.value && canTogglePreview.value) modes[selectedPath.value] = previewMode.value
+  const previewScroller = editorContentRef.value?.querySelector('textarea, .workspace-files__markdown-preview, .workspace-files__code-preview, .workspace-files__sheet-scroll, .workspace-files__chunked-text, .workspace-pdf-preview__viewport')
+  const scrollSelector = previewScroller
+    ? previewScroller.tagName.toLowerCase() === 'textarea' ? 'textarea' : previewScroller.classList[0] ? `.${previewScroller.classList[0]}` : ''
+    : documentFrame.value ? 'iframe-document' : ''
+  const scrollElement = previewScroller || (scrollSelector === 'iframe-document' ? documentFrame.value?.contentDocument?.scrollingElement : null)
+  const waitingScroll = pendingScrollRestore.value
+  const pendingTop = waitingScroll?.path === selectedPath.value && waitingScroll.agentId === agentId && waitingScroll.scope === rawScope && waitingScroll.location === location
+    ? waitingScroll.scrollTop
+    : null
+  rememberWorkspaceView(agentId, scope, { path: currentPath.value, selected: selectedPath.value, modes: Object.fromEntries(Object.entries(modes).slice(-30)), scrollTop: pendingTop ?? scrollElement?.scrollTop ?? 0, scrollSelector: waitingScroll?.path === selectedPath.value && pendingTop !== null ? waitingScroll.selector : scrollSelector })
+}
+function takeRememberedView() {
+  return getWorkspaceView(props.agentId, `${props.workspaceScope}\u0000${props.workspaceLocation || ''}`)
+}
+function scrollElementFor(selector) {
+  if (selector === 'iframe-document') return documentFrame.value?.contentDocument?.scrollingElement || null
+  return selector ? editorContentRef.value?.querySelector(selector) || null : null
+}
+function tryApplyPendingScroll() {
+  const target = pendingScrollRestore.value
+  if (!target || !props.active || target.restoreId !== viewRestoreSequence
+    || target.agentId !== props.agentId || target.scope !== props.workspaceScope
+    || target.location !== props.workspaceLocation || target.generation !== props.requestGeneration
+    || target.path !== selectedPath.value) return false
+  const element = scrollElementFor(target.selector)
+  if (!element || !element.clientHeight || !element.scrollHeight) return false
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+  if (target.scrollTop > maxScrollTop + 1) {
+    if (loading.value || (previewKind.value === 'code' && previewMode.value === 'preview' && content.value && !highlightedContent.value)) {
+      observePendingScrollContent(element)
+      return false
+    }
+    element.scrollTop = maxScrollTop
+    cancelPendingScrollRestore()
+    return false
+  }
+  element.scrollTop = target.scrollTop
+  cancelPendingScrollRestore()
+  return true
+}
+let observedScrollElement = null
+let observedScrollContent = null
+function observePendingScrollContent(element) {
+  if (!workspaceResizeObserver || observedScrollElement === element) return
+  unobservePendingScrollContent()
+  observedScrollElement = element
+  observedScrollContent = element.querySelector(':scope > article, :scope > pre, :scope > div') || null
+  try {
+    workspaceResizeObserver.observe(element)
+    if (observedScrollContent) workspaceResizeObserver.observe(observedScrollContent)
+  } catch { unobservePendingScrollContent() /* Detached or sandboxed preview elements may not be observable. */ }
+}
+function unobservePendingScrollContent() {
+  if (observedScrollElement) workspaceResizeObserver?.unobserve(observedScrollElement)
+  if (observedScrollContent) workspaceResizeObserver?.unobserve(observedScrollContent)
+  observedScrollElement = null
+  observedScrollContent = null
+}
+function cancelPendingScrollRestore() { pendingScrollRestore.value = null; unobservePendingScrollContent() }
 const dockStatusLabel = computed(() => ({ offline: '离线', pending: '待审批', generating: '生成中', idle: '空闲' }[props.dockStatus] || props.dockStatus))
 let requestEpoch = 0
 let contentEditVersion = 0
@@ -91,6 +160,8 @@ let highlightSequence = 0
 let textChunkDecoder = null
 let textChunkRevision = ''
 let csvPreviewParser = null
+let viewRestoreSequence = 0
+let workspaceResizeObserver = null
 const filename = computed(() => selectedPath.value.split('/').filter(Boolean).at(-1) || '')
 const selectedEntry = computed(() => entries.value.find(entry => entry.path === selectedPath.value) || null)
 const sortedEntries = computed(() => [...entries.value].sort((left, right) => {
@@ -209,7 +280,7 @@ function resetChunkedTextState() {
   textChunkRevision = ''
   csvPreviewParser = null
 }
-function defaultPreviewMode(kind) { return ['code', 'csv', 'docx', 'html', 'svg'].includes(kind) ? 'preview' : 'source' }
+function defaultPreviewMode(kind) { return ['code', 'csv', 'docx', 'html', 'svg', 'markdown'].includes(kind) ? 'preview' : 'source' }
 function xlsxColumnLabel(index) {
   let value = index
   let label = ''
@@ -500,6 +571,12 @@ async function addAnnotation(selected) {
   await nextTick()
   annotationInputRefs.get(id)?.focus()
 }
+function addWholeFileReference(path = selectedPath.value) {
+  const entry = entries.value.find(item => item.path === path && !item.is_dir)
+  if (!entry || props.attachmentLimitReached) return
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  emit('annotation-update', { id, agentId: props.agentId, path, name: entry.name, fileRef: entry.file_ref || fileRefs.value[path] || path, revision: path === selectedPath.value ? revision.value : entry.revision || '', draft: path === selectedPath.value && dirty.value, anchor: { type: 'file', label: '整个文件', quote: '', location: {} } })
+}
 function annotationStyle(annotation) {
   const width = Math.min(320, Math.max(0, window.innerWidth - 16))
   const height = 206
@@ -569,7 +646,8 @@ function applyFilePreview(snapshot, { keepMode = false } = {}) {
   imageSelection.value = null
   textAnchor.value = null
   pdfAnchor.value = null
-  previewMode.value = keepMode && canTogglePreview.value ? priorMode : defaultPreviewMode(snapshot.kind)
+  const rememberedMode = takeRememberedView()?.modes?.[selectedPath.value]
+  previewMode.value = keepMode && canTogglePreview.value ? priorMode : rememberedMode && ['preview', 'source'].includes(rememberedMode) && ['markdown', 'code', 'csv', 'html', 'svg'].includes(snapshot.kind) ? rememberedMode : defaultPreviewMode(snapshot.kind)
 }
 function installFileResult(result, snapshot, { keepMode = false, chunkState = null, nextRevision = result.etag } = {}) {
   fileBytes.value = chunkState ? null : result.bytes
@@ -585,7 +663,7 @@ function installFileResult(result, snapshot, { keepMode = false, chunkState = nu
   } else resetChunkedTextState()
   applyFilePreview(snapshot, { keepMode })
 }
-function setPreviewMode(mode) { if (canTogglePreview.value && ['preview', 'source'].includes(mode)) previewMode.value = mode }
+function setPreviewMode(mode) { if (canTogglePreview.value && ['preview', 'source'].includes(mode)) { previewMode.value = mode; rememberView() } }
 function saveDraft() {
   if (!draftOwnerPath.value || !draftOwnerId.value || !draftOwnerScope.value) return
   const key = workspaceDraftKey(draftOwnerId.value, draftOwnerPath.value, draftOwnerScope.value)
@@ -660,6 +738,7 @@ async function confirmDiscard() { return !dirty.value || await confirmDesktopAct
 async function loadDirectory(path = currentPath.value) {
   if (!props.agentId) return { ok: false, canceled: false }
   if (!await confirmDiscard()) return { ok: false, canceled: true }
+  rememberView()
   saveDraft()
   actionStatus.value = ''
   resourceActionBusy.value = false
@@ -721,6 +800,7 @@ async function openPath(path) {
 async function openEntry(entry, discard = false) {
   if (entry.is_dir) return loadDirectory(entry.path)
   if (!discard && !await confirmDiscard()) return false
+  rememberView()
   saveDraft()
   const request = { epoch: ++requestEpoch, agentId: props.agentId, path: entry.path, scope: props.workspaceScope, generation: props.requestGeneration }
   draftOwnerId.value = ''
@@ -882,10 +962,11 @@ function openEntryMenu(event, entry = null) {
     trigger: event.currentTarget,
     title: entry?.name || (currentPath.value || '工作区根目录'),
     context: { path: entry?.path || currentPath.value || '工作区' },
-    items: [{ label: entry ? entry.is_dir ? '在文件管理器中打开文件夹' : '在文件管理器中显示' : currentPath.value ? '在文件管理器中打开当前目录' : '在文件管理器中打开工作区', icon: entry?.is_dir || !entry ? 'folder-open' : 'file', disabled: resourceActionBusy.value }],
+    items: [{ label: entry ? entry.is_dir ? '在文件管理器中打开文件夹' : '在文件管理器中显示' : currentPath.value ? '在文件管理器中打开当前目录' : '在文件管理器中打开工作区', icon: entry?.is_dir || !entry ? 'folder-open' : 'file', disabled: resourceActionBusy.value }, ...(entry && !entry.is_dir ? [{ label: '引用到对话', icon: 'paperclip', action: 'reference-file', disabled: props.attachmentLimitReached, title: props.attachmentLimitReached ? '一条消息最多添加 8 个附件或注解' : '将此文件作为引用加入当前智能体对话' }] : [])],
+    referencePath: entry && !entry.is_dir ? entry.path : '',
   }
 }
-function onEntryMenuSelect(_item, snapshot) { void revealContextPath(snapshot) }
+function onEntryMenuSelect(item, snapshot) { if (item.action === 'reference-file') addWholeFileReference(snapshot.referencePath); else void revealContextPath(snapshot) }
 function onEntryKeydown(event, entry) {
   if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
   event.preventDefault()
@@ -932,7 +1013,13 @@ async function refreshHighlightedContent() {
     const { highlightWorkspaceSource } = await import('../../workspace-syntax.js')
     if (sequence !== highlightSequence || source !== content.value || previewKind.value !== 'code' || previewMode.value !== 'preview') return
     highlightedContent.value = highlightWorkspaceSource(source, workspaceCodeLanguage(filename.value))
-  } catch { if (sequence === highlightSequence) highlightedContent.value = '' }
+    void nextTick(() => tryApplyPendingScroll())
+  } catch {
+    if (sequence === highlightSequence) {
+      highlightedContent.value = ''
+      void nextTick(() => tryApplyPendingScroll())
+    }
+  }
 }
 async function discardDraftAndReload({ confirm = true } = {}) {
   if (loading.value || saving.value || !selectedPath.value || !dirty.value && !draftConflict.value && !fileMissing.value && !externalUpdate.value && !hasRetainedDraft.value) return
@@ -1245,10 +1332,6 @@ function goUp() {
   parts.pop()
   void loadDirectory(parts.join('/'))
 }
-function attachSelectedFile() {
-  const fileRef = fileRefs.value[selectedPath.value]
-  if (fileRef) emit('attach-file', { path: fileRef, name: filename.value })
-}
 function closeToolbarMenu() { if (toolbarMenu.value) toolbarMenu.value.open = false }
 function runToolbarAction(action) {
   closeToolbarMenu()
@@ -1270,9 +1353,11 @@ function resourceMenuActions() {
 }
 watch(selectedPath, (path, previousPath) => { if (previousPath && path !== previousPath) clearAnnotations({ notify: true }) })
 defineExpose({ openPath, refreshResources, discardDraftAndReload, resourceMenuActions, clearAnnotations, removeAnnotation })
+onBeforeUnmount(rememberView)
 watch(() => [content.value, dirty.value, selectedPath.value, props.agentId], saveDraft)
 watch(() => [content.value, filename.value, previewKind.value, previewMode.value], () => { void refreshHighlightedContent() }, { immediate: true })
-watch(() => [props.agentId, props.workspaceScope], () => {
+watch(() => [props.agentId, props.workspaceScope, props.workspaceLocation], (next, previous) => {
+  if (previous) rememberView(previous[0], previous[1], previous[2])
   saveDraft();
   if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
   activeWriteRequest.value = '';
@@ -1299,9 +1384,48 @@ watch(() => [props.agentId, props.workspaceScope], () => {
   externalUpdate.value = false;
   lastDirectoryCheck = 0;
   lastFileCheck = 0;
-  void loadDirectory('');
+  const restore = takeRememberedView()
+  cancelPendingScrollRestore()
+  const restoreId = ++viewRestoreSequence
+  const owner = { agentId: props.agentId, scope: props.workspaceScope, location: props.workspaceLocation, generation: props.requestGeneration }
+  const isCurrent = () => restoreId === viewRestoreSequence && owner.agentId === props.agentId && owner.scope === props.workspaceScope && owner.location === props.workspaceLocation && owner.generation === props.requestGeneration
+  void (async () => {
+    const loaded = await loadDirectory('')
+    if (!isCurrent() || !loaded.ok || !restore) return
+    let expectedEpoch = requestEpoch
+    const parts = (restore.path || '').split('/').filter(Boolean)
+    let directory = ''
+    for (const part of parts) {
+      if (!isCurrent() || expectedEpoch !== requestEpoch) return
+      const next = [...(directory ? [directory] : []), part].join('/')
+      if (!entries.value.some(entry => entry.path === next && entry.is_dir)) break
+      if (!(await loadDirectory(next)).ok || !isCurrent()) return
+      expectedEpoch = requestEpoch
+      directory = next
+    }
+    if (!isCurrent() || expectedEpoch !== requestEpoch) return
+    const selected = restore.selected && entries.value.find(entry => entry.path === restore.selected && !entry.is_dir)
+    if (selected) {
+      const opening = openEntry(selected, true)
+      const fileEpoch = requestEpoch
+      const restored = await opening
+      if (!restored || !isCurrent() || requestEpoch !== fileEpoch) return
+    }
+    await nextTick()
+    if (!isCurrent()) return
+    if (restore.selected && restore.scrollSelector) {
+      pendingScrollRestore.value = {
+        agentId: owner.agentId, scope: owner.scope, location: owner.location,
+        generation: owner.generation, restoreId, path: restore.selected,
+        selector: restore.scrollSelector, scrollTop: restore.scrollTop || 0,
+      }
+      tryApplyPendingScroll()
+    }
+  })()
 }, { immediate: true });
 watch(() => props.requestGeneration, () => {
+  viewRestoreSequence++
+  cancelPendingScrollRestore()
   if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
   activeWriteRequest.value = '';
   writeProgress.value = null;
@@ -1320,7 +1444,14 @@ watch(() => props.requestGeneration, () => {
   refreshTimer = 0;
   if (props.active) void refreshResources('return');
 });
-watch(() => props.active, active => { if (active) { lastDirectoryCheck = 0; lastFileCheck = 0; void refreshResources('return') } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 } }, { immediate: true })
+watch(() => props.active, active => {
+  if (active) {
+    lastDirectoryCheck = 0
+    lastFileCheck = 0
+    void nextTick(() => tryApplyPendingScroll())
+    void refreshResources('return')
+  } else if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = 0 }
+}, { immediate: true })
 watch([
   () => props.agentId,
   () => props.active,
@@ -1329,6 +1460,7 @@ watch([
   currentPath,
   selectedPath,
 ], () => {
+  if (pendingScrollRestore.value && pendingScrollRestore.value.path !== selectedPath.value) cancelPendingScrollRestore()
   entryMenu.value = null
   referenceMenu.value = null
 })
@@ -1339,6 +1471,10 @@ watch(() => props.dockCollapsed, async collapsed => {
 })
 let unlistenWriteProgress = null
 onMounted(async () => {
+  if (typeof ResizeObserver !== 'undefined' && editorContentRef.value) {
+    workspaceResizeObserver = new ResizeObserver(() => tryApplyPendingScroll())
+    workspaceResizeObserver.observe(editorContentRef.value)
+  }
   document.addEventListener('visibilitychange', onVisibilityChange); document.addEventListener('pointerdown', onToolbarPointerDown); document.addEventListener('pointerup', stopSpreadsheetSelection); document.addEventListener('keydown', onToolbarKeydown)
   try {
     const { listen } = await import('@tauri-apps/api/event')
@@ -1351,6 +1487,10 @@ onMounted(async () => {
   if (props.active) void refreshResources('return')
 })
 onUnmounted(() => {
+  workspaceResizeObserver?.disconnect()
+  workspaceResizeObserver = null
+  pendingScrollRestore.value = null
+  viewRestoreSequence++
   disposed = true;
   requestEpoch++;
   if (activeWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(activeWriteRequest.value)).catch(() => {});
@@ -1374,6 +1514,22 @@ onUnmounted(() => {
       <span v-if="noticeSummary" class="workspace-files__notice" tabindex="0" role="status" aria-live="polite" :aria-label="noticeSummary" aria-describedby="workspace-files-notice-detail"><UiIcon name="alert" :size="16" /><span class="workspace-files__sr-only">{{ noticeSummary }}</span><span id="workspace-files-notice-detail" class="workspace-files__notice-detail" role="tooltip"><span v-for="(detail,index) in noticeDetails" :key="index">{{ detail }}</span></span></span>
       <div class="workspace-files__toolbar-actions">
         <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
+        <button
+          type="button"
+          class="desktop-icon-button"
+          :aria-label="props.attachmentLimitReached
+            ? '无法引用：一条消息最多添加 8 个附件或注解'
+            : selectedPath ? '引用文件到对话' : '请选择文件后引用到对话'"
+          :title="props.attachmentLimitReached
+            ? '附件限制：一条消息最多添加 8 个附件或注解'
+            : selectedPath
+              ? `引用 ${filename} 到 ${dockAgentName} 的对话`
+              : '请选择文件后引用到对话'"
+          :disabled="!selectedPath || props.attachmentLimitReached"
+          @click="addWholeFileReference()"
+        >
+          <UiIcon name="paperclip" :size="16" />
+        </button>
         <div v-if="canTogglePreview" class="workspace-files__preview-toggle" role="group" aria-label="资源显示模式">
           <button type="button" :aria-pressed="previewMode === 'preview'" :class="{ 'is-active': previewMode === 'preview' }" @click="setPreviewMode('preview')">预览</button>
           <button type="button" :aria-pressed="previewMode === 'source'" :class="{ 'is-active': previewMode === 'source' }" @click="setPreviewMode('source')">{{ sourceModeLabel }}</button>
@@ -1385,7 +1541,6 @@ onUnmounted(() => {
           <button type="button" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(onUpload)"><UiIcon name="upload" :size="15" /><span>导入本机文件</span></button>
           <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(saveSelectedAs)"><UiIcon name="arrow-down" :size="15" /><span>另存为</span></button>
           <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(revealSelectedFile)"><UiIcon name="file" :size="15" /><span>在文件管理器中定位</span></button>
-          <button type="button" :disabled="!fileRefs[selectedPath]" @click="runToolbarAction(attachSelectedFile)"><UiIcon name="paperclip" :size="15" /><span>添加到对话</span></button>
         </div>
       </details>
       <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
@@ -1413,7 +1568,7 @@ onUnmounted(() => {
           {{ workspaceWriteProgressLabel(writeProgress?.phase, writeProgress?.bytes, writeProgress?.total) }}
           <button type="button" @click="cancelActiveWorkspaceWrite">请求取消</button>
         </div>
-        <div class="workspace-files__editor-content">
+        <div ref="editorContentRef" class="workspace-files__editor-content" @wheel.capture="cancelPendingScrollRestore" @touchstart.capture="cancelPendingScrollRestore" @pointerdown.capture="cancelPendingScrollRestore" @keydown.capture="cancelPendingScrollRestore">
           <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
           <div v-else-if="error" class="workspace-files__empty workspace-files__preview-error"><span>{{ error }}</span><button v-if="chunkedText || canRetrySelectedText" type="button" @click="reloadSelectedFile">重新读取文件</button><button v-if="selectedPath" type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
           <template v-else-if="selectedPath">

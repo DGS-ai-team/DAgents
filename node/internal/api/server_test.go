@@ -168,6 +168,9 @@ func TestRemovedDesktopRoutesReturnNotFound(t *testing.T) {
 		{http.MethodGet, "/v1/setup/config"},
 		{http.MethodPatch, "/v1/setup/config"},
 		{http.MethodPost, "/v1/setup/llm/probe-models"},
+		{http.MethodPost, "/v1/manage/upload/skill"},
+		{http.MethodPost, "/v1/manage/upload/externaltool"},
+		{http.MethodPost, "/v1/manage/upload/plugin"},
 	} {
 		req, err := http.NewRequest(route.method, ts.URL+route.path, nil)
 		if err != nil {

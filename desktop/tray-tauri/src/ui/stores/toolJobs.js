@@ -1,10 +1,7 @@
 import { reactive } from "vue";
-import * as api from "../api/node.js";
 
 export const toolJobsStore = reactive({
-  running: 0,
   runningCallIds: /** @type {string[]} */ ([]),
-  busyCallIds: /** @type {Record<string, 'cancel'>} */ ({}),
 });
 
 function normalizeIDList(raw) {
@@ -20,8 +17,6 @@ function normalizeIDList(raw) {
   return out;
 }
 export function applyToolJobsSnapshot(data) {
-  const running = Number(data?.running);
-  toolJobsStore.running = Number.isFinite(running) && running > 0 ? Math.floor(running) : 0;
   toolJobsStore.runningCallIds = normalizeIDList(data?.running_call_ids);
 }
 
@@ -38,12 +33,6 @@ export function applyToolExecutions(executions) {
   applyToolJobsSnapshot({ running: runningCallIds.length, running_call_ids: runningCallIds });
 }
 
-export function toolJobsStripText() {
-  const parts = [];
-  if (toolJobsStore.running > 0) parts.push(`${toolJobsStore.running} 执行中`);
-  return parts.join(" · ");
-}
-
 export function toolCallIdFromEntry(entry) {
   const data = entry?.data || {};
   return String(data.tool_call_id || data.id || entry?.blockId || "").trim();
@@ -52,51 +41,4 @@ export function toolCallIdFromEntry(entry) {
 export function toolNameFromEntry(entry) {
   const data = entry?.data || {};
   return String(data.tool_name || data.name || "").trim();
-}
-
-/**
- * bash 控制模式：running 表示同步执行中的 bash；其他阶段不可控制。
- *
- * 仅依据 /tool-jobs 返回的 call id（真正进执行器后才登记），避免审批阶段误显。
- */
-export function bashControlMode({ callEntry, resultEntry } = {}) {
-  const name = toolNameFromEntry(callEntry) || toolNameFromEntry(resultEntry);
-  if (name !== "bash_run") return null;
-  const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
-  if (!id) return null;
-  if (toolJobsStore.runningCallIds.includes(id)) return "running";
-  return null;
-}
-
-export function canControlBashTool(args) {
-  return bashControlMode(args) != null;
-}
-
-export async function refreshToolJobs(agentId) {
-  const id = String(agentId || "").trim();
-  if (!id) {
-    applyToolJobsSnapshot({ running: 0, running_call_ids: [] });
-    return;
-  }
-  try {
-    const data = await api.getAgentToolJobs(id);
-    applyToolJobsSnapshot(data);
-  } catch {
-    /* ignore transient poll errors */
-  }
-}
-
-export async function cancelBashToolCall(agentId, toolCallId) {
-  const id = String(toolCallId || "").trim();
-  if (!id) return;
-  toolJobsStore.busyCallIds[id] = "cancel";
-  try {
-    const response = await api.cancelAgentToolCall(agentId, id);
-    if (response?.cancelled !== true || response?.scope !== "tool_execution") {
-      throw new Error("工具终止状态未确认，请稍后重试");
-    }
-    await refreshToolJobs(agentId);
-  } finally {
-    delete toolJobsStore.busyCallIds[id];
-  }
 }

@@ -1,9 +1,9 @@
 import { reactive } from "vue";
-import * as api from "../api/node.js";
-import { agentStore } from "./agent.js";
 
 /** 父 Agent 下子 Agent 的实时/终态投影。 */
 const entries = reactive(new Map());
+let parentAgentId = "";
+let remoteEventVersion = 0;
 
 export const remoteWorkerStore = reactive({
   tick: 0,
@@ -72,6 +72,7 @@ function entryFrom(item, previous = null) {
     childAgentId: text(item?.child_agent_id || previous?.childAgentId),
     toolCallId: text(item?.tool_call_id || previous?.toolCallId),
     purpose: text(item?.purpose || previous?.purpose),
+    remoteEventVersion: previous?.remoteEventVersion || 0,
     awaitingApproval: progress.pendingApproval || (!terminal && previous?.awaitingApproval === true),
     progress,
   };
@@ -86,10 +87,21 @@ export function resetRemoteWorkers() {
   bump();
 }
 
+/** Switch the owner scope before any new hydrate or event can be applied. */
+export function setRemoteWorkerParent(agentId) {
+  const next = text(agentId);
+  if (next === parentAgentId) return;
+  parentAgentId = next;
+  remoteEventVersion += 1;
+  entries.clear();
+  bump();
+}
+
 export function onChildCreated(data) {
   const id = String(data?.child_agent_id || "").trim();
   if (!id) return;
-  entries.set(id, entryFrom(data, entries.get(id)));
+  remoteEventVersion += 1;
+  entries.set(id, { ...entryFrom(data, entries.get(id)), remoteEventVersion });
   bump();
 }
 
@@ -99,68 +111,75 @@ export function onChildProgress(data) {
   const previous = entries.get(id);
   const next = entryFrom(data, previous);
   if (previous && intVal(data?.revision) > 0 && intVal(data.revision) < previous.progress.revision) return;
-  entries.set(id, next);
+  remoteEventVersion += 1;
+  entries.set(id, { ...next, remoteEventVersion });
   bump();
 }
 
 export function onChildFinished(childOrData) {
-	const data = typeof childOrData === "object" ? childOrData : { child_agent_id: childOrData };
-	const id = text(data?.child_agent_id);
-	if (!id) return;
-	const previous = entries.get(id);
-	const status = text(data?.status || "completed");
-	entries.set(id, entryFrom({
-		...data,
-		status,
-		phase: data?.phase || status,
-		summary: data?.summary,
-		error: data?.error || data?.reason,
-	}, previous));
-	bump();
-}
-
-export function setChildAwaitingApproval(childId, on) {
-  const id = String(childId || "").trim();
+  const data = typeof childOrData === "object" ? childOrData : { child_agent_id: childOrData };
+  const id = text(data?.child_agent_id);
   if (!id) return;
-  let entry = entries.get(id);
-  if (!entry) {
-    if (!on) return;
-    entry = entryFrom({ child_agent_id: id });
-    entries.set(id, entry);
-  }
-  entry.awaitingApproval = !!on;
-  entry.progress.pendingApproval = !!on;
-  if (on) entry.progress.phase = "waiting_approval";
+  const previous = entries.get(id);
+  const status = text(data?.status || "completed");
+  remoteEventVersion += 1;
+  entries.set(id, {
+    ...entryFrom({
+      ...data,
+      status,
+      phase: data?.phase || status,
+      summary: data?.summary,
+      error: data?.error || data?.reason,
+    }, previous),
+    remoteEventVersion,
+  });
   bump();
 }
 
-export function replaceChildrenFromApi(items) {
+export function applyRemoteWorkerEvent(eventType, data) {
+  switch (text(eventType)) {
+    case "temporary_agent_created":
+      onChildCreated(data);
+      return true;
+    case "temporary_agent_progress":
+      onChildProgress(data);
+      return true;
+    case "temporary_agent_completed":
+      onChildFinished({ ...data, status: data?.status || "completed" });
+      return true;
+    case "temporary_agent_cancelled":
+      onChildFinished({ ...data, status: data?.status || "cancelled" });
+      return true;
+    default:
+      return false;
+  }
+}
+
+export function replaceChildrenFromHydrate(items, ownerAgentId = parentAgentId, eventVersionAtStart = remoteEventVersion) {
+  if (text(ownerAgentId) !== parentAgentId) return;
   const incoming = new Set();
   for (const item of items || []) {
     const id = String(item?.child_agent_id || "").trim();
     if (!id) continue;
     incoming.add(id);
-    entries.set(id, entryFrom(item, entries.get(id)));
+    const previous = entries.get(id);
+    if (previous?.remoteEventVersion > eventVersionAtStart) continue;
+    entries.set(id, entryFrom(item, previous));
   }
-  // 保留刚由 SSE 观测到、但查询快照在请求发出时尚未包含的活跃 child；
-  // 终态由 API 的持久快照补齐，避免刷新后把已完成任务伪装成 active。
+  // Hydrate is authoritative for rows that existed when it started. Preserve
+  // only lifecycle events received after that point; the next hydrate reconciles them.
   for (const [id, entry] of entries) {
     if (incoming.has(id)) continue;
-    if (entry.progress.revision > 0 && ["creating", "active"].includes(entry.progress.status)) continue;
+    // Keep only events newer than the snapshot request. Earlier active rows
+    // omitted by hydrate are stale and must be removed.
+    if (entry.remoteEventVersion > eventVersionAtStart) continue;
     entries.delete(id);
   }
   bump();
 }
 
-export async function syncChildAgentsFromApi() {
-  const sid = agentStore.agentId;
-  if (!sid) return;
-  try {
-    const res = await api.listChildAgents(sid);
-    replaceChildrenFromApi(res?.items || []);
-  } catch {
-    /* keep local SSE state */
-  }
+export function currentRemoteWorkerEventVersion() {
+  return remoteEventVersion;
 }
 
 export function activeChildCount() {

@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import McpSettings from "./McpSettings.vue";
 import * as api from "../../api/node.js";
 
+const { route, routerReplace } = vi.hoisted(() => ({ route: { query: {} }, routerReplace: vi.fn() }));
+
+vi.mock("vue-router", () => ({ useRoute: () => route, useRouter: () => ({ replace: routerReplace }) }));
+
 vi.mock("../../api/node.js", () => ({
   getMcpConfig: vi.fn(),
   saveMcpConfig: vi.fn(),
@@ -50,6 +54,7 @@ function deferred() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  route.query = {};
   api.getMcpConfig.mockResolvedValue(result());
   api.saveMcpConfig.mockImplementation(async (text) => result(text));
   api.patchMcpServer.mockResolvedValue(server(false));
@@ -57,6 +62,24 @@ beforeEach(() => {
 });
 
 describe("MCP settings draft consistency", () => {
+  it("opens the advanced editor for a requested create flow and returns to its agent after save", async () => {
+    route.query = { create: "1", returnAgentId: "agent-a", returnSection: "resources" };
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.get(".mcp-settings__advanced").element.open).toBe(true);
+    await wrapper.get(".mcp-settings__editor .btn--primary").trigger("click");
+    await flushPromises();
+
+    expect(api.saveMcpConfig).toHaveBeenCalledTimes(1);
+    expect(routerReplace).toHaveBeenCalledWith({
+      name: "settings-agent-detail",
+      params: { agentId: "agent-a" },
+      query: { section: "resources" },
+    });
+    wrapper.unmount();
+  });
+
   it("does not offer or send the initial example when the first read fails", async () => {
     api.getMcpConfig.mockRejectedValueOnce(new Error("initial read failed"));
     const wrapper = mountPage();

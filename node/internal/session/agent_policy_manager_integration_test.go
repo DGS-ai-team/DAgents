@@ -56,7 +56,7 @@ func waitForHITL(t *testing.T, ch <-chan stream.Event) {
 	}
 }
 
-func TestManagerPolicyRevokeBeforeToolCallAndAfterRestart(t *testing.T) {
+func TestManagerPolicyUpdateBeforeToolCallAndAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workspace := t.TempDir()
@@ -67,15 +67,14 @@ func TestManagerPolicyRevokeBeforeToolCallAndAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := llm.ToolCall{ID: "policy-call", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: string(callArgs)}}
-	grant := policy.Grant{ID: "temporary", Tools: []string{"write_file"}, Workspace: workspace, ExpiresAt: time.Now().Add(time.Hour)}
-	grantRecord := store.AgentPolicyRecord{AgentID: agentID, Tools: map[string]string{"write_file": "rule"}, Grants: []policy.Grant{grant}}
-	revokedRecord := store.AgentPolicyRecord{AgentID: agentID, Tools: map[string]string{"write_file": "rule"}}
+	initialRecord := store.AgentPolicyRecord{AgentID: agentID, Tools: map[string]string{"write_file": "never"}}
+	updatedRecord := store.AgentPolicyRecord{AgentID: agentID, Tools: map[string]string{"write_file": "rule"}}
 
 	agentStore, err := store.OpenAgents(filepath.Join(root, "agents.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := agentStore.SaveAgentPolicy(ctx, grantRecord); err != nil {
+	if err := agentStore.SaveAgentPolicy(ctx, initialRecord); err != nil {
 		t.Fatal(err)
 	}
 	initial, err := agentStore.LoadAgentPolicyEngine(ctx, agentID)
@@ -83,7 +82,7 @@ func TestManagerPolicyRevokeBeforeToolCallAndAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := initial.DecideTool("write_file", map[string]any{"path": target}); got != policy.ActionAuto {
-		t.Fatalf("initial grant decision = %s, want auto", got)
+		t.Fatalf("initial policy decision = %s, want auto", got)
 	}
 
 	sessionStore, err := store.Open(filepath.Join(root, "sessions.db"))
@@ -112,21 +111,21 @@ func TestManagerPolicyRevokeBeforeToolCallAndAfterRestart(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("model did not reach gate")
 	}
-	if err := agentStore.SaveAgentPolicy(ctx, revokedRecord); err != nil {
+	if err := agentStore.SaveAgentPolicy(ctx, updatedRecord); err != nil {
 		t.Fatal(err)
 	}
-	revoked, err := agentStore.LoadAgentPolicyEngine(ctx, agentID)
+	updatedPolicy, err := agentStore.LoadAgentPolicyEngine(ctx, agentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := revoked.DecideTool("write_file", map[string]any{"path": target}); got != policy.ActionRequireApproval {
-		t.Fatalf("revoked decision = %s, want approval", got)
+	if got := updatedPolicy.DecideTool("write_file", map[string]any{"path": target}); got != policy.ActionRequireApproval {
+		t.Fatalf("updated decision = %s, want approval", got)
 	}
-	mgr.SetAgentPolicy(agentID, revoked)
+	mgr.SetAgentPolicy(agentID, updatedPolicy)
 	close(client.release)
 	waitForHITL(t, events)
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("revoked queued write landed: %v", err)
+		t.Fatalf("policy-updated queued write landed: %v", err)
 	}
 	mgr.Stop()
 	if err := sessionStore.Close(); err != nil {
@@ -137,7 +136,7 @@ func TestManagerPolicyRevokeBeforeToolCallAndAfterRestart(t *testing.T) {
 	}
 
 	// Reload the policy SQLite store and construct a fresh production Manager
-	// from the persisted revoked policy. A new model tool call must still pause.
+	// from the persisted policy. A new model tool call must still pause.
 	agentStore2, err := store.OpenAgents(filepath.Join(root, "agents.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +179,6 @@ func TestManagerPolicyRevokeBeforeToolCallAndAfterRestart(t *testing.T) {
 	close(client2.release)
 	waitForHITL(t, events2)
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("reopened revoked write landed: %v", err)
+		t.Fatalf("reopened policy-controlled write landed: %v", err)
 	}
 }

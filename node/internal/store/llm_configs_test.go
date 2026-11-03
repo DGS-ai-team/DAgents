@@ -2,10 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func TestSecretBoxRoundTrip(t *testing.T) {
@@ -60,8 +64,10 @@ func TestLLMConfigStoreReplaceAndResolve(t *testing.T) {
 	defer st.Close()
 
 	ctx := context.Background()
+	budget := 12000
 	err = st.ReplaceAll(ctx, []LLMConfigRecord{
-		{ID: "deepseek", Provider: "deepseek", Model: "deepseek-chat"},
+		{ID: "deepseek", Provider: "deepseek", Model: "deepseek-v4-pro", Thinking: "enabled", ReasoningEffort: "low"},
+		{ID: "qwen", Provider: "qwen", Model: "qwen3-32b", ThinkingBudget: &budget},
 		{ID: "mock", Provider: "mock", Mock: true},
 	}, map[string]string{"deepseek": "sk-aaa"}, nil)
 	if err != nil {
@@ -71,7 +77,7 @@ func TestLLMConfigStoreReplaceAndResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 2 || list[0].ID != "deepseek" || !list[0].HasAPIKey() {
+	if len(list) != 3 || list[0].ID != "deepseek" || !list[0].HasAPIKey() || list[0].ReasoningEffort != "low" || list[1].ThinkingBudget == nil || *list[1].ThinkingBudget != budget {
 		t.Fatalf("list = %+v", list)
 	}
 	key, err := st.ResolveAPIKey(ctx, "deepseek")
@@ -85,6 +91,7 @@ func TestLLMConfigStoreReplaceAndResolve(t *testing.T) {
 	// 更新但不传 key → 保留原密文
 	err = st.ReplaceAll(ctx, []LLMConfigRecord{
 		{ID: "deepseek", Provider: "deepseek", Model: "deepseek-chat", MultimodalEnabled: true},
+		{ID: "qwen", Provider: "qwen", Model: "qwen3-32b", ThinkingBudget: &budget},
 		{ID: "mock", Provider: "mock", Mock: true},
 	}, map[string]string{}, nil)
 	if err != nil {
@@ -96,5 +103,225 @@ func TestLLMConfigStoreReplaceAndResolve(t *testing.T) {
 	}
 	if key != "sk-aaa" {
 		t.Fatalf("key after keep = %q", key)
+	}
+}
+
+func TestLLMConfigStoreMigratesThinkingBudget(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "llm_configs.db")
+	box, err := OpenSecretBox(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := box.Encrypt("sk-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a database created before thinking_budget existed.
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE llm_configs (
+		id TEXT PRIMARY KEY,
+		sort_order INTEGER NOT NULL,
+		provider TEXT NOT NULL,
+		base_url TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		api_key_ciphertext TEXT NOT NULL DEFAULT '',
+		mock INTEGER NOT NULL DEFAULT 0,
+		thinking TEXT NOT NULL DEFAULT '',
+		reasoning_effort TEXT NOT NULL DEFAULT '',
+		multimodal_enabled INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO llm_configs
+		(id, sort_order, provider, model, api_key_ciphertext, thinking, reasoning_effort, created_at, updated_at)
+		VALUES ('legacy', 0, 'qwen', 'qwen3-32b', ?, 'enabled', 'high', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')`, ciphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	st, err := OpenLLMConfigs(dbPath, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "legacy" || list[0].ReasoningEffort != "" || list[0].Thinking != "enabled" || list[0].ThinkingBudget != nil {
+		t.Fatalf("migrated legacy record = %+v", list)
+	}
+	key, err := st.ResolveAPIKey(ctx, "legacy")
+	if err != nil || key != "sk-existing" {
+		t.Fatalf("legacy key = %q, err = %v", key, err)
+	}
+
+	budget := 12000
+	if err := st.ReplaceAll(ctx, []LLMConfigRecord{{
+		ID: "legacy", Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &budget,
+	}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = OpenLLMConfigs(dbPath, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	list, err = st.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ReasoningEffort != "" || list[0].ThinkingBudget == nil || *list[0].ThinkingBudget != budget {
+		t.Fatalf("reopened record = %+v", list)
+	}
+	key, err = st.ResolveAPIKey(ctx, "legacy")
+	if err != nil || key != "sk-existing" {
+		t.Fatalf("reopened key = %q, err = %v", key, err)
+	}
+}
+
+func TestLLMConfigStoreNormalizesLegacyQwenReasoningEffort(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenLLMConfigs(filepath.Join(dir, "llm_configs.db"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	budget := 4096
+	if err := st.ReplaceAll(context.Background(), []LLMConfigRecord{{
+		ID: "legacy-qwen", Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled",
+		ReasoningEffort: "high", ThinkingBudget: &budget,
+	}}, map[string]string{"legacy-qwen": "synthetic-qwen-key"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := st.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Get(context.Background(), "legacy-qwen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, record := range map[string]LLMConfigRecord{"list": listed[0], "get": got} {
+		if record.ReasoningEffort != "" || record.Thinking != "enabled" || record.ThinkingBudget == nil || *record.ThinkingBudget != budget || !record.HasAPIKey() {
+			t.Fatalf("%s returned legacy Qwen profile = %+v", label, record)
+		}
+	}
+	key, err := st.ResolveAPIKey(context.Background(), "legacy-qwen")
+	if err != nil || key != "synthetic-qwen-key" {
+		t.Fatalf("Qwen key = %q, err = %v", key, err)
+	}
+
+	cfg := &config.Config{}
+	ApplyLLMConfigsToConfig(cfg, []LLMConfigRecord{{
+		ID: "legacy-qwen", Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled",
+		ReasoningEffort: "high", ThinkingBudget: &budget,
+	}}, "legacy-qwen")
+	profile, ok := cfg.LLM.GetProfile("legacy-qwen")
+	if !ok || profile.ReasoningEffort != "" || profile.Thinking != "enabled" || profile.ThinkingBudget == nil || *profile.ThinkingBudget != budget {
+		t.Fatalf("config projection retained invalid Qwen effort: %+v", profile)
+	}
+}
+
+func TestNormalizeLLMConfigRecordEnforcesModelCapabilities(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high"} {
+		t.Run("o3-valid-"+effort, func(t *testing.T) {
+			rec := NormalizeLLMConfigRecord(LLMConfigRecord{
+				ID: "openai-o3", Provider: "openai", Model: "o3", Thinking: "enabled",
+				ReasoningEffort: effort, APIKeyCiphertext: "preserve-ciphertext",
+			})
+			if rec.ReasoningEffort != effort || rec.Thinking != "enabled" || rec.APIKeyCiphertext != "preserve-ciphertext" {
+				t.Fatalf("valid OpenAI o3 record changed: %+v", rec)
+			}
+			if err := llm.ValidateThinkingSettings(rec.Provider, rec.Model, rec.Thinking, rec.ReasoningEffort, rec.ThinkingBudget); err != nil {
+				t.Fatalf("normalized valid record fails validation: %v", err)
+			}
+		})
+	}
+
+	badBudgetLow, badBudgetHigh := 0, 32769
+	validBudgetLow, validBudgetHigh := 1, 32768
+	tests := []struct {
+		name         string
+		record       LLMConfigRecord
+		wantThinking string
+		wantEffort   string
+		wantBudget   *int
+	}{
+		{
+			name:         "unknown o3 effort clears instead of mapping max",
+			record:       LLMConfigRecord{Provider: "openai", Model: "o3", Thinking: "enabled", ReasoningEffort: "max", APIKeyCiphertext: "cipher"},
+			wantThinking: "enabled",
+			wantEffort:   "",
+		},
+		{
+			name:         "invalid thinking uses model default",
+			record:       LLMConfigRecord{Provider: "openai", Model: "o3", Thinking: "mystery", ReasoningEffort: "high"},
+			wantThinking: "enabled",
+			wantEffort:   "high",
+		},
+		{
+			name:         "disallowed disabled state uses model default",
+			record:       LLMConfigRecord{Provider: "openai", Model: "o3", Thinking: "disabled", ReasoningEffort: "medium"},
+			wantThinking: "enabled",
+			wantEffort:   "medium",
+		},
+		{
+			name:         "budget lower boundary preserved",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &validBudgetLow},
+			wantThinking: "enabled",
+			wantBudget:   &validBudgetLow,
+		},
+		{
+			name:         "budget upper boundary preserved",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &validBudgetHigh},
+			wantThinking: "enabled",
+			wantBudget:   &validBudgetHigh,
+		},
+		{
+			name:         "out of range low budget cleared",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &badBudgetLow},
+			wantThinking: "enabled",
+		},
+		{
+			name:         "out of range high budget cleared",
+			record:       LLMConfigRecord{Provider: "qwen", Model: "qwen3-32b", Thinking: "enabled", ThinkingBudget: &badBudgetHigh},
+			wantThinking: "enabled",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := NormalizeLLMConfigRecord(test.record)
+			if got.Thinking != test.wantThinking || got.ReasoningEffort != test.wantEffort {
+				t.Fatalf("normalized controls = thinking %q effort %q, want %q/%q", got.Thinking, got.ReasoningEffort, test.wantThinking, test.wantEffort)
+			}
+			if (got.ThinkingBudget == nil) != (test.wantBudget == nil) ||
+				(got.ThinkingBudget != nil && *got.ThinkingBudget != *test.wantBudget) {
+				t.Fatalf("normalized budget = %v, want %v", got.ThinkingBudget, test.wantBudget)
+			}
+			if got.APIKeyCiphertext != test.record.APIKeyCiphertext {
+				t.Fatalf("normalization changed stored key ciphertext: got %q want %q", got.APIKeyCiphertext, test.record.APIKeyCiphertext)
+			}
+			if err := llm.ValidateThinkingSettings(got.Provider, got.Model, got.Thinking, got.ReasoningEffort, got.ThinkingBudget); err != nil {
+				t.Fatalf("normalized legacy controls still fail validation: %v", err)
+			}
+		})
 	}
 }

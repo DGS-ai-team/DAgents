@@ -14,6 +14,9 @@ import {
   normalizeShellCommand,
   removeLocalShellEntry,
 } from "../utils/policyEditor.js";
+import UiSelect from "./UiSelect.vue";
+import UiIcon from "./UiIcon.vue";
+import SettingsSectionHeader from "./SettingsSectionHeader.vue";
 import { formatPolicyMode, policyModeClass } from "../utils/panelFormat.js";
 
 const props = defineProps({
@@ -37,12 +40,6 @@ const filterText = ref("");
 const newShellCommand = ref("");
 const newShellMode = ref("never");
 const bulkToolMode = ref("never");
-const grants = ref([]);
-const grantTools = ref([]);
-const grantToolOptions = ["read_file", "write_file", "search_replace"];
-const grantWorkspace = ref("");
-const grantExpiresAt = ref("");
-
 const resolvedAgentId = computed(() => String(props.agentId || "").trim());
 
 const shellTypes = computed(() => {
@@ -81,8 +78,6 @@ async function load() {
       throw new Error("缺少 agent_id：策略已按 Agent 存储");
     }
     data.value = await api.getPolicy(resolvedAgentId.value);
-    const grantData = await api.listAgentPolicyGrants(resolvedAgentId.value);
-    grants.value = Array.isArray(grantData?.grants) ? grantData.grants : [];
     const def = data.value?.platform?.default_shell || "bash";
     shellTab.value = shellTypes.value.includes(def) ? def : shellTypes.value[0] || "bash";
   } catch (e) {
@@ -113,25 +108,6 @@ async function updateToolMode(name, mode) {
   } finally {
     busyKey.value = "";
   }
-}
-
-async function createGrant() {
-  if (busyKey.value || !grantTools.value.length || !grantWorkspace.value.trim() || !grantExpiresAt.value) return;
-  busyKey.value = "grant-create"; error.value = ""; statusMessage.value = "";
-  try {
-    const expires = new Date(grantExpiresAt.value).toISOString();
-    const created = await api.createAgentPolicyGrant(resolvedAgentId.value, { tools: grantTools.value, workspace: grantWorkspace.value.trim(), expires_at: expires });
-    grants.value = [...grants.value, created]; grantTools.value = []; statusMessage.value = "已创建临时岗位授权";
-  } catch (e) { error.value = e.message; } finally { busyKey.value = ""; }
-}
-
-function grantStatus(grant) { if (grant.revoked_at) return "已撤销"; return new Date(grant.expires_at).getTime() <= Date.now() ? "已过期" : "有效"; }
-function grantTime(grant) { const date = new Date(grant.expires_at); return Number.isNaN(date.getTime()) ? grant.expires_at : date.toLocaleString(); }
-
-async function revokeGrant(grant) {
-  if (!grant?.id || busyKey.value) return;
-  busyKey.value = `grant:${grant.id}`; error.value = "";
-  try { const result = await api.revokeAgentPolicyGrant(resolvedAgentId.value, grant.id); grants.value = grants.value.map((item) => item.id === grant.id ? { ...item, revoked_at: result.revoked_at } : item); statusMessage.value = "已撤销临时岗位授权"; } catch (e) { error.value = e.message; } finally { busyKey.value = ""; }
 }
 
 async function applyBulkToolMode() {
@@ -219,17 +195,54 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="panel panel-overlay__card command-panel policy-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header class="panel__header command-panel__header">
+  <section
+    class="command-panel policy-panel"
+    :class="embedded ? 'policy-panel--embedded' : 'panel panel-overlay__card'"
+  >
+    <SettingsSectionHeader
+      v-if="embedded"
+      title="工具审批"
+      description="为智能体配置工具与 Shell 命令的允许、审批和禁止规则。"
+    >
+      <template #actions>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          :disabled="loading"
+          :aria-label="loading ? '正在刷新审批策略' : '刷新审批策略'"
+          :title="loading ? '正在刷新审批策略' : '刷新审批策略'"
+          @click="load"
+        >
+          <UiIcon name="refresh-cw" :size="16" />
+        </button>
+      </template>
+    </SettingsSectionHeader>
+
+    <header v-else class="panel__header command-panel__header">
       <div>
         <div class="panel__title">审批策略</div>
       </div>
       <div class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">
-          {{ loading ? "刷新中…" : "刷新" }}
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          :disabled="loading"
+          :aria-label="loading ? '正在刷新审批策略' : '刷新审批策略'"
+          :title="loading ? '正在刷新审批策略' : '刷新审批策略'"
+          @click="load"
+        >
+          <UiIcon name="refresh-cw" :size="16" />
         </button>
-        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">
-          关闭
+        <button
+          v-if="!embedded"
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          data-panel-close
+          aria-label="关闭审批策略"
+          title="关闭审批策略"
+          @click="emit('close')"
+        >
+          <UiIcon name="close" :size="16" />
         </button>
       </div>
     </header>
@@ -276,11 +289,15 @@ onMounted(load);
           <div class="command-section__head policy-panel__bulk-head">
             <h3 class="command-section__title">工具策略 ({{ filteredTools.length }})</h3>
             <div class="policy-panel__bulk-actions">
-              <select v-model="bulkToolMode" class="policy-panel__decision-select" :disabled="!!busyKey">
-                <option v-for="opt in POLICY_MODES" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
-                </option>
-              </select>
+              <div class="policy-panel__select">
+                <UiSelect
+                  v-model="bulkToolMode"
+                  :options="POLICY_MODES"
+                  aria-label="批量工具策略"
+                  size="compact"
+                  :disabled="!!busyKey"
+                />
+              </div>
               <button
                 type="button"
                 class="btn btn--primary btn--sm"
@@ -341,7 +358,7 @@ onMounted(load);
           <p v-else class="command-panel__empty">
             {{
               Array.isArray(data?.tools) && data.tools.length === 0
-                ? "当前未启用任何工具，可在上方「能力与角色」中开启工具组后再配置策略。"
+                ? "当前未启用任何工具，可在「基本设置 → 能力与角色」中启用工具组后配置策略。"
                 : "无匹配工具"
             }}
           </p>
@@ -370,11 +387,14 @@ onMounted(load);
               class="policy-panel__filter"
               placeholder="添加命令（取首个单词，如 docker / git）"
             />
-            <select v-model="newShellMode" class="policy-panel__decision-select">
-              <option v-for="opt in POLICY_MODES" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
+            <div class="policy-panel__select">
+              <UiSelect
+                v-model="newShellMode"
+                :options="POLICY_MODES"
+                aria-label="新命令策略"
+                size="compact"
+              />
+            </div>
             <button type="submit" class="btn btn--primary btn--sm" :disabled="!newShellCommand.trim() || !!busyKey">
               添加
             </button>
@@ -432,23 +452,6 @@ onMounted(load);
           <p v-else class="command-panel__empty">暂无显式 shell 规则，可在上方添加</p>
         </section>
 
-        <section class="command-section policy-panel__grant-section">
-          <div class="command-section__head"><h3 class="command-section__title">临时岗位授权</h3></div>
-          <p class="policy-panel__hint">仅对指定文件工具和规范化工作目录生效；Shell 与无路径工具不会被授权，显式禁止永远优先。模型不能创建或扩大授权。</p>
-          <form class="policy-panel__grant-form" @submit.prevent="createGrant">
-            <div class="settings-field"><span class="settings-field__label">工具白名单</span><div><label v-for="tool in grantToolOptions" :key="tool"><input v-model="grantTools" type="checkbox" :value="tool" :aria-label="`授权 ${tool}`" /> {{ tool }}</label></div></div>
-            <label class="settings-field"><span class="settings-field__label">工作目录</span><input v-model="grantWorkspace" class="policy-panel__filter" placeholder="绝对工作目录" aria-label="授权工作目录" /></label>
-            <label class="settings-field"><span class="settings-field__label">有效期</span><input v-model="grantExpiresAt" class="policy-panel__filter" type="datetime-local" aria-label="授权有效期" /></label>
-            <button type="submit" class="btn btn--primary btn--sm" :disabled="busyKey === 'grant-create'">创建授权</button>
-          </form>
-          <div v-if="grants.length" class="command-table-wrap">
-            <table class="command-table"><thead><tr><th>工具</th><th>工作目录</th><th>有效期</th><th>状态</th><th /></tr></thead><tbody>
-              <tr v-for="grant in grants" :key="grant.id"><td class="command-table__mono">{{ grant.tools.join(", ") }}</td><td class="command-table__mono">{{ grant.workspace }}</td><td>{{ grantTime(grant) }}</td><td>{{ grantStatus(grant) }}</td><td><button v-if="!grant.revoked_at && grantStatus(grant) !== '已过期'" type="button" class="btn btn--ghost btn--sm btn--danger" :disabled="busyKey === `grant:${grant.id}`" @click="revokeGrant(grant)">撤销</button></td></tr>
-            </tbody></table>
-          </div>
-          <p v-else class="command-panel__empty">暂无临时岗位授权</p>
-        </section>
-
         <p class="command-panel__foot">
           点击选项即可生效
         </p>
@@ -456,3 +459,22 @@ onMounted(load);
     </div>
   </section>
 </template>
+
+<style scoped>
+.policy-panel--embedded {
+  width: 100%;
+  min-height: auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.policy-panel--embedded .command-panel__body {
+  min-height: auto;
+  overflow: visible;
+  padding: 0;
+}
+</style>

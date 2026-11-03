@@ -7,7 +7,7 @@
 <p align="center">
   本地优先的 AI Agent 工作台
   <br />
-  在自己的 Windows 或 Linux 机器上运行助手、工具与工作组协作
+  在 Windows 桌面使用助手与工具，按需连接跨机器工作组
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
-当前版本为 **v1.0.4**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
+当前版本为 **v1.0.5**。DAgents 适合自托管试用、个人开发和内网部署；生产使用前请先阅读[安全边界](#安全边界)与[运维指南](docs/user/operations.md)。
 
 v1.0.0 是 DAgents 首个稳定版，提供独立 Windows Desktop 与 API-only Node。由 v0.11.0 升级时，请先阅读[迁移指南](docs/user/migrate-from-v0.11.md)和[Windows 安装说明](packaging/windows/README.md)，备份现有 `.runtime` 后再安装；不要直接覆盖正在使用的数据目录。
 
@@ -34,7 +34,7 @@ v1.0.0 是 DAgents 首个稳定版，提供独立 Windows Desktop 与 API-only N
 
 ## 30 秒看懂
 
-DAgents 把“模型对话”和“可控执行环境”放在一起：你可以先只运行一个本机 Node，随后按需接入 Manage，把多个 Node 上的 Agent 组织成工作组。
+DAgents 把“模型对话”和“可控执行环境”放在一起：Windows Desktop 连接并管理同机的 Node，提供日常工作界面；需要多机协作时，再按需接入 Manage，把 Windows 或 Linux Node 上的 Agent 组织成工作组。
 
 | 你要做什么 | 从哪里开始 | 你会得到什么 |
 | --- | --- | --- |
@@ -44,12 +44,12 @@ DAgents 把“模型对话”和“可控执行环境”放在一起：你可以
 
 ## 产品界面
 
-Desktop 和 Manage 是两个互补入口：Desktop 连接 Node，提供日常对话与执行界面；Manage 面向跨 Node 的治理和汇总。具体设置项放在用户指南中。
+Desktop 和 Manage 是两个互补入口：Desktop 固定连接同机 Node，提供日常对话与执行界面；Manage 面向跨 Node 的治理和汇总。Desktop 不提供远程 Node 连接或独立网页界面。具体设置项放在用户指南中。
 
 | 页面 | 主要内容 | 本地入口或设计稿 |
 | --- | --- | --- |
 | Desktop Agent 工作台 | Agent 对话、工具结果、审批和终端工作台 | 开始菜单中的 `DAgents Desktop`；Node 只提供 API |
-| Desktop 设置 | 本机偏好、Node 连接、模型、工具策略、Auto、Todo 和反馈 | 顶栏 `DAgents → 通用设置`；智能体条目可进入其设置 |
+| Desktop 设置 | 本机偏好、模型、工具策略、Auto、Todo 和反馈 | 顶栏 `DAgents → 通用设置`；智能体条目可进入其设置 |
 | Manage 控制台 | Node 注册、Workgroup、Auto 汇总和反馈管理 | 运行 Manage 后打开 `http://127.0.0.1:8020/console/` |
 | Node / Manage 视觉参考 | 页面骨架、色彩、图标和关键状态的交互式稿 | [UI 视觉审计与方向](docs/design/dagents-ui-audit-and-direction.html) |
 
@@ -70,7 +70,7 @@ Desktop 当前原生验收与界面记录见[日常使用](docs/design/desktop-p
 
 ## 为什么是 DAgents
 
-DAgents 面向希望掌控数据、工具权限和执行边界的个人使用者；同一使用者可从多台 Desktop 访问自己的 Node，并通过可选 Manage 进行多机协作。当前不提供多人共用 Node 的账号、私人上下文或租户隔离。
+DAgents 面向希望掌控数据、工具权限和执行边界的个人使用者。每台 Windows Desktop 使用同机 Node，需要跨机器协作时，通过可选 Manage 组织各 Node 上的 Agent。当前不提供多人共用 Node 的账号、私人上下文或租户隔离。
 
 - **本机运行**：Go Agent Node 在本地承载会话、工具调用、审批和 API；独立 DAgents Desktop 提供本机工作界面。
 - **显式授权**：每个 Agent 独立配置工作目录、模型、工具组、Skills 和策略；危险操作可以要求人工审批。

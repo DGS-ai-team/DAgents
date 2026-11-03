@@ -1,11 +1,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const configText = ref("");
+const route = useRoute();
+const router = useRouter();
 const servers = ref([]);
 const activeServerId = ref("");
 const loading = ref(false);
@@ -21,6 +24,17 @@ const draft = reactive({ configText: "" });
 
 const REDACTED_SECRET = "__DAGENTS_SECRET_REDACTED__";
 const configBusy = computed(() => loading.value || saving.value || Boolean(toolSaving.value) || Boolean(refreshing.value));
+const createFlow = computed(() => route.query.create === "1" && String(route.query.returnAgentId || "").trim());
+
+function returnToAgent() {
+  const agentId = String(route.query.returnAgentId || "").trim();
+  if (!agentId) return;
+  void router.replace({
+    name: "settings-agent-detail",
+    params: { agentId },
+    query: { section: String(route.query.returnSection || "resources") },
+  });
+}
 
 function hasEditableServer(serverId) {
   try {
@@ -142,6 +156,7 @@ async function save() {
     setConfigFromResponse(result);
     notifyConfigurationChanged("mcp");
     status.value = "MCP 配置已保存并刷新服务目录";
+    if (createFlow.value) returnToAgent();
   } catch (e) {
     error.value = e.message || "保存 MCP 配置失败";
   } finally {
@@ -251,7 +266,7 @@ onMounted(() => {
       </template>
     </SettingsPageHeader>
 
-    <details class="mcp-settings__advanced">
+      <details class="mcp-settings__advanced" :open="Boolean(createFlow)">
       <summary>
         <span>高级：编辑 mcpServers JSON</span>
         <small>适用于导入、批量修改或配置 stdio 服务</small>
@@ -296,7 +311,9 @@ onMounted(() => {
         </div>
         <span class="mcp-settings__count">{{ servers.length }} 个服务</span>
       </div>
-      <div v-if="!servers.length && !loading" class="mcp-settings__empty settings-empty-state">还没有配置 MCP 服务。</div>
+      <div v-if="!servers.length && !loading" class="mcp-settings__empty settings-empty-state">
+        还没有配置 MCP 服务。使用上方高级编辑添加服务；保存后会返回发起配置的智能体。
+      </div>
       <div v-else class="mcp-settings__server-list">
         <button
           v-for="server in servers"

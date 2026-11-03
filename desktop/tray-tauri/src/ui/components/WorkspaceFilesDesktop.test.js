@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, ref } from 'vue'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import WorkspaceFiles from './WorkspaceFiles.vue'
+import WorkspaceReferenceAttachments from './WorkspaceReferenceAttachments.vue'
+import { dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences } from '../workspace-references.js'
 import * as api from '../workspace-files-api.js'
+import { clearWorkspaceViewsForTests } from '../workspace-view-state.js'
 
 vi.mock('../workspace-files-api.js', () => ({
   createWorkspaceFile: vi.fn(),
@@ -25,16 +29,17 @@ const directories = {
   '': [
     { name: '.gitignore', path: '.gitignore', is_dir: false, size: 20 },
     { name: 'reports', path: 'reports', is_dir: true, size: 0 },
-    { name: 'a.md', path: 'a.md', is_dir: false, size: 10 },
-    { name: 'b.md', path: 'b.md', is_dir: false, size: 10 },
+    { name: 'a.txt', path: 'a.txt', is_dir: false, size: 10 },
+    { name: 'b.txt', path: 'b.txt', is_dir: false, size: 10 },
     { name: 'records.csv', path: 'records.csv', is_dir: false, size: 32 },
     { name: 'large.bin', path: 'large.bin', is_dir: false, size: 17 * 1024 * 1024 },
     { name: 'too-large.bin', path: 'too-large.bin', is_dir: false, size: 257 * 1024 * 1024 },
+    { name: 'large.txt', path: 'large.txt', is_dir: false, size: 17 * 1024 * 1024 },
     { name: 'large.md', path: 'large.md', is_dir: false, size: 17 * 1024 * 1024 },
     { name: 'large.go', path: 'large.go', is_dir: false, size: 17 * 1024 * 1024 },
     { name: 'large.csv', path: 'large.csv', is_dir: false, size: 17 * 1024 * 1024 },
   ],
-  reports: [{ name: 'summary.md', path: 'reports/summary.md', is_dir: false, size: 20 }],
+  reports: [{ name: 'summary.txt', path: 'reports/summary.txt', is_dir: false, size: 20 }],
 }
 let wrapper
 
@@ -44,6 +49,7 @@ function result(text, etag = 'etag-1') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  clearWorkspaceViewsForTests()
   localStorage.clear()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path] || [] }))
@@ -103,21 +109,277 @@ describe('Desktop workspace resource navigation', () => {
   it('offers an inline Markdown preview/source switch in the toolbar', async () => {
     api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
       path,
-      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 8 }],
+      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 8 }, { name: 'notes.md', path: 'notes.md', is_dir: false, size: 9 }],
     }))
-    api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('# Guide'), contentType: 'application/octet-stream', etag: 'markdown-etag' })
+    api.readWorkspaceFile.mockImplementation(async (_agentId, path) => result(path === 'guide.md' ? '# Guide' : '# Notes'))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
 
     expect(await wrapper.vm.openPath('guide.md')).toEqual({ ok: true, canceled: false })
     const controls = wrapper.findAll('.workspace-files__preview-toggle button')
     expect(controls).toHaveLength(2)
-    expect(controls[1].attributes('aria-pressed')).toBe('true')
-    expect(wrapper.find('textarea').element.value).toBe('# Guide')
-    await controls[0].trigger('click')
+    expect(controls[0].attributes('aria-pressed')).toBe('true')
     expect(wrapper.find('.workspace-files__markdown-preview h1').text()).toBe('Guide')
     await controls[1].trigger('click')
     expect(wrapper.find('textarea').element.value).toBe('# Guide')
+    await wrapper.vm.openPath('notes.md')
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__markdown-preview h1').text()).toBe('Notes')
+    await wrapper.vm.openPath('guide.md')
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('# Guide')
+    await controls[1].trigger('click')
+    expect(wrapper.find('textarea').element.value).toBe('# Guide')
+  })
+
+  it('adds a whole-file reference from the visible toolbar action without changing pages', async () => {
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 10 }] }))
+    api.readWorkspaceFile.mockResolvedValueOnce(result('# Guide'))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'reference-action-agent', attachmentLimitReached: false } })
+    await flushPromises()
+    await wrapper.vm.openPath('guide.md')
+    const referenceButton = wrapper.find('[aria-label="引用文件到对话"]')
+    expect(referenceButton.attributes('title')).toContain('引用 guide.md')
+    await referenceButton.trigger('click')
+    const reference = wrapper.emitted('annotation-update')?.[0]?.[0]
+    expect(reference).toMatchObject({ agentId: 'reference-action-agent', path: 'guide.md', anchor: { type: 'file', label: '整个文件' } })
+    expect(wrapper.find('.workspace-files__markdown-preview').exists()).toBe(true)
+    await wrapper.setProps({ attachmentLimitReached: true })
+    const limitedReferenceButton = wrapper.find('[aria-label="无法引用：一条消息最多添加 8 个附件或注解"]')
+    expect(limitedReferenceButton.element.disabled).toBe(true)
+    expect(limitedReferenceButton.attributes('title')).toContain('最多添加 8 个附件或注解')
+  })
+
+  it('carries a selected whole-file reference into chat, sends its file_ref, and retains it after failure', async () => {
+    const submit = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined)
+    const agentId = 'reference-chat-agent'
+    const ChatHarness = defineComponent({
+      setup() {
+        const inChat = ref(false)
+        const references = ref([])
+        const captureReference = reference => {
+          if (reference.agentId === agentId) references.value = [...references.value, reference]
+        }
+        const send = async () => {
+          const sentReferences = references.value.slice()
+          try {
+            await dispatchWorkspaceMessage({ agentId, references: sentReferences }, submit)
+            references.value = settleWorkspaceReferences({ [agentId]: references.value }, agentId, sentReferences, true)[agentId]
+          } catch { /* A failed submit leaves the selected reference queued for retry. */ }
+        }
+        return () => h('div', [
+          h('button', { type: 'button', onClick: () => { inChat.value = !inChat.value } }, '切换到聊天'),
+          inChat.value
+            ? h('section', [
+              h(WorkspaceReferenceAttachments, { references: references.value }),
+              h('button', { type: 'button', disabled: !hasWorkspaceMessageContent({ references: references.value }), onClick: send }, '发送'),
+            ])
+            : h(WorkspaceFiles, { agentId, onAnnotationUpdate: captureReference }),
+        ])
+      },
+    })
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
+      path,
+      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', file_ref: 'node-file-guide', is_dir: false, size: 8 }],
+    }))
+    api.readWorkspaceFile.mockResolvedValueOnce(result('# Guide'))
+    wrapper = mount(ChatHarness)
+    await flushPromises()
+    const guide = wrapper.findAll('.workspace-files__list button').find(button => button.text().includes('guide.md'))
+    await guide.trigger('click')
+    await flushPromises()
+    await wrapper.find('[aria-label="引用文件到对话"]').trigger('click')
+    expect(wrapper.findComponent(WorkspaceFiles).emitted('annotation-update')?.[0]?.[0]).toMatchObject({ agentId, path: 'guide.md' })
+    await wrapper.findAll('button').find(button => button.text() === '切换到聊天').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('guide.md · 整个文件')
+    const sendButton = wrapper.findAll('section button').find(button => button.text() === '发送')
+    expect(sendButton.element.disabled).toBe(false)
+    await sendButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('guide.md · 整个文件')
+    expect(submit).toHaveBeenCalledTimes(1)
+    await sendButton.trigger('click')
+    await flushPromises()
+    expect(submit).toHaveBeenCalledTimes(2)
+    expect(submit.mock.calls[1]).toMatchObject([
+      agentId,
+      expect.stringContaining('文件：`guide.md`'),
+      [],
+      [{ path: 'node-file-guide', name: 'guide.md' }],
+    ])
+    expect(wrapper.text()).not.toContain('guide.md · 整个文件')
+  })
+
+  it('offers the same whole-file reference action in the file context menu', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'context-reference-agent' } })
+    await flushPromises()
+    const file = wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.txt')
+    await file.trigger('contextmenu', { clientX: 40, clientY: 50 })
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find(button => button.textContent.includes('引用到对话'))
+    expect(item).toBeTruthy()
+    item.click()
+    await flushPromises()
+    expect(wrapper.emitted('annotation-update')?.[0]?.[0]).toMatchObject({ path: 'a.txt', anchor: { label: '整个文件' } })
+  })
+
+  it('restores a bounded workspace view for the same Agent and scope', async () => {
+    const props = { agentId: 'view-restore-agent', workspaceScope: 'node-view-a' }
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    await wrapper.vm.openPath('reports/summary.txt')
+    wrapper.unmount()
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toContain('reports')
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toContain('summary.txt')
+  })
+
+  it('keeps workspace view snapshots isolated by Agent and Node scope', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'scoped-view-agent-a', workspaceScope: 'node-view-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('reports/summary.txt')
+    wrapper.unmount()
+
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'scoped-view-agent-b', workspaceScope: 'node-view-a' } })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toBe('工作区')
+    wrapper.unmount()
+
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'scoped-view-agent-a', workspaceScope: 'node-view-b' } })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toBe('工作区')
+  })
+
+  it('does not restore a view after the configured workspace location changes', async () => {
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'location-view-agent', workspaceScope: 'node-view', workspaceLocation: 'D:/workspace-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('reports/summary.txt')
+    wrapper.unmount()
+
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'location-view-agent', workspaceScope: 'node-view', workspaceLocation: 'D:/workspace-b' } })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toBe('工作区')
+  })
+
+  it('falls back to the nearest existing directory when the remembered file was deleted', async () => {
+    const props = { agentId: 'deleted-view-agent', workspaceScope: 'node-deleted' }
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    await wrapper.vm.openPath('reports/summary.txt')
+    wrapper.unmount()
+
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path === '' ? directories[''] : [] }))
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toContain('reports')
+    expect(wrapper.find('.workspace-files__breadcrumbs b').exists()).toBe(false)
+    wrapper.unmount()
+
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path === '' ? directories[''].filter(entry => entry.path !== 'reports') : [] }))
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs').text()).toBe('工作区')
+  })
+
+  it('restores the Markdown mode and scroll position on remount', async () => {
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 10 }] }))
+    api.readWorkspaceFile.mockImplementation(async () => result('# Guide'))
+    const props = { agentId: 'scroll-view-agent', workspaceScope: 'node-scroll', active: true }
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    await wrapper.vm.openPath('guide.md')
+    await wrapper.findAll('.workspace-files__preview-toggle button').find(button => button.text() === '源内容').trigger('click')
+    const firstEditor = wrapper.find('textarea').element
+    Object.defineProperty(firstEditor, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(firstEditor, 'scrollHeight', { configurable: true, value: 500 })
+    firstEditor.scrollTop = 73
+    wrapper.unmount()
+
+    wrapper = mount(WorkspaceFiles, { props: { ...props, active: false } })
+    await flushPromises()
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    wrapper.unmount()
+
+    wrapper = mount(WorkspaceFiles, { props: { ...props, active: false } })
+    await flushPromises()
+    const remountedEditor = wrapper.find('textarea').element
+    Object.defineProperty(remountedEditor, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(remountedEditor, 'scrollHeight', { configurable: true, value: 500 })
+    expect(remountedEditor.scrollTop).toBe(0)
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    expect(wrapper.find('textarea').element.scrollTop).toBe(73)
+    expect(wrapper.findAll('.workspace-files__preview-toggle button').find(button => button.text() === '源内容').attributes('aria-pressed')).toBe('true')
+
+    wrapper.unmount()
+    wrapper = mount(WorkspaceFiles, { props: { ...props, active: false } })
+    await flushPromises()
+    const userEditor = wrapper.find('textarea').element
+    Object.defineProperty(userEditor, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(userEditor, 'scrollHeight', { configurable: true, value: 500 })
+    await wrapper.find('.workspace-files__editor-content').trigger('wheel')
+    userEditor.scrollTop = 19
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    expect(userEditor.scrollTop).toBe(19)
+  })
+
+  it('clamps a remembered scroll when the restored file is now shorter', async () => {
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 10 }] }))
+    api.readWorkspaceFile.mockResolvedValue(result('# Guide'))
+    const props = { agentId: 'short-scroll-agent', workspaceScope: 'node-short-scroll', active: true }
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    await wrapper.vm.openPath('guide.md')
+    const editor = wrapper.find('.workspace-files__markdown-preview').element
+    Object.defineProperty(editor, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(editor, 'scrollHeight', { configurable: true, value: 500 })
+    editor.scrollTop = 73
+    wrapper.unmount()
+
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    const shortEditor = wrapper.find('.workspace-files__markdown-preview').element
+    Object.defineProperty(shortEditor, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(shortEditor, 'scrollHeight', { configurable: true, value: 100 })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    expect(shortEditor.scrollTop).toBe(0)
+
+    Object.defineProperty(shortEditor, 'scrollHeight', { configurable: true, value: 500 })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    expect(shortEditor.scrollTop).toBe(0)
+  })
+
+  it('does not apply a late restored-file scroll after the user opens another file', async () => {
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', is_dir: false, size: 10 }, { name: 'notes.md', path: 'notes.md', is_dir: false, size: 10 }] }))
+    api.readWorkspaceFile.mockImplementation(async (_agentId, path) => result(path === 'guide.md' ? '# Guide' : '# Notes'))
+    const props = { agentId: 'late-restore-agent', workspaceScope: 'node-late' }
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    await wrapper.vm.openPath('guide.md')
+    wrapper.find('.workspace-files__markdown-preview').element.scrollTop = 73
+    wrapper.unmount()
+
+    let finishRestoredRead
+    api.readWorkspaceFile.mockImplementation((_agentId, path) => path === 'guide.md'
+      ? new Promise(resolve => { finishRestoredRead = resolve })
+      : Promise.resolve(result('# Notes')))
+    wrapper = mount(WorkspaceFiles, { props })
+    await flushPromises()
+    await vi.waitFor(() => expect(finishRestoredRead).toBeTypeOf('function'))
+    await wrapper.vm.openPath('notes.md')
+    const notesPreview = wrapper.find('.workspace-files__markdown-preview').element
+    notesPreview.scrollTop = 7
+    finishRestoredRead(result('# Guide'))
+    await flushPromises()
+    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('notes.md')
+    expect(wrapper.find('.workspace-files__markdown-preview').element.scrollTop).toBe(7)
   })
 
   it('renders Markdown and lazily appends bounded chunks for large text files', async () => {
@@ -127,7 +389,6 @@ describe('Desktop workspace resource navigation', () => {
     expect(await wrapper.vm.openPath('large.md')).toEqual({ ok: true, canceled: false })
     expect(api.readWorkspaceFile).not.toHaveBeenCalledWith('agent-a', 'large.md')
     expect(api.readWorkspaceTextChunk).toHaveBeenCalledWith('agent-a', 'large.md', 0, 256 * 1024)
-    await wrapper.findAll('.workspace-files__preview-toggle button').find(button => button.text() === '预览').trigger('click')
     expect(wrapper.find('.workspace-files__markdown-preview h1').text()).toBe('First section')
     expect(wrapper.text()).toContain('剩余 37,856 字节')
 
@@ -156,7 +417,7 @@ describe('Desktop workspace resource navigation', () => {
     api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('now small'), contentType: 'text/plain', etag: strongRevision })
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
 
     expect(wrapper.find('.workspace-files__chunk-toolbar').exists()).toBe(false)
     expect(wrapper.find('textarea').element.value).toBe('now small')
@@ -174,7 +435,7 @@ describe('Desktop workspace resource navigation', () => {
     api.readWorkspaceFile.mockRejectedValueOnce(Object.assign(new Error('File exceeds full read limit'), { status: 413 }))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
 
     expect(api.readWorkspaceFile).toHaveBeenCalledTimes(1)
     expect(api.readWorkspaceTextChunk).toHaveBeenCalledTimes(2)
@@ -187,7 +448,7 @@ describe('Desktop workspace resource navigation', () => {
   it('offers reload instead of a broken download when a chunk revision changes', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
     api.readWorkspaceTextChunk.mockRejectedValueOnce(Object.assign(new Error('revision changed'), { status: 409 }))
     await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
     await flushPromises()
@@ -200,13 +461,13 @@ describe('Desktop workspace resource navigation', () => {
     api.saveWorkspaceFileAs.mockImplementationOnce(() => new Promise(resolve => { finishSaveAs = resolve }))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('current draft text')
     await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
     await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('另存为')).trigger('click')
     await flushPromises()
 
-    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.md', 'current draft text')
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.txt', 'current draft text')
     expect(wrapper.find('.workspace-files__action-status').text()).toBe('正在选择保存位置或另存文件…')
     finishSaveAs({ status: 'saved', bytesWritten: 18 })
     await flushPromises()
@@ -234,12 +495,12 @@ describe('Desktop workspace resource navigation', () => {
     api.revealWorkspacePath.mockRejectedValueOnce(new Error('定位失败'))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
     await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('在文件管理器中定位')).trigger('click')
     await flushPromises()
 
-    expect(api.revealWorkspacePath).toHaveBeenCalledWith('agent-a', 'a.md')
+    expect(api.revealWorkspacePath).toHaveBeenCalledWith('agent-a', 'a.txt')
     expect(wrapper.text()).toContain('定位失败')
   })
 
@@ -261,13 +522,13 @@ describe('Desktop workspace resource navigation', () => {
     await flushPromises()
     expect(api.revealWorkspacePath).toHaveBeenCalledWith('agent-a', 'reports')
 
-    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.md').trigger('contextmenu', { clientX: 40, clientY: 50 })
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.txt').trigger('contextmenu', { clientX: 40, clientY: 50 })
     await flushPromises()
     const fileMenu = document.body.querySelector('.ui-context-menu')
     expect(fileMenu?.textContent).toContain('在文件管理器中显示')
     fileMenu.querySelector('button').click()
     await flushPromises()
-    expect(api.revealWorkspacePath).toHaveBeenLastCalledWith('agent-a', 'a.md')
+    expect(api.revealWorkspacePath).toHaveBeenLastCalledWith('agent-a', 'a.txt')
 
     await wrapper.find('.workspace-files__list').trigger('contextmenu', { clientX: 30, clientY: 40 })
     document.body.querySelector('.ui-context-menu button').click()
@@ -278,7 +539,7 @@ describe('Desktop workspace resource navigation', () => {
   it('keeps reveal success quiet while preserving failures and supports keyboard context menus', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     wrapper.vm.actionStatus = 'stale success notice'
     await wrapper.vm.revealSelectedFile()
     expect(wrapper.find('.workspace-files__action-status').exists()).toBe(false)
@@ -291,7 +552,7 @@ describe('Desktop workspace resource navigation', () => {
     expect(wrapper.find('.workspace-files__action-status').exists()).toBe(false)
 
     api.revealWorkspacePath.mockRejectedValueOnce(new Error('文件管理器不可用'))
-    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.md').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await wrapper.findAll('.workspace-files__list button').find(button => button.text() === 'a.txt').trigger('contextmenu', { clientX: 30, clientY: 40 })
     await flushPromises()
     document.body.querySelector('.ui-context-menu button').click()
     await flushPromises()
@@ -332,7 +593,7 @@ describe('Desktop workspace resource navigation', () => {
   it('opens reference actions from the workspace keyboard context-menu key', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' }, attachTo: document.body })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('.workspace-files__editor').trigger('keydown', { key: 'F10', shiftKey: true })
     await flushPromises()
     expect(document.body.querySelector('.ui-context-menu')?.textContent).toContain('添加注解')
@@ -365,7 +626,7 @@ describe('Desktop workspace resource navigation', () => {
     expect(wrapper.find('[aria-label="刷新"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="保存文件"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="更多文件操作"]').exists()).toBe(true)
-    expect(wrapper.findAll('.workspace-files__actions-popover button')).toHaveLength(5)
+    expect(wrapper.findAll('.workspace-files__actions-popover button')).toHaveLength(4)
     expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="上传文件"]').exists()).toBe(false)
     expect(wrapper.find('.workspace-files__toolbar-actions > [aria-label="下载文件"]').exists()).toBe(false)
   })
@@ -388,10 +649,10 @@ describe('Desktop workspace resource navigation', () => {
     expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', '.gitignore')
     expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('.gitignore')
 
-    expect((await wrapper.vm.openPath('reports/summary.md')).ok).toBe(true)
+    expect((await wrapper.vm.openPath('reports/summary.txt')).ok).toBe(true)
     expect(api.listWorkspace).toHaveBeenLastCalledWith('agent-a', 'reports')
-    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'reports/summary.md')
-    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('summary.md')
+    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'reports/summary.txt')
+    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('summary.txt')
   })
 
   it('opens a persistent annotation for a CSV cell and emits it with the resource reference', async () => {
@@ -425,15 +686,15 @@ describe('Desktop workspace resource navigation', () => {
   it('keeps the current editor and its draft when confirmation to leave is canceled', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('reports/summary.md')
+    await wrapper.vm.openPath('reports/summary.txt')
     const editor = wrapper.find('textarea')
     await editor.setValue('unsaved local edit')
     window.confirm.mockReturnValue(false)
 
-    const outcome = await wrapper.vm.openPath('a.md')
+    const outcome = await wrapper.vm.openPath('a.txt')
     expect(outcome).toEqual({ ok: false, canceled: true })
     expect(wrapper.find('textarea').element.value).toBe('unsaved local edit')
-    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('summary.md')
+    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('summary.txt')
     expect(api.readWorkspaceFile).toHaveBeenCalledTimes(1)
   })
 
@@ -441,14 +702,14 @@ describe('Desktop workspace resource navigation', () => {
     let resolveA
     let resolveB
     api.readWorkspaceFile.mockImplementation((_agentId, path) => new Promise(resolve => {
-      if (path === 'a.md') resolveA = resolve
+      if (path === 'a.txt') resolveA = resolve
       else resolveB = resolve
     }))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    const openingA = wrapper.vm.openPath('a.md')
+    const openingA = wrapper.vm.openPath('a.txt')
     await flushPromises()
-    const openingB = wrapper.vm.openPath('b.md')
+    const openingB = wrapper.vm.openPath('b.txt')
     await flushPromises()
     resolveB(result('newer file', 'etag-b'))
     await flushPromises()
@@ -457,19 +718,19 @@ describe('Desktop workspace resource navigation', () => {
 
     expect((await openingB).ok).toBe(true)
     expect((await openingA).ok).toBe(false)
-    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('b.md')
+    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('b.txt')
     expect(wrapper.find('textarea').element.value).toBe('newer file')
   })
 
   it('restores a saved draft when reopening its file after navigating away', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('A draft to keep')
 
-    await wrapper.vm.openPath('b.md')
-    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md')).toContain('A draft to keep')
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('b.txt')
+    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.txt')).toContain('A draft to keep')
+    await wrapper.vm.openPath('a.txt')
 
     expect(wrapper.find('textarea').element.value).toBe('A draft to keep')
   })
@@ -477,19 +738,19 @@ describe('Desktop workspace resource navigation', () => {
   it('keeps a file draft in storage when reopening that file fails to read', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('draft survives failed read')
-    await wrapper.vm.openPath('b.md')
-    const draftKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.md'
+    await wrapper.vm.openPath('b.txt')
+    const draftKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.txt'
     const storedDraft = localStorage.getItem(draftKey)
     api.readWorkspaceFile.mockRejectedValueOnce(new Error('temporary read failure'))
 
-    expect((await wrapper.vm.openPath('a.md')).ok).toBe(false)
+    expect((await wrapper.vm.openPath('a.txt')).ok).toBe(false)
     expect(localStorage.getItem(draftKey)).toBe(storedDraft)
   })
 
   it('retains and lets users save as a draft when the source grows into a chunked preview', async () => {
-    const draftKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.md'
+    const draftKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.txt'
     api.readWorkspaceFile.mockResolvedValueOnce({
       bytes: new TextEncoder().encode('\uFEFForiginal\r\nsource\r\n'),
       contentType: 'text/plain',
@@ -497,17 +758,17 @@ describe('Desktop workspace resource navigation', () => {
     })
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('original local draft\nsecond line')
     const storedDraft = localStorage.getItem(draftKey)
-    await wrapper.vm.openPath('b.md')
+    await wrapper.vm.openPath('b.txt')
 
     api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
       path,
-      entries: path === '' ? directories[''].map(entry => entry.path === 'a.md' ? { ...entry, size: 17 * 1024 * 1024 } : entry) : directories[path] || [],
+      entries: path === '' ? directories[''].map(entry => entry.path === 'a.txt' ? { ...entry, size: 17 * 1024 * 1024 } : entry) : directories[path] || [],
     }))
     api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('# New large source chunk\n'), fileSize: 17 * 1024 * 1024, nextOffset: 256 * 1024, etag: 'large-etag' })
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
 
     expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('New large source chunk')
     expect(wrapper.find('textarea').exists()).toBe(false)
@@ -517,7 +778,7 @@ describe('Desktop workspace resource navigation', () => {
     api.saveWorkspaceFileAs.mockResolvedValueOnce({ status: 'saved', bytesWritten: 20 })
     await wrapper.find('.workspace-files__draft-bar.is-retained button').trigger('click')
     await flushPromises()
-    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.md', '\uFEFForiginal local draft\r\nsecond line')
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.txt', '\uFEFForiginal local draft\r\nsecond line')
     expect(localStorage.getItem(draftKey)).toBe(storedDraft)
 
     await wrapper.vm.discardDraftAndReload({ confirm: false })
@@ -530,7 +791,7 @@ describe('Desktop workspace resource navigation', () => {
     api.readWorkspaceTextChunk.mockImplementationOnce(() => new Promise(resolve => { resolveChunk = resolve }))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    const opening = wrapper.vm.openPath('large.md')
+    const opening = wrapper.vm.openPath('large.txt')
     await flushPromises()
     await wrapper.setProps({ agentId: 'agent-b' })
     await flushPromises()
@@ -544,22 +805,22 @@ describe('Desktop workspace resource navigation', () => {
 
   it('does not start a 413 chunk fallback after the selected path changes', async () => {
     let rejectA
-    api.readWorkspaceFile.mockImplementation((_agentId, path) => path === 'a.md'
+    api.readWorkspaceFile.mockImplementation((_agentId, path) => path === 'a.txt'
       ? new Promise((_resolve, reject) => { rejectA = reject })
       : Promise.resolve(result(`contents for ${path}`)))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    const openingA = wrapper.vm.openPath('a.md')
+    const openingA = wrapper.vm.openPath('a.txt')
     await flushPromises()
-    const openingB = wrapper.vm.openPath('b.md')
+    const openingB = wrapper.vm.openPath('b.txt')
     await flushPromises()
     expect((await openingB).ok).toBe(true)
     rejectA(Object.assign(new Error('full read limit'), { status: 413 }))
     await flushPromises()
 
     expect((await openingA).ok).toBe(false)
-    expect(api.readWorkspaceTextChunk).not.toHaveBeenCalledWith('agent-a', 'a.md', 0, 256 * 1024)
-    expect(wrapper.find('textarea').element.value).toBe('contents for b.md')
+    expect(api.readWorkspaceTextChunk).not.toHaveBeenCalledWith('agent-a', 'a.txt', 0, 256 * 1024)
+    expect(wrapper.find('textarea').element.value).toBe('contents for b.txt')
   })
 
   it('does not let an old chunk response clear the busy state of the newly opened file', async () => {
@@ -569,7 +830,7 @@ describe('Desktop workspace resource navigation', () => {
       : new Promise(resolve => { pendingChunks.push({ path, resolve }) }))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
     const oldLoad = wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
     await flushPromises()
 
@@ -589,7 +850,7 @@ describe('Desktop workspace resource navigation', () => {
   it('keeps the editor usable when a text save exceeds the native limit', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('still editable after the save error')
     api.saveWorkspaceFile.mockRejectedValueOnce(new Error('文本保存上限为 16 MiB。'))
 
@@ -609,22 +870,22 @@ describe('Desktop workspace resource navigation', () => {
     api.listWorkspace.mockImplementation((_agentId, path = '') => {
       listCalls += 1
       if (listCalls === 1) return new Promise(resolve => { resolveInitialList = resolve })
-      return Promise.resolve({ path, entries: [...directories[''], { name: 'README.md', path: 'README.md', is_dir: false, size: 16 }] })
+      return Promise.resolve({ path, entries: [...directories[''], { name: 'README.txt', path: 'README.txt', is_dir: false, size: 16 }] })
     })
     api.readWorkspaceFile.mockImplementation(async (_agentId, path) => result(`contents for ${path}`))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
 
-    const opening = wrapper.vm.openPath('README.md')
+    const opening = wrapper.vm.openPath('README.txt')
     await flushPromises()
     expect(listCalls).toBe(2)
     expect((await opening).ok).toBe(true)
     resolveInitialList({ path: '', entries: directories[''] })
     await flushPromises()
 
-    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'README.md')
-    expect(wrapper.find('textarea').element.value).toBe('contents for README.md')
-    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('README.md')
+    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'README.txt')
+    expect(wrapper.find('textarea').element.value).toBe('contents for README.txt')
+    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('README.txt')
   })
 
   it('refreshes an already-open directory so a newly created file link can open', async () => {
@@ -644,20 +905,20 @@ describe('Desktop workspace resource navigation', () => {
   it('keeps the selected editor on a 304 conditional refresh', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     const oldText = wrapper.find('textarea').element.value
     api.readWorkspaceFile.mockResolvedValueOnce({ notModified: true, bytes: null, etag: 'etag-1' })
 
     await wrapper.vm.refreshResources('manual')
 
     expect(wrapper.find('textarea').element.value).toBe(oldText)
-    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'a.md', { ifNoneMatch: 'etag-1' })
+    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'a.txt', { ifNoneMatch: 'etag-1' })
   })
 
   it('uses the refreshed BOM and dominant newline format for the next save', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('\uFEFFfirst\r\nsecond\r\n'), contentType: 'text/plain', etag: 'etag-format' })
     await wrapper.vm.refreshResources('tool')
 
@@ -673,21 +934,21 @@ describe('Desktop workspace resource navigation', () => {
   })
 
   it('does not install a clean-looking refresh over a revision-conflicted draft', async () => {
-    localStorage.setItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md', JSON.stringify({ content: 'a.md', revision: 'older-revision' }))
+    localStorage.setItem('dagents.desktop.workspace-draft:node-a:agent-a:a.txt', JSON.stringify({ content: 'a.txt', revision: 'older-revision' }))
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     api.readWorkspaceFile.mockResolvedValueOnce(result('external replacement', 'newer-revision'))
     await wrapper.vm.refreshResources('tool')
 
-    expect(wrapper.find('textarea').element.value).toBe('a.md')
+    expect(wrapper.find('textarea').element.value).toBe('a.txt')
     expect(wrapper.vm.$.setupState.draftConflict).toBe(true)
   })
 
   it('clears chunked read-only state when a refreshed large file now fits a full read', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
     api.readWorkspaceFile.mockResolvedValueOnce(result('now small and editable', 'etag-small'))
     await wrapper.vm.refreshResources('tool')
 
@@ -701,26 +962,26 @@ describe('Desktop workspace resource navigation', () => {
   it('refreshes changed large content from an unpinned first chunk and keeps later chunks revision-guarded', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
     api.readWorkspaceFile.mockRejectedValueOnce(Object.assign(new Error('full read limit'), { status: 413 }))
     api.readWorkspaceTextChunk.mockResolvedValueOnce({ ...result('# External update\n'), fileSize: 320000, nextOffset: 262144, etag: 'etag-external' })
 
     await wrapper.vm.refreshResources('tool')
 
-    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'large.md', { ifNoneMatch: 'etag-1' })
-    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 0, 256 * 1024)
+    expect(api.readWorkspaceFile).toHaveBeenLastCalledWith('agent-a', 'large.txt', { ifNoneMatch: 'etag-1' })
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.txt', 0, 256 * 1024)
     expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('External update')
     expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('320,000')
     await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
     await flushPromises()
-    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 262144, 256 * 1024, 'etag-external')
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.txt', 262144, 256 * 1024, 'etag-external')
   })
 
   it('discards a pending continuation from the previous same-path refresh version', async () => {
     const pending = []
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
     api.readWorkspaceTextChunk.mockImplementation((_agentId, _path, offset = 0) => offset === 0
       ? Promise.resolve({ ...result('# refreshed version\n'), fileSize: 300000, nextOffset: 262144, etag: 'etag-refreshed' })
       : new Promise(resolve => { pending.push(resolve) }))
@@ -751,7 +1012,7 @@ describe('Desktop workspace resource navigation', () => {
     })
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('large.md')
+    await wrapper.vm.openPath('large.txt')
 
     await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
     await flushPromises()
@@ -761,7 +1022,7 @@ describe('Desktop workspace resource navigation', () => {
 
     await wrapper.find('.workspace-files__chunk-toolbar button').trigger('click')
     await flushPromises()
-    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.md', 200, 256 * 1024, 'etag-three')
+    expect(api.readWorkspaceTextChunk).toHaveBeenLastCalledWith('agent-a', 'large.txt', 200, 256 * 1024, 'etag-three')
     expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('third')
     expect(wrapper.find('.workspace-files__chunk-toolbar').text()).toContain('已到文件末尾')
   })
@@ -770,21 +1031,21 @@ describe('Desktop workspace resource navigation', () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
     api.readWorkspaceFile.mockResolvedValueOnce({ bytes: bytes('\uFEFFfirst\r\nsecond\r\n'), contentType: 'text/plain', etag: 'etag-format' })
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('draft\nline\n')
     await wrapper.find('.workspace-files__actions-menu summary').trigger('click')
     await wrapper.findAll('.workspace-files__actions-popover button').find(button => button.text().includes('另存为')).trigger('click')
     await flushPromises()
 
-    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.md', '\uFEFFdraft\r\nline\r\n')
+    expect(api.saveWorkspaceFileAs).toHaveBeenCalledWith('agent-a', 'a.txt', '\uFEFFdraft\r\nline\r\n')
   })
 
   it('confirms deletion without a 404 polling storm', async () => {
     vi.useFakeTimers()
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
-    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path === '' ? directories[''].filter(entry => entry.path !== 'a.md') : directories[path] || [] }))
+    await wrapper.vm.openPath('a.txt')
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: path === '' ? directories[''].filter(entry => entry.path !== 'a.txt') : directories[path] || [] }))
     api.readWorkspaceFile.mockRejectedValue(Object.assign(new Error('missing'), { status: 404 }))
 
     const listsBefore = api.listWorkspace.mock.calls.length
@@ -802,9 +1063,9 @@ describe('Desktop workspace resource navigation', () => {
   it('preserves drafts and the Node-scoped draft key across reconnect request generations', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', requestGeneration: 1, active: false } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('typed during disconnect')
-    const key = 'dagents.desktop.workspace-draft:node-a:agent-a:a.md'
+    const key = 'dagents.desktop.workspace-draft:node-a:agent-a:a.txt'
     const draftBefore = localStorage.getItem(key)
 
     await wrapper.setProps({ requestGeneration: 2 })
@@ -812,28 +1073,28 @@ describe('Desktop workspace resource navigation', () => {
 
     expect(wrapper.find('textarea').element.value).toBe('typed during disconnect')
     expect(localStorage.getItem(key)).toBe(draftBefore)
-    expect(wrapper.vm.$.setupState.selectedPath).toBe('a.md')
+    expect(wrapper.vm.$.setupState.selectedPath).toBe('a.txt')
   })
 
   it('never writes the previous Agent draft under the newly selected Agent id', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', active: false } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('agent a draft')
-    const originalKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.md'
+    const originalKey = 'dagents.desktop.workspace-draft:node-a:agent-a:a.txt'
     const originalDraft = localStorage.getItem(originalKey)
 
     await wrapper.setProps({ agentId: 'agent-b' })
     await flushPromises()
 
     expect(localStorage.getItem(originalKey)).toBe(originalDraft)
-    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-b:a.md')).toBeNull()
+    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-b:a.txt')).toBeNull()
   })
 
   it('does not replace an editor when the user types while a conditional read is in flight', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     let resolveRefresh
     api.readWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve }))
     const refreshing = wrapper.vm.refreshResources('manual')
@@ -849,7 +1110,7 @@ describe('Desktop workspace resource navigation', () => {
   it('offers one external-update recovery action and keeps the draft when confirmation is canceled', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('keep this local draft')
     api.readWorkspaceFile.mockResolvedValueOnce(result('external version', 'etag-2'))
     await wrapper.vm.refreshResources('tool')
@@ -859,7 +1120,7 @@ describe('Desktop workspace resource navigation', () => {
     await wrapper.vm.discardDraftAndReload()
 
     expect(wrapper.find('textarea').element.value).toBe('keep this local draft')
-    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.md')).toContain('keep this local draft')
+    expect(localStorage.getItem('dagents.desktop.workspace-draft:node-a:agent-a:a.txt')).toContain('keep this local draft')
     expect(wrapper.vm.resourceMenuActions().canRecoverDraft).toBe(true)
   })
 
@@ -881,13 +1142,13 @@ describe('Desktop workspace resource navigation', () => {
     vi.useFakeTimers()
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('conflicted local draft')
     api.saveWorkspaceFile.mockRejectedValueOnce(Object.assign(new Error('revision conflict'), { status: 412 }))
     await wrapper.find('[aria-label="保存文件"]').trigger('click')
     await flushPromises()
 
-    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path]?.filter(entry => entry.path !== 'a.md') || [] }))
+    api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({ path, entries: directories[path]?.filter(entry => entry.path !== 'a.txt') || [] }))
     api.readWorkspaceFile.mockRejectedValue(Object.assign(new Error('missing'), { status: 404 }))
     await wrapper.vm.refreshResources('tool')
     await vi.advanceTimersByTimeAsync(400)
@@ -903,7 +1164,7 @@ describe('Desktop workspace resource navigation', () => {
   it('ignores a refresh GET that returns after a successful save', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('saved local version')
 
     let finishRead
@@ -933,19 +1194,19 @@ describe('Desktop workspace resource navigation', () => {
     api.saveWorkspaceFile.mockResolvedValueOnce({ status: 'saved', revision, etag: `"${revision}"` })
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('saved baseline')
     await wrapper.find('[aria-label="保存文件"]').trigger('click')
     await flushPromises()
     expect(api.saveWorkspaceFile.mock.calls[0][3]).toBe('"initial"')
-    expect(localStorage.getItem('dagents.desktop.workspace-draft:default:agent-a:a.md')).toBeNull()
+    expect(localStorage.getItem('dagents.desktop.workspace-draft:default:agent-a:a.txt')).toBeNull()
     expect(wrapper.findAll('.workspace-files__action-status').map(status => status.text())).toContain('已保存')
     expect(wrapper.text()).not.toContain('此阶段取消后结果可能未知')
 
     await wrapper.find('textarea').setValue('later local edits')
     await wrapper.vm.refreshSelectedFile()
     await flushPromises()
-    expect(api.readWorkspaceFile).toHaveBeenCalledWith('agent-a', 'a.md', { ifNoneMatch: `"${revision}"` })
+    expect(api.readWorkspaceFile).toHaveBeenCalledWith('agent-a', 'a.txt', { ifNoneMatch: `"${revision}"` })
     expect(wrapper.find('textarea').element.value).toBe('later local edits')
     expect(wrapper.find('.workspace-files__draft-bar').text()).not.toContain('较旧文件版本')
     expect(wrapper.find('.workspace-files__draft-bar').classes()).not.toContain('is-conflict')
@@ -954,7 +1215,7 @@ describe('Desktop workspace resource navigation', () => {
   it('does not let an old Agent 404 mark the new Agent file missing', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
 
     let rejectRead
     api.readWorkspaceFile.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject }))
@@ -963,20 +1224,20 @@ describe('Desktop workspace resource navigation', () => {
 
     await wrapper.setProps({ agentId: 'agent-b' })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     rejectRead(Object.assign(new Error('missing from old Agent'), { status: 404 }))
     await oldRefresh
     await flushPromises()
 
     expect(wrapper.find('.workspace-files__notice').exists()).toBe(false)
-    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('a.md')
-    expect(wrapper.find('textarea').element.value).toBe('a.md')
+    expect(wrapper.find('.workspace-files__breadcrumbs b').text()).toBe('a.txt')
+    expect(wrapper.find('textarea').element.value).toBe('a.txt')
   })
 
   it('does not expose a late old Agent refresh error in the new Agent view', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', active: true } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
 
     let rejectRead
     api.readWorkspaceFile.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject }))
@@ -985,19 +1246,19 @@ describe('Desktop workspace resource navigation', () => {
 
     await wrapper.setProps({ agentId: 'agent-b' })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     rejectRead(Object.assign(new Error('old Agent gateway failure'), { status: 502 }))
     await oldRefresh
     await flushPromises()
 
     expect(wrapper.find('.workspace-files__notice').exists()).toBe(false)
-    expect(wrapper.find('textarea').element.value).toBe('a.md')
+    expect(wrapper.find('textarea').element.value).toBe('a.txt')
   })
 
   it('keeps the draft and releases the save control when the connection changes during save', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', workspaceScope: 'node-a', requestGeneration: 1, active: false } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('draft survives reconnect')
     let finishSave
     api.saveWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { finishSave = resolve }))
@@ -1016,10 +1277,10 @@ describe('Desktop workspace resource navigation', () => {
   })
 
   it('keeps edits made while save is pending in the local draft', async () => {
-    const draftKey = 'dagents.desktop.workspace-draft:default:agent-a:a.md'
+    const draftKey = 'dagents.desktop.workspace-draft:default:agent-a:a.txt'
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
-    await wrapper.vm.openPath('a.md')
+    await wrapper.vm.openPath('a.txt')
     await wrapper.find('textarea').setValue('submitted text')
     let finishSave
     api.saveWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => { finishSave = resolve }))

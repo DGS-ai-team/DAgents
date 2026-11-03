@@ -51,6 +51,41 @@ func TestCompletedSnapshotAtomicFailureAndCommandIdempotency(t *testing.T) {
 	}
 }
 
+func TestTurnEventLogVersionTracksDeletionAndRebuild(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "event-version.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	append := func(commandID string) {
+		t.Helper()
+		event := turn.NewTurnEventEnvelope("session-1", turn.EventTurnStarted, time.Now().UTC())
+		event.TurnID = commandID
+		event.CommandID = commandID
+		if _, err := st.AppendTurnEvent(context.Background(), event); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+	append("turn-1")
+	append("turn-2")
+	oldID, oldCount, err := st.TurnEventLogVersion(context.Background(), "session-1")
+	if err != nil || oldID == 0 || oldCount != 2 {
+		t.Fatalf("initial version = (%d,%d), err=%v", oldID, oldCount, err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM turn_events WHERE session_id = ?`, "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	deletedID, deletedCount, err := st.TurnEventLogVersion(context.Background(), "session-1")
+	if err != nil || deletedID != 0 || deletedCount != 0 {
+		t.Fatalf("deleted version = (%d,%d), err=%v", deletedID, deletedCount, err)
+	}
+	append("turn-rebuilt")
+	rebuiltID, rebuiltCount, err := st.TurnEventLogVersion(context.Background(), "session-1")
+	if err != nil || rebuiltID == 0 || rebuiltCount != 1 || rebuiltID == oldID {
+		t.Fatalf("rebuilt version = (%d,%d), prior=%d, err=%v", rebuiltID, rebuiltCount, oldID, err)
+	}
+}
+
 func TestCompletedTurnSnapshotSurvivesReopenWithToolCallTranscript(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.db")
 	st, err := Open(path)

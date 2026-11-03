@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -232,8 +233,8 @@ func TestEnsureAgentRuntimeUsesBoundLLMWithoutGlobalProfileSwitch(t *testing.T) 
 	on := true
 	off := false
 	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
-		"profile-a": {Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &on},
-		"profile-b": {Provider: "mock", Model: "model-b", Mock: true, MultimodalEnabled: &off},
+		"profile-a": {Provider: "deepseek", Model: "deepseek-v4-pro", Mock: true, Thinking: "enabled", ReasoningEffort: "low", MultimodalEnabled: &on},
+		"profile-b": {Provider: "openai", Model: "o3", Mock: true, Thinking: "enabled", ReasoningEffort: "high", MultimodalEnabled: &off},
 	}
 	cfg.LLM.ProfileOrder = []string{"profile-a", "profile-b"}
 	cfg.LLM.Active = "profile-a"
@@ -283,10 +284,29 @@ func TestEnsureAgentRuntimeUsesBoundLLMWithoutGlobalProfileSwitch(t *testing.T) 
 	if got := cfg.LLM.ActiveProfileID(); got != "profile-a" {
 		t.Fatalf("creating an Agent must not switch global active profile=%q", got)
 	}
+	for _, tc := range []struct {
+		id, provider, model, effort string
+	}{
+		{agentA, "deepseek", "deepseek-v4-pro", "low"},
+		{agentB, "openai", "o3", "high"},
+	} {
+		record, err := agentsDB.Get(context.Background(), tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, profileSettings, err := srv.resolveLLMForAgent(context.Background(), record, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		extra := profileSettings.RequestExtra()
+		if profileSettings.Provider != tc.provider || profileSettings.Model != tc.model || extra["reasoning_effort"] != tc.effort {
+			t.Fatalf("agent %s profile=%s/%s request=%#v", tc.id, profileSettings.Provider, profileSettings.Model, extra)
+		}
+	}
 	// Simulate a profile multimodal setting change without changing the Agent
 	// snapshot revision. ensure must rebuild the already-loaded runtime.
 	cfg.LLM.Profiles["profile-a"] = config.LLMProfileConfig{
-		Provider: "mock", Model: "model-a", Mock: true, MultimodalEnabled: &off,
+		Provider: "deepseek", Model: "deepseek-v4-pro", Mock: true, Thinking: "enabled", ReasoningEffort: "low", MultimodalEnabled: &off,
 	}
 
 	oldDigest := srv.sessions.RuntimeLLMProfileDigest(agentA)

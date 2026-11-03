@@ -35,7 +35,6 @@ mod workspace_write;
 
 use config::ShellConfig;
 use layout::Layout;
-use nodectl::Health;
 use singleinstance::{acquire, InstanceError};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,7 +73,6 @@ struct Shared {
     blink_running: AtomicBool,
     update_check_in_flight: AtomicBool,
     last_err: Mutex<Option<String>>,
-    status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
     pending_submenu: Mutex<Option<Submenu<tauri::Wry>>>,
     pending_slots: Mutex<Vec<MenuItem<tauri::Wry>>>,
     pending_session_ids: Mutex<Vec<String>>,
@@ -364,7 +362,6 @@ pub fn run() {
         blink_running: AtomicBool::new(false),
         update_check_in_flight: AtomicBool::new(false),
         last_err: Mutex::new(None),
-        status_item: Mutex::new(None),
         pending_submenu: Mutex::new(None),
         pending_slots: Mutex::new(Vec::new()),
         pending_session_ids: Mutex::new(vec![String::new(); MAX_PENDING_MENU_SLOTS]),
@@ -439,8 +436,6 @@ pub fn run() {
                     }
                 });
 
-                let status =
-                    MenuItem::with_id(app, "status", "状态：检测中…", false, None::<&str>)?;
                 // 待办项挂在子菜单下；空闲槽不加入菜单，避免顶层出现空白行（对齐 Go tray Hide）。
                 let mut pending_slots = Vec::with_capacity(MAX_PENDING_MENU_SLOTS);
                 for i in 0..MAX_PENDING_MENU_SLOTS {
@@ -454,24 +449,32 @@ pub fn run() {
                     pending_slots.push(item);
                 }
                 let pending = Submenu::with_id(app, "pending", "待办：无", false)?;
-                let open =
-                    MenuItem::with_id(app, "open_desktop", "打开 DAgents", true, None::<&str>)?;
+                let open = MenuItem::with_id(
+                    app,
+                    "open_desktop",
+                    "打开 DAgents Desktop",
+                    true,
+                    None::<&str>,
+                )?;
                 let open_manage =
-                    MenuItem::with_id(app, "open_manage", "打开 Manage", false, None::<&str>)?;
+                    MenuItem::with_id(app, "open_manage", "打开管理后台", false, None::<&str>)?;
                 let update =
                     MenuItem::with_id(app, "update", "更新：检查中…", false, None::<&str>)?;
-                let start = MenuItem::with_id(app, "start", "启动 Node", true, None::<&str>)?;
-                let stop = MenuItem::with_id(app, "stop", "停止 Node", false, None::<&str>)?;
-                let restart = MenuItem::with_id(app, "restart", "重启 Node", false, None::<&str>)?;
-                let quit = MenuItem::with_id(app, "quit", "退出 Desktop", true, None::<&str>)?;
+                let start = MenuItem::with_id(app, "start", "启动本地服务", true, None::<&str>)?;
+                let stop = MenuItem::with_id(app, "stop", "停止本地服务", false, None::<&str>)?;
+                let restart =
+                    MenuItem::with_id(app, "restart", "重启本地服务", false, None::<&str>)?;
+                let quit = MenuItem::with_id(
+                    app,
+                    "quit",
+                    "退出桌面应用（本地服务继续运行）",
+                    true,
+                    None::<&str>,
+                )?;
                 let sep1 = PredefinedMenuItem::separator(app)?;
                 let sep2 = PredefinedMenuItem::separator(app)?;
                 let sep3 = PredefinedMenuItem::separator(app)?;
 
-                {
-                    let mut slot = shared.status_item.lock().unwrap();
-                    *slot = Some(status.clone());
-                }
                 {
                     let mut slot = shared.pending_submenu.lock().unwrap();
                     *slot = Some(pending.clone());
@@ -502,7 +505,6 @@ pub fn run() {
                 }
 
                 let items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
-                    &status,
                     &pending,
                     &sep1,
                     &open,
@@ -1696,30 +1698,6 @@ fn refresh_status(shared: &Shared) {
     let running = matches!(&health, Ok(h) if h.ok);
     let managed = running && nodectl::is_managed(&shared.layout, &shared.cfg);
     shared.node_running.store(running, Ordering::SeqCst);
-    let text = match health {
-        Ok(h) if h.ok => format_running(&h, managed),
-        Ok(h) => format!("状态：异常 ({})", h.status),
-        Err(_) => {
-            let err = shared
-                .last_err
-                .lock()
-                .ok()
-                .and_then(|g| g.clone())
-                .unwrap_or_else(|| "未运行".into());
-            // 截断过长错误
-            let short = if err.chars().count() > 24 {
-                format!("{}…", err.chars().take(24).collect::<String>())
-            } else {
-                err
-            };
-            format!("状态：{short}")
-        }
-    };
-    if let Ok(guard) = shared.status_item.lock() {
-        if let Some(item) = guard.as_ref() {
-            let _ = item.set_text(text.clone());
-        }
-    }
     let busy = shared.lifecycle_busy.load(Ordering::SeqCst);
     if let Ok(guard) = shared.start_item.lock() {
         if let Some(item) = guard.as_ref() {
@@ -1749,19 +1727,6 @@ fn refresh_status(shared: &Shared) {
         if let Some(item) = guard.as_ref() {
             let _ = item.set_enabled(manage_available);
         }
-    }
-}
-
-fn format_running(h: &Health, managed: bool) -> String {
-    let version = if h.version.is_empty() {
-        String::new()
-    } else {
-        format!(" v{}", h.version)
-    };
-    if managed {
-        format!("状态：受监督运行{version}")
-    } else {
-        format!("状态：外部 Node 运行{version}")
     }
 }
 
@@ -1919,9 +1884,9 @@ fn refresh_tooltip(shared: &Shared, app: &AppHandle) {
     match nodectl::probe(&shared.cfg) {
         Ok(h) if h.ok => {
             if h.version.is_empty() {
-                tooltip.push_str("\nNode 运行中");
+                tooltip.push_str("\n本地服务运行中");
             } else {
-                tooltip.push_str(&format!("\nNode 运行中 · v{}", h.version));
+                tooltip.push_str(&format!("\n本地服务运行中 · v{}", h.version));
             }
         }
         _ => {

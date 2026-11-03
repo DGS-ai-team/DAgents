@@ -130,6 +130,7 @@ type CoordinatorSnapshot struct {
 	RecoveryRequired   bool
 	ExternalFacts      int
 	ToolExecutions     []ToolExecutionView
+	ActiveToolCalls    []ToolCallProjection
 	Budget             TurnBudget
 	Usage              TurnUsage
 	HasActiveTurn      bool
@@ -1343,6 +1344,31 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 		sort.Slice(result.ToolExecutions, func(i, j int) bool {
 			return result.ToolExecutions[i].ID < result.ToolExecutions[j].ID
 		})
+	}
+	// Keep the hydrate-only call projection in the same atomic snapshot as the
+	// lifecycle state. Project the entire active batch, including terminal
+	// executions, because parallel calls may settle before runtime commits the
+	// batch's assistant/results to history. Status keeps this display projection
+	// truthful without changing the provider-facing transcript.
+	batchVisible := c.turn != nil && c.batch != nil && len(c.batch.ToolCallIDs) > 0 &&
+		(c.turn.Status.Terminal() || (c.step != nil && !c.step.Status.Terminal()))
+	if batchVisible {
+		byCall := make(map[string]*ToolExecution, len(c.executions))
+		for _, execution := range c.executions {
+			if execution != nil {
+				byCall[execution.ToolCallID] = execution
+			}
+		}
+		for _, callID := range c.batch.ToolCallIDs {
+			execution := byCall[callID]
+			if execution == nil {
+				continue
+			}
+			result.ActiveToolCalls = append(result.ActiveToolCalls, ToolCallProjection{
+				ID: execution.ToolCallID, ToolName: execution.ToolName,
+				Arguments: append(json.RawMessage(nil), execution.Arguments...),
+			})
+		}
 	}
 	if c.interaction != nil {
 		result.InteractionID = c.interaction.ID

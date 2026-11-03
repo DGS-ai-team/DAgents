@@ -4,15 +4,17 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, switchDraft, tabForRoute, updateAgentBusy, updateAgentError } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceImageBlob } from './workspace-files-state.js'
 import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
-import { createWorkspaceReference, formatWorkspaceReferencesMessage } from './workspace-references.js'
+import { onConfigurationChanged } from './utils/configurationEvents.js'
+import { createWorkspaceReference, dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences, workspaceReferencesForAgent } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
+import { applyRemoteWorkerEvent, currentRemoteWorkerEventVersion, replaceChildrenFromHydrate, setRemoteWorkerParent } from '@desktop-ui/stores/remoteWorkers.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
 import { applyHydrateTurnState, turnStateStore } from '@desktop-ui/stores/turnState.js'
 import { createTurnWatchdog } from '@desktop-ui/stores/turnWatchdog.js'
@@ -30,12 +32,13 @@ import TerminalEndDialog from './components/TerminalEndDialog.vue'
 import ScreenshotRegionDialog from './components/ScreenshotRegionDialog.vue'
 import ComposerSurface from './components/ComposerSurface.vue'
 import ResourceAgentDock from './components/ResourceAgentDock.vue'
+import WorkspaceReferenceAttachments from './components/WorkspaceReferenceAttachments.vue'
 import WorkspaceFiles from './components/WorkspaceFiles.vue'
 import BrowserViewer from './components/BrowserViewer.vue'
 import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
 import AutoOverviewPanel from './components/AutoOverviewPanel.vue'
 import TopLeftSlotIcon from './components/TopLeftSlotIcon.vue'
-import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getAgentModelView, getLLMSettings, patchAgent, patchLLMSettings, submitMessage, unsubscribeWorkgroup, uploadExternalToolToManage, uploadPluginToManage, uploadSkillToManage } from '@desktop-ui/api/node.js'
+import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getAgentModelView, getSetupConfig, patchAgent, submitMessage, unsubscribeWorkgroup } from '@desktop-ui/api/node.js'
 import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import { agentActiveProfile } from '@desktop-ui/utils/agentLLM.js'
 import { dispatchDesktopSlashCommand } from './slash-commands.js'
@@ -80,7 +83,9 @@ function setAgentError(agentId, message) {
   agentErrors.value = updateAgentError(agentErrors.value, agentId, message)
 }
 
-const status = ref({ online: false, setup_required: false, version: '', error: '正在连接 Node…' })
+const status = ref({ online: false, setup_required: false, version: '', error: '正在连接本地服务…' })
+const manageSettings = ref(null)
+const workgroupSettingsLoaded = ref(false)
 const agents = ref([])
 const activeId = ref('')
 const hydrate = ref(null)
@@ -186,8 +191,11 @@ provide('desktopNodeSetupRequired', computed(() => status.value.online && status
 provide('desktopFirstRunCompleted', onFirstRunCompleted)
 provide(ResourceRenderContextKey, { agentId: activeId, readImage: readResourceImage, openResource })
 
-watch(() => route.path, path => { activeTab.value = tabForRoute(path, activeTab.value) }, { immediate: true })
-watch(activeId, id => { agentStore.agentId = id || '' }, { immediate: true })
+watch(() => route.path, (path, previousPath) => {
+  activeTab.value = tabForRoute(path, activeTab.value)
+  if (previousPath?.startsWith('/settings') && !path.startsWith('/settings')) void refreshWorkgroupSettings()
+}, { immediate: true })
+watch(activeId, id => { agentStore.agentId = id || ''; setRemoteWorkerParent(id) }, { immediate: true })
 watch(activeId, (id, previousId) => {
   if (activeAttachmentBatch && activeAttachmentBatch.ownerId !== id) {
     cancelWorkspaceAttachmentBatch(activeAttachmentBatch)
@@ -262,7 +270,8 @@ const composerWriteProgress = ref(null)
 let activeAttachmentBatch = null
 const pendingWorkspaceReferencesByAgent = ref({})
 const pendingFiles = computed(() => pendingFilesByAgent.value[activeId.value] || [])
-const pendingWorkspaceReferences = computed(() => pendingWorkspaceReferencesByAgent.value[activeId.value] || [])
+const pendingWorkspaceReferences = computed(() => workspaceReferencesForAgent(pendingWorkspaceReferencesByAgent.value, activeId.value))
+const hasComposerContent = computed(() => hasWorkspaceMessageContent({ text: input.value, images: pendingImages.value, files: pendingFiles.value, references: pendingWorkspaceReferences.value }))
 const pendingImages = computed({
   get: () => pendingImagesByAgent.value[activeId.value] || [],
   set: images => { if (activeId.value) pendingImagesByAgent.value[activeId.value] = images },
@@ -274,8 +283,10 @@ let unlistenWorkspaceWrite = null
 let unlistenTerminal = null
 let unlistenWindowResize = null
 let unlistenWindowFocus = null
+let unlistenConfigurationChanged = null
 let selectionEpoch = 0
 let activeHydrationSequence = 0
+let manageSettingsRequestSequence = 0
 let resourceNavigationEpoch = 0
 const resourceNavigationError = ref('')
 let sendSequence = 0
@@ -297,11 +308,12 @@ const workspaceScope = computed(() => workspaceNodeIdentity.value)
 const activeAgent = computed(() => agents.value.find(a => a.agent_id === activeId.value))
 const activeWorkgroupName = computed(() => workgroupList.value.find(group => group.workgroup_id === selectedWorkgroupId.value)?.display_name || selectedWorkgroupName.value || selectedWorkgroupId.value || '工作组')
 const isWorkgroupView = computed(() => activeTab.value === 'workgroups')
+const showWorkgroupSidebar = computed(() => shouldShowWorkgroupSidebar({ collaborationEnabled: workgroupCollaborationEnabled(manageSettings.value), hasWorkgroups: workgroupList.value.length > 0, isWorkgroupView: isWorkgroupView.value }))
 const failedSendDraft = computed(() => failedSendDrafts.value[activeId.value] || '')
 const normalAgents = computed(() => agents.value.filter(a => a.agent_type !== 'auto'))
 const autoAgents = computed(() => agents.value.filter(a => a.agent_type === 'auto'))
 const fullTranscript = computed(() => hydrate.value?.transcript || [])
-const chatEntries = computed(() => desktopChatEntries(activeId.value, fullTranscript.value, streamingText.value, hydrate.value?.turn_state, pendingUserByAgent.value[activeId.value]))
+const chatEntries = computed(() => desktopChatEntries(activeId.value, fullTranscript.value, pendingUserByAgent.value[activeId.value]))
 const hitlQueue = computed(() => {
   const expanded = expandHitlRequired(pending.value)
   return desktopHitlQueue(expanded)
@@ -364,7 +376,6 @@ function activeResourceMenuActions() {
 const menuEntries = computed(() => createDesktopMenuModel({
   online: status.value.online,
   setupRequired: status.value.setup_required,
-  nodeVersion: status.value.version,
   activeAgentId: activeId.value,
   activeAgentName: activeAgent.value?.display_name || '尚未选择智能体',
   isWorkgroup: isWorkgroupView.value,
@@ -450,7 +461,7 @@ function waitForNodeStartup() {
 }
 
 function retryNodeStartup() {
-  status.value = { ...status.value, error: '正在重新连接本机 Node…' }
+  status.value = { ...status.value, error: '正在重新连接本地服务…' }
   waitForNodeStartup()
   void loadAgents().then(() => {
     if (status.value.online) finishStartup()
@@ -524,6 +535,7 @@ async function refreshHealth() {
     if (connectionChanged) workspaceRequestGeneration.value++
     workspaceConnectionState = identity
     status.value = next
+    if (next.online && (!workgroupSettingsLoaded.value || connectionChanged)) void refreshWorkgroupSettings()
     if (next.online && (!workspaceNodeIdentity.value || workspaceNodeIdentity.value === 'node:unknown' || connectionChanged)) {
       try {
         const info = await invoke('desktop_node_request', {
@@ -541,6 +553,18 @@ async function refreshHealth() {
     workspaceConnectionState = 'false:local'
     status.value = { online: false, error: String(e) }
     return status.value
+  }
+}
+async function refreshWorkgroupSettings() {
+  if (!status.value.online) return
+  const requestSequence = ++manageSettingsRequestSequence
+  try {
+    const response = await getSetupConfig()
+    if (requestSequence !== manageSettingsRequestSequence || !status.value.online) return
+    manageSettings.value = response?.manage || null
+    workgroupSettingsLoaded.value = true
+  } catch {
+    if (requestSequence === manageSettingsRequestSequence) workgroupSettingsLoaded.value = false
   }
 }
 async function minimizeWindow() { if (currentWindow) await currentWindow.minimize() }
@@ -570,7 +594,7 @@ async function loadAgents() {
   error.value = ''
   await refreshHealth()
   if (!status.value.online) return
-  if (status.value.setup_required) { error.value = '请先在 Desktop 设置中完成本机 Node 的首次初始化。'; return }
+  if (status.value.setup_required) { error.value = '请先在桌面应用设置中完成本地服务的首次初始化。'; return }
   try {
     const latest = await invoke('desktop_list_agents')
     agents.value = Array.isArray(latest) ? latest : []
@@ -623,10 +647,12 @@ async function restoreAgentMedia(snapshot, agentId) {
 async function hydrateAgentSnapshot(id) {
   if (!id || activeId.value !== id) return
   const requestSequence = ++activeHydrationSequence
+  const workerEventVersion = currentRemoteWorkerEventVersion()
   const snapshot = await invoke('desktop_hydrate_agent', { agentId: id })
   if (requestSequence !== activeHydrationSequence || activeId.value !== id) return
   turnWatchdog.noteActivity()
   hydrate.value = snapshot
+  if (Array.isArray(snapshot?.child_agents)) replaceChildrenFromHydrate(snapshot.child_agents, id, workerEventVersion)
   applyHydrateTurnState(snapshot)
   void restoreAgentMedia(snapshot, id).then(withMedia => {
     if (requestSequence === activeHydrationSequence && activeId.value === id) hydrate.value = withMedia
@@ -672,6 +698,11 @@ async function switchLLMProfile(profileId) {
   } catch (e) {
     if (activeId.value === id) error.value = String(e.message || e)
   }
+}
+function openModelSettings(profileId) {
+  const profile = String(profileId || agentActiveProfile(activeAgent.value) || '').trim()
+  if (!profile) return
+  void router.push({ path: '/settings/connection', query: { profile } })
 }
 async function selectAgent(id, { clearError = true, openChat = false } = {}) {
   const changed = activeId.value !== id
@@ -728,8 +759,9 @@ async function send() {
   const text = input.value.trim()
   const images = pendingImages.value.slice()
   const files = pendingFiles.value.slice()
-  if ((!text && !images.length && !files.length) || !activeId.value) return
-  if (text.startsWith('/') && !images.length && !files.length) {
+  const references = pendingWorkspaceReferences.value.slice()
+  if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value) return
+  if (text.startsWith('/') && !images.length && !files.length && !references.length) {
     const agentId = activeId.value
     input.value = ''
     inputDrafts.value[agentId] = ''
@@ -743,88 +775,77 @@ async function send() {
   const agentId = activeId.value
   input.value = ''
   inputDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(text, images, files)
+  const sent = await sendMessageToActiveAgent(text, images, files, references)
   if (!sent) input.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, input.value, text)
-  else pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
-  if (sent) pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
-}
-async function sendMessageToActiveAgent(text, images = [], files = []) {
-  text = String(text || '').trim()
-  if ((!text && !images.length && !files.length) || !activeId.value || agentGenerating.value) return false
-  const agentId = activeId.value
-  const pendingUser = {
-    id: ++sendSequence,
-    kind: 'user',
-    text,
-    images: images.map(image => image.url),
-    file_refs: files.map(toNodeFileReference),
-    baseTranscriptLength: fullTranscript.value.length,
+  else {
+    pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
+    pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
   }
-  pendingUserByAgent.value = { ...pendingUserByAgent.value, [agentId]: pendingUser }
+}
+async function sendMessageToActiveAgent(text, images = [], files = [], references = []) {
+  text = String(text || '').trim()
+  if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value || agentGenerating.value) return false
+  const agentId = activeId.value
+  let pendingUser
   setAgentError(agentId, '')
   setAgentBusy(agentId, true)
   try {
-    const contentParts = images.map(image => ({ type: 'image_url', image_url: { url: image.url } }))
-    await submitMessage(agentId, text, contentParts, files.map(toNodeFileReference))
-    if (activeId.value === agentId) {
-      await selectAgent(agentId)
-      await nextTick()
-      chatPanel.value?.scrollToTail()
-    }
-    return true
+    await dispatchWorkspaceMessage({ agentId, text, images, files, references }, submitMessage, message => {
+      pendingUser = {
+        id: ++sendSequence,
+        kind: 'user',
+        text: message.text,
+        images: message.images.map(image => image.url),
+        file_refs: message.files.map(toNodeFileReference),
+        baseTranscriptLength: fullTranscript.value.length,
+      }
+      pendingUserByAgent.value = { ...pendingUserByAgent.value, [agentId]: pendingUser }
+    })
+    if (references.length) consumeWorkspaceReferences(agentId, references)
   } catch (e) {
-    if (pendingUserByAgent.value[agentId]?.id === pendingUser.id) {
+    if (pendingUser && pendingUserByAgent.value[agentId]?.id === pendingUser.id) {
       const next = { ...pendingUserByAgent.value }
       delete next[agentId]
       pendingUserByAgent.value = next
     }
     setAgentError(agentId, String(e))
+    return false
+  } finally {
+    setAgentBusy(agentId, false)
   }
-  finally { setAgentBusy(agentId, false) }
-  return false
+  if (activeId.value === agentId) {
+    try {
+      await selectAgent(agentId)
+      await nextTick()
+      chatPanel.value?.scrollToTail()
+    } catch (e) {
+      // The send already succeeded; keep the message and cleared references while reporting refresh trouble.
+      setAgentError(agentId, String(e))
+    }
+  }
+  return true
 }
 async function executeSlashCommand(text, agentId) {
   error.value = ''
   clearCommandNotice()
   const consumed = await dispatchDesktopSlashCommand(text, {
     agentId,
-    clearContext: async id => {
-      await clearContext(id)
-      const next = { ...pendingUserByAgent.value }
-      delete next[id]
-      pendingUserByAgent.value = next
-      if (activeId.value === id) streamingText.value = ''
+    clearContext: clearContextWithConfirmation,
+    compressContext: async id => {
+      if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法压缩上下文')
+      if (activeId.value !== id || isWorkgroupView.value) throw new Error('请先选择一个智能体')
+      if (agentGenerating.value) throw new Error('请等待当前生成结束后再压缩上下文')
+      if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求')
+      return compressContext(id)
     },
-    compressContext,
-    getLLMSettings,
     refresh: async id => {
       if (activeId.value !== id) return
       await selectAgent(id)
-    },
-    patchLLMSettings: async patch => {
-      const settings = await patchLLMSettings(patch)
-      llmSettings.value = settings
-      return settings
-    },
-    upload: async spec => {
-      if (spec.kind === 'skill' || spec.kind === 'skills') return uploadSkillToManage({ path: spec.path, skillId: spec.id, version: spec.version, name: spec.name, publish: spec.publish })
-      if (['externaltool', 'externaltools', 'tool', 'tools'].includes(spec.kind)) return uploadExternalToolToManage({ path: spec.path, toolId: spec.id, version: spec.version, name: spec.name, platform: spec.platform, publish: spec.publish })
-      if (spec.kind === 'plugin' || spec.kind === 'plugins') return uploadPluginToManage({ path: spec.path, pluginId: spec.id, version: spec.version, name: spec.name, platform: spec.platform, publish: spec.publish })
-      throw new Error(`未知 upload 类型: ${spec.kind}`)
     },
     onError: message => { error.value = message },
     onNotice: showCommandNotice,
   })
   if (!consumed) error.value = '无法处理此斜杠命令'
-}
-function attachWorkspaceFile(fileRef) {
-  if (!activeId.value || !fileRef) return
-  const path = typeof fileRef === 'string' ? fileRef : fileRef.path
-  const name = typeof fileRef === 'string' ? fileRef.split(/[\\/]/).pop() : fileRef.name
-  if (!path || !name) return
-  const current = pendingFilesByAgent.value[activeId.value] || []
-  if (!current.some(file => file.path === path)) pendingFilesByAgent.value[activeId.value] = [...current, { path, name }]
-  showChat()
 }
 function handleWorkspaceReference(payload) {
   const agentId = String(payload?.agentId || '')
@@ -832,7 +853,7 @@ function handleWorkspaceReference(payload) {
   const existing = pendingWorkspaceReferencesByAgent.value[agentId] || []
   try {
     const reference = createWorkspaceReference(payload)
-    const index = existing.findIndex(item => item.id === reference.id)
+    const index = existing.findIndex(item => item.id === reference.id || item.path === reference.path && item.anchor?.label === '整个文件' && reference.anchor.label === '整个文件' && !item.annotation && !reference.annotation)
     if (index < 0) {
       const total = (pendingImagesByAgent.value[agentId] || []).length + (pendingFilesByAgent.value[agentId] || []).length + existing.length
       if (total >= 8) { error.value = '一条消息最多添加 8 个附件或注解。'; return }
@@ -857,6 +878,14 @@ function clearWorkspaceAnnotations(agentId = activeId.value) {
   if (!agentId) return
   pendingWorkspaceReferencesByAgent.value[agentId] = []
   if (agentId === activeId.value) workspaceFilesPanel.value?.clearAnnotations?.()
+}
+function consumeWorkspaceReferences(agentId, references) {
+  pendingWorkspaceReferencesByAgent.value = settleWorkspaceReferences(pendingWorkspaceReferencesByAgent.value, agentId, references, true)
+  const sentIds = new Set(references.map(reference => reference.id))
+  if (!sentIds.size) return
+  if (agentId === activeId.value) {
+    for (const id of sentIds) workspaceFilesPanel.value?.removeAnnotation?.(id)
+  }
 }
 function readImage(file) {
   return new Promise((resolve, reject) => {
@@ -1059,10 +1088,22 @@ async function stopCurrentTurn() {
   catch (e) { setAgentError(id, String(e.message || e)) }
   finally { setAgentCancelling(id, false) }
 }
+async function clearContextWithConfirmation(id) {
+  if (!id || id !== activeId.value) throw new Error('请先选择一个智能体')
+  if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法清空对话')
+  if (agentGenerating.value) throw new Error('请等待当前回合结束后再清空对话')
+  if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求后再清空对话')
+  if (!await confirmDesktopAction('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return false
+  await clearContext(id)
+  const next = { ...pendingUserByAgent.value }
+  delete next[id]
+  pendingUserByAgent.value = next
+  if (activeId.value === id) streamingText.value = ''
+  return true
+}
 async function clearCurrentContext() {
-  if (!activeId.value || agentGenerating.value || !await confirmDesktopAction('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return
   const id = activeId.value
-  try { await clearContext(id); if (activeId.value === id) { streamingText.value = ''; await selectAgent(id) } }
+  try { if (await clearContextWithConfirmation(id) && activeId.value === id) await selectAgent(id) }
   catch (e) { if (activeId.value === id) setAgentError(id, String(e.message || e)) }
 }
 async function deleteAgentById(agentId) {
@@ -1071,7 +1112,7 @@ async function deleteAgentById(agentId) {
   if (!agent || !status.value.online || status.value.setup_required || deletingAgentId.value || agent.state === 'working' || (activeId.value === id && agentGenerating.value)) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const name = agent.display_name || id
-  if (!await confirmDesktopAction(`删除${kind}「${name}」？\n该操作会在当前 Node 归档此智能体并移除其运行时。`)) return
+  if (!await confirmDesktopAction(`删除${kind}「${name}」？\n该操作会在本地服务归档此智能体并移除其运行时。`)) return
   autoOverviewActionError.value = ''
   deletingAgentId.value = id
   try {
@@ -1107,7 +1148,7 @@ function openAgentContextMenu(event, agent, anchor = event?.currentTarget) {
   if (!id) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const isWorking = agent.state === 'working' || (activeId.value === id && agentGenerating.value)
-  const disabledReason = !status.value.online ? '请先连接 Node' : status.value.setup_required ? '请先完成 Node 初始化' : deletingAgentId.value ? '正在删除智能体' : isWorking ? '智能体工作中，暂不能删除' : ''
+  const disabledReason = !status.value.online ? '请先连接本地服务' : status.value.setup_required ? '请先完成本地服务初始化' : deletingAgentId.value ? '正在删除智能体' : isWorking ? '智能体工作中，暂不能删除' : ''
   void openEntryContextMenu(event, {
     title: agent.display_name || id,
     anchor,
@@ -1127,11 +1168,11 @@ function openAutoOverviewContextMenu(payload) {
 function openSidebarWorkgroupContextMenu(event, group, anchor = event?.currentTarget) {
   const id = String(group?.workgroup_id || '').trim()
   if (!id) return
-  const disabledReason = !status.value.online ? '请先连接 Node' : status.value.setup_required ? '请先完成 Node 初始化' : removingWorkgroupId.value ? '正在移除工作组' : ''
+  const disabledReason = !status.value.online ? '请先连接本地服务' : status.value.setup_required ? '请先完成本地服务初始化' : removingWorkgroupId.value ? '正在移除工作组' : ''
   void openEntryContextMenu(event, {
     title: group.display_name || id,
     anchor,
-    items: [{ label: '从此 Node 移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeSidebarWorkgroup(group) }],
+    items: [{ label: '从本地服务移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeSidebarWorkgroup(group) }],
   })
 }
 function onWorkgroupEntryKeydown(event, group) {
@@ -1146,7 +1187,7 @@ async function removeSidebarWorkgroup(group) {
   const id = String(group?.workgroup_id || '').trim()
   if (!id || !status.value.online || status.value.setup_required || removingWorkgroupId.value) return
   const label = String(group?.display_name || id)
-  if (!await confirmDesktopAction(`从此 Node 移除工作组「${label}」？\n这会取消当前 Node 的订阅，Manage 中的工作组数据会保留。`)) return
+  if (!await confirmDesktopAction(`从本地服务移除工作组「${label}」？\n这会取消当前本地服务的订阅，管理后台中的工作组数据会保留。`)) return
   removingWorkgroupId.value = id
   resourceNavigationError.value = ''
   try {
@@ -1164,7 +1205,10 @@ async function onAgentCreated(agent) {
   showAgentCreate.value = false
   await loadAgents()
   const createdId = agent?.agent_id || agent?.id
-  if (createdId && agents.value.some(item => item.agent_id === createdId)) await selectAgent(createdId)
+  if (createdId && agents.value.some(item => item.agent_id === createdId)) {
+    await selectAgent(createdId)
+    window.dispatchEvent(new CustomEvent('desktop-agent-created', { detail: { agentId: createdId } }))
+  }
 }
 function showAutoOverview() { autoOverviewActionError.value = ''; dialog.value = 'auto-overview' }
 function showWorkgroups() { selectedWorkgroupId.value = ''; selectedWorkgroupName.value = ''; activeTab.value = 'workgroups' }
@@ -1195,14 +1239,10 @@ async function sendFromDock() {
   if (agentGenerating.value) return
   if ((!text.trim() && !references.length) || !activeId.value || agentGenerating.value) return
   const agentId = activeId.value
-  const message = formatWorkspaceReferencesMessage({ text, references })
-  const images = [...new Map(references.filter(reference => reference.imageUrl).map(reference => [reference.fileRef, { name: reference.name, url: reference.imageUrl }])).values()]
-  const files = [...new Map(references.map(reference => [reference.fileRef, { path: reference.fileRef, name: reference.name }])).values()]
   dockDraft.value = ''
   dockDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(message, images, files)
+  const sent = await sendMessageToActiveAgent(text, [], [], references)
   if (!sent) dockDraft.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, dockDraft.value, text)
-  else if (references.length) clearWorkspaceAnnotations(agentId)
 }
 async function requestNewTerminal(sessionId = '') {
   const intent = terminalOpenIntent(sessionId)
@@ -1353,7 +1393,7 @@ async function openResource(targetValue, { agentId = '' } = {}) {
   const current = () => requestEpoch === resourceNavigationEpoch && ownerEpoch === selectionEpoch && ownerId === activeId.value && ownerGeneration === workspaceRequestGeneration.value && ownerScope === workspaceScope.value
   if (!target) { resourceNavigationError.value = '此资源链接无效或不受支持。'; return }
   if (!ownerId || ownerId !== activeId.value) { resourceNavigationError.value = '此资源链接属于其他 Agent，无法在当前工作区中打开。'; return }
-  if (!status.value.online) { resourceNavigationError.value = 'Node 尚未连接，无法打开此资源。'; return }
+  if (!status.value.online) { resourceNavigationError.value = '本地服务尚未连接，无法打开此资源。'; return }
   resourceNavigationError.value = ''
 
   if (target.type === 'file') {
@@ -1700,12 +1740,14 @@ function runMenuAction(action) {
   openMenu.value = ''
   if (action === 'refresh') loadAgents()
   else if (action === 'settings-general') void router.push('/settings/general')
+  else if (action === 'workgroups-settings') void router.push('/settings/connection')
   else if (action === 'quit-desktop' && isTauri) void invoke('desktop_quit')
   else if (action === 'sidebar') { sidebarCollapsed.value = !sidebarCollapsed.value; collapsedGroup.value = '' }
   else if (action === 'approval') void jumpToApproval()
   else if (action === 'agent-chat') showChat()
   else if (action === 'create-agent') showAgentCreate.value = true
   else if (action === 'current-agent-settings' && activeId.value) void router.push(`/settings/agents/${encodeURIComponent(activeId.value)}`)
+  else if (action === 'compress-context' && activeId.value) void executeSlashCommand('/compress', activeId.value)
   else if (action === 'stop-turn') void stopCurrentTurn()
   else if (action === 'clear-context') void clearCurrentContext()
   else if (action === 'auto-overview') void showAutoOverview()
@@ -1758,11 +1800,7 @@ function onDesktopOpenSettings(event) {
   const path = String(event.detail?.path || '/settings/desktop')
   void router.push(path)
 }
-function onDesktopUseChatCommand(event) {
-  input.value = String(event.detail?.command || '')
-  showChat()
-  void nextTick(() => textarea.value?.focus())
-}
+function onDesktopOpenAgentCreate() { showAgentCreate.value = true }
 function showSettings() { void router.push('/settings/connection') }
 async function onFirstRunCompleted() {
   await loadAgents()
@@ -1770,15 +1808,19 @@ async function onFirstRunCompleted() {
 }
 function showChat() { activeTab.value = 'chat'; void router.push(routeForTab('chat')) }
 onMounted(async () => {
+  unlistenConfigurationChanged = onConfigurationChanged(({ kind }) => {
+    if (kind === 'llm' && activeId.value) void refreshAgentModel(activeId.value)
+    void refreshWorkgroupSettings()
+  })
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('keydown', onKeydown)
   window.addEventListener('resize', resizeComposer)
   void nextTick(resizeComposer)
   void nextTick(observeComposerField)
   window.addEventListener('desktop-back-to-chat', onDesktopBackToChat)
-  window.addEventListener('desktop-use-chat-command', onDesktopUseChatCommand)
   window.addEventListener('desktop-open-agent', onDesktopOpenAgent)
   window.addEventListener('desktop-open-settings', onDesktopOpenSettings)
+  window.addEventListener('desktop-open-agent-create', onDesktopOpenAgentCreate)
   if (window.__TAURI_INTERNALS__) {
     unlistenWorkspaceWrite = await listen('workspace-write-progress', event => {
       const progress = event.payload
@@ -1793,8 +1835,8 @@ onMounted(async () => {
     try { unlistenWindowFocus = await currentWindow.onFocusChanged(() => { void syncResourceWindowState() }) } catch { /* Preview builds may not expose focus events. */ }
   }
   if (!window.__TAURI_INTERNALS__) {
-    status.value = { online: false, setup_required: false, version: '', error: '浏览器预览模式：请在 Tauri Desktop MVP 窗口中连接真实 Node。' }
-    error.value = '预览模式仅展示界面；Node 状态、Agent 与消息仅从 Tauri Rust transport 获取。'
+    status.value = { online: false, setup_required: false, version: '', error: '浏览器预览模式：请在桌面应用窗口中连接本地服务。' }
+    error.value = '预览模式仅展示界面；连接状态、智能体与消息仅从桌面应用获取。'
     finishStartup()
     return
   }
@@ -1829,6 +1871,7 @@ onMounted(async () => {
       streamingText.value += event.data.content || ''
       return
     }
+    applyRemoteWorkerEvent(event.event_type, event.data)
     if (event.event_type === 'runtime/notice' && event.data?.message_kind === 'context_boundary') {
       await selectAgent(event.agent_id)
       return
@@ -1873,10 +1916,10 @@ onMounted(async () => {
       instance.output = (instance.output + decoder.decode(bytes, { stream: true })).slice(-1500000)
       if (activeTerminalInstanceId.value === instance.id) terminalOutput.value = instance.output
     } else if (event.type === 'replay_gap') {
-      instance.output += '\r\n[Node 提示：部分历史输出已过期]\r\n'
+      instance.output += '\r\n[本地服务提示：部分历史输出已过期]\r\n'
       if (activeTerminalInstanceId.value === instance.id) terminalOutput.value = instance.output
     } else if (event.type === 'error') {
-      instance.error = String(event.error || 'Node 终端错误')
+      instance.error = String(event.error || '本地服务终端错误')
       instance.status = 'error'
       if (activeTerminalInstanceId.value === instance.id) { terminalError.value = instance.error; terminalStatus.value = 'error' }
     } else if (event.type === 'exited' || event.type === 'terminated') {
@@ -1906,9 +1949,10 @@ onUnmounted(() => {
   window.removeEventListener('resize', resizeComposer)
   composerResizeObserver?.disconnect()
   window.removeEventListener('desktop-back-to-chat', onDesktopBackToChat)
-  window.removeEventListener('desktop-use-chat-command', onDesktopUseChatCommand)
   window.removeEventListener('desktop-open-agent', onDesktopOpenAgent)
   window.removeEventListener('desktop-open-settings', onDesktopOpenSettings)
+  window.removeEventListener('desktop-open-agent-create', onDesktopOpenAgentCreate)
+  unlistenConfigurationChanged?.()
   unlistenWindowResize?.(); unlistenWindowFocus?.()
   for (const terminal of terminalInstances.value.filter(item => item.connectionId)) {
     void invoke('desktop_terminal_command', { connectionId: terminal.connectionId, agentId: terminal.agentId, commandType: 'detach' }).catch(() => {})
@@ -1933,13 +1977,13 @@ onUnmounted(() => {
     <div class="desktop-startup-card">
       <span class="desktop-startup-mark" aria-hidden="true"><img :src="brandIconUrl" alt=""></span>
       <p class="desktop-startup-brand">DAgents Desktop</p>
-      <h1>{{ startupTimedOut ? '仍在等待本机 Node' : '正在启动 DAgents' }}</h1>
-      <p class="desktop-startup-description">{{ startupTimedOut ? (status.online ? 'Node 已连接，但工作区还没有完成加载。请重试，或离线打开 Desktop 设置。' : status.error || '本机 Node 尚未就绪。你可以重试连接，或先离线打开 Desktop 设置。') : '正在启动并连接本机 Node，准备好后会自动打开工作区。' }}</p>
+      <h1>{{ startupTimedOut ? '仍在等待本地服务' : '正在启动 DAgents' }}</h1>
+      <p class="desktop-startup-description">{{ startupTimedOut ? (status.online ? '本地服务已连接，但工作区还没有完成加载。请重试，或离线打开桌面应用设置。' : status.error || '本地服务尚未就绪。你可以重试连接，或先离线打开桌面应用设置。') : '正在启动并连接本地服务，准备好后会自动打开工作区。' }}</p>
       <div v-if="startupTimedOut" class="desktop-startup-actions">
         <button class="desktop-startup-retry" type="button" @click="retryNodeStartup">重试连接</button>
         <button class="desktop-startup-continue" type="button" @click="continueOffline">离线打开</button>
       </div>
-      <div v-else class="desktop-startup-progress"><span></span>连接本机 Node</div>
+      <div v-else class="desktop-startup-progress"><span></span>连接本地服务</div>
     </div>
   </section>
   <div v-else class="desktop-shell" :class="{ 'settings-mode': activeTab === 'settings' }">
@@ -1950,7 +1994,7 @@ onUnmounted(() => {
           <div class="menu-anchor" data-menu-anchor="DAgents" @mouseenter="setTopMenuFromHover('DAgents')">
             <button class="menu-brand" type="button" role="menuitem" data-menubar-trigger="DAgents" aria-haspopup="menu" :aria-expanded="openMenu === 'DAgents'" @click.stop="toggleTopMenu('DAgents')"><span class="brand-word">DAgents</span></button>
             <div v-if="openMenu === 'DAgents'" class="menu-popover" role="menu" aria-label="DAgents 菜单">
-              <template v-for="(item, i) in menuEntries.DAgents" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><div v-else-if="item.status" class="menu-status" role="group" :aria-label="`${item.label}，${item.hint}`"><span class="menu-status-dot" :class="{ online: item.online }" aria-hidden="true"></span><span class="menu-status-label" aria-hidden="true">{{ item.label }}</span><small aria-hidden="true">{{ item.hint }}</small></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
+              <template v-for="(item, i) in menuEntries.DAgents" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
             </div>
           </div>
           <div v-for="name in desktopMenuNames.slice(1)" :key="name" class="menu-anchor" :data-menu-anchor="name" @mouseenter="setTopMenuFromHover(name)">
@@ -1974,18 +2018,18 @@ onUnmounted(() => {
         <section class="side-section">
           <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type !== 'auto' }" aria-label="智能体" title="智能体" :aria-expanded="collapsedGroup === 'agents'" @click="collapsedGroup = collapsedGroup === 'agents' ? '' : 'agents'"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span></button>
           <template v-else>
-            <div class="group-title"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span><span>智能体</span><button class="group-add" aria-label="新建 Agent" title="新建 Agent" @click="showAgentCreate = true">+</button></div>
+            <div class="group-title"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span><span>智能体</span><button class="group-add" aria-label="新建智能体" title="新建智能体" @click="showAgentCreate = true">+</button></div>
             <div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row">
               <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
               <button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button>
             </div>
           </template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'agents'" class="sidebar-popover"><div class="sidebar-popover-heading"><b>智能体</b><button class="group-add" type="button" aria-label="新建 Agent" title="新建 Agent" @click="showAgentCreate = true">+</button></div><div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
+          <div v-if="sidebarCollapsed && collapsedGroup === 'agents'" class="sidebar-popover"><div class="sidebar-popover-heading"><b>智能体</b><button class="group-add" type="button" aria-label="新建智能体" title="新建智能体" @click="showAgentCreate = true">+</button></div><div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
         </section>
         <section class="side-section">
-          <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: activeTab === 'workgroups' }" aria-label="工作组" title="工作组" :aria-expanded="collapsedGroup === 'workgroups'" @click="collapsedGroup = collapsedGroup === 'workgroups' ? '' : 'workgroups'"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span></button>
-          <template v-else><button class="group-title group-title-button" :class="{ selected: isWorkgroupView }" :aria-current="isWorkgroupView ? 'page' : undefined" @click="showWorkgroups"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span><span>工作组</span></button><button v-for="group in workgroupList" :key="group.workgroup_id" class="agent-item" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" :title="group.display_name || group.workgroup_id" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'workgroups'" class="sidebar-popover"><button class="sidebar-popover-title" type="button" @click="showWorkgroups">工作组</button><button v-for="group in workgroupList" :key="group.workgroup_id" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></div>
+          <button v-if="sidebarCollapsed && showWorkgroupSidebar" class="collapsed-group" :class="{ selected: activeTab === 'workgroups' }" aria-label="工作组" title="工作组" :aria-expanded="collapsedGroup === 'workgroups'" @click="collapsedGroup = collapsedGroup === 'workgroups' ? '' : 'workgroups'"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span></button>
+          <template v-if="!sidebarCollapsed && showWorkgroupSidebar"><button class="group-title group-title-button" :class="{ selected: isWorkgroupView }" :aria-current="isWorkgroupView ? 'page' : undefined" @click="showWorkgroups"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span><span>工作组</span></button><button v-for="group in workgroupList" :key="group.workgroup_id" class="agent-item" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" :title="group.display_name || group.workgroup_id" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></template>
+          <div v-if="sidebarCollapsed && showWorkgroupSidebar && collapsedGroup === 'workgroups'" class="sidebar-popover"><button class="sidebar-popover-title" type="button" @click="showWorkgroups">工作组</button><button v-for="group in workgroupList" :key="group.workgroup_id" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></div>
         </section>
         <section class="side-section">
           <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type === 'auto' }" aria-label="自主智能体" title="自主智能体" :aria-expanded="collapsedGroup === 'auto'" @click="collapsedGroup = collapsedGroup === 'auto' ? '' : 'auto'"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span></button>
@@ -1999,7 +2043,7 @@ onUnmounted(() => {
           <div v-if="sidebarCollapsed && collapsedGroup === 'auto'" class="sidebar-popover"><b>自主智能体</b><div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
         </section>
       </div>
-      <div class="node-indicator" :class="status.online ? 'online' : 'offline'" :title="`本机 Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`" :aria-label="`本机 Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`"><span>{{ `Node · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}` }}</span><i></i></div>
+      <div class="node-indicator" :class="status.online ? 'online' : 'offline'" :title="`本地服务 · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`" :aria-label="`本地服务 · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`"><span>{{ `本地服务 · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}` }}</span><i></i></div>
     </aside>
     <main class="main-panel">
       <FirstRunNodeProfile v-if="showNodeFirstRun && activeTab !== 'settings'" class="desktop-first-run" @completed="onFirstRunCompleted" />
@@ -2010,7 +2054,7 @@ onUnmounted(() => {
         <div v-else class="conversation-tab active workgroup-conversation-tab" :title="activeWorkgroupName"><span class="icon-mask tab-icon" :style="maskStyle(navWorkgroupsIcon)"></span><b>{{ activeWorkgroupName }}</b></div>
         <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><UiIcon name="close" :size="14" /></button></div></div>
       </div>
-      <div v-if="status.setup_required" class="notice setup"><span>Node 需要首次配置</span><button @click="showSettings">打开设置</button></div>
+      <div v-if="status.setup_required" class="notice setup"><span>本地服务需要首次配置</span><button @click="showSettings">打开设置</button></div>
       <div v-if="error && status.online && !status.setup_required && displayedTab !== 'chat'" class="desktop-error-hint desktop-error-hint--resource" role="alert" tabindex="0" aria-describedby="desktop-resource-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
         <UiIcon name="alert" :size="14" aria-hidden="true" />
         <span>操作未完成</span>
@@ -2019,13 +2063,13 @@ onUnmounted(() => {
       <div v-if="resourceNavigationError" class="notice resource-navigation-notice" role="alert"><span>{{ resourceNavigationError }}</span><button type="button" aria-label="关闭资源提示" @click="resourceNavigationError = ''">关闭</button></div>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('chat')" @after-leave="onComposerPageAfterLeave('chat', $event)" @after-enter="onComposerPageAfterEnter('chat', $event)">
       <section v-if="visitedTabs.has('chat')" v-show="composerPageVisible('chat')" data-composer-page="chat" class="conversation" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)">
-        <div v-if="!status.online" class="empty-state"><div class="empty-icon"><i></i></div><h2>等待本机 Node</h2><p>{{ status.error || '启动 DAgents Node 后，Desktop 会自动连接。' }}</p></div>
-        <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成本机 Node 首次配置</h2><p>设置 Node 名称与模型后即可开始使用。</p><button class="quiet" @click="showSettings">打开设置</button></div>
+        <div v-if="!status.online" class="empty-state"><div class="empty-icon"><i></i></div><h2>等待本地服务</h2><p>{{ status.error || '启动 DAgents 本地服务后，桌面应用会自动连接。' }}</p></div>
+        <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成本地服务首次配置</h2><p>设置本地服务名称与模型后即可开始使用。</p><button class="quiet" @click="showSettings">打开设置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
         <template v-else>
-          <div v-if="!chatEntries.length && !hitlQueue.length" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在连接的 Node 中。</p><span class="real-tag">真实 Node 会话</span></div>
+          <div v-if="!chatEntries.length && !streamingText && !hitlQueue.length" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在已连接的本地服务中。</p><span class="real-tag">真实会话</span></div>
           <div v-else class="desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
+            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :streaming-text="streamingText" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
           </div>
         </template>
         <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint" role="alert" tabindex="0" aria-describedby="desktop-chat-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
@@ -2043,7 +2087,7 @@ onUnmounted(() => {
       </section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('file')" @after-leave="onComposerPageAfterLeave('file', $event)" @after-enter="onComposerPageAfterEnter('file', $event)">
-      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" :attachment-limit-reached="attachmentLimitReached" @resource-name="workspaceName = $event" @attach-file="attachWorkspaceFile" @annotation-update="handleWorkspaceReference" @annotation-remove="onWorkspaceAnnotationRemove" @expand-agent-dock="dockCollapsed = false" /></section>
+      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :workspace-location="activeAgent?.workspace?.path || activeAgent?.workspace_path || ''" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" :attachment-limit-reached="attachmentLimitReached" @resource-name="workspaceName = $event" @annotation-update="handleWorkspaceReference" @annotation-remove="onWorkspaceAnnotationRemove" @expand-agent-dock="dockCollapsed = false" /></section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('browser')" @after-leave="onComposerPageAfterLeave('browser', $event)" @after-enter="onComposerPageAfterEnter('browser', $event)">
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
@@ -2051,7 +2095,7 @@ onUnmounted(() => {
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
-      <footer class="composer-wrap"><div v-if="composerWriteRequest" class="desktop-composer-progress-pill" role="status" aria-live="polite">{{ composerWriteProgress?.phase === 'committing' ? '正在提交，取消后结果可能未知。' : composerWriteProgress?.total ? `导入进度 ${Math.min(100, Math.floor(composerWriteProgress.bytes * 100 / composerWriteProgress.total))}%` : '正在准备导入…' }}<button type="button" @click="cancelComposerImport">请求取消</button></div><div v-if="pendingImages.length || pendingFiles.length" class="composer-attachments"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
+      <footer class="composer-wrap"><div v-if="composerWriteRequest" class="desktop-composer-progress-pill" role="status" aria-live="polite">{{ composerWriteProgress?.phase === 'committing' ? '正在提交，取消后结果可能未知。' : composerWriteProgress?.total ? `导入进度 ${Math.min(100, Math.floor(composerWriteProgress.bytes * 100 / composerWriteProgress.total))}%` : '正在准备导入…' }}<button type="button" @click="cancelComposerImport">请求取消</button></div><div v-if="pendingImages.length || pendingFiles.length || pendingWorkspaceReferences.length" class="composer-attachments" role="group" aria-label="待发送附件和引用"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button><WorkspaceReferenceAttachments :references="pendingWorkspaceReferences" @remove="removeWorkspaceReferenceById" /></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
   <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
   <div class="composer-toolbar-row">
@@ -2067,8 +2111,8 @@ onUnmounted(() => {
     </div>
     <div class="composer-toolbar-right">
       <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
-      <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :desktop-compact="true" :disabled="agentGenerating || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile"/>
-      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canCancelTurn || cancellingTurn : !canSendMessage || (!input.trim() && !pendingImages.length && !pendingFiles.length) || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
+      <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="agentGenerating || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
+      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canCancelTurn || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
     </div>
   </div>
 </form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span></div></footer>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { dispatchDesktopSlashCommand } from './slash-commands.js'
 
-test('Desktop consumes /clear and refreshes the selected Agent without sending chat text', async () => {
+test('Desktop /clear reuses the confirmation result and refreshes only after clearing', async () => {
   const calls = []
   const notices = []
   const consumed = await dispatchDesktopSlashCommand('/clear', {
@@ -14,65 +14,65 @@ test('Desktop consumes /clear and refreshes the selected Agent without sending c
 
   assert.equal(consumed, true)
   assert.deepEqual(calls, [['clear', 'agent-a'], ['refresh', 'agent-a']])
-  assert.match(notices[0], /已清空对话上下文/)
+  assert.deepEqual(notices, ['已清空对话上下文'])
+
+  const canceled = []
+  await dispatchDesktopSlashCommand('/clear', {
+    agentId: 'agent-a',
+    clearContext: async () => false,
+    refresh: async () => canceled.push('refresh'),
+    onNotice: () => canceled.push('notice'),
+  })
+  assert.deepEqual(canceled, [])
 })
 
-test('Desktop executes /compress and reports the result', async () => {
-  const notices = []
-  const consumed = await dispatchDesktopSlashCommand('/compress', {
+test('Desktop /clear reports a busy or pending-approval block while keeping confirmation cancellation quiet', async () => {
+  const errors = []
+  const calls = []
+  const consumed = await dispatchDesktopSlashCommand('/clear', {
     agentId: 'agent-a',
-    compressContext: async () => ({ status: 'queued' }),
-    refresh: async () => {},
-    onNotice: notice => notices.push(notice),
+    clearContext: async () => { throw new Error('请先处理待审批请求后再清空对话') },
+    refresh: async () => calls.push('refresh'),
+    onError: error => errors.push(error),
+    onNotice: notice => calls.push(notice),
   })
 
   assert.equal(consumed, true)
-  assert.deepEqual(notices, ['压缩：queued'])
+  assert.deepEqual(errors, ['请先处理待审批请求后再清空对话'])
+  assert.deepEqual(calls, [])
 })
 
-test('Desktop reports the current thinking setting and routes Manage uploads', async () => {
+test('Desktop /compress reports the applied result or that no compaction was needed', async () => {
   const notices = []
-  const uploads = []
-  await dispatchDesktopSlashCommand('/thinking', {
+  await dispatchDesktopSlashCommand('/compress', {
     agentId: 'agent-a',
-    getLLMSettings: async () => ({ thinking: 'enabled' }),
+    compressContext: async () => ({ status: 'applied', compressed_message_count: 4 }),
+    refresh: async () => {},
     onNotice: notice => notices.push(notice),
   })
-  await dispatchDesktopSlashCommand('/upload skill C:/skills/demo.zip demo 1.0.0 Demo', {
+  await dispatchDesktopSlashCommand('/compress', {
     agentId: 'agent-a',
-    upload: async spec => {
-      uploads.push(spec)
-      return { kind: 'skill', id: 'demo', version: '1.0.0', status: 'uploaded' }
-    },
+    compressContext: async () => ({ status: 'noop' }),
     onNotice: notice => notices.push(notice),
   })
 
-  assert.deepEqual(notices, ['thinking: enabled', '已上传 skill demo@1.0.0（uploaded）'])
-  assert.deepEqual(uploads.map(({ kind, path, id, version }) => ({ kind, path, id, version })), [
-    { kind: 'skill', path: 'C:/skills/demo.zip', id: 'demo', version: '1.0.0' },
-  ])
+  assert.deepEqual(notices, ['上下文压缩完成，合并了 4 条消息', '当前上下文无需压缩'])
 })
 
-test('Desktop applies /thinking options and rejects invalid syntax', async () => {
-  const patches = []
-  const notices = []
-  await dispatchDesktopSlashCommand('/thinking effort max', {
-    agentId: 'agent-a',
-    patchLLMSettings: async patch => {
-      patches.push(patch)
-      return { thinking: 'enabled', reasoning_effort: 'max' }
-    },
-    onNotice: notice => notices.push(notice),
-  })
-  assert.deepEqual(patches, [{ reasoning_effort: 'max' }])
-  assert.deepEqual(notices, ['thinking: enabled'])
-
+test('Desktop no longer treats /thinking or /upload as supported commands', async () => {
   const errors = []
-  await dispatchDesktopSlashCommand('/thinking maybe', {
-    agentId: 'agent-a',
-    onError: error => errors.push(error),
-  })
-  assert.match(errors[0], /用法: \/thinking/)
+  for (const command of ['/thinking on', '/upload skill package.zip example 1.0.0']) {
+    const consumed = await dispatchDesktopSlashCommand(command, {
+      agentId: 'agent-a',
+      onError: error => errors.push(error),
+    })
+    assert.equal(consumed, true)
+  }
+
+  assert.deepEqual(errors, [
+    '未知命令: /thinking on',
+    '未知命令: /upload skill package.zip example 1.0.0',
+  ])
 })
 
 test('Desktop consumes unknown slash commands as errors instead of sending them to the model', async () => {

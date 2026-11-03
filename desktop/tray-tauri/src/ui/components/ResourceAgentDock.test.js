@@ -53,6 +53,22 @@ describe('ResourceAgentDock', () => {
     wrapper.unmount()
   })
 
+  it('keeps a labeled workspace reference removable and sendable without leaving the resource dock', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      props: {
+        agentName: 'Researcher', canSend: true,
+        references: [{ id: 'ref-1', name: 'guide.md', path: 'docs/guide.md', anchor: { label: '整个文件' } }],
+      },
+    })
+    expect(wrapper.find('.dock-references').attributes('aria-label')).toBe('Researcher 的已引用资源')
+    expect(wrapper.find('.dock-reference').text()).toContain('guide.md')
+    expect(wrapper.find('.dock-action').attributes('disabled')).toBeUndefined()
+    await wrapper.find('.dock-reference button').trigger('click')
+    expect(wrapper.emitted('remove-reference')).toEqual([['ref-1']])
+    await wrapper.find('.dock-input-surface').trigger('submit')
+    expect(wrapper.emitted('send')).toHaveLength(1)
+  })
+
   it('keeps the same input and draft while the panel expands, retains approval slot actions, and returns focus on collapse', async () => {
     const approve = vi.fn()
     const wrapper = mount(ResourceAgentDock, {

@@ -107,23 +107,24 @@ type runtime struct {
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
 	// second lifecycle projection.
-	lifecycleMu                sync.Mutex
-	lifecycleCommandSeq        uint64
-	lifecycleEventSeq          uint64
-	lifecycleEventsLoaded      bool
-	messages                   []llm.Message // 交互消息列表
-	pendingInputMessage        *llm.Message
-	historyRevision            uint64 // committed message snapshot revision
-	activeContextStart         int    // durable transcript index visible to new model requests
-	lastContextResetID         string // idempotency fence for the last logical reset
-	lastHumanInteraction       time.Time
-	loadedSkills               []skills.LoadedSkill // 加载的技能列表
-	pendingMemoryScope         string               // scope changes wait for the next human Turn
-	workspaceRoot              string               // Agent 工作区根路径
-	workspaceStateRoot         string
-	idleNewConversationSeconds int
-	media                      *media.Registry // session 媒体索引（F-M1）
-	memoryService              memory.Service  // v2 workspace memory authority
+	lifecycleMu                               sync.Mutex
+	lifecycleCommandSeq                       uint64
+	lifecycleEventSeq                         uint64
+	lifecycleEventsLoaded                     bool
+	messages                                  []llm.Message // 交互消息列表
+	pendingInputMessage                       *llm.Message
+	historyRevision                           uint64 // committed message snapshot revision
+	toolCallProjectionHiddenThroughGeneration uint64
+	activeContextStart                        int    // durable transcript index visible to new model requests
+	lastContextResetID                        string // idempotency fence for the last logical reset
+	lastHumanInteraction                      time.Time
+	loadedSkills                              []skills.LoadedSkill // 加载的技能列表
+	pendingMemoryScope                        string               // scope changes wait for the next human Turn
+	workspaceRoot                             string               // Agent 工作区根路径
+	workspaceStateRoot                        string
+	idleNewConversationSeconds                int
+	media                                     *media.Registry // session 媒体索引（F-M1）
+	memoryService                             memory.Service  // v2 workspace memory authority
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
@@ -246,26 +247,27 @@ func newRuntimeWithPublisher(
 			}
 			return coord
 		}(),
-		candidatePipeline:          candidatePipeline,
-		messages:                   append([]llm.Message(nil), initial...),
-		historyRevision:            turnOpts.initialHistoryRevision,
-		activeContextStart:         nonNegative(turnOpts.initialActiveContextStart),
-		lastContextResetID:         strings.TrimSpace(turnOpts.initialLastContextResetID),
-		lastHumanInteraction:       turnOpts.initialLastHumanInteraction,
-		loadedSkills:               append([]skills.LoadedSkill(nil), loaded...),
-		skillRevision:              turnCatalog.Revision(),
-		workspaceRoot:              workspaceRoot,
-		workspaceStateRoot:         strings.TrimSpace(turnOpts.WorkspaceStateRoot),
-		idleNewConversationSeconds: turnOpts.IdleNewConversationSeconds,
-		triggerDelivery:            triggerDelivery,
-		sideEffects:                newSideEffectStore(),
-		notifySeq:                  initialNotifySeq,
-		ackSeq:                     initialAckSeq,
-		runtimeRevision:            turnOpts.RuntimeRevision,
-		runtimeDigest:              strings.TrimSpace(turnOpts.RuntimeDigest),
-		llmProfileDigest:           strings.TrimSpace(turnOpts.LLMProfileDigest),
-		runtimeMultimodalEnabled:   turnOpts.MultimodalEnabled,
-		turnBudget:                 turnOpts.Budget,
+		candidatePipeline: candidatePipeline,
+		messages:          append([]llm.Message(nil), initial...),
+		historyRevision:   turnOpts.initialHistoryRevision,
+		toolCallProjectionHiddenThroughGeneration: turnOpts.initialToolCallProjectionHiddenThroughGeneration,
+		activeContextStart:                        nonNegative(turnOpts.initialActiveContextStart),
+		lastContextResetID:                        strings.TrimSpace(turnOpts.initialLastContextResetID),
+		lastHumanInteraction:                      turnOpts.initialLastHumanInteraction,
+		loadedSkills:                              append([]skills.LoadedSkill(nil), loaded...),
+		skillRevision:                             turnCatalog.Revision(),
+		workspaceRoot:                             workspaceRoot,
+		workspaceStateRoot:                        strings.TrimSpace(turnOpts.WorkspaceStateRoot),
+		idleNewConversationSeconds:                turnOpts.IdleNewConversationSeconds,
+		triggerDelivery:                           triggerDelivery,
+		sideEffects:                               newSideEffectStore(),
+		notifySeq:                                 initialNotifySeq,
+		ackSeq:                                    initialAckSeq,
+		runtimeRevision:                           turnOpts.RuntimeRevision,
+		runtimeDigest:                             strings.TrimSpace(turnOpts.RuntimeDigest),
+		llmProfileDigest:                          strings.TrimSpace(turnOpts.LLMProfileDigest),
+		runtimeMultimodalEnabled:                  turnOpts.MultimodalEnabled,
+		turnBudget:                                turnOpts.Budget,
 		// A trigger cap is activation-scoped and can only be granted by the
 		// trusted provider below. Never carry a static option into arbitrary
 		// trigger envelopes.
@@ -1231,7 +1233,7 @@ func (r *runtime) turnEpochCurrentLocked() bool {
 	return r.turnEpoch == r.sessionEpoch
 }
 
-func (r *runtime) clearMessages(ctx context.Context) {
+func (r *runtime) clearMessages(ctx context.Context) error {
 	// Context clearing is a logical cancellation boundary. Keep the durable
 	// Turn terminal event even though the durable transcript snapshot is removed;
 	// otherwise a restart could resurrect an in-flight Step from lifecycle
@@ -1253,6 +1255,7 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	r.mu.Lock()
 	r.sessionEpoch++
 	newEpoch := r.sessionEpoch
+	r.toolCallProjectionHiddenThroughGeneration = r.turnCoordinator.Snapshot().Generation
 	r.messages = nil
 	r.activeContextStart = 0
 	r.lastContextResetID = ""
@@ -1267,19 +1270,16 @@ func (r *runtime) clearMessages(ctx context.Context) {
 		r.orch.ClearHookStore()
 		r.orch.SyncLoadedSkillHooks(nil)
 	}
+	var persistErr error
 	if r.store != nil {
-		if err := r.store.ClearMessages(ctx, r.session.ID); err != nil && r.logger != nil {
-			r.logger.Warn("clear persisted runtime messages failed", "session_id", r.session.ID, "error", err)
-		}
-		// ClearMessages intentionally resets the durable transcript snapshot. Persist the
-		// monotonic revision again so an older in-flight hydrate cannot become
-		// newer merely because the context was cleared.
-		if err := r.persistLocked(ctx); err != nil && r.logger != nil {
-			r.logger.Warn("persist cleared runtime snapshot failed", "session_id", r.session.ID, "error", err)
-		}
+		// Save the cleared transcript and its projection boundary together. A
+		// preliminary ClearMessages write would create a crash window where the
+		// transcript is empty but the old tool-call projection remains visible.
+		persistErr = r.persistLocked(ctx)
 	}
 	r.persistMu.Unlock()
 	r.lifecycleMu.Unlock()
+	return persistErr
 }
 
 func (r *runtime) messagesSnapshot() []llm.Message {

@@ -1,4 +1,6 @@
 <script setup>
+import SettingsSaveBar from "./SettingsSaveBar.vue";
+
 defineProps({
   title: { type: String, required: true },
   subtitle: { type: String, default: "" },
@@ -8,6 +10,7 @@ defineProps({
   configPath: { type: String, default: "" },
   error: { type: String, default: "" },
   statusMessage: { type: String, default: "" },
+  dirty: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["save"]);
@@ -24,25 +27,20 @@ const emit = defineEmits(["save"]);
           <span v-if="!configWritable">只读</span>
         </div>
       </div>
-      <div class="setup-config-panel__actions">
-        <button
-          type="button"
-          class="btn btn--primary btn--sm"
-          :disabled="loading || saving || !configWritable"
-          @click="emit('save')"
-        >
-          {{ saving ? "保存中…" : "保存" }}
-        </button>
-      </div>
     </header>
 
     <div class="panel__body setup-config-panel__body">
       <div v-if="loading && !configPath" class="command-panel__loading">加载中…</div>
       <template v-else>
-        <div v-if="error" class="command-panel__error" role="alert">{{ error }}</div>
-        <p v-if="statusMessage" class="setup-config-panel__status">{{ statusMessage }}</p>
-        <slot v-if="configPath || configWritable" />
+        <fieldset class="config-panel-shell__fields" :disabled="loading || saving || !configWritable">
+          <slot v-if="configPath || configWritable" />
+        </fieldset>
       </template>
     </div>
+    <SettingsSaveBar :status="statusMessage || (dirty ? '有未保存的更改' : '修改后请保存。')" :error="error" :saving="saving" :disabled="loading || !configWritable" @save="emit('save')" />
   </section>
 </template>
+
+<style scoped>
+.config-panel-shell__fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+</style>

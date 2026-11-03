@@ -738,55 +738,43 @@ onMounted(async () => {
       <template v-else>
         <section class="wg-detail-section" aria-label="通用配置">
           <h3 class="wg-detail-section__title">通用配置</h3>
-          <dl class="wg-settings-kv">
-            <div>
-              <dt>显示名称</dt>
-              <dd>{{ selectedWorkgroup.display_name }}</dd>
-            </div>
-            <div>
-              <dt>工作组 ID</dt>
-              <dd class="cell-wrap">{{ selectedWorkgroup.workgroup_id }}</dd>
-            </div>
-            <div>
-              <dt>状态</dt>
-              <dd>{{ statusLabel(selectedWorkgroup.status) }}</dd>
-            </div>
-            <div>
-              <dt>归属人</dt>
-              <dd>{{ selectedWorkgroup.created_by_node_id || "—" }}</dd>
-            </div>
-            <div>
-              <dt>Owners</dt>
-              <dd>{{ (acl?.owners || []).join(", ") || "—" }}</dd>
-            </div>
-            <div>
-              <dt>Collaborators</dt>
-              <dd>{{ (acl?.collaborators || []).join(", ") || "—" }}</dd>
-            </div>
+          <dl class="wg-settings-kv wg-settings-kv--summary">
+            <div><dt>显示名称</dt><dd>{{ selectedWorkgroup.display_name }}</dd></div>
+            <div><dt>状态</dt><dd>{{ statusLabel(selectedWorkgroup.status) }}</dd></div>
           </dl>
-          <form class="wg-inline-form" @submit.prevent="addCollaborator">
-            <label class="field">
-              <span>添加协作者 Node</span>
-              <input
-                v-model="collabDraft"
-                type="text"
-                list="wg-node-options"
-                placeholder="输入 node_id"
-                :disabled="addingCollaborator"
-              />
-            </label>
-            <button
-              type="submit"
-              class="btn btn-ghost"
-              :disabled="addingCollaborator || !collabDraft.trim()"
-            >
-              {{ addingCollaborator ? "添加中…" : "添加" }}
-            </button>
-          </form>
-          <p class="muted wg-detail-section__note">
-            Home Node 必须在 ACL（Owners / Collaborators）中。新增成员时若尚未加入，会自动补进 Collaborators。
-            LLM 默认继承 Supervisor。配置完成后请点击右上角「发布」。
-          </p>
+          <details class="wg-access-details">
+            <summary>
+              <span>访问范围</span>
+              <small>{{ (acl?.owners || []).length }} 个 Owner · {{ (acl?.collaborators || []).length }} 个协作者</small>
+            </summary>
+            <div class="wg-access-details__body">
+              <dl class="wg-settings-kv">
+                <div><dt>工作组 ID</dt><dd class="cell-wrap">{{ selectedWorkgroup.workgroup_id }}</dd></div>
+                <div><dt>归属人</dt><dd>{{ selectedWorkgroup.created_by_node_id || "—" }}</dd></div>
+                <div><dt>Owners</dt><dd>{{ (acl?.owners || []).join(", ") || "—" }}</dd></div>
+                <div><dt>Collaborators</dt><dd>{{ (acl?.collaborators || []).join(", ") || "—" }}</dd></div>
+              </dl>
+              <form class="wg-inline-form" @submit.prevent="addCollaborator">
+                <label class="field">
+                  <span>添加协作者 Node</span>
+                  <input
+                    v-model="collabDraft"
+                    type="text"
+                    list="wg-node-options"
+                    placeholder="输入 node_id"
+                    :disabled="addingCollaborator"
+                  />
+                </label>
+                <button type="submit" class="btn btn-ghost" :disabled="addingCollaborator || !collabDraft.trim()">
+                  {{ addingCollaborator ? "添加中…" : "添加" }}
+                </button>
+              </form>
+              <p class="muted wg-detail-section__note">
+                Home Node 必须在 ACL（Owners / Collaborators）中。新增成员时若尚未加入，会自动补进 Collaborators。
+                LLM 默认继承 Supervisor。配置完成后请点击右上角「发布」。
+              </p>
+            </div>
+          </details>
         </section>
 
         <section class="wg-detail-section" aria-label="成员配置">

@@ -203,16 +203,17 @@
 }
 
 .settings-layout__nav-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   padding: 0 4px 14px;
 }
 
 .settings-layout__identity {
   display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0 10px;
+  align-items: center;
+  min-width: 0;
 }
 
 .settings-layout__identity strong {
@@ -327,19 +328,13 @@
 }
 
 .settings-layout__back {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 0 12px;
-  padding: 6px 8px;
+  margin: 0;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 13px;
   cursor: pointer;
-  text-align: left;
 }
 
 .settings-layout__back:hover {
@@ -487,20 +482,7 @@
   }
 
   .settings-layout__nav-head {
-    display: flex;
-    align-items: center;
-    flex: 0 0 auto;
     padding: 0;
-  }
-
-  .settings-layout__back {
-    margin: 0;
-    padding: 7px 8px;
-    white-space: nowrap;
-  }
-
-  .settings-layout__identity {
-    display: none;
   }
 
   .settings-layout__nav-scroll {

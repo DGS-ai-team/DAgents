@@ -23,7 +23,14 @@ func (s *Server) registerSetupRoutes() {
 }
 
 func (s *Server) setupWritable() bool {
-	return s.nodeSettings != nil || s.llmConfigs != nil || (s.configPath != "" && configPathWritable(s.configPath))
+	return s.nodeSettings != nil && s.llmConfigs != nil && s.llmConfigMigrationErr == nil
+}
+
+func (s *Server) settingsWriteUnavailableMessage() string {
+	if s.llmConfigMigrationErr != nil {
+		return "模型配置迁移尚未完成，设置写入已暂停；请按 Node 启动日志修复迁移问题后重启：" + s.llmConfigMigrationErr.Error()
+	}
+	return "Node 设置库或模型配置库不可用，无法保存设置"
 }
 
 func (s *Server) handleGetSetupConfig(w http.ResponseWriter, _ *http.Request) {
@@ -36,11 +43,7 @@ func (s *Server) handleGetSetupConfig(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.setupWritable() {
-		if s.configPath == "" && s.nodeSettings == nil && s.llmConfigs == nil {
-			writeAPIError(w, http.StatusServiceUnavailable, "config_path_unknown", "Node 未记录配置存储，无法保存", nil)
-			return
-		}
-		writeAPIError(w, http.StatusForbidden, "config_not_writable", "配置不可写", nil)
+		writeAPIError(w, http.StatusServiceUnavailable, "settings_store_unavailable", s.settingsWriteUnavailableMessage(), nil)
 		return
 	}
 	var patch setup.SettingsPatch
@@ -54,10 +57,23 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	}
 	s.llmRefMu.Lock()
 	defer s.llmRefMu.Unlock()
-
-	if setup.PatchHasNonLLMBlock(patch) && s.nodeSettings == nil && !(s.configPath != "" && configPathWritable(s.configPath)) {
-		writeAPIError(w, http.StatusForbidden, "config_not_writable", "node_settings 不可用且 config.yaml 不可写", nil)
-		return
+	if patch.LLM != nil {
+		for i := range patch.LLM.Profiles {
+			profile := &patch.LLM.Profiles[i]
+			if !llm.ThinkingSupported(profile.Provider, profile.Model) {
+				profile.Thinking = ""
+				profile.ClearThinking = true
+				profile.ReasoningEffort = ""
+				profile.ThinkingBudget = nil
+				profile.ClearReasoningEffort = true
+				profile.ClearThinkingBudget = true
+				continue
+			}
+			if err := llm.ValidateThinkingSettings(profile.Provider, profile.Model, profile.Thinking, profile.ReasoningEffort, profile.ThinkingBudget); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_setup_config", err.Error(), nil)
+				return
+			}
+		}
 	}
 
 	updated, err := setup.ApplyPatch(s.cfg, patch)
@@ -133,6 +149,9 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		if prev != nil {
 			snap := *prev
 			settingsSnapshot = &snap
+		} else if s.cfg != nil {
+			snap := *s.cfg
+			settingsSnapshot = &snap
 		}
 	}
 
@@ -141,11 +160,6 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		if err := s.nodeSettings.Save(r.Context(), updated); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "node_settings_save_failed", err.Error(), nil)
 			return
-		}
-		if s.configPath != "" && configPathWritable(s.configPath) {
-			if err := config.SaveBootstrapFile(s.configPath, updated); err != nil && s.logger != nil {
-				s.logger.Warn("save bootstrap config failed", "path", s.configPath, "error", err)
-			}
 		}
 	}
 
@@ -160,21 +174,6 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		if records, err := s.llmConfigs.List(r.Context()); err == nil {
 			store.ApplyLLMConfigsToConfig(updated, records, updated.LLM.ActiveProfileID())
 		}
-	}
-
-	if s.nodeSettings != nil {
-		// settings 已在上方持久化
-	} else if s.configPath != "" && configPathWritable(s.configPath) {
-		if err := config.SaveFile(s.configPath, updated); err != nil {
-			if needsLLMPersist && len(llmSnapshot) > 0 {
-				_ = s.llmConfigs.ReplaceAll(r.Context(), llmSnapshot, nil, nil)
-			}
-			writeAPIError(w, http.StatusInternalServerError, "config_save_failed", err.Error(), nil)
-			return
-		}
-	} else if patch.LLM == nil || setup.PatchHasNonLLMBlock(patch) {
-		writeAPIError(w, http.StatusForbidden, "config_not_writable", "无法持久化设置", nil)
-		return
 	}
 
 	setup.CopyConfig(s.cfg, updated)
@@ -256,16 +255,21 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		}
 		thinking := strings.TrimSpace(p.Thinking)
 		effort := strings.TrimSpace(p.ReasoningEffort)
+		budget := p.ThinkingBudget
 		old, ok := existing[id]
 		if !ok {
 			old, ok = existing[migrations[id]]
 		}
+		modelChanged := ok && (!strings.EqualFold(strings.TrimSpace(old.Provider), strings.TrimSpace(p.Provider)) || strings.TrimSpace(old.Model) != strings.TrimSpace(p.Model))
 		if ok {
-			if thinking == "" {
+			if thinking == "" && !p.ClearThinking && !modelChanged {
 				thinking = old.Thinking
 			}
-			if effort == "" {
+			if effort == "" && !p.ClearReasoningEffort && !modelChanged {
 				effort = old.ReasoningEffort
+			}
+			if budget == nil && !p.ClearThinkingBudget && !modelChanged {
+				budget = old.ThinkingBudget
 			}
 		}
 		records = append(records, store.LLMConfigRecord{
@@ -277,6 +281,7 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 			Mock:              p.Mock,
 			Thinking:          thinking,
 			ReasoningEffort:   effort,
+			ThinkingBudget:    budget,
 			MultimodalEnabled: p.MultimodalEnabled,
 		})
 		if p.ClearAPIKey {

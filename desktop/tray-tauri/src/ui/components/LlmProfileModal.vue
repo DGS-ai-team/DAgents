@@ -1,11 +1,11 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { probeLLMModels } from "../api/node.js";
+import { getLLMCapabilities, probeLLMModels } from "../api/node.js";
 import UiSelect from "./UiSelect.vue";
 import UiIcon from "./UiIcon.vue";
 
 const PROVIDER_PRESETS = {
-  deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-chat" },
+  deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-flash" },
   openai: { base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
   qwen: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
@@ -55,8 +55,13 @@ const probeState = reactive({
 });
 const probedModels = ref(/** @type {string[]} */ ([]));
 const modelManual = ref(false);
+const capability = ref(null);
+const capabilityError = ref("");
+const capabilityLoading = ref(false);
+let capabilityRequest = 0;
+let lastCapabilityKey = "";
 
-const title = computed(() => (props.mode === "create" ? "新建 LLM 配置" : "编辑 LLM 配置"));
+const title = computed(() => (props.mode === "create" ? "新建模型配置" : "编辑模型配置"));
 const currentId = computed(() => String(props.profile?.id || "").trim());
 const originalId = computed(() => String(props.profile?.original_id || props.profile?.id || "").trim());
 const canProbe = computed(() => {
@@ -64,6 +69,21 @@ const canProbe = computed(() => {
   return String(draft.base_url || "").trim().length > 0;
 });
 const useModelSelect = computed(() => probedModels.value.length > 0 && !modelManual.value);
+const EFFORT_LABELS = {
+  none: "无",
+  minimal: "最低",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最高",
+};
+const effortOptions = computed(() =>
+  (capability.value?.allowed_efforts || []).map((value) => ({
+    value,
+    label: `${EFFORT_LABELS[value] || value}（${value}）`,
+  })),
+);
 const modelOptions = computed(() =>
   probedModels.value.map((m) => ({ value: m, label: m })),
 );
@@ -79,6 +99,9 @@ function emptyDraft() {
     clear_api_key: false,
     mock: false,
     multimodal_enabled: false,
+    thinking: "enabled",
+    reasoning_effort: "",
+    thinking_budget: null,
   };
 }
 
@@ -96,6 +119,7 @@ function resetFromProps() {
   if (props.mode === "create") {
     Object.assign(draft, emptyDraft());
     draft.id = suggestId();
+    lastCapabilityKey = `${draft.provider}\0${draft.model}`;
     return;
   }
   const src = props.profile || {};
@@ -109,7 +133,52 @@ function resetFromProps() {
     clear_api_key: false,
     mock: !!src.mock,
     multimodal_enabled: !!src.multimodal_enabled,
+    thinking: src.thinking || "enabled",
+    reasoning_effort: src.reasoning_effort || "",
+    thinking_budget: src.thinking_budget ?? null,
   });
+  lastCapabilityKey = `${draft.provider}\0${draft.model}`;
+}
+
+async function loadModelCapabilities() {
+  const provider = String(draft.provider || "").trim();
+  const model = String(draft.model || "").trim();
+  const key = `${provider}\0${model}`;
+  const request = ++capabilityRequest;
+  capability.value = null;
+  capabilityError.value = "";
+  capabilityLoading.value = false;
+  if (!props.open || !provider || !model) return;
+  capabilityLoading.value = true;
+
+  const modelChanged = lastCapabilityKey && lastCapabilityKey !== key;
+  lastCapabilityKey = key;
+  if (modelChanged) {
+    draft.thinking = "enabled";
+    draft.reasoning_effort = "";
+    draft.thinking_budget = null;
+  }
+  try {
+    const result = await getLLMCapabilities(provider, model);
+    if (request !== capabilityRequest) return;
+    capability.value = result;
+    if (!result?.supported) {
+      draft.thinking = "";
+      draft.reasoning_effort = "";
+      draft.thinking_budget = null;
+    } else {
+      if (!result.can_disable_thinking) draft.thinking = "enabled";
+      if (result.thinking_control !== "effort") draft.reasoning_effort = "";
+      if (result.thinking_control !== "budget") draft.thinking_budget = null;
+    }
+    if (result?.thinking_control === "effort" && (modelChanged || !draft.reasoning_effort)) {
+      draft.reasoning_effort = result?.default_effort || draft.reasoning_effort;
+    }
+  } catch (error) {
+    if (request === capabilityRequest) capabilityError.value = error?.message || "暂时无法读取模型能力";
+  } finally {
+    if (request === capabilityRequest) capabilityLoading.value = false;
+  }
 }
 
 function suggestId() {
@@ -149,7 +218,7 @@ async function runProbe() {
   probeState.message = "";
   probeState.ok = false;
   if (!canProbe.value) {
-    probeState.message = "请先填写 Base URL（Mock 模式无需测试）";
+    probeState.message = "请先填写 Base URL（测试模式（Mock）无需测试）";
     return;
   }
   probeState.loading = true;
@@ -219,15 +288,31 @@ function submit() {
     clear_api_key: !!draft.clear_api_key,
     mock: draft.mock || draft.provider === "mock",
     multimodal_enabled: !!draft.multimodal_enabled,
+    thinking: draft.thinking,
+    reasoning_effort: draft.reasoning_effort,
+    thinking_budget: draft.thinking_budget === "" || draft.thinking_budget == null ? null : Number(draft.thinking_budget),
+    clear_reasoning_effort: !draft.reasoning_effort,
+    clear_thinking_budget: draft.thinking_budget === "" || draft.thinking_budget == null,
   });
 }
 
 watch(
   () => props.open,
   (visible) => {
-    if (visible) resetFromProps();
-  }
+    if (visible) {
+      resetFromProps();
+      loadModelCapabilities();
+    } else {
+      capabilityRequest += 1;
+      capability.value = null;
+    }
+  },
+  { immediate: true }
 );
+
+watch(() => [draft.provider, draft.model], () => {
+  if (props.open) loadModelCapabilities();
+});
 
 watch(
   () => [draft.base_url, draft.api_key, draft.clear_api_key],
@@ -303,19 +388,21 @@ watch(
             </div>
 
             <label class="settings-field">
-              <span class="settings-field__label">Provider</span>
+              <span class="settings-field__label">服务商</span>
               <UiSelect
                 v-model="draft.provider"
                 :options="PROVIDER_OPTIONS"
+                aria-label="服务商"
                 @change="applyProviderPreset"
               />
             </label>
             <label class="settings-field">
-              <span class="settings-field__label">Model</span>
+              <span class="settings-field__label">模型</span>
               <UiSelect
                 v-if="useModelSelect"
                 v-model="draft.model"
                 :options="modelOptions"
+                aria-label="模型"
                 @change="onModelSelect"
               />
               <input
@@ -325,6 +412,7 @@ watch(
                 type="text"
                 autocomplete="off"
                 placeholder="模型名称"
+                aria-label="模型"
               />
               <button
                 v-if="probedModels.length"
@@ -337,6 +425,44 @@ watch(
             </label>
           </div>
 
+          <section v-if="capability?.supported" class="llm-profile-modal__reasoning">
+            <h3 class="llm-profile-modal__section-title">思考与推理</h3>
+            <p class="settings-field__hint">此配置的参数会应用于引用它的智能体。</p>
+
+            <label v-if="capability.thinking_control === 'effort'" class="settings-field">
+              <span class="settings-field__label">{{ capability.thinking_secondary_label || "推理强度" }}</span>
+              <UiSelect
+                v-model="draft.reasoning_effort"
+                :options="effortOptions"
+                :aria-label="capability.thinking_secondary_label || '推理强度'"
+              />
+            </label>
+
+            <label v-else-if="capability.thinking_control === 'budget'" class="settings-field">
+              <span class="settings-field__label">{{ capability.thinking_secondary_label || "思考预算（Token）" }}</span>
+              <input
+                v-model.number="draft.thinking_budget"
+                class="settings-field__input"
+                type="number"
+                :min="capability.thinking_budget_min || 1"
+                :max="capability.thinking_budget_max || undefined"
+                placeholder="留空跟随服务默认"
+              />
+            </label>
+
+            <label v-if="capability.can_disable_thinking" class="settings-toggle llm-profile-modal__toggle-row">
+              <input v-model="draft.thinking" type="checkbox" :true-value="'enabled'" :false-value="'disabled'" />
+              <span>{{ capability.thinking_label || "思考" }}</span>
+            </label>
+            <p v-else-if="capability.allowed_efforts?.includes('none')" class="settings-field__hint">
+              可在推理强度中选择关闭。
+            </p>
+            <p v-else class="settings-field__hint">此模型始终启用思考。</p>
+          </section>
+          <p v-else-if="capabilityError" class="settings-field__hint">{{ capabilityError }}</p>
+          <p v-else-if="capabilityLoading" class="settings-field__hint">正在读取模型能力…</p>
+          <p v-else-if="draft.model" class="settings-field__hint">此模型暂无可配置的思考参数。</p>
+
           <label v-if="draft.has_api_key" class="settings-toggle llm-profile-modal__toggle-row">
             <input v-model="draft.clear_api_key" type="checkbox" />
             <span>清除已保存的 API Key</span>
@@ -345,7 +471,7 @@ watch(
           <div class="setup-config-panel__toggles llm-profile-modal__toggles">
             <label class="settings-toggle llm-profile-modal__toggle-row">
               <input v-model="draft.mock" type="checkbox" />
-              <span>Mock 模式</span>
+              <span>测试模式（Mock）</span>
             </label>
             <label class="settings-toggle llm-profile-modal__toggle-row">
               <input v-model="draft.multimodal_enabled" type="checkbox" />
@@ -445,9 +571,6 @@ watch(
   max-width: none;
 }
 
-.llm-profile-modal__body :deep(.ui-select__trigger) {
-  background: var(--color-surface);
-}
 
 .llm-profile-modal__grid {
   display: flex;
@@ -496,6 +619,20 @@ watch(
 
 .llm-profile-modal__probe-msg--ok {
   color: var(--color-text-muted);
+}
+
+.llm-profile-modal__reasoning {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.llm-profile-modal__section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .llm-profile-modal__model-toggle {
