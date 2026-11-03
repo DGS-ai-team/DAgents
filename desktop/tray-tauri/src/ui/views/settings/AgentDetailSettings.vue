@@ -3,6 +3,9 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import UiIcon from "../../components/UiIcon.vue";
+import SettingsSaveBar from "../../components/SettingsSaveBar.vue";
+import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import SettingsSectionHeader from "../../components/SettingsSectionHeader.vue";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
 import McpAgentPanel from "../../components/McpAgentPanel.vue";
@@ -32,12 +35,16 @@ const error = ref("");
 const statusMessage = ref("");
 const showAdvanced = ref(false);
 const activeSection = ref("behavior");
+const visitedSections = ref(new Set(["behavior"]));
 const policyRefreshKey = ref(0);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
 const agentMeta = ref(null);
 const savedMemoryScope = ref("agent");
 const draft = reactive(emptyAgentDraft());
+const savedDraft = ref("");
+const draftSnapshot = () => JSON.stringify(draft);
+const dirty = computed(() => !!savedDraft.value && draftSnapshot() !== savedDraft.value);
 let loadEpoch = 0;
 
 const agentId = computed(() => String(route.params.agentId || "").trim());
@@ -51,14 +58,27 @@ const detailSections = [
 
 function normalizedSection(value) {
   const section = String(value || "").trim();
-  return detailSections.some((item) => item.id === section) ? section : "behavior";
+  const sectionExists = detailSections.some((item) => item.id === section);
+  if (!sectionExists || (section === "autonomy" && agentMeta.value && agentMeta.value.agent_type !== "auto")) return "behavior";
+  return section;
 }
 
 function setActiveSection(section) {
   const next = normalizedSection(section);
-  activeSection.value = next;
+  visitSection(next);
   if (String(route.query.section || "") === next) return;
   void router.replace({ query: { ...route.query, section: next } });
+}
+
+function visitSection(section) {
+  activeSection.value = section;
+  if (!visitedSections.value.has(section)) {
+    visitedSections.value = new Set([...visitedSections.value, section]);
+  }
+}
+
+function sectionIsVisited(section) {
+  return visitedSections.value.has(section);
 }
 
 async function load() {
@@ -83,6 +103,11 @@ async function load() {
     ]);
     if (epoch !== loadEpoch || agentId.value !== requestedAgentId) return;
     agentMeta.value = agent;
+    const initialSection = normalizedSection(route.query.section);
+    visitSection(initialSection);
+    if (String(route.query.section || "") !== initialSection) {
+      void router.replace({ query: { ...route.query, section: initialSection } });
+    }
     const setup = setupResult.ok ? setupResult.data : null;
     setupConfigReady.value = Boolean(setup && typeof setup === "object");
     llmProfiles.value = Array.isArray(setup?.llm?.profiles)
@@ -116,6 +141,7 @@ async function load() {
           : "agent";
       draft.promptMemoryScope = savedMemoryScope.value;
     }
+    savedDraft.value = draftSnapshot();
     const loadErrors = [];
     if (!setupConfigReady.value) {
       loadErrors.push(`无法读取模型与能力目录，已保留 Agent 现有工具组并阻止保存：${setupResult.cause?.message || "配置响应为空"}`);
@@ -185,6 +211,7 @@ async function save() {
     }
     policyRefreshKey.value += 1;
     notifyConfigurationChanged("tools");
+    savedDraft.value = draftSnapshot();
     statusMessage.value = "已保存并应用到该智能体。";
   } catch (e) {
     error.value = e.message || "保存失败";
@@ -216,12 +243,21 @@ function refreshPolicy() {
   policyRefreshKey.value += 1;
 }
 
+function updateDraft(value) {
+  if (value && typeof value === "object") Object.assign(draft, value);
+}
+
 watch(agentId, () => { void load(); });
+watch(draft, () => { if (dirty.value) statusMessage.value = ""; }, { deep: true });
 
 watch(
-  () => route.query.section,
-  (section) => {
-    activeSection.value = normalizedSection(section);
+  [() => route.query.section, () => agentMeta.value?.agent_type],
+  ([section]) => {
+    const next = normalizedSection(section);
+    visitSection(next);
+    if (agentMeta.value && String(section || "") !== next) {
+      void router.replace({ query: { ...route.query, section: next } });
+    }
   },
   { immediate: true },
 );
@@ -240,20 +276,19 @@ onUnmounted(() => stopConfigurationEvents());
 
 <template>
   <div class="settings-page settings-embedded">
-    <header class="settings-page__header">
-      <div class="settings-page__header-main">
-        <h1 class="settings-page__title">
-          {{ agentMeta?.display_name || "智能体配置" }}
-        </h1>
-        <p class="agent-detail__intro">管理行为、工具权限和运行连接。</p>
-      </div>
-      <div class="settings-page__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="backToList">
-          <UiIcon name="arrow-left" :size="15" />
-          返回列表
+    <SettingsPageHeader :title="agentMeta?.display_name || '智能体配置'" description="管理行为、工具权限和运行连接。">
+      <template #back>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          title="返回智能体列表"
+          aria-label="返回智能体列表"
+          @click="backToList"
+        >
+          <UiIcon name="arrow-left" :size="18" />
         </button>
-      </div>
-    </header>
+      </template>
+    </SettingsPageHeader>
 
     <p v-if="loading" class="agent-detail__status">加载中…</p>
     <template v-else>
@@ -274,98 +309,87 @@ onUnmounted(() => stopConfigurationEvents());
 
       <p v-if="error && !agentMeta" class="agent-detail__error" role="alert">{{ error }}</p>
 
-      <section v-if="activeSection === 'autonomy' && agentMeta?.agent_type === 'auto'" class="agent-detail__section agent-detail__section--first">
-        <div class="agent-detail__section-heading"><h2>自动检查与手册</h2><span>管理职责、检查频率和可编辑手册</span></div>
-        <SimplifiedAutoPanel :key="agentId" :agent-id="agentId" />
-        <AgentHandbookPanel :key="`handbook-${agentId}`" :agent-id="agentId" />
+      <section
+        v-if="sectionIsVisited('autonomy') && agentMeta?.agent_type === 'auto'"
+        v-show="activeSection === 'autonomy'"
+        class="agent-detail__section"
+      >
+        <SettingsSectionHeader title="自动检查与手册" description="管理职责、检查频率和可编辑手册" />
+        <div class="agent-detail__resource-stack">
+          <SimplifiedAutoPanel :key="agentId" :agent-id="agentId" />
+          <AgentHandbookPanel :key="`handbook-${agentId}`" :agent-id="agentId" />
+        </div>
       </section>
 
-      <section v-else-if="activeSection === 'behavior'" class="agent-detail__section agent-detail__section--first">
-        <h2 class="agent-detail__section-title">基本设置</h2>
-        <AgentSettingsForm
-          v-model:draft="draft"
-          :llm-profiles="llmProfiles"
-          :available-tool-groups="availableToolGroups"
-          v-model:show-advanced="showAdvanced"
-        />
-        <div class="agent-detail__actions">
-          <div class="agent-detail__actions-copy">
-            <strong>应用基本设置</strong>
-            <span>保存后重新加载当前智能体运行配置</span>
-          </div>
-          <div class="agent-detail__action-buttons">
-            <button
-              type="button"
-              class="btn btn--ghost"
-              :disabled="reloading || saving"
-              title="不改配置，仅重新加载当前已保存的设置"
-              @click="reloadRuntime"
-            >
-              {{ reloading ? "加载中…" : "重新加载" }}
-            </button>
+      <section
+        v-if="sectionIsVisited('behavior')"
+        v-show="activeSection === 'behavior'"
+        class="agent-detail__section"
+      >
+        <SettingsSectionHeader title="基本设置" />
+        <fieldset class="agent-detail__fields" :disabled="saving || loading">
+          <AgentSettingsForm
+            :draft="draft"
+            @update:draft="updateDraft"
+            :llm-profiles="llmProfiles"
+            :available-tool-groups="availableToolGroups"
+            :hide-basic-heading="true"
+            v-model:show-advanced="showAdvanced"
+          />
+        </fieldset>
+        <SettingsSaveBar
+          :status="dirty ? '有未保存的更改' : (statusMessage || '当前智能体设置。')"
+          :error="error"
+          :saving="saving"
+          :disabled="loading || !setupConfigReady || !promptContextReady"
+          :busy="reloading"
+          @save="save"
+        >
           <button
             type="button"
-            class="btn btn--primary"
-            :disabled="saving || loading || !setupConfigReady || !promptContextReady"
-            @click="save"
+            class="btn btn--ghost btn--sm desktop-icon-button"
+            :disabled="reloading || saving"
+            :title="reloading ? '正在重新加载已保存的设置' : '重新加载已保存的设置'"
+            aria-label="重新加载已保存的设置"
+            @click="reloadRuntime"
           >
-              {{ saving ? "保存中…" : "保存并应用" }}
-            </button>
-          </div>
-        </div>
-        <div class="agent-detail__feedback" aria-live="polite">
-          <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
-          <p v-if="error" class="agent-detail__error" role="alert">{{ error }}</p>
-        </div>
+            <UiIcon name="refresh-cw" :size="16" />
+          </button>
+        </SettingsSaveBar>
       </section>
 
-      <section v-else-if="activeSection === 'memory'" class="agent-detail__section agent-detail__section--first">
+      <section
+        v-if="sectionIsVisited('memory')"
+        v-show="activeSection === 'memory'"
+        class="agent-detail__section"
+      >
         <MemoryPanel :agent-id="agentId" :scope="savedMemoryScope" />
       </section>
 
-      <section v-else-if="activeSection === 'resources'" class="agent-detail__section agent-detail__section--first">
-        <div class="agent-detail__section-heading">
-          <div>
-            <span class="agent-detail__section-kicker">运行连接</span>
-            <h2>连接与资源</h2>
-          </div>
-          <span>限定该智能体可以发现和使用的外部能力</span>
-        </div>
+      <section
+        v-if="sectionIsVisited('resources')"
+        v-show="activeSection === 'resources'"
+        class="agent-detail__section"
+      >
+        <SettingsSectionHeader title="连接与资源" description="限定该智能体可以发现和使用的外部能力" />
         <div class="agent-detail__resource-stack">
           <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
           <LinuxAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
         </div>
       </section>
 
-      <section v-else class="agent-detail__section agent-detail__section--first agent-detail__policy">
-        <div class="agent-detail__policy-title">工具审批</div>
-        <div class="agent-detail__policy-body">
-          <PolicyPanel embedded :agent-id="agentId" :refresh-key="policyRefreshKey" @close="() => {}" />
-        </div>
+      <section
+        v-if="sectionIsVisited('policy')"
+        v-show="activeSection === 'policy'"
+        class="agent-detail__section"
+      >
+        <PolicyPanel embedded :agent-id="agentId" :refresh-key="policyRefreshKey" @close="() => {}" />
       </section>
     </template>
   </div>
 </template>
 
 <style scoped>
-.agent-detail__eyebrow,
-.agent-detail__section-kicker {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--color-primary-strong);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.agent-detail__intro {
-  margin: 10px 0 0;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 .agent-detail__subnav {
   display: flex;
   align-items: center;
@@ -407,86 +431,10 @@ onUnmounted(() => stopConfigurationEvents());
 
 .agent-detail__section {
   min-width: 0;
-  padding-top: 24px;
   scroll-margin-top: 64px;
-  border-top: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
 }
 
-.agent-detail__section--first {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.agent-detail__section-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.agent-detail__section-heading h2 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 17px;
-  font-weight: 600;
-}
-
-.agent-detail__section-title { margin: 0 0 10px; color: var(--color-text); font-size: 15px; font-weight: 600; }
-
-.agent-detail__section-heading > span {
-  padding-bottom: 2px;
-  color: var(--color-text-subtle);
-  font-size: 11px;
-}
-
-.agent-detail__actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 24px 0 0;
-  padding: 14px 0 0;
-  border-top: 1px solid var(--color-border);
-}
-
-.agent-detail__actions-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.agent-detail__actions-copy strong {
-  color: var(--color-text);
-  font-size: 12px;
-}
-
-.agent-detail__actions-copy span {
-  color: var(--color-text-subtle);
-  font-size: 11px;
-}
-
-.agent-detail__action-buttons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.agent-detail__feedback {
-  min-height: 0;
-}
-
-.agent-detail__feedback p {
-  margin: 10px 0 0;
-}
-
-.agent-detail__ok {
-  font-size: 12.5px;
-  color: var(--color-success, #3d9a5f);
-}
+.agent-detail__fields { min-width: 0; margin: 0; padding: 0; border: 0; }
 
 .agent-detail__error,
 .agent-detail__status {
@@ -501,60 +449,5 @@ onUnmounted(() => stopConfigurationEvents());
   color: var(--color-text-subtle);
 }
 
-.agent-detail__policy {
-  padding-top: 0;
-}
-
-.agent-detail__resource-stack { display: grid; gap: 22px; }
-
-.agent-detail__policy-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin: 0 0 10px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.agent-detail__policy-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.agent-detail__policy-chevron {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  font-weight: 400;
-}
-
-.agent-detail__policy-body {
-  margin-top: 12px;
-}
-
-@media (max-width: 760px) {
-  .agent-detail__section-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .agent-detail__actions {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .agent-detail__action-buttons {
-    width: 100%;
-  }
-
-  .agent-detail__action-buttons .btn {
-    flex: 1 1 auto;
-  }
-}
+.agent-detail__resource-stack { display: grid; gap: 24px; }
 </style>

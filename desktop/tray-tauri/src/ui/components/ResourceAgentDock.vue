@@ -17,6 +17,7 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   collapsedInToolbar: { type: Boolean, default: false },
   status: { type: String, default: 'offline', validator: value => ['offline', 'pending', 'generating', 'idle'].includes(value) },
+  turnError: { type: String, default: '' },
   agentName: { type: String, default: '当前智能体' },
   canSend: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
@@ -38,11 +39,12 @@ const statusCopy = computed(() => ({
   offline: '离线', pending: '有待处理的审批', generating: props.cancelling ? '正在停止' : '生成中', idle: '空闲',
 }[props.status]))
 const statusIcon = computed(() => ({ offline: errorIcon, pending: warningIcon, generating: loadingIcon, idle: agentIcon }[props.status]))
-const statusLabel = computed(() => `${props.agentName || '当前智能体'}：${statusCopy.value}`)
+const statusLabel = computed(() => props.turnError
+  ? `${props.agentName || '当前智能体'}：${props.turnError}`
+  : `${props.agentName || '当前智能体'}：${statusCopy.value}`)
 const iconStyle = icon => ({ maskImage: `url("${icon}")`, WebkitMaskImage: `url("${icon}")` })
 const showStop = computed(() => props.status === 'generating' || props.canStop)
 const hasReferences = computed(() => props.references.length > 0)
-const actionIcon = computed(() => showStop.value ? stopIcon : sendIcon)
 const actionLabel = computed(() => showStop.value ? (props.cancelling ? '正在停止本轮' : '停止本轮') : '发送消息')
 const actionDisabled = computed(() => showStop.value
   ? !props.canStop || props.cancelling
@@ -129,13 +131,16 @@ onBeforeUnmount(() => {
       </section>
     </Transition>
 
-    <div v-if="!collapsed && references.length" class="dock-references" role="list" aria-label="已引用资源">
+    <div v-if="!collapsed && references.length" class="dock-references" role="list" :aria-label="`${agentName} 的已引用资源`">
+      <span class="dock-reference-target">发送给 {{ agentName }}</span>
       <div v-for="reference in references" :key="reference.id" class="dock-reference" role="listitem" :title="referenceTitle(reference)">
         <UiIcon name="paperclip" :size="14" aria-hidden="true" />
         <span>{{ referenceLabel(reference) }}</span>
         <button type="button" :aria-label="`移除引用：${reference.name}`" title="移除引用" @click.stop="emit('remove-reference', reference.id)"><UiIcon name="close" :size="13" /></button>
       </div>
     </div>
+
+    <p v-if="turnError && !collapsed" class="dock-turn-error" role="alert">{{ turnError }}</p>
 
     <Transition name="dock-bar" mode="out-in" @after-enter="focusVisibleBarControl">
       <form v-if="!collapsed" key="expanded" id="resource-agent-dock-input" class="dock-input-surface" @submit.prevent="submit">
@@ -152,13 +157,15 @@ onBeforeUnmount(() => {
         <button v-if="failedDraft" type="button" class="dock-restore" :disabled="restoreDisabled" aria-label="恢复失败消息" title="恢复失败消息" @click="emit('restore')">恢复</button>
         <button ref="toggleButton" type="button" class="dock-expand-toggle" :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'" :title="expanded ? '收起消息区' : status === 'pending' ? '展开消息区，查看待审批请求' : '展开消息区'" aria-controls="resource-agent-dock-details" :aria-expanded="expanded" @click="setExpanded(!expanded)"><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
         <button type="button" class="dock-collapse-toggle" aria-label="收起快速消息栏" title="收起消息栏" aria-expanded="true" @click="setCollapsed(true)"><span class="icon-mask" :style="iconStyle(chevronDownIcon)" aria-hidden="true"></span></button>
-        <button :type="showStop ? 'button' : 'submit'" class="dock-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask" :style="iconStyle(actionIcon)" aria-hidden="true"></span></button>
+        <button :type="showStop ? 'button' : 'submit'" class="dock-action composer-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask composer-action__send" :style="iconStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask composer-action__stop" :style="iconStyle(stopIcon)" aria-hidden="true"></span></button>
       </form>
       <button v-else-if="!collapsedInToolbar" key="collapsed" ref="collapsedToggle" type="button" class="dock-collapsed-toggle" :aria-label="`${statusLabel}；展开快速消息栏`" title="展开快速消息栏" :aria-expanded="false" @click="setCollapsed(false)">
         <span class="icon-mask dock-status-icon" :class="`is-${status}`" aria-hidden="true" :style="iconStyle(statusIcon)"></span>
         <span class="icon-mask dock-collapsed-chevron" :style="iconStyle(chevronUpIcon)" aria-hidden="true"></span>
       </button>
-      <span v-else key="collapsed-in-toolbar" class="dock-collapsed-placeholder" aria-hidden="true"></span>
+      <span v-else key="collapsed-in-toolbar" class="dock-collapsed-placeholder" :class="{ 'has-error': turnError }" :title="turnError || undefined" :aria-label="turnError || undefined" :aria-hidden="!turnError" role="alert">
+        <span v-if="turnError" class="dock-error-compact">本轮失败</span>
+      </span>
     </Transition>
   </aside>
 </template>

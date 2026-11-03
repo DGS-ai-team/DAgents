@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  applyRemoteWorkerEvent,
   childProgressForTool,
+  currentRemoteWorkerEventVersion,
   onChildCreated,
   onChildFinished,
   onChildProgress,
   resetRemoteWorkers,
+  replaceChildrenFromHydrate,
+  setRemoteWorkerParent,
 } from "./remoteWorkers.js";
 
 describe("remote child agent progress", () => {
   beforeEach(() => {
     resetRemoteWorkers();
+    setRemoteWorkerParent("parent-1");
   });
 
   it("keeps progress associated with the parent tool call", () => {
@@ -35,6 +40,22 @@ describe("remote child agent progress", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].progress.currentTool).toBe("bash_run");
     expect(rows[0].progress.turnCount).toBe(2);
+  });
+
+  it("projects Node child lifecycle events through the same state as hydrate", () => {
+    expect(applyRemoteWorkerEvent("temporary_agent_created", {
+      child_agent_id: "child-1", tool_call_id: "call-1", status: "creating", revision: 1,
+    })).toBe(true);
+    applyRemoteWorkerEvent("temporary_agent_progress", {
+      child_agent_id: "child-1", tool_call_id: "call-1", status: "active", phase: "tool_executing", revision: 2,
+    });
+    expect(childProgressForTool("call-1")[0].progress.phase).toBe("tool_executing");
+
+    applyRemoteWorkerEvent("temporary_agent_cancelled", {
+      child_agent_id: "child-1", tool_call_id: "call-1", revision: 3,
+    });
+    expect(childProgressForTool("call-1")[0].progress.status).toBe("cancelled");
+    expect(applyRemoteWorkerEvent("unrelated", {})).toBe(false);
   });
 
   it("ignores stale progress after a refresh/reconnect ordering race", () => {
@@ -91,5 +112,51 @@ describe("remote child agent progress", () => {
 
     onChildFinished({ child_agent_id: "child-1", status: "completed", summary: "done" });
     expect(childProgressForTool("call-1")[0].progress.recentTools).toHaveLength(2);
+  });
+
+  it("uses hydrate snapshots as the owner-scoped authority, including empty terminal snapshots", () => {
+    replaceChildrenFromHydrate([
+      { child_agent_id: "child-1", tool_call_id: "call-1", status: "active", revision: 2 },
+    ], "parent-1");
+    expect(childProgressForTool("call-1")).toHaveLength(1);
+
+    replaceChildrenFromHydrate([
+      { child_agent_id: "child-1", tool_call_id: "call-1", status: "completed", revision: 3 },
+    ], "parent-1");
+    expect(childProgressForTool("call-1")[0].progress.status).toBe("completed");
+
+    replaceChildrenFromHydrate([], "parent-1");
+    expect(childProgressForTool("call-1")).toEqual([]);
+  });
+
+  it("does not let an old Agent snapshot repopulate the current Agent or roll back newer SSE", () => {
+    onChildProgress({ child_agent_id: "child-1", tool_call_id: "call-1", status: "active", phase: "tool_executing", revision: 5 });
+    replaceChildrenFromHydrate([
+      { child_agent_id: "child-1", tool_call_id: "call-1", status: "creating", revision: 4 },
+    ], "parent-1");
+    expect(childProgressForTool("call-1")[0].progress.revision).toBe(5);
+
+    setRemoteWorkerParent("parent-2");
+    replaceChildrenFromHydrate([
+      { child_agent_id: "child-1", tool_call_id: "call-old", status: "active", revision: 7 },
+    ], "parent-1");
+    expect(childProgressForTool("call-1")).toEqual([]);
+    expect(childProgressForTool("call-old")).toEqual([]);
+  });
+
+  it("clears omitted active children unless their lifecycle event arrived after hydrate began", () => {
+    onChildProgress({ child_agent_id: "child-1", tool_call_id: "call-1", status: "active", revision: 2 });
+    const snapshotStart = currentRemoteWorkerEventVersion();
+    replaceChildrenFromHydrate([], "parent-1", snapshotStart);
+    expect(childProgressForTool("call-1")).toEqual([]);
+
+    const nextSnapshotStart = currentRemoteWorkerEventVersion();
+    onChildProgress({ child_agent_id: "child-2", tool_call_id: "call-2", status: "active", revision: 1 });
+    replaceChildrenFromHydrate([], "parent-1", nextSnapshotStart);
+    expect(childProgressForTool("call-2")).toHaveLength(1);
+
+    const reconciledStart = currentRemoteWorkerEventVersion();
+    replaceChildrenFromHydrate([], "parent-1", reconciledStart);
+    expect(childProgressForTool("call-2")).toEqual([]);
   });
 });

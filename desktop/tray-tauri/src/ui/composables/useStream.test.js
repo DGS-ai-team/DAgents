@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { buildStream } from "./useStream.js";
 import { toolStepIsActiveInGroup } from "../utils/toolUserLabel.js";
+import { applyTurnState, resetTurnState } from "../stores/turnState.js";
 
 function entry(id, kind, extra = {}) {
   return { id, kind, ...extra };
 }
+
+beforeEach(() => resetTurnState());
 
 describe("buildStream", () => {
   it("keeps a file-only user entry visible", () => {
@@ -32,6 +35,24 @@ describe("buildStream", () => {
 
     expect(items.filter((item) => item.kind === "tool_step")).toHaveLength(2);
     expect(items.filter((item) => item.kind === "tool_step").every((item) => item.resultEntry)).toBe(true);
+  });
+
+  it("keeps a tool row key stable when its result arrives", () => {
+    const call = entry(2, "tool_call", {
+      blockId: "call-stable",
+      data: { tool_call_id: "call-stable", tool_name: "read_file", arguments: "{}" },
+    });
+    const running = buildStream([call]).find((item) => item.kind === "tool_step");
+    const settled = buildStream([
+      call,
+      entry(3, "tool_result", {
+        blockId: "call-stable",
+        data: { tool_call_id: "call-stable", tool_name: "read_file", status: "succeeded" },
+      }),
+    ]).find((item) => item.kind === "tool_step");
+
+    expect(settled.key).toBe(running.key);
+    expect(settled.resultEntry.data.status).toBe("succeeded");
   });
 
   it("does not keep the final failed bash step active when a prior active hint lingers", () => {
@@ -81,5 +102,24 @@ describe("buildStream", () => {
     expect(items[0].kind).toBe("tool_step");
     expect(items[0].callEntry.partial).toBe(true);
     expect(items[0].executionHint).toBeUndefined();
+  });
+
+  it("restores a running tool from the hydrated execution projection", () => {
+    applyTurnState({
+      authority: "turn_coordinator",
+      phase: "tool_executing",
+      tool_executions: [{ tool_call_id: "call-hydrated", status: "running" }],
+    }, { source: "hydrate" });
+
+    const [step] = buildStream([
+      entry(1, "tool_call", {
+        blockId: "call-hydrated",
+        data: { tool_call_id: "call-hydrated", tool_name: "bash_run", arguments: '{"command":"sleep 1"}' },
+      }),
+    ]);
+
+    expect(step.kind).toBe("tool_step");
+    expect(step.executionHint).toBe("active");
+    expect(toolStepIsActiveInGroup(step)).toBe(true);
   });
 });

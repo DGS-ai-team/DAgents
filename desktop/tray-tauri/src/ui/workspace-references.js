@@ -86,6 +86,57 @@ export function formatWorkspaceReferencesMessage({ text, references } = {}) {
   return `${intro}\n\n---\n引用的工作区内容：\n\n${formatted}`
 }
 
+export function composeWorkspaceMessage({ text, images = [], files = [], references = [] } = {}) {
+  const normalizedReferences = (Array.isArray(references) ? references : []).map(reference => createWorkspaceReference(reference))
+  const imageByUrl = new Map()
+  for (const image of Array.isArray(images) ? images : []) {
+    if (image?.url) imageByUrl.set(image.url, image)
+  }
+  const fileByPath = new Map()
+  for (const file of Array.isArray(files) ? files : []) {
+    if (file?.path) fileByPath.set(file.path, { path: file.path, name: file.name || '' })
+  }
+  for (const reference of normalizedReferences) {
+    if (reference.imageUrl && !imageByUrl.has(reference.imageUrl)) {
+      imageByUrl.set(reference.imageUrl, { name: reference.name, url: reference.imageUrl })
+    }
+    if (reference.fileRef && !fileByPath.has(reference.fileRef)) {
+      fileByPath.set(reference.fileRef, { path: reference.fileRef, name: reference.name })
+    }
+  }
+  return {
+    text: formatWorkspaceReferencesMessage({ text, references: normalizedReferences }),
+    images: [...imageByUrl.values()],
+    files: [...fileByPath.values()],
+  }
+}
+
+export function hasWorkspaceMessageContent({ text = '', images = [], files = [], references = [] } = {}) {
+  return Boolean(String(text || '').trim() || images.length || files.length || references.length)
+}
+
+export async function dispatchWorkspaceMessage({ agentId, text, images = [], files = [], references = [] } = {}, submit, onPrepared = () => {}) {
+  const message = composeWorkspaceMessage({ text, images, files, references })
+  const fileReferences = message.files.map(file => ({ path: String(file.path || ''), name: String(file.name || '') }))
+  const contentParts = message.images.map(image => ({ type: 'image_url', image_url: { url: image.url } }))
+  onPrepared(message)
+  await submit(agentId, message.text, contentParts, fileReferences)
+  return message
+}
+
+export function workspaceReferencesForAgent(byAgent = {}, agentId = '') {
+  return byAgent?.[agentId] || []
+}
+
+export function settleWorkspaceReferences(byAgent = {}, agentId = '', references = [], succeeded = false) {
+  if (!succeeded || !agentId || !references.length) return byAgent
+  const sentIds = new Set(references.map(reference => reference.id))
+  return {
+    ...byAgent,
+    [agentId]: workspaceReferencesForAgent(byAgent, agentId).filter(reference => !sentIds.has(reference.id)),
+  }
+}
+
 export function textRangeAnchor(source, start, end, label = '文本选区') {
   const text = String(source || '')
   const from = Math.max(0, Math.min(text.length, Number(start) || 0))

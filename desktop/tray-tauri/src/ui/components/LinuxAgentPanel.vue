@@ -1,9 +1,13 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import * as api from "../api/node.js";
+import SettingsSectionHeader from "./SettingsSectionHeader.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({ agentId: { type: String, required: true } });
 const emit = defineEmits(["changed"]);
+const router = useRouter();
 const channels = ref([]);
 const selected = ref(new Set());
 const bindings = ref({});
@@ -11,6 +15,13 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const status = ref("");
+
+function openGlobalLinuxSettings() {
+  void router.push({
+    path: "/settings/linux-channels",
+    query: { returnAgentId: props.agentId, returnSection: "resources", create: "1" },
+  });
+}
 
 const selectedCount = computed(() => selected.value.size);
 
@@ -103,10 +114,23 @@ onMounted(() => void load());
 
 <template>
   <section class="linux-agent-panel">
-    <div class="linux-agent-panel__head"><div><h2 class="linux-agent-panel__title">Linux 通道</h2><p class="linux-agent-panel__desc">选择这个智能体可以使用的远程终端；可同时打开的终端数由通道配置决定。</p></div><button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button></div>
+    <SettingsSectionHeader
+      :level="3"
+      title="Linux 通道"
+      description="选择这个智能体可以使用的远程终端；可同时打开的终端数由通道配置决定。"
+    >
+      <template #actions>
+        <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" :disabled="loading" aria-label="刷新 Linux 通道绑定" title="刷新 Linux 通道绑定" @click="load">
+          <UiIcon name="refresh-cw" :size="16" />
+        </button>
+      </template>
+    </SettingsSectionHeader>
     <p v-if="loading" class="linux-agent-panel__muted">加载中…</p>
     <p v-else-if="error" class="linux-agent-panel__error">{{ error }}</p>
-    <p v-else-if="!channels.length" class="linux-agent-panel__muted">尚未配置 Linux 通道，请先到“设置 › Linux 通道”添加。</p>
+    <div v-else-if="!channels.length" class="linux-agent-panel__empty">
+      <p class="linux-agent-panel__muted">尚未配置 SSH 通道。创建通道后，还需在此处单独授权给当前智能体。</p>
+      <button type="button" class="btn btn--ghost btn--sm" @click="openGlobalLinuxSettings">创建 SSH 通道</button>
+    </div>
     <div v-else class="linux-agent-panel__list">
       <div v-for="channel in channels" :key="channel.channel_id" class="linux-agent-panel__row">
         <input class="settings-switch-input" type="checkbox" :checked="selected.has(channel.channel_id)" :disabled="saving || channel.enabled === false" @change="toggle(channel.channel_id)" />
@@ -120,7 +144,90 @@ onMounted(() => void load());
 </template>
 
 <style scoped>
-.linux-agent-panel{margin-top:20px;padding-top:16px;border-top:1px solid color-mix(in srgb,var(--color-border) 80%,transparent)}.linux-agent-panel__head,.linux-agent-panel__actions{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.linux-agent-panel__title{margin:0;font-size:15px}.linux-agent-panel__desc,.linux-agent-panel__muted,.linux-agent-panel__error,.linux-agent-panel__ok{margin:6px 0 0;font-size:12px;color:var(--color-text-subtle)}.linux-agent-panel__error{color:var(--color-danger)}.linux-agent-panel__ok{color:var(--color-success,#3d9a5f)}.linux-agent-panel__list{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px;margin-top:12px}.linux-agent-panel__row{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--color-border);border-radius:8px}.linux-agent-panel__main{min-width:0;flex:1}.linux-agent-panel__row small{display:block;margin-top:4px;color:var(--color-text-subtle);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.linux-agent-panel__limit{display:flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--color-text-subtle);font-size:11px}.linux-agent-panel__limit input{width:58px;padding:5px 6px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface,#fff);color:var(--color-text);font:inherit}.linux-agent-panel__actions{align-items:center;margin-top:12px}
-.linux-agent-panel__head > div:first-child { min-width: 0; }
-.linux-agent-panel__head > button { flex: 0 0 auto; white-space: nowrap; }
+.linux-agent-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.linux-agent-panel__muted,
+.linux-agent-panel__error,
+.linux-agent-panel__ok {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--color-text-subtle);
+}
+
+.linux-agent-panel > .linux-agent-panel__muted,
+.linux-agent-panel > .linux-agent-panel__error,
+.linux-agent-panel > .linux-agent-panel__list {
+  margin-top: 0;
+}
+
+.linux-agent-panel__error {
+  color: var(--color-danger);
+}
+
+.linux-agent-panel__empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.linux-agent-panel__ok {
+  color: var(--color-success, #3d9a5f);
+}
+
+.linux-agent-panel__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 8px;
+  margin-top: 0;
+}
+
+.linux-agent-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.linux-agent-panel__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.linux-agent-panel__row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linux-agent-panel__limit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+}
+
+.linux-agent-panel__limit input {
+  width: 58px;
+  padding: 5px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  font: inherit;
+}
 </style>

@@ -20,6 +20,9 @@ const meta = reactive({
   description: "",
 });
 const draft = reactive(emptyAgentDraft());
+function updateDraft(value) {
+  if (value && typeof value === "object") Object.assign(draft, value);
+}
 
 /** 生成符合后端 ValidateID 的唯一模板 id（用户无需填写）。 */
 function generateTemplateId(displayName) {
@@ -141,7 +144,8 @@ watch(
           </section>
 
           <AgentSettingsForm
-            v-model:draft="draft"
+            :draft="draft"
+            @update:draft="updateDraft"
             :llm-profiles="llmProfiles"
             :show-workspace="false"
             v-model:show-advanced="showAdvanced"

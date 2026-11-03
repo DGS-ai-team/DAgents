@@ -23,6 +23,7 @@ type LLMConfigRecord struct {
 	Mock              bool
 	Thinking          string
 	ReasoningEffort   string
+	ThinkingBudget    *int
 	MultimodalEnabled bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -80,12 +81,39 @@ CREATE TABLE IF NOT EXISTS llm_configs (
   mock INTEGER NOT NULL DEFAULT 0,
   thinking TEXT NOT NULL DEFAULT '',
   reasoning_effort TEXT NOT NULL DEFAULT '',
+  thinking_budget INTEGER,
   multimodal_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_llm_configs_sort ON llm_configs(sort_order, id);
 `)
+	if err != nil {
+		return err
+	}
+	rows, err := s.db.Query(`PRAGMA table_info(llm_configs)`)
+	if err != nil {
+		return err
+	}
+	hasBudget := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "thinking_budget" {
+			hasBudget = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !hasBudget {
+		_, err = s.db.Exec(`ALTER TABLE llm_configs ADD COLUMN thinking_budget INTEGER`)
+	}
 	return err
 }
 
@@ -96,7 +124,7 @@ func (s *LLMConfigStore) List(ctx context.Context) ([]LLMConfigRecord, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, sort_order, provider, base_url, model, api_key_ciphertext, mock,
-       thinking, reasoning_effort, multimodal_enabled, created_at, updated_at
+       thinking, reasoning_effort, thinking_budget, multimodal_enabled, created_at, updated_at
 FROM llm_configs
 ORDER BY sort_order ASC, id ASC`)
 	if err != nil {
@@ -109,7 +137,7 @@ ORDER BY sort_order ASC, id ASC`)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rec)
+		out = append(out, NormalizeLLMConfigRecord(rec))
 	}
 	return out, rows.Err()
 }
@@ -122,9 +150,13 @@ func (s *LLMConfigStore) Get(ctx context.Context, id string) (LLMConfigRecord, e
 	id = strings.TrimSpace(id)
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, sort_order, provider, base_url, model, api_key_ciphertext, mock,
-       thinking, reasoning_effort, multimodal_enabled, created_at, updated_at
+       thinking, reasoning_effort, thinking_budget, multimodal_enabled, created_at, updated_at
 FROM llm_configs WHERE id = ?`, id)
-	return scanLLMConfig(row)
+	rec, err := scanLLMConfig(row)
+	if err != nil {
+		return LLMConfigRecord{}, err
+	}
+	return NormalizeLLMConfigRecord(rec), nil
 }
 
 // HasAPIKey 是否已存密文 key。
@@ -223,10 +255,10 @@ func (s *LLMConfigStore) ReplaceAll(ctx context.Context, records []LLMConfigReco
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO llm_configs (
   id, sort_order, provider, base_url, model, api_key_ciphertext, mock,
-  thinking, reasoning_effort, multimodal_enabled, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  thinking, reasoning_effort, thinking_budget, multimodal_enabled, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, i, provider, strings.TrimSpace(rec.BaseURL), strings.TrimSpace(rec.Model),
-			cipherText, mockInt, strings.TrimSpace(rec.Thinking), strings.TrimSpace(rec.ReasoningEffort),
+			cipherText, mockInt, strings.TrimSpace(rec.Thinking), strings.TrimSpace(rec.ReasoningEffort), rec.ThinkingBudget,
 			mm, created.UTC().Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
 		)
 		if err != nil {
@@ -259,7 +291,7 @@ func scanLLMConfig(row llmConfigScanner) (LLMConfigRecord, error) {
 	)
 	err := row.Scan(
 		&rec.ID, &rec.SortOrder, &rec.Provider, &rec.BaseURL, &rec.Model, &rec.APIKeyCiphertext,
-		&mock, &rec.Thinking, &rec.ReasoningEffort, &mm, &created, &updated,
+		&mock, &rec.Thinking, &rec.ReasoningEffort, &rec.ThinkingBudget, &mm, &created, &updated,
 	)
 	if err != nil {
 		return LLMConfigRecord{}, err

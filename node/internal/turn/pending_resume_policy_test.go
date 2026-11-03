@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -55,21 +54,20 @@ func TestResumeApprovedToolIsRejectedWhenPolicyDenies(t *testing.T) {
 	}
 }
 
-func TestQueuedAutoToolRevokeEntersApprovalBeforeExecution(t *testing.T) {
+func TestQueuedAutoToolPolicyChangeEntersApprovalBeforeExecution(t *testing.T) {
 	root := t.TempDir()
 	reg := testRegistryAt(t, root)
-	revoked := false
-	grant := policy.Grant{ID: "g", Tools: []string{"write_file"}, Workspace: root, ExpiresAt: time.Now().Add(time.Hour)}
-	allow := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeRule}, Grants: []policy.Grant{grant}})
+	policyUpdated := false
+	allow := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeNever}})
 	orch := NewOrchestrator("agent-a", root, stream.NewHub(8, logx.Discard()), &llm.MockClient{}, reg, allow, SkillAccess{}, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DuplicateConfig{Enabled: boolPtr(false)}, ToolResult: hooks.DefaultToolResultConfig(root)}, logx.Discard())
 	raw, _ := json.Marshal(map[string]any{"path": filepath.Join(root, "queued.txt"), "content": "no"})
 	call := llm.ToolCall{ID: "call-auto", Type: "function", Function: llm.ToolCallFunction{Name: "write_file", Arguments: string(raw)}}
 	if got := allow.DecideTool("write_file", map[string]any{"path": filepath.Join(root, "queued.txt")}); got != policy.ActionAuto {
-		t.Fatalf("grant was not auto before revoke: %s", got)
+		t.Fatalf("initial policy was not auto before update: %s", got)
 	}
 	orch.executionGuard = executionGuardFunc(func(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
-		if !revoked {
-			revoked = true
+		if !policyUpdated {
+			policyUpdated = true
 			orch.SetPolicy(policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"write_file": policy.ModeRule}}))
 		}
 		return orch.evaluateToolBeforeEach(ctx, sessionID, history, tc)
@@ -77,7 +75,7 @@ func TestQueuedAutoToolRevokeEntersApprovalBeforeExecution(t *testing.T) {
 	history := []llm.Message{{Role: "assistant", ToolCalls: []llm.ToolCall{call}}}
 	pending, state, err := orch.processToolCalls(context.Background(), "session-a", &history, []llm.ToolCall{call})
 	if err != nil || state != "awaiting_hitl" || pending == nil {
-		t.Fatalf("revoked auto call did not enter approval: state=%s pending=%+v err=%v", state, pending, err)
+		t.Fatalf("policy-updated auto call did not enter approval: state=%s pending=%+v err=%v", state, pending, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "queued.txt")); !os.IsNotExist(err) {
 		t.Fatalf("queued write landed: %v", err)

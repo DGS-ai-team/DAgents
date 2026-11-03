@@ -58,8 +58,17 @@ func (s *Server) handleGetAgentModelView(w http.ResponseWriter, r *http.Request)
 			view.MultimodalEnabled = profile.MultimodalEnabled
 			view.Thinking = profile.Thinking
 			view.ReasoningEffort = profile.ReasoningEffort
-			view.ThinkingSupported = llm.ThinkingSupported(profile.Provider)
-			view.ThinkingControl, view.ThinkingLabel, view.ThinkingSecondaryLabel = llm.ThinkingControlMetadata(profile.Provider, profile.Model)
+			view.ThinkingSupported = llm.ThinkingSupported(profile.Provider, profile.Model)
+			capability := llm.ModelCapabilities(profile.Provider, profile.Model)
+			view.ThinkingControl = capability.Control
+			view.ThinkingLabel = capability.Label
+			view.ThinkingSecondaryLabel = capability.SecondaryLabel
+			view.AllowedEfforts = capability.AllowedEfforts
+			view.DefaultEffort = capability.DefaultEffort
+			view.CanDisableThinking = capability.CanDisable
+			view.ThinkingBudgetMin = capability.BudgetMin
+			view.ThinkingBudgetMax = capability.BudgetMax
+			view.ThinkingBudget = profile.ThinkingBudget
 			break
 		}
 	}

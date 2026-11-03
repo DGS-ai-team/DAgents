@@ -13,18 +13,22 @@ type LLMProfileSettings struct {
 	ID string `json:"id"`
 	// OriginalID is write-only PATCH metadata used when renaming a profile so
 	// its stored secret can move with it. It is never populated in GET views.
-	OriginalID        string `json:"original_id,omitempty"`
-	Provider          string `json:"provider"`
-	BaseURL           string `json:"base_url"`
-	Model             string `json:"model"`
-	APIKeyEnv         string `json:"api_key_env,omitempty"`
-	APIKey            string `json:"api_key,omitempty"` // 仅 PATCH 写入；GET 不回传明文
-	HasAPIKey         bool   `json:"has_api_key"`
-	ClearAPIKey       bool   `json:"clear_api_key,omitempty"`
-	Mock              bool   `json:"mock"`
-	Thinking          string `json:"thinking,omitempty"`
-	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
-	MultimodalEnabled bool   `json:"multimodal_enabled"`
+	OriginalID           string `json:"original_id,omitempty"`
+	Provider             string `json:"provider"`
+	BaseURL              string `json:"base_url"`
+	Model                string `json:"model"`
+	APIKeyEnv            string `json:"api_key_env,omitempty"`
+	APIKey               string `json:"api_key,omitempty"` // 仅 PATCH 写入；GET 不回传明文
+	HasAPIKey            bool   `json:"has_api_key"`
+	ClearAPIKey          bool   `json:"clear_api_key,omitempty"`
+	Mock                 bool   `json:"mock"`
+	Thinking             string `json:"thinking,omitempty"`
+	ClearThinking        bool   `json:"clear_thinking,omitempty"`
+	ReasoningEffort      string `json:"reasoning_effort,omitempty"`
+	ClearReasoningEffort bool   `json:"clear_reasoning_effort,omitempty"`
+	ThinkingBudget       *int   `json:"thinking_budget,omitempty"`
+	ClearThinkingBudget  bool   `json:"clear_thinking_budget,omitempty"`
+	MultimodalEnabled    bool   `json:"multimodal_enabled"`
 }
 
 // LLMSettings LLM 连接配置（支持多配置；列表顺序中第一条为默认）。
@@ -332,7 +336,7 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	if patch.Features != nil {
 		applyFeaturesPatch(&out, *patch.Features)
 		// 功能开关里的 multimodal 写回当前 LLM 档案。
-		out.SyncActiveProfileFromFlat()
+		out.SyncActiveProfileMultimodalFromFlat()
 	}
 	if patch.Compression != nil {
 		if err := applyCompressionPatch(&out, *patch.Compression); err != nil {
@@ -404,17 +408,27 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 				return fmt.Errorf("llm config id is required")
 			}
 			prevThinking, prevEffort := "", ""
+			var prevBudget *int
 			if prev, ok := cfg.LLM.GetProfile(id); ok {
 				prevThinking = prev.Thinking
 				prevEffort = prev.ReasoningEffort
+				prevBudget = prev.ThinkingBudget
+			}
+			modelChanged := false
+			if prev, ok := cfg.LLM.GetProfile(id); ok {
+				modelChanged = !strings.EqualFold(strings.TrimSpace(prev.Provider), strings.TrimSpace(item.Provider)) || strings.TrimSpace(prev.Model) != strings.TrimSpace(item.Model)
 			}
 			thinking := strings.TrimSpace(item.Thinking)
-			if thinking == "" {
+			if thinking == "" && !item.ClearThinking && !modelChanged {
 				thinking = prevThinking
 			}
 			effort := strings.TrimSpace(item.ReasoningEffort)
-			if effort == "" {
+			if effort == "" && !item.ClearReasoningEffort && !modelChanged {
 				effort = prevEffort
+			}
+			budget := item.ThinkingBudget
+			if budget == nil && !item.ClearThinkingBudget && !modelChanged {
+				budget = prevBudget
 			}
 			if err := upsertProfileIntoMap(next, id, config.LLMProfileConfig{
 				Provider:          item.Provider,
@@ -424,6 +438,7 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 				Mock:              item.Mock,
 				Thinking:          thinking,
 				ReasoningEffort:   effort,
+				ThinkingBudget:    budget,
 				MultimodalEnabled: boolPtr(item.MultimodalEnabled),
 			}); err != nil {
 				return err
@@ -496,6 +511,7 @@ func llmProfilesFromConfig(cfg *config.Config) []LLMProfileSettings {
 			Mock:              p.Mock,
 			Thinking:          p.Thinking,
 			ReasoningEffort:   p.ReasoningEffort,
+			ThinkingBudget:    p.ThinkingBudget,
 			MultimodalEnabled: config.ProfileMultimodalEnabled(p),
 		})
 	}

@@ -71,6 +71,7 @@ func (c *Config) snapshotLLMProfile() LLMProfileConfig {
 		Mock:            c.LLM.Mock,
 		Thinking:        c.LLM.Thinking,
 		ReasoningEffort: c.LLM.ReasoningEffort,
+		ThinkingBudget:  intPtrCopy(c.LLM.ThinkingBudget),
 	}
 	enabled := c.MultimodalEnabled()
 	p.MultimodalEnabled = &enabled
@@ -90,6 +91,7 @@ func (l *LLMConfig) applyProfileToFlat(id string) {
 	l.Mock = p.Mock
 	l.Thinking = p.Thinking
 	l.ReasoningEffort = p.ReasoningEffort
+	l.ThinkingBudget = intPtrCopy(p.ThinkingBudget)
 }
 
 // applyLLMProfile 将档案复制到 LLM 顶层快照，并同步 multimodal.enabled。
@@ -109,6 +111,14 @@ func (c *Config) applyLLMProfile(id string) {
 func boolPtrCopy(v bool) *bool {
 	b := v
 	return &b
+}
+
+func intPtrCopy(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	n := *v
+	return &n
 }
 
 // ProfileIDs 返回配置 id 列表：优先 ProfileOrder，否则按字母序。
@@ -252,20 +262,23 @@ func (c *Config) SetActiveLLMProfile(id string) error {
 	return nil
 }
 
-// SyncActiveProfileFromFlat 把顶层快照（含 multimodal）写回当前 active 档案。
-func (c *Config) SyncActiveProfileFromFlat() {
+// SyncActiveProfileMultimodalFromFlat updates only the active profile's
+// multimodal flag from the feature settings. Model fields remain profile-owned.
+func (c *Config) SyncActiveProfileMultimodalFromFlat() {
 	if c == nil {
 		return
 	}
 	id := strings.TrimSpace(c.LLM.Active)
-	if id == "" {
-		id = defaultLLMProfileID
-		c.LLM.Active = id
+	if id == "" || c.LLM.Profiles == nil {
+		return
 	}
-	if c.LLM.Profiles == nil {
-		c.LLM.Profiles = make(map[string]LLMProfileConfig)
+	profile, ok := c.LLM.Profiles[id]
+	if !ok {
+		return
 	}
-	c.LLM.Profiles[id] = c.snapshotLLMProfile()
+	enabled := c.MultimodalEnabled()
+	profile.MultimodalEnabled = &enabled
+	c.LLM.Profiles[id] = profile
 }
 
 func validateLLMProfile(p LLMProfileConfig) error {
@@ -300,6 +313,7 @@ func normalizeLLMProfile(p LLMProfileConfig) LLMProfileConfig {
 		Mock:            mock,
 		Thinking:        strings.TrimSpace(p.Thinking),
 		ReasoningEffort: strings.TrimSpace(p.ReasoningEffort),
+		ThinkingBudget:  intPtrCopy(p.ThinkingBudget),
 	}
 	v := p.MultimodalEnabled != nil && *p.MultimodalEnabled
 	out.MultimodalEnabled = &v

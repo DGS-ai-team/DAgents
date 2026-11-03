@@ -3,7 +3,6 @@ package policy
 
 import (
 	"strings"
-	"time"
 )
 
 // Action 为编排器使用的工具执行策略结果。
@@ -19,7 +18,6 @@ const (
 type Engine struct {
 	toolModes  map[string]ApprovalMode
 	shellModes map[ShellType]map[string]ApprovalMode
-	grants     []Grant
 	policyDir  string
 }
 
@@ -38,12 +36,6 @@ func (e *Engine) DecideTool(toolName string, toolArgs map[string]any) Action {
 	if toolMode == ModeDeny {
 		return ActionDeny
 	}
-	for _, grant := range e.grants {
-		if grant.Allows(name, toolArgs, time.Now()) {
-			return ActionAuto
-		}
-	}
-
 	switch toolMode {
 	case ModeAlways:
 		return ActionRequireApproval

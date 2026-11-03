@@ -29,7 +29,7 @@ flowchart TB
 | `turn` | 识别管理工具；创建和取消按普通 ToolCall → ToolResult 接回当前父 Turn |
 | `RelayHub` | 将子 runtime 的进度、工具和审批事件关联到父 session |
 | `store` | 持久化 ChildRun 控制面快照，不保存子 Agent 完整 transcript |
-| Web UI | 消费 SSE 实时进度，并用 hydrate/API 快照恢复卡片 |
+| Desktop | 消费 SSE 实时进度，并用 hydrate/API 快照恢复卡片 |
 
 ## 文件阅读顺序
 

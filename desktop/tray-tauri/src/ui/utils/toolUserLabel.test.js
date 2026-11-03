@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
-  bashControlModeForStep,
   resolveToolStepPhase,
   toolStepIsActiveInGroup,
   toolStepIsInProgress,
@@ -8,6 +7,7 @@ import {
   toolStepPurpose,
   toolStepStatusText,
   toolStepToolLabel,
+  toolStepToolLabelParts,
   toolStepUserSummary,
 } from "./toolUserLabel.js";
 import { applyToolJobsSnapshot } from "../stores/toolJobs.js";
@@ -126,6 +126,15 @@ describe("toolStepToolLabel", () => {
       }),
     ).toBe("terminal_command");
   });
+
+  it("shares normalized name and purpose parts with animated headers", () => {
+    expect(toolStepToolLabelParts({
+      callEntry: { data: { tool_name: "bash_run", arguments: { call_purpose: "检查服务状态" } } },
+    })).toEqual({ name: "bash", purpose: "检查服务状态" });
+    expect(toolStepToolLabelParts({
+      callEntry: { data: { tool_name: "read_file", arguments: {} } },
+    })).toEqual({ name: "read_file", purpose: "" });
+  });
 });
 
 describe("toolStepStatusText", () => {
@@ -240,7 +249,6 @@ describe("toolStepStatusText", () => {
 
     expect(resolveToolStepPhase(step)).toBe("failed");
     expect(toolStepIsActiveInGroup(step)).toBe(false);
-    expect(bashControlModeForStep(step)).toBe(null);
   });
 
   it("prefers an existing failed or queued result over a stale settled hint", () => {
@@ -250,10 +258,8 @@ describe("toolStepStatusText", () => {
     applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-result"] });
 
     expect(resolveToolStepPhase({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe("failed");
-    expect(bashControlModeForStep({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe(null);
     expect(resolveToolStepPhase({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("background");
     expect(toolStepIsInProgress({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe(true);
-    expect(bashControlModeForStep({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("running");
   });
 
   it.each(["running", "queued"])("keeps a nonterminal bash result in progress (%s)", (status) => {
@@ -263,7 +269,6 @@ describe("toolStepStatusText", () => {
     applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-live"] });
 
     expect(toolStepIsActiveInGroup(step)).toBe(true);
-    expect(bashControlModeForStep(step)).toBe("running");
   });
 
   it("prefers a real running job over a stale partial tool call", () => {

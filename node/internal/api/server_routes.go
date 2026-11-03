@@ -28,7 +28,6 @@ func (s *Server) registerRoutes() {
 	s.registerMediaRoutes()
 	s.registerLLMRoutes()
 	s.registerSetupRoutes()
-	s.registerManageUploadRoutes()
 	s.registerFeedbackRoutes()
 	s.mux.HandleFunc("GET /v1/skills/catalog", s.handleNodeSkillsCatalog)
 }

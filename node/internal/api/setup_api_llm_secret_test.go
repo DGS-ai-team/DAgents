@@ -373,9 +373,17 @@ func TestSetupSettingsPatchRenamesProfileAndKeepsSecret(t *testing.T) {
 	if err := cfg.SetActiveLLMProfile("source-profile"); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(cfg, nil, WithSkipStore())
+	nodeSettings, err := store.OpenNodeSettings(cfg.NodeSettingsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeSettings.Save(context.Background(), cfg); err != nil {
+		nodeSettings.Close()
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithNodeSettings(nodeSettings))
 	srv.llmConfigs = st
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() { srv.Close(); _ = nodeSettings.Close(); _ = st.Close() })
 
 	patch := []byte(`{"llm":{"active":"renamed-profile","profiles":[{"id":"renamed-profile","original_id":"source-profile","provider":"openai","base_url":"https://api.example.test/v1","model":"new-model"}]}}`)
 	rec := httptest.NewRecorder()

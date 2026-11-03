@@ -63,7 +63,7 @@ describe("FirstRunNodeProfile", () => {
     const wrapper = mount(FirstRunNodeProfile);
     await flushPromises();
 
-    expect(wrapper.text()).toContain("当前 Node 配置");
+    expect(wrapper.text()).toContain("本机服务配置");
     expect(wrapper.text()).not.toContain("你喜欢哪种外观");
     const identityInput = wrapper.find('input[placeholder="可留空，例如：小明"]');
     expect(identityInput.exists()).toBe(true);

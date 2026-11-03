@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferToolKind, resolveToolGroupVisual, resolveToolVisual } from "./toolSource.js";
+import { inferToolKind, resolveToolVisual } from "./toolSource.js";
 
 describe("inferToolKind", () => {
   it("classifies desktop tools as computer", () => {
@@ -67,30 +67,4 @@ describe("resolveToolVisual", () => {
     });
   });
 
-  it("uses a wrench for a merged group containing different tool kinds", () => {
-    expect(
-      resolveToolGroupVisual([
-        { callEntry: { data: { tool_name: "read_file" } } },
-        { callEntry: { data: { tool_name: "bash_run" } } },
-      ]),
-    ).toMatchObject({ kind: "wrench", label: "多种工具组", mixed: true });
-  });
-
-  it("keeps the specific visual for a merged group with one tool kind", () => {
-    expect(
-      resolveToolGroupVisual([
-        { callEntry: { data: { tool_name: "mcp__tencent-docs__doc_get" } } },
-        { callEntry: { data: { tool_name: "mcp__tencent-docs__doc_search" } } },
-      ]),
-    ).toMatchObject({ kind: "mcp", label: "tencent-docs" });
-  });
-
-  it("keeps terminal steps in one merged visual group", () => {
-    expect(
-      resolveToolGroupVisual([
-        { callEntry: { data: { tool_name: "terminal_read" } } },
-        { callEntry: { data: { tool_name: "terminal_command" } } },
-      ]),
-    ).toMatchObject({ kind: "terminal", label: "terminal" });
-  });
 });

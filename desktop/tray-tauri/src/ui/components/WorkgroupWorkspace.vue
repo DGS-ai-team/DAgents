@@ -57,7 +57,7 @@ async function loadList() {
       groups.value = []
       emit('list', [])
       manageUnavailable.value = true
-      notice.value = 'Manage 尚未启用。请先配置连接并启用 Workgroup，然后刷新工作组列表。'
+      notice.value = '管理后台尚未启用。请先配置管理后台连接并启用工作组，然后刷新列表。'
     } else error.value = message
   }
   finally { if (epochIsCurrent(token)) loading.value = false }
@@ -138,14 +138,14 @@ async function removeWorkgroup(item = group.value) {
   const id = String(item?.workgroup_id || props.workgroupId || '').trim()
   if (!id || busy.value || !item?.subscribed) return
   const label = String(item?.display_name || id)
-  if (!await confirmDesktopAction(`从此 Node 移除工作组「${label}」？\n这会取消当前 Node 的订阅，Manage 中的工作组数据会保留。`)) return
+  if (!await confirmDesktopAction(`从本机服务移除工作组「${label}」？\n这会取消当前本机服务的订阅，管理后台中的工作组数据会保留。`)) return
   const token = epoch; busy.value = true; error.value = ''
   try {
     await api.unsubscribeWorkgroup(id)
     if (!epochIsCurrent(token)) return
     await loadList()
     if (!epochIsCurrent(token)) return
-    notice.value = `已从此 Node 移除「${label}」；Manage 中的数据仍保留。`
+    notice.value = `已从本机服务移除「${label}」；管理后台中的数据仍保留。`
     emit('removed', id)
   } catch (e) { if (epochIsCurrent(token)) error.value = e?.message || '移除工作组失败' }
   finally { if (epochIsCurrent(token)) busy.value = false }
@@ -154,8 +154,12 @@ function requestWorkgroupContextMenu(event, item) {
   if (!item?.workgroup_id) return
   const current = String(item.workgroup_id) === String(props.workgroupId)
   const items = []
-  if (!current) items.push({ label: '打开工作组', run: () => openGroup(item.workgroup_id) })
-  if (item.subscribed) items.push({ label: '从此 Node 移除工作组', danger: true, disabled: busy.value, run: () => removeWorkgroup(item) })
+  if (!current) items.push({ label: '打开工作组', icon: 'workgroup', run: () => openGroup(item.workgroup_id) })
+  if (item.subscribed) {
+    if (items.length) items.push({ separator: true })
+    const disabledReason = busy.value ? '工作组操作进行中，请稍后再试' : ''
+    items.push({ label: '从本机服务移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeWorkgroup(item) })
+  }
   if (items.length) {
     event.preventDefault()
     event.stopPropagation()
@@ -217,13 +221,13 @@ async function removeQueued(item) { const id=props.workgroupId, token=epoch; try
 async function sendQueuedNow(item) { const id=props.workgroupId, token=epoch; try { await api.sendWorkgroupHumanQueueItemNow(id,item.queue_id); if(isCurrent(token,id)) { await loadHumanQueue(token,id); notice.value='已请求优先发送此消息'; watchQueue(token,id) } } catch(e) { if(isCurrent(token,id)) error.value=e?.message || '优先发送失败' } }
 async function resolve(hitlId, resolution) { const id = props.workgroupId, token = epoch; busy.value = true; error.value = ''; try { await api.resolveWorkgroupHITL(id, hitlId, resolution); if (isCurrent(token,id)) await refreshDetail(token,id) } catch(e) { if (isCurrent(token,id)) error.value = e?.message || '处理待办失败' } finally { if (isCurrent(token,id)) busy.value = false } }
 function resolveApproval(approval, callId, approve) { const all = (approval?.allItems || approval?.items || []).map(row => row.callId).filter(Boolean); const selected = String(callId || '').trim(); const approved = selected ? (approve ? [selected] : []) : (approve ? all : []); const rejected = selected ? (approve ? [] : [selected]) : (approve ? [] : all); return resolve(approval.hitlId, { type: 'selection', approved, rejected }) }
-watch(() => props.workgroupId, async () => { epoch++; const token = epoch; sendWake?.(); sendWake = null; clearPolling(); clearQueueWatch(); busy.value = false; sending.value = false; liveUser.value = null; liveAssistant.value = null; group.value = null; members.value = []; events.value = []; hitl.value = []; humanQueue.value = []; queueBusy.value=false; editingQueueId.value=''; agents.value = []; llmConfigs.value = []; selectedProfileId.value = ''; error.value = ''; notice.value = ''; draft.value = ''; retryClientMessageId=''; retryClientMessageText=''; if (!props.workgroupId) { await loadList(); return } loading.value = true; try { await Promise.all([refreshDetail(token, props.workgroupId, { includeAgents: true }), loadList()]); if (epochIsCurrent(token) && group.value?.status === 'active' && (queueBusy.value || humanQueue.value.length)) watchQueue(token,props.workgroupId) } catch(e) { if (epochIsCurrent(token)) { const msg = e?.message || '加载工作组失败'; error.value = /manage/i.test(msg) ? `${msg}；请先启动 Manage 并启用 Workgroup` : msg } } finally { if (epochIsCurrent(token)) loading.value = false } }, { immediate: true })
+watch(() => props.workgroupId, async () => { epoch++; const token = epoch; sendWake?.(); sendWake = null; clearPolling(); clearQueueWatch(); busy.value = false; sending.value = false; liveUser.value = null; liveAssistant.value = null; group.value = null; members.value = []; events.value = []; hitl.value = []; humanQueue.value = []; queueBusy.value=false; editingQueueId.value=''; agents.value = []; llmConfigs.value = []; selectedProfileId.value = ''; error.value = ''; notice.value = ''; draft.value = ''; retryClientMessageId=''; retryClientMessageText=''; if (!props.workgroupId) { await loadList(); return } loading.value = true; try { await Promise.all([refreshDetail(token, props.workgroupId, { includeAgents: true }), loadList()]); if (epochIsCurrent(token) && group.value?.status === 'active' && (queueBusy.value || humanQueue.value.length)) watchQueue(token,props.workgroupId) } catch(e) { if (epochIsCurrent(token)) { const msg = e?.message || '加载工作组失败'; error.value = /manage/i.test(msg) ? `${msg}；请先启动管理后台并启用工作组` : msg } } finally { if (epochIsCurrent(token)) loading.value = false } }, { immediate: true })
 onUnmounted(() => { mounted = false; epoch++; sendWake?.(); sendWake = null; clearPolling(); clearQueueWatch() })
 </script>
 
 <template>
   <main class="wg-workspace">
-    <header class="wg-head" :tabindex="workgroupId ? -1 : undefined" @contextmenu="workgroupId && requestWorkgroupContextMenu($event, selectedGroupEntry)" @keydown="workgroupId && onWorkgroupContextMenuKeydown($event, selectedGroupEntry)"><div><h1>{{ group?.display_name || '工作组' }}</h1><p v-if="group">{{ group.status || '状态未知' }} · {{ members.length }} 位成员</p><p v-else>协作消息、成员与待处理请求</p></div><div class="wg-actions"><button @click="safeRefresh" :disabled="loading">刷新</button><button v-if="workgroupId && !selectedIsSubscribed" @click="subscribe" :disabled="busy">订阅</button><button v-if="group?.status === 'configuring'" @click="publish" :disabled="publishDisabled" :title="publishDisabled ? '请先配置并选择可用的 Supervisor 模型' : ''">发布</button><button v-if="!workgroupId" @click="creating = !creating" :disabled="manageUnavailable" :title="manageUnavailable ? '请先启用 Manage 和 Workgroup' : ''">新建工作组</button></div></header>
+      <header class="wg-head" :tabindex="workgroupId ? -1 : undefined" @contextmenu="workgroupId && requestWorkgroupContextMenu($event, selectedGroupEntry)" @keydown="workgroupId && onWorkgroupContextMenuKeydown($event, selectedGroupEntry)"><div><h1>{{ group?.display_name || '工作组' }}</h1><p v-if="group">{{ group.status || '状态未知' }} · {{ members.length }} 位成员</p><p v-else>协作消息、成员与待处理请求</p></div><div class="wg-actions"><button @click="safeRefresh" :disabled="loading">刷新</button><button v-if="workgroupId && !selectedIsSubscribed" @click="subscribe" :disabled="busy">订阅</button><button v-if="group?.status === 'configuring'" @click="publish" :disabled="publishDisabled" :title="publishDisabled ? '请先配置并选择可用的 Supervisor 模型' : ''">发布</button><button v-if="!workgroupId" @click="creating = !creating" :disabled="manageUnavailable" :title="manageUnavailable ? '请先启用管理后台和工作组' : ''">新建工作组</button></div></header>
     <p v-if="error" class="wg-error" role="alert">{{ error }} <button @click="emit('open-connection-settings')">前往连接配置</button></p><p v-if="notice" class="wg-notice" role="status">{{ notice }} <button v-if="manageUnavailable" @click="emit('open-connection-settings')">配置连接</button></p>
     <template v-if="!workgroupId">
       <form v-if="creating && !manageUnavailable" class="wg-create" @submit.prevent="createGroup"><input v-model="newName" placeholder="工作组名称" required><button :disabled="busy">创建</button></form>
@@ -231,7 +235,7 @@ onUnmounted(() => { mounted = false; epoch++; sendWake?.(); sendWake = null; cle
       <div class="wg-list"><article v-for="item in groups" :key="item.workgroup_id" class="wg-group" tabindex="-1" @contextmenu="requestWorkgroupContextMenu($event, item)" @keydown="onWorkgroupContextMenuKeydown($event, item)"><button class="wg-group-open" type="button" @click="openGroup(item.workgroup_id)"><strong>{{ item.display_name || item.workgroup_id }}</strong><span>{{ item.status || '状态未知' }} · {{ item.workgroup_id }}</span></button><button v-if="!item.subscribed" class="wg-group-subscribe" type="button" :disabled="busy" @click="subscribeListed(item)">订阅</button></article></div>
     </template>
     <template v-else>
-      <section v-if="group?.status === 'configuring'" class="wg-model"><label for="wg-supervisor-model">Supervisor 模型</label><select id="wg-supervisor-model" v-model="selectedProfileId" @change="changeSupervisorProfile"><option value="">选择模型配置</option><option v-for="profile in llmConfigs" :key="profile.id" :value="profile.id">{{ profile.name || profile.id }}{{ profile.is_default ? '（默认）' : '' }}</option></select><small v-if="llmConfigs.length">新建工作组先使用 Manage 默认模型，可在发布前切换。</small><p v-else class="wg-model-warning" role="status">Manage 尚无当前节点可用的 LLM 配置。请在 Manage 控制台配置并授权模型后刷新；完成前不能发布工作组。</p><button v-if="!llmConfigs.length" @click="emit('open-connection-settings')">前往连接配置</button></section>
+      <section v-if="group?.status === 'configuring'" class="wg-model"><label for="wg-supervisor-model">Supervisor 模型</label><select id="wg-supervisor-model" v-model="selectedProfileId" @change="changeSupervisorProfile"><option value="">选择模型配置</option><option v-for="profile in llmConfigs" :key="profile.id" :value="profile.id">{{ profile.name || profile.id }}{{ profile.is_default ? '（默认）' : '' }}</option></select><small v-if="llmConfigs.length">新建工作组先使用管理后台默认模型，可在发布前切换。</small><p v-else class="wg-model-warning" role="status">管理后台尚无当前本机服务可用的模型配置。请在管理后台配置并授权模型后刷新；完成前不能发布工作组。</p><button v-if="!llmConfigs.length" @click="emit('open-connection-settings')">前往连接配置</button></section>
       <section class="wg-members"><strong>成员</strong><span v-for="m in members" :key="m.member_id">{{ m.display_name || m.agent_id }}</span><form @submit.prevent="addMember"><select v-model="newMember.agent_id" required><option value="">选择已注册 Agent</option><option v-for="a in agents" :key="a.agent_id" :value="a.agent_id">{{ a.name || a.agent_id }}</option></select><input v-model="newMember.display_name" placeholder="成员名称" required><button :disabled="busy">添加成员</button></form></section>
       <section v-if="queueBusy || humanQueue.length" class="wg-queue"><h2>消息队列 <small>{{ queueBusy ? '当前回合仍在处理' : '等待发送' }}</small></h2><article v-for="item in humanQueue" :key="item.queue_id"><template v-if="editingQueueId === item.queue_id"><textarea v-model="editQueueDraft" aria-label="修改排队消息"/><button @click="saveQueued(item)">保存</button><button @click="editingQueueId = ''; editQueueDraft = ''">取消编辑</button></template><template v-else><p><small>第 {{ item.position || '—' }} 位</small>{{ item.text }}</p><button @click="editQueued(item)">修改</button><button @click="removeQueued(item)">取消排队</button><button @click="sendQueuedNow(item)" :disabled="!queueBusy" title="优先发送会中断当前回合">优先发送</button></template></article></section>
       <section v-if="supervisorHitl" class="wg-hitl"><h2>需要你回答</h2><p>{{ supervisorHitl.prompt || supervisorHitl.message || supervisorHitl.metadata?.question || 'Supervisor 正在等待你的回答' }}</p><input v-model="supervisorHitl._answer" placeholder="输入回答"><button @click="resolve(supervisorHitl.hitl_id, { answer: supervisorHitl._answer || '' })" :disabled="busy">提交回答</button></section>

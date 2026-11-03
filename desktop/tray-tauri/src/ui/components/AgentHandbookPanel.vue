@@ -1,9 +1,11 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
+import SettingsSectionHeader from "./SettingsSectionHeader.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({ agentId: { type: String, required: true } });
-const unsupportedMessage = "当前 Node 版本尚不支持此功能，请更新 Node 后重试";
+const unsupportedMessage = "当前本机服务版本尚不支持此功能，请更新本机服务后重试";
 const page = ref(null),
   selectedPath = ref(""),
   directoryDraft = ref(""),
@@ -146,21 +148,20 @@ watch(
 
 <template>
   <section class="agent-handbook-panel">
-    <div class="agent-handbook-panel__header">
-      <div>
-        <h3>Agent 手册</h3>
-        <p class="agent-handbook-panel__intro">
-          管理手册目录，浏览文件并恢复历史版本。
-        </p>
-      </div>
-      <button
-        class="btn btn--ghost btn--sm"
-        :disabled="loading || saving || restoring !== null"
-        @click="refresh"
-      >
-        {{ loading ? "刷新中…" : "刷新" }}
-      </button>
-    </div>
+    <SettingsSectionHeader :level="3" title="Agent 手册" description="管理手册目录，浏览文件并恢复历史版本。">
+      <template #actions>
+        <button
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          type="button"
+          :disabled="loading || saving || restoring !== null"
+          :aria-label="loading ? '正在刷新 Agent 手册' : '刷新 Agent 手册'"
+          :title="loading ? '正在刷新 Agent 手册' : '刷新 Agent 手册'"
+          @click="refresh"
+        >
+          <UiIcon name="refresh-cw" :size="16" />
+        </button>
+      </template>
+    </SettingsSectionHeader>
     <form
       class="agent-handbook-panel__directory"
       @submit.prevent="saveDirectory"
@@ -250,7 +251,6 @@ watch(
 </template>
 
 <style scoped>
-.agent-handbook-panel__header,
 .agent-handbook-panel__directory,
 .agent-handbook-panel__history-row {
   display: flex;
@@ -258,16 +258,12 @@ watch(
   justify-content: space-between;
   gap: 12px;
 }
-.agent-handbook-panel__header h3 {
-  margin-bottom: 4px;
-}
-.agent-handbook-panel__intro,
 .agent-handbook-panel__empty {
   color: var(--text-secondary);
   font-size: 13px;
 }
 .agent-handbook-panel__directory {
-  margin: 10px 0 14px;
+  margin: 0 0 14px;
 }
 .agent-handbook-panel__directory .settings-field {
   flex: 1;
@@ -332,7 +328,6 @@ watch(
   color: var(--success, #287a45);
 }
 @media (max-width: 640px) {
-  .agent-handbook-panel__header,
   .agent-handbook-panel__directory,
   .agent-handbook-panel__history-row {
     align-items: stretch;

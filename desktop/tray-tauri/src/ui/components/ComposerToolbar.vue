@@ -1,15 +1,16 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   llmSettings: { type: Object, default: null },
+  settingsProfileId: { type: String, default: "" },
   disabled: { type: Boolean, default: false },
   desktopCompact: { type: Boolean, default: false },
   statusLabel: { type: String, default: "" },
 });
 
-const emit = defineEmits(["switch-profile"]);
+const emit = defineEmits(["switch-profile", "open-model-settings"]);
 
 const open = ref(false);
 const rootRef = ref(null);
@@ -19,9 +20,11 @@ const profiles = computed(() => {
   const list = props.llmSettings?.profiles;
   return Array.isArray(list) ? list.map((id) => String(id || "").trim()).filter(Boolean) : [];
 });
-const activeProfile = computed(() => String(props.llmSettings?.active_profile || "").trim());
-const showProfileSwitch = computed(() => profiles.value.length > 0);
-const canSwitch = computed(() => !props.disabled && profiles.value.length > 1);
+const activeProfile = computed(() => String(props.llmSettings?.active_profile || props.settingsProfileId || "").trim());
+const showProfileSwitch = computed(() => profiles.value.length > 0 || Boolean(activeProfile.value));
+const canSwitch = computed(() => !props.disabled && showProfileSwitch.value);
+const hasProfileChoice = computed(() => profiles.value.length > 1);
+const canOpenSettings = computed(() => Boolean(activeProfile.value));
 const activeLabel = computed(() => activeProfile.value || props.llmSettings?.model || "Auto");
 const displayLabel = computed(() => props.desktopCompact
   ? String(props.llmSettings?.model || "Auto").trim()
@@ -48,9 +51,18 @@ function toggleMenu() {
 
 function pickProfile(id) {
   closeMenu();
-  if (!id || id === activeProfile.value) return;
+  if (!canSwitch.value || !id || id === activeProfile.value) return;
   emit("switch-profile", id);
 }
+
+function openModelSettings() {
+  closeMenu();
+  if (!props.disabled && canOpenSettings.value) emit("open-model-settings", activeProfile.value);
+}
+
+watch(canSwitch, (available) => {
+  if (!available) closeMenu();
+});
 
 function onDocPointerDown(event) {
   if (!open.value) return;
@@ -80,14 +92,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="composer-toolbar">
     <span
-      v-if="statusLabel"
       class="composer-toolbar__status"
       role="status"
       aria-live="polite"
-      :title="statusLabel"
+      aria-atomic="true"
+      :title="statusLabel || undefined"
     >
-      <span class="composer-toolbar__status-dot" aria-hidden="true" />
-      <span>{{ statusLabel }}</span>
+      <span class="visually-hidden">{{ statusLabel }}</span>
+      <span class="composer-toolbar__status-window" aria-hidden="true">
+        <Transition name="composer-status" appear>
+          <span v-if="statusLabel" :key="statusLabel" class="composer-toolbar__status-line">
+            <span class="composer-toolbar__status-text">{{ statusLabel }}</span>
+          </span>
+        </Transition>
+      </span>
     </span>
 
     <div v-if="showProfileSwitch" ref="rootRef" class="composer-toolbar__profile">
@@ -102,28 +120,31 @@ onBeforeUnmount(() => {
         @click="toggleMenu"
       >
         <span class="composer-toolbar__trigger-label">{{ displayLabel }}</span>
-        <UiIcon v-if="canSwitch" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
+        <UiIcon v-if="hasProfileChoice || canOpenSettings" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
       </button>
 
       <div
         v-if="open"
         ref="menuRef"
         class="composer-toolbar__menu"
-        role="listbox"
-        :aria-label="'选择 LLM 配置'"
       >
-        <button
-          v-for="id in profiles"
-          :key="id"
-          type="button"
-          class="composer-toolbar__option"
-          role="option"
-          :aria-selected="id === activeProfile"
-          :class="{ 'composer-toolbar__option--active': id === activeProfile }"
-          @click="pickProfile(id)"
-        >
-          <span class="composer-toolbar__option-label">{{ id }}</span>
-          <UiIcon v-if="id === activeProfile" class="composer-toolbar__option-check" name="check" :size="14" />
+        <div role="listbox" aria-label="选择模型配置">
+          <button
+            v-for="id in profiles"
+            :key="id"
+            type="button"
+            class="composer-toolbar__option"
+            role="option"
+            :aria-selected="id === activeProfile"
+            :class="{ 'composer-toolbar__option--active': id === activeProfile }"
+            @click="pickProfile(id)"
+          >
+            <span class="composer-toolbar__option-label">{{ id }}</span>
+            <UiIcon v-if="id === activeProfile" class="composer-toolbar__option-check" name="check" :size="14" />
+          </button>
+        </div>
+        <button v-if="canOpenSettings" type="button" class="composer-toolbar__option composer-toolbar__settings-action" @click="openModelSettings">
+          模型设置…
         </button>
       </div>
     </div>

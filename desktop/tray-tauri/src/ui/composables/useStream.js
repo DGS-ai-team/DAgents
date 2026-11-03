@@ -148,7 +148,7 @@ export function buildStream(entries, hitlQueue = []) {
         continue;
       }
       items.push({
-        key: `tool-call-${blockId || entry.id}`,
+        key: `tool-step-${blockId || entry.id}`,
         kind: "tool_step",
         callEntry: entry,
         resultEntry: null,

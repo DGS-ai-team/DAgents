@@ -34,8 +34,8 @@ export function isWindowsPlatform(platform) {
 }
 
 export function terminalDialogChoices(platform, channels = []) {
-  const localLabel = isWindowsPlatform(platform) ? 'Node 本机 PowerShell' : 'Node 本机默认终端'
-  const choices = [{ kind: 'local', label: localLabel, hint: '由当前连接的 Node 主机启动' }]
+  const localLabel = isWindowsPlatform(platform) ? '本机 PowerShell' : '本机默认终端'
+  const choices = [{ kind: 'local', label: localLabel }]
   for (const channel of Array.isArray(channels) ? channels : []) {
     if (!channel?.channel_id || channel.enabled === false) continue
     const address = [channel.username, channel.host].filter(Boolean).join('@')

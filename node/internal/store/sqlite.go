@@ -213,15 +213,27 @@ func (s *SQLiteStore) Delete(ctx context.Context, agentID string) (bool, error) 
 
 // ClearMessages 清空对话历史但保留 Agent 行。
 func (s *SQLiteStore) ClearMessages(ctx context.Context, agentID string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.ExecContext(ctx, `
-UPDATE agent_runtimes SET messages_json = '[]', runtime_state_json = '{}', loaded_skills_json = '[]', updated_at = ? WHERE agent_id = ?
-`, now, strings.TrimSpace(agentID))
+	return s.ClearMessagesWithRuntimeState(ctx, agentID, RuntimeState{})
+}
+
+// ClearMessagesWithRuntimeState atomically clears a transcript and writes the
+// non-lifecycle state needed to keep its presentation boundary across restart.
+func (s *SQLiteStore) ClearMessagesWithRuntimeState(ctx context.Context, agentID string, state RuntimeState) error {
+	if strings.TrimSpace(agentID) == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	runtimeRaw, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx, `
+UPDATE agent_runtimes SET messages_json = '[]', runtime_state_json = ?, loaded_skills_json = '[]', updated_at = ? WHERE agent_id = ?
+`, string(runtimeRaw), now, strings.TrimSpace(agentID))
+	if err != nil {
+		return err
+	}
+	if count, _ := res.RowsAffected(); count == 0 {
 		return sql.ErrNoRows
 	}
 	return nil

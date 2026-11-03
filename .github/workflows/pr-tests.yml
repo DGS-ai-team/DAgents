@@ -110,3 +110,10 @@ jobs:
 
       - name: Run unittest discovery
         run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Test browser service protocol
+        working-directory: browser-service
+        run: |
+          python -m venv "$RUNNER_TEMP/browser-tests"
+          "$RUNNER_TEMP/browser-tests/bin/python" -m pip install -r requirements.lock
+          "$RUNNER_TEMP/browser-tests/bin/python" -m unittest discover -s tests -p "test_*.py" -v

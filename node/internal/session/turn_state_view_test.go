@@ -1,6 +1,7 @@
 package session
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -93,5 +94,33 @@ func TestTurnStateEventDataIncludesSafeLifecycleFields(t *testing.T) {
 	}
 	if data["command"] != string(turn.CommandModelRequestStarted) {
 		t.Fatalf("event command = %#v", data["command"])
+	}
+}
+
+func TestTurnStateProjectsDurableRetryAndSafeTerminalError(t *testing.T) {
+	retrying := turn.CoordinatorSnapshot{
+		TurnID: "turn-503", StepID: "step-503", Generation: 1,
+		TurnStatus: turn.TurnStatusRunning, StepStatus: turn.StepStatusRequesting,
+		HasActiveTurn: true, ModelAttempt: 2, ModelAttemptStatus: turn.ModelAttemptStatusRetrying,
+		ModelMaxAttempts: 3, ModelRetryAfterMS: 4200, ModelErrorKind: "provider_unavailable", ModelRetryable: true,
+	}
+	retryView := buildTurnStateView(retrying, 7)
+	if retryView.ModelAttempt == nil || retryView.ModelAttempt.Status != "retrying" || retryView.ModelAttempt.Attempt != 2 || retryView.ModelAttempt.MaxAttempts != 3 || retryView.ModelAttempt.RetryAfterMS != 4200 {
+		t.Fatalf("retry projection = %#v", retryView.ModelAttempt)
+	}
+
+	failed := retrying
+	failed.TurnStatus = turn.TurnStatusFailed
+	failed.StepStatus = turn.StepStatusFailed
+	failed.TurnEndReason = "模型服务暂时不可用，请稍后重试。"
+	failed.ModelAttemptStatus = turn.ModelAttemptStatusFailed
+	failed.HasActiveTurn = false
+	view := buildTurnStateView(failed, 8)
+	if view.Error == nil || view.Error.Code != "provider_unavailable" || view.Error.Message != failed.TurnEndReason || !view.Error.Retryable {
+		t.Fatalf("terminal error projection = %#v", view.Error)
+	}
+	event := turnStateEventData(failed, 8, 0, turn.CommandFailTurn)
+	if !reflect.DeepEqual(event["error"], view.Error) || !reflect.DeepEqual(event["model_attempt"], view.ModelAttempt) {
+		t.Fatalf("SSE contract differs from hydrate: event=%#v view=%#v", event, view)
 	}
 }

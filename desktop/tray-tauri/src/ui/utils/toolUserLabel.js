@@ -1,10 +1,6 @@
 import { truncateGraphemes } from "@shared-frontend/utils/textTruncate.js";
 import { resolveToolArgumentsFromData, toolCallPurpose } from "@shared-frontend/utils/toolCalls.js";
-import {
-  bashControlMode,
-  toolCallIdFromEntry,
-  toolJobsStore,
-} from "../stores/toolJobs.js";
+import { toolCallIdFromEntry, toolJobsStore } from "../stores/toolJobs.js";
 
 /** 面向普通用户的工具类别名（非技术 tool id）。 */
 const TOOL_USER_LABELS = {
@@ -118,13 +114,19 @@ export function toolStepPurpose({ callEntry, resultEntry } = {}) {
   return directPurpose ? truncateGraphemes(directPurpose, 48) : "";
 }
 
-/** 工具行标题保留稳定的“工具名(执行目的)”结构；详情面板不再重复目的。 */
-export function toolStepToolLabel({ callEntry, resultEntry } = {}) {
+/** 供紧凑标题共享的结构化工具名和执行目的；详情面板不再重复目的。 */
+export function toolStepToolLabelParts({ callEntry, resultEntry } = {}) {
   const name = toolNameFromStep(callEntry, resultEntry);
-  if (!name) return GENERIC_TOOL_LABEL;
-  const base = name === "bash_run" ? "bash" : name;
-  const purpose = toolStepPurpose({ callEntry, resultEntry });
-  return purpose ? `${base}(${purpose})` : base;
+  return {
+    name: name ? (name === "bash_run" ? "bash" : name) : GENERIC_TOOL_LABEL,
+    purpose: name ? toolStepPurpose({ callEntry, resultEntry }) : "",
+  };
+}
+
+/** 工具行标题保留稳定的“工具名(执行目的)”结构。 */
+export function toolStepToolLabel(step = {}) {
+  const { name, purpose } = toolStepToolLabelParts(step);
+  return purpose ? `${name}(${purpose})` : name;
 }
 
 /**
@@ -269,16 +271,6 @@ export function toolStepIsActiveInGroup(step = {}) {
   if (!step.callEntry) return false;
   const phase = resolveToolStepPhase(step);
   return !["completed", "failed", "cancelled", "rejected", "interrupted"].includes(phase);
-}
-
-/** A lagging bash job snapshot must not override an explicit terminal result. */
-export function bashControlModeForStep({ callEntry, resultEntry, executionHint = null } = {}) {
-  if (resultEntry) {
-    if (!toolStepIsInProgress({ callEntry, resultEntry })) return null;
-  } else if (["settled", "failed", "cancelled", "rejected", "interrupted"].includes(executionHint)) {
-    return null;
-  }
-  return bashControlMode({ callEntry, resultEntry });
 }
 
 /** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */

@@ -136,7 +136,7 @@ describe("AgentHandbookPanel", () => {
     const wrapper = mount(AgentHandbookPanel, { props: { agentId: "a" } });
     await tick();
     expect(wrapper.text()).toContain(
-      "当前 Node 版本尚不支持此功能，请更新 Node 后重试",
+      "当前本机服务版本尚不支持此功能，请更新本机服务后重试",
     );
     expect(wrapper.text()).not.toContain("404 page not found");
     await wrapper.find("button").trigger("click");

@@ -29,6 +29,9 @@ const templates = ref([]);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
 const draft = reactive(emptyAgentDraft());
+function updateDraft(value) {
+  if (value && typeof value === "object") Object.assign(draft, value);
+}
 /** 是否从「选起点」进来；无模板或从空态模板直达时为 false */
 const canGoBackToStart = ref(false);
 
@@ -382,7 +385,8 @@ onMounted(() => {
         <div v-else class="agent-create-page__form">
           <AgentSettingsForm
             v-if="step === 'details'"
-            v-model:draft="draft"
+            :draft="draft"
+            @update:draft="updateDraft"
             :llm-profiles="llmProfiles"
             :field-errors="fieldErrors"
             :show-workspace="false"
@@ -392,14 +396,16 @@ onMounted(() => {
 
           <AgentWorkspacePicker
             v-else-if="step === 'workspace'"
-            v-model:draft="draft"
+            :draft="draft"
+            @update:draft="updateDraft"
             :field-error="fieldErrors.workspace"
             @clear-error="clearFieldError('workspace')"
           />
 
           <AgentSettingsForm
             v-else
-            v-model:draft="draft"
+            :draft="draft"
+            @update:draft="updateDraft"
             :llm-profiles="llmProfiles"
             :available-tool-groups="availableToolGroups"
             mode="create-capabilities"

@@ -1,10 +1,26 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 import { confirmDesktopAction } from "../../utils/desktopDialogs.js";
+import UiSelect from "../../components/UiSelect.vue";
+
+const route = useRoute();
+const router = useRouter();
+const createFlow = computed(() => route.query.create === "1" && String(route.query.returnAgentId || "").trim());
+
+function returnToAgent() {
+  const agentId = String(route.query.returnAgentId || "").trim();
+  if (!agentId) return;
+  void router.replace({
+    name: "settings-agent-detail",
+    params: { agentId },
+    query: { section: String(route.query.returnSection || "resources") },
+  });
+}
 
 const channels = ref([]);
 const credentials = ref([]);
@@ -28,6 +44,25 @@ const credentialAuthMeta = {
   private_key: { label: "SSH 私钥", description: "可直接输入私钥或引用环境变量，Node 不会把私钥放进工具参数。" },
   password: { label: "密码", description: "可直接输入密码，也可以通过环境变量引用。" },
 };
+const authTypeOptions = [
+  { value: "private_key", label: "SSH 私钥" },
+  { value: "password", label: "密码" },
+];
+const secretModeOptions = [
+  { value: "environment", label: "环境变量引用" },
+  { value: "direct", label: "直接输入" },
+];
+const hostKeyPolicyOptions = [
+  { value: "known_hosts", label: "使用 known_hosts" },
+  { value: "pinned", label: "固定 SSH 主机指纹" },
+];
+const savedCredentialOptions = computed(() => [
+  { value: "", label: "选择已保存的凭据" },
+  ...credentials.value.map((item) => ({
+    value: item.credential_id,
+    label: `${item.display_name || "未命名凭据"}（${authTypeLabel(item.auth_type)}）`,
+  })),
+]);
 
 const credentialAuthDescription = computed(() => credentialAuthMeta[credential.auth_type]?.description || "请选择认证方式。");
 const credentialReady = computed(() => {
@@ -162,6 +197,7 @@ async function saveCredential() {
     showCredentialForm.value = false;
     await load();
     status.value = "凭据已保存";
+    if (createFlow.value) openChannelForm();
   } catch (e) {
     error.value = e.message || "保存凭据失败";
   } finally {
@@ -186,6 +222,7 @@ async function saveChannel() {
     await load();
     notifyConfigurationChanged("linux-channels");
     status.value = wasEditing ? "Linux 通道已更新" : "Linux 通道已保存";
+    if (createFlow.value && !wasEditing) returnToAgent();
   } catch (e) {
     error.value = e.message || "保存通道失败";
   } finally {
@@ -251,7 +288,13 @@ async function removeChannel(item) {
   }
 }
 
-onMounted(() => void load());
+onMounted(() => {
+  void load().then(() => {
+    if (!createFlow.value || error.value) return;
+    if (credentials.value.length) openChannelForm();
+    else openCredentialForm();
+  });
+});
 </script>
 
 <template>
@@ -261,7 +304,16 @@ onMounted(() => void load());
       description="先保存认证凭据，再创建 SSH 通道，最后在智能体设置中绑定需要暴露的通道。敏感信息不会进入工具参数或会话上下文。"
     >
       <template #actions>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          aria-label="刷新 Linux 通道设置"
+          title="刷新 Linux 通道设置"
+          :disabled="loading"
+          @click="load"
+        >
+          <UiIcon name="refresh-cw" :size="16" />
+        </button>
       </template>
     </SettingsPageHeader>
 
@@ -323,7 +375,15 @@ onMounted(() => void load());
       <div v-if="credentials.length" class="linux-settings__list">
         <div v-for="item in credentials" :key="item.credential_id" class="linux-settings__row">
           <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名凭据" }}</strong><small><code>{{ item.credential_id }}</code> · {{ authTypeLabel(item.auth_type) }} · {{ credentialStatusLabel(item) }}</small></div>
-          <button type="button" class="btn btn--ghost btn--sm" @click="api.deleteLinuxCredential(item.credential_id).then(load)">删除</button>
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm desktop-icon-button"
+            :aria-label="`删除凭据 ${item.display_name || item.credential_id}`"
+            :title="`删除凭据 ${item.display_name || item.credential_id}`"
+            @click="api.deleteLinuxCredential(item.credential_id).then(load)"
+          >
+            <UiIcon name="trash" :size="15" />
+          </button>
         </div>
       </div>
       <div v-else class="linux-settings__empty settings-empty-state">还没有凭据。点击“新增凭据”开始配置。</div>
@@ -343,7 +403,36 @@ onMounted(() => void load());
       <div v-else class="linux-settings__list">
         <div v-for="item in channels" :key="item.channel_id" class="linux-settings__row">
           <div class="linux-settings__row-main"><strong>{{ item.display_name || "未命名通道" }}</strong><small><code>{{ item.channel_id }}</code> · {{ item.username }}@{{ item.host }}:{{ item.port }} · {{ hostKeyPolicyLabel(item.host_key_policy) }} · 最大并发会话 {{ item.max_sessions || 1 }}</small></div>
-          <div class="linux-settings__actions"><button type="button" class="btn btn--ghost btn--sm" :disabled="testing === item.channel_id" @click="testChannel(item)">{{ testing === item.channel_id ? "测试中…" : "测试" }}</button><button type="button" class="btn btn--ghost btn--sm" @click="openChannelForm(item)">编辑</button><button type="button" class="btn btn--ghost btn--sm" @click="removeChannel(item)">删除</button></div>
+          <div class="linux-settings__actions">
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm desktop-icon-button"
+              :aria-label="`测试 SSH 通道 ${item.display_name || item.channel_id}`"
+              :title="testing === item.channel_id ? '正在测试 SSH 通道' : '测试 SSH 通道'"
+              :disabled="testing === item.channel_id"
+              @click="testChannel(item)"
+            >
+              <UiIcon name="plug" :size="15" />
+            </button>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm desktop-icon-button"
+              :aria-label="`编辑 SSH 通道 ${item.display_name || item.channel_id}`"
+              :title="`编辑 SSH 通道 ${item.display_name || item.channel_id}`"
+              @click="openChannelForm(item)"
+            >
+              <UiIcon name="pencil" :size="15" />
+            </button>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm desktop-icon-button"
+              :aria-label="`删除 SSH 通道 ${item.display_name || item.channel_id}`"
+              :title="`删除 SSH 通道 ${item.display_name || item.channel_id}`"
+              @click="removeChannel(item)"
+            >
+              <UiIcon name="trash" :size="15" />
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -352,7 +441,7 @@ onMounted(() => void load());
       <section class="linux-settings__modal" role="dialog" aria-modal="true" aria-labelledby="credential-form-title">
         <div class="linux-settings__modal-head">
           <div><h2 id="credential-form-title">新增凭据</h2><p>保存后会自动生成唯一凭据 ID。</p></div>
-          <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeCredentialForm"><UiIcon name="close" :size="16" /></button>
+          <button type="button" class="linux-settings__modal-close" aria-label="关闭凭据对话框" title="关闭" :disabled="saving" @click="closeCredentialForm"><UiIcon name="close" :size="16" /></button>
         </div>
         <div class="linux-settings__editor">
           <div class="linux-settings__field">
@@ -361,18 +450,22 @@ onMounted(() => void load());
           </div>
           <div class="linux-settings__field">
             <label>认证方式 <span>必选</span></label>
-            <select v-model="credential.auth_type" class="settings-field__input" @change="onCredentialAuthTypeChange">
-              <option value="private_key">SSH 私钥</option>
-              <option value="password">密码</option>
-            </select>
+            <UiSelect
+              v-model="credential.auth_type"
+              :options="authTypeOptions"
+              aria-label="认证方式"
+              @change="onCredentialAuthTypeChange"
+            />
             <small>{{ credentialAuthDescription }}</small>
           </div>
           <div v-if="credential.auth_type === 'password' || credential.auth_type === 'private_key'" class="linux-settings__field">
             <label>凭据来源 <span>必选</span></label>
-            <select v-model="credential.secret_mode" class="settings-field__input" @change="onCredentialSecretModeChange">
-              <option value="environment">环境变量引用</option>
-              <option value="direct">直接输入</option>
-            </select>
+            <UiSelect
+              v-model="credential.secret_mode"
+              :options="secretModeOptions"
+              aria-label="凭据来源"
+              @change="onCredentialSecretModeChange"
+            />
             <small>直接输入的内容会加密保存到本机 Node 配置中，不需要重启 Node 或 shell。</small>
           </div>
           <div class="linux-settings__field linux-settings__field--wide">
@@ -400,7 +493,7 @@ onMounted(() => void load());
       <section class="linux-settings__modal linux-settings__modal--wide" role="dialog" aria-modal="true" aria-labelledby="channel-form-title">
         <div class="linux-settings__modal-head">
           <div><h2 id="channel-form-title">{{ editingChannelId ? "编辑 SSH 通道" : "新增 SSH 通道" }}</h2><p>{{ editingChannelId ? `正在修改通道 ${editingChannelId}` : "通道 ID由系统自动生成，一个通道代表一台远程主机。" }}</p></div>
-          <button type="button" class="linux-settings__modal-close" aria-label="关闭" :disabled="saving" @click="closeChannelForm"><UiIcon name="close" :size="16" /></button>
+          <button type="button" class="linux-settings__modal-close" aria-label="关闭 SSH 通道对话框" title="关闭" :disabled="saving" @click="closeChannelForm"><UiIcon name="close" :size="16" /></button>
         </div>
         <div class="linux-settings__channel-editor">
           <div class="linux-settings__group">
@@ -415,8 +508,23 @@ onMounted(() => void load());
           <div class="linux-settings__group">
             <div class="linux-settings__group-head"><strong>登录凭据</strong><span>选择已保存的认证方式</span></div>
             <div class="linux-settings__grid">
-              <div class="linux-settings__field"><label>登录凭据 <span>必选</span></label><select v-model="channel.credential_id" class="settings-field__input"><option value="">选择已保存的凭据</option><option v-for="item in credentials" :key="item.credential_id" :value="item.credential_id">{{ item.display_name || "未命名凭据" }}（{{ authTypeLabel(item.auth_type) }}）</option></select></div>
-              <div class="linux-settings__field"><label>主机密钥策略 <span>必选</span></label><select v-model="channel.host_key_policy" class="settings-field__input" @change="onHostKeyPolicyChange"><option value="known_hosts">使用 known_hosts</option><option value="pinned">固定 SSH 主机指纹</option></select></div>
+              <div class="linux-settings__field">
+                <label>登录凭据 <span>必选</span></label>
+                <UiSelect
+                  v-model="channel.credential_id"
+                  :options="savedCredentialOptions"
+                  aria-label="登录凭据"
+                />
+              </div>
+              <div class="linux-settings__field">
+                <label>主机密钥策略 <span>必选</span></label>
+                <UiSelect
+                  v-model="channel.host_key_policy"
+                  :options="hostKeyPolicyOptions"
+                  aria-label="主机密钥策略"
+                  @change="onHostKeyPolicyChange"
+                />
+              </div>
               <div class="linux-settings__field linux-settings__field--wide">
                 <label>{{ channel.host_key_policy === "pinned" ? "SHA256 主机指纹" : "known_hosts 文件路径" }} <span>{{ channel.host_key_policy === "pinned" ? "必选" : "可选" }}</span></label>
                 <input v-model="channel.host_key_ref" class="settings-field__input" :placeholder="channel.host_key_policy === 'pinned' ? '例如：SHA256:xxxxxxxx' : '留空使用 Node 当前用户的 ~/.ssh/known_hosts'" />

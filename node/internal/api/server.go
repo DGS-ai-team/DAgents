@@ -65,6 +65,7 @@ type Server struct {
 	linuxChannels         *store.LinuxChannelStore
 	linuxProvider         *tools.LinuxShellProvider
 	llmConfigs            *store.LLMConfigStore
+	llmConfigMigrationErr error        // prevents settings snapshots from discarding an unimported legacy LLM source
 	llmRefMu              sync.RWMutex // serializes Agent snapshot writes against LLM profile removal
 	nodeSettings          *store.NodeSettingsStore
 	stream                *stream.Hub // 进程内 SSE 事件总线
@@ -79,7 +80,6 @@ type Server struct {
 	autoConfigMu          sync.Mutex
 	registrar             *manage.Registrar
 	updateChecker         *manage.UpdateChecker
-	packageUploader       *manage.PackageUploader
 	control               *manage.ControlClient
 	feedbackStore         *store.FeedbackStore
 	feedbackRateMu        sync.Mutex
@@ -273,14 +273,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 	}
 	var llmConfigStore *store.LLMConfigStore
+	var llmConfigMigrationErr error
 	if !o.skipStore {
 		opened, err := store.OpenLLMConfigs(cfg.LLMConfigsDBPath(), cfg.RuntimeDir())
 		if err != nil {
 			logger.Error("llm configs store init failed", "error", err, "path", cfg.LLMConfigsDBPath())
 		} else {
 			llmConfigStore = opened
+			existingProfiles, countErr := llmConfigStore.Count(context.Background())
+			llmStoreWasEmpty := countErr == nil && existingProfiles == 0
 			if err := store.EnsureDefaultLLMConfig(context.Background(), llmConfigStore, cfg); err != nil {
-				logger.Error("llm default config initialization failed", "error", err)
+				llmConfigMigrationErr = err
+				logger.Error("LLM profile migration failed; Node settings writes are disabled to preserve the legacy source. Fix the reported cause and restart Node", "error", err)
 			} else if records, err := llmConfigStore.List(context.Background()); err != nil {
 				logger.Error("llm configs list failed", "error", err)
 			} else if len(records) > 0 {
@@ -292,6 +296,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 				llmRuntime.SyncFromConfig(cfg)
 				if key, err := llmConfigStore.ResolveAPIKey(context.Background(), cfg.LLM.ActiveProfileID()); err == nil {
 					llmRuntime.SetAPIKey(key)
+				}
+				if o.nodeSettings != nil {
+					if oldSettings, loadErr := o.nodeSettings.Load(context.Background()); loadErr == nil && oldSettings != nil && store.HasLegacyLLMSettings(oldSettings.LLM) {
+						if saveErr := o.nodeSettings.Save(context.Background(), cfg); saveErr != nil {
+							logger.Warn("compact legacy Node LLM settings failed", "error", saveErr)
+						}
+					}
+				}
+				if llmStoreWasEmpty && o.configPath != "" && configPathWritable(o.configPath) {
+					if err := config.SaveBootstrapFile(o.configPath, cfg); err != nil {
+						logger.Warn("slim bootstrap YAML after LLM seed failed", "path", o.configPath, "error", err)
+					}
 				}
 			}
 		}
@@ -472,7 +488,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var registrar *manage.Registrar
 	var updateChecker *manage.UpdateChecker
-	var packageUploader *manage.PackageUploader
 	if cfg.Manage.Enabled {
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
@@ -504,7 +519,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		// Node still exposes an on-demand check using effective runtime config.
 		// This keeps secrets and node_settings.db inside Node.
 		updateChecker = manage.NewUpdateChecker(cfg, logger)
-		packageUploader = manage.NewPackageUploader(cfg, logger)
 	}
 	control := manage.NewControlClient(cfg)
 	var feedbackStore *store.FeedbackStore
@@ -583,6 +597,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		linuxChannels:         linuxChannelStore,
 		linuxProvider:         linuxProvider,
 		llmConfigs:            llmConfigStore,
+		llmConfigMigrationErr: llmConfigMigrationErr,
 		nodeSettings:          o.nodeSettings,
 		sessions:              mgr,
 		triggerStore:          triggerStore,
@@ -591,7 +606,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		autonomyStore:         autonomyStore,
 		registrar:             registrar,
 		updateChecker:         updateChecker,
-		packageUploader:       packageUploader,
 		control:               control,
 		feedbackStore:         feedbackStore,
 		feedbackRate:          make(map[string][]time.Time),

@@ -362,8 +362,9 @@ type LLMConfig struct {
 	Model           string                      `yaml:"model"`
 	APIKeyEnv       string                      `yaml:"api_key_env"`
 	Mock            bool                        `yaml:"mock"`
-	Thinking        string                      `yaml:"thinking"`         // provider thinking：enabled | disabled
-	ReasoningEffort string                      `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	Thinking        string                      `yaml:"thinking"` // provider thinking：enabled | disabled
+	ReasoningEffort string                      `yaml:"reasoning_effort"`
+	ThinkingBudget  *int                        `yaml:"thinking_budget,omitempty"`
 	// max_steps 属于 Agent config_snapshot（defaults.llm.max_steps），不写入 Node YAML。
 }
 
@@ -376,6 +377,7 @@ type LLMProfileConfig struct {
 	Mock            bool   `yaml:"mock"`
 	Thinking        string `yaml:"thinking,omitempty"`
 	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
+	ThinkingBudget  *int   `yaml:"thinking_budget,omitempty"`
 	// MultimodalEnabled 为 nil 时视为 false；切换档案时同步到顶层 multimodal.enabled。
 	MultimodalEnabled *bool `yaml:"multimodal_enabled,omitempty"`
 }
@@ -418,7 +420,7 @@ type ManageRegistrationConfig struct {
 // 1. 读文件并 os.ExpandEnv；
 // 2. yaml.Unmarshal 到 Config；
 // 3. ResolveNodeID（`.runtime/node/node_id` 持久化）；
-// 5. Validate 后返回。
+// 5. ValidateBootstrap 后返回；Node 业务配置在读取 node_settings.db 后再完整校验。
 //
 // 异常：文件不存在、YAML 语法错误、校验失败均向上返回 error。
 func LoadFile(path string) (*Config, error) {
@@ -437,7 +439,7 @@ func LoadFile(path string) (*Config, error) {
 	if err := cfg.ResolveNodeID(); err != nil {
 		return nil, err
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.ValidateBootstrap(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
@@ -534,8 +536,10 @@ func (c *Config) SkillsRoot() string {
 	return filepath.Join(c.RuntimeDir(), "skills")
 }
 
-// Validate 校验 Node 启动所需的最小字段集。
-func (c *Config) Validate() error {
+// ValidateBootstrap checks only fields needed to locate and contact this Node.
+// Other business settings may be stale in an older YAML file and are overlaid
+// from node_settings.db before full validation during Node startup.
+func (c *Config) ValidateBootstrap() error {
 	if strings.TrimSpace(c.NodeID) == "" {
 		return fmt.Errorf("node_id is required")
 	}
@@ -544,6 +548,15 @@ func (c *Config) Validate() error {
 	}
 	if _, err := url.Parse(c.Local.Endpoint); err != nil {
 		return fmt.Errorf("local.endpoint invalid: %w", err)
+	}
+	return nil
+}
+
+// Validate checks the fully assembled Node configuration after persistent
+// settings have been overlaid on the bootstrap YAML.
+func (c *Config) Validate() error {
+	if err := c.ValidateBootstrap(); err != nil {
+		return err
 	}
 	if c.Manage.Enabled && strings.TrimSpace(c.Manage.URL) == "" {
 		return fmt.Errorf("manage.url is required when manage.enabled is true")

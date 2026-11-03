@@ -3,9 +3,11 @@ package session
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
@@ -35,6 +37,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		rt.mu.Lock()
 		messages := append([]llm.Message(nil), rt.messages...)
 		historyRevision := rt.historyRevision
+		projectionBoundary := rt.toolCallProjectionHiddenThroughGeneration
 		queuePending := rt.queue.Len()
 		if rt.inputBox != nil {
 			queuePending += rt.inputBox.Len()
@@ -44,6 +47,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		pending := rt.pendingSnapshot()
 		lifecycle := rt.turnCoordinator.Snapshot()
 		hasActiveTurn := lifecycle.HasActiveTurn
+		lifecycle = hideClearedToolCallProjection(lifecycle, projectionBoundary)
 		rt.mu.Unlock()
 		rt.lifecycleMu.Unlock()
 		view := m.buildHydrateView(sessionID, messages, pending, lifecycle, rt.lifecycleEventSequence(), historyRevision, queuePending, hasActiveTurn, notifySeq, ackSeq)
@@ -70,9 +74,17 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		hasActiveTurn = lifecycle.HasActiveTurn
 	}
 	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
+	lifecycle = hideClearedToolCallProjection(lifecycle, rec.RuntimeState.ToolCallProjectionHiddenThroughGeneration)
 	view := m.buildHydrateView(sessionID, rec.Messages, pending, lifecycle, lifecycleSeq, rec.RuntimeState.HistoryRevision, queuePending, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq)
 	view.ChildAgents, _ = m.ListChildAgents(sessionID)
 	return view, nil
+}
+
+func hideClearedToolCallProjection(snapshot turn.CoordinatorSnapshot, throughGeneration uint64) turn.CoordinatorSnapshot {
+	if snapshot.Generation <= throughGeneration {
+		snapshot.ActiveToolCalls = nil
+	}
+	return snapshot
 }
 
 func (m *Manager) buildHydrateView(
@@ -96,6 +108,7 @@ func (m *Manager) buildHydrateView(
 		mediaByCall := media.RehydrateFromMessages(reg, messages, callIndex)
 		EnrichTranscriptMedia(transcript, mediaByCall)
 	}
+	transcript = appendActiveToolCalls(transcript, lifecycle.ActiveToolCalls)
 	turnState := buildTurnStateView(lifecycle, lifecycleSeq)
 	turnState.HistoryRevision = historyRevision
 	return &HydrateView{
@@ -111,4 +124,42 @@ func (m *Manager) buildHydrateView(
 		HasUnread:       notifySeq > ackSeq,
 		ChildAgents:     []ChildAgentView{},
 	}
+}
+
+// appendActiveToolCalls adds a read-only view of calls in the coordinator's
+// current batch. The lifecycle snapshot is atomic with the
+// history snapshot; deduplication also avoids moving/repeating calls already
+// accepted into the durable transcript (including a result that raced ahead).
+func appendActiveToolCalls(transcript []TranscriptEntry, calls []turn.ToolCallProjection) []TranscriptEntry {
+	if len(calls) == 0 {
+		return transcript
+	}
+	seen := make(map[string]bool, len(transcript))
+	for _, entry := range transcript {
+		if entry == nil {
+			continue
+		}
+		if id, ok := entry["blockId"].(string); ok && strings.TrimSpace(id) != "" {
+			seen[strings.TrimSpace(id)] = true
+		}
+		if data, ok := entry["data"].(map[string]any); ok {
+			if id, ok := data["tool_call_id"].(string); ok && strings.TrimSpace(id) != "" {
+				seen[strings.TrimSpace(id)] = true
+			}
+		}
+	}
+	for _, call := range calls {
+		id := strings.TrimSpace(call.ID)
+		if id == "" || seen[id] || tools.IsAskUserInformation(call.ToolName) {
+			continue
+		}
+		entry := toolCallEntryFromCall(llm.ToolCall{
+			ID:       id,
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: call.ToolName, Arguments: string(call.Arguments)},
+		}, nil)
+		transcript = append(transcript, entry)
+		seen[id] = true
+	}
+	return transcript
 }

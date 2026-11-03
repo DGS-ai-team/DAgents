@@ -86,6 +86,8 @@ class PlaywrightDriver:
             return {"ok": True, "detail": {"driver": "playwright-v2", "protocol_version": 2}}
         if op == "view":
             return await self._view(req)
+        if op == "control":
+            return await self._control(req)
         if op in {"call", "start", "stop"}:
             if op != "call":
                 req = {**req, "op": "call", "actions": [{"op": op}]}
@@ -107,7 +109,7 @@ class PlaywrightDriver:
                 async with state.lock:
                     live_pages = [(key, item.page) for key, item in state.pages.items() if not item.page.is_closed()]
                     if not live_pages:
-                        return self._error("browser_not_started", "browser session has no open pages")
+                        return {"ok": True, "detail": {"pages": [], "page_id": "", "url": "", "title": ""}}
                     selected = next(((key, page) for key, page in live_pages if key == page_id), None) if page_id else live_pages[-1]
                     if selected is None:
                         return self._error("page_not_found", "page does not belong to this browser session")
@@ -118,11 +120,82 @@ class PlaywrightDriver:
                         return self._error("image_too_large", "browser view screenshot exceeds the 4 MiB limit")
                     title = await page.title()
                     url = page.url
-                    return {"ok": True, "url": url, "title": title, "detail": {"pages": pages, "page_id": selected_id, "title": title, "url": url, "mime": "image/png", "image_base64": base64.b64encode(screenshot).decode("ascii")}}
+                    history = await self._navigation_history(state, page)
+                    return {"ok": True, "url": url, "title": title, "detail": {"pages": pages, "page_id": selected_id, "title": title, "url": url, **history, "mime": "image/png", "image_base64": base64.b64encode(screenshot).decode("ascii")}}
         except TimeoutError:
             return self._error("view_timeout", "browser view timed out after 5 seconds")
         except Exception as exc:
             return self._error("view_failed", str(exc))
+
+    async def _navigation_history(self, state: SessionState, page: Page) -> dict[str, bool]:
+        client = None
+        try:
+            client = await state.context.new_cdp_session(page)
+            history = await client.send("Page.getNavigationHistory")
+            index = history["currentIndex"]
+            return {"can_go_back": index > 0, "can_go_forward": index < len(history["entries"]) - 1}
+        except Exception:
+            return {"can_go_back": False, "can_go_forward": False}
+        finally:
+            if client is not None:
+                await client.detach()
+
+    async def _control(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Desktop navigation shares the Agent context without rebuilding refs.
+
+        Only explicit, bounded navigation is accepted; no page scripts or
+        generic tool actions are exposed through the Desktop route.
+        """
+        session_key = str(req.get("session_key") or "").strip()
+        command = str(req.get("command") or "").strip()
+        page_id = str(req.get("page_id") or "").strip()
+        url = str(req.get("url") or "").strip()
+        if not session_key or command not in {"navigate", "new", "back", "forward", "reload", "close"}:
+            return self._error("invalid_action", "invalid browser command")
+        if command == "navigate":
+            try:
+                parsed = urlsplit(url)
+                allowed = parsed.scheme in {"http", "https"} and bool(parsed.hostname) and parsed.username is None and navigation_url_allowed(url, self.settings.allowed_url_schemes)
+            except ValueError:
+                allowed = False
+            if not allowed:
+                return self._error("navigation_blocked", "only allowed HTTP(S) URLs can be opened")
+        state = self._sessions.get(session_key)
+        if state is None:
+            if page_id or command not in {"navigate", "new"}:
+                return self._error("browser_not_started", "browser session is not started")
+            state, err = await self._start({**req, "headed": False})
+            if err is not None:
+                return err
+            # _start already supplies a blank page for a fresh context.
+            if command == "new":
+                command = "select"
+        async with state.lock:
+            selected = state.pages.get(page_id) if page_id else next((p for p in reversed(list(state.pages.values())) if not p.page.is_closed()), None)
+            if page_id and (selected is None or selected.page.is_closed()):
+                return {**self._error("page_not_found", "page does not belong to this browser session"), "detail": {"started": True}}
+            try:
+                if command == "new" or (selected is None and command == "navigate"):
+                    selected = await self._register_page(state, await state.context.new_page())
+                if selected is None:
+                    return {**self._error("page_not_found", "no open page"), "detail": {"started": True}}
+                page = selected.page
+                options = {"wait_until": "domcontentloaded", "timeout": 30000}
+                if command == "navigate":
+                    await page.goto(url, **options)
+                elif command == "back":
+                    await page.go_back(**options)
+                elif command == "forward":
+                    await page.go_forward(**options)
+                elif command == "reload":
+                    await page.reload(**options)
+                elif command == "close":
+                    await page.close()
+                    state.pages.pop(selected.page_id, None)
+                    selected = next((p for p in reversed(list(state.pages.values())) if not p.page.is_closed()), None)
+                return {"ok": True, "detail": {"started": True, "page_id": selected.page_id if selected else ""}}
+            except Exception as exc:
+                return {**self._error(self._error_code(exc), str(exc)), "detail": {"started": True, "page_id": selected.page_id if selected else ""}}
 
     async def _ensure_playwright(self) -> Playwright:
         if self._playwright is None:

@@ -148,10 +148,14 @@ func assistantEntries(msg llm.Message) []TranscriptEntry {
 		})
 	}
 	if c := strings.TrimSpace(msg.Content); c != "" {
-		out = append(out, TranscriptEntry{
+		entry := TranscriptEntry{
 			"kind": "assistant",
 			"text": c,
-		})
+		}
+		if llm.IsPartialAssistantMessage(msg) {
+			entry["partial"] = true
+		}
+		out = append(out, entry)
 	}
 	for _, tc := range msg.ToolCalls {
 		if tools.IsAskUserInformation(tc.Function.Name) {

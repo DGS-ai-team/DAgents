@@ -81,7 +81,7 @@ export const VIEW_META = {
   },
   marketplace: {
     title: "能力市场",
-    subtitle: "浏览、上传与发布 Node 扩展能力包",
+    subtitle: "浏览已发布 Node 扩展能力包",
   },
   nodes: {
     title: "Node 列表",

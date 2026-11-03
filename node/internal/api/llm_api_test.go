@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -15,11 +16,11 @@ func testConfigDeepSeek(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := testConfig(t)
 	cfg.LLM.Provider = "deepseek"
-	cfg.LLM.Model = "deepseek-chat"
+	cfg.LLM.Model = "deepseek-v4-pro"
 	return cfg
 }
 
-func TestHandleLLMSettingsGetPatch(t *testing.T) {
+func TestLLMSettingsExposesCurrentProfileCapability(t *testing.T) {
 	srv := NewServer(testConfigDeepSeek(t), nil, WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -29,49 +30,83 @@ func TestHandleLLMSettingsGetPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var got llm.LLMSettingsView
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+	var view llm.LLMSettingsView
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
 		t.Fatal(err)
 	}
-	if got.Model != "deepseek-chat" || !got.ThinkingSupported || got.Thinking != "enabled" {
-		t.Fatalf("unexpected settings: %+v", got)
-	}
-	if got.ThinkingControl != llm.ThinkingControlEffort || got.ThinkingSecondaryLabel != "推理强度" {
-		t.Fatalf("unexpected thinking controls: %+v", got)
+	if view.Model != "deepseek-v4-pro" || !view.ThinkingSupported || view.ThinkingControl != llm.ThinkingControlEffort {
+		t.Fatalf("settings = %+v", view)
 	}
 
-	patchBody := []byte(`{"thinking":"disabled"}`)
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/llm/settings", bytes.NewReader(patchBody))
+	capResp, err := http.Get(ts.URL + "/v1/llm/capabilities?provider=openai&model=gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer capResp.Body.Close()
+	var capability map[string]any
+	if err := json.NewDecoder(capResp.Body).Decode(&capability); err != nil {
+		t.Fatal(err)
+	}
+	if capability["supported"] != false {
+		t.Fatalf("unknown capability = %#v", capability)
+	}
+}
+
+func TestLLMSettingsPatchCannotSetThinkingGlobally(t *testing.T) {
+	srv := NewServer(testConfigDeepSeek(t), nil, WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	for _, body := range []string{`{"thinking":"disabled"}`, `{"active_profile":"default","thinking":"disabled"}`} {
+		req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/llm/settings", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("body %s status = %d", body, resp.StatusCode)
+		}
+	}
+}
+
+func TestLLMSettingsActiveProfileRequiresStores(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := testConfigDeepSeek(t)
+	if err := config.SaveFile(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := `{"active_profile":"another-profile"}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/llm/settings", bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	patchResp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer patchResp.Body.Close()
-	if patchResp.StatusCode != http.StatusOK {
-		t.Fatalf("patch status = %d", patchResp.StatusCode)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want fail-closed 503", resp.StatusCode)
 	}
-	var patched llm.LLMSettingsView
-	if err := json.NewDecoder(patchResp.Body).Decode(&patched); err != nil {
-		t.Fatal(err)
+	if cfg.LLM.ActiveProfileID() != "default" {
+		t.Fatalf("active profile changed without stores: %q", cfg.LLM.ActiveProfileID())
 	}
-	if patched.Thinking != "disabled" {
-		t.Fatalf("patched = %+v", patched)
-	}
-
-	infoResp, err := http.Get(ts.URL + "/v1/node/info")
+	reloaded, err := config.LoadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer infoResp.Body.Close()
-	var info agentInfoResponse
-	if err := json.NewDecoder(infoResp.Body).Decode(&info); err != nil {
-		t.Fatal(err)
-	}
-	if info.LLM.Thinking != "disabled" || info.LLM.Model != "deepseek-chat" {
-		t.Fatalf("agent info llm = %+v", info.LLM)
+	if reloaded.LLM.ActiveProfileID() != "default" {
+		t.Fatalf("active profile persisted to YAML without stores: %q", reloaded.LLM.ActiveProfileID())
 	}
 }

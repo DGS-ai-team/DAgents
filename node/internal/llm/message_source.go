@@ -135,6 +135,14 @@ func EffectiveMessageProvenance(message Message) MessageProvenance {
 	return MessageProvenance{}
 }
 
+// IsPartialAssistantMessage identifies a text-only assistant fragment that was
+// persisted after a provider failure. It remains ordinary model history while
+// allowing hydrate clients to distinguish it from a completed response.
+func IsPartialAssistantMessage(message Message) bool {
+	return strings.EqualFold(strings.TrimSpace(message.Role), "assistant") &&
+		message.Provenance != nil && strings.EqualFold(strings.TrimSpace(message.Provenance.Operation), "partial_response")
+}
+
 // IsMessageSource matches structured message provenance.
 func IsMessageSource(message Message, kind MessageSourceKind, form MessageSourceForm, producer string) bool {
 	if strings.TrimSpace(message.Role) != "user" && kind != MessageSourceTool {

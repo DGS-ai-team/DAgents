@@ -18,6 +18,12 @@ const canApplyInUI = computed(() => data.value?.apply_available === true
   && data.value?.update_enabled === true
   && data.value?.manage_reachable === true
   && !!data.value?.upgrade_available);
+const updateMessage = computed(() => {
+  const message = String(data.value?.message || "");
+  return message === "Manage 未启用，无法检查更新"
+    ? "管理平台未启用，无法检查更新。"
+    : message;
+});
 
 async function load() {
   loading.value = true;
@@ -36,7 +42,7 @@ async function applyUpgrade() {
   if (!canApplyInUI.value || applying.value) return;
   const latest = String(data.value?.latest_version || "").trim();
   if (!latest) return;
-  if (!await confirmDesktopAction(`升级到 ${latest}？升级期间 Node 将短暂停止。`)) return;
+  if (!await confirmDesktopAction(`升级到 ${latest}？升级期间本机服务将短暂停止。`)) return;
   applying.value = true;
   error.value = "";
   try {
@@ -85,12 +91,12 @@ onMounted(load);
             <span class="command-stat__value">{{ data.platform || "—" }}</span>
           </div>
           <div class="command-stat">
-            <span class="command-stat__label">Manage</span>
+            <span class="command-stat__label">管理平台连接</span>
             <span class="command-stat__value">{{ data.manage_reachable ? "可达" : "不可达" }}</span>
           </div>
         </div>
 
-        <p v-if="data.message" class="command-panel__hint">{{ data.message }}</p>
+        <p v-if="updateMessage" class="command-panel__hint">{{ updateMessage }}</p>
 
         <section v-if="data.release_notes" class="command-section">
           <h3 class="command-section__title">更新说明</h3>
@@ -100,13 +106,13 @@ onMounted(load);
         <section v-if="data.upgrade_available" class="command-section">
           <h3 class="command-section__title">安装</h3>
           <template v-if="canApplyInUI">
-            <p class="command-panel__hint">Desktop 将向 Node 请求已校验的安装包，并在确认 Node 空闲后启动本机安装。</p>
+            <p class="command-panel__hint">桌面应用将向本机服务请求已校验的安装包，并在确认本机服务空闲后启动安装。</p>
             <button type="button" class="btn btn--primary btn--sm" :disabled="applying" @click="applyUpgrade">
               {{ applying ? "升级中…" : `升级到 ${data.latest_version}` }}
             </button>
           </template>
           <template v-else>
-            <p class="command-panel__hint">当前运行环境无法安装 Desktop 更新；请在受支持的 Desktop Shell 中打开此页面。</p>
+            <p class="command-panel__hint">当前运行环境无法安装桌面应用更新；请在桌面应用中打开此页面。</p>
           </template>
         </section>
       </template>

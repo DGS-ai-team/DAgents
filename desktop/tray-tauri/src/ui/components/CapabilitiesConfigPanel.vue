@@ -3,7 +3,7 @@ import { onMounted } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
-const { loading, saving, error, statusMessage, configPath, configWritable, form, load, save } =
+const { loading, saving, error, statusMessage, dirty, configPath, configWritable, form, load, save } =
   useSetupConfig();
 
 async function saveCapabilities() {
@@ -34,20 +34,21 @@ onMounted(load);
 
 <template>
   <ConfigPanelShell
-    title="能力设置"
-    subtitle="进程级服务与配额；各 Agent 的工具组在 Agents 中配置。运行中的子 Agent 见侧栏。"
+    title="共享服务与运行限制"
+    subtitle="配置本机服务及其可用集成；智能体仍需单独授予对应工具权限。"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"
     :config-writable="configWritable"
     :error="error"
     :status-message="statusMessage"
+    :dirty="dirty"
     @save="saveCapabilities"
   >
     <section class="settings-section">
       <h2 class="settings-section__title">共享服务</h2>
       <p class="settings-section__desc">
-        关闭后，对应工具组不会出现在 Agent 创建与设置中。详情随开关展开。
+        关闭后，对应能力不会出现在智能体创建与设置中。详情随开关展开。
       </p>
       <div class="setup-config-panel__toggles">
         <label class="settings-toggle">
@@ -61,10 +62,6 @@ onMounted(load);
           <input v-model="form.features.wecom_enabled" type="checkbox" />
           <span>企业微信推送</span>
         </label>
-        <label class="settings-toggle">
-          <input v-model="form.features.raw_message_history_enabled" type="checkbox" />
-          <span>原始消息记录</span>
-        </label>
       </div>
     </section>
 
@@ -74,67 +71,56 @@ onMounted(load);
         <span class="badge badge--beta" title="试验功能">Beta</span>
       </h2>
       <p class="settings-section__desc">
-        启用后 Node 会自动启动本机浏览器服务（127.0.0.1:18766）。源码部署需将 dagents-browser 放在 Node 同级目录。
+        启用后，智能体可在获准的工具权限范围内浏览网页和截取页面；当前应用会自动启动并管理浏览器服务。
       </p>
-      <div class="setup-config-panel__field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">默认超时（ms）</span>
-          <input
-            v-model.number="form.browser.default_timeout_ms"
-            class="settings-field__input"
-            type="number"
-            min="1000"
-            step="1000"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">最大并发会话</span>
-          <input
-            v-model.number="form.browser.max_sessions"
-            class="settings-field__input"
-            type="number"
-            min="1"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">截图目录</span>
-          <input
-            v-model="form.browser.output_dir"
-            class="settings-field__input"
-            type="text"
-            autocomplete="off"
-            placeholder="browser"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">Chrome 路径（可选）</span>
-          <input
-            v-model="form.browser.chrome_path"
-            class="settings-field__input"
-            type="text"
-            autocomplete="off"
-            placeholder="留空则自动查找"
-          />
-        </label>
-      </div>
-      <div class="setup-config-panel__toggles setup-config-panel__toggles--row">
-        <label class="settings-toggle">
-          <input v-model="form.browser.headed" type="checkbox" />
-          <span>显示浏览器窗口</span>
-        </label>
-        <label class="settings-toggle">
-          <input v-model="form.browser.ignore_https_errors" type="checkbox" />
-          <span>忽略 HTTPS 证书错误</span>
-        </label>
-      </div>
+      <details class="settings-section__advanced browser-settings__advanced">
+        <summary>
+          <span>高级浏览器设置</span>
+          <small>证书校验例外：{{ form.browser.ignore_https_errors ? "已开启" : "关闭" }}</small>
+        </summary>
+        <div class="setup-config-panel__field-grid">
+          <label class="settings-field">
+            <span class="settings-field__label">默认超时（ms）</span>
+            <input v-model.number="form.browser.default_timeout_ms" class="settings-field__input" type="number" min="1000" step="1000" />
+          </label>
+          <label class="settings-field">
+            <span class="settings-field__label">最大并发会话</span>
+            <input v-model.number="form.browser.max_sessions" class="settings-field__input" type="number" min="1" />
+          </label>
+          <label class="settings-field">
+            <span class="settings-field__label">截图目录</span>
+            <input v-model="form.browser.output_dir" class="settings-field__input" type="text" autocomplete="off" placeholder="browser" />
+          </label>
+          <label class="settings-field">
+            <span class="settings-field__label">Chrome 路径（可选）</span>
+            <input v-model="form.browser.chrome_path" class="settings-field__input" type="text" autocomplete="off" placeholder="留空则自动查找" />
+          </label>
+        </div>
+        <div class="setup-config-panel__toggles setup-config-panel__toggles--row">
+          <label class="settings-toggle">
+            <input v-model="form.browser.headed" type="checkbox" />
+            <span>显示浏览器窗口</span>
+          </label>
+          <label class="settings-toggle">
+            <input v-model="form.browser.ignore_https_errors" type="checkbox" />
+            <span>忽略 HTTPS 证书错误</span>
+          </label>
+        </div>
+        <p v-if="form.browser.ignore_https_errors" class="settings-section__warning" role="status">
+          已启用证书校验例外：浏览器会继续访问证书无效的网站，仅建议用于受控测试环境。
+        </p>
+        <p v-else class="settings-section__desc">关闭时会正常校验证书；仅在受控测试环境中开启证书例外。</p>
+      </details>
     </section>
 
     <section v-if="form.features.wecom_enabled" class="settings-section">
       <h2 class="settings-section__title">企业微信推送</h2>
       <p class="settings-section__desc">
-        使用群「消息推送」Webhook。Agent 仍需勾选「企业微信」工具组；保存后通常需重启 Node。
+        使用群「消息推送」Webhook。Agent 仍需勾选「企业微信」工具组；保存后通常需重启本机服务。
       </p>
-      <div class="setup-config-panel__field-grid">
+      <details class="settings-section__advanced wecom-settings__advanced">
+        <summary>配置企业微信 Webhook</summary>
+        <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">Webhook 地址或 Key</span>
           <input
@@ -165,7 +151,8 @@ onMounted(load);
             placeholder="https://qyapi.weixin.qq.com"
           />
         </label>
-      </div>
+        </div>
+      </details>
       <div v-if="form.wecom.has_webhook_key" class="setup-config-panel__toggles setup-config-panel__toggles--row">
         <label class="settings-toggle">
           <input v-model="form.wecom.clear_webhook_key" type="checkbox" />
@@ -174,9 +161,23 @@ onMounted(load);
       </div>
     </section>
 
-    <section class="settings-section">
-      <h2 class="settings-section__title">运行配额</h2>
-      <p class="settings-section__desc">同时启用的技能数量与定时任务轮询间隔（进程级）。</p>
+    <details class="settings-section__advanced">
+      <summary>
+        <span>诊断：原始消息记录</span>
+        <small>{{ form.features.raw_message_history_enabled ? "已启用" : "关闭" }}</small>
+      </summary>
+      <p class="settings-section__desc">用于排查消息处理问题；记录可能包含对话内容，请按需开启。</p>
+      <label class="settings-toggle">
+        <input v-model="form.features.raw_message_history_enabled" type="checkbox" />
+        <span>保存原始消息记录</span>
+      </label>
+    </details>
+
+    <details class="settings-section">
+      <summary class="settings-section__title">高级设置</summary>
+      <p class="settings-section__desc">调整当前应用的运行限制。通常无需修改。</p>
+      <h3 class="settings-section__title">运行限制</h3>
+      <p class="settings-section__desc">同时启用的技能数量与定时任务检查间隔。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">同时启用技能数上限</span>
@@ -188,7 +189,7 @@ onMounted(load);
           />
         </label>
         <label class="settings-field">
-          <span class="settings-field__label">定时任务轮询（秒）</span>
+          <span class="settings-field__label">定时任务检查间隔（秒）</span>
           <input
             v-model.number="form.features.triggers_poll_seconds"
             class="settings-field__input"
@@ -197,13 +198,11 @@ onMounted(load);
           />
         </label>
       </div>
-    </section>
+    </details>
 
-    <section class="settings-section">
-      <h2 class="settings-section__title">子 Agent 配额</h2>
-      <p class="settings-section__desc">
-        进程级并发与存活上限。是否启用由各 Agent 的「子智能体」工具组决定。
-      </p>
+    <details class="settings-section">
+      <summary class="settings-section__title">子智能体运行限制</summary>
+      <p class="settings-section__desc">设置当前应用中子智能体的存活时间、轮次和并发上限。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">默认存活时间（秒）</span>
@@ -251,6 +250,39 @@ onMounted(load);
           />
         </label>
       </div>
-    </section>
+    </details>
   </ConfigPanelShell>
 </template>
+
+<style scoped>
+.settings-section__advanced {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-section__advanced > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.settings-section__advanced > summary small {
+  color: var(--color-text-subtle);
+}
+
+.settings-section__advanced .setup-config-panel__field-grid,
+.settings-section__advanced .setup-config-panel__toggles {
+  margin-top: 12px;
+}
+
+.settings-section__warning {
+  margin: 12px 0 0;
+  color: var(--color-warning-strong, #a54c00);
+  font-size: 12px;
+}
+</style>

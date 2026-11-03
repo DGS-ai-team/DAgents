@@ -7,6 +7,7 @@ import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
+  canManage: { type: Boolean, default: false },
   nodeNoGroups: { type: Boolean, default: false },
   nodeDiscoveryGroup: { type: String, default: "" },
 });
@@ -32,7 +33,7 @@ const statusLine = computed(() => {
   return `${stats.online} 个 Node 在线 · ${stats.workgroupsActive} 个工作组进行中`;
 });
 
-const modules = [
+const modules = computed(() => [
   {
     id: "workgroup",
     label: "工作组",
@@ -42,10 +43,12 @@ const modules = [
   {
     id: "marketplace",
     label: "能力市场",
-    hint: "上传与分发 Skills、Hooks、External Tools",
+    hint: props.canManage
+      ? "发布 Skills、Hook 插件与外置工具"
+      : "浏览已发布的 Skills、Hook 插件与外置工具",
     tone: "marketplace",
   },
-];
+]);
 
 async function loadDashboard() {
   loading.value = true;

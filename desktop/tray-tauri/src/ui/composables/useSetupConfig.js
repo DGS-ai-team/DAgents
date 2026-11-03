@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
 const emptyForm = () => ({
@@ -27,6 +27,9 @@ export function useSetupConfig() {
   const configPath = ref("");
   const configWritable = ref(false);
   const form = reactive(emptyForm());
+  const snapshot = () => JSON.stringify(form);
+  const savedSnapshot = ref("");
+  const dirty = computed(() => !!savedSnapshot.value && snapshot() !== savedSnapshot.value);
 
   function fillForm(data) {
     if (!data) return;
@@ -58,6 +61,7 @@ export function useSetupConfig() {
     form.wecom.clear_webhook_key = false;
     Object.assign(form.tools, data.tools || {});
     Object.assign(form.hooks, data.hooks || {});
+    savedSnapshot.value = snapshot();
   }
 
   async function load() {
@@ -72,6 +76,10 @@ export function useSetupConfig() {
       loading.value = false;
     }
   }
+
+  watch(form, () => {
+    if (dirty.value) statusMessage.value = "";
+  }, { deep: true });
 
   async function save(patch, { successHint } = {}) {
     if (!configWritable.value) {
@@ -100,6 +108,7 @@ export function useSetupConfig() {
     saving,
     error,
     statusMessage,
+    dirty,
     configPath,
     configWritable,
     form,

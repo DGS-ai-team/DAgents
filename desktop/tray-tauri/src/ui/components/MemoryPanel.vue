@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import { confirmDesktopAction } from "../utils/desktopDialogs.js";
+import SettingsSectionHeader from "./SettingsSectionHeader.vue";
+import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   agentId: { type: String, required: true },
@@ -159,20 +161,20 @@ defineExpose({ refresh });
 
 <template>
   <section class="memory-panel">
-    <div class="memory-panel__header">
-      <div>
-        <h3 class="memory-panel__title">长期记忆</h3>
-        <p class="memory-panel__description">查看并维护该智能体可使用的结构化记忆条目。</p>
-      </div>
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        :disabled="loading || refreshing"
-        @click="refresh"
-      >
-        {{ refreshing ? "刷新中…" : "刷新" }}
-      </button>
-    </div>
+    <SettingsSectionHeader title="记忆" description="查看并维护该智能体可使用的结构化记忆条目。">
+      <template #actions>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm desktop-icon-button"
+          :disabled="loading || refreshing"
+          :aria-label="refreshing ? '正在刷新记忆' : '刷新记忆'"
+          :title="refreshing ? '正在刷新记忆' : '刷新记忆'"
+          @click="refresh"
+        >
+          <UiIcon name="refresh-cw" :size="16" />
+        </button>
+      </template>
+    </SettingsSectionHeader>
 
     <div class="memory-panel__meta">
       <span class="memory-panel__scope">当前生效：{{ currentScopeLabel }}</span>
@@ -211,7 +213,9 @@ defineExpose({ refresh });
     <p v-if="loading" class="memory-panel__state">加载中…</p>
     <div v-else-if="error" class="memory-panel__error">
       <span>{{ error }}</span>
-      <button type="button" class="btn btn--ghost btn--sm" @click="refresh">重试</button>
+      <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" aria-label="重试加载记忆" title="重试加载记忆" @click="refresh">
+        <UiIcon name="refresh-cw" :size="16" />
+      </button>
     </div>
     <p v-else-if="!visibleEntries.length" class="memory-panel__state">当前作用域暂无记忆条目。</p>
     <ul v-else class="memory-panel__list">
@@ -245,14 +249,18 @@ defineExpose({ refresh });
               </button>
             </template>
             <template v-else>
-              <button type="button" class="btn btn--ghost btn--xs" @click="startEdit(entry)">编辑</button>
+              <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" :aria-label="`编辑记忆：${entry.content.slice(0, 24)}`" :title="`编辑记忆：${entry.content.slice(0, 24)}`" @click="startEdit(entry)">
+                <UiIcon name="pencil" :size="15" />
+              </button>
               <button
                 type="button"
-                class="btn btn--ghost btn--xs memory-panel__delete"
+                class="btn btn--ghost btn--sm desktop-icon-button memory-panel__delete"
                 :disabled="deletingId === entry.id"
+                :aria-label="deletingId === entry.id ? '正在删除记忆' : '删除记忆'"
+                :title="deletingId === entry.id ? '正在删除记忆' : '删除记忆'"
                 @click="deleteEntry(entry)"
               >
-                {{ deletingId === entry.id ? "删除中…" : "删除" }}
+                <UiIcon name="trash" :size="15" />
               </button>
             </template>
           </div>
@@ -263,13 +271,6 @@ defineExpose({ refresh });
 </template>
 
 <style scoped>
-.memory-panel {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
-}
-
-.memory-panel__header,
 .memory-panel__meta,
 .memory-panel__error,
 .memory-panel__item-meta {
@@ -286,14 +287,6 @@ defineExpose({ refresh });
   color: var(--color-danger);
 }
 
-.memory-panel__title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.memory-panel__description,
 .memory-panel__hint,
 .memory-panel__state,
 .memory-panel__error {
@@ -305,7 +298,7 @@ defineExpose({ refresh });
 
 .memory-panel__meta {
   justify-content: flex-start;
-  margin-top: 12px;
+  margin-top: 0;
   font-size: 11.5px;
 }
 

@@ -33,7 +33,7 @@ async function chooseDirectory() {
     if (!result?.cancelled) pickerError.value = "没有获取到所选目录，请重试或直接输入路径。";
   } catch (error) {
     const message = String(error?.message || "").trim();
-    pickerError.value = message || "Node 暂时无法打开系统目录选择器，请直接输入绝对路径。";
+    pickerError.value = message || "桌面应用暂时无法打开系统目录选择器，请直接输入绝对路径。";
   } finally {
     selecting.value = false;
   }

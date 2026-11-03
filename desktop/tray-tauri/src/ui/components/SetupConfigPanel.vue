@@ -4,23 +4,26 @@ import ConfigPanelShell from "./ConfigPanelShell.vue";
 import LlmProfileModal from "./LlmProfileModal.vue";
 import UiIcon from "./UiIcon.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
+import { notifyConfigurationChanged } from "../utils/configurationEvents.js";
 
 const props = defineProps({
-  subtitle: { type: String, default: "管理模型配置、默认模型和 Manage 连接。" },
+  subtitle: { type: String, default: "管理模型配置、默认模型和管理平台连接。" },
+  requestedProfileId: { type: String, default: "" },
 });
+const emit = defineEmits(["profile-request-handled"]);
 
 const DEEPSEEK_DEFAULT = {
-  id: "deepseek-chat",
+  id: "deepseek-v4-flash",
   provider: "deepseek",
   base_url: "https://api.deepseek.com",
-  model: "deepseek-chat",
+  model: "deepseek-v4-flash",
   api_key: "",
   has_api_key: false,
   mock: false,
   multimodal_enabled: false,
 };
 
-const { loading, saving, error, statusMessage, configPath, configWritable, form, load, save } =
+const { loading, saving, error, statusMessage, dirty, configPath, configWritable, form, load, save } =
   useSetupConfig();
 
 const modalOpen = ref(false);
@@ -55,6 +58,7 @@ function openEditModal(id) {
 
 function closeModal() {
   modalOpen.value = false;
+  emit("profile-request-handled");
 }
 
 async function onModalConfirm(payload) {
@@ -70,6 +74,11 @@ async function onModalConfirm(payload) {
       clear_api_key: false,
       mock: !!payload.mock,
       multimodal_enabled: !!payload.multimodal_enabled,
+      thinking: payload.thinking || "enabled",
+      reasoning_effort: payload.reasoning_effort || "",
+      thinking_budget: payload.thinking_budget ?? null,
+      clear_reasoning_effort: !!payload.clear_reasoning_effort,
+      clear_thinking_budget: !!payload.clear_thinking_budget,
     });
   } else {
     const currentId = String(editingId.value || "").trim();
@@ -93,10 +102,16 @@ async function onModalConfirm(payload) {
     target.clear_api_key = !!payload.clear_api_key;
     target.mock = !!payload.mock;
     target.multimodal_enabled = !!payload.multimodal_enabled;
+    target.thinking = payload.thinking || "enabled";
+    target.reasoning_effort = payload.reasoning_effort || "";
+    target.thinking_budget = payload.thinking_budget ?? null;
+    target.clear_reasoning_effort = !!payload.clear_reasoning_effort;
+    target.clear_thinking_budget = !!payload.clear_thinking_budget;
     if (String(form.llm.active || "") === currentId) form.llm.active = nextId;
     editingId.value = nextId;
   }
   modalOpen.value = false;
+  emit("profile-request-handled");
   await saveConnection();
 }
 
@@ -138,7 +153,11 @@ function llmPayload() {
       api_key: p.api_key || undefined,
       clear_api_key: !!p.clear_api_key,
       mock: p.mock || p.provider === "mock",
-      // thinking / reasoning_effort 由状态栏运行时控制，不在连接配置里重复落盘
+      thinking: p.thinking || undefined,
+      reasoning_effort: p.reasoning_effort || "",
+      thinking_budget: p.thinking_budget ?? undefined,
+      clear_reasoning_effort: !!p.clear_reasoning_effort,
+      clear_thinking_budget: !!p.clear_thinking_budget,
       multimodal_enabled: !!p.multimodal_enabled,
     })),
   };
@@ -156,11 +175,12 @@ async function saveConnection() {
     error.value = "已启用管理平台时，请填写服务地址";
     return;
   }
-  await save({
+  const saved = await save({
     llm: llmPayload(),
     manage: managePayload(),
   });
   ensureProfiles();
+  if (saved) notifyConfigurationChanged("llm");
 }
 
 watch(
@@ -172,7 +192,29 @@ watch(
 onMounted(async () => {
   await load();
   ensureProfiles();
+  handleRequestedProfile();
 });
+
+watch(() => props.requestedProfileId, () => {
+  if (!loading.value) handleRequestedProfile();
+});
+
+function handleRequestedProfile() {
+  const id = String(props.requestedProfileId || "").trim();
+  if (!id) return;
+  if (modalOpen.value) {
+    error.value = "请先保存或关闭当前模型配置，再打开其他配置。";
+    emit("profile-request-handled");
+    return;
+  }
+  if (!profiles.value.some((profile) => profile.id === id)) {
+    error.value = `未找到模型配置「${id}」`;
+    emit("profile-request-handled");
+    return;
+  }
+  openEditModal(id);
+  emit("profile-request-handled");
+}
 </script>
 
 <template>
@@ -185,6 +227,7 @@ onMounted(async () => {
     :config-writable="configWritable"
     :error="error"
     :status-message="statusMessage"
+    :dirty="dirty"
     @save="saveConnection"
   >
     <section class="settings-section settings-section--llm">
@@ -252,7 +295,7 @@ onMounted(async () => {
         <h2 class="settings-section__title">管理平台</h2>
       </div>
       <p class="settings-section__desc">
-        连接到 Manage 后可注册本机 Node，并参与工作组协作。
+        连接到管理平台后可注册本机服务，并参与工作组协作。
       </p>
       <div class="setup-manage-stack">
         <label class="settings-toggle">
@@ -272,7 +315,7 @@ onMounted(async () => {
           />
         </label>
         <label class="settings-field settings-field--stack">
-          <span class="settings-field__label">Node Token</span>
+          <span class="settings-field__label">管理平台连接密钥</span>
           <input
             v-model="form.manage.node_token"
             class="settings-field__input"
@@ -286,7 +329,7 @@ onMounted(async () => {
         </label>
         <label v-if="form.manage.has_node_token" class="settings-toggle">
           <input v-model="form.manage.clear_node_token" type="checkbox" />
-          <span>清除已保存的 Node Token</span>
+          <span>清除已保存的管理平台连接密钥</span>
         </label>
         <label class="settings-toggle" :class="{ 'settings-toggle--disabled': manageFieldsDisabled }">
           <input

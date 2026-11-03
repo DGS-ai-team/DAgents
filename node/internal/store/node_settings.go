@@ -134,16 +134,10 @@ func SnapshotNodeSettings(cfg *config.Config) config.Config {
 	out.Listen = config.ListenConfig{}
 	out.Local = config.LocalConfig{}
 	out.RuntimeRoot = ""
-	// LLM 档案权威在 llm_configs.db；快照不保留 profiles/key。
-	out.LLM = config.LLMConfig{
-		Active:          cfg.LLM.Active,
-		Provider:        cfg.LLM.Provider,
-		BaseURL:         cfg.LLM.BaseURL,
-		Model:           cfg.LLM.Model,
-		Mock:            cfg.LLM.Mock,
-		Thinking:        cfg.LLM.Thinking,
-		ReasoningEffort: cfg.LLM.ReasoningEffort,
-	}
+	// llm_configs.db owns model profiles. node_settings keeps only the active
+	// profile reference; the flat fields below are runtime-derived and legacy
+	// copies are consumed only by the one-time migration in BootstrapNodeSettings.
+	out.LLM = config.LLMConfig{Active: cfg.LLM.Active}
 	return out
 }
 
@@ -159,9 +153,29 @@ func OverlayNodeSettings(dst *config.Config, snap *config.Config) {
 	dst.Listen = listen
 	dst.Local = local
 	dst.RuntimeRoot = runtimeRoot
+	// Older node_settings.json snapshots duplicated the active profile. Read
+	// those fields only as migration input so an empty llm_configs.db can be
+	// seeded without losing a user's existing setup.
+	if HasLegacyLLMSettings(snap.LLM) {
+		dst.LLM = snap.LLM
+	} else {
+		// Business settings come from node_settings and model settings from
+		// llm_configs. A legacy fat YAML is not an alternate source of truth.
+		active := strings.TrimSpace(snap.LLM.Active)
+		dst.LLM = ProductNodeSettingsSeed().LLM
+		dst.LLM.Active = active
+	}
 	if strings.TrimSpace(dst.RuntimeRoot) == "" {
 		dst.RuntimeRoot = config.DefaultRuntimeRoot
 	}
+}
+
+// HasLegacyLLMSettings identifies model data from pre-llm_configs snapshots.
+func HasLegacyLLMSettings(llm config.LLMConfig) bool {
+	return strings.TrimSpace(llm.Provider) != "" || strings.TrimSpace(llm.BaseURL) != "" ||
+		strings.TrimSpace(llm.Model) != "" || strings.TrimSpace(llm.APIKeyEnv) != "" || llm.Mock ||
+		strings.TrimSpace(llm.Thinking) != "" || strings.TrimSpace(llm.ReasoningEffort) != "" || llm.ThinkingBudget != nil ||
+		len(llm.Profiles) > 0 || len(llm.ProfileOrder) > 0
 }
 
 // ProductNodeSettingsSeed 空库且无 YAML 种子时的开箱默认。

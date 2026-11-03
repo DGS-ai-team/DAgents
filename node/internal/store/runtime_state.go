@@ -16,6 +16,9 @@ type RuntimeState struct {
 	// It is independent from the SSE Hub sequence and the Turn lifecycle
 	// sequence, so hydrate callers can reject an older transcript projection.
 	HistoryRevision uint64 `json:"history_revision,omitempty"`
+	// ToolCallProjectionHiddenThroughGeneration preserves a context-clear display
+	// boundary while leaving lifecycle facts available for recovery.
+	ToolCallProjectionHiddenThroughGeneration uint64 `json:"tool_call_projection_hidden_through_generation,omitempty"`
 	// ActiveContextStart is the index in the durable transcript from which
 	// future model requests may build context. Older messages remain queryable.
 	ActiveContextStart int `json:"active_context_start,omitempty"`

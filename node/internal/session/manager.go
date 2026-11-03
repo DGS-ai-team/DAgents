@@ -59,11 +59,12 @@ type TurnOptions struct {
 	// Lifecycle recovery may persist a repaired provider history during
 	// construction, so the constructor must start from the revision loaded from
 	// SQLite instead of the zero value.
-	initialHistoryRevision      uint64
-	initialActiveContextStart   int
-	initialLastContextResetID   string
-	initialLastHumanInteraction time.Time
-	initialDreamingAttempt      json.RawMessage
+	initialHistoryRevision                           uint64
+	initialToolCallProjectionHiddenThroughGeneration uint64
+	initialActiveContextStart                        int
+	initialLastContextResetID                        string
+	initialLastHumanInteraction                      time.Time
+	initialDreamingAttempt                           json.RawMessage
 	// initialLifecycleEvents are supplied by Manager when it already loaded the
 	// session projection. Keeping the load marker separate from the slice lets
 	// an empty, successfully-read event log avoid a second database scan.
@@ -149,6 +150,11 @@ func withInitialHistoryRevision(opts TurnOptions, revision uint64) TurnOptions {
 	return opts
 }
 
+func withInitialToolCallProjectionBoundary(opts TurnOptions, generation uint64) TurnOptions {
+	opts.initialToolCallProjectionHiddenThroughGeneration = generation
+	return opts
+}
+
 func withInitialActiveContextStart(opts TurnOptions, start int) TurnOptions {
 	opts.initialActiveContextStart = start
 	return opts
@@ -198,6 +204,10 @@ type Manager struct {
 
 	mediaOnlyMu sync.Mutex
 	mediaOnly   map[string]*media.Registry
+
+	lifecycleProjectionMu    sync.Mutex
+	lifecycleProjectionCache map[lifecycleProjectionKey]lifecycleProjectionCacheEntry
+	lifecycleProjectionOrder []lifecycleProjectionKey
 
 	triggerDelivery     triggers.DeliveryTracker
 	conditionCompletion func(triggers.ConditionRequest, triggers.ConditionResult) error
@@ -256,18 +266,19 @@ func NewManager(
 		turnOpts.MaxModelRetries = 2
 	}
 	return &Manager{
-		agentID:          agentID,
-		hub:              hub,
-		llm:              llmClient,
-		tools:            registry,
-		policy:           policyEngine,
-		store:            st,
-		turn:             turnOpts,
-		ctx:              ctx,
-		cancel:           cancel,
-		sessions:         make(map[string]*runtime),
-		maintenanceGates: make(map[string]*agentExecutionGate),
-		logger:           logx.OrDefault(logger),
+		agentID:                  agentID,
+		hub:                      hub,
+		llm:                      llmClient,
+		tools:                    registry,
+		policy:                   policyEngine,
+		store:                    st,
+		turn:                     turnOpts,
+		ctx:                      ctx,
+		cancel:                   cancel,
+		sessions:                 make(map[string]*runtime),
+		maintenanceGates:         make(map[string]*agentExecutionGate),
+		lifecycleProjectionCache: make(map[lifecycleProjectionKey]lifecycleProjectionCacheEntry),
+		logger:                   logx.OrDefault(logger),
 	}
 }
 
@@ -584,7 +595,7 @@ func (m *Manager) createWithOptionsReuse(
 		return nil, false, false, err
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 	if turnOpts.ConditionValidator == nil {
 		turnOpts.ConditionValidator = m.conditionValidator
@@ -705,7 +716,7 @@ func (m *Manager) replaceWithOptions(
 		}
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 	turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 	if turnOpts.ConditionValidator == nil {
 		turnOpts.ConditionValidator = m.conditionValidator
@@ -770,7 +781,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			return nil, false, err
 		}
 		created := len(restore.Messages) == 0 && !restore.Found
-		turnOpts := withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		turnOpts := withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
 		turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 		if turnOpts.ConditionValidator == nil {
 			turnOpts.ConditionValidator = m.conditionValidator
@@ -819,20 +830,21 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 }
 
 type sessionRestoreData struct {
-	Found                 bool
-	Messages              []llm.Message
-	LoadedSkills          []skills.LoadedSkill
-	HookStore             map[string]json.RawMessage
-	NotifySeq             int
-	AckSeq                int
-	HistoryRevision       uint64
-	ActiveContextStart    int
-	LastContextResetID    string
-	InputBoxState         json.RawMessage
-	DreamingAttempt       json.RawMessage
-	LastHumanInteraction  time.Time
-	LifecycleEvents       []turn.TurnEventEnvelope
-	LifecycleEventsLoaded bool
+	Found                                     bool
+	Messages                                  []llm.Message
+	LoadedSkills                              []skills.LoadedSkill
+	HookStore                                 map[string]json.RawMessage
+	NotifySeq                                 int
+	AckSeq                                    int
+	HistoryRevision                           uint64
+	ToolCallProjectionHiddenThroughGeneration uint64
+	ActiveContextStart                        int
+	LastContextResetID                        string
+	InputBoxState                             json.RawMessage
+	DreamingAttempt                           json.RawMessage
+	LastHumanInteraction                      time.Time
+	LifecycleEvents                           []turn.TurnEventEnvelope
+	LifecycleEventsLoaded                     bool
 }
 
 func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) {
@@ -855,20 +867,21 @@ func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) 
 		rec.RuntimeState.LastHumanInteraction,
 	)
 	return sessionRestoreData{
-		Found:                 true,
-		Messages:              rec.Messages,
-		LoadedSkills:          rec.LoadedSkills,
-		HookStore:             rec.RuntimeState.HookStore,
-		LastHumanInteraction:  lastHumanAt,
-		NotifySeq:             rec.RuntimeState.NotifySeq,
-		AckSeq:                rec.RuntimeState.AckSeq,
-		HistoryRevision:       rec.RuntimeState.HistoryRevision,
-		ActiveContextStart:    rec.RuntimeState.ActiveContextStart,
-		LastContextResetID:    rec.RuntimeState.LastContextResetID,
-		InputBoxState:         rec.RuntimeState.InputBoxState,
-		DreamingAttempt:       append(json.RawMessage(nil), rec.RuntimeState.DreamingAttempt...),
-		LifecycleEvents:       lifecycle.events,
-		LifecycleEventsLoaded: lifecycleErr == nil,
+		Found:                true,
+		Messages:             rec.Messages,
+		LoadedSkills:         rec.LoadedSkills,
+		HookStore:            rec.RuntimeState.HookStore,
+		LastHumanInteraction: lastHumanAt,
+		NotifySeq:            rec.RuntimeState.NotifySeq,
+		AckSeq:               rec.RuntimeState.AckSeq,
+		HistoryRevision:      rec.RuntimeState.HistoryRevision,
+		ToolCallProjectionHiddenThroughGeneration: rec.RuntimeState.ToolCallProjectionHiddenThroughGeneration,
+		ActiveContextStart:                        rec.RuntimeState.ActiveContextStart,
+		LastContextResetID:                        rec.RuntimeState.LastContextResetID,
+		InputBoxState:                             rec.RuntimeState.InputBoxState,
+		DreamingAttempt:                           append(json.RawMessage(nil), rec.RuntimeState.DreamingAttempt...),
+		LifecycleEvents:                           lifecycle.events,
+		LifecycleEventsLoaded:                     lifecycleErr == nil,
 	}, nil
 }
 
@@ -1186,14 +1199,35 @@ func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
 	rt := m.getRuntime(sid)
 	if rt != nil {
 		cancelled = rt.cancelTurn()
-		rt.clearMessages(context.Background())
+		if err := rt.clearMessages(context.Background()); err != nil {
+			return cancelled, fmt.Errorf("clear persisted session context: %w", err)
+		}
 		return cancelled, nil
 	}
 	if m.store == nil {
 		return false, fmt.Errorf("agent_not_found")
 	}
-	if err := m.store.ClearMessages(context.Background(), sid); err != nil {
+	rec, err := m.store.Load(context.Background(), sid)
+	if err != nil {
+		return false, fmt.Errorf("load session context: %w", err)
+	}
+	if rec == nil {
 		return false, fmt.Errorf("agent_not_found")
+	}
+	lifecycle, projected, _, projectionErr := m.loadLifecycleProjection(context.Background(), sid, rec.NodeID)
+	if projectionErr != nil {
+		return false, projectionErr
+	}
+	if !projected {
+		lifecycle.Generation = 0
+	}
+	state := store.RuntimeState{
+		HistoryRevision: rec.RuntimeState.HistoryRevision + 1,
+		ToolCallProjectionHiddenThroughGeneration: lifecycle.Generation,
+		LastHumanInteraction:                      time.Now().UTC(),
+	}
+	if err := m.store.ClearMessagesWithRuntimeState(context.Background(), sid, state); err != nil {
+		return false, fmt.Errorf("clear persisted session context: %w", err)
 	}
 	return false, nil
 }

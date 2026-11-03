@@ -37,6 +37,31 @@ function mountForm({ mode, showAdvanced = false, draft, groups }) {
 }
 
 describe("AgentSettingsForm tool group tiles", () => {
+  it("allows the Agent detail page to supply the basic-information heading", () => {
+    const draft = reactive({
+      agentType: "normal",
+      displayName: "助手",
+      description: "",
+      llmProfileId: "default",
+      maxToolCalls: 64,
+      toolGroups: [],
+      visibleSkills: null,
+      promptSoulMd: "",
+      promptCustomMd: "",
+      promptMemoryScope: "agent",
+    });
+    const standard = mountForm({ mode: "full", draft, groups: [] });
+    expect(standard.text()).toContain("基础信息");
+    standard.unmount();
+
+    const embedded = mount(AgentSettingsForm, {
+      props: { draft, mode: "full", hideBasicHeading: true, availableToolGroups: [] },
+      global: { stubs: { ToolGroupIcon: toolGroupIconStub, UiSelect: true } },
+    });
+    expect(embedded.text()).not.toContain("基础信息");
+    embedded.unmount();
+  });
+
   it("exposes the per-turn tool-call cap and updates the draft", async () => {
     const draft = reactive({
       agentType: "normal",

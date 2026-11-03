@@ -40,6 +40,8 @@ export const turnStateStore = reactive({
   endReason: "",
   interactionKind: "",
   recoveryRequired: false,
+  modelAttempt: { status: "", attempt: 0, maxAttempts: 0, retryAfterMs: 0 },
+  error: null,
   toolExecutions: [],
   outputChannel: "none",
   outputStartedAt: 0,
@@ -70,6 +72,23 @@ export function normalizeTurnState(raw = {}) {
     endReason: trim(payload?.end_reason),
     interactionKind: trim(payload?.interaction_kind),
     recoveryRequired: Boolean(payload?.recovery_required),
+    modelAttempt: (() => {
+      const attempt = payload?.model_attempt;
+      return {
+        status: trim(attempt?.status),
+        attempt: Number(attempt?.attempt) || 0,
+        maxAttempts: Number(attempt?.max_attempts) || 0,
+        retryAfterMs: Number(attempt?.retry_after_ms) || 0,
+      };
+    })(),
+    error: payload?.error && typeof payload.error === "object"
+      ? {
+          code: trim(payload.error.code),
+          message: trim(payload.error.message),
+          retryable: Boolean(payload.error.retryable),
+          incomplete: Boolean(payload.error.incomplete),
+        }
+      : null,
     toolExecutions: Array.isArray(payload?.tool_executions)
       ? payload.tool_executions.map((item) => ({
           id: trim(item?.id),
@@ -83,7 +102,12 @@ export function normalizeTurnState(raw = {}) {
 }
 
 function canAccept(next, current, source) {
-  if (source === "hydrate") return true;
+  if (source === "hydrate" && !current.turnId && !next.turnId && current.phase === "idle" && next.phase === "idle") return true;
+  if (source === "hydrate" && !current.turnId && current.lifecycleSeq === 0 && current.generation === 0) return true;
+  if (source === "hydrate" && current.turnId && !next.turnId) return false;
+  if (current.lifecycleSeq > 0 && !current.turnId && next.turnId && next.generation <= current.generation) return false;
+  if (current.turnId && next.turnId === current.turnId && current.terminal && !next.terminal) return false;
+  if (current.lifecycleSeq > 0 && next.lifecycleSeq === 0) return false;
   if (current.lifecycleSeq > 0 && next.lifecycleSeq > 0 && next.lifecycleSeq < current.lifecycleSeq) return false;
   if (current.generation > 0 && next.generation > 0 && next.generation < current.generation) return false;
   if (
@@ -108,7 +132,28 @@ export function applyTurnState(raw, { source = "event" } = {}) {
   const identityChanged =
     next.turnId !== turnStateStore.turnId || next.generation !== turnStateStore.generation;
   const previousHistoryRevision = turnStateStore.historyRevision;
+  const previousLifecycleSeq = turnStateStore.lifecycleSeq;
+  const previousGeneration = turnStateStore.generation;
   Object.assign(turnStateStore, next);
+  if (source === "hydrate" && !next.turnId && next.phase === "idle") {
+    turnStateStore.lifecycleSeq = Math.max(turnStateStore.lifecycleSeq, previousLifecycleSeq);
+    turnStateStore.generation = Math.max(turnStateStore.generation, previousGeneration);
+  }
+  if (next.phase === "failed" && !next.error) {
+    turnStateStore.error = {
+      code: "legacy_failure",
+      message: "本轮未能完成，请稍后重试或切换模型。",
+      retryable: false,
+      incomplete: false,
+    };
+  } else if (next.phase === "interrupted" && !next.error) {
+    turnStateStore.error = {
+      code: "turn_interrupted",
+      message: "本轮已中断。",
+      retryable: false,
+      incomplete: false,
+    };
+  }
   applyToolExecutions(next.toolExecutions);
   if (next.historyRevision === 0 && previousHistoryRevision > 0) {
     turnStateStore.historyRevision = previousHistoryRevision;
@@ -170,6 +215,14 @@ export function applyTurnFinishedEvent(data = {}) {
   });
 }
 
+/** Apply only turn lifecycle events belonging to the currently selected Agent. */
+export function applyDesktopTurnEvent(event, activeAgentId) {
+  if (!activeAgentId || event?.agent_id !== activeAgentId) return false;
+  if (event.event_type === "turn_state") return applyTurnState(event.data);
+  if (event.event_type === "turn_finished") return applyTurnFinishedEvent(event.data);
+  return false;
+}
+
 const BUDGET_REASON_LABELS = Object.freeze({
   max_input_tokens: "输入令牌数上限",
   max_steps: "模型步骤数上限",
@@ -220,7 +273,9 @@ export function markTurnCancellationFailed() {
   turnStateStore.cancelState = "failed";
 }
 
-export function resetTurnState() {
+export function resetTurnState({ preserveLifecycle = false } = {}) {
+  const lifecycleSeq = preserveLifecycle ? turnStateStore.lifecycleSeq : 0;
+  const generation = preserveLifecycle ? turnStateStore.generation : 0;
   Object.assign(turnStateStore, {
     authority: "unknown",
     phase: "idle",
@@ -229,13 +284,15 @@ export function resetTurnState() {
     turnId: "",
     stepId: "",
     stepIndex: 0,
-    generation: 0,
-    lifecycleSeq: 0,
+    generation,
+    lifecycleSeq,
     historyRevision: 0,
     terminal: false,
     endReason: "",
     interactionKind: "",
     recoveryRequired: false,
+    modelAttempt: { status: "", attempt: 0, maxAttempts: 0, retryAfterMs: 0 },
+    error: null,
     toolExecutions: [],
     outputChannel: "none",
     outputStartedAt: 0,

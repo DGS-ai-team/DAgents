@@ -75,20 +75,3 @@ export function resolveToolVisual(entry) {
   }
   return visualForKind(kind);
 }
-
-/**
- * 合并工具气泡的总图标。
- * 同一气泡里出现多个工具组时，不使用首个工具的图标，避免让用户误以为
- * 所有步骤都属于同一类工具；展开后仍由每个 ToolSummaryRow 展示准确图标。
- */
-export function resolveToolGroupVisual(steps = []) {
-  const visuals = (Array.isArray(steps) ? steps : [])
-    .map((step) => resolveToolVisual(step?.resultEntry || step?.callEntry || step || {}))
-    .filter(Boolean);
-  const first = visuals[0] || visualForKind("tool");
-  const kinds = new Set(visuals.map((item) => item.kind));
-  if (kinds.size > 1) {
-    return { kind: "wrench", label: "多种工具组", short: "多工具", icon: "⚒", mixed: true };
-  }
-  return first;
-}

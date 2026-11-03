@@ -2,6 +2,30 @@ package config
 
 import "testing"
 
+func TestSyncActiveProfileMultimodalDoesNotCopyFlatModelFields(t *testing.T) {
+	cfg := &Config{}
+	budget := 12000
+	if err := cfg.UpsertProfile("qwen", LLMProfileConfig{
+		Provider: "qwen", Model: "qwen3-32b", ThinkingBudget: &budget,
+		MultimodalEnabled: boolPtrCopy(false),
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	flatBudget := 24000
+	cfg.LLM.Provider = "stale-provider"
+	cfg.LLM.Model = "stale-model"
+	cfg.LLM.ThinkingBudget = &flatBudget
+	cfg.Multimodal.Enabled = boolPtrCopy(true)
+	cfg.SyncActiveProfileMultimodalFromFlat()
+	profile, _ := cfg.LLM.GetProfile("qwen")
+	if profile.Provider != "qwen" || profile.Model != "qwen3-32b" || profile.ThinkingBudget == nil || *profile.ThinkingBudget != budget {
+		t.Fatalf("profile budget = %v", profile.ThinkingBudget)
+	}
+	if !ProfileMultimodalEnabled(profile) {
+		t.Fatalf("multimodal setting was not propagated: %+v", profile)
+	}
+}
+
 func TestNormalizeLLMProfiles_fromFlat(t *testing.T) {
 	cfg := &Config{}
 	cfg.LLM.Provider = "deepseek"

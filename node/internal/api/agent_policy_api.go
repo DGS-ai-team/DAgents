@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"runtime"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
-	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -33,123 +31,10 @@ func (s *Server) registerAgentPolicyRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/policy", s.handleGetAgentPolicy)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/policy/tools", s.handlePutAgentToolPolicy)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/policy/shell/{shell_type}", s.handlePutAgentShellPolicy)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/policy/grants", s.handleGetAgentPolicyGrants)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/policy/grants", s.handlePostAgentPolicyGrant)
-	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}/policy/grants/{grant_id}", s.handleDeleteAgentPolicyGrant)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/prompt-context", s.handleGetAgentPromptContext)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/prompt-context", s.handlePutAgentPromptContext)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}/prompt-context/memory/{entry_id}", s.handlePatchAgentMemoryEntry)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}/prompt-context/memory/{entry_id}", s.handleDeleteAgentMemoryEntry)
-}
-
-type policyGrantBody struct {
-	Tools     []string `json:"tools"`
-	Workspace string   `json:"workspace"`
-	ExpiresAt string   `json:"expires_at"`
-}
-
-var errGrantNotFound = errors.New("grant not found")
-
-func (s *Server) handleGetAgentPolicyGrants(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAgentRecord(w, r)
-	if !ok {
-		return
-	}
-	rec, err := s.agents.EnsureAgentPolicy(r.Context(), id)
-	if err != nil {
-		writeAPIError(w, 500, "policy_load_failed", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"agent_id": id, "grants": rec.Grants})
-}
-
-func (s *Server) handlePostAgentPolicyGrant(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAgentRecord(w, r)
-	if !ok {
-		return
-	}
-	var body policyGrantBody
-	if err := decodeJSON(r, &body); err != nil {
-		writeAPIError(w, 400, "invalid_json", err.Error(), nil)
-		return
-	}
-	workspace, err := workspacecoord.Canonical(strings.TrimSpace(body.Workspace))
-	if err != nil || workspace == "." {
-		writeAPIError(w, 400, "invalid_workspace", "workspace is required", nil)
-		return
-	}
-	expires, err := time.Parse(time.RFC3339, strings.TrimSpace(body.ExpiresAt))
-	if err != nil || !expires.After(time.Now().UTC()) {
-		writeAPIError(w, 400, "invalid_expiry", "expires_at must be a future RFC3339 timestamp", nil)
-		return
-	}
-	tools := make([]string, 0, len(body.Tools))
-	seen := map[string]bool{}
-	for _, raw := range body.Tools {
-		name := strings.ToLower(strings.TrimSpace(raw))
-		if name != "" && !policy.GrantToolSupported(name) {
-			writeAPIError(w, http.StatusBadRequest, "unsupported_tool", "tool is not eligible for workspace grants", map[string]any{"tool": name})
-			return
-		}
-		if name != "" && !seen[name] {
-			seen[name] = true
-			tools = append(tools, name)
-		}
-	}
-	if len(tools) == 0 {
-		writeAPIError(w, 400, "invalid_tools", "tools is required", nil)
-		return
-	}
-	grant := policy.Grant{ID: fmt.Sprintf("grant-%d", time.Now().UnixNano()), Tools: tools, Workspace: workspace, ExpiresAt: expires.UTC()}
-	_, err = s.agents.MutateAgentPolicy(r.Context(), id, func(rec *store.AgentPolicyRecord) error { rec.Grants = append(rec.Grants, grant); return nil })
-	if err != nil {
-		writeAPIError(w, 500, "policy_save_failed", err.Error(), nil)
-		return
-	}
-	engine, loadErr := s.agents.LoadAgentPolicyEngine(r.Context(), id)
-	if loadErr != nil {
-		writeAPIError(w, http.StatusInternalServerError, "policy_reload_failed", loadErr.Error(), nil)
-		return
-	}
-	if s.sessions != nil {
-		s.sessions.SetAgentPolicy(id, engine)
-	}
-	writeJSON(w, http.StatusCreated, grant)
-}
-
-func (s *Server) handleDeleteAgentPolicyGrant(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAgentRecord(w, r)
-	if !ok {
-		return
-	}
-	grantID := strings.TrimSpace(r.PathValue("grant_id"))
-	now := time.Now().UTC()
-	_, err := s.agents.MutateAgentPolicy(r.Context(), id, func(rec *store.AgentPolicyRecord) error {
-		for i := range rec.Grants {
-			if rec.Grants[i].ID == grantID && rec.Grants[i].RevokedAt == nil {
-				rec.Grants[i].RevokedAt = &now
-				return nil
-			}
-		}
-		return errGrantNotFound
-	})
-	if err != nil {
-		if errors.Is(err, errGrantNotFound) {
-			writeAPIError(w, http.StatusNotFound, "grant_not_found", "grant not found", nil)
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "policy_save_failed", err.Error(), nil)
-		}
-		return
-	}
-	engine, reloadErr := s.agents.LoadAgentPolicyEngine(r.Context(), id)
-	if reloadErr != nil {
-		writeAPIError(w, http.StatusInternalServerError, "policy_reload_failed", reloadErr.Error(), nil)
-		return
-	}
-	if s.sessions != nil {
-		s.sessions.SetAgentPolicy(id, engine)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "grant_id": grantID, "revoked_at": now})
 }
 
 func (s *Server) requireAgentRecord(w http.ResponseWriter, r *http.Request) (string, *store.AgentRecord, bool) {
@@ -266,7 +151,6 @@ func (s *Server) handlePutAgentToolPolicy(w http.ResponseWriter, r *http.Request
 	var maps policy.Maps
 	_, err := s.agents.MutateAgentPolicy(r.Context(), id, func(rec *store.AgentPolicyRecord) error {
 		maps = policy.StringMapsToMaps(rec.Tools, rec.Shell)
-		maps.Grants = rec.Grants
 		var applyErr error
 		maps, applyErr = policy.ApplyToolUpdatesToMaps(maps, body.Updates)
 		if applyErr != nil {
@@ -311,7 +195,6 @@ func (s *Server) handlePutAgentShellPolicy(w http.ResponseWriter, r *http.Reques
 	var maps policy.Maps
 	_, err = s.agents.MutateAgentPolicy(r.Context(), id, func(rec *store.AgentPolicyRecord) error {
 		maps = policy.StringMapsToMaps(rec.Tools, rec.Shell)
-		maps.Grants = rec.Grants
 		var applyErr error
 		maps, applyErr = policy.ApplyShellPolicyChangesToMaps(maps, shellType, body.Updates, body.Deletes)
 		if applyErr != nil {

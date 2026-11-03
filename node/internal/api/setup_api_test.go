@@ -8,25 +8,43 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func TestHandleSetupConfigGetPatch(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "synthetic-setup-test-key")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	cfg := testConfig(t)
 	cfg.LLM.Provider = "deepseek"
 	cfg.LLM.Model = "deepseek-chat"
+	cfg.LLM.Profiles = nil
+	cfg.ApplyDefaults()
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-
-	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	llmConfigs := openTestLLMConfigStore(t)
+	if err := store.EnsureDefaultLLMConfig(t.Context(), llmConfigs, cfg); err != nil {
+		t.Fatal(err)
+	}
+	nodeSettings, err := store.OpenNodeSettings(filepath.Join(dir, "node_settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nodeSettings.Close()
+	if err := nodeSettings.Save(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), WithNodeSettings(nodeSettings))
+	srv.llmConfigs = llmConfigs
+	t.Cleanup(func() { srv.Close(); _ = llmConfigs.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -68,12 +86,12 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 		t.Fatalf("patched = %+v", patched)
 	}
 
-	reloaded, err := config.LoadFile(configPath)
+	reloaded, err := llmConfigs.Get(t.Context(), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.LLM.Provider != "mock" || !reloaded.LLM.Mock {
-		t.Fatalf("file llm = %+v", reloaded.LLM)
+	if reloaded.Provider != "mock" || !reloaded.Mock {
+		t.Fatalf("stored llm = %+v", reloaded)
 	}
 
 	compBody := []byte(`{"compression":{"silent_trigger_tokens":60000,"blocking_trigger_tokens":90000}}`)
@@ -90,12 +108,12 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	if compResp.StatusCode != http.StatusOK {
 		t.Fatalf("compression patch status = %d", compResp.StatusCode)
 	}
-	reloaded2, err := config.LoadFile(configPath)
+	reloaded2, err := nodeSettings.Load(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reloaded2.Compression.SilentTriggerTokens != 60000 || reloaded2.Compression.BlockingTriggerTokens != 90000 {
-		t.Fatalf("file compression = %+v", reloaded2.Compression)
+		t.Fatalf("stored compression = %+v", reloaded2.Compression)
 	}
 }
 
@@ -113,7 +131,10 @@ func TestHandleSetupConfigCompletesNodeProfileWithoutPreferredNameOrLLMKey(t *te
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	nodeSettings, llmConfigs := openSetupStores(t, dir, cfg)
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), WithNodeSettings(nodeSettings))
+	srv.llmConfigs = llmConfigs
+	t.Cleanup(func() { srv.Close() })
 	req := httptest.NewRequest(http.MethodPatch, "/v1/settings", bytes.NewReader([]byte(
 		`{"agent":{"name":"local-node"},"onboarding":{"node_profile_completed":true}}`,
 	)))
@@ -147,7 +168,10 @@ func TestSettingsNodeTokenIsRedactedAndWriteOnly(t *testing.T) {
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	nodeSettings, llmConfigs := openSetupStores(t, dir, cfg)
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), WithNodeSettings(nodeSettings))
+	srv.llmConfigs = llmConfigs
+	t.Cleanup(func() { srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -189,7 +213,7 @@ func TestSettingsNodeTokenIsRedactedAndWriteOnly(t *testing.T) {
 		}
 	}
 	patch(`{"manage":{"node_token":""}}`)
-	reloaded, err := config.LoadFile(configPath)
+	reloaded, err := nodeSettings.Load(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +222,7 @@ func TestSettingsNodeTokenIsRedactedAndWriteOnly(t *testing.T) {
 	}
 	assertManageSettingsPreserved(t, reloaded)
 	patch(`{"manage":{"clear_node_token":true}}`)
-	reloaded, err = config.LoadFile(configPath)
+	reloaded, err = nodeSettings.Load(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,14 +246,17 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
+	nodeSettings, llmConfigs := openSetupStores(t, dir, cfg)
 	var factoryEndpoint string
-	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), func(o *serverOptions) {
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), WithNodeSettings(nodeSettings), func(o *serverOptions) {
 		o.browserRuntimeFactory = func(cfg *config.Config) (*browser.Manager, *browser.ServiceProcess, error) {
 			factoryEndpoint = cfg.Browser.ServiceURL
 			manager, err := browser.NewManager(cfg, &browser.MockDriver{})
 			return manager, nil, err
 		}
 	})
+	srv.llmConfigs = llmConfigs
+	t.Cleanup(func() { srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -296,7 +323,10 @@ func TestHandlePatchSetupConfigBrowserFailsBeforePersisting(t *testing.T) {
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath))
+	nodeSettings, llmConfigs := openSetupStores(t, dir, cfg)
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), WithNodeSettings(nodeSettings))
+	srv.llmConfigs = llmConfigs
+	t.Cleanup(func() { srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -336,6 +366,21 @@ func hasToolDefinition(defs []tools.ToolDef, name string) bool {
 	return false
 }
 
+func openSetupStores(t *testing.T, dir string, cfg *config.Config) (*store.NodeSettingsStore, *store.LLMConfigStore) {
+	t.Helper()
+	nodeSettings, err := store.OpenNodeSettings(filepath.Join(dir, "node_settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeSettings.Save(t.Context(), cfg); err != nil {
+		_ = nodeSettings.Close()
+		t.Fatal(err)
+	}
+	llmConfigs := openTestLLMConfigStore(t)
+	t.Cleanup(func() { _ = nodeSettings.Close(); _ = llmConfigs.Close() })
+	return nodeSettings, llmConfigs
+}
+
 func TestHandlePatchSetupConfig_noConfigPath(t *testing.T) {
 	srv := NewServer(testConfig(t), nil, WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
@@ -354,6 +399,58 @@ func TestHandlePatchSetupConfig_noConfigPath(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestHandlePatchSetupConfigRequiresBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		withNodeStore bool
+		withLLMStore  bool
+		body          string
+	}{
+		{name: "missing LLM store", withNodeStore: true, body: `{"compression":{"silent_trigger_tokens":60000}}`},
+		{name: "missing Node settings store", withLLMStore: true, body: `{"llm":{"profiles":[{"id":"default","provider":"mock","model":"mock","mock":true}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.yaml")
+			cfg := testConfig(t)
+			if err := config.SaveFile(configPath, cfg); err != nil {
+				t.Fatal(err)
+			}
+			var options []Option
+			if tc.withNodeStore {
+				nodeSettings, err := store.OpenNodeSettings(filepath.Join(dir, "node_settings.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := nodeSettings.Save(t.Context(), cfg); err != nil {
+					_ = nodeSettings.Close()
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = nodeSettings.Close() })
+				options = append(options, WithNodeSettings(nodeSettings))
+			}
+			srv := NewServer(cfg, nil, append([]Option{WithSkipStore(), WithConfigPath(configPath)}, options...)...)
+			if tc.withLLMStore {
+				srv.llmConfigs = openTestLLMConfigStore(t)
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPatch, "/v1/settings", bytes.NewBufferString(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "settings_store_unavailable") {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			reloaded, err := config.LoadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reloaded.Compression.SilentTriggerTokens != cfg.Compression.SilentTriggerTokens || reloaded.LLM.Mock != cfg.LLM.Mock {
+				t.Fatal("settings patch was persisted to YAML without both stores")
+			}
+		})
 	}
 }
 

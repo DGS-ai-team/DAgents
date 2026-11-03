@@ -71,10 +71,10 @@ const stepTitle = computed(() => {
 const stepLead = computed(() => {
   if (step.value === "identity") {
     if (greetedName.value) return `你好呀，${greetedName.value}`;
-    return "可以留下称呼，也可以直接为当前 Node 配置模型。";
+    return "可以留下称呼，也可以直接为本机服务配置模型。";
   }
   if (probeState.message) return probeState.message;
-  return "配好一条 LLM，我们就可以开始聊天了。";
+  return "配好一个模型，我们就可以开始聊天了。";
 });
 
 const canNextIdentity = computed(() => {
@@ -258,7 +258,7 @@ async function submit() {
       || String(confirmed?.llm?.active || "") !== profileId
       || String(selected.provider || "") !== String(llm.provider)
       || String(selected.model || "") !== model) {
-      throw new Error("配置已提交，但 Node 未确认当前模型设置；请检查连接后重试。");
+      throw new Error("配置已提交，但本机服务未确认当前模型设置；请检查连接后重试。");
     }
     emit("completed");
   } catch (e) {
@@ -273,7 +273,7 @@ async function submit() {
   <div class="first-run">
     <section class="first-run__shell" :class="{ 'first-run__shell--wide': step === 'llm' }">
       <header class="first-run__header">
-        <span class="first-run__node-badge">当前 Node 配置</span>
+        <span class="first-run__node-badge">本机服务配置</span>
         <h1 class="first-run__title">{{ stepTitle }}</h1>
         <p class="first-run__lead">
           {{ stepLead }}
@@ -300,7 +300,7 @@ async function submit() {
           />
         </label>
         <label class="settings-field">
-          <span class="settings-field__label">这台 Node 叫什么？</span>
+          <span class="settings-field__label">这台电脑的名称</span>
           <input
             v-model="nodeName"
             class="settings-field__input"
@@ -310,7 +310,7 @@ async function submit() {
             autocomplete="off"
           />
         </label>
-        <div v-if="error" class="first-run__error">{{ error }}<button v-if="!loadSucceeded" type="button" @click="loadInitialConfig">重新读取 Node 设置</button></div>
+        <div v-if="error" class="first-run__error">{{ error }}<button v-if="!loadSucceeded" type="button" @click="loadInitialConfig">重新读取本机服务设置</button></div>
       </form>
 
       <!-- Step 2: LLM -->
@@ -382,7 +382,7 @@ async function submit() {
           </div>
         </label>
 
-        <div v-if="error" class="first-run__error">{{ error }}<button v-if="!loadSucceeded" type="button" @click="loadInitialConfig">重新读取 Node 设置</button></div>
+        <div v-if="error" class="first-run__error">{{ error }}<button v-if="!loadSucceeded" type="button" @click="loadInitialConfig">重新读取本机服务设置</button></div>
       </form>
 
       <footer v-if="!loading" class="first-run__footer">
@@ -720,9 +720,6 @@ async function submit() {
   max-width: none;
 }
 
-.first-run__body :deep(.ui-select__trigger) {
-  background: var(--color-input);
-}
 
 @media (max-width: 520px) {
   .first-run {
