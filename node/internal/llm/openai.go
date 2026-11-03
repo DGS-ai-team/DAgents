@@ -31,6 +31,24 @@ type OpenAIClient struct {
 	client *http.Client
 }
 
+// All OpenAI-compatible clients share the transport's concurrency-safe
+// connection pools. Credentials, model settings, and request bodies stay on
+// each request/client and are never stored in the transport.
+var sharedOpenAITransport = newOpenAIHTTPTransport()
+
+func newOpenAIHTTPTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 45 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+	}
+}
+
 // NewOpenAIClient 构造 OpenAI 兼容客户端。
 func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 	base := normalizeOpenAIBaseURL(cfg.BaseURL)
@@ -45,14 +63,8 @@ func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 			RequestExtra: cfg.RequestExtra,
 		},
 		client: &http.Client{
-			Timeout: 0, // Stream lifetime is bounded by idle reads, not total generation time.
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ResponseHeaderTimeout: 45 * time.Second,
-				ExpectContinueTimeout: time.Second,
-			},
+			Timeout:   0, // Stream lifetime is bounded by idle reads, not total generation time.
+			Transport: sharedOpenAITransport,
 		},
 	}
 }

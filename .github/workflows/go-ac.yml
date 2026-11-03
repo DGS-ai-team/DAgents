@@ -69,7 +69,7 @@ jobs:
       - name: Concurrency regression
         run: |
           cd node
-          go test -race ./internal/session ./internal/turn ./internal/queue
+          go test -race ./internal/session ./internal/turn ./internal/queue ./internal/llm
 
       - name: Go vulnerability scan
         run: bash scripts/ci/run_govulncheck.sh
