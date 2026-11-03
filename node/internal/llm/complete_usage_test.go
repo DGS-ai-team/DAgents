@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCompleteTextWithUsageFromHTTPAndAdapter(t *testing.T) {
@@ -166,5 +170,85 @@ func TestEnvAdapterCompleteTextWithUsagePassesThroughProviderUsage(t *testing.T)
 	_, usage, err := client.CompleteTextWithUsage(context.Background(), CompleteRequest{})
 	if err != nil || usage == nil || usage.TotalTokens != 9 {
 		t.Fatalf("usage=%+v err=%v", usage, err)
+	}
+}
+
+func TestEnvAdapterReusesHTTPConnectionWithoutSharingRequestCredentialsOrModel(t *testing.T) {
+	type receivedRequest struct {
+		remoteAddr    string
+		authorization string
+		model         string
+	}
+	var received []receivedRequest
+	var receivedMu sync.Mutex
+	var newConnections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		request := receivedRequest{
+			remoteAddr:    r.RemoteAddr,
+			authorization: r.Header.Get("Authorization"),
+			model:         body.Model,
+		}
+		receivedMu.Lock()
+		received = append(received, request)
+		receivedMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":1}}`)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			newConnections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	if sharedOpenAITransport.IdleConnTimeout != 90*time.Second {
+		t.Errorf("IdleConnTimeout = %s, want 90s", sharedOpenAITransport.IdleConnTimeout)
+	}
+	if sharedOpenAITransport.MaxIdleConns != 100 || sharedOpenAITransport.MaxIdleConnsPerHost != 10 {
+		t.Errorf("idle connection limits = %d total/%d per host, want 100/10", sharedOpenAITransport.MaxIdleConns, sharedOpenAITransport.MaxIdleConnsPerHost)
+	}
+
+	settings := &RuntimeSettings{
+		Provider: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "first-secret",
+		Model:    "first-model",
+	}
+	client := newEnvAdapterClient("", "", openAIAdapter{}, settings, nil)
+	for _, prompt := range []string{"first", "second"} {
+		if prompt == "second" {
+			settings.mu.Lock()
+			settings.APIKey = "second-secret"
+			settings.Model = "second-model"
+			settings.mu.Unlock()
+		}
+		if _, _, err := client.CompleteTextWithUsage(context.Background(), CompleteRequest{UserPrompt: prompt}); err != nil {
+			t.Fatalf("CompleteTextWithUsage(%q): %v", prompt, err)
+		}
+	}
+
+	receivedMu.Lock()
+	receivedSnapshot := append([]receivedRequest(nil), received...)
+	receivedMu.Unlock()
+	if len(receivedSnapshot) != 2 {
+		t.Fatalf("received %d requests, want 2", len(receivedSnapshot))
+	}
+	if receivedSnapshot[0].remoteAddr != receivedSnapshot[1].remoteAddr {
+		t.Fatalf("requests used different connections: %q and %q", receivedSnapshot[0].remoteAddr, receivedSnapshot[1].remoteAddr)
+	}
+	if got := newConnections.Load(); got != 1 {
+		t.Fatalf("server accepted %d connections, want one reused connection", got)
+	}
+	if receivedSnapshot[0].authorization != "Bearer first-secret" || receivedSnapshot[0].model != "first-model" {
+		t.Errorf("first request credentials/model = %q/%q", receivedSnapshot[0].authorization, receivedSnapshot[0].model)
+	}
+	if receivedSnapshot[1].authorization != "Bearer second-secret" || receivedSnapshot[1].model != "second-model" {
+		t.Errorf("second request credentials/model = %q/%q", receivedSnapshot[1].authorization, receivedSnapshot[1].model)
 	}
 }

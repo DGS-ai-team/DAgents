@@ -20,6 +20,17 @@ describe('ResourceAgentDock', () => {
     wrapper.unmount()
   })
 
+  it('shows terminal turn errors in the dock and exposes them when the toolbar is collapsed', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      props: { turnError: '模型服务暂时不可用，已重试2次。请稍后重试或切换模型。' },
+    })
+    expect(wrapper.find('[role="alert"]').text()).toContain('已重试2次')
+    await wrapper.setProps({ collapsed: true, collapsedInToolbar: true })
+    expect(wrapper.find('.dock-error-compact').text()).toBe('本轮失败')
+    expect(wrapper.find('.dock-collapsed-placeholder').attributes('aria-label')).toContain('模型服务暂时不可用')
+    wrapper.unmount()
+  })
+
   it('emits input, send, stop, and failed-draft restore actions without duplicate action buttons', async () => {
     const wrapper = mount(ResourceAgentDock, {
       props: {

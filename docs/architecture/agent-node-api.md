@@ -208,6 +208,21 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 
 `turn_state` 是 Turn Coordinator 的生命周期唯一权威，包含当前 turn/step、phase、工具执行态、交互态和终态。`hitl_required` 是需要用户交互的事实事件；`turn_state.phase=tool_waiting|waiting_user` 是暂停状态。
 
+模型请求状态由 SSE 和 hydrate 共享的字段表示：
+
+| 字段 | 说明 |
+| --- | --- |
+| `model_attempt.status` | 当前模型请求状态；`retrying` 表示等待自动重试，仍可取消 |
+| `model_attempt.attempt` / `max_attempts` | 已发起请求次数 / 最大总请求次数，包含首次请求；默认最多 3 次 |
+| `model_attempt.retry_after_ms` | 本次退避等待毫秒数，不是剩余时间倒计时 |
+| `error.code` / `message` | 模型失败的稳定错误类别和安全摘要；不包含上游响应正文、地址或凭据 |
+| `error.retryable` | 错误类别是否适合重试，不表示系统还会继续自动重试 |
+| `error.incomplete` | 本轮未完成；是否存在部分正文须结合 `transcript[].partial` 判断 |
+
+临时错误（408、429、500、502、503、504 和明确的临时网络故障）默认最多重试两次，退避约 2 秒、4 秒并添加最多 25% 抖动。有效 `Retry-After` 优先，超过 30 秒则结束自动重试。鉴权、余额和配置错误直接失败；已收到正文、推理或工具参数后不自动重放请求。连接和 TLS 超时为 10 秒，响应头为 45 秒，响应连续无字节为 120 秒；流式心跳会重置空闲计时，不限制正常持续输出的总时长。停止操作会中断退避与在途请求。
+
+非取消的模型失败会持久保存已收到的正文，投影为 `transcript[].partial=true`，但不保存未完成的工具调用或推理片段。本轮仍为 `failed`，下一次用户消息可引用已保存的正文继续。Desktop 应立即应用权威终态、展示原因并释放输入，按 generation/lifecycle_seq 拒绝旧 hydrate 覆盖新事件；不要把单独的 `error` 事件等同于整个 turn 的终态。
+
 `turn_finished` 只表示当前 turn 已真正进入终态，不能表示 HITL 暂停。实现：`node/internal/turn/sse_publish.go` 中 `publishTurnFinished`。
 
 **载荷字段**

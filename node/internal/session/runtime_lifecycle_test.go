@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,6 +211,72 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	}
 	if len(view.Transcript) != 1 || view.Transcript[0]["kind"] != "assistant" || view.Transcript[0]["text"] != "done" {
 		t.Fatalf("terminal hydrate transcript = %#v", view.Transcript)
+	}
+}
+
+func TestProviderFailurePersistsPartialTranscriptAndTerminalHydrateHotAndCold(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "partial-provider-failure.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r := newLifecycleTestRuntime()
+	r.store = st
+	r.queue = queue.NewMessageQueue()
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandModelRequestStarted, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, MaxAttempts: 3, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state = r.turnCoordinator.Snapshot()
+	safeMessage := "模型服务暂时不可用，请稍后重试。"
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandModelRequestFailed, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, ErrorKind: "provider_unavailable",
+		Retryable: true, Reason: safeMessage, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	partial := llm.Message{
+		Role: "assistant", Content: "partial answer",
+		Source:     &llm.MessageSource{Kind: llm.MessageSourceModel},
+		Provenance: &llm.MessageProvenance{Producer: "model", Operation: "partial_response", Reference: state.TurnID + "/" + state.StepID},
+	}
+	history := []llm.Message{llm.UserMessage("hello", llm.UserNameHuman), partial}
+	if err := r.lifecycleAfterModelStep(turn.StepOutcome{Err: errors.New("raw body: provider-secret")}, history, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	hotManager := NewManager("agent-1", stream.NewHub(8, logx.Discard()), nil, nil, nil, st, TurnOptions{}, logx.Discard())
+	hotManager.sessions[r.session.ID] = r
+	hot, err := hotManager.GetHydrateView(r.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coldManager := NewManager("agent-1", stream.NewHub(8, logx.Discard()), nil, nil, nil, st, TurnOptions{}, logx.Discard())
+	cold, err := coldManager.GetHydrateView(r.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, view := range map[string]*HydrateView{"hot": hot, "cold": cold} {
+		if view.HasActiveTurn || !view.TurnState.Terminal || view.TurnState.Phase != "failed" {
+			t.Fatalf("%s terminal state = %#v active=%t", name, view.TurnState, view.HasActiveTurn)
+		}
+		if view.TurnState.Error == nil || view.TurnState.Error.Code != "provider_unavailable" || !view.TurnState.Error.Incomplete || view.TurnState.EndReason != safeMessage {
+			t.Fatalf("%s error projection = %#v", name, view.TurnState)
+		}
+		if len(view.Transcript) != 2 || view.Transcript[1]["kind"] != "assistant" || view.Transcript[1]["text"] != "partial answer" || view.Transcript[1]["partial"] != true {
+			t.Fatalf("%s transcript = %#v", name, view.Transcript)
+		}
+		serialized, _ := json.Marshal(view)
+		if strings.Contains(string(serialized), "provider-secret") {
+			t.Fatalf("%s hydrate leaked raw provider detail: %s", name, serialized)
+		}
 	}
 }
 

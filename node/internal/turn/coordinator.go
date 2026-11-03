@@ -90,6 +90,9 @@ type TurnCommand struct {
 	CompactedMessageTo   int
 	Budget               TurnBudget
 	ErrorKind            string
+	MaxAttempts          int
+	RetryAfterMS         int64
+	Retryable            bool
 	Payload              json.RawMessage
 	PayloadRef           string
 	ResultContent        string
@@ -120,6 +123,11 @@ type CoordinatorSnapshot struct {
 	InteractionKind    string
 	InteractionPayload json.RawMessage
 	ModelAttempt       int
+	ModelAttemptStatus ModelAttemptStatus
+	ModelMaxAttempts   int
+	ModelRetryAfterMS  int64
+	ModelErrorKind     string
+	ModelRetryable     bool
 	ModelUsageKnown    bool
 	RuntimeRevision    int64
 	RuntimeDigest      string
@@ -464,6 +472,7 @@ func (c *TurnCoordinator) cancelActiveWorkLocked(command TurnCommand) {
 	if finished.IsZero() {
 		finished = time.Now().UTC()
 	}
+	c.finishInterruptedModelAttemptLocked(finished)
 	if c.step != nil && !c.step.Status.Terminal() {
 		// CommandCancelTurn is intentionally self-contained for replay and
 		// direct lifecycle callers. CommandCancelStep remains supported for
@@ -553,6 +562,10 @@ func replayCommand(event TurnEventEnvelope) (TurnCommand, bool, error) {
 		InteractionID        string                `json:"interaction_id"`
 		ToolName             string                `json:"tool_name"`
 		ErrorKind            string                `json:"error_kind"`
+		Reason               string                `json:"reason"`
+		Retryable            bool                  `json:"retryable"`
+		MaxAttempts          int                   `json:"max_attempts"`
+		RetryAfterMS         int64                 `json:"retry_after_ms"`
 		ExecutionStatus      ToolExecutionStatus   `json:"execution_status"`
 		RuntimeRevision      int64                 `json:"runtime_revision"`
 		RuntimeDigest        string                `json:"runtime_digest"`
@@ -585,6 +598,7 @@ func replayCommand(event TurnEventEnvelope) (TurnCommand, bool, error) {
 		FinalSummary:        meta.FinalSummary,
 		InteractionKind:     meta.InteractionKind,
 		InteractionRevision: meta.InteractionRev, ErrorKind: meta.ErrorKind,
+		Reason: meta.Reason, Retryable: meta.Retryable, MaxAttempts: meta.MaxAttempts, RetryAfterMS: meta.RetryAfterMS,
 		ExecutionStatus: meta.ExecutionStatus, PayloadRef: event.PayloadRef,
 		ResultContent:        meta.ResultContent,
 		ContextBeforeDigest:  meta.ContextBeforeDigest,
@@ -909,7 +923,7 @@ func (c *TurnCoordinator) startModelAttemptLocked(command TurnCommand) error {
 		attemptBase = c.step.ID
 	}
 	attemptID := fmt.Sprintf("%s-attempt-%d", attemptBase, attemptNumber)
-	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, TurnID: c.turn.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, StartedAt: command.At}
+	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, TurnID: c.turn.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, MaxAttempts: command.MaxAttempts, StartedAt: command.At}
 	c.attempts = append(c.attempts, attempt)
 	c.turn.ModelUsagePending = true
 	// A provider callback records the attempt; a completed attempt without a
@@ -1002,6 +1016,8 @@ func (c *TurnCoordinator) finishModelAttemptLocked(event EventType, status Model
 		last := &c.attempts[len(c.attempts)-1]
 		last.Status = status
 		last.ErrorKind = command.ErrorKind
+		last.Retrying = false
+		last.Retryable = command.Retryable
 		finished := command.At
 		last.FinishedAt = &finished
 	}
@@ -1013,6 +1029,9 @@ func (c *TurnCoordinator) retryModelAttemptLocked(command TurnCommand) error {
 		last := &c.attempts[len(c.attempts)-1]
 		last.Status = ModelAttemptStatusFailed
 		last.ErrorKind = command.ErrorKind
+		last.Retrying = true
+		last.Retryable = command.Retryable
+		last.RetryAfterMS = command.RetryAfterMS
 		finished := command.At
 		last.FinishedAt = &finished
 	}
@@ -1266,12 +1285,49 @@ func (c *TurnCoordinator) advanceStepLocked(event EventType, command TurnCommand
 	if event == EventStepCompleted && c.batch != nil && c.batch.Status != "settled" {
 		return fmt.Errorf("cannot complete step before tool batch is settled")
 	}
+	if event == EventStepInterrupted || event == EventStepCancelled {
+		c.finishInterruptedModelAttemptLocked(command.At)
+	} else if event == EventStepFailed {
+		c.clearModelAttemptRetryingLocked()
+	}
 	return c.step.Advance(event, command.At, command.Reason)
+}
+
+func (c *TurnCoordinator) finishInterruptedModelAttemptLocked(at time.Time) {
+	if len(c.attempts) == 0 {
+		return
+	}
+	last := &c.attempts[len(c.attempts)-1]
+	if last.Status != ModelAttemptStatusRunning && !last.Retrying {
+		return
+	}
+	last.Status = ModelAttemptStatusInterrupted
+	last.Retrying = false
+	last.RetryAfterMS = 0
+	finished := at
+	if finished.IsZero() {
+		finished = time.Now().UTC()
+	}
+	last.FinishedAt = &finished
+}
+
+func (c *TurnCoordinator) clearModelAttemptRetryingLocked() {
+	if len(c.attempts) == 0 {
+		return
+	}
+	last := &c.attempts[len(c.attempts)-1]
+	last.Retrying = false
+	last.RetryAfterMS = 0
 }
 
 func (c *TurnCoordinator) advanceTurnLocked(event EventType, command TurnCommand) error {
 	if c.turn == nil {
 		return fmt.Errorf("turn command requires an active turn")
+	}
+	if event == EventTurnInterrupted || event == EventTurnCancelled {
+		c.finishInterruptedModelAttemptLocked(command.At)
+	} else if event == EventTurnBudgetExhausted || event == EventTurnFailed {
+		c.clearModelAttemptRetryingLocked()
 	}
 	return c.turn.Advance(event, command.At, command.Reason)
 }
@@ -1376,7 +1432,16 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 		result.InteractionPayload = append(json.RawMessage(nil), c.interaction.Payload...)
 	}
 	if len(c.attempts) > 0 {
-		result.ModelAttempt = c.attempts[len(c.attempts)-1].Attempt
+		last := c.attempts[len(c.attempts)-1]
+		result.ModelAttempt = last.Attempt
+		result.ModelAttemptStatus = last.Status
+		if last.Retrying {
+			result.ModelAttemptStatus = "retrying"
+		}
+		result.ModelMaxAttempts = last.MaxAttempts
+		result.ModelRetryAfterMS = last.RetryAfterMS
+		result.ModelErrorKind = last.ErrorKind
+		result.ModelRetryable = last.Retryable
 		result.ModelUsageKnown = !c.turn.ModelUsageMissing && !c.turn.ModelUsagePending
 	}
 	if c.step != nil && c.step.Status == StepStatusExecutingTools {

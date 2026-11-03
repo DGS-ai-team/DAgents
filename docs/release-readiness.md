@@ -1,38 +1,40 @@
-# v1.0.4 发布验收清单
+# v1.0.5 发布验收清单
 
-评估日期：2026-11-02。[v1.0.4 已正式发布](https://github.com/DGS-ai-team/DAgents/releases/tag/v1.0.4)。PR #373、#374 已合入 `main`；tag 指向 `0ff031fff624aa2051c17fcde62d2ac502c27dfc`。正式构建和发布资产校验已完成，发布后同步由独立分支提交到 `dev`。
+评估日期：2026-11-03。当前为发布候选，尚未创建正式 tag 或 GitHub Release。功能与修复 PR [#383](https://github.com/DGS-ai-team/DAgents/pull/383) 已合入 dev（1de1d1f5），本发布分支用于将其合入 main。
 
-历史 v1.0.2 清单已归档：[release-readiness-v1.0.2.md](archive/releases/release-readiness-v1.0.2.md)。
+历史 v1.0.4 清单归档至 `docs/archive/releases/release-readiness-v1.0.4.md`；本次具体修改与验证边界见 [功能减负与实现收敛验收](audit/2026-11-03-simplification-and-acceptance.md)。
 
 ## 发布范围
 
-v1.0.4 包含工具执行结果字段布局修复，以及工作区文件列表排序、目录/文件标识、路径快捷操作、Word/Markdown/代码/表格预览和 Markdown 源码切换；同时改进输入栏状态提示，规范 system prompt 中 URL、加粗和特殊字面量的输出格式，并修复切换记忆范围时丢失 Agent 类型、workspace 和手册目录的问题。
+统一设置框架、选择器、上下文菜单和保存反馈；保留工具执行中的实时记录、文字扫光与垂直切换，由输入栏统一停止。移除临时岗位授权、命令帮助、Desktop/Node 扩展包上传及未使用的状态链和 CLI 包装。模型参数按供应商能力配置，模型档案统一持久化，修复旧配置迁移失败后的数据保护。恢复子智能体进度，优化长对话流式更新和冷会话状态读取。Manage 仓库保留，普通用户仅显示浏览入口。另含 v1.0.4 以来的浏览器进程清理、终端选择器、浏览器导航、代码块和资源菜单打磨。
 
-发布平台沿用现行范围：Windows x64 Desktop 安装包、Linux amd64 本地助手包和 Manage 离线包；安装包未签名，正式发布说明已包含 SmartScreen 提示、下载入口与 SHA256 校验文件。
+正式资产范围：Windows x64 Inno 安装包、Linux amd64 本地助手包、Manage 离线包，以及 SHA256SUMS 和 release-manifest.json。Windows 安装包未签名。
 
-## 已有验证证据
+## 已完成证据
 
-- [x] PR #371 合入 `dev`，对应 CI 全部通过。
-- [x] PR #372 合入 `dev`，对应 CI 全部通过，Codex review 无未解决发现。
-- [x] PR #372 本地验证：Desktop lint、前端测试（80 个文件、513 项）、生产构建、Rust 格式与测试（77 项）、Node turn Go 测试和 `git diff --check` 通过。
-- [x] v1.0.4 版本元数据由 `scripts/release/prepare_release.py` 更新，`scripts/release/validate_release.py --version 1.0.4` 通过。
-- [x] PR #373（v1.0.4 发布准备）已合入 `main`；必需 CI 与 Codex Review 均通过。
-- [x] 隔离 Windows 安装/升级/卸载演练通过：旧版 QA 包使用 v1.0.3 标签的安装器源码，并复用 v1.0.3 GitHub Actions run `40992773695` 的四个原始 Windows 二进制；新版 QA 包从当前 v1.0.4 候选构建。两包都使用独立 QA AppId，测试目录位于工作区 fixture。
-- [x] 基础演练启动旧版 Node 与 Desktop 后升级到 v1.0.4；安装器退出 Desktop、停止受管 Node，升级后 Node 设置数据库逻辑摘要、listen 配置、运行时哨兵、策略文件和 QA Desktop 设置保持一致。卸载仅移除程序文件，Node 数据库及用户数据仍保留；最终 Verify 通过。
-- [x] 演练前后比较当前用户的 Desktop 设置、快捷方式、自启动值、PATH 和正式安装卸载注册项摘要，均未变化；QA 安装没有创建 `.runtime/data`。
-- [x] PR #374 已合入 `main`，CI 与 Codex Review 通过。QA runner 使用 `ProcessStartInfo.ArgumentList` 分别传递命令和路径；记忆范围更新仅写入快照的 `defaults`，保留其他元数据。Node API 整包测试和快照元数据回归测试通过。
-- [x] 完整数据演练使用旧版 `1.0.3.1-qa` 包安装并通过实际 API 创建自主智能体、生成一轮 Mock 对话、写入 Agent/全局记忆、自定义 workspace 文件和已有工具输出文件 fixture，再升级到从合并提交 `0ff031ff` 构建的 `1.0.4.2-qa` 包。
-- [x] 升级时由安装器退出运行中的 Desktop、停止其受管 Node；重启后通过 v1.0.4 API 读回旧对话、自定义 workspace 和 Agent/全局记忆。原始历史 JSONL、workspace 文件和已有工具输出文件摘要保持一致，且没有创建 `.runtime/data`。
-- [x] 升级后切换记忆范围，再次 hydrate 并查询 workspace location，确认自主智能体类型和自定义 workspace 路径保持正确。卸载后通过只读 SQLite 查询确认 Agent 元数据、可恢复对话和 Agent/全局记忆内容仍保留，业务文件摘要一致；QA runner 的 Uninstall/Verify 通过，生产设置摘要未变化。
-- [x] 新候选 QA 包 SHA256 为 `bfbcd38305f803d10bfe03bc7520a9ad31707d1e55a67d69a059dc6041e6562a`；Node 从上述合并提交重新构建，Desktop 代码与此前候选相同，Client/Browser 复用未变更的 v1.0.3 CI 二进制。该 QA 包只用于隔离验收，不作为正式发布资产。
-- [x] 对话测试仅使用 Mock，不调用外部 LLM；工具输出验收覆盖已有文件保留，不代表重新执行了实际工具落盘流程。
-- [x] [正式发布工作流 41381880396](https://github.com/DGS-ai-team/DAgents/actions/runs/41381880396) 成功，包含跨语言单元测试、Windows x64、Linux amd64 和 Manage 离线包构建。
-- [x] 正式 Release 共五项资产：三个平台/组件包及 `SHA256SUMS`、`release-manifest.json`。逐项核对包名、版本、字节大小，以及 GitHub 上传 SHA256 digest、校验文件与 manifest 三者的摘要一致；manifest 的提交与正式 tag 一致。发布说明已补齐安装与升级提示，并设为 latest。
+- [x] 版本元数据更新为 1.0.5，`python scripts/release/validate_release.py --version 1.0.5` 通过。
+- [x] Desktop 84 个文件、570 项 Vitest，7 项图标契约与 106 项 UI 状态检查通过；后续重试短文案的定向测试 29 项及 lint 通过。lint/build 和 Windows 原生构建通过。
+- [x] Manage lint/build、Ruff、Pyright 和 212 项 Python unittest 通过；隔离数据库分别验证管理员发布与普通身份浏览。
+- [x] Go 1.26.10 五模块 test/vet/staticcheck、Node/client 构建；Rust fmt 和 77 项测试；品牌、API fixture 和 OpenAPI 契约通过。
+- [x] 原生工具运行验收使用隔离的本地 OpenAI SSE fixture 和真实 PowerShell 命令。输入栏停止后取得 cancelled_by_user、工具 cancelled、运行工具数 0；临时 Agent、档案与 fixture 已清理。
+- [x] 旧凭据迁移失败时普通设置保存和模型切换均被拒绝，原配置保留；补齐环境变量重启后两档模型及密钥恢复。旧 Qwen effort 归一化后，合法 thinking、预算及密钥保留，新提交的非法参数继续拒绝。
+- [x] CodeQL/Codex 两轮发现均修复并补充回归；提交 922cfaf3 的 Node 全包测试与 staticcheck 通过。新增工作区引用组件交互、旧 OpenAI effort、清空边界和持久化错误回归。
+- [x] 发布候选补充模型故障恢复：Node 全包测试与 staticcheck 通过；本地故障接口验证暂时/持续 503、401、退避中取消、超长 Retry-After、部分输出后断流，均收敛终态；后续消息成功，清空对话有效，部分正文进入下一轮上下文。
+- [x] 原生窗口验证失败提示、重试进度、输入和模型选择解锁、资源页悬浮错误提示。外部付费模型未调用，测试使用隔离目录和本地故障接口。
 
-## 发版门禁与待完成项
+## 发布门禁
 
-- [x] PR #374 已合并，完整数据升级验收通过；最新 `main` 的 CI 成功后创建并推送 `v1.0.4` tag。
-- [x] 正式发布工作流成功，资产校验和 Release 说明完善均已完成。
-- [ ] 合并独立分支 `codex/sync-main-to-dev-v1.0.4` 提交的发布后同步 PR，将 v1.0.4 版本元数据、快照保留修复和本次验收记录同步到 `dev`。不使用 `main` 本身作为源分支，避免合并后自动删除 main。
+- [x] PR #383 提交 922cfaf3 的完整 CI（run 41619773131）、Linux race、CodeQL 均通过；2026-11-03 10:35 UTC 的机器人复审完成且无发现，历史讨论均已解决。
+- [x] PR #383 于 2026-11-03 合入 dev，合并提交 1de1d1f56eeed0d9754a3f9156c6180f462d8878。
+- [x] v1.0.4 到 v1.0.5 的隔离安装、升级、卸载演练通过，验证历史、工作区、Agent/全局记忆、工具文件和用户数据保留。
+- [ ] 从最新 dev 建立独立发布分支，更新本清单并通过 main 发布 PR 的 CI、Release metadata 与审查。
+- [ ] 仅在合入后的最新 origin/main 提交创建 v1.0.5 tag，不覆盖任何已有 tag。
+- [ ] 正式工作流成功；五项资产齐全，版本、提交、大小与 SHA256 在上传 digest、SHA256SUMS、manifest 间一致。
+- [ ] Release 说明补齐下载入口、数据备份、旧环境变量、未签名/SmartScreen 与校验提示，确认 latest。
+- [ ] 通过临时源分支提交 main 到 dev 的发布后同步 PR，避免自动删除 main。
 
-当前仓库启用了合并后自动删除源分支。此前 PR #370 用 `main` 作为源分支同步至 `dev`，导致 `main` 被自动删除；已按正式 v1.0.3 tag 恢复 `main`，后续同步必须使用临时源分支。
+## 验收边界
+
+本次原生联调使用本地 SSE fixture，不代表验证了外部真实付费模型、真实 SSH 和跨机器工作组。Windows race 受本机工具链限制，合并以 CI Linux race 结果为准。冷状态缓存仍需查询持久日志版本，不改变完整恢复时的日志重放。
+
+升级前备份完整 `.runtime`（包括 `.llm_secret_key`），保留旧凭据所在的进程环境变量。本版安装演练使用原 v1.0.4 CI 二进制与提交 922cfaf3 的候选构建，QA 安装包版本 1.0.5.1，独立 AppId。原安装器前后数据库 hash 保留，启动迁移后另建卸载前后基线；已验证已知业务字段和 active-only 结构，没有迁移前完整 settings_json 快照，因此不声称逐字段完全等价。

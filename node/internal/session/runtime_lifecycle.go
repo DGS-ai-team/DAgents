@@ -377,6 +377,9 @@ func (r *runtime) lifecyclePersistEvent(command turn.TurnCommand, snapshot turn.
 		"compacted_message_from": command.CompactedMessageFrom,
 		"compacted_message_to":   command.CompactedMessageTo,
 		"error_kind":             command.ErrorKind,
+		"retryable":              command.Retryable,
+		"max_attempts":           command.MaxAttempts,
+		"retry_after_ms":         command.RetryAfterMS,
 		"execution_status":       command.ExecutionStatus,
 		"usage":                  command.Usage,
 		"turn_status":            snapshot.TurnStatus,
@@ -1346,6 +1349,10 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 	if outcome.Err != nil {
 		return r.withCommittedHistoryLocked(history, func() error {
 			state := r.turnCoordinator.Snapshot()
+			lifecycleReason := outcome.Err.Error()
+			if strings.TrimSpace(state.ModelErrorKind) != "" && strings.TrimSpace(state.StepEndReason) != "" {
+				lifecycleReason = state.StepEndReason
+			}
 			if errors.Is(outcome.Err, turn.ErrBudgetExhausted) {
 				if !state.StepStatus.Terminal() {
 					if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{
@@ -1388,7 +1395,7 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 					StepID:     state.StepID,
 					Generation: generation,
 					At:         now,
-					Reason:     outcome.Err.Error(),
+					Reason:     lifecycleReason,
 				}); err != nil {
 					return fmt.Errorf("finish failed step lifecycle: %w", err)
 				}
@@ -1400,7 +1407,7 @@ func (r *runtime) lifecycleAfterModelStep(outcome turn.StepOutcome, history []ll
 					TurnID:     identity,
 					Generation: generation,
 					At:         now,
-					Reason:     outcome.Err.Error(),
+					Reason:     lifecycleReason,
 				}); err != nil {
 					return fmt.Errorf("finish failed turn lifecycle: %w", err)
 				}
@@ -1528,6 +1535,10 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 	if outcome.Err != nil {
 		return r.withCommittedHistoryLocked(history, func() error {
 			state := r.turnCoordinator.Snapshot()
+			lifecycleReason := outcome.Err.Error()
+			if strings.TrimSpace(state.ModelErrorKind) != "" && strings.TrimSpace(state.StepEndReason) != "" {
+				lifecycleReason = state.StepEndReason
+			}
 			if errors.Is(outcome.Err, turn.ErrBudgetExhausted) {
 				if !state.StepStatus.Terminal() {
 					if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turn.CommandFailStep, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
@@ -1548,12 +1559,12 @@ func (r *runtime) lifecycleAfterResume(outcome turn.StepOutcome, history []llm.M
 				turnType = turn.CommandInterruptTurn
 			}
 			if !state.StepStatus.Terminal() {
-				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: stepType, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: stepType, SessionID: r.session.ID, TurnID: identity, StepID: state.StepID, Generation: generation, At: now, Reason: lifecycleReason}); err != nil {
 					return fmt.Errorf("finish resumed failed step lifecycle: %w", err)
 				}
 			}
 			if !r.turnCoordinator.Snapshot().TurnStatus.Terminal() {
-				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turnType, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: outcome.Err.Error()}); err != nil {
+				if _, err := r.lifecycleDispatchLockedErr(turn.TurnCommand{Type: turnType, SessionID: r.session.ID, TurnID: identity, Generation: generation, At: now, Reason: lifecycleReason}); err != nil {
 					return fmt.Errorf("finish resumed failed turn lifecycle: %w", err)
 				}
 			}

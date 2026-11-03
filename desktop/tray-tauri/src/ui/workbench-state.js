@@ -64,6 +64,13 @@ export function desktopComposerStatus({ generating = false, cancelling = false, 
   const phase = String(turnState?.phase || '')
   if (!generating || turnState?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted', 'finished'].includes(phase)) return ''
   if (cancelling) return '正在停止'
+  const attempt = turnState?.modelAttempt || turnState?.model_attempt || {}
+  if (attempt.status === 'retrying') {
+    const count = Math.max(1, Number(attempt.attempt) || 1)
+    const totalRequests = Number(attempt.maxAttempts ?? attempt.max_attempts) || count + 1
+    const totalRetries = Math.max(1, totalRequests - 1)
+    return `正在重试 ${count}/${totalRetries}`
+  }
   if (phase === 'queued') return '等待执行'
   if (phase === 'tool_executing') return '工具执行中'
   if (phase === 'tool_waiting') return '等待工具审批'
@@ -74,6 +81,42 @@ export function desktopComposerStatus({ generating = false, cancelling = false, 
       : '正在生成回复'
   }
   return '正在等待回复'
+}
+
+export function turnErrorSummary(error, { partial = false, retryCount = 0 } = {}) {
+  const code = String(error?.code || '').trim().toLowerCase()
+  const raw = String(error?.message || '').trim()
+  const retries = Math.max(0, Number(retryCount) || 0)
+  let message
+  if (code === 'provider_authentication') {
+    message = '模型鉴权失败，请到模型设置检查 API Key 和服务地址。'
+  } else if (code === 'provider_quota') {
+    message = '模型账户余额或额度不足，请检查服务商账户额度后重试。'
+  } else if (code === 'provider_unavailable') {
+    message = `模型服务暂时不可用，已重试${retries}次。请稍后重试或切换模型。`
+  } else if (code === 'provider_timeout') {
+    message = `模型服务响应超时，已重试${retries}次。请稍后重试或切换模型。`
+  } else if (code === 'provider_rate_limited') {
+    message = `模型服务请求过于频繁，已重试${retries}次。请稍后重试或切换模型。`
+  } else if (code === 'provider_configuration' || code === 'provider_error' || code === 'provider_http_error' || code === 'provider_network_error') {
+    message = raw || '本轮未能完成，请稍后重试或切换模型。'
+  } else if (code === 'turn_interrupted') {
+    message = '本轮已中断，请检查已生成内容后再继续。'
+  } else {
+    message = '本轮未能完成，请稍后重试或切换模型。'
+  }
+  return partial ? `${message} 已保留本轮已生成的部分内容。` : message
+}
+
+export function hasPersistedPartialMessage(transcript) {
+  if (!Array.isArray(transcript)) return false
+  let lastUserIndex = -1
+  for (let index = 0; index < transcript.length; index += 1) {
+    if (transcript[index]?.kind === 'user' || transcript[index]?.role === 'user') lastUserIndex = index
+  }
+  return transcript.slice(lastUserIndex + 1).some(entry =>
+    entry?.partial && (entry?.kind === 'assistant' || entry?.role === 'assistant'),
+  )
 }
 
 export function desktopChatEntries(agentId, transcript = [], pendingUser = null) {

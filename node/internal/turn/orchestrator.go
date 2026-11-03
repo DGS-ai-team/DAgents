@@ -921,12 +921,37 @@ func (o *Orchestrator) runOneStep(
 	}{systemPrompt, llmMessages, toolDefs})
 	result, err := o.runModelRequest(ctx, sessionID, systemPrompt, llmMessages, toolDefs, requestDigest, stepIndex)
 	if err != nil {
+		if errors.Is(err, ErrBudgetExhausted) {
+			finishReason = "budget_exhausted"
+			streamErr = err
+			o.publishTurnFinished(sessionID, finishReason)
+			o.clearModelContextSnapshot(sessionID)
+			return StepOutcome{StepIndex: stepIndex, Err: streamErr}
+		}
+		if !errors.Is(err, context.Canceled) && result.Content != "" {
+			execution, _ := ExecutionContextFromContext(ctx)
+			reference := execution.TurnID + "/" + execution.StepID
+			if strings.Trim(reference, "/") == "" {
+				reference = sessionID + "/step-" + fmt.Sprint(stepIndex)
+			}
+			partial := llm.Message{
+				Role:    "assistant",
+				Content: result.Content,
+				Source:  &llm.MessageSource{Kind: llm.MessageSourceModel},
+				Provenance: &llm.MessageProvenance{
+					Producer: "model", Operation: "partial_response",
+					Reference: reference,
+				},
+			}
+			o.appendHistory(sessionID, history, partial)
+		}
 		if !errors.Is(err, context.Canceled) {
 			o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 				Type:      CommandModelRequestFailed,
 				At:        time.Now().UTC(),
 				ErrorKind: modelErrorKind(err),
-				Reason:    err.Error(),
+				Retryable: isTransientModelError(err),
+				Reason:    modelErrorUserMessage(err),
 			})
 		}
 		if errors.Is(err, context.Canceled) {
@@ -936,7 +961,7 @@ func (o *Orchestrator) runOneStep(
 			o.logger.Info("turn llm cancelled", "session_id", sessionID, "step_index", stepIndex)
 		} else {
 			o.runTurnErrorPhase(ctx, sessionID, history, err)
-			o.publishError(sessionID, err.Error())
+			o.publishError(sessionID, modelErrorUserMessage(err))
 			finishReason = "error"
 			streamErr = err
 			o.logger.Error("turn llm failed", "session_id", sessionID, "step_index", stepIndex, "error", err)
@@ -1134,13 +1159,9 @@ func (o *Orchestrator) setModelContextSnapshot(sessionID string, snapshot *Model
 	o.modelSnapshots.set(sessionID, snapshot)
 }
 
-func waitModelRetry(ctx context.Context, attempt int) error {
-	// Keep retries bounded and cancellation-aware. The small exponential delay
-	// avoids hammering a provider during a transient outage without adding a
-	// visible delay to normal successful Steps.
-	delay := 100 * time.Millisecond * time.Duration(1<<(attempt-1))
-	if delay > 2*time.Second {
-		delay = 2 * time.Second
+func waitModelRetry(ctx context.Context, attempt int, delay time.Duration) error {
+	if delay <= 0 {
+		delay = modelRetryBackoff(attempt)
 	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -1152,31 +1173,12 @@ func waitModelRetry(ctx context.Context, attempt int) error {
 	}
 }
 
-func isTransientModelError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	for _, marker := range []string{
-		"timeout", "temporar", "try again", "rate limit", "too many requests",
-		"429", "502", "503", "504", "connection reset", "connection refused",
-		"broken pipe", "eof", "service unavailable",
-	} {
-		if strings.Contains(message, marker) {
-			return true
-		}
-	}
-	return false
+func modelErrorKind(err error) string {
+	return llm.ProviderErrorCode(err)
 }
 
-func modelErrorKind(err error) string {
-	if err == nil {
-		return ""
-	}
-	if isTransientModelError(err) {
-		return "transient_provider_error"
-	}
-	return "provider_error"
+func modelErrorUserMessage(err error) string {
+	return llm.ProviderErrorUserMessage(err)
 }
 
 func (o *Orchestrator) clearModelContextSnapshot(sessionID string) {

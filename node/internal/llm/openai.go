@@ -7,8 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
@@ -27,6 +31,24 @@ type OpenAIClient struct {
 	client *http.Client
 }
 
+// All OpenAI-compatible clients share the transport's concurrency-safe
+// connection pools. Credentials, model settings, and request bodies stay on
+// each request/client and are never stored in the transport.
+var sharedOpenAITransport = newOpenAIHTTPTransport()
+
+func newOpenAIHTTPTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 45 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+	}
+}
+
 // NewOpenAIClient 构造 OpenAI 兼容客户端。
 func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 	base := normalizeOpenAIBaseURL(cfg.BaseURL)
@@ -41,7 +63,8 @@ func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 			RequestExtra: cfg.RequestExtra,
 		},
 		client: &http.Client{
-			Timeout: 0,
+			Timeout:   0, // Stream lifetime is bounded by idle reads, not total generation time.
+			Transport: sharedOpenAITransport,
 		},
 	}
 }
@@ -126,7 +149,9 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	}
 
 	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -137,11 +162,18 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	if err != nil {
 		return ChatResult{}, err
 	}
-	defer resp.Body.Close()
+	responseBody := newIdleTimeoutBody(resp.Body, cancel, 120*time.Second)
+	defer responseBody.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return ChatResult{}, fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
+		raw, readErr := io.ReadAll(io.LimitReader(responseBody, 4096))
+		if ctx.Err() != nil {
+			return ChatResult{}, ctx.Err()
+		}
+		if readErr != nil && responseBody.IdleTimedOut() {
+			return ChatResult{}, StreamIdleTimeoutError{}
+		}
+		return ChatResult{}, &ProviderHTTPError{StatusCode: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()), Body: strings.TrimSpace(string(raw)), Endpoint: endpoint}
 	}
 
 	var full strings.Builder
@@ -150,7 +182,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	var finishReason string
 	streamComplete := false
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(responseBody)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		select {
@@ -223,6 +255,9 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if responseBody.IdleTimedOut() {
+			return ChatResult{Content: full.String(), ReasoningContent: fullReasoning.String(), ToolCalls: toolAcc.aggregate()}, StreamIdleTimeoutError{}
+		}
 		return ChatResult{
 			Content:          full.String(),
 			ReasoningContent: fullReasoning.String(),
@@ -370,7 +405,9 @@ func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRe
 		}
 	}
 	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", nil, err
 	}
@@ -380,10 +417,26 @@ func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRe
 	if err != nil {
 		return "", nil, err
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	responseBody := newIdleTimeoutBody(resp.Body, cancel, 120*time.Second)
+	defer responseBody.Close()
+	raw, readErr := io.ReadAll(responseBody)
+	if readErr != nil && responseBody.IdleTimedOut() {
+		return "", nil, StreamIdleTimeoutError{}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", nil, fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
+		if ctx.Err() != nil {
+			return "", nil, ctx.Err()
+		}
+		return "", nil, &ProviderHTTPError{StatusCode: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()), Body: strings.TrimSpace(string(raw)), Endpoint: endpoint}
+	}
+	if readErr != nil {
+		if ctx.Err() != nil {
+			return "", nil, ctx.Err()
+		}
+		if responseBody.IdleTimedOut() {
+			return "", nil, StreamIdleTimeoutError{}
+		}
+		return "", nil, readErr
 	}
 	var parsed completeResponseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -401,6 +454,74 @@ func (c *OpenAIClient) CompleteTextWithUsage(ctx context.Context, req CompleteRe
 		return "", usage, fmt.Errorf("empty completion choices")
 	}
 	return strings.TrimSpace(parsed.Choices[0].Message.Content), usage, nil
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		if seconds > int64(^uint64(0)>>1)/int64(time.Second) {
+			return time.Duration(1<<63 - 1)
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil && at.After(now) {
+		return at.Sub(now)
+	}
+	return 0
+}
+
+// StreamIdleTimeoutError means the provider stopped sending response bytes.
+// A long generation that continues to send SSE heartbeat comments remains
+// alive because every byte read resets the timer.
+type StreamIdleTimeoutError struct{}
+
+func (StreamIdleTimeoutError) Error() string   { return "llm response idle timeout" }
+func (StreamIdleTimeoutError) Timeout() bool   { return true }
+func (StreamIdleTimeoutError) Temporary() bool { return true }
+
+type idleTimeoutBody struct {
+	body     io.ReadCloser
+	cancel   context.CancelFunc
+	timer    *time.Timer
+	timeout  time.Duration
+	mu       sync.Mutex
+	timedOut bool
+}
+
+func newIdleTimeoutBody(body io.ReadCloser, cancel context.CancelFunc, timeout time.Duration) *idleTimeoutBody {
+	reader := &idleTimeoutBody{body: body, cancel: cancel, timeout: timeout}
+	reader.timer = time.AfterFunc(timeout, func() {
+		reader.mu.Lock()
+		reader.timedOut = true
+		reader.mu.Unlock()
+		cancel()
+	})
+	return reader
+}
+
+func (b *idleTimeoutBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	if n > 0 {
+		b.timer.Reset(b.timeout)
+	}
+	return n, err
+}
+
+func (b *idleTimeoutBody) Close() error {
+	b.timer.Stop()
+	return b.body.Close()
+}
+
+func (b *idleTimeoutBody) IdleTimedOut() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.timedOut
 }
 
 func usageHasTokenCounts(raw json.RawMessage) bool {

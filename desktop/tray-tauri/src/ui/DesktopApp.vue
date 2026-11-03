@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, hasPersistedPartialMessage, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
@@ -16,7 +16,7 @@ import { createWorkspaceReference, dispatchWorkspaceMessage, hasWorkspaceMessage
 import { agentStore } from '@desktop-ui/stores/agent.js'
 import { applyRemoteWorkerEvent, currentRemoteWorkerEventVersion, replaceChildrenFromHydrate, setRemoteWorkerParent } from '@desktop-ui/stores/remoteWorkers.js'
 import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
-import { applyHydrateTurnState, turnStateStore } from '@desktop-ui/stores/turnState.js'
+import { applyDesktopTurnEvent, applyHydrateTurnState, resetTurnState, turnStateStore } from '@desktop-ui/stores/turnState.js'
 import { createTurnWatchdog } from '@desktop-ui/stores/turnWatchdog.js'
 import MainChatPanel from '@desktop-ui/components/MainChatPanel.vue'
 import ResourceMarkdown from '@desktop-ui/components/ResourceMarkdown.vue'
@@ -123,6 +123,7 @@ const error = computed({
 })
 const workspaceUploadErrors = new Map()
 const streamingText = ref('')
+const partialHydrateRetryTurns = new Set()
 const textarea = ref(null)
 const attachmentActionsOpen = ref(false)
 const attachmentActionAnchor = ref(null)
@@ -345,7 +346,7 @@ const approvalCalls = computed(() => {
     argumentsText: formatApprovalArguments({ arguments: call.arguments, raw_arguments: call.rawArgs }),
   }))
 })
-const canCancelTurn = computed(() => ['queued', 'model_generating', 'tool_executing'].includes(hydrate.value?.turn_state?.phase))
+const canCancelTurn = computed(() => ['queued', 'model_generating', 'tool_executing'].includes(turnStateStore.phase))
 const agentGenerating = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
 const composerRuntimeStatus = computed(() => desktopComposerStatus({
   generating: agentGenerating.value,
@@ -353,9 +354,15 @@ const composerRuntimeStatus = computed(() => desktopComposerStatus({
   streamingText: streamingText.value,
   turnState: turnStateStore,
 }))
+const turnError = computed(() => turnStateStore.error
+  ? turnErrorSummary(turnStateStore.error, {
+      partial: Boolean(streamingText.value) || (turnStateStore.error.incomplete && hasPersistedPartialMessage(hydrate.value?.transcript)),
+      retryCount: Math.max(0, (turnStateStore.modelAttempt?.attempt || 1) - 1),
+    })
+  : '')
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => Boolean(activeId.value && status.value.online),
-  hasStuckStatus: () => agentGenerating.value || Boolean(streamingText.value),
+  hasStuckStatus: () => agentGenerating.value || (Boolean(streamingText.value) && !turnStateStore.terminal),
   onStuck: async () => {
     const id = activeId.value
     if (!id) return
@@ -651,16 +658,27 @@ async function hydrateAgentSnapshot(id) {
   const snapshot = await invoke('desktop_hydrate_agent', { agentId: id })
   if (requestSequence !== activeHydrationSequence || activeId.value !== id) return
   turnWatchdog.noteActivity()
+  const acceptedTurnState = applyHydrateTurnState(snapshot)
+  if (!acceptedTurnState && turnStateStore.turnId) return
   hydrate.value = snapshot
   if (Array.isArray(snapshot?.child_agents)) replaceChildrenFromHydrate(snapshot.child_agents, id, workerEventVersion)
-  applyHydrateTurnState(snapshot)
+  const incomplete = Boolean(snapshot?.turn_state?.error?.incomplete)
+  const hasPersistedPartial = incomplete && hasPersistedPartialMessage(snapshot?.transcript)
+  if (hasPersistedPartial) {
+    streamingText.value = ''
+    partialHydrateRetryTurns.delete(snapshot.turn_state?.turn_id)
+  } else if (incomplete && turnStateStore.terminal && !partialHydrateRetryTurns.has(snapshot.turn_state?.turn_id)) {
+    partialHydrateRetryTurns.add(snapshot.turn_state?.turn_id)
+    scheduleActiveAgentHydrate(id, 180)
+  }
   void restoreAgentMedia(snapshot, id).then(withMedia => {
     if (requestSequence === activeHydrationSequence && activeId.value === id) hydrate.value = withMedia
   }).catch(e => {
     if (requestSequence === activeHydrationSequence && activeId.value === id) error.value = `无法读取会话图片：${String(e.message || e)}`
   })
   if (snapshot.turn_state?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted'].includes(snapshot.turn_state?.phase)) {
-    streamingText.value = ''
+    const preservePartial = ['failed', 'interrupted'].includes(snapshot.turn_state?.phase) || snapshot.turn_state?.end_reason === 'error'
+    if (!preservePartial) streamingText.value = ''
   }
 }
 function scheduleActiveAgentHydrate(id, delay = 100) {
@@ -730,9 +748,10 @@ async function selectAgent(id, { clearError = true, openChat = false } = {}) {
     dockDraft.value = switchDraft(dockDrafts.value, activeId.value, id, dockDraft.value)
   }
   if (changed) {
+    partialHydrateRetryTurns.delete(turnStateStore.turnId)
     streamingText.value = ''
     userInfoSelected.value = []
-    applyHydrateTurnState({ turn_state: {} })
+    resetTurnState()
   }
   if (viewTransition.enterChat && route.path !== '/chat') void router.push('/chat')
   activeId.value = id
@@ -745,7 +764,7 @@ async function selectAgent(id, { clearError = true, openChat = false } = {}) {
     dockDraft.value = ''
     streamingText.value = ''
     userInfoSelected.value = []
-    applyHydrateTurnState({ turn_state: {} })
+    resetTurnState()
     if (clearError) error.value = ''
     return
   }
@@ -786,8 +805,10 @@ async function sendMessageToActiveAgent(text, images = [], files = [], reference
   text = String(text || '').trim()
   if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value || agentGenerating.value) return false
   const agentId = activeId.value
+  const previousPartial = activeId.value === agentId ? streamingText.value : ''
   let pendingUser
   setAgentError(agentId, '')
+  if (activeId.value === agentId) streamingText.value = ''
   setAgentBusy(agentId, true)
   try {
     await dispatchWorkspaceMessage({ agentId, text, images, files, references }, submitMessage, message => {
@@ -803,6 +824,7 @@ async function sendMessageToActiveAgent(text, images = [], files = [], reference
     })
     if (references.length) consumeWorkspaceReferences(agentId, references)
   } catch (e) {
+    if (activeId.value === agentId) streamingText.value = previousPartial
     if (pendingUser && pendingUserByAgent.value[agentId]?.id === pendingUser.id) {
       const next = { ...pendingUserByAgent.value }
       delete next[agentId]
@@ -1098,7 +1120,10 @@ async function clearContextWithConfirmation(id) {
   const next = { ...pendingUserByAgent.value }
   delete next[id]
   pendingUserByAgent.value = next
-  if (activeId.value === id) streamingText.value = ''
+  if (activeId.value === id) {
+    streamingText.value = ''
+    resetTurnState({ preserveLifecycle: true })
+  }
   return true
 }
 async function clearCurrentContext() {
@@ -1872,6 +1897,7 @@ onMounted(async () => {
       return
     }
     applyRemoteWorkerEvent(event.event_type, event.data)
+    applyDesktopTurnEvent(event, activeId.value)
     if (event.event_type === 'runtime/notice' && event.data?.message_kind === 'context_boundary') {
       await selectAgent(event.agent_id)
       return
@@ -1890,7 +1916,7 @@ onMounted(async () => {
       const terminalEvent = ['turn_finished', 'hitl_required', 'error'].includes(event.event_type)
       scheduleActiveAgentHydrate(eventAgentId, terminalEvent ? 0 : 120)
       const finalToolCall = event.event_type === 'tool_call' && !event.data?.partial
-      if (terminalEvent || finalToolCall) streamingText.value = ''
+      if (finalToolCall) streamingText.value = ''
     }
   })
   unlistenTerminal = await listen('desktop-terminal-event', ev => {
@@ -2067,9 +2093,9 @@ onUnmounted(() => {
         <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成本地服务首次配置</h2><p>设置本地服务名称与模型后即可开始使用。</p><button class="quiet" @click="showSettings">打开设置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
         <template v-else>
-          <div v-if="!chatEntries.length && !streamingText && !hitlQueue.length" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在已连接的本地服务中。</p><span class="real-tag">真实会话</span></div>
+          <div v-if="!chatEntries.length && !streamingText && !hitlQueue.length && !turnError" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在已连接的本地服务中。</p><span class="real-tag">真实会话</span></div>
           <div v-else class="desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :streaming-text="streamingText" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
+            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :streaming-text="streamingText" :turn-error="turnError" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
           </div>
         </template>
         <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint" role="alert" tabindex="0" aria-describedby="desktop-chat-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
@@ -2124,6 +2150,7 @@ onUnmounted(() => {
         v-model:collapsed="dockCollapsed"
         :collapsed-in-toolbar="activeTab === 'file'"
         :status="dockStatus"
+        :turn-error="turnError"
         :agent-name="activeAgent?.display_name || '当前智能体'"
         :can-send="canSendMessage"
         :references="pendingWorkspaceReferences"
