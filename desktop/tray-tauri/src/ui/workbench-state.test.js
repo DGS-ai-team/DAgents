@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, hasPersistedPartialMessage, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
   const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeAgentName: 'autotest', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0' })
@@ -139,13 +139,31 @@ test('DesktopApp renders composer status in the visible footer and follows Turn 
   assert.match(source, /desktopComposerStatus\(\{[\s\S]*?turnState: turnStateStore/)
   assert.match(source, /<ComposerToolbar[^>]*:status-label="composerRuntimeStatus"/)
   assert.doesNotMatch(source, /desktop-composer-runtime-pill[^>]*>\{\{ composerRuntimeStatus \}\}/)
+  assert.match(source, /applyDesktopTurnEvent\(event, activeId\.value\)/)
+  assert.match(source, /const acceptedTurnState = applyHydrateTurnState\(snapshot\)/)
+  assert.match(source, /if \(!acceptedTurnState && turnStateStore\.turnId\) return/)
 
   assert.equal(desktopComposerStatus({ generating: true }), '正在等待回复')
   assert.equal(desktopComposerStatus({ generating: true, streamingText: '首个 token', turnState: { phase: 'model_generating' } }), '正在生成回复')
   assert.equal(desktopComposerStatus({ generating: true, streamingText: 'reasoning', turnState: { phase: 'model_generating', outputChannel: 'reasoning' } }), '思考中')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'tool_executing' } }), '工具执行中')
+  assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'model_generating', modelAttempt: { status: 'retrying', attempt: 1, maxAttempts: 3 } } }), '正在重试 1/2')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'completed', terminal: true } }), '')
   assert.equal(desktopComposerStatus({ generating: false, streamingText: 'late text' }), '')
+})
+
+test('turn error summaries use structured provider codes and keep unknown failures generic', () => {
+  assert.equal(turnErrorSummary({ code: 'provider_unavailable', message: 'safe backend text' }, { retryCount: 2, partial: true }), '模型服务暂时不可用，已重试2次。请稍后重试或切换模型。 已保留本轮已生成的部分内容。')
+  assert.equal(turnErrorSummary({ code: 'provider_authentication', message: 'safe backend text' }), '模型鉴权失败，请到模型设置检查 API Key 和服务地址。')
+  assert.equal(turnErrorSummary({ code: 'provider_configuration', message: '模型请求或配置无效，请检查模型名称、接口地址和请求参数。' }), '模型请求或配置无效，请检查模型名称、接口地址和请求参数。')
+  assert.equal(turnErrorSummary({ code: 'provider_http_error', message: '模型服务请求失败（HTTP 403）。' }), '模型服务请求失败（HTTP 403）。')
+  assert.equal(turnErrorSummary({ code: 'unknown', message: '{"secret":"do not show"}' }), '本轮未能完成，请稍后重试或切换模型。')
+})
+
+test('partial assistant hydrate rows are identified after the current user message', () => {
+  assert.equal(hasPersistedPartialMessage([{ kind: 'user' }, { kind: 'assistant', partial: true }]), true)
+  assert.equal(hasPersistedPartialMessage([{ kind: 'assistant', partial: true }, { kind: 'user' }]), false)
+  assert.equal(hasPersistedPartialMessage([{ kind: 'user' }, { kind: 'assistant', partial: false }]), false)
 })
 
 test('Node first-run gate leaves Desktop-local settings accessible without opening Node settings', () => {

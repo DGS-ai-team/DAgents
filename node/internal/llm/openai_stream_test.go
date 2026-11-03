@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func streamToolChunk(t *testing.T, arguments string, first bool, finishReason string) string {
@@ -65,6 +67,46 @@ func TestOpenAIStreamChatRejectsIncompleteProviderToolCall(t *testing.T) {
 	}
 	if atomic.LoadInt32(requests) != 1 {
 		t.Fatalf("provider request count=%d, want 1", atomic.LoadInt32(requests))
+	}
+}
+
+func TestOpenAIProviderHTTPErrorCarriesRetryMetadataWithoutExposingItToUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "3")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"detail":"private provider diagnostic"}`)
+	}))
+	defer server.Close()
+	client := NewOpenAIClient(OpenAIConfig{BaseURL: server.URL, Model: "test-model", APIKey: "test-key"})
+	_, err := client.StreamChat(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}}, StreamHandler{})
+	var providerErr *ProviderHTTPError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %T %v, want ProviderHTTPError", err, err)
+	}
+	if providerErr.StatusCode != http.StatusServiceUnavailable || providerErr.RetryAfter != 3*time.Second {
+		t.Fatalf("provider error = %+v", providerErr)
+	}
+	if strings.Contains(providerErr.UserMessage(), "private provider diagnostic") || strings.Contains(providerErr.UserMessage(), server.URL) {
+		t.Fatalf("unsafe user message: %q", providerErr.UserMessage())
+	}
+}
+
+func TestIdleTimeoutBodyResetsOnBytesAndCancelsWhenIdle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	body := newIdleTimeoutBody(io.NopCloser(strings.NewReader("heartbeat")), cancel, 25*time.Millisecond)
+	defer body.Close()
+	buffer := make([]byte, 32)
+	if _, err := body.Read(buffer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("idle body did not cancel request context")
+	}
+	if !body.IdleTimedOut() {
+		t.Fatal("idle timeout was not recorded")
 	}
 }
 

@@ -3,6 +3,7 @@ package session
 import (
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
@@ -25,13 +26,34 @@ type TurnStateView struct {
 	EndReason        string                   `json:"end_reason,omitempty"`
 	InteractionKind  string                   `json:"interaction_kind,omitempty"`
 	RecoveryRequired bool                     `json:"recovery_required,omitempty"`
+	ModelAttempt     *ModelAttemptView        `json:"model_attempt,omitempty"`
+	Error            *TurnErrorView           `json:"error,omitempty"`
 	ToolExecutions   []turn.ToolExecutionView `json:"tool_executions,omitempty"`
+}
+
+type ModelAttemptView struct {
+	Status       string `json:"status"`
+	Attempt      int    `json:"attempt"`
+	MaxAttempts  int    `json:"max_attempts"`
+	RetryAfterMS int64  `json:"retry_after_ms,omitempty"`
+}
+
+type TurnErrorView struct {
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	Retryable  bool   `json:"retryable"`
+	Incomplete bool   `json:"incomplete,omitempty"`
 }
 
 func buildTurnStateView(snapshot turn.CoordinatorSnapshot, lifecycleSeq uint64) TurnStateView {
 	endReason := strings.TrimSpace(string(snapshot.TurnEndReason))
 	if endReason == "" {
 		endReason = strings.TrimSpace(string(snapshot.StepEndReason))
+	}
+	if snapshot.TurnStatus == turn.TurnStatusFailed && strings.TrimSpace(snapshot.ModelErrorKind) != "" {
+		// Old lifecycle journals may contain the raw provider error in reason.
+		// The typed error kind is authoritative for a safe user-facing summary.
+		endReason = safeModelErrorMessage(snapshot.ModelErrorKind)
 	}
 	return TurnStateView{
 		Authority:        "turn_coordinator",
@@ -47,8 +69,32 @@ func buildTurnStateView(snapshot turn.CoordinatorSnapshot, lifecycleSeq uint64) 
 		EndReason:        endReason,
 		InteractionKind:  strings.TrimSpace(snapshot.InteractionKind),
 		RecoveryRequired: snapshot.RecoveryRequired,
+		ModelAttempt:     buildModelAttemptView(snapshot),
+		Error:            buildTurnErrorView(snapshot),
 		ToolExecutions:   append([]turn.ToolExecutionView(nil), snapshot.ToolExecutions...),
 	}
+}
+
+func buildModelAttemptView(snapshot turn.CoordinatorSnapshot) *ModelAttemptView {
+	if snapshot.ModelAttempt <= 0 {
+		return nil
+	}
+	status := string(snapshot.ModelAttemptStatus)
+	if status == "" {
+		status = "running"
+	}
+	return &ModelAttemptView{Status: status, Attempt: snapshot.ModelAttempt, MaxAttempts: snapshot.ModelMaxAttempts, RetryAfterMS: snapshot.ModelRetryAfterMS}
+}
+
+func buildTurnErrorView(snapshot turn.CoordinatorSnapshot) *TurnErrorView {
+	if !snapshot.TurnStatus.Terminal() || snapshot.TurnStatus != turn.TurnStatusFailed || strings.TrimSpace(snapshot.ModelErrorKind) == "" {
+		return nil
+	}
+	return &TurnErrorView{Code: snapshot.ModelErrorKind, Message: safeModelErrorMessage(snapshot.ModelErrorKind), Retryable: snapshot.ModelRetryable, Incomplete: true}
+}
+
+func safeModelErrorMessage(code string) string {
+	return llm.ProviderErrorMessageForCode(strings.TrimSpace(code))
 }
 
 func turnStateEventData(snapshot turn.CoordinatorSnapshot, lifecycleSeq, historyRevision uint64, command turn.CommandType) map[string]any {
@@ -69,6 +115,8 @@ func turnStateEventData(snapshot turn.CoordinatorSnapshot, lifecycleSeq, history
 		"end_reason":        view.EndReason,
 		"interaction_kind":  view.InteractionKind,
 		"recovery_required": view.RecoveryRequired,
+		"model_attempt":     view.ModelAttempt,
+		"error":             view.Error,
 		"tool_executions":   view.ToolExecutions,
 		"command":           string(command),
 	}

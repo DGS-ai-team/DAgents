@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -42,6 +46,243 @@ func TestOrchestratorRetriesTransientModelFailureInsideStep(t *testing.T) {
 	}
 	if countLifecycleCommands(commands, CommandModelRequestStarted) != 2 {
 		t.Fatalf("start commands = %+v", commands)
+	}
+}
+
+func TestOrchestratorRetriesHTTP503TwiceThenSucceeds(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		count := atomic.AddInt32(&requests, 1)
+		if count <= 2 {
+			http.Error(w, "temporary upstream outage", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	client := retryTestOpenAIClient{OpenAIClient: llm.NewOpenAIClient(llm.OpenAIConfig{BaseURL: server.URL, Model: "test-model", APIKey: "test-key"})}
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
+	var commands []TurnCommand
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		commands = append(commands, command)
+		return nil
+	})
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-503", &history, "hello", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("provider requests = %d, want 3", got)
+	}
+	if len(history) != 2 || history[1].Content != "ok" {
+		t.Fatalf("history = %+v", history)
+	}
+	var retryDelays []int64
+	for _, command := range commands {
+		if command.Type == CommandModelRequestRetrying {
+			retryDelays = append(retryDelays, command.RetryAfterMS)
+		}
+	}
+	if len(retryDelays) != 2 {
+		t.Fatalf("retry delays = %v, want two retry events", retryDelays)
+	}
+	if retryDelays[0] < 2000 || retryDelays[0] > 2500 {
+		t.Errorf("first retry delay = %dms, want 2000–2500ms", retryDelays[0])
+	}
+	if retryDelays[1] < 4000 || retryDelays[1] > 5000 {
+		t.Errorf("second retry delay = %dms, want 4000–5000ms", retryDelays[1])
+	}
+}
+
+func TestOrchestratorDoesNotRetryHTTP401Or402(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var requests int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				atomic.AddInt32(&requests, 1)
+				w.WriteHeader(status)
+				_, _ = fmt.Fprint(w, "private provider details")
+			}))
+			defer server.Close()
+			client := retryTestOpenAIClient{OpenAIClient: llm.NewOpenAIClient(llm.OpenAIConfig{BaseURL: server.URL, Model: "test-model", APIKey: "test-key"})}
+			orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
+			var history []llm.Message
+			_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-http-error", &history, "hello", nil)
+			if err == nil {
+				t.Fatal("expected terminal provider error")
+			}
+			if got := atomic.LoadInt32(&requests); got != 1 {
+				t.Fatalf("provider requests = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestOrchestratorExhausted503ReturnsTerminalError(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		http.Error(w, "temporary outage", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client := retryTestOpenAIClient{OpenAIClient: llm.NewOpenAIClient(llm.OpenAIConfig{BaseURL: server.URL, Model: "test-model", APIKey: "test-key"})}
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-503-exhausted", &history, "hello", nil)
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("provider requests = %d, want 3", got)
+	}
+}
+
+func TestOrchestratorDoesNotReplayAfterPartialToolOutput(t *testing.T) {
+	client := &partialToolTransientFailure{}
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
+	orch.SetModelRetryLimit(2)
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-partial-tool", &history, "hello", nil)
+	if err == nil {
+		t.Fatal("expected partial stream failure")
+	}
+	if client.calls != 1 {
+		t.Fatalf("provider requests = %d, want no replay", client.calls)
+	}
+}
+
+func TestOrchestratorPersistsTextOnlyPartialAssistantAfterProviderFailure(t *testing.T) {
+	client := &partialTextTransientFailure{}
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-partial-text", &history, "hello", nil)
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if len(history) != 2 {
+		t.Fatalf("history = %#v, want user plus partial assistant", history)
+	}
+	partial := history[1]
+	if partial.Role != "assistant" || partial.Content != "partial answer" || partial.ReasoningContent != "" || len(partial.ToolCalls) != 0 {
+		t.Fatalf("persisted partial message = %#v", partial)
+	}
+	if partial.Provenance == nil || partial.Provenance.Operation != "partial_response" {
+		t.Fatalf("partial provenance = %#v", partial.Provenance)
+	}
+	if client.calls != 1 {
+		t.Fatalf("provider requests = %d, want no replay after output", client.calls)
+	}
+}
+
+func TestRetryDelayHonorsRetryAfter(t *testing.T) {
+	want := 17 * time.Second
+	got := retryDelayFor(&llm.ProviderHTTPError{StatusCode: http.StatusServiceUnavailable, RetryAfter: want}, 2)
+	if got != want {
+		t.Fatalf("retry delay = %s, want Retry-After %s", got, want)
+	}
+	if !retryAfterTooLong(&llm.ProviderHTTPError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 31 * time.Second}) {
+		t.Fatal("long Retry-After should skip automatic retry")
+	}
+}
+
+type partialToolTransientFailure struct{ calls int }
+
+type partialTextTransientFailure struct{ calls int }
+
+func (c *partialTextTransientFailure) StreamChat(_ context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if handler.OnDelta != nil {
+		handler.OnDelta("partial answer")
+	}
+	if handler.OnReasoningDelta != nil {
+		handler.OnReasoningDelta("private reasoning")
+	}
+	if handler.OnToolCallDelta != nil {
+		handler.OnToolCallDelta([]llm.ToolCall{{Function: llm.ToolCallFunction{Arguments: `{"command":"unsafe"`}}})
+	}
+	return llm.ChatResult{}, &llm.ProviderHTTPError{StatusCode: http.StatusServiceUnavailable}
+}
+func (*partialTextTransientFailure) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*partialTextTransientFailure) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+type retryTestOpenAIClient struct{ *llm.OpenAIClient }
+
+func (retryTestOpenAIClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func (c *partialToolTransientFailure) StreamChat(_ context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if handler.OnToolCallDelta != nil {
+		handler.OnToolCallDelta([]llm.ToolCall{{Function: llm.ToolCallFunction{Arguments: `{"command":`}}})
+	}
+	return llm.ChatResult{}, &llm.ProviderHTTPError{StatusCode: http.StatusServiceUnavailable}
+}
+func (*partialToolTransientFailure) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*partialToolTransientFailure) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func TestWaitModelRetryStopsPromptlyWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	if err := waitModelRetry(ctx, 2, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait error = %v, want cancellation", err)
+	}
+	if time.Since(started) > 300*time.Millisecond {
+		t.Fatal("retry wait did not stop promptly")
+	}
+}
+
+func TestModelRetryBudgetDenialDoesNotPublishProviderError(t *testing.T) {
+	client := &transientModelFailureMock{}
+	hub := stream.NewHub(16, logx.Discard())
+	events := hub.SubscribeAgent(0, "session-budget-retry")
+	defer hub.Unsubscribe(events)
+	orch := testOrchestrator(t, hub, client)
+	orch.SetModelRetryCheck(func(string) (bool, string) { return false, "max_retries" })
+	var commands []TurnCommand
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		commands = append(commands, command)
+		return nil
+	})
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-budget-retry", &history, "hello", nil)
+	if !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("turn error = %v, want budget exhaustion", err)
+	}
+	if countLifecycleCommands(commands, CommandModelRequestRetrying) != 1 || countLifecycleCommands(commands, CommandModelRequestFailed) != 0 {
+		t.Fatalf("model attempt lifecycle commands = %+v", commands)
+	}
+	var finishReason string
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "error" {
+				t.Fatalf("budget denial published a provider error: %#v", event.Data)
+			}
+			if event.Type == "turn_finished" {
+				finishReason, _ = event.Data["finish_reason"].(string)
+				if finishReason != "budget_exhausted" {
+					t.Fatalf("finish_reason = %q, want budget_exhausted", finishReason)
+				}
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing budget terminal event, finish_reason=%q", finishReason)
+		}
 	}
 }
 
@@ -120,7 +361,7 @@ func (m *transientModelFailureMock) StreamChat(_ context.Context, _ llm.ChatRequ
 	call := m.calls
 	m.mu.Unlock()
 	if call == 1 {
-		return llm.ChatResult{}, fmt.Errorf("temporary upstream timeout")
+		return llm.ChatResult{}, &llm.ProviderHTTPError{StatusCode: 503, Body: "temporary upstream timeout"}
 	}
 	if handler.OnDelta != nil {
 		handler.OnDelta("recovered")

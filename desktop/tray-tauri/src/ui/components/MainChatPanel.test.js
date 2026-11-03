@@ -74,6 +74,20 @@ describe("MainChatPanel tool lifecycle", () => {
 });
 
 describe("MainChatPanel incremental history rendering", () => {
+  it("keeps a failed-turn message visible alongside already generated partial output", async () => {
+    wrapper = shallowMount(MainChatPanel, {
+      props: {
+        agentId: "agent-a",
+        entries: [{ id: "user-1", kind: "user", text: "question" }],
+        streamingText: "partial answer",
+        turnError: "模型服务暂时不可用，已重试2次。已保留本轮已生成的部分内容。",
+      },
+    });
+    await flushFrames();
+    expect(wrapper.find('[role="alert"]').text()).toContain("已重试2次");
+    expect(wrapper.findAllComponents(MessageBubble).at(-1).props("entry").text).toBe("partial answer");
+  });
+
   it("updates streaming assistant text in place without rebuilding history", async () => {
     const buildSpy = vi.spyOn(streamBuilder, "buildStream");
     wrapper = shallowMount(MainChatPanel, {

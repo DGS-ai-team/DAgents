@@ -2057,6 +2057,19 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   overflow: auto;
   pointer-events: auto;
 }
+.dock-turn-error {
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 8px 12px;
+  border: 1px solid #e3c2bf;
+  border-radius: 9px;
+  background: #fff7f6;
+  color: #913f3a;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 4px 16px #172f3b12;
+  pointer-events: auto;
+}
 .dock-reference-target {
   display: flex;
   flex: none;
@@ -2230,6 +2243,7 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 .dock-details-panel { width: min(380px, calc(100vw - 28px)); }
 .dock-collapsed-toggle { position:relative; display:grid; align-self:flex-end; width:46px; height:46px; padding:0; place-items:center; border:1px solid #d7e0e3; border-radius:50%; background:#fff; box-shadow:0 8px 26px #172f3b20; cursor:pointer; pointer-events:auto; }
 .dock-collapsed-placeholder { display:none; }
+.dock-collapsed-placeholder.has-error { display:flex; max-width: min(420px, 100%); padding: 6px 10px; border: 1px solid #e3c2bf; border-radius: 8px; background: #fff7f6; color: #913f3a; font-size: 11px; pointer-events: auto; }
 .dock-collapsed-toggle .dock-status-icon { width:20px; height:20px; margin:0; }
 .dock-collapsed-chevron { position:absolute; right:7px; top:7px; width:10px; height:10px; background:#596368; }
 .dock-collapsed-toggle:hover { border-color:#aeb9bd; background:#f8f9f9; }

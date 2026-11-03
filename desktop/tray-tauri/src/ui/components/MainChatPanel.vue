@@ -21,6 +21,7 @@ import { createFollowTailController, distanceFromTail } from "../utils/scrollTai
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   streamingText: { type: String, default: "" },
+  turnError: { type: String, default: "" },
   hitlQueue: { type: Array, default: () => [] },
   toolVerbose: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
@@ -400,6 +401,7 @@ defineExpose({
           @cancel="emit('memory-conflict-cancel', item.hitlIndex)"
         />
       </template>
+      <p v-if="turnError" class="chat__turn-error" role="alert">{{ turnError }}</p>
       </div>
       <ScrollToTailButton
         :visible="showScrollToTail"

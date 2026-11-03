@@ -9,6 +9,7 @@
 | 工具停止入口 | 工具气泡不再提供单工具终止；输入栏停止本轮统一取消任务 | `desktop/tray-tauri/src/ui/components/ToolSummaryRow.vue`、`stores/toolJobs.js` |
 | 状态动效 | 工具组保留文字扫光；同工具仅参数垂直切换，不同工具整体切换；输入栏状态保留垂直切换与扫光 | `components/ToolGroupRow.vue`、`components/ComposerToolbar.vue`、`desktop-ui.css` |
 | 实时工具记录 | hydrate 包含正在执行的工具调用，等待结果时仍显示执行中；终态优先于旧的运行提示 | `node/internal/session/hydrate_view.go`、`node/internal/turn/coordinator.go` |
+| 模型故障恢复 | 临时错误有界重试并展示进度，失败明确提示原因、释放操作；响应有空闲超时，部分正文持久保存，产生输出后不自动重放 | `node/internal/llm/provider_error.go`、`openai.go`、`node/internal/turn/model_attempt_runner.go`、`node/internal/session/turn_state_view.go`、`DesktopApp.vue`、`stores/turnState.js` |
 | 清空对话边界 | 持久化清空前的运行代次，隐藏旧工具显示投影而保留恢复日志；清空与边界一次写入，失败返回错误，新一轮工具正常显示 | `node/internal/session/runtime.go`、`runtime_persistence.go`、`hydrate_view.go` |
 | 旧聊天实现 | 删除未使用的 transcript、toolStream、streamReveal 状态链；Agent store 仅保留当前 Agent 身份 | `desktop/tray-tauri/src/ui/stores/agent.js`、`DesktopApp.vue` |
 | 内部 CLI 冗余接口 | client 保留 probe/update/version 所需接口，删除未消费的聊天、SSE、hydrate、上下文和技能客户端包装 | `client/internal/api/client.go` |
@@ -34,7 +35,7 @@
 
 ## 验证记录
 
-- Desktop：84 个测试文件、563 项 Vitest 测试，另有 7 项图标契约和 102 项 UI 状态检查通过；工作区引用单测扩充后 9 项通过。lint、构建和 Tauri Windows 原生构建通过。
+- Desktop：84 个测试文件、570 项 Vitest 测试，另有 7 项图标契约和 106 项 UI 状态检查通过；工作区引用单测扩充后 9 项通过。后续重试短文案定向测试 29 项与 lint 通过。lint、构建和 Tauri Windows 原生构建通过。
 - Manage：控制台 lint/build、Ruff、Pyright、212 项 Python unittest 通过。使用独立测试数据库分别登录管理员与节点身份，确认发布按钮和空状态文案按角色一致。
 - Go：Go 1.26.10 下五个模块的 test、vet、staticcheck 通过；Node 与 client 构建通过。完整脚本发现的两项 staticcheck 遗留已修正并补跑。
 - Rust：格式检查与 77 项测试通过。品牌资源契约、API/fixture 契约、OpenAPI 路由覆盖和 git diff 检查通过。
@@ -42,6 +43,8 @@
 - 第二轮审查回归：旧 OpenAI o3 的 max 归一化后可保存其他设置；取消工具后清空对话，当前与重启后的 hydrate 均为空，恢复后新轮次调用仍显示；SQLite 故障注入证明清空快照不发生部分写入且错误能返回调用方。工作区组件测试覆盖引用文件、切换聊天、仅引用发送、失败保留及重试成功清理。
 - 原生联调：使用独立运行目录和本地 OpenAI SSE fixture，执行真实 PowerShell 固定睡眠命令；界面显示“执行中”，气泡无终止按钮。点击输入栏“停止本轮”后，服务返回 `cancelled_by_user`、工具状态 `cancelled`、`has_active_turn=false`、运行工具数 0。fixture、临时 Agent 和临时模型档案已清理。
 - 工具组的参数独立切换、工具名称整体切换、快速更新与展开态保持由组件测试覆盖；单工具行本来不使用工具组标题动画。降低动态效果禁用扫光与过渡；强制颜色模式禁用渐变扫光。
+- 模型故障联调：两次 503 后第三次成功；持续 503 在三次请求后失败；401 不重试；退避期间取消不再发送请求；超过 30 秒的 Retry-After 不自动重试；输出部分正文后断流仅请求一次。六类场景的 SSE 和 hydrate 均符合终态，之后新消息可成功并清空对话；部分正文带 `partial` 标记持久保存，并进入下一次请求的上下文。
+- 模型故障原生验收：聊天显示安全原因及已重试次数，发送和模型选择恢复；悬浮输入区也显示失败。退避状态保留输入栏停止和文字动效，短文案避免次数被截断。此次使用本地故障服务，不代表真实服务商故障恢复率。
 
 - 提交 922cfaf3 的完整 CI（run 41619773131）与 CodeQL 均通过；机器人复审完成且无发现，PR #383 已合入 dev。
 - 使用原 v1.0.4 CI 二进制与 922cfaf3 候选构建完成隔离安装、升级及卸载。对话历史、自定义工作区、Agent/全局记忆、已有工具输出和加密模型凭据保留，正式安装设置的校验值未变。安装器前后数据库校验值与启动迁移后的卸载基线分别保存；业务字段和迁移结构已核验，没有迁移前完整 JSON 快照，不能声称全部字段逐项等价。工具输出为已有文件 fixture，此升级测试没有外部模型调用。

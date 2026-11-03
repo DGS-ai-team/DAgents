@@ -17,6 +17,7 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   collapsedInToolbar: { type: Boolean, default: false },
   status: { type: String, default: 'offline', validator: value => ['offline', 'pending', 'generating', 'idle'].includes(value) },
+  turnError: { type: String, default: '' },
   agentName: { type: String, default: '当前智能体' },
   canSend: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
@@ -38,7 +39,9 @@ const statusCopy = computed(() => ({
   offline: '离线', pending: '有待处理的审批', generating: props.cancelling ? '正在停止' : '生成中', idle: '空闲',
 }[props.status]))
 const statusIcon = computed(() => ({ offline: errorIcon, pending: warningIcon, generating: loadingIcon, idle: agentIcon }[props.status]))
-const statusLabel = computed(() => `${props.agentName || '当前智能体'}：${statusCopy.value}`)
+const statusLabel = computed(() => props.turnError
+  ? `${props.agentName || '当前智能体'}：${props.turnError}`
+  : `${props.agentName || '当前智能体'}：${statusCopy.value}`)
 const iconStyle = icon => ({ maskImage: `url("${icon}")`, WebkitMaskImage: `url("${icon}")` })
 const showStop = computed(() => props.status === 'generating' || props.canStop)
 const hasReferences = computed(() => props.references.length > 0)
@@ -137,6 +140,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <p v-if="turnError && !collapsed" class="dock-turn-error" role="alert">{{ turnError }}</p>
+
     <Transition name="dock-bar" mode="out-in" @after-enter="focusVisibleBarControl">
       <form v-if="!collapsed" key="expanded" id="resource-agent-dock-input" class="dock-input-surface" @submit.prevent="submit">
         <span class="icon-mask dock-status-icon" :class="`is-${status}`" role="img" :aria-label="statusLabel" :title="statusLabel" :style="iconStyle(statusIcon)"></span>
@@ -158,7 +163,9 @@ onBeforeUnmount(() => {
         <span class="icon-mask dock-status-icon" :class="`is-${status}`" aria-hidden="true" :style="iconStyle(statusIcon)"></span>
         <span class="icon-mask dock-collapsed-chevron" :style="iconStyle(chevronUpIcon)" aria-hidden="true"></span>
       </button>
-      <span v-else key="collapsed-in-toolbar" class="dock-collapsed-placeholder" aria-hidden="true"></span>
+      <span v-else key="collapsed-in-toolbar" class="dock-collapsed-placeholder" :class="{ 'has-error': turnError }" :title="turnError || undefined" :aria-label="turnError || undefined" :aria-hidden="!turnError" role="alert">
+        <span v-if="turnError" class="dock-error-compact">本轮失败</span>
+      </span>
     </Transition>
   </aside>
 </template>

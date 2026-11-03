@@ -63,7 +63,8 @@ runOneStep(ctx, sessionID, history)
   │     OnToolCallDelta    → SSE tool_call（流式参数）
   │     OnUsage            → SSE usage（累计）
   │
-  ├─ 错误 / cancel → 丢弃流式草稿、turn_finished、return Err
+  ├─ 模型错误 → 有界重试；失败后保存部分正文、turn_finished、return Err
+  ├─ cancel → 既有 cancel recovery、turn_finished、return Err
   │
   ├─ appendHistory(assistant)            // 整段 assistant 落库
   │
@@ -109,6 +110,8 @@ runOneStep(ctx, sessionID, history)
 | 本步结束 | `turn_finished`（终态；见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |
 
 Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补占位 `tool` 消息，再 `turn_finished(cancelled)`。
+
+模型请求的临时错误默认最多重试两次；已产生正文、推理或工具参数时不自动重放。非取消的失败只保留部分正文并标记 `partial`，不把半截工具调用放入历史或执行。重试进度和最终安全错误均通过 `turn_state` 与 hydrate 恢复，详见 [agent-node-api.md §2.4.1](../architecture/agent-node-api.md#241-turn_finished-与-turn_state)。
 
 ### 1.5 本步内的工具处理（预告）
 

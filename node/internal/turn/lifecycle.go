@@ -80,6 +80,7 @@ const (
 	ModelAttemptStatusCompleted   ModelAttemptStatus = "completed"
 	ModelAttemptStatusFailed      ModelAttemptStatus = "failed"
 	ModelAttemptStatusInterrupted ModelAttemptStatus = "interrupted"
+	ModelAttemptStatusRetrying    ModelAttemptStatus = "retrying"
 )
 
 // ToolExecutionStatus describes the state of one ToolCall execution.
@@ -276,6 +277,10 @@ type ModelAttempt struct {
 	RequestDigest string
 	Status        ModelAttemptStatus
 	ErrorKind     string
+	MaxAttempts   int
+	RetryAfterMS  int64
+	Retrying      bool
+	Retryable     bool
 	Usage         StepUsage
 	UsageRecorded bool
 	StartedAt     time.Time

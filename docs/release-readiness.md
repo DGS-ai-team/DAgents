@@ -13,12 +13,14 @@
 ## 已完成证据
 
 - [x] 版本元数据更新为 1.0.5，`python scripts/release/validate_release.py --version 1.0.5` 通过。
-- [x] Desktop 84 个文件、563 项 Vitest，7 项图标契约与 102 项 UI 状态检查，扩充后的工作区引用单测 9 项通过；lint/build 和 Windows 原生构建通过。
+- [x] Desktop 84 个文件、570 项 Vitest，7 项图标契约与 106 项 UI 状态检查通过；后续重试短文案的定向测试 29 项及 lint 通过。lint/build 和 Windows 原生构建通过。
 - [x] Manage lint/build、Ruff、Pyright 和 212 项 Python unittest 通过；隔离数据库分别验证管理员发布与普通身份浏览。
 - [x] Go 1.26.10 五模块 test/vet/staticcheck、Node/client 构建；Rust fmt 和 77 项测试；品牌、API fixture 和 OpenAPI 契约通过。
 - [x] 原生工具运行验收使用隔离的本地 OpenAI SSE fixture 和真实 PowerShell 命令。输入栏停止后取得 cancelled_by_user、工具 cancelled、运行工具数 0；临时 Agent、档案与 fixture 已清理。
 - [x] 旧凭据迁移失败时普通设置保存和模型切换均被拒绝，原配置保留；补齐环境变量重启后两档模型及密钥恢复。旧 Qwen effort 归一化后，合法 thinking、预算及密钥保留，新提交的非法参数继续拒绝。
 - [x] CodeQL/Codex 两轮发现均修复并补充回归；提交 922cfaf3 的 Node 全包测试与 staticcheck 通过。新增工作区引用组件交互、旧 OpenAI effort、清空边界和持久化错误回归。
+- [x] 发布候选补充模型故障恢复：Node 全包测试与 staticcheck 通过；本地故障接口验证暂时/持续 503、401、退避中取消、超长 Retry-After、部分输出后断流，均收敛终态；后续消息成功，清空对话有效，部分正文进入下一轮上下文。
+- [x] 原生窗口验证失败提示、重试进度、输入和模型选择解锁、资源页悬浮错误提示。外部付费模型未调用，测试使用隔离目录和本地故障接口。
 
 ## 发布门禁
 
