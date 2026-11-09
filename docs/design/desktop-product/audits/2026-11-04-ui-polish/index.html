@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desktop UI/UX 审查 · 2026-11-04</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f5f7f9;
+      --surface: #fff;
+      --surface-soft: #f8fafb;
+      --text: #24313d;
+      --muted: #667684;
+      --subtle: #85929c;
+      --border: #dbe2e8;
+      --border-soft: #e8edf1;
+      --accent: #557f91;
+      --accent-soft: #eaf1f4;
+      --p1: #8f615a;
+      --p1-bg: #f6eeec;
+      --p2: #6c718d;
+      --p2-bg: #f0f0f6;
+      --p3: #737d69;
+      --p3-bg: #f0f3ed;
+      --radius: 10px;
+      font: 14px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--page);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #476f82; text-underline-offset: 3px; }
+    a:hover { color: #315a6d; }
+    .layout { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
+    aside { position: sticky; top: 0; align-self: start; height: 100vh; overflow: auto; padding: 24px 16px; border-right: 1px solid var(--border); background: #f8fafb; }
+    .brand { margin: 0 0 5px; font-size: 15px; font-weight: 650; letter-spacing: .01em; }
+    .meta { margin: 0 0 22px; color: var(--muted); font-size: 12px; }
+    .nav-title { margin: 18px 0 7px; color: var(--subtle); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+    nav a { display: block; margin: 2px 0; padding: 7px 9px; border-radius: 7px; color: var(--muted); font-size: 13px; text-decoration: none; }
+    nav a:hover, nav a:focus-visible { background: var(--accent-soft); color: var(--text); outline: none; }
+    main { width: min(1120px, 100%); margin: 0 auto; padding: 36px clamp(20px, 4vw, 56px) 64px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 650; }
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 34px); line-height: 1.2; letter-spacing: -.025em; }
+    .lead { max-width: 780px; margin: 14px 0 0; color: var(--muted); font-size: 15px; }
+    .scope { display: flex; flex-wrap: wrap; gap: 7px; margin: 20px 0 30px; }
+    .chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11px; }
+    section { scroll-margin-top: 20px; margin-top: 28px; }
+    h2 { margin: 0 0 10px; font-size: 20px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
+    p { margin: 8px 0; }
+    .summary, .finding, .note, .screens { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .summary { padding: 18px 20px; }
+    .summary strong { color: var(--text); }
+    .summary p:last-child { margin-bottom: 0; }
+    .finding { margin: 12px 0; padding: 15px 17px; }
+    .finding-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .priority { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+    .p1 { color: var(--p1); background: var(--p1-bg); }
+    .p2 { color: var(--p2); background: var(--p2-bg); }
+    .p3 { color: var(--p3); background: var(--p3-bg); }
+    .tag { color: var(--subtle); font-size: 11px; }
+    .label { color: var(--muted); font-size: 12px; font-weight: 650; }
+    .finding p { margin: 5px 0; }
+    .finding .accept { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 13px; }
+    .screens { margin: 14px 0 20px; padding: 14px; background: var(--surface-soft); }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; }
+    figure { min-width: 0; margin: 0; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+    figure a { display: block; }
+    figure img { display: block; width: 100%; height: auto; border-radius: 5px; }
+    figcaption { padding: 7px 2px 0; color: var(--muted); font-size: 12px; }
+    figcaption a { margin-left: 5px; font-size: 11px; }
+    .note { margin: 12px 0; padding: 14px 16px; background: var(--surface-soft); }
+    .note p:first-child { margin-top: 0; }
+    .note p:last-child { margin-bottom: 0; }
+    .code-ref { overflow-wrap: anywhere; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .limits div { padding: 12px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); }
+    .limits strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--subtle); font-size: 12px; }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      aside { position: static; width: 100%; height: auto; padding: 14px 18px; border-right: 0; border-bottom: 1px solid var(--border); }
+      nav { display: flex; flex-wrap: wrap; gap: 2px; }
+      .nav-title { width: 100%; margin: 10px 0 2px; }
+      nav a { padding: 5px 8px; }
+      main { padding-top: 24px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <p class="brand">Desktop UI/UX 审查</p>
+      <p class="meta">2026-11-04 · 当前浅色界面</p>
+      <nav aria-label="报告目录">
+        <p class="nav-title">结论</p>
+        <a href="#summary">整体方向</a>
+        <a href="#priorities">优先改进</a>
+        <p class="nav-title">用户旅程</p>
+        <a href="#settings">1 · 智能体与 Auto</a>
+        <a href="#chat">2 · 聊天与空态</a>
+        <a href="#resources">3 · 资源与工作区</a>
+        <a href="#browser">4 · 浏览器</a>
+        <a href="#terminal">5 · 终端</a>
+        <a href="#implementation">附 · 代码审查</a>
+        <a href="#limits">范围与未验证项</a>
+      </nav>
+    </aside>
+    <main>
+      <header>
+        <p class="eyebrow">产品体验审查 · 只读</p>
+        <h1>让现有界面更一致、更容易找到下一步</h1>
+        <p class="lead">保留目前浅色低饱和表面和线性图标。当前最值得做的是统一设置项的行结构、把常用资源操作放到更近的位置，并把技术状态信息收进可展开细节；无需整体换皮或增加第二套导航。</p>
+        <div class="scope" aria-label="审查范围">
+          <span class="chip">本轮 Windows 原生截图 01–11</span>
+          <span class="chip">本地 Mock / 隔离 QA 数据</span>
+          <span class="chip">源码事实与截图观察分开</span>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>整体方向</h2>
+        <div class="summary">
+          <p><strong>保留：</strong>浅色低饱和配色、细边框、线性图标、当前导航层级，以及模型选择器的选中勾和 Escape 关闭行为。终端选择弹窗也已简洁，保持当前交互即可。</p>
+          <p><strong>收敛：</strong>设置页统一“标签—控件”的行起点和间距；主聊天空态说明怎么开始；资源入口给常用工作区、浏览器和终端路径一个更直接的位置；文件引用中的版本摘要从正文移到结构化细节。</p>
+          <p><strong>审查依据：</strong>截图观察来自本目录原图；代码事实指向当前 Desktop 前端源码。尚未完成的屏幕和环境验证见最后一节。</p>
+        </div>
+        <div class="note">
+          <p><span class="label">建议风格基线（尚未实施）：</span>保留当前顶栏尺寸与低饱和浅灰，不做整体换皮。统一正文/辅助文字级别与行高、32/36px 控件高度、图标尺寸以及 hover/focus 语义 token。雪花图形只在应用图标、托盘图标和空态做轻量呼应；避免满屏青色描边或新增渐变。</p>
+        </div>
+      </section>
+
+      <section id="priorities">
+        <h2>优先改进</h2>
+        <p class="meta">P1/P2/P3 表示本轮产品打磨顺序，不代表所有条目都是阻断性缺陷。</p>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 流程摩擦</span><h3>让工作区新建与导入动作就近可见</h3></div>
+          <p><span class="label">截图观察：</span>工作区空态提示用户可以新建或上传文件，但两个动作收在右上角“更多”菜单中。用户刚进入空目录时，提示与可执行动作之间隔了一步探索。</p>
+          <p><span class="label">建议：</span>只在空目录或适用上下文中，把“新建文件”“导入本机文件”作为小型图标动作放到空态附近；用 tooltip 和无障碍名称说明操作，不增加常驻的大按钮行。</p>
+          <p class="accept"><span class="label">验收：</span>首次打开空工作区能直接找到两项动作；键盘可达；有文件后工具栏仍保持紧凑。</p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 恢复路径</span><span class="tag">源码观察；未做断网或失败重现</span></div>
+          <p>源码中，MainChatPanel 将 turnError 作为可见的纯文本 alert 渲染；DesktopApp 的普通操作错误提示显示“操作未完成”，具体原因放在 tooltip 中。当前可见的重试按钮仅在 Tauri 且没有 active Agent 时显示，用于重试加载 Agent；不能据此说整个应用没有重试能力。离线聊天空态只显示本地服务错误/启动说明，没有就近动作。</p>
+          <p><span class="label">建议：</span>明确展示错误原因，并根据结构化错误码提供适用的下一步，例如切换模型或打开模型设置；只有现有恢复语义确认安全时才提供“重试本轮”。不能自动重放可能已产生工具副作用的回合。</p>
+          <p class="accept"><span class="label">验收：</span>失败原因不依赖 hover 才能看到；操作入口与错误类型一致；重试不会重复执行有副作用的工具；离线态提供检查/打开本地服务设置的明确路径。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/ui/components/MainChatPanel.vue#L402">MainChatPanel.vue:402</a> · <a href="../../../../../desktop/tray-tauri/src/ui/DesktopApp.vue#L2077">DesktopApp.vue:2077–2080</a> · <a href="../../../../../desktop/tray-tauri/src/ui/DesktopApp.vue#L2094">DesktopApp.vue:2094–2099</a> · <a href="../../../../../desktop/tray-tauri/src/ui/DesktopApp.vue#L2085">DesktopApp.vue:2085</a></p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 内容起步</span><h3>把空会话欢迎语从存储说明改为可执行的起步提示</h3></div>
+          <p><span class="label">截图观察：</span>空会话展示“真实会话”和“与此 Agent 的真实对话会保存在已连接的本地服务中”。这解释了数据位置，却没有告诉用户可以先做什么。</p>
+          <p><span class="label">建议：</span>保留简短隐私/本地说明，把主提示换成一条任务导向的引导；可用低干扰的示例提示（例如“总结一个文件”），而不是再添加一块说明面板。</p>
+          <p class="accept"><span class="label">验收：</span>第一次打开时，用户能从主句知道可以输入什么；存储说明保留为次要信息。</p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 找入口</span><h3>把资源切换从顶栏菜单变成一个清楚的资源入口</h3></div>
+          <p><span class="label">截图观察：</span>打开工作区、浏览器和终端目前从顶栏“资源”菜单进入。当前结构清晰，但常用目的地都需要先打开菜单。</p>
+          <p><span class="label">建议：</span>在会话标签尾部提供单个“资源”加号入口，展开工作区、浏览器、终端三项；继续复用现有 tab，不加常驻搜索侧栏，也不堆多排大按钮。</p>
+          <p class="accept"><span class="label">验收：</span>三类资源在一次动作内可见；开启资源后在标签中可辨认并可关闭；小宽度下菜单可折行或收拢。</p>
+        </article>
+      </section>
+
+      <section id="settings">
+        <h2>1 · 智能体与 Auto 设置</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 一致性</span><span class="tag">截图观察，待结合完整窗口比例复核</span></div>
+          <p>基本设置（01）与 Auto 设置（03）的左侧标签字重、控件起点和行距不同，导致它们看起来不像同一设置区。设置导航包含 6 组、13 个入口；在约 762px 高的窗口中，靠下的入口需要滚动。</p>
+          <p><span class="label">建议：</span>统一标签字号/字重、控件起始列和行间距；把高频项留在基本区，低频项渐进收进高级区，不另造一套导航。</p>
+          <p class="accept"><span class="label">验收：</span>基本设置与 Auto 设置同类字段起点一致；默认视口可到达主要字段；低频设置仍可发现且不增加导航层级。</p>
+        </div>
+        <div class="finding">
+          <div class="finding-head"><span class="tag">保留</span></div>
+          <p>模型选择器（02）目前有明确的选中勾，Escape 可关闭下拉。保留该行为；后续统一输入与 selector 高度时，避免改变其键盘操作。</p>
+          <p class="accept"><span class="label">验收：</span>鼠标选择、键盘选择、选中反馈和 Escape 行为一致保留。</p>
+        </div>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 术语与摘要</span><span class="tag">截图观察</span></div>
+          <p>Auto 设置中的“Auto”“dreaming”技术词会与普通用户的任务语言混在一起，关闭状态、执行时间和“暂无经验”目前作为多行设置内容显示。</p>
+          <p><span class="label">建议：</span>将“Auto 设置”统一称作“自主运行”，将“每日 dreaming”统一称作“每日经验整理”；未开启时把状态、下次执行时间和经验摘要收为一行摘要，开启后再展开设置。手册继续采用文件系统；经验摘要与手册内容在界面上明确区分。</p>
+          <p class="accept"><span class="label">验收：</span>同一概念在入口、字段和状态中用词一致；关闭时摘要仍说明当前状态，开启后可查看时间与经验内容；手册目录说明不被隐藏。</p>
+        </div>
+        <div class="screens"><div class="gallery">
+          <figure><a href="01-agent-settings.png" target="_blank" rel="noreferrer"><img src="01-agent-settings.png" alt="智能体基本设置截图"></a><figcaption>01 · 智能体基本设置 <a href="01-agent-settings.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="02-model-selector.png" target="_blank" rel="noreferrer"><img src="02-model-selector.png" alt="模型选择器打开并显示已选项"></a><figcaption>02 · 模型选择器 <a href="02-model-selector.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="03-auto-settings.png" target="_blank" rel="noreferrer"><img src="03-auto-settings.png" alt="Auto 设置截图"></a><figcaption>03 · Auto 设置 <a href="03-auto-settings.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+        </div></div>
+      </section>
+
+      <section id="chat">
+        <h2>2 · 聊天与空态</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 信息层级</span><span class="tag">截图观察 + 源码事实；不推断模型回答行为</span></div>
+          <p>04 的 Mock 对话里，引用工作区文件时，用户正文包含“预览版本”及长 hash。源码确实把 `revision` 拼入发给模型的文本：<a class="code-ref" href="../../../../../desktop/tray-tauri/src/ui/workspace-references.js#L75">workspace-references.js:75–86</a>。这是 UI 消息构造的技术内容；不能据此断言真实模型也会重复回答它。</p>
+          <p><span class="label">建议：</span>保留用户的文件名、位置与注解；把版本摘要放入引用卡片的可展开技术细节，不显示在常规消息正文。</p>
+          <p class="accept"><span class="label">验收：</span>普通聊天视图能辨认引用文件与定位；hash 可在需要诊断时查看；模型仍收到校验所需版本信息。</p>
+        </div>
+        <div class="screens"><div class="gallery">
+          <figure><a href="04-chat.png" target="_blank" rel="noreferrer"><img src="04-chat.png" alt="含工作区引用的 Mock 聊天截图"></a><figcaption>04 · 含引用文件的 Mock 对话 <a href="04-chat.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="05-chat-empty.png" target="_blank" rel="noreferrer"><img src="05-chat-empty.png" alt="空会话欢迎页截图"></a><figcaption>05 · 空会话 <a href="05-chat-empty.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+        </div></div>
+      </section>
+
+      <section id="resources">
+        <h2>3 · 资源入口与工作区</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 流程摩擦</span><span class="tag">截图观察</span></div>
+          <p>06 展示工作区、浏览器、终端均藏在“资源”菜单下。07 的空工作区说明可新建或上传，但新建和导入动作在“更多”菜单里。</p>
+          <p><span class="label">建议：</span>一个资源加号入口集中打开三种资源；空工作区就近提供两个小型动作。沿用现有图标风格、工具提示和标签结构。</p>
+          <p class="accept"><span class="label">验收：</span>用户不需要猜“资源”菜单用途；空态提示旁边就有对应动作；打开的资源与原聊天之间可轻松切换。</p>
+        </div>
+        <div class="screens"><div class="gallery">
+          <figure><a href="06-resource-menu.png" target="_blank" rel="noreferrer"><img src="06-resource-menu.png" alt="顶栏资源菜单截图"></a><figcaption>06 · 资源菜单 <a href="06-resource-menu.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="07-workspace-empty.png" target="_blank" rel="noreferrer"><img src="07-workspace-empty.png" alt="空工作区截图"></a><figcaption>07 · 空工作区 <a href="07-workspace-empty.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="10-workspace-preview.png" target="_blank" rel="noreferrer"><img src="10-workspace-preview.png" alt="含文件列表、Markdown 预览与源内容切换的工作区"></a><figcaption>10 · 工作区预览与源内容切换 <a href="10-workspace-preview.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="11-file-menu.png" target="_blank" rel="noreferrer"><img src="11-file-menu.png" alt="工作区文件上下文菜单"></a><figcaption>11 · 单文件上下文菜单 <a href="11-file-menu.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+        </div></div>
+        <div class="note">
+          <p><span class="label">保留项：</span>10 中目录/文件图标区分清楚，选中行稳定，Markdown 预览和源内容切换入口可见；11 的单文件右键菜单只提供“在文件管理器中显示”“引用到对话”，动作语义简洁，Escape 可关闭。建议保留这套 per-file 菜单，不把相同操作堆回侧栏。</p>
+          <p><span class="label">P3 · 视觉待验：</span>悬浮输入栏上下箭头已有 title 与 aria-label，原生辅助功能检查能读出“展开智能体消息区”“收起快速消息栏”。本轮没有做无提示用户测试；可研究两种动作是否用更易区分的图形表达，不建议重复添加 tooltip。</p>
+          <p class="accept"><span class="label">验收：</span>若后续更换图形，动作与现有 title/aria-label 对应且仍可键盘聚焦；保持紧凑布局。</p>
+        </div>
+      </section>
+
+      <section id="browser">
+        <h2>4 · 浏览器</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 文案一致性</span><span class="tag">截图观察</span></div>
+          <p>08 的禁用空态有明确下一步“打开设置”，这是好的恢复路径。说明文案称“能力设置”，实际入口落在“共享服务”，名称不一致会让用户怀疑自己去了错误页面。</p>
+          <p><span class="label">建议：</span>把说明统一成设置页实际显示的“共享服务”，或者让跳转落到真正命名为“能力设置”的位置；保留当前空态按钮。</p>
+          <p class="accept"><span class="label">验收：</span>按钮文案和落地页标题对应；返回浏览器后空态随启用状态更新。</p>
+        </div>
+        <div class="screens"><div class="gallery"><figure><a href="08-browser-empty.png" target="_blank" rel="noreferrer"><img src="08-browser-empty.png" alt="浏览器未启用的空态截图"></a><figcaption>08 · 浏览器未启用 <a href="08-browser-empty.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+      </section>
+
+      <section id="terminal">
+        <h2>5 · 终端</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="tag">保留 · 本轮原生交互观察</span></div>
+          <p>09 的终端配置弹窗简洁，selector 支持搜索。按本轮操作观察，Escape 只关闭下拉并保留弹窗。这条交互应作为当前 selector 的保留行为，不重复提出已解决的问题。</p>
+          <p class="accept"><span class="label">验收：</span>搜索、选择、Escape 关闭下拉和继续留在弹窗中的行为保持稳定。</p>
+        </div>
+        <div class="screens"><div class="gallery"><figure><a href="09-terminal-selector.png" target="_blank" rel="noreferrer"><img src="09-terminal-selector.png" alt="终端配置弹窗中的可搜索选择器"></a><figcaption>09 · 终端配置选择器 <a href="09-terminal-selector.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+      </section>
+
+      <section id="implementation">
+        <h2>附 · 代码审查（无截图）</h2>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 可读性与一致性</span><span class="tag">代码事实；实际观感待本轮截图/显示器验证</span></div>
+          <p>全局提供 12/13/14px 的文本尺度，但桌面专用输入栏状态和模型选择器分别使用 11px、400 与继承的 500 字重、不同的行高。小字号辨识度需在实际显示缩放下验证。建议复用同一文本级别，并以颜色表达状态。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/ui/styles/tokens.css#L84">tokens.css:84–88</a> · <a href="../../../../../desktop/tray-tauri/src/ui/styles/workbench.css#L3258">workbench.css:3258–3260</a> · <a href="../../../../../desktop/tray-tauri/src/ui/desktop-ui.css#L1396">desktop-ui.css:1396</a> · <a href="../../../../../desktop/tray-tauri/src/ui/desktop-ui.css#L1472">desktop-ui.css:1472–1475</a></p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 无障碍</span><span class="tag">代码事实；对比度与辨识度待视觉验证</span></div>
+          <p>控件焦点样式分散：自定义 selector 使用主题色 2px 外框，Composer 输入框移除了自身 outline、仅让外层边框变色，部分桌面动作使用硬编码灰色环。建议定义统一且低饱和的 focus token，兼顾键盘可见性和用户偏好的克制描边。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/ui/components/UiSelect.vue#L363">UiSelect.vue:363–366</a> · <a href="../../../../../desktop/tray-tauri/src/ui/styles/workbench.css#L2135">workbench.css:2135–2157</a> · <a href="../../../../../desktop/tray-tauri/src/ui/desktop-ui.css#L1403">desktop-ui.css:1403</a> · <a href="../../../../../desktop/tray-tauri/src/ui/desktop-ui.css#L1660">desktop-ui.css:1660–1663</a></p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 动效偏好</span><span class="tag">代码事实</span></div>
+          <p>现有 reduced-motion 规则覆盖部分 Dock 和页面转场，但工作台工具旋转、导航刷新旋转和子 Agent 进度旋转仍定义独立动画。建议把持续旋转与大幅位移纳入同一偏好规则，用静态图标/文字维持状态信息。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/ui/desktop-ui.css#L2360">desktop-ui.css:2360–2392</a> · <a href="../../../../../desktop/tray-tauri/src/ui/styles/workbench.css#L1617">workbench.css:1617</a> · <a href="../../../../../desktop/tray-tauri/src/ui/styles/workbench.css#L2515">workbench.css:2515</a> · <a href="../../../../../desktop/tray-tauri/src/ui/components/ChildAgentProgressPanel.vue#L252">ChildAgentProgressPanel.vue:252</a></p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p3">P3 · 维护性</span><span class="tag">代码事实</span></div>
+          <p>全局主题/工作台样式与 Desktop 专用样式分别加载；工具栏基础规则在 workbench 中定义，Desktop 文件再覆盖尺寸、颜色和状态。建议逐步明确共享规则与 Desktop 变体的边界，并把颜色迁入语义 token，减少相同控件跨文件追样式。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/main.js#L6">main.js:6–9</a> · <a href="../../../../../desktop/tray-tauri/src/ui/DesktopApp.vue#L64">DesktopApp.vue:64</a> · <a href="../../../../../desktop/tray-tauri/src/ui/styles/workbench.css#L3247">workbench.css:3247–3271</a> · <a href="../../../../../desktop/tray-tauri/src/ui/desktop-ui.css#L1374">desktop-ui.css:1374–1396</a></p>
+        </article>
+      </section>
+
+      <section id="limits">
+        <h2>范围与未验证项</h2>
+        <div class="limits">
+          <div><strong>本轮依据</strong>隔离的 Windows 原生 QA 数据；LLM 使用 Mock；01–11 本地截图。截图的文字栅格化不作为字体损坏证据。</div>
+          <div><strong>未覆盖环境</strong>未测 Manage、深色主题、高 DPI、读屏器、断网复现、大量文件，也未实测本轮审批动态。报告仅完成静态结构/链接核对，未在内置浏览器渲染；未绕过 IAB 对 file 协议的访问限制。</div>
+          <div><strong>未做判断</strong>04 中 Mock 回显的旧 QA 用户内容不计作回答缺陷；源码显示引用 revision 会进入模型文本，但没有据此推断真实模型回显。</div>
+          <div><strong>截图原图</strong>本报告引用的 01–11 PNG 与报告同目录保存，点击缩略图可在新标签查看原图。</div>
+        </div>
+      </section>
+      <footer>只读体验审查 · 2026-11-04 · 截图均保留原始 PNG，点击缩略图可打开原图。</footer>
+    </main>
+  </div>
+</body>
+</html>
